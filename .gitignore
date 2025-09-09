@@ -1,0 +1,45 @@
+# Elixir / Mix
+/_build/
+/deps/
+erl_crash.dump
+.erlang.cookie
+*.ez
+
+# Logs & temp
+/log/
+tmp/
+cover/
+
+# Editor/LS
+.elixir_ls/
+.elixir-tools/
+.elixir-tools.json
+/.idea/
+/.vscode/
+
+# Phoenix static outputs (per app)
+apps/*/priv/static/assets/
+apps/*/priv/static/cache_manifest.json
+
+# Node (umbrella + per app)
+assets/node_modules/
+apps/*/assets/node_modules/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+config/*.secret.exs
+config/*_secret.exs
+config/prod.secret.exs
+
+# Locks (you asked to exclude all of them)
+mix.lock
+*.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb

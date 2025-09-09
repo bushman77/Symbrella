@@ -1,0 +1,37 @@
+/* Tailwind v3 entry */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- Baseline layout: header fixed, footer fixed, messages fill ---------- */
+html, body { height: 100%; margin: 0; }
+
+/* Fallback heights; your JS hooks can overwrite these via CSS vars */
+:root { --hdr: 56px; --ftr: 72px; }
+
+/* Chat viewport container */
+#chat-root    { position: relative; height: 100vh; }
+
+/* Pin header/footer to screen edges */
+#chat-header  { position: fixed; top: 0; left: 0; right: 0; z-index: 20; }
+#chat-composer{ position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; }
+
+/* Messages fill the space between and scroll independently */
+#messages {
+  position: fixed;
+  left: 0; right: 0;
+  top: var(--hdr);
+  bottom: var(--ftr);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session],
+[data-phx-teleported-src] { display: contents }
+
+/* Small utility helpers (optional) */
+.btn { @apply rounded-xl font-medium shadow px-4 py-2; }
+.btn:disabled { @apply opacity-60 cursor-not-allowed; }
+
+/* This file is for your main application CSS */
