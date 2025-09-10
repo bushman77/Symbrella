@@ -5,22 +5,50 @@ import topbar from "../vendor/topbar"
 
 const Hooks = {}
 
-/* -------------------- AutoScroll -------------------- */
-Hooks.AutoScroll = {
+/* -------------------- ScrollOnEvent (replaces AutoScroll) -------------------- */
+/* Only scrolls when LiveView pushes "chat:scroll". Does one initial scroll
+   on mount without animation; no auto-scroll on every DOM patch. */
+// replaces Hooks.ScrollOnEvent
+Hooks.ScrollOnEvent = {
   mounted() {
-    this.scrollToBottom = (smooth = true) => {
-      // prefer an anchor if present, else scroll container
+    const scrollMessagesBottom = (smooth = true) => {
       const bottom = this.el.querySelector("#bottom")
       if (bottom) {
         bottom.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "end" })
       } else {
-        this.el.scrollTop = this.el.scrollHeight
+        this.el.scrollTo({ top: this.el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
       }
     }
-    this.scrollToBottom(false)
-    this.handleEvent("chat:scroll", () => this.scrollToBottom())
-  },
-  updated() { this.scrollToBottom?.() }
+
+    const scrollComposerIntoView = (smooth = true) => {
+      const composer = document.getElementById("chat-composer")
+      if (composer) {
+        composer.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "end" })
+      }
+      // Hard fallback for mobile browser chrome shifts
+      const doc = document.scrollingElement || document.documentElement
+      window.scrollTo({ top: doc.scrollHeight, behavior: smooth ? "smooth" : "auto" })
+      // Keep focus on the input without yanking the viewport further
+      const input = document.getElementById("chat-input")
+      if (input && !input.disabled) {
+        setTimeout(() => input.focus({ preventScroll: true }), 50)
+      }
+    }
+
+    // Initial settle: align messages bottom after first paint
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollMessagesBottom(false)))
+
+    this.handleEvent("chat:scroll", (payload = {}) => {
+      const to = payload.to || "messages"
+      if (to === "composer") {
+        // Make sure both the latest message and the composer are visible
+        scrollMessagesBottom(true)
+        scrollComposerIntoView(true)
+      } else {
+        scrollMessagesBottom(true)
+      }
+    })
+  }
 }
 
 /* ----------- CSS size vars for header/footer ----------- */
@@ -87,7 +115,8 @@ Hooks.ChatInput = {
   },
   updated() {
     this.resize?.()
-    if (document.activeElement !== this.el) {
+    // Don’t yank the viewport when the textarea is disabled (e.g., during “Thinking…”)
+    if (!this.el.disabled && document.activeElement !== this.el) {
       this.el.focus({ preventScroll: true })
     }
   },

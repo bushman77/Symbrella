@@ -1,33 +1,52 @@
 defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
+  # ---------- helpers ----------
+  defp sanitize_user_text(text) do
+    text
+    |> to_string()
+    |> String.replace(~r/\r\n?/, "\n")     # CRLF -> LF
+    |> String.replace(~r/[ \t]+(\n)/, "\\1") # strip trailing spaces on lines
+    |> String.replace(~r/\n{3,}/, "\n\n")  # collapse 3+ newlines
+    |> String.trim()                       # trim both ends
+  end
+
+  defp to_bot_reply({_, %{text: _} = reply}), do: reply
+  defp to_bot_reply(%{text: _} = reply),     do: reply
+  defp to_bot_reply(text) when is_binary(text), do: %{text: text}
+  defp to_bot_reply(other), do: %{text: inspect(other)}
+
+  # ---------- liveview ----------
   @impl true
   def mount(_params, _session, socket) do
-    initial =
-      [
-        %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat 👋"}
-      ]
+    initial = [
+      %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat 👋"}
+    ]
 
     {:ok,
      socket
-     |> assign(page_title: "Chat", draft: "", bot_typing: false)
+     |> assign(
+       page_title: "Chat",
+       draft: "",
+       bot_typing: false,
+       pending_task: nil,
+       cancelled_ref: nil,
+       session_id: "s-" <> Integer.to_string(System.unique_integer([:positive]))
+     )
      |> stream(:messages, initial)}
   end
 
   @impl true
   def handle_event("update_draft", %{"message" => text}, socket) do
-    {:noreply, assign(socket, :draft, text)}
+    {:noreply, assign(socket, :draft, to_string(text))}
   end
 
   @impl true
-  def handle_event("send", %{"message" => text}, socket) do
-    text =
-      text
-      |> to_string()
-      |> String.trim_trailing()                         # keep leading, trim trailing
-      |> String.replace(~r/(?:\r\n|\r|\n){3,}/, "\n\n") # compress >2 newlines
+  def handle_event("send", %{"message" => raw}, socket) do
+    text = sanitize_user_text(raw)
 
-    if String.trim(text) == "" do
+    # Block empty sends or if a turn is already running
+    if text == "" or socket.assigns.bot_typing do
       {:noreply, socket}
     else
       msg = %{
@@ -39,29 +58,82 @@ defmodule SymbrellaWeb.HomeLive do
       socket =
         socket
         |> stream_insert(:messages, msg)
-        |> assign(draft: "", bot_typing: true)
-        |> push_event("chat:scroll", %{})
+        |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
+        |> push_event("chat:scroll", %{to: "composer"})
 
-      # Simulate async compute; swap with your real pipeline message when ready
-      Process.send_after(self(), {:bot_reply, text}, 350)
+      task =
+        Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
+          Brain.chat(text, session_id: socket.assigns.session_id, source: :ui)
+        end)
 
-      {:noreply, socket}
+      {:noreply, assign(socket, :pending_task, task)}
     end
   end
 
+  # 🛑 User clicked Stop
   @impl true
-  def handle_info({:bot_reply, user_text}, socket) do
+  def handle_event("stop", _params, socket) do
+    case socket.assigns.pending_task do
+      %Task{ref: ref} = task ->
+        _ = Task.shutdown(task, :brutal_kill)
+        {:noreply,
+         socket
+         |> assign(bot_typing: false, cancelled_ref: ref, pending_task: nil)
+         |> stream_insert(:messages, %{
+           id: "x-" <> Integer.to_string(System.unique_integer([:positive])),
+           role: :assistant,
+           text: "(stopped)"
+         })
+         |> push_event("chat:scroll", %{to: "composer"})}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # ✅ Task succeeded — accept map, text, or tuple payloads
+  @impl true
+  def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
+    Process.demonitor(ref, [:flush])
+
+    %{text: reply_text} = reply = to_bot_reply(payload)
+
     bot = %{
       id: "b-" <> Integer.to_string(System.unique_integer([:positive])),
       role: :assistant,
-      text: "You said: " <> user_text
+      text: reply_text
     }
 
     {:noreply,
      socket
+     |> assign(bot_typing: false, pending_task: nil)
      |> stream_insert(:messages, bot)
-     |> assign(:bot_typing, false)
-     |> push_event("chat:scroll", %{})}
+     |> push_event("chat:scroll", %{to: "composer"})}
+  end
+
+  # ❌ Task exited — distinguish user cancel vs real error
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket) do
+    cond do
+      socket.assigns.cancelled_ref == ref ->
+        {:noreply, assign(socket, cancelled_ref: nil)}
+
+      match?(%Task{ref: ^ref}, socket.assigns.pending_task) ->
+        msg = %{
+          id: "e-" <> Integer.to_string(System.unique_integer([:positive])),
+          role: :assistant,
+          text: "Oops—my brain hit a snag: #{Exception.format_exit(reason)}"
+        }
+
+        {:noreply,
+         socket
+         |> assign(bot_typing: false, pending_task: nil)
+         |> stream_insert(:messages, msg)
+         |> push_event("chat:scroll", %{to: "composer"})}
+
+      true ->
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -77,15 +149,14 @@ defmodule SymbrellaWeb.HomeLive do
         </div>
       </header>
 
-      <!-- MESSAGES: fills between header & footer -->
+      <!-- MESSAGES -->
       <main
         id="messages"
-        phx-hook="AutoScroll"
+        phx-hook="ScrollOnEvent"
         class="absolute left-0 right-0 overflow-y-auto scroll-smooth"
         style={"top: var(--hdr,56px); bottom: var(--ftr,72px);"}
       >
         <div class="mx-auto max-w-4xl w-full px-3 sm:px-4 py-4">
-          <!-- Streams replace deprecated phx-update='append' -->
           <div id="message-list" phx-update="stream" class="space-y-3">
             <%= for {dom_id, m} <- @streams.messages do %>
               <div id={dom_id} class={if m.role == :user, do: "flex justify-end", else: "flex justify-start"}>
@@ -102,36 +173,37 @@ defmodule SymbrellaWeb.HomeLive do
             <% end %>
           </div>
 
-          <!-- Typing indicator lives OUTSIDE the stream container -->
           <%= if @bot_typing do %>
             <div id="typing" class="mt-3 flex justify-start">
               <div class="max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2 bg-[var(--color-panel)] border border-slate-800/60 shadow">
-                <span class="opacity-70">Symbrella is typing…</span>
+                <span class="opacity-70">Symbrella is thinking…</span>
               </div>
             </div>
           <% end %>
 
-          <!-- Anchor for scroll -->
           <div id="bottom"></div>
         </div>
       </main>
 
-      <!-- FIXED FOOTER (COMPOSER) -->
+      <!-- COMPOSER -->
       <footer id="chat-composer" phx-hook="FooterSizer"
               class="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-800/60 bg-[var(--color-bg)]/95 backdrop-blur">
         <div class="mx-auto max-w-4xl w-full px-3 sm:px-4 pt-2 pb-3">
           <form phx-submit="send" phx-change="update_draft" class="flex items-end gap-2">
-            <textarea
-              id="chat-input"
-              name="message"
-              phx-hook="ChatInput"
-              phx-debounce="200"
-              rows="1"
-              placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-              class="flex-1 resize-none rounded-2xl border border-slate-800/60 bg-[var(--color-panel)] px-4 py-3 text-[15px] outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40"
-            ><%= @draft %></textarea>
-
-            <button type="submit" class="btn px-4 py-3 rounded-2xl shadow">Send</button>
+            <textarea id="chat-input"
+                      name="message"
+                      phx-hook="ChatInput"
+                      phx-debounce="200"
+                      rows="1"
+                      placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+                      class="flex-1 resize-none rounded-2xl border border-slate-800/60 bg-[var(--color-panel)] px-4 py-3 text-[15px] outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40"
+                      disabled={@bot_typing}
+                      aria-busy={@bot_typing}><%= @draft %></textarea>
+            <%= if @bot_typing do %>
+              <button type="button" phx-click="stop" class="btn px-4 py-3 rounded-2xl shadow">🛑 Stop</button>
+            <% else %>
+              <button type="submit" class="btn px-4 py-3 rounded-2xl shadow">Send</button>
+            <% end %>
           </form>
         </div>
       </footer>

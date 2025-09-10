@@ -9,7 +9,9 @@ defmodule Symbrella.Application do
   def start(_type, _args) do
     children = [
       {DNSCluster, query: Application.get_env(:symbrella, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Symbrella.PubSub}
+      {Phoenix.PubSub, name: Symbrella.PubSub},
+      {Task.Supervisor, name: Symbrella.TaskSup},
+      {Brain, []}
       # Start a worker by calling: Symbrella.Worker.start_link(arg)
       # {Symbrella.Worker, arg}
     ]
