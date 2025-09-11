@@ -52,68 +52,10 @@ defmodule Brain do
 
   @impl true
   def handle_call({:chat, raw_text, opts}, _from, state) do
-    # tiny inline normalize
-    text =
-      raw_text
-      |> to_string()
-      |> String.trim_trailing()
-      |> String.replace(~r/(?:\r\n|\r|\n){3,}/, "\n\n")
-
-    # 🔹 single, strict call into Core (no wrappers / no shape juggling)
-    {input, reply} =
-      try do
-        Core.resolve_input(text, opts)
-      rescue
-        e ->
-          Logger.warning("Core.resolve_input/2 error: " <> Exception.format(:error, e, __STACKTRACE__))
-          {%{tokens: []}, %{text: text, intent: :echo, confidence: 1.0, placeholder: true}}
-      end
-
-    # inline token text extraction
-    token_texts =
-      case input do
-        %{tokens: tokens} when is_list(tokens) ->
-          tokens
-          |> Enum.map(fn
-            %{text: t} when is_binary(t) -> t
-            t when is_binary(t) -> t
-            _ -> nil
-          end)
-          |> Enum.reject(&is_nil/1)
-
-        _ -> []
-      end
-
-    # inline reply text fetch
-    output_text = Map.get(reply, :text) || Map.get(reply, "text") || "(no text)"
-
-    # inline log_turn
-    turn_id = state.turn_seq + 1
-
-    turn = %{
-      id: turn_id,
-      at: System.system_time(:millisecond),
-      session_id: opts[:session_id],
-      source: opts[:source] || :ui,
-      input: text,
-      output: output_text,
-      token_texts: token_texts
-    }
-
-    history = [turn | state.history] |> Enum.take(@history_max)
-
-    token_counts =
-      Enum.reduce(token_texts, state.token_counts, fn tok, acc ->
-        Map.update(acc, tok, 1, &(&1 + 1))
-      end)
-
-    new_state =
-      state
-      |> Map.put(:turn_seq, turn_id)
-      |> Map.put(:history, history)
-      |> Map.put(:token_counts, token_counts)
-
-    {:reply, reply, new_state}
+    raw_text
+    |> Core.resolve_input 
+    |> IO.inspect
+    {:reply, "reply", state}
   end
 
   @impl true

@@ -1,102 +1,42 @@
 defmodule Core.SemanticInput do
   @moduledoc """
   Master input state passed through the semantic pipeline.
+
+  Build via `new/2`, optionally tokenizing (prefers Core.Tokenizer).
+  Then enrich with helpers like `put_tokens/2`, `put_pos_list/2`,
+  `with_intent/3`, `with_keyword/2`, `with_mood/2`, `merge_meta/2`.
   """
 
   alias Core.Token, as: Tok
 
+  @typedoc "Semantic pipeline state"
   @type t :: %__MODULE__{
           sentence: binary(),
-          original_sentence: binary() | nil,
-          source: atom(),
-          tokens: [Tok.t()],      # canonical token list
-          pos_list: list(),
+          tokens: [Tok.t()],            # canonical token list
+          pos_list: [atom() | nil],     # POS (may include nil until tagged)
           intent: atom() | nil,
           keyword: binary() | nil,
           confidence: float(),
           mood: atom(),
-          meta: map()
         }
 
-  @enforce_keys [:sentence, :source]
   defstruct sentence: "",
-            original_sentence: nil,
-            source: :ui,
             tokens: [],
             pos_list: [],
             intent: nil,
             keyword: nil,
             confidence: 0.0,
-            mood: :neutral,
-            meta: %{}
+            mood: :neutral
 
-  @doc """
-  Build a SemanticInput; optionally tokenize immediately.
+  # -- Public API -------------------------------------------------------------
+  # -- Private ---------------------------------------------------------------
 
-  Options:
-    * `:source`     (atom, default: :ui)
-    * `:tokenize`   (bool, default: true)
-    * `:token_opts` (keyword, default: [normalize: :phrase, keep_punct: true])
-  """
-  @spec new(binary(), keyword()) :: t()
-  def new(sentence, opts \\ []) when is_binary(sentence) do
-    source     = Keyword.get(opts, :source, :ui)
-    do_token   = Keyword.get(opts, :tokenize, true)
-    token_opts = Keyword.get(opts, :token_opts, [normalize: :phrase, keep_punct: true])
-
-    norm = normalize(sentence)
-
-    base = %__MODULE__{
-      sentence: norm,
-      original_sentence: sentence,
-      source: source
-    }
-
-    if do_token and Code.ensure_loaded?(Core.Token) and function_exported?(Core.Token, :tokenize, 2) do
-      tokens = Core.Token.tokenize(norm, token_opts)
-      put_tokens(base, tokens)
-    else
-      base
-    end
-  end
-
-  @doc """
-  Set tokens on the struct. Accepts [%Core.Token{}] or [binary] and normalizes to structs.
-  """
-  @spec put_tokens(t(), list()) :: t()
-  def put_tokens(%__MODULE__{} = si, tokens) when is_list(tokens) do
-    structs =
-      Enum.map(tokens, fn
-        %Tok{} = t -> t
-        t when is_binary(t) ->
-          lower = String.downcase(t)
-          %Tok{
-            text: t, phrase: lower, lower: lower,
-            kind: :word, pos: nil,
-            start: 0, stop: byte_size(t),
-            keyword: nil, features: %{}, cell: nil
-          }
-      end)
-
-    %__MODULE__{si | tokens: structs}
-  end
-
-  @doc """
-  Convenience: get the list of token texts (for logging/counters/UI).
-  """
-  @spec token_texts(t()) :: [binary()]
-  def token_texts(%__MODULE__{tokens: toks}) do
-    Enum.map(toks, fn
-      %Tok{text: t} -> t
-      t when is_binary(t) -> t
-    end)
-  end
-
-  # ——— private ———
   defp normalize(raw) do
     raw
-    |> String.trim_trailing()
-    |> String.replace(~r/(?:\r\n|\r|\n){3,}/, "\n\n")
+    |> String.replace(~r/\r\n?/, "\n")      # CRLF -> LF
+    |> String.replace(~r/[ \t]+(\n)/, "\\1")# strip trailing spaces on lines
+    |> String.replace(~r/\n{3,}/, "\n\n")   # collapse 3+ newlines
+    |> String.trim()                        # trim both ends
   end
 end
 
