@@ -27,7 +27,8 @@ defmodule Brain.MixProject do
 
   defp deps do
     [
-      {:core, in_umbrella: true}
+      {:core, in_umbrella: true},
+      {:db, in_umbrella: true}
     ]
   end
 end

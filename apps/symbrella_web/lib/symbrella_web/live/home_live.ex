@@ -63,7 +63,7 @@ defmodule SymbrellaWeb.HomeLive do
 
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          Brain.chat(text, session_id: socket.assigns.session_id, source: :ui)
+          Brain.chat(text)
         end)
 
       {:noreply, assign(socket, :pending_task, task)}
@@ -96,7 +96,7 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
     Process.demonitor(ref, [:flush])
 
-    %{text: reply_text} = reply = to_bot_reply(payload)
+    %{text: reply_text} = to_bot_reply(payload)
 
     bot = %{
       id: "b-" <> Integer.to_string(System.unique_integer([:positive])),

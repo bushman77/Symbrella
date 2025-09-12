@@ -56,6 +56,17 @@ config :logger, :default_formatter,
 # JSON library
 config :phoenix, :json_library, Jason
 
+config :symbrella, ecto_repos: [Db]
+
+config :symbrella, Db,
+  username: "postgres",
+  password: "postgres",
+  database: "brain",
+  hostname: "localhost",
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10,
+  types: Db.PostgrexTypes
+
 # Import environment-specific config at the very end
 import_config "#{config_env()}.exs"
 

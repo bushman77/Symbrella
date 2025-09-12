@@ -11,8 +11,8 @@ defmodule Brain do
   require Logger
 
   @name __MODULE__
-  @history_max 50
-  @call_timeout 15_000
+  #@history_max 50
+  #@call_timeout 15_000
 
   # ───────────────────────── Start / Init ─────────────────────────
 
@@ -40,9 +40,9 @@ defmodule Brain do
   @doc """
   Primary chat entrypoint (blocking). Returns a reply with at least `:text`.
   """
-  @spec chat(binary, keyword) :: map | struct
-  def chat(text, opts \\ []) when is_binary(text) do
-    GenServer.call(@name, {:chat, text, opts}, opts[:timeout] || @call_timeout)
+  @spec chat(binary) :: map | struct
+  def chat(text) when is_binary(text) do
+    GenServer.call(@name, {:chat, text})
   end
 
   @doc "Peek at minimal state (for debugging)."
@@ -51,7 +51,7 @@ defmodule Brain do
   # ───────────────────────── GenServer ─────────────────────────
 
   @impl true
-  def handle_call({:chat, raw_text, opts}, _from, state) do
+  def handle_call({:chat, raw_text}, _from, state) do
     raw_text
     |> Core.resolve_input 
     |> IO.inspect

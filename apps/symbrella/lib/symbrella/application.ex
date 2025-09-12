@@ -11,7 +11,8 @@ defmodule Symbrella.Application do
       {DNSCluster, query: Application.get_env(:symbrella, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Symbrella.PubSub},
       {Task.Supervisor, name: Symbrella.TaskSup},
-      {Brain, []}
+      {Brain, []},
+      Db
       # Start a worker by calling: Symbrella.Worker.start_link(arg)
       # {Symbrella.Worker, arg}
     ]

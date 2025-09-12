@@ -1,5 +1,5 @@
 defmodule Core do
-  alias Core.{SemanticInput, Tokenizer, POSEngine, IntentClassifier, ResponsePlanner}
+  #alias Core.{SemanticInput, Tokenizer, POSEngine, IntentClassifier, ResponsePlanner}
   alias MoodCore
   alias Core.{
     Token
