@@ -24,7 +24,7 @@ defmodule Brain do
      %{
        attention: MapSet.new(),
        activation_log: [],
-       active_cells: %{},
+       active_cells: [],
        llm_ctx: nil,
        llm_model: nil,
        llm_ctx_updated_at: nil,
@@ -66,6 +66,10 @@ defmodule Brain do
       |> Map.update!(:history, &Enum.take(&1, 5))
 
     {:reply, view, state}
+  end
+
+  def handle_call(:active_cells, _from, state) do
+    {:reply, state.active_cells, state}
   end
 end
 

@@ -3,5 +3,7 @@ defmodule Core.Brain do
 
   @spec whereis(String.t()) :: pid() | nil
   def whereis(_id), do: nil
+
+  def active_cells(phrase), do: GenServer.call(Brain, :active_cells, phrase)
 end
 
