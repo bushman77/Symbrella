@@ -1,8 +1,4 @@
 defmodule Symbrella.Application do
-  # See https://hexdocs.pm/elixir/Application.html
-  # for more information on OTP Applications
-  @moduledoc false
-
   use Application
 
   @impl true
@@ -11,12 +7,19 @@ defmodule Symbrella.Application do
       {DNSCluster, query: Application.get_env(:symbrella, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Symbrella.PubSub},
       {Task.Supervisor, name: Symbrella.TaskSup},
-      {Brain, []},
-      Db
-      # Start a worker by calling: Symbrella.Worker.start_link(arg)
-      # {Symbrella.Worker, arg}
+
+      # --- Brain infra (start before Brain) ---
+      {Registry, keys: :unique, name: Brain.Registry},
+      {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
+
+      # --- Storage ---
+      Db,                        # Repo
+
+      # --- Manager (the “Brain” GenServer) ---
+      Brain                      # must register itself as `name: Brain`
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
   end
 end
+

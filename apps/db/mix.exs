@@ -10,26 +10,29 @@ defmodule Db.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
+  # compile test helpers only in test
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp deps do
     [
-      {:ecto, "~> 3.10"},
-      {:ecto_sql, "~> 3.10"},
+      {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},
-      {:pgvector, ">= 0.0.0"},
-      {:jason, ">= 0.0.0"}
+      {:pgvector, "~> 0.2"},
+      {:jason, "~> 1.4"}
     ]
   end
 end
+
