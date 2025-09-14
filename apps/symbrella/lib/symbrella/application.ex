@@ -14,7 +14,9 @@ defmodule Symbrella.Application do
       Db,
       # 30 days in **seconds** (the NegCache expects seconds, not ms)
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
-      {Brain, []}
+      {Brain, []},
+      {Finch, name: Lexicon.Finch},
+      Lexicon
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)

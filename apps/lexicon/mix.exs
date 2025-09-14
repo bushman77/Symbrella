@@ -1,9 +1,9 @@
-defmodule Core.MixProject do
+defmodule Lexicon.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :core,
+      app: :lexicon,
       version: "0.1.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
@@ -25,8 +25,8 @@ defmodule Core.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:db, in_umbrella: true},
-      {:lexicon, in_umbrella: true}
+      {:tesla, "~> 1.4"},
+      {:hackney, "~> 1.18"}
     ]
   end
 end
