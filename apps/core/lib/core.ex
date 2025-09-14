@@ -1,90 +1,66 @@
 defmodule Core do
   @moduledoc """
-  Central Core pipeline.
-
-  Fast path (DB-free):
-    tokenize → prune → bind runtime actives
-
-  Then Recall Gate; if it returns a plan, run bounded Recall Execute.
+  Central Core pipeline (minimal).
+  Sentence in → SemanticInput out.
   """
 
   alias Core.{SemanticInput, Token, TokenFilters, RuntimeBind, BrainAdapter}
   alias Core.Recall.{Gate, Execute}
 
-  @doc """
-  Resolve a sentence into a `SemanticInput` with optional recall.
-
-  Options:
-    * `:source`               – defaults to `:user`
-    * `:confidence`           – classifier confidence (0..1), default 0.5
-    * `:requires_knowledge?`  – boolean, default false
-    * `:min_n`                – token frequency cutoff for pruning, default 2
-    * `:oov_probe?`           – whether to hit DB to compute OOV; **default false** to avoid DB crashes
-  """
-  @spec resolve_input(String.t(), keyword()) :: SemanticInput.t()
-  def resolve_input(sentence, opts \\ []) when is_binary(sentence) do
-    source = Keyword.get(opts, :source, :user)
-    conf   = Keyword.get(opts, :confidence, 0.5)
-    reqk?  = Keyword.get(opts, :requires_knowledge?, false)
-    min_n  = Keyword.get(opts, :min_n, 2)
-    oov?   = Keyword.get(opts, :oov_probe?, false)   # <- default false for safety
-
+  @doc "Resolve a sentence into a SemanticInput (no options, hardcoded defaults)."
+  @spec resolve_input(String.t()) :: SemanticInput.t()
+  def resolve_input(sentence) when is_binary(sentence) do
     si =
       sentence
-      |> tokenize_with_source(source)
-      |> TokenFilters.prune(min_n: min_n)
+      |> tokenize_with_source(:user)     # only two actors; default :user
+      |> TokenFilters.prune(min_n: 2)    # simple, fixed pruning
+      |> lexicon()                       # guarded call; no-op if stage absent
       |> RuntimeBind.bind(snapshot_fun: &BrainAdapter.snapshot/0)
 
-    oov_terms = if oov?, do: oov_terms_safe(si), else: []
-
-    case Gate.gate(si, confidence: conf, requires_knowledge?: reqk?, oov_terms: oov_terms) do
+    case safe_gate(si) do                # Recall Gate kept, but hardcoded + safe
       {:skip, si2} -> si2
       {:plan, plan, si2} -> Execute.execute(si2, plan)
     end
   end
 
-  # ---------- helpers ----------
+  # ——— helpers (tiny, boring, reliable) ———
 
   defp tokenize_with_source(sentence, source) do
-    if Code.ensure_loaded?(Token) and function_exported?(Token, :tokenize, 2) do
-      apply(Token, :tokenize, [sentence, [source: source]])
+    si =
+      if Code.ensure_loaded?(Token) and function_exported?(Token, :tokenize, 2) do
+        Token.tokenize(sentence, source: source)
+      else
+        Token.tokenize(sentence)
+      end
+
+    ensure_source(si, source)
+  end
+
+  defp ensure_source(%SemanticInput{source: s} = si, _src) when not is_nil(s), do: si
+  defp ensure_source(%SemanticInput{} = si, src), do: %SemanticInput{si | source: src}
+
+  # Guarded call into Core.Lexicon.Stage; returns si unchanged if missing.
+  defp lexicon(%SemanticInput{} = si) do
+    if Code.ensure_loaded?(Core.Lexicon.Stage) and function_exported?(Core.Lexicon.Stage, :run, 1) do
+      Core.Lexicon.Stage.run(si)
     else
-      si = apply(Token, :tokenize, [sentence])
-      ensure_source(si, source)
+      si
     end
   end
 
-  defp ensure_source(%SemanticInput{source: s} = si, _source) when not is_nil(s), do: si
-  defp ensure_source(%SemanticInput{} = si, source), do: %SemanticInput{si | source: source}
-
-  # Build an OOV list but **never** crash if DB/migrations aren’t ready.
-  defp oov_terms_safe(%SemanticInput{tokens: toks}) do
-    exists_fun =
-      if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
-        fn key ->
-          try do
-            Db.word_exists?(key)
-          rescue
-            _ -> true   # treat as "exists" → don't trigger OOV recall
-          catch
-            _, _ -> true
-          end
-        end
-      else
-        fn _ -> true end
+  # Hardcoded Recall Gate; never crashes Core if Gate/Execute change or aren’t ready.
+  defp safe_gate(%SemanticInput{} = si) do
+    if Code.ensure_loaded?(Gate) and function_exported?(Gate, :gate, 2) do
+      try do
+        Gate.gate(si, confidence: 0.5, requires_knowledge?: false, oov_terms: [])
+      rescue
+        _ -> {:skip, si}
+      catch
+        _, _ -> {:skip, si}
       end
-
-    toks
-    |> Enum.map(fn
-      %Token{phrase: p} -> normalize(p)
-      %{} = m -> m[:norm] || normalize(m[:phrase] || m[:text] || "")
-    end)
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.uniq()
-    |> Enum.reject(exists_fun)
+    else
+      {:skip, si}
+    end
   end
-
-  defp normalize(<<>>), do: <<>>
-  defp normalize(s) when is_binary(s), do: String.downcase(String.trim(s))
 end
 
