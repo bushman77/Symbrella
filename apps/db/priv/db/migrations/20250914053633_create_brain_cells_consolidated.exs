@@ -37,32 +37,38 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     end
 
     create unique_index(:brain_cells, [:word], name: :brain_cells_word_index)
+
     execute("""
     CREATE INDEX IF NOT EXISTS brain_cells_word_trgm_idx
     ON brain_cells USING GIN (word gin_trgm_ops)
     """)
-    execute("CREATE INDEX IF NOT EXISTS brain_cells_synonyms_gin_idx ON brain_cells USING GIN (synonyms)")
-    execute("CREATE INDEX IF NOT EXISTS brain_cells_antonyms_gin_idx ON brain_cells USING GIN (antonyms)")
 
-    # Try to enable pgvector + add column + index only if extension is available
+    execute("""
+    CREATE INDEX IF NOT EXISTS brain_cells_synonyms_gin_idx
+    ON brain_cells USING GIN (synonyms)
+    """)
+
+    execute("""
+    CREATE INDEX IF NOT EXISTS brain_cells_antonyms_gin_idx
+    ON brain_cells USING GIN (antonyms)
+    """)
+
+    # Add vector column + index only if extension is available
     execute("""
     DO $$
     BEGIN
       IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
         CREATE EXTENSION IF NOT EXISTS vector;
-        -- add vector column only if not present
+
         IF NOT EXISTS (
-          SELECT 1
-          FROM information_schema.columns
+          SELECT 1 FROM information_schema.columns
           WHERE table_name = 'brain_cells' AND column_name = 'embedding'
         ) THEN
           EXECUTE 'ALTER TABLE brain_cells ADD COLUMN embedding vector(768)';
         END IF;
 
-        -- create ANN index if column exists
         IF EXISTS (
-          SELECT 1
-          FROM information_schema.columns
+          SELECT 1 FROM information_schema.columns
           WHERE table_name = 'brain_cells' AND column_name = 'embedding'
         ) THEN
           CREATE INDEX IF NOT EXISTS brain_cells_embedding_idx
@@ -79,8 +85,10 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("DROP INDEX IF EXISTS brain_cells_antonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_synonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_word_trgm_idx")
+
     drop_if_exists index(:brain_cells, [:word], name: :brain_cells_word_index)
     drop table(:brain_cells)
+
     execute("DROP EXTENSION IF EXISTS vector")
     execute("DROP EXTENSION IF EXISTS pg_trgm")
     execute("DROP EXTENSION IF EXISTS citext")

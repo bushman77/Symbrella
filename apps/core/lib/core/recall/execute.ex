@@ -191,13 +191,21 @@ defmodule Core.Recall.Execute do
   defp min_tok_id(%{matched_tokens: []}), do: 0
 
   # ---- injected defaults ----
-  defp default_exists_fun() do
-    if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
-      &Db.word_exists?/1
-    else
-      fn _ -> false end
+defp default_exists_fun() do
+  if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
+    fn key ->
+      try do
+        Db.word_exists?(key)
+      rescue
+        _ -> false
+      catch
+        _, _ -> false
+      end
     end
+  else
+    fn _ -> false end
   end
+end
 
   defp default_neg_exists_fun() do
     if Code.ensure_loaded?(Core.NegCache) and function_exported?(Core.NegCache, :exists?, 1) do

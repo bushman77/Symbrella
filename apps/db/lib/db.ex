@@ -1,41 +1,52 @@
 defmodule Db do
   @moduledoc """
-  Lightweight Ecto Repo plus a minimal query helper used by Core/Brain.
+  Umbrella-wide Repo. One DB, one config source.
 
-  Design goals:
-  - Keep the surface area tiny and stable.
-  - Provide existence checks without pulling rows.
-  - Avoid doctests in this module to keep CI noise-free.
+  Crash-proof helpers:
+  - `table_exists?/1` uses to_regclass (no ERROR logs)
+  - `word_exists?/1` bails if table doesn't exist
   """
 
   use Ecto.Repo,
-    otp_app: :symbrella,
-    adapter: Ecto.Adapters.Postgres
+    otp_app: :db,                               # <<<<<< IMPORTANT
+    adapter: Ecto.Adapters.Postgres,
+    priv: "priv/repo"
 
   import Ecto.Query, only: [from: 2]
-
-  # If your BrainCell schema lives under a different namespace,
-  # adjust this alias accordingly (e.g., `alias Symbrella.Db.BrainCell`).
   alias Db.BrainCell
 
   @doc """
-  Returns `true` if any BrainCell row exists with an exact `word` match.
-
-  This performs a minimal `SELECT 1` and **does not** load full rows.
+  Cheap, non-raising table presence check (respects search_path).
   """
+  @spec table_exists?(binary()) :: boolean()
+  def table_exists?(table \\ "brain_cells") when is_binary(table) do
+    case Ecto.Adapters.SQL.query(__MODULE__, "SELECT to_regclass($1)", [table]) do
+      {:ok, %{rows: [[nil]]}} -> false
+      {:ok, %{rows: [[_]]}} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
   @spec word_exists?(binary()) :: boolean()
   def word_exists?(word) when is_binary(word) and byte_size(word) > 0 do
-    q =
-      from b in BrainCell,
-        where: b.word == ^word,
-        select: 1
-
-    __MODULE__.exists?(q)
+    if table_exists?("brain_cells") do
+      q = from b in BrainCell, where: b.word == ^word, select: 1
+      try do
+        __MODULE__.exists?(q)
+      rescue
+        _ -> false
+      catch
+        _, _ -> false
+      end
+    else
+      false
+    end
   end
 
   def word_exists?(_), do: false
-
-  @doc false
-  def hello, do: :world
 end
 

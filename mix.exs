@@ -7,62 +7,45 @@ defmodule Symbrella.Umbrella.MixProject do
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases(),
-      listeners: [Phoenix.CodeReloader]
+      aliases: aliases()
+      # no preferred_cli_env — single DB setup keeps it simple
     ]
   end
 
-  def cli do
-    [
-      preferred_envs: [precommit: :test]
-    ]
-  end
-
-  # Dependencies can be Hex packages:
-  #
-  #   {:mydep, "~> 0.3.0"}
-  #
-  # Or git/path repositories:
-  #
-  #   {:mydep, git: "https://github.com/elixir-lang/mydep.git", tag: "0.1.0"}
-  #
-  # Type "mix help deps" for more examples and options.
-  #
-  # Dependencies listed here are available only for this project
-  # and cannot be accessed from applications inside the apps/ folder.
+  # Root-only deps (not shared with child apps)
   defp deps do
     [
-      # Required to run "mix format" on ~H/.heex files from the umbrella root
+      # lets the umbrella root run `mix format` on ~H/.heex files
       {:phoenix_live_view, ">= 0.0.0"}
     ]
   end
 
-  # Aliases are shortcuts or tasks specific to the current project.
-  # For example, to install project dependencies and perform other setup tasks, run:
-  #
-  #     $ mix setup
-  #
-  # See the documentation for `Mix` for more info on aliases.
-  #
-  # Aliases listed here are available only for this project
-  # and cannot be accessed from applications inside the apps/ folder.
+  # Handy umbrella-wide tasks
+  defp aliases do
+    [
+      {:setup, ["deps.get"]},
 
-# umbrella mix.exs
-defp aliases do
-  [
-    setup: ["deps.get"],
-    "assets.build": [
-      "do --app symbrella_web cmd --cd assets node node_modules/tailwindcss/lib/cli.js " <>
-        "-c tailwind.config.js -i css/app.css -o ../priv/static/assets/app.css",
-      "esbuild symbrella_web"
-    ],
-    "assets.deploy": [
-      "do --app symbrella_web cmd --cd assets node node_modules/tailwindcss/lib/cli.js " <>
-        "-c tailwind.config.js -i css/app.css -o ../priv/static/assets/app.css --minify",
-      "esbuild symbrella_web --minify",
-      "phx.digest"
+      # database lifecycle (Repo = Db), no seeds here
+      {:"db.setup",   ["ecto.create -r Db", "ecto.migrate -r Db"]},
+      {:"db.reset",   ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db"]},
+      {:"db.migrate", ["ecto.migrate -r Db"]},
+      {:"db.rollback", ["ecto.rollback -r Db"]},
+      {:"db.migrations", ["ecto.migrations -r Db"]},
+
+      # convenience alias without a dot in the name
+      {:dbreset, ["db.reset"]},
+
+      # assets (use your existing Tailwind/Esbuild profiles)
+      {:"assets.build",  ["tailwind default", "esbuild default"]},
+      {:"assets.deploy", ["tailwind default --minify", "esbuild default --minify", "phx.digest"]},
+
+      # tests (no seeding)
+      {:test, [
+        "ecto.create -r Db --quiet",
+        "ecto.migrate -r Db --quiet",
+        "test"
+      ]}
     ]
-  ]
+  end
 end
 
-end
