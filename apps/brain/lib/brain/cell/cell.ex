@@ -2,7 +2,6 @@ defmodule Brain.Cell do
   @moduledoc """
   Runtime neuron process. GenServer state IS %Db.BrainCell{}.
   """
-
   use GenServer
   alias Db.BrainCell, as: Schema
 
@@ -13,9 +12,8 @@ defmodule Brain.Cell do
   # Public API ---------------------------------------------------------
 
   @spec start_link(Schema.t() | map()) :: GenServer.on_start()
-  def start_link(%Schema{id: id} = cell) do
-    GenServer.start_link(__MODULE__, cell, name: via(id))
-  end
+  def start_link(%Schema{id: id} = cell),
+    do: GenServer.start_link(__MODULE__, cell, name: via(id))
 
   def start_link(%{} = attrs) do
     id = Map.fetch!(attrs, :id)
@@ -24,9 +22,8 @@ defmodule Brain.Cell do
   end
 
   @doc "Start under Brain.CellSup."
-  def start(%Schema{} = cell) do
-    DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
-  end
+  def start(%Schema{} = cell),
+    do: DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
 
   @doc "Lookup a running cell and return its state (or nil)."
   def get(id) do
@@ -42,6 +39,9 @@ defmodule Brain.Cell do
   def apply_substance(pid, :dopamine, amt),  do: GenServer.cast(pid, {:apply_nt, :dopamine, amt})
   def apply_substance(pid, :serotonin, amt), do: GenServer.cast(pid, {:apply_nt, :serotonin, amt})
   def attenuate(pid, factor), do: GenServer.cast(pid, {:attenuate, factor})
+
+  @doc "Hydrate lexical fields from a full %Db.BrainCell{} (non-destructive to runtime counters)."
+  def hydrate(pid, %Schema{} = schema), do: GenServer.cast(pid, {:hydrate, schema})
 
   # GenServer ----------------------------------------------------------
 
@@ -87,7 +87,7 @@ defmodule Brain.Cell do
 
   @impl true
   def handle_cast({:attenuate, factor}, %Schema{} = s)
-  when is_number(factor) and factor >= 0.0 and factor <= 1.0 do
+      when is_number(factor) and factor >= 0.0 and factor <= 1.0 do
     base =
       cond do
         is_number(s.modulated_activation) -> s.modulated_activation
@@ -96,6 +96,26 @@ defmodule Brain.Cell do
       end
 
     {:noreply, %Schema{s | modulated_activation: clamp01(base * factor)}}
+  end
+
+  @impl true
+  def handle_cast({:hydrate, %Schema{} = lex}, %Schema{} = s) do
+    # Only overlay lexical/content fields; preserve runtime counters.
+    fields = [:definition, :example, :gram_function, :synonyms, :antonyms,
+              :semantic_atoms, :embedding, :token_id, :position, :connections]
+
+    merged =
+      Enum.reduce(fields, s, fn k, acc ->
+        newv = Map.get(lex, k)
+        oldv = Map.get(acc, k)
+        cond do
+          is_nil(newv) -> acc
+          newv == [] and is_list(oldv) -> acc
+          true -> Map.put(acc, k, newv)
+        end
+      end)
+
+    {:noreply, merged}
   end
 
   # Helpers ------------------------------------------------------------
