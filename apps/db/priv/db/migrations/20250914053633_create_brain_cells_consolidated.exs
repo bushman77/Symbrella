@@ -36,7 +36,8 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       timestamps()
     end
 
-    create unique_index(:brain_cells, [:word], name: :brain_cells_word_index)
+    # NON-UNIQUE btree index on word (allows multiple senses per word)
+    create index(:brain_cells, [:word], name: :brain_cells_word_index)
 
     execute("""
     CREATE INDEX IF NOT EXISTS brain_cells_word_trgm_idx

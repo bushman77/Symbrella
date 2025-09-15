@@ -31,18 +31,20 @@ defmodule Db.BrainCell do
     field :last_substance, :string
     field :token_id, :integer
 
-    # pgvector
+    # pgvector (optional, created conditionally in migration)
     field :embedding, Pgvector.Ecto.Vector
 
     timestamps()
   end
 
+  @doc false
   def changeset(cell, attrs) do
     cell
     |> cast(attrs, __schema__(:fields))
     |> validate_required([:id, :word, :status])
     |> validate_inclusion(:status, @statuses)
-    |> unique_constraint(:word, name: :brain_cells_word_index)
+    # NOTE: word is indexed but NOT unique (allows multiple senses per word)
+    # |> unique_constraint(:word, name: :brain_cells_word_index)  # ← removed
   end
 end
 

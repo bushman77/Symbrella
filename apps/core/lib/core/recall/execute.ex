@@ -10,16 +10,16 @@ defmodule Core.Recall.Execute do
   @type neg_exists_fun :: (binary() -> boolean())
   @type neg_put_fun :: (binary() -> :ok)
 
+  @max_tok_id 9_223_372_036_854_775_807
+
   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
   def execute(%SI{} = si, %Plan{} = plan, opts \\ []) do
-    t0 = now_ms()
-
+    t0         = now_ms()
     exists_fun = Keyword.get(opts, :exists_fun, default_exists_fun())
     neg_exists = Keyword.get(opts, :neg_exists_fun, default_neg_exists_fun())
-    neg_put = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
-
-    budget_ms = plan.budget_ms
-    max_items = plan.max_items
+    neg_put    = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
+    budget_ms  = plan.budget_ms
+    max_items  = plan.max_items
 
     {candidates, covered_tok_ids} = candidate_keys(si)
 
@@ -29,7 +29,17 @@ defmodule Core.Recall.Execute do
       end)
 
     {added_refs, counts, budget_hit?} =
-      run_strategies(candidates2, plan.strategies, exists_fun, neg_exists, neg_put, max_items, budget_ms, t0, [])
+      run_strategies(
+        candidates2,
+        plan.strategies,
+        exists_fun,
+        neg_exists,
+        neg_put,
+        max_items,
+        budget_ms,
+        t0,
+        []
+      )
 
     merge_and_trace(si, added_refs, counts, budget_ms, budget_hit?, t0)
   end
@@ -70,7 +80,7 @@ defmodule Core.Recall.Execute do
     list =
       merged
       |> Enum.map(fn {{k, prio}, set} -> {k, Enum.sort(MapSet.to_list(set)), prio} end)
-    |> Enum.sort_by(fn {_k, tok_ids, prio} -> {prio, Enum.min(tok_ids)} end)
+      |> Enum.sort_by(fn {_k, tok_ids, prio} -> {prio, Enum.min(tok_ids)} end)
 
     covered = covered_tok_ids_from_active(si)
     {list, covered}
@@ -95,19 +105,40 @@ defmodule Core.Recall.Execute do
   defp run_strategies(candidates, strategies, exists_fun, neg_exists, neg_put, max_items, budget_ms, t0, acc_refs) do
     counts = %{exact: 0, synonym: 0, embedding: 0}
 
+    # normalize limits to support :infinity
+    limit =
+      case max_items do
+        :infinity -> :infinity
+        n when is_integer(n) and n > 0 -> n
+        _ -> 8
+      end
+
     Enum.reduce_while(strategies, {acc_refs, counts, false}, fn strat, {refs, cnts, _bhit} ->
-      time_left = budget_ms - (now_ms() - t0)
+      elapsed = now_ms() - t0
+
+      time_left =
+        case budget_ms do
+          :infinity -> :infinity
+          n when is_integer(n) and n > 0 -> n - elapsed
+          _ -> 40 - elapsed
+        end
 
       cond do
-        time_left <= 0 ->
+        time_left != :infinity and time_left <= 0 ->
           {:halt, {refs, cnts, true}}
 
-        length(refs) >= max_items ->
+        limit != :infinity and length(refs) >= limit ->
           {:halt, {refs, cnts, false}}
 
         strat == :exact ->
+          slots_left =
+            case limit do
+              :infinity -> :infinity
+              n -> n - length(refs)
+            end
+
           {added, new_cnts, bh} =
-            exact_pass(candidates, exists_fun, neg_exists, neg_put, max_items - length(refs), time_left, t0)
+            exact_pass(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left, t0)
 
           {:cont, {refs ++ added, bump(cnts, :exact, new_cnts.exact), bh}}
 
@@ -133,20 +164,29 @@ defmodule Core.Recall.Execute do
     do: {Enum.reverse(acc), %{exact: cnt}, false}
 
   defp do_exact([{_key, _tok_ids, _prio} | _] = _rest, _exists_fun, _neg_exists, _neg_put, slots_left, _tl, _t0, acc, cnt)
-       when slots_left <= 0,
+       when is_integer(slots_left) and slots_left <= 0,
     do: {Enum.reverse(acc), %{exact: cnt}, false}
 
   defp do_exact([{key, tok_ids, _prio} | rest], exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt) do
-    if now_ms() - t0 >= time_left_ms do
+    elapsed = now_ms() - t0
+
+    if time_left_ms != :infinity and elapsed >= time_left_ms do
       {Enum.reverse(acc), %{exact: cnt}, true}
     else
+      # Positives (DB existence) beat stale negcache
       cond do
-        neg_exists.(key) ->
-          do_exact(rest, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt)
-
         exists_fun.(key) ->
           ref = to_active_ref_exact(key, tok_ids)
-          do_exact(rest, exists_fun, neg_exists, neg_put, slots_left - 1, time_left_ms, t0, [ref | acc], cnt + 1)
+          next_slots =
+            case slots_left do
+              :infinity -> :infinity
+              n -> n - 1
+            end
+
+          do_exact(rest, exists_fun, neg_exists, neg_put, next_slots, time_left_ms, t0, [ref | acc], cnt + 1)
+
+        neg_exists.(key) ->
+          do_exact(rest, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt)
 
         true ->
           _ = safe_neg_put(neg_put, key)
@@ -167,11 +207,13 @@ defmodule Core.Recall.Execute do
     }
   end
 
+  # ---------- merge & trace ----------
+
   defp merge_and_trace(%SI{} = si, added_refs, counts, budget_ms, budget_hit?, t0) do
     merged =
       (si.active_cells ++ added_refs)
       |> Enum.uniq_by(& &1.id)
-      |> Enum.sort_by(fn r -> {-(round(r.activation_snapshot * 1.0e6)), min_tok_id(r)} end)
+      |> Enum.sort_by(fn r -> {-(round(activation_of(r) * 1.0e6)), min_tok_id(r)} end)
 
     ev = %{
       stage: :recall_exec,
@@ -187,25 +229,36 @@ defmodule Core.Recall.Execute do
     %SI{si | active_cells: merged, trace: si.trace ++ [ev]}
   end
 
-  defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}), do: t0
-  defp min_tok_id(%{matched_tokens: []}), do: 0
+  # tolerate structs, maps, strings, anything
+  defp activation_of(%Db.BrainCell{activation: a}) when is_number(a), do: a
+  defp activation_of(%{activation_snapshot: a}) when is_number(a),     do: a
+  defp activation_of(%{activation: a}) when is_number(a),              do: a
+  defp activation_of(_),                                               do: 0.0
+
+  # tolerate items with/without matched_tokens/token_id
+  defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}),                  do: t0
+  defp min_tok_id(%{matched_tokens: _mts}),                                 do: 0
+  defp min_tok_id(%{token_id: tid}) when is_integer(tid),                   do: tid
+  defp min_tok_id(%Db.BrainCell{token_id: tid}) when is_integer(tid),       do: tid
+  defp min_tok_id(_),                                                       do: @max_tok_id
 
   # ---- injected defaults ----
-defp default_exists_fun() do
-  if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
-    fn key ->
-      try do
-        Db.word_exists?(key)
-      rescue
-        _ -> false
-      catch
-        _, _ -> false
+
+  defp default_exists_fun() do
+    if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
+      fn key ->
+        try do
+          Db.word_exists?(key)
+        rescue
+          _ -> false
+        catch
+          _, _ -> false
+        end
       end
+    else
+      fn _ -> false end
     end
-  else
-    fn _ -> false end
   end
-end
 
   defp default_neg_exists_fun() do
     if Code.ensure_loaded?(Core.NegCache) and function_exported?(Core.NegCache, :exists?, 1) do

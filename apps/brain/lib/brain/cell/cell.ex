@@ -1,51 +1,49 @@
-# apps/brain/lib/brain/cell/cell.ex
 defmodule Brain.Cell do
   @moduledoc """
   Runtime neuron process. GenServer state IS %Db.BrainCell{}.
-  No Ecto usage here; we only hold the plain struct.
   """
 
   use GenServer
   alias Db.BrainCell, as: Schema
 
-  @registry Core.Registry  # adjust if your registry name differs
+  @registry Brain.Registry
 
   @type state :: Schema.t()
 
-  # ── Public API ────────────────────────────────────────────────────────────
+  # Public API ---------------------------------------------------------
 
   @spec start_link(Schema.t() | map()) :: GenServer.on_start()
-  def start_link(%Schema{id: id} = schema),
-    do: GenServer.start_link(__MODULE__, schema, name: via(id))
+  def start_link(%Schema{id: id} = cell) do
+    GenServer.start_link(__MODULE__, cell, name: via(id))
+  end
 
   def start_link(%{} = attrs) do
-    id = Map.fetch!(attrs, :id)                 # require :id for naming
-    schema = cast_map_to_schema(attrs)          # build %Db.BrainCell{} from attrs
+    id = Map.fetch!(attrs, :id)
+    schema = cast_map_to_schema(attrs)
     GenServer.start_link(__MODULE__, schema, name: via(id))
+  end
+
+  @doc "Start under Brain.CellSup."
+  def start(%Schema{} = cell) do
+    DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
   end
 
   @doc "Lookup a running cell and return its state (or nil)."
   def get(id) do
     case Registry.lookup(@registry, id) do
-      [{pid, _}] -> get_state(pid)
+      [{pid, _}] -> GenServer.call(pid, :get_state)
       _ -> nil
     end
   end
 
-  @doc "Get full state from a pid."
   def get_state(pid), do: GenServer.call(pid, :get_state)
 
-  @doc "Increase activation by amount (default 0.1) with modulation."
   def fire(pid, amount \\ 0.1), do: GenServer.cast(pid, {:fire, amount})
-
-  @doc "Apply neurotransmitter dose."
-  def apply_substance(pid, :dopamine, amt), do: GenServer.cast(pid, {:apply_nt, :dopamine, amt})
+  def apply_substance(pid, :dopamine, amt),  do: GenServer.cast(pid, {:apply_nt, :dopamine, amt})
   def apply_substance(pid, :serotonin, amt), do: GenServer.cast(pid, {:apply_nt, :serotonin, amt})
-
-  @doc "Dampen modulated activation by factor in [0,1]."
   def attenuate(pid, factor), do: GenServer.cast(pid, {:attenuate, factor})
 
-  # ── GenServer ────────────────────────────────────────────────────────────
+  # GenServer ----------------------------------------------------------
 
   @impl true
   def init(%Schema{id: id} = schema) do
@@ -59,31 +57,37 @@ defmodule Brain.Cell do
   @impl true
   def handle_cast({:fire, amount}, %Schema{} = s) when is_number(amount) do
     new_act = clamp(s.activation + amount)
-    {:noreply, %Schema{s | activation: new_act,
-                           modulated_activation: modulated_activation(new_act, s.dopamine, s.serotonin)}}
+    {:noreply, %Schema{s |
+      activation: new_act,
+      modulated_activation: modulated_activation(new_act, s.dopamine, s.serotonin)
+    }}
   end
 
   @impl true
   def handle_cast({:apply_nt, :dopamine, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
     nd  = clamp(s.dopamine + amt)
-    {:noreply, %Schema{s | dopamine: nd,
-                           modulated_activation: modulated_activation(s.activation, nd, s.serotonin),
-                           last_dose_at: now, last_substance: "dopamine"}}
+    {:noreply, %Schema{s |
+      dopamine: nd,
+      modulated_activation: modulated_activation(s.activation, nd, s.serotonin),
+      last_dose_at: now, last_substance: "dopamine"
+    }}
   end
 
   @impl true
   def handle_cast({:apply_nt, :serotonin, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
     ns  = clamp(s.serotonin + amt)
-    {:noreply, %Schema{s | serotonin: ns,
-                           modulated_activation: modulated_activation(s.activation, s.dopamine, ns),
-                           last_dose_at: now, last_substance: "serotonin"}}
+    {:noreply, %Schema{s |
+      serotonin: ns,
+      modulated_activation: modulated_activation(s.activation, s.dopamine, ns),
+      last_dose_at: now, last_substance: "serotonin"
+    }}
   end
 
   @impl true
   def handle_cast({:attenuate, factor}, %Schema{} = s)
-      when is_number(factor) and factor >= 0.0 and factor <= 1.0 do
+  when is_number(factor) and factor >= 0.0 and factor <= 1.0 do
     base =
       cond do
         is_number(s.modulated_activation) -> s.modulated_activation
@@ -94,9 +98,8 @@ defmodule Brain.Cell do
     {:noreply, %Schema{s | modulated_activation: clamp01(base * factor)}}
   end
 
-  # ── Helpers ──────────────────────────────────────────────────────────────
+  # Helpers ------------------------------------------------------------
 
-  # Build a %Db.BrainCell{} from a map, inheriting defaults from the schema struct
   defp cast_map_to_schema(attrs) do
     defaults = Map.from_struct(%Schema{})
     struct!(Schema, Map.merge(defaults, attrs))

@@ -1,21 +1,34 @@
 defmodule Core.BrainAdapter do
-  @moduledoc "Thin adapter to read Brain's active-cells snapshot for Core."
+  @moduledoc """
+  Thin boundary so Core can start/fire cells and read Brain state
+  without sprinkling Brain.* calls everywhere.
+  """
 
-  @spec snapshot() :: {:ok, {term(), list()}} | {:error, term()}
-  def snapshot do
-    brain = Module.concat(Elixir, Brain)
+  alias Brain.Cell
 
-    if Code.ensure_loaded?(brain) and function_exported?(brain, :active_cells_snapshot, 0) do
-      try do
-        {:ok, apply(brain, :active_cells_snapshot, [])}
-      rescue
-        _ -> {:error, :brain_error}
-      catch
-        _, _ -> {:error, :brain_error}
-      end
-    else
-      {:error, :no_brain_snapshot}
+  # Snapshot passthrough (already used by you)
+  def snapshot(), do: GenServer.call(Brain, :snapshot)
+
+  # Start or return the running cell for a given id/attrs.
+  # Accepts a map so we can start cells without a preloaded DB schema.
+  @spec start_or_lookup_cell(map()) :: {:ok, pid()} | {:error, term()}
+  def start_or_lookup_cell(%{id: id} = attrs) when is_binary(id) do
+    case Registry.lookup(Brain.Registry, id) do
+      [{pid, _}] ->
+        {:ok, pid}
+
+      [] ->
+        # Start under Brain.CellSup; Brain.Cell.start_link/1 accepts a map
+        # and casts it into %Db.BrainCell{} internally.
+        case DynamicSupervisor.start_child(Brain.CellSup, {Cell, attrs}) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          other -> other
+        end
     end
   end
+
+  # Fire by pid (Brain.Cell.fire/2 expects pid)
+  def fire(pid, amount \\ 0.1) when is_pid(pid), do: Cell.fire(pid, amount)
 end
 

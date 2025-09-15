@@ -38,6 +38,10 @@ config :db, Db,
   pool_size: 10,
   types: Db.PostgrexTypes   # keep if you defined custom types (e.g., pgvector)
 
+config :core,
+  recall_budget_ms: :infinity,
+  recall_max_items: :infinity
+
 # Import env-specific at the end (OK to keep empty)
 import_config "#{config_env()}.exs"
 

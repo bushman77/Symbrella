@@ -1,162 +1,200 @@
 defmodule Core.Lexicon.Stage do
-  @moduledoc """
-  Pipeline stage:
-  - checks Core.NegCache
-  - uses Core.Lexicon.lookup/1
-  - on 404: negcache + (optionally) drop token
-  - on 200: upsert BrainCell + start Brain.Cell; keep token
-  Returns updated %Core.SemanticInput{}.
-  """
+  @moduledoc false
 
   alias Core.SemanticInput, as: SI
   alias Core.NegCache
   alias Core.Lexicon, as: Lx
 
-  alias Db, as: Repo
-  alias Db.BrainCell, as: BrainCellSchema
-  alias Brain.Cell, as: BrainCellProc
+  alias Db
+  alias Db.BrainCell
+  alias Brain.Cell, as: BrainCellProc  # prefer BrainCellProc.start/1
 
-  @type opts :: [drop_unknown: boolean]
+  @spec run(SI.t()) :: SI.t()
+  def run(%SI{tokens: tokens} = si) when is_list(tokens) do
+    t0 = now_ms()
 
-  @spec run(SI.t(), opts) :: SI.t()
-  def run(%SI{} = si, opts \\ []) do
-    drop_unknown? = Keyword.get(opts, :drop_unknown, true)
-
-    tokens = si.tokens || []
-
-    # de-dupe phrases for this SI to avoid repeated calls
     phrases =
       tokens
-      |> Enum.map(&token_phrase/1)
-      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.map(&phrase_of/1)
+      |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    # lookups map: %{phrase => {:ok, entries} | {:error, :not_found} | {:error, reason}}
+    # key by normalized phrase so NegCache/DB/API all align
     results =
-      Map.new(phrases, fn phrase ->
+      Map.new(phrases, fn raw ->
+        key = norm_phrase(raw)
+
         res =
           cond do
-            NegCache.exists?(phrase) ->
+            NegCache.exists?(key) ->
               {:error, :neg_cached}
 
             true ->
-              case Lx.lookup(phrase) do
-                {:ok, entries} -> {:ok, entries}
-                {:error, :not_found} -> (NegCache.put(phrase); {:error, :not_found})
-                {:error, reason} -> {:error, reason}
+              case Lx.lookup(key) do
+                {:ok, entries} ->
+                  entries
+                  |> enumerate_senses()
+                  |> Enum.each(&upsert_and_maybe_start/1)
+
+                  {:ok, :inserted}
+
+                {:error, :not_found} ->
+                  NegCache.put(key)
+                  {:error, :not_found}
+
+                {:error, reason} ->
+                  {:error, reason}
               end
           end
 
-        {phrase, res}
+        {key, res}
       end)
 
-    # Upsert cells for found phrases once; gather created/loaded cells
-    cells =
-      results
-      |> Enum.flat_map(fn
-        {phrase, {:ok, entries}} ->
-          case ensure_cell(primary_attrs(entries)) do
-            {:ok, cell} ->
-              _ = maybe_start_cell(cell)
-              [cell]
-            _ -> []
-          end
-
-        _ -> []
-      end)
-
-    # Rebuild token list depending on drop policy
-    kept_tokens =
-      Enum.reduce(tokens, [], fn tok, acc ->
-        phrase = token_phrase(tok)
-
-        case Map.get(results, phrase) do
-          {:ok, _} -> [tok | acc]  # keep on success
-          {:error, :not_found} -> if drop_unknown?, do: acc, else: [mark_unknown(tok) | acc]
-          {:error, :neg_cached} -> if drop_unknown?, do: acc, else: [mark_unknown(tok) | acc]
-          {:error, _reason} -> [tok | acc] # transient/transport error → keep
-          nil -> [tok | acc]               # phrase was nil/empty or not processed
+    {kept, dropped} =
+      Enum.reduce(tokens, {[], 0}, fn tok, {acc, dropN} ->
+        k = tok |> phrase_of() |> norm_phrase()
+        case Map.get(results, k) do
+          {:error, :not_found}   -> {acc, dropN + 1}
+          {:error, :neg_cached}  -> {acc, dropN + 1}
+          _                      -> {[tok | acc], dropN}
         end
       end)
-      |> Enum.reverse()
 
-    si
-    |> put_tokens(kept_tokens)
-    |> put_cells(merge_cells(si, cells))
+    kept_rev = Enum.reverse(kept)
+
+    ev = %{
+      stage: :lexicon_stage,
+      ts_ms: now_ms(),
+      meta: %{
+        looked_up: length(phrases),
+        dropped_tokens: dropped,
+        kept_tokens: length(kept_rev),
+        latency_ms: max(now_ms() - t0, 0)
+      }
+    }
+
+    %SI{si | tokens: kept_rev, trace: si.trace ++ [ev]}
   end
+
+  def run(%SI{} = si), do: si
 
   # ——— helpers ———
 
-  defp token_phrase(%{phrase: p}) when is_binary(p), do: String.trim(p)
-  defp token_phrase(p) when is_binary(p), do: String.trim(p)
-  defp token_phrase(_), do: nil
+  defp phrase_of(%{phrase: p}) when is_binary(p), do: String.trim(p)
+  defp phrase_of(p) when is_binary(p), do: String.trim(p)
+  defp phrase_of(_), do: nil
 
-  # annotate unknowns if you choose to keep them
-  defp mark_unknown(tok) do
-    meta = Map.get(tok, :meta, %{}) |> Map.put(:lex, :unknown)
-    Map.put(tok, :meta, meta)
-  end
+  defp norm_phrase(nil), do: nil
+  defp norm_phrase(<<>>), do: <<>>
+  defp norm_phrase(s) when is_binary(s), do: s |> String.trim() |> String.downcase()
 
-  defp merge_cells(%SI{} = si, new_cells) do
-    existing = Map.get(si, :cells, [])
-    # avoid dupes by id or word if present
-    (existing ++ new_cells)
-    |> Enum.uniq_by(fn
-      %{id: id} when not is_nil(id) -> {:id, id}
-      %{word: w} -> {:word, w}
-      other -> other
+  defp enumerate_senses(entries) do
+    defs =
+      for entry <- entries,
+          meaning <- List.wrap(entry["meanings"] || []),
+          defn <- List.wrap(meaning["definitions"] || []) do
+        %{
+          word: entry["word"] || "",
+          pos: meaning["partOfSpeech"],
+          definition: defn["definition"],
+          example: defn["example"]
+        }
+      end
+
+    defs
+    |> Enum.group_by(fn d -> {normalize_word(d.word), normalize_pos(d.pos)} end)
+    |> Enum.flat_map(fn {{w, p}, group} ->
+      group
+      |> Enum.with_index()
+      |> Enum.map(fn {d, idx} ->
+        %{
+          id: build_id(w, p, idx),
+          word: w,
+          pos: p,
+          idx: idx,
+          definition: d.definition,
+          example: d.example
+        }
+      end)
     end)
   end
 
-  defp put_tokens(%SI{} = si, tokens) do
-    if function_exported?(SI, :put_tokens, 2), do: SI.put_tokens(si, tokens), else: %{si | tokens: tokens}
-  end
-
-  defp put_cells(%SI{} = si, cells) do
-    if Map.has_key?(si, :cells), do: %{si | cells: cells}, else: si
-  end
-
-  # Choose a primary definition from entries
-  defp primary_attrs(entries) do
-    entry   = List.first(entries) || %{}
-    word    = entry["word"] || ""
-    meaning = entry["meanings"] |> List.first() || %{}
-    defn    = meaning["definitions"] |> List.first() || %{}
-
-    %{
-      word: word,
-      pos: meaning["partOfSpeech"],
-      definition: defn["definition"],
-      example: defn["example"],
-      synonyms: defn["synonyms"] || [],
-      antonyms: defn["antonyms"] || []
-    }
-  end
-
-  # DB upsert (simple + safe)
-  defp ensure_cell(%{word: word} = attrs) when is_binary(word) and word != "" do
-    case Repo.get_by(BrainCellSchema, word: word) do
-      %BrainCellSchema{} = cell -> {:ok, cell}
-      nil ->
-        %BrainCellSchema{}
-        |> BrainCellSchema.changeset(%{
-          word: attrs.word,
-          pos: Map.get(attrs, :pos),
-          definition: Map.get(attrs, :definition),
-          example: Map.get(attrs, :example),
-          synonyms: Map.get(attrs, :synonyms, []),
-          antonyms: Map.get(attrs, :antonyms, [])
-        })
-        |> Repo.insert()
+  defp normalize_word(w), do: w |> String.trim() |> String.downcase()
+  defp normalize_pos(nil), do: "unk"
+  defp normalize_pos(pos) do
+    case String.downcase(String.trim(pos)) do
+      "adjective"    -> "adj"
+      "adverb"       -> "adv"
+      "interjection" -> "interj"
+      "preposition"  -> "prep"
+      "conjunction"  -> "conj"
+      "pronoun"      -> "pron"
+      other          -> other  # keep "noun", "verb", etc.
     end
   end
-  defp ensure_cell(_), do: {:error, :invalid}
 
-  defp maybe_start_cell(%BrainCellSchema{} = schema) do
-    case BrainCellProc.start_link(schema) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _}} -> :ok
+  defp build_id(word_norm, pos_norm, idx), do: "#{word_norm}|#{pos_norm}|#{idx}"
+
+  defp upsert_and_maybe_start(%{id: id, word: w, pos: pos} = s) do
+    attrs = %{
+      id: id,  # PK "word|pos|idx"
+      word: w,
+      pos: pos,
+      definition: Map.get(s, :definition),
+      example: Map.get(s, :example),
+      type: "lexicon",
+      status: "inactive"
+    }
+
+    cs = BrainCell.changeset(%BrainCell{}, attrs)
+
+    cell =
+      case Db.insert(
+             cs,
+             on_conflict: {:replace, [:definition, :example, :pos, :updated_at]},
+             conflict_target: :id,
+             returning: true
+           ) do
+        {:ok, %BrainCell{} = c} -> c
+        {:error, _}             -> Db.get!(BrainCell, id)
+      end
+
+    start_cell(cell)
+    :ok
+  end
+
+  defp start_cell(%BrainCell{} = cell) do
+    try do
+      cond do
+        function_exported?(BrainCellProc, :start, 1) ->
+          case BrainCellProc.start(cell) do
+            {:ok, _pid}                        -> :ok
+            {:error, {:already_started, _pid}} -> :ok
+            _                                  -> :ok
+          end
+
+        function_exported?(BrainCellProc, :start_link, 1) ->
+          case BrainCellProc.start_link(cell) do
+            {:ok, _pid}                        -> :ok
+            {:error, {:already_started, _pid}} -> :ok
+            _                                  -> :ok
+          end
+
+        true ->
+          :ok
+      end
+    rescue
       _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+  end
+
+  defp now_ms() do
+    try do
+      System.monotonic_time(:millisecond)
+    rescue
+      _ -> System.system_time(:millisecond)
     end
   end
 end

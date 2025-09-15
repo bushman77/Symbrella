@@ -32,12 +32,12 @@ defmodule Core.Recall.Gate do
       end
 
     requires_knowledge? = !!Keyword.get(opts, :requires_knowledge?, false)
-    oov_terms = Keyword.get(opts, :oov_terms, [])
-    unmet_slots = Keyword.get(opts, :unmet_slots, [])
+    oov_terms     = Keyword.get(opts, :oov_terms, [])
+    unmet_slots   = Keyword.get(opts, :unmet_slots, [])
 
     conf_threshold = conf_threshold()
-    budget_ms = Keyword.get(opts, :budget_ms, recall_budget_ms())
-    max_items = Keyword.get(opts, :max_items, recall_max_items())
+    budget_ms  = Keyword.get(opts, :budget_ms, recall_budget_ms())
+    max_items  = Keyword.get(opts, :max_items, recall_max_items())
     strategies = Keyword.get(opts, :strategies, [:exact, :synonym, :embedding])
 
     reasons =
@@ -49,14 +49,8 @@ defmodule Core.Recall.Gate do
 
     decision =
       case reasons do
-        [] ->
-          # No triggers → skip recall
-          :skip
-
-        _ ->
-          # If we already have runtime context and confidence is decent,
-          # but intent *explicitly* needs knowledge, we still recall.
-          :plan
+        [] -> :skip
+        _  -> :plan
       end
 
     trace_ev = %{
@@ -101,10 +95,8 @@ defmodule Core.Recall.Gate do
   end
 
   defp maybe_add(list, _reason, false), do: list
-  defp maybe_add(list, reason, true), do: [reason | list]
+  defp maybe_add(list, reason, true),  do: [reason | list]
 
-  # If there are OOV terms, prioritize exact then embedding (semantic),
-  # still keep synonym as a middle lane unless caller overrides.
   defp normalize_strategies(strats, oov_terms) do
     clean =
       strats
@@ -119,14 +111,18 @@ defmodule Core.Recall.Gate do
     end
   end
 
+  # ---- knobs (now “wide open” by default; still overridable via config) ----
+
   defp conf_threshold,
     do: Application.get_env(:core, :recall_conf_threshold, 0.55)
 
+  # was 40 -> make recall practically unconstrained time-wise for simple checks
   defp recall_budget_ms,
-    do: Application.get_env(:core, :recall_budget_ms, 40)
+    do: Application.get_env(:core, :recall_budget_ms, 1_000)
 
+  # was 8 -> allow a lot more items per turn
   defp recall_max_items,
-    do: Application.get_env(:core, :recall_max_items, 8)
+    do: Application.get_env(:core, :recall_max_items, 10_000)
 
   defp now_ms() do
     try do
