@@ -1,4 +1,5 @@
 defmodule Brain do
+  @moduledoc false
   use GenServer
   require Logger
 
@@ -17,10 +18,12 @@ defmodule Brain do
     do: GenServer.call(@name, {:chat, text})
 
   @doc "Minimal state snapshot + active cells summary."
-  def snapshot, do: GenServer.call(@name, :snapshot)
+  def snapshot,
+    do: GenServer.call(@name, :snapshot)
 
-  @doc "List of active cell ids (for RuntimeBind). Registry-first, falls back to state."
-  def active_list, do: GenServer.call(@name, :active_list)
+  @doc "List of active cell ids (registry-first, falls back to state map)."
+  def active_list,
+    do: GenServer.call(@name, :active_list)
 
   @doc "Register a running cell (id -> pid)."
   def register_active(id, pid) when is_binary(id) and is_pid(pid),
@@ -30,7 +33,7 @@ defmodule Brain do
   def register_activation(id) when is_binary(id),
     do: GenServer.cast(@name, {:activation, id, now_ms()})
 
-  # ——— new: runtime cell inspection ———
+  # ——— inspection helpers ———
 
   @doc "Return the full state for a running cell id, or nil if not running."
   def cell(id) when is_binary(id),
@@ -48,10 +51,43 @@ defmodule Brain do
   Peek selected fields from a running cell (default: runtime-relevant).
   Returns a map or :not_running.
   """
-  def peek(id, fields \\ [:id, :word, :pos, :type, :activation, :modulated_activation,
-                          :dopamine, :serotonin, :last_substance, :last_dose_at])
+  def peek(
+        id,
+        fields \\ [
+          :id,
+          :word,
+          :pos,
+          :type,
+          :activation,
+          :modulated_activation,
+          :dopamine,
+          :serotonin,
+          :last_substance,
+          :last_dose_at
+        ]
+      )
       when is_binary(id) and is_list(fields),
       do: GenServer.call(@name, {:peek, id, fields})
+
+  @doc "Kill a single cell by id (if running)."
+  def kill(id) when is_binary(id) do
+    case Registry.lookup(@registry, id) do
+      [{pid, _}] -> Process.exit(pid, :normal); :ok
+      _ -> :not_found
+    end
+  end
+
+  @doc "Stop all runtime fallback cells (ids like \"w:*\")."
+  def prune_runtime do
+    ids = registry_keys()
+    Enum.each(ids, fn id ->
+      if String.starts_with?(id, "w:") do
+        kill(id)
+      end
+    end)
+
+    :ok
+  end
 
   # ───────────── GenServer ─────────────
 
@@ -75,7 +111,8 @@ defmodule Brain do
   @impl true
   def handle_call({:chat, raw_text}, _from, state) do
     si  = Core.resolve_input(raw_text)
-    si2 = Brain.Activator.run(si, impulse: 0.3)  # <— BRAIN-side activation
+    # prefer sense fan-out; skip MWE fallback by default to avoid w:"hello there"
+    si2 = Brain.Activator.run(si, impulse: 0.3, mwe_fallback: :skip)
 
     tokens = si2.tokens || []
 
@@ -91,7 +128,7 @@ defmodule Brain do
       si2.active_cells
       |> Enum.map(fn
         %{id: id} -> id
-        other     -> other
+        other -> other
       end)
 
     entry = %{
@@ -104,10 +141,11 @@ defmodule Brain do
     hist = [entry | state.history] |> Enum.take(@history_max)
 
     {:reply, "reply",
-     %{state |
-       history: hist,
-       token_counts: token_counts,
-       turn_seq: state.turn_seq + 1
+     %{
+       state
+       | history: hist,
+         token_counts: token_counts,
+         turn_seq: state.turn_seq + 1
      }}
   end
 
@@ -136,7 +174,7 @@ defmodule Brain do
     {:reply, (reg_ids ++ map_ids) |> Enum.uniq(), state}
   end
 
-  # ——— new: runtime cell inspection calls ———
+  # ——— runtime cell inspection calls ———
 
   @impl true
   def handle_call({:cell, id}, _from, state) do
@@ -148,7 +186,8 @@ defmodule Brain do
     states =
       ids
       |> Enum.map(&fetch_cell_state/1)
-      |> Enum.filter(& &1) # drop nils
+      |> Enum.filter(& &1)
+
     {:reply, states, state}
   end
 
@@ -169,14 +208,14 @@ defmodule Brain do
   @impl true
   def handle_call({:peek, id, fields}, _from, state) do
     case fetch_cell_state(id) do
-      nil    -> {:reply, :not_running, state}
+      nil -> {:reply, :not_running, state}
       struct -> {:reply, Map.take(Map.from_struct(struct), fields), state}
     end
   end
 
   @impl true
   def handle_cast({:register_active, id, pid}, state) do
-    ref   = Process.monitor(pid)
+    ref = Process.monitor(pid)
     entry = %{pid: pid, ref: ref, since: now_ms()}
     {:noreply, put_in(state.active_cells[id], entry)}
   end
@@ -193,7 +232,7 @@ defmodule Brain do
   @impl true
   def handle_info({:cell_started, {id, pid}}, state)
       when is_binary(id) and is_pid(pid) do
-    ref   = Process.monitor(pid)
+    ref = Process.monitor(pid)
     entry = %{pid: pid, ref: ref, since: now_ms()}
     {:noreply, put_in(state.active_cells[id], entry)}
   end

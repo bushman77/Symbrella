@@ -8,26 +8,48 @@ defmodule Symbrella.Umbrella.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases()
-      # no preferred_cli_env — single DB setup keeps it simple
     ]
   end
 
   # Root-only deps (not shared with child apps)
   defp deps do
     [
-      # lets the umbrella root run `mix format` on ~H/.heex files
       {:phoenix_live_view, ">= 0.0.0"}
     ]
   end
 
-  # Handy umbrella-wide tasks
+  # ---------- Helpers used by aliases ----------
+
+  # We delete both potential locations to be safe:
+  # 1) runtime build priv: _build/<env>/lib/core/priv/negcache
+  # 2) source priv: apps/core/priv/negcache
+  def negcache_dirs do
+    env = Atom.to_string(Mix.env())
+    root = File.cwd!()
+
+    [
+      Path.join([root, "_build", env, "lib", "core", "priv", "negcache"]),
+      Path.join([root, "apps", "core", "priv", "negcache"])
+    ]
+  end
+
+  def clean_negcache(_args) do
+    for dir <- negcache_dirs() do
+      File.rm_rf!(dir)
+      File.mkdir_p!(dir)
+      Mix.shell().info("✔ negcache cleared: " <> dir)
+    end
+  end
+
+  # ---------- Umbrella-wide tasks ----------
   defp aliases do
     [
-      {:setup, ["deps.get"]},
+      {:"negcache.clean", [&__MODULE__.clean_negcache/1]},
+      {:"cache.nuke",     [&__MODULE__.clean_negcache/1]},
 
-      # database lifecycle (Repo = Db), no seeds here
-      {:"db.setup",   ["ecto.create -r Db", "ecto.migrate -r Db"]},
-      {:"db.reset",   ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db"]},
+      # DB lifecycle (Repo = Db) + negcache wipe
+      {:"db.setup",   ["ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
+      {:"db.reset",   ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
       {:"db.migrate", ["ecto.migrate -r Db"]},
       {:"db.rollback", ["ecto.rollback -r Db"]},
       {:"db.migrations", ["ecto.migrations -r Db"]},
@@ -35,14 +57,15 @@ defmodule Symbrella.Umbrella.MixProject do
       # convenience alias without a dot in the name
       {:dbreset, ["db.reset"]},
 
-      # assets (use your existing Tailwind/Esbuild profiles)
+      # assets
       {:"assets.build",  ["tailwind default", "esbuild default"]},
       {:"assets.deploy", ["tailwind default --minify", "esbuild default --minify", "phx.digest"]},
 
-      # tests (no seeding)
+      # tests — keep cache clean so negatives don't bleed between runs
       {:test, [
         "ecto.create -r Db --quiet",
         "ecto.migrate -r Db --quiet",
+        "negcache.clean",
         "test"
       ]}
     ]

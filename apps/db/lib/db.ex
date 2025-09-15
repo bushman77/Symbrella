@@ -3,10 +3,10 @@ defmodule Db do
   Umbrella-wide Repo. One DB, one config source.
 
   Crash-proof helpers:
-  - table_exists?/1 uses to_regclass (no ERROR logs)
-  - word_exists?/1 bails if table doesn't exist
-  - senses_for_word/1, senses_for_words/1 (lightweight maps)
-  - senses_for_word_full/1, senses_for_words_full/1 (return full %Db.BrainCell{})
+  - `table_exists?/1` uses to_regclass (no ERROR logs)
+  - `word_exists?/1` bails if table doesn't exist
+  - `senses_for_word/1` & `senses_for_words/1` (lightweight selects)
+  - `senses_for_word_full/1` & `senses_for_words_full/1` (full schema rows)
   """
 
   use Ecto.Repo,
@@ -48,9 +48,10 @@ defmodule Db do
 
   def word_exists?(_), do: false
 
-  # ——— existing lightweight senses (map selects) ———
+  # ——— Lightweight senses (maps) ———
 
   @doc "Return ALL senses (POS + indices) for a given word (lightweight map)."
+  @spec senses_for_word(binary()) :: [map()]
   def senses_for_word(word) when is_binary(word) and byte_size(word) > 0 do
     if table_exists?("brain_cells") do
       from(b in BrainCell,
@@ -70,7 +71,8 @@ defmodule Db do
 
   def senses_for_word(_), do: []
 
-  @doc "Batched lightweight: word => [%{id, word, pos, type}]"
+  @doc "Batched lightweight: word => [%{id, word, pos, type}] (one query)."
+  @spec senses_for_words([binary()]) :: %{optional(binary()) => [map()]}
   def senses_for_words(words) when is_list(words) do
     uniq =
       words
@@ -98,9 +100,10 @@ defmodule Db do
     _, _ -> %{}
   end
 
-  # ——— NEW: full schema fetches ———
+  # ——— Full schema senses ———
 
   @doc "Return ALL senses as full %Db.BrainCell{} rows for a given word."
+  @spec senses_for_word_full(binary()) :: [Db.BrainCell.t()]
   def senses_for_word_full(word) when is_binary(word) and byte_size(word) > 0 do
     if table_exists?("brain_cells") do
       from(b in BrainCell,
@@ -119,7 +122,8 @@ defmodule Db do
 
   def senses_for_word_full(_), do: []
 
-  @doc "Batched FULL: word => [%Db.BrainCell{}]. One query, grouped by word."
+  @doc "Batched FULL: word => [%Db.BrainCell{}] (one query)."
+  @spec senses_for_words_full([binary()]) :: %{optional(binary()) => [Db.BrainCell.t()]}
   def senses_for_words_full(words) when is_list(words) do
     uniq =
       words

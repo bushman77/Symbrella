@@ -12,8 +12,9 @@ defmodule Brain.Cell do
   # Public API ---------------------------------------------------------
 
   @spec start_link(Schema.t() | map()) :: GenServer.on_start()
-  def start_link(%Schema{id: id} = cell),
-    do: GenServer.start_link(__MODULE__, cell, name: via(id))
+  def start_link(%Schema{id: id} = cell) do
+    GenServer.start_link(__MODULE__, cell, name: via(id))
+  end
 
   def start_link(%{} = attrs) do
     id = Map.fetch!(attrs, :id)
@@ -22,8 +23,9 @@ defmodule Brain.Cell do
   end
 
   @doc "Start under Brain.CellSup."
-  def start(%Schema{} = cell),
-    do: DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
+  def start(%Schema{} = cell) do
+    DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
+  end
 
   @doc "Lookup a running cell and return its state (or nil)."
   def get(id) do
@@ -57,32 +59,42 @@ defmodule Brain.Cell do
   @impl true
   def handle_cast({:fire, amount}, %Schema{} = s) when is_number(amount) do
     new_act = clamp(s.activation + amount)
-    {:noreply, %Schema{s |
-      activation: new_act,
-      modulated_activation: modulated_activation(new_act, s.dopamine, s.serotonin)
-    }}
+    {:noreply,
+     %Schema{
+       s
+       | activation: new_act,
+         modulated_activation: modulated_activation(new_act, s.dopamine, s.serotonin)
+     }}
   end
 
   @impl true
   def handle_cast({:apply_nt, :dopamine, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
-    nd  = clamp(s.dopamine + amt)
-    {:noreply, %Schema{s |
-      dopamine: nd,
-      modulated_activation: modulated_activation(s.activation, nd, s.serotonin),
-      last_dose_at: now, last_substance: "dopamine"
-    }}
+    nd = clamp(s.dopamine + amt)
+
+    {:noreply,
+     %Schema{
+       s
+       | dopamine: nd,
+         modulated_activation: modulated_activation(s.activation, nd, s.serotonin),
+         last_dose_at: now,
+         last_substance: "dopamine"
+     }}
   end
 
   @impl true
   def handle_cast({:apply_nt, :serotonin, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
-    ns  = clamp(s.serotonin + amt)
-    {:noreply, %Schema{s |
-      serotonin: ns,
-      modulated_activation: modulated_activation(s.activation, s.dopamine, ns),
-      last_dose_at: now, last_substance: "serotonin"
-    }}
+    ns = clamp(s.serotonin + amt)
+
+    {:noreply,
+     %Schema{
+       s
+       | serotonin: ns,
+         modulated_activation: modulated_activation(s.activation, s.dopamine, ns),
+         last_dose_at: now,
+         last_substance: "serotonin"
+     }}
   end
 
   @impl true
@@ -91,8 +103,8 @@ defmodule Brain.Cell do
     base =
       cond do
         is_number(s.modulated_activation) -> s.modulated_activation
-        is_number(s.activation)           -> s.activation
-        true                              -> 0.0
+        is_number(s.activation) -> s.activation
+        true -> 0.0
       end
 
     {:noreply, %Schema{s | modulated_activation: clamp01(base * factor)}}
@@ -100,14 +112,25 @@ defmodule Brain.Cell do
 
   @impl true
   def handle_cast({:hydrate, %Schema{} = lex}, %Schema{} = s) do
-    # Only overlay lexical/content fields; preserve runtime counters.
-    fields = [:definition, :example, :gram_function, :synonyms, :antonyms,
-              :semantic_atoms, :embedding, :token_id, :position, :connections]
+    # overlay lexical/content fields; preserve runtime counters
+    fields = [
+      :definition,
+      :example,
+      :gram_function,
+      :synonyms,
+      :antonyms,
+      :semantic_atoms,
+      :embedding,
+      :token_id,
+      :position,
+      :connections
+    ]
 
     merged =
       Enum.reduce(fields, s, fn k, acc ->
         newv = Map.get(lex, k)
         oldv = Map.get(acc, k)
+
         cond do
           is_nil(newv) -> acc
           newv == [] and is_list(oldv) -> acc
