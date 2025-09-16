@@ -24,8 +24,6 @@ defmodule Core.Token do
     {:ok, tokens}
   end
 
-  # ——— internals ———
-
   defp words_to_ngrams(words, sentence, max_n, opts) do
     assume_all? = Keyword.get(opts, :assume_all, true)
 
@@ -37,18 +35,17 @@ defmodule Core.Token do
         |> Enum.join(" ")
 
       {start, stop} = span_in(sentence, phrase)
-      known? = phrase_exists?(phrase)
 
       token = %__MODULE__{
         phrase: phrase,
         span: {start, stop},
         mw: n > 1,
-        source: if(known?, do: :db, else: :assumed),
+        source: :assumed,
         instances: [],
         n: n
       }
 
-      if assume_all? or known?, do: token, else: nil
+      token
     end
   end
 
@@ -56,14 +53,6 @@ defmodule Core.Token do
     case :binary.match(sentence, phrase) do
       {pos, len} -> {pos, pos + len}
       :nomatch -> {0, 0}
-    end
-  end
-
-  defp phrase_exists?(phrase) do
-    try do
-      Core.PhraseRepo.Default.exists?(phrase)
-    rescue
-      _ -> false
     end
   end
 end

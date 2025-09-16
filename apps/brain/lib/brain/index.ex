@@ -3,7 +3,7 @@ defmodule Brain.Index do
   alias Db.BrainCell
 
   @spec merge_active(map(), [BrainCell.t()], [String.t()]) :: map()
-  def merge_active(state, cells, started_ids) do
+  def merge_active(state, cells, started_ids \\ []) do
     active_map =
       Enum.reduce(cells, state.active_cells || %{}, fn %BrainCell{id: id} = cell, acc ->
         Map.put(acc, id, %{cell: cell, status: :active})
