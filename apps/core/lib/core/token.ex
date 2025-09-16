@@ -10,14 +10,17 @@ defmodule Core.Token do
           n: pos_integer()
         }
 
-  # public
+  @spec tokenize(String.t(), keyword) :: {:ok, [t()]}
   def tokenize(sentence, opts \\ []) when is_binary(sentence) do
     s = String.trim(sentence)
-    words = Regex.scan(~r/\S+/, s) |> Enum.map(&hd/1)
+    words = String.split(s)
     max_n = Keyword.get(opts, :max_n, 4)
     assume_all? = Keyword.get(opts, :assume_all, true)
 
-    tokens = words_to_ngrams(words, s, max_n, assume_all?: assume_all?)
+    tokens =
+      words_to_ngrams(words, s, max_n, assume_all?: assume_all?)
+      |> Enum.reject(&is_nil/1)
+
     {:ok, tokens}
   end
 
@@ -34,9 +37,9 @@ defmodule Core.Token do
         |> Enum.join(" ")
 
       {start, stop} = span_in(sentence, phrase)
+      known? = phrase_exists?(phrase)
 
-      known? = phrase_exists?(phrase, opts)
-      %__MODULE__{
+      token = %__MODULE__{
         phrase: phrase,
         span: {start, stop},
         mw: n > 1,
@@ -44,18 +47,19 @@ defmodule Core.Token do
         instances: [],
         n: n
       }
+
+      if assume_all? or known?, do: token, else: nil
     end
   end
 
   defp span_in(sentence, phrase) do
-    # naive first match; good enough for pipeline plumbing
     case :binary.match(sentence, phrase) do
       {pos, len} -> {pos, pos + len}
       :nomatch -> {0, 0}
     end
   end
 
-  defp phrase_exists?(phrase, _opts) do
+  defp phrase_exists?(phrase) do
     try do
       Core.PhraseRepo.Default.exists?(phrase)
     rescue
@@ -63,4 +67,3 @@ defmodule Core.Token do
     end
   end
 end
-

@@ -10,7 +10,7 @@ defmodule Core.PhraseRepo.Default do
   def exists?(phrase) when is_binary(phrase) do
     norm = normalize(phrase)
     query = from b in BrainCell, where: b.norm == ^norm, select: 1
-    Db.exists?(query)   # Ecto 3.13+: fast EXISTS
+    Db.exists?(query)
   rescue
     e ->
       require Logger
@@ -18,7 +18,6 @@ defmodule Core.PhraseRepo.Default do
       false
   end
 
-  # Keep this in-sync with how you set `norm` in migrations/inserts.
   defp normalize(p) do
     p
     |> String.downcase()
@@ -26,4 +25,3 @@ defmodule Core.PhraseRepo.Default do
     |> String.replace(~r/\s+/, " ")
   end
 end
-

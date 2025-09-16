@@ -2,35 +2,45 @@ defmodule Core.SemanticInput do
   @moduledoc """
   Pipeline state passed through Core.
 
-  Minimal fields for early pipeline (tokenize → runtime_bind). Extras can be layered later.
+  Minimal fields for early pipeline (tokenize → runtime_bind).
+  Safe to grow over time; downstream stages can rely on presence of
+  pos_list/intent/keyword/confidence/mood/etc.
   """
 
-  # Keep enforce minimal so callers that only set `sentence` still work.
   @enforce_keys [:sentence]
   defstruct original_sentence: "",
             sentence: "",
             source: :user,
             tokens: [],
+            pos_list: [],
+            intent: nil,
+            keyword: nil,
+            confidence: 0.0,
+            mood: nil,
+            phrase_matches: [],
+            activation_summary: %{},
+            pattern_roles: %{},
             active_cells: [],
             brain_state_ref: nil,
             trace: []
 
   @type source :: :user | :system | :api | :internal | :recall
 
-  @type tok :: %{
-          id: non_neg_integer(),
-          text: binary(),
-          norm: binary(),
-          lemma: binary() | nil,
-          span: %{char_start: non_neg_integer(), char_end: non_neg_integer()},
-          is_mwe_head: boolean(),
-          mwe_id: binary() | nil,
-          mwe_span: %{first_id: non_neg_integer(), last_id: non_neg_integer()} | nil,
-          is_stop: boolean(),
-          is_oov: boolean(),
-          kind: :word | :punct | :number | :emoji | :other,
-          hash: binary()
-        }
+  @type tok :: Core.Token.t()
+          | %{
+              id: non_neg_integer(),
+              text: binary(),
+              norm: binary(),
+              lemma: binary() | nil,
+              span: %{char_start: non_neg_integer(), char_end: non_neg_integer()},
+              is_mwe_head: boolean(),
+              mwe_id: binary() | nil,
+              mwe_span: %{first_id: non_neg_integer(), last_id: non_neg_integer()} | nil,
+              is_stop: boolean(),
+              is_oov: boolean(),
+              kind: :word | :punct | :number | :emoji | :other,
+              hash: binary()
+            }
 
   @type tok_ref :: %{tok_id: non_neg_integer(), conf: float() | nil}
 
@@ -51,9 +61,16 @@ defmodule Core.SemanticInput do
           sentence: binary(),
           source: source(),
           tokens: [tok()],
+          pos_list: [String.t()],
+          intent: atom() | String.t() | nil,
+          keyword: String.t() | nil,
+          confidence: float(),
+          mood: atom() | nil,
+          phrase_matches: list(),
+          activation_summary: map(),
+          pattern_roles: map(),
           active_cells: [active_ref()],
           brain_state_ref: term() | nil,
           trace: [event()]
         }
 end
-

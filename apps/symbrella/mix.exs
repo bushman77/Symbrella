@@ -41,7 +41,8 @@ defmodule Symbrella.MixProject do
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:brain, in_umbrella: true},
-      {:core, in_umbrella: true}
+      {:core, in_umbrella: true},
+      {:db, in_umbrella: true}
     ]
   end
 

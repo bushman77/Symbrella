@@ -1,13 +1,20 @@
 defmodule Brain.Index do
-  @moduledoc """
-  Minimal index shim.
+  @moduledoc false
+  alias Db.BrainCell
 
-  `ids_for_phrase/1` should return all active BrainCell IDs that begin with
-  the given phrase (e.g., "kick the bucket|VERB|0"). For now, this scaffold
-  returns an empty list.
-  """
+  @spec merge_active(map(), [BrainCell.t()], [String.t()]) :: map()
+  def merge_active(state, cells, started_ids) do
+    active_map =
+      Enum.reduce(cells, state.active_cells || %{}, fn %BrainCell{id: id} = cell, acc ->
+        Map.put(acc, id, %{cell: cell, status: :active})
+      end)
 
-  @spec ids_for_phrase(String.t()) :: [String.t()]
-  def ids_for_phrase(_phrase), do: []
+    ids = Map.keys(active_map)
+
+    state
+    |> Map.put(:active_cells, active_map)
+    |> Map.put(:active_cell_ids, ids)
+    |> Map.put(:active_cell_count, length(ids))
+    |> Map.put(:last_started_ids, started_ids)
+  end
 end
-
