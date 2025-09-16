@@ -9,6 +9,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :id, :string, primary_key: true
 
       add :word, :citext, null: false
+      add :norm, :citext, null: false                            # ← NEW
       add :pos, :string
       add :definition, :text
       add :example, :text
@@ -17,7 +18,6 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :synonyms, {:array, :text}, null: false, default: []
       add :antonyms, {:array, :text}, null: false, default: []
       add :semantic_atoms, {:array, :text}, null: false, default: []
-
       add :type, :string
       add :status, :string, null: false, default: "inactive"
 
@@ -28,7 +28,6 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
 
       add :position, {:array, :float}
       add :connections, {:array, :map}, null: false, default: []
-
       add :last_dose_at, :utc_datetime_usec
       add :last_substance, :string
       add :token_id, :bigint
@@ -36,8 +35,9 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       timestamps()
     end
 
-    # NON-UNIQUE btree index on word (allows multiple senses per word)
+    # Fast lookups by word/norm + trigram & array search
     create index(:brain_cells, [:word], name: :brain_cells_word_index)
+    create index(:brain_cells, [:norm], name: :brain_cells_norm_index)
 
     execute("""
     CREATE INDEX IF NOT EXISTS brain_cells_word_trgm_idx
@@ -54,7 +54,26 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     ON brain_cells USING GIN (antonyms)
     """)
 
-    # Add vector column + index only if extension is available
+    # Idempotency guard for lexical inserts (treat NULLs as empty)
+    execute("""
+    CREATE UNIQUE INDEX IF NOT EXISTS brain_cells_lexical_key_uniq
+    ON brain_cells (
+      norm,
+      COALESCE(pos, ''),
+      COALESCE(type, ''),
+      COALESCE(gram_function, '')
+    );
+    """)
+
+    # Backfill norm for any seeded rows
+    execute("""
+    UPDATE brain_cells
+       SET norm = citext(
+         regexp_replace(trim(lower(word::text)), '\\s+', ' ', 'g')
+       );
+    """)
+
+    # Optional vector column + index (kept as-is)
     execute("""
     DO $$
     BEGIN
@@ -73,7 +92,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
           WHERE table_name = 'brain_cells' AND column_name = 'embedding'
         ) THEN
           CREATE INDEX IF NOT EXISTS brain_cells_embedding_idx
-            ON brain_cells USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+          ON brain_cells USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
         END IF;
       END IF;
     END
@@ -86,8 +105,11 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("DROP INDEX IF EXISTS brain_cells_antonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_synonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_word_trgm_idx")
+    execute("DROP INDEX IF EXISTS brain_cells_lexical_key_uniq")
 
+    drop_if_exists index(:brain_cells, [:norm], name: :brain_cells_norm_index)
     drop_if_exists index(:brain_cells, [:word], name: :brain_cells_word_index)
+
     drop table(:brain_cells)
 
     execute("DROP EXTENSION IF EXISTS vector")

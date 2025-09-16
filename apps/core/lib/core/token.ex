@@ -1,69 +1,66 @@
 defmodule Core.Token do
-  @moduledoc """
-  Stage-0 tokenize: **normalize → all n-gram chunks (assumed) → SemanticInput**.
-
-  Tokens are lightweight: just phrase, span, multiword flag, provenance, instances, and n.
-  """
-
-  @enforce_keys [:phrase, :span, :mw, :source]
-  defstruct [
-    :phrase,                 # string
-    :span,                   # {start, stop}
-    :mw,                     # boolean (multiword?)
-    :source,                 # :assumed | :active | :db | :remote | :fallback
-    instances: [],           # instance ids (when known)
-    n: 1                     # word count
-  ]
+  defstruct [:phrase, :span, :mw, :source, :instances, :n]
 
   @type t :: %__MODULE__{
           phrase: String.t(),
           span: {non_neg_integer(), non_neg_integer()},
           mw: boolean(),
-          source: :assumed | :active | :db | :remote | :fallback,
-          instances: [String.t()],
+          source: :db | :assumed,
+          instances: list(),
           n: pos_integer()
         }
 
-  alias Core.SemanticInput, as: SI
-  alias Core.Token, as: Tok
+  # public
+  def tokenize(sentence, opts \\ []) when is_binary(sentence) do
+    s = String.trim(sentence)
+    words = Regex.scan(~r/\S+/, s) |> Enum.map(&hd/1)
+    max_n = Keyword.get(opts, :max_n, 4)
+    assume_all? = Keyword.get(opts, :assume_all, true)
 
-  @spec tokenize(String.t()) :: SI.t()
-  def tokenize(sentence) when is_binary(sentence) do
-    # 1) normalize
-    norm = Core.Text.normalize(sentence)
-
-    # 2) dynamic cap (min(5, word_count))
-    cap = norm |> count_words() |> min(5)
-
-    # 3) segment and wrap into %Core.Token{}
-    tokens =
-      norm
-      |> Core.Segmenter.segment_phrases(max_len: cap)
-      |> Enum.map(&to_token/1)
-
-    # 4) build SemanticInput
-    %SI{
-      sentence: norm,
-      original_sentence: sentence,
-      source: :console,
-      tokens: tokens
-    }
+    tokens = words_to_ngrams(words, s, max_n, assume_all?: assume_all?)
+    {:ok, tokens}
   end
 
-  # ——— private ———
+  # ——— internals ———
 
-  defp to_token(seg) do
-    %Tok{
-      phrase: seg.text,
-      span: {seg.start, seg.stop},
-      mw: Map.get(seg, :mw?, Map.get(seg, :mw, false)),
-      source: seg.source,
-      instances: Map.get(seg, :instances, []),
-      n: count_words(seg.text)
-    }
+  defp words_to_ngrams(words, sentence, max_n, opts) do
+    assume_all? = Keyword.get(opts, :assume_all, true)
+
+    for i <- 0..(length(words) - 1),
+        n <- 1..min(max_n, length(words) - i) do
+      phrase =
+        words
+        |> Enum.slice(i, n)
+        |> Enum.join(" ")
+
+      {start, stop} = span_in(sentence, phrase)
+
+      known? = phrase_exists?(phrase, opts)
+      %__MODULE__{
+        phrase: phrase,
+        span: {start, stop},
+        mw: n > 1,
+        source: if(known?, do: :db, else: :assumed),
+        instances: [],
+        n: n
+      }
+    end
   end
 
-  defp count_words(s) when is_binary(s),
-    do: Regex.scan(~r/\S+/u, s) |> length()
+  defp span_in(sentence, phrase) do
+    # naive first match; good enough for pipeline plumbing
+    case :binary.match(sentence, phrase) do
+      {pos, len} -> {pos, pos + len}
+      :nomatch -> {0, 0}
+    end
+  end
+
+  defp phrase_exists?(phrase, _opts) do
+    try do
+      Core.PhraseRepo.Default.exists?(phrase)
+    rescue
+      _ -> false
+    end
+  end
 end
 

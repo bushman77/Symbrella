@@ -1,42 +1,91 @@
 defmodule Db.Lexicon do
-  @moduledoc "Bulk upserts of lexicon senses into brain_cells."
-  alias Db, as: Repo
-  alias Db.BrainCell
+  @moduledoc "Idempotent upserts for lexical items."
+  import Ecto.Query, warn: false
+  alias Db.{Repo, BrainCell}
 
-  @doc """
-  Upsert a list of sense rows. Expected keys:
-    :id, :word, :pos, :type, :definition, :example, :synonyms, :antonyms
-  Missing arrays default to [].
-  """
-  @spec bulk_upsert_senses([map()]) :: :ok
-  def bulk_upsert_senses(rows) when is_list(rows) do
-    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+  # Normalize exactly like the migration’s UPDATE
+  defp normize(phrase) do
+    phrase
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/\s+/, " ")
+  end
 
-    rows1 =
-      Enum.map(rows, fn r ->
-        r
-        |> Map.put_new(:status, "inactive")
-        |> Map.put_new(:activation, 0.0)
-        |> Map.put_new(:dopamine, 0.0)
-        |> Map.put_new(:serotonin, 0.0)
-        |> Map.put_new(:modulated_activation, 0.0)
-        |> Map.put_new(:connections, [])
-        |> Map.put_new(:semantic_atoms, [])
-        |> Map.put_new(:synonyms, r[:synonyms] || [])
-        |> Map.put_new(:antonyms, r[:antonyms] || [])
-        |> Map.put_new(:inserted_at, now)
-        |> Map.put_new(:updated_at, now)
+  # Policy for your string PK: stable + readable
+  # Feel free to switch to Base.encode16(:crypto.hash(:sha256, key)) if preferred.
+  defp make_id(%{norm: norm, pos: pos, type: type, gram_function: gf}) do
+    [norm, pos || "", type || "", gf || ""]
+    |> Enum.join("|")
+  end
+
+  @doc "Ensure a single lexical item exists; returns %Db.BrainCell{}."
+  def ensure_one(phrase, opts \\ []) do
+    attrs = %{
+      word: phrase,
+      norm: normize(phrase),
+      pos: opts[:pos],
+      type: opts[:type],
+      gram_function: opts[:gram_function],
+      status: opts[:status] || "inactive",
+      token_id: opts[:token_id]
+    }
+
+    id = make_id(attrs)
+
+    _ =
+      %BrainCell{}
+      |> BrainCell.changeset(Map.put(attrs, :id, id))
+      |> Repo.insert(
+        on_conflict: :nothing,
+        conflict_target: {:unsafe_fragment, " (norm, COALESCE(pos,''), COALESCE(type,''), COALESCE(gram_function,'')) "}
+      )
+
+    Repo.get(BrainCell, id) ||
+      Repo.get_by(BrainCell,
+        norm: attrs.norm,
+        pos: attrs.pos,
+        type: attrs.type,
+        gram_function: attrs.gram_function
+      )
+  end
+
+  @doc "Ensure many at once (strings or %{phrase: ...} tokens)."
+  def ensure_many(items, opts \\ []) do
+    now = DateTime.utc_now()
+
+    rows =
+      items
+      |> Enum.map(fn
+        %{phrase: p} -> p
+        p when is_binary(p) -> p
       end)
+      |> Enum.map(fn p ->
+        attrs = %{
+          word: p,
+          norm: normize(p),
+          pos: opts[:pos],
+          type: opts[:type],
+          gram_function: opts[:gram_function],
+          status: opts[:status] || "inactive",
+          token_id: opts[:token_id]
+        }
 
-    Repo.insert_all(
-      BrainCell,
-      rows1,
-      conflict_target: :id,
-      on_conflict:
-        {:replace, [:definition, :example, :pos, :synonyms, :antonyms, :updated_at]}
-    )
+        Map.merge(attrs, %{
+          id: make_id(attrs),
+          inserted_at: now,
+          updated_at: now
+        })
+      end)
+      |> Enum.uniq_by(& &1.id)
 
-    :ok
+    _ =
+      Repo.insert_all(BrainCell, rows,
+        on_conflict: :nothing,
+        conflict_target: {:unsafe_fragment, " (norm, COALESCE(pos,''), COALESCE(type,''), COALESCE(gram_function,'')) "}
+      )
+
+    ids = Enum.map(rows, & &1.id)
+    Repo.all(from b in BrainCell, where: b.id in ^ids)
   end
 end
 

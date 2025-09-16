@@ -14,7 +14,8 @@ defmodule Symbrella.Umbrella.MixProject do
   # Root-only deps (not shared with child apps)
   defp deps do
     [
-      {:phoenix_live_view, ">= 0.0.0"}
+      {:phoenix_live_view, ">= 0.0.0"},
+      {:mox, "~> 1.1", only: :test}
     ]
   end
 

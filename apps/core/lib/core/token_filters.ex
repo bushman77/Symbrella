@@ -1,36 +1,36 @@
 defmodule Core.TokenFilters do
-  @moduledoc """
-  Pure token filters for early pipeline hygiene.
+  alias Core.{SemanticInput, Token}
+
+  @doc """
+  Prunes tokens with a safety guard: if pruning would yield an empty list,
+  keep the original tokens. This prevents downstream nil/[] explosions while
+  we refine span semantics and MW handling.
   """
-
-  alias Core.SemanticInput, as: SI
-
-  @spec prune(SI.t(), keyword()) :: SI.t()
-  def prune(%SI{} = si, opts \\ []) do
+  @spec prune(SemanticInput.t(), keyword()) :: SemanticInput.t()
+  def prune(%SemanticInput{tokens: toks} = si, opts) do
     min_n = Keyword.get(opts, :min_n, 1)
 
-    {kept, _removed} =
-      Enum.split_with(si.tokens, fn
-        %Core.Token{n: n} when is_integer(n) -> n >= min_n
-        %Core.Token{} -> true
-        _ -> true
+    kept =
+      toks
+      |> Enum.filter(fn
+        %Token{span: {s, k}, n: n} when is_integer(s) and is_integer(k) and n >= min_n ->
+          # Accept either {start, stop} (k > s) or {start, len} (k > 0)
+          (k > s) or (k > 0)
+        _ ->
+          false
       end)
 
-    ev = %{
-      stage: :token_prune,
-      ts_ms: now_ms(),
-      meta: %{min_n: min_n, kept: length(kept), removed: length(si.tokens) - length(kept)}
-    }
+    final = if kept == [], do: toks, else: kept
 
-    %SI{si | tokens: kept, trace: si.trace ++ [ev]}
+    put_trace(%{si | tokens: final}, :token_prune,
+      %{min_n: min_n, kept: length(final), removed: max(length(toks) - length(final), 0)}
+    )
   end
 
-  defp now_ms() do
-    try do
-      System.monotonic_time(:millisecond)
-    rescue
-      _ -> System.system_time(:millisecond)
-    end
+  defp put_trace(%SemanticInput{trace: tr} = si, stage, meta) do
+    ts_ms = System.os_time(:millisecond)
+    trace = [%{stage: stage, meta: meta, ts_ms: ts_ms} | (tr || [])]
+    %{si | trace: trace}
   end
 end
 
