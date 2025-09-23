@@ -3,9 +3,7 @@ defmodule Core.SemanticInput do
   Pipeline state used across Core/Brain stages.
   """
 
-  @enforce_keys [:sentence]
-  defstruct original_sentence: "",
-            sentence: "",
+  defstruct sentence: "",
             source: :user,
             tokens: [],
             pos_list: [],
