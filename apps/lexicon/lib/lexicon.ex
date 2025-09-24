@@ -10,7 +10,7 @@ defmodule Lexicon do
   plug Tesla.Middleware.JSON
   plug Tesla.Middleware.Timeout, timeout: 5_000
 
-@spec start_link(keyword()) :: GenServer.on_start()
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end

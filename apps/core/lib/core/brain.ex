@@ -5,5 +5,9 @@ defmodule Core.Brain do
   def whereis(_id), do: nil
 
   def active_cells(phrase), do: GenServer.call(Brain, :active_cells, phrase)
+
+  def stm(si), do: GenServer.call(Brain, {:stm, si})
+
+  def ltm(si), do: GenServer.call(Db, {:ltm, si})
 end
 
