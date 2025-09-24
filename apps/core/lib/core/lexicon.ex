@@ -23,38 +23,24 @@ defmodule Core.Lexicon do
           {:ok, %Tesla.Env{status: 200, body: body}} when is_list(body) ->
           Enum.at(body, 0)["meanings"]
           |> Enum.reduce([], fn d, acc ->
-            d["definitions"]
+            acc ++ [
+            Enum.with_index(d["definitions"])
             |>Enum.reduce([], fn e, accum ->
-#              e|> IO.inspect
-%BrainCell{
-  id: Enum.join([phrase, d["partOfSpeech"]], "|"),
-  word: phrase,
-  norm: nil,
-  pos: d["partOfSpeech"],
-  definition: e["definition"],
-  example: e["example"],
-  gram_function: nil,
-  synonyms: d["synonyms"],
-  antonyms: d["antonyms"],
-  semantic_atoms: [],
-  type: nil,
-  status: "inactive",
-  activation: 0.0,
-  modulated_activation: 0.0,
-  dopamine: 0.0,
-  serotonin: 0.0,
-  position: nil,
-  connections: [],
-  last_dose_at: nil,
-  last_substance: nil,
-  token_id: nil,
-  inserted_at: nil,
-  updated_at: nil
-}
-|>IO.inspect
-
-            end)
-          end)
+              {map, indx} = e
+              accum ++ [
+              %BrainCell{
+                id: Enum.join([phrase, d["partOfSpeech"], indx], "|"),
+                word: phrase,
+                pos: d["partOfSpeech"],
+                definition: map["definition"],
+                example: map["example"],
+                synonyms: d["synonyms"],
+                antonyms: d["antonyms"],
+                status: "inactive",
+              }]
+            end)]
+          end)|> List.flatten
+          |> IO.inspect
             {:ok, body}
 
           {:ok, %Tesla.Env{status: 404}} ->
