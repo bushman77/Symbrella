@@ -5,7 +5,7 @@ defmodule Core.Lexicon do
 
   def all(si) do
     si.tokens
-    |>Enum.each(fn token ->
+    |>Enum.map(fn token ->
       lookup(token.phrase)
     end)
   end
@@ -18,7 +18,6 @@ defmodule Core.Lexicon do
       true -> {:error, :not_found}
       _ -> 
         if phrase == "", do: {:error, :empty}
-
         case GenServer.call(Lexicon, {:fetch_word, phrase}, 7_000) do
           {:ok, %Tesla.Env{status: 200, body: body}} when is_list(body) ->
           Enum.at(body, 0)["meanings"]
@@ -39,9 +38,8 @@ defmodule Core.Lexicon do
                 status: "inactive",
               }]
             end)]
-          end)|> List.flatten
-          |> IO.inspect
-            {:ok, body}
+          end)
+          |> List.flatten
 
           {:ok, %Tesla.Env{status: 404}} ->
             NegCache.put(phrase)
