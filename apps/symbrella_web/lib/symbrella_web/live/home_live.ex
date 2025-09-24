@@ -63,7 +63,7 @@ defmodule SymbrellaWeb.HomeLive do
 
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          Brain.chat(text)
+          Core.resolve_input(text)
         end)
 
       {:noreply, assign(socket, :pending_task, task)}

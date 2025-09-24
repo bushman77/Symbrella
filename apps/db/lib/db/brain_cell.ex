@@ -2,13 +2,15 @@ defmodule Db.BrainCell do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @primary_key {:id, :string, autogenerate: false}   # you’re using :string PK
-  @derive {Jason.Encoder, only: [:id, :word, :norm, :pos, :type, :gram_function,
-                                 :definition, :example, :synonyms, :antonyms,
-                                 :semantic_atoms, :status, :activation,
-                                 :modulated_activation, :dopamine, :serotonin,
-                                 :position, :connections, :last_dose_at,
-                                 :last_substance, :token_id]}
+  @primary_key {:id, :string, autogenerate: false}
+  @timestamps_opts [type: :naive_datetime]
+  @derive {Jason.Encoder,
+           only: [:id, :word, :norm, :pos, :type, :gram_function,
+                  :definition, :example, :synonyms, :antonyms,
+                  :semantic_atoms, :status, :activation,
+                  :modulated_activation, :dopamine, :serotonin,
+                  :position, :connections, :last_dose_at,
+                  :last_substance, :token_id]}
 
   schema "brain_cells" do
     field :word, :string
@@ -35,8 +37,7 @@ defmodule Db.BrainCell do
     field :last_dose_at, :utc_datetime_usec
     field :last_substance, :string
     field :token_id, :integer
-
-    # field :embedding, Pgvector.Ecto.Vector  # enable later if/when needed
+    # field :embedding, Pgvector.Ecto.Vector
 
     timestamps()
   end
@@ -45,8 +46,7 @@ defmodule Db.BrainCell do
     cell
     |> cast(attrs, __schema__(:fields))
     |> validate_required([:word, :norm])
-    # Attach the unique constraint to :word or :norm (your choice)
-    |> unique_constraint(:word, name: :brain_cells_lexical_key_uniq)
+    # (no unique_constraint here; PK :id handles uniqueness)
   end
 end
 

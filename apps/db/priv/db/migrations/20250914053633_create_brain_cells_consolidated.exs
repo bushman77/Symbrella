@@ -9,8 +9,9 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :id, :string, primary_key: true
 
       add :word, :citext, null: false
-      add :norm, :citext, null: false                            # ← NEW
-      add :pos, :string
+      add :norm, :citext, null: false
+      add :pos,  :string
+
       add :definition, :text
       add :example, :text
       add :gram_function, :string
@@ -18,6 +19,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :synonyms, {:array, :text}, null: false, default: []
       add :antonyms, {:array, :text}, null: false, default: []
       add :semantic_atoms, {:array, :text}, null: false, default: []
+
       add :type, :string
       add :status, :string, null: false, default: "inactive"
 
@@ -32,10 +34,10 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :last_substance, :string
       add :token_id, :bigint
 
-      timestamps()
+      timestamps()  # => :naive_datetime by default
     end
 
-    # Fast lookups by word/norm + trigram & array search
+    # Speed indexes
     create index(:brain_cells, [:word], name: :brain_cells_word_index)
     create index(:brain_cells, [:norm], name: :brain_cells_norm_index)
 
@@ -54,16 +56,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     ON brain_cells USING GIN (antonyms)
     """)
 
-    # Idempotency guard for lexical inserts (treat NULLs as empty)
-    execute("""
-    CREATE UNIQUE INDEX IF NOT EXISTS brain_cells_lexical_key_uniq
-    ON brain_cells (
-      norm,
-      COALESCE(pos, ''),
-      COALESCE(type, ''),
-      COALESCE(gram_function, '')
-    );
-    """)
+    # ❌ Removed: unique “lexical key” index on (norm, pos, type, gram_function)
 
     # Backfill norm for any seeded rows
     execute("""
@@ -73,7 +66,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
        );
     """)
 
-    # Optional vector column + index (kept as-is)
+    # Optional vector column + index (unchanged)
     execute("""
     DO $$
     BEGIN
@@ -105,7 +98,7 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("DROP INDEX IF EXISTS brain_cells_antonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_synonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_word_trgm_idx")
-    execute("DROP INDEX IF EXISTS brain_cells_lexical_key_uniq")
+    execute("DROP INDEX IF EXISTS brain_cells_lexical_key_uniq") # harmless if it never existed
 
     drop_if_exists index(:brain_cells, [:norm], name: :brain_cells_norm_index)
     drop_if_exists index(:brain_cells, [:word], name: :brain_cells_word_index)
