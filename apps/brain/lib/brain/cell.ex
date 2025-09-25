@@ -10,8 +10,7 @@ defmodule Brain.Cell do
   @type state :: Schema.t()
 
   # ---------- Child spec (unique id per cell) ----------
-  # Ensures DynamicSupervisor can start many cells without id collisions.
-  @impl true
+  # Note: No @impl tag here (not a GenServer callback).
   def child_spec(arg) do
     id =
       case arg do
@@ -28,8 +27,7 @@ defmodule Brain.Cell do
   end
 
   # ---------- Public API ----------
-  @spec start_link(Schema.t() | map() | binary()) :: GenServer.on_start()
-
+  @spec start_link(Schema.t() | map()) :: GenServer.on_start()
   def start_link(%Schema{id: id} = cell),
     do: GenServer.start_link(__MODULE__, cell, name: via(id))
 
@@ -37,12 +35,6 @@ defmodule Brain.Cell do
     id = Map.fetch!(attrs, :id)
     schema = cast_map_to_schema(attrs)
     GenServer.start_link(__MODULE__, schema, name: via(id))
-  end
-
-  def start_link(id) when is_binary(id) do
-    # Optional: if you want lazy lookup by id only:
-    # Replace this with a Repo.get/2 if desired.
-    raise ArgumentError, "start_link/1 expects %Db.BrainCell{} or attrs map; got id=#{inspect(id)}"
   end
 
   @doc "Start under Brain.CellSup."
@@ -76,27 +68,25 @@ defmodule Brain.Cell do
   @impl true
   def handle_call(:get_state, _from, %Schema{} = s), do: {:reply, s, s}
 
-  # Optional, handy status that matches your state shape
+  # Handy status for inspection (matches your state shape)
   @impl true
   def handle_call(:status, _from, %Schema{} = s) do
-    reply = %{id: s.id, word: s.word, activation: s.activation}
-    {:reply, reply, s}
+    {:reply, %{id: s.id, word: s.word, activation: s.activation}, s}
   end
 
-  # Stop hook (optional)
   @impl true
   def handle_cast(:stop, s), do: {:stop, :normal, s}
 
-  # ---- ACTIVATE (fixed to your Schema state) ----
+  # ---- ACTIVATE (schema-shaped state + report-back) ----
   @impl true
   def handle_cast({:activate, payload}, %Schema{} = s) do
-    spike = Map.get(payload, :delta, 0.1)     # small default fits your 0..1 clamp
+    spike = Map.get(payload, :delta, 0.1)      # 0..1 scale fits your clamps
     decay = Map.get(payload, :decay, 0.98)
 
     new_act = clamp((s.activation || 0.0) * decay + spike)
     new_mod = modulated_activation(new_act, s.dopamine || 0.0, s.serotonin || 0.0)
 
-    # Report back so Brain.active_cells fills up
+    # Report so Brain.snapshot shows activity
     GenServer.cast(Brain, {:activation_report, s.id, new_act})
 
     {:noreply, %Schema{s | activation: new_act, modulated_activation: new_mod}}

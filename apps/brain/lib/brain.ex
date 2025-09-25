@@ -4,10 +4,9 @@ defmodule Brain do
   alias Db.BrainCell, as: Row
 
   @name __MODULE__
-  @history_max 50
   @cell_timeout 2_000
 
-  # ——— Public API (internal to app) ———
+  # ——— Public API (started by Symbrella.Application) ———
   def start_link(_args), do: GenServer.start_link(__MODULE__, :ok, name: @name)
 
   # ——— GenServer ———
@@ -23,11 +22,7 @@ defmodule Brain do
      }}
   end
 
-  @impl true
-  def handle_cast({:activate_cells, items, payload}, state) do
-    Enum.each(items, &ensure_start_and_cast(&1, payload))
-    {:noreply, state}
-  end
+  # ——— handle_call ———
 
   @impl true
   def handle_call({:stm, si}, _from, state) do
@@ -42,30 +37,31 @@ defmodule Brain do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state) do
-    {:reply, state, state}
-  end
+  def handle_call(:snapshot, _from, state), do: {:reply, state, state}
 
-  # ——— Single-cell router ———
-
+  # Optional: route a call to a single cell
   @impl true
   def handle_call({:cell, id, req}, _from, state) do
     case Registry.lookup(Brain.Registry, id) do
-      [{pid, _}] ->
-        reply = GenServer.call(pid, req, @cell_timeout)
-        {:reply, reply, state}
-
-      [] ->
-        {:reply, {:error, :not_found}, state}
+      [{pid, _}] -> {:reply, GenServer.call(pid, req, @cell_timeout), state}
+      [] -> {:reply, {:error, :not_found}, state}
     end
   end
 
-@impl true
-def handle_cast({:activation_report, id, a}, state) do
-  {:noreply, %{state | active_cells: Map.put(state.active_cells, id, a)}}
-end
+  # ——— handle_cast (grouped to avoid warnings) ———
 
+  @impl true
+  def handle_cast({:activate_cells, items, payload}, state) do
+    Enum.each(items, &ensure_start_and_cast(&1, payload))
+    {:noreply, state}
+  end
 
+  @impl true
+  def handle_cast({:activation_report, id, a}, state) do
+    {:noreply, %{state | active_cells: Map.put(state.active_cells, id, a)}}
+  end
+
+  # Optional: route a cast to a single cell
   @impl true
   def handle_cast({:cell, id, msg}, state) do
     case Registry.lookup(Brain.Registry, id) do
@@ -79,13 +75,13 @@ end
 
   # Accepts a DB row…
   defp ensure_start_and_cast(%Row{id: id} = row, payload) do
-    ensure_started(id, row)                        # start if needed
-    GenServer.cast(via(id), {:activate, payload})  # then cast
+    ensure_started(id, row)
+    GenServer.cast(via(id), {:activate, payload})
   end
 
-  # …or just an id
+  # …or just an id (if your cell supports lazy hydration)
   defp ensure_start_and_cast(id, payload) when is_binary(id) do
-    ensure_started(id, id)                         # Brain.Cell may lazy-load by id
+    ensure_started(id, id)
     GenServer.cast(via(id), {:activate, payload})
   end
 
@@ -95,7 +91,7 @@ end
         case DynamicSupervisor.start_child(Brain.CellSup, {Brain.Cell, arg}) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
-          other -> Logger.warn("Brain: start_child(#{id}) -> #{inspect(other)}")
+          other -> Logger.warning("Brain: start_child(#{id}) -> #{inspect(other)}")
         end
 
       _ ->
