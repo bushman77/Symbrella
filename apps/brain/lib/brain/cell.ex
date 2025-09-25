@@ -9,12 +9,29 @@ defmodule Brain.Cell do
 
   @type state :: Schema.t()
 
-  # Public API ---------------------------------------------------------
+  # ---------- Child spec (unique id per cell) ----------
+  # Ensures DynamicSupervisor can start many cells without id collisions.
+  @impl true
+  def child_spec(arg) do
+    id =
+      case arg do
+        %Schema{id: i} -> i
+        %{} = m -> Map.fetch!(m, :id)
+        i when is_binary(i) -> i
+      end
 
-  @spec start_link(Schema.t() | map()) :: GenServer.on_start()
-  def start_link(%Schema{id: id} = cell) do
-    GenServer.start_link(__MODULE__, cell, name: via(id))
+    %{
+      id: {:cell, id},
+      start: {__MODULE__, :start_link, [arg]},
+      restart: :transient
+    }
   end
+
+  # ---------- Public API ----------
+  @spec start_link(Schema.t() | map() | binary()) :: GenServer.on_start()
+
+  def start_link(%Schema{id: id} = cell),
+    do: GenServer.start_link(__MODULE__, cell, name: via(id))
 
   def start_link(%{} = attrs) do
     id = Map.fetch!(attrs, :id)
@@ -22,10 +39,15 @@ defmodule Brain.Cell do
     GenServer.start_link(__MODULE__, schema, name: via(id))
   end
 
-  @doc "Start under Brain.CellSup."
-  def start(%Schema{} = cell) do
-    DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
+  def start_link(id) when is_binary(id) do
+    # Optional: if you want lazy lookup by id only:
+    # Replace this with a Repo.get/2 if desired.
+    raise ArgumentError, "start_link/1 expects %Db.BrainCell{} or attrs map; got id=#{inspect(id)}"
   end
+
+  @doc "Start under Brain.CellSup."
+  def start(%Schema{} = cell),
+    do: DynamicSupervisor.start_child(Brain.CellSup, {__MODULE__, cell})
 
   @doc "Lookup a running cell and return its state (or nil)."
   def get(id) do
@@ -41,11 +63,9 @@ defmodule Brain.Cell do
   def apply_substance(pid, :dopamine, amt),  do: GenServer.cast(pid, {:apply_nt, :dopamine, amt})
   def apply_substance(pid, :serotonin, amt), do: GenServer.cast(pid, {:apply_nt, :serotonin, amt})
   def attenuate(pid, factor), do: GenServer.cast(pid, {:attenuate, factor})
-
-  @doc "Hydrate lexical fields from a full %Db.BrainCell{} (non-destructive to runtime counters)."
   def hydrate(pid, %Schema{} = schema), do: GenServer.cast(pid, {:hydrate, schema})
 
-  # GenServer ----------------------------------------------------------
+  # ---------- GenServer ----------
 
   @impl true
   def init(%Schema{id: id} = schema) do
@@ -53,38 +73,43 @@ defmodule Brain.Cell do
     {:ok, schema}
   end
 
-# brain/cell.ex (or wherever your neuron is)
-
-@impl true
-def handle_call(:status, _from, %{row: row, activation: a} = s) do
-  {:reply, %{id: row.id, word: row.word, activation: a}, s}
-end
-
-def handle_cast(:stop, s), do: {:stop, :normal, s}
-  
   @impl true
   def handle_call(:get_state, _from, %Schema{} = s), do: {:reply, s, s}
 
-@impl true
-def handle_cast({:activate, payload}, %{activation: a, row: row} = s) do
-  spike = Map.get(payload, :delta, 1.0)
-  decay = 0.98
-  new_a = min(10.0, a * decay + spike)
+  # Optional, handy status that matches your state shape
+  @impl true
+  def handle_call(:status, _from, %Schema{} = s) do
+    reply = %{id: s.id, word: s.word, activation: s.activation}
+    {:reply, reply, s}
+  end
 
-  GenServer.cast(Brain, {:activation_report, row.id, new_a})  # ← report back
+  # Stop hook (optional)
+  @impl true
+  def handle_cast(:stop, s), do: {:stop, :normal, s}
 
-  {:noreply, %{s | activation: new_a}}
-end
+  # ---- ACTIVATE (fixed to your Schema state) ----
+  @impl true
+  def handle_cast({:activate, payload}, %Schema{} = s) do
+    spike = Map.get(payload, :delta, 0.1)     # small default fits your 0..1 clamp
+    decay = Map.get(payload, :decay, 0.98)
 
+    new_act = clamp((s.activation || 0.0) * decay + spike)
+    new_mod = modulated_activation(new_act, s.dopamine || 0.0, s.serotonin || 0.0)
+
+    # Report back so Brain.active_cells fills up
+    GenServer.cast(Brain, {:activation_report, s.id, new_act})
+
+    {:noreply, %Schema{s | activation: new_act, modulated_activation: new_mod}}
+  end
 
   @impl true
   def handle_cast({:fire, amount}, %Schema{} = s) when is_number(amount) do
-    new_act = clamp(s.activation + amount)
+    new_act = clamp((s.activation || 0.0) + amount)
     {:noreply,
      %Schema{
        s
        | activation: new_act,
-         modulated_activation: modulated_activation(new_act, s.dopamine, s.serotonin)
+         modulated_activation: modulated_activation(new_act, s.dopamine || 0.0, s.serotonin || 0.0)
      }}
   end
 
@@ -97,7 +122,7 @@ end
      %Schema{
        s
        | dopamine: nd,
-         modulated_activation: modulated_activation(s.activation, nd, s.serotonin),
+         modulated_activation: modulated_activation(s.activation || 0.0, nd, s.serotonin || 0.0),
          last_dose_at: now,
          last_substance: "dopamine"
      }}
@@ -112,7 +137,7 @@ end
      %Schema{
        s
        | serotonin: ns,
-         modulated_activation: modulated_activation(s.activation, s.dopamine, ns),
+         modulated_activation: modulated_activation(s.activation || 0.0, s.dopamine || 0.0, ns),
          last_dose_at: now,
          last_substance: "serotonin"
      }}
@@ -162,7 +187,7 @@ end
     {:noreply, merged}
   end
 
-  # Helpers ------------------------------------------------------------
+  # ---------- Helpers ----------
 
   defp cast_map_to_schema(attrs) do
     defaults = Map.from_struct(%Schema{})
@@ -170,9 +195,11 @@ end
   end
 
   def modulated_activation(a, d, s), do: Float.round(a + d - s, 4)
+
   defp clamp(v) when v < 0.0, do: 0.0
   defp clamp(v) when v > 1.0, do: 1.0
   defp clamp(v), do: v
+
   defp clamp01(x) when x < 0.0, do: 0.0
   defp clamp01(x) when x > 1.0, do: 1.0
   defp clamp01(x), do: x
