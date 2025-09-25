@@ -5,22 +5,43 @@ defmodule SymbrellaWeb.HomeLive do
   defp sanitize_user_text(text) do
     text
     |> to_string()
-    |> String.replace(~r/\r\n?/, "\n")     # CRLF -> LF
-    |> String.replace(~r/[ \t]+(\n)/, "\\1") # strip trailing spaces on lines
-    |> String.replace(~r/\n{3,}/, "\n\n")  # collapse 3+ newlines
-    |> String.trim()                       # trim both ends
+    |> String.replace(~r/\r\n?/, "\n")       # CRLF -> LF
+    |> String.replace(~r/[ \t]+(\n)/, "\\1") # strip trailing spaces
+    |> String.replace(~r/\n{3,}/, "\n\n")    # collapse 3+ newlines
+    |> String.trim()
   end
 
   defp to_bot_reply({_, %{text: _} = reply}), do: reply
-  defp to_bot_reply(%{text: _} = reply),     do: reply
+  defp to_bot_reply(%{text: _} = reply), do: reply
   defp to_bot_reply(text) when is_binary(text), do: %{text: text}
   defp to_bot_reply(other), do: %{text: inspect(other)}
+
+  # A tiny formatter so the UI shows something friendly when SI comes back.
+  defp format_si_reply(si) do
+    cells = Map.get(si, :cells) || []
+    tokens = Map.get(si, :tokens) || []
+    cell_count = length(cells)
+    token_count = length(tokens)
+
+    token_preview =
+      tokens
+      |> Enum.take(6)
+      |> Enum.map(fn
+        %{phrase: p} -> p
+        p when is_binary(p) -> p
+        _ -> "<?>"
+      end)
+      |> Enum.join(", ")
+
+    "Got it. tokens=#{token_count}, cells=#{cell_count}" <>
+      if token_preview != "", do: " · [#{token_preview}]", else: ""
+  end
 
   # ---------- liveview ----------
   @impl true
   def mount(_params, _session, socket) do
     initial = [
-      %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat 👋"}
+      %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}
     ]
 
     {:ok,
@@ -61,9 +82,17 @@ defmodule SymbrellaWeb.HomeLive do
         |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
         |> push_event("chat:scroll", %{to: "composer"})
 
+      # Run the pure resolve + then dispatch activation to Brain via Core.BrainAdapter.
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          Core.resolve_input(text)
+          # 1) Build SI (pure)
+          si = Core.resolve_input(text)
+
+          # 2) Dispatch activation (side-effect) WITHOUT compile-time deps on brain app
+          _ = Core.BrainAdapter.activate_cells(Map.get(si, :cells, []), %{})
+
+          # 3) Return a small, friendly UI summary (keeps LV decoupled from SI internals)
+          %{text: format_si_reply(si)}
         end)
 
       {:noreply, assign(socket, :pending_task, task)}
@@ -76,6 +105,7 @@ defmodule SymbrellaWeb.HomeLive do
     case socket.assigns.pending_task do
       %Task{ref: ref} = task ->
         _ = Task.shutdown(task, :brutal_kill)
+
         {:noreply,
          socket
          |> assign(bot_typing: false, cancelled_ref: ref, pending_task: nil)

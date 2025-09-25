@@ -1,34 +1,36 @@
 defmodule Core.BrainAdapter do
   @moduledoc """
-  Thin boundary so Core can start/fire cells and read Brain state
-  without sprinkling Brain.* calls everywhere.
+  Runtime-only bridge to the Brain process (no compile-time deps).
+  Talks to the registered process name (Elixir.Brain) via GenServer messages.
   """
 
-  alias Brain.Cell
+  @brain :"Elixir.Brain"
+  @timeout 2_000
 
-  # Snapshot passthrough (already used by you)
-  def snapshot(), do: GenServer.call(Brain, :snapshot)
+  @type cell_id :: binary()
+  @type cell_item :: cell_id | map() | struct()
 
-  # Start or return the running cell for a given id/attrs.
-  # Accepts a map so we can start cells without a preloaded DB schema.
-  @spec start_or_lookup_cell(map()) :: {:ok, pid()} | {:error, term()}
-  def start_or_lookup_cell(%{id: id} = attrs) when is_binary(id) do
-    case Registry.lookup(Brain.Registry, id) do
-      [{pid, _}] ->
-        {:ok, pid}
-
-      [] ->
-        # Start under Brain.CellSup; Brain.Cell.start_link/1 accepts a map
-        # and casts it into %Db.BrainCell{} internally.
-        case DynamicSupervisor.start_child(Brain.CellSup, {Cell, attrs}) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          other -> other
-        end
-    end
+  @doc """
+  Activate a list of cells (rows, maps with :id, or ids). Payload is optional.
+  Fire-and-forget cast; returns :ok.
+  """
+  @spec activate_cells([cell_item()], map()) :: :ok
+  def activate_cells(items, payload \\ %{})
+  def activate_cells([], _payload), do: :ok
+  def activate_cells(items, payload) when is_list(items) and is_map(payload) do
+    GenServer.cast(@brain, {:activate_cells, items, payload})
   end
 
-  # Fire by pid (Brain.Cell.fire/2 expects pid)
-  def fire(pid, amount \\ 0.1) when is_pid(pid), do: Cell.fire(pid, amount)
+  @doc "Fetch a full snapshot of Brain state."
+  @spec snapshot() :: map()
+  def snapshot, do: GenServer.call(@brain, :snapshot, @timeout)
+
+  @doc "Call a specific neuron by id with a request (routed by Brain)."
+  @spec cell_call(cell_id(), term()) :: term()
+  def cell_call(id, req), do: GenServer.call(@brain, {:cell, id, req}, @timeout)
+
+  @doc "Cast a message to a specific neuron by id."
+  @spec cell_cast(cell_id(), term()) :: :ok
+  def cell_cast(id, msg), do: GenServer.cast(@brain, {:cell, id, msg})
 end
 

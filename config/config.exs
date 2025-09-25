@@ -42,6 +42,8 @@ config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity
 
+config :tesla, disable_deprecated_builder_warning: true
+
 # Import env-specific at the end (OK to keep empty)
 import_config "#{config_env()}.exs"
 

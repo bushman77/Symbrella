@@ -6,11 +6,9 @@ defmodule Brain.Cell do
   alias Db.BrainCell, as: Schema
 
   @registry Brain.Registry
-
   @type state :: Schema.t()
 
   # ---------- Child spec (unique id per cell) ----------
-  # Note: No @impl tag here (not a GenServer callback).
   def child_spec(arg) do
     id =
       case arg do
@@ -61,14 +59,21 @@ defmodule Brain.Cell do
 
   @impl true
   def init(%Schema{id: id} = schema) do
-    send(Brain, {:cell_started, {id, self()}})
+    # Robust registration: async + tolerate duplicates
+    Process.flag(:trap_exit, true)
+    GenServer.cast(Brain, {:register_active, id, self()})
     {:ok, schema}
+  end
+
+  @impl true
+  def terminate(_reason, %Schema{id: id}) do
+    GenServer.cast(Brain, {:deregister_active, id, self()})
+    :ok
   end
 
   @impl true
   def handle_call(:get_state, _from, %Schema{} = s), do: {:reply, s, s}
 
-  # Handy status for inspection (matches your state shape)
   @impl true
   def handle_call(:status, _from, %Schema{} = s) do
     {:reply, %{id: s.id, word: s.word, activation: s.activation}, s}
@@ -77,18 +82,15 @@ defmodule Brain.Cell do
   @impl true
   def handle_cast(:stop, s), do: {:stop, :normal, s}
 
-  # ---- ACTIVATE (schema-shaped state + report-back) ----
   @impl true
   def handle_cast({:activate, payload}, %Schema{} = s) do
-    spike = Map.get(payload, :delta, 0.1)      # 0..1 scale fits your clamps
+    spike = Map.get(payload, :delta, 0.1)
     decay = Map.get(payload, :decay, 0.98)
 
     new_act = clamp((s.activation || 0.0) * decay + spike)
     new_mod = modulated_activation(new_act, s.dopamine || 0.0, s.serotonin || 0.0)
 
-    # Report so Brain.snapshot shows activity
     GenServer.cast(Brain, {:activation_report, s.id, new_act})
-
     {:noreply, %Schema{s | activation: new_act, modulated_activation: new_mod}}
   end
 
@@ -106,7 +108,7 @@ defmodule Brain.Cell do
   @impl true
   def handle_cast({:apply_nt, :dopamine, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
-    nd = clamp(s.dopamine + amt)
+    nd = clamp((s.dopamine || 0.0) + amt)
 
     {:noreply,
      %Schema{
@@ -121,7 +123,7 @@ defmodule Brain.Cell do
   @impl true
   def handle_cast({:apply_nt, :serotonin, amt}, %Schema{} = s) when is_number(amt) do
     now = DateTime.utc_now()
-    ns = clamp(s.serotonin + amt)
+    ns = clamp((s.serotonin || 0.0) + amt)
 
     {:noreply,
      %Schema{
@@ -148,18 +150,9 @@ defmodule Brain.Cell do
 
   @impl true
   def handle_cast({:hydrate, %Schema{} = lex}, %Schema{} = s) do
-    # overlay lexical/content fields; preserve runtime counters
     fields = [
-      :definition,
-      :example,
-      :gram_function,
-      :synonyms,
-      :antonyms,
-      :semantic_atoms,
-      :embedding,
-      :token_id,
-      :position,
-      :connections
+      :definition, :example, :gram_function, :synonyms, :antonyms, :semantic_atoms,
+      :embedding, :token_id, :position, :connections
     ]
 
     merged =
@@ -178,7 +171,6 @@ defmodule Brain.Cell do
   end
 
   # ---------- Helpers ----------
-
   defp cast_map_to_schema(attrs) do
     defaults = Map.from_struct(%Schema{})
     struct!(Schema, Map.merge(defaults, attrs))
