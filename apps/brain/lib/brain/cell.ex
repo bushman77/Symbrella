@@ -53,8 +53,29 @@ defmodule Brain.Cell do
     {:ok, schema}
   end
 
+# brain/cell.ex (or wherever your neuron is)
+
+@impl true
+def handle_call(:status, _from, %{row: row, activation: a} = s) do
+  {:reply, %{id: row.id, word: row.word, activation: a}, s}
+end
+
+def handle_cast(:stop, s), do: {:stop, :normal, s}
+  
   @impl true
   def handle_call(:get_state, _from, %Schema{} = s), do: {:reply, s, s}
+
+@impl true
+def handle_cast({:activate, payload}, %{activation: a, row: row} = s) do
+  spike = Map.get(payload, :delta, 1.0)
+  decay = 0.98
+  new_a = min(10.0, a * decay + spike)
+
+  GenServer.cast(Brain, {:activation_report, row.id, new_a})  # ← report back
+
+  {:noreply, %{s | activation: new_a}}
+end
+
 
   @impl true
   def handle_cast({:fire, amount}, %Schema{} = s) when is_number(amount) do

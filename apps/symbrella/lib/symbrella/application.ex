@@ -14,7 +14,6 @@ defmodule Symbrella.Application do
       # Shared infra
       {Registry, keys: :unique, name: Brain.Registry},
       {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
-
       # Caches / services
       {Phoenix.PubSub, name: Symbrella.PubSub},
       {Task.Supervisor, name: Symbrella.TaskSup},
