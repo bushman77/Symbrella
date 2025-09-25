@@ -22,6 +22,11 @@ defmodule Brain do
      }}
   end
 
+  def handle_cast({:activate_cells, cells}, state) do
+   
+    {:noreply, state}
+  end
+
   def handle_call({:stm, si}, _from, state) do
     Map.keys(state.active_cells)
     |> case do
@@ -32,6 +37,10 @@ defmodule Brain do
         }, 
         state}
     end
+  end
+
+  def handle_call(:snapahot, _from, state) do
+    {:reply, state, state}
   end
 
 end
