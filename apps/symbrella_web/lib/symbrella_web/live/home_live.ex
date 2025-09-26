@@ -127,7 +127,7 @@ defmodule SymbrellaWeb.HomeLive do
     Process.demonitor(ref, [:flush])
 
     %{text: reply_text} = to_bot_reply(payload)
-
+IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)
     bot = %{
       id: "b-" <> Integer.to_string(System.unique_integer([:positive])),
       role: :assistant,

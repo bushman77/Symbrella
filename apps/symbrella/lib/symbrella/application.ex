@@ -2,21 +2,31 @@ defmodule Symbrella.Application do
   @moduledoc false
   use Application
 
+  @impl true
   def start(_type, _args) do
+    # Ensure DETS dir exists for NegCache
+    neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
+    File.mkdir_p!(Path.dirname(neg_path))
+
     children = [
-      # DB
+      # DB first
       Db,
 
-      # Registry for cells (must start before Brain/Cell)
+      # Brain infra (order matters)
       {Registry, keys: :unique, name: Brain.Registry},
+      {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
 
-      # Dynamic supervisor for cells
-      {DynamicSupervisor, strategy: :one_for_one, name: Brain.CellSup},
+      # Caches / services
+      {Task.Supervisor, name: Symbrella.TaskSup},
+      {Finch, name: Lexicon.Finch},
+      {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # Your Brain process
+      # Servers
+      Lexicon,
       Brain
 
-      # Add/keep any other children you already run (Lexicon, etc.)
+      # NOTE: PubSub is started in SymbrellaWeb.Application
+      # If you later want the Endpoint here, add it here and remove from web.
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
