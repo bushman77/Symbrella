@@ -1,4 +1,9 @@
 defmodule Brain do
+  @moduledoc """
+  Central coordinator for cells. Keeps a lightweight STM view (active cells, attention, history).
+  Started by your application supervisor.
+  """
+
   use GenServer
   require Logger
   alias Db.BrainCell, as: Row
@@ -6,10 +11,30 @@ defmodule Brain do
   @name __MODULE__
   @cell_timeout 2_000
 
-  # ——— Public API (started by Symbrella.Application) ———
+  # ─────────────────────────── Public API ───────────────────────────
+
   def start_link(_args), do: GenServer.start_link(__MODULE__, :ok, name: @name)
 
-  # ——— GenServer ———
+  @doc "Blocking: short-term memory snapshot merge."
+  def stm(si) when is_map(si), do: GenServer.call(@name, {:stm, si})
+
+  @doc "Non-blocking: activate a batch of rows or ids (payload e.g., %{delta: 1})."
+  def activate_cells(rows_or_ids, payload \\ %{delta: 1}),
+    do: GenServer.cast(@name, {:activate_cells, rows_or_ids, payload})
+
+  @doc "Optional: route a call to a single cell (e.g., {:status})."
+  def cell_status(id), do: GenServer.call(@name, {:cell, id, :status})
+
+  @doc "Optional: route a cast to a single cell (e.g., :activate, :stop)."
+  def cell_cast(id, msg), do: GenServer.cast(@name, {:cell, id, msg})
+
+  @doc "State snapshot (debug/testing)."
+  def snapshot, do: GenServer.call(@name, :snapshot)
+
+  @doc "Registry via tuple for a cell id."
+  def via(id), do: {:via, Registry, {Brain.Registry, id}}
+
+  # ─────────────────────────── GenServer ────────────────────────────
 
   @impl true
   def init(:ok) do
@@ -26,20 +51,13 @@ defmodule Brain do
 
   @impl true
   def handle_call({:stm, si}, _from, state) do
-    reply_si =
-      if map_size(state.active_cells) == 0 do
-        si
-      else
-        %{si | active_cells: state.active_cells}
-      end
-
-    {:reply, reply_si, state}
+    # Always surface current active_cells into the SI
+    {:reply, Map.put(si, :active_cells, state.active_cells), state}
   end
 
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, state, state}
 
-  # Optional: route a call to a single cell
   @impl true
   def handle_call({:cell, id, req}, _from, state) do
     case Registry.lookup(Brain.Registry, id) do
@@ -48,30 +66,49 @@ defmodule Brain do
     end
   end
 
-  # ——— handle_cast (grouped to avoid warnings) ———
+  # ——— handle_cast ———
 
+  # Accept a list of DB rows or ids
   @impl true
-  def handle_cast({:activate_cells, si, payload}, state) do
-    IO.inspect si.active_cells
+  def handle_cast({:activate_cells, rows_or_ids, payload}, state) when is_list(rows_or_ids) do
+    Enum.each(rows_or_ids, fn
+      %Row{} = row -> ensure_start_and_cast(row, payload)
+      id when is_binary(id) -> ensure_start_and_cast(id, payload)
+      other -> Logger.warning("Brain.activate_cells: unknown item #{inspect(other)}")
+    end)
+
+    {:noreply, state}
+  end
+
+  # Accept a SemanticInput with :db_cells list
+  @impl true
+  def handle_cast({:activate_cells, %{} = si, payload}, state) do
+    rows = Map.get(si, :db_cells, [])
+    Enum.each(rows, fn
+      %Row{} = row -> ensure_start_and_cast(row, payload)
+      id when is_binary(id) -> ensure_start_and_cast(id, payload)
+      other -> Logger.warning("Brain.activate_cells(si): unknown item #{inspect(other)}")
+    end)
+
     {:noreply, state}
   end
 
   @impl true
-  def handle_cast({:activation_report, id, a}, state) do
+  def handle_cast({:activation_report, id, a}, state) when is_binary(id) and is_number(a) do
     {:noreply, %{state | active_cells: Map.put(state.active_cells, id, a)}}
   end
 
-  # Optional: route a cast to a single cell
   @impl true
   def handle_cast({:cell, id, msg}, state) do
     case Registry.lookup(Brain.Registry, id) do
       [{pid, _}] -> GenServer.cast(pid, msg)
       [] -> :ok
     end
+
     {:noreply, state}
   end
 
-  # ——— Helpers ———
+  # ─────────────────────────── Helpers ──────────────────────────────
 
   # Accepts a DB row…
   defp ensure_start_and_cast(%Row{id: id} = row, payload) do
@@ -98,7 +135,5 @@ defmodule Brain do
         :ok
     end
   end
-
-  defp via(id), do: {:via, Registry, {Brain.Registry, id}}
 end
 
