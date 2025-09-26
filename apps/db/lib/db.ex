@@ -4,10 +4,8 @@ defmodule Db do
   import Ecto.Query, only: [from: 2]
   alias Db.BrainCell
 
-  @doc """
-  Long-term memory lookup: batch by normalized phrases, return rows as `si.cells`,
-  and mark `si.debug.db_hits`. No Brain messaging here.
-  """
+  @payload %{delta: 1.0, decay: 0.98}
+
   def ltm(%{tokens: toks} = si) do
     norms =
       toks
@@ -20,22 +18,31 @@ defmodule Db do
         [] -> []
         _  -> from(b in BrainCell, where: b.norm in ^norms) |> Db.all()
       end
-rows
-|> Enum.reduce([], fn cell, acc -> [cell.id] ++acc end)
-|> IO.inspect
-    
 
-    %{si | active_cells:
-      rows
-      |> Enum.reduce([], fn cell, acc ->
-        acc ++ [cell.id]
+    # 🔥 Activate with full rows (Brain already handles rows or ids)
+    if rows != [] do
+      GenServer.cast(Brain, {:activate_cells, rows, @payload})
+    end
+
+    # Update SI fields WITHOUT struct expansion
+    db_cells =
+      (si.db_cells || [])
+      |> Kernel.++(rows)
+      |> Enum.uniq_by(& &1.id)
+
+    db_hits = MapSet.new(for r <- rows, do: r.norm)
+
+    activation_summary =
+      Map.update(si.activation_summary || %{}, :db_hits, db_hits, fn existing ->
+        MapSet.union(existing, db_hits)
       end)
-    }
+
+    si
+    |> Map.put(:db_cells, db_cells)
+    |> Map.put(:activation_summary, activation_summary)
   end
 
   defp norm(nil), do: ""
-  defp norm(s) when is_binary(s) do
-    s |> String.trim() |> String.downcase(:default)
-  end
+  defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
 end
 
