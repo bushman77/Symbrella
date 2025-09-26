@@ -1,13 +1,31 @@
 defmodule Core.Brain do
-  @moduledoc "Core-side facade to avoid depending on the :brain app."
+  @moduledoc """
+  Adapter/wrapper for the Brain OTP app. Keep Core in charge of orchestration.
+  """
+  alias Db.BrainCell, as: Row
 
-  @spec whereis(String.t()) :: pid() | nil
-  def whereis(_id), do: nil
+  @default_payload %{delta: 0.12, decay: 0.98}
 
-  def active_cells(phrase), do: GenServer.call(Brain, :active_cells, phrase)
+  @doc "Inject Brain’s active_cells map into the SI (calls Brain GenServer)."
+  def stm(si) do
+    GenServer.call(Brain, {:stm, si})
+  end
 
-  def stm(si), do: GenServer.call(Brain, {:stm, si})
+  @doc """
+  Activate a list of rows or ids.
+  Accepts [%Db.BrainCell{} | id] and forwards to Brain.
+  """
+  def activate_cells(rows_or_ids, opts \\ []) do
+    payload = Map.merge(@default_payload, Map.new(opts))
+    GenServer.cast(Brain, {:activate_cells, rows_or_ids, payload})
+    :ok
+  end
 
-  def ltm(si), do: GenServer.call(Db, {:ltm, si})
+  @doc "Convenience: activate whatever Db.ltm put into si.cells."
+  def activate_from_si(%{cells: cells}) when is_list(cells) do
+    activate_cells(cells)
+  end
+
+  def activate_from_si(_), do: :ok
 end
 

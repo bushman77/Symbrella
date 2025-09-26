@@ -51,8 +51,8 @@ defmodule Brain do
   # ——— handle_cast (grouped to avoid warnings) ———
 
   @impl true
-  def handle_cast({:activate_cells, items, payload}, state) do
-    Enum.each(items, &ensure_start_and_cast(&1, payload))
+  def handle_cast({:activate_cells, si, payload}, state) do
+    IO.inspect si.active_cells
     {:noreply, state}
   end
 
