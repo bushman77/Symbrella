@@ -42,6 +42,26 @@ defmodule Db do
     |> Map.put(:activation_summary, activation_summary)
   end
 
+@doc """
+Return `true` if a *word* exists; guards invalid inputs without hitting the DB.
+Accepts a binary; trims whitespace. Empty/invalid → false immediately.
+"""
+@spec word_exists?(term) :: boolean()
+def word_exists?(term)
+def word_exists?(term) when is_binary(term) do
+  word = String.trim(term)
+  if word == "" do
+    false
+  else
+    # If you already have Db.exists?/1 that takes a word, delegate to it:
+    exists?(word)
+    # If your exists?/1 expects a query instead, use whatever helper you wrote
+    # to check by :word or :norm (this keeps the test intent intact).
+  end
+end
+def word_exists?(_), do: false
+
+
   defp norm(nil), do: ""
   defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
 end

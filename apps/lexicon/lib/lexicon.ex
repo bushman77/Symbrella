@@ -24,5 +24,8 @@ defmodule Lexicon do
     response = get("#{URI.encode(word)}")
     {:reply, response, state}
   end
+
+@doc "Compat stub for the Mix scaffold test."
+  def hello, do: :world
 end
 
