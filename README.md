@@ -1,59 +1,7 @@
-# Symbrella Phoenix **umbrella** app
+# Symbrella Phoenix **umbrella** app.
 
-## Repository Map (summary)
-
-```
-.
-├─ apps/                                     # umbrella apps
-│  ├─ brain/                                 # LIFG + Cell orchestration
-│  │  ├─ lib/brain/
-│  │  │  ├─ cell.ex                          # per-cell GenServer
-│  │  │  ├─ lifg.ex                          # LIFG API + scoring mix
-│  │  │  ├─ lifg_stage1.ex                   # Stage‑1 engine (selection/signals)
-│  │  │  └─ telemetry.ex                     # metrics hooks
-│  │  ├─ test/brain/                         # property, integration, benches
-│  │  │  ├─ brain_lifg_test.exs
-│  │  │  ├─ brain_lifg_property_test.exs
-│  │  │  ├─ brain_lifg_integration_test.exs
-│  │  │  └─ bench/bench_brain_lifg_bench.exs
-│  │  └─ bench/                              # standalone run benches
-│  ├─ core/                                  # pipeline & domain (SI, tokens, recall)
-│  │  ├─ lib/core/
-│  │  │  ├─ brain/                           # adapter entry points
-│  │  │  │  └─ index.ex
-│  │  │  ├─ recall/{plan,gate,execute}.ex    # recall planner + gate + executor
-│  │  │  ├─ semantic_input.ex                # SI struct & helpers
-│  │  │  ├─ token.ex                         # tokenizer
-│  │  │  ├─ lexicon/*.ex                     # normalization/senses/stage
-│  │  │  ├─ vectors.ex                       # vector helpers
-│  │  │  └─ brain_adapter.ex                 # Core ↔ Brain adapter
-│  │  └─ test/core/                          # unit tests
-│  ├─ db/                                    # Ecto schema + repo + migrations
-│  │  ├─ lib/db/brain_cell.ex                # Db.BrainCell schema
-│  │  └─ priv/{db,repo}/migrations/          # consolidated + legacy migrations
-│  ├─ lexicon/                               # Lexicon behaviour + facade
-│  ├─ symbrella/                             # OTP app skeleton (mailer, app)
-│  └─ symbrella_web/                         # Phoenix app (Bandit)
-│     ├─ lib/symbrella_web/                  # router, endpoint, live, components
-│     └─ assets/                             # Tailwind + esbuild sources
-├─ config/                                   # umbrella-wide config
-├─ assets/                                   # optional shared assets
-├─ benchmark_result.txt                      # recent LIFG benchmarks
-├─ README.md                                 # top-level guide
-├─ AGENTS.md, PROJECT-RESUME-PLAYBOOK.md     # docs/playbooks
-└─ mix.exs / mix.lock                        # umbrella definition
-```
-
-> **Note (cleanup):** I spotted likely stray files in the root:
-> - `e --abbrev-ref --symbolic-full-name @{u}`
-> - `how origin`  
-> These look like accidental outputs from shell commands. Safe to remove via `git rm` if committed (or delete locally if untracked).
-
-
-- **Erlang/OTP:** 28
-- **Elixir:** 1.18.x
-- **Phoenix:** 1.8.x (Bandit)
-- Watchers are **disabled by design** — rebuild assets manually when you want.
+**Erlang/OTP:** 28 • **Elixir:** 1.18.x • **Phoenix:** 1.8.x (Bandit)  
+Watchers are **disabled by design** — rebuild assets manually when you want.
 
 ---
 
@@ -75,23 +23,54 @@ mix esbuild default
 
 # run the server
 mix phx.server
-```
 
-- App: http://localhost:4000
-- Re-run the two `mix tailwind default` / `mix esbuild default` commands whenever you change CSS/JS.
+# App: http://localhost:4000
+# Re-run the two commands whenever you change CSS/JS:
+#   mix tailwind default
+#   mix esbuild default
+```
 
 ---
 
-## Project Layout
+## Project Layout (summary)
 
 ```
 symbrella_umbrella/
 ├─ apps/
-│  ├─ symbrella/      # core/domain
-│  └─ symbrella_web/  # Phoenix web UI (Bandit)
-├─ config/            # umbrella-wide config
-└─ mix.exs            # umbrella root
+│  ├─ brain/                 # Brain runtime + LIFG (disambiguation)
+│  │  ├─ lib/brain/
+│  │  │  ├─ cell.ex
+│  │  │  ├─ lifg.ex
+│  │  │  ├─ lifg_stage1.ex
+│  │  │  └─ telemetry.ex
+│  │  ├─ bench/              # microbenchmarks
+│  │  └─ test/brain/         # unit, property, integration & benches
+│  ├─ core/                  # SI pipeline, recall, lexicon glue
+│  │  ├─ lib/core/
+│  │  │  ├─ brain/           # adapter & index
+│  │  │  ├─ lexicon/         # normalize/senses/stage
+│  │  │  ├─ recall/          # plan/gate/execute
+│  │  │  ├─ semantic_input.ex
+│  │  │  └─ …
+│  ├─ db/                    # Ecto schemas & repo types
+│  │  └─ lib/db/
+│  │     ├─ brain_cell.ex
+│  │     ├─ lexicon.ex
+│  │     └─ postgrex_types.ex
+│  ├─ lexicon/               # pluggable lexicon behaviour
+│  ├─ symbrella/             # OTP app shell
+│  └─ symbrella_web/         # Phoenix + Tailwind/Esbuild
+│     ├─ assets/             # css/js; watchers are manual by design
+│     └─ lib/symbrella_web/  # controllers, live, components, etc.
+├─ config/                   # umbrella-wide config
+├─ assets/                   # shared styling
+├─ mix.exs
+└─ mix.lock
 ```
+
+> ℹ️ If you see stray files at the repo root like `how origin` or
+> `e --abbrev-ref --symbolic-full-name @{u}`, they likely came from an
+> accidental shell redirection. Safe to delete.
 
 ---
 
@@ -122,10 +101,14 @@ import "phoenix_html"
   `mix tailwind.install --if-missing && mix esbuild.install --if-missing`
 
 - **Version warnings**  
-  Align versions in `config/config.exs` (`:tailwind`, `:esbuild`) *or* reinstall with the version you prefer using the commands above.
+  Align versions in `config/config.exs` (`:tailwind`, `:esbuild`) *or*
+  reinstall with the version you prefer using the commands above.
 
 - **No output files**  
-  Rebuild: `mix tailwind default && mix esbuild default`  
+  Rebuild:
+  ```bash
+  mix tailwind default && mix esbuild default
+  ```
   Expected outputs:
   ```
   apps/symbrella_web/priv/static/assets/app.css
@@ -144,9 +127,7 @@ set -euo pipefail
 
 mix deps.get
 (
-  cd apps/symbrella_web &&
-  mix tailwind.install --if-missing &&
-  mix esbuild.install --if-missing
+  cd apps/symbrella_web &&   mix tailwind.install --if-missing &&   mix esbuild.install --if-missing
 )
 mix tailwind default
 mix esbuild default
@@ -154,7 +135,6 @@ mix phx.server
 ```
 
 Then:
-
 ```bash
 chmod +x dev.sh
 ./dev.sh
