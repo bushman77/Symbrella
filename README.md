@@ -1,5 +1,55 @@
 # Symbrella Phoenix **umbrella** app
 
+## Repository Map (summary)
+
+```
+.
+├─ apps/                                     # umbrella apps
+│  ├─ brain/                                 # LIFG + Cell orchestration
+│  │  ├─ lib/brain/
+│  │  │  ├─ cell.ex                          # per-cell GenServer
+│  │  │  ├─ lifg.ex                          # LIFG API + scoring mix
+│  │  │  ├─ lifg_stage1.ex                   # Stage‑1 engine (selection/signals)
+│  │  │  └─ telemetry.ex                     # metrics hooks
+│  │  ├─ test/brain/                         # property, integration, benches
+│  │  │  ├─ brain_lifg_test.exs
+│  │  │  ├─ brain_lifg_property_test.exs
+│  │  │  ├─ brain_lifg_integration_test.exs
+│  │  │  └─ bench/bench_brain_lifg_bench.exs
+│  │  └─ bench/                              # standalone run benches
+│  ├─ core/                                  # pipeline & domain (SI, tokens, recall)
+│  │  ├─ lib/core/
+│  │  │  ├─ brain/                           # adapter entry points
+│  │  │  │  └─ index.ex
+│  │  │  ├─ recall/{plan,gate,execute}.ex    # recall planner + gate + executor
+│  │  │  ├─ semantic_input.ex                # SI struct & helpers
+│  │  │  ├─ token.ex                         # tokenizer
+│  │  │  ├─ lexicon/*.ex                     # normalization/senses/stage
+│  │  │  ├─ vectors.ex                       # vector helpers
+│  │  │  └─ brain_adapter.ex                 # Core ↔ Brain adapter
+│  │  └─ test/core/                          # unit tests
+│  ├─ db/                                    # Ecto schema + repo + migrations
+│  │  ├─ lib/db/brain_cell.ex                # Db.BrainCell schema
+│  │  └─ priv/{db,repo}/migrations/          # consolidated + legacy migrations
+│  ├─ lexicon/                               # Lexicon behaviour + facade
+│  ├─ symbrella/                             # OTP app skeleton (mailer, app)
+│  └─ symbrella_web/                         # Phoenix app (Bandit)
+│     ├─ lib/symbrella_web/                  # router, endpoint, live, components
+│     └─ assets/                             # Tailwind + esbuild sources
+├─ config/                                   # umbrella-wide config
+├─ assets/                                   # optional shared assets
+├─ benchmark_result.txt                      # recent LIFG benchmarks
+├─ README.md                                 # top-level guide
+├─ AGENTS.md, PROJECT-RESUME-PLAYBOOK.md     # docs/playbooks
+└─ mix.exs / mix.lock                        # umbrella definition
+```
+
+> **Note (cleanup):** I spotted likely stray files in the root:
+> - `e --abbrev-ref --symbolic-full-name @{u}`
+> - `how origin`  
+> These look like accidental outputs from shell commands. Safe to remove via `git rm` if committed (or delete locally if untracked).
+
+
 - **Erlang/OTP:** 28
 - **Elixir:** 1.18.x
 - **Phoenix:** 1.8.x (Bandit)
