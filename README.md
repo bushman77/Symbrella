@@ -37,7 +37,7 @@ mix phx.server
 ```
 symbrella_umbrella/
 ├─ apps/
-│  ├─ brain/                 # Brain runtime + LIFG (disambiguation)
+│  ├─ brain/                 # Brain runtime + LIFG (disambiguation) decouoled moduke for core to access
 │  │  ├─ lib/brain/
 │  │  │  ├─ cell.ex
 │  │  │  ├─ lifg.ex
@@ -45,20 +45,20 @@ symbrella_umbrella/
 │  │  │  └─ telemetry.ex
 │  │  ├─ bench/              # microbenchmarks
 │  │  └─ test/brain/         # unit, property, integration & benches
-│  ├─ core/                  # SI pipeline, recall, lexicon glue
+│  ├─ core/                  # SI pipeline, recall, lexicon glue decoupled modules for Brain and Db modules
 │  │  ├─ lib/core/
 │  │  │  ├─ brain/           # adapter & index
 │  │  │  ├─ lexicon/         # normalize/senses/stage
 │  │  │  ├─ recall/          # plan/gate/execute
 │  │  │  ├─ semantic_input.ex
 │  │  │  └─ …
-│  ├─ db/                    # Ecto schemas & repo types
+│  ├─ db/                    # Ecto schemas & repo types db.ex is our repo Db
 │  │  └─ lib/db/
 │  │     ├─ brain_cell.ex
 │  │     ├─ lexicon.ex
 │  │     └─ postgrex_types.ex
-│  ├─ lexicon/               # pluggable lexicon behaviour
-│  ├─ symbrella/             # OTP app shell
+│  ├─ lexicon/               # pluggable lexicon behaviour decouoled for only core module access
+│  ├─ symbrella/             # OTP app shell sole applicatiin supervisor for all umbrella apps
 │  └─ symbrella_web/         # Phoenix + Tailwind/Esbuild
 │     ├─ assets/             # css/js; watchers are manual by design
 │     └─ lib/symbrella_web/  # controllers, live, components, etc.
