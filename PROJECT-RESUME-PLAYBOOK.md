@@ -14,6 +14,7 @@
 - Benchmarked both **softmax** and **max‑norm** normalizations; documented trade‑offs and memory profiles.
 - Introduced **telemetry hooks** (`[:brain, :pipeline, :lifg_stage1, :stop]`) for visibility and tuning.
 
+---
 
 ## Architecture
 
@@ -37,7 +38,6 @@ flowchart TD
     Core --> Lex["Lexicon/Senses"]
     Core --> Recall["Recall/Plan"]
   end
-
 
 ## Key Modules
 
