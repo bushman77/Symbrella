@@ -58,7 +58,7 @@ flowchart TD
   end
 
 ```
-```
+```mermaid
 sequenceDiagram
   participant UI as "Phoenix LiveView"
   participant Core as "Core Pipeline"
