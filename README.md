@@ -1,11 +1,9 @@
-# Symbrella
-
-Phoenix **umbrella** app.
+# Symbrella Phoenix **umbrella** app
 
 - **Erlang/OTP:** 28
 - **Elixir:** 1.18.x
 - **Phoenix:** 1.8.x (Bandit)
-- Watchers are **disabled by design** â€” rebuild assets manually when you want.
+- Watchers are **disabled by design** — rebuild assets manually when you want.
 
 ---
 
@@ -18,7 +16,7 @@ mix deps.get
 # (first time on a machine) install asset tool binaries
 cd apps/symbrella_web
 mix tailwind.install --if-missing
-mix esbuild.install  --if-missing
+mix esbuild.install --if-missing
 cd ../../
 
 # build assets (manual by design)
@@ -29,7 +27,7 @@ mix esbuild default
 mix phx.server
 ```
 
-- App: http://localhost:4000  
+- App: http://localhost:4000
 - Re-run the two `mix tailwind default` / `mix esbuild default` commands whenever you change CSS/JS.
 
 ---
@@ -38,11 +36,11 @@ mix phx.server
 
 ```
 symbrella_umbrella/
-â”œâ”€ apps/
-â”‚  â”œâ”€ symbrella/         # core/domain
-â”‚  â””â”€ symbrella_web/     # Phoenix web UI (Bandit)
-â”œâ”€ config/               # umbrella-wide config
-â””â”€ mix.exs               # umbrella root
+├─ apps/
+│  ├─ symbrella/      # core/domain
+│  └─ symbrella_web/  # Phoenix web UI (Bandit)
+├─ config/            # umbrella-wide config
+└─ mix.exs            # umbrella root
 ```
 
 ---
@@ -77,8 +75,7 @@ import "phoenix_html"
   Align versions in `config/config.exs` (`:tailwind`, `:esbuild`) *or* reinstall with the version you prefer using the commands above.
 
 - **No output files**  
-  Rebuild:  
-  `mix tailwind default && mix esbuild default`  
+  Rebuild: `mix tailwind default && mix esbuild default`  
   Expected outputs:
   ```
   apps/symbrella_web/priv/static/assets/app.css
@@ -94,14 +91,20 @@ Create `dev.sh` at the repo root:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
+
 mix deps.get
-( cd apps/symbrella_web && mix tailwind.install --if-missing && mix esbuild.install --if-missing )
+(
+  cd apps/symbrella_web &&
+  mix tailwind.install --if-missing &&
+  mix esbuild.install --if-missing
+)
 mix tailwind default
 mix esbuild default
 mix phx.server
 ```
 
 Then:
+
 ```bash
 chmod +x dev.sh
 ./dev.sh
@@ -111,4 +114,4 @@ chmod +x dev.sh
 
 ## License
 
-TBD Â© 2025 Bradley (bushman77)
+TBD © 2025 Bradley (bushman77)
