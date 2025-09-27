@@ -1,139 +1,162 @@
-# Project→Resume Playbook — Symbrella / elixir_ai_core
-
-**Goal:** Make your Elixir neuro‑symbolic AI project your strongest resume and hiring demo.
+# Project→Resume Playbook — Symbrella
+**Goal:** Turn your Elixir neuro-symbolic AI (Symbrella) into a standout, recruiter-friendly resume and demo.
 
 ---
+
 ## 0) Elevator Pitch (paste into README & LinkedIn)
-**One‑liner:** Neuro‑symbolic AI framework in Elixir (OTP + Ecto + Nx/Axon) with a Phoenix UI, treating each *BrainCell* as a stateful GenServer backed by Postgres.
+**One-liner:** Neuro‑symbolic AI in Elixir (OTP + Ecto + Nx/Axon) with a Phoenix UI and a production-style umbrella. Words/senses are **BrainCells** (GenServers) backed by Postgres. A new **LIFG** module performs fast, auditable Stage‑1 word-sense disambiguation and emits control signals into the cell layer.
 
-**Value:** Traceable reasoning + ML signals; clean separation between **UI ⇄ Brain ⇄ Core**; production‑style umbrella layout.
-
----
-## 1) 7‑Day Shipping Plan (visible progress, fast)
-- [ ] **README hero** (use template below) with GIF/screenshot and 3 bullets of impact.
-- [ ] **Quickstart**: `git clone → mix setup → mix phx.server` (copy‑paste ready).
-- [ ] **2‑minute demo video** (screen capture; captions OK).
-- [ ] **Architecture diagram** (Mermaid) showing **UI ⇄ Brain ⇄ Core** and Postgres.
-- [ ] **CI badge** (GitHub Actions) running `mix test` + `dialyzer`.
-- [ ] **Coverage badge** (excoveralls) — even partial coverage.
-- [ ] **Example dataset** + one `mix task` to run a tiny Axon training loop.
-- [ ] **Release tag v0.1.0** + CHANGELOG (What’s ready / What’s next).
+**Why it matters:** Traceable reasoning + ML signals. Clean UI ⇄ Brain ⇄ Core boundaries. Real-time activation dynamics with telemetry, tests, and benchmarks.
 
 ---
-## 2) README Hero Template (drop‑in)
+
+## 1) What’s Done (Now) vs What’s Next (7–14 days)
+
+### ✅ Done
+- **Brain.LIFG v2**: Stage‑1 disambiguation (`disambiguate_stage1/3`) with softmax/maxnorm, margins, audit trail, and concurrency flag.
+- **Brain.lifg_stage1/3 (side-effectful)**: Brain fan-out applies boosts/inhibitions to cells; telemetry hook `[:brain,:pipeline,:lifg_stage1,:stop]`.
+- **Brain.Cell**: per‑cell activation + status, registered via `Brain.Registry` and supervised under `Brain.CellSup`.
+- **Db.BrainCell**: consolidated Ecto schema (Postgres) as the source of truth for cells.
+- **Core integration**: `Core.resolve_input/1` wires SI → LTM → Lexicon → Brain activation; LIFG orchestration API exposed in Core.
+- **Tests**: unit + integration + property tests for LIFG; doctests; StreamData properties for normalization invariants.
+- **Benchmarks**: micro-bench suite comparing softmax vs maxnorm and serial vs parallel; sub‑millisecond decisions on mobile CPU.
+- **Git hygiene**: master/default set; stale branches pruned.
+
+### ▶ Next (low-risk, high-value)
+- **Stage‑2 context gating** (Top‑K + learned thresholds) and **Stage‑3 phrase-level reconciliation**.
+- **Cell decay/inhibition model** (configurable half-life) at Brain layer.
+- **Telemetry dashboard** (LiveDashboard or OpenTelemetry exporter).
+- **CI** badges: Actions + ExCoveralls + Dialyzer; `mix format` + `credo` baseline.
+
+---
+
+## 2) README Hero (drop-in)
 ```md
-# Symbrella / elixir_ai_core
-
-> Neuro‑symbolic AI in Elixir: stateful BrainCells (GenServer + Ecto) + intent pipeline (Nx/Axon) + Phoenix UI.
+# Symbrella — Neuro‑symbolic AI in Elixir
+> BrainCells (GenServer + Ecto) + LIFG disambiguation + Nx/Axon signals + Phoenix UI.
 
 **Why it matters**
-- 🔍 Traceable reasoning with GenServer “neurons” backed by Postgres
-- 🧠 Intent pipeline blending patterns + ML (Axon/Nx)
-- 🧩 Clean boundaries: UI ⇄ Brain ⇄ Core (umbrella apps)
+- Traceable reasoning with supervised “neurons” (GenServers) backed by Postgres.
+- Fast, auditable WSD via **Brain.LIFG** with telemetry and property tests.
+- Clean boundaries: UI ⇄ Brain ⇄ Core; production umbrella layout.
 
 **Demo**
-- 2‑minute walkthrough: <link to video>
 - Quickstart: `mix setup && iex -S mix phx.server`
+- Brain hook: `Brain.lifg_stage1(cands, ctx, normalize: :softmax)`
 
-**Stack**: Elixir/OTP • Phoenix LiveView • Ecto/Postgres • Nx/Axon • Dialyzer • ExUnit
-
-**Repo map**
-- `apps/brain/` — Brain supervisor + `Brain.Cell` processes
-- `apps/core/` — Core pipeline (tokenize → classify → plan) + `SemanticInput`
-- `apps/symbrella/` — Phoenix UI (talks to Brain; Core is isolated)
-
-**Roadmap**: POS disambiguation • ResponsePlanner v2 • Contingent Axon retraining • Observability
+**Stack:** Elixir/OTP • Phoenix LiveView • Ecto/Postgres • Nx/Axon • ExUnit/StreamData • Dialyzer
+**Repo map:**
+- `apps/brain/` — Brain supervisor, `Brain.Cell`, `Brain.LIFG`, telemetry
+- `apps/core/` — Pipeline (`SemanticInput`, Lexicon, recall plan)
+- `apps/symbrella_web/` — Phoenix UI (isolated from Core)
 ```
-
 ---
+
 ## 3) Skills Matrix (map features → hiring signals)
-| Project Artifact | Hiring Signal |
-|---|---|
-| `Brain.Cell` (GenServer + Ecto schema) | OTP concurrency, DB‑backed state, process supervision |
-| `Core.SemanticInput` + Token/Intent modules | Pipeline design, typed contracts, testability |
-| Axon training loop + inference | Nx/Axon, ML fundamentals, CPU‑only ops |
-| Phoenix LiveView UI | Real‑time UX, clean API boundary |
-| Postgres migrations (pgvector optional) | Data modeling, migrations, extensions |
-| CI (tests, dialyzer, coveralls) | Production hygiene, reliability |
 
-> Action: Add this table to README and link to code locations.
+| Project Artifact                             | Hiring Signal                                            |
+|----------------------------------------------|----------------------------------------------------------|
+| `Brain.LIFG.disambiguate_stage1/3`           | Probabilistic WSD, scoring/normalization, auditability   |
+| `Brain.lifg_stage1/3` side-effects           | Concurrency, backpressure, telemetry                     |
+| `Brain.Cell` (GenServer + Registry + Sup)    | OTP process design, supervised state, message passing    |
+| `Db.BrainCell` + migrations                  | Data modeling, Ecto schemas, migrations, conflict upserts|
+| LIFG tests (unit/integration/property)       | TDD, invariants with StreamData, doctests                |
+| Bench suite (Benchee)                        | Perf engineering, tradeoffs (serial vs parallel)         |
+| Phoenix UI boundary                          | Clean interfaces; LiveView familiarity                   |
+| Git/CI hygiene                                | Shipping discipline; reproducible builds                 |
 
----
-## 4) STAR Resume Bullets (tailored examples)
-- **Built** a neuro‑symbolic AI framework in Elixir (OTP umbrella) where each *BrainCell* is a GenServer backed by Ecto/Postgres; **reduced** cross‑module coupling and improved debuggability with a single **Core.SemanticInput** pipeline.  
-- **Implemented** intent classification (pattern matrix + Axon/Nx model) and **exposed** a Phoenix LiveView UI that speaks only to the Brain boundary; **cut** UI/Core coupling to near zero and simplified future ML swaps.  
-- **Stabilized** compile/runtime by refactoring schemas/modules (e.g., `Db.BrainCell` ⇄ `Brain.Cell`), **added** CI (ExUnit + Dialyzer + Coveralls) and a one‑command Quickstart, **accelerating** onboarding for new contributors.
-
-> Tip: Keep bullets outcome‑first. Add numbers where honest (tests added, lat/throughput, reduced build warnings, etc.).
+> Action: Copy table into README and link each artifact to source files.
 
 ---
-## 5) Architecture Diagram (Mermaid — paste in README)
+
+## 4) STAR Resume Bullets (tailored, paste into your resume)
+- **Designed & built** a neuro‑symbolic AI stack in Elixir where words/senses are supervised **BrainCells** backed by Postgres and orchestrated via a **Brain** coordinator; **improved debuggability** with a single `SemanticInput` pipeline and cell status introspection.
+- **Implemented** **Brain.LIFG** (Stage‑1 word‑sense disambiguation) with softmax/maxnorm scoring, margin awareness, and full audit trail; **integrated** as a side effect in `Brain.lifg_stage1/3` that emits activation boosts/inhibitions to running cells.
+- **Hardened** the system with **unit, integration, and property tests** (StreamData), catching normalization edge cases and group‑sum invariants; **added** Telemetry instrumentation and a simple handler for timing.
+- **Benchmarked** serial vs parallel paths with Benchee; achieved **sub‑millisecond** per‑sentence decisions on mobile‑class CPU in typical inputs; selected defaults based on P95 latency and memory tradeoffs.
+- **Shipped** repo hygiene (branch cleanup, default to `master`), added READMEs and a demoable Quickstart to lower onboarding friction.
+
+*(Add concrete numbers when you re-run on your target machine: e.g., “~180 µs avg on g8_s3_d128; ~5.5 K ops/sec serial maxnorm”.)*
+
+---
+
+## 5) Architecture Diagram (Mermaid)
 ```mermaid
 graph TD
   UI[Phoenix UI (LiveView)] -->|HTTP/WebSocket| Brain[Brain Supervisor]
+
   subgraph Brain App
+    Brain --> LIFG[Brain.LIFG (Stage-1 WSD)]
     Brain --> Cell[Brain.Cell (GenServer)]
     Cell -->|Ecto| DB[(Postgres)]
   end
+
   Brain -->|API calls| Core[Core Pipeline]
+
   subgraph Core App
     Core --> Tok[Token/Tokenizer]
     Core --> Sem[SemanticInput]
-    Core --> Intent[IntentClassifier/Matrix]
-    Core --> Plan[ResponsePlanner]
+    Core --> Lex[Lexicon/Senses]
+    Core --> Recall[Recall/Plan]
   end
 ```
-
 ---
+
 ## 6) Demo Script (2 minutes)
-1) Start server; show **UI ⇄ Brain** request in logs.  
-2) Type sentence → show `SemanticInput` printed (intent, keyword, confidence).  
-3) Toggle a *BrainCell* and show state in DB.  
-4) Run tiny Axon inference (toy input) → show response.  
-5) Close with roadmap: what you’d build in 4 weeks at $COMPANY.
+1. `iex -S mix phx.server` and hit the UI; show UI ⇄ Brain log line.
+2. `Core.resolve_input("hello there")` → print `SemanticInput` and `:db_cells`.
+3. Build `cands` + `ctx` in IEx → `Brain.lifg_stage1/3` → show choices + deltas.
+4. `Brain.snapshot().active_cells` → show boosted/inhibited cell activations.
+5. Close with a 30/60/90 plan (below).
 
 ---
-## 7) Evidence Log (README or `/docs/evidence.md`)
-Track a few **before/after** metrics you can cite:
-- Build warnings ↓ from X → Y  
-- Test count ↑ from X → Y; coverage to Z%  
-- p95 response time ↓ (local) from Xms → Yms  
-- CI duration and pass rate
+
+## 7) Evidence Log (track what changed)
+- Tests ↑ to N; property tests added for normalization & margins.
+- P95 LIFG latency ~XXX µs (serial, g8_s3_d64); memory footprint ~YYY KB.
+- Telemetry event count Z/session; handler outputs timing and config.
+- Branches consolidated; default set to `master`; CI badge added.
 
 ---
+
 ## 8) Quality & Hygiene Checklist
-- [ ] `mix format` + `credo` (style/nits)
-- [ ] `dialyzer` (typespec hygiene)
+- [ ] `mix format` + `credo --strict`
+- [ ] `dialyzer` (add `@spec`s; fail CI on new warnings)
 - [ ] `excoveralls` badge
 - [ ] GitHub Actions: `mix deps.get && mix compile --warnings-as-errors && mix test && mix dialyzer`
 - [ ] `CHANGELOG.md` + `LICENSE` + `CONTRIBUTING.md`
 
 ---
-## 9) “Why Elixir for AI?” (one paragraph for recruiters)
-Elixir’s OTP model gives resilient, inspectable concurrency for AI pipelines. By treating neurons as supervised processes and persisting to Postgres, we mix **traceable symbolic structure** with **ML components (Nx/Axon)**—a practical bridge between reliability and learning.
+
+## 9) Why Elixir for AI (recruiter paragraph)
+Elixir’s OTP model gives resilient, inspectable concurrency for AI pipelines. Modeling neurons as supervised processes with Postgres persistence blends **traceable symbolic structure** with **ML components (Nx/Axon)**—a practical bridge between reliability and learning. With LIFG’s audited disambiguation and Telemetry, Symbrella demonstrates production habits that translate directly to real systems.
 
 ---
-## 10) 30/60/90 Roadmap (hiring‑manager friendly)
-**30 days:** finalize Core pipeline; green CI; demo video; docs site.  
-**60 days:** POS disambiguation + ResponsePlanner v2; observability (telemetry, logs).  
-**90 days:** pgvector embeddings; simple retraining loop; public sample dataset + benchmarks.
+
+## 10) 30/60/90 (hiring-manager friendly)
+**30**: finalize Stage‑2/3 disambiguation, wire decay model, green CI.  
+**60**: add LiveDashboard + OTEL exporter; Top‑K attention + recall planner v2.  
+**90**: embeddings (pgvector), retraining loop, dataset + public benchmarks.
 
 ---
-## 11) Copy‑paste Quickstart (final polish)
+
+## 11) Quickstart (copy-paste)
 ```bash
-asdf install # or your toolchain
+asdf install  # or your toolchain
 mix setup
 MIX_ENV=dev iex -S mix phx.server
 ```
 
-> Add a `mix task` like `mix demo.intent` to generate a sample `SemanticInput` and print intent/keyword/confidence.
+Add a tiny `mix demo.lifg` that builds a context vector and candidates, runs `Brain.lifg_stage1/3`, and prints the audit and deltas.
 
 ---
-## 12) What to Show in Interviews
-- Repo (README hero first), 2‑min video, architecture diagram, short code tour of `Brain.Cell` and `SemanticInput`.
-- A single issue you opened/closed that demonstrates design tradeoffs.
-- The roadmap and what you’d build next if they hired you.
+
+## 12) Interview Packet
+- README hero first, 2-min video, Mermaid diagram.
+- Short code tour: `Brain.LIFG`, `Brain` (wiring + side-effects), `Db.BrainCell`.
+- One design tradeoff PR/commit (e.g., serial vs parallel default).
 
 ---
+
 ### License
-You can include this file in your repo as `PROJECT-RESUME-PLAYBOOK.md`. Feel free to adapt and license under MIT/Apache‑2.0 per your repo’s choice.
+You can include this file as `PROJECT-RESUME-PLAYBOOK.md`. Adapt under your repo’s license.
