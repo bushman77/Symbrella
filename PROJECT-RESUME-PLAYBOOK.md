@@ -1,24 +1,28 @@
+# Symbrella — Project Resume & Playbook
 
-# Symbrella — Project Résumé / Playbook
-
-**Owner:** Bradley  
-**Stack:** Elixir / OTP, Phoenix (LiveView), Ecto, PostgreSQL, StreamData, Benchee
+> High‑level overview, architecture, and developer workflow for the Symbrella monorepo.
 
 ---
 
 ## TL;DR
 
-- Built a **biologically-inspired sense disambiguation** pipeline anchored by `Brain.LIFG` (Left Inferior Frontal Gyrus analog) for Stage‑1 word-sense disambiguation (WSD).
-- Integrated **control signals** (boosts/inhibitions) that fan out to lightweight `Brain.Cell` processes via a central **`Brain` coordinator**.
-- Added **property, integration, and doctests**. All green locally after fixes.  
-- Benchmarked both **softmax** and **max‑norm** normalizations; documented trade‑offs and memory profiles.
-- Introduced **telemetry hooks** (`[:brain, :pipeline, :lifg_stage1, :stop]`) for visibility and tuning.
+Symbrella is an Elixir umbrella that models a lightweight, neuro‑inspired **semantic pipeline**.  
+Key parts:
+
+- **Core**: tokenization, semantic input (SI), lexicon recall.
+- **Brain**: central coordinator of per‑word **Cell** processes and **LIFG** (Stage‑1 lexical disambiguation).
+- **DB**: Ecto schema for `Db.BrainCell` and Postgres migrations.
+- **symbrella_web**: Phoenix UI (LiveView) and HTTP/WebSocket surface.
+
+**What’s working now**
+
+- `Brain.LIFG.disambiguate_stage1/3` (softmax or maxnorm normalization; serial/parallel; audit & telemetry).
+- `Brain.lifg_stage1/3` Brain‑level orchestration that **applies control signals** (boosts/inhibitions) to Cell processes.
+- Robust unit + property + integration tests passing; benches included.
 
 ---
 
 ## Architecture
-
-High-level data/control flow across apps.
 
 ```mermaid
 flowchart TD
@@ -27,7 +31,7 @@ flowchart TD
   subgraph "Brain App"
     Brain --> LIFG["Brain.LIFG (Stage-1 WSD)"]
     Brain --> Cell["Brain.Cell (GenServer)"]
-    Cell -->|"Ecto"| DB[("Postgres")]
+    Cell -->|"Ecto"| DB["Postgres"]
   end
 
   Brain -->|"API calls"| Core["Core Pipeline"]
@@ -38,134 +42,202 @@ flowchart TD
     Core --> Lex["Lexicon/Senses"]
     Core --> Recall["Recall/Plan"]
   end
+```
+
+---
+
+## Pipeline Walkthrough (Human Sentence -> Active Sense Choices)
+
+1. **Tokenize** the input into words and multi‑word candidates (`Core.Token.tokenize/1`).
+2. **Populate SI** and fetch candidates from LTM (`Db.ltm/1` + `Core.Lexicon.all/1`), yielding `:db_cells`.
+3. **Activate Cells (optional)**: `Brain.activate_cells/2` lazily starts cells and bumps their activation deltas.
+4. **Stage‑1 Disambiguation (LIFG)**: `Brain.lifg_stage1/3` (or direct `Brain.LIFG.disambiguate_stage1/3`) computes winner(s) per token, producing:
+   - `choices`: per‑token chosen sense + alternates, with features and normalized scores.
+   - `boosts` and `inhibitions`: control‑signal deltas (e.g., `+0.5` winners, `-0.25` non‑winners).
+   - `audit`: options, weights, timing, group counts, context dimension.
+5. **Apply Control Signals**: Brain coalesces deltas and casts `{:activate, %{delta: d}}` to live cells.
+6. **STM Merge**: `Brain.stm/1` can surface `active_cells` back into SI for downstream stages.
+
+---
 
 ## Key Modules
 
 ### `Brain` (Coordinator)
-- Keeps **STM** view: `active_cells`, `attention`, `history`.
-- **DynamicSupervisor** for `Brain.Cell` processes; lazy start on demand.
-- Public API:
-  - `stm/1` – merges STM snapshot into SI.
-  - `activate_cells/2` – batch activation for rows/ids/SI.
-  - `lifg_stage1/3` – runs `Brain.LIFG.disambiguate_stage1/3`, then applies boosts/inhibitions as a **side‑effect**.
-  - `cell_status/1`, `cell_cast/2`, `snapshot/0`, `via/1`.
+
+- **Public API**:
+  - `start_link/1` — supervisor child.
+  - `stm/1` — returns SI with `:active_cells` snapshot.
+  - `activate_cells/2` — accepts `[Db.BrainCell.t() | id]` or an SI with `:db_cells`.
+  - `cell_status/1`, `cell_cast/2`, `snapshot/0`.
+  - `lifg_stage1/3` — runs LIFG Stage‑1 and **applies boosts/inhibitions** as a side effect.
+- **Internals**:
+  - Registry: `Brain.Registry`; Cells supervised by `Brain.CellSup`.
+  - Telemetry (stop event): `[:brain, :pipeline, :lifg_stage1, :stop]` with `%{duration_ms: ms}` and audit metadata.
+
+**Example: Brain‑level LIFG with side effects**
+```elixir
+ctx = [1.0, 0.0, 0.0]
+cands = [
+  %{id: "hello|noun|0", token_index: 0, pos: "noun", lemma: "hello",
+    embedding: [1.0,0.0,0.0], lex_fit: 0.6, rel_prior: 0.5, intent_bias: 0.5, activation: 0.1},
+  %{id: "hello|noun|1", token_index: 0, pos: "noun", lemma: "hello",
+    embedding: [1.0,0.0,0.0], lex_fit: 0.6, rel_prior: 0.5, intent_bias: 0.5, activation: 0.1}
+]
+{:ok, out} = Brain.lifg_stage1(cands, ctx, normalize: :softmax, scores: :top2)
+# Cells for winners will receive positive deltas; others negative.
+```
 
 ### `Brain.LIFG` (Stage‑1 WSD)
-- Scores candidate senses per token using weighted features:
-  - `sim` (context similarity), `lex` (lexical fit), `rel` (relative prior), `prag` (intent bias), `act` (prior activation).
-- **Normalization**: `:softmax` or `:maxnorm` (configurable).
-- **Outputs**:
-  - `choices` (winner, alternatives, margins, feature audit)
-  - `boosts` (winner deltas) and `inhibitions` (loser deltas)
-  - `audit` (weights, parallelism, ctx dim, groups, timing)
-- Supports **parallel** and **serial** paths with deterministic reductions.
 
-### `Brain.Cell`
-- Minimal **GenServer** that tracks `activation` and reports to `Brain` via `{:activation_report, id, a}`.
-- Accepts `{:activate, %{delta: number}}` casts.
+- **Function**: `disambiguate_stage1(candidates, context_vec, opts)`
+- **Opts**:
+  - `:normalize` — `:softmax` (probabilities) or `:maxnorm` (unit‑max scaling).
+  - `:scores` — `:top1` or `:top2` (include runner‑up when the margin is small).
+  - `:parallel` — `true | false | :auto`.
+  - `:weights` — `%{lex: 0.25, sim: 0.4, rel: 0.15, prag: 0.1, act: 0.1}` (defaults).
+  - `:margin_threshold` — include alternates when winner‑margin < threshold.
+- **Returns**:
+  - `{:ok, %{choices: [...], boosts: [...], inhibitions: [...], audit: %{...}}}`
 
-### `Db.BrainCell` (Schema)
-- Single consolidated table for senses; JSON‑encodable for transport.
-- Clean `changeset/2` with PK `:id` — no separate uniqueness checks required.
+**Quick check**
+```elixir
+{:ok, out} = Brain.LIFG.disambiguate_stage1(cands, ctx, normalize: :softmax)
+Enum.map(out.choices, & &1.chosen_id)
+```
+
+### `Brain.Cell` (Per‑sense GenServer)
+
+- Registers under `Brain.Registry` by id (e.g., `"hello|noun|0"`).
+- Accepts `{:activate, %{delta: number}}` casts; reports back to `Brain` via `{:activation_report, id, a}`.
+- Lightweight, suitable for thousands of cells; lazily started by `Brain`.
+
+### `Db.BrainCell` (Ecto Schema)
+
+- Primary key: `id` (string); selected fields are `@derived` for `Jason.Encoder`.
+- Semantic attributes: `:word, :norm, :pos, :definition, :synonyms, :antonyms, :semantic_atoms, :activation, :dopamine, :serotonin, :connections, :position, :token_id, ...`.
+
+### `Core` (Pipeline)
+
+- Typical flow:
+  ```elixir
+  phrase
+  |> Core.Token.tokenize()
+  |> Brain.stm()
+  |> Db.ltm()
+  |> Core.Lexicon.all()
+  |> Core.activate_cells()
+  ```
+- Integrates with Brain for STM merge and activation fan‑out; optional call into `Brain.lifg_stage1/3` when you want immediate control‑signal application.
+
+---
+
+## Benchmarks (Phone CPU, Elixir 1.18.4 / OTP 28)
+
+Stage‑1, representative inputs:
+
+| Config (groups/senses/dim) | Serial maxnorm (ips) | Serial softmax (ips) | Parallel* (ips) |
+|---|---:|---:|---:|
+| g8_s3_d64  | ~10.3K | ~10.0K | ~3.6–3.7K |
+| g8_s6_d64  | ~4.9K  | ~4.8K  | ~2.4K |
+| g16_s4_d64 | ~3.7K  | ~3.6K  | ~1.6–1.7K |
+| g8_s3_d128 | ~5.5K  | ~5.4K  | ~2.5K |
+
+\* Parallel showed overhead on the test device; keep `parallel: :auto`.
+
+Memory footprints between softmax and maxnorm are roughly equal for same inputs.
+
+---
+
+## Testing & Quality
+
+- **Unit + Doctest** for `Brain.LIFG`.
+- **Property Tests** (StreamData): softmax sums per‑group ≈ 1; scores in [0,1].
+- **Integration Test** simulates decay + control deltas to verify winners stabilize in Top‑K.
+- **Benchmarks** with `Benchee`.
+
+**Run**
+```bash
+mix test
+mix test test/brain/brain_lifg_integration_test.exs
+mix run test/brain/bench/bench_brain_lifg_bench.exs
+```
 
 ---
 
 ## Telemetry
 
-- Emit on Stage‑1 completion:
-  - **Event**: `[:brain, :pipeline, :lifg_stage1, :stop]`
-  - **Measurements**: `%{duration_ms: ms}`
-  - **Metadata**: `%{groups, ctx_dim, normalize, scores_mode, parallel}`
-- Helper:
-  - `Brain.Telemetry.attach!/0` to install a simple logger (`brain-lifg-stage1-logger`).
-
----
-
-## Tests
-
-- **Unit & doctests**: scoring, normalization, margin behavior, vector lookup, etc.
-- **Property tests** (StreamData): softmax group sums ≈ 1; bounded scores [0,1]; stability across randomized inputs.
-- **Integration test**: decay + control deltas move winners into Top‑K over time.
-
-> Current status locally: **all Brain tests passing** (doctests, properties, integration).
-
----
-
-## Benchmarks (recent device run)
-
-> Representative results (μs/op). Throughput and memory vary with groups × senses × vector dim.
-
-- **g8_s3_d64** (8 tokens × 3 senses × 64‑dim)
-  - Serial `maxnorm`: ~97 μs (≈ 10.3 K ops/s), ~110 KB
-  - Serial `softmax`: ~100 μs (≈ 10.0 K ops/s), ~111 KB
-- **g8_s6_d64**:
-  - Serial `maxnorm`: ~202 μs (≈ 4.9 K ops/s), ~219 KB
-- **g16_s4_d64**:
-  - Serial `maxnorm`: ~269 μs (≈ 3.7 K ops/s), ~296 KB
-
-Notes:
-- Serial path is currently **faster** on a 6‑core mobile CPU; parallel reduces memory but adds overhead at small sizes.
-- `:maxnorm` vs `:softmax` is nearly a wash in latency; **maxnorm** often wins by a hair and uses slightly less memory.
-
----
-
-## Summary Repo Tree
-
-```
-apps/
-  brain/         # cell processes, LIFG, telemetry, benches & tests
-  core/          # tokenizer, semantic input, recall plan/execute, adapters
-  db/            # Ecto schemas, Repo types, migrations
-  lexicon/       # lexicon behaviour + adapter
-  symbrella/     # OTP shell app
-  symbrella_web/ # Phoenix LiveView UI
-assets/          # static CSS
-config/          # env runtime configs
-```
-
----
-
-## Example Flow
-
-1. `Core.resolve_input/1` → tokenize → SI → `Brain.stm/1` → LTM fetch → Lexicon senses.
-2. Convert senses to LIFG candidates → `Brain.lifg_stage1/3`.
-3. LIFG returns `choices` and control deltas → `Brain` fans out `{:activate, %{delta: …}}` to cells.
-4. Cells report `{:activation_report, id, a}` → Brain STM updates → downstream stages consume.
-
----
-
-## How to Run Locally (dev)
-
-```bash
-mix deps.get
-mix ecto.create && mix ecto.migrate
-iex -S mix
-```
-
-Telemetry (optional):
+Attach the logger:
 ```elixir
 Brain.Telemetry.attach!()
 :telemetry.list_handlers([:brain, :pipeline, :lifg_stage1, :stop])
 ```
 
-Manual smoke in `iex`:
-```elixir
-ctx = [1.0, 0.0, 0.0]
-
-cands =
-  for {w, t} <- [{"hello", 0}, {"there", 1}], s <- 0..1 do
-    %{id: "#{w}|noun|#{s}", pos: "noun", token_index: t, lemma: w,
-      embedding: [1.0, 0.0, 0.0], lex_fit: 0.6, rel_prior: 0.5, intent_bias: 0.5, activation: 0.1}
-  end
-
-{:ok, out} = Brain.lifg_stage1(cands, ctx, normalize: :softmax, scores: :top2)
-Brain.snapshot().active_cells
+Sample log (info):
+```
+[LIFG] 6ms groups=2 ctx_dim=3 norm=:softmax scores=:top2 parallel=false
 ```
 
 ---
 
-## Next Up
+## Repo Layout (Summary)
 
-- Stage‑2 syntax/role propagation and short‑range inhibition windows.
-- Intent‑aware weights via online learner (update `weights.prag`).
-- CI benches on multiple sizes; wall‑time vs memory curves per normalization.
+```
+apps/
+  brain/         # Brain, LIFG, Cell, Telemetry + tests/benches
+  core/          # Pipeline, lexicon, tokens, recall, vectors
+  db/            # Ecto schema + migrations
+  lexicon/       # Lexicon behaviour + adapters
+  symbrella/     # OTP app entrypoint
+  symbrella_web/ # Phoenix UI (LiveView)
+config/          # Mix env configs
+assets/          # CSS, frontend assets
+```
+
+---
+
+## Getting Started
+
+**Prereqs**: Elixir 1.18.x, Erlang/OTP 28, Postgres.
+
+```bash
+mix deps.get
+mix ecto.setup   # creates DB and runs migrations
+iex -S mix       # or: iex -S mix phx.server (for web)
+```
+
+**Quick sanity check in IEx**
+```elixir
+Logger.configure(level: :info)
+Brain.Telemetry.attach!()
+
+ctx = [1.0, 0.0, 0.0]
+cands = for s <- 0..1 do
+  %{id: "hello|noun|#{s}", token_index: 0, pos: "noun", lemma: "hello",
+    embedding: [1.0,0.0,0.0], lex_fit: 0.6, rel_prior: 0.5, intent_bias: 0.5, activation: 0.1}
+end
+{:ok, out} = Brain.lifg_stage1(cands, ctx, normalize: :softmax, scores: :top2)
+Brain.snapshot().active_cells # winners boosted, others inhibited
+```
+
+---
+
+## Roadmap (Near‑Term)
+
+- Stage‑2 concept composition (contextual constraints, co‑occurrence, graph walk).
+- Intent conditioning and top‑K attention feedback to STM.
+- Persisted activation traces and TTL decay policies.
+- Performance polish on parallel path and vector lookup cache.
+
+---
+
+## Contributing
+
+- Default branch: `master`.  
+- Use concise commit subjects (<= 72 chars), e.g.:  
+  `brain/lifg: add Brain.lifg_stage1 with control-signal fanout`
+
+---
+
+## License
+
+TBD (add your license of choice here).
