@@ -14,38 +14,30 @@
 - Benchmarked both **softmax** and **max‑norm** normalizations; documented trade‑offs and memory profiles.
 - Introduced **telemetry hooks** (`[:brain, :pipeline, :lifg_stage1, :stop]`) for visibility and tuning.
 
----
 
-## Architecture Diagram
+## Architecture
 
-> Paste this in your README as-is to render on GitHub.
+High-level data/control flow across apps.
 
 ```mermaid
 flowchart TD
-  A[Phoenix UI (LiveView)]
-  B[Brain Supervisor]
-  C[Core Pipeline]
-  D[(Postgres)]
+  UI["Phoenix UI (LiveView)"] -->|"HTTP/WebSocket"| Brain["Brain Supervisor"]
 
-  A -->|HTTP / WebSocket| B
-
-  subgraph E[Brain App]
-    B --> F[Brain.LIFG (Stage‑1 WSD)]
-    B --> G[Brain.Cell (GenServer)]
-    G -->|Ecto| D
+  subgraph "Brain App"
+    Brain --> LIFG["Brain.LIFG (Stage-1 WSD)"]
+    Brain --> Cell["Brain.Cell (GenServer)"]
+    Cell -->|"Ecto"| DB[("Postgres")]
   end
 
-  B -->|API calls| C
+  Brain -->|"API calls"| Core["Core Pipeline"]
 
-  subgraph H[Core App]
-    C --> I[Token / Tokenizer]
-    C --> J[SemanticInput]
-    C --> K[Lexicon / Senses]
-    C --> L[Recall / Plan]
+  subgraph "Core App"
+    Core --> Tok["Token/Tokenizer"]
+    Core --> Sem["SemanticInput"]
+    Core --> Lex["Lexicon/Senses"]
+    Core --> Recall["Recall/Plan"]
   end
-```
 
----
 
 ## Key Modules
 
