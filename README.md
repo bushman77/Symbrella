@@ -29,6 +29,35 @@ mix phx.server
 #   mix tailwind default
 #   mix esbuild default
 ```
+## Architecture Diagram
+
+> Paste this in your README as-is to render on GitHub.
+
+```mermaid
+flowchart TD
+  A["Phoenix UI (LiveView)"]
+  B["Brain Supervisor"]
+  C["Core Pipeline"]
+  D[(Postgres)]
+
+  A -->|HTTP / WebSocket| B
+
+  subgraph E["Brain App"]
+    B --> F["Brain.LIFG (Stage-1 WSD)"]
+    B --> G["Brain.Cell (GenServer)"]
+    G -->|Ecto| D
+  end
+
+  B -->|API calls| C
+
+  subgraph H["Core App"]
+    C --> I["Token / Tokenizer"]
+    C --> J["SemanticInput"]
+    C --> K["Lexicon / Senses"]
+    C --> L["Recall / Plan"]
+  end
+
+```
 
 ---
 
