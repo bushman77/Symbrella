@@ -58,7 +58,27 @@ flowchart TD
   end
 
 ```
+```
+sequenceDiagram
+  participant UI as "Phoenix LiveView"
+  participant Core as "Core Pipeline"
+  participant Brain as "Brain GenServer"
+  participant DB as Postgres
+  participant Lex as "Core.Lexicon"
 
+  UI->>Core: phrase
+  Core->>Core: Token.tokenize()
+  Core->>Brain: stm(tokens)
+  Brain->>DB: hydrate/lookup active cells
+  DB-->>Brain: rows / states
+  Brain-->>Core: SI (with active cells)
+  Core->>DB: ltm(SI)
+  DB-->>Core: SI (db cells merged)
+  Core->>Lex: all(SI.tokens)
+  Lex-->>Core: senses
+  Core-->>UI: SI (ready for recall/plan)
+
+```
 ---
 
 ## Project Layout (summary)
