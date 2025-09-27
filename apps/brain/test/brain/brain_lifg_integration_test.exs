@@ -1,18 +1,23 @@
 
 # test/brain/brain_lifg_integration_test.exs
-# Pure integration-style test that simulates Brain's focus narrowing using
-# LIFG’s boosts/inhibitions + a simple decay model. No GenServers involved.
-
 defmodule BrainLIFGIntegrationTest do
   use ExUnit.Case, async: true
   alias Brain.LIFG
 
-  @half_life 3.0  # seconds
-  @dt 0.5         # step seconds
-  @decay :math.pow(0.5, @dt / @half_life)  # per-step decay factor
-  @k 2           # focus size
+  @half_life 3.0   # seconds
+  @dt 0.5          # step seconds
+  @steps 6
+  @k 2
 
-  defp rerank(acts), do: acts |> Enum.sort_by(&elem(&1, 1), :desc)
+  @decay :math.pow(0.5, @dt / @half_life)
+
+  setup_all do
+    # Make randomness deterministic for stable tests
+    :rand.seed(:exsplus, {101, 202, 303})
+    :ok
+  end
+
+  defp rerank(acts), do: Enum.sort_by(acts, &elem(&1, 1), :desc)
 
   defp step_decay(acts) do
     for {id, a} <- acts, do: {id, a * @decay}
@@ -24,7 +29,7 @@ defmodule BrainLIFGIntegrationTest do
     end
   end
 
-  test "winners stabilize in Top‑K; losers drift out with decay + inhibitions" do
+  test "winners stabilize in Top‑K; losers drift with decay + inhibitions" do
     # Three tokens × three senses = 9 candidates total
     cands =
       for t <- 0..2, s <- 0..2 do
@@ -43,36 +48,61 @@ defmodule BrainLIFGIntegrationTest do
 
     ctx = [1.0, 0.0, 0.0]
 
-    # Start with small, slightly noisy activations
+    # Start with small, slightly noisy activations (deterministic due to seed)
     acts = for c <- cands, do: {c.id, 0.5 + :rand.uniform() * 0.05}
 
-    # One LIFG pass
-    {:ok, out} = LIFG.disambiguate_stage1(cands, ctx, margin_threshold: 0.05)
-    winners = Enum.map(out.choices, & &1.chosen_id) |> MapSet.new()
+    # One LIFG pass → winners and per-id deltas (boosts override inhibitions)
+    {:ok, out} = LIFG.disambiguate_stage1(cands, ctx, margin_threshold: 0.05, normalize: :softmax, scores: :none)
+    winners = out.choices |> Enum.map(& &1.chosen_id) |> MapSet.new()
 
-    # Build deltas
-    boost = Map.new(out.boosts)
-    inhib = Map.new(out.inhibitions)
-    deltas = Map.merge(inhib, boost) # boosts override inhibitions for winners
+    # sanity: one winner per token
+    assert MapSet.size(winners) == 3
 
-    # Apply 6 steps of decay+control and track Top‑K stability
-    topk_history =
-      1..6
-      |> Enum.reduce({acts, []}, fn _step, {acc_acts, hist} ->
-        acc_acts
-        |> step_decay()
-        |> apply_deltas(deltas)
-        |> then(fn new_acts ->
-          topk = new_acts |> rerank() |> Enum.take(@k) |> Enum.map(&elem(&1, 0)) |> MapSet.new()
-          {new_acts, [topk | hist]}
-        end)
+    deltas =
+      out.inhibitions
+      |> Map.new()
+      |> Map.merge(Map.new(out.boosts))
+
+    # Apply N steps of decay + constant control deltas; track Top‑K history
+    {final_acts, topk_history} =
+      Enum.reduce(1..@steps, {acts, []}, fn _step, {acc_acts, hist} ->
+        new_acts =
+          acc_acts
+          |> step_decay()
+          |> apply_deltas(deltas)
+
+        topk =
+          new_acts
+          |> rerank()
+          |> Enum.take(@k)
+          |> Enum.map(&elem(&1, 0))
+          |> MapSet.new()
+
+        {new_acts, [topk | hist]}
       end)
-      |> elem(1)
 
-    # Expect winners to appear in Top‑K most of the time
+    # Expect winners to appear in Top‑K in most steps
     winner_hits =
-      Enum.count(topk_history, fn topk -> MapSet.subset?(winners, topk) or MapSet.size(MapSet.intersection(winners, topk)) >= 1 end)
+      Enum.count(topk_history, fn topk ->
+        MapSet.size(MapSet.intersection(winners, topk)) >= 1
+      end)
 
-    assert winner_hits >= 4  # in at least 4/6 steps, a winner is in Top‑K
+    assert winner_hits >= div(@steps * 2, 3)  # ≥ 2/3 of the time (i.e., ≥4/6)
+
+    # Bonus: winners mean activation > losers mean activation at the end
+    {w_acts, l_acts} =
+      Enum.split_with(final_acts, fn {id, _a} -> MapSet.member?(winners, id) end)
+
+    w_mean =
+      w_acts
+      |> Enum.map(&elem(&1, 1))
+      |> then(fn xs -> Enum.sum(xs) / max(1, length(xs)) end)
+
+    l_mean =
+      l_acts
+      |> Enum.map(&elem(&1, 1))
+      |> then(fn xs -> Enum.sum(xs) / max(1, length(xs)) end)
+
+    assert w_mean > l_mean
   end
 end
