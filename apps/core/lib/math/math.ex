@@ -31,14 +31,17 @@ defmodule Core.Math do
   """
 
   @type rat :: {integer(), pos_integer()}
-  @type poly :: [rat]                 # a0 + a1*n + a2*n^2 + ...
-  @type binomial_coeffs :: [rat]      # d0..dk for a(n)=Σ d_k*C(n,k)
+  # a0 + a1*n + a2*n^2 + ...
+  @type poly :: [rat]
+  # d0..dk for a(n)=Σ d_k*C(n,k)
+  @type binomial_coeffs :: [rat]
 
   # -------- rationals --------
 
   @spec r(integer(), integer()) :: rat
   def r(num, den \\ 1)
   def r(_num, 0), do: raise(ArgumentError, "denominator cannot be 0")
+
   def r(num, den) when is_integer(num) and is_integer(den) do
     {n, d} = if den < 0, do: {-num, -den}, else: {num, den}
     g = Integer.gcd(abs(n), d)
@@ -63,6 +66,7 @@ defmodule Core.Math do
 
   @spec r_pow(rat, non_neg_integer()) :: rat
   def r_pow({_a, _b}, 0), do: {1, 1}
+
   def r_pow({a, b}, k) when is_integer(k) and k > 0 do
     r(Integer.pow(a, k), Integer.pow(b, k))
   end
@@ -76,6 +80,7 @@ defmodule Core.Math do
     d = for [x | _] <- diffs, do: r(x, 1)
 
     last_row = List.last(diffs)
+
     if Enum.all?(last_row, fn x -> x == 0 end) do
       {:ok, {:binomial, d}}
     else
@@ -128,10 +133,12 @@ defmodule Core.Math do
   def verify_sequence(seq, {:binomial, d}), do: do_verify(seq, &eval_binomial(d, &1))
   def verify_sequence(seq, {:poly, p}), do: do_verify(seq, &poly_eval(p, &1))
 
-  @spec check_identity({:binomial, binomial_coeffs} | {:poly, poly},
-                       {:binomial, binomial_coeffs} | {:poly, poly},
-                       Range.t()) ::
-                       :likely_true | {:counterexample, integer(), integer() | rat, integer() | rat}
+  @spec check_identity(
+          {:binomial, binomial_coeffs} | {:poly, poly},
+          {:binomial, binomial_coeffs} | {:poly, poly},
+          Range.t()
+        ) ::
+          :likely_true | {:counterexample, integer(), integer() | rat, integer() | rat}
   def check_identity(left, right, range \\ 0..12) do
     Enum.reduce_while(range, :likely_true, fn n, _ ->
       lv = eval_any(left, n)
@@ -156,6 +163,7 @@ defmodule Core.Math do
 
   defp difference_table(seq), do: do_diff([seq], seq)
   defp do_diff(cols, [_]), do: cols
+
   defp do_diff(cols, list) do
     next = pairwise_diff(list)
     do_diff(cols ++ [next], next)
@@ -170,6 +178,7 @@ defmodule Core.Math do
   defp choose(_n, k) when k < 0, do: 0
   defp choose(n, 0) when n >= 0, do: 1
   defp choose(n, k) when k > n, do: 0
+
   defp choose(n, k) do
     k = min(k, n - k)
     Enum.reduce(1..k, 1, fn i, acc -> div(acc * (n - k + i), i) end)
@@ -185,10 +194,12 @@ defmodule Core.Math do
   end
 
   defp poly_scale(poly, rat), do: Enum.map(poly, &r_mul(&1, rat))
+
   defp poly_div_int(poly, k) when is_integer(k) and k > 0,
     do: Enum.map(poly, fn {a, b} -> r(a, b * k) end)
 
   defp poly_choose_k(0), do: [{1, 1}]
+
   defp poly_choose_k(k) when k > 0 do
     Enum.reduce(0..(k - 1), [{1, 1}], fn i, poly ->
       # multiply by (n - i) => [-i, 1]
@@ -197,7 +208,7 @@ defmodule Core.Math do
   end
 
   defp mul(a, b) do
-    deg = (length(a) - 1) + (length(b) - 1)
+    deg = length(a) - 1 + (length(b) - 1)
     base = List.duplicate({0, 1}, deg + 1)
 
     Enum.with_index(a)
@@ -214,27 +225,30 @@ defmodule Core.Math do
   defp term_to_string({{num, den}, 0}) do
     if den == 1, do: Integer.to_string(num), else: "#{num}/#{den}"
   end
+
   defp term_to_string({{num, den}, 1}) do
     coef =
       cond do
-        {num, den} == {1, 1}  -> ""
+        {num, den} == {1, 1} -> ""
         {num, den} == {-1, 1} -> "-"
-        den == 1              -> Integer.to_string(abs(num))
-        true                  -> "#{abs(num)}/#{den}"
+        den == 1 -> Integer.to_string(abs(num))
+        true -> "#{abs(num)}/#{den}"
       end
+
     sign = if num < 0, do: "-", else: "+"
     sign <> coef <> "n"
   end
+
   defp term_to_string({{num, den}, k}) do
     coef =
       cond do
-        {num, den} == {1, 1}  -> ""
+        {num, den} == {1, 1} -> ""
         {num, den} == {-1, 1} -> "-"
-        den == 1              -> Integer.to_string(abs(num))
-        true                  -> "#{abs(num)}/#{den}"
+        den == 1 -> Integer.to_string(abs(num))
+        true -> "#{abs(num)}/#{den}"
       end
+
     sign = if num < 0, do: "-", else: "+"
     sign <> coef <> "n^" <> Integer.to_string(k)
   end
 end
-

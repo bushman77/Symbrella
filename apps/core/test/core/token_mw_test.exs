@@ -22,4 +22,3 @@ defmodule Core.TokenMWTest do
            "Tokenizer did not build 'kick the bucket' MW token. Got: #{inspect(si.tokens)}"
   end
 end
-

@@ -10,7 +10,7 @@ defmodule Core.RuntimeBind do
   alias Core.SemanticInput, as: SI
   alias Core.BrainAdapter
 
-  @type opts :: [impulse: float(), snapshot_fun: (() -> any())]
+  @type opts :: [impulse: float(), snapshot_fun: (-> any())]
 
   @spec bind(SI.t(), opts()) :: SI.t()
   def bind(%SI{} = si, opts \\ []) do
@@ -45,8 +45,10 @@ defmodule Core.RuntimeBind do
 
             aref = %{
               id: id,
-              matched_tokens: [],           # can fill with token refs later
-              activation_snapshot: 0.0,     # we can read live status later if needed
+              # can fill with token refs later
+              matched_tokens: [],
+              # we can read live status later if needed
+              activation_snapshot: 0.0,
               source: :runtime,
               reason: :matched_active_cell,
               score: nil,
@@ -74,7 +76,6 @@ defmodule Core.RuntimeBind do
 
   defp put_trace(%SI{trace: tr} = si, stage, meta) do
     evt = %{stage: stage, ts_ms: System.monotonic_time(:millisecond), meta: Map.new(meta)}
-    %{si | trace: [evt | (tr || [])]}
+    %{si | trace: [evt | tr || []]}
   end
 end
-

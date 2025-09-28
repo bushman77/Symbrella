@@ -17,4 +17,3 @@ defmodule Core.Lexicon.Normalize do
     end
   end
 end
-

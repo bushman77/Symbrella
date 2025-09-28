@@ -28,8 +28,8 @@ defmodule Symbrella.Application do
       # NOTE: PubSub is started in SymbrellaWeb.Application
       # If you later want the Endpoint here, add it here and remove from web.
     ]
-Brain.Telemetry.attach!()
+
+    Brain.Telemetry.attach!()
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
   end
 end
-

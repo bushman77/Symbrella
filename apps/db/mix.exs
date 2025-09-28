@@ -16,24 +16,23 @@ defmodule Db.MixProject do
     ]
   end
 
-def application do
-  [
-    extra_applications: [:logger, :ecto_sql, :postgrex]
-  ]
-end
+  def application do
+    [
+      extra_applications: [:logger, :ecto_sql, :postgrex]
+    ]
+  end
 
   # compile test helpers only in test
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-defp deps do
-  [
-    {:ecto_sql, "~> 3.13"},
-    {:postgrex, ">= 0.0.0"},
-    {:pgvector, "~> 0.3.0"},  # keep if you use the :vector column
-    {:jason, "~> 1.4"}
-  ]
+  defp deps do
+    [
+      {:ecto_sql, "~> 3.13"},
+      {:postgrex, ">= 0.0.0"},
+      # keep if you use the :vector column
+      {:pgvector, "~> 0.3.0"},
+      {:jason, "~> 1.4"}
+    ]
+  end
 end
-
-end
-

@@ -1,4 +1,3 @@
-
 defmodule Brain.Telemetry do
   @moduledoc """
   Attach lightweight telemetry handlers for Brain events.
@@ -49,7 +48,8 @@ defmodule Brain.Telemetry do
 
     :ok
   catch
-    :error, {:badarg, _} -> :ok # already attached
+    # already attached
+    :error, {:badarg, _} -> :ok
   end
 
   @doc """
@@ -68,15 +68,15 @@ defmodule Brain.Telemetry do
     duration_ms = Map.get(measurements, :duration_ms, 0)
 
     # Metadata (as emitted by Brain.lifg_stage1)
-    groups   = Map.get(metadata, :groups)
-    ctx_dim  = Map.get(metadata, :ctx_dim)
-    norm     = Map.get(metadata, :normalize)
-    scores   = Map.get(metadata, :scores_mode)
+    groups = Map.get(metadata, :groups)
+    ctx_dim = Map.get(metadata, :ctx_dim)
+    norm = Map.get(metadata, :normalize)
+    scores = Map.get(metadata, :scores_mode)
     parallel = Map.get(metadata, :parallel)
 
     Logger.info(fn ->
       "[LIFG] #{duration_ms}ms groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
-      "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
+        "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
     end)
   end
 end

@@ -20,4 +20,3 @@ defmodule SymbrellaWeb.PageControllerTest do
     assert body =~ ~s(phx-track-static)
   end
 end
-

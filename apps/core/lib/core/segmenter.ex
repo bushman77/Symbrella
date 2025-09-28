@@ -51,8 +51,8 @@ defmodule Core.Segmenter do
   @spec segment_phrases(String.t(), keyword()) :: [segment]
   def segment_phrases(sentence, opts \\ []) when is_binary(sentence) do
     words = word_spans(sentence)
-    wc    = length(words)
-    cap   = Keyword.get(opts, :max_len, min(5, wc))
+    wc = length(words)
+    cap = Keyword.get(opts, :max_len, min(5, wc))
 
     all_chunks(words, cap, sentence)
   end
@@ -78,9 +78,9 @@ defmodule Core.Segmenter do
   @spec build_segment([span], non_neg_integer(), pos_integer(), String.t()) :: map()
   defp build_segment(words, i, k, sentence) do
     first = Enum.at(words, i)
-    last  = Enum.at(words, i + k - 1)
+    last = Enum.at(words, i + k - 1)
     start = first.start
-    stop  = last.stop
+    stop = last.stop
 
     %{
       text: binary_part(sentence, start, stop - start),
@@ -114,4 +114,3 @@ defmodule Core.Segmenter do
     all_chunks(tl(words), cap, sentence, acc_rev2)
   end
 end
-

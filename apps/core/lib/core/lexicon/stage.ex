@@ -41,10 +41,17 @@ defmodule Core.Lexicon.Stage do
   defp partition_tokens(tokens) do
     tokens
     |> Enum.reduce({[], []}, fn
-      %{phrase: p, n: 1}, {uns, mws} when is_binary(p) -> {[p | uns], mws}
-      %{phrase: p, n: n}, {uns, mws} when is_binary(p) and is_integer(n) and n > 1 -> {uns, [p | mws]}
-      %{phrase: p}, acc when is_binary(p) -> acc
-      _, acc -> acc
+      %{phrase: p, n: 1}, {uns, mws} when is_binary(p) ->
+        {[p | uns], mws}
+
+      %{phrase: p, n: n}, {uns, mws} when is_binary(p) and is_integer(n) and n > 1 ->
+        {uns, [p | mws]}
+
+      %{phrase: p}, acc when is_binary(p) ->
+        acc
+
+      _, acc ->
+        acc
     end)
   end
 
@@ -55,6 +62,7 @@ defmodule Core.Lexicon.Stage do
         |> Enum.with_index()
         |> Enum.map(fn {s, i} ->
           pos = normalize_pos(s[:pos])
+
           %{
             id: "#{word}|#{pos}|#{i}",
             word: word,
@@ -67,7 +75,8 @@ defmodule Core.Lexicon.Stage do
           }
         end)
 
-      _ -> []
+      _ ->
+        []
     end
   end
 
@@ -89,7 +98,6 @@ defmodule Core.Lexicon.Stage do
 
   defp put_trace(%SI{trace: tr} = si, stage, meta) do
     evt = %{stage: stage, ts_ms: System.monotonic_time(:millisecond), meta: Map.new(meta)}
-    %{si | trace: [evt | (tr || [])]}
+    %{si | trace: [evt | tr || []]}
   end
 end
-

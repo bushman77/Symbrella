@@ -11,4 +11,3 @@ defmodule DbTest do
     refute Db.word_exists?(123)
   end
 end
-

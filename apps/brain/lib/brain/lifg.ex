@@ -3,15 +3,11 @@ defmodule Brain.LIFG do
   Stage-1 Disambiguation (LIFG). Pure, stateless, fast.
 
   Public API:
-    • `disambiguate_stage1/1` — pipeline entry: SI → SI
-      (results are attached as a trace event that includes `choices`, `boosts`, `inhibitions`)
+    • `disambiguate_stage1/1` — SI → SI; appends a trace event with `choices`, `boosts`, `inhibitions`.
 
   Scoring recipe (weights tunable):
-      score = w_lex*lex_fit
-            + w_sim*cosine(context_vec, embedding)
-            + w_rel*rel_prior
-            + w_prag*intent_bias
-            + w_act*activation
+      score = w_lex*lex_fit + w_sim*cosine(context_vec, embedding)
+            + w_rel*rel_prior + w_prag*intent_bias + w_act*activation
 
   Defaults: w_lex=0.25, w_sim=0.40, w_rel=0.15, w_prag=0.10, w_act=0.10.
   Softmax per token group → probabilities sum ≈ 1.0.
@@ -40,6 +36,23 @@ defmodule Brain.LIFG do
               scores: %{},
               margin: 0.0,
               features: %{}
+
+    @behaviour Access
+    # Allow get_in/Access (e.g. ch[:scores], get_in(ch, [:features, :score_norm]))
+    @impl Access
+    def fetch(%__MODULE__{} = s, key), do: Map.fetch(Map.from_struct(s), key)
+
+    @impl Access
+    def get_and_update(%__MODULE__{} = s, key, fun) do
+      {get, map2} = Map.get_and_update(Map.from_struct(s), key, fun)
+      {get, struct(s, map2)}
+    end
+
+    @impl Access
+    def pop(%__MODULE__{} = s, key) do
+      {val, map2} = Map.pop(Map.from_struct(s), key)
+      {val, struct(s, map2)}
+    end
   end
 
   # ─────────────────────────────
@@ -54,17 +67,30 @@ defmodule Brain.LIFG do
 
     norm = fn s ->
       s
-      |> to_string()
+      |> to_b()
       |> String.downcase()
       |> String.replace(~r/\s+/, " ")
       |> String.trim()
     end
 
+    # Build a normalized, struct-safe view of cells we can match against token phrases.
     cells_normed =
       Enum.map(cells, fn m ->
-        word = m[:word] || m["word"] || ""
-        n    = m[:norm] || m["norm"] || word
-        Map.merge(m, %{__norm__: norm.(n), __lemma__: word})
+        word  = getf(m, :word)  || ""
+        lemma = getf(m, :lemma) || word
+        nrm   = getf(m, :norm)  || word
+
+        %{
+          id:           getf(m, :id),                  # keep DB ID verbatim (preserve case)
+          pos:          getf(m, :pos),
+          lex_fit:      getf(m, :lex_fit),
+          rel_prior:    getf(m, :rel_prior),
+          intent_bias:  getf(m, :intent_bias),
+          activation:   getf(m, :activation),
+          embedding:    getf(m, :embedding),
+          __norm__:     norm.(nrm),
+          __lemma__:    lemma
+        }
       end)
 
     candidates =
@@ -81,27 +107,26 @@ defmodule Brain.LIFG do
         end)
         |> Enum.map(fn c ->
           %{
-            id: c[:id] || c["id"],
+            id: c.id,                      # keep as-is
             token_index: idx,
             lemma: c.__lemma__ || "",
-            pos: c[:pos] || c["pos"],
-            lex_fit: c[:lex_fit] || 0.6,
-            rel_prior: c[:rel_prior] || 0.5,
-            intent_bias: c[:intent_bias] || 0.0,
-            activation: c[:activation] || 0.0,
-            embedding: c[:embedding] # may be nil
+            pos: c.pos,
+            lex_fit: c.lex_fit || 0.6,
+            rel_prior: c.rel_prior || 0.5,
+            intent_bias: c.intent_bias || 0.0,
+            activation: c.activation || 0.0,
+            embedding: c.embedding
           }
         end)
       end)
 
-    # Use private scorer (no public /3)
     {:ok, out} = do_disambiguate(candidates, ctx, [])
 
     ev = %{
       stage: :lifg_stage1,
       normalize: :softmax,
       groups: candidates |> Enum.map(& &1.token_index) |> MapSet.new() |> MapSet.size(),
-      scores_mode: :all,
+      scores_mode: out.audit.scores_mode,
       ctx_dim: length(ctx),
       timing_ms: out.audit.timing_ms,
       choices: out.choices,
@@ -126,7 +151,10 @@ defmodule Brain.LIFG do
   defp do_disambiguate(candidates, context_vec, opts) when is_list(candidates) do
     t0 = System.monotonic_time()
 
-    weights          = Map.merge(default_weights(), Map.new(Keyword.get(opts, :weights, %{})))
+    weights =
+      default_weights()
+      |> Map.merge(Map.new(Keyword.get(opts, :weights, %{})))
+
     margin_threshold = Keyword.get(opts, :margin_threshold, 0.12)
     scores_mode      = Keyword.get(opts, :scores, :all)
 
@@ -201,17 +229,17 @@ defmodule Brain.LIFG do
     cand_feats =
       Enum.map(cands, fn cand ->
         sim =
-          case cand[:embedding] do
+          case cand.embedding do
             nil -> 0.0
             vec -> cosine_with_ctxnorm(vec, ctx, ctx_norm)
           end
 
         score =
-          weights.lex * safe_num(cand[:lex_fit]) +
-            weights.sim * sim +
-            weights.rel * safe_num(cand[:rel_prior]) +
-            weights.prag * safe_num(cand[:intent_bias]) +
-            weights.act * safe_num(cand[:activation])
+          weights.lex * safe_num(cand.lex_fit) +
+          weights.sim * sim +
+          weights.rel * safe_num(cand.rel_prior) +
+          weights.prag * safe_num(cand.intent_bias) +
+          weights.act * safe_num(cand.activation)
 
         {cand, %{sim: sim, score_raw: score}}
       end)
@@ -236,7 +264,7 @@ defmodule Brain.LIFG do
         %SenseChoice{
           token_index: token_idx,
           lemma: cand1.lemma || "",
-          chosen_id: cand1.id,
+          chosen_id: cand1.id,                 # preserve ID casing
           alt_ids: [],
           scores: scores_map_from_normed(normed, scores_mode, [{cand1, f1}]),
           margin: 0.0,
@@ -250,7 +278,7 @@ defmodule Brain.LIFG do
         %SenseChoice{
           token_index: token_idx,
           lemma: cand1.lemma || "",
-          chosen_id: cand1.id,
+          chosen_id: cand1.id,                 # preserve ID casing
           alt_ids: alt_ids,
           scores: scores_map_from_normed(normed, scores_mode, [{cand1, f1}, {cand2, f2}]),
           margin: margin,
@@ -259,8 +287,12 @@ defmodule Brain.LIFG do
     end
   end
 
-  defp scores_map_from_normed(normed, :all, _pairs), do: Enum.map(normed, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
-  defp scores_map_from_normed(_normed, :top2, pairs), do: Enum.map(pairs, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
+  defp scores_map_from_normed(normed, :all, _pairs),
+    do: Enum.map(normed, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
+
+  defp scores_map_from_normed(_normed, :top2, pairs),
+    do: Enum.map(pairs, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
+
   defp scores_map_from_normed(_normed, :none, _pairs), do: %{}
 
   defp base_features(cand, feats) do
@@ -268,11 +300,11 @@ defmodule Brain.LIFG do
       sim: feats.sim,
       score_raw: feats.score_raw,
       score_norm: feats.score_norm,
-      pos: cand[:pos],
-      lex_fit: cand[:lex_fit],
-      rel_prior: cand[:rel_prior],
-      intent_bias: cand[:intent_bias],
-      activation: cand[:activation]
+      pos: cand.pos,
+      lex_fit: cand.lex_fit,
+      rel_prior: cand.rel_prior,
+      intent_bias: cand.intent_bias,
+      activation: cand.activation
     }
   end
 
@@ -302,15 +334,23 @@ defmodule Brain.LIFG do
   defp better?({c1, _f1}, {c2, _f2}), do: c1.id <= c2.id
 
   defp cosine_with_ctxnorm(_vec, _ctx, 0.0), do: 0.0
-  defp cosine_with_ctxnorm(nil, _ctx, _ctxn), do: 0.0
+  defp cosine_with_ctxnorm(nil, _ctx, _ctxn),  do: 0.0
   defp cosine_with_ctxnorm(vec, ctx, ctxn) do
     na = l2(vec)
     if na == 0.0, do: 0.0, else: dot(vec, ctx) / (na * ctxn)
   end
 
   defp dot(a, b), do: Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
-  defp l2(v),      do: v |> Enum.reduce(0.0, fn x, acc -> acc + x * x end) |> :math.sqrt()
+  defp l2(v),     do: v |> Enum.reduce(0.0, fn x, acc -> acc + x * x end) |> :math.sqrt()
   defp safe_num(nil), do: 0.0
   defp safe_num(x) when is_number(x), do: x * 1.0
+
+  # tiny field getter that works for maps & structs (atom or string keys)
+  defp getf(m, k) when is_atom(k),   do: Map.get(m, k) || Map.get(m, Atom.to_string(k))
+  defp getf(m, k) when is_binary(k), do: Map.get(m, k)
+
+  defp to_b(nil), do: ""
+  defp to_b(v) when is_binary(v), do: v
+  defp to_b(v), do: Kernel.to_string(v)
 end
 

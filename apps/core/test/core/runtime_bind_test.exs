@@ -94,7 +94,8 @@ defmodule Core.RuntimeBindTest do
     tokens = [tok(0, "nothing")]
     si = %SI{sentence: "nothing", tokens: tokens}
 
-    out = RuntimeBind.bind(si) # no snapshot provided
+    # no snapshot provided
+    out = RuntimeBind.bind(si)
     assert out.active_cells == []
     ev = List.last(out.trace)
     assert ev.stage == :runtime_bind
@@ -103,6 +104,7 @@ defmodule Core.RuntimeBindTest do
 
   test "merge preserves stronger source precedence" do
     tokens = [tok(0, "alpha")]
+
     si = %SI{
       sentence: "alpha",
       tokens: tokens,
@@ -128,4 +130,3 @@ defmodule Core.RuntimeBindTest do
     assert only.activation_snapshot == 0.3
   end
 end
-

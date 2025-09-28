@@ -29,4 +29,3 @@ defmodule Core.SemanticInput do
             active_cells: [],
             trace: []
 end
-

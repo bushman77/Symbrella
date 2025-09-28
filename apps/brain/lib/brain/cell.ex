@@ -12,9 +12,7 @@ defmodule Brain.Cell do
   # Accepts either a %Db.BrainCell{} row or a binary id
   def start_link(arg) do
     id = extract_id(arg)
-    GenServer.start_link(__MODULE__, %{id: id, data: arg, activation: 0},
-      name: Brain.via(id)
-    )
+    GenServer.start_link(__MODULE__, %{id: id, data: arg, activation: 0}, name: Brain.via(id))
   end
 
   # ──────────────────────── GenServer ───────────────────────
@@ -43,6 +41,5 @@ defmodule Brain.Cell do
 
   defp extract_id(%Row{id: id}), do: id
   defp extract_id(id) when is_binary(id), do: id
-  defp extract_id(other), do: raise ArgumentError, "Unsupported cell arg: #{inspect(other)}"
+  defp extract_id(other), do: raise(ArgumentError, "Unsupported cell arg: #{inspect(other)}")
 end
-

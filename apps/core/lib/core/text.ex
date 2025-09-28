@@ -17,4 +17,3 @@ defmodule Core.Text do
     |> String.replace(~r/\s+/u, " ")
   end
 end
-

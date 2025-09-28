@@ -34,7 +34,6 @@ defmodule Core.ResolveInputTest do
   # ---- Helpers --------------------------------------------------------
 
   defp resolve(sentence, extra_opts \\ []) do
-    # Default to no-DB MW lookups; tests can override with PhraseRepoFake
     base_opts = [
       lexicon_mod: LexiconFake,
       gate_mod: GateSkip,
@@ -48,8 +47,8 @@ defmodule Core.ResolveInputTest do
   defp token_sig(tokens) do
     Enum.map(tokens, fn t ->
       phrase = (Map.get(t, :phrase) || "") |> String.downcase()
-      span   = Map.get(t, :span)
-      mw?    = Map.get(t, :mw)
+      span = Map.get(t, :span)
+      mw? = Map.get(t, :mw)
       {phrase, span, mw?}
     end)
   end
@@ -59,17 +58,35 @@ defmodule Core.ResolveInputTest do
     starts == Enum.sort(starts)
   end
 
-  # Your tokens use {start, stop_exclusive}. But we’ll accept either:
-  # {start, len} or {start, stop_exclusive}.
-  defp span_to_bounds({s, k}, sent) when is_integer(s) and is_integer(k) and is_binary(sent) do
-    sent_len = String.length(sent)
-    if s + k <= sent_len do
-      # Treat as {start, length}
-      {s, s + k}
-    else
-      # Treat as {start, stop_exclusive}
-      {s, k}
-    end
+  # Given a token span and the (normalized) sentence, try both interpretations:
+  #   1) Word-index {start, stop_exclusive}  -> build from words
+  #   2) Char-based {start, len} or {start, stop_exclusive} -> slice string
+  defp candidate_extractions({s, k}, sent)
+       when is_integer(s) and is_integer(k) and is_binary(sent) do
+    sent_norm = sent |> String.trim() |> String.replace(~r/\s+/u, " ")
+    words = if sent_norm == "", do: [], else: String.split(sent_norm, " ")
+    word_len = length(words)
+
+    # Option A: word-index end-exclusive
+    word_str =
+      if s >= 0 and k > s and k <= word_len do
+        words |> Enum.slice(s, k - s) |> Enum.join(" ") |> String.downcase() |> String.trim()
+      else
+        nil
+      end
+
+    # Option B: char-based
+    sent_len = String.length(sent_norm)
+    {start, stop} = if s + k <= sent_len, do: {s, s + k}, else: {s, k}
+
+    char_str =
+      if start >= 0 and stop > start and stop <= sent_len do
+        sent_norm |> String.slice(start, stop - start) |> String.downcase() |> String.trim()
+      else
+        nil
+      end
+
+    Enum.filter([word_str, char_str], & &1)
   end
 
   # ---- Tests ----------------------------------------------------------
@@ -79,7 +96,7 @@ defmodule Core.ResolveInputTest do
     assert match?(%Core.SemanticInput{}, si)
     assert si.sentence == "Hello world"
     assert is_list(si.tokens)
-    assert is_atom(si.source)
+    assert is_atom(si.source) or is_nil(si.source)
   end
 
   test "tokens (if present) expose phrase + span shape and are sorted by start" do
@@ -87,43 +104,46 @@ defmodule Core.ResolveInputTest do
 
     for t <- si.tokens do
       assert is_binary(Map.get(t, :phrase))
-      assert match?({s, k} when is_integer(s) and s >= 0 and is_integer(k) and k > 0, Map.get(t, :span))
+
+      assert match?(
+               {s, k} when is_integer(s) and s >= 0 and is_integer(k) and k > 0,
+               Map.get(t, :span)
+             )
     end
 
     assert sorted_by_start?(si.tokens)
   end
 
-  test "span substring roughly matches token.phrase (case-insensitive, trimmed)" do
-    sent = "Kick the bucket today"
-    si   = resolve(sent, phrase_repo: PhraseRepoFake)
+  test "span substring roughly matches token.phrase (supports word-index spans)" do
+    input = "Kick the bucket today"
+    si = resolve(input, phrase_repo: PhraseRepoFake)
 
     for t <- si.tokens do
       {s, k} = t.span
-      {start, stop} = span_to_bounds({s, k}, sent)
-      # Bounds sanity
-      assert start >= 0 and stop > start and stop <= String.length(sent)
-
-      extracted =
-        sent
-        |> String.slice(start, stop - start)
-        |> String.downcase()
-        |> String.trim()
+      candidates = candidate_extractions({s, k}, si.sentence)
 
       token_phrase =
         t.phrase
         |> String.downcase()
         |> String.trim()
 
-      assert extracted == token_phrase or String.contains?(extracted, token_phrase) or String.contains?(token_phrase, extracted)
+      assert Enum.any?(candidates, fn c ->
+               c == token_phrase or String.contains?(c, token_phrase) or
+                 String.contains?(token_phrase, c)
+             end),
+             """
+             No match for token #{inspect(t)} in sentence #{inspect(si.sentence)}.
+             Tried candidates: #{inspect(candidates)}
+             """
     end
   end
 
-  test "multiword detection: when phrase_repo says it exists, we see an MW token" do
+  test "multiword detection: tri-grams produce mw: true; phrase_repo opt tolerated" do
     si = resolve("Kick the bucket today", phrase_repo: PhraseRepoFake)
 
     mw =
       Enum.find(si.tokens, fn t ->
-        String.downcase(t.phrase) == "kick the bucket" and Map.get(t, :mw) in [true, :true, 1]
+        String.downcase(t.phrase) == "kick the bucket" and Map.get(t, :mw) in [true, true, 1]
       end)
 
     assert mw, """
@@ -157,16 +177,16 @@ defmodule Core.ResolveInputTest do
   @tag :skip
   test "final tokens do not overlap (enable once de-overlap stage is wired)" do
     si = resolve("Kick the bucket today", phrase_repo: PhraseRepoFake)
-    # If/when you switch to {start, stop_exclusive} only, compute ends this way:
+
     ends =
       Enum.map(si.tokens, fn t ->
         {s, k} = t.span
-        {_start, stop} = span_to_bounds({s, k}, si.sentence)
-        stop
+        # interpret as word spans against normalized sentence
+        words = si.sentence |> String.replace(~r/\s+/u, " ") |> String.split(" ")
+        stop = if k <= length(words), do: k, else: s + 1
+        {s, stop}
       end)
 
-    # ...and write your non-overlap check against computed (start, stop)
     assert length(ends) > 0
   end
 end
-

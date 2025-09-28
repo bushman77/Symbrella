@@ -1,141 +1,172 @@
 defmodule Core do
-  @moduledoc """
-  Core pipeline: tokenization → STM → LTM → lexicon → LIFG Stage-1.
-  """
+  @moduledoc "Tokenize -> rebuild word n-grams -> STM -> LTM(owns lexicon) -> LIFG Stage-1 -> notify Brain."
 
-  alias Core.{Lexicon, Token, Vectors}
-  alias Brain, as: CBrain
+  alias Brain
+  alias Core.Token
+  alias Core.Lexicon
+  alias Db
 
   @type si :: map()
-  @type lifg_opts :: keyword()
+  @type opts :: keyword()
 
-  @doc """
-  Resolve a phrase and run LIFG Stage-1 (side effects: boosts/inhibitions are applied).
-  Attaches `:lifg_choices` and an audit crumb in `:trace`.
-  """
-  @spec resolve_input(String.t(), lifg_opts()) :: si()
-  def resolve_input(phrase, lifg_opts \\ []) when is_binary(phrase) do
-    si =
+  @spec resolve_input(String.t(), opts()) :: si()
+  def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
+    mode  = Keyword.get(opts, :mode, :test)
+    max_n = Keyword.get(opts, :max_wordgram_n, 3)
+
+    si0 =
       phrase
-      |> Token.tokenize()
-      |> CBrain.stm()
-      |> Db.ltm()
-      |> Lexicon.all()
-      |> Brain.LIFG.disambiguate_stage1() 
+      |> Token.tokenize(max_wordgram_n: max_n)
+      |> rebuild_word_ngrams(max_n)                # char spans {start,len} over normalized sentence
+      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put_new(:trace, [])
 
+    case mode do
+      :prod ->
+        si0
+        |> Brain.stm()                              # <— was Brain.STM.run/2
+        |> keep_only_word_boundary_tokens()
+        |> Db.ltm(opts)                             # LTM also triggers Lexicon enrichment if missing
+        |> keep_only_word_boundary_tokens()
+        |> Lexicon.all()                            # ensure lexicon rows exist; merges into :active_cells
+        |> keep_only_word_boundary_tokens()
+        |> run_lifg_and_attach(opts)                # attach lifg_choices + audit event
+        |> notify_brain_activation(opts)            # bump cells & add {:activated, ...} to trace
 
-    cand_map = build_lifg_candidates_by_token(si)
-    ctx      = context_vec(si)
-
-    defaults = [
-      normalize: :softmax,
-      scores: :top2,
-      margin_threshold: 0.12,
-      parallel: :auto,
-      vector_lookup: &Vectors.fetch/1,        # <- NEW: vectors on demand
-      apply_signals?: true,                   # you can set false for dry-runs
-      delta_model: :margin_scaled             # <- NEW: gentle scaling (see Brain wiring)
-    ]
-
-    {:ok, lifg} =
-      CBrain.lifg_stage1(%{candidates_by_token: cand_map}, ctx, Keyword.merge(defaults, lifg_opts))
-
-    si
-    |> Map.put(:lifg_choices, lifg.choices)
-    |> Map.update(:trace, [], &[{:lifg_stage1, lifg.audit} | &1])
+      _ ->
+        si0
+    end
   end
 
-  @doc "Read a cell’s status (id is a string)."
-  def cell_status(id), do: GenServer.call(CBrain, {:cell, id, :status})
+  # ─────────────────────── Brain notify ───────────────────────
 
-  @doc "Send any cast message to a cell (e.g., :activate, :stop)."
-  def cell_cast(id, msg), do: GenServer.cast(CBrain, {:cell, id, msg})
+  defp notify_brain_activation(si, opts) do
+    payload = %{delta: Keyword.get(opts, :delta, 0.1), decay: Keyword.get(opts, :decay, 0.98), via: :core}
+    rows = Map.get(si, :active_cells, []) || []
+    lifg_count = si |> Map.get(:lifg_choices, []) |> length()
 
-  @doc """
-  Optional: activate a batch of cells from `si` (side effect); returns `si`.
-  Tip: Keep this *small* to avoid background noise; LIFG will do the heavy lifting.
-  """
-  def activate_cells(si, opts \\ [delta: 0.1]) do                 # was 1 → gentler default
-    payload = Map.new(opts)
-    GenServer.cast(CBrain, {:activate_cells, si, payload})
-    si
-  end
+    if rows != [] and Process.whereis(Brain) do
+      Brain.activate_cells(rows, payload)
+    end
 
-  # ───────────────────────── LIFG helpers ─────────────────────────
-
-  @doc false
-  defp build_lifg_candidates_by_token(%{tokens: toks} = si) when is_list(toks) do
-    rows = Map.get(si, :db_cells, []) || []
-
-    toks
-    |> Enum.with_index()
-    |> Map.new(fn {tok, tidx} ->
-      lemma = String.downcase(tok.phrase || "")
-
-      senses =
-        rows
-        # keep only those matching this lemma by norm
-        |> Enum.filter(&match_norm?(&1, lemma))
-        # dedupe by canonical (norm,pos,sense) to avoid "Hello|..." vs "hello|..." dupes
-        |> Enum.uniq_by(&canonical_key/1)
-        |> Enum.map(fn row ->
-          %{
-            id: row.id,                           # real cell id for signals
-            pos: row.pos || "noun",
-            token_index: tidx,
-            lemma: lemma,
-            embedding: nil,                       # <- prefer vector_lookup path
-            embedding_id: {row.norm, row.pos},    # <- key for Core.Vectors.fetch/1
-            lex_fit: 0.6,                         # stub; replace when ready
-            rel_prior: 0.5,
-            intent_bias: 0.0,
-            activation: row.activation || 0.0
-          }
-        end)
-
-      {tidx, senses}
+    Map.update(si, :trace, [], fn tr ->
+      [{:activated, %{rows: length(rows), lifg_choices: lifg_count, shape: :activate_cells}} | tr]
     end)
-    |> Enum.reject(fn {_i, senses} -> senses == [] end)
-    |> Map.new()
   end
 
-  defp build_lifg_candidates_by_token(_), do: %{}
+  # ─────────────────────── LIFG stage-1 ───────────────────────
 
-  defp match_norm?(%{norm: norm}, lemma) when is_binary(norm), do: String.downcase(norm) == lemma
-  defp match_norm?(_, _), do: false
+  defp run_lifg_and_attach(si, lifg_opts \\ []) do
+    groups =
+      si.tokens
+      |> Enum.reduce(%{}, fn t, acc ->
+        nrm = norm(Map.get(t, :phrase))
+        senses =
+          si.active_cells
+          |> Enum.filter(fn s -> (Map.get(s, :norm) || Map.get(s, "norm")) == nrm end)
 
-  defp canonical_key(%{norm: n, pos: p, id: id}) do
-    s =
-      case String.split(to_string(id), "|") do
-        [_w, _p, sense] -> sense
-        _ -> "0"
-      end
-
-    {String.downcase(n || ""), String.downcase(p || ""), s}
-  end
-
-  @doc false
-  defp context_vec(%{tokens: toks}) when is_list(toks) and toks != [] do
-    # Simple pooled context: average of lemma vectors
-    toks
-    |> Enum.map(&String.downcase(&1.phrase || ""))
-    |> Enum.map(&Vectors.fetch/1)
-    |> Enum.reject(&is_nil/1)
-    |> average_vec() || [1.0, 0.0, 0.0]
-  end
-  defp context_vec(_), do: [1.0, 0.0, 0.0]
-
-  defp average_vec(list) when is_list(list) and list != [] do
-    dim = list |> hd() |> length()
-    sum =
-      list
-      |> Enum.reduce(List.duplicate(0.0, dim), fn v, acc ->
-        Enum.zip_with(acc, v, &(&1 + &2))
+        if senses == [], do: acc, else: Map.put(acc, Map.get(t, :index), senses)
       end)
 
-    n = length(list) |> max(1)
-    Enum.map(sum, &(&1 / n))
+    ctx = [1.0]
+
+    case Brain.lifg_stage1(%{candidates_by_token: groups, tokens: si.tokens, sentence: si.sentence}, ctx, lifg_opts) do
+      {:ok, out} ->
+        ev =
+          out.audit
+          |> Map.merge(%{
+            stage: :lifg_stage1,
+            choices: out.choices,
+            boosts: out.boosts,
+            inhibitions: out.inhibitions
+          })
+
+        lifg_choices =
+          Enum.map(out.choices, fn ch ->
+            chosen_id = Map.get(ch, :chosen_id)
+            scores    = Map.get(ch, :scores)   || %{}
+            feats     = Map.get(ch, :features) || %{}
+
+            score =
+              if is_binary(chosen_id) and is_map(scores),
+                do: Map.get(scores, chosen_id, 0.0),
+                else: Map.get(feats, :score_norm, 0.0)
+
+            %{
+              token_index: Map.get(ch, :token_index),
+              lemma: (Map.get(ch, :lemma) || "") |> String.downcase(),
+              id: chosen_id,
+              alt_ids: Map.get(ch, :alt_ids, []),
+              score: score
+            }
+          end)
+
+        si
+        |> Map.put(:lifg_choices, lifg_choices)
+        |> Map.update(:trace, [], &[ev | &1])
+
+      {:error, _} ->
+        si
+    end
   end
-  defp average_vec(_), do: nil
+
+  # ─────────────────────── Tokens / n-grams ───────────────────────
+
+  # Build contiguous word n-grams with character spans against a normalized sentence.
+  defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
+       when is_binary(s) and is_integer(max_n) and max_n > 0 do
+    s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
+    words  = if s_norm == "", do: [], else: String.split(s_norm, " ")
+
+    # char start offsets for each word
+    starts =
+      words
+      |> Enum.reduce({[], 0}, fn w, {acc, pos} -> {[pos | acc], pos + String.length(w) + 1} end)
+      |> elem(0)
+      |> Enum.reverse()
+
+    wlen = length(words)
+
+    tokens =
+      for i <- 0..(wlen - 1), n <- min(max_n, wlen - i)..1//-1 do
+        phrase = words |> Enum.slice(i, n) |> Enum.join(" ")
+        start  = Enum.at(starts, i)
+        len    = String.length(phrase)
+
+        %{index: nil, span: {start, len}, n: n, phrase: phrase, mw: n > 1, instances: []}
+      end
+      |> Enum.with_index()
+      |> Enum.map(fn {t, idx} -> Map.put(t, :index, idx) end)
+
+    si |> Map.put(:sentence, s_norm) |> Map.put(:tokens, tokens)
+  end
+
+  defp rebuild_word_ngrams(si, _), do: si
+
+  # Keep tokens where sentence slice matches token.phrase (normalized)
+  defp keep_only_word_boundary_tokens(%{sentence: s, tokens: toks} = si)
+       when is_binary(s) and is_list(toks) do
+    kept =
+      Enum.filter(toks, fn t ->
+        case Map.get(t, :span) do
+          {start, len} when is_integer(start) and is_integer(len) and start >= 0 and len > 0 ->
+            from_span = String.slice(s, start, len) || ""
+            norm(from_span) == norm(Map.get(t, :phrase))
+          _ -> false
+        end
+      end)
+
+    %{si | tokens: kept}
+  end
+
+  defp keep_only_word_boundary_tokens(si), do: si
+
+  # ───────────────────────── Helpers ─────────────────────────
+
+  defp norm(nil), do: ""
+  defp norm(v) when is_binary(v),
+    do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+  defp norm(v),
+    do: v |> Kernel.to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 end
 

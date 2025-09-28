@@ -14,4 +14,3 @@ else
     json: Jason
   )
 end
-

@@ -12,7 +12,13 @@ defmodule Brain.LIFGStage1 do
   @type si :: map()
 
   @spec run(si, [number()], keyword()) ::
-          {:ok, %{choices: [map()], boosts: [{binary(), number()}], inhibitions: [{binary(), number()}], audit: map()}}
+          {:ok,
+           %{
+             choices: [map()],
+             boosts: [{binary(), number()}],
+             inhibitions: [{binary(), number()}],
+             audit: map()
+           }}
   def run(si, context_vec, opts \\ []) when is_list(context_vec) do
     candidates = si_to_candidates!(si)
 
@@ -59,7 +65,7 @@ defmodule Brain.LIFGStage1 do
   defp si_to_candidates!(list) when is_list(list), do: list
 
   defp si_to_candidates!(other),
-    do: raise ArgumentError, "Cannot extract LIFG candidates from: #{inspect(other)}"
+    do: raise(ArgumentError, "Cannot extract LIFG candidates from: #{inspect(other)}")
 
   # ----- signal application -----
 
@@ -95,4 +101,3 @@ defmodule Brain.LIFGStage1 do
     GenServer.cast(Brain.via(id), {:activate, %{delta: delta}})
   end
 end
-

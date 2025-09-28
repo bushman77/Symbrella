@@ -14,7 +14,7 @@ defmodule Db.Lexicon do
   @spec fetch_by_norms([String.t()]) :: [BrainCell.t()]
   def fetch_by_norms(norms) when is_list(norms) do
     norms = Enum.uniq(norms)
-    Db.all(from b in BrainCell, where: b.norm in ^norms)
+    Db.all(from(b in BrainCell, where: b.norm in ^norms))
   end
 
   @doc """
@@ -23,15 +23,18 @@ defmodule Db.Lexicon do
   @spec fetch_by_ids([String.t()]) :: [BrainCell.t()]
   def fetch_by_ids(ids) when is_list(ids) do
     ids = Enum.uniq(ids)
-    Db.all(from b in BrainCell, where: b.id in ^ids)
+    Db.all(from(b in BrainCell, where: b.id in ^ids))
   end
 
   # Optional, retained for feature-flag use
   def ensure_pos_variants_from_tokens(tokens, opts \\ []) do
-    only_mw?      = !!opts[:only_mw]
-    pos_list      = opts[:pos_inventory] ||
-                    Application.get_env(:symbrella, :pos_inventory) ||
-                    @pos_inventory
+    only_mw? = !!opts[:only_mw]
+
+    pos_list =
+      opts[:pos_inventory] ||
+        Application.get_env(:symbrella, :pos_inventory) ||
+        @pos_inventory
+
     gram_function = opts[:gram_function] || ""
 
     now_naive = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
@@ -44,7 +47,7 @@ defmodule Db.Lexicon do
           pos <- pos_list do
         norm = normize(phrase)
         type = opts[:type] || if(mw?, do: "phrase", else: "word")
-        id   = [norm, pos || "", type, gram_function || ""] |> Enum.join("|")
+        id = [norm, pos || "", type, gram_function || ""] |> Enum.join("|")
 
         %{
           id: id,
@@ -82,7 +85,7 @@ defmodule Db.Lexicon do
       from(b in BrainCell, where: b.id in ^ids)
       |> Db.update_all(set: [status: "active", updated_at: now_naive])
 
-    Db.all(from b in BrainCell, where: b.id in ^ids)
+    Db.all(from(b in BrainCell, where: b.id in ^ids))
   end
 
   defp normize(p),

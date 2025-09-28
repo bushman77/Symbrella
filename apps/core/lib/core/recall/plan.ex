@@ -24,4 +24,3 @@ defmodule Core.Recall.Plan do
           strategies: [strategy()]
         }
 end
-

@@ -13,6 +13,7 @@ defmodule Core.LexID do
 
   def normalize_word(w), do: w |> String.trim() |> String.downcase()
   def normalize_pos(nil), do: "unk"
+
   def normalize_pos(pos) do
     case String.downcase(String.trim(pos)) do
       "adjective" -> "adj"
@@ -25,29 +26,27 @@ defmodule Core.LexID do
     end
   end
 
-@doc "Runtime check for sense ids like \"word|pos|idx\"."
-@spec looks_like_id?(binary) :: boolean
-def looks_like_id?(bin) when is_binary(bin) do
-  case String.split(bin, "|") do
-    [w, pos, idx] ->
-      w != "" and pos_ok?(pos) and integer_string?(idx)
-    _ ->
-      false
+  @doc "Runtime check for sense ids like \"word|pos|idx\"."
+  @spec looks_like_id?(binary) :: boolean
+  def looks_like_id?(bin) when is_binary(bin) do
+    case String.split(bin, "|") do
+      [w, pos, idx] ->
+        w != "" and pos_ok?(pos) and integer_string?(idx)
+
+      _ ->
+        false
+    end
+  end
+
+  defp pos_ok?(pos) do
+    norm = normalize_pos(pos)
+    norm in ["noun", "verb", "adj", "adv", "interj", "prep", "conj", "pron", "unk"]
+  end
+
+  defp integer_string?(s) do
+    case Integer.parse(s) do
+      {_, ""} -> true
+      _ -> false
+    end
   end
 end
-
-defp pos_ok?(pos) do
-  norm = normalize_pos(pos)
-  norm in ["noun","verb","adj","adv","interj","prep","conj","pron","unk"]
-end
-
-defp integer_string?(s) do
-  case Integer.parse(s) do
-    {_, ""} -> true
-    _ -> false
-  end
-end
-
-
-end
-

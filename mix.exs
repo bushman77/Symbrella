@@ -46,11 +46,12 @@ defmodule Symbrella.Umbrella.MixProject do
   defp aliases do
     [
       {:"negcache.clean", [&__MODULE__.clean_negcache/1]},
-      {:"cache.nuke",     [&__MODULE__.clean_negcache/1]},
+      {:"cache.nuke", [&__MODULE__.clean_negcache/1]},
 
       # DB lifecycle (Repo = Db) + negcache wipe
-      {:"db.setup",   ["ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
-      {:"db.reset",   ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
+      {:"db.setup", ["ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
+      {:"db.reset",
+       ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
       {:"db.migrate", ["ecto.migrate -r Db"]},
       {:"db.rollback", ["ecto.rollback -r Db"]},
       {:"db.migrations", ["ecto.migrations -r Db"]},
@@ -59,17 +60,17 @@ defmodule Symbrella.Umbrella.MixProject do
       {:dbreset, ["db.reset"]},
 
       # assets
-      {:"assets.build",  ["tailwind default", "esbuild default"]},
+      {:"assets.build", ["tailwind default", "esbuild default"]},
       {:"assets.deploy", ["tailwind default --minify", "esbuild default --minify", "phx.digest"]},
 
       # tests — keep cache clean so negatives don't bleed between runs
-      {:test, [
-        "ecto.create -r Db --quiet",
-        "ecto.migrate -r Db --quiet",
-        "negcache.clean",
-        "test"
-      ]}
+      {:test,
+       [
+         "ecto.create -r Db --quiet",
+         "ecto.migrate -r Db --quiet",
+         "negcache.clean",
+         "test"
+       ]}
     ]
   end
 end
-

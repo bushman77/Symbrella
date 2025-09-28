@@ -40,15 +40,17 @@ defmodule BrainLIFGPropertyTest do
   end
 
   defp candidate_gen(dim) do
-    gen all token_index <- integer(0..15),
-            lemma <- string(:alphanumeric, min_length: 1, max_length: 10),
-            id <- string(:alphanumeric, min_length: 3, max_length: 12),
-            pos <- member_of(~w(noun verb adj adv)),
-            lex_fit <- float(min: 0.0, max: 1.0),
-            rel_prior <- float(min: 0.0, max: 1.0),
-            intent_bias <- float(min: 0.0, max: 1.0),
-            activation <- float(min: 0.0, max: 1.0),
-            embedding <- list_of(float(min: -1.0, max: 1.0), length: dim) do
+    gen all(
+          token_index <- integer(0..15),
+          lemma <- string(:alphanumeric, min_length: 1, max_length: 10),
+          id <- string(:alphanumeric, min_length: 3, max_length: 12),
+          pos <- member_of(~w(noun verb adj adv)),
+          lex_fit <- float(min: 0.0, max: 1.0),
+          rel_prior <- float(min: 0.0, max: 1.0),
+          intent_bias <- float(min: 0.0, max: 1.0),
+          activation <- float(min: 0.0, max: 1.0),
+          embedding <- list_of(float(min: -1.0, max: 1.0), length: dim)
+        ) do
       %{
         id: id,
         token_index: token_index,
@@ -64,11 +66,12 @@ defmodule BrainLIFGPropertyTest do
   end
 
   defp grouped_candidates_gen(groups, senses_per_group, dim) do
-    gen all base <- list_of(candidate_gen(dim), length: groups * senses_per_group) do
+    gen all(base <- list_of(candidate_gen(dim), length: groups * senses_per_group)) do
       base
       |> Enum.with_index()
       |> Enum.map(fn {cand, i} ->
         t = div(i, senses_per_group)
+
         Map.merge(cand, %{
           token_index: t,
           lemma: "lemma_#{t}",
@@ -79,12 +82,13 @@ defmodule BrainLIFGPropertyTest do
   end
 
   property "softmax normalization yields per-group sums ≈ 1 and score range [0,1]" do
-    check all groups <- integer(1..8),
-              senses <- integer(2..6),
-              dim <- member_of([16, 32, 64]),
-              cands <- grouped_candidates_gen(groups, senses, dim),
-              ctx <- list_of(float(min: -1.0, max: 1.0), length: dim) do
-
+    check all(
+            groups <- integer(1..8),
+            senses <- integer(2..6),
+            dim <- member_of([16, 32, 64]),
+            cands <- grouped_candidates_gen(groups, senses, dim),
+            ctx <- list_of(float(min: -1.0, max: 1.0), length: dim)
+          ) do
       %{choices: choices} = lifg_run(cands, ctx)
 
       by_token = Enum.group_by(choices, & &1.token_index)
@@ -102,18 +106,19 @@ defmodule BrainLIFGPropertyTest do
   end
 
   property "boosts target winners; inhibitions exclude winners and cover the rest" do
-    check all groups <- integer(1..6),
-              senses <- integer(2..5),
-              dim <- member_of([8, 16, 32]),
-              cands <- grouped_candidates_gen(groups, senses, dim),
-              ctx <- list_of(float(min: -1.0, max: 1.0), length: dim) do
-
+    check all(
+            groups <- integer(1..6),
+            senses <- integer(2..5),
+            dim <- member_of([8, 16, 32]),
+            cands <- grouped_candidates_gen(groups, senses, dim),
+            ctx <- list_of(float(min: -1.0, max: 1.0), length: dim)
+          ) do
       %{choices: choices, boosts: boosts, inhibitions: inhibs} = lifg_run(cands, ctx)
 
-      winners   = MapSet.new(Enum.map(choices, & &1.chosen_id))
-      boosted   = MapSet.new(Enum.map(boosts, &elem(&1, 0)))
+      winners = MapSet.new(Enum.map(choices, & &1.chosen_id))
+      boosted = MapSet.new(Enum.map(boosts, &elem(&1, 0)))
       inhibited = MapSet.new(Enum.map(inhibs, &elem(&1, 0)))
-      all_ids   = MapSet.new(Enum.map(cands, & &1.id))
+      all_ids = MapSet.new(Enum.map(cands, & &1.id))
 
       # Each winner should be boosted, not inhibited
       assert MapSet.subset?(winners, boosted)
@@ -125,4 +130,3 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 end
-

@@ -6,9 +6,9 @@ defmodule Lexicon do
   use GenServer
   use Tesla
 
-  plug Tesla.Middleware.BaseUrl, "https://api.dictionaryapi.dev/api/v2/entries/en/"
-  plug Tesla.Middleware.JSON
-  plug Tesla.Middleware.Timeout, timeout: 5_000
+  plug(Tesla.Middleware.BaseUrl, "https://api.dictionaryapi.dev/api/v2/entries/en/")
+  plug(Tesla.Middleware.JSON)
+  plug(Tesla.Middleware.Timeout, timeout: 5_000)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -25,7 +25,6 @@ defmodule Lexicon do
     {:reply, response, state}
   end
 
-@doc "Compat stub for the Mix scaffold test."
+  @doc "Compat stub for the Mix scaffold test."
   def hello, do: :world
 end
-

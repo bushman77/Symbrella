@@ -4,4 +4,3 @@ defmodule Core.Brain.Index do
   @spec ids_for_phrase(String.t()) :: [String.t()]
   def ids_for_phrase(_phrase), do: []
 end
-

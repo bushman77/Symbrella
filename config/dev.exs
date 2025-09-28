@@ -34,4 +34,3 @@ config :swoosh, :api_client, false
 
 # Helpful stacktraces in dev
 config :phoenix, :stacktrace_depth, 20
-

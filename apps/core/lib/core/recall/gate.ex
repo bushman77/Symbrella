@@ -32,12 +32,12 @@ defmodule Core.Recall.Gate do
       end
 
     requires_knowledge? = !!Keyword.get(opts, :requires_knowledge?, false)
-    oov_terms     = Keyword.get(opts, :oov_terms, [])
-    unmet_slots   = Keyword.get(opts, :unmet_slots, [])
+    oov_terms = Keyword.get(opts, :oov_terms, [])
+    unmet_slots = Keyword.get(opts, :unmet_slots, [])
 
     conf_threshold = conf_threshold()
-    budget_ms  = Keyword.get(opts, :budget_ms, recall_budget_ms())
-    max_items  = Keyword.get(opts, :max_items, recall_max_items())
+    budget_ms = Keyword.get(opts, :budget_ms, recall_budget_ms())
+    max_items = Keyword.get(opts, :max_items, recall_max_items())
     strategies = Keyword.get(opts, :strategies, [:exact, :synonym, :embedding])
 
     reasons =
@@ -50,7 +50,7 @@ defmodule Core.Recall.Gate do
     decision =
       case reasons do
         [] -> :skip
-        _  -> :plan
+        _ -> :plan
       end
 
     trace_ev = %{
@@ -95,7 +95,7 @@ defmodule Core.Recall.Gate do
   end
 
   defp maybe_add(list, _reason, false), do: list
-  defp maybe_add(list, reason, true),  do: [reason | list]
+  defp maybe_add(list, reason, true), do: [reason | list]
 
   defp normalize_strategies(strats, oov_terms) do
     clean =
@@ -132,4 +132,3 @@ defmodule Core.Recall.Gate do
     end
   end
 end
-

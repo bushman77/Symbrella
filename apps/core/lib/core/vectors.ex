@@ -13,8 +13,8 @@ defmodule Core.Vectors do
   def fetch(key) do
     # DEMO: stable 3-D unit vector from the key (phash2). Swap with real storage.
     h = :erlang.phash2(key, 1_000_003)
-    a = (rem(h, 997) / 996) * :math.pi() * 2
-    b = (rem(div(h, 997), 991) / 990) * :math.pi() * 2
+    a = rem(h, 997) / 996 * :math.pi() * 2
+    b = rem(div(h, 997), 991) / 990 * :math.pi() * 2
 
     # Spherical-ish mapping, normalized
     x = :math.cos(a)
@@ -25,4 +25,3 @@ defmodule Core.Vectors do
     [x / norm, y / norm, z / norm]
   end
 end
-

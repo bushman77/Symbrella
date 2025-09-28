@@ -16,7 +16,8 @@ defmodule Core.NegCache do
 
   use GenServer
 
-  @type opts :: [dets_path: String.t(), ttl: pos_integer()]  # ttl in seconds
+  # ttl in seconds
+  @type opts :: [dets_path: String.t(), ttl: pos_integer()]
 
   # ——— Public API ———
 
@@ -49,8 +50,9 @@ defmodule Core.NegCache do
 
   @impl true
   def init(opts) do
+    # default 6h
     ttl_ms =
-      (Keyword.get(opts, :ttl, 21_600) |> max(1)) * 1_000  # default 6h
+      (Keyword.get(opts, :ttl, 21_600) |> max(1)) * 1_000
 
     dets_path =
       opts[:dets_path] || Application.app_dir(:core, "priv/negcache/negcache.dets")
@@ -78,7 +80,7 @@ defmodule Core.NegCache do
   @impl true
   def handle_call({:exists?, phrase}, _from, state) do
     norm = normalize(phrase)
-    now  = now_ms()
+    now = now_ms()
 
     reply =
       case :ets.lookup(state.ets, norm) do
@@ -131,9 +133,9 @@ defmodule Core.NegCache do
   @impl true
   def handle_cast({:put, phrase}, state) do
     norm = normalize(phrase)
-    exp  = now_ms() + state.ttl_ms
+    exp = now_ms() + state.ttl_ms
     true = :ets.insert(state.ets, {norm, exp})
-    :ok  = :dets.insert(state.dets, {norm, exp})
+    :ok = :dets.insert(state.dets, {norm, exp})
     {:noreply, state}
   end
 
@@ -156,7 +158,6 @@ defmodule Core.NegCache do
     %{si | tokens: pruned}
   end
 
-
   # ——— Internals ———
 
   defp normalize(phrase) when is_binary(phrase), do: Core.Text.normalize(phrase)
@@ -164,4 +165,3 @@ defmodule Core.NegCache do
 
   defp now_ms, do: System.system_time(:millisecond)
 end
-

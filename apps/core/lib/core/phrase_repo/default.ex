@@ -9,7 +9,7 @@ defmodule Core.PhraseRepo.Default do
   @impl true
   def exists?(phrase) when is_binary(phrase) do
     norm = normalize(phrase)
-    query = from b in BrainCell, where: b.norm == ^norm, select: 1
+    query = from(b in BrainCell, where: b.norm == ^norm, select: 1)
     Db.exists?(query)
   rescue
     e ->

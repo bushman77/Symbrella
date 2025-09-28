@@ -14,12 +14,12 @@ defmodule Core.Recall.Execute do
 
   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
   def execute(%SI{} = si, %Plan{} = plan, opts \\ []) do
-    t0         = now_ms()
+    t0 = now_ms()
     exists_fun = Keyword.get(opts, :exists_fun, default_exists_fun())
     neg_exists = Keyword.get(opts, :neg_exists_fun, default_neg_exists_fun())
-    neg_put    = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
-    budget_ms  = plan.budget_ms
-    max_items  = plan.max_items
+    neg_put = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
+    budget_ms = plan.budget_ms
+    max_items = plan.max_items
 
     {candidates, covered_tok_ids} = candidate_keys(si)
 
@@ -92,6 +92,7 @@ defmodule Core.Recall.Execute do
     |> Enum.flat_map(fn
       %{source: src, matched_tokens: mts} when src in [:runtime, :recency] ->
         Enum.map(mts, & &1.tok_id)
+
       _ ->
         []
     end)
@@ -102,7 +103,17 @@ defmodule Core.Recall.Execute do
 
   # ---------- strategy runner ----------
 
-  defp run_strategies(candidates, strategies, exists_fun, neg_exists, neg_put, max_items, budget_ms, t0, acc_refs) do
+  defp run_strategies(
+         candidates,
+         strategies,
+         exists_fun,
+         neg_exists,
+         neg_put,
+         max_items,
+         budget_ms,
+         t0,
+         acc_refs
+       ) do
     counts = %{exact: 0, synonym: 0, embedding: 0}
 
     # normalize limits to support :infinity
@@ -160,14 +171,44 @@ defmodule Core.Recall.Execute do
     do_exact(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, [], 0)
   end
 
-  defp do_exact([], _exists_fun, _neg_exists, _neg_put, _slots_left, _time_left_ms, _t0, acc, cnt),
-    do: {Enum.reverse(acc), %{exact: cnt}, false}
+  defp do_exact(
+         [],
+         _exists_fun,
+         _neg_exists,
+         _neg_put,
+         _slots_left,
+         _time_left_ms,
+         _t0,
+         acc,
+         cnt
+       ),
+       do: {Enum.reverse(acc), %{exact: cnt}, false}
 
-  defp do_exact([{_key, _tok_ids, _prio} | _] = _rest, _exists_fun, _neg_exists, _neg_put, slots_left, _tl, _t0, acc, cnt)
+  defp do_exact(
+         [{_key, _tok_ids, _prio} | _] = _rest,
+         _exists_fun,
+         _neg_exists,
+         _neg_put,
+         slots_left,
+         _tl,
+         _t0,
+         acc,
+         cnt
+       )
        when is_integer(slots_left) and slots_left <= 0,
-    do: {Enum.reverse(acc), %{exact: cnt}, false}
+       do: {Enum.reverse(acc), %{exact: cnt}, false}
 
-  defp do_exact([{key, tok_ids, _prio} | rest], exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt) do
+  defp do_exact(
+         [{key, tok_ids, _prio} | rest],
+         exists_fun,
+         neg_exists,
+         neg_put,
+         slots_left,
+         time_left_ms,
+         t0,
+         acc,
+         cnt
+       ) do
     elapsed = now_ms() - t0
 
     if time_left_ms != :infinity and elapsed >= time_left_ms do
@@ -177,13 +218,24 @@ defmodule Core.Recall.Execute do
       cond do
         exists_fun.(key) ->
           ref = to_active_ref_exact(key, tok_ids)
+
           next_slots =
             case slots_left do
               :infinity -> :infinity
               n -> n - 1
             end
 
-          do_exact(rest, exists_fun, neg_exists, neg_put, next_slots, time_left_ms, t0, [ref | acc], cnt + 1)
+          do_exact(
+            rest,
+            exists_fun,
+            neg_exists,
+            neg_put,
+            next_slots,
+            time_left_ms,
+            t0,
+            [ref | acc],
+            cnt + 1
+          )
 
         neg_exists.(key) ->
           do_exact(rest, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt)
@@ -213,7 +265,7 @@ defmodule Core.Recall.Execute do
     merged =
       (si.active_cells ++ added_refs)
       |> Enum.uniq_by(& &1.id)
-      |> Enum.sort_by(fn r -> {-(round(activation_of(r) * 1.0e6)), min_tok_id(r)} end)
+      |> Enum.sort_by(fn r -> {-round(activation_of(r) * 1.0e6), min_tok_id(r)} end)
 
     ev = %{
       stage: :recall_exec,
@@ -231,16 +283,16 @@ defmodule Core.Recall.Execute do
 
   # tolerate structs, maps, strings, anything
   defp activation_of(%Db.BrainCell{activation: a}) when is_number(a), do: a
-  defp activation_of(%{activation_snapshot: a}) when is_number(a),     do: a
-  defp activation_of(%{activation: a}) when is_number(a),              do: a
-  defp activation_of(_),                                               do: 0.0
+  defp activation_of(%{activation_snapshot: a}) when is_number(a), do: a
+  defp activation_of(%{activation: a}) when is_number(a), do: a
+  defp activation_of(_), do: 0.0
 
   # tolerate items with/without matched_tokens/token_id
-  defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}),                  do: t0
-  defp min_tok_id(%{matched_tokens: _mts}),                                 do: 0
-  defp min_tok_id(%{token_id: tid}) when is_integer(tid),                   do: tid
-  defp min_tok_id(%Db.BrainCell{token_id: tid}) when is_integer(tid),       do: tid
-  defp min_tok_id(_),                                                       do: @max_tok_id
+  defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}), do: t0
+  defp min_tok_id(%{matched_tokens: _mts}), do: 0
+  defp min_tok_id(%{token_id: tid}) when is_integer(tid), do: tid
+  defp min_tok_id(%Db.BrainCell{token_id: tid}) when is_integer(tid), do: tid
+  defp min_tok_id(_), do: @max_tok_id
 
   # ---- injected defaults ----
 
@@ -297,4 +349,3 @@ defmodule Core.Recall.Execute do
     end
   end
 end
-

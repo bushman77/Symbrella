@@ -28,4 +28,3 @@ defmodule Core.Brain do
 
   def activate_from_si(_), do: :ok
 end
-

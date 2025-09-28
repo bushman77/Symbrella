@@ -16,7 +16,7 @@ defmodule SymbrellaWeb.Router do
 
   scope "/", SymbrellaWeb do
     pipe_through :browser
-live "/", HomeLive, :index
+    live "/", HomeLive, :index
   end
 
   # Other scopes may use custom stacks.
