@@ -21,6 +21,8 @@ defmodule Core do
       |> CBrain.stm()
       |> Db.ltm()
       |> Lexicon.all()
+      |> Brain.LIFG.disambiguate_stage1() 
+
 
     cand_map = build_lifg_candidates_by_token(si)
     ctx      = context_vec(si)

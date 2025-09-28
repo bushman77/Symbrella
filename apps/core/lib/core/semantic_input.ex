@@ -1,27 +1,32 @@
 defmodule Core.SemanticInput do
   @moduledoc """
-  Pipeline state used across Core/Brain stages.
+  Core pipeline carrier (SI). Minimal, unambiguous.
+
+  Fields:
+    • sentence      — the original input sentence (single source of truth)
+    • source        — origin (e.g., :user, :test)
+    • tokens        — tokens produced by Token.tokenize/1
+    • active_cells  — lexicon/DB rows attached by downstream stages
+    • trace         — ordered list of stage events (maps), including LIFG output
+
+  Notes:
+    • We intentionally do NOT include :original_sentence (avoid ambiguity).
+    • Stages may read optional fields (e.g., :context_vec) via Map.get/2.
+    • LIFG writes its results only into a trace event (no extra struct keys).
   """
 
-  defstruct sentence: "",
-            source: :user,
-            tokens: [],
-            pos_list: [],
-            intent: nil,
-            keyword: nil,
-            confidence: 0.0,
-            mood: nil,
-            phrase_matches: [],
-            activation_summary: %{},
-            pattern_roles: %{},
-            active_cells: [],
-            brain_state_ref: nil,
-            trace: [],
-            # Stages results (new)
-            running_cell_ids: [],
-            db_cells: [],
-            negcache_guarded: [],
-            mwe_pending: []
+  @type t :: %__MODULE__{
+          sentence: String.t() | nil,
+          source: atom() | nil,
+          tokens: [Core.Token.t()],
+          active_cells: [map()],
+          trace: [map()]
+        }
 
-  @type t :: %__MODULE__{}
+  defstruct sentence: nil,
+            source: nil,
+            tokens: [],
+            active_cells: [],
+            trace: []
 end
+

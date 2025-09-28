@@ -1,6 +1,11 @@
 defmodule Db do
   @moduledoc "Umbrella-wide Repo. One DB, one config source."
-  use Ecto.Repo, otp_app: :db, adapter: Ecto.Adapters.Postgres, priv: "priv/repo"
+
+  use Ecto.Repo,
+    otp_app: :db,
+    adapter: Ecto.Adapters.Postgres,
+    priv: "priv/repo"
+
   import Ecto.Query, only: [from: 2]
   alias Db.BrainCell
 
@@ -24,43 +29,48 @@ defmodule Db do
       GenServer.cast(Brain, {:activate_cells, rows, @payload})
     end
 
-    # Update SI fields WITHOUT struct expansion
-    db_cells =
-      (si.db_cells || [])
-      |> Kernel.++(rows)
+    # Always treat :active_cells as a LIST (coerce if someone stored a map earlier)
+    existing = ensure_list(Map.get(si, :active_cells, []))
+    new_rows = ensure_list(rows)
+
+    active_cells =
+      existing
+      |> Kernel.++(new_rows)
       |> Enum.uniq_by(& &1.id)
 
-    db_hits = MapSet.new(for r <- rows, do: r.norm)
+    db_hits = MapSet.new(for r <- new_rows, do: r.norm)
 
     activation_summary =
-      Map.update(si.activation_summary || %{}, :db_hits, db_hits, fn existing ->
-        MapSet.union(existing, db_hits)
+      Map.update(si.activation_summary || %{}, :db_hits, db_hits, fn existing_hits ->
+        MapSet.union(existing_hits, db_hits)
       end)
 
     si
-    |> Map.put(:db_cells, db_cells)
+    |> Map.put(:active_cells, active_cells)
     |> Map.put(:activation_summary, activation_summary)
   end
 
-@doc """
-Return `true` if a *word* exists; guards invalid inputs without hitting the DB.
-Accepts a binary; trims whitespace. Empty/invalid → false immediately.
-"""
-@spec word_exists?(term) :: boolean()
-def word_exists?(term)
-def word_exists?(term) when is_binary(term) do
-  word = String.trim(term)
-  if word == "" do
-    false
-  else
-    # If you already have Db.exists?/1 that takes a word, delegate to it:
-    exists?(word)
-    # If your exists?/1 expects a query instead, use whatever helper you wrote
-    # to check by :word or :norm (this keeps the test intent intact).
+  @doc """
+  Return `true` if a *word* exists; guards invalid inputs without hitting the DB.
+  Accepts a binary; trims whitespace. Empty/invalid → false immediately.
+  """
+  @spec word_exists?(term) :: boolean()
+  def word_exists?(term)
+  def word_exists?(term) when is_binary(term) do
+    word = String.trim(term)
+    if word == "" do
+      false
+    else
+      exists?(word)
+    end
   end
-end
-def word_exists?(_), do: false
 
+  def word_exists?(_), do: false
+
+  defp ensure_list(nil), do: []
+  defp ensure_list(l) when is_list(l), do: l
+  defp ensure_list(m) when is_map(m), do: Map.values(m)
+  defp ensure_list(other), do: List.wrap(other)
 
   defp norm(nil), do: ""
   defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)

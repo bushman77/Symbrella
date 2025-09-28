@@ -54,7 +54,7 @@ defmodule Brain do
 
   Examples:
       Brain.activate_cells(["id1","id2"], %{delta: +1})
-      Brain.activate_cells(si, %{delta: -0.25})  # when si has :db_cells
+      Brain.activate_cells(si, %{delta: -0.25})  # when si has :active_cells
 
   The payload shape is delegated to the cell; by convention `%{delta: number}`.
   """
@@ -266,10 +266,10 @@ apply_control_signals(boosts2, inhib2, lifg_opts)
   defp extract_items(list) when is_list(list), do: list
 
   defp extract_items(%{} = si) do
-    case Map.get(si, :db_cells, []) do
+    case Map.get(si, :active_cells, []) do
       list when is_list(list) -> list
       other ->
-        Logger.warning("Brain.extract_items: :db_cells not a list (got #{inspect(other)})")
+        Logger.warning("Brain.extract_items: :active_cells not a list (got #{inspect(other)})")
         []
     end
   end

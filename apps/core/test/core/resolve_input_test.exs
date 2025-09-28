@@ -77,7 +77,6 @@ defmodule Core.ResolveInputTest do
   test "returns a SemanticInput struct and echoes the sentence/source" do
     si = resolve("Hello world")
     assert match?(%Core.SemanticInput{}, si)
-    assert si.original_sentence == "Hello world"
     assert si.sentence == "Hello world"
     assert is_list(si.tokens)
     assert is_atom(si.source)

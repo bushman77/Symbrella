@@ -1,85 +1,26 @@
-
 defmodule Brain.LIFG do
   @moduledoc """
-  Stage‑1 **Disambiguation** (Controlled Retrieval & Selection) inspired by the
-  **Left Inferior Frontal Gyrus (LIFG)**. Pure, stateless, fast.
+  Stage-1 Disambiguation (LIFG). Pure, stateless, fast.
 
-  v2.1.2: Fix doctest to use `Float.round/2` (Elixir has `round/1`, precision is `Float.round/2`).
-  v2.1.1: `scores: :all` now includes **all** per‑group normalized scores (softmax sums ≈ 1.0).
+  Public API:
+    • `disambiguate_stage1/1` — pipeline entry: SI → SI
+      (results are attached as a trace event that includes `choices`, `boosts`, `inhibitions`)
 
-  ## What it does
-  Given a batch of **candidate senses** (already active in STM) and a
-  **context vector**, it scores and normalizes senses *within each token*
-  group, chooses a winner (optionally keeping runner‑up when margin is small),
-  and emits **control signals** (boosts for winners, inhibitions for others).
-
-  ## Score recipe (weights are tunable)
+  Scoring recipe (weights tunable):
       score = w_lex*lex_fit
-            + w_sim*cosine(context_vec, sense_vec)
+            + w_sim*cosine(context_vec, embedding)
             + w_rel*rel_prior
             + w_prag*intent_bias
             + w_act*activation
 
-  Defaults: `w_lex=0.25, w_sim=0.40, w_rel=0.15, w_prag=0.10, w_act=0.10`.
-
-  ## Candidate shape
-      %{
-        id: binary(),
-        token_index: non_neg_integer(),
-        lemma: binary(),
-        pos: binary(),
-        embedding: [number()] | nil,
-        embedding_id: any() | nil,
-        lex_fit: number(),       # 0..1
-        rel_prior: number(),     # 0..1
-        intent_bias: number(),   # 0..1
-        activation: number()     # 0..1
-      }
-
-  ## API
-      disambiguate_stage1(candidates, context_vec, opts \\ []) :: {:ok, result}
-
-  ### Options
-    * `:weights` — map override for weights
-    * `:normalize` — `:softmax` (default) | `:maxnorm`
-    * `:margin_threshold` — default `0.12`
-    * `:boost_delta` — default `+0.5`
-    * `:inhibit_delta` — default `-0.25`
-    * `:vector_lookup` — `fn embedding_id -> [floats] end` (for lazy embeddings)
-    * `:scores` — `:all` (default) | `:top2` | `:none` (controls how much score detail to carry)
-    * `:parallel` — `false` (default) | `true` | `:auto`
-      When `:auto`, parallelizes only when `(#candidates × ctx_dim) >= :parallel_threshold` (default `20_000`).
-    * `:max_concurrency` — when parallel, overrides the concurrency level.
-    * `:parallel_threshold` — integer complexity threshold for `:auto`. Default `20_000`.
-
-  ### Telemetry
-  Emits `[:brain, :lifg, :stage1, :stop]` with `%{duration_ms: int}` and metadata
-  `%{groups, ctx_dim, scores_mode, normalize, parallel}`.
-
-  ### Result
-      %{
-        choices: [%SenseChoice{}],
-        boosts: [{id, float}],
-        inhibitions: [{id, float}],
-        audit: %{...}
-      }
-
-  ## Doctest
-      iex> cands = [
-      ...>   %{id: "w0a", token_index: 0, lemma: "bank", pos: "noun",
-      ...>     embedding: [1.0, 0.0], lex_fit: 0.9, rel_prior: 0.7, intent_bias: 0.6, activation: 0.5},
-      ...>   %{id: "w0b", token_index: 0, lemma: "bank", pos: "noun",
-      ...>     embedding: [0.0, 1.0], lex_fit: 0.8, rel_prior: 0.4, intent_bias: 0.3, activation: 0.4}
-      ...> ]
-      iex> {:ok, out} = Brain.LIFG.disambiguate_stage1(cands, [0.9, 0.1], margin_threshold: 0.05, scores: :all)
-      ...> sum = out.choices |> Enum.at(0) |> Map.fetch!(:scores) |> Map.values() |> Enum.sum()
-      ...> Float.round(sum, 6) == 1.0
-      true
+  Defaults: w_lex=0.25, w_sim=0.40, w_rel=0.15, w_prag=0.10, w_act=0.10.
+  Softmax per token group → probabilities sum ≈ 1.0.
   """
 
+  alias Core.SemanticInput
   alias __MODULE__.SenseChoice
 
-  @typedoc "Per‑token choice."
+  @typedoc "Per-token choice."
   @type t_choice :: %SenseChoice{
           token_index: non_neg_integer(),
           lemma: binary(),
@@ -101,7 +42,80 @@ defmodule Brain.LIFG do
               features: %{}
   end
 
-  @spec disambiguate_stage1([map()], [number()], keyword() | map()) ::
+  # ─────────────────────────────
+  # SI → SI (pipeline-safe)
+  # ─────────────────────────────
+  @doc "Consume SI, compute LIFG choices, append a trace event, return SI."
+  @spec disambiguate_stage1(SemanticInput.t()) :: SemanticInput.t()
+  def disambiguate_stage1(%SemanticInput{} = si) do
+    tokens = si.tokens || []
+    cells  = si.active_cells || []
+    ctx    = Map.get(si, :context_vec, [0.0])
+
+    norm = fn s ->
+      s
+      |> to_string()
+      |> String.downcase()
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+    end
+
+    cells_normed =
+      Enum.map(cells, fn m ->
+        word = m[:word] || m["word"] || ""
+        n    = m[:norm] || m["norm"] || word
+        Map.merge(m, %{__norm__: norm.(n), __lemma__: word})
+      end)
+
+    candidates =
+      tokens
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {t, idx} ->
+        tnorm = norm.(Map.get(t, :phrase, ""))
+
+        cells_normed
+        |> Enum.filter(fn c ->
+          c.__norm__ == tnorm or
+            String.contains?(tnorm, c.__norm__) or
+            String.contains?(c.__norm__, tnorm)
+        end)
+        |> Enum.map(fn c ->
+          %{
+            id: c[:id] || c["id"],
+            token_index: idx,
+            lemma: c.__lemma__ || "",
+            pos: c[:pos] || c["pos"],
+            lex_fit: c[:lex_fit] || 0.6,
+            rel_prior: c[:rel_prior] || 0.5,
+            intent_bias: c[:intent_bias] || 0.0,
+            activation: c[:activation] || 0.0,
+            embedding: c[:embedding] # may be nil
+          }
+        end)
+      end)
+
+    # Use private scorer (no public /3)
+    {:ok, out} = do_disambiguate(candidates, ctx, [])
+
+    ev = %{
+      stage: :lifg_stage1,
+      normalize: :softmax,
+      groups: candidates |> Enum.map(& &1.token_index) |> MapSet.new() |> MapSet.size(),
+      scores_mode: :all,
+      ctx_dim: length(ctx),
+      timing_ms: out.audit.timing_ms,
+      choices: out.choices,
+      boosts: out.boosts,
+      inhibitions: out.inhibitions
+    }
+
+    %SemanticInput{si | trace: [ev | (si.trace || [])]}
+  end
+
+  # ─────────────────────────────
+  # Private scorer
+  # ─────────────────────────────
+  @spec do_disambiguate([map()], [number()], keyword()) ::
           {:ok,
            %{
              choices: [t_choice()],
@@ -109,102 +123,60 @@ defmodule Brain.LIFG do
              inhibitions: [{binary(), number()}],
              audit: map()
            }}
-  def disambiguate_stage1(candidates, context_vec, opts \\ []) when is_list(candidates) do
+  defp do_disambiguate(candidates, context_vec, opts) when is_list(candidates) do
     t0 = System.monotonic_time()
 
-    weights = Map.merge(default_weights(), Map.new(Keyword.get(opts, :weights, %{})))
-    normalize = Keyword.get(opts, :normalize, :softmax)
+    weights          = Map.merge(default_weights(), Map.new(Keyword.get(opts, :weights, %{})))
     margin_threshold = Keyword.get(opts, :margin_threshold, 0.12)
-    boost_delta = Keyword.get(opts, :boost_delta, 0.5)
-    inhibit_delta = Keyword.get(opts, :inhibit_delta, -0.25)
-    vector_lookup = Keyword.get(opts, :vector_lookup, nil)
-    scores_mode = Keyword.get(opts, :scores, :all)
+    scores_mode      = Keyword.get(opts, :scores, :all)
 
-    # parallel decision (supports :auto)
-    parallel_dec = Keyword.get(opts, :parallel, false)
-    parallel? =
-      case parallel_dec do
-        true -> true
-        false -> false
-        :auto ->
-          complexity = length(candidates) * length(context_vec)
-          threshold = Keyword.get(opts, :parallel_threshold, 20_000)
-          complexity >= threshold
-      end
-
-    max_conc = Keyword.get(opts, :max_concurrency, System.schedulers_online())
-
-    # group by token_index
-    groups = Enum.group_by(candidates, & &1.token_index)
+    groups   = Enum.group_by(candidates, & &1.token_index)
     ctx_norm = l2(context_vec)
 
-    chooser = fn {token_idx, cands} ->
-      {cand_feats, normed} = score_and_normalize(cands, context_vec, ctx_norm, vector_lookup, weights, normalize)
-      build_choice(token_idx, cand_feats, normed, margin_threshold, scores_mode)
-    end
-
     choices =
-      if parallel? do
-        groups
-        |> Task.async_stream(chooser,
-              max_concurrency: max_conc,
-              timeout: :infinity)
-        |> Enum.map(fn {:ok, choice} -> choice end)
-      else
-        Enum.map(groups, chooser)
-      end
+      groups
+      |> Enum.map(fn {token_idx, cands} ->
+        {_feats, normed} = score_and_normalize(cands, context_vec, ctx_norm, weights)
+        build_choice(token_idx, normed, margin_threshold, scores_mode)
+      end)
+      |> Enum.reject(&is_nil/1)
 
-    # control signals using group membership (independent of scores_mode)
     choices_by_token = Map.new(choices, &{&1.token_index, &1})
+
     losers =
       for {tidx, cands} <- groups,
+          ch = Map.get(choices_by_token, tidx),
+          ch != nil,
           c <- cands,
-          ch = Map.fetch!(choices_by_token, tidx),
           c.id != ch.chosen_id,
           uniq: true do
         c.id
       end
 
-    boosts = Enum.map(choices, &{&1.chosen_id, boost_delta})
-    inhibitions = Enum.map(losers, &{&1, inhibit_delta})
+    boosts      = Enum.map(choices, &{&1.chosen_id, +0.5})
+    inhibitions = Enum.map(losers,  &{&1, -0.25})
 
-    t1 = System.monotonic_time()
-    ms = System.convert_time_unit(t1 - t0, :native, :millisecond)
+    ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
 
     audit = %{
       stage: :lifg_stage1,
-      normalize: normalize,
+      normalize: :softmax,
       margin_threshold: margin_threshold,
       weights: weights,
       timing_ms: ms,
       groups: map_size(groups),
       scores_mode: scores_mode,
-      parallel: parallel?,
-      max_concurrency: max_conc,
       ctx_dim: length(context_vec)
     }
-
-    # telemetry
-    :telemetry.execute(
-      [:brain, :lifg, :stage1, :stop],
-      %{duration_ms: ms},
-      %{
-        groups: map_size(groups),
-        ctx_dim: length(context_vec),
-        scores_mode: scores_mode,
-        normalize: normalize,
-        parallel: parallel?
-      }
-    )
 
     {:ok, %{choices: choices, boosts: boosts, inhibitions: inhibitions, audit: audit}}
   end
 
-  @doc "Default weights used by `disambiguate_stage1/3`."
+  @doc "Default weights."
   @spec default_weights() :: %{lex: float(), sim: float(), rel: float(), prag: float(), act: float()}
   def default_weights, do: %{lex: 0.25, sim: 0.40, rel: 0.15, prag: 0.10, act: 0.10}
 
-  @doc "Cosine similarity between two vectors. Returns `0.0` on nil or zero‑norm."
+  @doc "Cosine similarity; 0.0 on nil/zero-norm."
   @spec cosine([number()] | nil, [number()] | nil) :: float()
   def cosine(nil, _), do: 0.0
   def cosine(_, nil), do: 0.0
@@ -215,37 +187,24 @@ defmodule Brain.LIFG do
     if na == 0.0 or nb == 0.0, do: 0.0, else: dot / (na * nb)
   end
 
-  @doc """
-  Normalize a list of scores:
-    * `:softmax` — numerically stable softmax
-    * `:maxnorm` — divide by max (or zeros)
-  """
-  @spec normalize_scores([number()], :softmax | :maxnorm) :: [float()]
-  def normalize_scores(scores, :maxnorm) do
-    maxv = Enum.max([0.0 | scores])
-    if maxv == 0.0, do: List.duplicate(0.0, length(scores)), else: Enum.map(scores, &(&1 / maxv))
-  end
-  def normalize_scores(scores, :softmax) do
-    m = Enum.max([0.0 | scores])
+  @spec normalize_scores([number()]) :: [float()]
+  def normalize_scores(scores) do
+    m    = Enum.max([0.0 | scores])
     exps = Enum.map(scores, fn s -> :math.exp(s - m) end)
-    z = Enum.sum(exps)
+    z    = Enum.sum(exps)
     if z == 0.0, do: List.duplicate(0.0, length(scores)), else: Enum.map(exps, &(&1 / z))
   end
 
-  # ─────────────── internals ───────────────
+  # ───────────── internals ─────────────
 
-  defp score_and_normalize(cands, ctx, ctx_norm, vector_lookup, weights, normalize) do
-    # score raw
+  defp score_and_normalize(cands, ctx, ctx_norm, weights) do
     cand_feats =
       Enum.map(cands, fn cand ->
-        vec =
-          cond do
-            is_list(cand[:embedding]) -> cand[:embedding]
-            cand[:embedding_id] && is_function(vector_lookup, 1) -> safe_lookup(vector_lookup, cand.embedding_id)
-            true -> nil
+        sim =
+          case cand[:embedding] do
+            nil -> 0.0
+            vec -> cosine_with_ctxnorm(vec, ctx, ctx_norm)
           end
-
-        sim = cosine_with_ctxnorm(vec, ctx, ctx_norm)
 
         score =
           weights.lex * safe_num(cand[:lex_fit]) +
@@ -257,8 +216,7 @@ defmodule Brain.LIFG do
         {cand, %{sim: sim, score_raw: score}}
       end)
 
-    # normalize
-    normed_vals = normalize_scores(Enum.map(cand_feats, fn {_c, f} -> f.score_raw end), normalize)
+    normed_vals = normalize_scores(Enum.map(cand_feats, fn {_c, f} -> f.score_raw end))
 
     normed =
       Enum.zip(cand_feats, normed_vals)
@@ -269,59 +227,41 @@ defmodule Brain.LIFG do
     {cand_feats, normed}
   end
 
-  defp build_choice(token_idx, _cand_feats, normed, margin_threshold, scores_mode) do
+  defp build_choice(token_idx, normed, margin_threshold, scores_mode) do
     case top2_unordered(normed) do
       :none ->
         nil
 
       {:one, {cand1, f1}} ->
-        scores_map =
-          case scores_mode do
-            :all -> scores_map_from_normed(normed)
-            :top2 -> scores_map_from_pairs([{cand1, f1}])
-            :none -> %{}
-          end
-
         %SenseChoice{
           token_index: token_idx,
           lemma: cand1.lemma || "",
           chosen_id: cand1.id,
           alt_ids: [],
-          scores: scores_map,
+          scores: scores_map_from_normed(normed, scores_mode, [{cand1, f1}]),
           margin: 0.0,
           features: base_features(cand1, f1)
         }
 
       {:two, {cand1, f1}, {cand2, f2}} ->
-        margin = f1.score_norm - f2.score_norm
+        margin  = f1.score_norm - f2.score_norm
         alt_ids = if margin < margin_threshold, do: [cand2.id], else: []
-
-        scores_map =
-          case scores_mode do
-            :all -> scores_map_from_normed(normed)
-            :top2 -> scores_map_from_pairs([{cand1, f1}, {cand2, f2}])
-            :none -> %{}
-          end
 
         %SenseChoice{
           token_index: token_idx,
           lemma: cand1.lemma || "",
           chosen_id: cand1.id,
           alt_ids: alt_ids,
-          scores: scores_map,
+          scores: scores_map_from_normed(normed, scores_mode, [{cand1, f1}, {cand2, f2}]),
           margin: margin,
           features: base_features(cand1, f1)
         }
     end
   end
 
-  defp scores_map_from_normed(normed) do
-    normed |> Enum.map(fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
-  end
-
-  defp scores_map_from_pairs(pairs) do
-    pairs |> Enum.map(fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
-  end
+  defp scores_map_from_normed(normed, :all, _pairs), do: Enum.map(normed, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
+  defp scores_map_from_normed(_normed, :top2, pairs), do: Enum.map(pairs, fn {c, f} -> {c.id, f.score_norm} end) |> Map.new()
+  defp scores_map_from_normed(_normed, :none, _pairs), do: %{}
 
   defp base_features(cand, feats) do
     %{
@@ -336,7 +276,7 @@ defmodule Brain.LIFG do
     }
   end
 
-  # Single pass selection of top‑2 by score_norm with **stable tie‑breaker** (id).
+  # pick best & runner-up by score_norm; stable tie-break by id
   defp top2_unordered([]), do: :none
   defp top2_unordered([one]), do: {:one, one}
   defp top2_unordered([first, second | rest]) do
@@ -344,9 +284,9 @@ defmodule Brain.LIFG do
       Enum.reduce(rest, init_order(first, second), fn {c, f}, {bc, bf, sc, sf} ->
         cond do
           better?({c, f}, {bc, bf}) -> {c, f, bc, bf}
-          sc == nil -> {bc, bf, c, f}
+          sc == nil                 -> {bc, bf, c, f}
           better?({c, f}, {sc, sf}) -> {bc, bf, c, f}
-          true -> {bc, bf, sc, sf}
+          true                      -> {bc, bf, sc, sf}
         end
       end)
 
@@ -357,28 +297,20 @@ defmodule Brain.LIFG do
     if better?({c1, f1}, {c2, f2}), do: {c1, f1, c2, f2}, else: {c2, f2, c1, f1}
   end
 
-  # Stable comparison: prefer higher score; on equal score_norm, prefer lexicographically smaller id.
   defp better?({_c1, f1}, {_c2, f2}) when f1.score_norm > f2.score_norm, do: true
   defp better?({_c1, f1}, {_c2, f2}) when f1.score_norm < f2.score_norm, do: false
   defp better?({c1, _f1}, {c2, _f2}), do: c1.id <= c2.id
 
-  defp cosine_with_ctxnorm(nil, _ctx, _ctxn), do: 0.0
   defp cosine_with_ctxnorm(_vec, _ctx, 0.0), do: 0.0
+  defp cosine_with_ctxnorm(nil, _ctx, _ctxn), do: 0.0
   defp cosine_with_ctxnorm(vec, ctx, ctxn) do
     na = l2(vec)
     if na == 0.0, do: 0.0, else: dot(vec, ctx) / (na * ctxn)
   end
 
-  defp safe_lookup(fun, id) do
-    try do
-      fun.(id)
-    rescue
-      _ -> nil
-    end
-  end
-
   defp dot(a, b), do: Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
-  defp l2(v), do: v |> Enum.reduce(0.0, fn x, acc -> acc + x * x end) |> :math.sqrt()
+  defp l2(v),      do: v |> Enum.reduce(0.0, fn x, acc -> acc + x * x end) |> :math.sqrt()
   defp safe_num(nil), do: 0.0
   defp safe_num(x) when is_number(x), do: x * 1.0
 end
+

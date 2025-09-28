@@ -14,8 +14,7 @@ defmodule Core.TokenMWTest do
   end
 
   test "tokenizer builds MW tokens when repo knows the phrase" do
-    si = Core.Token.tokenize("Kick the bucket today",
-          source: :test, phrase_repo: PhraseRepoFake)
+    si = Core.Token.tokenize("Kick the bucket today")
 
     assert Enum.any?(si.tokens, fn t ->
              String.downcase(t.phrase) == "kick the bucket" and t.mw == true
