@@ -6,7 +6,11 @@ defmodule Core.RuntimeBind do
 
   alias Core.SemanticInput
 
-  @type snapshot_t :: map() | fun() | {any(), list()}
+  @type snapshot_t ::
+          map()
+          | (binary() -> list())
+          | (binary(), keyword() -> list())
+          | {any(), list()}
 
   # Tests call bind/1; just forward to bind/2.
   @spec bind(SemanticInput.t()) :: SemanticInput.t()
@@ -129,11 +133,31 @@ defmodule Core.RuntimeBind do
       keys
       |> Enum.flat_map(&Map.get(hitmap, &1, []))
       |> Enum.uniq_by(& &1.tok_id)
+      |> Enum.sort_by(& &1.tok_id)   # stable [0,1,2,...] for tests
 
     cell
     |> Map.put_new(:source, :runtime)
     |> Map.put_new(:matched_tokens, matches)
+    |> Map.put_new(:reason, :matched_active_cell)
+    |> put_activation_snapshot()
   end
+
+  defp put_activation_snapshot(%{} = cell) do
+    snap =
+      cond do
+        is_number(cell[:activation_snapshot])   -> cell[:activation_snapshot] * 1.0
+        is_number(cell[:activation])            -> cell[:activation] * 1.0
+        is_number(cell[:modulated_activation])  -> cell[:modulated_activation] * 1.0
+        is_number(cell[:score])                 -> cell[:score] * 1.0
+        true -> nil
+      end
+
+    if is_number(snap), do: Map.put(cell, :activation_snapshot, snap), else: cell
+  end
+
+  # -------------------------
+  # Validity
+  # -------------------------
 
   defp valid_cell?(%{id: id}) when is_binary(id) or is_integer(id), do: true
   defp valid_cell?(_), do: false
@@ -166,13 +190,14 @@ defmodule Core.RuntimeBind do
 
     # Map phrase -> [%{tok_id: ...}]
     Enum.reduce(Enum.with_index(tokens), %{}, fn {t, idx}, acc ->
-      # word token
+      # word token (append to preserve ascending order)
       acc =
         case token_phrase(t) do
           nil -> acc
-          p   -> Map.update(acc, String.downcase(p), [%{tok_id: token_id(t, idx)}], fn lst ->
-                   [%{tok_id: token_id(t, idx)} | lst]
-                 end)
+          p   ->
+            Map.update(acc, String.downcase(p), [%{tok_id: token_id(t, idx)}], fn lst ->
+              lst ++ [%{tok_id: token_id(t, idx)}]
+            end)
         end
 
       # mwe head -> expand to its phrase and all member token ids
@@ -184,7 +209,7 @@ defmodule Core.RuntimeBind do
 
             {phrase, ids} ->
               Map.update(acc, String.downcase(phrase), Enum.map(ids, &%{tok_id: &1}), fn lst ->
-                Enum.uniq_by(Enum.map(ids, &%{tok_id: &1}) ++ lst, & &1.tok_id)
+                Enum.uniq_by(lst ++ Enum.map(ids, &%{tok_id: &1}), & &1.tok_id)
               end)
           end
         else
@@ -207,12 +232,12 @@ defmodule Core.RuntimeBind do
   defp token_phrase(%_struct{phrase: p}) when is_binary(p), do: p
   defp token_phrase(%{} = t) do
     cond do
-      is_binary(Map.get(t, :phrase)) -> Map.get(t, :phrase)
+      is_binary(Map.get(t, :phrase))  -> Map.get(t, :phrase)
       is_binary(Map.get(t, "phrase")) -> Map.get(t, "phrase")
-      is_binary(Map.get(t, :norm))   -> Map.get(t, :norm)
-      is_binary(Map.get(t, "norm"))  -> Map.get(t, "norm")
-      is_binary(Map.get(t, :text))   -> Map.get(t, :text)
-      is_binary(Map.get(t, "text"))  -> Map.get(t, "text")
+      is_binary(Map.get(t, :norm))    -> Map.get(t, :norm)
+      is_binary(Map.get(t, "norm"))   -> Map.get(t, "norm")
+      is_binary(Map.get(t, :text))    -> Map.get(t, :text)
+      is_binary(Map.get(t, "text"))   -> Map.get(t, "text")
       true -> nil
     end
   end
@@ -335,9 +360,39 @@ defmodule Core.RuntimeBind do
   # Merge with source precedence; numeric :source_priority wins, else name map
   defp merge_cell(a, b) do
     {pa, pb} = {source_pri(a), source_pri(b)}
-    preferred = if pb > pa, do: b, else: a
-    fallback  = if pb > pa, do: a, else: b
-    Map.merge(fallback, preferred, fn _k, _v1, v2 -> v2 end)
+    sa = snapshot_of(a)
+    sb = snapshot_of(b)
+
+    preferred =
+      cond do
+        pb > pa -> b
+        pa > pb -> a
+        is_number(sb) and is_number(sa) and sb > sa -> b
+        true -> a
+      end
+
+    fallback = if preferred === a, do: b, else: a
+
+    merged =
+      Map.merge(fallback, preferred, fn _k, _v1, v2 -> v2 end)
+
+    # Ensure the final cell’s snapshot reflects the winner’s source
+    snap = snapshot_of(preferred) || snapshot_of(fallback)
+    if is_number(snap), do: Map.put(merged, :activation_snapshot, snap), else: merged
+  end
+
+  defp snapshot_of(cell) do
+    cond do
+      is_number(cell[:activation_snapshot])   -> cell[:activation_snapshot] * 1.0
+      is_number(cell["activation_snapshot"])  -> cell["activation_snapshot"] * 1.0
+      is_number(cell[:activation])            -> cell[:activation] * 1.0
+      is_number(cell["activation"])           -> cell["activation"] * 1.0
+      is_number(cell[:modulated_activation])  -> cell[:modulated_activation] * 1.0
+      is_number(cell["modulated_activation"]) -> cell["modulated_activation"] * 1.0
+      is_number(cell[:score])                 -> cell[:score] * 1.0
+      is_number(cell["score"])                -> cell["score"] * 1.0
+      true -> nil
+    end
   end
 
   defp source_pri(%{source_priority: p}) when is_number(p), do: p * 1.0
