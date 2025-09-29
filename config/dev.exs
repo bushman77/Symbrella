@@ -34,3 +34,9 @@ config :swoosh, :api_client, false
 
 # Helpful stacktraces in dev
 config :phoenix, :stacktrace_depth, 20
+
+config :core, :tokenizer_defaults,
+  mode: :words,
+  emit_chargrams: false
+
+config :brain, :lifg_weights, prime: 0.05

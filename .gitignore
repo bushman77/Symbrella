@@ -43,3 +43,11 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 bun.lockb
+# Archives/bundles
+*.zip
+*.tar
+*.gz
+*.tgz
+*.7z
+*.rar
+

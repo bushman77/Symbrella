@@ -34,11 +34,11 @@ defmodule Db do
     existing_rows =
       case norms do
         [] -> []
-        _  -> from(b in BrainCell, where: b.norm in ^norms) |> Db.all()
+        _ -> from(b in BrainCell, where: b.norm in ^norms) |> Db.all()
       end
 
     existing_norms = MapSet.new(for r <- existing_rows, do: r.norm)
-    missing_norms  = Enum.reject(norms, &MapSet.member?(existing_norms, &1))
+    missing_norms = Enum.reject(norms, &MapSet.member?(existing_norms, &1))
 
     # Enrich via Lexicon only for missing norms (owned by LTM)
     if missing_norms != [] and Keyword.get(opts, :enrich_lexicon?, true) do
@@ -48,17 +48,18 @@ defmodule Db do
     new_rows =
       case missing_norms do
         [] -> []
-        _  -> from(b in BrainCell, where: b.norm in ^missing_norms) |> Db.all()
+        _ -> from(b in BrainCell, where: b.norm in ^missing_norms) |> Db.all()
       end
 
     rows = existing_rows ++ new_rows
 
-if rows != [] do
-  payload = Map.put(@payload, :via, :ltm)
-  if Process.whereis(Brain) do
-    Brain.activate_cells(rows, payload)
-  end
-end
+    if rows != [] do
+      payload = Map.put(@payload, :via, :ltm)
+
+      if Process.whereis(Brain) do
+        Brain.activate_cells(rows, payload)
+      end
+    end
 
     active_cells =
       si
@@ -85,27 +86,28 @@ end
   """
   @spec word_exists?(term) :: boolean()
   def word_exists?(term)
+
   def word_exists?(term) when is_binary(term) do
     word = String.trim(term)
     if word == "", do: false, else: exists?(word)
   end
+
   def word_exists?(_), do: false
 
   # ----------------- helpers -----------------
 
   defp sanitize_cell(%BrainCell{} = s), do: [s]
-  defp sanitize_cell(%{id: _} = m),     do: [m]
+  defp sanitize_cell(%{id: _} = m), do: [m]
   defp sanitize_cell(%{"id" => _} = m), do: [m]
   defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
   defp sanitize_cell(_), do: []
 
   defp cell_id(%BrainCell{id: id}), do: id
-  defp cell_id(%{id: id}),          do: id
-  defp cell_id(%{"id" => id}),      do: id
+  defp cell_id(%{id: id}), do: id
+  defp cell_id(%{"id" => id}), do: id
   defp cell_id(id) when is_binary(id), do: id
   defp cell_id(_), do: nil
 
   defp norm(nil), do: ""
   defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
 end
-

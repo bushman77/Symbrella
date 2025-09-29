@@ -14,7 +14,8 @@ defmodule Core.Lexicon do
       |> Enum.map(fn p ->
         %{
           phrase: p,
-          span: {0, 1},                    # harmless defaults; unused by all/1
+          # harmless defaults; unused by all/1
+          span: {0, 1},
           n: max(1, length(String.split(p))),
           mw: String.contains?(p, " "),
           instances: []
@@ -52,14 +53,16 @@ defmodule Core.Lexicon do
         norm =
           case m[:norm] || m["norm"] do
             nil -> word |> String.downcase() |> String.replace(~r/\s+/, " ") |> String.trim()
-            ""  -> word |> String.downcase() |> String.replace(~r/\s+/, " ") |> String.trim()
-            v   -> v
+            "" -> word |> String.downcase() |> String.replace(~r/\s+/, " ") |> String.trim()
+            v -> v
           end
 
         m
         |> Map.put(:norm, norm)
-        |> Map.put(:inserted_at, now)      # force-set
-        |> Map.put(:updated_at, now)       # force-set
+        # force-set
+        |> Map.put(:inserted_at, now)
+        # force-set
+        |> Map.put(:updated_at, now)
         |> Map.put_new(:activation, 0.0)
         |> Map.put_new(:modulated_activation, 0.0)
         |> Map.put_new(:dopamine, 0.0)
@@ -108,7 +111,8 @@ defmodule Core.Lexicon do
         {:error, :empty}
 
       NegCache.exists?(phrase) ->
-        []  # skip lookups we’ve previously marked as absent
+        # skip lookups we’ve previously marked as absent
+        []
 
       true ->
         case GenServer.call(Lexicon, {:fetch_word, phrase}, 7_000) do
@@ -118,6 +122,7 @@ defmodule Core.Lexicon do
                 (first["meanings"] || [])
                 |> Enum.reduce([], fn d, acc ->
                   defs = Enum.with_index(d["definitions"] || [])
+
                   acc ++
                     Enum.reduce(defs, [], fn {map, indx}, accum ->
                       accum ++
@@ -160,4 +165,3 @@ defmodule Core.Lexicon do
     end
   end
 end
-
