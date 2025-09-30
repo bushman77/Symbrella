@@ -1,25 +1,27 @@
 defmodule Core do
-  @moduledoc "Tokenize -> rebuild word n-grams -> STM -> LTM(owns lexicon) -> LIFG Stage-1 -> notify Brain."
+  @moduledoc """
+  Tokenize -> rebuild word n-grams -> STM -> LTM (DB read; Core orchestrates) -> LIFG Stage-1 -> notify Brain.
+  """
 
   alias Brain
   alias Core.Token
   alias Core.Lexicon
   alias Core.SemanticInput
   alias Db
+  alias Db.BrainCell   # [P-003] used by sanitize_cell/1 & cell_id/1
 
   @type si :: map()
   @type opts :: keyword()
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode = Keyword.get(opts, :mode, :test)
+    mode  = Keyword.get(opts, :mode, :test)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
     si0 =
       phrase
       |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      # <<< ensure struct here
-      |> wrap_si(phrase)
+      |> wrap_si(phrase)                 # ensure %SemanticInput{}
       |> rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put_new(:trace, [])
@@ -29,10 +31,10 @@ defmodule Core do
         si0
         |> Brain.stm()
         |> keep_only_word_boundary_tokens()
-        # LTM may enrich lexicon; returns SI
-        |> Db.ltm(opts)
+        # [P-003] LTM DB read; Core handles enrichment + direct GenServer cast
+        |> ltm_stage(opts)
         |> keep_only_word_boundary_tokens()
-        # merges :active_cells into SI
+        # merges :active_cells into SI (your existing Lexicon pass)
         |> Lexicon.all()
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
@@ -45,6 +47,7 @@ defmodule Core do
 
   # ─────────────────────── Brain notify ───────────────────────
 
+  # [P-003] Uses direct GenServer.cast/2 instead of any wrapper.
   defp notify_brain_activation(si, opts) do
     payload = %{
       delta: Keyword.get(opts, :delta, 0.1),
@@ -56,7 +59,7 @@ defmodule Core do
     lifg_count = si |> Map.get(:lifg_choices, []) |> length()
 
     if rows != [] and Process.whereis(Brain) do
-      Brain.activate_cells(rows, payload)
+      GenServer.cast(Brain, {:activate_cells, rows, payload})
     end
 
     Map.update(si, :trace, [], fn tr ->
@@ -121,6 +124,50 @@ defmodule Core do
         |> Map.update(:trace, [], &[ev | &1])
 
       {:error, _} ->
+        si
+    end
+  end
+
+  # ─────────────────────── LTM orchestrator ───────────────────────
+  # [P-003] New: consume Db.ltm/2 and orchestrate from Core (no wrappers; direct GenServer).
+
+  defp ltm_stage(si, opts) when is_map(si) do
+    case Db.ltm(si, opts) do
+      {:ok, %{rows: rows, missing_norms: missing, db_hits: db_hits}} ->
+        # (A) Optional lexicon enrichment (moved from Db)
+        if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
+          _ = Lexicon.ensure_cells(missing)
+          # If you need to immediately include newly created rows, re-query here.
+          # Otherwise they'll be available next pass.
+        end
+
+        # (B) Merge DB rows into SI.active_cells (moved from Db)
+        active_cells =
+          si
+          |> Map.get(:active_cells, [])
+          |> Kernel.++(rows)
+          |> Enum.flat_map(&sanitize_cell/1)
+          |> Enum.reject(&(cell_id(&1) == nil))
+          |> Enum.uniq_by(&cell_id/1)
+
+        activation_summary =
+          si
+          |> Map.get(:activation_summary, %{})
+          |> Map.update(:db_hits, db_hits, fn acc -> MapSet.union(acc, db_hits) end)
+
+        si1 =
+          si
+          |> Map.put(:active_cells, active_cells)
+          |> Map.put(:activation_summary, activation_summary)
+
+        # (C) Direct GenServer cast to Brain
+        if rows != [] and Process.whereis(Brain) do
+          GenServer.cast(Brain, {:activate_cells, rows, %{delta: 1.0, decay: 0.98, via: :ltm}})
+        end
+
+        si1
+
+      _other ->
         si
     end
   end
@@ -216,6 +263,19 @@ defmodule Core do
   defp wrap_si(_other, sentence),
     do: %SemanticInput{sentence: sentence, tokens: [], source: :test, trace: []}
 
+  # [P-003] moved from Db — used when merging active_cells
+  defp sanitize_cell(%BrainCell{} = s),      do: [s]
+  defp sanitize_cell(%{id: _} = m),          do: [m]
+  defp sanitize_cell(%{"id" => _} = m),      do: [m]
+  defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
+  defp sanitize_cell(_),                     do: []
+
+  defp cell_id(%BrainCell{id: id}),   do: id
+  defp cell_id(%{id: id}),            do: id
+  defp cell_id(%{"id" => id}),        do: id
+  defp cell_id(id) when is_binary(id),do: id
+  defp cell_id(_),                    do: nil
+
   defp norm(nil), do: ""
 
   defp norm(v) when is_binary(v),
@@ -229,3 +289,4 @@ defmodule Core do
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 end
+
