@@ -1,106 +1,129 @@
 defmodule Core.Lexicon do
   @moduledoc """
-  Public Lexicon API used by Core pipeline stages.
+  Core <-> Lexicon wiring.
+
+  - `all/2`: run the lexicon stage (scrape/normalize/upsert) and then
+    immediately re-query DB and merge those rows into SI.active_cells
+    so the same turn can use the new definitions.
+  - `lookup/1`: proxy to the `lexicon` app client (for UI fallbacks, etc).
+  - `bulk_upsert_senses/1`: delegate to DB.
   """
 
-  import Ecto.Query, only: [from: 2]
-
-  alias Db
-  alias Db.BrainCell
+  alias Core.SemanticInput, as: SI
+  alias Core.Lexicon.Stage
   alias Db.Lexicon, as: DbLex
-
-  @compile {:no_warn_undefined, Db.Lexicon}
-
-  @type word :: binary()
-  @type norm :: binary()
-  @type row :: %BrainCell{}
+alias Db
+alias Db.BrainCell
 
   @doc """
-  Ensure cells exist for the given list of normalized words.
-  (Delegates to DB layer; idempotent.)
+  Run the lexicon stage (if enabled), then re-query DB by norms and merge into SI.
   """
-@spec ensure_cells([binary()]) :: :ok
-def ensure_cells(norms) when is_list(norms) do
-  alias Db.BrainCell
-  alias Db
+  @spec all(SI.t(), Keyword.t()) :: SI.t()
+  def all(%SI{} = si, opts \\ []) do
+    if Keyword.get(opts, :lexicon_stage?, true) do
+      si1 = Stage.run(si)
 
-  fields = BrainCell.__schema__(:fields) |> MapSet.new()
-  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+      norms =
+        si1.tokens
+        |> Enum.map(&(&1[:phrase]))
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&String.downcase/1)
+        |> Enum.uniq()
 
-  entries =
-    norms
-    |> Enum.map(&(&1 |> to_string() |> String.trim() |> String.downcase(:default)))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-    |> Enum.map(fn n ->
-      pos  = "unk"
-      type = "seed"
-      gram = ""           # keep 4-part ID shape: norm|pos|type|gram
-      id   = Enum.join([n, pos, type, gram], "|")
+      rows = if norms == [], do: [], else: DbLex.fetch_by_norms(norms)
 
-      %{}
-      |> Map.put(:id, id)
-      |> Map.put(:norm, n)
-      |> maybe_put(:pos, pos, fields)
-      |> maybe_put(:type, type, fields)
-      |> maybe_put(:status, "active", fields)
-      |> maybe_put(:word, n, fields)    # optional; added only if column exists
-      |> maybe_put(:lemma, n, fields)   # optional; added only if column exists
-      |> maybe_put(:inserted_at, now, fields)
-      |> maybe_put(:updated_at, now, fields)
-      |> Map.take(MapSet.to_list(fields))
-    end)
+      if rows == [] do
+        si1
+      else
+        merged =
+          (si1.active_cells || [])
+          |> Kernel.++(rows)
+          |> dedup_by_id()
 
-  if entries != [] do
-    Db.insert_all(BrainCell, entries, on_conflict: :nothing)
-  end
-
-  :ok
-end
-
-defp maybe_put(map, key, val, fields),
-  do: if(MapSet.member?(fields, key), do: Map.put(map, key, val), else: map)
-
-  @doc """
-  Public `lookup/1` used by callers that expect it to exist.
-  Delegates to `safe_lookup/1`.
-  """
-  @spec lookup(word()) :: any()
-  def lookup(word), do: safe_lookup(word)
-
-  @doc """
-  Safe lookup that tolerates non-binary input and normalizes the word.
-  Replace with your real implementation as needed.
-  """
-  @spec safe_lookup(term()) :: any()
-  def safe_lookup(term) do
-    word =
-      case term do
-        s when is_binary(s) -> String.trim(s)
-        _ -> ""
+        %{si1 | active_cells: merged}
       end
-
-    if word == "" do
-      nil
     else
-      q =
-        from(b in BrainCell,
-          where: b.norm == ^String.downcase(word, :default),
-          limit: 1
-        )
-
-      Db.one(q)
+      si
     end
   end
 
   @doc """
-  No-op passthrough used in the Core pipeline; keeps shape for callers.
+  Proxy to the external `lexicon` app (used by LV fallback display).
   """
-  @spec all(map()) :: map()
-  def all(si) when is_map(si), do: si
+  @spec lookup(String.t()) :: map()
+  def lookup(word) when is_binary(word) do
+    # The `lexicon` app defines a top-level `Lexicon` module.
+    # If you renamed it, update this line accordingly.
+    Lexicon.lookup(word)
+  end
 
-  # Re-export stage helper if you need it:
-  @doc false
+@doc """
+Ensure a seed BrainCell exists for each missing norm.
+Creates rows like "\#{norm}|unk|seed|" with type="seed" and pos="unk".
+No-ops on conflict.
+"""
+@spec ensure_cells([String.t()]) :: :ok
+def ensure_cells(norms) when is_list(norms) do
+  norms =
+    norms
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.downcase/1)
+    |> Enum.uniq()
+
+  if norms == [] do
+    :ok
+  else
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    rows =
+      for norm <- norms do
+        %{
+          id: "#{norm}|unk|seed|",
+          status: "active",
+          type: "seed",
+          norm: norm,
+          pos: "unk",
+          word: norm,
+          inserted_at: now,
+          updated_at: now
+        }
+      end
+
+    _ = Db.insert_all(BrainCell, rows, on_conflict: :nothing)
+    :ok
+  end
+end
+
+
+  @doc """
+  DB bulk upsert for senses (called by Stage).
+  """
+  @spec bulk_upsert_senses(list()) :: :ok
   def bulk_upsert_senses(rows) when is_list(rows), do: DbLex.bulk_upsert_senses(rows)
+  def bulk_upsert_senses(_), do: :ok
+
+  # ─── helpers ──────────────────────────────────────────────────────────────
+
+  defp get_id(%Db.BrainCell{id: id}), do: id
+  defp get_id(%{id: id}) when is_binary(id), do: id
+  defp get_id(%{"id" => id}) when is_binary(id), do: id
+  defp get_id(_), do: nil
+
+  defp dedup_by_id(list) do
+    {acc, _seen} =
+      Enum.reduce(list, {[], MapSet.new()}, fn x, {acc, seen} ->
+        case get_id(x) do
+          nil -> {acc, seen}
+          id ->
+            if MapSet.member?(seen, id) do
+              {acc, seen}
+            else
+              {[x | acc], MapSet.put(seen, id)}
+            end
+        end
+      end)
+
+    Enum.reverse(acc)
+  end
 end
 

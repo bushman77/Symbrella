@@ -22,10 +22,7 @@ defmodule Symbrella.Application do
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
       # Servers
-      Lexicon,
       Brain
-
-      # NOTE: PubSub is started in SymbrellaWeb.Application
       # If you later want the Endpoint here, add it here and remove from web.
     ]
 

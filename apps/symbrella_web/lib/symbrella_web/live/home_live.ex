@@ -45,10 +45,11 @@ defmodule SymbrellaWeb.HomeLive do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.join(", ")
 
-    base =
-      "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
-        if token_preview != "", do: " · [#{token_preview}]", else: ""
-
+   base =
+  "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
+    " · src=#{inspect(Map.get(si, :source))}" <>
+    if token_preview != "", do: " · [#{token_preview}]", else: ""
+ 
     if choices_preview == "" do
       base
     else
@@ -273,15 +274,13 @@ defmodule SymbrellaWeb.HomeLive do
       # Run prod resolve (Core handles enrichment, re-query, LIFG, and Brain activation)
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          opts =
-            Application.get_env(
-              :symbrella,
-              :resolve_input_opts,
-              [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
-            )
-
-          si = Core.resolve_input(text, opts)
-
+         
+si = Core.resolve_input(text,
+  mode: :prod,
+  enrich_lexicon?: true,
+  lexicon_stage?: true
+)
+ 
           # Return a small, friendly UI summary
           %{text: format_si_reply(si)}
         end)

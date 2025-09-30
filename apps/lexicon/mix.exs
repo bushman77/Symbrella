@@ -9,24 +9,27 @@ defmodule Lexicon.MixProject do
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
-      elixir: "~> 1.18",
+      elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
+  # Note: NO :mod here. This stays a plain library with no supervision tree.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :tesla, :jason]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
-  defp deps do
+  def deps do
     [
-      {:tesla, "~> 1.4"},
-      {:hackney, "~> 1.18"}
+      {:tesla, "~> 1.8"},
+      {:jason, "~> 1.4"},
+      # If you don’t already depend on Finch from another umbrella app,
+      # keep it here so the adapter is available at compile/runtime:
+      {:finch, "~> 0.18"}
     ]
   end
 end
+

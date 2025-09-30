@@ -14,7 +14,7 @@ defmodule Core do
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode  = Keyword.get(opts, :mode, :test)
+    mode  = Keyword.get(opts, :mode, :prod)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
     si0 =
@@ -34,10 +34,11 @@ defmodule Core do
         |> ltm_stage(opts)
         |> maybe_lexicon_upsert_and_refetch(opts)
         |> keep_only_word_boundary_tokens()
+        |> maybe_lexicon_stage(opts)
         # merges :active_cells into SI (your existing Lexicon pass)
         # (P-005) Optional: dictionary ingestion → DB upserts (idempotent)
         |> maybe_run_lexicon_stage(opts)
-        |> Lexicon.all() 
+        |> Lexicon.all(opts) 
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> notify_brain_activation(opts)
@@ -183,6 +184,53 @@ defmodule Core do
   end
 
   # ─────────────────────── Tokens / n-grams ───────────────────────
+# Run the external lexicon stage, then re-query DB to pull in new defs
+defp maybe_lexicon_stage(si, opts) when is_map(si) do
+  if Keyword.get(opts, :lexicon_stage?, true) do
+    # 1) run the stage (fetch + bulk_upsert_senses)
+    si1 = Core.Lexicon.Stage.run(si)
+
+    # 2) re-query DB for all norms in this sentence
+    norms =
+      si1.tokens
+      |> Enum.map(&norm(Map.get(&1, :phrase)))
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    new_rows =
+      case norms do
+        [] -> []
+        _  -> Db.Lexicon.fetch_by_norms(norms)
+      end
+
+    # 3) merge only rows not already present
+    existing_ids =
+      si1
+      |> Map.get(:active_cells, [])
+      |> Enum.map(&cell_id/1)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    fresh = Enum.reject(new_rows, &MapSet.member?(existing_ids, &1.id))
+
+    active_cells =
+      si1
+      |> Map.get(:active_cells, [])
+      |> Kernel.++(fresh)
+      |> Enum.uniq_by(&cell_id/1)
+
+    si2 = Map.put(si1, :active_cells, active_cells)
+
+    # 4) nudge Brain for the newly added lexicon cells (lighter delta)
+    if fresh != [] and Process.whereis(Brain) do
+      GenServer.cast(Brain, {:activate_cells, fresh, %{delta: 0.35, decay: 0.99, via: :lexicon}})
+    end
+
+    si2
+  else
+    si
+  end
+end
 
 # lib/core.ex  (add this helper near the other privates)
 

@@ -1,30 +1,26 @@
 defmodule Lexicon do
-  @moduledoc """
-  Minimal internal GenServer.
-  No public API, no handlers—just lifecycle.
-  """
-  use GenServer
   use Tesla
 
-  plug(Tesla.Middleware.BaseUrl, "https://api.dictionaryapi.dev/api/v2/entries/en/")
-  plug(Tesla.Middleware.JSON)
-  plug(Tesla.Middleware.Timeout, timeout: 5_000)
+  plug Tesla.Middleware.BaseUrl, "https://api.dictionaryapi.dev/api/v2"
+  plug Tesla.Middleware.JSON
+  plug Tesla.Middleware.Timeout, timeout: 5_000
 
-  @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  adapter Tesla.Adapter.Finch, name: Lexicon.Finch
+
+  @spec lookup(String.t()) :: %{word: String.t(), senses: list()}
+  def lookup(word) when is_binary(word) do
+    case get("/entries/en/#{URI.encode(word)}") do
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        %{word: word, senses: normalize(body)}
+      _ ->
+        %{word: word, senses: []}
+    end
   end
 
-  @impl true
-  @spec init(term()) :: {:ok, %{}}
-  def init(_opts), do: {:ok, %{}}
-
-  @impl true
-  def handle_call({:fetch_word, word}, _from, state) do
-    response = get("#{URI.encode(word)}")
-    {:reply, response, state}
+  defp normalize(_body) do
+    # map API payload into [%{pos, definition, example, synonyms, antonyms}]
+    # …(your existing normalizer here)…
+    []
   end
-
-  @doc "Compat stub for the Mix scaffold test."
-  def hello, do: :world
 end
+
