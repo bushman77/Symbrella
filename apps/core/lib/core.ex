@@ -12,13 +12,14 @@ defmodule Core do
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode  = Keyword.get(opts, :mode, :test)
+    mode = Keyword.get(opts, :mode, :test)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
     si0 =
       phrase
       |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      |> wrap_si(phrase)                    # <<< ensure struct here
+      # <<< ensure struct here
+      |> wrap_si(phrase)
       |> rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put_new(:trace, [])
@@ -28,9 +29,11 @@ defmodule Core do
         si0
         |> Brain.stm()
         |> keep_only_word_boundary_tokens()
-        |> Db.ltm(opts)                     # LTM may enrich lexicon; returns SI
+        # LTM may enrich lexicon; returns SI
+        |> Db.ltm(opts)
         |> keep_only_word_boundary_tokens()
-        |> Lexicon.all()                    # merges :active_cells into SI
+        # merges :active_cells into SI
+        |> Lexicon.all()
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> notify_brain_activation(opts)
@@ -159,9 +162,9 @@ defmodule Core do
   # Supports char-span {start,len} and word-window {i,j} (j exclusive)
   defp keep_only_word_boundary_tokens(%{sentence: s, tokens: toks} = si)
        when is_binary(s) and is_list(toks) do
-    s_norm  = s |> String.trim() |> String.replace(~r/\s+/u, " ")
-    words   = if s_norm == "", do: [], else: String.split(s_norm, " ")
-    wcount  = length(words)
+    s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
+    words = if s_norm == "", do: [], else: String.split(s_norm, " ")
+    wcount = length(words)
 
     kept =
       Enum.filter(toks, fn t ->
@@ -171,15 +174,16 @@ defmodule Core do
           {a, b} when is_integer(a) and is_integer(b) and a >= 0 ->
             # First, treat as char-span {start,len}
             char_match =
-              (b > 0) and
-                (norm(String.slice(s_norm, a, b) || "") == phrase)
+              b > 0 and
+                norm(String.slice(s_norm, a, b) || "") == phrase
 
             if char_match do
               true
             else
               # Fallback: interpret as word-window {i,j} with j exclusive
               j = b
-              window_ok = (a < j) and (a < wcount) and (j <= wcount)
+              window_ok = a < j and a < wcount and j <= wcount
+
               if window_ok do
                 joined = words |> Enum.slice(a, j - a) |> Enum.join(" ") |> norm()
                 joined == phrase
@@ -202,10 +206,13 @@ defmodule Core do
 
   # Ensure we have a %SemanticInput{} struct after tokenize.
   defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si
+
   defp wrap_si(tokens, sentence) when is_list(tokens),
     do: %SemanticInput{sentence: sentence, tokens: tokens, source: :test, trace: []}
+
   defp wrap_si(other, sentence) when is_binary(other),
     do: %SemanticInput{sentence: other, tokens: [], source: :test, trace: []}
+
   defp wrap_si(_other, sentence),
     do: %SemanticInput{sentence: sentence, tokens: [], source: :test, trace: []}
 
@@ -222,4 +229,3 @@ defmodule Core do
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 end
-

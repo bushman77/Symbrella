@@ -19,12 +19,13 @@ defmodule Core.RuntimeBind do
   @spec bind(SemanticInput.t(), keyword()) :: SemanticInput.t()
   def bind(%SemanticInput{} = si, opts) do
     snapshot = Keyword.get(opts, :snapshot)
-    topk     = Keyword.get(opts, :topk, 16)
+    topk = Keyword.get(opts, :topk, 16)
     # Soft-fail should report timeout? when snapshot is missing, unless explicitly overridden
     timeout? = !!Keyword.get(opts, :timeout?, is_nil(snapshot))
 
     phrases = phrases_from_tokens(si)
-    hitmap  = phrase_hitmap(si) # downcased phrase => [%{tok_id: ...}]
+    # downcased phrase => [%{tok_id: ...}]
+    hitmap = phrase_hitmap(si)
 
     {active_cells, count, brain_ref} =
       case snapshot do
@@ -53,12 +54,12 @@ defmodule Core.RuntimeBind do
     si2 = %Core.SemanticInput{
       si
       | active_cells: active_cells,
-        trace: [ev | (si.trace || [])]
+        trace: [ev | si.trace || []]
     }
 
     case brain_ref do
       nil -> si2
-      _   -> Map.put(si2, :brain_state_ref, brain_ref)
+      _ -> Map.put(si2, :brain_state_ref, brain_ref)
     end
   end
 
@@ -92,10 +93,10 @@ defmodule Core.RuntimeBind do
 
     idx =
       cond do
-        is_map(snapshot[:index])   -> snapshot[:index]
-        is_map(snapshot[:cells])   -> snapshot[:cells]
+        is_map(snapshot[:index]) -> snapshot[:index]
+        is_map(snapshot[:cells]) -> snapshot[:cells]
         is_map(snapshot[:phrases]) -> snapshot[:phrases]
-        true                       -> %{}
+        true -> %{}
       end
 
     phrases
@@ -106,7 +107,7 @@ defmodule Core.RuntimeBind do
 
   # tuple {brain_state_ref, cells}
   defp collect_matches(phrases, {ref, list}, opts) when is_list(list) do
-    hm  = Keyword.get(opts, :_hitmap, %{})
+    hm = Keyword.get(opts, :_hitmap, %{})
     set = MapSet.new(phrases)
 
     list
@@ -133,7 +134,8 @@ defmodule Core.RuntimeBind do
       keys
       |> Enum.flat_map(&Map.get(hitmap, &1, []))
       |> Enum.uniq_by(& &1.tok_id)
-      |> Enum.sort_by(& &1.tok_id)   # stable [0,1,2,...] for tests
+      # stable [0,1,2,...] for tests
+      |> Enum.sort_by(& &1.tok_id)
 
     cell
     |> Map.put_new(:source, :runtime)
@@ -145,10 +147,10 @@ defmodule Core.RuntimeBind do
   defp put_activation_snapshot(%{} = cell) do
     snap =
       cond do
-        is_number(cell[:activation_snapshot])   -> cell[:activation_snapshot] * 1.0
-        is_number(cell[:activation])            -> cell[:activation] * 1.0
-        is_number(cell[:modulated_activation])  -> cell[:modulated_activation] * 1.0
-        is_number(cell[:score])                 -> cell[:score] * 1.0
+        is_number(cell[:activation_snapshot]) -> cell[:activation_snapshot] * 1.0
+        is_number(cell[:activation]) -> cell[:activation] * 1.0
+        is_number(cell[:modulated_activation]) -> cell[:modulated_activation] * 1.0
+        is_number(cell[:score]) -> cell[:score] * 1.0
         true -> nil
       end
 
@@ -193,8 +195,10 @@ defmodule Core.RuntimeBind do
       # word token (append to preserve ascending order)
       acc =
         case token_phrase(t) do
-          nil -> acc
-          p   ->
+          nil ->
+            acc
+
+          p ->
             Map.update(acc, String.downcase(p), [%{tok_id: token_id(t, idx)}], fn lst ->
               lst ++ [%{tok_id: token_id(t, idx)}]
             end)
@@ -221,26 +225,30 @@ defmodule Core.RuntimeBind do
   end
 
   defp token_id(%_struct{id: id}, _idx) when is_integer(id), do: id
+
   defp token_id(%{} = t, _idx) do
     case Map.get(t, :id) || Map.get(t, "id") do
       i when is_integer(i) -> i
       _ -> nil
     end
   end
+
   defp token_id(_other, idx), do: idx
 
   defp token_phrase(%_struct{phrase: p}) when is_binary(p), do: p
+
   defp token_phrase(%{} = t) do
     cond do
-      is_binary(Map.get(t, :phrase))  -> Map.get(t, :phrase)
+      is_binary(Map.get(t, :phrase)) -> Map.get(t, :phrase)
       is_binary(Map.get(t, "phrase")) -> Map.get(t, "phrase")
-      is_binary(Map.get(t, :norm))    -> Map.get(t, :norm)
-      is_binary(Map.get(t, "norm"))   -> Map.get(t, "norm")
-      is_binary(Map.get(t, :text))    -> Map.get(t, :text)
-      is_binary(Map.get(t, "text"))   -> Map.get(t, "text")
+      is_binary(Map.get(t, :norm)) -> Map.get(t, :norm)
+      is_binary(Map.get(t, "norm")) -> Map.get(t, "norm")
+      is_binary(Map.get(t, :text)) -> Map.get(t, :text)
+      is_binary(Map.get(t, "text")) -> Map.get(t, "text")
       true -> nil
     end
   end
+
   defp token_phrase(_), do: nil
 
   defp is_mwe_head?(%_struct{is_mwe_head: true}), do: true
@@ -338,6 +346,7 @@ defmodule Core.RuntimeBind do
     cells
     |> Enum.reduce(%{}, fn cell, acc ->
       id = cell.id
+
       case acc do
         %{^id => existing} -> Map.put(acc, id, merge_cell(existing, cell))
         _ -> Map.put(acc, id, cell)
@@ -383,14 +392,14 @@ defmodule Core.RuntimeBind do
 
   defp snapshot_of(cell) do
     cond do
-      is_number(cell[:activation_snapshot])   -> cell[:activation_snapshot] * 1.0
-      is_number(cell["activation_snapshot"])  -> cell["activation_snapshot"] * 1.0
-      is_number(cell[:activation])            -> cell[:activation] * 1.0
-      is_number(cell["activation"])           -> cell["activation"] * 1.0
-      is_number(cell[:modulated_activation])  -> cell[:modulated_activation] * 1.0
+      is_number(cell[:activation_snapshot]) -> cell[:activation_snapshot] * 1.0
+      is_number(cell["activation_snapshot"]) -> cell["activation_snapshot"] * 1.0
+      is_number(cell[:activation]) -> cell[:activation] * 1.0
+      is_number(cell["activation"]) -> cell["activation"] * 1.0
+      is_number(cell[:modulated_activation]) -> cell[:modulated_activation] * 1.0
       is_number(cell["modulated_activation"]) -> cell["modulated_activation"] * 1.0
-      is_number(cell[:score])                 -> cell[:score] * 1.0
-      is_number(cell["score"])                -> cell["score"] * 1.0
+      is_number(cell[:score]) -> cell[:score] * 1.0
+      is_number(cell["score"]) -> cell["score"] * 1.0
       true -> nil
     end
   end
@@ -402,12 +411,18 @@ defmodule Core.RuntimeBind do
   defp source_pri(_), do: 0.0
 
   defp source_name_pri(s) when is_atom(s), do: source_name_pri(Atom.to_string(s))
+
   defp source_name_pri(s) when is_binary(s) do
     pri = %{
-      "gold" => 5.0, "curated" => 4.0, "runtime" => 3.0,
-      "mwe" => 2.5, "repo" => 2.0, "snapshot" => 2.0, "default" => 1.0
+      "gold" => 5.0,
+      "curated" => 4.0,
+      "runtime" => 3.0,
+      "mwe" => 2.5,
+      "repo" => 2.0,
+      "snapshot" => 2.0,
+      "default" => 1.0
     }
+
     Map.get(pri, String.downcase(s), 1.0)
   end
 end
-

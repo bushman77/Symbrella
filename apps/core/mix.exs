@@ -25,6 +25,7 @@ defmodule Core.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:brain, in_umbrella: true},
       {:db, in_umbrella: true},
       {:lexicon, in_umbrella: true}
     ]

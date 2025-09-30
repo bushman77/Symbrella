@@ -29,7 +29,6 @@ defmodule Brain.MixProject do
     [
       {:stream_data, "~> 0.6", only: :test},
       {:benchee, "~> 1.3", only: :dev},
-      {:core, in_umbrella: true},
       {:db, in_umbrella: true}
     ]
   end

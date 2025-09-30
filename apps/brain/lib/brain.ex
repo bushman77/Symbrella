@@ -17,7 +17,6 @@ defmodule Brain do
 
   alias Db.BrainCell, as: Row
   alias Brain.LIFG
-  alias Core.SemanticInput
 
   @name __MODULE__
   @registry Brain.Registry
@@ -119,7 +118,7 @@ defmodule Brain do
     tokens0 = extract_tokens(si_or_cands, candidates)
 
     # Minimal SI for the new LIFG /1 API (no :context_vec field on the struct)
-    si0 = %SemanticInput{tokens: tokens0, active_cells: candidates, trace: []}
+    si0 = %{tokens: tokens0, active_cells: candidates, trace: []}
     si1 = LIFG.disambiguate_stage1(si0)
 
     with {:ok, out0} <- lifg_out_from_trace(si1) do
@@ -236,7 +235,7 @@ defmodule Brain do
 
   # Canonicalize tokens to include :index, :phrase, and (when derivable) :span.
   # Preserve ALL existing fields (e.g., :mw), only augment.
-  defp normalize_tokens(tokens, sentence \\ nil) do
+  defp normalize_tokens(tokens, sentence) do
     # 1) Coerce shape, (re)hydrate phrase from sentence+span if present
     tokens1 =
       tokens
@@ -484,12 +483,12 @@ defmodule Brain do
     |> Enum.sort_by(& &1.index)
   end
 
-  defp lifg_out_from_trace(%SemanticInput{trace: [ev | _]}) do
+  defp lifg_out_from_trace(%{trace: [ev | _]}) do
     audit = Map.drop(ev, [:choices, :boosts, :inhibitions])
     {:ok, %{choices: ev.choices, boosts: ev.boosts, inhibitions: ev.inhibitions, audit: audit}}
   end
 
-  defp lifg_out_from_trace(%SemanticInput{trace: []}) do
+  defp lifg_out_from_trace(%{trace: []}) do
     {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
   end
 

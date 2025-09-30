@@ -1,7 +1,6 @@
 defmodule Brain.LIFG do
   @moduledoc ~S"""
   Stage-1 Disambiguation (LIFG). Pure, stateless, fast.
-
   Public API:
     • `disambiguate_stage1/1` or `disambiguate_stage1/2` — SI → SI
       - consumes `si.sense_candidates` if present (from Core.SenseSlate)
@@ -20,11 +19,20 @@ defmodule Brain.LIFG do
   Softmax per token group → probabilities sum ≈ 1.0.
   """
 
-  # near the top with the other aliases:
   alias Brain.LIFG.{Reanalysis, Tripwire, Priming}
   alias Core.SemanticInput
 
-  # ---- Define SenseChoice FIRST so specs can see it ----
+  # ---------- Numerical stability (epsilon guard) ----------
+  @abs_eps 1.0e-15
+  @rel_eps 1.0e-12
+
+  # Treat very small magnitudes as zero (absolute OR relative to a scale).
+  defp zeroish?(x, scale) when is_float(x) do
+    ax = abs(x)
+    ax <= @abs_eps or ax <= @rel_eps * max(1.0, abs(scale))
+  end
+
+  # ---- Define SenseChoice first so specs can see it ----
   defmodule SenseChoice do
     @enforce_keys [:token_index, :lemma, :chosen_id, :scores, :margin, :features]
     defstruct token_index: 0,
@@ -69,13 +77,20 @@ defmodule Brain.LIFG do
   @spec disambiguate_stage1(SemanticInput.t()) :: SemanticInput.t()
   def disambiguate_stage1(si), do: disambiguate_stage1(si, [])
 
+  # New arity-3 wrapper (kept for compatibility; funnels to /2 through opts)
+  @spec disambiguate_stage1(map(), any(), keyword()) :: {:ok, map()} | {:error, term()}
+  def disambiguate_stage1(input, ctx, opts) do
+    disambiguate_stage1(input, Keyword.put(opts, :ctx, ctx))
+  end
+
   @doc """
   Same as `disambiguate_stage1/1` with options:
-    * `:weights`       — override weight map
-    * `:margin_threshold` (default 0.12)
-    * `:scores`        — :all (default) | :top2 | :none
-    * `:fit?`          — (cand, si) -> boolean (default `&default_fit?/2`)
-    * `:max_flips`     — integer (default 1)
+    * `:weights`         — override weight map
+    * `:margin_threshold` — default 0.12
+    * `:scores`          — :all (default) | :top2 | :none
+    * `:fit?`            — (cand, si) -> boolean (default `&default_fit?/2`)
+    * `:max_flips`       — integer (default 1)
+    * `:prime`           — priming options (bump winners, etc.)
   """
   @spec disambiguate_stage1(SemanticInput.t(), keyword()) :: SemanticInput.t()
   def disambiguate_stage1(%{} = si, opts) do
@@ -85,7 +100,8 @@ defmodule Brain.LIFG do
       |> Map.get(:tokens, [])
       |> Tripwire.check_and_filter(on_leak: :drop)
 
-    ctx = Map.get(si, :context_vec, [0.0])
+    context_vec = Map.get(si, :context_vec, [0.0])
+    ctx_norm = l2(context_vec)
 
     candidates =
       case Map.get(si, :sense_candidates) do
@@ -96,14 +112,15 @@ defmodule Brain.LIFG do
           candidates_from_cells(si, tokens)
       end
 
-    {:ok, out} = do_disambiguate_with_reanalysis(si, tokens, candidates, ctx, opts)
+    {:ok, out} =
+      do_disambiguate_with_reanalysis(si, tokens, candidates, context_vec, ctx_norm, opts)
 
     ev = %{
       stage: :lifg_stage1,
       normalize: :softmax,
       groups: candidates |> Enum.map(& &1.token_index) |> MapSet.new() |> MapSet.size(),
       scores_mode: out.audit.scores_mode,
-      ctx_dim: length(ctx),
+      ctx_dim: length(context_vec),
       timing_ms: out.audit.timing_ms,
       choices: out.choices,
       boosts: out.boosts,
@@ -115,11 +132,11 @@ defmodule Brain.LIFG do
     |> Map.put(:sense_winners, out.winners)
     |> Map.put(:lifg_traces, out.traces)
     |> Map.put(:trace, [ev | Map.get(si, :trace, [])])
-    # keep post-tripwire tokens on SI if you want them persisted
+    # persist post-tripwire tokens if desired
     |> Map.put(:tokens, tokens)
   end
 
-  @spec do_disambiguate_with_reanalysis(map(), list(), list(), [number()], keyword()) ::
+  @spec do_disambiguate_with_reanalysis(map(), list(), list(), [number()], float(), keyword()) ::
           {:ok,
            %{
              winners: %{optional(non_neg_integer) => map()},
@@ -129,11 +146,10 @@ defmodule Brain.LIFG do
              inhibitions: [{binary(), number()}],
              audit: map()
            }}
-  defp do_disambiguate_with_reanalysis(si, tokens, candidates, context_vec, opts) do
+  defp do_disambiguate_with_reanalysis(si, tokens, candidates, context_vec, ctx_norm, opts) do
     t0 = System.monotonic_time()
 
     weights = resolved_weights(opts)
-
     margin_threshold = Keyword.get(opts, :margin_threshold, 0.12)
     scores_mode = Keyword.get(opts, :scores, :all)
     fit? = Keyword.get(opts, :fit?, &__MODULE__.default_fit?/2)
@@ -145,17 +161,13 @@ defmodule Brain.LIFG do
     bump_after = Keyword.get(prime_opts, :bump_winners, true)
 
     groups = Enum.group_by(candidates, & &1.token_index)
-    ctx_norm = l2(context_vec)
 
     {choices, winners, traces, re_count} =
       Enum.reduce(groups, {[], %{}, %{}, 0}, fn {token_idx, cands}, {chs_acc, w_acc, t_acc, rc} ->
         {_cand_feats, normed} =
           score_and_normalize(cands, context_vec, ctx_norm, weights, prime_opts)
 
-        # attach normalized :score for Reanalysis ordering
-
-        # AFTER (raw — clear ordering for Reanalysis)
-
+        # Attach normalized :score for Reanalysis ordering (using raw score)
         cands_scored =
           Enum.map(normed, fn {cand, f} -> Map.put(cand, :score, f.score_raw) end)
 
@@ -353,10 +365,9 @@ defmodule Brain.LIFG do
   def cosine(_, nil), do: 0.0
 
   def cosine(a, b) when is_list(a) and is_list(b) do
-    dot = dot(a, b)
-    na = l2(a)
-    nb = l2(b)
-    if na == 0.0 or nb == 0.0, do: 0.0, else: dot / (na * nb)
+    num = dot(a, b)
+    den = l2(a) * l2(b)
+    if zeroish?(den, den), do: 0.0, else: num / den
   end
 
   @spec normalize_scores([number()]) :: [float()]
@@ -364,11 +375,10 @@ defmodule Brain.LIFG do
     m = Enum.max([0.0 | scores])
     exps = Enum.map(scores, fn s -> :math.exp(s - m) end)
     z = Enum.sum(exps)
-    if z == 0.0, do: List.duplicate(0.0, length(scores)), else: Enum.map(exps, &(&1 / z))
+    if zeroish?(z, z), do: List.duplicate(0.0, length(scores)), else: Enum.map(exps, &(&1 / z))
   end
 
-  # old: defp score_and_normalize(cands, ctx, ctx_norm, weights) do
-  defp score_and_normalize(cands, ctx, ctx_norm, weights, prime_opts \\ []) do
+  defp score_and_normalize(cands, ctx, ctx_norm, weights, prime_opts) do
     w_prime = Map.get(weights, :prime, 0.0) * 1.0
 
     cand_feats =
@@ -521,12 +531,20 @@ defmodule Brain.LIFG do
     end
   end
 
-  defp cosine_with_ctxnorm(_vec, _ctx, 0.0), do: 0.0
-  defp cosine_with_ctxnorm(nil, _ctx, _ctxn), do: 0.0
-
+  # Single, epsilon-safe version. Avoids head pattern-matching on 0.0.
   defp cosine_with_ctxnorm(vec, ctx, ctxn) do
-    na = l2(vec)
-    if na == 0.0, do: 0.0, else: dot(vec, ctx) / (na * ctxn)
+    cond do
+      is_nil(vec) or is_nil(ctx) ->
+        0.0
+
+      zeroish?(ctxn, ctxn) ->
+        0.0
+
+      true ->
+        na = l2(vec)
+        den = na * ctxn
+        if zeroish?(den, den), do: 0.0, else: dot(vec, ctx) / den
+    end
   end
 
   defp dot(a, b), do: Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
