@@ -1,38 +1,28 @@
 defmodule Core.Lexicon.Senses do
-  @moduledoc false
-  alias Core.LexID
+  @moduledoc """
+  Helpers for building/upserting lexicon senses from meanings data.
+  """
 
-  @spec senses([map()]) :: [map()]
-  def senses(entries) do
-    # collect all defs, keep original order
-    defs =
-      for entry <- entries,
-          meaning <- List.wrap(entry["meanings"] || []),
-          {defn, d_idx} <- List.wrap(meaning["definitions"] || []) |> Enum.with_index() do
-        %{
-          word: entry["word"] || "",
-          pos: meaning["partOfSpeech"],
-          defn: defn["definition"],
-          example: defn["example"]
-        }
-      end
+  @type meaning :: map()
+  @type sense_row :: map()
 
-    # re-index per (word,pos) so idx is dense and stable
-    defs
-    |> Enum.group_by(fn d -> {LexID.normalize_word(d.word), LexID.normalize_pos(d.pos)} end)
-    |> Enum.flat_map(fn {{w, p}, group} ->
-      group
-      |> Enum.with_index()
-      |> Enum.map(fn {d, idx} ->
-        %{
-          id: LexID.build(w, p, idx),
-          word: w,
-          pos: p,
-          idx: idx,
-          definition: d.defn,
-          example: d.example
-        }
-      end)
-    end)
+  @doc """
+  Extract sense rows from a meaning map (structure may vary).
+  Safe on missing keys; trims empty definitions.
+  """
+  @spec senses(meaning()) :: [sense_row()]
+  def senses(meaning) when is_map(meaning) do
+    defs = List.wrap(meaning["definitions"] || [])
+
+    for {defn, _d_idx} <- defs |> Enum.with_index(),
+        is_binary(defn) and String.trim(defn) != "" do
+      %{
+        definition: String.trim(defn),
+        lemma: meaning["lemma"] || meaning["word"] || "",
+        pos: meaning["pos"] || meaning["part_of_speech"] || nil,
+        provider: meaning["provider"] || meaning["source"] || "unknown"
+      }
+    end
   end
 end
+

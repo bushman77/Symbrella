@@ -16,10 +16,31 @@ defmodule Core.LIFG.Input do
   alias Core.Token
   alias Brain.LIFG.{Guard, BoundaryGuard}
 
+  # ---------- Public API ----------
+
   # SI → SI
   @spec tokenize(Core.SemanticInput.t()) :: Core.SemanticInput.t()
   def tokenize(%Core.SemanticInput{} = si), do: tokenize(si, [])
 
+  # String → [tokens]
+  @spec tokenize(String.t()) :: list()
+  def tokenize(sentence) when is_binary(sentence) do
+    tok_opts = tokenizer_defaults()
+    tok_out = Token.tokenize(sentence, tok_opts)
+
+    {tokens_list, s} =
+      case tok_out do
+        %Core.SemanticInput{tokens: tks, sentence: ss} -> {List.wrap(tks), ss || sentence}
+        tks when is_list(tks) -> {tks, sentence}
+        _ -> {[], sentence}
+      end
+
+    tokens_list
+    |> Guard.sanitize()
+    |> BoundaryGuard.sanitize(s)
+  end
+
+  # SI → SI with opts
   @spec tokenize(Core.SemanticInput.t(), keyword()) :: Core.SemanticInput.t()
   def tokenize(%Core.SemanticInput{} = si, opts) when is_list(opts) do
     tok_opts = tokenizer_defaults()
@@ -51,25 +72,7 @@ defmodule Core.LIFG.Input do
     %Core.SemanticInput{tok_out | tokens: tokens_final}
   end
 
-  # String → [tokens]
-  @spec tokenize(String.t()) :: list()
-  def tokenize(sentence) when is_binary(sentence) do
-    tok_opts = tokenizer_defaults()
-    tok_out = Token.tokenize(sentence, tok_opts)
-
-    {tokens_list, s} =
-      case tok_out do
-        %Core.SemanticInput{tokens: tks, sentence: ss} -> {List.wrap(tks), ss || sentence}
-        tks when is_list(tks) -> {tks, sentence}
-        _ -> {[], sentence}
-      end
-
-    tokens_list
-    |> Guard.sanitize()
-    |> BoundaryGuard.sanitize(s)
-  end
-
-  # String → [tokens] then MWE inject
+  # String → [tokens] with opts
   @spec tokenize(String.t(), keyword()) :: list()
   def tokenize(sentence, opts) when is_list(opts) do
     sentence
@@ -84,3 +87,4 @@ defmodule Core.LIFG.Input do
     Keyword.merge(base, Application.get_env(:core, :tokenizer_defaults, []))
   end
 end
+

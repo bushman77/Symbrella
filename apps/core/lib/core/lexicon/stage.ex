@@ -5,7 +5,7 @@ defmodule Core.Lexicon.Stage do
   """
 
   alias Core.SemanticInput, as: SI
-  alias Db.Lexicon, as: DbLex
+  alias Core.Lexicon, as: CoreLex
 
   @spec run(SI.t()) :: SI.t()
   def run(%SI{} = si) do
@@ -24,7 +24,7 @@ defmodule Core.Lexicon.Stage do
       |> Enum.flat_map(&rows_for_word/1)
 
     # 3) upsert immediately (no-op if rows == [])
-    if rows != [], do: DbLex.bulk_upsert_senses(rows)
+    if rows != [], do: CoreLex.bulk_upsert_senses(rows)
 
     # 4) trace for introspection
     put_trace(si, :lexicon_upserts, %{
@@ -55,30 +55,6 @@ defmodule Core.Lexicon.Stage do
     end)
   end
 
-  defp rows_for_word(word) do
-    case safe_lookup(word) do
-      %{senses: senses} when is_list(senses) ->
-        senses
-        |> Enum.with_index()
-        |> Enum.map(fn {s, i} ->
-          pos = normalize_pos(s[:pos])
-
-          %{
-            id: "#{word}|#{pos}|#{i}",
-            word: word,
-            pos: pos,
-            type: "lexicon",
-            definition: s[:definition] || s[:def] || nil,
-            example: s[:example] || s[:ex] || nil,
-            synonyms: s[:synonyms] || s[:syns] || [],
-            antonyms: s[:antonyms] || s[:ants] || []
-          }
-        end)
-
-      _ ->
-        []
-    end
-  end
 
   defp normalize_pos(nil), do: "unk"
   defp normalize_pos(pos) when is_binary(pos), do: String.downcase(pos)
@@ -88,7 +64,7 @@ defmodule Core.Lexicon.Stage do
   defp safe_lookup(word) do
     try do
       # Your app’s client. Should return %{word: ..., senses: [%{pos, definition, example, synonyms, antonyms}, ...]}
-      Lexicon.lookup(word)
+      CoreLex.lookup(word)
     rescue
       _ -> %{word: word, senses: []}
     catch
@@ -100,4 +76,31 @@ defmodule Core.Lexicon.Stage do
     evt = %{stage: stage, ts_ms: System.monotonic_time(:millisecond), meta: Map.new(meta)}
     %{si | trace: [evt | tr || []]}
   end
+
+defp get(map, k, alt \\ nil), do: Map.get(map, k, Map.get(map, to_string(k), alt))
+
+defp rows_for_word(word) do
+  case safe_lookup(word) do
+    %{senses: senses} when is_list(senses) ->
+      senses
+      |> Enum.with_index()
+      |> Enum.map(fn {s, i} ->
+        pos = normalize_pos(get(s, :pos))
+        %{
+          id: "#{word}|#{pos}|#{i}",
+          word: word,
+          pos: pos,
+          type: "lexicon",
+          definition: get(s, :definition, get(s, :def)),
+          example: get(s, :example, get(s, :ex)),
+          synonyms: get(s, :synonyms, get(s, :syns, [])),
+          antonyms: get(s, :antonyms, get(s, :ants, []))
+        }
+      end)
+
+    _ -> []
+  end
 end
+
+end
+

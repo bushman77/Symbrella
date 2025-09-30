@@ -90,4 +90,12 @@ defmodule Db.Lexicon do
 
   defp normize(p),
     do: p |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+
+@spec bulk_upsert_senses(list()) :: :ok
+  def bulk_upsert_senses([]), do: :ok
+  def bulk_upsert_senses(rows) when is_list(rows) do
+    _ = rows
+    :ok
+  end
+
 end

@@ -44,6 +44,29 @@ def ltm(%{tokens: toks} = _si, _opts \\ []) do
   end
 end
 
+@doc """
+Return `true` if a *word* exists; guards invalid inputs without querying for blanks.
+(Used by Core.Recall.Execute.default_exists_fun/0)
+"""
+@spec word_exists?(term) :: boolean()
+def word_exists?(term)
+def word_exists?(term) when is_binary(term) do
+  word = String.trim(term)
+
+  if word == "" do
+    false
+  else
+    norm = String.downcase(word, :default)
+    import Ecto.Query, only: [from: 2]
+
+    from(b in Db.BrainCell, where: b.norm == ^norm)
+    |> Db.exists?()
+  end
+end
+
+def word_exists?(_), do: false
+
+
 # keep this helper since ltm/2 uses it
 defp norm(nil), do: ""
 defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)

@@ -4,7 +4,6 @@ defmodule Core do
   """
 
   alias Brain
-  alias Core.Token
   alias Core.Lexicon
   alias Core.SemanticInput
   alias Db
@@ -68,8 +67,7 @@ defmodule Core do
   end
 
   # ─────────────────────── LIFG stage-1 ───────────────────────
-
-  defp run_lifg_and_attach(si, lifg_opts \\ []) do
+  defp run_lifg_and_attach(si, lifg_opts) do
     groups =
       si.tokens
       |> Enum.reduce(%{}, fn t, acc ->
@@ -257,7 +255,7 @@ defmodule Core do
   defp wrap_si(tokens, sentence) when is_list(tokens),
     do: %SemanticInput{sentence: sentence, tokens: tokens, source: :test, trace: []}
 
-  defp wrap_si(other, sentence) when is_binary(other),
+defp wrap_si(other, _sentence) when is_binary(other),
     do: %SemanticInput{sentence: other, tokens: [], source: :test, trace: []}
 
   defp wrap_si(_other, sentence),

@@ -1,30 +1,20 @@
 defmodule Core.Brain do
   @moduledoc """
-  Adapter/wrapper for the Brain OTP app. Keep Core in charge of orchestration.
+  Core-side helpers related to Brain integration.
+
+  We avoid wrappers in the main pipeline; callers should use direct GenServer calls, e.g.:
+
+      GenServer.cast(Brain, {:activate_cells, rows, payload})
+
+  This module exists for small, pure utility helpers only.
   """
-  alias Db.BrainCell, as: Row
 
-  @default_payload %{delta: 0.12, decay: 0.98}
+  @doc false
+  def normalize_id(nil), do: nil
+  def normalize_id(id) when is_binary(id), do: id
+  def normalize_id(id), do: to_string(id)
 
-  @doc "Inject Brain’s active_cells map into the SI (calls Brain GenServer)."
-  def stm(si) do
-    GenServer.call(Brain, {:stm, si})
-  end
-
-  @doc """
-  Activate a list of rows or ids.
-  Accepts [%Db.BrainCell{} | id] and forwards to Brain.
-  """
-  def activate_cells(rows_or_ids, opts \\ []) do
-    payload = Map.merge(@default_payload, Map.new(opts))
-    GenServer.cast(Brain, {:activate_cells, rows_or_ids, payload})
-    :ok
-  end
-
-  @doc "Convenience: activate whatever Db.ltm put into si.cells."
-  def activate_from_si(%{cells: cells}) when is_list(cells) do
-    activate_cells(cells)
-  end
-
-  def activate_from_si(_), do: :ok
+  @doc false
+  def now_ms, do: System.system_time(:millisecond)
 end
+
