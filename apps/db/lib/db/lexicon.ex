@@ -26,7 +26,7 @@ defmodule Db.Lexicon do
     Db.all(from(b in BrainCell, where: b.id in ^ids))
   end
 
-  # Optional, retained for feature-flag use
+  # Optional seeding kept as-is (you already had this)
   def ensure_pos_variants_from_tokens(tokens, opts \\ []) do
     only_mw? = !!opts[:only_mw]
 
@@ -91,85 +91,62 @@ defmodule Db.Lexicon do
   defp normize(p),
     do: p |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
 
-@spec bulk_upsert_senses(list()) :: :ok
-def bulk_upsert_senses([]), do: :ok
-def bulk_upsert_senses(rows) when is_list(rows) do
-  fields = BrainCell.__schema__(:fields) |> MapSet.new()
-  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+  @doc """
+  Insert/Update lexicon senses as BrainCell rows.
 
-  entries =
-    rows
-    |> Enum.map(&sense_to_entry(&1, fields, now))
-    |> Enum.reject(&is_nil/1)
+  Expected rows like:
+    %{id, word, pos, type: "lexicon", definition, example, synonyms, antonyms}
+  """
+  @spec bulk_upsert_senses(list()) :: :ok
+  def bulk_upsert_senses([]), do: :ok
+  def bulk_upsert_senses(rows) when is_list(rows) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-  if entries != [] do
-    conflict_target =
-      if MapSet.member?(fields, :id) do
-        :id
-      else
-        # Fallback to composite uniqueness used elsewhere in this module
-        {:unsafe_fragment,
-         " (norm, COALESCE(pos,''), COALESCE(type,''), COALESCE(gram_function,'')) "}
-      end
+    rows1 =
+      Enum.map(rows, fn r ->
+        word = get(r, :word, "")
+        norm = normize(word)
+        pos  = get(r, :pos, "unk")
+        id   = get(r, :id) || build_lex_id(norm, pos, r)
 
-    Db.insert_all(BrainCell, entries,
-      on_conflict: :nothing,
-      conflict_target: conflict_target
-    )
+        %{
+          id: id,
+          status: "active",
+          type: get(r, :type, "lexicon"),
+          norm: norm,
+          pos: pos,
+          word: word,
+          definition: get(r, :definition),
+          example: get(r, :example),
+          synonyms: List.wrap(get(r, :synonyms, [])),
+          antonyms: List.wrap(get(r, :antonyms, [])),
+          semantic_atoms: List.wrap(get(r, :semantic_atoms, [])),
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    # Upsert on PK id; replace content fields on conflict
+    _ =
+      Db.insert_all(
+        BrainCell,
+        rows1,
+        on_conflict:
+          {:replace, [:definition, :example, :synonyms, :antonyms, :type, :updated_at]},
+        conflict_target: [:id]
+      )
+
+    :ok
   end
 
-  :ok
+  def bulk_upsert_senses(_), do: :ok
+
+  defp get(m, k, alt \\ nil), do: Map.get(m, k, Map.get(m, to_string(k), alt))
+
+  defp build_lex_id(norm, pos, r) do
+    # stable-ish id if upstream didn't give one
+    base = :erlang.phash2({norm, pos, get(r, :definition)})
+    "#{norm}|#{pos}|lex|#{base}"
+  end
 end
 
-# ---------- helpers ----------
-
-defp sense_to_entry(row, fields, now) do
-  word =
-    (get(row, :word) || "")
-    |> to_string()
-    |> String.trim()
-
-  norm = normize(word)
-  if norm == "", do: nil, else: build_entry(row, fields, now, word, norm)
-end
-
-defp build_entry(row, fields, now, word, norm) do
-  pos = get(row, :pos) || "unk"
-  type = get(row, :type) || "lexicon"
-  gram_function = get(row, :gram_function)
-
-  # Prefer caller-provided ID; otherwise synthesize a stable composite if :id exists
-  id =
-    get(row, :id) ||
-      (if MapSet.member?(fields, :id),
-         do: [norm, pos || "", type || "", gram_function || ""] |> Enum.join("|"),
-         else: nil)
-
-  base = %{
-    id: id,
-    word: word,
-    norm: norm,
-    pos: pos,
-    type: type,
-    gram_function: gram_function,
-    status: get(row, :status) || "active",
-    definition: get(row, :definition) || get(row, :def),
-    example: get(row, :example) || get(row, :ex),
-    synonyms: get(row, :synonyms) || get(row, :syns) || [],
-    antonyms: get(row, :antonyms) || get(row, :ants) || [],
-    semantic_atoms: get(row, :semantic_atoms) || []
-  }
-
-  base
-  |> maybe_put(:inserted_at, now, fields)
-  |> maybe_put(:updated_at, now, fields)
-  |> Map.take(MapSet.to_list(fields))
-end
-
-defp get(map, k), do: Map.get(map, k) || Map.get(map, to_string(k))
-
-defp maybe_put(map, key, val, fields) do
-  if MapSet.member?(fields, key), do: Map.put(map, key, val), else: map
-end
-
-end

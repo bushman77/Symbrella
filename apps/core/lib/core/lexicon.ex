@@ -69,6 +69,7 @@ def ensure_cells(norms) when is_list(norms) do
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.downcase/1)
     |> Enum.uniq()
+    |> Enum.reject(&String.contains?(&1, " "))   # ← skip multi-word expressions
 
   if norms == [] do
     :ok
@@ -89,10 +90,11 @@ def ensure_cells(norms) when is_list(norms) do
         }
       end
 
-    _ = Db.insert_all(BrainCell, rows, on_conflict: :nothing)
+    _ = Db.insert_all(Db.BrainCell, rows, on_conflict: :nothing)
     :ok
   end
 end
+
 
 
   @doc """

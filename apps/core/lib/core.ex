@@ -1,13 +1,14 @@
 defmodule Core do
   @moduledoc """
-  Tokenize -> rebuild word n-grams -> STM -> LTM (DB read; Core orchestrates) -> LIFG Stage-1 -> notify Brain.
+  Tokenize → rebuild word n-grams → STM → LTM (DB read/enrich) → Lexicon Stage (fetch+upsert+refetch)
+  → LIFG Stage-1 → notify Brain.
   """
 
   alias Brain
   alias Core.Lexicon
   alias Core.SemanticInput
   alias Db
-  alias Db.BrainCell   # [P-003] used by sanitize_cell/1 & cell_id/1
+  alias Db.BrainCell
 
   @type si :: map()
   @type opts :: keyword()
@@ -30,15 +31,10 @@ defmodule Core do
         si0
         |> Brain.stm()
         |> keep_only_word_boundary_tokens()
-        # [P-003] LTM DB read; Core handles enrichment + direct GenServer cast
+        # LTM pass (includes optional seeding for *unigrams* and immediate re-fetch)
         |> ltm_stage(opts)
-        |> maybe_lexicon_upsert_and_refetch(opts)
-        |> keep_only_word_boundary_tokens()
-        |> maybe_lexicon_stage(opts)
-        # merges :active_cells into SI (your existing Lexicon pass)
-        # (P-005) Optional: dictionary ingestion → DB upserts (idempotent)
-        |> maybe_run_lexicon_stage(opts)
-        |> Lexicon.all(opts) 
+        # Single lexicon pass: Stage.run → DB re-fetch → merge into :active_cells
+        |> Lexicon.all(opts)
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> notify_brain_activation(opts)
@@ -49,8 +45,12 @@ defmodule Core do
   end
 
   # ─────────────────────── Brain notify ───────────────────────
+# add this helper near your other privates if you don’t already have it
+defp id_norm(nil), do: nil
+defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
 
-  # [P-003] Uses direct GenServer.cast/2 instead of any wrapper.
+
+  # Uses direct GenServer.cast/2 instead of any wrapper.
   defp notify_brain_activation(si, opts) do
     payload = %{
       delta: Keyword.get(opts, :delta, 0.1),
@@ -71,15 +71,19 @@ defmodule Core do
   end
 
   # ─────────────────────── LIFG stage-1 ───────────────────────
+
   defp run_lifg_and_attach(si, lifg_opts) do
     groups =
       si.tokens
       |> Enum.reduce(%{}, fn t, acc ->
         nrm = norm(Map.get(t, :phrase))
+        tn  = Map.get(t, :n, 1)
 
         senses =
           si.active_cells
           |> Enum.filter(fn s -> (Map.get(s, :norm) || Map.get(s, "norm")) == nrm end)
+          |> Enum.filter(&compatible_cell_for_token?(tn, &1))
+          |> drop_seeds_if_lexicon_present()
 
         if senses == [], do: acc, else: Map.put(acc, Map.get(t, :index), senses)
       end)
@@ -101,25 +105,44 @@ defmodule Core do
             inhibitions: out.inhibitions
           })
 
-        lifg_choices =
-          Enum.map(out.choices, fn ch ->
-            chosen_id = Map.get(ch, :chosen_id)
-            scores = Map.get(ch, :scores) || %{}
-            feats = Map.get(ch, :features) || %{}
+lifg_choices =
+  Enum.map(out.choices, fn ch ->
+    token_norm = norm(Map.get(ch, :lemma) || "")
+    chosen_id  = Map.get(ch, :chosen_id)
+    scores     = Map.get(ch, :scores) || %{}
+    feats      = Map.get(ch, :features) || %{}
+    alt_ids    = Map.get(ch, :alt_ids, [])
 
-            score =
-              if is_binary(chosen_id) and is_map(scores),
-                do: Map.get(scores, chosen_id, 0.0),
-                else: Map.get(feats, :score_norm, 0.0)
+    base_score =
+      if is_binary(chosen_id) and is_map(scores),
+        do: Map.get(scores, chosen_id, 0.0),
+        else: Map.get(feats, :score_norm, 0.0)
 
-            %{
-              token_index: Map.get(ch, :token_index),
-              lemma: (Map.get(ch, :lemma) || "") |> String.downcase(),
-              id: chosen_id,
-              alt_ids: Map.get(ch, :alt_ids, []),
-              score: score
-            }
-          end)
+    # Prefer an id whose norm matches the token’s norm, choosing the highest score among matches.
+    # Consider both the chosen_id and alt_ids.
+    candidates = [chosen_id | alt_ids]
+
+    matching =
+      candidates
+      |> Enum.filter(& (id_norm(&1) == token_norm))
+
+    {chosen_id2, score2} =
+      case matching do
+        [] ->
+          {chosen_id, base_score}
+        matches ->
+          Enum.max_by(matches, fn id -> Map.get(scores, id, -1.0) end, fn -> chosen_id end)
+          |> then(fn best -> {best, Map.get(scores, best, base_score)} end)
+      end
+
+    %{
+      token_index: Map.get(ch, :token_index),
+      lemma: token_norm,
+      id: chosen_id2,
+      alt_ids: alt_ids,
+      score: score2
+    }
+  end)
 
         si
         |> Map.put(:lifg_choices, lifg_choices)
@@ -130,36 +153,60 @@ defmodule Core do
     end
   end
 
-  # ─────────────────────── LTM orchestrator ───────────────────────
-  # [P-003] New: consume Db.ltm/2 and orchestrate from Core (no wrappers; direct GenServer).
+  # Only allow unigrams to consider unigram senses, and MWEs to consider MWEs.
+  defp compatible_cell_for_token?(token_n, cell) do
+    nrm = (Map.get(cell, :norm) || Map.get(cell, "norm") || "")
+    has_space = String.contains?(nrm, " ")
+    (token_n > 1 and has_space) or (token_n == 1 and not has_space)
+  end
 
+  # If any real lexicon row (with type="lexicon" or definition) exists,
+  # drop seed rows from the candidate set.
+  defp drop_seeds_if_lexicon_present(senses) do
+    has_lex? =
+      Enum.any?(senses, fn s ->
+        (Map.get(s, :type) || Map.get(s, "type")) == "lexicon" or
+          is_binary(Map.get(s, :definition) || Map.get(s, "definition"))
+      end)
+
+    if has_lex?, do: Enum.reject(senses, &seed?/1), else: senses
+  end
+
+  defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
+
+  # ─────────────────────── LTM orchestrator ───────────────────────
+
+  # Consumes Db.ltm/2. Enriches missing *unigram* norms with seeds, immediately re-fetches,
+  # merges into :active_cells, and nudges Brain.
   defp ltm_stage(si, opts) when is_map(si) do
     case Db.ltm(si, opts) do
-      {:ok, %{rows: rows, missing_norms: missing, db_hits: db_hits}} ->
-        # (A) Optional lexicon enrichment (moved from Db)
-      # (A) Optional lexicon enrichment + immediate reload
-      rows =
-        if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
-          _ = Lexicon.ensure_cells(missing)
-          # Load newly created rows right now so we can activate on first run
-          rows ++ Db.Lexicon.fetch_by_norms(missing)
-        else
-          rows
-        end
+      {:ok, %{rows: rows0, missing_norms: missing0, db_hits: db_hits}} ->
+        # Only seed unigrams (no spaces)
+        missing =
+          missing0
+          |> List.wrap()
+          |> Enum.reject(&String.contains?(&1, " "))
 
-      # (B) Merge DB rows into SI.active_cells (defensive: ensure list)
-      existing =
-        case Map.get(si, :active_cells, []) do
-          l when is_list(l) -> l
-          _ -> []
-        end
+        rows =
+          if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
+            _ = Lexicon.ensure_cells(missing)
+            rows0 ++ Db.Lexicon.fetch_by_norms(missing)
+          else
+            rows0
+          end
 
-      active_cells =
-        existing
-        |> Kernel.++(rows)
-        |> Enum.flat_map(&sanitize_cell/1)
-        |> Enum.reject(&(cell_id(&1) == nil))
-        |> Enum.uniq_by(&cell_id/1)
+        existing =
+          case Map.get(si, :active_cells, []) do
+            l when is_list(l) -> l
+            _ -> []
+          end
+
+        active_cells =
+          existing
+          |> Kernel.++(rows)
+          |> Enum.flat_map(&sanitize_cell/1)
+          |> Enum.reject(&(cell_id(&1) == nil))
+          |> Enum.uniq_by(&cell_id/1)
 
         activation_summary =
           si
@@ -171,7 +218,6 @@ defmodule Core do
           |> Map.put(:active_cells, active_cells)
           |> Map.put(:activation_summary, activation_summary)
 
-        # (C) Direct GenServer cast to Brain
         if rows != [] and Process.whereis(Brain) do
           GenServer.cast(Brain, {:activate_cells, rows, %{delta: 1.0, decay: 0.98, via: :ltm}})
         end
@@ -184,81 +230,6 @@ defmodule Core do
   end
 
   # ─────────────────────── Tokens / n-grams ───────────────────────
-# Run the external lexicon stage, then re-query DB to pull in new defs
-defp maybe_lexicon_stage(si, opts) when is_map(si) do
-  if Keyword.get(opts, :lexicon_stage?, true) do
-    # 1) run the stage (fetch + bulk_upsert_senses)
-    si1 = Core.Lexicon.Stage.run(si)
-
-    # 2) re-query DB for all norms in this sentence
-    norms =
-      si1.tokens
-      |> Enum.map(&norm(Map.get(&1, :phrase)))
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-
-    new_rows =
-      case norms do
-        [] -> []
-        _  -> Db.Lexicon.fetch_by_norms(norms)
-      end
-
-    # 3) merge only rows not already present
-    existing_ids =
-      si1
-      |> Map.get(:active_cells, [])
-      |> Enum.map(&cell_id/1)
-      |> Enum.reject(&is_nil/1)
-      |> MapSet.new()
-
-    fresh = Enum.reject(new_rows, &MapSet.member?(existing_ids, &1.id))
-
-    active_cells =
-      si1
-      |> Map.get(:active_cells, [])
-      |> Kernel.++(fresh)
-      |> Enum.uniq_by(&cell_id/1)
-
-    si2 = Map.put(si1, :active_cells, active_cells)
-
-    # 4) nudge Brain for the newly added lexicon cells (lighter delta)
-    if fresh != [] and Process.whereis(Brain) do
-      GenServer.cast(Brain, {:activate_cells, fresh, %{delta: 0.35, decay: 0.99, via: :lexicon}})
-    end
-
-    si2
-  else
-    si
-  end
-end
-
-# lib/core.ex  (add this helper near the other privates)
-
-defp maybe_lexicon_upsert_and_refetch(si, opts) do
-  if Keyword.get(opts, :lexicon_stage?, true) do
-    # 1) Upsert dictionary rows for any token words/MWEs
-    si1 = Core.Lexicon.Stage.run(si)
-
-    # 2) Re-fetch those rows so :active_cells includes real defs, not just seeds
-    norms =
-      (si1.tokens || [])
-      |> Enum.map(&(&1 |> Map.get(:phrase) |> norm()))
-      |> Enum.uniq()
-      |> Enum.reject(&(&1 == ""))
-
-    fresh = Db.Lexicon.fetch_by_norms(norms)
-
-    merged =
-      (si1.active_cells || [])
-      |> Kernel.++(fresh)
-      |> Enum.uniq_by(&cell_id/1)
-
-    %{si1 | active_cells: merged}
-  else
-    si
-  end
-end
-
 
   # Build contiguous word n-grams with character spans against a normalized sentence.
   defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
@@ -336,16 +307,6 @@ end
   defp keep_only_word_boundary_tokens(si), do: si
 
   # ───────────────────────── Helpers ─────────────────────────
-  # ─────────────────────── Lexicon Stage gate ───────────────────────
-  # Runs Core.Lexicon.Stage if enabled. Safe no-op when disabled.
-  defp maybe_run_lexicon_stage(%SemanticInput{} = si, opts) do
-    if Keyword.get(opts, :lexicon_stage?, true) do
-      Core.Lexicon.Stage.run(si)
-    else
-      si
-    end
-  end
-
 
   # Ensure we have a %SemanticInput{} struct after tokenize.
   defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si
@@ -353,24 +314,24 @@ end
   defp wrap_si(tokens, sentence) when is_list(tokens),
     do: %SemanticInput{sentence: sentence, tokens: tokens, source: :test, trace: []}
 
-defp wrap_si(other, _sentence) when is_binary(other),
+  defp wrap_si(other, _sentence) when is_binary(other),
     do: %SemanticInput{sentence: other, tokens: [], source: :test, trace: []}
 
   defp wrap_si(_other, sentence),
     do: %SemanticInput{sentence: sentence, tokens: [], source: :test, trace: []}
 
-  # [P-003] moved from Db — used when merging active_cells
+  # used when merging active_cells
   defp sanitize_cell(%BrainCell{} = s),      do: [s]
   defp sanitize_cell(%{id: _} = m),          do: [m]
   defp sanitize_cell(%{"id" => _} = m),      do: [m]
   defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
   defp sanitize_cell(_),                     do: []
 
-  defp cell_id(%BrainCell{id: id}),   do: id
-  defp cell_id(%{id: id}),            do: id
-  defp cell_id(%{"id" => id}),        do: id
-  defp cell_id(id) when is_binary(id),do: id
-  defp cell_id(_),                    do: nil
+  defp cell_id(%BrainCell{id: id}),    do: id
+  defp cell_id(%{id: id}),             do: id
+  defp cell_id(%{"id" => id}),         do: id
+  defp cell_id(id) when is_binary(id), do: id
+  defp cell_id(_),                     do: nil
 
   defp norm(nil), do: ""
 
