@@ -92,10 +92,84 @@ defmodule Db.Lexicon do
     do: p |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
 
 @spec bulk_upsert_senses(list()) :: :ok
-  def bulk_upsert_senses([]), do: :ok
-  def bulk_upsert_senses(rows) when is_list(rows) do
-    _ = rows
-    :ok
+def bulk_upsert_senses([]), do: :ok
+def bulk_upsert_senses(rows) when is_list(rows) do
+  fields = BrainCell.__schema__(:fields) |> MapSet.new()
+  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+  entries =
+    rows
+    |> Enum.map(&sense_to_entry(&1, fields, now))
+    |> Enum.reject(&is_nil/1)
+
+  if entries != [] do
+    conflict_target =
+      if MapSet.member?(fields, :id) do
+        :id
+      else
+        # Fallback to composite uniqueness used elsewhere in this module
+        {:unsafe_fragment,
+         " (norm, COALESCE(pos,''), COALESCE(type,''), COALESCE(gram_function,'')) "}
+      end
+
+    Db.insert_all(BrainCell, entries,
+      on_conflict: :nothing,
+      conflict_target: conflict_target
+    )
   end
+
+  :ok
+end
+
+# ---------- helpers ----------
+
+defp sense_to_entry(row, fields, now) do
+  word =
+    (get(row, :word) || "")
+    |> to_string()
+    |> String.trim()
+
+  norm = normize(word)
+  if norm == "", do: nil, else: build_entry(row, fields, now, word, norm)
+end
+
+defp build_entry(row, fields, now, word, norm) do
+  pos = get(row, :pos) || "unk"
+  type = get(row, :type) || "lexicon"
+  gram_function = get(row, :gram_function)
+
+  # Prefer caller-provided ID; otherwise synthesize a stable composite if :id exists
+  id =
+    get(row, :id) ||
+      (if MapSet.member?(fields, :id),
+         do: [norm, pos || "", type || "", gram_function || ""] |> Enum.join("|"),
+         else: nil)
+
+  base = %{
+    id: id,
+    word: word,
+    norm: norm,
+    pos: pos,
+    type: type,
+    gram_function: gram_function,
+    status: get(row, :status) || "active",
+    definition: get(row, :definition) || get(row, :def),
+    example: get(row, :example) || get(row, :ex),
+    synonyms: get(row, :synonyms) || get(row, :syns) || [],
+    antonyms: get(row, :antonyms) || get(row, :ants) || [],
+    semantic_atoms: get(row, :semantic_atoms) || []
+  }
+
+  base
+  |> maybe_put(:inserted_at, now, fields)
+  |> maybe_put(:updated_at, now, fields)
+  |> Map.take(MapSet.to_list(fields))
+end
+
+defp get(map, k), do: Map.get(map, k) || Map.get(map, to_string(k))
+
+defp maybe_put(map, key, val, fields) do
+  if MapSet.member?(fields, key), do: Map.put(map, key, val), else: map
+end
 
 end

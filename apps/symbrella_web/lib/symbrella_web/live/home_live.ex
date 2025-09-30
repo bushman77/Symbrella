@@ -1,6 +1,9 @@
 defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
+  @choice_preview_limit 3
+  @def_char_limit 120
+
   # ---------- helpers ----------
   defp sanitize_user_text(text) do
     text
@@ -21,10 +24,9 @@ defmodule SymbrellaWeb.HomeLive do
 
   # A tiny formatter so the UI shows something friendly when SI comes back.
   defp format_si_reply(si) do
-    cells = Map.get(si, :cells) || []
-    tokens = Map.get(si, :tokens) || []
-    cell_count = length(cells)
-    token_count = length(tokens)
+    tokens  = Map.get(si, :tokens, [])
+    cells   = Map.get(si, :active_cells, Map.get(si, :cells, []))
+    choices = Map.get(si, :lifg_choices, [])
 
     token_preview =
       tokens
@@ -36,9 +38,192 @@ defmodule SymbrellaWeb.HomeLive do
       end)
       |> Enum.join(", ")
 
-    "Got it. tokens=#{token_count}, cells=#{cell_count}" <>
-      if token_preview != "", do: " · [#{token_preview}]", else: ""
+    choices_preview =
+      choices
+      |> Enum.take(@choice_preview_limit)
+      |> Enum.map(&format_choice_with_def(&1, cells))
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.join(", ")
+
+    base =
+      "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
+        if token_preview != "", do: " · [#{token_preview}]", else: ""
+
+    if choices_preview == "" do
+      base
+    else
+      base <> " · choices: [#{choices_preview}]"
+    end
   end
+
+  # Show winner + score; append a definition with smart fallbacks.
+  defp format_choice_with_def(choice, cells) do
+    lemma = choice[:lemma] || ""
+    id    = choice[:id]
+    score = fmt_score(choice[:score])
+
+    alt =
+      case choice[:alt_ids] do
+        [a | _] -> " ; alt " <> short_id(a)
+        _ -> ""
+      end
+
+    defn = definition_for_choice(choice, cells)
+    head = "#{lemma}→#{short_id(id)}(#{score}#{alt})"
+    if defn == "", do: head, else: head <> " — " <> defn
+  end
+
+  defp definition_for_choice(choice, cells) do
+    by_id   = index_cells_by_id(cells)
+    by_norm = index_cells_by_norm(cells)
+
+    id         = choice[:id]
+    alt_ids    = List.wrap(choice[:alt_ids])
+    lemma_norm = norm_text(choice[:lemma] || "")
+
+    # 1) chosen id
+    with_choice =
+      by_id
+      |> Map.get(id)
+      |> cell_def()
+      |> gloss()
+
+    cond do
+      with_choice != "" ->
+        with_choice
+
+      true ->
+        # 2) first alt id with a def
+        with_alt = first_def_from_ids(alt_ids, by_id)
+
+        cond do
+          with_alt != "" ->
+            with_alt
+
+          true ->
+            # 3a) same norm as chosen id (parsed from id)
+            idn = id_norm(id)
+            with_same_norm =
+              by_norm
+              |> Map.get(idn)
+              |> cell_def()
+              |> gloss()
+
+            cond do
+              with_same_norm != "" ->
+                with_same_norm
+
+              true ->
+                # 3b) any cell matching lemma norm
+                with_lemma =
+                  by_norm
+                  |> Map.get(lemma_norm)
+                  |> cell_def()
+                  |> gloss()
+
+                if with_lemma != "" do
+                  with_lemma
+                else
+                  # FINAL FALLBACK: ask the lexicon live by lemma
+                  lexicon_def(lemma_norm)
+                end
+            end
+        end
+    end
+  end
+
+  defp first_def_from_ids([], _by_id), do: ""
+  defp first_def_from_ids([h | t], by_id) do
+    case by_id |> Map.get(h) |> cell_def() |> gloss() do
+      "" -> first_def_from_ids(t, by_id)
+      d  -> d
+    end
+  end
+
+  defp index_cells_by_id(cells) do
+    Enum.reduce(cells || [], %{}, fn c, acc ->
+      case cell_id(c) do
+        nil -> acc
+        id  -> Map.put(acc, id, c)
+      end
+    end)
+  end
+
+  defp index_cells_by_norm(cells) do
+    Enum.reduce(cells || [], %{}, fn c, acc ->
+      case cell_norm(c) do
+        nil -> acc
+        n   -> Map.put_new(acc, n, c)  # keep first with that norm
+      end
+    end)
+  end
+
+  # NOTE: Use Map.get to support structs (Ecto schemas) and plain maps.
+  defp cell_id(c) when is_map(c) do
+    case Map.get(c, :id) || Map.get(c, "id") do
+      id when is_binary(id) -> id
+      _ -> nil
+    end
+  end
+  defp cell_id(_), do: nil
+
+  defp cell_norm(c) when is_map(c) do
+    cond do
+      is_binary(Map.get(c, :norm)) -> Map.get(c, :norm)
+      is_binary(Map.get(c, "norm")) -> Map.get(c, "norm")
+      is_binary(Map.get(c, :id)) -> id_norm(Map.get(c, :id))
+      is_binary(Map.get(c, "id")) -> id_norm(Map.get(c, "id"))
+      true -> nil
+    end
+  end
+  defp cell_norm(_), do: nil
+
+  defp id_norm(nil), do: nil
+  defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
+
+  defp cell_def(c) when is_map(c),
+    do: Map.get(c, :definition) || Map.get(c, "definition")
+  defp cell_def(_), do: nil
+
+  defp gloss(nil), do: ""
+  defp gloss(""), do: ""
+  defp gloss(str) when is_binary(str) do
+    s = str |> String.replace(~r/\s+/u, " ") |> String.trim()
+    if String.length(s) <= @def_char_limit, do: s, else: String.slice(s, 0, @def_char_limit) <> "…"
+  end
+
+  defp short_id(nil), do: "∅"
+  defp short_id(id) when is_binary(id), do: id |> String.split("|") |> hd()
+
+  defp fmt_score(nil), do: "—"
+  defp fmt_score(s) when is_number(s), do: :erlang.float_to_binary(s, decimals: 2)
+
+  defp norm_text(v) when is_binary(v),
+    do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+  defp norm_text(v),
+    do:
+      v
+      |> Kernel.to_string()
+      |> String.downcase()
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
+
+  # Final fallback: query lexicon by lemma
+  defp lexicon_def(word) when is_binary(word) and word != "" do
+    try do
+      case Core.Lexicon.lookup(word) do
+        %{senses: [s | _]} ->
+          (s[:definition] || s[:def] || "") |> gloss()
+        _ ->
+          ""
+      end
+    rescue
+      _ -> ""
+    catch
+      _, _ -> ""
+    end
+  end
+  defp lexicon_def(_), do: ""
 
   # ---------- liveview ----------
   @impl true
@@ -85,16 +270,19 @@ defmodule SymbrellaWeb.HomeLive do
         |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
         |> push_event("chat:scroll", %{to: "composer"})
 
-      # Run the pure resolve + then dispatch activation to Brain via Core.BrainAdapter.
+      # Run prod resolve (Core handles enrichment, re-query, LIFG, and Brain activation)
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          # 1) Build SI (pure)
-          si = Core.resolve_input(text)
+          opts =
+            Application.get_env(
+              :symbrella,
+              :resolve_input_opts,
+              [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
+            )
 
-          # 2) Dispatch activation (side-effect) WITHOUT compile-time deps on brain app
-          _ = Core.BrainAdapter.activate_cells(Map.get(si, :cells, []), %{})
+          si = Core.resolve_input(text, opts)
 
-          # 3) Return a small, friendly UI summary (keeps LV decoupled from SI internals)
+          # Return a small, friendly UI summary
           %{text: format_si_reply(si)}
         end)
 
@@ -130,7 +318,6 @@ defmodule SymbrellaWeb.HomeLive do
     Process.demonitor(ref, [:flush])
 
     %{text: reply_text} = to_bot_reply(payload)
-    IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)
 
     bot = %{
       id: "b-" <> Integer.to_string(System.unique_integer([:positive])),
@@ -188,8 +375,8 @@ defmodule SymbrellaWeb.HomeLive do
           <div class="text-xs opacity-70 hidden sm:block">LiveView</div>
         </div>
       </header>
-      
-    <!-- MESSAGES -->
+
+      <!-- MESSAGES -->
       <main
         id="messages"
         phx-hook="ScrollOnEvent"
@@ -227,8 +414,8 @@ defmodule SymbrellaWeb.HomeLive do
           <div id="bottom"></div>
         </div>
       </main>
-      
-    <!-- COMPOSER -->
+
+      <!-- COMPOSER -->
       <footer
         id="chat-composer"
         phx-hook="FooterSizer"
@@ -261,3 +448,4 @@ defmodule SymbrellaWeb.HomeLive do
     """
   end
 end
+

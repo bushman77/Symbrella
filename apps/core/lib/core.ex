@@ -32,9 +32,12 @@ defmodule Core do
         |> keep_only_word_boundary_tokens()
         # [P-003] LTM DB read; Core handles enrichment + direct GenServer cast
         |> ltm_stage(opts)
+        |> maybe_lexicon_upsert_and_refetch(opts)
         |> keep_only_word_boundary_tokens()
         # merges :active_cells into SI (your existing Lexicon pass)
-        |> Lexicon.all()
+        # (P-005) Optional: dictionary ingestion → DB upserts (idempotent)
+        |> maybe_run_lexicon_stage(opts)
+        |> Lexicon.all() 
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> notify_brain_activation(opts)
@@ -133,20 +136,29 @@ defmodule Core do
     case Db.ltm(si, opts) do
       {:ok, %{rows: rows, missing_norms: missing, db_hits: db_hits}} ->
         # (A) Optional lexicon enrichment (moved from Db)
+      # (A) Optional lexicon enrichment + immediate reload
+      rows =
         if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
           _ = Lexicon.ensure_cells(missing)
-          # If you need to immediately include newly created rows, re-query here.
-          # Otherwise they'll be available next pass.
+          # Load newly created rows right now so we can activate on first run
+          rows ++ Db.Lexicon.fetch_by_norms(missing)
+        else
+          rows
         end
 
-        # (B) Merge DB rows into SI.active_cells (moved from Db)
-        active_cells =
-          si
-          |> Map.get(:active_cells, [])
-          |> Kernel.++(rows)
-          |> Enum.flat_map(&sanitize_cell/1)
-          |> Enum.reject(&(cell_id(&1) == nil))
-          |> Enum.uniq_by(&cell_id/1)
+      # (B) Merge DB rows into SI.active_cells (defensive: ensure list)
+      existing =
+        case Map.get(si, :active_cells, []) do
+          l when is_list(l) -> l
+          _ -> []
+        end
+
+      active_cells =
+        existing
+        |> Kernel.++(rows)
+        |> Enum.flat_map(&sanitize_cell/1)
+        |> Enum.reject(&(cell_id(&1) == nil))
+        |> Enum.uniq_by(&cell_id/1)
 
         activation_summary =
           si
@@ -171,6 +183,34 @@ defmodule Core do
   end
 
   # ─────────────────────── Tokens / n-grams ───────────────────────
+
+# lib/core.ex  (add this helper near the other privates)
+
+defp maybe_lexicon_upsert_and_refetch(si, opts) do
+  if Keyword.get(opts, :lexicon_stage?, true) do
+    # 1) Upsert dictionary rows for any token words/MWEs
+    si1 = Core.Lexicon.Stage.run(si)
+
+    # 2) Re-fetch those rows so :active_cells includes real defs, not just seeds
+    norms =
+      (si1.tokens || [])
+      |> Enum.map(&(&1 |> Map.get(:phrase) |> norm()))
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 == ""))
+
+    fresh = Db.Lexicon.fetch_by_norms(norms)
+
+    merged =
+      (si1.active_cells || [])
+      |> Kernel.++(fresh)
+      |> Enum.uniq_by(&cell_id/1)
+
+    %{si1 | active_cells: merged}
+  else
+    si
+  end
+end
+
 
   # Build contiguous word n-grams with character spans against a normalized sentence.
   defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
@@ -248,6 +288,16 @@ defmodule Core do
   defp keep_only_word_boundary_tokens(si), do: si
 
   # ───────────────────────── Helpers ─────────────────────────
+  # ─────────────────────── Lexicon Stage gate ───────────────────────
+  # Runs Core.Lexicon.Stage if enabled. Safe no-op when disabled.
+  defp maybe_run_lexicon_stage(%SemanticInput{} = si, opts) do
+    if Keyword.get(opts, :lexicon_stage?, true) do
+      Core.Lexicon.Stage.run(si)
+    else
+      si
+    end
+  end
+
 
   # Ensure we have a %SemanticInput{} struct after tokenize.
   defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si

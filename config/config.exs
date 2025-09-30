@@ -6,6 +6,10 @@ config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
 # Generators
 config :symbrella_web, generators: [context_app: :symbrella]
 
+# config/config.exs (or runtime.exs)
+config :symbrella, resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
+
+
 # Endpoint
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],

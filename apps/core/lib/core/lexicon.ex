@@ -19,12 +19,47 @@ defmodule Core.Lexicon do
   Ensure cells exist for the given list of normalized words.
   (Delegates to DB layer; idempotent.)
   """
-  @spec ensure_cells([norm()]) :: :ok
-  def ensure_cells(norms) when is_list(norms) do
-    # TODO: wire to a proper DB upsert stage (Db.Lexicon.bulk_upsert_senses/1 stub exists)
-    _ = norms
-    :ok
+@spec ensure_cells([binary()]) :: :ok
+def ensure_cells(norms) when is_list(norms) do
+  alias Db.BrainCell
+  alias Db
+
+  fields = BrainCell.__schema__(:fields) |> MapSet.new()
+  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+  entries =
+    norms
+    |> Enum.map(&(&1 |> to_string() |> String.trim() |> String.downcase(:default)))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> Enum.map(fn n ->
+      pos  = "unk"
+      type = "seed"
+      gram = ""           # keep 4-part ID shape: norm|pos|type|gram
+      id   = Enum.join([n, pos, type, gram], "|")
+
+      %{}
+      |> Map.put(:id, id)
+      |> Map.put(:norm, n)
+      |> maybe_put(:pos, pos, fields)
+      |> maybe_put(:type, type, fields)
+      |> maybe_put(:status, "active", fields)
+      |> maybe_put(:word, n, fields)    # optional; added only if column exists
+      |> maybe_put(:lemma, n, fields)   # optional; added only if column exists
+      |> maybe_put(:inserted_at, now, fields)
+      |> maybe_put(:updated_at, now, fields)
+      |> Map.take(MapSet.to_list(fields))
+    end)
+
+  if entries != [] do
+    Db.insert_all(BrainCell, entries, on_conflict: :nothing)
   end
+
+  :ok
+end
+
+defp maybe_put(map, key, val, fields),
+  do: if(MapSet.member?(fields, key), do: Map.put(map, key, val), else: map)
 
   @doc """
   Public `lookup/1` used by callers that expect it to exist.
