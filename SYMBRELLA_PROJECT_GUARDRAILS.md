@@ -13,7 +13,6 @@ Last updated: 2025-09-30 01:27
 - **LIFG lives in `apps/brain`** (symbolic brain); **Core orchestrates** the pipeline and can call `Lexicon`.  
 - **LIFG path invariants:** no char‑grams, boundary guard, MWE injection, sorted spans, config defaults set in `test/dev`.
 - **Deliverables:** Prefer **chat-bubble code blocks only** (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
-
 ---
 
 ## Canonical Umbrella Layout
