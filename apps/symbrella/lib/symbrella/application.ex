@@ -22,14 +22,14 @@ defmodule Symbrella.Application do
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
       # Servers
-      Brain
+      Brain,
       # If you later want the Endpoint here, add it here and remove from web.
       Brain.ATL,
   Brain.PMTG,
   Brain.AG,
   Brain.MTL,
   Brain.ACC,
-  Brain.BG
+  Brain.BasalGanglia
     ]
 
     Brain.Telemetry.attach!()

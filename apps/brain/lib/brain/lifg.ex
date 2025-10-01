@@ -1,24 +1,37 @@
 defmodule Brain.LIFG do
   @moduledoc ~S"""
-  Stage-1 Disambiguation (LIFG). Pure, stateless, fast.
-  Public API:
-    • `disambiguate_stage1/1` or `disambiguate_stage1/2` — SI → SI
-      - consumes `si.sense_candidates` if present (from Core.SenseSlate)
-      - else falls back to legacy matching against `si.active_cells`
-      - selects per-token winner with Reanalysis fallback
-      - appends a trace event and stores winners & traces on SI
+  **Left Inferior Frontal Gyrus (LIFG) — Competitive Sense Selection**
 
-  Scoring recipe (weights tunable):
+  The LIFG module is the fast, *stateless* gate that resolves lexical ambiguity early in the pipeline.  
+  It takes candidate senses for each token, computes a weighted score per candidate (lexical fit, contextual
+  similarity, prior/relational cues, pragmatic bias, and recent activation), normalizes with a per-token
+  softmax, and returns the top choice per token. A lightweight “reanalysis” step can flip a decision when
+  the local context strongly disagrees. LIFG outputs winners + an audit trace that downstream regions
+  (ATL, MTG/STS, TPJ/AG, etc.) can refine.
+
+  ---
+
+  Stage-1 Disambiguation (LIFG). Pure, stateless, fast.  
+  Public API: • `disambiguate_stage1/1` or
+  `disambiguate_stage1/2` — SI → SI
+
+  - consumes `si.sense_candidates` if present (from Core.SenseSlate)
+  - else falls back to legacy matching against `si.active_cells`
+  - selects per-token winner with Reanalysis fallback
+  - appends a trace event and stores winners & traces on SI
+
+  **Scoring recipe (weights tunable):**
+
       score = w_lex*lex_fit
             + w_sim*cosine(context_vec, embedding)
             + w_rel*rel_prior
             + w_prag*intent_bias
             + w_act*activation
 
-  Defaults: w_lex=0.25, w_sim=0.40, w_rel=0.15, w_prag=0.10, w_act=0.10.
-  Softmax per token group → probabilities sum ≈ 1.0.
+  Defaults: `w_lex=0.25`, `w_sim=0.40`, `w_rel=0.15`,
+  `w_prag=0.10`, `w_act=0.10`. Softmax per token group →
+  probabilities sum ≈ 1.0.
   """
-
   alias Brain.LIFG.{Reanalysis, Tripwire, Priming}
   alias Core.SemanticInput
 

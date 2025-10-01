@@ -37,6 +37,7 @@ defmodule Core do
         |> Lexicon.all(opts)
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
+        |> maybe_ingest_atl(opts)
         |> notify_brain_activation(opts)
 
       _ ->
@@ -152,6 +153,39 @@ lifg_choices =
         si
     end
   end
+
+defp maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
+     when is_list(choices) and is_list(tokens) do
+  if choices == [] do
+    si
+  else
+    slate =
+      case Process.whereis(Brain.ATL) do
+        pid when is_pid(pid) ->
+          # server path
+          Brain.ATL.ingest(choices, tokens)
+        _ ->
+          # pure fallback path
+          Brain.ATL.reduce(choices, tokens)
+      end
+
+    si
+    |> Map.put(:atl_slate, slate)
+    |> Map.update(:trace, [], fn tr ->
+      [
+        %{
+          stage: :atl,
+          ts_ms: System.system_time(:millisecond),
+          winners: Map.get(slate, :winner_count, 0),
+          concepts: slate |> Map.get(:by_norm, %{}) |> map_size()
+        }
+        | tr
+      ]
+    end)
+  end
+end
+
+defp maybe_ingest_atl(si, _opts), do: si
 
   # Only allow unigrams to consider unigram senses, and MWEs to consider MWEs.
   defp compatible_cell_for_token?(token_n, cell) do
