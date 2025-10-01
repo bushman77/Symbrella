@@ -258,9 +258,8 @@ Phoenix/Web may print `IO.inspect(GenServer.call(Brain, :snapshot), limit: :infi
    - **Tests** to add/update.
    - **Rollback plan** (git commands).
 
-2) **Deliverable format** (your preference):
-   - **Chat bulles with proper chatacter encoding**
-   - One module per “pane” if you want preview, but **downloadable artifacts win**.
+2) **Deliverables:** Prefer **chat-bubble code blocks only** (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
+   - One module per “pane”.
 
 3) **Approval**: You respond with `Approve: P-###`.  
    - If **not approved**, we do **no file replacements**. We can iterate with `P-###.1` etc.
