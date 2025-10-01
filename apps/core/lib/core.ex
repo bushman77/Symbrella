@@ -38,6 +38,7 @@ defmodule Core do
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> maybe_ingest_atl(opts)
+        |> maybe_encode_hippocampus()
         |> notify_brain_activation(opts)
 
       _ ->
@@ -205,6 +206,17 @@ defp maybe_ingest_atl(si, _opts), do: si
 
     if has_lex?, do: Enum.reject(senses, &seed?/1), else: senses
   end
+
+defp maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
+  if Process.whereis(Brain.Hippocampus) do
+    ep = Brain.Hippocampus.encode(slate)
+    # keep a tiny summary on SI; full episode lives in Hippocampus state
+    Map.put(si, :episode, Map.take(ep, [:ts_ms, :token_count, :winner_count]))
+  else
+    si
+  end
+end
+defp maybe_encode_hippocampus(si), do: si
 
   defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
 

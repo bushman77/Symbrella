@@ -131,7 +131,7 @@ Phoenix/Web may print `IO.inspect(GenServer.call(Brain, :snapshot), limit: :infi
    - **Rollback plan** (git commands).
 
 2) **Deliverable format** (your preference):
-   - **Downloadable files** for 1–3 files; otherwise a **`.zip` “patch pack”**: `brain_lifg_P-###.zip`.
+   - **Chat bulles with proper chatacter encoding**
    - One module per “pane” if you want preview, but **downloadable artifacts win**.
 
 3) **Approval**: You respond with `Approve: P-###`.  

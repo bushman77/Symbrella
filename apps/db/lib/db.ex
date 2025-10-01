@@ -1,76 +1,90 @@
- defmodule Db do
-   @moduledoc """
-   Umbrella-wide Repo. One DB, one config source.
+defmodule Db do
+  @moduledoc """
+  Umbrella‑wide Repo (single database).
 
-   LTM owns lexicon enrichment:
-     • Collect unique norms from si.tokens (word-true).
-     • Load known BrainCell rows.
-    • Report missing norms (Core will decide whether to create/ensure).
-    • Return loaded rows; Core will merge active_cells and notify Brain.
-   """
-   use Ecto.Repo,
-     otp_app: :db,
-     adapter: Ecto.Adapters.Postgres,
-     priv: "priv/repo"
+  Long‑term memory (LTM) helpers:
+  • Collect normalized `norm`s from `si.tokens`.
+  • Load matching `Db.BrainCell` rows.
+  • Report which norms are missing so callers can decide whether to create.
+  • Return loaded rows along with a set of DB hits.
+  """
 
-   import Ecto.Query, only: [from: 2]
+  use Ecto.Repo,
+    otp_app: :db,
+    adapter: Ecto.Adapters.Postgres,
+    priv: "priv/repo"
 
-   alias Db.BrainCell
-  # No upward aliases here — keep Db decoupled
+  import Ecto.Query, only: [from: 2]
+  alias Db.BrainCell
 
+  @type norm :: String.t()
+
+  @doc """
+  Look up BrainCell rows for the tokens inside an SI map.
+
+  `si.tokens` may contain:
+  • maps with `:phrase` (preferred) or `:norm`
+  • plain strings
+
+  Returns `{:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}`.
+  """
+# move defaults to a head
 @spec ltm(map(), keyword()) ::
-        {:ok, %{rows: [%Db.BrainCell{}], missing_norms: [binary()], db_hits: MapSet.t(binary())}}
-def ltm(%{tokens: toks} = _si, _opts \\ []) do
+        {:ok, %{rows: [Db.BrainCell.t()], missing_norms: [binary()], db_hits: MapSet.t(binary())}}
+def ltm(si, opts \\ [])
+
+# primary clause
+def ltm(%{tokens: tokens} = _si, _opts) when is_list(tokens) do
   norms =
-    toks
-    |> Enum.map(&norm(&1.phrase))
+    tokens
+    |> Enum.map(&token_to_phrase/1)
+    |> Enum.map(&norm/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
 
   if norms == [] do
     {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
   else
-    existing_rows =
-      from(b in BrainCell, where: b.norm in ^norms)
+    rows =
+      from(b in Db.BrainCell, where: b.norm in ^norms)
       |> Db.all()
 
-    existing_norms = MapSet.new(for r <- existing_rows, do: r.norm)
-    missing_norms = Enum.reject(norms, &MapSet.member?(existing_norms, &1))
-
-    rows = existing_rows
-    db_hits = MapSet.new(for r <- rows, do: r.norm)
-
-    {:ok, %{rows: rows, missing_norms: missing_norms, db_hits: db_hits}}
+    existing = MapSet.new(for r <- rows, do: r.norm)
+    missing  = Enum.reject(norms, &MapSet.member?(existing, &1))
+    hits     = MapSet.new(for r <- rows, do: r.norm)
+    {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
   end
 end
 
-@doc """
-Return `true` if a *word* exists; guards invalid inputs without querying for blanks.
-(Used by Core.Recall.Execute.default_exists_fun/0)
-"""
-@spec word_exists?(term) :: boolean()
-def word_exists?(term)
-def word_exists?(term) when is_binary(term) do
-  word = String.trim(term)
+# fallback
+def ltm(_si, _opts), do: {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
 
-  if word == "" do
-    false
-  else
-    norm = String.downcase(word, :default)
-    import Ecto.Query, only: [from: 2]
-
-    from(b in Db.BrainCell, where: b.norm == ^norm)
-    |> Db.exists?()
+  @doc """
+  Returns `true` if a *word* exists by `norm` in `brain_cells`.
+  Guards invalid/blank inputs without querying for blanks.
+  """
+  @spec word_exists?(term()) :: boolean()
+  def word_exists?(term) when is_binary(term) do
+    case norm(term) do
+      "" -> false
+      n -> from(b in BrainCell, where: b.norm == ^n) |> Db.exists?()
+    end
   end
+
+  def word_exists?(_), do: false
+
+  # -- helpers ----------------------------------------------------------------
+
+  # Accept token map or string, extract phrase text
+  defp token_to_phrase(%{phrase: p}) when is_binary(p), do: p
+  defp token_to_phrase(%{"phrase" => p}) when is_binary(p), do: p
+  defp token_to_phrase(%{norm: n}) when is_binary(n), do: n
+  defp token_to_phrase(%{"norm" => n}) when is_binary(n), do: n
+  defp token_to_phrase(s) when is_binary(s), do: s
+  defp token_to_phrase(_), do: ""
+
+  defp norm(nil), do: ""
+  defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
+  defp norm(_), do: ""
 end
-
-def word_exists?(_), do: false
-
-
-# keep this helper since ltm/2 uses it
-defp norm(nil), do: ""
-defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
-
-
-end
-
+ 

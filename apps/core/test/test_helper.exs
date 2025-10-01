@@ -1,5 +1,10 @@
+# apps/core/test/test_helper.exs
 ExUnit.start()
 
-# If you already have Logger config in config/test.exs, keep it.
-# Otherwise this helps when you run with --trace
-Logger.configure(level: :debug)
+# Start the DB app (Repo) and the Brain app tree that defines the `Brain` process
+{:ok, _} = Application.ensure_all_started(:db)
+{:ok, _} = Application.ensure_all_started(:brain)
+
+# Put Repo in manual sandbox mode for tests
+Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
+

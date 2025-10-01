@@ -59,6 +59,10 @@ config :db, Db,
   # keep if you defined custom types (e.g., pgvector)
   types: Db.PostgrexTypes
 
+config :db, :embedding_dim, 1536
+config :db, :embedder, MyEmbeddings   # implement MyEmbeddings.embed/1 -> {:ok, [float]}
+
+
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity

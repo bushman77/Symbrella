@@ -13,7 +13,7 @@ defmodule Core.Lexicon do
   alias Core.Lexicon.Stage
   alias Db.Lexicon, as: DbLex
 alias Db
-alias Db.BrainCell
+#alias Db.BrainCell
 
   @doc """
   Run the lexicon stage (if enabled), then re-query DB by norms and merge into SI.
