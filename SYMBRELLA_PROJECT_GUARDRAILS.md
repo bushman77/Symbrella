@@ -21,51 +21,179 @@ This is the canonical, minimal structure. If a directory/file isn’t listed her
 
 ```
 symbrella/
-├─ README.md
-├─ AGENTS.md
-├─ PROJECT-RESUME-PLAYBOOK.md
-├─ README-PATCH.md
-├─ _config.yml
-├─ config/
-│  ├─ config.exs
-│  ├─ dev.exs
-│  ├─ test.exs
-├─ apps/
-│  ├─ db/                         # Umbrella-wide Repo (Ecto/Postgres)
-│  │  ├─ lib/
-│  │  │  ├─ db.ex                 # Db (Ecto.Repo)
-│  │  │  └─ db/brain_cell.ex      # Db.BrainCell schema
-│  │  └─ priv/repo/migrations/
-│  ├─ brain/                      # Brain + LIFG (symbolic disambiguation)
-│  │  ├─ lib/brain/
-│  │  │  ├─ brain.ex              # Brain (GenServer, STM focus, activation log)
-│  │  │  ├─ cell.ex               # Brain.Cell (process + data conventions)
-│  │  │  ├─ lifg.ex               # Brain.LIFG (core algorithm)
-│  │  │  └─ lifg/
-│  │  │     └─ boundary_guard.ex  # Brain.LIFG.BoundaryGuard (sanitize/guards)
-│  │  ├─ bench/
-│  │  │  └─ brain_lifg_bench_v2_1.exs
-│  │  └─ test/
-│  ├─ core/                       # Orchestration + semantics
-│  │  ├─ lib/core/
-│  │  │  ├─ core.ex               # public facade (resolve_input/1, etc.)
-│  │  │  ├─ semantic_input.ex     # %Core.SemanticInput struct
-│  │  │  ├─ tokenizer.ex          # Core.Tokenizer (word-first)
-│  │  │  ├─ lifg_input.ex         # Core.LIFG.Input (prepares tokens for LIFG)
-│  │  │  ├─ mwe/
-│  │  │  │  └─ injector.ex        # Core.MWE.Injector (word-level n-grams)
-│  │  │  ├─ intent_resolver.ex    # IntentMatrix + fallback heuristics
-│  │  │  ├─ intent_matrix.ex
-│  │  │  ├─ runtime_bind.ex       # Runtime binding to active cells (STM→focus)
-│  │  │  └─ lexicon.ex            # Core.Lexicon facade (public lookups)
-│  │  └─ test/
-│  └─ web/                        # Phoenix LiveView app (optional/present)
-│     ├─ lib/symbrella_web/
-│     │  └─ live/home_live.ex     # snapshot prints, UI pipeline hooks
-│     └─ test/
-├─ priv/
-│  └─ mini_intent/                # model params, if used (hot-loadable)
-└─ scripts/                        # ops/dev utilities
+├── AGENTS.md                                   — High-level agent roles/notes
+├── PROJECT-RESUME-PLAYBOOK.md                  — “Resume the project quickly” runbook
+├── README-PATCH-v2.md                          — Patch-series readme (v2)
+├── README-PATCH.md                             — Patch-series readme (v1)
+├── README.md                                   — Main project overview
+├── README_BRAIN_CHAIN.md                       — Brain chain architecture notes
+├── README_guardrails_snippet.md                — Guardrails snippet for reuse
+├── SYMBRELLA_PROJECT_GUARDRAILS.md             — Canonical guardrails doc (this)
+├── _config.yml                                 — GitHub Pages/Jekyll config (if used)
+├── apps
+│   ├── brain
+│   │   ├── README.md                           — Brain app overview
+│   │   ├── bench
+│   │   │   └── brain_lifg_bench_v2_1.exs       — LIFG micro-benchmark script
+│   │   ├── brain_lifg_v2_1_2_pack.zip          — Zipped drop-in pack (LIFG)
+│   │   ├── lib
+│   │   │   ├── brain
+│   │   │   │   ├── acc.ex                      — Activation accumulator helpers
+│   │   │   │   ├── ag.ex                       — Angular Gyrus (semantic integration)
+│   │   │   │   ├── amygdala.ex                 — Amygdala (salience/emotional tagging)
+│   │   │   │   ├── atl.ex                      — Anterior Temporal Lobe (concept hub)
+│   │   │   │   ├── bg.ex                       — Basal Ganglia (gating/selection)
+│   │   │   │   ├── cell.ex                     — Brain cell process/state (per-cell API)
+│   │   │   │   ├── cerebellum.ex               — Cerebellum (timing/coordination)
+│   │   │   │   ├── chain.ex                    — Brain chain supervisor/flow wiring
+│   │   │   │   ├── hippocampus.ex              — Episodic memory API (write/recall)
+│   │   │   │   ├── lifg                        — LIFG subsystem (directory)
+│   │   │   │   │   └── boundary_guard.ex       — Boundary guard (DoD: word-boundary rule)
+│   │   │   │   ├── lifg.ex                     — LIFG core: disambiguation engine
+│   │   │   │   ├── lifg_guard.ex               — LIFG guards (invariants, prechecks)
+│   │   │   │   ├── lifg_stage1.ex              — LIFG Stage 1 (initial candidate pass)
+│   │   │   │   ├── lifg_tripwire.ex            — Telemetry tripwire (drop/log on violations)
+│   │   │   │   ├── mtl.ex                      — Medial Temporal Lobe (memory interface)
+│   │   │   │   ├── neuromodulator.ex           — Dopamine/serotonin modulation
+│   │   │   │   ├── ofc.ex                      — Orbitofrontal Cortex (valuation/policy)
+│   │   │   │   ├── pmtg.ex                     — Posterior MTG (controlled retrieval)
+│   │   │   │   ├── priming.ex                  — Priming cache/recency boost
+│   │   │   │   ├── reanalysis.ex               — Reanalysis fallback on integration failure
+│   │   │   │   ├── region.ex                   — `use Brain.Region` macro + region plumbing
+│   │   │   │   ├── telemetry.ex                — Metrics/events for Brain/LIFG
+│   │   │   │   ├── thalamus.ex                 — Thalamus (routing/signal relay)
+│   │   │   │   └── working_memory.ex           — STM/WM interface within Brain
+│   │   │   └── brain.ex                        — Brain supervisor/server (umbrella-started)
+│   │   ├── mix.exs                             — Brain app mix file
+│   │   └── test
+│   │       ├── brain
+│   │       │   ├── bench/bench_brain_lifg_bench.exs — Bench runner
+│   │       │   ├── boundary_guard_test.exs     — Tests: boundary guard invariants
+│   │       │   ├── brain_lifg_integration_test.exs — End-to-end LIFG path tests
+│   │       │   ├── brain_lifg_property_test.exs — Property tests for LIFG rules
+│   │       │   ├── brain_lifg_test.exs         — Unit tests for LIFG core
+│   │       │   ├── lifg_guard_test.exs         — Guard unit tests
+│   │       │   ├── lifg_priming_integration_test.exs — Priming + LIFG integration
+│   │       │   ├── priming_test.exs            — Priming behaviors
+│   │       │   └── reanalysis_test.exs         — Reanalysis behavior tests
+│   │       └── test_helper.exs                 — ExUnit setup for Brain
+│   ├── core
+│   │   ├── README.md                           — Core app overview
+│   │   ├── lib
+│   │   │   ├── core
+│   │   │   │   ├── brain
+│   │   │   │   │   └── index.ex                — Brain index facade used by Core
+│   │   │   │   ├── brain.ex                    — Thin Brain adapter (calls into Brain)
+│   │   │   │   ├── brain_adapter.ex            — Port/adapter boundary for Brain APIs
+│   │   │   │   ├── invariants.ex               — Core invariants (sorted spans, no char-grams)
+│   │   │   │   ├── lex_id.ex                   — `{word}|{pos}|{sense}` ID helpers
+│   │   │   │   ├── lexicon
+│   │   │   │   │   ├── normalize.ex            — Text normalization for lexicon lookup
+│   │   │   │   │   ├── senses.ex               — Sense retrieval/composition helpers
+│   │   │   │   │   └── stage.ex                — Lexicon pipeline stage orchestration
+│   │   │   │   ├── lexicon.ex                  — Public Lexicon facade (Core-facing)
+│   │   │   │   ├── lifg_input.ex               — Build LIFG-ready input (SI → LIFG)
+│   │   │   │   ├── mwe_injector.ex             — MWE injection (word n-grams → tokens)
+│   │   │   │   ├── neg_cache.ex                — Negative cache (avoid repeat misses)
+│   │   │   │   ├── phrase_repo
+│   │   │   │   │   └── default.ex              — Default phrase repository (MWEs/phrases)
+│   │   │   │   ├── phrase_repo.ex              — Phrase repo behaviour/dispatch
+│   │   │   │   ├── recall
+│   │   │   │   │   ├── execute.ex              — Execute recall plan
+│   │   │   │   │   ├── gate.ex                 — Gate recall by policy/signal
+│   │   │   │   │   └── plan.ex                 — Build recall plan (what/when)
+│   │   │   │   ├── runtime_bind.ex             — Bind tokens ↔ snapshot cells (STM→SI)
+│   │   │   │   ├── segmenter.ex                — Sentence/token segmentation utilities
+│   │   │   │   ├── semantic_input.ex           — `%SemanticInput{}` struct + helpers
+│   │   │   │   ├── sense_slate.ex              — `si.sense_candidates` slate
+│   │   │   │   ├── text.ex                     — Core text utilities
+│   │   │   │   ├── token.ex                    — Token struct + tokenizer (words first)
+│   │   │   │   ├── token_filters.ex            — Token filtering (boundary, sorting)
+│   │   │   │   └── vectors.ex                  — Vector helpers (pure Elixir)
+│   │   │   ├── core.ex                         — Orchestrator: tokenize → Brain.stm → Db.ltm → Lexicon
+│   │   │   └── math
+│   │   │       └── math.ex                     — `Core.Math` (pure-Elixir math ops)
+│   │   ├── mix.exs                             — Core app mix file
+│   │   ├── priv/negcache/negcache.dets         — DETS store for negative cache
+│   │   └── test
+│   │       ├── core
+│   │       │   ├── invariants_test.exs         — Invariant tests (no char-grams, etc.)
+│   │       │   ├── mwe_injector_test.exs       — MWE injection tests
+│   │       │   ├── resolve_input_test.exs      — Golden pipeline tests
+│   │       │   ├── runtime_bind_test.exs       — Binding tests
+│   │       │   ├── sense_slate_test.exs        — Sense slate tests
+│   │       │   ├── token_mw_test.exs           — Tokenization with MWEs tests
+│   │       │   ├── tokenizer_defaults_test.exs — Config defaults tests
+│   │       │   └── tokenizer_wordgrams_test.exs— Word n-gram scanning tests
+│   │       └── test_helper.exs                 — ExUnit setup for Core
+│   ├── db
+│   │   ├── README.md                           — Db app overview
+│   │   ├── lib
+│   │   │   ├── db
+│   │   │   │   ├── brain_cell.ex               — `Db.BrainCell` Ecto schema (string PK)
+│   │   │   │   ├── episode.ex                  — `Db.Episode` Ecto schema
+│   │   │   │   ├── episodes.ex                 — Episodes context (read/write helpers)
+│   │   │   │   ├── lexicon.ex                  — Lexicon tables/context
+│   │   │   │   ├── my_embeddibgs.ex            — (typo?) Embeddings context/helpers
+│   │   │   │   └── postgrex_types.ex           — Custom Postgres types
+│   │   │   └── db.ex                           — Repo + public DB facade used by Core/Brain
+│   │   ├── mix.exs                             — Db app mix file
+│   │   ├── priv
+│   │   │   ├── db/migrations
+│   │   │   │   ├── 20250914053633_create_brain_cells_consolidated.exs — Consolidation migration
+│   │   │   │   └── 20251001000000_create_episodes.exs                 — Episodes migration
+│   │   │   └── repo/migrations
+│   │   │       └── 20250708150554_create_brain_cells.exs              — Initial brain_cells migration
+│   │   └── test
+│   │       ├── db/episodes_test.exs            — Episodes tests
+│   │       ├── db_test.exs                     — Db facade tests
+│   │       └── test_helper.exs                 — ExUnit setup for Db
+│   ├── lexicon
+│   │   ├── README.md                           — Lexicon app overview
+│   │   ├── lib
+│   │   │   ├── lexicon/behaviou.ex             — (typo?) Behaviour spec for adapters
+│   │   │   └── lexicon.ex                      — Lexicon adapter implementation
+│   │   ├── mix.exs                             — Lexicon app mix file
+│   │   └── test
+│   │       ├── lexicon_test.exs                — Lexicon adapter tests
+│   │       └── test_helper.exs                 — ExUnit setup for Lexicon
+│   ├── symbrella
+│   │   ├── README.md                           — Umbrella “utility” app readme
+│   │   ├── lib
+│   │   │   ├── symbrella/application.ex        — Umbrella-root supervisor (single tree)
+│   │   │   ├── symbrella/mailer.ex             — Swoosh mailer (if used)
+│   │   │   └── symbrella.ex                    — Umbrella helpers
+│   │   ├── mix.exs                             — App mix file
+│   │   └── test/test_helper.exs                — ExUnit setup
+│   └── symbrella_web
+│       ├── README.md                           — Phoenix app overview
+│       ├── assets/...                          — Frontend assets (Tailwind/JS/hooks)
+│       ├── lib
+│       │   ├── symbrella_web
+│       │   │   ├── application.ex              — Phoenix supervision tree (no extra Apps)
+│       │   │   ├── components/core_components.ex — Shared UI components
+│       │   │   ├── components/layouts/*.ex/.heex — Layouts
+│       │   │   ├── controllers/*.ex/.heex      — Controllers + templates
+│       │   │   ├── endpoint.ex                 — Endpoint (Bandit)
+│       │   │   ├── gettext.ex                  — i18n scaffolding
+│       │   │   ├── live/brain_live.ex          — LiveView: Brain UI (reads snapshot)
+│       │   │   ├── live/home_live.ex           — LiveView: Home
+│       │   │   ├── router.ex                   — Routes
+│       │   │   └── telemetry.ex                — Phoenix telemetry
+│       │   └── symbrella_web.ex                — Phoenix web macros
+│       ├── mix.exs                             — Web app mix file
+│       ├── priv/...                            — Compiled assets, gettext, static
+│       └── test/...                            — Controller tests + setup
+├── assets/css/app.css                          — Root-level shared styles (if used)
+├── benchmark_result.txt                        — Last benchmark output
+├── config
+│   ├── config.exs                              — Shared config
+│   ├── dev.exs                                 — Dev config (tokenizer defaults here)
+│   ├── prod.exs                                — Prod config
+│   ├── runtime.exs                             — Runtime env config
+│   └── test.exs                                — Test config (tokenizer defaults here)
+├── mix.exs                                     — Umbrella root Mixfile
+└── mix.lock                                    — Locked deps
 ```
 
 **Module boundaries**
