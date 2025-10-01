@@ -12,7 +12,7 @@ Last updated: 2025-09-30 01:27
 - **Acyclic deps:** `db ← brain ← core ← web` (left depends on nothing to the right).  
 - **LIFG lives in `apps/brain`** (symbolic brain); **Core orchestrates** the pipeline and can call `Lexicon`.  
 - **LIFG path invariants:** no char‑grams, boundary guard, MWE injection, sorted spans, config defaults set in `test/dev`.
-- **Deliverables:** Prefer **downloadable files** or a **single .zip patch pack**; no unsolicited multi‑pane diffs.
+- **Deliverables:** Prefer **chat-bubble code blocks only** (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
 
 ---
 
