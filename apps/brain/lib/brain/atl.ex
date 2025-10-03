@@ -7,21 +7,20 @@ defmodule Brain.ATL do
   • Exposes a snapshot for downstream regions.
 
   Public API:
-    - start_link/1
-    - ingest/1        # ingest %{lifg_choices, tokens}
-    - ingest/2        # ingest choices + tokens directly
-    - reduce/1,2      # pure version (no server required)
-    - snapshot/0
-    - reset/0
+    - start_link/1         # provided by `use Brain, region: :atl`
+    - ingest/1             # ingest %{lifg_choices, tokens} (server)
+    - ingest/2             # ingest choices + tokens directly (server)
+    - reduce/1,2           # pure version (no server required)
+    - snapshot/0           # peek state
+    - reset/0              # clear rolling window & counters
   """
 
-  use GenServer
+  # Use Brain's region macro (gives us start_link/1, child_spec/1, status, etc.)
+  use Brain, region: :atl
+
   @name __MODULE__
 
-  # ── Public API ────────────────────────────────────────────────────────────
-
-  @spec start_link(Keyword.t()) :: GenServer.on_start()
-  def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: @name)
+  # ── Client API (server-backed) ───────────────────────────────────────────
 
   @doc "Ingest a SemanticInput-like map with :lifg_choices and :tokens; returns a slate map."
   @spec ingest(map()) :: map()
@@ -35,28 +34,6 @@ defmodule Brain.ATL do
     GenServer.call(@name, {:ingest, choices, tokens})
   end
 
-  @doc "Pure reducer (no server): takes %{lifg_choices, tokens}."
-  @spec reduce(map()) :: map()
-  def reduce(%{lifg_choices: choices, tokens: tokens}),
-    do: reduce(List.wrap(choices), List.wrap(tokens))
-
-  @doc "Pure reducer (no server): takes winners and tokens directly."
-  @spec reduce(list(), list()) :: map()
-  def reduce(choices, tokens) when is_list(choices) and is_list(tokens) do
-    winners = Enum.map(choices, &normalize_choice/1)
-    by_norm = Enum.group_by(winners, & &1.norm)
-    by_id   = Enum.group_by(winners, & &1.id)
-
-    %{
-      tokens: tokens,
-      token_count: length(tokens),
-      winners: winners,
-      winner_count: length(winners),
-      by_norm: by_norm,
-      by_id: by_id
-    }
-  end
-
   @doc "Peek current ATL state."
   @spec snapshot() :: map()
   def snapshot, do: GenServer.call(@name, :snapshot)
@@ -65,7 +42,7 @@ defmodule Brain.ATL do
   @spec reset() :: :ok
   def reset, do: GenServer.call(@name, :reset)
 
-  # ── GenServer callbacks ──────────────────────────────────────────────────
+  # ── GenServer callbacks ─────────────────────────────────────────────────
 
   @impl true
   def init(opts) do
@@ -73,10 +50,13 @@ defmodule Brain.ATL do
 
     {:ok,
      %{
+       region: :atl,
+       opts: Map.new(opts),
+       # rolling state
        keep: keep,
        last_slate: %{},
-       concept_counts: %{}, # norm => count
-       sense_counts: %{},   # id   => count
+       concept_counts: %{}, # norm => count (concept-level)
+       sense_counts: %{},   # id   => count (sense-level)
        window: []           # [{ts_ms, slate}, ...]
      }}
   end
@@ -120,19 +100,58 @@ defmodule Brain.ATL do
     {:reply, :ok, %{state | last_slate: %{}, concept_counts: %{}, sense_counts: %{}, window: []}}
   end
 
-  # ── Internals ────────────────────────────────────────────────────────────
+  # ── Pure reducers (no server) ───────────────────────────────────────────
 
-  # Accept keys as atoms or strings; tolerate missing fields.
-  defp normalize_choice(ch) when is_map(ch) do
-    id    = fetch_any(ch, [:id, "id"])
-    score = fetch_any(ch, [:score, "score"]) || 0.0
-    lemma = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
-    norm  = id_norm(id) || lemma
+  @doc "Pure reducer (no server): takes %{lifg_choices, tokens}."
+  @spec reduce(map()) :: map()
+  def reduce(%{lifg_choices: choices, tokens: tokens}),
+    do: reduce(List.wrap(choices), List.wrap(tokens))
 
-    %{id: id, score: score, lemma: lemma, norm: norm, raw: ch}
+  @doc "Pure reducer (no server): takes winners and tokens directly."
+  @spec reduce(list(), list()) :: map()
+  def reduce(choices, tokens) when is_list(choices) and is_list(tokens) do
+    winners =
+      choices
+      |> Enum.map(&normalize_choice/1)
+      |> Enum.reject(&is_nil(&1.id)) # only keep items with an id
+
+    by_norm = Enum.group_by(winners, & &1.norm)
+    by_id   = Enum.group_by(winners, & &1.id)
+
+    %{
+      tokens: tokens,
+      token_count: length(tokens),
+      winners: winners,
+      winner_count: length(winners),
+      by_norm: by_norm,
+      by_id: by_id
+    }
   end
 
-  defp normalize_choice(other), do: %{id: nil, score: 0.0, lemma: "", norm: "", raw: other}
+  # ── Internals ───────────────────────────────────────────────────────────
+
+  # Accepts both SenseChoice style (%{chosen_id:, lemma:, margin:, scores: ...})
+  # and simpler %{id:, lemma: ...}. Falls back where possible.
+  defp normalize_choice(ch) when is_map(ch) do
+    id         = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
+    token_idx  = fetch_any(ch, [:token_index, "token_index"])
+    score_norm = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
+    margin     = fetch_any(ch, [:margin, "margin"]) || 0.0
+    lemma0     = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
+
+    %{
+      id: id,
+      token_index: token_idx,
+      lemma: lemma0,
+      norm: id_norm(id) || lemma0,
+      score: score_norm,
+      margin: margin,
+      raw: ch
+    }
+  end
+
+  defp normalize_choice(other),
+    do: %{id: nil, token_index: nil, lemma: "", norm: "", score: 0.0, margin: 0.0, raw: other}
 
   defp fetch_any(map, keys) do
     Enum.reduce_while(keys, nil, fn k, _acc ->
@@ -142,6 +161,10 @@ defmodule Brain.ATL do
       end
     end)
   end
+
+  defp fetch_from_scores(%{scores: %{} = m}, id) when is_binary(id), do: Map.get(m, id)
+  defp fetch_from_scores(%{"scores" => %{} = m}, id) when is_binary(id), do: Map.get(m, id)
+  defp fetch_from_scores(_, _), do: nil
 
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
@@ -156,5 +179,114 @@ defmodule Brain.ATL do
       |> String.downcase()
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
+
+# ───────── Sense slate promotion → si.sense_candidates ─────────
+
+@doc """
+Attach sense candidates to the Semantic Input (SI), keyed by token index.
+
+- Pulls winners and near-winners from the current ATL `slate`
+- Uses `raw.scores` when available to expand alt candidates
+- Keeps a compact, LIFG-ready payload: %{token_index => [%{id, score, ...}]}
+
+Opts:
+  * :top_k         — default 3
+  * :margin_window — default 0.05 (accept alts within 5% of winner score)
+"""
+@spec attach_sense_candidates(map(), map(), keyword()) :: map()
+def attach_sense_candidates(si, slate, opts \\ []) when is_map(si) and is_map(slate) do
+  candidates = promote_sense_candidates_from_slate(slate, opts)
+  Map.put(si, :sense_candidates, candidates)
+end
+
+@spec promote_sense_candidates_from_slate(map(), keyword()) ::
+        %{non_neg_integer() => [map()]}
+def promote_sense_candidates_from_slate(%{winners: winners} = slate, opts) do
+  top_k         = Keyword.get(opts, :top_k, 3)
+  margin_window = Keyword.get(opts, :margin_window, 0.05)
+
+  # Build per-token candidate lists from winners + raw.scores (if present)
+  winners
+  |> Enum.group_by(& &1.token_index)
+  |> Enum.into(%{}, fn {idx, entries} ->
+    # Winner for this token is entries |> Enum.max_by(&score) in most setups,
+    # but your slate already has per-token winner at head; keep head as winner.
+    winner = List.first(entries) || %{}
+    w_score =
+      winner[:score] ||
+        get_in(winner, [:raw, :score_norm]) ||
+        0.0
+
+    # Expand alternatives from raw.scores if present; otherwise just keep the winner.
+    alts =
+      winner
+      |> Map.get(:raw, %{})
+      |> Map.get(:scores, %{})
+      |> Enum.map(fn {id, s} ->
+        %{
+          id: id,
+          score: as_float(s),
+          rank: nil,
+          from: :atl_scores,
+          pos: pos_from_id(id),
+          norm: Map.get(winner, :norm),
+          lemma: Map.get(winner, :lemma),
+          features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
+          margin: nil
+        }
+      end)
+
+    # Include the winner explicitly (first, de-duplicated)
+    winner_as_candidate = %{
+      id: winner[:id],
+      score: as_float(w_score),
+      rank: 0,
+      from: :atl_winner,
+      pos: pos_from_id(winner[:id]),
+      norm: winner[:norm],
+      lemma: winner[:lemma],
+      features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
+      margin: Map.get(winner, :margin, 0.0)
+    }
+
+    # Filter near-winners by margin window around the winner score, take top_k
+    near =
+      alts
+      |> Enum.reject(&is_nil(&1.id))
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.sort_by(&(-1 * (&1.score || 0.0)))
+      |> Enum.filter(fn c ->
+        w_score <= 0.0 or c.score >= w_score * (1.0 - margin_window)
+      end)
+      |> Enum.take(top_k)
+      |> Enum.with_index(1)
+      |> Enum.map(fn {c, i} -> %{c | rank: i} end)
+
+    # Final list for this token
+    {idx, uniq_by_id([winner_as_candidate | near])}
+  end)
+end
+
+defp uniq_by_id(list),
+  do: list |> Enum.reject(&is_nil(&1.id)) |> Enum.uniq_by(& &1.id)
+
+defp as_float(nil),  do: 0.0
+defp as_float(num) when is_number(num), do: num
+defp as_float(str) when is_binary(str) do
+  case Float.parse(str) do
+    {f, _} -> f
+    _ -> 0.0
+  end
+end
+
+defp pos_from_id(nil), do: nil
+defp pos_from_id(id) when is_binary(id) do
+  case String.split(id, "|") do
+    [_lemma, pos, _sense] -> pos
+    _ -> nil
+  end
+end
+
+
 end
 

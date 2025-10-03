@@ -28,7 +28,8 @@ defmodule Brain.MixProject do
   defp deps do
     [
       {:stream_data, "~> 0.6", only: :test},
-      {:benchee, "~> 1.3", only: :dev},
+      {:benchee, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:benchee_markdown, "~> 0.3", only: [:dev, :test], runtime: false},
       {:db, in_umbrella: true}
     ]
   end

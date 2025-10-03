@@ -2,27 +2,17 @@ defmodule Brain.LIFG.GuardTest do
   use ExUnit.Case, async: true
   alias Brain.LIFG.Guard
 
-  test "drops spaced non-mw tokens (char-grams / boundary substrings)" do
-    tokens = [
-      %{phrase: "hello", mw: false},
-      %{phrase: "ck t", mw: false},
-      %{phrase: "kick the bucket", mw: true},
-      %{phrase: "k th", mw: nil},
-      %{phrase: "bank", mw: false}
-    ]
-
-    sanitized = Guard.sanitize(tokens)
-    phrases_list = Enum.map(sanitized, & &1.phrase)
-
-    assert "hello" in phrases_list
-    assert "bank" in phrases_list
-    assert "kick the bucket" in phrases_list
-
-    refute "ck t" in phrases_list
-    refute "k th" in phrases_list
+  test "adds :index and preserves fields" do
+    toks = [%{phrase: "hi"}, %{phrase: "there"}]
+    out = Guard.sanitize(toks)
+    assert Enum.map(out, & &1.index) == [0, 1]
+    assert Enum.map(out, & &1.phrase) == ["hi", "there"]
   end
 
-  test "is_chargram?/1 returns false for MWEs (mw: true)" do
-    refute Guard.is_chargram?(%{phrase: "new york", mw: true})
+  test "sorts by span if all spans present" do
+    toks = [%{phrase: "b", span: {2,1}, index: 1}, %{phrase: "a", span: {0,1}, index: 0}]
+    out = Guard.sanitize(toks)
+    assert Enum.map(out, & &1.phrase) == ["a", "b"]
   end
 end
+

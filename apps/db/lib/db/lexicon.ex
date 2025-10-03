@@ -148,5 +148,45 @@ defmodule Db.Lexicon do
     base = :erlang.phash2({norm, pos, get(r, :definition)})
     "#{norm}|#{pos}|lex|#{base}"
   end
+
+# --- PMTG compatibility: lightweight sense lookups -------------------
+
+@doc """
+Return up to `limit` senses for a lemma, shaped for PMTG evidence.
+
+Reads from BrainCell rows where `norm == normize(lemma)`. Prefers rows
+seeded via `bulk_upsert_senses/1` (type = "lexicon") but will also
+return other types if present.
+"""
+@spec lookup(String.t(), non_neg_integer()) :: [map()]
+def lookup(lemma, limit) when is_binary(lemma) and is_integer(limit) do
+  norm = normize(lemma)
+
+  Db.all(
+    from b in BrainCell,
+      where: b.norm == ^norm and b.status == "active",
+      order_by: [
+        asc: fragment("CASE WHEN ? = 'lexicon' THEN 0 ELSE 1 END", b.type),
+        desc: b.updated_at
+      ],
+      limit: ^max(limit, 0),
+      select: %{
+        id: b.id,
+        lemma: b.word,
+        pos: b.pos,
+        type: b.type,
+        gloss: b.definition,
+        example: b.example,
+        synonyms: b.synonyms,
+        antonyms: b.antonyms
+      }
+  )
+end
+
+@doc "Alias kept for compatibility with other callers."
+@spec definitions_for(String.t(), non_neg_integer()) :: [map()]
+def definitions_for(lemma, limit), do: lookup(lemma, limit)
+
+
 end
 

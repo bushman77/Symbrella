@@ -24,13 +24,15 @@ defmodule Symbrella.Application do
       # Servers
       Brain,
       # If you later want the Endpoint here, add it here and remove from web.
-      {Brain.ATL, keep: 300},
-      {Brain.Hippocampus, keep: 300},
-  Brain.PMTG,
-  Brain.AG,
-  Brain.MTL,
-  Brain.ACC,
-  Brain.BasalGanglia
+      #
+Brain.LIFG,
+Brain.PMTG,
+{Brain.ATL, keep: 300}
+      #{Brain.Hippocampus, keep: 300},
+  #Brain.AG,
+  #Brain.MTL,
+  #Brain.ACC,
+  #Brain.BasalGanglia
     ]
 
     Brain.Telemetry.attach!()

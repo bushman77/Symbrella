@@ -4,7 +4,7 @@ defmodule Db.Episodes do
 
   Responsibilities:
   • Normalize + insert episodes (sync or async embedding)
-  • Hybrid recall (token prefilter + vector ANN) with re‑rank
+  • Hybrid recall (token prefilter + vector ANN) with re-rank
   • Utilities for embedding text and patching embeddings
   """
 
@@ -55,7 +55,6 @@ defmodule Db.Episodes do
   # Primary clause: SI must include :tokens list (strings or token maps)
   def write_episode(%{tokens: tokens} = si, opts) when is_list(tokens) do
     tokens_norm = normalize_tokens(tokens)
-
     attrs = new_episode_attrs(si, tokens_norm, opts)
 
     if Keyword.get(opts, :async_embedding, false) do
@@ -89,7 +88,7 @@ defmodule Db.Episodes do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Hybrid recall with re‑rank.
+  Hybrid recall with re-rank.
 
   * `cues` — normalized token list
   * `query` — an embedding list, a query string, or nil
@@ -155,7 +154,7 @@ defmodule Db.Episodes do
       |> Enum.uniq_by(fn {id, _} -> id end)
       |> Enum.into(%{}, fn {id, ep} -> {id, ep} end)
 
-    # 4) Score + re‑rank
+    # 4) Score + re-rank
     all_cands
     |> Enum.map(fn {_id, ep} ->
       ep_tokens_set = MapSet.new((ep.tokens || []) |> Enum.map(&String.downcase/1))
@@ -171,10 +170,11 @@ defmodule Db.Episodes do
           {_ep, sim} -> sim
         end
 
-      age_s = case ep.inserted_at do
-        %NaiveDateTime{} = t -> NaiveDateTime.diff(now, t, :second)
-        _ -> 0
-      end
+      age_s =
+        case ep.inserted_at do
+          %NaiveDateTime{} = t -> NaiveDateTime.diff(now, t, :second)
+          _ -> 0
+        end
 
       recency = :math.pow(2.0, -age_s / max(1, half_life))
       score   = alpha * jaccard + beta * (vec_sim || 0.0) + gamma * recency
@@ -200,6 +200,55 @@ defmodule Db.Episodes do
       {:ok, emb} -> recall_hybrid(cues, emb, opts)
       _ -> recall_hybrid(cues, nil, opts)
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Compatibility helpers used by Brain.PMTG
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Top `limit` episode hits for a lemma via hybrid recall.
+  Returns compact maps for pMTG evidence.
+  """
+# lib/db/episodes.ex
+@spec find_by_lemma(String.t(), non_neg_integer()) :: [map()]
+def find_by_lemma(lemma, limit \\ 5)
+def find_by_lemma(lemma, limit) when is_binary(lemma) and is_integer(limit) and limit > 0 do
+  if String.contains?(lemma, " ") do
+    search(lemma) |> Enum.take(limit)
+  else
+    cues = [String.downcase(lemma)]
+    recall_hybrid(cues, nil, top_k: limit)
+    |> Enum.map(&to_hit/1)
+  end
+end
+
+  @doc """
+  Lightweight search for arbitrary text.
+  Splits to cues and runs hybrid recall.
+  """
+  @spec search(String.t()) :: [map()]
+  def search(text) when is_binary(text) do
+    cues =
+      text
+      |> String.downcase()
+      |> String.split(~r/\s+/, trim: true)
+
+    recall_hybrid(cues, text, top_k: 10)
+    |> Enum.map(&to_hit/1)
+  end
+
+  # Normalize the recall_hybrid item into a small evidence map
+  defp to_hit(%{id: id, score: score, episode: ep, jaccard: j, vec_sim: v, recency: r}) do
+    %{
+      id: id,
+      score: score,
+      jaccard: j,
+      vec_sim: v,
+      recency: r,
+      tokens: ep.tokens,
+      inserted_at: ep.inserted_at
+    }
   end
 
   # ---------------------------------------------------------------------------
@@ -246,6 +295,7 @@ defmodule Db.Episodes do
   # Accept string tokens or token maps with :phrase / :norm keys
   @spec token_to_text(term()) :: String.t()
   defp token_to_text(t) when is_binary(t), do: t
+
   defp token_to_text(%{} = t) do
     cond do
       Map.has_key?(t, :phrase) -> to_string(Map.get(t, :phrase))
@@ -255,6 +305,7 @@ defmodule Db.Episodes do
       true -> to_string(t)
     end
   end
+
   defp token_to_text(other), do: to_string(other)
 
   @spec normalize_tokens([term()]) :: [String.t()]
@@ -278,9 +329,11 @@ defmodule Db.Episodes do
   defp compute_emb_sim_fallback(_, query) when is_binary(query), do: nil
   defp compute_emb_sim_fallback(nil, _), do: nil
   defp compute_emb_sim_fallback(_, nil), do: nil
+
   defp compute_emb_sim_fallback(%Pgvector{} = p, query_emb) when is_list(query_emb) do
     compute_emb_sim_fallback(Pgvector.to_list(p), query_emb)
   end
+
   defp compute_emb_sim_fallback(ep_emb, query_emb) when is_list(ep_emb) and is_list(query_emb) do
     dot = Enum.zip(ep_emb, query_emb) |> Enum.reduce(0.0, fn {a, b}, acc -> acc + a * b end)
     mag_a = :math.sqrt(Enum.reduce(ep_emb, 0.0, fn x, s -> s + x * x end))

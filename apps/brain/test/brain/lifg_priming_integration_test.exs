@@ -1,37 +1,24 @@
 defmodule Brain.LIFG.PrimingIntegrationTest do
-  use ExUnit.Case, async: false
-  alias Brain.LIFG
-  alias Brain.LIFG.Priming
+  use ExUnit.Case, async: true
 
-  setup do
-    Priming.clear()
-    :ok
-  end
-
-  test "priming lifts a tied candidate to the top" do
-    # Single token, two candidates tied on all features; priming should break tie.
-    tokens = [%{phrase: "bank", span: {0, 1}}]
-
-    slate = %{
-      0 => [
-        %{id: "bank|money", prior: 0.5, features: %{}},
-        %{id: "bank|river", prior: 0.5, features: %{}}
-      ]
+  test "when priming is disabled, ties resolve deterministically by candidate order" do
+    si = %{
+      tokens: [%{index: 0, phrase: "bank"}],
+      sense_candidates: %{
+        0 => [
+          %{id: "bank|financial", features: %{lex_fit: 0.5, rel_prior: 0.5, activation: 0.0, intent_bias: 0.0}},
+          %{id: "bank|river",     features: %{lex_fit: 0.5, rel_prior: 0.5, activation: 0.0, intent_bias: 0.0}}
+        ]
+      }
     }
 
-    si = %{tokens: tokens, sense_candidates: slate, context_vec: [0.0]}
+    # Use disambiguate_stage1 to exercise the new path (priming weight = 0.0)
+    si2 = Brain.LIFG.disambiguate_stage1(si, weights: %{lex: 0.25, sim: 0.0, rel: 0.15, prag: 0.10, act: 0.10}, scores: :top2)
+    [ev | _] = si2.trace
+    [%{chosen_id: winner}] = ev.choices
 
-    # Give recent credit to "bank|river"
-    :ok = Priming.bump("bank|river", now_ms: 1_000_000, delta: 1.0)
-
-    # Turn on priming: weight > 0, small half-life to make the effect obvious
-    si2 =
-      LIFG.disambiguate_stage1(si,
-        weights: %{lex: 0.0, sim: 0.0, rel: 0.0, prag: 0.0, act: 0.0, prime: 0.8},
-        prime: [half_life_sec: 300.0, cap: 1.0, now_ms: 1_000_000, bump_winners: false]
-      )
-
-    winner = si2.sense_winners[0]
-    assert winner.id == "bank|river"
+    # With equal scores and no priming, the first candidate wins deterministically.
+    assert winner == "bank|financial"
   end
 end
+

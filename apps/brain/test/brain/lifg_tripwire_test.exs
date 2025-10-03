@@ -1,51 +1,66 @@
 defmodule Brain.LIFG.TripwireTest do
   use ExUnit.Case, async: true
-  alias Brain.LIFG.Tripwire
+  alias Brain.LIFG.Stage1
 
   setup do
-    ref = "tripwire-test-#{System.unique_integer([:positive])}"
+    :telemetry.attach(
+      "lifg-tripwire-test",
+      [:brain, :lifg, :chargram_violation],
+      fn event, meas, meta, _config ->
+        send(self(), {:telemetry, event, meas, meta})
+      end,
+      nil
+    )
 
-    :ok =
-      :telemetry.attach(
-        ref,
-        [:lifg, :chargram, :leak],
-        fn _event, meas, meta, _conf ->
-          send(self(), {:leak, meas, meta})
-        end,
-        nil
-      )
+    :telemetry.attach(
+      "lifg-boundary-test",
+      [:brain, :lifg, :boundary_drop],
+      fn event, meas, meta, _config ->
+        send(self(), {:telemetry, event, meas, meta})
+      end,
+      nil
+    )
 
-    on_exit(fn -> :telemetry.detach(ref) end)
+    on_exit(fn ->
+      :telemetry.detach("lifg-tripwire-test")
+      :telemetry.detach("lifg-boundary-test")
+    end)
+
     :ok
   end
 
   test "emits telemetry and drops char-gram tokens by default" do
-    tokens = [
-      # char-gram leak
-      %{phrase: "ck t"},
-      %{phrase: "hello"},
-      # valid MWE
-      %{phrase: "new york", mw: true}
-    ]
+    si = %{
+      sentence: "check the bank",
+      tokens: [
+        %{index: 0, phrase: "ck t", source: :chargram, span: {1, 4}},
+        %{index: 1, phrase: "hello", span: {0, 5}},
+        %{index: 2, phrase: "new york", mw: true, span: {6, 8}}
+      ],
+      sense_candidates: %{}
+    }
 
-    out = Tripwire.check_and_filter(tokens)
+    {:ok, %{audit: audit}} = Stage1.run(si)
 
-    # Telemetry fired
-    assert_receive {:leak, %{count: 1, examples: examples}, %{on_leak: :drop}}, 100
-    assert "ck t" in examples
+    assert audit.token_count == 3
+    assert audit.dropped_tokens == 1
+    assert audit.kept_tokens == 2
 
-    # Dropped only the bad one
-    phrases = Enum.map(out, & &1.phrase)
-    refute "ck t" in phrases
-    assert "hello" in phrases
-    assert "new york" in phrases
+    # Telemetry proves the drop reason
+    assert_receive {:telemetry, [:brain, :lifg, :chargram_violation],
+                    %{token_index: 0, phrase: "ck t"}, _}, 100
   end
 
-  test "option :keep preserves tokens but still reports leak" do
-    tokens = [%{phrase: "k th"}, %{phrase: "bank"}]
-    out = Tripwire.check_and_filter(tokens, on_leak: :keep)
+  test "MWEs are kept even if they cross a boundary" do
+    si = %{
+      sentence: "kick-offmeeting",
+      tokens: [%{index: 0, phrase: "kick-off", span: {0, 8}, mw: true}],
+      sense_candidates: %{}
+    }
 
-    assert_receive {:leak, %{count: 1}, %{on_leak: :keep}}, 100
-    assert Enum.map(out, & &1.phrase) == ["k th", "bank"]
+    {:ok, %{audit: audit}} = Stage1.run(si)
+    assert audit.kept_tokens == 1
+    refute_receive {:telemetry, [:brain, :lifg, :boundary_drop], _, _}, 50
   end
 end
+

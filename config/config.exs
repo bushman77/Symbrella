@@ -6,18 +6,14 @@ config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
 # Generators
 config :symbrella_web, generators: [context_app: :symbrella]
 
-# config/config.exs (or runtime.exs)
+# App-specific (example)
 config :symbrella, resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
-
 
 # Endpoint
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
-  render_errors: [
-    formats: [html: SymbrellaWeb.ErrorHTML, json: SymbrellaWeb.ErrorJSON],
-    layout: false
-  ],
+  render_errors: [formats: [html: SymbrellaWeb.ErrorHTML, json: SymbrellaWeb.ErrorJSON], layout: false],
   pubsub_server: Symbrella.PubSub,
   live_view: [signing_salt: "mkK1WujO"]
 
@@ -34,8 +30,7 @@ config :esbuild,
 config :tailwind,
   version: "3.4.10",
   default: [
-    args:
-      ~w(--config=tailwind.config.js --input=css/app.css --output=../priv/static/assets/app.css),
+    args: ~w(--config=tailwind.config.js --input=css/app.css --output=../priv/static/assets/app.css),
     cd: Path.expand("../apps/symbrella_web/assets", __DIR__)
   ]
 
@@ -46,7 +41,7 @@ config :logger, :default_formatter,
 
 config :phoenix, :json_library, Jason
 
-# >>> Single source of truth for Ecto (db app)
+# >>> Ecto (db app)
 config :db, ecto_repos: [Db]
 
 config :db, Db,
@@ -56,18 +51,24 @@ config :db, Db,
   hostname: "localhost",
   show_sensitive_data_on_connection_error: true,
   pool_size: 10,
-  # keep if you defined custom types (e.g., pgvector)
   types: Db.PostgrexTypes
 
 config :db, :embedding_dim, 1536
-config :db, :embedder, MyEmbeddings   # implement MyEmbeddings.embed/1 -> {:ok, [float]}
+config :db, :embedder, MyEmbeddings  # implement MyEmbeddings.embed/1 -> {:ok, [float]}
 
-
+# Core defaults
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity
 
 config :tesla, disable_deprecated_builder_warning: true
 
-# Import env-specific at the end (OK to keep empty)
+# ---- Brain (central defaults) ----
+config :brain,
+  pmtg_mode: :boost,           # :boost | :rerun | :none
+  pmtg_margin_threshold: 0.15,
+  pmtg_window_keep: 50,
+ lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
+  lifg_stage1_scores_mode: :all
+# Import env-specific at the end
 import_config "#{config_env()}.exs"
