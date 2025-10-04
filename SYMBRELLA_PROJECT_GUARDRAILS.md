@@ -1,7 +1,7 @@
-# Symbrella Project Guardrails                                        *(Directory Structure & Approval Protocol — living doc)*
-Last updated: 2025-10-04 08:00
-> Purpose. A single source of truth we both refer to before any refactor or file replacement, so we don’t mangle the project. This is a gentle, persistent checklist for directory layout, module boundaries, and our pair-programming approval flow.
+Symbrella Project Guardrails                                        *(Directory Structure & Approval Protocol — living doc)*
+Last updated: 2025-10-04 08:20
 
+> Purpose. A single source of truth we both refer to before any refactor or file replacement, so we don’t mangle the project. This is a gentle, persistent checklist for directory layout, module boundaries, and our pair-programming approval flow.
 ---
 
 ## TL;DR
@@ -10,11 +10,12 @@ Last updated: 2025-10-04 08:00
 - One umbrella-root supervisor: start everything under Symbrella.Application. No per-app Application modules.
 - Acyclic deps: db ← brain ← core ← web (left depends on nothing to the right).
 - LIFG lives in apps/brain (symbolic brain); Core orchestrates the pipeline and can call Lexicon.
-- LIFG path invariants: no char-grams, boundary guard, MWE injection, sorted spans, config defaults set in test/dev.                  - Deliverables: Prefer chat-bubble code blocks only (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
-
+- LIFG path invariants: no char-grams, boundary guard, MWE injection, sorted spans, config defaults set in test/dev.
+- Deliverables: Prefer chat-bubble code blocks only (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
 ---
 
-## Canonical Umbrella Layout                                          This is the canonical, minimal structure. If a directory/file isn’t listed here, treat it as optional. If we add new dirs, we add them here first.
+## Canonical Umbrella Layout
+This is the canonical, minimal structure. If a directory/file isn’t listed here, treat it as optional. If we add new dirs, we add them here first.
 
 symbrella/
 ├── AGENTS.md                                   — High-level agent roles/notes
@@ -190,6 +191,7 @@ symbrella/
 │   └── test.exs                                — Test config (tokenizer defaults here)
 ├── mix.exs                                     — Umbrella root Mixfile
 └── mix.lock                                    — Locked deps
+---
 
 **Module boundaries**
 - Brain owns LIFG. Keep parsing/disambiguation primitives here.
@@ -211,141 +213,150 @@ Bandwidth principle: tokenize → check active cells → DB → lexicon (only if
 
 ---
 
-## LIFG Path: Definition of Done (DoD) — reference
-(Track progress in code reviews; we’ll mark ✅ as items are completed)
-- [ ] No char-grams in LIFG path (enforced + unit test)
-- [ ] Boundary guard (drop non-word-boundary substrings unless mw: true)
-- [ ] MWE injection pass (word-level n-grams before LIFG)
-- [ ] Sense slate in SI (si.sense_candidates keyed by token index)
-- [ ] Reanalysis fallback (flip to next-best on integration failure)
-- [ ] Telemetry tripwire (log/drop if a char-gram reaches LIFG)
-- [ ] Priming cache (optional; recency boost for recent winners)
-- [ ] Invariant tests (spans sorted; no char-grams; boundary-only unless mw: true)
-- [ ] Config defaults (test/dev: tokenizer_mode: :words, tokenizer_emit_chargrams: false)
+## Hippocampus Options (runtime)
 
-Additional invariants
-- Tokens sorted by start; spans hydrated from the sentence.
-- ID convention: ---{word}|{pos}|{sense}--- for Db.BrainCell.id (string PK).
+- window_keep (int, default 300): Maximum episodes retained in the rolling window.
+- half_life_ms (int, default 300_000): Recency half-life (ms) for recall scoring. Higher = slower decay.
+- recall_limit (int, default 3): Default top-K returned by recall/2 when :limit isn’t specified.
+- min_jaccard (float 0.0–1.0, default 0.0): Minimum raw Jaccard overlap to consider an episode (before recency).
+- scope (map, optional): When passed to recall/2, only episodes whose episode.meta contain every {k, v} in scope are eligible. Atom/string keys match case-sensitively without creating new atoms.
 
-Guard usage rule
-- Keep guards simple. No complex function calls (e.g., String.contains?/2) inside guards. Precompute booleans before when.
-
----
-
-## Configuration Defaults
-Set in config/test.exs and config/dev.exs:
-
-config :core,
-  tokenizer_mode: :words,
-    tokenizer_emit_chargrams: false
-
-    Phoenix/Web may print ---IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)--- for visibility without mutating state.
+Operational notes
+- Dedup-on-write: consecutive writes with the same token set refresh the head timestamp instead of appending a new episode. Meta on the head is preserved; only the timestamp moves forward. Insert a spacer write if you need two identical token sets recorded back-to-back.
+- Telemetry (stable):
+  - Write: [:brain, :hippocampus, :write] → measurements %{window_size}; metadata %{meta}.
+    - Recall: [:brain, :hippocampus, :recall] → measurements %{cue_count, window_size, returned, top_score}; metadata %{limit, half_life_ms}.
 
     ---
 
-    ## Approval Protocol (Pair-Programming Guardrails)
-    Nothing merges or “goes live” without an explicit approval token.
+    ## LIFG Path: Definition of Done (DoD) — reference
+    (Track progress in code reviews; we’ll mark ✅ as items are completed)
+    - [ ] No char-grams in LIFG path (enforced + unit test)
+    - [ ] Boundary guard (drop non-word-boundary substrings unless mw: true)
+    - [ ] MWE injection pass (word-level n-grams before LIFG)
+    - [ ] Sense slate in SI (si.sense_candidates keyed by token index)
+    - [ ] Reanalysis fallback (flip to next-best on integration failure)
+    - [ ] Telemetry tripwire (log/drop if a char-gram reaches LIFG)
+    - [ ] Priming cache (optional; recency boost for recent winners)
+    - [ ] Invariant tests (spans sorted; no char-grams; boundary-only unless mw: true)
+    - [ ] Config defaults (test/dev: tokenizer_mode: :words, tokenizer_emit_chargrams: false)
 
-    Full-File Patch Guardrail (required)
-    - Before any code, assistant requests the full current file for each file to be edited.
-    - Assistant returns full-file replacements only; no diffs or snippets.
-    - Approval tokens should include FileScope, e.g., ---Approve: P-005 (FileScope: SYMBRELLA_PROJECT_GUARDRAILS.md)---.
-    - No edits outside the approved FileScope without a new approval.
+    **Additional invariants**
+    - Tokens sorted by start; spans hydrated from the sentence.
+    - ID convention: ---{word}|{pos}|{sense}--- for Db.BrainCell.id (string PK).
 
-    1) Proposal: I present a patch proposal with ID ---P-###--- that includes:
-       - Summary (what/why), risk level (Safe / Risky / Breaking), and scope.
-          - Before/After code excerpts for key files.
-             - File list with replacements or additions.
-                - Tests to add/update.
-                   - Rollback plan (git commands).
+    **Guard usage rule**
+    - Keep guards simple. No complex function calls (e.g., String.contains?/2) inside guards. Precompute booleans before when.
 
-                   2) Deliverables: Prefer chat-bubble code blocks only (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
-                      - One module per “pane”.
+    ---
 
-                      3) Approval: You respond with ---Approve: P-###---.
-                         - If not approved, we do no file replacements. We can iterate with ---P-###.1--- etc.
+    ## Configuration Defaults
+    Set in config/test.exs and config/dev.exs:
 
-                         4) Special tags (for visibility):
-                            - QuickFix-###: small, surgical changes.
-                               - BREAKING-###: migrations, API changes, or module moves.
-                                  - Hotfix-###: urgent bug fix; still needs ---Approve: …--- before applying.
+    config :core,
+      tokenizer_mode: :words,
+        tokenizer_emit_chargrams: false
 
-                                  5) After approval I provide final artifacts only, without extra refactors beyond the approved scope.
+        Phoenix/Web may print ---IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)--- for visibility without mutating state.
 
-                                  Template
+        ---
 
-                                  Patch ID: P-###
-                                  Title: <one-line summary>
-                                  Risk: Safe | Risky | BREAKING
-                                  Files touched:
-                                    - apps/brain/lib/brain/lifg.ex (replace)
-                                      - apps/core/lib/core/tokenizer.ex (edit)
-                                      Summary:
-                                        - <plain-language explanation>
-                                        Tests:
-                                          - <list of tests added/updated>
-                                          Rollback:
-                                            - git checkout HEAD~1 -- <files>  (or)
-                                              - git revert <commit)
+        ## Approval Protocol (Pair-Programming Guardrails)
+        Nothing merges or “goes live” without an explicit approval token.
 
-                                              ---
+        **Full-File Patch Guardrail (required)**
+        - Before any code, assistant requests the full current file for each file to be edited.
+        - Assistant returns full-file replacements only; no diffs or snippets.
+        - Approval tokens should include FileScope, e.g., ---Approve: P-005 (FileScope: SYMBRELLA_PROJECT_GUARDRAILS.md)---.
+        - No edits outside the approved FileScope without a new approval.
 
-                                              ## Module & Dependency Rules
-                                              - One umbrella-root supervisor: Symbrella.Application starts Brain + others.
-                                              - No per-app Application supervisors.
-                                              - Acyclic dependencies: db ← brain ← core ← web.
-                                                - Brain can depend on Db. Core can depend on Brain and Db. Web depends on Core/Brain.
-                                                  - Never reverse this chain.
+        1) Proposal: I present a patch proposal with ID ---P-###--- that includes:
+           - Summary (what/why), risk level (Safe / Risky / Breaking), and scope.
+              - Before/After code excerpts for key files.
+                 - File list with replacements or additions.
+                    - Tests to add/update.
+                       - Rollback plan (git commands).
 
-                                                  ---
+                       2) Deliverables: Prefer chat-bubble code blocks only (UTF-8, LF). Avoid ZIPs/binaries due to encoding issues. Multi-file outputs are sent as consecutive chat bubbles with clear filename headers. No unsolicited multi-pane diffs.
+                          - One module per “pane”.
 
-                                                  ## Rollback & Recovery (Git Cookbook)
-                                                  - See file history for one file:
+                          3) Approval: You respond with ---Approve: P-###---.
+                             - If not approved, we do no file replacements. We can iterate with ---P-###.1--- etc.
 
-                                                  git log --follow -- apps/brain/lib/brain/lifg.ex
+                             4) Special tags (for visibility):
+                                - QuickFix-###: small, surgical changes.
+                                   - BREAKING-###: migrations, API changes, or module moves.
+                                      - Hotfix-###: urgent bug fix; still needs ---Approve: …--- before applying.
 
-                                                  - Show diffs over file history:
+                                      5) After approval I provide final artifacts only, without extra refactors beyond the approved scope.
 
-                                                  git log -p --follow -- apps/brain/lib/brain/lifg.ex
+                                      **Template**
 
-                                                  - Restore a file to main:
-
-                                                  git checkout origin/main -- apps/brain/lib/brain/lifg.ex
-
-                                                  - Revert the last commit (create a new inverse commit):
-
-                                                  git revert <commit_sha>
-
-                                                  - Discard local changes to a file:
-
-                                                  git restore --source=HEAD -- apps/core/lib/core.ex
-
-                                                  ---
-
-                                                  ## Working Session Conventions
-                                                  - If you say “hold off until I paste more files”, I pause changes and only review.
-                                                  - If the task is time-boxed or ambiguous, I deliver a small, safe delta, plus the proposal for the next step.
-                                                  - I won’t introduce new modules/dirs without a ---P-###--- that updates this doc’s layout.
-                                                  - No hidden background work: everything ships in the current message.
+                                      Patch ID: P-###
+                                      Title: <one-line summary>
+                                      Risk: Safe | Risky | BREAKING
+                                      Files touched:
+                                        - apps/brain/lib/brain/lifg.ex (replace)
+                                          - apps/core/lib/core/tokenizer.ex (edit)
+                                          Summary:
+                                            - <plain-language explanation>
+                                            Tests:
+                                              - <list of tests added/updated>
+                                              Rollback:
+                                                - git checkout HEAD~1 -- <files>  (or)
+                                                  - git revert <commit>
 
                                                   ---
 
-                                                  ## “Known-Good” Patterns (snapshots)
-                                                  - Web print before DOM push:
+                                                  ## Module & Dependency Rules
+                                                  - One umbrella-root supervisor: Symbrella.Application starts Brain + others.
+                                                  - No per-app Application supervisors.
+                                                  - Acyclic dependencies: db ← brain ← core ← web.
+                                                    - Brain can depend on Db. Core can depend on Brain and Db. Web depends on Core/Brain.
+                                                      - Never reverse this chain.
 
-                                                  IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)
+                                                      ---
 
-                                                  - Core pipeline (orchestration only): keep LIFG in Brain; Core may call Lexicon as a public facade.
+                                                      ## Rollback & Recovery (Git Cookbook)
+                                                      - See file history for one file:
+                                                        git log --follow -- apps/brain/lib/brain/lifg.ex
 
-                                                  ---
+                                                        - Show diffs over file history:
+                                                          git log -p --follow -- apps/brain/lib/brain/lifg.ex
 
-                                                  ### Appendix: Glossary
-                                                  - STM: short-term memory / active focus in Brain processes.
-                                                  - LIFG: left-inferior-frontal-gyrus (symbolic disambiguation layer).
-                                                  - MWE: multi-word expression (inserted as tokens prior to LIFG).
-                                                  - DoD: Definition of Done; check before PR approval.
+                                                          - Restore a file to main:
+                                                            git checkout origin/main -- apps/brain/lib/brain/lifg.ex
 
-                                                  ---
+                                                            - Revert the last commit (create a new inverse commit):
+                                                              git revert <commit_sha>
 
-                                                  How we’ll use this doc: Before any refactor or file drop-in, we sanity-check against this document. If the change requires updating this document, that update is part of the patch.
+                                                              - Discard local changes to a file:
+                                                                git restore --source=HEAD -- apps/core/lib/core.ex
 
+                                                                ---
+
+                                                                ## Working Session Conventions
+                                                                - If you say “hold off until I paste more files”, I pause changes and only review.
+                                                                - If the task is time-boxed or ambiguous, I deliver a small, safe delta, plus the proposal for the next step.
+                                                                - I won’t introduce new modules/dirs without a ---P-###--- that updates this doc’s layout.
+                                                                - No hidden background work: everything ships in the current message.
+
+                                                                ---
+
+                                                                ## “Known-Good” Patterns (snapshots)
+                                                                - Web print before DOM push:
+                                                                  IO.inspect(GenServer.call(Brain, :snapshot), limit: :infinity)
+                                                                  - Core pipeline (orchestration only): keep LIFG in Brain; Core may call Lexicon as a public facade.
+
+                                                                  ---
+
+                                                                  ### Appendix: Glossary
+                                                                  - STM: short-term memory / active focus in Brain processes.
+                                                                  - LIFG: left-inferior-frontal-gyrus (symbolic disambiguation layer).
+                                                                  - MWE: multi-word expression (inserted as tokens prior to LIFG).
+                                                                  - DoD: Definition of Done; check before PR approval.
+
+                                                                  ---
+
+                                                                  How we’ll use this doc: Before any refactor or file drop-in, we sanity-check against this document. If the change requires updating this document, that update is part of the patch.
+                                                                

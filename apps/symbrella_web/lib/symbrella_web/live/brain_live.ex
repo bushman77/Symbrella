@@ -1,249 +1,404 @@
 defmodule SymbrellaWeb.BrainLive do
+  @moduledoc """
+  LiveView: Interactive human brain (lateral left view).
+
+  • Color-coded regions (Frontal/LIFG, Temporal/PMTG, Hippocampus, Thalamus, OFC, Cerebellum, Occipital, Parietal)
+  • Click a region to reveal module details in the pane below
+  • Iconic, hand-drawn vector paths for an "organ" look (not abstract ellipses)
+  """
   use SymbrellaWeb, :live_view
 
-  @moduledoc """
-  Interactive brain silhouette (lateral view) with labeled cognitive regions.
-  Hover to preview, click to toggle selection highlight.
-  """
-
-  @palette %{
-    lifg:        "#8b5cf6", # violet
-    atl:         "#ef4444", # red
-    mtg_sts:     "#f59e0b", # amber
-    tpj_ag:      "#06b6d4", # cyan
-    mpfc:        "#ec4899", # pink
-    ofc_vmpfc:   "#14b8a6", # teal
-    hippocampus: "#eab308", # yellow
-    thalamus:    "#64748b"  # slate
-  }
-
-  # Stylized region paths (not ellipses), tuned for viewBox 0 0 800 480
   @regions [
-    %{
-      id: "lifg",
-      label: "LIFG / Broca",
-      color: @palette.lifg,
-      desc:
-        "Stage-1 sense selection & ambiguity pruning; early control/selection over candidate senses.",
-      d: "M 520 250 C 560 240, 600 220, 630 240 C 645 260, 640 290, 610 305 C 585 320, 545 320, 520 300 C 505 285, 505 265, 520 250 Z",
-      anchor: {650, 258}
-    },
-    %{
-      id: "atl",
-      label: "ATL (Anterior Temporal Lobe)",
-      color: @palette.atl,
-      desc: "Hub-like semantic integration; converges modality-specific inputs at the temporal pole.",
-      d: "M 560 320 C 600 320, 640 330, 660 350 C 650 370, 620 385, 590 380 C 560 370, 540 350, 545 335 C 550 325, 555 322, 560 320 Z",
-      anchor: {670, 350}
-    },
-    %{
-      id: "mtg_sts",
-      label: "MTG / STS",
-      color: @palette.mtg_sts,
-      desc: "Lexical-semantic access & combinatorics; temporal dynamics for context fit.",
-      d: "M 420 300 C 460 290, 520 295, 560 310 C 560 330, 520 345, 470 340 C 440 335, 420 325, 420 300 Z",
-      anchor: {585, 315}
-    },
-    %{
-      id: "tpj_ag",
-      label: "TPJ / Angular Gyrus",
-      color: @palette.tpj_ag,
-      desc: "Conceptual integration & controlled retrieval; discourse-level glue.",
-      d: "M 360 230 C 400 220, 450 225, 470 245 C 455 260, 430 275, 395 275 C 370 270, 355 255, 360 230 Z",
-      anchor: {485, 245}
-    },
-    %{
-      id: "mpfc",
-      label: "mPFC",
-      color: @palette.mpfc,
-      desc: "Goal/task schemas & global intent constraints over interpretation.",
-      d: "M 540 140 C 580 130, 620 130, 640 150 C 630 165, 600 175, 565 170 C 550 165, 542 155, 540 140 Z",
-      anchor: {660, 150}
-    },
-    %{
-      id: "ofc_vmpfc",
-      label: "OFC / vmPFC",
-      color: @palette.ofc_vmpfc,
-      desc: "Valuation & pragmatic bias; resolves among plausible readings via reward/utility signals.",
-      d: "M 560 200 C 600 205, 635 220, 650 240 C 635 250, 610 260, 580 260 C 560 255, 550 240, 552 220 Z",
-      anchor: {665, 240}
-    },
-    %{
-      id: "hippocampus",
-      label: "Hippocampus",
-      color: @palette.hippocampus,
-      desc: "Associative recall & episode binding; links current semantics to episodic traces.",
-      d: "M 460 340 C 480 335, 505 340, 515 355 C 505 365, 485 370, 465 365 C 455 357, 455 347, 460 340 Z",
-      anchor: {535, 355}
-    },
-    %{
-      id: "thalamus",
-      label: "Thalamus",
-      color: @palette.thalamus,
-      desc: "Relay/gating & rhythmic gain control across cortico-cortical loops.",
-      d: "M 410 250 C 430 245, 450 250, 455 265 C 445 275, 425 278, 410 270 C 405 262, 405 255, 410 250 Z",
-      anchor: {470, 267}
-    }
+    # id, label, color, module_key
+    {:lifg,        "LIFG (Broca’s area)",         "#f44336", :lifg},
+    {:ofc,         "OFC (orbitofrontal cortex)",  "#ff9800", :ofc},
+    {:pmtg,        "PMTG (mid temporal)",         "#7e57c2", :pmtg},
+    {:hippocampus, "Hippocampus",                  "#00897b", :hippocampus},
+    {:thalamus,    "Thalamus",                     "#1976d2", :thalamus},
+    {:cerebellum,  "Cerebellum",                   "#6d4c41", :cerebellum},
+    {:occipital,   "Occipital lobe",               "#66bb6a", :occipital},
+    {:parietal,    "Parietal lobe",                "#42a5f5", :parietal},
+    {:temporal,    "Temporal lobe",                "#9575cd", :temporal},
+    {:frontal,     "Frontal lobe",                 "#ef5350", :frontal}
   ]
+
+  @module_info %{
+    lifg: %{
+      title: "LIFG — Competitive Sense Selection",
+      modules: ~w(Brain.LIFG Brain.LIFG.Stage1 Core.LIFG.Input)a,
+      summary: """
+      Selects the winning sense per token from `si.sense_candidates`, with boundary guards and scoring:
+      lex_fit, rel_prior, activation, intent_bias (+ episodes boost).
+      """,
+      telemetry: ~w(brain.lifg.stage1.start brain.lifg.stage1.stop brain.lifg.chargram_violation brain.lifg.boundary_drop),
+      config: [
+        {:brain, :lifg_stage1_weights, %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}},
+        {:brain, :lifg_stage1_scores_mode, :all}
+      ]
+    },
+    pmtg: %{
+      title: "PMTG — Controlled Semantic Retrieval",
+      modules: ~w(Brain.PMTG)a,
+      summary: "Interfaces selection demands (from LIFG) with knowledge access dynamics; surfaces near-winners into `si.sense_candidates`.",
+      telemetry: ~w(brain.pmtg.no_mwe_senses),
+      config: [ {:brain, :pmtg_margin_threshold, 0.15}, {:brain, :pmtg_mode, :boost} ]
+    },
+    hippocampus: %{
+      title: "Hippocampus — Episodic Write/Recall",
+      modules: ~w(Brain.Hippocampus Db.Episode)a,
+      summary: "Writes episodes at ATL finalize; recalls by norms overlap + recency half-life; biases LIFG.",
+      telemetry: ~w(brain.hippo.write brain.hippo.recall),
+      config: [ {:db, :pgvector, true} ]
+    },
+    thalamus: %{
+      title: "Thalamus — Routing / Attention Gating",
+      modules: ~w(Brain.Thalamus)a,
+      summary: "Gates signals, routes salience to regions, coordinates focus windows.",
+      telemetry: ~w(brain.thalamus.route),
+      config: []
+    },
+    ofc: %{
+      title: "OFC — Valuation / Feedback",
+      modules: ~w(Brain.OFC)a,
+      summary: "Scores outcomes and feeds back to bias future selection and phrasing.",
+      telemetry: ~w(brain.ofc.feedback),
+      config: []
+    },
+    cerebellum: %{
+      title: "Cerebellum — Sequencing / Prediction",
+      modules: ~w(Brain.Cerebellum)a,
+      summary: "Smooths timing, sequencing of multi-step outputs; light predictive adjustments.",
+      telemetry: ~w(brain.cerebellum.tick),
+      config: []
+    },
+    occipital: %{
+      title: "Occipital — Visual Context (future)",
+      modules: [],
+      summary: "Reserved: visual feature hooks / context fusion.",
+      telemetry: [],
+      config: []
+    },
+    parietal: %{
+      title: "Parietal — Integration Hub (future)",
+      modules: [],
+      summary: "Reserved: multi-modal integration and spatial attention.",
+      telemetry: [],
+      config: []
+    },
+    temporal: %{
+      title: "Temporal — Semantics Bedrock",
+      modules: ~w(Brain.PMTG Db.BrainCell Core.Lexicon)a,
+      summary: "Home base for lexical & semantic knowledge access (with PMTG).",
+      telemetry: [],
+      config: []
+    },
+    frontal: %{
+      title: "Frontal — Control & Planning",
+      modules: ~w(Brain.LIFG Brain.OFC)a,
+      summary: "Executive control for language selection and valuation.",
+      telemetry: [],
+      config: []
+    }
+  }
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(
-       regions: @regions,
-       hovered: nil,
-       selected: MapSet.new()
-     )}
+     |> assign(:selected, :lifg)
+     |> assign(:regions, @regions)
+     |> assign(:module_info, @module_info)}
   end
 
   @impl true
-  def handle_event("toggle", %{"id" => id}, socket) do
-    sel =
-      if MapSet.member?(socket.assigns.selected, id),
-        do: MapSet.delete(socket.assigns.selected, id),
-        else: MapSet.put(socket.assigns.selected, id)
+  def handle_event("select_region", %{"region" => region}, socket) do
+    region_atom =
+      region
+      |> String.to_existing_atom()
 
-    {:noreply, assign(socket, selected: sel)}
+    {:noreply, assign(socket, :selected, region_atom)}
+  rescue
+    _ -> {:noreply, socket}
   end
-
-  @impl true
-  def handle_event("hover", %{"id" => id}, socket),
-    do: {:noreply, assign(socket, hovered: id)}
-
-  @impl true
-  def handle_event("leave", _params, socket),
-    do: {:noreply, assign(socket, hovered: nil)}
-
-  # --- view helpers
-
-  defp opacities(id, hovered, selected) do
-    cond do
-      hovered == id -> {"0.9", "1.0"}
-      MapSet.member?(selected, id) -> {"0.7", "1.0"}
-      true -> {"0.32", "0.85"}
-    end
-  end
-
-  defp label_color(hex) do
-    with <<?#, r1::binary-size(2), g1::binary-size(2), b1::binary-size(2)>> <- String.downcase(hex),
-         {r, ""} <- Integer.parse(r1, 16),
-         {g, ""} <- Integer.parse(g1, 16),
-         {b, ""} <- Integer.parse(b1, 16) do
-      lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-      if lum > 140, do: "#0f172a", else: "#f8fafc"
-    else
-      _ -> "#0f172a"
-    end
-  end
-
-  defp region_for(id), do: Enum.find(@regions, &(&1.id == id))
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-6xl w-full h-[calc(100svh-6rem)] grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 p-4">
-      <!-- Canvas -->
-      <div class="relative rounded-2xl border border-slate-800/60 bg-[var(--color-panel)] shadow">
-        <svg viewBox="0 0 800 480" class="w-full h-full">
-          <!-- Background -->
-          <rect x="0" y="0" width="800" height="480" fill="transparent"/>
-
-          <!-- Brain silhouette (stylized, not too detailed) -->
-          <g>
-            <path
-              d="M 130 240
-                 C 120 170, 170 110, 260 80
-                 C 350 50, 480 60, 560 110
-                 C 620 150, 680 210, 690 260
-                 C 700 300, 680 350, 640 380
-                 C 600 410, 540 430, 470 440
-                 C 400 450, 320 440, 260 410
-                 C 230 400, 210 380, 200 360
-                 C 190 340, 170 325, 150 320
-                 C 120 310, 110 280, 120 260 Z"
-              fill="#0b1220" fill-opacity="0.55"
-              stroke="#0ea5e9" stroke-opacity="0.25" stroke-width="2"
-            />
-            <!-- Brainstem (subtle) -->
-            <path d="M 200 360 Q 210 390 245 410 Q 255 450 300 465"
-                  fill="none" stroke="#0ea5e9" stroke-opacity="0.25" stroke-width="7" stroke-linecap="round"/>
-          </g>
-
-          <!-- Regions -->
-          <%= for r <- @regions do %>
-            <% {fill_op, stroke_op} = opacities(r.id, @hovered, @selected) %>
-            <g
-              phx-click="toggle" phx-value-id={r.id}
-              phx-mouseenter="hover" phx-value-id={r.id}
-              phx-mouseleave="leave"
-              class="cursor-pointer"
-            >
-              <path d={r.d}
-                    fill={r.color} fill-opacity={fill_op}
-                    stroke={r.color} stroke-opacity={stroke_op} stroke-width="2.5"/>
-              <% {lx, ly} = r.anchor %>
-              <line x1={lx - 18} y1={ly} x2={lx} y2={ly}
-                    stroke={r.color} stroke-opacity="0.75" stroke-width="2"/>
-              <rect x={lx + 2} y={ly - 14} rx="6" ry="6" width="220" height="28"
-                    fill={r.color} fill-opacity="0.18" stroke={r.color} stroke-opacity="0.5" stroke-width="1"/>
-              <text x={lx + 12} y={ly + 6} font-size="13" font-weight="600"
-                    fill={label_color(r.color)} style="font-family: ui-sans-serif, system-ui;">
-                <%= r.label %>
-              </text>
-            </g>
-          <% end %>
-
-          <!-- Hover badge -->
-          <%= if @hovered do %>
-            <% r = region_for(@hovered) %>
-            <% {bx, by} = r.anchor %>
-            <g>
-              <rect x={bx - 140} y={max(by - 94, 12)} width="280" height="78" rx="10" ry="10"
-                    fill="#0b1220" fill-opacity="0.95" stroke="#1f2937" stroke-width="1.25"/>
-              <text x={bx - 128} y={max(by - 74, 32)} font-size="13" font-weight="700" fill="#e5e7eb"
-                    style="font-family: ui-sans-serif, system-ui;"><%= r.label %></text>
-              <text x={bx - 128} y={max(by - 56, 48)} font-size="12" fill="#cbd5e1"
-                    style="font-family: ui-sans-serif, system-ui;">
-                <tspan><%= String.slice(r.desc, 0, 52) %></tspan>
-                <tspan x={bx - 128} dy="16"><%= String.slice(r.desc, 52, 52) %></tspan>
-                <tspan x={bx - 128} dy="16"><%= String.slice(r.desc, 104, 52) %></tspan>
-              </text>
-            </g>
-          <% end %>
-        </svg>
+    <div class="mx-auto max-w-6xl px-4 py-6">
+      <div class="mb-4 flex items-center justify-between gap-4">
+        <h1 class="text-2xl font-semibold">Brain Regions ↔ Symbrella Modules</h1>
+        <div class="text-sm opacity-70">Left-lateral human brain (vector, hand-drawn)</div>
       </div>
 
-      <!-- Legend / details -->
-      <aside class="rounded-2xl border border-slate-800/60 bg-[var(--color-panel)] p-4 space-y-4 shadow">
-        <h2 class="text-sm font-semibold opacity-80">Brain chain regions</h2>
-
-        <div class="space-y-2 max-h-[calc(100%-3rem)] overflow-y-auto pr-1">
-          <%= for r <- @regions do %>
-            <% selected? = MapSet.member?(@selected, r.id) %>
-            <button
-              phx-click="toggle" phx-value-id={r.id}
-              phx-mouseenter="hover" phx-value-id={r.id}
-              phx-mouseleave="leave"
-              class={[
-                "w-full text-left rounded-xl border px-3 py-2 transition",
-                selected? && "border-white/30 bg-white/5",
-                !selected? && "border-slate-800/70 hover:border-slate-700/80 bg-transparent"
-              ]}
-            >
-              <div class="flex items-center gap-2">
-                <span class="inline-block w-3.5 h-3.5 rounded-full" style={"background: #{r.color}"} />
-                <span class="text-sm font-medium"><%= r.label %></span>
-              </div>
-              <p class="mt-1 text-xs opacity-80 leading-snug"><%= r.desc %></p>
-            </button>
-          <% end %>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <!-- SVG brain -->
+        <div class="w-full">
+          <.brain_svg selected={@selected} />
+          <div class="mt-2 text-xs opacity-70">Click any colored region to view details.</div>
         </div>
 
-        <div class="pt-2 text-xs opacity-70">
-          Tip: hover to preview, click to toggle highlight.
+        <!-- Info pane -->
+        <div id="info" class="w-full">
+          <.info_panel selected={@selected} data={@module_info[@selected]} />
+          <div class="mt-4 rounded-2xl border p-4">
+            <h3 class="font-medium mb-2">Quick jump</h3>
+            <div class="flex flex-wrap gap-2">
+              <%= for {id, label, color, _} <- @regions do %>
+                <button
+                  type="button"
+                  phx-click="select_region"
+                  phx-value-region={id}
+                  class={[
+                    "rounded-full px-3 py-1 text-sm border hover:shadow transition",
+                    if(@selected == id, do: "ring-2 ring-offset-2", else: "")
+                  ]}
+                  style={"border-color: #{color}; #{if(@selected == id, do: "ring-color: #{color};", else: "")}"}
+                >
+                  <span class="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={"background: #{color}"}></span>
+                  <%= label %>
+                </button>
+              <% end %>
+            </div>
+          </div>
         </div>
-      </aside>
+      </div>
+    </div>
+    """
+  end
+
+  ## Components
+
+  attr :selected, :atom, required: true
+  def brain_svg(assigns) do
+    ~H"""
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 1100 750"
+      class="w-full h-auto rounded-2xl border bg-white"
+      aria-labelledby="title desc"
+      role="img"
+    >
+      <title id="title">Human brain, left lateral view</title>
+      <desc id="desc">Interactive diagram. Click colored regions to reveal corresponding Symbrella module details.</desc>
+
+      <!-- Base silhouette -->
+      <defs>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="2" stdDeviation="6" flood-opacity="0.18"/>
+        </filter>
+        <clipPath id="brain-clip">
+          <!-- Organic outer contour -->
+          <path d="M144,372 C140,250 230,170 360,140 C440,120 540,110 640,135 C740,160 820,210 865,270
+                   C915,340 910,420 892,470 C872,525 878,570 852,598 C820,632 760,618 740,598
+                   C730,588 710,590 700,595 C670,610 618,620 560,618 C495,615 440,598 400,580
+                   C360,562 330,560 300,562 C240,566 200,552 178,520 C156,488 150,438 144,372 z"/>
+        </clipPath>
+      </defs>
+
+      <!-- Tissue fill -->
+      <g filter="url(#shadow)" clip-path="url(#brain-clip)">
+        <rect x="120" y="110" width="800" height="560" fill="#f7f4ef"/>
+        <!-- light sulci texture -->
+        <g stroke="#e6e0d8" stroke-width="4" fill="none" opacity="0.8">
+          <path d="M220,220 C340,200 460,220 580,250"/>
+          <path d="M220,280 C360,260 520,300 640,320"/>
+          <path d="M240,340 C360,330 520,360 660,370"/>
+          <path d="M260,400 C380,400 520,430 660,430"/>
+          <path d="M280,460 C400,470 540,490 660,500"/>
+        </g>
+      </g>
+
+      <!-- Regions (each is a click target with a tasteful organ shape) -->
+      <!-- Frontal lobe -->
+      <.region
+        id="frontal"
+        label="Frontal lobe"
+        selected={@selected == :frontal or @selected == :lifg or @selected == :ofc}
+        color="#ef5350"
+        d="M180,360 C200,260 300,190 420,170 C520,155 600,170 640,190
+           C640,210 600,240 560,260 C520,280 470,300 430,320 C360,355 300,380 240,385
+           C210,387 190,380 180,360 z"
+      />
+
+      <!-- LIFG (Broca’s) subregion -->
+      <.region
+        id="lifg"
+        label="LIFG (Broca’s area)"
+        selected={@selected == :lifg}
+        color="#f44336"
+        d="M350,400 C340,375 360,350 400,330 C440,315 485,320 510,340
+           C520,355 515,380 490,400 C465,420 420,430 390,425 C370,420 355,415 350,400 z"
+      />
+
+      <!-- OFC subregion -->
+      <.region
+        id="ofc"
+        label="OFC"
+        selected={@selected == :ofc}
+        color="#ff9800"
+        d="M360,450 C355,430 370,415 400,405 C430,398 465,402 485,415
+           C495,430 488,447 465,460 C440,472 405,475 385,468 C370,463 362,458 360,450 z"
+      />
+
+      <!-- Parietal lobe -->
+      <.region
+        id="parietal"
+        label="Parietal"
+        selected={@selected == :parietal}
+        color="#42a5f5"
+        d="M520,250 C590,220 660,230 720,265 C760,290 790,330 780,380
+           C740,395 700,398 660,395 C610,392 570,380 540,360 C515,345 510,310 520,250 z"
+      />
+
+      <!-- Temporal lobe -->
+      <.region
+        id="temporal"
+        label="Temporal"
+        selected={@selected == :temporal or @selected == :pmtg or @selected == :hippocampus}
+        color="#9575cd"
+        d="M330,520 C340,485 380,465 440,460 C500,460 560,470 600,490
+           C640,510 640,545 600,565 C560,585 500,595 440,592 C390,588 350,570 330,520 z"
+      />
+
+      <!-- PMTG subregion -->
+      <.region
+        id="pmtg"
+        label="PMTG"
+        selected={@selected == :pmtg}
+        color="#7e57c2"
+        d="M460,520 C470,505 500,500 530,505 C560,512 580,525 575,540
+           C565,555 540,565 510,565 C485,562 470,552 465,540 C462,533 460,526 460,520 z"
+      />
+
+      <!-- Hippocampus -->
+      <.region
+        id="hippocampus"
+        label="Hippocampus"
+        selected={@selected == :hippocampus}
+        color="#00897b"
+        d="M520,560 C530,548 555,545 575,550 C595,557 600,570 590,580
+           C575,592 550,595 532,590 C522,585 518,575 520,560 z"
+      />
+
+      <!-- Thalamus (deep nucleus blob) -->
+      <.region
+        id="thalamus"
+        label="Thalamus"
+        selected={@selected == :thalamus}
+        color="#1976d2"
+        d="M600,420 C600,405 615,395 635,395 C650,395 665,405 665,420
+           C665,435 650,445 635,445 C615,445 600,435 600,420 z"
+      />
+
+      <!-- Occipital lobe -->
+      <.region
+        id="occipital"
+        label="Occipital"
+        selected={@selected == :occipital}
+        color="#66bb6a"
+        d="M710,340 C740,325 780,330 810,355 C825,370 830,395 818,420
+           C800,450 760,455 730,440 C710,430 700,410 700,390 C700,370 705,355 710,340 z"
+      />
+
+      <!-- Cerebellum (distinct organ look) -->
+      <.region
+        id="cerebellum"
+        label="Cerebellum"
+        selected={@selected == :cerebellum}
+        color="#6d4c41"
+        d="M720,570 C740,540 790,532 835,545 C875,555 900,580 895,610
+           C888,642 850,660 810,657 C770,654 735,635 725,605 C722,595 720,585 720,570 z"
+      />
+
+      <!-- Outline stroke for clarity -->
+      <use href="#brain-clip" fill="none" stroke="#b7b0a7" stroke-width="3"/>
+    </svg>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :selected, :boolean, required: true
+  attr :color, :string, required: true
+  attr :d, :string, required: true
+  def region(assigns) do
+    ~H"""
+    <g
+      phx-click="select_region"
+      phx-value-region={@id}
+      class="cursor-pointer transition"
+      role="button"
+      aria-label={"#{@label} (click for details)"}
+    >
+      <path
+        d={@d}
+        fill={@color}
+        fill-opacity={if @selected, do: "0.55", else: "0.28"}
+        stroke={@color}
+        stroke-width={if @selected, do: "3", else: "2"}
+      />
+    </g>
+    """
+  end
+
+  attr :selected, :atom, required: true
+  attr :data, :map, required: true
+  def info_panel(assigns) do
+    ~H"""
+    <div class="rounded-2xl border p-5 bg-white">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="text-xl font-semibold"><%= @data.title %></h2>
+        <span class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs">
+          <span class="opacity-60">Selected:</span>
+          <code class="font-mono"><%= @selected %></code>
+        </span>
+      </div>
+      <p class="mt-2 text-sm leading-relaxed opacity-90"><%= @data.summary %></p>
+
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <h3 class="font-medium mb-1">Modules</h3>
+          <ul class="text-sm space-y-1">
+            <%= if Enum.empty?(@data.modules) do %>
+              <li class="opacity-60">—</li>
+            <% else %>
+              <%= for m <- @data.modules do %>
+                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border"><%= inspect(m) %></code></li>
+              <% end %>
+            <% end %>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="font-medium mb-1">Telemetry</h3>
+          <ul class="text-sm space-y-1">
+            <%= if Enum.empty?(@data.telemetry) do %>
+              <li class="opacity-60">—</li>
+            <% else %>
+              <%= for t <- @data.telemetry do %>
+                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border"><%= t %></code></li>
+              <% end %>
+            <% end %>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="font-medium mb-1">Config (examples)</h3>
+          <ul class="text-sm space-y-1">
+            <%= if Enum.empty?(@data.config) do %>
+              <li class="opacity-60">—</li>
+            <% else %>
+              <%= for {app, key, val} <- @data.config do %>
+                <li>
+                  <code class="px-1 py-0.5 rounded bg-zinc-50 border">
+                    config :<%= app %>, <%= key %>, <%= inspect(val) %>
+                  </code>
+                </li>
+              <% end %>
+            <% end %>
+          </ul>
+        </div>
+      </div>
     </div>
     """
   end
