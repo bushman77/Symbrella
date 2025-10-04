@@ -553,17 +553,26 @@ defmodule Brain.PMTG do
     |> Enum.sort_by(& &1.token_index)
   end
 
-  defp emit_rerun_event(choices, mode \\ :sync) do
+  # Emit a pMTG :rerun event (2-arity only; no 1-arity wrapper)
+  defp emit_rerun_event(choices, mode) do
     groups =
       choices
       |> Enum.map(& &1.token_index)
       |> MapSet.new()
       |> MapSet.size()
 
-    safe_exec_telemetry([:brain, :pmtg, :rerun], %{groups: groups, mode: mode}, %{})
+    # Use 2-arity; wrapper forwards to the 3-arity impl
+    safe_exec_telemetry([:brain, :pmtg, :rerun], %{groups: groups, mode: mode})
   end
 
-  defp safe_exec_telemetry(event, measurements \\ %{}, meta \\ %{}) do
+  # --- Telemetry helpers (grouped; no duplicates, no unused 1-arity) ---
+
+  # Some call sites pass only event + measurements
+  defp safe_exec_telemetry(event, measurements),
+    do: safe_exec_telemetry(event, measurements, %{})
+
+  # Single implementation
+  defp safe_exec_telemetry(event, measurements, meta) do
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
       :telemetry.execute(event, measurements, meta)
     else

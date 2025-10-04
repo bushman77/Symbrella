@@ -202,18 +202,6 @@ defmodule Brain.LIFG do
 
   defp candidates_from_cells(_si, _tokens), do: []
 
-  defp lex_fit_from_phrase(phrase, lemma) do
-    p = String.downcase(to_b(phrase))
-    l = String.downcase(to_b(lemma))
-    cond do
-      p == "" or l == "" -> 0.60
-      p == l             -> 1.00
-      String.contains?(p, l) -> 0.85
-      String.contains?(l, p) -> 0.75
-      true                  -> 0.60
-    end
-  end
-
   defp intent_bias_from(si, idx, feats_or_map) do
     tokens = Map.get(si, :tokens, [])
     cur    = Enum.at(tokens, idx) || %{}
@@ -507,7 +495,7 @@ defmodule Brain.LIFG do
   Low-confidence predicate used by pMTG gate.
   Defaults: tau_confident=0.20, p_min=0.65. Returns true when pMTG should fire.
   """
-  def low_confidence?(choice, opts \\ []) when is_map(choice) do
+  def low_confidence?(choice, opts) when is_map(choice) do
     tau   = Keyword.get(opts, :tau_confident, 0.20)
     p_min = Keyword.get(opts, :p_min, 0.65)
     m     = Map.get(choice, :margin, 0.0)
@@ -748,7 +736,6 @@ defmodule Brain.LIFG do
     end
     defp boundary_aligned?(_snt, _s, _l), do: false
 
-    defp word_char?(nil), do: false
     defp word_char?(""), do: false
     defp word_char?(ch), do: Regex.match?(~r/^[\p{L}\p{N}]$/u, ch)
     defp truthy(true), do: true
@@ -769,8 +756,6 @@ defmodule Brain.LIFG do
     """
 
     require Logger
-
-    @small_k_cutoff 4
 
     @type si :: map()
     @type choice :: %{
@@ -895,11 +880,9 @@ defmodule Brain.LIFG do
     end
     defp do_boundary_check(_tok, _si), do: true
 
-    defp letter?(nil), do: false
     defp letter?(<<c::utf8>>), do: unicode_letter?(c)
     defp unicode_letter?(cp),
       do: (cp >= ?A and cp <= ?Z) or (cp >= ?a and cp <= ?z) or (cp >= ?À and cp <= 0x024F)
-    defp letter?(_), do: false
 
     # ── Disambiguation per token (hybrid) ──────────────────────────────
 
@@ -1100,44 +1083,6 @@ defmodule Brain.LIFG do
 
 # === in apps/brain/lib/brain/lifg_stage1.ex (inside defmodule Brain.LIFG.Stage1) ===
 
-# Runtime-configurable threshold (fallback 0.15)
-defp margin_threshold do
-  Application.get_env(:brain, :pmtg_margin_threshold, 0.15)
-end
-
-# scored :: [%{id: id, score: float, lemma: lemma, token_index: integer} | ...]
-defp pick_winner_with_margin(scored) when is_list(scored) and scored != [] do
-  [top | rest] = Enum.sort_by(scored, & &1.score, :desc)
-  second = List.first(rest)
-  margin = if second, do: top.score - second.score, else: 1.0
-  {Map.put(top, :margin, margin), if(second, do: Map.put(second, :margin, margin), else: nil)}
-end
-
-defp emit_sense_candidates(si, token_index, scored, lemma) do
-  {winner, second} = pick_winner_with_margin(scored)
-  near =
-    if second && winner.margin < margin_threshold() do
-      :telemetry.execute(
-        [:brain, :lifg, :low_margin],
-        %{margin: winner.margin},
-        %{token_index: token_index, winner_id: winner.id, second_id: second.id}
-      )
-      [%{second | near: true}]
-    else
-      []
-    end
-
-  candidate_list =
-    [%{winner | lemma: lemma, token_index: token_index, near: false} | near]
-    |> Enum.map(fn c ->
-      Map.take(c, [:id, :score, :lemma, :token_index, :margin, :near])
-    end)
-
-  # Stash on si.sense_candidates[token_index]
-  put_in(si, [:sense_candidates, token_index], candidate_list)
-end
-
-
     defp emit(ev, meas, meta) do
       if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
         :telemetry.execute(ev, meas, meta)
@@ -1175,97 +1120,100 @@ end
   4) pMTG consult (sync rerun or async boost/none)
   Returns {:ok, %{si, choices, slate}}.
   """
-  @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), slate: map()}} | {:error, term()}
-  def run(si, opts \\ []) when is_map(si) and is_list(opts) do
-    try do
-      # 1) ATL finalize (optional)
-      {si, slate} =
-        if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :finalize, 2) do
-          case Brain.ATL.finalize(si, opts) do
-            {s, sl} when is_map(s) and is_map(sl) -> {s, sl}
-            _ -> {si, %{}}
-          end
-        else
-          {si, %{}}
+@spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), slate: map()}} | {:error, term()}
+def run(si, opts \\ []) when is_map(si) and is_list(opts) do
+  require Logger
+
+  try do
+    # 1) ATL finalize (optional): expect {si, slate}; fallback to {si, %{}}
+    {si1, slate} =
+      if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :finalize, 2) do
+        case Brain.ATL.finalize(si, opts) do
+          {s, sl} when is_map(s) and is_map(sl) -> {s, sl}
+          _ -> {si, %{}}
         end
-
-      # 2) attach slate → sense_candidates (optional)
-      si =
-        if Code.ensure_loaded?(Brain.ATL) and
-             function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
-          case Brain.ATL.attach_sense_candidates(si, slate,
-                   top_k: Keyword.get(opts, :top_k, 3),
-                   margin_window: Keyword.get(opts, :margin_window, 0.05)
-                 ) do
-            %{} = s -> s
-            _ -> si
-          end
-        else
-          si
-        end
-
-      # 3) Stage-1
-      scores_mode = Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
-      margin_thr  = Keyword.get(opts, :margin_threshold, 0.15)
-
-      case Stage1.run(si,
-               weights: Map.get(opts, :weights, %{
-                 lex_fit: 0.5, rel_prior: 0.25, activation: 0.15, intent_bias: 0.10
-               }),
-               scores: scores_mode,
-               margin_threshold: margin_thr,
-               chargram_event: [:brain, :lifg, :chargram_violation],
-               boundary_event: [:brain, :lifg, :boundary_drop]
-             ) do
-        {:ok, %{si: si, choices: choices, audit: _a}} ->
-          # 4) pMTG
-          pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
-
-          final_choices =
-            if Code.ensure_loaded?(Brain.PMTG) do
-              case {pmtg_mode, Keyword.get(opts, :pmtg_apply?, true)} do
-                {:rerun, true} ->
-                  case Brain.PMTG.consult_sync(
-                         choices,
-                         si.tokens,
-                         already_needy: false,
-                         margin_threshold: margin_thr,
-                         limit: Keyword.get(opts, :limit, 5),
-                         mode: :rerun,
-                         rerun_only_if_hits: Keyword.get(opts, :rerun_only_if_hits, true),
-                         rerun_weights_bump: Keyword.get(opts, :rerun_weights_bump, %{lex_fit: 0.05, rel_prior: 0.05})
-                       ) do
-                    {:ok, %{choices: merged}} -> merged
-                    _ -> choices
-                  end
-
-                _other ->
-                  case Brain.PMTG.consult(
-                         choices,
-                         si.tokens,
-                         margin_threshold: margin_thr,
-                         limit: Keyword.get(opts, :limit, 5),
-                         mode: pmtg_mode
-                       ) do
-                    new_choices when is_list(new_choices) -> new_choices
-                    _ -> choices
-                  end
-              end
-            else
-              choices
-            end
-
-          {:ok, %{si: si, choices: final_choices, slate: slate}}
-
-        {:error, reason} ->
-          {:error, {:stage1, reason}}
+      else
+        {si, %{}}
       end
-    rescue
-      e ->
-        Logger.error("LIFG full run failed: #{inspect(e)}")
-        {:error, e}
+
+    # 2) Attach slate → sense_candidates (optional)
+    si2 =
+      if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
+        case Brain.ATL.attach_sense_candidates(
+               si1,
+               slate,
+               top_k: Keyword.get(opts, :top_k, 3),
+               margin_window: Keyword.get(opts, :margin_window, 0.05)
+             ) do
+          %{} = s -> s
+          _ -> si1
+        end
+      else
+        si1
+      end
+
+    # 3) Stage-1 scoring
+    scores_mode = Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+    margin_thr  = Keyword.get(opts, :margin_threshold, 0.15)
+
+    case Stage1.run(
+           si2,
+           weights: Map.get(opts, :weights, %{
+             lex_fit: 0.5, rel_prior: 0.25, activation: 0.15, intent_bias: 0.10
+           }),
+           scores: scores_mode,
+           margin_threshold: margin_thr,
+           chargram_event: [:brain, :lifg, :chargram_violation],
+           boundary_event: [:brain, :lifg, :boundary_drop]
+         ) do
+      {:ok, %{si: si3, choices: choices, audit: _a}} ->
+        # 4) pMTG integration
+        pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+
+        {final_si, final_choices} =
+          if Code.ensure_loaded?(Brain.PMTG) do
+            case {pmtg_mode, Keyword.get(opts, :pmtg_apply?, true)} do
+              {:rerun, true} ->
+                case Brain.PMTG.consult_sync(
+                       choices,
+                       si3.tokens,
+                       already_needy: false,
+                       margin_threshold: margin_thr,
+                       limit: Keyword.get(opts, :limit, 5),
+                       mode: :rerun,
+                       rerun_only_if_hits: Keyword.get(opts, :rerun_only_if_hits, true),
+                       rerun_weights_bump: Keyword.get(opts, :rerun_weights_bump, %{lex_fit: 0.05, rel_prior: 0.05})
+                     ) do
+                  {:ok, %{si: si_after, choices: merged}} -> {si_after, merged}
+                  _ -> {si3, choices}
+                end
+
+              _other_mode ->
+                # Async consult; keep current choices
+                _ = Brain.PMTG.consult(
+                      choices,
+                      si3.tokens,
+                      margin_threshold: margin_thr,
+                      limit: Keyword.get(opts, :limit, 5),
+                      mode: pmtg_mode
+                    )
+                {si3, choices}
+            end
+          else
+            {si3, choices}
+          end
+
+        {:ok, %{si: final_si, choices: final_choices, slate: slate}}
+
+      {:error, reason} ->
+        {:error, {:stage1, reason}}
     end
+  rescue
+    e ->
+      Logger.error("LIFG full run failed: #{inspect(e)}")
+      {:error, e}
   end
+end
 
   # ── weights (outer) ─────────────────────────────────────────────────
   defp to_map(nil), do: %{}

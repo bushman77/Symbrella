@@ -201,7 +201,8 @@ end
 
 @spec promote_sense_candidates_from_slate(map(), keyword()) ::
         %{non_neg_integer() => [map()]}
-def promote_sense_candidates_from_slate(%{winners: winners} = slate, opts) do
+def promote_sense_candidates_from_slate(%{winners: winners} = _slate, opts) do
+
   top_k         = Keyword.get(opts, :top_k, 3)
   margin_window = Keyword.get(opts, :margin_window, 0.05)
 
@@ -287,6 +288,39 @@ defp pos_from_id(id) when is_binary(id) do
   end
 end
 
+@doc """
+Finalize the ATL slate for the current `si`.
+
+Returns `{si, slate}`.
+
+Behavior:
+  * If `si` already has `:lifg_choices`, build a fresh `slate` via `reduce/2`.
+  * Otherwise, fall back to the ATL server's `last_slate` if the server is running.
+  * If nothing is available, return an empty `%{}` slate.
+"""
+@spec finalize(map(), keyword()) :: {map(), map()}
+def finalize(si, _opts \\ []) when is_map(si) do
+  choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
+  tokens  = Map.get(si, :tokens)       || Map.get(si, "tokens")       || []
+
+  slate =
+    cond do
+      is_list(choices) and choices != [] and is_list(tokens) ->
+        reduce(choices, tokens)
+
+      true ->
+        case Process.whereis(@name) do
+          nil -> %{}
+          _pid ->
+            case snapshot() do
+              %{last_slate: sl} when is_map(sl) -> sl
+              _ -> %{}
+            end
+        end
+    end
+
+  {si, slate}
+end
 
 end
 
