@@ -52,6 +52,7 @@ defmodule Brain.HippocampusRecallTest do
 
     # Overlap with 'a' → 2 results due to default recall_limit
     res = Hippocampus.recall(["a"])
+
     assert length(res) == 2
     assert Enum.all?(res, fn r -> r.score > 0.0 end)
   end

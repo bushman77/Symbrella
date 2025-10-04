@@ -1,3 +1,4 @@
+# config/test.exs
 import Config
 
 config :db, ecto_repos: [Db]
@@ -10,7 +11,6 @@ config :db, Db,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10,
   show_sensitive_data_on_connection_error: true
-
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -38,3 +38,4 @@ config :phoenix_live_view,
 config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
+

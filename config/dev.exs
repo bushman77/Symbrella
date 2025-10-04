@@ -1,3 +1,4 @@
+# apps/symbrella_web/config/dev.exs
 import Config
 
 config :symbrella_web, SymbrellaWeb.Endpoint,
@@ -40,3 +41,4 @@ config :core, :tokenizer_defaults,
   emit_chargrams: false
 
 config :brain, :lifg_weights, prime: 0.05
+

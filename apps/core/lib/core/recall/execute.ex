@@ -1,16 +1,31 @@
 defmodule Core.Recall.Execute do
   @moduledoc """
   Execute a recall plan against long-term memory (LTM/DB).
+
+  This version includes two **Hippocampus** hooks that are safe and opt-in/out via options:
+
+  • **Attach**: calls `Brain.Hippocampus.attach_episodes/2` and places the result under
+    `si[:evidence][:episodes]`. Enabled by default. Toggle with `hippo: true | false`.
+    Default opts: `hippo_opts: [limit: 3, min_jaccard: 0.1]`.
+
+  • **Write**: calls `Brain.Hippocampus.encode/2` to record the current SI tokens as an
+    episode for future recalls. Enabled by default. Toggle with `hippo_write: true | false`.
+    We store `slate: %{tokens: si.tokens}` and `meta: %{scope: %{source: si.source || :core}}`.
+
+  Both hooks are hard-guarded (won’t crash the recall path if Brain isn’t loaded).
   """
 
   alias Core.SemanticInput, as: SI
   alias Core.Recall.Plan
+  alias Brain.Hippocampus
 
   @type exists_fun :: (binary() -> boolean())
   @type neg_exists_fun :: (binary() -> boolean())
   @type neg_put_fun :: (binary() -> :ok)
 
   @max_tok_id 9_223_372_036_854_775_807
+
+  @hippo_default_opts [limit: 3, min_jaccard: 0.1]
 
   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
   def execute(%SI{} = si, %Plan{} = plan, opts \\ []) do
@@ -41,7 +56,15 @@ defmodule Core.Recall.Execute do
         []
       )
 
-    merge_and_trace(si, added_refs, counts, budget_ms, budget_hit?, t0)
+    si2 = merge_and_trace(si, added_refs, counts, budget_ms, budget_hit?, t0)
+
+    # ---- Hippocampus write (safe; default on) ----
+    _ = maybe_write_episode(si2, opts)
+
+    # ---- Hippocampus attach (safe; default on) ----
+    si3 = maybe_attach_episodes(si2, opts)
+
+    si3
   end
 
   # ---------- candidate key extraction ----------
@@ -281,6 +304,58 @@ defmodule Core.Recall.Execute do
     %SI{si | active_cells: merged, trace: si.trace ++ [ev]}
   end
 
+  # ---- Hippocampus write (safe) ----
+  defp maybe_write_episode(%SI{} = si, opts) do
+    enabled? = Keyword.get(opts, :hippo_write, true)
+
+    cond do
+      not enabled? ->
+        :ok
+
+      not is_list(si.tokens) or si.tokens == [] ->
+        :ok
+
+      Code.ensure_loaded?(Hippocampus) and function_exported?(Hippocampus, :encode, 2) ->
+        slate = %{tokens: si.tokens}
+        meta = %{scope: %{source: si.source || :core}}
+
+        try do
+          _ = Hippocampus.encode(slate, meta)
+          :ok
+        rescue
+          _ -> :ok
+        catch
+          _, _ -> :ok
+        end
+
+      true ->
+        :ok
+    end
+  end
+
+  # ---- Hippocampus attach (safe) ----
+  defp maybe_attach_episodes(%SI{} = si, opts) do
+    enabled? = Keyword.get(opts, :hippo, true)
+    hippo_opts = Keyword.get(opts, :hippo_opts, @hippo_default_opts)
+
+    cond do
+      not enabled? ->
+        si
+
+      Code.ensure_loaded?(Hippocampus) and function_exported?(Hippocampus, :attach_episodes, 2) ->
+        try do
+          Hippocampus.attach_episodes(si, hippo_opts)
+        rescue
+          _ -> si
+        catch
+          _, _ -> si
+        end
+
+      true ->
+        si
+    end
+  end
+
   # tolerate structs, maps, strings, anything
   defp activation_of(%Db.BrainCell{activation: a}) when is_number(a), do: a
   defp activation_of(%{activation_snapshot: a}) when is_number(a), do: a
@@ -349,3 +424,4 @@ defmodule Core.Recall.Execute do
     end
   end
 end
+
