@@ -1098,6 +1098,46 @@ defmodule Brain.LIFG do
       |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
     end
 
+# === in apps/brain/lib/brain/lifg_stage1.ex (inside defmodule Brain.LIFG.Stage1) ===
+
+# Runtime-configurable threshold (fallback 0.15)
+defp margin_threshold do
+  Application.get_env(:brain, :pmtg_margin_threshold, 0.15)
+end
+
+# scored :: [%{id: id, score: float, lemma: lemma, token_index: integer} | ...]
+defp pick_winner_with_margin(scored) when is_list(scored) and scored != [] do
+  [top | rest] = Enum.sort_by(scored, & &1.score, :desc)
+  second = List.first(rest)
+  margin = if second, do: top.score - second.score, else: 1.0
+  {Map.put(top, :margin, margin), if(second, do: Map.put(second, :margin, margin), else: nil)}
+end
+
+defp emit_sense_candidates(si, token_index, scored, lemma) do
+  {winner, second} = pick_winner_with_margin(scored)
+  near =
+    if second && winner.margin < margin_threshold() do
+      :telemetry.execute(
+        [:brain, :lifg, :low_margin],
+        %{margin: winner.margin},
+        %{token_index: token_index, winner_id: winner.id, second_id: second.id}
+      )
+      [%{second | near: true}]
+    else
+      []
+    end
+
+  candidate_list =
+    [%{winner | lemma: lemma, token_index: token_index, near: false} | near]
+    |> Enum.map(fn c ->
+      Map.take(c, [:id, :score, :lemma, :token_index, :margin, :near])
+    end)
+
+  # Stash on si.sense_candidates[token_index]
+  put_in(si, [:sense_candidates, token_index], candidate_list)
+end
+
+
     defp emit(ev, meas, meta) do
       if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
         :telemetry.execute(ev, meas, meta)

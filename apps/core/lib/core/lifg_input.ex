@@ -26,42 +26,55 @@ defmodule Core.LIFG.Input do
   @spec tokenize(String.t()) :: list()
   def tokenize(sentence) when is_binary(sentence) do
     tok_opts = tokenizer_defaults()
-    tok_out = Token.tokenize(sentence, tok_opts)
 
-    {tokens_list, s} =
-      case tok_out do
-        %Core.SemanticInput{tokens: tks, sentence: ss} -> {List.wrap(tks), ss || sentence}
-        tks when is_list(tks) -> {tks, sentence}
-        _ -> {[], sentence}
+    # ★ Build SI with char spans so downstream slices always match
+    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))  # ★
+
+    # ★ Invariant check (telemetry on failure, proceed defensively)
+    si1 =
+      case Token.check_span_invariants(si0) do
+        {:ok, si} -> si
+        {:error, fails} ->
+          :telemetry.execute(
+            [:core, :token, :span_invariant_fail],                 # ★
+            %{count: length(fails)},
+            %{fails: fails, sentence: si0.sentence}
+          )
+          si0
       end
 
-    tokens_list
+    # Continue your existing pipeline on the *char-span* tokens
+    si1.tokens
     |> Guard.sanitize()
-    |> BoundaryGuard.sanitize(s)
+    |> BoundaryGuard.sanitize(si1.sentence)
   end
 
   # SI → SI with opts
   @spec tokenize(Core.SemanticInput.t(), keyword()) :: Core.SemanticInput.t()
   def tokenize(%Core.SemanticInput{} = si, opts) when is_list(opts) do
     tok_opts = tokenizer_defaults()
-    tok_out = Token.tokenize(si, tok_opts)
+    sentence = Map.get(si, :sentence) || ""
 
-    {tokens_list, sentence} =
-      case tok_out do
-        %Core.SemanticInput{tokens: tks, sentence: s} ->
-          {List.wrap(tks), s || Map.get(si, :sentence) || ""}
+    # ★ Use the SI's sentence; produce char spans
+    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))  # ★
 
-        tks when is_list(tks) ->
-          {tks, Map.get(si, :sentence) || ""}
-
-        _ ->
-          {[], Map.get(si, :sentence) || ""}
+    # ★ Invariant check (telemetry on failure)
+    si1 =
+      case Token.check_span_invariants(si0) do
+        {:ok, si_ok} -> si_ok
+        {:error, fails} ->
+          :telemetry.execute(
+            [:core, :token, :span_invariant_fail],                 # ★
+            %{count: length(fails)},
+            %{fails: fails, sentence: si0.sentence}
+          )
+          si0
       end
 
     cleaned =
-      tokens_list
+      si1.tokens
       |> Guard.sanitize()
-      |> BoundaryGuard.sanitize(sentence)
+      |> BoundaryGuard.sanitize(si1.sentence)
 
     tokens_final =
       case opts do
@@ -69,7 +82,8 @@ defmodule Core.LIFG.Input do
         _ -> Core.MWE.Injector.inject(cleaned, opts)
       end
 
-    %Core.SemanticInput{tok_out | tokens: tokens_final}
+    # ★ Keep the sentence from si1 (normalized) and replace tokens
+    %Core.SemanticInput{si1 | tokens: tokens_final}                              # ★
   end
 
   # String → [tokens] with opts
@@ -83,8 +97,10 @@ defmodule Core.LIFG.Input do
   @doc false
   @spec tokenizer_defaults() :: keyword()
   def tokenizer_defaults do
-    base = [mode: :words, emit_chargrams: false]
-    Keyword.merge(base, Application.get_env(:core, :tokenizer_defaults, []))
+    # ★ Provide sensible defaults for the new Tokenizer. The legacy keys
+    #    (:mode, :emit_chargrams) remain harmless no-ops for compatibility.
+    env = Application.get_env(:core, :tokenizer_defaults, [])
+    [max_wordgram_n: 3, emit_chargrams: false] |> Keyword.merge(env)             # ★
   end
 end
 
