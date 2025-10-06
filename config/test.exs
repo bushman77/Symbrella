@@ -39,3 +39,6 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
+config :brain, :episodes_mode, :off
+config :brain, :lifg_min_score, 0.6
+

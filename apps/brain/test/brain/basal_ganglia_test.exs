@@ -51,5 +51,15 @@ defmodule Brain.BasalGangliaTest do
     {decision, _score} = BasalGanglia.decide(wm, cand, attn, cfg)
     assert decision == :boost
   end
+
+test "cooldown forces :boost even if below gate" do
+  wm = [%{id: "x", last_bump: System.system_time(:millisecond)}]
+  cand = %{id: "x", source: :hippocampus, score: 0.1}
+  attn = %{}
+  cfg  = %{gate_threshold: 0.6, cooldown_ms: 2000}
+  {decision, _} = Brain.BasalGanglia.decide(wm, cand, attn, cfg)
+  assert decision == :boost
+end
+
 end
 

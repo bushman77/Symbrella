@@ -24,6 +24,9 @@ defmodule Brain.LIFG do
   ## Region GenServer for status/config/telemetry (stage stays pure)
   use Brain, region: :lifg
 
+
+@default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
+
   # ── Optional server API (convenience) ─────────────────────────────────
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
 
@@ -41,449 +44,271 @@ defmodule Brain.LIFG do
     {:noreply, %{state | opts: Map.merge(state.opts || %{}, new_opts)}}
   end
 
-  # ── Legacy pure Stage-1 API ──────────────────────────────────────────
+# ---------------------------------------------
+# Public API (back-compat heads, no wrappers)
+# ---------------------------------------------
+# In apps/brain/lib/brain/lifg.ex
 
-  @doc "Pure, stateless stage-1. Appends a trace event with choices/boosts/inhibitions."
-  @spec disambiguate_stage1(map()) :: map()
-  def disambiguate_stage1(si) when is_map(si), do: disambiguate_stage1(si, [])
+# ---- LIFG Stage-1: struct-safe, honors si.lifg_opts, works with active_cells ----
 
-  @doc """
-  Pure stage-1 with options:
-    * `:weights`           — override weights map (outer {lex, sim, rel, prag, act, prime})
-    * `:margin_threshold`  — default 0.12
-    * `:scores`            — :all | :top2 | :none (default :all)
-    * `:fit?`              — (cand, si) -> boolean (default fn -> true end)
-    * `:max_flips`         — reanalysis cap (default 1) [stubbed]
-    * `:prime`             — priming options (stubbed; no-op)
-  """
-  @spec disambiguate_stage1(map(), keyword()) :: map()
-  def disambiguate_stage1(%{} = si, opts) do
-    try do
-      # 1) Tripwire (stub)
-      tokens =
-        si
-        |> Map.get(:tokens, [])
-        |> ensure_list()
-        |> tripwire_check_and_filter(on_leak: :drop)
-
-      ctx = Map.get(si, :context_vec)
-      ctx = if is_list(ctx), do: ctx, else: nil
-      ctxn = if ctx, do: l2(ctx), else: 0.0
-
-      # 2) Candidate source: prefer slate ; else from active_cells
-      candidates =
-        case Map.get(si, :sense_candidates) do
-          %{} = slate -> candidates_from_slate(si, slate, tokens)
-          _ -> candidates_from_cells(si, tokens)
-        end
-
-      # 3) Score + normalize per token group, pick winners (+ minimal reanalysis)
-      weights = resolved_weights(opts)
-      {choices, boosts, inhibitions} =
-        disambiguate_groups(tokens, candidates, ctx, ctxn, weights, opts)
-
-      # 4) Build trace event
-      ev = %{
-        stage: :lifg_stage1,
-        ts_ms: System.system_time(:millisecond),
-        normalize: :softmax,
-        scores_mode: Keyword.get(opts, :scores, :all),
-        ctx_dim: (ctx && length(ctx)) || 0,
-        groups: candidates |> Enum.map(& &1.token_index) |> MapSet.new() |> MapSet.size(),
-        choices: choices,
-        boosts: boosts,
-        inhibitions: inhibitions
-      }
-
-      trace = [ev | Map.get(si, :trace, [])]
-      Map.put(si, :trace, trace)
-    rescue
-      e ->
-        Logger.error("LIFG disambiguate_stage1 failed: #{inspect(e)}")
-        ts = System.system_time(:millisecond)
-        ev = %{stage: :lifg_stage1, error: Exception.format(:error, e, __STACKTRACE__), ts_ms: ts}
-        trace = [ev | Map.get(si, :trace, [])]
-        Map.put(si, :trace, trace)
+@spec disambiguate_stage1(map(), keyword()) :: map()
+def disambiguate_stage1(%{} = si, opts) do
+  # Merge opts: call-time opts override si.lifg_opts
+  si_opts =
+    case Map.get(si, :lifg_opts) do
+      kw when is_list(kw) -> kw
+      m when is_map(m) -> Map.to_list(m)
+      _ -> []
     end
+
+  eff_opts       = Keyword.merge(si_opts, opts)
+  fit?           = Keyword.get(eff_opts, :fit?, fn _cand, _si -> true end)
+  normalize_mode = Keyword.get(eff_opts, :normalize, :none)   # :none | :softmax
+  margin_thr     = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  scores_mode    = Keyword.get(eff_opts, :scores, :all)       # :all | :top2 | :none
+  weights        = lifg_weights()
+
+  sc_map = Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates")
+  ac     = Map.get(si, :active_cells)
+
+  # Normalize to per-token candidate groups
+  token_groups =
+    cond do
+      is_map(sc_map) and map_size(sc_map) > 0 ->
+        sc_map
+        |> Enum.sort_by(fn {ti, _} -> ti end)
+        |> Enum.map(fn {ti, list} ->
+          {ti, Enum.map(list || [], &normalize_cand/1)}
+        end)
+
+      is_list(ac) ->
+        ac
+        |> Enum.map(&normalize_cand/1)
+        |> Enum.group_by(& &1.token_index)
+        |> Enum.sort_by(fn {ti, _} -> ti end)
+
+      true ->
+        []
+    end
+
+  eps = 1.0e-12
+
+  {choices, boosts, inhibitions} =
+    Enum.reduce(token_groups, {[], [], []}, fn {ti, group}, {chs, boos, inhs} ->
+      ranked_raw =
+        group
+        |> Enum.map(&score_candidate(&1, weights))
+        |> Enum.sort_by(fn c -> {-c.score, c.id} end)
+
+      case ranked_raw do
+        [] ->
+          {chs, boos, inhs}
+
+        _ ->
+          # Display ranking (if softmax requested); selection & gating use RAW
+          ranked_disp =
+            case normalize_mode do
+              :softmax ->
+                ps = softmax(Enum.map(ranked_raw, & &1.score))
+                Enum.zip_with(ranked_raw, ps, fn c, p -> %{c | score: p} end)
+              _ ->
+                ranked_raw
+            end
+
+          chosen     = Enum.find(ranked_raw, fn c -> fit?.(c, si) end) || hd(ranked_raw)
+          losers_raw = Enum.reject(ranked_raw, &(&1.id == chosen.id))
+
+          # Margin = top score gap (so inhibitions can widen it across rounds)
+          margin_raw =
+            case ranked_raw do
+              [_a]       -> 1.0
+              [a, b | _] -> max(a.score - b.score, 0.0)
+              _          -> 0.0
+            end
+
+          # Emit scores per requested mode (display only)
+          scores_map =
+            case scores_mode do
+              :none -> %{}
+              :top2 -> ranked_disp |> Enum.take(2) |> Map.new(&{&1.id, &1.score})
+              _     -> Map.new(ranked_disp, &{&1.id, &1.score})
+            end
+
+          choice = %{
+            token_index: ti,
+            lemma: Map.get(chosen, :lemma),
+            chosen_id: chosen.id,
+            alt_ids: Enum.map(losers_raw, & &1.id),
+            margin: margin_raw,
+            scores: scores_map,
+            features: %{
+              score_raw:   chosen.score,
+              score_norm:  Map.get(scores_map, chosen.id, chosen.score),
+              pos: nil, sim: 0.0,
+              rel_prior:   feat(chosen.features, :rel_prior),
+              lex_fit:     feat(chosen.features, :lex_fit),
+              activation:  feat(chosen.features, :activation),
+              intent_bias: feat(chosen.features, :intent_bias)
+            }
+          }
+
+          boosts_here =
+            if margin_raw + eps >= margin_thr do
+              [%{token_index: ti, id: chosen.id, amount: Float.round(margin_raw, 6)}]
+            else
+              []
+            end
+
+          inhibitions_here =
+            if margin_raw + eps < margin_thr and losers_raw != [] do
+              Enum.map(losers_raw, fn l ->
+                gap = max(chosen.score - l.score, 0.0)
+                amt = Float.round(max(margin_thr - gap, 0.0), 6)
+                %{token_index: ti, id: l.id, amount: amt}
+              end)
+            else
+              []
+            end
+
+          {[choice | chs], boosts_here ++ boos, inhibitions_here ++ inhs}
+      end
+    end)
+
+  # Option A: convert map-shaped signals to tuple form when gating/WM is involved
+  pairs_mode? =
+    Keyword.has_key?(eff_opts, :gate_into_wm) or
+    Keyword.has_key?(eff_opts, :lifg_min_score) or
+    Keyword.get(eff_opts, :emit_pairs, false)
+
+  {boosts_out, inhibitions_out} =
+    if pairs_mode? do
+      {
+        Enum.map(boosts, fn
+          %{token_index: _ti, id: id, amount: amt} -> {id, +amt}
+          %{id: id, amount: amt} -> {id, +amt}
+        end),
+        Enum.map(inhibitions, fn
+          %{token_index: _ti, id: id, amount: amt} -> {id, -amt}
+          %{id: id, amount: amt} -> {id, -amt}
+        end)
+      }
+    else
+      {boosts, inhibitions}
+    end
+
+  evt = %{
+    stage: :lifg_stage1,
+    choices: Enum.reverse(choices),
+    boosts: Enum.reverse(boosts_out),
+    inhibitions: Enum.reverse(inhibitions_out),
+    opts: Enum.into(eff_opts, %{})
+  }
+
+  trace = [evt | (Map.get(si, :trace) || [])]
+  Map.put(si, :trace, trace)
+end
+
+# (/1) pure; uses si.lifg_opts only
+@doc "Pure, stateless stage-1 for SemanticInput. Appends a trace event (:choices/:boosts/:inhibitions)."
+@spec disambiguate_stage1(map()) :: map()
+def disambiguate_stage1(%{} = si), do: disambiguate_stage1(si, [])
+
+# --- helper: numerically stable softmax over a list of floats ---
+defp softmax([]), do: []
+
+defp softmax(xs) when is_list(xs) do
+  m   = Enum.max(xs)
+  exs = Enum.map(xs, & :math.exp(&1 - m))
+  sum = Enum.sum(exs)
+
+  cond do
+    sum == 0.0 ->
+      n = length(xs)
+      if n == 0, do: [], else: List.duplicate(1.0 / n, n)
+
+    true ->
+      Enum.map(exs, & &1 / sum)
   end
+end
 
-  # Back-compat shim if callers pass (si, ctx, opts)
-  @spec disambiguate_stage1(map(), any(), keyword()) :: map()
-  def disambiguate_stage1(si, _ctx, opts), do: disambiguate_stage1(si, opts)
 
+defp lifg_weights do
+  env = Application.get_env(:brain, :lifg_stage1_weights, %{})
+  Map.merge(@default_weights, env || %{})
+end
+
+# ---------------------------------------------
+# Scoring & selection
+# ---------------------------------------------
   # ── Candidate sources (legacy pure stage) ────────────────────────────
 
-  defp candidates_from_slate(si, slate, tokens) when is_map(slate) and is_list(tokens) do
-    Enum.flat_map(slate, fn {idx, list} ->
-      lemma = lemma_for(tokens, idx)
+# Preserve fields; only ensure :features exists
 
-      List.wrap(list)
-      |> Enum.map(fn c ->
-        feats = Map.get(c, :features, %{}) || %{}
+# accessor used everywher
+defp feat(map, k) when is_map(map) do
+  Map.get(map, k) || Map.get(map, to_string(k)) || 0.0
+end
 
-        %{
-          id: Map.get(c, :id),
-          token_index: idx,
-          lemma: lemma || "",
-          pos: Map.get(feats, :pos),
-          lex_fit: Map.get(feats, :lex_fit, 0.6),
-          rel_prior: Map.get(c, :prior, 0.5),
-          intent_bias: intent_bias_from(si, idx, feats),
-          activation: Map.get(feats, :activation, 0.0),
-          embedding: Map.get(feats, :embedding)
-        }
-      end)
-      |> Enum.reject(&is_nil/1)
-    end)
-  end
-
-  defp candidates_from_slate(_si, _slate, _tokens), do: []
-
-  # ── FIXED: Strict MWE matching to prevent cross-token contamination ──
-  defp candidates_from_cells(si, tokens) when is_map(si) and is_list(tokens) do
-    cells = Map.get(si, :active_cells, []) |> ensure_list()
-
-    # Pre-normalize cell info; no token index here yet.
-    cells_normed =
-      Enum.map(cells, fn m ->
-        word  = getf(m, :word) || ""
-        lemma = getf(m, :lemma) || word
-        nrm   = getf(m, :norm)  || word
-
-        %{
-          id:           getf(m, :id),
-          pos:          getf(m, :pos),
-          lex_fit:      getf(m, :lex_fit),
-          rel_prior:    getf(m, :rel_prior),
-          intent_bias:  getf(m, :intent_bias),
-          activation:   getf(m, :activation),
-          embedding:    getf(m, :embedding),
-          definition:   getf(m, :definition),
-          __norm__:     norm_phrase(nrm),
-          __lemma__:    lemma
-        }
-      end)
-
-    tokens
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {t, idx} ->
-      tnorm = norm_phrase(Map.get(t, :phrase, ""))
-      is_mwe = Map.get(t, :n, 1) > 1 or Map.get(t, :mw) in [true, "true"]
-
-      cells_normed
-      |> Enum.filter(fn c ->
-        # STRICT matching for MWEs to prevent cross-token contamination
-        if is_mwe do
-          # For MWE tokens, ONLY exact match
-          c.__norm__ == tnorm
-        else
-          # For single-word tokens, allow fuzzy matching
-          c.__norm__ == tnorm or
-            String.contains?(tnorm, c.__norm__) or
-            String.contains?(c.__norm__, tnorm)
-        end
-      end)
-      |> Enum.map(fn c ->
-        %{
-          id:          c.id,
-          token_index: idx,
-          lemma:       c.__lemma__ || "",
-          pos:         c.pos,
-          lex_fit:     c.lex_fit || 0.6,
-          rel_prior:   c.rel_prior || 0.5,
-          intent_bias: (c.intent_bias || 0.0) +
-                         intent_bias_from(si, idx, %{pos: c.pos, definition: c.definition}),
-          activation:  c.activation || 0.0,
-          embedding:   c.embedding
-        }
-      end)
-    end)
-  end
-
-  defp candidates_from_cells(_si, _tokens), do: []
-
-  defp intent_bias_from(si, idx, feats_or_map) do
-    tokens = Map.get(si, :tokens, [])
-    cur    = Enum.at(tokens, idx) || %{}
-    prev   = if idx > 0, do: Enum.at(tokens, idx - 1), else: %{}
-
-    phrase = (cur[:phrase] || cur["phrase"] || "") |> to_b()
-    prev_w = (prev[:phrase] || prev["phrase"] || "") |> to_b() |> String.downcase()
-
-    pos  =
-      (getf(feats_or_map, :pos) || getf(feats_or_map, "pos") || "")
-      |> to_b() |> String.downcase()
-
-    defn =
-      (getf(feats_or_map, :definition) || getf(feats_or_map, "definition") || "")
-      |> to_b() |> String.downcase()
-
-    at_start? = match?(%{span: {0, _}}, cur) or (cur[:index] || cur["index"] || 0) == 0
-
-    bias = 0.0
-    # Salutation: "hello/hi/hey …" → favor interjection at start
-    bias =
-      if at_start? and Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) and String.contains?(pos, "interjection"),
-        do: bias + 0.20, else: bias
-
-    # Definitions gated by "(with "the")" → slightly penalize if not preceded by "the"
-    bias =
-      if String.contains?(defn, ~s|(with "the")|) and prev_w != "the",
-        do: bias - 0.15, else: bias
-
-    bias
-  end
-
-  # ── Group scoring (legacy pure stage) ───────────────────────────────
-
-  defp disambiguate_groups(tokens, candidates, ctx, ctxn, weights, opts) do
-    groups = Enum.group_by(candidates, & &1.token_index)
-
-    scores_mode      = Keyword.get(opts, :scores, :all)
-    margin_threshold = Keyword.get(opts, :margin_threshold, 0.12)
-    fit?             = Keyword.get(opts, :fit?, fn _cand, _si -> true end)
-    prime_opts       = Keyword.get(opts, :prime, [])
-
-    {choices, losers} =
-      Enum.map_reduce(groups, MapSet.new(), fn {tidx, cands0}, acc_losers ->
-        tok =
-          case Enum.at(tokens, tidx) do
-            %{} = t -> t
-            _ -> %{}
-          end
-
-        # sanitize: drop nil/id-less, de-dup by id, then apply MWE↔sense compatibility
-        cands =
-          cands0
-          |> Enum.reject(&is_nil/1)
-          |> Enum.reject(&(is_nil(&1.id) or not is_binary(&1.id)))
-          |> Enum.uniq_by(& &1.id)
-          |> filter_candidates_for_token(tok)
-
-        # If no candidates remain after filtering, skip this token
-        if cands == [] do
-          {nil, acc_losers}
-        else
-          try do
-            {_cand_feats, normed} = score_and_normalize(cands, ctx, ctxn, weights, prime_opts)
-
-            {best_c, best_f} = best_of_normed(normed)
-
-            {winner_c, winner_f} =
-              case best_c do
-                nil -> {nil, %{score_norm: 0.0, sim: 0.0, score_raw: 0.0}}
-                bc  ->
-                  if fit?.(bc, %{}) do
-                    {bc, best_f}
-                  else
-                    best_of_normed(Enum.drop(normed, 1))
-                  end
-              end
-
-            {_ru_c, ru_f} =
-              case normed do
-                [_only]           -> {nil, %{score_norm: 0.0}}
-                [_, {c2, f2} | _] -> {c2, f2}
-                _                 -> {nil, %{score_norm: 0.0}}
-              end
-
-            margin = (winner_f[:score_norm] || 0.0) - (ru_f[:score_norm] || 0.0)
-
-            # build alt ids from top-2 if margin below threshold
-            alt_ids =
-              if margin < margin_threshold and length(normed) > 1 do
-                case Enum.sort_by(normed, fn {_c, f} -> -f.score_norm end) do
-                  [_first, {c2, _} | _] -> [c2.id]
-                  _ -> []
-                end
-              else
-                []
-              end
-
-            if winner_c, do: priming_bump(winner_c.id, prime_opts)
-
-            lemma = lemma_for(tokens, tidx) || (winner_c && (winner_c[:lemma] || "")) || ""
-
-            # cache sorted once for :top2 to avoid double sorts
-            sorted_normed = if scores_mode == :all, do: [], else: Enum.sort_by(normed, fn {_c, f} -> -f.score_norm end)
-
-            scores =
-              case scores_mode do
-                :all ->
-                  normed |> Map.new(fn {c, f} -> {c.id, f.score_norm} end)
-
-                :top2 ->
-                  case sorted_normed do
-                    []                       -> %{}
-                    [{c1, f1}]               -> %{c1.id => f1.score_norm}
-                    [{c1, f1}, {c2, f2} | _] -> %{c1.id => f1.score_norm, c2.id => f2.score_norm}
-                  end
-
-                _ ->
-                  %{}
-              end
-
-            choice = %{
-              token_index: tidx,
-              lemma: lemma,
-              chosen_id: winner_c && winner_c.id,
-              alt_ids: alt_ids,
-              scores: scores,
-              margin: margin,
-              features:
-                winner_c && %{
-                  sim: winner_f.sim,
-                  score_raw: winner_f.score_raw,
-                  score_norm: winner_f.score_norm,
-                  pos: winner_c[:pos],
-                  lex_fit: winner_c[:lex_fit],
-                  rel_prior: winner_c[:rel_prior],
-                  intent_bias: winner_c[:intent_bias],
-                  activation: winner_c[:activation]
-                } || %{}
-            }
-
-            losers_here =
-              case winner_c do
-                nil -> MapSet.new()
-                wc  -> cands |> Enum.filter(&(&1.id != wc.id)) |> Enum.map(& &1.id) |> MapSet.new()
-              end
-
-            {choice, MapSet.union(acc_losers, losers_here)}
-          rescue
-            _ -> {nil, acc_losers}
-          end
-        end
-      end)
-      |> then(fn {choices, losers} ->
-        # Filter out nil choices from tokens with no valid candidates
-        {Enum.reject(choices, &is_nil/1), losers}
-      end)
-
-    choices = Enum.sort_by(choices, & &1.token_index)
-
-    boosts      = for ch <- choices, ch.chosen_id, do: {ch.chosen_id, +0.5}
-    inhibitions = Enum.map(losers, &{&1, -0.25})
-
-    {choices, boosts, inhibitions}
-  end
-
-  defp score_and_normalize(cands, ctx, ctxn, weights, prime_opts) when is_list(cands) do
-    w_prime = Map.get(weights, :prime, 0.0) * 1.0
-
-    cand_feats =
-      Enum.map(cands, fn cand ->
-        sim =
-          case cand.embedding do
-            nil -> 0.0
-            vec when is_list(vec) -> cosine_with_ctxnorm(vec, ctx, ctxn)
-            _ -> 0.0
-          end
-
-        prime =
-          if w_prime == 0.0, do: 0.0, else: priming_boost_for(to_string(Map.get(cand, :id, "")), prime_opts)
-
-        score =
-          weights.lex * safe_num(cand.lex_fit) +
-            weights.sim * sim +
-            weights.rel * safe_num(cand.rel_prior) +
-            weights.prag * safe_num(cand.intent_bias) +
-            weights.act * safe_num(cand.activation) +
-            w_prime * prime
-
-        {cand, %{sim: sim, score_raw: score}}
-      end)
-
-    normed_vals = normalize_scores(Enum.map(cand_feats, fn {_c, f} -> f.score_raw end))
-
-    normed =
-      Enum.zip(cand_feats, normed_vals)
-      |> Enum.map(fn {{cand, feats}, s_norm} -> {cand, Map.put(feats, :score_norm, s_norm)} end)
-
-    {cand_feats, normed}
-  end
-
-  defp best_of_normed([]), do: {nil, %{score_norm: 0.0}}
-  defp best_of_normed(list), do: Enum.max_by(list, fn {_c, f} -> f.score_norm end, fn -> hd(list) end)
-
-  defp phrase_for(tokens, idx) do
-    case Enum.at(tokens, idx) do
-      %{phrase: p} when is_binary(p) -> p
-      _ -> nil
+# single source of truth for scoring
+defp score_candidate(%{} = cand, w) do
+  s =
+    case cand[:score] do
+      n when is_number(n) -> n * 1.0
+      _ ->
+        f = cand[:features] || %{}
+        feat(f, :lex_fit)     * feat(w, :lex_fit) +
+        feat(f, :rel_prior)   * feat(w, :rel_prior) +
+        feat(f, :activation)  * feat(w, :activation) +
+        feat(f, :intent_bias) * feat(w, :intent_bias)
     end
-  end
+  Map.put(cand, :score, s)
+end
 
-  defp lemma_for(tokens, idx), do: phrase_for(tokens, idx)
+# Promote legacy top-level fields into :features, but let existing :features win.
+# Promote legacy top-level fields into :features, but preserve token_index/score.
+defp normalize_cand(%{} = cand) do
+  id =
+    cand[:id] || cand[:chosen_id] ||
+      cand[:lemma] || cand[:word] || cand[:phrase] || "<?>"
 
-  # ── Tripwire/Reanalysis/Priming — stubs ─────────────────────────────
-  defp tripwire_check_and_filter(tokens, _opts), do: tokens
-  defp priming_bump(_id, _opts), do: :ok
-  defp priming_boost_for(_id, _opts), do: 0.0
+  top_as_features =
+    [:lex_fit, :rel_prior, :activation, :intent_bias, :pos, :lemma, :definition, :synonyms]
+    |> Enum.reduce(%{}, fn k, acc ->
+      case Map.fetch(cand, k) do
+        {:ok, v} when not is_nil(v) -> Map.put(acc, k, v)
+        _ -> acc
+      end
+    end)
 
-  # ── Math & utils (legacy pure) ──────────────────────────────────────
+  merged_features =
+    (cand[:features] || %{})
+    |> Map.merge(top_as_features, fn _k, from_features, _from_top -> from_features end)
 
-  @abs_eps 1.0e-15
-  @rel_eps 1.0e-12
+  out =
+    cand
+    |> Map.put(:id, id)
+    |> Map.put(:features, merged_features)
+    |> Map.put_new(:lemma, cand[:lemma] || cand[:word] || cand[:phrase] || "")
 
-  defp zeroish?(x, scale) when is_float(x) do
-    ax = abs(x)
-    ax <= @abs_eps or ax <= @rel_eps * max(1.0, abs(scale))
-  end
-
-  @doc "Cosine similarity; 0.0 on nil/zero-norm."
-  @spec cosine([number()] | nil, [number()] | nil) :: float()
-  def cosine(nil, _), do: 0.0
-  def cosine(_, nil), do: 0.0
-  def cosine(a, b) when is_list(a) and is_list(b) and length(a) == length(b) do
-    num = dot(a, b)
-    den = l2(a) * l2(b)
-    if zeroish?(den, den), do: 0.0, else: num / den
-  end
-  def cosine(_a, _b), do: 0.0
-
-  @spec normalize_scores([number()]) :: [float()]
-  def normalize_scores(scores) when is_list(scores) do
-    m = Enum.max([0.0 | scores], fn -> 0.0 end)
-    exps = Enum.map(scores, fn s -> :math.exp(s - m) end)
-    z = Enum.sum(exps)
-    if zeroish?(z, z), do: List.duplicate(0.0, length(scores)), else: Enum.map(exps, &(&1 / z))
-  end
-  def normalize_scores(_), do: []
-
-  defp cosine_with_ctxnorm(vec, ctx, ctxn) do
-    cond do
-      is_nil(vec) or is_nil(ctx) -> 0.0
-      zeroish?(ctxn, ctxn) -> 0.0
-      true ->
-        na = l2(vec)
-        den = na * ctxn
-        if zeroish?(den, den), do: 0.0, else: dot(vec, ctx) / den
+  # Keep token_index if present
+  out =
+    case Map.fetch(cand, :token_index) do
+      {:ok, ti} -> Map.put(out, :token_index, ti)
+      :error    -> out
     end
+
+  # Keep precomputed score if present (lets score_candidate/2 use it)
+  case Map.fetch(cand, :score) do
+    {:ok, s} -> Map.put(out, :score, s)
+    :error   -> out
   end
+end
 
-  defp dot(a, b) when is_list(a) and is_list(b), do: Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + safe_num(x) * safe_num(y) end)
-  defp dot(_a, _b), do: 0.0
-  defp l2(v) when is_list(v), do: v |> Enum.reduce(0.0, fn x, acc -> acc + safe_num(x) * safe_num(x) end) |> :math.sqrt()
-  defp l2(_), do: 0.0
-  defp safe_num(nil), do: 0.0
-  defp safe_num(x) when is_number(x), do: x * 1.0
-  defp safe_num(_), do: 0.0
-  defp getf(m, k) when is_atom(k), do: Map.get(m, k) || Map.get(m, Atom.to_string(k))
-  defp getf(m, k) when is_binary(k), do: Map.get(m, k)
-  defp getf(_m, _k), do: nil
-  defp to_b(nil), do: ""
-  defp to_b(v) when is_binary(v), do: v
-  defp to_b(v), do: Kernel.to_string(v)
+# If the “candidate” is just an ID, lift it.
+defp normalize_cand(id) when is_binary(id), do: %{id: id, features: %{}}
 
-  # ── NEW: Shared normalization helper ─────────────────────────────────
-  defp norm_phrase(phrase) do
-    phrase
-    |> to_b()
-    |> String.downcase()
-    |> String.replace(~r/\s+/, " ")
-    |> String.trim()
-  end
-
+ # ── Math & utils (legacy pure) ──────────────────────────────────────
+  
   # --- Confidence helpers (pure) ---
   @doc "Return p(top1) from a LIFG choice (max over normalized scores)."
   def top1_prob(choice) when is_map(choice) do
@@ -504,44 +329,6 @@ defmodule Brain.LIFG do
     (m < tau) or (p1 < p_min) or alts?
   end
   def low_confidence?(_choice, _opts), do: true
-
-  defp sense_lemma(c) when is_map(c) do
-    (Map.get(c, :lemma) ||
-       get_in(c, [:features, :lemma]) ||
-       get_in(c, ["features", "lemma"]) ||
-       Map.get(c, :word))
-    |> case do
-      nil -> nil
-      ""  -> nil
-      v   -> to_string(v)
-    end
-  end
-  defp sense_lemma(_), do: nil
-
-  defp filter_candidates_for_token(list, tok) when is_list(list) and is_map(tok) do
-    # MWE token if n>1 or explicit :mw flag
-    mwe? = (Map.get(tok, :n, 1) > 1) or (Map.get(tok, :mw) in [true, "true"])
-
-    have_lemma? = Enum.any?(list, &(!is_nil(sense_lemma(&1))))
-
-    kept =
-      Enum.filter(list, fn c ->
-        case sense_lemma(c) do
-          nil     -> true            # no lemma info? keep to be safe
-          lemma   ->
-            has_space = String.contains?(lemma, " ")
-            if mwe?, do: has_space, else: not has_space
-        end
-      end)
-
-    # safe fallback: if the filter nuked everything but we had lemmas, keep original list
-    if have_lemma? and kept == [], do: list, else: kept
-  end
-
-  defp filter_candidates_for_token(list, _tok), do: list
-
-  defp ensure_list(l) when is_list(l), do: l
-  defp ensure_list(_), do: []
 
   ##===================== HYGIENE (optional helper) =====================
   defmodule Hygiene do
@@ -771,7 +558,7 @@ defmodule Brain.LIFG do
       try do
         t0 = System.monotonic_time()
 
-        tokens = Map.get(si, :tokens, [])# |> ensure_list()
+        tokens = Map.get(si, :tokens, [])
         slate  = case Map.get(si, :sense_candidates, Map.get(si, :candidates_by_token, %{})) do
           %{} = s -> s
           _ -> %{}
@@ -1216,11 +1003,6 @@ def run(si, opts \\ []) when is_map(si) and is_list(opts) do
 end
 
   # ── weights (outer) ─────────────────────────────────────────────────
-  defp to_map(nil), do: %{}
-  defp to_map(m) when is_map(m), do: m
-  defp to_map(kv) when is_list(kv), do: Map.new(kv)
-  defp to_map(_), do: %{}
-
   @type lifg_outer_weights ::
           %{
             required(:lex) => float(),
@@ -1236,27 +1018,5 @@ end
   def default_weights, do: %{lex: 0.25, sim: 0.40, rel: 0.15, prag: 0.10, act: 0.10, prime: 0.0}
 
   # Merge order: defaults <- env (lifg_weights OR mapped stage1) <- opts[:weights]
-  defp resolved_weights(opts) when is_list(opts) do
-    outer_env = to_map(Application.get_env(:brain, :lifg_weights))
-    mapped_from_stage1 =
-      case to_map(Application.get_env(:brain, :lifg_stage1_weights)) do
-        %{} = w1 when map_size(w1) > 0 ->
-          %{
-            lex:  Map.get(w1, :lex_fit,     default_weights().lex),
-            sim:  default_weights().sim, # stage-1 has no :sim
-            rel:  Map.get(w1, :rel_prior,   default_weights().rel),
-            prag: Map.get(w1, :intent_bias, default_weights().prag),
-            act:  Map.get(w1, :activation,  default_weights().act)
-          }
-        _ -> %{}
-      end
-
-    env_weights = if outer_env == %{}, do: mapped_from_stage1, else: outer_env
-    opt_w      = to_map(Keyword.get(opts, :weights, %{}))
-
-    default_weights()
-    |> Map.merge(env_weights)
-    |> Map.merge(opt_w)
-  end
 end
 

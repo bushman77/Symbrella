@@ -68,4 +68,7 @@ if config_env() == :prod do
   # Optional DNS cluster
   config :symbrella, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 end
+# config/runtime.exs
+lifg_min_score = String.to_float(System.get_env("LIFG_MIN_SCORE") || "0.35")
+config :brain, :lifg_min_score, lifg_min_score
 

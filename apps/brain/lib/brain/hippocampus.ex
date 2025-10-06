@@ -43,6 +43,9 @@ defmodule Brain.Hippocampus do
   @default_half_life 300_000   # 5 minutes
   @default_recall_limit 3
   @default_min_jaccard 0.0
+# near top of module
+@mix_env (Code.ensure_loaded?(Mix) && function_exported?(Mix, :env, 0) && Mix.env()) || :prod
+@test_env @mix_env == :test
 
   ## Public API
 
@@ -294,25 +297,29 @@ end
 
   # --- token/cue extraction and scoring ---
 
-# apps/brain/lib/brain/hippocampus.ex
-# --- PATCH 1: accept list-of-maps cues (not just list of strings) ---
-defp cue_set(list) when is_list(list) do
-  if Enum.any?(list, &is_map/1) do
-    list
-    |> Enum.map(fn
-      %{} = m -> winner_norm(m) || token_norm(m)
-      other   -> norm_str(other)
-    end)
-    |> Enum.reject(&empty?/1)
-    |> MapSet.new()
-  else
-    list
-    |> Enum.map(&norm_str/1)
-    |> Enum.reject(&empty?/1)
-    |> MapSet.new()
-  end
-end
+# Normalize various cue shapes into a MapSet of {:id, id} or {:lemma, lemma}
+# replace cue_set/1 with:
+defp cue_set(nil), do: MapSet.new()
+defp cue_set(%{winners: winners}) when is_list(winners), do: cue_set(winners)
+defp cue_set(%{"winners" => winners}) when is_list(winners), do: cue_set(winners)
 
+defp cue_set(list) when is_list(list) do
+  list
+  |> Enum.map(fn
+    %{} = m ->
+      cond do
+        id = Map.get(m, :id) || Map.get(m, "id") -> {:id, id}
+        lemma = Map.get(m, :lemma) || Map.get(m, "lemma") -> {:lemma, String.downcase(to_string(lemma))}
+        phrase = Map.get(m, :phrase) || Map.get(m, "phrase") -> {:lemma, String.downcase(to_string(phrase))}
+        true -> nil
+      end
+    s when is_binary(s) ->
+      if String.contains?(s, "|"), do: {:id, s}, else: {:lemma, String.downcase(s)}
+    _ -> nil
+  end)
+  |> Enum.reject(&is_nil/1)
+  |> MapSet.new()
+end
 
   defp episode_token_set(%{slate: slate}) do
     slate
