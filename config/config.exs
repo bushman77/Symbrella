@@ -69,6 +69,10 @@ config :brain,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
  lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
-  lifg_stage1_scores_mode: :all
+  lifg_stage1_scores_mode: :all,
+wm_decay_lambda: 0.12,      # per-second exponential decay (≈ 5.8s half-life)
+  wm_score_min: 0.0,
+  wm_score_max: 1.0
+
 # Import env-specific at the end
 import_config "#{config_env()}.exs"

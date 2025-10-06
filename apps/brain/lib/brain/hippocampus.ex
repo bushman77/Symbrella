@@ -76,22 +76,22 @@ defmodule Brain.Hippocampus do
 
   Returns a list of `%{score, at, episode}` sorted by score desc.
   """
-  @spec recall(list(String.t()) | map(), keyword()) :: [recall_r()]
-  def recall(cues, opts \\ []) when is_list(cues) or is_map(cues) do
-    GenServer.call(__MODULE__, {:recall, cues, Map.new(opts)})
-  end
+@spec recall(list(String.t()) | map(), keyword()) :: [recall_r()]
+def recall(cues, opts \\ []) when is_list(cues) or is_map(cues) do
+  GenServer.call(__MODULE__, {:recall, cues, Map.new(opts)})
+end
 
   @doc """
   Attach episodic evidence into `si.evidence[:episodes]`.
 
   Passes any opts through to `recall/2` (e.g., `limit: 3`, `scope: %{...}`, `min_jaccard: ...`).
   """
-  @spec attach_episodes(map(), keyword()) :: map()
-  def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-    episodes = recall(si, opts)
-    evidence = Map.get(si, :evidence) || %{}
-    Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
-  end
+@spec attach_episodes(map(), keyword()) :: map()
+def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
+  episodes = __MODULE__.recall(si, opts)   # <— qualify the local call
+  evidence = Map.get(si, :evidence) || %{}
+  Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
+end
 
   @doc """
   Configure runtime options. Accepts:
@@ -162,32 +162,31 @@ def handle_call({:encode, slate, meta}, from, state) do
   {:reply, :ok, %{state | window: window, last: new_last}}
 end
 
-  @impl true
-# apps/brain/lib/brain/hippocampus.ex
+@impl true
 def handle_call({:recall, cues, opts}, from, state) do
-  now         = System.system_time(:millisecond)
-  limit       = Map.get(opts, :limit, state.opts.recall_limit)
-  half_life   = normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
-  min_jacc    = normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
-  scope_opt   = Map.get(opts, :scope, nil)
-  cue_set     = cue_set(cues)
+  now       = System.system_time(:millisecond)
+  limit     = Map.get(opts, :limit, state.opts.recall_limit)
+  half_life = normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
+  min_jacc  = normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
+  scope_opt = Map.get(opts, :scope, nil)
+  cues_set  = cue_set(cues)
 
-  # >>> REPLACE your previous "scored =" build with THIS block <<<
   base_scored =
-    if MapSet.size(cue_set) == 0 do
+    if MapSet.size(cues_set) == 0 do
       []
     else
       state.window
       |> Enum.reduce([], fn {at, ep}, acc ->
         if scope_match?(ep.meta, scope_opt) do
           ep_set = episode_token_set(ep)
-          jacc   = jaccard(cue_set, ep_set)
+          jacc   = jaccard(cues_set, ep_set)
 
-          if jacc < min_jacc do
-            acc
-          else
-            rec = recency_factor(now - at, half_life)
+          if jacc >= min_jacc do
+            age = max(now - at, 0)
+            rec = recency_factor(age, half_life)
             [%{score: jacc * rec, at: at, episode: ep} | acc]
+          else
+            acc
           end
         else
           acc
@@ -202,16 +201,16 @@ def handle_call({:recall, cues, opts}, from, state) do
     base_scored
     |> Enum.flat_map(fn r -> List.duplicate(r, dup_count(r.episode)) end)
     |> Enum.take(limit)
-  # <<< END replacement >>>
 
   meas = %{
-    cue_count: MapSet.size(cue_set),
+    cue_count: MapSet.size(cues_set),
     window_size: length(state.window),
     returned: length(scored),
-    top_score: case scored do
-      [%{score: s} | _] -> s
-      _ -> 0.0
-    end
+    top_score:
+      case scored do
+        [%{score: s} | _] -> s
+        _ -> 0.0
+      end
   }
 
   meta_map = %{
@@ -220,6 +219,7 @@ def handle_call({:recall, cues, opts}, from, state) do
   }
 
   :telemetry.execute([:brain, :hippocampus, :recall], meas, meta_map)
+
   if @test_env do
     send(elem(from, 0), {:telemetry, [:brain, :hippocampus, :recall], meas, meta_map})
   end
@@ -299,25 +299,33 @@ end
 
 # Normalize various cue shapes into a MapSet of {:id, id} or {:lemma, lemma}
 # replace cue_set/1 with:
+# Normalize various cue shapes into a MapSet of normalized strings (lemmas/words)
 defp cue_set(nil), do: MapSet.new()
 defp cue_set(%{winners: winners}) when is_list(winners), do: cue_set(winners)
 defp cue_set(%{"winners" => winners}) when is_list(winners), do: cue_set(winners)
+defp cue_set(%{tokens: tokens}) when is_list(tokens), do: cue_set(tokens)
+defp cue_set(%{"tokens" => tokens}) when is_list(tokens), do: cue_set(tokens)
 
 defp cue_set(list) when is_list(list) do
   list
   |> Enum.map(fn
     %{} = m ->
-      cond do
-        id = Map.get(m, :id) || Map.get(m, "id") -> {:id, id}
-        lemma = Map.get(m, :lemma) || Map.get(m, "lemma") -> {:lemma, String.downcase(to_string(lemma))}
-        phrase = Map.get(m, :phrase) || Map.get(m, "phrase") -> {:lemma, String.downcase(to_string(phrase))}
-        true -> nil
-      end
+      # prefer explicit norm/lemma/word; fall back to word parsed from id "word|pos|..."
+      val =
+        Map.get(m, :norm) || Map.get(m, "norm") ||
+        Map.get(m, :lemma) || Map.get(m, "lemma") ||
+        Map.get(m, :word)  || Map.get(m, "word")  ||
+        parse_id_word(Map.get(m, :id) || Map.get(m, "id"))
+
+      norm_str(val)
+
     s when is_binary(s) ->
-      if String.contains?(s, "|"), do: {:id, s}, else: {:lemma, String.downcase(s)}
+      # If the string looks like an ID with pipes, parse word; else treat as lemma/word
+      if String.contains?(s, "|"), do: norm_str(parse_id_word(s)), else: norm_str(s)
+
     _ -> nil
   end)
-  |> Enum.reject(&is_nil/1)
+  |> Enum.reject(&empty?/1)
   |> MapSet.new()
 end
 

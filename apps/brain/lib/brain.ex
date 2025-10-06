@@ -243,11 +243,6 @@ defmodule Brain do
   end
 
   @impl true
-  def handle_cast({:set_attention, ctx}, state) do
-    {:noreply, %{state | attention: Map.new(ctx)}}
-  end
-
-  @impl true
   def handle_call({:focus, cands_or_si, opts}, _from, state) do
     {wm_next, added, removed} = do_focus(state, cands_or_si, Map.new(opts))
 
@@ -259,6 +254,7 @@ defmodule Brain do
 
     {:reply, wm_next, %{state | wm: wm_next}}
   end
+
 
   @impl true
   def handle_call({:defocus, id_or_fun}, _from, state) do
@@ -282,8 +278,9 @@ defmodule Brain do
 @impl true
 def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
   t0 = System.monotonic_time()
+  now_ms = System.system_time(:millisecond)
 
-  # ---- Inputs for LIFG ----
+  # ── Inputs for LIFG ─────────────────────────────────────────────────
   candidates = lifg_candidates!(si_or_cands)
   tokens0    = extract_tokens(si_or_cands, candidates)
 
@@ -293,7 +290,7 @@ def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
       normalize: :softmax,
       parallel: :auto,
       margin_threshold: 0.12,
-      emit_pairs: true   # ensure tuple form for Brain.coalesce_pairs/1
+      emit_pairs: true        # ensure tuple form for Brain.coalesce_pairs/1
     ]
     |> Keyword.merge(opts)
 
@@ -304,18 +301,21 @@ def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
   # lifg_out_from_trace/1 is guaranteed {:ok, ...}
   {:ok, out0} = lifg_out_from_trace(si1)
 
-  # Side effects (best-effort)
+  # ── Side effects (best-effort) ──────────────────────────────────────
   _ = maybe_ingest_atl(out0.choices, tokens0)
   _ = maybe_consult_pmtg(out0.choices, tokens0)
   _ = maybe_store_episode(tokens0, si1, out0)
 
-  # Optional rescale; then apply controls (expects tuples)
+  # ── Optional rescale; then apply controls (expects tuples) ─────────
   {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
   apply_control_signals(boosts2, inhib2, lifg_opts)
 
-  # Optionally gate LIFG choices into WM locally
-  min_score =
-    Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.35))
+  # ── Decay BEFORE gating ─────────────────────────────────────────────
+  state1 = apply_decay(state, now_ms)
+
+  # ── Optionally gate LIFG choices into WM (local) ───────────────────
+  min_score = Keyword.get(opts, :lifg_min_score,
+                Application.get_env(:brain, :lifg_min_score, 0.35))
 
   state2 =
     if Keyword.get(opts, :gate_into_wm, false) do
@@ -326,38 +326,43 @@ def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
             id: ch.chosen_id,
             lemma: ch.lemma,
             token_index: ch.token_index,
-            score: max(raw, min_score),
+            score: max(raw, min_score), # clamp so it can cross the gate if needed
             source: :lifg,
-            reason: :lifg_stage1
+            reason: :lifg_stage1,
+            ts: now_ms
           }
         end)
 
-      {wm_next, added, removed} = do_focus(state, lifg_cands, %{})
+      {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
 
       :telemetry.execute(
         [:brain, :wm, :update],
-        %{size: length(wm_next), added: added, removed: removed, capacity: state.wm_cfg.capacity},
+        %{size: length(wm_next), added: added, removed: removed, capacity: state1.wm_cfg.capacity},
         %{reason: :gate_from_lifg}
       )
 
-      %{state | wm: wm_next}
+      %{state1 | wm: wm_next}
     else
-      state
+      state1
     end
 
-  # Telemetry
+  # ── Evict AFTER gating ──────────────────────────────────────────────
+  state3 = evict_if_needed(state2)
+
+  # ── Telemetry ───────────────────────────────────────────────────────
   ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
 
   :telemetry.execute(
     [:brain, :pipeline, :lifg_stage1, :stop],
     %{duration_ms: ms},
-    Map.merge(
-      Map.take(out0.audit, [:groups, :ctx_dim, :normalize, :scores_mode, :parallel]),
-      %{winners: length(out0.choices), boosts: length(out0.boosts), inhibitions: length(out0.inhibitions)}
-    )
+    %{
+      winners: length(out0.choices),
+      boosts: length(out0.boosts),
+      inhibitions: length(out0.inhibitions)
+    }
   )
 
-  {:reply, {:ok, out0}, state2}
+  {:reply, {:ok, out0}, state3}
 end
 
   # ── Remaining handlers ─────────────────────────────────────────────
@@ -395,6 +400,12 @@ end
       [{pid, _}] -> {:reply, GenServer.call(pid, req, @cell_timeout), state}
       [] -> {:reply, {:error, :not_found}, state}
     end
+  end
+
+
+  @impl true
+  def handle_cast({:set_attention, ctx}, state) do
+    {:noreply, %{state | attention: Map.new(ctx)}}
   end
 
   @impl true
@@ -481,6 +492,151 @@ end
   end
 
   # --- helpers -------------------------------------------------------
+
+# --- Working Memory (WM) decay & eviction ------------------------------------
+
+# Time-constant (τ) in milliseconds. Default matches tests (~8.333s).
+# Time-constant (τ) in milliseconds. Default exactly 25_000/3 ≈ 8333.333…
+defp wm_decay_tau_ms() do
+  (Application.get_env(:brain, :wm_decay_tau_ms, 25_000.0 / 3.0)) * 1.0
+end
+
+defp wm_score_bounds(), do: {
+  Application.get_env(:brain, :wm_score_min, 0.0) * 1.0,
+  Application.get_env(:brain, :wm_score_max, 1.0) * 1.0
+}
+
+defp clamp01(x) do
+  {lo, hi} = wm_score_bounds()
+  x = if is_number(x), do: x * 1.0, else: 0.0
+  x = if x == x, do: x, else: 0.0  # sanitize NaN
+  cond do
+    x < lo -> lo
+    x > hi -> hi
+    true   -> x
+  end
+end
+
+defp decay_factor_ms(dt_ms, tau_ms \\ wm_decay_tau_ms())
+     when is_number(dt_ms) and dt_ms >= 0 and is_number(tau_ms) and tau_ms > 0 do
+  :math.exp(- (dt_ms * 1.0) / tau_ms)
+end
+
+# Public: exponentially decay WM scores based on elapsed time using τ-model.
+# now_ms can be wall-clock or monotonic-like; dt is computed vs state.wm_last_ms.
+def apply_decay(%{wm: wm} = state, now_ms) when is_list(wm) and is_integer(now_ms) do
+  last = Map.get(state, :wm_last_ms, now_ms)
+  dt   = max(now_ms - last, 0)
+  k    = decay_factor_ms(dt)
+
+  wm2 =
+    Enum.map(wm, fn
+      %{score: s} = e when is_number(s) ->
+        # decay score; clamp to configured bounds
+        %{e | score: clamp01(s * k)}
+      e ->
+        e
+    end)
+
+  state
+  |> Map.put(:wm, wm2)
+  |> Map.put(:wm_last_ms, now_ms)
+end
+
+def apply_decay(state, _now_ms), do: state
+
+# Public: evict down to capacity using (score desc, ts desc).
+# Ties on score keep the most recent entry.
+def evict_if_needed(%{wm: wm, wm_cfg: %{capacity: cap}} = state)
+    when is_list(wm) and is_integer(cap) and cap >= 0 do
+  if length(wm) <= cap do
+    state
+  else
+    kept =
+      wm
+      |> Enum.sort_by(fn e -> {Map.get(e, :score, 0.0), Map.get(e, :ts, 0)} end, :desc)
+      |> Enum.take(cap)
+
+    Map.put(state, :wm, kept)
+  end
+end
+
+def evict_if_needed(state), do: state
+
+# Public: run decay then eviction in one step.
+def decay_and_evict(state, now_ms) do
+  state
+  |> apply_decay(now_ms)
+  |> evict_if_needed()
+end
+
+# ---- helpers ----------------------------------------------------------
+
+defp do_focus(state, incoming, _opts) when is_list(incoming) and is_map(state) do
+  cap = get_in(state, [:wm_cfg, :capacity]) || 7
+  now = System.system_time(:millisecond) 
+
+  # Index current WM by id
+  by_id =
+    Map.new(state.wm || [], fn it ->
+      {to_string(it.id), Map.put(it, :id, to_string(it.id))}
+    end)
+
+  # Merge/upsert each incoming candidate
+  merged =
+    Enum.reduce(incoming, by_id, fn cand, acc ->
+      id   = cand |> Map.get(:id) |> to_string()
+      prev = Map.get(acc, id)
+
+      score_in =
+        case cand[:score] do
+          s when is_number(s) -> min(max(s * 1.0, 0.0), 1.0)
+          _ -> 0.0
+        end
+
+      item =
+        (prev || %{})
+        |> Map.merge(%{
+          id: id,
+          token_index: Map.get(cand, :token_index, prev && prev[:token_index]),
+          lemma: Map.get(cand, :lemma, prev && prev[:lemma]),
+          score: max(prev && prev[:score] || 0.0, score_in),
+          source: Map.get(cand, :source, :lifg),
+          reason: Map.get(cand, :reason, :lifg_stage1),
+          ts: now
+        })
+
+      Map.put(acc, id, item)
+    end)
+
+  # Rank: by score desc, then most recent first
+  ranked =
+    merged
+    |> Map.values()
+    |> Enum.sort_by(fn it -> {-it.score, -it.ts} end)
+
+  # Enforce capacity
+  {kept, dropped} =
+    case length(ranked) > cap do
+      true  -> {Enum.take(ranked, cap), Enum.drop(ranked, cap)}
+      false -> {ranked, []}
+    end
+
+  kept_ids    = MapSet.new(Enum.map(kept, & &1.id))
+  before_ids  = MapSet.new(Enum.map(state.wm || [], & &1.id))
+  dropped_ids = MapSet.new(Enum.map(dropped, & &1.id))
+
+  added_ids   = MapSet.difference(kept_ids, before_ids) |> MapSet.to_list()
+  removed_ids = MapSet.intersection(before_ids, dropped_ids) |> MapSet.to_list()
+
+  {kept, added_ids, removed_ids}
+end
+
+# (Optional) expose for test-only use
+if Mix.env() == :test do
+  @doc false
+  def __test_do_focus__(state, cands, opts \\ %{}), do: do_focus(state, cands, opts)
+end
 
   # Centralized WM gating logic (pure; used by :focus and :lifg_stage1)
   defp do_focus(state, cands_or_si, opts) do
