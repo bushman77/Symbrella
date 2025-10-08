@@ -126,6 +126,7 @@ defmodule Core.RuntimeBindTest do
 
     out = RuntimeBind.bind(si, snapshot: incoming)
     [only] = out.active_cells
+
     assert only.source == :runtime
     assert only.activation_snapshot == 0.3
   end

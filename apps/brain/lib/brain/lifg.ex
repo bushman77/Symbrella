@@ -5,7 +5,12 @@ defmodule Brain.LIFG do
   Entry points:
     • Legacy-compatible API (pure): `disambiguate_stage1/1,2`
       - Calls the new `Brain.LIFG.Stage1.run/2` engine and preserves the legacy event shape.
-    • Full pipeline: `run/2` (ATL finalize → Stage-1 → optional pMTG).
+    • Full pipeline: `run/2` (ATL finalize → Stage-1 → optional pMTG, optional ACC gate).
+
+  Optional ACC hook:
+    If `Brain.ACC` is available, `run/2` will call it to compute a conflict score
+    and only apply pMTG if `conflict >= acc_conflict_tau`. When ACC is absent,
+    behavior is unchanged (pMTG applies according to opts).
 
   Central config (`config/config.exs`):
 
@@ -15,7 +20,8 @@ defmodule Brain.LIFG do
         lifg_min_margin: 0.05,
         pmtg_mode: :boost,
         pmtg_margin_threshold: 0.15,
-        pmtg_window_keep: 50
+        pmtg_window_keep: 50,
+        acc_conflict_tau: 0.50
   """
 
   require Logger
@@ -26,19 +32,44 @@ defmodule Brain.LIFG do
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
 
+  # ── Server bootstrap & runtime config ────────────────────────────────
+
+  @impl true
+  def init(opts) do
+    eff = opts |> Map.new() |> effective_opts()
+    {:ok, %{region: :lifg, opts: eff}}
+  end
+
   # ── Optional server API (convenience) ────────────────────────────────
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  # Returns effective options (env + overrides), even if the server hasn't started.
+  def status(server \\ __MODULE__) do
+    case GenServer.whereis(server) do
+      nil -> effective_opts(%{})
+      _pid ->
+        try do
+          GenServer.call(server, :status)
+        catch
+          :exit, _ -> effective_opts(%{})
+        end
+    end
+  end
 
   def reload_config(new_opts, server \\ __MODULE__) when is_list(new_opts) or is_map(new_opts) do
     GenServer.cast(server, {:reload_config, Map.new(new_opts)})
   end
 
   @impl true
-  def handle_call(:status, _from, state), do: {:reply, state.opts || %{}, state}
+  def handle_call(:status, _from, state) do
+    eff = effective_opts(state.opts || %{})
+    {:reply, eff, %{state | opts: eff}}
+  end
 
   @impl true
-  def handle_cast({:reload_config, new_opts}, state),
-    do: {:noreply, %{state | opts: Map.merge(state.opts || %{}, new_opts)}}
+  def handle_cast({:reload_config, new_opts}, state) do
+    merged = Map.merge(state.opts || %{}, Map.new(new_opts))
+    {:noreply, %{state | opts: effective_opts(merged)}}
+  end
 
   # ── Stage-1 (legacy-compatible event shape) ──────────────────────────
 
@@ -52,18 +83,15 @@ defmodule Brain.LIFG do
   """
   @spec disambiguate_stage1(map(), keyword()) :: map()
   def disambiguate_stage1(%{} = si, opts) do
-    # sanitize any structs in inputs and normalize a slate
     si_plain = Safe.to_plain(si)
     slate    = Input.slate_for(si_plain)
 
-    # prefer :sense_candidates; drop raw :candidates_by_token to avoid Access on structs later
     si_for_stage =
       si_plain
       |> Map.put(:sense_candidates, slate)
       |> Map.delete(:candidates_by_token)
       |> Map.put_new(:trace, [])
 
-    # Call-time opts override si.lifg_opts
     si_opts =
       case Map.get(si_for_stage, :lifg_opts) do
         kw when is_list(kw) -> kw
@@ -76,7 +104,6 @@ defmodule Brain.LIFG do
     scores_mode = Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
     min_margin  = Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-    # defaults <- env <- opts[:weights]
     stage_weights =
       lifg_weights()
       |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
@@ -93,7 +120,6 @@ defmodule Brain.LIFG do
 
     case result do
       {:ok, %{si: si_after0, choices: raw_choices, audit: _audit}} ->
-        # Normalize & augment choices: chosen_id/margin/alt_ids
         choices =
           raw_choices
           |> Enum.map(&Safe.to_plain/1)
@@ -188,21 +214,22 @@ defmodule Brain.LIFG do
   end
   def low_confidence?(_choice, _opts), do: true
 
-  # ── Full pipeline (optional ATL + pMTG) ──────────────────────────────
+  # ── Full pipeline (optional ATL + ACC + pMTG) ────────────────────────
 
   @doc """
   Full LIFG pipeline:
     1) ATL finalize → slate (if available)
     2) Attach si.sense_candidates
-    3) Stage-1 disambiguation
-    4) pMTG consult (sync rerun or async boost/none)
+    3) Stage-1 disambiguation (probabilities & margins)
+    4) ACC assess (optional; computes :conflict and appends trace)
+    5) pMTG consult (sync rerun or async boost/none), gated by ACC when available
 
   Returns {:ok, %{si, choices, slate}} or {:error, term()}.
   """
   @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), slate: map()}} | {:error, term()}
   def run(si, opts \\ []) when is_map(si) and is_list(opts) do
     try do
-      # 1) ATL finalize (optional): expect {si, slate}; fallback to {si, %{}}
+      # 1) ATL finalize (optional)
       {si1, slate} =
         if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :finalize, 2) do
           case Brain.ATL.finalize(si, opts) do
@@ -233,6 +260,7 @@ defmodule Brain.LIFG do
       margin_thr  = Keyword.get(opts, :margin_threshold, 0.15)
       min_margin  = Keyword.get(opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
+      # 3) Stage-1 disambiguation
       case Brain.LIFG.Stage1.run(
              si2,
              weights: Map.get(opts, :weights, %{lex_fit: 0.5, rel_prior: 0.25, activation: 0.15, intent_bias: 0.10}),
@@ -242,22 +270,26 @@ defmodule Brain.LIFG do
              boundary_event: [:brain, :lifg, :boundary_drop]
            ) do
         {:ok, %{si: si3, choices: raw_choices, audit: _a}} ->
-          # Augment choices before pMTG uses them
           choices =
             raw_choices
             |> Enum.map(&Safe.to_plain/1)
             |> augment_choices(si3, min_margin)
 
-          # 4) pMTG integration
-          pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+          # 4) ACC (optional). If present, record conflict & gate pMTG by threshold.
+          {si3a, acc_conflict, acc_present?} = maybe_acc_gate(si3, choices, opts)
+          acc_conf_tau = Keyword.get(opts, :acc_conflict_tau, Application.get_env(:brain, :acc_conflict_tau, 0.50))
+
+          # 5) pMTG consult (respect ACC gate when ACC is present)
+          pmtg_mode   = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+          pmtg_apply? = Keyword.get(opts, :pmtg_apply?, true) and (not acc_present? or acc_conflict >= acc_conf_tau)
 
           {final_si, final_choices} =
-            if Code.ensure_loaded?(Brain.PMTG) do
-              case {pmtg_mode, Keyword.get(opts, :pmtg_apply?, true)} do
-                {:rerun, true} ->
+            if Code.ensure_loaded?(Brain.PMTG) and pmtg_apply? do
+              case pmtg_mode do
+                :rerun ->
                   case Brain.PMTG.consult_sync(
                          choices,
-                         Safe.get(si3, :tokens, []),
+                         Safe.get(si3a, :tokens, []),
                          already_needy: false,
                          margin_threshold: margin_thr,
                          limit: Keyword.get(opts, :limit, 5),
@@ -266,21 +298,21 @@ defmodule Brain.LIFG do
                          rerun_weights_bump: Keyword.get(opts, :rerun_weights_bump, %{lex_fit: 0.05, rel_prior: 0.05})
                        ) do
                     {:ok, %{si: si_after, choices: merged}} -> {si_after, merged}
-                    _ -> {si3, choices}
+                    _ -> {si3a, choices}
                   end
 
-                _other_mode ->
+                _other ->
                   _ = Brain.PMTG.consult(
                         choices,
-                        Safe.get(si3, :tokens, []),
+                        Safe.get(si3a, :tokens, []),
                         margin_threshold: margin_thr,
                         limit: Keyword.get(opts, :limit, 5),
                         mode: pmtg_mode
                       )
-                  {si3, choices}
+                  {si3a, choices}
               end
             else
-              {si3, choices}
+              {si3a, choices}
             end
 
           {:ok, %{si: final_si, choices: final_choices, slate: slate}}
@@ -311,10 +343,25 @@ defmodule Brain.LIFG do
   @spec default_weights() :: lifg_outer_weights()
   def default_weights, do: %{lex: 0.25, sim: 0.40, rel: 0.15, prag: 0.10, act: 0.10, prime: 0.0}
 
-  # merge order: defaults <- env (lifg_weights OR mapped stage1) <- opts[:weights]
+  # merge order: defaults <- env (lifg_stage1_weights) <- opts[:weights]
   defp lifg_weights do
     env = Application.get_env(:brain, :lifg_stage1_weights, %{})
     Map.merge(@default_weights, env || %{})
+  end
+
+  # Build the effective option set we report via `status/0`
+  defp effective_opts(overrides) when is_map(overrides) do
+    %{
+      weights:
+        lifg_weights()
+        |> Map.merge(Map.new(Map.get(overrides, :weights, %{}))),
+      scores: Map.get(overrides, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all)),
+      margin_threshold: Map.get(overrides, :margin_threshold, 0.15),
+      min_margin: Application.get_env(:brain, :lifg_min_margin, 0.05),
+      pmtg_mode: Map.get(overrides, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost)),
+      pmtg_window_keep: Application.get_env(:brain, :pmtg_window_keep, 50),
+      acc_conflict_tau: Application.get_env(:brain, :acc_conflict_tau, 0.50)
+    }
   end
 
   # ── private: legacy conversion helpers ───────────────────────────────
@@ -357,7 +404,6 @@ defmodule Brain.LIFG do
         {[boost_here | boos], inhibitions_here ++ inhs}
       end)
 
-    # Optional conversion to {id, amt} pairs for gating paths
     pairs_mode? =
       Keyword.has_key?(eff_opts, :gate_into_wm) or
         Keyword.has_key?(eff_opts, :lifg_min_score) or
@@ -381,8 +427,6 @@ defmodule Brain.LIFG do
 
   # ── private: choice augmentation ─────────────────────────────────────
 
-  # Fill in missing chosen_id (from scores), compute margin (from score gap) with a floor,
-  # and build alt_ids from existing :alt_ids ++ score keys ++ slate entries at same token_index.
   defp augment_choices(raw_choices, si_after, min_margin) when is_list(raw_choices) do
     slate = Safe.get(si_after, :sense_candidates, %{}) || Safe.get(si_after, :candidates_by_token, %{}) || %{}
 
@@ -401,9 +445,7 @@ defmodule Brain.LIFG do
           x -> x
         end
 
-      # Collect alt_ids from existing, from score keys, and from slate
-      alt_from_scores =
-        if map_size(scores) > 0, do: Map.keys(scores), else: []
+      alt_from_scores = if map_size(scores) > 0, do: Map.keys(scores), else: []
 
       slate_alts =
         case Map.get(slate, idx) do
@@ -426,7 +468,6 @@ defmodule Brain.LIFG do
         |> Enum.uniq()
         |> then(fn ids -> if chosen_id_s, do: ids -- [chosen_id_s], else: ids end)
 
-      # margin: keep if present & > 0; otherwise compute from scores; then floor
       margin0 =
         case Safe.get(ch, :margin) do
           m when is_number(m) and m > 0.0 -> m
@@ -446,6 +487,73 @@ defmodule Brain.LIFG do
       |> Map.put(:alt_ids, alt_ids)
       |> Map.put(:margin, Float.round(margin * 1.0, 6))
     end)
+  end
+
+  # ── private: optional ACC hook ───────────────────────────────────────
+
+  # Returns {si_with_trace, conflict_score, acc_present?}
+  defp maybe_acc_gate(si, choices, opts) when is_map(si) and is_list(choices) do
+    acc_present? =
+      Code.ensure_loaded?(Brain.ACC) and
+        (function_exported?(Brain.ACC, :assess, 3) or
+         function_exported?(Brain.ACC, :assess, 2) or
+         function_exported?(Brain.ACC, :score, 2))
+
+    if acc_present? do
+      now_ms = System.system_time(:millisecond)
+
+      result =
+        cond do
+          function_exported?(Brain.ACC, :assess, 3) -> Brain.ACC.assess(si, choices, opts)
+          function_exported?(Brain.ACC, :assess, 2) -> Brain.ACC.assess(si, choices)
+          function_exported?(Brain.ACC, :score, 2)  -> Brain.ACC.score(si, choices)
+          true -> :skip
+        end
+
+      case result do
+        {:ok, %{si: si2, conflict: c} = payload} when is_number(c) ->
+          ev = payload |> Map.drop([:si]) |> Map.merge(%{stage: :acc, ts_ms: now_ms})
+          si3 = Map.update(si2, :trace, [ev], fn tr -> [ev | tr] end)
+          safe_exec_telemetry([:brain, :acc, :assess], %{conflict: c}, %{})
+          {si3, clamp01(c), true}
+
+        {:ok, c} when is_number(c) ->
+          ev = %{stage: :acc, conflict: c, ts_ms: now_ms}
+          si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
+          safe_exec_telemetry([:brain, :acc, :assess], %{conflict: c}, %{})
+          {si2, clamp01(c), true}
+
+        c when is_number(c) ->
+          ev = %{stage: :acc, conflict: c, ts_ms: now_ms}
+          si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
+          safe_exec_telemetry([:brain, :acc, :assess], %{conflict: c}, %{})
+          {si2, clamp01(c), true}
+
+        _ ->
+          {si, 1.0, false}
+      end
+    else
+      {si, 1.0, false}
+    end
+  end
+
+  defp clamp01(x) when is_number(x) do
+    x = x * 1.0
+    cond do
+      x < 0.0 -> 0.0
+      x > 1.0 -> 1.0
+      true -> x
+    end
+  end
+  defp clamp01(_), do: 0.0
+
+  # Small local helper, mirroring other regions
+  defp safe_exec_telemetry(event, measurements, meta) do
+    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute(event, measurements, meta)
+    else
+      :ok
+    end
   end
 end
 

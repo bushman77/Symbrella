@@ -1,8 +1,10 @@
+# config/runtime.exs
 import Config
 
-# --- Brain env overrides (apply in all envs) ---------------------------------
+# ───────── Brain env overrides (apply in all envs) ─────────
+
 pmtg_mode =
-  case System.get_env("PMTG_MODE", "boost") do
+  case System.get_env("PMTG_MODE", "boost") |> String.downcase() do
     "rerun" -> :rerun
     "none"  -> :none
     _       -> :boost
@@ -25,7 +27,8 @@ lifg_weights =
   case System.get_env("LIFG_WTS") do
     nil -> nil
     csv ->
-      case String.split(csv, ",") |> Enum.map(&Float.parse/1) do
+      parts = String.split(csv, ",")
+      case Enum.map(parts, &Float.parse/1) do
         [{lex,_},{rel,_},{act,_},{prag,_}] ->
           %{lex_fit: lex, rel_prior: rel, activation: act, intent_bias: prag}
         _ -> nil
@@ -34,42 +37,84 @@ lifg_weights =
 
 # Optional: override scores output mode ("all" | "top2" | "none")
 lifg_scores_mode =
-  case String.downcase(System.get_env("LIFG_SCORES_MODE", "")) do
+  case System.get_env("LIFG_SCORES_MODE", "") |> String.downcase() do
     "all"  -> :all
     "top2" -> :top2
     "none" -> :none
     _ -> nil
   end
 
+# Optional: gate threshold
+lifg_min_score =
+  case Float.parse(System.get_env("LIFG_MIN_SCORE", "0.35")) do
+    {f, _} -> f
+    _ -> 0.35
+  end
+
 config :brain,
   pmtg_mode: pmtg_mode,
   pmtg_margin_threshold: pmtg_margin,
   pmtg_window_keep: pmtg_keep,
-  hippo_meta_dup_count: true
+  hippo_meta_dup_count: true,
+  lifg_min_score: lifg_min_score
 
-if lifg_weights, do: config(:brain, :lifg_stage1_weights, lifg_weights)
+if lifg_weights,     do: config(:brain, :lifg_stage1_weights, lifg_weights)
 if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mode)
 
-# --- Phoenix / prod ----------------------------------------------------------
+# ───────── Logger runtime overrides ─────────
+log_level =
+  case System.get_env("LOG_LEVEL", "info") |> String.downcase() do
+    "debug" -> :debug
+    "warn"  -> :warn
+    "error" -> :error
+    _       -> :info
+  end
+
+config :logger, level: log_level
+
+# ───────── Ecto Repo runtime overrides ─────────
+# Silence SQL query spam unless DB_LOG=true
+db_log =
+  case System.get_env("DB_LOG", "false") |> String.downcase() do
+    s when s in ["1", "true", "yes"] -> true
+    _ -> false
+  end
+
+repo_overrides =
+  []
+  |> then(fn acc ->
+    case System.get_env("DATABASE_URL") do
+      nil -> acc
+      url -> Keyword.put(acc, :url, url)
+    end
+  end)
+  |> then(fn acc ->
+    case Integer.parse(System.get_env("POOL_SIZE", "")) do
+      {n, _} -> Keyword.put(acc, :pool_size, n)
+      _      -> acc
+    end
+  end)
+  |> Keyword.put(:log, db_log)
+
+if repo_overrides != [], do: config(:db, Db, repo_overrides)
+
+# ───────── Phoenix / prod only ─────────
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
       raise """
       environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
+      Generate one with: mix phx.gen.secret
       """
 
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
   config :symbrella_web, SymbrellaWeb.Endpoint,
-    http: [
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: String.to_integer(System.get_env("PORT") || "4000")
-    ],
+    server: true,
+    http: [ip: {0,0,0,0,0,0,0,0}, port: port],
     secret_key_base: secret_key_base
 
-  # Optional DNS cluster
-  config :symbrella, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :swoosh, :api_client, Swoosh.ApiClient.Req
+  config :swoosh, local: false
 end
-# config/runtime.exs
-lifg_min_score = String.to_float(System.get_env("LIFG_MIN_SCORE") || "0.35")
-config :brain, :lifg_min_score, lifg_min_score
 

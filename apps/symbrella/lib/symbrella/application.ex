@@ -26,10 +26,10 @@ defmodule Symbrella.Application do
       Brain.LIFG,
       Brain.PMTG,
       {Brain.ATL, keep: 300},
-      {Brain.Hippocampus, keep: 300}
+      {Brain.Hippocampus, keep: 300},
       # Brain.AG,
       # Brain.MTL,
-      # Brain.ACC,
+      {Brain.ACC, keep: 300}
       # Brain.BasalGanglia
     ]
 

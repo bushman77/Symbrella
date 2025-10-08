@@ -1,23 +1,26 @@
-defmodule Brain.BoundaryGuardTest do
+defmodule Brain.LIFG.BoundaryGuardTest do
   use ExUnit.Case, async: true
-  alias Brain.LIFG.BoundaryGuard
+  alias Brain.LIFG.Stage1.Guard, as: SGuard
 
-  test "keeps MWEs even if they cross boundaries" do
-    sent = "kick-off meeting"
-    toks = [%{index: 0, phrase: "kick-off", span: {0, 8}, mw: true}]
-    assert [%{phrase: "kick-off"}] = BoundaryGuard.sanitize(toks, sent)
+  @sent "Kick the ball"
+
+  test "boundary_ok?: true for aligned tokens at start/end boundaries" do
+    # "Kick" spans 0..4, next char is space → boundary
+    assert SGuard.boundary_ok?(@sent, {0, 4}, false)
+    # "ball" ends at string end → boundary
+    assert SGuard.boundary_ok?(@sent, {9, 13}, false)
   end
 
-  test "drops tokens not aligned to word boundaries when sentence is present" do
-    sent = "hello"
-    toks = [%{index: 0, phrase: "he", span: {1, 2}}] # mid-word slice
-    assert [] = BoundaryGuard.sanitize(toks, sent)
+  test "boundary_ok?: false for mid-word unless mw: true" do
+    # "ck t" lands mid-word (1..5) → not boundary unless mw=true
+    refute SGuard.boundary_ok?(@sent, {1, 5}, false)
+    assert SGuard.boundary_ok?(@sent, {1, 5}, true)
   end
 
-  test "unicode letters respected" do
-    sent = "café noir"
-    toks = [%{index: 0, phrase: "café", span: {0, 4}}]
-    assert [%{phrase: "café"}] = BoundaryGuard.sanitize(toks, sent)
+  test "boundary_ok?: punctuation right after end still counts as boundary" do
+    sent = "Hello, world"
+    # "Hello" is 0..5, char at 5 is "," (not letter/number) → boundary
+    assert SGuard.boundary_ok?(sent, {0, 5}, false)
   end
 end
 

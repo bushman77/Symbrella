@@ -1,4 +1,3 @@
-# apps/symbrella_web/config/dev.exs
 import Config
 
 config :symbrella_web, SymbrellaWeb.Endpoint,
@@ -9,7 +8,6 @@ config :symbrella_web, SymbrellaWeb.Endpoint,
   debug_errors: true,
   check_origin: false,
   secret_key_base: "0123456789012345678901234567890123456789012345678901234567890123",
-  # No watchers (removed)
   live_reload: [
     patterns: [
       ~r"priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$",
@@ -22,7 +20,7 @@ config :symbrella_web, SymbrellaWeb.Endpoint,
 config :symbrella_web, :dev_routes, true
 
 # Dev ergonomics
-config :logger, :default_formatter, format: "[$level] $message\n"
+config :logger, :console, format: "[$level] $message\n"
 config :phoenix, :plug_init_mode, :runtime
 
 config :phoenix_live_view,
@@ -40,5 +38,6 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
+# Optional extra LIFG outer weights in dev (kept from your original)
 config :brain, :lifg_weights, prime: 0.05
 

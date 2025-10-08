@@ -1,16 +1,15 @@
 defmodule Brain.LIFG.Hygiene do
   @moduledoc """
   Post-Stage-1 hygiene pass:
-    • Sanitizes score maps (drops non-numeric/NaN)
-    • Computes softmax probabilities as `:probs`
-    • Adds `:p_top1`
-    • Dedups `:alt_ids`
-    • Flags `:needs_rerun` (by margin/p_top1/alt_ids)
+    • Sanitizes score maps (drops non-numeric / NaN)
+    • Computes softmax probabilities as `:probs` (uniform fallback if degenerate)
+    • Adds `:p_top1` and `:prob_margin` (= p1 - p2)
+    • Dedups `:alt_ids` and removes `:chosen_id` from it
+    • Flags `:needs_rerun` (by margin / p_top1 / alt_ids)
     • Emits telemetry: [:brain, :hygiene, :wipe]
   """
 
   require Logger
-
   @type choice :: map()
 
   @spec run(map(), [choice()], keyword()) ::
@@ -28,22 +27,45 @@ defmodule Brain.LIFG.Hygiene do
 
       {cleaned, stats} =
         Enum.map_reduce(choices, %{sanitized: 0, needs_rerun: 0}, fn ch, acc ->
-          {probs, dropped} = normalize_scores_map(Map.get(ch, :scores, %{}))
-          p1 = max_prob(probs)
+          # 1) sanitize & normalize scores -> probs
+          scores_in = Map.get(ch, :scores, %{}) || %{}
+          {probs0, dropped} = normalize_scores_map(scores_in)
 
+          probs =
+            cond do
+              map_size(probs0) > 0 ->
+                probs0
+
+              # fallback: if no numeric scores, prefer a degenerate distribution on chosen_id (if any)
+              id = ch[:chosen_id] ->
+                %{id => 1.0}
+
+              true ->
+                %{}
+            end
+
+          # 2) compute top1 & prob margin
+          {p1, p2} = top2_probs(probs)
+          prob_margin = max(p1 - p2, 0.0)
+
+          # 3) alt_ids: dedup & remove chosen
           alt_ids2 =
             (ch[:alt_ids] || [])
             |> Enum.reject(&(&1 == ch[:chosen_id]))
             |> Enum.uniq()
 
+          # 4) needs_rerun: margin/p_top1/alt_ids
           needs? =
-            (ch[:margin] || 0.0) < min_margin or p1 < p_min or alt_ids2 != []
+            (ch[:margin] || 0.0) < min_margin or
+              p1 < p_min or
+              alt_ids2 != []
 
           ch2 =
             ch
             |> Map.put(:alt_ids, alt_ids2)
             |> Map.put(:probs, probs)
             |> Map.put(:p_top1, p1)
+            |> Map.put(:prob_margin, prob_margin)
             |> Map.put(:needs_rerun, needs?)
 
           acc2 =
@@ -54,7 +76,13 @@ defmodule Brain.LIFG.Hygiene do
           {ch2, acc2}
         end)
 
-      meas = %{total: length(choices), sanitized: stats.sanitized, needs_rerun: stats.needs_rerun, ts_ms: now_ms}
+      meas = %{
+        total: length(choices),
+        sanitized: stats.sanitized,
+        needs_rerun: stats.needs_rerun,
+        ts_ms: now_ms
+      }
+
       emit(event, meas, %{min_margin: min_margin, p_min: p_min})
       {:ok, %{si: si, choices: cleaned, audit: meas}}
     rescue
@@ -64,34 +92,48 @@ defmodule Brain.LIFG.Hygiene do
     end
   end
 
+  # --- internals ---------------------------------------------------------------
+
+  # Returns {normalized_probs_map, dropped_count}
   defp normalize_scores_map(map) when is_map(map) do
     pairs =
       map
       |> Enum.filter(fn {_k, v} -> is_number(v) and v == v end) # (v==v) filters NaN
 
     dropped = map_size(map) - length(pairs)
-    vals = Enum.map(pairs, fn {_, v} -> v end)
+    vals = Enum.map(pairs, fn {_, v} -> v * 1.0 end)
 
-    probs =
-      case vals do
-        [] -> %{}
-        _ ->
-          m = Enum.max([0.0 | vals])
-          exps = Enum.map(vals, fn s -> :math.exp(s - m) end)
-          z = Enum.sum(exps)
+    case vals do
+      [] ->
+        {%{}, dropped}
 
-          if z == 0.0 do
-            Map.new(pairs, fn {k, _} -> {k, 0.0} end)
-          else
-            pairs |> Enum.zip(exps) |> Map.new(fn {{k, _}, e} -> {k, e / z} end)
-          end
-      end
+      _ ->
+        m = Enum.max([0.0 | vals])
+        exps = Enum.map(vals, fn s -> :math.exp(s - m) end)
+        z = Enum.sum(exps)
 
-    {probs, dropped}
+        cond do
+          z <= 0.0 ->
+            # uniform fallback (avoids all-zeros)
+            n = length(pairs)
+            u = 1.0 / n
+            {Map.new(pairs, fn {k, _} -> {k, u} end), dropped}
+
+          true ->
+            {pairs |> Enum.zip(exps) |> Map.new(fn {{k, _}, e} -> {k, e / z} end), dropped}
+        end
+    end
   end
 
-  defp max_prob(%{} = probs), do: probs |> Map.values() |> Enum.max(fn -> 0.0 end)
-  defp max_prob(_), do: 0.0
+  defp normalize_scores_map(_), do: {%{}, 0}
+
+  defp top2_probs(%{} = probs) do
+    case probs |> Map.values() |> Enum.sort(:desc) do
+      [a, b | _] -> {a, b}
+      [a] -> {a, 0.0}
+      _ -> {0.0, 0.0}
+    end
+  end
 
   defp emit(ev, meas, meta) do
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
