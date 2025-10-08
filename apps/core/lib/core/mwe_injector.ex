@@ -13,55 +13,53 @@ defmodule Core.MWE.Injector do
 
   @spec inject([token], keyword()) :: [token]
   def inject(tokens, opts \\ []) when is_list(tokens) do
-    len = length(tokens)
-    max_n = Keyword.get(opts, :max_n, 4)
+    len     = length(tokens)
+    max_n   = Keyword.get(opts, :max_n, 4)
     exists? = Keyword.get(opts, :exists?, &__MODULE__.default_exists?/1)
 
     new_mwes =
-      0..(len - 1)
-      |> Enum.reduce([], fn i, acc ->
-        t = Enum.at(tokens, i)
-        p = tok_phrase(t)
+      if len <= 0 do
+        []
+      else
+        0..(len - 1)//1
+        |> Enum.reduce([], fn i, acc ->
+          t = Enum.at(tokens, i)
+          p = tok_phrase(t)
 
-        if is_binary(p) and not String.contains?(p, " ") do
-          max_here = min(max_n, len - i)
+          if single_word_string?(p) do
+            max_here = min(max_n, len - i)
 
-          Enum.reduce(2..max_here, acc, fn n, acc_in ->
-            slice = Enum.slice(tokens, i, n)
+            # use explicit-step range; if max_here < 2 the range is empty
+            Enum.reduce(2..max_here//1, acc, fn n, acc_in ->
+              slice = Enum.slice(tokens, i, n)
 
-            # ensure every element in the slice is a single-word token
-            all_single_words? =
-              Enum.all?(slice, fn tt ->
-                pp = tok_phrase(tt)
-                is_binary(pp) and not String.contains?(pp, " ")
-              end)
+              if Enum.all?(slice, fn tt -> single_word_string?(tok_phrase(tt)) end) do
+                phrase2 =
+                  slice
+                  |> Enum.map(&tok_phrase/1)
+                  |> Enum.filter(&is_binary/1)
+                  |> Enum.join(" ")
 
-            if all_single_words? do
-              phrase2 =
-                slice
-                |> Enum.map(&tok_phrase/1)
-                |> Enum.filter(&is_binary/1)
-                |> Enum.join(" ")
-
-              if exists?.(phrase2) do
-                [%{phrase: phrase2, mw: true, span: {i, i + n}, n: n, source: :mwe} | acc_in]
+                if exists?.(phrase2) do
+                  [%{phrase: phrase2, mw: true, span: {i, i + n}, n: n, source: :mwe} | acc_in]
+                else
+                  acc_in
+                end
               else
                 acc_in
               end
-            else
-              acc_in
-            end
-          end)
-        else
-          acc
-        end
-      end)
-      |> Enum.reverse()
+            end)
+          else
+            acc
+          end
+        end)
+        |> Enum.reverse()
+      end
 
     tokens
     |> Kernel.++(new_mwes)
     |> Enum.uniq_by(fn t -> {tok_span(t), tok_phrase(t), tok_mw?(t)} end)
-    # words first, then MWEs; within group sort by start; MWEs w/ same start: shorter first
+    # words first, then MWEs; within group: start asc; for MWEs at same start: shorter first
     |> Enum.sort_by(fn t -> {mw_key(t), start_index(t), length_key(t)} end)
   end
 
@@ -70,7 +68,7 @@ defmodule Core.MWE.Injector do
   def default_exists?(_phrase), do: false
 
   # ──────────────────────────────────────────────────────────
-  # SAFE ACCESS HELPERS (support maps and %Core.Token{} structs)
+  # SAFE ACCESS HELPERS (support maps and %Core.Token{}-like structs)
   # ──────────────────────────────────────────────────────────
 
   defp tok_phrase(%_struct{phrase: p}) when is_binary(p), do: p
@@ -78,9 +76,9 @@ defmodule Core.MWE.Injector do
   defp tok_phrase(%{} = t) do
     Map.get(t, :phrase) ||
       Map.get(t, "phrase") ||
-      Map.get(t, :norm) ||
-      Map.get(t, "norm") ||
-      Map.get(t, :text) ||
+      Map.get(t, :norm)   ||
+      Map.get(t, "norm")  ||
+      Map.get(t, :text)   ||
       Map.get(t, "text")
   end
 
@@ -95,14 +93,12 @@ defmodule Core.MWE.Injector do
   defp tok_mw?(_), do: false
 
   defp tok_n(%_struct{n: n}) when is_integer(n), do: n
-
   defp tok_n(%{} = t) do
     case Map.get(t, :n) || Map.get(t, "n") do
       i when is_integer(i) -> i
       _ -> nil
     end
   end
-
   defp tok_n(_), do: nil
 
   # ──────────────────────────────────────────────────────────
@@ -128,4 +124,13 @@ defmodule Core.MWE.Injector do
       0
     end
   end
+
+  # ──────────────────────────────────────────────────────────
+  # PREDICATES (no guards calling remote functions)
+  # ──────────────────────────────────────────────────────────
+
+  # True only for binaries with no spaces
+  defp single_word_string?(p) when is_binary(p), do: not String.contains?(p, " ")
+  defp single_word_string?(_), do: false
 end
+

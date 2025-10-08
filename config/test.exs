@@ -1,6 +1,9 @@
 # config/test.exs
 import Config
 
+# -------------------------------
+# Database (umbrella app: :db)
+# -------------------------------
 config :db, ecto_repos: [Db]
 
 config :db, Db,
@@ -12,33 +15,65 @@ config :db, Db,
   pool_size: 10,
   show_sensitive_data_on_connection_error: true
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# -------------------------------
+# Web (no server during tests)
+# -------------------------------
 config :symbrella_web, SymbrellaWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "14hiEvqKbnYtZ+2qDPg34F/YD7XKAZIhRV2/+Tu0m00q/a2ba7en3+E9Dr010Ze7",
   server: false
 
-# Print only warnings and errors during test
-config :logger, level: :warning
-
-# In test we don't send emails
+# -------------------------------
+# Mailer (test adapter)
+# -------------------------------
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
-# Initialize plugs at runtime for faster test compilation
+# -------------------------------
+# Logger / ExUnit
+# -------------------------------
+config :logger, level: :warning
+config :ex_unit, capture_log: true
+
+# -------------------------------
+# Phoenix runtime knobs for tests
+# -------------------------------
 config :phoenix, :plug_init_mode, :runtime
 
-# Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
+# -------------------------------
+# Core tokenizer defaults (tests)
+# -------------------------------
 config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
-config :brain, :episodes_mode, :off
-config :brain, :lifg_min_score, 0.6
+# -------------------------------
+# Brain (LIFG / pMTG / Hippocampus)
+# -------------------------------
+config :brain,
+  # Disable episodic writes during tests
+  episodes_mode: :on, #:off,
+
+  # LIFG test stability (thresholds & outputs)
+  lifg_min_score: 0.6,
+  lifg_min_margin: 0.12,
+  lifg_min_p_top1: 0.65,
+  lifg_stage1_scores_mode: :all,
+  lifg_stage1_weights: %{
+    lex_fit: 0.40,
+    rel_prior: 0.30,
+    activation: 0.20,
+    intent_bias: 0.10
+  },
+
+  # pMTG defaults (kept simple for unit tests)
+  pmtg_mode: :boost,
+  pmtg_margin_threshold: 0.15,
+  pmtg_window_keep: 50,
+
+  # Hippocampus: hide dup counter in test assertions
+  hippo_meta_dup_count: false
 

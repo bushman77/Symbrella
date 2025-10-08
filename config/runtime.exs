@@ -44,7 +44,8 @@ lifg_scores_mode =
 config :brain,
   pmtg_mode: pmtg_mode,
   pmtg_margin_threshold: pmtg_margin,
-  pmtg_window_keep: pmtg_keep
+  pmtg_window_keep: pmtg_keep,
+  hippo_meta_dup_count: true
 
 if lifg_weights, do: config(:brain, :lifg_stage1_weights, lifg_weights)
 if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mode)

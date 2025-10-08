@@ -9,33 +9,33 @@ defmodule Symbrella.Application do
     File.mkdir_p!(Path.dirname(neg_path))
 
     children = [
-      # DB first
+      # ── DB (start first) ──────────────────────────────────────────────
       Db,
 
-      # Brain infra (order matters)
+      # ── Brain infra (order matters) ───────────────────────────────────
       {Registry, keys: :unique, name: Brain.Registry},
       {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
 
-      # Caches / services
+      # ── Caches / services ─────────────────────────────────────────────
       {Task.Supervisor, name: Symbrella.TaskSup},
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # Servers
+      # ── Brain servers ─────────────────────────────────────────────────
       Brain,
-      # If you later want the Endpoint here, add it here and remove from web.
-      #
-Brain.LIFG,
-Brain.PMTG,
-{Brain.ATL, keep: 300},
-{Brain.Hippocampus, keep: 300}
-  #Brain.AG,
-  #Brain.MTL,
-  #Brain.ACC,
-  #Brain.BasalGanglia
+      Brain.LIFG,
+      Brain.PMTG,
+      {Brain.ATL, keep: 300},
+      {Brain.Hippocampus, keep: 300}
+      # Brain.AG,
+      # Brain.MTL,
+      # Brain.ACC,
+      # Brain.BasalGanglia
     ]
 
+    # Attach telemetry handlers
     Brain.Telemetry.attach!()
+
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
   end
 end

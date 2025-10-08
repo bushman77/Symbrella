@@ -1,8 +1,6 @@
 defmodule BrainWMEvictionDecayTest do
   use ExUnit.Case, async: true
 
-  alias :math, as: Math
-
   test "scores decay over elapsed time" do
     state = %{
       wm: [%{id: "a", score: 1.0, ts: 1}, %{id: "b", score: 0.5, ts: 1}],

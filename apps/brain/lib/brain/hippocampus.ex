@@ -1,57 +1,27 @@
 defmodule Brain.Hippocampus do
-  @moduledoc ~S"""
+  @moduledoc """
   Hippocampus — in-memory episodic window with lightweight recall + telemetry.
 
-  ## What it does
-  - Rolling window of episodes: `{timestamp, %{slate, meta}}`.
-  - Pass-through `encode/2`: records the episode and returns the `slate` unchanged.
-    * **Dedup-on-write:** if the new slate’s token set equals the current head,
-      we refresh the head timestamp instead of appending another copy (meta is preserved).
-  - `recall/2`: ranks episodes by `Jaccard(cues, episode_tokens) × recency_half_life`.
-    * Optional scope filter via `:scope` (**matches either `meta` or `meta.scope`**).
-    * Optional minimum-overlap via `:min_jaccard` threshold on **raw** Jaccard.
-  - `:telemetry` events (emitted from the server process **and echoed to the caller**):
-      - `[:brain, :hippocampus, :write]`
-        - **measurements:** `%{window_size: integer}`
-        - **metadata:** `%{meta: map()}`
-      - `[:brain, :hippocampus, :recall]`
-        - **measurements:** `%{cue_count: integer, window_size: integer, returned: integer, top_score: float}`
-        - **metadata:** `%{limit: integer, half_life_ms: integer}`
-  - Synchronous API: deterministic for tests, no races.
-
-  ## Runtime options
-  Use `configure/1` (or per-call opts in `recall/2`):
-
-  - `:window_keep` (alias `:keep`) — **integer**, default **300**
-  - `:half_life_ms` — **integer (ms)**, default **300_000** (5 minutes)
-  - `:recall_limit` — **integer**, default **3**
-  - `:min_jaccard` — **float [0.0, 1.0]**, default **0.0**
-  - `:scope` (recall/2 only) — **map**
-
-  ## Helper
-  - `attach_episodes/2` writes recall results to `si.evidence[:episodes]`.
+  Public API:
+    • encode/2 — record an episode and return the `slate` unchanged (de-dup on head).
+    • recall/2 — rank prior episodes by Jaccard×recency with optional scope/min_jaccard.
+    • attach_episodes/2 — write recall results to `si.evidence[:episodes]`.
+    • configure/1, reset/0, snapshot/0 — runtime config and inspection.
   """
 
   use GenServer
 
+  alias Brain.Hippocampus.{Window, Recall, Normalize, Evidence, Config, Telemetry}
+
   @type slate    :: map()
   @type meta     :: map()
-  @type episode  :: %{slate: slate(), meta: meta()}
+  @type episode  :: %{slate: slate(), meta: meta(), norms: MapSet.t()}
   @type recall_r :: %{score: float(), at: non_neg_integer(), episode: episode()}
 
-  @default_keep 300
-  @default_half_life 300_000   # 5 minutes
-  @default_recall_limit 3
-  @default_min_jaccard 0.0
-# near top of module
-@mix_env (Code.ensure_loaded?(Mix) && function_exported?(Mix, :env, 0) && Mix.env()) || :prod
-@test_env @mix_env == :test
+  ## ─────────────────────────────── Public API ───────────────────────────────
 
-  ## Public API
-
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, %{}, Keyword.merge([name: __MODULE__], opts))
-  end
+  def start_link(opts \\ []),
+    do: GenServer.start_link(__MODULE__, %{}, Keyword.merge([name: __MODULE__], opts))
 
   @doc "Record an episode (slate + meta) into the rolling window. Returns `slate` unchanged."
   @spec encode(slate(), meta()) :: slate()
@@ -61,49 +31,39 @@ defmodule Brain.Hippocampus do
   end
 
   @doc """
-  Recall prior episodes relevant to `cues`.
-
-  `cues` may be:
-    - a list of strings (lemmas/words), or
-    - a map shaped like a `slate` (e.g., with `winners`), or
-    - a full `si` map/struct that contains a `winners` or `tokens` list.
-
-  Options:
-    - `:limit` (default from config; returns top-K)
-    - `:half_life_ms` (override for this call)
-    - `:min_jaccard` (override for this call; default from config)
-    - `:scope` (map) — all key/values must be present (==) in `episode.meta` or `episode.meta.scope`
-
-  Returns a list of `%{score, at, episode}` sorted by score desc.
+  Recall prior episodes relevant to `cues` (list/stringy slate/si).
+  Options (per-call override):
+    • :limit, :half_life_ms, :min_jaccard, :scope
+    • :ignore_head — :auto | :always | :never | false
   """
-@spec recall(list(String.t()) | map(), keyword()) :: [recall_r()]
-def recall(cues, opts \\ []) when is_list(cues) or is_map(cues) do
-  GenServer.call(__MODULE__, {:recall, cues, Map.new(opts)})
-end
+  @spec recall([String.t()] | map(), keyword()) :: [recall_r()]
+  def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
+    do: GenServer.call(__MODULE__, {:recall, cues, Map.new(opts)})
 
   @doc """
   Attach episodic evidence into `si.evidence[:episodes]`.
-
-  Passes any opts through to `recall/2` (e.g., `limit: 3`, `scope: %{...}`, `min_jaccard: ...`).
+  Passes any opts to `recall/2`. Default `ignore_head: false` for attach.
   """
-@spec attach_episodes(map(), keyword()) :: map()
-def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-  episodes = __MODULE__.recall(si, opts)   # <— qualify the local call
-  evidence = Map.get(si, :evidence) || %{}
-  Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
-end
+  @spec attach_episodes(map(), keyword()) :: map()
+  def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
+    cues  = Keyword.get(opts, :cues, si)
+    opts2 = Keyword.put_new(opts, :ignore_head, false)
+
+    episodes =
+      __MODULE__.recall(cues, opts2)
+      |> Enum.map(&Evidence.ensure_winners_for_evidence/1)
+
+    evidence = Map.get(si, :evidence) || %{}
+    Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
+  end
 
   @doc """
-  Configure runtime options. Accepts:
-    - `:window_keep` or alias `:keep`
-    - `:half_life_ms`
-    - `:recall_limit`
-    - `:min_jaccard`
+  Configure runtime options. Accepts any of:
+    :window_keep (or :keep), :half_life_ms, :recall_limit, :min_jaccard
   """
   @spec configure(keyword()) :: :ok
-  def configure(opts) when is_list(opts) do
-    GenServer.call(__MODULE__, {:configure, Map.new(opts)})
-  end
+  def configure(opts) when is_list(opts),
+    do: GenServer.call(__MODULE__, {:configure, Map.new(opts)})
 
   @doc "Reset in-memory state to defaults."
   @spec reset() :: :ok
@@ -113,141 +73,85 @@ end
   @spec snapshot() :: map()
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
 
-  ## GenServer callbacks
+  ## ─────────────────────────────── GenServer ───────────────────────────────
 
   @impl true
   def init(_state), do: {:ok, default_state()}
 
-# apps/brain/lib/brain/hippocampus.ex
-def handle_call({:encode, slate, meta}, from, state) do
-  now = System.system_time(:millisecond)
-  new_ep  = %{slate: slate, meta: meta}
-  new_set =
-    slate
-    |> extract_norms_from_any()
-    |> Enum.reject(&empty?/1)
-    |> MapSet.new()
+  @impl true
+  def handle_call({:encode, slate, meta}, from, state) do
+    now = System.system_time(:millisecond)
 
-# --- in handle_call({:encode, slate, meta}, from, state) ---
+    ep = %{
+      slate: slate,
+      meta: meta,
+      norms:
+        slate
+        |> Normalize.extract_norms_from_any()
+        |> Enum.reject(&Normalize.empty?/1)
+        |> MapSet.new()
+    }
 
-    window =
-      case state.window do
-        [{_at_head, ep_head} | tail] ->
-          head_set = episode_token_set(ep_head)
-          if MapSet.equal?(new_set, head_set) do
-            # De-dup: refresh head timestamp, keep window size stable
-            ep_head2 = bump_dup_count(ep_head)   # <— INCREMENT dup counter on the head
-            [{now, ep_head2} | tail]
-          else
-            # New distinct episode: push to head, respect keep
-            [{now, new_ep} | state.window] |> Enum.take(state.window_keep)
-          end
+    window2 = Window.append_or_refresh_head(state.window, ep, state.window_keep)
 
-        [] ->
-          [{now, new_ep}]
+    Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta})
+    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], %{window_size: length(window2)}, %{meta: meta})
+
+    new_last =
+      case window2 do
+        [{^now, e} | _] -> {now, e}
+        [{at, e} | _] when is_integer(at) -> {at, e}
+        _ -> nil
       end
 
-  meas = %{window_size: length(window)}
-  meta_map = %{meta: meta}
-
-  :telemetry.execute([:brain, :hippocampus, :write], meas, meta_map)
-  if @test_env, do: send(elem(from, 0), {:telemetry, [:brain, :hippocampus, :write], meas, meta_map})
-
-  new_last =
-    case window do
-      [{^now, ep}|_] -> {now, ep}
-      _ -> {now, new_ep}
-    end
-
-  {:reply, :ok, %{state | window: window, last: new_last}}
-end
-
-@impl true
-def handle_call({:recall, cues, opts}, from, state) do
-  now       = System.system_time(:millisecond)
-  limit     = Map.get(opts, :limit, state.opts.recall_limit)
-  half_life = normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
-  min_jacc  = normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
-  scope_opt = Map.get(opts, :scope, nil)
-  cues_set  = cue_set(cues)
-
-  base_scored =
-    if MapSet.size(cues_set) == 0 do
-      []
-    else
-      state.window
-      |> Enum.reduce([], fn {at, ep}, acc ->
-        if scope_match?(ep.meta, scope_opt) do
-          ep_set = episode_token_set(ep)
-          jacc   = jaccard(cues_set, ep_set)
-
-          if jacc >= min_jacc do
-            age = max(now - at, 0)
-            rec = recency_factor(age, half_life)
-            [%{score: jacc * rec, at: at, episode: ep} | acc]
-          else
-            acc
-          end
-        else
-          acc
-        end
-      end)
-      |> Enum.filter(&(&1.score > 0.0))
-      |> Enum.sort_by(& &1.score, :desc)
-    end
-
-  # Expand by duplicate count, then respect the limit
-  scored =
-    base_scored
-    |> Enum.flat_map(fn r -> List.duplicate(r, dup_count(r.episode)) end)
-    |> Enum.take(limit)
-
-  meas = %{
-    cue_count: MapSet.size(cues_set),
-    window_size: length(state.window),
-    returned: length(scored),
-    top_score:
-      case scored do
-        [%{score: s} | _] -> s
-        _ -> 0.0
-      end
-  }
-
-  meta_map = %{
-    limit: limit,
-    half_life_ms: half_life
-  }
-
-  :telemetry.execute([:brain, :hippocampus, :recall], meas, meta_map)
-
-  if @test_env do
-    send(elem(from, 0), {:telemetry, [:brain, :hippocampus, :recall], meas, meta_map})
+    {:reply, :ok, %{state | window: window2, last: new_last}}
   end
 
-  {:reply, scored, state}
-end
+  @impl true
+  def handle_call({:recall, cues, opts}, from, state) do
+    window       = state.window
+    limit        = Map.get(opts, :limit, state.opts.recall_limit)
+    half_life_ms = Config.normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
+    min_jacc     = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
+    scope_opt    = Map.get(opts, :scope, nil)
+    ignore_head  = Map.get(opts, :ignore_head, :auto)
+
+    {scored, meas, meta_map} =
+      Recall.run(cues, window,
+        limit: limit,
+        half_life_ms: half_life_ms,
+        min_jaccard: min_jacc,
+        scope: scope_opt,
+        ignore_head: ignore_head
+      )
+
+    Telemetry.emit_recall(meas, meta_map)
+    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, meta_map)
+
+    {:reply, scored, state}
+  end
 
   @impl true
   def handle_call({:configure, opts}, _from, state) do
     keep =
       opts
       |> Map.get(:window_keep, Map.get(opts, :keep, state.window_keep))
-      |> normalize_keep()
+      |> Config.normalize_keep()
 
     half_life =
       opts
       |> Map.get(:half_life_ms, state.opts.half_life_ms)
-      |> normalize_half_life()
+      |> Config.normalize_half_life()
 
     recall_limit =
       opts
       |> Map.get(:recall_limit, state.opts.recall_limit)
-      |> normalize_limit()
+      |> Config.normalize_limit()
 
     min_jaccard =
       opts
       |> Map.get(:min_jaccard, state.opts.min_jaccard)
-      |> normalize_min_jaccard()
+      |> Config.normalize_min_jaccard()
 
     new_opts =
       state.opts
@@ -256,9 +160,7 @@ end
       |> Map.put(:recall_limit, recall_limit)
       |> Map.put(:min_jaccard, min_jaccard)
 
-    new_window = Enum.take(state.window, keep)
-
-    {:reply, :ok, %{state | window_keep: keep, opts: new_opts, window: new_window}}
+    {:reply, :ok, %{state | window_keep: keep, opts: new_opts, window: Window.trim(state.window, keep)}}
   end
 
   @impl true
@@ -267,182 +169,20 @@ end
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, state, state}
 
-  ## Helpers
+  ## ─────────────────────────────── Helpers ───────────────────────────────
 
   defp default_state do
     %{
-      window_keep: @default_keep,
+      window_keep: Config.defaults().window_keep,
       window: [],
       last: nil,
       opts: %{
-        window_keep: @default_keep,
-        half_life_ms: @default_half_life,
-        recall_limit: @default_recall_limit,
-        min_jaccard: @default_min_jaccard
+        window_keep:   Config.defaults().window_keep,
+        half_life_ms:  Config.defaults().half_life_ms,
+        recall_limit:  Config.defaults().recall_limit,
+        min_jaccard:   Config.defaults().min_jaccard
       }
     }
   end
-
-  defp normalize_keep(k) when is_integer(k) and k > 0, do: k
-  defp normalize_keep(_), do: @default_keep
-
-  defp normalize_half_life(h) when is_integer(h) and h > 0, do: h
-  defp normalize_half_life(_), do: @default_half_life
-
-  defp normalize_limit(k) when is_integer(k) and k > 0, do: k
-  defp normalize_limit(_), do: @default_recall_limit
-
-  defp normalize_min_jaccard(x) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
-  defp normalize_min_jaccard(_), do: @default_min_jaccard
-
-  # --- token/cue extraction and scoring ---
-
-# Normalize various cue shapes into a MapSet of {:id, id} or {:lemma, lemma}
-# replace cue_set/1 with:
-# Normalize various cue shapes into a MapSet of normalized strings (lemmas/words)
-defp cue_set(nil), do: MapSet.new()
-defp cue_set(%{winners: winners}) when is_list(winners), do: cue_set(winners)
-defp cue_set(%{"winners" => winners}) when is_list(winners), do: cue_set(winners)
-defp cue_set(%{tokens: tokens}) when is_list(tokens), do: cue_set(tokens)
-defp cue_set(%{"tokens" => tokens}) when is_list(tokens), do: cue_set(tokens)
-
-defp cue_set(list) when is_list(list) do
-  list
-  |> Enum.map(fn
-    %{} = m ->
-      # prefer explicit norm/lemma/word; fall back to word parsed from id "word|pos|..."
-      val =
-        Map.get(m, :norm) || Map.get(m, "norm") ||
-        Map.get(m, :lemma) || Map.get(m, "lemma") ||
-        Map.get(m, :word)  || Map.get(m, "word")  ||
-        parse_id_word(Map.get(m, :id) || Map.get(m, "id"))
-
-      norm_str(val)
-
-    s when is_binary(s) ->
-      # If the string looks like an ID with pipes, parse word; else treat as lemma/word
-      if String.contains?(s, "|"), do: norm_str(parse_id_word(s)), else: norm_str(s)
-
-    _ -> nil
-  end)
-  |> Enum.reject(&empty?/1)
-  |> MapSet.new()
 end
 
-  defp episode_token_set(%{slate: slate}) do
-    slate
-    |> extract_norms_from_any()
-    |> Enum.reject(&empty?/1)
-    |> MapSet.new()
-  end
-
-  # Accept several shapes: %{winners: [...]}, %{"winners" => [...]}, %{tokens: [...]}, %{"tokens" => [...]}
-  defp extract_norms_from_any(%{winners: winners}) when is_list(winners),
-    do: Enum.map(winners, &winner_norm/1)
-
-  defp extract_norms_from_any(%{"winners" => winners}) when is_list(winners),
-    do: Enum.map(winners, &winner_norm/1)
-
-  defp extract_norms_from_any(%{tokens: tokens}) when is_list(tokens),
-    do: Enum.map(tokens, &token_norm/1)
-
-  defp extract_norms_from_any(%{"tokens" => tokens}) when is_list(tokens),
-    do: Enum.map(tokens, &token_norm/1)
-
-  defp extract_norms_from_any(_), do: []
-
-  defp winner_norm(map) when is_map(map) do
-    val =
-      Map.get(map, :lemma) ||
-        Map.get(map, "lemma") ||
-        parse_id_word(Map.get(map, :id) || Map.get(map, "id")) ||
-        Map.get(map, :word) ||
-        Map.get(map, "word")
-
-    norm_str(val)
-  end
-
-# apps/brain/lib/brain/hippocampus.ex
-
-# ... keep everything else the same ...
-# --- PATCH 2: tokens can be ID-only; fall back to parse from :id ---
-defp token_norm(map) when is_map(map) do
-  val =
-    Map.get(map, :norm) ||
-      Map.get(map, "norm") ||
-      Map.get(map, :lemma) ||
-      Map.get(map, "lemma") ||
-      Map.get(map, :word) ||
-      Map.get(map, "word") ||
-      # fallback when tokens only carry an :id like "alpha|noun|0"
-      parse_id_word(Map.get(map, :id) || Map.get(map, "id"))
-
-  norm_str(val)
-end
-
-  defp norm_str(nil), do: nil
-  defp norm_str(s) when is_binary(s), do: s |> String.trim() |> String.downcase()
-
-  defp parse_id_word(nil), do: nil
-  defp parse_id_word(id) when is_binary(id) do
-    case String.split(id, "|", parts: 2) do
-      [w | _] -> w
-      _ -> nil
-    end
-  end
-
-# Keep the existing helper, but make the union a touch clearer/robus
-defp jaccard(a, b) do
-  ai = MapSet.size(MapSet.intersection(a, b))
-  au = MapSet.size(a) + MapSet.size(b) - ai
-  if au == 0, do: 0.0, else: ai / au
-end
-
-  defp recency_factor(age_ms, half_life_ms) when half_life_ms > 0 do
-    :math.pow(0.5, age_ms / half_life_ms)
-  end
-
-  # Scope matching: allow `scope` to match either top-level meta OR nested `meta.scope`
-  defp scope_match?(meta, scope) when is_map(scope) and map_size(scope) > 0 and is_map(meta) do
-    effective =
-      case Map.get(meta, :scope) || Map.get(meta, "scope") do
-        s when is_map(s) -> Map.merge(meta, s)
-        _ -> meta
-      end
-
-    Enum.all?(scope, fn {k, v} -> fetch_meta(effective, k) == v end)
-  end
-
-  defp scope_match?(_meta, _scope), do: true
-
-  defp fetch_meta(meta, key) when is_map(meta) do
-    cond do
-      is_atom(key) -> Map.get(meta, key) || Map.get(meta, Atom.to_string(key))
-      is_binary(key) ->
-        Map.get(meta, key) ||
-          case Enum.find(meta, fn
-                 {mk, _} when is_atom(mk) -> Atom.to_string(mk) == key
-                 _ -> false
-               end) do
-            {_, v} -> v
-            _ -> nil
-          end
-      true -> nil
-    end
-  end
-
-  defp empty?(nil), do: true
-  defp empty?(""), do: true
-  defp empty?(_), do: false
-
-# Count how many times this exact token set was written consecutively (collapsed by dedup).
-defp bump_dup_count(%{meta: m} = ep) when is_map(m) do
-  cnt = Map.get(m, :dup_count, 1)
-  %{ep | meta: Map.put(m, :dup_count, cnt + 1)}
-end
-defp bump_dup_count(ep), do: ep
-
-defp dup_count(%{meta: m}) when is_map(m), do: Map.get(m, :dup_count, 1)
-defp dup_count(_), do: 1
-
-end
