@@ -18,6 +18,7 @@ defmodule Brain.LIFG do
         lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10},
         lifg_stage1_scores_mode: :all,  # or :top2 | :none
         lifg_min_margin: 0.05,
+        lifg_stage1_mwe_fallback: true,
         pmtg_mode: :boost,
         pmtg_margin_threshold: 0.15,
         pmtg_window_keep: 50,
@@ -91,6 +92,7 @@ defmodule Brain.LIFG do
       |> Map.put(:sense_candidates, slate)
       |> Map.delete(:candidates_by_token)
       |> Map.put_new(:trace, [])
+      |> ensure_mwe_candidates(opts)            # ← inject fallback MWE if needed
 
     si_opts =
       case Map.get(si_for_stage, :lifg_opts) do
@@ -256,13 +258,16 @@ defmodule Brain.LIFG do
           si1
         end
 
+      # 2b) Ensure MWE candidates exist for MWE tokens that lack them
+      si2a = ensure_mwe_candidates(si2, opts)
+
       scores_mode = Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
       margin_thr  = Keyword.get(opts, :margin_threshold, 0.15)
       min_margin  = Keyword.get(opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
       # 3) Stage-1 disambiguation
       case Brain.LIFG.Stage1.run(
-             si2,
+             si2a,
              weights: Map.get(opts, :weights, %{lex_fit: 0.5, rel_prior: 0.25, activation: 0.15, intent_bias: 0.10}),
              scores: scores_mode,
              margin_threshold: margin_thr,
@@ -360,7 +365,8 @@ defmodule Brain.LIFG do
       min_margin: Application.get_env(:brain, :lifg_min_margin, 0.05),
       pmtg_mode: Map.get(overrides, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost)),
       pmtg_window_keep: Application.get_env(:brain, :pmtg_window_keep, 50),
-      acc_conflict_tau: Application.get_env(:brain, :acc_conflict_tau, 0.50)
+      acc_conflict_tau: Application.get_env(:brain, :acc_conflict_tau, 0.50),
+      mwe_fallback: Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
     }
   end
 
@@ -488,6 +494,76 @@ defmodule Brain.LIFG do
       |> Map.put(:margin, Float.round(margin * 1.0, 6))
     end)
   end
+
+  # ── private: MWE fallback injection (no Core deps) ───────────────────
+
+  # If a multiword token (n>1 or mw: true) has no compatible MWE senses,
+  # synthesize a lightweight phrase candidate so Stage-1 can score it.
+  defp ensure_mwe_candidates(%{tokens: tokens} = si, opts) when is_list(tokens) do
+    enable? = Keyword.get(opts, :mwe_fallback, Application.get_env(:brain, :lifg_stage1_mwe_fallback, true))
+    unless enable?, do: si
+
+    sc0 = Map.get(si, :sense_candidates, %{})
+
+    {sc, emitted} =
+      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+        token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
+        phrase  = Map.get(tok, :phrase) || Map.get(tok, :lemma)
+        mw?     = Map.get(tok, :mw, token_n > 1)
+
+        cond do
+          not mw? or is_nil(phrase) ->
+            {acc, n}
+
+          has_compatible_mwe?(acc, idx) ->
+            {acc, n}
+
+          true ->
+            # Heuristic score: modest, and bounded so real phrase cells win
+            score_guess =
+              acc
+              |> unigram_neighbor_idxs(idx)
+              |> Enum.map(fn j ->
+                acc |> Map.get(j, []) |> Enum.map(&Map.get(&1, :score, 0.0)) |> Enum.max(fn -> 0.0 end)
+              end)
+              |> case do
+                [] -> 0.25
+                xs -> Enum.sum(xs) / max(length(xs), 1)
+              end
+              |> min(0.45)
+
+            candidate = %{
+              id: "#{phrase}|phrase|fallback",
+              lemma: phrase,
+              norm: phrase,
+              mw: true,
+              pos: :phrase,
+              rel_prior: 0.30,
+              score: Float.round(score_guess, 4),
+              source: :mwe_fallback
+            }
+
+            updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
+            safe_exec_telemetry([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{token_index: idx, phrase: phrase, score: candidate.score})
+            {updated, n + 1}
+        end
+      end)
+
+    if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
+  end
+  defp ensure_mwe_candidates(si, _opts), do: si
+
+  defp has_compatible_mwe?(sc, idx) do
+    sc
+    |> Map.get(idx, [])
+    |> Enum.any?(fn c ->
+      norm = (c[:norm] || c["norm"] || c[:lemma] || c["lemma"] || "")
+      String.contains?(norm, " ")
+    end)
+  end
+
+  # Neighbor heuristic: immediate neighbors as unigram companions
+  defp unigram_neighbor_idxs(_sc, idx), do: [idx - 1, idx + 1] |> Enum.filter(&(&1 >= 0))
 
   # ── private: optional ACC hook ───────────────────────────────────────
 
