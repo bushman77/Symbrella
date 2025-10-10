@@ -4,15 +4,17 @@ defmodule Core.Recall.Execute do
 
   This version includes two **Hippocampus** hooks that are safe and opt-in/out via options:
 
-  • **Attach**: calls `Brain.Hippocampus.attach_episodes/2` and places the result under
-    `si[:evidence][:episodes]`. Enabled by default. Toggle with `hippo: true | false`.
-    Default opts: `hippo_opts: [limit: 3, min_jaccard: 0.1]`.
+  • **Attach**: calls `Brain.Hippocampus.attach_episodes/2`. Enabled by default.
+    Toggle with `hippo: true | false`. Default opts: `hippo_opts: [limit: 3, min_jaccard: 0.1]`.
 
-  • **Write**: calls `Brain.Hippocampus.encode/2` to record the current SI tokens as an
-    episode for future recalls. Enabled by default. Toggle with `hippo_write: true | false`.
-    We store `slate: %{tokens: si.tokens}` and `meta: %{scope: %{source: si.source || :core}}`.
+  • **Write**: calls `Brain.Hippocampus.encode/2` to record the current SI tokens
+    for future recalls. Enabled by default. Toggle with `hippo_write: true | false`.
 
   Both hooks are hard-guarded (won’t crash the recall path if Brain isn’t loaded).
+
+  Additionally, we inject **query norms** into `hippo_opts` (as `:query_norms`) prior
+  to `attach_episodes/2` so the hippocampus Jaccard filter can compare the *query*
+  slate to each episode's `:norms` correctly.
   """
 
   alias Core.SemanticInput, as: SI
@@ -343,8 +345,13 @@ defmodule Core.Recall.Execute do
         si
 
       Code.ensure_loaded?(Hippocampus) and function_exported?(Hippocampus, :attach_episodes, 2) ->
+        # Inject the *query* norms so hippocampus can compute Jaccard correctly
+        hippo_opts2 =
+          hippo_opts
+          |> Keyword.put_new(:query_norms, query_norms(si))
+
         try do
-          Hippocampus.attach_episodes(si, hippo_opts)
+          Hippocampus.attach_episodes(si, hippo_opts2)
         rescue
           _ -> si
         catch
@@ -355,6 +362,45 @@ defmodule Core.Recall.Execute do
         si
     end
   end
+
+  # ---- Query norms helpers ------------------------------------------------
+
+  defp query_norms(%SI{} = si) do
+    # Prefer Brain.Hippocampus.Normalize.norms/1 if available
+    if Code.ensure_loaded?(Brain.Hippocampus.Normalize) and
+         function_exported?(Brain.Hippocampus.Normalize, :norms, 1) do
+      try do
+        Brain.Hippocampus.Normalize.norms(si)
+      rescue
+        _ -> tokens_to_norms(si.tokens)
+      catch
+        _, _ -> tokens_to_norms(si.tokens)
+      end
+    else
+      tokens_to_norms(si.tokens)
+    end
+  end
+
+  # Core.Token does NOT have :norm — use :phrase (and accept maps with :norm/:text/:phrase)
+  defp tokens_to_norms(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.flat_map(fn
+      %Core.Token{phrase: p} when is_binary(p) and p != "" ->
+        [normalize(p)]
+
+      %{} = m ->
+        case (Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)) do
+          v when is_binary(v) and v != "" -> [normalize(v)]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+    |> MapSet.new()
+  end
+
+  defp tokens_to_norms(_), do: MapSet.new()
 
   # tolerate structs, maps, strings, anything
   defp activation_of(%Db.BrainCell{activation: a}) when is_number(a), do: a
@@ -424,3 +470,4 @@ defmodule Core.Recall.Execute do
     end
   end
 end
+
