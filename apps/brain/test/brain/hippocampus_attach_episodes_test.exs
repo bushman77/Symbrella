@@ -76,6 +76,7 @@ defmodule Brain.HippocampusAttachEpisodesTest do
     si_low = Hippocampus.attach_episodes(si, min_jaccard: 0.0, limit: 5)
     eps_low = si_low[:evidence][:episodes]
     assert is_list(eps_low)
+
     assert Enum.any?(eps_low, fn %{episode: %{slate: %{winners: ws}}} ->
              Enum.any?(ws, &((&1[:lemma] || &1["lemma"]) == "x"))
            end)
@@ -90,4 +91,3 @@ defmodule Brain.HippocampusAttachEpisodesTest do
            end)
   end
 end
-

@@ -14,7 +14,10 @@ config :symbrella,
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
-  render_errors: [formats: [html: SymbrellaWeb.ErrorHTML, json: SymbrellaWeb.ErrorJSON], layout: false],
+  render_errors: [
+    formats: [html: SymbrellaWeb.ErrorHTML, json: SymbrellaWeb.ErrorJSON],
+    layout: false
+  ],
   pubsub_server: Symbrella.PubSub,
   live_view: [signing_salt: "mkK1WujO"]
 
@@ -31,7 +34,8 @@ config :esbuild,
 config :tailwind,
   version: "3.4.10",
   default: [
-    args: ~w(--config=tailwind.config.js --input=css/app.css --output=../priv/static/assets/app.css),
+    args:
+      ~w(--config=tailwind.config.js --input=css/app.css --output=../priv/static/assets/app.css),
     cd: Path.expand("../apps/symbrella_web/assets", __DIR__)
   ]
 
@@ -67,7 +71,8 @@ config :db, Db,
   log: false
 
 config :db, :embedding_dim, 1536
-config :db, :embedder, MyEmbeddings  # implement MyEmbeddings.embed/1 -> {:ok, [float()]}
+# implement MyEmbeddings.embed/1 -> {:ok, [float()]}
+config :db, :embedder, MyEmbeddings
 
 # ───────── Core defaults ─────────
 config :core,
@@ -79,15 +84,16 @@ config :tesla, disable_deprecated_builder_warning: true
 
 # ───────── Brain (central defaults) ─────────
 config :brain,
-  pmtg_mode: :boost,                 # :boost | :rerun | :none
+  # :boost | :rerun | :none
+  pmtg_mode: :boost,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
   lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
   lifg_stage1_scores_mode: :all,
-  wm_decay_lambda: 0.12,             # per-second exponential decay (≈5.8s half-life)
+  # per-second exponential decay (≈5.8s half-life)
+  wm_decay_lambda: 0.12,
   wm_score_min: 0.0,
   wm_score_max: 1.0
 
 # Env-specific at the very end
 import_config "#{config_env()}.exs"
-

@@ -57,4 +57,3 @@ defmodule Brain.HippocampusRecallTest do
     assert Enum.all?(res, fn r -> r.score > 0.0 end)
   end
 end
-

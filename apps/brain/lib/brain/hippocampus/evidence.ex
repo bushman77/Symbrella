@@ -5,11 +5,20 @@ defmodule Brain.Hippocampus.Evidence do
   def ensure_winners_for_evidence(%{episode: %{slate: slate}} = rec) when is_map(slate) do
     winners =
       cond do
-        is_list(Map.get(slate, :winners))  -> slate.winners
-        is_list(Map.get(slate, "winners")) -> slate["winners"]
-        is_list(Map.get(slate, :tokens))   -> slate.tokens   |> Enum.map(&token_to_winner/1) |> Enum.reject(&is_nil/1)
-        is_list(Map.get(slate, "tokens"))  -> slate["tokens"] |> Enum.map(&token_to_winner/1) |> Enum.reject(&is_nil/1)
-        true -> []
+        is_list(Map.get(slate, :winners)) ->
+          slate.winners
+
+        is_list(Map.get(slate, "winners")) ->
+          slate["winners"]
+
+        is_list(Map.get(slate, :tokens)) ->
+          slate.tokens |> Enum.map(&token_to_winner/1) |> Enum.reject(&is_nil/1)
+
+        is_list(Map.get(slate, "tokens")) ->
+          slate["tokens"] |> Enum.map(&token_to_winner/1) |> Enum.reject(&is_nil/1)
+
+        true ->
+          []
       end
 
     put_in(rec, [:episode, :slate, :winners], winners)
@@ -19,14 +28,14 @@ defmodule Brain.Hippocampus.Evidence do
 
   defp token_to_winner(%{} = t) do
     cond do
-      is_binary(t[:lemma])  -> %{lemma: t[:lemma]}
+      is_binary(t[:lemma]) -> %{lemma: t[:lemma]}
       is_binary(t["lemma"]) -> %{lemma: t["lemma"]}
-      is_binary(t[:norm])   -> %{lemma: t[:norm]}
-      is_binary(t["norm"])  -> %{lemma: t["norm"]}
-      is_binary(t[:word])   -> %{lemma: t[:word]}
-      is_binary(t["word"])  -> %{lemma: t["word"]}
-      is_binary(t[:id])     -> parse_id_winner(t[:id])
-      is_binary(t["id"])    -> parse_id_winner(t["id"])
+      is_binary(t[:norm]) -> %{lemma: t[:norm]}
+      is_binary(t["norm"]) -> %{lemma: t["norm"]}
+      is_binary(t[:word]) -> %{lemma: t[:word]}
+      is_binary(t["word"]) -> %{lemma: t["word"]}
+      is_binary(t[:id]) -> parse_id_winner(t[:id])
+      is_binary(t["id"]) -> parse_id_winner(t["id"])
       true -> nil
     end
   end
@@ -37,8 +46,7 @@ defmodule Brain.Hippocampus.Evidence do
   defp parse_id_winner(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> %{lemma: String.downcase(w)}
-      _       -> nil
+      _ -> nil
     end
   end
 end
-

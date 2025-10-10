@@ -73,4 +73,3 @@ defmodule Brain.HippocampusTelemetryTest do
     flush_telemetry()
   end
 end
-

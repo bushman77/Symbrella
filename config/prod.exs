@@ -11,4 +11,3 @@ config :swoosh, local: false
 
 # Keep prod logs at info
 config :logger, level: :info
-

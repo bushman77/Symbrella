@@ -21,7 +21,7 @@ defmodule Brain.Utils.Safe do
   end
 
   def to_plain(%{} = m), do: m
-  def to_plain(other),   do: other
+  def to_plain(other), do: other
 
   @doc """
   Get a value from a map or struct using an atom **or** string key.
@@ -40,10 +40,11 @@ defmodule Brain.Utils.Safe do
           nil ->
             case safe_to_existing_atom(k) do
               {:ok, k2} -> Map.get(m, k2, default)
-              :error    -> default
+              :error -> default
             end
 
-          v -> v
+          v ->
+            v
         end
     end
   end
@@ -76,4 +77,3 @@ defmodule Brain.Utils.Safe do
     end
   end
 end
-

@@ -13,9 +13,9 @@ defmodule Brain.Hippocampus do
 
   alias Brain.Hippocampus.{Window, Recall, Normalize, Evidence, Config, Telemetry}
 
-  @type slate    :: map()
-  @type meta     :: map()
-  @type episode  :: %{slate: slate(), meta: meta(), norms: MapSet.t()}
+  @type slate :: map()
+  @type meta :: map()
+  @type episode :: %{slate: slate(), meta: meta(), norms: MapSet.t()}
   @type recall_r :: %{score: float(), at: non_neg_integer(), episode: episode()}
 
   ## ─────────────────────────────── Public API ───────────────────────────────
@@ -32,6 +32,7 @@ defmodule Brain.Hippocampus do
 
   @doc """
   Recall prior episodes relevant to `cues` (list/stringy slate/si).
+
   Options (per-call override):
     • :limit, :half_life_ms, :min_jaccard, :scope
     • :ignore_head — :auto | :always | :never | false
@@ -46,13 +47,14 @@ defmodule Brain.Hippocampus do
   """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-    cues  = Keyword.get(opts, :cues, si)
+    cues = Keyword.get(opts, :cues, si)
     opts2 = Keyword.put_new(opts, :ignore_head, false)
 
     episodes =
       __MODULE__.recall(cues, opts2)
       |> Enum.map(&Evidence.ensure_winners_for_evidence/1)
 
+    # keep other evidence keys intact
     evidence = Map.get(si, :evidence) || %{}
     Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
   end
@@ -80,44 +82,64 @@ defmodule Brain.Hippocampus do
 
   @impl true
   def handle_call({:encode, slate, meta}, from, state) do
-    now = System.system_time(:millisecond)
+    case Application.get_env(:brain, :episodes_mode, :on) do
+      :off ->
+        Telemetry.emit_write(%{window_size: length(state.window)}, %{meta: meta, skipped: true})
 
-    ep = %{
-      slate: slate,
-      meta: meta,
-      norms:
-        slate
-        |> Normalize.extract_norms_from_any()
-        |> Enum.reject(&Normalize.empty?/1)
-        |> MapSet.new()
-    }
+        Telemetry.maybe_echo_to_caller(
+          from,
+          [:brain, :hippocampus, :write],
+          %{window_size: length(state.window)},
+          %{meta: meta, skipped: true}
+        )
 
-    window2 = Window.append_or_refresh_head(state.window, ep, state.window_keep)
+        {:reply, :ok, state}
 
-    Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta})
-    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], %{window_size: length(window2)}, %{meta: meta})
+      _ ->
+        ep = %{
+          slate: slate,
+          meta: meta,
+          norms:
+            slate
+            |> Normalize.extract_norms_from_any()
+            |> Enum.reject(&Normalize.empty?/1)
+            |> MapSet.new()
+        }
 
-    new_last =
-      case window2 do
-        [{^now, e} | _] -> {now, e}
-        [{at, e} | _] when is_integer(at) -> {at, e}
-        _ -> nil
-      end
+        window2 = Window.append_or_refresh_head(state.window, ep, state.window_keep)
 
-    {:reply, :ok, %{state | window: window2, last: new_last}}
+        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta})
+
+        Telemetry.maybe_echo_to_caller(
+          from,
+          [:brain, :hippocampus, :write],
+          %{window_size: length(window2)},
+          %{meta: meta}
+        )
+
+        new_last =
+          case window2 do
+            [{at, e} | _] when is_integer(at) -> {at, e}
+            _ -> nil
+          end
+
+        {:reply, :ok, %{state | window: window2, last: new_last}}
+    end
   end
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
-    window       = state.window
-    limit        = Map.get(opts, :limit, state.opts.recall_limit)
-    half_life_ms = Config.normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
-    min_jacc     = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
-    scope_opt    = Map.get(opts, :scope, nil)
-    ignore_head  = Map.get(opts, :ignore_head, :auto)
+    limit = Map.get(opts, :limit, state.opts.recall_limit)
 
-    {scored, meas, meta_map} =
-      Recall.run(cues, window,
+    half_life_ms =
+      Config.normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
+
+    min_jacc = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
+    scope_opt = Map.get(opts, :scope, nil)
+    ignore_head = Map.get(opts, :ignore_head, :auto)
+
+    {ranked, meas, meta_map} =
+      Recall.run(cues, state.window,
         limit: limit,
         half_life_ms: half_life_ms,
         min_jaccard: min_jacc,
@@ -128,7 +150,7 @@ defmodule Brain.Hippocampus do
     Telemetry.emit_recall(meas, meta_map)
     Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, meta_map)
 
-    {:reply, scored, state}
+    {:reply, ranked, state}
   end
 
   @impl true
@@ -160,7 +182,8 @@ defmodule Brain.Hippocampus do
       |> Map.put(:recall_limit, recall_limit)
       |> Map.put(:min_jaccard, min_jaccard)
 
-    {:reply, :ok, %{state | window_keep: keep, opts: new_opts, window: Window.trim(state.window, keep)}}
+    {:reply, :ok,
+     %{state | window_keep: keep, opts: new_opts, window: Window.trim(state.window, keep)}}
   end
 
   @impl true
@@ -177,12 +200,11 @@ defmodule Brain.Hippocampus do
       window: [],
       last: nil,
       opts: %{
-        window_keep:   Config.defaults().window_keep,
-        half_life_ms:  Config.defaults().half_life_ms,
-        recall_limit:  Config.defaults().recall_limit,
-        min_jaccard:   Config.defaults().min_jaccard
+        window_keep: Config.defaults().window_keep,
+        half_life_ms: Config.defaults().half_life_ms,
+        recall_limit: Config.defaults().recall_limit,
+        min_jaccard: Config.defaults().min_jaccard
       }
     }
   end
 end
-

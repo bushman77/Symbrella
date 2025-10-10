@@ -2,7 +2,14 @@ defmodule Brain.LIFG.Stage1 do
   @moduledoc """
   Stage 1 — fast per-token disambiguation from `si.sense_candidates`.
 
-  Options:
+  ## Guardrail highlights (P-202)
+  • HARD REJECT: char-grams → emits [:brain,:lifg,:chargram_violation] and drops.
+  • BOUNDARY GUARD: non word-boundary substrings dropped unless `mw: true`,
+    emits [:brain,:lifg,:boundary_drop].
+  • Deterministic tie-breaks, safe spans, and clause-aware "what" nudges.
+  • Optional MWE fallback injection, emits [:brain,:pmtg,:mwe_fallback_emitted].
+
+  ### Options
     :weights          — %{lex_fit, rel_prior, activation, intent_bias}
     :scores           — :all | :top2 | :none (default from `:lifg_stage1_scores_mode`)
     :chargram_event   — telemetry (default [:brain, :lifg, :chargram_violation])
@@ -19,10 +26,10 @@ defmodule Brain.LIFG.Stage1 do
   @type choice ::
           %{
             required(:token_index) => non_neg_integer(),
-            required(:chosen_id)   => String.t(),
-            required(:alt_ids)     => [String.t()],
-            required(:margin)      => float(),
-            optional(:scores)      => map()
+            required(:chosen_id) => String.t(),
+            required(:alt_ids) => [String.t()],
+            required(:margin) => float(),
+            optional(:scores) => map()
           }
 
   @spec run(si(), keyword()) ::
@@ -31,7 +38,7 @@ defmodule Brain.LIFG.Stage1 do
     try do
       t0 = System.monotonic_time()
 
-      # --- NEW: inject MWE fallback candidates (feature-flagged) -------------
+      # NEW (feature-flagged): inject fallback MWE candidates if needed
       si1 = ensure_mwe_candidates(si, opts)
 
       tokens = Map.get(si1, :tokens, [])
@@ -43,9 +50,12 @@ defmodule Brain.LIFG.Stage1 do
         end
 
       {kept_tokens, dropped} = guard_tokens(tokens, si1, opts)
-      scores_mode      = Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+
+      scores_mode =
+        Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+
       margin_threshold = Keyword.get(opts, :margin_threshold, 0.15)
-      w                = weights(opts)
+      w = weights(opts)
 
       choices =
         kept_tokens
@@ -89,7 +99,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp guard_tokens(tokens, si, opts) when is_list(tokens) and is_map(si) do
     char_ev = Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
-    bnd_ev  = Keyword.get(opts, :boundary_event,  [:brain, :lifg, :boundary_drop])
+    bnd_ev = Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
 
     Enum.reduce(tokens, {[], []}, fn tok, {kept, dropped} ->
       cond do
@@ -99,6 +109,7 @@ defmodule Brain.LIFG.Stage1 do
             phrase: Map.get(tok, :phrase),
             span: tok_span(tok)
           })
+
           {kept, [tok | dropped]}
 
         not boundary_ok?(tok, si) ->
@@ -108,6 +119,7 @@ defmodule Brain.LIFG.Stage1 do
             span: tok_span(tok),
             mw: Map.get(tok, :mw, false)
           })
+
           {kept, [tok | dropped]}
 
         true ->
@@ -130,14 +142,14 @@ defmodule Brain.LIFG.Stage1 do
       true
     else
       phrase = (Map.get(tok, :phrase) || "") |> to_string() |> String.trim()
-      n      = Map.get(tok, :n, 1)
-      mw?    = Map.get(tok, :mw, false)
+      n = Map.get(tok, :n, 1)
+      mw? = Map.get(tok, :mw, false)
 
-      short?      = String.length(phrase) <= 2
+      short? = String.length(phrase) <= 2
       unigramish? = n == 1 and not String.contains?(phrase, " ")
 
       # treat as char-gram when short, unigram, misaligned (and not mw)
-      unigramish? and short? and (not boundary_ok?(Map.put(tok, :mw, false), si)) and (not mw?)
+      unigramish? and short? and not boundary_ok?(Map.put(tok, :mw, false), si) and not mw?
     end
   end
 
@@ -162,7 +174,7 @@ defmodule Brain.LIFG.Stage1 do
         {s, e} = tok_span(tok)
         len = String.length(sentence)
 
-        left_ok?  = s == 0 or not letter_or_number?(String.at(sentence, s - 1))
+        left_ok? = s == 0 or not letter_or_number?(String.at(sentence, s - 1))
         right_ok? = e >= len or not letter_or_number?(String.at(sentence, e))
         left_ok? and right_ok?
     end
@@ -172,6 +184,7 @@ defmodule Brain.LIFG.Stage1 do
   defp tok_span(%{span: {s, e}}) when is_integer(s) and is_integer(e), do: {s, e}
   defp tok_span(%{start: s, stop: e}) when is_integer(s) and is_integer(e), do: {s, e}
   defp tok_span(%{start: s, length: len}) when is_integer(s) and is_integer(len), do: {s, s + len}
+
   defp tok_span(%{index: i} = tok) when is_integer(i) do
     # conservative guess: use token length if we can, else 1 char
     phrase_len =
@@ -193,17 +206,16 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp letter_or_number?(nil), do: false
-  defp letter_or_number?(ch),  do: String.match?(ch, ~r/[\p{L}\p{N}]/u)
+  defp letter_or_number?(ch), do: String.match?(ch, ~r/[\p{L}\p{N}]/u)
 
   # ── Per-token disambiguation ────────────────────────────────────────
-  # Produces probabilities (softmax over raw) and margin = p1 - p2.
 
   defp disambiguate_token(%{} = tok, cand_list, opts) when is_list(cand_list) do
-    idx         = Map.get(tok, :index, 0)
-    thr         = Keyword.get(opts, :margin_threshold, 0.15)
+    idx = Map.get(tok, :index, 0)
+    thr = Keyword.get(opts, :margin_threshold, 0.15)
     scores_mode = Keyword.get(opts, :scores, :all)
-    w           = Map.new(Keyword.get(opts, :weights, []), fn {k, v} -> {k, v} end)
-    si          = Keyword.get(opts, :si, %{})
+    w = Map.new(Keyword.get(opts, :weights, []), fn {k, v} -> {k, v} end)
+    si = Keyword.get(opts, :si, %{})
 
     cand_list =
       cand_list
@@ -212,28 +224,30 @@ defmodule Brain.LIFG.Stage1 do
       |> Enum.reject(&(is_nil(&1.id) or not is_binary(&1.id)))
       |> Enum.uniq_by(& &1.id)
       |> prefer_salutation_interjection(tok)
-      |> prefer_pronoun_for_I(tok)          # covers I / I'm / im
-      |> prefer_interrogative_what(tok, si) # prefer interrogative "what" in clause frames
+      # covers I / I'm / im
+      |> prefer_pronoun_for_I(tok)
+      # prefer interrogative "what" in clause frames
+      |> prefer_interrogative_what(tok, si)
       |> compat_filter_for_token(tok)
 
     raw_scored =
       Enum.map(cand_list, fn c ->
         f = extract_features(c, tok, si)
 
-        lex  = as_float(f[:lex_fit])
-        rel  = as_float(f[:rel_prior])
-        act  = as_float(f[:activation])
-        ib   = as_float(f[:intent_bias])
+        lex = as_float(f[:lex_fit])
+        rel = as_float(f[:rel_prior])
+        act = as_float(f[:activation])
+        ib = as_float(f[:intent_bias])
 
         # base + micro nudges
         bias = context_bias(c, tok, si) + dialect_penalty(c, si)
 
         base =
-          (w[:lex_fit]     || 0.4) * lex +
-          (w[:rel_prior]   || 0.3) * rel +
-          (w[:activation]  || 0.2) * act +
-          (w[:intent_bias] || 0.1) * ib +
-          bias
+          (w[:lex_fit] || 0.4) * lex +
+            (w[:rel_prior] || 0.3) * rel +
+            (w[:activation] || 0.2) * act +
+            (w[:intent_bias] || 0.1) * ib +
+            bias
 
         # deterministic micro-nudge to break ties without randomness
         eps = :erlang.phash2(c.id, 1000) / 1_000_000.0
@@ -309,11 +323,16 @@ defmodule Brain.LIFG.Stage1 do
     if sal? do
       greet =
         Enum.filter(list, fn c when is_map(c) ->
-          pos  = extract_pos(c)
-          defn = (Map.get(c, :definition) || get_in(c, [:features, :definition]) || "")
-                 |> to_string() |> String.downcase()
-          syns = (Map.get(c, :synonyms) || get_in(c, [:features, :synonyms]) || [])
-                 |> Enum.map(&String.downcase/1)
+          pos = extract_pos(c)
+
+          defn =
+            (Map.get(c, :definition) || get_in(c, [:features, :definition]) || "")
+            |> to_string()
+            |> String.downcase()
+
+          syns =
+            (Map.get(c, :synonyms) || get_in(c, [:features, :synonyms]) || [])
+            |> Enum.map(&String.downcase/1)
 
           String.contains?(pos, "interjection") and
             (String.contains?(defn, "greet") or Enum.any?(syns, &(&1 == "greeting")))
@@ -336,7 +355,9 @@ defmodule Brain.LIFG.Stage1 do
     norm = String.downcase(phrase)
 
     if phrase == "I" or norm in ["i'm", "i’m", "im"] do
-      pronounish = Enum.filter(list, fn c when is_map(c) -> pos_pronoun?(c) or id_pronounish?(c) end)
+      pronounish =
+        Enum.filter(list, fn c when is_map(c) -> pos_pronoun?(c) or id_pronounish?(c) end)
+
       if pronounish == [], do: list, else: pronounish
     else
       list
@@ -345,8 +366,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp prefer_pronoun_for_I(list, _tok), do: list
 
-  # Prefer interrogative/determiner/relative "what" when followed by pronouny or clause-opening patterns.
-  # Also, if locale is not SG, demote indefinite “thing/stuff” senses.
+  # Prefer interrogative/determiner/relative "what" for clause openings
   defp prefer_interrogative_what(list, tok, si)
        when is_list(list) and is_map(tok) and is_map(si) do
     norm =
@@ -357,7 +377,7 @@ defmodule Brain.LIFG.Stage1 do
     if norm != "what" do
       list
     else
-      nx  = next_token_phrase(tok, si)  |> normalize_apostrophe() |> String.downcase()
+      nx = next_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
       nx2 = next2_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
 
       pronouny_follow? =
@@ -369,13 +389,13 @@ defmodule Brain.LIFG.Stage1 do
       interrogativeish =
         Enum.filter(list, fn c when is_map(c) ->
           pos = extract_pos(c)
-          id  = (c[:id] || "") |> to_string() |> String.downcase()
+          id = (c[:id] || "") |> to_string() |> String.downcase()
 
           String.contains?(pos, "pron") or
-          String.contains?(pos, "det") or
-          String.contains?(pos, "interrog") or
-          String.contains?(id,  "pron") or
-          String.contains?(id,  "det")
+            String.contains?(pos, "det") or
+            String.contains?(pos, "interrog") or
+            String.contains?(id, "pron") or
+            String.contains?(id, "det")
         end)
 
       cond do
@@ -415,7 +435,7 @@ defmodule Brain.LIFG.Stage1 do
 
   # ---- lookahead helpers --------------------------------------------
 
-  defp next_token_phrase(tok, si),  do: lookahead_phrases(tok, si) |> elem(0)
+  defp next_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(0)
   defp next2_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(1)
 
   # Returns {nx1, nx2} of the next two non-chargram phrases ("" if missing)
@@ -424,13 +444,15 @@ defmodule Brain.LIFG.Stage1 do
 
     idx =
       case Map.get(tok, :index) do
-        i when is_integer(i) -> i
+        i when is_integer(i) ->
+          i
+
         _ ->
           Enum.find_index(tokens, fn t ->
             t === tok or
-            (Map.get(t, :id) == Map.get(tok, :id) and
-               (tok_span(t) == tok_span(tok) or
-                (Map.get(t, :phrase) || "") == (Map.get(tok, :phrase) || "")))
+              (Map.get(t, :id) == Map.get(tok, :id) and
+                 (tok_span(t) == tok_span(tok) or
+                    (Map.get(t, :phrase) || "") == (Map.get(tok, :phrase) || "")))
           end) || -1
       end
 
@@ -439,26 +461,26 @@ defmodule Brain.LIFG.Stage1 do
       |> Enum.drop(idx + 1)
       |> Enum.filter(fn t ->
         kind = Map.get(t, :kind) || Map.get(t, "kind")
-        src  = Map.get(t, :source)
+        src = Map.get(t, :source)
         not (kind in [:chargram, "chargram"] or src in [:chargram, "chargram"])
       end)
       |> Enum.flat_map(fn t ->
         v =
           Map.get(t, :phrase) || Map.get(t, "phrase") ||
-          Map.get(t, :norm)   || Map.get(t, "norm")   ||
-          Map.get(t, :text)   || Map.get(t, "text")
+            Map.get(t, :norm) || Map.get(t, "norm") ||
+            Map.get(t, :text) || Map.get(t, "text")
 
         cond do
-          is_nil(v)    -> []
+          is_nil(v) -> []
           is_binary(v) -> [v]
-          true         -> [to_string(v)]
+          true -> [to_string(v)]
         end
       end)
 
     case words do
       [a, b | _] -> {a, b}
-      [a]        -> {a, ""}
-      _          -> {"", ""}
+      [a] -> {a, ""}
+      _ -> {"", ""}
     end
   end
 
@@ -474,10 +496,10 @@ defmodule Brain.LIFG.Stage1 do
         get_in(c, ["features", "pos"])
 
     cond do
-      is_nil(p)     -> false
-      is_atom(p)    -> p |> Atom.to_string() |> String.downcase() |> String.contains?("pron")
-      is_binary(p)  -> p |> String.downcase() |> String.contains?("pron")
-      true          -> false
+      is_nil(p) -> false
+      is_atom(p) -> p |> Atom.to_string() |> String.downcase() |> String.contains?("pron")
+      is_binary(p) -> p |> String.downcase() |> String.contains?("pron")
+      true -> false
     end
   end
 
@@ -499,7 +521,9 @@ defmodule Brain.LIFG.Stage1 do
     kept =
       Enum.filter(list, fn c when is_map(c) ->
         case sense_lemma(c) do
-          nil   -> true
+          nil ->
+            true
+
           lemma ->
             has_space = String.contains?(lemma, " ")
             if mwe?, do: has_space, else: not has_space
@@ -520,8 +544,8 @@ defmodule Brain.LIFG.Stage1 do
        Map.get(c, :word))
     |> case do
       nil -> nil
-      ""  -> nil
-      v   -> to_string(v)
+      "" -> nil
+      v -> to_string(v)
     end
   end
 
@@ -553,23 +577,26 @@ defmodule Brain.LIFG.Stage1 do
     pos = (base[:pos] || extract_pos(c) || "") |> to_string()
 
     %{
-      lex_fit:     as_float(base[:lex_fit]     || lexical_hint(c, tok, si)),
-      rel_prior:   as_float(base[:rel_prior]   || prior_from_id_rank(to_string(c[:id] || "")) || prior_from_pos(pos)),
-      activation:  as_float(base[:activation]  || c[:activation] || 0.0),
+      lex_fit: as_float(base[:lex_fit] || lexical_hint(c, tok, si)),
+      rel_prior:
+        as_float(
+          base[:rel_prior] || prior_from_id_rank(to_string(c[:id] || "")) || prior_from_pos(pos)
+        ),
+      activation: as_float(base[:activation] || c[:activation] || 0.0),
       intent_bias: as_float(base[:intent_bias] || salutation_bias(tok, pos) || 0.0),
-      pos:         pos
+      pos: pos
     }
   end
 
   # Derive a reasonably informative feature set when none exist.
   defp derive_features(tok, c) do
     phrase = to_string(Map.get(tok, :phrase, ""))
-    id     = to_string(Map.get(c, :id, ""))
-    lemma  = sense_lemma(c) || to_string(Map.get(c, :word, ""))
-    pos    = extract_pos(c)
+    id = to_string(Map.get(c, :id, ""))
+    lemma = sense_lemma(c) || to_string(Map.get(c, :word, ""))
+    pos = extract_pos(c)
 
-    n     = Map.get(tok, :n, 1)
-    mwe?  = n > 1 or (Map.get(tok, :mw) || false)
+    n = Map.get(tok, :n, 1)
+    mwe? = n > 1 or (Map.get(tok, :mw) || false)
     space = String.contains?(lemma, " ")
 
     lex_fit =
@@ -582,12 +609,12 @@ defmodule Brain.LIFG.Stage1 do
       end
 
     %{
-      lex_fit:     lex_fit,
-      rel_prior:   prior_from_id_rank(id) || prior_from_pos(pos),
-      activation:  (Map.get(c, :activation) || 0.0) * 1.0,
+      lex_fit: lex_fit,
+      rel_prior: prior_from_id_rank(id) || prior_from_pos(pos),
+      activation: (Map.get(c, :activation) || 0.0) * 1.0,
       intent_bias: salutation_bias(tok, pos),
-      pos:         pos,
-      lemma:       lemma
+      pos: pos,
+      lemma: lemma
     }
   end
 
@@ -607,16 +634,22 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp salutation_bias(tok, pos) do
-    phrase   = to_string(Map.get(tok, :phrase, ""))
-    at_start = case tok_span(tok) do {0, _} -> true; _ -> Map.get(tok, :index, 0) == 0 end
-    is_sal   = Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) or at_start
+    phrase = to_string(Map.get(tok, :phrase, ""))
+
+    at_start =
+      case tok_span(tok) do
+        {0, _} -> true
+        _ -> Map.get(tok, :index, 0) == 0
+      end
+
+    is_sal = Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) or at_start
     is_interj = String.contains?(String.downcase(to_string(pos)), "interjection")
     if is_sal and is_interj, do: 0.30, else: 0.0
   end
 
   defp mapify(bin) when is_binary(bin), do: %{id: bin}
   defp mapify(%_{} = s), do: Map.from_struct(s)
-  defp mapify(%{} = m),   do: m
+  defp mapify(%{} = m), do: m
 
   defp extract_pos(c) do
     (Map.get(c, :pos) || get_in(c, [:features, :pos]) || "")
@@ -630,9 +663,14 @@ defmodule Brain.LIFG.Stage1 do
           _ -> ""
         end
 
-      p when is_binary(p) -> String.downcase(p)
-      p when is_atom(p)   -> p |> Atom.to_string() |> String.downcase()
-      _ -> ""
+      p when is_binary(p) ->
+        String.downcase(p)
+
+      p when is_atom(p) ->
+        p |> Atom.to_string() |> String.downcase()
+
+      _ ->
+        ""
     end
   end
 
@@ -641,16 +679,17 @@ defmodule Brain.LIFG.Stage1 do
     cond do
       pos == "" -> 0.00
       String.contains?(pos, "interjection") -> 0.06
-      String.contains?(pos, "noun")         -> 0.04
-      String.contains?(pos, "verb")         -> 0.03
-      String.contains?(pos, "pron")         -> 0.03
-      String.contains?(pos, "adv")          -> 0.02
-      true                                  -> 0.01
+      String.contains?(pos, "noun") -> 0.04
+      String.contains?(pos, "verb") -> 0.03
+      String.contains?(pos, "pron") -> 0.03
+      String.contains?(pos, "adv") -> 0.02
+      true -> 0.01
     end
   end
 
   defp lexical_hint(c, tok, _si) do
-    phrase = (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "") |> to_string() |> String.downcase()
+    phrase =
+      (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "") |> to_string() |> String.downcase()
 
     lemma =
       (Map.get(c, :lemma) || Map.get(c, :word) || get_in(c, [:features, :lemma]) || "")
@@ -663,17 +702,19 @@ defmodule Brain.LIFG.Stage1 do
   # Add small context nudges; also add clause-aware "what" bias
   defp context_bias(c, tok, si) do
     phrase = (Map.get(tok, :phrase) || "") |> to_string()
-    pos    = extract_pos(c)
+    pos = extract_pos(c)
 
     base =
       0.0
       |> Kernel.+(
         if Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) and String.contains?(pos, "interjection"),
-          do: 0.08, else: 0.0
+          do: 0.08,
+          else: 0.0
       )
       |> Kernel.+(
         if String.downcase(phrase) == "there" and String.contains?(pos, "noun"),
-          do: 0.03, else: 0.0
+          do: 0.03,
+          else: 0.0
       )
 
     base + what_clause_bias(c, tok, si)
@@ -688,26 +729,28 @@ defmodule Brain.LIFG.Stage1 do
     if norm != "what" do
       0.0
     else
-      nx  = next_token_phrase(tok, si)  |> normalize_apostrophe() |> String.downcase()
+      nx = next_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
       nx2 = next2_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
       lang = locale(si)
 
       pronouny = nx in ~w(im i'm i’m i we you you're we're he she they it)
-      verbish  = nx2 in ~w(try trying mean meant want thinking think doing do say saying going gonna)
+
+      verbish =
+        nx2 in ~w(try trying mean meant want thinking think doing do say saying going gonna)
 
       if pronouny or verbish do
         pos = extract_pos(c)
-        id  = (c[:id] || "") |> to_string() |> String.downcase()
+        id = (c[:id] || "") |> to_string() |> String.downcase()
 
         det_pron_interrog =
           String.contains?(pos, "pron") or
-          String.contains?(pos, "det") or
-          String.contains?(pos, "interrog")
+            String.contains?(pos, "det") or
+            String.contains?(pos, "interrog")
 
         particleish =
           String.contains?(pos, "part") or
-          String.contains?(id,  "part") or
-          String.contains?(pos, "intj")
+            String.contains?(id, "part") or
+            String.contains?(pos, "intj")
 
         cond do
           det_pron_interrog -> 0.15
@@ -741,7 +784,7 @@ defmodule Brain.LIFG.Stage1 do
 
   # Penalize dialectal/marked senses unless locale matches
   defp dialect_penalty(c, si) do
-    reg  = regional_marker(c)
+    reg = regional_marker(c)
     lang = locale(si)
 
     cond do
@@ -754,7 +797,7 @@ defmodule Brain.LIFG.Stage1 do
   # ── Utils ───────────────────────────────────────────────────────────
 
   defp weights(opts) when is_list(opts) do
-    env  = Application.get_env(:brain, :lifg_stage1_weights, %{})
+    env = Application.get_env(:brain, :lifg_stage1_weights, %{})
     base = %{lex_fit: 0.4, rel_prior: 0.3, activation: 0.2, intent_bias: 0.1}
 
     base
@@ -772,22 +815,26 @@ defmodule Brain.LIFG.Stage1 do
 
   defp as_int(nil, d), do: d
   defp as_int(i, _d) when is_integer(i), do: i
+
   defp as_int(b, d) when is_binary(b) do
     case Integer.parse(b) do
       {n, _} -> n
       _ -> d
     end
   end
+
   defp as_int(_, d), do: d
 
   defp as_float(nil), do: 0.0
   defp as_float(n) when is_number(n), do: n * 1.0
+
   defp as_float(b) when is_binary(b) do
     case Float.parse(b) do
       {f, _} -> f
       _ -> 0.0
     end
   end
+
   defp as_float(_), do: 0.0
 
   # ── NEW: MWE fallback injector (brain-local, no Core deps) ──────────
@@ -795,7 +842,13 @@ defmodule Brain.LIFG.Stage1 do
   # If a multiword token (n>1 or mw: true) has no compatible MWE senses,
   # synthesize a conservative phrase candidate so Stage-1 can score it.
   defp ensure_mwe_candidates(%{tokens: tokens} = si, opts) when is_list(tokens) do
-    enable? = Keyword.get(opts, :mwe_fallback, Application.get_env(:brain, :lifg_stage1_mwe_fallback, true))
+    enable? =
+      Keyword.get(
+        opts,
+        :mwe_fallback,
+        Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
+      )
+
     unless enable?, do: si
 
     sc0 = Map.get(si, :sense_candidates, %{})
@@ -803,8 +856,8 @@ defmodule Brain.LIFG.Stage1 do
     {sc, emitted} =
       Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
         token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
-        phrase  = Map.get(tok, :phrase) || Map.get(tok, :lemma)
-        mw?     = Map.get(tok, :mw, token_n > 1)
+        phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
+        mw? = Map.get(tok, :mw, token_n > 1)
 
         cond do
           not mw? or is_nil(phrase) ->
@@ -818,7 +871,10 @@ defmodule Brain.LIFG.Stage1 do
               [idx - 1, idx + 1]
               |> Enum.filter(&(&1 >= 0))
               |> Enum.map(fn j ->
-                acc |> Map.get(j, []) |> Enum.map(&Map.get(&1, :score, 0.0)) |> Enum.max(fn -> 0.0 end)
+                acc
+                |> Map.get(j, [])
+                |> Enum.map(&Map.get(&1, :score, 0.0))
+                |> Enum.max(fn -> 0.0 end)
               end)
               |> case do
                 [] -> 0.25
@@ -838,7 +894,13 @@ defmodule Brain.LIFG.Stage1 do
             }
 
             updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
-            emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{token_index: idx, phrase: phrase, score: candidate.score})
+
+            emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
+              token_index: idx,
+              phrase: phrase,
+              score: candidate.score
+            })
+
             {updated, n + 1}
         end
       end)
@@ -852,9 +914,8 @@ defmodule Brain.LIFG.Stage1 do
     sc
     |> Map.get(idx, [])
     |> Enum.any?(fn c ->
-      norm = (c[:norm] || c["norm"] || c[:lemma] || c["lemma"] || "")
+      norm = c[:norm] || c["norm"] || c[:lemma] || c["lemma"] || ""
       String.contains?(norm, " ")
     end)
   end
 end
-

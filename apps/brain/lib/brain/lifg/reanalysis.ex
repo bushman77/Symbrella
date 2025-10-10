@@ -18,7 +18,7 @@ defmodule Brain.LIFG.Reanalysis do
       Map.merge(choice, %{
         chosen_id: second.id,
         scores: Map.get(second, :scores, %{}),
-        total:  Map.get(second, :total, 0.0),
+        total: Map.get(second, :total, 0.0),
         audit: Map.merge(choice.audit || %{}, %{reanalysis: %{from: top.id, to: second.id}})
       })
     else
@@ -28,4 +28,3 @@ defmodule Brain.LIFG.Reanalysis do
 
   def maybe_promote(choice), do: choice
 end
-

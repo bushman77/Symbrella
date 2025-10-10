@@ -32,8 +32,10 @@ defmodule Brain.LIFG.TripwireTest do
     si = %{
       sentence: "Kick the ball",
       tokens: [
-        %{index: 0, phrase: "ck t", span: {1, 5}, n: 1, mw: false}, # should drop
-        %{index: 1, phrase: "Kick", span: {0, 4}, n: 1, mw: false}  # should keep
+        # should drop
+        %{index: 0, phrase: "ck t", span: {1, 5}, n: 1, mw: false},
+        # should keep
+        %{index: 1, phrase: "Kick", span: {0, 4}, n: 1, mw: false}
       ],
       sense_candidates: %{
         0 => ["junk"],
@@ -51,4 +53,3 @@ defmodule Brain.LIFG.TripwireTest do
     assert Enum.any?(events, &match?(%{token_index: 0, phrase: "ck t"}, &1))
   end
 end
-

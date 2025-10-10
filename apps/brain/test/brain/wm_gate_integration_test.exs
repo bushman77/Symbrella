@@ -6,8 +6,16 @@ defmodule WMGateIntegrationTest do
     si = %{
       tokens: [%{index: 0, phrase: "this"}],
       active_cells: [
-        %{token_index: 0, id: "THIS/strong", features: %{lex_fit: 0.9, rel_prior: 0.6, activation: 0.0, intent_bias: 0.0}},
-        %{token_index: 0, id: "THIS/weak",   features: %{lex_fit: 0.7, rel_prior: 0.6, activation: 0.0, intent_bias: 0.0}}
+        %{
+          token_index: 0,
+          id: "THIS/strong",
+          features: %{lex_fit: 0.9, rel_prior: 0.6, activation: 0.0, intent_bias: 0.0}
+        },
+        %{
+          token_index: 0,
+          id: "THIS/weak",
+          features: %{lex_fit: 0.7, rel_prior: 0.6, activation: 0.0, intent_bias: 0.0}
+        }
       ]
     }
 
@@ -25,4 +33,3 @@ defmodule WMGateIntegrationTest do
     assert is_list(out.inhibitions)
   end
 end
-

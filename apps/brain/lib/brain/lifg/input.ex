@@ -34,17 +34,22 @@ defmodule Brain.LIFG.Input do
     m = Safe.to_plain(any_map)
 
     cond do
-      is_list(Safe.get(m, :lifg_candidates))    -> Safe.get(m, :lifg_candidates)
-      is_list(Safe.get(m, :candidates))         -> Safe.get(m, :candidates)
-      is_list(Safe.get(m, :sense_candidates))   -> Safe.get(m, :sense_candidates)
+      is_list(Safe.get(m, :lifg_candidates)) ->
+        Safe.get(m, :lifg_candidates)
 
-      is_map(Safe.get(m, :sense_candidates))    ->
+      is_list(Safe.get(m, :candidates)) ->
+        Safe.get(m, :candidates)
+
+      is_list(Safe.get(m, :sense_candidates)) ->
+        Safe.get(m, :sense_candidates)
+
+      is_map(Safe.get(m, :sense_candidates)) ->
         flatten_candidate_groups(Safe.get(m, :sense_candidates))
 
       is_map(Safe.get(m, :candidates_by_token)) ->
         flatten_candidate_groups(Safe.get(m, :candidates_by_token))
 
-      is_list(Safe.get(m, :active_cells))       ->
+      is_list(Safe.get(m, :active_cells)) ->
         candidates_from_active_cells(Safe.get(m, :active_cells))
 
       is_list(Safe.get(Safe.get(m, :slate, %{}), :winners)) ->
@@ -69,9 +74,14 @@ defmodule Brain.LIFG.Input do
     m = Safe.to_plain(any_map)
 
     cond do
-      is_map(Safe.get(m, :sense_candidates))    -> normalize_slate_map(Safe.get(m, :sense_candidates))
-      is_map(Safe.get(m, :candidates_by_token)) -> normalize_slate_map(Safe.get(m, :candidates_by_token))
-      true                                      -> group_by_token_index(lifg_candidates!(m))
+      is_map(Safe.get(m, :sense_candidates)) ->
+        normalize_slate_map(Safe.get(m, :sense_candidates))
+
+      is_map(Safe.get(m, :candidates_by_token)) ->
+        normalize_slate_map(Safe.get(m, :candidates_by_token))
+
+      true ->
+        group_by_token_index(lifg_candidates!(m))
     end
   end
 
@@ -82,9 +92,10 @@ defmodule Brain.LIFG.Input do
   defp group_by_token_index(cands) when is_list(cands) do
     cands
     |> Enum.reduce(%{}, fn c, acc ->
-      c1  = Safe.to_plain(c)
+      c1 = Safe.to_plain(c)
+
       idx =
-        case (c1[:token_index] || c1["token_index"]) do
+        case c1[:token_index] || c1["token_index"] do
           i when is_integer(i) -> i
           _ -> 0
         end
@@ -100,13 +111,17 @@ defmodule Brain.LIFG.Input do
     |> Enum.into(%{}, fn {tidx, senses} ->
       idx =
         case tidx do
-          i when is_integer(i) -> i
+          i when is_integer(i) ->
+            i
+
           b when is_binary(b) ->
             case Integer.parse(b) do
               {n, _} -> n
               _ -> 0
             end
-          _ -> 0
+
+          _ ->
+            0
         end
 
       list =
@@ -128,13 +143,17 @@ defmodule Brain.LIFG.Input do
     |> Enum.flat_map(fn {tidx, senses} ->
       idx =
         case tidx do
-          i when is_integer(i) -> i
+          i when is_integer(i) ->
+            i
+
           b when is_binary(b) ->
             case Integer.parse(b) do
               {n, _} -> n
               _ -> 0
             end
-          _ -> 0
+
+          _ ->
+            0
         end
 
       senses
@@ -156,11 +175,11 @@ defmodule Brain.LIFG.Input do
 
       id =
         Safe.get(w, :id) ||
-        Safe.get(w, :chosen_id) ||
-        Safe.get(w, :lemma) ||
-        Safe.get(w, :word)
+          Safe.get(w, :chosen_id) ||
+          Safe.get(w, :lemma) ||
+          Safe.get(w, :word)
 
-      %{token_index: Safe.get(w, :token_index, idx), id: (id && to_string(id))}
+      %{token_index: Safe.get(w, :token_index, idx), id: id && to_string(id)}
     end)
     |> Enum.reject(fn c -> is_nil(c.id) or c.id == "" end)
   end
@@ -168,8 +187,8 @@ defmodule Brain.LIFG.Input do
   defp candidates_from_active_cells(ac) when is_list(ac) do
     ac
     |> Enum.flat_map(fn cell ->
-      cell   = Safe.to_plain(cell)
-      idx    = Safe.get(cell, :token_index, 0)
+      cell = Safe.to_plain(cell)
+      idx = Safe.get(cell, :token_index, 0)
       scores = Safe.get(cell, :scores)
 
       cond do
@@ -185,7 +204,7 @@ defmodule Brain.LIFG.Input do
           s = Safe.get(cell, :score, 0.0)
           [%{token_index: idx, id: to_string(id), score: s * 1.0}]
 
-        lemma = (Safe.get(cell, :lemma) || Safe.get(cell, :word)) ->
+        lemma = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
           s = Safe.get(cell, :score, 0.0)
           [%{token_index: idx, id: to_string(lemma), score: s * 1.0}]
 
@@ -195,4 +214,3 @@ defmodule Brain.LIFG.Input do
     end)
   end
 end
-

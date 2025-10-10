@@ -7,16 +7,16 @@ defmodule Brain.Hippocampus.Recall do
   alias Brain.Hippocampus.{Normalize, Scoring, Dup}
 
   @type episode :: %{slate: map(), meta: map(), norms: MapSet.t()}
-  @type scored  :: %{score: float(), at: non_neg_integer(), episode: episode()}
+  @type scored :: %{score: float(), at: non_neg_integer(), episode: episode()}
 
   @spec run([String.t()] | map(), [{non_neg_integer(), episode()}], keyword()) ::
           {[scored()], map(), map()}
   def run(cues, window, opts) when (is_list(cues) or is_map(cues)) and is_list(window) do
-    now         = System.system_time(:millisecond)
-    limit       = Keyword.get(opts, :limit, 3)
-    half_life   = Keyword.get(opts, :half_life_ms, 300_000)
-    min_jacc    = Keyword.get(opts, :min_jaccard, 0.0)
-    scope_opt   = Keyword.get(opts, :scope, nil)
+    now = System.system_time(:millisecond)
+    limit = Keyword.get(opts, :limit, 3)
+    half_life = Keyword.get(opts, :half_life_ms, 300_000)
+    min_jacc = Keyword.get(opts, :min_jaccard, 0.0)
+    scope_opt = Keyword.get(opts, :scope, nil)
     ignore_head = Keyword.get(opts, :ignore_head, :auto)
 
     cues_set = Normalize.cue_set(cues)
@@ -41,7 +41,8 @@ defmodule Brain.Hippocampus.Recall do
             score > 0.0 do
           %{score: score, at: at, episode: ep}
         end
-        |> Enum.sort_by(& &1.score, :desc)
+        # 🔒 deterministic: break ties by `at` (newer first)
+        |> Enum.sort_by(fn %{score: s, at: at} -> {s, at} end, :desc)
       end
 
     scored =
@@ -50,18 +51,32 @@ defmodule Brain.Hippocampus.Recall do
       |> Enum.take(limit)
 
     meas = %{
-      cue_count:   MapSet.size(cues_set),
+      cue_count: MapSet.size(cues_set),
       window_size: length(window),
-      returned:    length(scored),
-      top_score:   case scored do [%{score: s} | _] -> s; _ -> 0.0 end
+      returned: length(scored),
+      top_score:
+        case scored do
+          [%{score: s} | _] -> s
+          _ -> 0.0
+        end
     }
 
-    meta_map = %{limit: limit, half_life_ms: half_life}
+    meta_map = %{
+      limit: limit,
+      half_life_ms: half_life,
+      min_jaccard: min_jacc,
+      ignore_head: ignore_head,
+      scoped?: scope_opt != nil
+    }
 
     {scored, meas, meta_map}
   end
 
-  @spec resolve_ignore_head([{non_neg_integer(), episode()}], :auto | :always | :never | boolean(), MapSet.t()) ::
+  @spec resolve_ignore_head(
+          [{non_neg_integer(), episode()}],
+          :auto | :always | :never | boolean(),
+          MapSet.t()
+        ) ::
           {:ok, [{non_neg_integer(), episode()}]}
   def resolve_ignore_head(window, ignore_opt, cues_set) when is_list(window) do
     case normalize_ignore(ignore_opt) do
@@ -102,7 +117,9 @@ defmodule Brain.Hippocampus.Recall do
 
   defp fetch_meta(meta, key) when is_map(meta) do
     cond do
-      is_atom(key) -> Map.get(meta, key) || Map.get(meta, Atom.to_string(key))
+      is_atom(key) ->
+        Map.get(meta, key) || Map.get(meta, Atom.to_string(key))
+
       is_binary(key) ->
         Map.get(meta, key) ||
           case Enum.find(meta, fn
@@ -120,11 +137,10 @@ defmodule Brain.Hippocampus.Recall do
 
   # ————— options —————
 
-  defp normalize_ignore(true),      do: :always
-  defp normalize_ignore(false),     do: :never
-  defp normalize_ignore(:always),   do: :always
-  defp normalize_ignore(:never),    do: :never
-  defp normalize_ignore(:auto),     do: :auto
-  defp normalize_ignore(_unknown),  do: :auto
+  defp normalize_ignore(true), do: :always
+  defp normalize_ignore(false), do: :never
+  defp normalize_ignore(:always), do: :always
+  defp normalize_ignore(:never), do: :never
+  defp normalize_ignore(:auto), do: :auto
+  defp normalize_ignore(_unknown), do: :auto
 end
-

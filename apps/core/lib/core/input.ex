@@ -45,29 +45,30 @@ defmodule Core.Input do
 
     tokens
     |> Enum.reject(fn t ->
-      src      = Map.get(t, :source) || Map.get(t, "source")
-      kind     = Map.get(t, :kind) || Map.get(t, "kind")
+      src = Map.get(t, :source) || Map.get(t, "source")
+      kind = Map.get(t, :kind) || Map.get(t, "kind")
       charflag = Map.get(t, :chargram) || Map.get(t, "chargram")
-      phrase0  = (Map.get(t, :phrase) || Map.get(t, "phrase") || "") |> to_string()
-      phrase   = String.downcase(phrase0)
-      mw?      = Map.get(t, :mw) || Map.get(t, "mw") || false
+      phrase0 = (Map.get(t, :phrase) || Map.get(t, "phrase") || "") |> to_string()
+      phrase = String.downcase(phrase0)
+      mw? = Map.get(t, :mw) || Map.get(t, "mw") || false
 
       # shortish = length <= 2 once whitespace removed
       shortish =
         phrase0
         |> String.replace(~r/\s+/u, "")
         |> String.length()
-        |> Kernel.<=>(2)
-        |> case do
-          :lt -> true
-          :eq -> true
-          _   -> false
-        end
+        |> Kernel.<=() >
+          2
+          |> case do
+            :lt -> true
+            :eq -> true
+            _ -> false
+          end
 
       flagged_chargram =
         src in [:chargram, "chargram"] or
-        kind in [:chargram, "chargram"] or
-        charflag in [true, "true"]
+          kind in [:chargram, "chargram"] or
+          charflag in [true, "true"]
 
       short_fragment =
         shortish and not mw? and not MapSet.member?(wl, phrase)
@@ -79,11 +80,10 @@ defmodule Core.Input do
       # Preserve existing :index if present; else assign stable index
       case Map.fetch(t, :index) do
         {:ok, _} -> t
-        :error   -> Map.put(t, :index, i)
+        :error -> Map.put(t, :index, i)
       end
     end)
   end
 
   def drop_chargrams(other), do: other
 end
-

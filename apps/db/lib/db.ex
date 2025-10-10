@@ -28,36 +28,37 @@ defmodule Db do
 
   Returns `{:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}`.
   """
-# move defaults to a head
-@spec ltm(map(), keyword()) ::
-        {:ok, %{rows: [Db.BrainCell.t()], missing_norms: [binary()], db_hits: MapSet.t(binary())}}
-def ltm(si, opts \\ [])
+  # move defaults to a head
+  @spec ltm(map(), keyword()) ::
+          {:ok,
+           %{rows: [Db.BrainCell.t()], missing_norms: [binary()], db_hits: MapSet.t(binary())}}
+  def ltm(si, opts \\ [])
 
-# primary clause
-def ltm(%{tokens: tokens} = _si, _opts) when is_list(tokens) do
-  norms =
-    tokens
-    |> Enum.map(&token_to_phrase/1)
-    |> Enum.map(&norm/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
+  # primary clause
+  def ltm(%{tokens: tokens} = _si, _opts) when is_list(tokens) do
+    norms =
+      tokens
+      |> Enum.map(&token_to_phrase/1)
+      |> Enum.map(&norm/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
 
-  if norms == [] do
-    {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
-  else
-    rows =
-      from(b in Db.BrainCell, where: b.norm in ^norms)
-      |> Db.all()
+    if norms == [] do
+      {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
+    else
+      rows =
+        from(b in Db.BrainCell, where: b.norm in ^norms)
+        |> Db.all()
 
-    existing = MapSet.new(for r <- rows, do: r.norm)
-    missing  = Enum.reject(norms, &MapSet.member?(existing, &1))
-    hits     = MapSet.new(for r <- rows, do: r.norm)
-    {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
+      existing = MapSet.new(for r <- rows, do: r.norm)
+      missing = Enum.reject(norms, &MapSet.member?(existing, &1))
+      hits = MapSet.new(for r <- rows, do: r.norm)
+      {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
+    end
   end
-end
 
-# fallback
-def ltm(_si, _opts), do: {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
+  # fallback
+  def ltm(_si, _opts), do: {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
 
   @doc """
   Returns `true` if a *word* exists by `norm` in `brain_cells`.
@@ -87,4 +88,3 @@ def ltm(_si, _opts), do: {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.ne
   defp norm(s) when is_binary(s), do: s |> String.trim() |> String.downcase(:default)
   defp norm(_), do: ""
 end
- 

@@ -13,8 +13,8 @@ defmodule Core.MWE.Injector do
 
   @spec inject([token], keyword()) :: [token]
   def inject(tokens, opts \\ []) when is_list(tokens) do
-    len     = length(tokens)
-    max_n   = Keyword.get(opts, :max_n, 4)
+    len = length(tokens)
+    max_n = Keyword.get(opts, :max_n, 4)
     exists? = Keyword.get(opts, :exists?, &__MODULE__.default_exists?/1)
 
     new_mwes =
@@ -76,9 +76,9 @@ defmodule Core.MWE.Injector do
   defp tok_phrase(%{} = t) do
     Map.get(t, :phrase) ||
       Map.get(t, "phrase") ||
-      Map.get(t, :norm)   ||
-      Map.get(t, "norm")  ||
-      Map.get(t, :text)   ||
+      Map.get(t, :norm) ||
+      Map.get(t, "norm") ||
+      Map.get(t, :text) ||
       Map.get(t, "text")
   end
 
@@ -93,12 +93,14 @@ defmodule Core.MWE.Injector do
   defp tok_mw?(_), do: false
 
   defp tok_n(%_struct{n: n}) when is_integer(n), do: n
+
   defp tok_n(%{} = t) do
     case Map.get(t, :n) || Map.get(t, "n") do
       i when is_integer(i) -> i
       _ -> nil
     end
   end
+
   defp tok_n(_), do: nil
 
   # ──────────────────────────────────────────────────────────
@@ -133,4 +135,3 @@ defmodule Core.MWE.Injector do
   defp single_word_string?(p) when is_binary(p), do: not String.contains?(p, " ")
   defp single_word_string?(_), do: false
 end
-

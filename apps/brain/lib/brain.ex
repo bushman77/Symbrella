@@ -69,7 +69,7 @@ defmodule Brain do
   alias Brain.Utils.Numbers
   alias Brain.Utils.ControlSignals
   alias Brain.LIFG.Input, as: LIFGInput
-  alias Brain.LIFG.Gate,  as: LIFGGate
+  alias Brain.LIFG.Gate, as: LIFGGate
   alias Brain.Episodes.Writer, as: EpWriter
 
   @name __MODULE__
@@ -188,13 +188,13 @@ defmodule Brain do
   # group all handle_call/3 together
   @impl true
   def handle_call({:configure_wm, opts}, _from, state) do
-    cap   = norm_pos_int(Map.get(opts, :capacity), state.wm_cfg.capacity)
+    cap = norm_pos_int(Map.get(opts, :capacity), state.wm_cfg.capacity)
     decay = norm_pos_int(Map.get(opts, :decay_ms), state.wm_cfg.decay_ms)
-    thr   = norm_float_01(Map.get(opts, :gate_threshold), state.wm_cfg.gate_threshold)
-    md?   = Map.get(opts, :merge_duplicates?, state.wm_cfg.merge_duplicates?)
+    thr = norm_float_01(Map.get(opts, :gate_threshold), state.wm_cfg.gate_threshold)
+    md? = Map.get(opts, :merge_duplicates?, state.wm_cfg.merge_duplicates?)
 
     cfg2 = %{capacity: cap, decay_ms: decay, gate_threshold: thr, merge_duplicates?: !!md?}
-    wm2  = WorkingMemory.trim(state.wm, cfg2.capacity)
+    wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
 
     {:reply, :ok, %{state | wm_cfg: cfg2, wm: wm2}}
   end
@@ -229,83 +229,94 @@ defmodule Brain do
   def handle_call(:snapshot_wm, _from, state),
     do: {:reply, %{wm: state.wm, cfg: state.wm_cfg, attention: state.attention}, state}
 
-@impl true
-def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
-  t0     = System.monotonic_time()
-  now_ms = System.system_time(:millisecond)
+  @impl true
+  def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
+    t0 = System.monotonic_time()
+    now_ms = System.system_time(:millisecond)
 
-  # Build inputs for LIFG
-  candidates = LIFGInput.lifg_candidates!(si_or_cands)
-  tokens0    = Tokens.extract_tokens(si_or_cands, candidates)
-  slate      = LIFGInput.slate_for(si_or_cands)
+    # Build inputs for LIFG
+    candidates = LIFGInput.lifg_candidates!(si_or_cands)
+    tokens0 = Tokens.extract_tokens(si_or_cands, candidates)
+    slate = LIFGInput.slate_for(si_or_cands)
 
-  lifg_opts =
-    [scores: :all, normalize: :softmax, parallel: :auto, margin_threshold: 0.12]
-    |> Keyword.merge(opts)
+    lifg_opts =
+      [scores: :all, normalize: :softmax, parallel: :auto, margin_threshold: 0.12]
+      |> Keyword.merge(opts)
 
-  # CRITICAL: pass `:sense_candidates` so Stage-1 can score something
-  si1 =
-    %{tokens: tokens0, sense_candidates: slate, trace: []}
-    |> LIFG.disambiguate_stage1(lifg_opts)
+    # CRITICAL: pass `:sense_candidates` so Stage-1 can score something
+    si1 =
+      %{tokens: tokens0, sense_candidates: slate, trace: []}
+      |> LIFG.disambiguate_stage1(lifg_opts)
 
-  {:ok, out0} = lifg_out_from_trace(si1)
+    {:ok, out0} = lifg_out_from_trace(si1)
 
-  # Optional: Hygiene pass to compute :probs, :p_top1, dedup alt_ids, etc.
-  out0 =
-    case Brain.LIFG.Hygiene.run(%{}, out0.choices, []) do
-      {:ok, %{choices: cleaned, audit: _}} -> %{out0 | choices: cleaned}
-      _ -> out0
-    end
-
-  _ = maybe_ingest_atl(out0.choices, tokens0)
-  _ = maybe_consult_pmtg(out0.choices, tokens0)
-  _ = maybe_store_episode(tokens0, si1, out0)
-
-  {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
-  apply_control_signals(boosts2, inhib2, lifg_opts)
-
-  state1 = apply_decay(state, now_ms)
-
-  state2 =
-    if Keyword.get(opts, :gate_into_wm, false) do
-      min = Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
-      lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
-
-      if lifg_cands == [] do
-        state1
-      else
-        {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
-
-        :telemetry.execute(
-          [:brain, :wm, :update],
-          %{size: length(wm_next), added: added, removed: removed, capacity: state1.wm_cfg.capacity},
-          %{reason: :gate_from_lifg}
-        )
-
-        %{state1 | wm: wm_next}
+    # Optional: Hygiene pass to compute :probs, :p_top1, dedup alt_ids, etc.
+    out0 =
+      case Brain.LIFG.Hygiene.run(%{}, out0.choices, []) do
+        {:ok, %{choices: cleaned, audit: _}} -> %{out0 | choices: cleaned}
+        _ -> out0
       end
-    else
-      state1
-    end
 
-  state3 = evict_if_needed(state2)
+    _ = maybe_ingest_atl(out0.choices, tokens0)
+    _ = maybe_consult_pmtg(out0.choices, tokens0)
+    _ = maybe_store_episode(tokens0, si1, out0)
 
-  ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+    {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
+    apply_control_signals(boosts2, inhib2, lifg_opts)
 
-  :telemetry.execute(
-    [:brain, :pipeline, :lifg_stage1, :stop],
-    %{duration_ms: ms},
-    %{winners: length(out0.choices), boosts: length(out0.boosts), inhibitions: length(out0.inhibitions)}
-  )
+    state1 = apply_decay(state, now_ms)
 
-  {:reply, {:ok, out0}, state3}
-end
+    state2 =
+      if Keyword.get(opts, :gate_into_wm, false) do
+        min =
+          Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
+
+        lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
+
+        if lifg_cands == [] do
+          state1
+        else
+          {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
+
+          :telemetry.execute(
+            [:brain, :wm, :update],
+            %{
+              size: length(wm_next),
+              added: added,
+              removed: removed,
+              capacity: state1.wm_cfg.capacity
+            },
+            %{reason: :gate_from_lifg}
+          )
+
+          %{state1 | wm: wm_next}
+        end
+      else
+        state1
+      end
+
+    state3 = evict_if_needed(state2)
+
+    ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+
+    :telemetry.execute(
+      [:brain, :pipeline, :lifg_stage1, :stop],
+      %{duration_ms: ms},
+      %{
+        winners: length(out0.choices),
+        boosts: length(out0.boosts),
+        inhibitions: length(out0.inhibitions)
+      }
+    )
+
+    {:reply, {:ok, out0}, state3}
+  end
 
   @impl true
   def handle_call({:stm, si}, _from, state) when is_map(si) do
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
-    tokens0  = Map.get(si, :tokens) || Map.get(si, "tokens") || []
-    tokens1  = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
+    tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+    tokens1 = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
 
     si2 =
       si
@@ -328,7 +339,8 @@ end
 
   # group all handle_cast/2 together
   @impl true
-  def handle_cast({:set_attention, ctx}, state), do: {:noreply, %{state | attention: Map.new(ctx)}}
+  def handle_cast({:set_attention, ctx}, state),
+    do: {:noreply, %{state | attention: Map.new(ctx)}}
 
   @impl true
   def handle_cast({:activate_cells, rows_or_ids, payload}, state) do
@@ -354,6 +366,7 @@ end
       [{pid, _}] -> GenServer.cast(pid, msg)
       [] -> :ok
     end
+
     {:noreply, state}
   end
 
@@ -372,6 +385,7 @@ end
       if is_list(results) and results != [] do
         Enum.map(results, fn r ->
           slate = get_in(r, [:episode, :slate]) || get_in(r, ["episode", "slate"])
+
           lemma =
             Map.get(r, :lemma) ||
               Map.get(r, "lemma") ||
@@ -416,15 +430,17 @@ end
   def apply_decay(%{wm: wm} = state, now_ms) when is_list(wm) and is_integer(now_ms) do
     # FIX: treat stored nil as missing; avoid now_ms - nil crash
     last_raw = Map.get(state, :wm_last_ms, nil)
-    last     = if is_integer(last_raw), do: last_raw, else: now_ms
-    dt       = max(now_ms - last, 0)
-    k        = Numbers.decay_factor_ms(dt)
+    last = if is_integer(last_raw), do: last_raw, else: now_ms
+    dt = max(now_ms - last, 0)
+    k = Numbers.decay_factor_ms(dt)
 
     wm2 =
       Enum.map(wm, fn
         %{score: s} = e when is_number(s) ->
           %{e | score: Numbers.clamp01(s * k)}
-        e -> e
+
+        e ->
+          e
       end)
 
     state
@@ -458,12 +474,12 @@ end
 
   # ───────────────────────── Centralized WM gating logic ───────────────────────
   defp do_focus(state, cands_or_si, opts) do
-    now    = System.system_time(:millisecond)
-    cfg    = state.wm_cfg
-    attn   = state.attention
+    now = System.system_time(:millisecond)
+    cfg = state.wm_cfg
+    attn = state.attention
     cands0 = normalize_candidates(cands_or_si)
 
-    wm_d  = WorkingMemory.decay(state.wm, now, cfg.decay_ms)
+    wm_d = WorkingMemory.decay(state.wm, now, cfg.decay_ms)
 
     {wm_next, added, removed} =
       Enum.reduce(cands0, {wm_d, 0, 0}, fn cand0, {wm_acc, a_cnt, r_cnt} ->
@@ -498,29 +514,31 @@ end
   end
 
   defp decide_gate(wm, cand, attn, cfg, opts, salience) do
-    if Code.ensure_loaded?(Brain.BasalGanglia) and function_exported?(Brain.BasalGanglia, :decide, 4) do
+    if Code.ensure_loaded?(Brain.BasalGanglia) and
+         function_exported?(Brain.BasalGanglia, :decide, 4) do
       Brain.BasalGanglia.decide(wm, cand, attn, Map.merge(cfg, opts))
     else
-      base  = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
-      bias  = salience |> Kernel.max(0.0) |> Kernel.min(1.0)
+      base = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
+      bias = salience |> Kernel.max(0.0) |> Kernel.min(1.0)
       final = min(base + 0.5 * bias, 1.0)
-      prefer_source? = (cand[:source] in [:runtime, :recency, :lifg, :ltm])
+      prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
 
       cond do
-        prefer_source? and base  >= cfg.gate_threshold -> {:boost, final}
-        prefer_source? and final >= 0.20               -> {:boost, final}
-        final >= cfg.gate_threshold                     -> {:allow, final}
-        true                                            -> {:block, final}
+        prefer_source? and base >= cfg.gate_threshold -> {:boost, final}
+        prefer_source? and final >= 0.20 -> {:boost, final}
+        final >= cfg.gate_threshold -> {:allow, final}
+        true -> {:block, final}
       end
     end
   end
 
   defp normalize_candidates(list) when is_list(list), do: list
+
   defp normalize_candidates(%{} = si) do
     cond do
       is_list(si[:active_cells]) -> si[:active_cells]
-      is_list(si[:winners])      -> si[:winners]
-      is_list(si[:tokens])       -> si[:tokens]
+      is_list(si[:winners]) -> si[:winners]
+      is_list(si[:tokens]) -> si[:tokens]
       true -> []
     end
   end
@@ -530,8 +548,10 @@ end
     audit = Map.drop(ev, [:choices, :boosts, :inhibitions])
     {:ok, %{choices: ev.choices, boosts: ev.boosts, inhibitions: ev.inhibitions, audit: audit}}
   end
+
   defp lifg_out_from_trace(%{trace: []}),
-    do: {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
+    do:
+      {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
 
   defp maybe_ingest_atl(choices, tokens) do
     case Process.whereis(Brain.ATL) do
@@ -560,7 +580,7 @@ end
 
     needy =
       Enum.filter(choices, fn ch ->
-        m    = Map.get(ch, :margin, 1.0)
+        m = Map.get(ch, :margin, 1.0)
         alts = Map.get(ch, :alt_ids, [])
         is_number(m) and m < needy_thr and is_list(alts) and length(alts) > 0
       end)
@@ -622,6 +642,7 @@ end
           |> Enum.flat_map(fn ch ->
             alts = ch[:alt_ids] || Map.get(ch, :alt_ids, [])
             m = ch[:margin] || Map.get(ch, :margin, 0.0)
+
             for aid <- alts do
               delta = clamp.(-base_inhib * max(0.2, 1.0 - m))
               {aid, delta}
@@ -634,7 +655,7 @@ end
 
   defp apply_control_signals(boosts, inhibitions, opts) do
     coalesce? = Keyword.get(opts, :coalesce, true)
-    conc      = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
+    conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
     delta_key = Keyword.get(opts, :delta_key, :delta)
 
     signals =
@@ -674,18 +695,20 @@ end
       cond do
         is_map(w) and (w[:id] || w["id"]) ->
           id = w[:id] || w["id"]
+
           %{
-            token_index: (w[:token_index] || w["token_index"] || 0),
+            token_index: w[:token_index] || w["token_index"] || 0,
             id: to_string(id),
-            score: (w[:score] || w["score"] || 1.0)
+            score: w[:score] || w["score"] || 1.0
           }
 
         is_map(w) and (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) ->
           lemma = (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) |> to_string()
+
           %{
-            token_index: (w[:token_index] || w["token_index"] || 0),
+            token_index: w[:token_index] || w["token_index"] || 0,
             lemma: lemma,
-            score: (w[:score] || w["score"] || 1.0)
+            score: w[:score] || w["score"] || 1.0
           }
 
         is_binary(w) and String.contains?(w, "|") ->
@@ -706,9 +729,11 @@ end
       w[:lemma] || w["lemma"] || parse_id_word(w[:id] || w["id"]) || w[:word] || w["word"]
     end) || "ltm"
   end
+
   defp first_lemma_from_slate(_), do: "ltm"
 
   defp parse_id_word(nil), do: nil
+
   defp parse_id_word(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
@@ -726,14 +751,18 @@ end
   def via(id) when is_binary(id), do: {:via, Registry, {@registry, id}}
 
   defp extract_items(list) when is_list(list), do: list
+
   defp extract_items(%{} = si) do
     case Map.get(si, :active_cells, []) do
-      list when is_list(list) -> list
+      list when is_list(list) ->
+        list
+
       other ->
         Logger.warning("Brain.extract_items: :active_cells not a list (got #{inspect(other)})")
         []
     end
   end
+
   defp extract_items(%Row{} = row), do: [row]
   defp extract_items(id) when is_binary(id), do: [id]
   defp extract_items(_other), do: []
@@ -743,6 +772,7 @@ end
     GenServer.cast(via(id), {:activate, payload})
     :ok
   end
+
   defp ensure_start_and_cast(id, payload) when is_binary(id) do
     ensure_started(id, id)
     GenServer.cast(via(id), {:activate, payload})
@@ -758,8 +788,8 @@ end
           other -> Logger.warning("Brain: start_child(#{id}) -> #{inspect(other)}")
         end
 
-      _ -> :ok
+      _ ->
+        :ok
     end
   end
 end
-

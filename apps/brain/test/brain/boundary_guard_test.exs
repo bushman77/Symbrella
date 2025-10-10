@@ -23,4 +23,3 @@ defmodule Brain.LIFG.BoundaryGuardTest do
     assert SGuard.boundary_ok?(sent, {0, 5}, false)
   end
 end
-

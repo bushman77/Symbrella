@@ -15,13 +15,14 @@ defmodule Core do
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode  = Keyword.get(opts, :mode, :prod)
+    mode = Keyword.get(opts, :mode, :prod)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
     si0 =
       phrase
       |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      |> wrap_si(phrase)                 # ensure %SemanticInput{}
+      # ensure %SemanticInput{}
+      |> wrap_si(phrase)
       |> rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put_new(:trace, [])
@@ -47,10 +48,9 @@ defmodule Core do
   end
 
   # ─────────────────────── Brain notify ───────────────────────
-# add this helper near your other privates if you don’t already have it
-defp id_norm(nil), do: nil
-defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
-
+  # add this helper near your other privates if you don’t already have it
+  defp id_norm(nil), do: nil
+  defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
 
   # Uses direct GenServer.cast/2 instead of any wrapper.
   defp notify_brain_activation(si, opts) do
@@ -79,7 +79,7 @@ defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
       si.tokens
       |> Enum.reduce(%{}, fn t, acc ->
         nrm = norm(Map.get(t, :phrase))
-        tn  = Map.get(t, :n, 1)
+        tn = Map.get(t, :n, 1)
 
         senses =
           si.active_cells
@@ -107,44 +107,45 @@ defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
             inhibitions: out.inhibitions
           })
 
-lifg_choices =
-  Enum.map(out.choices, fn ch ->
-    token_norm = norm(Map.get(ch, :lemma) || "")
-    chosen_id  = Map.get(ch, :chosen_id)
-    scores     = Map.get(ch, :scores) || %{}
-    feats      = Map.get(ch, :features) || %{}
-    alt_ids    = Map.get(ch, :alt_ids, [])
+        lifg_choices =
+          Enum.map(out.choices, fn ch ->
+            token_norm = norm(Map.get(ch, :lemma) || "")
+            chosen_id = Map.get(ch, :chosen_id)
+            scores = Map.get(ch, :scores) || %{}
+            feats = Map.get(ch, :features) || %{}
+            alt_ids = Map.get(ch, :alt_ids, [])
 
-    base_score =
-      if is_binary(chosen_id) and is_map(scores),
-        do: Map.get(scores, chosen_id, 0.0),
-        else: Map.get(feats, :score_norm, 0.0)
+            base_score =
+              if is_binary(chosen_id) and is_map(scores),
+                do: Map.get(scores, chosen_id, 0.0),
+                else: Map.get(feats, :score_norm, 0.0)
 
-    # Prefer an id whose norm matches the token’s norm, choosing the highest score among matches.
-    # Consider both the chosen_id and alt_ids.
-    candidates = [chosen_id | alt_ids]
+            # Prefer an id whose norm matches the token’s norm, choosing the highest score among matches.
+            # Consider both the chosen_id and alt_ids.
+            candidates = [chosen_id | alt_ids]
 
-    matching =
-      candidates
-      |> Enum.filter(& (id_norm(&1) == token_norm))
+            matching =
+              candidates
+              |> Enum.filter(&(id_norm(&1) == token_norm))
 
-    {chosen_id2, score2} =
-      case matching do
-        [] ->
-          {chosen_id, base_score}
-        matches ->
-          Enum.max_by(matches, fn id -> Map.get(scores, id, -1.0) end, fn -> chosen_id end)
-          |> then(fn best -> {best, Map.get(scores, best, base_score)} end)
-      end
+            {chosen_id2, score2} =
+              case matching do
+                [] ->
+                  {chosen_id, base_score}
 
-    %{
-      token_index: Map.get(ch, :token_index),
-      lemma: token_norm,
-      id: chosen_id2,
-      alt_ids: alt_ids,
-      score: score2
-    }
-  end)
+                matches ->
+                  Enum.max_by(matches, fn id -> Map.get(scores, id, -1.0) end, fn -> chosen_id end)
+                  |> then(fn best -> {best, Map.get(scores, best, base_score)} end)
+              end
+
+            %{
+              token_index: Map.get(ch, :token_index),
+              lemma: token_norm,
+              id: chosen_id2,
+              alt_ids: alt_ids,
+              score: score2
+            }
+          end)
 
         si
         |> Map.put(:lifg_choices, lifg_choices)
@@ -155,42 +156,43 @@ lifg_choices =
     end
   end
 
-defp maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
-     when is_list(choices) and is_list(tokens) do
-  if choices == [] do
-    si
-  else
-    slate =
-      case Process.whereis(Brain.ATL) do
-        pid when is_pid(pid) ->
-          # server path
-          Brain.ATL.ingest(choices, tokens)
-        _ ->
-          # pure fallback path
-          Brain.ATL.reduce(choices, tokens)
-      end
+  defp maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
+       when is_list(choices) and is_list(tokens) do
+    if choices == [] do
+      si
+    else
+      slate =
+        case Process.whereis(Brain.ATL) do
+          pid when is_pid(pid) ->
+            # server path
+            Brain.ATL.ingest(choices, tokens)
 
-    si
-    |> Map.put(:atl_slate, slate)
-    |> Map.update(:trace, [], fn tr ->
-      [
-        %{
-          stage: :atl,
-          ts_ms: System.system_time(:millisecond),
-          winners: Map.get(slate, :winner_count, 0),
-          concepts: slate |> Map.get(:by_norm, %{}) |> map_size()
-        }
-        | tr
-      ]
-    end)
+          _ ->
+            # pure fallback path
+            Brain.ATL.reduce(choices, tokens)
+        end
+
+      si
+      |> Map.put(:atl_slate, slate)
+      |> Map.update(:trace, [], fn tr ->
+        [
+          %{
+            stage: :atl,
+            ts_ms: System.system_time(:millisecond),
+            winners: Map.get(slate, :winner_count, 0),
+            concepts: slate |> Map.get(:by_norm, %{}) |> map_size()
+          }
+          | tr
+        ]
+      end)
+    end
   end
-end
 
-defp maybe_ingest_atl(si, _opts), do: si
+  defp maybe_ingest_atl(si, _opts), do: si
 
   # Only allow unigrams to consider unigram senses, and MWEs to consider MWEs.
   defp compatible_cell_for_token?(token_n, cell) do
-    nrm = (Map.get(cell, :norm) || Map.get(cell, "norm") || "")
+    nrm = Map.get(cell, :norm) || Map.get(cell, "norm") || ""
     has_space = String.contains?(nrm, " ")
     (token_n > 1 and has_space) or (token_n == 1 and not has_space)
   end
@@ -207,16 +209,17 @@ defp maybe_ingest_atl(si, _opts), do: si
     if has_lex?, do: Enum.reject(senses, &seed?/1), else: senses
   end
 
-defp maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
-  if Process.whereis(Brain.Hippocampus) do
-    ep = Brain.Hippocampus.encode(slate)
-    # keep a tiny summary on SI; full episode lives in Hippocampus state
-    Map.put(si, :episode, Map.take(ep, [:ts_ms, :token_count, :winner_count]))
-  else
-    si
+  defp maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
+    if Process.whereis(Brain.Hippocampus) do
+      ep = Brain.Hippocampus.encode(slate)
+      # keep a tiny summary on SI; full episode lives in Hippocampus state
+      Map.put(si, :episode, Map.take(ep, [:ts_ms, :token_count, :winner_count]))
+    else
+      si
+    end
   end
-end
-defp maybe_encode_hippocampus(si), do: si
+
+  defp maybe_encode_hippocampus(si), do: si
 
   defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
 
@@ -367,17 +370,17 @@ defp maybe_encode_hippocampus(si), do: si
     do: %SemanticInput{sentence: sentence, tokens: [], source: :test, trace: []}
 
   # used when merging active_cells
-  defp sanitize_cell(%BrainCell{} = s),      do: [s]
-  defp sanitize_cell(%{id: _} = m),          do: [m]
-  defp sanitize_cell(%{"id" => _} = m),      do: [m]
+  defp sanitize_cell(%BrainCell{} = s), do: [s]
+  defp sanitize_cell(%{id: _} = m), do: [m]
+  defp sanitize_cell(%{"id" => _} = m), do: [m]
   defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
-  defp sanitize_cell(_),                     do: []
+  defp sanitize_cell(_), do: []
 
-  defp cell_id(%BrainCell{id: id}),    do: id
-  defp cell_id(%{id: id}),             do: id
-  defp cell_id(%{"id" => id}),         do: id
+  defp cell_id(%BrainCell{id: id}), do: id
+  defp cell_id(%{id: id}), do: id
+  defp cell_id(%{"id" => id}), do: id
   defp cell_id(id) when is_binary(id), do: id
-  defp cell_id(_),                     do: nil
+  defp cell_id(_), do: nil
 
   defp norm(nil), do: ""
 
@@ -392,4 +395,3 @@ defp maybe_encode_hippocampus(si), do: si
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 end
-

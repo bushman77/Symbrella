@@ -9,8 +9,14 @@ defmodule Brain.LIFGGatingTest do
       sense_candidates: %{
         0 => [
           # Make "strong" clearly top-1 under default weights so p_top1 > 0.6 after softmax
-          %{id: "THIS/strong", features: %{lex_fit: 1.0, rel_prior: 1.0, activation: 1.0, intent_bias: 1.0}},
-          %{id: "THIS/weak",   features: %{lex_fit: 0.0, rel_prior: 0.0, activation: 0.0, intent_bias: 0.0}}
+          %{
+            id: "THIS/strong",
+            features: %{lex_fit: 1.0, rel_prior: 1.0, activation: 1.0, intent_bias: 1.0}
+          },
+          %{
+            id: "THIS/weak",
+            features: %{lex_fit: 0.0, rel_prior: 0.0, activation: 0.0, intent_bias: 0.0}
+          }
         ]
       }
     }
@@ -19,15 +25,16 @@ defmodule Brain.LIFGGatingTest do
     {:ok, _} =
       Brain.lifg_stage1(
         si,
-        [0.0],                          # ctx arg (ignored by Stage1, kept for arity compatibility)
+        # ctx arg (ignored by Stage1, kept for arity compatibility)
+        [0.0],
         gate_into_wm: true,
         lifg_min_score: 0.6,
         normalize: :softmax,
-        scores: :all                    # ensure score_norm is present in features for gating
+        # ensure score_norm is present in features for gating
+        scores: :all
       )
 
     %{wm: wm} = Brain.snapshot_wm()
     assert Enum.any?(wm, &(&1.id == "THIS/strong" and &1.source == :lifg))
   end
 end
-

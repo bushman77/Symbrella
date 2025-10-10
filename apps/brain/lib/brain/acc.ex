@@ -1,12 +1,21 @@
 defmodule Brain.ACC do
   @moduledoc """
-  Anterior Cingulate Cortex (ACC) — conflict monitoring.
+  **Anterior Cingulate Cortex (ACC) — conflict monitoring.**
 
-  Computes a scalar conflict score from LIFG choices and flags `needy`
-  items. Emits telemetry and keeps a small rolling window for status.
+  Computes a scalar **conflict** score from LIFG choices and flags **needy**
+  items (low margin / low p_top1 / has alternatives). Emits telemetry and keeps
+  a small rolling window for status.
 
-  Telemetry:
-    [:brain, :acc, :conflict] with %{conflict, needy, n} and meta thresholds.
+  ### Telemetry
+  - `[:brain, :acc, :conflict]`
+    - **measurements:** `%{conflict, needy, n}`
+    - **metadata:** `%{tau_m, p_min, weights}`
+
+  ### Config (in `:brain`)
+  - `:acc_tau_margin` (default `0.20`) — margin threshold for “confident”
+  - `:acc_p_min` (default `0.65`) — minimum p(top1) to avoid “needy”
+  - `:acc_weights` (default `%{margin: 0.40, p_top1: 0.30, entropy: 0.20, alts: 0.10}`)
+  - `:acc_window_keep` (default `50`) — rolling window length
   """
 
   use Brain, region: :acc
@@ -22,7 +31,7 @@ defmodule Brain.ACC do
   Assess conflict for current choices.
 
   Returns:
-    {:ok, %{si, conflict: float, needy: [choice()], audit: map()}}
+    `{:ok, %{si, conflict: float, needy: [choice()], audit: map()}}`
   """
   @spec assess(si(), [choice()], keyword()) ::
           {:ok, %{si: si(), conflict: float(), needy: [choice()], audit: map()}}
@@ -66,8 +75,8 @@ defmodule Brain.ACC do
         %{
           p1: p1,
           margin: m,
-          entropy: (if k > 1, do: h, else: 0.0),
-          alts: (if altc > 0, do: 1.0, else: 0.0),
+          entropy: if(k > 1, do: h, else: 0.0),
+          alts: if(altc > 0, do: 1.0, else: 0.0),
           token_index: Safe.get(ch, :token_index, 0)
         }
       end)
@@ -80,10 +89,10 @@ defmodule Brain.ACC do
         e_norm = clamp01(f.entropy)
         a_norm = clamp01(f.alts)
 
-        (w.margin * m_norm) +
-          (w.p_top1 * p_norm) +
-          (w.entropy * e_norm) +
-          (w.alts * a_norm)
+        w.margin * m_norm +
+          w.p_top1 * p_norm +
+          w.entropy * e_norm +
+          w.alts * a_norm
       end)
 
     # Aggregate conflict
@@ -97,9 +106,9 @@ defmodule Brain.ACC do
     needy =
       Enum.zip(choices, feats)
       |> Enum.filter(fn {ch, f} ->
-        m = (Safe.get(ch, :margin, 0.0) || 0.0)
-        alts? = ((Safe.get(ch, :alt_ids, []) || []) != [])
-        (m < tau_m) or (f.p1 < p_min) or alts?
+        m = Safe.get(ch, :margin, 0.0) || 0.0
+        alts? = (Safe.get(ch, :alt_ids, []) || []) != []
+        m < tau_m or f.p1 < p_min or alts?
       end)
       |> Enum.map(fn {ch, _} -> ch end)
 
@@ -178,9 +187,8 @@ defmodule Brain.ACC do
 
   defp entropy(%{} = scores) do
     ps = scores |> Map.values() |> Enum.filter(&(&1 > 0.0))
-    Enum.reduce(ps, 0.0, fn p, acc -> acc - (p * :math.log(p)) end)
+    Enum.reduce(ps, 0.0, fn p, acc -> acc - p * :math.log(p) end)
   end
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
 end
-

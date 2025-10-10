@@ -6,4 +6,3 @@ ExUnit.start()
 
 # Use SQL Sandbox for isolated DB tests
 Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
-

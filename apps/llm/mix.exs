@@ -33,7 +33,6 @@ defmodule Llm.MixProject do
       # If you don’t already depend on Finch from another umbrella app,
       # keep it here so the adapter is available at compile/runtime:
       {:finch, "~> 0.18"}
-
     ]
   end
 end

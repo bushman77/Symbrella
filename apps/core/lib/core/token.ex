@@ -158,67 +158,68 @@ defmodule Core.Token do
     `{:ok, si}` on success
     `{:error, failures}` where failures is a list of maps describing the bad tokens
   """
-# in Core.Token
 
-@spec check_span_invariants(Core.SemanticInput.t()) ::
-        {:ok, Core.SemanticInput.t()} | {:error, [map()]}
-def check_span_invariants(%Core.SemanticInput{sentence: s, tokens: tokens} = si) do
-  {failures, _last_start} =
-    tokens
-    |> Enum.with_index()
-    |> Enum.reduce({[], -1}, fn {t, idx}, {acc, last_start} ->
-      # tolerate struct or map; atom or string keys
-      p =
-        Map.get(t, :phrase) ||
-          Map.get(t, "phrase") ||
-          ""
+  # in Core.Token
 
-      span_raw =
-        Map.get(t, :span) ||
-          Map.get(t, "span") ||
-          {0, 0}
+  @spec check_span_invariants(Core.SemanticInput.t()) ::
+          {:ok, Core.SemanticInput.t()} | {:error, [map()]}
+  def check_span_invariants(%Core.SemanticInput{sentence: s, tokens: tokens} = si) do
+    {failures, _last_start} =
+      tokens
+      |> Enum.with_index()
+      |> Enum.reduce({[], -1}, fn {t, idx}, {acc, last_start} ->
+        # tolerate struct or map; atom or string keys
+        p =
+          Map.get(t, :phrase) ||
+            Map.get(t, "phrase") ||
+            ""
 
-      {st, en} = normalize_span(span_raw)
-      slice = safe_slice(s, st, en)
+        span_raw =
+          Map.get(t, :span) ||
+            Map.get(t, "span") ||
+            {0, 0}
 
-      reasons = []
-      reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
-      reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
-      reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
-      reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+        {st, en} = normalize_span(span_raw)
+        slice = safe_slice(s, st, en)
 
-      if reasons == [] do
-        {acc, st}
-      else
-        fail = %{
-          index: idx,
-          token: t,
-          span: {st, en},
-          expected_slice: slice,
-          reasons: Enum.reverse(reasons)
-        }
+        reasons = []
+        reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
+        reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
+        reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
 
-        {[fail | acc], st}
-      end
-    end)
+        reasons =
+          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
-  case failures do
-    [] -> {:ok, si}
-    _ -> {:error, Enum.reverse(failures)}
+        if reasons == [] do
+          {acc, st}
+        else
+          fail = %{
+            index: idx,
+            token: t,
+            span: {st, en},
+            expected_slice: slice,
+            reasons: Enum.reverse(reasons)
+          }
+
+          {[fail | acc], st}
+        end
+      end)
+
+    case failures do
+      [] -> {:ok, si}
+      _ -> {:error, Enum.reverse(failures)}
+    end
   end
+
+  # Accept tuple or [start,end]; default safely
+  defp normalize_span({st, en}) when is_integer(st) and is_integer(en), do: {st, en}
+  defp normalize_span([st, en]) when is_integer(st) and is_integer(en), do: {st, en}
+  defp normalize_span(_), do: {0, 0}
+
+  defp safe_slice(s, st, en)
+       when is_binary(s) and is_integer(st) and is_integer(en) and en >= st do
+    String.slice(s, st, en - st) || ""
+  end
+
+  defp safe_slice(_s, _st, _en), do: ""
 end
-
-# Accept tuple or [start,end]; default safely
-defp normalize_span({st, en}) when is_integer(st) and is_integer(en), do: {st, en}
-defp normalize_span([st, en]) when is_integer(st) and is_integer(en), do: {st, en}
-defp normalize_span(_), do: {0, 0}
-
-defp safe_slice(s, st, en)
-     when is_binary(s) and is_integer(st) and is_integer(en) and en >= st do
-  String.slice(s, st, en - st) || ""
-end
-
-defp safe_slice(_s, _st, _en), do: ""
-
-end
-

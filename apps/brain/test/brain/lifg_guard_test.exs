@@ -23,28 +23,37 @@ defmodule Brain.LIFG.GuardTest do
   test "sanitize: normalizes span to {start,end}, recovers when {start,len} or broken" do
     toks =
       [
-        %{phrase: "Hello", span: {0, 5}},  # already {start,end}
-        %{phrase: "Hi",    span: {6, 0}},  # treat as {start,len}-> recover via phrase length
-        %{phrase: "!"}                      # no span
+        # already {start,end}
+        %{phrase: "Hello", span: {0, 5}},
+        # treat as {start,len}-> recover via phrase length
+        %{phrase: "Hi", span: {6, 0}},
+        # no span
+        %{phrase: "!"}
       ]
       |> Guard.sanitize()
 
     assert Enum.at(toks, 0).span == {0, 5}
-    assert Enum.at(toks, 1).span == {6, 8} # 6 + byte_size("Hi") == 8
+    # 6 + byte_size("Hi") == 8
+    assert Enum.at(toks, 1).span == {6, 8}
     refute Map.has_key?(Enum.at(toks, 2), :span)
   end
 
   test "sanitize: sorts by span start iff all spans are valid; otherwise preserves order" do
-    a = %{phrase: "B", span: {5, 6}}  # starts later
-    b = %{phrase: "A", span: {0, 1}}  # starts first
-    c = %{phrase: "C"}                # no span → keeps original order
+    # starts later
+    a = %{phrase: "B", span: {5, 6}}
+    # starts first
+    b = %{phrase: "A", span: {0, 1}}
+    # no span → keeps original order
+    c = %{phrase: "C"}
 
     sorted = Guard.sanitize([a, b])
     assert Enum.map(sorted, & &1.phrase) == ["A", "B"]
 
     kept = Guard.sanitize([a, c, b])
-    assert Enum.map(kept, & &1.phrase) == ["B", "A", "C"] |> tl() |> Kernel.++(["A"]) |> then(fn _ -> ["B","C","A"] end)
+
+    assert Enum.map(kept, & &1.phrase) ==
+             ["B", "A", "C"] |> tl() |> Kernel.++(["A"]) |> then(fn _ -> ["B", "C", "A"] end)
+
     # Explanation: because not all have valid spans, input order is preserved: [a, c, b] → ["B","C","A"].
   end
 end
-

@@ -13,7 +13,7 @@ defmodule Brain.Utils.Tokens do
 
     raw_tokens =
       cond do
-        is_map(si_or) and is_list(Map.get(si_or, :tokens))  -> Map.get(si_or, :tokens)
+        is_map(si_or) and is_list(Map.get(si_or, :tokens)) -> Map.get(si_or, :tokens)
         is_map(si_or) and is_list(Map.get(si_or, "tokens")) -> Map.get(si_or, "tokens")
         true -> build_tokens_from(candidates)
       end
@@ -27,7 +27,7 @@ defmodule Brain.Utils.Tokens do
       tokens
       |> Enum.with_index()
       |> Enum.map(fn {t, fallback_idx} ->
-        tm  = if is_struct(t), do: Map.from_struct(t), else: t
+        tm = if is_struct(t), do: Map.from_struct(t), else: t
         idx = Map.get(tm, :index) || Map.get(tm, "index") || fallback_idx
 
         coerced_span =
@@ -114,6 +114,7 @@ defmodule Brain.Utils.Tokens do
   end
 
   defp do_find_from(_gsent, _target, pos, max_start, _plen) when pos > max_start, do: nil
+
   defp do_find_from(gsent, target, pos, max_start, plen) do
     slice = gsent |> Enum.slice(pos, plen) |> Enum.join() |> String.downcase()
     if slice == target, do: pos, else: do_find_from(gsent, target, pos + 1, max_start, plen)
@@ -132,6 +133,7 @@ defmodule Brain.Utils.Tokens do
         s = Map.get(span, :start) || Map.get(span, "start")
         l = Map.get(span, :len) || Map.get(span, "len")
         e = Map.get(span, :end) || Map.get(span, "end")
+
         cond do
           is_integer(s) and is_integer(l) -> {:ok, s, l}
           is_integer(s) and is_integer(e) and e >= s -> {:ok, s, e - s}
@@ -142,6 +144,7 @@ defmodule Brain.Utils.Tokens do
         s = Map.get(t, :start) || Map.get(t, "start")
         l = Map.get(t, :len) || Map.get(t, "len")
         e = Map.get(t, :end) || Map.get(t, "end")
+
         cond do
           is_integer(s) and is_integer(l) -> {:ok, s, l}
           is_integer(s) and is_integer(e) and e >= s -> {:ok, s, e - s}
@@ -157,15 +160,18 @@ defmodule Brain.Utils.Tokens do
     |> Enum.map(fn {idx, group} ->
       phrase =
         Enum.find_value(group, fn c ->
-          v = Map.get(c, :phrase) || Map.get(c, "phrase") ||
-              Map.get(c, :word)   || Map.get(c, "word") ||
-              Map.get(c, :lemma)  || Map.get(c, "lemma")
+          v =
+            Map.get(c, :phrase) || Map.get(c, "phrase") ||
+              Map.get(c, :word) || Map.get(c, "word") ||
+              Map.get(c, :lemma) || Map.get(c, "lemma")
 
           cond do
             is_binary(v) ->
               vt = String.trim(v)
               if vt != "", do: vt, else: nil
-            true -> nil
+
+            true ->
+              nil
           end
         end) || "t#{idx}"
 
@@ -174,4 +180,3 @@ defmodule Brain.Utils.Tokens do
     |> Enum.sort_by(& &1.index)
   end
 end
-

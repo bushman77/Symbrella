@@ -31,10 +31,14 @@ defmodule Db.Episodes do
     token_limit: 200,
     vec_limit: 100,
     top_k: 10,
-    half_life: 86_400, # seconds
-    alpha: 0.7,        # jaccard weight
-    beta: 0.2,         # vector weight
-    gamma: 0.1         # recency weight
+    # seconds
+    half_life: 86_400,
+    # jaccard weight
+    alpha: 0.7,
+    # vector weight
+    beta: 0.2,
+    # recency weight
+    gamma: 0.1
   ]
 
   # ---------------------------------------------------------------------------
@@ -103,12 +107,12 @@ defmodule Db.Episodes do
     opts = Keyword.merge(@defaults, opts)
 
     token_limit = opts[:token_limit]
-    vec_limit   = opts[:vec_limit]
-    top_k       = opts[:top_k]
-    half_life   = opts[:half_life]
-    alpha       = opts[:alpha]
-    beta        = opts[:beta]
-    gamma       = opts[:gamma]
+    vec_limit = opts[:vec_limit]
+    top_k = opts[:top_k]
+    half_life = opts[:half_life]
+    alpha = opts[:alpha]
+    beta = opts[:beta]
+    gamma = opts[:gamma]
 
     now = NaiveDateTime.utc_now()
 
@@ -147,7 +151,7 @@ defmodule Db.Episodes do
       |> Enum.into(%{}, fn {ep, dist} -> {ep.id, {ep, 1.0 / (1.0 + (dist || 0.0))}} end)
 
     token_list = Enum.map(token_candidates, &{&1.id, &1})
-    vec_list   = vec_sim_map |> Map.values() |> Enum.map(fn {ep, _sim} -> {ep.id, ep} end)
+    vec_list = vec_sim_map |> Map.values() |> Enum.map(fn {ep, _sim} -> {ep.id, ep} end)
 
     all_cands =
       (token_list ++ vec_list)
@@ -158,10 +162,10 @@ defmodule Db.Episodes do
     all_cands
     |> Enum.map(fn {_id, ep} ->
       ep_tokens_set = MapSet.new((ep.tokens || []) |> Enum.map(&String.downcase/1))
-      cue_set       = MapSet.new(cues)
+      cue_set = MapSet.new(cues)
 
-      inter   = MapSet.intersection(ep_tokens_set, cue_set) |> MapSet.size()
-      union   = MapSet.union(ep_tokens_set, cue_set) |> MapSet.size()
+      inter = MapSet.intersection(ep_tokens_set, cue_set) |> MapSet.size()
+      union = MapSet.union(ep_tokens_set, cue_set) |> MapSet.size()
       jaccard = if union == 0, do: 0.0, else: inter / union
 
       vec_sim =
@@ -177,7 +181,7 @@ defmodule Db.Episodes do
         end
 
       recency = :math.pow(2.0, -age_s / max(1, half_life))
-      score   = alpha * jaccard + beta * (vec_sim || 0.0) + gamma * recency
+      score = alpha * jaccard + beta * (vec_sim || 0.0) + gamma * recency
 
       %{
         id: ep.id,
@@ -210,18 +214,20 @@ defmodule Db.Episodes do
   Top `limit` episode hits for a lemma via hybrid recall.
   Returns compact maps for pMTG evidence.
   """
-# lib/db/episodes.ex
-@spec find_by_lemma(String.t(), non_neg_integer()) :: [map()]
-def find_by_lemma(lemma, limit \\ 5)
-def find_by_lemma(lemma, limit) when is_binary(lemma) and is_integer(limit) and limit > 0 do
-  if String.contains?(lemma, " ") do
-    search(lemma) |> Enum.take(limit)
-  else
-    cues = [String.downcase(lemma)]
-    recall_hybrid(cues, nil, top_k: limit)
-    |> Enum.map(&to_hit/1)
+  # lib/db/episodes.ex
+  @spec find_by_lemma(String.t(), non_neg_integer()) :: [map()]
+  def find_by_lemma(lemma, limit \\ 5)
+
+  def find_by_lemma(lemma, limit) when is_binary(lemma) and is_integer(limit) and limit > 0 do
+    if String.contains?(lemma, " ") do
+      search(lemma) |> Enum.take(limit)
+    else
+      cues = [String.downcase(lemma)]
+
+      recall_hybrid(cues, nil, top_k: limit)
+      |> Enum.map(&to_hit/1)
+    end
   end
-end
 
   @doc """
   Lightweight search for arbitrary text.
@@ -341,4 +347,3 @@ end
     if mag_a == 0 or mag_b == 0, do: nil, else: dot / (mag_a * mag_b)
   end
 end
-

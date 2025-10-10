@@ -44,4 +44,3 @@ defmodule Brain.LIFGScoresModeTest do
     assert map_size(ch.scores) == 2
   end
 end
-

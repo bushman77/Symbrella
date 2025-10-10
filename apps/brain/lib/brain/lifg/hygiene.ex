@@ -98,7 +98,8 @@ defmodule Brain.LIFG.Hygiene do
   defp normalize_scores_map(map) when is_map(map) do
     pairs =
       map
-      |> Enum.filter(fn {_k, v} -> is_number(v) and v == v end) # (v==v) filters NaN
+      # (v==v) filters NaN
+      |> Enum.filter(fn {_k, v} -> is_number(v) and v == v end)
 
     dropped = map_size(map) - length(pairs)
     vals = Enum.map(pairs, fn {_, v} -> v * 1.0 end)
@@ -143,4 +144,3 @@ defmodule Brain.LIFG.Hygiene do
     end
   end
 end
-

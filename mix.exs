@@ -6,8 +6,8 @@ defmodule Symbrella.Umbrella.MixProject do
       apps_path: "apps",
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
-elixirc_options: [warnings_as_errors: true]  , 
-listeners: [Phoenix.CodeReloader] , 
+      elixirc_options: [warnings_as_errors: true],
+      listeners: [Phoenix.CodeReloader],
       deps: deps(),
       aliases: aliases()
     ]

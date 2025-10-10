@@ -58,6 +58,7 @@ defmodule Core.Lexicon.Stage do
         |> Enum.with_index()
         |> Enum.map(fn {s, i} ->
           pos = normalize_pos(get(s, :pos))
+
           %{
             id: "#{word}|#{pos}|#{i}",
             word: word,
@@ -70,7 +71,8 @@ defmodule Core.Lexicon.Stage do
           }
         end)
 
-      _ -> []
+      _ ->
+        []
     end
   end
 
@@ -96,4 +98,3 @@ defmodule Core.Lexicon.Stage do
     %{si | trace: [evt | tr || []]}
   end
 end
-

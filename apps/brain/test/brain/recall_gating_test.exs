@@ -8,4 +8,3 @@ defmodule Brain.RecallGatingTest do
     assert Enum.any?(wm, &(&1.source == :ltm))
   end
 end
-

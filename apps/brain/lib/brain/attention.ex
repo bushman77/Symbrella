@@ -18,7 +18,7 @@ defmodule Brain.Attention do
         true -> 0.0
       end
 
-    src   = Map.get(cand, :source)
+    src = Map.get(cand, :source)
     bonus = get_in(ctx, [:boosts, src]) || 0.0
     min(max(w + bonus, 0.0), 1.0)
   end
@@ -35,4 +35,3 @@ defmodule Brain.Attention do
   defp explode(b) when is_binary(b), do: [b]
   defp explode(_), do: []
 end
-

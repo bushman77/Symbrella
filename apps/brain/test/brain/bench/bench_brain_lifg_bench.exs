@@ -11,7 +11,7 @@ alias Brain.LIFG.Stage1
 
 defmodule BenchUtil do
   def randf, do: :rand.uniform()
-  def vec(dim), do: for _ <- 1..dim, do: :rand.uniform() - 0.5
+  def vec(dim), do: for(_ <- 1..dim, do: :rand.uniform() - 0.5)
 
   # Build a full SI (current API): tokens + sense_candidates + context_vec
   def si(num_tokens, senses_per_token, dim) do
@@ -27,7 +27,8 @@ defmodule BenchUtil do
           for s <- 1..senses_per_token do
             %{
               id: "t#{t}|s#{s}",
-              prior: randf(), # feeds :rel_prior through candidates_from_slate/… → score mix
+              # feeds :rel_prior through candidates_from_slate/… → score mix
+              prior: randf(),
               features: %{
                 pos: "noun",
                 lex_fit: randf(),
@@ -50,11 +51,11 @@ defmodule BenchUtil do
 end
 
 scenarios = [
-  {:g4_s3_d64,   4, 3, 64},
-  {:g8_s3_d64,   8, 3, 64},
-  {:g8_s6_d64,   8, 6, 64},
+  {:g4_s3_d64, 4, 3, 64},
+  {:g8_s3_d64, 8, 3, 64},
+  {:g8_s6_d64, 8, 6, 64},
   {:g16_s4_d64, 16, 4, 64},
-  {:g8_s3_d128,  8, 3, 128}
+  {:g8_s3_d128, 8, 3, 128}
 ]
 
 inputs =
@@ -83,4 +84,3 @@ Benchee.run(
   memory_time: 1.0,
   format: :markdown
 )
-

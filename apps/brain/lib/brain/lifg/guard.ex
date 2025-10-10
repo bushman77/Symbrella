@@ -12,11 +12,11 @@ defmodule Brain.LIFG.Guard do
   """
 
   @type token :: %{
-          optional(:index)  => non_neg_integer(),
-          optional(:span)   => {non_neg_integer(), non_neg_integer()},
+          optional(:index) => non_neg_integer(),
+          optional(:span) => {non_neg_integer(), non_neg_integer()},
           optional(:phrase) => String.t(),
-          optional(:mw)     => boolean(),
-          optional(:n)      => pos_integer()
+          optional(:mw) => boolean(),
+          optional(:n) => pos_integer()
         }
 
   @spec sanitize(list()) :: list()
@@ -33,8 +33,8 @@ defmodule Brain.LIFG.Guard do
 
   # IMPORTANT: match structs first; structs are maps and would match %{} otherwise
   defp mapify(%_{} = s), do: Map.from_struct(s)
-  defp mapify(%{} = t),  do: t
-  defp mapify(other),    do: %{phrase: to_string(other)}
+  defp mapify(%{} = t), do: t
+  defp mapify(other), do: %{phrase: to_string(other)}
 
   defp ensure_indexed(list) do
     list
@@ -93,8 +93,8 @@ defmodule Brain.LIFG.Guard do
   end
 
   defp valid_span?(%{span: {s, e}})
-       when is_integer(s) and is_integer(e) and s >= 0 and e >= s, do: true
+       when is_integer(s) and is_integer(e) and s >= 0 and e >= s,
+       do: true
 
   defp valid_span?(_), do: false
 end
-

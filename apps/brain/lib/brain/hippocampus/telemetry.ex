@@ -30,8 +30,9 @@ defmodule Brain.Hippocampus.Telemetry do
   end
 
   defp test_env? do
-    mix_env = (Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env()) || :prod
+    mix_env =
+      (Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env()) || :prod
+
     mix_env == :test
   end
 end
-

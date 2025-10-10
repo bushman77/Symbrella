@@ -1,11 +1,38 @@
 # apps/core/test/test_helper.exs
 ExUnit.start()
 
-# Start the DB app (Repo) and the Brain app tree
-{:ok, _} = Application.ensure_all_started(:db)
-{:ok, _} = Application.ensure_all_started(:brain)
+# 1) Bring up ecto_sql for Sandbox
+{:ok, _} = Application.ensure_all_started(:ecto_sql)
 
-# Put Repo in manual sandbox mode and create a shared owner for the whole suite
+# 2) Ensure the Repo (Db) is running in this test VM.
+repo_started? =
+  try do
+    case Ecto.Repo.Registry.lookup(Db) do
+      pid when is_pid(pid) -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+unless repo_started? do
+  {:ok, _pid} = Db.start_link()
+end
+
+# 3) Suite-wide sandbox owner (manual mode, shared).
 Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
-_owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
+owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
+
+# 4) Idempotent teardown — won't blow up if already stopped elsewhere.
+ExUnit.after_suite(fn _ ->
+  if Process.alive?(owner) do
+    try do
+      Ecto.Adapters.SQL.Sandbox.stop_owner(owner)
+    catch
+      :exit, _ -> :ok
+    rescue
+      _ -> :ok
+    end
+  end
+end)
 

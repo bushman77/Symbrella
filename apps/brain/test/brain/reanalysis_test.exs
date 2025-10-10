@@ -34,4 +34,3 @@ defmodule Brain.LIFG.ReanalysisTest do
     assert choice.chosen_id == "hello|interjection|top"
   end
 end
-

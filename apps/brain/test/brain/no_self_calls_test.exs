@@ -21,4 +21,3 @@ defmodule Brain.NoSelfCallsTest do
            "Found GenServer.cast(@name, ...) inside a handler"
   end
 end
-

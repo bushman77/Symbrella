@@ -1,4 +1,4 @@
-# config/test.exs
+# P-201 — Tokenizer defaults (test): words-only, no char-grams
 import Config
 
 # -------------------------------
@@ -54,9 +54,9 @@ config :core, :tokenizer_defaults,
 # Brain (LIFG / pMTG / Hippocampus)
 # -------------------------------
 config :brain,
-  # Disable episodic writes during tests
-  episodes_mode: :on, #:off,
-
+  # Episodic mode during tests
+  # set :off if you want zero writes
+  episodes_mode: :on,
   # LIFG test stability (thresholds & outputs)
   lifg_min_score: 0.6,
   lifg_min_margin: 0.12,
@@ -68,12 +68,9 @@ config :brain,
     activation: 0.20,
     intent_bias: 0.10
   },
-
   # pMTG defaults (kept simple for unit tests)
   pmtg_mode: :boost,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
-
   # Hippocampus: hide dup counter in test assertions
   hippo_meta_dup_count: false
-

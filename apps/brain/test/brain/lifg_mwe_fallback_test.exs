@@ -13,7 +13,7 @@ defmodule Brain.LIFG.MWEFallbackTelemetryTest do
       # No senses for the MWE (index 0) → fallback should be injected
       sense_candidates: %{
         1 => [%{id: "hello|interjection|6", lemma: "hello", score: 0.40}],
-        2 => [%{id: "there|adverb|2",       lemma: "there", score: 0.10}]
+        2 => [%{id: "there|adverb|2", lemma: "there", score: 0.10}]
       }
     }
 
@@ -40,4 +40,3 @@ defmodule Brain.LIFG.MWEFallbackTelemetryTest do
     assert_receive {:fb, %{count: 1}, %{token_index: 0, phrase: "Hello there", score: _}}, 100
   end
 end
-

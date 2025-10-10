@@ -7,7 +7,10 @@ defmodule Brain.BasalGangliaSmokeTest do
 
   test "attention lifts marginal item" do
     attn = %{goal_terms: ~w(hello)}
-    {dec, s} = BasalGanglia.decide([], %{lemma: "hello", score: 0.2, source: :runtime}, attn, @cfg)
+
+    {dec, s} =
+      BasalGanglia.decide([], %{lemma: "hello", score: 0.2, source: :runtime}, attn, @cfg)
+
     assert dec in [:allow, :boost]
     assert s >= 0.4
   end
@@ -16,8 +19,15 @@ defmodule Brain.BasalGangliaSmokeTest do
     now = System.system_time(:millisecond)
     wm = [%{id: "hello", last_bump: now, activation: 0.7, payload: %{lemma: "hello"}}]
     attn = %{}
-    {dec, _} = BasalGanglia.decide(wm, %{id: "hello", score: 0.3, source: :lifg}, attn, Map.merge(@cfg, %{cooldown_ms: 5000}))
+
+    {dec, _} =
+      BasalGanglia.decide(
+        wm,
+        %{id: "hello", score: 0.3, source: :lifg},
+        attn,
+        Map.merge(@cfg, %{cooldown_ms: 5000})
+      )
+
     assert dec == :boost
   end
 end
-

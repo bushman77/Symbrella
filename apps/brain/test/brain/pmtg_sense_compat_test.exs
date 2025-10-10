@@ -21,8 +21,10 @@ defmodule Brain.PMTG.SenseCompatTest do
 
   test "keeps only MWE senses for MWE tokens; keeps single-word senses for 1-word tokens" do
     tokens = [
-      %{index: 0, phrase: "new york", n: 2},  # MWE
-      %{index: 1, phrase: "bank", n: 1}       # single
+      # MWE
+      %{index: 0, phrase: "new york", n: 2},
+      # single
+      %{index: 1, phrase: "bank", n: 1}
     ]
 
     evidence = [
@@ -31,7 +33,8 @@ defmodule Brain.PMTG.SenseCompatTest do
         lemma: "new york",
         lexicon: [
           %{id: "ny|noun|0", lemma: "new york"},
-          %{id: "york|noun|0", lemma: "york"} # should be dropped for MWE
+          # should be dropped for MWE
+          %{id: "york|noun|0", lemma: "york"}
         ]
       },
       %{
@@ -39,7 +42,8 @@ defmodule Brain.PMTG.SenseCompatTest do
         lemma: "bank",
         lexicon: [
           %{id: "bank|noun|0", lemma: "bank"},
-          %{id: "river bank|noun|0", lemma: "river bank"} # should be dropped for single
+          # should be dropped for single
+          %{id: "river bank|noun|0", lemma: "river bank"}
         ]
       }
     ]
@@ -79,7 +83,7 @@ defmodule Brain.PMTG.SenseCompatTest do
 
     # Telemetry proves we had to fallback
     assert_receive {:telemetry, [:brain, :pmtg, :no_mwe_senses],
-                    %{orig: 2, kept: 0, token_index: 0, phrase: "hot dog"}, _}, 100
+                    %{orig: 2, kept: 0, token_index: 0, phrase: "hot dog"}, _},
+                   100
   end
 end
-

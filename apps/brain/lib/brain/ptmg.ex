@@ -96,8 +96,10 @@ defmodule Brain.PMTG do
        region: :pmtg,
        opts: %{mode: mode, window_keep: keep} |> Map.merge(Map.new(opts)),
        window_keep: keep,
-       window: [],   # [{ts_ms, %{needy_count: n, queries: [...]}}]
-       last: nil     # %{si, queries, evidence, audit}
+       # [{ts_ms, %{needy_count: n, queries: [...]}}]
+       window: [],
+       # %{si, queries, evidence, audit}
+       last: nil
      }}
   end
 
@@ -172,7 +174,10 @@ defmodule Brain.PMTG do
     }
 
     window =
-      [{System.system_time(:millisecond), %{needy_count: length(need), queries: queries}} | state.window]
+      [
+        {System.system_time(:millisecond), %{needy_count: length(need), queries: queries}}
+        | state.window
+      ]
       |> Enum.take(state.window_keep)
 
     :telemetry.execute([:brain, :pmtg, :consult], %{needy: length(need)}, %{thr: thr, mode: mode})
@@ -237,7 +242,10 @@ defmodule Brain.PMTG do
     }
 
     window =
-      [{System.system_time(:millisecond), %{needy_count: length(need), queries: queries}} | state.window]
+      [
+        {System.system_time(:millisecond), %{needy_count: length(need), queries: queries}}
+        | state.window
+      ]
       |> Enum.take(state.window_keep)
 
     :telemetry.execute([:brain, :pmtg, :consult], %{needy: length(need)}, %{thr: thr, mode: mode})
@@ -251,8 +259,7 @@ defmodule Brain.PMTG do
         choices: choices,
         mode: mode,
         rerun?: rerun?
-      }},
-     %{state | last: last, window: window}}
+      }}, %{state | last: last, window: window}}
   end
 
   @impl true
@@ -331,6 +338,7 @@ defmodule Brain.PMTG do
 
   defp episodes_hits(nil, _limit), do: []
   defp episodes_hits("", _limit), do: []
+
   defp episodes_hits(lemma, limit) do
     mod = Module.concat([Db, Episodes])
 
@@ -348,6 +356,7 @@ defmodule Brain.PMTG do
 
   defp lexicon_hits(nil, _limit), do: []
   defp lexicon_hits("", _limit), do: []
+
   defp lexicon_hits(lemma, limit) do
     mods = [Module.concat([Db, Lexicon]), Lexicon]
 
@@ -394,9 +403,10 @@ defmodule Brain.PMTG do
   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
   def enforce_sense_compatibility(evidence, tokens)
       when is_list(evidence) and is_list(tokens) do
-    tmap = Map.new(tokens, fn t ->
-      {Map.get(t, :index) || Map.get(t, "index"), t}
-    end)
+    tmap =
+      Map.new(tokens, fn t ->
+        {Map.get(t, :index) || Map.get(t, "index"), t}
+      end)
 
     Enum.map(evidence, fn ev ->
       idx = Map.get(ev, :token_index) || Map.get(ev, "token_index")
@@ -452,9 +462,11 @@ defmodule Brain.PMTG do
     inhib = Keyword.get(opts, :inhib, -0.05)
 
     Enum.each(evidence, fn ev ->
-      has_hits = (ev.episodes != [] or ev.lexicon != [])
+      has_hits = ev.episodes != [] or ev.lexicon != []
+
       if has_hits and is_binary(ev.chosen_id) do
         Brain.cell_cast(ev.chosen_id, {:activate, %{delta: boost}})
+
         Enum.each(ev.alt_ids || [], fn aid ->
           Brain.cell_cast(aid, {:activate, %{delta: inhib}})
         end)
@@ -467,96 +479,103 @@ defmodule Brain.PMTG do
   @doc false
   @spec do_rerun(si(), [evidence_item()], keyword()) ::
           {:ok, %{si: si(), choices: [choice()]}}
-defp do_rerun(si, evidence, opts) do
-  # Build a slate from lexicon evidence with semantic fields preserved
-  slate_from_ev =
-    evidence
-    |> Enum.group_by(& &1.token_index)
-    |> Enum.into(%{}, fn {tidx, evs} ->
-      senses =
-        evs
-        |> Enum.flat_map(fn ev -> List.wrap(ev.lexicon) end)
-        |> Enum.uniq_by(fn s -> Map.get(s, :id) || Map.get(s, "id") end)
-        |> Enum.with_index()
-        |> Enum.map(fn {s, i} ->
-          id    = Map.get(s, :id)    || Map.get(s, "id")
-          lemma = Map.get(s, :lemma) || Map.get(s, "lemma") || ""
-          pos   = Map.get(s, :pos)   || Map.get(s, "pos")   || ""
-          defn  = Map.get(s, :gloss) || Map.get(s, "gloss") ||
-                  Map.get(s, :definition) || Map.get(s, "definition") || ""
-          syns  = Map.get(s, :synonyms) || Map.get(s, "synonyms") || []
+  defp do_rerun(si, evidence, opts) do
+    # Build a slate from lexicon evidence with semantic fields preserved
+    slate_from_ev =
+      evidence
+      |> Enum.group_by(& &1.token_index)
+      |> Enum.into(%{}, fn {tidx, evs} ->
+        senses =
+          evs
+          |> Enum.flat_map(fn ev -> List.wrap(ev.lexicon) end)
+          |> Enum.uniq_by(fn s -> Map.get(s, :id) || Map.get(s, "id") end)
+          |> Enum.with_index()
+          |> Enum.map(fn {s, i} ->
+            id = Map.get(s, :id) || Map.get(s, "id")
+            lemma = Map.get(s, :lemma) || Map.get(s, "lemma") || ""
+            pos = Map.get(s, :pos) || Map.get(s, "pos") || ""
 
-          feats_from_sense = Map.get(s, :features) || %{}
+            defn =
+              Map.get(s, :gloss) || Map.get(s, "gloss") ||
+                Map.get(s, :definition) || Map.get(s, "definition") || ""
 
-          # tiny deterministic tiebreaker so top-1 has non-zero margin
-          eps = 1.0e-6 * (1000 - i)
+            syns = Map.get(s, :synonyms) || Map.get(s, "synonyms") || []
 
-          base_feats = %{
-            lex_fit:     0.60,
-            rel_prior:   0.50,     # will get +eps below
-            activation:  0.0,
-            intent_bias: 0.0,
-            # carry semantics so Stage1 heuristics can work
-            pos: pos,
-            lemma: lemma,
-            definition: defn,
-            synonyms: syns
-          }
+            feats_from_sense = Map.get(s, :features) || %{}
 
-          feats =
-            base_feats
-            # let explicit features from the sense win over base defaults
-            |> Map.merge(feats_from_sense, fn _k, _base, from_sense -> from_sense end)
-            # always add the epsilon even if rel_prior came from the sense
-            |> Map.update(:rel_prior, 0.50 + eps, &(&1 + eps))
-            # salutation nudge for interjection senses
-            |> maybe_salutation_nudge(si, tidx)
+            # tiny deterministic tiebreaker so top-1 has non-zero margin
+            eps = 1.0e-6 * (1000 - i)
 
-          %{id: id, features: feats}
-        end)
+            base_feats = %{
+              lex_fit: 0.60,
+              # will get +eps below
+              rel_prior: 0.50,
+              activation: 0.0,
+              intent_bias: 0.0,
+              # carry semantics so Stage1 heuristics can work
+              pos: pos,
+              lemma: lemma,
+              definition: defn,
+              synonyms: syns
+            }
 
-      {tidx, senses}
-    end)
+            feats =
+              base_feats
+              # let explicit features from the sense win over base defaults
+              |> Map.merge(feats_from_sense, fn _k, _base, from_sense -> from_sense end)
+              # always add the epsilon even if rel_prior came from the sense
+              |> Map.update(:rel_prior, 0.50 + eps, &(&1 + eps))
+              # salutation nudge for interjection senses
+              |> maybe_salutation_nudge(si, tidx)
 
-  si2 = Map.put(si, :sense_candidates, slate_from_ev)
+            %{id: id, features: feats}
+          end)
 
-  # Weights: Stage1 env/defaults + optional bump
-  env =
-    Application.get_env(:brain, :lifg_stage1_weights, %{
-      lex_fit: 0.4, rel_prior: 0.3, activation: 0.2, intent_bias: 0.1
-    })
+        {tidx, senses}
+      end)
 
-  base    = Map.merge(env, Map.new(Keyword.get(opts, :weights, [])))
-  bump    = Map.get(Map.new(opts), :rerun_weights_bump, %{})
-  weights = Map.merge(base, bump, fn _k, a, b -> a + b end)
+    si2 = Map.put(si, :sense_candidates, slate_from_ev)
 
-  {:ok, %{choices: choices}} =
-    Brain.LIFG.Stage1.run(
-      si2,
-      weights: weights,
-      chargram_event:  [:brain, :pmtg, :chargram_violation],
-      boundary_event:  [:brain, :pmtg, :boundary_drop]
-    )
+    # Weights: Stage1 env/defaults + optional bump
+    env =
+      Application.get_env(:brain, :lifg_stage1_weights, %{
+        lex_fit: 0.4,
+        rel_prior: 0.3,
+        activation: 0.2,
+        intent_bias: 0.1
+      })
 
-  {:ok, %{si: si2, choices: choices}}
-end
+    base = Map.merge(env, Map.new(Keyword.get(opts, :weights, [])))
+    bump = Map.get(Map.new(opts), :rerun_weights_bump, %{})
+    weights = Map.merge(base, bump, fn _k, a, b -> a + b end)
 
-defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
-  phrase =
-    si
-    |> Map.get(:tokens, [])
-    |> Enum.at(tidx, %{})
-    |> Map.get(:phrase, "")
-    |> to_string()
+    {:ok, %{choices: choices}} =
+      Brain.LIFG.Stage1.run(
+        si2,
+        weights: weights,
+        chargram_event: [:brain, :pmtg, :chargram_violation],
+        boundary_event: [:brain, :pmtg, :boundary_drop]
+      )
 
-  pos = (feats[:pos] || feats["pos"] || "") |> to_string() |> String.downcase()
-
-  if Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) and String.contains?(pos, "interjection") do
-    Map.update(feats, :lex_fit, 0.63, &(&1 + 0.03))
-  else
-    feats
+    {:ok, %{si: si2, choices: choices}}
   end
-end
+
+  defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
+    phrase =
+      si
+      |> Map.get(:tokens, [])
+      |> Enum.at(tidx, %{})
+      |> Map.get(:phrase, "")
+      |> to_string()
+
+    pos = (feats[:pos] || feats["pos"] || "") |> to_string() |> String.downcase()
+
+    if Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) and String.contains?(pos, "interjection") do
+      Map.update(feats, :lex_fit, 0.63, &(&1 + 0.03))
+    else
+      feats
+    end
+  end
 
   # ─────────────────────────────── Helpers ───────────────────────────────
 
@@ -565,7 +584,7 @@ end
     |> Enum.filter(fn ch ->
       m = Map.get(ch, :margin, 1.0)
       alts = Map.get(ch, :alt_ids, [])
-      is_number(m) and m < (thr * 1.0) and is_list(alts) and length(alts) > 0
+      is_number(m) and m < thr * 1.0 and is_list(alts) and length(alts) > 0
     end)
   end
 
@@ -591,6 +610,7 @@ end
   end
 
   # Emit a pMTG :rerun event (2-arity only; no 1-arity wrapper)
+  # Emit a pMTG :rerun event (2-arity only; no 1-arity wrapper)
   defp emit_rerun_event(choices, mode) do
     groups =
       choices
@@ -598,8 +618,12 @@ end
       |> MapSet.new()
       |> MapSet.size()
 
-    # Use 2-arity; wrapper forwards to the 3-arity impl
-    safe_exec_telemetry([:brain, :pmtg, :rerun], %{groups: groups, mode: mode})
+    # Telemetry: keep numeric fields in measurements; atoms/labels in meta
+    :telemetry.execute(
+      [:brain, :pmtg, :rerun],
+      %{groups: groups, choices: length(choices)},
+      %{mode: mode}
+    )
   end
 
   # --- Telemetry helpers (grouped; no duplicates, no unused 1-arity) ---
@@ -617,4 +641,3 @@ end
     end
   end
 end
-

@@ -17,4 +17,3 @@ defmodule Core.Brain do
   @doc false
   def now_ms, do: System.system_time(:millisecond)
 end
-

@@ -6,8 +6,8 @@ import Config
 pmtg_mode =
   case System.get_env("PMTG_MODE", "boost") |> String.downcase() do
     "rerun" -> :rerun
-    "none"  -> :none
-    _       -> :boost
+    "none" -> :none
+    _ -> :boost
   end
 
 pmtg_margin =
@@ -25,20 +25,25 @@ pmtg_keep =
 # Optional: override Stage-1 weights via "LIFG_WTS=lex,rel,act,prag"
 lifg_weights =
   case System.get_env("LIFG_WTS") do
-    nil -> nil
+    nil ->
+      nil
+
     csv ->
       parts = String.split(csv, ",")
+
       case Enum.map(parts, &Float.parse/1) do
-        [{lex,_},{rel,_},{act,_},{prag,_}] ->
+        [{lex, _}, {rel, _}, {act, _}, {prag, _}] ->
           %{lex_fit: lex, rel_prior: rel, activation: act, intent_bias: prag}
-        _ -> nil
+
+        _ ->
+          nil
       end
   end
 
 # Optional: override scores output mode ("all" | "top2" | "none")
 lifg_scores_mode =
   case System.get_env("LIFG_SCORES_MODE", "") |> String.downcase() do
-    "all"  -> :all
+    "all" -> :all
     "top2" -> :top2
     "none" -> :none
     _ -> nil
@@ -58,16 +63,16 @@ config :brain,
   hippo_meta_dup_count: true,
   lifg_min_score: lifg_min_score
 
-if lifg_weights,     do: config(:brain, :lifg_stage1_weights, lifg_weights)
+if lifg_weights, do: config(:brain, :lifg_stage1_weights, lifg_weights)
 if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mode)
 
 # ───────── Logger runtime overrides ─────────
 log_level =
   case System.get_env("LOG_LEVEL", "info") |> String.downcase() do
     "debug" -> :debug
-    "warn"  -> :warn
+    "warn" -> :warn
     "error" -> :error
-    _       -> :info
+    _ -> :info
   end
 
 config :logger, level: log_level
@@ -91,7 +96,7 @@ repo_overrides =
   |> then(fn acc ->
     case Integer.parse(System.get_env("POOL_SIZE", "")) do
       {n, _} -> Keyword.put(acc, :pool_size, n)
-      _      -> acc
+      _ -> acc
     end
   end)
   |> Keyword.put(:log, db_log)
@@ -111,10 +116,9 @@ if config_env() == :prod do
 
   config :symbrella_web, SymbrellaWeb.Endpoint,
     server: true,
-    http: [ip: {0,0,0,0,0,0,0,0}, port: port],
+    http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base
 
   config :swoosh, :api_client, Swoosh.ApiClient.Req
   config :swoosh, local: false
 end
-

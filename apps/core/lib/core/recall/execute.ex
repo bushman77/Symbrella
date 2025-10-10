@@ -424,4 +424,3 @@ defmodule Core.Recall.Execute do
     end
   end
 end
-

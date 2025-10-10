@@ -55,9 +55,12 @@ defmodule Brain.ATL do
        # rolling state
        keep: keep,
        last_slate: %{},
-       concept_counts: %{}, # norm => count (concept-level)
-       sense_counts: %{},   # id   => count (sense-level)
-       window: []           # [{ts_ms, slate}, ...]
+       # norm => count (concept-level)
+       concept_counts: %{},
+       # id   => count (sense-level)
+       sense_counts: %{},
+       # [{ts_ms, slate}, ...]
+       window: []
      }}
   end
 
@@ -113,10 +116,11 @@ defmodule Brain.ATL do
     winners =
       choices
       |> Enum.map(&normalize_choice/1)
-      |> Enum.reject(&is_nil(&1.id)) # only keep items with an id
+      # only keep items with an id
+      |> Enum.reject(&is_nil(&1.id))
 
     by_norm = Enum.group_by(winners, & &1.norm)
-    by_id   = Enum.group_by(winners, & &1.id)
+    by_id = Enum.group_by(winners, & &1.id)
 
     %{
       tokens: tokens,
@@ -133,11 +137,11 @@ defmodule Brain.ATL do
   # Accepts both SenseChoice style (%{chosen_id:, lemma:, margin:, scores: ...})
   # and simpler %{id:, lemma: ...}. Falls back where possible.
   defp normalize_choice(ch) when is_map(ch) do
-    id         = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
-    token_idx  = fetch_any(ch, [:token_index, "token_index"])
+    id = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
+    token_idx = fetch_any(ch, [:token_index, "token_index"])
     score_norm = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
-    margin     = fetch_any(ch, [:margin, "margin"]) || 0.0
-    lemma0     = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
+    margin = fetch_any(ch, [:margin, "margin"]) || 0.0
+    lemma0 = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
 
     %{
       id: id,
@@ -157,7 +161,7 @@ defmodule Brain.ATL do
     Enum.reduce_while(keys, nil, fn k, _acc ->
       case Map.get(map, k) do
         nil -> {:cont, nil}
-        v   -> {:halt, v}
+        v -> {:halt, v}
       end
     end)
   end
@@ -170,8 +174,10 @@ defmodule Brain.ATL do
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
 
   defp norm_text(nil), do: ""
+
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
   defp norm_text(v),
     do:
       v
@@ -180,147 +186,149 @@ defmodule Brain.ATL do
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 
-# ───────── Sense slate promotion → si.sense_candidates ─────────
+  # ───────── Sense slate promotion → si.sense_candidates ─────────
 
-@doc """
-Attach sense candidates to the Semantic Input (SI), keyed by token index.
+  @doc """
+  Attach sense candidates to the Semantic Input (SI), keyed by token index.
 
-- Pulls winners and near-winners from the current ATL `slate`
-- Uses `raw.scores` when available to expand alt candidates
-- Keeps a compact, LIFG-ready payload: %{token_index => [%{id, score, ...}]}
+  - Pulls winners and near-winners from the current ATL `slate`
+  - Uses `raw.scores` when available to expand alt candidates
+  - Keeps a compact, LIFG-ready payload: %{token_index => [%{id, score, ...}]}
 
-Opts:
-  * :top_k         — default 3
-  * :margin_window — default 0.05 (accept alts within 5% of winner score)
-"""
-@spec attach_sense_candidates(map(), map(), keyword()) :: map()
-def attach_sense_candidates(si, slate, opts \\ []) when is_map(si) and is_map(slate) do
-  candidates = promote_sense_candidates_from_slate(slate, opts)
-  Map.put(si, :sense_candidates, candidates)
-end
-
-@spec promote_sense_candidates_from_slate(map(), keyword()) ::
-        %{non_neg_integer() => [map()]}
-def promote_sense_candidates_from_slate(%{winners: winners} = _slate, opts) do
-
-  top_k         = Keyword.get(opts, :top_k, 3)
-  margin_window = Keyword.get(opts, :margin_window, 0.05)
-
-  # Build per-token candidate lists from winners + raw.scores (if present)
-  winners
-  |> Enum.group_by(& &1.token_index)
-  |> Enum.into(%{}, fn {idx, entries} ->
-    # Winner for this token is entries |> Enum.max_by(&score) in most setups,
-    # but your slate already has per-token winner at head; keep head as winner.
-    winner = List.first(entries) || %{}
-    w_score =
-      winner[:score] ||
-        get_in(winner, [:raw, :score_norm]) ||
-        0.0
-
-    # Expand alternatives from raw.scores if present; otherwise just keep the winner.
-    alts =
-      winner
-      |> Map.get(:raw, %{})
-      |> Map.get(:scores, %{})
-      |> Enum.map(fn {id, s} ->
-        %{
-          id: id,
-          score: as_float(s),
-          rank: nil,
-          from: :atl_scores,
-          pos: pos_from_id(id),
-          norm: Map.get(winner, :norm),
-          lemma: Map.get(winner, :lemma),
-          features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
-          margin: nil
-        }
-      end)
-
-    # Include the winner explicitly (first, de-duplicated)
-    winner_as_candidate = %{
-      id: winner[:id],
-      score: as_float(w_score),
-      rank: 0,
-      from: :atl_winner,
-      pos: pos_from_id(winner[:id]),
-      norm: winner[:norm],
-      lemma: winner[:lemma],
-      features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
-      margin: Map.get(winner, :margin, 0.0)
-    }
-
-    # Filter near-winners by margin window around the winner score, take top_k
-    near =
-      alts
-      |> Enum.reject(&is_nil(&1.id))
-      |> Enum.uniq_by(& &1.id)
-      |> Enum.sort_by(&(-1 * (&1.score || 0.0)))
-      |> Enum.filter(fn c ->
-        w_score <= 0.0 or c.score >= w_score * (1.0 - margin_window)
-      end)
-      |> Enum.take(top_k)
-      |> Enum.with_index(1)
-      |> Enum.map(fn {c, i} -> %{c | rank: i} end)
-
-    # Final list for this token
-    {idx, uniq_by_id([winner_as_candidate | near])}
-  end)
-end
-
-defp uniq_by_id(list),
-  do: list |> Enum.reject(&is_nil(&1.id)) |> Enum.uniq_by(& &1.id)
-
-defp as_float(nil),  do: 0.0
-defp as_float(num) when is_number(num), do: num
-defp as_float(str) when is_binary(str) do
-  case Float.parse(str) do
-    {f, _} -> f
-    _ -> 0.0
+  Opts:
+    * :top_k         — default 3
+    * :margin_window — default 0.05 (accept alts within 5% of winner score)
+  """
+  @spec attach_sense_candidates(map(), map(), keyword()) :: map()
+  def attach_sense_candidates(si, slate, opts \\ []) when is_map(si) and is_map(slate) do
+    candidates = promote_sense_candidates_from_slate(slate, opts)
+    Map.put(si, :sense_candidates, candidates)
   end
-end
 
-defp pos_from_id(nil), do: nil
-defp pos_from_id(id) when is_binary(id) do
-  case String.split(id, "|") do
-    [_lemma, pos, _sense] -> pos
-    _ -> nil
+  @spec promote_sense_candidates_from_slate(map(), keyword()) ::
+          %{non_neg_integer() => [map()]}
+  def promote_sense_candidates_from_slate(%{winners: winners} = _slate, opts) do
+    top_k = Keyword.get(opts, :top_k, 3)
+    margin_window = Keyword.get(opts, :margin_window, 0.05)
+
+    # Build per-token candidate lists from winners + raw.scores (if present)
+    winners
+    |> Enum.group_by(& &1.token_index)
+    |> Enum.into(%{}, fn {idx, entries} ->
+      # Winner for this token is entries |> Enum.max_by(&score) in most setups,
+      # but your slate already has per-token winner at head; keep head as winner.
+      winner = List.first(entries) || %{}
+
+      w_score =
+        winner[:score] ||
+          get_in(winner, [:raw, :score_norm]) ||
+          0.0
+
+      # Expand alternatives from raw.scores if present; otherwise just keep the winner.
+      alts =
+        winner
+        |> Map.get(:raw, %{})
+        |> Map.get(:scores, %{})
+        |> Enum.map(fn {id, s} ->
+          %{
+            id: id,
+            score: as_float(s),
+            rank: nil,
+            from: :atl_scores,
+            pos: pos_from_id(id),
+            norm: Map.get(winner, :norm),
+            lemma: Map.get(winner, :lemma),
+            features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
+            margin: nil
+          }
+        end)
+
+      # Include the winner explicitly (first, de-duplicated)
+      winner_as_candidate = %{
+        id: winner[:id],
+        score: as_float(w_score),
+        rank: 0,
+        from: :atl_winner,
+        pos: pos_from_id(winner[:id]),
+        norm: winner[:norm],
+        lemma: winner[:lemma],
+        features: Map.get(winner, :raw, %{}) |> Map.get(:features, %{}),
+        margin: Map.get(winner, :margin, 0.0)
+      }
+
+      # Filter near-winners by margin window around the winner score, take top_k
+      near =
+        alts
+        |> Enum.reject(&is_nil(&1.id))
+        |> Enum.uniq_by(& &1.id)
+        |> Enum.sort_by(&(-1 * (&1.score || 0.0)))
+        |> Enum.filter(fn c ->
+          w_score <= 0.0 or c.score >= w_score * (1.0 - margin_window)
+        end)
+        |> Enum.take(top_k)
+        |> Enum.with_index(1)
+        |> Enum.map(fn {c, i} -> %{c | rank: i} end)
+
+      # Final list for this token
+      {idx, uniq_by_id([winner_as_candidate | near])}
+    end)
   end
-end
 
-@doc """
-Finalize the ATL slate for the current `si`.
+  defp uniq_by_id(list),
+    do: list |> Enum.reject(&is_nil(&1.id)) |> Enum.uniq_by(& &1.id)
 
-Returns `{si, slate}`.
+  defp as_float(nil), do: 0.0
+  defp as_float(num) when is_number(num), do: num
 
-Behavior:
-  * If `si` already has `:lifg_choices`, build a fresh `slate` via `reduce/2`.
-  * Otherwise, fall back to the ATL server's `last_slate` if the server is running.
-  * If nothing is available, return an empty `%{}` slate.
-"""
-@spec finalize(map(), keyword()) :: {map(), map()}
-def finalize(si, _opts \\ []) when is_map(si) do
-  choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
-  tokens  = Map.get(si, :tokens)       || Map.get(si, "tokens")       || []
-
-  slate =
-    cond do
-      is_list(choices) and choices != [] and is_list(tokens) ->
-        reduce(choices, tokens)
-
-      true ->
-        case Process.whereis(@name) do
-          nil -> %{}
-          _pid ->
-            case snapshot() do
-              %{last_slate: sl} when is_map(sl) -> sl
-              _ -> %{}
-            end
-        end
+  defp as_float(str) when is_binary(str) do
+    case Float.parse(str) do
+      {f, _} -> f
+      _ -> 0.0
     end
+  end
 
-  {si, slate}
+  defp pos_from_id(nil), do: nil
+
+  defp pos_from_id(id) when is_binary(id) do
+    case String.split(id, "|") do
+      [_lemma, pos, _sense] -> pos
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Finalize the ATL slate for the current `si`.
+
+  Returns `{si, slate}`.
+
+  Behavior:
+    * If `si` already has `:lifg_choices`, build a fresh `slate` via `reduce/2`.
+    * Otherwise, fall back to the ATL server's `last_slate` if the server is running.
+    * If nothing is available, return an empty `%{}` slate.
+  """
+  @spec finalize(map(), keyword()) :: {map(), map()}
+  def finalize(si, _opts \\ []) when is_map(si) do
+    choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
+    tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+
+    slate =
+      cond do
+        is_list(choices) and choices != [] and is_list(tokens) ->
+          reduce(choices, tokens)
+
+        true ->
+          case Process.whereis(@name) do
+            nil ->
+              %{}
+
+            _pid ->
+              case snapshot() do
+                %{last_slate: sl} when is_map(sl) -> sl
+                _ -> %{}
+              end
+          end
+      end
+
+    {si, slate}
+  end
 end
-
-end
-

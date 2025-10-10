@@ -16,4 +16,3 @@ defmodule Brain.LIFG.PrimingTest do
     # Skipped until a Brain.LIFG.Priming module is introduced.
   end
 end
-

@@ -39,7 +39,7 @@ defmodule Brain.HippocampusBehaviorTest do
     Hippocampus.encode(slate_with("alpha"), %{conv_id: 1})
     Hippocampus.encode(slate_with("spacer"), %{conv_id: 999})
     Hippocampus.encode(slate_with("alpha"), %{conv_id: 2})
-    Hippocampus.encode(slate_with("beta"),  %{conv_id: 1})
+    Hippocampus.encode(slate_with("beta"), %{conv_id: 1})
 
     # Scope conv_id: 1 → only the alpha in scope 1 overlaps with cue "alpha"
     res1 = Hippocampus.recall(["alpha"], limit: 5, scope: %{conv_id: 1})
@@ -71,4 +71,3 @@ defmodule Brain.HippocampusBehaviorTest do
     assert hd(res_low).score > 0.0
   end
 end
-

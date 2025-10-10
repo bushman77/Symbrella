@@ -24,4 +24,3 @@ defmodule Core.TokenTest do
     assert {:ok, _} = Token.check_span_invariants(si_chars)
   end
 end
-

@@ -18,6 +18,7 @@ defmodule Lexicon do
         case Jason.decode(body) do
           {:ok, items} when is_list(items) ->
             %{word: norm(word), senses: flatten_senses(items)}
+
           _ ->
             %{word: norm(word), senses: []}
         end
@@ -41,6 +42,7 @@ defmodule Lexicon do
     items
     |> Enum.flat_map(fn entry ->
       meanings = entry["meanings"] || []
+
       Enum.flat_map(meanings, fn m ->
         pos = m["partOfSpeech"] |> down()
         syn_m = m["synonyms"] || []
@@ -66,4 +68,3 @@ defmodule Lexicon do
   defp norm(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 end
-

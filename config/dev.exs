@@ -1,3 +1,4 @@
+# P-201 — Tokenizer defaults (dev): words-only, no char-grams
 import Config
 
 config :symbrella_web, SymbrellaWeb.Endpoint,
@@ -34,10 +35,10 @@ config :swoosh, :api_client, false
 # Helpful stacktraces in dev
 config :phoenix, :stacktrace_depth, 20
 
+# ---- Core tokenizer defaults (dev) -----------------------------------
 config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
 # Optional extra LIFG outer weights in dev (kept from your original)
 config :brain, :lifg_weights, prime: 0.05
-

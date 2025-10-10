@@ -6,6 +6,9 @@ defmodule Core.Recall.ExecuteHippoIntegrationTest do
   alias Brain.Hippocampus
 
   setup do
+    # Ensure Core.NegCache is running (Execute.do_exact/… consults it)
+    Process.whereis(Core.NegCache) || start_supervised!({Core.NegCache, name: Core.NegCache})
+
     # Ensure Hippocampus server is running and clean
     Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
     Hippocampus.reset()
@@ -33,7 +36,7 @@ defmodule Core.Recall.ExecuteHippoIntegrationTest do
     }
   end
 
-  defp plan_min() do
+  defp plan_min do
     # Only the fields Execute.execute/3 actually reads; provide required :triggers key.
     %Plan{budget_ms: 25, max_items: 4, strategies: [:exact], triggers: []}
   end

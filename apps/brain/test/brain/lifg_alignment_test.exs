@@ -11,9 +11,9 @@ defmodule Brain.LIFGAlignmentTest do
       # Provide ≥2 candidates per token_index
       active_cells: [
         %{token_index: 0, lemma: "this", id: "THIS/strong", score: 0.9},
-        %{token_index: 0, lemma: "this", id: "THIS/weak",   score: 0.1},
-        %{token_index: 1, lemma: "is",   id: "BE/strong",   score: 0.8},
-        %{token_index: 1, lemma: "is",   id: "BE/weak",     score: 0.2}
+        %{token_index: 0, lemma: "this", id: "THIS/weak", score: 0.1},
+        %{token_index: 1, lemma: "is", id: "BE/strong", score: 0.8},
+        %{token_index: 1, lemma: "is", id: "BE/weak", score: 0.2}
       ],
       trace: []
     }
@@ -39,4 +39,3 @@ defmodule Brain.LIFGAlignmentTest do
     end
   end
 end
-

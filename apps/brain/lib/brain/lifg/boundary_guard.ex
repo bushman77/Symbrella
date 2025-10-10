@@ -19,6 +19,7 @@ defmodule Brain.LIFG.BoundaryGuard do
       case {Map.get(t, :span) || Map.get(t, "span"), sentence} do
         {{s, l}, snt} when is_integer(s) and is_integer(l) and l > 0 and is_binary(snt) ->
           boundary_aligned?(snt, s, l) or mw?
+
         _ ->
           true
       end
@@ -31,10 +32,11 @@ defmodule Brain.LIFG.BoundaryGuard do
   defp mapify(other), do: %{phrase: to_string(other)}
 
   defp chargram?(t) when is_map(t) do
-    (Map.get(t, :chargram) in [true, "true"]) or
-      (Map.get(t, :kind) in [:chargram, "chargram"]) or
-      (Map.get(t, :source) in [:chargram, "chargram"])
+    Map.get(t, :chargram) in [true, "true"] or
+      Map.get(t, :kind) in [:chargram, "chargram"] or
+      Map.get(t, :source) in [:chargram, "chargram"]
   end
+
   defp chargram?(_), do: false
 
   defp sort_by_span_if_present(list) when is_list(list) do
@@ -55,6 +57,7 @@ defmodule Brain.LIFG.BoundaryGuard do
     right_ok = right >= String.length(snt) or not word_char?(String.slice(snt, right, 1))
     left_ok and right_ok
   end
+
   defp boundary_aligned?(_snt, _s, _l), do: false
 
   defp word_char?(""), do: false
@@ -64,4 +67,3 @@ defmodule Brain.LIFG.BoundaryGuard do
   defp truthy("true"), do: true
   defp truthy(_), do: false
 end
-

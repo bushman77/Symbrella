@@ -17,7 +17,8 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
       si =
         SI.emit_sense_candidates(@si, 0, scored, "alpha",
-          margin: 0.15, # keep >= 1.00 - 0.15 => 0.85
+          # keep >= 1.00 - 0.15 => 0.85
+          margin: 0.15,
           top_k: 3
         )
 
@@ -29,20 +30,31 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
     test "dedups by id (keep highest score) and merges with existing up to top_k" do
       si1 =
-        SI.emit_sense_candidates(@si, 2, [
-          {"b|verb|1", 0.90},
-          {"c|verb|1", 0.89}
-        ], "beta",
-          margin: 0.25, top_k: 3
+        SI.emit_sense_candidates(
+          @si,
+          2,
+          [
+            {"b|verb|1", 0.90},
+            {"c|verb|1", 0.89}
+          ],
+          "beta",
+          margin: 0.25,
+          top_k: 3
         )
 
       # second batch: improves c, adds d; ensure merge + dedup + resort + cap by top_k
       si2 =
-        SI.emit_sense_candidates(si1, 2, [
-          {"c|verb|1", 0.95}, # higher than previous
-          {"d|verb|1", 0.86}
-        ], "beta",
-          margin: 0.25, top_k: 3
+        SI.emit_sense_candidates(
+          si1,
+          2,
+          [
+            # higher than previous
+            {"c|verb|1", 0.95},
+            {"d|verb|1", 0.86}
+          ],
+          "beta",
+          margin: 0.25,
+          top_k: 3
         )
 
       cands = SI.get_sense_candidates(si2, 2)
@@ -55,10 +67,14 @@ defmodule Core.SemanticInputSenseCandidatesTest do
     test "min_score drops items even if within margin" do
       # max=0.80; with margin 0.30 threshold is 0.50 — but min_score = 0.60 should drop 0.55
       si =
-        SI.emit_sense_candidates(@si, 1, [
-          {"x|adj|0", 0.80},
-          {"y|adj|0", 0.55}
-        ], "xi",
+        SI.emit_sense_candidates(
+          @si,
+          1,
+          [
+            {"x|adj|0", 0.80},
+            {"y|adj|0", 0.55}
+          ],
+          "xi",
           margin: 0.30,
           min_score: 0.60,
           top_k: 5
@@ -69,22 +85,27 @@ defmodule Core.SemanticInputSenseCandidatesTest do
       assert Enum.map(cands, & &1.score) == [0.80]
     end
 
-test "accepts %{id, score} maps and bare ids (score defaults to 0.0)" do
-  # Use a larger margin so the 0.0 bare-id candidate isn't filtered out.
-  si =
-    SI.emit_sense_candidates(@si, 3, [
-      %{id: "mwe one|mwe|0", score: 0.25},
-      "lonely|noun|0"
-    ], "lemma3",
-      margin: 1.0,   # <-- key change
-      top_k: 5
-    )
+    test "accepts %{id, score} maps and bare ids (score defaults to 0.0)" do
+      # Use a larger margin so the 0.0 bare-id candidate isn't filtered out.
+      si =
+        SI.emit_sense_candidates(
+          @si,
+          3,
+          [
+            %{id: "mwe one|mwe|0", score: 0.25},
+            "lonely|noun|0"
+          ],
+          "lemma3",
+          # <-- key change
+          margin: 1.0,
+          top_k: 5
+        )
 
-  cands = SI.get_sense_candidates(si, 3)
-  assert Enum.map(cands, & &1.id) == ["mwe one|mwe|0", "lonely|noun|0"]
-  assert Enum.map(cands, & &1.score) == [0.25, 0.0]
-  assert Enum.all?(cands, &(&1.lemma == "lemma3"))
-end
+      cands = SI.get_sense_candidates(si, 3)
+      assert Enum.map(cands, & &1.id) == ["mwe one|mwe|0", "lonely|noun|0"]
+      assert Enum.map(cands, & &1.score) == [0.25, 0.0]
+      assert Enum.all?(cands, &(&1.lemma == "lemma3"))
+    end
 
     test "merges per-index but keeps indices isolated" do
       si =
@@ -99,4 +120,3 @@ end
     end
   end
 end
-

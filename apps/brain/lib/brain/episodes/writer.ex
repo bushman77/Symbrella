@@ -9,14 +9,15 @@ defmodule Brain.Episodes.Writer do
   @type mode :: :off | :sync | :async
 
   @spec normalize_episode_mode(any()) :: mode()
-  def normalize_episode_mode(:off),   do: :off
-  def normalize_episode_mode(:sync),  do: :sync
+  def normalize_episode_mode(:off), do: :off
+  def normalize_episode_mode(:sync), do: :sync
   def normalize_episode_mode(_other), do: :async
 
   @spec store(map(), [binary()], mode()) :: :ok
   def store(_si, _tags, :off), do: :ok
-  def store(si, tags, :sync),  do: do_store_episode(si, tags, async_embedding?: false)
-  def store(si, tags, :async)  do
+  def store(si, tags, :sync), do: do_store_episode(si, tags, async_embedding?: false)
+
+  def store(si, tags, :async) do
     Task.start(fn -> do_store_episode(si, tags, async_embedding?: true) end)
     :ok
   end
@@ -36,7 +37,9 @@ defmodule Brain.Episodes.Writer do
 
     case result do
       {:ok, _ep} ->
-        :telemetry.execute([:brain, :episodes, :write], %{ok: 1}, %{mode: mode_tag(async_embedding?)})
+        :telemetry.execute([:brain, :episodes, :write], %{ok: 1}, %{
+          mode: mode_tag(async_embedding?)
+        })
 
       {:error, reason} ->
         :telemetry.execute(
@@ -49,7 +52,6 @@ defmodule Brain.Episodes.Writer do
     :ok
   end
 
-  defp mode_tag(true),  do: :async
+  defp mode_tag(true), do: :async
   defp mode_tag(false), do: :sync
 end
-

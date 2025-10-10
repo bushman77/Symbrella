@@ -9,25 +9,66 @@ defmodule Brain.Hippocampus.Dup do
   @doc """
   If `:hippo_meta_dup_count` is true (and not test), increment `:dup_count` in meta.
   Otherwise, return the episode unchanged.
+
+  NOTE: on the *first* duplicate, we want `dup_count=2` (two occurrences).
   """
   @spec bump_dup_count(%{meta: map()}) :: map()
   def bump_dup_count(%{meta: meta} = ep) do
-    if @test_env do
-      ep
-    else
-      if Application.get_env(:brain, :hippo_meta_dup_count, false) do
-        meta2 = (meta || %{}) |> Map.update(:dup_count, 1, &(&1 + 1))
-        %{ep | meta: meta2}
-      else
+    cond do
+      @test_env ->
         ep
-      end
+
+      Application.get_env(:brain, :hippo_meta_dup_count, false) ->
+        # merge existing & new meta shape (in case caller passed a fresh meta)
+        meta0 = meta || %{}
+
+        # If already present, +1; otherwise seed at 2 (first duplicate → two copies total)
+        dup2 =
+          case fetch_dup_count(meta0) do
+            nil -> 2
+            n when is_integer(n) -> n + 1
+            _ -> 2
+          end
+
+        %{ep | meta: Map.put(meta0, :dup_count, dup2)}
+
+      true ->
+        ep
     end
   end
 
   def bump_dup_count(ep), do: ep
 
   @spec dup_count(map()) :: pos_integer()
-  def dup_count(%{meta: m}) when is_map(m), do: Map.get(m, :dup_count, 1)
-  def dup_count(_), do: 1
-end
+  def dup_count(%{meta: m}) when is_map(m) do
+    n =
+      fetch_dup_count(m)
+      |> case do
+        nil ->
+          1
 
+        v when is_integer(v) ->
+          v
+
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            _ -> 1
+          end
+
+        _ ->
+          1
+      end
+
+    n |> max(1) |> min(5)
+  end
+
+  def dup_count(_), do: 1
+
+  # -------- internals --------
+
+  defp fetch_dup_count(m) do
+    Map.get(m, :dup_count) || Map.get(m, "dup_count") ||
+      Map.get(m, :dup) || Map.get(m, "dup")
+  end
+end

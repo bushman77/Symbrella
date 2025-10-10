@@ -36,4 +36,3 @@ defmodule Brain.LIFG.Gate do
 
   def stage1_wm_candidates(_, _now_ms, _min), do: []
 end
-

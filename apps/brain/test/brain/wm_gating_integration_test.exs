@@ -12,8 +12,12 @@ defmodule Brain.WMGatingIntegrationTest do
     si = %{
       tokens: [%{index: 0, phrase: "this"}],
       active_cells: [
-        %{token_index: 0, lemma: "this", chosen_id: "THIS/strong",
-          scores: %{"THIS/strong" => 0.6}}
+        %{
+          token_index: 0,
+          lemma: "this",
+          chosen_id: "THIS/strong",
+          scores: %{"THIS/strong" => 0.6}
+        }
       ],
       trace: []
     }
@@ -33,4 +37,3 @@ defmodule Brain.WMGatingIntegrationTest do
     assert Enum.any?(wm, &(&1.source == :ltm))
   end
 end
-

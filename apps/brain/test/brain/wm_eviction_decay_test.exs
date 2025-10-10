@@ -8,7 +8,8 @@ defmodule BrainWMEvictionDecayTest do
       wm_last_ms: 1_000
     }
 
-    state2 = :erlang.apply(Brain, :apply_decay, [state, 4_000]) # dt=3s
+    # dt=3s
+    state2 = :erlang.apply(Brain, :apply_decay, [state, 4_000])
     # k = exp(-lambda * 3.0)
     k = :math.exp(-Application.get_env(:brain, :wm_decay_lambda, 0.12) * 3.0)
 
@@ -48,4 +49,3 @@ defmodule BrainWMEvictionDecayTest do
     assert Enum.map(state2.wm, & &1.id) == ["x", "y"]
   end
 end
-

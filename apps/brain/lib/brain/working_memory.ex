@@ -25,11 +25,15 @@ defmodule Brain.WorkingMemory do
 
   @spec normalize(map(), non_neg_integer(), keyword()) :: wm_item()
   def normalize(%{} = cand, now_ms, opts \\ []) do
-    act   = Keyword.get(opts, :activation, (cand[:activation_snapshot] || cand[:score] || 0.0) * 1.0)
+    act =
+      Keyword.get(opts, :activation, (cand[:activation_snapshot] || cand[:score] || 0.0) * 1.0)
+
     score = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
 
     %{
-      id: cand[:id] || cand[:chosen_id] || cand[:lemma] || cand[:word] || cand[:phrase] || make_ref(),
+      id:
+        cand[:id] || cand[:chosen_id] || cand[:lemma] || cand[:word] || cand[:phrase] ||
+          make_ref(),
       source: cand[:source] || cand[:reason] || :unknown,
       activation: clamp01(act),
       score: clamp01(score),
@@ -55,7 +59,7 @@ defmodule Brain.WorkingMemory do
         }
 
         [merged | tail_dups ++ rest]
-        |> Enum.reject(& (&1 != merged and same_identity?(&1, merged)))
+        |> Enum.reject(&(&1 != merged and same_identity?(&1, merged)))
     end
   end
 
@@ -90,4 +94,3 @@ defmodule Brain.WorkingMemory do
   defp same_identity?(a, b), do: a.id == b.id
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
 end
-

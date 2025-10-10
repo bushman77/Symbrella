@@ -30,14 +30,17 @@ defmodule Brain.BasalGangliaTest do
     wm = Enum.map(1..6, &wm_item("w#{&1}"))
     cand = %{id: "z|noun|0", lemma: "z", source: :other, score: 0.41}
     attn = %{}
+
     cfg = %{
       capacity: 7,
       gate_threshold: 0.4,
-      fullness_penalty_mult: 0.5   # raises thr as WM fills
+      # raises thr as WM fills
+      fullness_penalty_mult: 0.5
     }
 
     {decision, _score} = BasalGanglia.decide(wm, cand, attn, cfg)
-    assert decision in [:block, :allow] # sanity
+    # sanity
+    assert decision in [:block, :allow]
     assert decision == :block
   end
 
@@ -52,14 +55,12 @@ defmodule Brain.BasalGangliaTest do
     assert decision == :boost
   end
 
-test "cooldown forces :boost even if below gate" do
-  wm = [%{id: "x", last_bump: System.system_time(:millisecond)}]
-  cand = %{id: "x", source: :hippocampus, score: 0.1}
-  attn = %{}
-  cfg  = %{gate_threshold: 0.6, cooldown_ms: 2000}
-  {decision, _} = Brain.BasalGanglia.decide(wm, cand, attn, cfg)
-  assert decision == :boost
+  test "cooldown forces :boost even if below gate" do
+    wm = [%{id: "x", last_bump: System.system_time(:millisecond)}]
+    cand = %{id: "x", source: :hippocampus, score: 0.1}
+    attn = %{}
+    cfg = %{gate_threshold: 0.6, cooldown_ms: 2000}
+    {decision, _} = Brain.BasalGanglia.decide(wm, cand, attn, cfg)
+    assert decision == :boost
+  end
 end
-
-end
-

@@ -19,8 +19,8 @@ defmodule Core.LIFG.InputTest do
     # Expect order: {0,11} "hello there", {0,5} "hello", {6,11} "there"
     assert Enum.map(tokens, &{&1.phrase, &1.span, &1.n}) == [
              {"hello there", {0, 11}, 2},
-             {"hello",       {0, 5},  1},
-             {"there",       {6, 11}, 1}
+             {"hello", {0, 5}, 1},
+             {"there", {6, 11}, 1}
            ]
 
     # Check invariant via Core.Token.check_span_invariants/1
@@ -33,7 +33,7 @@ defmodule Core.LIFG.InputTest do
   whose tokens use boundary-aligned character spans and pass the invariant check.
   """
   test "SI path: returns SI with boundary-aligned char spans and invariant OK" do
-    si_in  = %SemanticInput{sentence: "hello there"}
+    si_in = %SemanticInput{sentence: "hello there"}
     si_out = Input.tokenize(si_in)
 
     # Invariant must hold for the returned SI
@@ -42,9 +42,8 @@ defmodule Core.LIFG.InputTest do
     # Same expected ordering and spans as the binary path
     assert Enum.map(si_out.tokens, &{&1.phrase, &1.span}) == [
              {"hello there", {0, 11}},
-             {"hello",       {0, 5}},
-             {"there",       {6, 11}}
+             {"hello", {0, 5}},
+             {"there", {6, 11}}
            ]
   end
 end
-

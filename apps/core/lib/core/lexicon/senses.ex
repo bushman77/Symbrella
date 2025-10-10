@@ -25,4 +25,3 @@ defmodule Core.Lexicon.Senses do
     end
   end
 end
-

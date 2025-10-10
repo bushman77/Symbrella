@@ -74,14 +74,16 @@ defmodule Db.EpisodesTest do
 
   test "recall_hybrid/3 (token + vector) ranks the matching episode highest" do
     # Non-matching background episode
-    {:ok, _} = Episodes.write_episode(%{tokens: ["car", "engine"], sentence: "car engine trouble"})
+    {:ok, _} =
+      Episodes.write_episode(%{tokens: ["car", "engine"], sentence: "car engine trouble"})
 
     # Strong match episode
-    {:ok, %Episode{} = ep} = Episodes.write_episode(%{
-      tokens: ["order", "adapter", "maple", "ridge"],
-      sentence: "order adapter in maple ridge",
-      intent: "purchase"
-    })
+    {:ok, %Episode{} = ep} =
+      Episodes.write_episode(%{
+        tokens: ["order", "adapter", "maple", "ridge"],
+        sentence: "order adapter in maple ridge",
+        intent: "purchase"
+      })
 
     cues = ["order", "adapter", "maple"]
 
@@ -97,4 +99,3 @@ defmodule Db.EpisodesTest do
     assert is_number(top.score)
   end
 end
-

@@ -32,9 +32,10 @@ defmodule Db.Lexicon do
       |> Enum.uniq()
 
     Db.all(
-      from b in BrainCell,
+      from(b in BrainCell,
         where: b.norm in ^norms and b.status == "active",
         select: b
+      )
     )
     |> Enum.map(&map_for_core/1)
   end
@@ -56,9 +57,10 @@ defmodule Db.Lexicon do
     ids = Enum.uniq(ids)
 
     Db.all(
-      from b in BrainCell,
+      from(b in BrainCell,
         where: b.id in ^ids,
         select: b
+      )
     )
     |> Enum.map(&map_for_core/1)
   end
@@ -73,6 +75,7 @@ defmodule Db.Lexicon do
   """
   @spec bulk_upsert_senses(list()) :: :ok
   def bulk_upsert_senses([]), do: :ok
+
   def bulk_upsert_senses(rows) when is_list(rows) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
@@ -80,8 +83,8 @@ defmodule Db.Lexicon do
       Enum.map(rows, fn r ->
         word = get(r, :word, "")
         norm = normize(word)
-        pos  = get(r, :pos, "unk")
-        id   = get(r, :id) || build_lex_id(norm, pos, r)
+        pos = get(r, :pos, "unk")
+        id = get(r, :id) || build_lex_id(norm, pos, r)
 
         %{
           id: id,
@@ -106,7 +109,8 @@ defmodule Db.Lexicon do
         BrainCell,
         rows1,
         on_conflict:
-          {:replace, [:word, :norm, :pos, :type, :definition, :example, :synonyms, :antonyms, :updated_at]},
+          {:replace,
+           [:word, :norm, :pos, :type, :definition, :example, :synonyms, :antonyms, :updated_at]},
         conflict_target: [:id]
       )
 
@@ -140,7 +144,7 @@ defmodule Db.Lexicon do
       for %{phrase: phrase, mw: mw?} <- selected, pos <- pos_list do
         norm = normize(phrase)
         type = type_override || if(mw?, do: "phrase", else: "word")
-        id   = [norm, pos || "", type, gram_function || ""] |> Enum.join("|")
+        id = [norm, pos || "", type, gram_function || ""] |> Enum.join("|")
 
         %{
           id: id,
@@ -193,7 +197,7 @@ defmodule Db.Lexicon do
     norm = normize(lemma)
 
     Db.all(
-      from b in BrainCell,
+      from(b in BrainCell,
         where: b.norm == ^norm and b.status == "active",
         order_by: [
           asc: fragment("CASE WHEN ? = 'lexicon' THEN 0 ELSE 1 END", b.type),
@@ -210,6 +214,7 @@ defmodule Db.Lexicon do
           synonyms: b.synonyms,
           antonyms: b.antonyms
         }
+      )
     )
   end
 
@@ -251,4 +256,3 @@ defmodule Db.Lexicon do
     "#{norm}|#{pos}|lex|#{base}"
   end
 end
-

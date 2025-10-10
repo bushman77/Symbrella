@@ -24,8 +24,8 @@ defmodule SymbrellaWeb.HomeLive do
 
   # A tiny formatter so the UI shows something friendly when SI comes back.
   defp format_si_reply(si) do
-    tokens  = Map.get(si, :tokens, [])
-    cells   = Map.get(si, :active_cells, Map.get(si, :cells, []))
+    tokens = Map.get(si, :tokens, [])
+    cells = Map.get(si, :active_cells, Map.get(si, :cells, []))
     choices = Map.get(si, :lifg_choices, [])
 
     token_preview =
@@ -45,11 +45,11 @@ defmodule SymbrellaWeb.HomeLive do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.join(", ")
 
-   base =
-  "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
-    " · src=#{inspect(Map.get(si, :source))}" <>
-    if token_preview != "", do: " · [#{token_preview}]", else: ""
- 
+    base =
+      "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
+        " · src=#{inspect(Map.get(si, :source))}" <>
+        if token_preview != "", do: " · [#{token_preview}]", else: ""
+
     if choices_preview == "" do
       base
     else
@@ -60,7 +60,7 @@ defmodule SymbrellaWeb.HomeLive do
   # Show winner + score; append a definition with smart fallbacks.
   defp format_choice_with_def(choice, cells) do
     lemma = choice[:lemma] || ""
-    id    = choice[:id]
+    id = choice[:id]
     score = fmt_score(choice[:score])
 
     alt =
@@ -75,11 +75,11 @@ defmodule SymbrellaWeb.HomeLive do
   end
 
   defp definition_for_choice(choice, cells) do
-    by_id   = index_cells_by_id(cells)
+    by_id = index_cells_by_id(cells)
     by_norm = index_cells_by_norm(cells)
 
-    id         = choice[:id]
-    alt_ids    = List.wrap(choice[:alt_ids])
+    id = choice[:id]
+    alt_ids = List.wrap(choice[:alt_ids])
     lemma_norm = norm_text(choice[:lemma] || "")
 
     # 1) chosen id
@@ -104,6 +104,7 @@ defmodule SymbrellaWeb.HomeLive do
           true ->
             # 3a) same norm as chosen id (parsed from id)
             idn = id_norm(id)
+
             with_same_norm =
               by_norm
               |> Map.get(idn)
@@ -134,10 +135,11 @@ defmodule SymbrellaWeb.HomeLive do
   end
 
   defp first_def_from_ids([], _by_id), do: ""
+
   defp first_def_from_ids([h | t], by_id) do
     case by_id |> Map.get(h) |> cell_def() |> gloss() do
       "" -> first_def_from_ids(t, by_id)
-      d  -> d
+      d -> d
     end
   end
 
@@ -145,7 +147,7 @@ defmodule SymbrellaWeb.HomeLive do
     Enum.reduce(cells || [], %{}, fn c, acc ->
       case cell_id(c) do
         nil -> acc
-        id  -> Map.put(acc, id, c)
+        id -> Map.put(acc, id, c)
       end
     end)
   end
@@ -154,7 +156,8 @@ defmodule SymbrellaWeb.HomeLive do
     Enum.reduce(cells || [], %{}, fn c, acc ->
       case cell_norm(c) do
         nil -> acc
-        n   -> Map.put_new(acc, n, c)  # keep first with that norm
+        # keep first with that norm
+        n -> Map.put_new(acc, n, c)
       end
     end)
   end
@@ -166,6 +169,7 @@ defmodule SymbrellaWeb.HomeLive do
       _ -> nil
     end
   end
+
   defp cell_id(_), do: nil
 
   defp cell_norm(c) when is_map(c) do
@@ -177,6 +181,7 @@ defmodule SymbrellaWeb.HomeLive do
       true -> nil
     end
   end
+
   defp cell_norm(_), do: nil
 
   defp id_norm(nil), do: nil
@@ -184,13 +189,18 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp cell_def(c) when is_map(c),
     do: Map.get(c, :definition) || Map.get(c, "definition")
+
   defp cell_def(_), do: nil
 
   defp gloss(nil), do: ""
   defp gloss(""), do: ""
+
   defp gloss(str) when is_binary(str) do
     s = str |> String.replace(~r/\s+/u, " ") |> String.trim()
-    if String.length(s) <= @def_char_limit, do: s, else: String.slice(s, 0, @def_char_limit) <> "…"
+
+    if String.length(s) <= @def_char_limit,
+      do: s,
+      else: String.slice(s, 0, @def_char_limit) <> "…"
   end
 
   defp short_id(nil), do: "∅"
@@ -201,6 +211,7 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
   defp norm_text(v),
     do:
       v
@@ -215,6 +226,7 @@ defmodule SymbrellaWeb.HomeLive do
       case Core.Lexicon.lookup(word) do
         %{senses: [s | _]} ->
           (s[:definition] || s[:def] || "") |> gloss()
+
         _ ->
           ""
       end
@@ -224,6 +236,7 @@ defmodule SymbrellaWeb.HomeLive do
       _, _ -> ""
     end
   end
+
   defp lexicon_def(_), do: ""
 
   # ---------- liveview ----------
@@ -274,13 +287,13 @@ defmodule SymbrellaWeb.HomeLive do
       # Run prod resolve (Core handles enrichment, re-query, LIFG, and Brain activation)
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-         
-si = Core.resolve_input(text,
-  mode: :prod,
-  enrich_lexicon?: true,
-  lexicon_stage?: true
-)
- 
+          si =
+            Core.resolve_input(text,
+              mode: :prod,
+              enrich_lexicon?: true,
+              lexicon_stage?: true
+            )
+
           # Return a small, friendly UI summary
           %{text: format_si_reply(si)}
         end)
@@ -374,8 +387,8 @@ si = Core.resolve_input(text,
           <div class="text-xs opacity-70 hidden sm:block">LiveView</div>
         </div>
       </header>
-
-      <!-- MESSAGES -->
+      
+    <!-- MESSAGES -->
       <main
         id="messages"
         phx-hook="ScrollOnEvent"
@@ -413,8 +426,8 @@ si = Core.resolve_input(text,
           <div id="bottom"></div>
         </div>
       </main>
-
-      <!-- COMPOSER -->
+      
+    <!-- COMPOSER -->
       <footer
         id="chat-composer"
         phx-hook="FooterSizer"
@@ -447,4 +460,3 @@ si = Core.resolve_input(text,
     """
   end
 end
-

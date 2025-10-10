@@ -28,18 +28,23 @@ defmodule Core.LIFG.Input do
     tok_opts = tokenizer_defaults()
 
     # ★ Build SI with char spans so downstream slices always match
-    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))  # ★
+    # ★
+    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))
 
     # ★ Invariant check (telemetry on failure, proceed defensively)
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si} -> si
+        {:ok, si} ->
+          si
+
         {:error, fails} ->
           :telemetry.execute(
-            [:core, :token, :span_invariant_fail],                 # ★
+            # ★
+            [:core, :token, :span_invariant_fail],
             %{count: length(fails)},
             %{fails: fails, sentence: si0.sentence}
           )
+
           si0
       end
 
@@ -56,18 +61,23 @@ defmodule Core.LIFG.Input do
     sentence = Map.get(si, :sentence) || ""
 
     # ★ Use the SI's sentence; produce char spans
-    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))  # ★
+    # ★
+    si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))
 
     # ★ Invariant check (telemetry on failure)
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si_ok} -> si_ok
+        {:ok, si_ok} ->
+          si_ok
+
         {:error, fails} ->
           :telemetry.execute(
-            [:core, :token, :span_invariant_fail],                 # ★
+            # ★
+            [:core, :token, :span_invariant_fail],
             %{count: length(fails)},
             %{fails: fails, sentence: si0.sentence}
           )
+
           si0
       end
 
@@ -83,7 +93,8 @@ defmodule Core.LIFG.Input do
       end
 
     # ★ Keep the sentence from si1 (normalized) and replace tokens
-    %Core.SemanticInput{si1 | tokens: tokens_final}                              # ★
+    # ★
+    %Core.SemanticInput{si1 | tokens: tokens_final}
   end
 
   # String → [tokens] with opts
@@ -100,7 +111,7 @@ defmodule Core.LIFG.Input do
     # ★ Provide sensible defaults for the new Tokenizer. The legacy keys
     #    (:mode, :emit_chargrams) remain harmless no-ops for compatibility.
     env = Application.get_env(:core, :tokenizer_defaults, [])
-    [max_wordgram_n: 3, emit_chargrams: false] |> Keyword.merge(env)             # ★
+    # ★
+    [max_wordgram_n: 3, emit_chargrams: false] |> Keyword.merge(env)
   end
 end
-
