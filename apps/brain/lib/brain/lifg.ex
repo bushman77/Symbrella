@@ -646,11 +646,12 @@ defmodule Brain.LIFG do
     if acc_present? do
       now_ms = System.system_time(:millisecond)
 
+      # IMPORTANT: use apply/3 so the compiler doesn't warn about undefined/private ACC functions.
       result =
         cond do
-          function_exported?(Brain.ACC, :assess, 3) -> Brain.ACC.assess(si, choices, opts)
-          function_exported?(Brain.ACC, :assess, 2) -> Brain.ACC.assess(si, choices)
-          function_exported?(Brain.ACC, :score, 2) -> Brain.ACC.score(si, choices)
+          function_exported?(Brain.ACC, :assess, 3) -> apply(Brain.ACC, :assess, [si, choices, opts])
+          function_exported?(Brain.ACC, :assess, 2) -> apply(Brain.ACC, :assess, [si, choices])
+          function_exported?(Brain.ACC, :score, 2)  -> apply(Brain.ACC, :score,  [si, choices])
           true -> :skip
         end
 
@@ -702,3 +703,4 @@ defmodule Brain.LIFG do
     end
   end
 end
+

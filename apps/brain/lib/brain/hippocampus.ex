@@ -287,28 +287,55 @@ defmodule Brain.Hippocampus do
           [w[:lemma], w["lemma"], w[:norm], w["norm"]]
         end)
         |> Enum.filter(&is_binary/1)
-        |> Enum.map(&Normalize.norm/1)
+        |> Enum.map(&safe_norm/1)
 
       is_map(si) and is_map(si[:atl_slate]) and is_list(si[:atl_slate][:winners]) ->
         Enum.flat_map(si[:atl_slate][:winners], fn w ->
           [w[:lemma], w["lemma"], w[:norm], w["norm"]]
         end)
         |> Enum.filter(&is_binary/1)
-        |> Enum.map(&Normalize.norm/1)
+        |> Enum.map(&safe_norm/1)
 
       is_map(si) and is_list(si[:tokens]) ->
         si[:tokens]
         |> Enum.filter(&(Map.get(&1, :n, 1) == 1))
-        |> Enum.map(&Normalize.norm(&1[:phrase]))
+        |> Enum.map(&safe_norm(&1[:phrase]))
 
       is_map(si) and is_binary(si[:sentence]) ->
         si[:sentence]
-        |> Normalize.norm()
+        |> safe_norm()
         |> String.split(" ", trim: true)
 
       true ->
         si
     end
+  end
+
+  # Prefer Normalize.norm/1 if it exists; otherwise, use a local fallback that matches
+  # the project’s normalization style (downcase, trim, collapse internal whitespace).
+  # Use `apply/3` to avoid compile-time warnings when Normalize.norm/1 is not defined.
+  defp safe_norm(nil), do: ""
+  defp safe_norm(v) when is_binary(v) do
+    if Code.ensure_loaded?(Normalize) and function_exported?(Normalize, :norm, 1) do
+      try do
+        apply(Normalize, :norm, [v])
+      rescue
+        _ -> local_norm(v)
+      catch
+        _, _ -> local_norm(v)
+      end
+    else
+      local_norm(v)
+    end
+  end
+
+  defp safe_norm(v), do: v |> to_string() |> safe_norm()
+
+  defp local_norm(s) when is_binary(s) do
+    s
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/\s+/u, " ")
   end
 
   # Match all key/value pairs in `scope` against episode meta (accept atom-or-string keys)

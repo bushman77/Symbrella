@@ -16,8 +16,8 @@ defmodule Brain.LIFG.Stage1 do
     :boundary_event   — telemetry (default [:brain, :lifg, :boundary_drop])
     :margin_threshold — default 0.15 (for alt_id emission)
     :mwe_fallback     — when true (or env `:lifg_stage1_mwe_fallback`), injects a
-                         conservative fallback MWE candidate if an MWE token lacks
-                         compatible MWE senses.
+                        conservative fallback MWE candidate if an MWE token lacks
+                        compatible MWE senses.
   """
 
   require Logger
@@ -237,7 +237,7 @@ defmodule Brain.LIFG.Stage1 do
         lex = as_float(f[:lex_fit])
         rel = as_float(f[:rel_prior])
         act = as_float(f[:activation])
-        ib = as_float(f[:intent_bias])
+        ib  = as_float(f[:intent_bias])
 
         # base + micro nudges
         bias = context_bias(c, tok, si) + dialect_penalty(c, si)
@@ -813,18 +813,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  defp as_int(nil, d), do: d
-  defp as_int(i, _d) when is_integer(i), do: i
-
-  defp as_int(b, d) when is_binary(b) do
-    case Integer.parse(b) do
-      {n, _} -> n
-      _ -> d
-    end
-  end
-
-  defp as_int(_, d), do: d
-
   defp as_float(nil), do: 0.0
   defp as_float(n) when is_number(n), do: n * 1.0
 
@@ -849,63 +837,65 @@ defmodule Brain.LIFG.Stage1 do
         Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
       )
 
-    unless enable?, do: si
+    if not enable? do
+      si
+    else
+      sc0 = Map.get(si, :sense_candidates, %{})
 
-    sc0 = Map.get(si, :sense_candidates, %{})
+      {sc, emitted} =
+        Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+          token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
+          phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
+          mw? = Map.get(tok, :mw, token_n > 1)
 
-    {sc, emitted} =
-      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
-        token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
-        phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
-        mw? = Map.get(tok, :mw, token_n > 1)
+          cond do
+            not mw? or is_nil(phrase) ->
+              {acc, n}
 
-        cond do
-          not mw? or is_nil(phrase) ->
-            {acc, n}
+            has_compatible_mwe?(acc, idx) ->
+              {acc, n}
 
-          has_compatible_mwe?(acc, idx) ->
-            {acc, n}
+            true ->
+              score_guess =
+                [idx - 1, idx + 1]
+                |> Enum.filter(&(&1 >= 0))
+                |> Enum.map(fn j ->
+                  acc
+                  |> Map.get(j, [])
+                  |> Enum.map(&Map.get(&1, :score, 0.0))
+                  |> Enum.max(fn -> 0.0 end)
+                end)
+                |> case do
+                  [] -> 0.25
+                  xs -> Enum.sum(xs) / max(length(xs), 1)
+                end
+                |> min(0.45)
 
-          true ->
-            score_guess =
-              [idx - 1, idx + 1]
-              |> Enum.filter(&(&1 >= 0))
-              |> Enum.map(fn j ->
-                acc
-                |> Map.get(j, [])
-                |> Enum.map(&Map.get(&1, :score, 0.0))
-                |> Enum.max(fn -> 0.0 end)
-              end)
-              |> case do
-                [] -> 0.25
-                xs -> Enum.sum(xs) / max(length(xs), 1)
-              end
-              |> min(0.45)
+              candidate = %{
+                id: "#{phrase}|phrase|fallback",
+                lemma: phrase,
+                norm: phrase,
+                mw: true,
+                pos: :phrase,
+                rel_prior: 0.30,
+                score: Float.round(score_guess, 4),
+                source: :mwe_fallback
+              }
 
-            candidate = %{
-              id: "#{phrase}|phrase|fallback",
-              lemma: phrase,
-              norm: phrase,
-              mw: true,
-              pos: :phrase,
-              rel_prior: 0.30,
-              score: Float.round(score_guess, 4),
-              source: :mwe_fallback
-            }
+              updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
 
-            updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
+              emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
+                token_index: idx,
+                phrase: phrase,
+                score: candidate.score
+              })
 
-            emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
-              token_index: idx,
-              phrase: phrase,
-              score: candidate.score
-            })
+              {updated, n + 1}
+          end
+        end)
 
-            {updated, n + 1}
-        end
-      end)
-
-    if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
+      if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
+    end
   end
 
   defp ensure_mwe_candidates(si, _opts), do: si
@@ -919,3 +909,4 @@ defmodule Brain.LIFG.Stage1 do
     end)
   end
 end
+

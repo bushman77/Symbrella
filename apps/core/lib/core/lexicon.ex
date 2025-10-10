@@ -50,17 +50,26 @@ defmodule Core.Lexicon do
 
   @doc """
   Proxy to the external `Lexicon` app (used by LV fallback display). Guarded.
+
+  Uses dynamic dispatch (`apply/3`) to avoid compile-time warnings when
+  only one arity is available in the external client.
   """
   @spec lookup(String.t()) :: map()
   def lookup(word) when is_binary(word) do
     try do
-      cond do
-        Code.ensure_loaded?(Lexicon) and function_exported?(Lexicon, :lookup, 1) ->
-          Lexicon.lookup(word)
-        Code.ensure_loaded?(Lexicon) and function_exported?(Lexicon, :lookup, 2) ->
-          Lexicon.lookup(word, 8)
-        true ->
-          %{word: word, senses: []}
+      if Code.ensure_loaded?(Lexicon) do
+        cond do
+          function_exported?(Lexicon, :lookup, 1) ->
+            apply(Lexicon, :lookup, [word])
+
+          function_exported?(Lexicon, :lookup, 2) ->
+            apply(Lexicon, :lookup, [word, 8])
+
+          true ->
+            %{word: word, senses: []}
+        end
+      else
+        %{word: word, senses: []}
       end
     rescue
       _ -> %{word: word, senses: []}

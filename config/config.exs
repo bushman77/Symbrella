@@ -2,6 +2,15 @@ import Config
 
 # ───────── Mailer ─────────
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
+# config/config.exs  (Core stays decoupled from :db)
+config :core, Core.Recall.Synonyms,
+  provider: Core.Recall.Synonyms.Providers.External,
+  cache?: true,
+  ttl_ms: 60_000,
+  top_k: 12
+
+config :core, Core.Recall.Synonyms.Providers.External,
+  mfa: {Db.Lexicon, :lookup_synonyms, []}  # you implement this in :db
 
 # ───────── Generators ─────────
 config :symbrella_web, generators: [context_app: :symbrella]

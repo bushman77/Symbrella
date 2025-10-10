@@ -2,15 +2,16 @@ defmodule Db.Lexicon do
   @moduledoc """
   DB helpers for Lexicon/Brain integration.
 
-  RETURN SHAPES
+  ## RETURN SHAPES
 
   - fetch_by_norms/1 → [sense_map, ...] (flat list; Core-safe)
   - fetch_by_ids/1 → [sense_map, ...] (flat list)
   - fetch_by_norms_grouped/1 → %{norm => [sense_map, ...]}
   - ensure_pos_variants_from_tokens/2 → [sense_map, ...] (flat list of seeded rows)
   - lookup/2 and definitions_for/2 → [pmg_evidence_map, ...] (PMTG-friendly subset)
+  - lookup_synonyms/3 → {:ok, [entry], meta} (Core.Recall.Synonyms external provider target)
 
-  SENSE MAP FIELDS (Core/LIFG friendly)
+  ## SENSE MAP FIELDS (Core/LIFG friendly)
 
   Each sense map exposes the following common fields:
 
@@ -25,6 +26,25 @@ defmodule Db.Lexicon do
   - synonyms: [String.t()]
   - antonyms: [String.t()]
   - features: %{lemma: String.t(), pos: String.t()}
+
+  ## SYNONYMS PROVIDER CONTRACT
+
+  `lookup_synonyms/3` is designed to be called via
+      Core.Recall.Synonyms.Providers.External
+  with config:
+      config :core, Core.Recall.Synonyms.Providers.External,
+        mfa: {Db.Lexicon, :lookup_synonyms, []}
+
+  It returns rows shaped like:
+      %{
+        lemma:  "word",            # normalized lemma
+        pos:    "noun" | "verb" | nil,
+        prior:  0.0..1.0,          # quality/precedence prior
+        source: "db/direct" | "db/reverse" | "db/identity" | ...,
+        meta:   map()
+      }
+
+  This keeps :core decoupled from :db (db ← brain ← core ← web).
   """
 
   import Ecto.Query, warn: false
@@ -251,6 +271,115 @@ defmodule Db.Lexicon do
   @spec definitions_for(String.t(), non_neg_integer()) :: [map()]
   def definitions_for(lemma, limit), do: lookup(lemma, limit)
 
+  # ---------- Synonyms Provider (External MFA Target) ----------
+
+  @doc """
+  Provide synonyms for `word` (and optional `pos`) for Core.Recall.Synonyms.
+
+  Returns:
+    {:ok, [entry], %{source: \"db_lexicon\", took_ms: integer, counts: map()}}
+
+  Where each entry is:
+    %{lemma: String.t(), pos: String.t() | nil, prior: float, source: String.t(), meta: map()}
+
+  Strategy:
+    • identity row (always) — strong prior (1.0)
+    • direct synonyms — from rows where norm(word) matches (:db/direct)
+    • reverse synonyms — rows that list `word` in their synonyms (:db/reverse)
+    • optional pos filter tightens rows (kept permissive on identity)
+
+  Notes:
+    • We keep DB in strings; Core normalizes/atomizes POS as needed.
+    • Duplicate lemmas are collapsed keeping the highest prior.
+  """
+  @spec lookup_synonyms(String.t(), String.t() | atom() | nil, keyword()) ::
+          {:ok, [map()], map()} | {:ok, [map()]} | {:error, term()}
+  def lookup_synonyms(word, pos, opts \\ []) when is_binary(word) do
+    t0 = System.monotonic_time(:millisecond)
+
+    norm        = normize(word)
+    pos         = normalize_pos(pos)
+    limit       = Keyword.get(opts, :limit, 64)
+    include_id? = Keyword.get(opts, :include_identity, true)
+
+    # identity (always include)
+    identity =
+      if include_id? do
+        [%{lemma: norm, pos: pos, prior: 1.0, source: "db/identity", meta: %{}}]
+      else
+        []
+      end
+
+    # Direct: for this norm, gather synonyms + (optionally) same-norm variants
+    direct_rows =
+      Db.all(
+        from b in BrainCell,
+          where:
+            b.norm == ^norm and b.status == "active" and
+              (is_nil(^pos) or b.pos == ^pos),
+          select: %{pos: b.pos, synonyms: b.synonyms, word: b.word, type: b.type}
+      )
+
+    direct_entries =
+      direct_rows
+      |> Enum.flat_map(fn %{pos: p, synonyms: syns} ->
+        syns = List.wrap(syns)
+        for s <- syns, is_binary(s) do
+          s_norm = normize(s)
+          %{lemma: s_norm, pos: p, prior: 0.85, source: "db/direct", meta: %{}}
+        end
+      end)
+
+    # Reverse: find rows that list `word` (or lower(word)) in synonyms array.
+    # We OR both the raw and lower() versions for tolerant matching.
+    # NOTE: If you frequently query reverse, consider a GIN index on synonyms.
+    lw = String.downcase(word)
+
+    reverse_rows =
+      Db.all(
+        from b in BrainCell,
+          where:
+            b.status == "active" and
+              (is_nil(^pos) or b.pos == ^pos) and
+              (fragment("? = ANY(?)", ^word, b.synonyms) or
+               fragment("? = ANY(?)", ^lw,   b.synonyms)),
+          select: %{pos: b.pos, word: b.word, type: b.type}
+      )
+
+    reverse_entries =
+      for %{pos: p, word: w} <- reverse_rows do
+        %{lemma: normize(w), pos: p, prior: 0.75, source: "db/reverse", meta: %{}}
+      end
+
+    # Merge, dedupe by {lemma,pos}, keep best prior
+    entries =
+      identity ++ direct_entries ++ reverse_entries
+      |> Enum.reduce(%{}, fn e = %{lemma: l, pos: p}, acc ->
+        Map.update(acc, {l, p}, e, fn prev ->
+          if (prev[:prior] || 0.0) >= (e[:prior] || 0.0), do: prev, else: e
+        end)
+      end)
+      |> Map.values()
+      |> Enum.sort_by(&{-(&1[:prior] || 0.0), &1.lemma})
+      |> Enum.take(limit)
+
+    took_ms = System.monotonic_time(:millisecond) - t0
+    meta = %{
+      source: "db_lexicon",
+      took_ms: took_ms,
+      counts: %{
+        identity: length(identity),
+        direct_rows: length(direct_rows),
+        reverse_rows: length(reverse_rows),
+        returned: length(entries)
+      }
+    }
+
+    {:ok, entries, meta}
+  rescue
+    e -> {:error, e}
+  end
+
   # ---------- Helpers ----------
 
   # Normalize BrainCell to a Core-friendly shape.
@@ -277,6 +406,21 @@ defmodule Db.Lexicon do
 
   defp normize(p),
     do: p |> to_string() |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+
+  defp normalize_pos(nil), do: nil
+  defp normalize_pos(p) when is_atom(p), do: Atom.to_string(p)
+  defp normalize_pos(p) when is_binary(p) do
+    p
+    |> String.trim()
+    |> String.downcase()
+    |> case do
+      "n"   -> "noun"
+      "v"   -> "verb"
+      "adj" -> "adj"
+      "adv" -> "adv"
+      other -> other
+    end
+  end
 
   defp get(m, k, alt \\ nil), do: Map.get(m, k, Map.get(m, to_string(k), alt))
 

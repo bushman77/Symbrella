@@ -14,11 +14,11 @@ defmodule Brain.Hippocampus.Dup do
   """
   @spec bump_dup_count(%{meta: map()}) :: map()
   def bump_dup_count(%{meta: meta} = ep) do
-    cond do
-      @test_env ->
-        ep
-
-      Application.get_env(:brain, :hippo_meta_dup_count, false) ->
+    # Use compile-time branching for test env to avoid an unreachable `cond` clause warning.
+    if @test_env do
+      ep
+    else
+      if Application.get_env(:brain, :hippo_meta_dup_count, false) do
         # merge existing & new meta shape (in case caller passed a fresh meta)
         meta0 = meta || %{}
 
@@ -31,9 +31,9 @@ defmodule Brain.Hippocampus.Dup do
           end
 
         %{ep | meta: Map.put(meta0, :dup_count, dup2)}
-
-      true ->
+      else
         ep
+      end
     end
   end
 
@@ -72,3 +72,4 @@ defmodule Brain.Hippocampus.Dup do
       Map.get(m, :dup) || Map.get(m, "dup")
   end
 end
+

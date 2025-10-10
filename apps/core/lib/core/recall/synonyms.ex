@@ -1,239 +1,144 @@
-# apps/core/lib/core/recall/synonyms.ex
 defmodule Core.Recall.Synonyms do
   @moduledoc """
-  Synonym harvesting & expansion for the recall pipeline.
+  Facade for synonym lookup/expansion used by recall.
 
-  Input:
-    • `candidates` — list of `{key, tok_ids, prio}` produced by Execute.
-    • `opts` — functions & limits (exists/neg cache/limit/budget/etc).
+  Responsibilities:
+    • Normalize inputs (case, NFC, optional POS).
+    • Query provider(s) for raw candidates (DB, lexicons, etc.).
+    • Rank/merge/dedupe with stable ordering.
+    • (Optional) Cache results with TTL.
+    • Emit telemetry for observability.
 
-  Output:
-    • `{added_refs, taken_count, budget_hit?}` where `added_refs` are recall refs:
-      %{
-        id: {:db_synonym, src_key, syn},
-        matched_tokens: [%{tok_id: integer(), conf: nil}],
-        activation_snapshot: 0.0,
-        source: :db_recall,
-        reason: :synonym,
-        score: float(),
-        ts_ms: integer()
-      }
+  Public API:
+    - lookup/2   — ranked synonyms for a word (and optional POS)
+    - expand/2   — expand many terms into a unified ranked set
+
+  Swap providers via config (default keeps Core decoupled from :db):
+      config :core, Core.Recall.Synonyms,
+        provider: Core.Recall.Synonyms.Providers.External,
+        cache?: true,
+        ttl_ms: 60_000,
+        top_k: 12
+
+  Telemetry:
+    [:core, :recall, :synonyms, :lookup]
+      measurements: %{count: non_neg_integer()}
+      metadata: %{word: String.t(), pos: atom() | nil, cached?: boolean(), took_ms: integer()}
   """
 
-  alias Core.Recall.Synonyms.{Source, DbSource}
+  alias Core.Recall.Synonyms.{Normalize, Ranker, Cache}
 
-  @type candidate :: {binary(), [non_neg_integer()], 0 | 1}
+  @type word :: String.t()
+  @type pos  :: atom() | nil
+  @type entry :: %{
+          lemma: word(),
+          pos: pos(),
+          prior: float(),
+          source: String.t(),
+          meta: map()
+        }
 
-  @default_score 0.65
-  @default_reason :synonym
-  @default_limit 8
-  @default_budget_ms 40
+  @default_top_k 12
+
+  @spec lookup(word() | %{word: word(), pos: pos()}, keyword()) ::
+          {:ok, [entry()], %{cached?: boolean(), took_ms: non_neg_integer()}}
+  def lookup(word_or_map, opts \\ []) do
+    t0 = System.monotonic_time(:millisecond)
+
+    %{word: norm_word, pos: pos} =
+      case word_or_map do
+        %{} = m ->
+          %{word: Normalize.word(Map.get(m, :word) || Map.get(m, "word")),
+            pos: Normalize.pos(Map.get(m, :pos) || Map.get(m, "pos"))}
+
+        w when is_binary(w) ->
+          %{word: Normalize.word(w), pos: nil}
+      end
+
+    cache?  = get_opt(opts, :cache?, config(:cache?, true))
+    ttl_ms  = get_opt(opts, :ttl_ms, config(:ttl_ms, 60_000))
+    top_k   = get_opt(opts, :top_k, config(:top_k, @default_top_k))
+    prov    = get_opt(opts, :provider, config(:provider, Core.Recall.Synonyms.Providers.Fallback))
+
+    key = {norm_word, pos}
+
+    # Use cache when present; otherwise hit provider safely.
+    {raw, cached?} =
+      case cache? && Cache.get(key, ttl_ms) do
+        v when is_list(v) -> {v, true}
+        _ -> {safe_lookup(prov, norm_word, pos, opts), false}
+      end
+
+    ranked = Ranker.rank(norm_word, raw, opts) |> Enum.take(top_k)
+
+    if cache? and not cached?, do: Cache.put(key, ranked)
+
+    took_ms = System.monotonic_time(:millisecond) - t0
+    :telemetry.execute([:core, :recall, :synonyms, :lookup], %{count: length(ranked)}, %{
+      word: norm_word, pos: pos, cached?: cached?, took_ms: took_ms
+    })
+
+    {:ok, ranked, %{cached?: cached?, took_ms: took_ms}}
+  end
 
   @doc """
-  Expand `candidates` via a synonym source under slot/time budgets.
+  Expand a list of query terms into a unique, ranked set suitable for recall.
 
   Options:
-    • :exists_fun       — (binary -> bool), target existence check (defaults false)
-    • :neg_exists_fun   — (binary -> bool), negative cache probe
-    • :neg_put_fun      — (binary -> :ok), negative cache insert
-    • :limit            — max refs to add (default #{@default_limit})
-    • :budget_ms        — time budget from `t0` (default #{@default_budget_ms})
-    • :t0               — ms clock start (default: now)
-    • :already_ids      — MapSet of ids to avoid duplicates
-    • :score            — score assigned to synonym refs (default #{@default_score})
-    • :reason           — reason atom (default #{@default_reason})
-    • :source           — module implementing #{inspect(Source)} (default #{inspect(DbSource)})
+    :per_top_k — top-k per input term (default from lookup/2’s config)
+    :limit     — overall cap after merge (default 64)
   """
-  @spec run([candidate()], keyword()) :: {[map()], non_neg_integer(), boolean()}
-  def run(candidates, opts \\ []) when is_list(candidates) do
-    exists_fun = Keyword.get(opts, :exists_fun, fn _ -> false end)
-    neg_exists = Keyword.get(opts, :neg_exists_fun, fn _ -> false end)
-    neg_put    = Keyword.get(opts, :neg_put_fun, fn _ -> :ok end)
+  @spec expand([word() | %{word: word(), pos: pos()}], keyword()) ::
+          {:ok, [entry()], %{inputs: non_neg_integer(), unique: non_neg_integer()}}
+  def expand(terms, opts \\ []) when is_list(terms) do
+    per_top_k = get_opt(opts, :per_top_k, get_opt(opts, :top_k, config(:top_k, @default_top_k)))
+    limit     = get_opt(opts, :limit, 64)
 
-    limit      = Keyword.get(opts, :limit, @default_limit)
-    budget_ms  = Keyword.get(opts, :budget_ms, @default_budget_ms)
-    t0         = Keyword.get(opts, :t0, now_ms())
-    already    = Keyword.get(opts, :already_ids, MapSet.new())
+    results =
+      terms
+      |> Enum.flat_map(fn t ->
+        {:ok, list, _} = lookup(t, Keyword.put(opts, :top_k, per_top_k))
+        list
+      end)
+      |> dedupe_keep_best()
+      |> Enum.take(limit)
 
-    base_score = Keyword.get(opts, :score, @default_score)
-    reason     = Keyword.get(opts, :reason, @default_reason)
-    source_mod = Keyword.get(opts, :source, DbSource)
+    {:ok, results, %{inputs: length(terms), unique: length(results)}}
+  end
 
-    keys =
-      candidates
-      |> Enum.map(fn {k, _ids, _p} -> k end)
-      |> Enum.filter(&is_binary/1)
-      |> Enum.map(&normalize/1)
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.uniq()
+  # ---- helpers --------------------------------------------------------
 
-    grouped_rows =
-      if function_exported?(source_mod, :fetch_grouped, 1) do
-        safe(fn -> source_mod.fetch_grouped(keys) end, %{})
-      else
-        %{}
+  defp safe_lookup(provider, word, pos, opts) do
+    if function_exported?(provider, :lookup, 3) do
+      case provider.lookup(word, pos, opts) do
+        {:ok, list, _meta} when is_list(list) -> list
+        {:ok, list} when is_list(list) -> list
+        other ->
+          require Logger
+          Logger.warning("Synonyms provider returned unexpected: #{inspect(other)}")
+          []
       end
-
-    syn_map = harvest_synonyms(grouped_rows)
-
-    do_expand(candidates, syn_map, exists_fun, neg_exists, neg_put,
-      limit, budget_ms, t0, already, base_score, reason, [])
-  end
-
-  # ---------- harvesting ----------
-
-  defp harvest_synonyms(%{} = grouped) do
-    grouped
-    |> Enum.into(%{}, fn {k, rows} ->
-      syns =
-        rows
-        |> List.wrap()
-        |> Enum.flat_map(&extract_syns/1)
-        |> Enum.map(&normalize/1)
-        |> Enum.reject(&(&1 in [nil, ""]))
-        |> MapSet.new()
-
-      {normalize(k), syns}
-    end)
-  end
-
-  defp harvest_synonyms(_), do: %{}
-
-  defp extract_syns(%{} = row) do
-    (Map.get(row, :synonyms) || Map.get(row, "synonyms") ||
-       Map.get(row, :syns)    || Map.get(row, "syns") || [])
-    |> List.wrap()
-    |> Enum.flat_map(fn
-      s when is_binary(s) -> [s]
-      %{} = m ->
-        # tolerate shapes like %{lemma: "..."} or %{word: "..."}
-        v = Map.get(m, :lemma) || Map.get(m, "lemma") ||
-            Map.get(m, :word)  || Map.get(m, "word")
-        if is_binary(v), do: [v], else: []
-      _ -> []
-    end)
-  end
-
-  # ---------- expansion ----------
-
-  defp do_expand([], _syn_map, _exists, _neg_exists, _neg_put,
-                 _limit, _budget, _t0, _already, _score, _reason, acc),
-    do: {Enum.reverse(acc), 0, false}
-
-  defp do_expand([{_k,_ids,_p} | _]=_rest, _syn_map, _exists, _neg_exists, _neg_put,
-                 limit, _budget, _t0, _already, _score, _reason, acc)
-       when is_integer(limit) and limit <= 0,
-    do: {Enum.reverse(acc), 0, false}
-
-  defp do_expand([{key, tok_ids, _prio} | rest], syn_map, exists_fun, neg_exists, neg_put,
-                 limit, budget_ms, t0, already, base_score, reason, acc) do
-    elapsed = now_ms() - t0
-
-    cond do
-      budget_ms != :infinity and elapsed >= budget_ms ->
-        {Enum.reverse(acc), 0, true}
-
-      true ->
-        src = normalize(key)
-        syns = Map.get(syn_map, src, MapSet.new())
-
-        {acc2, taken, bhit} =
-          expand_for_key(src, tok_ids, syns, exists_fun, neg_exists, neg_put,
-            limit, budget_ms, t0, already, base_score, reason, acc, 0)
-
-        if bhit do
-          {Enum.reverse(acc2), taken, true}
-        else
-          {tail_refs, tail_taken, tail_bhit} =
-            do_expand(rest, syn_map, exists_fun, neg_exists, neg_put,
-              dec(limit, taken), budget_ms, t0, union_ids(already, acc2), base_score, reason, acc2)
-
-          {tail_refs, taken + tail_taken, tail_bhit}
-        end
+    else
+      []
     end
   end
 
-  defp expand_for_key(_src, _tok_ids, syns, _exists_fun, _neg_exists, _neg_put,
-                      limit, _budget, _t0, _already, _score, _reason, acc, taken)
-       when MapSet.size(syns) == 0 or (is_integer(limit) and limit <= 0),
-    do: {acc, taken, false}
+  defp config(key, default), do:
+    Application.get_env(:core, __MODULE__, [])
+    |> Keyword.get(key, default)
 
-  defp expand_for_key(src, tok_ids, syns, exists_fun, neg_exists, neg_put,
-                      limit, budget_ms, t0, already, base_score, reason, acc, taken) do
-    Enum.reduce_while(MapSet.to_list(syns), {acc, taken, false}, fn syn, {acc0, t0count, _} ->
-      elapsed = now_ms() - t0
-      if budget_ms != :infinity and elapsed >= budget_ms do
-        {:halt, {acc0, t0count, true}}
-      else
-        cond do
-          syn == src ->
-            {:cont, {acc0, t0count, false}}
+  defp get_opt(opts, k, default), do: Keyword.get(opts, k, default)
 
-          neg_exists.(syn) ->
-            {:cont, {acc0, t0count, false}}
-
-          exists_fun.(syn) ->
-            ref = build_ref(src, syn, tok_ids, base_score, reason)
-            if MapSet.member?(already, ref.id) do
-              {:cont, {acc0, t0count, false}}
-            else
-              next_limit = dec(limit, 1)
-              if is_integer(next_limit) and next_limit < 0 do
-                {:halt, {acc0, t0count, false}}
-              else
-                {:cont, {[ref | acc0], t0count + 1, false}}
-              end
-            end
-
-          true ->
-            _ = safe_neg_put(neg_put, syn)
-            {:cont, {acc0, t0count, false}}
-        end
-      end
+  defp dedupe_keep_best(list) do
+    list
+    |> Enum.reduce(%{}, fn e = %{lemma: l, pos: p}, acc ->
+      k = {l, p}
+      Map.update(acc, k, e, fn prev ->
+        if (prev[:prior] || 0.0) >= (e[:prior] || 0.0), do: prev, else: e
+      end)
     end)
-  end
-
-  # ---------- ref building & helpers ----------
-
-  defp build_ref(src_key, synonym, tok_ids, score, reason) do
-    %{
-      id: {:db_synonym, src_key, synonym},
-      matched_tokens: Enum.map(List.wrap(tok_ids), &%{tok_id: &1, conf: nil}),
-      activation_snapshot: 0.0,
-      source: :db_recall,
-      reason: reason,
-      score: score,
-      ts_ms: now_ms()
-    }
-  end
-
-  defp union_ids(already, refs) do
-    Enum.reduce(refs, already, fn r, acc -> MapSet.put(acc, r.id) end)
-  end
-
-  defp dec(:infinity, _), do: :infinity
-  defp dec(n, by) when is_integer(n), do: n - by
-
-  defp normalize(nil), do: nil
-  defp normalize(b) when is_binary(b), do: b |> String.downcase() |> String.trim()
-  defp normalize(v), do: v |> to_string() |> String.downcase() |> String.trim()
-
-  defp safe_neg_put(fun, key) when is_function(fun, 1) do
-    try do
-      fun.(key)
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
-  end
-
-  defp now_ms() do
-    try do
-      System.monotonic_time(:millisecond)
-    rescue
-      _ -> System.system_time(:millisecond)
-    end
+    |> Map.values()
+    |> Enum.sort_by(&{-(&1[:prior] || 0.0), &1.lemma})
   end
 end
 

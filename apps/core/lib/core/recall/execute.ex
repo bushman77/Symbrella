@@ -1,4 +1,3 @@
-# apps/core/lib/core/recall/execute.ex
 defmodule Core.Recall.Execute do
   @moduledoc """
   Execute a recall plan against long-term memory (LTM/DB).
@@ -699,10 +698,11 @@ defmodule Core.Recall.Execute do
   # ---- Query norms helpers -------------------------------------------------
 
   defp query_norms(%SI{} = si) do
+    # Use dynamic apply to avoid compile-time warnings when the optional module is absent.
     if Code.ensure_loaded?(Brain.Hippocampus.Normalize) and
          function_exported?(Brain.Hippocampus.Normalize, :norms, 1) do
       try do
-        Brain.Hippocampus.Normalize.norms(si)
+        apply(Brain.Hippocampus.Normalize, :norms, [si])
       rescue
         _ -> best_effort_norms(si)
       catch

@@ -91,17 +91,11 @@ defmodule Core.Lexicon.Stage do
   defp normalize_pos(pos) when is_binary(pos), do: String.downcase(pos)
   defp normalize_pos(pos) when is_atom(pos), do: pos |> Atom.to_string() |> String.downcase()
 
-  # Look up word in CoreLex (or fallback) without ever crashing.
+  # Look up word through CoreLex without ever crashing.
+  # CoreLex.lookup/1 already handles external client arity differences and fallbacks.
   defp safe_lookup(word) when is_binary(word) do
-    # Prefer CoreLex.lookup/1 if present; as a fallback, call CoreLex.lookup/2 with a small limit;
-    # lastly, try Db.Lexicon.lookup/2 if available. All wrapped in try/catch.
     try do
-      cond do
-        function_exported?(CoreLex, :lookup, 1) -> CoreLex.lookup(word)
-        function_exported?(CoreLex, :lookup, 2) -> CoreLex.lookup(word, 8)
-        Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :lookup, 2) -> Db.Lexicon.lookup(word, 8)
-        true -> %{word: word, senses: []}
-      end
+      CoreLex.lookup(word)
     rescue
       _ -> %{word: word, senses: []}
     catch
@@ -118,7 +112,8 @@ defmodule Core.Lexicon.Stage do
       try do
         cond do
           function_exported?(CoreLex, :bulk_upsert_senses, 1) -> CoreLex.bulk_upsert_senses(rows)
-          Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :bulk_upsert_senses, 1) -> Db.Lexicon.bulk_upsert_senses(rows)
+          Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :bulk_upsert_senses, 1) ->
+            Db.Lexicon.bulk_upsert_senses(rows)
           true -> :ok
         end
       rescue

@@ -196,6 +196,8 @@ defmodule Brain.BasalGanglia do
   defp to_float(x) when is_number(x), do: x * 1.0
   defp to_float(_), do: 0.0
 
-  defp get_pos_int(v, default) when is_integer(v) and v > 0, do: v
+  # Use underscore on the unused parameter in the guard-matching clause to silence warnings.
+  defp get_pos_int(v, _default) when is_integer(v) and v > 0, do: v
   defp get_pos_int(_, default), do: default
 end
+

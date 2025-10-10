@@ -31,9 +31,10 @@ defmodule Core.Input do
   Drop char-gram tokens from a SemanticInput or a raw token list.
 
   A token is considered a char-gram if any of:
-    * source/kind == :chargram or "chargram"
-    * `chargram` flag is true/"true"
-    * (optionally) super-short fragment **not** in whitelist AND not an MWE head
+    * `source` or `kind` is `:chargram` / `"chargram"`
+    * `chargram` flag is `true` / `"true"`
+    * (optionally) it is a super-short fragment (length ≤ 2 after removing whitespace),
+      **not** in whitelist, and **not** an MWE head (`:mw`)
 
   We avoid dropping legit short words like "I", "we", "to", or "im".
   """
@@ -44,37 +45,7 @@ defmodule Core.Input do
     wl = short_whitelist()
 
     tokens
-    |> Enum.reject(fn t ->
-      src = Map.get(t, :source) || Map.get(t, "source")
-      kind = Map.get(t, :kind) || Map.get(t, "kind")
-      charflag = Map.get(t, :chargram) || Map.get(t, "chargram")
-      phrase0 = (Map.get(t, :phrase) || Map.get(t, "phrase") || "") |> to_string()
-      phrase = String.downcase(phrase0)
-      mw? = Map.get(t, :mw) || Map.get(t, "mw") || false
-
-      # shortish = length <= 2 once whitespace removed
-      shortish =
-        phrase0
-        |> String.replace(~r/\s+/u, "")
-        |> String.length()
-        |> Kernel.<=() >
-          2
-          |> case do
-            :lt -> true
-            :eq -> true
-            _ -> false
-          end
-
-      flagged_chargram =
-        src in [:chargram, "chargram"] or
-          kind in [:chargram, "chargram"] or
-          charflag in [true, "true"]
-
-      short_fragment =
-        shortish and not mw? and not MapSet.member?(wl, phrase)
-
-      flagged_chargram or short_fragment
-    end)
+    |> Enum.reject(&is_chargram_token?(&1, wl))
     |> Enum.with_index()
     |> Enum.map(fn {t, i} ->
       # Preserve existing :index if present; else assign stable index
@@ -86,4 +57,39 @@ defmodule Core.Input do
   end
 
   def drop_chargrams(other), do: other
+
+  # --------------------- helpers ---------------------
+
+  # Decide whether to drop the token as a char-gram.
+  defp is_chargram_token?(t, wl) when is_map(t) do
+    src       = Map.get(t, :source)   || Map.get(t, "source")
+    kind      = Map.get(t, :kind)     || Map.get(t, "kind")
+    charflag  = Map.get(t, :chargram) || Map.get(t, "chargram")
+    phrase0   = (Map.get(t, :phrase)  || Map.get(t, "phrase")  || "") |> to_string()
+    phrase    = String.downcase(phrase0)
+    mw?       = Map.get(t, :mw) || Map.get(t, "mw") || false
+
+    shortish  = shortish_fragment?(phrase0)
+
+    flagged_chargram =
+      src   in [:chargram, "chargram"] or
+      kind  in [:chargram, "chargram"] or
+      charflag in [true, "true"]
+
+    short_fragment =
+      shortish and not mw? and not MapSet.member?(wl, phrase)
+
+    flagged_chargram or short_fragment
+  end
+
+  defp is_chargram_token?(_t, _wl), do: false
+
+  # "Shortish" = length ≤ 2 once whitespace is removed (e.g. "a", "i", "ok").
+  defp shortish_fragment?(phrase0) when is_binary(phrase0) do
+    normalized = String.replace(phrase0, ~r/\s+/u, "")
+    String.length(normalized) <= 2
+  end
+
+  defp shortish_fragment?(_), do: false
 end
+
