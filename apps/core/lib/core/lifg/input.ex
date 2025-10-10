@@ -1,15 +1,15 @@
 defmodule Core.LIFG.Input do
-  @moduledoc ~S"""
+  @moduledoc """
   Canonical entry point for LIFG-safe tokenization.
 
   Accepts:
-    * a raw `String.t()` sentence → returns list of tokens
-    * a `%Core.SemanticInput{}` → returns updated SI with cleaned `tokens`
+    • a raw String sentence → returns list of tokens
+    • a %Core.SemanticInput{} → returns updated SI with cleaned tokens
 
   Steps:
     - Tokenize with defaults (mode: :words, emit_chargrams: false unless overridden)
-    - Guard.sanitize (drop char-grams)
-    - BoundaryGuard.sanitize (boundary-aligned only)
+    - Guard.sanitize (struct→map, index, spans)
+    - BoundaryGuard.sanitize (drop char-grams, enforce word-boundaries; always keep MWEs)
     - (optional) MWE injection with provided opts
   """
 
@@ -18,28 +18,20 @@ defmodule Core.LIFG.Input do
 
   # ---------- Public API ----------
 
-  # SI → SI
-  @spec tokenize(Core.SemanticInput.t()) :: Core.SemanticInput.t()
-  def tokenize(%Core.SemanticInput{} = si), do: tokenize(si, [])
-
   # String → [tokens]
   @spec tokenize(String.t()) :: list()
   def tokenize(sentence) when is_binary(sentence) do
     tok_opts = tokenizer_defaults()
 
-    # ★ Build SI with char spans so downstream slices always match
-    # ★
+    # Produce char spans so downstream slicing and boundary checks are reliable
     si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))
 
-    # ★ Invariant check (telemetry on failure, proceed defensively)
+    # Invariant check (emit telemetry on failure but proceed defensively)
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si} ->
-          si
-
+        {:ok, si_ok} -> si_ok
         {:error, fails} ->
           :telemetry.execute(
-            # ★
             [:core, :token, :span_invariant_fail],
             %{count: length(fails)},
             %{fails: fails, sentence: si0.sentence}
@@ -48,11 +40,14 @@ defmodule Core.LIFG.Input do
           si0
       end
 
-    # Continue your existing pipeline on the *char-span* tokens
     si1.tokens
     |> Guard.sanitize()
     |> BoundaryGuard.sanitize(si1.sentence)
   end
+
+  # SI → SI
+  @spec tokenize(Core.SemanticInput.t()) :: Core.SemanticInput.t()
+  def tokenize(%Core.SemanticInput{} = si), do: tokenize(si, [])
 
   # SI → SI with opts
   @spec tokenize(Core.SemanticInput.t(), keyword()) :: Core.SemanticInput.t()
@@ -60,19 +55,13 @@ defmodule Core.LIFG.Input do
     tok_opts = tokenizer_defaults()
     sentence = Map.get(si, :sentence) || ""
 
-    # ★ Use the SI's sentence; produce char spans
-    # ★
     si0 = Token.tokenize(sentence, Keyword.merge(tok_opts, span_mode: :chars))
 
-    # ★ Invariant check (telemetry on failure)
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si_ok} ->
-          si_ok
-
+        {:ok, si_ok} -> si_ok
         {:error, fails} ->
           :telemetry.execute(
-            # ★
             [:core, :token, :span_invariant_fail],
             %{count: length(fails)},
             %{fails: fails, sentence: si0.sentence}
@@ -89,17 +78,15 @@ defmodule Core.LIFG.Input do
     tokens_final =
       case opts do
         [] -> cleaned
-        _ -> Core.MWE.Injector.inject(cleaned, opts)
+        _  -> Core.MWE.Injector.inject(cleaned, opts)
       end
 
-    # ★ Keep the sentence from si1 (normalized) and replace tokens
-    # ★
     %Core.SemanticInput{si1 | tokens: tokens_final}
   end
 
   # String → [tokens] with opts
   @spec tokenize(String.t(), keyword()) :: list()
-  def tokenize(sentence, opts) when is_list(opts) do
+  def tokenize(sentence, opts) when is_binary(sentence) and is_list(opts) do
     sentence
     |> tokenize()
     |> Core.MWE.Injector.inject(opts)
@@ -108,10 +95,17 @@ defmodule Core.LIFG.Input do
   @doc false
   @spec tokenizer_defaults() :: keyword()
   def tokenizer_defaults do
-    # ★ Provide sensible defaults for the new Tokenizer. The legacy keys
-    #    (:mode, :emit_chargrams) remain harmless no-ops for compatibility.
+    # Base defaults satisfy tests expecting :mode and :emit_chargrams
+    base = [
+      mode: :words,
+      max_wordgram_n: 3,
+      emit_chargrams: false,
+      lowercase?: true,
+      strip_punct?: true
+    ]
+
     env = Application.get_env(:core, :tokenizer_defaults, [])
-    # ★
-    [max_wordgram_n: 3, emit_chargrams: false] |> Keyword.merge(env)
+    Keyword.merge(base, env)
   end
 end
+

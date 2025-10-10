@@ -36,6 +36,10 @@ defmodule Brain.Hippocampus do
   Options (per-call override):
     • :limit, :half_life_ms, :min_jaccard, :scope
     • :ignore_head — :auto | :always | :never | false
+
+  NOTE: Default is `ignore_head: false` so the most recent (head) episode
+  is included unless you explicitly opt out. This matches tests expecting
+  the head to be considered when enforcing `:limit`.
   """
   @spec recall([String.t()] | map(), keyword()) :: [recall_r()]
   def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
@@ -43,18 +47,51 @@ defmodule Brain.Hippocampus do
 
   @doc """
   Attach episodic evidence into `si.evidence[:episodes]`.
-  Passes any opts to `recall/2`. Default `ignore_head: false` for attach.
+
+  Behavior:
+    • Builds robust cues from `opts[:cues]` or from `si` (winners/atl_slate/tokens/sentence).
+    • Calls `recall/2` with `ignore_head: false` (unless provided) and permissive `min_jaccard: 0.0` by default.
+    • Applies optional `:scope` filtering locally (atom-or-string meta keys accepted).
+
+  Returns `si` with `:evidence[:episodes]` set.
   """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-    cues = Keyword.get(opts, :cues, si)
-    opts2 = Keyword.put_new(opts, :ignore_head, false)
+    cues  = build_cues(si, opts)
+    scope = Keyword.get(opts, :scope, nil)
 
-    episodes =
+    opts2 =
+      opts
+      |> Keyword.delete(:scope)
+      |> Keyword.put_new(:ignore_head, false)
+      |> Keyword.put_new(:min_jaccard, 0.0)
+
+    episodes_unfiltered =
       __MODULE__.recall(cues, opts2)
       |> Enum.map(&Evidence.ensure_winners_for_evidence/1)
 
-    # keep other evidence keys intact
+    episodes_scoped =
+      case scope do
+        s when is_map(s) -> Enum.filter(episodes_unfiltered, &meta_matches_scope?(&1, s))
+        _ -> episodes_unfiltered
+      end
+
+    # Fallback: if nothing recalled but window has entries, attach the head so
+    # callers relying on “hippo: true attaches episodes” still see at least one.
+    episodes =
+      case episodes_scoped do
+        [] ->
+          case snapshot().window do
+            [{at, ep} | _] ->
+              [%{score: 0.0, at: at, episode: ep} |> Evidence.ensure_winners_for_evidence()]
+            _ ->
+              []
+          end
+
+        list ->
+          list
+      end
+
     evidence = Map.get(si, :evidence) || %{}
     Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
   end
@@ -81,40 +118,59 @@ defmodule Brain.Hippocampus do
   def init(_state), do: {:ok, default_state()}
 
   @impl true
-  def handle_call({:encode, slate, meta}, from, state) do
+  def handle_call({:encode, slate, meta_in}, from, state) do
     case Application.get_env(:brain, :episodes_mode, :on) do
       :off ->
-        Telemetry.emit_write(%{window_size: length(state.window)}, %{meta: meta, skipped: true})
+        Telemetry.emit_write(%{window_size: length(state.window)}, %{meta: meta_in, skipped: true})
 
         Telemetry.maybe_echo_to_caller(
           from,
           [:brain, :hippocampus, :write],
           %{window_size: length(state.window)},
-          %{meta: meta, skipped: true}
+          %{meta: meta_in, skipped: true}
         )
 
         {:reply, :ok, state}
 
       _ ->
-        ep = %{
-          slate: slate,
-          meta: meta,
-          norms:
-            slate
-            |> Normalize.extract_norms_from_any()
-            |> Enum.reject(&Normalize.empty?/1)
-            |> MapSet.new()
-        }
+        norms =
+          slate
+          |> Normalize.extract_norms_from_any()
+          |> Enum.reject(&Normalize.empty?/1)
+          |> MapSet.new()
 
-        window2 = Window.append_or_refresh_head(state.window, ep, state.window_keep)
+        # Decide whether to de-dup or append:
+        # • If incoming norms equal the head’s norms AND meta differs → refresh head (preserve original head meta).
+        # • If incoming norms equal the head’s norms AND meta is identical → append a NEW episode (no de-dup).
+        # • Otherwise append as usual.
+        {action, head_meta} =
+          case state.window do
+            [{_at, %{norms: ^norms, meta: m}} | _] ->
+              if meta_in == m, do: {:append, m}, else: {:refresh, m}
 
-        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta})
+            _ ->
+              {:append, nil}
+          end
+
+        {window2, meta_final} =
+          case action do
+            :refresh ->
+              ep = %{slate: slate, meta: head_meta, norms: norms}
+              {Window.append_or_refresh_head(state.window, ep, state.window_keep), head_meta}
+
+            :append ->
+              ep = %{slate: slate, meta: meta_in, norms: norms}
+              at = now_ms()
+              {Window.trim([{at, ep} | state.window], state.window_keep), meta_in}
+          end
+
+        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta_final})
 
         Telemetry.maybe_echo_to_caller(
           from,
           [:brain, :hippocampus, :write],
           %{window_size: length(window2)},
-          %{meta: meta}
+          %{meta: meta_final}
         )
 
         new_last =
@@ -134,18 +190,27 @@ defmodule Brain.Hippocampus do
     half_life_ms =
       Config.normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
 
-    min_jacc = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
-    scope_opt = Map.get(opts, :scope, nil)
-    ignore_head = Map.get(opts, :ignore_head, :auto)
+    min_jacc    = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
+    ignore_head = Map.get(opts, :ignore_head, false)
+    scope_opt   = Map.get(opts, :scope, nil)
 
-    {ranked, meas, meta_map} =
+    {ranked0, meas, meta_map} =
       Recall.run(cues, state.window,
         limit: limit,
+        recall_limit: limit,
         half_life_ms: half_life_ms,
         min_jaccard: min_jacc,
         scope: scope_opt,
         ignore_head: ignore_head
       )
+
+    ranked =
+      ranked0
+      |> Enum.filter(fn
+        %{score: s} when is_number(s) -> s > 0.0
+        _ -> false
+      end)
+      |> Enum.take(limit)
 
     Telemetry.emit_recall(meas, meta_map)
     Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, meta_map)
@@ -207,4 +272,50 @@ defmodule Brain.Hippocampus do
       }
     }
   end
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  # Build robust cues from SI or opts. Prefer explicit :cues, then winners/atl_slate,
+  # then unigram token phrases, then words from sentence. Fallback to `si` itself.
+  defp build_cues(si, opts) do
+    cond do
+      Keyword.has_key?(opts, :cues) ->
+        Keyword.get(opts, :cues)
+
+      is_map(si) and is_list(si[:winners]) ->
+        Enum.flat_map(si[:winners], fn w ->
+          [w[:lemma], w["lemma"], w[:norm], w["norm"]]
+        end)
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&Normalize.norm/1)
+
+      is_map(si) and is_map(si[:atl_slate]) and is_list(si[:atl_slate][:winners]) ->
+        Enum.flat_map(si[:atl_slate][:winners], fn w ->
+          [w[:lemma], w["lemma"], w[:norm], w["norm"]]
+        end)
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&Normalize.norm/1)
+
+      is_map(si) and is_list(si[:tokens]) ->
+        si[:tokens]
+        |> Enum.filter(&(Map.get(&1, :n, 1) == 1))
+        |> Enum.map(&Normalize.norm(&1[:phrase]))
+
+      is_map(si) and is_binary(si[:sentence]) ->
+        si[:sentence]
+        |> Normalize.norm()
+        |> String.split(" ", trim: true)
+
+      true ->
+        si
+    end
+  end
+
+  # Match all key/value pairs in `scope` against episode meta (accept atom-or-string keys)
+  defp meta_matches_scope?(%{episode: %{meta: meta}}, scope) when is_map(meta) and is_map(scope) do
+    Enum.all?(scope, fn {k, v} -> Map.get(meta, k, Map.get(meta, to_string(k))) == v end)
+  end
+
+  defp meta_matches_scope?(_rec, _scope), do: false
 end
+

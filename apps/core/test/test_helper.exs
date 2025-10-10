@@ -2,16 +2,54 @@
 
 ExUnit.start()
 
-# --- Bring up dependencies needed for Ecto's SQL sandbox (idempotent) ----
-{:ok, _} = Application.ensure_all_started(:ecto_sql)
+# --- Helper module: keeps sandbox allowances stable for background GenServers
+# Avoids undefined-function errors by defining helpers inside a module.
+# Works across restarts of the named processes.
 
-# Prefer starting the umbrella application once; it should start Repo and other children.
-# If Symbrella isn't an OTP app in your env, this call simply does nothing.
+defmodule Core.TestSandboxHelper do
+  def start_allow_loop(repo, owner_pid, names) when is_list(names) do
+    Enum.each(names, fn name ->
+      spawn_link(fn -> loop_allow(repo, owner_pid, name) end)
+    end)
+  end
+
+  defp loop_allow(repo, owner_pid, name) when is_atom(name) do
+    pid = Process.whereis(name)
+
+    if is_pid(pid) do
+      safe_allow(repo, owner_pid, pid)
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      after
+        1_000 -> :ok
+      end
+    else
+      Process.sleep(200)
+    end
+
+    loop_allow(repo, owner_pid, name)
+  end
+
+  defp safe_allow(repo, owner_pid, pid) do
+    try do
+      Ecto.Adapters.SQL.Sandbox.allow(repo, owner_pid, pid)
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+  end
+end
+
+# --- Boot deps needed for Ecto SQL sandbox (idempotent) ---------------
+{:ok, _} = Application.ensure_all_started(:ecto_sql)
 _ = Application.ensure_all_started(:symbrella)
 
-# --- DB/Sandbox setup (guarded so repeated loads won't crash) -------------
+# --- Repo + Sandbox setup ----------------------------------------------
 if Code.ensure_loaded?(Db) do
-  # Is the Repo process already alive?
+  # Ensure the Repo is running even when tests run with --no-start
   repo_alive? =
     try do
       pid = Ecto.Repo.Registry.lookup(Db)
@@ -20,7 +58,6 @@ if Code.ensure_loaded?(Db) do
       _ -> false
     end
 
-  # If for some reason the Repo isn't running (e.g., tests with --no-start), try to start it.
   unless repo_alive? do
     case Db.start_link() do
       {:ok, _pid} -> :ok
@@ -29,17 +66,15 @@ if Code.ensure_loaded?(Db) do
     end
   end
 
-  # Put Repo in manual sandbox mode for the suite
+  # Manual sandbox + a suite-long shared owner
   Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
 
-  # Create or reuse a single suite-wide sandbox owner using :persistent_term
   owner_pid =
     case :persistent_term.get({:symbrella, :sandbox_owner}, :undefined) do
       :undefined ->
         pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
         :persistent_term.put({:symbrella, :sandbox_owner}, pid)
 
-        # Teardown only once, tied to the pid we created
         ExUnit.after_suite(fn _ ->
           if Process.alive?(pid) do
             try do
@@ -58,7 +93,8 @@ if Code.ensure_loaded?(Db) do
         pid
     end
 
-  # Optional: keep a local reference to avoid "unused variable" warnings if you later expand
-  _ = owner_pid
+  # Continuously (re)allow known background processes to use the owner's connection.
+  allow_names = [Brain.PMTG, Brain.Hippocampus]
+  Core.TestSandboxHelper.start_allow_loop(Db, owner_pid, allow_names)
 end
 

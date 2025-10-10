@@ -3,40 +3,64 @@ defmodule Brain.HippocampusAttachEpisodesTest do
 
   alias Brain.Hippocampus
 
-  setup do
+  #
+  # ───────────────────────────── Setup ─────────────────────────────
+  #
+
+  setup_all do
     Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
+    :ok
+  end
+
+  setup do
     Hippocampus.reset()
     :ok
   end
 
-  defp slate_with(word) do
-    %{winners: [%{id: "#{word}|noun|0", lemma: word}]}
-  end
+  #
+  # ───────────────────────────── Helpers ───────────────────────────
+  #
+
+  defp slate_with(word), do: %{winners: [%{id: "#{word}|noun|0", lemma: word}]}
 
   defp slate_with_many(words) when is_list(words) do
-    %{
-      winners:
-        Enum.map(words, fn w ->
-          %{id: "#{w}|noun|0", lemma: w}
-        end)
-    }
+    %{winners: Enum.map(words, &%{id: "#{&1}|noun|0", lemma: &1})}
   end
+
+  defp episodes_from(si, opts \\ []) do
+    si
+    |> Hippocampus.attach_episodes(Keyword.merge([limit: 5], opts))
+    |> then(&get_in(&1, [:evidence, :episodes]) || [])
+  end
+
+  defp has_winner_lemma?(%{episode: %{slate: %{winners: ws}}}, lemma) when is_list(ws) do
+    Enum.any?(ws, fn w -> (w[:lemma] || w["lemma"]) == lemma end)
+  end
+
+  defp all_scope?(episodes, scope) when is_map(scope) do
+    Enum.all?(episodes, fn
+      %{episode: %{meta: meta}} ->
+        (meta[:tenant] || meta["tenant"]) == scope[:tenant]
+      _ ->
+        false
+    end)
+  end
+
+  #
+  # ───────────────────────────── Tests ─────────────────────────────
+  #
 
   test "attach_episodes/2 writes episodes into si.evidence[:episodes] with proper shape" do
     Hippocampus.encode(slate_with("alpha"), %{})
     Hippocampus.encode(slate_with("beta"), %{})
 
-    si0 = %{winners: [%{lemma: "alpha", id: "alpha|noun|0"}]}
-    si1 = Hippocampus.attach_episodes(si0, limit: 3)
+    episodes =
+      %{winners: [%{lemma: "alpha", id: "alpha|noun|0"}]}
+      |> episodes_from(limit: 3)
 
-    assert is_map(si1)
-    assert is_map(si1[:evidence])
-
-    episodes = si1[:evidence][:episodes]
     assert is_list(episodes)
     assert length(episodes) >= 1
 
-    # Shape: %{score: float, at: int, episode: %{slate: map, meta: map}}
     [%{score: score, at: at, episode: ep} | _] = episodes
     assert is_float(score)
     assert is_integer(at)
@@ -45,49 +69,35 @@ defmodule Brain.HippocampusAttachEpisodesTest do
   end
 
   test "attach_episodes/2 honors :scope filter" do
-    # Two otherwise-identical episodes but different scope in meta
+    # two episodes, same winners, different tenant
     Hippocampus.encode(slate_with("alpha"), %{tenant: "a"})
     Hippocampus.encode(slate_with("alpha"), %{tenant: "b"})
 
-    si = %{winners: [%{lemma: "alpha", id: "alpha|noun|0"}]}
+    scope = %{tenant: "a"}
 
-    # Scope to tenant "a" → only those episodes should pass
-    si_scoped = Hippocampus.attach_episodes(si, scope: %{tenant: "a"}, limit: 5)
+    episodes =
+      %{winners: [%{lemma: "alpha", id: "alpha|noun|0"}]}
+      |> episodes_from(scope: scope, limit: 5)
 
-    episodes = si_scoped[:evidence][:episodes]
     assert is_list(episodes)
     assert length(episodes) >= 1
-
-    # All returned must match the scoped tenant
-    assert Enum.all?(episodes, fn %{episode: %{meta: meta}} ->
-             (meta[:tenant] || meta["tenant"]) == "a"
-           end)
+    assert all_scope?(episodes, scope)
   end
 
   test "attach_episodes/2 honors :min_jaccard threshold" do
-    # Episode with partial overlap: winners = ["alpha", "x", "y"] → J = 1/3 with cues ["alpha"]
+    # winners = ["alpha","x","y"] has J=1/3 w.r.t. cues ["alpha"]
     Hippocampus.encode(slate_with_many(["alpha", "x", "y"]), %{})
-    # Non-overlapping (will be filtered by score>0 anyway)
+    # totally disjoint episode
     Hippocampus.encode(slate_with("zzz"), %{})
 
     si = %{winners: [%{lemma: "alpha", id: "alpha|noun|0"}]}
 
-    # With a low threshold, the partial-overlap episode should appear
-    si_low = Hippocampus.attach_episodes(si, min_jaccard: 0.0, limit: 5)
-    eps_low = si_low[:evidence][:episodes]
+    eps_low = episodes_from(si, min_jaccard: 0.0, limit: 5)
     assert is_list(eps_low)
+    assert Enum.any?(eps_low, &has_winner_lemma?(&1, "x"))
 
-    assert Enum.any?(eps_low, fn %{episode: %{slate: %{winners: ws}}} ->
-             Enum.any?(ws, &((&1[:lemma] || &1["lemma"]) == "x"))
-           end)
-
-    # With a higher threshold, 1/3 ≈ 0.333 should be filtered out
-    si_high = Hippocampus.attach_episodes(si, min_jaccard: 0.5, limit: 5)
-    eps_high = si_high[:evidence][:episodes]
-
-    # Either empty or none contain the multi-token episode
-    refute Enum.any?(eps_high, fn %{episode: %{slate: %{winners: ws}}} ->
-             Enum.any?(ws, &((&1[:lemma] || &1["lemma"]) == "x"))
-           end)
+    eps_high = episodes_from(si, min_jaccard: 0.5, limit: 5)
+    refute Enum.any?(eps_high, &has_winner_lemma?(&1, "x"))
   end
 end
+

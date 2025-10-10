@@ -1,7 +1,15 @@
 defmodule Core do
   @moduledoc """
-  Tokenize → rebuild word n-grams → STM → LTM (DB read/enrich) → Lexicon Stage (fetch+upsert+refetch)
-  → LIFG Stage-1 → notify Brain.
+  Pipeline:
+  Tokenize → Rebuild word n-grams → STM → LTM (DB read/enrich)
+  → Lexicon Stage (fetch + upsert + refetch)
+  → LIFG Stage-1 → Notify Brain.
+
+  Notes:
+  • resolve_input/2 defaults to :prod mode and runs the full pipeline.
+  • LTM seeding only creates unigram “seed” rows when norms are missing.
+  • Lexicon stage runs once per turn: Stage.run → DB refetch → merge into :active_cells.
+  • All Brain interactions are guarded so tests without the Brain process still pass.
   """
 
   alias Brain
@@ -15,13 +23,12 @@ defmodule Core do
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode = Keyword.get(opts, :mode, :prod)
+    mode  = Keyword.get(opts, :mode, :prod)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
     si0 =
       phrase
       |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      # ensure %SemanticInput{}
       |> wrap_si(phrase)
       |> rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
@@ -32,10 +39,8 @@ defmodule Core do
         si0
         |> Brain.stm()
         |> keep_only_word_boundary_tokens()
-        # LTM pass (includes optional seeding for *unigrams* and immediate re-fetch)
-        |> ltm_stage(opts)
-        # Single lexicon pass: Stage.run → DB re-fetch → merge into :active_cells
-        |> Lexicon.all(opts)
+        |> ltm_stage(opts)          # DB read + optional unigram seeding + refetch
+        |> Lexicon.all(opts)        # Stage.run + DB refetch + merge
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> maybe_ingest_atl(opts)
@@ -48,11 +53,10 @@ defmodule Core do
   end
 
   # ─────────────────────── Brain notify ───────────────────────
-  # add this helper near your other privates if you don’t already have it
+
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
 
-  # Uses direct GenServer.cast/2 instead of any wrapper.
   defp notify_brain_activation(si, opts) do
     payload = %{
       delta: Keyword.get(opts, :delta, 0.1),
@@ -79,7 +83,7 @@ defmodule Core do
       si.tokens
       |> Enum.reduce(%{}, fn t, acc ->
         nrm = norm(Map.get(t, :phrase))
-        tn = Map.get(t, :n, 1)
+        tn  = Map.get(t, :n, 1)
 
         senses =
           si.active_cells
@@ -110,18 +114,16 @@ defmodule Core do
         lifg_choices =
           Enum.map(out.choices, fn ch ->
             token_norm = norm(Map.get(ch, :lemma) || "")
-            chosen_id = Map.get(ch, :chosen_id)
-            scores = Map.get(ch, :scores) || %{}
-            feats = Map.get(ch, :features) || %{}
-            alt_ids = Map.get(ch, :alt_ids, [])
+            chosen_id  = Map.get(ch, :chosen_id)
+            scores     = Map.get(ch, :scores) || %{}
+            feats      = Map.get(ch, :features) || %{}
+            alt_ids    = Map.get(ch, :alt_ids, [])
 
             base_score =
               if is_binary(chosen_id) and is_map(scores),
                 do: Map.get(scores, chosen_id, 0.0),
                 else: Map.get(feats, :score_norm, 0.0)
 
-            # Prefer an id whose norm matches the token’s norm, choosing the highest score among matches.
-            # Consider both the chosen_id and alt_ids.
             candidates = [chosen_id | alt_ids]
 
             matching =
@@ -163,13 +165,8 @@ defmodule Core do
     else
       slate =
         case Process.whereis(Brain.ATL) do
-          pid when is_pid(pid) ->
-            # server path
-            Brain.ATL.ingest(choices, tokens)
-
-          _ ->
-            # pure fallback path
-            Brain.ATL.reduce(choices, tokens)
+          pid when is_pid(pid) -> Brain.ATL.ingest(choices, tokens)
+          _ -> Brain.ATL.reduce(choices, tokens)
         end
 
       si
@@ -197,8 +194,7 @@ defmodule Core do
     (token_n > 1 and has_space) or (token_n == 1 and not has_space)
   end
 
-  # If any real lexicon row (with type="lexicon" or definition) exists,
-  # drop seed rows from the candidate set.
+  # If any real lexicon row exists, drop seed rows from the candidate set.
   defp drop_seeds_if_lexicon_present(senses) do
     has_lex? =
       Enum.any?(senses, fn s ->
@@ -209,10 +205,11 @@ defmodule Core do
     if has_lex?, do: Enum.reject(senses, &seed?/1), else: senses
   end
 
+  defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
+
   defp maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
     if Process.whereis(Brain.Hippocampus) do
       ep = Brain.Hippocampus.encode(slate)
-      # keep a tiny summary on SI; full episode lives in Hippocampus state
       Map.put(si, :episode, Map.take(ep, [:ts_ms, :token_count, :winner_count]))
     else
       si
@@ -221,8 +218,6 @@ defmodule Core do
 
   defp maybe_encode_hippocampus(si), do: si
 
-  defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
-
   # ─────────────────────── LTM orchestrator ───────────────────────
 
   # Consumes Db.ltm/2. Enriches missing *unigram* norms with seeds, immediately re-fetches,
@@ -230,7 +225,6 @@ defmodule Core do
   defp ltm_stage(si, opts) when is_map(si) do
     case Db.ltm(si, opts) do
       {:ok, %{rows: rows0, missing_norms: missing0, db_hits: db_hits}} ->
-        # Only seed unigrams (no spaces)
         missing =
           missing0
           |> List.wrap()
@@ -239,7 +233,7 @@ defmodule Core do
         rows =
           if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
             _ = Lexicon.ensure_cells(missing)
-            rows0 ++ Db.Lexicon.fetch_by_norms(missing)
+            rows0 ++ safe_fetch_by_norms(missing)
           else
             rows0
           end
@@ -273,8 +267,18 @@ defmodule Core do
 
         si1
 
-      _other ->
+      _ ->
         si
+    end
+  end
+
+  defp safe_fetch_by_norms(norms) do
+    try do
+      Db.Lexicon.fetch_by_norms(norms)
+    rescue
+      _ -> []
+    catch
+      _, _ -> []
     end
   end
 
@@ -284,7 +288,7 @@ defmodule Core do
   defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
        when is_binary(s) and is_integer(max_n) and max_n > 0 do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
-    words = if s_norm == "", do: [], else: String.split(s_norm, " ")
+    words  = if s_norm == "", do: [], else: String.split(s_norm, " ")
 
     # char start offsets for each word
     starts =
@@ -298,25 +302,27 @@ defmodule Core do
     tokens =
       for i <- 0..(wlen - 1), n <- min(max_n, wlen - i)..1//-1 do
         phrase = words |> Enum.slice(i, n) |> Enum.join(" ")
-        start = Enum.at(starts, i)
-        len = String.length(phrase)
+        start  = Enum.at(starts, i)
+        len    = String.length(phrase)
 
         %{index: nil, span: {start, len}, n: n, phrase: phrase, mw: n > 1, instances: []}
       end
       |> Enum.with_index()
       |> Enum.map(fn {t, idx} -> Map.put(t, :index, idx) end)
 
-    si |> Map.put(:sentence, s_norm) |> Map.put(:tokens, tokens)
+    si
+    |> Map.put(:sentence, s_norm)
+    |> Map.put(:tokens, tokens)
   end
 
   defp rebuild_word_ngrams(si, _), do: si
 
-  # Keep tokens where sentence slice matches token.phrase (normalized)
-  # Supports char-span {start,len} and word-window {i,j} (j exclusive)
+  # Keep tokens where sentence slice matches token.phrase (normalized).
+  # Supports char-span {start, len} and word-window {i, j} (j exclusive).
   defp keep_only_word_boundary_tokens(%{sentence: s, tokens: toks} = si)
        when is_binary(s) and is_list(toks) do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
-    words = if s_norm == "", do: [], else: String.split(s_norm, " ")
+    words  = if s_norm == "", do: [], else: String.split(s_norm, " ")
     wcount = length(words)
 
     kept =
@@ -325,15 +331,11 @@ defmodule Core do
 
         case Map.get(t, :span) do
           {a, b} when is_integer(a) and is_integer(b) and a >= 0 ->
-            # First, treat as char-span {start,len}
-            char_match =
-              b > 0 and
-                norm(String.slice(s_norm, a, b) || "") == phrase
+            char_match = b > 0 and norm(String.slice(s_norm, a, b) || "") == phrase
 
             if char_match do
               true
             else
-              # Fallback: interpret as word-window {i,j} with j exclusive
               j = b
               window_ok = a < j and a < wcount and j <= wcount
 
@@ -395,3 +397,4 @@ defmodule Core do
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 end
+

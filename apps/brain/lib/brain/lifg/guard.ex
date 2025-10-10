@@ -5,10 +5,10 @@ defmodule Brain.LIFG.Guard do
   Responsibilities (structural only — no semantics):
     • Mapify structs and loose inputs.
     • Ensure every token has a stable integer :index.
-    • Normalize optional :span to the project’s canonical shape {start, end}.
+    • Normalize optional :span to the project’s canonical shape {start, len}.
     • Sort by span start **iff** every token has a valid span; otherwise keep input order.
 
-  NOTE: Boundary checks and char-gram drops live in Stage-1 guards.
+  NOTE: Boundary checks and char-gram drops live in BoundaryGuard.
   """
 
   @type token :: %{
@@ -60,21 +60,28 @@ defmodule Brain.LIFG.Guard do
     end)
   end
 
-  # Accept both {start, end} and {start, len}; convert to {start, end}.
+  # Accept both {start, end} and {start, len}; convert to {start, len} (len > 0)
   defp normalize_spans(list) do
     Enum.map(list, fn t ->
       case Map.get(t, :span) || Map.get(t, "span") do
         {s, e} when is_integer(s) and is_integer(e) ->
-          span =
-            if e <= s do
-              # Treat as {start, len}; recover using phrase length (fallback 1)
-              len = max(String.length(to_string(Map.get(t, :phrase))), 1)
-              {s, s + len}
-            else
-              {s, e}
+          phrase_len = t |> Map.get(:phrase, "") |> to_string() |> String.length()
+
+          len =
+            cond do
+              # Looks like {start, end}; turn into length, prefer exact match when possible
+              e > s and phrase_len > 0 and e - s == phrase_len -> e - s
+              e > s and phrase_len == 0 -> e - s
+              # Otherwise treat as already-length
+              e > 0 -> e
+              true -> 0
             end
 
-          Map.put(t, :span, span)
+          if len > 0 do
+            Map.put(t, :span, {s, len})
+          else
+            Map.delete(t, :span)
+          end
 
         _ ->
           Map.delete(t, :span)
@@ -92,9 +99,10 @@ defmodule Brain.LIFG.Guard do
     end
   end
 
-  defp valid_span?(%{span: {s, e}})
-       when is_integer(s) and is_integer(e) and s >= 0 and e >= s,
+  defp valid_span?(%{span: {s, l}})
+       when is_integer(s) and is_integer(l) and s >= 0 and l > 0,
        do: true
 
   defp valid_span?(_), do: false
 end
+
