@@ -1,4 +1,3 @@
-# apps/brain/lib/brain.ex
 defmodule Brain do
   @moduledoc """
   Central coordinator for `Brain.Cell` processes **and** a tiny `use Brain, region: :xyz` macro.
@@ -367,9 +366,19 @@ defmodule Brain do
     rows_or_ids
     |> extract_items()
     |> Enum.each(fn
-      %Row{} = row -> ensure_start_and_cast(row, payload)
-      id when is_binary(id) -> ensure_start_and_cast(id, payload)
-      other -> Logger.warning("Brain.activate_cells: unknown item #{inspect(other)}")
+      %Row{} = row ->
+        ensure_start_and_cast(row, payload)
+
+      # NEW: accept plain maps from LIFG/lexicon/seed and handle smartly
+      %{} = map_item ->
+        handle_map_item_activation(map_item, payload)
+
+      id when is_binary(id) ->
+        ensure_start_and_cast(id, payload)
+
+      other ->
+        :telemetry.execute([:brain, :activate, :unknown_item], %{count: 1}, %{sample: other})
+        Logger.debug("Brain.activate_cells: unknown item #{inspect(other)}")
     end)
 
     {:noreply, state}
@@ -899,6 +908,34 @@ defmodule Brain do
     ensure_started(id, id)
     GenServer.cast(via(id), {:activate, payload})
     :ok
+  end
+
+  # NEW: handle map items (lexicon/seed/other)
+  defp handle_map_item_activation(map_item, payload) do
+    id = map_item[:id] || map_item["id"]
+    type = map_item[:type] || map_item["type"]
+
+    cond do
+      is_binary(id) and (type == "lexicon" or type == :lexicon) ->
+        :telemetry.execute([:brain, :activate, :lexicon_autohydrate], %{count: 1}, %{id: id})
+        ensure_start_and_cast(id, payload)
+        :ok
+
+      is_binary(id) and (type == "seed" or type == :seed) ->
+        # Seeds are not backed by DB; don't warn-spam. Emit telemetry and skip.
+        :telemetry.execute([:brain, :activate, :seed_unknown], %{count: 1}, %{id: id})
+        :ok
+
+      is_binary(id) ->
+        # Fallback: try to treat it as an id-based cell
+        ensure_start_and_cast(id, payload)
+        :ok
+
+      true ->
+        :telemetry.execute([:brain, :activate, :unknown_map], %{count: 1}, %{sample: map_item})
+        Logger.debug("Brain.activate_cells: unhandled map item #{inspect(map_item)}")
+        :ok
+    end
   end
 
   defp ensure_started(id, arg) when is_binary(id) do

@@ -1,5 +1,18 @@
+# apps/db/priv/repo/migrations/20251011_create_brain_cells_consolidated.exs
 defmodule Db.Migrations.CreateBrainCellsConsolidated do
   use Ecto.Migration
+
+  @allowed_pos ~w(
+    noun verb adjective adverb interjection phrase proper_noun pronoun
+    determiner preposition conjunction numeral particle
+  )
+
+  # POS whitelist as comma-separated quoted list for SQL ANY(ARRAY[…])
+  defp allowed_pos_sql do
+    @allowed_pos
+    |> Enum.map(&("'#{&1}'"))
+    |> Enum.join(", ")
+  end
 
   def up do
     execute("CREATE EXTENSION IF NOT EXISTS citext")
@@ -34,10 +47,10 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       add :last_substance, :string
       add :token_id, :bigint
 
-      timestamps()  # => :naive_datetime by default
+      timestamps()
     end
 
-    # Speed indexes
+    # ---------------- Indexes ----------------
     create index(:brain_cells, [:word], name: :brain_cells_word_index)
     create index(:brain_cells, [:norm], name: :brain_cells_norm_index)
 
@@ -56,9 +69,8 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     ON brain_cells USING GIN (antonyms)
     """)
 
-    # ❌ Removed: unique “lexical key” index on (norm, pos, type, gram_function)
-
-    # Backfill norm for any seeded rows
+    # ---------------- Data hygiene / normalization ----------------
+    # Normalize norm for any pre-seeded rows
     execute("""
     UPDATE brain_cells
        SET norm = citext(
@@ -66,7 +78,46 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
        );
     """)
 
-    # Optional vector column + index (unchanged)
+    # (Optional) Trim id and drop trailing pipes if any leaked in from prior seeds
+    # Safe only if `id` is not referenced by FKs elsewhere.
+    execute("""
+    UPDATE brain_cells
+       SET id = regexp_replace(btrim(id), '\\|+$', '', 'g')
+     WHERE id ~ '\\|$' OR id <> btrim(id);
+    """)
+
+    # ---------------- Hardening constraints (prevents UNK/seed leaks) ----------------
+    # 1) POS cannot be NULL or 'unk' and must be in allowed set
+    execute("""
+    ALTER TABLE brain_cells
+    ADD CONSTRAINT brain_cells_pos_valid
+      CHECK (pos IS NOT NULL AND pos <> 'unk' AND pos = ANY(ARRAY[#{allowed_pos_sql()}]));
+    """)
+
+    # 2) ID must not contain placeholder segments and must be trimmed
+    execute("""
+    ALTER TABLE brain_cells
+    ADD CONSTRAINT brain_cells_id_no_seed_or_unk
+      CHECK (id = btrim(id) AND id NOT LIKE '%|unk|%' AND id NOT LIKE '%|seed|%');
+    """)
+
+    # 3) ID shape: text|pos[|suffix] — suffix is alnum/underscore; no trailing pipe
+    execute("""
+    ALTER TABLE brain_cells
+    ADD CONSTRAINT brain_cells_id_shape
+      CHECK (
+        btrim(id) ~ '^[^|]+\\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\\|[A-Za-z0-9_]+)?$'
+      );
+    """)
+
+    # 4) POS inside the ID must match the pos column exactly
+    execute("""
+    ALTER TABLE brain_cells
+    ADD CONSTRAINT brain_cells_id_pos_matches_column
+      CHECK (split_part(btrim(id), '|', 2) = pos);
+    """)
+
+    # ---------------- Optional vector column + index ----------------
     execute("""
     DO $$
     BEGIN
@@ -98,7 +149,12 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("DROP INDEX IF EXISTS brain_cells_antonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_synonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_word_trgm_idx")
-    execute("DROP INDEX IF EXISTS brain_cells_lexical_key_uniq") # harmless if it never existed
+
+    # Drop hardening constraints (if present)
+    execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_pos_matches_column;")
+    execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_shape;")
+    execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_no_seed_or_unk;")
+    execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_pos_valid;")
 
     drop_if_exists index(:brain_cells, [:norm], name: :brain_cells_norm_index)
     drop_if_exists index(:brain_cells, [:word], name: :brain_cells_word_index)

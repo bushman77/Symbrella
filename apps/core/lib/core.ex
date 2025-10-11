@@ -396,5 +396,17 @@ defmodule Core do
       |> String.downcase()
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
+
+  def examine() do
+    Brain.snapshot()
+    |> IO.inspect(label: :brain)
+    Brain.LIFG.status
+    |> IO.inspect(label: :lifg)
+    Brain.Hippocampus.snapshot
+    |> IO.inspect(label: :hippocampus)
+    Brain.PMTG.status
+    |> IO.inspect(label: :pmtg)
+    :ok
+  end
 end
 
