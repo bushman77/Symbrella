@@ -6,10 +6,15 @@ defmodule Core.Token do
   Per start index, order is **longest → shortest**.
 
   NEW:
-    • `span_mode: :words | :chars` (default `:words`). When `:chars`, spans are character
-      indices over the normalized sentence (end-exclusive: `{start, end}`).
-    • `to_char_spans/1,2` — convert existing word spans to char spans.
-    • `check_span_invariants/1` — optional invariant validation.
+    • Explicit punctuation splitting & tagging (Unicode-safe).
+      - Punctuation is *not* included in word-grams.
+      - In `span_mode: :chars`, punctuation tokens are emitted with char spans.
+      - In `span_mode: :words`, punctuation tokens are omitted (word-grams only).
+    • `span_mode: :words | :chars` (default `:words`). When `:chars`, n-gram spans use
+      character indices over the normalized sentence (end-exclusive: `{start, end}`) and
+      punctuation tokens are included as single-symbol tokens with `kind: :punct`.
+    • `to_char_spans/1,2` — convert existing word spans to char spans (unchanged).
+    • `check_span_invariants/1` — optional invariant validation (unchanged).
 
   `tokenize/2` returns a %Core.SemanticInput{sentence, tokens}.
   """
@@ -20,31 +25,28 @@ defmodule Core.Token do
             mw: false,
             source: nil,
             instances: [],
-            n: 1
-
+            n: 1,
+            # Optional hints; safe for downstream that uses maps
+            kind: :word,    # :word | :punct
+            pos: nil,       # "punct" for punctuation tokens (only when span_mode=:chars)
+            subpos: nil     # :sentence_final | :comma | :dash | ...
   @type t :: %__MODULE__{
           phrase: String.t(),
-          # When span_mode=:words -> word-index span (end-exclusive): {i, i+n}
-          # When span_mode=:chars -> character-index span (end-exclusive): {start, end}
           span: {non_neg_integer(), non_neg_integer()},
           mw: boolean(),
           instances: list(),
           n: pos_integer(),
-          source: any()
+          source: any(),
+          kind: :word | :punct,
+          pos: nil | String.t(),
+          subpos: nil | atom()
         }
 
   @type span_mode :: :words | :chars
 
-  @doc """
-  Tokenize a sentence into **all contiguous word n-grams**.
-
-  Options:
-    * `:max_wordgram_n` (pos int, default 3) — cap n-gram length
-    * `:span_mode`      (`:words` | `:chars`, default `:words`)
-  """
   @spec tokenize(String.t(), keyword()) :: Core.SemanticInput.t()
   def tokenize(sentence, opts \\ []) when is_binary(sentence) do
-    max_n = Keyword.get(opts, :max_wordgram_n, 3) |> max(1)
+    max_n     = Keyword.get(opts, :max_wordgram_n, 3) |> max(1)
     span_mode = Keyword.get(opts, :span_mode, :words)
 
     s =
@@ -53,44 +55,167 @@ defmodule Core.Token do
       |> String.trim()
       |> String.replace(~r/\s+/u, " ")
 
-    words = if s == "", do: [], else: String.split(s, " ")
+    # 1) Scan the normalized string into primitive tokens (words & punct) with char spans.
+    prim = scan_primitive_tokens(s)
 
-    tokens =
-      case words do
-        [] -> []
-        _ -> build_wordgrams(words, max_n)
-      end
+    # 2) Derive the list of word tokens (order preserved) and their indices.
+    word_tokens =
+      prim
+      |> Enum.with_index()
+      |> Enum.filter(fn {t, _i} -> t.kind == :word end)
 
+    # 3) Build word-grams (only over word tokens).
+    grams = build_wordgrams_from_word_tokens(word_tokens, max_n, span_mode)
+
+    # 4) Optionally include punctuation tokens in :chars mode.
     tokens =
       case span_mode do
-        :words -> tokens
-        :chars -> to_char_spans(tokens, s)
+        :words ->
+          grams
+
+        :chars ->
+          puncts =
+            prim
+            |> Enum.filter(&(&1.kind == :punct))
+            |> Enum.map(fn p ->
+              %__MODULE__{
+                phrase: p.text,
+                span: {p.start, p.stop},
+                n: 1,
+                mw: false,
+                source: :punct,
+                kind: :punct,
+                pos: "punct",
+                subpos: p.subpos
+              }
+            end)
+
+          (grams ++ puncts)
+          |> Enum.sort_by(fn %__MODULE__{span: {st, _}} -> st end)
       end
 
     %Core.SemanticInput{sentence: s, tokens: tokens}
   end
 
-  # ---------- helpers ----------
+  # ---------- primitive scan (Unicode-safe) ----------
 
-  # Build all word-grams with word-index spans {i, i+n}, longest→shortest per start.
-  defp build_wordgrams(words, max_n) do
-    k = length(words)
+  @doc false
+  # Classify a single grapheme as :space | :punct | :word
+  defp char_class(g) do
+    cond do
+      g =~ ~r/\s/u -> :space
+      # Unicode P (punctuation) or S (symbol) -> treat as punctuation
+      g =~ ~r/[\p{P}\p{S}]/u -> :punct
+      true -> :word
+    end
+  end
+
+  @punct_sf MapSet.new(["?", "!", "."])
+  @punct_map %{
+    "," => :comma, ";" => :colon, ":" => :colon,
+    "—" => :dash, "-" => :dash, "…" => :ellipsis,
+    "\"" => :quote, "”" => :quote, "“" => :quote, "’" => :quote, "'" => :quote,
+    "(" => :paren, ")" => :paren, "[" => :paren, "]" => :paren, "{" => :paren, "}" => :paren
+  }
+
+  @doc false
+  defp punct_pos(sym) do
+    if MapSet.member?(@punct_sf, sym),
+      do: {:punct, :sentence_final},
+      else: {:punct, Map.get(@punct_map, sym, :other)}
+  end
+
+  @doc false
+  # Deterministic scanner with a separate running-word buffer.
+  # Returns a list of maps: %{text,start,stop,kind,:subpos?}
+  defp scan_primitive_tokens(s) do
+    graphemes = String.graphemes(s)
+
+    {idx, run, acc} =
+      Enum.reduce(graphemes, {0, nil, []}, fn g, {i, run, acc} ->
+        cls = char_class(g)
+        w = byte_size(g)
+
+        case {cls, run} do
+          {:space, nil} ->
+            {i + w, nil, acc}
+
+          {:space, {text, st, _en}} ->
+            # finalize running word on space
+            acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
+            {i + w, nil, acc1}
+
+          {:punct, nil} ->
+            # emit punct, keep no running word
+            {_p, sub} = punct_pos(g)
+            acc1 = [%{text: g, start: i, stop: i + w, kind: :punct, subpos: sub} | acc]
+            {i + w, nil, acc1}
+
+          {:punct, {text, st, _en}} ->
+            # finalize running word, then emit punct
+            {_p, sub} = punct_pos(g)
+            acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
+            acc2 = [%{text: g, start: i, stop: i + w, kind: :punct, subpos: sub} | acc1]
+            {i + w, nil, acc2}
+
+          {:word, nil} ->
+            # start a new running word
+            {i + w, {g, i, i + w}, acc}
+
+          {:word, {text, st, _en}} ->
+            # extend running word
+            {i + w, {text <> g, st, i + w}, acc}
+        end
+      end)
+
+    acc =
+      case run do
+        nil -> acc
+        {text, st, _en} -> [%{text: text, start: st, stop: idx, kind: :word} | acc]
+      end
+
+    acc |> Enum.reverse()
+  end
+
+  # ---------- n-gram builder over word tokens ----------
+
+  # word_tokens: [{%{text,start,stop,kind: :word}, primitive_index}, ...]
+  defp build_wordgrams_from_word_tokens(word_tokens, max_n, span_mode) do
+    k = length(word_tokens)
 
     0..(k - 1)
-    |> Enum.flat_map(fn i ->
-      max_here = min(max_n, k - i)
+    |> Enum.flat_map(fn wi ->
+      max_here = min(max_n, k - wi)
 
       for n <- max_here..1//-1 do
+        {first, _} = Enum.at(word_tokens, wi)
+        {last,  _} = Enum.at(word_tokens, wi + n - 1)
+
+        phrase =
+          word_tokens
+          |> Enum.slice(wi, n)
+          |> Enum.map(fn {w, _} -> w.text end)
+          |> Enum.join(" ")
+
+        span =
+          case span_mode do
+            :words -> {wi, wi + n}
+            :chars -> {first.start, last.stop}
+          end
+
         %__MODULE__{
-          phrase: Enum.slice(words, i, n) |> Enum.join(" "),
-          span: {i, i + n},
+          phrase: phrase,
+          span: span,
           mw: n > 1,
           instances: [],
-          n: n
+          n: n,
+          kind: :word
         }
       end
     end)
   end
+
+  # ---------- legacy helpers (unchanged) ----------
 
   @doc """
   Convert a `%Core.SemanticInput{}` whose tokens use word-index spans `{i, i+n}`
@@ -115,19 +240,20 @@ defmodule Core.Token do
     {starts, ends} = word_boundaries(words)
 
     Enum.map(tokens, fn %__MODULE__{span: {i, j}, n: n} = tok ->
-      # n == j - i by construction for word-index spans
-      if n <= 0 or j < i do
-        # Defensive: produce a zero-length span at 0 to avoid crashes; caller can validate later.
-        %__MODULE__{tok | span: {0, 0}}
-      else
-        start_char = Enum.at(starts, i, 0)
-        last_idx = j - 1
-        end_char = Enum.at(ends, last_idx, start_char)
+      # If a token is already in char spans (e.g., punctuation we might introduce later),
+      # try to detect and keep as-is. Here we assume word spans when 0 <= i <= j <= length(words).
+      cond do
+        is_integer(i) and is_integer(j) and i >= 0 and j >= i and j <= length(words) and n == (j - i) ->
+          start_char = Enum.at(starts, i, 0)
+          last_idx = j - 1
+          end_char = Enum.at(ends, last_idx, start_char)
+          %__MODULE__{tok | span: {start_char, end_char}}
 
-        %__MODULE__{tok | span: {start_char, end_char}}
+        true ->
+          # Fallback: leave span unchanged
+          tok
       end
     end)
-    # Keep deterministic order by character start
     |> Enum.sort_by(fn %__MODULE__{span: {start, _}} -> start end)
   end
 
@@ -141,7 +267,6 @@ defmodule Core.Token do
       Enum.reduce(Enum.with_index(words), {0, [], []}, fn {w, idx}, {cur, sacc, eacc} ->
         s = cur
         e = s + String.length(w)
-        # Advance by a single space if not the last word (we normalized spaces)
         next = if idx < len - 1, do: e + 1, else: e
         {next, [s | sacc], [e | eacc]}
       end)
@@ -153,14 +278,7 @@ defmodule Core.Token do
   Optional invariant check:
     • spans are non-decreasing by start
     • each token's phrase equals String.slice(sentence, start, end-start)
-
-  Returns:
-    `{:ok, si}` on success
-    `{:error, failures}` where failures is a list of maps describing the bad tokens
   """
-
-  # in Core.Token
-
   @spec check_span_invariants(Core.SemanticInput.t()) ::
           {:ok, Core.SemanticInput.t()} | {:error, [map()]}
   def check_span_invariants(%Core.SemanticInput{sentence: s, tokens: tokens} = si) do
@@ -168,17 +286,8 @@ defmodule Core.Token do
       tokens
       |> Enum.with_index()
       |> Enum.reduce({[], -1}, fn {t, idx}, {acc, last_start} ->
-        # tolerate struct or map; atom or string keys
-        p =
-          Map.get(t, :phrase) ||
-            Map.get(t, "phrase") ||
-            ""
-
-        span_raw =
-          Map.get(t, :span) ||
-            Map.get(t, "span") ||
-            {0, 0}
-
+        p = Map.get(t, :phrase) || Map.get(t, "phrase") || ""
+        span_raw = Map.get(t, :span) || Map.get(t, "span") || {0, 0}
         {st, en} = normalize_span(span_raw)
         slice = safe_slice(s, st, en)
 
@@ -186,9 +295,7 @@ defmodule Core.Token do
         reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
         reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
         reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
-
-        reasons =
-          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
         if reasons == [] do
           {acc, st}
@@ -211,7 +318,6 @@ defmodule Core.Token do
     end
   end
 
-  # Accept tuple or [start,end]; default safely
   defp normalize_span({st, en}) when is_integer(st) and is_integer(en), do: {st, en}
   defp normalize_span([st, en]) when is_integer(st) and is_integer(en), do: {st, en}
   defp normalize_span(_), do: {0, 0}
@@ -223,3 +329,4 @@ defmodule Core.Token do
 
   defp safe_slice(_s, _st, _en), do: ""
 end
+

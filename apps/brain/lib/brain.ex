@@ -1,3 +1,4 @@
+# apps/brain/lib/brain.ex
 defmodule Brain do
   @moduledoc """
   Central coordinator for `Brain.Cell` processes **and** a tiny `use Brain, region: :xyz` macro.
@@ -11,7 +12,8 @@ defmodule Brain do
   For region helpers (LIFG etc.), prefer `use Brain, region: :lifg` in those modules.
   """
 
-  # ───────────────────────────────────── Region Macro ─────────────────────────────────────
+  # ───────────────────────── Region Macro ─────────────────────────
+
   @doc """
   Use inside a module to make it a region GenServer:
 
@@ -57,25 +59,40 @@ defmodule Brain do
     end
   end
 
-  # ───────────────────────────────────────── Brain Server ─────────────────────────────────────────
+  # ───────────────────────── Brain Server ─────────────────────────
+
   use GenServer
   require Logger
 
   alias Db.BrainCell, as: Row
-  alias Brain.LIFG
-  alias Brain.WorkingMemory
   alias Brain.Attention
-  alias Brain.Utils.Tokens
-  alias Brain.Utils.Numbers
-  alias Brain.Utils.ControlSignals
-  alias Brain.LIFG.Input, as: LIFGInput
-  alias Brain.LIFG.Gate, as: LIFGGate
   alias Brain.Episodes.Writer, as: EpWriter
+  alias Brain.LIFG
+  alias Brain.LIFG.Gate, as: LIFGGate
+  alias Brain.LIFG.Input, as: LIFGInput
+  alias Brain.Utils.ControlSignals
+  alias Brain.Utils.Numbers
+  alias Brain.Utils.Tokens
+  alias Brain.WorkingMemory
 
   @name __MODULE__
   @registry Brain.Registry
   @cell_sup Brain.CellSup
   @cell_timeout 2_000
+
+  @wm_defaults %{
+    capacity: 7,
+    decay_ms: 30_000,
+    gate_threshold: 0.4,
+    merge_duplicates?: true,
+    # Optional knobs (policy defaults preserve prior behavior):
+    lemma_budget: 2,
+    replace_margin: 0.10,
+    diversity_lambda: 0.06,
+    allow_unk?: true,
+    allow_seed?: true,
+    fallback_scale: 0.70
+  }
 
   @type id :: any()
   @type wm_item :: map()
@@ -83,7 +100,13 @@ defmodule Brain do
           capacity: pos_integer(),
           decay_ms: pos_integer(),
           gate_threshold: number(),
-          merge_duplicates?: boolean()
+          merge_duplicates?: boolean(),
+          lemma_budget: pos_integer(),
+          replace_margin: number(),
+          diversity_lambda: number(),
+          allow_unk?: boolean(),
+          allow_seed?: boolean(),
+          fallback_scale: number()
         }
   @type state :: %{
           history: list(),
@@ -95,11 +118,13 @@ defmodule Brain do
           wm_last_ms: non_neg_integer() | nil
         }
 
-  # Small wrappers (keep the literal GenServer.* out of most call-sites)
+  # ── Small wrappers (hide raw GenServer.* from call-sites) ──────────────────
+
   defp gencall(name, msg, timeout \\ 5_000), do: :gen_server.call(name, msg, timeout)
   defp gencast(name, msg), do: :gen_server.cast(name, msg)
 
-  # ── Public API: WM/Attention ─────────────────────────────────────────────────────────────
+  # ── Public API: WM/Attention ────────────────────────────────────────────────
+
   @spec configure_wm(keyword()) :: :ok
   def configure_wm(opts) when is_list(opts), do: gencall(@name, {:configure_wm, Map.new(opts)})
 
@@ -119,7 +144,8 @@ defmodule Brain do
   @spec snapshot_wm() :: %{wm: [wm_item()], cfg: wm_cfg(), attention: map()}
   def snapshot_wm, do: gencall(@name, :snapshot_wm)
 
-  # ── Public API: existing surface (unchanged) ─────────────────────────────────────────────
+  # ── Public API: existing surface (unchanged) ────────────────────────────────
+
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{
@@ -138,7 +164,7 @@ defmodule Brain do
   @spec stm(map()) :: map()
   def stm(si) when is_map(si), do: gencall(@name, {:stm, si})
 
-  @doc "Activate rows/ids asynchronously with a payload (e.g., `%{delta: +0.2}`)."
+  @doc "Activate rows/ids asynchronously with a payload (e.g., `%{delta: +1}`)."
   @spec activate_cells([Row.t() | id()] | map(), map()) :: :ok
   def activate_cells(rows_or_ids, payload \\ %{delta: 1}) when is_map(payload) do
     gencast(@name, {:activate_cells, rows_or_ids, payload})
@@ -169,7 +195,7 @@ defmodule Brain do
     gencall(@name, {:lifg_stage1, si_or_candidates, context_vec, opts}, :infinity)
   end
 
-  # ── GenServer callbacks ─────────────────────────────────────────────
+  # ───────────────────────── GenServer callbacks ──────────────────────────────
 
   @impl true
   def init(:ok) do
@@ -179,23 +205,22 @@ defmodule Brain do
        active_cells: %{},
        attention: %{},
        wm: [],
-       wm_cfg: %{capacity: 7, decay_ms: 30_000, gate_threshold: 0.4, merge_duplicates?: true},
+       wm_cfg: @wm_defaults,
        activation_log: [],
        wm_last_ms: nil
      }}
   end
 
   # group all handle_call/3 together
+
   @impl true
   def handle_call({:configure_wm, opts}, _from, state) do
-    cap = norm_pos_int(Map.get(opts, :capacity), state.wm_cfg.capacity)
-    decay = norm_pos_int(Map.get(opts, :decay_ms), state.wm_cfg.decay_ms)
-    thr = norm_float_01(Map.get(opts, :gate_threshold), state.wm_cfg.gate_threshold)
-    md? = Map.get(opts, :merge_duplicates?, state.wm_cfg.merge_duplicates?)
+    cfg2 =
+      state.wm_cfg
+      |> Map.merge(@wm_defaults) # guarantee missing keys are filled
+      |> merge_wm_opts(opts)
 
-    cfg2 = %{capacity: cap, decay_ms: decay, gate_threshold: thr, merge_duplicates?: !!md?}
     wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
-
     {:reply, :ok, %{state | wm_cfg: cfg2, wm: wm2}}
   end
 
@@ -234,10 +259,7 @@ defmodule Brain do
     t0 = System.monotonic_time()
     now_ms = System.system_time(:millisecond)
 
-    # Build inputs for LIFG
-    candidates = LIFGInput.lifg_candidates!(si_or_cands)
-    tokens0 = Tokens.extract_tokens(si_or_cands, candidates)
-    slate = LIFGInput.slate_for(si_or_cands)
+    %{tokens: tokens0, slate: slate} = build_lifg_inputs(si_or_cands)
 
     lifg_opts =
       [scores: :all, normalize: :softmax, parallel: :auto, margin_threshold: 0.12]
@@ -250,10 +272,9 @@ defmodule Brain do
 
     {:ok, out0} = lifg_out_from_trace(si1)
 
-    # Optional: Hygiene pass to compute :probs, :p_top1, dedup alt_ids, etc.
     out0 =
       case Brain.LIFG.Hygiene.run(%{}, out0.choices, []) do
-        {:ok, %{choices: cleaned, audit: _}} -> %{out0 | choices: cleaned}
+        {:ok, %{choices: cleaned}} -> %{out0 | choices: cleaned}
         _ -> out0
       end
 
@@ -268,9 +289,7 @@ defmodule Brain do
 
     state2 =
       if Keyword.get(opts, :gate_into_wm, false) do
-        min =
-          Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
-
+        min = Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
         lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
         if lifg_cands == [] do
@@ -338,6 +357,7 @@ defmodule Brain do
   end
 
   # group all handle_cast/2 together
+
   @impl true
   def handle_cast({:set_attention, ctx}, state),
     do: {:noreply, %{state | attention: Map.new(ctx)}}
@@ -370,7 +390,8 @@ defmodule Brain do
     {:noreply, state}
   end
 
-  # ───────────────────────── Public helper: recall → WM ─────────────────────────
+  # ───────────────────────── Public helper: recall → WM ───────────────────────
+
   @doc """
   Recall from Hippocampus and gate results into WM.
 
@@ -426,9 +447,9 @@ defmodule Brain do
     gencall(@name, {:focus, cands, %{}})
   end
 
-  # ───────────────────────── WM decay & eviction (τ-model) ─────────────────────
+  # ───────────────────────── WM decay & eviction (τ-model) ────────────────────
+
   def apply_decay(%{wm: wm} = state, now_ms) when is_list(wm) and is_integer(now_ms) do
-    # FIX: treat stored nil as missing; avoid now_ms - nil crash
     last_raw = Map.get(state, :wm_last_ms, nil)
     last = if is_integer(last_raw), do: last_raw, else: now_ms
     dt = max(now_ms - last, 0)
@@ -472,8 +493,9 @@ defmodule Brain do
     |> evict_if_needed()
   end
 
-  # ───────────────────────── Centralized WM gating logic ───────────────────────
-  defp do_focus(state, cands_or_si, opts) do
+  # ───────────────────────── Centralized WM gating logic ──────────────────────
+
+  defp do_focus(state, cands_or_si, _opts) do
     now = System.system_time(:millisecond)
     cfg = state.wm_cfg
     attn = state.attention
@@ -483,26 +505,31 @@ defmodule Brain do
 
     {wm_next, added, removed} =
       Enum.reduce(cands0, {wm_d, 0, 0}, fn cand0, {wm_acc, a_cnt, r_cnt} ->
-        sal = Attention.salience(cand0, attn)
-        {decision, gate_score} = decide_gate(wm_acc, cand0, attn, cfg, Map.new(opts), sal)
+        if not acceptable_candidate?(cand0, cfg) do
+          {wm_acc, a_cnt, r_cnt}
+        else
+          sal = Attention.salience(cand0, attn)
+          gate_score = gate_score_for(cand0, sal, cfg)
+          decision = decide_gate_policy(wm_acc, cand0, gate_score, cfg)
 
-        :telemetry.execute(
-          [:brain, :gate, :decision],
-          %{score: gate_score},
-          %{decision: decision, source: Map.get(cand0, :source)}
-        )
+          :telemetry.execute(
+            [:brain, :gate, :decision],
+            %{score: gate_score},
+            %{decision: elem(decision, 0), source: Map.get(cand0, :source)}
+          )
 
-        case decision do
-          :block ->
-            {wm_acc, a_cnt, r_cnt}
+          case decision do
+            {:block, _s} ->
+              {wm_acc, a_cnt, r_cnt}
 
-          :allow ->
-            item = WorkingMemory.normalize(cand0, now, activation: gate_score)
-            {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
+            {:allow, s} ->
+              item = WorkingMemory.normalize(cand0, now, activation: s)
+              {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
 
-          :boost ->
-            item = WorkingMemory.normalize(cand0, now, activation: min(gate_score + 0.2, 1.0))
-            {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
+            {:boost, s} ->
+              item = WorkingMemory.normalize(cand0, now, activation: min(s + 0.2, 1.0))
+              {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
+          end
         end
       end)
       |> then(fn {wm_tmp, a_cnt, r_cnt} ->
@@ -513,37 +540,128 @@ defmodule Brain do
     {wm_next, added, removed}
   end
 
-  defp decide_gate(wm, cand, attn, cfg, opts, salience) do
-    if Code.ensure_loaded?(Brain.BasalGanglia) and
-         function_exported?(Brain.BasalGanglia, :decide, 4) do
-      Brain.BasalGanglia.decide(wm, cand, attn, Map.merge(cfg, opts))
+  # Compute a robust gate score from candidate + salience + policy scalers.
+  defp gate_score_for(cand, salience, cfg) do
+    base =
+      (cand[:score] || cand[:activation_snapshot] || 0.0)
+      |> Kernel.*(1.0)
+
+    # Prefer runtime-ish sources; keep weights gentle.
+    prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
+
+    # Downweight fallback phrase candidates a touch.
+    b_scaled =
+      if fallback_id?(cand[:id]) do
+        scale = cfg[:fallback_scale] || 0.70
+        base * scale
+      else
+        base
+      end
+
+    # diversity penalty against items for the same lemma with same (pos, frame)
+    div_pen = diversity_penalty(cand, cfg)
+
+    b_scaled
+    |> Kernel.+(0.5 * Numbers.clamp01(salience))
+    |> Kernel.+(prefer)
+    |> Kernel.-(div_pen)
+    |> Numbers.clamp01()
+  end
+
+  defp decide_gate_policy(wm, cand, gate_score, cfg) do
+    prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
+    thr = cfg.gate_threshold
+
+    # Per-lemma budget + hysteresis (don’t churn on tiny margins)
+    {within_budget?, beats_by?} = within_lemma_budget?(wm, cand, cfg)
+
+    cond do
+      not within_budget? and not beats_by? ->
+        {:block, gate_score}
+
+      prefer_source? and gate_score >= thr ->
+        {:boost, gate_score}
+
+      prefer_source? and gate_score >= 0.20 ->
+        {:boost, gate_score}
+
+      gate_score >= thr ->
+        {:allow, gate_score}
+
+      true ->
+        {:block, gate_score}
+    end
+  end
+
+  # ── Admission helpers (policy; no hard deletes) ─────────────────────────────
+
+  defp acceptable_candidate?(cand, cfg) do
+    id = to_string(cand[:id] || "")
+    pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
+
+    allow_unk? = Map.get(cfg, :allow_unk?, true)
+    allow_seed? = Map.get(cfg, :allow_seed?, true)
+
+    cond do
+      not allow_seed? and String.ends_with?(id, "|seed|") -> false
+      not allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
+      true -> true
+    end
+  end
+
+  defp fallback_id?(nil), do: false
+  defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
+  defp fallback_id?(_), do: false
+
+  defp diversity_penalty(cand, cfg) do
+    λ = Map.get(cfg, :diversity_lambda, 0.06) |> Numbers.clamp01()
+    pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
+    frame = to_string(get_in(cand, [:frame]) || get_in(cand, [:features, :frame]) || "")
+    if pos == "" and frame == "", do: 0.0, else: λ * 0.5
+  end
+
+  defp within_lemma_budget?(wm, cand, cfg) do
+    lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
+    budget = Map.get(cfg, :lemma_budget, 2)
+    margin = Map.get(cfg, :replace_margin, 0.10)
+
+    if lemma == "" or budget <= 0 do
+      {true, true}
     else
-      base = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
-      bias = salience |> Kernel.max(0.0) |> Kernel.min(1.0)
-      final = min(base + 0.5 * bias, 1.0)
-      prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
+      same = Enum.filter(wm, &(to_string(&1[:lemma] || "") == lemma))
 
       cond do
-        prefer_source? and base >= cfg.gate_threshold -> {:boost, final}
-        prefer_source? and final >= 0.20 -> {:boost, final}
-        final >= cfg.gate_threshold -> {:allow, final}
-        true -> {:block, final}
+        length(same) < budget ->
+          {true, true}
+
+        true ->
+          weakest = Enum.min_by(same, &Map.get(&1, :score, 0.0), fn -> nil end)
+
+          beat? =
+            if weakest do
+              (cand[:score] || 0.0) >= Map.get(weakest, :score, 0.0) + margin
+            else
+              true
+            end
+
+          {false, beat?}
       end
     end
   end
 
-  defp normalize_candidates(list) when is_list(list), do: list
+  defp guess_lemma_from_id(nil), do: nil
 
-  defp normalize_candidates(%{} = si) do
-    cond do
-      is_list(si[:active_cells]) -> si[:active_cells]
-      is_list(si[:winners]) -> si[:winners]
-      is_list(si[:tokens]) -> si[:tokens]
-      true -> []
+  defp guess_lemma_from_id(id) when is_binary(id) do
+    case String.split(id, "|", parts: 2) do
+      [w | _] -> w
+      _ -> nil
     end
   end
 
+  defp guess_lemma_from_id(_), do: nil
+
   # ───────────────────────── LIFG/ATL/PMTG/Episodes helpers ───────────────────
+
   defp lifg_out_from_trace(%{trace: [ev | _]}) do
     audit = Map.drop(ev, [:choices, :boosts, :inhibitions])
     {:ok, %{choices: ev.choices, boosts: ev.boosts, inhibitions: ev.inhibitions, audit: audit}}
@@ -678,7 +796,8 @@ defmodule Brain do
     :ok
   end
 
-  # ───────────────────────── Misc helpers ──────────────────────────────
+  # ───────────────────────── Misc helpers ─────────────────────────────────────
+
   def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
 
   defp cues_to_candidates(cues) do
@@ -746,8 +865,11 @@ defmodule Brain do
   defp norm_pos_int(_, d), do: d
   defp norm_float_01(x, _d) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
   defp norm_float_01(_, d), do: d
+  defp norm_float_01_or(x, _d) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
+  defp norm_float_01_or(_, d), do: d
 
   # Cell helpers
+
   def via(id) when is_binary(id), do: {:via, Registry, {@registry, id}}
 
   defp extract_items(list) when is_list(list), do: list
@@ -792,4 +914,50 @@ defmodule Brain do
         :ok
     end
   end
+
+  # ───────────────────────── Internal: WM cfg merge ───────────────────────────
+
+  defp merge_wm_opts(cfg, opts) when is_map(cfg) and is_map(opts) do
+    %{
+      cfg
+      | capacity: norm_pos_int(Map.get(opts, :capacity, cfg.capacity), cfg.capacity),
+        decay_ms: norm_pos_int(Map.get(opts, :decay_ms, cfg.decay_ms), cfg.decay_ms),
+        gate_threshold:
+          norm_float_01(Map.get(opts, :gate_threshold, cfg.gate_threshold), cfg.gate_threshold),
+        merge_duplicates?: Map.get(opts, :merge_duplicates?, cfg.merge_duplicates?),
+        lemma_budget:
+          norm_pos_int(Map.get(opts, :lemma_budget, cfg.lemma_budget), cfg.lemma_budget),
+        replace_margin:
+          norm_float_01_or(Map.get(opts, :replace_margin, cfg.replace_margin), cfg.replace_margin),
+        diversity_lambda:
+          norm_float_01_or(Map.get(opts, :diversity_lambda, cfg.diversity_lambda), cfg.diversity_lambda),
+        allow_unk?: Map.get(opts, :allow_unk?, cfg.allow_unk?),
+        allow_seed?: Map.get(opts, :allow_seed?, cfg.allow_seed?),
+        fallback_scale:
+          norm_float_01_or(Map.get(opts, :fallback_scale, cfg.fallback_scale), cfg.fallback_scale)
+    }
+  end
+
+  # ───────────────────────── Internal: LIFG input build ───────────────────────
+
+  defp build_lifg_inputs(si_or_candidates) do
+    candidates = LIFGInput.lifg_candidates!(si_or_candidates)
+    tokens0 = Tokens.extract_tokens(si_or_candidates, candidates)
+    slate = LIFGInput.slate_for(si_or_candidates)
+    %{tokens: tokens0, slate: slate}
+  end
+
+  # ───────────────────────── Internal: Candidate normalization ────────────────
+
+  defp normalize_candidates(list) when is_list(list), do: list
+
+  defp normalize_candidates(%{} = si) do
+    cond do
+      is_list(si[:active_cells]) -> si[:active_cells]
+      is_list(si[:winners]) -> si[:winners]
+      is_list(si[:tokens]) -> si[:tokens]
+      true -> []
+    end
+  end
 end
+

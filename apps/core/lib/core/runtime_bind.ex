@@ -3,33 +3,42 @@ defmodule Core.RuntimeBind do
   Runtime binding: match current tokens (and MWEs) to a snapshot of known cells,
   producing `si.active_cells`, with tracing and soft-fail behavior.
 
-  Merge precedence (deterministic):
+  Merge precedence (deterministic) for **same id**:
     1) Source name rank (e.g., "only" > "runtime")
     2) Numeric `:source_priority` (higher wins)
     3) `activation_snapshot` (higher wins)
     4) Stable fallback to left (for determinism)
+
+  After merging duplicates by id, Top-K ordering prefers:
+    A) Source name rank
+    B) Numeric `:source_priority`
+    C) `activation_snapshot`
+    D) Matched-token coverage (more is better)
+    E) Stable tie (id hash) to keep results reproducible
   """
 
   alias Core.SemanticInput
 
+  @type snapshot_fun_1 :: (binary() -> list())
+  @type snapshot_fun_2 :: (binary(), keyword() -> list())
   @type snapshot_t ::
           map()
-          | (binary() -> list())
-          | (binary(), keyword() -> list())
+          | snapshot_fun_1
+          | snapshot_fun_2
           | {any(), list()}
 
   # -------- Configuration (ranks) ------------------------------------
 
   @source_name_rank %{
-    "only" => 100,
-    "gold" => 90,
-    "user" => 85,
-    "curated" => 80,
-    "runtime" => 50,
-    "mwe" => 45,
-    "repo" => 40,
+    "only"     => 100,
+    "gold"     => 90,
+    "user"     => 85,
+    "curated"  => 80,
+    "runtime"  => 50,
+    "mwe"      => 45,
+    "repo"     => 40,
     "snapshot" => 40,
-    "default" => 10
+    "default"  => 10
   }
 
   # -------- Public API -----------------------------------------------
@@ -40,17 +49,16 @@ defmodule Core.RuntimeBind do
   @spec bind(SemanticInput.t(), keyword()) :: SemanticInput.t()
   def bind(%SemanticInput{} = si, opts) do
     snapshot = Keyword.get(opts, :snapshot)
-    topk = Keyword.get(opts, :topk, 16)
+    topk     = Keyword.get(opts, :topk, 16)
 
-    # Soft-fail: if snapshot is missing, mark timeout? unless explicitly overridden
+    # Soft-fail: if snapshot missing, mark timeout? unless explicitly overridden.
     timeout? = !!Keyword.get(opts, :timeout?, is_nil(snapshot))
 
-    # downcased phrases (words + MWEs)
+    # Precompute phrases and a phrase→token-hit map once.
     phrases = phrases_from_tokens(si)
-    # phrase -> [%{tok_id: ...}]
-    hitmap = phrase_hitmap(si)
+    hitmap  = phrase_hitmap(si)
 
-    # Collect new matches (count used for trace), but merge with existing cells before dedup.
+    # Collect matches (count used for trace), track brain_state_ref if present.
     {matches, count, brain_ref} =
       case snapshot do
         nil ->
@@ -69,10 +77,11 @@ defmodule Core.RuntimeBind do
           {m, length(m), Map.get(si, :brain_state_ref)}
       end
 
-    # >>> IMPORTANT: merge existing active cells with new matches (existing first for stable left-bias)
-    existing = List.wrap(si.active_cells || [])
-    merged_input = existing ++ matches
-    active_cells = dedup_and_cap(merged_input, topk)
+    # Merge with existing (existing first for stable left-bias),
+    # dedup by id with precedence, then rank & cap to Top-K.
+    existing      = List.wrap(si.active_cells || [])
+    merged_input  = existing ++ matches
+    active_cells  = dedup_and_cap(merged_input, topk)
 
     ev = %{
       stage: :runtime_bind,
@@ -83,12 +92,12 @@ defmodule Core.RuntimeBind do
     si2 = %SemanticInput{
       si
       | active_cells: active_cells,
-        trace: [ev | si.trace || []]
+        trace: [ev | (si.trace || [])]
     }
 
     case brain_ref do
       nil -> si2
-      _ -> Map.put(si2, :brain_state_ref, brain_ref)
+      _   -> Map.put(si2, :brain_state_ref, brain_ref)
     end
   end
 
@@ -96,12 +105,12 @@ defmodule Core.RuntimeBind do
 
   # Snapshot as function (supports arity 1 or 2)
   defp collect_matches(phrases, snapshot_fun, opts) when is_function(snapshot_fun) do
-    hm = Keyword.get(opts, :hitmap, Keyword.get(opts, :_hitmap, %{}))
+    hm = Keyword.get(opts, :hitmap, %{})
 
     cands =
       case :erlang.fun_info(snapshot_fun, :arity) do
         {:arity, 2} -> Enum.flat_map(phrases, fn p -> List.wrap(snapshot_fun.(p, opts)) end)
-        _ -> Enum.flat_map(phrases, fn p -> List.wrap(snapshot_fun.(p)) end)
+        _           -> Enum.flat_map(phrases, fn p -> List.wrap(snapshot_fun.(p)) end)
       end
 
     cands
@@ -111,7 +120,7 @@ defmodule Core.RuntimeBind do
 
   # Snapshot as map (index) OR tuple {brain_state_ref, list_of_cells}
   defp collect_matches(phrases, snapshot, opts) do
-    hm = Keyword.get(opts, :hitmap, Keyword.get(opts, :_hitmap, %{}))
+    hm  = Keyword.get(opts, :hitmap, %{})
     set = MapSet.new(phrases)
 
     case snapshot do
@@ -119,17 +128,17 @@ defmodule Core.RuntimeBind do
       %{} = snap ->
         idx =
           cond do
-            is_map(snap[:index]) -> snap[:index]
+            is_map(snap[:index])   -> snap[:index]
             is_map(snap[:phrases]) -> snap[:phrases]
-            is_map(snap[:cells]) -> snap[:cells]
-            true -> %{}
+            is_map(snap[:cells])   -> snap[:cells]
+            true                   -> %{}
           end
 
         global_list =
           cond do
             is_list(snap[:cells]) -> snap[:cells]
-            is_list(snap[:all]) -> snap[:all]
-            true -> []
+            is_list(snap[:all])   -> snap[:all]
+            true                  -> []
           end
 
         phrase_hits =
@@ -147,8 +156,8 @@ defmodule Core.RuntimeBind do
         matched_by_keys =
           valid
           |> Enum.filter(fn cell ->
-            keys = normalized_keys(cell)
-            src = cell[:source] || cell["source"]
+            keys  = normalized_keys(cell)
+            src   = cell[:source] || cell["source"]
             only? = to_string(src) |> String.downcase() == "only"
             global = keys == []
             only? or global or Enum.any?(keys, &MapSet.member?(set, &1))
@@ -205,15 +214,15 @@ defmodule Core.RuntimeBind do
   defp put_activation_snapshot(%{} = cell) do
     snap =
       cond do
-        is_number(cell[:activation_snapshot]) -> cell[:activation_snapshot] * 1.0
-        is_number(cell["activation_snapshot"]) -> cell["activation_snapshot"] * 1.0
-        is_number(cell[:activation]) -> cell[:activation] * 1.0
-        is_number(cell["activation"]) -> cell["activation"] * 1.0
-        is_number(cell[:modulated_activation]) -> cell[:modulated_activation] * 1.0
-        is_number(cell["modulated_activation"]) -> cell["modulated_activation"] * 1.0
-        is_number(cell[:score]) -> cell[:score] * 1.0
-        is_number(cell["score"]) -> cell["score"] * 1.0
-        true -> nil
+        is_number(cell[:activation_snapshot])        -> cell[:activation_snapshot] * 1.0
+        is_number(cell["activation_snapshot"])       -> cell["activation_snapshot"] * 1.0
+        is_number(cell[:activation])                 -> cell[:activation] * 1.0
+        is_number(cell["activation"])                -> cell["activation"] * 1.0
+        is_number(cell[:modulated_activation])       -> cell[:modulated_activation] * 1.0
+        is_number(cell["modulated_activation"])      -> cell["modulated_activation"] * 1.0
+        is_number(cell[:score])                      -> cell[:score] * 1.0
+        is_number(cell["score"])                     -> cell["score"] * 1.0
+        true                                         -> nil
       end
 
     if is_number(snap), do: Map.put(cell, :activation_snapshot, snap), else: cell
@@ -226,6 +235,7 @@ defmodule Core.RuntimeBind do
 
   # -------- Phrase extraction (tokens + MWEs) -------------------------
 
+  @spec phrases_from_tokens(SemanticInput.t()) :: [binary()]
   defp phrases_from_tokens(%SemanticInput{tokens: tokens}) do
     tokens = List.wrap(tokens)
 
@@ -242,9 +252,11 @@ defmodule Core.RuntimeBind do
       |> Enum.filter(&is_binary/1)
       |> Enum.map(&downcased/1)
 
+    # Small, stable set
     Enum.uniq(word_phrases ++ mwe_phrases)
   end
 
+  @spec phrase_hitmap(SemanticInput.t()) :: %{binary() => [%{tok_id: integer()}]}
   defp phrase_hitmap(%SemanticInput{tokens: tokens}) do
     tokens = List.wrap(tokens)
 
@@ -252,10 +264,8 @@ defmodule Core.RuntimeBind do
       # word token
       acc =
         case token_phrase(t) do
-          nil ->
-            acc
-
-          p ->
+          nil -> acc
+          p   ->
             Map.update(acc, downcased(p), [%{tok_id: token_id(t, idx)}], fn lst ->
               lst ++ [%{tok_id: token_id(t, idx)}]
             end)
@@ -265,9 +275,7 @@ defmodule Core.RuntimeBind do
       acc =
         if is_mwe_head?(t) do
           case mwe_phrase_and_ids(t, tokens, idx) do
-            {nil, _ids} ->
-              acc
-
+            {nil, _ids} -> acc
             {phrase, ids} ->
               Map.update(acc, downcased(phrase), Enum.map(ids, &%{tok_id: &1}), fn lst ->
                 Enum.uniq_by(lst ++ Enum.map(ids, &%{tok_id: &1}), & &1.tok_id)
@@ -392,29 +400,51 @@ defmodule Core.RuntimeBind do
 
   # -------- Dedup + TopK ---------------------------------------------
 
-  defp dedup_and_cap(cells, topk) do
+  @spec dedup_and_cap([map()], pos_integer()) :: [map()]
+  defp dedup_and_cap(cells, topk) when is_list(cells) and is_integer(topk) and topk >= 0 do
     cells
     |> Enum.reduce(%{}, fn cell, acc ->
-      id = cell.id
+      id =
+        case cell do
+          %{id: id} -> id
+          %{"id" => id} -> id
+          _ -> nil
+        end
 
-      case acc do
-        %{^id => existing} -> Map.put(acc, id, merge_cell(existing, cell))
-        _ -> Map.put(acc, id, cell)
+      if is_nil(id) do
+        acc
+      else
+        case acc do
+          %{^id => existing} -> Map.put(acc, id, merge_cell(existing, cell))
+          _                   -> Map.put(acc, id, cell)
+        end
       end
     end)
     |> Map.values()
-    |> Enum.sort_by(&sort_key/1, :desc)
+    |> Enum.sort_by(&sort_tuple/1, :desc)
     |> Enum.take(topk)
   end
 
-  # Prefer :activation for ranking, then :score, then hash(id)
-  defp sort_key(%{activation: a}) when is_number(a), do: a
-  defp sort_key(%{"activation" => a}) when is_number(a), do: a
-  defp sort_key(%{score: s}) when is_number(s), do: s
-  defp sort_key(%{"score" => s}) when is_number(s), do: s
-  defp sort_key(%{id: id}) when is_integer(id), do: id * 1.0
-  defp sort_key(%{id: id}) when is_binary(id), do: :erlang.phash2(id) * 1.0
-  defp sort_key(_), do: 0.0
+  # Top-K ranking tuple (see module doc, section "After merging"):
+  # { source_name_rank, source_priority, activation_snapshot, matched_count, id_hash }
+  defp sort_tuple(cell) do
+    {
+      source_name_rank(cell),
+      source_numeric_priority(cell),
+      snapshot_of(cell) || 0.0,
+      matched_count(cell),
+      id_hash(cell)
+    }
+  end
+
+  defp matched_count(%{matched_tokens: lst}) when is_list(lst), do: length(lst)
+  defp matched_count(%{"matched_tokens" => lst}) when is_list(lst), do: length(lst)
+  defp matched_count(_), do: 0
+
+  defp id_hash(%{id: id}) when is_integer(id), do: id * 1.0
+  defp id_hash(%{id: id}) when is_binary(id),  do: :erlang.phash2(id) * 1.0
+  defp id_hash(%{"id" => id}) when is_binary(id), do: :erlang.phash2(id) * 1.0
+  defp id_hash(_), do: 0.0
 
   # -------- Merge precedence (refactored) -----------------------------
 
@@ -425,18 +455,10 @@ defmodule Core.RuntimeBind do
 
     preferred =
       cond do
-        nb > na ->
-          b
-
-        na > nb ->
-          a
-
-        pb > pa ->
-          b
-
-        pa > pb ->
-          a
-
+        nb > na -> b
+        na > nb -> a
+        pb > pa -> b
+        pa > pb -> a
         true ->
           sa = snapshot_of(a) || -1.0
           sb = snapshot_of(b) || -1.0
@@ -444,10 +466,14 @@ defmodule Core.RuntimeBind do
       end
 
     fallback = if preferred === a, do: b, else: a
-    merged = Map.merge(fallback, preferred, fn _k, _v1, v2 -> v2 end)
+    merged   = Map.merge(fallback, preferred, fn _k, _v1, v2 -> v2 end)
 
     snap = snapshot_of(preferred) || snapshot_of(fallback)
-    if is_number(snap), do: Map.put(merged, :activation_snapshot, snap), else: merged
+    if is_number(snap) do
+      Map.put(merged, :activation_snapshot, snap)
+    else
+      merged
+    end
   end
 
   # Rank tuple = {name_rank, numeric_priority}
@@ -457,8 +483,8 @@ defmodule Core.RuntimeBind do
   defp source_numeric_priority(%{"source_priority" => p}) when is_number(p), do: p * 1.0
   defp source_numeric_priority(_), do: 0.0
 
-  defp source_name_rank(%{source: s}), do: source_name_rank(s)
-  defp source_name_rank(%{"source" => s}), do: source_name_rank(s)
+  defp source_name_rank(%{source: s}),      do: source_name_rank(s)
+  defp source_name_rank(%{"source" => s}),  do: source_name_rank(s)
 
   defp source_name_rank(s) when is_atom(s),
     do: source_name_rank(Atom.to_string(s))
@@ -469,14 +495,14 @@ defmodule Core.RuntimeBind do
   # Snapshots used as a tertiary tie-breaker
   defp snapshot_of(cell) do
     cond do
-      is_number(cell[:activation_snapshot]) -> cell[:activation_snapshot] * 1.0
-      is_number(cell["activation_snapshot"]) -> cell["activation_snapshot"] * 1.0
-      is_number(cell[:activation]) -> cell[:activation] * 1.0
-      is_number(cell["activation"]) -> cell["activation"] * 1.0
-      is_number(cell[:modulated_activation]) -> cell[:modulated_activation] * 1.0
+      is_number(cell[:activation_snapshot])   -> cell[:activation_snapshot] * 1.0
+      is_number(cell["activation_snapshot"])  -> cell["activation_snapshot"] * 1.0
+      is_number(cell[:activation])            -> cell[:activation] * 1.0
+      is_number(cell["activation"])           -> cell["activation"] * 1.0
+      is_number(cell[:modulated_activation])  -> cell[:modulated_activation] * 1.0
       is_number(cell["modulated_activation"]) -> cell["modulated_activation"] * 1.0
-      is_number(cell[:score]) -> cell[:score] * 1.0
-      is_number(cell["score"]) -> cell[:score] * 1.0
+      is_number(cell[:score])                 -> cell[:score] * 1.0
+      is_number(cell["score"])                -> cell[:score] * 1.0
       true -> nil
     end
   end
@@ -484,5 +510,6 @@ defmodule Core.RuntimeBind do
   # -------- Small utils ----------------------------------------------
 
   defp downcased(nil), do: ""
-  defp downcased(v), do: v |> to_string() |> String.downcase()
+  defp downcased(v),  do: v |> to_string() |> String.downcase()
 end
+

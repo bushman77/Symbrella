@@ -6,6 +6,8 @@ defmodule Brain.LIFG.Stage1 do
   • HARD REJECT: char-grams → emits [:brain,:lifg,:chargram_violation] and drops.
   • BOUNDARY GUARD: non word-boundary substrings dropped unless `mw: true`,
     emits [:brain,:lifg,:boundary_drop].
+  • PUNCT SKIP: punctuation tokens (`kind: :punct` or `pos: "punct"`) are ignored for sense
+    competition (no boundary or char-gram checks, no warnings).
   • Deterministic tie-breaks, safe spans, and clause-aware "what" nudges.
   • Optional MWE fallback injection, emits [:brain,:pmtg,:mwe_fallback_emitted].
 
@@ -32,13 +34,15 @@ defmodule Brain.LIFG.Stage1 do
             optional(:scores) => map()
           }
 
+  # ─────────────────────────────────────────────────────────────────────────────
+
   @spec run(si(), keyword()) ::
           {:ok, %{si: si(), choices: [choice()], audit: map()}} | {:error, term()}
   def run(si, opts \\ []) when is_map(si) and is_list(opts) do
     try do
       t0 = System.monotonic_time()
 
-      # NEW (feature-flagged): inject fallback MWE candidates if needed
+      # Optionally inject conservative MWE candidates
       si1 = ensure_mwe_candidates(si, opts)
 
       tokens = Map.get(si1, :tokens, [])
@@ -71,15 +75,12 @@ defmodule Brain.LIFG.Stage1 do
         end)
         |> Enum.reject(&is_nil/1)
 
-      timing_ms =
-        System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-
       audit = %{
         stage: :lifg_stage1,
         token_count: length(tokens),
         kept_tokens: length(kept_tokens),
         dropped_tokens: length(dropped),
-        timing_ms: timing_ms
+        timing_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
       }
 
       {:ok, %{si: si1, choices: choices, audit: audit}}
@@ -103,6 +104,10 @@ defmodule Brain.LIFG.Stage1 do
 
     Enum.reduce(tokens, {[], []}, fn tok, {kept, dropped} ->
       cond do
+        # punctuation tokens are ignored for sense competition (quietly dropped)
+        is_punct_token?(tok) ->
+          {kept, [tok | dropped]}
+
         is_chargram?(tok, si) ->
           emit(char_ev, %{}, %{
             token_index: Map.get(tok, :index),
@@ -130,6 +135,13 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp guard_tokens(_tokens, _si, _opts), do: {[], []}
+
+  # Treat as punctuation if explicitly marked or pos=='punct'
+  defp is_punct_token?(tok) do
+    kind = Map.get(tok, :kind) || Map.get(tok, "kind")
+    pos = Map.get(tok, :pos) || Map.get(tok, "pos")
+    kind in [:punct, "punct"] or pos in [:punct, "punct"]
+  end
 
   # explicit flags OR (short, unigram, misaligned fragment) ⇒ char-gram
   defp is_chargram?(tok, si) when is_map(tok) and is_map(si) do
@@ -186,7 +198,6 @@ defmodule Brain.LIFG.Stage1 do
   defp tok_span(%{start: s, length: len}) when is_integer(s) and is_integer(len), do: {s, s + len}
 
   defp tok_span(%{index: i} = tok) when is_integer(i) do
-    # conservative guess: use token length if we can, else 1 char
     phrase_len =
       (Map.get(tok, :phrase) || Map.get(tok, :word) || Map.get(tok, :lemma) || "")
       |> to_string()
@@ -224,9 +235,7 @@ defmodule Brain.LIFG.Stage1 do
       |> Enum.reject(&(is_nil(&1.id) or not is_binary(&1.id)))
       |> Enum.uniq_by(& &1.id)
       |> prefer_salutation_interjection(tok)
-      # covers I / I'm / im
       |> prefer_pronoun_for_I(tok)
-      # prefer interrogative "what" in clause frames
       |> prefer_interrogative_what(tok, si)
       |> compat_filter_for_token(tok)
 
@@ -237,7 +246,7 @@ defmodule Brain.LIFG.Stage1 do
         lex = as_float(f[:lex_fit])
         rel = as_float(f[:rel_prior])
         act = as_float(f[:activation])
-        ib  = as_float(f[:intent_bias])
+        ib = as_float(f[:intent_bias])
 
         # base + micro nudges
         bias = context_bias(c, tok, si) + dialect_penalty(c, si)
@@ -438,7 +447,7 @@ defmodule Brain.LIFG.Stage1 do
   defp next_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(0)
   defp next2_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(1)
 
-  # Returns {nx1, nx2} of the next two non-chargram phrases ("" if missing)
+  # Returns {nx1, nx2} of the next two non-chargram, non-punct phrases ("" if missing)
   defp lookahead_phrases(tok, si) do
     tokens = Map.get(si, :tokens, [])
 
@@ -462,7 +471,7 @@ defmodule Brain.LIFG.Stage1 do
       |> Enum.filter(fn t ->
         kind = Map.get(t, :kind) || Map.get(t, "kind")
         src = Map.get(t, :source)
-        not (kind in [:chargram, "chargram"] or src in [:chargram, "chargram"])
+        not (kind in [:chargram, "chargram", :punct, "punct"] or src in [:chargram, "chargram"])
       end)
       |> Enum.flat_map(fn t ->
         v =
@@ -837,68 +846,68 @@ defmodule Brain.LIFG.Stage1 do
         Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
       )
 
-    if not enable? do
-      si
-    else
-      sc0 = Map.get(si, :sense_candidates, %{})
-
-      {sc, emitted} =
-        Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
-          token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
-          phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
-          mw? = Map.get(tok, :mw, token_n > 1)
-
-          cond do
-            not mw? or is_nil(phrase) ->
-              {acc, n}
-
-            has_compatible_mwe?(acc, idx) ->
-              {acc, n}
-
-            true ->
-              score_guess =
-                [idx - 1, idx + 1]
-                |> Enum.filter(&(&1 >= 0))
-                |> Enum.map(fn j ->
-                  acc
-                  |> Map.get(j, [])
-                  |> Enum.map(&Map.get(&1, :score, 0.0))
-                  |> Enum.max(fn -> 0.0 end)
-                end)
-                |> case do
-                  [] -> 0.25
-                  xs -> Enum.sum(xs) / max(length(xs), 1)
-                end
-                |> min(0.45)
-
-              candidate = %{
-                id: "#{phrase}|phrase|fallback",
-                lemma: phrase,
-                norm: phrase,
-                mw: true,
-                pos: :phrase,
-                rel_prior: 0.30,
-                score: Float.round(score_guess, 4),
-                source: :mwe_fallback
-              }
-
-              updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
-
-              emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
-                token_index: idx,
-                phrase: phrase,
-                score: candidate.score
-              })
-
-              {updated, n + 1}
-          end
-        end)
-
-      if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
-    end
+    if not enable?, do: si, else: do_mwe_injection(si)
   end
 
   defp ensure_mwe_candidates(si, _opts), do: si
+
+  defp do_mwe_injection(%{tokens: tokens} = si) do
+    sc0 = Map.get(si, :sense_candidates, %{})
+
+    {sc, emitted} =
+      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+        token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
+        phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
+        mw? = Map.get(tok, :mw, token_n > 1)
+
+        cond do
+          not mw? or is_nil(phrase) ->
+            {acc, n}
+
+          has_compatible_mwe?(acc, idx) ->
+            {acc, n}
+
+          true ->
+            score_guess =
+              [idx - 1, idx + 1]
+              |> Enum.filter(&(&1 >= 0))
+              |> Enum.map(fn j ->
+                acc
+                |> Map.get(j, [])
+                |> Enum.map(&Map.get(&1, :score, 0.0))
+                |> Enum.max(fn -> 0.0 end)
+              end)
+              |> case do
+                [] -> 0.25
+                xs -> Enum.sum(xs) / max(length(xs), 1)
+              end
+              |> min(0.45)
+
+            candidate = %{
+              id: "#{phrase}|phrase|fallback",
+              lemma: phrase,
+              norm: phrase,
+              mw: true,
+              pos: :phrase,
+              rel_prior: 0.30,
+              score: Float.round(score_guess, 4),
+              source: :mwe_fallback
+            }
+
+            updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
+
+            emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
+              token_index: idx,
+              phrase: phrase,
+              score: candidate.score
+            })
+
+            {updated, n + 1}
+        end
+      end)
+
+    if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
+  end
 
   defp has_compatible_mwe?(sc, idx) do
     sc
