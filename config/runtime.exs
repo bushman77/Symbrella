@@ -122,3 +122,11 @@ if config_env() == :prod do
   config :swoosh, :api_client, Swoosh.ApiClient.Req
   config :swoosh, local: false
 end
+
+config :llm, Llm,
+  auto_start_on_boot?: true,   # keep daemon up
+  pull_on_boot?: true,         # optional: prefetch model
+  warm_on_boot?: false,        # <- critical: DO NOT warm on boot
+  warm_on_restart?: false,
+  pull_on_restart?: false
+

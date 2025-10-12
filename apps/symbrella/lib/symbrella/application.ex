@@ -8,11 +8,24 @@ defmodule Symbrella.Application do
     neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
     File.mkdir_p!(Path.dirname(neg_path))
 
+    # LLM boot options (env-driven where available)
+    llm_opts =
+      [
+        base_url: System.get_env("OLLAMA_API_BASE"),
+        model: System.get_env("OLLAMA_MODEL"),
+        timeout: 60_000,
+        auto_start_on_boot?: true,
+        pull_on_boot?: true,
+        warm_on_boot?: true,
+        boot_timeout: 60_000
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
     children = [
       # ── DB (start first) ──────────────────────────────────────────────
       Db,
 
-      # ── Brain infra (order matters) ───────────────────────────────────
+      # ── Foundations / infra (order matters) ───────────────────────────
       {Registry, keys: :unique, name: Brain.Registry},
       {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
 
@@ -20,6 +33,9 @@ defmodule Symbrella.Application do
       {Task.Supervisor, name: Symbrella.TaskSup},
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
+
+      # ── LLM service (start before Brain servers so it's warm) ─────────
+      {Llm, llm_opts},
 
       # ── Brain servers ─────────────────────────────────────────────────
       Brain,
@@ -39,3 +55,4 @@ defmodule Symbrella.Application do
     Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
   end
 end
+
