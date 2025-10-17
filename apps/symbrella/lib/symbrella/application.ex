@@ -1,3 +1,4 @@
+# lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
   use Application
@@ -34,8 +35,12 @@ defmodule Symbrella.Application do
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # ── LLM service (start before Brain servers so it's warm) ─────────
+      # ── LLM service (warm before Curiosity/Brain) ─────────────────────
       {Llm, llm_opts},
+
+      # ── Autonomous workers (first-class, decoupled) ───────────────────
+      Curiosity,        # standalone, emits [:curiosity, :proposal]
+      Core.Curiosity,   # Core sweeper that re-probes NegCache
 
       # ── Brain servers ─────────────────────────────────────────────────
       Brain,
@@ -45,18 +50,25 @@ defmodule Symbrella.Application do
       {Brain.Hippocampus, keep: 300},
       Brain.Thalamus,
       Brain.OFC,
-{Brain.DLPFC, act_on_thalamus: true},
+      {Brain.DLPFC, act_on_thalamus: true},
       # Brain.AG,
       # Brain.MTL,
-      {Brain.ACC, keep: 300}, 
-      Curiosity
+      {Brain.ACC, keep: 300}
+      # Curiosity is already started above (standalone)
       # Brain.BasalGanglia
     ]
 
-    # Attach telemetry handlers
-    Brain.Telemetry.attach!()
+    # Start the supervision tree
+    {:ok, sup} = Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
+    # Attach telemetry handlers AFTER the tree is live
+    Brain.Telemetry.attach!()
+    # Bridge Curiosity proposals → Core.Curiosity sweeps (no UI coupling)
+    Core.Curiosity.Bridge.attach()
+    # Optionally: feed more misses automatically (LLM/brain → NegCache)
+    # Core.Curiosity.Events.attach()
+
+    {:ok, sup}
   end
 end
 

@@ -104,5 +104,11 @@ config :brain,
   wm_score_min: 0.0,
   wm_score_max: 1.0
 
+# config/config.exs
+config :core, Core.Curiosity.Bridge,
+  threshold: 0.60,
+  min_gap_ms: 30_000
+
+
 # Env-specific at the very end
 import_config "#{config_env()}.exs"

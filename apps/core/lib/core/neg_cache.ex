@@ -9,9 +9,11 @@ defmodule Core.NegCache do
   • TTL: seconds (default 6h). Expired entries are removed on read or purge.
 
   Public API:
-    - exists?(phrase) :: boolean
-    - put(phrase)     :: :ok
-    - purge()         :: non_neg_integer
+    - exists?(phrase)             :: boolean
+    - put(phrase)                 :: :ok
+    - purge()                     :: non_neg_integer
+    - pop_expired_batch(limit \\ 32) :: [binary()]   # NEW: for Curiosity
+    - stats()                     :: map()           # NEW: quick snapshot
   """
 
   use GenServer
@@ -42,9 +44,21 @@ defmodule Core.NegCache do
   def put(phrase),
     do: GenServer.cast(__MODULE__, {:put, phrase})
 
-  @doc "Sweep expired entries now; returns number removed."
+  @doc "Sweep expired entries now (ETS cache only); returns number removed."
   def purge,
     do: GenServer.call(__MODULE__, :purge)
+
+  @doc """
+  NEW: Pop up to `limit` expired phrases (exp <= now) *and remove them* from DETS and ETS.
+  Returns a list of normalized phrases. Intended for Curiosity re-probe cycles.
+  """
+  @spec pop_expired_batch(pos_integer()) :: [binary()]
+  def pop_expired_batch(limit \\ 32) when is_integer(limit) and limit > 0,
+    do: GenServer.call(__MODULE__, {:pop_expired_batch, limit})
+
+  @doc "NEW: Return a small stats snapshot."
+  @spec stats() :: %{dets_size: non_neg_integer(), ets_size: non_neg_integer(), ttl_ms: non_neg_integer()}
+  def stats, do: GenServer.call(__MODULE__, :stats)
 
   # ——— GenServer ———
 
@@ -131,6 +145,38 @@ defmodule Core.NegCache do
   end
 
   @impl true
+  def handle_call({:pop_expired_batch, limit}, _from, %{dets: dets, ets: ets} = state) do
+    now = now_ms()
+
+    # Match-spec: select {key, exp} where exp =< now, return key
+    ms = [{{:"$1", :"$2"}, [{:"=<", :"$2", now}], [:"$1"]}]
+
+    expired_keys =
+      case :dets.select(dets, ms, limit) do
+        {keys, _cont} when is_list(keys) -> keys
+        :'$end_of_table' -> []
+      end
+
+    # Remove from both stores so callers won't see them again unless reinserted.
+    Enum.each(expired_keys, fn k ->
+      :ets.delete(ets, k)
+      :dets.delete(dets, k)
+    end)
+
+    {:reply, expired_keys, state}
+  end
+
+  @impl true
+  def handle_call(:stats, _from, %{dets: dets, ets: ets, ttl_ms: ttl} = state) do
+    {:reply,
+     %{
+       dets_size: :dets.info(dets, :size),
+       ets_size: :ets.info(ets, :size),
+       ttl_ms: ttl
+     }, state}
+  end
+
+  @impl true
   def handle_cast({:put, phrase}, state) do
     norm = normalize(phrase)
     exp = now_ms() + state.ttl_ms
@@ -165,3 +211,4 @@ defmodule Core.NegCache do
 
   defp now_ms, do: System.system_time(:millisecond)
 end
+
