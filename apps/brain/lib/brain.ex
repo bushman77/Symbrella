@@ -64,6 +64,7 @@ defmodule Brain do
   require Logger
 
   alias Db.BrainCell, as: Row
+  alias Brain.ACC
   alias Brain.Attention
   alias Brain.Episodes.Writer, as: EpWriter
   alias Brain.LIFG
@@ -78,6 +79,10 @@ defmodule Brain do
   @registry Brain.Registry
   @cell_sup Brain.CellSup
   @cell_timeout 2_000
+
+  # Telemetry constants
+  @wm_update_event [:brain, :wm, :update]
+  @pipeline_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
 
   @wm_defaults %{
     capacity: 7,
@@ -226,12 +231,7 @@ defmodule Brain do
   @impl true
   def handle_call({:focus, cands_or_si, opts}, _from, state) do
     {wm_next, added, removed} = do_focus(state, cands_or_si, Map.new(opts))
-
-    :telemetry.execute(
-      [:brain, :wm, :update],
-      %{size: length(wm_next), added: added, removed: removed, capacity: state.wm_cfg.capacity},
-      %{}
-    )
+    emit_wm_update(state.wm_cfg.capacity, length(wm_next), added, removed)
 
     {:reply, wm_next, %{state | wm: wm_next}}
   end
@@ -239,13 +239,7 @@ defmodule Brain do
   @impl true
   def handle_call({:defocus, id_or_fun}, _from, state) do
     {wm2, removed} = WorkingMemory.remove(state.wm, id_or_fun)
-
-    :telemetry.execute(
-      [:brain, :wm, :update],
-      %{size: length(wm2), added: 0, removed: removed, capacity: state.wm_cfg.capacity},
-      %{reason: :defocus}
-    )
-
+    emit_wm_update(state.wm_cfg.capacity, length(wm2), 0, removed, :defocus)
     {:reply, :ok, %{state | wm: wm2}}
   end
 
@@ -277,6 +271,9 @@ defmodule Brain do
         _ -> out0
       end
 
+    # NEW: ACC conflict assessment (no-op if ACC region isn't started)
+    _ = maybe_assess_acc(out0.choices, tokens0)
+
     _ = maybe_ingest_atl(out0.choices, tokens0)
     _ = maybe_consult_pmtg(out0.choices, tokens0)
     _ = maybe_store_episode(tokens0, si1, out0)
@@ -295,18 +292,7 @@ defmodule Brain do
           state1
         else
           {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
-
-          :telemetry.execute(
-            [:brain, :wm, :update],
-            %{
-              size: length(wm_next),
-              added: added,
-              removed: removed,
-              capacity: state1.wm_cfg.capacity
-            },
-            %{reason: :gate_from_lifg}
-          )
-
+          emit_wm_update(state1.wm_cfg.capacity, length(wm_next), added, removed, :gate_from_lifg)
           %{state1 | wm: wm_next}
         end
       else
@@ -315,11 +301,9 @@ defmodule Brain do
 
     state3 = evict_if_needed(state2)
 
-    ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-
     :telemetry.execute(
-      [:brain, :pipeline, :lifg_stage1, :stop],
-      %{duration_ms: ms},
+      @pipeline_stop_event,
+      %{duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)},
       %{
         winners: length(out0.choices),
         boosts: length(out0.boosts),
@@ -807,6 +791,12 @@ defmodule Brain do
 
   # ───────────────────────── Misc helpers ─────────────────────────────────────
 
+  # Small de-dup helper for WM telemetry
+  defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
+    meta = if reason, do: %{reason: reason}, else: %{}
+    :telemetry.execute(@wm_update_event, %{size: size, added: added, removed: removed, capacity: capacity}, meta)
+  end
+
   def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
 
   defp cues_to_candidates(cues) do
@@ -823,21 +813,11 @@ defmodule Brain do
       cond do
         is_map(w) and (w[:id] || w["id"]) ->
           id = w[:id] || w["id"]
-
-          %{
-            token_index: w[:token_index] || w["token_index"] || 0,
-            id: to_string(id),
-            score: w[:score] || w["score"] || 1.0
-          }
+          %{token_index: w[:token_index] || w["token_index"] || 0, id: to_string(id), score: w[:score] || w["score"] || 1.0}
 
         is_map(w) and (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) ->
           lemma = (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) |> to_string()
-
-          %{
-            token_index: w[:token_index] || w["token_index"] || 0,
-            lemma: lemma,
-            score: w[:score] || w["score"] || 1.0
-          }
+          %{token_index: w[:token_index] || w["token_index"] || 0, lemma: lemma, score: w[:score] || w["score"] || 1.0}
 
         is_binary(w) and String.contains?(w, "|") ->
           %{token_index: 0, id: w, score: 1.0}
@@ -861,7 +841,6 @@ defmodule Brain do
   defp first_lemma_from_slate(_), do: "ltm"
 
   defp parse_id_word(nil), do: nil
-
   defp parse_id_word(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
@@ -885,9 +864,7 @@ defmodule Brain do
 
   defp extract_items(%{} = si) do
     case Map.get(si, :active_cells, []) do
-      list when is_list(list) ->
-        list
-
+      list when is_list(list) -> list
       other ->
         Logger.warning("Brain.extract_items: :active_cells not a list (got #{inspect(other)})")
         []
@@ -927,7 +904,6 @@ defmodule Brain do
         :ok
 
       is_binary(id) ->
-        # Fallback: try to treat it as an id-based cell
         ensure_start_and_cast(id, payload)
         :ok
 
@@ -994,6 +970,18 @@ defmodule Brain do
       is_list(si[:winners]) -> si[:winners]
       is_list(si[:tokens]) -> si[:tokens]
       true -> []
+    end
+  end
+
+  # ───────────────────────── ACC hook ─────────────────────────────────────────
+
+  defp maybe_assess_acc(choices, tokens) when is_list(choices) do
+    case Process.whereis(Brain.ACC) do
+      nil -> :noop
+      _pid ->
+        si = %{tokens: tokens, trace: []}
+        _ = ACC.assess(si, choices)
+        :ok
     end
   end
 end

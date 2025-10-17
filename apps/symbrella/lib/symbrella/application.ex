@@ -43,9 +43,13 @@ defmodule Symbrella.Application do
       Brain.PMTG,
       {Brain.ATL, keep: 300},
       {Brain.Hippocampus, keep: 300},
+      Brain.Thalamus,
+      Brain.OFC,
+{Brain.DLPFC, act_on_thalamus: true},
       # Brain.AG,
       # Brain.MTL,
-      {Brain.ACC, keep: 300}
+      {Brain.ACC, keep: 300}, 
+      Curiosity
       # Brain.BasalGanglia
     ]
 
