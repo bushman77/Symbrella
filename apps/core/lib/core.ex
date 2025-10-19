@@ -2,18 +2,18 @@ defmodule Core do
   @moduledoc """
   Pipeline:
   Tokenize → Rebuild word n-grams → STM → LTM (DB read/enrich)
-  → Lexicon Stage (fetch + upsert + refetch)
   → LIFG Stage-1 → Notify Brain.
 
   Notes:
   • resolve_input/2 defaults to :prod mode and runs the full pipeline.
-  • LTM seeding only creates unigram “seed” rows when norms are missing.
-  • Lexicon stage runs once per turn: Stage.run → DB refetch → merge into :active_cells.
+  • LTM no longer seeds or refetches via Lexicon — DB is the source of truth.
+  • Any legacy `type: "seed"` rows are ignored when selecting candidates.
+  • LIFG tie-breaks: uses a tiny POS prior only for razor-thin margins.
+  • MWE shadowing: winning multi-word tokens suppress overlapping unigram winners.
   • All Brain interactions are guarded so tests without the Brain process still pass.
   """
 
   alias Brain
-  alias Core.Lexicon
   alias Core.SemanticInput
   alias Db
   alias Db.BrainCell
@@ -39,8 +39,7 @@ defmodule Core do
         si0
         |> Brain.stm()
         |> keep_only_word_boundary_tokens()
-        |> ltm_stage(opts)          # DB read + optional unigram seeding + refetch
-        |> Lexicon.all(opts)        # Stage.run + DB refetch + merge
+        |> ltm_stage(opts)          # DB read-only + merge
         |> keep_only_word_boundary_tokens()
         |> run_lifg_and_attach(opts)
         |> maybe_ingest_atl(opts)
@@ -56,6 +55,15 @@ defmodule Core do
 
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> hd()
+
+  # Extract POS from an id (e.g., "hello|noun|0" -> "noun")
+  defp id_pos(nil), do: nil
+  defp id_pos(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [_, p | _] -> p
+      _ -> nil
+    end
+  end
 
   defp notify_brain_activation(si, opts) do
     payload = %{
@@ -89,7 +97,7 @@ defmodule Core do
           si.active_cells
           |> Enum.filter(fn s -> (Map.get(s, :norm) || Map.get(s, "norm")) == nrm end)
           |> Enum.filter(&compatible_cell_for_token?(tn, &1))
-          |> drop_seeds_if_lexicon_present()
+          |> drop_seed_rows()
 
         if senses == [], do: acc, else: Map.put(acc, Map.get(t, :index), senses)
       end)
@@ -113,41 +121,73 @@ defmodule Core do
 
         lifg_choices =
           Enum.map(out.choices, fn ch ->
-            token_norm = norm(Map.get(ch, :lemma) || "")
+            token_index = Map.get(ch, :token_index, 0)
+
+            # (1) Lemma from the token's phrase (normalized)
+            token_norm =
+              si.tokens
+              |> Enum.at(token_index, %{})
+              |> Map.get(:phrase, "")
+              |> norm()
+
             chosen_id  = Map.get(ch, :chosen_id)
             scores     = Map.get(ch, :scores) || %{}
             feats      = Map.get(ch, :features) || %{}
             alt_ids    = Map.get(ch, :alt_ids, [])
+            margin     = Map.get(ch, :margin, 0.0)
 
             base_score =
               if is_binary(chosen_id) and is_map(scores),
                 do: Map.get(scores, chosen_id, 0.0),
                 else: Map.get(feats, :score_norm, 0.0)
 
-            candidates = [chosen_id | alt_ids]
+            candidates =
+              [chosen_id | alt_ids]
+              |> Enum.uniq()
+              |> Enum.reject(&is_nil/1)
 
+            # Favor ids whose id-norm matches the token norm
             matching =
               candidates
               |> Enum.filter(&(id_norm(&1) == token_norm))
 
-            {chosen_id2, score2} =
-              case matching do
-                [] ->
-                  {chosen_id, base_score}
+            # (2) Tiny POS prior only for razor-thin margins (stability)
+            pos_prior = %{"noun" => 0.02, "verb" => 0.0, "adjective" => 0.0}
+            epsilon   = 0.001
 
-                matches ->
-                  Enum.max_by(matches, fn id -> Map.get(scores, id, -1.0) end, fn -> chosen_id end)
-                  |> then(fn best -> {best, Map.get(scores, best, base_score)} end)
+            pick_with_prior = fn ids ->
+              Enum.max_by(ids, fn id ->
+                (Map.get(scores, id, base_score)) + Map.get(pos_prior, id_pos(id), 0.0)
+              end, fn -> chosen_id end)
+            end
+
+            {chosen_id2, score2} =
+              cond do
+                matching != [] and margin < epsilon ->
+                  best = pick_with_prior.(matching)
+                  {best, Map.get(scores, best, base_score)}
+
+                matching != [] ->
+                  best = Enum.max_by(matching, &Map.get(scores, &1, -1.0), fn -> chosen_id end)
+                  {best, Map.get(scores, best, base_score)}
+
+                margin < epsilon ->
+                  best = pick_with_prior.(candidates)
+                  {best, Map.get(scores, best, base_score)}
+
+                true ->
+                  {chosen_id, base_score}
               end
 
             %{
-              token_index: Map.get(ch, :token_index),
+              token_index: token_index,
               lemma: token_norm,
               id: chosen_id2,
               alt_ids: alt_ids,
               score: score2
             }
           end)
+          |> mwe_shadow(si.tokens)   # NEW: shadow unigrams covered by a winning MWE
 
         si
         |> Map.put(:lifg_choices, lifg_choices)
@@ -194,16 +234,9 @@ defmodule Core do
     (token_n > 1 and has_space) or (token_n == 1 and not has_space)
   end
 
-  # If any real lexicon row exists, drop seed rows from the candidate set.
-  defp drop_seeds_if_lexicon_present(senses) do
-    has_lex? =
-      Enum.any?(senses, fn s ->
-        (Map.get(s, :type) || Map.get(s, "type")) == "lexicon" or
-          is_binary(Map.get(s, :definition) || Map.get(s, "definition"))
-      end)
-
-    if has_lex?, do: Enum.reject(senses, &seed?/1), else: senses
-  end
+  # Always drop legacy seed rows if any are present.
+  defp drop_seed_rows(senses),
+    do: Enum.reject(senses, &seed?/1)
 
   defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
 
@@ -220,24 +253,10 @@ defmodule Core do
 
   # ─────────────────────── LTM orchestrator ───────────────────────
 
-  # Consumes Db.ltm/2. Enriches missing *unigram* norms with seeds, immediately re-fetches,
-  # merges into :active_cells, and nudges Brain.
+  # Consumes Db.ltm/2. Merges rows into :active_cells and nudges Brain.
   defp ltm_stage(si, opts) when is_map(si) do
     case Db.ltm(si, opts) do
-      {:ok, %{rows: rows0, missing_norms: missing0, db_hits: db_hits}} ->
-        missing =
-          missing0
-          |> List.wrap()
-          |> Enum.reject(&String.contains?(&1, " "))
-
-        rows =
-          if missing != [] and Keyword.get(opts, :enrich_lexicon?, true) do
-            _ = Lexicon.ensure_cells(missing)
-            rows0 ++ safe_fetch_by_norms(missing)
-          else
-            rows0
-          end
-
+      {:ok, %{rows: rows, db_hits: db_hits}} ->
         existing =
           case Map.get(si, :active_cells, []) do
             l when is_list(l) -> l
@@ -272,19 +291,8 @@ defmodule Core do
     end
   end
 
-  defp safe_fetch_by_norms(norms) do
-    try do
-      Db.Lexicon.fetch_by_norms(norms)
-    rescue
-      _ -> []
-    catch
-      _, _ -> []
-    end
-  end
-
   # ─────────────────────── Tokens / n-grams ───────────────────────
 
-  # Build contiguous word n-grams with character spans against a normalized sentence.
   defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
        when is_binary(s) and is_integer(max_n) and max_n > 0 do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
@@ -317,8 +325,6 @@ defmodule Core do
 
   defp rebuild_word_ngrams(si, _), do: si
 
-  # Keep tokens where sentence slice matches token.phrase (normalized).
-  # Supports char-span {start, len} and word-window {i, j} (j exclusive).
   defp keep_only_word_boundary_tokens(%{sentence: s, tokens: toks} = si)
        when is_binary(s) and is_list(toks) do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
@@ -359,7 +365,6 @@ defmodule Core do
 
   # ───────────────────────── Helpers ─────────────────────────
 
-  # Ensure we have a %SemanticInput{} struct after tokenize.
   defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si
 
   defp wrap_si(tokens, sentence) when is_list(tokens),
@@ -397,16 +402,292 @@ defmodule Core do
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 
-  def examine() do
-    Brain.snapshot()
-    |> IO.inspect(label: :brain)
-    Brain.LIFG.status
-    |> IO.inspect(label: :lifg)
-    Brain.Hippocampus.snapshot
-    |> IO.inspect(label: :hippocampus)
-    Brain.PMTG.status
-    |> IO.inspect(label: :pmtg)
+  # ─────────────────────── Introspection / Examine ───────────────────────
+
+  # Regions we show in the UI by default (linguistic pipeline)
+  @ui_regions [
+    {:brain,        Brain,             :snapshot, []},
+    {:lifg,         Brain.LIFG,        :status,   []},
+    {:pmtg,         Brain.PMTG,        :status,   []},
+    {:atl,          Brain.ATL,         :status,   []},
+    {:hippocampus,  Brain.Hippocampus, :snapshot, []}
+  ]
+
+  # Extra regions you can opt into
+  @extra_regions [
+    {:acc,          Brain.ACC,         :auto,     []},
+    {:thalamus,     Brain.Thalamus,    :auto,     []},
+    {:ofc,          Brain.OFC,         :auto,     []},
+    {:dlpfc,        Brain.DLPFC,       :auto,     []},
+    {:negcache,     Core.NegCache,     :auto,     []},
+    {:curiosity,    Curiosity,         :auto,     []},
+    {:core_curiosity, Core.Curiosity,  :auto,     []}
+  ]
+
+  # Default = UI-only regions (no auto-discovery). Opt into everything via `all?: true`.
+  @default_regions @ui_regions
+
+  @doc """
+  Inspect the state of brain regions.
+
+  ## Options
+    * `:ui_only?` – if true, show only UI-related regions (default: true).
+    * `:all?` – if true, include extra regions and discover children from `Symbrella.Supervisor` (default: false).
+    * `:regions` – override region specs with your own list of `{label, module, fun | :auto, args}`.
+    * `:discover_from_sup?` – also enumerate children from `Symbrella.Supervisor` (default: false unless `all?: true`).
+    * `:supervisor` – supervisor module or pid to discover from (default: Symbrella.Supervisor).
+    * `:only` – filter by a set of labels/modules, e.g. `only: [:lifg, :atl]`.
+    * `:exclude` – exclude a set of labels/modules, e.g. `exclude: [:hippocampus]`.
+    * `:compact?` – print compact summaries (default: false).
+
+  ## Examples
+      Core.examine()                       # UI-focused regions
+      Core.examine(all?: true)             # Everything we can find
+      Core.examine(only: [:pmtg, :atl])    # Just PMTG + ATL
+      Core.examine(exclude: [:hippocampus])
+      Core.examine(compact?: true)
+  """
+  def examine(opts) do
+    compact?  = Keyword.get(opts, :compact?, false)
+    ui_only?  = Keyword.get(opts, :ui_only?, true)
+    all?      = Keyword.get(opts, :all?, false)
+
+    base_regions =
+      cond do
+        is_list(Keyword.get(opts, :regions)) ->
+          Keyword.fetch!(opts, :regions)
+
+        all? ->
+          @ui_regions ++ @extra_regions
+
+        ui_only? ->
+          @ui_regions
+
+        true ->
+          @default_regions
+      end
+
+    # Auto-discovery only when explicitly requested or when `all?: true`
+    sup           = Keyword.get(opts, :supervisor, Symbrella.Supervisor)
+    discover?     = Keyword.get(opts, :discover_from_sup?, all?)
+    discovered    = if discover?, do: discover_regions_from_sup(sup), else: []
+
+    regions =
+      (base_regions ++ discovered)
+      |> uniq_regions()
+      |> apply_only_filter(Keyword.get(opts, :only))
+      |> apply_exclude_filter(Keyword.get(opts, :exclude))
+
+    regions
+    |> Enum.map(&safe_invoke/1)
+    |> Enum.each(fn
+      {:ok, label, state} ->
+        if compact? do
+          IO.inspect(compact_state(state), label: label)
+        else
+          IO.inspect(state, label: label)
+        end
+
+      {:missing, label} ->
+        IO.puts("#{label}: (not running / no module)")
+
+      {:error, label, reason} ->
+        IO.puts("#{label}: ERROR #{inspect(reason)}")
+    end)
+
     :ok
   end
+
+  # Keep old Core.examine/0 call working, without default/arity conflict
+  def examine(), do: examine([])
+
+  # ── helpers ─────────────────────────────────────────────────────────────
+
+  # Accepts {label, mod, fun, args}
+  defp safe_invoke({label, mod, fun, args}) when is_atom(label) and is_atom(mod) do
+    cond do
+      Code.ensure_loaded?(mod) and fun == :auto ->
+        auto_snapshot(label, mod)
+
+      Code.ensure_loaded?(mod) and function_exported?(mod, fun, length(args)) ->
+        try do
+          {:ok, label, apply(mod, fun, args)}
+        rescue
+          e -> {:error, label, e}
+        catch
+          kind, term -> {:error, label, {kind, term}}
+        end
+
+      true ->
+        case Process.whereis(mod) do
+          pid when is_pid(pid) ->
+            try do
+              {:ok, label, :sys.get_state(pid)}
+            rescue
+              e -> {:error, label, e}
+            catch
+              kind, term -> {:error, label, {kind, term}}
+            end
+
+          _ ->
+            {:missing, label}
+        end
+    end
+  end
+
+  defp safe_invoke(mod) when is_atom(mod),
+    do: safe_invoke({module_label(mod), mod, :auto, []})
+
+  defp auto_snapshot(label, mod) do
+    cond do
+      function_exported?(mod, :status, 0)     -> {:ok, label, apply(mod, :status, [])}
+      function_exported?(mod, :snapshot, 0)   -> {:ok, label, apply(mod, :snapshot, [])}
+      function_exported?(mod, :state, 0)      -> {:ok, label, apply(mod, :state, [])}
+      true ->
+        case Process.whereis(mod) do
+          pid when is_pid(pid) ->
+            try do
+              {:ok, label, :sys.get_state(pid)}
+            rescue
+              e -> {:error, label, e}
+            catch
+              kind, term -> {:error, label, {kind, term}}
+            end
+
+          _ ->
+            {:missing, label}
+        end
+    end
+  end
+
+  # Walk children of the given supervisor and build {:label, Mod, :auto, []} specs
+  # IMPORTANT: Always use `module_label(mod)` (e.g. :acc) to avoid duplicate labels like "Elixir.Brain.ACC".
+  defp discover_regions_from_sup(sup) do
+    pid =
+      case sup do
+        m when is_atom(m) -> Process.whereis(m)
+        p when is_pid(p)  -> p
+        _ -> nil
+      end
+
+    cond do
+      is_pid(pid) ->
+        Supervisor.which_children(pid)
+        |> Enum.flat_map(fn
+          # {id, pid, type, [mod]}
+          {_id, _pid, _type, [mod]} when is_atom(mod) ->
+            [{module_label(mod), mod, :auto, []}]
+
+          # {id, pid, type, mod}
+          {_id, _pid, _type, mod} when is_atom(mod) ->
+            [{module_label(mod), mod, :auto, []}]
+
+          _ ->
+            []
+        end)
+
+      true ->
+        []
+    end
+  end
+
+  defp module_label(mod) when is_atom(mod) do
+    mod
+    |> Atom.to_string()
+    |> String.split(".")
+    |> List.last()
+    |> Macro.underscore()
+    |> String.to_atom()
+  end
+
+  defp label_from_selector(sel) when is_atom(sel) do
+    # If it's a module, normalize to module_label; otherwise pass through
+    case Atom.to_string(sel) do
+      "Elixir." <> _ -> module_label(sel)
+      _ -> sel
+    end
+  end
+
+  defp uniq_regions(specs) do
+    specs
+    |> Enum.uniq_by(fn
+      {label, _m, _f, _a} -> label
+      m when is_atom(m)   -> module_label(m)
+      other               -> other
+    end)
+  end
+
+  defp apply_only_filter(specs, nil), do: specs
+
+  defp apply_only_filter(specs, only) when is_list(only) do
+    wanted = only |> Enum.map(&label_from_selector/1) |> MapSet.new()
+    Enum.filter(specs, fn
+      {label, _m, _f, _a} -> MapSet.member?(wanted, label)
+      m when is_atom(m)   -> MapSet.member?(wanted, module_label(m))
+      _                   -> false
+    end)
+  end
+
+  defp apply_exclude_filter(specs, nil), do: specs
+
+  defp apply_exclude_filter(specs, exclude) when is_list(exclude) do
+    blocked = exclude |> Enum.map(&label_from_selector/1) |> MapSet.new()
+    Enum.reject(specs, fn
+      {label, _m, _f, _a} -> MapSet.member?(blocked, label)
+      m when is_atom(m)   -> MapSet.member?(blocked, module_label(m))
+      _                   -> false
+    end)
+  end
+
+  # Compact summaries for bulky maps/lists
+  defp compact_state(%{} = map) do
+    keys = Map.keys(map)
+    %{
+      __summary__: true,
+      size: map_size(map),
+      keys: Enum.take(Enum.sort(keys), 10)
+    }
+  end
+
+  defp compact_state(list) when is_list(list), do: %{__summary__: true, length: length(list)}
+  defp compact_state(other), do: other
+
+  # ─────────────────────── MWE shadowing helpers ───────────────────────
+
+  # Keep only choices whose token (usually a unigram) doesn't sit inside any winning MWE span.
+  defp mwe_shadow(lifg_choices, tokens) when is_list(lifg_choices) and is_list(tokens) do
+    mwe_spans =
+      lifg_choices
+      |> Enum.map(& &1.token_index)
+      |> Enum.map(&Enum.at(tokens, &1, %{}))
+      |> Enum.filter(fn t -> Map.get(t, :n, 1) > 1 end)  # MWEs only
+      |> Enum.map(&Map.get(&1, :span))
+
+    if mwe_spans == [] do
+      lifg_choices
+    else
+      Enum.reject(lifg_choices, fn ch ->
+        t = Enum.at(tokens, ch.token_index, %{})
+        # Only shadow unigrams that are fully covered by an MWE span
+        if Map.get(t, :n, 1) == 1 do
+          covered_by_any_mwe?(Map.get(t, :span), mwe_spans)
+        else
+          false
+        end
+      end)
+    end
+  end
+
+  defp covered_by_any_mwe?({a, l}, spans) when is_integer(a) and is_integer(l) do
+    b = a + l
+    Enum.any?(spans, fn
+      {s, sl} when is_integer(s) and is_integer(sl) ->
+        e = s + sl
+        a >= s and b <= e
+      _ -> false
+    end)
+  end
+
+  defp covered_by_any_mwe?(_, _), do: false
 end
 

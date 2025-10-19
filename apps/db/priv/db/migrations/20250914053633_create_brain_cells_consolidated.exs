@@ -1,4 +1,4 @@
-# apps/db/priv/repo/migrations/20251011_create_brain_cells_consolidated.exs
+# apps/db/priv/db/migrations/20250914053633_create_brain_cells_consolidated.exs
 defmodule Db.Migrations.CreateBrainCellsConsolidated do
   use Ecto.Migration
 
@@ -27,7 +27,9 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
 
       add :definition, :text
       add :example, :text
-      add :gram_function, :string
+
+      # gram_function as array (text[]), default [], NOT NULL
+      add :gram_function, {:array, :text}, null: false, default: []
 
       add :synonyms, {:array, :text}, null: false, default: []
       add :antonyms, {:array, :text}, null: false, default: []
@@ -67,6 +69,12 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("""
     CREATE INDEX IF NOT EXISTS brain_cells_antonyms_gin_idx
     ON brain_cells USING GIN (antonyms)
+    """)
+
+    # GIN index for array membership on gram_function
+    execute("""
+    CREATE INDEX IF NOT EXISTS brain_cells_gram_function_gin_idx
+    ON brain_cells USING GIN (gram_function)
     """)
 
     # ---------------- Data hygiene / normalization ----------------
@@ -117,6 +125,27 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
       CHECK (split_part(btrim(id), '|', 2) = pos);
     """)
 
+    # 5) POS-aware allowlist for gram_function (no subqueries; uses array containment)
+    execute("""
+    ALTER TABLE brain_cells
+    ADD CONSTRAINT brain_cells_gram_function_allowed_by_pos
+      CHECK (
+        CASE
+          WHEN pos = 'noun' THEN gram_function <@ ARRAY[
+            'countable','uncountable','plural-only','usually plural'
+          ]::text[]
+          WHEN pos = 'verb' THEN gram_function <@ ARRAY[
+            'transitive','intransitive','ditransitive','ambitransitive',
+            'copular','auxiliary','modal','ergative','impersonal'
+          ]::text[]
+          WHEN pos = 'adjective' THEN gram_function <@ ARRAY[
+            'attributive-only','predicative-only','postpositive','comparative-only'
+          ]::text[]
+          ELSE TRUE
+        END
+      );
+    """)
+
     # ---------------- Optional vector column + index ----------------
     execute("""
     DO $$
@@ -149,8 +178,10 @@ defmodule Db.Migrations.CreateBrainCellsConsolidated do
     execute("DROP INDEX IF EXISTS brain_cells_antonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_synonyms_gin_idx")
     execute("DROP INDEX IF EXISTS brain_cells_word_trgm_idx")
+    execute("DROP INDEX IF EXISTS brain_cells_gram_function_gin_idx")
 
     # Drop hardening constraints (if present)
+    execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_gram_function_allowed_by_pos;")
     execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_pos_matches_column;")
     execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_shape;")
     execute("ALTER TABLE brain_cells DROP CONSTRAINT IF EXISTS brain_cells_id_no_seed_or_unk;")

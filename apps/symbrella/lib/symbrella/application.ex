@@ -35,9 +35,6 @@ defmodule Symbrella.Application do
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # ── LLM service (warm before Curiosity/Brain) ─────────────────────
-      {Llm, llm_opts},
-
       # ── Autonomous workers (first-class, decoupled) ───────────────────
       Curiosity,        # standalone, emits [:curiosity, :proposal]
       Core.Curiosity,   # Core sweeper that re-probes NegCache

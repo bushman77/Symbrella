@@ -1,4 +1,3 @@
-# apps/db/lib/db/brain_cell.ex
 defmodule Db.BrainCell do
   @moduledoc """
   Persistent representation of a Brain Cell.
@@ -12,6 +11,9 @@ defmodule Db.BrainCell do
   - `id`'s POS segment must equal `pos` column.
   - `id` must not contain `|unk|` or `|seed|`.
   - `norm` is the normalized `word` (lowercase, trimmed, single-spaced).
+
+  Notes:
+  - `gram_function` is an array (`text[]`) with POS-aware allowed values only.
   """
 
   use Ecto.Schema
@@ -55,13 +57,30 @@ defmodule Db.BrainCell do
   # Allows third segment to be alnum/underscore (index or tag like "fallback")
   @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/
 
+  # POS-aware grammar allowlist (matches the DB CHECK)
+  @gf_allow %{
+    "noun" => ~w(countable uncountable plural-only usually plural),
+    "verb" => ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
+    "adjective" => ~w(attributive-only predicative-only postpositive comparative-only)
+  }
+
+  # common “spelling” normalizations we accept on input and canonicalize
+  @gf_aliases %{
+    "plural only" => "plural-only",
+    "comparative only" => "comparative-only",
+    "predicative only" => "predicative-only",
+    "attributive only" => "attributive-only"
+  }
+
   schema "brain_cells" do
     field :word, :string
     field :norm, :string
     field :pos, :string
     field :definition, :string
     field :example, :string
-    field :gram_function, :string
+
+    # ✅ array type to match Postgres text[]
+    field :gram_function, {:array, :string}, default: []
 
     field :synonyms, {:array, :string}, default: []
     field :antonyms, {:array, :string}, default: []
@@ -92,6 +111,7 @@ defmodule Db.BrainCell do
   - Trims `id` (and strips trailing pipes) before validating.
   - Enforces POS whitelist and `id` shape/consistency.
   - Bans `|unk|`/`|seed|` anywhere in `id` and `pos == "unk"`.
+  - Sanitizes arrays (synonyms/antonyms/semantic_atoms/gram_function).
   """
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(cell, attrs) do
@@ -116,7 +136,7 @@ defmodule Db.BrainCell do
     |> update_change(:pos, &normalize_pos/1)
     |> update_change(:type, &trim_or_nil/1)
     |> update_change(:status, &trim_or_nil/1)
-    # id: trim & drop trailing pipes, but do not collapse internal spaces (phrases allowed)
+    # id: trim & drop trailing pipes, but keep internal spaces (phrases allowed)
     |> update_change(:id, fn
       nil -> nil
       s when is_binary(s) ->
@@ -133,11 +153,14 @@ defmodule Db.BrainCell do
 
   defp ensure_norm_matches_word(%Ecto.Changeset{} = cs), do: cs
 
-  defp sanitize_arrays(changeset) do
-    changeset
+  defp sanitize_arrays(%Ecto.Changeset{} = cs) do
+    pos = get_field(cs, :pos)
+
+    cs
     |> update_change(:synonyms, &sanitize_string_array/1)
     |> update_change(:antonyms, &sanitize_string_array/1)
     |> update_change(:semantic_atoms, &sanitize_string_array/1)
+    |> update_change(:gram_function, &sanitize_gf_array(&1, pos))
   end
 
   defp sanitize_string_array(list) when is_list(list) do
@@ -148,6 +171,57 @@ defmodule Db.BrainCell do
   end
 
   defp sanitize_string_array(_), do: []
+
+  # POS-aware cleanup + clamp to allowlist. Also synthesizes "usually plural"
+  # for nouns when both "usually" and "plural" are present as separate tags.
+  defp sanitize_gf_array(list, pos) when is_list(list) do
+    raw =
+      list
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&normalize_tag/1)
+
+    tags =
+      case pos do
+        "noun" ->
+          synth =
+            if Enum.member?(raw, "usually") and Enum.member?(raw, "plural"),
+              do: ["usually plural"],
+              else: []
+          keep(raw ++ synth, @gf_allow["noun"])
+
+        "verb" ->
+          keep(raw, @gf_allow["verb"])
+
+        "adjective" ->
+          keep(raw, @gf_allow["adjective"])
+
+        _ ->
+          # other POS: we don't restrict, but still dedup and trim
+          Enum.uniq(raw)
+      end
+
+    tags
+  end
+
+  defp sanitize_gf_array(_other, _pos), do: []
+
+  defp keep(tags, allow) do
+    tags
+    |> Enum.map(&canonicalize/1)
+    |> Enum.filter(&(&1 in allow))
+    |> Enum.uniq()
+  end
+
+  defp canonicalize(s), do: Map.get(@gf_aliases, s, s)
+
+  defp normalize_tag(t) when is_binary(t) do
+    t
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/\s+/u, " ")
+  end
+
+  defp normalize_tag(t), do: t |> to_string() |> normalize_tag()
 
   defp validate_pos_whitelist(%Ecto.Changeset{} = cs) do
     validate_inclusion(cs, :pos, @allowed_pos, message: "must be a known POS")
