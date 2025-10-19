@@ -50,4 +50,4 @@ bun.lockb
 *.tgz
 *.7z
 *.rar
-
+apps/db/priv/kaikki.org-dictionary-English.jsonl
