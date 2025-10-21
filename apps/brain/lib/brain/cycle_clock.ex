@@ -1,99 +1,137 @@
 defmodule Brain.CycleClock do
   @moduledoc """
-  Global, lightweight phase clock that emits a repeating cycle and telemetry.
+  CycleClock: emits `[:brain, :cycle, :tick]` telemetry on a steady interval so
+  regions can coordinate time-based behavior (decay, scheduling, HUD refresh).
 
-  • Phases default to [:internal, :external, :integrate, :idle]
-  • Tick interval defaults to 750 ms (≈1.33 Hz), configurable via env:
-      config :brain, Brain.CycleClock, phases: [:internal, :external, :integrate, :idle], tick_ms: 750
-  • Telemetry on each tick:
-      event:    [:brain, :cycle, :tick]
-      measures: %{i: non_neg_integer(), dt_ms: float, hz: float}
-      meta:     %{phase: atom()}
-  • Self-starting: any public call ensures the clock is running (no supervisor change required).
+  ## Telemetry
+  Event:       [:brain, :cycle, :tick]
+  Measurements %{dt_ms, hz, seq}
+  Metadata:    %{interval_ms, phase}
+
+  Configure via `config :brain, Brain.CycleClock, hz: 20`
   """
 
   use GenServer
+  @default_hz 20
 
-  @name __MODULE__
-  @phases_default [:internal, :external, :integrate, :idle]
-  @tick_ms_default 750
+  # ────────────────────────────────────────────────────────────────────────────
+  # Public API (read-only helpers; no process starts here)
+  # ────────────────────────────────────────────────────────────────────────────
 
-  # --------- Public API ---------
+  def start_link(opts \\ []),
+    do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Ensure the clock is running (idempotent)."
+  @doc """
+  Return `{:ok, pid}` if the clock is running, else `{:error, :not_started}`.
+
+  Note: This does NOT start the clock (root supervisor does that).
+  """
+  @spec ensure_started() :: {:ok, pid()} | {:error, :not_started}
   def ensure_started do
-    case Process.whereis(@name) do
-      nil  -> GenServer.start(@name, %{}, name: @name)
-      _pid -> :ok
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) -> {:ok, pid}
+      _ -> {:error, :not_started}
     end
   end
 
-  @doc "Current phase atom (starts the clock if needed)."
-  def phase do
-    ensure_started()
-    :persistent_term.get({@name, :phase}, :idle)
+  @doc """
+  Read a snapshot of the clock state. Safe if the process isn't started.
+  Returns a map with keys: :hz, :interval_ms, :seq, :last_ts, :dt_ms, :phase
+  """
+  @spec snapshot() :: map()
+  def snapshot do
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) ->
+        GenServer.call(__MODULE__, :snapshot)
+
+      _ ->
+        hz = configured_or_default_hz()
+        %{
+          hz: hz,
+          interval_ms: max(trunc(1000 / hz), 1),
+          seq: 0,
+          last_ts: System.monotonic_time(:millisecond),
+          dt_ms: 0,
+          phase: 0.0
+        }
+    end
   end
 
-  @doc "All configured phases."
-  def phases do
-    ensure_started()
-    :persistent_term.get({@name, :phases}, @phases_default)
-  end
+  @doc "Current target frequency (Hz), or configured default if not started."
+  def hz, do: snapshot().hz
 
-  @doc "Approximate current cycle frequency in Hz (EWMA)."
-  def hz do
-    ensure_started()
-    :persistent_term.get({@name, :hz}, 0.0)
-  end
+  @doc "Planned tick interval in ms, or derived from configured default if not started."
+  def interval_ms, do: snapshot().interval_ms
 
-  @doc "Manually advance one tick (useful for tests)."
-  def tick, do: send(@name, :tick)
+  @doc "Tick sequence counter (starts at 0)."
+  def seq, do: snapshot().seq
 
-  # --------- GenServer ---------
+  @doc "Fractional phase in [0.0, 1.0) within a 1s window."
+  def phase, do: snapshot().phase
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # GenServer
+  # ────────────────────────────────────────────────────────────────────────────
 
   @impl true
-  def start(_, _opts \\ []) do
-    GenServer.start(__MODULE__, %{}, name: @name)
-  end
+  def init(opts) do
+    cfg = Application.get_env(:brain, __MODULE__, [])
+    hz  = opts[:hz] || cfg[:hz] || @default_hz
+    hz  = if hz <= 0, do: @default_hz, else: hz
 
-  @impl true
-  def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: @name)
-
-  @impl true
-  def init(_) do
-    cfg     = Application.get_env(:brain, __MODULE__, [])
-    phases  = Keyword.get(cfg, :phases, @phases_default)
-    tick_ms = max(10, Keyword.get(cfg, :tick_ms, @tick_ms_default))
-
-    put(:phases, phases)
-    put(:phase, :idle)
-    put(:hz, 0.0)
-
+    interval_ms = max(trunc(1000 / hz), 1)
     now = System.monotonic_time(:millisecond)
-    :timer.send_interval(tick_ms, :tick)
-    {:ok, %{i: 0, last_ms: now, tick_ms: tick_ms, phases: phases, ewma_ms: tick_ms * 1.0}}
+
+    state = %{hz: hz, interval_ms: interval_ms, last_ts: now, seq: 0}
+    Process.send_after(self(), :tick, interval_ms)
+    {:ok, state}
   end
 
   @impl true
-  def handle_info(:tick, %{i: i, last_ms: last, tick_ms: tick_ms, phases: phases, ewma_ms: ewma} = st) do
-    now   = System.monotonic_time(:millisecond)
-    dt    = max(1.0, now - last)
-    # EWMA of period
-    alpha = 0.2
-    ewma2 = (1.0 - alpha) * ewma + alpha * dt
-    hz    = 1000.0 / ewma2
+  def handle_info(:tick, %{hz: hz, interval_ms: interval, last_ts: last, seq: seq} = st) do
+    now = System.monotonic_time(:millisecond)
+    dt  = max(now - last, 0)
+    seq = seq + 1
+    phase = rem(seq, hz) / hz
 
-    idx   = rem(i, length(phases))
-    phase = Enum.at(phases, idx)
+    :telemetry.execute(
+      [:brain, :cycle, :tick],
+      %{dt_ms: dt, hz: hz, seq: seq},
+      %{interval_ms: interval, phase: phase}
+    )
 
-    put(:phase, phase)
-    put(:hz, hz)
-
-    :telemetry.execute([:brain, :cycle, :tick], %{i: i, dt_ms: dt * 1.0, hz: hz}, %{phase: phase})
-    {:noreply, %{st | i: i + 1, last_ms: now, ewma_ms: ewma2}}
+    Process.send_after(self(), :tick, interval)
+    {:noreply, %{st | last_ts: now, seq: seq}}
   end
 
-  # --------- internals ---------
-  defp put(key, val), do: :persistent_term.put({@name, key}, val)
+  @impl true
+  def handle_call(:snapshot, _from, %{hz: hz, interval_ms: interval, last_ts: last, seq: seq} = st) do
+    now   = System.monotonic_time(:millisecond)
+    dt    = max(now - last, 0)
+    phase = if hz > 0, do: rem(seq, hz) / hz, else: 0.0
+
+    reply = %{
+      hz: hz,
+      interval_ms: interval,
+      seq: seq,
+      last_ts: last,
+      dt_ms: dt,
+      phase: phase
+    }
+
+    {:reply, reply, st}
+  end
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Internals
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp configured_or_default_hz do
+    case Application.get_env(:brain, __MODULE__, [])[:hz] do
+      nil -> @default_hz
+      x when is_integer(x) and x > 0 -> x
+      _ -> @default_hz
+    end
+  end
 end
 

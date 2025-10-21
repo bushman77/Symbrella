@@ -40,5 +40,13 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
+config :brain, Brain.CycleClock, hz: 20
+
+config :brain, Brain.MoodCore,
+  clock: :cycle,
+  half_life_ms: 12_000,
+  init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
+
+
 # Optional extra LIFG outer weights in dev (kept from your original)
 config :brain, :lifg_weights, prime: 0.05

@@ -24,9 +24,10 @@ defmodule SymbrellaWeb.BrainLive do
   alias SymbrellaWeb.Components.Brain.LIFGDecision,  as: BrainLIFGDecision
   alias SymbrellaWeb.Components.Brain.HippoPanel,    as: BrainHippoPanel
   alias SymbrellaWeb.Components.Brain.IntentChip,    as: BrainIntentChip
+  alias SymbrellaWeb.Components.MoodChip
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Region metadata stays here (no Brain.Legend module)
+  # Region metadata (kept local; no Brain.Legend module)
   # ────────────────────────────────────────────────────────────────────────────
 
   @regions [
@@ -147,6 +148,22 @@ defmodule SymbrellaWeb.BrainLive do
     selected = :lifg
     _ = Brain.CycleClock.ensure_started()
 
+    # Prime mood from current snapshot so UI isn't empty at first render
+    %{levels: lv} = Brain.MoodCore.snapshot()
+    init_mood_levels = %{
+      :da    => Map.get(lv, :da, 0.5),
+      :"5ht" => Map.get(lv, :"5ht", 0.5),
+      :ne    => Map.get(lv, :ne, 0.5),
+      :glu   => Map.get(lv, :glu, 0.5)
+    }
+
+    init_mood_derived = %{
+      exploration: 0.6 * init_mood_levels.da + 0.4 * init_mood_levels.ne,
+      inhibition:  init_mood_levels[:"5ht"],
+      vigilance:   init_mood_levels.ne,
+      plasticity:  0.5 * init_mood_levels.da + 0.5 * init_mood_levels.glu
+    }
+
     socket =
       socket
       |> assign(:selected, selected)
@@ -163,7 +180,11 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign(:telemetry_hippo_id, nil)
       |> assign(:telemetry_cycle_id, nil)
       |> assign(:telemetry_intent_ids, [])
+      |> assign(:telemetry_mood_id, nil)
       |> assign(:cycle_nonce, 0)
+      |> assign(:mood_levels, init_mood_levels)
+      |> assign(:mood_derived, init_mood_derived)
+      |> assign(:mood_tone, :neutral)        # NEW: tone default
 
     if connected?(socket) do
       hippo_handler_id =
@@ -185,6 +206,18 @@ defmodule SymbrellaWeb.BrainLive do
           cycle_handler_id,
           [:brain, :cycle, :tick],
           &__MODULE__.cycle_telemetry_handler/4,
+          %{pid: self()}
+        )
+
+      # Mood telemetry
+      mood_handler_id =
+        "brain-live-mood-#{System.unique_integer([:positive])}-#{System.system_time(:microsecond)}"
+
+      :ok =
+        :telemetry.attach(
+          mood_handler_id,
+          [:brain, :mood, :update],
+          &__MODULE__.mood_telemetry_handler/4,
           %{pid: self()}
         )
 
@@ -220,8 +253,10 @@ defmodule SymbrellaWeb.BrainLive do
        socket
        |> assign(:telemetry_hippo_id, hippo_handler_id)
        |> assign(:telemetry_cycle_id, cycle_handler_id)
+       |> assign(:telemetry_mood_id, mood_handler_id)
        |> assign(:telemetry_intent_ids, [intent_id_core, intent_id_brain])
-       |> assign(:intent, init_intent)}
+       |> assign(:intent, init_intent)
+       |> assign(:mood_tone, tone_for_intent(extract_label(init_intent)))}
     else
       {:ok, socket}
     end
@@ -231,6 +266,7 @@ defmodule SymbrellaWeb.BrainLive do
   def terminate(_reason, socket) do
     if id = socket.assigns[:telemetry_hippo_id], do: :telemetry.detach(id)
     if id = socket.assigns[:telemetry_cycle_id], do: :telemetry.detach(id)
+    if id = socket.assigns[:telemetry_mood_id],  do: :telemetry.detach(id)
 
     case socket.assigns[:telemetry_intent_ids] do
       ids when is_list(ids) -> Enum.each(ids, &:telemetry.detach/1)
@@ -239,6 +275,30 @@ defmodule SymbrellaWeb.BrainLive do
 
     if ref = socket.assigns[:timer_ref], do: :timer.cancel(ref)
     :ok
+  end
+
+  # Telemetry → LiveView mailbox bridge for mood updates
+  def mood_telemetry_handler(_event, meas, _meta, %{pid: pid}) when is_pid(pid) do
+    send(pid, {:mood_update, meas})
+  end
+
+  @impl true
+  def handle_info({:mood_update, meas}, socket) do
+    levels = %{
+      :da    => meas[:da],
+      :"5ht" => meas[:"5ht"],
+      :ne    => meas[:ne],
+      :glu   => meas[:glu]
+    }
+
+    derived = %{
+      exploration: meas[:exploration],
+      inhibition:  meas[:inhibition],
+      vigilance:   meas[:vigilance],
+      plasticity:  meas[:plasticity]
+    }
+
+    {:noreply, assign(socket, mood_levels: levels, mood_derived: derived)}
   end
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -354,7 +414,7 @@ defmodule SymbrellaWeb.BrainLive do
     {:noreply, assign(socket, :hippo_metrics, compact)}
   end
 
-  # Optional fast-path: immediate update when intent telemetry fires
+  # Intent telemetry → update chip + tone
   @impl true
   def handle_info({:intent_selected, meas, meta}, socket) do
     now = System.system_time(:millisecond)
@@ -363,10 +423,15 @@ defmodule SymbrellaWeb.BrainLive do
       meta[:intent] || meas[:intent] || meta["intent"] || meas["intent"] || nil
 
     keyword =
-      meta[:keyword] || meas[:keyword] || meta["keyword"] || meas["keyword"] || nil
+      meta[:keyword] || meas[:keyword] || meta["keyword"] || meas["keyword"] || ""
+
+    text =
+      meta[:text] || meas[:text] || meta["text"] || meas["text"] || keyword
 
     confidence =
       meas[:confidence] || meta[:confidence] || meas["confidence"] || meta["confidence"] || nil
+
+    source = meta[:source] || meas[:source] || :core
 
     norm_intent =
       cond do
@@ -391,14 +456,20 @@ defmodule SymbrellaWeb.BrainLive do
         true -> nil
       end
 
+    {label_fixed, conf_fixed} = normalize_intent_label(norm_intent, text, norm_conf)
+
     compact = %{
       at_ms: now,
-      intent: norm_intent,
+      intent: label_fixed,
       keyword: (if is_binary(keyword), do: keyword, else: to_string(keyword || "")),
-      confidence: norm_conf
+      confidence: conf_fixed,
+      source: source
     }
 
-    {:noreply, assign(socket, :intent, compact)}
+    {:noreply,
+     socket
+     |> assign(:intent, compact)
+     |> assign(:mood_tone, tone_for_intent(label_fixed))}
   end
 
   # Cycle-driven source of truth
@@ -414,6 +485,7 @@ defmodule SymbrellaWeb.BrainLive do
       if latest != socket.assigns.intent do
         socket
         |> assign(:intent, latest)
+        |> assign(:mood_tone, tone_for_intent(extract_label(latest)))
         |> assign(:cycle_nonce, socket.assigns.cycle_nonce + 1)
       else
         assign(socket, :cycle_nonce, socket.assigns.cycle_nonce + 1)
@@ -474,6 +546,44 @@ defmodule SymbrellaWeb.BrainLive do
     max(now - at_ms, 0)
   end
 
+  # Intent normalization: keep :abuse / :insult intact, only gate :ask
+  defp normalize_intent_label(label, text, conf) do
+    label1 =
+      case label do
+        :ask ->
+          if looks_like_question?(text), do: :ask, else: :unknown
+        nil ->
+          :unknown
+        other ->
+          other
+      end
+
+    conf1 = conf || 0.0
+    label2 =
+      if conf1 < 0.60 and label1 == :ask, do: :unknown, else: label1
+
+    {label2, conf1}
+  end
+
+  defp looks_like_question?(s) when is_binary(s) do
+    String.contains?(s, "?") ||
+      Regex.match?(
+        ~r/^\s*(who|what|when|where|why|how|do|does|did|can|could|will|would|should|is|are|am|have|has|had|may|might|was|were)\b/i,
+        s
+      )
+  end
+  defp looks_like_question?(_), do: false
+
+  # tone helpers
+  defp tone_for_intent(:abuse),  do: :danger
+  defp tone_for_intent(:insult), do: :warning
+  defp tone_for_intent(_),       do: :neutral
+
+  defp extract_label(nil), do: nil
+  defp extract_label(%{intent: i}) when is_atom(i), do: i
+  defp extract_label(i) when is_atom(i), do: i
+  defp extract_label(_), do: nil
+
   # ────────────────────────────────────────────────────────────────────────────
   # Render
   # ────────────────────────────────────────────────────────────────────────────
@@ -486,9 +596,10 @@ defmodule SymbrellaWeb.BrainLive do
         <div class="flex items-center justify-between gap-4">
           <h1 class="text-2xl font-semibold">Brain Regions ↔ Symbrella Modules</h1>
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <CycleHUD.cycle_hud />
-            <BrainIntentChip.intent_chip intent={@intent} />
+            <BrainIntentChip.intent_chip intent={@intent} class="bg-white/70" />
+            <MoodChip.mood_chip levels={@mood_levels} derived={@mood_derived} tone={@mood_tone} />
             <button phx-click="refresh" class="rounded-md border px-3 py-1 text-sm hover:bg-zinc-50">
               Refresh
             </button>

@@ -1,51 +1,37 @@
 defmodule SymbrellaWeb.Components.CycleHUD do
   @moduledoc """
-  Minimal HUD to display current brain cycle phase + tempo + strength.
-
-  Usage from HEEx:  <CycleHUD.cycle_hud />
-  (Make sure you have: `alias SymbrellaWeb.Components.CycleHUD` in the LiveView.)
+  Compact clock HUD showing seq/Hz/Δt/phase pulled from Brain.CycleClock.snapshot/0.
+  Safe formatting for integers/floats/nils to avoid float_to_binary errors.
   """
-
   use Phoenix.Component
+  alias Brain.CycleClock
+
+  attr :class, :string, default: ""
 
   def cycle_hud(assigns) do
-    # Pull live values right before render
-    phase = Brain.CycleClock.phase()
-    hz    = Brain.CycleClock.hz()
-
-    metrics =
-      try do
-        state =
-          if function_exported?(Brain, :get_state, 0),
-            do: Brain.get_state(),
-            else: %{}
-
-        Brain.CycleMetrics.snapshot(state)
-      rescue
-        _ -> %{strength: 0.0, hz: hz, order: []}
-      end
-
-    assigns =
-      assigns
-      |> Map.put(:phase, phase)
-      |> Map.put(:hz, hz)
-      |> Map.put(:strength, Float.round(metrics.strength || 0.0, 2))
-      |> Map.put(:order, Enum.map(metrics.order || [], &to_string/1))
+    snap = CycleClock.snapshot()
+    assigns = assign(assigns, snap: snap)
 
     ~H"""
-    <div class="flex items-center gap-3 text-sm font-medium px-3 py-2 rounded-2xl shadow-md bg-neutral-900/60 border border-neutral-700">
-      <span class="uppercase tracking-wide">Phase:</span>
-      <span class="px-2 py-0.5 rounded-md bg-neutral-800 border border-neutral-700"><%= @phase %></span>
-      <span>•</span>
-      <span>Tempo: <%= :erlang.float_to_binary(@hz, decimals: 2) %> Hz</span>
-      <span>•</span>
-      <span>Cycle S: <%= :erlang.float_to_binary(@strength, decimals: 2) %></span>
-      <%= if @order != [] do %>
-        <span>•</span>
-        <span>Order: <%= Enum.join(@order, " → ") %></span>
-      <% end %>
+    <div class={"flex items-center gap-2 rounded-2xl px-3 py-2 shadow-sm border border-black/5 #{ @class }"}>
+      <span class="text-xs font-semibold tracking-wide">Clock</span>
+      <span class="text-[10px] tabular-nums">seq <%= @snap.seq %></span>
+      <span class="text-[10px] tabular-nums">Hz <%= fmtf(@snap.hz, 2) %></span>
+      <span class="text-[10px] tabular-nums">Δt <%= fmt_ms(@snap.dt_ms) %>ms</span>
+      <span class="text-[10px] tabular-nums">ϕ <%= fmtf(@snap.phase, 2) %></span>
     </div>
     """
   end
+
+  # ---- formatting helpers ----
+
+  defp fmtf(v, d \\ 2)
+  defp fmtf(v, d) when is_integer(v), do: :erlang.float_to_binary(v * 1.0, decimals: d)
+  defp fmtf(v, d) when is_float(v),   do: :erlang.float_to_binary(v, decimals: d)
+  defp fmtf(_v, _d),                  do: "--"
+
+  defp fmt_ms(v) when is_integer(v), do: Integer.to_string(v)
+  defp fmt_ms(v) when is_float(v),   do: :erlang.float_to_binary(v, decimals: 1)
+  defp fmt_ms(_),                    do: "--"
 end
 

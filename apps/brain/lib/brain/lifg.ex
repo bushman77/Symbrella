@@ -494,6 +494,66 @@ defmodule Brain.LIFG do
   end
 
   # ── private: legacy conversion helpers ───────────────────────────────
+# --- Mood hooks (private) ----------------------------------------------------
+
+defp mood_scalars() do
+  levels =
+    try do
+      Brain.MoodCore.snapshot().levels
+    rescue
+      _ -> %{}
+    end
+
+  %{
+    da:  (levels[:da]   || levels["da"]   || 0.50) * 1.0,   # dopamine
+    s5:  (levels[:"5ht"]|| levels["5ht"]  || 0.50) * 1.0,   # serotonin
+    glu: (levels[:glu]  || levels["glu"]  || 0.50) * 1.0,   # glutamate
+    ne:  (levels[:ne]   || levels["ne"]   || 0.50) * 1.0    # norepinephrine (optional)
+  }
+end
+
+defp clamp_between(x, lo, hi) when is_number(x), do: min(max(x, lo), hi)
+
+defp apply_mood_to_opts(opts, %{da: da, s5: s5, glu: glu, ne: ne}) when is_list(opts) do
+  base_mt    = Keyword.get(opts, :margin_threshold, 0.15)
+  base_limit = Keyword.get(opts, :limit, 5)
+  base_tau   = Keyword.get(opts, :acc_conflict_tau, Application.get_env(:brain, :acc_conflict_tau, 0.50))
+  base_w     =
+    lifg_weights()
+    |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
+
+  # Caution (5-HT) raises margin & ACC gate; Drive (DA) lowers margin, boosts intent bias.
+  mt =
+    base_mt
+    |> Kernel.*(1.0 + (s5 - 0.5) * 0.6)   # +60% at 5-HT=1.0, −30% at 0.0
+    |> Kernel.*(1.0 - (da - 0.5) * 0.3)   # −30% at DA=1.0, +15% at 0.0
+    |> clamp_between(0.02, 0.60)
+
+  acc_tau =
+    base_tau
+    |> Kernel.*(1.0 + (s5 - 0.5) * 0.5)   # more caution ⇒ need more conflict to open the gate
+    |> clamp_between(0.05, 0.95)
+
+  # Curiosity (GLU) controls PMTG budget; NE could add a small focus bonus
+  limit =
+    base_limit
+    |> Kernel.+(round((glu - 0.5) * 6))   # −3..+3 around base
+    |> Kernel.+(round((ne  - 0.5) * 2))   # −1..+1 around base
+    |> max(1)
+
+  w =
+    base_w
+    |> Map.update(:intent_bias, 0.10, fn v -> clamp_between(v * (1.0 + (da - 0.5) * 1.0), 0.02, 0.50) end)
+    |> Map.update(:activation,  0.20, fn v -> clamp_between(v * (1.0 - (s5 - 0.5) * 0.8), 0.05, 0.40) end)
+
+  # Merge back
+  Keyword.merge(opts,
+    margin_threshold: mt,
+    limit: limit,
+    weights: w,
+    acc_conflict_tau: acc_tau
+  )
+end
 
   defp legacy_boosts_inhibitions(choices, margin_thr, _scores_mode, eff_opts) do
     {boosts_maps, inhibitions_maps} =

@@ -39,7 +39,6 @@ defmodule Symbrella.Application do
       Core.Curiosity,   # Core sweeper that re-probes NegCache
 
       # ── Brain timing & phase coordination ─────────────────────────────
-      {Brain.CycleClock, []},  # global repeating phase clock + telemetry ticks
 
       # ── Brain servers ─────────────────────────────────────────────────
       Brain,
@@ -52,9 +51,13 @@ defmodule Symbrella.Application do
       {Brain.DLPFC, act_on_thalamus: true},
       # Brain.AG,
       # Brain.MTL,
-      {Brain.ACC, keep: 300}
+      {Brain.ACC, keep: 300},
       # Curiosity is already started above (standalone)
       # Brain.BasalGanglia
+      # --- Global brain clock + neuromodulators ---
+      {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
+      {Brain.MoodCore, []}
+
     ]
 
     # Start the supervision tree
