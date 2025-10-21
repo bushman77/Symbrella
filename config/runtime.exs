@@ -56,15 +56,59 @@ lifg_min_score =
     _ -> 0.35
   end
 
+# NEW: episodic attach master switch (EPISODES_MODE=on|off; default on)
+episodes_mode =
+  case System.get_env("EPISODES_MODE", "on") |> String.downcase() do
+    "off" -> :off
+    _ -> :on
+  end
+
+# NEW: optional defaults for DB/Hybrid recall (all overridable per request)
+hippo_recall_source =
+  case System.get_env("HIPPO_RECALL_SOURCE", "") |> String.downcase() do
+    "db" -> :db
+    "hybrid" -> :hybrid
+    "memory" -> :memory
+    _ -> :memory
+  end
+
+hippo_recall_k =
+  case Integer.parse(System.get_env("HIPPO_RECALL_K", "")) do
+    {n, _} when n > 0 -> n
+    _ -> 8
+  end
+
+hippo_recall_min_sim =
+  case Float.parse(System.get_env("HIPPO_RECALL_MIN_SIM", "")) do
+    {f, _} when f >= 0.0 -> f
+    _ -> 0.35
+  end
+
+hippo_recall_half_life_s =
+  case Integer.parse(System.get_env("HIPPO_RECALL_HALF_LIFE_S", "")) do
+    {n, _} when n > 0 -> n
+    _ -> 3600
+  end
+
 config :brain,
   pmtg_mode: pmtg_mode,
   pmtg_margin_threshold: pmtg_margin,
   pmtg_window_keep: pmtg_keep,
   hippo_meta_dup_count: true,
-  lifg_min_score: lifg_min_score
+  lifg_min_score: lifg_min_score,
+  # NEW:
+  episodes_mode: episodes_mode,
+  lifg_stage1_mwe_fallback: true
 
 if lifg_weights, do: config(:brain, :lifg_stage1_weights, lifg_weights)
 if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mode)
+
+# NEW: defaults for DB/Hybrid episodic recall
+config :brain, :hippo_db_defaults,
+  recall_source: hippo_recall_source,      # :memory | :db | :hybrid
+  recall_k: hippo_recall_k,
+  recall_min_sim: hippo_recall_min_sim,
+  recall_half_life_s: hippo_recall_half_life_s
 
 # ───────── Logger runtime overrides ─────────
 log_level =

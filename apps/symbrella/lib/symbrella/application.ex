@@ -1,4 +1,3 @@
-# lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
   use Application
@@ -38,6 +37,9 @@ defmodule Symbrella.Application do
       # ── Autonomous workers (first-class, decoupled) ───────────────────
       Curiosity,        # standalone, emits [:curiosity, :proposal]
       Core.Curiosity,   # Core sweeper that re-probes NegCache
+
+      # ── Brain timing & phase coordination ─────────────────────────────
+      {Brain.CycleClock, []},  # global repeating phase clock + telemetry ticks
 
       # ── Brain servers ─────────────────────────────────────────────────
       Brain,

@@ -10,11 +10,20 @@ defmodule Db.Episode do
   • `token_count` is derived from the (possibly updated) `:tokens` field so it stays
     consistent even if callers forget to set it.
   • `si` is normalized to a plain map, recursively converting structs (e.g., `Core.SemanticInput`, `%Db.BrainCell{}`) and data structures (e.g., `MapSet` to list) for JSONB serialization.
+
+  Query helpers
+  -------------
+  • `knn/2` performs nearest-neighbor search using pgvector cosine distance:
+      distance = embedding <-> ^query
+      similarity = 1.0 - distance
   """
 
   use Ecto.Schema
   import Ecto.Changeset
+  import Ecto.Query, only: [from: 2]
   require Logger
+
+  alias Db.Repo
 
   @type t :: %__MODULE__{}
   @embedding_dim Application.compile_env(:db, :embedding_dim, 1536)
@@ -185,4 +194,74 @@ defmodule Db.Episode do
         add_error(changeset, :embedding, "embedding must be a list of floats or a %Pgvector{}")
     end
   end
+
+  # ───────────────────────── Query helpers (KNN) ─────────────────────────
+
+  @doc """
+  Nearest-neighbor search by `embedding` using pgvector **cosine** distance.
+
+  ## Options
+    * `:k`           – number of neighbors (default 8)
+    * `:user_id`     – scope by user (optional)
+    * `:tokens_any`  – list of tokens; requires overlap via `tokens && ^list` (optional)
+    * `:tags_any`    – list of tags; requires overlap via `tags && ^list` (optional)
+    * `:since`       – minimum `inserted_at` (NaiveDateTime) (optional)
+
+  ## Returns
+    A list of maps (lightweight payload for recall):
+    %{
+      id:           episode_id,
+      si:           map(),
+      tags:         [string()],
+      inserted_at:  NaiveDateTime.t(),
+      distance:     float()   # cosine distance in 0..2 (similarity = 1 - distance)
+    }
+
+  Notes
+  -----
+  • Accepts a raw list(float) or `%Pgvector{}` for `embedding`.
+  • Uses `type(^emb, Pgvector.Ecto.Vector)` so Postgres treats the param as `vector`.
+  """
+  @spec knn([number()] | Pgvector.t(), keyword()) ::
+          [%{id: any(), si: map(), tags: [String.t()], inserted_at: NaiveDateTime.t(), distance: float()}]
+  def knn(embedding, opts \\ []) do
+    with {:ok, emb} <- to_pgvector(embedding) do
+      k          = Keyword.get(opts, :k, 8)
+      user_id    = Keyword.get(opts, :user_id)
+      tokens_any = Keyword.get(opts, :tokens_any)
+      tags_any   = Keyword.get(opts, :tags_any)
+      since      = Keyword.get(opts, :since)
+
+      base =
+        from e in __MODULE__,
+          where: not is_nil(e.embedding),
+          select: %{
+            id: e.id,
+            si: e.si,
+            tags: e.tags,
+            inserted_at: e.inserted_at,
+            distance: fragment("? <-> ?", e.embedding, type(^emb, Pgvector.Ecto.Vector))
+          },
+          order_by: fragment("? <-> ?", e.embedding, type(^emb, Pgvector.Ecto.Vector)),
+          limit: ^k
+
+      scoped =
+        base
+        |> then(fn q -> if user_id, do: from(e in q, where: e.user_id == ^user_id), else: q end)
+        |> then(fn q -> if is_list(tokens_any) and tokens_any != [], do: from(e in q, where: fragment("? && ?", e.tokens, ^tokens_any)), else: q end)
+        |> then(fn q -> if is_list(tags_any) and tags_any != [], do: from(e in q, where: fragment("? && ?", e.tags, ^tags_any)), else: q end)
+        |> then(fn q -> if match?(%NaiveDateTime{}, since), do: from(e in q, where: e.inserted_at >= ^since), else: q end)
+
+      Repo.all(scoped)
+    else
+      {:error, reason} ->
+        Logger.warning("Db.Episode.knn/2 skipped: #{reason}")
+        []
+    end
+  end
+
+  defp to_pgvector(%Pgvector{} = v), do: {:ok, v}
+  defp to_pgvector(list) when is_list(list), do: {:ok, Pgvector.new(list)}
+  defp to_pgvector(other), do: {:error, "invalid embedding param: #{inspect(other)}"}
 end
+

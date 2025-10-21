@@ -1,25 +1,25 @@
 defmodule Brain.LIFG.Stage1 do
   @moduledoc """
-  Stage 1 — fast per-token disambiguation from `si.sense_candidates`.
+  Stage 1 — fast per-token disambiguation from `si.sense_candidates` with:
 
-  ## Guardrail highlights (P-202)
-  • HARD REJECT: char-grams → emits [:brain,:lifg,:chargram_violation] and drops.
-  • BOUNDARY GUARD: non word-boundary substrings dropped unless `mw: true`,
-    emits [:brain,:lifg,:boundary_drop].
-  • PUNCT SKIP: punctuation tokens (`kind: :punct` or `pos: "punct"`) are ignored for sense
-    competition (no boundary or char-gram checks, no warnings).
-  • Deterministic tie-breaks, safe spans, and clause-aware "what" nudges.
-  • Optional MWE fallback injection, emits [:brain,:pmtg,:mwe_fallback_emitted].
+  • HARD REJECT: **no char-grams** in the LIFG path (telemetry: `[:brain,:lifg,:chargram_violation]`)
+  • BOUNDARY GUARD: drop non-word-boundary substrings unless `mw: true`
+    (telemetry: `[:brain,:lifg,:boundary_drop]`)
+  • PUNCT SKIP: punctuation tokens don’t compete for senses
+  • **Episode priors**: gentle tie-breaks from `si.evidence[:episodes]` (never override lexical evidence)
+  • **ACC conflict scalar**: 0..1 mismatch between prior vs current evidence
+  • **Flip rule**: on high conflict & thin margin, flip once to next-best and down-weight priors
+  • Optional MWE fallback injection (telemetry: `[:brain,:pmtg,:mwe_fallback_emitted]`)
 
   ### Options
-    :weights          — %{lex_fit, rel_prior, activation, intent_bias}
-    :scores           — :all | :top2 | :none (default from `:lifg_stage1_scores_mode`)
-    :chargram_event   — telemetry (default [:brain, :lifg, :chargram_violation])
-    :boundary_event   — telemetry (default [:brain, :lifg, :boundary_drop])
-    :margin_threshold — default 0.15 (for alt_id emission)
-    :mwe_fallback     — when true (or env `:lifg_stage1_mwe_fallback`), injects a
-                        conservative fallback MWE candidate if an MWE token lacks
-                        compatible MWE senses.
+    :weights            — %{lex_fit, rel_prior, activation, intent_bias}
+    :scores             — :all | :top2 | :none (default from `:lifg_stage1_scores_mode`)
+    :chargram_event     — telemetry event name (default [:brain, :lifg, :chargram_violation])
+    :boundary_event     — telemetry event name (default [:brain, :lifg, :boundary_drop])
+    :margin_threshold   — default 0.15 (alt_id emission / flip sensitivity)
+    :mwe_fallback       — enable conservative MWE fallback (default true via env)
+    :episode_prior_w    — episode prior weight (default from env, soft ≤ 0.25)
+    :acc_flip_threshold — conflict threshold to allow flip (default from env, ~0.70)
   """
 
   require Logger
@@ -61,7 +61,10 @@ defmodule Brain.LIFG.Stage1 do
       margin_threshold = Keyword.get(opts, :margin_threshold, 0.15)
       w = weights(opts)
 
-      choices =
+      # Aggregate (once) the episodic priors from Hippocampus evidence
+      ep_ctx = build_episode_context(si1, opts)
+
+      {choices, acc_max} =
         kept_tokens
         |> Enum.map(fn tok ->
           disambiguate_token(
@@ -70,20 +73,28 @@ defmodule Brain.LIFG.Stage1 do
             scores: scores_mode,
             margin_threshold: margin_threshold,
             weights: w,
-            si: si1
+            si: si1,
+            ep_ctx: ep_ctx
           )
         end)
         |> Enum.reject(&is_nil/1)
+        |> Enum.map_reduce(0.0, fn ch, acc ->
+          lvl = Map.get(ch, :acc_conflict, 0.0)
+          {Map.drop(ch, [:ranked, :audit]), max(acc, lvl)}
+        end)
 
       audit = %{
         stage: :lifg_stage1,
         token_count: length(tokens),
         kept_tokens: length(kept_tokens),
         dropped_tokens: length(dropped),
+        acc_conflict_max: acc_max,
         timing_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
       }
 
-      {:ok, %{si: si1, choices: choices, audit: audit}}
+      si2 = Map.put(si1, :acc_conflict, acc_max)
+
+      {:ok, %{si: si2, choices: choices, audit: audit}}
     rescue
       e ->
         Logger.error("LIFG Stage1 run failed: #{inspect(e)}")
@@ -227,6 +238,7 @@ defmodule Brain.LIFG.Stage1 do
     scores_mode = Keyword.get(opts, :scores, :all)
     w = Map.new(Keyword.get(opts, :weights, []), fn {k, v} -> {k, v} end)
     si = Keyword.get(opts, :si, %{})
+    ep_ctx = Keyword.get(opts, :ep_ctx, %{sense_prior: %{}, intent_prior: %{}, prior_mass: 0.0})
 
     cand_list =
       cand_list
@@ -239,54 +251,72 @@ defmodule Brain.LIFG.Stage1 do
       |> prefer_interrogative_what(tok, si)
       |> compat_filter_for_token(tok)
 
-    raw_scored =
-      Enum.map(cand_list, fn c ->
-        f = extract_features(c, tok, si)
-
-        lex = as_float(f[:lex_fit])
-        rel = as_float(f[:rel_prior])
-        act = as_float(f[:activation])
-        ib = as_float(f[:intent_bias])
-
-        # base + micro nudges
-        bias = context_bias(c, tok, si) + dialect_penalty(c, si)
-
-        base =
-          (w[:lex_fit] || 0.4) * lex +
-            (w[:rel_prior] || 0.3) * rel +
-            (w[:activation] || 0.2) * act +
-            (w[:intent_bias] || 0.1) * ib +
-            bias
-
-        # deterministic micro-nudge to break ties without randomness
-        eps = :erlang.phash2(c.id, 1000) / 1_000_000.0
-
-        %{
-          id: c.id,
-          raw: base + eps,
-          veto?: Map.get(c, :veto?, false)
-        }
-      end)
-
-    if raw_scored == [] do
+    if cand_list == [] do
       nil
     else
+      # Base feature scoring
+      raw_scored =
+        Enum.map(cand_list, fn c ->
+          f = extract_features(c, tok, si)
+
+          lex = as_float(f[:lex_fit])
+          rel = as_float(f[:rel_prior])
+          act = as_float(f[:activation])
+          ib  = as_float(f[:intent_bias])
+
+          # Prior from episodes (by exact sense id; already familiarity-weighted)
+          epw = episode_prior_weight()
+          epp = ep_ctx.sense_prior |> Map.get(c.id, 0.0) |> min(1.0) |> max(0.0)
+
+          # base + micro nudges
+          bias = context_bias(c, tok, si) + dialect_penalty(c, si)
+
+          base =
+            (w[:lex_fit] || 0.4) * lex +
+              (w[:rel_prior] || 0.3) * rel +
+              (w[:activation] || 0.2) * act +
+              (w[:intent_bias] || 0.1) * ib +
+              bias +
+              epw * epp
+
+          # deterministic micro-nudge to break ties without randomness
+          eps = :erlang.phash2(c.id, 1000) / 1_000_000.0
+
+          %{
+            id: c.id,
+            raw: base + eps,
+            veto?: Map.get(c, :veto?, false)
+          }
+        end)
+
+      # Convert to probabilities
       probs =
         raw_scored
         |> Enum.map(& &1.raw)
         |> Brain.LIFG.normalize_scores()
 
-      scored =
+      ranked0 =
         Enum.zip(raw_scored, probs)
         |> Enum.map(fn {%{id: id, raw: r, veto?: veto?}, p} ->
           %{id: id, score: p, raw: r, veto?: veto?}
         end)
         |> Enum.sort_by(&(-&1.score))
 
-      [%{id: top_id, score: p1} | rest] = scored
+      # ACC conflict between episodic prior vector and evidence vector
+      {acc_lvl, prior_vec} = acc_conflict_for_token(ranked0, ep_ctx)
+
+      # Maybe down-weight priors and flip once on high conflict with thin margin
+      ranked =
+        maybe_reconcile_conflict(ranked0, prior_vec,
+          acc_lvl: acc_lvl,
+          margin_threshold: thr,
+          epw: episode_prior_weight()
+        )
+
+      [%{id: top_id, score: p1} | rest] = ranked
 
       second_p =
-        case rest |> Enum.reject(&(&1.id == top_id)) do
+        case rest do
           [%{score: s2} | _] -> s2
           _ -> 0.0
         end
@@ -303,17 +333,160 @@ defmodule Brain.LIFG.Stage1 do
         chosen_id: top_id,
         alt_ids: alt_ids,
         margin: max(p1 - second_p, 0.0),
-        scores: build_scores_map(scored, scores_mode),
-        ranked: scored,
-        audit: %{guards: :ok}
+        scores: build_scores_map(ranked, scores_mode),
+        ranked: ranked,
+        audit: %{guards: :ok},
+        acc_conflict: acc_lvl
       }
 
-      choice = Brain.LIFG.Reanalysis.maybe_promote(choice0)
+      # Keep existing reanalysis hook (no-ops if module absent)
+      choice = maybe_promote(choice0)
+
+      # Telemetry for mismatch (once per token)
+      if acc_lvl > 0.0 do
+        emit([:brain, :acc, :mismatch], %{level: acc_lvl}, %{
+          token_index: idx,
+          top: choice.chosen_id,
+          margin: choice.margin
+        })
+      end
+
       Map.drop(choice, [:ranked, :audit])
     end
   end
 
   defp disambiguate_token(_tok, _cand_list, _opts), do: nil
+
+  # ── Episode priors / ACC conflict ───────────────────────────────────
+
+  # Build a familiarity-weighted prior over sense IDs from si.evidence[:episodes]
+  defp build_episode_context(si, _opts) do
+    eps = get_in(si, [:evidence, :episodes]) || []
+    Enum.reduce(eps, %{sense_prior: %{}, intent_prior: %{}, prior_mass: 0.0}, fn rec, acc ->
+      fam = clamp01(rec[:score] || rec["score"] || 0.0)
+      pri = rec[:priors] || rec["priors"] || %{}
+      senses = Map.get(pri, :senses) || Map.get(pri, "senses") || %{}
+      intent = Map.get(pri, :intent) || Map.get(pri, "intent") || %{}
+
+      sense_prior =
+        Enum.reduce(senses, acc.sense_prior, fn {id, val}, m ->
+          v = (is_number(val) && val) || 0.0
+          Map.update(m, to_string(id), fam * v, &(&1 + fam * v))
+        end)
+
+      intent_prior =
+        Enum.reduce(intent, acc.intent_prior, fn {k, v}, m ->
+          vv = (is_number(v) && v) || 0.0
+          Map.update(m, to_string(k), fam * vv, &(&1 + fam * vv))
+        end)
+
+      %{acc | sense_prior: sense_prior, intent_prior: intent_prior, prior_mass: acc.prior_mass + fam}
+    end)
+    |> normalize_episode_context()
+  end
+
+  defp normalize_episode_context(%{sense_prior: sp, intent_prior: ip} = ctx) do
+    sp_sum = Enum.reduce(sp, 0.0, fn {_k, v}, s -> s + v end)
+    ip_sum = Enum.reduce(ip, 0.0, fn {_k, v}, s -> s + v end)
+
+    %{
+      ctx
+      | sense_prior:
+          (if sp_sum > 0.0, do: Map.new(sp, fn {k, v} -> {k, v / sp_sum} end), else: %{}),
+        intent_prior:
+          (if ip_sum > 0.0, do: Map.new(ip, fn {k, v} -> {k, v / ip_sum} end), else: %{})
+    }
+  end
+
+  # Return {conflict_level, prior_vec_over_ranked_ids}
+  defp acc_conflict_for_token(ranked, ep_ctx) when is_list(ranked) do
+    ids = Enum.map(ranked, & &1.id)
+
+    prior_vec =
+      ids
+      |> Enum.map(fn id -> Map.get(ep_ctx.sense_prior, id, 0.0) end)
+
+    prior_sum = Enum.sum(prior_vec)
+
+    cond do
+      prior_sum <= 0.0 ->
+        {0.0, []}
+
+      true ->
+        # Normalize prior to the candidate simplex
+        q =
+          if prior_sum > 0.0 do
+            Enum.map(prior_vec, &(&1 / prior_sum))
+          else
+            []
+          end
+
+        p = Enum.map(ranked, & &1.score)
+
+        # 1 − overlap (∑ min(p_i, q_i)) is a stable 0..1 mismatch metric
+        overlap =
+          Enum.zip(p, q)
+          |> Enum.reduce(0.0, fn {pi, qi}, s -> s + min(pi, qi) end)
+          |> clamp01()
+
+        {1.0 - overlap, q}
+    end
+  end
+
+  defp acc_conflict_for_token(_ranked, _ctx), do: {0.0, []}
+
+  defp maybe_reconcile_conflict(ranked, prior_vec, opts) do
+    acc_lvl = Keyword.get(opts, :acc_lvl, 0.0)
+    thr = Keyword.get(opts, :margin_threshold, 0.15)
+    flip_thr = acc_flip_threshold()
+    epw = Keyword.get(opts, :epw, 0.20)
+
+    case ranked do
+      [%{score: p1} | rest] ->
+        second = Enum.at(rest, 0)
+        margin = if second, do: max(p1 - second.score, 0.0), else: 1.0
+
+        cond do
+          acc_lvl < flip_thr or margin >= thr or second == nil ->
+            ranked
+
+          true ->
+            # Down-weight episodic priors and recompute a softer distribution between top-2
+            dislike =
+              case prior_vec do
+                [] -> 0.0
+                [q1 | qrest] ->
+                  q2 = (Enum.at(qrest, 0) || 0.0)
+                  max(q2 - q1, 0.0)
+              end
+
+            boost = min(dislike + epw * 0.5, 0.25)
+
+            ranked
+            |> Enum.with_index()
+            |> Enum.map(fn
+              {%{score: s} = r, 0} -> %{r | score: clamp01(s * (1.0 - boost))}
+              {%{score: s} = r, 1} -> %{r | score: clamp01(min(s + boost, 1.0))}
+              {r, _} -> r
+            end)
+            |> Enum.sort_by(&(-&1.score))
+        end
+
+      _ ->
+        ranked
+    end
+  end
+
+  defp episode_prior_weight do
+    w = Application.get_env(:brain, :lifg_stage1_episode_prior_weight, 0.20)
+    w = if is_number(w) and w >= 0.0, do: w, else: 0.20
+    min(w, 0.25)
+  end
+
+  defp acc_flip_threshold do
+    t = Application.get_env(:brain, :lifg_stage1_acc_flip_threshold, 0.70)
+    if is_number(t) and t >= 0.0 and t <= 1.0, do: t, else: 0.70
+  end
 
   # ── Candidate list tweaks ───────────────────────────────────────────
 
@@ -363,7 +536,7 @@ defmodule Brain.LIFG.Stage1 do
 
     norm = String.downcase(phrase)
 
-    if phrase == "I" or norm in ["i'm", "i’m", "im"] do
+    if phrase == "I" or norm in ["i'm", "i’s", "im", "i’m"] do
       pronounish =
         Enum.filter(list, fn c when is_map(c) -> pos_pronoun?(c) or id_pronounish?(c) end)
 
@@ -696,17 +869,7 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  defp lexical_hint(c, tok, _si) do
-    phrase =
-      (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "") |> to_string() |> String.downcase()
-
-    lemma =
-      (Map.get(c, :lemma) || Map.get(c, :word) || get_in(c, [:features, :lemma]) || "")
-      |> to_string()
-      |> String.downcase()
-
-    if lemma != "" and phrase != "" and String.starts_with?(phrase, lemma), do: 0.05, else: 0.0
-  end
+  defp lexical_hint(_c, _tok, _si), do: 0.0
 
   # Add small context nudges; also add clause-aware "what" bias
   defp context_bias(c, tok, si) do
@@ -917,5 +1080,34 @@ defmodule Brain.LIFG.Stage1 do
       String.contains?(norm, " ")
     end)
   end
+
+  # ── Reanalysis hook (tolerant if module missing) ────────────────────
+
+  defp maybe_promote(choice) do
+    try do
+      if Code.ensure_loaded?(Brain.LIFG.Reanalysis) and
+           function_exported?(Brain.LIFG.Reanalysis, :maybe_promote, 1) do
+        Brain.LIFG.Reanalysis.maybe_promote(choice)
+      else
+        choice
+      end
+    rescue
+      _ -> choice
+    catch
+      _, _ -> choice
+    end
+  end
+
+  # ── Clamp helpers ───────────────────────────────────────────────────
+
+  defp clamp01(v) when is_number(v) do
+    cond do
+      v < 0.0 -> 0.0
+      v > 1.0 -> 1.0
+      true -> v
+    end
+  end
+
+  defp clamp01(_), do: 0.0
 end
 

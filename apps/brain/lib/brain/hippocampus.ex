@@ -4,14 +4,23 @@ defmodule Brain.Hippocampus do
 
   Public API:
     • encode/2 — record an episode and return the `slate` unchanged (de-dup on head).
-    • recall/2 — rank prior episodes by Jaccard×recency with optional scope/min_jaccard.
+    • recall/2 — rank prior episodes with optional source:
+        :memory (default), :db (pgvector), or :hybrid (merge).
     • attach_episodes/2 — write recall results to `si.evidence[:episodes]`.
     • configure/1, reset/0, snapshot/0 — runtime config and inspection.
+
+  Notes
+  -----
+  • DB recall can use an `:embedding` in opts (list(float) or %Pgvector{}).
+    If missing and :source is :db or :hybrid, we fall back to memory-only recall.
+  • The recall `score` is treated as **familiarity**. We optionally apply an
+    **outcome uplift** (bounded) based on `episode.meta[:outcome_score]`.
   """
 
   use GenServer
 
   alias Brain.Hippocampus.{Window, Recall, Normalize, Evidence, Config, Telemetry}
+  alias Brain.Hippocampus.DB
 
   @type slate :: map()
   @type meta :: map()
@@ -36,6 +45,8 @@ defmodule Brain.Hippocampus do
   Options (per-call override):
     • :limit, :half_life_ms, :min_jaccard, :scope
     • :ignore_head — :auto | :always | :never | false
+    • :source — :memory | :db | :hybrid (defaults to configured `recall_source`)
+    • :embedding — required if :source is :db or :hybrid (query vector)
 
   NOTE: Default is `ignore_head: false` so the most recent (head) episode
   is included unless you explicitly opt out. This matches tests expecting
@@ -52,8 +63,11 @@ defmodule Brain.Hippocampus do
     • Builds robust cues from `opts[:cues]` or from `si` (winners/atl_slate/tokens/sentence).
     • Calls `recall/2` with `ignore_head: false` (unless provided) and permissive `min_jaccard: 0.0` by default.
     • Applies optional `:scope` filtering locally (atom-or-string meta keys accepted).
+    • Pass-through opts such as `:source` and `:embedding` are honored.
 
-  Returns `si` with `:evidence[:episodes]` set.
+  Returns `si` with `:evidence[:episodes]` set. Each item will include:
+    • :score (familiarity after outcome uplift), :at, :episode
+    • :priors (maps for :senses / :intent when derivable), :hint (short debug text)
   """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
@@ -69,6 +83,7 @@ defmodule Brain.Hippocampus do
     episodes_unfiltered =
       __MODULE__.recall(cues, opts2)
       |> Enum.map(&Evidence.ensure_winners_for_evidence/1)
+      |> Enum.map(&standardize_for_evidence/1)
 
     episodes_scoped =
       case scope do
@@ -83,7 +98,7 @@ defmodule Brain.Hippocampus do
         [] ->
           case snapshot().window do
             [{at, ep} | _] ->
-              [%{score: 0.0, at: at, episode: ep} |> Evidence.ensure_winners_for_evidence()]
+              [%{score: 0.0, at: at, episode: ep} |> Evidence.ensure_winners_for_evidence() |> standardize_for_evidence()]
             _ ->
               []
           end
@@ -98,7 +113,7 @@ defmodule Brain.Hippocampus do
 
   @doc """
   Configure runtime options. Accepts any of:
-    :window_keep (or :keep), :half_life_ms, :recall_limit, :min_jaccard
+    :window_keep (or :keep), :half_life_ms, :recall_limit, :min_jaccard, :recall_source
   """
   @spec configure(keyword()) :: :ok
   def configure(opts) when is_list(opts),
@@ -152,16 +167,16 @@ defmodule Brain.Hippocampus do
               {:append, nil}
           end
 
-        {window2, meta_final} =
+        {window2, meta_final, at_written, ep_written} =
           case action do
             :refresh ->
               ep = %{slate: slate, meta: head_meta, norms: norms}
-              {Window.append_or_refresh_head(state.window, ep, state.window_keep), head_meta}
+              {Window.append_or_refresh_head(state.window, ep, state.window_keep), head_meta, state.last_at || now_ms(), ep}
 
             :append ->
               ep = %{slate: slate, meta: meta_in, norms: norms}
               at = now_ms()
-              {Window.trim([{at, ep} | state.window], state.window_keep), meta_in}
+              {Window.trim([{at, ep} | state.window], state.window_keep), meta_in, at, ep}
           end
 
         Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta_final})
@@ -173,13 +188,16 @@ defmodule Brain.Hippocampus do
           %{meta: meta_final}
         )
 
+        # Optional persistence (safe no-op if disabled or schema missing)
+        maybe_persist(at_written, ep_written)
+
         new_last =
           case window2 do
             [{at, e} | _] when is_integer(at) -> {at, e}
             _ -> nil
           end
 
-        {:reply, :ok, %{state | window: window2, last: new_last}}
+        {:reply, :ok, %{state | window: window2, last: new_last, last_at: elem(new_last || {nil, nil}, 0)}}
     end
   end
 
@@ -194,28 +212,136 @@ defmodule Brain.Hippocampus do
     ignore_head = Map.get(opts, :ignore_head, false)
     scope_opt   = Map.get(opts, :scope, nil)
 
-    {ranked0, meas, meta_map} =
-      Recall.run(cues, state.window,
-        limit: limit,
-        recall_limit: limit,
-        half_life_ms: half_life_ms,
-        min_jaccard: min_jacc,
-        scope: scope_opt,
-        ignore_head: ignore_head
-      )
+    source =
+      opts
+      |> Map.get(:source, state.opts.recall_source)
+      |> Config.normalize_source()
 
-    ranked =
-      ranked0
-      |> Enum.filter(fn
-        %{score: s} when is_number(s) -> s > 0.0
-        _ -> false
-      end)
-      |> Enum.take(limit)
+    outcome_w = outcome_weight()
 
-    Telemetry.emit_recall(meas, meta_map)
-    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, meta_map)
+    case source do
+      :memory ->
+        {ranked0, meas, meta_map} =
+          Recall.run(cues, state.window,
+            limit: limit,
+            recall_limit: limit,
+            half_life_ms: half_life_ms,
+            min_jaccard: min_jacc,
+            scope: scope_opt,
+            ignore_head: ignore_head
+          )
 
-    {:reply, ranked, state}
+        ranked =
+          ranked0
+          |> Enum.filter(fn
+            %{score: s} when is_number(s) -> s > 0.0
+            _ -> false
+          end)
+          |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+          |> Enum.sort_by(& &1.score, :desc)
+          |> Enum.take(limit)
+
+        Telemetry.emit_recall(Map.merge(meas, %{source: :memory}), meta_map)
+        Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], Map.merge(meas, %{source: :memory}), meta_map)
+
+        {:reply, ranked, state}
+
+      :db ->
+        embedding = Map.get(opts, :embedding)
+
+        if is_nil(embedding) do
+          # Fallback to memory if embedding is not provided
+          {ranked0, meas, meta_map} =
+            Recall.run(cues, state.window,
+              limit: limit,
+              recall_limit: limit,
+              half_life_ms: half_life_ms,
+              min_jaccard: min_jacc,
+              scope: scope_opt,
+              ignore_head: ignore_head
+            )
+
+          ranked =
+            ranked0
+            |> Enum.filter(fn
+              %{score: s} when is_number(s) -> s > 0.0
+              _ -> false
+            end)
+            |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+            |> Enum.sort_by(& &1.score, :desc)
+            |> Enum.take(limit)
+
+          Telemetry.emit_recall(Map.merge(meas, %{source: :memory, fallback: :missing_embedding}), meta_map)
+          Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], Map.merge(meas, %{source: :memory}), meta_map)
+
+          {:reply, ranked, state}
+        else
+          db_opts =
+            opts
+            |> Map.put_new(:k, limit)
+            |> Map.put_new(:tau_s, div(half_life_ms, 1000))
+            |> Map.put_new(:min_sim, 0.35)
+
+          ranked =
+            DB.recall(Map.to_list(db_opts))
+            |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+            |> Enum.sort_by(& &1.score, :desc)
+            |> Enum.take(limit)
+
+          meas = %{k: length(ranked), source: :db}
+          Telemetry.emit_recall(meas, %{source: :db})
+          Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, %{source: :db})
+
+          {:reply, ranked, state}
+        end
+
+      :hybrid ->
+        # Memory path
+        {mem_ranked0, _meas_mem, _meta_mem} =
+          Recall.run(cues, state.window,
+            limit: limit,
+            recall_limit: limit,
+            half_life_ms: half_life_ms,
+            min_jaccard: min_jacc,
+            scope: scope_opt,
+            ignore_head: ignore_head
+          )
+
+        mem_ranked =
+          mem_ranked0
+          |> Enum.filter(fn
+            %{score: s} when is_number(s) -> s > 0.0
+            _ -> false
+          end)
+          |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+
+        # DB path (only if embedding provided)
+        embedding = Map.get(opts, :embedding)
+
+        db_ranked =
+          if is_nil(embedding) do
+            []
+          else
+            opts
+            |> Map.put_new(:k, limit)
+            |> Map.put_new(:tau_s, div(half_life_ms, 1000))
+            |> Map.put_new(:min_sim, 0.35)
+            |> Map.to_list()
+            |> DB.recall()
+            |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+          end
+
+        ranked =
+          (mem_ranked ++ db_ranked)
+          |> Enum.sort_by(& &1.score, :desc)
+          |> Enum.take(limit)
+
+        meas = %{mem_k: length(mem_ranked), db_k: length(db_ranked), source: :hybrid, had_embedding?: not is_nil(embedding)}
+        Telemetry.emit_recall(meas, %{source: :hybrid})
+        Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, %{source: :hybrid})
+
+        {:reply, ranked, state}
+    end
   end
 
   @impl true
@@ -240,12 +366,18 @@ defmodule Brain.Hippocampus do
       |> Map.get(:min_jaccard, state.opts.min_jaccard)
       |> Config.normalize_min_jaccard()
 
+    recall_source =
+      opts
+      |> Map.get(:recall_source, state.opts.recall_source)
+      |> Config.normalize_source()
+
     new_opts =
       state.opts
       |> Map.put(:window_keep, keep)
       |> Map.put(:half_life_ms, half_life)
       |> Map.put(:recall_limit, recall_limit)
       |> Map.put(:min_jaccard, min_jaccard)
+      |> Map.put(:recall_source, recall_source)
 
     {:reply, :ok,
      %{state | window_keep: keep, opts: new_opts, window: Window.trim(state.window, keep)}}
@@ -264,11 +396,13 @@ defmodule Brain.Hippocampus do
       window_keep: Config.defaults().window_keep,
       window: [],
       last: nil,
+      last_at: nil,
       opts: %{
         window_keep: Config.defaults().window_keep,
         half_life_ms: Config.defaults().half_life_ms,
         recall_limit: Config.defaults().recall_limit,
-        min_jaccard: Config.defaults().min_jaccard
+        min_jaccard: Config.defaults().min_jaccard,
+        recall_source: Config.defaults().recall_source
       }
     }
   end
@@ -344,5 +478,125 @@ defmodule Brain.Hippocampus do
   end
 
   defp meta_matches_scope?(_rec, _scope), do: false
+
+  # ───────────── Outcome uplift & evidence standardization ─────────────
+
+  defp apply_outcome_uplift(%{score: s} = rec, outcome_w) when is_number(s) do
+    outcome =
+      case rec do
+        %{episode: %{meta: meta}} when is_map(meta) ->
+          meta[:outcome_score] || meta["outcome_score"] || 0.0
+        _ ->
+          0.0
+      end
+
+    # Bound outcome in [-1, 1]. Positive outcome boosts; negative dampens slightly.
+    o = clamp(outcome, -1.0, 1.0)
+    factor =
+      cond do
+        o > 0.0 -> 1.0 + outcome_w * o
+        o < 0.0 -> max(0.0, 1.0 + (outcome_w * 0.5) * o) # smaller penalty
+        true    -> 1.0
+      end
+
+    score2 = clamp01(s * factor)
+    Map.put(rec, :score, score2)
+  end
+
+  defp apply_outcome_uplift(rec, _w), do: rec
+
+  defp outcome_weight do
+    w = Application.get_env(:brain, :episodes_outcome_weight, 0.25)
+    if is_number(w) and w >= 0, do: min(w, 1.0), else: 0.25
+  end
+
+  defp standardize_for_evidence(%{score: s, at: at, episode: ep} = rec) do
+    priors = priors_from_meta(ep[:meta] || %{})
+    hint   = hint_from_meta(ep[:meta] || %{})
+
+    rec
+    |> Map.put(:priors, priors)
+    |> Map.put(:hint, hint)
+    |> Map.put(:score, clamp01(s))
+    |> Map.put(:at, at)
+    |> Map.put(:episode, ep)
+  end
+
+  defp priors_from_meta(meta) when is_map(meta) do
+    senses =
+      case meta[:senses_prior] || meta["senses_prior"] do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    intent =
+      case meta[:intent_prior] || meta["intent_prior"] || meta[:intent] || meta["intent"] do
+        m when is_map(m) -> m
+        s when is_binary(s) -> %{s => 1.0}
+        _ -> %{}
+      end
+
+    %{senses: senses, intent: intent}
+  end
+
+  defp hint_from_meta(meta) do
+    parts =
+      [
+        (meta[:route] || meta["route"]) && "route=#{meta[:route] || meta["route"]}",
+        (meta[:keyword] || meta["keyword"]) && "kw=#{meta[:keyword] || meta["keyword"]}",
+        (is_number(meta[:conflict] || meta["conflict"])) && "conf=#{Float.round((meta[:conflict] || meta["conflict"]) * 100, 1)}%",
+        (is_number(meta[:outcome_score] || meta["outcome_score"])) && "out=#{Float.round(meta[:outcome_score] || meta["outcome_score"], 2)}"
+      ]
+      |> Enum.filter(& &1)
+
+    Enum.join(parts, " · ")
+  end
+
+  defp clamp01(v) when is_number(v), do: clamp(v, 0.0, 1.0)
+  defp clamp01(_), do: 0.0
+
+  defp clamp(v, lo, hi) when is_number(v) and is_number(lo) and is_number(hi) and lo <= hi do
+    cond do
+      v < lo -> lo
+      v > hi -> hi
+      true -> v
+    end
+  end
+
+  # ───────────── Optional persistence (safe no-op if disabled/missing) ─────────────
+
+  defp maybe_persist(at, %{slate: slate, meta: meta, norms: norms}) do
+    case Application.get_env(:brain, :episodes_persist, :off) do
+      :db ->
+        # Best-effort: only if Db.Episode is available and has insert/enqueue API.
+        cond do
+          Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :enqueue_write, 1) ->
+            try do
+              Db.Episode.enqueue_write(%{at: at, slate: slate, meta: meta, norms: MapSet.to_list(norms)})
+            rescue
+              _ -> :ok
+            catch
+              _, _ -> :ok
+            end
+
+          Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :insert, 1) ->
+            try do
+              _ = Db.Episode.insert(%{at: at, slate: slate, meta: meta, norms: MapSet.to_list(norms)})
+            rescue
+              _ -> :ok
+            catch
+              _, _ -> :ok
+            end
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp maybe_persist(_at, _ep), do: :ok
 end
 

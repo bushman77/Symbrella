@@ -200,20 +200,20 @@ defmodule Brain do
   end
 
   # ───────────────────────── GenServer callbacks ──────────────────────────────
-
-  @impl true
-  def init(:ok) do
-    {:ok,
-     %{
-       history: [],
-       active_cells: %{},
-       attention: %{},
-       wm: [],
-       wm_cfg: @wm_defaults,
-       activation_log: [],
-       wm_last_ms: nil
-     }}
-  end
+@impl true
+def init(:ok) do
+  {:ok,
+   %{
+     history: [],
+     active_cells: %{},
+     attention: %{},
+     wm: [],
+     wm_cfg: @wm_defaults,
+     activation_log: [],
+     wm_last_ms: nil,
+     last_intent: nil     # ← NEW
+   }}
+end
 
   # group all handle_call/3 together
 
@@ -339,6 +339,11 @@ defmodule Brain do
     end
   end
 
+@impl true
+def handle_call(:latest_intent, _from, state),
+  do: {:reply, state.last_intent, state}
+
+
   # group all handle_cast/2 together
 
   @impl true
@@ -383,7 +388,19 @@ defmodule Brain do
     {:noreply, state}
   end
 
+@impl true
+def handle_cast({:set_latest_intent, m}, state) do
+  {:noreply, %{state | last_intent: normalize_intent_map(m)}}
+end
+
   # ───────────────────────── Public helper: recall → WM ───────────────────────
+
+@spec latest_intent() :: map() | nil
+def latest_intent, do: gencall(@name, :latest_intent)
+
+@spec set_latest_intent(map()) :: :ok
+def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent, m})
+
 
   @doc """
   Recall from Hippocampus and gate results into WM.
@@ -487,6 +504,39 @@ defmodule Brain do
   end
 
   # ───────────────────────── Centralized WM gating logic ──────────────────────
+defp normalize_intent_map(m) do
+  intent0 = m[:intent] || m["intent"]
+  intent =
+    cond do
+      is_atom(intent0) -> intent0
+      is_binary(intent0) ->
+        try do
+          String.to_existing_atom(intent0)
+        rescue
+          _ -> :unknown
+        end
+      true -> :unknown
+    end
+
+  kw = m[:keyword] || m["keyword"] || ""
+  conf0 = m[:confidence] || m["confidence"] || 0.0
+  conf =
+    cond do
+      is_number(conf0) -> conf0 * 1.0
+      is_binary(conf0) ->
+        case Float.parse(conf0) do
+          {f, _} -> f
+          _ -> 0.0
+        end
+      true -> 0.0
+    end
+
+  at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
+
+  %{intent: intent, keyword: to_string(kw), confidence: conf, at_ms: at_ms}
+end
+
+
 
   defp do_focus(state, cands_or_si, _opts) do
     now = System.system_time(:millisecond)

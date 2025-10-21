@@ -1,23 +1,35 @@
 defmodule Brain.Hippocampus.Config do
-  @moduledoc "Defaults and normalizers for Hippocampus."
+  @moduledoc """
+  Defaults and normalizers for Hippocampus.
+
+  Adds a `:recall_source` knob to choose the recall backend:
+    • :memory — current in-memory window (default)
+    • :db     — pgvector-backed recall via Db.Episode
+    • :hybrid — merge memory + db results
+  """
 
   @default_keep 300
   @default_half_life 300_000
   @default_recall_limit 3
   @default_min_jaccard 0.0
+  @default_recall_source :memory
+
+  @type recall_source :: :memory | :db | :hybrid
 
   @spec defaults() :: %{
           window_keep: pos_integer(),
           half_life_ms: pos_integer(),
           recall_limit: pos_integer(),
-          min_jaccard: float()
+          min_jaccard: float(),
+          recall_source: recall_source()
         }
   def defaults do
     %{
       window_keep: @default_keep,
       half_life_ms: @default_half_life,
       recall_limit: @default_recall_limit,
-      min_jaccard: @default_min_jaccard
+      min_jaccard: @default_min_jaccard,
+      recall_source: @default_recall_source
     }
   end
 
@@ -37,6 +49,26 @@ defmodule Brain.Hippocampus.Config do
   def normalize_min_jaccard(x) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
   def normalize_min_jaccard(_), do: @default_min_jaccard
 
+  @doc """
+  Normalize a recall source. Accepts atoms (:memory | :db | :hybrid)
+  or strings ("memory" | "db" | "hybrid" | short forms like "mem").
+  """
+  @spec normalize_source(any()) :: recall_source()
+  def normalize_source(v) when v in [:memory, :db, :hybrid], do: v
+
+  def normalize_source(v) when is_binary(v) do
+    case String.downcase(v) do
+      "memory" -> :memory
+      "mem" -> :memory
+      "db" -> :db
+      "database" -> :db
+      "hybrid" -> :hybrid
+      _ -> @default_recall_source
+    end
+  end
+
+  def normalize_source(_), do: @default_recall_source
+
   @spec test_env?() :: boolean()
   def test_env? do
     mix_env =
@@ -45,3 +77,4 @@ defmodule Brain.Hippocampus.Config do
     mix_env == :test
   end
 end
+
