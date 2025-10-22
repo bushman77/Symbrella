@@ -56,7 +56,8 @@ defmodule Symbrella.Application do
       # Brain.BasalGanglia
       # --- Global brain clock + neuromodulators ---
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
-      {Brain.MoodCore, []}
+      {Brain.MoodCore, []},
+      {Brain.MoodPolicy, []}
 
     ]
 
