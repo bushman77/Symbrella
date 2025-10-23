@@ -6,8 +6,8 @@ defmodule SymbrellaWeb.Application do
   def start(_type, _args) do
     children = [
       SymbrellaWeb.Telemetry,
-      {Phoenix.PubSub, name: Symbrella.PubSub},
       SymbrellaWeb.Endpoint
+      # NOTE: PubSub is started in :symbrella (core) as {Phoenix.PubSub, name: Symbrella.PubSub}
     ]
 
     opts = [strategy: :one_for_one, name: SymbrellaWeb.Supervisor]
@@ -20,3 +20,4 @@ defmodule SymbrellaWeb.Application do
     :ok
   end
 end
+

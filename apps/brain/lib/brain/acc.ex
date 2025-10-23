@@ -1,300 +1,299 @@
-# apps/brain/lib/brain/acc.ex
 defmodule Brain.ACC do
   @moduledoc """
-  **Anterior Cingulate Cortex (ACC) — conflict monitoring.**
+  ACC — conflict/uncertainty monitor, modulated by mood, with decay.
 
-  Computes a scalar **conflict** score from LIFG choices and flags **needy**
-  items (low margin / low p_top1 / has alternatives). Emits telemetry and keeps
-  a small rolling window for status.
+  Listens:
+    • [:curiosity, :proposal]   (optional fields: uncertainty, risk, entropy)
+    • [:brain, :mood, :update]  (Expl/Inhib/Vigil/Plast snapshot)
+    • [:brain, :cycle, :tick]   (for clock-coupled decay)
 
-  ### Telemetry
-  - `[:brain, :acc, :conflict]`
-    - **measurements:** `%{conflict, needy, n}`
-    - **metadata:** `%{tau_m, p_min, weights}`
+  Emits:
+    • [:brain, :acc, :conflict]
+      measurements: %{conflict: 0.0..1.0}
+      metadata: %{cause: :tick | :proposal, mood_snapshot: map() | nil, weights: map() | nil, halflife_ms: non_neg_integer(), v: 2}
 
-  ### Config (in `:brain`)
-  - `:acc_tau_margin` (default `0.20`) — margin threshold for “confident”
-  - `:acc_p_min` (default `0.65`) — minimum p(top1) to avoid “needy”
-  - `:acc_weights` (default `%{margin: 0.40, p_top1: 0.30, entropy: 0.20, alts: 0.10}`)
-  - `:acc_window_keep` (default `50`) — rolling window length
+  Public API:
+    set_params/2, get_params/1
   """
 
   use Brain, region: :acc
   require Logger
-  alias Brain.Utils.Safe
 
-  @type choice :: map()
-  @type si :: map()
+  @cur_handler_prefix  "brain-acc-curiosity-"
+  @mood_handler_prefix "brain-acc-mood-"
+  @clk_handler_prefix  "brain-acc-clock-"
 
-  # ───────────────────────────── Public API ─────────────────────────────
+  @impl GenServer
+  def init(opts) do
+    opts_kw = normalize_opts(opts)
+
+    state = %{
+      region: :acc,
+      opts: opts_kw,
+      mood: nil,
+      conflict: 0.0,
+      last_ts: now_ms(),
+      # predefine so map updates can never crash
+      cur_handler: nil,
+      mood_handler: nil,
+      clk_handler: nil
+    }
+
+    cur_id  = unique(@cur_handler_prefix)
+    mood_id = unique(@mood_handler_prefix)
+    clk_id  = unique(@clk_handler_prefix)
+
+    :ok = :telemetry.attach(cur_id,  [:curiosity, :proposal],  &__MODULE__.on_curiosity/4,  %{pid: self()})
+    :ok = :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
+    :ok = :telemetry.attach(clk_id,  [:brain, :cycle, :tick],  &__MODULE__.on_tick/4,        %{pid: self()})
+
+    {:ok,
+      state
+      |> Map.put(:cur_handler, cur_id)
+      |> Map.put(:mood_handler, mood_id)
+      |> Map.put(:clk_handler, clk_id)
+    }
+  end
+
+  @impl GenServer
+  def terminate(_reason, %{cur_handler: cur, mood_handler: mood, clk_handler: clk}) do
+    if is_binary(cur),  do: :telemetry.detach(cur)
+    if is_binary(mood), do: :telemetry.detach(mood)
+    if is_binary(clk),  do: :telemetry.detach(clk)
+    :ok
+  end
+  def terminate(_, _), do: :ok
+
+  # ---- Public API -----------------------------------------------------------
 
   @doc """
-  Assess conflict for a set of LIFG `choices`.
+  Adjust weights/half-life/caps live.
 
-  Returns:
-    `{:ok, %{si, conflict: float, needy: [choice()], audit: map()}}`
-
-  Notes:
-  * `p_top1` is derived from, in order: `ch.probs[chosen_id]`, `ch.p_top1`, then
-    `max(ch.scores)` as a last resort.
-  * Entropy is computed over available **probabilities** when present; falls back
-    to normalized entropy over scores.
+  Keys:
+    :halflife_ms       (default 8_000)
+    :proposal_alpha    (default 0.6)
+    :weights           %{vigil: +0.35, inhib: +0.30, expl: -0.20, plast: -0.10}
+    :cap_per_proposal  (default 0.20)
   """
-  @spec assess(si(), [choice()], keyword()) ::
-          {:ok, %{si: si(), conflict: float(), needy: [choice()], audit: map()}}
-  def assess(si, choices, opts \\ [])
-      when is_map(si) and is_list(choices) and is_list(opts) do
-    t0 = System.monotonic_time()
+  def set_params(server \\ __MODULE__, opts) when is_list(opts) or is_map(opts),
+    do: GenServer.call(server, {:set_params, opts})
 
-    cfg = load_cfg(opts)
+  @doc "Returns effective params."
+  def get_params(server \\ __MODULE__), do: GenServer.call(server, :get_params)
 
-    feats = Enum.map(choices, &features_for_choice/1)
+  # ---- Telemetry bridges ----------------------------------------------------
 
-    conflict =
-      feats
-      |> Enum.map(&conflict_component(&1, cfg))
-      |> average()
-      |> clamp01()
+  def on_curiosity(_e, meas, meta, %{pid: pid}) when is_pid(pid),
+    do: send(pid, {:proposal, meas, meta})
+  def on_curiosity(_,_,_,_), do: :ok
 
-    needy =
-      Enum.zip(choices, feats)
-      |> Enum.filter(fn {ch, f} -> needy?(ch, f, cfg) end)
-      |> Enum.map(fn {ch, _} -> ch end)
+  def on_mood_update(_e, meas, meta, %{pid: pid}) when is_pid(pid),
+    do: send(pid, {:mood, meas, meta})
+  def on_mood_update(_,_,_,_), do: :ok
+
+  def on_tick(_e, meas, _meta, %{pid: pid}) when is_pid(pid),
+    do: send(pid, {:tick, (meas[:dt_ms] || 0)})
+  def on_tick(_,_,_,_), do: :ok
+
+  # ---- GenServer callbacks --------------------------------------------------
+
+  @impl GenServer
+  def handle_call({:set_params, opts_in}, _from, state) do
+    opts_norm = normalize_opts(opts_in)
+    {:reply, :ok, %{state | opts: Keyword.merge(state.opts, opts_norm)}}
+  end
+
+  @impl GenServer
+  def handle_call(:get_params, _from, state) do
+    {:reply, effective_params(state.opts), state}
+  end
+
+  @impl GenServer
+  def handle_info({:mood, meas, _meta}, state) do
+    mood = %{
+      exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
+      inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
+      vigilance:   get_num(meas, :vigilance,   0.5) |> clamp01(),
+      plasticity:  get_num(meas, :plasticity,  0.5) |> clamp01()
+    }
+    {:noreply, %{state | mood: mood}}
+  end
+
+  @impl GenServer
+  def handle_info({:tick, _dt_ms}, state) do
+    %{halflife_ms: hl} = effective_params(state.opts)
+
+    now = now_ms()
+    dt  = max(now - state.last_ts, 0)
+    fac = :math.pow(0.5, dt / max(hl, 1.0))
+
+    conflict = 0.5 + (state.conflict - 0.5) * fac
+    st = %{state | conflict: conflict, last_ts: now}
 
     :telemetry.execute(
       [:brain, :acc, :conflict],
-      %{conflict: conflict, needy: length(needy), n: length(choices)},
-      %{tau_m: cfg.tau_m, p_min: cfg.p_min, weights: cfg.weights}
+      %{conflict: conflict},
+      %{cause: :tick, mood_snapshot: state.mood, weights: nil, halflife_ms: hl, v: 2}
     )
 
-    audit = %{
-      stage: :acc,
-      n: length(choices),
-      needy: length(needy),
-      conflict: conflict,
-      timing_ms: elapsed_ms_since(t0),
-      tau_m: cfg.tau_m,
-      p_min: cfg.p_min,
-      weights: cfg.weights
-    }
-
-    {:ok,
-     %{
-       si:
-         push_trace(si, %{
-           stage: :acc,
-           conflict: conflict,
-           needy: length(needy)
-         }),
-       conflict: conflict,
-       needy: needy,
-       audit: audit
-     }}
+    {:noreply, st}
   end
 
-  @doc "Server status (rolling window + last assessment payload)."
-  @spec status(pid() | module()) :: map()
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+  @impl GenServer
+  def handle_info({:proposal, meas, _meta}, state) do
+    %{
+      proposal_alpha: alpha,
+      cap_per_proposal: cap,
+      weights: w,
+      halflife_ms: hl
+    } = effective_params(state.opts)
 
-  # ───────────────────────────── GenServer ─────────────────────────────
-
-  @impl true
-  def init(opts) do
-    keep = Keyword.get(opts, :window_keep, Application.get_env(:brain, :acc_window_keep, 50))
-
-    {:ok,
-     %{
-       region: :acc,
-       window_keep: keep,
-       window: [],
-       last: nil,
-       opts: Map.new(opts)
-     }}
-  end
-
-  @impl true
-  def handle_call(:status, _from, state), do: {:reply, state, state}
-
-  @impl true
-  def handle_cast({:record, payload}, state) do
-    ts = System.system_time(:millisecond)
-    win = [{ts, payload} | state.window] |> Enum.take(state.window_keep)
-    {:noreply, %{state | window: win, last: payload}}
-  end
-
-  # ───────────────────────────── Internals ─────────────────────────────
-
-  # ---- Config ----
-
-  @doc false
-  defp load_cfg(opts) do
-    tau_m =
-      Keyword.get(opts, :tau_confident, Application.get_env(:brain, :acc_tau_margin, 0.20)) * 1.0
-
-    p_min =
-      Keyword.get(opts, :p_min, Application.get_env(:brain, :acc_p_min, 0.65)) * 1.0
-
-    weights_env =
-      Application.get_env(:brain, :acc_weights, %{
-        margin: 0.40,
-        p_top1: 0.30,
-        entropy: 0.20,
-        alts: 0.10
-      })
-
-    weights = Map.merge(weights_env, Map.new(Keyword.get(opts, :weights, [])))
-
-    %{tau_m: tau_m, p_min: p_min, weights: weights}
-  end
-
-  # ---- Trace & window ----
-
-  @doc false
-  defp push_trace(si, ev) do
-    si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
-    GenServer.cast(__MODULE__, {:record, %{ev: ev, tokens: Map.get(si2, :tokens)}})
-    si2
-  end
-
-  # ---- Conflict math ----
-
-  @doc false
-  defp conflict_component(%{margin: m, p1: p1, entropy: h, alts: a}, %{tau_m: tau, weights: w}) do
-    m_norm = 1.0 - min(safe_div(m, max(tau, 1.0e-9)), 1.0)
-    p_norm = 1.0 - p1
-    e_norm = clamp01(h)
-    a_norm = clamp01(a)
-
-    (Map.get(w, :margin, 0.0) * m_norm) +
-      (Map.get(w, :p_top1, 0.0) * p_norm) +
-      (Map.get(w, :entropy, 0.0) * e_norm) +
-      (Map.get(w, :alts, 0.0) * a_norm)
-  end
-
-  @doc false
-  defp needy?(ch, f, %{tau_m: tau_m, p_min: p_min}) do
-    m = Safe.get(ch, :margin, 0.0) || 0.0
-    alts? = (Safe.get(ch, :alt_ids, []) || []) != []
-
-    (is_number(m) and m < tau_m) or (is_number(f.p1) and f.p1 < p_min) or alts?
-  end
-
-  # ---- Feature extraction ----
-
-  @doc false
-  @spec features_for_choice(choice()) :: %{
-          p1: float(),
-          margin: float(),
-          entropy: float(),
-          alts: float(),
-          token_index: non_neg_integer()
-        }
-  defp features_for_choice(ch0) do
-    ch = Safe.to_plain(ch0)
-
-    probs = as_map(Safe.get(ch, :probs, %{}))
-    scores = as_map(Safe.get(ch, :scores, %{}))
-    chosen_id = Safe.get(ch, :chosen_id, nil)
-
-    p1 =
-      cond do
-        is_binary(chosen_id) and is_map(probs) and is_number(Map.get(probs, chosen_id)) ->
-          Map.get(probs, chosen_id) * 1.0
-
-        is_number(Safe.get(ch, :p_top1, nil)) ->
-          Safe.get(ch, :p_top1, 0.0) * 1.0
-
-        true ->
-          score_max =
-            scores
-            |> Map.values()
-            |> Enum.max(fn -> 0.0 end)
-
-          score_max * 1.0
-      end
+    # If uncertainty/entropy are absent, risk becomes the fallback (possibly 0.0).
+    obs =
+      (get_num(meas, :uncertainty, nil) ||
+       get_num(meas, :entropy,    nil) ||
+       get_num(meas, :risk,       0.0))
       |> clamp01()
 
-    # Prefer entropy of probs (if present), else of normalized scores
-    {dist, k} =
-      if map_size(probs) > 0 do
-        {probs, map_size(probs)}
-      else
-        nd = normalize_dist(scores)
-        {nd, map_size(nd)}
-      end
+    dx = if state.mood do
+      %{
+        vigil: (state.mood.vigilance   - 0.5),
+        inhib: (state.mood.inhibition  - 0.5),
+        expl:  (state.mood.exploration - 0.5),
+        plast: (state.mood.plasticity  - 0.5)
+      }
+    else
+      %{vigil: 0.0, inhib: 0.0, expl: 0.0, plast: 0.0}
+    end
 
-    h_raw = entropy(dist)
-    h_den = :math.log(max(k, 2))
-    entropy01 = if h_den > 0.0, do: h_raw / h_den, else: 0.0
+    mood_term =
+      dx.vigil * w.vigil +
+      dx.inhib * w.inhib +
+      dx.expl  * w.expl  +
+      dx.plast * w.plast
 
-    altc = Safe.get(ch, :alt_ids, []) |> List.wrap() |> length()
-    margin = (Safe.get(ch, :margin, 0.0) || 0.0) * 1.0
+    target = clamp01(obs + max(-cap, min(cap, mood_term)))
+    conflict = clamp01((1.0 - alpha) * state.conflict + alpha * target)
 
+    st = %{state | conflict: conflict, last_ts: now_ms()}
+
+    :telemetry.execute(
+      [:brain, :acc, :conflict],
+      %{conflict: conflict},
+      %{cause: :proposal, mood_snapshot: state.mood, weights: w, halflife_ms: hl, v: 2}
+    )
+
+    {:noreply, st}
+  end
+
+  @impl GenServer
+  def handle_info(_, state), do: {:noreply, state}
+
+  # ---- Params & helpers -----------------------------------------------------
+
+  defp effective_params(opts) do
     %{
-      p1: clamp01(p1),
-      margin: max(0.0, margin),
-      entropy: clamp01(entropy01),
-      alts: if(altc > 0, do: 1.0, else: 0.0),
-      token_index:
-        case Safe.get(ch, :token_index, 0) do
-          i when is_integer(i) and i >= 0 -> i
-          _ -> 0
-        end
+      halflife_ms:       to_ms(get_opt(opts, :halflife_ms,       Application.get_env(:brain, :acc_halflife_ms, 8_000))),
+      proposal_alpha:    to_small(get_opt(opts, :proposal_alpha,  Application.get_env(:brain, :acc_proposal_alpha, 0.6))),
+      cap_per_proposal:  to_cap(get_opt(opts, :cap_per_proposal,  Application.get_env(:brain, :acc_cap_per_proposal, 0.20))),
+      weights:           to_w(get_opt(opts, :weights,            Application.get_env(:brain, :acc_weights, %{vigil: 0.35, inhib: 0.30, expl: -0.20, plast: -0.10})))
     }
   end
 
-  # ---- Math helpers ----
-
-  @doc false
-  @spec entropy(%{optional(any()) => number()}) :: float()
-  defp entropy(%{} = dist) do
-    dist
-    |> Map.values()
-    |> Enum.filter(&is_number/1)
-    |> Enum.filter(&(&1 > 0.0))
-    |> Enum.reduce(0.0, fn p, acc -> acc - p * :math.log(p) end)
+  defp to_w(val) do
+    %{
+      vigil: to_small(val[:vigil] || val["vigil"] || 0.35),
+      inhib: to_small(val[:inhib] || val["inhib"] || 0.30),
+      expl:  to_small(val[:expl]  || val["expl"]  || -0.20),
+      plast: to_small(val[:plast] || val["plast"] || -0.10)
+    }
   end
 
-  @doc false
-  defp average([]), do: 0.0
-  defp average(xs) when is_list(xs), do: Enum.sum(xs) / length(xs)
+  defp to_small(x) when is_number(x), do: x * 1.0
+  defp to_small(_), do: 0.0
 
-  @doc false
-  # OTP 27+: handle both +0.0 and -0.0 without literal pattern-matching.
-  defp safe_div(_a, b) when is_number(b) and (b == 0.0 or b == -0.0), do: 0.0
-  defp safe_div(a, b) when is_number(a) and is_number(b), do: a / b
+  defp to_cap(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
+  defp to_cap(_), do: 0.20
 
-  @doc false
-  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x) * 1.0)
-  defp clamp01(_), do: 0.0
+  defp to_ms(x) when is_integer(x) and x >= 0, do: x
+  defp to_ms(x) when is_float(x) and x >= 0.0, do: trunc(x)
+  defp to_ms(_), do: 8_000
 
-  @doc false
-  defp elapsed_ms_since(t0),
-    do: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+  defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
+  defp get_opt(%{} = opts, key, default),           do: Map.get(opts, key, default)
+  defp get_opt(_, _, default),                      do: default
 
-  # ---- Normalization helpers ----
+  # ---- Hardened numeric getter (nil-safe default + string/boolean coercion) ----
+  #
+  # Returns:
+  #   - float() when a numeric can be coerced
+  #   - nil when both the source and default are non-numeric and default is nil
+  #
+  defp get_num(map, key, default) do
+    val =
+      case map do
+        %{} ->
+          case {Map.get(map, key), Map.get(map, to_string(key))} do
+            {v, _} when is_integer(v) -> v * 1.0
+            {v, _} when is_float(v)   -> v
+            {v, _} when is_boolean(v) -> if v, do: 1.0, else: 0.0
+            {v, _} when is_binary(v)  ->
+              case Float.parse(v) do
+                {f, _} -> f
+                :error -> :nope
+              end
+            {_, v} when is_integer(v) -> v * 1.0
+            {_, v} when is_float(v)   -> v
+            {_, v} when is_boolean(v) -> if v, do: 1.0, else: 0.0
+            {_, v} when is_binary(v)  ->
+              case Float.parse(v) do
+                {f, _} -> f
+                :error -> :nope
+              end
+            _ -> :nope
+          end
 
-  @doc false
-  defp as_map(%{} = m), do: m
-  defp as_map(_), do: %{}
+        _ -> :nope
+      end
 
-  @doc false
-  defp normalize_dist(%{} = m) do
-    vals =
-      m
-      |> Map.values()
-      |> Enum.filter(&is_number/1)
-      |> Enum.map(&max(0.0, &1))
+    case val do
+      :nope ->
+        coerce_default(default)
 
-    s = Enum.sum(vals)
-
-    if s <= 0.0 do
-      %{}
-    else
-      Enum.reduce(m, %{}, fn {k, v}, acc ->
-        if is_number(v) and v > 0.0, do: Map.put(acc, k, v / s * 1.0), else: acc
-      end)
+      num when is_number(num) ->
+        num * 1.0
     end
   end
+
+  # default may be number | boolean | numeric string | nil | anything
+  defp coerce_default(nil), do: nil
+  defp coerce_default(true), do: 1.0
+  defp coerce_default(false), do: 0.0
+  defp coerce_default(d) when is_integer(d), do: d * 1.0
+  defp coerce_default(d) when is_float(d),   do: d
+  defp coerce_default(d) when is_binary(d) do
+    case Float.parse(d) do
+      {f, _} -> f
+      :error -> nil
+    end
+  end
+  defp coerce_default(_), do: nil
+
+  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
+  defp clamp01(_), do: 0.0
+
+  defp unique(prefix),
+    do:
+      prefix <>
+        Integer.to_string(:erlang.unique_integer([:positive])) <>
+        "-" <> Integer.to_string(System.system_time(:microsecond))
+
+  defp now_ms(), do: System.monotonic_time(:millisecond)
+
+  defp normalize_opts(opts) when is_list(opts) do
+    if Keyword.keyword?(opts), do: opts, else: []
+  end
+  defp normalize_opts(%{} = opts), do: Map.to_list(opts)
+  defp normalize_opts(_), do: []
 end
 

@@ -17,7 +17,7 @@ defmodule Db do
   use Ecto.Repo,
     otp_app: :db,
     adapter: Ecto.Adapters.Postgres,
-    priv: "priv/repo"
+    priv: "priv/db"
 
   # Need full query macros (row_number/0, over/2, subquery/1, etc.)
   import Ecto.Query

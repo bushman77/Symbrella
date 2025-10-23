@@ -584,32 +584,42 @@ end
   end
 
   # Compute a robust gate score from candidate + salience + policy scalers.
-  defp gate_score_for(cand, salience, cfg) do
-    base =
-      (cand[:score] || cand[:activation_snapshot] || 0.0)
-      |> Kernel.*(1.0)
+defp gate_score_for(cand, salience, cfg) do
+  base =
+    (cand[:score] || cand[:activation_snapshot] || 0.0)
+    |> Kernel.*(1.0)
 
-    # Prefer runtime-ish sources; keep weights gentle.
-    prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
+  # Prefer runtime-ish sources; keep weights gentle.
+  prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
 
-    # Downweight fallback phrase candidates a touch.
-    b_scaled =
-      if fallback_id?(cand[:id]) do
-        scale = cfg[:fallback_scale] || 0.70
-        base * scale
-      else
-        base
-      end
+  # Downweight fallback phrase candidates a touch.
+  b_scaled =
+    if fallback_id?(cand[:id]) do
+      scale = cfg[:fallback_scale] || 0.70
+      base * scale
+    else
+      base
+    end
 
-    # diversity penalty against items for the same lemma with same (pos, frame)
-    div_pen = diversity_penalty(cand, cfg)
+  # diversity penalty against items for the same lemma with same (pos, frame)
+  div_pen = diversity_penalty(cand, cfg)
 
-    b_scaled
-    |> Kernel.+(0.5 * Numbers.clamp01(salience))
-    |> Kernel.+(prefer)
-    |> Kernel.-(div_pen)
-    |> Numbers.clamp01()
-  end
+  # NEW: Semantic bias from Brain.Semantics (optional and bounded)
+  sem_bias =
+    case Brain.Semantics.bias_for(cand) do
+      b when is_number(b) -> Numbers.clamp01(b)
+      _ -> 0.0
+    end
+
+  sem_boost = (cfg[:semantic_boost] || 0.1) * sem_bias
+
+  b_scaled
+  |> Kernel.+(0.5 * Numbers.clamp01(salience))
+  |> Kernel.+(prefer)
+  |> Kernel.+(sem_boost)
+  |> Kernel.-(div_pen)
+  |> Numbers.clamp01()
+end
 
   defp decide_gate_policy(wm, cand, gate_score, cfg) do
     prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
@@ -1025,14 +1035,53 @@ end
 
   # ───────────────────────── ACC hook ─────────────────────────────────────────
 
-  defp maybe_assess_acc(choices, tokens) when is_list(choices) do
-    case Process.whereis(Brain.ACC) do
-      nil -> :noop
-      _pid ->
-        si = %{tokens: tokens, trace: []}
-        _ = ACC.assess(si, choices)
-        :ok
+# Accepts *anything* and never crashes the pipeline.
+defp maybe_assess_acc(si, opts) do
+  # Normalize opts: only keep keyword pairs if present
+  opts_kw =
+    if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
+
+  # If SI isn't a map, just pass through with zero conflict
+  unless is_map(si) do
+    {si, 0.0}
+  else
+    res =
+      try do
+        Brain.ACC.assess(si, opts_kw)
+      rescue
+        _ -> {:ok, si}
+      catch
+        _, _ -> {:ok, si}
+      end
+
+    case res do
+      # Preferred new shape
+      {:ok, %{si: si2, conflict: c}} when is_map(si2) ->
+        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+      # Legacy 3-tuple: {:ok, si2, meta}
+      {:ok, si2, meta} when is_map(si2) and is_map(meta) ->
+        c = meta[:conflict] || meta["conflict"] || Map.get(si2, :acc_conflict, 0.0)
+        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+      # Legacy 2-tuple: {:ok, si2}
+      {:ok, si2} when is_map(si2) ->
+        c = Map.get(si2, :acc_conflict, 0.0)
+        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+      # Anything else (including :error tuples): pass-through
+      _ ->
+        {si, Map.get(si, :acc_conflict, 0.0) |> to_float_01()}
     end
   end
+end
+
+defp to_float_01(x) when is_integer(x), do: x * 1.0 |> clamp01()
+defp to_float_01(x) when is_float(x),   do: clamp01(x)
+defp to_float_01(_),                    do: 0.0
+
+defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
+defp clamp01(_), do: 0.0
+
 end
 

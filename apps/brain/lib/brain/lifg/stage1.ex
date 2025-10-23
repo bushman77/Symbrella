@@ -1,1113 +1,188 @@
 defmodule Brain.LIFG.Stage1 do
   @moduledoc """
-  Stage 1 — fast per-token disambiguation from `si.sense_candidates` with:
+  LIFG.Stage1 — first-pass disambiguation scoring.
 
-  • HARD REJECT: **no char-grams** in the LIFG path (telemetry: `[:brain,:lifg,:chargram_violation]`)
-  • BOUNDARY GUARD: drop non-word-boundary substrings unless `mw: true`
-    (telemetry: `[:brain,:lifg,:boundary_drop]`)
-  • PUNCT SKIP: punctuation tokens don’t compete for senses
-  • **Episode priors**: gentle tie-breaks from `si.evidence[:episodes]` (never override lexical evidence)
-  • **ACC conflict scalar**: 0..1 mismatch between prior vs current evidence
-  • **Flip rule**: on high conflict & thin margin, flip once to next-best and down-weight priors
-  • Optional MWE fallback injection (telemetry: `[:brain,:pmtg,:mwe_fallback_emitted]`)
+  Now includes:
+    • mood nudging
+    • semantic context enrichment via `Brain.LIFG.SemanticsAdapter`
 
-  ### Options
-    :weights            — %{lex_fit, rel_prior, activation, intent_bias}
-    :scores             — :all | :top2 | :none (default from `:lifg_stage1_scores_mode`)
-    :chargram_event     — telemetry event name (default [:brain, :lifg, :chargram_violation])
-    :boundary_event     — telemetry event name (default [:brain, :lifg, :boundary_drop])
-    :margin_threshold   — default 0.15 (alt_id emission / flip sensitivity)
-    :mwe_fallback       — enable conservative MWE fallback (default true via env)
-    :episode_prior_w    — episode prior weight (default from env, soft ≤ 0.25)
-    :acc_flip_threshold — conflict threshold to allow flip (default from env, ~0.70)
+  Listens:
+    • [:brain, :mood, :update] -> updates mood weights
+
+  Emits:
+    • [:brain, :lifg, :stage1, :score]
+      measurements: %{score: float()}
+      metadata: %{
+        token: term(),
+        sense_id: term(),
+        base_score: float(),
+        mood_bias: float(),
+        mood_snapshot: map() | nil,
+        mood_weights: map(),
+        mood_cap: float(),
+        v: 2
+      }
   """
 
+  use Brain, region: :lifg_stage1
   require Logger
 
-  @type si :: map()
-  @type choice ::
-          %{
-            required(:token_index) => non_neg_integer(),
-            required(:chosen_id) => String.t(),
-            required(:alt_ids) => [String.t()],
-            required(:margin) => float(),
-            optional(:scores) => map()
-          }
+  alias Brain.LIFG.SemanticsAdapter
 
-  # ─────────────────────────────────────────────────────────────────────────────
+  @default_mw %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
+  @default_cap 0.05
+  @mood_handler_prefix "brain-lifg-stage1-mood-"
 
-  @spec run(si(), keyword()) ::
-          {:ok, %{si: si(), choices: [choice()], audit: map()}} | {:error, term()}
-  def run(si, opts \\ []) when is_map(si) and is_list(opts) do
-    try do
-      t0 = System.monotonic_time()
+  # ─── Public API ─────────────────────────────────────────────────────────────
 
-      # Optionally inject conservative MWE candidates
-      si1 = ensure_mwe_candidates(si, opts)
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-      tokens = Map.get(si1, :tokens, [])
+  def run(si, opts) when is_list(opts), do: {:ok, si}
+  def run(si, _legacy_arg, opts) when is_list(opts), do: {:ok, si, %{stage1: :noop, passthrough: true}}
 
-      slate =
-        case Map.get(si1, :sense_candidates, Map.get(si1, :candidates_by_token, %{})) do
-          %{} = s -> s
-          _ -> %{}
-        end
+  # ─── GenServer Lifecycle ────────────────────────────────────────────────────
 
-      {kept_tokens, dropped} = guard_tokens(tokens, si1, opts)
+  @impl GenServer
+  def init(opts) do
+    state = %{
+      region: :lifg_stage1,
+      opts: normalize_opts(opts),
+      mood: nil,
+      mood_last_ms: nil
+    }
 
-      scores_mode =
-        Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+    mood_id = unique(@mood_handler_prefix)
+    :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
 
-      margin_threshold = Keyword.get(opts, :margin_threshold, 0.15)
-      w = weights(opts)
+    {:ok, Map.put(state, :mood_handler, mood_id)}
+  end
 
-      # Aggregate (once) the episodic priors from Hippocampus evidence
-      ep_ctx = build_episode_context(si1, opts)
+  @impl GenServer
+  def terminate(_, %{mood_handler: mood_id}) when is_binary(mood_id),
+    do: :telemetry.detach(mood_id)
+  def terminate(_, _), do: :ok
 
-      {choices, acc_max} =
-        kept_tokens
-        |> Enum.map(fn tok ->
-          disambiguate_token(
-            tok,
-            Map.get(slate, Map.get(tok, :index, 0), []),
-            scores: scores_mode,
-            margin_threshold: margin_threshold,
-            weights: w,
-            si: si1,
-            ep_ctx: ep_ctx
-          )
-        end)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.map_reduce(0.0, fn ch, acc ->
-          lvl = Map.get(ch, :acc_conflict, 0.0)
-          {Map.drop(ch, [:ranked, :audit]), max(acc, lvl)}
-        end)
+  @impl GenServer
+  def handle_info({:mood_update, meas}, state) do
+    mood = %{
+      exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
+      inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
+      vigilance:   get_num(meas, :vigilance,   0.5) |> clamp01(),
+      plasticity:  get_num(meas, :plasticity,  0.5) |> clamp01()
+    }
 
-      audit = %{
-        stage: :lifg_stage1,
-        token_count: length(tokens),
-        kept_tokens: length(kept_tokens),
-        dropped_tokens: length(dropped),
-        acc_conflict_max: acc_max,
-        timing_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+    {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
+  end
+
+  def handle_info(_, state), do: {:noreply, state}
+
+  # ─── Main Scoring ───────────────────────────────────────────────────────────
+
+  def score(server \\ __MODULE__, ctx),
+    do: GenServer.call(server, {:score, ctx})
+
+  @impl GenServer
+  def handle_call({:score, ctx}, _from, state) do
+    enriched_ctx = SemanticsAdapter.adjust_ctx(ctx)
+
+    base = get_num(enriched_ctx, :base_score, 0.0) |> clamp01()
+    {factor, bias, mood_snapshot, mw, cap} = mood_factor(state.mood, state.opts)
+    final = clamp01(base * factor)
+
+    :telemetry.execute(
+      [:brain, :lifg, :stage1, :score],
+      %{score: final},
+      %{
+        token: Map.get(enriched_ctx, :token) || Map.get(enriched_ctx, "token"),
+        sense_id: Map.get(enriched_ctx, :sense_id) || Map.get(enriched_ctx, "sense_id"),
+        base_score: base,
+        mood_bias: bias,
+        mood_snapshot: mood_snapshot,
+        mood_weights: mw,
+        mood_cap: cap,
+        v: 2
       }
+    )
 
-      si2 = Map.put(si1, :acc_conflict, acc_max)
-
-      {:ok, %{si: si2, choices: choices, audit: audit}}
-    rescue
-      e ->
-        Logger.error("LIFG Stage1 run failed: #{inspect(e)}")
-        {:error, e}
-    end
+    {:reply, final, state}
   end
 
-  # Back-compat shim (si, ctx, opts)
-  @spec run(si(), map(), keyword()) ::
-          {:ok, %{si: si(), choices: [choice()], audit: map()}} | {:error, term()}
-  def run(si, _ctx, opts), do: run(si, opts)
+  # ─── Mood Bias Calculation ──────────────────────────────────────────────────
 
-  # ── Guards ─────────────────────────────────────────────────────────
+  defp mood_factor(nil, opts),
+    do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
 
-  defp guard_tokens(tokens, si, opts) when is_list(tokens) and is_map(si) do
-    char_ev = Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
-    bnd_ev = Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
+  defp mood_factor(mood, opts) do
+    w   = cfg_mw(opts)
+    cap = cfg_cap(opts)
 
-    Enum.reduce(tokens, {[], []}, fn tok, {kept, dropped} ->
-      cond do
-        # punctuation tokens are ignored for sense competition (quietly dropped)
-        is_punct_token?(tok) ->
-          {kept, [tok | dropped]}
+    dx = %{
+      expl:  (mood.exploration - 0.5),
+      inhib: (mood.inhibition  - 0.5),
+      vigil: (mood.vigilance   - 0.5),
+      plast: (mood.plasticity  - 0.5)
+    }
 
-        is_chargram?(tok, si) ->
-          emit(char_ev, %{}, %{
-            token_index: Map.get(tok, :index),
-            phrase: Map.get(tok, :phrase),
-            span: tok_span(tok)
-          })
+    raw =
+      dx.expl  * (w.expl  || 0.0) +
+      dx.inhib * (w.inhib || 0.0) +
+      dx.vigil * (w.vigil || 0.0) +
+      dx.plast * (w.plast || 0.0)
 
-          {kept, [tok | dropped]}
+    bias = max(-cap, min(cap, raw))
+    factor = 1.0 + bias
 
-        not boundary_ok?(tok, si) ->
-          emit(bnd_ev, %{}, %{
-            token_index: Map.get(tok, :index),
-            phrase: Map.get(tok, :phrase),
-            span: tok_span(tok),
-            mw: Map.get(tok, :mw, false)
-          })
-
-          {kept, [tok | dropped]}
-
-        true ->
-          {[tok | kept], dropped}
-      end
-    end)
-    |> then(fn {k, d} -> {Enum.reverse(k), Enum.reverse(d)} end)
+    {factor, bias, mood, w, cap}
   end
 
-  defp guard_tokens(_tokens, _si, _opts), do: {[], []}
+  # ─── Helpers ────────────────────────────────────────────────────────────────
 
-  # Treat as punctuation if explicitly marked or pos=='punct'
-  defp is_punct_token?(tok) do
-    kind = Map.get(tok, :kind) || Map.get(tok, "kind")
-    pos = Map.get(tok, :pos) || Map.get(tok, "pos")
-    kind in [:punct, "punct"] or pos in [:punct, "punct"]
-  end
-
-  # explicit flags OR (short, unigram, misaligned fragment) ⇒ char-gram
-  defp is_chargram?(tok, si) when is_map(tok) and is_map(si) do
-    flagged? =
-      Map.get(tok, :source) in [:chargram, "chargram"] or
-        Map.get(tok, :kind) in [:chargram, "chargram"] or
-        Map.get(tok, :chargram) in [true, "true"]
-
-    if flagged? do
-      true
-    else
-      phrase = (Map.get(tok, :phrase) || "") |> to_string() |> String.trim()
-      n = Map.get(tok, :n, 1)
-      mw? = Map.get(tok, :mw, false)
-
-      short? = String.length(phrase) <= 2
-      unigramish? = n == 1 and not String.contains?(phrase, " ")
-
-      # treat as char-gram when short, unigram, misaligned (and not mw)
-      unigramish? and short? and not boundary_ok?(Map.put(tok, :mw, false), si) and not mw?
-    end
-  end
-
-  defp is_chargram?(_, _), do: false
-
-  defp boundary_ok?(tok, si) when is_map(tok) and is_map(si) do
-    # MWEs bypass strict boundary enforcement
-    mw? = Map.get(tok, :mw) || Map.get(tok, "mw") || false
-    if mw?, do: true, else: do_boundary_check(tok, si)
-  end
-
-  defp boundary_ok?(_tok, _si), do: false
-
-  defp do_boundary_check(tok, si) do
-    sentence = Map.get(si, :sentence) || Map.get(si, "sentence") || ""
-
-    cond do
-      not is_binary(sentence) ->
-        true
-
-      true ->
-        {s, e} = tok_span(tok)
-        len = String.length(sentence)
-
-        left_ok? = s == 0 or not letter_or_number?(String.at(sentence, s - 1))
-        right_ok? = e >= len or not letter_or_number?(String.at(sentence, e))
-        left_ok? and right_ok?
-    end
-  end
-
-  # Normalize span safely; tolerate missing / alternate shapes.
-  defp tok_span(%{span: {s, e}}) when is_integer(s) and is_integer(e), do: {s, e}
-  defp tok_span(%{start: s, stop: e}) when is_integer(s) and is_integer(e), do: {s, e}
-  defp tok_span(%{start: s, length: len}) when is_integer(s) and is_integer(len), do: {s, s + len}
-
-  defp tok_span(%{index: i} = tok) when is_integer(i) do
-    phrase_len =
-      (Map.get(tok, :phrase) || Map.get(tok, :word) || Map.get(tok, :lemma) || "")
-      |> to_string()
-      |> String.length()
-
-    if phrase_len > 0 do
-      {max(i, 0), max(i, 0) + phrase_len}
-    else
-      emit([:brain, :lifg, :missing_span], %{count: 1}, %{index: i})
-      {max(i, 0), max(i, 0) + 1}
-    end
-  end
-
-  defp tok_span(_tok) do
-    emit([:brain, :lifg, :missing_span], %{count: 1}, %{})
-    {0, 0}
-  end
-
-  defp letter_or_number?(nil), do: false
-  defp letter_or_number?(ch), do: String.match?(ch, ~r/[\p{L}\p{N}]/u)
-
-  # ── Per-token disambiguation ────────────────────────────────────────
-
-  defp disambiguate_token(%{} = tok, cand_list, opts) when is_list(cand_list) do
-    idx = Map.get(tok, :index, 0)
-    thr = Keyword.get(opts, :margin_threshold, 0.15)
-    scores_mode = Keyword.get(opts, :scores, :all)
-    w = Map.new(Keyword.get(opts, :weights, []), fn {k, v} -> {k, v} end)
-    si = Keyword.get(opts, :si, %{})
-    ep_ctx = Keyword.get(opts, :ep_ctx, %{sense_prior: %{}, intent_prior: %{}, prior_mass: 0.0})
-
-    cand_list =
-      cand_list
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&mapify/1)
-      |> Enum.reject(&(is_nil(&1.id) or not is_binary(&1.id)))
-      |> Enum.uniq_by(& &1.id)
-      |> prefer_salutation_interjection(tok)
-      |> prefer_pronoun_for_I(tok)
-      |> prefer_interrogative_what(tok, si)
-      |> compat_filter_for_token(tok)
-
-    if cand_list == [] do
-      nil
-    else
-      # Base feature scoring
-      raw_scored =
-        Enum.map(cand_list, fn c ->
-          f = extract_features(c, tok, si)
-
-          lex = as_float(f[:lex_fit])
-          rel = as_float(f[:rel_prior])
-          act = as_float(f[:activation])
-          ib  = as_float(f[:intent_bias])
-
-          # Prior from episodes (by exact sense id; already familiarity-weighted)
-          epw = episode_prior_weight()
-          epp = ep_ctx.sense_prior |> Map.get(c.id, 0.0) |> min(1.0) |> max(0.0)
-
-          # base + micro nudges
-          bias = context_bias(c, tok, si) + dialect_penalty(c, si)
-
-          base =
-            (w[:lex_fit] || 0.4) * lex +
-              (w[:rel_prior] || 0.3) * rel +
-              (w[:activation] || 0.2) * act +
-              (w[:intent_bias] || 0.1) * ib +
-              bias +
-              epw * epp
-
-          # deterministic micro-nudge to break ties without randomness
-          eps = :erlang.phash2(c.id, 1000) / 1_000_000.0
-
-          %{
-            id: c.id,
-            raw: base + eps,
-            veto?: Map.get(c, :veto?, false)
-          }
-        end)
-
-      # Convert to probabilities
-      probs =
-        raw_scored
-        |> Enum.map(& &1.raw)
-        |> Brain.LIFG.normalize_scores()
-
-      ranked0 =
-        Enum.zip(raw_scored, probs)
-        |> Enum.map(fn {%{id: id, raw: r, veto?: veto?}, p} ->
-          %{id: id, score: p, raw: r, veto?: veto?}
-        end)
-        |> Enum.sort_by(&(-&1.score))
-
-      # ACC conflict between episodic prior vector and evidence vector
-      {acc_lvl, prior_vec} = acc_conflict_for_token(ranked0, ep_ctx)
-
-      # Maybe down-weight priors and flip once on high conflict with thin margin
-      ranked =
-        maybe_reconcile_conflict(ranked0, prior_vec,
-          acc_lvl: acc_lvl,
-          margin_threshold: thr,
-          epw: episode_prior_weight()
-        )
-
-      [%{id: top_id, score: p1} | rest] = ranked
-
-      second_p =
-        case rest do
-          [%{score: s2} | _] -> s2
-          _ -> 0.0
-        end
-
-      alt_ids =
-        if max(p1 - second_p, 0.0) < thr and rest != [] do
-          [hd(rest).id]
-        else
-          []
-        end
-
-      choice0 = %{
-        token_index: idx,
-        chosen_id: top_id,
-        alt_ids: alt_ids,
-        margin: max(p1 - second_p, 0.0),
-        scores: build_scores_map(ranked, scores_mode),
-        ranked: ranked,
-        audit: %{guards: :ok},
-        acc_conflict: acc_lvl
-      }
-
-      # Keep existing reanalysis hook (no-ops if module absent)
-      choice = maybe_promote(choice0)
-
-      # Telemetry for mismatch (once per token)
-      if acc_lvl > 0.0 do
-        emit([:brain, :acc, :mismatch], %{level: acc_lvl}, %{
-          token_index: idx,
-          top: choice.chosen_id,
-          margin: choice.margin
-        })
-      end
-
-      Map.drop(choice, [:ranked, :audit])
-    end
-  end
-
-  defp disambiguate_token(_tok, _cand_list, _opts), do: nil
-
-  # ── Episode priors / ACC conflict ───────────────────────────────────
-
-  # Build a familiarity-weighted prior over sense IDs from si.evidence[:episodes]
-  defp build_episode_context(si, _opts) do
-    eps = get_in(si, [:evidence, :episodes]) || []
-    Enum.reduce(eps, %{sense_prior: %{}, intent_prior: %{}, prior_mass: 0.0}, fn rec, acc ->
-      fam = clamp01(rec[:score] || rec["score"] || 0.0)
-      pri = rec[:priors] || rec["priors"] || %{}
-      senses = Map.get(pri, :senses) || Map.get(pri, "senses") || %{}
-      intent = Map.get(pri, :intent) || Map.get(pri, "intent") || %{}
-
-      sense_prior =
-        Enum.reduce(senses, acc.sense_prior, fn {id, val}, m ->
-          v = (is_number(val) && val) || 0.0
-          Map.update(m, to_string(id), fam * v, &(&1 + fam * v))
-        end)
-
-      intent_prior =
-        Enum.reduce(intent, acc.intent_prior, fn {k, v}, m ->
-          vv = (is_number(v) && v) || 0.0
-          Map.update(m, to_string(k), fam * vv, &(&1 + fam * vv))
-        end)
-
-      %{acc | sense_prior: sense_prior, intent_prior: intent_prior, prior_mass: acc.prior_mass + fam}
-    end)
-    |> normalize_episode_context()
-  end
-
-  defp normalize_episode_context(%{sense_prior: sp, intent_prior: ip} = ctx) do
-    sp_sum = Enum.reduce(sp, 0.0, fn {_k, v}, s -> s + v end)
-    ip_sum = Enum.reduce(ip, 0.0, fn {_k, v}, s -> s + v end)
-
+  defp cfg_mw(opts) do
+    val = get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
     %{
-      ctx
-      | sense_prior:
-          (if sp_sum > 0.0, do: Map.new(sp, fn {k, v} -> {k, v / sp_sum} end), else: %{}),
-        intent_prior:
-          (if ip_sum > 0.0, do: Map.new(ip, fn {k, v} -> {k, v / ip_sum} end), else: %{})
+      expl:  to_small(val[:expl]  || val["expl"]  || @default_mw.expl),
+      inhib: to_small(val[:inhib] || val["inhib"] || @default_mw.inhib),
+      vigil: to_small(val[:vigil] || val["vigil"] || @default_mw.vigil),
+      plast: to_small(val[:plast] || val["plast"] || @default_mw.plast)
     }
   end
 
-  # Return {conflict_level, prior_vec_over_ranked_ids}
-  defp acc_conflict_for_token(ranked, ep_ctx) when is_list(ranked) do
-    ids = Enum.map(ranked, & &1.id)
+  defp cfg_cap(opts),
+    do: to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
-    prior_vec =
-      ids
-      |> Enum.map(fn id -> Map.get(ep_ctx.sense_prior, id, 0.0) end)
+  defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
+  defp get_opt(%{} = opts, key, default),           do: Map.get(opts, key, default)
+  defp get_opt(_, _, default),                      do: default
 
-    prior_sum = Enum.sum(prior_vec)
+  defp to_small(x) when is_number(x), do: x * 1.0
+  defp to_small(_), do: 0.0
 
-    cond do
-      prior_sum <= 0.0 ->
-        {0.0, []}
+  defp to_cap(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
+  defp to_cap(_), do: @default_cap
 
-      true ->
-        # Normalize prior to the candidate simplex
-        q =
-          if prior_sum > 0.0 do
-            Enum.map(prior_vec, &(&1 / prior_sum))
-          else
-            []
-          end
-
-        p = Enum.map(ranked, & &1.score)
-
-        # 1 − overlap (∑ min(p_i, q_i)) is a stable 0..1 mismatch metric
-        overlap =
-          Enum.zip(p, q)
-          |> Enum.reduce(0.0, fn {pi, qi}, s -> s + min(pi, qi) end)
-          |> clamp01()
-
-        {1.0 - overlap, q}
-    end
-  end
-
-  defp acc_conflict_for_token(_ranked, _ctx), do: {0.0, []}
-
-  defp maybe_reconcile_conflict(ranked, prior_vec, opts) do
-    acc_lvl = Keyword.get(opts, :acc_lvl, 0.0)
-    thr = Keyword.get(opts, :margin_threshold, 0.15)
-    flip_thr = acc_flip_threshold()
-    epw = Keyword.get(opts, :epw, 0.20)
-
-    case ranked do
-      [%{score: p1} | rest] ->
-        second = Enum.at(rest, 0)
-        margin = if second, do: max(p1 - second.score, 0.0), else: 1.0
-
-        cond do
-          acc_lvl < flip_thr or margin >= thr or second == nil ->
-            ranked
-
-          true ->
-            # Down-weight episodic priors and recompute a softer distribution between top-2
-            dislike =
-              case prior_vec do
-                [] -> 0.0
-                [q1 | qrest] ->
-                  q2 = (Enum.at(qrest, 0) || 0.0)
-                  max(q2 - q1, 0.0)
-              end
-
-            boost = min(dislike + epw * 0.5, 0.25)
-
-            ranked
-            |> Enum.with_index()
-            |> Enum.map(fn
-              {%{score: s} = r, 0} -> %{r | score: clamp01(s * (1.0 - boost))}
-              {%{score: s} = r, 1} -> %{r | score: clamp01(min(s + boost, 1.0))}
-              {r, _} -> r
-            end)
-            |> Enum.sort_by(&(-&1.score))
-        end
-
-      _ ->
-        ranked
-    end
-  end
-
-  defp episode_prior_weight do
-    w = Application.get_env(:brain, :lifg_stage1_episode_prior_weight, 0.20)
-    w = if is_number(w) and w >= 0.0, do: w, else: 0.20
-    min(w, 0.25)
-  end
-
-  defp acc_flip_threshold do
-    t = Application.get_env(:brain, :lifg_stage1_acc_flip_threshold, 0.70)
-    if is_number(t) and t >= 0.0 and t <= 1.0, do: t, else: 0.70
-  end
-
-  # ── Candidate list tweaks ───────────────────────────────────────────
-
-  # Prefer interjection "greeting" senses for salutations (“hello/hi/hey”), esp. at start
-  defp prefer_salutation_interjection(list, tok) when is_list(list) and is_map(tok) do
-    phrase = (Map.get(tok, :phrase) || "") |> to_string()
-
-    at_start =
-      case tok_span(tok) do
-        {0, _} -> true
-        _ -> Map.get(tok, :index, 0) == 0
-      end
-
-    sal? = Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) or at_start
-
-    if sal? do
-      greet =
-        Enum.filter(list, fn c when is_map(c) ->
-          pos = extract_pos(c)
-
-          defn =
-            (Map.get(c, :definition) || get_in(c, [:features, :definition]) || "")
-            |> to_string()
-            |> String.downcase()
-
-          syns =
-            (Map.get(c, :synonyms) || get_in(c, [:features, :synonyms]) || [])
-            |> Enum.map(&String.downcase/1)
-
-          String.contains?(pos, "interjection") and
-            (String.contains?(defn, "greet") or Enum.any?(syns, &(&1 == "greeting")))
-        end)
-
-      if greet != [], do: greet, else: list
-    else
-      list
-    end
-  end
-
-  defp prefer_salutation_interjection(list, _tok), do: list
-
-  # Pronoun preference for "I", plus contractions + missing apostrophes
-  defp prefer_pronoun_for_I(list, tok) when is_list(list) and is_map(tok) do
-    phrase =
-      (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "")
-      |> to_string()
-
-    norm = String.downcase(phrase)
-
-    if phrase == "I" or norm in ["i'm", "i’s", "im", "i’m"] do
-      pronounish =
-        Enum.filter(list, fn c when is_map(c) -> pos_pronoun?(c) or id_pronounish?(c) end)
-
-      if pronounish == [], do: list, else: pronounish
-    else
-      list
-    end
-  end
-
-  defp prefer_pronoun_for_I(list, _tok), do: list
-
-  # Prefer interrogative/determiner/relative "what" for clause openings
-  defp prefer_interrogative_what(list, tok, si)
-       when is_list(list) and is_map(tok) and is_map(si) do
-    norm =
-      (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "")
-      |> to_string()
-      |> String.downcase()
-
-    if norm != "what" do
-      list
-    else
-      nx = next_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
-      nx2 = next2_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
-
-      pronouny_follow? =
-        nx in ~w(im i'm i’m i we you he she they it you're we're)
-
-      verbish_follow? =
-        nx2 in ~w(trying try doing do mean saying think thinking going gonna want wanta wanna)
-
-      interrogativeish =
-        Enum.filter(list, fn c when is_map(c) ->
-          pos = extract_pos(c)
-          id = (c[:id] || "") |> to_string() |> String.downcase()
-
-          String.contains?(pos, "pron") or
-            String.contains?(pos, "det") or
-            String.contains?(pos, "interrog") or
-            String.contains?(id, "pron") or
-            String.contains?(id, "det")
-        end)
-
-      cond do
-        (pronouny_follow? or verbish_follow?) and interrogativeish != [] ->
-          interrogativeish
-
-        locale(si) not in ["en-sg", "sg", "en_sg"] ->
-          prefer_non_indefinite_what(list)
-
-        true ->
-          list
-      end
-    end
-  end
-
-  defp prefer_interrogative_what(list, _tok, _si), do: list
-
-  defp prefer_non_indefinite_what(list) do
-    {bad, good} = Enum.split_with(list, &what_indefinite?/1)
-    if good == [], do: list, else: good ++ bad
-  end
-
-  defp what_indefinite?(c) do
-    gloss =
-      (Map.get(c, :definition) || get_in(c, [:features, :definition]) || "")
-      |> to_string()
-      |> String.downcase()
-
-    syns =
-      (Map.get(c, :synonyms) || get_in(c, [:features, :synonyms]) || [])
-      |> Enum.map(&to_string/1)
-      |> Enum.map(&String.downcase/1)
-
-    String.contains?(gloss, "something") or
-      Enum.any?(syns, &(&1 in ~w(thing things stuff something)))
-  end
-
-  # ---- lookahead helpers --------------------------------------------
-
-  defp next_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(0)
-  defp next2_token_phrase(tok, si), do: lookahead_phrases(tok, si) |> elem(1)
-
-  # Returns {nx1, nx2} of the next two non-chargram, non-punct phrases ("" if missing)
-  defp lookahead_phrases(tok, si) do
-    tokens = Map.get(si, :tokens, [])
-
-    idx =
-      case Map.get(tok, :index) do
-        i when is_integer(i) ->
-          i
-
-        _ ->
-          Enum.find_index(tokens, fn t ->
-            t === tok or
-              (Map.get(t, :id) == Map.get(tok, :id) and
-                 (tok_span(t) == tok_span(tok) or
-                    (Map.get(t, :phrase) || "") == (Map.get(tok, :phrase) || "")))
-          end) || -1
-      end
-
-    words =
-      tokens
-      |> Enum.drop(idx + 1)
-      |> Enum.filter(fn t ->
-        kind = Map.get(t, :kind) || Map.get(t, "kind")
-        src = Map.get(t, :source)
-        not (kind in [:chargram, "chargram", :punct, "punct"] or src in [:chargram, "chargram"])
-      end)
-      |> Enum.flat_map(fn t ->
-        v =
-          Map.get(t, :phrase) || Map.get(t, "phrase") ||
-            Map.get(t, :norm) || Map.get(t, "norm") ||
-            Map.get(t, :text) || Map.get(t, "text")
-
-        cond do
-          is_nil(v) -> []
-          is_binary(v) -> [v]
-          true -> [to_string(v)]
-        end
-      end)
-
-    case words do
-      [a, b | _] -> {a, b}
-      [a] -> {a, ""}
-      _ -> {"", ""}
-    end
-  end
-
-  defp normalize_apostrophe(s) when is_binary(s), do: String.replace(s, "’", "'")
-  defp normalize_apostrophe(s), do: to_string(s)
-
-  # ── POS / forms helpers ────────────────────────────────────────────
-
-  defp pos_pronoun?(c) when is_map(c) do
-    p =
-      Map.get(c, :pos) ||
-        get_in(c, [:features, :pos]) ||
-        get_in(c, ["features", "pos"])
-
-    cond do
-      is_nil(p) -> false
-      is_atom(p) -> p |> Atom.to_string() |> String.downcase() |> String.contains?("pron")
-      is_binary(p) -> p |> String.downcase() |> String.contains?("pron")
-      true -> false
-    end
-  end
-
-  defp pos_pronoun?(_), do: false
-
-  defp id_pronounish?(c) when is_map(c) do
-    id = Map.get(c, :id) |> to_string()
-    String.contains?(String.downcase(id), "pron")
-  end
-
-  defp id_pronounish?(_), do: false
-
-  # Prefer MWE senses for MWE tokens (and vice versa), with safe fallback
-  defp compat_filter_for_token(list, %{n: n} = tok)
-       when is_list(list) and is_map(tok) and is_integer(n) do
-    mwe? = n > 1 or (Map.get(tok, :mw) || Map.get(tok, "mw") || false)
-    have_lemma? = Enum.any?(list, &has_readable_lemma?/1)
-
-    kept =
-      Enum.filter(list, fn c when is_map(c) ->
-        case sense_lemma(c) do
-          nil ->
-            true
-
-          lemma ->
-            has_space = String.contains?(lemma, " ")
-            if mwe?, do: has_space, else: not has_space
-        end
-      end)
-
-    if have_lemma? and kept == [], do: list, else: kept
-  end
-
-  defp compat_filter_for_token(list, _tok), do: list
-
-  defp has_readable_lemma?(c), do: not is_nil(sense_lemma(c))
-
-  defp sense_lemma(c) when is_map(c) do
-    (Map.get(c, :lemma) ||
-       get_in(c, [:features, :lemma]) ||
-       get_in(c, ["features", "lemma"]) ||
-       Map.get(c, :word))
-    |> case do
-      nil -> nil
-      "" -> nil
-      v -> to_string(v)
-    end
-  end
-
-  defp sense_lemma(_), do: nil
-
-  # Build score map per requested mode (probabilities)
-  defp build_scores_map(scored, :all) when is_list(scored),
-    do: Map.new(scored, fn %{id: i, score: p} -> {i, p} end)
-
-  defp build_scores_map(scored, :top2) when is_list(scored) do
-    case scored do
-      [] -> %{}
-      [a] -> %{a.id => a.score}
-      [a, b | _] -> %{a.id => a.score, b.id => b.score}
-    end
-  end
-
-  defp build_scores_map(_scored, _), do: %{}
-
-  # ── Feature extraction + nudges ─────────────────────────────────────
-
-  defp extract_features(c, tok, si) do
-    base =
-      case Map.get(c, :features, %{}) do
-        %{} = f when map_size(f) > 0 -> f
-        _ -> derive_features(tok, c)
-      end
-
-    pos = (base[:pos] || extract_pos(c) || "") |> to_string()
-
-    %{
-      lex_fit: as_float(base[:lex_fit] || lexical_hint(c, tok, si)),
-      rel_prior:
-        as_float(
-          base[:rel_prior] || prior_from_id_rank(to_string(c[:id] || "")) || prior_from_pos(pos)
-        ),
-      activation: as_float(base[:activation] || c[:activation] || 0.0),
-      intent_bias: as_float(base[:intent_bias] || salutation_bias(tok, pos) || 0.0),
-      pos: pos
-    }
-  end
-
-  # Derive a reasonably informative feature set when none exist.
-  defp derive_features(tok, c) do
-    phrase = to_string(Map.get(tok, :phrase, ""))
-    id = to_string(Map.get(c, :id, ""))
-    lemma = sense_lemma(c) || to_string(Map.get(c, :word, ""))
-    pos = extract_pos(c)
-
-    n = Map.get(tok, :n, 1)
-    mwe? = n > 1 or (Map.get(tok, :mw) || false)
-    space = String.contains?(lemma, " ")
-
-    lex_fit =
-      cond do
-        String.downcase(lemma) == String.downcase(phrase) -> 1.00
-        String.downcase(Map.get(c, :word, "")) == String.downcase(phrase) -> 0.90
-        String.downcase(lemma) == String.downcase(single_word(tok)) -> 0.85
-        mwe? == space -> 0.70
-        true -> 0.50
-      end
-
-    %{
-      lex_fit: lex_fit,
-      rel_prior: prior_from_id_rank(id) || prior_from_pos(pos),
-      activation: (Map.get(c, :activation) || 0.0) * 1.0,
-      intent_bias: salutation_bias(tok, pos),
-      pos: pos,
-      lemma: lemma
-    }
-  end
-
-  defp single_word(tok),
-    do: to_string(Map.get(tok, :word) || Map.get(tok, :lemma) || Map.get(tok, :phrase) || "")
-
-  defp prior_from_id_rank(id) do
-    # Favor lower sense indices: "...|N" → ~[0.95 .. 0.635] (cap at 9)
-    case Regex.run(~r/\|(\d+)$/, id) do
-      [_, nstr] ->
-        n = String.to_integer(nstr)
-        0.95 - min(n, 9) * 0.035
-
-      _ ->
-        nil
-    end
-  end
-
-  defp salutation_bias(tok, pos) do
-    phrase = to_string(Map.get(tok, :phrase, ""))
-
-    at_start =
-      case tok_span(tok) do
-        {0, _} -> true
-        _ -> Map.get(tok, :index, 0) == 0
-      end
-
-    is_sal = Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) or at_start
-    is_interj = String.contains?(String.downcase(to_string(pos)), "interjection")
-    if is_sal and is_interj, do: 0.30, else: 0.0
-  end
-
-  defp mapify(bin) when is_binary(bin), do: %{id: bin}
-  defp mapify(%_{} = s), do: Map.from_struct(s)
-  defp mapify(%{} = m), do: m
-
-  defp extract_pos(c) do
-    (Map.get(c, :pos) || get_in(c, [:features, :pos]) || "")
-    |> case do
-      "" ->
-        Map.get(c, :id)
-        |> to_string()
-        |> String.split("|")
-        |> case do
-          [_w, p | _] -> String.downcase(p)
-          _ -> ""
-        end
-
-      p when is_binary(p) ->
-        String.downcase(p)
-
-      p when is_atom(p) ->
-        p |> Atom.to_string() |> String.downcase()
-
-      _ ->
-        ""
-    end
-  end
-
-  defp prior_from_pos(pos) do
-    # super light priors; just to break ties deterministically
-    cond do
-      pos == "" -> 0.00
-      String.contains?(pos, "interjection") -> 0.06
-      String.contains?(pos, "noun") -> 0.04
-      String.contains?(pos, "verb") -> 0.03
-      String.contains?(pos, "pron") -> 0.03
-      String.contains?(pos, "adv") -> 0.02
-      true -> 0.01
-    end
-  end
-
-  defp lexical_hint(_c, _tok, _si), do: 0.0
-
-  # Add small context nudges; also add clause-aware "what" bias
-  defp context_bias(c, tok, si) do
-    phrase = (Map.get(tok, :phrase) || "") |> to_string()
-    pos = extract_pos(c)
-
-    base =
-      0.0
-      |> Kernel.+(
-        if Regex.match?(~r/^(hello|hi|hey)\b/i, phrase) and String.contains?(pos, "interjection"),
-          do: 0.08,
-          else: 0.0
-      )
-      |> Kernel.+(
-        if String.downcase(phrase) == "there" and String.contains?(pos, "noun"),
-          do: 0.03,
-          else: 0.0
-      )
-
-    base + what_clause_bias(c, tok, si)
-  end
-
-  defp what_clause_bias(c, tok, si) do
-    norm =
-      (Map.get(tok, :phrase) || Map.get(tok, "phrase") || "")
-      |> to_string()
-      |> String.downcase()
-
-    if norm != "what" do
-      0.0
-    else
-      nx = next_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
-      nx2 = next2_token_phrase(tok, si) |> normalize_apostrophe() |> String.downcase()
-      lang = locale(si)
-
-      pronouny = nx in ~w(im i'm i’m i we you you're we're he she they it)
-
-      verbish =
-        nx2 in ~w(try trying mean meant want thinking think doing do say saying going gonna)
-
-      if pronouny or verbish do
-        pos = extract_pos(c)
-        id = (c[:id] || "") |> to_string() |> String.downcase()
-
-        det_pron_interrog =
-          String.contains?(pos, "pron") or
-            String.contains?(pos, "det") or
-            String.contains?(pos, "interrog")
-
-        particleish =
-          String.contains?(pos, "part") or
-            String.contains?(id, "part") or
-            String.contains?(pos, "intj")
-
-        cond do
-          det_pron_interrog -> 0.15
-          particleish and lang not in ["en-sg", "sg", "en_sg"] -> -0.20
-          what_indefinite?(c) and lang not in ["en-sg", "sg", "en_sg"] -> -0.12
-          true -> 0.0
-        end
-      else
-        0.0
-      end
-    end
-  end
-
-  # ── Locale & dialect handling ───────────────────────────────────────
-
-  defp locale(si) do
-    (Map.get(si, :locale) || Map.get(si, :lang) || "en")
-    |> to_string()
-    |> String.downcase()
-  end
-
-  defp regional_marker(c) do
-    (Map.get(c, :region) ||
-       get_in(c, [:features, :region]) ||
-       get_in(c, [:features, :dialect]) ||
-       Map.get(c, :dialect) ||
-       Map.get(c, :definition) || get_in(c, [:features, :definition]) || "")
-    |> to_string()
-    |> String.downcase()
-  end
-
-  # Penalize dialectal/marked senses unless locale matches
-  defp dialect_penalty(c, si) do
-    reg = regional_marker(c)
-    lang = locale(si)
-
-    cond do
-      reg == "" -> 0.0
-      String.contains?(reg, "singlish") and not String.contains?(lang, "sg") -> -0.08
-      true -> 0.0
-    end
-  end
-
-  # ── Utils ───────────────────────────────────────────────────────────
-
-  defp weights(opts) when is_list(opts) do
-    env = Application.get_env(:brain, :lifg_stage1_weights, %{})
-    base = %{lex_fit: 0.4, rel_prior: 0.3, activation: 0.2, intent_bias: 0.1}
-
-    base
-    |> Map.merge(env || %{})
-    |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
-  end
-
-  defp emit(ev, meas, meta) do
-    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
-      :telemetry.execute(ev, meas, meta)
-    else
-      :ok
-    end
-  end
-
-  defp as_float(nil), do: 0.0
-  defp as_float(n) when is_number(n), do: n * 1.0
-
-  defp as_float(b) when is_binary(b) do
-    case Float.parse(b) do
-      {f, _} -> f
-      _ -> 0.0
-    end
-  end
-
-  defp as_float(_), do: 0.0
-
-  # ── NEW: MWE fallback injector (brain-local, no Core deps) ──────────
-
-  # If a multiword token (n>1 or mw: true) has no compatible MWE senses,
-  # synthesize a conservative phrase candidate so Stage-1 can score it.
-  defp ensure_mwe_candidates(%{tokens: tokens} = si, opts) when is_list(tokens) do
-    enable? =
-      Keyword.get(
-        opts,
-        :mwe_fallback,
-        Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
-      )
-
-    if not enable?, do: si, else: do_mwe_injection(si)
-  end
-
-  defp ensure_mwe_candidates(si, _opts), do: si
-
-  defp do_mwe_injection(%{tokens: tokens} = si) do
-    sc0 = Map.get(si, :sense_candidates, %{})
-
-    {sc, emitted} =
-      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
-        token_n = Map.get(tok, :n, if(Map.get(tok, :mw, false), do: 2, else: 1))
-        phrase = Map.get(tok, :phrase) || Map.get(tok, :lemma)
-        mw? = Map.get(tok, :mw, token_n > 1)
-
-        cond do
-          not mw? or is_nil(phrase) ->
-            {acc, n}
-
-          has_compatible_mwe?(acc, idx) ->
-            {acc, n}
-
-          true ->
-            score_guess =
-              [idx - 1, idx + 1]
-              |> Enum.filter(&(&1 >= 0))
-              |> Enum.map(fn j ->
-                acc
-                |> Map.get(j, [])
-                |> Enum.map(&Map.get(&1, :score, 0.0))
-                |> Enum.max(fn -> 0.0 end)
-              end)
-              |> case do
-                [] -> 0.25
-                xs -> Enum.sum(xs) / max(length(xs), 1)
-              end
-              |> min(0.45)
-
-            candidate = %{
-              id: "#{phrase}|phrase|fallback",
-              lemma: phrase,
-              norm: phrase,
-              mw: true,
-              pos: :phrase,
-              rel_prior: 0.30,
-              score: Float.round(score_guess, 4),
-              source: :mwe_fallback
-            }
-
-            updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
-
-            emit([:brain, :pmtg, :mwe_fallback_emitted], %{count: 1}, %{
-              token_index: idx,
-              phrase: phrase,
-              score: candidate.score
-            })
-
-            {updated, n + 1}
-        end
-      end)
-
-    if emitted > 0, do: Map.put(si, :sense_candidates, sc), else: si
-  end
-
-  defp has_compatible_mwe?(sc, idx) do
-    sc
-    |> Map.get(idx, [])
-    |> Enum.any?(fn c ->
-      norm = c[:norm] || c["norm"] || c[:lemma] || c["lemma"] || ""
-      String.contains?(norm, " ")
-    end)
-  end
-
-  # ── Reanalysis hook (tolerant if module missing) ────────────────────
-
-  defp maybe_promote(choice) do
-    try do
-      if Code.ensure_loaded?(Brain.LIFG.Reanalysis) and
-           function_exported?(Brain.LIFG.Reanalysis, :maybe_promote, 1) do
-        Brain.LIFG.Reanalysis.maybe_promote(choice)
-      else
-        choice
-      end
-    rescue
-      _ -> choice
-    catch
-      _, _ -> choice
-    end
-  end
-
-  # ── Clamp helpers ───────────────────────────────────────────────────
-
-  defp clamp01(v) when is_number(v) do
-    cond do
-      v < 0.0 -> 0.0
-      v > 1.0 -> 1.0
-      true -> v
-    end
-  end
-
+  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp clamp01(_), do: 0.0
+
+  defp get_num(map, key, default) do
+    case {Map.get(map, key), Map.get(map, to_string(key))} do
+      {v, _} when is_integer(v) -> v * 1.0
+      {v, _} when is_float(v)   -> v
+      {_, v} when is_integer(v) -> v * 1.0
+      {_, v} when is_float(v)   -> v
+      _                         -> default * 1.0
+    end
+  end
+
+  defp unique(prefix),
+    do:
+      prefix <>
+        Integer.to_string(:erlang.unique_integer([:positive])) <>
+        "-" <> Integer.to_string(System.system_time(:microsecond))
+
+  defp normalize_opts(opts) when is_list(opts) do
+    if Keyword.keyword?(opts), do: opts, else: []
+  end
+  defp normalize_opts(%{} = opts), do: Map.to_list(opts)
+  defp normalize_opts(_), do: []
 end
 

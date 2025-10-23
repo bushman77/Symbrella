@@ -2,12 +2,15 @@ import Config
 
 # ───────── Mailer ─────────
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
-# config/config.exs  (Core stays decoupled from :db)
+
+# ───────── Core (decoupled from :db) ─────────
 config :core, Core.Recall.Synonyms,
   provider: Core.Recall.Synonyms.Providers.External,
   cache?: true,
   ttl_ms: 60_000,
   top_k: 12
+
+config :brain, pubsub: Symbrella.PubSub
 
 config :core, Core.Recall.Synonyms.Providers.External,
   mfa: {Db.Lexicon, :lookup_synonyms, []}  # you implement this in :db
@@ -49,12 +52,10 @@ config :tailwind,
   ]
 
 # ───────── Logger (global) ─────────
-# Show only :info / :warn / :error at runtime (can override in runtime.exs via LOG_LEVEL)
 config :logger,
   backends: [:console],
   level: :info,
   compile_time_purge_matching: [
-    # Purge anything below :info (i.e., :debug) at compile time
     [level_lower_than: :info]
   ]
 
@@ -69,15 +70,16 @@ config :phoenix, :json_library, Jason
 config :db, ecto_repos: [Db]
 
 config :db, Db,
-  username: "postgres",
-  password: "postgres",
-  database: "brain",
-  hostname: "localhost",
+  username: System.get_env("PGUSER", "postgres"),
+  password: System.get_env("PGPASSWORD", "postgres"),
+  database: System.get_env("PGDATABASE", "brain"),
+  hostname: System.get_env("PGHOST", "127.0.0.1"),
+  port: String.to_integer(System.get_env("PGPORT", "5432")),
   show_sensitive_data_on_connection_error: true,
   pool_size: 10,
   types: Db.PostgrexTypes,
   # silence SQL logs by default (opt in at runtime via DB_LOG=true)
-  log: false
+  log: System.get_env("DB_LOG", "false") in ~w(true 1 on yes)
 
 config :db, :embedding_dim, 1536
 # implement MyEmbeddings.embed/1 -> {:ok, [float()]}
@@ -104,11 +106,27 @@ config :brain,
   wm_score_min: 0.0,
   wm_score_max: 1.0
 
-# config/config.exs
+# LIFG mood shaping
+config :brain, :lifg_mood_weights, %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
+config :brain, :lifg_mood_cap, 0.05
+
+# Curiosity
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
 
+# Hippo priming
+config :brain, :hippo_priming, :on
+config :brain, :hippo_priming_vectors, %{
+  success: %{da: 0.02, "5ht": -0.01, glu: 0.02, ne: 0.01},
+  failure: %{da: -0.01, "5ht": 0.02, glu: 0.00, ne: 0.02}
+}
+
+# ✅ MoodCore — explicit, safe keyword config (prevents crash from bare integer)
+config :brain, Brain.MoodCore,
+  half_life_ms: 12_000,
+  clock: :cycle,
+  init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
 
 # Env-specific at the very end
 import_config "#{config_env()}.exs"

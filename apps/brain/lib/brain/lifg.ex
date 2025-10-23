@@ -142,100 +142,127 @@ defmodule Brain.LIFG do
   - Inhibition amount = max(margin_threshold - score_gap, 0.0)
   - Supports `{id, amount}` tuples when `:emit_pairs` (or WM gating flags) are present.
   """
-  @spec disambiguate_stage1(map(), keyword()) :: map()
-  def disambiguate_stage1(%{} = si, opts) do
-    si_plain = Safe.to_plain(si)
-    slate = Input.slate_for(si_plain)
+@spec disambiguate_stage1(map(), keyword()) :: map()
+def disambiguate_stage1(%{} = si, opts) do
+  si_plain = Safe.to_plain(si)
+  slate = Input.slate_for(si_plain)
 
-    si_for_stage =
-      si_plain
-      |> Map.put(:sense_candidates, slate)
-      |> Map.delete(:candidates_by_token)
-      |> Map.put_new(:trace, [])
-      # ← inject fallback MWE if needed
-      |> ensure_mwe_candidates(opts)
+  si_for_stage =
+    si_plain
+    |> Map.put(:sense_candidates, slate)
+    |> Map.delete(:candidates_by_token)
+    |> Map.put_new(:trace, [])
+    |> ensure_mwe_candidates(opts)
 
-    si_opts =
-      case Map.get(si_for_stage, :lifg_opts) do
-        kw when is_list(kw) -> kw
-        m when is_map(m) -> Map.to_list(m)
-        _ -> []
-      end
+  si_opts =
+    case Map.get(si_for_stage, :lifg_opts) do
+      kw when is_list(kw) -> kw
+      m when is_map(m) -> Map.to_list(m)
+      _ -> []
+    end
 
-    eff_opts = Keyword.merge(si_opts, opts)
-    margin_thr = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  eff_opts = Keyword.merge(si_opts, opts)
 
-    scores_mode =
-      Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+  margin_thr   = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  scores_mode  = Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+  min_margin   = Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-    min_margin =
-      Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
+  stage_weights =
+    lifg_weights()
+    |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
 
-    stage_weights =
-      lifg_weights()
-      |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
-
-    result =
-      Brain.LIFG.Stage1.run(
-        si_for_stage,
+  # ---- robust Stage1 call (supports run/2 and run/3, new/old return shapes)
+  res =
+    safe_stage1_call(
+      si_for_stage,
+      [
         weights: stage_weights,
         scores: scores_mode,
         margin_threshold: margin_thr,
         chargram_event: [:brain, :lifg, :chargram_violation],
         boundary_event: [:brain, :lifg, :boundary_drop]
-      )
+      ],
+      eff_opts
+    )
 
-    case result do
-      {:ok, %{si: si_after0, choices: raw_choices, audit: audit}} ->
-        choices =
-          raw_choices
-          |> Enum.map(&Safe.to_plain/1)
-          |> augment_choices(si_after0, min_margin)
+  case normalize_stage1_result(res) do
+    {:ok, si_after0, raw_choices, audit} ->
+      choices =
+        raw_choices
+        |> Enum.map(&Safe.to_plain/1)
+        |> augment_choices(si_after0, min_margin)
 
-        {boosts_out, inhibitions_out} =
-          legacy_boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
+      {boosts_out, inhibitions_out} =
+        legacy_boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
 
-        # NEW: record last decision (best-effort snapshot)
-        maybe_record_last(:stage1, si_after0, choices, audit, %{
-          scores_mode: scores_mode,
-          margin_threshold: margin_thr,
-          weights: stage_weights
-        })
+      maybe_record_last(:stage1, si_after0, choices, audit, %{
+        scores_mode: scores_mode,
+        margin_threshold: margin_thr,
+        weights: stage_weights
+      })
 
-        evt = %{
-          stage: :lifg_stage1,
-          choices: choices,
-          boosts: boosts_out,
-          inhibitions: inhibitions_out,
-          opts: Enum.into(eff_opts, %{})
-        }
+      evt = %{
+        stage: :lifg_stage1,
+        choices: choices,
+        boosts: boosts_out,
+        inhibitions: inhibitions_out,
+        opts: Enum.into(eff_opts, %{})
+      }
 
-        trace = [evt | Map.get(si_after0, :trace) || []]
-        Map.put(si_after0, :trace, trace)
+      trace = [evt | (Map.get(si_after0, :trace) || [])]
+      Map.put(si_after0, :trace, trace)
 
-      {:error, reason} ->
-        Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
+    {:error, reason} ->
+      Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
 
-        # Even on error, write a tiny diagnostic last snapshot
-        maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{
-          error: inspect(reason)
-        })
+      maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
 
-        evt = %{
-          stage: :lifg_stage1,
-          choices: [],
-          boosts: [],
-          inhibitions: [],
-          opts: Enum.into(eff_opts, %{error: inspect(reason)})
-        }
+      evt = %{
+        stage: :lifg_stage1,
+        choices: [],
+        boosts: [],
+        inhibitions: [],
+        opts: Enum.into(eff_opts, %{error: inspect(reason)})
+      }
 
-        trace = [evt | Map.get(si_for_stage, :trace) || []]
+      trace = [evt | (Map.get(si_for_stage, :trace) || [])]
 
-        si_for_stage
-        |> Map.put(:lifg_error, inspect(reason))
-        |> Map.put(:trace, trace)
-    end
+      si_for_stage
+      |> Map.put(:lifg_error, inspect(reason))
+      |> Map.put(:trace, trace)
   end
+end
+
+# ---- helpers ---------------------------------------------------------------
+
+# Tries new run/2 first; if that raises/undef, tries legacy run/3.
+defp safe_stage1_call(si, kw_opts, eff_opts) do
+  try do
+    Brain.LIFG.Stage1.run(si, kw_opts)
+  rescue
+    _ ->
+      # legacy path: weights is passed separately, remaining opts as the 3rd arg
+      weights_only = Keyword.get(kw_opts, :weights, %{})
+      Brain.LIFG.Stage1.run(si, weights_only, eff_opts)
+  end
+end
+
+# Normalizes all supported return shapes into {:ok, si, choices, audit} | {:error, reason}
+defp normalize_stage1_result({:ok, %{si: si, choices: choices, audit: audit}})
+     when is_map(si) and is_list(choices) and is_map(audit),
+  do: {:ok, si, choices, audit}
+
+defp normalize_stage1_result({:ok, si, meta}) when is_map(si) and is_map(meta) do
+  choices = Map.get(meta, :choices, [])
+  audit   = Map.get(meta, :audit, %{})
+  {:ok, si, List.wrap(choices), audit}
+end
+
+defp normalize_stage1_result({:ok, si}) when is_map(si),
+  do: {:ok, si, [], %{}}
+
+defp normalize_stage1_result(other),
+  do: {:error, other}
 
   @doc "Pure, stateless Stage-1 with default opts."
   @spec disambiguate_stage1(map()) :: map()

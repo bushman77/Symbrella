@@ -1,182 +1,255 @@
-# apps/brain/lib/brain/ofc.ex
 defmodule Brain.OFC do
   @moduledoc """
-  OFC/vmPFC — valuation region for curiosity proposals.
+  OFC — value estimation for proposals, gently shaped by mood.
 
-  • Subscribes to `[:curiosity, :proposal]` (no compile-time deps on Curiosity).
-  • Computes a quick expected-value-of-information (EVI) from:
-      - `score` (proposal’s intrinsic value)
-      - `gain` (LC-like arousal)
-      - lightweight costs from `tasks_running` and memory pressure
-  • Emits `[:brain, :ofc, :value]` with the computed value; **no gating or launching** here.
+  Listens:
+    • [:curiosity, :proposal]   (base inputs: score/risk/novelty/etc.)
+    • [:brain, :mood, :update]  (Expl/Inhib/Vigil/Plast snapshot)
 
-  Notes:
-  - Keeps acyclic deps (db ← brain ← core ← web).
-  - Uses `use Brain, region: :ofc` to remain a first-class region.
-  - Maintains a simple EMA baseline for memory to normalize pressure across hosts.
+  Emits:
+    • [:brain, :ofc, :value]
+      measurements: %{value: 0.0..1.0}
+      metadata: %{
+        probe_id: String.t(),
+        source:   term(),
+        mood_snapshot: %{exploration:, inhibition:, vigilance:, plasticity:} | nil,
+        mood_weights: %{expl:, inhib:, vigil:, plast:},
+        mood_cap: float(),
+        risk_weight: float(),
+        novelty_weight: float(),
+        v: 2
+      }
+
+  Public API:
+    set_params/2, get_params/1  (adjust weights live)
   """
 
   use Brain, region: :ofc
   require Logger
 
-  @handler_prefix "brain-ofc-curiosity-"
-  @ema_alpha 0.10
-
-  # ---- Region lifecycle ----
+  @cur_handler_prefix  "brain-ofc-curiosity-"
+  @mood_handler_prefix "brain-ofc-mood-"
 
   @impl GenServer
   def init(opts) do
-    state =
-      %{
-        region: :ofc,
-        opts: Map.new(opts),
-        stats: %{},
-        # rolling baseline for mem_bytes (EMA)
-        mem_baseline: nil
-      }
+    opts_kw = normalize_opts(opts)
 
-    handler_id = unique_handler_id()
+    state = %{
+      region: :ofc,
+      opts: opts_kw,
+      mood: nil,           # cached %{exploration:, inhibition:, vigilance:, plasticity:}
+      mood_last_ms: nil
+    }
 
-    :ok =
-      :telemetry.attach(
-        handler_id,
-        [:curiosity, :proposal],
-        &__MODULE__.on_curiosity/4,
-        %{pid: self()}
-      )
+    cur_id  = unique(@cur_handler_prefix)
+    mood_id = unique(@mood_handler_prefix)
 
-    {:ok, Map.put(state, :handler_id, handler_id)}
+    :ok = :telemetry.attach(cur_id,  [:curiosity, :proposal],  &__MODULE__.on_curiosity/4,  %{pid: self()})
+    :ok = :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
+
+{:ok,
+  state
+  |> Map.put(:cur_handler, cur_id)
+  |> Map.put(:mood_handler, mood_id)
+}
   end
 
   @impl GenServer
-  def terminate(_reason, %{handler_id: id}) when is_binary(id) do
-    :telemetry.detach(id)
+  def terminate(_reason, %{cur_handler: cur, mood_handler: mood}) do
+    if is_binary(cur),  do: :telemetry.detach(cur)
+    if is_binary(mood), do: :telemetry.detach(mood)
     :ok
   end
+  def terminate(_, _), do: :ok
 
-  def terminate(_reason, _state), do: :ok
+  # ---- Public API -----------------------------------------------------------
 
-  # ---- Telemetry → GenServer bridge ----
+  @doc """
+  Update runtime parameters.
 
-  @doc false
-  def on_curiosity(_event, measurements, metadata, %{pid: pid}) when is_pid(pid) do
-    send(pid, {:curiosity_proposal, measurements, metadata})
-  end
+  Accepted keys:
+    :risk_weight       (default 0.35)
+    :novelty_weight    (default 0.15)
+    :mood_cap          (default 0.12)   # bounds mood multiplier around 1.0
+    :mood_weights      (map of expl/inhib/vigil/plast; small magnitudes)
+  """
+  def set_params(server \\ __MODULE__, opts) when is_list(opts) or is_map(opts),
+    do: GenServer.call(server, {:set_params, opts})
 
-  def on_curiosity(_event, _meas, _meta, _cfg), do: :ok
+  @doc "Returns the effective params map."
+  def get_params(server \\ __MODULE__),
+    do: GenServer.call(server, :get_params)
 
-  # ---- Region message handling ----
+  # ---- Telemetry bridges ----------------------------------------------------
+
+  def on_curiosity(_ev, meas, meta, %{pid: pid}) when is_pid(pid),
+    do: send(pid, {:curiosity, meas, meta})
+  def on_curiosity(_,_,_,_), do: :ok
+
+  def on_mood_update(_ev, meas, meta, %{pid: pid}) when is_pid(pid),
+    do: send(pid, {:mood, meas, meta})
+  def on_mood_update(_,_,_,_), do: :ok
+
+  # ---- GenServer callbacks --------------------------------------------------
 
   @impl GenServer
-  def handle_info({:curiosity_proposal, meas, meta}, state) do
-    # Pull features (defensive to atom/string keys)
-    gain          = get_num(meas, :gain, 0.0)
-    score         = get_num(meas, :score, 0.0)
-    mem_bytes     = get_num(meas, :mem_bytes, 0)
-    tasks_running = get_num(meas, :tasks_running, 0)
+  def handle_call({:set_params, opts_in}, _from, state) do
+    opts_norm = normalize_opts(opts_in)
+    {:reply, :ok, %{state | opts: Keyword.merge(state.opts, opts_norm)}}
+  end
 
-    probe = meta_get(meta, :probe, %{})
-    probe_id = to_string(Map.get(probe, :id) || Map.get(probe, "id") || "curiosity|probe|unknown")
-    kind     = Map.get(probe, :kind)   || Map.get(probe, "kind")
-    source   = Map.get(probe, :source) || Map.get(probe, "source")
+  @impl GenServer
+  def handle_call(:get_params, _from, state) do
+    {:reply, effective_params(state.opts), state}
+  end
 
-    # Update EMA baseline for memory
-    {baseline, state2} = update_mem_baseline(state, mem_bytes)
+  @impl GenServer
+  def handle_info({:mood, meas, _meta}, state) do
+    mood = %{
+      exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
+      inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
+      vigilance:   get_num(meas, :vigilance,   0.5) |> clamp01(),
+      plasticity:  get_num(meas, :plasticity,  0.5) |> clamp01()
+    }
+    {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
+  end
 
-    # Compute lightweight costs
-    load_penalty =
-      tasks_running
-      |> Kernel.*(0.10)     # each running task costs 0.10
-      |> min(0.50)          # cap load penalty
+  @impl GenServer
+  def handle_info({:curiosity, meas, meta}, state) do
+    # Base features
+    base_score = get_num(meas, :score, 0.0) |> clamp01()
+    risk       = get_num(meas, :risk,  0.0) |> clamp01()
+    novelty    = get_num(meas, :novelty, 0.0) |> clamp01()
 
-    mem_ratio =
-      if baseline && baseline > 0 do
-        mem_bytes / baseline
-      else
-        1.0
-      end
-      |> min(2.0)
-      |> max(0.0)
+    probe_id = meta_get(meta, :probe_id, nil) ||
+               meta_get(meta, :probe, %{}) |> case do
+                 %{} = p -> (p[:id] || p["id"])
+                 _ -> nil
+               end
+    probe_id = to_string(probe_id || "curiosity|probe|unknown")
+    source   = meta_get(meta, :source, nil)
 
-    # only penalize when above baseline; scaled gently
-    memory_penalty =
-      if mem_ratio > 1.0 do
-        # up to +0.25 penalty at 2.0× baseline
-        0.25 * min(mem_ratio - 1.0, 1.0)
-      else
-        0.0
-      end
+    # Params
+    %{
+      risk_weight: rw,
+      novelty_weight: nw,
+      mood_cap: cap,
+      mood_weights: mw
+    } = effective_params(state.opts)
 
-    value =
-      0.5 * score +
-      0.5 * gain -
-      load_penalty -
-      memory_penalty
+    # Base valuation (risk reduces; novelty adds a bit)
+    base_val =
+      base_score
+      |> Kernel.*(1.0 - rw * risk)
+      |> Kernel.+(nw * novelty)
       |> clamp01()
+
+    # Mood factor
+    {factor, w_used, mood_snapshot} = mood_factor(state.mood, mw, cap)
+
+    value = clamp01(base_val * factor)
 
     :telemetry.execute(
       [:brain, :ofc, :value],
-      %{
-        value: value,
-        gain: gain,
-        score: score,
-        mem_bytes: mem_bytes,
-        tasks_running: tasks_running
-      },
+      %{value: value},
       %{
         probe_id: probe_id,
-        kind: kind,
         source: source,
-        mem_baseline: baseline,
-        penalties: %{load: load_penalty, memory: memory_penalty},
-        v: 1
+        mood_snapshot: mood_snapshot,
+        mood_weights: w_used,
+        mood_cap: cap,
+        risk_weight: rw,
+        novelty_weight: nw,
+        v: 2
       }
     )
 
-    {:noreply, state2}
+    {:noreply, state}
   end
 
   @impl GenServer
-  def handle_info(_msg, state), do: {:noreply, state}
+  def handle_info(_, state), do: {:noreply, state}
 
-  # ---- Helpers ----
+  # ---- Math & helpers -------------------------------------------------------
 
-  defp unique_handler_id do
-    @handler_prefix <>
-      Integer.to_string(:erlang.unique_integer([:positive])) <>
-      "-" <> Integer.to_string(System.system_time(:microsecond))
+  defp mood_factor(nil, weights, cap), do: {1.0, weights, nil}
+  defp mood_factor(mood, weights, cap) do
+    dx = %{
+      expl:  (Map.get(mood, :exploration, 0.5) - 0.5),
+      inhib: (Map.get(mood, :inhibition,  0.5) - 0.5),
+      vigil: (Map.get(mood, :vigilance,   0.5) - 0.5),
+      plast: (Map.get(mood, :plasticity,  0.5) - 0.5)
+    }
+
+    raw =
+      dx.expl  * (weights.expl  || 0.0) +
+      dx.inhib * (weights.inhib || 0.0) * (-1.0) +
+      dx.vigil * (weights.vigil || 0.0) * (-1.0) +
+      dx.plast * (weights.plast || 0.0)
+
+    factor = 1.0 + max(-cap, min(cap, raw))
+    {factor, weights, mood}
   end
 
-  defp update_mem_baseline(%{mem_baseline: nil} = st, sample) when is_number(sample) and sample >= 0 do
-    {sample, %{st | mem_baseline: sample}}
+  defp effective_params(opts) do
+    %{
+      risk_weight:    to_small(get_opt(opts, :risk_weight,    Application.get_env(:brain, :ofc_risk_weight, 0.35))),
+      novelty_weight: to_small(get_opt(opts, :novelty_weight, Application.get_env(:brain, :ofc_novelty_weight, 0.15))),
+      mood_cap:       to_cap(  get_opt(opts, :mood_cap,       Application.get_env(:brain, :ofc_mood_cap, 0.12))),
+      mood_weights:   to_mw(   get_opt(opts, :mood_weights,   Application.get_env(:brain, :ofc_mood_weights, %{expl: 0.06, inhib: 0.07, vigil: 0.04, plast: 0.05})))
+    }
   end
 
-  defp update_mem_baseline(%{mem_baseline: base} = st, sample) when is_number(sample) and sample >= 0 do
-    ema = base + @ema_alpha * (sample - base)
-    {ema, %{st | mem_baseline: ema}}
+  defp to_mw(val) do
+    %{
+      expl:  to_small(val[:expl]  || val["expl"]  || 0.06),
+      inhib: to_small(val[:inhib] || val["inhib"] || 0.07),
+      vigil: to_small(val[:vigil] || val["vigil"] || 0.04),
+      plast: to_small(val[:plast] || val["plast"] || 0.05)
+    }
   end
 
-  defp update_mem_baseline(st, _sample), do: {st.mem_baseline, st}
+  defp to_small(x) when is_number(x), do: x * 1.0
+  defp to_small(_), do: 0.0
+
+  defp to_cap(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
+  defp to_cap(_), do: 0.12
+
+  defp unique(prefix),
+    do:
+      prefix <>
+        Integer.to_string(:erlang.unique_integer([:positive])) <>
+        "-" <> Integer.to_string(System.system_time(:microsecond))
+
+  defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
+  defp get_opt(%{} = opts, key, default),           do: Map.get(opts, key, default)
+  defp get_opt(_, _, default),                      do: default
 
   defp get_num(map, key, default) do
     case {Map.get(map, key), Map.get(map, to_string(key))} do
       {v, _} when is_integer(v) -> v * 1.0
-      {v, _} when is_float(v) -> v
+      {v, _} when is_float(v)   -> v
       {_, v} when is_integer(v) -> v * 1.0
-      {_, v} when is_float(v) -> v
-      _ -> default * 1.0
+      {_, v} when is_float(v)   -> v
+      _                         -> default * 1.0
     end
   end
 
   defp meta_get(meta, key, default \\ nil) do
     case {Map.get(meta, key), Map.get(meta, to_string(key))} do
       {nil, nil} -> default
-      {v, _} -> v
-      {_, v} -> v
+      {v, _}     -> v
+      {_, v}     -> v
     end
   end
 
-  defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
+  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp clamp01(_), do: 0.0
+
+  defp normalize_opts(opts) when is_list(opts) do
+    if Keyword.keyword?(opts), do: opts, else: []
+  end
+  defp normalize_opts(%{} = opts), do: Map.to_list(opts)
+  defp normalize_opts(_), do: []
 end
 

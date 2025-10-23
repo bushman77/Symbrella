@@ -8,8 +8,12 @@ defmodule Core.Intent.Selection do
   """
 
   @type si :: map()
-@type intent :: :greet | :translate | :abuse | :insult | :command | :ask | :unknown
+# add :feedback
+# add :feedback to the intent union
+@type intent :: :greet | :translate | :abuse | :insult | :command | :feedback | :ask | :unknown
 
+# include :feedback in precedence (after :command, before :ask)
+@precedence [:greet, :translate, :abuse, :insult, :command, :feedback, :ask]
 
   @spec select(si(), Keyword.t()) :: si()
   def select(si, _opts \\ [])
@@ -118,10 +122,6 @@ defmodule Core.Intent.Selection do
 
   # ──────────────────── cue-based inference ────────────────────
 
-# precedence for near ties (highest wins first)
-@precedence [:greet, :translate, :abuse, :insult, :command, :ask]
-
-
   defp infer_intent(kw) when kw in ["", nil], do: {:unknown, 0.0}
   defp infer_intent(kw) do
 scores = %{
@@ -129,7 +129,8 @@ scores = %{
   translate: score_translate(kw),
   abuse:     score_abuse(kw),
   insult:    score_insult(kw),
-  command:   score_command(kw),   # NEW
+  command:   score_command(kw),
+  feedback:  score_feedback(kw),  # ← NEW/ensure present
   ask:       score_question(kw)
 }
 
@@ -183,6 +184,28 @@ scores = %{
   end
 
   # ─────────────── cue scorers (0.0 .. 1.0) ───────────────
+# Thanks/praise/soft critique (avoid insult words which are handled elsewhere)
+defp score_feedback(s) do
+  # Positive thanks/praise
+  pos_thanks? =
+    Regex.match?(~r/\b(thanks|thank\s+you|thx|ty)\b/i, s) or
+    Regex.match?(~r/\b(appreciate(?:\s+it)?|i\s+appreciate(?:\s+it)?)\b/i, s) or
+    Regex.match?(~r/\b(nice\s+work|good\s+job|well\s+done|awesome|great\s+job)\b/i, s)
+
+  # Light negative feedback (don’t collide with abuse/insult)
+  neg_soft? =
+    Regex.match?(~r/\bnot\s+working\b/i, s) or
+    Regex.match?(~r/\bdoes(?:\s*|')?nt\s+work\b/i, s) or
+    Regex.match?(~r/\b(broken|bug|issue|crash(?:ing)?)\b/i, s) or
+    Regex.match?(~r/\bthis\s+(?:is\s+)?(bad|wrong|slow)\b/i, s)
+
+  cond do
+    pos_thanks? -> 0.85
+    neg_soft?   -> 0.70
+    true        -> 0.0
+  end
+end
+
 # Imperatives like "please build...", "send me...", "fix this", "open ..."
 defp score_command(s) do
   qmark = String.contains?(s, "?")

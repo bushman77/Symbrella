@@ -49,5 +49,15 @@ test "command: send me the logs" do
   assert conf("send me the logs")   >= 0.80
 end
 
+test "feedback: thanks for the help" do
+  assert intent("thanks for the help") == :feedback
+  assert conf("thanks for the help")   >= 0.80
+end
+
+test "feedback: this is not working" do
+  assert intent("this is not working") == :feedback
+  assert conf("this is not working")   >= 0.70
+end
+
 end
 

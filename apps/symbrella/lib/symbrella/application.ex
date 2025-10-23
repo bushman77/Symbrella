@@ -9,7 +9,7 @@ defmodule Symbrella.Application do
     File.mkdir_p!(Path.dirname(neg_path))
 
     # LLM boot options (env-driven where available)
-    llm_opts =
+    _llm_opts =
       [
         base_url: System.get_env("OLLAMA_API_BASE"),
         model: System.get_env("OLLAMA_MODEL"),
@@ -22,7 +22,8 @@ defmodule Symbrella.Application do
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     children = [
-      # ── DB (start first) ──────────────────────────────────────────────
+
+      {Phoenix.PubSub, name: Symbrella.PubSub},
       Db,
 
       # ── Foundations / infra (order matters) ───────────────────────────
@@ -35,12 +36,10 @@ defmodule Symbrella.Application do
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
       # ── Autonomous workers (first-class, decoupled) ───────────────────
-      Curiosity,        # standalone, emits [:curiosity, :proposal]
-      Core.Curiosity,   # Core sweeper that re-probes NegCache
+      Curiosity,        # emits [:curiosity, :proposal]
+      Core.Curiosity,   # sweeps NegCache
 
-      # ── Brain timing & phase coordination ─────────────────────────────
-
-      # ── Brain servers ─────────────────────────────────────────────────
+      # ── Brain servers / timing ────────────────────────────────────────
       Brain,
       Brain.LIFG,
       Brain.PMTG,
@@ -49,27 +48,18 @@ defmodule Symbrella.Application do
       Brain.Thalamus,
       Brain.OFC,
       {Brain.DLPFC, act_on_thalamus: true},
-      # Brain.AG,
-      # Brain.MTL,
       {Brain.ACC, keep: 300},
-      # Curiosity is already started above (standalone)
-      # Brain.BasalGanglia
-      # --- Global brain clock + neuromodulators ---
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
       {Brain.MoodCore, []},
-      {Brain.MoodPolicy, []}
-
+      {Brain.MoodPolicy, []},
+      {Brain.Blackboard, []}
     ]
 
-    # Start the supervision tree
     {:ok, sup} = Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
 
     # Attach telemetry handlers AFTER the tree is live
     Brain.Telemetry.attach!()
-    # Bridge Curiosity proposals → Core.Curiosity sweeps (no UI coupling)
     Core.Curiosity.Bridge.attach()
-    # Optionally: feed more misses automatically (LLM/brain → NegCache)
-    # Core.Curiosity.Events.attach()
 
     {:ok, sup}
   end
