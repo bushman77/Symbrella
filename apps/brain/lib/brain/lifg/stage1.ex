@@ -26,23 +26,19 @@ defmodule Brain.LIFG.Stage1 do
 
   use Brain, region: :lifg_stage1
   require Logger
-
   alias Brain.LIFG.SemanticsAdapter
 
   @default_mw %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
   @default_cap 0.05
   @mood_handler_prefix "brain-lifg-stage1-mood-"
 
-  # ─── Public API ─────────────────────────────────────────────────────────────
-
+  # ─── Public API (compat stubs remain) ───────────────────────────────────────
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-
   def run(si, opts) when is_list(opts), do: {:ok, si}
-  def run(si, _legacy_arg, opts) when is_list(opts), do: {:ok, si, %{stage1: :noop, passthrough: true}}
+  def run(si, _legacy_arg, _opts),      do: {:ok, si, %{stage1: :noop, passthrough: true}}
 
   # ─── GenServer Lifecycle ────────────────────────────────────────────────────
-
-  @impl GenServer
+  @impl true
   def init(opts) do
     state = %{
       region: :lifg_stage1,
@@ -52,17 +48,29 @@ defmodule Brain.LIFG.Stage1 do
     }
 
     mood_id = unique(@mood_handler_prefix)
-    :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
-
+    :ok = :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
     {:ok, Map.put(state, :mood_handler, mood_id)}
   end
 
-  @impl GenServer
-  def terminate(_, %{mood_handler: mood_id}) when is_binary(mood_id),
-    do: :telemetry.detach(mood_id)
-  def terminate(_, _), do: :ok
+  @impl true
+  def terminate(_reason, %{mood_handler: mood_id}) when is_binary(mood_id) do
+    :telemetry.detach(mood_id)
+    :ok
+  end
+  def terminate(_reason, _state), do: :ok
 
-  @impl GenServer
+  # ─── Telemetry handler (this was missing; caused :undef) ────────────────────
+  # Forward mood updates into the server mailbox; never crash.
+  @doc false
+  def on_mood_update(_event, measurements, _meta, %{pid: pid}) when is_pid(pid) do
+    send(pid, {:mood_update, measurements})
+    :ok
+  catch
+    _, _ -> :ok
+  end
+  def on_mood_update(_e, _m, _meta, _config), do: :ok
+
+  @impl true
   def handle_info({:mood_update, meas}, state) do
     mood = %{
       exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
@@ -74,14 +82,14 @@ defmodule Brain.LIFG.Stage1 do
     {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
   end
 
-  def handle_info(_, state), do: {:noreply, state}
+  @impl true
+  def handle_info(_msg, state), do: {:noreply, state}
 
   # ─── Main Scoring ───────────────────────────────────────────────────────────
-
   def score(server \\ __MODULE__, ctx),
     do: GenServer.call(server, {:score, ctx})
 
-  @impl GenServer
+  @impl true
   def handle_call({:score, ctx}, _from, state) do
     enriched_ctx = SemanticsAdapter.adjust_ctx(ctx)
 
@@ -108,7 +116,6 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   # ─── Mood Bias Calculation ──────────────────────────────────────────────────
-
   defp mood_factor(nil, opts),
     do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
 
@@ -131,12 +138,10 @@ defmodule Brain.LIFG.Stage1 do
 
     bias = max(-cap, min(cap, raw))
     factor = 1.0 + bias
-
     {factor, bias, mood, w, cap}
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────
-
   defp cfg_mw(opts) do
     val = get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
     %{
@@ -179,9 +184,7 @@ defmodule Brain.LIFG.Stage1 do
         Integer.to_string(:erlang.unique_integer([:positive])) <>
         "-" <> Integer.to_string(System.system_time(:microsecond))
 
-  defp normalize_opts(opts) when is_list(opts) do
-    if Keyword.keyword?(opts), do: opts, else: []
-  end
+  defp normalize_opts(opts) when is_list(opts), do: if(Keyword.keyword?(opts), do: opts, else: [])
   defp normalize_opts(%{} = opts), do: Map.to_list(opts)
   defp normalize_opts(_), do: []
 end

@@ -22,7 +22,7 @@ defmodule Symbrella.Application do
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     children = [
-
+      # PubSub / DB
       {Phoenix.PubSub, name: Symbrella.PubSub},
       Db,
 
@@ -39,6 +39,14 @@ defmodule Symbrella.Application do
       Curiosity,        # emits [:curiosity, :proposal]
       Core.Curiosity,   # sweeps NegCache
 
+      # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ───
+      {Brain.MoodCore, []},
+      {Brain.MoodPolicy, []},
+
+      # ── Stage-1 scoring server (mood-nudged) ──────────────────────────
+      # Provides GenServer API for scoring and listens to [:brain, :mood, :update]
+      {Brain.LIFG.Stage1, []},
+
       # ── Brain servers / timing ────────────────────────────────────────
       Brain,
       Brain.LIFG,
@@ -50,8 +58,6 @@ defmodule Symbrella.Application do
       {Brain.DLPFC, act_on_thalamus: true},
       {Brain.ACC, keep: 300},
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
-      {Brain.MoodCore, []},
-      {Brain.MoodPolicy, []},
       {Brain.Blackboard, []}
     ]
 

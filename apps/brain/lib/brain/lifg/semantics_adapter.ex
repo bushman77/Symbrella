@@ -25,11 +25,26 @@ defmodule Brain.LIFG.SemanticsAdapter do
 
   Returns updated ctx.
   """
-  @spec adjust_ctx(map()) :: map()
-  def adjust_ctx(%{} = ctx) do
-    # Default: no-op — override for semantic enrichment
-    ctx
-  end
+def adjust_ctx(%{} = ctx) do
+  # +0.05 bias when domain matches the recent intent keyword
+  intent_kw =
+    case Brain.latest_intent() do
+      %{keyword: kw} when is_binary(kw) -> String.downcase(kw)
+      _ -> nil
+    end
+
+  domain = ctx[:domain] || ctx["domain"]
+
+  bias =
+    if is_binary(domain) and is_binary(intent_kw) and
+         String.contains?(String.downcase(domain), intent_kw),
+       do: 0.05, else: 0.0
+
+  base = (ctx[:base_score] || ctx["base_score"] || 0.0) * 1.0
+  Map.put(ctx, :base_score, Float.min(1.0, Float.max(0.0, base + bias)))
+rescue
+  _ -> ctx
+end
 
   @doc """
   Optionally tags or annotates a sense with semantic labels.
@@ -54,5 +69,8 @@ defmodule Brain.LIFG.SemanticsAdapter do
   """
   @spec semantic_distance(map(), map()) :: float() | nil
   def semantic_distance(_ctx1, _ctx2), do: nil
+# compatibility with older callers
+def inject(ctx), do: adjust_ctx(ctx)
+
 end
 

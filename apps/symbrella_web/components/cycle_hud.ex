@@ -7,13 +7,13 @@ defmodule SymbrellaWeb.Components.CycleHUD do
   use Phoenix.Component
 
   def cycle_hud(assigns) do
-    phase = Brain.CycleClock.phase()
-    hz    = Brain.CycleClock.hz()
-    # Try to fetch a snapshot; fall back gracefully if Brain.get_state/0 isn't available.
+    phase = safe_phase()
+    hz    = safe_hz()
+
     metrics =
       try do
         state =
-          if function_exported?(Brain, :get_state, 0),
+          if Code.ensure_loaded?(Brain) and function_exported?(Brain, :get_state, 0),
             do: Brain.get_state(),
             else: %{}
 
@@ -25,24 +25,52 @@ defmodule SymbrellaWeb.Components.CycleHUD do
     assigns =
       assigns
       |> Map.put(:phase, phase)
-      |> Map.put(:hz, hz)
-      |> Map.put(:strength, Float.round(metrics.strength, 2))
-      |> Map.put(:order, Enum.map(metrics.order, &to_string/1))
+      |> Map.put(:hz, safe_num(hz))
+      |> Map.put(:strength, safe_num(metrics[:strength] || metrics["strength"] || 0.0))
+      |> Map.put(:order, metrics[:order] || metrics["order"] || [])
 
     ~H"""
     <div class="flex items-center gap-3 text-sm font-medium px-3 py-2 rounded-2xl shadow-md bg-neutral-900/60 border border-neutral-700">
       <span class="uppercase tracking-wide">Phase:</span>
       <span class="px-2 py-0.5 rounded-md bg-neutral-800 border border-neutral-700"><%= @phase %></span>
       <span>•</span>
-      <span>Tempo: <%= :erlang.float_to_binary(@hz, decimals: 2) %> Hz</span>
+      <span>Tempo: <%= f2(@hz) %> Hz</span>
       <span>•</span>
-      <span>Cycle S: <%= :erlang.float_to_binary(@strength, decimals: 2) %></span>
+      <span>Cycle S: <%= f2(@strength) %></span>
       <%= if @order != [] do %>
         <span>•</span>
-        <span>Order: <%= Enum.join(@order, " → ") %></span>
+        <span>Order: <%= Enum.map(@order, &to_string/1) |> Enum.join(" → ") %></span>
       <% end %>
     </div>
     """
   end
+
+  # ── helpers ──────────────────────────────────────────────────────────
+
+  defp safe_phase do
+    try do
+      if Code.ensure_loaded?(Brain.CycleClock) and function_exported?(Brain.CycleClock, :phase, 0),
+        do: Brain.CycleClock.phase(),
+        else: :unknown
+    rescue
+      _ -> :unknown
+    end
+  end
+
+  defp safe_hz do
+    try do
+      if Code.ensure_loaded?(Brain.CycleClock) and function_exported?(Brain.CycleClock, :hz, 0),
+        do: Brain.CycleClock.hz(),
+        else: 0.0
+    rescue
+      _ -> 0.0
+    end
+  end
+
+  defp safe_num(v) when is_number(v), do: v * 1.0
+  defp safe_num(_), do: 0.0
+
+  # format float with 2 decimals (no default args warning)
+  defp f2(v), do: :erlang.float_to_binary(safe_num(v), decimals: 2)
 end
 
