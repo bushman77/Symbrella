@@ -1,4 +1,3 @@
-# lib/curiosity.ex
 defmodule Curiosity do
   @moduledoc """
   Curiosity — minimal, self-contained background worker.
@@ -81,8 +80,13 @@ defmodule Curiosity do
     max_int       = Keyword.get(opts, :max_interval_ms, @default_max_interval_ms)
 
     # Local, bounded task pool for future probes
+    # NOTE: :restart / :shutdown options are deprecated on start_link (Elixir >= 1.18).
+    # Pass them later on Task.Supervisor.start_child/3 instead when spawning tasks.
     {:ok, _pid} =
-      Task.Supervisor.start_link(name: task_sup(), max_children: max_conc, restart: :transient)
+      Task.Supervisor.start_link(
+        name: task_sup(),
+        max_children: max_conc
+      )
 
     st = %{
       interval_ms: clamp_interval(interval_ms, min_int, max_int),
@@ -132,7 +136,7 @@ defmodule Curiosity do
       next_in_ms: st.next_interval_ms
     })
 
-    # ---- NEW: Proposal broadcast (Route A — no Brain deps) ----
+    # ---- Proposal broadcast (Route A — no Brain deps) ----
     idle_bonus = 0.10
     score = clamp01(0.6 * gain + 0.4 * idle_bonus)
 
@@ -155,7 +159,7 @@ defmodule Curiosity do
       },
       %{probe: probe, reason: :idle, v: 1}
     )
-    # -----------------------------------------------------------
+    # -----------------------------------------------
 
     # Adaptive schedule: back off when memory is hot, relax when cool
     next_interval_ms =

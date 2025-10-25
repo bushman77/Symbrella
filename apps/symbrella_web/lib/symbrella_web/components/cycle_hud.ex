@@ -16,9 +16,9 @@ defmodule SymbrellaWeb.Components.CycleHUD do
     <div class={"flex items-center gap-2 rounded-2xl px-3 py-2 shadow-sm border border-black/5 #{ @class }"}>
       <span class="text-xs font-semibold tracking-wide">Clock</span>
       <span class="text-[10px] tabular-nums">seq <%= @snap.seq %></span>
-      <span class="text-[10px] tabular-nums">Hz <%= fmtf(@snap.hz, 2) %></span>
+      <span class="text-[10px] tabular-nums">Hz <%= fmtf(@snap.hz) %></span>
       <span class="text-[10px] tabular-nums">Δt <%= fmt_ms(@snap.dt_ms) %>ms</span>
-      <span class="text-[10px] tabular-nums">ϕ <%= fmtf(@snap.phase, 2) %></span>
+      <span class="text-[10px] tabular-nums">ϕ <%= fmtf(@snap.phase) %></span>
     </div>
     """
   end

@@ -20,8 +20,6 @@ defmodule Core.Intent.Normalize do
           confidence: number() | nil
         }
 
-  @allowed_intents ~w(ask tell affirm deny greet bye meta why help debug)a
-
   # Common human-friendly aliases; all values are existing atoms (no new atom creation).
   @alias_map %{
     "hi" => :greet,
@@ -56,7 +54,10 @@ defmodule Core.Intent.Normalize do
 
   defp get_any(map, keys), do: Enum.find_value(keys, &Map.get(map, &1))
 
-  defp normalize_intent(v) when is_atom(v) and v in @allowed_intents, do: v
+  # Guard only checks type; validity is done inside (guards can't call Core.Intent.valid?/1).
+  defp normalize_intent(v) when is_atom(v) do
+    if Core.Intent.valid?(v), do: v, else: :unknown
+  end
 
   defp normalize_intent(v) when is_binary(v) do
     v =
@@ -65,14 +66,19 @@ defmodule Core.Intent.Normalize do
       |> strip_edge_punct()
       |> String.downcase()
 
-    case Map.get(@alias_map, v) do
-      a when a in @allowed_intents ->
-        a
+    alias_intent = Map.get(@alias_map, v)
 
-      _ ->
+    cond do
+      is_atom(alias_intent) and Core.Intent.valid?(alias_intent) ->
+        alias_intent
+
+      true ->
         case safe_existing_atom(v) do
-          a when a in @allowed_intents -> a
-          _ -> :unknown
+          a when is_atom(a) ->
+            if Core.Intent.valid?(a), do: a, else: :unknown
+
+          _ ->
+            :unknown
         end
     end
   end

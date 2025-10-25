@@ -2,44 +2,60 @@ defmodule SymbrellaWeb.BrainHTML do
   @moduledoc """
   Presentation for the Brain dashboard. Pure HEEx & helpers.
 
-  Hardened against nil assigns so first render / upstream hiccups never crash.
+  Uses per-file region modules via SymbrellaWeb.Region.Registry.
+  Base brain SVG is inlined and the overlay uses the exact viewBox.
   """
 
   use SymbrellaWeb, :html
+  alias SymbrellaWeb.Region.Registry, as: RegionRegistry
+
+  # Prefrontal macro → children; we avoid double-painting by only drawing the
+  # macro overlay when :prefrontal is selected.
+  @region_groups %{
+    prefrontal: ~w(dlpfc vmpfc dmpfc fpc lifg ofc)a
+  }
 
   # Public entry point used by BrainLive.render/1
   def brain(assigns) do
-    # 🔐 Default any missing assigns so <.hud_row ... /> never KeyErrors
     assigns =
       assigns
       |> Map.put_new(:selected, :lifg)
-      |> Map.put_new(:regions, [])
+      |> Map.put_new(:regions, []) # optional external region listing
       |> Map.put_new(:clock, %{})
       |> Map.put_new(:intent, %{})
       |> Map.put_new(:mood, %{levels: %{}, derived: %{}, tone: :neutral})
       |> Map.put_new(:auto, false)
-      |> Map.put_new(:brain_svg, nil)
       |> Map.put_new(:region, %{})
       |> Map.put_new(:region_state, %{})
       |> Map.put_new(:lifg_last, %{})
       |> Map.put_new(:hippo, %{window: []})
       |> Map.put_new(:hippo_metrics, %{})
       |> Map.put_new(:snapshot, nil)
+      |> Map.put_new(:region_tweaks, %{})        # optional per-region overrides
+      |> ensure_svg_base()                        # put :svg_base if missing
+      |> put_viewbox_meta()                       # put :vb from :svg_base
+      |> Map.put_new(:pan, %{x: 0, y: 0})        # aligned by default
+      |> Map.put_new(:scale, 1.00)
 
     ~H"""
     <div class="container mx-auto px-4 py-6 space-y-6">
       <.brain_header selected={@selected} regions={@regions} />
-
-      <!-- HUD row: clock / intent / mood chips -->
       <.hud_row clock={@clock} intent={@intent} mood={@mood} auto={@auto} />
 
-<!-- Brain map + Region summary -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-  <div class="border rounded-xl p-4 shadow-sm">
-    <.brain_map brain_svg={@brain_svg} selected={@selected} />
-  </div>
-  <.region_summary selected={@selected} region={@region} />
-</div>
+      <!-- Brain map + Region summary -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="border rounded-xl p-4 shadow-sm">
+          <.brain_map
+            svg_base={@svg_base}
+            selected={@selected}
+            region_tweaks={@region_tweaks}
+            pan={@pan}
+            scale={@scale}
+            vb={@vb}
+          />
+        </div>
+        <.region_summary selected={@selected} region={@region} />
+      </div>
 
       <!-- Live state + LIFG decision -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -61,8 +77,40 @@ defmodule SymbrellaWeb.BrainHTML do
     """
   end
 
-  # -- Components -------------------------------------------------------------
+  # --- Ensure base SVG is present (inline, not <img>) ------------------------
+  # Accepts either :svg_base (preferred) or :brain_svg (legacy).
+  # Falls back to file: priv/static/images/brain.svg
+  defp ensure_svg_base(%{svg_base: svg} = assigns) when is_binary(svg) and byte_size(svg) > 0, do: assigns
+  defp ensure_svg_base(%{brain_svg: svg} = assigns) when is_binary(svg) and byte_size(svg) > 0,
+    do: Map.put(assigns, :svg_base, svg)
 
+  defp ensure_svg_base(assigns) do
+    case Application.app_dir(:symbrella_web, "priv/static/images/brain.svg") |> File.read() do
+      {:ok, svg} -> Map.put(assigns, :svg_base, svg)
+      _          -> Map.put(assigns, :svg_base, nil)
+    end
+  end
+
+  # --- Parse exact viewBox (minX minY width height) --------------------------
+  defp put_viewbox_meta(%{svg_base: nil} = assigns),
+    do: Map.put(assigns, :vb, %{minx: 0, miny: 0, w: 516, h: 406})
+
+  defp put_viewbox_meta(%{svg_base: svg} = assigns) when is_binary(svg) do
+    case Regex.run(~r/viewBox\s*=\s*"([^"]+)"/, svg) do
+      [_, vb] ->
+        [minx, miny, w, h] =
+          vb
+          |> String.split(~r/\s+/, trim: true)
+          |> Enum.map(fn s -> case Float.parse(s) do {f,_}->f; :error->0.0 end end)
+
+        Map.put(assigns, :vb, %{minx: minx, miny: miny, w: w, h: h})
+
+      _ ->
+        Map.put(assigns, :vb, %{minx: 0, miny: 0, w: 516, h: 406})
+    end
+  end
+
+  # --- Header ---------------------------------------------------------------
   defp brain_header(assigns) do
     assigns =
       assigns
@@ -94,7 +142,6 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   # --- HUD row ---------------------------------------------------------------
-
   defp hud_row(assigns) do
     clock   = assigns[:clock] || %{}
     intent  = assigns[:intent] || %{}
@@ -162,113 +209,115 @@ defmodule SymbrellaWeb.BrainHTML do
     """
   end
 
-  # --- Brain map (with clickable overlay) -----------------------------------
-# Replace the whole brain_map/1 with this
-defp brain_map(assigns) do
-  # Native canvas is 516x406 → pick center once and use offsets for all zones
-  cx  = 75   # 516/2
-  cy  = 100   # 406/2
+  # --- Draw order helper (prefrontal hierarchy) ------------------------------
+  defp draw_regions(selected) do
+    base  = [:frontal, :temporal, :cerebellum]
+    deep  = [:thalamus, :basal_ganglia, :hippocampus]
+    other = [:pmtg, :atl, :acc]
+    pfc_children = Map.get(@region_groups, :prefrontal, [])
 
-  # Global pan to nudge ALL regions together (tweak live as needed)
-  pan = %{x: 0, y: 0}
-  # Example: move everything left by 12px → pan = %{x: -12, y: 0}
+    order =
+      if selected == :prefrontal,
+        do: base ++ [:prefrontal] ++ pfc_children ++ deep ++ other,
+        else: base ++ pfc_children ++ deep ++ other
 
-  selected? = fn key -> (assigns[:selected] || :lifg) == key end
-
-  color = fn
-    :frontal      -> {"#64748B", "#475569"}   # slate
-    :lifg         -> {"#F43F5E", "#E11D48"}   # rose
-    :temporal     -> {"#0EA5E9", "#0284C7"}   # sky
-    :pmtg         -> {"#8B5CF6", "#7C3AED"}   # violet
-    :ofc          -> {"#F59E0B", "#D97706"}   # amber
-    :thalamus     -> {"#06B6D4", "#0891B2"}   # cyan
-    :hippocampus  -> {"#10B981", "#059669"}   # emerald
-    :cerebellum   -> {"#F59E0B", "#D97706"}   # amber
-    _             -> {"#94A3B8", "#64748B"}
+    Enum.filter(order, &RegionRegistry.available?/1)
   end
 
-  zone_style = fn key ->
-    {fill, stroke} = color.(key)
-    sel  = selected?.(key)
-    fw   = if sel, do: 2, else: 1
-    fop  = if sel, do: "0.35", else: "0.20"
-    "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};"
-  end
+  # --- Brain map (uses registry + exact viewBox) -----------------------------
+  attr :svg_base, :any, required: false
+  attr :vb, :map, default: %{minx: 0, miny: 0, w: 516, h: 406}
+  attr :selected, :atom, default: :lifg
+  attr :region_tweaks, :map, default: %{}
+  attr :pan, :map, default: %{x: 0, y: 0}
+  attr :scale, :float, default: 1.0
+  defp brain_map(assigns) do
+    selected = assigns.selected || :lifg
+    vb       = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
+    pan      = assigns.pan || %{x: 0, y: 0}
+    scale    = assigns.scale || 1.0
 
-  # Region geometry as OFFSETS from (cx, cy). Values derived from your earlier absolutes.
-  zones = [
-    {:frontal,     %{dx: -98,  dy: -123, w: 155, h: 92,  rx: 12, ry: 12}},
-    {:lifg,        %{dx: -48,  dy:  -33, w: 115, h: 55,  rx: 10, ry: 10}},
-    {:temporal,    %{dx: -88,  dy:   42, w: 190, h: 80,  rx: 12, ry: 12}},
-    {:pmtg,        %{dx:  102, dy:   45, w: 60, h: 35,  rx: 10, ry: 10}},
-    {:ofc,         %{dx:   82, dy:  -45, w: 120, h: 60,  rx: 10, ry: 10}},
-    {:thalamus,    %{dx:   62, dy:    2, w:  80, h: 45,  rx:  8, ry:  8}},
-    {:hippocampus, %{dx:   42, dy:   87, w: 120, h: 60,  rx: 12, ry: 12}},
-    {:cerebellum,  %{dx:  162, dy:   97, w:  90, h: 70,  rx: 14, ry: 14}}
-  ]
+    draw_order = draw_regions(selected)
 
-  # Expose to the template
-  assigns =
-    assigns
-    |> assign(:cx, cx)
-    |> assign(:cy, cy)
-    |> assign(:pan, pan)
-    |> assign(:zones, zones)
-    |> assign(:zone_style, zone_style)
+    assigns =
+      assigns
+      |> assign(:selected, selected)
+      |> assign(:vb, vb)
+      |> assign(:view_w, vb.w |> round())
+      |> assign(:view_h, vb.h |> round())
+      |> assign(:pan, pan)
+      |> assign(:scale, scale)
+      |> assign(:draw_order, draw_order)
 
-  ~H"""
-  <div class="p-3">
-    <div class="flex justify-between items-start mb-2">
-      <h2 class="font-semibold">Brain map</h2>
-      <span class="text-xs text-zinc-500">Left-lateral human brain (vector)</span>
-    </div>
+    ~H"""
+    <div class="p-3">
+      <div class="flex justify-between items-start mb-2">
+        <h2 class="font-semibold">Brain map</h2>
+        <span class="text-xs text-zinc-500">Left-lateral human brain (vector)</span>
+      </div>
 
-    <div class="relative bg-white rounded border overflow-hidden" style="aspect-ratio: 516 / 406; min-height: 260px;">
-      <!-- Base graphic confined to panel -->
-      <%= if is_binary(@brain_svg) and byte_size(@brain_svg) > 0 do %>
+      <div class="relative bg-white rounded border overflow-hidden" style={"aspect-ratio: #{@view_w} / #{@view_h}; min-height: 260px;"}>
+        <!-- Base art (INLINE, not <img>) -->
         <div class="absolute inset-0 pointer-events-none overflow-hidden z-0">
-          <div class="w-full h-full [&_svg]:block [&_svg]:w-full [&_svg]:h-full [&_svg]:max-w-full [&_svg]:max-h-full">
-            <%= raw(@brain_svg) %>
+          <div class="w-full h-full [&_svg]:block [&_svg]:w-full [&_svg]:h-full">
+            <%= if is_binary(@svg_base), do: raw(@svg_base), else: "" %>
           </div>
         </div>
-      <% else %>
-        <img
-          src={~p"/images/brain.svg"}
-          alt="Human Brain sketch (SVG)"
-          class="absolute inset-0 z-0 block w-full h-full object-contain pointer-events-none select-none"
-          draggable="false"
-        />
-      <% end %>
 
-      <!-- Overlay: compute absolute x/y from (cx, cy) + offsets + global pan -->
-      <svg viewBox="0 0 516 406" class="absolute inset-0 z-10 w-full h-full" preserveAspectRatio="xMidYMid meet">
-        <g class="pointer-events-auto">
-          <%= for {key, z} <- @zones do %>
-            <rect
-              x={@cx + @pan.x + z.dx}
-              y={@cy + @pan.y + z.dy}
-              width={z.w}
-              height={z.h}
-              rx={z.rx} ry={z.ry}
-              vector-effect="non-scaling-stroke"
-              phx-click="select-region"
-              phx-value-region={Atom.to_string(key)}
-              style={@zone_style.(key)}
-            >
-              <title><%= String.capitalize(Atom.to_string(key)) %></title>
-            </rect>
-          <% end %>
-        </g>
-      </svg>
+        <!-- Overlay uses the SAME viewBox as the base art -->
+        <svg
+          viewBox={"#{@vb.minx} #{@vb.miny} #{@vb.w} #{@vb.h}"}
+          class="absolute inset-0 z-10 w-full h-full"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          <style>
+            .r-label{opacity:0; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#111;}
+            g.region:hover .r-label{opacity:.9}
+          </style>
+
+          <!-- Global pan/scale -->
+          <g transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"} class="pointer-events-auto">
+            <%= for key <- @draw_order do %>
+              <% defn = RegionRegistry.defn(key) %>
+
+              <% # Merge optional per-render overrides (%{key => %{dx/dy/s}}) %>
+              <% t0 = defn.tweak %>
+              <% tovr = Map.get(@region_tweaks, key, %{}) %>
+              <% t = Map.merge(%{dx: 0, dy: 0, s: 1.0}, Map.merge(t0, tovr)) %>
+
+              <% {fill, stroke} = defn.colors %>
+              <% sel? = @selected == key %>
+              <% fw   = if sel?, do: 2, else: 1 %>
+              <% fop  = if sel?, do: "0.35", else: "0.20" %>
+              <% style = "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
+              <% {lx, ly} = defn.anchor %>
+
+              <g class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
+                <path
+                  d={defn.path}
+                  vector-effect="non-scaling-stroke"
+                  phx-click="select-region"
+                  phx-value-region={Atom.to_string(key)}
+                  style={style}
+                >
+                  <title><%= String.upcase(Atom.to_string(key)) %></title>
+                </path>
+                <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
+              </g>
+            <% end %>
+          </g>
+        </svg>
+      </div>
+
+      <p class="text-[11px] text-zinc-500 mt-2">
+        Base art is inlined and the overlay uses the same viewBox—no letterboxing drift.
+        Pan/scale start at 0/1; use per-region tweaks for tiny nudges only.
+      </p>
     </div>
-
-    <p class="text-[11px] text-zinc-500 mt-2">Click any region to view details.</p>
-  </div>
-  """
-end
+    """
+  end
 
   # --- Region summary --------------------------------------------------------
-
   defp region_summary(assigns) do
     region   = assigns[:region] || %{}
     selected = assigns[:selected] || :lifg
@@ -341,7 +390,6 @@ end
   defp default_region_desc(_), do: "Overview of the selected module."
 
   # --- Live state ------------------------------------------------------------
-
   defp live_state_panel(assigns) do
     st   = assigns[:state] || %{}
     proc = Map.get(st, :process) || Map.get(st, :process_name) || "N/A"
@@ -368,8 +416,7 @@ end
     """
   end
 
-  # --- Mood panel (existing) -------------------------------------------------
-
+  # --- Mood panel ------------------------------------------------------------
   defp mood_panel(assigns) do
     mood     = assigns[:mood] || %{levels: %{}, derived: %{}, tone: :neutral}
     levels   = Map.get(mood, :levels, %{}) || %{}
@@ -408,7 +455,6 @@ end
   end
 
   # --- LIFG last decision ----------------------------------------------------
-
   defp lifg_panel(assigns) do
     lifg_last  = assigns[:lifg_last] || %{}
     meta       = Map.get(lifg_last, :meta, %{}) || %{}
@@ -478,11 +524,10 @@ end
     """
   end
 
-  # --- Hippocampus / Snapshot (existing) ------------------------------------
-
+  # --- Hippocampus / Snapshot ------------------------------------------------
   defp hippo_panel(assigns) do
     hippo   = assigns[:hippo] || %{window: []}
-    metrics = assigns[:metrics] || %{}
+    metrics = Map.get(assigns, :metrics, %{}) || %{}
 
     ~H"""
     <div class="border rounded-xl p-4 shadow-sm">
@@ -493,28 +538,29 @@ end
       </div>
 
       <div class="text-sm text-zinc-500">Metrics:</div>
-      <pre class="text-xs bg-zinc-50 p-2 rounded border mt-1"><%= inspect(metrics) %></pre>
+      <pre class="text-xs bg-zinc-50 p-2 rounded border mt-1"><%= inspect(@metrics) %></pre>
     </div>
     """
   end
 
+  # Explicit attrs help dialyzer/compile warnings
+  attr :snapshot, :any, default: nil
   defp snapshot_panel(assigns) do
-    snapshot = Map.get(assigns, :snapshot)
-
     ~H"""
     <div class="border rounded-xl p-4 shadow-sm">
       <h2 class="font-semibold mb-3">Process Snapshot</h2>
-      <%= if is_nil(snapshot) do %>
+      <%= if is_nil(@snapshot) do %>
         <div class="text-sm text-zinc-400">No snapshot available</div>
       <% else %>
-        <pre class="text-xs bg-zinc-50 p-2 rounded border"><%= inspect(snapshot, limit: :infinity) %></pre>
+        <pre class="text-xs bg-zinc-50 p-2 rounded border"><%= inspect(@snapshot, limit: :infinity) %></pre>
       <% end %>
     </div>
     """
   end
 
   # --- small UI helpers ------------------------------------------------------
-
+  attr :label, :any, required: true
+  attr :value, :any, required: true
   defp kv(assigns) do
     ~H"""
     <div class="flex items-center justify-between py-0.5">
@@ -537,27 +583,52 @@ end
   defp fmt_pct(v) when is_float(v), do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
   defp fmt_pct(v), do: to_string(v)
 
-  # derive region options from `@regions` if present, else sensible defaults
+  # Region select options:
+  # - If caller supplies @regions, use that list.
+  # - Else, list keys from the registry in a sensible order.
   defp region_options([]) do
-    [
-      lifg: "LIFG",
-      ofc: "OFC",
-      hippocampus: "Hippocampus",
-      pmtg: "PMTG",
-      thalamus: "Thalamus",
-      cerebellum: "Cerebellum",
-      temporal: "Temporal",
-      frontal: "Frontal"
+    # Prefer a stable, readable order in the dropdown
+    preferred = [
+      :lifg, :pmtg, :hippocampus, :thalamus, :basal_ganglia, :ofc, :acc,
+      :dlpfc, :vmpfc, :dmpfc, :fpc, :prefrontal, :atl, :salience,
+      :temporal, :frontal, :cerebellum
     ]
+
+    keys =
+      preferred
+      |> Enum.filter(&RegionRegistry.available?/1)
+      |> Kernel.++(RegionRegistry.keys() -- preferred)
+      |> Enum.uniq()
+
+    Enum.map(keys, &{&1, pretty_label(&1)})
   end
 
   defp region_options(pairs) do
     Enum.map(pairs, fn
       {key, label, _color, _region} -> {key, label}
       {key, label} -> {key, label}
-      atom when is_atom(atom) -> {atom, atom |> Atom.to_string() |> String.upcase()}
-      _other -> {:lifg, "LIFG"} # fallback
+      atom when is_atom(atom) -> {atom, pretty_label(atom)}
+      _other -> {:lifg, "LIFG"}
     end)
   end
+
+  defp pretty_label(:lifg),           do: "LIFG"
+  defp pretty_label(:pmtg),           do: "PMTG"
+  defp pretty_label(:ofc),            do: "OFC"
+  defp pretty_label(:acc),            do: "ACC"
+  defp pretty_label(:dlpfc),          do: "DLPFC"
+  defp pretty_label(:vmpfc),          do: "VMPFC"
+  defp pretty_label(:dmpfc),          do: "DMPFC"
+  defp pretty_label(:fpc),            do: "FPC"
+  defp pretty_label(:atl),            do: "ATL"
+  defp pretty_label(:salience),       do: "Salience"
+  defp pretty_label(:temporal),       do: "Temporal"
+  defp pretty_label(:frontal),        do: "Frontal"
+  defp pretty_label(:cerebellum),     do: "Cerebellum"
+  defp pretty_label(:thalamus),       do: "Thalamus"
+  defp pretty_label(:basal_ganglia),  do: "Basal Ganglia"
+  defp pretty_label(:hippocampus),    do: "Hippocampus"
+  defp pretty_label(:prefrontal),     do: "Prefrontal"
+  defp pretty_label(other),           do: other |> Atom.to_string() |> String.upcase()
 end
 
