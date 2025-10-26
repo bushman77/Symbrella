@@ -3,11 +3,14 @@ defmodule SymbrellaWeb.BrainHTML do
   Presentation for the Brain dashboard. Pure HEEx & helpers.
 
   Uses per-file region modules via SymbrellaWeb.Region.Registry.
-  Base brain SVG is inlined and the overlay uses the exact viewBox.
+  The **base brain art and region overlays render inside one `<svg>`** that
+  shares a single `viewBox` → no cross-device drift.
   """
 
   use SymbrellaWeb, :html
+
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
+  alias SymbrellaWeb.Region.BaseArt
 
   # Prefrontal macro → children; we avoid double-painting by only drawing the
   # macro overlay when :prefrontal is selected.
@@ -31,10 +34,10 @@ defmodule SymbrellaWeb.BrainHTML do
       |> Map.put_new(:hippo, %{window: []})
       |> Map.put_new(:hippo_metrics, %{})
       |> Map.put_new(:snapshot, nil)
-      |> Map.put_new(:region_tweaks, %{})        # optional per-region overrides
-      |> ensure_svg_base()                        # put :svg_base if missing
-      |> put_viewbox_meta()                       # put :vb from :svg_base
-      |> Map.put_new(:pan, %{x: 0, y: 0})        # aligned by default
+      |> Map.put_new(:region_tweaks, %{})   # optional per-region overrides
+      |> Map.put_new(:svg_base, nil)        # optional override SVG string
+      |> assign_viewbox()                   # put :vb from svg override or BaseArt
+      |> Map.put_new(:pan, %{x: 0, y: 0})   # aligned by default
       |> Map.put_new(:scale, 1.00)
 
     ~H"""
@@ -75,39 +78,6 @@ defmodule SymbrellaWeb.BrainHTML do
       </div>
     </div>
     """
-  end
-
-  # --- Ensure base SVG is present (inline, not <img>) ------------------------
-  # Accepts either :svg_base (preferred) or :brain_svg (legacy).
-  # Falls back to file: priv/static/images/brain.svg
-  defp ensure_svg_base(%{svg_base: svg} = assigns) when is_binary(svg) and byte_size(svg) > 0, do: assigns
-  defp ensure_svg_base(%{brain_svg: svg} = assigns) when is_binary(svg) and byte_size(svg) > 0,
-    do: Map.put(assigns, :svg_base, svg)
-
-  defp ensure_svg_base(assigns) do
-    case Application.app_dir(:symbrella_web, "priv/static/images/brain.svg") |> File.read() do
-      {:ok, svg} -> Map.put(assigns, :svg_base, svg)
-      _          -> Map.put(assigns, :svg_base, nil)
-    end
-  end
-
-  # --- Parse exact viewBox (minX minY width height) --------------------------
-  defp put_viewbox_meta(%{svg_base: nil} = assigns),
-    do: Map.put(assigns, :vb, %{minx: 0, miny: 0, w: 516, h: 406})
-
-  defp put_viewbox_meta(%{svg_base: svg} = assigns) when is_binary(svg) do
-    case Regex.run(~r/viewBox\s*=\s*"([^"]+)"/, svg) do
-      [_, vb] ->
-        [minx, miny, w, h] =
-          vb
-          |> String.split(~r/\s+/, trim: true)
-          |> Enum.map(fn s -> case Float.parse(s) do {f,_}->f; :error->0.0 end end)
-
-        Map.put(assigns, :vb, %{minx: minx, miny: miny, w: w, h: h})
-
-      _ ->
-        Map.put(assigns, :vb, %{minx: 0, miny: 0, w: 516, h: 406})
-    end
   end
 
   # --- Header ---------------------------------------------------------------
@@ -224,7 +194,7 @@ defmodule SymbrellaWeb.BrainHTML do
     Enum.filter(order, &RegionRegistry.available?/1)
   end
 
-  # --- Brain map (uses registry + exact viewBox) -----------------------------
+  # --- Brain map (single SVG: base + overlays share one viewBox) -------------
   attr :svg_base, :any, required: false
   attr :vb, :map, default: %{minx: 0, miny: 0, w: 516, h: 406}
   attr :selected, :atom, default: :lifg
@@ -236,7 +206,6 @@ defmodule SymbrellaWeb.BrainHTML do
     vb       = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
     pan      = assigns.pan || %{x: 0, y: 0}
     scale    = assigns.scale || 1.0
-
     draw_order = draw_regions(selected)
 
     assigns =
@@ -257,17 +226,9 @@ defmodule SymbrellaWeb.BrainHTML do
       </div>
 
       <div class="relative bg-white rounded border overflow-hidden" style={"aspect-ratio: #{@view_w} / #{@view_h}; min-height: 260px;"}>
-        <!-- Base art (INLINE, not <img>) -->
-        <div class="absolute inset-0 pointer-events-none overflow-hidden z-0">
-          <div class="w-full h-full [&_svg]:block [&_svg]:w-full [&_svg]:h-full">
-            <%= if is_binary(@svg_base), do: raw(@svg_base), else: "" %>
-          </div>
-        </div>
-
-        <!-- Overlay uses the SAME viewBox as the base art -->
         <svg
           viewBox={"#{@vb.minx} #{@vb.miny} #{@vb.w} #{@vb.h}"}
-          class="absolute inset-0 z-10 w-full h-full"
+          class="absolute inset-0 w-full h-full"
           preserveAspectRatio="xMidYMid meet"
         >
           <style>
@@ -275,13 +236,21 @@ defmodule SymbrellaWeb.BrainHTML do
             g.region:hover .r-label{opacity:.9}
           </style>
 
-          <!-- Global pan/scale -->
-          <g transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"} class="pointer-events-auto">
+          <!-- Pan/scale applies to base art and overlays together -->
+          <g transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"} class="pointer-events-auto" vector-effect="non-scaling-stroke">
+            <!-- Base art (component returns a <g>) -->
+            <BaseArt.group svg={@svg_base} />
+
+            <!-- Region overlays (same coordinate system as base) -->
             <%= for key <- @draw_order do %>
               <% defn = RegionRegistry.defn(key) %>
 
-              <% # Merge optional per-render overrides (%{key => %{dx/dy/s}}) %>
-              <% t0 = defn.tweak %>
+              <% # Merge optional per-render overrides (%{key => %{dx/dy/s}}) safely %>
+              <% t0 =
+                case defn.tweak do
+                  m when is_map(m) -> m
+                  _ -> %{}
+                end %>
               <% tovr = Map.get(@region_tweaks, key, %{}) %>
               <% t = Map.merge(%{dx: 0, dy: 0, s: 1.0}, Map.merge(t0, tovr)) %>
 
@@ -310,8 +279,9 @@ defmodule SymbrellaWeb.BrainHTML do
       </div>
 
       <p class="text-[11px] text-zinc-500 mt-2">
-        Base art is inlined and the overlay uses the same viewBox—no letterboxing drift.
-        Pan/scale start at 0/1; use per-region tweaks for tiny nudges only.
+        Single SVG, shared viewBox — zero drift across devices. Use per-region
+        tweaks for tiny nudges only; prefer adjusting the base `viewBox` for
+        global framing.
       </p>
     </div>
     """
@@ -527,7 +497,7 @@ defmodule SymbrellaWeb.BrainHTML do
   # --- Hippocampus / Snapshot ------------------------------------------------
   defp hippo_panel(assigns) do
     hippo   = assigns[:hippo] || %{window: []}
-    metrics = Map.get(assigns, :metrics, %{}) || %{}
+    _metrics = Map.get(assigns, :metrics, %{}) || %{}
 
     ~H"""
     <div class="border rounded-xl p-4 shadow-sm">
@@ -630,5 +600,11 @@ defmodule SymbrellaWeb.BrainHTML do
   defp pretty_label(:hippocampus),    do: "Hippocampus"
   defp pretty_label(:prefrontal),     do: "Prefrontal"
   defp pretty_label(other),           do: other |> Atom.to_string() |> String.upcase()
+
+  # --- internal: viewBox assignment from optional override -------------------
+  defp assign_viewbox(assigns) do
+    vb = BaseArt.viewbox(Map.get(assigns, :svg_base))
+    Map.put(assigns, :vb, vb)
+  end
 end
 
