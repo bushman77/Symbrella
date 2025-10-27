@@ -14,7 +14,7 @@ defmodule Brain.LIFG.Cover do
         }
 
   @spec resolve_cover(map(), list(choice), keyword()) :: %{si: map(), cover: list(map())}
-  def resolve_cover(si, choices, opts \\ []) do
+  def resolve_cover(si, choices, _opts \\ []) do
     si0 = Safe.to_plain(si)
     tokens = Safe.get(si0, :tokens, []) |> Enum.map(&Safe.to_plain/1)
 

@@ -1,30 +1,60 @@
 defmodule Brain.LIFG.Reanalysis do
-  @moduledoc ~S"""
-  Minimal reanalysis for Stage-1.
+  @moduledoc """
+  Reanalysis fallback for LIFG choices.
 
-  If the top candidate is vetoed (`veto?: true`), promote the runner-up.
-  Emits telemetry: [:brain, :lifg, :reanalysis] with %{token_index, from, to}.
+  If downstream integration rejects a chosen sense, flip to the next-best alt id.
+  Emits telemetry for each fallback.
+
+  Usage:
+    fail_fun = fn %{token_index: i, chosen_id: id} -> should_flip?(i, id) end
+    %{choices: updated} = Brain.LIFG.Reanalysis.fallback(choices, fail_fun)
   """
 
-  @spec maybe_promote(map()) :: map()
-  def maybe_promote(%{ranked: [top, second | _]} = choice) do
-    if Map.get(top, :veto?, false) do
-      :telemetry.execute([:brain, :lifg, :reanalysis], %{}, %{
-        token_index: choice.token_index,
-        from: top.id,
-        to: second.id
-      })
+  @type choice :: %{
+          token_index: non_neg_integer(),
+          chosen_id: any(),
+          alt_ids: list(),
+          margin: number(),
+          scores: map(),
+          prob_margin: number()
+        }
 
-      Map.merge(choice, %{
-        chosen_id: second.id,
-        scores: Map.get(second, :scores, %{}),
-        total: Map.get(second, :total, 0.0),
-        audit: Map.merge(choice.audit || %{}, %{reanalysis: %{from: top.id, to: second.id}})
-      })
-    else
-      choice
-    end
+  @spec fallback(list(choice), (map() -> boolean()), keyword()) ::
+          %{choices: list(choice), flips: non_neg_integer()}
+  def fallback(choices, fail_fun, _opts \\ []) when is_list(choices) and is_function(fail_fun, 1) do
+    {out, flips} =
+      Enum.map_reduce(choices, 0, fn ch, acc ->
+        if fail_fun.(ch) do
+          case ch.alt_ids do
+            [next | rest] ->
+              flipped =
+                ch
+                |> Map.put(:chosen_id, next)
+                |> Map.put(:alt_ids, rest ++ [ch.chosen_id])
+
+              :telemetry.execute(
+                [:brain, :lifg, :reanalysis, :fallback],
+                %{count: 1},
+                %{token_index: ch.token_index, from: ch.chosen_id, to: next, v: 1}
+              )
+
+              {flipped, acc + 1}
+
+            [] ->
+              :telemetry.execute(
+                [:brain, :lifg, :reanalysis, :no_alternative],
+                %{count: 1},
+                %{token_index: ch.token_index, chosen_id: ch.chosen_id, v: 1}
+              )
+
+              {ch, acc}
+          end
+        else
+          {ch, acc}
+        end
+      end)
+
+    %{choices: out, flips: flips}
   end
-
-  def maybe_promote(choice), do: choice
 end
+
