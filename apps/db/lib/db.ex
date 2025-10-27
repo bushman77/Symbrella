@@ -1,4 +1,3 @@
-# apps/db/lib/db.ex
 defmodule Db do
   @moduledoc """
   Umbrella-wide Repo (single database).
@@ -140,11 +139,16 @@ defmodule Db do
   defp token_to_phrase(s) when is_binary(s), do: s
   defp token_to_phrase(_), do: ""
 
+  # P-213: Unicode-punctuation-safe normalization for lookups
   defp norm(nil), do: ""
+
   defp norm(s) when is_binary(s) do
     s
     |> String.downcase()
     |> String.trim()
+    # strip leading/trailing punctuation (Unicode-aware); keep inner apostrophes/hyphens
+    |> String.replace(~r/^\p{P}+/u, "")
+    |> String.replace(~r/\p{P}+$/u, "")
     |> String.replace(~r/\s+/u, " ")
   end
 

@@ -2,7 +2,7 @@ defmodule Core do
   @moduledoc """
   Pipeline:
   Tokenize → Rebuild word n-grams → STM → LTM (DB read/enrich)
-  → (Episodes attach) → LIFG Stage-1 → ATL → Hippocampus encode
+  → MWE Signatures (late bias) → (Episodes attach) → LIFG Stage-1 → ATL → Hippocampus encode
   → (Optional) Persist episode → Notify Brain.
 
   Notes:
@@ -11,6 +11,10 @@ defmodule Core do
   • Any legacy `type: "seed"` rows are ignored when selecting candidates.
   • LIFG tie-breaks: uses a tiny POS prior only for razor-thin margins.
   • MWE shadowing: winning multi-word tokens suppress overlapping unigram winners.
+  • MWE Signatures: cheap, symbolic sliding-window MWE detection producing `si.intent_bias`.
+    - We run it twice: optional early (pre-LTM) and required late (post-LTM, pre-LIFG).
+    - Toggled by env `:core, :mwe_signatures` (":on" by default; set to `:off` to disable),
+      or per-call via opts `mwe_signatures: :off`.
   • All Brain interactions are guarded so tests without the Brain process still pass.
   • Episodes attach can be toggled via `opts[:episodes]` (default true) or env
     `Application.get_env(:brain, :episodes_mode, :on) != :off`.
@@ -29,50 +33,54 @@ defmodule Core do
   alias Brain
   alias Core.SemanticInput
   alias Core.Intent.Selection
+  alias Core.MWE.Signatures
   alias Db
   alias Db.BrainCell
 
   @type si :: map()
   @type opts :: keyword()
 
- @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
-def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-  mode  = Keyword.get(opts, :mode, :prod)
-  max_n = Keyword.get(opts, :max_wordgram_n, 3)
+  @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
+  def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
+    mode  = Keyword.get(opts, :mode, :prod)
+    max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
-  si0 =
-    phrase
-    |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-    |> wrap_si(phrase)
-    |> rebuild_word_ngrams(max_n)
-    |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
-    |> Map.put_new(:trace, [])
+    si0 =
+      phrase
+      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+      |> wrap_si(phrase)
+      |> rebuild_word_ngrams(max_n)
+      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put_new(:trace, [])
 
-  # ── Stage-1 Intent Selection (early, cheap, biases LIFG later) ──
-  # Appends its own {:intent, %{...}} trace entry and emits telemetry.
-  si1 =
-    si0
-    |> Core.Intent.Selection.select(opts)
+    # ── Stage-1 Intent Selection (early, cheap, biases LIFG later) ──
+    # Appends its own {:intent, %{...}} trace entry and emits telemetry.
+    si1 =
+      si0
+      |> Selection.select(opts)
 
-  case mode do
-    :prod ->
-      si1
-      |> Brain.stm()
-      |> keep_only_word_boundary_tokens()
-      |> ltm_stage(opts)                # DB read-only + merge
-      |> keep_only_word_boundary_tokens()
-      |> maybe_attach_episodes(opts)    # forward :recall_source / :episode_embedding
-      |> run_lifg_and_attach(opts)      # LIFG can read si.intent / si.keyword / si.confidence
-      |> maybe_ingest_atl(opts)
-      |> maybe_encode_hippocampus()
-      |> maybe_persist_episode(opts)    # returns SI unchanged
-      |> notify_brain_activation(opts)
+    case mode do
+      :prod ->
+        si1
+        |> Brain.stm()
+        |> keep_only_word_boundary_tokens()
+        # Optional early signature pass (pre-LTM) for introspection/telemetry
+        |> maybe_run_mwe(:early, opts)
+        |> ltm_stage(opts)                # DB read-only + merge
+        |> keep_only_word_boundary_tokens()
+        |> maybe_run_mwe(:late, opts)     # ← single gated late pass
+        |> maybe_attach_episodes(opts)    # forward :recall_source / :episode_embedding
+        |> run_lifg_and_attach(opts)      # LIFG can read si.intent / si.keyword / si.confidence / si.intent_bias
+        |> maybe_ingest_atl(opts)
+        |> maybe_encode_hippocampus()
+        |> maybe_persist_episode(opts)    # returns SI unchanged
+        |> notify_brain_activation(opts)
 
-    _ ->
-      si1
+      _ ->
+        si1
+    end
   end
-end
- 
+
   # ─────────────────────── Brain notify ───────────────────────
 
   defp id_norm(nil), do: nil
@@ -124,6 +132,15 @@ end
         if senses == [], do: acc, else: Map.put(acc, Map.get(t, :index), senses)
       end)
 
+    # P-213: visibility telemetry on candidate volume pre-call
+    cand_count =
+      groups
+      |> Map.values()
+      |> Enum.map(&length/1)
+      |> Enum.sum()
+
+    emit([:brain, :lifg, :candidates_ready], %{candidates: cand_count}, %{stage: :pre_call})
+
     ctx = [1.0]
 
     lifg_input = %{
@@ -139,6 +156,11 @@ end
 
     case Brain.lifg_stage1(lifg_input, ctx, lifg_opts2) do
       {:ok, out} ->
+        # P-213: telemetry when LIFG returns no choices (helps gate tuning)
+        if (Map.get(out, :choices, []) || []) == [] do
+          emit([:brain, :lifg, :no_choices], %{candidates: cand_count}, %{stage: :post_call})
+        end
+
         ev =
           out.audit
           |> Map.merge(%{
@@ -347,7 +369,8 @@ end
 
   defp maybe_persist_episode(si, opts) when is_map(si) do
     # Delegates gating to Writer (persist flag/env). Always returns SI unchanged.
-    Brain.Hippocampus.Writer.maybe_persist(si,
+    Brain.Hippocampus.Writer.maybe_persist(
+      si,
       persist:   Keyword.get(opts, :persist_episodes),
       embedding: Keyword.get(opts, :episode_embedding),
       user_id:   Keyword.get(opts, :user_id)
@@ -494,18 +517,28 @@ end
   defp cell_id(id) when is_binary(id), do: id
   defp cell_id(_), do: nil
 
+  # P-213: Unicode-punctuation-safe normalization
   defp norm(nil), do: ""
 
-  defp norm(v) when is_binary(v),
-    do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+  defp norm(v) when is_binary(v) do
+    v
+    |> String.downcase()
+    |> String.trim()
+    # Strip leading & trailing Unicode punctuation; keep inner apostrophes/hyphens
+    |> String.replace(~r/^\p{P}+/u, "")
+    |> String.replace(~r/\p{P}+$/u, "")
+    |> String.replace(~r/\s+/u, " ")
+  end
 
-  defp norm(v),
-    do:
-      v
-      |> Kernel.to_string()
-      |> String.downcase()
-      |> String.replace(~r/\s+/u, " ")
-      |> String.trim()
+  defp norm(v) do
+    v
+    |> Kernel.to_string()
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/^\p{P}+/u, "")
+    |> String.replace(~r/\p{P}+$/u, "")
+    |> String.replace(~r/\s+/u, " ")
+  end
 
   # ─────────────────────── Introspection / Examine ───────────────────────
 
@@ -769,5 +802,28 @@ end
   # ─────────────────────── Small util ───────────────────────
   defp put_if_present(kvs, _k, nil), do: kvs
   defp put_if_present(kvs, k, v),   do: Keyword.put(kvs, k, v)
+
+  # Gate + forwarder for MWE Signatures
+  defp maybe_run_mwe(si, stage, opts) do
+    env_on  = Application.get_env(:core, :mwe_signatures, :on) != :off
+    opt_val = Keyword.get(opts, :mwe_signatures, :inherit)
+    enabled = case opt_val do
+      :off -> false
+      false -> false
+      :inherit -> env_on
+      _ -> true
+    end
+
+    if enabled do
+      Signatures.run(si,
+        stage: stage,
+        extra_lex: Keyword.get(opts, :mwe_extra_lex, []),
+        multiplier: Keyword.get(opts, :mwe_multiplier, 1.0),
+        demote_funcs?: Keyword.get(opts, :mwe_demote_funcs?, true)
+      )
+    else
+      si
+    end
+  end
 end
 

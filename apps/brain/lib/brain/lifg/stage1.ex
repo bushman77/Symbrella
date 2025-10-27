@@ -2,42 +2,227 @@ defmodule Brain.LIFG.Stage1 do
   @moduledoc """
   LIFG.Stage1 — first-pass disambiguation scoring.
 
-  Now includes:
-    • mood nudging
-    • semantic context enrichment via `Brain.LIFG.SemanticsAdapter`
+  Responsibilities
+  • Score sense candidates per token using a weighted feature mix:
+      - :lex_fit     — lexical compatibility with the token (esp. for MWEs)
+      - :rel_prior   — relational prior / heuristic prior from candidate
+      - :activation  — candidate prior activation / score (DB or slate)
+      - :intent_bias — bias from `si.intent_bias[token_index]` (e.g., MWE signatures)
+  • Apply mood nudging (multiplicative factor) if the Stage1 server is running.
+  • Normalize to probabilities (softmax), compute margins, return winners.
 
-  Listens:
-    • [:brain, :mood, :update] -> updates mood weights
+  Integrations
+  • Optional mood updates via telemetry: [:brain, :mood, :update]
+  • NOTE: To avoid circular GenServer calls, semantic adjustments must be applied upstream
+    (e.g., enrich `si.intent_bias` before Stage1). The Stage1 server process
+    does not call out to other GenServers during `handle_call/3`.
 
-  Emits:
-    • [:brain, :lifg, :stage1, :score]
-      measurements: %{score: float()}
-      metadata: %{
-        token: term(),
-        sense_id: term(),
-        base_score: float(),
-        mood_bias: float(),
-        mood_snapshot: map() | nil,
-        mood_weights: map(),
-        mood_cap: float(),
-        v: 2
-      }
+  Public API
+  • start_link/1 — starts the mood-aware Stage1 server
+  • run/2        — pure Stage1 scoring over `si` + opts → {:ok, %{si, choices, audit}}
+  • run/3        — legacy shim (weights, opts)
+  • score/2      — server call to apply mood factor to a single base score (used internally)
+
+  Telemetry
+  • [:brain, :lifg, :stage1, :score] — per-candidate mood-applied score
+  • [:brain, :lifg, :chargram_violation] — token dropped by boundary/char-gram guard
   """
 
   use Brain, region: :lifg_stage1
   require Logger
-  alias Brain.LIFG.SemanticsAdapter
+  alias Brain.Utils.Safe
+
+  @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
+  @default_scores_mode :all
+  @default_margin_thr 0.15
+  @default_min_margin 0.05
 
   @default_mw %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
   @default_cap 0.05
   @mood_handler_prefix "brain-lifg-stage1-mood-"
 
-  # ─── Public API (compat stubs remain) ───────────────────────────────────────
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  def run(si, opts) when is_list(opts), do: {:ok, si}
-  def run(si, _legacy_arg, _opts),      do: {:ok, si, %{stage1: :noop, passthrough: true}}
+  @function_pos ~w(determiner preposition conjunction auxiliary modal pronoun adverb particle)
 
-  # ─── GenServer Lifecycle ────────────────────────────────────────────────────
+  # ---------- Public server API (mood) ----------
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def score(server \\ __MODULE__, ctx), do: GenServer.call(server, {:score, ctx})
+
+  # `run/2` – main Stage1 entry (pure)
+  @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  def run(si, opts) when is_map(si) and is_list(opts) do
+    try do
+      si0 = Safe.to_plain(si)
+      sent = Safe.get(si0, :sentence, "") |> to_string()
+
+      tokens =
+        Safe.get(si0, :tokens, [])
+        |> Enum.map(&Safe.to_plain/1)
+
+      buckets =
+        Safe.get(si0, :sense_candidates, %{}) ||
+          Safe.get(si0, :candidates_by_token, %{}) || %{}
+
+      # Effective knobs
+      weights =
+        Application.get_env(:brain, :lifg_stage1_weights, @default_weights)
+        |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
+
+      scores_mode = Keyword.get(opts, :scores,
+        Application.get_env(:brain, :lifg_stage1_scores_mode, @default_scores_mode)
+      )
+
+      margin_thr  = Keyword.get(opts, :margin_threshold,
+        Application.get_env(:brain, :lifg_min_margin, @default_margin_thr)
+      )
+
+      min_margin  = Keyword.get(opts, :min_margin,
+        Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
+      )
+
+      bias_map = Keyword.get(opts, :intent_bias, Safe.get(si0, :intent_bias, %{})) || %{}
+
+      # Score each token's candidate bucket with boundary/char-gram guard
+      %{choices: choices, weak: weak_count, rejected: rejected_by_boundary, chargram: chargram_violation} =
+        tokens
+        |> Enum.with_index()
+        |> Enum.reduce(%{choices: [], weak: 0, rejected: [], chargram: 0}, fn {tok, idx}, acc ->
+          cand_list =
+            buckets
+            |> Map.get(idx, [])
+            |> Enum.map(&Safe.to_plain/1)
+
+          token_phrase = norm(Safe.get(tok, :phrase, ""))
+          token_mwe?   = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
+
+          # Boundary/char-gram guard
+          if not boundary_ok?(sent, tok, token_phrase, token_mwe?) do
+            :telemetry.execute(
+              [:brain, :lifg, :chargram_violation],
+              %{count: 1},
+              %{token_index: idx, phrase: token_phrase, mw: token_mwe?, v: 2}
+            )
+
+            acc
+            |> Map.update!(:rejected, &([idx | &1]))
+            |> Map.update!(:chargram, &(&1 + 1))
+          else
+            if cand_list == [] do
+              acc
+            else
+              bias_val = get_float(bias_map, idx, 0.0)
+
+              scored =
+                Enum.map(cand_list, fn c ->
+                  id   = sense_id_for(c, token_phrase)
+                  pos  = pos_of(c)
+                  cnrm = norm(Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || token_phrase)
+
+                  lex  = lex_fit(cnrm, token_phrase, token_mwe?)
+                  rel  = clamp01(Safe.get(c, :rel_prior, guess_rel_prior(c)))
+                  act  = clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
+
+                  intent_feat =
+                    intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
+
+                  base =
+                    weights[:lex_fit]     * lex +
+                    weights[:rel_prior]   * rel +
+                    weights[:activation]  * act +
+                    weights[:intent_bias] * intent_feat
+                    |> clamp01()
+
+                  final = apply_mood_if_up(base, tok, id)
+                  {id, final}
+                end)
+
+              probs = softmax(Enum.map(scored, fn {_id, s} -> s end))
+
+              id_prob =
+                scored
+                |> Enum.zip(probs)
+                |> Enum.map(fn {{id, _s}, p} -> {id, p} end)
+
+              ranked = Enum.sort_by(id_prob, fn {_id, p} -> -p end)
+
+              {chosen_id, top_p} =
+                case ranked do
+                  [{id1, p1} | _] -> {id1, p1}
+                  _ -> {nil, 0.0}
+                end
+
+              second_p =
+                case ranked do
+                  [_first, {_id2, p2} | _] -> p2
+                  _ -> 0.0
+                end
+
+              margin0 = top_p - second_p
+              margin  = Float.round(max(margin0, min_margin), 6)
+
+              scores_out =
+                case scores_mode do
+                  :all ->
+                    id_prob |> Enum.into(%{}, fn {id, p} -> {id, Float.round(p, 6)} end)
+
+                  :top2 ->
+                    id_prob
+                    |> Enum.take(2)
+                    |> Enum.into(%{}, fn {id, p} -> {id, Float.round(p, 6)} end)
+
+                  _ ->
+                    %{}
+                end
+
+              alt_ids =
+                ranked
+                |> Enum.map(fn {id, _p} -> id end)
+                |> Enum.reject(&(&1 == chosen_id))
+
+              choice = %{
+                token_index: idx,
+                chosen_id: chosen_id,
+                scores: scores_out,
+                alt_ids: alt_ids,
+                margin: margin,
+                prob_margin: margin
+              }
+
+              weak_next = if margin < margin_thr, do: acc.weak + 1, else: acc.weak
+
+              acc
+              |> Map.update!(:choices, &([choice | &1]))
+              |> Map.put(:weak, weak_next)
+            end
+          end
+        end)
+
+      audit = %{
+        feature_mix: weights,
+        weak_decisions: weak_count,
+        chargram_violation: chargram_violation,
+        rejected_by_boundary: Enum.reverse(rejected_by_boundary)
+      }
+
+      {:ok, %{si: si0, choices: Enum.reverse(choices), audit: audit}}
+    rescue
+      e -> {:error, e}
+    end
+  end
+
+  @spec run(map(), map() | keyword(), keyword()) ::
+          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  def run(si, weights_or_kw, opts) when is_list(opts) do
+    weights_map =
+      case weights_or_kw do
+        m when is_map(m) -> m
+        kw when is_list(kw) -> Map.new(kw)
+        _ -> %{}
+      end
+
+    run(si, Keyword.merge(opts, [weights: weights_map]))
+  end
+
+  # ---------- GenServer lifecycle (mood) ----------
   @impl true
   def init(opts) do
     state = %{
@@ -48,7 +233,15 @@ defmodule Brain.LIFG.Stage1 do
     }
 
     mood_id = unique(@mood_handler_prefix)
-    :ok = :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{pid: self()})
+
+    :ok =
+      :telemetry.attach(
+        mood_id,
+        [:brain, :mood, :update],
+        &__MODULE__.on_mood_update/4,
+        %{pid: self()}
+      )
+
     {:ok, Map.put(state, :mood_handler, mood_id)}
   end
 
@@ -57,10 +250,9 @@ defmodule Brain.LIFG.Stage1 do
     :telemetry.detach(mood_id)
     :ok
   end
+
   def terminate(_reason, _state), do: :ok
 
-  # ─── Telemetry handler (this was missing; caused :undef) ────────────────────
-  # Forward mood updates into the server mailbox; never crash.
   @doc false
   def on_mood_update(_event, measurements, _meta, %{pid: pid}) when is_pid(pid) do
     send(pid, {:mood_update, measurements})
@@ -68,7 +260,8 @@ defmodule Brain.LIFG.Stage1 do
   catch
     _, _ -> :ok
   end
-  def on_mood_update(_e, _m, _meta, _config), do: :ok
+
+  def on_mood_update(_e, _m, _meta, _cfg), do: :ok
 
   @impl true
   def handle_info({:mood_update, meas}, state) do
@@ -85,15 +278,9 @@ defmodule Brain.LIFG.Stage1 do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # ─── Main Scoring ───────────────────────────────────────────────────────────
-  def score(server \\ __MODULE__, ctx),
-    do: GenServer.call(server, {:score, ctx})
-
   @impl true
   def handle_call({:score, ctx}, _from, state) do
-    enriched_ctx = SemanticsAdapter.adjust_ctx(ctx)
-
-    base = get_num(enriched_ctx, :base_score, 0.0) |> clamp01()
+    base = get_num(ctx, :base_score, 0.0) |> clamp01()
     {factor, bias, mood_snapshot, mw, cap} = mood_factor(state.mood, state.opts)
     final = clamp01(base * factor)
 
@@ -101,8 +288,8 @@ defmodule Brain.LIFG.Stage1 do
       [:brain, :lifg, :stage1, :score],
       %{score: final},
       %{
-        token: Map.get(enriched_ctx, :token) || Map.get(enriched_ctx, "token"),
-        sense_id: Map.get(enriched_ctx, :sense_id) || Map.get(enriched_ctx, "sense_id"),
+        token: Map.get(ctx, :token) || Map.get(ctx, "token"),
+        sense_id: Map.get(ctx, :sense_id) || Map.get(ctx, "sense_id"),
         base_score: base,
         mood_bias: bias,
         mood_snapshot: mood_snapshot,
@@ -115,9 +302,93 @@ defmodule Brain.LIFG.Stage1 do
     {:reply, final, state}
   end
 
-  # ─── Mood Bias Calculation ──────────────────────────────────────────────────
-  defp mood_factor(nil, opts),
-    do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
+  # ---------- Feature engineering ----------
+  defp lex_fit(cnrm, token_phrase, token_mwe?) do
+    cond do
+      cnrm == token_phrase -> 1.0
+      token_mwe? and String.contains?(cnrm, " ") -> 0.80
+      not token_mwe? and not String.contains?(cnrm, " ") -> 0.60
+      true -> 0.40
+    end
+  end
+
+  defp intent_alignment_feature(bias_val, token_mwe?, cand_norm, token_phrase, pos_str) do
+    b = clamp(bias_val, -0.5, 0.5)
+    cond do
+      token_mwe? and cand_norm == token_phrase -> max(0.0, b)
+      function_pos?(pos_str) -> min(0.0, b)
+      true -> 0.0
+    end
+  end
+
+  defp function_pos?(p) when is_binary(p), do: String.downcase(p) in @function_pos
+  defp function_pos?(p) when is_atom(p),   do: function_pos?(Atom.to_string(p))
+  defp function_pos?(_), do: false
+
+  # ---------- Boundary / char-gram guard ----------
+  defp boundary_ok?(sentence, tok, phrase, token_mwe?) do
+    # If we have a span and a sentence, enforce true word-boundaries at edges.
+    case {sentence, Safe.get(tok, :span)} do
+      {s, {i, j}} when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
+                        i >= 0 and j <= byte_size(s) ->
+        # Compare normalized substring to normalized phrase
+        sub = :binary.part(s, i, j - i)
+        if norm(sub) != norm(phrase) do
+          false
+        else
+          # Edges must be non-word chars (unless mw: true per DoD)
+          left_ok  = i == 0 or not word_char?(prev_char(s, i))
+          right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
+          if token_mwe?, do: true, else: (left_ok and right_ok)
+        end
+
+      _ ->
+        # Fallback: validate shape of the phrase only
+        if token_mwe?, do: phrase_valid_mwe?(phrase), else: phrase_valid_unigram?(phrase)
+    end
+  end
+
+  defp phrase_valid_unigram?(p) when is_binary(p),
+    do: String.match?(p, ~r/^\p{L}[\p{L}'-]*$/u)
+  defp phrase_valid_unigram?(_), do: false
+
+  defp phrase_valid_mwe?(p) when is_binary(p) do
+    parts = String.split(p, ~r/\s+/u, trim: true)
+    length(parts) >= 2 and Enum.all?(parts, &phrase_valid_unigram?/1)
+  end
+  defp phrase_valid_mwe?(_), do: false
+
+  defp word_char?(nil), do: false
+  defp word_char?(c) when is_binary(c),
+    do: String.match?(c, ~r/^[\p{L}\p{N}'-]$/u)
+
+  defp prev_char(_s, 0), do: nil
+  defp prev_char(s, i) when is_binary(s) and is_integer(i) and i > 0 do
+    # Grab last grapheme before byte index i
+    left = :binary.part(s, 0, i)
+    String.last(left)
+  end
+
+  defp next_char(s, j) when is_binary(s) and is_integer(j) and j < byte_size(s) do
+    right = :binary.part(s, j, byte_size(s) - j)
+    String.first(right)
+  end
+  defp next_char(_s, _j), do: nil
+
+  # ---------- Mood helpers ----------
+  defp apply_mood_if_up(base, token, sense_id) do
+    case GenServer.whereis(__MODULE__) do
+      pid when is_pid(pid) ->
+        try do
+          score(__MODULE__, %{base_score: base, token: token, sense_id: sense_id})
+        catch
+          _, _ -> base
+        end
+      _ -> base
+    end
+  end
+
+  defp mood_factor(nil, opts), do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
 
   defp mood_factor(mood, opts) do
     w   = cfg_mw(opts)
@@ -136,12 +407,11 @@ defmodule Brain.LIFG.Stage1 do
       dx.vigil * (w.vigil || 0.0) +
       dx.plast * (w.plast || 0.0)
 
-    bias = max(-cap, min(cap, raw))
+    bias = clamp(raw, -cap, cap)
     factor = 1.0 + bias
     {factor, bias, mood, w, cap}
   end
 
-  # ─── Helpers ────────────────────────────────────────────────────────────────
   defp cfg_mw(opts) do
     val = get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
     %{
@@ -155,6 +425,71 @@ defmodule Brain.LIFG.Stage1 do
   defp cfg_cap(opts),
     do: to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
+  # ---------- Small utils ----------
+  defp sense_id_for(c, token_phrase) do
+    id = Safe.get(c, :id) || Safe.get(c, "id")
+    if is_nil(id) do
+      lemma = Safe.get(c, :lemma) || Safe.get(c, :word) || token_phrase
+      pos   = pos_of(c)
+      "#{lemma}|#{pos}|0"
+    else
+      to_string(id)
+    end
+  end
+
+  defp pos_of(c) do
+    p = Safe.get(c, :pos) || Safe.get(c, "pos") || "other"
+    to_string(p) |> String.downcase()
+  end
+
+  defp guess_rel_prior(c) do
+    norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || ""
+    if String.contains?(to_string(norm), " "), do: 0.30, else: 0.20
+  end
+
+  defp guess_activation(c) do
+    norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
+    if String.contains?(to_string(norm), " "), do: 0.30, else: 0.25
+  end
+
+  defp softmax([]), do: []
+  defp softmax(xs) when is_list(xs) do
+    m = Enum.max(xs, fn -> 0.0 end)
+    exs = Enum.map(xs, fn x -> :math.exp(x * 1.0 - m) end)
+    z = Enum.sum(exs)
+    if z <= 0.0 do
+      n = length(xs)
+      if n == 0, do: [], else: List.duplicate(1.0 / n, n)
+    else
+      Enum.map(exs, &(&1 / z))
+    end
+  end
+
+  defp norm(nil), do: ""
+  defp norm(v) when is_binary(v) do
+    v
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/^\p{P}+/u, "")
+    |> String.replace(~r/\p{P}+$/u, "")
+    |> String.replace(~r/\s+/u, " ")
+  end
+  defp norm(v), do: v |> to_string() |> norm()
+
+  defp clamp(x, lo, hi) when is_number(x), do: min(max(x, lo), hi)
+  defp clamp(_, lo, _hi), do: lo
+  defp clamp01(x) when is_number(x), do: clamp(x * 1.0, 0.0, 1.0)
+  defp clamp01(_), do: 0.0
+
+  defp get_float(map, k, dflt) when is_map(map) do
+    case {Map.get(map, k), Map.get(map, to_string(k))} do
+      {v, _} when is_number(v) -> v * 1.0
+      {_, v} when is_number(v) -> v * 1.0
+      _ -> dflt * 1.0
+    end
+  end
+  defp get_float(_, _, d), do: d * 1.0
+
   defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
   defp get_opt(%{} = opts, key, default),           do: Map.get(opts, key, default)
   defp get_opt(_, _, default),                      do: default
@@ -164,9 +499,6 @@ defmodule Brain.LIFG.Stage1 do
 
   defp to_cap(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp to_cap(_), do: @default_cap
-
-  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
-  defp clamp01(_), do: 0.0
 
   defp get_num(map, key, default) do
     case {Map.get(map, key), Map.get(map, to_string(key))} do
