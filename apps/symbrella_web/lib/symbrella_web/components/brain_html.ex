@@ -12,8 +12,8 @@ defmodule SymbrellaWeb.BrainHTML do
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.Region.BaseArt
 
-  # Prefrontal macro → children; we avoid double-painting by only drawing the
-  # macro overlay when :prefrontal is selected.
+  # Prefrontal macro → children; avoid double-paint by only drawing the macro
+  # overlay when :prefrontal is selected.
   @region_groups %{
     prefrontal: ~w(dlpfc vmpfc dmpfc fpc lifg ofc)a
   }
@@ -30,10 +30,7 @@ defmodule SymbrellaWeb.BrainHTML do
       |> Map.put_new(:auto, false)
       |> Map.put_new(:region, %{})
       |> Map.put_new(:region_state, %{})
-      |> Map.put_new(:lifg_last, %{})
-      |> Map.put_new(:hippo, %{window: []})
-      |> Map.put_new(:hippo_metrics, %{})
-      |> Map.put_new(:snapshot, nil)
+      |> Map.put_new(:region_status, %{})   # ← status comes from LiveView
       |> Map.put_new(:region_tweaks, %{})   # optional per-region overrides
       |> Map.put_new(:svg_base, nil)        # optional override SVG string
       |> assign_viewbox()                   # put :vb from svg override or BaseArt
@@ -57,24 +54,22 @@ defmodule SymbrellaWeb.BrainHTML do
             vb={@vb}
           />
         </div>
-        <.region_summary selected={@selected} region={@region} />
+        <.region_summary
+          selected={@selected}
+          region={@region}
+          state={@snapshot || @region_status || (@region_state && @region_state[:snapshot]) || %{}}
+        />
       </div>
 
-      <!-- Live state + LIFG decision -->
+      <!-- Live state + Module Status -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <.live_state_panel state={@region_state} />
-        <.lifg_panel lifg_last={@lifg_last} />
+        <.module_status_panel status={@region_status} selected={@selected} />
       </div>
 
-      <!-- Existing panels -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Mood only -->
+      <div class="grid grid-cols-1">
         <.mood_panel mood={@mood} />
-        <.snapshot_panel snapshot={@snapshot} />
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <.hippo_panel hippo={@hippo} metrics={@hippo_metrics} />
-        <div />
       </div>
     </div>
     """
@@ -82,10 +77,20 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Header ---------------------------------------------------------------
   defp brain_header(assigns) do
+    selected = assigns[:selected] || :lifg
+    base_opts = region_options(assigns[:regions] || [])
+
+    opts =
+      if Enum.any?(base_opts, fn {k, _} -> k == selected end) do
+        base_opts
+      else
+        [{selected, pretty_label(selected)} | base_opts]
+      end
+
     assigns =
       assigns
-      |> Map.put(:selected, assigns[:selected] || :lifg)
-      |> Map.put(:regions, assigns[:regions] || [])
+      |> Map.put(:selected, selected)
+      |> Map.put(:options, opts)
 
     ~H"""
     <div class="flex items-center justify-between">
@@ -102,7 +107,7 @@ defmodule SymbrellaWeb.BrainHTML do
           phx-change="select-region"
           value={Atom.to_string(@selected)}
         >
-          <%= for {key, label} <- region_options(@regions) do %>
+          <%= for {key, label} <- @options do %>
             <option value={Atom.to_string(key)} selected={key == @selected}><%= label %></option>
           <% end %>
         </select>
@@ -202,10 +207,10 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :pan, :map, default: %{x: 0, y: 0}
   attr :scale, :float, default: 1.0
   defp brain_map(assigns) do
-    selected = assigns.selected || :lifg
-    vb       = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
-    pan      = assigns.pan || %{x: 0, y: 0}
-    scale    = assigns.scale || 1.0
+    selected   = assigns.selected || :lifg
+    vb         = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
+    pan        = assigns.pan || %{x: 0, y: 0}
+    scale      = assigns.scale || 1.0
     draw_order = draw_regions(selected)
 
     assigns =
@@ -261,18 +266,21 @@ defmodule SymbrellaWeb.BrainHTML do
               <% style = "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
               <% {lx, ly} = defn.anchor %>
 
-              <g class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
-                <path
-                  d={defn.path}
-                  vector-effect="non-scaling-stroke"
-                  phx-click="select-region"
-                  phx-value-region={Atom.to_string(key)}
-                  style={style}
-                >
-                  <title><%= String.upcase(Atom.to_string(key)) %></title>
-                </path>
-                <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
-              </g>
+<g id={"g-#{key}"} class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
+  <path
+    id={"path-#{key}"}
+    d={defn.path}
+    vector-effect="non-scaling-stroke"
+    phx-click="select-region"
+    phx-value-region={Atom.to_string(key)}
+    class={if(@selected == key, do: "opacity-100 stroke-2", else: "opacity-70 hover:opacity-90")}
+    style={style}
+  >
+    <title><%= String.upcase(Atom.to_string(key)) %></title>
+  </path>
+  <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
+</g>
+
             <% end %>
           </g>
         </svg>
@@ -289,20 +297,27 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Region summary --------------------------------------------------------
   defp region_summary(assigns) do
-    region   = assigns[:region] || %{}
+    region   = assigns[:region]   || %{}
     selected = assigns[:selected] || :lifg
+
+    # Prefer an explicit :state prop, then fall back to Live assigns you already keep fresh
+    state_map =
+      assigns[:state] ||
+        assigns[:snapshot] ||
+        assigns[:region_status] ||
+        (assigns[:region_state] && assigns[:region_state][:snapshot]) ||
+        %{}
 
     title    = Map.get(region, :title)    || Atom.to_string(selected) |> String.upcase()
     subtitle = Map.get(region, :subtitle) || default_subtitle(selected)
     desc     = Map.get(region, :desc)     || default_region_desc(selected)
-
     mods     = Map.get(region, :modules, [])
     telem    = Map.get(region, :telemetry, [])
     confs    = Map.get(region, :config_examples, [])
 
     ~H"""
     <div class="border rounded-xl p-4 shadow-sm">
-      <h2 class="font-semibold"> <%= title %> — <%= subtitle %> </h2>
+      <h2 class="font-semibold"><%= title %> — <%= subtitle %></h2>
       <p class="text-sm text-zinc-600 mb-3"><%= desc %></p>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -345,6 +360,14 @@ defmodule SymbrellaWeb.BrainHTML do
           <% end %>
         </div>
       </div>
+
+      <!-- Region State (map) -->
+      <div class="mt-4">
+        <h3 class="text-sm text-zinc-500 mb-1">Region State</h3>
+        <pre class="text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5">
+<%= inspect(state_map, pretty: true, width: 100, limit: :infinity) %>
+        </pre>
+      </div>
     </div>
     """
   end
@@ -386,6 +409,57 @@ defmodule SymbrellaWeb.BrainHTML do
     """
   end
 
+  # --- Module status ---------------------------------------------------------
+  attr :status, :any, required: true
+  attr :selected, :atom, default: :lifg
+  defp module_status_panel(assigns) do
+    stat     = assigns[:status] || %{}
+    selected = assigns[:selected] || :lifg
+
+    {tag_level, tag_text} =
+      cond do
+        Map.get(stat, :ok?, false) ->
+          {:ok, "running"}
+        stat[:error] in [:not_running, :noproc] ->
+          {:warn, "not running"}
+        true ->
+          {:neutral, "unknown"}
+      end
+
+    ~H"""
+    <div class="border rounded-xl p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">Module Status — <%= String.upcase(Atom.to_string(@selected)) %></h2>
+        <span class={["text-xs px-2 py-1 rounded border", status_badge_class(tag_level)]}>
+          <%= tag_text %>
+        </span>
+      </div>
+
+      <%= if @status == %{} do %>
+        <div class="text-sm text-zinc-400">No status available</div>
+      <% else %>
+        <%= if Map.get(@status, :ok?) && not is_nil(Map.get(@status, :status)) do %>
+          <div class="text-sm text-zinc-500 mb-1">Details</div>
+          <pre class="text-xs bg-zinc-50 p-2 rounded border overflow-x-auto"><%= inspect(@status.status, limit: :infinity) %></pre>
+        <% else %>
+          <div class="text-sm">
+            <%= case @status[:error] do
+              :not_running -> "Region process is not running."
+              :noproc      -> "No process registered for this region."
+              {:exit, r}   -> "Exited while fetching status: #{inspect(r)}"
+              other        -> "Status unavailable: #{inspect(other)}"
+            end %>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp status_badge_class(:ok),      do: "border-green-400 text-green-600"
+  defp status_badge_class(:warn),    do: "border-amber-400 text-amber-600"
+  defp status_badge_class(_neutral), do: "border-zinc-300 text-zinc-600"
+
   # --- Mood panel ------------------------------------------------------------
   defp mood_panel(assigns) do
     mood     = assigns[:mood] || %{levels: %{}, derived: %{}, tone: :neutral}
@@ -420,110 +494,6 @@ defmodule SymbrellaWeb.BrainHTML do
           <.kv label="Plasticity"  value={fmt(derived[:plasticity])} />
         </div>
       </div>
-    </div>
-    """
-  end
-
-  # --- LIFG last decision ----------------------------------------------------
-  defp lifg_panel(assigns) do
-    lifg_last  = assigns[:lifg_last] || %{}
-    meta       = Map.get(lifg_last, :meta, %{}) || %{}
-    guards     = Map.get(lifg_last, :guards, %{}) || %{}
-    choices    = Map.get(lifg_last, :choices, []) || []
-
-    sentence   = Map.get(lifg_last, :sentence)
-    intent     = Map.get(lifg_last, :intent)
-    confidence = Map.get(lifg_last, :confidence)
-    tokens     = Map.get(lifg_last, :tokens, []) || []
-    updated_ms = Map.get(lifg_last, :updated_ms_ago) || Map.get(lifg_last, :updated_ago_ms)
-
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="font-semibold">LIFG — Decision (last)</h2>
-        <span class="text-xs text-zinc-500">
-          <%= if is_number(updated_ms), do: "#{updated_ms} ms ago", else: "—" %>
-        </span>
-      </div>
-
-      <div class="text-sm grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <div><span class="opacity-60">sentence:</span> <%= sentence || "—" %></div>
-          <div><span class="opacity-60">intent:</span> <%= intent || "—" %></div>
-          <div><span class="opacity-60">confidence:</span> <%= if is_number(confidence), do: fmt_pct(confidence), else: "—" %></div>
-          <div class="mt-1">
-            <span class="opacity-60">guards:</span>
-            chargrams=<%= guards[:chargram_violation] || 0 %>,
-            boundary_drops=<%= guards[:boundary_drops] || guards[:boundary_drop] || 0 %>
-          </div>
-        </div>
-
-        <div>
-          <div class="opacity-60">meta</div>
-          <div class="text-xs">
-            margin_threshold=<%= meta[:margin_threshold] || "—" %>,
-            scores_mode=<%= meta[:scores_mode] || "—" %>
-          </div>
-        </div>
-      </div>
-
-      <div class="mt-3">
-        <h3 class="text-sm text-zinc-500 mb-1">Tokens</h3>
-        <%= if tokens == [] do %>
-          <div class="text-sm text-zinc-400">None</div>
-        <% else %>
-          <ul class="text-sm list-disc ml-5">
-            <%= for t <- tokens do %><li><%= inspect(t) %></li><% end %>
-          </ul>
-        <% end %>
-      </div>
-
-      <div class="mt-3">
-        <h3 class="text-sm text-zinc-500 mb-1">Choices</h3>
-        <%= if choices == [] do %>
-          <div class="text-sm text-zinc-400">No finalists</div>
-        <% else %>
-          <ul class="list-disc ml-5 text-sm">
-            <%= for c <- choices do %>
-              <li><%= inspect(c) %></li>
-            <% end %>
-          </ul>
-        <% end %>
-      </div>
-    </div>
-    """
-  end
-
-  # --- Hippocampus / Snapshot ------------------------------------------------
-  defp hippo_panel(assigns) do
-    hippo   = assigns[:hippo] || %{window: []}
-    _metrics = Map.get(assigns, :metrics, %{}) || %{}
-
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <h2 class="font-semibold mb-3">Hippocampus</h2>
-
-      <div class="text-sm text-zinc-600 mb-2">
-        <div>Window size: <%= (hippo[:window] || []) |> length() %></div>
-      </div>
-
-      <div class="text-sm text-zinc-500">Metrics:</div>
-      <pre class="text-xs bg-zinc-50 p-2 rounded border mt-1"><%= inspect(@metrics) %></pre>
-    </div>
-    """
-  end
-
-  # Explicit attrs help dialyzer/compile warnings
-  attr :snapshot, :any, default: nil
-  defp snapshot_panel(assigns) do
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <h2 class="font-semibold mb-3">Process Snapshot</h2>
-      <%= if is_nil(@snapshot) do %>
-        <div class="text-sm text-zinc-400">No snapshot available</div>
-      <% else %>
-        <pre class="text-xs bg-zinc-50 p-2 rounded border"><%= inspect(@snapshot, limit: :infinity) %></pre>
-      <% end %>
     </div>
     """
   end

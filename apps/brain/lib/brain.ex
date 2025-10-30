@@ -95,7 +95,9 @@ defmodule Brain do
     diversity_lambda: 0.06,
     allow_unk?: true,
     allow_seed?: true,
-    fallback_scale: 0.70
+    fallback_scale: 0.70,
+    # NEW (P-206): fallbacks must meet the normal threshold unless explicitly allowed
+    allow_fallback_into_wm?: false
   }
 
   @type id :: any()
@@ -110,7 +112,8 @@ defmodule Brain do
           diversity_lambda: number(),
           allow_unk?: boolean(),
           allow_seed?: boolean(),
-          fallback_scale: number()
+          fallback_scale: number(),
+          allow_fallback_into_wm?: boolean()
         }
   @type state :: %{
           history: list(),
@@ -200,20 +203,20 @@ defmodule Brain do
   end
 
   # ───────────────────────── GenServer callbacks ──────────────────────────────
-@impl true
-def init(:ok) do
-  {:ok,
-   %{
-     history: [],
-     active_cells: %{},
-     attention: %{},
-     wm: [],
-     wm_cfg: @wm_defaults,
-     activation_log: [],
-     wm_last_ms: nil,
-     last_intent: nil     # ← NEW
-   }}
-end
+  @impl true
+  def init(:ok) do
+    {:ok,
+     %{
+       history: [],
+       active_cells: %{},
+       attention: %{},
+       wm: [],
+       wm_cfg: @wm_defaults,
+       activation_log: [],
+       wm_last_ms: nil,
+       last_intent: nil
+     }}
+  end
 
   # group all handle_call/3 together
 
@@ -252,11 +255,19 @@ end
     t0 = System.monotonic_time()
     now_ms = System.system_time(:millisecond)
 
+    # Build inputs (tokens, slate) first so PFC can see tokens for intent_bias_map
     %{tokens: tokens0, slate: slate} = build_lifg_inputs(si_or_cands)
 
+    # Enrich SI for PFC policy (ensures tokens present)
+    si_for_policy = enrich_for_policy(si_or_cands, tokens0)
+
+    # Pull dynamic policy from PFC safely (no-op if PFC not started)
+    pfc_opts = safe_pfc_policy(si_for_policy)
+
     lifg_opts =
-      [scores: :all, normalize: :softmax, parallel: :auto, margin_threshold: 0.12]
-      |> Keyword.merge(opts)
+      [scores: :all, normalize: :softmax, parallel: :auto]
+      |> Keyword.merge(pfc_opts) # ← PFC tunes margins, pMTG mode, deltas, gate_into_wm, etc.
+      |> Keyword.merge(opts)     # ← explicit caller opts take precedence
 
     # CRITICAL: pass `:sense_candidates` so Stage-1 can score something
     si1 =
@@ -271,8 +282,9 @@ end
         _ -> out0
       end
 
-    # NEW: ACC conflict assessment (no-op if ACC region isn't started)
-    _ = maybe_assess_acc(out0.choices, tokens0)
+    # ACC conflict assessment (no-op if ACC region isn't started)
+    {_si_acc, _conflict} =
+      maybe_assess_acc(%{tokens: tokens0, choices: out0.choices}, [already_needy: true])
 
     _ = maybe_ingest_atl(out0.choices, tokens0)
     _ = maybe_consult_pmtg(out0.choices, tokens0)
@@ -284,8 +296,8 @@ end
     state1 = apply_decay(state, now_ms)
 
     state2 =
-      if Keyword.get(opts, :gate_into_wm, false) do
-        min = Keyword.get(opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
+      if Keyword.get(lifg_opts, :gate_into_wm, false) do
+        min = Keyword.get(lifg_opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
         lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
         if lifg_cands == [] do
@@ -339,10 +351,9 @@ end
     end
   end
 
-@impl true
-def handle_call(:latest_intent, _from, state),
-  do: {:reply, state.last_intent, state}
-
+  @impl true
+  def handle_call(:latest_intent, _from, state),
+    do: {:reply, state.last_intent, state}
 
   # group all handle_cast/2 together
 
@@ -358,7 +369,7 @@ def handle_call(:latest_intent, _from, state),
       %Row{} = row ->
         ensure_start_and_cast(row, payload)
 
-      # NEW: accept plain maps from LIFG/lexicon/seed and handle smartly
+      # accept plain maps from LIFG/lexicon/seed and handle smartly
       %{} = map_item ->
         handle_map_item_activation(map_item, payload)
 
@@ -388,19 +399,18 @@ def handle_call(:latest_intent, _from, state),
     {:noreply, state}
   end
 
-@impl true
-def handle_cast({:set_latest_intent, m}, state) do
-  {:noreply, %{state | last_intent: normalize_intent_map(m)}}
-end
+  @impl true
+  def handle_cast({:set_latest_intent, m}, state) do
+    {:noreply, %{state | last_intent: normalize_intent_map(m)}}
+  end
 
   # ───────────────────────── Public helper: recall → WM ───────────────────────
 
-@spec latest_intent() :: map() | nil
-def latest_intent, do: gencall(@name, :latest_intent)
+  @spec latest_intent() :: map() | nil
+  def latest_intent, do: gencall(@name, :latest_intent)
 
-@spec set_latest_intent(map()) :: :ok
-def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent, m})
-
+  @spec set_latest_intent(map()) :: :ok
+  def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent, m})
 
   @doc """
   Recall from Hippocampus and gate results into WM.
@@ -504,39 +514,37 @@ def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent,
   end
 
   # ───────────────────────── Centralized WM gating logic ──────────────────────
-defp normalize_intent_map(m) do
-  intent0 = m[:intent] || m["intent"]
-  intent =
-    cond do
-      is_atom(intent0) -> intent0
-      is_binary(intent0) ->
-        try do
-          String.to_existing_atom(intent0)
-        rescue
-          _ -> :unknown
-        end
-      true -> :unknown
-    end
+  defp normalize_intent_map(m) do
+    intent0 = m[:intent] || m["intent"]
+    intent =
+      cond do
+        is_atom(intent0) -> intent0
+        is_binary(intent0) ->
+          try do
+            String.to_existing_atom(intent0)
+          rescue
+            _ -> :unknown
+          end
+        true -> :unknown
+      end
 
-  kw = m[:keyword] || m["keyword"] || ""
-  conf0 = m[:confidence] || m["confidence"] || 0.0
-  conf =
-    cond do
-      is_number(conf0) -> conf0 * 1.0
-      is_binary(conf0) ->
-        case Float.parse(conf0) do
-          {f, _} -> f
-          _ -> 0.0
-        end
-      true -> 0.0
-    end
+    kw = m[:keyword] || m["keyword"] || ""
+    conf0 = m[:confidence] || m["confidence"] || 0.0
+    conf =
+      cond do
+        is_number(conf0) -> conf0 * 1.0
+        is_binary(conf0) ->
+          case Float.parse(conf0) do
+            {f, _} -> f
+            _ -> 0.0
+          end
+        true -> 0.0
+      end
 
-  at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
+    at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
 
-  %{intent: intent, keyword: to_string(kw), confidence: conf, at_ms: at_ms}
-end
-
-
+    %{intent: intent, keyword: to_string(kw), confidence: conf, at_ms: at_ms}
+  end
 
   defp do_focus(state, cands_or_si, _opts) do
     now = System.system_time(:millisecond)
@@ -584,46 +592,48 @@ end
   end
 
   # Compute a robust gate score from candidate + salience + policy scalers.
-defp gate_score_for(cand, salience, cfg) do
-  base =
-    (cand[:score] || cand[:activation_snapshot] || 0.0)
-    |> Kernel.*(1.0)
+  defp gate_score_for(cand, salience, cfg) do
+    base =
+      (cand[:score] || cand[:activation_snapshot] || 0.0)
+      |> Kernel.*(1.0)
 
-  # Prefer runtime-ish sources; keep weights gentle.
-  prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
+    # Prefer runtime-ish sources; keep weights gentle.
+    prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
 
-  # Downweight fallback phrase candidates a touch.
-  b_scaled =
-    if fallback_id?(cand[:id]) do
-      scale = cfg[:fallback_scale] || 0.70
-      base * scale
-    else
-      base
-    end
+    # Downweight fallback phrase candidates a touch.
+    b_scaled =
+      if fallback_id?(cand[:id]) do
+        scale = cfg[:fallback_scale] || 0.70
+        base * scale
+      else
+        base
+      end
 
-  # diversity penalty against items for the same lemma with same (pos, frame)
-  div_pen = diversity_penalty(cand, cfg)
+    # diversity penalty against items for the same lemma with same (pos, frame)
+    div_pen = diversity_penalty(cand, cfg)
 
-  # NEW: Semantic bias from Brain.Semantics (optional and bounded)
-  sem_bias =
-    case Brain.Semantics.bias_for(cand) do
-      b when is_number(b) -> Numbers.clamp01(b)
-      _ -> 0.0
-    end
+    # Optional semantic bias
+    sem_bias =
+      case Brain.Semantics.bias_for(cand) do
+        b when is_number(b) -> Numbers.clamp01(b)
+        _ -> 0.0
+      end
 
-  sem_boost = (cfg[:semantic_boost] || 0.1) * sem_bias
+    sem_boost = (cfg[:semantic_boost] || 0.1) * sem_bias
 
-  b_scaled
-  |> Kernel.+(0.5 * Numbers.clamp01(salience))
-  |> Kernel.+(prefer)
-  |> Kernel.+(sem_boost)
-  |> Kernel.-(div_pen)
-  |> Numbers.clamp01()
-end
+    b_scaled
+    |> Kernel.+(0.5 * Numbers.clamp01(salience))
+    |> Kernel.+(prefer)
+    |> Kernel.+(sem_boost)
+    |> Kernel.-(div_pen)
+    |> Numbers.clamp01()
+  end
 
   defp decide_gate_policy(wm, cand, gate_score, cfg) do
     prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
     thr = cfg.gate_threshold
+    allow_fallback? = Map.get(cfg, :allow_fallback_into_wm?, false)
+    is_fallback = fallback_id?(cand[:id])
 
     # Per-lemma budget + hysteresis (don’t churn on tiny margins)
     {within_budget?, beats_by?} = within_lemma_budget?(wm, cand, cfg)
@@ -631,6 +641,10 @@ end
     cond do
       not within_budget? and not beats_by? ->
         {:block, gate_score}
+
+      # NEW (P-206): fallbacks must meet the normal threshold unless explicitly allowed
+      is_fallback and not allow_fallback? ->
+        if gate_score >= thr, do: {:allow, gate_score}, else: {:block, gate_score}
 
       prefer_source? and gate_score >= thr ->
         {:boost, gate_score}
@@ -666,11 +680,9 @@ end
   defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
   defp fallback_id?(_), do: false
 
-  defp diversity_penalty(cand, cfg) do
-    λ = Map.get(cfg, :diversity_lambda, 0.06) |> Numbers.clamp01()
-    pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
-    frame = to_string(get_in(cand, [:frame]) || get_in(cand, [:features, :frame]) || "")
-    if pos == "" and frame == "", do: 0.0, else: λ * 0.5
+  defp diversity_penalty(cand, _cfg) do
+    # Very light diversity pressure unless pos/frame present; keep simple for now
+    0.0
   end
 
   defp within_lemma_budget?(wm, cand, cfg) do
@@ -947,7 +959,7 @@ end
     :ok
   end
 
-  # NEW: handle map items (lexicon/seed/other)
+  # handle map items (lexicon/seed/other)
   defp handle_map_item_activation(map_item, payload) do
     id = map_item[:id] || map_item["id"]
     type = map_item[:type] || map_item["type"]
@@ -959,7 +971,6 @@ end
         :ok
 
       is_binary(id) and (type == "seed" or type == :seed) ->
-        # Seeds are not backed by DB; don't warn-spam. Emit telemetry and skip.
         :telemetry.execute([:brain, :activate, :seed_unknown], %{count: 1}, %{id: id})
         :ok
 
@@ -1007,81 +1018,72 @@ end
         allow_unk?: Map.get(opts, :allow_unk?, cfg.allow_unk?),
         allow_seed?: Map.get(opts, :allow_seed?, cfg.allow_seed?),
         fallback_scale:
-          norm_float_01_or(Map.get(opts, :fallback_scale, cfg.fallback_scale), cfg.fallback_scale)
+          norm_float_01_or(Map.get(opts, :fallback_scale, cfg.fallback_scale), cfg.fallback_scale),
+        allow_fallback_into_wm?: Map.get(opts, :allow_fallback_into_wm?, cfg.allow_fallback_into_wm?)
     }
-  end
-
-  # ───────────────────────── Internal: LIFG input build ───────────────────────
-
-  defp build_lifg_inputs(si_or_candidates) do
-    candidates = LIFGInput.lifg_candidates!(si_or_candidates)
-    tokens0 = Tokens.extract_tokens(si_or_candidates, candidates)
-    slate = LIFGInput.slate_for(si_or_candidates)
-    %{tokens: tokens0, slate: slate}
-  end
-
-  # ───────────────────────── Internal: Candidate normalization ────────────────
-
-  defp normalize_candidates(list) when is_list(list), do: list
-
-  defp normalize_candidates(%{} = si) do
-    cond do
-      is_list(si[:active_cells]) -> si[:active_cells]
-      is_list(si[:winners]) -> si[:winners]
-      is_list(si[:tokens]) -> si[:tokens]
-      true -> []
-    end
   end
 
   # ───────────────────────── ACC hook ─────────────────────────────────────────
 
-# Accepts *anything* and never crashes the pipeline.
-defp maybe_assess_acc(si, opts) do
-  # Normalize opts: only keep keyword pairs if present
-  opts_kw =
-    if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
+  # Accepts *anything* and never crashes the pipeline.
+  defp maybe_assess_acc(si, opts) do
+    opts_kw =
+      if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
 
-  # If SI isn't a map, just pass through with zero conflict
-  unless is_map(si) do
-    {si, 0.0}
-  else
-    res =
-      try do
-        Brain.ACC.assess(si, opts_kw)
-      rescue
-        _ -> {:ok, si}
-      catch
-        _, _ -> {:ok, si}
+    unless is_map(si) do
+      {si, 0.0}
+    else
+      res =
+        try do
+          Brain.ACC.assess(si, opts_kw)
+        rescue
+          _ -> {:ok, si}
+        catch
+          _, _ -> {:ok, si}
+        end
+
+      case res do
+        {:ok, %{si: si2, conflict: c}} when is_map(si2) ->
+          {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+        {:ok, si2, meta} when is_map(si2) and is_map(meta) ->
+          c = meta[:conflict] || meta["conflict"] || Map.get(si2, :acc_conflict, 0.0)
+          {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+        {:ok, si2} when is_map(si2) ->
+          c = Map.get(si2, :acc_conflict, 0.0)
+          {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
+
+        _ ->
+          {si, Map.get(si, :acc_conflict, 0.0) |> to_float_01()}
       end
-
-    case res do
-      # Preferred new shape
-      {:ok, %{si: si2, conflict: c}} when is_map(si2) ->
-        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
-
-      # Legacy 3-tuple: {:ok, si2, meta}
-      {:ok, si2, meta} when is_map(si2) and is_map(meta) ->
-        c = meta[:conflict] || meta["conflict"] || Map.get(si2, :acc_conflict, 0.0)
-        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
-
-      # Legacy 2-tuple: {:ok, si2}
-      {:ok, si2} when is_map(si2) ->
-        c = Map.get(si2, :acc_conflict, 0.0)
-        {Map.put(si2, :acc_conflict, to_float_01(c)), to_float_01(c)}
-
-      # Anything else (including :error tuples): pass-through
-      _ ->
-        {si, Map.get(si, :acc_conflict, 0.0) |> to_float_01()}
     end
   end
-end
 
-defp to_float_01(x) when is_integer(x), do: x * 1.0 |> clamp01()
-defp to_float_01(x) when is_float(x),   do: clamp01(x)
-defp to_float_01(_),                    do: 0.0
+  defp to_float_01(x) when is_integer(x), do: x * 1.0 |> clamp01()
+  defp to_float_01(x) when is_float(x),   do: clamp01(x)
+  defp to_float_01(_),                    do: 0.0
 
-defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
-defp clamp01(_), do: 0.0
+  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
+  defp clamp01(_), do: 0.0
 
+  # ───────────────────────── PFC integration helpers ──────────────────────────
+
+  defp safe_pfc_policy(si) do
+    try do
+      Brain.PFC.policy(si)
+    catch
+      _, _ -> []
+    rescue
+      _ -> []
+    end
+  end
+
+  defp enrich_for_policy(si_or_cands, tokens0) do
+    cond do
+      is_map(si_or_cands) -> Map.put(si_or_cands, :tokens, tokens0)
+      true -> %{tokens: tokens0}
+    end
+  end
 end
 

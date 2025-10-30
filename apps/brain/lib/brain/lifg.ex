@@ -34,6 +34,49 @@ defmodule Brain.LIFG do
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
 
+  # ---- Stable registered name / lifecycle helpers ---------------------------
+
+  @doc "Stable registered name used for calls/whereis (pairs with UI call_target/1)."
+  def name, do: __MODULE__
+
+  @doc "Best-effort bring-up for dev/hotreload; safe if already running."
+  def ensure_started do
+    case GenServer.whereis(name()) do
+      nil ->
+        case start_link(%{}) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _}} -> :ok
+          _ -> :ok
+        end
+
+      _pid ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  @doc "Return a minimal snapshot of the server state if running; else %{}."
+  def get_state(server \\ __MODULE__) do
+    case GenServer.whereis(server) do
+      nil ->
+        %{}
+
+      _ ->
+        try do
+          GenServer.call(server, :get_state)
+        catch
+          :exit, _ -> %{}
+        end
+    end
+  end
+
+  # If the Brain macro already defines start_link/1, this will override with same contract.
+  @doc false
+  def start_link(opts \\ %{}) when is_list(opts) or is_map(opts) do
+    GenServer.start_link(__MODULE__, Map.new(opts), name: name())
+  end
+
   # ── Server bootstrap & runtime config ────────────────────────────────
 
   @impl true
@@ -88,7 +131,7 @@ defmodule Brain.LIFG do
       },
       feature_mix: map(),
       audit: map(),
-      meta: map()  # includes cover_count, flips, and optionally cover preview
+      meta: map()
     } | :empty
   """
   @spec last(module()) :: map() | :empty
@@ -119,6 +162,12 @@ defmodule Brain.LIFG do
   @impl true
   def handle_call(:last, _from, state) do
     {:reply, state.last || :empty, state}
+  end
+
+  @impl true
+  def handle_call(:get_state, _from, state) do
+    # Keep it light; enough for BrainLive.direct_module_snapshot/1
+    {:reply, %{region: :lifg, opts: state.opts, last: state.last}, state}
   end
 
   @impl true
@@ -250,8 +299,8 @@ defmodule Brain.LIFG do
 
   # Normalizes all supported return shapes into {:ok, si, choices, audit} | {:error, reason}
   defp normalize_stage1_result({:ok, %{si: si, choices: choices, audit: audit}})
-       when is_map(si) and is_list(choices) and is_map(audit),
-    do: {:ok, si, choices, audit}
+         when is_map(si) and is_list(choices) and is_map(audit),
+       do: {:ok, si, choices, audit}
 
   defp normalize_stage1_result({:ok, si, meta}) when is_map(si) and is_map(meta) do
     choices = Map.get(meta, :choices, [])
@@ -260,10 +309,10 @@ defmodule Brain.LIFG do
   end
 
   defp normalize_stage1_result({:ok, si}) when is_map(si),
-    do: {:ok, si, [], %{}}
+       do: {:ok, si, [], %{}}
 
   defp normalize_stage1_result(other),
-    do: {:error, other}
+       do: {:error, other}
 
   @doc "Pure, stateless Stage-1 with default opts."
   @spec disambiguate_stage1(map()) :: map()
@@ -480,8 +529,6 @@ defmodule Brain.LIFG do
             pmtg_mode: pmtg_mode,
             cover_count: length(post_out.cover),
             flips: post_out.flips
-            # if you want to see spans in the introspection snapshot, uncomment:
-            # cover: Enum.take(post_out.cover, 6)
           })
 
           {:ok,
@@ -545,7 +592,6 @@ defmodule Brain.LIFG do
     }
   end
 
-  # ── private: legacy conversion helpers ───────────────────────────────
   # --- Mood hooks (private) ----------------------------------------------------
 
   defp mood_scalars() do
@@ -820,67 +866,66 @@ defmodule Brain.LIFG do
 
   # If a multiword token only has a |phrase|fallback, inject real phrase cells
   # from si.active_cells so Stage-1 can rank them.
-  defp backfill_real_mwe_from_active_cells(si) do
-    sc0    = Map.get(si, :sense_candidates, %{})
-    tokens = Map.get(si, :tokens, [])
-    cells  = Safe.get(si, :active_cells, [])
+defp backfill_real_mwe_from_active_cells(si) do
+  sc0    = Map.get(si, :sense_candidates, %{})
+  tokens = Map.get(si, :tokens, [])
+  cells  = Safe.get(si, :active_cells, [])
 
-    phrase_cells_by_norm =
-      cells
-      |> Enum.map(&Safe.to_plain/1)
-      |> Enum.filter(fn c ->
-        p = Safe.get(c, :pos)
-        to_string(p) == "phrase"
-      end)
-      |> Enum.group_by(fn c ->
-        String.downcase(to_string(Safe.get(c, :norm) || Safe.get(c, :word)))
-      end)
+  phrase_cells_by_norm =
+    cells
+    |> Enum.map(&Safe.to_plain/1)
+    |> Enum.filter(fn c ->
+      p = Safe.get(c, :pos)
+      to_string(p) == "phrase"
+    end)
+    |> Enum.group_by(fn c ->
+      String.downcase(to_string(Safe.get(c, :norm) || Safe.get(c, :word)))
+    end)
 
-    {sc, added} =
-      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
-        phrase = Safe.get(tok, :phrase)
-        mw?    = Safe.get(tok, :mw, false) or (Safe.get(tok, :n, 1) > 1)
-        bucket = Map.get(acc, idx, [])
+  {sc, added} =
+    Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+      phrase = Safe.get(tok, :phrase)
+      mw?    = Safe.get(tok, :mw, false) or (Safe.get(tok, :n, 1) > 1)
+      bucket = Map.get(acc, idx, [])
 
-        has_real? =
-          Enum.any?(bucket, fn c ->
-            pos  = Safe.get(c, :pos)
-            norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
-            (pos == :phrase or to_string(pos) == "phrase") and String.contains?(norm, " ")
-          end)
+      has_real? =
+        Enum.any?(bucket, fn c ->
+          pos  = Safe.get(c, :pos)
+          norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
+          (pos == :phrase or to_string(pos) == "phrase") and String.contains?(norm, " ")
+        end)
 
-        cond do
-          not mw? or is_nil(phrase) or has_real? ->
-            {acc, n}
+      cond do
+        not mw? or is_nil(phrase) or has_real? ->
+          {acc, n}
 
-          true ->
-            norm_key = String.downcase(to_string(phrase))
-            case Map.get(phrase_cells_by_norm, norm_key, []) do
-              [] -> {acc, n}
-              list ->
-                cands =
-                  Enum.map(list, fn c ->
-                    id = Safe.get(c, :id) || "#{phrase}|phrase|0"
-                    %{
-                      id: to_string(id),
-                      lemma: phrase,
-                      norm: phrase,
-                      mw: true,
-                      pos: :phrase,
-                      rel_prior: 0.30,
-                      score: 0.30,
-                      source: :active_cells
-                    }
-                  end)
+        true ->
+          norm_key = String.downcase(to_string(phrase))
+          case Map.get(phrase_cells_by_norm, norm_key, []) do
+            [] -> {acc, n}
+            list ->
+              cands =
+                Enum.map(list, fn c ->
+                  id = Safe.get(c, :id) || "#{phrase}|phrase|0"
+                  %{
+                    id: to_string(id),
+                    lemma: phrase,
+                    norm: phrase,
+                    mw: true,
+                    pos: :phrase,
+                    rel_prior: 0.30,
+                    score: 0.30,
+                    source: :active_cells
+                  }
+                end)
 
-                {Map.put(acc, idx, cands ++ bucket), n + length(cands)}
-            end
-        end
-      end)
+              {Map.put(acc, idx, cands ++ bucket), n + length(cands)}
+          end
+      end
+    end)
 
-    if added > 0, do: Map.put(si, :sense_candidates, sc), else: si
-  end
-
+  if added > 0, do: Map.put(si, :sense_candidates, sc), else: si
+end
   defp has_compatible_mwe?(sc, idx) do
     sc
     |> Map.get(idx, [])

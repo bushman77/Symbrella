@@ -1,4 +1,3 @@
-# apps/brain/lib/brain/thalamus.ex
 defmodule Brain.Thalamus do
   @moduledoc """
   Thalamus — region relay for curiosity proposals.
@@ -75,6 +74,14 @@ defmodule Brain.Thalamus do
   @spec get_params(server :: pid() | atom()) :: map()
   def get_params(server \\ __MODULE__) do
     GenServer.call(server, :get_params)
+  end
+
+  @doc """
+  Return a compact status snapshot for UI/diagnostics.
+  """
+  @spec status(server :: pid() | atom()) :: {:ok, map()} | {:error, term()}
+  def status(server \\ __MODULE__) do
+    GenServer.call(server, :status)
   end
 
   # ── Region lifecycle ────────────────────────────────────────────────────────
@@ -166,10 +173,22 @@ defmodule Brain.Thalamus do
     {:reply, reply, state}
   end
 
+  @impl GenServer
+  def handle_call(:status, _from, %{} = state) do
+    {:reply, {:ok, snapshot(state)}, state}
+  end
+
+  @impl GenServer
+  def handle_call(msg, from, %{} = state) do
+    require Logger
+    Logger.warning("[Thalamus] Unknown call: #{inspect(msg)} from #{inspect(from)}")
+    {:reply, {:error, {:unknown_call, msg}}, state}
+  end
+
   # ── Region message handling ────────────────────────────────────────────────
 
   @impl GenServer
-  def handle_info({:mood_update, meas, meta}, state) do
+  def handle_info({:mood_update, meas, _meta}, state) do
     mood = %{
       exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
       inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
@@ -181,7 +200,7 @@ defmodule Brain.Thalamus do
 
   @impl GenServer
   def handle_info({:ofc_value, meas, meta}, state) do
-    value   = get_num(meas, :value, 0.0) |> clamp01()
+    value    = get_num(meas, :value, 0.0) |> clamp01()
     probe_id = meta_get(meta, :probe_id, "curiosity|probe|unknown") |> to_string()
     {cache2, order2} = put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
     {:noreply, %{state | ofc_cache: cache2, ofc_order: order2}}
@@ -313,6 +332,27 @@ defmodule Brain.Thalamus do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  defp snapshot(%{} = state) do
+    %{
+      region: Map.get(state, :region, :thalamus),
+      mood: Map.get(state, :mood, %{}),
+      acc_conflict: Map.get(state, :acc_conflict),
+      ofc_cache_size: state |> Map.get(:ofc_cache, %{}) |> map_size(),
+      ofc_order_len: state |> Map.get(:ofc_order, []) |> length(),
+      last_ms: %{
+        mood: Map.get(state, :mood_last_ms),
+        acc:  Map.get(state, :acc_last_ms)
+      },
+      handlers: %{
+        mood: Map.get(state, :mood_handler),
+        acc:  Map.get(state, :acc_handler),
+        cur:  Map.get(state, :cur_handler),
+        ofc:  Map.get(state, :ofc_handler)
+      },
+      stats: Map.get(state, :stats, %{})
+    }
+  end
 
   defp unique(prefix),
     do:

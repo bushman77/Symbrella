@@ -2,10 +2,10 @@ defmodule SymbrellaWeb.Region.Pmtg do
   use SymbrellaWeb.Region,
     key: :pmtg,
 
-    # Lens hugging posterior STG/MTG. Slight posterior bulge and softer inferior curve.
-    path: "M288,246 C306,236 342,236 368,246 C384,252 388,270 384,286 C380,304 360,316 332,318 C308,320 292,312 286,296 C282,286 282,258 288,246 Z",
+    # pMTG lens ~one-third area (scaled around {342,276}); same anchor/tweak.
+    path: "M310.8,258.7 C321.2,252.9 342,252.9 357,258.7 C366.2,262.1 368.6,272.5 366.2,281.8 C363.9,292.2 352.4,299.1 336.2,300.2 C322.4,301.4 313.1,296.8 309.7,287.5 C307.4,281.8 307.4,265.6 310.8,258.7 Z",
     colors: {"#8B5CF6", "#7C3AED"},
     anchor: {342, 276},
-    tweak:  %{dx: 150, dy: 150, s: 0.40}
+    tweak:  %{dx: 30, dy: -100, s: 1.00}
 end
 

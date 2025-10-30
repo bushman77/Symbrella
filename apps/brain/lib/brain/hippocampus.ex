@@ -39,6 +39,11 @@ defmodule Brain.Hippocampus do
     slate
   end
 
+@doc "Summarized status for dashboards (pid/queue + full state)."
+@spec status() :: map()
+def status, do: GenServer.call(__MODULE__, :status)
+
+
   @doc """
   Recall prior episodes relevant to `cues` (list/stringy slate/si).
 
@@ -200,6 +205,27 @@ defmodule Brain.Hippocampus do
         {:reply, :ok, %{state | window: window2, last: new_last, last_at: elem(new_last || {nil, nil}, 0)}}
     end
   end
+
+
+@impl true
+def handle_call(:status, _from, state) do
+  qlen =
+    case :erlang.process_info(self(), :message_queue_len) do
+      {:message_queue_len, n} when is_integer(n) -> n
+      _ -> 0
+    end
+
+  reply = %{
+    process: __MODULE__,
+    pid: self(),
+    queue: qlen,
+    current: :idle,
+    state: state
+  }
+
+  {:reply, reply, state}
+end
+
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do

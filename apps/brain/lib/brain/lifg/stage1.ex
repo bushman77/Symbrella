@@ -9,10 +9,13 @@ defmodule Brain.LIFG.Stage1 do
       - :activation  — candidate prior activation / score (DB or slate)
       - :intent_bias — bias from `si.intent_bias[token_index]` (e.g., MWE signatures)
   • Apply mood nudging (multiplicative factor) if the Stage1 server is running.
+  • **Apply Cerebellum calibration** (tiny delta-scores) when margin is thin.
   • Normalize to probabilities (softmax), compute margins, return winners.
+  • **Learn online** in Cerebellum after the decision.
 
   Integrations
   • Optional mood updates via telemetry: [:brain, :mood, :update]
+  • Cerebellum forward model via Brain.Cerebellum.{calibrate_scores, learn_lifg}
   • NOTE: To avoid circular GenServer calls, semantic adjustments must be applied upstream
     (e.g., enrich `si.intent_bias` before Stage1). The Stage1 server process
     does not call out to other GenServers during `handle_call/3`.
@@ -26,11 +29,15 @@ defmodule Brain.LIFG.Stage1 do
   Telemetry
   • [:brain, :lifg, :stage1, :score] — per-candidate mood-applied score
   • [:brain, :lifg, :chargram_violation] — token dropped by boundary/char-gram guard
+  • (Cerebellum emits:)
+    - [:brain, :cerebellum, :lifg, :predict] with %{margin0, margin1}
+    - [:brain, :cerebellum, :lifg, :learn] with %{update_norm, loss}
   """
 
   use Brain, region: :lifg_stage1
   require Logger
   alias Brain.Utils.Safe
+  alias Brain.Cerebellum
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
   @default_scores_mode :all
@@ -67,17 +74,20 @@ defmodule Brain.LIFG.Stage1 do
         Application.get_env(:brain, :lifg_stage1_weights, @default_weights)
         |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
 
-      scores_mode = Keyword.get(opts, :scores,
-        Application.get_env(:brain, :lifg_stage1_scores_mode, @default_scores_mode)
-      )
+      scores_mode =
+        Keyword.get(opts, :scores,
+          Application.get_env(:brain, :lifg_stage1_scores_mode, @default_scores_mode)
+        )
 
-      margin_thr  = Keyword.get(opts, :margin_threshold,
-        Application.get_env(:brain, :lifg_min_margin, @default_margin_thr)
-      )
+      margin_thr  =
+        Keyword.get(opts, :margin_threshold,
+          Application.get_env(:brain, :lifg_min_margin, @default_margin_thr)
+        )
 
-      min_margin  = Keyword.get(opts, :min_margin,
-        Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
-      )
+      min_margin  =
+        Keyword.get(opts, :min_margin,
+          Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
+        )
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si0, :intent_bias, %{})) || %{}
 
@@ -111,7 +121,9 @@ defmodule Brain.LIFG.Stage1 do
             else
               bias_val = get_float(bias_map, idx, 0.0)
 
-              scored =
+              # --------- Base scoring + feature extraction (per candidate) ---------
+              # Build triples: {id, base_after_mood, feature_map_for_cerebellum}
+              scored_trip =
                 Enum.map(cand_list, fn c ->
                   id   = sense_id_for(c, token_phrase)
                   pos  = pos_of(c)
@@ -124,23 +136,50 @@ defmodule Brain.LIFG.Stage1 do
                   intent_feat =
                     intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
 
-                  base =
+                  base0 =
                     weights[:lex_fit]     * lex +
                     weights[:rel_prior]   * rel +
                     weights[:activation]  * act +
                     weights[:intent_bias] * intent_feat
                     |> clamp01()
 
-                  final = apply_mood_if_up(base, tok, id)
-                  {id, final}
+                  base = apply_mood_if_up(base0, tok, id)
+
+                  feat = %{
+                    id: id,
+                    lex_fit: lex,
+                    rel_prior: rel,
+                    activation: act,
+                    intent_bias: intent_feat
+                  }
+
+                  {id, base, feat}
                 end)
 
-              probs = softmax(Enum.map(scored, fn {_id, s} -> s end))
+              ids         = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
+              base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
+              feats       = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
+
+              # --------- Cerebellum calibration (gated by margin) ---------
+              ctx_key = Cerebellum.context_key({:lifg_stage1, intent: intent_key(si0), mwe: token_mwe?})
+
+              cereb_opts = to_map([scope: "lifg_stage1", context_key: ctx_key, margin_tau: margin_thr])
+
+              cal_scores =
+                Cerebellum.calibrate_scores(
+                  si0,
+                  base_scores,
+                  feats,
+                  cereb_opts
+                )
+
+              # Softmax over the (possibly) calibrated scores
+              logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
+              probs  = softmax(logits)
 
               id_prob =
-                scored
-                |> Enum.zip(probs)
-                |> Enum.map(fn {{id, _s}, p} -> {id, p} end)
+                Enum.zip(ids, probs)
+                |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
 
               ranked = Enum.sort_by(id_prob, fn {_id, p} -> -p end)
 
@@ -159,15 +198,26 @@ defmodule Brain.LIFG.Stage1 do
               margin0 = top_p - second_p
               margin  = Float.round(max(margin0, min_margin), 6)
 
+              # --------- Online learning (pairwise hinge-style) ---------
+              # Learn against *base_scores* (pre-delta), using same context/scope.
+              _ =
+                Cerebellum.learn_lifg(
+                  si0,
+                  chosen_id,
+                  feats,
+                  base_scores,
+                  cereb_opts
+                )
+
               scores_out =
                 case scores_mode do
                   :all ->
-                    id_prob |> Enum.into(%{}, fn {id, p} -> {id, Float.round(p, 6)} end)
+                    id_prob |> Enum.into(%{}, fn {id, p} -> {id, p} end)
 
                   :top2 ->
                     id_prob
                     |> Enum.take(2)
-                    |> Enum.into(%{}, fn {id, p} -> {id, Float.round(p, 6)} end)
+                    |> Enum.into(%{}, fn {id, p} -> {id, p} end)
 
                   _ ->
                     %{}
@@ -250,6 +300,31 @@ defmodule Brain.LIFG.Stage1 do
     :telemetry.detach(mood_id)
     :ok
   end
+
+  # Convenience: optional public status/0 for dashboards (BrainLive will use it if present)
+  def status do
+    case Process.whereis(__MODULE__) do
+      nil -> %{}
+      _   -> GenServer.call(__MODULE__, :status, 150)
+    end
+  end
+
+  @impl true
+  def handle_call(:status, _from, state) do
+    reply = %{
+      region: :lifg_stage1,
+      status: :ok,
+      pid: self(),
+      opts: state.opts,
+      mood: state.mood,
+      mood_last_ms: state.mood_last_ms
+    }
+    {:reply, reply, state}
+  end
+
+  # (Optional) lets other code fetch the raw GenServer state
+  @impl true
+  def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
   def terminate(_reason, _state), do: :ok
 
@@ -519,5 +594,28 @@ defmodule Brain.LIFG.Stage1 do
   defp normalize_opts(opts) when is_list(opts), do: if(Keyword.keyword?(opts), do: opts, else: [])
   defp normalize_opts(%{} = opts), do: Map.to_list(opts)
   defp normalize_opts(_), do: []
+
+  # Stable, coarse context label for Cerebellum keying
+  defp intent_key(si0) do
+    i = Safe.get(si0, :intent)
+    cond do
+      is_binary(i) -> i
+      is_map(i) ->
+        to_string(
+          Safe.get(i, :intent) ||
+          Safe.get(i, :name)   ||
+          Safe.get(i, :type)   ||
+          "none"
+        )
+      true -> "none"
+    end
+  end
+
+  # ——— tolerant map helper (no guard calling Keyword.keyword?/1) ———
+  defp to_map(%{} = m), do: m
+  defp to_map(list) when is_list(list) do
+    if Keyword.keyword?(list), do: Map.new(list), else: %{}
+  end
+  defp to_map(_), do: %{}
 end
 
