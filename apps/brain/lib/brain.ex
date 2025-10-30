@@ -69,7 +69,6 @@ defmodule Brain do
   alias Brain.Episodes.Writer, as: EpWriter
   alias Brain.LIFG
   alias Brain.LIFG.Gate, as: LIFGGate
-  alias Brain.LIFG.Input, as: LIFGInput
   alias Brain.Utils.ControlSignals
   alias Brain.Utils.Numbers
   alias Brain.Utils.Tokens
@@ -680,10 +679,7 @@ defmodule Brain do
   defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
   defp fallback_id?(_), do: false
 
-  defp diversity_penalty(cand, _cfg) do
-    # Very light diversity pressure unless pos/frame present; keep simple for now
-    0.0
-  end
+  defp diversity_penalty(_cand, _cfg), do: 0.0
 
   defp within_lemma_budget?(wm, cand, cfg) do
     lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
@@ -715,14 +711,12 @@ defmodule Brain do
   end
 
   defp guess_lemma_from_id(nil), do: nil
-
   defp guess_lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
       _ -> nil
     end
   end
-
   defp guess_lemma_from_id(_), do: nil
 
   # ───────────────────────── LIFG/ATL/PMTG/Episodes helpers ───────────────────
@@ -1084,6 +1078,110 @@ defmodule Brain do
       is_map(si_or_cands) -> Map.put(si_or_cands, :tokens, tokens0)
       true -> %{tokens: tokens0}
     end
+  end
+
+  # ───────────────────────── Inputs/Normalization helpers ─────────────────────
+
+  defp build_lifg_inputs(si_or_cands) do
+    cond do
+      is_map(si_or_cands) ->
+        sentence = Map.get(si_or_cands, :sentence) || Map.get(si_or_cands, "sentence")
+        tokens0  = Map.get(si_or_cands, :tokens) || Map.get(si_or_cands, "tokens") || []
+        tokens   = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
+
+        slate =
+          Map.get(si_or_cands, :sense_candidates) ||
+          Map.get(si_or_cands, "sense_candidates") ||
+          Map.get(si_or_cands, :slate) ||
+          Map.get(si_or_cands, "slate") ||
+          case Map.get(si_or_cands, :winners) || Map.get(si_or_cands, "winners") do
+            ws when is_list(ws) -> %{winners: ws}
+            _ -> nil
+          end ||
+          case Map.get(si_or_cands, :choices) || Map.get(si_or_cands, "choices") do
+            ws when is_list(ws) -> %{winners: ws}
+            _ -> %{winners: []}
+          end
+
+        %{tokens: tokens, slate: slate}
+
+      is_list(si_or_cands) ->
+        %{tokens: [], slate: %{winners: si_or_cands}}
+
+      true ->
+        %{tokens: [], slate: %{winners: []}}
+    end
+  end
+
+  defp normalize_candidates(cands_or_si) do
+    base =
+      cond do
+        is_list(cands_or_si) ->
+          cands_or_si
+
+        is_map(cands_or_si) ->
+          Map.get(cands_or_si, :winners) || Map.get(cands_or_si, "winners") ||
+          Map.get(cands_or_si, :choices) || Map.get(cands_or_si, "choices") ||
+          case Map.get(cands_or_si, :sense_candidates) || Map.get(cands_or_si, "sense_candidates") do
+            %{winners: ws} when is_list(ws) -> ws
+            %{"winners" => ws} when is_list(ws) -> ws
+            ws when is_list(ws) -> ws
+            _ -> []
+          end
+
+        true ->
+          []
+      end
+
+    Enum.map(base, &normalize_candidate/1)
+  end
+
+  defp normalize_candidate(%{} = c) do
+    id = c[:id] || c["id"]
+    lemma =
+      c[:lemma] || c["lemma"] ||
+      (id && guess_lemma_from_id(id)) ||
+      c[:phrase] || c["phrase"] ||
+      c[:word] || c["word"] || ""
+
+    %{
+      token_index: c[:token_index] || c["token_index"] || 0,
+      id: (id && to_string(id)) || (lemma != "" && "#{lemma}|phrase|fallback") || "unk|phrase|fallback",
+      lemma: to_string(lemma),
+      score: (c[:score] || c["score"] || c[:margin] || c["margin"] || 1.0) * 1.0,
+      source: c[:source] || c["source"] || :runtime
+    }
+  end
+
+  defp normalize_candidate(w) when is_binary(w) do
+    if String.contains?(w, "|") do
+      %{
+        token_index: 0,
+        id: w,
+        lemma: guess_lemma_from_id(w) || "",
+        score: 1.0,
+        source: :runtime
+      }
+    else
+      l = String.downcase(w)
+      %{
+        token_index: 0,
+        id: "#{l}|phrase|fallback",
+        lemma: l,
+        score: 1.0,
+        source: :runtime
+      }
+    end
+  end
+
+  defp normalize_candidate(_other) do
+    %{
+      token_index: 0,
+      id: "unk|phrase|fallback",
+      lemma: "",
+      score: 0.0,
+      source: :runtime
+    }
   end
 end
 
