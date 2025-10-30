@@ -22,6 +22,7 @@ defmodule Symbrella.Application do
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     children = [
+      {Phoenix.PubSub, name: Symbrella.PubSub},
       # ── DB ────────────────────────────────────────────────────────────────
       Db,
 
@@ -59,10 +60,10 @@ defmodule Symbrella.Application do
       {Brain.DLPFC, act_on_thalamus: true},
       {Brain.ACC, keep: 300},
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
-      {Brain.Blackboard, []},
+      {Brain.Blackboard, []}
 
-      # ── Web endpoint LAST (owns PubSub; do NOT start Phoenix.PubSub here) ─
-      SymbrellaWeb.Endpoint
+      # 🚫 Do NOT start SymbrellaWeb.Endpoint here.
+      # The web app owns its endpoint under SymbrellaWeb.Application.
     ]
 
     {:ok, sup} =
@@ -76,16 +77,12 @@ defmodule Symbrella.Application do
   end
 
   @impl true
-  def config_change(changed, _new, removed) do
-    if function_exported?(SymbrellaWeb.Endpoint, :config_change, 2) do
-      SymbrellaWeb.Endpoint.config_change(changed, removed)
-    end
-
+  def config_change(_changed, _new, _removed) do
+    # Root doesn’t own the Endpoint; nothing to forward here.
     :ok
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
-
   defp safe_attach(fun) when is_function(fun, 0) do
     try do
       fun.()

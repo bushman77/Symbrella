@@ -5,9 +5,9 @@ defmodule SymbrellaWeb.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      # Web owns its PubSub so the Endpoint has a local, well-defined owner.
       SymbrellaWeb.Telemetry,
       SymbrellaWeb.Endpoint
-      # NOTE: PubSub is started in :symbrella (core) as {Phoenix.PubSub, name: Symbrella.PubSub}
     ]
 
     opts = [strategy: :one_for_one, name: SymbrellaWeb.Supervisor]
