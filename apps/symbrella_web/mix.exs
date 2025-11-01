@@ -24,6 +24,7 @@ defmodule SymbrellaWeb.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
+      mod: {SymbrellaWeb.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end

@@ -128,8 +128,8 @@ defmodule Core.Intent.Normalize do
 
   defp normalize_conf(_), do: nil
 
-  defp clamp(n, lo, hi) when n < lo, do: lo
-  defp clamp(n, lo, hi) when n > hi, do: hi
+  defp clamp(n, lo, _hi) when n < lo, do: lo
+  defp clamp(n, _lo, hi) when n > hi, do: hi
   defp clamp(n, _lo, _hi), do: n
 end
 

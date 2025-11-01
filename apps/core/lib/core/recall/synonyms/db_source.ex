@@ -1,4 +1,3 @@
-# apps/core/lib/core/recall/synonyms/db_source.ex
 defmodule Core.Recall.Synonyms.DbSource do
   @moduledoc """
   Db-backed synonym source.
@@ -7,6 +6,7 @@ defmodule Core.Recall.Synonyms.DbSource do
   falls back to `Db.Lexicon.fetch_by_norms/1` and groups locally.
 
   All calls are **safe** (wrapped in try/catch) to avoid crashing recall.
+  Uses dynamic `apply/3` so there is **no compile-time coupling** to `Db.*`.
   """
 
   @behaviour Core.Recall.Synonyms.Source
@@ -21,23 +21,26 @@ defmodule Core.Recall.Synonyms.DbSource do
       |> Enum.uniq()
 
     case keys do
-      [] ->
-        %{}
-
-      _ ->
-        grouped_via_db(keys)
+      [] -> %{}
+      _  -> grouped_via_db(keys)
     end
   end
 
   # ---------- internals ----------
 
   defp grouped_via_db(keys) do
-    cond do
-      Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :fetch_by_norms_grouped, 1) ->
-        safe(fn -> Db.Lexicon.fetch_by_norms_grouped(keys) end, %{})
+    mod = Module.concat(Db, Lexicon)
 
-      Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :fetch_by_norms, 1) ->
-        rows = safe(fn -> Db.Lexicon.fetch_by_norms(keys) end, [])
+    cond do
+      Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_by_norms_grouped, 1) ->
+        safe(fn ->
+          mod
+          |> apply(:fetch_by_norms_grouped, [keys])
+          |> normalize_grouped(keys)
+        end, %{})
+
+      Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_by_norms, 1) ->
+        rows = safe(fn -> apply(mod, :fetch_by_norms, [keys]) end, [])
         group_locally(keys, rows)
 
       true ->
@@ -45,12 +48,26 @@ defmodule Core.Recall.Synonyms.DbSource do
     end
   end
 
-  defp group_locally(keys, rows) when is_list(rows) do
-    grouped =
-      rows
-      |> Enum.group_by(fn r -> row_norm(r) end)
+  # Accept any grouped shape and ensure we only keep requested keys.
+  # Unknown/missing keys map to [].
+  defp normalize_grouped(%{} = grouped, keys) do
+    Enum.reduce(keys, %{}, fn k, acc ->
+      v =
+        case Map.get(grouped, k) do
+          nil -> []
+          list when is_list(list) -> list
+          other -> List.wrap(other)
+        end
 
-    # Ensure only requested keys are present; missing keys map to []
+      Map.put(acc, k, v)
+    end)
+  end
+
+  defp normalize_grouped(_, keys), do: Enum.into(keys, %{}, &{&1, []})
+
+  defp group_locally(keys, rows) when is_list(rows) do
+    grouped = Enum.group_by(rows, &row_norm/1)
+
     Enum.reduce(keys, %{}, fn k, acc ->
       Map.put(acc, k, Map.get(grouped, k, []))
     end)
@@ -80,4 +97,3 @@ defmodule Core.Recall.Synonyms.DbSource do
     end
   end
 end
-

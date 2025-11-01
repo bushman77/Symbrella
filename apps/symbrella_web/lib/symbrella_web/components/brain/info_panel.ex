@@ -104,7 +104,7 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
               <h4 class="font-medium mb-1">State</h4>
               <div class="rounded border bg-zinc-50 p-2 overflow-auto max-h-56">
                 <pre class="text-xs whitespace-pre-wrap">
-<%= inspect(@snapshot.state, pretty: true, width: 80, limit: :infinity, printable_limit: 500) %>
+                  <%= inspect(@snapshot.state, pretty: true, width: 80, limit: :infinity, printable_limit: 500) %>
                 </pre>
               </div>
             </div>

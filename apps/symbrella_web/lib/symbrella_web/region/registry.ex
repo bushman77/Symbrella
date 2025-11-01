@@ -1,3 +1,4 @@
+
 defmodule SymbrellaWeb.Region.Registry do
   @moduledoc false
 
@@ -22,63 +23,56 @@ defmodule SymbrellaWeb.Region.Registry do
     SymbrellaWeb.Region.Salience
   ]
 
-  # ----- Public: SVG Region discovery (unchanged) -----------------------------
+  # ── Public: SVG Region discovery ───────────────────────────────────────────
 
-  # Runtime-only discovery (no compile-time calls to region modules)
+  # Runtime-only discovery (no compile-time calls to region modules).
+  # Accepts modules that expose either:
+  #   • defn/0   OR
+  #   • key/0, path/0, colors/0, anchor/0, tweak/0
   def modules do
-    Enum.filter(@modules, fn mod ->
-      Code.ensure_compiled?(mod) and
-        function_exported?(mod, :key, 0) and
-        function_exported?(mod, :path, 0) and
-        function_exported?(mod, :colors, 0) and
-        function_exported?(mod, :anchor, 0) and
-        function_exported?(mod, :tweak, 0)
-    end)
+    @modules
+    |> Enum.uniq()
+    |> Enum.filter(&region_module?/1)
   end
 
-  defp by_key_map do
-    Enum.reduce(modules(), %{}, fn mod, acc ->
-      key =
-        if function_exported?(mod, :key, 0) do
-          apply(mod, :key, [])
-        else
-          nil
-        end
-
-      if key, do: Map.put(acc, key, mod), else: acc
-    end)
-  end
-
-  def module_for(key), do: Map.get(by_key_map(), key)
+  def keys, do: Map.keys(by_key_map())
   def available?(key),  do: Map.has_key?(by_key_map(), key)
-  def keys,             do: Map.keys(by_key_map())
+  def module_for(key),  do: Map.get(by_key_map(), key)
 
-  # Safe definition fetch (with sensible defaults if a module is missing)
-  def defn(key) do
+  # Safe definition fetch (with sensible defaults if a module is missing).
+  # If a region module implements defn/0 we use it directly; otherwise we
+  # assemble a defn map from the individual functions.
+  def defn(key) when is_atom(key) do
     case module_for(key) do
       nil ->
         %{
-          path: "",
+          path:   "",
           colors: {"#94A3B8", "#64748B"},
           anchor: {0, 0},
-          tweak: %{dx: 0, dy: 0, s: 1.0}
+          tweak:  %{dx: 0, dy: 0, s: 1.0}
         }
 
       mod ->
-        safe = fn fun, default ->
-          if function_exported?(mod, fun, 0), do: apply(mod, fun, []), else: default
+        if function_exported?(mod, :defn, 0) do
+          safe_apply(mod, :defn, []) ||
+            %{
+              path:   "",
+              colors: {"#94A3B8", "#64748B"},
+              anchor: {0, 0},
+              tweak:  %{dx: 0, dy: 0, s: 1.0}
+            }
+        else
+          %{
+            path:   safe_apply(mod, :path,   "")   || "",
+            colors: safe_apply(mod, :colors, {"#94A3B8", "#64748B"}) || {"#94A3B8", "#64748B"},
+            anchor: safe_apply(mod, :anchor, {0, 0}) || {0, 0},
+            tweak:  safe_apply(mod, :tweak,  %{dx: 0, dy: 0, s: 1.0}) || %{dx: 0, dy: 0, s: 1.0}
+          }
         end
-
-        %{
-          path:   safe.(:path,   ""),
-          colors: safe.(:colors, {"#94A3B8", "#64748B"}),
-          anchor: safe.(:anchor, {0, 0}),
-          tweak:  safe.(:tweak,  %{dx: 0, dy: 0, s: 1.0})
-        }
     end
   end
 
-  # ----- New: Labels & Brain process mapping ---------------------------------
+  # ── Labels & Brain process mapping ─────────────────────────────────────────
 
   @labels %{
     lifg: "LIFG",
@@ -111,35 +105,27 @@ defmodule SymbrellaWeb.Region.Registry do
     end
   end
 
-  defp titlecase(s) do
-    s
-    |> String.downcase()
-    |> String.split(" ", trim: true)
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join(" ")
-  end
-
   @brain_process_map %{
-    lifg:        Brain.LIFG,
-    pmtg:        Brain.PMTG,
-    atl:         Brain.ATL,
-    acc:         Brain.ACC,
-    ofc:         Brain.OFC,
-    dlpfc:       Brain.DLPFC,
-    vmpfc:       Brain.VMPFC,
-    dmpfc:       Brain.DMPFC,
-    fpc:         Brain.FPC,
-    bg:          Brain.BasalGanglia,
+    lifg:          Brain.LIFG,
+    pmtg:          Brain.PMTG,
+    atl:           Brain.ATL,
+    acc:           Brain.ACC,
+    ofc:           Brain.OFC,
+    dlpfc:         Brain.DLPFC,
+    vmpfc:         Brain.VMPFC,
+    dmpfc:         Brain.DMPFC,
+    fpc:           Brain.FPC,
+    bg:            Brain.BasalGanglia,
     basal_ganglia: Brain.BasalGanglia,
-    hippocampus: Brain.Hippocampus,
-    cerebellum:  Brain.Cerebellum,
-    thalamus:    Brain.Thalamus,
-    occipital:   Brain.Occipital,
-    parietal:    Brain.Parietal,
-    frontal:     Brain.Frontal,
-    prefrontal:  Brain.Prefrontal,
-    temporal:    Brain.Temporal,
-    salience:    Brain.Salience
+    hippocampus:   Brain.Hippocampus,
+    cerebellum:    Brain.Cerebellum,
+    thalamus:      Brain.Thalamus,
+    occipital:     Brain.Occipital,
+    parietal:      Brain.Parietal,
+    frontal:       Brain.Frontal,
+    prefrontal:    Brain.Prefrontal,
+    temporal:      Brain.Temporal,
+    salience:      Brain.Salience
   }
 
   @doc """
@@ -156,12 +142,75 @@ defmodule SymbrellaWeb.Region.Registry do
       try do
         String.to_existing_atom(key)
       rescue
-        ArgumentError ->
-          # Careful with atoms; but keys come from our own set, so bounded.
-          String.to_atom(key)
+        ArgumentError -> String.to_atom(key) # bounded by our own keys
       end
 
     process_for(atom)
+  end
+
+  # ── internal helpers ───────────────────────────────────────────────────────
+
+  defp by_key_map do
+    modules()
+    |> Enum.reduce(%{}, fn mod, acc ->
+      key =
+        cond do
+          function_exported?(mod, :key, 0) ->
+            safe_apply(mod, :key, nil)
+
+          function_exported?(mod, :defn, 0) ->
+            case safe_apply(mod, :defn, %{}) do
+              %{key: k} when is_atom(k) -> k
+              _ -> nil
+            end
+
+          true ->
+            nil
+        end
+
+      if is_atom(key), do: Map.put(acc, key, mod), else: acc
+    end)
+  end
+
+  defp region_module?(mod) when is_atom(mod) do
+    loaded? =
+      try do
+        Code.ensure_loaded?(mod)  # strictly boolean; avoids {:error, :nofile}
+      rescue
+        _ -> false
+      end
+
+    loaded? and
+      (
+        function_exported?(mod, :defn, 0) or
+        (
+          function_exported?(mod, :key, 0)     and
+          function_exported?(mod, :path, 0)    and
+          function_exported?(mod, :colors, 0)  and
+          function_exported?(mod, :anchor, 0)  and
+          function_exported?(mod, :tweak, 0)
+        )
+      )
+  end
+
+  defp region_module?(_), do: false
+
+  defp titlecase(s) do
+    s
+    |> String.downcase()
+    |> String.split(" ", trim: true)
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
+  end
+
+  defp safe_apply(mod, fun, default) do
+    try do
+      apply(mod, fun, [])
+    rescue
+      _ -> default
+    catch
+      _, _ -> default
+    end
   end
 end
 

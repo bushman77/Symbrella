@@ -5,7 +5,6 @@ defmodule SymbrellaWeb.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Web owns its PubSub so the Endpoint has a local, well-defined owner.
       SymbrellaWeb.Telemetry,
       SymbrellaWeb.Endpoint
     ]

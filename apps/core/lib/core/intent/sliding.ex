@@ -1,3 +1,4 @@
+# lib/core/intent/sliding.ex
 defmodule Core.Intent.Sliding do
   @moduledoc "Crude sliding-window intent + per-token bias for LIFG."
 
@@ -22,7 +23,7 @@ defmodule Core.Intent.Sliding do
         true -> :inform
       end
 
-    bias = build_bias(intent, toks, forms)
+    bias = build_bias(intent, seq, forms)
 
     si
     |> Map.put(:intent, intent)
@@ -52,7 +53,7 @@ defmodule Core.Intent.Sliding do
           low in @det    -> :det
           low in @prep   -> :prep
           capitalized?(raw) and String.length(raw) >= 2 -> :proper
-          String.ends_with?(low, "?") -> :qmark    # rarely a separate token, kept for safety
+          String.ends_with?(low, "?") -> :qmark
           true -> guess_open_class(low)
         end
       end)
@@ -81,17 +82,23 @@ defmodule Core.Intent.Sliding do
   defp starts_with?(_forms, _lex), do: false
 
   defp questionish?(forms) do
-    last_low = forms |> List.last() |> case do {_, l} -> l; _ -> "" end
+    last_low =
+      case List.last(forms) do
+        {_, l} -> l
+        _ -> ""
+      end
+
     starts_with?(forms, @wh) or String.ends_with?(last_low, "?")
   end
 
   # ——— bias builder (keys: token_index) ———
-  # numbers are small; LIFG already normalizes
-  defp build_bias(:question, tokens, forms) do
-    Enum.with_index(tokens)
-    |> Enum.map(fn {t, ix} ->
+  # Uses the already-computed seq so types/labels are consistent.
+  defp build_bias(:question, seq, forms) do
+    seq
+    |> Enum.with_index()
+    |> Enum.map(fn {pos, ix} ->
       low = elem(Enum.at(forms, ix), 1)
-      pos = coarse_tag_from_low(low)
+
       v =
         cond do
           pos in [:verb, :proper, :noun] -> 0.25
@@ -99,45 +106,30 @@ defmodule Core.Intent.Sliding do
           pos == :unknown                -> 0.0
           true                           -> -0.05
         end
+
       {ix, v}
     end)
     |> Map.new()
   end
 
-  defp build_bias(:greet, tokens, forms) do
-    Enum.with_index(tokens)
-    |> Enum.map(fn {_t, ix} ->
-      low = elem(Enum.at(forms, ix), 1)
+  defp build_bias(:greet, _seq, forms) do
+    forms
+    |> Enum.with_index()
+    |> Enum.map(fn {({_raw, low}), ix} ->
       v = if low in @interj, do: 0.3, else: -0.05
       {ix, v}
     end)
     |> Map.new()
   end
 
-  defp build_bias(_other, tokens, forms) do
-    Enum.with_index(tokens)
-    |> Enum.map(fn {_t, ix} ->
-      low = elem(Enum.at(forms, ix), 1)
-      pos = coarse_tag_from_low(low)
+  defp build_bias(_other, seq, _forms) do
+    seq
+    |> Enum.with_index()
+    |> Enum.map(fn {pos, ix} ->
       v = if pos in [:proper, :noun, :verb], do: 0.12, else: -0.05
       {ix, v}
     end)
     |> Map.new()
-  end
-
-  defp coarse_tag_from_low(low) do
-    cond do
-      low in @wh -> :wh
-      low in @aux -> :aux
-      low in @modal -> :modal
-      low in @pron -> :pron
-      low in @det -> :det
-      low in @prep -> :prep
-      low in @interj -> :interj
-      capitalized?(low) -> :proper
-      Enum.any?(@func, & &1 == low) -> :func
-      true -> :unknown
-    end
   end
 
   defp confidence(:question, _seq), do: 0.7
@@ -150,12 +142,14 @@ defmodule Core.Intent.Sliding do
       _ -> nil
     end
   end
+
   defp extract_keyword(:greet, forms) do
     case forms do
       [{_, l} | _] when l in @interj -> l
       _ -> nil
     end
   end
+
   defp extract_keyword(_, _), do: nil
 end
 

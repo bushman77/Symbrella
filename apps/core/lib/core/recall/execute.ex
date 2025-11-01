@@ -1,33 +1,32 @@
 defmodule Core.Recall.Execute do
   @moduledoc """
-  Execute a recall plan against long-term memory (LTM/DB).
+  Execute a recall plan against long-term memory.
 
   Hooks (safe, opt-in/out via options):
 
-  • Attach — Brain.Hippocampus.attach_episodes/2
-      - Enabled by default with hippo: true
-      - Default opts: hippo_opts: [limit: 3, min_jaccard: 0.1]
-      - After attaching we apply a local Jaccard gate to honor hippo_opts[:min_jaccard]
-        by comparing query norms (from the current SI) against each episode’s norms.
-        Episode norms are taken from `episode.norms` when present, or derived from
-        `episode.slate` (`winners` and/or `tokens`) as a fallback.
+    • Attach — `Brain.Hippocampus.attach_episodes/2`
+      - Enabled by default with `hippo: true`
+      - Default opts: `hippo_opts: [limit: 3, min_jaccard: 0.1]`
+      - After attaching we apply a local Jaccard gate to honor `:min_jaccard` by
+        comparing query norms (from the current SI) against each episode’s norms.
+        Episode norms come from `episode.norms` or are derived from `episode.slate`.
 
-  • Write — Brain.Hippocampus.encode/2
-      - Enabled by default with hippo_write: true
-      - Stores slate: %{tokens: si.tokens}, meta: %{scope: %{source: si.source || :core}}
-      - We write **after** attach so the just-written episode does not echo into
-        the same recall cycle and bypass `min_jaccard`.
+    • Write — `Brain.Hippocampus.encode/2`
+      - Enabled by default with `hippo_write: true`
+      - Writes `slate: %{tokens: si.tokens}`, `meta: %{scope: %{source: si.source || :core}}`
+      - We write **after** attach so the just-written episode does not echo into the
+        same recall cycle and bypass `:min_jaccard`.
 
   Strategies supported:
-    :exact     – DB word existence (already present).
-    :synonym   – NEW: harvest synonyms from Lexicon rows and recall those words.
+    :exact     – existence check via user-provided `exists_fun` (see defaults).
+    :synonym   – harvest synonyms from `Core.Recall.Synonyms` (or configured external MFA).
     :embedding – placeholder (no-op here).
   """
 
   alias Core.SemanticInput, as: SI
   alias Core.Recall.Plan
   alias Brain.Hippocampus
-  alias Db.Lexicon, as: DbLex
+  alias Core.Telemetry
 
   @type exists_fun :: (binary() -> boolean())
   @type neg_exists_fun :: (binary() -> boolean())
@@ -44,10 +43,10 @@ defmodule Core.Recall.Execute do
 
   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
   def execute(%SI{} = si, %Plan{} = plan, opts \\ []) do
-    t0 = now_ms()
+    t0         = now_ms()
     exists_fun = Keyword.get(opts, :exists_fun, default_exists_fun())
     neg_exists = Keyword.get(opts, :neg_exists_fun, default_neg_exists_fun())
-    neg_put = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
+    neg_put    = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
 
     {candidates, covered_tok_ids} = candidate_keys(si)
 
@@ -74,13 +73,13 @@ defmodule Core.Recall.Execute do
     # ---- Hippocampus attach (+ local Jaccard gate; default on) ----
     si3 = maybe_attach_episodes(si2, opts)
 
-    # ---- Hippocampus write (safe; default on) — do this AFTER attach to avoid echo ----
+    # ---- Hippocampus write (safe; default on) — AFTER attach to avoid echo ----
     _ = maybe_write_episode(si3, opts)
 
     si3
   end
 
-  # ---------- candidate key extraction ----------
+  # ───────── candidate key extraction ─────────
 
   # Returns {candidates, covered_tok_ids}
   # candidates: [{key :: binary, tok_ids :: [non_neg_integer], prio :: 0 | 1}]
@@ -98,8 +97,8 @@ defmodule Core.Recall.Execute do
             [{normalize(phrase), [idx], 1}]
 
           %{} = m ->
-            raw = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
-            key = if is_binary(raw), do: normalize(raw), else: ""
+            raw  = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
+            key  = if is_binary(raw), do: normalize(raw), else: ""
             prio = if Map.get(m, :is_mwe_head, false), do: 0, else: 1
             [{key, [Map.get(m, :id, idx)], prio}]
 
@@ -136,7 +135,7 @@ defmodule Core.Recall.Execute do
 
   defp covered_tok_ids_from_active(_), do: []
 
-  # ---------- strategy runner ----------
+  # ───────── strategy runner ─────────
 
   defp run_strategies(
          candidates,
@@ -208,7 +207,7 @@ defmodule Core.Recall.Execute do
 
   defp bump(cnts, key, add), do: Map.update!(cnts, key, &(&1 + add))
 
-  # ---------- exact pass ----------
+  # ───────── exact pass ─────────
 
   defp exact_pass(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0) do
     do_exact(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, [], 0)
@@ -218,7 +217,7 @@ defmodule Core.Recall.Execute do
     do: {Enum.reverse(acc), %{exact: cnt}, false}
 
   defp do_exact(
-         [{_key, _tok_ids, _prio} | _] = _rest,
+         [{_key, _tok_ids, _prio} | _],
          _exists_fun,
          _neg_exists,
          _neg_put,
@@ -275,15 +274,9 @@ defmodule Core.Recall.Execute do
     }
   end
 
-  # ---------- synonym pass (NEW) ----------
+  # ───────── synonym pass ─────────
 
-  # Produces references for synonyms of candidate keys.
-  # - uses Db.Lexicon.fetch_by_norms(_)/1 (or *_grouped) if available
-  # - respects time & slot budget
-  # - consults neg cache & exists_fun to avoid expensive misses
-  # - gives each ref reason=:synonym and score=@synonym_score
   defp synonym_pass(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, already_refs) do
-    # stop early on no slots
     if is_integer(slots_left) and slots_left <= 0 do
       {[], 0, false}
     else
@@ -301,80 +294,45 @@ defmodule Core.Recall.Execute do
         # ensure we don't duplicate ids that exact pass added
         existing_ids = MapSet.new(Enum.map(already_refs, & &1.id))
 
-        {refs, taken, bhit} =
-          do_synonyms(candidates, syn_map, exists_fun, neg_exists, neg_put,
-            slots_left, time_left_ms, t0, existing_ids, [], 0
-          )
+        {refs, cnt2, slots2, _seen2} =
+          Enum.reduce_while(candidates, {[], 0, slots_left, existing_ids}, fn {key, tok_ids, _prio}, {acc, cnt, slots_i, seen_i} ->
+            cond do
+              is_integer(slots_i) and slots_i <= 0 ->
+                {:halt, {acc, cnt, slots_i, seen_i}}
 
-        {Enum.reverse(refs), taken, bhit}
+              true ->
+                syns = Map.get(syn_map, key, MapSet.new()) |> MapSet.to_list()
+
+                {acc2, cnt2, slots3, seen3} =
+                  Enum.reduce_while(syns, {acc, cnt, slots_i, seen_i}, fn syn, {acc_i, cnt_i, s_i, seen_j} ->
+                    cond do
+                      is_integer(s_i) and s_i <= 0 ->
+                        {:halt, {acc_i, cnt_i, s_i, seen_j}}
+
+                      neg_exists.(syn) ->
+                        {:cont, {acc_i, cnt_i, s_i, seen_j}}
+
+                      exists_fun.(syn) ->
+                        ref = to_active_ref_synonym(key, syn, tok_ids)
+                        if MapSet.member?(seen_j, ref.id) do
+                          {:cont, {acc_i, cnt_i, s_i, seen_j}}
+                        else
+                          next_slots = case s_i do :infinity -> :infinity; n -> n - 1 end
+                          {:cont, {[ref | acc_i], cnt_i + 1, next_slots, MapSet.put(seen_j, ref.id)}}
+                        end
+
+                      true ->
+                        _ = safe_neg_put(neg_put, syn)
+                        {:cont, {acc_i, cnt_i, s_i, seen_j}}
+                    end
+                  end)
+
+                {:cont, {acc2, cnt2, slots3, seen3}}
+            end
+          end)
+
+        {Enum.reverse(refs), cnt2, slots2 == 0}
       end
-    end
-  end
-
-  defp do_synonyms([], _syn_map, _exists_fun, _neg_exists, _neg_put, _slots_left, _tl, _t0, _seen_ids, acc, cnt),
-    do: {acc, cnt, false}
-
-  defp do_synonyms(
-         [{_key, _tok_ids, _prio} | _] = _rest,
-         _syn_map,
-         _exists_fun,
-         _neg_exists,
-         _neg_put,
-         slots_left,
-         _time_left_ms,
-         _t0,
-         _seen_ids,
-         acc,
-         cnt
-       )
-       when is_integer(slots_left) and slots_left <= 0,
-       do: {acc, cnt, false}
-
-  defp do_synonyms(
-         [{key, tok_ids, _prio} | rest],
-         syn_map,
-         exists_fun,
-         neg_exists,
-         neg_put,
-         slots_left,
-         time_left_ms,
-         t0,
-         seen_ids,
-         acc,
-         cnt
-       ) do
-    elapsed = now_ms() - t0
-    if time_left_ms != :infinity and elapsed >= time_left_ms do
-      {acc, cnt, true}
-    else
-      syns = Map.get(syn_map, key, MapSet.new()) |> MapSet.to_list()
-
-      {acc2, cnt2, slots2, seen2} =
-        Enum.reduce_while(syns, {acc, cnt, slots_left, seen_ids}, fn syn, {acc_i, cnt_i, slots_i, seen_i} ->
-          cond do
-            is_integer(slots_i) and slots_i <= 0 ->
-              {:halt, {acc_i, cnt_i, slots_i, seen_i}}
-
-            neg_exists.(syn) ->
-              {:cont, {acc_i, cnt_i, slots_i, seen_i}}
-
-            exists_fun.(syn) ->
-              ref = to_active_ref_synonym(key, syn, tok_ids)
-              # ensure uniqueness across whole run
-              if MapSet.member?(seen_i, ref.id) do
-                {:cont, {acc_i, cnt_i, slots_i, seen_i}}
-              else
-                next_slots = case slots_i do :infinity -> :infinity; n -> n - 1 end
-                {:cont, {[ref | acc_i], cnt_i + 1, next_slots, MapSet.put(seen_i, ref.id)}}
-              end
-
-            true ->
-              _ = safe_neg_put(neg_put, syn)
-              {:cont, {acc_i, cnt_i, slots_i, seen_i}}
-          end
-        end)
-
-      do_synonyms(rest, syn_map, exists_fun, neg_exists, neg_put, slots2, time_left_ms, t0, seen2, acc2, cnt2)
     end
   end
 
@@ -390,44 +348,67 @@ defmodule Core.Recall.Execute do
     }
   end
 
-  # ---------- synonym harvesting helpers ----------
+  # ───────── synonym harvesting helpers ─────────
 
-  defp synonyms_for_keys(keys) when is_list(keys) do
-    norms =
-      keys
-      |> Enum.map(&normalize/1)
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.uniq()
+  # Resolve synonyms for a list of normalized keys.
+  # Tries Core.Recall.Synonyms if available; otherwise consults configured external MFA.
+  # Returns: %{norm => MapSet.t()}   (values are sets of normalized binary terms)
+# Replace this whole function in apps/core/lib/core/recall/execute.ex
+defp synonyms_for_keys(keys) when is_list(keys) do
+  raw =
+    cond do
+      # Prefer the façade (P-201): Core.Synonyms.for_keys/2 or /1
+      Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 2) ->
+        safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys, []]) end)
 
-    grouped =
-      cond do
-        Code.ensure_loaded?(DbLex) and function_exported?(DbLex, :fetch_by_norms_grouped, 1) ->
-          safe_fetch_grouped(norms)
+      Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 1) ->
+        safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys]) end)
 
-        Code.ensure_loaded?(DbLex) and function_exported?(DbLex, :fetch_by_norms, 1) ->
-          rows = safe_fetch_flat(norms)
-          group_rows_by_norm(rows)
+      # Back-compat with Core.Recall.Synonyms if present
+      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :for_keys, 1) ->
+        safe_apply_map(fn -> apply(Core.Recall.Synonyms, :for_keys, [keys]) end)
 
-        true ->
-          %{}
-      end
+      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :expand, 2) ->
+        # expand/2 can take a list and return {:ok, list, meta}; normalize_syn_map/1 handles lists
+        safe_apply_map(fn ->
+          case apply(Core.Recall.Synonyms, :expand, [keys, []]) do
+            {:ok, list, _meta} -> list
+            {:ok, list} -> list
+            other -> other
+          end
+        end)
 
-    Enum.reduce(norms, %{}, fn k, acc ->
-      syns =
-        grouped
-        |> Map.get(k, [])
-        |> synonyms_from_rows()
-        |> Enum.map(&normalize/1)
-        |> Enum.reject(&(&1 in [nil, "", k])) # drop self
-        |> MapSet.new()
+      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :lookup, 2) ->
+        # As a last resort, map each key through lookup/2
+        safe_apply_map(fn ->
+          keys
+          |> Enum.map(fn k ->
+            case apply(Core.Recall.Synonyms, :lookup, [k, []]) do
+              {:ok, list, _meta} -> {k, list}
+              {:ok, list} -> {k, list}
+              _ -> {k, []}
+            end
+          end)
+          |> Enum.into(%{})
+        end)
 
-      Map.put(acc, k, syns)
-    end)
-  end
+      true ->
+        # External MFA fallback (no compile-time coupling)
+        ext_cfg = Application.get_env(:core, Core.Recall.Synonyms.Providers.External, [])
+        case Keyword.get(ext_cfg, :mfa) do
+          {m, f, a} when is_atom(m) and is_atom(f) and is_list(a) ->
+            safe_apply_map(fn -> apply(m, f, [keys | a]) end)
+          _ ->
+            %{}
+        end
+    end
 
-  defp safe_fetch_grouped(norms) do
+  normalize_syn_map(raw)
+end
+
+  defp safe_apply_map(fun) when is_function(fun, 0) do
     try do
-      DbLex.fetch_by_norms_grouped(norms) || %{}
+      fun.()
     rescue
       _ -> %{}
     catch
@@ -435,25 +416,72 @@ defmodule Core.Recall.Execute do
     end
   end
 
-  defp safe_fetch_flat(norms) do
-    try do
-      DbLex.fetch_by_norms(norms) || []
-    rescue
-      _ -> []
-    catch
-      _, _ -> []
-    end
+  # Accepts various shapes from providers and coerces to: %{norm => MapSet.t()}
+  defp normalize_syn_map(%{} = m) do
+    Enum.reduce(m, %{}, fn {k, v}, acc ->
+      nk = normalize(k)
+
+      syns =
+        cond do
+          match?(%MapSet{}, v) ->
+            v |> MapSet.to_list() |> Enum.flat_map(&map_value_to_terms/1) |> to_norm_set()
+
+          is_list(v) ->
+            v |> Enum.flat_map(&map_value_to_terms/1) |> to_norm_set()
+
+          is_map(v) ->
+            (Map.get(v, :items) || Map.get(v, "items") ||
+               Map.get(v, :synonyms) || Map.get(v, "synonyms") || [])
+            |> List.wrap()
+            |> Enum.flat_map(&map_value_to_terms/1)
+            |> to_norm_set()
+
+          true ->
+            MapSet.new()
+        end
+
+      if nk in [nil, ""] do acc else Map.put(acc, nk, syns) end
+    end)
+  end
+
+  defp normalize_syn_map(list) when is_list(list) do
+    list
+    |> group_rows_by_norm()
+    |> Enum.into(%{}, fn {norm, rows} ->
+      syns =
+        rows
+        |> synonyms_from_rows()
+        |> Enum.flat_map(&map_value_to_terms/1)
+        |> to_norm_set()
+      {norm, syns}
+    end)
+  end
+
+  defp normalize_syn_map(_), do: %{}
+
+  defp map_value_to_terms(v) when is_binary(v), do: [v]
+  defp map_value_to_terms(%{term: t}) when is_binary(t),  do: [t]
+  defp map_value_to_terms(%{lemma: t}) when is_binary(t), do: [t]
+  defp map_value_to_terms(%{"term" => t}) when is_binary(t),  do: [t]
+  defp map_value_to_terms(%{"lemma" => t}) when is_binary(t), do: [t]
+  defp map_value_to_terms(_), do: []
+
+  defp to_norm_set(list) when is_list(list) do
+    list
+    |> Enum.map(&normalize/1)
+    |> Enum.reject(&(&1 == ""))
+    |> MapSet.new()
   end
 
   defp group_rows_by_norm(rows) when is_list(rows) do
     Enum.group_by(rows, fn r ->
       cond do
-        is_map(r) and is_binary(Map.get(r, :norm)) -> normalize(Map.get(r, :norm))
+        is_map(r) and is_binary(Map.get(r, :norm))  -> normalize(Map.get(r, :norm))
         is_map(r) and is_binary(Map.get(r, "norm")) -> normalize(Map.get(r, "norm"))
-        is_map(r) and is_binary(Map.get(r, :word)) -> normalize(Map.get(r, :word))
+        is_map(r) and is_binary(Map.get(r, :word))  -> normalize(Map.get(r, :word))
         is_map(r) and is_binary(Map.get(r, "word")) -> normalize(Map.get(r, "word"))
-        is_map(r) and is_binary(Map.get(r, :id)) -> r |> Map.get(:id) |> String.split("|") |> hd()
-        is_map(r) and is_binary(Map.get(r, "id")) -> r |> Map.get("id") |> String.split("|") |> hd()
+        is_map(r) and is_binary(Map.get(r, :id))    -> r |> Map.get(:id)    |> String.split("|") |> hd()
+        is_map(r) and is_binary(Map.get(r, "id"))   -> r |> Map.get("id")   |> String.split("|") |> hd()
         true -> "__unknown__"
       end
     end)
@@ -471,7 +499,7 @@ defmodule Core.Recall.Execute do
     |> Enum.uniq()
   end
 
-  # ---------- merge & trace ----------
+  # ───────── merge & trace ─────────
 
   defp merge_and_trace(%SI{} = si, added_refs, counts, budget_ms, budget_hit?, t0) do
     merged =
@@ -493,7 +521,8 @@ defmodule Core.Recall.Execute do
     %SI{si | active_cells: merged, trace: si.trace ++ [ev]}
   end
 
-  # ---- Hippocampus write (safe) ----
+  # ───────── Hippocampus write (safe) ─────────
+
   defp maybe_write_episode(%SI{} = si, opts) do
     enabled? = Keyword.get(opts, :hippo_write, true)
 
@@ -510,6 +539,7 @@ defmodule Core.Recall.Execute do
 
         try do
           _ = Hippocampus.encode(slate, meta)
+          Telemetry.emit([:brain, :hippo, :write], %{count: 1}, %{tokens: length(si.tokens)})
           :ok
         rescue
           _ -> :ok
@@ -522,7 +552,8 @@ defmodule Core.Recall.Execute do
     end
   end
 
-  # ---- Hippocampus attach (safe) + local min_jaccard filter ----
+  # ───────── Hippocampus attach (safe) + local min_jaccard filter ─────────
+
   defp maybe_attach_episodes(%SI{} = si, opts) do
     enabled?   = Keyword.get(opts, :hippo, true)
     hippo_opts = Keyword.get(opts, :hippo_opts, @hippo_default_opts)
@@ -548,7 +579,10 @@ defmodule Core.Recall.Execute do
         # Primary: let Hippocampus attach onto SI
         si_attached =
           try do
-            Hippocampus.attach_episodes(si, hippo_opts2)
+            res = Hippocampus.attach_episodes(si, hippo_opts2)
+            attached = episodes_list(res) |> length()
+            Telemetry.emit([:brain, :hippo, :attach], %{count: attached}, %{cues: length(List.wrap(cues_list))})
+            res
           rescue
             _ -> si
           catch
@@ -562,6 +596,7 @@ defmodule Core.Recall.Execute do
             [] when is_list(cues_list) and cues_list != [] ->
               try do
                 rec = Hippocampus.recall(cues_list, Keyword.put(hippo_opts2, :min_jaccard, 0.0))
+                Telemetry.emit([:brain, :hippo, :recall], %{count: length(rec)}, %{fallback?: true})
                 put_episodes(si_attached, rec)
               rescue
                 _ -> si_attached
@@ -583,7 +618,8 @@ defmodule Core.Recall.Execute do
     end
   end
 
-  # ---- Local Jaccard gate (query norms vs episode norms) ----
+  # ───────── Local Jaccard gate (query norms vs episode norms) ─────────
+
   # Apply only if we have non-empty query cues; otherwise skip gating.
   # Also bump each kept record’s :score to at least the computed Jaccard.
   defp apply_jaccard_filter(%SI{} = si, hippo_opts) do
@@ -604,27 +640,27 @@ defmodule Core.Recall.Execute do
         if MapSet.size(qset) == 0 do
           si
         else
-          filtered =
+          {kept, kept_list} =
             episodes
-            |> Enum.reduce([], fn rec, acc ->
+            |> Enum.reduce({0, []}, fn rec, {n, acc} ->
               e_set = episode_norms(rec)
 
               if MapSet.size(e_set) == 0 do
-                acc
+                {n, acc}
               else
                 j = jaccard(qset, e_set)
                 # keep only if j > min (strict), and bump score to at least j
                 if j > min do
                   new_score = max(Map.get(rec, :score, 0.0), j)
-                  [Map.put(rec, :score, new_score) | acc]
+                  {n + 1, [Map.put(rec, :score, new_score) | acc]}
                 else
-                  acc
+                  {n, acc}
                 end
               end
             end)
-            |> Enum.reverse()
 
-          put_episodes(si, filtered)
+          Telemetry.emit([:brain, :hippo, :jaccard_filter], %{kept: kept, total: length(episodes)}, %{min: min})
+          put_episodes(si, Enum.reverse(kept_list))
         end
     end
   end
@@ -661,7 +697,8 @@ defmodule Core.Recall.Execute do
     :maps.put(:evidence, new_ev, si)
   end
 
-  # ---- Episode norms derivation (fallback if :episode lacks :norms) -------
+  # ───────── Episode norms derivation (fallback if :episode lacks :norms) ─────────
+
   defp episode_norms(%{episode: %{norms: %MapSet{} = ms}}), do: ms
 
   defp episode_norms(%{episode: %{slate: slate}}) when is_map(slate) do
@@ -695,10 +732,10 @@ defmodule Core.Recall.Execute do
 
   defp episode_norms(_), do: MapSet.new()
 
-  # ---- Query norms helpers -------------------------------------------------
+  # ───────── Query norms helpers ─────────
 
   defp query_norms(%SI{} = si) do
-    # Use dynamic apply to avoid compile-time warnings when the optional module is absent.
+    # Use dynamic apply to avoid compile-time warnings when optional module is absent.
     if Code.ensure_loaded?(Brain.Hippocampus.Normalize) and
          function_exported?(Brain.Hippocampus.Normalize, :norms, 1) do
       try do
@@ -757,7 +794,7 @@ defmodule Core.Recall.Execute do
         [normalize(p)]
 
       %{} = m ->
-        case (Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)) do
+        case Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase) do
           v when is_binary(v) and v != "" -> [normalize(v)]
           _ -> []
         end
@@ -778,7 +815,7 @@ defmodule Core.Recall.Execute do
 
   defp sentence_to_norms(_), do: MapSet.new()
 
-  # ---- Jaccard ------------------------------------------------------------
+  # ───────── Jaccard ─────────
 
   defp jaccard(a, b) do
     a = to_set(a)
@@ -804,24 +841,24 @@ defmodule Core.Recall.Execute do
 
   defp to_set(_), do: MapSet.new()
 
-  # ---- utilities ----------------------------------------------------------
+  # ───────── utilities ─────────
 
-  defp activation_of(%Db.BrainCell{activation: a}) when is_number(a), do: a
-  defp activation_of(%{activation_snapshot: a}) when is_number(a),    do: a
-  defp activation_of(%{activation: a}) when is_number(a),             do: a
-  defp activation_of(_),                                              do: 0.0
+  # Avoid compile-time coupling to Db.* structs
+  defp activation_of(%{activation_snapshot: a}) when is_number(a), do: a
+  defp activation_of(%{activation: a})          when is_number(a), do: a
+  defp activation_of(_),                                      do: 0.0
 
   defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}), do: t0
   defp min_tok_id(%{matched_tokens: _mts}),                do: 0
   defp min_tok_id(%{token_id: tid}) when is_integer(tid),  do: tid
-  defp min_tok_id(%Db.BrainCell{token_id: tid}) when is_integer(tid), do: tid
   defp min_tok_id(_),                                      do: @max_tok_id
 
   defp default_exists_fun() do
+    # Compile-safe: do not call Db.word_exists?/1 directly at compile time
     if Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) do
       fn key ->
         try do
-          Db.word_exists?(key)
+          apply(Db, :word_exists?, [key])
         rescue
           _ -> false
         catch

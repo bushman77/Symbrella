@@ -117,62 +117,79 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   # --- HUD row ---------------------------------------------------------------
-  defp hud_row(assigns) do
-    clock   = assigns[:clock] || %{}
-    intent  = assigns[:intent] || %{}
-    mood    = assigns[:mood] || %{derived: %{}}
-    auto    = assigns[:auto]
-    d       = Map.get(mood, :derived, %{}) || %{}
+# Optional attrs for compile-time checks
+attr :clock, :map, default: %{}
+attr :intent, :map, default: %{}
+attr :mood, :map, default: %{derived: %{}}
+attr :auto, :any, default: false
+defp hud_row(assigns) do
+  clock  = Map.get(assigns, :clock, %{})
+  intent = Map.get(assigns, :intent, %{})
+  mood   = Map.get(assigns, :mood, %{derived: %{}})
 
-    seq  = Map.get(clock, :seq, "—")
-    hz   = Map.get(clock, :hz,  "—") |> fmt
-    dtms = Map.get(clock, :dt_ms, "—")
-    phi  = Map.get(clock, :phi, "—") |> fmt
+  d    = Map.get(mood, :derived, %{}) || %{}
+  seq  = Map.get(clock, :seq,  "—")
+  hz   = Map.get(clock, :hz,   "—")
+  dtms = Map.get(clock, :dt_ms, "—")
+  phi  = Map.get(clock, :phi,  "—")
 
-    label = Map.get(intent, :label) || Map.get(intent, :intent)
-    kw    = Map.get(intent, :keyword)
-    src   = Map.get(intent, :source) || Map.get(intent, :src)
-    conf  = Map.get(intent, :confidence)
+  label = Map.get(intent, :label) || Map.get(intent, :intent)
+  kw    = Map.get(intent, :keyword)
+  src   = Map.get(intent, :source) || Map.get(intent, :src)
+  conf  = Map.get(intent, :confidence)
 
-    ~H"""
-    <div class="flex flex-wrap items-center gap-2">
-      <.chip>
-        <span class="font-semibold">Clock</span>
-        <span class="opacity-70">seq</span> <%= seq %>
-        <span class="opacity-70">Hz</span> <%= hz %>
-        <span class="opacity-70">Δt</span> <%= dtms %>ms
-        <span class="opacity-70">ϕ</span> <%= phi %>
-      </.chip>
+  assigns =
+    assigns
+    |> assign(:seq, seq)
+    |> assign(:hz, hz)
+    |> assign(:dtms, dtms)
+    |> assign(:phi, phi)
+    |> assign(:label, label)
+    |> assign(:kw, kw)
+    |> assign(:src, src)
+    |> assign(:conf, conf)
+    |> assign(:d, d)
+    |> assign(:auto_on, (assigns[:auto] in [true, "on", "ON"]))
 
-      <.chip>
-        <span class="font-semibold">Intent</span>
-        <%= if is_binary(label) do %>
-          <code class="px-1"><%= label %></code>
-        <% else %>
-          <span>—</span>
-        <% end %>
-        <%= if is_binary(kw) do %><span>· <%= kw %></span><% end %>
-        <%= if is_number(conf) do %>· <%= fmt_pct(conf) %><% else %>· --<% end %>
-        <%= if is_binary(src) do %>
-          <span class="opacity-60">( <%= src %> )</span>
-        <% end %>
-      </.chip>
+  ~H"""
+  <div class="flex flex-wrap items-center gap-2">
+    <.chip>
+      <span class="font-semibold">Clock</span>
+      <span class="opacity-70">seq</span> <%= @seq %>
+      <span class="opacity-70">Hz</span> <%= fmt(@hz) %>
+      <span class="opacity-70">Δt</span> <%= @dtms %>ms
+      <span class="opacity-70">ϕ</span> <%= fmt(@phi) %>
+    </.chip>
 
-      <.chip>
-        <span class="font-semibold">Mood</span>
-        Expl: <%= fmt(d[:exploration]) %>
-        · Inhib: <%= fmt(d[:inhibition]) %>
-        · Vigil: <%= fmt(d[:vigilance]) %>
-        · Plast: <%= fmt(d[:plasticity]) %>
-      </.chip>
+    <.chip>
+      <span class="font-semibold">Intent</span>
+      <%= if is_binary(@label) do %>
+        <code class="px-1"><%= @label %></code>
+      <% else %>
+        <span>—</span>
+      <% end %>
+      <%= if is_binary(@kw) do %>· <%= @kw %><% end %>
+      <%= if is_number(@conf) do %>· <%= fmt_pct(@conf) %><% else %>· --<% end %>
+      <%= if is_binary(@src) do %>
+        <span class="opacity-60">( <%= @src %> )</span>
+      <% end %>
+    </.chip>
 
-      <.chip>
-        <button class="text-xs border px-2 py-1 rounded" phx-click="refresh">Refresh</button>
-        <span class="opacity-60">Auto:</span> <%= (auto in [true, "on", "ON"]) && "ON" || "OFF" %>
-      </.chip>
-    </div>
-    """
-  end
+    <.chip>
+      <span class="font-semibold">Mood</span>
+      Expl: <%= fmt(@d[:exploration]) %>
+      · Inhib: <%= fmt(@d[:inhibition]) %>
+      · Vigil: <%= fmt(@d[:vigilance]) %>
+      · Plast: <%= fmt(@d[:plasticity]) %>
+    </.chip>
+
+    <.chip>
+      <button class="text-xs border px-2 py-1 rounded" phx-click="refresh">Refresh</button>
+      <span class="opacity-60">Auto:</span> <%= @auto_on && "ON" || "OFF" %>
+    </.chip>
+  </div>
+  """
+end
 
   # HUD chip component
   slot :inner_block, required: true
@@ -206,171 +223,196 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :region_tweaks, :map, default: %{}
   attr :pan, :map, default: %{x: 0, y: 0}
   attr :scale, :float, default: 1.0
-  defp brain_map(assigns) do
-    selected   = assigns.selected || :lifg
-    vb         = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
-    pan        = assigns.pan || %{x: 0, y: 0}
-    scale      = assigns.scale || 1.0
-    draw_order = draw_regions(selected)
+defp brain_map(assigns) do
+  selected   = assigns.selected || :lifg
+  vb         = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
+  pan        = assigns.pan || %{x: 0, y: 0}
+  scale      = assigns.scale || 1.0
+  draw_order = draw_regions(selected)
 
-    assigns =
-      assigns
-      |> assign(:selected, selected)
-      |> assign(:vb, vb)
-      |> assign(:view_w, vb.w |> round())
-      |> assign(:view_h, vb.h |> round())
-      |> assign(:pan, pan)
-      |> assign(:scale, scale)
-      |> assign(:draw_order, draw_order)
+  assigns =
+    assigns
+    |> assign(:selected, selected)
+    |> assign(:vb, vb)
+    |> assign(:view_w, vb.w |> round())
+    |> assign(:view_h, vb.h |> round())
+    |> assign(:pan, pan)
+    |> assign(:scale, scale)
+    |> assign(:draw_order, draw_order)
 
-    ~H"""
-    <div class="p-3">
-      <div class="flex justify-between items-start mb-2">
-        <h2 class="font-semibold">Brain map</h2>
-        <span class="text-xs text-zinc-500">Left-lateral human brain (vector)</span>
-      </div>
-
-      <div class="relative bg-white rounded border overflow-hidden" style={"aspect-ratio: #{@view_w} / #{@view_h}; min-height: 260px;"}>
-        <svg
-          viewBox={"#{@vb.minx} #{@vb.miny} #{@vb.w} #{@vb.h}"}
-          class="absolute inset-0 w-full h-full"
-          preserveAspectRatio="xMidYMid meet"
-        >
-          <style>
-            .r-label{opacity:0; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#111;}
-            g.region:hover .r-label{opacity:.9}
-          </style>
-
-          <!-- Pan/scale applies to base art and overlays together -->
-          <g transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"} class="pointer-events-auto" vector-effect="non-scaling-stroke">
-            <!-- Base art (component returns a <g>) -->
-            <BaseArt.group svg={@svg_base} />
-
-            <!-- Region overlays (same coordinate system as base) -->
-            <%= for key <- @draw_order do %>
-              <% defn = RegionRegistry.defn(key) %>
-
-              <% # Merge optional per-render overrides (%{key => %{dx/dy/s}}) safely %>
-              <% t0 =
-                case defn.tweak do
-                  m when is_map(m) -> m
-                  _ -> %{}
-                end %>
-              <% tovr = Map.get(@region_tweaks, key, %{}) %>
-              <% t = Map.merge(%{dx: 0, dy: 0, s: 1.0}, Map.merge(t0, tovr)) %>
-
-              <% {fill, stroke} = defn.colors %>
-              <% sel? = @selected == key %>
-              <% fw   = if sel?, do: 2, else: 1 %>
-              <% fop  = if sel?, do: "0.35", else: "0.20" %>
-              <% style = "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
-              <% {lx, ly} = defn.anchor %>
-
-<g id={"g-#{key}"} class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
-  <path
-    id={"path-#{key}"}
-    d={defn.path}
-    vector-effect="non-scaling-stroke"
-    phx-click="select-region"
-    phx-value-region={Atom.to_string(key)}
-    class={if(@selected == key, do: "opacity-100 stroke-2", else: "opacity-70 hover:opacity-90")}
-    style={style}
-  >
-    <title><%= String.upcase(Atom.to_string(key)) %></title>
-  </path>
-  <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
-</g>
-
-            <% end %>
-          </g>
-        </svg>
-      </div>
-
-      <p class="text-[11px] text-zinc-500 mt-2">
-        Single SVG, shared viewBox — zero drift across devices. Use per-region
-        tweaks for tiny nudges only; prefer adjusting the base `viewBox` for
-        global framing.
-      </p>
+  ~H"""
+  <div class="p-3">
+    <div class="flex justify-between items-start mb-2">
+      <h2 class="font-semibold">Brain map</h2>
+      <span class="text-xs text-zinc-500">Left-lateral human brain (vector)</span>
     </div>
-    """
-  end
+
+    <div
+      class="relative bg-white rounded border overflow-hidden"
+      style={"aspect-ratio: #{@view_w} / #{@view_h}; min-height: 260px;"}
+    >
+      <svg
+        viewBox={"#{@vb.minx} #{@vb.miny} #{@vb.w} #{@vb.h}"}
+        class="absolute inset-0 w-full h-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <style>
+          .r-label{opacity:0; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#111;}
+          g.region:hover .r-label{opacity:.9}
+        </style>
+
+        <!-- Pan/scale applies to base art and overlays together -->
+        <g
+          transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"}
+          class="pointer-events-auto"
+          vector-effect="non-scaling-stroke"
+        >
+          <!-- Base art (component returns a <g>) -->
+          <BaseArt.group svg={@svg_base} />
+
+          <!-- Region overlays (same coordinate system as base) -->
+          <%= for key <- @draw_order do %>
+            <% defn = RegionRegistry.defn(key) %>
+
+            <% t0 =
+              case defn.tweak do
+                m when is_map(m) -> m
+                _ -> %{}
+              end %>
+            <% tovr = Map.get(@region_tweaks, key, %{}) %>
+            <% t = Map.merge(%{dx: 0, dy: 0, s: 1.0}, Map.merge(t0, tovr)) %>
+
+            <% {fill, stroke} = defn.colors %>
+            <% sel? = @selected == key %>
+            <% fw   = if sel?, do: 2, else: 1 %>
+            <% fop  = if sel?, do: "0.35", else: "0.20" %>
+            <% style = "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
+            <% {lx, ly} = defn.anchor %>
+
+            <g id={"g-#{key}"} class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
+              <path
+                id={"path-#{key}"}
+                d={defn.path}
+                vector-effect="non-scaling-stroke"
+                phx-click="select-region"
+                phx-value-region={Atom.to_string(key)}
+                class={if(@selected == key, do: "opacity-100 stroke-2", else: "opacity-70 hover:opacity-90")}
+                style={style}
+              >
+                <title><%= String.upcase(Atom.to_string(key)) %></title>
+              </path>
+              <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
+            </g>
+          <% end %>
+        </g>
+      </svg>
+    </div>
+
+    <p class="text-[11px] text-zinc-500 mt-2">
+      Single SVG, shared viewBox — zero drift across devices. Use per-region
+      tweaks for tiny nudges only; prefer adjusting the base <code>viewBox</code> for
+      global framing.
+    </p>
+  </div>
+  """
+end
 
   # --- Region summary --------------------------------------------------------
-  defp region_summary(assigns) do
-    region   = assigns[:region]   || %{}
-    selected = assigns[:selected] || :lifg
+# Optional attrs for nicer compile checks (safe to keep even if private)
+attr :region, :map, default: %{}
+attr :selected, :atom, default: :lifg
+attr :state, :any, default: nil
+attr :snapshot, :any, default: nil
+attr :region_status, :any, default: nil
+attr :region_state, :map, default: nil
+defp region_summary(assigns) do
+  region   = Map.get(assigns, :region, %{})
+  selected = Map.get(assigns, :selected, :lifg)
 
-    # Prefer an explicit :state prop, then fall back to Live assigns you already keep fresh
-    state_map =
-      assigns[:state] ||
-        assigns[:snapshot] ||
-        assigns[:region_status] ||
-        (assigns[:region_state] && assigns[:region_state][:snapshot]) ||
-        %{}
+  # Prefer explicit :state, then snapshot/status, then region_state.snapshot
+  state_map =
+    assigns[:state] ||
+      assigns[:snapshot] ||
+      assigns[:region_status] ||
+      get_in(assigns, [:region_state, :snapshot]) ||
+      %{}
 
-    title    = Map.get(region, :title)    || Atom.to_string(selected) |> String.upcase()
-    subtitle = Map.get(region, :subtitle) || default_subtitle(selected)
-    desc     = Map.get(region, :desc)     || default_region_desc(selected)
-    mods     = Map.get(region, :modules, [])
-    telem    = Map.get(region, :telemetry, [])
-    confs    = Map.get(region, :config_examples, [])
+  title =
+    Map.get(region, :title) ||
+      (selected |> Atom.to_string() |> String.upcase())
 
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <h2 class="font-semibold"><%= title %> — <%= subtitle %></h2>
-      <p class="text-sm text-zinc-600 mb-3"><%= desc %></p>
+  subtitle = Map.get(region, :subtitle) || default_subtitle(selected)
+  desc     = Map.get(region, :desc)     || default_region_desc(selected)
+  mods     = Map.get(region, :modules, [])
+  telem    = Map.get(region, :telemetry, [])
+  confs    = Map.get(region, :config_examples, [])
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div>
-          <h3 class="text-sm text-zinc-500 mb-1">Modules</h3>
-          <%= if mods == [] do %>
-            <div class="text-sm text-zinc-400">None</div>
-          <% else %>
-            <ul class="text-xs space-y-1">
-              <%= for m <- mods do %>
-                <li><code><%= m %></code></li>
-              <% end %>
-            </ul>
-          <% end %>
-        </div>
+  assigns =
+    assigns
+    |> assign(:title, title)
+    |> assign(:subtitle, subtitle)
+    |> assign(:desc, desc)
+    |> assign(:mods, mods)
+    |> assign(:telem, telem)
+    |> assign(:confs, confs)
+    |> assign(:state_map, state_map)
 
-        <div>
-          <h3 class="text-sm text-zinc-500 mb-1">Telemetry</h3>
-          <%= if telem == [] do %>
-            <div class="text-sm text-zinc-400">N/A</div>
-          <% else %>
-            <ul class="text-xs space-y-1">
-              <%= for t <- telem do %>
-                <li><code><%= t %></code></li>
-              <% end %>
-            </ul>
-          <% end %>
-        </div>
+  ~H"""
+  <div class="border rounded-xl p-4 shadow-sm">
+    <h2 class="font-semibold"><%= @title %> — <%= @subtitle %></h2>
+    <p class="text-sm text-zinc-600 mb-3"><%= @desc %></p>
 
-        <div>
-          <h3 class="text-sm text-zinc-500 mb-1">Config (examples)</h3>
-          <%= if confs == [] do %>
-            <div class="text-sm text-zinc-400">No examples</div>
-          <% else %>
-            <ul class="text-xs space-y-1">
-              <%= for c <- confs do %>
-                <li><code><%= c %></code></li>
-              <% end %>
-            </ul>
-          <% end %>
-        </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div>
+        <h3 class="text-sm text-zinc-500 mb-1">Modules</h3>
+        <%= if @mods == [] do %>
+          <div class="text-sm text-zinc-400">None</div>
+        <% else %>
+          <ul class="text-xs space-y-1">
+            <%= for m <- @mods do %>
+              <li><code><%= m %></code></li>
+            <% end %>
+          </ul>
+        <% end %>
       </div>
 
-      <!-- Region State (map) -->
-      <div class="mt-4">
-        <h3 class="text-sm text-zinc-500 mb-1">Region State</h3>
-        <pre class="text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5">
-<%= inspect(state_map, pretty: true, width: 100, limit: :infinity) %>
-        </pre>
+      <div>
+        <h3 class="text-sm text-zinc-500 mb-1">Telemetry</h3>
+        <%= if @telem == [] do %>
+          <div class="text-sm text-zinc-400">N/A</div>
+        <% else %>
+          <ul class="text-xs space-y-1">
+            <%= for t <- @telem do %>
+              <li><code><%= t %></code></li>
+            <% end %>
+          </ul>
+        <% end %>
+      </div>
+
+      <div>
+        <h3 class="text-sm text-zinc-500 mb-1">Config (examples)</h3>
+        <%= if @confs == [] do %>
+          <div class="text-sm text-zinc-400">No examples</div>
+        <% else %>
+          <ul class="text-xs space-y-1">
+            <%= for c <- @confs do %>
+              <li><code><%= c %></code></li>
+            <% end %>
+          </ul>
+        <% end %>
       </div>
     </div>
-    """
-  end
+
+    <!-- Region State (map) -->
+    <div class="mt-4">
+      <h3 class="text-sm text-zinc-500 mb-1">Region State</h3>
+      <pre class="text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5">
+        <%= inspect(@state_map, pretty: true, width: 100, limit: :infinity) %>
+      </pre>
+    </div>
+  </div>
+  """
+end
 
   defp default_subtitle(:lifg), do: "Competitive Sense Selection"
   defp default_subtitle(_),     do: "Module Summary"
@@ -383,120 +425,140 @@ defmodule SymbrellaWeb.BrainHTML do
   defp default_region_desc(_), do: "Overview of the selected module."
 
   # --- Live state ------------------------------------------------------------
-  defp live_state_panel(assigns) do
-    st   = assigns[:state] || %{}
-    proc = Map.get(st, :process) || Map.get(st, :process_name) || "N/A"
-    pid  = Map.get(st, :pid) || "N/A"
-    q    = Map.get(st, :queue, 0)
-    cur  = Map.get(st, :current) || Map.get(st, :current_msg)
+# Optional: declare attrs for nicer compile-time checks
+attr :state, :any, default: %{}
+defp live_state_panel(assigns) do
+  st = assigns[:state] || %{}
 
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <h2 class="font-semibold mb-2">Live state</h2>
+  assigns =
+    assigns
+    |> assign(:proc, Map.get(st, :process) || Map.get(st, :process_name) || "N/A")
+    |> assign(:pid,  Map.get(st, :pid) || "N/A")
+    |> assign(:q,    Map.get(st, :queue, 0))
+    |> assign(:cur,  Map.get(st, :current) || Map.get(st, :current_msg))
+    |> assign(:state_dump, Map.get(st, :state, st))
 
-      <div class="text-sm space-y-1 mb-2">
-        <div><span class="opacity-60">process:</span> <code><%= proc %></code></div>
-        <div><span class="opacity-60">pid:</span> <code><%= pid %></code></div>
-        <div><span class="opacity-60">queue:</span> <%= q %></div>
-        <div><span class="opacity-60">current:</span> <%= inspect(cur || :idle) %></div>
-      </div>
+  ~H"""
+  <div class="border rounded-xl p-4 shadow-sm">
+    <h2 class="font-semibold mb-2">Live state</h2>
 
-      <div class="text-sm text-zinc-500">State</div>
-      <pre class="text-xs bg-zinc-50 p-2 rounded border mt-1 overflow-x-auto">
-<%= inspect(st[:state] || st, limit: :infinity) %>
-      </pre>
+    <div class="text-sm space-y-1 mb-2">
+      <div><span class="opacity-60">process:</span> <code><%= inspect(@proc) %></code></div>
+      <div><span class="opacity-60">pid:</span> <code><%= inspect(@pid) %></code></div>
+      <div><span class="opacity-60">queue:</span> <%= @q %></div>
+      <div><span class="opacity-60">current:</span> <%= inspect(@cur || :idle) %></div>
     </div>
-    """
-  end
 
-  # --- Module status ---------------------------------------------------------
-  attr :status, :any, required: true
-  attr :selected, :atom, default: :lifg
-  defp module_status_panel(assigns) do
-    stat     = assigns[:status] || %{}
-    selected = assigns[:selected] || :lifg
+    <div class="text-sm text-zinc-500">State</div>
+    <pre class="text-xs bg-zinc-50 p-2 rounded border mt-1 overflow-x-auto">
+      <%= inspect(@state_dump, limit: :infinity) %>
+    </pre>
+  </div>
+  """
+end
 
-    {tag_level, tag_text} =
-      cond do
-        Map.get(stat, :ok?, false) ->
-          {:ok, "running"}
-        stat[:error] in [:not_running, :noproc] ->
-          {:warn, "not running"}
-        true ->
-          {:neutral, "unknown"}
-      end
+# --- Module status ---------------------------------------------------------
+attr :status, :any, required: true
+attr :selected, :atom, default: :lifg
+defp module_status_panel(assigns) do
+  stat = assigns[:status] || %{}
 
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="font-semibold">Module Status — <%= String.upcase(Atom.to_string(@selected)) %></h2>
-        <span class={["text-xs px-2 py-1 rounded border", status_badge_class(tag_level)]}>
-          <%= tag_text %>
-        </span>
-      </div>
+  {tag_level, tag_text} =
+    cond do
+      Map.get(stat, :ok?, false) ->
+        {:ok, "running"}
 
-      <%= if @status == %{} do %>
-        <div class="text-sm text-zinc-400">No status available</div>
+      stat[:error] in [:not_running, :noproc] ->
+        {:warn, "not running"}
+
+      true ->
+        {:neutral, "unknown"}
+    end
+
+  # Keep HEEx happy: computed assigns + ensure @status is never nil
+  assigns =
+    assigns
+    |> assign(:tag_level, tag_level)
+    |> assign(:tag_text, tag_text)
+    |> assign(:status, stat)
+
+  ~H"""
+  <div class="border rounded-xl p-4 shadow-sm">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-semibold">
+        Module Status — <%= @selected |> to_string() |> String.upcase() %>
+      </h2>
+      <span class={["text-xs px-2 py-1 rounded border", status_badge_class(@tag_level)]}>
+        <%= @tag_text %>
+      </span>
+    </div>
+
+    <%= if @status == %{} do %>
+      <div class="text-sm text-zinc-400">No status available</div>
+    <% else %>
+      <%= if Map.get(@status, :ok?) && not is_nil(Map.get(@status, :status)) do %>
+        <div class="text-sm text-zinc-500 mb-1">Details</div>
+        <pre class="text-xs bg-zinc-50 p-2 rounded border overflow-x-auto">
+          <%= inspect(@status.status, limit: :infinity) %>
+        </pre>
       <% else %>
-        <%= if Map.get(@status, :ok?) && not is_nil(Map.get(@status, :status)) do %>
-          <div class="text-sm text-zinc-500 mb-1">Details</div>
-          <pre class="text-xs bg-zinc-50 p-2 rounded border overflow-x-auto"><%= inspect(@status.status, limit: :infinity) %></pre>
-        <% else %>
-          <div class="text-sm">
-            <%= case @status[:error] do
-              :not_running -> "Region process is not running."
-              :noproc      -> "No process registered for this region."
-              {:exit, r}   -> "Exited while fetching status: #{inspect(r)}"
-              other        -> "Status unavailable: #{inspect(other)}"
-            end %>
-          </div>
-        <% end %>
+        <div class="text-sm">
+          <%= case @status[:error] do
+            :not_running -> "Region process is not running."
+            :noproc      -> "No process registered for this region."
+            {:exit, r}   -> "Exited while fetching status: #{inspect(r)}"
+            other        -> "Status unavailable: #{inspect(other)}"
+          end %>
+        </div>
       <% end %>
-    </div>
-    """
-  end
+    <% end %>
+  </div>
+  """
+end
 
   defp status_badge_class(:ok),      do: "border-green-400 text-green-600"
   defp status_badge_class(:warn),    do: "border-amber-400 text-amber-600"
   defp status_badge_class(_neutral), do: "border-zinc-300 text-zinc-600"
 
   # --- Mood panel ------------------------------------------------------------
-  defp mood_panel(assigns) do
-    mood     = assigns[:mood] || %{levels: %{}, derived: %{}, tone: :neutral}
-    levels   = Map.get(mood, :levels, %{}) || %{}
-    derived  = Map.get(mood, :derived, %{}) || %{}
-    tone     = Map.get(mood, :tone, :neutral) || :neutral
+defp mood_panel(assigns) do
+  mood = Map.get(assigns, :mood, %{levels: %{}, derived: %{}, tone: :neutral})
 
-    ~H"""
-    <div class="border rounded-xl p-4 shadow-sm">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-semibold">Mood</h2>
-        <span class={[
-          "text-xs px-2 py-1 rounded border",
-          tone_class(tone)
-        ]}><%= Atom.to_string(tone) %></span>
+  assigns =
+    assigns
+    |> assign(:levels, Map.get(mood, :levels, %{}) || %{})
+    |> assign(:derived, Map.get(mood, :derived, %{}) || %{})
+    |> assign(:tone, Map.get(mood, :tone, :neutral) || :neutral)
+
+  ~H"""
+  <div class="border rounded-xl p-4 shadow-sm">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold">Mood</h2>
+      <span class={["text-xs px-2 py-1 rounded border", tone_class(@tone)]}>
+        <%= to_string(@tone) %>
+      </span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <h3 class="text-sm text-zinc-500 mb-1">Neuromodulators</h3>
+        <.kv label="DA"  value={fmt(@levels[:da])} />
+        <.kv label="5HT" value={fmt(@levels[:"5ht"])} />
+        <.kv label="GLU" value={fmt(@levels[:glu])} />
+        <.kv label="NE"  value={fmt(@levels[:ne])} />
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <h3 class="text-sm text-zinc-500 mb-1">Neuromodulators</h3>
-          <.kv label="DA"   value={fmt(levels[:da])} />
-          <.kv label="5HT"  value={fmt(levels[:"5ht"])} />
-          <.kv label="GLU"  value={fmt(levels[:glu])} />
-          <.kv label="NE"   value={fmt(levels[:ne])} />
-        </div>
-
-        <div>
-          <h3 class="text-sm text-zinc-500 mb-1">Derived</h3>
-          <.kv label="Exploration" value={fmt(derived[:exploration])} />
-          <.kv label="Inhibition"  value={fmt(derived[:inhibition])} />
-          <.kv label="Vigilance"   value={fmt(derived[:vigilance])} />
-          <.kv label="Plasticity"  value={fmt(derived[:plasticity])} />
-        </div>
+      <div>
+        <h3 class="text-sm text-zinc-500 mb-1">Derived</h3>
+        <.kv label="Exploration" value={fmt(@derived[:exploration])} />
+        <.kv label="Inhibition"  value={fmt(@derived[:inhibition])} />
+        <.kv label="Vigilance"   value={fmt(@derived[:vigilance])} />
+        <.kv label="Plasticity"  value={fmt(@derived[:plasticity])} />
       </div>
     </div>
-    """
-  end
+  </div>
+  """
+end
 
   # --- small UI helpers ------------------------------------------------------
   attr :label, :any, required: true

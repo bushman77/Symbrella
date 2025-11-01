@@ -91,20 +91,32 @@ defmodule SymbrellaWeb.Region do
       def tweak,  do: unquote(Macro.escape(tweak))
 
       # Friendly alias
+      @doc false
       def colours, do: colors()
 
       # Optional metadata (return constants if provided; otherwise nil/[])
       @doc false
+      @impl SymbrellaWeb.Region
       def title,    do: unquote(title)
+
       @doc false
+      @impl SymbrellaWeb.Region
       def subtitle, do: unquote(subtitle)
+
       @doc false
+      @impl SymbrellaWeb.Region
       def desc,     do: unquote(desc)
+
       @doc false
+      @impl SymbrellaWeb.Region
       def modules,  do: unquote(modules)
+
       @doc false
+      @impl SymbrellaWeb.Region
       def telemetry, do: unquote(telem)
+
       @doc false
+      @impl SymbrellaWeb.Region
       def config_examples, do: unquote(confs)
     end
   end

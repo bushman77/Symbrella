@@ -6,14 +6,28 @@ defmodule Brain.Introspect do
     :region, :running?, :pid, :module, :info (process info), :state (from :sys.get_state/1 if possible)
 
   It tries multiple strategies to find the region PID:
-    1) If the region has a primary module (e.g., Brain.DLPFC), check Process.whereis(module)
+    1) If the region has a primary module (e.g., Brain.LIFG), check Process.whereis(module)
     2) If a Registry named Brain.Registry exists, try Registry.lookup/2 with the region key
     3) Try common global names like :"brain-<region>"
 
   All calls are wrapped in try/rescue so the UI never crashes.
+
+  Convenience:
+    • snapshot/0 returns a map of all known regions → %{lifg: ..., pmtg: ..., ...}
   """
 
   @type region :: atom()
+
+  @doc """
+  Convenience: take a best-effort snapshot of all known regions and return a map keyed by region.
+  Keeps UI calls that use `snapshot/0` working without knowing a specific region.
+  """
+  @spec snapshot() :: map()
+  def snapshot() do
+    Enum.reduce(known_regions(), %{}, fn r, acc ->
+      Map.put(acc, r, snapshot(r))
+    end)
+  end
 
   @spec snapshot(region) :: map()
   def snapshot(region) when is_atom(region) do
@@ -44,9 +58,13 @@ defmodule Brain.Introspect do
     }
   end
 
+  @spec known_regions() :: [region]
+  def known_regions(),
+    do: [:lifg, :pmtg, :hippocampus, :thalamus, :ofc, :cerebellum, :occipital, :parietal, :temporal, :frontal]
+
   # ---------- resolution ----------
 
-  defp module_for(:lifg), do: Brain.DLPFC
+  defp module_for(:lifg), do: Brain.LIFG
   defp module_for(:pmtg), do: Brain.PMTG
   defp module_for(:hippocampus), do: Brain.Hippocampus
   defp module_for(:thalamus), do: Brain.Thalamus
@@ -60,16 +78,13 @@ defmodule Brain.Introspect do
 
   defp resolve_pid(region, mod) do
     cond do
-      # 1) Module name registration (common for GenServers)
-      is_atom(mod) and Process.whereis(mod) |> is_pid() ->
+      is_atom(mod) and is_pid(Process.whereis(mod)) ->
         Process.whereis(mod)
 
-      # 2) Registry registration (if you have one)
       Code.ensure_loaded?(Registry) and Code.ensure_loaded?(Brain.Registry) ->
         lookup_registry(region)
 
-      # 3) Common global/local atoms
-      Process.whereis(:"brain-#{region}") |> is_pid() ->
+      is_pid(Process.whereis(:"brain-#{region}")) ->
         Process.whereis(:"brain-#{region}")
 
       true ->
@@ -113,5 +128,29 @@ defmodule Brain.Introspect do
       _, _ -> :unavailable
     end
   end
+
+@doc """
+UI adapter: return %{ok?: true, status: snapshot} when region is running,
+or %{error: reason, status: snapshot} otherwise.
+"""
+@spec region_state(region) :: map()
+def region_state(region) when is_atom(region) do
+  snap = snapshot(region)
+
+  if snap.running? do
+    %{ok?: true, status: snap}
+  else
+    reason =
+      cond do
+        snap.pid == nil -> :noproc
+        snap.state == :down -> :not_running
+        true -> :unavailable
+      end
+
+    %{error: reason, status: snap}
+  end
+end
+
+
 end
 

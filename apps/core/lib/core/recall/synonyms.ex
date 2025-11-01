@@ -1,98 +1,116 @@
 defmodule Core.Recall.Synonyms do
   @moduledoc """
-  Facade for synonym lookup/expansion used by recall.
+  Thin compatibility façade for recall-time synonym usage.
 
-  Responsibilities:
-    • Normalize inputs (case, NFC, optional POS).
-    • Query provider(s) for raw candidates (DB, lexicons, etc.).
-    • Rank/merge/dedupe with stable ordering.
-    • (Optional) Cache results with TTL.
-    • Emit telemetry for observability.
+  • Keeps the existing public API: `lookup/2` and `expand/2`.
+  • Delegates retrieval & policy to `Core.Synonyms` (which calls Brain via Core.BrainAdapter).
+  • Adapts return shape to the legacy `[entry]` format used by recall (lemma/pos/prior/source/meta).
+  • Emits telemetry under [:core, :recall, :synonyms, :lookup].
 
-  Public API:
-    - lookup/2   — ranked synonyms for a word (and optional POS)
-    - expand/2   — expand many terms into a unified ranked set
-
-  Swap providers via config (default keeps Core decoupled from :db):
-      config :core, Core.Recall.Synonyms,
-        provider: Core.Recall.Synonyms.Providers.External,
-        cache?: true,
-        ttl_ms: 60_000,
-        top_k: 12
-
-  Telemetry:
-    [:core, :recall, :synonyms, :lookup]
-      measurements: %{count: non_neg_integer()}
-      metadata: %{word: String.t(), pos: atom() | nil, cached?: boolean(), took_ms: integer()}
+  This module intentionally contains no Db or legacy Lexicon references.
   """
-
-  alias Core.Recall.Synonyms.{Normalize, Ranker, Cache}
 
   @type word :: String.t()
   @type pos  :: atom() | nil
+
   @type entry :: %{
           lemma: word(),
           pos: pos(),
           prior: float(),
-          source: String.t(),
+          source: String.t() | atom(),
           meta: map()
         }
 
   @default_top_k 12
 
+  # --------------------------------------------------------------------
+  # NEW: Back-compat shim for older callsites that expect a plain map.
+  # Returns %{key => [syn_obj]} where syn_obj ~= %{term,pos,weight,source,key}.
+  # --------------------------------------------------------------------
+  @spec for_keys([String.t() | {String.t(), atom()} | {:mwe, [String.t()]}], keyword()) :: map()
+  def for_keys(keys, opts \\ []) do
+    case Core.Synonyms.for_keys(keys, opts) do
+      {:ok, %{} = map, _meta} -> map
+      {:ok, %{} = map} -> map
+      _ -> Map.new(keys, &{&1, []})
+    end
+  end
+
+  @doc """
+  Ranked synonyms for a word (and optional POS).
+
+  Accepts:
+    • binary word
+    • %{word: ..., pos: ...} map
+
+  Returns: {:ok, [entry], %{cached?: boolean(), took_ms: non_neg_integer()}}
+  (cached? is surfaced if Core.Synonyms provides it; otherwise false)
+  """
   @spec lookup(word() | %{word: word(), pos: pos()}, keyword()) ::
           {:ok, [entry()], %{cached?: boolean(), took_ms: non_neg_integer()}}
   def lookup(word_or_map, opts \\ []) do
     t0 = System.monotonic_time(:millisecond)
 
-    %{word: norm_word, pos: pos} =
+    {norm_word, pos} =
       case word_or_map do
-        %{} = m ->
-          %{word: Normalize.word(Map.get(m, :word) || Map.get(m, "word")),
-            pos: Normalize.pos(Map.get(m, :pos) || Map.get(m, "pos"))}
-
-        w when is_binary(w) ->
-          %{word: Normalize.word(w), pos: nil}
+        %{} = m -> {normalize_word(Map.get(m, :word) || Map.get(m, "word")), normalize_pos(Map.get(m, :pos) || Map.get(m, "pos"))}
+        w when is_binary(w) -> {normalize_word(w), nil}
       end
 
-    cache?  = get_opt(opts, :cache?, config(:cache?, true))
-    ttl_ms  = get_opt(opts, :ttl_ms, config(:ttl_ms, 60_000))
-    top_k   = get_opt(opts, :top_k, config(:top_k, @default_top_k))
-    prov    = get_opt(opts, :provider, config(:provider, Core.Recall.Synonyms.Providers.Fallback))
+    top_k   = Keyword.get(opts, :top_k, config(:top_k, @default_top_k))
+    syn_opts =
+      opts
+      |> Keyword.put_new(:limit, top_k)
+      |> Keyword.put_new(:pos_filter, pos)
 
-    key = {norm_word, pos}
+    key = build_key(norm_word, pos)
 
-    # Use cache when present; otherwise hit provider safely.
-    {raw, cached?} =
-      case cache? && Cache.get(key, ttl_ms) do
-        v when is_list(v) -> {v, true}
-        _ -> {safe_lookup(prov, norm_word, pos, opts), false}
+    {list, cached?} =
+      case Core.Synonyms.for_keys([key], syn_opts) do
+        {:ok, %{} = map, meta} ->
+          {
+            map
+            |> Map.get(key, [])
+            |> Enum.map(&syn_to_entry/1)
+            |> Enum.take(top_k),
+            Map.get(meta, :cached?, false)
+          }
+
+        {:ok, %{} = map} ->
+          {
+            map
+            |> Map.get(key, [])
+            |> Enum.map(&syn_to_entry/1)
+            |> Enum.take(top_k),
+            false
+          }
+
+        {:error, _} ->
+          {[], false}
       end
-
-    ranked = Ranker.rank(norm_word, raw, opts) |> Enum.take(top_k)
-
-    if cache? and not cached?, do: Cache.put(key, ranked)
 
     took_ms = System.monotonic_time(:millisecond) - t0
-    :telemetry.execute([:core, :recall, :synonyms, :lookup], %{count: length(ranked)}, %{
-      word: norm_word, pos: pos, cached?: cached?, took_ms: took_ms
-    })
+    :telemetry.execute(
+      [:core, :recall, :synonyms, :lookup],
+      %{count: length(list)},
+      %{word: norm_word, pos: pos, cached?: cached?, took_ms: took_ms}
+    )
 
-    {:ok, ranked, %{cached?: cached?, took_ms: took_ms}}
+    {:ok, list, %{cached?: cached?, took_ms: took_ms}}
   end
 
   @doc """
-  Expand a list of query terms into a unique, ranked set suitable for recall.
+  Expand a list of terms into a unique, ranked set for recall.
 
   Options:
-    :per_top_k — top-k per input term (default from lookup/2’s config)
+    :per_top_k — top-k per input (defaults to lookup/2’s top_k)
     :limit     — overall cap after merge (default 64)
   """
   @spec expand([word() | %{word: word(), pos: pos()}], keyword()) ::
           {:ok, [entry()], %{inputs: non_neg_integer(), unique: non_neg_integer()}}
   def expand(terms, opts \\ []) when is_list(terms) do
-    per_top_k = get_opt(opts, :per_top_k, get_opt(opts, :top_k, config(:top_k, @default_top_k)))
-    limit     = get_opt(opts, :limit, 64)
+    per_top_k = Keyword.get(opts, :per_top_k, Keyword.get(opts, :top_k, config(:top_k, @default_top_k)))
+    limit     = Keyword.get(opts, :limit, 64)
 
     results =
       terms
@@ -106,28 +124,58 @@ defmodule Core.Recall.Synonyms do
     {:ok, results, %{inputs: length(terms), unique: length(results)}}
   end
 
-  # ---- helpers --------------------------------------------------------
+  # ---------- helpers (unchanged below) --------------------------------
 
-  defp safe_lookup(provider, word, pos, opts) do
-    if function_exported?(provider, :lookup, 3) do
-      case provider.lookup(word, pos, opts) do
-        {:ok, list, _meta} when is_list(list) -> list
-        {:ok, list} when is_list(list) -> list
-        other ->
-          require Logger
-          Logger.warning("Synonyms provider returned unexpected: #{inspect(other)}")
-          []
-      end
-    else
-      []
-    end
+  defp syn_to_entry(s) when is_binary(s) do
+    %{lemma: s, pos: nil, prior: 0.0, source: "brain", meta: %{}}
   end
 
-  defp config(key, default), do:
+  defp syn_to_entry(%{term: term} = s) do
+    %{
+      lemma: term,
+      pos: Map.get(s, :pos),
+      prior: (Map.get(s, :weight) || 0.0) * 1.0,
+      source: Map.get(s, :source) || :brain,
+      meta: %{origin_key: Map.get(s, :key)}
+    }
+  end
+
+  defp syn_to_entry(%{} = s) do
+    term = Map.get(s, :lemma) || Map.get(s, :term) || Map.get(s, "lemma") || Map.get(s, "term") || ""
+    %{
+      lemma: term,
+      pos: Map.get(s, :pos),
+      prior: (Map.get(s, :prior) || Map.get(s, :weight) || 0.0) * 1.0,
+      source: Map.get(s, :source) || :brain,
+      meta: Map.drop(s, [:lemma, :term, :pos, :prior, :weight, :source])
+    }
+  end
+
+  defp normalize_word(w) when is_binary(w), do: w |> String.trim() |> String.downcase()
+  defp normalize_word(_), do: ""
+
+  defp normalize_pos(nil), do: nil
+  defp normalize_pos(p) when is_atom(p), do: p
+  defp normalize_pos(p) when is_binary(p) do
+    p
+    |> String.downcase()
+    |> case do
+      "noun" -> :noun
+      "verb" -> :verb
+      "adj"  -> :adj
+      "adv"  -> :adv
+      other  -> String.to_atom(other)
+    end
+  end
+  defp normalize_pos(_), do: nil
+
+  defp build_key(word, nil), do: word
+  defp build_key(word, pos) when is_binary(word) and is_atom(pos), do: {word, pos}
+
+  defp config(key, default) do
     Application.get_env(:core, __MODULE__, [])
     |> Keyword.get(key, default)
-
-  defp get_opt(opts, k, default), do: Keyword.get(opts, k, default)
+  end
 
   defp dedupe_keep_best(list) do
     list

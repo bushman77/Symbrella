@@ -56,29 +56,110 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:region_status,  fn -> %{} end)
       |> assign_new(:auto,           fn -> false end)
       |> assign_new(:clock,          fn -> %{} end)
-      # Mood assigns + alias
       |> assign_new(:mood_levels,  fn -> @mood_defaults.levels  end)
       |> assign_new(:mood_derived, fn -> @mood_defaults.derived end)
       |> assign_new(:mood_tone,    fn -> @mood_defaults.tone    end)
+      |> assign_new(:telemetry_mood_id, fn -> nil end)   # track handler id for detach
       |> ensure_mood_alias()
-      # SVG (inline if present, else nil so HTML falls back to /images)
       |> assign_new(:brain_svg, fn -> load_brain_svg() end)
-      # Capture all-regions status once on mount
       |> assign(:all_status, collect_all_region_status())
-      # 👉 Seed @intent from global brain snapshot/state if PubSub hasn't fired yet
       |> maybe_seed_intent_from_brain()
 
-    if connected?(socket) do
-      :ok = Bus.subscribe(@blackboard_topic)
-      Enum.each(@hud_topics, &Bus.subscribe/1)
-      :timer.send_interval(@refresh_ms, :refresh_selected)
-    end
+    socket =
+      if connected?(socket) do
+        :ok = Bus.subscribe(@blackboard_topic)
+        Enum.each(@hud_topics, &Bus.subscribe/1)
+        :timer.send_interval(@refresh_ms, :refresh_selected)
+        attach_mood_telemetry(socket)   # <— USE IT HERE ✅
+      else
+        socket
+      end
 
     {:ok, socket}
   end
 
+  @impl true
+  def render(assigns) do
+    assigns =
+      if Map.has_key?(assigns, :mood),
+        do: assigns,
+        else: Map.put(assigns, :mood, @mood_defaults)
+
+    ~H"""
+    <%= BrainHTML.brain(assigns) %>
+
+    <.selected_region_status selected={@selected} status={@region_status} />
+    <.regions_status_grid all_status={@all_status} />
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Telemetry bridge (mood)
+  # ---------------------------------------------------------------------------
+
+  # Call this from mount/3 once:
+  # socket |> attach_mood_telemetry()
+  defp attach_mood_telemetry(socket) do
+    # Don’t attach twice on reconnect/code-reload
+    if socket.assigns[:telemetry_mood_id] do
+      socket
+    else
+      id = "brain-mood-ui:#{inspect(self())}"
+
+      events = [
+        [:brain, :mood, :updated],
+        [:brain, :mood, :tick],
+        [:brain, :mood, :update] # legacy/alt spelling
+      ]
+
+      try do
+        if Code.ensure_loaded?(:telemetry) do
+          :ok = :telemetry.attach_many(id, events, &__MODULE__.handle_mood_event/4, self())
+        end
+      rescue
+        _ -> :ok
+      end
+
+      assign(socket, :telemetry_mood_id, id)
+    end
+  end
+
+# -- Mood event handlers (grouped) ---------------------------------------------
+
+# Canonical: send {:mood_event, measurements, metadata}
+def handle_mood_event(_event, measurements, metadata, lv_pid) when is_pid(lv_pid) do
+  send(lv_pid, {:mood_event, measurements, metadata})
+  :ok
+end
+
+# Non-PID callers: ignore safely
+def handle_mood_event(_event, _m, _md, _other), do: :ok
+
+# Legacy/alternate: send {:mood_update, meas, meta}
+# Keep this only if something in your UI is already matching on :mood_update.
+def on_mood_event(_event, meas, meta, pid) when is_pid(pid) do
+  send(pid, {:mood_update, meas, meta})
+  :ok
+end
+
+# Non-PID callers: ignore safely
+def on_mood_event(_event, _meas, _meta, _other), do: :ok
+
+  @impl true
+  def terminate(_reason, socket) do
+    if id = socket.assigns[:telemetry_mood_id] do
+      :telemetry.detach(id)
+    end
+    :ok
+  end
+
+  # ---------------------------------------------------------------------------
+  # Params & UI events
+  # ---------------------------------------------------------------------------
+
   defp default_selected do
     keys = RegionRegistry.keys()
+
     cond do
       Enum.member?(keys, :lifg) -> :lifg
       keys != [] -> hd(keys)
@@ -105,10 +186,6 @@ defmodule SymbrellaWeb.BrainLive do
     {:noreply, socket}
   end
 
-  # ---------------------------------------------------------------------------
-  # Events
-  # ---------------------------------------------------------------------------
-
   @impl true
   def handle_event("select-region", params, socket) do
     # Expecting phx-value-region from the <path> tag
@@ -123,6 +200,7 @@ defmodule SymbrellaWeb.BrainLive do
           rescue
             ArgumentError -> socket.assigns.selected
           end
+
         true -> socket.assigns.selected
       end
 
@@ -137,8 +215,24 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   # ---------------------------------------------------------------------------
-  # Incoming telemetry + PubSub
+  # Incoming telemetry + PubSub (ALL handle_info clauses grouped together)
   # ---------------------------------------------------------------------------
+
+  @impl true
+  def handle_info({:mood_event, meas, meta}, socket) do
+    mood =
+      meta[:mood] ||
+        %{
+          levels: Map.get(meta, :levels, %{}),
+          derived: Map.get(meta, :derived, %{}),
+          tone: Map.get(meta, :tone, :neutral)
+        }
+
+    {:noreply,
+     socket
+     |> assign(:mood, mood)
+     |> assign(:mood_last, %{at: System.system_time(:millisecond), meas: meas})}
+  end
 
   @impl true
   def handle_info({:mood_update, meas, _meta}, socket) do
@@ -256,23 +350,17 @@ defmodule SymbrellaWeb.BrainLive do
         catch
           _, _ -> :ok
         end
-      true -> :ok
+
+      true ->
+        :ok
     end
   end
 
-  defp attach_mood_telemetry(socket) do
-    id = "brain-live-mood-#{System.unique_integer([:positive])}"
-    :ok = :telemetry.attach(id, [:brain, :mood, :update], &__MODULE__.on_mood_event/4, self())
-    assign(socket, :telemetry_mood_id, id)
-  end
-
-  def on_mood_event(_event, meas, meta, pid) when is_pid(pid) do
-    send(pid, {:mood_update, meas, meta})
-  end
-  def on_mood_event(_, _, _, _), do: :ok
+# --- Telemetry bridge (mood) handlers ---------------------------------------
 
   defp ensure_mood_alias(socket) do
     a = socket.assigns
+
     mood =
       a[:mood] ||
         %{
@@ -329,6 +417,7 @@ defmodule SymbrellaWeb.BrainLive do
           {:ok, s} ->
             s = normalize_map(s)
             regs = s[:regions] || s["regions"] || %{}
+
             cond do
               is_map(regs) and map_size(regs) > 0 ->
                 Map.get(regs, region_key) || Map.get(regs, to_string(region_key)) || %{}
@@ -482,29 +571,13 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   # ---------------------------------------------------------------------------
-  # Render (delegated + appended panels)
+  # Render helpers (panels)
   # ---------------------------------------------------------------------------
-
-  @impl true
-  def render(assigns) do
-    assigns =
-      if Map.has_key?(assigns, :mood),
-        do: assigns,
-        else: Map.put(assigns, :mood, @mood_defaults)
-
-    ~H"""
-    <%= BrainHTML.brain(assigns) %>
-
-    <.selected_region_status selected={@selected} status={@region_status} />
-    <.regions_status_grid all_status={@all_status} />
-    """
-  end
 
   # --- Selected region status (uses :status map) -----------------------------
 
   attr :selected, :atom
   attr :status, :map, default: %{}
-
   defp selected_region_status(assigns) do
     ~H"""
     <div class="mt-6">
@@ -560,7 +633,6 @@ defmodule SymbrellaWeb.BrainLive do
   # --- All-regions status grid ----------------------------------------------
 
   attr :all_status, :map, default: %{}
-
   defp regions_status_grid(assigns) do
     ~H"""
     <div class="mt-6">
@@ -598,9 +670,14 @@ defmodule SymbrellaWeb.BrainLive do
     """
   end
 
-  defp status_badge_class(:down), do: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-  defp status_badge_class(:unknown), do: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-  defp status_badge_class(_), do: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+  defp status_badge_class(:down),
+    do: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+
+  defp status_badge_class(:unknown),
+    do: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+
+  defp status_badge_class(_),
+    do: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
 
   # ---- HTML-safe formatter for odd values -----------------------------------
 
@@ -617,6 +694,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp maybe_seed_intent_from_brain(socket) do
     cur = socket.assigns[:intent] || %{}
+
     if map_size(cur) > 0 do
       socket
     else
@@ -644,7 +722,7 @@ defmodule SymbrellaWeb.BrainLive do
     case intent do
       nil ->
         if Code.ensure_loaded?(Brain) and function_exported?(Brain, :get_state, 0) do
-          case safe_call(fn -> Brain.get_state() end) do
+          case safe_call(fn -> GenServer.call(Brain, :snapshot) end) do
             {:ok, st} -> extract_intent_any(st)
             _ -> nil
           end
@@ -652,12 +730,14 @@ defmodule SymbrellaWeb.BrainLive do
           nil
         end
 
-      other -> other
+      other ->
+        other
     end
   end
 
   # Extracts intent from many possible shapes/locations
   defp extract_intent_any(nil), do: nil
+
   defp extract_intent_any(%{} = m) do
     direct = mget(m, :intent)
 
@@ -673,13 +753,16 @@ defmodule SymbrellaWeb.BrainLive do
       _ -> nil
     end
   end
+
   defp extract_intent_any(v) when is_binary(v), do: normalize_intent(v, "state")
   defp extract_intent_any(_), do: nil
 
   # Normalizes intent payloads into a consistent HUD-friendly map
   defp normalize_intent(nil, _src), do: %{}
+
   defp normalize_intent(v, src) when is_binary(v),
     do: %{label: v, intent: v, source: src, updated_at: now_ms()}
+
   defp normalize_intent(%{} = m, src) do
     label = mget(m, :label) || mget(m, :intent) || mget(m, :name) || mget(m, :type)
     kw    = mget(m, :keyword) || mget(m, :key)
@@ -698,8 +781,10 @@ defmodule SymbrellaWeb.BrainLive do
     # Merge any extra fields the producer might have provided
     Map.merge(base, m)
   end
+
   defp normalize_intent(v, src) when is_atom(v),
     do: normalize_intent(Atom.to_string(v), src)
+
   defp normalize_intent(v, src),
     do: normalize_intent(to_string(v), src)
 
@@ -719,6 +804,7 @@ defmodule SymbrellaWeb.BrainLive do
       other -> other
     end
   end
+
   defp mget_in(_, _), do: nil
 
   defp now_ms, do: System.system_time(:millisecond)
