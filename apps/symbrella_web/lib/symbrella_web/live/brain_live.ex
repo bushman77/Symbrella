@@ -1,10 +1,12 @@
 defmodule SymbrellaWeb.BrainLive do
   @moduledoc """
-  LiveView for the Brain dashboard. All HTML is delegated to `SymbrellaWeb.BrainHTML`.
+  LiveView for the Brain dashboard.
+  All page structure is delegated to `SymbrellaWeb.BrainHTML`.
+  Mood telemetry + compact HUD are handled by `SymbrellaWeb.BrainLive.MoodHud`.
 
   • Safe defaults so first render never crashes (even if upstream is quiet)
   • Subscribes to Brain.Bus for blackboard + HUD topics (clock/intent/mood/lifg)
-  • Telemetry bridge for mood updates
+  • Mood telemetry attach/detach delegated to MoodHud
   • Loads inline brain SVG from priv/static/images/brain.svg when available
   • ✅ Periodic, defensive region snapshot + status refresh
   • ✅ Selected-region status panel (prefers GenServer.call(mod, :status))
@@ -17,19 +19,16 @@ defmodule SymbrellaWeb.BrainLive do
 
   alias SymbrellaWeb.BrainHTML
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
+  alias SymbrellaWeb.BrainLive.MoodHud
   alias Brain.Bus
   # Optional (used if present):
   alias Brain.Introspect
 
+  import SymbrellaWeb.BrainLive.MoodHud, only: [mood_hud: 1]
+
   @blackboard_topic "brain:blackboard"
   @hud_topics ~w(brain:clock brain:intent brain:mood brain:lifg)
   @refresh_ms 500
-
-  @mood_defaults %{
-    levels: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50},
-    derived: %{exploration: 0.41, inhibition: 0.50, vigilance: 0.50, plasticity: 0.375},
-    tone: :neutral
-  }
 
   # ---------------------------------------------------------------------------
   # LiveView lifecycle
@@ -38,7 +37,7 @@ defmodule SymbrellaWeb.BrainLive do
   @impl true
   def mount(_params, _session, socket) do
     _ = ensure_optional(Brain.Cerebellum)
-    _ = ensure_optional(Brain.LIFG)   # <— make sure LIFG is up if available
+    _ = ensure_optional(Brain.LIFG)
 
     socket =
       socket
@@ -56,13 +55,13 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:region_status,  fn -> %{} end)
       |> assign_new(:auto,           fn -> false end)
       |> assign_new(:clock,          fn -> %{} end)
-      |> assign_new(:mood_levels,  fn -> @mood_defaults.levels  end)
-      |> assign_new(:mood_derived, fn -> @mood_defaults.derived end)
-      |> assign_new(:mood_tone,    fn -> @mood_defaults.tone    end)
-      |> assign_new(:telemetry_mood_id, fn -> nil end)   # track handler id for detach
-      |> ensure_mood_alias()
-      |> assign_new(:brain_svg, fn -> load_brain_svg() end)
+      # NEW: BrainHTML expects :svg_base (not :brain_svg)
+      |> assign_new(:svg_base,       fn -> load_brain_svg() end)
+      # NEW: seed mood defaults + alias + telemetry id holder
+      |> MoodHud.seed()
+      # Global status grid
       |> assign(:all_status, collect_all_region_status())
+      # Intent fallback from snapshot/brain state
       |> maybe_seed_intent_from_brain()
 
     socket =
@@ -70,7 +69,7 @@ defmodule SymbrellaWeb.BrainLive do
         :ok = Bus.subscribe(@blackboard_topic)
         Enum.each(@hud_topics, &Bus.subscribe/1)
         :timer.send_interval(@refresh_ms, :refresh_selected)
-        attach_mood_telemetry(socket)   # <— USE IT HERE ✅
+        MoodHud.attach(socket)
       else
         socket
       end
@@ -79,78 +78,27 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   @impl true
+  def terminate(_reason, socket) do
+    _ = MoodHud.detach(socket)
+    :ok
+  end
+
+  @impl true
   def render(assigns) do
     assigns =
       if Map.has_key?(assigns, :mood),
         do: assigns,
-        else: Map.put(assigns, :mood, @mood_defaults)
+        else: Map.put(assigns, :mood, MoodHud.defaults())
 
     ~H"""
     <%= BrainHTML.brain(assigns) %>
 
+    <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
+    <.mood_hud mood={@mood} />
+
     <.selected_region_status selected={@selected} status={@region_status} />
     <.regions_status_grid all_status={@all_status} />
     """
-  end
-
-  # ---------------------------------------------------------------------------
-  # Telemetry bridge (mood)
-  # ---------------------------------------------------------------------------
-
-  # Call this from mount/3 once:
-  # socket |> attach_mood_telemetry()
-  defp attach_mood_telemetry(socket) do
-    # Don’t attach twice on reconnect/code-reload
-    if socket.assigns[:telemetry_mood_id] do
-      socket
-    else
-      id = "brain-mood-ui:#{inspect(self())}"
-
-      events = [
-        [:brain, :mood, :updated],
-        [:brain, :mood, :tick],
-        [:brain, :mood, :update] # legacy/alt spelling
-      ]
-
-      try do
-        if Code.ensure_loaded?(:telemetry) do
-          :ok = :telemetry.attach_many(id, events, &__MODULE__.handle_mood_event/4, self())
-        end
-      rescue
-        _ -> :ok
-      end
-
-      assign(socket, :telemetry_mood_id, id)
-    end
-  end
-
-# -- Mood event handlers (grouped) ---------------------------------------------
-
-# Canonical: send {:mood_event, measurements, metadata}
-def handle_mood_event(_event, measurements, metadata, lv_pid) when is_pid(lv_pid) do
-  send(lv_pid, {:mood_event, measurements, metadata})
-  :ok
-end
-
-# Non-PID callers: ignore safely
-def handle_mood_event(_event, _m, _md, _other), do: :ok
-
-# Legacy/alternate: send {:mood_update, meas, meta}
-# Keep this only if something in your UI is already matching on :mood_update.
-def on_mood_event(_event, meas, meta, pid) when is_pid(pid) do
-  send(pid, {:mood_update, meas, meta})
-  :ok
-end
-
-# Non-PID callers: ignore safely
-def on_mood_event(_event, _meas, _meta, _other), do: :ok
-
-  @impl true
-  def terminate(_reason, socket) do
-    if id = socket.assigns[:telemetry_mood_id] do
-      :telemetry.detach(id)
-    end
-    :ok
   end
 
   # ---------------------------------------------------------------------------
@@ -188,7 +136,6 @@ def on_mood_event(_event, _meas, _meta, _other), do: :ok
 
   @impl true
   def handle_event("select-region", params, socket) do
-    # Expecting phx-value-region from the <path> tag
     r = Map.get(params, "region") || Map.get(params, "value") || Map.get(params, "r")
 
     sel =
@@ -204,7 +151,7 @@ def on_mood_event(_event, _meas, _meta, _other), do: :ok
         true -> socket.assigns.selected
       end
 
-    send(self(), :refresh_selected) # instant refresh on change
+    send(self(), :refresh_selected)
     {:noreply, assign(socket, :selected, sel)}
   end
 
@@ -215,54 +162,24 @@ def on_mood_event(_event, _meas, _meta, _other), do: :ok
   end
 
   # ---------------------------------------------------------------------------
-  # Incoming telemetry + PubSub (ALL handle_info clauses grouped together)
+  # Incoming telemetry + PubSub
   # ---------------------------------------------------------------------------
 
+  # Mood: delegate to MoodHud
   @impl true
-  def handle_info({:mood_event, meas, meta}, socket) do
-    mood =
-      meta[:mood] ||
-        %{
-          levels: Map.get(meta, :levels, %{}),
-          derived: Map.get(meta, :derived, %{}),
-          tone: Map.get(meta, :tone, :neutral)
-        }
-
-    {:noreply,
-     socket
-     |> assign(:mood, mood)
-     |> assign(:mood_last, %{at: System.system_time(:millisecond), meas: meas})}
-  end
-
+  def handle_info({:mood_event, _, _} = msg, socket),  do: MoodHud.on_info(msg, socket)
   @impl true
-  def handle_info({:mood_update, meas, _meta}, socket) do
-    levels = %{
-      da:    Map.get(meas, :da,    0.5),
-      "5ht": Map.get(meas, :"5ht", 0.5),
-      glu:   Map.get(meas, :glu,   0.5),
-      ne:    Map.get(meas, :ne,    0.5)
-    }
-
-    derived = %{
-      exploration: Map.get(meas, :exploration, 0.5),
-      inhibition:  Map.get(meas, :inhibition,  0.5),
-      vigilance:   Map.get(meas, :vigilance,   0.5),
-      plasticity:  Map.get(meas, :plasticity,  0.5)
-    }
-
-    tone = socket.assigns[:mood_tone] || :neutral
-
-    {:noreply,
-     socket
-     |> assign(:mood_levels, levels)
-     |> assign(:mood_derived, derived)
-     |> assign(:mood_tone, tone)
-     |> assign(:mood, %{levels: levels, derived: derived, tone: tone})}
-  end
-
+  def handle_info({:mood_update, _, _} = msg, socket), do: MoodHud.on_info(msg, socket)
   @impl true
-  def handle_info({tag, env}, socket) when tag in [:blackboard, :brain_bus] do
-    # Keep workspace; also opportunistically harvest intent if present in env
+  def handle_info({:mood, _} = msg, socket),           do: MoodHud.on_info(msg, socket)
+
+  # Blackboard / bus
+  @impl true
+  def handle_info({:blackboard, env}, socket), do: handle_blackboard(env, socket)
+  @impl true
+  def handle_info({:brain_bus, env}, socket),  do: handle_blackboard(env, socket)
+
+  defp handle_blackboard(env, socket) do
     socket =
       case extract_intent_any(env) do
         nil -> socket
@@ -278,29 +195,12 @@ def on_mood_event(_event, _meas, _meta, _other), do: :ok
   end
 
   @impl true
-  def handle_info({:clock, m}, socket),
-    do: {:noreply, assign(socket, :clock,  m || %{})}
+  def handle_info({:clock, m}, socket), do: {:noreply, assign(socket, :clock, m || %{})}
 
   @impl true
   def handle_info({:intent, m}, socket) do
-    # PubSub winner — normalize and stamp
     intent = normalize_intent(m, "bus")
     {:noreply, assign(socket, :intent, intent)}
-  end
-
-  @impl true
-  def handle_info({:mood, m}, socket) do
-    mood = m || %{}
-    levels  = Map.get(mood, :levels,  socket.assigns[:mood_levels]  || @mood_defaults.levels)
-    derived = Map.get(mood, :derived, socket.assigns[:mood_derived] || @mood_defaults.derived)
-    tone    = Map.get(mood, :tone,    socket.assigns[:mood_tone]    || @mood_defaults.tone)
-
-    {:noreply,
-     socket
-     |> assign(:mood_levels, levels)
-     |> assign(:mood_derived, derived)
-     |> assign(:mood_tone, tone)
-     |> assign(:mood, %{levels: levels, derived: derived, tone: tone})}
   end
 
   @impl true
@@ -354,22 +254,6 @@ def on_mood_event(_event, _meas, _meta, _other), do: :ok
       true ->
         :ok
     end
-  end
-
-# --- Telemetry bridge (mood) handlers ---------------------------------------
-
-  defp ensure_mood_alias(socket) do
-    a = socket.assigns
-
-    mood =
-      a[:mood] ||
-        %{
-          levels: Map.get(a, :mood_levels,  @mood_defaults.levels),
-          derived: Map.get(a, :mood_derived, @mood_defaults.derived),
-          tone: Map.get(a, :mood_tone, @mood_defaults.tone)
-        }
-
-    assign(socket, :mood, mood)
   end
 
   defp load_brain_svg do

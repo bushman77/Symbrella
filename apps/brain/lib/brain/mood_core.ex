@@ -29,8 +29,6 @@ defmodule Brain.MoodCore do
 
   use GenServer
 
-  @ln2 :math.log(2)
-
   @event_update      [:brain, :mood, :update]
   @event_saturation  [:brain, :mood, :saturation]
   @event_shock       [:brain, :mood, :shock]
@@ -65,6 +63,19 @@ defmodule Brain.MoodCore do
   def apply_serotonin(k \\ 0.03),      do: bump(%{"5ht" => +k})
   def apply_norepinephrine(k \\ 0.03), do: bump(%{ne: +k})
   def apply_glutamate(k \\ 0.03),      do: bump(%{glu: +k})
+
+  @doc "Reset neuromodulators back to baseline (clears saturation counters)."
+  def reset(), do: GenServer.call(__MODULE__, :reset)
+
+  @doc """
+  Configure MoodCore at runtime. Accepts the same shapes as application config.
+  Supported keys: :baseline, :half_life_ms, :max_delta_per_tick, :saturation_ticks,
+  :shock_threshold, :clock, :init (merged immediately).
+  """
+  def configure(opts), do: GenServer.call(__MODULE__, {:configure, opts})
+
+  @doc "Detach a previously registered subscriber id returned from subscribe/0."
+  def detach(id) when is_binary(id), do: :telemetry.detach(id)
 
   # ---------- GenServer ----------
 
@@ -146,6 +157,64 @@ defmodule Brain.MoodCore do
 
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, decorate_snapshot(state), state}
+
+  @impl true
+  def handle_call(:reset, _from, st) do
+    lv = st.baseline
+    st =
+      st
+      |> Map.put(:levels, lv)
+      |> Map.put(:last_levels, lv)
+      |> Map.put(:sat_counts, %{da: 0, "5ht": 0, glu: 0, ne: 0})
+      |> Map.put(:last_ts, now_ms())
+      |> Map.put(:last_dt_ms, 0)
+
+    {:reply, decorate_snapshot(st), st}
+  end
+
+  @impl true
+  def handle_call({:configure, opts}, _from, st) do
+    cfg = normalize_cfg(opts || [])
+
+    new =
+      st
+      |> then(fn s ->
+        case get_map_like(cfg, :baseline) do
+          %{} = bl when map_size(bl) > 0 -> %{s | baseline: bl}
+          _ -> s
+        end
+      end)
+      |> then(fn s ->
+        case Keyword.get(cfg, :half_life_ms, nil) do
+          nil -> s
+          v   -> %{s | half_life_ms: resolve_half_life(s.half_life_ms, v) |> coerce_keys()}
+        end
+      end)
+      |> then(fn s -> %{
+        s |
+        max_delta_per_tick: to_float(Keyword.get(cfg, :max_delta_per_tick, s.max_delta_per_tick), s.max_delta_per_tick),
+        saturation_ticks:   to_pos_int(Keyword.get(cfg, :saturation_ticks, s.saturation_ticks), s.saturation_ticks),
+        shock_threshold:    to_float(Keyword.get(cfg, :shock_threshold, s.shock_threshold), s.shock_threshold)
+      } end)
+      |> then(fn s ->
+        case Keyword.get(cfg, :clock, s.clock) do
+          :cycle -> %{s | clock: :cycle}
+          :self  -> %{s | clock: :self}
+          _      -> s
+        end
+      end)
+      |> then(fn s ->
+        # Optional init merge applied immediately (like a controlled bump without events)
+        case get_map_like(cfg, :init) do
+          %{} = init when map_size(init) > 0 ->
+            lv = merge_defaults(s.levels, init)
+            %{s | levels: lv, last_levels: lv}
+          _ -> s
+        end
+      end)
+
+    {:reply, decorate_snapshot(new), new}
+  end
 
   def terminate(_reason, %{telemetry_id: id}) when is_binary(id) do
     :telemetry.detach(id)
@@ -275,28 +344,25 @@ defmodule Brain.MoodCore do
 
   # ---------- defensive config helpers ----------
 
-defp normalize_cfg(cfg) when is_list(cfg) do
-  if Keyword.keyword?(cfg), do: cfg, else: []
-end
-
-defp normalize_cfg(%{} = cfg), do: Map.to_list(cfg)
-defp normalize_cfg(v) when is_integer(v), do: [half_life_ms: v]
-
-defp normalize_cfg(v) when is_binary(v) do
-  case Integer.parse(String.trim(v)) do
-    {n, _} -> [half_life_ms: n]
-    _      -> []
+  defp normalize_cfg(cfg) when is_list(cfg) do
+    if Keyword.keyword?(cfg), do: cfg, else: []
   end
-end
-
-defp normalize_cfg(_), do: []
+  defp normalize_cfg(%{} = cfg), do: Map.to_list(cfg)
+  defp normalize_cfg(v) when is_integer(v), do: [half_life_ms: v]
+  defp normalize_cfg(v) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {n, _} -> [half_life_ms: n]
+      _      -> []
+    end
+  end
+  defp normalize_cfg(_), do: []
 
   # Pull a map/keyword value from cfg and turn it into a map with our neuro keys
   defp get_map_like(cfg, key) do
     case Keyword.get(cfg, key, %{}) do
-      %{} = m   -> coerce_keys(m)
+      %{} = m           -> coerce_keys(m)
       l when is_list(l) -> l |> Map.new() |> coerce_keys()
-      _         -> %{}
+      _                 -> %{}
     end
   end
 
@@ -312,16 +378,15 @@ defp normalize_cfg(_), do: []
   defp resolve_half_life(defaults, val) when is_map(val) do
     merge_defaults(defaults, val)
   end
-defp resolve_half_life(defaults, val) when is_list(val) do
-  resolve_half_life(defaults, Map.new(val))
-end
-
+  defp resolve_half_life(defaults, val) when is_list(val) do
+    resolve_half_life(defaults, Map.new(val))
+  end
   defp resolve_half_life(_defaults, val) do
     # number/string → broadcast to all neuros; fallback to sane defaults if invalid
     n =
       case val do
         i when is_integer(i) and i > 0 -> i
-        f when is_float(f) and f > 0.0 -> trunc(f)
+        f when is_float(f)   and f > 0.0 -> trunc(f)
         s when is_binary(s) ->
           case Integer.parse(String.trim(s)) do
             {k, _} when k > 0 -> k

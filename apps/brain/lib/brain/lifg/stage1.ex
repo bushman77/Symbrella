@@ -38,12 +38,14 @@ defmodule Brain.LIFG.Stage1 do
   require Logger
   alias Brain.Utils.Safe
   alias Brain.Cerebellum
+  alias Brain.MoodWeights
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
   @default_scores_mode :all
   @default_margin_thr 0.15
   @default_min_margin 0.05
 
+  # Mood weights/cap (match MoodWeights.bias/3)
   @default_mw %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
   @default_cap 0.05
   @mood_handler_prefix "brain-lifg-stage1-mood-"
@@ -260,7 +262,7 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   @spec run(map(), map() | keyword(), keyword()) ::
-          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+        {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, weights_or_kw, opts) when is_list(opts) do
     weights_map =
       case weights_or_kw do
@@ -463,26 +465,34 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
+  # Use Brain.MoodWeights.bias/3 for the scalar; multiply: final = base * (1 + bias).
   defp mood_factor(nil, opts), do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
-
   defp mood_factor(mood, opts) do
     w   = cfg_mw(opts)
     cap = cfg_cap(opts)
 
-    dx = %{
-      expl:  (mood.exploration - 0.5),
-      inhib: (mood.inhibition  - 0.5),
-      vigil: (mood.vigilance   - 0.5),
-      plast: (mood.plasticity  - 0.5)
-    }
+    bias =
+      try do
+        MoodWeights.bias(mood, w, cap)
+      rescue
+        _ ->
+          # Fallback: reproduce bias math locally if MoodWeights isn't available
+          dx = %{
+            expl:  (mood.exploration - 0.5),
+            inhib: (mood.inhibition  - 0.5),
+            vigil: (mood.vigilance   - 0.5),
+            plast: (mood.plasticity  - 0.5)
+          }
 
-    raw =
-      dx.expl  * (w.expl  || 0.0) +
-      dx.inhib * (w.inhib || 0.0) +
-      dx.vigil * (w.vigil || 0.0) +
-      dx.plast * (w.plast || 0.0)
+          raw =
+            dx.expl  * (w.expl  || 0.0) +
+            dx.inhib * (w.inhib || 0.0) +
+            dx.vigil * (w.vigil || 0.0) +
+            dx.plast * (w.plast || 0.0)
 
-    bias = clamp(raw, -cap, cap)
+          clamp(raw, -cap, cap)
+      end
+
     factor = 1.0 + bias
     {factor, bias, mood, w, cap}
   end

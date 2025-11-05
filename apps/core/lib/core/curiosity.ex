@@ -1,10 +1,17 @@
 defmodule Core.Curiosity do
   @moduledoc """
   Periodically re-probes expired NegCache entries:
+
   - pops a small batch of expired phrases
   - tries Llm.Pos.run/2 to enrich
-  - on success: persist fallback senses (if available), do NOT reinsert into NegCache
-  - on failure: reinsert with fresh TTL via Core.NegCache.put/1
+  - on success:
+      • write episodes to Brain.Hippocampus (if available)
+      • optional lexicon upsert (config-gated; off by default)
+      • do NOT reinsert into NegCache
+  - on failure:
+      • reinsert with fresh TTL via Core.NegCache.put/1
+
+  All external writes use dynamic `apply/3` to avoid compile-time coupling.
   """
 
   use GenServer
@@ -15,11 +22,11 @@ defmodule Core.Curiosity do
   @default_concurrency 2
 
   @type state :: %{
-    interval_ms: pos_integer(),
-    batch_size: pos_integer(),
-    concurrency: pos_integer(),
-    llm_model: binary() | nil
-  }
+          interval_ms: pos_integer(),
+          batch_size: pos_integer(),
+          concurrency: pos_integer(),
+          llm_model: binary() | nil
+        }
 
   # -- Public -------------------------------------------------
 
@@ -76,27 +83,39 @@ defmodule Core.Curiosity do
     else
       phrases
       |> Task.async_stream(&process_phrase(&1, state),
-           max_concurrency: c,
-           timeout: :timer.seconds(30)
-         )
+        max_concurrency: c,
+        timeout: :timer.seconds(30)
+      )
       |> Stream.run()
     end
   end
 
   defp process_phrase(phrase, state) do
     res =
-      Llm.Pos.run(phrase,
-        model: state.llm_model,
-        keep_alive: "5m",
-        timeout: :timer.seconds(20),
-        options: %{num_predict: 256, num_ctx: 1024, temperature: 0.0},
-        allow_builtin_lexicon: true,
-        require_nonempty_syn_ant?: false
-      )
+      try do
+        Llm.Pos.run(
+          phrase,
+          model: state.llm_model,
+          keep_alive: "5m",
+          timeout: :timer.seconds(20),
+          options: %{num_predict: 256, num_ctx: 1024, temperature: 0.0},
+          allow_builtin_lexicon: true,
+          require_nonempty_syn_ant?: false
+        )
+      rescue
+        e ->
+          Logger.warning("Curiosity: Llm.Pos.run/2 crashed: #{inspect(e)}")
+          {:error, e}
+      catch
+        kind, reason ->
+          Logger.warning("Curiosity: Llm.Pos.run/2 threw: #{inspect({kind, reason})}")
+          {:error, reason}
+      end
 
     case res do
       {:ok, %{"entries" => entries}} when is_list(entries) and entries != [] ->
         persist(entries)
+
       _ ->
         # Still unknown → renew TTL to avoid hot-looping
         Core.NegCache.put(phrase)
@@ -104,17 +123,73 @@ defmodule Core.Curiosity do
     end
   end
 
-  defp persist(entries) do
-    cond do
-      Code.ensure_loaded?(Core.Lexicon) and function_exported?(Core.Lexicon, :upsert_fallbacks, 1) ->
-        Core.Lexicon.upsert_fallbacks(entries)
+  # -- Persistence -------------------------------------------
 
-      Code.ensure_loaded?(Db.Lexicon) and function_exported?(Db.Lexicon, :bulk_upsert_senses, 1) ->
-        Db.Lexicon.bulk_upsert_senses(entries)
+  defp persist(entries) when is_list(entries) and entries != [] do
+    write_as_episodes(entries)
+    maybe_upsert_lexicon(entries)
+    :ok
+  end
 
-      true ->
-        Logger.warning("Curiosity: no Lexicon upsert function found — skipping persist")
-        :ok
+  defp persist(_), do: :ok
+
+  defp write_as_episodes(entries) do
+    ep_at = System.system_time(:millisecond)
+    hippo = Module.concat([Brain, Hippocampus])
+
+    for e <- entries do
+      episode = %{
+        source: :curiosity,
+        kind: :lexicon_seed,
+        payload: e,
+        at: ep_at
+      }
+
+      safe_apply(hippo, :write, [episode])
+    end
+
+    :ok
+  end
+
+  defp maybe_upsert_lexicon(entries) do
+    if Application.get_env(:core, :curiosity_allow_lexicon_writes, false) do
+      core_lex = Module.concat([Core, Lexicon])
+      db_lex   = Module.concat([Db,   Lexicon])
+
+      cond do
+        export?(core_lex, :upsert_fallbacks, 1) ->
+          safe_apply(core_lex, :upsert_fallbacks, [entries])
+
+        export?(db_lex, :bulk_upsert_senses, 1) ->
+          safe_apply(db_lex, :bulk_upsert_senses, [entries])
+
+        true ->
+          Logger.warning("Curiosity: no Lexicon upsert function found — skipping persist")
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  # -- Helpers -----------------------------------------------
+
+  defp export?(mod, fun, arity),
+    do: Code.ensure_loaded?(mod) and function_exported?(mod, fun, arity)
+
+  defp safe_apply(mod, fun, args) do
+    if export?(mod, fun, length(args)) do
+      try do
+        apply(mod, fun, args)
+      rescue
+        e ->
+          Logger.warning("Curiosity: #{inspect(mod)}.#{fun}/#{length(args)} failed: #{inspect(e)}")
+          :error
+      catch
+        _, _ -> :error
+      end
+    else
+      :undef
     end
   end
 
