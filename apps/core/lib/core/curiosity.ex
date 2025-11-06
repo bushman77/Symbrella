@@ -1,3 +1,4 @@
+# apps/core/lib/core/curiosity.ex
 defmodule Core.Curiosity do
   @moduledoc """
   Periodically re-probes expired NegCache entries:
@@ -12,7 +13,13 @@ defmodule Core.Curiosity do
       • reinsert with fresh TTL via Core.NegCache.put/1
 
   All external writes use dynamic `apply/3` to avoid compile-time coupling.
+
+  NOTE: During Brain migration, the LLM path is fully optional.
+  If Llm.Pos is not available, we skip enrichment and renew NegCache TTL.
   """
+
+  # Suppress compile-time warnings about optional Llm.Pos
+  @compile {:no_warn_undefined, Llm.Pos}
 
   use GenServer
   require Logger
@@ -91,7 +98,22 @@ defmodule Core.Curiosity do
   end
 
   defp process_phrase(phrase, state) do
-    res =
+    res = llm_enrich(phrase, state)
+
+    case res do
+      {:ok, %{"entries" => entries}} when is_list(entries) and entries != [] ->
+        persist(entries)
+
+      _ ->
+        # Still unknown or LLM unavailable → renew TTL to avoid hot-looping
+        Core.NegCache.put(phrase)
+        :ok
+    end
+  end
+
+  # LLM enrichment is optional and fully guarded
+  defp llm_enrich(phrase, state) do
+    if Code.ensure_loaded?(Llm.Pos) and function_exported?(Llm.Pos, :run, 2) do
       try do
         Llm.Pos.run(
           phrase,
@@ -111,15 +133,8 @@ defmodule Core.Curiosity do
           Logger.warning("Curiosity: Llm.Pos.run/2 threw: #{inspect({kind, reason})}")
           {:error, reason}
       end
-
-    case res do
-      {:ok, %{"entries" => entries}} when is_list(entries) and entries != [] ->
-        persist(entries)
-
-      _ ->
-        # Still unknown → renew TTL to avoid hot-looping
-        Core.NegCache.put(phrase)
-        :ok
+    else
+      :undef
     end
   end
 

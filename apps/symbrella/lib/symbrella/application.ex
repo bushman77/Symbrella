@@ -1,3 +1,4 @@
+# apps/symbrella/lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
   use Application
@@ -23,6 +24,7 @@ defmodule Symbrella.Application do
 
     children = [
       {Phoenix.PubSub, name: Symbrella.PubSub},
+
       # ── DB ────────────────────────────────────────────────────────────────
       Db,
 
@@ -35,9 +37,9 @@ defmodule Symbrella.Application do
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # ── Autonomous workers (first-class, decoupled) ──────────────────────
-      Curiosity,        # emits [:curiosity, :proposal]
-      Core.Curiosity,   # sweeps NegCache
+      # ── Background maintenance (decoupled) ───────────────────────────────
+      # NOTE: The standalone Curiosity app has been removed (Checklist item 1).
+      # Keep Core.Curiosity (NegCache sweeps) for now; fold later into Brain.Idle.
 
       # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
       {Brain.MoodCore, []},
@@ -71,6 +73,7 @@ defmodule Symbrella.Application do
 
     # Attach telemetry handlers AFTER the tree is live (safe-guarded)
     safe_attach(fn -> Brain.Telemetry.attach!() end)
+    # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
     safe_attach(fn -> Core.Curiosity.Bridge.attach() end)
 
     {:ok, sup}

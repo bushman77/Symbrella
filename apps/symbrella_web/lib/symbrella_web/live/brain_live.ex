@@ -1,3 +1,4 @@
+# apps/symbrella_web/lib/symbrella_web/live/brain_live.ex
 defmodule SymbrellaWeb.BrainLive do
   @moduledoc """
   LiveView for the Brain dashboard.
@@ -162,7 +163,7 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   # ---------------------------------------------------------------------------
-  # Incoming telemetry + PubSub
+  # Incoming telemetry + PubSub (ALL handle_info/2 CLAUSES GROUPED HERE)
   # ---------------------------------------------------------------------------
 
   # Mood: delegate to MoodHud
@@ -179,21 +180,7 @@ defmodule SymbrellaWeb.BrainLive do
   @impl true
   def handle_info({:brain_bus, env}, socket),  do: handle_blackboard(env, socket)
 
-  defp handle_blackboard(env, socket) do
-    socket =
-      case extract_intent_any(env) do
-        nil -> socket
-        intent -> assign(socket, :intent, stamp_intent(intent, "blackboard"))
-      end
-
-    {:noreply,
-     update(socket, :region_state, fn st ->
-       st = st || %{}
-       ws = [env | (st[:workspace] || [])] |> Enum.take(100)
-       Map.put(st, :workspace, ws)
-     end)}
-  end
-
+  # HUD topics
   @impl true
   def handle_info({:clock, m}, socket), do: {:noreply, assign(socket, :clock, m || %{})}
 
@@ -692,5 +679,24 @@ defmodule SymbrellaWeb.BrainLive do
   defp mget_in(_, _), do: nil
 
   defp now_ms, do: System.system_time(:millisecond)
+
+  # ---------------------------------------------------------------------------
+  # Moved below all handle_info/2 clauses to keep them grouped
+  # ---------------------------------------------------------------------------
+
+  defp handle_blackboard(env, socket) do
+    socket =
+      case extract_intent_any(env) do
+        nil -> socket
+        intent -> assign(socket, :intent, stamp_intent(intent, "blackboard"))
+      end
+
+    {:noreply,
+     update(socket, :region_state, fn st ->
+       st = st || %{}
+       ws = [env | (st[:workspace] || [])] |> Enum.take(100)
+       Map.put(st, :workspace, ws)
+     end)}
+  end
 end
 

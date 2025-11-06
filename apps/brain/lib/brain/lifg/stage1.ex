@@ -123,6 +123,9 @@ defmodule Brain.LIFG.Stage1 do
             else
               bias_val = get_float(bias_map, idx, 0.0)
 
+              # --------- NEW: relation-driven signals (safe/no-op if module missing) ---------
+              {syn_hits, ant_hits} = relations_count_overlaps(si0)
+
               # --------- Base scoring + feature extraction (per candidate) ---------
               # Build triples: {id, base_after_mood, feature_map_for_cerebellum}
               scored_trip =
@@ -131,9 +134,13 @@ defmodule Brain.LIFG.Stage1 do
                   pos  = pos_of(c)
                   cnrm = norm(Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || token_phrase)
 
-                  lex  = lex_fit(cnrm, token_phrase, token_mwe?)
-                  rel  = clamp01(Safe.get(c, :rel_prior, guess_rel_prior(c)))
+                  lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
+                  rel0 = clamp01(Safe.get(c, :rel_prior, guess_rel_prior(c)))
                   act  = clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
+
+                  # NEW: adjust features using relation context
+                  lex = clamp01(lex0 + 0.6 * syn_hits)
+                  rel = clamp01(rel0 - 0.4 * ant_hits)
 
                   intent_feat =
                     intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
@@ -144,6 +151,12 @@ defmodule Brain.LIFG.Stage1 do
                     weights[:activation]  * act +
                     weights[:intent_bias] * intent_feat
                     |> clamp01()
+
+                  # NEW: tiny homonym bump (safe/no-op if helper missing)
+                  hom_bump =
+                    if relations_homonym_bonus?(si0, c), do: 0.5, else: 0.0
+
+                  base0 = clamp01(base0 + hom_bump)
 
                   base = apply_mood_if_up(base0, tok, id)
 
@@ -627,5 +640,36 @@ defmodule Brain.LIFG.Stage1 do
     if Keyword.keyword?(list), do: Map.new(list), else: %{}
   end
   defp to_map(_), do: %{}
+
+  # ---------- Relation helpers (safe dynamic calls) ----------
+  defp relations_count_overlaps(si0) do
+    try do
+      if Code.ensure_loaded?(Brain.LIFG.RelationSignals) and
+           function_exported?(Brain.LIFG.RelationSignals, :count_overlaps, 1) do
+        apply(Brain.LIFG.RelationSignals, :count_overlaps, [si0])
+      else
+        {0, 0}
+      end
+    rescue
+      _ -> {0, 0}
+    catch
+      _, _ -> {0, 0}
+    end
+  end
+
+  defp relations_homonym_bonus?(si0, candidate) do
+    try do
+      if Code.ensure_loaded?(Brain.LIFG.RelationSignals) and
+           function_exported?(Brain.LIFG.RelationSignals, :homonym_bonus?, 2) do
+        apply(Brain.LIFG.RelationSignals, :homonym_bonus?, [si0, candidate])
+      else
+        false
+      end
+    rescue
+      _ -> false
+    catch
+      _, _ -> false
+    end
+  end
 end
 

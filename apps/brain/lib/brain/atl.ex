@@ -15,8 +15,9 @@ defmodule Brain.ATL do
     - reset/0              # clear rolling window & counters
   """
 
-  # Use Brain's region macro (gives us start_link/1, child_spec/1, status, etc.)
   use Brain, region: :atl
+
+  alias Brain.Utils.Safe
 
   @name __MODULE__
 
@@ -52,15 +53,11 @@ defmodule Brain.ATL do
      %{
        region: :atl,
        opts: Map.new(opts),
-       # rolling state
        keep: keep,
        last_slate: %{},
-       # norm => count (concept-level)
-       concept_counts: %{},
-       # id   => count (sense-level)
-       sense_counts: %{},
-       # [{ts_ms, slate}, ...]
-       window: []
+       concept_counts: %{},  # norm => count
+       sense_counts: %{},    # id   => count
+       window: []            # rolling [{ts_ms, slate}, ...]
      }}
   end
 
@@ -71,16 +68,12 @@ defmodule Brain.ATL do
     concept_counts =
       slate.by_norm
       |> Map.keys()
-      |> Enum.reduce(state.concept_counts, fn norm, acc ->
-        Map.update(acc, norm, 1, &(&1 + 1))
-      end)
+      |> Enum.reduce(state.concept_counts, fn norm, acc -> Map.update(acc, norm, 1, &(&1 + 1)) end)
 
     sense_counts =
       slate.by_id
       |> Map.keys()
-      |> Enum.reduce(state.sense_counts, fn id, acc ->
-        Map.update(acc, id, 1, &(&1 + 1))
-      end)
+      |> Enum.reduce(state.sense_counts, fn id, acc -> Map.update(acc, id, 1, &(&1 + 1)) end)
 
     ts = System.system_time(:millisecond)
     window = [{ts, slate} | state.window] |> Enum.take(state.keep)
@@ -116,39 +109,35 @@ defmodule Brain.ATL do
     winners =
       choices
       |> Enum.map(&normalize_choice/1)
-      # only keep items with an id
-      |> Enum.reject(&is_nil(&1.id))
-
-    by_norm = Enum.group_by(winners, & &1.norm)
-    by_id = Enum.group_by(winners, & &1.id)
+      |> Enum.reject(&is_nil(&1.id)) # only keep items with an id
 
     %{
       tokens: tokens,
       token_count: length(tokens),
       winners: winners,
       winner_count: length(winners),
-      by_norm: by_norm,
-      by_id: by_id
+      by_norm: Enum.group_by(winners, & &1.norm),
+      by_id:   Enum.group_by(winners, & &1.id)
     }
   end
 
-  # ── Internals ───────────────────────────────────────────────────────────
+  # ── Internals — normalize choice ─────────────────────────────────────────
 
   # Accepts both SenseChoice style (%{chosen_id:, lemma:, margin:, scores: ...})
   # and simpler %{id:, lemma: ...}. Falls back where possible.
   defp normalize_choice(ch) when is_map(ch) do
-    id = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
+    id        = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
     token_idx = fetch_any(ch, [:token_index, "token_index"])
-    score_norm = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
-    margin = fetch_any(ch, [:margin, "margin"]) || 0.0
-    lemma0 = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
+    score     = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
+    margin    = fetch_any(ch, [:margin, "margin"]) || 0.0
+    lemma0    = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
 
     %{
       id: id,
       token_index: token_idx,
       lemma: lemma0,
       norm: id_norm(id) || lemma0,
-      score: score_norm,
+      score: score,
       margin: margin,
       raw: ch
     }
@@ -161,12 +150,12 @@ defmodule Brain.ATL do
     Enum.reduce_while(keys, nil, fn k, _acc ->
       case Map.get(map, k) do
         nil -> {:cont, nil}
-        v -> {:halt, v}
+        v   -> {:halt, v}
       end
     end)
   end
 
-  defp fetch_from_scores(%{scores: %{} = m}, id) when is_binary(id), do: Map.get(m, id)
+  defp fetch_from_scores(%{scores: %{} = m}, id) when is_binary(id),   do: Map.get(m, id)
   defp fetch_from_scores(%{"scores" => %{} = m}, id) when is_binary(id), do: Map.get(m, id)
   defp fetch_from_scores(_, _), do: nil
 
@@ -174,19 +163,12 @@ defmodule Brain.ATL do
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
 
   defp norm_text(nil), do: ""
-
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
-
   defp norm_text(v),
-    do:
-      v
-      |> Kernel.to_string()
-      |> String.downcase()
-      |> String.replace(~r/\s+/u, " ")
-      |> String.trim()
+    do: v |> Kernel.to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
-  # ───────── Sense slate promotion → si.sense_candidates ─────────
+  # ───────── Sense slate → si.sense_candidates ────────────────────────────
 
   @doc """
   Attach sense candidates to the Semantic Input (SI), keyed by token index.
@@ -195,36 +177,149 @@ defmodule Brain.ATL do
   - Uses `raw.scores` when available to expand alt candidates
   - Keeps a compact, LIFG-ready payload: %{token_index => [%{id, score, ...}]}
 
-  Opts:
-    * :top_k         — default 3
-    * :margin_window — default 0.05 (accept alts within 5% of winner score)
+  Also supports an optional flag:
+    * `si.lifg_opts[:absorb_unigrams_into_mwe?]` — when true,
+      injects winners for child unigrams whose spans lie inside a winning MWE span,
+      but only when that MWE winner is a `|phrase|fallback` (to limit noise).
   """
   @spec attach_sense_candidates(map(), map(), keyword()) :: map()
   def attach_sense_candidates(si, slate, opts \\ []) when is_map(si) and is_map(slate) do
-    candidates = promote_sense_candidates_from_slate(slate, opts)
+    absorb? =
+      case Map.get(si, :lifg_opts) do
+        kw when is_list(kw) -> Keyword.get(kw, :absorb_unigrams_into_mwe?, false)
+        m  when is_map(m)   -> Map.get(m, :absorb_unigrams_into_mwe?, false)
+        _                   -> false
+      end
+
+    slate1 =
+      if absorb? do
+        maybe_augment_winners_with_child_unigrams(
+          si,
+          slate,
+          inject_child_unigrams?: true,
+          only_if_fallback?: true
+        )
+      else
+        slate
+      end
+
+    candidates = promote_sense_candidates_from_slate(slate1, opts)
     Map.put(si, :sense_candidates, candidates)
   end
 
+  # Inject winners for child unigrams when an MWE |phrase|fallback is the winner.
+  defp maybe_augment_winners_with_child_unigrams(
+         %{tokens: tokens} = si,
+         %{winners: winners} = slate,
+         opts
+       )
+       when is_list(tokens) and is_list(winners) do
+    inject?          = Keyword.get(opts, :inject_child_unigrams?, true)
+    only_if_fallback = Keyword.get(opts, :only_if_fallback?, true)
+    cells            = Map.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
+
+    unless inject?, do: slate
+
+    cells_by_norm =
+      Enum.group_by(cells, fn c ->
+        (c[:norm] || c["norm"] || c[:word] || c["word"] || "") |> down()
+      end)
+
+    extra =
+      Enum.flat_map(Enum.with_index(tokens), fn {tok, idx_mwe} ->
+        n   = Map.get(tok, :n, 1)
+        mw? = Map.get(tok, :mw, n > 1)
+
+        if not mw? do
+          []
+        else
+          w_for_idx = Enum.filter(winners, &(&1[:token_index] == idx_mwe))
+
+          ok? =
+            if only_if_fallback do
+              Enum.any?(w_for_idx, fn w -> phrase_fallback?(w[:id]) end)
+            else
+              w_for_idx != []
+            end
+
+          if not ok? do
+            []
+          else
+            mwe_span = Map.get(tok, :span)
+
+            child_uni =
+              tokens
+              |> Enum.with_index()
+              |> Enum.filter(fn {t, j} ->
+                j != idx_mwe and Map.get(t, :n, 1) == 1 and inside?(Map.get(t, :span), mwe_span)
+              end)
+
+            Enum.flat_map(child_uni, fn {t, j} ->
+              norm =
+                (Map.get(t, :phrase) || Map.get(t, :word) ||
+                 Map.get(t, "phrase") || Map.get(t, "word") || "")
+                |> down()
+
+              cells_by_norm
+              |> Map.get(norm, [])
+              |> Enum.map(fn c ->
+                %{
+                  id: to_string(c[:id] || c["id"]),
+                  token_index: j,
+                  lemma: norm,
+                  norm: norm,
+                  score: 0.30,  # modest seed; Stage-1 will re-score
+                  margin: 0.0,
+                  raw: %{from: :atl_child_unigram}
+                }
+              end)
+            end)
+          end
+        end
+      end)
+
+    if extra == [] do
+      slate
+    else
+      Map.update(slate, :winners, winners, fn lst ->
+        (lst ++ extra) |> Enum.uniq_by(fn w -> {w[:id], w[:token_index]} end)
+      end)
+    end
+  end
+
+  defp maybe_augment_winners_with_child_unigrams(_si, slate, _opts), do: slate
+
+  defp phrase_fallback?(id) when is_binary(id), do: String.contains?(id, "|phrase|fallback")
+  defp phrase_fallback?(_), do: false
+
+  defp inside?({s, l}, {ps, pl})
+       when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
+    e  = s + l
+    pe = ps + pl
+    s >= ps and e <= pe
+  end
+  defp inside?(_, _), do: false
+
+  defp down(nil), do: ""
+  defp down(s) when is_binary(s),
+    do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
+  defp down(v),
+    do: v |> Kernel.to_string() |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
+
+  # ── Candidate promotion helpers ─────────────────────────────────────────
+
   @spec promote_sense_candidates_from_slate(map(), keyword()) ::
           %{non_neg_integer() => [map()]}
-  def promote_sense_candidates_from_slate(%{winners: winners} = _slate, opts) do
-    top_k = Keyword.get(opts, :top_k, 3)
+  def promote_sense_candidates_from_slate(%{winners: winners}, opts) when is_list(winners) do
+    top_k         = Keyword.get(opts, :top_k, 3)
     margin_window = Keyword.get(opts, :margin_window, 0.05)
 
-    # Build per-token candidate lists from winners + raw.scores (if present)
     winners
     |> Enum.group_by(& &1.token_index)
     |> Enum.into(%{}, fn {idx, entries} ->
-      # Winner for this token is entries |> Enum.max_by(&score) in most setups,
-      # but your slate already has per-token winner at head; keep head as winner.
-      winner = List.first(entries) || %{}
+      winner   = List.first(entries) || %{}
+      w_score  = winner[:score] || get_in(winner, [:raw, :score_norm]) || 0.0
 
-      w_score =
-        winner[:score] ||
-          get_in(winner, [:raw, :score_norm]) ||
-          0.0
-
-      # Expand alternatives from raw.scores if present; otherwise just keep the winner.
       alts =
         winner
         |> Map.get(:raw, %{})
@@ -243,7 +338,6 @@ defmodule Brain.ATL do
           }
         end)
 
-      # Include the winner explicitly (first, de-duplicated)
       winner_as_candidate = %{
         id: winner[:id],
         score: as_float(w_score),
@@ -256,30 +350,27 @@ defmodule Brain.ATL do
         margin: Map.get(winner, :margin, 0.0)
       }
 
-      # Filter near-winners by margin window around the winner score, take top_k
       near =
         alts
         |> Enum.reject(&is_nil(&1.id))
         |> Enum.uniq_by(& &1.id)
         |> Enum.sort_by(&(-1 * (&1.score || 0.0)))
-        |> Enum.filter(fn c ->
-          w_score <= 0.0 or c.score >= w_score * (1.0 - margin_window)
-        end)
+        |> Enum.filter(fn c -> w_score <= 0.0 or c.score >= w_score * (1.0 - margin_window) end)
         |> Enum.take(top_k)
         |> Enum.with_index(1)
         |> Enum.map(fn {c, i} -> %{c | rank: i} end)
 
-      # Final list for this token
       {idx, uniq_by_id([winner_as_candidate | near])}
     end)
   end
+
+  def promote_sense_candidates_from_slate(_slate, _opts), do: %{}
 
   defp uniq_by_id(list),
     do: list |> Enum.reject(&is_nil(&1.id)) |> Enum.uniq_by(& &1.id)
 
   defp as_float(nil), do: 0.0
   defp as_float(num) when is_number(num), do: num
-
   defp as_float(str) when is_binary(str) do
     case Float.parse(str) do
       {f, _} -> f
@@ -288,13 +379,14 @@ defmodule Brain.ATL do
   end
 
   defp pos_from_id(nil), do: nil
-
   defp pos_from_id(id) when is_binary(id) do
     case String.split(id, "|") do
       [_lemma, pos, _sense] -> pos
       _ -> nil
     end
   end
+
+  # ── Finalize slate for current SI ───────────────────────────────────────
 
   @doc """
   Finalize the ATL slate for the current `si`.
@@ -309,7 +401,7 @@ defmodule Brain.ATL do
   @spec finalize(map(), keyword()) :: {map(), map()}
   def finalize(si, _opts \\ []) when is_map(si) do
     choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
-    tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+    tokens  = Map.get(si, :tokens)       || Map.get(si, "tokens")       || []
 
     slate =
       cond do
@@ -318,9 +410,7 @@ defmodule Brain.ATL do
 
         true ->
           case Process.whereis(@name) do
-            nil ->
-              %{}
-
+            nil   -> %{}
             _pid ->
               case snapshot() do
                 %{last_slate: sl} when is_map(sl) -> sl
@@ -331,4 +421,89 @@ defmodule Brain.ATL do
 
     {si, slate}
   end
+
+  @doc """
+  Optionally derive and attach `:lifg_pairs` (MWE↔unigram) to `si` for WM gating.
+
+  We emit pairs only when a winner is a `|phrase|fallback` and there are child
+  unigrams inside that MWE's span. Controlled by `:derive_lifg_pairs?` (default: true).
+
+  Pair shape:
+    %{
+      type: :mwe_unigram,
+      mwe_id:      binary(),       # the phrase|fallback winner id
+      unigram_id:  binary(),       # a concrete unigram sense id from active_cells
+      token_index: non_neg_integer(),
+      weight:      float(),        # 1.0 for now
+      from:        :atl
+    }
+  """
+  @spec attach_lifg_pairs(map(), keyword()) :: map()
+  def attach_lifg_pairs(%{atl_slate: %{winners: winners}, tokens: tokens} = si, opts \\ []) do
+    if Keyword.get(opts, :derive_lifg_pairs?, true) do
+      cells = Map.get(si, :active_cells, []) |> Enum.map(&Brain.Utils.Safe.to_plain/1)
+      pairs = derive_lifg_pairs(winners, tokens, cells)
+
+      if pairs == [] do
+        si
+      else
+        Map.put(si, :lifg_pairs, pairs)
+      end
+    else
+      si
+    end
+  end
+
+  # Build pairs between a phrase|fallback winner and concrete unigram sense ids
+  # whose tokens lie inside the phrase span.
+  defp derive_lifg_pairs(winners, tokens, cells) when is_list(winners) and is_list(tokens) do
+    cells_by_norm =
+      Enum.group_by(cells, fn c ->
+        (c[:norm] || c["norm"] || c[:word] || c["word"] || "") |> down()
+      end)
+
+    winners
+    |> Enum.filter(&phrase_fallback?(&1[:id]))
+    |> Enum.flat_map(fn w ->
+      idx = w[:token_index]
+      mwe_span = span_for(tokens, idx)
+
+      child_idxs =
+        tokens
+        |> Enum.with_index()
+        |> Enum.filter(fn {t, j} ->
+          j != idx and Map.get(t, :n, 1) == 1 and inside?(Map.get(t, :span), mwe_span)
+        end)
+        |> Enum.map(&elem(&1, 1))
+
+      Enum.flat_map(child_idxs, fn j ->
+        norm = tokens |> Enum.at(j) |> Map.get(:phrase) |> down()
+
+        for c <- Map.get(cells_by_norm, norm, []) do
+          %{
+            type: :mwe_unigram,
+            mwe_id: to_string(w[:id]),
+            unigram_id: to_string(c[:id] || c["id"]),
+            token_index: j,
+            weight: 1.0,
+            from: :atl
+          }
+        end
+      end)
+    end)
+    |> Enum.uniq_by(&{&1.mwe_id, &1.unigram_id, &1.token_index})
+  end
+
+  defp derive_lifg_pairs(_, _, _), do: []
+
+  # Safe span lookup for the token at `idx`
+  defp span_for(tokens, idx) do
+    case Enum.find(tokens, &(&1[:index] == idx)) do
+      %{span: {s, l}} when is_integer(s) and is_integer(l) -> {s, l}
+      _ -> {0, 0}
+    end
+  end
+
+
 end
+

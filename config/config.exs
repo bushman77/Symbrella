@@ -98,6 +98,7 @@ config :brain,
   # :boost | :rerun | :none
   pmtg_mode: :boost,
   pmtg_margin_threshold: 0.15,
+  lifg_defaults: [inject_child_unigrams?: true],
   pmtg_window_keep: 50,
   lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
   lifg_stage1_scores_mode: :all,

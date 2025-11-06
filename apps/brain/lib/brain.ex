@@ -10,6 +10,7 @@ defmodule Brain do
 
   For region helpers (LIFG etc.), prefer `use Brain, region: :lifg` in those modules.
   """
+alias Brain.WM.Policy, as: WMPolicy
 
   # ───────────────────────── Region Macro ─────────────────────────
 
@@ -179,6 +180,12 @@ defmodule Brain do
   @doc "Sync call to one cell (e.g., `:status`); returns `{:ok, term}` or `{:error, :not_found}`."
   @spec cell_status(String.t()) :: {:ok, term()} | {:error, :not_found}
   def cell_status(id) when is_binary(id), do: gencall(@name, {:cell, id, :status})
+# LIFG → WM gating (fires a cast; returns :ok)
+@doc false
+def gate_from_lifg(si, opts \\ []) when is_map(si) and is_list(opts) do
+  GenServer.cast(@name, {:gate_from_lifg, si, opts})
+  :ok
+end
 
   @doc "Async cast to one cell."
   @spec cell_cast(String.t(), term()) :: :ok
@@ -403,6 +410,11 @@ defmodule Brain do
     {:noreply, %{state | last_intent: normalize_intent_map(m)}}
   end
 
+@impl true
+def handle_cast({:gate_from_lifg, si, opts}, state) do
+  {:noreply, Brain.WM.Gate.ingest_from_si(state, si, opts)}
+end
+
   # ───────────────────────── Public helper: recall → WM ───────────────────────
 
   @spec latest_intent() :: map() | nil
@@ -545,135 +557,60 @@ defmodule Brain do
     %{intent: intent, keyword: to_string(kw), confidence: conf, at_ms: at_ms}
   end
 
-  defp do_focus(state, cands_or_si, _opts) do
-    now = System.system_time(:millisecond)
-    cfg = state.wm_cfg
-    attn = state.attention
-    cands0 = normalize_candidates(cands_or_si)
+# Brain.ex
+defp do_focus(state, cands_or_si, _opts) do
+  now   = System.system_time(:millisecond)
+  cfg   = state.wm_cfg
+  attn  = state.attention
 
-    wm_d = WorkingMemory.decay(state.wm, now, cfg.decay_ms)
+  base_wm =
+    state.wm
+    |> WorkingMemory.decay(now, cfg.decay_ms)
 
-    {wm_next, added, removed} =
-      Enum.reduce(cands0, {wm_d, 0, 0}, fn cand0, {wm_acc, a_cnt, r_cnt} ->
-        if not acceptable_candidate?(cand0, cfg) do
-          {wm_acc, a_cnt, r_cnt}
-        else
-          sal = Attention.salience(cand0, attn)
-          gate_score = gate_score_for(cand0, sal, cfg)
-          decision = decide_gate_policy(wm_acc, cand0, gate_score, cfg)
+  normalize_candidates(cands_or_si)
+  |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
+    focus_reduce_step(cand, acc, now, cfg, attn)
+  end)
+  |> then(fn res -> trim_and_count(res, cfg.capacity) end)
+end
 
-          :telemetry.execute(
-            [:brain, :gate, :decision],
-            %{score: gate_score},
-            %{decision: elem(decision, 0), source: Map.get(cand0, :source)}
-          )
+# ——— helpers (private) ———
 
-          case decision do
-            {:block, _s} ->
-              {wm_acc, a_cnt, r_cnt}
+defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn) do
+  if not WMPolicy.acceptable_candidate?(cand, cfg) do
+    {wm_acc, a_cnt, r_cnt}
+  else
+    salience   = Attention.salience(cand, attn)
+    gate_score = WMPolicy.gate_score_for(cand, salience, cfg)
+    {decision, s} = WMPolicy.decide_gate_policy(wm_acc, cand, gate_score, cfg)
 
-            {:allow, s} ->
-              item = WorkingMemory.normalize(cand0, now, activation: s)
-              {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
+    :telemetry.execute(
+      [:brain, :gate, :decision],
+      %{score: gate_score},
+      %{decision: decision, source: Map.get(cand, :source)}
+    )
 
-            {:boost, s} ->
-              item = WorkingMemory.normalize(cand0, now, activation: min(s + 0.2, 1.0))
-              {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
-          end
-        end
-      end)
-      |> then(fn {wm_tmp, a_cnt, r_cnt} ->
-        wm_trim = WorkingMemory.trim(wm_tmp, cfg.capacity)
-        {wm_trim, a_cnt, r_cnt + (length(wm_tmp) - length(wm_trim))}
-      end)
+    case decision do
+      :block ->
+        {wm_acc, a_cnt, r_cnt}
 
-    {wm_next, added, removed}
-  end
+      :allow ->
+        item = WorkingMemory.normalize(cand, now, activation: s)
+        {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
 
-  # Compute a robust gate score from candidate + salience + policy scalers.
-  defp gate_score_for(cand, salience, cfg) do
-    base =
-      (cand[:score] || cand[:activation_snapshot] || 0.0)
-      |> Kernel.*(1.0)
-
-    # Prefer runtime-ish sources; keep weights gentle.
-    prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
-
-    # Downweight fallback phrase candidates a touch.
-    b_scaled =
-      if fallback_id?(cand[:id]) do
-        scale = cfg[:fallback_scale] || 0.70
-        base * scale
-      else
-        base
-      end
-
-    # diversity penalty against items for the same lemma with same (pos, frame)
-    div_pen = diversity_penalty(cand, cfg)
-
-    # Optional semantic bias
-    sem_bias =
-      case Brain.Semantics.bias_for(cand) do
-        b when is_number(b) -> Numbers.clamp01(b)
-        _ -> 0.0
-      end
-
-    sem_boost = (cfg[:semantic_boost] || 0.1) * sem_bias
-
-    b_scaled
-    |> Kernel.+(0.5 * Numbers.clamp01(salience))
-    |> Kernel.+(prefer)
-    |> Kernel.+(sem_boost)
-    |> Kernel.-(div_pen)
-    |> Numbers.clamp01()
-  end
-
-  defp decide_gate_policy(wm, cand, gate_score, cfg) do
-    prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
-    thr = cfg.gate_threshold
-    allow_fallback? = Map.get(cfg, :allow_fallback_into_wm?, false)
-    is_fallback = fallback_id?(cand[:id])
-
-    # Per-lemma budget + hysteresis (don’t churn on tiny margins)
-    {within_budget?, beats_by?} = within_lemma_budget?(wm, cand, cfg)
-
-    cond do
-      not within_budget? and not beats_by? ->
-        {:block, gate_score}
-
-      # NEW (P-206): fallbacks must meet the normal threshold unless explicitly allowed
-      is_fallback and not allow_fallback? ->
-        if gate_score >= thr, do: {:allow, gate_score}, else: {:block, gate_score}
-
-      prefer_source? and gate_score >= thr ->
-        {:boost, gate_score}
-
-      prefer_source? and gate_score >= 0.20 ->
-        {:boost, gate_score}
-
-      gate_score >= thr ->
-        {:allow, gate_score}
-
-      true ->
-        {:block, gate_score}
+      :boost ->
+        item = WorkingMemory.normalize(cand, now, activation: min(s + 0.2, 1.0))
+        {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
     end
   end
+end
+
+defp trim_and_count({wm_tmp, a_cnt, r_cnt}, capacity) do
+  wm_trim = WorkingMemory.trim(wm_tmp, capacity)
+  {wm_trim, a_cnt, r_cnt + (length(wm_tmp) - length(wm_trim))}
+end
 
   # ── Admission helpers (policy; no hard deletes) ─────────────────────────────
-
-  defp acceptable_candidate?(cand, cfg) do
-    id = to_string(cand[:id] || "")
-    pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
-
-    allow_unk? = Map.get(cfg, :allow_unk?, true)
-    allow_seed? = Map.get(cfg, :allow_seed?, true)
-
-    cond do
-      not allow_seed? and String.ends_with?(id, "|seed|") -> false
-      not allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
-      true -> true
-    end
-  end
 
   defp fallback_id?(nil), do: false
   defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
@@ -1183,5 +1120,161 @@ defmodule Brain do
       source: :runtime
     }
   end
+
+# Accepts [{id,score}] or maps like %{id: "...", score: 0.7}
+defp normalize_pairs(list) do
+  Enum.flat_map(list, fn
+    {id, score} when is_binary(id) and is_number(score) -> [{id, score}]
+    %{} = m ->
+      case {m[:id] || m["id"], m[:score] || m["score"] || m[:weight] || m["weight"]} do
+        {id, score} when is_binary(id) and is_number(score) -> [{id, score}]
+        _ -> []
+      end
+    _ -> []
+  end)
+end
+
+defp wm_put(state, id, score) when is_binary(id) and is_number(score) do
+  key = normalize_cell_id(id)
+  active_cells = Map.update(state.active_cells || %{}, key, score, &(&1 + score))
+  %{state | active_cells: active_cells}
+end
+
+defp bump_wm_ts(state),
+  do: Map.put(state, :wm_last_ms, System.system_time(:millisecond))
+
+# Avoid duplicate “Hello|…” vs “hello|…”
+defp normalize_cell_id(id) when is_binary(id) do
+  case String.split(id, "|") do
+    [lemma, pos, sense] -> Enum.join([String.downcase(lemma), pos, sense], "|")
+    _ -> String.downcase(id)
+  end
+end
+
+# --- WM gating: robust pair ingest (guards bad spans/ids) -----------------
+
+# --- WM gating: robust pair ingest (stateful) -------------------------------
+
+defp gate_pairs_into_wm_state(state, pairs, opts) when is_list(pairs) and is_map(state) do
+  allow_fb? = Keyword.get(opts, :allow_fallback_into_wm?, false)
+
+  Enum.reduce(pairs, state, fn
+    {ida, spa, idb, spb, sc}, st ->
+      if keep_pair?(ida, spa, idb, spb, allow_fb?) do
+        s = clamp01(as_float(sc))
+        st
+        |> wm_put(ida, s * 0.5)
+        |> wm_put(idb, s * 0.5)
+      else
+        st
+      end
+
+    {ida, idb}, st ->
+      if keep_pair?(ida, {0, 1}, idb, {0, 1}, allow_fb?) do
+        st
+        |> wm_put(ida, 0.15)
+        |> wm_put(idb, 0.15)
+      else
+        st
+      end
+
+    %{} = m, st ->
+      case {m[:id] || m["id"], m[:score] || m["score"] || m[:weight] || m["weight"]} do
+        {id, sc} when is_binary(id) ->
+          wm_put(st, id, clamp01(as_float(sc)))
+        _ ->
+          st
+      end
+
+    _, st ->
+      st
+  end)
+end
+
+defp keep_pair?(ida, spa, idb, spb, allow_fb?) do
+  is_binary(ida) and is_binary(idb) and
+    valid_span?(spa) and valid_span?(spb) and
+    (allow_fb? or (!phrase_fallback_id?(ida) and !phrase_fallback_id?(idb)))
+end
+
+defp valid_span?({s, l}) when is_integer(s) and is_integer(l) and s >= 0 and l > 0, do: true
+defp valid_span?(_), do: false
+
+defp phrase_fallback_id?(id) when is_binary(id),
+  do: String.contains?(id, "|phrase|fallback")
+defp phrase_fallback_id?(_), do: false
+
+defp as_float(nil), do: 0.0
+defp as_float(v) when is_number(v), do: v
+defp as_float(v) when is_binary(v) do
+  case Float.parse(v) do
+    {f, _} -> f
+    _ -> 0.0
+  end
+end
+
+defp clamp01(x) when is_number(x) and x < 0.0, do: 0.0
+defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0
+defp clamp01(x) when is_number(x), do: x
+
+defp keep_pair?(ida, spa, idb, spb, allow_fb?) do
+  is_binary(ida) and is_binary(idb) and
+    valid_span?(spa) and valid_span?(spb) and
+    (allow_fb? or (!phrase_fallback_id?(ida) and !phrase_fallback_id?(idb)))
+end
+
+defp valid_span?({s, l})
+     when is_integer(s) and is_integer(l) and s >= 0 and l > 0, do: true
+defp valid_span?(_), do: false
+
+defp phrase_fallback_id?(id) when is_binary(id),
+  do: String.contains?(id, "|phrase|fallback")
+defp phrase_fallback_id?(_), do: false
+
+defp as_float(nil), do: 0.0
+defp as_float(v) when is_number(v), do: v
+defp as_float(v) when is_binary(v) do
+  case Float.parse(v) do
+    {f, _} -> f
+    _ -> 0.0
+  end
+end
+
+defp clamp01(x) when is_number(x) and x < 0.0, do: 0.0
+defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0
+defp clamp01(x) when is_number(x), do: x
+
+
+# Convert SI.lifg_pairs (map shape) → tuples we can gate
+defp lifg_pairs_to_tuples(si) when is_map(si) do
+  tokens = Map.get(si, :tokens, [])
+
+  get_span = fn idx ->
+    case Enum.find(tokens, fn t -> (t[:index] || t["index"]) == idx end) do
+      %{span: span} -> span
+      %{"span" => span} -> span
+      _ -> nil
+    end
+  end
+
+  Map.get(si, :lifg_pairs, [])
+  |> List.wrap()
+  |> Enum.flat_map(fn
+    # canonical MWE↔unigram from ATL
+    %{type: :mwe_unigram, mwe_id: mwe, unigram_id: uni, token_index: j} = m ->
+      ms = get_span.(0)   # MWE is at index 0 in your tokenizer output
+      us = get_span.(j)   # unigram index provided by pair
+      sc = m[:weight] || m["weight"] || 1.0
+      if ms && us, do: [{mwe, ms, uni, us, sc}], else: []
+
+    # tolerate already-normalized or simplified forms too
+    {ida, spa, idb, spb, sc} = tup -> [tup]
+    {ida, idb} = tup -> [tup]
+    %{id: id, score: sc} when is_binary(id) -> [{id, clamp01(as_float(sc))}]
+    _ -> []
+  end)
+end
+
+
 end
 

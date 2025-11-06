@@ -192,96 +192,299 @@ defmodule Brain.LIFG do
   - Inhibition amount = max(margin_threshold - score_gap, 0.0)
   - Supports `{id, amount}` tuples when `:emit_pairs` (or WM gating flags) are present.
   """
-  @spec disambiguate_stage1(map(), keyword()) :: map()
-  def disambiguate_stage1(%{} = si, opts) do
-    si_plain = Safe.to_plain(si)
-    slate = Input.slate_for(si_plain)
-
-    si_for_stage =
-      si_plain
-      |> Map.put(:sense_candidates, slate)
+@spec disambiguate_stage1(map(), keyword()) :: map()
+def disambiguate_stage1(%{} = si, opts) do
+  # Build the SI we feed into Stage1
+  si_for_stage =
+    si
+    |> Safe.to_plain()
+    |> then(fn si0 ->
+      si0
+      |> Map.put(:sense_candidates, Input.slate_for(si0))
       |> Map.delete(:candidates_by_token)
       |> Map.put_new(:trace, [])
       |> ensure_mwe_candidates(opts)
+      |> absorb_unigrams_into_mwe(opts)
+      |> backfill_unigrams_from_active_cells(opts)   # ← new: promote real unigram senses if present
+    end)
 
-    si_opts =
-      case Map.get(si_for_stage, :lifg_opts) do
-        kw when is_list(kw) -> kw
-        m when is_map(m) -> Map.to_list(m)
-        _ -> []
-      end
+  # Effective options (env + si + call-site)
+  eff_opts =
+    si_for_stage
+    |> Map.get(:lifg_opts, [])
+    |> case do
+      kw when is_list(kw) -> kw
+      m when is_map(m)    -> Map.to_list(m)
+      _                   -> []
+    end
+    |> Keyword.merge(opts)
 
-    eff_opts = Keyword.merge(si_opts, opts)
+  scores_mode = Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+  margin_thr  = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  min_margin  = Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-    margin_thr   = Keyword.get(eff_opts, :margin_threshold, 0.15)
-    scores_mode  = Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
-    min_margin   = Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
+  stage_weights =
+    lifg_weights()
+    |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
 
-    stage_weights =
-      lifg_weights()
-      |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
+  # Robust Stage1 call (supports new/legacy arities + shapes)
+  res =
+    safe_stage1_call(
+      si_for_stage,
+      [
+        weights: stage_weights,
+        scores: scores_mode,
+        margin_threshold: margin_thr,
+        chargram_event: [:brain, :lifg, :chargram_violation],
+        boundary_event: [:brain, :lifg, :boundary_drop]
+      ],
+      eff_opts
+    )
 
-    # ---- robust Stage1 call (supports run/2 and run/3, new/old return shapes)
-    res =
-      safe_stage1_call(
-        si_for_stage,
-        [
-          weights: stage_weights,
-          scores: scores_mode,
-          margin_threshold: margin_thr,
-          chargram_event: [:brain, :lifg, :chargram_violation],
-          boundary_event: [:brain, :lifg, :boundary_drop]
-        ],
-        eff_opts
-      )
+  case normalize_stage1_result(res) do
+    {:ok, si_after, raw_choices, audit} ->
+      choices =
+        raw_choices
+        |> Enum.map(&Safe.to_plain/1)
+        |> augment_choices(si_after, min_margin)
 
-    case normalize_stage1_result(res) do
-      {:ok, si_after0, raw_choices, audit} ->
-        choices =
-          raw_choices
-          |> Enum.map(&Safe.to_plain/1)
-          |> augment_choices(si_after0, min_margin)
+      {boosts_out, inhibitions_out} =
+        legacy_boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
 
-        {boosts_out, inhibitions_out} =
-          legacy_boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
-
-        maybe_record_last(:stage1, si_after0, choices, audit, %{
+      _ =
+        maybe_record_last(:stage1, si_after, choices, audit, %{
           scores_mode: scores_mode,
           margin_threshold: margin_thr,
           weights: stage_weights
         })
 
-        evt = %{
-          stage: :lifg_stage1,
-          choices: choices,
-          boosts: boosts_out,
-          inhibitions: inhibitions_out,
-          opts: Enum.into(eff_opts, %{})
-        }
+      evt = %{
+        stage: :lifg_stage1,
+        choices: choices,
+        boosts: boosts_out,
+        inhibitions: inhibitions_out,
+        opts: Enum.into(eff_opts, %{})
+      }
 
-        trace = [evt | (Map.get(si_after0, :trace) || [])]
-        Map.put(si_after0, :trace, trace)
+      si_after
+      |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
 
-      {:error, reason} ->
-        Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
+    {:error, reason} ->
+      Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
+      _ = maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
 
-        maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
+      evt = %{
+        stage: :lifg_stage1,
+        choices: [],
+        boosts: [],
+        inhibitions: [],
+        opts: Enum.into(eff_opts, %{error: inspect(reason)})
+      }
 
-        evt = %{
-          stage: :lifg_stage1,
-          choices: [],
-          boosts: [],
-          inhibitions: [],
-          opts: Enum.into(eff_opts, %{error: inspect(reason)})
-        }
-
-        trace = [evt | (Map.get(si_for_stage, :trace) || [])]
-
-        si_for_stage
-        |> Map.put(:lifg_error, inspect(reason))
-        |> Map.put(:trace, trace)
-    end
+      si_for_stage
+      |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
+      |> Map.put(:lifg_error, inspect(reason))
   end
+end
+
+# --- private: unigram backfill from active_cells ---------------------------------
+
+defp backfill_unigrams_from_active_cells(si, _opts \\ []) when is_map(si) do
+  sc0    = Map.get(si, :sense_candidates, %{})
+  tokens = Map.get(si, :tokens, [])
+  cells  = Safe.get(si, :active_cells, [])
+
+  # Group real (non-phrase) cells by normalized norm
+  cells_by_norm =
+    cells
+    |> Enum.map(&Safe.to_plain/1)
+    |> Enum.reject(fn c ->
+      pos = Safe.get(c, :pos)
+      to_string(pos) == "phrase"
+    end)
+    |> Enum.group_by(fn c ->
+      norm_key(Safe.get(c, :norm) || Safe.get(c, :word))
+    end)
+
+  {sc, added} =
+    tokens
+    |> Enum.with_index()
+    |> Enum.reduce({sc0, 0}, fn {tok, idx}, {acc, n} ->
+      n_tok = Safe.get(tok, :n, 1)
+      mw?   = Safe.get(tok, :mw, n_tok > 1)
+      surface =
+        Safe.get(tok, :phrase) ||
+        Safe.get(tok, :word)   ||
+        Safe.get(tok, :lemma)
+
+      # unigram only; must have a surface
+      cond do
+        mw? or is_nil(surface) ->
+          {acc, n}
+
+        true ->
+          nk      = norm_key(surface)
+          bucket  = Map.get(acc, idx, [])
+          have_unigram? =
+            Enum.any?(bucket, &unigram_candidate?/1)
+
+          # Only backfill when the bucket lacks any unigram candidates
+          # (we don't want to fight existing slate/ATL output)
+          if have_unigram? do
+            {acc, n}
+          else
+            case Map.get(cells_by_norm, nk, []) do
+              [] ->
+                {acc, n}
+
+              list ->
+                # Avoid duplicates by id already in the bucket
+                existing_ids =
+                  bucket
+                  |> Enum.map(fn c -> c[:id] || c["id"] end)
+                  |> MapSet.new()
+
+                cands =
+                  list
+                  |> Enum.map(&cell_to_unigram_candidate(&1, surface))
+                  |> Enum.reject(&(is_nil(&1[:id]) or MapSet.member?(existing_ids, &1[:id])))
+
+                if cands == [] do
+                  {acc, n}
+                else
+                  :telemetry.execute(
+                    [:brain, :lifg, :unigram_backfill_emitted],
+                    %{count: length(cands)},
+                    %{token_index: idx, norm: surface}
+                  )
+
+                  {Map.put(acc, idx, cands ++ bucket), n + length(cands)}
+                end
+            end
+          end
+      end
+    end)
+
+  if added > 0, do: Map.put(si, :sense_candidates, sc), else: si
+end
+
+defp cell_to_unigram_candidate(cell, surface) do
+  id  = Safe.get(cell, :id) || Safe.get(cell, "id")
+  pos =
+    Safe.get(cell, :pos) ||
+    Safe.get(cell, "pos") ||
+    :other
+
+  %{
+    id: to_string(id),
+    lemma: surface,
+    norm: surface,
+    mw: false,
+    pos: pos,
+    # Small priors that let real phrase/unigram cells compete fairly:
+    rel_prior: 0.20,
+    # If DB carries an activation, pass it through; else a gentle baseline
+    activation: (Safe.get(cell, :activation, Safe.get(cell, :modulated_activation, 0.25)) || 0.25) * 1.0,
+    score: 0.30,
+    source: :active_cells
+  }
+end
+
+defp unigram_candidate?(cand) do
+  nrm = cand[:norm] || cand["norm"] || cand[:lemma] || cand["lemma"] || ""
+  nrm = to_string(nrm)
+  nrm != "" and not String.contains?(nrm, " ")
+end
+
+defp norm_key(v) when is_binary(v) do
+  v
+  |> String.downcase()
+  |> String.trim()
+  |> String.replace(~r/\s+/, " ")
+end
+
+defp norm_key(_), do: ""
+
+# --- absorb unigram senses into overlapping MWE buckets -----------------
+
+defp absorb_unigrams_into_mwe(%{tokens: toks} = si, opts) when is_list(toks) do
+  # opt-in to avoid surprises; turn on with opts: [absorb_unigrams_into_mwe?: true]
+  unless Keyword.get(opts, :absorb_unigrams_into_mwe?, false), do: si
+
+  sc0    = Map.get(si, :sense_candidates, %{})
+  cells  = Safe.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
+
+  cells_by_norm =
+    Enum.group_by(cells, fn c ->
+      (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> down()
+    end)
+
+  updated =
+    Enum.reduce(Enum.with_index(toks), sc0, fn {tok, idx}, acc ->
+      n   = Safe.get(tok, :n, 1)
+      mw? = Safe.get(tok, :mw, n > 1)
+      mwe_span = Safe.get(tok, :span)
+
+      if mw? and is_tuple(mwe_span) do
+        child_norms =
+          toks
+          |> Enum.with_index()
+          |> Enum.filter(fn {t, j} ->
+            j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), mwe_span)
+          end)
+          |> Enum.map(fn {t, _} ->
+            (Safe.get(t, :phrase) || Safe.get(t, :word) || "") |> down()
+          end)
+          |> Enum.reject(&(&1 == ""))
+
+        # Build lightweight candidates from active_cells for each child norm
+        absorbed =
+          child_norms
+          |> Enum.flat_map(&Map.get(cells_by_norm, &1, []))
+          |> Enum.map(fn c ->
+            norm = (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> to_string()
+            %{
+              id: to_string(Safe.get(c, :id)),
+              lemma: norm,
+              norm: norm,
+              mw: false,
+              pos: Safe.get(c, :pos),
+              rel_prior: 0.20,
+              score: 0.20,
+              source: :absorbed_unigram
+            }
+          end)
+
+        if absorbed == [] do
+          acc
+        else
+          merged =
+            absorbed ++ Map.get(acc, idx, [])
+            |> Enum.uniq_by(&(&1[:id] || &1["id"]))
+
+          Map.put(acc, idx, merged)
+        end
+      else
+        acc
+      end
+    end)
+
+  Map.put(si, :sense_candidates, updated)
+end
+
+defp absorb_unigrams_into_mwe(si, _opts), do: si
+
+defp inside?({s, l}, {ps, pl}) when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
+  e  = s + l
+  pe = ps + pl
+  s >= ps and e <= pe
+end
+defp inside?(_, _), do: false
+
+defp down(s) when is_binary(s),
+  do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+defp down(_), do: ""
+
 
   # ---- helpers ---------------------------------------------------------------
 
@@ -713,6 +916,106 @@ defmodule Brain.LIFG do
   end
 
   # ── private: choice augmentation ─────────────────────────────────────
+# inside Brain.LIFG (or wherever disambiguate_stage1/2 lives)
+
+# helper (put near other priv fns)
+defp flatten_lifg_opts(nil), do: []
+defp flatten_lifg_opts(%{} = m), do: Map.to_list(m)
+defp flatten_lifg_opts(kw) when is_list(kw), do: kw
+defp flatten_lifg_opts(other) when is_list(other) == false do
+  # handle when opts itself has lifg_opts nested
+  case other do
+    kw when is_list(kw) ->
+      inner = Keyword.get(kw, :lifg_opts, [])
+      Keyword.merge(Keyword.delete(kw, :lifg_opts), flatten_lifg_opts(inner))
+    %{} = m ->
+      flatten_lifg_opts(Map.to_list(m))
+  end
+end
+
+@spec disambiguate_stage1(map(), keyword()) :: map()
+def disambiguate_stage1(%{} = si, opts) do
+  si_plain = Safe.to_plain(si)
+  slate    = Input.slate_for(si_plain)
+
+  si_for_stage =
+    si_plain
+    |> Map.put(:sense_candidates, slate)
+    |> Map.delete(:candidates_by_token)
+    |> Map.put_new(:trace, [])
+    |> ensure_mwe_candidates(opts)
+
+  # ↓↓↓ THIS PART CHANGED
+  si_opts  = flatten_lifg_opts(Map.get(si_for_stage, :lifg_opts, []))
+  call_opts = flatten_lifg_opts(opts)
+  eff_opts = Keyword.merge(si_opts, call_opts)   # call-site wins on conflicts
+  # ↑↑↑
+
+  scores_mode = Keyword.get(eff_opts, :scores,
+                  Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+  margin_thr  = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  min_margin  = Keyword.get(eff_opts, :min_margin,
+                  Application.get_env(:brain, :lifg_min_margin, 0.05))
+
+  stage_weights =
+    lifg_weights()
+    |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
+
+  res =
+    safe_stage1_call(
+      si_for_stage,
+      [
+        weights: stage_weights,
+        scores:  scores_mode,
+        margin_threshold: margin_thr,
+        chargram_event:  [:brain, :lifg, :chargram_violation],
+        boundary_event:  [:brain, :lifg, :boundary_drop]
+      ],
+      eff_opts
+    )
+
+  case normalize_stage1_result(res) do
+    {:ok, si_after, raw_choices, audit} ->
+      choices =
+        raw_choices
+        |> Enum.map(&Safe.to_plain/1)
+        |> augment_choices(si_after, min_margin)
+
+      {boosts_out, inhibitions_out} =
+        legacy_boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
+
+      _ = maybe_record_last(:stage1, si_after, choices, audit, %{
+            scores_mode: scores_mode, margin_threshold: margin_thr, weights: stage_weights
+          })
+
+      evt = %{
+        stage: :lifg_stage1,
+        choices: choices,
+        boosts: boosts_out,
+        inhibitions: inhibitions_out,
+        # Store FLATTENED opts so you can see :gate_into_wm right here:
+        opts: Enum.into(eff_opts, %{})
+      }
+
+      Map.update(si_after, :trace, [evt], fn tr -> [evt | tr] end)
+
+    {:error, reason} ->
+      Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
+      _ = maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
+
+      evt = %{
+        stage: :lifg_stage1,
+        choices: [],
+        boosts: [],
+        inhibitions: [],
+        opts: Enum.into(Keyword.put(eff_opts, :error, inspect(reason)), %{})
+      }
+
+      si_for_stage
+      |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
+      |> Map.put(:lifg_error, inspect(reason))
+  end
+end
 
   defp augment_choices(raw_choices, si_after, min_margin) when is_list(raw_choices) do
     slate =

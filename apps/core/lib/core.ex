@@ -41,45 +41,51 @@ defmodule Core do
   @type opts :: keyword()
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
-  def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode  = Keyword.get(opts, :mode, :prod)
-    max_n = Keyword.get(opts, :max_wordgram_n, 3)
+def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
+  mode  = Keyword.get(opts, :mode, :prod)
+  max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
-    si0 =
-      phrase
-      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      |> wrap_si(phrase)
-      |> rebuild_word_ngrams(max_n)
-      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
-      |> Map.put_new(:trace, [])
+  # optionally pull a default from config so it's “always on” unless overridden
+  lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
+  lifg_opts = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
 
-    # ── Stage-1 Intent Selection (early, cheap, biases LIFG later) ──
-    # Appends its own {:intent, %{...}} trace entry and emits telemetry.
-    si1 =
-      si0
-      |> Selection.select(opts)
+  si0 =
+    phrase
+    |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+    |> wrap_si(phrase)
+    |> rebuild_word_ngrams(max_n)
+    |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+    |> Map.put_new(:trace, [])
+    |> Map.put(:lifg_opts, lifg_opts)   # ← ensure it’s on the SI
 
-    case mode do
-      :prod ->
-        si1
-        |> Brain.stm()
-        |> keep_only_word_boundary_tokens()
-        # Optional early signature pass (pre-LTM) for introspection/telemetry
-        |> maybe_run_mwe(:early, opts)
-        |> ltm_stage(opts)                # DB read-only + merge
-        |> keep_only_word_boundary_tokens()
-        |> maybe_run_mwe(:late, opts)     # ← single gated late pass
-        |> maybe_attach_episodes(opts)    # forward :recall_source / :episode_embedding
-        |> run_lifg_and_attach(opts)      # LIFG can read si.intent / si.keyword / si.confidence / si.intent_bias
-        |> maybe_ingest_atl(opts)
-        |> maybe_encode_hippocampus()
-        |> maybe_persist_episode(opts)    # returns SI unchanged
-        |> notify_brain_activation(opts)
+  si1 = Selection.select(si0, opts)
 
-      _ ->
-        si1
-    end
-  end
+case mode do
+    :prod ->
+      si1
+      |> Brain.stm()
+      |> keep_only_word_boundary_tokens()
+      |> maybe_run_mwe(:early, opts)
+      |> ltm_stage(opts)
+      |> keep_only_word_boundary_tokens()
+      |> maybe_run_mwe(:late, opts)
+      |> Core.Relations.attach_edges()
+      |> maybe_attach_episodes(opts)
+      |> run_lifg_and_attach(opts)
+      |> maybe_ingest_atl(opts)
+      |> then(&Brain.ATL.attach_lifg_pairs(&1, opts))   # ← add this line
+      |> maybe_encode_hippocampus()
+      |> maybe_persist_episode(opts)
+      |> notify_brain_activation(opts)
+
+  _ ->
+    si1
+end
+
+
+end
+
+
 
   # ─────────────────────── Brain notify ───────────────────────
 
