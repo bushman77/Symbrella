@@ -66,6 +66,23 @@ defmodule Brain.ACC do
 
   # ---- Public API -----------------------------------------------------------
 
+  @spec assess(map(), keyword()) :: {:ok, %{si: map(), conflict: float()}}
+  def assess(si, _opts \\ []) when is_map(si) do
+    c = current_conflict()
+    {:ok, %{si: Map.put(si, :acc_conflict, c), conflict: c}}
+  end
+
+  defp current_conflict(server \\ __MODULE__) do
+    case Process.whereis(server) do
+      nil -> 0.0
+      _pid ->
+        case GenServer.call(server, :status) do
+          %{conflict: c} when is_number(c) -> max(0.0, min(1.0, c * 1.0))
+          _ -> 0.0
+        end
+    end
+  end
+
   @doc """
   Adjust weights/half-life/caps live.
 
@@ -96,6 +113,12 @@ defmodule Brain.ACC do
   def on_tick(_,_,_,_), do: :ok
 
   # ---- GenServer callbacks --------------------------------------------------
+
+  # ⬇️ Re-add :status clause (overriding handle_call/3 removed the macro's default)
+  @impl GenServer
+  def handle_call(:status, _from, state) do
+    {:reply, state, state}
+  end
 
   @impl GenServer
   def handle_call({:set_params, opts_in}, _from, state) do
@@ -224,11 +247,7 @@ defmodule Brain.ACC do
   defp get_opt(_, _, default),                      do: default
 
   # ---- Hardened numeric getter (nil-safe default + string/boolean coercion) ----
-  #
-  # Returns:
-  #   - float() when a numeric can be coerced
-  #   - nil when both the source and default are non-numeric and default is nil
-  #
+
   defp get_num(map, key, default) do
     val =
       case map do
@@ -257,15 +276,11 @@ defmodule Brain.ACC do
       end
 
     case val do
-      :nope ->
-        coerce_default(default)
-
-      num when is_number(num) ->
-        num * 1.0
+      :nope -> coerce_default(default)
+      num when is_number(num) -> num * 1.0
     end
   end
 
-  # default may be number | boolean | numeric string | nil | anything
   defp coerce_default(nil), do: nil
   defp coerce_default(true), do: 1.0
   defp coerce_default(false), do: 0.0

@@ -22,8 +22,6 @@ defmodule Brain.PFC do
   """
 
   use Brain, region: :pfc
-  @behaviour Brain.Region
-
   require Logger
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -69,14 +67,12 @@ defmodule Brain.PFC do
   def policy(si \\ %{}) when is_map(si), do: GenServer.call(__MODULE__, {:policy, si}, 250)
 
   @doc "Region atom key."
-  @impl Brain.Region
   def region, do: :pfc
 
   @doc """
   Web/UI adapter: summarize policy for display badges.
   Accepts `%{snapshot: map}` or plain snapshot (from :status).
   """
-  @impl Brain.Region
   def handle(region_state) do
     snap =
       cond do

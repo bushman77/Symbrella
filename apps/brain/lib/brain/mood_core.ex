@@ -216,6 +216,7 @@ defmodule Brain.MoodCore do
     {:reply, decorate_snapshot(new), new}
   end
 
+  @impl true
   def terminate(_reason, %{telemetry_id: id}) when is_binary(id) do
     :telemetry.detach(id)
     :ok
@@ -240,54 +241,63 @@ defmodule Brain.MoodCore do
     emit(st, source, dt, :decay)
   end
 
-  defp emit(%{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} = st, source, dt_ms, cause \\ :other) do
-    # Raw neuros
-    da  = Map.get(lv, :da, 0.5)
-    s5  = Map.get(lv, :"5ht", 0.5)
-    glu = Map.get(lv, :glu, 0.5)
-    ne  = Map.get(lv, :ne, 0.5)
+# lib/brain/mood_core.ex
 
-    # Derived mood indices
-    exploration = 0.6 * da + 0.4 * ne
-    inhibition  = s5
-    vigilance   = ne
-    plasticity  = 0.5 * da + 0.5 * glu
+# keep a convenience 3-arity (no default on the 4-arity head)
+defp emit(
+       %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} = st,
+       source,
+       dt_ms,
+       cause
+     ) do
+  # Raw neuros
+  da  = Map.get(lv, :da, 0.5)
+  s5  = Map.get(lv, :"5ht", 0.5)
+  glu = Map.get(lv, :glu, 0.5)
+  ne  = Map.get(lv, :ne, 0.5)
 
-    meas = %{
-      da: da, "5ht": s5, glu: glu, ne: ne,
-      exploration: exploration, inhibition: inhibition,
-      vigilance: vigilance, plasticity: plasticity
-    }
+  # Derived mood indices
+  exploration = 0.6 * da + 0.4 * ne
+  inhibition  = s5
+  vigilance   = ne
+  plasticity  = 0.5 * da + 0.5 * glu
 
-    meta = %{source: source, cause: cause, dt_ms: dt_ms}
-    :telemetry.execute(@event_update, meas, meta)
+  meas = %{
+    da: da, "5ht": s5, glu: glu, ne: ne,
+    exploration: exploration, inhibition: inhibition,
+    vigilance: vigilance, plasticity: plasticity
+  }
 
-    # Saturation detector
-    sat_counts =
-      Enum.reduce([:da, :"5ht", :glu, :ne], st.sat_counts, fn k, acc ->
-        v = Map.fetch!(lv, k)
-        stuck? = v == 0.0 or v == 1.0
-        Map.put(acc, k, if(stuck?, do: acc[k] + 1, else: 0))
-      end)
+  meta = %{source: source, cause: cause, dt_ms: dt_ms}
+  :telemetry.execute(@event_update, meas, meta)
 
-    if Enum.any?(sat_counts, fn {_k, n} -> n >= sat_n end) do
-      :telemetry.execute(@event_saturation, meas, Map.put(meta, :ticks, sat_counts))
-    end
+  # Saturation detector
+  sat_counts =
+    Enum.reduce([:da, :"5ht", :glu, :ne], st.sat_counts, fn k, acc ->
+      v = Map.fetch!(lv, k)
+      stuck? = v == 0.0 or v == 1.0
+      Map.put(acc, k, if(stuck?, do: acc[k] + 1, else: 0))
+    end)
 
-    # Shock detector (L2-norm of delta across neuros)
-    dx = :math.sqrt(
-      (:math.pow(da  - Map.get(prev, :da,  da), 2) +
-       :math.pow(s5  - Map.get(prev, :"5ht", s5), 2) +
-       :math.pow(glu - Map.get(prev, :glu, glu), 2) +
-       :math.pow(ne  - Map.get(prev, :ne,  ne), 2))
+  if Enum.any?(sat_counts, fn {_k, n} -> n >= sat_n end) do
+    :telemetry.execute(@event_saturation, meas, Map.put(meta, :ticks, sat_counts))
+  end
+
+  # Shock detector (L2-norm of delta across neuros)
+  dx =
+    :math.sqrt(
+      :math.pow(da  - Map.get(prev, :da,  da), 2) +
+      :math.pow(s5  - Map.get(prev, :"5ht", s5), 2) +
+      :math.pow(glu - Map.get(prev, :glu, glu), 2) +
+      :math.pow(ne  - Map.get(prev, :ne,  ne), 2)
     )
 
-    if dx > shock_thr do
-      :telemetry.execute(@event_shock, Map.put(meas, :delta_norm, dx), meta)
-    end
-
-    %{st | last_levels: lv, sat_counts: sat_counts}
+  if dx > shock_thr do
+    :telemetry.execute(@event_shock, Map.put(meas, :delta_norm, dx), meta)
   end
+
+  %{st | last_levels: lv, sat_counts: sat_counts}
+end
 
   defp decorate_snapshot(%{levels: lv, last_dt_ms: dt} = st) do
     da  = Map.get(lv, :da, 0.5)
@@ -402,8 +412,8 @@ defmodule Brain.MoodCore do
     end
   end
 
-  defp to_pos_int(v, default) when is_integer(v) and v > 0,  do: v
-  defp to_pos_int(v, default) when is_float(v)   and v > 0,  do: trunc(v)
+  defp to_pos_int(v, _default) when is_integer(v) and v > 0,  do: v
+  defp to_pos_int(v, _default) when is_float(v)   and v > 0,  do: trunc(v)
   defp to_pos_int(v, default) when is_binary(v) do
     case Integer.parse(String.trim(v)) do
       {n, _} when n > 0 -> n
@@ -412,7 +422,7 @@ defmodule Brain.MoodCore do
   end
   defp to_pos_int(_, default), do: default
 
-  defp to_float(v, default) when is_number(v), do: v * 1.0
+  defp to_float(v, _default) when is_number(v), do: v * 1.0
   defp to_float(v, default) when is_binary(v) do
     case Float.parse(String.trim(v)) do
       {n, _} -> n

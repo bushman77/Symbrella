@@ -178,7 +178,7 @@ defmodule Brain.LIFG.Stage1 do
               # --------- Cerebellum calibration (gated by margin) ---------
               ctx_key = Cerebellum.context_key({:lifg_stage1, intent: intent_key(si0), mwe: token_mwe?})
 
-              cereb_opts = to_map([scope: "lifg_stage1", context_key: ctx_key, margin_tau: margin_thr])
+cereb_opts = kw_to_map([scope: "lifg_stage1", context_key: ctx_key, margin_tau: margin_thr])
 
               cal_scores =
                 Cerebellum.calibrate_scores(
@@ -310,11 +310,15 @@ defmodule Brain.LIFG.Stage1 do
     {:ok, Map.put(state, :mood_handler, mood_id)}
   end
 
+  # Group terminate/2 clauses together
   @impl true
   def terminate(_reason, %{mood_handler: mood_id}) when is_binary(mood_id) do
     :telemetry.detach(mood_id)
     :ok
   end
+
+  @impl true
+  def terminate(_reason, _state), do: :ok
 
   # Convenience: optional public status/0 for dashboards (BrainLive will use it if present)
   def status do
@@ -324,6 +328,7 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
+  # Group ALL handle_call/3 clauses together
   @impl true
   def handle_call(:status, _from, state) do
     reply = %{
@@ -337,12 +342,34 @@ defmodule Brain.LIFG.Stage1 do
     {:reply, reply, state}
   end
 
-  # (Optional) lets other code fetch the raw GenServer state
   @impl true
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
-  def terminate(_reason, _state), do: :ok
+  @impl true
+  def handle_call({:score, ctx}, _from, state) do
+    base = get_num(ctx, :base_score, 0.0) |> clamp01()
+    {factor, bias, mood_snapshot, mw, cap} = mood_factor(state.mood, state.opts)
+    final = clamp01(base * factor)
 
+    :telemetry.execute(
+      [:brain, :lifg, :stage1, :score],
+      %{score: final},
+      %{
+        token: Map.get(ctx, :token) || Map.get(ctx, "token"),
+        sense_id: Map.get(ctx, :sense_id) || Map.get(ctx, "sense_id"),
+        base_score: base,
+        mood_bias: bias,
+        mood_snapshot: mood_snapshot,
+        mood_weights: mw,
+        mood_cap: cap,
+        v: 2
+      }
+    )
+
+    {:reply, final, state}
+  end
+
+  # (Telemetry bridge helpers can stay anywhere; they’re not overlapping arity)
   @doc false
   def on_mood_update(_event, measurements, _meta, %{pid: pid}) when is_pid(pid) do
     send(pid, {:mood_update, measurements})
@@ -368,29 +395,6 @@ defmodule Brain.LIFG.Stage1 do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  @impl true
-  def handle_call({:score, ctx}, _from, state) do
-    base = get_num(ctx, :base_score, 0.0) |> clamp01()
-    {factor, bias, mood_snapshot, mw, cap} = mood_factor(state.mood, state.opts)
-    final = clamp01(base * factor)
-
-    :telemetry.execute(
-      [:brain, :lifg, :stage1, :score],
-      %{score: final},
-      %{
-        token: Map.get(ctx, :token) || Map.get(ctx, "token"),
-        sense_id: Map.get(ctx, :sense_id) || Map.get(ctx, "sense_id"),
-        base_score: base,
-        mood_bias: bias,
-        mood_snapshot: mood_snapshot,
-        mood_weights: mw,
-        mood_cap: cap,
-        v: 2
-      }
-    )
-
-    {:reply, final, state}
-  end
 
   # ---------- Feature engineering ----------
   defp lex_fit(cnrm, token_phrase, token_mwe?) do
@@ -635,11 +639,14 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   # ——— tolerant map helper (no guard calling Keyword.keyword?/1) ———
-  defp to_map(%{} = m), do: m
-  defp to_map(list) when is_list(list) do
-    if Keyword.keyword?(list), do: Map.new(list), else: %{}
+# lib/brain/lifg/stage1.ex
+defp kw_to_map(v) do
+  cond do
+    is_list(v) and Keyword.keyword?(v) -> Map.new(v)
+    is_map(v)                          -> v
+    true                               -> %{}
   end
-  defp to_map(_), do: %{}
+end
 
   # ---------- Relation helpers (safe dynamic calls) ----------
   defp relations_count_overlaps(si0) do

@@ -172,7 +172,7 @@ defmodule Brain.OFC do
 
   # ---- Math & helpers -------------------------------------------------------
 
-  defp mood_factor(nil, weights, cap), do: {1.0, weights, nil}
+  defp mood_factor(nil, weights, _cap), do: {1.0, weights, nil}
   defp mood_factor(mood, weights, cap) do
     dx = %{
       expl:  (Map.get(mood, :exploration, 0.5) - 0.5),
@@ -235,13 +235,13 @@ defmodule Brain.OFC do
     end
   end
 
-  defp meta_get(meta, key, default \\ nil) do
-    case {Map.get(meta, key), Map.get(meta, to_string(key))} do
-      {nil, nil} -> default
-      {v, _}     -> v
-      {_, v}     -> v
-    end
+defp meta_get(meta, key, default) do
+  case {Map.get(meta, key), Map.get(meta, to_string(key))} do
+    {nil, nil} -> default
+    {nil, v}   -> v
+    {v, _}     -> v
   end
+end
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp clamp01(_), do: 0.0

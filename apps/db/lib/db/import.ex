@@ -141,7 +141,6 @@ defmodule Db.Import do
   end
 
   # ---- entry -> list of senses ----
-  defp to_senses(entry), do: to_senses(entry, @include_unglossed)
   defp to_senses(entry, include_unglossed?) when is_map(entry) do
     word   = entry["word"]
     pos0   = entry["pos"]

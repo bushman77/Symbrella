@@ -148,10 +148,10 @@ defmodule Brain.WM.Policy do
   defp safe_sem_bias(cand) do
     try do
       Brain.Semantics.bias_for(cand)
-    catch
-      _, _ -> 0.0
     rescue
       _ -> 0.0
+    catch
+      _, _ -> 0.0
     end
   end
 end

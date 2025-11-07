@@ -85,7 +85,7 @@ defmodule Brain.Prefrontal do
   defp combine(parts) when is_list(parts) do
     if Code.ensure_loaded?(Brain.Utils.ControlSignals) and
          function_exported?(Brain.Utils.ControlSignals, :combine, 1) do
-      Brain.Utils.ControlSignals.combine(parts)
+      apply(Brain.Utils.ControlSignals, :combine, [parts])
     else
       parts
       |> right_biased_merge()
@@ -95,7 +95,8 @@ defmodule Brain.Prefrontal do
 
   defp right_biased_merge(list) do
     Enum.reduce(list, %{}, fn
-      %struct{} = s, acc -> Map.merge(acc, Map.from_struct(s))
+      # match any struct without binding the module var (avoids "unused variable" warning)
+      %{__struct__: _} = s, acc -> Map.merge(acc, Map.from_struct(s))
       %{} = m, acc -> Map.merge(acc, m)
       kvs, acc when is_list(kvs) -> Map.merge(acc, normalize_kv(kvs))
       _, acc -> acc

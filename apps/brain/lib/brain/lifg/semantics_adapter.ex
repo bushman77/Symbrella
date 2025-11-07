@@ -25,26 +25,34 @@ defmodule Brain.LIFG.SemanticsAdapter do
 
   Returns updated ctx.
   """
-def adjust_ctx(%{} = ctx) do
-  # +0.05 bias when domain matches the recent intent keyword
-  intent_kw =
-    case Brain.latest_intent() do
-      %{keyword: kw} when is_binary(kw) -> String.downcase(kw)
-      _ -> nil
-    end
+  @spec adjust_ctx(map()) :: map()
+  def adjust_ctx(%{} = ctx) do
+    # +0.05 bias when domain matches the recent intent keyword
+    intent_kw =
+      case Brain.latest_intent() do
+        %{keyword: kw} when is_binary(kw) -> String.downcase(kw)
+        _ -> nil
+      end
 
-  domain = ctx[:domain] || ctx["domain"]
+    domain = ctx[:domain] || ctx["domain"]
 
-  bias =
-    if is_binary(domain) and is_binary(intent_kw) and
-         String.contains?(String.downcase(domain), intent_kw),
-       do: 0.05, else: 0.0
+    bias =
+      if is_binary(domain) and is_binary(intent_kw) and
+           String.contains?(String.downcase(domain), intent_kw) do
+        0.05
+      else
+        0.0
+      end
 
-  base = (ctx[:base_score] || ctx["base_score"] || 0.0) * 1.0
-  Map.put(ctx, :base_score, Float.min(1.0, Float.max(0.0, base + bias)))
-rescue
-  _ -> ctx
-end
+    base = (ctx[:base_score] || ctx["base_score"] || 0.0) * 1.0
+
+    # Clamp to [0.0, 1.0] using Kernel.min/max
+    clamped = min(1.0, max(0.0, base + bias))
+
+    Map.put(ctx, :base_score, clamped)
+  rescue
+    _ -> ctx
+  end
 
   @doc """
   Optionally tags or annotates a sense with semantic labels.
@@ -53,9 +61,8 @@ end
     - []        → no semantic categories
     - ["body"]  → domain tags
     - ["tool", "noun.artifact"] → WordNet-style or custom
-
   """
-  @spec semantic_tags(term(), term()) :: list(String.t())
+  @spec semantic_tags(term(), term()) :: [String.t()]
   def semantic_tags(_token, _sense_id), do: []
 
   @doc """
@@ -69,8 +76,9 @@ end
   """
   @spec semantic_distance(map(), map()) :: float() | nil
   def semantic_distance(_ctx1, _ctx2), do: nil
-# compatibility with older callers
-def inject(ctx), do: adjust_ctx(ctx)
 
+  # Compatibility with older callers
+  @spec inject(map()) :: map()
+  def inject(ctx), do: adjust_ctx(ctx)
 end
 

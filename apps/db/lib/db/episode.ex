@@ -23,7 +23,8 @@ defmodule Db.Episode do
   import Ecto.Query, only: [from: 2]
   require Logger
 
-  alias Db.Repo
+  # Your repo module is `Db` (not Db.Repo). Alias it to keep Repo.* calls intact.
+  alias Db, as: Repo
 
   @type t :: %__MODULE__{}
   @embedding_dim Application.compile_env(:db, :embedding_dim, 1536)
@@ -56,143 +57,55 @@ defmodule Db.Episode do
     |> validate_embedding_shape()
   end
 
-  # --- Helpers ---------------------------------------------------------------
+  # ───────────────────────── Public API (used by Hippocampus) ─────────────────────────
 
-  # Ensure tokens is a list of strings. Do not lowercase here (that lives in the
-  # context) to keep this schema side-effect free. Safe to call even if nil.
-  defp normalize_tokens(changeset) do
-    case get_change(changeset, :tokens) do
-      nil ->
-        changeset
+  @doc """
+  Insert an episode. Accepts either:
+    • `%{si: map(), tokens: [string()], tags: [string()], embedding: list|%Pgvector{}}`, or
+    • Hippocampus payload `%{at, slate, meta, norms}` which we adapt.
 
-      list when is_list(list) ->
-        put_change(changeset, :tokens, Enum.map(list, &to_string/1))
-
-      other ->
-        add_error(changeset, :tokens, "must be a list of strings, got: #{inspect(other)}")
-    end
+  Returns `{:ok, %Db.Episode{}} | {:error, Ecto.Changeset.t()}`.
+  """
+  @spec insert(map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
+  def insert(%{si: _} = attrs) when is_map(attrs) do
+    attrs
+    |> normalize_direct_attrs()
+    |> then(&changeset(%__MODULE__{}, &1))
+    |> Repo.insert()
   end
 
-  # Recursively convert si to a plain map, stripping structs and converting non-JSON types.
-  defp normalize_si(changeset) do
-    case get_change(changeset, :si) do
-      nil ->
-        changeset
+  def insert(%{slate: slate} = attrs) when is_map(attrs) do
+    # Adapt Hippocampus payload → episodes row
+    si        = build_si_from_slate(slate, Map.get(attrs, :meta, %{}))
+    tokens    = choose_tokens(attrs, si)
+    tags      = Map.get(attrs, :tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
+    embedding = Map.get(attrs, :embedding)
 
-      %{} = si ->
-        normalized = to_plain_map(si)
-        # Debug: Check top-level keys
-        Logger.debug("Si normalized: #{inspect(Map.keys(normalized), limit: 10)}")
-        put_change(changeset, :si, normalized)
+    base =
+      %{
+        si: si,
+        tokens: tokens,
+        tags: tags
+      }
+      |> maybe_put_embedding(embedding)
 
-      other ->
-        add_error(changeset, :si, "must be a map, got: #{inspect(other)}")
-    end
+    base
+    |> then(&changeset(%__MODULE__{}, &1))
+    |> Repo.insert()
   end
 
-  # Core recursive converter: Handles structs, maps, lists, MapSets, and tuples.
-  defp to_plain_map(%{__struct__: _} = struct) do
-    # Strip __struct__ and __meta__, recurse on nests
-    struct
-    |> Map.from_struct()
-    # Drop Ecto metadata
-    |> Map.delete(:__meta__)
-    |> Map.new(fn {k, v} ->
-      {k, to_plain_map(v)}
-    end)
-    |> convert_non_json_types()
+  def insert(other) do
+    {:error, change(%__MODULE__{}, %{}) |> add_error(:base, "unsupported episode payload: #{inspect(other)}")}
   end
 
-  defp to_plain_map(tuple) when is_tuple(tuple) do
-    # Convert tuples (e.g., span: {0, 11} or trace tuples) to lists
-    Tuple.to_list(tuple) |> Enum.map(&to_plain_map/1)
-  end
-
-  defp to_plain_map(map) when is_map(map) do
-    # Recurse on nested maps (non-structs)
-    Map.new(map, fn {k, v} ->
-      {k, to_plain_map(v)}
-    end)
-  end
-
-  defp to_plain_map(list) when is_list(list) do
-    # Recurse on lists
-    Enum.map(list, &to_plain_map/1)
-  end
-
-  defp to_plain_map(%MapSet{} = set) do
-    # Convert MapSet to list for JSON
-    Enum.to_list(set)
-  end
-
-  # Fallback: Leave primitives as-is
-  defp to_plain_map(value), do: value
-
-  # Specialized handling for known non-JSON nests in si (e.g., activation_summary, trace)
-  defp convert_non_json_types(map) when is_map(map) do
-    map
-    |> Map.update(:activation_summary, %{}, fn summary ->
-      Map.update(summary, :db_hits, [], fn hits ->
-        # Ensures MapSet → list
-        to_plain_map(hits)
-      end)
-    end)
-    |> Map.update(:trace, [], fn trace ->
-      Enum.map(trace, fn item ->
-        # Handles tuples → lists or maps
-        to_plain_map(item)
-      end)
-    end)
-    |> Map.update(:active_cells, [], fn cells ->
-      # Ensures BrainCell structs → plain maps
-      Enum.map(cells, &to_plain_map/1)
-    end)
-  end
-
-  defp convert_non_json_types(value), do: value
-
-  defp put_token_count(changeset) do
-    tokens = get_field(changeset, :tokens) || []
-    put_change(changeset, :token_count, length(tokens))
-  end
-
-  defp validate_embedding_shape(changeset) do
-    val = get_change(changeset, :embedding, get_field(changeset, :embedding))
-
-    cond do
-      is_nil(val) ->
-        changeset
-
-      match?(%Pgvector{}, val) ->
-        case Pgvector.to_list(val) do
-          list when is_list(list) and length(list) == @embedding_dim ->
-            changeset
-
-          list when is_list(list) ->
-            add_error(
-              changeset,
-              :embedding,
-              "embedding length must be #{@embedding_dim} (got #{length(list)})"
-            )
-
-          _ ->
-            add_error(changeset, :embedding, "invalid pgvector value")
-        end
-
-      is_list(val) ->
-        if length(val) == @embedding_dim do
-          changeset
-        else
-          add_error(
-            changeset,
-            :embedding,
-            "embedding length must be #{@embedding_dim} (got #{length(val)})"
-          )
-        end
-
-      true ->
-        add_error(changeset, :embedding, "embedding must be a list of floats or a %Pgvector{}")
-    end
+  @doc """
+  "Enqueue" a write. If you don’t have a job runner yet, we just perform a best-effort
+  synchronous insert and return `:ok`. This keeps Hippocampus happy without adding infra.
+  """
+  @spec enqueue_write(map()) :: :ok
+  def enqueue_write(attrs) when is_map(attrs) do
+    _ = insert(attrs)
+    :ok
   end
 
   # ───────────────────────── Query helpers (KNN) ─────────────────────────
@@ -206,21 +119,6 @@ defmodule Db.Episode do
     * `:tokens_any`  – list of tokens; requires overlap via `tokens && ^list` (optional)
     * `:tags_any`    – list of tags; requires overlap via `tags && ^list` (optional)
     * `:since`       – minimum `inserted_at` (NaiveDateTime) (optional)
-
-  ## Returns
-    A list of maps (lightweight payload for recall):
-    %{
-      id:           episode_id,
-      si:           map(),
-      tags:         [string()],
-      inserted_at:  NaiveDateTime.t(),
-      distance:     float()   # cosine distance in 0..2 (similarity = 1 - distance)
-    }
-
-  Notes
-  -----
-  • Accepts a raw list(float) or `%Pgvector{}` for `embedding`.
-  • Uses `type(^emb, Pgvector.Ecto.Vector)` so Postgres treats the param as `vector`.
   """
   @spec knn([number()] | Pgvector.t(), keyword()) ::
           [%{id: any(), si: map(), tags: [String.t()], inserted_at: NaiveDateTime.t(), distance: float()}]
@@ -249,7 +147,7 @@ defmodule Db.Episode do
         base
         |> then(fn q -> if user_id, do: from(e in q, where: e.user_id == ^user_id), else: q end)
         |> then(fn q -> if is_list(tokens_any) and tokens_any != [], do: from(e in q, where: fragment("? && ?", e.tokens, ^tokens_any)), else: q end)
-        |> then(fn q -> if is_list(tags_any) and tags_any != [], do: from(e in q, where: fragment("? && ?", e.tags, ^tags_any)), else: q end)
+        |> then(fn q -> if is_list(tags_any)    and tags_any    != [], do: from(e in q, where: fragment("? && ?", e.tags,   ^tags_any)), else: q end)
         |> then(fn q -> if match?(%NaiveDateTime{}, since), do: from(e in q, where: e.inserted_at >= ^since), else: q end)
 
       Repo.all(scoped)
@@ -259,6 +157,142 @@ defmodule Db.Episode do
         []
     end
   end
+
+  # ───────────────────────── Changeset helpers ─────────────────────────
+
+  defp normalize_tokens(changeset) do
+    case get_change(changeset, :tokens) do
+      nil ->
+        changeset
+
+      list when is_list(list) ->
+        put_change(changeset, :tokens, Enum.map(list, &to_string/1))
+
+      other ->
+        add_error(changeset, :tokens, "must be a list of strings, got: #{inspect(other)}")
+    end
+  end
+
+  defp normalize_si(changeset) do
+    case get_change(changeset, :si) do
+      nil ->
+        changeset
+
+      %{} = si ->
+        normalized = to_plain_map(si)
+        Logger.debug("Si normalized: #{inspect(Map.keys(normalized), limit: 10)}")
+        put_change(changeset, :si, normalized)
+
+      other ->
+        add_error(changeset, :si, "must be a map, got: #{inspect(other)}")
+    end
+  end
+
+  defp put_token_count(changeset) do
+    tokens = get_field(changeset, :tokens) || []
+    put_change(changeset, :token_count, length(tokens))
+  end
+
+  defp validate_embedding_shape(changeset) do
+    val = get_change(changeset, :embedding, get_field(changeset, :embedding))
+
+    cond do
+      is_nil(val) ->
+        changeset
+
+      match?(%Pgvector{}, val) ->
+        case Pgvector.to_list(val) do
+          list when is_list(list) and length(list) == @embedding_dim ->
+            changeset
+
+          list when is_list(list) ->
+            add_error(changeset, :embedding, "embedding length must be #{@embedding_dim} (got #{length(list)})")
+
+          _ ->
+            add_error(changeset, :embedding, "invalid pgvector value")
+        end
+
+      is_list(val) ->
+        if length(val) == @embedding_dim do
+          changeset
+        else
+          add_error(changeset, :embedding, "embedding length must be #{@embedding_dim} (got #{length(val)})")
+        end
+
+      true ->
+        add_error(changeset, :embedding, "embedding must be a list of floats or a %Pgvector{}")
+    end
+  end
+
+  # ───────────────────────── Normalizers & builders ─────────────────────────
+
+  defp normalize_direct_attrs(attrs) do
+    %{
+      si: Map.get(attrs, :si) || Map.get(attrs, "si") || %{},
+      tokens: attrs |> Map.get(:tokens, Map.get(attrs, "tokens", [])) |> ensure_string_list(),
+      tags: attrs |> Map.get(:tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
+    }
+    |> maybe_put_embedding(Map.get(attrs, :embedding, Map.get(attrs, "embedding")))
+  end
+
+  defp maybe_put_embedding(map, nil), do: map
+  defp maybe_put_embedding(map, %Pgvector{} = v), do: Map.put(map, :embedding, v)
+  defp maybe_put_embedding(map, list) when is_list(list), do: Map.put(map, :embedding, Pgvector.new(list))
+  defp maybe_put_embedding(map, _), do: map
+
+  defp ensure_string_list(v) when is_list(v), do: Enum.map(v, &to_string/1)
+  defp ensure_string_list(_), do: []
+
+  defp build_si_from_slate(slate, meta) do
+    %{
+      "slate" => to_plain_map(slate),
+      "meta"  => to_plain_map(meta || %{})
+    }
+  end
+
+  defp choose_tokens(attrs, si) do
+    cond do
+      is_list(attrs[:norms]) ->
+        ensure_string_list(attrs[:norms])
+
+      is_list(Map.get(attrs, "norms")) ->
+        ensure_string_list(Map.get(attrs, "norms"))
+
+      tokens = get_in(si, ["slate", "tokens"]) ->
+        ensure_string_list(tokens)
+
+      true ->
+        []
+    end
+  end
+
+  # Core recursive converter: Handles structs, maps, lists, MapSets, and tuples.
+  defp to_plain_map(%{__struct__: _} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Map.delete(:__meta__)
+    |> Map.new(fn {k, v} -> {k, to_plain_map(v)} end)
+    |> convert_non_json_types()
+  end
+
+  defp to_plain_map(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> Enum.map(&to_plain_map/1)
+  defp to_plain_map(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, to_plain_map(v)} end)
+  defp to_plain_map(list) when is_list(list), do: Enum.map(list, &to_plain_map/1)
+  defp to_plain_map(%MapSet{} = set), do: Enum.to_list(set)
+  defp to_plain_map(value), do: value
+
+  # Specialized handling for known non-JSON nests in si (e.g., activation_summary, trace)
+  defp convert_non_json_types(map) when is_map(map) do
+    map
+    |> Map.update(:activation_summary, %{}, fn summary ->
+      Map.update(summary, :db_hits, [], fn hits -> to_plain_map(hits) end)
+    end)
+    |> Map.update(:trace, [], fn trace -> Enum.map(trace, &to_plain_map/1) end)
+    |> Map.update(:active_cells, [], fn cells -> Enum.map(cells, &to_plain_map/1) end)
+  end
+  defp convert_non_json_types(value), do: value
+
+  # ───────────────────────── Utilities ─────────────────────────
 
   defp to_pgvector(%Pgvector{} = v), do: {:ok, v}
   defp to_pgvector(list) when is_list(list), do: {:ok, Pgvector.new(list)}

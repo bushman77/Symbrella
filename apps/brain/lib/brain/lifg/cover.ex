@@ -34,7 +34,7 @@ defmodule Brain.LIFG.Cover do
         if overlaps_any?(span, taken) do
           {keep, taken}
         else
-          {i, j} = span
+          #{_i, _j} = span
           {[
              %{token_index: ch.token_index, span: span, id: ch.chosen_id, margin: ch.margin}
              | keep

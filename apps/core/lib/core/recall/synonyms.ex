@@ -1,3 +1,4 @@
+# apps/core/lib/core/recall/synonyms.ex
 defmodule Core.Recall.Synonyms do
   @moduledoc """
   Thin compatibility façade for recall-time synonym usage.
@@ -24,14 +25,13 @@ defmodule Core.Recall.Synonyms do
   @default_top_k 12
 
   # --------------------------------------------------------------------
-  # NEW: Back-compat shim for older callsites that expect a plain map.
-  # Returns %{key => [syn_obj]} where syn_obj ~= %{term,pos,weight,source,key}.
+  # Back-compat shim for older callsites that expect a plain map.
+  # Aligns to Core.Synonyms.for_keys/2 returning {:ok, term, meta}.
   # --------------------------------------------------------------------
   @spec for_keys([String.t() | {String.t(), atom()} | {:mwe, [String.t()]}], keyword()) :: map()
   def for_keys(keys, opts \\ []) do
     case Core.Synonyms.for_keys(keys, opts) do
-      {:ok, %{} = map, _meta} -> map
-      {:ok, %{} = map} -> map
+      {:ok, m, _meta} when is_map(m) -> m
       _ -> Map.new(keys, &{&1, []})
     end
   end
@@ -53,11 +53,16 @@ defmodule Core.Recall.Synonyms do
 
     {norm_word, pos} =
       case word_or_map do
-        %{} = m -> {normalize_word(Map.get(m, :word) || Map.get(m, "word")), normalize_pos(Map.get(m, :pos) || Map.get(m, "pos"))}
-        w when is_binary(w) -> {normalize_word(w), nil}
+        %{} = m ->
+          {normalize_word(Map.get(m, :word) || Map.get(m, "word")),
+           normalize_pos(Map.get(m, :pos) || Map.get(m, "pos"))}
+
+        w when is_binary(w) ->
+          {normalize_word(w), nil}
       end
 
-    top_k   = Keyword.get(opts, :top_k, config(:top_k, @default_top_k))
+    top_k = Keyword.get(opts, :top_k, config(:top_k, @default_top_k))
+
     syn_opts =
       opts
       |> Keyword.put_new(:limit, top_k)
@@ -65,31 +70,20 @@ defmodule Core.Recall.Synonyms do
 
     key = build_key(norm_word, pos)
 
-    {list, cached?} =
+    {map, cached?} =
       case Core.Synonyms.for_keys([key], syn_opts) do
-        {:ok, %{} = map, meta} ->
-          {
-            map
-            |> Map.get(key, [])
-            |> Enum.map(&syn_to_entry/1)
-            |> Enum.take(top_k),
-            Map.get(meta, :cached?, false)
-          }
-
-        {:ok, %{} = map} ->
-          {
-            map
-            |> Map.get(key, [])
-            |> Enum.map(&syn_to_entry/1)
-            |> Enum.take(top_k),
-            false
-          }
-
-        {:error, _} ->
-          {[], false}
+        {:ok, m, meta} when is_map(m) -> {m, Map.get(meta, :cached?, false)}
+        _                             -> {%{}, false}  # defensive
       end
 
+    list =
+      map
+      |> Map.get(key, [])
+      |> Enum.map(&syn_to_entry/1)
+      |> Enum.take(top_k)
+
     took_ms = System.monotonic_time(:millisecond) - t0
+
     :telemetry.execute(
       [:core, :recall, :synonyms, :lookup],
       %{count: length(list)},
@@ -124,7 +118,7 @@ defmodule Core.Recall.Synonyms do
     {:ok, results, %{inputs: length(terms), unique: length(results)}}
   end
 
-  # ---------- helpers (unchanged below) --------------------------------
+  # ---------- helpers --------------------------------
 
   defp syn_to_entry(s) when is_binary(s) do
     %{lemma: s, pos: nil, prior: 0.0, source: "brain", meta: %{}}
@@ -141,7 +135,10 @@ defmodule Core.Recall.Synonyms do
   end
 
   defp syn_to_entry(%{} = s) do
-    term = Map.get(s, :lemma) || Map.get(s, :term) || Map.get(s, "lemma") || Map.get(s, "term") || ""
+    term =
+      Map.get(s, :lemma) || Map.get(s, :term) ||
+        Map.get(s, "lemma") || Map.get(s, "term") || ""
+
     %{
       lemma: term,
       pos: Map.get(s, :pos),
@@ -156,6 +153,7 @@ defmodule Core.Recall.Synonyms do
 
   defp normalize_pos(nil), do: nil
   defp normalize_pos(p) when is_atom(p), do: p
+
   defp normalize_pos(p) when is_binary(p) do
     p
     |> String.downcase()
@@ -167,6 +165,7 @@ defmodule Core.Recall.Synonyms do
       other  -> String.to_atom(other)
     end
   end
+
   defp normalize_pos(_), do: nil
 
   defp build_key(word, nil), do: word

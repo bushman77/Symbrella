@@ -16,9 +16,9 @@ defmodule Brain.Meta do
   use Brain, region: :meta
   require Logger
 
-  @ev_conf      [:brain, :lifg, :confidence]
-  @ev_conflict  [:brain, :acc, :conflict]
-  @ev_reasons   [:brain, :lifg, :reasons]
+  @ev_conf     [:brain, :lifg, :confidence] # emits %{value: conf}
+  @ev_conflict [:brain, :acc, :conflict]     # emits %{conflict: c} (our ACC)
+  @ev_reasons  [:brain, :lifg, :reasons]     # meta: %{reasons: [...]}
 
   @impl true
   def init(opts) do
@@ -28,47 +28,72 @@ defmodule Brain.Meta do
       conflict: 0.0,
       surprise: 0.0,
       last_reasons: [],
-      overrides: Map.get(opts, :overrides, %{})
+      overrides: Map.get(opts, :overrides, %{}),
+      h_conf: nil,
+      h_conflict: nil,
+      h_reasons: nil
     }
 
-    # Attach telemetry listeners (unique handler names)
-    :ok = attach(@ev_conf,     &__MODULE__.on_confidence/4)
-    :ok = attach(@ev_conflict, &__MODULE__.on_conflict/4)
-    :ok = attach(@ev_reasons,  &__MODULE__.on_reasons/4)
+    # Attach telemetry listeners with the server pid in config
+    h_conf     = attach(@ev_conf,     &__MODULE__.on_confidence/4, self())
+    h_conflict = attach(@ev_conflict, &__MODULE__.on_conflict/4,   self())
+    h_reasons  = attach(@ev_reasons,  &__MODULE__.on_reasons/4,    self())
 
-    {:ok, st}
+    {:ok, %{st | h_conf: h_conf, h_conflict: h_conflict, h_reasons: h_reasons}}
   end
 
-  defp attach(event, fun) do
+  defp attach(event, fun, pid) do
     name = {__MODULE__, event, make_ref()}
-    case :telemetry.attach(name, event, fun, %{}) do
-      :ok -> :ok
-      {:error, _} -> :ok
+    case :telemetry.attach(name, event, fun, %{pid: pid}) do
+      :ok -> name
+      {:error, _} -> name
     end
   end
 
   @impl true
-  def handle_call(:status, _from, state),
-    do: {:reply, Map.take(state, [:conf, :conflict, :surprise, :last_reasons, :region]), state}
+  def terminate(_reason, %{h_conf: hc, h_conflict: hk, h_reasons: hr}) do
+    for h <- [hc, hk, hr], do: :telemetry.detach(h)
+    :ok
+  end
+  def terminate(_reason, _), do: :ok
 
   @impl true
-  def handle_call(:reasons, _from, state),
-    do: {:reply, state.last_reasons, state}
+  def handle_call(:status, _from, state) do
+    reply = Map.take(state, [:conf, :conflict, :surprise, :last_reasons, :region])
+    {:reply, reply, state}
+  end
+
+  @impl true
+  def handle_call(:reasons, _from, state), do: {:reply, state.last_reasons, state}
+
+  @impl true
+  def handle_cast({:__update, fun}, st) when is_function(fun, 1), do: {:noreply, fun.(st)}
 
   # ——— Telemetry handlers ———
 
   @doc false
-  def on_confidence(_event, %{value: v}, _meta, state_or_pid) do
-    update_state(state_or_pid, fn st -> %{st | conf: clamp01(as_float(v))} end)
+  def on_confidence(_event, meas, _meta, %{pid: pid}) when is_pid(pid) do
+    v = pick_num(meas, [:value, :conf, :confidence])
+    if is_number(v) do
+      GenServer.cast(pid, {:__update, fn st -> %{st | conf: clamp01(as_float(v))} end})
+    end
+    :ok
   end
+  def on_confidence(_,_,_,_), do: :ok
 
   @doc false
-  def on_conflict(_event, %{value: v}, _meta, state_or_pid) do
-    update_state(state_or_pid, fn st -> %{st | conflict: clamp01(as_float(v))} end)
+  def on_conflict(_event, meas, _meta, %{pid: pid}) when is_pid(pid) do
+    # Accept both our ACC shape (%{conflict: ...}) and generic %{value: ...}
+    v = pick_num(meas, [:conflict, :value])
+    if is_number(v) do
+      GenServer.cast(pid, {:__update, fn st -> %{st | conflict: clamp01(as_float(v))} end})
+    end
+    :ok
   end
+  def on_conflict(_,_,_,_), do: :ok
 
   @doc false
-  def on_reasons(_event, _meas, %{reasons: reasons} = _meta, state_or_pid) when is_list(reasons) do
+  def on_reasons(_event, _meas, %{reasons: reasons}, %{pid: pid}) when is_pid(pid) and is_list(reasons) do
     min_margin =
       reasons
       |> Enum.map(&Kernel.get_in(&1, [:margin]))
@@ -80,24 +105,15 @@ defmodule Brain.Meta do
 
     surprise = clamp01(1.0 - min_margin)
 
-    update_state(state_or_pid, fn st ->
+    GenServer.cast(pid, {:__update, fn st ->
       %{st | last_reasons: reasons, surprise: surprise}
-    end)
+    end})
+
+    :ok
   end
-
-  def on_reasons(_e, _m, _meta, _state_or_pid), do: :ok
-
-  defp update_state(%{} = st, fun) when is_function(fun, 1), do: fun.(st)
-  defp update_state(pid, fun) when is_pid(pid), do: GenServer.cast(__MODULE__, {:__update, fun})
-  defp update_state(_other, _fun), do: :ok
-
-  @impl true
-  def handle_cast({:__update, fun}, st) when is_function(fun, 1) do
-    {:noreply, fun.(st)}
-  end
+  def on_reasons(_,_,_,_), do: :ok
 
   # ——— Public helpers ———
-
   @spec status() :: map()
   def status, do: GenServer.call(__MODULE__, :status)
 
@@ -105,9 +121,26 @@ defmodule Brain.Meta do
   def reasons, do: GenServer.call(__MODULE__, :reasons)
 
   # ——— Small utils ———
+  defp pick_num(map, keys) when is_map(map) and is_list(keys) do
+    Enum.find_value(keys, fn k ->
+      case Map.get(map, k) do
+        x when is_integer(x) -> x * 1.0
+        x when is_float(x)   -> x
+        x when is_binary(x)  ->
+          case Float.parse(x) do
+            {f, _} -> f
+            _ -> nil
+          end
+        _ -> nil
+      end
+    end)
+  end
+  defp pick_num(_, _), do: nil
+
   defp as_float(x) when is_integer(x), do: x * 1.0
-  defp as_float(x) when is_float(x), do: x
+  defp as_float(x) when is_float(x),   do: x
   defp as_float(_), do: 0.0
+
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0
 end

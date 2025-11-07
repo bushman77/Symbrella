@@ -589,40 +589,44 @@ end
     end
   end
 
-  # ───────────── Optional persistence (safe no-op if disabled/missing) ─────────────
+# ───────────── Optional persistence (safe no-op if disabled/missing) ─────────────
 
-  defp maybe_persist(at, %{slate: slate, meta: meta, norms: norms}) do
-    case Application.get_env(:brain, :episodes_persist, :off) do
-      :db ->
-        # Best-effort: only if Db.Episode is available and has insert/enqueue API.
+defp maybe_persist(at, %{slate: slate, meta: meta, norms: norms}) do
+  case Application.get_env(:brain, :episodes_persist, :off) do
+    :db ->
+      args = %{at: at, slate: slate, meta: meta, norms: MapSet.to_list(norms)}
+
+      if Code.ensure_loaded?(Db.Episode) do
         cond do
-          Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :enqueue_write, 1) ->
-            try do
-              Db.Episode.enqueue_write(%{at: at, slate: slate, meta: meta, norms: MapSet.to_list(norms)})
-            rescue
-              _ -> :ok
-            catch
-              _, _ -> :ok
-            end
+          function_exported?(Db.Episode, :enqueue_write, 1) ->
+            safe_apply(Db.Episode, :enqueue_write, [args])
 
-          Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :insert, 1) ->
-            try do
-              _ = Db.Episode.insert(%{at: at, slate: slate, meta: meta, norms: MapSet.to_list(norms)})
-            rescue
-              _ -> :ok
-            catch
-              _, _ -> :ok
-            end
+          function_exported?(Db.Episode, :insert, 1) ->
+            safe_apply(Db.Episode, :insert, [args])
 
           true ->
             :ok
         end
-
-      _ ->
+      else
         :ok
-    end
-  end
+      end
 
-  defp maybe_persist(_at, _ep), do: :ok
+    _ ->
+      :ok
+  end
+end
+
+defp maybe_persist(_at, _ep), do: :ok
+
+defp safe_apply(mod, fun, args) do
+  try do
+    apply(mod, fun, args)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+end
+
 end
 

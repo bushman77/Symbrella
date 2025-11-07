@@ -43,7 +43,6 @@ defmodule Brain.WM.Gate do
       end
     end
 
-    # fallback span for the MWE if present in tokens
     mwe_span_fallback =
       case Enum.find(tokens, fn t -> t[:mw] == true or t["mw"] == true end) do
         %{span: span} -> span
@@ -61,9 +60,9 @@ defmodule Brain.WM.Gate do
         sc = m[:weight] || m["weight"] || 1.0
         if ms && us, do: [{to_string(mwe), ms, to_string(uni), us, sc}], else: []
 
-      # already-normalized tuple forms
-      {ida, spa, idb, spb, sc} = tup -> [tup]
-      {ida, idb} = tup -> [tup]
+      # already-normalized tuple forms (avoid binding unused vars)
+      tup when is_tuple(tup) and tuple_size(tup) == 5 -> [tup]
+      tup when is_tuple(tup) and tuple_size(tup) == 2 -> [tup]
       _ -> []
     end)
   end
@@ -106,7 +105,7 @@ defmodule Brain.WM.Gate do
       cond do
         is_nil(id) -> st
         phrase_fallback_id?(id) and not allow_fb? -> st
-        true -> wm_put(st, id, score)
+        true -> wm_put(st, id, clamp01(as_float(score)))
       end
     end)
   end
@@ -135,14 +134,16 @@ defmodule Brain.WM.Gate do
     do: String.contains?(id, "|phrase|fallback")
   defp phrase_fallback_id?(_), do: false
 
+  # --- converters ---
   defp as_float(nil), do: 0.0
-  defp as_float(v) when is_number(v), do: v
+  defp as_float(v) when is_number(v), do: v * 1.0
   defp as_float(v) when is_binary(v) do
     case Float.parse(v) do
       {f, _} -> f
       _ -> 0.0
     end
   end
+  defp as_float(_), do: 0.0
 
   defp clamp01(x) when is_number(x) and x < 0.0, do: 0.0
   defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0

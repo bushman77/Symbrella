@@ -143,7 +143,7 @@ defmodule Brain.Hippocampus.DB do
   end
   defp norms_from_si(_), do: MapSet.new()
 
-  defp num(map, key, default \\ 0.0) do
+  defp num(map, key, default) do
     case {Map.get(map, key), Map.get(map, to_string(key))} do
       {v, _} when is_number(v) -> v * 1.0
       {_, v} when is_number(v) -> v * 1.0

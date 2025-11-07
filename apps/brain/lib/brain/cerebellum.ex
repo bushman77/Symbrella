@@ -11,8 +11,6 @@ defmodule Brain.Cerebellum do
   use GenServer
   alias Brain.Cerebellum.Store
 
-  @basis [:bias, :lex_fit, :rel_prior, :activation, :intent_bias]
-
   # ------- GenServer (status only) -------------------------------------------
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -193,7 +191,7 @@ defmodule Brain.Cerebellum do
 
   # ------- Config & math ------------------------------------------------------
 
-  defp cfg(k, default \\ nil), do: Application.get_env(:brain, :cerebellum, %{}) |> Map.get(k, default)
+  defp cfg(k, default), do: Application.get_env(:brain, :cerebellum, %{}) |> Map.get(k, default)
 
   defp zero_vec, do: Enum.map(cfg(:init_weights, [0.0, 0.05, 0.05, 0.03, 0.03]), fn _ -> 0.0 end)
   defp dot(w, x), do: Enum.zip(w, x) |> Enum.reduce(0.0, fn {a, b}, acc -> acc + a * b end)

@@ -22,7 +22,6 @@ defmodule Brain.Cell.Safe do
       default_retries: 1,
       warn_ms: 200
   """
-  @behaviour :gen_statem
 
   require Logger
   alias Brain.Cell.Telemetry, as: CellTelemetry
@@ -52,14 +51,14 @@ defmodule Brain.Cell.Safe do
   def call(cell, msg, opts \\ []) do
     CellTelemetry.ensure_attached() # lazy, idempotent
 
-    timeout  = opts[:timeout]  || @default_timeout_ms
-    retry?   = opts[:retry?]   || @default_retry?
-    retries  = opts[:retries]  || @default_retries
+    timeout = opts[:timeout] || @default_timeout_ms
+    retry?  = opts[:retry?]  || @default_retry?
+    retries = opts[:retries] || @default_retries
 
     do_call(cell, msg, timeout, retry?, retries, 1)
   end
 
-  # ---- Internal
+  # ---- Internal --------------------------------------------------------------
 
   defp do_call(cell, msg, timeout, retry?, retries_left, attempt) do
     start = System.monotonic_time()
@@ -89,7 +88,8 @@ defmodule Brain.Cell.Safe do
     end
   end
 
-  defp transient_retry_or_error(cell, msg, start, timeout, attempt, tag_reason, meta, retry?, retries_left) do
+  # NOTE: `_meta` retained for future tagging but intentionally unused.
+  defp transient_retry_or_error(cell, msg, start, timeout, attempt, tag_reason, _meta, retry?, retries_left) do
     if retry? and retries_left > 0 do
       emit_err(cell, msg, start, timeout, attempt, tag_reason, retried?: true)
       jitter_ms = 5 + :rand.uniform(25)

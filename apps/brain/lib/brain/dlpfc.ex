@@ -153,12 +153,12 @@ defmodule Brain.DLPFC do
     end
   end
 
-  defp meta_get(meta, key, default \\ nil) do
-    case {Map.get(meta, key), Map.get(meta, to_string(key))} do
-      {nil, nil} -> default
-      {v, _} -> v
-      {_, v} -> v
-    end
+defp meta_get(meta, key, default) do
+  case {Map.get(meta, key), Map.get(meta, to_string(key))} do
+    {nil, nil} -> default
+    {v, _} when not is_nil(v) -> v
+    {_, v} -> v
   end
+end
 end
 
