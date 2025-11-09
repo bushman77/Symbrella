@@ -15,6 +15,7 @@ defmodule Brain.LIFG.Input do
   """
 
   alias Brain.Utils.Safe
+  alias Brain.LIFG.SlateFilter
 
   @type candidate :: %{
           optional(:token_index) => non_neg_integer(),
@@ -92,19 +93,26 @@ defmodule Brain.LIFG.Input do
   def slate_for(%{} = any_map) do
     m = Safe.to_plain(any_map)
 
-    cond do
-      is_map(Safe.get(m, :sense_candidates)) ->
-        normalize_slate_map(Safe.get(m, :sense_candidates))
+    raw =
+      cond do
+        is_map(Safe.get(m, :sense_candidates)) ->
+          normalize_slate_map(Safe.get(m, :sense_candidates))
 
-      is_map(Safe.get(m, :candidates_by_token)) ->
-        normalize_slate_map(Safe.get(m, :candidates_by_token))
+        is_map(Safe.get(m, :candidates_by_token)) ->
+          normalize_slate_map(Safe.get(m, :candidates_by_token))
 
-      true ->
-        group_by_token_index(lifg_candidates!(m))
-    end
+        true ->
+          group_by_token_index(lifg_candidates!(m))
+      end
+
+    SlateFilter.sanitize_map(raw)
   end
 
-  def slate_for(list) when is_list(list), do: group_by_token_index(list)
+  def slate_for(list) when is_list(list) do
+    list
+    |> group_by_token_index()
+    |> SlateFilter.sanitize_map()
+  end
 
   # ───────────────────────────── Helpers (private) ─────────────────────────────
 

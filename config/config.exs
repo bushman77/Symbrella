@@ -105,7 +105,12 @@ config :brain,
   # per-second exponential decay (≈5.8s half-life)
   wm_decay_lambda: 0.12,
   wm_score_min: 0.0,
-  wm_score_max: 1.0
+  wm_score_max: 1.0,
+lifg_slate_filter_rules: [
+    %{lemma: "a",   allow: ~w(det article particle), drop_others?: true},
+    %{lemma: "A",   allow: ~w(det article particle), drop_others?: true},
+    %{lemma: "eat", allow: ~w(verb),                 drop_others?: true}
+  ]
 
 # LIFG mood shaping
 config :brain, :lifg_mood_weights, %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}

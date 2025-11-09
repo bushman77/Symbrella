@@ -71,10 +71,10 @@ defmodule Brain.LIFG do
     end
   end
 
-# was: def start_link(opts \\ %{}) when is_list(opts) or is_map(opts) do
-def start_link(opts) when is_list(opts) or is_map(opts) do
-  GenServer.start_link(__MODULE__, Map.new(opts), name: name())
-end
+  # was: def start_link(opts \\ %{}) when is_list(opts) or is_map(opts) do
+  def start_link(opts) when is_list(opts) or is_map(opts) do
+    GenServer.start_link(__MODULE__, Map.new(opts), name: name())
+  end
 
   # ── Server bootstrap & runtime config ────────────────────────────────
 
@@ -256,9 +256,10 @@ end
     1) ATL finalize → slate (if available)
     2) Attach si.sense_candidates
     3) Stage-1 disambiguation (probabilities & margins)
-    4) ACC assess (optional; computes :conflict and appends trace)
-    5) pMTG consult (sync rerun or async boost/none), gated by ACC when available
-    6) Post.finalize: non-overlap cover and optional reanalysis
+    4) **Fallback-rerun** if winners are `|phrase|fallback` and WM disallows fallbacks
+    5) ACC assess (optional; computes :conflict and appends trace)
+    6) pMTG consult (sync rerun or async boost/none), gated by ACC when available
+    7) Post.finalize: non-overlap cover and optional reanalysis
 
   Returns:
     {:ok, %{si, choices, slate, cover, flips}} or {:error, term()}.
@@ -306,29 +307,47 @@ end
       min_margin =
         Keyword.get(opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
+      weights_for_stage1 =
+        Map.get(opts, :weights, %{
+          lex_fit: 0.5,
+          rel_prior: 0.25,
+          activation: 0.15,
+          intent_bias: 0.10
+        })
+
       # 3) Stage-1 disambiguation
-      case Brain.LIFG.Stage1.run(
-             si2a,
-             weights:
-               Map.get(opts, :weights, %{
-                 lex_fit: 0.5,
-                 rel_prior: 0.25,
-                 activation: 0.15,
-                 intent_bias: 0.10
-               }),
-             scores: scores_mode,
-             margin_threshold: margin_thr,
-             chargram_event: [:brain, :lifg, :chargram_violation],
-             boundary_event: [:brain, :lifg, :boundary_drop]
-           ) do
+      stage1_result =
+        Brain.LIFG.Stage1.run(
+          si2a,
+          weights: weights_for_stage1,
+          scores: scores_mode,
+          margin_threshold: margin_thr,
+          chargram_event: [:brain, :lifg, :chargram_violation],
+          boundary_event: [:brain, :lifg, :boundary_drop]
+        )
+
+      case stage1_result do
         {:ok, %{si: si3, choices: raw_choices, audit: audit}} ->
-          choices =
+          choices0 =
             raw_choices
             |> Enum.map(&Safe.to_plain/1)
             |> augment_choices(si3, min_margin)
 
-          # 4) ACC (optional). If present, record conflict & gate pMTG by threshold.
-          {si3a, acc_conflict, acc_present?} = maybe_acc_gate(si3, choices, opts)
+          # 4) Fallback-rerun (P-201): if winners are `|phrase|fallback`
+          # and WM disallows fallbacks, absorb child unigrams from active_cells into MWE buckets
+          # then rerun Stage-1 and use the improved choices.
+          {si3a, choices} =
+            fallback_rerun_if_needed(
+              si3,
+              choices0,
+              weights_for_stage1,
+              scores_mode,
+              margin_thr,
+              opts
+            )
+
+          # 5) ACC (optional). If present, record conflict & gate pMTG by threshold.
+          {si3b, acc_conflict, acc_present?} = maybe_acc_gate(si3a, choices, opts)
 
           acc_conf_tau =
             Keyword.get(
@@ -337,7 +356,7 @@ end
               Application.get_env(:brain, :acc_conflict_tau, 0.50)
             )
 
-          # 5) pMTG consult (respect ACC gate when ACC is present)
+          # 6) pMTG consult (respect ACC gate when ACC is present)
           pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
 
           pmtg_apply? =
@@ -350,7 +369,7 @@ end
                 :rerun ->
                   case Brain.PMTG.consult_sync(
                          choices,
-                         Safe.get(si3a, :tokens, []),
+                         Safe.get(si3b, :tokens, []),
                          already_needy: false,
                          margin_threshold: margin_thr,
                          limit: Keyword.get(opts, :limit, 5),
@@ -363,26 +382,26 @@ end
                            })
                        ) do
                     {:ok, %{si: si_after, choices: merged}} -> {si_after, merged}
-                    _ -> {si3a, choices}
+                    _ -> {si3b, choices}
                   end
 
                 _other ->
                   _ =
                     Brain.PMTG.consult(
                       choices,
-                      Safe.get(si3a, :tokens, []),
+                      Safe.get(si3b, :tokens, []),
                       margin_threshold: margin_thr,
                       limit: Keyword.get(opts, :limit, 5),
                       mode: pmtg_mode
                     )
 
-                  {si3a, choices}
+                  {si3b, choices}
               end
             else
-              {si3a, choices}
+              {si3b, choices}
             end
 
-          # 6) Post.finalize — non-overlap cover + optional reanalysis
+          # 7) Post.finalize — non-overlap cover + optional reanalysis
           post_out =
             Post.finalize(
               final_si,
@@ -748,86 +767,86 @@ end
 
   defp ensure_mwe_candidates(si, _opts), do: si
 
-# --- absorb unigram senses into overlapping MWE buckets -----------------
+  # --- absorb unigram senses into overlapping MWE buckets -----------------
 
-defp absorb_unigrams_into_mwe(%{tokens: toks} = si, opts) when is_list(toks) do
-  # opt-in to avoid surprises; turn on with opts: [absorb_unigrams_into_mwe?: true]
-  unless Keyword.get(opts, :absorb_unigrams_into_mwe?, false), do: si
+  defp absorb_unigrams_into_mwe(%{tokens: toks} = si, opts) when is_list(toks) do
+    # opt-in to avoid surprises; turn on with opts: [absorb_unigrams_into_mwe?: true]
+    unless Keyword.get(opts, :absorb_unigrams_into_mwe?, false), do: si
 
-  sc0    = Map.get(si, :sense_candidates, %{})
-  cells  = Safe.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
+    sc0    = Map.get(si, :sense_candidates, %{})
+    cells  = Safe.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
 
-  cells_by_norm =
-    Enum.group_by(cells, fn c ->
-      (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> down()
-    end)
+    cells_by_norm =
+      Enum.group_by(cells, fn c ->
+        (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> down()
+      end)
 
-  updated =
-    Enum.reduce(Enum.with_index(toks), sc0, fn {tok, idx}, acc ->
-      n   = Safe.get(tok, :n, 1)
-      mw? = Safe.get(tok, :mw, n > 1)
-      mwe_span = Safe.get(tok, :span)
+    updated =
+      Enum.reduce(Enum.with_index(toks), sc0, fn {tok, idx}, acc ->
+        n   = Safe.get(tok, :n, 1)
+        mw? = Safe.get(tok, :mw, n > 1)
+        mwe_span = Safe.get(tok, :span)
 
-      if mw? and is_tuple(mwe_span) do
-        child_norms =
-          toks
-          |> Enum.with_index()
-          |> Enum.filter(fn {t, j} ->
-            j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), mwe_span)
-          end)
-          |> Enum.map(fn {t, _} ->
-            (Safe.get(t, :phrase) || Safe.get(t, :word) || "") |> down()
-          end)
-          |> Enum.reject(&(&1 == ""))
+        if mw? and is_tuple(mwe_span) do
+          child_norms =
+            toks
+            |> Enum.with_index()
+            |> Enum.filter(fn {t, j} ->
+              j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), mwe_span)
+            end)
+            |> Enum.map(fn {t, _} ->
+              (Safe.get(t, :phrase) || Safe.get(t, :word) || "") |> down()
+            end)
+            |> Enum.reject(&(&1 == ""))
 
-        absorbed =
-          child_norms
-          |> Enum.flat_map(&Map.get(cells_by_norm, &1, []))
-          |> Enum.map(fn c ->
-            norm = (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> to_string()
-            %{
-              id: to_string(Safe.get(c, :id)),
-              lemma: norm,
-              norm: norm,
-              mw: false,
-              pos: Safe.get(c, :pos),
-              rel_prior: 0.20,
-              score: 0.20,
-              source: :absorbed_unigram
-            }
-          end)
+          absorbed =
+            child_norms
+            |> Enum.flat_map(&Map.get(cells_by_norm, &1, []))
+            |> Enum.map(fn c ->
+              norm = (Safe.get(c, :norm) || Safe.get(c, :word) || "") |> to_string()
+              %{
+                id: to_string(Safe.get(c, :id)),
+                lemma: norm,
+                norm: norm,
+                mw: false,
+                pos: Safe.get(c, :pos),
+                rel_prior: 0.20,
+                score: 0.20,
+                source: :absorbed_unigram
+              }
+            end)
 
-        if absorbed == [] do
-          acc
+          if absorbed == [] do
+            acc
+          else
+            merged =
+              absorbed ++ Map.get(acc, idx, [])
+              |> Enum.uniq_by(&(&1[:id] || &1["id"]))
+
+            Map.put(acc, idx, merged)
+          end
         else
-          merged =
-            absorbed ++ Map.get(acc, idx, [])
-            |> Enum.uniq_by(&(&1[:id] || &1["id"]))
-
-          Map.put(acc, idx, merged)
+          acc
         end
-      else
-        acc
-      end
-    end)
+      end)
 
-  Map.put(si, :sense_candidates, updated)
-end
+    Map.put(si, :sense_candidates, updated)
+  end
 
-defp absorb_unigrams_into_mwe(si, _opts), do: si
+  defp absorb_unigrams_into_mwe(si, _opts), do: si
 
-# helpers used above
-defp inside?({s, l}, {ps, pl})
-     when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
-  e  = s + l
-  pe = ps + pl
-  s >= ps and e <= pe
-end
-defp inside?(_, _), do: false
+  # helpers used above
+  defp inside?({s, l}, {ps, pl})
+       when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
+    e  = s + l
+    pe = ps + pl
+    s >= ps and e <= pe
+  end
+  defp inside?(_, _), do: false
 
-defp down(s) when is_binary(s),
-  do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
-defp down(_), do: ""
+  defp down(s) when is_binary(s),
+    do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+  defp down(_), do: ""
 
   # If a multiword token only has a |phrase|fallback, inject real phrase cells from si.active_cells.
   defp backfill_real_mwe_from_active_cells(si) do
@@ -1155,6 +1174,123 @@ defp down(_), do: ""
       audit: audit || %{},
       meta: meta || %{}
     }
+  end
+
+  # ── P-201: fallback-rerun helpers -------------------------------------------
+
+  # Decide whether to rerun, and do so by absorbing child unigrams from active_cells
+  # into the affected MWE buckets, then calling Stage-1 again.
+  defp fallback_rerun_if_needed(si3, choices0, weights_for_stage1, scores_mode, margin_thr, opts) do
+    rerun_on_fallback? = Keyword.get(opts, :rerun_on_fallback?, true)
+
+    {allow_fallback_into_wm?, wm_present?} =
+      case si3 do
+        %{wm_cfg: %{allow_fallback_into_wm?: v}} -> {!!v, true}
+        _ -> {Keyword.get(opts, :allow_fallback_into_wm?, false), false}
+      end
+
+    idxs = fallback_winner_indices(choices0)
+
+    needs_rerun? =
+      rerun_on_fallback? and idxs != [] and not allow_fallback_into_wm?
+
+    if needs_rerun? do
+      # Build heads for telemetry/debug (unigram children inside each MWE span)
+      heads_by_idx = heads_for_indices(si3, idxs)
+
+      # absorb unigrams from active_cells → affected MWE buckets only
+      si3_absorb =
+        absorb_unigrams_into_mwe(
+          si3,
+          Keyword.put(opts, :absorb_unigrams_into_mwe?, true)
+        )
+
+      # mark trace + telemetry
+      now_ms = System.system_time(:millisecond)
+
+      ev = %{
+        stage: :lifg_rerun,
+        reason: :mwe_fallback,
+        ts_ms: now_ms,
+        token_indices: idxs,
+        heads_by_idx: heads_by_idx,
+        wm_cfg_seen?: wm_present?,
+        allow_fallback_into_wm?: allow_fallback_into_wm?
+      }
+
+      si3_trace =
+        Map.update(si3_absorb, :trace, [ev], fn tr -> [ev | tr] end)
+
+      safe_exec_telemetry(
+        [:brain, :lifg, :rerun],
+        %{count: length(idxs)},
+        %{
+          reason: :mwe_fallback,
+          token_indices: idxs,
+          heads_by_idx: heads_by_idx
+        }
+      )
+
+      # re-run Stage-1 with same weights/thresholds
+      case Brain.LIFG.Stage1.run(
+             si3_trace,
+             weights: weights_for_stage1,
+             scores: scores_mode,
+             margin_threshold: margin_thr,
+             chargram_event: [:brain, :lifg, :chargram_violation],
+             boundary_event: [:brain, :lifg, :boundary_drop]
+           ) do
+        {:ok, %{si: si_rerun, choices: raw2}} ->
+          choices2 =
+            raw2
+            |> Enum.map(&Safe.to_plain/1)
+            |> augment_choices(si_rerun, Keyword.get(opts, :min_margin, 0.05))
+
+          {si_rerun, choices2}
+
+        _ ->
+          # If rerun fails for any reason, fall back to original
+          {si3_trace, choices0}
+      end
+    else
+      {si3, choices0}
+    end
+  end
+
+  defp fallback_winner_indices(choices) do
+    Enum.reduce(choices, [], fn ch, acc ->
+      id = to_string(Safe.get(ch, :chosen_id, ""))
+      if String.ends_with?(id, "|phrase|fallback"),
+        do: [Safe.get(ch, :token_index, 0) | acc],
+        else: acc
+    end)
+    |> Enum.reverse()
+    |> Enum.uniq()
+  end
+
+  # Build a debug map of heads per token index using child unigrams inside each MWE span
+  defp heads_for_indices(si, idxs) do
+    toks = Safe.get(si, :tokens, [])
+    Enum.reduce(idxs, %{}, fn idx, acc ->
+      heads =
+        case Enum.at(toks, idx) do
+          nil -> []
+          tok ->
+            span = Safe.get(tok, :span)
+            toks
+            |> Enum.with_index()
+            |> Enum.filter(fn {t, j} ->
+              j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), span)
+            end)
+            |> Enum.map(fn {t, _} ->
+              Safe.get(t, :phrase) || Safe.get(t, :word) || Safe.get(t, :lemma) || ""
+            end)
+            |> Enum.map(&down/1)
+            |> Enum.reject(&(&1 in ["", "a", "an", "the"]))
+        end
+
+      Map.put(acc, idx, heads)
+    end)
   end
 end
 

@@ -1,3 +1,4 @@
+# apps/brain/lib/brain.ex
 defmodule Brain do
   @moduledoc """
   Central coordinator for `Brain.Cell` processes **and** a tiny `use Brain, region: :xyz` macro.
@@ -22,48 +23,48 @@ defmodule Brain do
         use Brain, region: :lifg
       end
   """
-defmacro __using__(opts) do
-  region = Keyword.fetch!(opts, :region)
+  defmacro __using__(opts) do
+    region = Keyword.fetch!(opts, :region)
 
-  quote location: :keep, bind_quoted: [region: region] do
-    use GenServer
-    @region region
+    quote location: :keep, bind_quoted: [region: region] do
+      use GenServer
+      @region region
 
-    @doc false
-    def start_link(opts) do
-      name =
-        if is_list(opts) do
-          Keyword.get(opts, :name, __MODULE__)
-        else
-          Map.get(Map.new(opts), :name, __MODULE__)
-        end
+      @doc false
+      def start_link(opts) do
+        name =
+          if is_list(opts) do
+            Keyword.get(opts, :name, __MODULE__)
+          else
+            Map.get(Map.new(opts), :name, __MODULE__)
+          end
 
-      GenServer.start_link(__MODULE__, opts, name: name)
+        GenServer.start_link(__MODULE__, opts, name: name)
+      end
+
+      def child_spec(opts) do
+        %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [opts]},
+          type: :worker,
+          restart: :permanent,
+          shutdown: 500
+        }
+      end
+
+      @impl true
+      def init(opts), do: {:ok, %{region: @region, opts: Map.new(opts), stats: %{}}}
+      @impl true
+      def handle_call(:status, _from, state), do: {:reply, state, state}
+      @impl true
+      def handle_cast(_msg, state), do: {:noreply, state}
+      @impl true
+      def handle_info(_msg, state), do: {:noreply, state}
+
+      # 👇 critical line:
+      defoverridable start_link: 1, child_spec: 1, init: 1, handle_call: 3, handle_cast: 2, handle_info: 2
     end
-
-    def child_spec(opts) do
-      %{
-        id: __MODULE__,
-        start: {__MODULE__, :start_link, [opts]},
-        type: :worker,
-        restart: :permanent,
-        shutdown: 500
-      }
-    end
-
-    @impl true
-    def init(opts), do: {:ok, %{region: @region, opts: Map.new(opts), stats: %{}}}
-    @impl true
-    def handle_call(:status, _from, state), do: {:reply, state, state}
-    @impl true
-    def handle_cast(_msg, state), do: {:noreply, state}
-    @impl true
-    def handle_info(_msg, state), do: {:noreply, state}
-
-    # 👇 critical line:
-    defoverridable start_link: 1, child_spec: 1, init: 1, handle_call: 3, handle_cast: 2, handle_info: 2
   end
-end
 
   # ───────────────────────── Brain Server ─────────────────────────
 
@@ -248,6 +249,7 @@ end
   def handle_call({:focus, cands_or_si, opts}, _from, state) do
     {wm_next, added, removed} = do_focus(state, cands_or_si, Map.new(opts))
     emit_wm_update(state.wm_cfg.capacity, length(wm_next), added, removed)
+    _ = safe_mood_update_wm(wm_next)
     {:reply, wm_next, %{state | wm: wm_next}}
   end
 
@@ -255,6 +257,7 @@ end
   def handle_call({:defocus, id_or_fun}, _from, state) do
     {wm2, removed} = WorkingMemory.remove(state.wm, id_or_fun)
     emit_wm_update(state.wm_cfg.capacity, length(wm2), 0, removed, :defocus)
+    _ = safe_mood_update_wm(wm2)
     {:reply, :ok, %{state | wm: wm2}}
   end
 
@@ -317,6 +320,7 @@ end
         else
           {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
           emit_wm_update(state1.wm_cfg.capacity, length(wm_next), added, removed, :gate_from_lifg)
+          _ = safe_mood_update_wm(wm_next)
           %{state1 | wm: wm_next}
         end
       else
@@ -390,7 +394,9 @@ end
 
   @impl true
   def handle_cast({:activation_report, id, a}, state) when is_binary(id) and is_number(a) do
-    {:noreply, %{state | active_cells: Map.put(state.active_cells, id, a)}}
+    new_active = Map.put(state.active_cells, id, a)
+    _ = safe_mood_register_activation(new_active)
+    {:noreply, %{state | active_cells: new_active}}
   end
 
   @impl true
@@ -405,12 +411,16 @@ end
 
   @impl true
   def handle_cast({:set_latest_intent, m}, state) do
-    {:noreply, %{state | last_intent: normalize_intent_map(m)}}
+    li = normalize_intent_map(m)
+    _ = safe_mood_apply_intent(li.intent, li.confidence)
+    {:noreply, %{state | last_intent: li}}
   end
 
   @impl true
   def handle_cast({:gate_from_lifg, si, opts}, state) do
-    {:noreply, Brain.WM.Gate.ingest_from_si(state, si, opts)}
+    new_state = Brain.WM.Gate.ingest_from_si(state, si, opts)
+    _ = safe_mood_update_wm(new_state.wm)
+    {:noreply, new_state}
   end
 
   # ───────────────────────── Public helper: recall → WM ───────────────────────
@@ -776,7 +786,7 @@ end
 
         is_binary(w) ->
           l = String.downcase(w)
-          %{token_index: 0, lemma: l, score: 1.0}
+          %{token_index: 0, id: "#{l}|phrase|fallback", lemma: l, score: 1.0, source: :runtime}
 
         true ->
           %{token_index: 0, score: 0.0}
@@ -906,43 +916,42 @@ end
 
   # ───────────────────────── ACC hook ─────────────────────────────────────────
 
-# Brain.ex
-# Accepts *anything* and never crashes the pipeline.
-defp maybe_assess_acc(si, opts) do
-  unless is_map(si) do
-    {si, 0.0}
-  else
-    case safe_acc_assess(si, opts) do
-      {:ok, %{si: si2, conflict: c}} ->
-        c1 = to_float_01(c)
-        {Map.put(si2, :acc_conflict, c1), c1}
+  # Accepts *anything* and never crashes the pipeline.
+  defp maybe_assess_acc(si, opts) do
+    unless is_map(si) do
+      {si, 0.0}
+    else
+      case safe_acc_assess(si, opts) do
+        {:ok, %{si: si2, conflict: c}} ->
+          c1 = to_float_01(c)
+          {Map.put(si2, :acc_conflict, c1), c1}
 
-      _ ->
-        c0 = Map.get(si, :acc_conflict, 0.0) |> to_float_01()
-        {si, c0}
+        _ ->
+          c0 = Map.get(si, :acc_conflict, 0.0) |> to_float_01()
+          {si, c0}
+      end
     end
   end
-end
 
-defp safe_acc_assess(si, opts) do
-  opts_kw = if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
+  defp safe_acc_assess(si, opts) do
+    opts_kw = if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
 
-  # Avoid compile-time warnings if ACC isn’t available yet
-  res =
-    if Code.ensure_loaded?(Brain.ACC) and function_exported?(Brain.ACC, :assess, 2) do
-      try do
-        apply(Brain.ACC, :assess, [si, opts_kw])
-      rescue
-        _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
-      catch
-        _, _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
+    # Avoid compile-time warnings if ACC isn’t available yet
+    res =
+      if Code.ensure_loaded?(Brain.ACC) and function_exported?(Brain.ACC, :assess, 2) do
+        try do
+          apply(Brain.ACC, :assess, [si, opts_kw])
+        rescue
+          _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
+        catch
+          _, _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
+        end
+      else
+        {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
       end
-    else
-      {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
-    end
 
-  res
-end
+    res
+  end
 
   # --- converters (centralized) ---
   defp as_float(x) when is_number(x), do: x * 1.0
@@ -1087,5 +1096,31 @@ end
     end
   end
   defp guess_lemma_from_id(_), do: nil
+
+  # ───────────────────────── MoodCore safe hooks (new) ────────────────────────
+
+  defp safe_mood_apply_intent(intent, conf) do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :apply_intent, 2) do
+      Brain.MoodCore.apply_intent(intent, conf)
+    else
+      :ok
+    end
+  end
+
+  defp safe_mood_register_activation(active_cells) do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :register_activation, 1) do
+      Brain.MoodCore.register_activation(active_cells)
+    else
+      :ok
+    end
+  end
+
+  defp safe_mood_update_wm(wm_list) do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :update_wm, 1) do
+      Brain.MoodCore.update_wm(wm_list)
+    else
+      :ok
+    end
+  end
 end
 

@@ -1,8 +1,9 @@
-# apps/symbrella_web/lib/symbrella_web/live/home_live.ex
 defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
+  alias Core.ResponsePlanner
+  alias Brain
 
   @choice_preview_limit 3
   @def_char_limit 120
@@ -26,6 +27,7 @@ defmodule SymbrellaWeb.HomeLive do
   defp to_bot_reply(other), do: %{text: inspect(other)}
 
   # A tiny formatter so the UI shows something friendly when SI comes back.
+  # (kept as a fallback if the planner module isn't present)
   defp format_si_reply(si) do
     tokens = Map.get(si, :tokens, [])
     cells = Map.get(si, :active_cells, Map.get(si, :cells, []))
@@ -226,6 +228,59 @@ defmodule SymbrellaWeb.HomeLive do
   # Final fallback (remote OFF): don't query anything; show no extra gloss.
   defp lexicon_def(_), do: ""
 
+  # ---------- Planner integration (NEW) ----------
+
+  # Defensive, in case Brain/Planner/Mood aren’t available yet.
+  defp latest_intent_si_like() do
+    case safe_call_latest_intent() do
+      %{intent: i, confidence: c} = m -> %{intent: i, confidence: c, keyword: Map.get(m, :keyword, "")}
+      _ -> %{intent: :unknown, confidence: 0.0}
+    end
+  end
+
+  defp safe_call_latest_intent() do
+    try do
+      Brain.latest_intent()
+    rescue
+      _ -> nil
+    catch
+      _, _ -> nil
+    end
+  end
+
+  defp safe_mood_snapshot() do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
+      Brain.MoodCore.snapshot()
+    else
+      %{}
+    end
+  end
+
+defp build_planned_reply(user_text) do
+  si =
+    Core.resolve_input(user_text,
+      mode: :prod,
+      enrich_lexicon?: true,
+      lexicon_stage?: true
+    )
+
+  # BEFORE:
+  # si_like = latest_intent_si_like()
+  # AFTER (pass the raw text through to the planner):
+  si_like =
+    latest_intent_si_like()
+    |> Map.put(:text, user_text)
+
+  mood = safe_mood_snapshot()
+
+  if Code.ensure_loaded?(Core.ResponsePlanner) and function_exported?(Core.ResponsePlanner, :plan, 2) do
+    {_tone, reply, _meta} = ResponsePlanner.plan(si_like, mood)
+    %{text: reply}
+  else
+    %{text: format_si_reply(si)}
+  end
+end
+
   # ---------- liveview ----------
   @impl true
   def mount(_params, _session, socket) do
@@ -271,18 +326,10 @@ defmodule SymbrellaWeb.HomeLive do
         |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
         |> push_event("chat:scroll", %{to: "composer"})
 
-      # Run prod resolve (Core handles enrichment, re-query, LIFG, and Brain activation)
+      # Use planner-based reply instead of SI debug string.
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-          si =
-            Core.resolve_input(text,
-              mode: :prod,
-              enrich_lexicon?: true,
-              lexicon_stage?: true
-            )
-
-          # Return a small, friendly UI summary
-          %{text: format_si_reply(si)}
+          build_planned_reply(text)
         end)
 
       {:noreply, assign(socket, :pending_task, task)}

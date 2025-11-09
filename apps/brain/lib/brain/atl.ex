@@ -18,6 +18,7 @@ defmodule Brain.ATL do
   use Brain, region: :atl
 
   alias Brain.Utils.Safe
+  alias Brain.LIFG.SlateFilter
 
   @name __MODULE__
 
@@ -362,6 +363,7 @@ defmodule Brain.ATL do
 
       {idx, uniq_by_id([winner_as_candidate | near])}
     end)
+    |> SlateFilter.sanitize_map()
   end
 
   def promote_sense_candidates_from_slate(_slate, _opts), do: %{}
@@ -424,19 +426,7 @@ defmodule Brain.ATL do
 
   @doc """
   Optionally derive and attach `:lifg_pairs` (MWE↔unigram) to `si` for WM gating.
-
-  We emit pairs only when a winner is a `|phrase|fallback` and there are child
-  unigrams inside that MWE's span. Controlled by `:derive_lifg_pairs?` (default: true).
-
-  Pair shape:
-    %{
-      type: :mwe_unigram,
-      mwe_id:      binary(),       # the phrase|fallback winner id
-      unigram_id:  binary(),       # a concrete unigram sense id from active_cells
-      token_index: non_neg_integer(),
-      weight:      float(),        # 1.0 for now
-      from:        :atl
-    }
+  ...
   """
   @spec attach_lifg_pairs(map(), keyword()) :: map()
   def attach_lifg_pairs(%{atl_slate: %{winners: winners}, tokens: tokens} = si, opts \\ []) do
@@ -454,8 +444,7 @@ defmodule Brain.ATL do
     end
   end
 
-  # Build pairs between a phrase|fallback winner and concrete unigram sense ids
-  # whose tokens lie inside the phrase span.
+  # (derive_lifg_pairs/3 and helpers remain unchanged)
   defp derive_lifg_pairs(winners, tokens, cells) when is_list(winners) and is_list(tokens) do
     cells_by_norm =
       Enum.group_by(cells, fn c ->
@@ -496,14 +485,11 @@ defmodule Brain.ATL do
 
   defp derive_lifg_pairs(_, _, _), do: []
 
-  # Safe span lookup for the token at `idx`
   defp span_for(tokens, idx) do
     case Enum.find(tokens, &(&1[:index] == idx)) do
       %{span: {s, l}} when is_integer(s) and is_integer(l) -> {s, l}
       _ -> {0, 0}
     end
   end
-
-
 end
 

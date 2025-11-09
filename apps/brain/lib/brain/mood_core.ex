@@ -77,6 +77,32 @@ defmodule Brain.MoodCore do
   @doc "Detach a previously registered subscriber id returned from subscribe/0."
   def detach(id) when is_binary(id), do: :telemetry.detach(id)
 
+  # -------- NEW PUBLIC HOOKS (additive) --------
+
+  @doc """
+  Intent → neuro deltas (scaled by confidence). Call this right after you set last_intent.
+
+      Brain.MoodCore.apply_intent(:abuse, 0.98)
+  """
+  def apply_intent(intent, confidence \\ 1.0) when is_atom(intent) and is_number(confidence) do
+    GenServer.cast(__MODULE__, {:apply_intent, intent, confidence})
+  end
+
+  @doc """
+  Lightweight arousal/plasticity nudge from recent activation load (active_cells map or list).
+  Safe to call from LIFG/ATL ticks.
+  """
+  def register_activation(active_cells) do
+    GenServer.cast(__MODULE__, {:activation, active_cells})
+  end
+
+  @doc """
+  Optional WM density nudge (pass your WM list). Keeps things reactive without spikes.
+  """
+  def update_wm(wm_list) when is_list(wm_list) do
+    GenServer.cast(__MODULE__, {:wm, wm_list})
+  end
+
   # ---------- GenServer ----------
 
   @impl true
@@ -153,6 +179,45 @@ defmodule Brain.MoodCore do
       |> emit(:bump, 0, source)
 
     {:noreply, new_state}
+  end
+
+  # ---- NEW CASTS ----
+
+  @impl true
+  def handle_cast({:apply_intent, intent, conf}, st) do
+    deltas = intent_to_deltas(intent, conf)
+    deltas = sanitize_deltas(deltas, st.max_delta_per_tick)
+
+    st =
+      st
+      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> emit({:intent, intent}, 0, :bump)
+
+    {:noreply, st}
+  end
+
+  @impl true
+  def handle_cast({:activation, cells}, st) do
+    deltas = activation_to_deltas(cells) |> sanitize_deltas(st.max_delta_per_tick)
+
+    st =
+      st
+      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> emit(:activation, 0, :bump)
+
+    {:noreply, st}
+  end
+
+  @impl true
+  def handle_cast({:wm, wm_list}, st) do
+    deltas = wm_to_deltas(wm_list) |> sanitize_deltas(st.max_delta_per_tick)
+
+    st =
+      st
+      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> emit(:wm, 0, :bump)
+
+    {:noreply, st}
   end
 
   @impl true
@@ -241,63 +306,61 @@ defmodule Brain.MoodCore do
     emit(st, source, dt, :decay)
   end
 
-# lib/brain/mood_core.ex
+  # keep a convenience 3-arity (no default on the 4-arity head)
+  defp emit(
+         %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} = st,
+         source,
+         dt_ms,
+         cause
+       ) do
+    # Raw neuros
+    da  = Map.get(lv, :da, 0.5)
+    s5  = Map.get(lv, :"5ht", 0.5)
+    glu = Map.get(lv, :glu, 0.5)
+    ne  = Map.get(lv, :ne, 0.5)
 
-# keep a convenience 3-arity (no default on the 4-arity head)
-defp emit(
-       %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} = st,
-       source,
-       dt_ms,
-       cause
-     ) do
-  # Raw neuros
-  da  = Map.get(lv, :da, 0.5)
-  s5  = Map.get(lv, :"5ht", 0.5)
-  glu = Map.get(lv, :glu, 0.5)
-  ne  = Map.get(lv, :ne, 0.5)
+    # Derived mood indices
+    exploration = 0.6 * da + 0.4 * ne
+    inhibition  = s5
+    vigilance   = ne
+    plasticity  = 0.5 * da + 0.5 * glu
 
-  # Derived mood indices
-  exploration = 0.6 * da + 0.4 * ne
-  inhibition  = s5
-  vigilance   = ne
-  plasticity  = 0.5 * da + 0.5 * glu
+    meas = %{
+      da: da, "5ht": s5, glu: glu, ne: ne,
+      exploration: exploration, inhibition: inhibition,
+      vigilance: vigilance, plasticity: plasticity
+    }
 
-  meas = %{
-    da: da, "5ht": s5, glu: glu, ne: ne,
-    exploration: exploration, inhibition: inhibition,
-    vigilance: vigilance, plasticity: plasticity
-  }
+    meta = %{source: source, cause: cause, dt_ms: dt_ms}
+    :telemetry.execute(@event_update, meas, meta)
 
-  meta = %{source: source, cause: cause, dt_ms: dt_ms}
-  :telemetry.execute(@event_update, meas, meta)
+    # Saturation detector
+    sat_counts =
+      Enum.reduce([:da, :"5ht", :glu, :ne], st.sat_counts, fn k, acc ->
+        v = Map.fetch!(lv, k)
+        stuck? = v == 0.0 or v == 1.0
+        Map.put(acc, k, if(stuck?, do: acc[k] + 1, else: 0))
+      end)
 
-  # Saturation detector
-  sat_counts =
-    Enum.reduce([:da, :"5ht", :glu, :ne], st.sat_counts, fn k, acc ->
-      v = Map.fetch!(lv, k)
-      stuck? = v == 0.0 or v == 1.0
-      Map.put(acc, k, if(stuck?, do: acc[k] + 1, else: 0))
-    end)
+    if Enum.any?(sat_counts, fn {_k, n} -> n >= sat_n end) do
+      :telemetry.execute(@event_saturation, meas, Map.put(meta, :ticks, sat_counts))
+    end
 
-  if Enum.any?(sat_counts, fn {_k, n} -> n >= sat_n end) do
-    :telemetry.execute(@event_saturation, meas, Map.put(meta, :ticks, sat_counts))
+    # Shock detector (L2-norm of delta across neuros)
+    dx =
+      :math.sqrt(
+        :math.pow(da  - Map.get(prev, :da,  da), 2) +
+        :math.pow(s5  - Map.get(prev, :"5ht", s5), 2) +
+        :math.pow(glu - Map.get(prev, :glu, glu), 2) +
+        :math.pow(ne  - Map.get(prev, :ne,  ne), 2)
+      )
+
+    if dx > shock_thr do
+      :telemetry.execute(@event_shock, Map.put(meas, :delta_norm, dx), meta)
+    end
+
+    %{st | last_levels: lv, sat_counts: sat_counts}
   end
-
-  # Shock detector (L2-norm of delta across neuros)
-  dx =
-    :math.sqrt(
-      :math.pow(da  - Map.get(prev, :da,  da), 2) +
-      :math.pow(s5  - Map.get(prev, :"5ht", s5), 2) +
-      :math.pow(glu - Map.get(prev, :glu, glu), 2) +
-      :math.pow(ne  - Map.get(prev, :ne,  ne), 2)
-    )
-
-  if dx > shock_thr do
-    :telemetry.execute(@event_shock, Map.put(meas, :delta_norm, dx), meta)
-  end
-
-  %{st | last_levels: lv, sat_counts: sat_counts}
-end
 
   defp decorate_snapshot(%{levels: lv, last_dt_ms: dt} = st) do
     da  = Map.get(lv, :da, 0.5)
@@ -312,14 +375,80 @@ end
       plasticity:  0.5 * da + 0.5 * glu
     }
 
-    Map.merge(st, %{mood: mood, dt_ms: dt})
+    # NEW: tone hint derived from indices (kept conservative)
+    tone_hint = choose_tone(mood)
+
+    Map.merge(st, %{mood: mood, tone_hint: tone_hint, dt_ms: dt})
   end
 
   defp put_levels(st, f),
     do: %{st | levels: Map.new(st.levels, fn {k, v} -> {k, f.(v, k)} end)}
 
+  # ---------- Intent / Load mapping (new) ----------
+
+  defp intent_to_deltas(:abuse, conf) do
+    # Stress/hostility → ↑NE (vigilance), ↓5HT (inhibition), mild ↓DA (reward)
+    k = clamp_conf(conf)
+    %{ne: +0.25 * k, "5ht": -0.20 * k, da: -0.05 * k}
+  end
+
+  defp intent_to_deltas(:gratitude, conf) do
+    k = clamp_conf(conf)
+    %{"5ht": +0.12 * k, da: +0.15 * k, ne: -0.05 * k}
+  end
+
+  defp intent_to_deltas(:greeting, conf) do
+    k = clamp_conf(conf)
+    %{"5ht": +0.08 * k, ne: -0.02 * k}
+  end
+
+  defp intent_to_deltas(:question, conf) do
+    # Curiosity → mild ↑DA (exploration) and ↑NE (attention)
+    k = clamp_conf(conf)
+    %{da: +0.07 * k, ne: +0.07 * k}
+  end
+
+  defp intent_to_deltas(:help, conf),      do: intent_to_deltas(:question, conf)
+  defp intent_to_deltas(:instruction, c),  do: intent_to_deltas(:question, c)
+  defp intent_to_deltas(_other, conf) do
+    k = clamp_conf(conf)
+    # Default: tiny calming + slight plasticity
+    %{"5ht": +0.03 * k, glu: +0.03 * k}
+  end
+
+  defp activation_to_deltas(cells) do
+    n =
+      case cells do
+        %{} -> map_size(cells)
+        list when is_list(list) -> length(list)
+        _ -> 0
+      end
+
+    load = min(1.0, n / 120.0)
+    # Gentle: attention + learning + a hint of exploration
+    %{ne: +0.08 * load, glu: +0.04 * load, da: +0.03 * load}
+  end
+
+  defp wm_to_deltas(wm_list) do
+    density = min(1.0, (wm_list |> length()) / 7.0)
+    %{ne: +0.05 * density, glu: +0.03 * density}
+  end
+
+  # ---------- Tone selection (new) ----------
+
+  defp choose_tone(%{vigilance: vig, inhibition: inh, exploration: exp}) do
+    cond do
+      vig > 0.65 -> :deescalate
+      inh > 0.65 and exp < 0.35 -> :cool
+      exp > 0.45 and inh >= 0.40 -> :warm
+      true -> :neutral
+    end
+  end
+  defp choose_tone(_), do: :neutral
+
   # ---------- small helpers ----------
 
+  defp clamp_conf(c) when is_number(c), do: min(1.0, max(0.0, c))
   defp clamp(x),   do: min(1.0, max(0.0, x))
   defp now_ms(),   do: System.monotonic_time(:millisecond)
 
