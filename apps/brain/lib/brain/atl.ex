@@ -428,21 +428,60 @@ defmodule Brain.ATL do
   Optionally derive and attach `:lifg_pairs` (MWE↔unigram) to `si` for WM gating.
   ...
   """
-  @spec attach_lifg_pairs(map(), keyword()) :: map()
-  def attach_lifg_pairs(%{atl_slate: %{winners: winners}, tokens: tokens} = si, opts \\ []) do
-    if Keyword.get(opts, :derive_lifg_pairs?, true) do
-      cells = Map.get(si, :active_cells, []) |> Enum.map(&Brain.Utils.Safe.to_plain/1)
-      pairs = derive_lifg_pairs(winners, tokens, cells)
+@spec attach_lifg_pairs(map(), keyword()) :: map()
+def attach_lifg_pairs(si, opts \\ []) when is_map(si) do
+  if Keyword.get(opts, :derive_lifg_pairs?, true) do
+    tokens  = Map.get(si, :tokens, [])
+    winners = get_in(si, [:atl_slate, :winners])
 
-      if pairs == [] do
-        si
-      else
-        Map.put(si, :lifg_pairs, pairs)
+    pairs =
+      cond do
+        is_list(winners) ->
+          cells =
+            si
+            |> Map.get(:active_cells, [])
+            |> Enum.map(&Brain.Utils.Safe.to_plain/1)
+
+          derive_lifg_pairs(winners, tokens, cells)
+
+        is_list(Map.get(si, :lifg_choices)) ->
+          si
+          |> Map.get(:lifg_choices, [])
+          |> Enum.flat_map(fn ch ->
+            ti = Map.get(ch, :token_index) || Map.get(ch, "token_index")
+            id = Map.get(ch, :chosen_id)   || Map.get(ch, "chosen_id")
+            if is_integer(ti) and is_binary(id), do: [{ti, id}], else: []
+          end)
+
+        true ->
+          []
       end
-    else
+
+    if pairs == [] do
       si
+    else
+      by_token = Enum.group_by(pairs, fn {ti, _} -> ti end, fn {_ti, id} -> id end)
+
+      evidence1 =
+        (Map.get(si, :evidence) || %{})
+        |> Map.put(:lifg_pairs, pairs)
+        |> Map.put(:lifg_pairs_by_token, by_token)
+
+      trace1 = (Map.get(si, :trace) || []) ++ [{:lifg_pairs, %{count: length(pairs)}}]
+
+      update_si_with_pairs(si, evidence1, trace1)
     end
+  else
+    si
   end
+end
+
+# ——— helper: preserves struct type if `si` is a struct ———
+defp update_si_with_pairs(%{__struct__: _} = si, evidence, trace),
+  do: struct(si, evidence: evidence, trace: trace)
+
+defp update_si_with_pairs(si, evidence, trace) when is_map(si),
+  do: Map.merge(si, %{evidence: evidence, trace: trace})
 
   # (derive_lifg_pairs/3 and helpers remain unchanged)
   defp derive_lifg_pairs(winners, tokens, cells) when is_list(winners) and is_list(tokens) do
