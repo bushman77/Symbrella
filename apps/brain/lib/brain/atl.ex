@@ -426,62 +426,111 @@ defmodule Brain.ATL do
 
   @doc """
   Optionally derive and attach `:lifg_pairs` (MWE↔unigram) to `si` for WM gating.
-  ...
+
+  Stores three fields in `si.evidence` when pairs exist:
+    * `:lifg_pairs` — normalized `[{token_index, unigram_id}]`
+    * `:lifg_pairs_by_token` — `%{token_index => [unigram_id, ...]}`
+    * `:lifg_pairs_rich` — the full structs/maps when available (for introspection)
+
+  Safe when winners are missing; returns `si` unchanged if nothing to attach.
   """
-@spec attach_lifg_pairs(map(), keyword()) :: map()
-def attach_lifg_pairs(si, opts \\ []) when is_map(si) do
-  if Keyword.get(opts, :derive_lifg_pairs?, true) do
-    tokens  = Map.get(si, :tokens, [])
-    winners = get_in(si, [:atl_slate, :winners])
+  @spec attach_lifg_pairs(map(), keyword()) :: map()
+  def attach_lifg_pairs(si, opts \\ []) when is_map(si) do
+    if Keyword.get(opts, :derive_lifg_pairs?, true) do
+      tokens  = Map.get(si, :tokens, [])
+      slate   = Map.get(si, :atl_slate, %{})
+      winners = Map.get(slate, :winners, [])
 
-    pairs =
-      cond do
-        is_list(winners) ->
-          cells =
+      pairs_rich_or_tuples =
+        cond do
+          is_list(winners) and winners != [] ->
+            cells =
+              si
+              |> Map.get(:active_cells, [])
+              |> Enum.map(&Brain.Utils.Safe.to_plain/1)
+
+            # returns a list of maps with keys: :token_index, :unigram_id, :mwe_id, ...
+            derive_lifg_pairs(winners, tokens, cells)
+
+          is_list(Map.get(si, :lifg_choices)) ->
+            # Legacy fallback: produce tuple pairs from :lifg_choices (not MWE↔unigram).
+            # We still normalize them below; rich list will be empty in this branch.
             si
-            |> Map.get(:active_cells, [])
-            |> Enum.map(&Brain.Utils.Safe.to_plain/1)
+            |> Map.get(:lifg_choices, [])
+            |> Enum.flat_map(fn ch ->
+              ti = Map.get(ch, :token_index) || Map.get(ch, "token_index")
+              id = Map.get(ch, :chosen_id)   || Map.get(ch, "chosen_id")
+              if is_integer(ti) and is_binary(id), do: [{ti, id}], else: []
+            end)
 
-          derive_lifg_pairs(winners, tokens, cells)
+          true ->
+            []
+        end
 
-        is_list(Map.get(si, :lifg_choices)) ->
-          si
-          |> Map.get(:lifg_choices, [])
-          |> Enum.flat_map(fn ch ->
-            ti = Map.get(ch, :token_index) || Map.get(ch, "token_index")
-            id = Map.get(ch, :chosen_id)   || Map.get(ch, "chosen_id")
-            if is_integer(ti) and is_binary(id), do: [{ti, id}], else: []
-          end)
+      # Normalize into simple `[{token_index, unigram_id}]`
+      {pairs_simple, pairs_rich} =
+        cond do
+          pairs_rich_or_tuples == [] ->
+            {[], []}
 
-        true ->
-          []
+          is_list(pairs_rich_or_tuples) and
+              Enum.all?(pairs_rich_or_tuples, &is_map/1) ->
+            {
+              pairs_rich_or_tuples
+              |> Enum.flat_map(fn
+                %{token_index: ti, unigram_id: id}
+                when is_integer(ti) and is_binary(id) -> [{ti, id}]
+                _ -> []
+              end)
+              |> Enum.uniq(),
+              pairs_rich_or_tuples
+            }
+
+          is_list(pairs_rich_or_tuples) ->
+            {
+              pairs_rich_or_tuples
+              |> Enum.flat_map(fn
+                {ti, id} when is_integer(ti) and is_binary(id) -> [{ti, id}]
+                _ -> []
+              end)
+              |> Enum.uniq(),
+              []
+            }
+        end
+
+      if pairs_simple == [] do
+        si
+      else
+        by_token =
+          pairs_simple
+          |> Enum.group_by(fn {ti, _} -> ti end, fn {_ti, id} -> id end)
+
+        evidence1 =
+          (Map.get(si, :evidence) || %{})
+          |> Map.put(:lifg_pairs, pairs_simple)
+          |> Map.put(:lifg_pairs_by_token, by_token)
+          |> maybe_put(:lifg_pairs_rich, pairs_rich, not Enum.empty?(pairs_rich))
+
+        trace1 = (Map.get(si, :trace) || []) ++ [
+          {:lifg_pairs, %{count: length(pairs_simple), rich: length(pairs_rich)}}
+        ]
+
+        update_si_with_pairs(si, evidence1, trace1)
       end
-
-    if pairs == [] do
-      si
     else
-      by_token = Enum.group_by(pairs, fn {ti, _} -> ti end, fn {_ti, id} -> id end)
-
-      evidence1 =
-        (Map.get(si, :evidence) || %{})
-        |> Map.put(:lifg_pairs, pairs)
-        |> Map.put(:lifg_pairs_by_token, by_token)
-
-      trace1 = (Map.get(si, :trace) || []) ++ [{:lifg_pairs, %{count: length(pairs)}}]
-
-      update_si_with_pairs(si, evidence1, trace1)
+      si
     end
-  else
-    si
   end
-end
 
-# ——— helper: preserves struct type if `si` is a struct ———
-defp update_si_with_pairs(%{__struct__: _} = si, evidence, trace),
-  do: struct(si, evidence: evidence, trace: trace)
+  # ——— helper: preserves struct type if `si` is a struct ———
+  defp update_si_with_pairs(%{__struct__: _} = si, evidence, trace),
+    do: struct(si, evidence: evidence, trace: trace)
 
-defp update_si_with_pairs(si, evidence, trace) when is_map(si),
-  do: Map.merge(si, %{evidence: evidence, trace: trace})
+  defp update_si_with_pairs(si, evidence, trace) when is_map(si),
+    do: Map.merge(si, %{evidence: evidence, trace: trace})
+
+  defp maybe_put(map, _k, _v, false), do: map
+  defp maybe_put(map, k, v, true), do: Map.put(map, k, v)
 
   # (derive_lifg_pairs/3 and helpers remain unchanged)
   defp derive_lifg_pairs(winners, tokens, cells) when is_list(winners) and is_list(tokens) do

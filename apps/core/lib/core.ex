@@ -120,165 +120,128 @@ end
     end)
   end
 
-  # ─────────────────────── LIFG stage-1 ───────────────────────
+# ─────────────────────── LIFG (full pipeline) ───────────────────────
+defp run_lifg_and_attach(si, lifg_opts) do
+  # Pass intent bias downstream (non-breaking; ignored if unused)
+  lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
 
-  defp run_lifg_and_attach(si, lifg_opts) do
-    groups =
-      si.tokens
-      |> Enum.reduce(%{}, fn t, acc ->
-        nrm = norm(Map.get(t, :phrase))
-        tn  = Map.get(t, :n, 1)
+  case safe_lifg_run(si, lifg_opts2) do
+    {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
+      # Build UI-friendly lifg_choices, preserving your tie-breaking logic
+      lifg_choices =
+        raw_choices
+        |> Enum.map(fn ch ->
+          token_index = Map.get(ch, :token_index, 0)
+          t           = Enum.at(si.tokens, token_index, %{})
+          token_norm  = t |> Map.get(:phrase, "") |> norm()
 
-        senses =
-          si.active_cells
-          |> Enum.filter(fn s -> (Map.get(s, :norm) || Map.get(s, "norm")) == nrm end)
-          |> Enum.filter(&compatible_cell_for_token?(tn, &1))
-          |> drop_seed_rows()
+          chosen_id   = Map.get(ch, :chosen_id)
+          scores      = Map.get(ch, :scores) || %{}
+          feats       = Map.get(ch, :features) || %{}
+          alt_ids     = Map.get(ch, :alt_ids, [])
+          margin      = Map.get(ch, :margin, 0.0)
+          prob_margin = Map.get(ch, :prob_margin, 0.0)
 
-        if senses == [], do: acc, else: Map.put(acc, Map.get(t, :index), senses)
-      end)
+          phrase_bump_for = fn id, thin? ->
+            cond do
+              Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
+                base  = if thin?, do: @mwe_general_bump, else: 0.0
+                greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
+                base + greet
+              true ->
+                0.0
+            end
+          end
 
-    # P-213: visibility telemetry on candidate volume pre-call
-    cand_count =
-      groups
-      |> Map.values()
-      |> Enum.map(&length/1)
-      |> Enum.sum()
+          base_score =
+            if is_binary(chosen_id) and is_map(scores),
+              do: Map.get(scores, chosen_id, 0.0),
+              else: Map.get(feats, :score_norm, 0.0)
 
-    emit([:brain, :lifg, :candidates_ready], %{candidates: cand_count}, %{stage: :pre_call})
+          candidates =
+            [chosen_id | alt_ids]
+            |> Enum.uniq()
+            |> Enum.reject(&is_nil/1)
 
-    ctx = [1.0]
+          matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
+          pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
 
-    lifg_input = %{
-      candidates_by_token: groups,
-      tokens: si.tokens,
-      sentence: si.sentence,
-      atl_slate: Map.get(si, :atl_slate),
-      evidence: Map.get(si, :evidence)           # episodes available to Stage-1
-    }
+          thin? = (margin < @lifg_tie_epsilon) or (prob_margin < @lifg_prob_epsilon)
 
-    # Pass intent bias downstream (non-breaking; ignored if unused)
-    lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
+          score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
 
-    case Brain.lifg_stage1(lifg_input, ctx, lifg_opts2) do
-      {:ok, out} ->
-        # P-213: telemetry when LIFG returns no choices (helps gate tuning)
-        if (Map.get(out, :choices, []) || []) == [] do
-          emit([:brain, :lifg, :no_choices], %{candidates: cand_count}, %{stage: :post_call})
-        end
+          pick_with_prior = fn ids ->
+            Enum.max_by(
+              ids,
+              fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
+              fn -> chosen_id end
+            )
+          end
 
-        ev =
-          out.audit
-          |> Map.merge(%{
-            stage: :lifg_stage1,
-            choices: out.choices,
-            boosts: out.boosts,
-            inhibitions: out.inhibitions
-          })
+          {chosen_id2, score2} =
+            cond do
+              matching != [] and thin? ->
+                best = pick_with_prior.(matching)
+                {best, Map.get(scores, best, base_score)}
 
-        lifg_choices =
-          Enum.map(out.choices, fn ch ->
-            token_index = Map.get(ch, :token_index, 0)
-            t = Enum.at(si.tokens, token_index, %{})
+              matching != [] ->
+                best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
+                {best, Map.get(scores, best, base_score)}
 
-            # (1) Lemma from the token's phrase (normalized)
-            token_norm =
-              t
-              |> Map.get(:phrase, "")
-              |> norm()
+              thin? ->
+                best = pick_with_prior.(candidates)
+                {best, Map.get(scores, best, base_score)}
 
-            chosen_id  = Map.get(ch, :chosen_id)
-            scores     = Map.get(ch, :scores) || %{}
-            feats      = Map.get(ch, :features) || %{}
-            alt_ids    = Map.get(ch, :alt_ids, [])
-            margin     = Map.get(ch, :margin, 0.0)
-            prob_margin = Map.get(ch, :prob_margin, 0.0)
-
-            # Greeting MWE tiny bump + NEW general MWE bump for thin ties
-            phrase_bump_for = fn id, thin? ->
-              cond do
-                Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
-                  base = if thin?, do: @mwe_general_bump, else: 0.0
-                  greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
-                  base + greet
-                true ->
-                  0.0
-              end
+              true ->
+                {chosen_id, base_score}
             end
 
-            base_score =
-              if is_binary(chosen_id) and is_map(scores) do
-                Map.get(scores, chosen_id, 0.0)
-              else
-                Map.get(feats, :score_norm, 0.0)
-              end
+          %{
+            token_index: token_index,
+            lemma: token_norm,
+            id: chosen_id2,
+            alt_ids: alt_ids,
+            score: score2
+          }
+        end)
+        |> mwe_shadow(si.tokens)  # keep your MWE → unigram shadowing
 
-            candidates =
-              [chosen_id | alt_ids]
-              |> Enum.uniq()
-              |> Enum.reject(&is_nil/1)
+      ev = %{
+        stage: :lifg_run,
+        ts_ms: System.system_time(:millisecond),
+        choice_count: length(raw_choices),
+        flips: flips
+      }
 
-            # Favor ids whose id-norm matches the token norm
-            matching =
-              candidates
-              |> Enum.filter(&(id_norm(&1) == token_norm))
+      si_after
+      |> Map.put(:atl_slate, slate)               # make slate available to later steps
+      |> Map.put(:lifg_choices, lifg_choices)     # preserve existing consumer contract
+      |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
+      |> Map.update(:trace, [], &[ev | &1])
 
-            # POS prior for razor-thin ties (phrase > noun > others)
-            pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
-
-            thin? = (margin < @lifg_tie_epsilon) or (prob_margin < @lifg_prob_epsilon)
-
-            score_of = fn id ->
-              Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?)
-            end
-
-            pick_with_prior = fn ids ->
-              Enum.max_by(
-                ids,
-                fn id ->
-                  score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0)
-                end,
-                fn -> chosen_id end
-              )
-            end
-
-            {chosen_id2, score2} =
-              cond do
-                matching != [] and thin? ->
-                  best = pick_with_prior.(matching)
-                  {best, Map.get(scores, best, base_score)}
-
-                matching != [] ->
-                  best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
-                  {best, Map.get(scores, best, base_score)}
-
-                thin? ->
-                  best = pick_with_prior.(candidates)
-                  {best, Map.get(scores, best, base_score)}
-
-                true ->
-                  {chosen_id, base_score}
-              end
-
-            %{
-              token_index: token_index,
-              lemma: token_norm,
-              id: chosen_id2,
-              alt_ids: alt_ids,
-              score: score2
-            }
-          end)
-          |> mwe_shadow(si.tokens)   # shadow unigrams covered by a winning MWE
-
-        si
-        |> Map.put(:lifg_choices, lifg_choices)
-        |> Map.put(:acc_conflict, get_in(out, [:si, :acc_conflict]) || 0.0)
-        |> Map.update(:trace, [], &[ev | &1])
-
-      {:error, _} ->
-        si
-    end
+    {:error, _reason} ->
+      si
   end
+end
+
+defp safe_lifg_run(si, opts) do
+  cond do
+    Code.ensure_loaded?(Brain) and function_exported?(Brain, :lifg_run, 2) ->
+      # Prefer the Brain facade if present (uses the LIFG GenServer + Recorder)
+      try do
+        Brain.lifg_run(si, opts)
+      rescue
+        _ -> Brain.LIFG.run(si, opts)
+      end
+
+    Code.ensure_loaded?(Brain.LIFG) and function_exported?(Brain.LIFG, :run, 2) ->
+      Brain.LIFG.run(si, opts)
+
+    true ->
+      {:error, :lifg_unavailable}
+  end
+end
+
 
   defp maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
        when is_list(choices) and is_list(tokens) do
