@@ -213,7 +213,7 @@ defmodule Brain.LIFG do
           Legacy.boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
 
         _ =
-          Recorder.maybe_record_last(:stage1, si_after, choices, audit, %{
+          Recorder.maybe_record_last(__MODULE__, :stage1, si_after, choices, audit, %{
             scores_mode: scores_mode,
             margin_threshold: margin_thr,
             weights: stage_weights
@@ -231,7 +231,7 @@ defmodule Brain.LIFG do
 
       {:error, reason} ->
         Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
-        _ = Recorder.maybe_record_last(:stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
+        _ = Recorder.maybe_record_last(__MODULE__, :stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
 
         evt = %{
           stage: :lifg_stage1,
@@ -409,7 +409,7 @@ weights_for_stage1 =
               allow_overlaps?: Keyword.get(opts, :allow_overlaps?, false)
             )
 
-          Recorder.maybe_record_last(:run, post_out.si, post_out.choices, audit, %{
+          Recorder.maybe_record_last(__MODULE__, :run, post_out.si, post_out.choices, audit, %{
             scores_mode: scores_mode,
             margin_threshold: margin_thr,
             pmtg_mode: pmtg_mode,
@@ -427,13 +427,13 @@ weights_for_stage1 =
            }}
 
         {:error, reason} ->
-          Recorder.maybe_record_last(:run_error, si2a, [], %{}, %{error: inspect(reason)})
+          Recorder.maybe_record_last(__MODULE__, :run_error, si2a, [], %{}, %{error: inspect(reason)})
           {:error, {:stage1, reason}}
       end
     rescue
       e ->
         Logger.error("LIFG full run failed: #{inspect(e)}")
-        Recorder.maybe_record_last(:run_exception, si, [], %{}, %{error: inspect(e)})
+        Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
         {:error, e}
     end
   end

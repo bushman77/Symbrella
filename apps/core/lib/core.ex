@@ -41,51 +41,47 @@ defmodule Core do
   @type opts :: keyword()
 
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
-def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-  mode  = Keyword.get(opts, :mode, :prod)
-  max_n = Keyword.get(opts, :max_wordgram_n, 3)
+  def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
+    mode  = Keyword.get(opts, :mode, :prod)
+    max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
-  # optionally pull a default from config so it's “always on” unless overridden
-  lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
-  lifg_opts = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
+    # optionally pull a default from config so it's “always on” unless overridden
+    lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
+    lifg_opts = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
 
-  si0 =
-    phrase
-    |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-    |> wrap_si(phrase)
-    |> rebuild_word_ngrams(max_n)
-    |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
-    |> Map.put_new(:trace, [])
-    |> Map.put(:lifg_opts, lifg_opts)   # ← ensure it’s on the SI
+    si0 =
+      phrase
+      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+      |> wrap_si(phrase)
+      |> rebuild_word_ngrams(max_n)
+      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put_new(:trace, [])
+      |> Map.put(:lifg_opts, lifg_opts)   # ← ensure it’s on the SI
 
-  si1 = Selection.select(si0, opts)
+    si1 = Selection.select(si0, opts)
 
-case mode do
-    :prod ->
-      si1
-      |> Brain.stm()
-      |> keep_only_word_boundary_tokens()
-      |> maybe_run_mwe(:early, opts)
-      |> ltm_stage(opts)
-      |> keep_only_word_boundary_tokens()
-      |> maybe_run_mwe(:late, opts)
-      |> Core.Relations.attach_edges()
-      |> maybe_attach_episodes(opts)
-      |> run_lifg_and_attach(opts)
-      |> maybe_ingest_atl(opts)
-      |> then(&Brain.ATL.attach_lifg_pairs(&1, opts))   # ← add this line
-      |> maybe_encode_hippocampus()
-      |> maybe_persist_episode(opts)
-      |> notify_brain_activation(opts)
+    case mode do
+      :prod ->
+        si1
+        |> Brain.stm()
+        |> keep_only_word_boundary_tokens()
+        |> maybe_run_mwe(:early, opts)
+        |> ltm_stage(opts)
+        |> keep_only_word_boundary_tokens()
+        |> maybe_run_mwe(:late, opts)
+        |> Core.Relations.attach_edges()
+        |> maybe_attach_episodes(opts)
+        |> run_lifg_and_attach(opts)
+        |> maybe_ingest_atl(opts)
+        |> then(&Brain.ATL.attach_lifg_pairs(&1, opts))   # ← add this line
+        |> maybe_encode_hippocampus()
+        |> maybe_persist_episode(opts)
+        |> notify_brain_activation(opts)
 
-  _ ->
-    si1
-end
-
-
-end
-
-
+      _ ->
+        si1
+    end
+  end
 
   # ─────────────────────── Brain notify ───────────────────────
 
@@ -120,128 +116,127 @@ end
     end)
   end
 
-# ─────────────────────── LIFG (full pipeline) ───────────────────────
-defp run_lifg_and_attach(si, lifg_opts) do
-  # Pass intent bias downstream (non-breaking; ignored if unused)
-  lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
+  # ─────────────────────── LIFG (full pipeline) ───────────────────────
+  defp run_lifg_and_attach(si, lifg_opts) do
+    # Pass intent bias downstream (non-breaking; ignored if unused)
+    lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
 
-  case safe_lifg_run(si, lifg_opts2) do
-    {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
-      # Build UI-friendly lifg_choices, preserving your tie-breaking logic
-      lifg_choices =
-        raw_choices
-        |> Enum.map(fn ch ->
-          token_index = Map.get(ch, :token_index, 0)
-          t           = Enum.at(si.tokens, token_index, %{})
-          token_norm  = t |> Map.get(:phrase, "") |> norm()
+    case safe_lifg_run(si, lifg_opts2) do
+      {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
+        # Build UI-friendly lifg_choices, preserving your tie-breaking logic
+        lifg_choices =
+          raw_choices
+          |> Enum.map(fn ch ->
+            token_index = Map.get(ch, :token_index, 0)
+            t           = Enum.at(si.tokens, token_index, %{})
+            token_norm  = t |> Map.get(:phrase, "") |> norm()
 
-          chosen_id   = Map.get(ch, :chosen_id)
-          scores      = Map.get(ch, :scores) || %{}
-          feats       = Map.get(ch, :features) || %{}
-          alt_ids     = Map.get(ch, :alt_ids, [])
-          margin      = Map.get(ch, :margin, 0.0)
-          prob_margin = Map.get(ch, :prob_margin, 0.0)
+            chosen_id   = Map.get(ch, :chosen_id)
+            scores      = Map.get(ch, :scores) || %{}
+            feats       = Map.get(ch, :features) || %{}
+            alt_ids     = Map.get(ch, :alt_ids, [])
+            margin      = Map.get(ch, :margin, 0.0)
+            prob_margin = Map.get(ch, :prob_margin, 0.0)
 
-          phrase_bump_for = fn id, thin? ->
-            cond do
-              Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
-                base  = if thin?, do: @mwe_general_bump, else: 0.0
-                greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
-                base + greet
-              true ->
-                0.0
-            end
-          end
-
-          base_score =
-            if is_binary(chosen_id) and is_map(scores),
-              do: Map.get(scores, chosen_id, 0.0),
-              else: Map.get(feats, :score_norm, 0.0)
-
-          candidates =
-            [chosen_id | alt_ids]
-            |> Enum.uniq()
-            |> Enum.reject(&is_nil/1)
-
-          matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
-          pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
-
-          thin? = (margin < @lifg_tie_epsilon) or (prob_margin < @lifg_prob_epsilon)
-
-          score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
-
-          pick_with_prior = fn ids ->
-            Enum.max_by(
-              ids,
-              fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
-              fn -> chosen_id end
-            )
-          end
-
-          {chosen_id2, score2} =
-            cond do
-              matching != [] and thin? ->
-                best = pick_with_prior.(matching)
-                {best, Map.get(scores, best, base_score)}
-
-              matching != [] ->
-                best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
-                {best, Map.get(scores, best, base_score)}
-
-              thin? ->
-                best = pick_with_prior.(candidates)
-                {best, Map.get(scores, best, base_score)}
-
-              true ->
-                {chosen_id, base_score}
+            phrase_bump_for = fn id, thin? ->
+              cond do
+                Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
+                  base  = if thin?, do: @mwe_general_bump, else: 0.0
+                  greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
+                  base + greet
+                true ->
+                  0.0
+              end
             end
 
-          %{
-            token_index: token_index,
-            lemma: token_norm,
-            id: chosen_id2,
-            alt_ids: alt_ids,
-            score: score2
-          }
-        end)
-        |> mwe_shadow(si.tokens)  # keep your MWE → unigram shadowing
+            base_score =
+              if is_binary(chosen_id) and is_map(scores),
+                do: Map.get(scores, chosen_id, 0.0),
+                else: Map.get(feats, :score_norm, 0.0)
 
-      ev = %{
-        stage: :lifg_run,
-        ts_ms: System.system_time(:millisecond),
-        choice_count: length(raw_choices),
-        flips: flips
-      }
+            candidates =
+              [chosen_id | alt_ids]
+              |> Enum.uniq()
+              |> Enum.reject(&is_nil/1)
 
-      si_after
-      |> Map.put(:atl_slate, slate)               # make slate available to later steps
-      |> Map.put(:lifg_choices, lifg_choices)     # preserve existing consumer contract
-      |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
-      |> Map.update(:trace, [], &[ev | &1])
+            matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
+            pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
 
-    {:error, _reason} ->
-      si
+            thin? = (margin < @lifg_tie_epsilon) or (prob_margin < @lifg_prob_epsilon)
+
+            score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
+
+            pick_with_prior = fn ids ->
+              Enum.max_by(
+                ids,
+                fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
+                fn -> chosen_id end
+              )
+            end
+
+            {chosen_id2, score2} =
+              cond do
+                matching != [] and thin? ->
+                  best = pick_with_prior.(matching)
+                  {best, Map.get(scores, best, base_score)}
+
+                matching != [] ->
+                  best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
+                  {best, Map.get(scores, best, base_score)}
+
+                thin? ->
+                  best = pick_with_prior.(candidates)
+                  {best, Map.get(scores, best, base_score)}
+
+                true ->
+                  {chosen_id, base_score}
+              end
+
+            %{
+              token_index: token_index,
+              lemma: token_norm,
+              id: chosen_id2,
+              alt_ids: alt_ids,
+              score: score2
+            }
+          end)
+          |> mwe_shadow(si.tokens)  # keep your MWE → unigram shadowing
+
+        ev = %{
+          stage: :lifg_run,
+          ts_ms: System.system_time(:millisecond),
+          choice_count: length(raw_choices),
+          flips: flips
+        }
+
+        si_after
+        |> Map.put(:atl_slate, slate)               # make slate available to later steps
+        |> Map.put(:lifg_choices, lifg_choices)     # preserve existing consumer contract
+        |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
+        |> Map.update(:trace, [], &[ev | &1])
+
+      {:error, _reason} ->
+        si
+    end
   end
-end
 
-defp safe_lifg_run(si, opts) do
-  cond do
-    Code.ensure_loaded?(Brain) and function_exported?(Brain, :lifg_run, 2) ->
-      # Prefer the Brain facade if present (uses the LIFG GenServer + Recorder)
-      try do
-        Brain.lifg_run(si, opts)
-      rescue
-        _ -> Brain.LIFG.run(si, opts)
-      end
+  defp safe_lifg_run(si, opts) do
+    cond do
+      Code.ensure_loaded?(Brain) and function_exported?(Brain, :lifg_run, 2) ->
+        # Prefer the Brain facade (GenServer + Recorder)
+        try do
+          apply(Brain, :lifg_run, [si, opts])
+        rescue
+          _ -> apply(Brain.LIFG, :run, [si, opts])
+        end
 
-    Code.ensure_loaded?(Brain.LIFG) and function_exported?(Brain.LIFG, :run, 2) ->
-      Brain.LIFG.run(si, opts)
+      Code.ensure_loaded?(Brain.LIFG) and function_exported?(Brain.LIFG, :run, 2) ->
+        apply(Brain.LIFG, :run, [si, opts])
 
-    true ->
-      {:error, :lifg_unavailable}
+      true ->
+        {:error, :lifg_unavailable}
+    end
   end
-end
-
 
   defp maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
        when is_list(choices) and is_list(tokens) do
@@ -271,19 +266,6 @@ end
   end
 
   defp maybe_ingest_atl(si, _opts), do: si
-
-  # Only allow unigrams to consider unigram senses, and MWEs to consider MWEs.
-  defp compatible_cell_for_token?(token_n, cell) do
-    nrm = Map.get(cell, :norm) || Map.get(cell, "norm") || ""
-    has_space = String.contains?(nrm, " ")
-    (token_n > 1 and has_space) or (token_n == 1 and not has_space)
-  end
-
-  # Always drop legacy seed rows if any are present.
-  defp drop_seed_rows(senses),
-    do: Enum.reject(senses, &seed?/1)
-
-  defp seed?(s), do: (Map.get(s, :type) || Map.get(s, "type")) == "seed"
 
   defp maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
     if Process.whereis(Brain.Hippocampus) do
