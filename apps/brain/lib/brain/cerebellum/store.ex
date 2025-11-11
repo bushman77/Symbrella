@@ -28,15 +28,19 @@ defmodule Brain.Cerebellum.Store do
       nil ->
         {:ok, _pid} = GenServer.start_link(@name, %{}, name: @name)
         :ok
-      _pid -> :ok
+
+      _pid ->
+        :ok
     end
   end
 
   def get_weights(scope, context_key) when is_binary(context_key) do
     ensure_started()
+
     case :ets.lookup(@table, {scope, context_key}) do
       [{{^scope, ^context_key}, rec}] ->
         rec.weights
+
       _ ->
         rec = load_or_init(scope, context_key)
         rec.weights
@@ -95,7 +99,11 @@ defmodule Brain.Cerebellum.Store do
     rec = ensure_record(scope, ctx, st)
 
     gradv = pad_or_trim(grad, st.feature_dims)
-    new_w = clip_norm(vec_add(rec.weights, gradv), st.max_update_norm)
+    new_w =
+      clip_norm(
+        vec_add(rec.weights, gradv),
+        opts[:clip_norm] || st.max_update_norm
+      )
 
     new_rec = %{
       rec
@@ -103,7 +111,7 @@ defmodule Brain.Cerebellum.Store do
         count_seen: rec.count_seen + 1,
         ema_error: ema(rec.ema_error, loss, 0.10),
         feature_schema: opts[:feature_schema] || rec.feature_schema,
-        updated_at: now()
+        updated_at: now_ms()
     }
 
     :ets.insert(@table, {{scope, ctx}, new_rec})
@@ -150,12 +158,15 @@ defmodule Brain.Cerebellum.Store do
   defp create_table! do
     _ =
       :ets.new(@table, [
-        :set, :public, :named_table,
+        :set,
+        :public,
+        :named_table,
         read_concurrency: true,
         write_concurrency: true
       ])
   rescue
-    ArgumentError -> :ok
+    ArgumentError ->
+      :ok
   end
 
   defp ensure_record(scope, ctx, st) do
@@ -183,20 +194,28 @@ defmodule Brain.Cerebellum.Store do
       case model do
         nil ->
           %{
-            weights: pad_or_trim(st[:init_weights] || cfg(:init_weights, [0.0, 0.05, 0.05, 0.03, 0.03]), st[:feature_dims] || cfg(:feature_dims, 5)),
+            weights:
+              pad_or_trim(
+                st[:init_weights] || cfg(:init_weights, [0.0, 0.05, 0.05, 0.03, 0.03]),
+                st[:feature_dims] || cfg(:feature_dims, 5)
+              ),
             count_seen: 0,
             ema_error: 0.0,
             feature_schema: st[:feature_schema] || cfg(:feature_schema, 1),
-            updated_at: now()
+            updated_at: now_ms()
           }
 
         %CerebellumModel{} = m ->
           %{
-            weights: pad_or_trim(m.weights || [], st[:feature_dims] || cfg(:feature_dims, 5)),
+            weights:
+              pad_or_trim(
+                m.weights || [],
+                st[:feature_dims] || cfg(:feature_dims, 5)
+              ),
             count_seen: m.count_seen || 0,
             ema_error: m.ema_error || 0.0,
             feature_schema: m.feature_schema || 1,
-            updated_at: now()
+            updated_at: now_ms()
           }
       end
 
@@ -212,9 +231,11 @@ defmodule Brain.Cerebellum.Store do
     end
   end
 
+  # IMPORTANT: Db schema uses :naive_datetime; write NaiveDateTime here.
   defp do_flush(%{pending: pend} = st) when map_size(pend) == 0, do: st
+
   defp do_flush(%{pending: pend} = st) do
-    now_dt = DateTime.utc_now() |> DateTime.truncate(:second)
+    now_ndt = now_naive()
 
     entries =
       for {{scope, ctx}, rec} <- pend do
@@ -225,25 +246,46 @@ defmodule Brain.Cerebellum.Store do
           count_seen: rec.count_seen,
           ema_error: rec.ema_error,
           feature_schema: rec.feature_schema,
-          inserted_at: now_dt,
-          updated_at: now_dt
+          inserted_at: now_ndt,
+          updated_at: now_ndt
         }
       end
 
-    Db.insert_all(
-      CerebellumModel,
-      entries,
-      on_conflict: {:replace, [:weights, :count_seen, :ema_error, :feature_schema, :updated_at]},
-      conflict_target: [:scope, :context_key]
-    )
+    try do
+      Db.insert_all(
+        CerebellumModel,
+        entries,
+        on_conflict:
+          {:replace, [:weights, :count_seen, :ema_error, :feature_schema, :updated_at]},
+        conflict_target: [:scope, :context_key]
+      )
 
-    %{st | pending: %{}}
+      # Success → clear pending
+      %{st | pending: %{}}
+    rescue
+      e ->
+        Logger.error("""
+        [Cerebellum.Store] flush failed: #{inspect(e)}
+        Keeping #{map_size(pend)} pending entries for retry.
+        """)
+
+        # Keep pending for next scheduled retry
+        st
+    end
   end
 
   # ---- Math & utils ----------------------------------------------------------
 
-  defp cfg(k, default), do: Application.get_env(:brain, :cerebellum, %{}) |> Map.get(k, default)
-  defp now, do: System.system_time(:millisecond)
+  defp cfg(k, default),
+    do: Application.get_env(:brain, :cerebellum, %{}) |> Map.get(k, default)
+
+  # Millisecond monotonic-ish marker for in-memory recs
+  defp now_ms, do: System.system_time(:millisecond)
+
+  # Naive UTC timestamp for DB writes (schema expects :naive_datetime)
+  defp now_naive do
+    NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+  end
 
   defp ema(prev, x, alpha) when is_number(x), do: prev + alpha * (x - prev)
   defp ema(prev, _x, _a), do: prev
@@ -256,7 +298,8 @@ defmodule Brain.Cerebellum.Store do
     end
   end
 
-  defp vec_add(a, b), do: Enum.zip(a, b) |> Enum.map(fn {x, y} -> x + y end)
+  defp vec_add(a, b),
+    do: Enum.zip(a, b) |> Enum.map(fn {x, y} -> x + y end)
 
   defp clip_norm(v, max) do
     n = :math.sqrt(Enum.reduce(v, 0.0, fn x, acc -> acc + x * x end))

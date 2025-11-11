@@ -2,7 +2,7 @@ defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
-  alias Core.ResponsePlanner
+  alias Core.Response
   alias Brain
 
   @choice_preview_limit 3
@@ -273,8 +273,8 @@ defp build_planned_reply(user_text) do
 
   mood = safe_mood_snapshot()
 
-  if Code.ensure_loaded?(Core.ResponsePlanner) and function_exported?(Core.ResponsePlanner, :plan, 2) do
-    {_tone, reply, _meta} = ResponsePlanner.plan(si_like, mood)
+  if Code.ensure_loaded?(Core.Response) and function_exported?(Core.Response, :plan, 2) do
+    {_tone, reply, _meta} = Response.plan(si_like, mood)
     %{text: reply}
   else
     %{text: format_si_reply(si)}

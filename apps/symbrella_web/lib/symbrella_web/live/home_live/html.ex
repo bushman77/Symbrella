@@ -70,18 +70,25 @@ defmodule SymbrellaWeb.ChatLive.HTML do
         class="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-800/60 bg-[var(--color-bg)]/95 backdrop-blur"
       >
         <div class="mx-auto max-w-4xl w-full px-3 sm:px-4 pt-2 pb-3">
-          <form phx-submit="send" phx-change="update_draft" class="flex items-end gap-2">
+          <!-- NOTE: removed phx-change from the form to avoid early patch races -->
+          <form phx-submit="send" class="flex items-end gap-2">
             <textarea
               id="chat-input"
               name="message"
               phx-hook="ChatInput"
+              phx-input="update_draft"
               phx-debounce="200"
               rows="1"
               placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
               class="flex-1 resize-none rounded-2xl border border-slate-800/60 bg-[var(--color-panel)] px-4 py-3 text-[15px] outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40"
               disabled={@bot_typing}
               aria-busy={@bot_typing}
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
             ><%= @draft %></textarea>
+
             <%= if @bot_typing do %>
               <button type="button" phx-click="stop" class="btn px-4 py-3 rounded-2xl shadow">
                 🛑 Stop

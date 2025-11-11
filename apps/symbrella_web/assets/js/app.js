@@ -5,9 +5,21 @@ import { Socket } from "phoenix"
 import { LiveSocket } from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 
-const Hooks = {}
+// Import ChatInput from dedicated hooks file (Option B)
+import { ChatInput } from "./hooks/chat"
 
-/* -------------------- ScrollOnEvent (replaces AutoScroll) -------------------- */
+const Hooks = {}
+Hooks.ChatInput = ChatInput
+
+/* ──────────────────────────────── Utilities ──────────────────────────────── */
+
+const isEditableTarget = (el) =>
+  el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))
+
+const isPrintable = (e) =>
+  e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+
+/* ───────────────── ScrollOnEvent (replaces AutoScroll) ──────────────────── */
 /* Only scrolls when LiveView pushes "chat:scroll". Does one initial scroll
    on mount without animation; no auto-scroll on every DOM patch. */
 Hooks.ScrollOnEvent = {
@@ -34,6 +46,7 @@ Hooks.ScrollOnEvent = {
       }
     }
 
+    // initial scroll after mount & patch settle
     requestAnimationFrame(() => requestAnimationFrame(() => scrollMessagesBottom(false)))
 
     this.handleEvent("chat:scroll", (payload = {}) => {
@@ -48,7 +61,7 @@ Hooks.ScrollOnEvent = {
   }
 }
 
-/* ----------- CSS size vars for header/footer ----------- */
+/* ───────────────────── CSS size vars for header/footer ──────────────────── */
 function makeSizer(varName, fallbackPx) {
   return {
     mounted() {
@@ -73,65 +86,13 @@ Hooks.HeaderSizer   = makeSizer("--hdr", 56)
 Hooks.FooterSizer   = makeSizer("--ftr", 72)
 Hooks.ComposerSizer = makeSizer("--composer-h", 72)
 
-/* -------------------- ChatInput -------------------- */
-/* Auto-resize (cap 240px), Enter=send (Shift+Enter newline),
-   IME-safe, de-duped submit, keeps focus after patches. */
-Hooks.ChatInput = {
-  mounted() {
-    const ta = this.el
-    this.submitting = false
-    this.composing = false
-
-    this.resize = () => {
-      ta.style.height = "auto"
-      ta.style.height = Math.min(ta.scrollHeight, 240) + "px"
-    }
-
-    this.onKeyDown = (e) => {
-      if (e.key === "Enter" && !e.shiftKey && !this.composing) {
-        e.preventDefault()
-        if (this.submitting) return
-        this.submitting = true
-        const form = ta.closest("form")
-        if (form) (form.requestSubmit ? form.requestSubmit() : form.submit())
-        setTimeout(() => (this.submitting = false), 120)
-      }
-    }
-
-    this.onCompStart = () => (this.composing = true)
-    this.onCompEnd   = () => (this.composing = false)
-
-    ta.addEventListener("input", this.resize)
-    ta.addEventListener("keydown", this.onKeyDown)
-    ta.addEventListener("compositionstart", this.onCompStart)
-    ta.addEventListener("compositionend", this.onCompEnd)
-
-    this.resize()
-    ta.setAttribute("enterkeyhint", "send")
-    ta.focus({ preventScroll: true })
-  },
-  updated() {
-    this.resize?.()
-    if (!this.el.disabled && document.activeElement !== this.el) {
-      this.el.focus({ preventScroll: true })
-    }
-  },
-  destroyed() {
-    const ta = this.el
-    ta.removeEventListener("input", this.resize)
-    ta.removeEventListener("keydown", this.onKeyDown)
-    ta.removeEventListener("compositionstart", this.onCompStart)
-    ta.removeEventListener("compositionend", this.onCompEnd)
-  }
-}
-
-/* -------------------- BrainMap (SVG click/keyboard interactivity) -------------------- */
+/* ───────────── BrainMap (SVG click/keyboard interactivity) ─────────────── */
 /*
 Usage:
-  - In your HEEx where you render the SVG, wrap it with a container:
+  - Wrap your inline SVG:
       <div id="brain-map" phx-hook="BrainMap"> ...inline SVG here... </div>
-  - (Optional) mark elements with data-region="lifg|ofc|hippocampus|..." for precise mapping.
-  - If data-region is absent, we fall back to inkscape:label or id from the nearest <g> ancestor.
+  - Mark elements with data-region="lifg|ofc|hippocampus|..." when possible.
+  - If data-region is absent, fallback to inkscape:label or id from nearest <g>.
 Events pushed:
   - "select-region", payload: {region: "<key>"}
   - "hover-region",  payload: {region: "<key>", on: true|false}
@@ -159,18 +120,17 @@ Hooks.BrainMap = {
     this.svg.setAttribute("role", "application")
 
     // Candidates:
-    //  - anything with [data-region]
-    //  - or group layers with inkscape:label / id (fallback)
-    const candidates = Array.from(this.svg.querySelectorAll("[data-region], g[inkscape\\:label], g[id], path[id]"))
+    const candidates = Array.from(
+      this.svg.querySelectorAll("[data-region], g[inkscape\\:label], g[id], path[id]")
+    )
 
-    // Deduplicate by the topmost <g> (prefer larger clickable areas)
-    const unique = new Set()
+    // Deduplicate by element identity
+    const seen = new Set()
     const pick = []
     for (const el of candidates) {
       const key = this.regionKey(el)
-      if (!key) continue
-      if (unique.has(el)) continue
-      unique.add(el)
+      if (!key || seen.has(el)) continue
+      seen.add(el)
       pick.push({ el, key })
     }
 
@@ -189,7 +149,7 @@ Hooks.BrainMap = {
       }
       const onKey = (e) => {
         if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
+          e.preventDefault() // prevent scroll/activation outside the SVG
           this.highlight(el)
           this.pushEvent("select-region", { region: key })
         }
@@ -207,7 +167,12 @@ Hooks.BrainMap = {
       el.addEventListener("keydown", onKey)
       el.addEventListener("mouseenter", onEnter)
       el.addEventListener("mouseleave", onLeave)
-      this._handlers.push([el, "click", onClick], [el, "keydown", onKey], [el, "mouseenter", onEnter], [el, "mouseleave", onLeave])
+      this._handlers.push(
+        [el, "click", onClick],
+        [el, "keydown", onKey],
+        [el, "mouseenter", onEnter],
+        [el, "mouseleave", onLeave]
+      )
     })
   },
 
@@ -271,8 +236,7 @@ Hooks.BrainMap = {
   }
 }
 
-/* (Optional) A minimal live workspace feed hook if you want auto-trim/auto-scroll
-   Attach with: <div id="workspace" phx-hook="WorkspaceFeed" data-autoscroll="1"></div> */
+/* ───────── (Optional) Minimal live workspace feed hook (auto-trim/scroll) ─ */
 Hooks.WorkspaceFeed = {
   mounted() {
     this.max = parseInt(this.el.dataset.max || "200", 10)
@@ -290,13 +254,46 @@ Hooks.WorkspaceFeed = {
   }
 }
 
-/* -------------------- LiveSocket bootstrap -------------------- */
+/* ─────────────────────────── LiveSocket bootstrap ────────────────────────── */
 let csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, { hooks: Hooks, params: { _csrf_token: csrfToken } })
 
 topbar.config({ barThickness: 3, barColors: { 0: "#10b981" }, shadowColor: "rgba(0,0,0,0.3)" })
 window.addEventListener("phx:page-loading-start", () => topbar.show())
 window.addEventListener("phx:page-loading-stop", () => topbar.hide())
+
+// --- Global fallback: focus chat on first printable key and insert the char ---
+;(function () {
+  const isEditableTarget = (el) =>
+    el && (el.isContentEditable || ["INPUT","TEXTAREA","SELECT"].includes(el.tagName))
+
+  const isPrintable = (e) =>
+    e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+
+  // Capture=true so we run before random handlers that might preventDefault
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!isPrintable(e)) return
+      if (isEditableTarget(e.target)) return
+
+      const chat = document.querySelector("#chat-input, textarea[data-role='chat']")
+      if (!chat || chat.disabled) return
+
+      // Prevent page hotkeys, focus chat, and insert the key you typed.
+      e.preventDefault()
+      const pos = chat.selectionStart ?? chat.value.length
+      const ch = e.key
+      chat.focus({ preventScroll: true })
+      // Insert on the next frame so selection is stable after focus()
+      requestAnimationFrame(() => {
+        chat.setRangeText(ch, pos, pos, "end")
+        chat.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    },
+    { capture: true }
+  )
+})()
 
 liveSocket.connect()
 window.liveSocket = liveSocket
