@@ -62,19 +62,19 @@ defmodule Core.Input do
 
   # Decide whether to drop the token as a char-gram.
   defp is_chargram_token?(t, wl) when is_map(t) do
-    src       = Map.get(t, :source)   || Map.get(t, "source")
-    kind      = Map.get(t, :kind)     || Map.get(t, "kind")
-    charflag  = Map.get(t, :chargram) || Map.get(t, "chargram")
-    phrase0   = (Map.get(t, :phrase)  || Map.get(t, "phrase")  || "") |> to_string()
-    phrase    = String.downcase(phrase0)
-    mw?       = Map.get(t, :mw) || Map.get(t, "mw") || false
+    src = Map.get(t, :source) || Map.get(t, "source")
+    kind = Map.get(t, :kind) || Map.get(t, "kind")
+    charflag = Map.get(t, :chargram) || Map.get(t, "chargram")
+    phrase0 = (Map.get(t, :phrase) || Map.get(t, "phrase") || "") |> to_string()
+    phrase = String.downcase(phrase0)
+    mw? = Map.get(t, :mw) || Map.get(t, "mw") || false
 
-    shortish  = shortish_fragment?(phrase0)
+    shortish = shortish_fragment?(phrase0)
 
     flagged_chargram =
-      src   in [:chargram, "chargram"] or
-      kind  in [:chargram, "chargram"] or
-      charflag in [true, "true"]
+      src in [:chargram, "chargram"] or
+        kind in [:chargram, "chargram"] or
+        charflag in [true, "true"]
 
     short_fragment =
       shortish and not mw? and not MapSet.member?(wl, phrase)
@@ -92,4 +92,3 @@ defmodule Core.Input do
 
   defp shortish_fragment?(_), do: false
 end
-

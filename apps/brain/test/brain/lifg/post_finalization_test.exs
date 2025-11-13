@@ -15,13 +15,15 @@ defmodule Brain.LIFG.PostFinalizationTest do
       sentence: "It is raining",
       tokens: [
         %{index: 0, phrase: "It is raining", n: 3, mw: true, span: {0, 14}},
-        %{index: 1, phrase: "it is",         n: 2, mw: true, span: {0, 5}},
-        %{index: 2, phrase: "is raining",    n: 2, mw: true, span: {3, 14}}
+        %{index: 1, phrase: "it is", n: 2, mw: true, span: {0, 5}},
+        %{index: 2, phrase: "is raining", n: 2, mw: true, span: {3, 14}}
       ],
       sense_candidates: %{
-        0 => [%{id: "It is raining|phrase|0", pos: "phrase", norm: "it is raining", activation: 0.9}],
-        1 => [%{id: "It is|phrase|0",         pos: "phrase", norm: "it is",          activation: 0.9}],
-        2 => [%{id: "is raining|phrase|0",    pos: "phrase", norm: "is raining",     activation: 0.9}]
+        0 => [
+          %{id: "It is raining|phrase|0", pos: "phrase", norm: "it is raining", activation: 0.9}
+        ],
+        1 => [%{id: "It is|phrase|0", pos: "phrase", norm: "it is", activation: 0.9}],
+        2 => [%{id: "is raining|phrase|0", pos: "phrase", norm: "is raining", activation: 0.9}]
       }
     }
 
@@ -62,7 +64,8 @@ defmodule Brain.LIFG.PostFinalizationTest do
       _ -> false
     end
 
-    out = Post.finalize(si, choices, reanalysis?: true, fail_fun: fail_fun, allow_overlaps?: false)
+    out =
+      Post.finalize(si, choices, reanalysis?: true, fail_fun: fail_fun, allow_overlaps?: false)
 
     assert out.flips == 1
     ch0b = Enum.find(out.choices, &(&1.token_index == 0))
@@ -73,4 +76,3 @@ defmodule Brain.LIFG.PostFinalizationTest do
     assert Enum.sort(Enum.map(out.cover, & &1.span)) == Enum.sort([{0, 3}, {4, 7}])
   end
 end
-

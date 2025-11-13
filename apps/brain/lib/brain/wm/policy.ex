@@ -45,15 +45,15 @@ defmodule Brain.WM.Policy do
 
   @spec acceptable_candidate?(map(), cfg()) :: boolean()
   def acceptable_candidate?(cand, cfg) do
-    id  = to_string(cand[:id] || "")
+    id = to_string(cand[:id] || "")
     pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
 
-    allow_unk?  = Map.get(cfg, :allow_unk?, true)
+    allow_unk? = Map.get(cfg, :allow_unk?, true)
     allow_seed? = Map.get(cfg, :allow_seed?, true)
 
     cond do
       not allow_seed? and String.ends_with?(id, "|seed|") -> false
-      not allow_unk?  and String.contains?(String.downcase(pos), "unk") -> false
+      not allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
       true -> true
     end
   end
@@ -93,7 +93,7 @@ defmodule Brain.WM.Policy do
 
     # --- Recency & Intent nudges (light, bounded) ---
     recency_nudge = recency_nudge(cand, cfg)
-    intent_nudge  = intent_nudge(cand, cfg)
+    intent_nudge = intent_nudge(cand, cfg)
 
     b_scaled
     |> Kernel.+(0.5 * Numbers.clamp01(salience))
@@ -121,10 +121,10 @@ defmodule Brain.WM.Policy do
   @spec decide_gate_policy([map()], map(), float(), cfg()) ::
           {:allow | :block | :boost, float()}
   def decide_gate_policy(wm, cand, gate_score, cfg) do
-    prefer_source?   = cand[:source] in [:runtime, :recency, :lifg, :ltm]
-    thr              = Map.fetch!(cfg, :gate_threshold)
-    allow_fallback?  = Map.get(cfg, :allow_fallback_into_wm?, false)
-    is_fallback      = fallback_id?(cand[:id])
+    prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
+    thr = Map.fetch!(cfg, :gate_threshold)
+    allow_fallback? = Map.get(cfg, :allow_fallback_into_wm?, false)
+    is_fallback = fallback_id?(cand[:id])
 
     {within_budget?, beats_by?} = within_lemma_budget?(wm, cand, cfg)
 
@@ -174,7 +174,7 @@ defmodule Brain.WM.Policy do
 
   @spec within_lemma_budget?([map()], map(), cfg()) :: {boolean(), boolean()}
   defp within_lemma_budget?(wm, cand, cfg) do
-    lemma  = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
+    lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
     budget = Map.get(cfg, :lemma_budget, 2)
     margin = Map.get(cfg, :replace_margin, 0.10)
 
@@ -201,24 +201,26 @@ defmodule Brain.WM.Policy do
   end
 
   defp guess_lemma_from_id(nil), do: nil
+
   defp guess_lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
       _ -> nil
     end
   end
+
   defp guess_lemma_from_id(_), do: nil
 
   # --- New scoring helpers ----------------------------------------------------
 
   # Light, seconds-scale recency nudge; safe if ts_ms missing.
   defp recency_nudge(cand, cfg) do
-    now  = System.system_time(:millisecond)
+    now = System.system_time(:millisecond)
     half = Map.get(cfg, :half_life_ms, 7_500)
-    wt   = Map.get(cfg, :recency_weight, 0.10)
+    wt = Map.get(cfg, :recency_weight, 0.10)
 
-    ts   = cand[:ts_ms]
-    dt   = if is_integer(ts) and ts > 0, do: max(0, now - ts), else: 0
+    ts = cand[:ts_ms]
+    dt = if is_integer(ts) and ts > 0, do: max(0, now - ts), else: 0
     decay = :math.pow(0.5, dt / max(1, half))
 
     wt * decay
@@ -226,9 +228,9 @@ defmodule Brain.WM.Policy do
 
   # Small nudge when candidate intent matches current intent.
   defp intent_nudge(cand, cfg) do
-    cur  = Map.get(cfg, :current_intent)
-    wt   = Map.get(cfg, :intent_weight, 0.05)
-    cin  = cand[:intent] || get_in(cand, [:features, :intent])
+    cur = Map.get(cfg, :current_intent)
+    wt = Map.get(cfg, :intent_weight, 0.05)
+    cin = cand[:intent] || get_in(cand, [:features, :intent])
 
     if cur && cin && cur == cin, do: wt, else: 0.0
   end
@@ -236,9 +238,10 @@ defmodule Brain.WM.Policy do
   # Novelty boost based on whether the lemma is absent from recent WM items.
   defp novelty_boost(wm, cand, cfg) do
     window = Map.get(cfg, :novelty_window, 16)
-    wt     = Map.get(cfg, :novelty_weight, 0.15)
+    wt = Map.get(cfg, :novelty_weight, 0.15)
 
     lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
+
     if lemma == "" do
       0.0
     else
@@ -283,4 +286,3 @@ defmodule Brain.WM.Policy do
     end
   end
 end
-

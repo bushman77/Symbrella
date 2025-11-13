@@ -15,6 +15,7 @@ defmodule Core.Telemetry do
     if Code.ensure_loaded?(:telemetry) and :erlang.function_exported(:telemetry, :execute, 3) do
       _ = apply(:telemetry, :execute, [event, measurements, metadata])
     end
+
     :ok
   end
 
@@ -47,7 +48,7 @@ defmodule Core.Telemetry do
     if Code.ensure_loaded?(:telemetry) and :erlang.function_exported(:telemetry, :detach, 1) do
       _ = apply(:telemetry, :detach, [handler_id])
     end
+
     :ok
   end
 end
-

@@ -31,20 +31,20 @@ defmodule Brain.VmPFC do
 
   @spec compute_utility(ctx) :: %{utility_prior: float(), explore_rate: float()}
   def compute_utility(ctx) when is_map(ctx) do
-    success    = clamp01(Map.get(ctx, :recent_success_rate, 0.5))
-    cost_ms    = max(0, Map.get(ctx, :avg_cost_ms, 200))
+    success = clamp01(Map.get(ctx, :recent_success_rate, 0.5))
+    cost_ms = max(0, Map.get(ctx, :avg_cost_ms, 200))
     cost_scale = max(1, Map.get(ctx, :cost_scale_ms, 400))
-    prior      = clamp01(Map.get(ctx, :prior, 0.5))
+    prior = clamp01(Map.get(ctx, :prior, 0.5))
 
     # Normalize cost into 0..1, where 1.0 ~ “expensive”
     norm_cost = min(1.0, cost_ms / cost_scale)
 
     # Blend prior with (success - weighted cost). Weight cost to avoid overreacting.
-    raw_util       = max(0.0, success - 0.5 * norm_cost)
-    utility_prior  = clamp01(0.5 * prior + 0.5 * raw_util)
+    raw_util = max(0.0, success - 0.5 * norm_cost)
+    utility_prior = clamp01(0.5 * prior + 0.5 * raw_util)
 
     # Explore more when utility is low; soften with 0.6 factor for stability.
-    explore_rate   = clamp01(0.6 * (1.0 - utility_prior))
+    explore_rate = clamp01(0.6 * (1.0 - utility_prior))
 
     :telemetry.execute(
       [:brain, :vmpfc, :utility],
@@ -60,4 +60,3 @@ defmodule Brain.VmPFC do
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.5
 end
-

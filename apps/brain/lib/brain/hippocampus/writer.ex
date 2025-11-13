@@ -127,6 +127,7 @@ defmodule Brain.Hippocampus.Writer do
 
   defp map_has_numbers?(%{} = map),
     do: Enum.any?(map, fn {_k, v} -> is_number(v) end)
+
   defp map_has_numbers?(_), do: false
 
   # ──────── Outcome heuristics ─────────────
@@ -142,18 +143,22 @@ defmodule Brain.Hippocampus.Writer do
 
   defp infer_from_confidence(si) do
     winners = get_in(si, [:atl_slate, :winners]) || get_in(si, ["atl_slate", "winners"]) || []
+
     conf =
       get_in(si, [:intent, :confidence]) ||
-      get_in(si, ["intent", "confidence"]) ||
-      get_in(si, [:confidence]) ||
-      get_in(si, ["confidence"])
+        get_in(si, ["intent", "confidence"]) ||
+        get_in(si, [:confidence]) ||
+        get_in(si, ["confidence"])
 
     cond do
       is_list(winners) and winners != [] and is_number(conf) and conf >= 0.65 ->
         :success
+
       truthy?(get_in(si, [:reanalysis, :gave_up]) || get_in(si, ["reanalysis", "gave_up"])) ->
         :failure
-      true -> :neutral
+
+      true ->
+        :neutral
     end
   end
 
@@ -176,9 +181,10 @@ defmodule Brain.Hippocampus.Writer do
   defp compact_si(%{} = si), do: si
 
   defp user_id_from(si, opts),
-    do: Keyword.get(opts, :user_id) ||
-         get_in(si, [:user, :id]) ||
-         get_in(si, ["user", "id"])
+    do:
+      Keyword.get(opts, :user_id) ||
+        get_in(si, [:user, :id]) ||
+        get_in(si, ["user", "id"])
 
   defp embedding_from(opts) do
     case Keyword.get(opts, :embedding) do
@@ -199,12 +205,14 @@ defmodule Brain.Hippocampus.Writer do
 
   defp tokens_from_si(si) do
     toks =
-      si[:tokens] || si["tokens"] || []
-      |> Enum.flat_map(&token_extract/1)
+      si[:tokens] || si["tokens"] ||
+        []
+        |> Enum.flat_map(&token_extract/1)
 
     winners =
-      get_in(si, [:atl_slate, :winners]) || get_in(si, ["atl_slate", "winners"]) || []
-      |> Enum.flat_map(&winner_extract/1)
+      get_in(si, [:atl_slate, :winners]) || get_in(si, ["atl_slate", "winners"]) ||
+        []
+        |> Enum.flat_map(&winner_extract/1)
 
     Enum.uniq(toks ++ winners)
   end
@@ -214,12 +222,14 @@ defmodule Brain.Hippocampus.Writer do
     |> Enum.find(&is_binary/1)
     |> then(&if(&1, do: [norm(&1)], else: []))
   end
+
   defp token_extract(_), do: []
 
-  defp winner_extract(w), do:
-    [w[:lemma], w["lemma"], w[:norm], w["norm"], w[:mwe], w["mwe"]]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&norm/1)
+  defp winner_extract(w),
+    do:
+      [w[:lemma], w["lemma"], w[:norm], w["norm"], w[:mwe], w["mwe"]]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&norm/1)
 
   defp norm(nil), do: ""
   defp norm(v) when is_binary(v), do: v |> String.downcase() |> String.trim()
@@ -232,21 +242,22 @@ defmodule Brain.Hippocampus.Writer do
 
     sql = """
     INSERT INTO episodes (user_id, tokens, token_count, si, tags, embedding, inserted_at, updated_at)
-    VALUES ($#{length(emb)+1}, $#{length(emb)+2}, $#{length(emb)+3},
-            $#{length(emb)+4}, $#{length(emb)+5},
+    VALUES ($#{length(emb) + 1}, $#{length(emb) + 2}, $#{length(emb) + 3},
+            $#{length(emb) + 4}, $#{length(emb) + 5},
             ARRAY[#{placeholders}]::vector,
             now(), now())
     ON CONFLICT DO NOTHING
     """
 
     params =
-      emb ++ [
-        row.user_id,
-        row.tokens,
-        row.token_count,
-        row.si,
-        row.tags
-      ]
+      emb ++
+        [
+          row.user_id,
+          row.tokens,
+          row.token_count,
+          row.si,
+          row.tags
+        ]
 
     case SQL.query(Db, sql, params) do
       {:ok, _} -> :ok
@@ -273,7 +284,9 @@ defmodule Brain.Hippocampus.Writer do
           outcome: outcome,
           source: si[:source] || si["source"],
           confidence: get_in(si, [:intent, :confidence]) || get_in(si, ["intent", "confidence"]),
-          winners?: (get_in(si, [:atl_slate, :winners]) || get_in(si, ["atl_slate", "winners"]) || []) != []
+          winners?:
+            (get_in(si, [:atl_slate, :winners]) || get_in(si, ["atl_slate", "winners"]) || []) !=
+              []
         }
       )
 
@@ -289,4 +302,3 @@ defmodule Brain.Hippocampus.Writer do
         }
       )
 end
-

@@ -15,8 +15,22 @@ defmodule Core.BrainAdapter do
   @type cell_item :: cell_id | map() | struct()
 
   @type pos ::
-          :noun | :verb | :adj | :adv | :pron | :det | :adp | :num | :part |
-          :intj | :conj | :aux | :punct | :sym | :x | atom()
+          :noun
+          | :verb
+          | :adj
+          | :adv
+          | :pron
+          | :det
+          | :adp
+          | :num
+          | :part
+          | :intj
+          | :conj
+          | :aux
+          | :punct
+          | :sym
+          | :x
+          | atom()
 
   @type key :: cell_id | {binary(), pos} | {:mwe, [binary()]}
   @type syn_obj :: %{
@@ -37,6 +51,7 @@ defmodule Core.BrainAdapter do
   @spec activate_cells([cell_item()], map()) :: :ok
   def activate_cells(items, payload \\ %{})
   def activate_cells([], _payload), do: :ok
+
   def activate_cells(items, payload) when is_list(items) and is_map(payload) do
     GenServer.cast(@brain, {:activate_cells, items, payload})
   end
@@ -65,6 +80,7 @@ defmodule Core.BrainAdapter do
           {:ok, syn_result()} | {:error, term()}
   def synonyms_for_keys(keys, opts \\ %{})
   def synonyms_for_keys([], _opts), do: {:ok, %{}}
+
   def synonyms_for_keys(keys, opts) when is_list(keys) do
     payload = %{keys: keys, opts: normalize_opts(opts)}
     safe_call({:synonyms_for_keys, payload}, @timeout)
@@ -99,4 +115,3 @@ defmodule Core.BrainAdapter do
     end
   end
 end
-

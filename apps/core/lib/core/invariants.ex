@@ -162,7 +162,11 @@ defmodule Core.Invariants do
 
       # Boundary check: previous and next chars must be boundary or OOB.
       prev = if start - 1 < 0, do: ?\s, else: String.at(sent_norm, start - 1)
-      next = if start + len >= String.length(sent_norm), do: ?\s, else: String.at(sent_norm, start + len)
+
+      next =
+        if start + len >= String.length(sent_norm),
+          do: ?\s,
+          else: String.at(sent_norm, start + len)
 
       boundary? = boundary_char?(prev) and boundary_char?(next)
 
@@ -173,6 +177,7 @@ defmodule Core.Invariants do
   defp align_span_violation?(_t, _sent_norm, _phrase_norm), do: false
 
   defp boundary_char?(nil), do: true
+
   defp boundary_char?(<<c::utf8>>) do
     # Treat letters, digits, and underscore as non-boundary; everything else as boundary.
     not match?(true, letter_or_digit_or_uscore?(c))
@@ -181,10 +186,18 @@ defmodule Core.Invariants do
   defp letter_or_digit_or_uscore?(c) do
     # ASCII fast path; for non-ASCII, rely on Unicode properties via Regex
     cond do
-      c in ?0..?9 -> true
-      c in ?A..?Z -> true
-      c in ?a..?z -> true
-      c == ?_ -> true
+      c in ?0..?9 ->
+        true
+
+      c in ?A..?Z ->
+        true
+
+      c in ?a..?z ->
+        true
+
+      c == ?_ ->
+        true
+
       true ->
         # Non-ASCII: consider as letter/digit if it matches \p{L} or \p{N}
         Regex.match?(~r/^\p{L}$|^\p{N}$/u, <<c::utf8>>)
@@ -205,12 +218,13 @@ defmodule Core.Invariants do
   end
 
   defp norm(nil), do: ""
+
   defp norm(v) when is_binary(v) do
     v
     |> String.downcase()
     |> String.replace(~r/\s+/u, " ")
     |> String.trim()
   end
+
   defp norm(v), do: norm(Kernel.to_string(v))
 end
-

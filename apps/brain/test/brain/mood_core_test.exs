@@ -9,6 +9,7 @@ defmodule Brain.MoodCoreTest do
     case Process.whereis(Brain.MoodCore) do
       nil ->
         start_supervised!({Brain.MoodCore, []})
+
       _pid ->
         :ok
     end
@@ -40,16 +41,19 @@ defmodule Brain.MoodCoreTest do
 
   test "bump clamps to max_delta_per_tick" do
     s0 = Brain.MoodCore.snapshot()
-    Brain.MoodCore.bump(%{da: 1.0})   # cast; will clamp to +0.20
+    # cast; will clamp to +0.20
+    Brain.MoodCore.bump(%{da: 1.0})
     s1 = Brain.MoodCore.snapshot()
     assert_in_delta s1.levels.da - s0.levels.da, 0.20, 1.0e-6
   end
 
   test "decay heads toward baseline on tick" do
-    Brain.MoodCore.bump(%{ne: 0.20})      # raise NE above baseline
+    # raise NE above baseline
+    Brain.MoodCore.bump(%{ne: 0.20})
     s0 = Brain.MoodCore.snapshot()
     Process.sleep(5)
-    send(Brain.MoodCore, :tick)           # trigger one decay step
+    # trigger one decay step
+    send(Brain.MoodCore, :tick)
     Process.sleep(5)
     s1 = Brain.MoodCore.snapshot()
     assert s1.levels.ne < s0.levels.ne
@@ -59,13 +63,31 @@ defmodule Brain.MoodCoreTest do
     parent = self()
 
     upd_id = "test-update-#{System.unique_integer([:positive])}"
-    :telemetry.attach(upd_id, [:brain, :mood, :update], fn _, _, _, _ -> send(parent, :update) end, nil)
+
+    :telemetry.attach(
+      upd_id,
+      [:brain, :mood, :update],
+      fn _, _, _, _ -> send(parent, :update) end,
+      nil
+    )
 
     sat_id = "test-sat-#{System.unique_integer([:positive])}"
-    :telemetry.attach(sat_id, [:brain, :mood, :saturation], fn _, _, _, _ -> send(parent, :sat) end, nil)
+
+    :telemetry.attach(
+      sat_id,
+      [:brain, :mood, :saturation],
+      fn _, _, _, _ -> send(parent, :sat) end,
+      nil
+    )
 
     shk_id = "test-shock-#{System.unique_integer([:positive])}"
-    :telemetry.attach(shk_id, [:brain, :mood, :shock], fn _, _, _, _ -> send(parent, :shock) end, nil)
+
+    :telemetry.attach(
+      shk_id,
+      [:brain, :mood, :shock],
+      fn _, _, _, _ -> send(parent, :shock) end,
+      nil
+    )
 
     on_exit(fn ->
       :telemetry.detach(upd_id)
@@ -103,4 +125,3 @@ defmodule Brain.MoodCoreTest do
     end
   end
 end
-

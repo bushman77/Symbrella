@@ -12,43 +12,54 @@ defmodule SymbrellaWeb.Region.BaseArt do
   @external_resource @svg_path
 
   # Load raw SVG once at compile time (no local helpers used here)
-  @svg_raw (if File.exists?(@svg_path), do: File.read!(@svg_path), else: nil)
+  @svg_raw if File.exists?(@svg_path), do: File.read!(@svg_path), else: nil
 
   # Parse the default viewBox from the on-disk SVG (still safe at compile time)
-  @vb (
-    if is_binary(@svg_raw) do
-      case Regex.run(~r/viewBox\s*=\s*"([^"]+)"/, @svg_raw) do
-        [_, vb] ->
-          [minx, miny, w, h] =
-            vb
-            |> String.split(~r/\s+/, trim: true)
-            |> Enum.map(fn s -> case Float.parse(s) do {f, _} -> f; :error -> 0.0 end end)
+  @vb (if is_binary(@svg_raw) do
+         case Regex.run(~r/viewBox\s*=\s*"([^"]+)"/, @svg_raw) do
+           [_, vb] ->
+             [minx, miny, w, h] =
+               vb
+               |> String.split(~r/\s+/, trim: true)
+               |> Enum.map(fn s ->
+                 case Float.parse(s) do
+                   {f, _} -> f
+                   :error -> 0.0
+                 end
+               end)
 
-          %{minx: minx, miny: miny, w: w, h: h}
+             %{minx: minx, miny: miny, w: w, h: h}
 
-        _ -> %{minx: 0.0, miny: 0.0, w: 516.0, h: 406.0}
-      end
-    else
-      %{minx: 0.0, miny: 0.0, w: 516.0, h: 406.0}
-    end
-  )
+           _ ->
+             %{minx: 0.0, miny: 0.0, w: 516.0, h: 406.0}
+         end
+       else
+         %{minx: 0.0, miny: 0.0, w: 516.0, h: 406.0}
+       end)
 
   @doc """
   Returns `%{minx, miny, w, h}` for sizing the parent `<svg>`.
   If an override SVG string is provided, we parse its viewBox; else we use the default.
   """
   def viewbox(nil), do: @vb
+
   def viewbox(svg) when is_binary(svg) and byte_size(svg) > 0 do
     case Regex.run(~r/viewBox\s*=\s*"([^"]+)"/, svg) do
       [_, vb] ->
         [minx, miny, w, h] =
           vb
           |> String.split(~r/\s+/, trim: true)
-          |> Enum.map(fn s -> case Float.parse(s) do {f, _} -> f; :error -> 0.0 end end)
+          |> Enum.map(fn s ->
+            case Float.parse(s) do
+              {f, _} -> f
+              :error -> 0.0
+            end
+          end)
 
         %{minx: minx, miny: miny, w: w, h: h}
 
-      _ -> @vb
+      _ ->
+        @vb
     end
   end
 
@@ -57,6 +68,7 @@ defmodule SymbrellaWeb.Region.BaseArt do
   Accepts optional `:svg` override (string).
   """
   attr :svg, :string, default: nil
+
   def group(assigns) do
     svg_src =
       case assigns[:svg] do
@@ -69,7 +81,7 @@ defmodule SymbrellaWeb.Region.BaseArt do
 
     ~H"""
     <g id="base" vector-effect="non-scaling-stroke">
-      <%= Phoenix.HTML.raw(@inner) %>
+      {Phoenix.HTML.raw(@inner)}
     </g>
     """
   end
@@ -91,4 +103,3 @@ defmodule SymbrellaWeb.Region.BaseArt do
     |> String.replace(~r/\sheight="[^"]*"/, "")
   end
 end
-

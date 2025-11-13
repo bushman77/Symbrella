@@ -35,7 +35,7 @@ defmodule Core.Relations do
         []
       else
         Db.all(
-          from c in Db.BrainCell,
+          from(c in Db.BrainCell,
             where: c.norm in ^norms and c.status == "active",
             select: %{
               id: c.id,
@@ -44,6 +44,7 @@ defmodule Core.Relations do
               synonyms: c.synonyms,
               antonyms: c.antonyms
             }
+          )
         )
       end
 
@@ -88,7 +89,8 @@ defmodule Core.Relations do
         si_with_ev
       end
 
-    :telemetry.execute([:core, :relations, :edges_attached],
+    :telemetry.execute(
+      [:core, :relations, :edges_attached],
       %{count: length(edges)},
       %{syn: length(syn_edges), ant: length(ant_edges), hom: length(hom_edges)}
     )
@@ -125,7 +127,7 @@ defmodule Core.Relations do
   end
 
   defp fetch_cells_by_norms(ns) do
-    Db.all(from c in Db.BrainCell, where: c.norm in ^ns and c.status == "active")
+    Db.all(from(c in Db.BrainCell, where: c.norm in ^ns and c.status == "active"))
   rescue
     _ -> []
   end
@@ -145,4 +147,3 @@ defmodule Core.Relations do
 
   defp normalize(_), do: ""
 end
-

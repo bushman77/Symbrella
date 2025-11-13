@@ -20,17 +20,23 @@ defmodule Llm.Inference do
   def chat(model \\ nil, prompt, opts, state) do
     with {:ok, msgs} <- normalize_messages(prompt) do
       http_timeout = Keyword.get(opts, :timeout, state.timeout)
-      m           = model || state.model
-      ephemeral?  = Keyword.get(opts, :ephemeral?, false)
-      opts2       = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
+      m = model || state.model
+      ephemeral? = Keyword.get(opts, :ephemeral?, false)
+      opts2 = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
 
       # Cold-by-default: callers must pass auto_start?: true (and optionally pull?/warm?)
-      case ensure_autostart_and_warm(state, m, Keyword.merge(opts2, [timeout: http_timeout, origin: :chat])) do
+      case ensure_autostart_and_warm(
+             state,
+             m,
+             Keyword.merge(opts2, timeout: http_timeout, origin: :chat)
+           ) do
         {:ok, state2, _warmed?} ->
           base = %{"model" => m, "stream" => false, "messages" => msgs}
           body = Http.build_request_body(base, state2, opts2)
 
-          reply  = Http.post_json(state2, "/api/chat", body, Keyword.put(opts2, :timeout, http_timeout))
+          reply =
+            Http.post_json(state2, "/api/chat", body, Keyword.put(opts2, :timeout, http_timeout))
+
           state3 = maybe_ephemeral_cleanup_if(state2, m, ephemeral?, http_timeout)
 
           case reply do
@@ -62,16 +68,27 @@ defmodule Llm.Inference do
   """
   def generate(model \\ nil, prompt, opts, state) when is_binary(prompt) do
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    m           = model || state.model
-    ephemeral?  = Keyword.get(opts, :ephemeral?, false)
-    opts2       = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
+    m = model || state.model
+    ephemeral? = Keyword.get(opts, :ephemeral?, false)
+    opts2 = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
 
-    case ensure_autostart_and_warm(state, m, Keyword.merge(opts2, [timeout: http_timeout, origin: :generate])) do
+    case ensure_autostart_and_warm(
+           state,
+           m,
+           Keyword.merge(opts2, timeout: http_timeout, origin: :generate)
+         ) do
       {:ok, state2, _warmed?} ->
         base = %{"model" => m, "prompt" => prompt, "stream" => false}
         body = Http.build_request_body(base, state2, opts2)
 
-        reply  = Http.post_json(state2, "/api/generate", body, Keyword.put(opts2, :timeout, http_timeout))
+        reply =
+          Http.post_json(
+            state2,
+            "/api/generate",
+            body,
+            Keyword.put(opts2, :timeout, http_timeout)
+          )
+
         state3 = maybe_ephemeral_cleanup_if(state2, m, ephemeral?, http_timeout)
 
         case reply do
@@ -100,15 +117,26 @@ defmodule Llm.Inference do
   """
   def embeddings_one(text, opts, state) when is_binary(text) do
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    model       = Keyword.get(opts, :model, "nomic-embed-text")
-    ephemeral?  = Keyword.get(opts, :ephemeral?, false)
-    opts2       = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
+    model = Keyword.get(opts, :model, "nomic-embed-text")
+    ephemeral? = Keyword.get(opts, :ephemeral?, false)
+    opts2 = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
 
-    case ensure_autostart_and_warm(state, model, Keyword.merge(opts2, [timeout: http_timeout, origin: :embeddings_one])) do
+    case ensure_autostart_and_warm(
+           state,
+           model,
+           Keyword.merge(opts2, timeout: http_timeout, origin: :embeddings_one)
+         ) do
       {:ok, state2, _warmed?} ->
         body = %{"model" => model, "prompt" => text} |> Util.maybe_put_keep_alive(opts2)
 
-        reply  = Http.post_json(state2, "/api/embeddings", body, Keyword.put(opts2, :timeout, http_timeout))
+        reply =
+          Http.post_json(
+            state2,
+            "/api/embeddings",
+            body,
+            Keyword.put(opts2, :timeout, http_timeout)
+          )
+
         state3 = maybe_ephemeral_cleanup_if(state2, model, ephemeral?, http_timeout)
 
         case reply do
@@ -137,22 +165,33 @@ defmodule Llm.Inference do
   """
   def embeddings_batch(list, opts, state) when is_list(list) do
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    model       = Keyword.get(opts, :model, "nomic-embed-text")
-    ephemeral?  = Keyword.get(opts, :ephemeral?, false)
-    opts2       = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
+    model = Keyword.get(opts, :model, "nomic-embed-text")
+    ephemeral? = Keyword.get(opts, :ephemeral?, false)
+    opts2 = if ephemeral?, do: Keyword.put(opts, :keep_alive, 0), else: opts
 
-    case ensure_autostart_and_warm(state, model, Keyword.merge(opts2, [timeout: http_timeout, origin: :embeddings_batch])) do
+    case ensure_autostart_and_warm(
+           state,
+           model,
+           Keyword.merge(opts2, timeout: http_timeout, origin: :embeddings_batch)
+         ) do
       {:ok, state2, _warmed?} ->
         result =
           Enum.reduce_while(Enum.with_index(list), {:ok, []}, fn
             {text, idx}, {:ok, acc} when is_binary(text) ->
               body = %{"model" => model, "prompt" => text} |> Util.maybe_put_keep_alive(opts2)
 
-              case Http.post_json(state2, "/api/embeddings", body, Keyword.put(opts2, :timeout, http_timeout)) do
+              case Http.post_json(
+                     state2,
+                     "/api/embeddings",
+                     body,
+                     Keyword.put(opts2, :timeout, http_timeout)
+                   ) do
                 {:ok, %{"embedding" => vec} = raw} when is_list(vec) ->
                   {:cont, {:ok, acc ++ [%{embeddings: vec, raw: raw}]}}
+
                 {:ok, raw} ->
                   {:halt, {:error, {:at, idx, {:unexpected_response, raw}}}}
+
                 {:error, reason} ->
                   {:halt, {:error, {:at, idx, reason}}}
               end
@@ -165,7 +204,7 @@ defmodule Llm.Inference do
           maybe_ephemeral_cleanup_if(state2, model, ephemeral?, http_timeout)
 
         case result do
-          {:ok, out}       -> {:ok, out, state3}
+          {:ok, out} -> {:ok, out, state3}
           {:error, reason} -> {:error, reason, state3}
         end
 
@@ -192,7 +231,7 @@ defmodule Llm.Inference do
   def ensure_autostart_and_warm(state, model, opts) do
     # Global manual-only gate (configurable)
     manual_only = Application.get_env(:llm, :manual_only?, false)
-    force?      = Keyword.get(opts, :force?, false)
+    force? = Keyword.get(opts, :force?, false)
 
     # Cold-by-default flags
     auto? = Keyword.get(opts, :auto_start?, false)
@@ -200,8 +239,8 @@ defmodule Llm.Inference do
     warm? = Keyword.get(opts, :warm?, false) and not Keyword.get(opts, :ephemeral?, false)
 
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    origin       = Keyword.get(opts, :origin, :unknown)
-    m            = model || state.model
+    origin = Keyword.get(opts, :origin, :unknown)
+    m = model || state.model
 
     cond do
       manual_only and not force? ->
@@ -211,7 +250,11 @@ defmodule Llm.Inference do
         case Daemon.ensure_serving(state, http_timeout) do
           {:ok, st2, spawned?} ->
             # Telemetry: autostart happened (daemon ensured)
-            safe_telemetry([:llm, :autostart], %{count: 1}, %{origin: origin, model: m, spawned?: spawned?})
+            safe_telemetry([:llm, :autostart], %{count: 1}, %{
+              origin: origin,
+              model: m,
+              spawned?: spawned?
+            })
 
             _ = if pull?, do: ModelControl.pull_model(m), else: true
 
@@ -259,13 +302,14 @@ defmodule Llm.Inference do
 
   # For ephemeral calls: strict unload + drop warmed flag.
   defp maybe_ephemeral_cleanup_if(state, model, true, http_timeout) do
-    _ = ModelControl.unload_model_strict(
-      state,
-      model,
-      timeout:  http_timeout,
-      attempts: @strict_unload_verify_attempts,
-      sleep_ms: @strict_unload_verify_sleep_ms
-    )
+    _ =
+      ModelControl.unload_model_strict(
+        state,
+        model,
+        timeout: http_timeout,
+        attempts: @strict_unload_verify_attempts,
+        sleep_ms: @strict_unload_verify_sleep_ms
+      )
 
     %{state | warmed_models: MapSet.delete(state.warmed_models, model)}
   end
@@ -281,4 +325,3 @@ defmodule Llm.Inference do
     end
   end
 end
-

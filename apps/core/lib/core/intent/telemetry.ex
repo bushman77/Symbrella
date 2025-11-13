@@ -11,14 +11,18 @@ defmodule Core.Intent.Telemetry do
     # normalize label to atom if it came in as string
     label =
       cond do
-        is_atom(label) -> label
+        is_atom(label) ->
+          label
+
         is_binary(label) ->
           try do
             String.to_existing_atom(label)
           rescue
             _ -> String.to_atom(label)
           end
-        true -> :other
+
+        true ->
+          :other
       end
 
     meas = %{confidence: normalize_confidence(confidence)}
@@ -30,6 +34,7 @@ defmodule Core.Intent.Telemetry do
   defp normalize_confidence(nil), do: 0.0
   defp normalize_confidence(c) when is_integer(c), do: c * 1.0
   defp normalize_confidence(c) when is_float(c), do: c
+
   defp normalize_confidence(c) when is_binary(c) do
     case Float.parse(c) do
       {f, _} -> f
@@ -37,4 +42,3 @@ defmodule Core.Intent.Telemetry do
     end
   end
 end
-

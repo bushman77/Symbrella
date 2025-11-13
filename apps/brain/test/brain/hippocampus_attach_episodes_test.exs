@@ -30,7 +30,7 @@ defmodule Brain.HippocampusAttachEpisodesTest do
   defp episodes_from(si, opts \\ []) do
     si
     |> Hippocampus.attach_episodes(Keyword.merge([limit: 5], opts))
-    |> then(&get_in(&1, [:evidence, :episodes]) || [])
+    |> then(&(get_in(&1, [:evidence, :episodes]) || []))
   end
 
   defp has_winner_lemma?(%{episode: %{slate: %{winners: ws}}}, lemma) when is_list(ws) do
@@ -41,6 +41,7 @@ defmodule Brain.HippocampusAttachEpisodesTest do
     Enum.all?(episodes, fn
       %{episode: %{meta: meta}} ->
         (meta[:tenant] || meta["tenant"]) == scope[:tenant]
+
       _ ->
         false
     end)
@@ -100,4 +101,3 @@ defmodule Brain.HippocampusAttachEpisodesTest do
     refute Enum.any?(eps_high, &has_winner_lemma?(&1, "x"))
   end
 end
-

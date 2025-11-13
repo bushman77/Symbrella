@@ -41,4 +41,3 @@ defmodule Core.Recall.Synonyms.Cache do
     end
   end
 end
-

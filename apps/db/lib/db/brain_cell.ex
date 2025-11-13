@@ -60,7 +60,8 @@ defmodule Db.BrainCell do
   # POS-aware grammar allowlist (matches the DB CHECK)
   @gf_allow %{
     "noun" => ~w(countable uncountable plural-only usually plural),
-    "verb" => ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
+    "verb" =>
+      ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
     "adjective" => ~w(attributive-only predicative-only postpositive comparative-only)
   }
 
@@ -73,32 +74,32 @@ defmodule Db.BrainCell do
   }
 
   schema "brain_cells" do
-    field :word, :string
-    field :norm, :string
-    field :pos, :string
-    field :definition, :string
-    field :example, :string
+    field(:word, :string)
+    field(:norm, :string)
+    field(:pos, :string)
+    field(:definition, :string)
+    field(:example, :string)
 
     # ✅ array type to match Postgres text[]
-    field :gram_function, {:array, :string}, default: []
+    field(:gram_function, {:array, :string}, default: [])
 
-    field :synonyms, {:array, :string}, default: []
-    field :antonyms, {:array, :string}, default: []
-    field :semantic_atoms, {:array, :string}, default: []
+    field(:synonyms, {:array, :string}, default: [])
+    field(:antonyms, {:array, :string}, default: [])
+    field(:semantic_atoms, {:array, :string}, default: [])
 
-    field :type, :string
-    field :status, :string, default: "inactive"
+    field(:type, :string)
+    field(:status, :string, default: "inactive")
 
-    field :activation, :float, default: 0.0
-    field :modulated_activation, :float, default: 0.0
-    field :dopamine, :float, default: 0.0
-    field :serotonin, :float, default: 0.0
+    field(:activation, :float, default: 0.0)
+    field(:modulated_activation, :float, default: 0.0)
+    field(:dopamine, :float, default: 0.0)
+    field(:serotonin, :float, default: 0.0)
 
-    field :position, {:array, :float}
-    field :connections, {:array, :map}, default: []
-    field :last_dose_at, :utc_datetime_usec
-    field :last_substance, :string
-    field :token_id, :integer
+    field(:position, {:array, :float})
+    field(:connections, {:array, :map}, default: [])
+    field(:last_dose_at, :utc_datetime_usec)
+    field(:last_substance, :string)
+    field(:token_id, :integer)
     # field :embedding, Pgvector.Ecto.Vector
 
     timestamps()
@@ -138,12 +139,16 @@ defmodule Db.BrainCell do
     |> update_change(:status, &trim_or_nil/1)
     # id: trim & drop trailing pipes, but keep internal spaces (phrases allowed)
     |> update_change(:id, fn
-      nil -> nil
+      nil ->
+        nil
+
       s when is_binary(s) ->
         s
         |> String.trim()
         |> String.replace(~r/\|+$/u, "")
-      other -> other
+
+      other ->
+        other
     end)
   end
 
@@ -187,6 +192,7 @@ defmodule Db.BrainCell do
             if Enum.member?(raw, "usually") and Enum.member?(raw, "plural"),
               do: ["usually plural"],
               else: []
+
           keep(raw ++ synth, @gf_allow["noun"])
 
         "verb" ->
@@ -319,4 +325,3 @@ defmodule Db.BrainCell do
 
   defp extract_pos(_), do: nil
 end
-

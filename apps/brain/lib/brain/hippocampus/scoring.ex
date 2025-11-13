@@ -23,4 +23,3 @@ defmodule Brain.Hippocampus.Scoring do
     :math.pow(0.5, age_ms / half_life_ms)
   end
 end
-

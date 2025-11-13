@@ -62,4 +62,3 @@ defmodule Brain.LIFG.Config do
     }
   end
 end
-

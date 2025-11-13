@@ -46,4 +46,3 @@ defmodule Llm.Http do
     Map.merge(Const.stable_runner_opts(), user)
   end
 end
-

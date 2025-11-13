@@ -57,7 +57,7 @@ defmodule Core.Intent.NormalizePolishTest do
 
     test "junk confidence becomes nil" do
       assert %{confidence: nil} = Normalize.normalize(%{"confidence" => "NaN"})
-      assert %{confidence: nil} = Normalize.normalize(%{"confidence" => %{}}) 
+      assert %{confidence: nil} = Normalize.normalize(%{"confidence" => %{}})
     end
   end
 
@@ -69,4 +69,3 @@ defmodule Core.Intent.NormalizePolishTest do
     end
   end
 end
-

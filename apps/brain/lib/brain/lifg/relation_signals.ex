@@ -47,7 +47,8 @@ defmodule Brain.LIFG.RelationSignals do
 
   defp get_edges(si) when is_map(si) do
     ev = Map.get(si, :evidence) || %{}
-    case (Map.get(ev, :relations) || Map.get(ev, "relations")) do
+
+    case Map.get(ev, :relations) || Map.get(ev, "relations") do
       xs when is_list(xs) -> xs
       _ -> []
     end
@@ -69,6 +70,6 @@ defmodule Brain.LIFG.RelationSignals do
   defp normalize(s) when is_binary(s) do
     s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
   end
+
   defp normalize(_), do: ""
 end
-

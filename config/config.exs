@@ -1,28 +1,88 @@
+# config/config.exs
 import Config
 
-# ───────── Mailer ─────────
+# ───────────────────────────── Mailer ─────────────────────────────
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
 
-# ───────── Core (decoupled from :db) ─────────
+# ───────────────────────────── Core ───────────────────────────────
+# Synonyms (decoupled from :db, via external provider that calls Db.Lexicon)
 config :core, Core.Recall.Synonyms,
   provider: Core.Recall.Synonyms.Providers.External,
   cache?: true,
   ttl_ms: 60_000,
   top_k: 12
 
-config :brain, pubsub: Symbrella.PubSub
-
 config :core, Core.Recall.Synonyms.Providers.External,
-  mfa: {Db.Lexicon, :lookup_synonyms, []}  # you implement this in :db
+  # You implement this in :db
+  mfa: {Db.Lexicon, :lookup_synonyms, []}
 
-# ───────── Generators ─────────
-config :symbrella_web, generators: [context_app: :symbrella]
+# Core defaults
+config :core,
+  recall_budget_ms: :infinity,
+  recall_max_items: :infinity
 
-# ───────── App-specific (example) ─────────
+# Curiosity bridge (kept as-is)
+config :core, Core.Curiosity.Bridge,
+  threshold: 0.60,
+  min_gap_ms: 30_000
+
+# ─────────────────────────── Brain (central) ──────────────────────
+# Single consolidated block; preserves your effective weights and options.
+config :brain,
+  pubsub: Symbrella.PubSub,
+  # pMTG
+  # :boost | :rerun | :none
+  pmtg_mode: :boost,
+  pmtg_margin_threshold: 0.15,
+  pmtg_window_keep: 50,
+  # LIFG (Stage-1)
+  lifg_defaults: [inject_child_unigrams?: true],
+  lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
+  # or :top2 | :none
+  lifg_stage1_scores_mode: :all,
+  lifg_min_margin: 0.05,
+  lifg_stage1_mwe_fallback: true,
+  lifg_slate_filter_rules: [
+    %{lemma: "a", allow: ~w(det article particle), drop_others?: true},
+    %{lemma: "A", allow: ~w(det article particle), drop_others?: true},
+    %{lemma: "eat", allow: ~w(verb), drop_others?: true}
+  ],
+  # ACC gate
+  acc_conflict_tau: 0.50,
+  # Working memory shaping
+  # per-second exponential decay (≈5.8s half-life)
+  wm_decay_lambda: 0.12,
+  wm_score_min: 0.0,
+  wm_score_max: 1.0,
+  lifg_mood_weights: %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00},
+  lifg_mood_cap: 0.05,
+  # Hippocampus defaults
+  hpc_half_life_ms: 300_000,
+  hpc_window_keep: 300,
+  hpc_min_jaccard: 0.0,
+  hpc_recall_limit: 3,
+  # Priming knobs
+  hippo_priming: :on,
+  hippo_priming_vectors: %{
+    success: %{da: 0.02, "5ht": -0.01, glu: 0.02, ne: 0.01},
+    failure: %{da: -0.01, "5ht": 0.02, glu: 0.00, ne: 0.02}
+  }
+
+# MoodCore — explicit module config (kept separate on purpose)
+config :brain, Brain.MoodCore,
+  half_life_ms: 12_000,
+  clock: :cycle,
+  init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
+
+# ───────────────────────────── Web ────────────────────────────────
+# Symbrella app opts
 config :symbrella,
   resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
 
-# ───────── Phoenix Endpoint (base/static config) ─────────
+# Generators
+config :symbrella_web, generators: [context_app: :symbrella]
+
+# Endpoint (base/static config)
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
@@ -33,7 +93,7 @@ config :symbrella_web, SymbrellaWeb.Endpoint,
   pubsub_server: Symbrella.PubSub,
   live_view: [signing_salt: "mkK1WujO"]
 
-# ───────── Build tools ─────────
+# ─────────────────────────── Build tools ──────────────────────────
 config :esbuild,
   version: "0.25.4",
   default: [
@@ -51,7 +111,7 @@ config :tailwind,
     cd: Path.expand("../apps/symbrella_web/assets", __DIR__)
   ]
 
-# ───────── Logger (global) ─────────
+# ───────────────────────────── Logger ─────────────────────────────
 config :logger,
   backends: [:console],
   level: :info,
@@ -63,10 +123,10 @@ config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id]
 
-# JSON
+# ───────────────────────────── Phoenix ────────────────────────────
 config :phoenix, :json_library, Jason
 
-# ───────── Ecto (db app) ─────────
+# ─────────────────────────────  DB  ───────────────────────────────
 config :db, ecto_repos: [Db]
 
 config :db, Db,
@@ -81,58 +141,12 @@ config :db, Db,
   # silence SQL logs by default (opt in at runtime via DB_LOG=true)
   log: System.get_env("DB_LOG", "false") in ~w(true 1 on yes)
 
+# Embeddings (placeholders; wire up your module)
 config :db, :embedding_dim, 1536
-# implement MyEmbeddings.embed/1 -> {:ok, [float()]}
 config :db, :embedder, MyEmbeddings
 
-# ───────── Core defaults ─────────
-config :core,
-  recall_budget_ms: :infinity,
-  recall_max_items: :infinity
-
-# ───────── Tesla ─────────
+# ───────────────────────────── Tesla ──────────────────────────────
 config :tesla, disable_deprecated_builder_warning: true
 
-# ───────── Brain (central defaults) ─────────
-config :brain,
-  # :boost | :rerun | :none
-  pmtg_mode: :boost,
-  pmtg_margin_threshold: 0.15,
-  lifg_defaults: [inject_child_unigrams?: true],
-  pmtg_window_keep: 50,
-  lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
-  lifg_stage1_scores_mode: :all,
-  # per-second exponential decay (≈5.8s half-life)
-  wm_decay_lambda: 0.12,
-  wm_score_min: 0.0,
-  wm_score_max: 1.0,
-lifg_slate_filter_rules: [
-    %{lemma: "a",   allow: ~w(det article particle), drop_others?: true},
-    %{lemma: "A",   allow: ~w(det article particle), drop_others?: true},
-    %{lemma: "eat", allow: ~w(verb),                 drop_others?: true}
-  ]
-
-# LIFG mood shaping
-config :brain, :lifg_mood_weights, %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00}
-config :brain, :lifg_mood_cap, 0.05
-
-# Curiosity
-config :core, Core.Curiosity.Bridge,
-  threshold: 0.60,
-  min_gap_ms: 30_000
-
-# Hippo priming
-config :brain, :hippo_priming, :on
-config :brain, :hippo_priming_vectors, %{
-  success: %{da: 0.02, "5ht": -0.01, glu: 0.02, ne: 0.01},
-  failure: %{da: -0.01, "5ht": 0.02, glu: 0.00, ne: 0.02}
-}
-
-# ✅ MoodCore — explicit, safe keyword config (prevents crash from bare integer)
-config :brain, Brain.MoodCore,
-  half_life_ms: 12_000,
-  clock: :cycle,
-  init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
-
-# Env-specific at the very end
+# ─────────────────────────── Per-env tail ─────────────────────────
 import_config "#{config_env()}.exs"

@@ -82,4 +82,3 @@ defmodule Core.Intent.Normalize do
   defp clamp(n, lo, hi) when n > hi, do: hi
   defp clamp(n, _lo, _hi), do: n
 end
-

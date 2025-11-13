@@ -40,4 +40,3 @@ defmodule Core.Recall.Synonyms.Providers.Fallback do
     %{lemma: Normalize.word(other), pos: nil, prior: 0.5, source: "extras", meta: %{}}
   end
 end
-

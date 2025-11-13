@@ -29,4 +29,3 @@ defmodule Core.Intent do
   def valid?(intent) when is_atom(intent), do: intent in @allowed_intents
   def valid?(_), do: false
 end
-

@@ -15,18 +15,26 @@ defmodule Core.Curiosity.Policy do
           token_budget_per_cycle: non_neg_integer()
         }
 
-  defstruct interval_ms: 300_000,        # 5 min base cadence
-            jitter_ms: 30_000,           # ± jitter to desync cycles
-            batch_size: 16,              # phrases per cycle
-            concurrency: 2,              # Termux-friendly
-            max_tries: 3,                # (future) if you add a tries counter
-            llm_model: nil,              # let Llm default unless set
-            token_budget_per_cycle: 6_000 # rough soft budget (tokens/effort)
+  # 5 min base cadence
+  defstruct interval_ms: 300_000,
+            # ± jitter to desync cycles
+            jitter_ms: 30_000,
+            # phrases per cycle
+            batch_size: 16,
+            # Termux-friendly
+            concurrency: 2,
+            # (future) if you add a tries counter
+            max_tries: 3,
+            # let Llm default unless set
+            llm_model: nil,
+            # rough soft budget (tokens/effort)
+            token_budget_per_cycle: 6_000
 
   @doc "Load policy from Application env (:core, Core.Curiosity) with sane defaults."
   @spec load() :: t()
   def load do
     cfg = Application.get_env(:core, Core.Curiosity, [])
+
     %__MODULE__{
       interval_ms: Keyword.get(cfg, :interval_ms, 300_000),
       jitter_ms: Keyword.get(cfg, :jitter_ms, 30_000),
@@ -38,4 +46,3 @@ defmodule Core.Curiosity.Policy do
     }
   end
 end
-

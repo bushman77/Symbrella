@@ -5,7 +5,8 @@ defmodule Brain.LIFG do
   Entry points:
     • Legacy-compatible API (pure): `disambiguate_stage1/1,2`
       - Calls the new `Brain.LIFG.Stage1.run/2` engine and preserves the legacy event shape.
-    • Full pipeline: `run/2` (ATL finalize → Stage-1 → optional pMTG, optional ACC gate → Post.finalize).
+    • Full pipeline: `run/2`
+      (ATL finalize → Stage-1 → optional fallback-rerun → optional ACC gate → optional pMTG → Post.finalize)
 
   Optional ACC hook:
     If `Brain.ACC` is available, `run/2` will compute a conflict score
@@ -23,20 +24,26 @@ defmodule Brain.LIFG do
         pmtg_margin_threshold: 0.15,
         pmtg_window_keep: 50,
         acc_conflict_tau: 0.50
+
+  Telemetry (emitted by `run/2`):
+    • [:brain, :lifg, :pmtg_decision]
+      measurements: %{needy: non_neg_integer()}
+      metadata: %{apply?: boolean(), mode: atom(), acc_present?: boolean(), acc_conflict: float(), acc_tau: float()}
   """
 
   use Brain, region: :lifg
   require Logger
 
   alias Brain.Utils.Safe
-  alias Brain.LIFG.Input
-  alias Brain.LIFG.Post
+  alias Brain.LIFG.{Input, Post, Explanation}
 
   # Slim helpers (lived in separate files)
   alias Brain.LIFG.{
     MWE,
-    Choices,          # ensure apps/brain/lib/brain/lifg/choices.ex is present
-    Legacy,           # ensure apps/brain/lib/brain/lifg/legacy.ex is present
+    # ensure apps/brain/lib/brain/lifg/choices.ex is present
+    Choices,
+    # ensure apps/brain/lib/brain/lifg/legacy.ex is present
+    Legacy,
     Stage1Bridge,
     ACCGate,
     FallbackRerun,
@@ -44,7 +51,7 @@ defmodule Brain.LIFG do
     Config
   }
 
-  # ---- Stable registered name / lifecycle helpers ---------------------------
+  # ── Stable registered name / lifecycle helpers ─────────────────────────────
 
   @doc "Stable registered name used for calls/whereis (pairs with UI call_target/1)."
   def name, do: __MODULE__
@@ -69,7 +76,9 @@ defmodule Brain.LIFG do
   @doc "Return a minimal snapshot of the server state if running; else %{}."
   def get_state(server \\ __MODULE__) do
     case GenServer.whereis(server) do
-      nil -> %{}
+      nil ->
+        %{}
+
       _ ->
         try do
           GenServer.call(server, :get_state)
@@ -83,7 +92,7 @@ defmodule Brain.LIFG do
     GenServer.start_link(__MODULE__, Map.new(opts), name: name())
   end
 
-  # ── Server bootstrap & runtime config ────────────────────────────────
+  # ── Server bootstrap & runtime config ──────────────────────────────────────
 
   @impl true
   def init(opts) do
@@ -94,7 +103,9 @@ defmodule Brain.LIFG do
   @doc "Returns effective options (env + overrides), even if the server hasn't started."
   def status(server \\ __MODULE__) do
     case GenServer.whereis(server) do
-      nil -> Config.effective_opts(%{})
+      nil ->
+        Config.effective_opts(%{})
+
       _pid ->
         try do
           GenServer.call(server, :status)
@@ -104,13 +115,13 @@ defmodule Brain.LIFG do
     end
   end
 
-  @doc """
-  Returns the most recent LIFG decision snapshot recorded by this server, or :empty.
-  """
+  @doc "Returns the most recent LIFG decision snapshot recorded by this server, or :empty."
   @spec last(module()) :: map() | :empty
   def last(server \\ __MODULE__) do
     case GenServer.whereis(server) do
-      nil -> :empty
+      nil ->
+        :empty
+
       _pid ->
         try do
           GenServer.call(server, :last)
@@ -145,10 +156,12 @@ defmodule Brain.LIFG do
 
   @impl true
   def handle_cast({:record_last, payload}, state) when is_map(payload) do
-    {:noreply, %{state | last: payload}}
+    # Central enrichment point: attach explanation + weak_decision flag (idempotent & safe)
+    enriched = attach_explanation(payload)
+    {:noreply, %{state | last: enriched}}
   end
 
-  # ── Stage-1 (legacy-compatible event shape) ──────────────────────────
+  # ── Stage-1 (legacy-compatible event shape) ────────────────────────────────
 
   @doc """
   Pure, stateless Stage-1 wrapper over `Brain.LIFG.Stage1.run/2`.
@@ -160,7 +173,7 @@ defmodule Brain.LIFG do
   @spec disambiguate_stage1(map(), keyword()) :: map()
   def disambiguate_stage1(%{} = si, opts) do
     si_plain = Safe.to_plain(si)
-    slate    = Input.slate_for(si_plain)
+    slate = Input.slate_for(si_plain)
 
     si_for_stage =
       si_plain
@@ -231,7 +244,11 @@ defmodule Brain.LIFG do
 
       {:error, reason} ->
         Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
-        _ = Recorder.maybe_record_last(__MODULE__, :stage1_error, si_for_stage, [], %{}, %{error: inspect(reason)})
+
+        _ =
+          Recorder.maybe_record_last(__MODULE__, :stage1_error, si_for_stage, [], %{}, %{
+            error: inspect(reason)
+          })
 
         evt = %{
           stage: :lifg_stage1,
@@ -247,7 +264,7 @@ defmodule Brain.LIFG do
     end
   end
 
-  # ── Full pipeline (optional ATL + ACC + pMTG) ────────────────────────
+  # ── Full pipeline (optional ATL + ACC + pMTG) ──────────────────────────────
 
   @doc """
   Full LIFG pipeline:
@@ -260,7 +277,8 @@ defmodule Brain.LIFG do
     7) Post.finalize: non-overlap cover and optional reanalysis
   """
   @spec run(map(), keyword()) ::
-          {:ok, %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
+          {:ok,
+           %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
           | {:error, term()}
   def run(si, opts \\ []) when is_map(si) and is_list(opts) do
     try do
@@ -277,7 +295,8 @@ defmodule Brain.LIFG do
 
       # 2) Attach slate → sense_candidates (optional)
       si2 =
-        if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
+        if Code.ensure_loaded?(Brain.ATL) and
+             function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
           case Brain.ATL.attach_sense_candidates(
                  si1,
                  slate,
@@ -302,16 +321,11 @@ defmodule Brain.LIFG do
       min_margin =
         Keyword.get(opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-     
+      # Env-driven weights with optional per-call overrides
+      weights_for_stage1 =
+        Config.lifg_weights()
+        |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
 
-weights_for_stage1 =
-  Keyword.get(opts, :weights, %{
-    lex_fit: 0.5,
-    rel_prior: 0.25,
-    activation: 0.15,
-    intent_bias: 0.10
-  })
- 
       # 3) Stage-1 disambiguation
       stage1_result =
         Stage1Bridge.safe_call(
@@ -354,12 +368,41 @@ weights_for_stage1 =
               Application.get_env(:brain, :acc_conflict_tau, 0.50)
             )
 
+          # Identify "needy" (low margin or low p(top1)) with alternatives
+          needy =
+            Enum.filter(choices, fn ch ->
+              m = (ch[:margin] || 1.0) * 1.0
+              alts? = (ch[:alt_ids] || []) != []
+
+              p1 =
+                (ch[:scores] || %{})
+                |> Map.values()
+                |> Enum.max(fn -> 0.0 end)
+                |> Kernel.*(1.0)
+
+              (m < margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and alts?
+            end)
+
           # 6) pMTG consult (respect ACC gate when ACC is present)
-          pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+          pmtg_mode =
+            Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
 
           pmtg_apply? =
             Keyword.get(opts, :pmtg_apply?, true) and
               (not acc_present? or acc_conflict >= acc_conf_tau)
+
+          # Emit decision telemetry
+          :telemetry.execute(
+            [:brain, :lifg, :pmtg_decision],
+            %{needy: length(needy)},
+            %{
+              apply?: pmtg_apply?,
+              mode: pmtg_mode,
+              acc_present?: acc_present?,
+              acc_conflict: acc_conflict * 1.0,
+              acc_tau: acc_conf_tau * 1.0
+            }
+          )
 
           {final_si, final_choices} =
             if Code.ensure_loaded?(Brain.PMTG) and pmtg_apply? do
@@ -409,13 +452,19 @@ weights_for_stage1 =
               allow_overlaps?: Keyword.get(opts, :allow_overlaps?, false)
             )
 
-          Recorder.maybe_record_last(__MODULE__, :run, post_out.si, post_out.choices, audit, %{
-            scores_mode: scores_mode,
-            margin_threshold: margin_thr,
-            pmtg_mode: pmtg_mode,
-            cover_count: length(post_out.cover),
-            flips: post_out.flips
-          })
+          _ =
+            Recorder.maybe_record_last(__MODULE__, :run, post_out.si, post_out.choices, audit, %{
+              scores_mode: scores_mode,
+              margin_threshold: margin_thr,
+              pmtg_mode: pmtg_mode,
+              pmtg_applied?: pmtg_apply?,
+              acc_present?: acc_present?,
+              acc_conflict: acc_conflict,
+              acc_conflict_tau: acc_conf_tau,
+              needy_count: length(needy),
+              cover_count: length(post_out.cover),
+              flips: post_out.flips
+            })
 
           {:ok,
            %{
@@ -427,18 +476,25 @@ weights_for_stage1 =
            }}
 
         {:error, reason} ->
-          Recorder.maybe_record_last(__MODULE__, :run_error, si2a, [], %{}, %{error: inspect(reason)})
+          _ =
+            Recorder.maybe_record_last(__MODULE__, :run_error, si2a, [], %{}, %{
+              error: inspect(reason)
+            })
+
           {:error, {:stage1, reason}}
       end
     rescue
       e ->
         Logger.error("LIFG full run failed: #{inspect(e)}")
-        Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
+
+        _ =
+          Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
+
         {:error, e}
     end
   end
 
-  # ── Math helpers (public, used elsewhere) ────────────────────────────
+  # ── Math helpers (public, used elsewhere) ──────────────────────────────────
 
   @doc "Stable softmax. Uniform if inputs are all equal. Sums to 1.0."
   @spec normalize_scores([number()]) :: [float()]
@@ -448,11 +504,14 @@ weights_for_stage1 =
     m = Enum.max(xs, fn -> 0.0 end)
     exs = Enum.map(xs, fn x -> :math.exp(x * 1.0 - m) end)
     z = Enum.sum(exs)
-    if z <= 0.0 do
-      n = length(xs)
-      if n == 0, do: [], else: List.duplicate(1.0 / n, n)
-    else
-      Enum.map(exs, &(&1 / z))
+
+    cond do
+      z <= 0.0 ->
+        n = length(xs)
+        if n == 0, do: [], else: List.duplicate(1.0 / n, n)
+
+      true ->
+        Enum.map(exs, &(&1 / z))
     end
   end
 
@@ -462,10 +521,15 @@ weights_for_stage1 =
     {sa, sb} =
       {Enum.reduce(a, 0.0, fn x, acc -> acc + x * x end),
        Enum.reduce(b, 0.0, fn x, acc -> acc + x * x end)}
+
     na = :math.sqrt(Kernel.max(sa, 0.0))
     nb = :math.sqrt(Kernel.max(sb, 0.0))
-    if na <= 1.0e-15 or nb <= 1.0e-15, do: 0.0,
-      else: (Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)) / (na * nb)
+
+    if na <= 1.0e-15 or nb <= 1.0e-15 do
+      0.0
+    else
+      (Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)) / (na * nb)
+    end
   end
 
   def cosine(_, _), do: 0.0
@@ -492,11 +556,58 @@ weights_for_stage1 =
 
   def low_confidence?(_choice, _opts), do: true
 
-  # ── Small internal helpers ───────────────────────────────────────────
+  # ── Small internal helpers ─────────────────────────────────────────────────
 
   # Flatten :lifg_opts embedded as kw/map into a keyword list
   defp flatten_lifg_opts(nil), do: []
   defp flatten_lifg_opts(%{} = m), do: Map.to_list(m)
   defp flatten_lifg_opts(kw) when is_list(kw), do: kw
-end
 
+  # Attach explanation (idempotent, rescue-safe). Adds:
+  #   :explanation (map), :explanation_text (string),
+  #   and bumps :audit.weak_decisions to 1 if decision is weak.
+  defp attach_explanation(%{} = last) do
+    already? = Map.has_key?(last, :explanation) or Map.has_key?(last, :explanation_text)
+
+    exp =
+      if already? do
+        last[:explanation] || %{}
+      else
+        safe_build_explanation(last)
+      end
+
+    if exp == %{} do
+      last
+    else
+      weak? = get_in(exp, [:decision, :weak?]) || false
+
+      audit0 = last[:audit] || %{}
+
+      audit =
+        audit0
+        |> Map.put_new(:feature_mix, Map.get(last, :feature_mix, %{}))
+        |> Map.put(:weak_decisions, (weak? && 1) || Map.get(audit0, :weak_decisions, 0))
+
+      last
+      |> Map.put(:explanation, exp)
+      |> Map.put(:explanation_text, exp[:text])
+      |> Map.put(:audit, audit)
+    end
+  end
+
+  defp attach_explanation(other), do: other
+
+  defp safe_build_explanation(last) do
+    try do
+      if Code.ensure_loaded?(Explanation) and function_exported?(Explanation, :build, 1) do
+        Explanation.build(last) || %{}
+      else
+        %{}
+      end
+    rescue
+      _ -> %{}
+    catch
+      _, _ -> %{}
+    end
+  end
+end

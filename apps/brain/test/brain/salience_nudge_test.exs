@@ -22,4 +22,3 @@ defmodule Brain.SalienceNudgeTest do
     assert out.salience_boost <= 1.0
   end
 end
-

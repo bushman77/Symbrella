@@ -12,4 +12,3 @@ defmodule Brain.LIFG.SlateFilterTest do
     assert got[1] == [%{id: "a banana|phrase|fallback"}]
   end
 end
-

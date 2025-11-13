@@ -1,4 +1,3 @@
-# apps/brain/lib/brain/pmtg.ex
 defmodule Brain.PMTG do
   @moduledoc """
   Posterior Middle Temporal Gyrus (pMTG) — controlled semantic retrieval.
@@ -25,7 +24,6 @@ defmodule Brain.PMTG do
   """
 
   use Brain, region: :pmtg
-
   @name __MODULE__
 
   @type si :: map()
@@ -53,28 +51,12 @@ defmodule Brain.PMTG do
 
   # ───────────────────────────── Public API ─────────────────────────────
 
-  @doc """
-  Non-blocking consult. Pass raw LIFG `choices` or prefiltered `needy` (set `already_needy: true`).
-
-  Options (selected):
-    * `:already_needy` (bool) — if true, `list` is used as-is
-    * `:limit` (pos_integer) — max episodes/lexicon entries per token (default: 5)
-    * `:margin_threshold` (float) — low-margin threshold (default: app env)
-    * `:p_min` (float) — p(top1) threshold (default: `:acc_p_min`)
-    * `:mode` (:boost | :rerun | :none) — override server mode
-    * `:boost`, `:inhib` — deltas for :boost mode (defaults 0.15 / -0.05)
-  """
   @spec consult([choice()], [map()], keyword()) :: :ok
   def consult(list, tokens, opts \\ [])
       when is_list(list) and is_list(tokens) and is_list(opts) do
     GenServer.cast(@name, {:consult, list, tokens, opts})
   end
 
-  @doc """
-  Synchronous consult; returns result payload. Useful for tests or blocking flows.
-
-  See `consult/3` for supported options.
-  """
   @spec consult_sync([choice()], [map()], keyword()) ::
           {:ok,
            %{
@@ -90,15 +72,12 @@ defmodule Brain.PMTG do
     GenServer.call(@name, {:consult_sync, list, tokens, opts})
   end
 
-  @doc "Server status (state includes :last and rolling :window)."
   @spec status(pid() | module()) :: map()
   def status(server \\ @name), do: GenServer.call(server, :status)
 
-  @doc "Update server-level defaults at runtime (e.g., mode/window_keep)."
   @spec configure(keyword()) :: :ok
   def configure(opts) when is_list(opts), do: GenServer.cast(@name, {:configure, opts})
 
-  @doc "Clear rolling window and last snapshot."
   @spec reset() :: :ok
   def reset, do: GenServer.call(@name, :reset)
 
@@ -114,9 +93,7 @@ defmodule Brain.PMTG do
        region: :pmtg,
        opts: %{mode: mode, window_keep: keep} |> Map.merge(Map.new(opts)),
        window_keep: keep,
-       # [{ts_ms, %{needy_count: n, queries: [...]}}]
        window: [],
-       # %{si, queries, evidence, audit}
        last: nil
      }}
   end
@@ -140,11 +117,9 @@ defmodule Brain.PMTG do
     %{need: need, si: si1, queries: queries, evidence: evidence, thr: thr, pmin: pmin, mode: mode} =
       plan_and_collect(list, tokens, opts, state)
 
-    # Apply side-effects for async mode (no return payload)
     apply_mode(si1, need, list, evidence, mode, opts, emit_mode: :async)
 
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-
     {last, window} = build_last_and_window(si1, queries, evidence, need, state, timing_ms)
 
     :telemetry.execute(
@@ -167,7 +142,6 @@ defmodule Brain.PMTG do
       apply_mode(si1, need, list, evidence, mode, opts, emit_mode: :sync)
 
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-
     {last, window} = build_last_and_window(si1, queries, evidence, need, state, timing_ms)
 
     :telemetry.execute(
@@ -189,20 +163,18 @@ defmodule Brain.PMTG do
   end
 
   @impl true
-  def handle_call(:reset, _from, state) do
-    {:reply, :ok, %{state | last: nil, window: []}}
-  end
+  def handle_call(:reset, _from, state), do: {:reply, :ok, %{state | last: nil, window: []}}
 
-  # Fallback to the macro’s default clauses (e.g., :status)
+  # >>> Moved ABOVE the catch-all to avoid clause shadowing <<<
+  @impl true
+  def handle_call(:status, _from, state), do: {:reply, state, state}
+
+  # Keep the catch-all last so it doesn’t shadow specific clauses
   @impl true
   def handle_call(other, from, state), do: super(other, from, state)
 
   # ─────────────────────────── Pure planning stage ───────────────────────────
 
-  @doc """
-  Plan retrieval for `needy` LIFG choices. Appends a `:pmtg` trace event.
-  Returns `{:ok, %{si, queries, audit}}`.
-  """
   @spec resolve(si(), [choice()], keyword()) ::
           {:ok, %{si: si(), queries: [query()], audit: map()}}
   def resolve(si, needy, opts \\ []) when is_map(si) and is_list(needy) do
@@ -220,19 +192,10 @@ defmodule Brain.PMTG do
         }
       end)
 
-    ev = %{
-      stage: :pmtg,
-      needy_count: length(needy),
-      planned_queries: length(queries)
-    }
-
+    ev = %{stage: :pmtg, needy_count: length(needy), planned_queries: length(queries)}
     si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
 
-    audit = %{
-      stage: :pmtg,
-      needy_count: ev.needy_count
-    }
-
+    audit = %{stage: :pmtg, needy_count: ev.needy_count}
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
     {:ok, %{si: si2, queries: queries, audit: Map.put(audit, :timing_ms, timing_ms)}}
   end
@@ -240,23 +203,80 @@ defmodule Brain.PMTG do
   # ───────────────────── Evidence gathering (best-effort) ───────────────────
 
   @spec fetch_evidence([query()], [map()], keyword()) :: [evidence_item()]
-  def fetch_evidence(queries, _tokens, _opts) when is_list(queries) do
-    Enum.map(queries, fn q ->
-      hits_eps = episodes_hits(q.lemma, q.limit)
-      hits_lex = lexicon_hits(q.lemma, q.limit)
+  def fetch_evidence(queries, tokens, opts) when is_list(queries) and is_list(tokens) do
+    tmap = Map.new(tokens, fn t -> {Map.get(t, :index) || Map.get(t, "index"), t} end)
 
-      %{
+    use_syns? = Keyword.get(opts, :use_synonyms?, true)
+
+    syn_top_k =
+      Keyword.get(
+        opts,
+        :synonyms_top_k,
+        Application.get_env(:brain, Brain.Recall.Synonyms, [])[:top_k] || 8
+      )
+
+    dbg? =
+      Keyword.get(
+        opts,
+        :emit_variant_debug?,
+        Application.get_env(:brain, :pmtg_variant_debug, false)
+      )
+
+    Enum.map(queries, fn q ->
+      tok = Map.get(tmap, q.token_index, %{})
+
+      variants_core = lemma_variants(q.lemma, tok)
+
+      variants_syns =
+        if use_syns?, do: synonyms_for(q.lemma, tok, syn_top_k), else: []
+
+      variants =
+        (variants_core ++ variants_syns)
+        |> Enum.map(&String.downcase/1)
+        |> Enum.uniq()
+
+      eps_hits =
+        variants
+        |> Enum.flat_map(&episodes_hits(&1, q.limit))
+        |> uniq_by_id()
+
+      lex_hits =
+        variants
+        |> Enum.flat_map(&lexicon_hits(&1, q.limit))
+        |> uniq_by_id()
+
+      _ =
+        if dbg? do
+          :telemetry.execute(
+            [:brain, :pmtg, :variants],
+            %{tried: length(variants), eps: length(eps_hits), lex: length(lex_hits)},
+            %{lemma: q.lemma, token_index: q.token_index}
+          )
+        end
+
+      base = %{
         token_index: q.token_index,
         lemma: q.lemma,
         chosen_id: q.chosen_id,
         alt_ids: q.alt_ids,
-        episodes: hits_eps,
-        lexicon: hits_lex
+        episodes: eps_hits,
+        lexicon: lex_hits
       }
+
+      if dbg? do
+        Map.merge(base, %{
+          variants_tried: variants,
+          variants_hit: %{
+            episodes: Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
+            lexicon: Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
+          }
+        })
+      else
+        base
+      end
     end)
   end
 
-  # Backward-compat (arity-2)
   @spec fetch_evidence([query()], keyword()) :: [evidence_item()]
   def fetch_evidence(queries, opts) when is_list(queries) and is_list(opts) do
     fetch_evidence(queries, [], opts)
@@ -319,20 +339,10 @@ defmodule Brain.PMTG do
 
   # ─────────────── Sense compatibility (MWE vs unigram) ───────────────
 
-  @doc """
-  Filter lexicon candidates by token granularity.
-
-  Ensures:
-    * MWEs (`token.n > 1`) keep space-containing lemmas; unigrams prefer non-space lemmas.
-    * Emits `[:brain, :pmtg, :no_mwe_senses]` when an MWE has no MWE senses (kept=0).
-  """
   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
   def enforce_sense_compatibility(evidence, tokens)
       when is_list(evidence) and is_list(tokens) do
-    tmap =
-      Map.new(tokens, fn t ->
-        {Map.get(t, :index) || Map.get(t, "index"), t}
-      end)
+    tmap = Map.new(tokens, fn t -> {Map.get(t, :index) || Map.get(t, "index"), t} end)
 
     Enum.map(evidence, fn ev ->
       idx = Map.get(ev, :token_index) || Map.get(ev, "token_index")
@@ -356,7 +366,6 @@ defmodule Brain.PMTG do
       end)
 
     if n > 1 and filtered == [] do
-      # No MWE senses available: keep originals but flag via telemetry as kept=0.
       {lexicon, true}
     else
       {filtered, false}
@@ -392,10 +401,8 @@ defmodule Brain.PMTG do
       has_hits = ev.episodes != [] or ev.lexicon != []
 
       if has_hits and is_binary(ev.chosen_id) do
-        # boost winner
         Brain.cell_cast(ev.chosen_id, {:activate, %{delta: boost}})
 
-        # softly inhibit alts (unique)
         ev.alt_ids
         |> List.wrap()
         |> Enum.uniq()
@@ -412,7 +419,6 @@ defmodule Brain.PMTG do
   @spec do_rerun(si(), [evidence_item()], keyword()) ::
           {:ok, %{si: si(), choices: [choice()]}}
   defp do_rerun(si, evidence, opts) do
-    # Build a slate from lexicon evidence with semantic fields preserved
     slate_from_ev =
       evidence
       |> Enum.group_by(& &1.token_index)
@@ -420,7 +426,9 @@ defmodule Brain.PMTG do
         senses =
           evs
           |> Enum.flat_map(fn ev -> List.wrap(ev.lexicon) end)
-          |> Enum.uniq_by(fn s -> Map.get(s, :id) || Map.get(s, "id") || sense_key_fallback(s) end)
+          |> Enum.uniq_by(fn s ->
+            Map.get(s, :id) || Map.get(s, "id") || sense_key_fallback(s)
+          end)
           |> Enum.with_index()
           |> Enum.map(fn {s, i} ->
             id = Map.get(s, :id) || Map.get(s, "id") || sense_key_fallback(s)
@@ -432,19 +440,15 @@ defmodule Brain.PMTG do
                 Map.get(s, :definition) || Map.get(s, "definition") || ""
 
             syns = Map.get(s, :synonyms) || Map.get(s, "synonyms") || []
-
             feats_from_sense = Map.get(s, :features) || %{}
 
-            # tiny deterministic tiebreaker so top-1 has non-zero margin
             eps = 1.0e-6 * (1000 - i)
 
             base_feats = %{
               lex_fit: 0.60,
-              # will get +eps below
               rel_prior: 0.50,
               activation: 0.0,
               intent_bias: 0.0,
-              # carry semantics so Stage1 heuristics can work
               pos: pos,
               lemma: lemma,
               definition: defn,
@@ -453,11 +457,8 @@ defmodule Brain.PMTG do
 
             feats =
               base_feats
-              # let explicit features from the sense win over base defaults
               |> Map.merge(feats_from_sense, fn _k, _base, from_sense -> from_sense end)
-              # always add the epsilon even if rel_prior came from the sense
               |> Map.update(:rel_prior, 0.50 + eps, &(&1 + eps))
-              # salutation nudge for interjection senses (hello/hi/hey)
               |> maybe_salutation_nudge(si, tidx)
 
             %{id: id, features: feats}
@@ -468,7 +469,6 @@ defmodule Brain.PMTG do
 
     si2 = Map.put(si, :sense_candidates, slate_from_ev)
 
-    # Weights: Stage1 env/defaults + optional bump
     env =
       Application.get_env(:brain, :lifg_stage1_weights, %{
         lex_fit: 0.4,
@@ -511,22 +511,17 @@ defmodule Brain.PMTG do
 
   # ─────────────────────────────── Helpers ───────────────────────────────
 
-  # Shared consult logic for async/sync paths
   defp plan_and_collect(list, tokens, opts, state) do
     thr = margin_threshold(opts)
     pmin = p_min(opts)
 
     need =
-      if Keyword.get(opts, :already_needy, false) do
-        list
-      else
-        needy_from_choices(list, thr, pmin)
-      end
+      if Keyword.get(opts, :already_needy, false),
+        do: list,
+        else: needy_from_choices(list, thr, pmin)
 
     si0 = %{tokens: tokens, trace: []}
-
-    {:ok, %{si: si1, queries: queries}} =
-      resolve(si0, need, limit: Keyword.get(opts, :limit, 5))
+    {:ok, %{si: si1, queries: queries}} = resolve(si0, need, limit: Keyword.get(opts, :limit, 5))
 
     evidence =
       fetch_evidence(queries, si1.tokens, opts)
@@ -534,15 +529,7 @@ defmodule Brain.PMTG do
 
     mode = opts[:mode] || state.opts[:mode] || Application.get_env(:brain, :pmtg_mode, :boost)
 
-    %{
-      need: need,
-      si: si1,
-      queries: queries,
-      evidence: evidence,
-      thr: thr,
-      pmin: pmin,
-      mode: mode
-    }
+    %{need: need, si: si1, queries: queries, evidence: evidence, thr: thr, pmin: pmin, mode: mode}
   end
 
   defp apply_mode(si1, need, list, evidence, mode, opts, emit_mode: emit_mode) do
@@ -560,9 +547,6 @@ defmodule Brain.PMTG do
           _ ->
             {need, false, si1}
         end
-
-      :none ->
-        {need, false, si1}
 
       _ ->
         {need, false, si1}
@@ -587,7 +571,6 @@ defmodule Brain.PMTG do
     {last, window}
   end
 
-  # Determine needy items using margin, p(top1), and presence of alts
   defp needy_from_choices(choices, thr, pmin) do
     Enum.filter(choices, fn ch ->
       m = Map.get(ch, :margin, 1.0) * 1.0
@@ -651,7 +634,6 @@ defmodule Brain.PMTG do
     end
   end
 
-  # Merge rerun winners over a baseline (typically the original or needy list)
   defp merge_choices(baseline, rerun) do
     by_tok = Map.new(baseline, fn ch -> {ch.token_index, ch} end)
 
@@ -660,7 +642,6 @@ defmodule Brain.PMTG do
     |> Enum.sort_by(& &1.token_index)
   end
 
-  # Emit a pMTG :rerun event (2-arity only; no 1-arity wrapper)
   defp emit_rerun_event(choices, mode) do
     groups =
       choices
@@ -668,7 +649,6 @@ defmodule Brain.PMTG do
       |> MapSet.new()
       |> MapSet.size()
 
-    # Telemetry: keep numeric fields in measurements; atoms/labels in meta
     :telemetry.execute(
       [:brain, :pmtg, :rerun],
       %{groups: groups, choices: length(choices)},
@@ -676,18 +656,66 @@ defmodule Brain.PMTG do
     )
   end
 
-  # Ensure sense has a reproducible key when id is missing
   defp sense_key_fallback(s) do
     "#{Map.get(s, :lemma) || Map.get(s, "lemma") || "?"}|#{Map.get(s, :pos) || Map.get(s, "pos") || "?"}"
   end
 
-  # --- Telemetry helpers (grouped; no duplicates, no unused 1-arity) ---
+  # ── Variant helpers & synonyms (Brain-side) ────────────────────────────
 
-  # Some call sites pass only event + measurements
+  defp lemma_variants(nil, _tok), do: []
+  defp lemma_variants("", _tok), do: []
+
+  defp lemma_variants(lemma, tok) do
+    base = to_string(lemma) |> String.trim()
+    down = String.downcase(base)
+
+    expanded =
+      down
+      |> String.replace(~r/\bim\b/, "i'm")
+      |> String.replace(~r/\bi am\b/, "i'm")
+
+    head =
+      case {Map.get(tok, :n) || Map.get(tok, "n"), String.contains?(down, " ")} do
+        {n, true} when is_integer(n) and n > 1 -> down |> String.split() |> List.last()
+        _ -> nil
+      end
+
+    [down, expanded, head]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp synonyms_for(nil, _tok, _top_k), do: []
+  defp synonyms_for("", _tok, _top_k), do: []
+
+  defp synonyms_for(lemma, tok, top_k) do
+    pos = Map.get(tok, :pos) || Map.get(tok, "pos")
+
+    try do
+      if pos do
+        Brain.Recall.Synonyms.lookup_by_pos(lemma, pos, top_k) |> List.wrap()
+      else
+        Brain.Recall.Synonyms.lookup(lemma, top_k) |> List.wrap()
+      end
+    rescue
+      _ -> []
+    catch
+      _, _ -> []
+    end
+  end
+
+  defp uniq_by_id(list) do
+    Enum.uniq_by(list, fn s ->
+      Map.get(s, :id) || Map.get(s, "id") ||
+        {Map.get(s, :lemma) || Map.get(s, "lemma"), Map.get(s, :pos) || Map.get(s, "pos")}
+    end)
+  end
+
+  # --- Telemetry helpers ---
+
   defp safe_exec_telemetry(event, measurements),
     do: safe_exec_telemetry(event, measurements, %{})
 
-  # Single implementation
   defp safe_exec_telemetry(event, measurements, meta) do
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
       :telemetry.execute(event, measurements, meta)

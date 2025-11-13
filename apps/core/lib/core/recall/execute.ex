@@ -43,10 +43,10 @@ defmodule Core.Recall.Execute do
 
   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
   def execute(%SI{} = si, %Plan{} = plan, opts \\ []) do
-    t0         = now_ms()
+    t0 = now_ms()
     exists_fun = Keyword.get(opts, :exists_fun, default_exists_fun())
     neg_exists = Keyword.get(opts, :neg_exists_fun, default_neg_exists_fun())
-    neg_put    = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
+    neg_put = Keyword.get(opts, :neg_put_fun, default_neg_put_fun())
 
     {candidates, covered_tok_ids} = candidate_keys(si)
 
@@ -97,8 +97,8 @@ defmodule Core.Recall.Execute do
             [{normalize(phrase), [idx], 1}]
 
           %{} = m ->
-            raw  = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
-            key  = if is_binary(raw), do: normalize(raw), else: ""
+            raw = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
+            key = if is_binary(raw), do: normalize(raw), else: ""
             prio = if Map.get(m, :is_mwe_head, false), do: 0, else: 1
             [{key, [Map.get(m, :id, idx)], prio}]
 
@@ -127,6 +127,7 @@ defmodule Core.Recall.Execute do
     |> Enum.flat_map(fn
       %{source: src, matched_tokens: mts} when src in [:runtime, :recency] ->
         Enum.map(mts, & &1.tok_id)
+
       _ ->
         []
     end)
@@ -192,7 +193,16 @@ defmodule Core.Recall.Execute do
             end
 
           {added, add_cnt, bh} =
-            synonym_pass(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left, t0, refs)
+            synonym_pass(
+              candidates,
+              exists_fun,
+              neg_exists,
+              neg_put,
+              slots_left,
+              time_left,
+              t0,
+              refs
+            )
 
           {:cont, {refs ++ added, %{cnts | synonym: cnts.synonym + add_cnt}, bh}}
 
@@ -249,8 +259,24 @@ defmodule Core.Recall.Execute do
       cond do
         exists_fun.(key) ->
           ref = to_active_ref_exact(key, tok_ids)
-          next_slots = case slots_left do :infinity -> :infinity; n -> n - 1 end
-          do_exact(rest, exists_fun, neg_exists, neg_put, next_slots, time_left_ms, t0, [ref | acc], cnt + 1)
+
+          next_slots =
+            case slots_left do
+              :infinity -> :infinity
+              n -> n - 1
+            end
+
+          do_exact(
+            rest,
+            exists_fun,
+            neg_exists,
+            neg_put,
+            next_slots,
+            time_left_ms,
+            t0,
+            [ref | acc],
+            cnt + 1
+          )
 
         neg_exists.(key) ->
           do_exact(rest, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, acc, cnt)
@@ -276,11 +302,21 @@ defmodule Core.Recall.Execute do
 
   # ───────── synonym pass ─────────
 
-  defp synonym_pass(candidates, exists_fun, neg_exists, neg_put, slots_left, time_left_ms, t0, already_refs) do
+  defp synonym_pass(
+         candidates,
+         exists_fun,
+         neg_exists,
+         neg_put,
+         slots_left,
+         time_left_ms,
+         t0,
+         already_refs
+       ) do
     if is_integer(slots_left) and slots_left <= 0 do
       {[], 0, false}
     else
       elapsed = now_ms() - t0
+
       if time_left_ms != :infinity and elapsed >= time_left_ms do
         {[], 0, true}
       else
@@ -295,7 +331,10 @@ defmodule Core.Recall.Execute do
         existing_ids = MapSet.new(Enum.map(already_refs, & &1.id))
 
         {refs, cnt2, slots2, _seen2} =
-          Enum.reduce_while(candidates, {[], 0, slots_left, existing_ids}, fn {key, tok_ids, _prio}, {acc, cnt, slots_i, seen_i} ->
+          Enum.reduce_while(candidates, {[], 0, slots_left, existing_ids}, fn {key, tok_ids,
+                                                                               _prio},
+                                                                              {acc, cnt, slots_i,
+                                                                               seen_i} ->
             cond do
               is_integer(slots_i) and slots_i <= 0 ->
                 {:halt, {acc, cnt, slots_i, seen_i}}
@@ -304,7 +343,9 @@ defmodule Core.Recall.Execute do
                 syns = Map.get(syn_map, key, MapSet.new()) |> MapSet.to_list()
 
                 {acc2, cnt2, slots3, seen3} =
-                  Enum.reduce_while(syns, {acc, cnt, slots_i, seen_i}, fn syn, {acc_i, cnt_i, s_i, seen_j} ->
+                  Enum.reduce_while(syns, {acc, cnt, slots_i, seen_i}, fn syn,
+                                                                          {acc_i, cnt_i, s_i,
+                                                                           seen_j} ->
                     cond do
                       is_integer(s_i) and s_i <= 0 ->
                         {:halt, {acc_i, cnt_i, s_i, seen_j}}
@@ -314,11 +355,18 @@ defmodule Core.Recall.Execute do
 
                       exists_fun.(syn) ->
                         ref = to_active_ref_synonym(key, syn, tok_ids)
+
                         if MapSet.member?(seen_j, ref.id) do
                           {:cont, {acc_i, cnt_i, s_i, seen_j}}
                         else
-                          next_slots = case s_i do :infinity -> :infinity; n -> n - 1 end
-                          {:cont, {[ref | acc_i], cnt_i + 1, next_slots, MapSet.put(seen_j, ref.id)}}
+                          next_slots =
+                            case s_i do
+                              :infinity -> :infinity
+                              n -> n - 1
+                            end
+
+                          {:cont,
+                           {[ref | acc_i], cnt_i + 1, next_slots, MapSet.put(seen_j, ref.id)}}
                         end
 
                       true ->
@@ -353,58 +401,63 @@ defmodule Core.Recall.Execute do
   # Resolve synonyms for a list of normalized keys.
   # Tries Core.Recall.Synonyms if available; otherwise consults configured external MFA.
   # Returns: %{norm => MapSet.t()}   (values are sets of normalized binary terms)
-# Replace this whole function in apps/core/lib/core/recall/execute.ex
-defp synonyms_for_keys(keys) when is_list(keys) do
-  raw =
-    cond do
-      # Prefer the façade (P-201): Core.Synonyms.for_keys/2 or /1
-      Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 2) ->
-        safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys, []]) end)
+  # Replace this whole function in apps/core/lib/core/recall/execute.ex
+  defp synonyms_for_keys(keys) when is_list(keys) do
+    raw =
+      cond do
+        # Prefer the façade (P-201): Core.Synonyms.for_keys/2 or /1
+        Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 2) ->
+          safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys, []]) end)
 
-      Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 1) ->
-        safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys]) end)
+        Code.ensure_loaded?(Core.Synonyms) and function_exported?(Core.Synonyms, :for_keys, 1) ->
+          safe_apply_map(fn -> apply(Core.Synonyms, :for_keys, [keys]) end)
 
-      # Back-compat with Core.Recall.Synonyms if present
-      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :for_keys, 1) ->
-        safe_apply_map(fn -> apply(Core.Recall.Synonyms, :for_keys, [keys]) end)
+        # Back-compat with Core.Recall.Synonyms if present
+        Code.ensure_loaded?(Core.Recall.Synonyms) and
+            function_exported?(Core.Recall.Synonyms, :for_keys, 1) ->
+          safe_apply_map(fn -> apply(Core.Recall.Synonyms, :for_keys, [keys]) end)
 
-      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :expand, 2) ->
-        # expand/2 can take a list and return {:ok, list, meta}; normalize_syn_map/1 handles lists
-        safe_apply_map(fn ->
-          case apply(Core.Recall.Synonyms, :expand, [keys, []]) do
-            {:ok, list, _meta} -> list
-            {:ok, list} -> list
-            other -> other
-          end
-        end)
-
-      Code.ensure_loaded?(Core.Recall.Synonyms) and function_exported?(Core.Recall.Synonyms, :lookup, 2) ->
-        # As a last resort, map each key through lookup/2
-        safe_apply_map(fn ->
-          keys
-          |> Enum.map(fn k ->
-            case apply(Core.Recall.Synonyms, :lookup, [k, []]) do
-              {:ok, list, _meta} -> {k, list}
-              {:ok, list} -> {k, list}
-              _ -> {k, []}
+        Code.ensure_loaded?(Core.Recall.Synonyms) and
+            function_exported?(Core.Recall.Synonyms, :expand, 2) ->
+          # expand/2 can take a list and return {:ok, list, meta}; normalize_syn_map/1 handles lists
+          safe_apply_map(fn ->
+            case apply(Core.Recall.Synonyms, :expand, [keys, []]) do
+              {:ok, list, _meta} -> list
+              {:ok, list} -> list
+              other -> other
             end
           end)
-          |> Enum.into(%{})
-        end)
 
-      true ->
-        # External MFA fallback (no compile-time coupling)
-        ext_cfg = Application.get_env(:core, Core.Recall.Synonyms.Providers.External, [])
-        case Keyword.get(ext_cfg, :mfa) do
-          {m, f, a} when is_atom(m) and is_atom(f) and is_list(a) ->
-            safe_apply_map(fn -> apply(m, f, [keys | a]) end)
-          _ ->
-            %{}
-        end
-    end
+        Code.ensure_loaded?(Core.Recall.Synonyms) and
+            function_exported?(Core.Recall.Synonyms, :lookup, 2) ->
+          # As a last resort, map each key through lookup/2
+          safe_apply_map(fn ->
+            keys
+            |> Enum.map(fn k ->
+              case apply(Core.Recall.Synonyms, :lookup, [k, []]) do
+                {:ok, list, _meta} -> {k, list}
+                {:ok, list} -> {k, list}
+                _ -> {k, []}
+              end
+            end)
+            |> Enum.into(%{})
+          end)
 
-  normalize_syn_map(raw)
-end
+        true ->
+          # External MFA fallback (no compile-time coupling)
+          ext_cfg = Application.get_env(:core, Core.Recall.Synonyms.Providers.External, [])
+
+          case Keyword.get(ext_cfg, :mfa) do
+            {m, f, a} when is_atom(m) and is_atom(f) and is_list(a) ->
+              safe_apply_map(fn -> apply(m, f, [keys | a]) end)
+
+            _ ->
+              %{}
+          end
+      end
+
+    normalize_syn_map(raw)
+  end
 
   defp safe_apply_map(fun) when is_function(fun, 0) do
     try do
@@ -440,7 +493,11 @@ end
             MapSet.new()
         end
 
-      if nk in [nil, ""] do acc else Map.put(acc, nk, syns) end
+      if nk in [nil, ""] do
+        acc
+      else
+        Map.put(acc, nk, syns)
+      end
     end)
   end
 
@@ -453,6 +510,7 @@ end
         |> synonyms_from_rows()
         |> Enum.flat_map(&map_value_to_terms/1)
         |> to_norm_set()
+
       {norm, syns}
     end)
   end
@@ -460,9 +518,9 @@ end
   defp normalize_syn_map(_), do: %{}
 
   defp map_value_to_terms(v) when is_binary(v), do: [v]
-  defp map_value_to_terms(%{term: t}) when is_binary(t),  do: [t]
+  defp map_value_to_terms(%{term: t}) when is_binary(t), do: [t]
   defp map_value_to_terms(%{lemma: t}) when is_binary(t), do: [t]
-  defp map_value_to_terms(%{"term" => t}) when is_binary(t),  do: [t]
+  defp map_value_to_terms(%{"term" => t}) when is_binary(t), do: [t]
   defp map_value_to_terms(%{"lemma" => t}) when is_binary(t), do: [t]
   defp map_value_to_terms(_), do: []
 
@@ -476,13 +534,26 @@ end
   defp group_rows_by_norm(rows) when is_list(rows) do
     Enum.group_by(rows, fn r ->
       cond do
-        is_map(r) and is_binary(Map.get(r, :norm))  -> normalize(Map.get(r, :norm))
-        is_map(r) and is_binary(Map.get(r, "norm")) -> normalize(Map.get(r, "norm"))
-        is_map(r) and is_binary(Map.get(r, :word))  -> normalize(Map.get(r, :word))
-        is_map(r) and is_binary(Map.get(r, "word")) -> normalize(Map.get(r, "word"))
-        is_map(r) and is_binary(Map.get(r, :id))    -> r |> Map.get(:id)    |> String.split("|") |> hd()
-        is_map(r) and is_binary(Map.get(r, "id"))   -> r |> Map.get("id")   |> String.split("|") |> hd()
-        true -> "__unknown__"
+        is_map(r) and is_binary(Map.get(r, :norm)) ->
+          normalize(Map.get(r, :norm))
+
+        is_map(r) and is_binary(Map.get(r, "norm")) ->
+          normalize(Map.get(r, "norm"))
+
+        is_map(r) and is_binary(Map.get(r, :word)) ->
+          normalize(Map.get(r, :word))
+
+        is_map(r) and is_binary(Map.get(r, "word")) ->
+          normalize(Map.get(r, "word"))
+
+        is_map(r) and is_binary(Map.get(r, :id)) ->
+          r |> Map.get(:id) |> String.split("|") |> hd()
+
+        is_map(r) and is_binary(Map.get(r, "id")) ->
+          r |> Map.get("id") |> String.split("|") |> hd()
+
+        true ->
+          "__unknown__"
       end
     end)
   end
@@ -491,6 +562,7 @@ end
     rows
     |> Enum.flat_map(fn r ->
       syns = Map.get(r, :synonyms) || Map.get(r, "synonyms") || []
+
       case syns do
         l when is_list(l) -> l
         _ -> []
@@ -533,9 +605,10 @@ end
       not is_list(si.tokens) or si.tokens == [] ->
         :ok
 
-      ensure_hippo_started() and Code.ensure_loaded?(Hippocampus) and function_exported?(Hippocampus, :encode, 2) ->
+      ensure_hippo_started() and Code.ensure_loaded?(Hippocampus) and
+          function_exported?(Hippocampus, :encode, 2) ->
         slate = %{tokens: si.tokens}
-        meta  = %{scope: %{source: si.source || :core}}
+        meta = %{scope: %{source: si.source || :core}}
 
         try do
           _ = Hippocampus.encode(slate, meta)
@@ -555,7 +628,7 @@ end
   # ───────── Hippocampus attach (safe) + local min_jaccard filter ─────────
 
   defp maybe_attach_episodes(%SI{} = si, opts) do
-    enabled?   = Keyword.get(opts, :hippo, true)
+    enabled? = Keyword.get(opts, :hippo, true)
     hippo_opts = Keyword.get(opts, :hippo_opts, @hippo_default_opts)
 
     cond do
@@ -563,8 +636,10 @@ end
       not enabled? ->
         si
 
-      ensure_hippo_started() and Code.ensure_loaded?(Hippocampus) and function_exported?(Hippocampus, :attach_episodes, 2) ->
+      ensure_hippo_started() and Code.ensure_loaded?(Hippocampus) and
+          function_exported?(Hippocampus, :attach_episodes, 2) ->
         qset = query_norms(si)
+
         cues_list =
           case qset do
             %MapSet{} -> MapSet.to_list(qset)
@@ -581,7 +656,11 @@ end
           try do
             res = Hippocampus.attach_episodes(si, hippo_opts2)
             attached = episodes_list(res) |> length()
-            Telemetry.emit([:brain, :hippo, :attach], %{count: attached}, %{cues: length(List.wrap(cues_list))})
+
+            Telemetry.emit([:brain, :hippo, :attach], %{count: attached}, %{
+              cues: length(List.wrap(cues_list))
+            })
+
             res
           rescue
             _ -> si
@@ -595,9 +674,25 @@ end
           case episodes_list(si_attached) do
             [] when is_list(cues_list) and cues_list != [] ->
               try do
-                rec = Hippocampus.recall(cues_list, Keyword.put(hippo_opts2, :min_jaccard, 0.0))
-                Telemetry.emit([:brain, :hippo, :recall], %{count: length(rec)}, %{fallback?: true})
-                put_episodes(si_attached, rec)
+                rec =
+                  Hippocampus.recall(
+                    cues_list,
+                    Keyword.put(hippo_opts2, :min_jaccard, 0.0)
+                  )
+
+                Telemetry.emit([:brain, :hippo, :recall], %{count: length(rec)}, %{
+                  fallback?: true
+                })
+
+                # If Hippo recall still returns nothing, fall back to a simple
+                # Jaccard-based scan over the in-memory window.
+                rec2 =
+                  case rec do
+                    [] -> manual_hippo_recall_from_window(Keyword.get(hippo_opts2, :query_norms))
+                    _ -> rec
+                  end
+
+                put_episodes(si_attached, rec2)
               rescue
                 _ -> si_attached
               catch
@@ -617,6 +712,40 @@ end
         si
     end
   end
+
+  # Fallback: if Hippo.recall/2 returns nothing, approximate a recall
+  # directly from the in-memory window using simple Jaccard scores.
+  defp manual_hippo_recall_from_window(query_norms) do
+    window =
+      try do
+        case Hippocampus.snapshot() do
+          %{window: w} when is_list(w) -> w
+          _ -> []
+        end
+      rescue
+        _ -> []
+      catch
+        _, _ -> []
+      end
+
+    qset = to_set(query_norms)
+
+    if MapSet.size(qset) == 0 do
+      []
+    else
+      window
+      |> Enum.map(fn {at, ep} ->
+        # Reuse the same episode_norms/jaccard logic used in the gate
+        rec = %{score: 0.0, at: at, episode: ep}
+        e_set = episode_norms(rec)
+        j = jaccard(qset, e_set)
+        %{score: j, at: at, episode: ep}
+      end)
+      |> Enum.filter(fn r -> Map.get(r, :score, 0.0) > 0.0 end)
+      |> Enum.sort_by(& &1.score, :desc)
+    end
+  end
+
 
   # ───────── Local Jaccard gate (query norms vs episode norms) ─────────
 
@@ -659,7 +788,12 @@ end
               end
             end)
 
-          Telemetry.emit([:brain, :hippo, :jaccard_filter], %{kept: kept, total: length(episodes)}, %{min: min})
+          Telemetry.emit(
+            [:brain, :hippo, :jaccard_filter],
+            %{kept: kept, total: length(episodes)},
+            %{min: min}
+          )
+
           put_episodes(si, Enum.reverse(kept_list))
         end
     end
@@ -668,9 +802,10 @@ end
   # Robust episodes getter/setter that do NOT rely on Access on structs
   defp episodes_list(%SI{} = si) do
     ev = Map.get(si, :evidence)
+
     case ev do
       %{} -> Map.get(ev, :episodes, [])
-      _   -> []
+      _ -> []
     end
   end
 
@@ -692,7 +827,7 @@ end
 
   # Set/replace the episodes list on SI.evidence (works on structs without :evidence field)
   defp put_episodes(%SI{} = si, list) when is_list(list) do
-    ev     = Map.get(si, :evidence) || %{}
+    ev = Map.get(si, :evidence) || %{}
     new_ev = Map.put(ev, :episodes, list)
     :maps.put(:evidence, new_ev, si)
   end
@@ -710,7 +845,9 @@ end
         %{} = m ->
           v = Map.get(m, :lemma) || Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
           if is_binary(v) and v != "", do: [normalize(v)], else: []
-        _ -> []
+
+        _ ->
+          []
       end)
 
     toks =
@@ -721,8 +858,10 @@ end
         %{} = m ->
           v = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
           if is_binary(v) and v != "", do: [normalize(v)], else: []
+
         %Core.Token{phrase: p} when is_binary(p) and p != "" ->
           [normalize(p)]
+
         _ ->
           []
       end)
@@ -734,12 +873,36 @@ end
 
   # ───────── Query norms helpers ─────────
 
-  defp query_norms(%SI{} = si) do
-    # Use dynamic apply to avoid compile-time warnings when optional module is absent.
+   defp query_norms(%SI{} = si) do
+    # Prefer Brain.Hippocampus.Normalize.norms/1 if it returns something usable.
+    # If it returns empty/weird data or errors, fall back to best_effort_norms/1.
     if Code.ensure_loaded?(Brain.Hippocampus.Normalize) and
          function_exported?(Brain.Hippocampus.Normalize, :norms, 1) do
       try do
-        apply(Brain.Hippocampus.Normalize, :norms, [si])
+        v = apply(Brain.Hippocampus.Normalize, :norms, [si])
+
+        cond do
+          match?(%MapSet{}, v) ->
+            set = v
+
+            if MapSet.size(set) > 0 do
+              set
+            else
+              best_effort_norms(si)
+            end
+
+          is_list(v) and v != [] ->
+            set = to_set(v)
+
+            if MapSet.size(set) > 0 do
+              set
+            else
+              best_effort_norms(si)
+            end
+
+          true ->
+            best_effort_norms(si)
+        end
       rescue
         _ -> best_effort_norms(si)
       catch
@@ -749,13 +912,15 @@ end
       best_effort_norms(si)
     end
   end
-
+ 
   defp best_effort_norms(si) do
     w = winners_to_norms(si)
+
     if set_nonempty?(w) do
       w
     else
       t = tokens_to_norms(Map.get(si, :tokens))
+
       if set_nonempty?(t) do
         t
       else
@@ -769,6 +934,7 @@ end
 
   defp winners_to_norms(%SI{} = si) do
     slate = Map.get(si, :slate)
+
     winners =
       case slate do
         %{} -> Map.get(slate, :winners)
@@ -781,7 +947,9 @@ end
       %{} = m ->
         val = Map.get(m, :lemma) || Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
         if is_binary(val) and val != "", do: [normalize(val)], else: []
-      _ -> []
+
+      _ ->
+        []
     end)
     |> MapSet.new()
   end
@@ -799,7 +967,8 @@ end
           _ -> []
         end
 
-      _ -> []
+      _ ->
+        []
     end)
     |> MapSet.new()
   end
@@ -829,9 +998,14 @@ end
   defp to_set(list) when is_list(list) do
     list
     |> Enum.map(fn
-      %Core.Token{phrase: p} when is_binary(p) -> p
-      %{} = m -> Map.get(m, :lemma) || Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase) || ""
-      v -> v
+      %Core.Token{phrase: p} when is_binary(p) ->
+        p
+
+      %{} = m ->
+        Map.get(m, :lemma) || Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase) || ""
+
+      v ->
+        v
     end)
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&normalize/1)
@@ -845,13 +1019,13 @@ end
 
   # Avoid compile-time coupling to Db.* structs
   defp activation_of(%{activation_snapshot: a}) when is_number(a), do: a
-  defp activation_of(%{activation: a})          when is_number(a), do: a
-  defp activation_of(_),                                      do: 0.0
+  defp activation_of(%{activation: a}) when is_number(a), do: a
+  defp activation_of(_), do: 0.0
 
   defp min_tok_id(%{matched_tokens: [%{tok_id: t0} | _]}), do: t0
-  defp min_tok_id(%{matched_tokens: _mts}),                do: 0
-  defp min_tok_id(%{token_id: tid}) when is_integer(tid),  do: tid
-  defp min_tok_id(_),                                      do: @max_tok_id
+  defp min_tok_id(%{matched_tokens: _mts}), do: 0
+  defp min_tok_id(%{token_id: tid}) when is_integer(tid), do: tid
+  defp min_tok_id(_), do: @max_tok_id
 
   defp default_exists_fun() do
     # Compile-safe: do not call Db.word_exists?/1 directly at compile time
@@ -899,9 +1073,9 @@ end
   defp normalize(<<>>), do: <<>>
   defp normalize(bin) when is_binary(bin), do: String.downcase(String.trim(bin))
 
-  defp to_float(x) when is_float(x),   do: x
+  defp to_float(x) when is_float(x), do: x
   defp to_float(x) when is_integer(x), do: x / 1.0
-  defp to_float(_),                    do: 0.0
+  defp to_float(_), do: 0.0
 
   defp now_ms() do
     try do
@@ -932,4 +1106,3 @@ end
     end
   end
 end
-

@@ -12,21 +12,21 @@ defmodule Brain.Semantics do
   # Anchor table (positive-only, by lemma)
   @anchors %{
     # Action verbs
-    "intend"    => %{boost: 0.12, regions: [:lifg]},
-    "read"      => %{boost: 0.08, regions: [:pmtg]},
-    "know"      => %{boost: 0.10, regions: [:temporal]},
-    "remember"  => %{boost: 0.11, regions: [:hippocampus]},
-    "think"     => %{boost: 0.09, regions: [:frontal]},
-    "mean"      => %{boost: 0.13, regions: [:atl, :lifg]},
+    "intend" => %{boost: 0.12, regions: [:lifg]},
+    "read" => %{boost: 0.08, regions: [:pmtg]},
+    "know" => %{boost: 0.10, regions: [:temporal]},
+    "remember" => %{boost: 0.11, regions: [:hippocampus]},
+    "think" => %{boost: 0.09, regions: [:frontal]},
+    "mean" => %{boost: 0.13, regions: [:atl, :lifg]},
 
     # Objects + concepts
-    "object"    => %{boost: 0.07, regions: [:atl]},
-    "person"    => %{boost: 0.06, regions: [:temporal]},
-    "story"     => %{boost: 0.09, regions: [:pmtg]},
-    "concept"   => %{boost: 0.10, regions: [:atl]},
-    "context"   => %{boost: 0.07, regions: [:temporal]},
-    "idea"      => %{boost: 0.08, regions: [:frontal]},
-    "event"     => %{boost: 0.05, regions: [:hippocampus]}
+    "object" => %{boost: 0.07, regions: [:atl]},
+    "person" => %{boost: 0.06, regions: [:temporal]},
+    "story" => %{boost: 0.09, regions: [:pmtg]},
+    "concept" => %{boost: 0.10, regions: [:atl]},
+    "context" => %{boost: 0.07, regions: [:temporal]},
+    "idea" => %{boost: 0.08, regions: [:frontal]},
+    "event" => %{boost: 0.05, regions: [:hippocampus]}
   }
 
   # Public: get the full anchor map (useful for introspection/diagnostics)
@@ -55,17 +55,18 @@ defmodule Brain.Semantics do
   end
 
   def bias_for(%{} = cand) do
-    lemma  = cand_get(cand, [:lemma]) || lemma_from_id(cand_get(cand, [:id])) || ""
-    id     = cand_get(cand, [:id]) || ""
-    pos    = cand_get(cand, [:pos]) || cand_get_in(cand, [:features, :pos])
+    lemma = cand_get(cand, [:lemma]) || lemma_from_id(cand_get(cand, [:id])) || ""
+    id = cand_get(cand, [:id]) || ""
+    pos = cand_get(cand, [:pos]) || cand_get_in(cand, [:features, :pos])
     source = cand_get(cand, [:source])
     reason = cand_get(cand, [:reason])
-    kind   = cand_get(cand, [:kind])
+    kind = cand_get(cand, [:kind])
 
     anchor = bias_for(lemma)
 
     curiosity? =
-      source == :curiosity or reason == :curiosity or kind in [:probe, :idle_probe, "probe", "idle_probe"]
+      source == :curiosity or reason == :curiosity or
+        kind in [:probe, :idle_probe, "probe", "idle_probe"]
 
     phrase_fallback? =
       is_binary(id) and String.ends_with?(id, "|phrase|fallback")
@@ -117,20 +118,22 @@ defmodule Brain.Semantics do
   defp add_if(x, true, d) when is_number(x) and is_number(d), do: x + d
   defp add_if(x, _cond, _d), do: x
 
-defp clamp(x, lo, hi) when is_number(x) do
-  x
-  |> max(lo)
-  |> min(hi)
-  |> Kernel.*(1.0)
-end
+  defp clamp(x, lo, hi) when is_number(x) do
+    x
+    |> max(lo)
+    |> min(hi)
+    |> Kernel.*(1.0)
+  end
 
   defp lemma_from_id(nil), do: nil
+
   defp lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> String.downcase(w)
       _ -> nil
     end
   end
+
   defp lemma_from_id(_), do: nil
 
   # tolerant access (atom or string keys)
@@ -142,10 +145,11 @@ end
       nil ->
         path_s = Enum.map(path, fn k -> if is_atom(k), do: to_string(k), else: k end)
         get_in(m, path_s)
-      v -> v
+
+      v ->
+        v
     end
   end
 
   defp cand_get_in(_, _), do: nil
 end
-

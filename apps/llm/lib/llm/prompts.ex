@@ -135,4 +135,3 @@ defmodule Llm.Prompts do
     """
   end
 end
-

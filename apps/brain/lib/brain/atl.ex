@@ -56,9 +56,12 @@ defmodule Brain.ATL do
        opts: Map.new(opts),
        keep: keep,
        last_slate: %{},
-       concept_counts: %{},  # norm => count
-       sense_counts: %{},    # id   => count
-       window: []            # rolling [{ts_ms, slate}, ...]
+       # norm => count
+       concept_counts: %{},
+       # id   => count
+       sense_counts: %{},
+       # rolling [{ts_ms, slate}, ...]
+       window: []
      }}
   end
 
@@ -110,7 +113,8 @@ defmodule Brain.ATL do
     winners =
       choices
       |> Enum.map(&normalize_choice/1)
-      |> Enum.reject(&is_nil(&1.id)) # only keep items with an id
+      # only keep items with an id
+      |> Enum.reject(&is_nil(&1.id))
 
     %{
       tokens: tokens,
@@ -118,7 +122,7 @@ defmodule Brain.ATL do
       winners: winners,
       winner_count: length(winners),
       by_norm: Enum.group_by(winners, & &1.norm),
-      by_id:   Enum.group_by(winners, & &1.id)
+      by_id: Enum.group_by(winners, & &1.id)
     }
   end
 
@@ -127,11 +131,11 @@ defmodule Brain.ATL do
   # Accepts both SenseChoice style (%{chosen_id:, lemma:, margin:, scores: ...})
   # and simpler %{id:, lemma: ...}. Falls back where possible.
   defp normalize_choice(ch) when is_map(ch) do
-    id        = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
+    id = fetch_any(ch, [:chosen_id, "chosen_id", :id, "id"])
     token_idx = fetch_any(ch, [:token_index, "token_index"])
-    score     = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
-    margin    = fetch_any(ch, [:margin, "margin"]) || 0.0
-    lemma0    = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
+    score = fetch_from_scores(ch, id) || fetch_any(ch, [:score, "score"]) || 0.0
+    margin = fetch_any(ch, [:margin, "margin"]) || 0.0
+    lemma0 = fetch_any(ch, [:lemma, "lemma"]) |> norm_text()
 
     %{
       id: id,
@@ -151,12 +155,12 @@ defmodule Brain.ATL do
     Enum.reduce_while(keys, nil, fn k, _acc ->
       case Map.get(map, k) do
         nil -> {:cont, nil}
-        v   -> {:halt, v}
+        v -> {:halt, v}
       end
     end)
   end
 
-  defp fetch_from_scores(%{scores: %{} = m}, id) when is_binary(id),   do: Map.get(m, id)
+  defp fetch_from_scores(%{scores: %{} = m}, id) when is_binary(id), do: Map.get(m, id)
   defp fetch_from_scores(%{"scores" => %{} = m}, id) when is_binary(id), do: Map.get(m, id)
   defp fetch_from_scores(_, _), do: nil
 
@@ -164,10 +168,17 @@ defmodule Brain.ATL do
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
 
   defp norm_text(nil), do: ""
+
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
   defp norm_text(v),
-    do: v |> Kernel.to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+    do:
+      v
+      |> Kernel.to_string()
+      |> String.downcase()
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
 
   # ───────── Sense slate → si.sense_candidates ────────────────────────────
 
@@ -188,8 +199,8 @@ defmodule Brain.ATL do
     absorb? =
       case Map.get(si, :lifg_opts) do
         kw when is_list(kw) -> Keyword.get(kw, :absorb_unigrams_into_mwe?, false)
-        m  when is_map(m)   -> Map.get(m, :absorb_unigrams_into_mwe?, false)
-        _                   -> false
+        m when is_map(m) -> Map.get(m, :absorb_unigrams_into_mwe?, false)
+        _ -> false
       end
 
     slate1 =
@@ -215,9 +226,9 @@ defmodule Brain.ATL do
          opts
        )
        when is_list(tokens) and is_list(winners) do
-    inject?          = Keyword.get(opts, :inject_child_unigrams?, true)
+    inject? = Keyword.get(opts, :inject_child_unigrams?, true)
     only_if_fallback = Keyword.get(opts, :only_if_fallback?, true)
-    cells            = Map.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
+    cells = Map.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
 
     unless inject?, do: slate
 
@@ -228,7 +239,7 @@ defmodule Brain.ATL do
 
     extra =
       Enum.flat_map(Enum.with_index(tokens), fn {tok, idx_mwe} ->
-        n   = Map.get(tok, :n, 1)
+        n = Map.get(tok, :n, 1)
         mw? = Map.get(tok, :mw, n > 1)
 
         if not mw? do
@@ -258,7 +269,7 @@ defmodule Brain.ATL do
             Enum.flat_map(child_uni, fn {t, j} ->
               norm =
                 (Map.get(t, :phrase) || Map.get(t, :word) ||
-                 Map.get(t, "phrase") || Map.get(t, "word") || "")
+                   Map.get(t, "phrase") || Map.get(t, "word") || "")
                 |> down()
 
               cells_by_norm
@@ -269,7 +280,8 @@ defmodule Brain.ATL do
                   token_index: j,
                   lemma: norm,
                   norm: norm,
-                  score: 0.30,  # modest seed; Stage-1 will re-score
+                  # modest seed; Stage-1 will re-score
+                  score: 0.30,
                   margin: 0.0,
                   raw: %{from: :atl_child_unigram}
                 }
@@ -295,31 +307,39 @@ defmodule Brain.ATL do
 
   defp inside?({s, l}, {ps, pl})
        when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
-    e  = s + l
+    e = s + l
     pe = ps + pl
     s >= ps and e <= pe
   end
+
   defp inside?(_, _), do: false
 
   defp down(nil), do: ""
+
   defp down(s) when is_binary(s),
     do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
+
   defp down(v),
-    do: v |> Kernel.to_string() |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
+    do:
+      v
+      |> Kernel.to_string()
+      |> String.downcase()
+      |> String.trim()
+      |> String.replace(~r/\s+/u, " ")
 
   # ── Candidate promotion helpers ─────────────────────────────────────────
 
   @spec promote_sense_candidates_from_slate(map(), keyword()) ::
           %{non_neg_integer() => [map()]}
   def promote_sense_candidates_from_slate(%{winners: winners}, opts) when is_list(winners) do
-    top_k         = Keyword.get(opts, :top_k, 3)
+    top_k = Keyword.get(opts, :top_k, 3)
     margin_window = Keyword.get(opts, :margin_window, 0.05)
 
     winners
     |> Enum.group_by(& &1.token_index)
     |> Enum.into(%{}, fn {idx, entries} ->
-      winner   = List.first(entries) || %{}
-      w_score  = winner[:score] || get_in(winner, [:raw, :score_norm]) || 0.0
+      winner = List.first(entries) || %{}
+      w_score = winner[:score] || get_in(winner, [:raw, :score_norm]) || 0.0
 
       alts =
         winner
@@ -373,6 +393,7 @@ defmodule Brain.ATL do
 
   defp as_float(nil), do: 0.0
   defp as_float(num) when is_number(num), do: num
+
   defp as_float(str) when is_binary(str) do
     case Float.parse(str) do
       {f, _} -> f
@@ -381,6 +402,7 @@ defmodule Brain.ATL do
   end
 
   defp pos_from_id(nil), do: nil
+
   defp pos_from_id(id) when is_binary(id) do
     case String.split(id, "|") do
       [_lemma, pos, _sense] -> pos
@@ -403,7 +425,7 @@ defmodule Brain.ATL do
   @spec finalize(map(), keyword()) :: {map(), map()}
   def finalize(si, _opts \\ []) when is_map(si) do
     choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
-    tokens  = Map.get(si, :tokens)       || Map.get(si, "tokens")       || []
+    tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
 
     slate =
       cond do
@@ -412,7 +434,9 @@ defmodule Brain.ATL do
 
         true ->
           case Process.whereis(@name) do
-            nil   -> %{}
+            nil ->
+              %{}
+
             _pid ->
               case snapshot() do
                 %{last_slate: sl} when is_map(sl) -> sl
@@ -437,8 +461,8 @@ defmodule Brain.ATL do
   @spec attach_lifg_pairs(map(), keyword()) :: map()
   def attach_lifg_pairs(si, opts \\ []) when is_map(si) do
     if Keyword.get(opts, :derive_lifg_pairs?, true) do
-      tokens  = Map.get(si, :tokens, [])
-      slate   = Map.get(si, :atl_slate, %{})
+      tokens = Map.get(si, :tokens, [])
+      slate = Map.get(si, :atl_slate, %{})
       winners = Map.get(slate, :winners, [])
 
       pairs_rich_or_tuples =
@@ -459,7 +483,7 @@ defmodule Brain.ATL do
             |> Map.get(:lifg_choices, [])
             |> Enum.flat_map(fn ch ->
               ti = Map.get(ch, :token_index) || Map.get(ch, "token_index")
-              id = Map.get(ch, :chosen_id)   || Map.get(ch, "chosen_id")
+              id = Map.get(ch, :chosen_id) || Map.get(ch, "chosen_id")
               if is_integer(ti) and is_binary(id), do: [{ti, id}], else: []
             end)
 
@@ -479,8 +503,11 @@ defmodule Brain.ATL do
               pairs_rich_or_tuples
               |> Enum.flat_map(fn
                 %{token_index: ti, unigram_id: id}
-                when is_integer(ti) and is_binary(id) -> [{ti, id}]
-                _ -> []
+                when is_integer(ti) and is_binary(id) ->
+                  [{ti, id}]
+
+                _ ->
+                  []
               end)
               |> Enum.uniq(),
               pairs_rich_or_tuples
@@ -511,9 +538,11 @@ defmodule Brain.ATL do
           |> Map.put(:lifg_pairs_by_token, by_token)
           |> maybe_put(:lifg_pairs_rich, pairs_rich, not Enum.empty?(pairs_rich))
 
-        trace1 = (Map.get(si, :trace) || []) ++ [
-          {:lifg_pairs, %{count: length(pairs_simple), rich: length(pairs_rich)}}
-        ]
+        trace1 =
+          (Map.get(si, :trace) || []) ++
+            [
+              {:lifg_pairs, %{count: length(pairs_simple), rich: length(pairs_rich)}}
+            ]
 
         update_si_with_pairs(si, evidence1, trace1)
       end
@@ -580,4 +609,3 @@ defmodule Brain.ATL do
     end
   end
 end
-

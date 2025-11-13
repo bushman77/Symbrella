@@ -76,7 +76,9 @@ defmodule Brain.LIFG.Input do
     cands
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&Safe.to_plain/1)
-    |> Enum.map(fn c -> normalize_candidate(c, Map.get(c, :token_index, Map.get(c, "token_index", 0))) end)
+    |> Enum.map(fn c ->
+      normalize_candidate(c, Map.get(c, :token_index, Map.get(c, "token_index", 0)))
+    end)
     |> Enum.reject(&reject_bad_candidate/1)
   end
 
@@ -124,7 +126,7 @@ defmodule Brain.LIFG.Input do
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {c0, _ord}, acc ->
       idx = parse_idx(c0[:token_index] || c0["token_index"])
-      c1  = normalize_candidate(c0, idx)
+      c1 = normalize_candidate(c0, idx)
       Map.update(acc, idx, [c1], &(&1 ++ [c1]))
     end)
   end
@@ -167,7 +169,7 @@ defmodule Brain.LIFG.Input do
     winners
     |> Enum.with_index()
     |> Enum.map(fn {w0, idx} ->
-      w  = Safe.to_plain(w0)
+      w = Safe.to_plain(w0)
 
       raw_id =
         Safe.get(w, :id) ||
@@ -190,8 +192,8 @@ defmodule Brain.LIFG.Input do
   defp candidates_from_active_cells(ac) when is_list(ac) do
     ac
     |> Enum.flat_map(fn cell0 ->
-      cell  = Safe.to_plain(cell0)
-      idx   = parse_idx(Safe.get(cell, :token_index, 0))
+      cell = Safe.to_plain(cell0)
+      idx = parse_idx(Safe.get(cell, :token_index, 0))
       scores = Safe.get(cell, :scores)
 
       base =
@@ -208,7 +210,7 @@ defmodule Brain.LIFG.Input do
             s = Safe.get(cell, :score, 0.0)
             [normalize_candidate(%{token_index: idx, id: id, score: s}, idx)]
 
-          lemma = (Safe.get(cell, :lemma) || Safe.get(cell, :word)) ->
+          lemma = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
             s = Safe.get(cell, :score, 0.0)
             [normalize_candidate(%{token_index: idx, id: lemma, score: s}, idx)]
 
@@ -241,7 +243,7 @@ defmodule Brain.LIFG.Input do
       |> to_string_if_present()
       |> case do
         nil -> nil
-        s   -> s |> String.trim()
+        s -> s |> String.trim()
       end
 
     score =
@@ -262,10 +264,13 @@ defmodule Brain.LIFG.Input do
 
   defp normalize_candidate(other, default_idx) do
     # catch-all for bare ids/lemmas etc.
-    id = other |> to_string_if_present() |> case do
-      nil -> nil
-      s -> String.trim(s)
-    end
+    id =
+      other
+      |> to_string_if_present()
+      |> case do
+        nil -> nil
+        s -> String.trim(s)
+      end
 
     %{token_index: parse_idx(default_idx)}
     |> maybe_put(:id, id)
@@ -277,13 +282,15 @@ defmodule Brain.LIFG.Input do
   defp reject_bad_candidate(_), do: false
 
   defp parse_idx(i) when is_integer(i) and i >= 0, do: i
-  defp parse_idx(i) when is_integer(i) and i < 0,  do: 0
+  defp parse_idx(i) when is_integer(i) and i < 0, do: 0
+
   defp parse_idx(b) when is_binary(b) do
     case Integer.parse(b) do
       {n, _} when n >= 0 -> n
       _ -> 0
     end
   end
+
   defp parse_idx(_), do: 0
 
   defp clamp01_or_nil(nil), do: nil
@@ -292,12 +299,14 @@ defmodule Brain.LIFG.Input do
   defp to_float_if_present(nil), do: nil
   defp to_float_if_present(n) when is_float(n), do: n
   defp to_float_if_present(n) when is_integer(n), do: n * 1.0
+
   defp to_float_if_present(b) when is_binary(b) do
     case Float.parse(b) do
       {f, _} -> f
       _ -> nil
     end
   end
+
   defp to_float_if_present(_), do: nil
 
   defp to_string_if_present(nil), do: nil
@@ -307,4 +316,3 @@ defmodule Brain.LIFG.Input do
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
 end
-

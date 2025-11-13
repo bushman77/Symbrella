@@ -21,7 +21,8 @@ defmodule Brain.LIFG.Reanalysis do
 
   @spec fallback(list(choice), (map() -> boolean()), keyword()) ::
           %{choices: list(choice), flips: non_neg_integer()}
-  def fallback(choices, fail_fun, _opts \\ []) when is_list(choices) and is_function(fail_fun, 1) do
+  def fallback(choices, fail_fun, _opts \\ [])
+      when is_list(choices) and is_function(fail_fun, 1) do
     {out, flips} =
       Enum.map_reduce(choices, 0, fn ch, acc ->
         if fail_fun.(ch) do
@@ -57,4 +58,3 @@ defmodule Brain.LIFG.Reanalysis do
     %{choices: out, flips: flips}
   end
 end
-

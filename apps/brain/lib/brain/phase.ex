@@ -25,4 +25,3 @@ defmodule Brain.Phase do
   def allow?(phase) when is_atom(phase), do: current() == phase
   def allow?(_), do: true
 end
-

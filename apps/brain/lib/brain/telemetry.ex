@@ -79,4 +79,10 @@ defmodule Brain.Telemetry do
         "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
     end)
   end
+
+# lib/brain/telemetry.ex
+def meta(extra \\ %{}) do
+  Map.merge(%{v: 3}, extra)
+end
+
 end

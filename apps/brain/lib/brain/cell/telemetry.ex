@@ -13,7 +13,7 @@ defmodule Brain.Cell.Telemetry do
   require Logger
 
   @id_calls "brain-cell-call-logger"
-  @id_errs  "brain-cell-call-error-logger"
+  @id_errs "brain-cell-call-error-logger"
 
   @spec ensure_attached() :: :ok
   def ensure_attached do
@@ -27,7 +27,8 @@ defmodule Brain.Cell.Telemetry do
         :ok
     end
   catch
-    :error, _ -> :ok # be conservative; never fail callers
+    # be conservative; never fail callers
+    :error, _ -> :ok
   end
 
   defp attach do
@@ -49,6 +50,7 @@ defmodule Brain.Cell.Telemetry do
   # Log only when duration exceeds warn threshold to avoid noise.
   def handle_call(_event, %{duration: dur_native}, meta, _cfg) do
     ms = System.convert_time_unit(dur_native, :native, :millisecond)
+
     warn_ms =
       Application.get_env(:brain, Brain.Cell.Safe, [])
       |> Keyword.get(:warn_ms, 200)
@@ -76,4 +78,3 @@ defmodule Brain.Cell.Telemetry do
     _ -> :ok
   end
 end
-

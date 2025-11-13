@@ -29,7 +29,9 @@ defmodule Core.LIFG.Input do
     # Invariant check (emit telemetry on failure but proceed defensively)
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si_ok} -> si_ok
+        {:ok, si_ok} ->
+          si_ok
+
         {:error, fails} ->
           :telemetry.execute(
             [:core, :token, :span_invariant_fail],
@@ -59,7 +61,9 @@ defmodule Core.LIFG.Input do
 
     si1 =
       case Token.check_span_invariants(si0) do
-        {:ok, si_ok} -> si_ok
+        {:ok, si_ok} ->
+          si_ok
+
         {:error, fails} ->
           :telemetry.execute(
             [:core, :token, :span_invariant_fail],
@@ -78,7 +82,7 @@ defmodule Core.LIFG.Input do
     tokens_final =
       case opts do
         [] -> cleaned
-        _  -> Core.MWE.Injector.inject(cleaned, opts)
+        _ -> Core.MWE.Injector.inject(cleaned, opts)
       end
 
     %Core.SemanticInput{si1 | tokens: tokens_final}
@@ -108,4 +112,3 @@ defmodule Core.LIFG.Input do
     Keyword.merge(base, env)
   end
 end
-

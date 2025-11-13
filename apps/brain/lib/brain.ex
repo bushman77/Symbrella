@@ -62,7 +62,12 @@ defmodule Brain do
       def handle_info(_msg, state), do: {:noreply, state}
 
       # 👇 critical line:
-      defoverridable start_link: 1, child_spec: 1, init: 1, handle_call: 3, handle_cast: 2, handle_info: 2
+      defoverridable start_link: 1,
+                     child_spec: 1,
+                     init: 1,
+                     handle_call: 3,
+                     handle_cast: 2,
+                     handle_info: 2
     end
   end
 
@@ -238,7 +243,8 @@ defmodule Brain do
   def handle_call({:configure_wm, opts}, _from, state) do
     cfg2 =
       state.wm_cfg
-      |> Map.merge(@wm_defaults) # guarantee missing keys are filled
+      # guarantee missing keys are filled
+      |> Map.merge(@wm_defaults)
       |> merge_wm_opts(Map.new(opts))
 
     wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
@@ -281,8 +287,10 @@ defmodule Brain do
 
     lifg_opts =
       [scores: :all, normalize: :softmax, parallel: :auto]
-      |> Keyword.merge(pfc_opts) # PFC tunes margins, pMTG mode, deltas, gate_into_wm, etc.
-      |> Keyword.merge(opts)     # explicit caller opts take precedence
+      # PFC tunes margins, pMTG mode, deltas, gate_into_wm, etc.
+      |> Keyword.merge(pfc_opts)
+      # explicit caller opts take precedence
+      |> Keyword.merge(opts)
 
     # CRITICAL: pass `:sense_candidates` so Stage-1 can score something
     si1 =
@@ -299,7 +307,7 @@ defmodule Brain do
 
     # ACC conflict assessment (no-op if ACC region isn't started)
     {_si_acc, _conflict} =
-      maybe_assess_acc(%{tokens: tokens0, choices: out0.choices}, [already_needy: true])
+      maybe_assess_acc(%{tokens: tokens0, choices: out0.choices}, already_needy: true)
 
     _ = maybe_ingest_atl(out0.choices, tokens0)
     _ = maybe_consult_pmtg(out0.choices, tokens0)
@@ -312,7 +320,13 @@ defmodule Brain do
 
     state2 =
       if Keyword.get(lifg_opts, :gate_into_wm, false) do
-        min = Keyword.get(lifg_opts, :lifg_min_score, Application.get_env(:brain, :lifg_min_score, 0.6))
+        min =
+          Keyword.get(
+            lifg_opts,
+            :lifg_min_score,
+            Application.get_env(:brain, :lifg_min_score, 0.6)
+          )
+
         lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
         if lifg_cands == [] do
@@ -331,7 +345,9 @@ defmodule Brain do
 
     :telemetry.execute(
       @pipeline_stop_event,
-      %{duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)},
+      %{
+        duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+      },
       %{
         winners: length(out0.choices),
         boosts: length(out0.boosts),
@@ -381,9 +397,15 @@ defmodule Brain do
     rows_or_ids
     |> extract_items()
     |> Enum.each(fn
-      %Row{} = row -> ensure_start_and_cast(row, payload)
-      %{} = map_item -> handle_map_item_activation(map_item, payload)
-      id when is_binary(id) -> ensure_start_and_cast(id, payload)
+      %Row{} = row ->
+        ensure_start_and_cast(row, payload)
+
+      %{} = map_item ->
+        handle_map_item_activation(map_item, payload)
+
+      id when is_binary(id) ->
+        ensure_start_and_cast(id, payload)
+
       other ->
         :telemetry.execute([:brain, :activate, :unknown_item], %{count: 1}, %{sample: other})
         Logger.debug("Brain.activate_cells: unknown item #{inspect(other)}")
@@ -536,14 +558,18 @@ defmodule Brain do
 
     intent =
       cond do
-        is_atom(intent0) -> intent0
+        is_atom(intent0) ->
+          intent0
+
         is_binary(intent0) ->
           try do
             String.to_existing_atom(intent0)
           rescue
             _ -> :unknown
           end
-        true -> :unknown
+
+        true ->
+          :unknown
       end
 
     kw = m[:keyword] || m["keyword"] || ""
@@ -551,13 +577,17 @@ defmodule Brain do
 
     conf =
       cond do
-        is_number(conf0) -> conf0 * 1.0
+        is_number(conf0) ->
+          conf0 * 1.0
+
         is_binary(conf0) ->
           case Float.parse(conf0) do
             {f, _} -> f
             _ -> 0.0
           end
-        true -> 0.0
+
+        true ->
+          0.0
       end
 
     at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
@@ -565,20 +595,41 @@ defmodule Brain do
     %{intent: intent, keyword: to_string(kw), confidence: clamp01(conf), at_ms: at_ms}
   end
 
-  defp do_focus(state, cands_or_si, _opts) do
-    now = System.system_time(:millisecond)
-    cfg = state.wm_cfg
-    attn = state.attention
-
-    base_wm =
-      state.wm
-      |> WorkingMemory.decay(now, cfg.decay_ms)
-
-    cands_or_si
-    |> normalize_candidates()
-    |> Enum.reduce({base_wm, 0, 0}, fn cand, acc -> focus_reduce_step(cand, acc, now, cfg, attn) end)
-    |> then(fn res -> trim_and_count(res, cfg.capacity) end)
+  if Mix.env() == :test do
+    def __test_do_focus__(state, choices, opts \\ %{}) do
+      do_focus(state, choices, opts)  # call your actual internal function
+    end
   end
+
+defp do_focus(state, cands_or_si, _opts) do
+  now = System.system_time(:millisecond)
+
+  wm_cfg0 = Map.get(state, :wm_cfg, %{})
+  wm_cfg = %{
+    capacity: Map.get(wm_cfg0, :capacity, 3),
+    decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
+  }
+
+  attention0 = Map.get(state, :attention, %{})
+  attention = %{
+    min_score: Map.get(attention0, :min_score, 0.0),
+    capacity: Map.get(attention0, :capacity, wm_cfg.capacity)
+  }
+
+  # ensure state has :attention so callers reading it later won't crash
+  state = Map.put_new(state, :attention, attention)
+
+  base_wm =
+    Map.get(state, :wm, [])
+    |> WorkingMemory.decay(now, wm_cfg.decay_ms)
+
+  cands_or_si
+  |> normalize_candidates()
+  |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
+    focus_reduce_step(cand, acc, now, wm_cfg, attention)
+  end)
+  |> then(fn res -> trim_and_count(res, wm_cfg.capacity) end)
+end
 
   defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn) do
     if not WMPolicy.acceptable_candidate?(cand, cfg) do
@@ -622,7 +673,8 @@ defmodule Brain do
   end
 
   defp lifg_out_from_trace(%{trace: []}),
-    do: {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
+    do:
+      {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
 
   defp maybe_ingest_atl(choices, tokens) do
     case Process.whereis(Brain.ATL) do
@@ -756,7 +808,12 @@ defmodule Brain do
   # Small de-dup helper for WM telemetry
   defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
     meta = if reason, do: %{reason: reason}, else: %{}
-    :telemetry.execute(@wm_update_event, %{size: size, added: added, removed: removed, capacity: capacity}, meta)
+
+    :telemetry.execute(
+      @wm_update_event,
+      %{size: size, added: added, removed: removed, capacity: capacity},
+      meta
+    )
   end
 
   def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
@@ -775,11 +832,21 @@ defmodule Brain do
       cond do
         is_map(w) and (w[:id] || w["id"]) ->
           id = w[:id] || w["id"]
-          %{token_index: w[:token_index] || w["token_index"] || 0, id: to_string(id), score: w[:score] || w["score"] || 1.0}
+
+          %{
+            token_index: w[:token_index] || w["token_index"] || 0,
+            id: to_string(id),
+            score: w[:score] || w["score"] || 1.0
+          }
 
         is_map(w) and (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) ->
           lemma = (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) |> to_string()
-          %{token_index: w[:token_index] || w["token_index"] || 0, lemma: lemma, score: w[:score] || w["score"] || 1.0}
+
+          %{
+            token_index: w[:token_index] || w["token_index"] || 0,
+            lemma: lemma,
+            score: w[:score] || w["score"] || 1.0
+          }
 
         is_binary(w) and String.contains?(w, "|") ->
           %{token_index: 0, id: w, score: 1.0}
@@ -804,6 +871,7 @@ defmodule Brain do
   defp first_lemma_from_slate(_), do: "ltm"
 
   defp parse_id_word(nil), do: nil
+
   defp parse_id_word(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
@@ -827,7 +895,9 @@ defmodule Brain do
 
   defp extract_items(%{} = si) do
     case Map.get(si, :active_cells, []) do
-      list when is_list(list) -> list
+      list when is_list(list) ->
+        list
+
       other ->
         Logger.warning("Brain.extract_items: :active_cells not a list (got #{inspect(other)})")
         []
@@ -905,12 +975,16 @@ defmodule Brain do
         replace_margin:
           norm_float_01_or(Map.get(opts, :replace_margin, cfg.replace_margin), cfg.replace_margin),
         diversity_lambda:
-          norm_float_01_or(Map.get(opts, :diversity_lambda, cfg.diversity_lambda), cfg.diversity_lambda),
+          norm_float_01_or(
+            Map.get(opts, :diversity_lambda, cfg.diversity_lambda),
+            cfg.diversity_lambda
+          ),
         allow_unk?: Map.get(opts, :allow_unk?, cfg.allow_unk?),
         allow_seed?: Map.get(opts, :allow_seed?, cfg.allow_seed?),
         fallback_scale:
           norm_float_01_or(Map.get(opts, :fallback_scale, cfg.fallback_scale), cfg.fallback_scale),
-        allow_fallback_into_wm?: Map.get(opts, :allow_fallback_into_wm?, cfg.allow_fallback_into_wm?)
+        allow_fallback_into_wm?:
+          Map.get(opts, :allow_fallback_into_wm?, cfg.allow_fallback_into_wm?)
     }
   end
 
@@ -955,12 +1029,14 @@ defmodule Brain do
 
   # --- converters (centralized) ---
   defp as_float(x) when is_number(x), do: x * 1.0
+
   defp as_float(x) when is_binary(x) do
     case Float.parse(x) do
       {f, _} -> f
       _ -> 0.0
     end
   end
+
   defp as_float(_), do: 0.0
 
   defp to_float_01(x), do: as_float(x) |> clamp01()
@@ -989,22 +1065,22 @@ defmodule Brain do
     cond do
       is_map(si_or_cands) ->
         sentence = Map.get(si_or_cands, :sentence) || Map.get(si_or_cands, "sentence")
-        tokens0  = Map.get(si_or_cands, :tokens) || Map.get(si_or_cands, "tokens") || []
-        tokens   = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
+        tokens0 = Map.get(si_or_cands, :tokens) || Map.get(si_or_cands, "tokens") || []
+        tokens = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
 
         slate =
           Map.get(si_or_cands, :sense_candidates) ||
-          Map.get(si_or_cands, "sense_candidates") ||
-          Map.get(si_or_cands, :slate) ||
-          Map.get(si_or_cands, "slate") ||
-          case Map.get(si_or_cands, :winners) || Map.get(si_or_cands, "winners") do
-            ws when is_list(ws) -> %{winners: ws}
-            _ -> nil
-          end ||
-          case Map.get(si_or_cands, :choices) || Map.get(si_or_cands, "choices") do
-            ws when is_list(ws) -> %{winners: ws}
-            _ -> %{winners: []}
-          end
+            Map.get(si_or_cands, "sense_candidates") ||
+            Map.get(si_or_cands, :slate) ||
+            Map.get(si_or_cands, "slate") ||
+            case Map.get(si_or_cands, :winners) || Map.get(si_or_cands, "winners") do
+              ws when is_list(ws) -> %{winners: ws}
+              _ -> nil
+            end ||
+            case Map.get(si_or_cands, :choices) || Map.get(si_or_cands, "choices") do
+              ws when is_list(ws) -> %{winners: ws}
+              _ -> %{winners: []}
+            end
 
         %{tokens: tokens, slate: slate}
 
@@ -1024,13 +1100,14 @@ defmodule Brain do
 
         is_map(cands_or_si) ->
           Map.get(cands_or_si, :winners) || Map.get(cands_or_si, "winners") ||
-          Map.get(cands_or_si, :choices) || Map.get(cands_or_si, "choices") ||
-          case Map.get(cands_or_si, :sense_candidates) || Map.get(cands_or_si, "sense_candidates") do
-            %{winners: ws} when is_list(ws) -> ws
-            %{"winners" => ws} when is_list(ws) -> ws
-            ws when is_list(ws) -> ws
-            _ -> []
-          end
+            Map.get(cands_or_si, :choices) || Map.get(cands_or_si, "choices") ||
+            case Map.get(cands_or_si, :sense_candidates) ||
+                   Map.get(cands_or_si, "sense_candidates") do
+              %{winners: ws} when is_list(ws) -> ws
+              %{"winners" => ws} when is_list(ws) -> ws
+              ws when is_list(ws) -> ws
+              _ -> []
+            end
 
         true ->
           []
@@ -1044,13 +1121,15 @@ defmodule Brain do
 
     lemma =
       c[:lemma] || c["lemma"] ||
-      (id && guess_lemma_from_id(id)) ||
-      c[:phrase] || c["phrase"] ||
-      c[:word] || c["word"] || ""
+        (id && guess_lemma_from_id(id)) ||
+        c[:phrase] || c["phrase"] ||
+        c[:word] || c["word"] || ""
 
     %{
       token_index: c[:token_index] || c["token_index"] || 0,
-      id: (id && to_string(id)) || (lemma != "" && "#{lemma}|phrase|fallback") || "unk|phrase|fallback",
+      id:
+        (id && to_string(id)) || (lemma != "" && "#{lemma}|phrase|fallback") ||
+          "unk|phrase|fallback",
       lemma: to_string(lemma),
       score: (c[:score] || c["score"] || c[:margin] || c["margin"] || 1.0) * 1.0,
       source: c[:source] || c["source"] || :runtime
@@ -1068,6 +1147,7 @@ defmodule Brain do
       }
     else
       l = String.downcase(w)
+
       %{
         token_index: 0,
         id: "#{l}|phrase|fallback",
@@ -1089,18 +1169,21 @@ defmodule Brain do
   end
 
   defp guess_lemma_from_id(nil), do: nil
+
   defp guess_lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
       _ -> nil
     end
   end
+
   defp guess_lemma_from_id(_), do: nil
 
   # ───────────────────────── MoodCore safe hooks (new) ────────────────────────
 
   defp safe_mood_apply_intent(intent, conf) do
-    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :apply_intent, 2) do
+    if Code.ensure_loaded?(Brain.MoodCore) and
+         function_exported?(Brain.MoodCore, :apply_intent, 2) do
       Brain.MoodCore.apply_intent(intent, conf)
     else
       :ok
@@ -1108,7 +1191,8 @@ defmodule Brain do
   end
 
   defp safe_mood_register_activation(active_cells) do
-    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :register_activation, 1) do
+    if Code.ensure_loaded?(Brain.MoodCore) and
+         function_exported?(Brain.MoodCore, :register_activation, 1) do
       Brain.MoodCore.register_activation(active_cells)
     else
       :ok
@@ -1123,4 +1207,3 @@ defmodule Brain do
     end
   end
 end
-

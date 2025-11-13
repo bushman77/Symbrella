@@ -61,9 +61,14 @@ defmodule Brain.WM.Gate do
         if ms && us, do: [{to_string(mwe), ms, to_string(uni), us, sc}], else: []
 
       # already-normalized tuple forms (avoid binding unused vars)
-      tup when is_tuple(tup) and tuple_size(tup) == 5 -> [tup]
-      tup when is_tuple(tup) and tuple_size(tup) == 2 -> [tup]
-      _ -> []
+      tup when is_tuple(tup) and tuple_size(tup) == 5 ->
+        [tup]
+
+      tup when is_tuple(tup) and tuple_size(tup) == 2 ->
+        [tup]
+
+      _ ->
+        []
     end)
   end
 
@@ -132,21 +137,23 @@ defmodule Brain.WM.Gate do
 
   defp phrase_fallback_id?(id) when is_binary(id),
     do: String.contains?(id, "|phrase|fallback")
+
   defp phrase_fallback_id?(_), do: false
 
   # --- converters ---
   defp as_float(nil), do: 0.0
   defp as_float(v) when is_number(v), do: v * 1.0
+
   defp as_float(v) when is_binary(v) do
     case Float.parse(v) do
       {f, _} -> f
       _ -> 0.0
     end
   end
+
   defp as_float(_), do: 0.0
 
   defp clamp01(x) when is_number(x) and x < 0.0, do: 0.0
   defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0
   defp clamp01(x) when is_number(x), do: x
 end
-

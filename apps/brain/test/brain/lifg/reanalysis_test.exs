@@ -44,5 +44,37 @@ defmodule Brain.LIFG.ReanalysisTest do
     assert ch0b.chosen_id != ch0.chosen_id
     assert Enum.member?(ch0b.alt_ids, ch0.chosen_id)
   end
-end
 
+  test "promotes runner-up when top is vetoed" do
+    si = %{
+      sentence: "Hello",
+      tokens: [%{index: 0, phrase: "Hello", span: {0, 5}, n: 1, mw: false}],
+      sense_candidates: %{
+        0 => [
+          %{id: "hello|interjection|top", score: 0.9, veto?: true},
+          %{id: "hello|interjection|runner", score: 0.6}
+        ]
+      }
+    }
+
+    {:ok, %{choices: [choice]}} = Stage1.run(si, reanalysis: true)
+    assert choice.chosen_id == "hello|interjection|runner"
+  end
+
+  test "keeps top when it is valid" do
+    si = %{
+      sentence: "Hello",
+      tokens: [%{index: 0, phrase: "Hello", span: {0, 5}, n: 1, mw: false}],
+      sense_candidates: %{
+        0 => [
+          %{id: "hello|interjection|top", score: 0.9},
+          %{id: "hello|interjection|runner", score: 0.6}
+        ]
+      }
+    }
+
+    {:ok, %{choices: [choice]}} = Stage1.run(si, reanalysis: true)
+    assert choice.chosen_id == "hello|interjection|top"
+  end
+
+end

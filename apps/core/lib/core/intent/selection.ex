@@ -8,31 +8,35 @@ defmodule Core.Intent.Selection do
   """
 
   @type si :: map()
-# add :feedback
-# add :feedback to the intent union
-@type intent :: :greet | :translate | :abuse | :insult | :command | :feedback | :ask | :unknown
+  # add :feedback
+  # add :feedback to the intent union
+  @type intent :: :greet | :translate | :abuse | :insult | :command | :feedback | :ask | :unknown
 
-# include :feedback in precedence (after :command, before :ask)
-@precedence [:greet, :translate, :abuse, :insult, :command, :feedback, :ask]
+  # include :feedback in precedence (after :command, before :ask)
+  @precedence [:greet, :translate, :abuse, :insult, :command, :feedback, :ask]
 
   @spec select(si(), Keyword.t()) :: si()
   def select(si, _opts \\ [])
 
   def select(%{sentence: _} = si, _opts) do
     kw0 = extract_keyword(si)
-    kw  = normalize_text(kw0)
+    kw = normalize_text(kw0)
 
     {intent, conf} = infer_intent(kw)
 
     text0 = text_from_si(si, kw)
-    text  = normalize_text(text0)
+    text = normalize_text(text0)
 
     si2 =
       si
       |> Map.put(:intent, intent)
       |> Map.put(:keyword, kw)
       |> Map.put(:confidence, conf)
-      |> Map.update(:trace, [], &[{:intent, %{keyword: kw, intent: intent, confidence: conf}} | &1])
+      |> Map.update(
+        :trace,
+        [],
+        &[{:intent, %{keyword: kw, intent: intent, confidence: conf}} | &1]
+      )
 
     emit(intent, kw, conf, text)
     si2
@@ -55,37 +59,50 @@ defmodule Core.Intent.Selection do
       end
 
     if function_exported?(:telemetry, :execute, 3) do
-      :telemetry.execute([:core, :intent, :selected],  meas, meta)
+      :telemetry.execute([:core, :intent, :selected], meas, meta)
       :telemetry.execute([:brain, :intent, :selected], meas, meta)
     end
 
     :ok
   end
+
   defp emit(_, _, _, _), do: :ok
 
   # ─────────────────────── normalization ───────────────────────
 
-  defp extract_keyword(%{keyword: kw}) when is_binary(kw) and kw != "" do
-    kw |> String.trim() |> squish() |> String.downcase()
-  end
+# apps/core/lib/core/intent/selection.ex
 
-  defp extract_keyword(%{tokens: tokens}) when is_list(tokens) do
-    tokens
-    |> Enum.map(fn t -> t[:phrase] || t["phrase"] || "" end)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&squish/1)
-    |> Enum.uniq()
-    |> prefer_multiword_keyword()
-  end
+defp extract_keyword(%{keyword: kw}) when is_binary(kw) and kw != "" do
+  kw |> String.trim() |> squish() |> String.downcase()
+end
 
-  defp extract_keyword(%{sentence: s}) when is_binary(s),
-    do: s |> String.trim() |> squish() |> String.downcase()
+defp extract_keyword(%{tokens: tokens}) when is_list(tokens) do
+  tokens
+  |> Enum.map(&token_phrase/1)
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+  |> Enum.map(&squish/1)
+  |> Enum.uniq()
+  |> prefer_multiword_keyword()
+end
 
-  defp extract_keyword(_), do: ""
+defp extract_keyword(%{sentence: s}) when is_binary(s),
+  do: s |> String.trim() |> squish() |> String.downcase()
+
+defp extract_keyword(_), do: ""
+
+defp token_phrase(%{phrase: p}) when is_binary(p), do: p
+defp token_phrase(%{"phrase" => p}) when is_binary(p), do: p
+# (optional fallbacks if your tokens sometimes carry normalized text)
+defp token_phrase(%{norm: p}) when is_binary(p), do: p
+defp token_phrase(%{"norm" => p}) when is_binary(p), do: p
+# if token is already a string, use it directly
+defp token_phrase(p) when is_binary(p), do: p
+defp token_phrase(_), do: ""
 
   defp text_from_si(%{sentence: s}, _kw) when is_binary(s) and s != "", do: s
   defp text_from_si(%{text: s}, _kw) when is_binary(s) and s != "", do: s
+
   defp text_from_si(%{tokens: tokens}, kw) when is_list(tokens) do
     joined =
       tokens
@@ -96,43 +113,52 @@ defmodule Core.Intent.Selection do
 
     if joined == "", do: kw || "", else: joined
   end
+
   defp text_from_si(_si, kw), do: kw || ""
 
   defp normalize_text(nil), do: ""
+
   defp normalize_text(s) when is_binary(s) do
     s
     |> String.downcase()
     |> squish()
-    |> String.replace(~r/([!?.,])\1+/u, "\\1")         # collapse !!!, ???, ...
-    |> String.replace(~r/([a-z])\1{2,}/u, "\\1\\1")    # loooove -> loove
+    # collapse !!!, ???, ...
+    |> String.replace(~r/([!?.,])\1+/u, "\\1")
+    # loooove -> loove
+    |> String.replace(~r/([a-z])\1{2,}/u, "\\1\\1")
     |> String.trim(".!,? ")
   end
+
   defp normalize_text(other), do: other |> to_string() |> normalize_text()
 
   defp squish(s), do: s |> String.replace(~r/\s+/u, " ") |> String.trim()
 
   defp prefer_multiword_keyword([]), do: ""
+
   defp prefer_multiword_keyword(phrases) do
     phrases
     |> Enum.sort_by(fn p -> {word_count(p), String.length(p)} end, :desc)
     |> List.first()
     |> String.downcase()
   end
+
   defp word_count(p), do: length(String.split(p, ~r/\s+/, trim: true))
 
   # ──────────────────── cue-based inference ────────────────────
 
   defp infer_intent(kw) when kw in ["", nil], do: {:unknown, 0.0}
+
   defp infer_intent(kw) do
-scores = %{
-  greet:     score_greet(kw),
-  translate: score_translate(kw),
-  abuse:     score_abuse(kw),
-  insult:    score_insult(kw),
-  command:   score_command(kw),
-  feedback:  score_feedback(kw),  # ← NEW/ensure present
-  ask:       score_question(kw)
-}
+    scores = %{
+      greet: score_greet(kw),
+      translate: score_translate(kw),
+      abuse: score_abuse(kw),
+      insult: score_insult(kw),
+      command: score_command(kw),
+      # ← NEW/ensure present
+      feedback: score_feedback(kw),
+      ask: score_question(kw)
+    }
 
     {label, top, second} = pick_label(scores)
 
@@ -155,10 +181,12 @@ scores = %{
       |> Enum.sort_by(fn {_k, v} -> v end, :desc)
 
     [{best_label, best} | rest] = sorted
-    second = case rest do
-      [] -> 0.0
-      [{_, v2} | _] -> v2
-    end
+
+    second =
+      case rest do
+        [] -> 0.0
+        [{_, v2} | _] -> v2
+      end
 
     # resolve near ties by precedence
     near_ties =
@@ -184,66 +212,65 @@ scores = %{
   end
 
   # ─────────────── cue scorers (0.0 .. 1.0) ───────────────
-# Thanks/praise/soft critique (avoid insult words which are handled elsewhere)
-defp score_feedback(s) do
-  # Positive thanks/praise
-  pos_thanks? =
-    Regex.match?(~r/\b(thanks|thank\s+you|thx|ty)\b/i, s) or
-    Regex.match?(~r/\b(appreciate(?:\s+it)?|i\s+appreciate(?:\s+it)?)\b/i, s) or
-    Regex.match?(~r/\b(nice\s+work|good\s+job|well\s+done|awesome|great\s+job)\b/i, s)
+  # Thanks/praise/soft critique (avoid insult words which are handled elsewhere)
+  defp score_feedback(s) do
+    # Positive thanks/praise
+    pos_thanks? =
+      Regex.match?(~r/\b(thanks|thank\s+you|thx|ty)\b/i, s) or
+        Regex.match?(~r/\b(appreciate(?:\s+it)?|i\s+appreciate(?:\s+it)?)\b/i, s) or
+        Regex.match?(~r/\b(nice\s+work|good\s+job|well\s+done|awesome|great\s+job)\b/i, s)
 
-  # Light negative feedback (don’t collide with abuse/insult)
-  neg_soft? =
-    Regex.match?(~r/\bnot\s+working\b/i, s) or
-    Regex.match?(~r/\bdoes(?:\s*|')?nt\s+work\b/i, s) or
-    Regex.match?(~r/\b(broken|bug|issue|crash(?:ing)?)\b/i, s) or
-    Regex.match?(~r/\bthis\s+(?:is\s+)?(bad|wrong|slow)\b/i, s)
-
-  cond do
-    pos_thanks? -> 0.85
-    neg_soft?   -> 0.70
-    true        -> 0.0
-  end
-end
-
-# Imperatives like "please build...", "send me...", "fix this", "open ..."
-defp score_command(s) do
-  qmark = String.contains?(s, "?")
-
-  # Do NOT treat explicit "translate ..." as a command; let :translate win cleanly.
-  if Regex.match?(~r/\btranslate\b/i, s) do
-    0.0
-  else
-    strong =
-      Regex.match?(
-        ~r/^\s*(?:please\s+)?(?:add|create|make|show|open|close|run|build|deploy|install|remove|delete|fix|update|set|write|rename|refactor|generate|explain|summarize|send|tell|give)\b/i,
-        s
-      ) ||
-      Regex.match?(~r/^\s*(?:give me|send me|tell me)\b/i, s)
-
-    polite = Regex.match?(~r/\bplease\b/i, s)
+    # Light negative feedback (don’t collide with abuse/insult)
+    neg_soft? =
+      Regex.match?(~r/\bnot\s+working\b/i, s) or
+        Regex.match?(~r/\bdoes(?:\s*|')?nt\s+work\b/i, s) or
+        Regex.match?(~r/\b(broken|bug|issue|crash(?:ing)?)\b/i, s) or
+        Regex.match?(~r/\bthis\s+(?:is\s+)?(bad|wrong|slow)\b/i, s)
 
     cond do
-      strong and not qmark -> 0.85
-      polite and not qmark -> 0.70
+      pos_thanks? -> 0.85
+      neg_soft? -> 0.70
       true -> 0.0
     end
   end
-end
 
+  # Imperatives like "please build...", "send me...", "fix this", "open ..."
+  defp score_command(s) do
+    qmark = String.contains?(s, "?")
+
+    # Do NOT treat explicit "translate ..." as a command; let :translate win cleanly.
+    if Regex.match?(~r/\btranslate\b/i, s) do
+      0.0
+    else
+      strong =
+        Regex.match?(
+          ~r/^\s*(?:please\s+)?(?:add|create|make|show|open|close|run|build|deploy|install|remove|delete|fix|update|set|write|rename|refactor|generate|explain|summarize|send|tell|give)\b/i,
+          s
+        ) ||
+          Regex.match?(~r/^\s*(?:give me|send me|tell me)\b/i, s)
+
+      polite = Regex.match?(~r/\bplease\b/i, s)
+
+      cond do
+        strong and not qmark -> 0.85
+        polite and not qmark -> 0.70
+        true -> 0.0
+      end
+    end
+  end
 
   # elongated greetings (heeellooo, heyyy, hiii, yooo, gm, good morning/…)
-defp score_greet(s) do
-  base  = if Regex.match?(greet_rx(), s), do: 0.70, else: 0.0
-  extra = if base > 0.0 and String.contains?(s, "!"), do: 0.10, else: 0.0
-  min(1.0, base + extra)
-end
+  defp score_greet(s) do
+    base = if Regex.match?(greet_rx(), s), do: 0.70, else: 0.0
+    extra = if base > 0.0 and String.contains?(s, "!"), do: 0.10, else: 0.0
+    min(1.0, base + extra)
+  end
 
-defp greet_rx do
-  # Start-of-string greetings with elongations.
-  # - 'yo' must NOT be followed by an apostrophe (so it won't match "you're")
-  # - require a word boundary or punctuation/end after the greeting token
-  ~r/
+  defp greet_rx do
+    # Start-of-string greetings with elongations.
+    # - 'yo' must NOT be followed by an apostrophe (so it won't match "you're")
+    # - require a word boundary or punctuation/end after the greeting token
+    ~r/
     ^
     (?:
       h+e+l{1,2}o+(?:\b|[!.?]|$) |
@@ -254,77 +281,91 @@ defp greet_rx do
       good\s+(?:morning|afternoon|evening)\b
     )
   /ix
-end
+  end
 
   defp score_translate(s) do
     k1 = Regex.match?(~r/\btranslate\b/i, s)
-    k2 = Regex.match?(~r/\b(?:to|into)\s+(english|spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|hindi)\b/i, s)
-    k3 = Regex.match?(~r/\bwhat(?:'s| is)\s+.+?\s+in\s+(english|spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|hindi)\b/i, s)
+
+    k2 =
+      Regex.match?(
+        ~r/\b(?:to|into)\s+(english|spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|hindi)\b/i,
+        s
+      )
+
+    k3 =
+      Regex.match?(
+        ~r/\bwhat(?:'s| is)\s+.+?\s+in\s+(english|spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|hindi)\b/i,
+        s
+      )
 
     cond do
-      k3 and k1    -> 0.95
+      k3 and k1 -> 0.95
       k3 or (k1 && k2) -> 0.85
-      k1           -> 0.60
-      true         -> 0.0
+      k1 -> 0.60
+      true -> 0.0
     end
   end
 
   # strong phrase → highest, word-only → medium-high
-defp score_abuse(s) do
-  phrase_hit? = Enum.any?(abuse_phrase_regexes(), &Regex.match?(&1, s))
-  word_hit?   = Regex.match?(compiled_word_regex(abuse_words()), s) or
-                case env_abuse_regex() do
-                  nil -> false
-                  rx  -> Regex.match?(rx, s)
-                end
+  defp score_abuse(s) do
+    phrase_hit? = Enum.any?(abuse_phrase_regexes(), &Regex.match?(&1, s))
 
-  cond do
-    phrase_hit? -> 0.98  # was 0.95
-    word_hit?   -> 0.70  # mild words-only hit slightly lower
-    true        -> 0.0
+    word_hit? =
+      Regex.match?(compiled_word_regex(abuse_words()), s) or
+        case env_abuse_regex() do
+          nil -> false
+          rx -> Regex.match?(rx, s)
+        end
+
+    cond do
+      # was 0.95
+      phrase_hit? -> 0.98
+      # mild words-only hit slightly lower
+      word_hit? -> 0.70
+      true -> 0.0
+    end
   end
-end
 
   defp score_insult(s) do
     pattern_hit? =
       Regex.match?(~r/\b(you\s+are|you're|ur)\s+(a\s+)?(#{words_alt(insult_words())})\b/i, s)
 
-    word_hit?   = Regex.match?(compiled_word_regex(insult_words()), s) or
-                  case env_insult_regex() do
-                    nil -> false
-                    rx -> Regex.match?(rx, s)
-                  end
+    word_hit? =
+      Regex.match?(compiled_word_regex(insult_words()), s) or
+        case env_insult_regex() do
+          nil -> false
+          rx -> Regex.match?(rx, s)
+        end
 
     cond do
       pattern_hit? -> 0.90
-      word_hit?    -> 0.70
-      true         -> 0.0
+      word_hit? -> 0.70
+      true -> 0.0
     end
   end
 
-defp score_question(s) do
-  qm = String.contains?(s, "?")
+  defp score_question(s) do
+    qm = String.contains?(s, "?")
 
-  starter = Regex.match?(
-    ~r/^\s*(who|what|when|where|why|how|do|does|did|can|could|will|would|should|is|are|am|have|has|had|may|might|was|were)\b/i,
-    s
-  )
+    starter =
+      Regex.match?(
+        ~r/^\s*(who|what|when|where|why|how|do|does|did|can|could|will|would|should|is|are|am|have|has|had|may|might|was|were)\b/i,
+        s
+      )
 
-  greet = Regex.match?(greet_rx(), s)
+    greet = Regex.match?(greet_rx(), s)
 
-  cond do
-    # real questions: strong
-    qm and starter -> 0.90
-    starter        -> 0.70
-
-    # expressive greeting like "hello?!" or "heyy??" — treat as greeting, not question
-    qm and greet   -> 0.20
-
-    # lone question mark with no interrogative — mild signal
-    qm             -> 0.55
-    true           -> 0.0
+    cond do
+      # real questions: strong
+      qm and starter -> 0.90
+      starter -> 0.70
+      # expressive greeting like "hello?!" or "heyy??" — treat as greeting, not question
+      qm and greet -> 0.20
+      # lone question mark with no interrogative — mild signal
+      qm -> 0.55
+      true -> 0.0
+    end
   end
-end
 
   defp looks_like_question?(s), do: score_question(s) >= 0.70
 
@@ -340,12 +381,17 @@ end
     ]
   end
 
-  defp abuse_words,  do: ~w(asshole bitch bastard dickhead motherfucker shithead cocksucker retard retarded)
-  defp insult_words, do: ~w(idiot stupid dumb moron loser pathetic jerk clown trash garbage worthless useless brainless)
+  defp abuse_words,
+    do: ~w(asshole bitch bastard dickhead motherfucker shithead cocksucker retard retarded)
+
+  defp insult_words,
+    do:
+      ~w(idiot stupid dumb moron loser pathetic jerk clown trash garbage worthless useless brainless)
 
   defp compiled_word_regex(words) when is_list(words) and words != [] do
     Regex.compile!("\\b(" <> Enum.map_join(words, "|", &Regex.escape/1) <> ")\\b", "i")
   end
+
   defp compiled_word_regex(_), do: ~r/(?!)/
 
   defp words_alt(words), do: Enum.map_join(words, "|", &Regex.escape/1)
@@ -360,4 +406,3 @@ end
     if terms == [], do: nil, else: compiled_word_regex(terms)
   end
 end
-

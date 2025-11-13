@@ -26,10 +26,17 @@ defmodule Brain.LIFG.ACCGate do
 
       result =
         cond do
-          function_exported?(Brain.ACC, :assess, 3) -> apply(Brain.ACC, :assess, [si, choices, opts])
-          function_exported?(Brain.ACC, :assess, 2) -> apply(Brain.ACC, :assess, [si, choices])
-          function_exported?(Brain.ACC, :score, 2)  -> apply(Brain.ACC, :score,  [si, choices])
-          true -> :skip
+          function_exported?(Brain.ACC, :assess, 3) ->
+            apply(Brain.ACC, :assess, [si, choices, opts])
+
+          function_exported?(Brain.ACC, :assess, 2) ->
+            apply(Brain.ACC, :assess, [si, choices])
+
+          function_exported?(Brain.ACC, :score, 2) ->
+            apply(Brain.ACC, :score, [si, choices])
+
+          true ->
+            :skip
         end
 
       case result do
@@ -68,6 +75,7 @@ defmodule Brain.LIFG.ACCGate do
 
   defp clamp01(x) when is_number(x) do
     x = x * 1.0
+
     cond do
       x < 0.0 -> 0.0
       x > 1.0 -> 1.0
@@ -85,4 +93,3 @@ defmodule Brain.LIFG.ACCGate do
     end
   end
 end
-

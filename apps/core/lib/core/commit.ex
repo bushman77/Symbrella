@@ -13,29 +13,29 @@ defmodule Core.Commit do
 
   @spec commit(map(), keyword()) :: %{output: map(), si: map()}
   def commit(si, opts \\ []) do
-    include_trace?  = Keyword.get(opts, :include_trace, false)
+    include_trace? = Keyword.get(opts, :include_trace, false)
     include_tokens? = Keyword.get(opts, :include_tokens, false)
     now_ms = System.system_time(:millisecond)
 
     lifg_choices = Map.get(si, :lifg_choices, [])
-    tokens       = Map.get(si, :tokens, [])
+    tokens = Map.get(si, :tokens, [])
 
     winners =
       lifg_choices
       |> Enum.map(fn ch ->
-        idx  = Map.get(ch, :token_index, 0)
-        tok  = Enum.at(tokens, idx, %{})
+        idx = Map.get(ch, :token_index, 0)
+        tok = Enum.at(tokens, idx, %{})
         span = Map.get(tok, :span, nil)
-        n    = Map.get(tok, :n, 1)
+        n = Map.get(tok, :n, 1)
 
         %{
           token_index: idx,
-          id:        Map.get(ch, :id),
-          lemma:     Map.get(ch, :lemma),
-          score:     Map.get(ch, :score, 0.0),
-          alt_ids:   Map.get(ch, :alt_ids, []),
-          n:         n,
-          span:      span
+          id: Map.get(ch, :id),
+          lemma: Map.get(ch, :lemma),
+          score: Map.get(ch, :score, 0.0),
+          alt_ids: Map.get(ch, :alt_ids, []),
+          n: n,
+          span: span
         }
       end)
 
@@ -44,7 +44,7 @@ defmodule Core.Commit do
       case get_in(si, [:evidence, :episodes]) do
         list when is_list(list) ->
           Enum.map(list, fn rec ->
-            at    = Map.get(rec, :at) || Map.get(rec, "at")
+            at = Map.get(rec, :at) || Map.get(rec, "at")
             score = Map.get(rec, :score) || Map.get(rec, "score") || 0.0
 
             meta =
@@ -56,28 +56,33 @@ defmodule Core.Commit do
             %{at: at, score: score, meta: meta}
           end)
 
-        _ -> []
+        _ ->
+          []
       end
 
-    atl        = Map.get(si, :atl_slate, %{})
-    atl_sum    = %{
+    atl = Map.get(si, :atl_slate, %{})
+
+    atl_sum = %{
       winner_count: Map.get(atl, :winner_count, 0),
-      concepts:     atl |> Map.get(:by_norm, %{}) |> map_size()
+      concepts: atl |> Map.get(:by_norm, %{}) |> map_size()
     }
 
     acc_conflict = Map.get(si, :acc_conflict, 0.0)
 
     base_output = %{
-      sentence:      Map.get(si, :sentence),
-      winners:       winners,
-      episodes:      episodes,
-      acc_conflict:  acc_conflict,
-      atl:           atl_sum,
-      ts_ms:         now_ms
+      sentence: Map.get(si, :sentence),
+      winners: winners,
+      episodes: episodes,
+      acc_conflict: acc_conflict,
+      atl: atl_sum,
+      ts_ms: now_ms
     }
 
     output =
-      (if include_trace?, do: Map.put(base_output, :trace, Map.get(si, :trace, [])), else: base_output)
+      if(include_trace?,
+        do: Map.put(base_output, :trace, Map.get(si, :trace, [])),
+        else: base_output
+      )
       |> then(fn m -> if include_tokens?, do: Map.put(m, :tokens, tokens), else: m end)
 
     commit_event = %{
@@ -104,4 +109,3 @@ defmodule Core.Commit do
     end
   end
 end
-

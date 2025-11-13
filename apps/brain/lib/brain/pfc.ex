@@ -81,20 +81,20 @@ defmodule Brain.PFC do
         true -> %{}
       end
 
-    mode   = snap[:mode] || :balanced
-    mt     = get_in(snap, [:policy, :margin_threshold]) || 0.12
-    pmtg   = get_in(snap, [:policy, :pmtg_mode]) || :boost
-    items  = (get_in(snap, [:wm, :size]) || 0) * 1
-    cap    = (get_in(snap, [:wm, :capacity]) || 0) * 1
-    meta   = Map.get(snap, :meta, %{})
-    conf   = meta[:conf] || 1.0
-    confl  = meta[:conflict] || 0.0
-    surpr  = meta[:surprise] || 0.0
+    mode = snap[:mode] || :balanced
+    mt = get_in(snap, [:policy, :margin_threshold]) || 0.12
+    pmtg = get_in(snap, [:policy, :pmtg_mode]) || :boost
+    items = (get_in(snap, [:wm, :size]) || 0) * 1
+    cap = (get_in(snap, [:wm, :capacity]) || 0) * 1
+    meta = Map.get(snap, :meta, %{})
+    conf = meta[:conf] || 1.0
+    confl = meta[:conflict] || 0.0
+    surpr = meta[:surprise] || 0.0
 
     %{
       title: "PFC",
       summary:
-        "mode=#{mode} · mt=#{Float.round(mt, 2)} · pMTG=#{pmtg} · WM #{items}/#{cap} · conf=#{Float.round(conf,2)} · conflict=#{Float.round(confl,2)} · surprise=#{Float.round(surpr,2)}",
+        "mode=#{mode} · mt=#{Float.round(mt, 2)} · pMTG=#{pmtg} · WM #{items}/#{cap} · conf=#{Float.round(conf, 2)} · conflict=#{Float.round(confl, 2)} · surprise=#{Float.round(surpr, 2)}",
       badges: [
         %{k: :mode, v: mode},
         %{k: :mt, v: mt},
@@ -113,7 +113,8 @@ defmodule Brain.PFC do
     @moduledoc false
     defstruct mode: :balanced,
               last_goal: nil,
-              overrides: %{},          # {:weights, :margin_threshold, :pmtg_mode, :acc_conflict_tau, ...}
+              # {:weights, :margin_threshold, :pmtg_mode, :acc_conflict_tau, ...}
+              overrides: %{},
               defaults: %{
                 weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
                 margin_threshold: 0.12,
@@ -157,8 +158,8 @@ defmodule Brain.PFC do
   @impl true
   def handle_call({:policy, si}, _from, %State{} = st) do
     goal = st.last_goal || safe_latest_intent()
-    wm   = safe_wm()
-    pol  = compute_policy(si, goal, wm, st)
+    wm = safe_wm()
+    pol = compute_policy(si, goal, wm, st)
 
     snap = %{
       mode: st.mode,
@@ -175,8 +176,8 @@ defmodule Brain.PFC do
   @impl true
   def handle_call(:status, _from, %State{} = st) do
     goal = st.last_goal || safe_latest_intent()
-    wm   = safe_wm()
-    pol  = compute_policy(%{}, goal, wm, st) |> Enum.into(%{})
+    wm = safe_wm()
+    pol = compute_policy(%{}, goal, wm, st) |> Enum.into(%{})
 
     snapshot = %{
       mode: st.mode,
@@ -202,12 +203,12 @@ defmodule Brain.PFC do
 
     # Goal- and meta-derived signals
     conf_goal = clamp01(goal[:confidence] || goal["confidence"] || 0.0)
-    wm_fill   = wm_fill_ratio(wm)
+    wm_fill = wm_fill_ratio(wm)
 
-    meta        = safe_meta()
-    m_conf      = clamp01((meta[:conf] || 1.0) * 1.0)
-    m_conflict  = clamp01((meta[:conflict] || 0.0) * 1.0)
-    m_surprise  = clamp01((meta[:surprise] || 0.0) * 1.0)
+    meta = safe_meta()
+    m_conf = clamp01((meta[:conf] || 1.0) * 1.0)
+    m_conflict = clamp01((meta[:conflict] || 0.0) * 1.0)
+    m_surprise = clamp01((meta[:surprise] || 0.0) * 1.0)
 
     # Be conservative: effective confidence = min(goal_conf, meta_conf)
     conf_eff = min(conf_goal, m_conf)
@@ -227,25 +228,25 @@ defmodule Brain.PFC do
     mt_mode =
       case st.mode do
         :conservative -> mt_conflict + 0.03
-        :balanced     -> mt_conflict
-        :adventurous  -> max(mt_conflict - 0.02, 0.05)
+        :balanced -> mt_conflict
+        :adventurous -> max(mt_conflict - 0.02, 0.05)
       end
 
     mt_load =
       cond do
         wm_fill >= 0.90 -> mt_mode + 0.05
         wm_fill >= 0.75 -> mt_mode + 0.02
-        true            -> mt_mode
+        true -> mt_mode
       end
 
     # When to consult pMTG
     pmtg_mode =
       cond do
         Map.has_key?(ov, :pmtg_mode) -> Map.get(ov, :pmtg_mode)
-        conf_eff < 0.55              -> :boost
-        m_surprise >= 0.30           -> :boost
-        m_conflict >= 0.50           -> :boost
-        true                         -> defaults.pmtg_mode
+        conf_eff < 0.55 -> :boost
+        m_surprise >= 0.30 -> :boost
+        m_conflict >= 0.50 -> :boost
+        true -> defaults.pmtg_mode
       end
 
     # Conflict raises the admission bar a bit
@@ -255,11 +256,12 @@ defmodule Brain.PFC do
       Map.get(ov, :acc_conflict_tau) ||
         case st.mode do
           :conservative -> 0.45
-          :balanced     -> defaults.acc_conflict_tau + (wm_fill >= 0.90 && 0.05 || 0.0)
-          :adventurous  -> 0.60
+          :balanced -> defaults.acc_conflict_tau + ((wm_fill >= 0.90 && 0.05) || 0.0)
+          :adventurous -> 0.60
         end
 
     bias_weight = weights0.intent_bias || defaults.weights.intent_bias
+
     intent_bias =
       intent_bias_map_from_si(
         si,
@@ -271,20 +273,21 @@ defmodule Brain.PFC do
       Map.get(ov, :base_boost) ||
         case st.mode do
           :conservative -> defaults.base_boost * 0.9
-          :balanced     -> defaults.base_boost
-          :adventurous  -> defaults.base_boost * 1.1
+          :balanced -> defaults.base_boost
+          :adventurous -> defaults.base_boost * 1.1
         end
 
     base_inhib =
       Map.get(ov, :base_inhib) ||
         case st.mode do
           :conservative -> defaults.base_inhib * 1.1
-          :balanced     -> defaults.base_inhib
-          :adventurous  -> defaults.base_inhib * 0.9
+          :balanced -> defaults.base_inhib
+          :adventurous -> defaults.base_inhib * 0.9
         end
 
     [
-      weights: Map.put(weights0, :intent_bias, weights0.intent_bias || defaults.weights.intent_bias),
+      weights:
+        Map.put(weights0, :intent_bias, weights0.intent_bias || defaults.weights.intent_bias),
       margin_threshold: Map.get(ov, :margin_threshold, mt_load),
       min_margin: Map.get(ov, :min_margin, defaults.min_margin),
       pmtg_mode: pmtg_mode,
@@ -353,14 +356,15 @@ defmodule Brain.PFC do
       end
 
     case mode do
-      :adventurous  -> base * 0.9
+      :adventurous -> base * 0.9
       :conservative -> base * 1.1
-      _             -> base
+      _ -> base
     end
   end
 
   defp intent_bias_map_from_si(%{tokens: toks}, kw, scale) when is_list(toks) and is_binary(kw) do
     down = String.downcase(kw)
+
     toks
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {t, i}, acc ->
@@ -368,37 +372,47 @@ defmodule Brain.PFC do
       if down != "" and phrase == down, do: Map.put(acc, i, scale), else: acc
     end)
   end
+
   defp intent_bias_map_from_si(_, _, _), do: %{}
 
   defp normalize_goal(m) do
     intent0 = m[:intent] || m["intent"]
+
     intent =
       cond do
-        is_atom(intent0) -> intent0
+        is_atom(intent0) ->
+          intent0
+
         is_binary(intent0) ->
           try do
             String.to_existing_atom(intent0)
           rescue
             _ -> :unknown
           end
-        true -> :unknown
+
+        true ->
+          :unknown
       end
 
     kw0 = m[:keyword] || m["keyword"] || ""
     conf0 = m[:confidence] || m["confidence"] || 0.0
+
     conf =
       cond do
-        is_number(conf0) -> conf0 * 1.0
+        is_number(conf0) ->
+          conf0 * 1.0
+
         is_binary(conf0) ->
           case Float.parse(conf0) do
             {f, _} -> f
             _ -> 0.0
           end
-        true -> 0.0
+
+        true ->
+          0.0
       end
 
     at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
     %{intent: intent, keyword: to_string(kw0), confidence: conf, at_ms: at_ms}
   end
 end
-

@@ -15,4 +15,3 @@ defmodule Llm.Const do
   def stable_runner_opts, do: @stable_runner_opts
   def default_keep_alive, do: @default_keep_alive
 end
-

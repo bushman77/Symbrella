@@ -14,12 +14,12 @@ defmodule Llm.Pos do
   def run(word, opts) when is_binary(word) do
     w = Util.sanitize_word(word)
 
-    user_opts        = Map.new(Keyword.get(opts, :options, %{}))
-    base_options     = Map.merge(Llm.Const.stable_runner_opts(), Map.drop(user_opts, [:num_ctx]))
-    keep_alive       = Keyword.get(opts, :keep_alive, Llm.Const.default_keep_alive())
-    io_timeout       = Keyword.get(opts, :timeout, @pos_call_timeout_default)
-    model            = Keyword.get(opts, :model, nil)
-    allow_builtin?   = Keyword.get(opts, :allow_builtin_lexicon, true)
+    user_opts = Map.new(Keyword.get(opts, :options, %{}))
+    base_options = Map.merge(Llm.Const.stable_runner_opts(), Map.drop(user_opts, [:num_ctx]))
+    keep_alive = Keyword.get(opts, :keep_alive, Llm.Const.default_keep_alive())
+    io_timeout = Keyword.get(opts, :timeout, @pos_call_timeout_default)
+    model = Keyword.get(opts, :model, nil)
+    allow_builtin? = Keyword.get(opts, :allow_builtin_lexicon, true)
     require_nonempty = Keyword.get(opts, :require_nonempty_syn_ant?, true)
 
     strong_opts = Util.ensure_min_predict(base_options, 160)
@@ -40,21 +40,46 @@ defmodule Llm.Pos do
     result =
       case Llm.generate(model, prompt_json, gen_opts_json) do
         {:ok, %{response: json}} ->
-          with {:ok, data}  <- Util.decode_strict_json(json),
+          with {:ok, data} <- Util.decode_strict_json(json),
                {:ok, data2} <- Util.prefer_exact_lemma(data, w),
-               :ok          <- Util.validate_pos_payload(data2, @pos_tags) do
+               :ok <- Util.validate_pos_payload(data2, @pos_tags) do
             {:ok, data2}
           else
-            _ -> tsv_fallback_generate_then_chat(w, model, strong_opts, keep_alive, allow_builtin?, io_timeout)
+            _ ->
+              tsv_fallback_generate_then_chat(
+                w,
+                model,
+                strong_opts,
+                keep_alive,
+                allow_builtin?,
+                io_timeout
+              )
           end
 
         _ ->
-          tsv_fallback_generate_then_chat(w, model, strong_opts, keep_alive, allow_builtin?, io_timeout)
+          tsv_fallback_generate_then_chat(
+            w,
+            model,
+            strong_opts,
+            keep_alive,
+            allow_builtin?,
+            io_timeout
+          )
       end
 
     case result do
       {:ok, %{"word" => ^w, "entries" => entries}} ->
-        entries2 = ensure_syn_ant_entries(entries, w, model, strong_opts, keep_alive, io_timeout, require_nonempty)
+        entries2 =
+          ensure_syn_ant_entries(
+            entries,
+            w,
+            model,
+            strong_opts,
+            keep_alive,
+            io_timeout,
+            require_nonempty
+          )
+
         {:ok, %{"word" => w, "entries" => entries2}}
 
       other ->
@@ -65,11 +90,15 @@ defmodule Llm.Pos do
   # TSV fallbacks
   defp tsv_fallback_generate_then_chat(w, model, options, keep_alive, allow_builtin?, io_timeout) do
     prompt =
-      Enum.join([
-        Prompts.tsv_system_prompt(), "",
-        "WORD: #{w}",
-        ~s|Return ONLY TSV lines for this word. Lemma must be exactly "#{w}".|
-      ], "\n")
+      Enum.join(
+        [
+          Prompts.tsv_system_prompt(),
+          "",
+          "WORD: #{w}",
+          ~s|Return ONLY TSV lines for this word. Lemma must be exactly "#{w}".|
+        ],
+        "\n"
+      )
 
     with {:ok, %{response: tsv}} <-
            Llm.generate(model, prompt,
@@ -84,8 +113,13 @@ defmodule Llm.Pos do
       _ ->
         msgs = [
           %{"role" => "system", "content" => Prompts.tsv_system_prompt()},
-          %{"role" => "user", "content" => "WORD: " <> w <>
-            ~s|\nReturn TSV lines only. Lemma must be exactly "#{w}". No commentary.|}
+          %{
+            "role" => "user",
+            "content" =>
+              "WORD: " <>
+                w <>
+                ~s|\nReturn TSV lines only. Lemma must be exactly "#{w}". No commentary.|
+          }
         ]
 
         case Llm.chat(model, msgs,
@@ -96,6 +130,7 @@ defmodule Llm.Pos do
              ) do
           {:ok, %{content: tsv2}} ->
             entries = Util.tsv_to_entries(tsv2, @pos_tags) |> Util.only_word(w)
+
             cond do
               entries != [] -> {:ok, %{"word" => w, "entries" => entries}}
               allow_builtin? -> builtin_or_error(w)
@@ -116,7 +151,15 @@ defmodule Llm.Pos do
   end
 
   # Enrichment of synonyms/antonyms when missing
-  defp ensure_syn_ant_entries(entries, word, model, options, keep_alive, io_timeout, require_nonempty?) do
+  defp ensure_syn_ant_entries(
+         entries,
+         word,
+         model,
+         options,
+         keep_alive,
+         io_timeout,
+         require_nonempty?
+       ) do
     Enum.map(entries, fn e ->
       syns = Map.get(e, "synonyms", [])
       ants = Map.get(e, "antonyms", [])
@@ -147,7 +190,7 @@ defmodule Llm.Pos do
 
   defp enrich_syn_ant(word, entry, model, options, keep_alive, io_timeout) do
     lemma = entry["lemma"] || word
-    pos   = entry["pos"] || ""
+    pos = entry["pos"] || ""
     gloss = entry["short_gloss"] || ""
 
     prompt = Prompts.enrichment_prompt(lemma, pos, gloss)
@@ -164,4 +207,3 @@ defmodule Llm.Pos do
     end
   end
 end
-

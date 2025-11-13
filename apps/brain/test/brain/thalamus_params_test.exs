@@ -6,7 +6,7 @@ defmodule Brain.ThalamusParams_Test do
   setup_all do
     # Ensure core Brain supervisor is present if your test environment expects it
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -18,6 +18,7 @@ defmodule Brain.ThalamusParams_Test do
 
         These tests assume the singleton is already started under the umbrella root.
         """)
+
       pid when is_pid(pid) ->
         :ok
     end
@@ -65,4 +66,3 @@ defmodule Brain.ThalamusParams_Test do
     assert params0 == Brain.Thalamus.get_params()
   end
 end
-

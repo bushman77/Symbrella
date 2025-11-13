@@ -16,4 +16,3 @@ defmodule Core.Time do
     System.system_time(:millisecond)
   end
 end
-

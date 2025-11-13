@@ -1,6 +1,10 @@
 # P-201 — Tokenizer defaults (test): words-only, no char-grams
 import Config
 
+config :db, Db.Repo,
+  pool: Ecto.Adapters.SQL.Sandbox,
+  ownership_timeout: 60_000
+
 # -------------------------------
 # Database (umbrella app: :db)
 # -------------------------------
@@ -50,6 +54,9 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
+
+config :brain, thalamus: [ofc_weight: 0.42, acc_alpha: 0.37]
+
 # -------------------------------
 # Brain (LIFG / pMTG / Hippocampus)
 # -------------------------------
@@ -73,4 +80,6 @@ config :brain,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
   # Hippocampus: hide dup counter in test assertions
-  hippo_meta_dup_count: false
+  hippo_meta_dup_count: false,
+ allow_test_ids: true
+

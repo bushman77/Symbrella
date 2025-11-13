@@ -81,7 +81,8 @@ defmodule Brain.Cerebellum.Store do
     create_table!()
 
     st = %{
-      pending: %{},                    # {{scope, ctx} => rec}
+      # {{scope, ctx} => rec}
+      pending: %{},
       feature_dims: cfg(:feature_dims, 5),
       init_weights: cfg(:init_weights, [0.0, 0.05, 0.05, 0.03, 0.03]),
       flush_interval_ms: cfg(:flush_interval_ms, 15_000),
@@ -99,6 +100,7 @@ defmodule Brain.Cerebellum.Store do
     rec = ensure_record(scope, ctx, st)
 
     gradv = pad_or_trim(grad, st.feature_dims)
+
     new_w =
       clip_norm(
         vec_add(rec.weights, gradv),
@@ -306,4 +308,3 @@ defmodule Brain.Cerebellum.Store do
     if n == 0.0 or n <= max, do: v, else: Enum.map(v, &(&1 * (max / n)))
   end
 end
-

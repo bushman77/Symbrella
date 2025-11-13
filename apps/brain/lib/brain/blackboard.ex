@@ -85,4 +85,3 @@ defmodule Brain.Blackboard do
     end
   end
 end
-

@@ -92,6 +92,7 @@ defmodule Brain.LIFG.Gate do
   end
 
   defp lemma_from_id(nil), do: nil
+
   defp lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
@@ -126,7 +127,8 @@ defmodule Brain.LIFG.Gate do
 
       true ->
         # Last resort: try legacy features or raw values
-        case get_in_maybe(ch, [:features, :score_norm]) || get_in_maybe(ch, [:features, :score_raw]) do
+        case get_in_maybe(ch, [:features, :score_norm]) ||
+               get_in_maybe(ch, [:features, :score_raw]) do
           s when is_number(s) -> s
           _ -> 0.0
         end
@@ -150,12 +152,13 @@ defmodule Brain.LIFG.Gate do
   defp get_in_maybe(m, path) do
     case m do
       %{} ->
-        Map.get(m, hd(path)) || Map.get(m, to_string(hd(path)))
-        |> case do
-          nil -> nil
-          next when length(path) == 1 -> next
-          next -> get_in_maybe(next, tl(path))
-        end
+        Map.get(m, hd(path)) ||
+          Map.get(m, to_string(hd(path)))
+          |> case do
+            nil -> nil
+            next when length(path) == 1 -> next
+            next -> get_in_maybe(next, tl(path))
+          end
 
       _ ->
         nil
@@ -165,4 +168,3 @@ defmodule Brain.LIFG.Gate do
   defp map_or_nil(%{} = m), do: m
   defp map_or_nil(_), do: nil
 end
-

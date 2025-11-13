@@ -81,4 +81,3 @@ defmodule Brain.LIFG.SemanticsAdapter do
   @spec inject(map()) :: map()
   def inject(ctx), do: adjust_ctx(ctx)
 end
-

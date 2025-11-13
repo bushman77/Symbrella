@@ -16,7 +16,7 @@ defmodule Brain.ThalamusACC_OFC_Test do
     # Ensure core Brain supervisor is present if your test environment expects it
     # (harmless if already started).
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -215,4 +215,3 @@ defmodule Brain.ThalamusACC_OFC_Test do
     assert meta1[:ofc_blended?] == true
   end
 end
-

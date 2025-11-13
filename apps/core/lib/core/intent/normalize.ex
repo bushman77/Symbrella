@@ -113,6 +113,7 @@ defmodule Core.Intent.Normalize do
     cond do
       String.ends_with?(s, "%") ->
         base = String.trim_trailing(s, "%")
+
         case Float.parse(base) do
           {n, _} -> clamp(n / 100.0, 0.0, 1.0)
           :error -> nil
@@ -132,4 +133,3 @@ defmodule Core.Intent.Normalize do
   defp clamp(n, _lo, hi) when n > hi, do: hi
   defp clamp(n, _lo, _hi), do: n
 end
-

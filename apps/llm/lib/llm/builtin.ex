@@ -69,4 +69,3 @@ defmodule Llm.Builtin do
 
   def entries_for(_), do: []
 end
-

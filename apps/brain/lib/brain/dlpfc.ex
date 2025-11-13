@@ -93,7 +93,8 @@ defmodule Brain.DLPFC do
     probe =
       meta_get(meta, :probe, %{})
       |> Map.put_new(:score, score)
-      |> Map.put(:source, :runtime)   # preferred for BG / WM policy
+      # preferred for BG / WM policy
+      |> Map.put(:source, :runtime)
       |> Map.put(:reason, :curiosity)
 
     :telemetry.execute(
@@ -108,8 +109,8 @@ defmodule Brain.DLPFC do
   @impl GenServer
   def handle_info({:thalamus_decision, meas, meta}, state) do
     decision = Map.get(meta, :decision) || Map.get(meta, "decision")
-    score    = get_num(meas, :score, 0.0)
-    act?     = !!Map.get(state.opts, :act_on_thalamus, false)
+    score = get_num(meas, :score, 0.0)
+    act? = !!Map.get(state.opts, :act_on_thalamus, false)
 
     :telemetry.execute(
       [:brain, :dlpfc, :heard],
@@ -153,12 +154,11 @@ defmodule Brain.DLPFC do
     end
   end
 
-defp meta_get(meta, key, default) do
-  case {Map.get(meta, key), Map.get(meta, to_string(key))} do
-    {nil, nil} -> default
-    {v, _} when not is_nil(v) -> v
-    {_, v} -> v
+  defp meta_get(meta, key, default) do
+    case {Map.get(meta, key), Map.get(meta, to_string(key))} do
+      {nil, nil} -> default
+      {v, _} when not is_nil(v) -> v
+      {_, v} -> v
+    end
   end
 end
-end
-

@@ -81,7 +81,8 @@ defmodule Brain.LIFG.FallbackRerun do
              weights: weights_for_stage1,
              scores: scores_mode,
              margin_threshold: margin_thr,
-             chargram_event: Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
+             chargram_event:
+               Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
              boundary_event: Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
            ) do
         {:ok, %{si: si_rerun, choices: raw2}} ->
@@ -103,6 +104,7 @@ defmodule Brain.LIFG.FallbackRerun do
     choices
     |> Enum.reduce([], fn ch, acc ->
       id = to_string(Safe.get(ch, :chosen_id, ""))
+
       if String.ends_with?(id, "|phrase|fallback"),
         do: [Safe.get(ch, :token_index, 0) | acc],
         else: acc
@@ -116,6 +118,7 @@ defmodule Brain.LIFG.FallbackRerun do
   # Build a debug map of heads per token index using child unigrams inside each MWE span
   defp heads_for_indices(si, idxs) do
     toks = Safe.get(si, :tokens, [])
+
     Enum.reduce(idxs, %{}, fn idx, acc ->
       heads =
         case Enum.at(toks, idx) do
@@ -240,4 +243,3 @@ defmodule Brain.LIFG.FallbackRerun do
     end
   end
 end
-

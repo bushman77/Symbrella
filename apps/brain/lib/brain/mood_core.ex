@@ -29,14 +29,14 @@ defmodule Brain.MoodCore do
 
   use GenServer
 
-  @event_update      [:brain, :mood, :update]
-  @event_saturation  [:brain, :mood, :saturation]
-  @event_shock       [:brain, :mood, :shock]
+  @event_update [:brain, :mood, :update]
+  @event_saturation [:brain, :mood, :saturation]
+  @event_shock [:brain, :mood, :shock]
 
   # ---------- Public API ----------
 
   def start_link(_opts \\ []), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
-  def snapshot(),              do: GenServer.call(__MODULE__, :snapshot)
+  def snapshot(), do: GenServer.call(__MODULE__, :snapshot)
 
   @doc """
   Bump neuromodulators by deltas map. Keys may be atoms or strings: "da","5ht","glu","ne".
@@ -59,10 +59,10 @@ defmodule Brain.MoodCore do
   end
 
   # Convenience receptor-style applicators
-  def apply_dopamine(k \\ 0.03),       do: bump(%{da: +k})
-  def apply_serotonin(k \\ 0.03),      do: bump(%{"5ht" => +k})
+  def apply_dopamine(k \\ 0.03), do: bump(%{da: +k})
+  def apply_serotonin(k \\ 0.03), do: bump(%{"5ht" => +k})
   def apply_norepinephrine(k \\ 0.03), do: bump(%{ne: +k})
-  def apply_glutamate(k \\ 0.03),      do: bump(%{glu: +k})
+  def apply_glutamate(k \\ 0.03), do: bump(%{glu: +k})
 
   @doc "Reset neuromodulators back to baseline (clears saturation counters)."
   def reset(), do: GenServer.call(__MODULE__, :reset)
@@ -111,12 +111,16 @@ defmodule Brain.MoodCore do
     cfg = Application.get_env(:brain, __MODULE__, []) |> normalize_cfg()
 
     baseline =
-      merge_defaults(%{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50},
-        get_map_like(cfg, :baseline))
+      merge_defaults(
+        %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50},
+        get_map_like(cfg, :baseline)
+      )
 
     init_lv =
-      merge_defaults(baseline,
-        get_map_like(cfg, :init))
+      merge_defaults(
+        baseline,
+        get_map_like(cfg, :init)
+      )
 
     half_life_ms =
       resolve_half_life(
@@ -125,28 +129,33 @@ defmodule Brain.MoodCore do
       )
 
     state = %{
-      levels:     coerce_keys(init_lv),
-      baseline:   coerce_keys(baseline),
+      levels: coerce_keys(init_lv),
+      baseline: coerce_keys(baseline),
       half_life_ms: coerce_keys(half_life_ms),
       max_delta_per_tick: to_float(Keyword.get(cfg, :max_delta_per_tick, 0.08), 0.08),
-      saturation_ticks:   to_pos_int(Keyword.get(cfg, :saturation_ticks, 30), 30),
-      shock_threshold:    to_float(Keyword.get(cfg, :shock_threshold, 0.25), 0.25),
-      last_ts:    now_ms(),
+      saturation_ticks: to_pos_int(Keyword.get(cfg, :saturation_ticks, 30), 30),
+      shock_threshold: to_float(Keyword.get(cfg, :shock_threshold, 0.25), 0.25),
+      last_ts: now_ms(),
       last_dt_ms: 0,
       last_levels: coerce_keys(init_lv),
       sat_counts: %{da: 0, "5ht": 0, glu: 0, ne: 0},
       clock:
         case Keyword.get(cfg, :clock, :cycle) do
           :cycle -> :cycle
-          :self  -> :self
-          _      -> :cycle
+          :self -> :self
+          _ -> :cycle
         end
     }
 
     case state.clock do
       :cycle ->
         id = "moodcore-on-cycle-#{System.unique_integer([:positive])}"
-        :ok = :telemetry.attach(id, [:brain, :cycle, :tick], &__MODULE__.on_cycle_tick/4, %{pid: self()})
+
+        :ok =
+          :telemetry.attach(id, [:brain, :cycle, :tick], &__MODULE__.on_cycle_tick/4, %{
+            pid: self()
+          })
+
         {:ok, Map.put(state, :telemetry_id, id)}
 
       :self ->
@@ -157,7 +166,7 @@ defmodule Brain.MoodCore do
 
   # Bridge from CycleClock
   def on_cycle_tick(_e, meas, _meta, %{pid: pid}) when is_pid(pid),
-    do: send(pid, {:tick, (meas[:dt_ms] || 0)})
+    do: send(pid, {:tick, meas[:dt_ms] || 0})
 
   @impl true
   def handle_info({:tick, _dt_ms}, state), do: {:noreply, decay_and_emit(state, :tick)}
@@ -226,6 +235,7 @@ defmodule Brain.MoodCore do
   @impl true
   def handle_call(:reset, _from, st) do
     lv = st.baseline
+
     st =
       st
       |> Map.put(:levels, lv)
@@ -252,20 +262,31 @@ defmodule Brain.MoodCore do
       |> then(fn s ->
         case Keyword.get(cfg, :half_life_ms, nil) do
           nil -> s
-          v   -> %{s | half_life_ms: resolve_half_life(s.half_life_ms, v) |> coerce_keys()}
+          v -> %{s | half_life_ms: resolve_half_life(s.half_life_ms, v) |> coerce_keys()}
         end
       end)
-      |> then(fn s -> %{
-        s |
-        max_delta_per_tick: to_float(Keyword.get(cfg, :max_delta_per_tick, s.max_delta_per_tick), s.max_delta_per_tick),
-        saturation_ticks:   to_pos_int(Keyword.get(cfg, :saturation_ticks, s.saturation_ticks), s.saturation_ticks),
-        shock_threshold:    to_float(Keyword.get(cfg, :shock_threshold, s.shock_threshold), s.shock_threshold)
-      } end)
+      |> then(fn s ->
+        %{
+          s
+          | max_delta_per_tick:
+              to_float(
+                Keyword.get(cfg, :max_delta_per_tick, s.max_delta_per_tick),
+                s.max_delta_per_tick
+              ),
+            saturation_ticks:
+              to_pos_int(
+                Keyword.get(cfg, :saturation_ticks, s.saturation_ticks),
+                s.saturation_ticks
+              ),
+            shock_threshold:
+              to_float(Keyword.get(cfg, :shock_threshold, s.shock_threshold), s.shock_threshold)
+        }
+      end)
       |> then(fn s ->
         case Keyword.get(cfg, :clock, s.clock) do
           :cycle -> %{s | clock: :cycle}
-          :self  -> %{s | clock: :self}
-          _      -> s
+          :self -> %{s | clock: :self}
+          _ -> s
         end
       end)
       |> then(fn s ->
@@ -274,7 +295,9 @@ defmodule Brain.MoodCore do
           %{} = init when map_size(init) > 0 ->
             lv = merge_defaults(s.levels, init)
             %{s | levels: lv, last_levels: lv}
-          _ -> s
+
+          _ ->
+            s
         end
       end)
 
@@ -286,13 +309,14 @@ defmodule Brain.MoodCore do
     :telemetry.detach(id)
     :ok
   end
+
   def terminate(_reason, _state), do: :ok
 
   # ---------- Internals ----------
 
   defp decay_and_emit(%{levels: lv, baseline: bl, half_life_ms: hl, last_ts: last} = st, source) do
     now = now_ms()
-    dt  = max(now - last, 0)
+    dt = max(now - last, 0)
 
     new_lv =
       Map.new(lv, fn {k, v} ->
@@ -308,27 +332,33 @@ defmodule Brain.MoodCore do
 
   # keep a convenience 3-arity (no default on the 4-arity head)
   defp emit(
-         %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} = st,
+         %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} =
+           st,
          source,
          dt_ms,
          cause
        ) do
     # Raw neuros
-    da  = Map.get(lv, :da, 0.5)
-    s5  = Map.get(lv, :"5ht", 0.5)
+    da = Map.get(lv, :da, 0.5)
+    s5 = Map.get(lv, :"5ht", 0.5)
     glu = Map.get(lv, :glu, 0.5)
-    ne  = Map.get(lv, :ne, 0.5)
+    ne = Map.get(lv, :ne, 0.5)
 
     # Derived mood indices
     exploration = 0.6 * da + 0.4 * ne
-    inhibition  = s5
-    vigilance   = ne
-    plasticity  = 0.5 * da + 0.5 * glu
+    inhibition = s5
+    vigilance = ne
+    plasticity = 0.5 * da + 0.5 * glu
 
     meas = %{
-      da: da, "5ht": s5, glu: glu, ne: ne,
-      exploration: exploration, inhibition: inhibition,
-      vigilance: vigilance, plasticity: plasticity
+      da: da,
+      "5ht": s5,
+      glu: glu,
+      ne: ne,
+      exploration: exploration,
+      inhibition: inhibition,
+      vigilance: vigilance,
+      plasticity: plasticity
     }
 
     meta = %{source: source, cause: cause, dt_ms: dt_ms}
@@ -349,10 +379,10 @@ defmodule Brain.MoodCore do
     # Shock detector (L2-norm of delta across neuros)
     dx =
       :math.sqrt(
-        :math.pow(da  - Map.get(prev, :da,  da), 2) +
-        :math.pow(s5  - Map.get(prev, :"5ht", s5), 2) +
-        :math.pow(glu - Map.get(prev, :glu, glu), 2) +
-        :math.pow(ne  - Map.get(prev, :ne,  ne), 2)
+        :math.pow(da - Map.get(prev, :da, da), 2) +
+          :math.pow(s5 - Map.get(prev, :"5ht", s5), 2) +
+          :math.pow(glu - Map.get(prev, :glu, glu), 2) +
+          :math.pow(ne - Map.get(prev, :ne, ne), 2)
       )
 
     if dx > shock_thr do
@@ -363,16 +393,16 @@ defmodule Brain.MoodCore do
   end
 
   defp decorate_snapshot(%{levels: lv, last_dt_ms: dt} = st) do
-    da  = Map.get(lv, :da, 0.5)
-    s5  = Map.get(lv, :"5ht", 0.5)
+    da = Map.get(lv, :da, 0.5)
+    s5 = Map.get(lv, :"5ht", 0.5)
     glu = Map.get(lv, :glu, 0.5)
-    ne  = Map.get(lv, :ne, 0.5)
+    ne = Map.get(lv, :ne, 0.5)
 
     mood = %{
       exploration: 0.6 * da + 0.4 * ne,
-      inhibition:  s5,
-      vigilance:   ne,
-      plasticity:  0.5 * da + 0.5 * glu
+      inhibition: s5,
+      vigilance: ne,
+      plasticity: 0.5 * da + 0.5 * glu
     }
 
     # NEW: tone hint derived from indices (kept conservative)
@@ -408,8 +438,9 @@ defmodule Brain.MoodCore do
     %{da: +0.07 * k, ne: +0.07 * k}
   end
 
-  defp intent_to_deltas(:help, conf),      do: intent_to_deltas(:question, conf)
-  defp intent_to_deltas(:instruction, c),  do: intent_to_deltas(:question, c)
+  defp intent_to_deltas(:help, conf), do: intent_to_deltas(:question, conf)
+  defp intent_to_deltas(:instruction, c), do: intent_to_deltas(:question, c)
+
   defp intent_to_deltas(_other, conf) do
     k = clamp_conf(conf)
     # Default: tiny calming + slight plasticity
@@ -444,26 +475,27 @@ defmodule Brain.MoodCore do
       true -> :neutral
     end
   end
+
   defp choose_tone(_), do: :neutral
 
   # ---------- small helpers ----------
 
   defp clamp_conf(c) when is_number(c), do: min(1.0, max(0.0, c))
-  defp clamp(x),   do: min(1.0, max(0.0, x))
-  defp now_ms(),   do: System.monotonic_time(:millisecond)
+  defp clamp(x), do: min(1.0, max(0.0, x))
+  defp now_ms(), do: System.monotonic_time(:millisecond)
 
   defp coerce_keys(map) do
     map
     |> Enum.map(fn
-      {"da", v}   -> {:da, v}
-      {:da, v}    -> {:da, v}
-      {"5ht", v}  -> {:"5ht", v}
+      {"da", v} -> {:da, v}
+      {:da, v} -> {:da, v}
+      {"5ht", v} -> {:"5ht", v}
       {:"5ht", v} -> {:"5ht", v}
-      {"glu", v}  -> {:glu, v}
-      {:glu, v}   -> {:glu, v}
-      {"ne", v}   -> {:ne, v}
-      {:ne, v}    -> {:ne, v}
-      {k, v}      -> {k, v}
+      {"glu", v} -> {:glu, v}
+      {:glu, v} -> {:glu, v}
+      {"ne", v} -> {:ne, v}
+      {:ne, v} -> {:ne, v}
+      {k, v} -> {k, v}
     end)
     |> Map.new()
   end
@@ -479,6 +511,7 @@ defmodule Brain.MoodCore do
     c = abs(cap || 0.08)
     max(-c, min(+c, v))
   end
+
   defp clamp_delta(_, cap), do: 0.0 |> clamp_delta(cap)
 
   # ---------- defensive config helpers ----------
@@ -486,28 +519,32 @@ defmodule Brain.MoodCore do
   defp normalize_cfg(cfg) when is_list(cfg) do
     if Keyword.keyword?(cfg), do: cfg, else: []
   end
+
   defp normalize_cfg(%{} = cfg), do: Map.to_list(cfg)
   defp normalize_cfg(v) when is_integer(v), do: [half_life_ms: v]
+
   defp normalize_cfg(v) when is_binary(v) do
     case Integer.parse(String.trim(v)) do
       {n, _} -> [half_life_ms: n]
-      _      -> []
+      _ -> []
     end
   end
+
   defp normalize_cfg(_), do: []
 
   # Pull a map/keyword value from cfg and turn it into a map with our neuro keys
   defp get_map_like(cfg, key) do
     case Keyword.get(cfg, key, %{}) do
-      %{} = m           -> coerce_keys(m)
+      %{} = m -> coerce_keys(m)
       l when is_list(l) -> l |> Map.new() |> coerce_keys()
-      _                 -> %{}
+      _ -> %{}
     end
   end
 
   # Merge a defaults map with an override map (override only known keys)
   defp merge_defaults(defaults, overrides) do
     overrides = coerce_keys(overrides || %{})
+
     defaults
     |> Enum.map(fn {k, v} -> {k, Map.get(overrides, k, v)} end)
     |> Map.new()
@@ -517,21 +554,29 @@ defmodule Brain.MoodCore do
   defp resolve_half_life(defaults, val) when is_map(val) do
     merge_defaults(defaults, val)
   end
+
   defp resolve_half_life(defaults, val) when is_list(val) do
     resolve_half_life(defaults, Map.new(val))
   end
+
   defp resolve_half_life(_defaults, val) do
     # number/string → broadcast to all neuros; fallback to sane defaults if invalid
     n =
       case val do
-        i when is_integer(i) and i > 0 -> i
-        f when is_float(f)   and f > 0.0 -> trunc(f)
+        i when is_integer(i) and i > 0 ->
+          i
+
+        f when is_float(f) and f > 0.0 ->
+          trunc(f)
+
         s when is_binary(s) ->
           case Integer.parse(String.trim(s)) do
             {k, _} when k > 0 -> k
             _ -> nil
           end
-        _ -> nil
+
+        _ ->
+          nil
       end
 
     if n do
@@ -541,23 +586,26 @@ defmodule Brain.MoodCore do
     end
   end
 
-  defp to_pos_int(v, _default) when is_integer(v) and v > 0,  do: v
-  defp to_pos_int(v, _default) when is_float(v)   and v > 0,  do: trunc(v)
+  defp to_pos_int(v, _default) when is_integer(v) and v > 0, do: v
+  defp to_pos_int(v, _default) when is_float(v) and v > 0, do: trunc(v)
+
   defp to_pos_int(v, default) when is_binary(v) do
     case Integer.parse(String.trim(v)) do
       {n, _} when n > 0 -> n
       _ -> default
     end
   end
+
   defp to_pos_int(_, default), do: default
 
   defp to_float(v, _default) when is_number(v), do: v * 1.0
+
   defp to_float(v, default) when is_binary(v) do
     case Float.parse(String.trim(v)) do
       {n, _} -> n
       _ -> default * 1.0
     end
   end
+
   defp to_float(_, default), do: default * 1.0
 end
-

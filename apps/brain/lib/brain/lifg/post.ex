@@ -33,7 +33,7 @@ defmodule Brain.LIFG.Post do
     si0 = Safe.to_plain(si)
 
     reanalysis? = Keyword.get(opts, :reanalysis?, false)
-    fail_fun    = Keyword.get(opts, :fail_fun, fn _ -> false end)
+    fail_fun = Keyword.get(opts, :fail_fun, fn _ -> false end)
 
     {choices2, flips} =
       if reanalysis? and is_function(fail_fun, 1) do
@@ -43,9 +43,10 @@ defmodule Brain.LIFG.Post do
         {choices, 0}
       end
 
-    %{cover: cover} = Cover.resolve_cover(si0, choices2, [
-      allow_overlaps?: Keyword.get(opts, :allow_overlaps?, false)
-    ])
+    %{cover: cover} =
+      Cover.resolve_cover(si0, choices2,
+        allow_overlaps?: Keyword.get(opts, :allow_overlaps?, false)
+      )
 
     total_span =
       Enum.reduce(cover, 0, fn
@@ -62,4 +63,3 @@ defmodule Brain.LIFG.Post do
     %{si: si0, choices: choices2, cover: cover, flips: flips}
   end
 end
-

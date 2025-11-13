@@ -62,4 +62,3 @@ defmodule Brain.DmPFC do
 
   defp clamp_range(x, lo, hi) when is_number(x), do: max(lo, min(hi, x))
 end
-

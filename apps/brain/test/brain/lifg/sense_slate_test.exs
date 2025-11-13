@@ -51,4 +51,3 @@ defmodule Brain.LIFG.SenseSlateTest do
     assert ids == ["x|noun|0", "y|noun|0"]
   end
 end
-

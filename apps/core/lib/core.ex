@@ -6,7 +6,7 @@ defmodule Core do
   → (Optional) Persist episode → Notify Brain.
 
   Notes:
-  • resolve_input/2 defaults to :prod mode and runs the full pipeline.
+  • `resolve_input/2` defaults to :prod mode and runs the full pipeline.
   • LTM no longer seeds or refetches via Lexicon — DB is the source of truth.
   • Any legacy `type: "seed"` rows are ignored when selecting candidates.
   • LIFG tie-breaks: uses a tiny POS prior only for razor-thin margins.
@@ -19,16 +19,16 @@ defmodule Core do
   • Episodes attach can be toggled via `opts[:episodes]` (default true) or env
     `Application.get_env(:brain, :episodes_mode, :on) != :off`.
   • (Optional) Episode persistence is controlled by:
-      - opts:   persist_episodes: true
-      - env:    EPISODES_PERSIST=on|true|1
-      - config: Application.put_env(:brain, :episodes_persist, :on)
+      - opts:   `persist_episodes: true`
+      - env:    `EPISODES_PERSIST=on|true|1`
+      - config: `Application.put_env(:brain, :episodes_persist, :on)`
   """
 
   # ── P-253/254 knobs ─────────────────────────────────────────────────────────
-  @lifg_tie_epsilon 0.01      # score margin considered "razor-thin"
-  @lifg_prob_epsilon 0.01     # probability margin considered "razor-thin"
-  @greet_phrase_bump 0.01     # extra nudge for MWE when intent==:greet
-  @mwe_general_bump 0.008     # NEW: small nudge for any multi-word token in thin ties
+  @lifg_tie_epsilon 0.01          # score margin considered "razor-thin"
+  @lifg_prob_epsilon 0.01         # probability margin considered "razor-thin"
+  @greet_phrase_bump 0.01         # extra nudge for MWE when intent == :greet
+  @mwe_general_bump 0.008         # small nudge for any multi-word token in thin ties
 
   alias Brain
   alias Core.SemanticInput
@@ -40,14 +40,57 @@ defmodule Core do
   @type si :: map()
   @type opts :: keyword()
 
+  # ───────────────────────── Struct/merge helpers ─────────────────────────────
+
+  @si_template %SemanticInput{}
+  @si_fields   @si_template |> Map.from_struct() |> Map.keys() |> MapSet.new()
+
+  # Accepts %SemanticInput{} or a plain map; returns %SemanticInput{} with safe keys
+  defp coerce_si(%SemanticInput{} = si), do: si
+
+  defp coerce_si(%{} = m) do
+    filtered =
+      m
+      |> Enum.filter(fn {k, _} -> is_atom(k) and MapSet.member?(@si_fields, k) end)
+      |> Map.new()
+
+    struct(SemanticInput, filtered)
+  end
+
+  defp coerce_si(other) when is_binary(other),
+    do: %SemanticInput{sentence: other, tokens: [], source: :test, trace: []}
+
+  defp coerce_si(_), do: %SemanticInput{}
+
+  # Merge only whitelisted keys from a Brain map back into the struct
+  defp merge_into_si(%SemanticInput{} = si, %{} = brain_out) do
+    Enum.reduce(brain_out, si, fn {k, v}, acc ->
+      if MapSet.member?(@si_fields, k), do: Map.put(acc, k, v), else: acc
+    end)
+  end
+
+  # Call a Brain function with a plain map; merge result safely into struct.
+  # Accepts either a %SemanticInput{} or a plain map (coerces maps into the struct).
+  defp brain_roundtrip(si_or_map, fun) when is_function(fun, 1) do
+    si = coerce_si(si_or_map)
+    brain_in = Map.from_struct(si)
+
+    case fun.(brain_in) do
+      %{} = out -> merge_into_si(si, out)
+      _         -> si
+    end
+  end
+
+  # ───────────────────────── Public API ───────────────────────────────────────
+
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
     mode  = Keyword.get(opts, :mode, :prod)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
-    # optionally pull a default from config so it's “always on” unless overridden
+    # Optionally pull defaults for LIFG (always on unless overridden)
     lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
-    lifg_opts = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
+    lifg_opts     = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
 
     si0 =
       phrase
@@ -56,14 +99,23 @@ defmodule Core do
       |> rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put_new(:trace, [])
-      |> Map.put(:lifg_opts, lifg_opts)   # ← ensure it’s on the SI
+      |> Map.put(:lifg_opts, lifg_opts)
 
-    si1 = Selection.select(si0, opts)
+    # Be compatible with both Selection.select/2 shapes:
+    # - legacy: returns a plain si (map/struct)
+    # - new:    returns {si, res}
+    sel_out = Selection.select(si0, opts)
+
+    si1 =
+      case sel_out do
+        {si, _res} -> coerce_si(si)
+        si         -> coerce_si(si)
+      end
 
     case mode do
       :prod ->
         si1
-        |> Brain.stm()
+        |> brain_roundtrip(&Brain.stm/1)
         |> keep_only_word_boundary_tokens()
         |> maybe_run_mwe(:early, opts)
         |> ltm_stage(opts)
@@ -73,7 +125,7 @@ defmodule Core do
         |> maybe_attach_episodes(opts)
         |> run_lifg_and_attach(opts)
         |> maybe_ingest_atl(opts)
-        |> then(&Brain.ATL.attach_lifg_pairs(&1, opts))   # ← add this line
+        |> brain_roundtrip(&Brain.ATL.attach_lifg_pairs(&1, opts))
         |> maybe_encode_hippocampus()
         |> maybe_persist_episode(opts)
         |> notify_brain_activation(opts)
@@ -90,6 +142,7 @@ defmodule Core do
 
   # Extract POS from an id (e.g., "hello|noun|0" -> "noun")
   defp id_pos(nil), do: nil
+
   defp id_pos(id) when is_binary(id) do
     case String.split(id, "|", parts: 3) do
       [_, p | _] -> p
@@ -117,35 +170,34 @@ defmodule Core do
   end
 
   # ─────────────────────── LIFG (full pipeline) ───────────────────────
+
   defp run_lifg_and_attach(si, lifg_opts) do
     # Pass intent bias downstream (non-breaking; ignored if unused)
     lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
 
     case safe_lifg_run(si, lifg_opts2) do
       {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
-        # Build UI-friendly lifg_choices, preserving your tie-breaking logic
         lifg_choices =
           raw_choices
           |> Enum.map(fn ch ->
             token_index = Map.get(ch, :token_index, 0)
-            t           = Enum.at(si.tokens, token_index, %{})
-            token_norm  = t |> Map.get(:phrase, "") |> norm()
+            t = Enum.at(si.tokens, token_index, %{})
+            token_norm = t |> Map.get(:phrase, "") |> norm()
 
-            chosen_id   = Map.get(ch, :chosen_id)
-            scores      = Map.get(ch, :scores) || %{}
-            feats       = Map.get(ch, :features) || %{}
-            alt_ids     = Map.get(ch, :alt_ids, [])
-            margin      = Map.get(ch, :margin, 0.0)
+            chosen_id = Map.get(ch, :chosen_id)
+            scores = Map.get(ch, :scores) || %{}
+            feats = Map.get(ch, :features) || %{}
+            alt_ids = Map.get(ch, :alt_ids, [])
+            margin = Map.get(ch, :margin, 0.0)
             prob_margin = Map.get(ch, :prob_margin, 0.0)
 
             phrase_bump_for = fn id, thin? ->
               cond do
                 Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
-                  base  = if thin?, do: @mwe_general_bump, else: 0.0
+                  base = if thin?, do: @mwe_general_bump, else: 0.0
                   greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
                   base + greet
-                true ->
-                  0.0
+                true -> 0.0
               end
             end
 
@@ -161,17 +213,11 @@ defmodule Core do
 
             matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
             pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
-
-            thin? = (margin < @lifg_tie_epsilon) or (prob_margin < @lifg_prob_epsilon)
-
+            thin? = margin < @lifg_tie_epsilon or prob_margin < @lifg_prob_epsilon
             score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
 
             pick_with_prior = fn ids ->
-              Enum.max_by(
-                ids,
-                fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
-                fn -> chosen_id end
-              )
+              Enum.max_by(ids, fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end, fn -> chosen_id end)
             end
 
             {chosen_id2, score2} =
@@ -200,7 +246,7 @@ defmodule Core do
               score: score2
             }
           end)
-          |> mwe_shadow(si.tokens)  # keep your MWE → unigram shadowing
+          |> mwe_shadow(si.tokens)
 
         ev = %{
           stage: :lifg_run,
@@ -210,8 +256,8 @@ defmodule Core do
         }
 
         si_after
-        |> Map.put(:atl_slate, slate)               # make slate available to later steps
-        |> Map.put(:lifg_choices, lifg_choices)     # preserve existing consumer contract
+        |> Map.put(:atl_slate, slate)
+        |> Map.put(:lifg_choices, lifg_choices)
         |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
         |> Map.update(:trace, [], &[ev | &1])
 
@@ -223,7 +269,6 @@ defmodule Core do
   defp safe_lifg_run(si, opts) do
     cond do
       Code.ensure_loaded?(Brain) and function_exported?(Brain, :lifg_run, 2) ->
-        # Prefer the Brain facade (GenServer + Recorder)
         try do
           apply(Brain, :lifg_run, [si, opts])
         rescue
@@ -278,10 +323,10 @@ defmodule Core do
 
   defp maybe_encode_hippocampus(si), do: si
 
-  # ─────────────────────── NEW: Episodes attach ───────────────────────
+  # ─────────────────────── Episodes attach ───────────────────────
 
   defp maybe_attach_episodes(si, opts) when is_map(si) do
-    enabled?  = episodes_enabled?(opts)
+    enabled? = episodes_enabled?(opts)
     hippo_up? = is_pid(Process.whereis(Brain.Hippocampus))
 
     cond do
@@ -291,17 +336,16 @@ defmodule Core do
       true ->
         pass =
           []
-          |> put_if_present(:source,     Keyword.get(opts, :recall_source))
-          |> put_if_present(:embedding,  Keyword.get(opts, :episode_embedding))
+          |> put_if_present(:source, Keyword.get(opts, :recall_source))
+          |> put_if_present(:embedding, Keyword.get(opts, :episode_embedding))
 
-        # attach_episodes builds cues itself from SI (winners/atl_slate/tokens/sentence)
         si2 = Brain.Hippocampus.attach_episodes(si, pass)
         eps = get_in(si2, [:evidence, :episodes]) || []
         emit([:brain, :core, :episodes_attached], %{count: length(eps)}, %{mode: :pre_lifg})
         si2
     end
   catch
-    _, _ -> si   # safety: never break pipeline
+    _, _ -> si
   end
 
   defp episodes_enabled?(opts) do
@@ -310,21 +354,18 @@ defmodule Core do
     case opt do
       true -> true
       false -> false
-      _ ->
-        # default to on unless env explicitly sets :off
-        Application.get_env(:brain, :episodes_mode, :on) != :off
+      _ -> Application.get_env(:brain, :episodes_mode, :on) != :off
     end
   end
 
-  # ─────────────────────── NEW: Optional persistence ───────────────────────
+  # ─────────────────────── Optional persistence ───────────────────────
 
   defp maybe_persist_episode(si, opts) when is_map(si) do
-    # Delegates gating to Writer (persist flag/env). Always returns SI unchanged.
     Brain.Hippocampus.Writer.maybe_persist(
       si,
-      persist:   Keyword.get(opts, :persist_episodes),
+      persist: Keyword.get(opts, :persist_episodes),
       embedding: Keyword.get(opts, :episode_embedding),
-      user_id:   Keyword.get(opts, :user_id)
+      user_id: Keyword.get(opts, :user_id)
     )
   rescue
     _ -> si
@@ -375,7 +416,7 @@ defmodule Core do
   defp rebuild_word_ngrams(%{sentence: s} = si, max_n)
        when is_binary(s) and is_integer(max_n) and max_n > 0 do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
-    words  = if s_norm == "", do: [], else: String.split(s_norm, " ")
+    words = if s_norm == "", do: [], else: String.split(s_norm, " ")
 
     # char start offsets for each word
     starts =
@@ -389,8 +430,8 @@ defmodule Core do
     tokens =
       for i <- 0..(wlen - 1), n <- min(max_n, wlen - i)..1//-1 do
         phrase = words |> Enum.slice(i, n) |> Enum.join(" ")
-        start  = Enum.at(starts, i)
-        len    = String.length(phrase)
+        start = Enum.at(starts, i)
+        len = String.length(phrase)
 
         %{index: nil, span: {start, len}, n: n, phrase: phrase, mw: n > 1, instances: []}
       end
@@ -407,7 +448,7 @@ defmodule Core do
   defp keep_only_word_boundary_tokens(%{sentence: s, tokens: toks} = si)
        when is_binary(s) and is_list(toks) do
     s_norm = s |> String.trim() |> String.replace(~r/\s+/u, " ")
-    words  = if s_norm == "", do: [], else: String.split(s_norm, " ")
+    words = if s_norm == "", do: [], else: String.split(s_norm, " ")
     wcount = length(words)
 
     kept =
@@ -494,21 +535,21 @@ defmodule Core do
   # ─────────────────────── Introspection / Examine ───────────────────────
 
   @ui_regions [
-    {:brain,        Brain,             :snapshot, []},
-    {:lifg,         Brain.LIFG,        :status,   []},
-    {:pmtg,         Brain.PMTG,        :status,   []},
-    {:atl,          Brain.ATL,         :status,   []},
-    {:hippocampus,  Brain.Hippocampus, :snapshot, []}
+    {:brain, Brain, :snapshot, []},
+    {:lifg, Brain.LIFG, :status, []},
+    {:pmtg, Brain.PMTG, :status, []},
+    {:atl, Brain.ATL, :status, []},
+    {:hippocampus, Brain.Hippocampus, :snapshot, []}
   ]
 
   @extra_regions [
-    {:acc,          Brain.ACC,         :auto,     []},
-    {:thalamus,     Brain.Thalamus,    :auto,     []},
-    {:ofc,          Brain.OFC,         :auto,     []},
-    {:dlpfc,        Brain.DLPFC,       :auto,     []},
-    {:negcache,     Core.NegCache,     :auto,     []},
-    {:curiosity,    Curiosity,         :auto,     []},
-    {:core_curiosity, Core.Curiosity,  :auto,     []}
+    {:acc, Brain.ACC, :auto, []},
+    {:thalamus, Brain.Thalamus, :auto, []},
+    {:ofc, Brain.OFC, :auto, []},
+    {:dlpfc, Brain.DLPFC, :auto, []},
+    {:negcache, Core.NegCache, :auto, []},
+    {:curiosity, Curiosity, :auto, []},
+    {:core_curiosity, Core.Curiosity, :auto, []}
   ]
 
   @default_regions @ui_regions
@@ -516,10 +557,10 @@ defmodule Core do
   @doc """
   Inspect the state of brain regions.
   """
-  def examine(opts) do
-    compact?  = Keyword.get(opts, :compact?, false)
-    ui_only?  = Keyword.get(opts, :ui_only?, true)
-    all?      = Keyword.get(opts, :all?, false)
+  def examine(opts \\ []) do
+    compact? = Keyword.get(opts, :compact?, false)
+    ui_only? = Keyword.get(opts, :ui_only?, true)
+    all? = Keyword.get(opts, :all?, false)
 
     base_regions =
       cond do
@@ -536,9 +577,9 @@ defmodule Core do
           @default_regions
       end
 
-    sup           = Keyword.get(opts, :supervisor, Symbrella.Supervisor)
-    discover?     = Keyword.get(opts, :discover_from_sup?, all?)
-    discovered    = if discover?, do: discover_regions_from_sup(sup), else: []
+    sup = Keyword.get(opts, :supervisor, Symbrella.Supervisor)
+    discover? = Keyword.get(opts, :discover_from_sup?, all?)
+    discovered = if discover?, do: discover_regions_from_sup(sup), else: []
 
     regions =
       (base_regions ++ discovered)
@@ -565,8 +606,6 @@ defmodule Core do
 
     :ok
   end
-
-  def examine(), do: examine([])
 
   # helpers for examine
   defp safe_invoke({label, mod, fun, args}) when is_atom(label) and is_atom(mod) do
@@ -605,9 +644,15 @@ defmodule Core do
 
   defp auto_snapshot(label, mod) do
     cond do
-      function_exported?(mod, :status, 0)     -> {:ok, label, apply(mod, :status, [])}
-      function_exported?(mod, :snapshot, 0)   -> {:ok, label, apply(mod, :snapshot, [])}
-      function_exported?(mod, :state, 0)      -> {:ok, label, apply(mod, :state, [])}
+      function_exported?(mod, :status, 0) ->
+        {:ok, label, apply(mod, :status, [])}
+
+      function_exported?(mod, :snapshot, 0) ->
+        {:ok, label, apply(mod, :snapshot, [])}
+
+      function_exported?(mod, :state, 0) ->
+        {:ok, label, apply(mod, :state, [])}
+
       true ->
         case Process.whereis(mod) do
           pid when is_pid(pid) ->
@@ -629,7 +674,7 @@ defmodule Core do
     pid =
       case sup do
         m when is_atom(m) -> Process.whereis(m)
-        p when is_pid(p)  -> p
+        p when is_pid(p) -> p
         _ -> nil
       end
 
@@ -638,7 +683,7 @@ defmodule Core do
         Supervisor.which_children(pid)
         |> Enum.flat_map(fn
           {_id, _pid, _type, [mod]} when is_atom(mod) -> [{module_label(mod), mod, :auto, []}]
-          {_id, _pid, _type, mod}  when is_atom(mod) -> [{module_label(mod), mod, :auto, []}]
+          {_id, _pid, _type, mod} when is_atom(mod) -> [{module_label(mod), mod, :auto, []}]
           _ -> []
         end)
 
@@ -667,28 +712,32 @@ defmodule Core do
     specs
     |> Enum.uniq_by(fn
       {label, _m, _f, _a} -> label
-      m when is_atom(m)   -> module_label(m)
-      other               -> other
+      m when is_atom(m) -> module_label(m)
+      other -> other
     end)
   end
 
   defp apply_only_filter(specs, nil), do: specs
+
   defp apply_only_filter(specs, only) when is_list(only) do
     wanted = only |> Enum.map(&label_from_selector/1) |> MapSet.new()
+
     Enum.filter(specs, fn
       {label, _m, _f, _a} -> MapSet.member?(wanted, label)
-      m when is_atom(m)   -> MapSet.member?(wanted, module_label(m))
-      _                   -> false
+      m when is_atom(m) -> MapSet.member?(wanted, module_label(m))
+      _ -> false
     end)
   end
 
   defp apply_exclude_filter(specs, nil), do: specs
+
   defp apply_exclude_filter(specs, exclude) when is_list(exclude) do
     blocked = exclude |> Enum.map(&label_from_selector/1) |> MapSet.new()
+
     Enum.reject(specs, fn
       {label, _m, _f, _a} -> MapSet.member?(blocked, label)
-      m when is_atom(m)   -> MapSet.member?(blocked, module_label(m))
-      _                   -> false
+      m when is_atom(m) -> MapSet.member?(blocked, module_label(m))
+      _ -> false
     end)
   end
 
@@ -719,6 +768,7 @@ defmodule Core do
     else
       Enum.reject(lifg_choices, fn ch ->
         t = Enum.at(tokens, ch.token_index, %{})
+
         if Map.get(t, :n, 1) == 1 do
           covered_by_any_mwe?(Map.get(t, :span), mwe_spans)
         else
@@ -730,6 +780,7 @@ defmodule Core do
 
   defp covered_by_any_mwe?({a, l}, spans) when is_integer(a) and is_integer(l) do
     b = a + l
+
     Enum.any?(spans, fn
       {s, sl} when is_integer(s) and is_integer(sl) ->
         e = s + sl
@@ -752,18 +803,20 @@ defmodule Core do
 
   # ─────────────────────── Small util ───────────────────────
   defp put_if_present(kvs, _k, nil), do: kvs
-  defp put_if_present(kvs, k, v),   do: Keyword.put(kvs, k, v)
+  defp put_if_present(kvs, k, v), do: Keyword.put(kvs, k, v)
 
   # Gate + forwarder for MWE Signatures
   defp maybe_run_mwe(si, stage, opts) do
-    env_on  = Application.get_env(:core, :mwe_signatures, :on) != :off
+    env_on = Application.get_env(:core, :mwe_signatures, :on) != :off
     opt_val = Keyword.get(opts, :mwe_signatures, :inherit)
-    enabled = case opt_val do
-      :off -> false
-      false -> false
-      :inherit -> env_on
-      _ -> true
-    end
+
+    enabled =
+      case opt_val do
+        :off -> false
+        false -> false
+        :inherit -> env_on
+        _ -> true
+      end
 
     if enabled do
       Signatures.run(si,

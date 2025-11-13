@@ -50,10 +50,10 @@ defmodule Support.TelemetryHelpers do
     this returns `{result, captured}` where `captured` is a list of
     `{event, measurements, metadata}` for all events seen within the window.
   """
-  @spec capture([atom()] | [[atom()]], (() -> any()), non_neg_integer()) ::
+  @spec capture([atom()] | [[atom()]], (-> any()), non_neg_integer()) ::
           {map(), map()} | {any(), [{[atom()], map(), map()}]}
   def capture(events, fun, timeout_ms \\ 100)
-      when (is_list(events) and is_function(fun, 0) and is_integer(timeout_ms)) do
+      when is_list(events) and is_function(fun, 0) and is_integer(timeout_ms) do
     case normalize_events(events) do
       {:single, ev} -> capture_single(ev, fun, timeout_ms)
       {:multi, evs} -> capture_multi(evs, fun, timeout_ms)
@@ -66,9 +66,9 @@ defmodule Support.TelemetryHelpers do
 
   Accepts either a single event path (list of atoms) or a list of paths.
   """
-  @spec refute_event([atom()] | [[atom()]], (() -> any()), non_neg_integer()) :: :ok
+  @spec refute_event([atom()] | [[atom()]], (-> any()), non_neg_integer()) :: :ok
   def refute_event(events, fun, timeout_ms \\ 100)
-      when (is_list(events) and is_function(fun, 0) and is_integer(timeout_ms)) do
+      when is_list(events) and is_function(fun, 0) and is_integer(timeout_ms) do
     case normalize_events(events) do
       {:single, ev} -> do_refute([ev], fun, timeout_ms)
       {:multi, evs} -> do_refute(evs, fun, timeout_ms)
@@ -123,8 +123,12 @@ defmodule Support.TelemetryHelpers do
       msg = wait_for_event(event, timeout_ms)
 
       case msg do
-        {:telemetry, ^event, meas, meta} -> {meas, meta}
-        nil -> raise ExUnit.AssertionError, "Expected telemetry #{inspect(event)} but none was emitted within #{timeout_ms}ms"
+        {:telemetry, ^event, meas, meta} ->
+          {meas, meta}
+
+        nil ->
+          raise ExUnit.AssertionError,
+                "Expected telemetry #{inspect(event)} but none was emitted within #{timeout_ms}ms"
       end
     after
       :ok = detach_probe(id)
@@ -177,9 +181,15 @@ defmodule Support.TelemetryHelpers do
 
   defp normalize_events(events) do
     cond do
-      events == [] -> {:multi, []}
-      is_list(events) and Enum.all?(events, &is_list/1) -> {:multi, events}
-      is_list(events) and Enum.all?(events, &is_atom/1) -> {:single, events}
+      events == [] ->
+        {:multi, []}
+
+      is_list(events) and Enum.all?(events, &is_list/1) ->
+        {:multi, events}
+
+      is_list(events) and Enum.all?(events, &is_atom/1) ->
+        {:single, events}
+
       true ->
         raise ArgumentError, "events must be a path [:a,:b] or a list of paths [[:a,:b], [:c,:d]]"
     end

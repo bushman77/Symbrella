@@ -61,6 +61,27 @@ Hooks.ScrollOnEvent = {
   }
 }
 
+// --- add to your Hooks object ---
+Hooks.ClipboardCopy = {
+  mounted() {
+    this.targetSelector = this.el.dataset.clipboardTarget
+    this.onClick = async () => {
+      const target = document.querySelector(this.targetSelector)
+      const text = target?.innerText || ""
+      if (!text) return
+      try { await navigator.clipboard.writeText(text) } catch (_) { /* fallback handled elsewhere if you added it */ }
+      // quick visual feedback
+      const orig = this.el.textContent
+      this.el.textContent = "Copied"
+      this.el.disabled = true
+      setTimeout(() => { this.el.textContent = orig; this.el.disabled = false }, 900)
+    }
+    this.el.addEventListener("click", this.onClick)
+  },
+  destroyed() { this.el.removeEventListener("click", this.onClick) }
+}
+
+
 /* ───────────────────── CSS size vars for header/footer ──────────────────── */
 function makeSizer(varName, fallbackPx) {
   return {

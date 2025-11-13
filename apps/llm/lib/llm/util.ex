@@ -126,7 +126,8 @@ defmodule Llm.Util do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
     |> Enum.map(&split_fields/1)
-    |> Enum.filter(fn parts -> length(parts) >= 3 end) # accept 3–6 fields; salvage example if missing
+    # accept 3–6 fields; salvage example if missing
+    |> Enum.filter(fn parts -> length(parts) >= 3 end)
     |> Enum.map(fn parts ->
       [pos, lemma, gloss | rest] = parts
       example0 = rest |> Enum.at(0, "") |> String.trim()
@@ -209,7 +210,10 @@ defmodule Llm.Util do
   def validate_pos_payload(_other, _allowed), do: {:error, :bad_shape}
 
   @spec valid_entry?(map(), [String.t()]) :: boolean()
-  def valid_entry?(%{"pos" => pos, "lemma" => lemma, "short_gloss" => gloss, "example" => ex} = e, allowed)
+  def valid_entry?(
+        %{"pos" => pos, "lemma" => lemma, "short_gloss" => gloss, "example" => ex} = e,
+        allowed
+      )
       when is_binary(pos) and is_binary(lemma) and is_binary(gloss) and is_binary(ex) do
     syn_ok = Map.get(e, "synonyms", []) |> is_list()
     ant_ok = Map.get(e, "antonyms", []) |> is_list()
@@ -234,4 +238,3 @@ defmodule Llm.Util do
 
   def sanitize_syn_ant(_, _), do: []
 end
-

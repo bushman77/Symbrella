@@ -41,4 +41,3 @@ defmodule Brain.Bus do
     Phoenix.PubSub.broadcast_from(@pubsub, sender, topic, message)
   end
 end
-

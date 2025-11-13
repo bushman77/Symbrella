@@ -1,4 +1,3 @@
-# apps/brain/lib/brain/cell.ex
 defmodule Brain.Cell do
   @moduledoc """
   One cell process. Registers under Brain.Registry by its id.
@@ -26,8 +25,11 @@ defmodule Brain.Cell do
     determiner preposition conjunction numeral particle
   )
 
-  # Allows third segment to be alnum/underscore (index or tag like "fallback")
-  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/
+  # Full shape check with explicit POS in second segment.
+  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/u
+
+  # Basic preflight shape (up to 3 segments; allows spaces and unicode, but no pipes inside segments)
+  @basic_id_regex ~r/^[^|]+(\|[^|]+){1,2}$/u
 
   # ───────────────────────── Public ─────────────────────────
 
@@ -37,14 +39,41 @@ defmodule Brain.Cell do
   Accepts either a `%Db.BrainCell{}` row or a binary id. Validates the id to
   prevent placeholder/unknown cells (e.g. `|unk|`, `|seed|`) from entering the system.
   """
+  @spec start_link(Row.t() | binary()) :: GenServer.on_start()
   def start_link(arg) do
     id =
       arg
       |> extract_id()
       |> normalize_id()
-      |> validate_id!()
+
+    # Fast preflight: reject obviously bad shapes (including "/" unless tests allow it)
+    if bad_shape?(id) do
+      return_reject!(id, :bad_shape)
+    end
+
+    # Full semantic validation (POS, reserved segments, trailing pipes, etc.)
+    id = validate_id!(id)
 
     GenServer.start_link(__MODULE__, %{id: id, data: arg, activation: 0}, name: Brain.via(id))
+  end
+
+  @doc "True if an ID is acceptable for a Brain cell (\"norm or phrase|pos|suffix?\")."
+  @spec valid_id?(term) :: boolean()
+  def valid_id?(id) do
+    try do
+      id
+      |> to_string()
+      |> normalize_id()
+      |> then(fn s -> not bad_shape?(s) end)
+      |> case do
+        false -> false
+        true  ->
+          validate_id!(normalize_id(to_string(id)))
+          true
+      end
+    rescue
+      _ -> false
+    end
   end
 
   # ──────────────────────── GenServer ───────────────────────
@@ -82,18 +111,17 @@ defmodule Brain.Cell do
   defp normalize_id(id) do
     id
     |> String.trim()
-    |> String.replace(~r/\s+/, " ")
+    |> String.replace(~r/\s+/u, " ")
   end
 
   defp validate_id!(id) when is_binary(id) do
     segments = String.split(id, "|", trim: true)
 
-    # Basic shape
+    # Basic segment count: word|pos or word|pos|suffix
     case segments do
       [_, _pos] -> :ok
       [_, _pos, _suffix] -> :ok
-      _ ->
-        return_reject!(id, :bad_shape)
+      _ -> return_reject!(id, :bad_shape_segments)
     end
 
     # No 'unk' or 'seed' in any segment
@@ -107,7 +135,7 @@ defmodule Brain.Cell do
       return_reject!(id, {:unknown_pos, pos})
     end
 
-    # Regex guard (catches trailing pipes and oddities)
+    # Final regex guard (catches trailing pipes and oddities)
     unless Regex.match?(@id_regex, id) do
       return_reject!(id, :regex_mismatch)
     end
@@ -129,9 +157,12 @@ defmodule Brain.Cell do
   end
 
   defp coerce_number(x, _default) when is_integer(x) or is_float(x), do: x
+
   defp coerce_number(x, _default) when is_binary(x) do
     case Integer.parse(x) do
-      {n, ""} -> n
+      {n, ""} ->
+        n
+
       _ ->
         case Float.parse(x) do
           {f, ""} -> f
@@ -141,5 +172,27 @@ defmodule Brain.Cell do
   end
 
   defp coerce_number(_x, default), do: default
+
+  # Now *used* in start_link/1 as a quick preflight.
+  # - Allows unicode & spaces in segments
+  # - Forbids "/" unless :brain, :allow_test_ids is true (handy for unit tests)
+  defp bad_shape?(id) when is_binary(id) do
+    allow = Application.get_env(:brain, :allow_test_ids, false)
+
+    cond do
+      # Disallow "/" in production unless explicitly permitted for tests
+      String.contains?(id, "/") and not allow ->
+        true
+
+      # Must look like "seg|seg" or "seg|seg|seg", no pipes inside segments
+      not Regex.match?(@basic_id_regex, id) ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  defp bad_shape?(_), do: true
 end
 

@@ -22,12 +22,13 @@ defmodule Brain.FPCBranchingTest do
   end
 
   test "low conflict + high value → small or zero budget" do
-    out = FPC.plan_branches(%{
-      acc_conflict: 0.1,
-      novelty: 0.1,
-      ofc_value: 0.9,
-      max_budget: 4
-    })
+    out =
+      FPC.plan_branches(%{
+        acc_conflict: 0.1,
+        novelty: 0.1,
+        ofc_value: 0.9,
+        max_budget: 4
+      })
 
     assert is_integer(out.branch_budget)
     assert out.branch_budget in 0..4
@@ -35,12 +36,18 @@ defmodule Brain.FPCBranchingTest do
 
   test "clamps to provided ranges and is deterministic" do
     ctx = %{
-      acc_conflict: 10.0,     # will be clamped to 1.0
-      novelty: -5.0,          # will be clamped to 0.0
-      ofc_value: 42.0,        # will be clamped to 1.0
-      max_budget: 7,          # will be clamped internally to 5 per module
-      min_switch_ms: -100,    # should clamp to >= 0
-      max_switch_ms: 20_000   # should clamp to <= 5000
+      # will be clamped to 1.0
+      acc_conflict: 10.0,
+      # will be clamped to 0.0
+      novelty: -5.0,
+      # will be clamped to 1.0
+      ofc_value: 42.0,
+      # will be clamped internally to 5 per module
+      max_budget: 7,
+      # should clamp to >= 0
+      min_switch_ms: -100,
+      # should clamp to <= 5000
+      max_switch_ms: 20_000
     }
 
     a = FPC.plan_branches(ctx)
@@ -51,4 +58,3 @@ defmodule Brain.FPCBranchingTest do
     assert a.switch_after_ms >= 0 and a.switch_after_ms <= 5_000
   end
 end
-

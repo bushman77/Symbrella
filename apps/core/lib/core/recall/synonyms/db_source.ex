@@ -22,7 +22,7 @@ defmodule Core.Recall.Synonyms.DbSource do
 
     case keys do
       [] -> %{}
-      _  -> grouped_via_db(keys)
+      _ -> grouped_via_db(keys)
     end
   end
 
@@ -33,11 +33,14 @@ defmodule Core.Recall.Synonyms.DbSource do
 
     cond do
       Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_by_norms_grouped, 1) ->
-        safe(fn ->
-          mod
-          |> apply(:fetch_by_norms_grouped, [keys])
-          |> normalize_grouped(keys)
-        end, %{})
+        safe(
+          fn ->
+            mod
+            |> apply(:fetch_by_norms_grouped, [keys])
+            |> normalize_grouped(keys)
+          end,
+          %{}
+        )
 
       Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_by_norms, 1) ->
         rows = safe(fn -> apply(mod, :fetch_by_norms, [keys]) end, [])

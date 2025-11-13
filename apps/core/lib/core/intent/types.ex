@@ -41,4 +41,3 @@ defmodule Core.Intent.Types do
   def normalize("brain_introspect"), do: :brain_introspect
   def normalize(_), do: :none
 end
-

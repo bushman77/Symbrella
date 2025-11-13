@@ -21,7 +21,8 @@ defmodule Core.Lexicon.SeedingTest do
   end
 
   test "phrase without POS seeds phrase|fallback once" do
-    phrase = "glurble snarfblat"        # improbable head word; lookup likely returns no POS
+    # improbable head word; lookup likely returns no POS
+    phrase = "glurble snarfblat"
     :ok = Lexicon.ensure_cells_from_tokens([%{phrase: phrase}])
 
     rows = Db.Lexicon.fetch_by_norms([phrase])
@@ -37,4 +38,3 @@ defmodule Core.Lexicon.SeedingTest do
            end)
   end
 end
-

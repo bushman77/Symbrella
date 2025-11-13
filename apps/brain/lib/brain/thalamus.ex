@@ -33,9 +33,9 @@ defmodule Brain.Thalamus do
   use Brain, region: :thalamus
   require Logger
 
-  @cur_handler_prefix  "brain-thalamus-curiosity-"
-  @ofc_handler_prefix  "brain-thalamus-ofc-"
-  @acc_handler_prefix  "brain-thalamus-acc-"
+  @cur_handler_prefix "brain-thalamus-curiosity-"
+  @ofc_handler_prefix "brain-thalamus-ofc-"
+  @acc_handler_prefix "brain-thalamus-acc-"
   @mood_handler_prefix "brain-thalamus-mood-"
 
   @ofc_cache_max 64
@@ -50,11 +50,6 @@ defmodule Brain.Thalamus do
     * :acc_alpha        — 0.0..1.0
     * :mood_weights     — %{expl: float, inhib: float, vigil: float, plast: float}
     * :mood_cap         — 0.0..1.0 (max multiplicative influence per decision)
-
-  Example:
-      :ok = Brain.Thalamus.set_params(ofc_weight: 0.8, acc_alpha: 0.2,
-                                      mood_weights: %{expl: 0.06, inhib: -0.08, vigil: -0.03, plast: 0.04},
-                                      mood_cap: 0.15)
   """
   @spec set_params(server :: pid() | atom(), opts :: Keyword.t() | map()) :: :ok
   def set_params(server \\ __MODULE__, opts) when is_list(opts) or is_map(opts) do
@@ -62,19 +57,42 @@ defmodule Brain.Thalamus do
   end
 
   @doc """
-  Read the *effective* current parameters (after defaults + clamping).
-  Returns a map like:
-    %{
-      ofc_weight: float(),
-      acc_alpha: float(),
-      mood_weights: %{expl: float, inhib: float, vigil: float, plast: float},
-      mood_cap: float()
-    }
+  Read the *effective* current parameters.
+
+  If the Thalamus server is running, returns the live values. If not, returns
+  **config defaults** so tests/tools can call this safely.
   """
-  @spec get_params(server :: pid() | atom()) :: map()
-  def get_params(server \\ __MODULE__) do
-    GenServer.call(server, :get_params)
+@spec get_params(server :: pid() | atom()) :: %{
+        ofc_weight: float(),
+        acc_alpha: float(),
+        mood_weights: %{expl: float(), inhib: float(), vigil: float(), plast: float()},
+        mood_cap: float()
+      }
+def get_params(server \\ __MODULE__)
+def get_params(server) when is_pid(server) do
+  if Process.alive?(server),
+    do: safe_get_params(server),
+    else: config_defaults()
+end
+
+def get_params(server) when is_atom(server) do
+  case Process.whereis(server) do
+    pid when is_pid(pid) -> safe_get_params(server)
+    _ -> config_defaults()
   end
+end
+
+def get_params(_), do: config_defaults()
+
+defp safe_get_params(server) do
+  try do
+    GenServer.call(server, :get_params)
+  rescue
+    _ -> config_defaults()
+  catch
+    _, _ -> config_defaults()
+  end
+end
 
   @doc """
   Return a compact status snapshot for UI/diagnostics.
@@ -94,40 +112,62 @@ defmodule Brain.Thalamus do
       region: :thalamus,
       opts: opts_kw,
       stats: %{},
-      ofc_cache: %{},   # probe_id(string) => value(float 0..1)
-      ofc_order: [],    # recency list to bound the cache
+      # probe_id(string) => value(float 0..1)
+      ofc_cache: %{},
+      # recency list to bound the cache
+      ofc_order: [],
       acc_conflict: nil,
       acc_last_ms: nil,
-      mood: nil,        # %{exploration:, inhibition:, vigilance:, plasticity:}
+      # %{exploration:, inhibition:, vigilance:, plasticity:}
+      mood: nil,
       mood_last_ms: nil
     }
 
-    cur_id  = unique(@cur_handler_prefix)
-    ofc_id  = unique(@ofc_handler_prefix)
-    acc_id  = unique(@acc_handler_prefix)
+    cur_id = unique(@cur_handler_prefix)
+    ofc_id = unique(@ofc_handler_prefix)
+    acc_id = unique(@acc_handler_prefix)
     mood_id = unique(@mood_handler_prefix)
 
-    :ok = :telemetry.attach(cur_id,  [:curiosity, :proposal],   &__MODULE__.on_curiosity/4,   %{pid: self()})
-    :ok = :telemetry.attach(ofc_id,  [:brain, :ofc, :value],    &__MODULE__.on_ofc_value/4,   %{pid: self()})
-    :ok = :telemetry.attach(acc_id,  [:brain, :acc, :conflict], &__MODULE__.on_acc_conflict/4, %{pid: self()})
-    :ok = :telemetry.attach(mood_id, [:brain, :mood, :update],  &__MODULE__.on_mood_update/4, %{pid: self()})
+    :ok =
+      :telemetry.attach(cur_id, [:curiosity, :proposal], &__MODULE__.on_curiosity/4, %{
+        pid: self()
+      })
+
+    :ok =
+      :telemetry.attach(ofc_id, [:brain, :ofc, :value], &__MODULE__.on_ofc_value/4, %{pid: self()})
+
+    :ok =
+      :telemetry.attach(acc_id, [:brain, :acc, :conflict], &__MODULE__.on_acc_conflict/4, %{
+        pid: self()
+      })
+
+    :ok =
+      :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{
+        pid: self()
+      })
 
     {:ok,
-      state
-      |> Map.put(:cur_handler, cur_id)
-      |> Map.put(:ofc_handler, ofc_id)
-      |> Map.put(:acc_handler, acc_id)
-      |> Map.put(:mood_handler, mood_id)}
+     state
+     |> Map.put(:cur_handler, cur_id)
+     |> Map.put(:ofc_handler, ofc_id)
+     |> Map.put(:acc_handler, acc_id)
+     |> Map.put(:mood_handler, mood_id)}
   end
 
   @impl GenServer
-  def terminate(_reason, %{cur_handler: cur, ofc_handler: ofc, acc_handler: acc, mood_handler: mood}) do
-    if is_binary(cur),  do: :telemetry.detach(cur)
-    if is_binary(ofc),  do: :telemetry.detach(ofc)
-    if is_binary(acc),  do: :telemetry.detach(acc)
+  def terminate(_reason, %{
+        cur_handler: cur,
+        ofc_handler: ofc,
+        acc_handler: acc,
+        mood_handler: mood
+      }) do
+    if is_binary(cur), do: :telemetry.detach(cur)
+    if is_binary(ofc), do: :telemetry.detach(ofc)
+    if is_binary(acc), do: :telemetry.detach(acc)
     if is_binary(mood), do: :telemetry.detach(mood)
     :ok
   end
+
   def terminate(_reason, _state), do: :ok
 
   # ── Telemetry → GenServer bridges ──────────────────────────────────────────
@@ -165,11 +205,12 @@ defmodule Brain.Thalamus do
   @impl GenServer
   def handle_call(:get_params, _from, state) do
     reply = %{
-      ofc_weight:    cfg_ofc_weight(state.opts),
-      acc_alpha:     cfg_acc_alpha(state.opts),
-      mood_weights:  cfg_mood_weights(state.opts),
-      mood_cap:      cfg_mood_cap(state.opts)
+      ofc_weight: cfg_ofc_weight(state.opts),
+      acc_alpha:  cfg_acc_alpha(state.opts),
+      mood_weights: cfg_mood_weights(state.opts),
+      mood_cap:     cfg_mood_cap(state.opts)
     }
+
     {:reply, reply, state}
   end
 
@@ -191,18 +232,22 @@ defmodule Brain.Thalamus do
   def handle_info({:mood_update, meas, _meta}, state) do
     mood = %{
       exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
-      inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
-      vigilance:   get_num(meas, :vigilance,   0.5) |> clamp01(),
-      plasticity:  get_num(meas, :plasticity,  0.5) |> clamp01()
+      inhibition:  get_num(meas, :inhibition, 0.5)  |> clamp01(),
+      vigilance:   get_num(meas, :vigilance, 0.5)   |> clamp01(),
+      plasticity:  get_num(meas, :plasticity, 0.5)  |> clamp01()
     }
+
     {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
   end
 
   @impl GenServer
   def handle_info({:ofc_value, meas, meta}, state) do
-    value    = get_num(meas, :value, 0.0) |> clamp01()
+    value = get_num(meas, :value, 0.0) |> clamp01()
     probe_id = meta_get(meta, :probe_id, "curiosity|probe|unknown") |> to_string()
-    {cache2, order2} = put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
+
+    {cache2, order2} =
+      put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
+
     {:noreply, %{state | ofc_cache: cache2, ofc_order: order2}}
   end
 
@@ -227,21 +272,20 @@ defmodule Brain.Thalamus do
 
     # 2) OFC blend (convex combination)
     ofc_val = Map.get(state.ofc_cache, probe_id)
-    w_ofc   = cfg_ofc_weight(state.opts)
+    w_ofc = cfg_ofc_weight(state.opts)
 
     {probe1, blended_score, blended?} =
       case ofc_val do
         v when is_number(v) ->
           b = clamp01((1.0 - w_ofc) * base_score + w_ofc * v)
           {Map.put(probe0, :score, b), b, true}
-
         _ ->
           {probe0, base_score, false}
       end
 
-    # 3) ACC brake (apply only if alpha > 0 and conflict > 0)
+    # 3) ACC brake
     alpha = cfg_acc_alpha(state.opts)
-    c     = state.acc_conflict
+    c = state.acc_conflict
 
     {probe2, post_acc_score, acc_applied?} =
       if is_number(c) and alpha > 0.0 and c > 0.0 do
@@ -252,16 +296,12 @@ defmodule Brain.Thalamus do
         {probe1, blended_score, false}
       end
 
-    # 4) Mood bias (bounded multiplicative factor around 1.0)
+    # 4) Mood bias
     {mood_factor, mood_applied?, mood_snapshot, mood_weights, mood_cap} =
       compute_mood_factor(state)
 
     final_score =
-      if mood_applied? do
-        clamp01(post_acc_score * mood_factor)
-      else
-        post_acc_score
-      end
+      if mood_applied?, do: clamp01(post_acc_score * mood_factor), else: post_acc_score
 
     probe = Map.put(probe2, :score, final_score)
 
@@ -274,20 +314,20 @@ defmodule Brain.Thalamus do
       [:brain, :thalamus, :curiosity, :decision],
       %{score: s},
       %{
-        decision:     decision,
-        source:       probe[:source] || probe["source"],
-        probe:        probe,
+        decision: decision,
+        source: probe[:source] || probe["source"],
+        probe: probe,
         ofc_blended?: blended?,
-        ofc_value:    ofc_val,
-        ofc_weight:   w_ofc,
+        ofc_value: ofc_val,
+        ofc_weight: w_ofc,
         acc_applied?: acc_applied?,
         acc_conflict: state.acc_conflict,
-        acc_alpha:    alpha,
+        acc_alpha: alpha,
         mood_applied?: mood_applied?,
-        mood_factor:   mood_factor,
+        mood_factor: mood_factor,
         mood_snapshot: mood_snapshot,
-        mood_weights:  mood_weights,
-        mood_cap:      mood_cap,
+        mood_weights: mood_weights,
+        mood_cap: mood_cap,
         v: 3
       }
     )
@@ -305,29 +345,23 @@ defmodule Brain.Thalamus do
   end
 
   defp compute_mood_factor(%{mood: mood, opts: opts}) do
-    # Deviation from neutral 0.5 (centered in [-0.5, +0.5])
     dx = %{
-      expl:  (Map.get(mood, :exploration, 0.5) - 0.5),
-      inhib: (Map.get(mood, :inhibition,  0.5) - 0.5),
-      vigil: (Map.get(mood, :vigilance,   0.5) - 0.5),
-      plast: (Map.get(mood, :plasticity,  0.5) - 0.5)
+      expl: Map.get(mood, :exploration, 0.5) - 0.5,
+      inhib: Map.get(mood, :inhibition, 0.5) - 0.5,
+      vigil: Map.get(mood, :vigilance, 0.5) - 0.5,
+      plast: Map.get(mood, :plasticity, 0.5) - 0.5
     }
 
     w = cfg_mood_weights(opts)
     cap = cfg_mood_cap(opts)
 
-    # Signed weighted sum (small magnitudes). Positive increases score (loosens gate).
     raw =
-      dx.expl  * (w.expl  || 0.0) +
-      dx.inhib * (w.inhib || 0.0) +
-      dx.vigil * (w.vigil || 0.0) +
-      dx.plast * (w.plast || 0.0)
+      dx.expl * (w.expl || 0.0) +
+        dx.inhib * (w.inhib || 0.0) +
+        dx.vigil * (w.vigil || 0.0) +
+        dx.plast * (w.plast || 0.0)
 
-    # Bound the influence: factor in [1 - cap, 1 + cap]
-    factor =
-      raw
-      |> (fn r -> 1.0 + max(-cap, min(cap, r)) end).()
-
+    factor = 1.0 + max(-cap, min(cap, raw))
     {factor, true, mood, w, cap}
   end
 
@@ -342,13 +376,13 @@ defmodule Brain.Thalamus do
       ofc_order_len: state |> Map.get(:ofc_order, []) |> length(),
       last_ms: %{
         mood: Map.get(state, :mood_last_ms),
-        acc:  Map.get(state, :acc_last_ms)
+        acc: Map.get(state, :acc_last_ms)
       },
       handlers: %{
         mood: Map.get(state, :mood_handler),
-        acc:  Map.get(state, :acc_handler),
-        cur:  Map.get(state, :cur_handler),
-        ofc:  Map.get(state, :ofc_handler)
+        acc: Map.get(state, :acc_handler),
+        cur: Map.get(state, :cur_handler),
+        ofc: Map.get(state, :ofc_handler)
       },
       stats: Map.get(state, :stats, %{})
     }
@@ -378,20 +412,20 @@ defmodule Brain.Thalamus do
   defp get_num(map, key, default) do
     case {Map.get(map, key), Map.get(map, to_string(key))} do
       {v, _} when is_integer(v) -> v * 1.0
-      {v, _} when is_float(v)   -> v
+      {v, _} when is_float(v) -> v
       {_, v} when is_integer(v) -> v * 1.0
-      {_, v} when is_float(v)   -> v
-      _                         -> default * 1.0
+      {_, v} when is_float(v) -> v
+      _ -> default * 1.0
     end
   end
 
-defp meta_get(meta, key, default) do
-  case {Map.get(meta, key), Map.get(meta, to_string(key))} do
-    {nil, nil} -> default
-    {v, _} when not is_nil(v) -> v
-    {_, v} when not is_nil(v) -> v
+  defp meta_get(meta, key, default) do
+    case {Map.get(meta, key), Map.get(meta, to_string(key))} do
+      {nil, nil} -> default
+      {v, _} when not is_nil(v) -> v
+      {_, v} when not is_nil(v) -> v
+    end
   end
-end
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp clamp01(_), do: 0.0
@@ -412,19 +446,25 @@ end
     cap =
       get_opt(opts, :mood_cap, Application.get_env(:brain, :thalamus_mood_cap, 0.15))
 
-    cap
-    |> case do
+    case cap do
       v when is_number(v) -> max(0.0, min(1.0, v))
       _ -> 0.15
     end
   end
 
   defp cfg_mood_weights(opts) do
-    default = Application.get_env(:brain, :thalamus_mood_weights, %{expl: 0.05, inhib: -0.07, vigil: -0.03, plast: 0.04})
+    default =
+      Application.get_env(:brain, :thalamus_mood_weights, %{
+        expl: 0.05,
+        inhib: -0.07,
+        vigil: -0.03,
+        plast: 0.04
+      })
+
     val = get_opt(opts, :mood_weights, default)
 
     %{
-      expl:  to_small(val[:expl]  || val["expl"]  || 0.05),
+      expl: to_small(val[:expl] || val["expl"] || 0.05),
       inhib: to_small(val[:inhib] || val["inhib"] || -0.07),
       vigil: to_small(val[:vigil] || val["vigil"] || -0.03),
       plast: to_small(val[:plast] || val["plast"] || 0.04)
@@ -436,8 +476,8 @@ end
 
   # Accepts keyword or map; normalize_opts ensures keyword in state
   defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
-  defp get_opt(%{} = opts, key, default),           do: Map.get(opts, key, default)
-  defp get_opt(_opts, _key, default),               do: default
+  defp get_opt(%{} = opts, key, default), do: Map.get(opts, key, default)
+  defp get_opt(_opts, _key, default), do: default
 
   defp to_float_01(x) when is_number(x), do: clamp01(x * 1.0)
   defp to_float_01(_), do: 0.0
@@ -446,7 +486,18 @@ end
   defp normalize_opts(opts) when is_list(opts) do
     if Keyword.keyword?(opts), do: opts, else: []
   end
+
   defp normalize_opts(%{} = opts), do: Map.to_list(opts)
   defp normalize_opts(_), do: []
+
+  # Fallback config for get_params/1 when server isn't running
+  defp config_defaults do
+    %{
+      ofc_weight: cfg_ofc_weight([]),
+      acc_alpha:  cfg_acc_alpha([]),
+      mood_weights: cfg_mood_weights([]),
+      mood_cap:     cfg_mood_cap([])
+    }
+  end
 end
 

@@ -5,7 +5,7 @@ defmodule Brain.ThalamusSupervision_Test do
 
   test "Thalamus is a running singleton under the umbrella" do
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -22,4 +22,3 @@ defmodule Brain.ThalamusSupervision_Test do
     assert %{ofc_weight: _, acc_alpha: _} = Brain.Thalamus.get_params()
   end
 end
-

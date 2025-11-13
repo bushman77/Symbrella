@@ -41,4 +41,3 @@ defmodule SymbrellaWeb.Router do
     end
   end
 end
-

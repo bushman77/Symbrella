@@ -22,7 +22,7 @@ defmodule SymbrellaWeb.HUD.Telemetry do
     [:brain, :hippo, :recall],
     [:brain, :hippo, :write],
     [:brain, :hippo, :jaccard_filter],
-    [:core,  :recall, :synonyms, :lookup]
+    [:core, :recall, :synonyms, :lookup]
   ]
 
   @doc "Ensure ETS exists and telemetry is attached exactly once."
@@ -31,8 +31,10 @@ defmodule SymbrellaWeb.HUD.Telemetry do
     ensure_table()
 
     case :persistent_term.get(@attached_key, :no) do
-      :yes -> :ok
-      :no  ->
+      :yes ->
+        :ok
+
+      :no ->
         # Try to attach; tolerate already_exists if some other process beat us
         _ = Telemetry.attach_many(@handler_id, @events, &__MODULE__.handle/4, %{})
         :persistent_term.put(@attached_key, :yes)
@@ -80,19 +82,18 @@ defmodule SymbrellaWeb.HUD.Telemetry do
           tokens_last: get_any(:hippo_write_tokens_last)
         },
         jaccard: %{
-          kept_sum:  get_int(:hippo_jaccard_kept_sum),
+          kept_sum: get_int(:hippo_jaccard_kept_sum),
           total_sum: get_int(:hippo_jaccard_total_sum),
-          min_last:  get_any(:hippo_jaccard_min_last)
+          min_last: get_any(:hippo_jaccard_min_last)
         }
       },
       synonyms: %{
         lookups: %{
-          count:       get_int(:syn_lookup_count),
+          count: get_int(:syn_lookup_count),
           cached_hits: get_int(:syn_lookup_cached_hits),
           took_ms_sum: get_int(:syn_lookup_took_ms_sum)
         },
-        avg_lookup_ms:
-          avg(get_int(:syn_lookup_took_ms_sum), get_int(:syn_lookup_count))
+        avg_lookup_ms: avg(get_int(:syn_lookup_took_ms_sum), get_int(:syn_lookup_count))
       }
     }
   end
@@ -118,15 +119,15 @@ defmodule SymbrellaWeb.HUD.Telemetry do
   end
 
   def handle([:brain, :hippo, :jaccard_filter], meas, meta, _cfg) do
-    inc(:hippo_jaccard_kept_sum,  meas[:kept]  || 0)
+    inc(:hippo_jaccard_kept_sum, meas[:kept] || 0)
     inc(:hippo_jaccard_total_sum, meas[:total] || 0)
-    put(:hippo_jaccard_min_last,  to_float(Map.get(meta, :min)))
+    put(:hippo_jaccard_min_last, to_float(Map.get(meta, :min)))
     :ok
   end
 
   def handle([:core, :recall, :synonyms, :lookup], meas, meta, _cfg) do
-    inc(:syn_lookup_count,       meas[:count] || 0)
-    inc(:syn_lookup_cached_hits, Map.get(meta, :cached?) == true && 1 || 0)
+    inc(:syn_lookup_count, meas[:count] || 0)
+    inc(:syn_lookup_cached_hits, (Map.get(meta, :cached?) == true && 1) || 0)
     inc(:syn_lookup_took_ms_sum, Map.get(meta, :took_ms) || 0)
     :ok
   end
@@ -138,9 +139,16 @@ defmodule SymbrellaWeb.HUD.Telemetry do
   defp ensure_table do
     case :ets.whereis(@table) do
       :undefined ->
-        :ets.new(@table, [:named_table, :public, :set,
-                          read_concurrency: true, write_concurrency: true])
-      _tid -> :ok
+        :ets.new(@table, [
+          :named_table,
+          :public,
+          :set,
+          read_concurrency: true,
+          write_concurrency: true
+        ])
+
+      _tid ->
+        :ok
     end
   end
 
@@ -176,4 +184,3 @@ defmodule SymbrellaWeb.HUD.Telemetry do
   defp avg(_sum, 0), do: 0.0
   defp avg(sum, n) when is_integer(sum) and is_integer(n), do: sum / n
 end
-

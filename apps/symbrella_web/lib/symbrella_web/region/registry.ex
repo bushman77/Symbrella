@@ -1,4 +1,3 @@
-
 defmodule SymbrellaWeb.Region.Registry do
   @moduledoc false
 
@@ -36,8 +35,8 @@ defmodule SymbrellaWeb.Region.Registry do
   end
 
   def keys, do: Map.keys(by_key_map())
-  def available?(key),  do: Map.has_key?(by_key_map(), key)
-  def module_for(key),  do: Map.get(by_key_map(), key)
+  def available?(key), do: Map.has_key?(by_key_map(), key)
+  def module_for(key), do: Map.get(by_key_map(), key)
 
   # Safe definition fetch (with sensible defaults if a module is missing).
   # If a region module implements defn/0 we use it directly; otherwise we
@@ -46,27 +45,27 @@ defmodule SymbrellaWeb.Region.Registry do
     case module_for(key) do
       nil ->
         %{
-          path:   "",
+          path: "",
           colors: {"#94A3B8", "#64748B"},
           anchor: {0, 0},
-          tweak:  %{dx: 0, dy: 0, s: 1.0}
+          tweak: %{dx: 0, dy: 0, s: 1.0}
         }
 
       mod ->
         if function_exported?(mod, :defn, 0) do
           safe_apply(mod, :defn, []) ||
             %{
-              path:   "",
+              path: "",
               colors: {"#94A3B8", "#64748B"},
               anchor: {0, 0},
-              tweak:  %{dx: 0, dy: 0, s: 1.0}
+              tweak: %{dx: 0, dy: 0, s: 1.0}
             }
         else
           %{
-            path:   safe_apply(mod, :path,   "")   || "",
+            path: safe_apply(mod, :path, "") || "",
             colors: safe_apply(mod, :colors, {"#94A3B8", "#64748B"}) || {"#94A3B8", "#64748B"},
             anchor: safe_apply(mod, :anchor, {0, 0}) || {0, 0},
-            tweak:  safe_apply(mod, :tweak,  %{dx: 0, dy: 0, s: 1.0}) || %{dx: 0, dy: 0, s: 1.0}
+            tweak: safe_apply(mod, :tweak, %{dx: 0, dy: 0, s: 1.0}) || %{dx: 0, dy: 0, s: 1.0}
           }
         end
     end
@@ -106,26 +105,26 @@ defmodule SymbrellaWeb.Region.Registry do
   end
 
   @brain_process_map %{
-    lifg:          Brain.LIFG,
-    pmtg:          Brain.PMTG,
-    atl:           Brain.ATL,
-    acc:           Brain.ACC,
-    ofc:           Brain.OFC,
-    dlpfc:         Brain.DLPFC,
-    vmpfc:         Brain.VMPFC,
-    dmpfc:         Brain.DMPFC,
-    fpc:           Brain.FPC,
-    bg:            Brain.BasalGanglia,
+    lifg: Brain.LIFG,
+    pmtg: Brain.PMTG,
+    atl: Brain.ATL,
+    acc: Brain.ACC,
+    ofc: Brain.OFC,
+    dlpfc: Brain.DLPFC,
+    vmpfc: Brain.VMPFC,
+    dmpfc: Brain.DMPFC,
+    fpc: Brain.FPC,
+    bg: Brain.BasalGanglia,
     basal_ganglia: Brain.BasalGanglia,
-    hippocampus:   Brain.Hippocampus,
-    cerebellum:    Brain.Cerebellum,
-    thalamus:      Brain.Thalamus,
-    occipital:     Brain.Occipital,
-    parietal:      Brain.Parietal,
-    frontal:       Brain.Frontal,
-    prefrontal:    Brain.Prefrontal,
-    temporal:      Brain.Temporal,
-    salience:      Brain.Salience
+    hippocampus: Brain.Hippocampus,
+    cerebellum: Brain.Cerebellum,
+    thalamus: Brain.Thalamus,
+    occipital: Brain.Occipital,
+    parietal: Brain.Parietal,
+    frontal: Brain.Frontal,
+    prefrontal: Brain.Prefrontal,
+    temporal: Brain.Temporal,
+    salience: Brain.Salience
   }
 
   @doc """
@@ -142,7 +141,8 @@ defmodule SymbrellaWeb.Region.Registry do
       try do
         String.to_existing_atom(key)
       rescue
-        ArgumentError -> String.to_atom(key) # bounded by our own keys
+        # bounded by our own keys
+        ArgumentError -> String.to_atom(key)
       end
 
     process_for(atom)
@@ -175,22 +175,19 @@ defmodule SymbrellaWeb.Region.Registry do
   defp region_module?(mod) when is_atom(mod) do
     loaded? =
       try do
-        Code.ensure_loaded?(mod)  # strictly boolean; avoids {:error, :nofile}
+        # strictly boolean; avoids {:error, :nofile}
+        Code.ensure_loaded?(mod)
       rescue
         _ -> false
       end
 
     loaded? and
-      (
-        function_exported?(mod, :defn, 0) or
-        (
-          function_exported?(mod, :key, 0)     and
-          function_exported?(mod, :path, 0)    and
-          function_exported?(mod, :colors, 0)  and
-          function_exported?(mod, :anchor, 0)  and
-          function_exported?(mod, :tweak, 0)
-        )
-      )
+      (function_exported?(mod, :defn, 0) or
+         (function_exported?(mod, :key, 0) and
+            function_exported?(mod, :path, 0) and
+            function_exported?(mod, :colors, 0) and
+            function_exported?(mod, :anchor, 0) and
+            function_exported?(mod, :tweak, 0)))
   end
 
   defp region_module?(_), do: false
@@ -213,4 +210,3 @@ defmodule SymbrellaWeb.Region.Registry do
     end
   end
 end
-

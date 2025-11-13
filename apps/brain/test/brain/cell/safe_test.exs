@@ -13,6 +13,7 @@ defmodule Brain.Cell.SafeTest do
 
     @impl true
     def handle_call({:echo, v}, _from, s), do: {:reply, v, s}
+
     def handle_call(:sleep_250, _from, s) do
       Process.sleep(250)
       {:reply, :ok, s}
@@ -55,4 +56,3 @@ defmodule Brain.Cell.SafeTest do
     assert {:error, :noproc} = Safe.call(dead, {:echo, 1}, timeout: 10, retry?: true, retries: 1)
   end
 end
-

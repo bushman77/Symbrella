@@ -1,4 +1,9 @@
+# test/test_helper.exs
 ExUnit.start()
+
+# Start a single shared Sandbox owner for the whole test run.
+# (Do NOT call Sandbox.mode/2 when using the owner API.)
+_ = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
 
 :telemetry.attach_many(
   "lifg-test-hooks",

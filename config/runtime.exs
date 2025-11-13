@@ -105,7 +105,8 @@ if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mo
 
 # NEW: defaults for DB/Hybrid episodic recall
 config :brain, :hippo_db_defaults,
-  recall_source: hippo_recall_source,      # :memory | :db | :hybrid
+  # :memory | :db | :hybrid
+  recall_source: hippo_recall_source,
   recall_k: hippo_recall_k,
   recall_min_sim: hippo_recall_min_sim,
   recall_half_life_s: hippo_recall_half_life_s
@@ -168,9 +169,11 @@ if config_env() == :prod do
 end
 
 config :llm, Llm,
-  auto_start_on_boot?: true,   # keep daemon up
-  pull_on_boot?: true,         # optional: prefetch model
-  warm_on_boot?: false,        # <- critical: DO NOT warm on boot
+  # keep daemon up
+  auto_start_on_boot?: true,
+  # optional: prefetch model
+  pull_on_boot?: true,
+  # <- critical: DO NOT warm on boot
+  warm_on_boot?: false,
   warm_on_restart?: false,
   pull_on_restart?: false
-

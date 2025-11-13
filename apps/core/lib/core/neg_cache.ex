@@ -57,7 +57,11 @@ defmodule Core.NegCache do
     do: GenServer.call(__MODULE__, {:pop_expired_batch, limit})
 
   @doc "NEW: Return a small stats snapshot."
-  @spec stats() :: %{dets_size: non_neg_integer(), ets_size: non_neg_integer(), ttl_ms: non_neg_integer()}
+  @spec stats() :: %{
+          dets_size: non_neg_integer(),
+          ets_size: non_neg_integer(),
+          ttl_ms: non_neg_integer()
+        }
   def stats, do: GenServer.call(__MODULE__, :stats)
 
   # ——— GenServer ———
@@ -154,7 +158,7 @@ defmodule Core.NegCache do
     expired_keys =
       case :dets.select(dets, ms, limit) do
         {keys, _cont} when is_list(keys) -> keys
-        :'$end_of_table' -> []
+        :"$end_of_table" -> []
       end
 
     # Remove from both stores so callers won't see them again unless reinserted.
@@ -211,4 +215,3 @@ defmodule Core.NegCache do
 
   defp now_ms, do: System.system_time(:millisecond)
 end
-

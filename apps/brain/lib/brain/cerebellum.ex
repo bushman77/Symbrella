@@ -20,7 +20,9 @@ defmodule Brain.Cerebellum do
       nil ->
         {:ok, _} = start_link([])
         :ok
-      _pid -> :ok
+
+      _pid ->
+        :ok
     end
   end
 
@@ -34,12 +36,14 @@ defmodule Brain.Cerebellum do
   @impl true
   def handle_call(:status, _from, state) do
     st = Store.stats()
+
     reply = %{
       region: :cerebellum,
       pid: self(),
       store_pid: Process.whereis(Store),
       store: st
     }
+
     {:reply, reply, state}
   end
 
@@ -63,7 +67,8 @@ defmodule Brain.Cerebellum do
     - :base_scores (for telemetry margin reporting)
   """
   def predict_lifg(_si, candidates, opts \\ []) when is_list(candidates) do
-    w = Store.get_weights(opts[:scope] || "lifg_stage1", opts[:context_key] || context_key(:global))
+    w =
+      Store.get_weights(opts[:scope] || "lifg_stage1", opts[:context_key] || context_key(:global))
 
     deltas =
       for c <- candidates, into: %{} do
@@ -74,8 +79,14 @@ defmodule Brain.Cerebellum do
       %{} = base ->
         m0 = rank_margin(base, %{})
         m1 = rank_margin(base, deltas)
-        :telemetry.execute([:brain, :cerebellum, :lifg, :predict], %{margin0: m0, margin1: m1}, %{n: length(candidates), scope: opts[:scope] || "lifg_stage1"})
-      _ -> :ok
+
+        :telemetry.execute([:brain, :cerebellum, :lifg, :predict], %{margin0: m0, margin1: m1}, %{
+          n: length(candidates),
+          scope: opts[:scope] || "lifg_stage1"
+        })
+
+      _ ->
+        :ok
     end
 
     deltas
@@ -93,12 +104,12 @@ defmodule Brain.Cerebellum do
     - :acc_conflict_tau (default cfg)
   """
   def calibrate_scores(si, base_scores, candidates, opts \\ []) do
-    margin_tau       = opts[:margin_tau] || cfg(:margin_tau, 0.12)
-    acc_conflict     = opts[:acc_conflict]
+    margin_tau = opts[:margin_tau] || cfg(:margin_tau, 0.12)
+    acc_conflict = opts[:acc_conflict]
     acc_conflict_tau = opts[:acc_conflict_tau] || cfg(:acc_conflict_tau, 0.50)
 
     m0 = rank_margin(base_scores, %{})
-    need_by_margin?  = m0 < margin_tau
+    need_by_margin? = m0 < margin_tau
     need_by_conflict? = is_number(acc_conflict) and acc_conflict >= acc_conflict_tau
 
     if need_by_margin? or need_by_conflict? do
@@ -122,13 +133,16 @@ defmodule Brain.Cerebellum do
     - :margin_tau (default cfg)
   """
   def learn_lifg(_si, chosen_id, candidates, base_scores, opts \\ []) do
-    scope      = opts[:scope] || "lifg_stage1"
-    ctx        = opts[:context_key] || context_key(:global)
+    scope = opts[:scope] || "lifg_stage1"
+    ctx = opts[:context_key] || context_key(:global)
     margin_tau = opts[:margin_tau] || cfg(:margin_tau, 0.12)
-    lr         = opts[:lr] || cfg(:lr, 0.05)
+    lr = opts[:lr] || cfg(:lr, 0.05)
 
     deltas = predict_lifg(nil, candidates, scope: scope, context_key: ctx)
-    scorep = fn c -> Map.get(base_scores, candidate_id(c), 0.0) + Map.get(deltas, candidate_id(c), 0.0) end
+
+    scorep = fn c ->
+      Map.get(base_scores, candidate_id(c), 0.0) + Map.get(deltas, candidate_id(c), 0.0)
+    end
 
     chosen = Enum.find(candidates, &(candidate_id(&1) == chosen_id)) || hd(candidates)
     f_star = feat(chosen)
@@ -138,11 +152,12 @@ defmodule Brain.Cerebellum do
       candidates
       |> Enum.reject(&(candidate_id(&1) == chosen_id))
       |> Enum.reduce({zero_vec(), 0.0}, fn c, {acc, loss_acc} ->
-        s_j   = scorep.(c)
-        loss  = margin_tau - (s_star - s_j)
+        s_j = scorep.(c)
+        loss = margin_tau - (s_star - s_j)
+
         if loss > 0.0 do
-          f_j  = feat(c)
-          g    = vec_scale(vec_sub(f_star, f_j), lr * loss)
+          f_j = feat(c)
+          g = vec_scale(vec_sub(f_star, f_j), lr * loss)
           {vec_add(acc, g), loss_acc + loss}
         else
           {acc, loss_acc}
@@ -151,7 +166,12 @@ defmodule Brain.Cerebellum do
 
     if not vec_zero?(grad) do
       Store.learn(scope, ctx, grad, loss_sum, feature_schema: cfg(:feature_schema, 1))
-      :telemetry.execute([:brain, :cerebellum, :lifg, :learn], %{update_norm: l2_norm(grad), loss: loss_sum}, %{scope: scope})
+
+      :telemetry.execute(
+        [:brain, :cerebellum, :lifg, :learn],
+        %{update_norm: l2_norm(grad), loss: loss_sum},
+        %{scope: scope}
+      )
     end
 
     :ok
@@ -165,7 +185,8 @@ defmodule Brain.Cerebellum do
 
   defp feat(c) do
     [
-      1.0, # bias
+      # bias
+      1.0,
       to_f(Map.get(c, :lex_fit, 0.0)),
       to_f(Map.get(c, :rel_prior, 0.0)),
       to_f(Map.get(c, :activation, 0.0)),
@@ -184,8 +205,8 @@ defmodule Brain.Cerebellum do
 
     case Enum.sort(totals, :desc) do
       [a, b | _] -> a - b
-      [_a]       -> 9.99
-      _          -> 0.0
+      [_a] -> 9.99
+      _ -> 0.0
     end
   end
 
@@ -201,4 +222,3 @@ defmodule Brain.Cerebellum do
   defp l2_norm(v), do: :math.sqrt(Enum.reduce(v, 0.0, fn x, acc -> acc + x * x end))
   defp vec_zero?(v), do: Enum.all?(v, &(&1 == 0.0))
 end
-

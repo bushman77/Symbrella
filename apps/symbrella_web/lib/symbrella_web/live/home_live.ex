@@ -233,8 +233,11 @@ defmodule SymbrellaWeb.HomeLive do
   # Defensive, in case Brain/Planner/Mood aren’t available yet.
   defp latest_intent_si_like() do
     case safe_call_latest_intent() do
-      %{intent: i, confidence: c} = m -> %{intent: i, confidence: c, keyword: Map.get(m, :keyword, "")}
-      _ -> %{intent: :unknown, confidence: 0.0}
+      %{intent: i, confidence: c} = m ->
+        %{intent: i, confidence: c, keyword: Map.get(m, :keyword, "")}
+
+      _ ->
+        %{intent: :unknown, confidence: 0.0}
     end
   end
 
@@ -256,30 +259,30 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-defp build_planned_reply(user_text) do
-  si =
-    Core.resolve_input(user_text,
-      mode: :prod,
-      enrich_lexicon?: true,
-      lexicon_stage?: true
-    )
+  defp build_planned_reply(user_text) do
+    si =
+      Core.resolve_input(user_text,
+        mode: :prod,
+        enrich_lexicon?: true,
+        lexicon_stage?: true
+      )
 
-  # BEFORE:
-  # si_like = latest_intent_si_like()
-  # AFTER (pass the raw text through to the planner):
-  si_like =
-    latest_intent_si_like()
-    |> Map.put(:text, user_text)
+    # BEFORE:
+    # si_like = latest_intent_si_like()
+    # AFTER (pass the raw text through to the planner):
+    si_like =
+      latest_intent_si_like()
+      |> Map.put(:text, user_text)
 
-  mood = safe_mood_snapshot()
+    mood = safe_mood_snapshot()
 
-  if Code.ensure_loaded?(Core.Response) and function_exported?(Core.Response, :plan, 2) do
-    {_tone, reply, _meta} = Response.plan(si_like, mood)
-    %{text: reply}
-  else
-    %{text: format_si_reply(si)}
+    if Code.ensure_loaded?(Core.Response) and function_exported?(Core.Response, :plan, 2) do
+      {_tone, reply, _meta} = Response.plan(si_like, mood)
+      %{text: reply}
+    else
+      %{text: format_si_reply(si)}
+    end
   end
-end
 
   # ---------- liveview ----------
   @impl true
@@ -406,4 +409,3 @@ end
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
 end
-

@@ -8,9 +8,19 @@ defmodule Brain.ThalamusSoak_Test do
     :ok
   end
 
+# test/brain/thalamus_soak_test.exs
+defp recv(acc) do
+  receive do
+    {:decision, _meas, meta} -> recv([meta[:probe][:id] | acc])
+  after
+    50 -> Enum.reverse(acc)
+  end
+end
+
+
   setup_all do
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -21,7 +31,9 @@ defmodule Brain.ThalamusSoak_Test do
 
         These tests assume the singleton is already started under the umbrella root.
         """)
-      _pid -> :ok
+
+      _pid ->
+        :ok
     end
 
     :ok
@@ -38,9 +50,13 @@ defmodule Brain.ThalamusSoak_Test do
 
   test "burst of proposals yields a matching number of decision events" do
     n = 200
+
     for i <- 1..n do
       pid = "probe|soak|#{i}"
-      :telemetry.execute([:curiosity, :proposal], %{score: rem(i, 10) / 10}, %{probe: %{id: pid, source: :soak}})
+
+      :telemetry.execute([:curiosity, :proposal], %{score: rem(i, 10) / 10}, %{
+        probe: %{id: pid, source: :soak}
+      })
     end
 
     # Collect all decisions (allow a little time)
@@ -58,4 +74,3 @@ defmodule Brain.ThalamusSoak_Test do
     assert MapSet.size(uniq) == n
   end
 end
-

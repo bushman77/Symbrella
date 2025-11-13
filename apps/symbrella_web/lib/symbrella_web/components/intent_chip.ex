@@ -8,8 +8,8 @@ defmodule SymbrellaWeb.Components.IntentChip do
 
   @levels %{
     high: "bg-emerald-50 border-emerald-300",
-    mid:  "bg-amber-50 border-amber-300",
-    low:  "bg-rose-50 border-rose-300"
+    mid: "bg-amber-50 border-amber-300",
+    low: "bg-rose-50 border-rose-300"
   }
 
   attr :intent, :atom, default: :none
@@ -28,19 +28,22 @@ defmodule SymbrellaWeb.Components.IntentChip do
     assigns = assign(assigns, :tone, Map.fetch!(@levels, level))
 
     ~H"""
-    <div class={["inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs", @tone, @class]}>
+    <div class={[
+      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs",
+      @tone,
+      @class
+    ]}>
       <span class="opacity-70">intent</span>
-      <code class="px-1 rounded bg-white border"><%= inspect(@intent) %></code>
+      <code class="px-1 rounded bg-white border">{inspect(@intent)}</code>
       <%= if @keyword do %>
         <span class="opacity-70">kw</span>
-        <code class="px-1 rounded bg-white border"><%= @keyword %></code>
+        <code class="px-1 rounded bg-white border">{@keyword}</code>
       <% end %>
       <span class="opacity-70">conf</span>
       <code class="px-1 rounded bg-white border">
-        <%= :erlang.float_to_binary(@confidence * 1.0, [:compact, decimals: 2]) %>
+        {:erlang.float_to_binary(@confidence * 1.0, [:compact, decimals: 2])}
       </code>
     </div>
     """
   end
 end
-

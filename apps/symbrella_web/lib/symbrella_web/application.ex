@@ -19,4 +19,3 @@ defmodule SymbrellaWeb.Application do
     :ok
   end
 end
-

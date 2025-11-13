@@ -13,4 +13,3 @@ defmodule Core.Recall.Synonyms.Source do
 
   @callback fetch_grouped([norm()]) :: %{optional(norm()) => [row()]}
 end
-

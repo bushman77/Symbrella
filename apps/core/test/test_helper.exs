@@ -97,4 +97,3 @@ if Code.ensure_loaded?(Db) do
   allow_names = [Brain.PMTG, Brain.Hippocampus]
   Core.TestSandboxHelper.start_allow_loop(Db, owner_pid, allow_names)
 end
-

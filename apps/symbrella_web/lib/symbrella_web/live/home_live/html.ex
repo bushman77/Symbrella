@@ -23,8 +23,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div class="text-xs opacity-70 hidden sm:block">LiveView</div>
         </div>
       </header>
-
-      <!-- MESSAGES -->
+      
+    <!-- MESSAGES -->
       <main
         id="messages"
         phx-hook="ScrollOnEvent"
@@ -45,7 +45,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
                     "max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2 bg-[var(--color-panel)] border border-slate-800/60 shadow"
                   end
                 }>
-                  <p class="whitespace-pre-wrap"><%= m.text %></p>
+                  <p class="whitespace-pre-wrap">{m.text}</p>
                 </div>
               </div>
             <% end %>
@@ -62,8 +62,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div id="bottom"></div>
         </div>
       </main>
-
-      <!-- COMPOSER -->
+      
+    <!-- COMPOSER -->
       <footer
         id="chat-composer"
         phx-hook="FooterSizer"
@@ -103,4 +103,3 @@ defmodule SymbrellaWeb.ChatLive.HTML do
     """
   end
 end
-

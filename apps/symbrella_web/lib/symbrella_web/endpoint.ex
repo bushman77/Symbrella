@@ -52,4 +52,3 @@ defmodule SymbrellaWeb.Endpoint do
   plug Plug.Session, @session_options
   plug SymbrellaWeb.Router
 end
-

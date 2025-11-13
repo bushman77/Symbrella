@@ -15,7 +15,7 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
       <div class="flex items-start justify-between gap-4">
         <div>
           <h2 class="text-xl font-semibold">{@data.title}</h2>
-          <div class="mt-1 text-xs opacity-70"><%= Map.get(@full_names, @selected, "—") %></div>
+          <div class="mt-1 text-xs opacity-70">{Map.get(@full_names, @selected, "—")}</div>
         </div>
         <span class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs">
           <span class="opacity-60">Selected:</span>
@@ -33,7 +33,7 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
               <li class="opacity-60">—</li>
             <% else %>
               <%= for m <- @data.modules do %>
-                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border"><%= inspect(m) %></code></li>
+                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border">{inspect(m)}</code></li>
               <% end %>
             <% end %>
           </ul>
@@ -46,7 +46,7 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
               <li class="opacity-60">—</li>
             <% else %>
               <%= for t <- @data.telemetry do %>
-                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border"><%= t %></code></li>
+                <li><code class="px-1 py-0.5 rounded bg-zinc-50 border">{t}</code></li>
               <% end %>
             <% end %>
           </ul>
@@ -61,7 +61,7 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
               <%= for {app, key, val} <- @data.config do %>
                 <li>
                   <code class="px-1 py-0.5 rounded bg-zinc-50 border">
-                    config :<%= app %>, <%= key %>, <%= inspect(val) %>
+                    config :{app}, {key}, {inspect(val)}
                   </code>
                 </li>
               <% end %>
@@ -91,11 +91,19 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
             <div class="text-sm">
               <h4 class="font-medium mb-1">Process</h4>
               <ul class="space-y-1">
-                <li><span class="opacity-60">module:</span> <code><%= inspect(@snapshot.module) %></code></li>
-                <li><span class="opacity-60">pid:</span> <code><%= inspect(@snapshot.pid) %></code></li>
+                <li>
+                  <span class="opacity-60">module:</span> <code>{inspect(@snapshot.module)}</code>
+                </li>
+                <li><span class="opacity-60">pid:</span> <code>{inspect(@snapshot.pid)}</code></li>
                 <%= if is_map(@snapshot.info) do %>
-                  <li><span class="opacity-60">queue:</span> <code><%= @snapshot.info[:message_queue_len] || 0 %></code></li>
-                  <li><span class="opacity-60">current:</span> <code><%= inspect(@snapshot.info[:current_function]) %></code></li>
+                  <li>
+                    <span class="opacity-60">queue:</span>
+                    <code>{@snapshot.info[:message_queue_len] || 0}</code>
+                  </li>
+                  <li>
+                    <span class="opacity-60">current:</span>
+                    <code>{inspect(@snapshot.info[:current_function])}</code>
+                  </li>
                 <% end %>
               </ul>
             </div>
@@ -117,4 +125,3 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
     """
   end
 end
-

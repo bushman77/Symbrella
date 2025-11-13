@@ -16,13 +16,14 @@ defmodule Core.Recall.Synonyms.Normalize do
   @spec pos(term()) :: pos()
   def pos(nil), do: nil
   def pos(p) when is_atom(p), do: p
+
   def pos(p) when is_binary(p) do
     p
     |> String.trim()
     |> String.downcase()
     |> case do
-      "n"   -> :noun
-      "v"   -> :verb
+      "n" -> :noun
+      "v" -> :verb
       "adj" -> :adjective
       "adv" -> :adverb
       "noun" -> :noun
@@ -33,4 +34,3 @@ defmodule Core.Recall.Synonyms.Normalize do
     end
   end
 end
-

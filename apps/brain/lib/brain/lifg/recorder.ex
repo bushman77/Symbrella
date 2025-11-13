@@ -125,8 +125,7 @@ defmodule Brain.LIFG.Recorder do
       chargram_violation:
         (is_map(audit) && Map.get(audit, :chargram_violation)) ||
           Safe.get(si, :chargram_violation, 0) || 0,
-      rejected_by_boundary:
-        (is_map(audit) && Map.get(audit, :rejected_by_boundary)) || []
+      rejected_by_boundary: (is_map(audit) && Map.get(audit, :rejected_by_boundary)) || []
     }
 
     %{
@@ -154,4 +153,3 @@ defmodule Brain.LIFG.Recorder do
     }
   end
 end
-

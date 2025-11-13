@@ -141,4 +141,3 @@ defmodule Brain.Prefrontal do
     end
   end
 end
-

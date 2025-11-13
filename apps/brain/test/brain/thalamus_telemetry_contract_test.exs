@@ -11,7 +11,7 @@ defmodule Brain.ThalamusTelemetryContract_Test do
 
   setup_all do
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -22,7 +22,9 @@ defmodule Brain.ThalamusTelemetryContract_Test do
 
         These tests assume the singleton is already started under the umbrella root.
         """)
-      _pid -> :ok
+
+      _pid ->
+        :ok
     end
 
     :ok
@@ -61,7 +63,17 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     assert meas[:score] >= 0.0 and meas[:score] <= 1.0
 
     # Metadata contract
-    for k <- [:decision, :probe, :ofc_blended?, :ofc_value, :ofc_weight, :acc_applied?, :acc_conflict, :acc_alpha, :v] do
+    for k <- [
+          :decision,
+          :probe,
+          :ofc_blended?,
+          :ofc_value,
+          :ofc_weight,
+          :acc_applied?,
+          :acc_conflict,
+          :acc_alpha,
+          :v
+        ] do
       assert Map.has_key?(meta, k), "missing meta key #{inspect(k)}"
     end
 
@@ -86,6 +98,7 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     :ok = Brain.Thalamus.set_params(ofc_weight: 0.9, acc_alpha: 0.0)
 
     probe_id = "probe|no_ofc"
+
     :telemetry.execute(
       [:curiosity, :proposal],
       %{score: 0.4},
@@ -120,4 +133,3 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     assert_in_delta 0.0, meta[:acc_conflict] || 0.0, 1.0e-6
   end
 end
-

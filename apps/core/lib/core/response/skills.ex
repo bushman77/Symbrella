@@ -20,7 +20,8 @@ defmodule Core.Response.Skills do
           required(:approve_token?) => boolean
         }
 
-  @spec pick(String.t(), features_like, decision_like) :: nil | %{id: atom, inline_text: String.t(), reason: String.t()}
+  @spec pick(String.t(), features_like, decision_like) ::
+          nil | %{id: atom, inline_text: String.t(), reason: String.t()}
   def pick(text, features, decision) do
     t = (text || "") |> String.downcase()
 
@@ -46,8 +47,8 @@ defmodule Core.Response.Skills do
   defp banana?(t) do
     String.contains?(t, "banana") and
       (Regex.match?(~r/\bhow\s+(do\s+i|to)\b.*banana/, t) or
-       Regex.match?(~r/\beat\b.*banana/, t) or
-       Regex.match?(~r/\bbanana\b/, t))
+         Regex.match?(~r/\beat\b.*banana/, t) or
+         Regex.match?(~r/\bbanana\b/, t))
   end
 
   defp banana_answer do
@@ -64,4 +65,3 @@ defmodule Core.Response.Skills do
     """
   end
 end
-

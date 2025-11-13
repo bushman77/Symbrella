@@ -24,8 +24,9 @@ defmodule Core.Curiosity do
   use GenServer
   require Logger
 
-  @default_interval_ms 300_000   # 5m
-  @default_batch_size  16
+  # 5m
+  @default_interval_ms 300_000
+  @default_batch_size 16
   @default_concurrency 2
 
   @type state :: %{
@@ -41,7 +42,13 @@ defmodule Core.Curiosity do
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
   def child_spec(opts),
-    do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :worker, restart: :permanent, shutdown: 5_000}
+    do: %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :permanent,
+      shutdown: 5_000
+    }
 
   @doc "Kick a cycle immediately."
   def probe_now(server \\ __MODULE__), do: GenServer.cast(server, :probe)
@@ -55,9 +62,9 @@ defmodule Core.Curiosity do
   def init(opts) do
     state = %{
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
-      batch_size:  Keyword.get(opts, :batch_size,  @default_batch_size),
+      batch_size: Keyword.get(opts, :batch_size, @default_batch_size),
       concurrency: Keyword.get(opts, :concurrency, @default_concurrency),
-      llm_model:   Keyword.get(opts, :llm_model,   nil)
+      llm_model: Keyword.get(opts, :llm_model, nil)
     }
 
     schedule_tick(state.interval_ms)
@@ -169,7 +176,7 @@ defmodule Core.Curiosity do
   defp maybe_upsert_lexicon(entries) do
     if Application.get_env(:core, :curiosity_allow_lexicon_writes, false) do
       core_lex = Module.concat([Core, Lexicon])
-      db_lex   = Module.concat([Db,   Lexicon])
+      db_lex = Module.concat([Db, Lexicon])
 
       cond do
         export?(core_lex, :upsert_fallbacks, 1) ->
@@ -198,7 +205,10 @@ defmodule Core.Curiosity do
         apply(mod, fun, args)
       rescue
         e ->
-          Logger.warning("Curiosity: #{inspect(mod)}.#{fun}/#{length(args)} failed: #{inspect(e)}")
+          Logger.warning(
+            "Curiosity: #{inspect(mod)}.#{fun}/#{length(args)} failed: #{inspect(e)}"
+          )
+
           :error
       catch
         _, _ -> :error
@@ -210,4 +220,3 @@ defmodule Core.Curiosity do
 
   defp schedule_tick(ms), do: Process.send_after(self(), :tick, ms)
 end
-

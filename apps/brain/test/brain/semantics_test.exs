@@ -25,4 +25,3 @@ defmodule Brain.SemanticsTest do
     end
   end
 end
-

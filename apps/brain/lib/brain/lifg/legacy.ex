@@ -26,9 +26,9 @@ defmodule Brain.LIFG.Legacy do
     {boosts_maps, inhibitions_maps} =
       Enum.reduce(choices, {[], []}, fn ch, {boos, inhs} ->
         token_index = Safe.get(ch, :token_index, 0)
-        chosen_id   = Safe.get(ch, :chosen_id, nil)
-        margin      = (Safe.get(ch, :margin, 0.0) || 0.0) * 1.0
-        scores      = Safe.get(ch, :scores, %{}) || %{}
+        chosen_id = Safe.get(ch, :chosen_id, nil)
+        margin = (Safe.get(ch, :margin, 0.0) || 0.0) * 1.0
+        scores = Safe.get(ch, :scores, %{}) || %{}
 
         top_s =
           if is_map(scores) and map_size(scores) > 0 do
@@ -79,4 +79,3 @@ defmodule Brain.LIFG.Legacy do
   defp to_pair({id, amt}), do: {to_string(id), (amt || 0.0) * 1.0}
   defp to_pair(_), do: nil
 end
-

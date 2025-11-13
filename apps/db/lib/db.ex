@@ -40,7 +40,7 @@ defmodule Db do
   def ltm(si, opts \\ [])
 
   def ltm(%{tokens: tokens} = _si, opts) when is_list(tokens) do
-    only_active?   = Keyword.get(opts, :only_active, true)
+    only_active? = Keyword.get(opts, :only_active, true)
     limit_per_norm = Keyword.get(opts, :limit_per_norm, :all)
 
     norms =
@@ -61,36 +61,39 @@ defmodule Db do
         end
 
       base_q =
-        from b in BrainCell,
+        from(b in BrainCell,
           where: ^where_dyn
+        )
 
       # Optional per-norm limiting via window function (row_number over partition)
       q =
         case limit_per_norm do
           :all ->
-            from b in base_q, select: b
+            from(b in base_q, select: b)
 
           n when is_integer(n) and n > 0 ->
             # 1) Select a map with the struct and the row_number window
             q1 =
-              from b in base_q,
+              from(b in base_q,
                 select: %{b: b, rn: over(row_number(), :norm_part)},
                 windows: [norm_part: [partition_by: b.norm, order_by: [desc: b.updated_at]]]
+              )
 
             # 2) Filter by rn in the outer query and select the original struct
-            from s in subquery(q1),
+            from(s in subquery(q1),
               where: s.rn <= ^n,
               select: s.b
+            )
 
           _ ->
-            from b in base_q, select: b
+            from(b in base_q, select: b)
         end
 
       rows = Db.all(q)
 
       existing = MapSet.new(for r <- rows, do: r.norm)
-      missing  = Enum.reject(norms, &MapSet.member?(existing, &1))
-      hits     = existing
+      missing = Enum.reject(norms, &MapSet.member?(existing, &1))
+      hits = existing
 
       {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
     end
@@ -154,4 +157,3 @@ defmodule Db do
 
   defp norm(_), do: ""
 end
-

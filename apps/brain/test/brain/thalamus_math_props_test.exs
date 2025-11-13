@@ -24,6 +24,7 @@ defmodule Brain.ThalamusMathProps_Test do
     receive do
       {:decision, _m, meta} ->
         id = meta[:probe][:id] || meta[:probe]["id"]
+
         if to_string(id) == probe_id do
           meta
         else
@@ -39,7 +40,7 @@ defmodule Brain.ThalamusMathProps_Test do
 
   setup_all do
     case Process.whereis(Brain) do
-      nil  -> start_supervised!(Brain)
+      nil -> start_supervised!(Brain)
       _pid -> :ok
     end
 
@@ -50,7 +51,9 @@ defmodule Brain.ThalamusMathProps_Test do
 
         These tests assume the singleton is already started under the umbrella root.
         """)
-      _pid -> :ok
+
+      _pid ->
+        :ok
     end
 
     :ok
@@ -71,14 +74,17 @@ defmodule Brain.ThalamusMathProps_Test do
 
     # Preflight: warm the OFC cache and assert blend at w=1.0
     :telemetry.execute([:brain, :ofc, :value], %{value: 1.0}, %{probe_id: probe_id})
-    _ = Brain.Thalamus.get_params() # flush mailbox to ensure OFC processed
+    # flush mailbox to ensure OFC processed
+    _ = Brain.Thalamus.get_params()
 
     :ok = Brain.Thalamus.set_params(ofc_weight: 1.0, acc_alpha: 0.0)
+
     :telemetry.execute(
       [:curiosity, :proposal],
       %{score: 0.0},
       %{probe: %{id: probe_id, source: :math}}
     )
+
     meta0 = recv_for_probe!(probe_id)
     assert meta0[:ofc_blended?] == true
     assert_in_delta 1.0, meta0[:probe][:score], 1.0e-6
@@ -86,7 +92,8 @@ defmodule Brain.ThalamusMathProps_Test do
     # Now test monotonicity across weights, refreshing OFC each iteration and flushing
     for w <- [0.0, 0.25, 0.5, 0.75, 1.0] do
       :telemetry.execute([:brain, :ofc, :value], %{value: 1.0}, %{probe_id: probe_id})
-      _ = Brain.Thalamus.get_params() # ensures OFC value processed before proposal
+      # ensures OFC value processed before proposal
+      _ = Brain.Thalamus.get_params()
       :ok = Brain.Thalamus.set_params(ofc_weight: w, acc_alpha: 0.0)
 
       :telemetry.execute(
@@ -111,8 +118,10 @@ defmodule Brain.ThalamusMathProps_Test do
     base = 0.9
 
     prev = 1.1
+
     for alpha <- [0.0, 0.25, 0.5, 0.75, 1.0] do
       :ok = Brain.Thalamus.set_params(ofc_weight: 0.0, acc_alpha: alpha)
+
       :telemetry.execute(
         [:curiosity, :proposal],
         %{score: base},
@@ -143,20 +152,22 @@ defmodule Brain.ThalamusMathProps_Test do
       %{score: 10.0},
       %{probe: %{id: probe_id, source: :clamp}}
     )
+
     assert_receive {:decision, _m1, meta1}, 500
     assert meta1[:probe][:score] <= 1.0 + 1.0e-9
     assert meta1[:probe][:score] >= 0.0 - 1.0e-9
 
     :telemetry.execute([:brain, :acc, :conflict], %{conflict: 1.0}, %{})
     :ok = Brain.Thalamus.set_params(ofc_weight: 0.0, acc_alpha: 1.0)
+
     :telemetry.execute(
       [:curiosity, :proposal],
       %{score: 0.01},
       %{probe: %{id: "probe|clamp|min", source: :clamp}}
     )
+
     assert_receive {:decision, _m2, meta2}, 500
     assert meta2[:probe][:score] >= 0.0 - 1.0e-9
     assert meta2[:probe][:score] <= 1.0 + 1.0e-9
   end
 end
-

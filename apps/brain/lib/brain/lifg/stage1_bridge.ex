@@ -36,7 +36,7 @@ defmodule Brain.LIFG.Stage1Bridge do
   def normalize_result(result) do
     case result do
       {:ok, %{si: si, choices: choices, audit: audit}}
-          when is_map(si) and is_list(choices) and is_map(audit) ->
+      when is_map(si) and is_list(choices) and is_map(audit) ->
         {:ok, si, choices, audit}
 
       {:ok, %{si: si, choices: choices}} when is_map(si) and is_list(choices) ->
@@ -44,7 +44,7 @@ defmodule Brain.LIFG.Stage1Bridge do
 
       {:ok, si, meta} when is_map(si) and is_map(meta) ->
         choices = Map.get(meta, :choices, [])
-        audit   = Map.get(meta, :audit, %{})
+        audit = Map.get(meta, :audit, %{})
         {:ok, si, List.wrap(choices), audit}
 
       {:ok, si} when is_map(si) ->
@@ -55,4 +55,3 @@ defmodule Brain.LIFG.Stage1Bridge do
     end
   end
 end
-

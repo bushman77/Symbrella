@@ -76,9 +76,9 @@ defmodule Db.Episode do
 
   def insert(%{slate: slate} = attrs) when is_map(attrs) do
     # Adapt Hippocampus payload → episodes row
-    si        = build_si_from_slate(slate, Map.get(attrs, :meta, %{}))
-    tokens    = choose_tokens(attrs, si)
-    tags      = Map.get(attrs, :tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
+    si = build_si_from_slate(slate, Map.get(attrs, :meta, %{}))
+    tokens = choose_tokens(attrs, si)
+    tags = Map.get(attrs, :tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
     embedding = Map.get(attrs, :embedding)
 
     base =
@@ -95,7 +95,9 @@ defmodule Db.Episode do
   end
 
   def insert(other) do
-    {:error, change(%__MODULE__{}, %{}) |> add_error(:base, "unsupported episode payload: #{inspect(other)}")}
+    {:error,
+     change(%__MODULE__{}, %{})
+     |> add_error(:base, "unsupported episode payload: #{inspect(other)}")}
   end
 
   @doc """
@@ -121,17 +123,25 @@ defmodule Db.Episode do
     * `:since`       – minimum `inserted_at` (NaiveDateTime) (optional)
   """
   @spec knn([number()] | Pgvector.t(), keyword()) ::
-          [%{id: any(), si: map(), tags: [String.t()], inserted_at: NaiveDateTime.t(), distance: float()}]
+          [
+            %{
+              id: any(),
+              si: map(),
+              tags: [String.t()],
+              inserted_at: NaiveDateTime.t(),
+              distance: float()
+            }
+          ]
   def knn(embedding, opts \\ []) do
     with {:ok, emb} <- to_pgvector(embedding) do
-      k          = Keyword.get(opts, :k, 8)
-      user_id    = Keyword.get(opts, :user_id)
+      k = Keyword.get(opts, :k, 8)
+      user_id = Keyword.get(opts, :user_id)
       tokens_any = Keyword.get(opts, :tokens_any)
-      tags_any   = Keyword.get(opts, :tags_any)
-      since      = Keyword.get(opts, :since)
+      tags_any = Keyword.get(opts, :tags_any)
+      since = Keyword.get(opts, :since)
 
       base =
-        from e in __MODULE__,
+        from(e in __MODULE__,
           where: not is_nil(e.embedding),
           select: %{
             id: e.id,
@@ -142,13 +152,26 @@ defmodule Db.Episode do
           },
           order_by: fragment("? <-> ?", e.embedding, type(^emb, Pgvector.Ecto.Vector)),
           limit: ^k
+        )
 
       scoped =
         base
         |> then(fn q -> if user_id, do: from(e in q, where: e.user_id == ^user_id), else: q end)
-        |> then(fn q -> if is_list(tokens_any) and tokens_any != [], do: from(e in q, where: fragment("? && ?", e.tokens, ^tokens_any)), else: q end)
-        |> then(fn q -> if is_list(tags_any)    and tags_any    != [], do: from(e in q, where: fragment("? && ?", e.tags,   ^tags_any)), else: q end)
-        |> then(fn q -> if match?(%NaiveDateTime{}, since), do: from(e in q, where: e.inserted_at >= ^since), else: q end)
+        |> then(fn q ->
+          if is_list(tokens_any) and tokens_any != [],
+            do: from(e in q, where: fragment("? && ?", e.tokens, ^tokens_any)),
+            else: q
+        end)
+        |> then(fn q ->
+          if is_list(tags_any) and tags_any != [],
+            do: from(e in q, where: fragment("? && ?", e.tags, ^tags_any)),
+            else: q
+        end)
+        |> then(fn q ->
+          if match?(%NaiveDateTime{}, since),
+            do: from(e in q, where: e.inserted_at >= ^since),
+            else: q
+        end)
 
       Repo.all(scoped)
     else
@@ -206,7 +229,11 @@ defmodule Db.Episode do
             changeset
 
           list when is_list(list) ->
-            add_error(changeset, :embedding, "embedding length must be #{@embedding_dim} (got #{length(list)})")
+            add_error(
+              changeset,
+              :embedding,
+              "embedding length must be #{@embedding_dim} (got #{length(list)})"
+            )
 
           _ ->
             add_error(changeset, :embedding, "invalid pgvector value")
@@ -216,7 +243,11 @@ defmodule Db.Episode do
         if length(val) == @embedding_dim do
           changeset
         else
-          add_error(changeset, :embedding, "embedding length must be #{@embedding_dim} (got #{length(val)})")
+          add_error(
+            changeset,
+            :embedding,
+            "embedding length must be #{@embedding_dim} (got #{length(val)})"
+          )
         end
 
       true ->
@@ -237,7 +268,10 @@ defmodule Db.Episode do
 
   defp maybe_put_embedding(map, nil), do: map
   defp maybe_put_embedding(map, %Pgvector{} = v), do: Map.put(map, :embedding, v)
-  defp maybe_put_embedding(map, list) when is_list(list), do: Map.put(map, :embedding, Pgvector.new(list))
+
+  defp maybe_put_embedding(map, list) when is_list(list),
+    do: Map.put(map, :embedding, Pgvector.new(list))
+
   defp maybe_put_embedding(map, _), do: map
 
   defp ensure_string_list(v) when is_list(v), do: Enum.map(v, &to_string/1)
@@ -246,7 +280,7 @@ defmodule Db.Episode do
   defp build_si_from_slate(slate, meta) do
     %{
       "slate" => to_plain_map(slate),
-      "meta"  => to_plain_map(meta || %{})
+      "meta" => to_plain_map(meta || %{})
     }
   end
 
@@ -275,7 +309,9 @@ defmodule Db.Episode do
     |> convert_non_json_types()
   end
 
-  defp to_plain_map(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> Enum.map(&to_plain_map/1)
+  defp to_plain_map(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.map(&to_plain_map/1)
+
   defp to_plain_map(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, to_plain_map(v)} end)
   defp to_plain_map(list) when is_list(list), do: Enum.map(list, &to_plain_map/1)
   defp to_plain_map(%MapSet{} = set), do: Enum.to_list(set)
@@ -290,6 +326,7 @@ defmodule Db.Episode do
     |> Map.update(:trace, [], fn trace -> Enum.map(trace, &to_plain_map/1) end)
     |> Map.update(:active_cells, [], fn cells -> Enum.map(cells, &to_plain_map/1) end)
   end
+
   defp convert_non_json_types(value), do: value
 
   # ───────────────────────── Utilities ─────────────────────────
@@ -298,4 +335,3 @@ defmodule Db.Episode do
   defp to_pgvector(list) when is_list(list), do: {:ok, Pgvector.new(list)}
   defp to_pgvector(other), do: {:error, "invalid embedding param: #{inspect(other)}"}
 end
-

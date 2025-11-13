@@ -44,9 +44,9 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   @doc "Seed default mood assigns on mount."
   def seed(socket) do
     socket
-    |> Phoenix.Component.assign_new(:mood_levels,  fn -> @defaults.levels  end)
+    |> Phoenix.Component.assign_new(:mood_levels, fn -> @defaults.levels end)
     |> Phoenix.Component.assign_new(:mood_derived, fn -> @defaults.derived end)
-    |> Phoenix.Component.assign_new(:mood_tone,    fn -> @defaults.tone    end)
+    |> Phoenix.Component.assign_new(:mood_tone, fn -> @defaults.tone end)
     |> Phoenix.Component.assign_new(:telemetry_mood_id, fn -> nil end)
     |> ensure_alias()
   end
@@ -61,7 +61,8 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       events = [
         [:brain, :mood, :updated],
         [:brain, :mood, :tick],
-        [:brain, :mood, :update] # legacy/alternate spelling
+        # legacy/alternate spelling
+        [:brain, :mood, :update]
       ]
 
       try do
@@ -106,17 +107,17 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   def on_info({:mood_update, meas, _meta}, socket) do
     levels = %{
-      da:    Map.get(meas, :da,    0.5),
+      da: Map.get(meas, :da, 0.5),
       "5ht": Map.get(meas, :"5ht", 0.5),
-      glu:   Map.get(meas, :glu,   0.5),
-      ne:    Map.get(meas, :ne,    0.5)
+      glu: Map.get(meas, :glu, 0.5),
+      ne: Map.get(meas, :ne, 0.5)
     }
 
     derived = %{
       exploration: Map.get(meas, :exploration, 0.5),
-      inhibition:  Map.get(meas, :inhibition,  0.5),
-      vigilance:   Map.get(meas, :vigilance,   0.5),
-      plasticity:  Map.get(meas, :plasticity,  0.5)
+      inhibition: Map.get(meas, :inhibition, 0.5),
+      vigilance: Map.get(meas, :vigilance, 0.5),
+      plasticity: Map.get(meas, :plasticity, 0.5)
     }
 
     tone = socket.assigns[:mood_tone] || :neutral
@@ -132,9 +133,9 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   def on_info({:mood, m}, socket) do
     mood = m || %{}
 
-    levels  = Map.get(mood, :levels,  socket.assigns[:mood_levels]  || @defaults.levels)
+    levels = Map.get(mood, :levels, socket.assigns[:mood_levels] || @defaults.levels)
     derived = Map.get(mood, :derived, socket.assigns[:mood_derived] || @defaults.derived)
-    tone    = Map.get(mood, :tone,    socket.assigns[:mood_tone]    || @defaults.tone)
+    tone = Map.get(mood, :tone, socket.assigns[:mood_tone] || @defaults.tone)
 
     {:noreply,
      socket
@@ -169,6 +170,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   @doc "Compact, always-visible mood HUD chip."
   attr :mood, :map, default: @defaults
+
   def mood_hud(assigns) do
     mood = Map.get(assigns, :mood, @defaults) || @defaults
 
@@ -180,7 +182,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     ~H"""
     <div class="fixed bottom-3 right-3 z-30">
       <div class="text-xs px-2 py-1 rounded-md border bg-white/80 backdrop-blur flex gap-2 items-center shadow">
-        <span class={["px-1 rounded border", tone_class(@tone)]}><%= to_string(@tone) %></span>
+        <span class={["px-1 rounded border", tone_class(@tone)]}>{to_string(@tone)}</span>
         <span class="opacity-70">Expl</span><span class="font-mono"><%= fmt(@derived[:exploration]) %></span>
         <span class="opacity-70">Inhib</span><span class="font-mono"><%= fmt(@derived[:inhibition]) %></span>
         <span class="opacity-70">Vigil</span><span class="font-mono"><%= fmt(@derived[:vigilance]) %></span>
@@ -198,7 +200,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     mood =
       a[:mood] ||
         %{
-          levels: Map.get(a, :mood_levels,  @defaults.levels),
+          levels: Map.get(a, :mood_levels, @defaults.levels),
           derived: Map.get(a, :mood_derived, @defaults.derived),
           tone: Map.get(a, :mood_tone, @defaults.tone)
         }
@@ -208,10 +210,9 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   defp tone_class(:positive), do: "border-green-400 text-green-700"
   defp tone_class(:negative), do: "border-red-400 text-red-700"
-  defp tone_class(_),         do: "border-zinc-300 text-zinc-700"
+  defp tone_class(_), do: "border-zinc-300 text-zinc-700"
 
   defp fmt(nil), do: "—"
   defp fmt(v) when is_number(v), do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
   defp fmt(v), do: to_string(v)
 end
-

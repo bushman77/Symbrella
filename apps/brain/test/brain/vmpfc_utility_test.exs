@@ -38,4 +38,3 @@ defmodule Brain.VmPFCUtilityTest do
     assert o.explore_rate >= 0.0 and o.explore_rate <= 1.0
   end
 end
-

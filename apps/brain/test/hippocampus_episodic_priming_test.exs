@@ -16,7 +16,16 @@ defmodule Brain.HippocampusEpisodicPrimingTest do
         %{}
       )
 
-    on_exit(fn -> :telemetry.detach(handler_id) rescue _ -> :ok end)
+# test/hippocampus_episodic_priming_test.exs (around line 19)
+on_exit(fn ->
+  try do
+    :telemetry.detach(handler_id)
+  rescue
+    _ -> :ok
+  end
+end)
+
+
     :ok
   end
 

@@ -48,6 +48,7 @@ defmodule Core.Response.Policy do
         }
   def decide(f) do
     pv = "matrix.v1"
+
     base =
       cond do
         # Guardrail intercept (unless approved)
@@ -78,6 +79,7 @@ defmodule Core.Response.Policy do
         # Social intents
         f.intent in [:greeting, :gratitude, :smalltalk] ->
           tone = if f.vig >= 0.95, do: :deescalate, else: :warm
+
           %{
             tone: tone,
             mode: :scribe,
@@ -117,34 +119,83 @@ defmodule Core.Response.Policy do
 
   defp helpful_decision(f) do
     risk_high? = f.risk_bucket == :high
+
     case {f.vigilance_bucket, f.confidence_bucket, risk_high?} do
       # high vigil, low risk → still act, but tone neutral
       {:high, _c, false} ->
-        %{tone: :neutral, mode: :pair_programmer, action: :act_first, scores: %{vigilance: :high}, overrides: []}
+        %{
+          tone: :neutral,
+          mode: :pair_programmer,
+          action: :act_first,
+          scores: %{vigilance: :high},
+          overrides: []
+        }
 
       # extreme vigil → cap at neutral regardless
       {:extreme, _c, _} ->
-        %{tone: :neutral, mode: :pair_programmer, action: :offer_options, scores: %{vigilance: :extreme}, overrides: []}
+        %{
+          tone: :neutral,
+          mode: :pair_programmer,
+          action: :offer_options,
+          scores: %{vigilance: :extreme},
+          overrides: []
+        }
 
       # any vigil, high risk → editor + options/ask
       {_v, :high, true} ->
-        %{tone: :firm, mode: :editor, action: :offer_options, scores: %{risk: :high, conf: :high}, overrides: []}
+        %{
+          tone: :firm,
+          mode: :editor,
+          action: :offer_options,
+          scores: %{risk: :high, conf: :high},
+          overrides: []
+        }
 
       {_v, :med, true} ->
-        %{tone: :neutral, mode: :editor, action: :offer_options, scores: %{risk: :high, conf: :med}, overrides: []}
+        %{
+          tone: :neutral,
+          mode: :editor,
+          action: :offer_options,
+          scores: %{risk: :high, conf: :med},
+          overrides: []
+        }
 
       {_v, :low, true} ->
-        %{tone: :deescalate, mode: :editor, action: :ask_first, scores: %{risk: :high, conf: :low}, overrides: []}
+        %{
+          tone: :deescalate,
+          mode: :editor,
+          action: :ask_first,
+          scores: %{risk: :high, conf: :low},
+          overrides: []
+        }
 
       # low risk paths
       {_v, :high, false} ->
-        %{tone: :warm, mode: :pair_programmer, action: :act_first, scores: %{conf: :high}, overrides: []}
+        %{
+          tone: :warm,
+          mode: :pair_programmer,
+          action: :act_first,
+          scores: %{conf: :high},
+          overrides: []
+        }
 
       {_v, :med, false} ->
-        %{tone: :neutral, mode: :pair_programmer, action: :act_first, scores: %{conf: :med}, overrides: []}
+        %{
+          tone: :neutral,
+          mode: :pair_programmer,
+          action: :act_first,
+          scores: %{conf: :med},
+          overrides: []
+        }
 
       {_v, :low, false} ->
-        %{tone: :neutral, mode: :coach, action: :offer_options, scores: %{conf: :low}, overrides: []}
+        %{
+          tone: :neutral,
+          mode: :coach,
+          action: :offer_options,
+          scores: %{conf: :low},
+          overrides: []
+        }
     end
   end
 
@@ -180,12 +231,12 @@ defmodule Core.Response.Policy do
     t = dn(text)
 
     cond do
-      greeting?(t)   -> :greeting
-      gratitude?(t)  -> :gratitude
-      smalltalk?(t)  -> :smalltalk
-      question?(t)   -> :question
-      command?(t)    -> :command
-      true           -> :unknown
+      greeting?(t) -> :greeting
+      gratitude?(t) -> :gratitude
+      smalltalk?(t) -> :smalltalk
+      question?(t) -> :question
+      command?(t) -> :command
+      true -> :unknown
     end
   end
 
@@ -198,7 +249,10 @@ defmodule Core.Response.Policy do
   def benign_text?(t), do: not hostile_text?(t)
 
   def hostile_text?(t) do
-    Regex.match?(~r/\b(fuck\s+you|bitch|asshole|idiot|stupid|dumbass|kill\s+yourself|kys|die|shut\s+up|screw\s+you)\b/i, t)
+    Regex.match?(
+      ~r/\b(fuck\s+you|bitch|asshole|idiot|stupid|dumbass|kill\s+yourself|kys|die|shut\s+up|screw\s+you)\b/i,
+      t
+    )
   end
 
   def command?(t) do
@@ -208,11 +262,15 @@ defmodule Core.Response.Policy do
       refactor wire hook connect print log trace enable disable outline summarize drop-in
     )
     please_forms? = Regex.match?(~r/^\s*(please|pls|plz)\b/i, t)
-    head = t |> String.trim_leading() |> String.split(~r/\s+/, parts: 2) |> List.first() |> to_string()
+
+    head =
+      t |> String.trim_leading() |> String.split(~r/\s+/, parts: 2) |> List.first() |> to_string()
+
     verb_head? = Enum.member?(start_verbs, head)
+
     patterns? =
       Regex.match?(~r/\b(show|give|tell)\s+me\b/i, t) or
-      Regex.match?(~r/\bwalk\s+me\s+through\b/i, t)
+        Regex.match?(~r/\bwalk\s+me\s+through\b/i, t)
 
     please_forms? or verb_head? or patterns?
   end
@@ -234,4 +292,3 @@ defmodule Core.Response.Policy do
   defp dn(nil), do: ""
   defp dn(t), do: t |> to_string() |> String.downcase() |> String.trim()
 end
-

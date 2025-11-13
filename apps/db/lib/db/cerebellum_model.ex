@@ -11,12 +11,12 @@ defmodule Db.CerebellumModel do
   import Ecto.Changeset
 
   schema "cerebellum_models" do
-    field :scope, :string
-    field :context_key, :binary
-    field :weights, {:array, :float}
-    field :count_seen, :integer, default: 0
-    field :ema_error, :float, default: 0.0
-    field :feature_schema, :integer, default: 1
+    field(:scope, :string)
+    field(:context_key, :binary)
+    field(:weights, {:array, :float})
+    field(:count_seen, :integer, default: 0)
+    field(:ema_error, :float, default: 0.0)
+    field(:feature_schema, :integer, default: 1)
     timestamps()
   end
 
@@ -27,4 +27,3 @@ defmodule Db.CerebellumModel do
     |> unique_constraint([:scope, :context_key])
   end
 end
-

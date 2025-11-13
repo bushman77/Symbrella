@@ -26,7 +26,8 @@ defmodule Db.Import do
   # POS-appropriate grammatical function labels (expand later if needed).
   @gram_keep %{
     "noun" => ~w(countable uncountable plural-only usually plural),
-    "verb" => ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
+    "verb" =>
+      ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
     "adjective" => ~w(attributive-only predicative-only postpositive comparative-only)
   }
 
@@ -80,18 +81,28 @@ defmodule Db.Import do
     * `:include_unglossed` - include senses without gloss (default: #{@include_unglossed})
   """
   def seed(opts \\ []) do
-    path   = opts[:path]  || Path.expand(@file_path)
-    limit  = opts[:limit] || :all
-    chunk  = opts[:chunk] || @default_chunk
-    dry?   = !!opts[:dry_run]
+    path = opts[:path] || Path.expand(@file_path)
+    limit = opts[:limit] || :all
+    chunk = opts[:chunk] || @default_chunk
+    dry? = !!opts[:dry_run]
     inc_unglossed? = Map.get(opts_to_map(opts), :include_unglossed, @include_unglossed)
 
     pos_ok =
       case opts[:pos] do
-        nil -> @allowed_pos
-        s when is_binary(s) -> s |> String.split([","," "], trim: true) |> Enum.map(&normalize_pos/1) |> Enum.filter(&(&1 in @allowed_pos))
-        list when is_list(list) -> list |> Enum.map(&normalize_pos/1) |> Enum.filter(&(&1 in @allowed_pos))
-        _ -> @allowed_pos
+        nil ->
+          @allowed_pos
+
+        s when is_binary(s) ->
+          s
+          |> String.split([",", " "], trim: true)
+          |> Enum.map(&normalize_pos/1)
+          |> Enum.filter(&(&1 in @allowed_pos))
+
+        list when is_list(list) ->
+          list |> Enum.map(&normalize_pos/1) |> Enum.filter(&(&1 in @allowed_pos))
+
+        _ ->
+          @allowed_pos
       end
 
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
@@ -126,7 +137,14 @@ defmodule Db.Import do
           {p + length(batch), i + count, c + 1}
         end)
 
-      %{produced: produced, inserted: inserted, chunks: chunks, path: path, pos: pos_ok, dry_run: false}
+      %{
+        produced: produced,
+        inserted: inserted,
+        chunks: chunks,
+        path: path,
+        pos: pos_ok,
+        dry_run: false
+      }
     end
   end
 
@@ -142,9 +160,9 @@ defmodule Db.Import do
 
   # ---- entry -> list of senses ----
   defp to_senses(entry, include_unglossed?) when is_map(entry) do
-    word   = entry["word"]
-    pos0   = entry["pos"]
-    pos    = normalize_pos(pos0)
+    word = entry["word"]
+    pos0 = entry["pos"]
+    pos = normalize_pos(pos0)
     senses = entry["senses"] || []
 
     entry_syns = extract_word_list(entry, "synonyms")
@@ -153,15 +171,16 @@ defmodule Db.Import do
     senses
     |> Enum.map(fn sense ->
       gloss = first_gloss(sense)
-      syns  = merge_and_dedup(entry_syns, extract_word_list(sense, "synonyms"))
-      ants  = merge_and_dedup(entry_ants, extract_word_list(sense, "antonyms"))
+      syns = merge_and_dedup(entry_syns, extract_word_list(sense, "synonyms"))
+      ants = merge_and_dedup(entry_ants, extract_word_list(sense, "antonyms"))
 
       if include_unglossed? or (is_binary(gloss) and String.trim(gloss) != "") do
         %{
           id: nil,
           word: word,
           pos: pos,
-          definition: gloss,  # may be nil
+          # may be nil
+          definition: gloss,
           example: first_example(sense),
           gram_function: derive_gram_function(sense, pos),
           synonyms: drop_nil_and_self(syns, word),
@@ -183,13 +202,14 @@ defmodule Db.Import do
     cond do
       is_binary(sense["gloss"]) -> sense["gloss"]
       is_list(sense["glosses"]) -> Enum.find(sense["glosses"], &is_binary/1)
-      is_list(sense["gloss"])   -> Enum.find(sense["gloss"], &is_binary/1)
+      is_list(sense["gloss"]) -> Enum.find(sense["gloss"], &is_binary/1)
       true -> nil
     end
   end
 
   defp first_example(sense) do
     exs = sense["examples"] || []
+
     if is_list(exs) do
       exs
       |> Enum.map(fn
@@ -252,22 +272,30 @@ defmodule Db.Import do
 
   defp add_if_synth_usually_plural(acc, tags_set) do
     cond do
-      MapSet.member?(tags_set, "usually plural") -> ["usually plural" | acc]
+      MapSet.member?(tags_set, "usually plural") ->
+        ["usually plural" | acc]
+
       MapSet.member?(tags_set, "usually") and MapSet.member?(tags_set, "plural") ->
         ["usually plural" | acc]
+
       true ->
         acc
     end
   end
+
   # -------------------------------------------------------------------------
 
   defp extract_word_list(map, key) when is_map(map) do
     case Map.get(map, key) do
-      nil -> []
+      nil ->
+        []
+
       list when is_list(list) ->
         list
         |> Enum.flat_map(fn
-          %{"word" => w} when is_binary(w) -> [String.trim(w)]
+          %{"word" => w} when is_binary(w) ->
+            [String.trim(w)]
+
           %{"terms" => terms} when is_list(terms) ->
             terms
             |> Enum.flat_map(fn
@@ -275,11 +303,17 @@ defmodule Db.Import do
               s when is_binary(s) -> [String.trim(s)]
               _ -> []
             end)
-          s when is_binary(s) -> [String.trim(s)]
-          _ -> []
+
+          s when is_binary(s) ->
+            [String.trim(s)]
+
+          _ ->
+            []
         end)
         |> Enum.reject(&(&1 == ""))
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -364,4 +398,3 @@ defmodule Db.Import do
 
   defp opts_to_map(opts) when is_list(opts), do: Map.new(opts)
 end
-

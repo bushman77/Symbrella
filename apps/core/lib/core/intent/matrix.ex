@@ -99,7 +99,10 @@ defmodule Core.Intent.Matrix do
   defp maybe_code(acc, toks, text, w) do
     cond do
       has_phrase?(text, ["```", "~H", "defmodule"]) ->
-        [%{intent: :code, score: w.code_hint + 0.15, keyword: nil, evidence: ["code:block"]} | acc]
+        [
+          %{intent: :code, score: w.code_hint + 0.15, keyword: nil, evidence: ["code:block"]}
+          | acc
+        ]
 
       Enum.any?(toks, &(&1 in @code_markers)) ->
         [%{intent: :code, score: w.code_hint, keyword: nil, evidence: ["code:marker"]} | acc]
@@ -112,10 +115,26 @@ defmodule Core.Intent.Matrix do
   defp maybe_brain_introspect(acc, toks, text, w) do
     cond do
       has_phrase?(text, ["core.", "brain."]) ->
-        [%{intent: :brain_introspect, score: w.domain_hint + 0.2, keyword: nil, evidence: ["brain:module"]} | acc]
+        [
+          %{
+            intent: :brain_introspect,
+            score: w.domain_hint + 0.2,
+            keyword: nil,
+            evidence: ["brain:module"]
+          }
+          | acc
+        ]
 
       Enum.any?(toks, &(&1 in @brain_words)) ->
-        [%{intent: :brain_introspect, score: w.domain_hint, keyword: nil, evidence: ["brain:lex"]} | acc]
+        [
+          %{
+            intent: :brain_introspect,
+            score: w.domain_hint,
+            keyword: nil,
+            evidence: ["brain:lex"]
+          }
+          | acc
+        ]
 
       true ->
         acc
@@ -124,7 +143,15 @@ defmodule Core.Intent.Matrix do
 
   defp maybe_ask_info_fallback(acc, toks, _pos, w) do
     if Enum.any?(toks, &(&1 in ~w(who what when where why how))) do
-      [%{intent: :ask_info, score: w.lexical_hint - 0.05, keyword: nil, evidence: ["ask_info:wh"]} | acc]
+      [
+        %{
+          intent: :ask_info,
+          score: w.lexical_hint - 0.05,
+          keyword: nil,
+          evidence: ["ask_info:wh"]
+        }
+        | acc
+      ]
     else
       acc
     end
@@ -144,7 +171,11 @@ defmodule Core.Intent.Matrix do
 
   # Super cheap keyword guess: return the first content word after a trigger
   defp head_noun_hint(toks) do
-    stop = MapSet.new(~w(define definition meaning what is what's whats translate to into in a an the of for from how do you say))
+    stop =
+      MapSet.new(
+        ~w(define definition meaning what is what's whats translate to into in a an the of for from how do you say)
+      )
+
     kw =
       toks
       |> Enum.reject(&MapSet.member?(stop, &1))
@@ -154,4 +185,3 @@ defmodule Core.Intent.Matrix do
     {kw, ev}
   end
 end
-

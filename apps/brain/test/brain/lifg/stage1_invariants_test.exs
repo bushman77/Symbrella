@@ -27,13 +27,13 @@ defmodule Brain.LIFG.Stage1InvariantsTest do
       sentence: "It is raining",
       tokens: [
         %{index: 0, phrase: "It is raining", n: 3, mw: true, span: {0, 14}},
-        %{index: 1, phrase: "it is",         n: 2, mw: true, span: {0, 5}},
-        %{index: 2, phrase: "is raining",    n: 2, mw: true, span: {3, 14}}
+        %{index: 1, phrase: "it is", n: 2, mw: true, span: {0, 5}},
+        %{index: 2, phrase: "is raining", n: 2, mw: true, span: {3, 14}}
       ],
       sense_candidates: %{
         0 => [%{id: "It is raining|phrase|0", pos: "phrase", norm: "it is raining"}],
-        1 => [%{id: "It is|phrase|0",         pos: "phrase", norm: "it is"}],
-        2 => [%{id: "is raining|phrase|0",    pos: "phrase", norm: "is raining"}]
+        1 => [%{id: "It is|phrase|0", pos: "phrase", norm: "it is"}],
+        2 => [%{id: "is raining|phrase|0", pos: "phrase", norm: "is raining"}]
       }
     }
 
@@ -49,4 +49,3 @@ defmodule Brain.LIFG.Stage1InvariantsTest do
     assert only.span == {0, 14}
   end
 end
-

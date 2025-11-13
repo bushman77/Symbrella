@@ -9,19 +9,22 @@ defmodule Brain.WMGatingFromLIFGTest do
 
   setup do
     # Telemetry listeners used in assertions
-    :telemetry.attach_many("wm-gating-test-guards",
+    :telemetry.attach_many(
+      "wm-gating-test-guards",
       [[:brain, :lifg, :chargram_violation], [:brain, :lifg, :boundary_drop]],
       fn e, m, meta, pid -> send(pid, {:guard, e, m, meta}) end,
       self()
     )
 
-    :telemetry.attach("wm-gating-test-update",
+    :telemetry.attach(
+      "wm-gating-test-update",
       [:brain, :wm, :update],
       fn _e, m, meta, pid -> send(pid, {:wm, m, meta}) end,
       self()
     )
 
-    :telemetry.attach("wm-gating-test-gate",
+    :telemetry.attach(
+      "wm-gating-test-gate",
       [:brain, :gate, :decision],
       fn _e, m, meta, pid -> send(pid, {:gate, m, meta}) end,
       self()
@@ -41,13 +44,21 @@ defmodule Brain.WMGatingFromLIFGTest do
     si = %{
       sentence: "Hello there",
       tokens: [
-        %{word: "Hello", start: 0, stop: 5,  kind: :word, pos: "intj"},
+        %{word: "Hello", start: 0, stop: 5, kind: :word, pos: "intj"},
         %{word: "there", start: 6, stop: 11, kind: :word, pos: "adv"}
       ],
       sense_candidates: %{
-        0 => [%{id: "Hello there|phrase|fallback", lemma: "Hello there", pos: "phrase", mw: true,  score: 1.0}],
-        1 => [%{id: "hello|interjection|2",        lemma: "hello",       pos: "intj",             score: 0.50}],
-        2 => [%{id: "there|noun|0",                lemma: "there",       pos: "noun",             score: 0.08}]
+        0 => [
+          %{
+            id: "Hello there|phrase|fallback",
+            lemma: "Hello there",
+            pos: "phrase",
+            mw: true,
+            score: 1.0
+          }
+        ],
+        1 => [%{id: "hello|interjection|2", lemma: "hello", pos: "intj", score: 0.50}],
+        2 => [%{id: "there|noun|0", lemma: "there", pos: "noun", score: 0.08}]
       }
     }
 
@@ -64,8 +75,11 @@ defmodule Brain.WMGatingFromLIFGTest do
     assert id1 == "hello|interjection|2"
 
     # Telemetry: at least 1 gate decision and a WM update with added > 0
-    assert_receive {:gate, %{score: s1}, %{decision: dec1, source: :lifg}} when is_number(s1) and dec1 in [:allow, :boost]
-    assert_receive {:wm, %{added: added, size: size}, %{reason: :gate_from_lifg}} when added > 0 and size >= added
+    assert_receive {:gate, %{score: s1}, %{decision: dec1, source: :lifg}}
+                   when is_number(s1) and dec1 in [:allow, :boost]
+
+    assert_receive {:wm, %{added: added, size: size}, %{reason: :gate_from_lifg}}
+                   when added > 0 and size >= added
 
     # No guard violations for this clean input
     refute_received {:guard, [:brain, :lifg, :chargram_violation], _m, _meta}
@@ -78,4 +92,3 @@ defmodule Brain.WMGatingFromLIFGTest do
     assert "hello|interjection|2" in ids_in_wm
   end
 end
-

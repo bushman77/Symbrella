@@ -24,14 +24,14 @@ defmodule Brain.CycleMetrics do
   @doc "Compute a metrics snapshot from a Brain state map."
   @spec snapshot(map()) :: snapshot()
   def snapshot(%{activation_log: log}) when is_list(log) do
-    now    = now_ms()
+    now = now_ms()
     recent = Enum.filter(log, &has_time_after?(&1, now - @window_ms))
-    seq    = extract_sequence(recent)
+    seq = extract_sequence(recent)
 
-    tm     = transition_matrix(seq)
-    s      = cycle_strength(tm)
-    hz     = est_hz(seq)
-    order  = dominant_order(tm)
+    tm = transition_matrix(seq)
+    s = cycle_strength(tm)
+    hz = est_hz(seq)
+    order = dominant_order(tm)
 
     %{strength: s, hz: hz, order: order}
   end
@@ -67,6 +67,7 @@ defmodule Brain.CycleMetrics do
   defp compress_runs([]), do: []
   defp compress_runs([h | rest]), do: do_compress(rest, h, [h])
   defp do_compress([], _prev, acc), do: Enum.reverse(acc)
+
   defp do_compress([x | xs], prev, acc) do
     if x == prev, do: do_compress(xs, prev, acc), else: do_compress(xs, x, [x | acc])
   end
@@ -83,10 +84,11 @@ defmodule Brain.CycleMetrics do
   # Very simple loopiness proxy:
   # sum of strongest outgoing edge per node divided by total transitions.
   defp cycle_strength(tm) when map_size(tm) == 0, do: 0.0
+
   defp cycle_strength(tm) do
     {best, total} =
       Enum.reduce(tm, {0, 0}, fn {_from, outs}, {b, t} ->
-        vals   = Map.values(outs)
+        vals = Map.values(outs)
         b_node = Enum.max(vals)
         {b + b_node, t + Enum.sum(vals)}
       end)
@@ -133,4 +135,3 @@ defmodule Brain.CycleMetrics do
     end
   end
 end
-

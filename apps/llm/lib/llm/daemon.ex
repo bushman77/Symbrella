@@ -10,6 +10,7 @@ defmodule Llm.Daemon do
       case spawn_ollama() do
         {:ok, port} ->
           state2 = %{state | ollama_port: port, served_by_us?: true}
+
           if wait_until(fn -> reachable?(state2, timeout_ms) end, 60, 500) do
             {:ok, state2, true}
           else
@@ -31,13 +32,19 @@ defmodule Llm.Daemon do
 
   def spawn_ollama do
     case System.find_executable("ollama") do
-      nil -> {:error, :ollama_not_found}
+      nil ->
+        {:error, :ollama_not_found}
+
       path ->
         port =
           Port.open({:spawn_executable, path}, [
-            :binary, :exit_status,
+            :binary,
+            :exit_status,
             args: ["serve"],
-            env: Enum.map(System.get_env(), fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+            env:
+              Enum.map(System.get_env(), fn {k, v} ->
+                {String.to_charlist(k), String.to_charlist(v)}
+              end)
           ])
 
         {:ok, port}
@@ -52,6 +59,6 @@ defmodule Llm.Daemon do
       wait_until(fun, attempts - 1, sleep_ms)
     end
   end
+
   def wait_until(_fun, 0, _sleep_ms), do: false
 end
-

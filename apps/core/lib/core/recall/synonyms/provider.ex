@@ -15,10 +15,9 @@ defmodule Core.Recall.Synonyms.Provider do
   """
 
   @type word :: String.t()
-  @type pos  :: atom() | nil
+  @type pos :: atom() | nil
   @type entry :: %{lemma: word(), pos: pos(), prior: float(), source: String.t(), meta: map()}
 
   @callback lookup(word(), pos(), keyword()) ::
               {:ok, [entry()], map()} | {:ok, [entry()]} | {:error, term()}
 end
-

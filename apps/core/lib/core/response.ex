@@ -1,3 +1,4 @@
+# apps/core/lib/core/response.ex
 defmodule Core.Response do
   @moduledoc """
   Response — small policy engine that maps (intent × mood × text) → {tone, text, meta}.
@@ -41,7 +42,7 @@ defmodule Core.Response do
   @spec plan(si_like, mood_like) :: {atom, String.t(), map}
   def plan(si, mood \\ %{}) do
     intent0 = Map.get(si, :intent, :unknown)
-    conf    = clamp01(Map.get(si, :confidence, 0.0))
+    conf = clamp01(Map.get(si, :confidence, 0.0))
     text_in = to_string(Map.get(si, :text) || Map.get(si, :keyword) || "")
 
     # Mood indices (work with nested or flat)
@@ -56,15 +57,15 @@ defmodule Core.Response do
 
     # Guardrails & lexical flags
     guard = Guardrails.detect(text_in)
-    benign?  = Policy.benign_text?(text_in)
+    benign? = Policy.benign_text?(text_in)
     hostile? = Policy.hostile_text?(text_in)
     command? = Policy.command?(text_in)
 
     # Buckets & context (cooldown could be supplied later; start at 0)
     confidence_bucket = bucket_confidence(conf)
-    vigilance_bucket  = bucket_vigilance(vig)
-    risk_bucket       = if guard.guardrail?, do: :high, else: :low
-    cooldown          = 0
+    vigilance_bucket = bucket_vigilance(vig)
+    risk_bucket = if guard.guardrail?, do: :high, else: :low
+    cooldown = 0
 
     features = %{
       intent_in: intent0,
@@ -72,7 +73,10 @@ defmodule Core.Response do
       text: text_in,
       conf: conf,
       confidence_bucket: confidence_bucket,
-      vig: vig, inh: inh, exp: exp, plast: pls,
+      vig: vig,
+      inh: inh,
+      exp: exp,
+      plast: pls,
       vigilance_bucket: vigilance_bucket,
       tone_hint: tone_hint,
       benign?: benign?,
@@ -102,6 +106,23 @@ defmodule Core.Response do
           Modes.compose(intent, decision.tone, decision.mode)
       end
 
+    # Planner, compact, deterministic explanation (for UI + tests)
+    planner_explanation =
+      build_planner_explanation(
+        intent,
+        conf,
+        decision.tone,
+        decision.mode,
+        tone_hint,
+        vig,
+        inh,
+        exp,
+        benign?,
+        hostile?,
+        risk_bucket,
+        decision.overrides
+      )
+
     meta = %{
       policy_version: decision.policy_version,
       intent_inferred: intent,
@@ -122,7 +143,8 @@ defmodule Core.Response do
       skill_reason: (skill && skill.reason) || nil,
       guardrail?: guard.guardrail?,
       approve_token?: guard.approve_token?,
-      guardrail_flags: guard.flags
+      guardrail_flags: guard.flags,
+      explanation: planner_explanation
     }
 
     # Telemetry — safe if :telemetry is in deps (it is in Phoenix projects)
@@ -130,6 +152,94 @@ defmodule Core.Response do
 
     {decision.tone, text, meta}
   end
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Planner explanation (deterministic one-liner + structured map)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp build_planner_explanation(
+         intent,
+         conf,
+         tone,
+         mode,
+         tone_hint,
+         vig,
+         inh,
+         exp,
+         benign?,
+         hostile?,
+         risk_bucket,
+         overrides
+       ) do
+    reasons =
+      because_reasons(tone, vig, inh, exp, benign?, hostile?, risk_bucket, tone_hint, overrides)
+
+    text =
+      "intent=#{inspect(intent)}(#{fmtf(conf, 2)}) → tone=#{inspect(tone)}" <>
+        reason_suffix(reasons) <>
+        mode_suffix(mode) <>
+        hint_suffix(tone_hint)
+
+    %{
+      text: text,
+      intent: %{label: intent, confidence: conf},
+      tone: %{chosen: tone, because: reasons},
+      mode: mode,
+      overrides: %{
+        benign_override?: benign?,
+        tone_hint: tone_hint
+      },
+      context: %{
+        vigilance: vig,
+        inhibition: inh,
+        exploration: exp,
+        hostile_text?: hostile?,
+        risk_bucket: risk_bucket
+      }
+    }
+  end
+
+  defp because_reasons(:deescalate, vig, _inh, _exp, _b, h, risk, _hint, _ovr) do
+    base = []
+    base = if vig >= 0.98, do: base ++ [:vigilance_extreme], else: base
+    base = if vig >= 0.85 and vig < 0.98, do: base ++ [:vigilance_high], else: base
+    base = if h, do: base ++ [:hostile_text], else: base
+    base = if risk == :high, do: base ++ [:guardrail_risk], else: base
+    if base == [], do: [:policy_default], else: base
+  end
+
+  defp because_reasons(:warm, vig, inh, exp, b, _h, _risk, _hint, _ovr) do
+    base = []
+    base = if b, do: base ++ [:benign_text], else: base
+    base = if exp >= 0.35 and inh >= 0.30 and vig < 0.98, do: base ++ [:explore_ok], else: base
+    if base == [], do: [:policy_default], else: base
+  end
+
+  defp because_reasons(:neutral, vig, inh, exp, _b, _h, risk, _hint, _ovr) do
+    base = []
+    base = if risk == :high, do: base ++ [:guardrail_risk], else: base
+    base = if vig >= 0.98, do: base ++ [:vigilance_extreme], else: base
+
+    base =
+      if vig < 0.98 and not (exp >= 0.45 and inh >= 0.35), do: base ++ [:conservative], else: base
+
+    if base == [], do: [:policy_default], else: base
+  end
+
+  defp because_reasons(:firm, _vig, _inh, _exp, _b, _h, _risk, _hint, _ovr),
+    do: [:focus_enforcement]
+
+  defp because_reasons(_other, _vig, _inh, _exp, _b, _h, _risk, _hint, _ovr),
+    do: [:policy_default]
+
+  defp reason_suffix([]), do: ""
+  defp reason_suffix(list), do: " because=" <> Enum.map_join(list, ",", &to_string/1)
+
+  defp mode_suffix(nil), do: ""
+  defp mode_suffix(mode), do: " · mode=" <> to_string(mode)
+
+  defp hint_suffix(nil), do: ""
+  defp hint_suffix(hint), do: " [hint=" <> to_string(hint) <> "]"
 
   # ────────────────────────────────────────────────────────────────────────────
   # Utils (local)
@@ -153,5 +263,9 @@ defmodule Core.Response do
   defp bucket_vigilance(v) when v >= 0.98, do: :extreme
   defp bucket_vigilance(v) when v >= 0.85, do: :high
   defp bucket_vigilance(_), do: :normal
-end
 
+  defp fmtf(v, decimals) when is_number(v),
+    do: :erlang.float_to_binary(v, decimals: decimals)
+
+  defp fmtf(_v, _d), do: "0.00"
+end

@@ -25,12 +25,12 @@ defmodule Brain.Salience do
 
   @spec salience_nudge(ctx) :: %{salience_boost: float()}
   def salience_nudge(ctx) when is_map(ctx) do
-    novelty  = clamp01(Map.get(ctx, :novelty, 0.0))
+    novelty = clamp01(Map.get(ctx, :novelty, 0.0))
     conflict = clamp01(Map.get(ctx, :acc_conflict, 0.0))
-    wm_load  = clamp01(Map.get(ctx, :wm_load, 0.0))
+    wm_load = clamp01(Map.get(ctx, :wm_load, 0.0))
 
     # Weighted sum favors simultaneous spikes; then squash for nicer dynamics.
-    raw   = novelty * 0.6 + conflict * 0.5 + wm_load * 0.3
+    raw = novelty * 0.6 + conflict * 0.5 + wm_load * 0.3
     boost = raw |> nonlin_boost() |> clamp01()
 
     :telemetry.execute(
@@ -52,4 +52,3 @@ defmodule Brain.Salience do
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0
 end
-

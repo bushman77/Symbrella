@@ -10,7 +10,10 @@ defmodule Brain.MoodWeights do
   """
 
   @type mood_idx :: %{
-          exploration: float(), inhibition: float(), vigilance: float(), plasticity: float()
+          exploration: float(),
+          inhibition: float(),
+          vigilance: float(),
+          plasticity: float()
         }
 
   @doc """
@@ -22,11 +25,13 @@ defmodule Brain.MoodWeights do
       score = clamp(base + bias, 0.0, 1.0)
   """
   @spec bias(mood_idx, map(), float()) :: float()
-  def bias(%{exploration: e, inhibition: i, vigilance: v, plasticity: p},
-           weights \\ %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00},
-           cap \\ 0.05)
+  def bias(
+        %{exploration: e, inhibition: i, vigilance: v, plasticity: p},
+        weights \\ %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00},
+        cap \\ 0.05
+      )
       when is_map(weights) and is_number(cap) do
-    expl  = (e - 0.5) * Map.get(weights, :expl, 0.0)
+    expl = (e - 0.5) * Map.get(weights, :expl, 0.0)
     inhib = (i - 0.5) * Map.get(weights, :inhib, 0.0)
     vigil = (v - 0.5) * Map.get(weights, :vigil, 0.0)
     plast = (p - 0.5) * Map.get(weights, :plast, 0.0)
@@ -42,4 +47,3 @@ defmodule Brain.MoodWeights do
 
   defp clamp(x, a, b), do: max(a, min(b, x))
 end
-

@@ -31,9 +31,12 @@ defmodule Brain.Temporal do
     @moduledoc false
     defstruct window: [],
               opts: %{
-                window_keep: 300,       # max items kept (count guard)
-                half_life_ms: 300_000,  # soft TTL (5 min) for time pruning
-                recall_limit: 50        # max items returned by status
+                # max items kept (count guard)
+                window_keep: 300,
+                # soft TTL (5 min) for time pruning
+                half_life_ms: 300_000,
+                # max items returned by status
+                recall_limit: 50
               },
               last_at_ms: nil
   end
@@ -159,16 +162,17 @@ defmodule Brain.Temporal do
 
   defp prune_window(%State{} = st) do
     now = monotonic_ms()
-    ttl  = st.opts.half_life_ms
+    ttl = st.opts.half_life_ms
 
     # Time-based prune (soft)
     pruned_time =
       Enum.filter(st.window, fn %Entry{at_ms: at} ->
-        is_integer(at) and (now - at) <= ttl
+        is_integer(at) and now - at <= ttl
       end)
 
     # Count-based cap (hard)
     keep = st.opts.window_keep
+
     final =
       if length(pruned_time) > keep do
         Enum.take(pruned_time, keep)
@@ -189,4 +193,3 @@ defmodule Brain.Temporal do
     :telemetry.execute(event, measurements, meta)
   end
 end
-

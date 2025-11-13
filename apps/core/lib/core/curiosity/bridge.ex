@@ -30,8 +30,8 @@ defmodule Core.Curiosity.Bridge do
 
   def handle(_event, meas, _meta, _cfg) do
     score = Map.get(meas, :score, 0.0)
-    now   = System.system_time(:millisecond)
-    last  = :persistent_term.get({__MODULE__, :last_trigger_ms}, 0)
+    now = System.system_time(:millisecond)
+    last = :persistent_term.get({__MODULE__, :last_trigger_ms}, 0)
 
     if score >= threshold() and now - last >= min_gap_ms() do
       :persistent_term.put({__MODULE__, :last_trigger_ms}, now)
@@ -51,4 +51,3 @@ defmodule Core.Curiosity.Bridge do
     |> Keyword.get(:min_gap_ms, @default_min_gap_ms)
   end
 end
-

@@ -9,6 +9,7 @@ defmodule Llm do
   • Deterministic runner defaults via Llm.Const.
   """
 
+
   use GenServer
   require Logger
   alias Llm.Pos
@@ -26,6 +27,8 @@ defmodule Llm do
   @default_heartbeat_ms 15_000
 
   # ───────────── Public API ─────────────
+
+  def hello(), do: :world
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -45,7 +48,11 @@ defmodule Llm do
 
   @spec start_ollama(String.t() | nil, keyword()) :: {:ok, map()} | {:error, term()}
   def start_ollama(model \\ nil, opts \\ []) do
-    GenServer.call(server(opts), {:start_ollama, model || @default_model, opts}, call_timeout(opts) + 60_000)
+    GenServer.call(
+      server(opts),
+      {:start_ollama, model || @default_model, opts},
+      call_timeout(opts) + 60_000
+    )
   end
 
   def stop_ollama(opts \\ []) do
@@ -55,7 +62,11 @@ defmodule Llm do
   @spec start_model(String.t() | nil, keyword()) ::
           {:ok, %{served?: boolean(), pulled?: boolean(), warmed?: boolean()}} | {:error, term()}
   def start_model(model \\ nil, opts \\ []) do
-    GenServer.call(server(opts), {:start_model, model || @default_model, opts}, call_timeout(opts))
+    GenServer.call(
+      server(opts),
+      {:start_model, model || @default_model, opts},
+      call_timeout(opts)
+    )
   end
 
   @spec stop_model(String.t() | nil, keyword()) :: :ok | {:error, term()}
@@ -97,29 +108,29 @@ defmodule Llm do
 
   @impl GenServer
   def init(opts) do
-    env  = Application.get_env(:llm, __MODULE__, [])
+    env = Application.get_env(:llm, __MODULE__, [])
     boot = Keyword.merge(env, opts, fn _k, _v1, v2 -> v2 end)
 
-    base_url    = Keyword.get(boot, :base_url, System.get_env("OLLAMA_API_BASE") || @default_base)
-    model       = Keyword.get(boot, :model, @default_model)
-    timeout     = Keyword.get(boot, :timeout, @pos_call_timeout_default)
+    base_url = Keyword.get(boot, :base_url, System.get_env("OLLAMA_API_BASE") || @default_base)
+    model = Keyword.get(boot, :model, @default_model)
+    timeout = Keyword.get(boot, :timeout, @pos_call_timeout_default)
     temperature = Keyword.get(boot, :temperature, 0.2)
-    pools       = Keyword.get(boot, :pools, %{default: [size: 8, count: 1]})
-    finch_name  = Keyword.get(boot, :finch_name, @finch_default)
+    pools = Keyword.get(boot, :pools, %{default: [size: 8, count: 1]})
+    finch_name = Keyword.get(boot, :finch_name, @finch_default)
 
-    auto_start_on_boot?  = Keyword.get(boot, :auto_start_on_boot?, false)
-    pull_on_boot?        = Keyword.get(boot, :pull_on_boot?, true)
+    auto_start_on_boot? = Keyword.get(boot, :auto_start_on_boot?, false)
+    pull_on_boot? = Keyword.get(boot, :pull_on_boot?, true)
     # 🔻 Default changed: do NOT warm (and hence do not load) any model at boot
-    warm_on_boot?        = Keyword.get(boot, :warm_on_boot?, false)
-    boot_model           = Keyword.get(boot, :boot_model, model)
-    boot_timeout         = Keyword.get(boot, :boot_timeout, timeout)
+    warm_on_boot? = Keyword.get(boot, :warm_on_boot?, false)
+    boot_model = Keyword.get(boot, :boot_model, model)
+    boot_timeout = Keyword.get(boot, :boot_timeout, timeout)
 
-    warm_on_restart?     = Keyword.get(boot, :warm_on_restart?, false)
-    pull_on_restart?     = Keyword.get(boot, :pull_on_restart?, false)
-    restart_model        = Keyword.get(boot, :restart_model, model)
+    warm_on_restart? = Keyword.get(boot, :warm_on_restart?, false)
+    pull_on_restart? = Keyword.get(boot, :pull_on_restart?, false)
+    restart_model = Keyword.get(boot, :restart_model, model)
 
     auto_restart_on_crash? = Keyword.get(boot, :auto_restart_on_crash?, true)
-    heartbeat_ms           = Keyword.get(boot, :heartbeat_ms, @default_heartbeat_ms)
+    heartbeat_ms = Keyword.get(boot, :heartbeat_ms, @default_heartbeat_ms)
 
     {:ok, _} = Finch.start_link(name: finch_name, pools: pools)
 
@@ -171,9 +182,15 @@ defmodule Llm do
           st2 =
             if state.warm_on_boot? do
               case ModelControl.maybe_warm_model(st, m, t) do
-                {:ok, st3} -> st3
-                {:error, reason} -> Logger.debug("Llm boot warm skipped: #{inspect(reason)}"); st
-                _ -> st
+                {:ok, st3} ->
+                  st3
+
+                {:error, reason} ->
+                  Logger.debug("Llm boot warm skipped: #{inspect(reason)}")
+                  st
+
+                _ ->
+                  st
               end
             else
               st
@@ -202,10 +219,14 @@ defmodule Llm do
   @impl GenServer
   def handle_call(:stop_ollama, _from, state) do
     state1 = %{state | manual_stop?: true}
+
     cond do
       state1.served_by_us? and is_port(state1.ollama_port) ->
         Port.close(state1.ollama_port)
-        {:reply, :ok, %{state1 | ollama_port: nil, served_by_us?: false, warmed_models: MapSet.new()} |> schedule_heartbeat()}
+
+        {:reply, :ok,
+         %{state1 | ollama_port: nil, served_by_us?: false, warmed_models: MapSet.new()}
+         |> schedule_heartbeat()}
 
       true ->
         {:reply, {:error, :not_started_by_us}, schedule_heartbeat(state1)}
@@ -215,11 +236,11 @@ defmodule Llm do
   # start_ollama/2 (defaults updated so it does NOT warm a model)
   @impl GenServer
   def handle_call({:start_ollama, model, opts}, _from, state) do
-    pull?        = Keyword.get(opts, :pull?, true)
+    pull? = Keyword.get(opts, :pull?, true)
     # 🔻 Default changed: do NOT warm here unless explicitly asked
-    warm?        = Keyword.get(opts, :warm?, false)
+    warm? = Keyword.get(opts, :warm?, false)
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    m            = model || state.model
+    m = model || state.model
 
     case Daemon.ensure_serving(state, http_timeout) do
       {:ok, st2, spawned?} ->
@@ -235,7 +256,16 @@ defmodule Llm do
             {false, st2}
           end
 
-        reply = {:ok, %{served?: spawned?, pulled?: pull?, warmed?: warmed?, base_url: st3.base_url, model: m}}
+        reply =
+          {:ok,
+           %{
+             served?: spawned?,
+             pulled?: pull?,
+             warmed?: warmed?,
+             base_url: st3.base_url,
+             model: m
+           }}
+
         {:reply, reply, schedule_heartbeat(st3)}
 
       {:error, st2, reason} ->
@@ -251,14 +281,20 @@ defmodule Llm do
 
   @impl GenServer
   def handle_call({:start_model, model, opts}, _from, state) do
-    pull?        = Keyword.get(opts, :pull?, true)
-    warm?        = Keyword.get(opts, :warm?, true)
+    pull? = Keyword.get(opts, :pull?, true)
+    warm? = Keyword.get(opts, :warm?, true)
     http_timeout = Keyword.get(opts, :timeout, state.timeout)
-    m            = model || state.model
+    m = model || state.model
 
-    case Inference.ensure_autostart_and_warm(state, m, pull?: pull?, warm?: warm?, timeout: http_timeout) do
+    case Inference.ensure_autostart_and_warm(state, m,
+           pull?: pull?,
+           warm?: warm?,
+           timeout: http_timeout
+         ) do
       {:ok, st3, warmed?} ->
-        {:reply, {:ok, %{served?: true, pulled?: true, warmed?: warmed?}}, schedule_heartbeat(st3)}
+        {:reply, {:ok, %{served?: true, pulled?: true, warmed?: warmed?}},
+         schedule_heartbeat(st3)}
+
       {:error, reason, st2} ->
         {:reply, {:error, reason}, schedule_heartbeat(st2)}
     end
@@ -270,7 +306,10 @@ defmodule Llm do
     m = model || state.model
 
     case ModelControl.unload_model_strict(state, m,
-           timeout: http_timeout, attempts: @strict_unload_verify_attempts, sleep_ms: @strict_unload_verify_sleep_ms) do
+           timeout: http_timeout,
+           attempts: @strict_unload_verify_attempts,
+           sleep_ms: @strict_unload_verify_sleep_ms
+         ) do
       :ok -> {:reply, :ok, schedule_heartbeat(drop_warmed(state, m))}
       {:error, reason} -> {:reply, {:error, reason}, schedule_heartbeat(state)}
     end
@@ -281,6 +320,7 @@ defmodule Llm do
     case Inference.chat(model, prompt, opts, state) do
       {:ok, %{content: content, raw: raw}, st2} ->
         {:reply, {:ok, %{content: content, raw: raw}}, schedule_heartbeat(st2)}
+
       {:error, reason, st2} ->
         {:reply, {:error, reason}, schedule_heartbeat(st2)}
     end
@@ -291,6 +331,7 @@ defmodule Llm do
     case Inference.generate(model, prompt, opts, state) do
       {:ok, %{response: resp, raw: raw}, st2} ->
         {:reply, {:ok, %{response: resp, raw: raw}}, schedule_heartbeat(st2)}
+
       {:error, reason, st2} ->
         {:reply, {:error, reason}, schedule_heartbeat(st2)}
     end
@@ -301,6 +342,7 @@ defmodule Llm do
     case Inference.embeddings_one(text, opts, state) do
       {:ok, %{embeddings: vec, raw: raw}, st2} ->
         {:reply, {:ok, %{embeddings: vec, raw: raw}}, schedule_heartbeat(st2)}
+
       {:error, reason, st2} ->
         {:reply, {:error, reason}, schedule_heartbeat(st2)}
     end
@@ -311,6 +353,7 @@ defmodule Llm do
     case Inference.embeddings_batch(list, opts, state) do
       {:ok, out, st2} ->
         {:reply, {:ok, out}, schedule_heartbeat(st2)}
+
       {:error, reason, st2} ->
         {:reply, {:error, reason}, schedule_heartbeat(st2)}
     end
@@ -327,16 +370,19 @@ defmodule Llm do
 
   defp schedule_heartbeat(%{heartbeat_ms: ms} = state) do
     cancel_heartbeat(state)
+
     case is_integer(ms) and ms > 0 do
       true ->
         ref = Process.send_after(self(), :heartbeat, ms)
         %{state | heartbeat_ref: ref}
+
       false ->
         %{state | heartbeat_ref: nil}
     end
   end
 
   defp cancel_heartbeat(%{heartbeat_ref: nil}), do: :ok
+
   defp cancel_heartbeat(%{heartbeat_ref: ref}) when is_reference(ref) do
     Process.cancel_timer(ref, info: false)
     :ok
@@ -357,17 +403,27 @@ defmodule Llm do
             state
           else
             Logger.debug("Llm heartbeat: service down; attempting restart…")
+
             case Daemon.ensure_serving(state, state.timeout) do
               {:ok, st2, _spawned?} ->
-                _ = if state.pull_on_restart?, do: ModelControl.pull_model(state.restart_model || st2.model), else: true
+                _ =
+                  if state.pull_on_restart?,
+                    do: ModelControl.pull_model(state.restart_model || st2.model),
+                    else: true
+
                 if state.warm_on_restart? do
-                  case ModelControl.maybe_warm_model(st2, state.restart_model || st2.model, st2.timeout) do
+                  case ModelControl.maybe_warm_model(
+                         st2,
+                         state.restart_model || st2.model,
+                         st2.timeout
+                       ) do
                     {:ok, stx} -> stx
                     _ -> st2
                   end
                 else
                   st2
                 end
+
               {:error, st2, reason} ->
                 Logger.debug("Llm heartbeat restart failed: #{inspect(reason)}")
                 st2
@@ -400,17 +456,27 @@ defmodule Llm do
 
         true ->
           Logger.debug("Llm auto-restart on crash…")
+
           case Daemon.ensure_serving(state1, state1.timeout) do
             {:ok, st2, _spawned?} ->
-              _ = if state1.pull_on_restart?, do: ModelControl.pull_model(state1.restart_model || st2.model), else: true
+              _ =
+                if state1.pull_on_restart?,
+                  do: ModelControl.pull_model(state1.restart_model || st2.model),
+                  else: true
+
               if state1.warm_on_restart? do
-                case ModelControl.maybe_warm_model(st2, state1.restart_model || st2.model, st2.timeout) do
+                case ModelControl.maybe_warm_model(
+                       st2,
+                       state1.restart_model || st2.model,
+                       st2.timeout
+                     ) do
                   {:ok, stx} -> stx
                   _ -> st2
                 end
               else
                 st2
               end
+
             {:error, st2, reason} ->
               Logger.debug("Llm auto-restart failed: #{inspect(reason)}")
               st2
@@ -422,4 +488,3 @@ defmodule Llm do
 
   def handle_info(_msg, state), do: {:noreply, state}
 end
-

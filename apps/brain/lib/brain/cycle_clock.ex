@@ -46,6 +46,7 @@ defmodule Brain.CycleClock do
 
       _ ->
         hz = configured_or_default_hz()
+
         %{
           hz: hz,
           interval_ms: max(trunc(1000 / hz), 1),
@@ -76,8 +77,8 @@ defmodule Brain.CycleClock do
   @impl true
   def init(opts) do
     cfg = Application.get_env(:brain, __MODULE__, [])
-    hz  = opts[:hz] || cfg[:hz] || @default_hz
-    hz  = if hz <= 0, do: @default_hz, else: hz
+    hz = opts[:hz] || cfg[:hz] || @default_hz
+    hz = if hz <= 0, do: @default_hz, else: hz
 
     interval_ms = max(trunc(1000 / hz), 1)
     now = System.monotonic_time(:millisecond)
@@ -90,7 +91,7 @@ defmodule Brain.CycleClock do
   @impl true
   def handle_info(:tick, %{hz: hz, interval_ms: interval, last_ts: last, seq: seq} = st) do
     now = System.monotonic_time(:millisecond)
-    dt  = max(now - last, 0)
+    dt = max(now - last, 0)
     seq = seq + 1
     phase = rem(seq, hz) / hz
 
@@ -105,9 +106,13 @@ defmodule Brain.CycleClock do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, %{hz: hz, interval_ms: interval, last_ts: last, seq: seq} = st) do
-    now   = System.monotonic_time(:millisecond)
-    dt    = max(now - last, 0)
+  def handle_call(
+        :snapshot,
+        _from,
+        %{hz: hz, interval_ms: interval, last_ts: last, seq: seq} = st
+      ) do
+    now = System.monotonic_time(:millisecond)
+    dt = max(now - last, 0)
     phase = if hz > 0, do: rem(seq, hz) / hz, else: 0.0
 
     reply = %{
@@ -134,4 +139,3 @@ defmodule Brain.CycleClock do
     end
   end
 end
-

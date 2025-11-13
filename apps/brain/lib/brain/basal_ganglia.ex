@@ -1,31 +1,21 @@
+# apps/brain/lib/brain/basal_ganglia.ex
 defmodule Brain.BasalGanglia do
   @moduledoc """
   Stateless gating policy for Working Memory (WM).
 
-  ## API
-    decide(wm, cand, attn, cfg) :: {:allow | :boost | :block, score :: float}
+  decide/4 returns `{decision, score}` where decision ∈ `:allow | :boost | :block`.
 
-  * `wm`   – current WM items (newest-first), as produced by Brain.WorkingMemory.normalize/3
-  * `cand` – candidate map (e.g., LIFG winner, runtime hit, etc.)
-  * `attn` – attention context (used by Brain.Attention.salience/2)
-  * `cfg`  – options (Brain's wm_cfg merged with per-call opts)
+  Inputs:
+    * `wm`   – current WM items (newest-first); items may include `%{payload: %{id: ..., last_bump: ...}}`
+    * `cand` – candidate map (e.g., LIFG winner) with at least `:score` or `:activation_snapshot`
+    * `attn` – attention context (used by Brain.Attention.salience/2 if available)
+    * `cfg`  – merged config (Brain's wm_cfg + per-call opts)
 
-  ## Config keys (all optional)
-    :capacity               (pos int, default 7)
-    :gate_threshold         (0..1, default 0.4)
-    :lifg_min_score         (0..1, default 0.0)  # hard floor for LIFG gating
-    :source_boosts          (map, e.g. %{runtime: 0.2, recency: 0.1})
-    :prefer_sources         (list, default [:hippocampus, :pmtg, :lifg, :runtime, :recency, :intent])
-    :disprefer_sources      (list, default [])
-    :dup_penalty            (0..1, default 0.0)  # lower score when duplicate exists
-    :cooldown_ms            (int, default 0)     # if same id bumped recently -> treat as :boost
-    :fullness_penalty_mult  (0..1, default 0.2)  # raises threshold as WM fills up
-
-    # Threshold knobs
-    :boost_threshold        (0..1, default gate_threshold)
-    :boost_threshold_pref   (0..1, default gate_threshold - 0.05 |> clamp at 0)
-    :block_threshold        (0..1, default 0.20)
-    :block_threshold_pref   (0..1, default 0.25)
+  Config keys (all optional; see normalize_cfg/1 for defaults):
+    :capacity, :gate_threshold, :lifg_min_score, :source_boosts,
+    :prefer_sources, :disprefer_sources, :dup_penalty, :cooldown_ms,
+    :fullness_penalty_mult, :boost_threshold, :boost_threshold_pref,
+    :block_threshold, :block_threshold_disprefer
   """
 
   @type decision :: :allow | :boost | :block
@@ -33,87 +23,88 @@ defmodule Brain.BasalGanglia do
   def decide(wm, cand, attn, cfg)
       when is_list(wm) and is_map(cand) and is_map(attn) and is_map(cfg) do
     now = System.system_time(:millisecond)
-    capacity = get_pos_int(Map.get(cfg, :capacity), 7)
-    thr_base = clamp01(Map.get(cfg, :gate_threshold, 0.4))
-    min_floor = clamp01(Map.get(cfg, :lifg_min_score, Map.get(cfg, :min_score, 0.0)))
-    src_boosts = Map.get(cfg, :source_boosts, %{})
+    cfg = normalize_cfg(cfg)
 
-    # Accept both spellings; broaden by default
-    prefer_src =
-      Map.get(
-        cfg,
-        :prefer_sources,
-        Map.get(cfg, :preferred_sources, [:hippocampus, :pmtg, :lifg, :runtime, :recency, :intent])
-      )
+    capacity = cfg.capacity
+    thr_base = cfg.gate_threshold
+    min_floor = cfg.lifg_min_score
+    dup_pen = cfg.dup_penalty
+    cooldown = cfg.cooldown_ms
+    fmult = cfg.fullness_penalty_mult
 
-    disp_src = Map.get(cfg, :disprefer_sources, Map.get(cfg, :dispreferred_sources, []))
+    boost_thr = cfg.boost_threshold
+    boost_thr_pref = cfg.boost_threshold_pref
+    block_thr = cfg.block_threshold
+    block_thr_disp = cfg.block_threshold_disprefer
 
-    dup_pen = clamp01(Map.get(cfg, :dup_penalty, 0.0))
-    cooldown = get_pos_int(Map.get(cfg, :cooldown_ms), 0)
-    fmult = clamp01(Map.get(cfg, :fullness_penalty_mult, 0.2))
+    prefer_src = cfg.prefer_sources |> Enum.map(&source_key/1)
+    disp_src = cfg.disprefer_sources |> Enum.map(&source_key/1)
 
-    # Threshold knobs (optional in cfg)
-    boost_thr = clamp01(Map.get(cfg, :boost_threshold, thr_base))
-    boost_thr_pref = clamp01(Map.get(cfg, :boost_threshold_pref, max(thr_base - 0.05, 0.0)))
-    block_thr = clamp01(Map.get(cfg, :block_threshold, 0.20))
-    block_thr_disp = clamp01(Map.get(cfg, :block_threshold_pref, 0.25))
-
-    # fullness raises the effective gate; respect min_floor as a hard lower bound
-    fullness = if capacity > 0, do: min(length(wm) / capacity, 1.0), else: 1.0
+    # Fullness raises the effective gate; never drop below hard floor
+    fullness = min(length(wm) / max(capacity, 1), 1.0)
     thr_eff0 = clamp01(thr_base + fmult * fullness)
     thr_eff = max(thr_eff0, min_floor)
 
-    # --- scoring: NEVER undercut the caller-provided cand[:score] ---
-    base = to_float(Map.get(cand, :score, Map.get(cand, :activation_snapshot, 0.0)))
+    # Base score (never undercut caller-provided score)
+    base =
+      cand
+      |> Map.get(:score, Map.get(cand, :activation_snapshot, 0.0))
+      |> to_float()
 
     salience =
       try do
-        Brain.Attention.salience(cand, attn)
+        if Code.ensure_loaded?(Brain.Attention) and
+             function_exported?(Brain.Attention, :salience, 2) do
+          Brain.Attention.salience(cand, attn)
+        else
+          0.0
+        end
       rescue
         _ -> 0.0
       end
 
-    src_bonus = to_float(Map.get(src_boosts, Map.get(cand, :source)))
-    blended = clamp01(0.7 * base + 0.3 * salience + (src_bonus || 0.0))
+    src_bonus =
+      cfg.source_boosts
+      |> Map.get(Map.get(cand, :source))
+      |> to_float()
+
+    blended = clamp01(0.7 * base + 0.3 * salience + src_bonus)
     score0 = max(base, blended)
 
-    {dup?, recent?} = duplicate_flags(wm, cand, now, cooldown)
+    {dup?, match} = duplicate_match(wm, cand)
 
     score =
-      score0
-      |> then(fn s -> if dup?, do: s * max(1.0 - dup_pen, 0.0), else: s end)
+      if(dup?, do: score0 * max(1.0 - dup_pen, 0.0), else: score0)
       |> clamp01()
 
-    # normalized source keys (string compare avoids atom leaks)
-    src_key = source_key(Map.get(cand, :source))
-    prefer_keys = Enum.map(prefer_src, &source_key/1)
-    disprefer_keys = Enum.map(disp_src, &source_key/1)
+    recent? = cooldown_match?(match, now, cooldown)
 
-    pref? = src_key in prefer_keys
-    disp? = src_key in disprefer_keys
+    src_key = source_key(Map.get(cand, :source))
+    pref? = src_key in prefer_src
+    disp? = src_key in disp_src
 
     cond do
-      # Hard floor: if below min_floor after adjustments, block
+      # Hard floor
       score < min_floor ->
         {:block, score}
 
-      # Cooldown hit = targeted boost (re-bump existing)
+      # Cooldown rebump
       recent? ->
         {:boost, score}
 
-      # Preferred sources: easier boost path; don’t set bar below gate floor
+      # Preferred sources: easier boost path, but not below effective gate
       pref? and score >= max(boost_thr_pref, thr_eff) ->
         {:boost, score}
 
-      # Strong enough overall → allow
+      # Strong enough overall
       score >= max(boost_thr, thr_eff) ->
         {:allow, score}
 
-      # Dispreferred weak → block
+      # Dispreferred weak
       disp? and score <= block_thr_disp ->
         {:block, score}
 
-      # Generic weak → block
+      # Generic weak
       score <= block_thr ->
         {:block, score}
 
@@ -123,7 +114,105 @@ defmodule Brain.BasalGanglia do
     end
   end
 
-  # --- helpers for source normalization (string-based; avoids atom leaks) ---
+  # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # Normalize cfg with safe defaults & clamped ranges
+  defp normalize_cfg(cfg) do
+    thr_base = clamp01(Map.get(cfg, :gate_threshold, 0.40))
+
+    %{
+      capacity: get_pos_int(Map.get(cfg, :capacity, 7), 7),
+      gate_threshold: thr_base,
+      lifg_min_score: clamp01(Map.get(cfg, :lifg_min_score, Map.get(cfg, :min_score, 0.0))),
+      source_boosts: Map.get(cfg, :source_boosts, %{}),
+      prefer_sources:
+        Map.get(
+          cfg,
+          :prefer_sources,
+          Map.get(cfg, :preferred_sources, [
+            :hippocampus,
+            :pmtg,
+            :lifg,
+            :runtime,
+            :recency,
+            :intent
+          ])
+        ),
+      disprefer_sources:
+        Map.get(cfg, :disprefer_sources, Map.get(cfg, :dispreferred_sources, [])),
+      dup_penalty: clamp01(Map.get(cfg, :dup_penalty, 0.0)),
+      cooldown_ms: get_pos_int(Map.get(cfg, :cooldown_ms, 0), 0),
+      fullness_penalty_mult: clamp01(Map.get(cfg, :fullness_penalty_mult, 0.20)),
+      boost_threshold: clamp01(Map.get(cfg, :boost_threshold, thr_base)),
+      boost_threshold_pref:
+        clamp01(Map.get(cfg, :boost_threshold_pref, max(thr_base - 0.05, 0.0))),
+      block_threshold: clamp01(Map.get(cfg, :block_threshold, 0.20)),
+      block_threshold_disprefer: clamp01(Map.get(cfg, :block_threshold_disprefer, 0.25))
+    }
+  end
+
+  # Duplicate detection (by id or fuzzy key)
+  # Returns {dup?, matching_item_or_nil}
+  defp duplicate_match(wm, cand) do
+    {id, fuzzy_key} = extract_keys(cand)
+
+    found =
+      Enum.find(wm, fn it ->
+        item_matches?(it, id, fuzzy_key)
+      end)
+
+    {not is_nil(found), found}
+  end
+
+  # Cooldown rebump if a recent matching item exists
+  defp cooldown_match?(nil, _now_ms, _cooldown_ms), do: false
+
+  defp cooldown_match?(match, now_ms, cooldown_ms)
+       when is_map(match) and is_integer(cooldown_ms) and cooldown_ms > 0 do
+    last = Map.get(match, :last_bump, Map.get(match, :ts, 0)) |> to_int()
+    age = now_ms - last
+    age >= 0 and age < cooldown_ms
+  end
+
+  defp cooldown_match?(_match, _now_ms, _cooldown_ms), do: false
+
+  defp item_matches?(it, cand_id, fuzzy_key) do
+    ip = Map.get(it, :payload, %{})
+    it_id = Map.get(ip, :id) || Map.get(it, :id)
+
+    cond do
+      # exact id match
+      not is_nil(cand_id) and it_id == cand_id ->
+        true
+
+      # fuzzy: id head or stored word/lemma/phrase matches
+      not is_nil(fuzzy_key) and down("#{it_id || ""}") == fuzzy_key ->
+        true
+
+      not is_nil(fuzzy_key) and
+          fuzzy_key == down(extract_fuzzy_key(ip) || extract_fuzzy_key(it)) ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  # Extract consistent matching keys from candidate
+  defp extract_keys(cand) do
+    payload = Map.get(cand, :payload, %{})
+    id = Map.get(payload, :id) || Map.get(cand, :id)
+    fuzzy_key = down(extract_fuzzy_key(payload) || extract_fuzzy_key(cand))
+    {id, fuzzy_key}
+  end
+
+  defp extract_fuzzy_key(%{lemma: l}) when is_binary(l), do: l
+  defp extract_fuzzy_key(%{word: w}) when is_binary(w), do: w
+  defp extract_fuzzy_key(%{phrase: p}) when is_binary(p), do: p
+  defp extract_fuzzy_key(%{id: id}) when is_binary(id), do: parse_id_word(id)
+  defp extract_fuzzy_key(_), do: nil
+
+  # Normalize source keys via string path (avoid atom leaks)
   defp source_key(nil), do: ""
 
   defp source_key(a) when is_atom(a),
@@ -134,51 +223,6 @@ defmodule Brain.BasalGanglia do
 
   defp source_key(_), do: ""
 
-  # ---------- internals ----------
-
-  # Returns {dup?, recent?}
-  defp duplicate_flags(wm, cand, now_ms, cooldown_ms) do
-    id = Map.get(cand, :id) || Map.get(cand, :chosen_id)
-    key1 = down(Map.get(cand, :lemma) || Map.get(cand, :word) || Map.get(cand, :phrase))
-    key2 = down(parse_id_word(Map.get(cand, :id)))
-
-    found =
-      Enum.find(wm, fn it ->
-        it_id = Map.get(it, :id)
-        ip = Map.get(it, :payload, %{})
-
-        ip_key =
-          down(
-            Map.get(ip, :lemma) || Map.get(ip, :word) || Map.get(ip, :phrase) ||
-              parse_id_word(Map.get(ip, :id))
-          )
-
-        cond do
-          it_id == id -> true
-          not is_nil(key1) and down("#{it_id || ""}") == key1 -> true
-          not is_nil(key1) and ip_key == key1 -> true
-          not is_nil(key2) and ip_key == key2 -> true
-          true -> false
-        end
-      end)
-
-    dup? = not is_nil(found)
-
-    recent? =
-      case {found, cooldown_ms} do
-        {%{last_bump: lb}, c} when is_integer(c) and c > 0 ->
-          age = now_ms - (lb || 0)
-          age >= 0 and age < c
-
-        _ ->
-          false
-      end
-
-    {dup?, recent?}
-  end
-
-  defp parse_id_word(nil), do: nil
-
   defp parse_id_word(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
       [w | _] -> w
@@ -186,18 +230,22 @@ defmodule Brain.BasalGanglia do
     end
   end
 
+  defp parse_id_word(_), do: nil
+
   defp down(nil), do: nil
   defp down(b) when is_binary(b), do: String.downcase(b)
   defp down(other), do: other
 
-  defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
+  defp clamp01(x) when is_number(x), do: min(1.0, max(0.0, x * 1.0))
   defp clamp01(_), do: 0.0
 
   defp to_float(x) when is_number(x), do: x * 1.0
   defp to_float(_), do: 0.0
 
-  # Use underscore on the unused parameter in the guard-matching clause to silence warnings.
+  defp to_int(x) when is_integer(x), do: x
+  defp to_int(x) when is_float(x), do: trunc(x)
+  defp to_int(_), do: 0
+
   defp get_pos_int(v, _default) when is_integer(v) and v > 0, do: v
   defp get_pos_int(_, default), do: default
 end
-

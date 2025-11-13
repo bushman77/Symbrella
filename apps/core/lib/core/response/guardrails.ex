@@ -19,14 +19,19 @@ defmodule Core.Response.Guardrails do
   @spec detect(String.t()) :: %{guardrail?: boolean, approve_token?: boolean, flags: [atom]}
   def detect(text) do
     t = dn(text)
+
     flags =
       []
       |> flag_if(t =~ ~r/\b(db.*brain.*core.*web|web.*core.*brain.*db)\b/)
       |> flag_if(t =~ ~r/\bmove\b.*\bLIFG\b/i, :lifg_move)
       |> flag_if(t =~ ~r/\bchar(-| )?grams?\b.*\bLIFG\b/i, :chargrams_to_lifg)
-      |> flag_if(t =~ ~r/\brename\b.*(Brain\.Application|Symbrella\.Application)/i, :app_supervisor_rename)
+      |> flag_if(
+        t =~ ~r/\brename\b.*(Brain\.Application|Symbrella\.Application)/i,
+        :app_supervisor_rename
+      )
 
     flags2 = if flags == [], do: flags, else: flags
+
     %{
       guardrail?: flags2 != [],
       approve_token?: Regex.match?(@approve, t),
@@ -42,4 +47,3 @@ defmodule Core.Response.Guardrails do
   defp dn(nil), do: ""
   defp dn(t), do: t |> to_string() |> String.downcase()
 end
-

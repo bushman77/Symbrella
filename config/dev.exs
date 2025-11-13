@@ -49,9 +49,10 @@ config :brain, Brain.MoodCore,
 
 # config/dev.exs (and prod.exs)
 config :brain, Brain.MoodPolicy,
-  gain: 1.0,             # overall strength (try 0.5..1.5)
-  min_interval_ms: 150   # rate-limit bumps from rapid-fire intents
-
+  # overall strength (try 0.5..1.5)
+  gain: 1.0,
+  # rate-limit bumps from rapid-fire intents
+  min_interval_ms: 150
 
 # Optional extra LIFG outer weights in dev (kept from your original)
 config :brain, :lifg_weights, prime: 0.05

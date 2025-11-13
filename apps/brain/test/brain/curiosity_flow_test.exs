@@ -23,10 +23,13 @@ defmodule Brain.CuriosityFlowTest do
     :ok = Curiosity.nudge()
 
     # Wait until WM grows
-    assert wait_until(fn ->
-             %{wm: wm1} = Brain.snapshot_wm()
-             length(wm1) > n0
-           end, 1_000)
+    assert wait_until(
+             fn ->
+               %{wm: wm1} = Brain.snapshot_wm()
+               length(wm1) > n0
+             end,
+             1_000
+           )
 
     %{wm: wm2} = Brain.snapshot_wm()
     [head | _] = wm2
@@ -70,7 +73,9 @@ defmodule Brain.CuriosityFlowTest do
 
   defp do_wait_until(fun, t0, timeout_ms, step_ms) do
     case safe_true?(fun) do
-      true -> true
+      true ->
+        true
+
       false ->
         if System.monotonic_time(:millisecond) - t0 > timeout_ms do
           false
@@ -91,4 +96,3 @@ defmodule Brain.CuriosityFlowTest do
     end
   end
 end
-

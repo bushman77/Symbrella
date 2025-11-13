@@ -52,4 +52,3 @@ defmodule Brain.DLPFC.Policy do
   defp ensure_int_min(x, minv) when is_integer(x), do: if(x < minv, do: minv, else: x)
   defp ensure_int_min(_, minv), do: minv
 end
-

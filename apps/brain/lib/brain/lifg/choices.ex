@@ -27,8 +27,8 @@ defmodule Brain.LIFG.Choices do
         Safe.get(si_after, :candidates_by_token, %{}) || %{}
 
     Enum.map(raw_choices, fn ch0 ->
-      ch   = Safe.to_plain(ch0)
-      idx  = Safe.get(ch, :token_index, 0)
+      ch = Safe.to_plain(ch0)
+      idx = Safe.get(ch, :token_index, 0)
       # Scores may be :none depending on config; default to %{}
       scores = Safe.get(ch, :scores, %{}) || %{}
 
@@ -101,4 +101,3 @@ defmodule Brain.LIFG.Choices do
     end)
   end
 end
-

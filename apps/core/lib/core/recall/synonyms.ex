@@ -12,7 +12,7 @@ defmodule Core.Recall.Synonyms do
   """
 
   @type word :: String.t()
-  @type pos  :: atom() | nil
+  @type pos :: atom() | nil
 
   @type entry :: %{
           lemma: word(),
@@ -73,7 +73,8 @@ defmodule Core.Recall.Synonyms do
     {map, cached?} =
       case Core.Synonyms.for_keys([key], syn_opts) do
         {:ok, m, meta} when is_map(m) -> {m, Map.get(meta, :cached?, false)}
-        _                             -> {%{}, false}  # defensive
+        # defensive
+        _ -> {%{}, false}
       end
 
     list =
@@ -103,8 +104,10 @@ defmodule Core.Recall.Synonyms do
   @spec expand([word() | %{word: word(), pos: pos()}], keyword()) ::
           {:ok, [entry()], %{inputs: non_neg_integer(), unique: non_neg_integer()}}
   def expand(terms, opts \\ []) when is_list(terms) do
-    per_top_k = Keyword.get(opts, :per_top_k, Keyword.get(opts, :top_k, config(:top_k, @default_top_k)))
-    limit     = Keyword.get(opts, :limit, 64)
+    per_top_k =
+      Keyword.get(opts, :per_top_k, Keyword.get(opts, :top_k, config(:top_k, @default_top_k)))
+
+    limit = Keyword.get(opts, :limit, 64)
 
     results =
       terms
@@ -160,9 +163,9 @@ defmodule Core.Recall.Synonyms do
     |> case do
       "noun" -> :noun
       "verb" -> :verb
-      "adj"  -> :adj
-      "adv"  -> :adv
-      other  -> String.to_atom(other)
+      "adj" -> :adj
+      "adv" -> :adv
+      other -> String.to_atom(other)
     end
   end
 
@@ -180,6 +183,7 @@ defmodule Core.Recall.Synonyms do
     list
     |> Enum.reduce(%{}, fn e = %{lemma: l, pos: p}, acc ->
       k = {l, p}
+
       Map.update(acc, k, e, fn prev ->
         if (prev[:prior] || 0.0) >= (e[:prior] || 0.0), do: prev, else: e
       end)
@@ -188,4 +192,3 @@ defmodule Core.Recall.Synonyms do
     |> Enum.sort_by(&{-(&1[:prior] || 0.0), &1.lemma})
   end
 end
-

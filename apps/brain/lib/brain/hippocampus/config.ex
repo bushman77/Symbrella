@@ -77,4 +77,3 @@ defmodule Brain.Hippocampus.Config do
     mix_env == :test
   end
 end
-

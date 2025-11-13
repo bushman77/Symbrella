@@ -15,24 +15,34 @@ defmodule Brain.ControlSignals do
   @enforce_keys []
   defstruct [
     # DLPFC
-    :policy,             # policy()
-    :max_retries,        # pos_integer()
-    :top_k,              # pos_integer()
+    # policy()
+    :policy,
+    # pos_integer()
+    :max_retries,
+    # pos_integer()
+    :top_k,
 
     # FPC
-    :branch_budget,      # non_neg_integer()
-    :switch_after_ms,    # non_neg_integer()
+    # non_neg_integer()
+    :branch_budget,
+    # non_neg_integer()
+    :switch_after_ms,
 
     # VmPFC
-    :utility_prior,      # 0.0..1.0
-    :explore_rate,       # 0.0..1.0
+    # 0.0..1.0
+    :utility_prior,
+    # 0.0..1.0
+    :explore_rate,
 
     # DmPFC
-    :confidence_scale,   # 0.5..1.5
-    :acc_conflict_gain,  # 0.5..1.5
+    # 0.5..1.5
+    :confidence_scale,
+    # 0.5..1.5
+    :acc_conflict_gain,
 
     # Salience
-    :salience_boost      # 0.0..1.0
+    # 0.0..1.0
+    :salience_boost
   ]
 
   @type t :: %__MODULE__{
@@ -58,9 +68,9 @@ defmodule Brain.ControlSignals do
         part_map =
           cond do
             is_struct(part) -> Map.from_struct(part)
-            is_map(part)    -> part
-            is_list(part)   -> Map.new(part)
-            true            -> %{}
+            is_map(part) -> part
+            is_list(part) -> Map.new(part)
+            true -> %{}
           end
 
         Map.merge(acc, part_map, fn _k, _v1, v2 -> v2 end)
@@ -108,6 +118,7 @@ defmodule Brain.ControlSignals do
   defp clamp01(x) when is_number(x), do: clamp_range(x, 0.0, 1.0)
 
   defp clamp_range(nil, _lo, _hi), do: nil
+
   defp clamp_range(x, lo, hi) when is_number(x) and is_number(lo) and is_number(hi) do
     cond do
       x < lo -> lo
@@ -117,6 +128,7 @@ defmodule Brain.ControlSignals do
   end
 
   defp clamp_int_minmax_or_nil(nil, _lo, _hi), do: nil
+
   defp clamp_int_minmax_or_nil(x, lo, hi) when is_integer(x) do
     cond do
       x < lo -> lo
@@ -125,4 +137,3 @@ defmodule Brain.ControlSignals do
     end
   end
 end
-

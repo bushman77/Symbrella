@@ -67,8 +67,8 @@ defmodule Brain.Hippocampus.Normalize do
     |> candidate_from_map()
     |> case do
       nil -> []
-      ""  -> []
-      v   -> [norm_string(v)]
+      "" -> []
+      v -> [norm_string(v)]
     end
   end
 
@@ -101,9 +101,9 @@ defmodule Brain.Hippocampus.Normalize do
 
   def episode_token_set(%{slate: %{} = slate}) do
     cond do
-      is_list(slate[:tokens])  -> slate[:tokens]  |> Enum.map(&token_norm/1)  |> set_from()
+      is_list(slate[:tokens]) -> slate[:tokens] |> Enum.map(&token_norm/1) |> set_from()
       is_list(slate[:winners]) -> slate[:winners] |> Enum.map(&winner_norm/1) |> set_from()
-      true                     -> cue_set(slate)
+      true -> cue_set(slate)
     end
   end
 
@@ -120,7 +120,7 @@ defmodule Brain.Hippocampus.Normalize do
     |> candidate_from_map()
     |> case do
       nil -> ""
-      v   -> norm_string(v)
+      v -> norm_string(v)
     end
   end
 
@@ -132,7 +132,7 @@ defmodule Brain.Hippocampus.Normalize do
     |> first_present([:norm, :lemma, :word, :phrase, :id, :chosen_id])
     |> case do
       nil -> ""
-      v   -> norm_string(v)
+      v -> norm_string(v)
     end
   end
 
@@ -147,12 +147,24 @@ defmodule Brain.Hippocampus.Normalize do
   defp first_present(map, keys) do
     Enum.find_value(keys, fn k ->
       case Map.fetch(map, k) do
-        :error -> nil
-        {:ok, nil} -> nil
-        {:ok, ""} -> nil
-        {:ok, v} when is_binary(v) -> non_blank(v)
-        {:ok, v} when is_atom(v) -> non_blank(Atom.to_string(v))
-        {:ok, v} when is_integer(v) -> Integer.to_string(v)
+        :error ->
+          nil
+
+        {:ok, nil} ->
+          nil
+
+        {:ok, ""} ->
+          nil
+
+        {:ok, v} when is_binary(v) ->
+          non_blank(v)
+
+        {:ok, v} when is_atom(v) ->
+          non_blank(Atom.to_string(v))
+
+        {:ok, v} when is_integer(v) ->
+          Integer.to_string(v)
+
         {:ok, v} ->
           # Allow ids like "alpha|noun|1" in `id`/`chosen_id`
           case k do
@@ -173,12 +185,14 @@ defmodule Brain.Hippocampus.Normalize do
   defp parse_id_word(nil), do: nil
   defp parse_id_word(v) when is_atom(v), do: v |> Atom.to_string() |> parse_id_word()
   defp parse_id_word(v) when is_integer(v), do: Integer.to_string(v)
+
   defp parse_id_word(v) when is_binary(v) do
     case String.split(v, "|", parts: 2) do
       [w | _] -> String.trim(w)
       _ -> nil
     end
   end
+
   defp parse_id_word(_), do: nil
 
   # Normalize to downcased, trimmed binary.
@@ -188,7 +202,7 @@ defmodule Brain.Hippocampus.Normalize do
 
   # True if value is empty/blank.
   def empty?(nil), do: true
-  def empty?(""),  do: true
+  def empty?(""), do: true
   def empty?(s) when is_binary(s), do: String.trim(s) == ""
   def empty?(list) when is_list(list), do: Enum.all?(list, &empty?/1)
   def empty?(_), do: false
@@ -217,4 +231,3 @@ defmodule Brain.Hippocampus.Normalize do
     |> MapSet.new()
   end
 end
-

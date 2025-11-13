@@ -27,9 +27,13 @@ defmodule Core.Token do
             instances: [],
             n: 1,
             # Optional hints; safe for downstream that uses maps
-            kind: :word,    # :word | :punct
-            pos: nil,       # "punct" for punctuation tokens (only when span_mode=:chars)
-            subpos: nil     # :sentence_final | :comma | :dash | ...
+            # :word | :punct
+            kind: :word,
+            # "punct" for punctuation tokens (only when span_mode=:chars)
+            pos: nil,
+            # :sentence_final | :comma | :dash | ...
+            subpos: nil
+
   @type t :: %__MODULE__{
           phrase: String.t(),
           span: {non_neg_integer(), non_neg_integer()},
@@ -46,7 +50,7 @@ defmodule Core.Token do
 
   @spec tokenize(String.t(), keyword()) :: Core.SemanticInput.t()
   def tokenize(sentence, opts \\ []) when is_binary(sentence) do
-    max_n     = Keyword.get(opts, :max_wordgram_n, 3) |> max(1)
+    max_n = Keyword.get(opts, :max_wordgram_n, 3) |> max(1)
     span_mode = Keyword.get(opts, :span_mode, :words)
 
     s =
@@ -112,10 +116,23 @@ defmodule Core.Token do
 
   @punct_sf MapSet.new(["?", "!", "."])
   @punct_map %{
-    "," => :comma, ";" => :colon, ":" => :colon,
-    "—" => :dash, "-" => :dash, "…" => :ellipsis,
-    "\"" => :quote, "”" => :quote, "“" => :quote, "’" => :quote, "'" => :quote,
-    "(" => :paren, ")" => :paren, "[" => :paren, "]" => :paren, "{" => :paren, "}" => :paren
+    "," => :comma,
+    ";" => :colon,
+    ":" => :colon,
+    "—" => :dash,
+    "-" => :dash,
+    "…" => :ellipsis,
+    "\"" => :quote,
+    "”" => :quote,
+    "“" => :quote,
+    "’" => :quote,
+    "'" => :quote,
+    "(" => :paren,
+    ")" => :paren,
+    "[" => :paren,
+    "]" => :paren,
+    "{" => :paren,
+    "}" => :paren
   }
 
   @doc false
@@ -189,7 +206,7 @@ defmodule Core.Token do
 
       for n <- max_here..1//-1 do
         {first, _} = Enum.at(word_tokens, wi)
-        {last,  _} = Enum.at(word_tokens, wi + n - 1)
+        {last, _} = Enum.at(word_tokens, wi + n - 1)
 
         phrase =
           word_tokens
@@ -243,7 +260,8 @@ defmodule Core.Token do
       # If a token is already in char spans (e.g., punctuation we might introduce later),
       # try to detect and keep as-is. Here we assume word spans when 0 <= i <= j <= length(words).
       cond do
-        is_integer(i) and is_integer(j) and i >= 0 and j >= i and j <= length(words) and n == (j - i) ->
+        is_integer(i) and is_integer(j) and i >= 0 and j >= i and j <= length(words) and
+            n == j - i ->
           start_char = Enum.at(starts, i, 0)
           last_idx = j - 1
           end_char = Enum.at(ends, last_idx, start_char)
@@ -295,7 +313,9 @@ defmodule Core.Token do
         reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
         reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
         reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
-        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+
+        reasons =
+          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
         if reasons == [] do
           {acc, st}
@@ -329,4 +349,3 @@ defmodule Core.Token do
 
   defp safe_slice(_s, _st, _en), do: ""
 end
-

@@ -9,10 +9,11 @@ defmodule BrainLIFGTest do
   defp approx_equal(a, b, eps \\ 1.0e-6), do: abs(a - b) <= eps
   defp sum(xs), do: Enum.reduce(xs, 0.0, &+/2)
 
-  defp lifg_event!(%SemanticInput{trace: trace}) do
-    Enum.find(trace, &(&1[:stage] == :lifg_stage1)) ||
-      flunk("LIFG trace event not found")
-  end
+defp lifg_event!(%{trace: [%{stage: :lifg_stage1} = ev | _]}) , do: ev
+defp lifg_event!(%{trace: trace}) when is_list(trace) do
+  Enum.find(trace, &match?(%{stage: :lifg_stage1}, &1)) ||
+    flunk("No lifg_stage1 event in trace")
+end
 
   defp sample_si(ctx_vec) do
     tokens = [%{phrase: "bank"}, %{phrase: "charge"}]

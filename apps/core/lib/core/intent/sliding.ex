@@ -18,9 +18,15 @@ defmodule Core.Intent.Sliding do
 
     intent =
       cond do
-        questionish?(forms) or match(seq, [[:adverb, :aux, :pron], [:aux, :pron], [:modal, :pron, :verb]]) -> :question
-        starts_with?(forms, @interj) -> :greet
-        true -> :inform
+        questionish?(forms) or
+            match(seq, [[:adverb, :aux, :pron], [:aux, :pron], [:modal, :pron, :verb]]) ->
+          :question
+
+        starts_with?(forms, @interj) ->
+          :greet
+
+        true ->
+          :inform
       end
 
     bias = build_bias(intent, seq, forms)
@@ -46,12 +52,12 @@ defmodule Core.Intent.Sliding do
       Enum.map(forms, fn {raw, low} ->
         cond do
           low in @interj -> :interj
-          low in @wh     -> :wh
-          low in @aux    -> :aux
-          low in @modal  -> :modal
-          low in @pron   -> :pron
-          low in @det    -> :det
-          low in @prep   -> :prep
+          low in @wh -> :wh
+          low in @aux -> :aux
+          low in @modal -> :modal
+          low in @pron -> :pron
+          low in @det -> :det
+          low in @prep -> :prep
           capitalized?(raw) and String.length(raw) >= 2 -> :proper
           String.ends_with?(low, "?") -> :qmark
           true -> guess_open_class(low)
@@ -63,9 +69,14 @@ defmodule Core.Intent.Sliding do
 
   defp guess_open_class(low) do
     cond do
-      low in ~w(stream play launch open install configure fix run) -> :verb
-      low in ~w(phone pc client game app settings sunshine moonlight parsec steam everquest) -> :noun
-      true -> :unknown
+      low in ~w(stream play launch open install configure fix run) ->
+        :verb
+
+      low in ~w(phone pc client game app settings sunshine moonlight parsec steam everquest) ->
+        :noun
+
+      true ->
+        :unknown
     end
   end
 
@@ -102,9 +113,9 @@ defmodule Core.Intent.Sliding do
       v =
         cond do
           pos in [:verb, :proper, :noun] -> 0.25
-          low in @func                   -> -0.18
-          pos == :unknown                -> 0.0
-          true                           -> -0.05
+          low in @func -> -0.18
+          pos == :unknown -> 0.0
+          true -> -0.05
         end
 
       {ix, v}
@@ -115,7 +126,7 @@ defmodule Core.Intent.Sliding do
   defp build_bias(:greet, _seq, forms) do
     forms
     |> Enum.with_index()
-    |> Enum.map(fn {({_raw, low}), ix} ->
+    |> Enum.map(fn {{_raw, low}, ix} ->
       v = if low in @interj, do: 0.3, else: -0.05
       {ix, v}
     end)
@@ -152,4 +163,3 @@ defmodule Core.Intent.Sliding do
 
   defp extract_keyword(_, _), do: nil
 end
-
