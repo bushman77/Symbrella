@@ -5,6 +5,46 @@
 > Symbrella is an NSSI (Neuro‑Symbolic Synthetic Intelligence) umbrella app.  
 > It models brain‑inspired regions (LIFG, PMTG, Hippocampus, ACC, Basal Ganglia, etc.) as OTP processes, combining symbolic structure with learned signals (Axon/Nx, embeddings, episodic recall).
 
+Symbrella treats your phone (and eventually real robots) as a **body**, and this umbrella as a **brain**.  
+It combines:
+
+- **Neural models** (Axon/Nx, embeddings)  
+- **Symbolic control** (GenServers, policies, Ecto-backed memory)  
+- **Brain-inspired regions** (LIFG, PMTG, Hippocampus, WM, Mood, Cerebellum, etc.)
+
+…into a single, inspectable cognitive system you can run locally.
+
+---
+
+## Why Symbrella?
+
+Most AI systems today look like this:
+
+> “Send text to a big model in the cloud → get a text answer back.”
+
+Symbrella is for people who want more:
+
+- A **long-lived brain** with state, mood, memories, and habits.  
+- A **cognitive pipeline** you can actually see and debug.  
+- A path from **phone** → **VR cockpit** → **physical robot** without changing the mental model.
+
+Instead of treating AI as a black-box API, Symbrella treats it as a **living system** with regions, episodes, and working memory.
+
+Modern AI stacks are converging on a similar pattern:
+
+> **Neural core** + **symbolic wrapper** + **tools & memory**.
+
+Reasoning models (e.g. “reasoning” LLMs and agent frameworks) follow this pattern, even if they don’t use brain metaphors or region names.
+
+Symbrella lives in that same ecosystem, but pushes harder on the **“actual brain”** side:
+
+- Named cortical/subcortical regions instead of anonymous “agents”  
+- Explicit Working Memory and episodic recall stages  
+- Mood / neuromodulators that can influence control flow  
+- An explicit path to **embodiment** (phone sensors, VR, robots)
+
+See **SYMBRELLA_PROJECT_GUARDRAILS.md** for module boundaries, approval protocol, and invariants.
+
 ---
 
 ## Quickstart
@@ -44,7 +84,104 @@ mix phx.server
 - **apps/symbrella** — Umbrella runtime; single supervisor tree.
 - **apps/symbrella_web** — Phoenix LiveView UI (brain view, chat hooks, etc.).
 
-See **SYMBRELLA_PROJECT_GUARDRAILS.md** for module boundaries, approval protocol, and invariants.
+---
+
+## Symbrella in the AI landscape
+
+At a high level, you can think of Symbrella next to a “typical” modern reasoning stack:
+
+```text
+┌────────────────────────────┐        ┌────────────────────────────┐
+│ OpenAI-style Reasoning     │        │ Symbrella Brain Stack      │
+└────────────────────────────┘        └────────────────────────────┘
+
+User prompt                          Sensor / user input
+      │                                         │
+      ▼                                         ▼
+Orchestrator / agent                Core.resolve_input/2
+(choose tools, model, plan)         (Tokenize → LTM → MWE → LIFG)
+      │                                         │
+      ▼                                         ▼
+Reasoning model (LLM)                Brain regions:
+(internal chain-of-thought)          LIFG ⇄ ATL ⇄ Hippocampus ⇄ WM ⇄ Mood ⇄ Cerebellum
+      │                                         │
+      ▼                                         ▼
+Tools (search, code, DB, …)          Episodic writes, WM focus, gate / mood updates
+      │                                         │
+      ▼                                         ▼
+Answer synthesis                     Phrase / action / UI output
+      │                                         │
+      ▼                                         ▼
+   User                                 User / robot / VR scene
+```
+
+Both sides have:
+
+- A **neural engine** that does the heavy “thinking”  
+- A **symbolic / programmatic layer** that controls flow, tools, and memory  
+- Some notion of **context and history** beyond a single request  
+
+The difference is how explicit and “brain-like” those pieces are.
+
+### Neural core
+
+| Aspect                | OpenAI-style reasoning stack                                 | Symbrella                                             |
+|----------------------|--------------------------------------------------------------|-------------------------------------------------------|
+| Engine               | Large transformer reasoning model                            | Axon/Nx models, embeddings, small task-specific nets |
+| How it’s used        | Called via API by an orchestrator / agent                    | Called from Brain/Core as one piece of the pipeline  |
+| Visibility           | Internal chain-of-thought mostly hidden from users           | Activations and decisions can be exposed via WM, telemetry, UI |
+
+Symbrella leans into **small, inspectable circuits** instead of a single giant opaque model.
+
+### Symbolic / control layer
+
+| Aspect          | OpenAI-style reasoning stack                     | Symbrella brain stack                                 |
+|----------------|---------------------------------------------------|-------------------------------------------------------|
+| Orchestration  | Agents, planners, tool routers                    | `Brain` as central coordinator + `use Brain, region:` macros |
+| Control flow   | “If task X → call tool Y → call model Z”          | Region graph: LIFG → ATL → Hippocampus → WM/Mood/etc. |
+| Representation | JSON, workflows, system prompts                   | GenServers, structs, Ecto schemas, SemanticInput state |
+
+Symbrella’s “agents” are literally **named brain regions** with explicit responsibilities.
+
+### Memory
+
+| Type                 | OpenAI-style reasoning stack                        | Symbrella                                                 |
+|----------------------|-----------------------------------------------------|-----------------------------------------------------------|
+| Short-term context   | Chat history + hidden scratchpad tokens             | Working Memory (WM) focus set + SI trace + `active_cells` |
+| Long-term knowledge  | Model weights, plus external RAG/vector stores      | BrainCell DB, Lexicon, and future pgvector recall         |
+| Episodic memory      | Often app-specific logs or vector DB entries        | `Brain.Hippocampus` + `Db.Episode`, recency & outcome uplift |
+
+Symbrella treats **episodic memory** as a first-class brain stage, not just a feature of a retrieval library.
+
+### Attention, gating, and meta-control
+
+| Aspect          | OpenAI-style reasoning stack                  | Symbrella                                           |
+|----------------|-----------------------------------------------|-----------------------------------------------------|
+| Attention      | Transformer attention + orchestrator hints    | WM admission policy + focus thresholds + gate scores |
+| Gating         | System prompts, reasoning_effort, tool rules  | `Brain.WM.Policy`, LIFG Stage-1 scores, ACC/OFC gates |
+| Meta-signals   | Mostly hidden policies and heuristics         | **Mood** (dopamine/serotonin), curiosity, ACCGate inputs |
+
+Symbrella’s control flow is designed to be **mood-sensitive**: neuromodulators can actually shift thresholds and choices.
+
+### Tools, sensors, and embodiment
+
+| Aspect          | OpenAI-style reasoning stack         | Symbrella                                                |
+|----------------|---------------------------------------|----------------------------------------------------------|
+| Tools          | HTTP APIs, search, code execution     | Sensors (camera), HTTP APIs, DB, future robot actuators |
+| Environment    | Cloud services, browser clients       | Termux on Android, Phoenix/LiveView, VR/3D dashboards    |
+| Embodiment     | Usually none (pure service)           | **Phone as body**, VR “desk” as cockpit, future robots  |
+
+A key design goal of Symbrella is to **live inside a body**—starting with a phone and VR headset, expanding to hardware.
+
+### Introspection and debugging
+
+| Aspect        | OpenAI-style reasoning stack          | Symbrella                                        |
+|---------------|----------------------------------------|--------------------------------------------------|
+| Telemetry     | Extensive internal metrics (not public) | `Brain.Introspect`, region status, WM snapshots   |
+| Visuals       | Internal dashboards                    | BrainLive, SVG region overlays, VR desk cockpit  |
+| Granularity   | High internally, low externally        | You can expose **every stage**, every region, every WM slot |
+
+Symbrella is intentionally built as a **transparent brain**, not a sealed black box.
 
 ---
 
