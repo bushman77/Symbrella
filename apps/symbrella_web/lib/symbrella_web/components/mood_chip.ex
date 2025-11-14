@@ -1,3 +1,4 @@
+#apps/symbrella_web/lib/symbrella_web/components/mood_chip.ex
 defmodule SymbrellaWeb.Components.MoodChip do
   @moduledoc """
   MoodChip — tiny UI widget showing the four mood indices as bars.

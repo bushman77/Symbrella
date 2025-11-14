@@ -1,4 +1,4 @@
-#apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex
+# apps/symbrella_web/lib/symbrella_web/components/brain/panels.ex
 defmodule SymbrellaWeb.Components.Brain.Panels do
   @moduledoc """
   Extracted 'brain' presentation functions for the Brain dashboard.

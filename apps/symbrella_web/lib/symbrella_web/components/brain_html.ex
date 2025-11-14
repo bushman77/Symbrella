@@ -43,10 +43,24 @@ defmodule SymbrellaWeb.BrainHTML do
         nonempty_map(mget(snap, :intent)) ||
         %{}
 
+    # Prefer LiveView's :mood; fall back to snapshot.mood only if it's empty
     mood =
-      nonempty_map(assigns[:mood]) ||
-        nonempty_map(mget(snap, :mood)) ||
-        %{levels: %{}, derived: %{}, tone: :neutral}
+      case assigns[:mood] do
+        %{} = m when map_size(m) > 0 ->
+          m
+
+        _ ->
+          nonempty_map(mget(snap, :mood)) ||
+            %{levels: %{}, derived: %{}, tone: :neutral}
+      end
+
+    # Support both shapes:
+    #   - nested: mood.derived[:exploration]
+    #   - flat:   mood[:exploration]
+    expl  = mood_val(mood, :exploration)
+    inhib = mood_val(mood, :inhibition)
+    vigil = mood_val(mood, :vigilance)
+    plast = mood_val(mood, :plasticity)
 
     d    = mget(mood, :derived) || %{}
     seq  = mget(clock, :seq) || "—"
@@ -79,6 +93,10 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:src, src)
       |> assign(:conf, conf)
       |> assign(:d, d)
+      |> assign(:expl, expl)
+      |> assign(:inhib, inhib)
+      |> assign(:vigil, vigil)
+      |> assign(:plast, plast)
       |> assign(:auto_on, assigns[:auto] in [true, "on", "ON"])
 
     ~H"""
@@ -107,10 +125,10 @@ defmodule SymbrellaWeb.BrainHTML do
 
       <.chip>
         <span class="font-semibold">Mood</span>
-        Expl: <%= fmt(@d[:exploration]) %>
-        · Inhib: <%= fmt(@d[:inhibition]) %>
-        · Vigil: <%= fmt(@d[:vigilance]) %>
-        · Plast: <%= fmt(@d[:plasticity]) %>
+        Expl: <%= fmt(@expl) %>
+        · Inhib: <%= fmt(@inhib) %>
+        · Vigil: <%= fmt(@vigil) %>
+        · Plast: <%= fmt(@plast) %>
       </.chip>
 
       <.chip>
@@ -299,7 +317,7 @@ defmodule SymbrellaWeb.BrainHTML do
     do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
   defp fmt_pct(v), do: to_string(v)
 
-  # --- tiny helpers for mixed-key maps --------------------------------------
+  # --- tiny helpers for mixed-key maps + mood dims --------------------------
 
   defp mget(m, k) when is_map(m),
     do: Map.get(m, k) || Map.get(m, to_string(k))
@@ -307,5 +325,13 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp nonempty_map(%{} = m) when map_size(m) > 0, do: m
   defp nonempty_map(_), do: nil
+
+  # Try nested `mood.derived[key]`, then flat `mood[key]`
+  defp mood_val(%{} = mood, key) do
+    derived = mget(mood, :derived) || %{}
+    mget(derived, key) || mget(mood, key)
+  end
+
+  defp mood_val(_, _), do: nil
 end
 
