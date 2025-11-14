@@ -46,25 +46,47 @@ defmodule Core.Intent.Selection do
 
   # ─────────────────────────── emit ───────────────────────────
 
-  defp emit(intent, kw, conf, text)
-       when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
-    meas = %{confidence: conf}
-    meta = %{intent: intent, keyword: kw, text: text, source: :core}
+# apps/core/lib/core/intent/selection.ex
 
-    _ =
-      try do
-        Brain.set_latest_intent(%{intent: intent, keyword: kw, confidence: conf})
-      catch
-        _, _ -> :ok
-      end
+defp emit(intent, kw, conf, text)
+     when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
+  meas = %{confidence: conf}
 
-    if function_exported?(:telemetry, :execute, 3) do
-      :telemetry.execute([:core, :intent, :selected], meas, meta)
-      :telemetry.execute([:brain, :intent, :selected], meas, meta)
+  payload = %{
+    label: Atom.to_string(intent),
+    intent: intent,
+    keyword: kw,
+    confidence: conf,
+    source: :core,
+    text: text
+  }
+
+  # 1) Update Brain.last_intent (for mood + snapshot)
+  _ =
+    try do
+      Brain.set_latest_intent(payload)
+    catch
+      _, _ -> :ok
     end
 
-    :ok
+  # 2) Broadcast to HUD over Brain.Bus
+  _ =
+    try do
+      if Code.ensure_loaded?(Brain.Bus) do
+        Brain.Bus.broadcast("brain:intent", {:intent, payload})
+      end
+    catch
+      _, _ -> :ok
+    end
+
+  # 3) Telemetry (unchanged if you already had it)
+  if function_exported?(:telemetry, :execute, 3) do
+    :telemetry.execute([:core,  :intent, :selected], meas, payload)
+    :telemetry.execute([:brain, :intent, :selected], meas, payload)
   end
+
+  :ok
+end
 
   defp emit(_, _, _, _), do: :ok
 

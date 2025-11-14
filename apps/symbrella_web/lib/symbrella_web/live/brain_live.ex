@@ -576,29 +576,29 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
-  # Try Introspect.snapshot/0 first, else Brain.get_state/0
+  # Try Introspect.snapshot/0 first, else Brain.snapshot/0
   defp fetch_global_intent do
-    intent =
-      cond do
-        Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :snapshot, 0) ->
-          case safe_call(fn -> Introspect.snapshot() end) do
-            {:ok, snap} -> extract_intent_any(snap)
-            _ -> nil
-          end
-
-        true ->
-          nil
+    intent_from_introspect =
+      if Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :snapshot, 0) do
+        case safe_call(fn -> Introspect.snapshot() end) do
+          {:ok, snap} -> extract_intent_any(snap)
+          _ -> nil
+        end
+      else
+        nil
       end
 
-    case intent do
+    case intent_from_introspect do
       nil ->
-        if Code.ensure_loaded?(Brain) and function_exported?(Brain, :get_state, 0) do
-          case safe_call(fn -> GenServer.call(Brain, :snapshot) end) do
-            {:ok, st} -> extract_intent_any(st)
-            _ -> nil
-          end
-        else
-          nil
+        cond do
+          Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot, 0) ->
+            case safe_call(fn -> Brain.snapshot() end) do
+              {:ok, st} -> extract_intent_any(st)
+              _ -> nil
+            end
+
+          true ->
+            nil
         end
 
       other ->
@@ -619,7 +619,15 @@ defmodule SymbrellaWeb.BrainLive do
       mget_in(m, [:latest, :intent]) ||
       mget_in(m, [:brain, :intent])
 
-    case normalize_intent(direct || nested, "state") do
+    # allow Brain.snapshot/0’s :last_intent as a fallback
+    last =
+      mget(m, :last_intent) ||
+      mget_in(m, [:brain, :last_intent]) ||
+      mget_in(m, [:latest, :last_intent])
+
+    candidate = direct || nested || last
+
+    case normalize_intent(candidate, "state") do
       %{} = i -> i
       _ -> nil
     end
@@ -635,14 +643,29 @@ defmodule SymbrellaWeb.BrainLive do
     do: %{label: v, intent: v, source: src, updated_at: now_ms()}
 
   defp normalize_intent(%{} = m, src) do
-    label = mget(m, :label) || mget(m, :intent) || mget(m, :name) || mget(m, :type)
+    raw_label =
+      mget(m, :label) ||
+        mget(m, :intent) ||
+        mget(m, :name) ||
+        mget(m, :type)
+
     kw    = mget(m, :keyword) || mget(m, :key)
     conf  = mget(m, :confidence) || mget(m, :score) || mget(m, :prob)
     src0  = mget(m, :source) || src
 
+    # HUD wants a *string* label or it prints "—"
+    label_str =
+      case raw_label do
+        nil -> nil
+        v when is_binary(v) -> v
+        v when is_atom(v) -> Atom.to_string(v)
+        v -> to_string(v)
+      end
+
     base = %{
-      label: label,
-      intent: label,
+      label: label_str,
+      # preserve original intent (often an atom) if present
+      intent: Map.get(m, :intent, raw_label),
       keyword: kw,
       confidence: conf,
       source: src0,
