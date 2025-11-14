@@ -1,4 +1,4 @@
-# apps/symbrella_web/lib/symbrella_web/brain_html.ex
+#apps/symbrella_web/lib/symbrella_web/components/brain_html.ex
 defmodule SymbrellaWeb.BrainHTML do
   @moduledoc """
   Presentation helpers for the Brain dashboard (HUD, status, mood, etc.).
@@ -22,25 +22,51 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- HUD row ---------------------------------------------------------------
   # Public so Panels.brain/1 can call it
+
   attr :clock, :map, default: %{}
   attr :intent, :map, default: %{}
   attr :mood, :map, default: %{derived: %{}}
   attr :auto, :any, default: false
+  # region / brain snapshot (optional; used as fallback source)
+  attr :snapshot, :any, default: nil
+
   def hud_row(assigns) do
-    clock  = Map.get(assigns, :clock, %{})
-    intent = Map.get(assigns, :intent, %{})
-    mood   = Map.get(assigns, :mood, %{derived: %{}})
+    snap = assigns[:snapshot] || %{}
 
-    d    = Map.get(mood, :derived, %{}) || %{}
-    seq  = Map.get(clock, :seq,  "—")
-    hz   = Map.get(clock, :hz,   "—")
-    dtms = Map.get(clock, :dt_ms, "—")
-    phi  = Map.get(clock, :phi,  "—")
+    clock =
+      nonempty_map(assigns[:clock]) ||
+        nonempty_map(mget(snap, :clock)) ||
+        %{}
 
-    label = Map.get(intent, :label) || Map.get(intent, :intent)
-    kw    = Map.get(intent, :keyword)
-    src   = Map.get(intent, :source) || Map.get(intent, :src)
-    conf  = Map.get(intent, :confidence)
+    intent =
+      nonempty_map(assigns[:intent]) ||
+        nonempty_map(mget(snap, :intent)) ||
+        %{}
+
+    mood =
+      nonempty_map(assigns[:mood]) ||
+        nonempty_map(mget(snap, :mood)) ||
+        %{levels: %{}, derived: %{}, tone: :neutral}
+
+    d    = mget(mood, :derived) || %{}
+    seq  = mget(clock, :seq) || "—"
+    hz   = mget(clock, :hz) || "—"
+    dtms = mget(clock, :dt_ms) || mget(clock, :dt) || "—"
+    phi  = mget(clock, :phi) || "—"
+
+    label =
+      mget(intent, :label) ||
+        mget(intent, :intent) ||
+        mget(intent, :name) ||
+        mget(intent, :type)
+
+    kw =
+      mget(intent, :keyword) ||
+        mget(intent, :kw) ||
+        mget(intent, :keyword_norm)
+
+    src  = mget(intent, :source) || mget(intent, :src)
+    conf = mget(intent, :confidence) || mget(intent, :score) || mget(intent, :prob)
 
     assigns =
       assigns
@@ -53,7 +79,7 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:src, src)
       |> assign(:conf, conf)
       |> assign(:d, d)
-      |> assign(:auto_on, (assigns[:auto] in [true, "on", "ON"]))
+      |> assign(:auto_on, assigns[:auto] in [true, "on", "ON"])
 
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
@@ -107,6 +133,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Live state ------------------------------------------------------------
   # Public so Panels.brain/1 can call it
+
   attr :state, :any, default: %{}
   def live_state_panel(assigns) do
     st = assigns[:state] || %{}
@@ -140,6 +167,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Module status ---------------------------------------------------------
   # Public so Panels.brain/1 can call it
+
   attr :status, :any, required: true
   attr :selected, :atom, default: :lifg
   def module_status_panel(assigns) do
@@ -203,6 +231,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Mood panel ------------------------------------------------------------
   # Public so Panels.brain/1 can call it
+
   def mood_panel(assigns) do
     mood = Map.get(assigns, :mood, %{levels: %{}, derived: %{}, tone: :neutral})
 
@@ -243,6 +272,7 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   # --- small UI helpers ------------------------------------------------------
+
   attr :label, :any, required: true
   attr :value, :any, required: true
   defp kv(assigns) do
@@ -259,12 +289,23 @@ defmodule SymbrellaWeb.BrainHTML do
   defp tone_class(_),         do: "border-zinc-300 text-zinc-600"
 
   defp fmt(nil), do: "—"
-  defp fmt(v) when is_number(v), do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
+  defp fmt(v) when is_number(v),
+    do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
   defp fmt(v), do: to_string(v)
 
   defp fmt_pct(nil), do: "--"
   defp fmt_pct(v) when is_integer(v), do: "#{v}%"
-  defp fmt_pct(v) when is_float(v), do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
+  defp fmt_pct(v) when is_float(v),
+    do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
   defp fmt_pct(v), do: to_string(v)
+
+  # --- tiny helpers for mixed-key maps --------------------------------------
+
+  defp mget(m, k) when is_map(m),
+    do: Map.get(m, k) || Map.get(m, to_string(k))
+  defp mget(_, _), do: nil
+
+  defp nonempty_map(%{} = m) when map_size(m) > 0, do: m
+  defp nonempty_map(_), do: nil
 end
 

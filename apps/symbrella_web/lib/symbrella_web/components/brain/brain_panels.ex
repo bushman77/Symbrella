@@ -1,4 +1,4 @@
-# apps/symbrella_web/lib/symbrella_web/components/brain/panels.ex
+#apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex
 defmodule SymbrellaWeb.Components.Brain.Panels do
   @moduledoc """
   Extracted 'brain' presentation functions for the Brain dashboard.
@@ -15,7 +15,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
 
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.Region.BaseArt
-  alias Symbrella.Components.Regions
+  alias SymbrellaWeb.Components.Brain.Regions
 
   # Public entry point used by BrainLive.render/1
   def brain(assigns) do
@@ -39,7 +39,14 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     ~H"""
     <div class="container mx-auto px-4 py-6 space-y-6">
       <.brain_header selected={@selected} regions={@regions} />
-      <SymbrellaWeb.BrainHTML.hud_row clock={@clock} intent={@intent} mood={@mood} auto={@auto} />
+
+      <SymbrellaWeb.BrainHTML.hud_row
+        clock={@clock}
+        intent={@intent}
+        mood={@mood}
+        auto={@auto}
+        snapshot={@snapshot}
+      />
 
       <!-- Brain map + Region summary -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -53,11 +60,36 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
             vb={@vb}
           />
         </div>
-        <Regions.region_summary
-          selected={@selected}
-          region={@region}
-          state={@snapshot || @region_status || (@region_state && @region_state[:snapshot]) || %{}}
-        />
+
+        <!-- Wrap the summary card so we can float a copy button in its top-right -->
+        <div class="relative h-full">
+          <% copy_id = "region-summary-copy-#{@selected}" %>
+
+          <%= if @region_state && map_size(@region_state) > 0 do %>
+            <button
+              type="button"
+              class="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white/80 px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              aria-label="Copy region state"
+              onclick={"(function(){var el=document.getElementById('#{copy_id}'); if(!el || !navigator.clipboard) return; navigator.clipboard.writeText(el.innerText || '');})();"}
+            >
+              <.icon name="hero-clipboard-document" class="w-3 h-3" />
+              <span>Copy</span>
+            </button>
+          <% end %>
+
+          <div id={copy_id}>
+            <Regions.region_summary
+              selected={@selected}
+              region={@region}
+              state={
+                @snapshot ||
+                  @region_status ||
+                  (@region_state && @region_state[:snapshot]) ||
+                  %{}
+              }
+            />
+          </div>
+        </div>
       </div>
 
       <!-- Live state + Module Status -->

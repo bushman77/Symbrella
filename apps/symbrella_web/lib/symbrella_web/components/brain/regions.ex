@@ -1,4 +1,4 @@
-defmodule Symbrella.Components.Regions do
+defmodule SymbrellaWeb.Components.Brain.Regions do
   @moduledoc """
   Region-related UI helpers & components extracted from `SymbrellaWeb.BrainHTML`.
 
