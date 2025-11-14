@@ -1,4 +1,4 @@
-# apps/symbrella_web/lib/symbrella_web/components/brain/panels.ex
+#apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex 
 defmodule SymbrellaWeb.Components.Brain.Panels do
   @moduledoc """
   Extracted 'brain' presentation functions for the Brain dashboard.
@@ -22,7 +22,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     assigns =
       assigns
       |> Map.put_new(:selected, :lifg)
-      |> Map.put_new(:regions, []) # optional external region listing
+      |> Map.put_new(:regions, [])       # optional external region listing
       |> Map.put_new(:clock, %{})
       |> Map.put_new(:intent, %{})
       |> Map.put_new(:mood, %{levels: %{}, derived: %{}, tone: :neutral})
@@ -32,6 +32,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:region_status, %{})   # ← status comes from LiveView
       |> Map.put_new(:region_tweaks, %{})   # optional per-region overrides
       |> Map.put_new(:svg_base, nil)        # optional override SVG string
+      |> Map.put_new(:snapshot, nil)        # ensure HUD row always has a snapshot key
       |> assign_viewbox()                   # put :vb from svg override or BaseArt
       |> Map.put_new(:pan, %{x: 0, y: 0})   # aligned by default
       |> Map.put_new(:scale, 1.00)
@@ -44,8 +45,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         clock={@clock}
         intent={@intent}
         mood={@mood}
-        auto={@auto}
         snapshot={@snapshot}
+        auto={@auto}
       />
 
       <!-- Brain map + Region summary -->
@@ -106,7 +107,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     """
   end
 
-  # --- Header (moved) --------------------------------------------------------
+  # --- Header ---------------------------------------------------------------
   defp brain_header(assigns) do
     selected = assigns[:selected] || :lifg
     base_opts = Regions.region_options(assigns[:regions] || [])
@@ -147,7 +148,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     """
   end
 
-  # --- Brain map (moved) -----------------------------------------------------
+  # --- Brain map ------------------------------------------------------------
   attr :svg_base, :any, required: false
   attr :vb, :map, default: %{minx: 0, miny: 0, w: 516, h: 406}
   attr :selected, :atom, default: :lifg
@@ -155,10 +156,10 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   attr :pan, :map, default: %{x: 0, y: 0}
   attr :scale, :float, default: 1.0
   defp brain_map(assigns) do
-    selected   = assigns.selected || :lifg
-    vb         = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
-    pan        = assigns.pan || %{x: 0, y: 0}
-    scale      = assigns.scale || 1.0
+    selected = assigns.selected || :lifg
+    vb = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
+    pan = assigns.pan || %{x: 0, y: 0}
+    scale = assigns.scale || 1.0
     draw_order = Regions.draw_regions(selected)
 
     assigns =
@@ -210,6 +211,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
                   m when is_map(m) -> m
                   _ -> %{}
                 end %>
+
               <% tovr = Map.get(@region_tweaks, key, %{}) %>
               <% t = Map.merge(%{dx: 0, dy: 0, s: 1.0}, Map.merge(t0, tovr)) %>
 
