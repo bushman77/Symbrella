@@ -1,4 +1,3 @@
-# apps/brain/lib/brain/lifg/stage1.ex
 defmodule Brain.LIFG.Stage1 do
   @moduledoc """
   LIFG.Stage1 — first-pass disambiguation scoring.
@@ -53,7 +52,7 @@ defmodule Brain.LIFG.Stage1 do
 
   @function_pos ~w(determiner preposition conjunction auxiliary modal pronoun adverb particle)
 
-  # --- new: tiny POS priors + greeting MWEs ----------------------------------
+  # --- tiny POS priors + greeting MWEs ---------------------------------------
 
   @default_rel_prior 0.93
 
@@ -173,7 +172,6 @@ defmodule Brain.LIFG.Stage1 do
                       lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
                       # Always use our symbolic prior based on the sense ID + phrase shape.
-                      # (We can fold any stored :rel_prior back in later if we want.)
                       rel0 =
                         guess_rel_prior(c, id, token_phrase)
                         |> clamp01()
@@ -485,7 +483,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-
   defp function_pos?(p) when is_binary(p), do: String.downcase(p) in @function_pos
   defp function_pos?(p) when is_atom(p), do: function_pos?(Atom.to_string(p))
   defp function_pos?(_), do: false
@@ -495,10 +492,12 @@ defmodule Brain.LIFG.Stage1 do
   #   :span_mismatch | :nonword_edges | :chargram
   defp boundary_check(sentence, tok, phrase, token_mwe?) do
     # hard tripwire
-    case Brain.Utils.Safe.get(tok, :source) do
-      :chargram -> {:error, :chargram}
+    case Safe.get(tok, :source) do
+      :chargram ->
+        {:error, :chargram}
+
       _ ->
-        case {sentence, Brain.Utils.Safe.get(tok, :span)} do
+        case {sentence, Safe.get(tok, :span)} do
           {s, {i, j}}
             when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
                  i >= 0 and j <= byte_size(s) ->
@@ -661,18 +660,36 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   # Coarse symbolic prior based on:
-  #   • whether the token is an MWE
-  #   • whether the sense id looks like a phrase sense
+  #   • POS (tiny priors from @pos_prior with @default_rel_prior fallback)
+  #   • whether the token/sense looks phrase-like
+  #   • whether it is a phrase|fallback greeting MWE (tiny boosts)
   defp guess_rel_prior(c, id, token_phrase) do
-    norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || ""
-    id_s = to_string(id || "")
+    norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || ""
+    id_s  = to_string(id || "")
+
+    {lemma, pos, tag} = parse_sense_id(id_s)
+    lemma_norm        = norm(lemma)
 
     phrase_like? =
       String.contains?(to_string(token_phrase || ""), " ") or
         String.contains?(id_s, "|phrase|") or
-        String.contains?(to_string(norm), " ")
+        String.contains?(to_string(norm0), " ")
 
-    if phrase_like?, do: 0.35, else: 0.20
+    base_pos =
+      @pos_prior
+      |> Map.get(pos, @default_rel_prior)
+      |> apply_phrase_fallback_adjustment(pos, tag)
+      |> maybe_boost_greeting_phrase(lemma_norm, pos, tag)
+
+    # tiny nudge for phrase-like shapes
+    adj =
+      if phrase_like? do
+        0.02
+      else
+        -0.02
+      end
+
+    clamp01(base_pos + adj)
   end
 
   defp parse_sense_id(id_str) when is_binary(id_str) do

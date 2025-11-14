@@ -18,6 +18,11 @@ defmodule SymbrellaWeb.Components.IntentChip do
   attr :class, :string, default: nil
 
   def intent_chip(assigns) do
+assigns
+|> IO.inspect
+
+
+
     level =
       cond do
         assigns.confidence >= 0.66 -> :high

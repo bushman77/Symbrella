@@ -184,43 +184,35 @@ defmodule SymbrellaWeb.BrainLive do
   @impl true
   def handle_info({:clock, m}, socket), do: {:noreply, assign(socket, :clock, m || %{})}
 
-  @impl true
-  def handle_info({:intent, m}, socket) do
-    intent = normalize_intent(m, "bus")
-    {:noreply, assign(socket, :intent, intent)}
-  end
+@impl true
+def handle_info({:intent, m}, socket) do
+  intent = normalize_intent(m, "bus")
+  IO.inspect(m,       label: "BrainLive bus raw intent")
+  IO.inspect(intent,  label: "BrainLive normalized intent")
 
-  @impl true
-  def handle_info({:lifg_update, m}, socket),
-    do: {:noreply, assign(socket, :lifg_last, m || %{})}
+  {:noreply, assign(socket, :intent, intent)}
+end
 
-  # Periodic (and manual) refresh for the selected region
-  @impl true
-  def handle_info(:refresh_selected, socket) do
-    sel = socket.assigns[:selected] || default_selected()
-    {snapshot, status} = fetch_snapshot_and_status(sel)
+@impl true
+def handle_info({:lifg_update, m}, socket) do
+  lifg_last = m || %{}
 
-    # Also pull global intent from the *brain state* so the HUD chip stays fresh
-    socket =
-      case fetch_global_intent() do
-        nil -> socket
-        intent -> assign(socket, :intent, stamp_intent(intent, "snapshot"))
-      end
+  intent_from_lifg =
+    lifg_last
+    |> extract_intent_any()   # digs into lifg_last.si.intent, lifg_last.intent, etc.
 
-    socket =
-      socket
-      |> assign(:snapshot, snapshot)
-      |> assign(:region_status, status || %{})
-      |> assign(:all_status, collect_all_region_status()) # keep global grid fresh
-      |> update(:region_state, fn st ->
-        st = st || %{}
-        ws = st[:workspace] || []
-        st = Map.put(st, :snapshot, snapshot || %{})
-        Map.put_new(st, :workspace, ws)
-      end)
+  socket =
+    socket
+    |> assign(:lifg_last, lifg_last)
+    |> (fn sock ->
+          case intent_from_lifg do
+            nil    -> sock
+            intent -> assign(sock, :intent, stamp_intent(intent, "lifg"))
+          end
+        end).()
 
-    {:noreply, socket}
-  end
+  {:noreply, socket}
+end
 
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}

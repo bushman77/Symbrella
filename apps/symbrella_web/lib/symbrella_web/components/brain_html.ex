@@ -31,6 +31,7 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :snapshot, :any, default: nil
 
   def hud_row(assigns) do
+
     snap = assigns[:snapshot] || %{}
 
     clock =
