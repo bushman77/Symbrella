@@ -64,6 +64,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign(:all_status, collect_all_region_status())
       # Intent fallback from snapshot/brain state
       |> maybe_seed_intent_from_brain()
+      |> refresh_selected()
 
     socket =
       if connected?(socket) do
@@ -165,6 +166,10 @@ defmodule SymbrellaWeb.BrainLive do
   # ---------------------------------------------------------------------------
   # Incoming telemetry + PubSub (ALL handle_info/2 CLAUSES GROUPED HERE)
   # ---------------------------------------------------------------------------
+@impl true
+def handle_info(:refresh_selected, socket) do
+  {:noreply, refresh_selected(socket)}
+end
 
   # Mood: delegate to MoodHud
   @impl true
@@ -492,6 +497,24 @@ end
 
   defp status_val(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp status_val(_, _), do: nil
+
+defp refresh_selected(socket) do
+  selected = socket.assigns[:selected] || default_selected()
+
+  {snapshot, status} = fetch_snapshot_and_status(selected)
+
+  socket
+  |> assign(:snapshot, snapshot)
+  |> assign(:region_status, status)
+  |> assign(:all_status, collect_all_region_status())
+  |> update(:region_state, fn st ->
+    st = st || %{}
+    # keep existing workspace history, just update the latest snapshot
+    st
+    |> Map.put(:snapshot, snapshot)
+  end)
+end
+
 
   # --- All-regions status grid ----------------------------------------------
 
