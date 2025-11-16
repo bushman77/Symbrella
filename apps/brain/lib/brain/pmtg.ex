@@ -54,7 +54,7 @@ defmodule Brain.PMTG do
   @spec consult([choice()], [map()], keyword()) :: :ok
   def consult(list, tokens, opts \\ [])
       when is_list(list) and is_list(tokens) and is_list(opts) do
-    GenServer.cast(@name, {:consult, list, tokens, opts})
+    :gen_server.cast(@name, {:consult, list, tokens, opts})
   end
 
   @spec consult_sync([choice()], [map()], keyword()) ::
@@ -76,7 +76,7 @@ defmodule Brain.PMTG do
   def status(server \\ @name), do: GenServer.call(server, :status)
 
   @spec configure(keyword()) :: :ok
-  def configure(opts) when is_list(opts), do: GenServer.cast(@name, {:configure, opts})
+  def configure(opts) when is_list(opts), do: :gen_server.cast(@name, {:configure, opts})
 
   @spec reset() :: :ok
   def reset, do: GenServer.call(@name, :reset)

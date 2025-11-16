@@ -22,23 +22,25 @@ defmodule Brain.LIFG.Stage1 do
 
   Public API
   • start_link/1 — starts the mood-aware Stage1 server
-  • run/2        — pure Stage1 scoring over `si` + opts → {:ok, %{si, choices, audit}}
-  • run/3        — legacy shim (weights, opts)
+  • run/1,2,3    — pure Stage1 scoring over `si` + opts → {:ok, %{si, choices, audit}}
   • score/2      — server call to apply mood factor to a single base score (used internally)
 
   Telemetry
-  • [:brain, :lifg, :stage1, :score] — per-candidate mood-applied score
-  • (configurable) char-gram event (default [:brain, :lifg, :chargram_violation])
-  • (configurable) boundary-drop event (default [:brain, :lifg, :boundary_drop])
+  • [:brain, :lifg, :stage1, :score]           — per-candidate mood-applied score
+  • [:brain, :lifg, :chargram_violation]       — char-gram drops (measurements = %{})
+  • [:brain, :lifg, :boundary_drop]            — boundary guard drops (measurements = %{})
+  • [:brain, :pmtg, :mwe_fallback_emitted]     — MWE tokens with no senses (measurements = %{count: 1})
   • (Cerebellum emits:)
     - [:brain, :cerebellum, :lifg, :predict] with %{margin0, margin1}
-    - [:brain, :cerebellum, :lifg, :learn] with %{update_norm, loss}
+    - [:brain, :cerebellum, :lifg, :learn]   with %{update_norm, loss}
   """
 
   use Brain, region: :lifg_stage1
+
   alias Brain.Utils.Safe
   alias Brain.Cerebellum
   alias Brain.MoodWeights
+  alias Brain.LIFG.Guard
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
   @default_scores_mode :all
@@ -72,9 +74,17 @@ defmodule Brain.LIFG.Stage1 do
                      "how is life treating"
                    ])
 
+  # Default event for MWE fallback telemetry
+  @mwe_fallback_event [:brain, :pmtg, :mwe_fallback_emitted]
+
   # ---------- Public server API (mood) ----------
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  def score(server \\ __MODULE__, ctx), do: GenServer.call(server, {:score, ctx})
+
+  def score(server \\ __MODULE__, ctx),
+    do: GenServer.call(server, {:score, ctx})
+
+  # ---------- Public Stage-1 API ----------
 
   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si), do: run(si, [])
@@ -89,6 +99,7 @@ defmodule Brain.LIFG.Stage1 do
       tokens =
         Safe.get(si0, :tokens, [])
         |> Enum.map(&Safe.to_plain/1)
+        |> Guard.sanitize()
 
       buckets =
         case {Safe.get(si0, :sense_candidates, nil), Safe.get(si0, :candidates_by_token, nil)} do
@@ -125,7 +136,7 @@ defmodule Brain.LIFG.Stage1 do
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si0, :intent_bias, %{})) || %{}
 
-      # Telemetry names (overridable by PMTG)
+      # Telemetry names (overridable by tests / PMTG)
       chargram_event = Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
       boundary_event = Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
 
@@ -143,146 +154,187 @@ defmodule Brain.LIFG.Stage1 do
             boundary_drops: 0
           },
           fn {tok, idx}, acc ->
-token_phrase =
-  (Safe.get(tok, :phrase) ||
-     Safe.get(tok, :lemma) ||
-     Safe.get(tok, :word) ||
-     "")
-  |> norm()
+            raw_phrase =
+              Safe.get(tok, :phrase) ||
+                Safe.get(tok, :lemma) ||
+                Safe.get(tok, :word) ||
+                ""
 
-token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
+            token_phrase = norm(raw_phrase)
 
-            cand_list =
-              Map.get(buckets, idx, [])
-              |> Enum.map(&Safe.to_plain/1)
-              |> restrict_to_phrase_if_mwe(token_mwe?)
+            n_val       = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
+            has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
+            source      = Safe.get(tok, :source) || Safe.get(tok, "source")
+
+            # Real MWEs:
+            #   • mw: true
+            #   • or n > 1
+            #   • or explicit MWE-ish sources
+            # Char-grams like "ck t" (n: 1, mw: false, no special :source)
+            # will NOT be treated as MWEs.
+            token_mwe? =
+              has_mw_flag ||
+                (is_integer(n_val) and n_val > 1) ||
+                source in [:mwe, :lexicon_mwe, :pmtg_mwe, :pmtg]
 
             case boundary_check(sent, tok, token_phrase, token_mwe?) do
               :ok ->
+                orig_cands =
+                  Map.get(buckets, idx, [])
+                  |> Enum.map(&Safe.to_plain/1)
+
+                cand_list =
+                  orig_cands
+                  |> restrict_to_phrase_if_mwe(token_mwe?)
+
+                # No usable candidates → drop as "no_cand"; but if this is an
+                # MWE, emit MWE-fallback telemetry once.
                 if cand_list == [] do
-                  Map.update!(acc, :no_cand, &(&1 + 1))
+                  acc2 = Map.update!(acc, :no_cand, &(&1 + 1))
+
+                  if token_mwe? and orig_cands == [] do
+                    emit_mwe_fallback(idx, raw_phrase, 0.0)
+                  end
+
+                  acc2
                 else
                   bias_val = get_float(bias_map, idx, 0.0)
                   {syn_hits, ant_hits} = relations_count_overlaps(si0)
 
                   scored_trip =
-                    Enum.map(cand_list, fn c ->
-                      id  = sense_id_for(c, token_phrase)
-                      pos = pos_of(c)
+                    cand_list
+                    |> Enum.reduce([], fn c, acc_triple ->
+                      # Be defensive: skip non-map candidates like "junk"
+                      if is_map(c) or is_struct(c) do
+                        id  = sense_id_for(c, token_phrase)
+                        pos = pos_of(c)
 
-                      cnrm =
-                        norm(
-                          Safe.get(c, :norm) ||
-                            Safe.get(c, :lemma) ||
-                            Safe.get(c, :word) ||
-                            token_phrase
-                        )
+                        cnrm =
+                          norm(
+                            Safe.get(c, :norm) ||
+                              Safe.get(c, :lemma) ||
+                              Safe.get(c, :word) ||
+                              token_phrase
+                          )
 
-                      lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
+                        lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
-                      # Always use our symbolic prior based on the sense ID + phrase shape.
-                      rel0 =
-                        guess_rel_prior(c, id, token_phrase)
-                        |> clamp01()
+                        # Always use our symbolic prior based on the sense ID + phrase shape.
+                        rel0 =
+                          guess_rel_prior(c, id, token_phrase)
+                          |> clamp01()
 
-                      act =
-                        clamp01(
-                          Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c)))
-                        )
+                        act =
+                          clamp01(
+                            Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c)))
+                          )
 
-                      # relation context
-                      lex = clamp01(lex0 + 0.6 * syn_hits)
-                      rel = clamp01(rel0 - 0.4 * ant_hits)
+                        # relation context
+                        lex = clamp01(lex0 + 0.6 * syn_hits)
+                        rel = clamp01(rel0 - 0.4 * ant_hits)
 
-                      intent_feat =
-                        intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
+                        intent_feat =
+                          intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
 
-                      base0 =
-                        (weights[:lex_fit]     * lex   +
-                           weights[:rel_prior]   * rel   +
-                           weights[:activation]  * act   +
-                           weights[:intent_bias] * intent_feat)
-                        |> clamp01()
+                        base0 =
+                          (weights[:lex_fit]     * lex   +
+                             weights[:rel_prior]   * rel   +
+                             weights[:activation]  * act   +
+                             weights[:intent_bias] * intent_feat)
+                          |> clamp01()
 
-                      hom_bump = if relations_homonym_bonus?(si0, c), do: 0.5, else: 0.0
-                      base     = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
+                        hom_bump = if relations_homonym_bonus?(si0, c), do: 0.5, else: 0.0
+                        base     = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
 
-                      feat = %{
-                        id: id,
-                        lex_fit: lex,
-                        rel_prior: rel,
-                        activation: act,
-                        intent_bias: intent_feat
-                      }
+                        feat = %{
+                          id: id,
+                          lex_fit: lex,
+                          rel_prior: rel,
+                          activation: act,
+                          intent_bias: intent_feat
+                        }
 
-                      {id, base, feat}
+                        [{id, base, feat} | acc_triple]
+                      else
+                        acc_triple
+                      end
                     end)
 
-                  ids         = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
-                  base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
-                  feats       = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
+                  # If every candidate was junk, treat as "no_cand" for this token.
+                  if scored_trip == [] do
+                    Map.update!(acc, :no_cand, &(&1 + 1))
+                  else
+                    scored_trip = Enum.reverse(scored_trip)
 
-                  ctx_key =
-                    Cerebellum.context_key({:lifg_stage1, intent: intent_key(si0), mwe: token_mwe?})
+                    ids         = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
+                    base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
+                    feats       = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
 
-                  cereb_opts =
-                    kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: margin_thr)
+                    ctx_key =
+                      Cerebellum.context_key(
+                        {:lifg_stage1, intent: intent_key(si0), mwe: token_mwe?}
+                      )
 
-                  cal_scores = cereb_calibrate(si0, base_scores, feats, cereb_opts)
+                    cereb_opts =
+                      kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: margin_thr)
 
-                  logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
-                  probs  = softmax(logits)
+                    cal_scores = cereb_calibrate(si0, base_scores, feats, cereb_opts)
 
-                  ranked =
-                    Enum.zip(ids, probs)
-                    |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
-                    |> Enum.sort_by(fn {_id, p} -> -p end)
+                    logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
+                    probs  = softmax(logits)
 
-                  {chosen_id, top_p} =
-                    case ranked do
-                      [{id1, p1} | _] -> {id1, p1}
-                      _ -> {nil, 0.0}
-                    end
+                    ranked =
+                      Enum.zip(ids, probs)
+                      |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
+                      |> Enum.sort_by(fn {_id, p} -> -p end)
 
-                  second_p =
-                    case ranked do
-                      [_first, {_id2, p2} | _] -> p2
-                      _ -> 0.0
-                    end
+                    {chosen_id, top_p} =
+                      case ranked do
+                        [{id1, p1} | _] -> {id1, p1}
+                        _ -> {nil, 0.0}
+                      end
 
-                  margin0 = top_p - second_p
-                  margin  = Float.round(max(margin0, min_margin), 6)
+                    second_p =
+                      case ranked do
+                        [_first, {_id2, p2} | _] -> p2
+                        _ -> 0.0
+                      end
 
-                  _ = cereb_learn(si0, chosen_id, feats, base_scores, cereb_opts)
+                    margin0 = top_p - second_p
+                    margin  = Float.round(max(margin0, min_margin), 6)
 
-                  scores_out =
-                    case scores_mode do
-                      :all  -> Map.new(ranked)
-                      :top2 -> ranked |> Enum.take(2) |> Map.new()
-                      _     -> %{}
-                    end
+                    _ = cereb_learn(si0, chosen_id, feats, base_scores, cereb_opts)
 
-                  alt_ids =
-                    ranked
-                    |> Enum.map(&elem(&1, 0))
-                    |> Enum.reject(&(&1 == chosen_id))
+                    scores_out =
+                      case scores_mode do
+                        :all  -> Map.new(ranked)
+                        :top2 -> ranked |> Enum.take(2) |> Map.new()
+                        _     -> %{}
+                      end
 
-                  choice = %{
-                    token_index: idx,
-                    chosen_id: chosen_id,
-                    scores: scores_out,
-                    alt_ids: alt_ids,
-                    margin: margin,
-                    prob_margin: margin
-                  }
+                    alt_ids =
+                      ranked
+                      |> Enum.map(&elem(&1, 0))
+                      |> Enum.reject(&(&1 == chosen_id))
 
-                  weak_next = if margin < margin_thr, do: acc.weak + 1, else: acc.weak
+                    choice = %{
+                      token_index: idx,
+                      chosen_id: chosen_id,
+                      scores: scores_out,
+                      alt_ids: alt_ids,
+                      margin: margin,
+                      prob_margin: margin
+                    }
 
-                  acc
-                  |> Map.update!(:choices, &[choice | &1])
-                  |> Map.put(:weak, weak_next)
-                  |> Map.update!(:kept, &(&1 + 1))
+                    weak_next = if margin < margin_thr, do: acc.weak + 1, else: acc.weak
+
+                    acc
+                    |> Map.update!(:choices, &[choice | &1])
+                    |> Map.put(:weak, weak_next)
+                    |> Map.update!(:kept, &(&1 + 1))
+                  end
                 end
+
               {:error, :chargram} ->
                 :telemetry.execute(
                   chargram_event,
@@ -318,7 +370,6 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
                 acc
                 |> Map.update!(:rejected, &[idx | &1])
                 |> Map.update!(:boundary_drops, &(&1 + 1))
-
             end
           end
         )
@@ -354,6 +405,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   end
 
   # ---------- GenServer lifecycle (mood) ----------
+
   @impl true
   def init(opts) do
     state = %{
@@ -376,7 +428,6 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
     {:ok, Map.put(state, :mood_handler, mood_id)}
   end
 
-  # Group terminate/2 clauses together
   @impl true
   def terminate(_reason, %{mood_handler: mood_id}) when is_binary(mood_id) do
     :telemetry.detach(mood_id)
@@ -394,7 +445,6 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
     end
   end
 
-  # Group ALL handle_call/3 clauses together
   @impl true
   def handle_call(:status, _from, state) do
     reply = %{
@@ -437,6 +487,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   end
 
   # (Telemetry bridge helpers)
+
   @doc false
   def on_mood_update(_event, measurements, _meta, %{pid: pid}) when is_pid(pid) do
     send(pid, {:mood_update, measurements})
@@ -463,6 +514,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ---------- Feature engineering ----------
+
   defp lex_fit(cnrm, token_phrase, token_mwe?) do
     cond do
       cnrm == token_phrase -> 1.0
@@ -511,49 +563,60 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   defp function_pos?(_), do: false
 
   # ---------- Boundary / char-gram guard with reasons ----------
+
   # Returns :ok or {:error, reason} where reason ∈
-  #   :span_mismatch | :nonword_edges | :chargram
-  # ---------- Boundary / char-gram guard with reasons ----------
-  # Returns :ok or {:error, reason} where reason ∈
-  #   :span_mismatch | :nonword_edges | :chargram
+  #   :nonword_edges | :chargram
+  #
+  # Invariants:
+  #   • Explicit char-grams (:source == :chargram) → {:error, :chargram}
+  #   • Real MWEs (mw: true / n > 1 / MWE source) → bypass boundary guard
+  #   • Non-MWEs:
+  #       - if span substring ≠ phrase (after norm) → {:error, :chargram}
+  #       - else if edges are mid-word → {:error, :nonword_edges}
+  #       - else → :ok
   defp boundary_check(sentence, tok, phrase, token_mwe?) do
     case Safe.get(tok, :source) do
       :chargram ->
-        # Explicit char-gram from the tokenizer → hard drop.
         {:error, :chargram}
 
       _ ->
-        case {sentence, Safe.get(tok, :span)} do
-          # Full context: sentence + span → do the strict substring + boundary checks.
-          {s, {i, j}}
-            when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
-                   i >= 0 and j <= byte_size(s) ->
-            sub = :binary.part(s, i, j - i)
+        cond do
+          phrase_nil_or_empty?(phrase) ->
+            {:error, :chargram}
 
-            cond do
-              norm(sub) != norm(phrase) ->
-                {:error, :span_mismatch}
+          # MWEs bypass strict boundary checks; tests assert no :boundary_drop for these.
+          token_mwe? ->
+            :ok
 
-              token_mwe? ->
-                # Phrase matches substring; MWEs are allowed even if they sit inside larger spans,
-                # because they come from MWE injection.
-                :ok
+          true ->
+            case {sentence, Safe.get(tok, :span)} do
+              {s, {i, j}}
+                  when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
+                         i >= 0 and j <= byte_size(s) ->
+                sub         = :binary.part(s, i, j - i)
+                sub_norm    = norm(sub)
+                phrase_norm = norm(phrase)
 
-              true ->
-                left_ok  = i == 0 or not word_char?(prev_char(s, i))
-                right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
+                cond do
+                  # Misaligned substring (Tripwire "ck t") → treat as char-gram.
+                  sub_norm != phrase_norm ->
+                    {:error, :chargram}
 
-                if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
+                  true ->
+                    left_ok  = i == 0 or not word_char?(prev_char(s, i))
+                    right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
+
+                    if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
+                end
+
+              # We have a sentence but no usable span → fall back to shape-based guard.
+              {s, _} when is_binary(s) and byte_size(s) > 0 ->
+                boundary_shape_only(phrase, false)
+
+              # No sentence/span context at all (synthetic tests / pure SI):
+              _ ->
+                if phrase_nil_or_empty?(phrase), do: {:error, :chargram}, else: :ok
             end
-
-          # We have a sentence but no usable span → fall back to shape-based guard.
-          {s, _} when is_binary(s) and byte_size(s) > 0 ->
-            boundary_shape_only(phrase, token_mwe?)
-
-          # No sentence/span context at all (typical for synthetic tests / pure SI):
-          # be lenient: accept anything non-empty and let Stage1 scoring handle it.
-          _ ->
-            if phrase_nil_or_empty?(phrase), do: {:error, :chargram}, else: :ok
         end
     end
   end
@@ -572,15 +635,12 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   end
 
   defp phrase_nil_or_empty?(nil), do: true
-
-  defp phrase_nil_or_empty?(p) when is_binary(p),
-    do: String.trim(p) == ""
-
+  defp phrase_nil_or_empty?(p) when is_binary(p), do: String.trim(p) == ""
   defp phrase_nil_or_empty?(_), do: false
 
- defp phrase_valid_unigram?(p) when is_binary(p),
-  do: String.match?(p, ~r/^[\p{L}\p{N}_][\p{L}\p{N}'_-]*$/u)
- 
+  defp phrase_valid_unigram?(p) when is_binary(p),
+    do: String.match?(p, ~r/^[\p{L}\p{N}_][\p{L}\p{N}'_-]*$/u)
+
   defp phrase_valid_unigram?(_), do: false
 
   defp phrase_valid_mwe?(p) when is_binary(p) do
@@ -610,6 +670,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   defp next_char(_s, _j), do: nil
 
   # ---------- Mood / Cerebellum helpers ----------
+
   defp apply_mood_if_up(base, token, sense_id) do
     case GenServer.whereis(__MODULE__) do
       pid when is_pid(pid) ->
@@ -693,6 +754,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
       to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
   # ---------- Small utils ----------
+
   defp sense_id_for(c, token_phrase) do
     id = Safe.get(c, :id) || Safe.get(c, "id")
 
@@ -895,6 +957,7 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
   end
 
   # ---------- Relation helpers (safe dynamic calls) ----------
+
   defp relations_count_overlaps(si0) do
     try do
       if Code.ensure_loaded?(Brain.LIFG.RelationSignals) and
@@ -925,6 +988,8 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
     end
   end
 
+  # ---------- Audit ----------
+
   defp build_audit(kept, dropped, rejected_by_boundary, chargram_drops, weak) do
     %{
       feature_mix: :lifg_stage1,
@@ -935,6 +1000,22 @@ token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
       chargram_violation: chargram_drops,
       weak_decisions: weak
     }
+  end
+
+  # ---------- MWE fallback telemetry ----------
+
+  defp emit_mwe_fallback(idx, phrase, score) do
+    meta = %{
+      token_index: idx,
+      phrase: to_string(phrase || ""),
+      score: score
+    }
+
+    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute(@mwe_fallback_event, %{count: 1}, meta)
+    else
+      :ok
+    end
   end
 end
 

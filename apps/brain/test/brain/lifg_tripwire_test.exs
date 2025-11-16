@@ -10,19 +10,26 @@ defmodule Brain.LIFG.TripwireTest do
       Agent.update(pid, fn xs -> [meta | xs] end)
     end
 
-    :telemetry.attach_many(
-      "lifg-tripwire-test",
-      [
-        [:brain, :lifg, :chargram_violation],
-        [:brain, :lifg, :boundary_drop]
-      ],
-      handler,
-      nil
-    )
+    :ok =
+      :telemetry.attach_many(
+        "lifg-tripwire-test",
+        [
+          [:brain, :lifg, :chargram_violation],
+          [:brain, :lifg, :boundary_drop]
+        ],
+        handler,
+        nil
+      )
 
     on_exit(fn ->
       :telemetry.detach("lifg-tripwire-test")
-      Agent.stop(pid)
+
+      # Be tolerant if the Agent died during the test (e.g. due to a crash)
+      if Process.alive?(pid) do
+        Agent.stop(pid)
+      else
+        :ok
+      end
     end)
 
     {:ok, store: pid}

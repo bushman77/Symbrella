@@ -196,7 +196,7 @@ defmodule Brain do
   # LIFG → WM gating (fires a cast; returns :ok)
   @doc false
   def gate_from_lifg(si, opts \\ []) when is_map(si) and is_list(opts) do
-    GenServer.cast(@name, {:gate_from_lifg, si, opts})
+    gencast(@name, {:gate_from_lifg, si, opts})
     :ok
   end
 
@@ -601,35 +601,35 @@ defmodule Brain do
     end
   end
 
-defp do_focus(state, cands_or_si, _opts) do
-  now = System.system_time(:millisecond)
+  defp do_focus(state, cands_or_si, _opts) do
+    now = System.system_time(:millisecond)
 
-  wm_cfg0 = Map.get(state, :wm_cfg, %{})
-  wm_cfg = %{
-    capacity: Map.get(wm_cfg0, :capacity, 3),
-    decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
-  }
+    wm_cfg0 = Map.get(state, :wm_cfg, %{})
+    wm_cfg = %{
+      capacity: Map.get(wm_cfg0, :capacity, 3),
+      decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
+    }
 
-  attention0 = Map.get(state, :attention, %{})
-  attention = %{
-    min_score: Map.get(attention0, :min_score, 0.0),
-    capacity: Map.get(attention0, :capacity, wm_cfg.capacity)
-  }
+    attention0 = Map.get(state, :attention, %{})
+    attention = %{
+      min_score: Map.get(attention0, :min_score, 0.0),
+      capacity: Map.get(attention0, :capacity, wm_cfg.capacity)
+    }
 
-  # ensure state has :attention so callers reading it later won't crash
-  state = Map.put_new(state, :attention, attention)
+    # ensure state has :attention so callers reading it later won't crash
+    state = Map.put_new(state, :attention, attention)
 
-  base_wm =
-    Map.get(state, :wm, [])
-    |> WorkingMemory.decay(now, wm_cfg.decay_ms)
+    base_wm =
+      Map.get(state, :wm, [])
+      |> WorkingMemory.decay(now, wm_cfg.decay_ms)
 
-  cands_or_si
-  |> normalize_candidates()
-  |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
-    focus_reduce_step(cand, acc, now, wm_cfg, attention)
-  end)
-  |> then(fn res -> trim_and_count(res, wm_cfg.capacity) end)
-end
+    cands_or_si
+    |> normalize_candidates()
+    |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
+      focus_reduce_step(cand, acc, now, wm_cfg, attention)
+    end)
+    |> then(fn res -> trim_and_count(res, wm_cfg.capacity) end)
+  end
 
   defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn) do
     if not WMPolicy.acceptable_candidate?(cand, cfg) do
@@ -1207,3 +1207,4 @@ end
     end
   end
 end
+

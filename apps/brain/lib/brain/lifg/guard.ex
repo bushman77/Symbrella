@@ -72,6 +72,7 @@ defmodule Brain.LIFG.Guard do
 
   defp normalize_phrase_key(map) do
     cond do
+      # Already has a proper phrase
       Map.has_key?(map, :phrase) ->
         map
 
@@ -82,7 +83,12 @@ defmodule Brain.LIFG.Guard do
 
       true ->
         phrase =
-          map[:text] || map["text"] ||
+          map[:lemma] ||
+            map["lemma"] ||
+            map[:word] ||
+            map["word"] ||
+            map[:text] ||
+            map["text"] ||
             inspect(map)
 
         Map.put(map, :phrase, phrase)
