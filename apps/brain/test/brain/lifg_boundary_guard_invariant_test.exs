@@ -18,6 +18,8 @@ defmodule Brain.LIFG.BoundaryGuardInvariantTest do
       }
     }
 
+    si |> IO.inspect()
+
     {meas, meta} =
       capture(
         [:brain, :lifg, :boundary_drop],
@@ -30,6 +32,9 @@ defmodule Brain.LIFG.BoundaryGuardInvariantTest do
         end,
         300
       )
+
+    meas|> IO.inspect(label: :meas)
+    meta|>IO.inspect(label: :meta)
 
     assert meas == %{}
     assert meta[:token_index] == 0
