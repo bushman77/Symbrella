@@ -151,14 +151,26 @@ defmodule Brain.LIFG.Stage1 do
                 ""
 
             token_phrase = norm(raw_phrase)
+            phrase_norm  = token_phrase
 
-            n_val       = Safe.get(tok, :n)  || Safe.get(tok, "n")  || 1
+            n_val       = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
             has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
+
+            # How many whitespace-separated parts does the phrase have?
+            word_count =
+              phrase_norm
+              |> String.split(~r/\s+/u, trim: true)
+              |> length()
+
+            # Only treat “phrase with spaces” as MWE if span & sentence actually match
+            # the phrase surface (so "Hello there" passes, but "ck t" does not).
+            span_mwe? =
+              word_count > 1 and span_matches_phrase?(sent, tok, phrase_norm)
 
             token_mwe? =
               has_mw_flag ||
                 (is_integer(n_val) and n_val > 1) ||
-                String.contains?(token_phrase, " ")
+                span_mwe?
 
             tok_index =
               case {Safe.get(tok, :index), Safe.get(tok, "index")} do
@@ -205,24 +217,51 @@ defmodule Brain.LIFG.Stage1 do
                             token_phrase
                         )
 
-                      lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
+                      # Heuristic base features
+                      lex0 =
+                        lex_fit(cnrm, token_phrase, token_mwe?)
 
-                      # Always use our symbolic prior based on the sense ID + phrase shape.
                       rel0 =
                         guess_rel_prior(c, id, token_phrase)
                         |> clamp01()
 
-                      act =
+                      act0 =
                         clamp01(
                           Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c)))
                         )
 
                       # relation context
-                      lex = clamp01(lex0 + 0.6 * syn_hits)
-                      rel = clamp01(rel0 - 0.4 * ant_hits)
+                      lex_ctx = clamp01(lex0 + 0.6 * syn_hits)
+                      rel_ctx = clamp01(rel0 - 0.4 * ant_hits)
+
+                      intent0 =
+                        intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
+
+                      # Optional override from nested :features (for tests/synthetic inputs)
+                      feat_override =
+                        Safe.get(c, :features) ||
+                          Safe.get(c, "features") ||
+                          %{}
+
+                      lex =
+                        feat_override
+                        |> get_num(:lex_fit, lex_ctx)
+                        |> clamp01()
+
+                      rel =
+                        feat_override
+                        |> get_num(:rel_prior, rel_ctx)
+                        |> clamp01()
+
+                      act =
+                        feat_override
+                        |> get_num(:activation, act0)
+                        |> clamp01()
 
                       intent_feat =
-                        intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
+                        feat_override
+                        |> get_num(:intent_bias, intent0)
+                        |> clamp01()
 
                       base0 =
                         (weights[:lex_fit]     * lex   +
@@ -366,6 +405,7 @@ defmodule Brain.LIFG.Stage1 do
       e -> {:error, e}
     end
   end
+
 
   @spec run(map(), map() | keyword(), keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
@@ -587,6 +627,20 @@ defmodule Brain.LIFG.Stage1 do
         end
     end
   end
+
+  defp span_matches_phrase?(sentence, tok, phrase_norm) do
+    case {sentence, Safe.get(tok, :span)} do
+      {s, {i, j}}
+        when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
+               i >= 0 and j <= byte_size(s) ->
+        sub = :binary.part(s, i, j - i)
+        norm(sub) == phrase_norm
+
+      _ ->
+        false
+    end
+  end
+
 
   defp boundary_shape_only(phrase, token_mwe?) do
     cond do
