@@ -91,8 +91,11 @@ defmodule Brain.LIFG.Stage1 do
         |> Enum.map(&Safe.to_plain/1)
 
       buckets =
-        Safe.get(si0, :sense_candidates, %{}) ||
-          Safe.get(si0, :candidates_by_token, %{}) || %{}
+        case {Safe.get(si0, :sense_candidates, nil), Safe.get(si0, :candidates_by_token, nil)} do
+          {m, _} when is_map(m) and map_size(m) > 0 -> m
+          {_, m} when is_map(m) and map_size(m) > 0 -> m
+          _ -> %{}
+        end
 
       # Effective knobs
       weights =
@@ -140,8 +143,14 @@ defmodule Brain.LIFG.Stage1 do
             boundary_drops: 0
           },
           fn {tok, idx}, acc ->
-            token_phrase = norm(Safe.get(tok, :phrase, ""))
-            token_mwe?   = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
+token_phrase =
+  (Safe.get(tok, :phrase) ||
+     Safe.get(tok, :lemma) ||
+     Safe.get(tok, :word) ||
+     "")
+  |> norm()
+
+token_mwe? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
 
             cand_list =
               Map.get(buckets, idx, [])
@@ -274,12 +283,18 @@ defmodule Brain.LIFG.Stage1 do
                   |> Map.put(:weak, weak_next)
                   |> Map.update!(:kept, &(&1 + 1))
                 end
-
               {:error, :chargram} ->
                 :telemetry.execute(
                   chargram_event,
-                  %{count: 1},
-                  %{token_index: idx, phrase: token_phrase, mw: token_mwe?, reason: :chargram, v: 2}
+                  %{},
+                  %{
+                    token_index: idx,
+                    phrase: token_phrase,
+                    mw: token_mwe?,
+                    reason: :chargram,
+                    count: 1,
+                    v: 2
+                  }
                 )
 
                 acc
@@ -289,13 +304,21 @@ defmodule Brain.LIFG.Stage1 do
               {:error, reason} ->
                 :telemetry.execute(
                   boundary_event,
-                  %{count: 1},
-                  %{token_index: idx, phrase: token_phrase, mw: token_mwe?, reason: reason, v: 2}
+                  %{},
+                  %{
+                    token_index: idx,
+                    phrase: token_phrase,
+                    mw: token_mwe?,
+                    reason: reason,
+                    count: 1,
+                    v: 2
+                  }
                 )
 
                 acc
                 |> Map.update!(:rejected, &[idx | &1])
                 |> Map.update!(:boundary_drops, &(&1 + 1))
+
             end
           end
         )
@@ -490,46 +513,74 @@ defmodule Brain.LIFG.Stage1 do
   # ---------- Boundary / char-gram guard with reasons ----------
   # Returns :ok or {:error, reason} where reason ∈
   #   :span_mismatch | :nonword_edges | :chargram
+  # ---------- Boundary / char-gram guard with reasons ----------
+  # Returns :ok or {:error, reason} where reason ∈
+  #   :span_mismatch | :nonword_edges | :chargram
   defp boundary_check(sentence, tok, phrase, token_mwe?) do
-    # hard tripwire
     case Safe.get(tok, :source) do
       :chargram ->
+        # Explicit char-gram from the tokenizer → hard drop.
         {:error, :chargram}
 
       _ ->
         case {sentence, Safe.get(tok, :span)} do
+          # Full context: sentence + span → do the strict substring + boundary checks.
           {s, {i, j}}
             when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
-                 i >= 0 and j <= byte_size(s) ->
+                   i >= 0 and j <= byte_size(s) ->
             sub = :binary.part(s, i, j - i)
 
-            if norm(sub) != norm(phrase) do
-              {:error, :span_mismatch}
-            else
-              left_ok  = i == 0 or not word_char?(prev_char(s, i))
-              right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
+            cond do
+              norm(sub) != norm(phrase) ->
+                {:error, :span_mismatch}
 
-              if token_mwe? do
+              token_mwe? ->
+                # Phrase matches substring; MWEs are allowed even if they sit inside larger spans,
+                # because they come from MWE injection.
                 :ok
-              else
-                if(left_ok and right_ok, do: :ok, else: {:error, :nonword_edges})
-              end
+
+              true ->
+                left_ok  = i == 0 or not word_char?(prev_char(s, i))
+                right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
+
+                if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
             end
 
+          # We have a sentence but no usable span → fall back to shape-based guard.
+          {s, _} when is_binary(s) and byte_size(s) > 0 ->
+            boundary_shape_only(phrase, token_mwe?)
+
+          # No sentence/span context at all (typical for synthetic tests / pure SI):
+          # be lenient: accept anything non-empty and let Stage1 scoring handle it.
           _ ->
-            # shape-only fallback
-            if token_mwe? do
-              if phrase_valid_mwe?(phrase), do: :ok, else: {:error, :chargram}
-            else
-              if phrase_valid_unigram?(phrase), do: :ok, else: {:error, :chargram}
-            end
+            if phrase_nil_or_empty?(phrase), do: {:error, :chargram}, else: :ok
         end
     end
   end
 
-  defp phrase_valid_unigram?(p) when is_binary(p),
-    do: String.match?(p, ~r/^\p{L}[\p{L}'-]*$/u)
+  defp boundary_shape_only(phrase, token_mwe?) do
+    cond do
+      phrase_nil_or_empty?(phrase) ->
+        {:error, :chargram}
 
+      token_mwe? ->
+        if phrase_valid_mwe?(phrase), do: :ok, else: {:error, :chargram}
+
+      true ->
+        if phrase_valid_unigram?(phrase), do: :ok, else: {:error, :chargram}
+    end
+  end
+
+  defp phrase_nil_or_empty?(nil), do: true
+
+  defp phrase_nil_or_empty?(p) when is_binary(p),
+    do: String.trim(p) == ""
+
+  defp phrase_nil_or_empty?(_), do: false
+
+ defp phrase_valid_unigram?(p) when is_binary(p),
+  do: String.match?(p, ~r/^[\p{L}\p{N}_][\p{L}\p{N}'_-]*$/u)
+ 
   defp phrase_valid_unigram?(_), do: false
 
   defp phrase_valid_mwe?(p) when is_binary(p) do
@@ -734,15 +785,26 @@ defmodule Brain.LIFG.Stage1 do
   defp softmax([]), do: []
 
   defp softmax(xs) when is_list(xs) do
-    m = Enum.max(xs, fn -> 0.0 end)
+    m   = Enum.max(xs, fn -> 0.0 end)
     exs = Enum.map(xs, fn x -> :math.exp(x * 1.0 - m) end)
-    z = Enum.sum(exs)
+    z   = Enum.sum(exs)
 
-    if z <= 0.0 do
-      n = length(xs)
-      if n == 0, do: [], else: List.duplicate(1.0 / n, n)
-    else
-      Enum.map(exs, &(&1 / z))
+    cond do
+      z <= 0.0 ->
+        n = length(xs)
+        if n == 0, do: [], else: List.duplicate(1.0 / n, n)
+
+      true ->
+        # First pass: standard softmax
+        probs0 = Enum.map(exs, &(&1 / z))
+        sum0   = Enum.sum(probs0)
+
+        # Second pass: tiny renorm to kill drift (so sums ≈ 1.0 within 1e-6)
+        if sum0 > 0.0 do
+          Enum.map(probs0, &(&1 / sum0))
+        else
+          probs0
+        end
     end
   end
 

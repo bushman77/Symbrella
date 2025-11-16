@@ -22,29 +22,54 @@ defmodule Brain.WM.Policy do
 
   alias Brain.Utils.Numbers
 
-  @type cfg :: %{
-          gate_threshold: number(),
-          fallback_scale: number(),
-          lemma_budget: pos_integer(),
-          replace_margin: number(),
-          allow_unk?: boolean(),
-          allow_seed?: boolean(),
-          allow_fallback_into_wm?: boolean(),
-          # New (optional) scoring knobs:
-          half_life_ms: pos_integer(),
-          novelty_window: non_neg_integer(),
-          novelty_weight: number(),
-          intent_weight: number(),
-          recency_weight: number(),
-          outcome_weight: number(),
-          current_intent: atom() | nil,
-          semantic_boost: number()
-        }
+  @type cfg ::
+          %{
+            required(:gate_threshold) => number(),
+            required(:fallback_scale) => number(),
+            required(:lemma_budget) => pos_integer(),
+            required(:replace_margin) => number(),
+            required(:allow_unk?) => boolean(),
+            required(:allow_seed?) => boolean(),
+            required(:allow_fallback_into_wm?) => boolean(),
+            optional(:half_life_ms) => pos_integer(),
+            optional(:novelty_window) => non_neg_integer(),
+            optional(:novelty_weight) => number(),
+            optional(:intent_weight) => number(),
+            optional(:recency_weight) => number(),
+            optional(:outcome_weight) => number(),
+            optional(:current_intent) => atom() | nil,
+            optional(:semantic_boost) => number()
+          }
+
+  # >>> NEW: default gating config used to fill in missing keys <<<
+  @default_cfg %{
+    gate_threshold: 0.0,
+    fallback_scale: 0.70,
+    lemma_budget: 16,
+    replace_margin: 0.10,
+    allow_unk?: true,
+    allow_seed?: true,
+    allow_fallback_into_wm?: true,
+    half_life_ms: 7_500,
+    novelty_window: 16,
+    novelty_weight: 0.15,
+    intent_weight: 0.05,
+    recency_weight: 0.10,
+    outcome_weight: 0.10,
+    current_intent: nil,
+    semantic_boost: 0.10
+  }
+
+  # Normalize *any* cfg (even %{capacity: 3, decay_ms: 8000}) into a full cfg
+  defp normalize_cfg(nil), do: @default_cfg
+  defp normalize_cfg(cfg) when is_map(cfg), do: Map.merge(@default_cfg, cfg)
 
   # --- Public API -------------------------------------------------------------
 
   @spec acceptable_candidate?(map(), cfg()) :: boolean()
   def acceptable_candidate?(cand, cfg) do
+    cfg = normalize_cfg(cfg)
+
     id = to_string(cand[:id] || "")
     pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
 
@@ -71,6 +96,8 @@ defmodule Brain.WM.Policy do
   """
   @spec gate_score_for(map(), number(), cfg()) :: float()
   def gate_score_for(cand, salience, cfg) do
+    cfg = normalize_cfg(cfg)
+
     base =
       (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
 
@@ -121,6 +148,8 @@ defmodule Brain.WM.Policy do
   @spec decide_gate_policy([map()], map(), float(), cfg()) ::
           {:allow | :block | :boost, float()}
   def decide_gate_policy(wm, cand, gate_score, cfg) do
+    cfg = normalize_cfg(cfg)
+
     prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
     thr = Map.fetch!(cfg, :gate_threshold)
     allow_fallback? = Map.get(cfg, :allow_fallback_into_wm?, false)
@@ -286,3 +315,4 @@ defmodule Brain.WM.Policy do
     end
   end
 end
+

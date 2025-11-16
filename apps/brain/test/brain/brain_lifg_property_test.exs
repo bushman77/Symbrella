@@ -97,8 +97,10 @@ defmodule BrainLIFGPropertyTest do
       Enum.each(choices, fn ch ->
         vals = Map.values(ch.scores)
         sum = Enum.reduce(vals, 0.0, &+/2)
-        # LIFG normalizes (softmax); per-choice score map sums to 1.0
-        assert approx(sum, 1.0, 1.0e-6)
+
+        # Stage-1 quantizes to 6 decimals; allow a tiny bit more slack
+        assert approx(sum, 1.0, 1.0e-5)
+
         assert Enum.all?(vals, fn v -> v >= 0.0 and v <= 1.0 end)
         assert ch.margin >= 0.0 and ch.margin <= 1.0
       end)
@@ -115,10 +117,17 @@ defmodule BrainLIFGPropertyTest do
           ) do
       %{choices: choices, boosts: boosts, inhibitions: inhibs} = lifg_run(cands, ctx)
 
-      winners = MapSet.new(Enum.map(choices, & &1.chosen_id))
-      boosted = MapSet.new(Enum.map(boosts, &elem(&1, 0)))
-      inhibited = MapSet.new(Enum.map(inhibs, &elem(&1, 0)))
-      all_ids = MapSet.new(Enum.map(cands, & &1.id))
+      # Support both legacy {id, amount} tuples and new %{id, ...} maps
+      id_of =
+        fn
+          {id, _amt} -> id
+          %{id: id} -> id
+        end
+
+      winners  = MapSet.new(Enum.map(choices, & &1.chosen_id))
+      boosted  = MapSet.new(Enum.map(boosts, id_of))
+      inhibited = MapSet.new(Enum.map(inhibs, id_of))
+      all_ids  = MapSet.new(Enum.map(cands, & &1.id))
 
       # Each winner should be boosted, not inhibited
       assert MapSet.subset?(winners, boosted)
@@ -130,3 +139,4 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 end
+

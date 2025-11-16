@@ -79,11 +79,21 @@ defmodule Brain.ACC do
   # ---- Public API -----------------------------------------------------------
 
   # CHOICES MODE:
-  # - used by tests expecting :region, :audit and :needy; stores to status/0.
+  # CHOICES == [] → mark all tokens as "needy"
   def assess(si, [] = _choices) when is_map(si) do
     c = current_conflict()
     tokens = Map.get(si, :tokens, [])
-    needy = tokens |> Enum.map(&index_of/1) |> Enum.uniq() |> Enum.sort()
+
+    needy =
+      tokens
+      |> Enum.map(&index_of/1)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    needy_count = length(needy)
+
+    # Use default ACC params for telemetry metadata
+    %{weights: weights} = effective_params([])
 
     out = %{
       region: :acc,
@@ -95,8 +105,14 @@ defmodule Brain.ACC do
 
     :telemetry.execute(
       [:brain, :acc, :conflict],
-      %{conflict: c, n: length(tokens)},
-      %{cause: :assess, v: 2}
+      %{conflict: c, n: length(tokens), needy: needy_count},
+      %{
+        cause: :assess,
+        v: 2,
+        tau_m: 0.0,
+        p_min: 0.0,
+        weights: weights
+      }
     )
 
     {:ok, persist_with_window(out)}
@@ -106,12 +122,26 @@ defmodule Brain.ACC do
   def assess(si, [{k, _} | _] = _opts) when is_map(si) and is_atom(k) do
     c = current_conflict()
     tokens = Map.get(si, :tokens, [])
-    out = %{region: :acc, si: Map.put(si, :acc_conflict, c), conflict: c, audit: %{stage: :acc}}
+
+    %{weights: weights} = effective_params([])
+
+    out = %{
+      region: :acc,
+      si: Map.put(si, :acc_conflict, c),
+      conflict: c,
+      audit: %{stage: :acc}
+    }
 
     :telemetry.execute(
       [:brain, :acc, :conflict],
-      %{conflict: c, n: length(tokens)},
-      %{cause: :assess, v: 2}
+      %{conflict: c, n: length(tokens), needy: 0},
+      %{
+        cause: :assess,
+        v: 2,
+        tau_m: 0.0,
+        p_min: 0.0,
+        weights: weights
+      }
     )
 
     {:ok, persist_with_window(out)}
@@ -141,6 +171,11 @@ defmodule Brain.ACC do
       |> Enum.uniq()
       |> Enum.sort()
 
+    needy_count = length(needy)
+
+    # Pull default params for telemetry metadata
+    %{weights: weights} = effective_params([])
+
     out = %{
       region: :acc,
       si: Map.put(si, :acc_conflict, c),
@@ -151,8 +186,14 @@ defmodule Brain.ACC do
 
     :telemetry.execute(
       [:brain, :acc, :conflict],
-      %{conflict: c, n: length(tokens)},
-      %{cause: :assess, v: 2}
+      %{conflict: c, n: length(tokens), needy: needy_count},
+      %{
+        cause: :assess,
+        v: 2,
+        tau_m: 0.0,
+        p_min: 0.0,
+        weights: weights
+      }
     )
 
     {:ok, persist_with_window(out)}
@@ -432,16 +473,30 @@ defmodule Brain.ACC do
 
   # ---- persistence/window ---------------------------------------------------
 
-  defp persist_with_window(out) do
+    defp persist_with_window(out) do
     prev = :persistent_term.get(@status_key, %{})
     old = Map.get(prev, :window, [])
+
     win =
-      [Map.drop(out, [:window]) | old]
+      [Map.drop(out, [:window, :last]) | old]
       |> Enum.take(window_size())
 
-    out2 = Map.put(out, :window, win)
+    last = %{
+      ev: Map.get(out, :audit, %{}),
+      si: Map.get(out, :si, %{}),
+      conflict: Map.get(out, :conflict, 0.0),
+      needy: Map.get(out, :needy, [])
+    }
+
+    out2 =
+      out
+      |> Map.put(:window, win)
+      |> Map.put(:last, last)
+
     :persistent_term.put(@status_key, out2)
     out2
   end
+
+
 end
 

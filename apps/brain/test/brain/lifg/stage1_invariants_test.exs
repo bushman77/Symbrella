@@ -37,7 +37,7 @@ defmodule Brain.LIFG.Stage1InvariantsTest do
       }
     }
 
-    {:ok, %{choices: choices} = out} = Stage1.run(si, [])
+    {:ok, %{choices: choices} = _out} = Stage1.run(si, [])
     ids = Enum.map(choices, & &1.chosen_id) |> Enum.sort()
     assert ids == ["It is raining|phrase|0", "It is|phrase|0", "is raining|phrase|0"]
 

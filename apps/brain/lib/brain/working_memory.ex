@@ -1,21 +1,37 @@
-# lib/brain/working_memory.ex
 defmodule Brain.WorkingMemory do
   @moduledoc """
   Pure working-memory utilities (no process state).
 
   WM item shape (newest-first list):
-    %{
-      id: term(),
-      source: atom() | binary() | nil,
-      activation: float(),
-      score: float(),
-      inserted_at: ms(),
-      last_bump: ms(),
-      payload: map()
-    }
+
+      %{
+        id: term(),
+        source: atom() | binary() | nil,
+        activation: float(),
+        score: float(),
+        ts: non_neg_integer(),
+        inserted_at: non_neg_integer(),
+        last_bump: non_neg_integer(),
+        payload: map()
+      }
+
+  Notes:
+
+  • Backwards compatible with older entries like `%{id: "A", score: 0.4, ts: 1}`.
+    We infer activation from `score` when missing, and we preserve/refresh `:ts`.
   """
 
-  @type wm_item :: map()
+  @type wm_item :: %{
+          optional(:id) => any(),
+          optional(:source) => atom() | String.t() | nil,
+          optional(:activation) => float(),
+          optional(:score) => float(),
+          optional(:ts) => non_neg_integer(),
+          optional(:inserted_at) => non_neg_integer(),
+          optional(:last_bump) => non_neg_integer(),
+          optional(:payload) => map()
+        }
+
   @type cfg :: %{
           capacity: pos_integer(),
           decay_ms: pos_integer(),
@@ -25,10 +41,15 @@ defmodule Brain.WorkingMemory do
 
   @spec normalize(map(), non_neg_integer(), keyword()) :: wm_item()
   def normalize(%{} = cand, now_ms, opts \\ []) do
-    act =
-      Keyword.get(opts, :activation, (cand[:activation_snapshot] || cand[:score] || 0.0) * 1.0)
+    raw =
+      cand[:activation] ||
+        cand[:activation_snapshot] ||
+        cand[:score] ||
+        0.0
 
-    score = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
+    act = Keyword.get(opts, :activation, raw * 1.0)
+    score = (cand[:score] || raw) * 1.0
+    ts = now_ms
 
     %{
       id:
@@ -37,6 +58,7 @@ defmodule Brain.WorkingMemory do
       source: cand[:source] || cand[:reason] || :unknown,
       activation: clamp01(act),
       score: clamp01(score),
+      ts: ts,
       inserted_at: now_ms,
       last_bump: now_ms,
       payload: cand
@@ -50,13 +72,7 @@ defmodule Brain.WorkingMemory do
         [item | rest]
 
       {[existing | tail_dups], rest} ->
-        merged = %{
-          existing
-          | activation: max(existing.activation, item.activation),
-            last_bump: max(existing.last_bump, item.last_bump),
-            score: max(existing.score, item.score),
-            payload: Map.merge(existing.payload || %{}, item.payload || %{})
-        }
+        merged = merge_items(existing, item)
 
         [merged | tail_dups ++ rest]
         |> Enum.reject(&(&1 != merged and same_identity?(&1, merged)))
@@ -68,12 +84,26 @@ defmodule Brain.WorkingMemory do
   @spec decay([wm_item()], non_neg_integer(), pos_integer()) :: [wm_item()]
   def decay(wm, now_ms, decay_ms) when is_integer(decay_ms) and decay_ms > 0 do
     Enum.map(wm, fn it ->
-      age = now_ms - (it[:last_bump] || it[:inserted_at] || now_ms)
+      # Use last_bump → inserted_at → ts → now as recency anchor
+      ts =
+        it[:last_bump] ||
+          it[:inserted_at] ||
+          it[:ts] ||
+          now_ms
+
+      age = now_ms - ts
       factor = :math.pow(0.5, age / decay_ms)
-      %{it | activation: clamp01(it.activation * factor)}
+
+      base_activation = it[:activation] || it[:score] || 0.0
+      activation = clamp01(base_activation * factor)
+
+      it
+      |> Map.put(:activation, activation)
+      |> Map.put_new(:ts, ts)
+      |> Map.put_new(:inserted_at, ts)
+      |> Map.put(:last_bump, ts)
     end)
   end
-
   def decay(wm, _now, _decay_ms), do: wm
 
   @spec trim([wm_item()], pos_integer()) :: [wm_item()]
@@ -91,6 +121,39 @@ defmodule Brain.WorkingMemory do
     {kept, length(wm) - length(kept)}
   end
 
+  # --- internal helpers -------------------------------------------------------
+
+  defp merge_items(existing, item) do
+    ts_existing =
+      existing[:ts] ||
+        existing[:last_bump] ||
+        existing[:inserted_at] ||
+        0
+
+    ts_item =
+      item[:ts] ||
+        item[:last_bump] ||
+        item[:inserted_at] ||
+        0
+
+    ts = max(ts_existing, ts_item)
+
+    last_bump_existing = existing[:last_bump] || ts_existing
+    last_bump_item = item[:last_bump] || ts_item
+
+    %{
+      existing
+      | activation: max(existing[:activation] || 0.0, item[:activation] || 0.0),
+        score: max(existing[:score] || 0.0, item[:score] || 0.0),
+        ts: ts,
+        inserted_at: existing[:inserted_at] || existing[:ts] || item[:inserted_at] || ts,
+        last_bump: max(last_bump_existing, last_bump_item),
+        payload: Map.merge(existing[:payload] || %{}, item[:payload] || %{})
+    }
+  end
+
   defp same_identity?(a, b), do: a.id == b.id
+
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
 end
+

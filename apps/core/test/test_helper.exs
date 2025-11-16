@@ -7,6 +7,8 @@ ExUnit.start()
 # Works across restarts of the named processes.
 
 defmodule Core.TestSandboxHelper do
+  @moduledoc false
+
   def start_allow_loop(repo, owner_pid, names) when is_list(names) do
     Enum.each(names, fn name ->
       spawn_link(fn -> loop_allow(repo, owner_pid, name) end)
@@ -37,8 +39,6 @@ defmodule Core.TestSandboxHelper do
       Ecto.Adapters.SQL.Sandbox.allow(repo, owner_pid, pid)
     rescue
       _ -> :ok
-    catch
-      _, _ -> :ok
     end
   end
 end
@@ -60,14 +60,19 @@ if Code.ensure_loaded?(Db) do
 
   unless repo_alive? do
     case Db.start_link() do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-      other -> raise "Failed to ensure Db repo started: #{inspect(other)}"
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      other ->
+        raise "Failed to ensure Db repo started: #{inspect(other)}"
     end
   end
 
   # Manual sandbox + a suite-long shared owner
-  Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
+  :ok = Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
 
   owner_pid =
     case :persistent_term.get({:symbrella, :sandbox_owner}, :undefined) do
@@ -79,8 +84,6 @@ if Code.ensure_loaded?(Db) do
           if Process.alive?(pid) do
             try do
               Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
-            catch
-              :exit, _ -> :ok
             rescue
               _ -> :ok
             end
@@ -97,3 +100,4 @@ if Code.ensure_loaded?(Db) do
   allow_names = [Brain.PMTG, Brain.Hippocampus]
   Core.TestSandboxHelper.start_allow_loop(Db, owner_pid, allow_names)
 end
+

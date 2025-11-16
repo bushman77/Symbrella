@@ -1,159 +1,171 @@
-# apps/brain/lib/brain/lifg/guard.ex
 defmodule Brain.LIFG.Guard do
-  @moduledoc ~S"""
-  Compatibility shim for Core↔LIFG token intake (structural only).
+  @moduledoc """
+  LIFG input guard / token normalizer.
 
-  ✅ Guardrails-compliant: no references to Core or its structs.
+  Responsibilities (pure, no process calls):
 
-  Responsibilities:
-    • Accept flexible inputs: list, a single map/struct/string, or `%{tokens: ..., sentence: ...}`.
-    • Mapify any struct generically (no module deps), keep everything as plain maps.
-    • Ensure stable integer :index.
-    • Canonicalize :span to **{start, stop}** (start-inclusive, stop-exclusive).
-    • If a sentence is present and :span missing, best-effort hydrate from the first occurrence.
-    • Sort by span start **iff** every token has a valid span; else keep input order.
-
-  NOTE: Boundary/char-gram rules belong in BoundaryGuard (not here).
+    * Accepts mixed token inputs (maps, structs, atoms, binaries, etc.).
+    * Ensures every token is a **map** with at least:
+        - `:phrase` (string)
+        - `:index` (integer, 0-based if not provided)
+    * Normalizes spans:
+        - Keeps `{start, stop}` as-is when `stop >= start` and positive length.
+        - For any other `{start, stop}` pair of integers, treats `stop` as a
+          length and recovers `stop = start + byte_size(phrase)`.
+        - Drops `:span` when invalid / missing.
+    * Sorts tokens by span start **only** when all spans are valid;
+      otherwise preserves original order.
   """
 
-  @type token_map :: %{
-          optional(:index) => non_neg_integer(),
-          optional(:span) => {non_neg_integer(), non_neg_integer()},
-          optional(:phrase) => String.t(),
-          optional(:mw) => boolean(),
-          optional(:n) => pos_integer(),
-          optional(:instances) => list()
-        }
+  @type token :: %{optional(atom()) => any()}
 
-  @spec sanitize(
-          nil
-          | binary()
-          | token_map
-          | [token_map | struct()]
-          | %{required(:tokens) => list(), optional(:sentence) => binary()}
-        ) :: [token_map] | %{tokens: [token_map]}
-  def sanitize(nil), do: []
-
-  # SI map → return SI map with sanitized tokens (still plain maps)
-  def sanitize(%{tokens: toks} = si) when is_list(toks) do
-    sent = Map.get(si, :sentence)
-    %{si | tokens: sanitize_tokens(toks, sent)}
-  end
-
-  # List → return sanitized list
-  def sanitize(list) when is_list(list), do: sanitize_tokens(list, nil)
-
-  # Single struct/map/string → wrap to list (struct handled generically)
-  def sanitize(%_{} = struct_tok), do: sanitize([struct_tok])
-  def sanitize(%{} = tok_map),     do: sanitize([tok_map])
-  def sanitize(phrase) when is_binary(phrase), do: sanitize([%{phrase: phrase}])
-
-  # Fallback
-  def sanitize(_other), do: []
-
-  # ── Internals ────────────────────────────────────────────────────────────────
-
-  defp sanitize_tokens(list, sentence) do
-    list
-    |> Enum.map(&mapify/1)           # structs → maps, keep maps as-is
-    |> ensure_phrase()               # always a binary :phrase
-    |> ensure_defaults()             # mw/instances/n
-    |> canonicalize_spans(sentence)  # to {start, stop}, or drop :span
-    |> ensure_indexed()              # stable :index
-    |> sort_by_span_if_all_valid()   # only if all spans are valid
-  end
-
-  # IMPORTANT: match any struct without naming its module (no compile-time deps)
-  defp mapify(%_{} = s), do: Map.from_struct(s)
-  defp mapify(%{} = t),  do: t
-  defp mapify(other),    do: %{phrase: to_string(other)}
-
-  defp ensure_phrase(list) do
-    Enum.map(list, fn t ->
-      phrase = (t[:phrase] || t["phrase"] || "") |> to_string()
-      Map.put(t, :phrase, phrase)
+  @spec sanitize([term()]) :: [token()]
+  def sanitize(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.with_index()
+    |> Enum.map(fn {raw, idx} ->
+      raw
+      |> normalize_raw()
+      |> ensure_index(idx)
+      |> normalize_span()
     end)
+    |> maybe_sort_by_span()
   end
 
-  defp ensure_defaults(list) do
-    Enum.map(list, fn t ->
-      t
-      |> Map.put_new(:mw, false)
-      |> Map.put_new(:instances, [])
-      |> Map.put_new_lazy(:n, fn ->
-        t[:phrase]
-        |> to_string()
-        |> String.split(~r/\s+/, trim: true)
-        |> length()
-        |> max(1)
-      end)
-    end)
+  def sanitize(other) do
+    other
+    |> List.wrap()
+    |> sanitize()
   end
 
-  # Accept both {start, len} and {start, stop}; canonicalize to {start, stop}.
-  # If :span missing and sentence provided, hydrate from first occurrence of phrase.
-  defp canonicalize_spans(list, nil) do
-    Enum.map(list, &to_start_stop/1)
+  # -- helpers ---------------------------------------------------------------
+
+  # Step 1: normalize the raw input into a map with a :phrase key.
+
+  # Actual structs: %DemoTok{}, %Core.Token{}, etc.
+  defp normalize_raw(%_struct{} = raw) do
+    raw
+    |> Map.from_struct()
+    |> normalize_phrase_key()
   end
 
-  defp canonicalize_spans(list, sentence) when is_binary(sentence) do
-    Enum.map(list, fn t ->
-      case t[:span] || t["span"] do
-        {s, e} when is_integer(s) and is_integer(e) ->
-          put_span_start_stop(t, s, e)
+  # Plain maps (including maps with string keys).
+  defp normalize_raw(%{} = raw) do
+    raw
+    |> normalize_phrase_key()
+  end
+
+  # Bare binaries.
+  defp normalize_raw(raw) when is_binary(raw) do
+    %{phrase: raw}
+  end
+
+  # Atoms (including :gamma in the test).
+  defp normalize_raw(raw) when is_atom(raw) do
+    %{phrase: Atom.to_string(raw)}
+  end
+
+  # Fallback: stringify whatever we got.
+  defp normalize_raw(raw) do
+    %{phrase: to_string(raw)}
+  end
+
+  defp normalize_phrase_key(map) do
+    cond do
+      Map.has_key?(map, :phrase) ->
+        map
+
+      Map.has_key?(map, "phrase") ->
+        map
+        |> Map.put(:phrase, map["phrase"])
+        |> Map.delete("phrase")
+
+      true ->
+        phrase =
+          map[:text] || map["text"] ||
+            inspect(map)
+
+        Map.put(map, :phrase, phrase)
+    end
+  end
+
+  # Step 2: ensure :index is present and integer.
+
+  defp ensure_index(%{index: idx} = tok, _when_present) when is_integer(idx) do
+    tok
+  end
+
+  defp ensure_index(%{"index" => idx} = tok, _when_present) when is_integer(idx) do
+    tok
+    |> Map.put(:index, idx)
+    |> Map.delete("index")
+  end
+
+  defp ensure_index(tok, idx) do
+    Map.put(tok, :index, idx)
+  end
+
+  # Step 3: normalize span semantics.
+  #
+  # Rules:
+  #   * If span missing or invalid → drop it.
+  #   * If span = {start, stop} and stop >= start and (stop - start) > 0
+  #       → keep as {start, stop}.
+  #   * For any other {start, stop} with integer start/stop
+  #       → treat stop as "length" and recover via phrase bytes:
+  #           {start, start + byte_size(phrase)}.
+  defp normalize_span(%{phrase: phrase} = tok) do
+    span =
+      cond do
+        Map.has_key?(tok, :span) -> tok.span
+        Map.has_key?(tok, "span") -> tok["span"]
+        true -> nil
+      end
+
+    normalized =
+      case span do
+        {start, stop} when is_integer(start) and is_integer(stop) ->
+          cond do
+            stop >= start and stop - start > 0 ->
+              # Looks like a proper {start, stop} range; keep it.
+              {start, stop}
+
+            true ->
+              # Treat second component as length and recover via phrase length.
+              {start, start + byte_size(phrase)}
+          end
 
         _ ->
-          phrase = t[:phrase] |> to_string()
-          case :binary.match(sentence, phrase) do
-            {pos, _len} ->
-              s = pos
-              e = pos + byte_size(phrase)
-              put_span_start_stop(t, s, e)
-
-            :nomatch ->
-              Map.delete(t, :span)
-          end
+          :none
       end
-    end)
-  end
 
-  defp to_start_stop(t) do
-    case t[:span] || t["span"] do
-      {s, e} when is_integer(s) and is_integer(e) and e > s ->
-        put_span_start_stop(t, s, e)
+    case normalized do
+      :none ->
+        tok
+        |> Map.delete(:span)
+        |> Map.delete("span")
 
-      {s, len} when is_integer(s) and is_integer(len) and len > 0 ->
-        put_span_start_stop(t, s, s + len)
-
-      _ ->
-        Map.delete(t, :span)
+      {s, e} ->
+        tok
+        |> Map.put(:span, {s, e})
+        |> Map.delete("span")
     end
   end
 
-  defp put_span_start_stop(t, s, e), do: Map.put(t, :span, {s, e})
+  defp normalize_span(tok), do: tok
 
-  defp ensure_indexed(list) do
-    list
-    |> Enum.with_index()
-    |> Enum.map(fn {t, i} ->
-      idx = t[:index] || t["index"] || i
-      Map.put(t, :index, idx)
-    end)
-  end
+  # Step 4: sort by span start only if all spans are valid.
 
-  defp sort_by_span_if_all_valid(list) do
-    if Enum.all?(list, &valid_span?/1) do
-      Enum.sort_by(list, fn t ->
-        {{s, _e}, idx} = {Map.fetch!(t, :span), Map.fetch!(t, :index)}
-        {s, idx}
-      end)
+  defp maybe_sort_by_span(tokens) do
+    if Enum.all?(tokens, &valid_span?/1) do
+      Enum.sort_by(tokens, fn %{span: {start, _}} -> start end)
     else
-      list
+      tokens
     end
   end
 
-  defp valid_span?(%{span: {s, e}})
-       when is_integer(s) and is_integer(e) and s >= 0 and e > s,
+  defp valid_span?(%{span: {start, stop}})
+       when is_integer(start) and is_integer(stop) and stop >= start,
        do: true
 
   defp valid_span?(_), do: false

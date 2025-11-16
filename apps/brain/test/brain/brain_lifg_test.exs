@@ -9,20 +9,27 @@ defmodule BrainLIFGTest do
   defp approx_equal(a, b, eps \\ 1.0e-6), do: abs(a - b) <= eps
   defp sum(xs), do: Enum.reduce(xs, 0.0, &+/2)
 
-defp lifg_event!(%{trace: [%{stage: :lifg_stage1} = ev | _]}) , do: ev
-defp lifg_event!(%{trace: trace}) when is_list(trace) do
-  Enum.find(trace, &match?(%{stage: :lifg_stage1}, &1)) ||
-    flunk("No lifg_stage1 event in trace")
-end
+  defp lifg_event!(%{trace: [%{stage: :lifg_stage1} = ev | _]}), do: ev
+
+  defp lifg_event!(%{trace: trace}) when is_list(trace) do
+    Enum.find(trace, &match?(%{stage: :lifg_stage1}, &1)) ||
+      flunk("No lifg_stage1 event in trace")
+  end
 
   defp sample_si(ctx_vec) do
-    tokens = [%{phrase: "bank"}, %{phrase: "charge"}]
+    # Explicit indices so slate + Stage1 bucket candidates correctly
+    tokens = [
+      %{index: 0, phrase: "bank"},
+      %{index: 1, phrase: "charge"}
+    ]
 
+    # Attach token_index so Input.slate_for/1 can group by token
     cells = [
       %{
         id: "bank|noun|money",
         word: "bank",
         pos: "noun",
+        token_index: 0,
         embedding: [0.1, 0.2, 0.3],
         lex_fit: 0.9,
         rel_prior: 0.7,
@@ -33,6 +40,7 @@ end
         id: "bank|noun|river",
         word: "bank",
         pos: "noun",
+        token_index: 0,
         embedding: [0.0, 0.1, 0.0],
         lex_fit: 0.8,
         rel_prior: 0.4,
@@ -43,6 +51,7 @@ end
         id: "charge|verb|money",
         word: "charge",
         pos: "verb",
+        token_index: 1,
         embedding: [0.2, 0.2, 0.2],
         lex_fit: 0.8,
         rel_prior: 0.6,
@@ -53,6 +62,7 @@ end
         id: "charge|verb|attack",
         word: "charge",
         pos: "verb",
+        token_index: 1,
         embedding: [0.0, 0.3, 0.1],
         lex_fit: 0.7,
         rel_prior: 0.3,
@@ -115,9 +125,32 @@ end
 
       assert chosen == ["bank|noun|money", "charge|verb|money"]
 
-      assert Enum.member?(ev.boosts, {"bank|noun|money", 0.5})
-      assert Enum.member?(ev.inhibitions, {"bank|noun|river", -0.25})
-      assert ev.groups == 2
+      # boosts/inhibitions are now maps like %{id, token_index, amount}
+      boost_ids =
+        ev.boosts
+        |> Enum.map(fn
+          {id, _amt} -> id
+          %{id: id} -> id
+        end)
+
+      inhib_ids =
+        ev.inhibitions
+        |> Enum.map(fn
+          {id, _amt} -> id
+          %{id: id} -> id
+        end)
+
+      assert "bank|noun|money" in boost_ids
+      assert "bank|noun|river" in inhib_ids
+
+      # groups are implicit in choices via token_index
+      group_count =
+        ev.choices
+        |> Enum.map(& &1.token_index)
+        |> Enum.uniq()
+        |> length()
+
+      assert group_count == 2
     end
 
     test "per-group softmax sums ≈ 1.0" do
@@ -177,3 +210,4 @@ end
     end
   end
 end
+

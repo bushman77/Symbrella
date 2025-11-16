@@ -102,8 +102,6 @@ defmodule Core.Recall.ExecuteHippoIntegrationTest do
     plan = plan_min()
 
     si2 = Execute.execute(si, plan, hippo: true, hippo_opts: [min_jaccard: 0.9])
-si2
-|> IO.inspect(label: :si2)
 
     assert episodes_of(si2) == []
   end
