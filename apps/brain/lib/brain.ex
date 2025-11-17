@@ -276,8 +276,8 @@ defmodule Brain do
     t0 = System.monotonic_time()
     now_ms = System.system_time(:millisecond)
 
-    # Build inputs (tokens, slate) so PFC can see tokens for intent biasing
-    %{tokens: tokens0, slate: slate} = build_lifg_inputs(si_or_cands)
+    # Build inputs (tokens + sentence) so PFC can see tokens for intent biasing
+    %{tokens: tokens0, sentence: sentence} = build_lifg_inputs(si_or_cands)
 
     # Enrich SI for PFC policy (ensures tokens present)
     si_for_policy = enrich_for_policy(si_or_cands, tokens0)
@@ -292,9 +292,20 @@ defmodule Brain do
       # explicit caller opts take precedence
       |> Keyword.merge(opts)
 
-    # CRITICAL: pass `:sense_candidates` so Stage-1 can score something
+    # IMPORTANT:
+    #   • Preserve existing candidate info (:sense_candidates, :active_cells, etc.)
+    #   • Just overlay normalized :tokens and :sentence for Stage-1.
+    base_si =
+      case si_or_cands do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
     si1 =
-      %{tokens: tokens0, sense_candidates: slate, trace: []}
+      base_si
+      |> Map.put(:tokens, tokens0)
+      |> Map.put(:sentence, sentence)
+      |> Map.put_new(:trace, [])
       |> LIFG.disambiguate_stage1(lifg_opts)
 
     {:ok, out0} = lifg_out_from_trace(si1)
@@ -331,10 +342,7 @@ defmodule Brain do
         lifg_cands =
           LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
-        # Fallback: if the gate produced nothing (e.g., shape mismatch or
-        # misaligned expectations), synthesize WM candidates directly from
-        # Stage-1 choices. This is deliberately conservative and only admits
-        # choices whose score/prob >= min.
+        # Fallback: synthesize WM candidates directly from Stage-1 choices
         lifg_cands2 =
           case lifg_cands do
             [] -> lifg_wm_candidates_fallback(out0.choices, now_ms, min)
@@ -366,7 +374,8 @@ defmodule Brain do
     :telemetry.execute(
       @pipeline_stop_event,
       %{
-        duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+        duration_ms:
+          System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
       },
       %{
         winners: length(out0.choices),
@@ -1151,31 +1160,33 @@ defmodule Brain do
   defp build_lifg_inputs(si_or_cands) do
     cond do
       is_map(si_or_cands) ->
-        sentence = Map.get(si_or_cands, :sentence) || Map.get(si_or_cands, "sentence")
-        tokens0 = Map.get(si_or_cands, :tokens) || Map.get(si_or_cands, "tokens") || []
-        tokens = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
+        sentence =
+          Map.get(si_or_cands, :sentence) ||
+            Map.get(si_or_cands, "sentence")
 
-        slate =
-          Map.get(si_or_cands, :sense_candidates) ||
-            Map.get(si_or_cands, "sense_candidates") ||
-            Map.get(si_or_cands, :slate) ||
-            Map.get(si_or_cands, "slate") ||
-            case Map.get(si_or_cands, :winners) || Map.get(si_or_cands, "winners") do
-              ws when is_list(ws) -> %{winners: ws}
-              _ -> nil
-            end ||
-            case Map.get(si_or_cands, :choices) || Map.get(si_or_cands, "choices") do
-              ws when is_list(ws) -> %{winners: ws}
-              _ -> %{winners: []}
-            end
+        tokens0 =
+          Map.get(si_or_cands, :tokens) ||
+            Map.get(si_or_cands, "tokens") ||
+            []
 
-        %{tokens: tokens, slate: slate}
+        # IMPORTANT:
+        #   • Do NOT re-normalize here.
+        #   • Stage-1 will run Brain.LIFG.Guard.sanitize/1 over whatever we pass.
+        tokens =
+          if is_list(tokens0) do
+            tokens0
+          else
+            []
+          end
+
+        %{tokens: tokens, sentence: sentence}
 
       is_list(si_or_cands) ->
-        %{tokens: [], slate: %{winners: si_or_cands}}
+        # Legacy path: list of winners/choices; there is no sentence/tokens here.
+        %{tokens: [], sentence: nil}
 
       true ->
-        %{tokens: [], slate: %{winners: []}}
+        %{tokens: [], sentence: nil}
     end
   end
 

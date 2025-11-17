@@ -91,12 +91,7 @@ defmodule Brain.LIFG.Stage1 do
         |> Enum.map(&Safe.to_plain/1)
         |> Guard.sanitize()
 
-      buckets =
-        case {Safe.get(si0, :sense_candidates, nil), Safe.get(si0, :candidates_by_token, nil)} do
-          {m, _} when is_map(m) and map_size(m) > 0 -> m
-          {_, m} when is_map(m) and map_size(m) > 0 -> m
-          _ -> %{}
-        end
+      buckets = buckets_from_si(si0)
 
       # Effective knobs
       weights =
@@ -568,6 +563,136 @@ defmodule Brain.LIFG.Stage1 do
   defp function_pos?(p) when is_binary(p), do: String.downcase(p) in @function_pos
   defp function_pos?(p) when is_atom(p),   do: function_pos?(Atom.to_string(p))
   defp function_pos?(_),                  do: false
+
+  # ---------- Candidate bucket extraction ----------
+
+  # Prefer explicit sense maps; fall back to candidates_by_token; otherwise
+  # synthesize buckets from :active_cells (used in WM gating tests).
+  defp buckets_from_si(si0) do
+    sense = Safe.get(si0, :sense_candidates, nil)
+
+    cond do
+      good_bucket_map?(sense) ->
+        sense
+
+      true ->
+        cbt = Safe.get(si0, :candidates_by_token, nil)
+
+        cond do
+          good_bucket_map?(cbt) ->
+            cbt
+
+          true ->
+            ac =
+              Safe.get(si0, :active_cells) ||
+                Safe.get(si0, "active_cells") ||
+                []
+
+            if is_list(ac) and ac != [] do
+              ac
+              |> Enum.map(&Safe.to_plain/1)
+              |> active_cells_to_buckets()
+            else
+              %{}
+            end
+        end
+    end
+  end
+
+  defp good_bucket_map?(m) when is_map(m), do: map_size(m) > 0
+  defp good_bucket_map?(_), do: false
+
+  # Group active cells by token_index and turn each into a Stage-1 candidate.
+  #
+  # This covers the WM tests where we only have :active_cells with:
+  #   • token_index
+  #   • id + features (first test)
+  #   • chosen_id + scores (second test)
+  defp active_cells_to_buckets(cells) do
+    cells
+    |> Enum.group_by(fn cell ->
+      case {Safe.get(cell, :token_index), Safe.get(cell, "token_index")} do
+        {i, _} when is_integer(i) -> i
+        {_, i} when is_integer(i) -> i
+        _ -> 0
+      end
+    end)
+    |> Enum.into(%{}, fn {idx, group} ->
+      {idx, Enum.map(group, &active_cell_to_candidate/1)}
+    end)
+  end
+
+  defp active_cell_to_candidate(cell) do
+    id =
+      Safe.get(cell, :id) ||
+        Safe.get(cell, "id") ||
+        Safe.get(cell, :chosen_id) ||
+        Safe.get(cell, "chosen_id") ||
+        guess_cell_id(cell)
+
+    lemma =
+      Safe.get(cell, :lemma) ||
+        Safe.get(cell, "lemma") ||
+        guess_cell_lemma(id)
+
+    features =
+      Safe.get(cell, :features) ||
+        Safe.get(cell, "features") ||
+        %{}
+
+    %{
+      id: id,
+      lemma: lemma,
+      pos: Safe.get(cell, :pos) || Safe.get(cell, "pos") || "other",
+      score: Safe.get(cell, :score, cell_score_from_map(cell)),
+      features: features
+    }
+  end
+
+  # For the WM test with `scores: %{"THIS/strong" => 0.6}`,
+  # pick a sensible scalar score to seed activation.
+  defp cell_score_from_map(cell) do
+    scores =
+      Safe.get(cell, :scores) ||
+        Safe.get(cell, "scores") ||
+        %{}
+
+    if is_map(scores) and map_size(scores) > 0 do
+      chosen = Safe.get(cell, :chosen_id) || Safe.get(cell, "chosen_id")
+
+      cond do
+        chosen && Map.has_key?(scores, chosen) ->
+          Map.get(scores, chosen)
+
+        chosen && Map.has_key?(scores, to_string(chosen)) ->
+          Map.get(scores, to_string(chosen))
+
+        true ->
+          scores
+          |> Map.values()
+          |> Enum.max(fn -> 0.0 end)
+      end
+    else
+      0.0
+    end
+  end
+
+  defp guess_cell_id(cell) do
+    lemma = Safe.get(cell, :lemma) || Safe.get(cell, "lemma") || "cell"
+    pos   = Safe.get(cell, :pos)   || Safe.get(cell, "pos")   || "other"
+    "#{lemma}|#{pos}|0"
+  end
+
+  defp guess_cell_lemma(id) when is_binary(id) do
+    case String.split(id, "|") do
+      [lemma | _] -> lemma
+      _ -> id
+    end
+  end
+
+  defp guess_cell_lemma(id), do: to_string(id)
+
+
 
   # ---------- Boundary / char-gram guard with reasons ----------
 

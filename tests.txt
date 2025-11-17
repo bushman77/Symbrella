@@ -1,0 +1,514 @@
+✔ negcache cleared: /data/data/com.termux/files/home/Symbrella/_build/test/lib/core/priv/negcache
+✔ negcache cleared: /data/data/com.termux/files/home/Symbrella/apps/core/priv/negcache
+==> brain
+21:07:10.037 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub
+21:07:10.100 [info] The function passed as a handler with ID "lifg-test-hooks" is a local function.
+This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+
+https://hexdocs.pm/telemetry/telemetry.html#attach/4
+Running ExUnit with seed: 108241, max_cases: 12
+
+.........
+
+  1) test char-grams are rejected with telemetry/audit (Brain.LIFG.Stage1InvariantsTest)
+     apps/brain/test/brain/lifg/stage1_invariants_test.exs:6
+     Assertion with >= failed
+     code:  assert out.audit.chargram_violation >= 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/lifg/stage1_invariants_test.exs:20: (test)
+
+..........***...........
+
+  2) test promotes runner-up when top is vetoed (Brain.LIFG.ReanalysisTest)
+     apps/brain/test/brain/lifg/reanalysis_test.exs:48
+     Assertion with == failed
+     code:  assert choice.chosen_id == "hello|interjection|runner"
+     left:  "hello|interjection|top"
+     right: "hello|interjection|runner"
+     stacktrace:
+       test/brain/lifg/reanalysis_test.exs:61: (test)
+
+.......
+
+  3) test winners stabilize in Top-K; losers drift with decay + inhibitions (BrainLIFGIntegrationTest)
+     apps/brain/test/brain/brain_lifg_integration_test.exs:57
+     Assertion with > failed, both sides are exactly equal
+     code: assert ch2_1.margin > ch1_1.margin
+     left: 0.12
+     stacktrace:
+       test/brain/brain_lifg_integration_test.exs:123: (test)
+
+     The following output was logged:
+     21:07:10.470 [info] The function passed as a handler with ID "mwe-fb-test-2915" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:10.552 [info] The function passed as a handler with ID "telemetry-probe-62a269bcaca6" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     
+................................
+
+  4) test handles server crash as {:exit, reason} (Brain.Cell.SafeTest)
+     apps/brain/test/brain/cell/safe_test.exs:38
+     ** (EXIT from #PID<0.903.0>) an exception was raised:
+         ** (ErlangError) Erlang error: :boom
+             test/brain/cell/safe_test.exs:22: Brain.Cell.SafeTest.Echo.handle_call/3
+             (stdlib 7.1) gen_server.erl:2470: :gen_server.try_handle_call/4
+             (stdlib 7.1) gen_server.erl:2499: :gen_server.handle_msg/3
+             (stdlib 7.1) proc_lib.erl:333: :proc_lib.init_p_do_apply/3
+
+.
+
+  5) test LIFG choices gate into WM with min_score (WMGateIntegrationTest)
+     apps/brain/test/brain/wm_gate_integration_test.exs:5
+     Assertion with == failed
+     code:  assert length(out.choices) == 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/wm_gate_integration_test.exs:31: (test)
+
+     The following output was logged:
+     21:07:10.783 [info] The function passed as a handler with ID "pmtg-no-mwe-senses-test" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:10.836 [info] The function passed as a handler with ID "pmtg-no-mwe-senses-test" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:10.881 [warning] [brain/cell] ERROR tag=echo reason=:noproc ms=0 timeout=50 attempts=1 retry=true
+     21:07:10.896 [info] The function passed as a handler with ID "telemetry-probe-06f560e5218a" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:10.898 [warning] [brain/cell] ERROR tag=echo reason=:noproc ms=0 timeout=50 attempts=2 retry=false
+     21:07:10.898 [warning] [brain/cell] ERROR tag=echo reason=:noproc ms=0 timeout=10 attempts=1 retry=true
+     21:07:10.908 [warning] [brain/cell] ERROR tag=echo reason=:noproc ms=0 timeout=10 attempts=2 retry=false
+     21:07:10.911 [error] GenServer #PID<0.905.0> terminating
+     ** (stop) :boom
+         test/brain/cell/safe_test.exs:22: Brain.Cell.SafeTest.Echo.handle_call/3
+         (stdlib 7.1) gen_server.erl:2470: :gen_server.try_handle_call/4
+         (stdlib 7.1) gen_server.erl:2499: :gen_server.handle_msg/3
+         (stdlib 7.1) proc_lib.erl:333: :proc_lib.init_p_do_apply/3
+     Last message (from #PID<0.903.0>): :crash
+     21:07:10.949 [info] [LIFG] 325ms groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil
+     
+....
+
+  6) test lifg choices can be gated into WM (Brain.WMGatingIntegrationTest)
+     apps/brain/test/brain/wm_gating_integration_test.exs:11
+     Expected truthy, got false
+     code: assert Enum.any?(wm, &(&1.id == "THIS/strong" and &1.source == :lifg))
+     arguments:
+
+         # 1
+         []
+
+         # 2
+         #Function<1.9514232/1 in Brain.WMGatingIntegrationTest."test lifg choices can be gated into WM"/1>
+
+     stacktrace:
+       test/brain/wm_gating_integration_test.exs:29: (test)
+
+     The following output was logged:
+     21:07:13.690 [info] [LIFG] 255ms groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil
+     
+...
+
+  7) test get_params reflects Application env defaults when no overrides set (Brain.ThalamusParams_Test)
+     apps/brain/test/brain/thalamus_params_test.exs:29
+     Assertion with == failed
+     code:  assert %{ofc_weight: 0.42, acc_alpha: 0.37} == Brain.Thalamus.get_params()
+     left:  %{ofc_weight: 0.42, acc_alpha: 0.37}
+     right: %{
+              ofc_weight: 0.25,
+              acc_alpha: 0.75,
+              mood_cap: 0.15,
+              mood_weights: %{
+                expl: 0.05,
+                inhib: -0.07,
+                vigil: -0.03,
+                plast: 0.04
+              }
+            }
+     stacktrace:
+       test/brain/thalamus_params_test.exs:37: (test)
+
+...
+
+  8) test attach_episodes/2 honors :min_jaccard threshold (Brain.HippocampusAttachEpisodesTest)
+     apps/brain/test/brain/hippocampus_attach_episodes_test.exs:88
+     Expected truthy, got false
+     code: assert Enum.any?(eps_low, &has_winner_lemma?(&1, "x"))
+     arguments:
+
+         # 1
+         [
+           %{
+             at: -576460746764,
+             hint: "",
+             score: 0.0,
+             episode: %{
+               meta: %{},
+               slate: %{
+                 winners: [
+                   %{
+                     id: "zzz|noun|0",
+                     lemma: "zzz"
+                   }
+                 ]
+               },
+               norms: MapSet.new(["zzz"])
+             },
+             priors: %{
+               intent: %{},
+               senses: %{}
+             }
+           }
+         ]
+
+         # 2
+         #Function<3.75480136/1 in Brain.HippocampusAttachEpisodesTest."test attach_episodes/2 honors :min_jaccard threshold"/1>
+
+     stacktrace:
+       test/brain/hippocampus_attach_episodes_test.exs:98: (test)
+
+.
+
+  9) test attach_episodes/2 honors :scope filter (Brain.HippocampusAttachEpisodesTest)
+     apps/brain/test/brain/hippocampus_attach_episodes_test.exs:72
+     Expected truthy, got false
+     code: assert all_scope?(episodes, scope)
+     arguments:
+
+         # 1
+         [
+           %{
+             at: -576460746756,
+             hint: "",
+             score: 0.0,
+             episode: %{
+               meta: %{tenant: "b"},
+               slate: %{
+                 winners: [
+                   %{
+                     id: "alpha|noun|0",
+                     lemma: "alpha"
+                   }
+                 ]
+               },
+               norms: MapSet.new(["alpha"])
+             },
+             priors: %{
+               intent: %{},
+               senses: %{}
+             }
+           }
+         ]
+
+         # 2
+         %{tenant: "a"}
+
+     stacktrace:
+       test/brain/hippocampus_attach_episodes_test.exs:85: (test)
+
+.?
+
+  9) Brain.CuriosityFlowTest: failure on setup_all callback, all tests have been invalidated
+     ** (ArgumentError) The module Curiosity was given as a child to a supervisor but it does not exist
+     stacktrace:
+       (elixir 1.18.4) lib/supervisor.ex:797: Supervisor.init_child/1
+       (elixir 1.18.4) lib/supervisor.ex:905: Supervisor.child_spec/2
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:571: ExUnit.Callbacks.start_supervised/2
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:582: ExUnit.Callbacks.start_supervised!/2
+       test/brain/curiosity_flow_test.exs:10: Brain.CuriosityFlowTest.__ex_unit_setup_all_0/1
+       test/brain/curiosity_flow_test.exs:2: Brain.CuriosityFlowTest.__ex_unit__/2
+
+.....
+
+ 10) test OFC weighting blends into proposal score (ACC off) (Brain.ThalamusACC_OFC_Test)
+     apps/brain/test/brain/thalamus_acc_ofc_test.exs:66
+     Assertion with == failed
+     code:  assert meta[:v] == 2
+     left:  3
+     right: 2
+     stacktrace:
+       test/brain/thalamus_acc_ofc_test.exs:89: (test)
+
+
+
+ 11) test ACC conflict attenuates effective score (OFC off) (Brain.ThalamusACC_OFC_Test)
+     apps/brain/test/brain/thalamus_acc_ofc_test.exs:92
+     Assertion with == failed
+     code:  assert meta[:v] == 2
+     left:  3
+     right: 2
+     stacktrace:
+       test/brain/thalamus_acc_ofc_test.exs:112: (test)
+
+.....
+
+ 12) test limit is respected and zero-overlap results are filtered out (Brain.HippocampusRecallTest)
+     apps/brain/test/brain/hippocampus_recall_test.exs:42
+     Assertion with == failed
+     code:  assert length(res) == 2
+     left:  0
+     right: 2
+     stacktrace:
+       test/brain/hippocampus_recall_test.exs:56: (test)
+
+
+
+ 13) test recall prefers overlapping episode (Jaccard > 0) (Brain.HippocampusRecallTest)
+     apps/brain/test/brain/hippocampus_recall_test.exs:16
+     Assertion with == failed
+     code:  assert length(results) == 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/hippocampus_recall_test.exs:21: (test)
+
+
+
+ 14) test recency half-life breaks ties in favor of newer episodes (Brain.HippocampusRecallTest)
+     apps/brain/test/brain/hippocampus_recall_test.exs:26
+     ** (MatchError) no match of right hand side value: []
+     code: [%{at: at_new} | _] = Hippocampus.recall(["foo"], limit: 2)
+     stacktrace:
+       test/brain/hippocampus_recall_test.exs:35: (test)
+
+
+
+ 15) test min_jaccard: threshold excludes low-overlap even when recent (Brain.HippocampusBehaviorTest)
+     apps/brain/test/brain/hippocampus_behavior_test.exs:59
+     Assertion with == failed
+     code:  assert length(res_low) == 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/hippocampus_behavior_test.exs:70: (test)
+
+
+
+ 16) test dedup-on-write: same token set refreshes head timestamp without growing window (Brain.HippocampusBehaviorTest)
+     apps/brain/test/brain/hippocampus_behavior_test.exs:18
+     Assertion with == failed
+     code:  assert length(s2.window) == 1
+     left:  2
+     right: 1
+     stacktrace:
+       test/brain/hippocampus_behavior_test.exs:29: (test)
+
+
+
+ 17) test scope filter: recall only returns episodes whose meta contain the given scope (Brain.HippocampusBehaviorTest)
+     apps/brain/test/brain/hippocampus_behavior_test.exs:37
+     Assertion with == failed
+     code:  assert length(res1) == 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/hippocampus_behavior_test.exs:46: (test)
+
+.
+
+ 18) test decision event includes required keys; OFC blended + ACC applied path (Brain.ThalamusTelemetryContract_Test)
+     apps/brain/test/brain/thalamus_telemetry_contract_test.exs:44
+     Assertion with == failed
+     code:  assert meta[:v] == 2
+     left:  3
+     right: 2
+     stacktrace:
+       test/brain/thalamus_telemetry_contract_test.exs:87: (test)
+
+...
+
+ 19) test blend monotonic in ofc_weight (with OFC present, no ACC) (Brain.ThalamusMathProps_Test)
+     apps/brain/test/brain/thalamus_math_props_test.exs:69
+     Expected the difference between 0.25 and 0.25247322454233767 (0.002473224542337671) to be less than or equal to 1.0e-6
+     code: for w <- [0.0, 0.25, 0.5, 0.75, 1.0] do
+     stacktrace:
+       test/brain/thalamus_math_props_test.exs:108: anonymous fn/1 in Brain.ThalamusMathProps_Test."test blend monotonic in ofc_weight (with OFC present, no ACC)"/1
+       (elixir 1.18.4) lib/enum.ex:1714: Enum."-map/2-lists^map/1-1-"/2
+       (elixir 1.18.4) lib/enum.ex:1714: Enum."-map/2-lists^map/1-1-"/2
+       test/brain/thalamus_math_props_test.exs:93: (test)
+
+
+
+ 20) test ACC brake reduces score monotonically with alpha (no OFC) (Brain.ThalamusMathProps_Test)
+     apps/brain/test/brain/thalamus_math_props_test.exs:113
+     Expected the difference between 0.9 and 0.9089936083524156 (0.008993608352415583) to be less than or equal to 1.0e-6
+     code: for alpha <- [0.0, 0.25, 0.5, 0.75, 1.0] do
+     stacktrace:
+       test/brain/thalamus_math_props_test.exs:134: anonymous fn/1 in Brain.ThalamusMathProps_Test."test ACC brake reduces score monotonically with alpha (no OFC)"/1
+       (elixir 1.18.4) lib/enum.ex:1714: Enum."-map/2-lists^map/1-1-"/2
+       test/brain/thalamus_math_props_test.exs:122: (test)
+
+WM after lifg_stage1/3: [
+  %{
+    id: "this|noun|0",
+    source: :lifg,
+    activation: 1.0,
+    payload: %{
+      id: "this|noun|0",
+      source: :lifg,
+      lemma: "this",
+      score: 0.691101,
+      token_index: 0
+    },
+    ts: 1763356034185,
+    inserted_at: 1763356034185,
+    score: 0.691101,
+    last_bump: 1763356034185
+  },
+  %{
+    id: "probe|acc|mono",
+    source: :runtime,
+    activation: 0.993574463838117,
+    payload: %{
+      id: "probe|acc|mono",
+      source: :runtime,
+      lemma: "probe",
+      score: 0.9,
+      token_index: 0
+    },
+    ts: 1763356033906,
+    inserted_at: 1763356033906,
+    score: 0.8502366847105771,
+    last_bump: 1763356033906
+  },
+  %{
+    id: "probe|blend|mono",
+    source: :runtime,
+    activation: 0.5464154532665402,
+    payload: %{
+      id: "probe|blend|mono",
+      source: :runtime,
+      lemma: "probe",
+      score: 0.0,
+      token_index: 0
+    },
+    ts: 1763356033904,
+    inserted_at: 1763356033904,
+    score: 0.0,
+    last_bump: 1763356033904
+  },
+  %{
+    id: "probe|clamp",
+    source: :runtime,
+    activation: 0.9925878269183597,
+    payload: %{
+      id: "probe|clamp",
+      source: :runtime,
+      lemma: "probe",
+      score: 10.0,
+      token_index: 0
+    },
+    ts: 1763356033891,
+    inserted_at: 1763356033891,
+    score: 0.9447074274561967,
+    last_bump: 1763356033891
+  },
+  %{
+    id: "probe|no_acc",
+    source: :runtime,
+    activation: 0.9921292599088718,
+    payload: %{
+      id: "probe|no_acc",
+      source: :runtime,
+      lemma: "probe",
+      score: 0.9,
+      token_index: 0
+    },
+    ts: 1763356033886,
+    inserted_at: 1763356033886,
+    score: 0.8502366847105771,
+    last_bump: 1763356033886
+  },
+  %{
+    id: "probe-69",
+    source: :runtime,
+    activation: 0.6378452216846247,
+    payload: %{
+      id: "probe-69",
+      source: :runtime,
+      lemma: "probe-69",
+      score: 0.1,
+      token_index: 0
+    },
+    ts: 1763356033791,
+    inserted_at: 1763356033791,
+    score: 0.09447074274561967,
+    last_bump: 1763356033791
+  },
+  %{
+    id: "curiosity|probe|ofc_ok",
+    source: :runtime,
+    activation: 0.7356692359252965,
+    payload: %{
+      id: "curiosity|probe|ofc_ok",
+      source: :runtime,
+      lemma: "curiosity",
+      score: 0.2,
+      token_index: 0
+    },
+    ts: 1763356033788,
+    inserted_at: 1763356033788,
+    score: 0.18894148549123935,
+    last_bump: 1763356033788
+  }
+]
+..
+
+ 21) test recall emits telemetry with counts and top_score (Brain.HippocampusTelemetryTest)
+     apps/brain/test/brain/hippocampus_telemetry_test.exs:46
+     Assertion with >= failed
+     code:  assert meas.returned >= 1
+     left:  0
+     right: 1
+     stacktrace:
+       test/brain/hippocampus_telemetry_test.exs:67: (test)
+
+     The following output was logged:
+     21:07:14.190 [info] The function passed as a handler with ID "hippo-recall-1092" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     
+.
+
+21:07:14.536 [error] Brain Brain received unexpected message in handle_info/2: {:telemetry, [:brain, :lifg, :chargram_violation], %{},
+ %{count: 1, reason: :chargram, v: 2, phrase: "", token_index: 1, mw: false}}
+
+ 22) test stage-1 winners above threshold are admitted to WM and guards stay quiet (Brain.WMGatingFromLIFGTest)
+     apps/brain/test/brain/wm_gating_from_lifg_test.exs:42
+     match (=) failed
+     code:  assert [%{chosen_id: id0}, %{chosen_id: id1}] = out.choices
+     left:  [%{chosen_id: id0}, %{chosen_id: id1}]
+     right: []
+     stacktrace:
+       test/brain/wm_gating_from_lifg_test.exs:73: (test)
+
+     The following output was logged:
+     21:07:14.262 [info] The function passed as a handler with ID "wm-gating-test-guards" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:14.263 [info] The function passed as a handler with ID "wm-gating-test-update" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:14.263 [info] The function passed as a handler with ID "wm-gating-test-gate" is a local function.
+     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
+     
+     https://hexdocs.pm/telemetry/telemetry.html#attach/4
+     21:07:14.517 [info] [LIFG] 253ms groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil
+     
+
+Finished in 4.3 seconds (3.2s async, 1.1s sync)
+2 properties, 123 tests, 22 failures, 1 invalid, 3 skipped
