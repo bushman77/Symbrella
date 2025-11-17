@@ -85,9 +85,10 @@ defmodule Brain.LIFG.Stage1 do
       si0  = Safe.to_plain(si)
       sent = Safe.get(si0, :sentence, "") |> to_string()
 
-      # Let Guard do minimal sanitization; we keep token order.
+      # Let Guard do minimal sanitization; we keep token order (index is explicit).
       tokens =
         Safe.get(si0, :tokens, [])
+        |> Enum.map(&Safe.to_plain/1)
         |> Guard.sanitize()
 
       buckets =
@@ -151,26 +152,16 @@ defmodule Brain.LIFG.Stage1 do
                 ""
 
             token_phrase = norm(raw_phrase)
-            phrase_norm  = token_phrase
 
-            n_val       = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
+            n_val       = Safe.get(tok, :n)  || Safe.get(tok, "n")  || 1
             has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
 
-            # How many whitespace-separated parts does the phrase have?
-            word_count =
-              phrase_norm
-              |> String.split(~r/\s+/u, trim: true)
-              |> length()
-
-            # Only treat “phrase with spaces” as MWE if span & sentence actually match
-            # the phrase surface (so "Hello there" passes, but "ck t" does not).
-            span_mwe? =
-              word_count > 1 and span_matches_phrase?(sent, tok, phrase_norm)
-
+            # MWE-ness is explicit: either n>1 or mw: true.
+            # We do NOT infer MWE from arbitrary spaces here;
+            # shape-based checks happen in the guard.
             token_mwe? =
               has_mw_flag ||
-                (is_integer(n_val) and n_val > 1) ||
-                span_mwe?
+                (is_integer(n_val) and n_val > 1)
 
             tok_index =
               case {Safe.get(tok, :index), Safe.get(tok, "index")} do
@@ -185,10 +176,10 @@ defmodule Brain.LIFG.Stage1 do
                 orig_cands =
                   Map.get(buckets, tok_index, [])
                   |> Enum.map(&Safe.to_plain/1)
-                  |> Enum.filter(&is_map/1)
 
                 cand_list =
                   orig_cands
+                  |> Enum.filter(&is_map/1)
                   |> restrict_to_phrase_if_mwe(token_mwe?)
 
                 if cand_list == [] do
@@ -218,8 +209,7 @@ defmodule Brain.LIFG.Stage1 do
                         )
 
                       # Heuristic base features
-                      lex0 =
-                        lex_fit(cnrm, token_phrase, token_mwe?)
+                      lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
                       rel0 =
                         guess_rel_prior(c, id, token_phrase)
@@ -333,9 +323,14 @@ defmodule Brain.LIFG.Stage1 do
                     |> Enum.map(&elem(&1, 0))
                     |> Enum.reject(&(&1 == chosen_id))
 
+                  # Backwards-compatible choice shape
                   choice = %{
                     token_index: tok_index,
+                    index: tok_index,
+                    id: chosen_id,
                     chosen_id: chosen_id,
+                    score: top_p,
+                    prob: top_p,
                     scores: scores_out,
                     alt_ids: alt_ids,
                     margin: margin,
@@ -405,7 +400,6 @@ defmodule Brain.LIFG.Stage1 do
       e -> {:error, e}
     end
   end
-
 
   @spec run(map(), map() | keyword(), keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
@@ -575,123 +569,154 @@ defmodule Brain.LIFG.Stage1 do
   defp function_pos?(p) when is_atom(p),   do: function_pos?(Atom.to_string(p))
   defp function_pos?(_),                  do: false
 
-  # ---------- Boundary / char-gram guard ----------
+  # ---------- Boundary / char-gram guard with reasons ----------
 
-  # Returns :ok or {:error, reason} where reason ∈
-  #   :span_mismatch | :nonword_edges | :chargram
-  defp boundary_check(sentence, tok, phrase, token_mwe?) do
+  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
+          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+  defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
+    # Explicit char-gram source (from tokenizer) always treated as char-gram.
     case Safe.get(tok, :source) do
       :chargram ->
-        # Explicit char-gram from the tokenizer → hard drop as char-gram violation.
         {:error, :chargram}
 
       _ ->
-        # MWEs bypass strict boundary guard (tests expect NO :boundary_drop for MWEs).
-        if token_mwe? do
-          if phrase_nil_or_empty?(phrase), do: {:error, :chargram}, else: :ok
+        phrase_raw = Safe.get(tok, :phrase)
+
+        # Empty phrases are always treated as char-grams.
+        if phrase_nil_or_empty?(phrase_norm) or phrase_nil_or_empty?(phrase_raw) do
+          {:error, :chargram}
         else
-          case {sentence, Safe.get(tok, :span)} do
-            # Full context: sentence + span → strict substring + boundary checks.
-            {s, {i, j}}
-              when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
-                     i >= 0 and j <= byte_size(s) ->
-              sub         = :binary.part(s, i, j - i)
-              sub_norm    = norm(sub)
-              phrase_norm = norm(phrase)
-
-              cond do
-                sub_norm != phrase_norm ->
-                  # If the phrase looks like a clean word/MWE, this is a span mismatch
-                  # (boundary_drop); otherwise it’s more like a char-gram.
-                  if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) do
-                    {:error, :span_mismatch}
-                  else
-                    {:error, :chargram}
-                  end
-
-                true ->
-                  left_ok  = i == 0 or not word_char?(prev_char(s, i))
-                  right_ok = j == byte_size(s) or not word_char?(next_char(s, j))
-
-                  if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
-              end
-
-            # We have a sentence but no usable span → shape-based guard only.
-            {s, _} when is_binary(s) and byte_size(s) > 0 ->
-              boundary_shape_only(phrase, false)
-
-            # No sentence at all → accept anything non-empty and let Stage1 score.
-            _ ->
-              if phrase_nil_or_empty?(phrase), do: {:error, :chargram}, else: :ok
+          if token_mwe? do
+            boundary_check_mwe(sentence, tok, phrase_norm)
+          else
+            boundary_check_unigram(sentence, tok, phrase_norm)
           end
         end
     end
   end
 
-  defp span_matches_phrase?(sentence, tok, phrase_norm) do
+  # --- MWE path: must still match the span; otherwise it's junk ---
+  defp boundary_check_mwe(sentence, tok, phrase_norm) do
     case {sentence, Safe.get(tok, :span)} do
-      {s, {i, j}}
-        when is_binary(s) and is_integer(i) and is_integer(j) and j > i and
-               i >= 0 and j <= byte_size(s) ->
-        sub = :binary.part(s, i, j - i)
-        norm(sub) == phrase_norm
+      {s, {start, stop}}
+      when is_binary(s) and is_integer(start) and is_integer(stop) and
+             start >= 0 and stop > start and stop <= byte_size(s) ->
+        len      = stop - start
+        sub_norm = s |> binary_part(start, len) |> norm()
+
+        if sub_norm == phrase_norm do
+          # Proper aligned MWE: bypass strict boundary checks.
+          :ok
+        else
+          # Span text doesn't match the phrase → treat as char-gram.
+          {:error, :chargram}
+        end
 
       _ ->
-        false
+        # No usable span: accept only "shapely" MWEs, otherwise char-gram.
+        if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
     end
   end
 
+  # --- Unigram path: full span + boundary invariants ---
+  defp boundary_check_unigram(sentence, tok, phrase_norm) do
+    case {sentence, Safe.get(tok, :span)} do
+      {s, {start, stop}}
+      when is_binary(s) and is_integer(start) and is_integer(stop) and
+             start >= 0 and stop > start and stop <= byte_size(s) ->
+        len      = stop - start
+        sub_norm = s |> binary_part(start, len) |> norm()
 
-  defp boundary_shape_only(phrase, token_mwe?) do
-    cond do
-      phrase_nil_or_empty?(phrase) ->
-        {:error, :chargram}
+        cond do
+          # The span text does not match the token phrase at all.
+          sub_norm != phrase_norm ->
+            cond do
+              # For a unigram token whose "phrase" contains a space
+              # (like "ck t"), treat this mismatch as a char-gram.
+              String.contains?(phrase_norm, " ") ->
+                {:error, :chargram}
 
-      token_mwe? ->
-        if phrase_valid_mwe?(phrase), do: :ok, else: {:error, :chargram}
+              # Otherwise, clean-looking words/phrases are span mismatches.
+              phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) ->
+                {:error, :span_mismatch}
 
-      true ->
-        if phrase_valid_unigram?(phrase), do: :ok, else: {:error, :chargram}
+              # Fallback: weird junk ⇒ char-gram.
+              true ->
+                {:error, :chargram}
+            end
+
+          true ->
+            # Enforce word boundaries (no letter/digit immediately outside the span).
+            left_ok =
+              start == 0 or
+                not word_char?(String.at(s, start - 1))
+
+            right_ok =
+              stop == byte_size(s) or
+                not word_char?(String.at(s, stop))
+
+            if left_ok and right_ok do
+              :ok
+            else
+              {:error, :nonword_edges}
+            end
+        end
+
+      _ ->
+        # No span at all (typical synthetic / SI-only tests): allow clean
+        # words/phrases, treat everything else as char-grams.
+        if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) do
+          :ok
+        else
+          {:error, :chargram}
+        end
     end
   end
+
+  # ---------- Phrase shape helpers ----------
 
   defp phrase_nil_or_empty?(nil), do: true
+  defp phrase_nil_or_empty?(""),  do: true
 
-  defp phrase_nil_or_empty?(p) when is_binary(p),
-    do: String.trim(p) == ""
+  defp phrase_nil_or_empty?(p) when is_binary(p) do
+    String.trim(p) == ""
+  end
 
   defp phrase_nil_or_empty?(_), do: false
 
-  defp phrase_valid_unigram?(p) when is_binary(p),
-    do: String.match?(p, ~r/^[\p{L}\p{N}_][\p{L}\p{N}'_-]*$/u)
+  defp phrase_valid_unigram?(phrase) when is_binary(phrase) do
+    clean =
+      phrase
+      |> String.downcase()
+      |> String.replace(~r/[^[:alnum:]]/u, "")
+      |> String.trim()
+
+    clean != "" and not String.contains?(clean, " ")
+  end
 
   defp phrase_valid_unigram?(_), do: false
 
-  defp phrase_valid_mwe?(p) when is_binary(p) do
-    parts = String.split(p, ~r/\s+/u, trim: true)
-    length(parts) >= 2 and Enum.all?(parts, &phrase_valid_unigram?/1)
+  defp phrase_valid_mwe?(phrase) when is_binary(phrase) do
+    tokens =
+      phrase
+      |> String.downcase()
+      |> String.trim()
+      |> String.split(~r/\s+/, trim: true)
+
+    length(tokens) >= 2 and Enum.all?(tokens, &phrase_valid_unigram?/1)
   end
 
   defp phrase_valid_mwe?(_), do: false
 
   defp word_char?(nil), do: false
 
-  defp word_char?(c) when is_binary(c),
-    do: String.match?(c, ~r/^[\p{L}\p{N}'-]$/u)
-
-  defp prev_char(_s, 0), do: nil
-
-  defp prev_char(s, i) when is_binary(s) and is_integer(i) and i > 0 do
-    left = :binary.part(s, 0, i)
-    String.last(left)
+  defp word_char?(<<cp::utf8>>) do
+    (cp >= ?0 and cp <= ?9) or
+      (cp >= ?a and cp <= ?z) or
+      (cp >= ?A and cp <= ?Z)
   end
 
-  defp next_char(s, j) when is_binary(s) and is_integer(j) and j < byte_size(s) do
-    right = :binary.part(s, j, byte_size(s) - j)
-    String.first(right)
-  end
-
-  defp next_char(_s, _j), do: nil
+  defp word_char?(_), do: false
 
   # ---------- Mood / Cerebellum helpers ----------
 
