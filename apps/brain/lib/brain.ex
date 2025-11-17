@@ -327,13 +327,33 @@ defmodule Brain do
             Application.get_env(:brain, :lifg_min_score, 0.6)
           )
 
-        lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
+        # Primary path: dedicated LIFG gate module.
+        lifg_cands =
+          LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
-        if lifg_cands == [] do
+        # Fallback: if the gate produced nothing (e.g., shape mismatch or
+        # misaligned expectations), synthesize WM candidates directly from
+        # Stage-1 choices. This is deliberately conservative and only admits
+        # choices whose score/prob >= min.
+        lifg_cands2 =
+          case lifg_cands do
+            [] -> lifg_wm_candidates_fallback(out0.choices, now_ms, min)
+            other -> other
+          end
+
+        if lifg_cands2 == [] do
           state1
         else
-          {wm_next, added, removed} = do_focus(state1, lifg_cands, %{})
-          emit_wm_update(state1.wm_cfg.capacity, length(wm_next), added, removed, :gate_from_lifg)
+          {wm_next, added, removed} = do_focus(state1, lifg_cands2, %{})
+
+          emit_wm_update(
+            state1.wm_cfg.capacity,
+            length(wm_next),
+            added,
+            removed,
+            :gate_from_lifg
+          )
+
           _ = safe_mood_update_wm(wm_next)
           %{state1 | wm: wm_next}
         end
@@ -802,6 +822,73 @@ defmodule Brain do
 
     :ok
   end
+
+    # ───────────────────────── LIFG → WM fallback helper ───────────────────────
+
+  # If Brain.LIFG.Gate.stage1_wm_candidates/3 returns no candidates, we fall
+  # back to this minimal adapter that turns Stage-1 choices into WM candidates
+  # with the same overall shape as focus_from_recall/2.
+  defp lifg_wm_candidates_fallback(choices, now_ms, min)
+       when is_list(choices) and is_number(min) do
+    choices
+    |> Enum.filter(fn ch ->
+      choice_gate_score(ch) >= min
+    end)
+    |> Enum.map(fn ch ->
+      id =
+        ch[:id] ||
+          ch["id"] ||
+          ch[:chosen_id] ||
+          ch["chosen_id"] ||
+          "lifg|unknown|0"
+
+      lemma =
+        ch[:lemma] ||
+          ch["lemma"] ||
+          guess_lemma_from_id(id) ||
+          ""
+
+      %{
+        token_index: ch[:token_index] || ch["token_index"] || 0,
+        id: to_string(id),
+        lemma: to_string(lemma),
+        score: choice_gate_score(ch),
+        source: :lifg,
+        reason: :lifg_stage1,
+        ts: now_ms,
+        payload: ch
+      }
+    end)
+  end
+
+  defp lifg_wm_candidates_fallback(_choices, _now_ms, _min), do: []
+
+  # For gating we prefer normalized probability if present, else fall back
+  # to raw score or margin.
+  defp choice_gate_score(ch) when is_map(ch) do
+    s =
+      ch[:score] ||
+        ch["score"] ||
+        ch[:prob] ||
+        ch["prob"] ||
+        ch[:margin] ||
+        ch["margin"] ||
+        0.0
+
+    case s do
+      v when is_number(v) -> v * 1.0
+      v when is_binary(v) ->
+        case Float.parse(v) do
+          {f, _} -> f
+          _ -> 0.0
+        end
+
+      _ ->
+        0.0
+    end
+  end
+
+  defp choice_gate_score(_), do: 0.0
 
   # ───────────────────────── Misc helpers ─────────────────────────────────────
 
