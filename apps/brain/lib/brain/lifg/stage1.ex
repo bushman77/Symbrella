@@ -36,6 +36,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.Cerebellum
   alias Brain.MoodWeights
   alias Brain.LIFG.Guard
+  alias Brain.LIFG.Reanalysis
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
   @default_scores_mode :all
@@ -80,16 +81,61 @@ defmodule Brain.LIFG.Stage1 do
 
   @spec run(map(), keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map(), keyword()) ::
+          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map(), keyword()) ::
+          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
       si0  = Safe.to_plain(si)
       sent = Safe.get(si0, :sentence, "") |> to_string()
 
-      # Let Guard do minimal sanitization; we keep token order (index is explicit).
-      tokens =
-        Safe.get(si0, :tokens, [])
+      # Capture original tokens + their logical indices up front so we
+      # can see which ones Guard dropped.
+      {raw_tokens, raw_indices} =
+        si0
+        |> Safe.get(:tokens, [])
         |> Enum.map(&Safe.to_plain/1)
+        |> Enum.with_index()
+        |> Enum.map(fn {tok, fallback_idx} ->
+          idx =
+            case {Safe.get(tok, :index), Safe.get(tok, "index")} do
+              {i, _} when is_integer(i) -> i
+              {_, i} when is_integer(i) -> i
+              _ -> fallback_idx
+            end
+
+          {tok, idx}
+        end)
+        |> Enum.unzip()
+
+      # Let Guard sanitize (char-grams + boundary); it may drop tokens.
+      sanitized =
+        %{tokens: raw_tokens, sentence: sent}
         |> Guard.sanitize()
+
+      tokens =
+        sanitized
+        |> Map.get(:tokens, [])
+        |> Enum.map(&Safe.to_plain/1)
+
+      kept_indices =
+        tokens
+        |> Enum.map(fn tok ->
+          case {Safe.get(tok, :index), Safe.get(tok, "index")} do
+            {i, _} when is_integer(i) -> i
+            {_, i} when is_integer(i) -> i
+            _ -> 0
+          end
+        end)
+
+      guard_rejected =
+        raw_indices
+        |> Enum.uniq()
+        |> Enum.reject(&(&1 in kept_indices))
+        |> Enum.sort()
+
+      guard_drops = length(guard_rejected)
 
       buckets = buckets_from_si(si0)
 
@@ -153,7 +199,7 @@ defmodule Brain.LIFG.Stage1 do
 
             # MWE-ness is explicit: either n>1 or mw: true.
             # We do NOT infer MWE from arbitrary spaces here;
-            # shape-based checks happen in the guard.
+            # shape-based checks happen in the guard/boundary layer.
             token_mwe? =
               has_mw_flag ||
                 (is_integer(n_val) and n_val > 1)
@@ -379,18 +425,25 @@ defmodule Brain.LIFG.Stage1 do
           end
         )
 
-      dropped_total = acc.boundary_drops + acc.chargram + acc.no_cand
+      dropped_total = acc.boundary_drops + acc.chargram + acc.no_cand + guard_drops
+
+      rejected_all =
+        guard_rejected
+        |> Enum.concat(Enum.reverse(acc.rejected))
+        |> Enum.uniq()
+        |> Enum.sort()
 
       audit =
         build_audit(
           acc.kept,
           dropped_total,
-          Enum.reverse(acc.rejected),
-          acc.chargram,
+          rejected_all,
+          acc.chargram + acc.boundary_drops + guard_drops,
           acc.weak
         )
 
-      {:ok, %{si: si0, choices: Enum.reverse(acc.choices), audit: audit}}
+      out = %{si: si0, choices: Enum.reverse(acc.choices), audit: audit}
+      {:ok, maybe_reanalyse(out, si0, opts)}
     rescue
       e -> {:error, e}
     end
@@ -698,14 +751,30 @@ defmodule Brain.LIFG.Stage1 do
 
   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
+          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
   defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
-    # Explicit char-gram source (from tokenizer) always treated as char-gram.
-    case Safe.get(tok, :source) do
-      :chargram ->
+    source =
+      Brain.Utils.Safe.get(tok, :source) ||
+        Brain.Utils.Safe.get(tok, "source")
+
+    kind =
+      Brain.Utils.Safe.get(tok, :kind) ||
+        Brain.Utils.Safe.get(tok, "kind")
+
+    flag =
+      Brain.Utils.Safe.get(tok, :chargram?, false) ||
+        Brain.Utils.Safe.get(tok, "chargram?", false)
+
+    cond do
+      # Any explicit char-gram hint → treat as char-gram
+      source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+          flag ->
         {:error, :chargram}
 
-      _ ->
-        phrase_raw = Safe.get(tok, :phrase)
+      true ->
+        phrase_raw = Brain.Utils.Safe.get(tok, :phrase)
 
         # Empty phrases are always treated as char-grams.
         if phrase_nil_or_empty?(phrase_norm) or phrase_nil_or_empty?(phrase_raw) do
@@ -1164,6 +1233,59 @@ defmodule Brain.LIFG.Stage1 do
       weak_decisions: weak
     }
   end
+
+  # ───────────────────────── Reanalysis hook ─────────────────────────
+
+  # Only applies when opts include :reanalysis or :reanalysis?
+  #   • Uses a fail_fun from opts if present
+  #   • Otherwise builds a fail_fun that respects per-sense `veto?: true`
+  defp maybe_reanalyse(%{choices: choices} = out, si0, opts) do
+    reanalysis? =
+      Keyword.get(opts, :reanalysis, false) or
+        Keyword.get(opts, :reanalysis?, false)
+
+    if not reanalysis? do
+      out
+    else
+      fail_fun =
+        Keyword.get(opts, :fail_fun) ||
+          build_veto_fail_fun(si0)
+
+      %{choices: flipped, flips: n} = Reanalysis.fallback(choices, fail_fun, opts)
+
+      audit0 = out.audit || %{}
+      audit = Map.update(audit0, :flips, n, &(&1 + n))
+
+      %{out | choices: flipped, audit: audit}
+    end
+  end
+
+  defp maybe_reanalyse(out, _si0, _opts), do: out
+
+  # Build a fail_fun/1 that returns true when the chosen sense comes
+  # from a candidate flagged as `veto?: true` in `si.sense_candidates`.
+  defp build_veto_fail_fun(%{sense_candidates: sc}) when is_map(sc) do
+    veto_lookup =
+      sc
+      |> Enum.flat_map(fn {idx, senses} ->
+        Enum.map(senses, fn s ->
+          id = s[:id] || s["id"]
+          veto? = s[:veto?] || s["veto?"] || false
+          {{idx, id}, veto?}
+        end)
+      end)
+      |> Enum.into(%{})
+
+    fn
+      %{token_index: idx, chosen_id: id} ->
+        Map.get(veto_lookup, {idx, id}, false)
+
+      _ ->
+        false
+    end
+  end
+
+  defp build_veto_fail_fun(_), do: fn _ -> false end
 
   # ---------- MWE fallback telemetry ----------
 

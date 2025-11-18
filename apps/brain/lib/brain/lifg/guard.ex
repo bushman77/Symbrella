@@ -17,7 +17,7 @@ defmodule Brain.LIFG.Guard do
           length and recovers `stop = start + byte_size(phrase)`.
         - Drops `:span` when invalid / missing.
     * Char-gram / boundary guard:
-        - Drops explicit char-grams (e.g. `kind: :chargram`) with telemetry.
+        - Drops explicit char-grams (e.g. `kind: :chargram` or `source: :chargram`) with telemetry.
         - When `sentence` is present and `span` is valid:
             · Drops non-boundary substrings unless `mw: true`.
             · Emits `[:brain, :lifg, :chargram_violation]` for each drop.
@@ -143,13 +143,6 @@ defmodule Brain.LIFG.Guard do
 
   # -- helpers: span normalization -------------------------------------------
 
-  # Rules:
-  #   * If span missing or invalid → drop it.
-  #   * If span = {start, stop} and stop >= start and (stop - start) > 0
-  #       → keep as {start, stop}.
-  #   * For any other {start, stop} with integer start/stop
-  #       → treat stop as "length" and recover via phrase bytes:
-  #           {start, start + byte_size(phrase)}.
   defp normalize_span(%{phrase: phrase} = tok) do
     span =
       cond do
@@ -163,11 +156,9 @@ defmodule Brain.LIFG.Guard do
         {start, stop} when is_integer(start) and is_integer(stop) ->
           cond do
             stop >= start and stop - start > 0 ->
-              # Looks like a proper {start, stop} range; keep it.
               {start, stop}
 
             true ->
-              # Treat second component as length and recover via phrase length.
               {start, start + byte_size(phrase)}
           end
 
@@ -193,8 +184,8 @@ defmodule Brain.LIFG.Guard do
   # -- char-gram / boundary guard -------------------------------------------
 
   # When there is NO sentence:
-  #   • Only drop explicit char-grams (kind: :chargram, char_ngram, etc.).
-  #   • Don't run boundary heuristics (this is what fixes the WM tests).
+  #   • Only drop explicit char-grams (kind/source/chargram?).
+  #   • Don't run boundary heuristics.
   defp maybe_filter_chargrams(tokens, nil) do
     {kept, _dropped} =
       Enum.reduce(tokens, {[], []}, fn tok, {keep, drop} ->
@@ -234,10 +225,13 @@ defmodule Brain.LIFG.Guard do
     Enum.reverse(kept)
   end
 
+  # 🔴 KEY CHANGE: now also looks at :source / "source"
   defp explicit_chargram?(tok) do
-    kind = Map.get(tok, :kind) || Map.get(tok, "kind")
+    kind   = Map.get(tok, :kind)   || Map.get(tok, "kind")
+    source = Map.get(tok, :source) || Map.get(tok, "source")
 
     kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+      source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
       Map.get(tok, :chargram?, false) or
       Map.get(tok, "chargram?", false)
   end

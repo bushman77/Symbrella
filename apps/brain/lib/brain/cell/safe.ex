@@ -16,11 +16,12 @@ defmodule Brain.Cell.Safe do
     %{cell: cell, tag: tag(msg), timeout: timeout, retry: retried?, attempts: n, reason: reason?}
 
   Configure (optional) in `config/*.exs` under :brain, Brain.Cell.Safe:
-    config :brain, Brain.Cell.Safe,
-      default_timeout_ms: 150,
-      default_retry?: true,
-      default_retries: 1,
-      warn_ms: 200
+
+      config :brain, Brain.Cell.Safe,
+        default_timeout_ms: 150,
+        default_retry?: true,
+        default_retries: 1,
+        warn_ms: 200
   """
 
   require Logger
@@ -52,9 +53,9 @@ defmodule Brain.Cell.Safe do
     # lazy, idempotent
     CellTelemetry.ensure_attached()
 
-    timeout = opts[:timeout] || @default_timeout_ms
-    retry? = opts[:retry?] || @default_retry?
-    retries = opts[:retries] || @default_retries
+    timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
+    retry? = Keyword.get(opts, :retry?, @default_retry?)
+    retries = Keyword.get(opts, :retries, @default_retries)
 
     do_call(cell, msg, timeout, retry?, retries, 1)
   end
@@ -64,71 +65,66 @@ defmodule Brain.Cell.Safe do
   defp do_call(cell, msg, timeout, retry?, retries_left, attempt) do
     start = System.monotonic_time()
 
-    try do
-      reply = GenServer.call(cell, msg, timeout)
-      emit_ok(cell, msg, start, timeout, attempt)
-      {:ok, reply}
-    catch
-      :exit, {:timeout, _} ->
-        emit_err(cell, msg, start, timeout, attempt, :timeout)
-        {:error, :timeout}
+    task = Task.async(fn -> GenServer.call(cell, msg, timeout) end)
 
-      :exit, {:noproc, _} = e ->
-        transient_retry_or_error(
-          cell,
-          msg,
-          start,
-          timeout,
-          attempt,
-          :noproc,
-          e,
-          retry?,
-          retries_left
-        )
+    result =
+      case Task.yield(task, timeout + 10) do
+        {:ok, reply} ->
+          {:ok, reply}
 
-      :exit, {:noconnection, _} = e ->
-        transient_retry_or_error(
-          cell,
-          msg,
-          start,
-          timeout,
-          attempt,
-          :noconnection,
-          e,
-          retry?,
-          retries_left
-        )
+        {:exit, reason} ->
+          {:exit, reason}
 
-      :exit, reason ->
-        emit_err(cell, msg, start, timeout, attempt, {:exit, reason})
-        {:error, {:exit, reason}}
+        nil ->
+          _ = Task.shutdown(task, :brutal_kill, 0)
+          {:exit, :timeout}
+      end
 
-      kind, reason ->
-        emit_err(cell, msg, start, timeout, attempt, {:raise, {kind, reason}})
-        {:error, {:raise, {kind, reason}}}
+    case result do
+      {:ok, reply} ->
+        emit_ok(cell, msg, start, timeout, attempt)
+        {:ok, reply}
+
+      {:exit, reason} ->
+        {tag_reason, transient?} = classify_exit_reason(reason)
+
+        if transient? and retry? and retries_left > 0 do
+          emit_err(cell, msg, start, timeout, attempt, tag_reason, retried?: true)
+
+          jitter_ms = 5 + :rand.uniform(25)
+          Process.sleep(jitter_ms)
+
+          do_call(cell, msg, timeout, true, retries_left - 1, attempt + 1)
+        else
+          emit_err(cell, msg, start, timeout, attempt, tag_reason)
+          {:error, tag_reason}
+        end
     end
   end
 
-  # NOTE: `_meta` retained for future tagging but intentionally unused.
-  defp transient_retry_or_error(
-         cell,
-         msg,
-         start,
-         timeout,
-         attempt,
-         tag_reason,
-         _meta,
-         retry?,
-         retries_left
-       ) do
-    if retry? and retries_left > 0 do
-      emit_err(cell, msg, start, timeout, attempt, tag_reason, retried?: true)
-      jitter_ms = 5 + :rand.uniform(25)
-      Process.sleep(jitter_ms)
-      do_call(cell, msg, timeout, true, retries_left - 1, attempt + 1)
-    else
-      emit_err(cell, msg, start, timeout, attempt, tag_reason)
-      {:error, tag_reason}
+  # Map low-level exit reasons to the simplified taxonomy the tests expect.
+  defp classify_exit_reason(reason) do
+    case reason do
+      :timeout ->
+        {:timeout, false}
+
+      {:timeout, _} ->
+        {:timeout, false}
+
+      :noproc ->
+        {:noproc, true}
+
+      {:noproc, _} ->
+        {:noproc, true}
+
+      :noconnection ->
+        {:noconnection, true}
+
+      {:noconnection, _} ->
+        {:noconnection, true}
+
+      other ->
+        {{:exit, other}, false}
     end
   end
 
@@ -164,3 +160,4 @@ defmodule Brain.Cell.Safe do
   defp tag(t) when is_atom(t), do: t
   defp tag(_), do: :unknown
 end
+
