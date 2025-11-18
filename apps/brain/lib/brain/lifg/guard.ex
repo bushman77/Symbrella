@@ -17,10 +17,14 @@ defmodule Brain.LIFG.Guard do
           length and recovers `stop = start + byte_size(phrase)`.
         - Drops `:span` when invalid / missing.
     * Char-gram / boundary guard:
-        - Drops explicit char-grams (e.g. `kind: :chargram` or `source: :chargram`) with telemetry.
+        - Drops explicit char-grams (e.g. `kind: :chargram` or `source: :chargram`)
+          and emits `[:brain, :lifg, :chargram_violation]` plus a
+          test-only `[:test, :lifg, :chargram_violation_tripwire]`.
         - When `sentence` is present and `span` is valid:
-            · Drops non-boundary substrings unless `mw: true`.
-            · Emits `[:brain, :lifg, :chargram_violation]` for each drop.
+            · Drops **cross-word char-grams** (substrings that include whitespace)
+              as `:chargram` violations.
+            · Drops **in-word, non-boundary substrings** as `:boundary_drop`
+              (unless `mw: true`).
         - When **no** `sentence` is present:
             · Does NOT run boundary heuristics.
             · Only drops explicit char-grams.
@@ -31,6 +35,7 @@ defmodule Brain.LIFG.Guard do
   @type token :: %{optional(atom()) => any()}
 
   @spec sanitize([term()] | map()) :: [token()] | map()
+
   # Slate form: %{tokens: [...], sentence: "..."} (used by LIFG Stage-1)
   def sanitize(%{tokens: tokens} = slate) do
     sentence = Map.get(slate, :sentence)
@@ -189,8 +194,10 @@ defmodule Brain.LIFG.Guard do
   defp maybe_filter_chargrams(tokens, nil) do
     {kept, _dropped} =
       Enum.reduce(tokens, {[], []}, fn tok, {keep, drop} ->
+        idx = Map.get(tok, :index, 0)
+
         if explicit_chargram?(tok) do
-          emit_chargram_violation(nil, tok, Map.get(tok, :index, 0), :chargram)
+          emit_chargram_violation(nil, tok, idx, :chargram)
           {keep, [tok | drop]}
         else
           {[tok | keep], drop}
@@ -201,23 +208,28 @@ defmodule Brain.LIFG.Guard do
   end
 
   # When sentence is present:
-  #   • Drop explicit char-grams.
-  #   • Drop non-boundary substrings unless mw: true.
+  #   • Drop explicit char-grams and cross-word char-grams as :chargram.
+  #   • Drop in-word non-boundary substrings as boundary_drop (unless mw: true).
   defp maybe_filter_chargrams(tokens, sentence) when is_binary(sentence) do
     {kept, _dropped} =
       Enum.reduce(tokens, {[], []}, fn tok, {keep, drop} ->
         idx = Map.get(tok, :index, 0)
 
-        cond do
-          explicit_chargram?(tok) ->
+        case classify_violation(sentence, tok) do
+          :chargram ->
             emit_chargram_violation(sentence, tok, idx, :chargram)
             {keep, [tok | drop]}
 
-          boundary_violation?(sentence, tok) and not Map.get(tok, :mw, false) ->
-            emit_chargram_violation(sentence, tok, idx, :boundary)
-            {keep, [tok | drop]}
+          :boundary ->
+            if Map.get(tok, :mw, false) do
+              # MWEs bypass boundary drops
+              {[tok | keep], drop}
+            else
+              emit_boundary_drop(sentence, tok, idx)
+              {keep, [tok | drop]}
+            end
 
-          true ->
+          :ok ->
             {[tok | keep], drop}
         end
       end)
@@ -225,7 +237,33 @@ defmodule Brain.LIFG.Guard do
     Enum.reverse(kept)
   end
 
-  # 🔴 KEY CHANGE: now also looks at :source / "source"
+  # Decide whether a token is a char-gram, a boundary substring, or OK.
+  defp classify_violation(sentence, tok) do
+    cond do
+      explicit_chargram?(tok) ->
+        :chargram
+
+      cross_word_chargram?(sentence, tok) ->
+        :chargram
+
+      boundary_violation?(sentence, tok) ->
+        :boundary
+
+      true ->
+        :ok
+    end
+  end
+
+  # 🔍 Cross-word char-gram: span slice contains whitespace.
+  defp cross_word_chargram?(sentence, %{span: {start, stop}})
+       when is_binary(sentence) and is_integer(start) and is_integer(stop) do
+    slice = safe_slice(sentence, start, stop)
+    slice != "" and String.contains?(slice, " ")
+  end
+
+  defp cross_word_chargram?(_sentence, _tok), do: false
+
+  # 🔍 Explicit char-gram, flagged via kind/source/chargram?
   defp explicit_chargram?(tok) do
     kind   = Map.get(tok, :kind)   || Map.get(tok, "kind")
     source = Map.get(tok, :source) || Map.get(tok, "source")
@@ -236,6 +274,7 @@ defmodule Brain.LIFG.Guard do
       Map.get(tok, "chargram?", false)
   end
 
+  # 🔍 In-word non-boundary substring
   defp boundary_violation?(sentence, %{span: {start, stop}})
        when is_binary(sentence) and is_integer(start) and is_integer(stop) do
     phrase = safe_slice(sentence, start, stop)
@@ -293,7 +332,42 @@ defmodule Brain.LIFG.Guard do
     left_ok? and right_ok?
   end
 
-  defp emit_chargram_violation(sentence, tok, token_index, reason) do
+  # 🚨 Char-gram violation telemetry
+  #
+  # Emits both:
+  #   • [:brain, :lifg, :chargram_violation]
+  #   • [:test,  :lifg, :chargram_violation_tripwire]  (for TripwireTest)
+  defp emit_chargram_violation(_sentence, tok, token_index, reason) do
+    phrase = Map.get(tok, :phrase, "")
+
+    meta = %{
+      count: 1,
+      reason: reason,
+      v: 2,
+      phrase: phrase,
+      token_index: token_index,
+      mw: Map.get(tok, :mw, false)
+    }
+
+    # Prod-style event
+    :telemetry.execute(
+      [:brain, :lifg, :chargram_violation],
+      %{},
+      meta
+    )
+
+    # Test-only tripwire (captured by Brain.LIFG.TripwireTest)
+    :telemetry.execute(
+      [:test, :lifg, :chargram_violation_tripwire],
+      %{},
+      meta
+    )
+  end
+
+  # 🚨 Boundary drop telemetry
+  #
+  # Used for in-word misaligned substrings (e.g. "hat" inside "what").
+  defp emit_boundary_drop(sentence, tok, token_index) do
     phrase =
       case {sentence, Map.get(tok, :span)} do
         {bin, {start, stop}}
@@ -304,17 +378,16 @@ defmodule Brain.LIFG.Guard do
           Map.get(tok, :phrase, "")
       end
 
+    meta = %{
+      token_index: token_index,
+      mw: Map.get(tok, :mw, false),
+      phrase: phrase
+    }
+
     :telemetry.execute(
-      [:brain, :lifg, :chargram_violation],
+      [:brain, :lifg, :boundary_drop],
       %{},
-      %{
-        count: 1,
-        reason: reason,
-        v: 2,
-        phrase: phrase,
-        token_index: token_index,
-        mw: Map.get(tok, :mw, false)
-      }
+      meta
     )
   end
 

@@ -13,12 +13,22 @@ defmodule Brain.HippocampusRecallTest do
     %{winners: [%{id: "#{word}|noun|0", lemma: word}]}
   end
 
+  defp slate_multi(words) when is_list(words) do
+    %{
+      winners:
+        Enum.map(words, fn w ->
+          %{id: "#{w}|noun|0", lemma: w}
+        end)
+    }
+  end
+
   test "recall prefers overlapping episode (Jaccard > 0)" do
     Hippocampus.encode(slate_with("hello"), %{})
     Hippocampus.encode(slate_with("world"), %{})
 
     results = Hippocampus.recall(["hello"])
     assert length(results) == 1
+
     [%{episode: %{slate: %{winners: [%{lemma: "hello"}]}}}] = results
     assert hd(results).score > 0.0
   end
@@ -33,6 +43,7 @@ defmodule Brain.HippocampusRecallTest do
     Hippocampus.encode(slate_with("foo"), %{})
 
     [%{at: at_new} | _] = Hippocampus.recall(["foo"], limit: 2)
+
     # The first result should be the newest episode (greater timestamp)
     [first_entry | _] = Hippocampus.snapshot().window
     {at_top, _} = first_entry
@@ -43,17 +54,21 @@ defmodule Brain.HippocampusRecallTest do
     Hippocampus.reset()
     Hippocampus.configure(window_keep: 10, recall_limit: 2)
 
-    Hippocampus.encode(slate_with("a"), %{})
-    Hippocampus.encode(slate_with("a"), %{})
+    # Two distinct episodes that both overlap "a" but are not deduped
+    Hippocampus.encode(slate_multi(["a", "x"]), %{})
+    Hippocampus.encode(slate_multi(["a", "y"]), %{})
+
+    # A pure distractor that should never be returned for cue "a"
     Hippocampus.encode(slate_with("b"), %{})
 
     # No overlap → empty
     assert Hippocampus.recall(["zzz"]) == []
 
-    # Overlap with 'a' → 2 results due to default recall_limit
+    # Overlap with 'a' → 2 results due to recall_limit and Jaccard > 0
     res = Hippocampus.recall(["a"])
 
     assert length(res) == 2
     assert Enum.all?(res, fn r -> r.score > 0.0 end)
   end
 end
+

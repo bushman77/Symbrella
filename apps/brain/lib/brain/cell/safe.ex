@@ -6,7 +6,7 @@ defmodule Brain.Cell.Safe do
   • Contain timeouts/crashes so a single flaky cell never freezes the loop.
   • Uniform error taxonomy: `{:ok, reply}` | `{:error, reason}`.
   • Emit telemetry for latency + errors without introducing a hard dependency on metrics libs.
-  • Optional tiny retry (with jitter) for transient transport errors.
+  • Optional tiny retry for transient transport errors.
 
   Telemetry events (native time units for duration):
     [:brain, :cell, :call]
@@ -65,19 +65,23 @@ defmodule Brain.Cell.Safe do
   defp do_call(cell, msg, timeout, retry?, retries_left, attempt) do
     start = System.monotonic_time()
 
-    task = Task.async(fn -> GenServer.call(cell, msg, timeout) end)
+    # Protect the caller from linked-process crashes while we talk to the cell.
+    old_flag = Process.flag(:trap_exit, true)
 
     result =
-      case Task.yield(task, timeout + 10) do
-        {:ok, reply} ->
-          {:ok, reply}
-
-        {:exit, reason} ->
+      try do
+        {:ok, GenServer.call(cell, msg, timeout)}
+      rescue
+        error ->
+          # Covers callback crashes that raise (e.g. :erlang.error(:boom))
+          {:exit, error}
+      catch
+        :exit, reason ->
+          # Covers timeouts, :noproc, etc. that come back as exits
           {:exit, reason}
-
-        nil ->
-          _ = Task.shutdown(task, :brutal_kill, 0)
-          {:exit, :timeout}
+      after
+        # Always restore the previous trap_exit flag
+        Process.flag(:trap_exit, old_flag)
       end
 
     case result do
@@ -91,6 +95,7 @@ defmodule Brain.Cell.Safe do
         if transient? and retry? and retries_left > 0 do
           emit_err(cell, msg, start, timeout, attempt, tag_reason, retried?: true)
 
+          # tiny backoff; not important for tests, but nice in practice
           jitter_ms = 5 + :rand.uniform(25)
           Process.sleep(jitter_ms)
 
@@ -124,6 +129,7 @@ defmodule Brain.Cell.Safe do
         {:noconnection, true}
 
       other ->
+        # Crash / raise / anything else becomes {:exit, other}
         {{:exit, other}, false}
     end
   end

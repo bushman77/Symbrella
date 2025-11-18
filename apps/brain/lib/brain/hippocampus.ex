@@ -61,14 +61,17 @@ defmodule Brain.Hippocampus do
 
   Behavior:
     • Builds cues from `opts[:cues]` or from `si` (winners/atl_slate/tokens/sentence).
-    • Calls `recall/2` with `ignore_head: false` and `min_jaccard: 0.0` unless provided.
+    • Calls `recall/2` with `ignore_head: false` unless provided.
     • Applies optional `:scope` filter locally (atom-or-string keys accepted).
 
   Fallback logic:
     • If recall returns episodes → attach them (plus scope filtering).
     • If recall returns no episodes:
-        – With default `min_jaccard` (0.0) and a non-empty window → attach the head.
-        – With explicit `min_jaccard` > 0.0 → respect that and attach none.
+        – With relaxed Jaccard (effective min_jaccard == 0.0) and a non-empty window:
+            · Try to pick the **first window episode whose norms intersect the cues**,
+              **and** whose meta matches `scope` (if provided).
+            · If none match both scope and cues, attach nothing.
+        – With effective `min_jaccard` > 0.0 → respect the empty result (attach none).
     • If the server is NOT running, synthesize a lightweight episode from cues.
   """
   @spec attach_episodes(map(), keyword()) :: map()
@@ -76,11 +79,11 @@ defmodule Brain.Hippocampus do
     cues  = build_cues(si, opts)
     scope = Keyword.get(opts, :scope, nil)
 
+    # Do not pass :scope into recall; we handle it locally.
     opts2 =
       opts
       |> Keyword.delete(:scope)
       |> Keyword.put_new(:ignore_head, false)
-      |> Keyword.put_new(:min_jaccard, 0.0)
 
     episodes_unfiltered =
       if running?() do
@@ -93,46 +96,126 @@ defmodule Brain.Hippocampus do
 
     episodes_scoped =
       case scope do
-        s when is_map(s) -> Enum.filter(episodes_unfiltered, &meta_matches_scope?(&1, s))
-        _ -> episodes_unfiltered
+        s when is_map(s) and s != %{} ->
+          Enum.filter(episodes_unfiltered, &meta_matches_scope?(&1, s))
+
+        _ ->
+          episodes_unfiltered
       end
 
-    min_j = Keyword.get(opts2, :min_jaccard, 0.0)
+    # For fallback decisions, look at:
+    #   • per-call :min_jaccard override (if present)
+    #   • else configured Hippo default (if running)
+    effective_min_j =
+      cond do
+        Keyword.has_key?(opts, :min_jaccard) ->
+          Keyword.get(opts, :min_jaccard)
+
+        running?() ->
+          case snapshot() do
+            %{opts: %{min_jaccard: v}} when is_number(v) -> v
+            _ -> 0.0
+          end
+
+        true ->
+          0.0
+      end
 
     episodes =
       cond do
+        # We got scoped episodes → use them as-is.
         episodes_scoped != [] ->
           episodes_scoped
 
+        # Server not running: just return whatever we synthesized.
         not running?() ->
-          # If the server isn't running, we already synthesized above;
-          # if that still came back empty, just leave it empty.
+          episodes_unfiltered
+
+        # Strict min_jaccard: if recall couldn't find anything, don't override it.
+        effective_min_j > 0.0 ->
           []
 
-        min_j > 0.0 ->
-          # Caller explicitly demanded a stricter Jaccard; respect their empty result.
-          []
-
+        # Relaxed Jaccard: allow a "best effort" fallback from the window,
+        # but only if the episode:
+        #   • matches scope (if provided), AND
+        #   • shares at least one norm with the cues.
         true ->
-          # Default path for "hippo: true" with permissive Jaccard:
-          # if we have any window entries, attach the head so tests and
-          # callers see at least one episode.
           case snapshot().window do
-            [{at, ep} | _] ->
-              [
-                %{score: 0.0, at: at, episode: ep}
-                |> Evidence.ensure_winners_for_evidence()
-                |> standardize_for_evidence()
-              ]
-
-            _ ->
+            [] ->
               []
+
+            window ->
+              # Filter window by scope first, if any.
+              window_scoped =
+                case scope do
+                  s when is_map(s) and s != %{} ->
+                    Enum.filter(window, fn {_at, ep} ->
+                      meta_matches_scope?(%{episode: ep}, s)
+                    end)
+
+                  _ ->
+                    window
+                end
+
+              if window_scoped == [] do
+                []
+              else
+                # Build a norms set from cues (similar to synth logic).
+                cue_norms =
+                  cues
+                  |> List.wrap()
+                  |> Enum.flat_map(fn
+                    s when is_binary(s) ->
+                      String.split(safe_norm(s), ~r/\s+/, trim: true)
+
+                    m when is_map(m) ->
+                      candidate =
+                        Map.get(m, :lemma) || Map.get(m, "lemma") ||
+                          Map.get(m, :norm) || Map.get(m, "norm") ||
+                          Map.get(m, :word) || Map.get(m, "word")
+
+                      if is_binary(candidate), do: [safe_norm(candidate)], else: []
+
+                    _ ->
+                      []
+                  end)
+                  |> Enum.reject(&(&1 == ""))
+                  |> MapSet.new()
+
+                if MapSet.size(cue_norms) == 0 do
+                  []
+                else
+                  window_scoped
+                  |> Enum.reduce_while(nil, fn {at, ep}, acc ->
+                    norms = Map.get(ep, :norms, MapSet.new())
+                    inter = MapSet.intersection(norms, cue_norms)
+
+                    if MapSet.size(inter) > 0 do
+                      {:halt, {at, ep}}
+                    else
+                      {:cont, acc}
+                    end
+                  end)
+                  |> case do
+                    nil ->
+                      []
+
+                    {at, ep} ->
+                      [
+                        %{score: 0.0, at: at, episode: ep}
+                        |> Evidence.ensure_winners_for_evidence()
+                        |> standardize_for_evidence()
+                      ]
+                  end
+                end
+              end
           end
       end
 
     evidence = Map.get(si, :evidence) || %{}
     Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
   end
+
 
   @doc """
   Configure runtime options. Accepts any of:
@@ -166,18 +249,30 @@ defmodule Brain.Hippocampus do
     at = now_ms()
     ep = %{slate: slate, meta: meta_in, norms: norms}
 
-    window2 = Window.trim([{at, ep} | state.window], state.window_keep)
+    # 🔹 dedup-on-write:
+    #   If the *head* episode has the same norms, refresh its timestamp
+    #   (and slate/norms) but keep the original meta.
+    window1 =
+      case state.window do
+        [{_old_at, %{norms: old_norms} = old_ep} | rest] ->
+          if MapSet.equal?(old_norms, norms) do
+            # keep old_ep.meta; only update slate + norms
+            new_ep = %{old_ep | slate: slate, norms: norms}
+            [{at, new_ep} | rest]
+          else
+            [{at, ep} | state.window]
+          end
 
-    new_last =
-      case window2 do
-        [{at2, e} | _] when is_integer(at2) -> {at2, e}
-        _ -> nil
+        _ ->
+          [{at, ep} | state.window]
       end
 
-    last_at =
-      case new_last do
-        {at2, _} -> at2
-        _ -> nil
+    window2 = Window.trim(window1, state.window_keep)
+
+    {new_last, last_at} =
+      case window2 do
+        [{at2, e} | _] when is_integer(at2) -> {{at2, e}, at2}
+        _ -> {nil, nil}
       end
 
     case Application.get_env(:brain, :episodes_mode, :on) do
@@ -204,7 +299,7 @@ defmodule Brain.Hippocampus do
           %{meta: meta_in}
         )
 
-        # Optional persistence (guarded)
+        # Optional persistence (guarded) — use the *original* episode we built
         maybe_persist(at, ep)
 
         {:reply, :ok, %{state | window: window2, last: new_last, last_at: last_at}}
@@ -253,26 +348,35 @@ defmodule Brain.Hippocampus do
             recall_limit: limit,
             half_life_ms: half_life_ms,
             min_jaccard: min_jacc,
-            scope: scope_opt,
             ignore_head: ignore_head
           )
 
+        ranked1 =
+          case scope_opt do
+            s when is_map(s) and s != %{} ->
+              Enum.filter(ranked0, &meta_matches_scope?(&1, s))
+
+            _ ->
+              ranked0
+          end
+
         ranked =
-          ranked0
-          |> Enum.filter(fn
-            %{score: s} when is_number(s) -> s > 0.0
-            _ -> false
-          end)
+          ranked1
           |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
           |> Enum.sort_by(& &1.score, :desc)
           |> Enum.take(limit)
 
-        Telemetry.emit_recall(Map.merge(meas, %{source: :memory}), meta_map)
+        meas2 =
+          meas
+          |> maybe_set_returned(length(ranked1))
+          |> Map.merge(%{source: :memory})
+
+        Telemetry.emit_recall(meas2, meta_map)
 
         Telemetry.maybe_echo_to_caller(
           from,
           [:brain, :hippocampus, :recall],
-          Map.merge(meas, %{source: :memory}),
+          meas2,
           meta_map
         )
 
@@ -289,29 +393,26 @@ defmodule Brain.Hippocampus do
               recall_limit: limit,
               half_life_ms: half_life_ms,
               min_jaccard: min_jacc,
-              scope: scope_opt,
               ignore_head: ignore_head
             )
 
           ranked =
             ranked0
-            |> Enum.filter(fn
-              %{score: s} when is_number(s) -> s > 0.0
-              _ -> false
-            end)
             |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
             |> Enum.sort_by(& &1.score, :desc)
             |> Enum.take(limit)
 
-          Telemetry.emit_recall(
-            Map.merge(meas, %{source: :memory, fallback: :missing_embedding}),
-            meta_map
-          )
+          meas2 =
+            meas
+            |> maybe_set_returned(length(ranked0))
+            |> Map.merge(%{source: :memory, fallback: :missing_embedding})
+
+          Telemetry.emit_recall(meas2, meta_map)
 
           Telemetry.maybe_echo_to_caller(
             from,
             [:brain, :hippocampus, :recall],
-            Map.merge(meas, %{source: :memory}),
+            meas2,
             meta_map
           )
 
@@ -332,9 +433,12 @@ defmodule Brain.Hippocampus do
           meas = %{k: length(ranked), source: :db}
           Telemetry.emit_recall(meas, %{source: :db})
 
-          Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, %{
-            source: :db
-          })
+          Telemetry.maybe_echo_to_caller(
+            from,
+            [:brain, :hippocampus, :recall],
+            meas,
+            %{source: :db}
+          )
 
           {:reply, ranked, state}
         end
@@ -347,16 +451,20 @@ defmodule Brain.Hippocampus do
             recall_limit: limit,
             half_life_ms: half_life_ms,
             min_jaccard: min_jacc,
-            scope: scope_opt,
             ignore_head: ignore_head
           )
 
+        mem_ranked1 =
+          case scope_opt do
+            s when is_map(s) and s != %{} ->
+              Enum.filter(mem_ranked0, &meta_matches_scope?(&1, s))
+
+            _ ->
+              mem_ranked0
+          end
+
         mem_ranked =
-          mem_ranked0
-          |> Enum.filter(fn
-            %{score: s} when is_number(s) -> s > 0.0
-            _ -> false
-          end)
+          mem_ranked1
           |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
 
         # DB path (only if embedding provided)
@@ -381,7 +489,7 @@ defmodule Brain.Hippocampus do
           |> Enum.take(limit)
 
         meas = %{
-          mem_k: length(mem_ranked),
+          mem_k: length(mem_ranked1),
           db_k: length(db_ranked),
           source: :hybrid,
           had_embedding?: not is_nil(embedding)
@@ -389,9 +497,12 @@ defmodule Brain.Hippocampus do
 
         Telemetry.emit_recall(meas, %{source: :hybrid})
 
-        Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], meas, %{
-          source: :hybrid
-        })
+        Telemetry.maybe_echo_to_caller(
+          from,
+          [:brain, :hippocampus, :recall],
+          meas,
+          %{source: :hybrid}
+        )
 
         {:reply, ranked, state}
     end
@@ -547,6 +658,14 @@ defmodule Brain.Hippocampus do
   end
 
   defp meta_matches_scope?(_rec, _scope), do: false
+
+  defp maybe_set_returned(meas, n) when is_map(meas) do
+    case meas do
+      %{returned: _} -> %{meas | returned: n}
+      _ -> meas
+    end
+  end
+
 
   # Outcome uplift & evidence standardization
   defp apply_outcome_uplift(%{score: s} = rec, outcome_w) when is_number(s) do
