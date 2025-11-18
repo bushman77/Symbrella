@@ -122,6 +122,7 @@ defmodule Brain.Hippocampus.Recall do
 
   # ─────────────────────────── cues helpers ─────────────────────────
 
+  # List-form cues (["alpha"], ["hello", "world"], etc.)
   defp cues_to_set(cues) when is_list(cues) do
     cues
     |> Enum.flat_map(&tokenize_term/1)
@@ -129,19 +130,29 @@ defmodule Brain.Hippocampus.Recall do
     |> MapSet.new()
   end
 
+  # Slate-style cues: e.g. %{winners: ["alpha"]} or %{winners: [%{lemma: "alpha"}]}
   defp cues_to_set(%{} = slate) do
     winners = slate[:winners] || slate["winners"] || []
 
     winners
-    |> Enum.flat_map(fn w ->
-      [
-        w[:lemma], w["lemma"],
-        w[:norm],  w["norm"],
-        w[:word],  w["word"],
-        w[:id],    w["id"]
-      ]
+    |> Enum.flat_map(fn
+      # NEW: winner is already a simple term (string/atom)
+      w when is_binary(w) or is_atom(w) ->
+        tokenize_term(w)
+
+      # Original behaviour: winner is a map with lemma/norm/word/id
+      %{} = w ->
+        [
+          w[:lemma], w["lemma"],
+          w[:norm],  w["norm"],
+          w[:word],  w["word"],
+          w[:id],    w["id"]
+        ]
+        |> Enum.flat_map(&tokenize_term/1)
+
+      _ ->
+        []
     end)
-    |> Enum.flat_map(&tokenize_term/1)
     |> Enum.reject(&(&1 == ""))
     |> MapSet.new()
   end

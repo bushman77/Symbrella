@@ -255,10 +255,20 @@ defmodule Brain.LIFG.Guard do
   end
 
   # 🔍 Cross-word char-gram: span slice contains whitespace.
-  defp cross_word_chargram?(sentence, %{span: {start, stop}})
+  # NOTE:
+  #   • Real MWEs (mw: true / "mw" => true) are *not* treated as char-grams here.
+  #   • Only non-MWE cross-word substrings are considered char-grams.
+  defp cross_word_chargram?(sentence, %{span: {start, stop}} = tok)
        when is_binary(sentence) and is_integer(start) and is_integer(stop) do
-    slice = safe_slice(sentence, start, stop)
-    slice != "" and String.contains?(slice, " ")
+    # If upstream has explicitly marked this token as an MWE, we let it
+    # through and let Stage1's MWE logic decide what to do (including
+    # emitting :mwe_fallback_emitted when it has no senses).
+    if Map.get(tok, :mw, false) or Map.get(tok, "mw", false) do
+      false
+    else
+      slice = safe_slice(sentence, start, stop)
+      slice != "" and String.contains?(slice, " ")
+    end
   end
 
   defp cross_word_chargram?(_sentence, _tok), do: false

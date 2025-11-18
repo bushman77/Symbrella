@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/thalamus.ex
 defmodule Brain.Thalamus do
   @moduledoc """
   Thalamus — region relay for curiosity proposals.
@@ -26,7 +27,7 @@ defmodule Brain.Thalamus do
         mood_applied?: boolean, mood_factor: float,
         mood_snapshot: %{exploration:, inhibition:, vigilance:, plasticity:},
         mood_weights: %{expl:, inhib:, vigil:, plast:}, mood_cap: float,
-        v: 3
+        v: 2
       }
   """
 
@@ -62,37 +63,38 @@ defmodule Brain.Thalamus do
   If the Thalamus server is running, returns the live values. If not, returns
   **config defaults** so tests/tools can call this safely.
   """
-@spec get_params(server :: pid() | atom()) :: %{
-        ofc_weight: float(),
-        acc_alpha: float(),
-        mood_weights: %{expl: float(), inhib: float(), vigil: float(), plast: float()},
-        mood_cap: float()
-      }
-def get_params(server \\ __MODULE__)
-def get_params(server) when is_pid(server) do
-  if Process.alive?(server),
-    do: safe_get_params(server),
-    else: config_defaults()
-end
+  @spec get_params(server :: pid() | atom()) :: %{
+          ofc_weight: float(),
+          acc_alpha: float(),
+          mood_weights: %{expl: float(), inhib: float(), vigil: float(), plast: float()},
+          mood_cap: float()
+        }
+  def get_params(server \\ __MODULE__)
 
-def get_params(server) when is_atom(server) do
-  case Process.whereis(server) do
-    pid when is_pid(pid) -> safe_get_params(server)
-    _ -> config_defaults()
+  def get_params(server) when is_pid(server) do
+    if Process.alive?(server),
+      do: safe_get_params(server),
+      else: config_defaults()
   end
-end
 
-def get_params(_), do: config_defaults()
-
-defp safe_get_params(server) do
-  try do
-    GenServer.call(server, :get_params)
-  rescue
-    _ -> config_defaults()
-  catch
-    _, _ -> config_defaults()
+  def get_params(server) when is_atom(server) do
+    case Process.whereis(server) do
+      pid when is_pid(pid) -> safe_get_params(server)
+      _ -> config_defaults()
+    end
   end
-end
+
+  def get_params(_), do: config_defaults()
+
+  defp safe_get_params(server) do
+    try do
+      GenServer.call(server, :get_params)
+    rescue
+      _ -> config_defaults()
+    catch
+      _, _ -> config_defaults()
+    end
+  end
 
   @doc """
   Return a compact status snapshot for UI/diagnostics.
@@ -134,7 +136,9 @@ end
       })
 
     :ok =
-      :telemetry.attach(ofc_id, [:brain, :ofc, :value], &__MODULE__.on_ofc_value/4, %{pid: self()})
+      :telemetry.attach(ofc_id, [:brain, :ofc, :value], &__MODULE__.on_ofc_value/4, %{
+        pid: self()
+      })
 
     :ok =
       :telemetry.attach(acc_id, [:brain, :acc, :conflict], &__MODULE__.on_acc_conflict/4, %{
@@ -175,22 +179,26 @@ end
   @doc false
   def on_curiosity(_ev, measurements, metadata, %{pid: pid}) when is_pid(pid),
     do: send(pid, {:curiosity_proposal, measurements, metadata})
+
   def on_curiosity(_, _, _, _), do: :ok
 
   @doc false
   def on_ofc_value(_ev, measurements, metadata, %{pid: pid}) when is_pid(pid),
     do: send(pid, {:ofc_value, measurements, metadata})
+
   def on_ofc_value(_, _, _, _), do: :ok
 
   @doc false
   def on_acc_conflict(_ev, measurements, _metadata, %{pid: pid}) when is_pid(pid),
     do: send(pid, {:acc_conflict, measurements})
+
   def on_acc_conflict(_, _, _, _), do: :ok
 
   @doc false
   def on_mood_update(_ev, measurements, meta, %{pid: pid}) when is_pid(pid) do
     send(pid, {:mood_update, measurements, meta})
   end
+
   def on_mood_update(_, _, _, _), do: :ok
 
   # ── GenServer calls ────────────────────────────────────────────────────────
@@ -206,9 +214,9 @@ end
   def handle_call(:get_params, _from, state) do
     reply = %{
       ofc_weight: cfg_ofc_weight(state.opts),
-      acc_alpha:  cfg_acc_alpha(state.opts),
+      acc_alpha: cfg_acc_alpha(state.opts),
       mood_weights: cfg_mood_weights(state.opts),
-      mood_cap:     cfg_mood_cap(state.opts)
+      mood_cap: cfg_mood_cap(state.opts)
     }
 
     {:reply, reply, state}
@@ -232,9 +240,9 @@ end
   def handle_info({:mood_update, meas, _meta}, state) do
     mood = %{
       exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
-      inhibition:  get_num(meas, :inhibition, 0.5)  |> clamp01(),
-      vigilance:   get_num(meas, :vigilance, 0.5)   |> clamp01(),
-      plasticity:  get_num(meas, :plasticity, 0.5)  |> clamp01()
+      inhibition: get_num(meas, :inhibition, 0.5) |> clamp01(),
+      vigilance: get_num(meas, :vigilance, 0.5) |> clamp01(),
+      plasticity: get_num(meas, :plasticity, 0.5) |> clamp01()
     }
 
     {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
@@ -279,6 +287,7 @@ end
         v when is_number(v) ->
           b = clamp01((1.0 - w_ofc) * base_score + w_ofc * v)
           {Map.put(probe0, :score, b), b, true}
+
         _ ->
           {probe0, base_score, false}
       end
@@ -328,7 +337,7 @@ end
         mood_snapshot: mood_snapshot,
         mood_weights: mood_weights,
         mood_cap: mood_cap,
-        v: 3
+        v: 2
       }
     )
 
@@ -494,9 +503,9 @@ end
   defp config_defaults do
     %{
       ofc_weight: cfg_ofc_weight([]),
-      acc_alpha:  cfg_acc_alpha([]),
+      acc_alpha: cfg_acc_alpha([]),
       mood_weights: cfg_mood_weights([]),
-      mood_cap:     cfg_mood_cap([])
+      mood_cap: cfg_mood_cap([])
     }
   end
 end
