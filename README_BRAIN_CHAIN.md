@@ -52,4 +52,3 @@ that receive signals after the LIFG stage.
 - Each region supports:
   - `Region.snapshot/0`
   - `Region.stimulate(si)` (manual poke for debugging)
-
