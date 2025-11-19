@@ -172,6 +172,8 @@ defmodule Brain.WorkingMemory do
         cand["phrase"] ||
         ""
 
+    source = cand[:source] || cand["source"] || nil
+
     id_down =
       case id do
         b when is_binary(b) -> String.downcase(b)
@@ -184,14 +186,31 @@ defmodule Brain.WorkingMemory do
         _ -> ""
       end
 
+    source_down =
+      case source do
+        b when is_binary(b) -> String.downcase(b)
+        a when is_atom(a)   -> Atom.to_string(a) |> String.downcase()
+        _ -> ""
+      end
+
     cond do
-      # Curiosity probes usually look like "curiosity|probe|..."
+      # Explicit curiosity source
+      source_down == "curiosity" ->
+        :curiosity
+
+      # Canonical curiosity probe ids: "curiosity|probe|..."
       String.starts_with?(id_down, "curiosity|probe|") ->
         :curiosity
 
       String.contains?(id_down, "curiosity|probe|") ->
         :curiosity
 
+      # NEW: modern curiosity probe ids from Thalamus/OFC/BG/DLPFC:
+      # e.g. "probe|drop", "probe|keep", "probe|ofc|69"
+      String.starts_with?(id_down, "probe|") and lemma_down == "probe" ->
+        :curiosity
+
+      # Fallback: explicit lemma "curiosity"
       lemma_down == "curiosity" ->
         :curiosity
 

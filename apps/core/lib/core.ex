@@ -1,3 +1,4 @@
+# apps/core/lib/core.ex
 defmodule Core do
   @moduledoc """
   Pipeline:
@@ -27,8 +28,12 @@ defmodule Core do
   # ── P-253/254 knobs ─────────────────────────────────────────────────────────
   @lifg_tie_epsilon 0.01          # score margin considered "razor-thin"
   @lifg_prob_epsilon 0.01         # probability margin considered "razor-thin"
-  @greet_phrase_bump 0.01         # extra nudge for MWE when intent == :greet
-  @mwe_general_bump 0.008         # small nudge for any multi-word token in thin ties
+
+  # Bias knobs for multi-word expressions (config-driven):
+  #   :mwe_greet_phrase_bump — extra score for greeting phrases ("hello there", "hey you")
+  #   :mwe_general_bump      — extra score for non-greeting MWEs
+  @greet_phrase_bump Application.compile_env(:core, :mwe_greet_phrase_bump, 0.01)
+  @mwe_general_bump Application.compile_env(:core, :mwe_general_bump, 0.008)
 
   alias Brain
   alias Core.SemanticInput
@@ -197,7 +202,9 @@ defmodule Core do
                   base = if thin?, do: @mwe_general_bump, else: 0.0
                   greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
                   base + greet
-                true -> 0.0
+
+                true ->
+                  0.0
               end
             end
 

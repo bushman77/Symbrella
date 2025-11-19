@@ -1,3 +1,4 @@
+# apps/core/test/core/mwe_injector_test.exs
 defmodule Core.MWE.InjectorTest do
   use ExUnit.Case, async: true
   alias Core.MWE.Injector
@@ -70,4 +71,47 @@ defmodule Core.MWE.InjectorTest do
 
     assert just_mwes == [{"kick the bucket", {0, 3}}]
   end
+
+  test "returns original tokens when repo never confirms any MWE" do
+    tokens = [
+      %{phrase: "alpha", span: {0, 1}},
+      %{phrase: "beta", span: {1, 2}},
+      %{phrase: "gamma", span: {2, 3}}
+    ]
+
+    repo = MapSet.new([])
+    out = Injector.inject(tokens, exists?: exists_from_set(repo), max_n: 4)
+
+    # No injected MWEs
+    refute Enum.any?(out, fn t -> Map.get(t, :mw, false) or Map.get(t, "mw", false) end)
+
+    # Same number of tokens and same phrases in order
+    assert length(out) == length(tokens)
+    assert Enum.map(out, & &1.phrase) == Enum.map(tokens, & &1.phrase)
+  end
+
+  test "does not inject MWEs from tokens that already look like char-grams" do
+    tokens = [
+      %{phrase: "Ki", span: {0, 1}},
+      # char-gram-ish: includes a space and not a clean word
+      %{phrase: "ck t", span: {1, 2}},
+      %{phrase: "the", span: {2, 3}}
+    ]
+
+    # Even if the repo would recognise suspicious phrases, Injector should
+    # only build MWEs from single-word strings.
+    repo = MapSet.new(["Ki ck t", "ck t the"])
+    out = Injector.inject(tokens, exists?: exists_from_set(repo), max_n: 3)
+
+    mwes =
+      out
+      |> Enum.filter(fn t -> Map.get(t, :mw, false) or Map.get(t, "mw", false) end)
+
+    # No MWEs should be injected at all from "ck t" style junk.
+    assert mwes == []
+
+    # Base tokens are preserved
+    assert Enum.map(out, & &1.phrase) == Enum.map(tokens, & &1.phrase)
+  end
 end
+

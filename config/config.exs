@@ -19,7 +19,9 @@ config :core, Core.Recall.Synonyms.Providers.External,
 # Core defaults
 config :core,
   recall_budget_ms: :infinity,
-  recall_max_items: :infinity
+  recall_max_items: :infinity,
+  mwe_greet_phrase_bump: 0.02,
+  mwe_general_bump: 0.01
 
 # Curiosity bridge (kept as-is)
 config :core, Core.Curiosity.Bridge,
