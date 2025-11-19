@@ -3,14 +3,14 @@
 **Erlang/OTP:** 28 • **Elixir:** 1.18.x • **Phoenix:** 1.8.x (Bandit)
 
 > Symbrella is an NSSI (Neuro‑Symbolic Synthetic Intelligence) umbrella app.  
-> It models brain‑inspired regions (LIFG, PMTG, Hippocampus, ACC, Basal Ganglia, etc.) as OTP processes, combining symbolic structure with learned signals (Axon/Nx, embeddings, episodic recall).
+> It models brain‑inspired regions (LIFG, PMTG, Hippocampus, ACC, Basal Ganglia, Thalamus, DLPFC, etc.) as OTP processes, combining symbolic structure with learned signals (Axon/Nx, embeddings, episodic recall).
 
 Symbrella treats your phone (and eventually real robots) as a **body**, and this umbrella as a **brain**.  
 It combines:
 
 - **Neural models** (Axon/Nx, embeddings)  
 - **Symbolic control** (GenServers, policies, Ecto-backed memory)  
-- **Brain-inspired regions** (LIFG, PMTG, Hippocampus, WM, Mood, Cerebellum, etc.)
+- **Brain-inspired regions** (LIFG, PMTG, Hippocampus, WM, Mood, Curiosity, Thalamus, DLPFC, Cerebellum, etc.)
 
 …into a single, inspectable cognitive system you can run locally.
 
@@ -76,7 +76,7 @@ mix phx.server
 
 ## Apps at a glance
 
-- **apps/brain** — Brain regions + working memory. **Owns LIFG** selection and episodic coordination (Hippocampus).
+- **apps/brain** — Brain regions + working memory. Owns LIFG selection, the Curiosity → Thalamus → BasalGanglia → DLPFC → WM loop, and episodic coordination (Hippocampus).
 - **apps/core** — Orchestrates the pipeline (tokenize → Brain STM → Db LTM → Lexicon). SemanticInput, MWE injection, invariants.
 - **apps/db** — Ecto schemas (BrainCell, Episode, Lexicon) + Repo; pgvector support for embeddings.
 - **apps/lexicon** — Adapter layer for dictionary/lexicon sources.
@@ -106,7 +106,7 @@ Reasoning model (LLM)                Brain regions:
 (internal chain-of-thought)          LIFG ⇄ ATL ⇄ Hippocampus ⇄ WM ⇄ Mood ⇄ Cerebellum
       │                                         │
       ▼                                         ▼
-Tools (search, code, DB, …)          Episodic writes, WM focus, gate / mood updates
+Tools (search, code, DB, …)          Curiosity, Thalamus, BasalGanglia, DLPFC, tools/sensors
       │                                         │
       ▼                                         ▼
 Answer synthesis                     Phrase / action / UI output
@@ -158,10 +158,10 @@ Symbrella treats **episodic memory** as a first-class brain stage, not just a fe
 | Aspect          | OpenAI-style reasoning stack                  | Symbrella                                           |
 |----------------|-----------------------------------------------|-----------------------------------------------------|
 | Attention      | Transformer attention + orchestrator hints    | WM admission policy + focus thresholds + gate scores |
-| Gating         | System prompts, reasoning_effort, tool rules  | `Brain.WM.Policy`, LIFG Stage-1 scores, ACC/OFC gates |
-| Meta-signals   | Mostly hidden policies and heuristics         | **Mood** (dopamine/serotonin), curiosity, ACCGate inputs |
+| Gating         | System prompts, reasoning_effort, tool rules  | `Brain.WM.Policy`, LIFG Stage-1 scores, ACC/OFC/Thalamus gates |
+| Meta-signals   | Mostly hidden policies and heuristics         | **Mood** (dopamine/serotonin), Curiosity, ACC inputs |
 
-Symbrella’s control flow is designed to be **mood-sensitive**: neuromodulators can actually shift thresholds and choices.
+Symbrella’s control flow is designed to be **mood-sensitive**: neuromodulators and curiosity can actually shift thresholds and choices.
 
 ### Tools, sensors, and embodiment
 
@@ -182,6 +182,72 @@ A key design goal of Symbrella is to **live inside a body**—starting with a ph
 | Granularity   | High internally, low externally        | You can expose **every stage**, every region, every WM slot |
 
 Symbrella is intentionally built as a **transparent brain**, not a sealed black box.
+
+---
+
+## Curiosity loop — current implementation (Nov 2025)
+
+The **curiosity loop** is a concrete example of how regions cooperate:
+
+> Curiosity → Thalamus → BasalGanglia → DLPFC → WorkingMemory
+
+Roughly:
+
+1. **`Brain.Curiosity`**  
+   - Generates small “what if?” probes on demand (via `nudge/0` or future schedulers).  
+   - Emits telemetry on `[:curiosity, :proposal]` with a `probe` payload:
+     - `id`, `lemma`, `score` in `[0,1]`, `reason: :curiosity`, `source: :runtime`.
+
+2. **`Brain.Thalamus`**  
+   - Listens for curiosity proposals.  
+   - Blends:
+     - base curiosity score,
+     - **OFC** value (exploit vs explore),
+     - **ACC** conflict (brake),
+     - **Mood** (exploration/inhibition/vigilance/plasticity).  
+   - Emits `[:brain, :thalamus, :curiosity, :decision]` telemetry with:
+     - measurements: `score` in `[0,1]`,  
+     - metadata: `decision` (`:allow | :boost | :block`), `ofc_value`, `ofc_weight`,  
+       `acc_conflict`, `acc_alpha`, mood fields, etc.  
+   - Parameters are surfaced via `Brain.Thalamus.get_params/0` and wired to
+     `Application` env (e.g. `:thalamus_ofc_weight`, `:thalamus_acc_alpha`, `:thalamus_mood_cap`).
+
+3. **`Brain.BasalGanglia`** (stateless gate)  
+   - `decide/4` takes:
+     - current WM (newest-first),
+     - the candidate probe,
+     - an attention context,
+     - config (capacity, thresholds, source preferences, cooldown).  
+   - Returns `{decision, score}` where `decision ∈ :allow | :boost | :block`.  
+   - Uses:
+     - WM fullness / capacity,
+     - duplicate detection and cooldown rebump,
+     - per-source boost/dispreference.
+
+4. **`Brain.DLPFC`**  
+   - First-class region (`use Brain, region: :dlpfc`).  
+   - Subscribes to:
+     - curiosity proposals (`[:curiosity, :proposal]`) to **cache the last probe**, and  
+     - Thalamus decisions (`[:brain, :thalamus, :curiosity, :decision]`).  
+   - When `:act_on_thalamus` is enabled and decision is `:allow` or `:boost`,
+     DLPFC calls `Brain.focus/2` with the cached probe → a WM item is inserted.
+
+5. **`Brain.WorkingMemory`**  
+   - Normalizes the candidate probe into a WM item with a consistent shape:  
+     `id`, `source`, `activation`, `score`, `ts`, `inserted_at`, `last_bump`, `payload`.  
+   - Handles:
+     - decay over time (half-life style),
+     - duplicate merging,
+     - trimming to capacity.
+
+The whole loop is covered by tests such as:
+
+- `Brain.CuriosityFlowTest` — end-to-end:  
+  `Curiosity → Thalamus(+OFC/ACC/mood) → BG → DLPFC → WM` inserts a `reason: :curiosity` item.
+- `Brain.ThalamusParams_Test` — config → params contract.  
+- `Brain.ThalamusTelemetryContract_Test` — telemetry shape and math (`ofc_weight`, `acc_alpha`, score).  
+- `Brain.ThalamusMathProps_Test` — monotonicity and braking properties.  
+- `Brain.BasalGanglia*Test` — gating edges and smoke tests.
 
 ---
 
@@ -213,7 +279,7 @@ phrase
 
 ---
 
-## LIFG DoD — working checklist (Oct 9, 2025)
+## LIFG DoD — working checklist (Oct 9, 2025 snapshot)
 
 - [ ] No char-grams in LIFG path (enforced + unit test)
 - [ ] Boundary guard (drop non-word-boundary substrings unless `mw: true`)
@@ -242,6 +308,10 @@ mix compile
 # run a single test file
 mix test apps/brain/test/brain/lifg_guard_test.exs
 
+# curiosity / thalamus loop
+mix test apps/brain/test/brain/curiosity_flow_test.exs
+mix test apps/brain/test/brain/thalamus_*test.exs
+
 # micro-benchmarks (examples)
 mix run apps/brain/bench/brain_stage1_bench.exs
 mix run apps/brain/bench/brain_lifg_bench_v2_1.exs
@@ -260,7 +330,7 @@ config :core,
 
 ---
 
-## Repository layout (current)
+## Repository layout (current snapshot)
 
 ```text
 ├── AGENTS.md
@@ -285,6 +355,8 @@ config :core,
 │   │   │   │   ├── attention.ex
 │   │   │   │   ├── basal_ganglia.ex
 │   │   │   │   ├── cell.ex
+│   │   │   │   ├── curiosity.ex
+│   │   │   │   ├── dlpfc.ex
 │   │   │   │   ├── episodes
 │   │   │   │   │   └── writer.ex
 │   │   │   │   ├── hippocampus
@@ -309,6 +381,7 @@ config :core,
 │   │   │   │   ├── lifg.ex
 │   │   │   │   ├── ptmg.ex
 │   │   │   │   ├── telemetry.ex
+│   │   │   │   ├── thalamus.ex
 │   │   │   │   ├── utils
 │   │   │   │   │   ├── control_signals.ex
 │   │   │   │   │   ├── numbers.ex
@@ -328,6 +401,7 @@ config :core,
 │   │       │   ├── brain_lifg_integration_test.exs
 │   │       │   ├── brain_lifg_property_test.exs
 │   │       │   ├── brain_lifg_test.exs
+│   │       │   ├── curiosity_flow_test.exs
 │   │       │   ├── hippocampus_attach_episodes_test.exs
 │   │       │   ├── hippocampus_behavior_test.exs
 │   │       │   ├── hippocampus_recall_test.exs
@@ -346,6 +420,9 @@ config :core,
 │   │       │   ├── priming_test.exs
 │   │       │   ├── reanalysis_test.exs
 │   │       │   ├── recall_gating_test.exs
+│   │       │   ├── thalamus_math_props_test.exs
+│   │       │   ├── thalamus_params_test.exs
+│   │       │   ├── thalamus_telemetry_contract_test.exs
 │   │       │   ├── wm_dynamics_test.exs
 │   │       │   ├── wm_eviction_decay_test.exs
 │   │       │   ├── wm_gate_integration_test.exs
@@ -425,8 +502,8 @@ config :core,
 │   │   ├── priv
 │   │   │   ├── db
 │   │   │   │   └── migrations
-│   │   │   │   ├── 20250914053633_create_brain_cells_consolidated.exs
-│   │   │   │   └── 20251001000000_create_episodes.exs
+│   │   │   │       ├── 20250914053633_create_brain_cells_consolidated.exs
+│   │   │   │       └── 20251001000000_create_episodes.exs
 │   │   │   └── repo
 │   │   │       └── migrations
 │   │   │           └── 20250708150554_create_brain_cells.exs
