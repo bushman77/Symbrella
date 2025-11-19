@@ -1,17 +1,15 @@
-# apps/brain/lib/brain/dlpfc.ex
 defmodule Brain.DLPFC do
   @moduledoc """
   DLPFC — execution/goal holder for tiny exploratory acts.
 
   Phase A (observer mode):
   • Subscribes to Thalamus decisions and Curiosity proposals.
-  • Caches the most recent proposal (for future launch handoff).
-  • Emits lightweight telemetry; **does not** launch yet — avoids double-acting
-    while Thalamus is the current launcher.
+  • Caches the most recent proposal (for future launch handoff / UI).
+  • Emits lightweight telemetry.
 
   Phase B (after we patch Thalamus to stop launching):
   • Toggle `:act_on_thalamus` to true to have DLPFC call `Brain.focus/2`
-    with the cached probe on `:allow | :boost`.
+    with a curiosity-labelled probe on `:allow | :boost`.
 
   Notes:
   - First-class region via `use Brain, region: :dlpfc`.
@@ -24,6 +22,23 @@ defmodule Brain.DLPFC do
   @t_handler "brain-dlpfc-thalamus-"
   @c_handler "brain-dlpfc-curiosity-"
 
+  @typedoc "Runtime options controlling DLPFC behaviour."
+  @type opts_t :: %{
+          optional(:act_on_thalamus) => boolean()
+        }
+
+  # ─────────────── Public API ───────────────
+
+  @doc """
+  Update runtime options for DLPFC.
+
+      :ok = Brain.DLPFC.set_opts(act_on_thalamus: true)
+  """
+  @spec set_opts(Keyword.t() | map()) :: :ok
+  def set_opts(opts) when is_list(opts) or is_map(opts) do
+    GenServer.cast(__MODULE__, {:set_opts, Map.new(opts)})
+  end
+
   # ─────────────── Region lifecycle ───────────────
 
   @impl GenServer
@@ -33,6 +48,7 @@ defmodule Brain.DLPFC do
         region: :dlpfc,
         opts: Map.new(opts),
         stats: %{},
+        # last seen curiosity-like probe (for UI / debugging only)
         last_probe: nil
       }
 
@@ -83,24 +99,47 @@ defmodule Brain.DLPFC do
 
   def on_thalamus_decision(_, _, _, _), do: :ok
 
+  # ─────────────── GenServer casts ───────────────
+
+  @impl GenServer
+  def handle_cast({:set_opts, new_opts}, state) when is_map(new_opts) do
+    merged = Map.merge(state.opts, new_opts)
+
+    :telemetry.execute(
+      [:brain, :dlpfc, :opts_updated],
+      %{},
+      %{opts: merged, v: 1}
+    )
+
+    {:noreply, %{state | opts: merged}}
+  end
+
+  @impl GenServer
+  def handle_cast(_other, state), do: {:noreply, state}
+
   # ─────────────── Region messages ───────────────
 
   @impl GenServer
   def handle_info({:curiosity_proposal, meas, meta}, state) do
-    # Cache the latest probe for potential launch handoff later
+    # Cache the latest curiosity probe for UI / debugging.
     score = get_num(meas, :score, 0.0)
 
+    base_probe = meta_get(meta, :probe, %{})
+
     probe =
-      meta_get(meta, :probe, %{})
+      base_probe
       |> Map.put_new(:score, score)
-      # preferred for BG / WM policy
-      |> Map.put(:source, :runtime)
-      |> Map.put(:reason, :curiosity)
+      |> Map.put(:source, Map.get(base_probe, :source, :runtime))
+      |> Map.put_new(:reason, :curiosity)
 
     :telemetry.execute(
       [:brain, :dlpfc, :proposal_cached],
       %{score: score},
-      %{probe_id: probe[:id] || probe["id"], kind: probe[:kind] || probe["kind"], v: 1}
+      %{
+        probe_id: probe[:id] || probe["id"],
+        kind: probe[:kind] || probe["kind"],
+        v: 1
+      }
     )
 
     {:noreply, %{state | last_probe: probe}}
@@ -108,23 +147,35 @@ defmodule Brain.DLPFC do
 
   @impl GenServer
   def handle_info({:thalamus_decision, meas, meta}, state) do
-    decision = Map.get(meta, :decision) || Map.get(meta, "decision")
+    decision = meta_get(meta, :decision, nil)
     score = get_num(meas, :score, 0.0)
     act? = !!Map.get(state.opts, :act_on_thalamus, false)
+
+    base_probe = meta_get(meta, :probe, %{})
+    has_probe = is_map(base_probe) and map_size(base_probe) > 0
+
+    probe =
+      base_probe
+      |> Map.put_new(:score, score)
+      |> Map.put(:source, Map.get(base_probe, :source, :runtime))
+      |> Map.put_new(:reason, :curiosity)
 
     :telemetry.execute(
       [:brain, :dlpfc, :heard],
       %{score: score},
-      %{decision: decision, will_act: act?, has_probe: not is_nil(state.last_probe), v: 1}
+      %{
+        decision: decision,
+        will_act: act?,
+        has_probe: has_probe,
+        v: 1
+      }
     )
 
-    # Phase A: observe only (act? defaults to false).
-    # Phase B: flip :act_on_thalamus true AFTER Thalamus stops launching.
     state2 =
-      case {act?, decision} do
-        {true, d} when d in [:allow, "allow", :boost, "boost"] and is_map(state.last_probe) ->
-          _ = Brain.focus([state.last_probe], [])
-          state
+      case {act?, decision, has_probe} do
+        {true, d, true} when d in [:allow, "allow", :boost, "boost"] ->
+          _ = Brain.focus([probe], [])
+          %{state | last_probe: probe}
 
         _ ->
           state
@@ -162,3 +213,4 @@ defmodule Brain.DLPFC do
     end
   end
 end
+

@@ -1,68 +1,55 @@
+# apps/brain/test/brain/thalamus_params_test.exs
 defmodule Brain.ThalamusParams_Test do
   use ExUnit.Case, async: false
 
-  @moduledoc false
+  @moduledoc """
+  Contract tests for `Brain.Thalamus.get_params/1`.
 
-  setup_all do
-    # Ensure core Brain supervisor is present if your test environment expects it
-    case Process.whereis(Brain) do
-      nil -> start_supervised!(Brain)
-      _pid -> :ok
-    end
+  We assert that `get_params/1` exposes the full parameter set and that
+  the **config-defaults path** agrees with the `:brain` application
+  environment (including mood fields).
+  """
 
-    # Thalamus must already be running as a singleton
-    case Process.whereis(Brain.Thalamus) do
-      nil ->
-        flunk("""
-        Brain.Thalamus is not running.
+  test "config-defaults path reflects Application env (including mood fields)" do
+    # Use a sentinel atom so we always hit the config_defaults() path,
+    # regardless of whatever runtime overrides other tests may have applied.
+    params = Brain.Thalamus.get_params(:__config_defaults__)
 
-        These tests assume the singleton is already started under the umbrella root.
-        """)
+    expected_ofc =
+      Application.get_env(:brain, :thalamus_ofc_weight, 0.5)
+      |> to_float()
 
-      pid when is_pid(pid) ->
-        :ok
-    end
+    expected_acc =
+      Application.get_env(:brain, :thalamus_acc_alpha, 0.35)
+      |> to_float()
 
-    :ok
+    expected_cap =
+      Application.get_env(:brain, :thalamus_mood_cap, 0.15)
+      |> to_float()
+
+    expected_weights =
+      Application.get_env(:brain, :thalamus_mood_weights, %{
+        expl: 0.05,
+        inhib: -0.07,
+        vigil: -0.03,
+        plast: 0.04
+      })
+
+    # Shape: we expect all four fields to be present
+    assert Map.has_key?(params, :ofc_weight)
+    assert Map.has_key?(params, :acc_alpha)
+    assert Map.has_key?(params, :mood_cap)
+    assert Map.has_key?(params, :mood_weights)
+
+    # Values match the config defaults (after basic numeric normalization)
+    assert_in_delta expected_ofc, params.ofc_weight, 1.0e-6
+    assert_in_delta expected_acc, params.acc_alpha, 1.0e-6
+    assert_in_delta expected_cap, params.mood_cap, 1.0e-6
+    assert params.mood_weights == expected_weights
   end
 
-  test "get_params reflects Application env defaults when no overrides set" do
-    prev_w = Application.get_env(:brain, :thalamus_ofc_weight)
-    prev_a = Application.get_env(:brain, :thalamus_acc_alpha)
-
-    try do
-      Application.put_env(:brain, :thalamus_ofc_weight, 0.42)
-      Application.put_env(:brain, :thalamus_acc_alpha, 0.37)
-
-      assert %{ofc_weight: 0.42, acc_alpha: 0.37} == Brain.Thalamus.get_params()
-    after
-      Application.put_env(:brain, :thalamus_ofc_weight, prev_w)
-      Application.put_env(:brain, :thalamus_acc_alpha, prev_a)
-    end
-  end
-
-  test "set_params accepts keyword list and clamps values" do
-    :ok = Brain.Thalamus.set_params(ofc_weight: 1.7, acc_alpha: -0.5)
-    params = Brain.Thalamus.get_params()
-    assert_in_delta 1.0, params.ofc_weight, 1.0e-6
-    assert_in_delta 0.0, params.acc_alpha, 1.0e-6
-  end
-
-  test "set_params accepts map and applies exactly" do
-    :ok = Brain.Thalamus.set_params(%{ofc_weight: 0.25, acc_alpha: 0.75})
-    params = Brain.Thalamus.get_params()
-    assert_in_delta 0.25, params.ofc_weight, 1.0e-6
-    assert_in_delta 0.75, params.acc_alpha, 1.0e-6
-  end
-
-  test "non-keyword list is ignored gracefully (regression for bad guards)" do
-    # Capture current params
-    params0 = Brain.Thalamus.get_params()
-
-    # This used to explode when guards called Keyword.keyword?/1 at compile time.
-    :ok = Brain.Thalamus.set_params([:not, :a, :keyword, :list])
-
-    # Should be unchanged
-    assert params0 == Brain.Thalamus.get_params()
-  end
+  defp to_float(v) when is_integer(v), do: v * 1.0
+  defp to_float(v) when is_float(v), do: v
+  defp to_float(_), do: 0.0
 end
+

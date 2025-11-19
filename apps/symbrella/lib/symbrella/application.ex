@@ -54,6 +54,7 @@ defmodule Symbrella.Application do
       Brain.LIFG,
       Brain.PMTG,
       {Brain.ATL, keep: 300},
+      Brain.Curiosity,
       {Brain.Hippocampus, keep: 300},
       Brain.PFC,
       Brain.Thalamus,

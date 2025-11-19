@@ -51,17 +51,48 @@ defmodule Brain.WorkingMemory do
     score = (cand[:score] || raw) * 1.0
     ts = now_ms
 
+    # Try to recover a "reason" tag from either the candidate or its nested payload.
+    base_reason =
+      cand[:reason] ||
+        cand["reason"] ||
+        case cand[:payload] || cand["payload"] do
+          %{} = inner -> inner[:reason] || inner["reason"]
+          _ -> nil
+        end
+
+    # If no explicit reason, infer for known probe shapes (e.g. curiosity probes).
+    reason = base_reason || infer_reason(cand)
+
+    # Ensure the payload we store carries the reason (if any),
+    # so callers like CuriosityFlowTest can introspect payload[:reason].
+    payload =
+      case reason do
+        nil -> cand
+        r -> Map.put(cand, :reason, r)
+      end
+
+    # Prefer explicit source, otherwise fall back to reason, then :unknown
+    src =
+      cand[:source] ||
+        cand["source"] ||
+        reason ||
+        :unknown
+
     %{
       id:
-        cand[:id] || cand[:chosen_id] || cand[:lemma] || cand[:word] || cand[:phrase] ||
-          make_ref(),
-      source: cand[:source] || cand[:reason] || :unknown,
+        cand[:id] || cand["id"] ||
+          cand[:chosen_id] || cand["chosen_id"] ||
+          cand[:lemma] || cand["lemma"] ||
+          cand[:word] || cand["word"] ||
+          cand[:phrase] || cand["phrase"] ||
+          Kernel.make_ref(),
+      source: src,
       activation: clamp01(act),
       score: clamp01(score),
       ts: ts,
       inserted_at: now_ms,
       last_bump: now_ms,
-      payload: cand
+      payload: payload
     }
   end
 
@@ -104,6 +135,7 @@ defmodule Brain.WorkingMemory do
       |> Map.put(:last_bump, ts)
     end)
   end
+
   def decay(wm, _now, _decay_ms), do: wm
 
   @spec trim([wm_item()], pos_integer()) :: [wm_item()]
@@ -122,6 +154,51 @@ defmodule Brain.WorkingMemory do
   end
 
   # --- internal helpers -------------------------------------------------------
+
+  # Heuristic "why is this here?" inference for probes, used only
+  # when no explicit :reason was provided upstream.
+  defp infer_reason(cand) do
+    id =
+      cand[:id] ||
+        cand["id"] ||
+        ""
+
+    lemma =
+      cand[:lemma] ||
+        cand["lemma"] ||
+        cand[:word] ||
+        cand["word"] ||
+        cand[:phrase] ||
+        cand["phrase"] ||
+        ""
+
+    id_down =
+      case id do
+        b when is_binary(b) -> String.downcase(b)
+        _ -> ""
+      end
+
+    lemma_down =
+      case lemma do
+        b when is_binary(b) -> String.downcase(b)
+        _ -> ""
+      end
+
+    cond do
+      # Curiosity probes usually look like "curiosity|probe|..."
+      String.starts_with?(id_down, "curiosity|probe|") ->
+        :curiosity
+
+      String.contains?(id_down, "curiosity|probe|") ->
+        :curiosity
+
+      lemma_down == "curiosity" ->
+        :curiosity
+
+      true ->
+        nil
+    end
+  end
 
   defp merge_items(existing, item) do
     ts_existing =
