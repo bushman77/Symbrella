@@ -250,11 +250,27 @@ defmodule Brain.Thalamus do
 
   @impl GenServer
   def handle_info({:ofc_value, meas, meta}, state) do
-    value = get_num(meas, :value, 0.0) |> clamp01()
-    probe_id = meta_get(meta, :probe_id, "curiosity|probe|unknown") |> to_string()
+    value =
+      meas
+      |> get_num(:value, 0.0)
+      |> clamp01()
+
+    probe_id =
+      meta
+      |> meta_get(:probe_id, "curiosity|probe|unknown")
+      |> to_string()
 
     {cache2, order2} =
-      put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
+      case Map.fetch(state.ofc_cache, probe_id) do
+        # First OFC signal for this probe_id: store it (bounded cache)
+        :error ->
+          put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
+
+        # We already have an OFC value for this probe_id; keep it, just bump recency
+        {:ok, _existing} ->
+          order1 = [probe_id | Enum.reject(state.ofc_order, &(&1 == probe_id))]
+          {state.ofc_cache, order1}
+      end
 
     {:noreply, %{state | ofc_cache: cache2, ofc_order: order2}}
   end
