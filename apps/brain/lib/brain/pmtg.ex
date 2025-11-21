@@ -165,7 +165,7 @@ defmodule Brain.PMTG do
   @impl true
   def handle_call(:reset, _from, state), do: {:reply, :ok, %{state | last: nil, window: []}}
 
-  # >>> Moved ABOVE the catch-all to avoid clause shadowing <<<
+  # >>> keep :status above the catch-all to avoid clause shadowing <<<
   @impl true
   def handle_call(:status, _from, state), do: {:reply, state, state}
 
@@ -204,7 +204,15 @@ defmodule Brain.PMTG do
 
   @spec fetch_evidence([query()], [map()], keyword()) :: [evidence_item()]
   def fetch_evidence(queries, tokens, opts) when is_list(queries) and is_list(tokens) do
-    tmap = Map.new(tokens, fn t -> {Map.get(t, :index) || Map.get(t, "index"), t} end)
+    tmap =
+      Enum.reduce(tokens, %{}, fn
+        %{} = t, acc ->
+          idx = Map.get(t, :index) || Map.get(t, "index")
+          if is_integer(idx), do: Map.put(acc, idx, t), else: acc
+
+        _, acc ->
+          acc
+      end)
 
     use_syns? = Keyword.get(opts, :use_synonyms?, true)
 
@@ -267,8 +275,10 @@ defmodule Brain.PMTG do
         Map.merge(base, %{
           variants_tried: variants,
           variants_hit: %{
-            episodes: Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
-            lexicon: Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
+            episodes:
+              Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
+            lexicon:
+              Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
           }
         })
       else
@@ -342,7 +352,15 @@ defmodule Brain.PMTG do
   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
   def enforce_sense_compatibility(evidence, tokens)
       when is_list(evidence) and is_list(tokens) do
-    tmap = Map.new(tokens, fn t -> {Map.get(t, :index) || Map.get(t, "index"), t} end)
+    tmap =
+      Enum.reduce(tokens, %{}, fn
+        %{} = t, acc ->
+          idx = Map.get(t, :index) || Map.get(t, "index")
+          if is_integer(idx), do: Map.put(acc, idx, t), else: acc
+
+        _, acc ->
+          acc
+      end)
 
     Enum.map(evidence, fn ev ->
       idx = Map.get(ev, :token_index) || Map.get(ev, "token_index")
@@ -357,38 +375,74 @@ defmodule Brain.PMTG do
     end)
   end
 
-  defp filter_lexicon_for_token(lexicon, %{n: n}) when is_list(lexicon) and is_integer(n) do
-    filtered =
-      Enum.filter(lexicon, fn sense ->
-        lemma = (Map.get(sense, :lemma) || Map.get(sense, "lemma") || "") |> to_string()
-        has_space = String.contains?(lemma, " ")
-        (n > 1 and has_space) or (n == 1 and not has_space)
-      end)
+  defp filter_lexicon_for_token(lexicon, token) when is_list(lexicon) do
+    n =
+      Map.get(token, :n) ||
+        Map.get(token, "n")
 
-    if n > 1 and filtered == [] do
-      {lexicon, true}
-    else
-      {filtered, false}
+    mw =
+      Map.get(token, :mw) ||
+        Map.get(token, "mw") || false
+
+    mwe? = (is_integer(n) and n > 1) or mw
+    unigram? = is_integer(n) and n == 1
+
+    cond do
+      mwe? or unigram? ->
+        filtered =
+          Enum.filter(lexicon, fn sense ->
+            lemma = (Map.get(sense, :lemma) || Map.get(sense, "lemma") || "") |> to_string()
+            has_space = String.contains?(lemma, " ")
+
+            if mwe? do
+              has_space
+            else
+              not has_space
+            end
+          end)
+
+        if mwe? and filtered == [] do
+          # For MWEs, fall back to the full lexicon and let Stage-1 decide.
+          {lexicon, true}
+        else
+          {filtered, false}
+        end
+
+      true ->
+        # No shape info; leave lexicon unchanged.
+        {lexicon, false}
     end
   end
 
-  defp filter_lexicon_for_token(lexicon, _token), do: {lexicon, false}
+  defp maybe_emit_no_mwe_senses(ev, token, orig, filtered, fallback?) do
+    n =
+      Map.get(token, :n) ||
+        Map.get(token, "n")
 
-  defp maybe_emit_no_mwe_senses(ev, %{n: n} = token, orig, filtered, fallback?)
-       when is_integer(n) and n > 1 and (filtered == [] or fallback?) do
-    kept_count = if fallback?, do: 0, else: length(filtered)
+    mw =
+      Map.get(token, :mw) ||
+        Map.get(token, "mw") || false
 
-    safe_exec_telemetry([:brain, :pmtg, :no_mwe_senses], %{
-      orig: length(orig),
-      kept: kept_count,
-      token_index: Map.get(token, :index),
-      phrase: Map.get(token, :phrase)
-    })
+    mwe? = (is_integer(n) and n > 1) or mw
 
-    ev
+    if mwe? and (filtered == [] or fallback?) do
+      kept_count = if fallback?, do: 0, else: length(filtered)
+
+      safe_exec_telemetry(
+        [:brain, :pmtg, :no_mwe_senses],
+        %{
+          orig: length(orig),
+          kept: kept_count,
+          token_index: Map.get(token, :index),
+          phrase: Map.get(token, :phrase)
+        }
+      )
+
+      ev
+    else
+      ev
+    end
   end
-
-  defp maybe_emit_no_mwe_senses(ev, _token, _orig, _filtered, _fallback?), do: ev
 
   # ───────────────────────── Actions on evidence ─────────────────────────────
 
@@ -485,6 +539,7 @@ defmodule Brain.PMTG do
       Brain.LIFG.Stage1.run(
         si2,
         weights: weights,
+        # pMTG-specific telemetry namespace for rerun path
         chargram_event: [:brain, :pmtg, :chargram_violation],
         boundary_event: [:brain, :pmtg, :boundary_drop]
       )

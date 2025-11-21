@@ -311,7 +311,12 @@ defmodule Brain.LIFG do
         end
 
       # 2b) Ensure MWE candidates exist for MWE tokens that lack them
-      si2a = MWE.ensure_mwe_candidates(si2, opts)
+      # 2b) Ensure + normalize MWE candidates the same way as disambiguate_stage1/2
+      si2a =
+        si2
+        |> MWE.ensure_mwe_candidates(opts)
+        |> MWE.absorb_unigrams_into_mwe(opts)
+        |> MWE.backfill_unigrams_from_active_cells(opts)
 
       scores_mode =
         Keyword.get(opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))

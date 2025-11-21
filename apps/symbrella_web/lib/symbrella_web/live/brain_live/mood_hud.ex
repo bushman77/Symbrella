@@ -1,4 +1,3 @@
-# apps/symbrella_web/lib/symbrella_web/live/brain_live/mood_hud.ex
 defmodule SymbrellaWeb.BrainLive.MoodHud do
   @moduledoc """
   Mood HUD for BrainLive.
@@ -8,31 +7,6 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   • Telemetry attach/detach (brain:mood events)
   • Event and handle_info helpers to keep LiveView tiny
   • Function component `<.mood_hud />` (compact, always-visible HUD)
-
-  Usage (in BrainLive):
-
-      import SymbrellaWeb.BrainLive.MoodHud, only: [mood_hud: 1]
-
-      socket =
-        socket
-        |> SymbrellaWeb.BrainLive.MoodHud.seed()
-        |> (fn s -> if connected?(s), do: SymbrellaWeb.BrainLive.MoodHud.attach(s), else: s end).()
-
-      # In render:
-      <.mood_hud mood={@mood} />
-
-      # In terminate/2:
-      _ = SymbrellaWeb.BrainLive.MoodHud.detach(socket)
-
-      # In handle_info/2:
-      def handle_info({:mood_event, _, _} = msg, socket),
-        do: SymbrellaWeb.BrainLive.MoodHud.on_info(msg, socket)
-
-      def handle_info({:mood_update, _, _} = msg, socket),
-        do: SymbrellaWeb.BrainLive.MoodHud.on_info(msg, socket)
-
-      def handle_info({:mood, _} = msg, socket),
-        do: SymbrellaWeb.BrainLive.MoodHud.on_info(msg, socket)
   """
 
   use SymbrellaWeb, :html
@@ -118,7 +92,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   non-mood messages (so your LiveView can fall through).
   """
 
-  # NEW: correctly derive mood from Brain.MoodCore telemetry measurements.
+  # NEW: correctly derive mood + tone from Brain.MoodCore telemetry measurements.
   def on_info({:mood_event, meas, meta}, socket) do
     levels0 = socket.assigns[:mood_levels] || @defaults.levels
     derived0 = socket.assigns[:mood_derived] || @defaults.derived
@@ -130,17 +104,36 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     {levels, derived, tone} =
       cond do
         is_map(mood_from_meta) ->
-          {
-            Map.get(mood_from_meta, :levels) ||
-              Map.get(mood_from_meta, "levels") ||
-              levels0,
-            Map.get(mood_from_meta, :derived) ||
-              Map.get(mood_from_meta, "derived") ||
-              derived0,
-            Map.get(mood_from_meta, :tone) ||
-              Map.get(mood_from_meta, "tone") ||
-              tone0
-          }
+          m = mood_from_meta
+
+          levels =
+            Map.get(m, :levels) ||
+              Map.get(m, "levels") ||
+              levels0
+
+          derived =
+            Map.get(m, :derived) ||
+              Map.get(m, "derived") ||
+              %{
+                exploration:
+                  Map.get(m, :exploration, Map.get(m, "exploration", derived0[:exploration])),
+                inhibition:
+                  Map.get(m, :inhibition, Map.get(m, "inhibition", derived0[:inhibition])),
+                vigilance:
+                  Map.get(m, :vigilance, Map.get(m, "vigilance", derived0[:vigilance])),
+                plasticity:
+                  Map.get(m, :plasticity, Map.get(m, "plasticity", derived0[:plasticity]))
+              }
+
+          tone_raw =
+            Map.get(m, :tone) ||
+              Map.get(m, "tone") ||
+              Map.get(m, :tone_hint) ||
+              Map.get(m, "tone_hint")
+
+          tone = tone_raw || derive_tone_from_derived(derived, tone0)
+
+          {levels, derived, tone}
 
         true ->
           # Otherwise derive from measurements (this is what MoodCore.emit/4 sends).
@@ -168,12 +161,15 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
                 plasticity: Map.get(meas, :plasticity, derived0[:plasticity])
               }
 
-          tone =
+          tone_raw =
             Map.get(meta, :tone) ||
               Map.get(meta, "tone") ||
+              Map.get(meta, :tone_hint) ||
+              Map.get(meta, "tone_hint") ||
               Map.get(meas, :tone) ||
-              Map.get(meas, "tone") ||
-              tone0
+              Map.get(meas, "tone")
+
+          tone = tone_raw || derive_tone_from_derived(derived, tone0)
 
           {levels, derived, tone}
       end
@@ -208,7 +204,8 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       plasticity: Map.get(meas, :plasticity, 0.5)
     }
 
-    tone = socket.assigns[:mood_tone] || :neutral
+    tone0 = socket.assigns[:mood_tone] || :neutral
+    tone = derive_tone_from_derived(derived, tone0)
 
     {:noreply,
      socket
@@ -227,8 +224,12 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     derived =
       Map.get(mood, :derived, socket.assigns[:mood_derived] || @defaults.derived)
 
+    tone0 = socket.assigns[:mood_tone] || @defaults.tone
+
     tone =
-      Map.get(mood, :tone, socket.assigns[:mood_tone] || @defaults.tone)
+      Map.get(mood, :tone) ||
+        Map.get(mood, :tone_hint) ||
+        derive_tone_from_derived(derived, tone0)
 
     {:noreply,
      socket
@@ -270,18 +271,44 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   def mood_hud(assigns) do
     mood = Map.get(assigns, :mood, @defaults) || @defaults
 
+    tone =
+      Map.get(mood, :tone) ||
+        Map.get(mood, :tone_hint) ||
+        :neutral
+
+    derived = Map.get(mood, :derived, %{})
+
     assigns =
       assigns
-      |> Phoenix.Component.assign(:tone, Map.get(mood, :tone, :neutral))
-      |> Phoenix.Component.assign(:derived, Map.get(mood, :derived, %{}))
+      |> Phoenix.Component.assign(:tone, tone)
+      |> Phoenix.Component.assign(:derived, derived)
 
     ~H"""
-    <span class={["text-xs px-2 py-1 rounded-md border bg-white/70 text-zinc-700 inline-flex items-center gap-1", tone_class(@tone)]}>
+    <span
+      class={[
+        "text-xs px-2 py-1 rounded-md border inline-flex items-center gap-1 shadow-sm backdrop-blur-sm",
+        tone_class(@tone)
+      ]}
+    >
+      <span class={["w-2 h-2 rounded-full mr-1", tone_dot_class(@tone)]}></span>
+
       <span class="font-semibold mr-1">Mood</span>
-      <span class="opacity-70">Expl</span> <%= fmt(@derived[:exploration]) %>
-      <span class="opacity-70">Inhib</span> <%= fmt(@derived[:inhibition]) %>
-      <span class="opacity-70">Vigil</span> <%= fmt(@derived[:vigilance]) %>
-      <span class="opacity-70">Plast</span> <%= fmt(@derived[:plasticity]) %>
+
+      <span class="opacity-70">Expl</span>
+      <span class="tabular-nums"><%= fmt(@derived[:exploration]) %></span>
+
+      <span class="opacity-70 ml-1">Inhib</span>
+      <span class="tabular-nums"><%= fmt(@derived[:inhibition]) %></span>
+
+      <span class="opacity-70 ml-1">Vigil</span>
+      <span class="tabular-nums"><%= fmt(@derived[:vigilance]) %></span>
+
+      <span class="opacity-70 ml-1">Plast</span>
+      <span class="tabular-nums"><%= fmt(@derived[:plasticity]) %></span>
+
+      <span class="ml-2 text-[10px] font-semibold tracking-wide uppercase opacity-80">
+        <%= tone_label(@tone) %>
+      </span>
     </span>
     """
   end
@@ -304,9 +331,75 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     Phoenix.Component.assign(socket, :mood, mood)
   end
 
-  defp tone_class(:positive), do: "border-green-400 text-green-700"
-  defp tone_class(:negative), do: "border-red-400 text-red-700"
-  defp tone_class(_), do: "border-zinc-300 text-zinc-700"
+  # Take derived indices and turn them into a tone, mirroring MoodCore.choose_tone/1
+  defp derive_tone_from_derived(%{vigilance: vig, inhibition: inh, exploration: exp}, _fallback) do
+    cond do
+      vig > 0.65 -> :deescalate
+      inh > 0.65 and exp < 0.35 -> :cool
+      exp > 0.45 and inh >= 0.40 -> :warm
+      true -> :neutral
+    end
+  end
+
+  defp derive_tone_from_derived(_other, fallback), do: fallback || :neutral
+
+  # Color scheme per tone (chip-level)
+
+  defp tone_class(:warm),
+    do: "border-green-400 text-green-700"
+
+  defp tone_class(:cool),
+    do: "border-sky-400 text-sky-700"
+
+  defp tone_class(:deescalate),
+    do: "border-red-400 text-red-700"
+
+  # Backwards-compat / legacy names if anything else sets them
+  defp tone_class(:positive),
+    do: "border-green-400 text-green-700"
+
+  defp tone_class(:negative),
+    do: "border-red-400 text-red-700"
+
+  defp tone_class(_),
+    do: "border-zinc-300 text-zinc-700"
+
+  # Tiny dot color per tone
+  defp tone_dot_class(tone) do
+    case normalize_tone(tone) do
+      :warm -> "bg-amber-400 dark:bg-amber-300"
+      :cool -> "bg-sky-400 dark:bg-sky-300"
+      :deescalate -> "bg-rose-400 dark:bg-rose-300"
+      :neutral -> "bg-zinc-400 dark:bg-zinc-300"
+    end
+  end
+
+  defp tone_label(tone) do
+    case normalize_tone(tone) do
+      :warm -> "Warm"
+      :cool -> "Cool"
+      :deescalate -> "De-escalate"
+      :neutral -> "Neutral"
+      nil -> "Neutral"
+    end
+  end
+
+  defp normalize_tone(nil), do: :neutral
+  defp normalize_tone(t) when is_atom(t), do: t
+
+  defp normalize_tone(t) when is_binary(t) do
+    case t |> String.trim() |> String.downcase() do
+      "warm" -> :warm
+      "cool" -> :cool
+      "deescalate" -> :deescalate
+      "de-escalate" -> :deescalate
+      "de_escalate" -> :deescalate
+      "neutral" -> :neutral
+      _ -> :neutral
+    end
+  end
+
+  defp normalize_tone(_), do: :neutral
 
   defp fmt(nil), do: "—"
 

@@ -331,6 +331,7 @@ defmodule Brain.MoodCore do
   end
 
   # keep a convenience 3-arity (no default on the 4-arity head)
+  # keep a convenience 3-arity (no default on the 4-arity head)
   defp emit(
          %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} =
            st,
@@ -339,16 +340,26 @@ defmodule Brain.MoodCore do
          cause
        ) do
     # Raw neuros
-    da = Map.get(lv, :da, 0.5)
-    s5 = Map.get(lv, :"5ht", 0.5)
+    da  = Map.get(lv, :da, 0.5)
+    s5  = Map.get(lv, :"5ht", 0.5)
     glu = Map.get(lv, :glu, 0.5)
-    ne = Map.get(lv, :ne, 0.5)
+    ne  = Map.get(lv, :ne, 0.5)
 
     # Derived mood indices
     exploration = 0.6 * da + 0.4 * ne
-    inhibition = s5
-    vigilance = ne
-    plasticity = 0.5 * da + 0.5 * glu
+    inhibition  = s5
+    vigilance   = ne
+    plasticity  = 0.5 * da + 0.5 * glu
+
+    # Bundle into a mood struct + tone so UI can see the "shape"
+    mood = %{
+      exploration: exploration,
+      inhibition:  inhibition,
+      vigilance:   vigilance,
+      plasticity:  plasticity
+    }
+
+    tone = choose_tone(mood)
 
     meas = %{
       da: da,
@@ -358,10 +369,14 @@ defmodule Brain.MoodCore do
       exploration: exploration,
       inhibition: inhibition,
       vigilance: vigilance,
-      plasticity: plasticity
+      plasticity: plasticity,
+      tone: tone
     }
 
-    meta = %{source: source, cause: cause, dt_ms: dt_ms}
+    meta =
+      %{source: source, cause: cause, dt_ms: dt_ms}
+      |> Map.put(:mood, %{levels: lv, derived: mood, tone: tone})
+
     :telemetry.execute(@event_update, meas, meta)
 
     # Saturation detector
@@ -465,19 +480,51 @@ defmodule Brain.MoodCore do
     %{ne: +0.05 * density, glu: +0.03 * density}
   end
 
+  # ---------- Tone selection (revised again) ----------
+
   # ---------- Tone selection (new) ----------
 
+  # ---------- Tone selection (dominant axis) ----------
+
   defp choose_tone(%{vigilance: vig, inhibition: inh, exploration: exp}) do
+    # Look at how far each index is from the conceptual mid-point (0.5)
+    # and pick the dominant positive axis:
+    #
+    #   vigilance   → :deescalate  (hot / conflict)
+    #   exploration → :warm        (curious / engaging)
+    #   inhibition  → :cool        (cautious / inhibited)
+    #
+    # Anything close to the center, or below the center, stays :neutral.
+    exp = (exp || 0.5) * 1.0
+    inh = (inh || 0.5) * 1.0
+    vig = (vig || 0.5) * 1.0
+
+    neutral_band = 0.08
+
+    e_dev = exp - 0.5
+    i_dev = inh - 0.5
+    v_dev = vig - 0.5
+
+    {axis, dev} =
+      [warm: e_dev, cool: i_dev, deescalate: v_dev]
+      |> Enum.max_by(fn {_k, d} -> abs(d) end)
+
     cond do
-      vig > 0.65 -> :deescalate
-      inh > 0.65 and exp < 0.35 -> :cool
-      exp > 0.45 and inh >= 0.40 -> :warm
-      true -> :neutral
+      # Close to the center → treat as neutral.
+      abs(dev) < neutral_band ->
+        :neutral
+
+      # Only *positive* excursions from the center drive tone;
+      # below-center values (e.g. low vigilance) are just calmer/neutral.
+      dev <= 0.0 ->
+        :neutral
+
+      true ->
+        axis
     end
   end
 
   defp choose_tone(_), do: :neutral
-
   # ---------- small helpers ----------
 
   defp clamp_conf(c) when is_number(c), do: min(1.0, max(0.0, c))

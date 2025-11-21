@@ -328,10 +328,19 @@ defmodule Brain.Hippocampus do
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
     limit        = Map.get(opts, :limit, state.opts.recall_limit)
-    half_life_ms = Config.normalize_half_life(Map.get(opts, :half_life_ms, state.opts.half_life_ms))
-    min_jacc     = Config.normalize_min_jaccard(Map.get(opts, :min_jaccard, state.opts.min_jaccard))
-    ignore_head  = Map.get(opts, :ignore_head, false)
-    scope_opt    = Map.get(opts, :scope, nil)
+
+    half_life_ms =
+      opts
+      |> Map.get(:half_life_ms, state.opts.half_life_ms)
+      |> Config.normalize_half_life()
+
+    min_jacc =
+      opts
+      |> Map.get(:min_jaccard, state.opts.min_jaccard)
+      |> Config.normalize_min_jaccard()
+
+    ignore_head = Map.get(opts, :ignore_head, false)
+    scope_opt   = Map.get(opts, :scope, nil)
 
     source =
       opts
@@ -396,15 +405,24 @@ defmodule Brain.Hippocampus do
               ignore_head: ignore_head
             )
 
+          ranked1 =
+            case scope_opt do
+              s when is_map(s) and s != %{} ->
+                Enum.filter(ranked0, &meta_matches_scope?(&1, s))
+
+              _ ->
+                ranked0
+            end
+
           ranked =
-            ranked0
+            ranked1
             |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
             |> Enum.sort_by(& &1.score, :desc)
             |> Enum.take(limit)
 
           meas2 =
             meas
-            |> maybe_set_returned(length(ranked0))
+            |> maybe_set_returned(length(ranked1))
             |> Map.merge(%{source: :memory, fallback: :missing_embedding})
 
           Telemetry.emit_recall(meas2, meta_map)
@@ -423,14 +441,30 @@ defmodule Brain.Hippocampus do
             |> Map.put_new(:k, limit)
             |> Map.put_new(:tau_s, div(half_life_ms, 1000))
             |> Map.put_new(:min_sim, 0.35)
+            |> Map.put_new(:cues, cues)
+
+          db_ranked0 =
+            db_opts
+            |> Map.to_list()
+            |> DB.recall()
+
+          db_ranked1 =
+            case scope_opt do
+              s when is_map(s) and s != %{} ->
+                Enum.filter(db_ranked0, &meta_matches_scope?(&1, s))
+
+              _ ->
+                db_ranked0
+            end
 
           ranked =
-            DB.recall(Map.to_list(db_opts))
+            db_ranked1
             |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
             |> Enum.sort_by(& &1.score, :desc)
             |> Enum.take(limit)
 
-          meas = %{k: length(ranked), source: :db}
+          meas = %{k: length(db_ranked1), source: :db}
+
           Telemetry.emit_recall(meas, %{source: :db})
 
           Telemetry.maybe_echo_to_caller(
@@ -470,17 +504,36 @@ defmodule Brain.Hippocampus do
         # DB path (only if embedding provided)
         embedding = Map.get(opts, :embedding)
 
-        db_ranked =
+        {db_ranked1, db_ranked} =
           if is_nil(embedding) do
-            []
+            {[], []}
           else
-            opts
-            |> Map.put_new(:k, limit)
-            |> Map.put_new(:tau_s, div(half_life_ms, 1000))
-            |> Map.put_new(:min_sim, 0.35)
-            |> Map.to_list()
-            |> DB.recall()
-            |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+            db_opts =
+              opts
+              |> Map.put_new(:k, limit)
+              |> Map.put_new(:tau_s, div(half_life_ms, 1000))
+              |> Map.put_new(:min_sim, 0.35)
+              |> Map.put_new(:cues, cues)
+
+            db_ranked0 =
+              db_opts
+              |> Map.to_list()
+              |> DB.recall()
+
+            db_ranked1 =
+              case scope_opt do
+                s when is_map(s) and s != %{} ->
+                  Enum.filter(db_ranked0, &meta_matches_scope?(&1, s))
+
+                _ ->
+                  db_ranked0
+              end
+
+            db_ranked =
+              db_ranked1
+              |> Enum.map(&apply_outcome_uplift(&1, outcome_w))
+
+            {db_ranked1, db_ranked}
           end
 
         ranked =
@@ -490,7 +543,7 @@ defmodule Brain.Hippocampus do
 
         meas = %{
           mem_k: length(mem_ranked1),
-          db_k: length(db_ranked),
+          db_k: length(db_ranked1),
           source: :hybrid,
           had_embedding?: not is_nil(embedding)
         }

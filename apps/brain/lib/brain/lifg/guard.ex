@@ -76,8 +76,8 @@ defmodule Brain.LIFG.Guard do
 
   # -- helpers: raw normalization -------------------------------------------
 
-  # Actual structs: %DemoTok{}, %Core.Token{}, etc.
-  # NOTE: pattern matches any struct, but never references Core directly.
+  # Actual token structs (e.g. domain-specific %SomethingToken{}).
+  # NOTE: pattern matches any struct, then treats it as a plain map.
   defp normalize_raw(%_struct{} = raw) do
     raw
     |> Map.from_struct()
