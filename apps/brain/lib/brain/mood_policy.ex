@@ -73,27 +73,27 @@ defmodule Brain.MoodPolicy do
   # Tunable mapping. Keep tiny and reversible; MoodCore’s half-life does the rest.
   # Positive raises level; negative lowers. All clamped 0..1 in MoodCore.
 
-  # Hostile / stressful: ↑NE (vigilance), ↓5HT (inhibition), ↓DA/GLU a bit
+  # Hostile / stressful: ↑NE (vigilance), ↓5HT (inhibition), slight ↓DA
   defp bump_for(:abuse, conf),
-    do: scale(%{"5ht": -0.12, ne: +0.18, da: -0.06, glu: -0.03}, conf)
+    do: scale(%{"5ht": -0.20, ne: +0.25, da: -0.05}, conf)
 
   defp bump_for(:insult, conf),
-    do: scale(%{"5ht": -0.08, ne: +0.12, da: -0.04, glu: -0.02}, conf)
+    do: scale(%{"5ht": -0.14, ne: +0.20, da: -0.04}, conf)
 
-  # Friendly greeting: ↑5HT (calm/connection), slight ↑DA/GLU, ↓NE so we don't look panicky
+  # Friendly greeting: ↑5HT (calm/connection), slight ↑DA/GLU, ↓NE
   defp bump_for(:greet, conf),
-    do: scale(%{"5ht": +0.10, ne: -0.06, da: +0.03, glu: +0.02}, conf)
+    do: scale(%{"5ht": +0.10, ne: -0.04, da: +0.03, glu: +0.02}, conf)
 
-  # Task / curiosity: modest exploration bump
+  # Task / curiosity: exploration + plasticity, **no extra NE**
   defp bump_for(:translate, conf),
-    do: scale(%{da: +0.02, ne: +0.01}, conf)
+    do: scale(%{da: +0.04, glu: +0.02}, conf)
 
   defp bump_for(:ask, conf),
-    do: scale(%{da: +0.03, ne: +0.02}, conf)
+    do: scale(%{da: +0.05, glu: +0.02}, conf)
 
-  # Default: tiny calming / plasticity nudge
+  # Default: tiny calming / plasticity nudge, no vigilance bump
   defp bump_for(_other, conf),
-    do: scale(%{"5ht": +0.01, glu: +0.01}, conf)
+    do: scale(%{"5ht": +0.02, glu: +0.02}, conf)
 
   # Confidence-scaled deltas with global gain from config
   defp scale(map, conf) do

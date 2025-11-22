@@ -151,4 +151,5 @@ config :db, :embedder, MyEmbeddings
 config :tesla, disable_deprecated_builder_warning: true
 
 # ─────────────────────────── Per-env tail ─────────────────────────
+import_config "mood.exs"
 import_config "#{config_env()}.exs"

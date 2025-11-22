@@ -15,6 +15,30 @@ defmodule Brain.Hippocampus do
     If missing and :source is :db or :hybrid, we fall back to memory-only recall.
   • Recall `score` is **familiarity**. We optionally apply an **outcome uplift**
     (bounded) from `episode.meta[:outcome_score]`.
+
+  Emotional integration
+  ---------------------
+  • On encode/2 we enrich `meta` with an emotional header when possible:
+
+        %{
+          emotion: %{
+            tone_reaction: :warm | :cool | :deescalate | :neutral,
+            latents:       %{threat: f, safety: f, reward: f, control: f},
+            mood_levels:   %{da: f, "5ht": f, glu: f, ne: f},
+            mood_indices:  %{exploration: f, inhibition: f, vigilance: f, plasticity: f}
+          },
+          tone_reaction: :warm | :cool | :deescalate | :neutral,
+          latents:       %{...}
+        }
+
+    This is derived from `Brain.MoodCore.snapshot/0` plus any `:tone_reaction`
+    or `:reaction` you pass in the meta.
+
+  • On recall/2 we expose per-episode emotional priors on each result:
+
+        %{..., emotion_priors: %{threat_prior: f, safety_prior: f, ...}}
+
+    These can be aggregated by the amygdala/mood path to bias current reactions.
   """
 
   use GenServer
@@ -216,7 +240,6 @@ defmodule Brain.Hippocampus do
     Map.put(si, :evidence, Map.put(evidence, :episodes, episodes))
   end
 
-
   @doc """
   Configure runtime options. Accepts any of:
     :window_keep (or :keep), :half_life_ms, :recall_limit, :min_jaccard, :recall_source
@@ -246,8 +269,10 @@ defmodule Brain.Hippocampus do
       |> Enum.reject(&Normalize.empty?/1)
       |> MapSet.new()
 
-    at = now_ms()
-    ep = %{slate: slate, meta: meta_in, norms: norms}
+    at   = now_ms()
+    meta = enrich_meta_with_emotion(meta_in)
+
+    ep = %{slate: slate, meta: meta, norms: norms}
 
     # 🔹 dedup-on-write:
     #   If the *head* episode has the same norms, refresh its timestamp
@@ -278,25 +303,25 @@ defmodule Brain.Hippocampus do
     case Application.get_env(:brain, :episodes_mode, :on) do
       :off ->
         # Still update the in-memory window, but mark as skipped in telemetry
-        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta_in, skipped: true})
+        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta, skipped: true})
 
         Telemetry.maybe_echo_to_caller(
           from,
           [:brain, :hippocampus, :write],
           %{window_size: length(window2)},
-          %{meta: meta_in, skipped: true}
+          %{meta: meta, skipped: true}
         )
 
         {:reply, :ok, %{state | window: window2, last: new_last, last_at: last_at}}
 
       _ ->
-        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta_in})
+        Telemetry.emit_write(%{window_size: length(window2)}, %{meta: meta})
 
         Telemetry.maybe_echo_to_caller(
           from,
           [:brain, :hippocampus, :write],
           %{window_size: length(window2)},
-          %{meta: meta_in}
+          %{meta: meta}
         )
 
         # Optional persistence (guarded) — use the *original* episode we built
@@ -635,6 +660,92 @@ defmodule Brain.Hippocampus do
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
+  # ── Emotional enrichment on write ────────────────────────────────────────
+
+  # Enrich meta with an emotional header from MoodCore, unless the caller
+  # already supplied one. This lets us capture the climate at encode-time
+  # without forcing any particular upstream shape.
+  defp enrich_meta_with_emotion(meta) when is_map(meta) do
+    has_emotion? =
+      case meta[:emotion] || meta["emotion"] do
+        %{} -> true
+        _ -> false
+      end
+
+    # If caller already provided a full emotion header, don't touch it.
+    if has_emotion? do
+      meta
+    else
+      snap = safe_mood_snapshot()
+
+      {levels, indices, latents, tone_hint} =
+        case snap do
+          %{} = s ->
+            {
+              Map.get(s, :levels) || %{},
+              Map.get(s, :mood) || Map.get(s, :mood_indices) || %{},
+              Map.get(s, :latents) || %{},
+              Map.get(s, :tone_hint) || Map.get(s, :tone) || :neutral
+            }
+
+          _ ->
+            {%{}, %{}, %{}, nil}
+        end
+
+      tone_from_meta =
+        case meta[:tone_reaction] || meta["tone_reaction"] do
+          nil ->
+            case meta[:reaction] || meta["reaction"] do
+              %{} = r -> r[:tone_reaction] || r["tone_reaction"]
+              _ -> nil
+            end
+
+          val ->
+            val
+        end
+
+      tone_reaction =
+        tone_from_meta ||
+          tone_hint ||
+          :neutral
+
+      # If we truly have no signal, leave meta as-is.
+      if levels == %{} and indices == %{} and latents == %{} and is_nil(tone_reaction) do
+        meta
+      else
+        norm_tone = normalize_tone(tone_reaction) || :neutral
+
+        emotional_header = %{
+          tone_reaction: norm_tone,
+          latents: latents,
+          mood_levels: levels,
+          mood_indices: indices
+        }
+
+        meta
+        |> Map.put_new(:emotion, emotional_header)
+        |> Map.put_new(:tone_reaction, norm_tone)
+        |> Map.put_new(:latents, latents)
+      end
+    end
+  end
+
+  defp enrich_meta_with_emotion(meta), do: meta
+
+  defp safe_mood_snapshot do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
+      try do
+        Brain.MoodCore.snapshot()
+      rescue
+        _ -> nil
+      catch
+        _, _ -> nil
+      end
+    else
+      nil
+    end
+  end
+
   # Build cues from SI or opts. Prefer explicit :cues, then winners/atl_slate,
   # then unigram token phrases/norms, then sentence words. Fallback to `si` itself.
   defp build_cues(si, opts) do
@@ -719,7 +830,6 @@ defmodule Brain.Hippocampus do
     end
   end
 
-
   # Outcome uplift & evidence standardization
   defp apply_outcome_uplift(%{score: s} = rec, outcome_w) when is_number(s) do
     outcome =
@@ -752,11 +862,14 @@ defmodule Brain.Hippocampus do
   end
 
   defp standardize_for_evidence(%{score: s, at: at, episode: ep} = rec) do
-    priors = priors_from_meta(ep[:meta] || %{})
-    hint   = hint_from_meta(ep[:meta] || %{})
+    meta           = ep[:meta] || %{}
+    priors         = priors_from_meta(meta)
+    emotion_priors = emotion_priors_from_meta(meta)
+    hint           = hint_from_meta(meta)
 
     rec
     |> Map.put(:priors, priors)
+    |> Map.put(:emotion_priors, emotion_priors)
     |> Map.put(:hint, hint)
     |> Map.put(:score, clamp01(s))
     |> Map.put(:at, at)
@@ -780,14 +893,57 @@ defmodule Brain.Hippocampus do
     %{senses: senses, intent: intent}
   end
 
+  defp priors_from_meta(_), do: %{senses: %{}, intent: %{}}
+
+  # Emotion priors are per-episode emotional fingerprints derived from meta.
+  # They are NOT aggregated here — the caller can fold over recall results to
+  # build a prior for the current event.
+  defp emotion_priors_from_meta(meta) when is_map(meta) do
+    emotion =
+      case meta[:emotion] || meta["emotion"] do
+        %{} = m -> m
+        _ -> %{}
+      end
+
+    latents =
+      case emotion[:latents] || emotion["latents"] || meta[:latents] || meta["latents"] do
+        %{} = l -> l
+        _ -> %{}
+      end
+
+    tone_raw =
+      emotion[:tone_reaction] || emotion["tone_reaction"] ||
+        meta[:tone_reaction] || meta["tone_reaction"]
+
+    %{
+      threat_prior:  to_unit(Map.get(latents, :threat)  || Map.get(latents, "threat")),
+      safety_prior:  to_unit(Map.get(latents, :safety)  || Map.get(latents, "safety")),
+      reward_prior:  to_unit(Map.get(latents, :reward)  || Map.get(latents, "reward")),
+      control_prior: to_unit(Map.get(latents, :control) || Map.get(latents, "control")),
+      tone_reaction: normalize_tone(tone_raw)
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  defp emotion_priors_from_meta(_), do: %{}
+
   defp hint_from_meta(meta) do
+    emotion = emotion_priors_from_meta(meta)
+
     [
       (meta[:route] || meta["route"]) && "route=#{meta[:route] || meta["route"]}",
       (meta[:keyword] || meta["keyword"]) && "kw=#{meta[:keyword] || meta["keyword"]}",
       is_number(meta[:conflict] || meta["conflict"]) &&
         "conf=#{Float.round((meta[:conflict] || meta["conflict"]) * 100, 1)}%",
       is_number(meta[:outcome_score] || meta["outcome_score"]) &&
-        "out=#{Float.round(meta[:outcome_score] || meta["outcome_score"], 2)}"
+        "out=#{Float.round(meta[:outcome_score] || meta["outcome_score"], 2)}",
+      is_atom(emotion[:tone_reaction]) &&
+        "tone=#{emotion[:tone_reaction]}",
+      is_number(emotion[:threat_prior]) &&
+        "thr=#{Float.round(emotion[:threat_prior], 2)}",
+      is_number(emotion[:safety_prior]) &&
+        "safe=#{Float.round(emotion[:safety_prior], 2)}"
     ]
     |> Enum.filter(& &1)
     |> Enum.join(" · ")
@@ -925,5 +1081,57 @@ defmodule Brain.Hippocampus do
 
     %{by_norm: %{}, winners: winners}
   end
+
+  ## ───────────────────────────── Small helpers ──────────────────────────────
+
+  defp to_unit(nil), do: nil
+
+  defp to_unit(v) when is_number(v) do
+    v = v * 1.0
+
+    cond do
+      v < 0.0 -> 0.0
+      v > 1.0 -> 1.0
+      true -> v
+    end
+  end
+
+  defp to_unit(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {n, _} -> to_unit(n)
+      _ -> nil
+    end
+  end
+
+  defp to_unit(_), do: nil
+
+  defp normalize_tone(nil), do: nil
+
+  defp normalize_tone(t) when is_atom(t) do
+    case t do
+      :warm -> :warm
+      :cool -> :cool
+      :deescalate -> :deescalate
+      :neutral -> :neutral
+      _ -> nil
+    end
+  end
+
+  defp normalize_tone(t) when is_binary(t) do
+    t
+    |> String.trim()
+    |> String.downcase()
+    |> case do
+      "warm" -> :warm
+      "cool" -> :cool
+      "deescalate" -> :deescalate
+      "de-escalate" -> :deescalate
+      "de_escalate" -> :deescalate
+      "neutral" -> :neutral
+      _ -> nil
+    end
+  end
+
+  defp normalize_tone(_), do: nil
 end
 

@@ -25,6 +25,15 @@ defmodule Brain.MoodCore do
     shock_threshold:    0.25
     clock:              :cycle | :self   (default :cycle)
     init:               map/keyword (merged on top of baseline)
+
+  Tone mapping:
+    Uses config :brain, :mood_tone (see config/mood.exs) to classify
+    indices → :warm | :cool | :deescalate | :neutral.
+
+  Latents (optional):
+    If Brain.AffectLatents.compute/2 is available, we attach TRCS-style
+    latents (e.g. :threat, :reward, :control, :safety) into telemetry
+    meas/meta under :latents.
   """
 
   use GenServer
@@ -331,7 +340,6 @@ defmodule Brain.MoodCore do
   end
 
   # keep a convenience 3-arity (no default on the 4-arity head)
-  # keep a convenience 3-arity (no default on the 4-arity head)
   defp emit(
          %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} =
            st,
@@ -361,7 +369,7 @@ defmodule Brain.MoodCore do
 
     tone = choose_tone(mood)
 
-    meas = %{
+    meas0 = %{
       da: da,
       "5ht": s5,
       glu: glu,
@@ -373,9 +381,15 @@ defmodule Brain.MoodCore do
       tone: tone
     }
 
-    meta =
+    meta0 =
       %{source: source, cause: cause, dt_ms: dt_ms}
       |> Map.put(:mood, %{levels: lv, derived: mood, tone: tone})
+
+    # Optional TRCS latents
+    latents = maybe_compute_latents(meas0, meta0)
+
+    meas = maybe_put_latents(meas0, latents)
+    meta = maybe_put_latents(meta0, latents)
 
     :telemetry.execute(@event_update, meas, meta)
 
@@ -420,10 +434,13 @@ defmodule Brain.MoodCore do
       plasticity: 0.5 * da + 0.5 * glu
     }
 
-    # NEW: tone hint derived from indices (kept conservative)
     tone_hint = choose_tone(mood)
 
-    Map.merge(st, %{mood: mood, tone_hint: tone_hint, dt_ms: dt})
+    base =
+      %{mood: mood, tone_hint: tone_hint, dt_ms: dt}
+      |> maybe_put_latents(maybe_compute_latents(%{levels: lv, mood: mood}, %{}))
+
+    Map.merge(st, base)
   end
 
   defp put_levels(st, f),
@@ -480,52 +497,105 @@ defmodule Brain.MoodCore do
     %{ne: +0.05 * density, glu: +0.03 * density}
   end
 
-  # ---------- Tone selection (revised again) ----------
-
-  # ---------- Tone selection (new) ----------
-
-  # ---------- Tone selection (dominant axis) ----------
+  # ---------- Tone selection (revised again – brain truth for tone_hint) ----------
 
   defp choose_tone(%{vigilance: vig, inhibition: inh, exploration: exp}) do
-    # Look at how far each index is from the conceptual mid-point (0.5)
-    # and pick the dominant positive axis:
-    #
-    #   vigilance   → :deescalate  (hot / conflict)
-    #   exploration → :warm        (curious / engaging)
-    #   inhibition  → :cool        (cautious / inhibited)
-    #
-    # Anything close to the center, or below the center, stays :neutral.
+    cfg          = Application.get_env(:brain, :mood_tone, [])
+    neutral_band = Keyword.get(cfg, :neutral_band, 0.10)
+
+    warm_cfg  = Keyword.get(cfg, :warm, [])
+    cool_cfg  = Keyword.get(cfg, :cool, [])
+    deesc_cfg = Keyword.get(cfg, :deescalate, [])
+
+    # De-escalate “hot” gate: high vigilance + low inhibition
+    hot_vig_min = deesc_cfg[:vigilance_min]  || 0.85
+    hot_inh_max = deesc_cfg[:inhibition_max] || 0.60
+
+    warm_exp_min = warm_cfg[:exploration_min] || 0.65
+    warm_vig_max = warm_cfg[:vigilance_max]   || 0.85
+
+    cool_inh_min = cool_cfg[:inhibition_min]  || 0.70
+
     exp = (exp || 0.5) * 1.0
     inh = (inh || 0.5) * 1.0
     vig = (vig || 0.5) * 1.0
-
-    neutral_band = 0.08
 
     e_dev = exp - 0.5
     i_dev = inh - 0.5
     v_dev = vig - 0.5
 
-    {axis, dev} =
-      [warm: e_dev, cool: i_dev, deescalate: v_dev]
-      |> Enum.max_by(fn {_k, d} -> abs(d) end)
+    # “How far from the middle are we on any axis?”
+    spread =
+      [e_dev, i_dev, v_dev]
+      |> Enum.map(&abs/1)
+      |> Enum.max()
 
     cond do
-      # Close to the center → treat as neutral.
-      abs(dev) < neutral_band ->
+      # 1) Clearly “hot” / conflict:
+      #    very high vigilance AND not enough inhibition → deescalate.
+      vig >= hot_vig_min and inh <= hot_inh_max ->
+        :deescalate
+
+      # 2) Friendly / engaged:
+      #    exploration above mid, inhibition not too low, vigilance not spiking.
+      exp >= warm_exp_min and inh >= 0.50 and vig <= warm_vig_max ->
+        :warm
+
+      # 3) Cautious / inhibited (cool):
+      inh >= cool_inh_min and exp <= 0.50 and vig <= warm_vig_max ->
+        :cool
+
+      # 4) If everything is very close to the center, call it neutral.
+      spread < neutral_band ->
         :neutral
 
-      # Only *positive* excursions from the center drive tone;
-      # below-center values (e.g. low vigilance) are just calmer/neutral.
-      dev <= 0.0 ->
-        :neutral
-
+      # 5) Fallback: dominant positive axis, but bias toward deescalate
+      #    when vigilance is the biggest excursion.
       true ->
-        axis
+        {axis, dev} =
+          [deescalate: v_dev, warm: e_dev, cool: i_dev]
+          |> Enum.max_by(fn {_k, d} -> abs(d) end)
+
+        cond do
+          # If the strongest axis is below center or tiny, stay neutral.
+          dev <= 0.0 or abs(dev) < neutral_band ->
+            :neutral
+
+          axis == :deescalate and vig >= hot_vig_min ->
+            :deescalate
+
+          axis == :warm and exp >= warm_exp_min ->
+            :warm
+
+          axis == :cool and inh >= cool_inh_min ->
+            :cool
+
+          true ->
+            :neutral
+        end
     end
   end
 
   defp choose_tone(_), do: :neutral
+
+  defp choose_tone(_), do: :neutral
+
   # ---------- small helpers ----------
+
+  defp maybe_compute_latents(meas, meta) do
+    try do
+      if function_exported?(Brain.AffectLatents, :compute, 2) do
+        Brain.AffectLatents.compute(meas, meta)
+      else
+        %{}
+      end
+    rescue
+      _ -> %{}
+    end
+  end
+
+  defp maybe_put_latents(map, %{} = latents) when map_size(latents) == 0, do: map
+  defp maybe_put_latents(map, latents), do: Map.put(map, :latents, latents)
 
   defp clamp_conf(c) when is_number(c), do: min(1.0, max(0.0, c))
   defp clamp(x), do: min(1.0, max(0.0, x))
@@ -656,3 +726,4 @@ defmodule Brain.MoodCore do
 
   defp to_float(_, default), do: default * 1.0
 end
+

@@ -25,7 +25,8 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       vigilance: 0.50,
       plasticity: 0.375
     },
-    tone: :neutral
+    tone: :neutral,
+    tone_since: 0
   }
 
   # ---------------------------------------------------------------------------
@@ -40,6 +41,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     |> Phoenix.Component.assign_new(:mood_levels, fn -> @defaults.levels end)
     |> Phoenix.Component.assign_new(:mood_derived, fn -> @defaults.derived end)
     |> Phoenix.Component.assign_new(:mood_tone, fn -> @defaults.tone end)
+    |> Phoenix.Component.assign_new(:mood_tone_since, fn -> @defaults.tone_since end)
     |> Phoenix.Component.assign_new(:telemetry_mood_id, fn -> nil end)
     |> ensure_alias()
   end
@@ -92,96 +94,24 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   non-mood messages (so your LiveView can fall through).
   """
 
-  # NEW: correctly derive mood + tone from Brain.MoodCore telemetry measurements.
+  # Canonical path: {:mood_event, measurements, metadata}
   def on_info({:mood_event, meas, meta}, socket) do
-    levels0 = socket.assigns[:mood_levels] || @defaults.levels
-    derived0 = socket.assigns[:mood_derived] || @defaults.derived
-    tone0 = socket.assigns[:mood_tone] || @defaults.tone
+    prev_mood = socket.assigns[:mood] || @defaults
 
-    # If metadata carries a full mood struct, use it directly.
-    mood_from_meta = meta[:mood] || meta["mood"]
+    mood_raw =
+      case meta[:mood] || meta["mood"] do
+        %{} = meta_mood ->
+          normalize_mood(meta_mood, prev_mood)
 
-    {levels, derived, tone} =
-      cond do
-        is_map(mood_from_meta) ->
-          m = mood_from_meta
-
-          levels =
-            Map.get(m, :levels) ||
-              Map.get(m, "levels") ||
-              levels0
-
-          derived =
-            Map.get(m, :derived) ||
-              Map.get(m, "derived") ||
-              %{
-                exploration:
-                  Map.get(m, :exploration, Map.get(m, "exploration", derived0[:exploration])),
-                inhibition:
-                  Map.get(m, :inhibition, Map.get(m, "inhibition", derived0[:inhibition])),
-                vigilance:
-                  Map.get(m, :vigilance, Map.get(m, "vigilance", derived0[:vigilance])),
-                plasticity:
-                  Map.get(m, :plasticity, Map.get(m, "plasticity", derived0[:plasticity]))
-              }
-
-          tone_raw =
-            Map.get(m, :tone) ||
-              Map.get(m, "tone") ||
-              Map.get(m, :tone_hint) ||
-              Map.get(m, "tone_hint")
-
-          tone = tone_raw || derive_tone_from_derived(derived, tone0)
-
-          {levels, derived, tone}
-
-        true ->
-          # Otherwise derive from measurements (this is what MoodCore.emit/4 sends).
-          levels =
-            Map.get(meta, :levels) ||
-              Map.get(meta, "levels") ||
-              Map.get(meas, :levels) ||
-              Map.get(meas, "levels") ||
-              %{
-                da: Map.get(meas, :da, levels0[:da]),
-                "5ht": Map.get(meas, :"5ht", levels0[:"5ht"]),
-                glu: Map.get(meas, :glu, levels0[:glu]),
-                ne: Map.get(meas, :ne, levels0[:ne])
-              }
-
-          derived =
-            Map.get(meta, :derived) ||
-              Map.get(meta, "derived") ||
-              Map.get(meas, :derived) ||
-              Map.get(meas, "derived") ||
-              %{
-                exploration: Map.get(meas, :exploration, derived0[:exploration]),
-                inhibition: Map.get(meas, :inhibition, derived0[:inhibition]),
-                vigilance: Map.get(meas, :vigilance, derived0[:vigilance]),
-                plasticity: Map.get(meas, :plasticity, derived0[:plasticity])
-              }
-
-          tone_raw =
-            Map.get(meta, :tone) ||
-              Map.get(meta, "tone") ||
-              Map.get(meta, :tone_hint) ||
-              Map.get(meta, "tone_hint") ||
-              Map.get(meas, :tone) ||
-              Map.get(meas, "tone")
-
-          tone = tone_raw || derive_tone_from_derived(derived, tone0)
-
-          {levels, derived, tone}
+        _ ->
+          build_mood_from_meas(prev_mood, meas, meta || %{})
       end
 
-    mood = %{levels: levels, derived: derived, tone: tone}
+    mood = smooth_tone(mood_raw, prev_mood)
 
     {:noreply,
      socket
-     |> Phoenix.Component.assign(:mood_levels, levels)
-     |> Phoenix.Component.assign(:mood_derived, derived)
-     |> Phoenix.Component.assign(:mood_tone, tone)
-     |> Phoenix.Component.assign(:mood, mood)
+     |> assign_mood(mood)
      |> Phoenix.Component.assign(:mood_last, %{
        at: System.system_time(:millisecond),
        meas: meas,
@@ -189,54 +119,22 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
      })}
   end
 
-  def on_info({:mood_update, meas, _meta}, socket) do
-    levels = %{
-      da: Map.get(meas, :da, 0.5),
-      "5ht": Map.get(meas, :"5ht", 0.5),
-      glu: Map.get(meas, :glu, 0.5),
-      ne: Map.get(meas, :ne, 0.5)
-    }
+  # Legacy path: {:mood_update, measurements, metadata}
+  def on_info({:mood_update, meas, meta}, socket) do
+    prev_mood = socket.assigns[:mood] || @defaults
+    mood_raw = build_mood_from_meas(prev_mood, meas, meta || %{})
+    mood = smooth_tone(mood_raw, prev_mood)
 
-    derived = %{
-      exploration: Map.get(meas, :exploration, 0.5),
-      inhibition: Map.get(meas, :inhibition, 0.5),
-      vigilance: Map.get(meas, :vigilance, 0.5),
-      plasticity: Map.get(meas, :plasticity, 0.5)
-    }
-
-    tone0 = socket.assigns[:mood_tone] || :neutral
-    tone = derive_tone_from_derived(derived, tone0)
-
-    {:noreply,
-     socket
-     |> Phoenix.Component.assign(:mood_levels, levels)
-     |> Phoenix.Component.assign(:mood_derived, derived)
-     |> Phoenix.Component.assign(:mood_tone, tone)
-     |> Phoenix.Component.assign(:mood, %{levels: levels, derived: derived, tone: tone})}
+    {:noreply, assign_mood(socket, mood)}
   end
 
+  # Direct mood struct: {:mood, %{levels/derived/tone/...}}
   def on_info({:mood, m}, socket) do
-    mood = m || %{}
+    prev_mood = socket.assigns[:mood] || @defaults
+    mood_raw = normalize_mood(m || %{}, prev_mood)
+    mood = smooth_tone(mood_raw, prev_mood)
 
-    levels =
-      Map.get(mood, :levels, socket.assigns[:mood_levels] || @defaults.levels)
-
-    derived =
-      Map.get(mood, :derived, socket.assigns[:mood_derived] || @defaults.derived)
-
-    tone0 = socket.assigns[:mood_tone] || @defaults.tone
-
-    tone =
-      Map.get(mood, :tone) ||
-        Map.get(mood, :tone_hint) ||
-        derive_tone_from_derived(derived, tone0)
-
-    {:noreply,
-     socket
-     |> Phoenix.Component.assign(:mood_levels, levels)
-     |> Phoenix.Component.assign(:mood_derived, derived)
-     |> Phoenix.Component.assign(:mood_tone, tone)
-     |> Phoenix.Component.assign(:mood, %{levels: levels, derived: derived, tone: tone})}
+    {:noreply, assign_mood(socket, mood)}
   end
 
   def on_info(_msg, _socket), do: :ignore
@@ -325,10 +223,152 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
         %{
           levels: Map.get(a, :mood_levels, @defaults.levels),
           derived: Map.get(a, :mood_derived, @defaults.derived),
-          tone: Map.get(a, :mood_tone, @defaults.tone)
+          tone: Map.get(a, :mood_tone, @defaults.tone),
+          tone_since: Map.get(a, :mood_tone_since, @defaults.tone_since)
         }
 
-    Phoenix.Component.assign(socket, :mood, mood)
+    assign_mood(socket, mood)
+  end
+
+  defp assign_mood(socket, mood) do
+    mood = mood || @defaults
+
+    levels = Map.get(mood, :levels, @defaults.levels)
+    derived = Map.get(mood, :derived, @defaults.derived)
+    tone = Map.get(mood, :tone, @defaults.tone)
+    tone_since = Map.get(mood, :tone_since, @defaults.tone_since)
+
+    mood = %{
+      levels: levels,
+      derived: derived,
+      tone: tone,
+      tone_since: tone_since
+    }
+
+    socket
+    |> Phoenix.Component.assign(:mood_levels, levels)
+    |> Phoenix.Component.assign(:mood_derived, derived)
+    |> Phoenix.Component.assign(:mood_tone, tone)
+    |> Phoenix.Component.assign(:mood_tone_since, tone_since)
+    |> Phoenix.Component.assign(:mood, mood)
+  end
+
+  defp normalize_mood(mood_map, prev_mood) do
+    prev_levels = Map.get(prev_mood, :levels, @defaults.levels)
+    prev_derived = Map.get(prev_mood, :derived, @defaults.derived)
+    prev_tone = Map.get(prev_mood, :tone, @defaults.tone)
+    prev_since = Map.get(prev_mood, :tone_since, @defaults.tone_since)
+
+    levels =
+      Map.get(mood_map, :levels) ||
+        Map.get(mood_map, "levels") ||
+        prev_levels
+
+    derived =
+      Map.get(mood_map, :derived) ||
+        Map.get(mood_map, "derived") ||
+        %{
+          exploration:
+            Map.get(
+              mood_map,
+              :exploration,
+              Map.get(mood_map, "exploration", prev_derived[:exploration])
+            ),
+          inhibition:
+            Map.get(
+              mood_map,
+              :inhibition,
+              Map.get(mood_map, "inhibition", prev_derived[:inhibition])
+            ),
+          vigilance:
+            Map.get(
+              mood_map,
+              :vigilance,
+              Map.get(mood_map, "vigilance", prev_derived[:vigilance])
+            ),
+          plasticity:
+            Map.get(
+              mood_map,
+              :plasticity,
+              Map.get(mood_map, "plasticity", prev_derived[:plasticity])
+            )
+        }
+
+    tone_raw =
+      Map.get(mood_map, :tone) ||
+        Map.get(mood_map, "tone") ||
+        Map.get(mood_map, :tone_hint) ||
+        Map.get(mood_map, "tone_hint")
+
+    tone =
+      case tone_raw do
+        nil -> derive_tone_from_derived(derived, prev_tone)
+        t -> t
+      end
+
+    %{
+      levels: levels,
+      derived: derived,
+      tone: tone,
+      tone_since:
+        Map.get(
+          mood_map,
+          :tone_since,
+          Map.get(mood_map, "tone_since", prev_since)
+        )
+    }
+  end
+
+  defp build_mood_from_meas(prev_mood, meas, meta) do
+    prev_levels = Map.get(prev_mood, :levels, @defaults.levels)
+    prev_derived = Map.get(prev_mood, :derived, @defaults.derived)
+    prev_tone = Map.get(prev_mood, :tone, @defaults.tone)
+    prev_since = Map.get(prev_mood, :tone_since, @defaults.tone_since)
+
+    levels =
+      Map.get(meta, :levels) ||
+        Map.get(meta, "levels") ||
+        Map.get(meas, :levels) ||
+        Map.get(meas, "levels") ||
+        %{
+          da: Map.get(meas, :da, prev_levels[:da]),
+          "5ht": Map.get(meas, :"5ht", prev_levels[:"5ht"]),
+          glu: Map.get(meas, :glu, prev_levels[:glu]),
+          ne: Map.get(meas, :ne, prev_levels[:ne])
+        }
+
+    derived =
+      Map.get(meta, :derived) ||
+        Map.get(meta, "derived") ||
+        Map.get(meas, :derived) ||
+        Map.get(meas, "derived") ||
+        %{
+          exploration: Map.get(meas, :exploration, prev_derived[:exploration]),
+          inhibition: Map.get(meas, :inhibition, prev_derived[:inhibition]),
+          vigilance: Map.get(meas, :vigilance, prev_derived[:vigilance]),
+          plasticity: Map.get(meas, :plasticity, prev_derived[:plasticity])
+        }
+
+    tone_raw =
+      Map.get(meta, :tone) ||
+        Map.get(meta, "tone") ||
+        Map.get(meta, :tone_hint) ||
+        Map.get(meta, "tone_hint") ||
+        Map.get(meas, :tone) ||
+        Map.get(meas, "tone")
+
+    tone =
+      case tone_raw do
+        nil -> derive_tone_from_derived(derived, prev_tone)
+        t -> t
+      end
+
+    %{
+      levels: levels,
+      derived: derived,
+      tone: tone,
+      tone_since: prev_since
+    }
   end
 
   # Take derived indices and turn them into a tone, mirroring MoodCore.choose_tone/1
@@ -342,6 +382,49 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   end
 
   defp derive_tone_from_derived(_other, fallback), do: fallback || :neutral
+
+  # ----------------- Tone smoothing -----------------
+
+  defp smooth_tone(%{} = new_mood, %{} = prev_mood) do
+    now_ms = System.monotonic_time(:millisecond)
+
+    ui_cfg = Application.get_env(:brain, :mood_ui, [])
+    ignore_deesc_ms = ui_cfg[:ignore_transient_deescalate_ms] || 300
+    min_dwell_ms = ui_cfg[:min_tone_dwell_ms] || 200
+
+    last_tone = Map.get(prev_mood, :tone, :neutral)
+    last_since = Map.get(prev_mood, :tone_since, now_ms)
+    new_tone = Map.get(new_mood, :tone, last_tone)
+
+    cond do
+      # No change → keep existing start time
+      new_tone == last_tone ->
+        Map.put(new_mood, :tone_since, last_since)
+
+      # Very short, more-intense spike? (e.g. deescalate) -> ignore.
+      tone_rank(new_tone) > tone_rank(last_tone) and now_ms - last_since < min_dwell_ms ->
+        new_mood
+        |> Map.put(:tone, last_tone)
+        |> Map.put(:tone_since, last_since)
+
+      # Special case: quick deescalate blip after neutral/warm → ignore
+      last_tone in [:neutral, :warm] and new_tone == :deescalate and
+          now_ms - last_since < ignore_deesc_ms ->
+        new_mood
+        |> Map.put(:tone, last_tone)
+        |> Map.put(:tone_since, last_since)
+
+      # Otherwise accept the new tone and start its timer
+      true ->
+        Map.put(new_mood, :tone_since, now_ms)
+    end
+  end
+
+  defp tone_rank(:neutral), do: 0
+  defp tone_rank(:warm), do: 1
+  defp tone_rank(:cool), do: 1
+  defp tone_rank(:deescalate), do: 2
+  defp tone_rank(_), do: 0
 
   # Color scheme per tone (chip-level)
 
@@ -408,4 +491,3 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   defp fmt(v), do: to_string(v)
 end
-
