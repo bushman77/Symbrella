@@ -19,7 +19,9 @@ defmodule Brain.HippocampusBehaviorTest do
     # 1st write
     Hippocampus.encode(slate_with("same"), %{first: true})
     %{window: [{at1, ep1} | _]} = Hippocampus.snapshot()
-    assert ep1.meta == %{first: true}
+
+    # meta on first write includes first: true (and may include emotion, latents, etc.)
+    assert %{first: true} = ep1.meta
 
     # 2nd write with identical token set but different meta → should dedup & refresh timestamp
     Process.sleep(10)
@@ -30,8 +32,13 @@ defmodule Brain.HippocampusBehaviorTest do
 
     [{at2, ep2} | _] = s2.window
     assert at2 > at1
+
     # Meta remains the original head's meta (dedup keeps head episode, updates only timestamp)
-    assert ep2.meta == %{first: true}
+    # Accepts extra keys, but still enforces first: true and emotional context
+    assert %{first: true} = ep2.meta
+    assert Map.has_key?(ep2.meta, :emotion)
+    assert Map.has_key?(ep2.meta, :latents)
+    assert Map.has_key?(ep2.meta, :tone_reaction)
   end
 
   test "scope filter: recall only returns episodes whose meta contain the given scope" do
@@ -71,3 +78,4 @@ defmodule Brain.HippocampusBehaviorTest do
     assert hd(res_low).score > 0.0
   end
 end
+

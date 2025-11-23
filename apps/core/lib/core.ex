@@ -88,57 +88,59 @@ defmodule Core do
 
   # ───────────────────────── Public API ───────────────────────────────────────
 
-  @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
-  def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
-    mode  = Keyword.get(opts, :mode, :prod)
-    max_n = Keyword.get(opts, :max_wordgram_n, 3)
+@spec resolve_input(String.t(), opts()) :: SemanticInput.t()
+def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
+  mode  = Keyword.get(opts, :mode, :prod)
+  max_n = Keyword.get(opts, :max_wordgram_n, 3)
 
-    # Optionally pull defaults for LIFG (always on unless overridden)
-    lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
-    lifg_opts     = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
+  # Optionally pull defaults for LIFG (always on unless overridden)
+  lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
+  lifg_opts     = Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
 
-    si0 =
-      phrase
-      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
-      |> wrap_si(phrase)
-      |> rebuild_word_ngrams(max_n)
-      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
-      |> Map.put_new(:trace, [])
-      |> Map.put(:lifg_opts, lifg_opts)
+  si0 =
+    phrase
+    |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+    |> wrap_si(phrase)
+    |> rebuild_word_ngrams(max_n)
+    |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+    |> Map.put_new(:trace, [])
+    |> Map.put(:lifg_opts, lifg_opts)
 
-    # Be compatible with both Selection.select/2 shapes:
-    # - legacy: returns a plain si (map/struct)
-    # - new:    returns {si, res}
-    sel_out = Selection.select(si0, opts)
+  # Be compatible with both Selection.select/2 shapes:
+  # - legacy: returns a plain si (map/struct)
+  # - new:    returns {si, res}
+  sel_out = Selection.select(si0, opts)
 
-    si1 =
-      case sel_out do
-        {si, _res} -> coerce_si(si)
-        si         -> coerce_si(si)
-      end
-
-    case mode do
-      :prod ->
-        si1
-        |> brain_roundtrip(&Brain.stm/1)
-        |> keep_only_word_boundary_tokens()
-        |> maybe_run_mwe(:early, opts)
-        |> ltm_stage(opts)
-        |> keep_only_word_boundary_tokens()
-        |> maybe_run_mwe(:late, opts)
-        |> Core.Relations.attach_edges()
-        |> maybe_attach_episodes(opts)
-        |> run_lifg_and_attach(opts)
-        |> maybe_ingest_atl(opts)
-        |> brain_roundtrip(&Brain.ATL.attach_lifg_pairs(&1, opts))
-        |> maybe_encode_hippocampus()
-        |> maybe_persist_episode(opts)
-        |> notify_brain_activation(opts)
-
-      _ ->
-        si1
+  si1 =
+    case sel_out do
+      {si, _res} -> coerce_si(si)
+      si         -> coerce_si(si)
     end
+
+  case mode do
+    :prod ->
+      si1
+      |> brain_roundtrip(&Brain.stm/1)
+      |> keep_only_word_boundary_tokens()
+      |> maybe_run_mwe(:early, opts)
+      |> ltm_stage(opts)
+      |> keep_only_word_boundary_tokens()
+      |> maybe_run_mwe(:late, opts)
+      |> Core.Relations.attach_edges()
+      |> maybe_attach_episodes(opts)
+      |> maybe_amygdala_react(opts)
+      # 🔽 use LIFG-specific opts here
+      |> run_lifg_and_attach(lifg_opts)
+      |> maybe_ingest_atl(opts)
+      |> brain_roundtrip(&Brain.ATL.attach_lifg_pairs(&1, opts))
+      |> maybe_encode_hippocampus()
+      |> maybe_persist_episode(opts)
+      |> notify_brain_activation(opts)
+
+    _ ->
+      si1
   end
+end
 
   # ─────────────────────── Brain notify ───────────────────────
 
@@ -176,102 +178,127 @@ defmodule Core do
 
   # ─────────────────────── LIFG (full pipeline) ───────────────────────
 
-  defp run_lifg_and_attach(si, lifg_opts) do
-    # Pass intent bias downstream (non-breaking; ignored if unused)
-    lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
+# apps/core/lib/core.ex
 
-    case safe_lifg_run(si, lifg_opts2) do
-      {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
-        lifg_choices =
-          raw_choices
-          |> Enum.map(fn ch ->
-            token_index = Map.get(ch, :token_index, 0)
-            t = Enum.at(si.tokens, token_index, %{})
-            token_norm = t |> Map.get(:phrase, "") |> norm()
+defp run_lifg_and_attach(%{tokens: tokens} = si, lifg_opts) when is_list(tokens) do
+  # Pass intent bias downstream (non-breaking; ignored if unused)
+  lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
 
-            chosen_id = Map.get(ch, :chosen_id)
-            scores = Map.get(ch, :scores) || %{}
-            feats = Map.get(ch, :features) || %{}
-            alt_ids = Map.get(ch, :alt_ids, [])
-            margin = Map.get(ch, :margin, 0.0)
-            prob_margin = Map.get(ch, :prob_margin, 0.0)
+  case safe_lifg_run(si, lifg_opts2) do
+    {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}} ->
+      # Prefer tokens from si_after in case LIFG ever enriches them;
+      # fall back to the original tokens.
+      tokens_for_choices = Map.get(si_after, :tokens, tokens)
 
-            phrase_bump_for = fn id, thin? ->
-              cond do
-                Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
-                  base = if thin?, do: @mwe_general_bump, else: 0.0
-                  greet = if Map.get(si, :intent) == :greet, do: @greet_phrase_bump, else: 0.0
-                  base + greet
+      lifg_choices =
+        raw_choices
+        |> Enum.map(fn ch ->
+          token_index = Map.get(ch, :token_index, 0)
+          t = Enum.at(tokens_for_choices, token_index, %{})
+          token_norm = t |> Map.get(:phrase, "") |> norm()
 
-                true ->
-                  0.0
-              end
+          chosen_id   = Map.get(ch, :chosen_id)
+          scores      = Map.get(ch, :scores) || %{}
+          feats       = Map.get(ch, :features) || %{}
+          alt_ids     = Map.get(ch, :alt_ids, [])
+          margin      = Map.get(ch, :margin, 0.0)
+          prob_margin = Map.get(ch, :prob_margin, 0.0)
+
+          phrase_bump_for = fn id, thin? ->
+            cond do
+              Map.get(t, :n, 1) > 1 and id_norm(id) == token_norm ->
+                base  = if thin?, do: @mwe_general_bump, else: 0.0
+                greet =
+                  if Map.get(si_after, :intent, si.intent) == :greet,
+                    do: @greet_phrase_bump,
+                    else: 0.0
+
+                base + greet
+
+              true ->
+                0.0
+            end
+          end
+
+          base_score =
+            if is_binary(chosen_id) and is_map(scores),
+              do: Map.get(scores, chosen_id, 0.0),
+              else: Map.get(feats, :score_norm, 0.0)
+
+          candidates =
+            [chosen_id | alt_ids]
+            |> Enum.uniq()
+            |> Enum.reject(&is_nil/1)
+
+          matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
+
+          pos_prior = %{
+            "phrase"   => 0.03,
+            "noun"     => 0.01,
+            "verb"     => 0.0,
+            "adjective"=> 0.0
+          }
+
+          thin? = margin < @lifg_tie_epsilon or prob_margin < @lifg_prob_epsilon
+          score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
+
+          pick_with_prior = fn ids ->
+            Enum.max_by(
+              ids,
+              fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
+              fn -> chosen_id end
+            )
+          end
+
+          {chosen_id2, score2} =
+            cond do
+              matching != [] and thin? ->
+                best = pick_with_prior.(matching)
+                {best, Map.get(scores, best, base_score)}
+
+              matching != [] ->
+                best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
+                {best, Map.get(scores, best, base_score)}
+
+              thin? ->
+                best = pick_with_prior.(candidates)
+                {best, Map.get(scores, best, base_score)}
+
+              true ->
+                {chosen_id, base_score}
             end
 
-            base_score =
-              if is_binary(chosen_id) and is_map(scores),
-                do: Map.get(scores, chosen_id, 0.0),
-                else: Map.get(feats, :score_norm, 0.0)
+          %{
+            token_index: token_index,
+            lemma: token_norm,
+            id: chosen_id2,
+            alt_ids: alt_ids,
+            score: score2
+          }
+        end)
+        |> mwe_shadow(tokens_for_choices)
 
-            candidates =
-              [chosen_id | alt_ids]
-              |> Enum.uniq()
-              |> Enum.reject(&is_nil/1)
+      ev = %{
+        stage: :lifg_run,
+        ts_ms: System.system_time(:millisecond),
+        choice_count: length(raw_choices),
+        flips: flips
+      }
 
-            matching = Enum.filter(candidates, &(id_norm(&1) == token_norm))
-            pos_prior = %{"phrase" => 0.03, "noun" => 0.01, "verb" => 0.0, "adjective" => 0.0}
-            thin? = margin < @lifg_tie_epsilon or prob_margin < @lifg_prob_epsilon
-            score_of = fn id -> Map.get(scores, id, base_score) + phrase_bump_for.(id, thin?) end
+      si_after
+      |> Map.put(:atl_slate, slate)
+      |> Map.put(:lifg_choices, lifg_choices)
+      |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
+      |> Map.update(:trace, [], &[ev | &1])
 
-            pick_with_prior = fn ids ->
-              Enum.max_by(ids, fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end, fn -> chosen_id end)
-            end
-
-            {chosen_id2, score2} =
-              cond do
-                matching != [] and thin? ->
-                  best = pick_with_prior.(matching)
-                  {best, Map.get(scores, best, base_score)}
-
-                matching != [] ->
-                  best = Enum.max_by(matching, &score_of.(&1), fn -> chosen_id end)
-                  {best, Map.get(scores, best, base_score)}
-
-                thin? ->
-                  best = pick_with_prior.(candidates)
-                  {best, Map.get(scores, best, base_score)}
-
-                true ->
-                  {chosen_id, base_score}
-              end
-
-            %{
-              token_index: token_index,
-              lemma: token_norm,
-              id: chosen_id2,
-              alt_ids: alt_ids,
-              score: score2
-            }
-          end)
-          |> mwe_shadow(si.tokens)
-
-        ev = %{
-          stage: :lifg_run,
-          ts_ms: System.system_time(:millisecond),
-          choice_count: length(raw_choices),
-          flips: flips
-        }
-
-        si_after
-        |> Map.put(:atl_slate, slate)
-        |> Map.put(:lifg_choices, lifg_choices)
-        |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
-        |> Map.update(:trace, [], &[ev | &1])
-
-      {:error, _reason} ->
-        si
-    end
+    {:error, _reason} ->
+      si
   end
+end
+
+# Fallback clause: if someone accidentally passes an emotion map or anything
+# without :tokens, just give it back untouched instead of blowing up.
+defp run_lifg_and_attach(si, _lifg_opts), do: si
 
   defp safe_lifg_run(si, opts) do
     cond do
@@ -836,5 +863,32 @@ defmodule Core do
       si
     end
   end
+
+    # Amygdala hook: fast affective appraisal between episodes + LIFG
+defp maybe_amygdala_react(si, opts) do
+  if Code.ensure_loaded?(Brain.Amygdala) and
+       function_exported?(Brain.Amygdala, :react, 2) do
+    try do
+      case Brain.Amygdala.react(si, opts) do
+        # Amygdala returns an emotion summary map like
+        # %{from: ..., latents: ..., tone_reaction: ..., ...}
+        %{} = emotion ->
+          # 🔑 Keep the SemanticInput, just enrich it
+          Map.put(si, :emotion, emotion)
+
+        # If it returns something unexpected, don’t break the pipeline
+        _ ->
+          si
+      end
+    rescue
+      _ -> si
+    catch
+      _, _ -> si
+    end
+  else
+    si
+  end
+end
+
 end
 

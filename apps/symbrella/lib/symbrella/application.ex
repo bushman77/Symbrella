@@ -50,6 +50,7 @@ defmodule Symbrella.Application do
 
       # ── Brain servers / timing ───────────────────────────────────────────
       Brain,
+      Brain.Amygdala,
       Brain.Cerebellum,
       Brain.LIFG,
       Brain.PMTG,
