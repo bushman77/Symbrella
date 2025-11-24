@@ -488,7 +488,7 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   # Boundary/shape drop (non-char-gram reasons)
-  defp handle_boundary_drop(tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx) do
+  defp handle_boundary_drop(_tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx) do
     :telemetry.execute(
       ctx.boundary_event,
       %{},
