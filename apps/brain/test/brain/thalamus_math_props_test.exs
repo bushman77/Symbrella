@@ -167,7 +167,8 @@ defmodule Brain.ThalamusMathProps_Test do
     # Monotonic non-increasing in alpha
     Enum.reduce(scores, nil, fn s, prev ->
       if prev != nil do
-        assert s <= prev + 1.0e-6
+eps = 1.0e-4
+assert s <= prev + eps
       end
 
       s

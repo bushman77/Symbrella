@@ -62,7 +62,6 @@ defmodule Brain.LIFGGatingTest do
       )
 
     %{wm: wm} = Brain.snapshot_wm()
-    IO.inspect(wm, label: "WM after lifg_stage1/3")
 
     assert Enum.any?(wm, &(&1.id == @strong_id and &1.source == :lifg))
   end

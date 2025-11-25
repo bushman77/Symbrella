@@ -119,90 +119,159 @@ defmodule Core.Response.Policy do
 
   defp helpful_decision(f) do
     risk_high? = f.risk_bucket == :high
+    bug? = f.intent == :bug
+    meta_explainer? = meta_explainer?(f)
 
-    case {f.vigilance_bucket, f.confidence_bucket, risk_high?} do
-      # high vigil, low risk → still act, but tone neutral
-      {:high, _c, false} ->
+    cond do
+      # Gentle bug coach: bug + high/extreme vigilance and low risk
+      bug? and f.vigilance_bucket in [:high, :extreme] and not risk_high? ->
         %{
-          tone: :neutral,
-          mode: :pair_programmer,
+          tone:
+            if(f.vigilance_bucket == :extreme) do
+              :deescalate
+            else
+              :warm
+            end,
+          mode: :coach,
           action: :act_first,
-          scores: %{vigilance: :high},
+          scores: %{
+            profile: :gentle_bug_coach,
+            vigilance: f.vigilance_bucket,
+            conf: f.confidence_bucket
+          },
           overrides: []
         }
 
-      # extreme vigil → cap at neutral regardless
-      {:extreme, _c, _} ->
+      # Calm explainer: meta/brain questions, low risk
+      meta_explainer? and not risk_high? ->
+        tone =
+          case f.vigilance_bucket do
+            :normal -> :warm
+            :high -> :neutral
+            :extreme -> :neutral
+          end
+
         %{
-          tone: :neutral,
-          mode: :pair_programmer,
+          tone: tone,
+          mode: :explainer,
           action: :offer_options,
-          scores: %{vigilance: :extreme},
+          scores: %{
+            profile: :calm_explainer,
+            vigilance: f.vigilance_bucket,
+            conf: f.confidence_bucket
+          },
           overrides: []
         }
 
-      # any vigil, high risk → editor + options/ask
-      {_v, :high, true} ->
-        %{
-          tone: :firm,
-          mode: :editor,
-          action: :offer_options,
-          scores: %{risk: :high, conf: :high},
-          overrides: []
-        }
-
-      {_v, :med, true} ->
-        %{
-          tone: :neutral,
-          mode: :editor,
-          action: :offer_options,
-          scores: %{risk: :high, conf: :med},
-          overrides: []
-        }
-
-      {_v, :low, true} ->
-        %{
-          tone: :deescalate,
-          mode: :editor,
-          action: :ask_first,
-          scores: %{risk: :high, conf: :low},
-          overrides: []
-        }
-
-      # low risk paths
-      {_v, :high, false} ->
+      # Warm collaborator: helpful, non-bug intent, low risk, normal vigil, med/high confidence
+      not bug? and not risk_high? and
+          f.vigilance_bucket == :normal and f.confidence_bucket in [:high, :med] ->
         %{
           tone: :warm,
           mode: :pair_programmer,
           action: :act_first,
-          scores: %{conf: :high},
+          scores: %{
+            profile: :warm_collaborator,
+            vigilance: :normal,
+            conf: f.confidence_bucket
+          },
           overrides: []
         }
 
-      {_v, :med, false} ->
-        %{
-          tone: :neutral,
-          mode: :pair_programmer,
-          action: :act_first,
-          scores: %{conf: :med},
-          overrides: []
-        }
+      true ->
+        case {f.vigilance_bucket, f.confidence_bucket, risk_high?} do
+          # high vigil, low risk → still act, but tone neutral
+          {:high, _c, false} ->
+            %{
+              tone: :neutral,
+              mode: :pair_programmer,
+              action: :act_first,
+              scores: %{vigilance: :high},
+              overrides: []
+            }
 
-      {_v, :low, false} ->
-        %{
-          tone: :neutral,
-          mode: :coach,
-          action: :offer_options,
-          scores: %{conf: :low},
-          overrides: []
-        }
+          # extreme vigil → cap at neutral regardless
+          {:extreme, _c, _} ->
+            %{
+              tone: :neutral,
+              mode: :pair_programmer,
+              action: :offer_options,
+              scores: %{vigilance: :extreme},
+              overrides: []
+            }
+
+          # any vigil, high risk → editor + options/ask
+          {_v, :high, true} ->
+            %{
+              tone: :firm,
+              mode: :editor,
+              action: :offer_options,
+              scores: %{risk: :high, conf: :high},
+              overrides: []
+            }
+
+          {_v, :med, true} ->
+            %{
+              tone: :neutral,
+              mode: :editor,
+              action: :offer_options,
+              scores: %{risk: :high, conf: :med},
+              overrides: []
+            }
+
+          {_v, :low, true} ->
+            %{
+              tone: :deescalate,
+              mode: :editor,
+              action: :ask_first,
+              scores: %{risk: :high, conf: :low},
+              overrides: []
+            }
+
+          # low risk paths
+          {_v, :high, false} ->
+            %{
+              tone: :warm,
+              mode: :pair_programmer,
+              action: :act_first,
+              scores: %{conf: :high},
+              overrides: []
+            }
+
+          {_v, :med, false} ->
+            %{
+              tone: :neutral,
+              mode: :pair_programmer,
+              action: :act_first,
+              scores: %{conf: :med},
+              overrides: []
+            }
+
+          {_v, :low, false} ->
+            %{
+              tone: :neutral,
+              mode: :coach,
+              action: :offer_options,
+              scores: %{conf: :low},
+              overrides: []
+            }
+        end
     end
+  end
+
+  # meta explainer when user is asking about Symbrella's own brain/regions
+  defp meta_explainer?(f) do
+    f.intent in [:explain, :question] and brain_meta?(f.text)
   end
 
   # ── Overrides ───────────────────────────────────────────────────────────────
 
   defp benign_override(tone, overrides, f) do
     cond do
+      # Do not bump calm explainer; keep neutral for high vigilance.
+      meta_explainer?(f) ->
+        {tone, overrides}
+
       f.intent in @helpful_intents and f.benign? and tone in [:neutral, :firm] ->
         {bump_tone(tone), [:benign_override | overrides]}
 
@@ -231,12 +300,13 @@ defmodule Core.Response.Policy do
     t = dn(text)
 
     cond do
-      greeting?(t) -> :greeting
-      gratitude?(t) -> :gratitude
-      smalltalk?(t) -> :smalltalk
-      question?(t) -> :question
-      command?(t) -> :command
-      true -> :unknown
+      greeting?(t)    -> :greeting
+      gratitude?(t)   -> :gratitude
+      smalltalk?(t)   -> :smalltalk
+      bug_report?(t)  -> :bug
+      question?(t)    -> :question
+      command?(t)     -> :command
+      true            -> :unknown
     end
   end
 
@@ -289,6 +359,51 @@ defmodule Core.Response.Policy do
       Regex.match?(~r/\b(how|what|why|when|where|who|which)\b/i, t)
   end
 
+  # "Is the brain doing X?" / "Explain LIFG" / "how does Symbrella respond?"
+  defp brain_meta?(t) do
+    t = dn(t)
+
+    Regex.match?(
+      ~r/\b(symbrella|lifg|working memory|wm|hippocampus|pmtg|amygdala|brain dashboard|episodes?)\b/i,
+      t
+    )
+  end
+
   defp dn(nil), do: ""
   defp dn(t), do: t |> to_string() |> String.downcase() |> String.trim()
+
+  def bug_report?(t) do
+    # We expect `t` already downcased via dn/1, but dn/1 is idempotent,
+    # so calling it again is harmless if this gets reused elsewhere.
+    t = dn(t)
+
+    # Classic bug keywords
+    basic? =
+      Regex.match?(
+        ~r/\b(bug|issue|problem|error|exception|stack trace|traceback|crash|crashing|regression)\b/i,
+        t
+      ) or
+        Regex.match?(
+          ~r/\b(not working|doesn'?t work|fails?|failing|broken)\b/i,
+          t
+        )
+
+    # "Weird/off" behavior around Symbrella brain regions / tests
+    weird_symbrella? =
+      Regex.match?(~r/\b(weird|odd|off|unexpected|wrong)\b/i, t) and
+        Regex.match?(
+          ~r/\b(symbrella|lifg|pmtg|hippocampus|thalamus|atl|wm|working memory|basal ganglia|acc)\b/i,
+          t
+        )
+
+    # Test-oriented bug complaints
+    test_fail? =
+      Regex.match?(~r/\b(test(s)?|spec(s)?|assert(ion)?|unit test|property test)\b/i, t) and
+        Regex.match?(~r/\b(fail(ed|ing)?|red)\b/i, t)
+
+    basic? or weird_symbrella? or test_fail?
+  end
+
+
 end
+

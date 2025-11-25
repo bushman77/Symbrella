@@ -40,6 +40,7 @@ defmodule Core.Response.Modes do
 
   @type tone :: :warm | :neutral | :firm | :deescalate
   @type mode :: :pair_programmer | :coach | :scribe | :editor | :explainer
+
   @type opts :: %{
           optional(:file_hint) => String.t(),
           optional(:flag) => any(),
@@ -114,16 +115,22 @@ defmodule Core.Response.Modes do
     with_file_hint(base, opts[:file_hint])
   end
 
-  # Coach: steer to small next step; always show A/B when action=offer_options upstream.
+  # Coach: steer to small next step; bug-aware for test failures.
   def compose(intent, tone, :coach, raw_opts) when intent in @helpful_intents do
     opts = normalize_opts(raw_opts)
 
     base =
-      case tone do
-        :deescalate ->
+      case {intent, tone} do
+        {:bug, :deescalate} ->
+          "Test failures are frustrating but fixable. We'll take it one failure at a time—what's the most painful one right now?"
+
+        {:bug, _} ->
+          "Let's get this test passing. We'll start from the failing output and narrow down the cause together."
+
+        {_other_intent, :deescalate} ->
           "No rush. One step at a time—what's top priority right now?"
 
-        _ ->
+        {_other_intent, _} ->
           "Let's pick a small next step. A) I act. B) clarify one detail."
       end
 
@@ -176,6 +183,7 @@ defmodule Core.Response.Modes do
 
   def compose(_intent, :firm, _mode, raw_opts) do
     opts = normalize_opts(raw_opts)
+
     with_file_hint("Got it—staying focused and brief. Name the file or module.", opts[:file_hint])
   end
 
@@ -223,3 +231,4 @@ defmodule Core.Response.Modes do
     :erlang.phash2({intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag)})
   end
 end
+

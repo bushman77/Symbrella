@@ -1,4 +1,3 @@
-# apps/core/lib/core/response.ex
 defmodule Core.Response do
   @moduledoc """
   Response — small policy engine that maps (intent × mood × text) → {tone, text, meta}.
@@ -6,9 +5,11 @@ defmodule Core.Response do
   Public API:
     • plan/2 — given an SI-like map and an optional mood-like map, decide tone/mode/action,
       optionally fire one micro-skill (inline text), and return {tone, text, meta}.
+    • annotate_si/2 — convenience helper that runs plan/2 and attaches
+      :response_tone, :response_text, :response_meta onto an SI-like map/struct.
 
   Notes:
-    • This is the successor to `Core.Response` (module renamed).
+    • This is the successor to the earlier response module (module renamed).
     • Children live under `Core.Response.*` (Policy, Modes, Guardrails, Skills).
     • Emits telemetry: [:core, :response, :plan].
   """
@@ -106,6 +107,9 @@ defmodule Core.Response do
           Modes.compose(intent, decision.tone, decision.mode)
       end
 
+    # High-level interaction profile (for UI, tests, debugging)
+    profile = classify_profile(features, decision, guard)
+
     # Planner, compact, deterministic explanation (for UI + tests)
     planner_explanation =
       build_planner_explanation(
@@ -133,6 +137,7 @@ defmodule Core.Response do
       tone: decision.tone,
       mode: decision.mode,
       action: decision.action,
+      profile: profile,
       benign: benign?,
       hostile: hostile?,
       tone_hint: tone_hint,
@@ -151,6 +156,62 @@ defmodule Core.Response do
     :telemetry.execute([:core, :response, :plan], %{}, meta)
 
     {decision.tone, text, meta}
+  end
+
+  @doc """
+  Convenience helper: annotate an SI-like map/struct with planner output.
+
+  Attaches:
+    • :response_tone — the chosen tone atom
+    • :response_text — the inline reply text
+    • :response_meta — the full meta map from plan/2
+
+  Any map or struct is accepted; keys are added via Map.put/3.
+  """
+  @spec annotate_si(map(), mood_like) :: map()
+  def annotate_si(si, mood \\ %{}) when is_map(si) do
+    {tone, text, meta} = plan(si, mood)
+
+    si
+    |> Map.put(:response_tone, tone)
+    |> Map.put(:response_text, text)
+    |> Map.put(:response_meta, meta)
+  end
+
+  # If something non-map sneaks through, just return it unchanged.
+  def annotate_si(other, _mood), do: other
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Profile classification
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # Prefer explicit profile from Policy.scores; otherwise infer from tone/mode/flags.
+  defp classify_profile(features, decision, guard) do
+    scores = decision.scores || %{}
+
+    case Map.get(scores, :profile) do
+      p when p in [:warm_collaborator, :gentle_bug_coach, :calm_explainer] ->
+        p
+
+      _ ->
+        cond do
+          guard.guardrail? or features.risk_bucket == :high or
+              features.intent in [:abuse] or features.hostile? ->
+            :firm_guardian
+
+          decision.mode == :explainer ->
+            :calm_explainer
+
+          decision.tone == :warm and decision.mode == :pair_programmer ->
+            :warm_collaborator
+
+          decision.mode == :coach and features.intent == :bug ->
+            :gentle_bug_coach
+
+          true ->
+            :generic
+        end
+    end
   end
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -221,7 +282,9 @@ defmodule Core.Response do
     base = if vig >= 0.98, do: base ++ [:vigilance_extreme], else: base
 
     base =
-      if vig < 0.98 and not (exp >= 0.45 and inh >= 0.35), do: base ++ [:conservative], else: base
+      if vig < 0.98 and not (exp >= 0.45 and inh >= 0.35),
+        do: base ++ [:conservative],
+        else: base
 
     if base == [], do: [:policy_default], else: base
   end
@@ -269,3 +332,4 @@ defmodule Core.Response do
 
   defp fmtf(_v, _d), do: "0.00"
 end
+

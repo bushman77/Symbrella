@@ -39,6 +39,7 @@ defmodule Core do
   alias Core.SemanticInput
   alias Core.Intent.Selection
   alias Core.MWE.Signatures
+alias Core.Response
   alias Db
   alias Db.BrainCell
 
@@ -135,7 +136,9 @@ def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
       |> brain_roundtrip(&Brain.ATL.attach_lifg_pairs(&1, opts))
       |> maybe_encode_hippocampus()
       |> maybe_persist_episode(opts)
+      |> maybe_build_response_plan(opts)
       |> notify_brain_activation(opts)
+      |> maybe_attach_response(opts)
 
     _ ->
       si1
@@ -889,6 +892,230 @@ defp maybe_amygdala_react(si, opts) do
     si
   end
 end
+
+  # ─────────────────────── Response planner hook ───────────────────────
+
+  # Public-ish gate: lets us turn the planner off via opts if needed.
+  defp maybe_attach_response(si, opts) when is_map(si) do
+    case Keyword.get(opts, :response, :auto) do
+      :off -> si
+      _    -> attach_response(si)
+    end
+  end
+
+  defp maybe_attach_response(si, _opts), do: si
+
+  # Build a skinny input for Core.Response.plan/2 from the SI + trace.
+  defp attach_response(%{sentence: sentence} = si) do
+    {intent, keyword, confidence} = intent_from_trace(si)
+
+    planner_si = %{
+      intent: intent,
+      keyword: keyword,
+      confidence: confidence,
+      text: sentence || ""
+    }
+
+    # For now we let the planner run with no explicit mood sample;
+    # it’s written to handle an empty context safely.
+    mood_ctx = %{}
+
+    {tone, text, meta} = Core.Response.plan(planner_si, mood_ctx)
+
+    si
+    |> Map.put(:response_tone, tone)
+    |> Map.put(:response_text, text)
+    |> Map.put(:response_meta, meta)
+  rescue
+    _ -> si
+  end
+
+  defp intent_from_trace(%{trace: trace} = si) when is_list(trace) do
+    default = {:unknown, Map.get(si, :sentence, "") || "", 0.0}
+
+    trace
+    |> Enum.reverse()
+    |> Enum.find_value(default, fn
+      {:intent, %{intent: intent, keyword: kw, confidence: conf}} ->
+        {
+          intent || :unknown,
+          (kw || Map.get(si, :sentence, "")) || "",
+          conf || 0.0
+        }
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp intent_from_trace(si),
+    do: {:unknown, Map.get(si, :sentence, "") || "", 0.0}
+
+
+  # ─────────────────────── Response planner hook ───────────────────────
+
+  # Attach Core.Response planning output onto the SI as:
+  #   :response_tone, :response_text, :response_meta
+  #
+  # This is a no-op if Response.plan/2 is unavailable for any reason.
+  defp maybe_build_response_plan(%{} = si, opts) do
+    # Only attempt to call the planner if the module is available
+    if Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) do
+      si_like  = build_response_si_like(si)
+      mood_like = build_response_mood_like(si, opts)
+
+      case Response.plan(si_like, mood_like) do
+        {tone, text, meta} ->
+          si
+          |> Map.put(:response_tone, tone)
+          |> Map.put(:response_text, text)
+          |> Map.put(:response_meta, meta)
+
+        _other ->
+          si
+      end
+    else
+      si
+    end
+  rescue
+    _ -> si
+  catch
+    _, _ -> si
+  end
+
+  defp maybe_build_response_plan(si, _opts), do: si
+
+  # Build the minimal SI-like map that Core.Response expects.
+  # Priority for intent/keyword/confidence:
+  #   1) top-level SI (if present and concrete)
+  #   2) Amygdala emotion.from
+  #   3) trace entry {:intent, %{...}}
+  #   4) final fallback: unknown / 0.0 / sentence-as-text
+  defp build_response_si_like(si) do
+    {intent, confidence, keyword, text} = pick_intent_conf_keyword_and_text(si)
+
+    %{
+      intent: intent,
+      keyword: keyword,
+      confidence: confidence,
+      text: text
+    }
+  end
+
+  defp pick_intent_conf_keyword_and_text(si) do
+    # Pull any intent snapshot the pipeline produced
+    from_emotion = get_in(si, [:emotion, :from]) || %{}
+    from_trace   = find_intent_trace(si) || %{}
+
+    base_text =
+      Map.get(si, :sentence) ||
+        Map.get(si, :text) ||
+        Map.get(si, :keyword) ||
+        Map.get(from_emotion, :keyword) ||
+        Map.get(from_trace, :keyword) ||
+        ""
+
+    intent_si     = Map.get(si, :intent)
+    intent_em     = Map.get(from_emotion, :intent)
+    intent_trace  = Map.get(from_trace, :intent)
+
+    intent =
+      cond do
+        intent_si not in [nil, :unknown, :other] ->
+          intent_si
+
+        intent_em not in [nil, :unknown, :other] ->
+          intent_em
+
+        intent_trace not in [nil, :unknown, :other] ->
+          intent_trace
+
+        true ->
+          :unknown
+      end
+
+    conf_si    = Map.get(si, :confidence)
+    conf_em    = Map.get(from_emotion, :confidence)
+    conf_trace = Map.get(from_trace, :confidence)
+
+    confidence =
+      cond do
+        is_number(conf_si) -> conf_si
+        is_number(conf_em) -> conf_em
+        is_number(conf_trace) -> conf_trace
+        true -> 0.0
+      end
+
+    keyword =
+      Map.get(si, :keyword) ||
+        Map.get(from_emotion, :keyword) ||
+        Map.get(from_trace, :keyword) ||
+        base_text
+
+    {intent, confidence, keyword, to_string(base_text)}
+  end
+
+  # Look inside si.trace for the latest {:intent, %{...}} entry
+  defp find_intent_trace(%{trace: trace}) when is_list(trace) do
+    trace
+    |> Enum.reverse() # prefer the most recent intent event
+    |> Enum.find_value(fn
+      {:intent, %{} = payload} -> payload
+      _ -> nil
+    end)
+  end
+
+  defp find_intent_trace(_), do: nil
+
+  # Build the mood-like map from Amygdala emotion (if present).
+  # We map Amygdala latents → exploration / inhibition / vigilance / plasticity,
+  # and forward tone_reaction as a tone_hint.
+  defp build_response_mood_like(si, _opts) do
+    emotion = Map.get(si, :emotion, %{})
+    tone_hint =
+      case emotion do
+        %{} -> Map.get(emotion, :tone_reaction)
+        _ -> nil
+      end
+
+    latents = Map.get(emotion, :latents, %{})
+
+    control = clamp01(Map.get(latents, :control, 0.0))
+    threat  = clamp01(Map.get(latents, :threat, 0.0))
+    safety  = clamp01(Map.get(latents, :safety, 0.0))
+    reward  = clamp01(Map.get(latents, :reward, 0.0))
+
+    # Heuristic mapping:
+    #   exploration ≈ reward
+    #   inhibition  ≈ control
+    #   vigilance   ≈ threat + (1 - safety) + a bit of control
+    #   plasticity  ≈ baseline 0.5 tilted by reward vs threat
+    vigilance =
+      0.6 * threat +
+        0.2 * (1.0 - safety) +
+        0.2 * control
+      |> clamp01()
+
+    exploration = reward
+    inhibition  = control
+    plasticity  =
+      0.5 +
+        0.3 * (reward - threat)
+      |> clamp01()
+
+    %{
+      mood: %{
+        exploration: exploration,
+        inhibition: inhibition,
+        vigilance: vigilance,
+        plasticity: plasticity
+      },
+      tone_hint: tone_hint
+    }
+  end
+
+  defp clamp01(x) when is_number(x), do: min(1.0, max(0.0, x))
+  defp clamp01(_), do: 0.0
 
 end
 

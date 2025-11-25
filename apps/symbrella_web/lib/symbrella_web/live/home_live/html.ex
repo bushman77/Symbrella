@@ -5,6 +5,28 @@ defmodule SymbrellaWeb.ChatLive.HTML do
 
   use SymbrellaWeb, :html
 
+  # ---------- components ----------
+
+  # Assistant bubble: show main text at normal size, and any lexical tail
+  # ("By the way, …") in smaller, softer text.
+  attr :message, :map, required: true
+  def assistant_text(assigns) do
+    ~H"""
+    <% text = @message.text || "" %>
+    <% {main, extra} = split_lexical_tail(text) %>
+
+    <p class="whitespace-pre-wrap">
+      <%= main %>
+    </p>
+
+    <%= if extra do %>
+      <p class="mt-3 whitespace-pre-wrap text-xs sm:text-[13px] leading-relaxed opacity-80">
+        <%= extra %>
+      </p>
+    <% end %>
+    """
+  end
+
   # Public entry point used by HomeLive.render/1
   def chat(assigns) do
     ~H"""
@@ -23,8 +45,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div class="text-xs opacity-70 hidden sm:block">LiveView</div>
         </div>
       </header>
-      
-    <!-- MESSAGES -->
+
+      <!-- MESSAGES -->
       <main
         id="messages"
         phx-hook="ScrollOnEvent"
@@ -45,7 +67,11 @@ defmodule SymbrellaWeb.ChatLive.HTML do
                     "max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2 bg-[var(--color-panel)] border border-slate-800/60 shadow"
                   end
                 }>
-                  <p class="whitespace-pre-wrap">{m.text}</p>
+                  <%= if m.role == :assistant do %>
+                    <.assistant_text message={m} />
+                  <% else %>
+                    <p class="whitespace-pre-wrap"><%= m.text %></p>
+                  <% end %>
                 </div>
               </div>
             <% end %>
@@ -62,8 +88,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div id="bottom"></div>
         </div>
       </main>
-      
-    <!-- COMPOSER -->
+
+      <!-- COMPOSER -->
       <footer
         id="chat-composer"
         phx-hook="FooterSizer"
@@ -102,4 +128,22 @@ defmodule SymbrellaWeb.ChatLive.HTML do
     </div>
     """
   end
+
+  # ---------- helpers ----------
+
+  # Split an assistant reply into:
+  #   {main_text, lexical_tail}
+  # where lexical_tail starts at "By the way, …" if present.
+  defp split_lexical_tail(text) when is_binary(text) do
+    case String.split(text, "\n\nBy the way,", parts: 2) do
+      [main, rest] ->
+        {main, "By the way," <> rest}
+
+      _ ->
+        {text, nil}
+    end
+  end
+
+  defp split_lexical_tail(other), do: {to_string(other), nil}
 end
+

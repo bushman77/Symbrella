@@ -3,6 +3,7 @@ defmodule SymbrellaWeb.HomeLive do
 
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
   alias Core.Response
+  alias Core.LexicalExplain
   alias Brain
 
   @choice_preview_limit 3
@@ -228,7 +229,7 @@ defmodule SymbrellaWeb.HomeLive do
   # Final fallback (remote OFF): don't query anything; show no extra gloss.
   defp lexicon_def(_), do: ""
 
-  # ---------- Planner integration (NEW) ----------
+  # ---------- Planner integration ----------
 
   # Defensive, in case Brain/Planner/Mood aren’t available yet.
   defp latest_intent_si_like() do
@@ -259,7 +260,37 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
+  # Compose:
+  #   tone line
+  #   + main text
+  defp compose_tone_and_main(tone, main_text) do
+    tone_line =
+      case tone do
+        t when is_atom(t) -> Atom.to_string(t)
+        t when is_binary(t) -> t
+        _ -> nil
+      end
+
+    [tone_line, main_text]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n")
+  end
+
+  # Append explanation line at the end (intent=:... → tone=...)
+  defp append_explanation(body_text, meta) do
+    expl = get_in(meta || %{}, [:explanation, :text])
+
+    cond do
+      is_binary(expl) and expl != "" ->
+        body_text <> "\n\n" <> expl
+
+      true ->
+        body_text
+    end
+  end
+
   defp build_planned_reply(user_text) do
+    # Run the full golden pipeline
     si =
       Core.resolve_input(user_text,
         mode: :prod,
@@ -267,20 +298,74 @@ defmodule SymbrellaWeb.HomeLive do
         lexicon_stage?: true
       )
 
-    # BEFORE:
-    # si_like = latest_intent_si_like()
-    # AFTER (pass the raw text through to the planner):
-    si_like =
-      latest_intent_si_like()
-      |> Map.put(:text, user_text)
+    # Build lexical tail once from SI (definitions + synonyms from active_cells)
+    # Build lexical tail once from SI (definitions + synonyms from active_cells)
+    token_count = si |> Map.get(:tokens, []) |> length()
 
-    mood = safe_mood_snapshot()
+    max_items =
+      cond do
+        token_count <= 0 -> 0
+        token_count <= 4 -> token_count      # for tiny utterances like "hello there"
+        true -> 3                            # longer inputs → keep it compact
+      end
 
-    if Code.ensure_loaded?(Core.Response) and function_exported?(Core.Response, :plan, 2) do
-      {_tone, reply, _meta} = Response.plan(si_like, mood)
-      %{text: reply}
-    else
-      %{text: format_si_reply(si)}
+    lexical_tail =
+      if max_items > 0 and
+           Code.ensure_loaded?(LexicalExplain) and
+           function_exported?(LexicalExplain, :from_si, 2) do
+        LexicalExplain.from_si(si, max_items: max_items)
+      else
+        ""
+      end
+
+    join_lexical =
+      fn base_text ->
+        case lexical_tail do
+          nil -> base_text
+          "" -> base_text
+          tail -> base_text <> "\n\n" <> tail
+        end
+      end
+
+    # 1️⃣ Preferred path: pipeline already attached response fields
+    case Map.get(si, :response_text) do
+      text when is_binary(text) and text != "" ->
+        tone = Map.get(si, :response_tone, :warm)
+        meta = Map.get(si, :response_meta, %{})
+
+        base = compose_tone_and_main(tone, text)
+        with_lex = join_lexical.(base)
+        final_text = append_explanation(with_lex, meta)
+
+        %{text: final_text, tone: tone, meta: meta, si: si}
+
+      _ ->
+        # 2️⃣ Fallback: use the planner directly (legacy path)
+        si_like =
+          latest_intent_si_like()
+          |> Map.put(:text, user_text)
+
+        mood = safe_mood_snapshot()
+
+        cond do
+          Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
+            {tone, reply_text, meta} = Response.plan(si_like, mood)
+
+            base = compose_tone_and_main(tone, reply_text)
+            with_lex = join_lexical.(base)
+            final_text = append_explanation(with_lex, meta)
+
+            %{text: final_text, tone: tone, meta: meta, si: si}
+
+          true ->
+            # 3️⃣ Final fallback: SI debug string so we never go silent
+            debug_text = format_si_reply(si)
+
+            base = compose_tone_and_main(nil, debug_text)
+            with_lex = join_lexical.(base)
+
+            %{text: with_lex, si: si}
+        end
     end
   end
 
@@ -329,7 +414,7 @@ defmodule SymbrellaWeb.HomeLive do
         |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
         |> push_event("chat:scroll", %{to: "composer"})
 
-      # Use planner-based reply instead of SI debug string.
+      # Use planner-based reply, preferring pipeline-attached response fields.
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
           build_planned_reply(text)
@@ -366,12 +451,17 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
     Process.demonitor(ref, [:flush])
 
-    %{text: reply_text} = to_bot_reply(payload)
+    reply = to_bot_reply(payload)
+    reply_text = reply.text
+    tone = Map.get(reply, :tone)
+    meta = Map.get(reply, :meta)
 
     bot = %{
       id: "b-" <> Integer.to_string(System.unique_integer([:positive])),
       role: :assistant,
-      text: reply_text
+      text: reply_text,
+      tone: tone,
+      meta: meta
     }
 
     {:noreply,
@@ -409,3 +499,4 @@ defmodule SymbrellaWeb.HomeLive do
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
 end
+
