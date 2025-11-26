@@ -169,7 +169,9 @@ defmodule Core.Response do
   Any map or struct is accepted; keys are added via Map.put/3.
   """
   @spec annotate_si(map(), mood_like) :: map()
-  def annotate_si(si, mood \\ %{}) when is_map(si) do
+  def annotate_si(si, mood \\ %{})
+
+  def annotate_si(si, mood) when is_map(si) do
     {tone, text, meta} = plan(si, mood)
 
     si

@@ -10,6 +10,7 @@ defmodule SymbrellaWeb.HomeLive do
   @def_char_limit 120
 
   # ---------- helpers ----------
+
   defp sanitize_user_text(text) do
     text
     |> to_string()
@@ -54,7 +55,7 @@ defmodule SymbrellaWeb.HomeLive do
     base =
       "Got it. tokens=#{length(tokens)}, cells=#{length(cells)}, lifg=#{length(choices)}" <>
         " · src=#{inspect(Map.get(si, :source))}" <>
-        if token_preview != "", do: " · [#{token_preview}]", else: ""
+        if(token_preview != "", do: " · [#{token_preview}]", else: "")
 
     if choices_preview == "" do
       base
@@ -204,9 +205,11 @@ defmodule SymbrellaWeb.HomeLive do
   defp gloss(str) when is_binary(str) do
     s = str |> String.replace(~r/\s+/u, " ") |> String.trim()
 
-    if String.length(s) <= @def_char_limit,
-      do: s,
-      else: String.slice(s, 0, @def_char_limit) <> "…"
+    if String.length(s) <= @def_char_limit do
+      s
+    else
+      String.slice(s, 0, @def_char_limit) <> "…"
+    end
   end
 
   defp short_id(nil), do: "∅"
@@ -218,13 +221,13 @@ defmodule SymbrellaWeb.HomeLive do
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
-  defp norm_text(v),
-    do:
-      v
-      |> Kernel.to_string()
-      |> String.downcase()
-      |> String.replace(~r/\s+/u, " ")
-      |> String.trim()
+  defp norm_text(v) do
+    v
+    |> Kernel.to_string()
+    |> String.downcase()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
 
   # Final fallback (remote OFF): don't query anything; show no extra gloss.
   defp lexicon_def(_), do: ""
@@ -276,19 +279,39 @@ defmodule SymbrellaWeb.HomeLive do
     |> Enum.join("\n")
   end
 
-  # Append explanation line at the end (intent=:... → tone=...)
-  defp append_explanation(body_text, meta) do
-    expl = get_in(meta || %{}, [:explanation, :text])
+  defp join_blocks(blocks) when is_list(blocks) do
+    blocks
+    |> Enum.map(fn
+      nil -> ""
+      v -> to_string(v)
+    end)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
 
-    cond do
-      is_binary(expl) and expl != "" ->
-        body_text <> "\n\n" <> expl
+  # Build a lexical "tail" string (By the way...) from SI, for modal use.
+  defp build_lexical_tail(si) do
+    token_count = si |> Map.get(:tokens, []) |> length()
 
-      true ->
-        body_text
+    max_items =
+      cond do
+        token_count <= 0 -> 0
+        token_count <= 4 -> token_count
+        true -> 3
+      end
+
+    if max_items > 0 and
+         Code.ensure_loaded?(LexicalExplain) and
+         function_exported?(LexicalExplain, :from_si, 2) do
+      LexicalExplain.from_si(si, max_items: max_items)
+    else
+      ""
     end
   end
 
+  # Build the visible text + an internal modal "source" that includes
+  # lexical tail + intent/tone explanation lines.
   defp build_planned_reply(user_text) do
     # Run the full golden pipeline
     si =
@@ -298,34 +321,7 @@ defmodule SymbrellaWeb.HomeLive do
         lexicon_stage?: true
       )
 
-    # Build lexical tail once from SI (definitions + synonyms from active_cells)
-    # Build lexical tail once from SI (definitions + synonyms from active_cells)
-    token_count = si |> Map.get(:tokens, []) |> length()
-
-    max_items =
-      cond do
-        token_count <= 0 -> 0
-        token_count <= 4 -> token_count      # for tiny utterances like "hello there"
-        true -> 3                            # longer inputs → keep it compact
-      end
-
-    lexical_tail =
-      if max_items > 0 and
-           Code.ensure_loaded?(LexicalExplain) and
-           function_exported?(LexicalExplain, :from_si, 2) do
-        LexicalExplain.from_si(si, max_items: max_items)
-      else
-        ""
-      end
-
-    join_lexical =
-      fn base_text ->
-        case lexical_tail do
-          nil -> base_text
-          "" -> base_text
-          tail -> base_text <> "\n\n" <> tail
-        end
-      end
+    lexical_tail = build_lexical_tail(si)
 
     # 1️⃣ Preferred path: pipeline already attached response fields
     case Map.get(si, :response_text) do
@@ -333,11 +329,24 @@ defmodule SymbrellaWeb.HomeLive do
         tone = Map.get(si, :response_tone, :warm)
         meta = Map.get(si, :response_meta, %{})
 
-        base = compose_tone_and_main(tone, text)
-        with_lex = join_lexical.(base)
-        final_text = append_explanation(with_lex, meta)
+        visible = compose_tone_and_main(tone, text)
 
-        %{text: final_text, tone: tone, meta: meta, si: si}
+        modal_source =
+          join_blocks([
+            visible,
+            lexical_tail,
+            get_in(meta || %{}, [:explanation, :text])
+          ])
+
+        modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
+
+        %{
+          text: visible,
+          tone: tone,
+          meta: meta,
+          si: si,
+          explain_payload: modal_payload
+        }
 
       _ ->
         # 2️⃣ Fallback: use the planner directly (legacy path)
@@ -351,30 +360,60 @@ defmodule SymbrellaWeb.HomeLive do
           Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
             {tone, reply_text, meta} = Response.plan(si_like, mood)
 
-            base = compose_tone_and_main(tone, reply_text)
-            with_lex = join_lexical.(base)
-            final_text = append_explanation(with_lex, meta)
+            visible = compose_tone_and_main(tone, reply_text)
 
-            %{text: final_text, tone: tone, meta: meta, si: si}
+            modal_source =
+              join_blocks([
+                visible,
+                lexical_tail,
+                get_in(meta || %{}, [:explanation, :text])
+              ])
+
+            modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
+
+            %{
+              text: visible,
+              tone: tone,
+              meta: meta,
+              si: si,
+              explain_payload: modal_payload
+            }
 
           true ->
             # 3️⃣ Final fallback: SI debug string so we never go silent
             debug_text = format_si_reply(si)
+            visible = compose_tone_and_main(nil, debug_text)
 
-            base = compose_tone_and_main(nil, debug_text)
-            with_lex = join_lexical.(base)
+            modal_source =
+              join_blocks([
+                visible,
+                lexical_tail
+              ])
 
-            %{text: with_lex, si: si}
+            modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
+
+            %{
+              text: visible,
+              si: si,
+              explain_payload: modal_payload
+            }
         end
     end
   end
 
   # ---------- liveview ----------
+
   @impl true
   def mount(_params, _session, socket) do
     initial = [
       %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}
     ]
+
+    initial_text_by_id = %{"m1" => "Welcome to Symbrella chat  👋"}
+
+    initial_explain_by_id = %{
+      "m1" => ChatHTML.explain_payload_for(%{id: "m1", text: "Welcome to Symbrella chat  👋"})
+    }
 
     {:ok,
      socket
@@ -384,7 +423,13 @@ defmodule SymbrellaWeb.HomeLive do
        bot_typing: false,
        pending_task: nil,
        cancelled_ref: nil,
-       session_id: "s-" <> Integer.to_string(System.unique_integer([:positive]))
+       session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
+       # Explain modal state
+       explain_open?: false,
+       explain_payload: %{},
+       # Local lookup so Explain works even if button only sends "id"
+       message_text_by_id: initial_text_by_id,
+       explain_by_id: initial_explain_by_id
      )
      |> stream(:messages, initial)}
   end
@@ -402,8 +447,10 @@ defmodule SymbrellaWeb.HomeLive do
     if text == "" or socket.assigns.bot_typing do
       {:noreply, socket}
     else
+      msg_id = "u-" <> Integer.to_string(System.unique_integer([:positive]))
+
       msg = %{
-        id: "u-" <> Integer.to_string(System.unique_integer([:positive])),
+        id: msg_id,
         role: :user,
         text: text
       }
@@ -411,10 +458,14 @@ defmodule SymbrellaWeb.HomeLive do
       socket =
         socket
         |> stream_insert(:messages, msg)
-        |> assign(draft: "", bot_typing: true, cancelled_ref: nil)
+        |> assign(
+          draft: "",
+          bot_typing: true,
+          cancelled_ref: nil,
+          message_text_by_id: Map.put(socket.assigns.message_text_by_id, msg_id, text)
+        )
         |> push_event("chat:scroll", %{to: "composer"})
 
-      # Use planner-based reply, preferring pipeline-attached response fields.
       task =
         Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
           build_planned_reply(text)
@@ -424,20 +475,54 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
+  # 🔍 Explain modal open
+  @impl true
+  def handle_event("explain_open", %{"id" => id} = params, socket) do
+    # If the button was updated to also send text, use it. Otherwise use our local maps.
+    text =
+      case params do
+        %{"text" => t} when is_binary(t) -> t
+        _ -> Map.get(socket.assigns.message_text_by_id, id, "")
+      end
+
+    payload =
+      socket.assigns.explain_by_id[id] ||
+        ChatHTML.explain_payload_for(%{id: id, text: text})
+
+    {:noreply, assign(socket, explain_open?: true, explain_payload: payload)}
+  end
+
+  # ❎ Explain modal close
+  @impl true
+  def handle_event("explain_close", _params, socket) do
+    {:noreply, assign(socket, explain_open?: false, explain_payload: %{})}
+  end
+
   # 🛑 User clicked Stop
   @impl true
   def handle_event("stop", _params, socket) do
     case socket.assigns.pending_task do
-      %Task{ref: _ref} = task ->
+      %Task{} = task ->
         _ = Task.shutdown(task, :brutal_kill)
+
+        bot_id = "x-" <> Integer.to_string(System.unique_integer([:positive]))
+        bot_text = "(stopped)"
+
+        payload = ChatHTML.explain_payload_for(%{id: bot_id, text: bot_text})
 
         {:noreply,
          socket
-         |> assign(bot_typing: false, cancelled_ref: nil, pending_task: nil)
+         |> assign(
+           bot_typing: false,
+           cancelled_ref: nil,
+           pending_task: nil,
+           message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
+           explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
+         )
          |> stream_insert(:messages, %{
-           id: "x-" <> Integer.to_string(System.unique_integer([:positive])),
+           id: bot_id,
            role: :assistant,
-           text: "(stopped)"
+           text: bot_text
          })
          |> push_event("chat:scroll", %{to: "composer"})}
 
@@ -455,9 +540,17 @@ defmodule SymbrellaWeb.HomeLive do
     reply_text = reply.text
     tone = Map.get(reply, :tone)
     meta = Map.get(reply, :meta)
+    explain_payload = Map.get(reply, :explain_payload)
+
+    bot_id = "b-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    # If build_planned_reply didn't provide a payload for some reason, fall back.
+    explain_payload =
+      explain_payload ||
+        ChatHTML.explain_payload_for(%{id: bot_id, text: reply_text})
 
     bot = %{
-      id: "b-" <> Integer.to_string(System.unique_integer([:positive])),
+      id: bot_id,
       role: :assistant,
       text: reply_text,
       tone: tone,
@@ -466,7 +559,12 @@ defmodule SymbrellaWeb.HomeLive do
 
     {:noreply,
      socket
-     |> assign(bot_typing: false, pending_task: nil)
+     |> assign(
+       bot_typing: false,
+       pending_task: nil,
+       message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, reply_text),
+       explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
+     )
      |> stream_insert(:messages, bot)
      |> push_event("chat:scroll", %{to: "composer"})}
   end
@@ -479,15 +577,24 @@ defmodule SymbrellaWeb.HomeLive do
         {:noreply, assign(socket, cancelled_ref: nil)}
 
       match?(%Task{ref: ^ref}, socket.assigns.pending_task) ->
+        bot_id = "e-" <> Integer.to_string(System.unique_integer([:positive]))
+        bot_text = "Oops—my brain hit a snag: #{Exception.format_exit(reason)}"
+        payload = ChatHTML.explain_payload_for(%{id: bot_id, text: bot_text})
+
         msg = %{
-          id: "e-" <> Integer.to_string(System.unique_integer([:positive])),
+          id: bot_id,
           role: :assistant,
-          text: "Oops—my brain hit a snag: #{Exception.format_exit(reason)}"
+          text: bot_text
         }
 
         {:noreply,
          socket
-         |> assign(bot_typing: false, pending_task: nil)
+         |> assign(
+           bot_typing: false,
+           pending_task: nil,
+           message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
+           explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
+         )
          |> stream_insert(:messages, msg)
          |> push_event("chat:scroll", %{to: "composer"})}
 
