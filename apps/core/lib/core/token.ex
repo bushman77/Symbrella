@@ -20,7 +20,8 @@ defmodule Core.Token do
   """
 
   @enforce_keys [:phrase, :span, :n]
-  defstruct phrase: "",
+  defstruct index: nil,
+            phrase: "",
             span: {0, 0},
             mw: false,
             source: nil,
@@ -35,6 +36,7 @@ defmodule Core.Token do
             subpos: nil
 
   @type t :: %__MODULE__{
+          index: nil | non_neg_integer(),
           phrase: String.t(),
           span: {non_neg_integer(), non_neg_integer()},
           mw: boolean(),
@@ -59,10 +61,10 @@ defmodule Core.Token do
       |> String.trim()
       |> String.replace(~r/\s+/u, " ")
 
-    # 1) Scan the normalized string into primitive tokens (words & punct) with char spans.
+    # 1) Scan the normalized string into primitive tokens (words & punct) with char (grapheme) spans.
     prim = scan_primitive_tokens(s)
 
-    # 2) Derive the list of word tokens (order preserved) and their indices.
+    # 2) Derive the list of word tokens (order preserved).
     word_tokens =
       prim
       |> Enum.with_index()
@@ -98,6 +100,11 @@ defmodule Core.Token do
           |> Enum.sort_by(fn %__MODULE__{span: {st, _}} -> st end)
       end
 
+    tokens =
+      tokens
+      |> Enum.with_index()
+      |> Enum.map(fn {t, idx} -> %__MODULE__{t | index: idx} end)
+
     %Core.SemanticInput{sentence: s, tokens: tokens}
   end
 
@@ -117,7 +124,7 @@ defmodule Core.Token do
   @punct_sf MapSet.new(["?", "!", "."])
   @punct_map %{
     "," => :comma,
-    ";" => :colon,
+    ";" => :semicolon,
     ":" => :colon,
     "—" => :dash,
     "-" => :dash,
@@ -145,42 +152,39 @@ defmodule Core.Token do
   @doc false
   # Deterministic scanner with a separate running-word buffer.
   # Returns a list of maps: %{text,start,stop,kind,:subpos?}
+  #
+  # NOTE: start/stop are *grapheme indices* (compatible with String.slice/3).
   defp scan_primitive_tokens(s) do
     graphemes = String.graphemes(s)
 
     {idx, run, acc} =
       Enum.reduce(graphemes, {0, nil, []}, fn g, {i, run, acc} ->
         cls = char_class(g)
-        w = byte_size(g)
+        w = 1
 
         case {cls, run} do
           {:space, nil} ->
             {i + w, nil, acc}
 
           {:space, {text, st, _en}} ->
-            # finalize running word on space
             acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
             {i + w, nil, acc1}
 
           {:punct, nil} ->
-            # emit punct, keep no running word
             {_p, sub} = punct_pos(g)
             acc1 = [%{text: g, start: i, stop: i + w, kind: :punct, subpos: sub} | acc]
             {i + w, nil, acc1}
 
           {:punct, {text, st, _en}} ->
-            # finalize running word, then emit punct
             {_p, sub} = punct_pos(g)
             acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
             acc2 = [%{text: g, start: i, stop: i + w, kind: :punct, subpos: sub} | acc1]
             {i + w, nil, acc2}
 
           {:word, nil} ->
-            # start a new running word
             {i + w, {g, i, i + w}, acc}
 
           {:word, {text, st, _en}} ->
-            # extend running word
             {i + w, {text <> g, st, i + w}, acc}
         end
       end)
@@ -200,36 +204,40 @@ defmodule Core.Token do
   defp build_wordgrams_from_word_tokens(word_tokens, max_n, span_mode) do
     k = length(word_tokens)
 
-    0..(k - 1)
-    |> Enum.flat_map(fn wi ->
-      max_here = min(max_n, k - wi)
+    if k == 0 do
+      []
+    else
+      0..(k - 1)
+      |> Enum.flat_map(fn wi ->
+        max_here = min(max_n, k - wi)
 
-      for n <- max_here..1//-1 do
-        {first, _} = Enum.at(word_tokens, wi)
-        {last, _} = Enum.at(word_tokens, wi + n - 1)
+        for n <- max_here..1//-1 do
+          {first, _} = Enum.at(word_tokens, wi)
+          {last, _} = Enum.at(word_tokens, wi + n - 1)
 
-        phrase =
-          word_tokens
-          |> Enum.slice(wi, n)
-          |> Enum.map(fn {w, _} -> w.text end)
-          |> Enum.join(" ")
+          phrase =
+            word_tokens
+            |> Enum.slice(wi, n)
+            |> Enum.map(fn {w, _} -> w.text end)
+            |> Enum.join(" ")
 
-        span =
-          case span_mode do
-            :words -> {wi, wi + n}
-            :chars -> {first.start, last.stop}
-          end
+          span =
+            case span_mode do
+              :words -> {wi, wi + n}
+              :chars -> {first.start, last.stop}
+            end
 
-        %__MODULE__{
-          phrase: phrase,
-          span: span,
-          mw: n > 1,
-          instances: [],
-          n: n,
-          kind: :word
-        }
-      end
-    end)
+          %__MODULE__{
+            phrase: phrase,
+            span: span,
+            mw: n > 1,
+            instances: [],
+            n: n,
+            kind: :word
+          }
+        end
+      end)
+    end
   end
 
   # ---------- legacy helpers (unchanged) ----------
@@ -257,8 +265,6 @@ defmodule Core.Token do
     {starts, ends} = word_boundaries(words)
 
     Enum.map(tokens, fn %__MODULE__{span: {i, j}, n: n} = tok ->
-      # If a token is already in char spans (e.g., punctuation we might introduce later),
-      # try to detect and keep as-is. Here we assume word spans when 0 <= i <= j <= length(words).
       cond do
         is_integer(i) and is_integer(j) and i >= 0 and j >= i and j <= length(words) and
             n == j - i ->
@@ -268,16 +274,12 @@ defmodule Core.Token do
           %__MODULE__{tok | span: {start_char, end_char}}
 
         true ->
-          # Fallback: leave span unchanged
           tok
       end
     end)
     |> Enum.sort_by(fn %__MODULE__{span: {start, _}} -> start end)
   end
 
-  # Compute char start/end for each word under the normalized splitter:
-  # starts[w_i] = char index of the first character of word_i
-  # ends[w_i]   = char index *after* the last character of word_i (end-exclusive)
   defp word_boundaries(words) do
     len = length(words)
 
@@ -313,9 +315,7 @@ defmodule Core.Token do
         reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
         reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
         reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
-
-        reasons =
-          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
         if reasons == [] do
           {acc, st}
@@ -349,3 +349,4 @@ defmodule Core.Token do
 
   defp safe_slice(_s, _st, _en), do: ""
 end
+

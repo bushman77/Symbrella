@@ -12,6 +12,10 @@ defmodule Core.Response.Guardrails do
 
   Approval token
   • Matches: `Approve: P-###` (case-insensitive).
+
+  NOTE:
+  Core.Response.Attach optionally calls guardrails as a *response-text* pass.
+  To keep the pipeline stable, we provide run/enforce/apply as no-op passthroughs.
   """
 
   @approve ~r/\bapprove:\s*p-\d{3}\b/i
@@ -22,28 +26,40 @@ defmodule Core.Response.Guardrails do
 
     flags =
       []
-      |> flag_if(t =~ ~r/\b(db.*brain.*core.*web|web.*core.*brain.*db)\b/)
-      |> flag_if(t =~ ~r/\bmove\b.*\bLIFG\b/i, :lifg_move)
-      |> flag_if(t =~ ~r/\bchar(-| )?grams?\b.*\bLIFG\b/i, :chargrams_to_lifg)
+      |> flag_if(t =~ ~r/\b(db.*brain.*core.*web|web.*core.*brain.*db)\b/, :acyclic_violation)
+      |> flag_if(t =~ ~r/\bmove\b.*\blifg\b/i, :lifg_move)
+      |> flag_if(t =~ ~r/\bchar(-| )?grams?\b.*\blifg\b/i, :chargrams_to_lifg)
       |> flag_if(
         t =~ ~r/\brename\b.*(Brain\.Application|Symbrella\.Application)/i,
         :app_supervisor_rename
       )
 
-    flags2 = if flags == [], do: flags, else: flags
-
     %{
-      guardrail?: flags2 != [],
+      guardrail?: flags != [],
       approve_token?: Regex.match?(@approve, t),
-      flags: if(flags2 == [], do: [], else: Enum.uniq(flags2))
+      flags: Enum.uniq(flags)
     }
   end
 
-  defp flag_if(list, true), do: [:acyclic_violation | list]
-  defp flag_if(list, false), do: list
+  # Optional response guardrail hooks (no-op for now).
+  # Expected shapes:
+  #   run/enforce/apply(text, ctx, meta) -> {text, meta} OR {tone, text, meta}
+  @spec run(String.t(), map(), map()) :: {String.t(), map()}
+  def run(text, _ctx, meta), do: {text, ensure_map(meta)}
+
+  @spec enforce(String.t(), map(), map()) :: {String.t(), map()}
+  def enforce(text, ctx, meta), do: run(text, ctx, meta)
+
+  @spec apply(String.t(), map(), map()) :: {String.t(), map()}
+  def apply(text, ctx, meta), do: run(text, ctx, meta)
+
   defp flag_if(list, true, tag), do: [tag | list]
   defp flag_if(list, false, _tag), do: list
+
+  defp ensure_map(%{} = m), do: m
+  defp ensure_map(_), do: %{}
 
   defp dn(nil), do: ""
   defp dn(t), do: t |> to_string() |> String.downcase()
 end
+

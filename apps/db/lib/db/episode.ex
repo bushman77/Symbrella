@@ -181,6 +181,120 @@ defmodule Db.Episode do
     end
   end
 
+  @type recalled :: %{
+          id: any(),
+          si: map(),
+          tags: [String.t()],
+          inserted_at: NaiveDateTime.t(),
+          score: float(),
+          components: %{jaccard: float(), recency: float()}
+        }
+
+  @doc """
+  Recall episodes by cue tokens (fast overlap query + recency scoring).
+
+  This is the “human” path: cues → candidate pool → rank by overlap + freshness.
+
+  ## Options
+    * `:k`            – return top k (default 8)
+    * `:pool`         – candidate pool size before scoring (default 50)
+    * `:user_id`      – optional scope by user
+    * `:tags_any`     – optional overlap filter on tags
+    * `:since`        – optional minimum inserted_at
+    * `:half_life_ms` – recency decay half-life (default 24h)
+    * `:w_jaccard`    – weight for overlap (default 0.70)
+    * `:w_recency`    – weight for freshness (default 0.30)
+  """
+  @spec recall([String.t()], keyword()) :: [recalled()]
+  def recall(tokens, opts \\ []) when is_list(tokens) do
+    cue = normalize_token_list(tokens)
+
+    if cue == [] do
+      []
+    else
+      k            = Keyword.get(opts, :k, 8)
+      pool         = Keyword.get(opts, :pool, 50)
+      user_id      = Keyword.get(opts, :user_id)
+      tags_any     = Keyword.get(opts, :tags_any)
+      since        = Keyword.get(opts, :since)
+      half_life_ms = Keyword.get(opts, :half_life_ms, 86_400_000)
+      wj           = Keyword.get(opts, :w_jaccard, 0.70)
+      wr           = Keyword.get(opts, :w_recency, 0.30)
+
+      base =
+        from(e in __MODULE__,
+          where: fragment("? && ?", e.tokens, ^cue),
+          select: %{
+            id: e.id,
+            si: e.si,
+            tags: e.tags,
+            inserted_at: e.inserted_at,
+            tokens: e.tokens
+          },
+          order_by: [desc: e.inserted_at],
+          limit: ^pool
+        )
+
+      scoped =
+        base
+        |> then(fn q -> if user_id, do: from(e in q, where: e.user_id == ^user_id), else: q end)
+        |> then(fn q ->
+          if is_list(tags_any) and tags_any != [],
+            do: from(e in q, where: fragment("? && ?", e.tags, ^ensure_string_list(tags_any))),
+            else: q
+        end)
+        |> then(fn q ->
+          if match?(%NaiveDateTime{}, since),
+            do: from(e in q, where: e.inserted_at >= ^since),
+            else: q
+        end)
+
+      now = NaiveDateTime.utc_now()
+
+      scoped
+      |> Repo.all()
+      |> Enum.map(fn row ->
+        j = jaccard(row.tokens || [], cue)
+        r = recency(now, row.inserted_at, half_life_ms)
+        s = (wj * j) + (wr * r)
+
+        %{
+          id: row.id,
+          si: row.si,
+          tags: row.tags || [],
+          inserted_at: row.inserted_at,
+          score: s,
+          components: %{jaccard: j, recency: r}
+        }
+      end)
+      |> Enum.sort_by(& &1.score, :desc)
+      |> Enum.take(k)
+    end
+  end
+
+  defp normalize_token_list(list) when is_list(list) do
+    list
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.downcase/1)
+    |> Enum.uniq()
+  end
+
+  defp recency(now, inserted_at, half_life_ms) do
+    age_ms = max(0, NaiveDateTime.diff(now, inserted_at, :millisecond))
+    :math.exp(-age_ms / max(1.0, half_life_ms * 1.0))
+  end
+
+  defp jaccard(a, b) do
+    sa = MapSet.new(Enum.map(a, &String.downcase(to_string(&1))))
+    sb = MapSet.new(Enum.map(b, &String.downcase(to_string(&1))))
+    inter = MapSet.size(MapSet.intersection(sa, sb))
+    union = MapSet.size(MapSet.union(sa, sb))
+    if union == 0, do: 0.0, else: inter / union
+  end
+
+
   # ───────────────────────── Changeset helpers ─────────────────────────
 
   defp normalize_tokens(changeset) do

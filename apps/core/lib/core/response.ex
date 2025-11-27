@@ -92,10 +92,13 @@ defmodule Core.Response do
     }
 
     # Policy decision (tone/mode/action + scores/overrides)
-    decision = Policy.decide(features)
+    decision0 = Policy.decide(features)
+
+    # Hard overrides for smalltalk / utility queries (prevents “dev menu” bleed).
+    {decision, forced_skill} = force_overrides(features, decision0, guard)
 
     # Optional micro-skill — at most one inline helper
-    skill = Skills.pick(text_in, features, decision)
+    skill = forced_skill || Skills.pick(text_in, features, decision)
 
     # Final text: skill wins if it produces inline text; otherwise a mode template
     text =
@@ -182,6 +185,117 @@ defmodule Core.Response do
 
   # If something non-map sneaks through, just return it unchanged.
   def annotate_si(other, _mood), do: other
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Smalltalk / utility overrides (fixes “pair_programmer menu on greet/time”)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp force_overrides(features, decision, guard) do
+    text = features.text
+    intent = features.intent
+
+    cond do
+      # Never override in guardrail situations.
+      guard.guardrail? ->
+        {decision, nil}
+
+      # Time questions should answer with a direct time snippet (not the dev menu).
+      time_query?(text) ->
+        decision =
+          decision
+          |> put_decision(mode: :chat, action: :time)
+          |> add_decision_override(:time_skill)
+
+        {decision,
+         %{
+           id: :time,
+           reason: :time_query,
+           inline_text: time_inline_text()
+         }}
+
+      # Greetings should greet in chat mode (not “pick one: full file / fix / plan”).
+      intent in [:greet] and features.benign? and not features.hostile? ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :greet)
+          |> add_decision_override(:greet_override)
+
+        {decision,
+         %{
+           id: :greet,
+           reason: :greet,
+           inline_text: greet_inline_text(text)
+         }}
+
+      true ->
+        {decision, nil}
+    end
+  end
+
+  defp time_query?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    String.contains?(t, "what time") or
+      String.contains?(t, "time is it") or
+      String.contains?(t, "current time") or
+      Regex.match?(~r/\btime\?\s*\z/u, String.trim(t))
+  end
+
+  defp time_query?(_), do: false
+
+  defp greet_inline_text(text) do
+    t = String.downcase(to_string(text))
+
+    cond do
+      String.contains?(t, "good morning") -> "Good morning 👋"
+      String.contains?(t, "good afternoon") -> "Good afternoon 👋"
+      String.contains?(t, "good evening") -> "Good evening 👋"
+      String.contains?(t, "good night") -> "Good night 👋"
+      String.contains?(t, "hello") -> "Hello 👋"
+      String.contains?(t, "hi") -> "Hi 👋"
+      true -> "Hey 👋"
+    end
+  end
+
+  defp time_inline_text() do
+    # Prefer America/Vancouver when tzdata is available; fall back to UTC.
+    utc = DateTime.utc_now()
+
+    case safe_shift_zone(utc, "America/Vancouver") do
+      {:ok, dt} ->
+        # Example: "2:16 PM"
+        formatted = Calendar.strftime(dt, "%-I:%M %p")
+        "It’s #{formatted} (America/Vancouver)."
+
+      _ ->
+        formatted = Calendar.strftime(utc, "%H:%M UTC")
+        "It’s #{formatted}."
+    end
+  end
+
+  defp safe_shift_zone(dt, zone) do
+    try do
+      DateTime.shift_zone(dt, zone)
+    rescue
+      _ -> {:error, :no_tzdata}
+    catch
+      _, _ -> {:error, :no_tzdata}
+    end
+  end
+
+  defp put_decision(decision, kvs) when is_list(kvs) do
+    Enum.reduce(kvs, decision, fn {k, v}, acc -> Map.put(acc, k, v) end)
+  end
+
+  defp add_decision_override(decision, flag) do
+    existing = Map.get(decision, :overrides)
+    Map.put(decision, :overrides, add_override(existing, flag))
+  end
+
+  defp add_override(nil, flag), do: [flag]
+  defp add_override(list, flag) when is_list(list), do: Enum.uniq([flag | list])
+  defp add_override(map, flag) when is_map(map), do: Map.put(map, flag, true)
+  defp add_override(other, flag), do: Enum.uniq([flag, other])
 
   # ────────────────────────────────────────────────────────────────────────────
   # Profile classification

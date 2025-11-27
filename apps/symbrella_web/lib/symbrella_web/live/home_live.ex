@@ -4,7 +4,6 @@ defmodule SymbrellaWeb.HomeLive do
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
   alias Core.Response
   alias Core.LexicalExplain
-  alias Brain
 
   @choice_preview_limit 3
   @def_char_limit 120
@@ -234,35 +233,6 @@ defmodule SymbrellaWeb.HomeLive do
 
   # ---------- Planner integration ----------
 
-  # Defensive, in case Brain/Planner/Mood aren’t available yet.
-  defp latest_intent_si_like() do
-    case safe_call_latest_intent() do
-      %{intent: i, confidence: c} = m ->
-        %{intent: i, confidence: c, keyword: Map.get(m, :keyword, "")}
-
-      _ ->
-        %{intent: :unknown, confidence: 0.0}
-    end
-  end
-
-  defp safe_call_latest_intent() do
-    try do
-      Brain.latest_intent()
-    rescue
-      _ -> nil
-    catch
-      _, _ -> nil
-    end
-  end
-
-  defp safe_mood_snapshot() do
-    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
-      Brain.MoodCore.snapshot()
-    else
-      %{}
-    end
-  end
-
   # Compose:
   #   tone line
   #   + main text
@@ -310,8 +280,19 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
+  # Prefer mood from this run’s SI (prevents “last-turn mood bleed”).
+  defp mood_from_si(si) when is_map(si) do
+    case Map.get(si, :mood) do
+      %{} = m -> m
+      _ -> %{}
+    end
+  end
+
   # Build the visible text + an internal modal "source" that includes
   # lexical tail + intent/tone explanation lines.
+  #
+  # IMPORTANT: do NOT pull intent from Brain.latest_intent/0 here.
+  # Always derive from the *current* SI to avoid cross-turn bleed.
   defp build_planned_reply(user_text) do
     # Run the full golden pipeline
     si =
@@ -331,30 +312,34 @@ defmodule SymbrellaWeb.HomeLive do
 
         visible = compose_tone_and_main(tone, text)
 
-        modal_source =
+        explain_text =
           join_blocks([
             visible,
             lexical_tail,
             get_in(meta || %{}, [:explanation, :text])
           ])
 
-        modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
-
         %{
           text: visible,
           tone: tone,
           meta: meta,
           si: si,
-          explain_payload: modal_payload
+          explain_text: explain_text
         }
 
       _ ->
         # 2️⃣ Fallback: use the planner directly (legacy path)
-        si_like =
-          latest_intent_si_like()
-          |> Map.put(:text, user_text)
+        # Derive intent/confidence/keyword from THIS si (not global last intent).
+        si_like = %{
+          intent: Map.get(si, :intent, :unknown),
+          confidence: Map.get(si, :confidence, 0.0),
+          keyword: Map.get(si, :keyword, ""),
+          text: user_text,
+          tokens: Map.get(si, :tokens, []),
+          source: Map.get(si, :source, :user)
+        }
 
-        mood = safe_mood_snapshot()
+        mood = mood_from_si(si)
 
         cond do
           Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
@@ -362,21 +347,19 @@ defmodule SymbrellaWeb.HomeLive do
 
             visible = compose_tone_and_main(tone, reply_text)
 
-            modal_source =
+            explain_text =
               join_blocks([
                 visible,
                 lexical_tail,
                 get_in(meta || %{}, [:explanation, :text])
               ])
 
-            modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
-
             %{
               text: visible,
               tone: tone,
               meta: meta,
               si: si,
-              explain_payload: modal_payload
+              explain_text: explain_text
             }
 
           true ->
@@ -384,18 +367,16 @@ defmodule SymbrellaWeb.HomeLive do
             debug_text = format_si_reply(si)
             visible = compose_tone_and_main(nil, debug_text)
 
-            modal_source =
+            explain_text =
               join_blocks([
                 visible,
                 lexical_tail
               ])
 
-            modal_payload = ChatHTML.explain_payload_for(%{id: "pending", text: modal_source})
-
             %{
               text: visible,
               si: si,
-              explain_payload: modal_payload
+              explain_text: explain_text
             }
         end
     end
@@ -503,7 +484,9 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_event("stop", _params, socket) do
     case socket.assigns.pending_task do
       %Task{} = task ->
+        # Mark this ref as cancelled so :DOWN doesn’t create an error bubble.
         _ = Task.shutdown(task, :brutal_kill)
+        Process.demonitor(task.ref, [:flush])
 
         bot_id = "x-" <> Integer.to_string(System.unique_integer([:positive]))
         bot_text = "(stopped)"
@@ -514,7 +497,7 @@ defmodule SymbrellaWeb.HomeLive do
          socket
          |> assign(
            bot_typing: false,
-           cancelled_ref: nil,
+           cancelled_ref: task.ref,
            pending_task: nil,
            message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
            explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
@@ -540,14 +523,11 @@ defmodule SymbrellaWeb.HomeLive do
     reply_text = reply.text
     tone = Map.get(reply, :tone)
     meta = Map.get(reply, :meta)
-    explain_payload = Map.get(reply, :explain_payload)
+    explain_text = Map.get(reply, :explain_text, reply_text)
 
     bot_id = "b-" <> Integer.to_string(System.unique_integer([:positive]))
 
-    # If build_planned_reply didn't provide a payload for some reason, fall back.
-    explain_payload =
-      explain_payload ||
-        ChatHTML.explain_payload_for(%{id: bot_id, text: reply_text})
+    explain_payload = ChatHTML.explain_payload_for(%{id: bot_id, text: explain_text})
 
     bot = %{
       id: bot_id,
@@ -562,11 +542,18 @@ defmodule SymbrellaWeb.HomeLive do
      |> assign(
        bot_typing: false,
        pending_task: nil,
-       message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, reply_text),
+       # Store the full explain text for safety; modal can use this even without cached payload.
+       message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, explain_text),
        explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
      )
      |> stream_insert(:messages, bot)
      |> push_event("chat:scroll", %{to: "composer"})}
+  end
+
+  # 🧹 Ignore stale Task result messages (e.g. if a Task died after stop).
+  @impl true
+  def handle_info({ref, _payload}, socket) when is_reference(ref) do
+    {:noreply, socket}
   end
 
   # ❌ Task exited — distinguish user cancel vs real error
