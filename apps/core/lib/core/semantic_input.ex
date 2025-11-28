@@ -70,14 +70,14 @@ defmodule Core.SemanticInput do
   """
   @spec emit_sense_candidates(map(), non_neg_integer(), list(), String.t(), keyword()) :: map()
   def emit_sense_candidates(%{} = si, token_index, scored, lemma, opts \\ []) do
-    margin    = Keyword.get(opts, :margin, 0.15)
-    top_k     = Keyword.get(opts, :top_k, 4)
+    margin = Keyword.get(opts, :margin, 0.15)
+    top_k = Keyword.get(opts, :top_k, 4)
     min_score = Keyword.get(opts, :min_score, nil)
 
     list =
       scored
       |> Enum.map(fn
-        {id, score}        -> %{id: id, score: score, lemma: lemma}
+        {id, score} -> %{id: id, score: score, lemma: lemma}
         %{id: id, score: s} -> %{id: id, score: s, lemma: lemma}
         id when is_binary(id) -> %{id: id, score: 0.0, lemma: lemma}
       end)
@@ -139,4 +139,3 @@ defmodule Core.SemanticInput do
     end
   end
 end
-

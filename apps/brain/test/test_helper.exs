@@ -17,4 +17,3 @@ _ = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
   end,
   nil
 )
-

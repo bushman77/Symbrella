@@ -163,7 +163,7 @@ defmodule Brain.Curiosity do
 
     source = get_opt(opts, :source, :curiosity)
     reason = get_opt(opts, :reason, :curiosity)
-    seed   = get_opt(opts, :seed, nil)
+    seed = get_opt(opts, :seed, nil)
 
     probe = %{
       id: id,
@@ -218,4 +218,3 @@ defmodule Brain.Curiosity do
   defp normalize_opts(%{} = opts), do: Map.to_list(opts)
   defp normalize_opts(_), do: []
 end
-

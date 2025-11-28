@@ -62,4 +62,3 @@ defmodule Core.Response.Guardrails do
   defp dn(nil), do: ""
   defp dn(t), do: t |> to_string() |> String.downcase()
 end
-

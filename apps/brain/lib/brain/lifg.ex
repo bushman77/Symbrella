@@ -616,4 +616,3 @@ defmodule Brain.LIFG do
     end
   end
 end
-

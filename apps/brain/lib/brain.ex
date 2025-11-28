@@ -374,8 +374,7 @@ defmodule Brain do
     :telemetry.execute(
       @pipeline_stop_event,
       %{
-        duration_ms:
-          System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
+        duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
       },
       %{
         winners: length(out0.choices),
@@ -626,7 +625,8 @@ defmodule Brain do
 
   if Mix.env() == :test do
     def __test_do_focus__(state, choices, opts \\ %{}) do
-      do_focus(state, choices, opts)  # call your actual internal function
+      # call your actual internal function
+      do_focus(state, choices, opts)
     end
   end
 
@@ -634,12 +634,14 @@ defmodule Brain do
     now = System.system_time(:millisecond)
 
     wm_cfg0 = Map.get(state, :wm_cfg, %{})
+
     wm_cfg = %{
       capacity: Map.get(wm_cfg0, :capacity, 3),
       decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
     }
 
     attention0 = Map.get(state, :attention, %{})
+
     attention = %{
       min_score: Map.get(attention0, :min_score, 0.0),
       capacity: Map.get(attention0, :capacity, wm_cfg.capacity)
@@ -832,7 +834,7 @@ defmodule Brain do
     :ok
   end
 
-    # ───────────────────────── LIFG → WM fallback helper ───────────────────────
+  # ───────────────────────── LIFG → WM fallback helper ───────────────────────
 
   # If Brain.LIFG.Gate.stage1_wm_candidates/3 returns no candidates, we fall
   # back to this minimal adapter that turns Stage-1 choices into WM candidates
@@ -885,7 +887,9 @@ defmodule Brain do
         0.0
 
     case s do
-      v when is_number(v) -> v * 1.0
+      v when is_number(v) ->
+        v * 1.0
+
       v when is_binary(v) ->
         case Float.parse(v) do
           {f, _} -> f
@@ -1305,4 +1309,3 @@ defmodule Brain do
     end
   end
 end
-

@@ -9,22 +9,23 @@ defmodule Brain.HippocampusEpisodicPrimingTest do
     parent = self()
 
     :ok =
-      :telemetry.attach(handler_id, [:brain, :hippo, :priming],
+      :telemetry.attach(
+        handler_id,
+        [:brain, :hippo, :priming],
         fn _event, meas, meta, _cfg ->
           send(parent, {:hippo_priming, meas, meta})
         end,
         %{}
       )
 
-# test/hippocampus_episodic_priming_test.exs (around line 19)
-on_exit(fn ->
-  try do
-    :telemetry.detach(handler_id)
-  rescue
-    _ -> :ok
-  end
-end)
-
+    # test/hippocampus_episodic_priming_test.exs (around line 19)
+    on_exit(fn ->
+      try do
+        :telemetry.detach(handler_id)
+      rescue
+        _ -> :ok
+      end
+    end)
 
     :ok
   end
@@ -64,4 +65,3 @@ end)
     refute_receive {:hippo_priming, _meas, _meta}, 200
   end
 end
-

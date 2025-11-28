@@ -44,30 +44,31 @@ defmodule Brain.CuriosityFlowTest do
 
   # ───────────── helpers ─────────────
 
-defp has_curiosity?(wm) do
-  Enum.any?(wm, fn item ->
-    cond do
-      # 1) Direct curiosity tag in payload
-      match?(%{payload: %{reason: :curiosity}}, item) ->
-        true
+  defp has_curiosity?(wm) do
+    Enum.any?(wm, fn item ->
+      cond do
+        # 1) Direct curiosity tag in payload
+        match?(%{payload: %{reason: :curiosity}}, item) ->
+          true
 
-      # 2) Direct curiosity tag at top level
-      match?(%{reason: :curiosity}, item) ->
-        true
+        # 2) Direct curiosity tag at top level
+        match?(%{reason: :curiosity}, item) ->
+          true
 
-      # 3) Fallback: look for "probe|" id in payload or top-level
-      true ->
-        id =
-          case item do
-            %{payload: %{id: id}} when is_binary(id) -> id
-            %{id: id} when is_binary(id) -> id
-            _ -> nil
-          end
+        # 3) Fallback: look for "probe|" id in payload or top-level
+        true ->
+          id =
+            case item do
+              %{payload: %{id: id}} when is_binary(id) -> id
+              %{id: id} when is_binary(id) -> id
+              _ -> nil
+            end
 
-        is_binary(id) and String.starts_with?(id, "probe|")
-    end
-  end)
-end
+          is_binary(id) and String.starts_with?(id, "probe|")
+      end
+    end)
+  end
+
   defp has_curiosity?(_), do: false
 
   defp ensure_started(mod) when is_atom(mod) do
@@ -107,4 +108,3 @@ end
     end
   end
 end
-

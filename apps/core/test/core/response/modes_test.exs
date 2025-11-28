@@ -79,4 +79,3 @@ defmodule Core.Response.ModesTest do
     end
   end
 end
-

@@ -243,4 +243,3 @@ defmodule Core.LIFG.Attach do
     |> String.replace(~r/\s+/u, " ")
   end
 end
-

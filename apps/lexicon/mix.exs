@@ -28,4 +28,3 @@ defmodule Lexicon.MixProject do
     ]
   end
 end
-

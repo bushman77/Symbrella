@@ -9,7 +9,6 @@ defmodule Llm do
   • Deterministic runner defaults via Llm.Const.
   """
 
-
   use GenServer
   require Logger
   alias Llm.Pos

@@ -36,4 +36,3 @@ defmodule Core.Response.PlanBugFlowTest do
     assert text =~ "fail"
   end
 end
-

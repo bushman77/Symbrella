@@ -9,6 +9,7 @@ config :db, Db.Repo,
 # Database (umbrella app: :db)
 # -------------------------------
 config :db, ecto_repos: [Db]
+
 config :db, Db,
   username: "postgres",
   password: "postgres",
@@ -42,6 +43,7 @@ config :ex_unit, capture_log: true
 # Phoenix runtime knobs for tests
 # -------------------------------
 config :phoenix, :plug_init_mode, :runtime
+
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
@@ -58,7 +60,7 @@ config :core, :tokenizer_defaults,
 config :brain,
   # Episodic mode during tests
   episodes_mode: :on,
-  
+
   # LIFG test stability (relaxed thresholds)
   lifg_min_score: 0.5,
   lifg_min_margin: 0.08,
@@ -70,12 +72,12 @@ config :brain,
     activation: 0.20,
     intent_bias: 0.10
   },
-  
+
   # pMTG defaults
   pmtg_mode: :boost,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
-  
+
   # Hippocampus configuration
   hippo_meta_dup_count: false,
   allow_test_ids: true

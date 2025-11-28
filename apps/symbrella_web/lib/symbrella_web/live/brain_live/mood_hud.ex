@@ -166,6 +166,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   @doc "Compact, always-visible mood HUD chip."
   attr :mood, :map, default: @defaults
+
   def mood_hud(assigns) do
     mood = Map.get(assigns, :mood, @defaults) || @defaults
 
@@ -182,30 +183,28 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       |> Phoenix.Component.assign(:derived, derived)
 
     ~H"""
-    <span
-      class={[
-        "text-xs px-2 py-1 rounded-md border inline-flex items-center gap-1 shadow-sm backdrop-blur-sm",
-        tone_class(@tone)
-      ]}
-    >
+    <span class={[
+      "text-xs px-2 py-1 rounded-md border inline-flex items-center gap-1 shadow-sm backdrop-blur-sm",
+      tone_class(@tone)
+    ]}>
       <span class={["w-2 h-2 rounded-full mr-1", tone_dot_class(@tone)]}></span>
 
       <span class="font-semibold mr-1">Mood</span>
 
       <span class="opacity-70">Expl</span>
-      <span class="tabular-nums"><%= fmt(@derived[:exploration]) %></span>
+      <span class="tabular-nums">{fmt(@derived[:exploration])}</span>
 
       <span class="opacity-70 ml-1">Inhib</span>
-      <span class="tabular-nums"><%= fmt(@derived[:inhibition]) %></span>
+      <span class="tabular-nums">{fmt(@derived[:inhibition])}</span>
 
       <span class="opacity-70 ml-1">Vigil</span>
-      <span class="tabular-nums"><%= fmt(@derived[:vigilance]) %></span>
+      <span class="tabular-nums">{fmt(@derived[:vigilance])}</span>
 
       <span class="opacity-70 ml-1">Plast</span>
-      <span class="tabular-nums"><%= fmt(@derived[:plasticity]) %></span>
+      <span class="tabular-nums">{fmt(@derived[:plasticity])}</span>
 
       <span class="ml-2 text-[10px] font-semibold tracking-wide uppercase opacity-80">
-        <%= tone_label(@tone) %>
+        {tone_label(@tone)}
       </span>
     </span>
     """

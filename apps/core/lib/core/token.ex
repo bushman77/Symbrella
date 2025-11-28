@@ -315,7 +315,9 @@ defmodule Core.Token do
         reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
         reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
         reasons = if p == slice, do: reasons, else: [{:slice_mismatch, {p, slice}} | reasons]
-        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+
+        reasons =
+          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
         if reasons == [] do
           {acc, st}
@@ -349,4 +351,3 @@ defmodule Core.Token do
 
   defp safe_slice(_s, _st, _en), do: ""
 end
-

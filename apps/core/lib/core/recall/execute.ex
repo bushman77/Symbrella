@@ -746,7 +746,6 @@ defmodule Core.Recall.Execute do
     end
   end
 
-
   # ───────── Local Jaccard gate (query norms vs episode norms) ─────────
 
   # Apply only if we have non-empty query cues; otherwise skip gating.
@@ -873,7 +872,7 @@ defmodule Core.Recall.Execute do
 
   # ───────── Query norms helpers ─────────
 
-   defp query_norms(%SI{} = si) do
+  defp query_norms(%SI{} = si) do
     # Prefer Brain.Hippocampus.Normalize.norms/1 if it returns something usable.
     # If it returns empty/weird data or errors, fall back to best_effort_norms/1.
     if Code.ensure_loaded?(Brain.Hippocampus.Normalize) and
@@ -912,7 +911,7 @@ defmodule Core.Recall.Execute do
       best_effort_norms(si)
     end
   end
- 
+
   defp best_effort_norms(si) do
     w = winners_to_norms(si)
 

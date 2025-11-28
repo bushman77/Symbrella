@@ -19,14 +19,13 @@ defmodule Brain.Thalamus.Params do
   def set_params(%__MODULE__{} = p, %{} = m) do
     %__MODULE__{
       ofc_weight: clamp(Map.get(m, :ofc_weight, p.ofc_weight)),
-      acc_alpha:  clamp(Map.get(m, :acc_alpha,  p.acc_alpha)),
-      min_score:  clamp(Map.get(m, :min_score,  p.min_score))
+      acc_alpha: clamp(Map.get(m, :acc_alpha, p.acc_alpha)),
+      min_score: clamp(Map.get(m, :min_score, p.min_score))
     }
   end
 
   # keep it simple; inputs are expected numeric already
-  defp clamp(v) when is_integer(v), do: v / 1 |> clamp()
-  defp clamp(v) when is_float(v),   do: v |> max(0.0) |> min(1.0)
-  defp clamp(_),                    do: 0.0
+  defp clamp(v) when is_integer(v), do: (v / 1) |> clamp()
+  defp clamp(v) when is_float(v), do: v |> max(0.0) |> min(1.0)
+  defp clamp(_), do: 0.0
 end
-

@@ -212,14 +212,14 @@ defmodule Db.Episode do
     if cue == [] do
       []
     else
-      k            = Keyword.get(opts, :k, 8)
-      pool         = Keyword.get(opts, :pool, 50)
-      user_id      = Keyword.get(opts, :user_id)
-      tags_any     = Keyword.get(opts, :tags_any)
-      since        = Keyword.get(opts, :since)
+      k = Keyword.get(opts, :k, 8)
+      pool = Keyword.get(opts, :pool, 50)
+      user_id = Keyword.get(opts, :user_id)
+      tags_any = Keyword.get(opts, :tags_any)
+      since = Keyword.get(opts, :since)
       half_life_ms = Keyword.get(opts, :half_life_ms, 86_400_000)
-      wj           = Keyword.get(opts, :w_jaccard, 0.70)
-      wr           = Keyword.get(opts, :w_recency, 0.30)
+      wj = Keyword.get(opts, :w_jaccard, 0.70)
+      wr = Keyword.get(opts, :w_recency, 0.30)
 
       base =
         from(e in __MODULE__,
@@ -256,7 +256,7 @@ defmodule Db.Episode do
       |> Enum.map(fn row ->
         j = jaccard(row.tokens || [], cue)
         r = recency(now, row.inserted_at, half_life_ms)
-        s = (wj * j) + (wr * r)
+        s = wj * j + wr * r
 
         %{
           id: row.id,
@@ -293,7 +293,6 @@ defmodule Db.Episode do
     union = MapSet.size(MapSet.union(sa, sb))
     if union == 0, do: 0.0, else: inter / union
   end
-
 
   # ───────────────────────── Changeset helpers ─────────────────────────
 

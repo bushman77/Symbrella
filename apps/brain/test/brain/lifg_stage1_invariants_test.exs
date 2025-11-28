@@ -112,6 +112,7 @@ defmodule Brain.LIFG.Stage1InvariantsTest do
 
       # MWE token should pass through and get a winner
       assert length(choices) == 1
+
       assert Enum.any?(choices, fn ch ->
                ch.token_index == 0 and
                  is_binary(ch.id) and
@@ -170,6 +171,4 @@ defmodule Brain.LIFG.Stage1InvariantsTest do
     assert only.id == "It is raining|phrase|0"
     assert only.span == {0, 14}
   end
-
 end
-

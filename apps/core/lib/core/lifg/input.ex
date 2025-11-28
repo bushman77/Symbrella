@@ -135,4 +135,3 @@ defmodule Core.LIFG.Input do
     Keyword.merge(base, env)
   end
 end
-

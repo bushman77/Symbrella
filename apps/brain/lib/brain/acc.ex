@@ -49,7 +49,9 @@ defmodule Brain.ACC do
     clk_id = unique(@clk_handler_prefix)
 
     :ok =
-      :telemetry.attach(cur_id, [:curiosity, :proposal], &__MODULE__.on_curiosity/4, %{pid: self()})
+      :telemetry.attach(cur_id, [:curiosity, :proposal], &__MODULE__.on_curiosity/4, %{
+        pid: self()
+      })
 
     :ok =
       :telemetry.attach(mood_id, [:brain, :mood, :update], &__MODULE__.on_mood_update/4, %{
@@ -397,18 +399,30 @@ defmodule Brain.ACC do
       case map do
         %{} ->
           case {Map.get(map, key), Map.get(map, to_string(key))} do
-            {v, _} when is_integer(v) -> v * 1.0
-            {v, _} when is_float(v) -> v
-            {v, _} when is_boolean(v) -> if v, do: 1.0, else: 0.0
+            {v, _} when is_integer(v) ->
+              v * 1.0
+
+            {v, _} when is_float(v) ->
+              v
+
+            {v, _} when is_boolean(v) ->
+              if v, do: 1.0, else: 0.0
+
             {v, _} when is_binary(v) ->
               case Float.parse(v) do
                 {f, _} -> f
                 :error -> :nope
               end
 
-            {_, v} when is_integer(v) -> v * 1.0
-            {_, v} when is_float(v) -> v
-            {_, v} when is_boolean(v) -> if v, do: 1.0, else: 0.0
+            {_, v} when is_integer(v) ->
+              v * 1.0
+
+            {_, v} when is_float(v) ->
+              v
+
+            {_, v} when is_boolean(v) ->
+              if v, do: 1.0, else: 0.0
+
             {_, v} when is_binary(v) ->
               case Float.parse(v) do
                 {f, _} -> f
@@ -473,7 +487,7 @@ defmodule Brain.ACC do
 
   # ---- persistence/window ---------------------------------------------------
 
-    defp persist_with_window(out) do
+  defp persist_with_window(out) do
     prev = :persistent_term.get(@status_key, %{})
     old = Map.get(prev, :window, [])
 
@@ -496,7 +510,4 @@ defmodule Brain.ACC do
     :persistent_term.put(@status_key, out2)
     out2
   end
-
-
 end
-

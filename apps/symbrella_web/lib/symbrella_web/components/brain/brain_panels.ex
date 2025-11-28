@@ -1,4 +1,4 @@
-#apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex
+# apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex
 defmodule SymbrellaWeb.Components.Brain.Panels do
   @moduledoc """
   Extracted 'brain' presentation functions for the Brain dashboard.
@@ -22,18 +22,24 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     assigns =
       assigns
       |> Map.put_new(:selected, :lifg)
-      |> Map.put_new(:regions, []) # optional external region listing
+      # optional external region listing
+      |> Map.put_new(:regions, [])
       |> Map.put_new(:clock, %{})
       |> Map.put_new(:intent, %{})
       |> Map.put_new(:mood, %{levels: %{}, derived: %{}, tone: :neutral})
       |> Map.put_new(:auto, false)
       |> Map.put_new(:region, %{})
       |> Map.put_new(:region_state, %{})
-      |> Map.put_new(:region_status, %{})   # ← status comes from LiveView
-      |> Map.put_new(:region_tweaks, %{})   # optional per-region overrides
-      |> Map.put_new(:svg_base, nil)        # optional override SVG string
-      |> assign_viewbox()                   # put :vb from svg override or BaseArt
-      |> Map.put_new(:pan, %{x: 0, y: 0})   # aligned by default
+      # ← status comes from LiveView
+      |> Map.put_new(:region_status, %{})
+      # optional per-region overrides
+      |> Map.put_new(:region_tweaks, %{})
+      # optional override SVG string
+      |> Map.put_new(:svg_base, nil)
+      # put :vb from svg override or BaseArt
+      |> assign_viewbox()
+      # aligned by default
+      |> Map.put_new(:pan, %{x: 0, y: 0})
       |> Map.put_new(:scale, 1.00)
 
     ~H"""
@@ -47,8 +53,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         auto={@auto}
         snapshot={@snapshot}
       />
-
-      <!-- Brain map + Region summary -->
+      
+    <!-- Brain map + Region summary -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="border rounded-xl p-4 shadow-sm">
           <.brain_map
@@ -60,8 +66,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
             vb={@vb}
           />
         </div>
-
-        <!-- Wrap the summary card so we can float a copy button in its top-right -->
+        
+    <!-- Wrap the summary card so we can float a copy button in its top-right -->
         <div class="relative h-full">
           <% copy_id = "region-summary-copy-#{@selected}" %>
 
@@ -91,14 +97,14 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
           </div>
         </div>
       </div>
-
-      <!-- Live state + Module Status -->
+      
+    <!-- Live state + Module Status -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SymbrellaWeb.BrainHTML.live_state_panel state={@region_state} />
         <SymbrellaWeb.BrainHTML.module_status_panel status={@region_status} selected={@selected} />
       </div>
-
-      <!-- Mood only -->
+      
+    <!-- Mood only -->
       <div class="grid grid-cols-1">
         <SymbrellaWeb.BrainHTML.mood_panel mood={@mood} />
       </div>
@@ -139,7 +145,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
           value={Atom.to_string(@selected)}
         >
           <%= for {key, label} <- @options do %>
-            <option value={Atom.to_string(key)} selected={key == @selected}><%= label %></option>
+            <option value={Atom.to_string(key)} selected={key == @selected}>{label}</option>
           <% end %>
         </select>
       </div>
@@ -154,11 +160,12 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   attr :region_tweaks, :map, default: %{}
   attr :pan, :map, default: %{x: 0, y: 0}
   attr :scale, :float, default: 1.0
+
   defp brain_map(assigns) do
-    selected   = assigns.selected || :lifg
-    vb         = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
-    pan        = assigns.pan || %{x: 0, y: 0}
-    scale      = assigns.scale || 1.0
+    selected = assigns.selected || :lifg
+    vb = assigns.vb || %{minx: 0, miny: 0, w: 516, h: 406}
+    pan = assigns.pan || %{x: 0, y: 0}
+    scale = assigns.scale || 1.0
     draw_order = Regions.draw_regions(selected)
 
     assigns =
@@ -191,8 +198,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
             .r-label{opacity:0; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#111;}
             g.region:hover .r-label{opacity:.9}
           </style>
-
-          <!-- Pan/scale applies to base art and overlays together -->
+          
+    <!-- Pan/scale applies to base art and overlays together -->
           <g
             transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"}
             class="pointer-events-auto"
@@ -200,8 +207,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
           >
             <!-- Base art (component returns a <g>) -->
             <BaseArt.group svg={@svg_base} />
-
-            <!-- Region overlays (same coordinate system as base) -->
+            
+    <!-- Region overlays (same coordinate system as base) -->
             <%= for key <- @draw_order do %>
               <% defn = RegionRegistry.defn(key) %>
 
@@ -215,9 +222,10 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
 
               <% {fill, stroke} = defn.colors %>
               <% sel? = @selected == key %>
-              <% fw   = if sel?, do: 2, else: 1 %>
-              <% fop  = if sel?, do: "0.35", else: "0.20" %>
-              <% style = "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
+              <% fw = if sel?, do: 2, else: 1 %>
+              <% fop = if sel?, do: "0.35", else: "0.20" %>
+              <% style =
+                "fill: #{fill}; fill-opacity: #{fop}; stroke: #{stroke}; stroke-width: #{fw};" %>
               <% {lx, ly} = defn.anchor %>
 
               <g id={"g-#{key}"} class="region" transform={"translate(#{t.dx},#{t.dy}) scale(#{t.s})"}>
@@ -227,12 +235,17 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
                   vector-effect="non-scaling-stroke"
                   phx-click="select-region"
                   phx-value-region={Atom.to_string(key)}
-                  class={if(@selected == key, do: "opacity-100 stroke-2", else: "opacity-70 hover:opacity-90")}
+                  class={
+                    if(@selected == key,
+                      do: "opacity-100 stroke-2",
+                      else: "opacity-70 hover:opacity-90"
+                    )
+                  }
                   style={style}
                 >
-                  <title><%= String.upcase(Atom.to_string(key)) %></title>
+                  <title>{String.upcase(Atom.to_string(key))}</title>
                 </path>
-                <text class="r-label" x={lx} y={ly}><%= String.upcase(Atom.to_string(key)) %></text>
+                <text class="r-label" x={lx} y={ly}>{String.upcase(Atom.to_string(key))}</text>
               </g>
             <% end %>
           </g>
@@ -254,4 +267,3 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     Map.put(assigns, :vb, vb)
   end
 end
-

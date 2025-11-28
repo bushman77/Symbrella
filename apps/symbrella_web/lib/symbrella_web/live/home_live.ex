@@ -593,4 +593,3 @@ defmodule SymbrellaWeb.HomeLive do
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
 end
-

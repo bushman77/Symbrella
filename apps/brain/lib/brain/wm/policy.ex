@@ -315,4 +315,3 @@ defmodule Brain.WM.Policy do
     end
   end
 end
-

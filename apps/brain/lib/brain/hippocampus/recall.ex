@@ -21,11 +21,11 @@ defmodule Brain.Hippocampus.Recall do
           {[scored()], map(), map()}
   def run(cues, window, opts) when (is_list(cues) or is_map(cues)) and is_list(window) do
     # Use the same clock family as `encode/2` (monotonic).
-    now        = System.monotonic_time(:millisecond)
-    limit      = Keyword.get(opts, :limit, 3)
-    half_life  = Keyword.get(opts, :half_life_ms, 300_000)
-    min_jacc   = Keyword.get(opts, :min_jaccard, 0.0)
-    scope_opt  = Keyword.get(opts, :scope, nil)
+    now = System.monotonic_time(:millisecond)
+    limit = Keyword.get(opts, :limit, 3)
+    half_life = Keyword.get(opts, :half_life_ms, 300_000)
+    min_jacc = Keyword.get(opts, :min_jaccard, 0.0)
+    scope_opt = Keyword.get(opts, :scope, nil)
     ignore_opt = Keyword.get(opts, :ignore_head, :auto)
 
     cues_set = cues_to_set(cues)
@@ -143,10 +143,14 @@ defmodule Brain.Hippocampus.Recall do
       # Original behaviour: winner is a map with lemma/norm/word/id
       %{} = w ->
         [
-          w[:lemma], w["lemma"],
-          w[:norm],  w["norm"],
-          w[:word],  w["word"],
-          w[:id],    w["id"]
+          w[:lemma],
+          w["lemma"],
+          w[:norm],
+          w["norm"],
+          w[:word],
+          w["word"],
+          w[:id],
+          w["id"]
         ]
         |> Enum.flat_map(&tokenize_term/1)
 
@@ -185,10 +189,14 @@ defmodule Brain.Hippocampus.Recall do
     winners
     |> Enum.flat_map(fn w ->
       [
-        w[:lemma], w["lemma"],
-        w[:norm],  w["norm"],
-        w[:word],  w["word"],
-        w[:id],    w["id"]
+        w[:lemma],
+        w["lemma"],
+        w[:norm],
+        w["norm"],
+        w[:word],
+        w["word"],
+        w[:id],
+        w["id"]
       ]
     end)
     |> Enum.flat_map(&tokenize_term/1)
@@ -251,4 +259,3 @@ defmodule Brain.Hippocampus.Recall do
   defp normalize_ignore(:auto), do: :auto
   defp normalize_ignore(_unknown), do: :auto
 end
-

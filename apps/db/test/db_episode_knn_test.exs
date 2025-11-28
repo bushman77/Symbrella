@@ -63,4 +63,3 @@ defmodule Db.EpisodeKnnTest do
     assert row.distance <= 0.01
   end
 end
-

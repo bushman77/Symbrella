@@ -15,9 +15,9 @@ defmodule SymbrellaWeb.Components.Brain.IntentChip do
   attr :class, :string, default: ""
 
   def intent_chip(assigns) do
+    assigns
+    |> IO.inspect()
 
-assigns
-|> IO.inspect
     intent = assigns[:intent] || %{}
     label = Map.get(intent, :intent, :unknown)
     keyword = Map.get(intent, :keyword, "")

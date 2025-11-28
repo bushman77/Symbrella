@@ -90,8 +90,7 @@ defmodule Core.Intent.SelectionTest do
   end
 
   test "translate-like question (how do you say hello in french)" do
-    si = %{sentence: "how do you say hello in french",
-           tokens: ~w(how do you say hello in french)}
+    si = %{sentence: "how do you say hello in french", tokens: ~w(how do you say hello in french)}
 
     si2 = Selection.select(si)
 
@@ -115,8 +114,7 @@ defmodule Core.Intent.SelectionTest do
   end
 
   test "brain introspect (show Brain.Hippocampus state)" do
-    si = %{sentence: "show Brain.Hippocampus state",
-           tokens: ~w(show brain.hippocampus state)}
+    si = %{sentence: "show Brain.Hippocampus state", tokens: ~w(show brain.hippocampus state)}
 
     si2 = Selection.select(si)
 
@@ -136,4 +134,3 @@ defmodule Core.Intent.SelectionTest do
     assert si2.confidence <= 0.5
   end
 end
-

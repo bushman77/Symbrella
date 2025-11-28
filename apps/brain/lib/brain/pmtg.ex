@@ -275,10 +275,8 @@ defmodule Brain.PMTG do
         Map.merge(base, %{
           variants_tried: variants,
           variants_hit: %{
-            episodes:
-              Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
-            lexicon:
-              Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
+            episodes: Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
+            lexicon: Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
           }
         })
       else
@@ -779,4 +777,3 @@ defmodule Brain.PMTG do
     end
   end
 end
-

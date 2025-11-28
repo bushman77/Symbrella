@@ -137,4 +137,3 @@ defmodule BrainWMDynamicsTest do
     assert first.ts >= second.ts
   end
 end
-

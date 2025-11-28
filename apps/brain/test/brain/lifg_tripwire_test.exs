@@ -47,4 +47,3 @@ defmodule Brain.LIFG.TripwireTest do
     assert meta[:v] == 2
   end
 end
-

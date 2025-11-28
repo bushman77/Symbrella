@@ -56,22 +56,22 @@ defmodule Brain.AffectLatents do
     pla = clamp(mood[:plasticity] || mood["plasticity"] || 0.5)
 
     intent_val = clamp_sym(ctx[:intent_valence] || ctx["intent_valence"] || 0.0)
-    acc_conf   = clamp(ctx[:acc_conflict] || ctx["acc_conflict"] || 0.0)
-    wm_load    = clamp(ctx[:wm_load] || ctx["wm_load"] || 0.0)
+    acc_conf = clamp(ctx[:acc_conflict] || ctx["acc_conflict"] || 0.0)
+    wm_load = clamp(ctx[:wm_load] || ctx["wm_load"] || 0.0)
 
     # Threat: high vigilance, high conflict, low exploration
     threat =
       0.50 * vig +
-      0.25 * acc_conf +
-      0.15 * max(0.0, inh - 0.5) +
-      0.10 * max(0.0, 0.5 - exp)
+        0.25 * acc_conf +
+        0.15 * max(0.0, inh - 0.5) +
+        0.10 * max(0.0, 0.5 - exp)
 
     # Reward: exploration + plasticity + positive intent
     reward =
       0.40 * exp +
-      0.30 * pla +
-      0.20 * max(0.0, -0.3 * (inh - 0.5) + 0.5) +
-      0.10 * (intent_val * 0.5 + 0.5)
+        0.30 * pla +
+        0.20 * max(0.0, -0.3 * (inh - 0.5) + 0.5) +
+        0.10 * (intent_val * 0.5 + 0.5)
 
     # Control: “do I feel in control of the situation?”
     #  - good when exploration+plasticity beat inhibition
@@ -83,8 +83,8 @@ defmodule Brain.AffectLatents do
     # Safety: low threat + decent reward + not totally inhibited
     safety =
       0.50 * (1.0 - threat) +
-      0.30 * reward +
-      0.20 * max(0.0, 1.0 - inh)
+        0.30 * reward +
+        0.20 * max(0.0, 1.0 - inh)
 
     %{
       threat: clamp(threat),
@@ -108,4 +108,3 @@ defmodule Brain.AffectLatents do
 
   defp clamp_sym(_), do: 0.0
 end
-

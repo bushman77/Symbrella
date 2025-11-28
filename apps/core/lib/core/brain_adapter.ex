@@ -352,4 +352,3 @@ defmodule Core.BrainAdapter do
     end
   end
 end
-

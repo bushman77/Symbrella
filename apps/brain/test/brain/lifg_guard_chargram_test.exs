@@ -112,9 +112,7 @@ defmodule Brain.LIFG.GuardChargramTest do
     assert meta1.reason == :chargram
 
     # Tripwire event for tests
-    assert_receive {:chargram_tripwire,
-                    [:test, :lifg, :chargram_violation_tripwire],
-                    _meas,
+    assert_receive {:chargram_tripwire, [:test, :lifg, :chargram_violation_tripwire], _meas,
                     meta2},
                    100
 
@@ -151,4 +149,3 @@ defmodule Brain.LIFG.GuardChargramTest do
     refute meta.mw
   end
 end
-

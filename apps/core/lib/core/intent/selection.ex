@@ -46,81 +46,81 @@ defmodule Core.Intent.Selection do
 
   # ─────────────────────────── emit ───────────────────────────
 
-# apps/core/lib/core/intent/selection.ex
+  # apps/core/lib/core/intent/selection.ex
 
-defp emit(intent, kw, conf, text)
-     when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
-  meas = %{confidence: conf}
+  defp emit(intent, kw, conf, text)
+       when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
+    meas = %{confidence: conf}
 
-  payload = %{
-    label: Atom.to_string(intent),
-    intent: intent,
-    keyword: kw,
-    confidence: conf,
-    source: :core,
-    text: text
-  }
+    payload = %{
+      label: Atom.to_string(intent),
+      intent: intent,
+      keyword: kw,
+      confidence: conf,
+      source: :core,
+      text: text
+    }
 
-  # 1) Update Brain.last_intent (for mood + snapshot)
-  _ =
-    try do
-      Brain.set_latest_intent(payload)
-    catch
-      _, _ -> :ok
-    end
-
-  # 2) Broadcast to HUD over Brain.Bus
-  _ =
-    try do
-      if Code.ensure_loaded?(Brain.Bus) do
-        Brain.Bus.broadcast("brain:intent", {:intent, payload})
+    # 1) Update Brain.last_intent (for mood + snapshot)
+    _ =
+      try do
+        Brain.set_latest_intent(payload)
+      catch
+        _, _ -> :ok
       end
-    catch
-      _, _ -> :ok
+
+    # 2) Broadcast to HUD over Brain.Bus
+    _ =
+      try do
+        if Code.ensure_loaded?(Brain.Bus) do
+          Brain.Bus.broadcast("brain:intent", {:intent, payload})
+        end
+      catch
+        _, _ -> :ok
+      end
+
+    # 3) Telemetry (unchanged if you already had it)
+    if function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute([:core, :intent, :selected], meas, payload)
+      :telemetry.execute([:brain, :intent, :selected], meas, payload)
     end
 
-  # 3) Telemetry (unchanged if you already had it)
-  if function_exported?(:telemetry, :execute, 3) do
-    :telemetry.execute([:core,  :intent, :selected], meas, payload)
-    :telemetry.execute([:brain, :intent, :selected], meas, payload)
+    :ok
   end
-
-  :ok
-end
 
   defp emit(_, _, _, _), do: :ok
 
   # ─────────────────────── normalization ───────────────────────
 
-# apps/core/lib/core/intent/selection.ex
+  # apps/core/lib/core/intent/selection.ex
 
-defp extract_keyword(%{keyword: kw}) when is_binary(kw) and kw != "" do
-  kw |> String.trim() |> squish() |> String.downcase()
-end
+  defp extract_keyword(%{keyword: kw}) when is_binary(kw) and kw != "" do
+    kw |> String.trim() |> squish() |> String.downcase()
+  end
 
-defp extract_keyword(%{tokens: tokens}) when is_list(tokens) do
-  tokens
-  |> Enum.map(&token_phrase/1)
-  |> Enum.map(&String.trim/1)
-  |> Enum.reject(&(&1 == ""))
-  |> Enum.map(&squish/1)
-  |> Enum.uniq()
-  |> prefer_multiword_keyword()
-end
+  defp extract_keyword(%{tokens: tokens}) when is_list(tokens) do
+    tokens
+    |> Enum.map(&token_phrase/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&squish/1)
+    |> Enum.uniq()
+    |> prefer_multiword_keyword()
+  end
 
-defp extract_keyword(%{sentence: s}) when is_binary(s),
-  do: s |> String.trim() |> squish() |> String.downcase()
+  defp extract_keyword(%{sentence: s}) when is_binary(s),
+    do: s |> String.trim() |> squish() |> String.downcase()
 
-defp extract_keyword(_), do: ""
+  defp extract_keyword(_), do: ""
 
-defp token_phrase(%{phrase: p}) when is_binary(p), do: p
-defp token_phrase(%{"phrase" => p}) when is_binary(p), do: p
-# (optional fallbacks if your tokens sometimes carry normalized text)
-defp token_phrase(%{norm: p}) when is_binary(p), do: p
-defp token_phrase(%{"norm" => p}) when is_binary(p), do: p
-# if token is already a string, use it directly
-defp token_phrase(p) when is_binary(p), do: p
-defp token_phrase(_), do: ""
+  defp token_phrase(%{phrase: p}) when is_binary(p), do: p
+  defp token_phrase(%{"phrase" => p}) when is_binary(p), do: p
+  # (optional fallbacks if your tokens sometimes carry normalized text)
+  defp token_phrase(%{norm: p}) when is_binary(p), do: p
+  defp token_phrase(%{"norm" => p}) when is_binary(p), do: p
+  # if token is already a string, use it directly
+  defp token_phrase(p) when is_binary(p), do: p
+  defp token_phrase(_), do: ""
 
   defp text_from_si(%{sentence: s}, _kw) when is_binary(s) and s != "", do: s
   defp text_from_si(%{text: s}, _kw) when is_binary(s) and s != "", do: s

@@ -51,8 +51,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
               </button>
             </div>
           </div>
-
-          <!-- Scrollable body -->
+          
+    <!-- Scrollable body -->
           <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 overflow-x-hidden">
             <div class="grid gap-3 w-full">
               <div
@@ -61,32 +61,32 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
               >
                 <div class="flex items-center justify-between gap-3">
                   <div class="text-sm font-semibold truncate">
-                    <%= sec[:title] || "Section" %>
+                    {sec[:title] || "Section"}
                   </div>
 
                   <span
                     :if={sec[:tag]}
                     class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700"
                   >
-                    <%= sec[:tag] %>
+                    {sec[:tag]}
                   </span>
                 </div>
 
                 <div :if={sec[:hint]} class="mt-1 text-xs text-slate-600">
-                  <%= sec[:hint] %>
+                  {sec[:hint]}
                 </div>
 
                 <div class="mt-2 grid gap-2">
                   <div
-                    :for={item <- (sec[:items] || [])}
+                    :for={item <- sec[:items] || []}
                     class="rounded-xl border border-slate-200 bg-white p-3"
                   >
                     <div :if={item[:label]} class="text-xs font-semibold text-slate-800">
-                      <%= item[:label] %>
+                      {item[:label]}
                     </div>
 
                     <div class="mt-1 text-sm whitespace-pre-wrap break-words text-slate-700">
-                      <%= item[:body] || "" %>
+                      {item[:body] || ""}
                     </div>
                   </div>
 
@@ -235,7 +235,10 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> Enum.reverse()
       |> Enum.find_value({nil, nil}, fn {line, i} ->
         t = String.trim(line)
-        if String.contains?(t, "intent=:") or String.starts_with?(t, "intent="), do: {t, i}, else: false
+
+        if String.contains?(t, "intent=:") or String.starts_with?(t, "intent="),
+          do: {t, i},
+          else: false
       end)
 
     if meta_line && idx != nil do
@@ -342,7 +345,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     |> String.split("\n", trim: false)
     |> Enum.map(&String.trim/1)
     |> Enum.filter(&(&1 != ""))
-    |> Enum.filter(&(String.starts_with?(&1, "• ")))
+    |> Enum.filter(&String.starts_with?(&1, "• "))
     |> Enum.map(&parse_reading_bullet/1)
     |> Enum.reject(&is_nil/1)
   end
@@ -480,7 +483,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
   defp maybe_add_intent_tone_section(sections, meta, meta_line) do
     has_any? =
-      meta[:intent] || meta[:confidence] || meta[:tone] || meta[:because] || meta[:mode] || meta_line
+      meta[:intent] || meta[:confidence] || meta[:tone] || meta[:because] || meta[:mode] ||
+        meta_line
 
     if has_any? do
       items =
@@ -604,4 +608,3 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     end
   end
 end
-

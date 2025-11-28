@@ -210,4 +210,3 @@ defmodule BrainLIFGTest do
     end
   end
 end
-

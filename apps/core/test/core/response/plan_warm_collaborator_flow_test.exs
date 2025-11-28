@@ -36,4 +36,3 @@ defmodule Core.Response.PlanWarmCollaboratorFlowTest do
     assert text =~ "paste-ready"
   end
 end
-

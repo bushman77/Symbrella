@@ -8,15 +8,14 @@ defmodule Brain.ThalamusSoak_Test do
     :ok
   end
 
-# test/brain/thalamus_soak_test.exs
-defp recv(acc) do
-  receive do
-    {:decision, _meas, meta} -> recv([meta[:probe][:id] | acc])
-  after
-    50 -> Enum.reverse(acc)
+  # test/brain/thalamus_soak_test.exs
+  defp recv(acc) do
+    receive do
+      {:decision, _meas, meta} -> recv([meta[:probe][:id] | acc])
+    after
+      50 -> Enum.reverse(acc)
+    end
   end
-end
-
 
   setup_all do
     case Process.whereis(Brain) do

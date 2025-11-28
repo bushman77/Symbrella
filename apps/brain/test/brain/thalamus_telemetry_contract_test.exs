@@ -138,4 +138,3 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     assert_in_delta 0.0, meta[:acc_conflict] || 0.0, 1.0e-6
   end
 end
-

@@ -348,23 +348,23 @@ defmodule Brain.MoodCore do
          cause
        ) do
     # Raw neuros
-    da  = Map.get(lv, :da, 0.5)
-    s5  = Map.get(lv, :"5ht", 0.5)
+    da = Map.get(lv, :da, 0.5)
+    s5 = Map.get(lv, :"5ht", 0.5)
     glu = Map.get(lv, :glu, 0.5)
-    ne  = Map.get(lv, :ne, 0.5)
+    ne = Map.get(lv, :ne, 0.5)
 
     # Derived mood indices
     exploration = 0.6 * da + 0.4 * ne
-    inhibition  = s5
-    vigilance   = ne
-    plasticity  = 0.5 * da + 0.5 * glu
+    inhibition = s5
+    vigilance = ne
+    plasticity = 0.5 * da + 0.5 * glu
 
     # Bundle into a mood struct + tone so UI can see the "shape"
     mood = %{
       exploration: exploration,
-      inhibition:  inhibition,
-      vigilance:   vigilance,
-      plasticity:  plasticity
+      inhibition: inhibition,
+      vigilance: vigilance,
+      plasticity: plasticity
     }
 
     tone = choose_tone(mood)
@@ -500,21 +500,21 @@ defmodule Brain.MoodCore do
   # ---------- Tone selection (revised again – brain truth for tone_hint) ----------
 
   defp choose_tone(%{vigilance: vig, inhibition: inh, exploration: exp}) do
-    cfg          = Application.get_env(:brain, :mood_tone, [])
+    cfg = Application.get_env(:brain, :mood_tone, [])
     neutral_band = Keyword.get(cfg, :neutral_band, 0.10)
 
-    warm_cfg  = Keyword.get(cfg, :warm, [])
-    cool_cfg  = Keyword.get(cfg, :cool, [])
+    warm_cfg = Keyword.get(cfg, :warm, [])
+    cool_cfg = Keyword.get(cfg, :cool, [])
     deesc_cfg = Keyword.get(cfg, :deescalate, [])
 
     # De-escalate “hot” gate: high vigilance + low inhibition
-    hot_vig_min = deesc_cfg[:vigilance_min]  || 0.85
+    hot_vig_min = deesc_cfg[:vigilance_min] || 0.85
     hot_inh_max = deesc_cfg[:inhibition_max] || 0.60
 
     warm_exp_min = warm_cfg[:exploration_min] || 0.65
-    warm_vig_max = warm_cfg[:vigilance_max]   || 0.85
+    warm_vig_max = warm_cfg[:vigilance_max] || 0.85
 
-    cool_inh_min = cool_cfg[:inhibition_min]  || 0.70
+    cool_inh_min = cool_cfg[:inhibition_min] || 0.70
 
     exp = (exp || 0.5) * 1.0
     inh = (inh || 0.5) * 1.0
@@ -726,4 +726,3 @@ defmodule Brain.MoodCore do
 
   defp to_float(_, default), do: default * 1.0
 end
-

@@ -242,4 +242,3 @@ defmodule Core.Brain.Examine do
   defp compact_state(list) when is_list(list), do: %{__summary__: true, length: length(list)}
   defp compact_state(other), do: other
 end
-

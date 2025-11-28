@@ -23,11 +23,49 @@ defmodule Core.Response.Attach do
   @type opts :: keyword()
 
   @stopwords MapSet.new([
-               "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with", "at", "by",
-               "is", "are", "was", "were", "be", "been", "being",
-               "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
-               "my", "your", "his", "her", "its", "our", "their",
-               "this", "that", "these", "those"
+               "a",
+               "an",
+               "the",
+               "and",
+               "or",
+               "to",
+               "of",
+               "in",
+               "on",
+               "for",
+               "with",
+               "at",
+               "by",
+               "is",
+               "are",
+               "was",
+               "were",
+               "be",
+               "been",
+               "being",
+               "i",
+               "you",
+               "he",
+               "she",
+               "it",
+               "we",
+               "they",
+               "me",
+               "him",
+               "her",
+               "us",
+               "them",
+               "my",
+               "your",
+               "his",
+               "her",
+               "its",
+               "our",
+               "their",
+               "this",
+               "that",
+               "these",
+               "those"
              ])
 
   @spec maybe_build_response_plan(SemanticInput.t() | map(), opts()) :: SemanticInput.t() | map()
@@ -248,7 +286,7 @@ defmodule Core.Response.Attach do
     end)
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.reject(&MapSet.member?(@stopwords, &1))
-    |> Enum.reject(&(Regex.match?(~r/\s/u, &1)))
+    |> Enum.reject(&Regex.match?(~r/\s/u, &1))
     |> MapSet.new()
   end
 
@@ -295,4 +333,3 @@ defmodule Core.Response.Attach do
     end)
   end
 end
-

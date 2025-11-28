@@ -76,5 +76,4 @@ defmodule Brain.LIFG.ReanalysisTest do
     {:ok, %{choices: [choice]}} = Stage1.run(si, reanalysis: true)
     assert choice.chosen_id == "hello|interjection|top"
   end
-
 end

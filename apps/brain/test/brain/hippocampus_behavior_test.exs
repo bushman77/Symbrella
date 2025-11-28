@@ -78,4 +78,3 @@ defmodule Brain.HippocampusBehaviorTest do
     assert hd(res_low).score > 0.0
   end
 end
-

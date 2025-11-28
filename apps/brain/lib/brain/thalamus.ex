@@ -525,4 +525,3 @@ defmodule Brain.Thalamus do
     }
   end
 end
-

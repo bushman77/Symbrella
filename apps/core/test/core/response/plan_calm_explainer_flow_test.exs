@@ -34,4 +34,3 @@ defmodule Core.Response.PlanCalmExplainerFlowTest do
     assert text =~ "1) What changes, at a glance"
   end
 end
-

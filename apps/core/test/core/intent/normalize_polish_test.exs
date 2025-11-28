@@ -38,31 +38,31 @@ defmodule Core.Intent.NormalizePolishTest do
     end
   end
 
-describe "confidence normalization" do
-  test "accepts numbers and clamps to [0,1]" do
-    assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => 2.7})
+  describe "confidence normalization" do
+    test "accepts numbers and clamps to [0,1]" do
+      assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => 2.7})
 
-    %{confidence: c0} = Normalize.normalize(%{"confidence" => -1})
-    assert c0 == 0.0
+      %{confidence: c0} = Normalize.normalize(%{"confidence" => -1})
+      assert c0 == 0.0
 
-    assert %{confidence: 0.42} = Normalize.normalize(%{"confidence" => 0.42})
+      assert %{confidence: 0.42} = Normalize.normalize(%{"confidence" => 0.42})
+    end
+
+    test "parses floats from strings and clamps" do
+      assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => " 1.2 "})
+      assert %{confidence: 0.25} = Normalize.normalize(%{"confidence" => "0.25"})
+    end
+
+    test "supports percent-form strings" do
+      assert %{confidence: 0.7} = Normalize.normalize(%{"confidence" => "70%"})
+      assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => "250%"})
+    end
+
+    test "junk confidence becomes nil" do
+      assert %{confidence: nil} = Normalize.normalize(%{"confidence" => "NaN"})
+      assert %{confidence: nil} = Normalize.normalize(%{"confidence" => %{}})
+    end
   end
-
-  test "parses floats from strings and clamps" do
-    assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => " 1.2 "})
-    assert %{confidence: 0.25} = Normalize.normalize(%{"confidence" => "0.25"})
-  end
-
-  test "supports percent-form strings" do
-    assert %{confidence: 0.7} = Normalize.normalize(%{"confidence" => "70%"})
-    assert %{confidence: 1.0} = Normalize.normalize(%{"confidence" => "250%"})
-  end
-
-  test "junk confidence becomes nil" do
-    assert %{confidence: nil} = Normalize.normalize(%{"confidence" => "NaN"})
-    assert %{confidence: nil} = Normalize.normalize(%{"confidence" => %{}})
-  end
-end
 
   describe "non-map inputs" do
     test "returns safe defaults" do

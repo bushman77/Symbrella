@@ -166,4 +166,3 @@ defmodule Brain.Cell.Safe do
   defp tag(t) when is_atom(t), do: t
   defp tag(_), do: :unknown
 end
-

@@ -124,4 +124,3 @@ defmodule Brain.LIFGBoundaryGuardTest do
     end
   end
 end
-

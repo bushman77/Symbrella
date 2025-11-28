@@ -305,4 +305,3 @@ defmodule Core.TokenFilters do
 
   defp put_trace_any(other, _stage, _meta), do: other
 end
-

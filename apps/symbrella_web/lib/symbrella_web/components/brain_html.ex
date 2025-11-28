@@ -1,4 +1,4 @@
-#apps/symbrella_web/lib/symbrella_web/components/brain_html.ex
+# apps/symbrella_web/lib/symbrella_web/components/brain_html.ex
 defmodule SymbrellaWeb.BrainHTML do
   @moduledoc """
   Presentation helpers for the Brain dashboard (HUD, status, mood, etc.).
@@ -31,7 +31,6 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :snapshot, :any, default: nil
 
   def hud_row(assigns) do
-
     snap = assigns[:snapshot] || %{}
 
     clock =
@@ -58,16 +57,16 @@ defmodule SymbrellaWeb.BrainHTML do
     # Support both shapes:
     #   - nested: mood.derived[:exploration]
     #   - flat:   mood[:exploration]
-    expl  = mood_val(mood, :exploration)
+    expl = mood_val(mood, :exploration)
     inhib = mood_val(mood, :inhibition)
     vigil = mood_val(mood, :vigilance)
     plast = mood_val(mood, :plasticity)
 
-    d    = mget(mood, :derived) || %{}
-    seq  = mget(clock, :seq) || "—"
-    hz   = mget(clock, :hz) || "—"
+    d = mget(mood, :derived) || %{}
+    seq = mget(clock, :seq) || "—"
+    hz = mget(clock, :hz) || "—"
     dtms = mget(clock, :dt_ms) || mget(clock, :dt) || "—"
-    phi  = mget(clock, :phi) || "—"
+    phi = mget(clock, :phi) || "—"
 
     label =
       mget(intent, :label) ||
@@ -80,7 +79,7 @@ defmodule SymbrellaWeb.BrainHTML do
         mget(intent, :kw) ||
         mget(intent, :keyword_norm)
 
-    src  = mget(intent, :source) || mget(intent, :src)
+    src = mget(intent, :source) || mget(intent, :src)
     conf = mget(intent, :confidence) || mget(intent, :score) || mget(intent, :prob)
 
     assigns =
@@ -104,37 +103,39 @@ defmodule SymbrellaWeb.BrainHTML do
     <div class="flex flex-wrap items-center gap-2">
       <.chip>
         <span class="font-semibold">Clock</span>
-        <span class="opacity-70">seq</span> <%= @seq %>
-        <span class="opacity-70">Hz</span> <%= fmt(@hz) %>
-        <span class="opacity-70">Δt</span> <%= @dtms %>ms
-        <span class="opacity-70">ϕ</span> <%= fmt(@phi) %>
+        <span class="opacity-70">seq</span> {@seq}
+        <span class="opacity-70">Hz</span> {fmt(@hz)}
+        <span class="opacity-70">Δt</span> {@dtms}ms <span class="opacity-70">ϕ</span> {fmt(@phi)}
       </.chip>
 
       <.chip>
         <span class="font-semibold">Intent</span>
         <%= if is_binary(@label) do %>
-          <code class="px-1"><%= @label %></code>
+          <code class="px-1">{@label}</code>
         <% else %>
           <span>—</span>
         <% end %>
-        <%= if is_binary(@kw) do %>· <%= @kw %><% end %>
-        <%= if is_number(@conf) do %>· <%= fmt_pct(@conf) %><% else %>· --<% end %>
+        <%= if is_binary(@kw) do %>
+          · {@kw}
+        <% end %>
+        <%= if is_number(@conf) do %>
+          · {fmt_pct(@conf)}
+        <% else %>
+          · --
+        <% end %>
         <%= if is_binary(@src) do %>
-          <span class="opacity-60">( <%= @src %> )</span>
+          <span class="opacity-60">( {@src} )</span>
         <% end %>
       </.chip>
 
       <.chip>
         <span class="font-semibold">Mood</span>
-        Expl: <%= fmt(@expl) %>
-        · Inhib: <%= fmt(@inhib) %>
-        · Vigil: <%= fmt(@vigil) %>
-        · Plast: <%= fmt(@plast) %>
+        Expl: {fmt(@expl)} · Inhib: {fmt(@inhib)} · Vigil: {fmt(@vigil)} · Plast: {fmt(@plast)}
       </.chip>
 
       <.chip>
         <button class="text-xs border px-2 py-1 rounded" phx-click="refresh">Refresh</button>
-        <span class="opacity-60">Auto:</span> <%= @auto_on && "ON" || "OFF" %>
+        <span class="opacity-60">Auto:</span> {(@auto_on && "ON") || "OFF"}
       </.chip>
     </div>
     """
@@ -142,10 +143,11 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # HUD chip component (internal)
   slot :inner_block, required: true
+
   defp chip(assigns) do
     ~H"""
     <span class="text-xs px-2 py-1 rounded-md border bg-white/70 text-zinc-700 flex items-center gap-1">
-      <%= render_slot(@inner_block) %>
+      {render_slot(@inner_block)}
     </span>
     """
   end
@@ -154,15 +156,16 @@ defmodule SymbrellaWeb.BrainHTML do
   # Public so Panels.brain/1 can call it
 
   attr :state, :any, default: %{}
+
   def live_state_panel(assigns) do
     st = assigns[:state] || %{}
 
     assigns =
       assigns
       |> assign(:proc, Map.get(st, :process) || Map.get(st, :process_name) || "N/A")
-      |> assign(:pid,  Map.get(st, :pid) || "N/A")
-      |> assign(:q,    Map.get(st, :queue, 0))
-      |> assign(:cur,  Map.get(st, :current) || Map.get(st, :current_msg))
+      |> assign(:pid, Map.get(st, :pid) || "N/A")
+      |> assign(:q, Map.get(st, :queue, 0))
+      |> assign(:cur, Map.get(st, :current) || Map.get(st, :current_msg))
       |> assign(:state_dump, Map.get(st, :state, st))
 
     ~H"""
@@ -170,10 +173,10 @@ defmodule SymbrellaWeb.BrainHTML do
       <h2 class="font-semibold mb-2">Live state</h2>
 
       <div class="text-sm space-y-1 mb-2">
-        <div><span class="opacity-60">process:</span> <code><%= inspect(@proc) %></code></div>
-        <div><span class="opacity-60">pid:</span> <code><%= inspect(@pid) %></code></div>
-        <div><span class="opacity-60">queue:</span> <%= @q %></div>
-        <div><span class="opacity-60">current:</span> <%= inspect(@cur || :idle) %></div>
+        <div><span class="opacity-60">process:</span> <code>{inspect(@proc)}</code></div>
+        <div><span class="opacity-60">pid:</span> <code>{inspect(@pid)}</code></div>
+        <div><span class="opacity-60">queue:</span> {@q}</div>
+        <div><span class="opacity-60">current:</span> {inspect(@cur || :idle)}</div>
       </div>
 
       <div class="text-sm text-zinc-500">State</div>
@@ -189,6 +192,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   attr :status, :any, required: true
   attr :selected, :atom, default: :lifg
+
   def module_status_panel(assigns) do
     stat = assigns[:status] || %{}
 
@@ -214,10 +218,10 @@ defmodule SymbrellaWeb.BrainHTML do
     <div class="border rounded-xl p-4 shadow-sm">
       <div class="flex items-center justify-between mb-2">
         <h2 class="font-semibold">
-          Module Status — <%= @selected |> to_string() |> String.upcase() %>
+          Module Status — {@selected |> to_string() |> String.upcase()}
         </h2>
         <span class={["text-xs px-2 py-1 rounded border", status_badge_class(@tag_level)]}>
-          <%= @tag_text %>
+          {@tag_text}
         </span>
       </div>
 
@@ -231,12 +235,12 @@ defmodule SymbrellaWeb.BrainHTML do
           </pre>
         <% else %>
           <div class="text-sm">
-            <%= case @status[:error] do
+            {case @status[:error] do
               :not_running -> "Region process is not running."
-              :noproc      -> "No process registered for this region."
-              {:exit, r}   -> "Exited while fetching status: #{inspect(r)}"
-              other        -> "Status unavailable: #{inspect(other)}"
-            end %>
+              :noproc -> "No process registered for this region."
+              {:exit, r} -> "Exited while fetching status: #{inspect(r)}"
+              other -> "Status unavailable: #{inspect(other)}"
+            end}
           </div>
         <% end %>
       <% end %>
@@ -244,8 +248,8 @@ defmodule SymbrellaWeb.BrainHTML do
     """
   end
 
-  defp status_badge_class(:ok),      do: "border-green-400 text-green-600"
-  defp status_badge_class(:warn),    do: "border-amber-400 text-amber-600"
+  defp status_badge_class(:ok), do: "border-green-400 text-green-600"
+  defp status_badge_class(:warn), do: "border-amber-400 text-amber-600"
   defp status_badge_class(_neutral), do: "border-zinc-300 text-zinc-600"
 
   # --- Mood panel ------------------------------------------------------------
@@ -265,25 +269,25 @@ defmodule SymbrellaWeb.BrainHTML do
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold">Mood</h2>
         <span class={["text-xs px-2 py-1 rounded border", tone_class(@tone)]}>
-          <%= to_string(@tone) %>
+          {to_string(@tone)}
         </span>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div>
           <h3 class="text-sm text-zinc-500 mb-1">Neuromodulators</h3>
-          <.kv label="DA"  value={fmt(@levels[:da])} />
+          <.kv label="DA" value={fmt(@levels[:da])} />
           <.kv label="5HT" value={fmt(@levels[:"5ht"])} />
           <.kv label="GLU" value={fmt(@levels[:glu])} />
-          <.kv label="NE"  value={fmt(@levels[:ne])} />
+          <.kv label="NE" value={fmt(@levels[:ne])} />
         </div>
 
         <div>
           <h3 class="text-sm text-zinc-500 mb-1">Derived</h3>
           <.kv label="Exploration" value={fmt(@derived[:exploration])} />
-          <.kv label="Inhibition"  value={fmt(@derived[:inhibition])} />
-          <.kv label="Vigilance"   value={fmt(@derived[:vigilance])} />
-          <.kv label="Plasticity"  value={fmt(@derived[:plasticity])} />
+          <.kv label="Inhibition" value={fmt(@derived[:inhibition])} />
+          <.kv label="Vigilance" value={fmt(@derived[:vigilance])} />
+          <.kv label="Plasticity" value={fmt(@derived[:plasticity])} />
         </div>
       </div>
     </div>
@@ -294,34 +298,40 @@ defmodule SymbrellaWeb.BrainHTML do
 
   attr :label, :any, required: true
   attr :value, :any, required: true
+
   defp kv(assigns) do
     ~H"""
     <div class="flex items-center justify-between py-0.5">
-      <span class="text-sm text-zinc-500"><%= @label %></span>
-      <span class="font-mono text-sm"><%= @value %></span>
+      <span class="text-sm text-zinc-500">{@label}</span>
+      <span class="font-mono text-sm">{@value}</span>
     </div>
     """
   end
 
   defp tone_class(:positive), do: "border-green-400 text-green-600"
   defp tone_class(:negative), do: "border-red-400 text-red-600"
-  defp tone_class(_),         do: "border-zinc-300 text-zinc-600"
+  defp tone_class(_), do: "border-zinc-300 text-zinc-600"
 
   defp fmt(nil), do: "—"
+
   defp fmt(v) when is_number(v),
     do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
+
   defp fmt(v), do: to_string(v)
 
   defp fmt_pct(nil), do: "--"
   defp fmt_pct(v) when is_integer(v), do: "#{v}%"
+
   defp fmt_pct(v) when is_float(v),
     do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
+
   defp fmt_pct(v), do: to_string(v)
 
   # --- tiny helpers for mixed-key maps + mood dims --------------------------
 
   defp mget(m, k) when is_map(m),
     do: Map.get(m, k) || Map.get(m, to_string(k))
+
   defp mget(_, _), do: nil
 
   defp nonempty_map(%{} = m) when map_size(m) > 0, do: m
@@ -335,4 +345,3 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp mood_val(_, _), do: nil
 end
-

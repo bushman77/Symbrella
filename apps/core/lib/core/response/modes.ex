@@ -231,4 +231,3 @@ defmodule Core.Response.Modes do
     :erlang.phash2({intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag)})
   end
 end
-

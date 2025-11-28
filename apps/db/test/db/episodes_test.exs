@@ -1,6 +1,6 @@
 defmodule Db.TestEmbedder do
   @moduledoc false
-@dim Application.compile_env(:db, :embedding_dim, 1536)
+  @dim Application.compile_env(:db, :embedding_dim, 1536)
 
   # Deterministic, fast, and dimension-stable for tests
   def embed(text) when is_binary(text) do

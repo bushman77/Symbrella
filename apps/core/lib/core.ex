@@ -211,4 +211,3 @@ defmodule Core do
     end
   end
 end
-

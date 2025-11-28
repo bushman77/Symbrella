@@ -55,7 +55,8 @@ defmodule Brain.Recall.Synonyms do
   end
 
   @spec expand_for_tokens([token], keyword) :: %{
-          results: list(%{index: non_neg_integer(), phrase: String.t(), pos: any(), synonyms: syns}),
+          results:
+            list(%{index: non_neg_integer(), phrase: String.t(), pos: any(), synonyms: syns}),
           hits: non_neg_integer(),
           misses: non_neg_integer()
         }
@@ -73,9 +74,12 @@ defmodule Brain.Recall.Synonyms do
           pos = Map.get(tok, :pos)
 
           syns =
-            if is_nil(pos), do: lookup(phrase, k), else: lookup_by_pos(phrase, pos, k)
-            |> maybe_drop_self(phrase, keep_self?)
-            |> Enum.take(k)
+            if is_nil(pos),
+              do: lookup(phrase, k),
+              else:
+                lookup_by_pos(phrase, pos, k)
+                |> maybe_drop_self(phrase, keep_self?)
+                |> Enum.take(k)
 
           item = %{index: idx, phrase: phrase, pos: pos, synonyms: syns}
           acc_hits_new = acc_hits + if syns == [], do: 0, else: 1
@@ -97,9 +101,10 @@ defmodule Brain.Recall.Synonyms do
   defp do_lookup(lemma, pos, k) do
     :telemetry.span([:brain, :synonyms, :lookup], %{lemma: lemma, pos: pos, k: k}, fn ->
       q =
-        from c in BrainCell,
+        from(c in BrainCell,
           where: c.word == ^lemma,
           select: %{pos: c.pos, synonyms: c.synonyms}
+        )
 
       rows = Db.all(q)
 
@@ -142,4 +147,3 @@ defmodule Brain.Recall.Synonyms do
     end
   end
 end
-

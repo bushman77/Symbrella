@@ -128,14 +128,16 @@ defmodule Core.LexicalExplain do
     ok? =
       ok? and
         if MapSet.size(allowed_norms) > 0 do
-          MapSet.member?(allowed_norms, norm) or (word != "" and MapSet.member?(allowed_norms, word))
+          MapSet.member?(allowed_norms, norm) or
+            (word != "" and MapSet.member?(allowed_norms, word))
         else
           true
         end
 
     ok? and
       if is_binary(sentence) and sentence != "" do
-        whole_word_in_sentence?(sentence, norm) or (word != "" and whole_word_in_sentence?(sentence, word))
+        whole_word_in_sentence?(sentence, norm) or
+          (word != "" and whole_word_in_sentence?(sentence, word))
       else
         true
       end
@@ -230,12 +232,24 @@ defmodule Core.LexicalExplain do
     raw = pos_raw(cell)
 
     cond do
-      raw in ["adj", "adjective", "a", "s", "adj_sat", "adjective satellite"] -> :adjective
-      String.starts_with?(raw, "adj") -> :adjective
-      raw in ["n", "noun"] or String.starts_with?(raw, "noun") -> :noun
-      raw in ["v", "verb"] or String.starts_with?(raw, "verb") -> :verb
-      raw in ["r", "adv", "adverb"] or String.starts_with?(raw, "adv") or String.starts_with?(raw, "adverb") -> :adverb
-      true -> :other
+      raw in ["adj", "adjective", "a", "s", "adj_sat", "adjective satellite"] ->
+        :adjective
+
+      String.starts_with?(raw, "adj") ->
+        :adjective
+
+      raw in ["n", "noun"] or String.starts_with?(raw, "noun") ->
+        :noun
+
+      raw in ["v", "verb"] or String.starts_with?(raw, "verb") ->
+        :verb
+
+      raw in ["r", "adv", "adverb"] or String.starts_with?(raw, "adv") or
+          String.starts_with?(raw, "adverb") ->
+        :adverb
+
+      true ->
+        :other
     end
   end
 
@@ -298,7 +312,7 @@ defmodule Core.LexicalExplain do
     |> Enum.map(&norm_text/1)
     |> Enum.uniq()
     |> Enum.reject(&MapSet.member?(@stopwords, &1))
-    |> Enum.reject(&(Regex.match?(~r/\s/u, &1)))
+    |> Enum.reject(&Regex.match?(~r/\s/u, &1))
     |> Enum.reject(&(String.length(&1) < @default_min_syn_len))
     |> Enum.reject(fn s ->
       # If the synonym is literally present as a whole word in the sentence, it’s probably not a “synonym” here.
@@ -347,7 +361,7 @@ defmodule Core.LexicalExplain do
     end)
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.reject(&MapSet.member?(@stopwords, &1))
-    |> Enum.reject(&(Regex.match?(~r/\s/u, &1)))
+    |> Enum.reject(&Regex.match?(~r/\s/u, &1))
     |> MapSet.new()
   end
 
@@ -427,4 +441,3 @@ defmodule Core.LexicalExplain do
     |> String.trim()
   end
 end
-

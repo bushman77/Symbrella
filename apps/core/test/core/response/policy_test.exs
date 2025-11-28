@@ -314,4 +314,3 @@ defmodule Core.Response.PolicyTest do
     end
   end
 end
-

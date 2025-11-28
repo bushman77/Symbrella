@@ -131,4 +131,3 @@ defmodule BrainLIFGIntegrationTest do
     assert ch3_1.margin >= ch2_1.margin
   end
 end
-

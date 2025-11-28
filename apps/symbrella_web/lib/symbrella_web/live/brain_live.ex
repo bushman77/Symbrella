@@ -43,21 +43,21 @@ defmodule SymbrellaWeb.BrainLive do
     socket =
       socket
       # Core assigns (safe defaults)
-      |> assign_new(:selected,       fn -> default_selected() end)
-      |> assign_new(:regions,        fn -> [] end)
-      |> assign_new(:module_info,    fn -> %{} end)
-      |> assign_new(:intent,         fn -> %{} end)
-      |> assign_new(:snapshot,       fn -> nil end)
-      |> assign_new(:lifg_last,      fn -> %{} end)
-      |> assign_new(:hippo,          fn -> %{window: []} end)
-      |> assign_new(:hippo_metrics,  fn -> %{} end)
-      |> assign_new(:region,         fn -> %{} end)
-      |> assign_new(:region_state,   fn -> %{workspace: [], snapshot: %{}} end)
-      |> assign_new(:region_status,  fn -> %{} end)
-      |> assign_new(:auto,           fn -> false end)
-      |> assign_new(:clock,          fn -> %{} end)
+      |> assign_new(:selected, fn -> default_selected() end)
+      |> assign_new(:regions, fn -> [] end)
+      |> assign_new(:module_info, fn -> %{} end)
+      |> assign_new(:intent, fn -> %{} end)
+      |> assign_new(:snapshot, fn -> nil end)
+      |> assign_new(:lifg_last, fn -> %{} end)
+      |> assign_new(:hippo, fn -> %{window: []} end)
+      |> assign_new(:hippo_metrics, fn -> %{} end)
+      |> assign_new(:region, fn -> %{} end)
+      |> assign_new(:region_state, fn -> %{workspace: [], snapshot: %{}} end)
+      |> assign_new(:region_status, fn -> %{} end)
+      |> assign_new(:auto, fn -> false end)
+      |> assign_new(:clock, fn -> %{} end)
       # NEW: BrainHTML expects :svg_base (not :brain_svg)
-      |> assign_new(:svg_base,       fn -> load_brain_svg() end)
+      |> assign_new(:svg_base, fn -> load_brain_svg() end)
       # NEW: seed mood defaults + alias + telemetry id holder
       |> MoodHud.seed()
       # Global status grid
@@ -93,7 +93,7 @@ defmodule SymbrellaWeb.BrainLive do
         else: Map.put(assigns, :mood, MoodHud.defaults())
 
     ~H"""
-    <%= BrainHTML.brain(assigns) %>
+    {BrainHTML.brain(assigns)}
 
     <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
     <.mood_hud mood={@mood} />
@@ -121,7 +121,9 @@ defmodule SymbrellaWeb.BrainLive do
   def handle_params(params, _uri, socket) do
     socket =
       case Map.get(params, "r") do
-        nil -> socket
+        nil ->
+          socket
+
         r when is_binary(r) ->
           sel =
             try do
@@ -142,7 +144,9 @@ defmodule SymbrellaWeb.BrainLive do
 
     sel =
       cond do
-        is_atom(r) -> r
+        is_atom(r) ->
+          r
+
         is_binary(r) ->
           try do
             String.to_existing_atom(r)
@@ -150,7 +154,8 @@ defmodule SymbrellaWeb.BrainLive do
             ArgumentError -> socket.assigns.selected
           end
 
-        true -> socket.assigns.selected
+        true ->
+          socket.assigns.selected
       end
 
     send(self(), :refresh_selected)
@@ -166,58 +171,59 @@ defmodule SymbrellaWeb.BrainLive do
   # ---------------------------------------------------------------------------
   # Incoming telemetry + PubSub (ALL handle_info/2 CLAUSES GROUPED HERE)
   # ---------------------------------------------------------------------------
-@impl true
-def handle_info(:refresh_selected, socket) do
-  {:noreply, refresh_selected(socket)}
-end
+  @impl true
+  def handle_info(:refresh_selected, socket) do
+    {:noreply, refresh_selected(socket)}
+  end
 
   # Mood: delegate to MoodHud
   @impl true
-  def handle_info({:mood_event, _, _} = msg, socket),  do: MoodHud.on_info(msg, socket)
+  def handle_info({:mood_event, _, _} = msg, socket), do: MoodHud.on_info(msg, socket)
   @impl true
   def handle_info({:mood_update, _, _} = msg, socket), do: MoodHud.on_info(msg, socket)
   @impl true
-  def handle_info({:mood, _} = msg, socket),           do: MoodHud.on_info(msg, socket)
+  def handle_info({:mood, _} = msg, socket), do: MoodHud.on_info(msg, socket)
 
   # Blackboard / bus
   @impl true
   def handle_info({:blackboard, env}, socket), do: handle_blackboard(env, socket)
   @impl true
-  def handle_info({:brain_bus, env}, socket),  do: handle_blackboard(env, socket)
+  def handle_info({:brain_bus, env}, socket), do: handle_blackboard(env, socket)
 
   # HUD topics
   @impl true
   def handle_info({:clock, m}, socket), do: {:noreply, assign(socket, :clock, m || %{})}
 
-@impl true
-def handle_info({:intent, m}, socket) do
-  intent = normalize_intent(m, "bus")
-  IO.inspect(m,       label: "BrainLive bus raw intent")
-  IO.inspect(intent,  label: "BrainLive normalized intent")
+  @impl true
+  def handle_info({:intent, m}, socket) do
+    intent = normalize_intent(m, "bus")
+    IO.inspect(m, label: "BrainLive bus raw intent")
+    IO.inspect(intent, label: "BrainLive normalized intent")
 
-  {:noreply, assign(socket, :intent, intent)}
-end
+    {:noreply, assign(socket, :intent, intent)}
+  end
 
-@impl true
-def handle_info({:lifg_update, m}, socket) do
-  lifg_last = m || %{}
+  @impl true
+  def handle_info({:lifg_update, m}, socket) do
+    lifg_last = m || %{}
 
-  intent_from_lifg =
-    lifg_last
-    |> extract_intent_any()   # digs into lifg_last.si.intent, lifg_last.intent, etc.
+    intent_from_lifg =
+      lifg_last
+      # digs into lifg_last.si.intent, lifg_last.intent, etc.
+      |> extract_intent_any()
 
-  socket =
-    socket
-    |> assign(:lifg_last, lifg_last)
-    |> (fn sock ->
-          case intent_from_lifg do
-            nil    -> sock
-            intent -> assign(sock, :intent, stamp_intent(intent, "lifg"))
-          end
-        end).()
+    socket =
+      socket
+      |> assign(:lifg_last, lifg_last)
+      |> (fn sock ->
+            case intent_from_lifg do
+              nil -> sock
+              intent -> assign(sock, :intent, stamp_intent(intent, "lifg"))
+            end
+          end).()
 
-  {:noreply, socket}
-end
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -337,7 +343,9 @@ end
 
     gs =
       case safe_call(fn -> GenServer.call(mod, :status, 150) end) do
-        {:ok, s} when is_map(s) -> s
+        {:ok, s} when is_map(s) ->
+          s
+
         _ ->
           if Code.ensure_loaded?(mod) and function_exported?(mod, :status, 0) do
             case safe_call(fn -> mod.status() end) do
@@ -435,7 +443,7 @@ end
     s
     |> Map.put_new(:region, key)
     |> Map.put_new(:pid, pid)
-    |> Map.put_new(:status, s[:status] || s["status"] || (if pid, do: :up, else: :down))
+    |> Map.put_new(:status, s[:status] || s["status"] || if(pid, do: :up, else: :down))
   end
 
   # ---------------------------------------------------------------------------
@@ -446,24 +454,25 @@ end
 
   attr :selected, :atom
   attr :status, :map, default: %{}
+
   defp selected_region_status(assigns) do
     ~H"""
     <div class="mt-6">
       <div class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
-        Selected Region — Status (<%= @selected %>)
+        Selected Region — Status ({@selected})
       </div>
 
       <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           <div>
             <div class="font-medium mb-1">Mode & Thresholds</div>
-            <div>pMTG mode: <%= h(status_val(@status, :pmtg_mode)) %></div>
-            <div>pMTG window_keep: <%= h(status_val(@status, :pmtg_window_keep)) %></div>
-            <div>scores: <%= h(status_val(@status, :scores)) %></div>
-            <div>margin_threshold: <%= h(status_val(@status, :margin_threshold)) %></div>
-            <div>min_margin: <%= h(status_val(@status, :min_margin)) %></div>
-            <div>acc_conflict_tau: <%= h(status_val(@status, :acc_conflict_tau)) %></div>
-            <div>mwe_fallback: <%= h(status_val(@status, :mwe_fallback)) %></div>
+            <div>pMTG mode: {h(status_val(@status, :pmtg_mode))}</div>
+            <div>pMTG window_keep: {h(status_val(@status, :pmtg_window_keep))}</div>
+            <div>scores: {h(status_val(@status, :scores))}</div>
+            <div>margin_threshold: {h(status_val(@status, :margin_threshold))}</div>
+            <div>min_margin: {h(status_val(@status, :min_margin))}</div>
+            <div>acc_conflict_tau: {h(status_val(@status, :acc_conflict_tau))}</div>
+            <div>mwe_fallback: {h(status_val(@status, :mwe_fallback))}</div>
           </div>
 
           <div>
@@ -472,7 +481,7 @@ end
               <% %{} = w -> %>
                 <ul class="space-y-0.5">
                   <%= for {k, v} <- w do %>
-                    <li><%= to_string(k) %>: <%= h(v) %></li>
+                    <li>{to_string(k)}: {h(v)}</li>
                   <% end %>
                 </ul>
               <% _ -> %>
@@ -482,11 +491,11 @@ end
 
           <div>
             <div class="font-medium mb-1">Process</div>
-            <div>pid: <%= inspect(@status[:pid] || @status["pid"]) %></div>
-            <div>queue: <%= h(@status[:queue] || @status["queue"]) %></div>
-            <div>current: <%= h(@status[:current] || @status["current"]) %></div>
+            <div>pid: {inspect(@status[:pid] || @status["pid"])}</div>
+            <div>queue: {h(@status[:queue] || @status["queue"])}</div>
+            <div>current: {h(@status[:current] || @status["current"])}</div>
             <%= if rn = (@status[:registered_name] || @status["registered_name"]) do %>
-              <div>registered_name: <%= h(rn) %></div>
+              <div>registered_name: {h(rn)}</div>
             <% end %>
           </div>
         </div>
@@ -498,27 +507,27 @@ end
   defp status_val(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp status_val(_, _), do: nil
 
-defp refresh_selected(socket) do
-  selected = socket.assigns[:selected] || default_selected()
+  defp refresh_selected(socket) do
+    selected = socket.assigns[:selected] || default_selected()
 
-  {snapshot, status} = fetch_snapshot_and_status(selected)
+    {snapshot, status} = fetch_snapshot_and_status(selected)
 
-  socket
-  |> assign(:snapshot, snapshot)
-  |> assign(:region_status, status)
-  |> assign(:all_status, collect_all_region_status())
-  |> update(:region_state, fn st ->
-    st = st || %{}
-    # keep existing workspace history, just update the latest snapshot
-    st
-    |> Map.put(:snapshot, snapshot)
-  end)
-end
-
+    socket
+    |> assign(:snapshot, snapshot)
+    |> assign(:region_status, status)
+    |> assign(:all_status, collect_all_region_status())
+    |> update(:region_state, fn st ->
+      st = st || %{}
+      # keep existing workspace history, just update the latest snapshot
+      st
+      |> Map.put(:snapshot, snapshot)
+    end)
+  end
 
   # --- All-regions status grid ----------------------------------------------
 
   attr :all_status, :map, default: %{}
+
   defp regions_status_grid(assigns) do
     ~H"""
     <div class="mt-6">
@@ -529,23 +538,23 @@ end
         <%= for {k, s} <- @all_status do %>
           <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-white/70 dark:bg-neutral-900/70">
             <div class="flex items-center justify-between">
-              <div class="text-sm font-medium"><%= RegionRegistry.label_for(k) %></div>
+              <div class="text-sm font-medium">{RegionRegistry.label_for(k)}</div>
               <span class={"text-xs px-2 py-0.5 rounded-full " <> status_badge_class(s[:status])}>
-                <%= (s[:status] || :unknown) |> to_string() %>
+                {(s[:status] || :unknown) |> to_string()}
               </span>
             </div>
             <div class="mt-2 text-xs text-gray-600 dark:text-gray-400">
-              <div>pid: <%= inspect(s[:pid]) %></div>
+              <div>pid: {inspect(s[:pid])}</div>
               <%= if is_number(s[:queue] || s["queue"]) do %>
-                <div>queue: <%= s[:queue] || s["queue"] %></div>
+                <div>queue: {s[:queue] || s["queue"]}</div>
               <% end %>
               <%= if s[:current] || s["current"] do %>
-                <div>current: <%= h(s[:current] || s["current"]) %></div>
+                <div>current: {h(s[:current] || s["current"])}</div>
               <% end %>
               <%= if s[:store] && is_map(s[:store]) do %>
                 <div class="mt-1">
-                  store: size=<%= s[:store][:size] || s[:store]["size"] || 0 %>,
-                  pending=<%= s[:store][:pending] || s[:store]["pending"] || 0 %>
+                  store: size={s[:store][:size] || s[:store]["size"] || 0},
+                  pending={s[:store][:pending] || s[:store]["pending"] || 0}
                 </div>
               <% end %>
             </div>
@@ -569,8 +578,8 @@ end
 
   # Tuples/PIDs/Maps/Lists → inspect/1 so HEEx won't choke.
   defp h(v) when is_tuple(v), do: inspect(v)
-  defp h(v) when is_pid(v),   do: inspect(v)
-  defp h(v) when is_map(v),   do: inspect(v)
+  defp h(v) when is_pid(v), do: inspect(v)
+  defp h(v) when is_map(v), do: inspect(v)
   defp h(v) when is_list(v) and not is_binary(v), do: inspect(v)
   defp h(v), do: v
 
@@ -585,8 +594,8 @@ end
       socket
     else
       case fetch_global_intent() do
-        nil     -> socket
-        intent  -> assign(socket, :intent, stamp_intent(intent, "snapshot"))
+        nil -> socket
+        intent -> assign(socket, :intent, stamp_intent(intent, "snapshot"))
       end
     end
   end
@@ -629,16 +638,16 @@ end
 
     nested =
       mget_in(m, [:core, :intent]) ||
-      mget_in(m, [:si, :intent]) ||
-      mget_in(m, [:semantic, :intent]) ||
-      mget_in(m, [:latest, :intent]) ||
-      mget_in(m, [:brain, :intent])
+        mget_in(m, [:si, :intent]) ||
+        mget_in(m, [:semantic, :intent]) ||
+        mget_in(m, [:latest, :intent]) ||
+        mget_in(m, [:brain, :intent])
 
     # allow Brain.snapshot/0’s :last_intent as a fallback
     last =
       mget(m, :last_intent) ||
-      mget_in(m, [:brain, :last_intent]) ||
-      mget_in(m, [:latest, :last_intent])
+        mget_in(m, [:brain, :last_intent]) ||
+        mget_in(m, [:latest, :last_intent])
 
     candidate = direct || nested || last
 
@@ -664,9 +673,9 @@ end
         mget(m, :name) ||
         mget(m, :type)
 
-    kw    = mget(m, :keyword) || mget(m, :key)
-    conf  = mget(m, :confidence) || mget(m, :score) || mget(m, :prob)
-    src0  = mget(m, :source) || src
+    kw = mget(m, :keyword) || mget(m, :key)
+    conf = mget(m, :confidence) || mget(m, :score) || mget(m, :prob)
+    src0 = mget(m, :source) || src
 
     # HUD wants a *string* label or it prints "—"
     label_str =
@@ -732,9 +741,8 @@ end
     {:noreply,
      update(socket, :region_state, fn st ->
        st = st || %{}
-       ws = [env | (st[:workspace] || [])] |> Enum.take(100)
+       ws = [env | st[:workspace] || []] |> Enum.take(100)
        Map.put(st, :workspace, ws)
      end)}
   end
 end
-

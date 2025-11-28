@@ -37,13 +37,13 @@ defmodule Brain.HippocampusTelemetryTest do
 
     assert_receive {:telemetry, [:brain, :hippocampus, :write], meas, meta}, 100
     assert is_integer(meas.window_size) and meas.window_size >= 1
-# Keep the source check but allow additional keys
-assert %{meta: %{source: :test} = episode_meta} = meta
+    # Keep the source check but allow additional keys
+    assert %{meta: %{source: :test} = episode_meta} = meta
 
-# Optionally assert that we get emotional context now
-assert Map.has_key?(episode_meta, :emotion)
-assert Map.has_key?(episode_meta, :latents)
-assert Map.has_key?(episode_meta, :tone_reaction)
+    # Optionally assert that we get emotional context now
+    assert Map.has_key?(episode_meta, :emotion)
+    assert Map.has_key?(episode_meta, :latents)
+    assert Map.has_key?(episode_meta, :tone_reaction)
 
     :telemetry.detach(handler_id)
     flush_telemetry()

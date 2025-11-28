@@ -66,19 +66,19 @@ defmodule SymbrellaWeb.Region do
   end
 
   defmacro __using__(opts) do
-    key    = Keyword.fetch!(opts, :key)
-    path   = Keyword.fetch!(opts, :path)
+    key = Keyword.fetch!(opts, :key)
+    path = Keyword.fetch!(opts, :path)
     colors = Keyword.fetch!(opts, :colors)
     anchor = Keyword.fetch!(opts, :anchor)
     tweak0 = Keyword.get(opts, :tweak, %{dx: 0, dy: 0, s: 1.0})
 
     # Optional metadata (pure constants if you choose to provide them)
-    title    = Keyword.get(opts, :title, nil)
+    title = Keyword.get(opts, :title, nil)
     subtitle = Keyword.get(opts, :subtitle, nil)
-    desc     = Keyword.get(opts, :desc, nil)
-    modules  = Keyword.get(opts, :modules, nil)
-    telem    = Keyword.get(opts, :telemetry, nil)
-    confs    = Keyword.get(opts, :config_examples, nil)
+    desc = Keyword.get(opts, :desc, nil)
+    modules = Keyword.get(opts, :modules, nil)
+    telem = Keyword.get(opts, :telemetry, nil)
+    confs = Keyword.get(opts, :config_examples, nil)
 
     # Normalize tweak at compile time and emit as a literal map
     tweak = sanitize_tweak(tweak0)
@@ -132,4 +132,3 @@ defmodule SymbrellaWeb.Region do
     end
   end
 end
-

@@ -80,9 +80,8 @@ defmodule Brain.Telemetry do
     end)
   end
 
-# lib/brain/telemetry.ex
-def meta(extra \\ %{}) do
-  Map.merge(%{v: 3}, extra)
-end
-
+  # lib/brain/telemetry.ex
+  def meta(extra \\ %{}) do
+    Map.merge(%{v: 3}, extra)
+  end
 end

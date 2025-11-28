@@ -38,13 +38,13 @@ defmodule SymbrellaWeb.Components.MoodChip do
       </div>
 
       <% tone =
-           @tone ||
-             @mood[:tone_hint] || @mood["tone_hint"] ||
-             @mood[:tone] || @mood["tone"] %>
+        @tone ||
+          @mood[:tone_hint] || @mood["tone_hint"] ||
+          @mood[:tone] || @mood["tone"] %>
 
       <%= if tone do %>
         <span class={tone_class(tone)} title={"Tone: " <> tone_label(tone)}>
-          <%= tone_label(tone) %>
+          {tone_label(tone)}
         </span>
       <% end %>
     </div>
@@ -160,4 +160,3 @@ defmodule SymbrellaWeb.Components.MoodChip do
 
   defp to_float_01(_), do: 0.5
 end
-

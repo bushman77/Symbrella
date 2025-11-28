@@ -114,4 +114,3 @@ defmodule Core.MWE.InjectorTest do
     assert Enum.map(out, & &1.phrase) == Enum.map(tokens, & &1.phrase)
   end
 end
-

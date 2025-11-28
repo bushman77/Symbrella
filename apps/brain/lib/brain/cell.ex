@@ -66,8 +66,10 @@ defmodule Brain.Cell do
       |> normalize_id()
       |> then(fn s -> not bad_shape?(s) end)
       |> case do
-        false -> false
-        true  ->
+        false ->
+          false
+
+        true ->
           validate_id!(normalize_id(to_string(id)))
           true
       end
@@ -131,6 +133,7 @@ defmodule Brain.Cell do
 
     # POS must be whitelisted
     pos = Enum.at(segments, 1)
+
     unless pos in @allowed_pos do
       return_reject!(id, {:unknown_pos, pos})
     end
@@ -195,4 +198,3 @@ defmodule Brain.Cell do
 
   defp bad_shape?(_), do: true
 end
-

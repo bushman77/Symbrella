@@ -54,11 +54,11 @@ defmodule Brain.LIFG.Stage1 do
 
   @pos_prior %{
     "phrase" => 0.98,
-    "verb"   => 0.96,
-    "adj"    => 0.95,
-    "adv"    => 0.94,
-    "noun"   => 0.93,
-    "other"  => 0.93
+    "verb" => 0.96,
+    "adj" => 0.95,
+    "adv" => 0.94,
+    "noun" => 0.93,
+    "other" => 0.93
   }
 
   @greeting_lemmas MapSet.new([
@@ -86,7 +86,7 @@ defmodule Brain.LIFG.Stage1 do
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
-      si0  = Safe.to_plain(si)
+      si0 = Safe.to_plain(si)
       sent = Safe.get(si0, :sentence, "") |> to_string()
 
       # 1) Tokens + Guard preprocessing (may drop tokens)
@@ -124,8 +124,8 @@ defmodule Brain.LIFG.Stage1 do
       # 3) Telemetry events (overridable by tests / PMTG)
       chargram_event = Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
       boundary_event = Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
-      mwe_event      = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
-      mwe_fallback?  = Keyword.get(opts, :mwe_fallback, true)
+      mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
+      mwe_fallback? = Keyword.get(opts, :mwe_fallback, true)
 
       # 4) Main scoring loop
       {choices, acc} =
@@ -239,7 +239,7 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp token_mwe?(tok) do
-    n_val       = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
+    n_val = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
     has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
     has_mw_flag || (is_integer(n_val) and n_val > 1)
   end
@@ -273,10 +273,10 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp score_token(tok, acc, ctx) do
-    raw_phrase   = token_raw_phrase(tok)
+    raw_phrase = token_raw_phrase(tok)
     token_phrase = norm(raw_phrase)
-    token_mwe?   = token_mwe?(tok)
-    tok_index    = token_index(tok, 0)
+    token_mwe? = token_mwe?(tok)
+    tok_index = token_index(tok, 0)
 
     case boundary_check(ctx.sent, tok, token_phrase, token_mwe?) do
       :ok ->
@@ -316,7 +316,7 @@ defmodule Brain.LIFG.Stage1 do
 
       scored_trip =
         Enum.map(cand_list, fn c ->
-          id  = sense_id_for(c, token_phrase)
+          id = sense_id_for(c, token_phrase)
           pos = pos_of(c)
 
           cnrm =
@@ -335,9 +335,7 @@ defmodule Brain.LIFG.Stage1 do
             |> clamp01()
 
           act0 =
-            clamp01(
-              Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c)))
-            )
+            clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
 
           # relation context
           lex_ctx = clamp01(lex0 + 0.6 * syn_hits)
@@ -373,14 +371,14 @@ defmodule Brain.LIFG.Stage1 do
             |> clamp01()
 
           base0 =
-            (ctx.weights[:lex_fit]     * lex   +
-               ctx.weights[:rel_prior]   * rel   +
-               ctx.weights[:activation]  * act   +
+            (ctx.weights[:lex_fit] * lex +
+               ctx.weights[:rel_prior] * rel +
+               ctx.weights[:activation] * act +
                ctx.weights[:intent_bias] * intent_feat)
             |> clamp01()
 
           hom_bump = if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
-          base     = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
+          base = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
 
           feat = %{
             id: id,
@@ -393,9 +391,9 @@ defmodule Brain.LIFG.Stage1 do
           {id, base, feat}
         end)
 
-      ids         = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
+      ids = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
       base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
-      feats       = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
+      feats = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
 
       ctx_key =
         Cerebellum.context_key({:lifg_stage1, intent: intent_key(ctx.si), mwe: token_mwe?})
@@ -406,7 +404,7 @@ defmodule Brain.LIFG.Stage1 do
       cal_scores = cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
 
       logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
-      probs  = softmax(logits)
+      probs = softmax(logits)
 
       ranked =
         Enum.zip(ids, probs)
@@ -426,15 +424,15 @@ defmodule Brain.LIFG.Stage1 do
         end
 
       margin0 = top_p - second_p
-      margin  = Float.round(max(margin0, ctx.min_margin), 6)
+      margin = Float.round(max(margin0, ctx.min_margin), 6)
 
       _ = cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
 
       scores_out =
         case ctx.scores_mode do
-          :all  -> Map.new(ranked)
+          :all -> Map.new(ranked)
           :top2 -> ranked |> Enum.take(2) |> Map.new()
-          _     -> %{}
+          _ -> %{}
         end
 
       alt_ids =
@@ -605,9 +603,9 @@ defmodule Brain.LIFG.Stage1 do
   def handle_info({:mood_update, meas}, state) do
     mood = %{
       exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
-      inhibition:  get_num(meas, :inhibition,  0.5) |> clamp01(),
-      vigilance:   get_num(meas, :vigilance,   0.5) |> clamp01(),
-      plasticity:  get_num(meas, :plasticity,  0.5) |> clamp01()
+      inhibition: get_num(meas, :inhibition, 0.5) |> clamp01(),
+      vigilance: get_num(meas, :vigilance, 0.5) |> clamp01(),
+      plasticity: get_num(meas, :plasticity, 0.5) |> clamp01()
     }
 
     {:noreply, %{state | mood: mood, mood_last_ms: System.system_time(:millisecond)}}
@@ -643,24 +641,24 @@ defmodule Brain.LIFG.Stage1 do
   defp restrict_to_phrase_if_mwe(candidates, true) when is_list(candidates) do
     phrase_like =
       Enum.filter(candidates, fn c ->
-        id   = Safe.get(c, :id)    || Safe.get(c, "id")
-        norm = Safe.get(c, :norm)  || Safe.get(c, :lemma) || Safe.get(c, :word)
+        id = Safe.get(c, :id) || Safe.get(c, "id")
+        norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word)
 
-        id_s   = to_string(id || "")
+        id_s = to_string(id || "")
         norm_s = to_string(norm || "")
 
         String.contains?(id_s, "|phrase|") or String.contains?(norm_s, " ")
       end)
 
     case phrase_like do
-      []   -> candidates
+      [] -> candidates
       list -> list
     end
   end
 
   defp function_pos?(p) when is_binary(p), do: String.downcase(p) in @function_pos
-  defp function_pos?(p) when is_atom(p),   do: function_pos?(Atom.to_string(p))
-  defp function_pos?(_),                  do: false
+  defp function_pos?(p) when is_atom(p), do: function_pos?(Atom.to_string(p))
+  defp function_pos?(_), do: false
 
   # ---------- Candidate bucket extraction ----------
 
@@ -777,7 +775,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp guess_cell_id(cell) do
     lemma = Safe.get(cell, :lemma) || Safe.get(cell, "lemma") || "cell"
-    pos   = Safe.get(cell, :pos)   || Safe.get(cell, "pos")   || "other"
+    pos = Safe.get(cell, :pos) || Safe.get(cell, "pos") || "other"
     "#{lemma}|#{pos}|0"
   end
 
@@ -789,8 +787,6 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp guess_cell_lemma(id), do: to_string(id)
-
-
 
   # ---------- Boundary / char-gram guard with reasons ----------
 
@@ -814,7 +810,7 @@ defmodule Brain.LIFG.Stage1 do
     cond do
       # Any explicit char-gram hint → treat as char-gram
       source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+        kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
           flag ->
         {:error, :chargram}
 
@@ -840,7 +836,7 @@ defmodule Brain.LIFG.Stage1 do
       {s, {start, stop}}
       when is_binary(s) and is_integer(start) and is_integer(stop) and
              start >= 0 and stop > start and stop <= byte_size(s) ->
-        len      = stop - start
+        len = stop - start
         sub_norm = s |> binary_part(start, len) |> norm()
 
         if sub_norm == phrase_norm do
@@ -863,7 +859,7 @@ defmodule Brain.LIFG.Stage1 do
       {s, {start, stop}}
       when is_binary(s) and is_integer(start) and is_integer(stop) and
              start >= 0 and stop > start and stop <= byte_size(s) ->
-        len      = stop - start
+        len = stop - start
         sub_norm = s |> binary_part(start, len) |> norm()
 
         cond do
@@ -915,7 +911,7 @@ defmodule Brain.LIFG.Stage1 do
   # ---------- Phrase shape helpers ----------
 
   defp phrase_nil_or_empty?(nil), do: true
-  defp phrase_nil_or_empty?(""),  do: true
+  defp phrase_nil_or_empty?(""), do: true
 
   defp phrase_nil_or_empty?(p) when is_binary(p) do
     String.trim(p) == ""
@@ -997,7 +993,7 @@ defmodule Brain.LIFG.Stage1 do
   defp mood_factor(nil, opts), do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
 
   defp mood_factor(mood, opts) do
-    w   = cfg_mw(opts)
+    w = cfg_mw(opts)
     cap = cfg_cap(opts)
 
     bias =
@@ -1006,14 +1002,14 @@ defmodule Brain.LIFG.Stage1 do
       rescue
         _ ->
           dx = %{
-            expl:  mood.exploration - 0.5,
-            inhib: mood.inhibition  - 0.5,
-            vigil: mood.vigilance   - 0.5,
-            plast: mood.plasticity  - 0.5
+            expl: mood.exploration - 0.5,
+            inhib: mood.inhibition - 0.5,
+            vigil: mood.vigilance - 0.5,
+            plast: mood.plasticity - 0.5
           }
 
           raw =
-            dx.expl * (w.expl  || 0.0) +
+            dx.expl * (w.expl || 0.0) +
               dx.inhib * (w.inhib || 0.0) +
               dx.vigil * (w.vigil || 0.0) +
               dx.plast * (w.plast || 0.0)
@@ -1030,7 +1026,7 @@ defmodule Brain.LIFG.Stage1 do
       get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
 
     %{
-      expl:  to_small(val[:expl]  || val["expl"]  || @default_mw.expl),
+      expl: to_small(val[:expl] || val["expl"] || @default_mw.expl),
       inhib: to_small(val[:inhib] || val["inhib"] || @default_mw.inhib),
       vigil: to_small(val[:vigil] || val["vigil"] || @default_mw.vigil),
       plast: to_small(val[:plast] || val["plast"] || @default_mw.plast)
@@ -1048,7 +1044,7 @@ defmodule Brain.LIFG.Stage1 do
 
     if is_nil(id) do
       lemma = Safe.get(c, :lemma) || Safe.get(c, :word) || token_phrase
-      pos   = pos_of(c)
+      pos = pos_of(c)
       "#{lemma}|#{pos}|0"
     else
       to_string(id)
@@ -1062,10 +1058,10 @@ defmodule Brain.LIFG.Stage1 do
 
   defp guess_rel_prior(c, id, token_phrase) do
     norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || ""
-    id_s  = to_string(id || "")
+    id_s = to_string(id || "")
 
     {lemma, pos, tag} = parse_sense_id(id_s)
-    lemma_norm        = norm(lemma)
+    lemma_norm = norm(lemma)
 
     phrase_like? =
       String.contains?(to_string(token_phrase || ""), " ") or
@@ -1130,9 +1126,9 @@ defmodule Brain.LIFG.Stage1 do
   defp softmax([]), do: []
 
   defp softmax(xs) when is_list(xs) do
-    m   = Enum.max(xs, fn -> 0.0 end)
+    m = Enum.max(xs, fn -> 0.0 end)
     exs = Enum.map(xs, fn x -> :math.exp(x * 1.0 - m) end)
-    z   = Enum.sum(exs)
+    z = Enum.sum(exs)
 
     cond do
       z <= 0.0 ->
@@ -1141,7 +1137,7 @@ defmodule Brain.LIFG.Stage1 do
 
       true ->
         probs0 = Enum.map(exs, &(&1 / z))
-        sum0   = Enum.sum(probs0)
+        sum0 = Enum.sum(probs0)
 
         if sum0 > 0.0 do
           Enum.map(probs0, &(&1 / sum0))
@@ -1165,9 +1161,9 @@ defmodule Brain.LIFG.Stage1 do
   defp norm(v), do: v |> to_string() |> norm()
 
   defp clamp(x, lo, hi) when is_number(x), do: min(max(x, lo), hi)
-  defp clamp(_, lo, _hi),                    do: lo
-  defp clamp01(x) when is_number(x),         do: clamp(x * 1.0, 0.0, 1.0)
-  defp clamp01(_),                           do: 0.0
+  defp clamp(_, lo, _hi), do: lo
+  defp clamp01(x) when is_number(x), do: clamp(x * 1.0, 0.0, 1.0)
+  defp clamp01(_), do: 0.0
 
   defp get_float(map, k, dflt) when is_map(map) do
     case {Map.get(map, k), Map.get(map, to_string(k))} do
@@ -1180,21 +1176,21 @@ defmodule Brain.LIFG.Stage1 do
   defp get_float(_, _, d), do: d * 1.0
 
   defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
-  defp get_opt(%{} = opts, key, default),             do: Map.get(opts, key, default)
-  defp get_opt(_, _, default),                        do: default
+  defp get_opt(%{} = opts, key, default), do: Map.get(opts, key, default)
+  defp get_opt(_, _, default), do: default
 
   defp to_small(x) when is_number(x), do: x * 1.0
-  defp to_small(_),                   do: 0.0
+  defp to_small(_), do: 0.0
 
   defp to_cap(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
-  defp to_cap(_),                   do: @default_cap
+  defp to_cap(_), do: @default_cap
 
   defp get_num(map, key, default) do
     case {Map.get(map, key), Map.get(map, to_string(key))} do
       {v, _} when is_integer(v) -> v * 1.0
-      {v, _} when is_float(v)   -> v
+      {v, _} when is_float(v) -> v
       {_, v} when is_integer(v) -> v * 1.0
-      {_, v} when is_float(v)   -> v
+      {_, v} when is_float(v) -> v
       _ -> default * 1.0
     end
   end
@@ -1206,14 +1202,16 @@ defmodule Brain.LIFG.Stage1 do
         "-" <> Integer.to_string(System.system_time(:microsecond))
 
   defp normalize_opts(opts) when is_list(opts), do: if(Keyword.keyword?(opts), do: opts, else: [])
-  defp normalize_opts(%{} = opts),             do: Map.to_list(opts)
-  defp normalize_opts(_),                     do: []
+  defp normalize_opts(%{} = opts), do: Map.to_list(opts)
+  defp normalize_opts(_), do: []
 
   defp intent_key(si0) do
     i = Safe.get(si0, :intent)
 
     cond do
-      is_binary(i) -> i
+      is_binary(i) ->
+        i
+
       is_map(i) ->
         to_string(
           Safe.get(i, :intent) ||
@@ -1348,4 +1346,3 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 end
-

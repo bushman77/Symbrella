@@ -124,10 +124,10 @@ defmodule BrainLIFGPropertyTest do
           %{id: id} -> id
         end
 
-      winners  = MapSet.new(Enum.map(choices, & &1.chosen_id))
-      boosted  = MapSet.new(Enum.map(boosts, id_of))
+      winners = MapSet.new(Enum.map(choices, & &1.chosen_id))
+      boosted = MapSet.new(Enum.map(boosts, id_of))
       inhibited = MapSet.new(Enum.map(inhibs, id_of))
-      all_ids  = MapSet.new(Enum.map(cands, & &1.id))
+      all_ids = MapSet.new(Enum.map(cands, & &1.id))
 
       # Each winner should be boosted, not inhibited
       assert MapSet.subset?(winners, boosted)
@@ -139,4 +139,3 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 end
-

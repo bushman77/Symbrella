@@ -100,7 +100,7 @@ defmodule Brain.Hippocampus do
   """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-    cues  = build_cues(si, opts)
+    cues = build_cues(si, opts)
     scope = Keyword.get(opts, :scope, nil)
 
     # Do not pass :scope into recall; we handle it locally.
@@ -269,7 +269,7 @@ defmodule Brain.Hippocampus do
       |> Enum.reject(&Normalize.empty?/1)
       |> MapSet.new()
 
-    at   = now_ms()
+    at = now_ms()
     meta = enrich_meta_with_emotion(meta_in)
 
     ep = %{slate: slate, meta: meta, norms: norms}
@@ -352,7 +352,7 @@ defmodule Brain.Hippocampus do
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
-    limit        = Map.get(opts, :limit, state.opts.recall_limit)
+    limit = Map.get(opts, :limit, state.opts.recall_limit)
 
     half_life_ms =
       opts
@@ -365,7 +365,7 @@ defmodule Brain.Hippocampus do
       |> Config.normalize_min_jaccard()
 
     ignore_head = Map.get(opts, :ignore_head, false)
-    scope_opt   = Map.get(opts, :scope, nil)
+    scope_opt = Map.get(opts, :scope, nil)
 
     source =
       opts
@@ -862,10 +862,10 @@ defmodule Brain.Hippocampus do
   end
 
   defp standardize_for_evidence(%{score: s, at: at, episode: ep} = rec) do
-    meta           = ep[:meta] || %{}
-    priors         = priors_from_meta(meta)
+    meta = ep[:meta] || %{}
+    priors = priors_from_meta(meta)
     emotion_priors = emotion_priors_from_meta(meta)
-    hint           = hint_from_meta(meta)
+    hint = hint_from_meta(meta)
 
     rec
     |> Map.put(:priors, priors)
@@ -916,9 +916,9 @@ defmodule Brain.Hippocampus do
         meta[:tone_reaction] || meta["tone_reaction"]
 
     %{
-      threat_prior:  to_unit(Map.get(latents, :threat)  || Map.get(latents, "threat")),
-      safety_prior:  to_unit(Map.get(latents, :safety)  || Map.get(latents, "safety")),
-      reward_prior:  to_unit(Map.get(latents, :reward)  || Map.get(latents, "reward")),
+      threat_prior: to_unit(Map.get(latents, :threat) || Map.get(latents, "threat")),
+      safety_prior: to_unit(Map.get(latents, :safety) || Map.get(latents, "safety")),
+      reward_prior: to_unit(Map.get(latents, :reward) || Map.get(latents, "reward")),
       control_prior: to_unit(Map.get(latents, :control) || Map.get(latents, "control")),
       tone_reaction: normalize_tone(tone_raw)
     }
@@ -1060,7 +1060,7 @@ defmodule Brain.Hippocampus do
       route: :synth,
       reason: :hippocampus_not_running,
       keyword: (si[:keyword] || si["keyword"] || si[:sentence] || "") |> to_string(),
-      intent:  (si[:intent]  || si["intent"]  || :none)
+      intent: si[:intent] || si["intent"] || :none
     }
 
     at = now_ms()
@@ -1134,4 +1134,3 @@ defmodule Brain.Hippocampus do
 
   defp normalize_tone(_), do: nil
 end
-

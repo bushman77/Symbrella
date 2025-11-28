@@ -35,4 +35,3 @@ defmodule Core.Response.PlanAbuseFlowTest do
     assert String.contains?(String.downcase(text), "changed")
   end
 end
-

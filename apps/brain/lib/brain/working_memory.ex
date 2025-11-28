@@ -189,7 +189,7 @@ defmodule Brain.WorkingMemory do
     source_down =
       case source do
         b when is_binary(b) -> String.downcase(b)
-        a when is_atom(a)   -> Atom.to_string(a) |> String.downcase()
+        a when is_atom(a) -> Atom.to_string(a) |> String.downcase()
         _ -> ""
       end
 
@@ -252,4 +252,3 @@ defmodule Brain.WorkingMemory do
 
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
 end
-

@@ -16,7 +16,8 @@ defmodule SymbrellaWeb.Components.ExplainModal do
 
   attr :open?, :boolean, default: false
   attr :payload, :map, default: %{}
-  attr :on_close, :any, default: "explain_close" # LiveView event name
+  # LiveView event name
+  attr :on_close, :any, default: "explain_close"
 
   def explain_modal(assigns) do
     assigns =
@@ -32,8 +33,8 @@ defmodule SymbrellaWeb.Components.ExplainModal do
         phx-click={@on_close}
         aria-hidden="true"
       />
-
-      <!-- dialog -->
+      
+    <!-- dialog -->
       <div
         class="absolute inset-0 flex items-end sm:items-center justify-center p-3 sm:p-6"
         role="dialog"
@@ -46,10 +47,10 @@ defmodule SymbrellaWeb.Components.ExplainModal do
           <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-800">
             <div class="min-w-0">
               <div class="text-sm font-semibold text-zinc-100 truncate">
-                <%= @payload[:title] || "Explain" %>
+                {@payload[:title] || "Explain"}
               </div>
               <div :if={@payload[:subtitle]} class="text-xs text-zinc-400 truncate">
-                <%= @payload[:subtitle] %>
+                {@payload[:subtitle]}
               </div>
             </div>
 
@@ -62,37 +63,40 @@ defmodule SymbrellaWeb.Components.ExplainModal do
               Close
             </button>
           </div>
-
-          <!-- scrollable body -->
+          
+    <!-- scrollable body -->
           <div class="max-h-[75vh] overflow-y-auto px-4 py-3">
             <div class="grid gap-2">
               <div
-                :for={sec <- (@payload[:sections] || [])}
+                :for={sec <- @payload[:sections] || []}
                 class="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3"
               >
                 <div class="flex items-center justify-between gap-3">
                   <div class="text-sm font-semibold text-zinc-100">
-                    <%= sec[:title] || to_string(sec[:key] || "Section") %>
+                    {sec[:title] || to_string(sec[:key] || "Section")}
                   </div>
-                  <span :if={sec[:tag]} class="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300">
-                    <%= sec[:tag] %>
+                  <span
+                    :if={sec[:tag]}
+                    class="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300"
+                  >
+                    {sec[:tag]}
                   </span>
                 </div>
 
                 <div :if={sec[:hint]} class="mt-1 text-xs text-zinc-400">
-                  <%= sec[:hint] %>
+                  {sec[:hint]}
                 </div>
 
                 <div class="mt-2 grid gap-2">
                   <div
-                    :for={item <- (sec[:items] || [])}
+                    :for={item <- sec[:items] || []}
                     class="rounded-xl border border-zinc-800 bg-zinc-950 p-3"
                   >
                     <div :if={item[:label]} class="text-xs font-semibold text-zinc-200">
-                      <%= item[:label] %>
+                      {item[:label]}
                     </div>
                     <div class="text-sm text-zinc-300 whitespace-pre-wrap break-words">
-                      <%= item[:body] || "" %>
+                      {item[:body] || ""}
                     </div>
                   </div>
 
@@ -107,8 +111,8 @@ defmodule SymbrellaWeb.Components.ExplainModal do
               </div>
             </div>
           </div>
-
-          <!-- footer -->
+          
+    <!-- footer -->
           <div class="px-4 py-3 border-t border-zinc-800 flex justify-end">
             <button
               type="button"
@@ -124,4 +128,3 @@ defmodule SymbrellaWeb.Components.ExplainModal do
     """
   end
 end
-

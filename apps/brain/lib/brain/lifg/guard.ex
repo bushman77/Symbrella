@@ -275,7 +275,7 @@ defmodule Brain.LIFG.Guard do
 
   # 🔍 Explicit char-gram, flagged via kind/source/chargram?
   defp explicit_chargram?(tok) do
-    kind   = Map.get(tok, :kind)   || Map.get(tok, "kind")
+    kind = Map.get(tok, :kind) || Map.get(tok, "kind")
     source = Map.get(tok, :source) || Map.get(tok, "source")
 
     kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
@@ -337,7 +337,9 @@ defmodule Brain.LIFG.Guard do
       end
 
     left_ok? = is_nil(left_char) or left_char in [" ", "\n", "\t"]
-    right_ok? = is_nil(right_char) or right_char in [" ", "\n", "\t", ".", ",", "!", "?", ";", ":"]
+
+    right_ok? =
+      is_nil(right_char) or right_char in [" ", "\n", "\t", ".", ",", "!", "?", ";", ":"]
 
     left_ok? and right_ok?
   end
@@ -417,4 +419,3 @@ defmodule Brain.LIFG.Guard do
 
   defp valid_span?(_), do: false
 end
-

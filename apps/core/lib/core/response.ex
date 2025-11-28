@@ -312,7 +312,7 @@ defmodule Core.Response do
       _ ->
         cond do
           guard.guardrail? or features.risk_bucket == :high or
-              features.intent in [:abuse] or features.hostile? ->
+            features.intent in [:abuse] or features.hostile? ->
             :firm_guardian
 
           decision.mode == :explainer ->
@@ -448,4 +448,3 @@ defmodule Core.Response do
 
   defp fmtf(_v, _d), do: "0.00"
 end
-

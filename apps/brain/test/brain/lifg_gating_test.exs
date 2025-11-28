@@ -66,4 +66,3 @@ defmodule Brain.LIFGGatingTest do
     assert Enum.any?(wm, &(&1.id == @strong_id and &1.source == :lifg))
   end
 end
-

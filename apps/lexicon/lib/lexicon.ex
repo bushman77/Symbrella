@@ -50,7 +50,8 @@ defmodule Lexicon do
         |> Keyword.put_new(:connect_timeout, @connect_timeout)
         |> Keyword.put_new(:recv_timeout, @recv_timeout)
 
-      with {:ok, status, _resp_headers, ref} <- :hackney.request(:get, url, headers, "", hackney_opts),
+      with {:ok, status, _resp_headers, ref} <-
+             :hackney.request(:get, url, headers, "", hackney_opts),
            {:ok, body} <- :hackney.body(ref) do
         {:ok, %{status: status, url: url, data: maybe_decode_json(body)}}
       else
@@ -74,5 +75,6 @@ defmodule Lexicon do
       body
     end
   end
-end
 
+  def hello, do: :world
+end

@@ -363,7 +363,9 @@ defmodule Brain.Amygdala do
 
     confidence =
       case confidence do
-        c when is_number(c) -> clamp(c, 0.0, 1.0)
+        c when is_number(c) ->
+          clamp(c, 0.0, 1.0)
+
         c when is_binary(c) ->
           case Float.parse(String.trim(c)) do
             {n, _} -> clamp(n, 0.0, 1.0)
@@ -579,9 +581,12 @@ defmodule Brain.Amygdala do
   # ---------- Fusion & decay ----------
 
   defp fuse_latents(mood_latents, episodic_latents, instant_latents, baseline, weights) do
-    mood   = ensure_latents(mood_latents, baseline)
-    ep     = if episodic_latents == %{}, do: baseline, else: ensure_latents(episodic_latents, baseline)
-    inst   = ensure_latents(instant_latents, baseline)
+    mood = ensure_latents(mood_latents, baseline)
+
+    ep =
+      if episodic_latents == %{}, do: baseline, else: ensure_latents(episodic_latents, baseline)
+
+    inst = ensure_latents(instant_latents, baseline)
 
     wm = weights.mood
     we = if episodic_latents == %{}, do: 0.0, else: weights.episodes
@@ -619,9 +624,9 @@ defmodule Brain.Amygdala do
   end
 
   defp fuse_with_memory(fused, memory, baseline, weights) do
-    new  = ensure_latents(fused, baseline)
-    mem  = ensure_latents(memory, baseline)
-    wm   = weights.memory
+    new = ensure_latents(fused, baseline)
+    mem = ensure_latents(memory, baseline)
+    wm = weights.memory
 
     # Simple blend: mostly new, with a tail from memory
     α = clamp(wm, 0.0, 1.0)
@@ -898,4 +903,3 @@ defmodule Brain.Amygdala do
 
   defp normalize_tone(_), do: nil
 end
-

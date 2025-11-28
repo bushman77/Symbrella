@@ -23,11 +23,11 @@ defmodule Brain.LIFG.Priors do
   # These are deliberately close to each other; the feature mix weights (e.g. 0.35
   # for :rel_prior) will turn these into small nudges, not hard rules.
   @pos_prior %{
-    "phrase"   => 1.00,
-    "verb"     => 0.97,
-    "adj"      => 0.96,
-    "adv"      => 0.95,
-    "noun"     => 0.94,
+    "phrase" => 1.00,
+    "verb" => 0.97,
+    "adj" => 0.96,
+    "adv" => 0.95,
+    "noun" => 0.94,
     "fallback" => 0.92
   }
 
@@ -63,9 +63,9 @@ defmodule Brain.LIFG.Priors do
   defp parse_id(id) do
     case String.split(id, "|") do
       [lemma, pos, tag] -> {lemma, pos, tag}
-      [lemma, pos]      -> {lemma, pos, ""}
-      [lemma]           -> {lemma, "", ""}
-      _                 -> {id, "", ""}
+      [lemma, pos] -> {lemma, pos, ""}
+      [lemma] -> {lemma, "", ""}
+      _ -> {id, "", ""}
     end
   end
 
@@ -109,4 +109,3 @@ defmodule Brain.LIFG.Priors do
     |> min(high)
   end
 end
-

@@ -165,7 +165,7 @@ defmodule Core.Response.Policy do
 
       # Warm collaborator: helpful, non-bug intent, low risk, normal vigil, med/high confidence
       not bug? and not risk_high? and
-          f.vigilance_bucket == :normal and f.confidence_bucket in [:high, :med] ->
+        f.vigilance_bucket == :normal and f.confidence_bucket in [:high, :med] ->
         %{
           tone: :warm,
           mode: :pair_programmer,
@@ -300,13 +300,13 @@ defmodule Core.Response.Policy do
     t = dn(text)
 
     cond do
-      greeting?(t)    -> :greeting
-      gratitude?(t)   -> :gratitude
-      smalltalk?(t)   -> :smalltalk
-      bug_report?(t)  -> :bug
-      question?(t)    -> :question
-      command?(t)     -> :command
-      true            -> :unknown
+      greeting?(t) -> :greeting
+      gratitude?(t) -> :gratitude
+      smalltalk?(t) -> :smalltalk
+      bug_report?(t) -> :bug
+      question?(t) -> :question
+      command?(t) -> :command
+      true -> :unknown
     end
   end
 
@@ -403,7 +403,4 @@ defmodule Core.Response.Policy do
 
     basic? or weird_symbrella? or test_fail?
   end
-
-
 end
-

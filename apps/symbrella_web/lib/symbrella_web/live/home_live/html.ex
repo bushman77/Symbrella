@@ -14,13 +14,14 @@ defmodule SymbrellaWeb.ChatLive.HTML do
 
   # Assistant bubble: show ONLY main text (lexical tail is modal-only).
   attr :message, :map, required: true
+
   def assistant_text(assigns) do
     ~H"""
     <% text = to_string(@message.text || "") %>
     <% {main, _extra} = split_lexical_tail(text) %>
 
     <p class="whitespace-pre-wrap">
-      <%= main %>
+      {main}
     </p>
     """
   end
@@ -28,6 +29,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   # Explain button (passes id + text as fallback)
   attr :msg_id, :string, required: true
   attr :text, :string, default: ""
+
   def assistant_actions(assigns) do
     ~H"""
     <div class="mt-2 flex justify-end">
@@ -47,6 +49,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   # A single row in the message stream.
   attr :dom_id, :string, required: true
   attr :m, :map, required: true
+
   def message_row(assigns) do
     ~H"""
     <div id={@dom_id} class={row_class(@m)}>
@@ -58,7 +61,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
             text={to_string(@m.text || "")}
           />
         <% else %>
-          <p class="whitespace-pre-wrap"><%= @m.text %></p>
+          <p class="whitespace-pre-wrap">{@m.text}</p>
         <% end %>
       </div>
     </div>
@@ -72,6 +75,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   attr :draft, :string, default: ""
   attr :explain_open?, :boolean, default: false
   attr :explain_payload, :map, default: %{}
+
   def chat(assigns) do
     ~H"""
     <div
@@ -89,8 +93,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div class="text-xs opacity-70 hidden sm:block">LiveView</div>
         </div>
       </header>
-
-      <!-- MESSAGES -->
+      
+    <!-- MESSAGES -->
       <main
         id="messages"
         phx-hook="ScrollOnEvent"
@@ -115,8 +119,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <div id="bottom"></div>
         </div>
       </main>
-
-      <!-- COMPOSER -->
+      
+    <!-- COMPOSER -->
       <footer
         id="chat-composer"
         phx-hook="FooterSizer"
@@ -151,8 +155,8 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           </form>
         </div>
       </footer>
-
-      <!-- EXPLAIN MODAL (single full-width panel) -->
+      
+    <!-- EXPLAIN MODAL (single full-width panel) -->
       <Modal.explain_modal open?={@explain_open?} payload={@explain_payload} />
     </div>
     """
@@ -199,4 +203,3 @@ defmodule SymbrellaWeb.ChatLive.HTML do
 
   defp split_lexical_tail(other), do: {to_string(other), nil}
 end
-

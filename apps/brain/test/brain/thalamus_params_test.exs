@@ -52,4 +52,3 @@ defmodule Brain.ThalamusParams_Test do
   defp to_float(v) when is_float(v), do: v
   defp to_float(_), do: 0.0
 end
-
