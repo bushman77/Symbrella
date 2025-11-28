@@ -1,17 +1,6 @@
 # apps/db/lib/db/jsonl.ex
 defmodule Db.JSONL do
-  @moduledoc """
-  Streaming reader for JSONL (one JSON object per line), tuned for very large
-  Kaikki/Wiktextract dumps.
-
-  Key points:
-  - Streams by :line (NOT fixed-size chunks) so each item is one JSON line.
-  - Uses a cheap substring prefilter before JSON-decoding.
-  - Never creates atoms from file content (avoids atom leaks).
-  - Can return entries, or just senses (flattened).
-
-  This is for *inspecting* the file before building an importer/index.
-  """
+  @moduledoc false
 
   @default_filename "english.jsonl"
 
@@ -28,16 +17,19 @@ defmodule Db.JSONL do
           fetch_opt()
           | {:type, String.t() | nil}
           | {:status, String.t() | nil}
-          | {:pos_fallback, String.t()} # default "phrase"
+          | {:pos_fallback, String.t()}
           | {:include_semantic_atoms?, boolean()}
-          | {:id_start, non_neg_integer()} # default 1 (set 0 if you want good|noun|0 style)
+          | {:fill_missing_relations?, boolean()}
 
   @spec default_paths() :: [String.t()]
   def default_paths do
     build_priv =
       case :code.priv_dir(:db) do
-        dir when is_list(dir) or is_binary(dir) -> dir |> to_string() |> Path.join(@default_filename)
-        _ -> nil
+        dir when is_list(dir) or is_binary(dir) ->
+          dir |> to_string() |> Path.join(@default_filename)
+
+        _ ->
+          nil
       end
 
     source_priv = Path.expand("apps/db/priv/#{@default_filename}")
@@ -51,13 +43,6 @@ defmodule Db.JSONL do
     Enum.find(default_paths(), &File.exists?/1) || List.first(default_paths())
   end
 
-  @doc """
-  Read the first N JSONL lines (raw strings), useful to inspect shape quickly.
-
-  Tip: if you want to decode, do:
-      {:ok, [l|_]} = Db.JSONL.head(1)
-      Jason.decode!(l)
-  """
   @spec head(non_neg_integer(), keyword()) :: {:ok, [binary()]} | {:error, any()}
   def head(n \\ 3, opts \\ []) when is_integer(n) and n >= 0 do
     path = resolve_path(opts)
@@ -74,29 +59,12 @@ defmodule Db.JSONL do
     end
   end
 
-  @doc """
-  Stream (lazy) all decoded entries where `field == word`.
-
-  Options:
-    * :path  (default: auto build priv or apps/db/priv)
-    * :field (default: "word")
-    * :decode? (default true) — if false, yields raw JSON lines
-    * :on_decode_error (default :skip) — :skip | :raise | :count
-      - :count yields `{:bad_json, line}` items instead of skipping, for investigation
-  """
   @spec fetch_word_stream(String.t(), [fetch_opt()]) :: {:ok, Enumerable.t()} | {:error, any()}
   def fetch_word_stream(word, opts \\ []) when is_binary(word) do
     word = String.trim(word)
     if word == "", do: {:error, :empty_word}, else: do_fetch_stream(word, opts)
   end
 
-  @doc """
-  Fetch all entries where `field == word` into a list.
-
-  Options:
-    * :limit (default :infinity)
-    * all options from fetch_word_stream/2
-  """
   @spec fetch_word(String.t(), [fetch_opt()]) :: {:ok, list(row() | binary())} | {:error, any()}
   def fetch_word(word, opts \\ []) when is_binary(word) do
     word = String.trim(word)
@@ -117,20 +85,6 @@ defmodule Db.JSONL do
     end
   end
 
-  @doc """
-  Fetch *just* the senses for a given lemma, flattened across all matching entries.
-
-  Each returned sense is the original sense map (string keys) plus `_meta` with
-  entry context:
-
-      %{
-        ...sense fields...,
-        "_meta" => %{"word" => "good", "pos" => "adj", "etymology_number" => 1}
-      }
-
-  Options:
-    * :path, :limit, :on_decode_error (as above)
-  """
   @spec fetch_senses(String.t(), keyword()) :: {:ok, list(map())} | {:error, any()}
   def fetch_senses(word, opts \\ []) when is_binary(word) do
     word = String.trim(word)
@@ -149,24 +103,21 @@ defmodule Db.JSONL do
               []
 
             %{} = entry ->
-              word0 = Map.get(entry, "word")
-              pos = Map.get(entry, "pos")
-              ety = Map.get(entry, "etymology_number")
-
-              meta = %{
-                "word" => word0,
-                "pos" => pos,
-                "etymology_number" => ety
-              }
+              meta =
+                %{
+                  "word" => Map.get(entry, "word"),
+                  "pos" => Map.get(entry, "pos"),
+                  "etymology_number" => Map.get(entry, "etymology_number"),
+                  "entry_synonyms" => flatten_term_list(Map.get(entry, "synonyms")),
+                  "entry_antonyms" => flatten_term_list(Map.get(entry, "antonyms"))
+                }
+                |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+                |> Map.new()
 
               entry
               |> Map.get("senses", [])
               |> List.wrap()
-              |> Enum.map(fn s ->
-                s
-                |> ensure_map()
-                |> Map.put("_meta", meta)
-              end)
+              |> Enum.map(fn s -> s |> ensure_map() |> Map.put("_meta", meta) end)
 
             _other ->
               []
@@ -179,39 +130,24 @@ defmodule Db.JSONL do
     end
   end
 
-  @doc """
-  Turn every sense for `word` into a `%Db.BrainCell{}`.
-
-  This does **not** insert into Postgres — it only returns structs so you can inspect
-  and then decide how/when to persist (via changeset + Db.insert_all/2 etc.).
-
-  Options:
-    * all options from fetch_senses/2 (path/limit/on_decode_error)
-    * :type  (default "wiktextract")
-    * :status (default "inactive")
-    * :pos_fallback (default "phrase")
-    * :include_semantic_atoms? (default true)
-    * :id_start (default 1) — set 0 if you want good|noun|0 style
-  """
-  @spec populate_structs(String.t(), [populate_opt()]) :: {:ok, list(Db.BrainCell.t())} | {:error, any()}
+  @spec populate_structs(String.t(), [populate_opt()]) ::
+          {:ok, list(Db.BrainCell.t())} | {:error, any()}
   def populate_structs(word, opts \\ []) when is_binary(word) do
     with {:ok, senses} <- fetch_senses(word, opts) do
       {:ok, populate_structs_from_senses(senses, opts)}
     end
   end
 
-  @doc """
-  Map an already-loaded senses list (from fetch_senses/2) into BrainCell structs.
-
-  IDs use numeric indexing: "word|pos|N" where N increments per {word,pos}.
-  """
   @spec populate_structs_from_senses([map()], [populate_opt()]) :: list(Db.BrainCell.t())
   def populate_structs_from_senses(senses, opts \\ []) when is_list(senses) do
     default_type = Keyword.get(opts, :type, "wiktextract")
     default_status = Keyword.get(opts, :status, "inactive")
     pos_fallback = Keyword.get(opts, :pos_fallback, "phrase")
     include_atoms? = Keyword.get(opts, :include_semantic_atoms?, true)
-    id_start = Keyword.get(opts, :id_start, 1)
+    fill_missing? = Keyword.get(opts, :fill_missing_relations?, true)
+
+    # Build a {word,pos} relations pool so we can optionally backfill missing rels.
+    rels_by_key = build_relations_index(senses, pos_fallback)
 
     {cells, _counters} =
       Enum.map_reduce(senses, %{}, fn s, counters ->
@@ -223,14 +159,43 @@ defmodule Db.JSONL do
         pos = canonical_pos(raw_pos, pos_fallback)
 
         key = {word, pos}
-        idx = Map.get(counters, key, id_start - 1) + 1
+        idx = Map.get(counters, key, 0) + 1
         counters = Map.put(counters, key, idx)
 
         definition = pick_definition(s)
         example = pick_example(s)
 
-        synonyms = flatten_term_list(Map.get(s, "synonyms"))
-        antonyms = flatten_term_list(Map.get(s, "antonyms"))
+        sense_syn = flatten_term_list(Map.get(s, "synonyms"))
+        sense_ant = flatten_term_list(Map.get(s, "antonyms"))
+
+        entry_syn = flatten_term_list(Map.get(meta, "entry_synonyms"))
+        entry_ant = flatten_term_list(Map.get(meta, "entry_antonyms"))
+
+        syn0 = uniq_terms((sense_syn ++ entry_syn) |> drop_self(word))
+        ant0 = uniq_terms((sense_ant ++ entry_ant) |> drop_self(word))
+
+        {synonyms, antonyms, rel_marks} =
+          if fill_missing? do
+            rel = Map.get(rels_by_key, key, %{syn: MapSet.new(), ant: MapSet.new()})
+
+            {syn1, marks1} =
+              if syn0 == [] and MapSet.size(rel.syn) > 0 do
+                {MapSet.to_list(rel.syn) |> drop_self(word) |> uniq_terms(), ["rel:syn_pool"]}
+              else
+                {syn0, []}
+              end
+
+            {ant1, marks2} =
+              if ant0 == [] and MapSet.size(rel.ant) > 0 do
+                {MapSet.to_list(rel.ant) |> drop_self(word) |> uniq_terms(), ["rel:ant_pool"]}
+              else
+                {ant0, []}
+              end
+
+            {syn1, ant1, marks1 ++ marks2}
+          else
+            {syn0, ant0, []}
+          end
 
         gf = gram_function_from_tags(pos, Map.get(s, "tags"), Map.get(s, "raw_tags"))
 
@@ -245,9 +210,9 @@ defmodule Db.JSONL do
                 _ -> atoms
               end
 
-            atoms
+            Enum.uniq(atoms ++ rel_marks)
           else
-            []
+            rel_marks
           end
 
         cell =
@@ -277,14 +242,11 @@ defmodule Db.JSONL do
     cells
   end
 
-  @doc """
-  Summarize decoded entries: top keys + pos distribution + senses count totals.
-  """
   @spec summarize_entries([row()]) :: map()
   def summarize_entries(entries) when is_list(entries) do
     keys =
       entries
-      |> Enum.flat_map(fn e -> Map.keys(e) end)
+      |> Enum.flat_map(&Map.keys/1)
       |> Enum.map(&to_string/1)
       |> Enum.frequencies()
       |> Enum.sort_by(fn {_k, v} -> -v end)
@@ -309,9 +271,6 @@ defmodule Db.JSONL do
     }
   end
 
-  @doc """
-  Summarize flattened senses: key frequency + sample tags/gloss presence.
-  """
   @spec summarize_senses([map()]) :: map()
   def summarize_senses(senses) when is_list(senses) do
     keys =
@@ -322,21 +281,20 @@ defmodule Db.JSONL do
       |> Enum.sort_by(fn {_k, v} -> -v end)
       |> Enum.take(30)
 
-    has_gloss? =
+    has_gloss =
       Enum.count(senses, fn s ->
-        (s["glosses"] |> List.wrap() |> length() > 0) or
-          (s["raw_glosses"] |> List.wrap() |> length() > 0)
+        (s["glosses"] |> List.wrap() |> length() > 0) or (s["raw_glosses"] |> List.wrap() |> length() > 0)
       end)
 
-    has_examples? =
+    has_examples =
       Enum.count(senses, fn s ->
         s["examples"] |> List.wrap() |> length() > 0
       end)
 
     %{
       senses: length(senses),
-      with_gloss: has_gloss?,
-      with_examples: has_examples?,
+      with_gloss: has_gloss,
+      with_examples: has_examples,
       key_frequencies_top30: keys
     }
   end
@@ -360,9 +318,7 @@ defmodule Db.JSONL do
         stream =
           path
           |> stream_lines()
-          |> Stream.filter(fn line ->
-            String.contains?(line, needle1) or String.contains?(line, needle2)
-          end)
+          |> Stream.filter(fn line -> String.contains?(line, needle1) or String.contains?(line, needle2) end)
           |> Stream.flat_map(fn line ->
             if decode? do
               case Jason.decode(line) do
@@ -371,9 +327,14 @@ defmodule Db.JSONL do
 
                 {:error, _} ->
                   case on_err do
-                    :raise -> raise "JSON decode failed for line beginning: #{String.slice(line, 0, 200)}"
-                    :count -> [{:bad_json, line}]
-                    :skip -> []
+                    :raise ->
+                      raise "JSON decode failed for line beginning: #{String.slice(line, 0, 200)}"
+
+                    :count ->
+                      [{:bad_json, line}]
+
+                    :skip ->
+                      []
                   end
 
                 _ ->
@@ -443,10 +404,35 @@ defmodule Db.JSONL do
 
   # ───────────────────────── sense → braincell helpers ─────────────────────────
 
-  defp normalize_word(nil), do: ""
-  defp normalize_word(s) when is_binary(s),
-    do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
+  defp build_relations_index(senses, pos_fallback) do
+    Enum.reduce(senses, %{}, fn s, acc ->
+      meta = Map.get(s, "_meta", %{})
+      word = normalize_word(Map.get(meta, "word") || Map.get(s, "word") || "")
+      raw_pos = Map.get(meta, "pos") || Map.get(s, "pos") || ""
+      pos = canonical_pos(raw_pos, pos_fallback)
 
+      key = {word, pos}
+
+      sense_syn = flatten_term_list(Map.get(s, "synonyms"))
+      sense_ant = flatten_term_list(Map.get(s, "antonyms"))
+      entry_syn = flatten_term_list(Map.get(meta, "entry_synonyms"))
+      entry_ant = flatten_term_list(Map.get(meta, "entry_antonyms"))
+
+      syn = MapSet.new(drop_self(uniq_terms(sense_syn ++ entry_syn), word))
+      ant = MapSet.new(drop_self(uniq_terms(sense_ant ++ entry_ant), word))
+
+      prev = Map.get(acc, key, %{syn: MapSet.new(), ant: MapSet.new()})
+
+      acc
+      |> Map.put(key, %{
+        syn: MapSet.union(prev.syn, syn),
+        ant: MapSet.union(prev.ant, ant)
+      })
+    end)
+  end
+
+  defp normalize_word(nil), do: ""
+  defp normalize_word(s) when is_binary(s), do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/u, " ")
   defp normalize_word(other), do: other |> to_string() |> normalize_word()
 
   defp canonical_pos(raw, fallback) do
@@ -497,17 +483,56 @@ defmodule Db.JSONL do
   end
 
   defp pick_definition(sense) do
-    glosses = sense |> Map.get("glosses") |> List.wrap()
-    raw = sense |> Map.get("raw_glosses") |> List.wrap()
+    gloss =
+      sense
+      |> Map.get("glosses")
+      |> List.wrap()
+      |> Enum.find_value(fn
+        g when is_binary(g) and g != "" -> String.trim(g)
+        _ -> nil
+      end) ||
+        sense
+        |> Map.get("raw_glosses")
+        |> List.wrap()
+        |> Enum.find_value(fn
+          g when is_binary(g) and g != "" -> String.trim(g)
+          _ -> nil
+        end)
 
-    (glosses ++ raw)
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> case do
-      [] -> nil
-      [one] -> one
-      many -> Enum.join(many, " / ")
+    if is_nil(gloss) or gloss == "" do
+      nil
+    else
+      labels =
+        (List.wrap(sense["tags"]) ++ List.wrap(sense["raw_tags"]))
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.filter(fn t ->
+          lt = String.downcase(t)
+          String.length(t) <= 24 and not String.starts_with?(lt, "of ") and not String.starts_with?(lt, "with ")
+        end)
+        |> Enum.map(&normalize_tag/1)
+        |> Enum.uniq()
+
+      q =
+        case sense["qualifier"] do
+          s when is_binary(s) ->
+            s2 = String.trim(s)
+            if s2 == "", do: nil, else: normalize_tag(s2)
+
+          _ ->
+            nil
+        end
+
+      labels =
+        (if q, do: [q | labels], else: labels)
+        |> Enum.uniq()
+
+      if labels == [] do
+        gloss
+      else
+        "(#{Enum.join(labels, ", ")}) " <> gloss
+      end
     end
   end
 
@@ -540,14 +565,26 @@ defmodule Db.JSONL do
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
+  end
+
+  defp uniq_terms(list) do
+    list
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
+  end
+
+  defp drop_self(list, word_norm) do
+    Enum.reject(list, fn t -> normalize_word(t) == word_norm end)
   end
 
   defp gram_function_from_tags(pos, tags, raw_tags) do
     allow =
       case pos do
         "noun" -> MapSet.new(~w(countable uncountable plural-only usually plural))
-        "verb" -> MapSet.new(~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal))
+        "verb" ->
+          MapSet.new(~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal))
         "adjective" -> MapSet.new(~w(attributive-only predicative-only postpositive comparative-only))
         _ -> MapSet.new()
       end
@@ -577,6 +614,7 @@ defmodule Db.JSONL do
 
   defp normalize_tag(t) do
     t
+    |> to_string()
     |> String.downcase()
     |> String.trim()
     |> String.replace(~r/\s+/u, " ")
