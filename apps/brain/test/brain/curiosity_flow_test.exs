@@ -69,8 +69,6 @@ defmodule Brain.CuriosityFlowTest do
     end)
   end
 
-  defp has_curiosity?(_), do: false
-
   defp ensure_started(mod) when is_atom(mod) do
     case Process.whereis(mod) do
       nil -> start_supervised!(mod)
@@ -78,7 +76,7 @@ defmodule Brain.CuriosityFlowTest do
     end
   end
 
-  defp wait_until(fun, timeout_ms \\ 1_000, step_ms \\ 20) when is_function(fun, 0) do
+  defp wait_until(fun, timeout_ms \\ 1_000, step_ms) when is_function(fun, 0) do
     t0 = System.monotonic_time(:millisecond)
     do_wait_until(fun, t0, timeout_ms, step_ms)
   end

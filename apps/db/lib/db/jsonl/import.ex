@@ -1,16 +1,16 @@
 defmodule Db.JSONL.Import do
   @moduledoc false
 
-  alias Db.JSONL.{IO, Populate, Upsert, Util}
+  alias Db.JSONL.{Populate, Upsert, Util}
 
   @spec import_all(keyword()) :: {:ok, map()} | {:error, any()}
   def import_all(opts \\ []) do
-    path = IO.resolve_path(opts)
+    path = Db.JSONL.IO.resolve_path(opts)
 
     unless File.exists?(path) do
       {:error, {:no_such_file, path}}
     else
-      if not IO.jason_available?() do
+      if not Db.JSONL.IO.jason_available?() do
         {:error, :jason_not_available}
       else
         repo = Keyword.get(opts, :repo, Db)
@@ -47,7 +47,7 @@ defmodule Db.JSONL.Import do
 
         st1 =
           path
-          |> IO.stream_lines()
+          |> Db.JSONL.IO.stream_lines()
           |> Stream.with_index(1)
           |> Enum.reduce_while(st0, fn {line, idx}, st ->
             st = maybe_progress(st, idx)

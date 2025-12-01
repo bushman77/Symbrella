@@ -23,7 +23,7 @@ defmodule SynonymCompetitionTest do
   }
 
   # --- Helpers: softmax-based selector (emulates LIFG competition) ---
-  defp select_synonym(lemma, ctx, opts \\ []) do
+  defp select_synonym(lemma, ctx, opts) do
     tau = Keyword.get(opts, :tau, 0.7)
     syns_override = Keyword.get(opts, :syns_override, nil)
     intent_bias = Keyword.get(opts, :intent_bias, %{})

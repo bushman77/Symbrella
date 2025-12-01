@@ -3,7 +3,7 @@ defmodule Brain.BasalGangliaEdgesTest do
   use ExUnit.Case, async: true
   alias Brain.BasalGanglia, as: BG
 
-  defp wm_item(id, last_bump_ms \\ 0) do
+  defp wm_item(id, last_bump_ms) do
     %{
       id: id,
       activation: 0.4,

@@ -48,7 +48,7 @@ defmodule Brain.Cell.SafeTest do
     assert {:error, :noproc} = Safe.call(dead, {:echo, 1}, timeout: 50, retry?: false)
   end
 
-  test "does a single transient retry by default", %{pid: pid} do
+  test "does a single transient retry by default", %{pid: _pid} do
     # call a killed process with retry? true still resolves to :noproc; we just cover path
     dead = spawn(fn -> :ok end)
     ref = Process.monitor(dead)

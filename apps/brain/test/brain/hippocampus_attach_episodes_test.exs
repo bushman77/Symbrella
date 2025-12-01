@@ -27,7 +27,7 @@ defmodule Brain.HippocampusAttachEpisodesTest do
     %{winners: Enum.map(words, &%{id: "#{&1}|noun|0", lemma: &1})}
   end
 
-  defp episodes_from(si, opts \\ []) do
+  defp episodes_from(si, opts) do
     si
     |> Hippocampus.attach_episodes(Keyword.merge([limit: 5], opts))
     |> then(&(get_in(&1, [:evidence, :episodes]) || []))

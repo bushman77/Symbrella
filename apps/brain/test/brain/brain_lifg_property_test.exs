@@ -1,3 +1,4 @@
+# apps/brain/test/brain/brain_lifg_property_test.exs
 defmodule BrainLIFGPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -5,7 +6,7 @@ defmodule BrainLIFGPropertyTest do
   alias Brain.LIFG
   alias Core.SemanticInput
 
-  defp approx(a, b, eps \\ 1.0e-6), do: abs(a - b) <= eps
+  defp approx(a, b, eps), do: abs(a - b) <= eps
 
   # Run LIFG via the SI-based API, return just what the properties need
   defp lifg_run(cands, ctx) do
@@ -81,7 +82,7 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 
-  property "softmax normalization yields per-group sums ≈ 1 and score range [0,1]" do
+  test "softmax normalization yields per-group sums ≈ 1 and score range [0,1]" do
     check all(
             groups <- integer(1..8),
             senses <- integer(2..6),
@@ -107,7 +108,7 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 
-  property "boosts target winners; inhibitions exclude winners and cover the rest" do
+  test "boosts target winners; inhibitions exclude winners and cover the rest" do
     check all(
             groups <- integer(1..6),
             senses <- integer(2..5),
@@ -139,3 +140,4 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 end
+

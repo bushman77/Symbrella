@@ -1,4 +1,3 @@
-# apps/brain/lib/brain.ex
 defmodule Brain do
   @moduledoc """
   Central coordinator for `Brain.Cell` processes **and** a tiny `use Brain, region: :xyz` macro.
@@ -12,62 +11,21 @@ defmodule Brain do
   For region helpers (LIFG etc.), prefer `use Brain, region: :lifg` in those modules.
   """
 
-  alias Brain.WM.Policy, as: WMPolicy
+  alias Brain.Cell.Runtime, as: CellRT
+  alias Brain.WM.Focus, as: WMFocus
 
-  # ───────────────────────── Region Macro ─────────────────────────
+  # ───────────────────────── Region Macro (re-export) ─────────────────────────
 
   @doc """
-  Use inside a module to make it a region GenServer:
+  Re-export `Brain.Region` so region modules can continue to do:
 
       defmodule Brain.LIFG do
         use Brain, region: :lifg
       end
   """
   defmacro __using__(opts) do
-    region = Keyword.fetch!(opts, :region)
-
-    quote location: :keep, bind_quoted: [region: region] do
-      use GenServer
-      @region region
-
-      @doc false
-      def start_link(opts) do
-        name =
-          if is_list(opts) do
-            Keyword.get(opts, :name, __MODULE__)
-          else
-            Map.get(Map.new(opts), :name, __MODULE__)
-          end
-
-        GenServer.start_link(__MODULE__, opts, name: name)
-      end
-
-      def child_spec(opts) do
-        %{
-          id: __MODULE__,
-          start: {__MODULE__, :start_link, [opts]},
-          type: :worker,
-          restart: :permanent,
-          shutdown: 500
-        }
-      end
-
-      @impl true
-      def init(opts), do: {:ok, %{region: @region, opts: Map.new(opts), stats: %{}}}
-      @impl true
-      def handle_call(:status, _from, state), do: {:reply, state, state}
-      @impl true
-      def handle_cast(_msg, state), do: {:noreply, state}
-      @impl true
-      def handle_info(_msg, state), do: {:noreply, state}
-
-      # 👇 critical line:
-      defoverridable start_link: 1,
-                     child_spec: 1,
-                     init: 1,
-                     handle_call: 3,
-                     handle_cast: 2,
-                     handle_info: 2
+    quote location: :keep do
+      use Brain.Region, unquote(opts)
     end
   end
 
@@ -77,10 +35,6 @@ defmodule Brain do
   require Logger
 
   alias Db.BrainCell, as: Row
-  alias Brain.Attention
-  alias Brain.Episodes.Writer, as: EpWriter
-  alias Brain.LIFG
-  alias Brain.LIFG.Gate, as: LIFGGate
   alias Brain.Utils.ControlSignals
   alias Brain.Utils.Numbers
   alias Brain.Utils.Tokens
@@ -88,12 +42,10 @@ defmodule Brain do
 
   @name __MODULE__
   @registry Brain.Registry
-  @cell_sup Brain.CellSup
   @cell_timeout 2_000
 
   # Telemetry constants
   @wm_update_event [:brain, :wm, :update]
-  @pipeline_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
 
   @wm_defaults %{
     capacity: 7,
@@ -113,6 +65,7 @@ defmodule Brain do
 
   @type id :: any()
   @type wm_item :: map()
+
   @type wm_cfg :: %{
           capacity: pos_integer(),
           decay_ms: pos_integer(),
@@ -126,6 +79,7 @@ defmodule Brain do
           fallback_scale: number(),
           allow_fallback_into_wm?: boolean()
         }
+
   @type state :: %{
           history: list(),
           active_cells: %{optional(String.t()) => number()},
@@ -141,6 +95,22 @@ defmodule Brain do
 
   defp gencall(name, msg, timeout \\ 5_000), do: :gen_server.call(name, msg, timeout)
   defp gencast(name, msg), do: :gen_server.cast(name, msg)
+
+  # ── Pipeline bridge (internal-use) ───────────────────────────────────────────
+
+  @doc false
+  def __pipeline_do_focus__(state, cands_or_si, opts), do: WMFocus.run(state, cands_or_si, opts)
+
+  @doc false
+  def __pipeline_emit_wm_update__(capacity, size, added, removed, reason \\ nil),
+    do: emit_wm_update(capacity, size, added, removed, reason)
+
+  @doc false
+  def __pipeline_safe_mood_update_wm__(wm_list), do: safe_mood_update_wm(wm_list)
+
+  @doc false
+  def __pipeline_apply_control_signals__(boosts, inhibitions, opts),
+    do: apply_control_signals(boosts, inhibitions, opts)
 
   # ── Public API: WM/Attention ────────────────────────────────────────────────
 
@@ -222,6 +192,7 @@ defmodule Brain do
   end
 
   # ───────────────────────── GenServer callbacks ──────────────────────────────
+
   @impl true
   def init(:ok) do
     {:ok,
@@ -253,7 +224,7 @@ defmodule Brain do
 
   @impl true
   def handle_call({:focus, cands_or_si, opts}, _from, state) do
-    {wm_next, added, removed} = do_focus(state, cands_or_si, Map.new(opts))
+    {wm_next, added, removed} = WMFocus.run(state, cands_or_si, opts)
     emit_wm_update(state.wm_cfg.capacity, length(wm_next), added, removed)
     _ = safe_mood_update_wm(wm_next)
     {:reply, wm_next, %{state | wm: wm_next}}
@@ -272,118 +243,9 @@ defmodule Brain do
     do: {:reply, %{wm: state.wm, cfg: state.wm_cfg, attention: state.attention}, state}
 
   @impl true
-  def handle_call({:lifg_stage1, si_or_cands, _ctx_vec, opts}, _from, state) do
-    t0 = System.monotonic_time()
-    now_ms = System.system_time(:millisecond)
-
-    # Build inputs (tokens + sentence) so PFC can see tokens for intent biasing
-    %{tokens: tokens0, sentence: sentence} = build_lifg_inputs(si_or_cands)
-
-    # Enrich SI for PFC policy (ensures tokens present)
-    si_for_policy = enrich_for_policy(si_or_cands, tokens0)
-
-    # Pull dynamic policy from PFC safely (no-op if PFC not started)
-    pfc_opts = safe_pfc_policy(si_for_policy)
-
-    lifg_opts =
-      [scores: :all, normalize: :softmax, parallel: :auto]
-      # PFC tunes margins, pMTG mode, deltas, gate_into_wm, etc.
-      |> Keyword.merge(pfc_opts)
-      # explicit caller opts take precedence
-      |> Keyword.merge(opts)
-
-    # IMPORTANT:
-    #   • Preserve existing candidate info (:sense_candidates, :active_cells, etc.)
-    #   • Just overlay normalized :tokens and :sentence for Stage-1.
-    base_si =
-      case si_or_cands do
-        m when is_map(m) -> m
-        _ -> %{}
-      end
-
-    si1 =
-      base_si
-      |> Map.put(:tokens, tokens0)
-      |> Map.put(:sentence, sentence)
-      |> Map.put_new(:trace, [])
-      |> LIFG.disambiguate_stage1(lifg_opts)
-
-    {:ok, out0} = lifg_out_from_trace(si1)
-
-    out0 =
-      case Brain.LIFG.Hygiene.run(%{}, out0.choices, []) do
-        {:ok, %{choices: cleaned}} -> %{out0 | choices: cleaned}
-        _ -> out0
-      end
-
-    # ACC conflict assessment (no-op if ACC region isn't started)
-    {_si_acc, _conflict} =
-      maybe_assess_acc(%{tokens: tokens0, choices: out0.choices}, already_needy: true)
-
-    _ = maybe_ingest_atl(out0.choices, tokens0)
-    _ = maybe_consult_pmtg(out0.choices, tokens0)
-    _ = maybe_store_episode(tokens0, si1, out0)
-
-    {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
-    apply_control_signals(boosts2, inhib2, lifg_opts)
-
-    state1 = apply_decay(state, now_ms)
-
-    state2 =
-      if Keyword.get(lifg_opts, :gate_into_wm, false) do
-        min =
-          Keyword.get(
-            lifg_opts,
-            :lifg_min_score,
-            Application.get_env(:brain, :lifg_min_score, 0.6)
-          )
-
-        # Primary path: dedicated LIFG gate module.
-        lifg_cands =
-          LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
-
-        # Fallback: synthesize WM candidates directly from Stage-1 choices
-        lifg_cands2 =
-          case lifg_cands do
-            [] -> lifg_wm_candidates_fallback(out0.choices, now_ms, min)
-            other -> other
-          end
-
-        if lifg_cands2 == [] do
-          state1
-        else
-          {wm_next, added, removed} = do_focus(state1, lifg_cands2, %{})
-
-          emit_wm_update(
-            state1.wm_cfg.capacity,
-            length(wm_next),
-            added,
-            removed,
-            :gate_from_lifg
-          )
-
-          _ = safe_mood_update_wm(wm_next)
-          %{state1 | wm: wm_next}
-        end
-      else
-        state1
-      end
-
-    state3 = evict_if_needed(state2)
-
-    :telemetry.execute(
-      @pipeline_stop_event,
-      %{
-        duration_ms: System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-      },
-      %{
-        winners: length(out0.choices),
-        boosts: length(out0.boosts),
-        inhibitions: length(out0.inhibitions)
-      }
-    )
-
-    {:reply, {:ok, out0}, state3}
+  def handle_call({:lifg_stage1, si_or_cands, ctx_vec, opts}, _from, state) do
+    {reply, state2} = Brain.Pipeline.LIFGStage1.run(si_or_cands, ctx_vec, opts, state)
+    {:reply, reply, state2}
   end
 
   @impl true
@@ -426,13 +288,13 @@ defmodule Brain do
     |> extract_items()
     |> Enum.each(fn
       %Row{} = row ->
-        ensure_start_and_cast(row, payload)
+        CellRT.ensure_start_and_cast(row, payload)
 
       %{} = map_item ->
-        handle_map_item_activation(map_item, payload)
+        CellRT.handle_map_item_activation(map_item, payload)
 
       id when is_binary(id) ->
-        ensure_start_and_cast(id, payload)
+        CellRT.ensure_start_and_cast(id, payload)
 
       other ->
         :telemetry.execute([:brain, :activate, :unknown_item], %{count: 1}, %{sample: other})
@@ -515,7 +377,6 @@ defmodule Brain do
           }
         end)
       else
-        # Fallback: gate the cues themselves into WM as :ltm
         si_or_cues
         |> cues_to_candidates()
         |> Enum.map(fn c ->
@@ -579,333 +440,8 @@ defmodule Brain do
     |> evict_if_needed()
   end
 
-  # ───────────────────────── Centralized WM gating logic ──────────────────────
-
-  defp normalize_intent_map(m) do
-    intent0 = m[:intent] || m["intent"]
-
-    intent =
-      cond do
-        is_atom(intent0) ->
-          intent0
-
-        is_binary(intent0) ->
-          try do
-            String.to_existing_atom(intent0)
-          rescue
-            _ -> :unknown
-          end
-
-        true ->
-          :unknown
-      end
-
-    kw = m[:keyword] || m["keyword"] || ""
-    conf0 = m[:confidence] || m["confidence"] || 0.0
-
-    conf =
-      cond do
-        is_number(conf0) ->
-          conf0 * 1.0
-
-        is_binary(conf0) ->
-          case Float.parse(conf0) do
-            {f, _} -> f
-            _ -> 0.0
-          end
-
-        true ->
-          0.0
-      end
-
-    at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
-
-    %{intent: intent, keyword: to_string(kw), confidence: clamp01(conf), at_ms: at_ms}
-  end
-
-  if Mix.env() == :test do
-    def __test_do_focus__(state, choices, opts \\ %{}) do
-      # call your actual internal function
-      do_focus(state, choices, opts)
-    end
-  end
-
-  defp do_focus(state, cands_or_si, _opts) do
-    now = System.system_time(:millisecond)
-
-    wm_cfg0 = Map.get(state, :wm_cfg, %{})
-
-    wm_cfg = %{
-      capacity: Map.get(wm_cfg0, :capacity, 3),
-      decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
-    }
-
-    attention0 = Map.get(state, :attention, %{})
-
-    attention = %{
-      min_score: Map.get(attention0, :min_score, 0.0),
-      capacity: Map.get(attention0, :capacity, wm_cfg.capacity)
-    }
-
-    # ensure state has :attention so callers reading it later won't crash
-    state = Map.put_new(state, :attention, attention)
-
-    base_wm =
-      Map.get(state, :wm, [])
-      |> WorkingMemory.decay(now, wm_cfg.decay_ms)
-
-    cands_or_si
-    |> normalize_candidates()
-    |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
-      focus_reduce_step(cand, acc, now, wm_cfg, attention)
-    end)
-    |> then(fn res -> trim_and_count(res, wm_cfg.capacity) end)
-  end
-
-  defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn) do
-    if not WMPolicy.acceptable_candidate?(cand, cfg) do
-      {wm_acc, a_cnt, r_cnt}
-    else
-      salience = Attention.salience(cand, attn)
-      gate_score = WMPolicy.gate_score_for(cand, salience, cfg)
-      {decision, s} = WMPolicy.decide_gate_policy(wm_acc, cand, gate_score, cfg)
-
-      :telemetry.execute(
-        [:brain, :gate, :decision],
-        %{score: gate_score},
-        %{decision: decision, source: Map.get(cand, :source)}
-      )
-
-      case decision do
-        :block ->
-          {wm_acc, a_cnt, r_cnt}
-
-        :allow ->
-          item = WorkingMemory.normalize(cand, now, activation: s)
-          {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
-
-        :boost ->
-          item = WorkingMemory.normalize(cand, now, activation: min(s + 0.2, 1.0))
-          {WorkingMemory.upsert(wm_acc, item, cfg), a_cnt + 1, r_cnt}
-      end
-    end
-  end
-
-  defp trim_and_count({wm_tmp, a_cnt, r_cnt}, capacity) do
-    wm_trim = WorkingMemory.trim(wm_tmp, capacity)
-    {wm_trim, a_cnt, r_cnt + (length(wm_tmp) - length(wm_trim))}
-  end
-
-  # ───────────────────────── LIFG/ATL/PMTG/Episodes helpers ───────────────────
-
-  defp lifg_out_from_trace(%{trace: [ev | _]}) do
-    audit = Map.drop(ev, [:choices, :boosts, :inhibitions])
-    {:ok, %{choices: ev.choices, boosts: ev.boosts, inhibitions: ev.inhibitions, audit: audit}}
-  end
-
-  defp lifg_out_from_trace(%{trace: []}),
-    do:
-      {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
-
-  defp maybe_ingest_atl(choices, tokens) do
-    case Process.whereis(Brain.ATL) do
-      nil -> :noop
-      _pid -> Brain.ATL.ingest(choices, tokens)
-    end
-  end
-
-  defp confidence_from_choices(choices) when is_list(choices) do
-    choices
-    |> Enum.map(&Map.get(&1, :margin, 0.0))
-    |> Enum.reject(&is_nil/1)
-    |> case do
-      [] -> 1.0
-      ms -> Enum.min(ms) * 1.0
-    end
-  end
-
-  defp lifg_conf_threshold, do: Application.get_env(:brain, :lifg_conf_threshold, 0.18) * 1.0
-
-  defp maybe_consult_pmtg(choices, tokens) do
-    conf = confidence_from_choices(choices)
-    :telemetry.execute([:brain, :lifg, :confidence], %{value: conf}, %{})
-
-    needy_thr = Application.get_env(:brain, :pmtg_margin_threshold, 0.18)
-
-    needy =
-      Enum.filter(choices, fn ch ->
-        m = Map.get(ch, :margin, 1.0)
-        alts = Map.get(ch, :alt_ids, [])
-        is_number(m) and m < needy_thr and is_list(alts) and length(alts) > 0
-      end)
-
-    should_consult? = conf < lifg_conf_threshold() or needy != []
-
-    if should_consult? and is_pid(Process.whereis(Brain.PMTG)) do
-      Brain.PMTG.consult(needy, tokens, already_needy: true, limit: 5, mode: :boost)
-    else
-      :ok
-    end
-  end
-
-  defp maybe_store_episode(tokens, si1, out0) do
-    mode =
-      Application.get_env(:brain, :episodes_mode, :async)
-      |> EpWriter.normalize_episode_mode()
-
-    tags = Application.get_env(:brain, :episodes_tags, ["auto", "lifg"])
-
-    si = %{
-      tokens: tokens,
-      lifg_choices:
-        Enum.map(out0.choices, fn ch ->
-          %{
-            token_index: ch[:token_index],
-            lemma: ch[:lemma],
-            chosen_id: ch[:chosen_id],
-            alt_ids: ch[:alt_ids] || [],
-            margin: ch[:margin],
-            scores: ch[:scores] || %{}
-          }
-        end),
-      trace: si1.trace
-    }
-
-    EpWriter.store(si, tags, mode)
-  end
-
-  defp maybe_rescale_signals(%{choices: choices, boosts: b, inhibitions: i}, opts) do
-    case Keyword.get(opts, :delta_model, :fixed) do
-      :fixed ->
-        {b, i}
-
-      :margin_scaled ->
-        base_boost = Keyword.get(opts, :base_boost, 0.2)
-        base_inhib = Keyword.get(opts, :base_inhib, 0.1)
-        clamp = fn x -> x |> min(0.5) |> max(-0.5) end
-
-        boosts2 =
-          for ch <- choices do
-            m = ch[:margin] || Map.get(ch, :margin, 0.05)
-            delta = clamp.(base_boost * max(m, 0.05))
-            {ch[:chosen_id] || Map.get(ch, :chosen_id), delta}
-          end
-
-        inhib2 =
-          choices
-          |> Enum.flat_map(fn ch ->
-            alts = ch[:alt_ids] || Map.get(ch, :alt_ids, [])
-            m = ch[:margin] || Map.get(ch, :margin, 0.0)
-
-            for aid <- alts do
-              delta = clamp.(-base_inhib * max(0.2, 1.0 - m))
-              {aid, delta}
-            end
-          end)
-
-        {boosts2, inhib2}
-    end
-  end
-
-  defp apply_control_signals(boosts, inhibitions, opts) do
-    coalesce? = Keyword.get(opts, :coalesce, true)
-    conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
-    delta_key = Keyword.get(opts, :delta_key, :delta)
-
-    signals =
-      boosts
-      |> Kernel.++(inhibitions)
-      |> then(fn pairs ->
-        if coalesce?, do: ControlSignals.coalesce_pairs(pairs), else: pairs
-      end)
-
-    signals
-    |> Task.async_stream(
-      fn {id, delta} ->
-        ensure_started(id, id)
-        payload = %{delta_key => delta}
-        GenServer.cast(via(id), {:activate, payload})
-      end,
-      max_concurrency: conc,
-      timeout: :infinity
-    )
-    |> Stream.run()
-
-    :ok
-  end
-
-  # ───────────────────────── LIFG → WM fallback helper ───────────────────────
-
-  # If Brain.LIFG.Gate.stage1_wm_candidates/3 returns no candidates, we fall
-  # back to this minimal adapter that turns Stage-1 choices into WM candidates
-  # with the same overall shape as focus_from_recall/2.
-  defp lifg_wm_candidates_fallback(choices, now_ms, min)
-       when is_list(choices) and is_number(min) do
-    choices
-    |> Enum.filter(fn ch ->
-      choice_gate_score(ch) >= min
-    end)
-    |> Enum.map(fn ch ->
-      id =
-        ch[:id] ||
-          ch["id"] ||
-          ch[:chosen_id] ||
-          ch["chosen_id"] ||
-          "lifg|unknown|0"
-
-      lemma =
-        ch[:lemma] ||
-          ch["lemma"] ||
-          guess_lemma_from_id(id) ||
-          ""
-
-      %{
-        token_index: ch[:token_index] || ch["token_index"] || 0,
-        id: to_string(id),
-        lemma: to_string(lemma),
-        score: choice_gate_score(ch),
-        source: :lifg,
-        reason: :lifg_stage1,
-        ts: now_ms,
-        payload: ch
-      }
-    end)
-  end
-
-  defp lifg_wm_candidates_fallback(_choices, _now_ms, _min), do: []
-
-  # For gating we prefer normalized probability if present, else fall back
-  # to raw score or margin.
-  defp choice_gate_score(ch) when is_map(ch) do
-    s =
-      ch[:score] ||
-        ch["score"] ||
-        ch[:prob] ||
-        ch["prob"] ||
-        ch[:margin] ||
-        ch["margin"] ||
-        0.0
-
-    case s do
-      v when is_number(v) ->
-        v * 1.0
-
-      v when is_binary(v) ->
-        case Float.parse(v) do
-          {f, _} -> f
-          _ -> 0.0
-        end
-
-      _ ->
-        0.0
-    end
-  end
-
-  defp choice_gate_score(_), do: 0.0
-
   # ───────────────────────── Misc helpers ─────────────────────────────────────
 
-  # Small de-dup helper for WM telemetry
   defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
     meta = if reason, do: %{reason: reason}, else: %{}
 
@@ -917,6 +453,9 @@ defmodule Brain do
   end
 
   def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
+
+  # CellRT-via delegate (keeps existing callsites stable)
+  def via(id) when is_binary(id), do: CellRT.via(id)
 
   defp cues_to_candidates(cues) do
     winners =
@@ -987,10 +526,6 @@ defmodule Brain do
   defp norm_float_01_or(x, _d) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
   defp norm_float_01_or(_, d), do: d
 
-  # Cell helpers
-
-  def via(id) when is_binary(id), do: {:via, Registry, {@registry, id}}
-
   defp extract_items(list) when is_list(list), do: list
 
   defp extract_items(%{} = si) do
@@ -1007,58 +542,6 @@ defmodule Brain do
   defp extract_items(%Row{} = row), do: [row]
   defp extract_items(id) when is_binary(id), do: [id]
   defp extract_items(_other), do: []
-
-  defp ensure_start_and_cast(%Row{id: id} = row, payload) do
-    ensure_started(id, row)
-    GenServer.cast(via(id), {:activate, payload})
-    :ok
-  end
-
-  defp ensure_start_and_cast(id, payload) when is_binary(id) do
-    ensure_started(id, id)
-    GenServer.cast(via(id), {:activate, payload})
-    :ok
-  end
-
-  # handle map items (lexicon/seed/other)
-  defp handle_map_item_activation(map_item, payload) do
-    id = map_item[:id] || map_item["id"]
-    type = map_item[:type] || map_item["type"]
-
-    cond do
-      is_binary(id) and (type == "lexicon" or type == :lexicon) ->
-        :telemetry.execute([:brain, :activate, :lexicon_autohydrate], %{count: 1}, %{id: id})
-        ensure_start_and_cast(id, payload)
-        :ok
-
-      is_binary(id) and (type == "seed" or type == :seed) ->
-        :telemetry.execute([:brain, :activate, :seed_unknown], %{count: 1}, %{id: id})
-        :ok
-
-      is_binary(id) ->
-        ensure_start_and_cast(id, payload)
-        :ok
-
-      true ->
-        :telemetry.execute([:brain, :activate, :unknown_map], %{count: 1}, %{sample: map_item})
-        Logger.debug("Brain.activate_cells: unhandled map item #{inspect(map_item)}")
-        :ok
-    end
-  end
-
-  defp ensure_started(id, arg) when is_binary(id) do
-    case Registry.lookup(@registry, id) do
-      [] ->
-        case DynamicSupervisor.start_child(@cell_sup, {Brain.Cell, arg}) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          other -> Logger.warning("Brain: start_child(#{id}) -> #{inspect(other)}")
-        end
-
-      _ ->
-        :ok
-    end
-  end
 
   # ───────────────────────── Internal: WM cfg merge ───────────────────────────
 
@@ -1088,200 +571,86 @@ defmodule Brain do
     }
   end
 
-  # ───────────────────────── ACC hook ─────────────────────────────────────────
+  # ───────────────────────── Control signal emission ─────────────────────────
 
-  # Accepts *anything* and never crashes the pipeline.
-  defp maybe_assess_acc(si, opts) do
-    unless is_map(si) do
-      {si, 0.0}
-    else
-      case safe_acc_assess(si, opts) do
-        {:ok, %{si: si2, conflict: c}} ->
-          c1 = to_float_01(c)
-          {Map.put(si2, :acc_conflict, c1), c1}
+  defp apply_control_signals(boosts, inhibitions, opts) do
+    coalesce? = Keyword.get(opts, :coalesce, true)
+    conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
+    delta_key = Keyword.get(opts, :delta_key, :delta)
 
-        _ ->
-          c0 = Map.get(si, :acc_conflict, 0.0) |> to_float_01()
-          {si, c0}
-      end
-    end
+    signals =
+      boosts
+      |> Kernel.++(inhibitions)
+      |> then(fn pairs ->
+        if coalesce?, do: ControlSignals.coalesce_pairs(pairs), else: pairs
+      end)
+
+    signals
+    |> Task.async_stream(
+      fn {id, delta} ->
+        CellRT.ensure_started(id, id)
+        payload = %{delta_key => delta}
+        GenServer.cast(CellRT.via(id), {:activate, payload})
+      end,
+      max_concurrency: conc,
+      timeout: :infinity
+    )
+    |> Stream.run()
+
+    :ok
   end
 
-  defp safe_acc_assess(si, opts) do
-    opts_kw = if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
+  # ───────────────────────── Centralized WM helpers ───────────────────────────
 
-    # Avoid compile-time warnings if ACC isn’t available yet
-    res =
-      if Code.ensure_loaded?(Brain.ACC) and function_exported?(Brain.ACC, :assess, 2) do
-        try do
-          apply(Brain.ACC, :assess, [si, opts_kw])
-        rescue
-          _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
-        catch
-          _, _ -> {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
-        end
-      else
-        {:ok, %{si: si, conflict: Map.get(si, :acc_conflict, 0.0)}}
-      end
+  defp normalize_intent_map(m) do
+    intent0 = m[:intent] || m["intent"]
 
-    res
-  end
+    intent =
+      cond do
+        is_atom(intent0) ->
+          intent0
 
-  # --- converters (centralized) ---
-  defp as_float(x) when is_number(x), do: x * 1.0
-
-  defp as_float(x) when is_binary(x) do
-    case Float.parse(x) do
-      {f, _} -> f
-      _ -> 0.0
-    end
-  end
-
-  defp as_float(_), do: 0.0
-
-  defp to_float_01(x), do: as_float(x) |> clamp01()
-  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
-  defp clamp01(_), do: 0.0
-
-  # ───────────────────────── PFC integration helpers ──────────────────────────
-
-  defp safe_pfc_policy(si) do
-    try do
-      Brain.PFC.policy(si)
-    rescue
-      _ -> []
-    catch
-      _, _ -> []
-    end
-  end
-
-  defp enrich_for_policy(si_or_cands, tokens0) do
-    if is_map(si_or_cands), do: Map.put(si_or_cands, :tokens, tokens0), else: %{tokens: tokens0}
-  end
-
-  # ───────────────────────── Inputs/Normalization helpers ─────────────────────
-
-  defp build_lifg_inputs(si_or_cands) do
-    cond do
-      is_map(si_or_cands) ->
-        sentence =
-          Map.get(si_or_cands, :sentence) ||
-            Map.get(si_or_cands, "sentence")
-
-        tokens0 =
-          Map.get(si_or_cands, :tokens) ||
-            Map.get(si_or_cands, "tokens") ||
-            []
-
-        # IMPORTANT:
-        #   • Do NOT re-normalize here.
-        #   • Stage-1 will run Brain.LIFG.Guard.sanitize/1 over whatever we pass.
-        tokens =
-          if is_list(tokens0) do
-            tokens0
-          else
-            []
+        is_binary(intent0) ->
+          try do
+            String.to_existing_atom(intent0)
+          rescue
+            _ -> :unknown
           end
 
-        %{tokens: tokens, sentence: sentence}
-
-      is_list(si_or_cands) ->
-        # Legacy path: list of winners/choices; there is no sentence/tokens here.
-        %{tokens: [], sentence: nil}
-
-      true ->
-        %{tokens: [], sentence: nil}
-    end
-  end
-
-  defp normalize_candidates(cands_or_si) do
-    base =
-      cond do
-        is_list(cands_or_si) ->
-          cands_or_si
-
-        is_map(cands_or_si) ->
-          Map.get(cands_or_si, :winners) || Map.get(cands_or_si, "winners") ||
-            Map.get(cands_or_si, :choices) || Map.get(cands_or_si, "choices") ||
-            case Map.get(cands_or_si, :sense_candidates) ||
-                   Map.get(cands_or_si, "sense_candidates") do
-              %{winners: ws} when is_list(ws) -> ws
-              %{"winners" => ws} when is_list(ws) -> ws
-              ws when is_list(ws) -> ws
-              _ -> []
-            end
-
         true ->
-          []
+          :unknown
       end
 
-    Enum.map(base, &normalize_candidate/1)
+    kw = m[:keyword] || m["keyword"] || ""
+    conf0 = m[:confidence] || m["confidence"] || 0.0
+
+    conf =
+      cond do
+        is_number(conf0) ->
+          conf0 * 1.0
+
+        is_binary(conf0) ->
+          case Float.parse(conf0) do
+            {f, _} -> f
+            _ -> 0.0
+          end
+
+        true ->
+          0.0
+      end
+
+    at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
+
+    %{intent: intent, keyword: to_string(kw), confidence: clamp01(conf), at_ms: at_ms}
   end
 
-  defp normalize_candidate(%{} = c) do
-    id = c[:id] || c["id"]
-
-    lemma =
-      c[:lemma] || c["lemma"] ||
-        (id && guess_lemma_from_id(id)) ||
-        c[:phrase] || c["phrase"] ||
-        c[:word] || c["word"] || ""
-
-    %{
-      token_index: c[:token_index] || c["token_index"] || 0,
-      id:
-        (id && to_string(id)) || (lemma != "" && "#{lemma}|phrase|fallback") ||
-          "unk|phrase|fallback",
-      lemma: to_string(lemma),
-      score: (c[:score] || c["score"] || c[:margin] || c["margin"] || 1.0) * 1.0,
-      source: c[:source] || c["source"] || :runtime
-    }
-  end
-
-  defp normalize_candidate(w) when is_binary(w) do
-    if String.contains?(w, "|") do
-      %{
-        token_index: 0,
-        id: w,
-        lemma: guess_lemma_from_id(w) || "",
-        score: 1.0,
-        source: :runtime
-      }
-    else
-      l = String.downcase(w)
-
-      %{
-        token_index: 0,
-        id: "#{l}|phrase|fallback",
-        lemma: l,
-        score: 1.0,
-        source: :runtime
-      }
+  if Mix.env() == :test do
+    def __test_do_focus__(state, choices, opts \\ %{}) do
+      WMFocus.run(state, choices, opts)
     end
   end
 
-  defp normalize_candidate(_other) do
-    %{
-      token_index: 0,
-      id: "unk|phrase|fallback",
-      lemma: "",
-      score: 0.0,
-      source: :runtime
-    }
-  end
-
-  defp guess_lemma_from_id(nil), do: nil
-
-  defp guess_lemma_from_id(id) when is_binary(id) do
-    case String.split(id, "|", parts: 2) do
-      [w | _] -> w
-      _ -> nil
-    end
-  end
-
-  defp guess_lemma_from_id(_), do: nil
-
-  # ───────────────────────── MoodCore safe hooks (new) ────────────────────────
+  # ───────────────────────── MoodCore safe hooks ──────────────────────────────
 
   defp safe_mood_apply_intent(intent, conf) do
     if Code.ensure_loaded?(Brain.MoodCore) and
@@ -1308,4 +677,8 @@ defmodule Brain do
       :ok
     end
   end
+
+  defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
+  defp clamp01(_), do: 0.0
 end
+
