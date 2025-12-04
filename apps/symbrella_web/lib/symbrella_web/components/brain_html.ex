@@ -12,16 +12,12 @@ defmodule SymbrellaWeb.BrainHTML do
 
   alias SymbrellaWeb.Components.Brain.Panels
 
-  # ---------------------------------------------------------------------------
-  # Compatibility shim: keep existing call-sites working
-  # ---------------------------------------------------------------------------
   @doc """
   Delegates to `SymbrellaWeb.Components.Brain.Panels.brain/1`.
   """
   def brain(assigns), do: Panels.brain(assigns)
 
   # --- HUD row ---------------------------------------------------------------
-  # Public so Panels.brain/1 can call it
 
   attr :clock, :map, default: %{}
   attr :intent, :map, default: %{}
@@ -29,6 +25,10 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :auto, :any, default: false
   # region / brain snapshot (optional; used as fallback source)
   attr :snapshot, :any, default: nil
+  # working memory summary (optional)
+  attr :wm, :any, default: nil
+  # attention/meta (optional; supports self-name hit)
+  attr :attention, :any, default: nil
 
   def hud_row(assigns) do
     snap = assigns[:snapshot] || %{}
@@ -82,6 +82,51 @@ defmodule SymbrellaWeb.BrainHTML do
     src = mget(intent, :source) || mget(intent, :src)
     conf = mget(intent, :confidence) || mget(intent, :score) || mget(intent, :prob)
 
+    # WM summary: allow passing wm directly or via snapshot.wm / snapshot.workspace / etc
+    wm =
+      nonempty_map(normalize_wm(assigns[:wm])) ||
+        nonempty_map(normalize_wm(mget(snap, :wm))) ||
+        %{}
+
+    wm_size =
+      mget(wm, :size) ||
+        mget(wm, :count) ||
+        mget(wm, :n)
+
+    wm_cap =
+      mget(wm, :capacity) ||
+        mget(wm, :cap) ||
+        mget(wm, :limit) ||
+        mget(wm, :max)
+
+    wm_ratio =
+      cond do
+        is_integer(wm_size) and is_integer(wm_cap) -> "#{wm_size}/#{wm_cap}"
+        is_number(wm_size) and is_number(wm_cap) -> "#{wm_size}/#{wm_cap}"
+        true -> "—/—"
+      end
+
+    attention =
+      nonempty_map(assigns[:attention]) ||
+        nonempty_map(mget(snap, :attention)) ||
+        %{}
+
+    self_match =
+      mget_in(attention, [:self_name, :match]) ||
+        mget_in(attention, [:self_name, :value]) ||
+        mget_in(attention, [:self, :match]) ||
+        mget_in(attention, [:self, :value]) ||
+        mget_in(snap, [:attention, :self_name, :match]) ||
+        mget_in(snap, [:attention, :self_name, :value])
+
+    self_hit =
+      truthy?(mget_in(attention, [:self_name, :hit?])) or
+        truthy?(mget_in(attention, [:self_name, :hit])) or
+        truthy?(mget_in(attention, [:self, :hit?])) or
+        truthy?(mget_in(attention, [:self, :hit])) or
+        self_hit?(snap) or
+        truthy?(assigns[:self_hit])
+
     assigns =
       assigns
       |> assign(:seq, seq)
@@ -98,6 +143,9 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:vigil, vigil)
       |> assign(:plast, plast)
       |> assign(:auto_on, assigns[:auto] in [true, "on", "ON"])
+      |> assign(:wm_ratio, wm_ratio)
+      |> assign(:self_hit, self_hit)
+      |> assign(:self_match, self_match)
 
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
@@ -134,6 +182,22 @@ defmodule SymbrellaWeb.BrainHTML do
       </.chip>
 
       <.chip>
+        <span class="font-semibold">WM</span>
+        <span class="font-mono">{@wm_ratio}</span>
+      </.chip>
+
+      <%= if @self_hit do %>
+        <.chip>
+          <span class="font-semibold">Self</span>
+          <%= if is_binary(@self_match) and @self_match != "" do %>
+            <code class="px-1">{@self_match}</code>
+          <% else %>
+            <span class="opacity-70">hit</span>
+          <% end %>
+        </.chip>
+      <% end %>
+
+      <.chip>
         <button class="text-xs border px-2 py-1 rounded" phx-click="refresh">Refresh</button>
         <span class="opacity-60">Auto:</span> {(@auto_on && "ON") || "OFF"}
       </.chip>
@@ -143,7 +207,6 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # HUD chip component (internal)
   slot :inner_block, required: true
-
   defp chip(assigns) do
     ~H"""
     <span class="text-xs px-2 py-1 rounded-md border bg-white/70 text-zinc-700 flex items-center gap-1">
@@ -152,11 +215,166 @@ defmodule SymbrellaWeb.BrainHTML do
     """
   end
 
+  # --- Blackboard panel ------------------------------------------------------
+
+  attr :events, :list, default: []
+  attr :filter, :string, default: ""
+  attr :limit, :integer, default: 50
+
+  def blackboard_panel(assigns) do
+    now = System.system_time(:millisecond)
+    q = (assigns[:filter] || "") |> String.trim() |> String.downcase()
+
+    normalized =
+      (assigns[:events] || [])
+      |> Enum.map(&normalize_bb_event/1)
+
+    filtered =
+      if q == "" do
+        normalized
+      else
+        Enum.filter(normalized, fn ev ->
+          (to_string(ev.tag) |> String.downcase() |> String.contains?(q)) or
+            (ev.preview |> String.downcase() |> String.contains?(q))
+        end)
+      end
+
+    view = filtered |> Enum.take(assigns[:limit] || 50)
+
+    assigns =
+      assigns
+      |> assign(:now, now)
+      |> assign(:q, assigns[:filter] || "")
+      |> assign(:count, length(normalized))
+      |> assign(:fcount, length(filtered))
+      |> assign(:view, view)
+
+    ~H"""
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+          <div class="text-sm font-semibold text-gray-700 dark:text-gray-200">Blackboard Feed</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">
+            showing {@fcount} / {@count} (latest {@limit})
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <form phx-change="bb_filter" class="flex items-center gap-2">
+            <input
+              type="text"
+              name="q"
+              value={@q}
+              phx-debounce="150"
+              placeholder="filter (tag / text)…"
+              class="w-56 rounded-md border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-neutral-900 px-2 py-1 text-sm"
+            />
+          </form>
+          <button
+            type="button"
+            phx-click="bb_clear"
+            class="rounded-md border border-gray-200 dark:border-gray-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-neutral-900"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-3 space-y-2">
+        <%= if @view == [] do %>
+          <div class="text-sm text-gray-500 dark:text-gray-400">— no events —</div>
+        <% else %>
+          <%= for ev <- @view do %>
+            <details class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+              <summary class="cursor-pointer text-sm">
+                <span class="font-mono text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
+                  {to_string(ev.tag)}
+                </span>
+                <span class="opacity-70 mr-2">
+                  {format_age(@now, ev.at_ms)}
+                </span>
+                <span class="text-gray-700 dark:text-gray-200">
+                  {ev.preview}
+                </span>
+              </summary>
+              <pre class="mt-2 text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5"><%= inspect(ev.env, pretty: true, width: 100, limit: :infinity) %></pre>
+            </details>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  defp normalize_bb_event(%{at_ms: at, tag: tag, env: env} = m) do
+    %{
+      id: Map.get(m, :id),
+      at_ms: if(is_integer(at), do: at, else: 0),
+      tag: tag || :event,
+      env: env,
+      preview: preview_env(env)
+    }
+  end
+
+  defp normalize_bb_event(env) do
+    %{
+      id: nil,
+      at_ms: 0,
+      tag: :event,
+      env: env,
+      preview: preview_env(env)
+    }
+  end
+
+  defp preview_env(env) do
+    s = inspect(env, pretty: false, limit: 50, printable_limit: 300)
+    if byte_size(s) > 120, do: binary_part(s, 0, 120) <> "…", else: s
+  end
+
+  defp format_age(now_ms, at_ms) when is_integer(at_ms) and at_ms > 0 do
+    delta = max(now_ms - at_ms, 0)
+    "#{delta}ms ago"
+  end
+
+  defp format_age(_now_ms, _at_ms), do: "—"
+
+  # --- Working memory panel --------------------------------------------------
+
+  attr :wm, :any, default: %{}
+
+  def wm_panel(assigns) do
+    wm = assigns[:wm] || %{}
+
+    assigns =
+      assigns
+      |> assign(:wm, wm)
+      |> assign(:empty?, wm == %{} or wm == nil)
+
+    ~H"""
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold text-gray-700 dark:text-gray-200">Working Memory (WM)</div>
+        <div class="text-xs text-gray-500 dark:text-gray-400">
+          <%= if is_map(@wm) do %>
+            <%= if @wm[:source] do %>source: <span class="font-mono">{to_string(@wm[:source])}</span><% end %>
+          <% else %>
+            —
+          <% end %>
+        </div>
+      </div>
+
+      <%= if @empty? do %>
+        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">— no WM observed yet —</div>
+      <% else %>
+        <pre class="mt-3 text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5"><%= inspect(@wm, pretty: true, width: 100, limit: :infinity) %></pre>
+      <% end %>
+    </div>
+    """
+  end
+
   # --- Live state ------------------------------------------------------------
-  # Public so Panels.brain/1 can call it
 
   attr :state, :any, default: %{}
-
   def live_state_panel(assigns) do
     st = assigns[:state] || %{}
 
@@ -188,7 +406,6 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   # --- Module status ---------------------------------------------------------
-  # Public so Panels.brain/1 can call it
 
   attr :status, :any, required: true
   attr :selected, :atom, default: :lifg
@@ -253,7 +470,6 @@ defmodule SymbrellaWeb.BrainHTML do
   defp status_badge_class(_neutral), do: "border-zinc-300 text-zinc-600"
 
   # --- Mood panel ------------------------------------------------------------
-  # Public so Panels.brain/1 can call it
 
   def mood_panel(assigns) do
     mood = Map.get(assigns, :mood, %{levels: %{}, derived: %{}, tone: :neutral})
@@ -322,6 +538,10 @@ defmodule SymbrellaWeb.BrainHTML do
   defp fmt_pct(nil), do: "--"
   defp fmt_pct(v) when is_integer(v), do: "#{v}%"
 
+  # Treat floats in 0..1 as probability; otherwise treat as 0..100 already
+  defp fmt_pct(v) when is_float(v) and v >= 0.0 and v <= 1.0,
+    do: :io_lib.format("~.1f%", [v * 100.0]) |> IO.iodata_to_binary()
+
   defp fmt_pct(v) when is_float(v),
     do: :io_lib.format("~.1f%", [v]) |> IO.iodata_to_binary()
 
@@ -334,6 +554,15 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp mget(_, _), do: nil
 
+  defp mget_in(m, [k | rest]) when is_map(m) do
+    case mget(m, k) do
+      %{} = next -> mget_in(next, rest)
+      other -> other
+    end
+  end
+
+  defp mget_in(_, _), do: nil
+
   defp nonempty_map(%{} = m) when map_size(m) > 0, do: m
   defp nonempty_map(_), do: nil
 
@@ -344,4 +573,25 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   defp mood_val(_, _), do: nil
+
+  defp truthy?(v) when v in [true, "true", "TRUE", "1", 1, :true, :yes, "yes", "on", "ON"], do: true
+  defp truthy?(_), do: false
+
+  defp self_hit?(snap) do
+    truthy?(mget_in(snap, [:attention, :self_name, :hit?])) or
+      truthy?(mget_in(snap, [:attention, :self_name, :hit])) or
+      truthy?(mget_in(snap, [:attention_stamp, :self_name_hit?])) or
+      truthy?(mget_in(snap, [:attention, :self_hit]))
+  end
+
+  defp normalize_wm(nil), do: nil
+  defp normalize_wm(%{} = wm), do: wm
+
+  defp normalize_wm(other) when is_list(other) do
+    # if someone passes a list of items, treat length as size
+    %{size: length(other)}
+  end
+
+  defp normalize_wm(_), do: nil
 end
+

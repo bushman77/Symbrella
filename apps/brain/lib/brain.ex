@@ -681,4 +681,3 @@ defmodule Brain do
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0
 end
-

@@ -1,3 +1,4 @@
+# apps/symbrella_web/lib/symbrella_web/region/registry.ex
 defmodule SymbrellaWeb.Region.Registry do
   @moduledoc false
 
@@ -22,6 +23,105 @@ defmodule SymbrellaWeb.Region.Registry do
     SymbrellaWeb.Region.Salience
   ]
 
+  @shape_defaults %{
+    path: "",
+    colors: {"#94A3B8", "#64748B"},
+    anchor: {0, 0},
+    tweak: %{dx: 0, dy: 0, s: 1.0}
+  }
+
+  @meta_defaults %{
+    subtitle: "Module Summary",
+    desc: "Overview of the selected module.",
+    modules: [],
+    telemetry: [],
+    config_examples: []
+  }
+
+  # Registry-owned meta. These values override module-provided meta (if any).
+  @meta_by_key %{
+    lifg: %{
+      subtitle: "Competitive Sense Selection",
+      desc:
+        "Selects the winning sense per token from si.sense_candidates with boundary guards and scoring " <>
+          "(lex_fit, rel_prior, activation, intent_bias).",
+      modules: [Brain.LIFG, Brain.LIFG.Stage1],
+      telemetry: [
+        [:brain, :lifg, :stage1, :score],
+        [:brain, :lifg, :stage1, :winner],
+        [:brain, :lifg, :stage1, :boundary_drop],
+        [:brain, :lifg, :stage1, :chargram_violation]
+      ],
+      config_examples: [
+        "config :brain, :lifg_defaults, margin_threshold: 0.15",
+        "config :brain, :lifg_stage1_scores_mode, :all",
+        "config :brain, :lifg_stage1_mwe_fallback, true"
+      ]
+    },
+    pmtg: %{
+      subtitle: "Lexical Retrieval Boost",
+      desc:
+        "Boosts/recovers sense candidates before LIFG using retrieval heuristics when confidence is low " <>
+          "or tokens are needy.",
+      modules: [Brain.PMTG],
+      telemetry: [
+        [:brain, :pmtg, :boost],
+        [:brain, :pmtg, :no_mwe_senses]
+      ],
+      config_examples: [
+        "config :brain, pmtg_mode: :boost",
+        "config :brain, pmtg_margin_threshold: 0.15"
+      ]
+    },
+    hippocampus: %{
+      subtitle: "Episodic Recall",
+      desc:
+        "Stores and recalls episodes; can attach recall evidence to bias selection and planning. " <>
+          "Supports memory/db/hybrid recall modes.",
+      modules: [Brain.Hippocampus],
+      telemetry: [
+        [:brain, :hippocampus, :recall],
+        [:brain, :hippocampus, :write]
+      ],
+      config_examples: [
+        "config :brain, episodes_mode: :on",
+        "config :brain, :hippo_db_defaults, recall_source: :memory, recall_k: 8"
+      ]
+    },
+    acc: %{
+      subtitle: "Conflict Monitor",
+      desc:
+        "Tracks competition/conflict signals and helps decide when to escalate or tighten thresholds.",
+      modules: [Brain.ACC],
+      telemetry: [[:brain, :acc, :conflict]],
+      config_examples: ["config :brain, acc_conflict_tau: 0.50"]
+    },
+    thalamus: %{
+      subtitle: "Routing & Gating",
+      desc:
+        "Routes signals between regions and participates in gating policies (attention/WM routing).",
+      modules: [Brain.Thalamus],
+      telemetry: [[:brain, :thalamus, :gate]],
+      config_examples: []
+    },
+    basal_ganglia: %{
+      subtitle: "Action Selection",
+      desc:
+        "Action selection and gating signals (what enters focus/WM; inhibit/permit competing actions).",
+      modules: [Brain.BasalGanglia],
+      telemetry: [[:brain, :basal_ganglia, :gate]],
+      config_examples: []
+    },
+    bg: %{
+      subtitle: "Action Selection",
+      desc:
+        "Action selection and gating signals (what enters focus/WM; inhibit/permit competing actions).",
+      modules: [Brain.BasalGanglia],
+      telemetry: [[:brain, :basal_ganglia, :gate]],
+      config_examples: []
+    }
+  }
+
   # ── Public: SVG Region discovery ───────────────────────────────────────────
 
   # Runtime-only discovery (no compile-time calls to region modules).
@@ -42,33 +142,31 @@ defmodule SymbrellaWeb.Region.Registry do
   # If a region module implements defn/0 we use it directly; otherwise we
   # assemble a defn map from the individual functions.
   def defn(key) when is_atom(key) do
-    case module_for(key) do
-      nil ->
-        %{
-          path: "",
-          colors: {"#94A3B8", "#64748B"},
-          anchor: {0, 0},
-          tweak: %{dx: 0, dy: 0, s: 1.0}
-        }
+    base = @shape_defaults
 
-      mod ->
-        if function_exported?(mod, :defn, 0) do
-          safe_apply(mod, :defn, []) ||
+    result =
+      case module_for(key) do
+        nil ->
+          base
+
+        mod ->
+          if function_exported?(mod, :defn, 0) do
+            safe_apply(mod, :defn, %{}) || %{}
+          else
             %{
-              path: "",
-              colors: {"#94A3B8", "#64748B"},
-              anchor: {0, 0},
-              tweak: %{dx: 0, dy: 0, s: 1.0}
+              path: safe_apply(mod, :path, "") || "",
+              colors: safe_apply(mod, :colors, base.colors) || base.colors,
+              anchor: safe_apply(mod, :anchor, base.anchor) || base.anchor,
+              tweak: safe_apply(mod, :tweak, base.tweak) || base.tweak
             }
-        else
-          %{
-            path: safe_apply(mod, :path, "") || "",
-            colors: safe_apply(mod, :colors, {"#94A3B8", "#64748B"}) || {"#94A3B8", "#64748B"},
-            anchor: safe_apply(mod, :anchor, {0, 0}) || {0, 0},
-            tweak: safe_apply(mod, :tweak, %{dx: 0, dy: 0, s: 1.0}) || %{dx: 0, dy: 0, s: 1.0}
-          }
-        end
-    end
+          end
+      end
+
+    result
+    |> ensure_shape_defaults()
+    |> ensure_identity(key)
+    |> ensure_meta_defaults()
+    |> apply_meta_override(key)
   end
 
   # ── Labels & Brain process mapping ─────────────────────────────────────────
@@ -84,7 +182,14 @@ defmodule SymbrellaWeb.Region.Registry do
     dmpfc: "DMPFC",
     fpc: "FPC",
     bg: "Basal Ganglia",
-    basal_ganglia: "Basal Ganglia"
+    basal_ganglia: "Basal Ganglia",
+    hippocampus: "Hippocampus",
+    thalamus: "Thalamus",
+    cerebellum: "Cerebellum",
+    frontal: "Frontal",
+    temporal: "Temporal",
+    prefrontal: "Prefrontal",
+    salience: "Salience"
   }
 
   @doc """
@@ -149,6 +254,45 @@ defmodule SymbrellaWeb.Region.Registry do
   end
 
   # ── internal helpers ───────────────────────────────────────────────────────
+
+  defp ensure_shape_defaults(%{} = defn) do
+    defn
+    |> Map.put_new(:path, @shape_defaults.path)
+    |> Map.put_new(:colors, @shape_defaults.colors)
+    |> Map.put_new(:anchor, @shape_defaults.anchor)
+    |> Map.put_new(:tweak, @shape_defaults.tweak)
+  end
+
+  defp ensure_identity(%{} = defn, key) do
+    lbl = label_for(key)
+
+    defn
+    |> Map.put_new(:key, key)
+    |> Map.put_new(:label, lbl)
+    |> Map.put_new(:title, lbl)
+  end
+
+  defp ensure_meta_defaults(%{} = defn) do
+    defn
+    |> Map.put_new(:subtitle, @meta_defaults.subtitle)
+    |> Map.put_new(:desc, @meta_defaults.desc)
+    |> Map.put_new(:modules, @meta_defaults.modules)
+    |> Map.put_new(:telemetry, @meta_defaults.telemetry)
+    |> Map.put_new(:config_examples, @meta_defaults.config_examples)
+  end
+
+  defp apply_meta_override(%{} = defn, key) do
+    # allow :bg to shadow :basal_ganglia (or other alias keys)
+    meta =
+      Map.get(@meta_by_key, key) ||
+        Map.get(@meta_by_key, alias_key(key)) ||
+        %{}
+
+    Map.merge(defn, meta)
+  end
+
+  defp alias_key(:bg), do: :basal_ganglia
+  defp alias_key(other), do: other
 
   defp by_key_map do
     modules()

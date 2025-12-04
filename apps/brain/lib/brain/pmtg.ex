@@ -10,17 +10,6 @@ defmodule Brain.PMTG do
     • `:boost` (default) — bump `chosen_id` if any evidence found; softly inhibit alts
     • `:rerun`          — re-run `LIFG.Stage1` with a slate built from evidence
     • `:none`           — plan/record only (no side effects)
-
-  Optional runtime config (override per-call via opts):
-
-      config :brain,
-        pmtg_mode: :boost,
-        pmtg_margin_threshold: 0.15,
-        pmtg_window_keep: 50
-
-  Additional signals considered for "needy":
-    • p(top1) < `:acc_p_min` (defaults to 0.65) when available
-    • presence of alternatives (alt_ids != [])
   """
 
   use Brain, region: :pmtg
@@ -102,7 +91,7 @@ defmodule Brain.PMTG do
   def handle_cast({:configure, opts}, state) do
     opts_map = Map.new(opts)
     keep = Map.get(opts_map, :window_keep, state.window_keep)
-    mode = Map.get(opts_map, :mode, state.opts[:mode])
+    mode = Map.get(opts_map, :mode, Map.get(state.opts, :mode))
 
     {:noreply,
      state
@@ -117,7 +106,7 @@ defmodule Brain.PMTG do
     %{need: need, si: si1, queries: queries, evidence: evidence, thr: thr, pmin: pmin, mode: mode} =
       plan_and_collect(list, tokens, opts, state)
 
-    apply_mode(si1, need, list, evidence, mode, opts, emit_mode: :async)
+    _ = apply_mode(si1, need, list, evidence, mode, opts, emit_mode: :async)
 
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
     {last, window} = build_last_and_window(si1, queries, evidence, need, state, timing_ms)
@@ -165,11 +154,9 @@ defmodule Brain.PMTG do
   @impl true
   def handle_call(:reset, _from, state), do: {:reply, :ok, %{state | last: nil, window: []}}
 
-  # >>> keep :status above the catch-all to avoid clause shadowing <<<
   @impl true
   def handle_call(:status, _from, state), do: {:reply, state, state}
 
-  # Keep the catch-all last so it doesn’t shadow specific clauses
   @impl true
   def handle_call(other, from, state), do: super(other, from, state)
 
@@ -234,9 +221,7 @@ defmodule Brain.PMTG do
       tok = Map.get(tmap, q.token_index, %{})
 
       variants_core = lemma_variants(q.lemma, tok)
-
-      variants_syns =
-        if use_syns?, do: synonyms_for(q.lemma, tok, syn_top_k), else: []
+      variants_syns = if use_syns?, do: synonyms_for(q.lemma, tok, syn_top_k), else: []
 
       variants =
         (variants_core ++ variants_syns)
@@ -250,7 +235,7 @@ defmodule Brain.PMTG do
 
       lex_hits =
         variants
-        |> Enum.flat_map(&lexicon_hits(&1, q.limit))
+        |> Enum.flat_map(&lexicon_hits(&1, q.limit, opts))
         |> uniq_by_id()
 
       _ =
@@ -275,7 +260,8 @@ defmodule Brain.PMTG do
         Map.merge(base, %{
           variants_tried: variants,
           variants_hit: %{
-            episodes: Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
+            episodes:
+              Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
             lexicon: Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
           }
         })
@@ -308,26 +294,34 @@ defmodule Brain.PMTG do
     end
   end
 
-  defp lexicon_hits(nil, _limit), do: []
-  defp lexicon_hits("", _limit), do: []
+  defp lexicon_hits(nil, _limit, _opts), do: []
+  defp lexicon_hits("", _limit, _opts), do: []
 
-  defp lexicon_hits(lemma, limit) do
-    mods = [Module.concat([Db, Lexicon]), Lexicon]
+  defp lexicon_hits(lemma, limit, opts) do
+    injected = Keyword.get(opts, :lexicon_mod)
 
-    case Enum.find(mods, &Code.ensure_loaded?/1) do
-      nil ->
-        []
+    cond do
+      is_atom(injected) and Code.ensure_loaded?(injected) and function_exported?(injected, :lookup, 2) ->
+        safe_call(fn -> injected.lookup(lemma, limit) end)
 
-      mod ->
-        cond do
-          function_exported?(mod, :lookup, 2) ->
-            safe_call(fn -> mod.lookup(lemma, limit) end)
+      true ->
+        mods = [Module.concat([Db, Lexicon]), Lexicon]
 
-          function_exported?(mod, :definitions_for, 2) ->
-            safe_call(fn -> mod.definitions_for(lemma, limit) end)
-
-          true ->
+        case Enum.find(mods, &Code.ensure_loaded?/1) do
+          nil ->
             []
+
+          mod ->
+            cond do
+              function_exported?(mod, :lookup, 2) ->
+                safe_call(fn -> mod.lookup(lemma, limit) end)
+
+              function_exported?(mod, :definitions_for, 2) ->
+                safe_call(fn -> mod.definitions_for(lemma, limit) end)
+
+              true ->
+                []
+            end
         end
     end
   end
@@ -346,6 +340,11 @@ defmodule Brain.PMTG do
   end
 
   # ─────────────── Sense compatibility (MWE vs unigram) ───────────────
+  #
+  # Required behavior for tests:
+  # - If token is MWE but lexicon has 0 MWE-compatible senses, KEEP original lexicon
+  #   (do not erase it), and emit [:brain, :pmtg, :no_mwe_senses] with kept=0.
+  #
 
   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
   def enforce_sense_compatibility(evidence, tokens)
@@ -353,94 +352,92 @@ defmodule Brain.PMTG do
     tmap =
       Enum.reduce(tokens, %{}, fn
         %{} = t, acc ->
-          idx = Map.get(t, :index) || Map.get(t, "index")
-          if is_integer(idx), do: Map.put(acc, idx, t), else: acc
+          case token_index_of(t) do
+            i when is_integer(i) -> Map.put(acc, i, t)
+            _ -> acc
+          end
 
         _, acc ->
           acc
       end)
 
-    Enum.map(evidence, fn ev ->
-      idx = Map.get(ev, :token_index) || Map.get(ev, "token_index")
-      token = Map.get(tmap, idx, %{})
-      lex = Map.get(ev, :lexicon) || Map.get(ev, "lexicon") || []
+    Enum.map(evidence, fn
+      %{} = ev ->
+        idx = ev[:token_index] || ev["token_index"]
+        token = if is_integer(idx), do: Map.get(tmap, idx, %{}), else: %{}
 
-      {filtered, fallback_used?} = filter_lexicon_for_token(lex, token)
+        orig_lex = ev[:lexicon] || ev["lexicon"] || []
+        lex = if is_list(orig_lex), do: orig_lex, else: List.wrap(orig_lex)
 
-      ev
-      |> Map.put(:lexicon, filtered)
-      |> maybe_emit_no_mwe_senses(token, lex, filtered, fallback_used?)
+        {lex_out, kept_compatible, fallback?} = filter_lexicon_for_token(lex, token)
+
+        ev
+        |> Map.put(:lexicon, lex_out)
+        |> maybe_emit_no_mwe_senses(token, lex, kept_compatible, fallback?)
+
+      other ->
+        other
     end)
   end
 
-  defp filter_lexicon_for_token(lexicon, token) when is_list(lexicon) do
-    n =
-      Map.get(token, :n) ||
-        Map.get(token, "n")
-
-    mw =
-      Map.get(token, :mw) ||
-        Map.get(token, "mw") || false
-
-    mwe? = (is_integer(n) and n > 1) or mw
-    unigram? = is_integer(n) and n == 1
+  # Returns: {lexicon_to_use, kept_compatible_count, fallback?}
+  defp filter_lexicon_for_token(lexicon, token) when is_list(lexicon) and is_map(token) do
+    mwe? = token_mwe?(token)
+    unigram? = token_unigram?(token)
 
     cond do
-      mwe? or unigram? ->
-        filtered =
-          Enum.filter(lexicon, fn sense ->
-            lemma = (Map.get(sense, :lemma) || Map.get(sense, "lemma") || "") |> to_string()
-            has_space = String.contains?(lemma, " ")
+      mwe? ->
+        filter_by_space_compat(lexicon, true)
 
-            if mwe? do
-              has_space
-            else
-              not has_space
-            end
-          end)
-
-        if mwe? and filtered == [] do
-          # For MWEs, fall back to the full lexicon and let Stage-1 decide.
-          {lexicon, true}
-        else
-          {filtered, false}
-        end
+      unigram? ->
+        filter_by_space_compat(lexicon, false)
 
       true ->
-        # No shape info; leave lexicon unchanged.
-        {lexicon, false}
+        {lexicon, length(lexicon), false}
     end
   end
 
-  defp maybe_emit_no_mwe_senses(ev, token, orig, filtered, fallback?) do
-    n =
-      Map.get(token, :n) ||
-        Map.get(token, "n")
+  defp filter_lexicon_for_token(lexicon, _token) when is_list(lexicon),
+    do: {lexicon, length(lexicon), false}
 
-    mw =
-      Map.get(token, :mw) ||
-        Map.get(token, "mw") || false
+  defp filter_by_space_compat([], _want_space?), do: {[], 0, false}
 
-    mwe? = (is_integer(n) and n > 1) or mw
+  defp filter_by_space_compat(lexicon, want_space?) when is_list(lexicon) do
+    compatible =
+      Enum.filter(lexicon, fn sense ->
+        lemma = (sense[:lemma] || sense["lemma"] || "") |> to_string()
+        has_space = String.contains?(lemma, " ")
+        if want_space?, do: has_space, else: not has_space
+      end)
 
-    if mwe? and (filtered == [] or fallback?) do
-      kept_count = if fallback?, do: 0, else: length(filtered)
+    cond do
+      compatible != [] ->
+        {compatible, length(compatible), false}
 
+      true ->
+        # fallback: KEEP original lexicon, but report 0 compatible kept
+        {lexicon, 0, true}
+    end
+  end
+
+  defp maybe_emit_no_mwe_senses(ev, token, orig_lex, kept_compatible, _fallback?)
+       when is_map(ev) and is_map(token) and is_list(orig_lex) and is_integer(kept_compatible) do
+    if token_mwe?(token) and orig_lex != [] and kept_compatible == 0 do
       safe_exec_telemetry(
         [:brain, :pmtg, :no_mwe_senses],
         %{
-          orig: length(orig),
-          kept: kept_count,
-          token_index: Map.get(token, :index),
-          phrase: Map.get(token, :phrase)
+          orig: length(orig_lex),
+          kept: 0,
+          token_index: token_index_of(token) || ev[:token_index] || ev["token_index"] || 0,
+          phrase: token_phrase_of(token) || ev[:lemma] || ev["lemma"] || ""
         }
       )
-
-      ev
-    else
-      ev
     end
+
+    ev
   end
+
+  defp maybe_emit_no_mwe_senses(ev, _token, _orig_lex, _kept_compatible, _fallback?), do: ev
 
   # ───────────────────────── Actions on evidence ─────────────────────────────
 
@@ -448,8 +445,7 @@ defmodule Brain.PMTG do
     boost = Keyword.get(opts, :boost, 0.15) * 1.0
     inhib = Keyword.get(opts, :inhib, -0.05) * 1.0
 
-    evidence
-    |> Enum.each(fn ev ->
+    Enum.each(evidence, fn ev ->
       has_hits = ev.episodes != [] or ev.lexicon != []
 
       if has_hits and is_binary(ev.chosen_id) do
@@ -467,11 +463,10 @@ defmodule Brain.PMTG do
     :ok
   end
 
-  @doc false
   @spec do_rerun(si(), [evidence_item()], keyword()) ::
           {:ok, %{si: si(), choices: [choice()]}}
   defp do_rerun(si, evidence, opts) do
-    slate_from_ev =
+    sense_candidates =
       evidence
       |> Enum.group_by(& &1.token_index)
       |> Enum.into(%{}, fn {tidx, evs} ->
@@ -488,8 +483,11 @@ defmodule Brain.PMTG do
             pos = Map.get(s, :pos) || Map.get(s, "pos") || ""
 
             defn =
-              Map.get(s, :gloss) || Map.get(s, "gloss") ||
-                Map.get(s, :definition) || Map.get(s, "definition") || ""
+              Map.get(s, :gloss) ||
+                Map.get(s, "gloss") ||
+                Map.get(s, :definition) ||
+                Map.get(s, "definition") ||
+                ""
 
             syns = Map.get(s, :synonyms) || Map.get(s, "synonyms") || []
             feats_from_sense = Map.get(s, :features) || %{}
@@ -519,7 +517,7 @@ defmodule Brain.PMTG do
         {tidx, senses}
       end)
 
-    si2 = Map.put(si, :sense_candidates, slate_from_ev)
+    si2 = Map.put(si, :sense_candidates, sense_candidates)
 
     env =
       Application.get_env(:brain, :lifg_stage1_weights, %{
@@ -537,13 +535,113 @@ defmodule Brain.PMTG do
       Brain.LIFG.Stage1.run(
         si2,
         weights: weights,
-        # pMTG-specific telemetry namespace for rerun path
         chargram_event: [:brain, :pmtg, :chargram_violation],
         boundary_event: [:brain, :pmtg, :boundary_drop]
       )
 
+    slate = Map.get(si2, :sense_candidates, %{})
+    choices = break_rerun_ties(choices, slate, weights, opts)
+
     {:ok, %{si: si2, choices: choices}}
   end
+
+  # Deterministic tie-breaker for rerun outputs using the rerun slate + weights.
+  defp break_rerun_ties(choices, slate_by_tidx, weights, opts)
+       when is_list(choices) and is_map(slate_by_tidx) and is_map(weights) do
+    eps = Keyword.get(opts, :rerun_tie_epsilon, 1.0e-9) * 1.0
+
+    Enum.map(choices, fn ch ->
+      tidx = choice_token_index(ch)
+      cands = Map.get(slate_by_tidx, tidx, [])
+
+      cond do
+        cands == [] ->
+          ch
+
+        not tied_choice?(ch, eps) ->
+          ch
+
+        true ->
+          {best_id, best, second, score_map} = best_candidate(cands, weights)
+
+          alt_ids =
+            score_map
+            |> Map.keys()
+            |> Enum.reject(&(&1 == best_id))
+
+          ch
+          |> Map.put(:chosen_id, best_id)
+          |> Map.put(:id, best_id)
+          |> Map.put(:scores, score_map)
+          |> Map.put(:alt_ids, alt_ids)
+          |> Map.put(:margin, best - second)
+      end
+    end)
+  end
+
+  defp tied_choice?(ch, eps) do
+    m = num(Map.get(ch, :margin) || Map.get(ch, :prob_margin) || 0.0)
+    sm = score_margin_from_choice(ch)
+    abs(m) <= eps and abs(sm) <= eps
+  end
+
+  defp score_margin_from_choice(ch) do
+    scores = Map.get(ch, :scores) || Map.get(ch, :probs) || %{}
+
+    if is_map(scores) and map_size(scores) > 1 do
+      vals =
+        scores
+        |> Map.values()
+        |> Enum.map(&num/1)
+        |> Enum.sort(:desc)
+
+      Enum.at(vals, 0, 0.0) - Enum.at(vals, 1, 0.0)
+    else
+      0.0
+    end
+  end
+
+  defp best_candidate(cands, weights) do
+    scored =
+      Enum.map(cands, fn c ->
+        id = Map.get(c, :id) || Map.get(c, "id") || "?"
+        feats = Map.get(c, :features) || Map.get(c, "features") || %{}
+        {to_string(id), candidate_score(feats, weights)}
+      end)
+
+    score_map = Map.new(scored)
+
+    {best_id, best_score} =
+      scored
+      |> Enum.sort_by(fn {id, s} -> {-s, id} end)
+      |> hd()
+
+    second_score =
+      scored
+      |> Enum.map(fn {_id, s} -> s end)
+      |> Enum.sort(:desc)
+      |> Enum.at(1, 0.0)
+
+    {best_id, best_score, second_score, score_map}
+  end
+
+  defp candidate_score(feats, weights) when is_map(feats) and is_map(weights) do
+    w_lex = Map.get(weights, :lex_fit, 0.0) |> num()
+    w_rel = Map.get(weights, :rel_prior, 0.0) |> num()
+    w_act = Map.get(weights, :activation, 0.0) |> num()
+    w_int = Map.get(weights, :intent_bias, 0.0) |> num()
+
+    lex = Map.get(feats, :lex_fit) || Map.get(feats, "lex_fit") || 0.0
+    rel = Map.get(feats, :rel_prior) || Map.get(feats, "rel_prior") || 0.0
+    act = Map.get(feats, :activation) || Map.get(feats, "activation") || 0.0
+    ib = Map.get(feats, :intent_bias) || Map.get(feats, "intent_bias") || 0.0
+
+    w_lex * num(lex) + w_rel * num(rel) + w_act * num(act) + w_int * num(ib)
+  end
+
+  defp num(v) when is_integer(v), do: v * 1.0
+  defp num(v) when is_float(v), do: v
+  defp num(_), do: 0.0
 
   defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
     phrase =
@@ -580,16 +678,17 @@ defmodule Brain.PMTG do
       fetch_evidence(queries, si1.tokens, opts)
       |> enforce_sense_compatibility(si1.tokens)
 
-    mode = opts[:mode] || state.opts[:mode] || Application.get_env(:brain, :pmtg_mode, :boost)
+    mode =
+      opts[:mode] || Map.get(state.opts, :mode) || Application.get_env(:brain, :pmtg_mode, :boost)
 
     %{need: need, si: si1, queries: queries, evidence: evidence, thr: thr, pmin: pmin, mode: mode}
   end
 
-  defp apply_mode(si1, need, list, evidence, mode, opts, emit_mode: emit_mode) do
+  defp apply_mode(si1, _need, list, evidence, mode, opts, emit_mode: emit_mode) do
     case mode do
       :boost ->
         do_boost(evidence, opts)
-        {need, false, si1}
+        {list, false, si1}
 
       :rerun ->
         case do_rerun(si1, evidence, opts) do
@@ -598,11 +697,11 @@ defmodule Brain.PMTG do
             {merge_choices(list, rerun_choices), true, si2}
 
           _ ->
-            {need, false, si1}
+            {list, false, si1}
         end
 
       _ ->
-        {need, false, si1}
+        {list, false, si1}
     end
   end
 
@@ -639,7 +738,7 @@ defmodule Brain.PMTG do
   end
 
   defp p_top1(ch) do
-    chosen_id = Map.get(ch, :chosen_id)
+    chosen_id = Map.get(ch, :chosen_id) || Map.get(ch, :id)
     probs = Map.get(ch, :probs, %{})
 
     cond do
@@ -650,7 +749,8 @@ defmodule Brain.PMTG do
         Map.get(ch, :p_top1) * 1.0
 
       is_map(Map.get(ch, :scores)) ->
-        Map.get(ch, :scores)
+        ch
+        |> Map.get(:scores)
         |> Map.values()
         |> Enum.max(fn -> 0.0 end)
         |> Kernel.*(1.0)
@@ -688,11 +788,27 @@ defmodule Brain.PMTG do
   end
 
   defp merge_choices(baseline, rerun) do
-    by_tok = Map.new(baseline, fn ch -> {ch.token_index, ch} end)
+    by_tok =
+      Enum.reduce(baseline, %{}, fn ch, acc ->
+        Map.put(acc, choice_token_index(ch), ch)
+      end)
 
-    Enum.reduce(rerun, by_tok, fn ch, acc -> Map.put(acc, ch.token_index, ch) end)
+    by_tok =
+      Enum.reduce(rerun, by_tok, fn ch, acc ->
+        Map.put(acc, choice_token_index(ch), ch)
+      end)
+
+    by_tok
     |> Map.values()
-    |> Enum.sort_by(& &1.token_index)
+    |> Enum.sort_by(&choice_token_index/1)
+  end
+
+  defp choice_token_index(ch) when is_map(ch) do
+    case {Map.get(ch, :token_index), Map.get(ch, :index)} do
+      {i, _} when is_integer(i) -> i
+      {_, i} when is_integer(i) -> i
+      _ -> 0
+    end
   end
 
   defp emit_rerun_event(choices, mode) do
@@ -764,6 +880,25 @@ defmodule Brain.PMTG do
     end)
   end
 
+  # ── Local token helpers (avoid repeating the :atom/"string" dance) ──────────
+
+  defp token_index_of(%{} = t),
+    do: t[:index] || t["index"] || t[:token_index] || t["token_index"]
+
+  defp token_phrase_of(%{} = t),
+    do: t[:phrase] || t["phrase"] || t[:lemma] || t["lemma"] || t[:word] || t["word"] || ""
+
+  defp token_mwe?(%{} = t) do
+    n = t[:n] || t["n"]
+    mw = t[:mw] || t["mw"] || false
+    (is_integer(n) and n > 1) or mw == true
+  end
+
+  defp token_unigram?(%{} = t) do
+    n = t[:n] || t["n"]
+    is_integer(n) and n == 1
+  end
+
   # --- Telemetry helpers ---
 
   defp safe_exec_telemetry(event, measurements),
@@ -777,3 +912,4 @@ defmodule Brain.PMTG do
     end
   end
 end
+

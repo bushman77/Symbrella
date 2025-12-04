@@ -27,6 +27,9 @@ defmodule Brain.LIFG.Input do
 
   @type slate_map :: %{optional(non_neg_integer()) => [candidate()]}
 
+  # Self-name / project-name fallback bucket (keeps LIFG/Input DB-free).
+  @self_names MapSet.new(["symbrella"])
+
   # ───────────────────────────── Public API ─────────────────────────────
 
   @doc """
@@ -210,9 +213,31 @@ defmodule Brain.LIFG.Input do
             s = Safe.get(cell, :score, 0.0)
             [normalize_candidate(%{token_index: idx, id: id, score: s}, idx)]
 
-          lemma = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
+          lemma0 = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
             s = Safe.get(cell, :score, 0.0)
-            [normalize_candidate(%{token_index: idx, id: lemma, score: s}, idx)]
+
+            lemma =
+              lemma0
+              |> to_string_if_present()
+              |> case do
+                nil -> ""
+                v -> v
+              end
+              |> String.trim()
+
+            id = ensure_pos_tagged_id(lemma, cell)
+
+            [
+              normalize_candidate(
+                %{
+                  token_index: idx,
+                  id: id,
+                  lemma: String.downcase(lemma),
+                  score: s
+                },
+                idx
+              )
+            ]
 
           true ->
             []
@@ -315,4 +340,32 @@ defmodule Brain.LIFG.Input do
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  # If upstream only gives us a lemma/word, synthesize a POS-tagged id so LIFG can treat it sanely.
+  # Keeps anything already shaped like "x|pos|k".
+  defp ensure_pos_tagged_id(lemma, cell) when is_binary(lemma) do
+    lemma_norm = String.downcase(String.trim(lemma))
+
+    cond do
+      lemma_norm == "" ->
+        nil
+
+      String.contains?(lemma, "|") ->
+        lemma
+
+      MapSet.member?(@self_names, lemma_norm) ->
+        "#{lemma_norm}|proper_noun|fallback"
+
+      true ->
+        pos =
+          Safe.get(cell, :pos) ||
+            Safe.get(cell, "pos") ||
+            "noun"
+
+        "#{lemma_norm}|#{pos}|fallback"
+    end
+  end
+
+  defp ensure_pos_tagged_id(_lemma, _cell), do: nil
 end
+

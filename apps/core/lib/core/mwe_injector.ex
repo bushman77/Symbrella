@@ -41,7 +41,8 @@ defmodule Core.MWE.Injector do
                   |> Enum.join(" ")
 
                 if exists?.(phrase2) do
-                  [%{phrase: phrase2, mw: true, span: {i, i + n}, n: n, source: :mwe} | acc_in]
+                  span = mwe_span_from_slice(slice, i, n)
+                  [%{phrase: phrase2, mw: true, span: span, n: n, source: :mwe} | acc_in]
                 else
                   acc_in
                 end
@@ -128,6 +129,26 @@ defmodule Core.MWE.Injector do
   end
 
   # ──────────────────────────────────────────────────────────
+  # SPAN FIXUP (derive MWE span from underlying token spans)
+  # ──────────────────────────────────────────────────────────
+
+  # Prefer deriving the injected MWE span from the slice’s first/last token spans.
+  # Fallback keeps the old behavior ({i, i+n}) if spans aren’t usable.
+  defp mwe_span_from_slice(slice, i, n) when is_list(slice) and is_integer(i) and is_integer(n) do
+    fallback = {i, i + n}
+
+    spans = Enum.map(slice, &tok_span/1)
+
+    case {List.first(spans), List.last(spans)} do
+      {{s, _}, {_, e}} when is_integer(s) and is_integer(e) and e > s ->
+        {s, e}
+
+      _ ->
+        fallback
+    end
+  end
+
+  # ──────────────────────────────────────────────────────────
   # PREDICATES (no guards calling remote functions)
   # ──────────────────────────────────────────────────────────
 
@@ -135,3 +156,4 @@ defmodule Core.MWE.Injector do
   defp single_word_string?(p) when is_binary(p), do: not String.contains?(p, " ")
   defp single_word_string?(_), do: false
 end
+

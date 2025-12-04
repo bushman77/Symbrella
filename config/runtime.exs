@@ -91,6 +91,7 @@ hippo_recall_half_life_s =
   end
 
 config :brain,
+  self_names: ["symbrella"],
   pmtg_mode: pmtg_mode,
   pmtg_margin_threshold: pmtg_margin,
   pmtg_window_keep: pmtg_keep,

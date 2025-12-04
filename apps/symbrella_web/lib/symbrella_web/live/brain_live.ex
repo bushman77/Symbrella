@@ -6,13 +6,14 @@ defmodule SymbrellaWeb.BrainLive do
   Mood telemetry + compact HUD are handled by `SymbrellaWeb.BrainLive.MoodHud`.
 
   • Safe defaults so first render never crashes (even if upstream is quiet)
-  • Subscribes to Brain.Bus for blackboard + HUD topics (clock/intent/mood/lifg)
+  • Subscribes to Brain.Bus for blackboard + HUD topics (clock/intent/mood/lifg/wm)
   • Mood telemetry attach/detach delegated to MoodHud
   • Loads inline brain SVG from priv/static/images/brain.svg when available
   • ✅ Periodic, defensive region snapshot + status refresh
   • ✅ Selected-region status panel (prefers GenServer.call(mod, :status))
   • ✅ All-regions status grid (fully registry-driven, no hard-coding)
-  • ✅ Intent chip stays in sync with brain state (PubSub + snapshot fallback)
+  • ✅ Region Summary is now registry-driven (RegionRegistry.defn/1 → assigns.region)
+  • ✅ Blackboard feed + WM panel (filterable + tolerant of shape drift)
   """
 
   use SymbrellaWeb, :live_view
@@ -28,41 +29,36 @@ defmodule SymbrellaWeb.BrainLive do
   import SymbrellaWeb.BrainLive.MoodHud, only: [mood_hud: 1]
 
   @blackboard_topic "brain:blackboard"
-  @hud_topics ~w(brain:clock brain:intent brain:mood brain:lifg)
+  @hud_topics ~w(brain:clock brain:intent brain:mood brain:lifg brain:wm)
   @refresh_ms 500
-
-  # ---------------------------------------------------------------------------
-  # LiveView lifecycle
-  # ---------------------------------------------------------------------------
 
   @impl true
   def mount(_params, _session, socket) do
     _ = ensure_optional(Brain.Cerebellum)
     _ = ensure_optional(Brain.LIFG)
 
+    selected0 = default_selected()
+
     socket =
       socket
-      # Core assigns (safe defaults)
-      |> assign_new(:selected, fn -> default_selected() end)
-      |> assign_new(:regions, fn -> [] end)
+      |> assign_new(:selected, fn -> selected0 end)
+      |> assign_new(:regions, fn -> RegionRegistry.keys() end)
+      |> assign_new(:region, fn -> region_meta_for(selected0) end)
       |> assign_new(:module_info, fn -> %{} end)
       |> assign_new(:intent, fn -> %{} end)
       |> assign_new(:snapshot, fn -> nil end)
       |> assign_new(:lifg_last, fn -> %{} end)
       |> assign_new(:hippo, fn -> %{window: []} end)
       |> assign_new(:hippo_metrics, fn -> %{} end)
-      |> assign_new(:region, fn -> %{} end)
       |> assign_new(:region_state, fn -> %{workspace: [], snapshot: %{}} end)
       |> assign_new(:region_status, fn -> %{} end)
       |> assign_new(:auto, fn -> false end)
       |> assign_new(:clock, fn -> %{} end)
-      # NEW: BrainHTML expects :svg_base (not :brain_svg)
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
-      # NEW: seed mood defaults + alias + telemetry id holder
+      |> assign_new(:bb_filter, fn -> "" end)
+      |> assign_new(:wm, fn -> %{} end)
       |> MoodHud.seed()
-      # Global status grid
       |> assign(:all_status, collect_all_region_status())
-      # Intent fallback from snapshot/brain state
       |> maybe_seed_intent_from_brain()
       |> refresh_selected()
 
@@ -135,6 +131,7 @@ defmodule SymbrellaWeb.BrainLive do
           if RegionRegistry.available?(sel), do: assign(socket, :selected, sel), else: socket
       end
 
+    send(self(), :refresh_selected)
     {:noreply, socket}
   end
 
@@ -168,9 +165,27 @@ defmodule SymbrellaWeb.BrainLive do
     {:noreply, socket}
   end
 
+  # Blackboard UI knobs
+  @impl true
+  def handle_event("bb_filter", %{"q" => q}, socket) when is_binary(q) do
+    {:noreply, assign(socket, :bb_filter, q)}
+  end
+
+  def handle_event("bb_filter", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("bb_clear", _params, socket) do
+    {:noreply,
+     update(socket, :region_state, fn st ->
+       st = st || %{}
+       st |> Map.put(:workspace, [])
+     end)}
+  end
+
   # ---------------------------------------------------------------------------
-  # Incoming telemetry + PubSub (ALL handle_info/2 CLAUSES GROUPED HERE)
+  # Incoming telemetry + PubSub
   # ---------------------------------------------------------------------------
+
   @impl true
   def handle_info(:refresh_selected, socket) do
     {:noreply, refresh_selected(socket)}
@@ -179,14 +194,17 @@ defmodule SymbrellaWeb.BrainLive do
   # Mood: delegate to MoodHud
   @impl true
   def handle_info({:mood_event, _, _} = msg, socket), do: MoodHud.on_info(msg, socket)
+
   @impl true
   def handle_info({:mood_update, _, _} = msg, socket), do: MoodHud.on_info(msg, socket)
+
   @impl true
   def handle_info({:mood, _} = msg, socket), do: MoodHud.on_info(msg, socket)
 
   # Blackboard / bus
   @impl true
   def handle_info({:blackboard, env}, socket), do: handle_blackboard(env, socket)
+
   @impl true
   def handle_info({:brain_bus, env}, socket), do: handle_blackboard(env, socket)
 
@@ -197,9 +215,6 @@ defmodule SymbrellaWeb.BrainLive do
   @impl true
   def handle_info({:intent, m}, socket) do
     intent = normalize_intent(m, "bus")
-    IO.inspect(m, label: "BrainLive bus raw intent")
-    IO.inspect(intent, label: "BrainLive normalized intent")
-
     {:noreply, assign(socket, :intent, intent)}
   end
 
@@ -209,20 +224,20 @@ defmodule SymbrellaWeb.BrainLive do
 
     intent_from_lifg =
       lifg_last
-      # digs into lifg_last.si.intent, lifg_last.intent, etc.
       |> extract_intent_any()
 
     socket =
       socket
       |> assign(:lifg_last, lifg_last)
-      |> (fn sock ->
-            case intent_from_lifg do
-              nil -> sock
-              intent -> assign(sock, :intent, stamp_intent(intent, "lifg"))
-            end
-          end).()
+      |> maybe_assign_intent(intent_from_lifg, "lifg")
+      |> maybe_assign_wm(extract_wm_any(lifg_last), "lifg")
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:wm, m}, socket) do
+    {:noreply, maybe_assign_wm(socket, m, "bus")}
   end
 
   @impl true
@@ -265,9 +280,51 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
+  # ---- Region meta (registry-driven) ----------------------------------------
+
+  defp region_meta_for(region_key) when is_atom(region_key) do
+    base =
+      try do
+        defn = RegionRegistry.defn(region_key)
+
+        cond do
+          is_map(defn) and Map.has_key?(defn, :__struct__) -> Map.from_struct(defn)
+          is_map(defn) -> defn
+          true -> %{}
+        end
+      rescue
+        _ -> %{}
+      end
+
+    title =
+      mget(base, :title) ||
+        mget(base, :label) ||
+        RegionRegistry.label_for(region_key) ||
+        region_key |> Atom.to_string() |> String.upcase()
+
+    %{
+      key: region_key,
+      title: title,
+      subtitle: mget(base, :subtitle) || mget(base, :summary_title),
+      desc: mget(base, :desc) || mget(base, :summary) || mget(base, :description),
+      modules: listify(mget(base, :modules) || mget(base, :mods) || mget(base, :module)),
+      telemetry: listify(mget(base, :telemetry) || mget(base, :telem)),
+      config_examples:
+        listify(mget(base, :config_examples) || mget(base, :config) || mget(base, :confs))
+    }
+  end
+
+  defp region_meta_for(_), do: %{}
+
+  defp mget(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
+  defp mget(_, _), do: nil
+
+  defp listify(nil), do: []
+  defp listify(v) when is_list(v), do: v
+  defp listify(v), do: [v]
+
   # ---- Region fetchers ------------------------------------------------------
 
-  # Returns {snapshot_map, status_map}
   defp fetch_snapshot_and_status(region_key) do
     snap =
       cond do
@@ -332,10 +389,6 @@ defmodule SymbrellaWeb.BrainLive do
     try_direct_status(mod, region_key)
   end
 
-  # Builds a robust status map using (in order):
-  # 1) GenServer.call(mod, :status, 150) if implemented
-  # 2) mod.status/0 if implemented
-  # 3) Process info fallback (pid, queue, current) so UI always has something
   defp try_direct_status(nil, _rk), do: %{}
 
   defp try_direct_status(mod, region_key) do
@@ -400,8 +453,6 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
-  # Resolve misnamed/mis-cased module atoms from registries into the real target.
-  # Today we fix Brain.Lifg → Brain.LIFG; add more here if needed.
   defp call_target(mod) when is_atom(mod) do
     cond do
       mod == Brain.Lifg and Code.ensure_loaded?(Brain.LIFG) -> Brain.LIFG
@@ -449,8 +500,6 @@ defmodule SymbrellaWeb.BrainLive do
   # ---------------------------------------------------------------------------
   # Render helpers (panels)
   # ---------------------------------------------------------------------------
-
-  # --- Selected region status (uses :status map) -----------------------------
 
   attr :selected, :atom
   attr :status, :map, default: %{}
@@ -509,18 +558,18 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp refresh_selected(socket) do
     selected = socket.assigns[:selected] || default_selected()
-
     {snapshot, status} = fetch_snapshot_and_status(selected)
 
     socket
     |> assign(:snapshot, snapshot)
     |> assign(:region_status, status)
     |> assign(:all_status, collect_all_region_status())
+    |> assign(:regions, RegionRegistry.keys())
+    |> assign(:region, region_meta_for(selected))
+    |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
     |> update(:region_state, fn st ->
       st = st || %{}
-      # keep existing workspace history, just update the latest snapshot
-      st
-      |> Map.put(:snapshot, snapshot)
+      st |> Map.put(:snapshot, snapshot)
     end)
   end
 
@@ -574,9 +623,6 @@ defmodule SymbrellaWeb.BrainLive do
   defp status_badge_class(_),
     do: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
 
-  # ---- HTML-safe formatter for odd values -----------------------------------
-
-  # Tuples/PIDs/Maps/Lists → inspect/1 so HEEx won't choke.
   defp h(v) when is_tuple(v), do: inspect(v)
   defp h(v) when is_pid(v), do: inspect(v)
   defp h(v) when is_map(v), do: inspect(v)
@@ -584,7 +630,7 @@ defmodule SymbrellaWeb.BrainLive do
   defp h(v), do: v
 
   # ---------------------------------------------------------------------------
-  # Intent helpers (normalize + fallback from brain snapshot/state)
+  # Intent helpers (unchanged)
   # ---------------------------------------------------------------------------
 
   defp maybe_seed_intent_from_brain(socket) do
@@ -600,7 +646,6 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
-  # Try Introspect.snapshot/0 first, else Brain.snapshot/0
   defp fetch_global_intent do
     intent_from_introspect =
       if Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :snapshot, 0) do
@@ -630,7 +675,6 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
-  # Extracts intent from many possible shapes/locations
   defp extract_intent_any(nil), do: nil
 
   defp extract_intent_any(%{} = m) do
@@ -643,7 +687,6 @@ defmodule SymbrellaWeb.BrainLive do
         mget_in(m, [:latest, :intent]) ||
         mget_in(m, [:brain, :intent])
 
-    # allow Brain.snapshot/0’s :last_intent as a fallback
     last =
       mget(m, :last_intent) ||
         mget_in(m, [:brain, :last_intent]) ||
@@ -660,7 +703,6 @@ defmodule SymbrellaWeb.BrainLive do
   defp extract_intent_any(v) when is_binary(v), do: normalize_intent(v, "state")
   defp extract_intent_any(_), do: nil
 
-  # Normalizes intent payloads into a consistent HUD-friendly map
   defp normalize_intent(nil, _src), do: %{}
 
   defp normalize_intent(v, src) when is_binary(v),
@@ -677,7 +719,6 @@ defmodule SymbrellaWeb.BrainLive do
     conf = mget(m, :confidence) || mget(m, :score) || mget(m, :prob)
     src0 = mget(m, :source) || src
 
-    # HUD wants a *string* label or it prints "—"
     label_str =
       case raw_label do
         nil -> nil
@@ -688,7 +729,6 @@ defmodule SymbrellaWeb.BrainLive do
 
     base = %{
       label: label_str,
-      # preserve original intent (often an atom) if present
       intent: Map.get(m, :intent, raw_label),
       keyword: kw,
       confidence: conf,
@@ -696,7 +736,6 @@ defmodule SymbrellaWeb.BrainLive do
       updated_at: now_ms()
     }
 
-    # Merge any extra fields the producer might have provided
     Map.merge(base, m)
   end
 
@@ -712,10 +751,6 @@ defmodule SymbrellaWeb.BrainLive do
     |> Map.put(:updated_at, now_ms())
   end
 
-  # Mixed atom/string key getters
-  defp mget(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
-  defp mget(_, _), do: nil
-
   defp mget_in(m, [k | rest]) when is_map(m) do
     case mget(m, k) do
       %{} = next -> mget_in(next, rest)
@@ -728,21 +763,92 @@ defmodule SymbrellaWeb.BrainLive do
   defp now_ms, do: System.system_time(:millisecond)
 
   # ---------------------------------------------------------------------------
-  # Moved below all handle_info/2 clauses to keep them grouped
+  # WM helpers
+  # ---------------------------------------------------------------------------
+
+  defp extract_wm_any(nil), do: nil
+
+  defp extract_wm_any(%{} = m) do
+    direct = mget(m, :wm) || mget(m, :working_memory)
+
+    nested =
+      mget_in(m, [:core, :wm]) ||
+        mget_in(m, [:brain, :wm]) ||
+        mget_in(m, [:latest, :wm]) ||
+        mget_in(m, [:state, :wm]) ||
+        mget_in(m, [:regions, :wm])
+
+    cand = direct || nested
+
+    case cand do
+      nil -> nil
+      %{} = mm -> mm
+      other -> %{value: other}
+    end
+  end
+
+  defp extract_wm_any(other), do: %{value: other}
+
+  defp maybe_assign_wm(socket, wm, src) do
+    case wm do
+      nil -> socket
+      %{} = m -> assign(socket, :wm, Map.merge(%{source: src, updated_at: now_ms()}, m))
+      _ -> assign(socket, :wm, %{source: src, updated_at: now_ms(), value: wm})
+    end
+  end
+
+  defp maybe_assign_intent(socket, nil, _src), do: socket
+
+  defp maybe_assign_intent(socket, %{} = intent, src),
+    do: assign(socket, :intent, stamp_intent(intent, src))
+
+  defp maybe_assign_intent(socket, intent, src),
+    do: assign(socket, :intent, stamp_intent(normalize_intent(intent, src), src))
+
+  # ---------------------------------------------------------------------------
+  # Blackboard handler (now wraps events with timestamp + tag)
   # ---------------------------------------------------------------------------
 
   defp handle_blackboard(env, socket) do
     socket =
-      case extract_intent_any(env) do
-        nil -> socket
-        intent -> assign(socket, :intent, stamp_intent(intent, "blackboard"))
-      end
+      socket
+      |> maybe_assign_intent(extract_intent_any(env), "blackboard")
+      |> maybe_assign_wm(extract_wm_any(env), "blackboard")
+
+    bb_event = wrap_bb_event(env)
 
     {:noreply,
      update(socket, :region_state, fn st ->
        st = st || %{}
-       ws = [env | st[:workspace] || []] |> Enum.take(100)
+       ws = [bb_event | st[:workspace] || []] |> Enum.take(100)
        Map.put(st, :workspace, ws)
      end)}
   end
+
+  defp wrap_bb_event(env) do
+    %{
+      id: :erlang.unique_integer([:positive, :monotonic]),
+      at_ms: now_ms(),
+      tag: bb_tag(env),
+      env: env
+    }
+  end
+
+  defp bb_tag(%{} = env) do
+    cond do
+      is_atom(mget(env, :region)) -> mget(env, :region)
+      is_binary(mget(env, :region)) -> mget(env, :region)
+      is_atom(mget(env, :tag)) -> mget(env, :tag)
+      is_binary(mget(env, :tag)) -> mget(env, :tag)
+      not is_nil(mget(env, :lifg)) -> :lifg
+      not is_nil(mget(env, :pmtg)) -> :pmtg
+      not is_nil(mget(env, :hippocampus)) -> :hippocampus
+      not is_nil(mget(env, :mood)) -> :mood
+      not is_nil(mget(env, :wm)) or not is_nil(mget(env, :working_memory)) -> :wm
+      not is_nil(mget(env, :intent)) -> :intent
+      true -> :event
+    end
+  end
+
+  defp bb_tag(_), do: :event
 end

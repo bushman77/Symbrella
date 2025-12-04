@@ -86,12 +86,31 @@ defmodule Brain.LIFG.Stage1 do
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
-      si0 = Safe.to_plain(si)
-      sent = Safe.get(si0, :sentence, "") |> to_string()
+sent0 = Safe.get(si, :sentence) || Safe.get(si, "sentence")
+
+sent =
+  if is_binary(sent0) and String.trim(sent0) != "" do
+    sent0
+  else
+    nil
+  end
 
       # 1) Tokens + Guard preprocessing (may drop tokens)
-      {tokens, guard_rejected, guard_drops} = prepare_tokens(si0, sent)
-      buckets = buckets_from_si(si0)
+      {tokens, guard_rejected, guard_drops} = prepare_tokens(si, sent)
+
+      # Ensure the SI actually carries the sanitized tokens (critical for span logic)
+      si0 = Map.put(si, :tokens, tokens)
+
+      # Wire candidate slate from active_cells + MWE fallback/backfill
+      lifg_opts = merged_lifg_opts(si0, opts)
+
+      si1 =
+        si0
+        |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
+        |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
+        |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
+
+      buckets = buckets_from_si(si1)
 
       # 2) Effective knobs
       weights =
@@ -119,18 +138,27 @@ defmodule Brain.LIFG.Stage1 do
           Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
         )
 
-      bias_map = Keyword.get(opts, :intent_bias, Safe.get(si0, :intent_bias, %{})) || %{}
+      bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
 
-      # 3) Telemetry events (overridable by tests / PMTG)
-      chargram_event = Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
-      boundary_event = Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
+chargram_event =
+  Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
+
+boundary_event =
+  Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
+
       mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
-      mwe_fallback? = Keyword.get(opts, :mwe_fallback, true)
+
+      mwe_fallback? =
+        Keyword.get(
+          opts,
+          :mwe_fallback,
+          Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
+        )
 
       # 4) Main scoring loop
       {choices, acc} =
         score_tokens(tokens, %{
-          si: si0,
+          si: si1,
           sent: sent,
           buckets: buckets,
           weights: weights,
@@ -162,8 +190,8 @@ defmodule Brain.LIFG.Stage1 do
           acc.weak
         )
 
-      out = %{si: si0, choices: Enum.reverse(choices), audit: audit}
-      {:ok, maybe_reanalyse(out, si0, opts)}
+      out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
+      {:ok, maybe_reanalyse(out, si1, opts)}
     rescue
       e -> {:error, e}
     end
@@ -172,11 +200,18 @@ defmodule Brain.LIFG.Stage1 do
   @spec run(map(), map() | keyword(), keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, weights_or_kw, opts) when is_list(opts) do
+    # IMPORTANT: tolerate legacy ctx (e.g., [0.0]) passed as arg2.
+    # Only treat arg2 as weights when it is a map or a proper keyword list.
     weights_map =
-      case weights_or_kw do
-        m when is_map(m) -> m
-        kw when is_list(kw) -> Map.new(kw)
-        _ -> %{}
+      cond do
+        is_map(weights_or_kw) ->
+          weights_or_kw
+
+        is_list(weights_or_kw) and Keyword.keyword?(weights_or_kw) ->
+          Map.new(weights_or_kw)
+
+        true ->
+          %{}
       end
 
     run(si, Keyword.merge(opts, weights: weights_map))
@@ -184,10 +219,6 @@ defmodule Brain.LIFG.Stage1 do
 
   # ---------- Internal helpers for run/2 ------------------------------------
 
-  # Guard + basic token prep:
-  #   • converts structs → plain maps
-  #   • applies Brain.LIFG.Guard.sanitize/1 (char-grams + boundary)
-  #   • returns sanitized tokens + which original indices Guard dropped
   defp prepare_tokens(si0, sent) do
     {raw_tokens, raw_indices} =
       si0
@@ -231,18 +262,32 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  defp token_raw_phrase(tok) do
-    Safe.get(tok, :phrase) ||
-      Safe.get(tok, :lemma) ||
-      Safe.get(tok, :word) ||
-      ""
-  end
+defp token_raw_phrase(tok) do
+  Safe.get(tok, :phrase) ||
+    Safe.get(tok, "phrase") ||
+    Safe.get(tok, :lemma) ||
+    Safe.get(tok, "lemma") ||
+    Safe.get(tok, :word) ||
+    Safe.get(tok, "word") ||
+    phrase_from_id(Safe.get(tok, :id) || Safe.get(tok, "id")) ||
+    ""
+end
 
-  defp token_mwe?(tok) do
-    n_val = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
-    has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
-    has_mw_flag || (is_integer(n_val) and n_val > 1)
+defp phrase_from_id(id) when is_binary(id) do
+  case String.split(id, "|", parts: 2) do
+    [ph, _rest] -> ph
+    _ -> nil
   end
+end
+
+defp phrase_from_id(_), do: nil
+
+defp token_mwe?(tok) do
+  n_val = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
+  has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
+  id = to_string(Safe.get(tok, :id) || Safe.get(tok, "id") || "")
+  has_mw_flag || (is_integer(n_val) and n_val > 1) || String.contains?(id, "|phrase|")
+end
 
   defp telemetry_phrase(tok, token_phrase) do
     Safe.get(tok, :lemma) ||
@@ -252,7 +297,6 @@ defmodule Brain.LIFG.Stage1 do
       token_phrase
   end
 
-  # Main scoring loop: walks sanitized tokens and accumulates stats
   defp score_tokens(tokens, ctx) do
     acc0 = %{
       choices: [],
@@ -290,7 +334,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # Token passes boundary/char-gram guard → look at candidates and score
   defp score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx) do
     orig_cands =
       Map.get(ctx.buckets, tok_index, [])
@@ -304,7 +347,6 @@ defmodule Brain.LIFG.Stage1 do
     if cand_list == [] do
       acc2 = Map.update!(acc, :no_cand, &(&1 + 1))
 
-      # Emit MWE fallback telemetry when an MWE token has no senses at all.
       if ctx.mwe_fallback? and token_mwe? and orig_cands == [] do
         emit_mwe_fallback(ctx.mwe_event, tok_index, raw_phrase, 0.0)
       end
@@ -327,7 +369,6 @@ defmodule Brain.LIFG.Stage1 do
                 token_phrase
             )
 
-          # Heuristic base features
           lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
           rel0 =
@@ -337,14 +378,12 @@ defmodule Brain.LIFG.Stage1 do
           act0 =
             clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
 
-          # relation context
           lex_ctx = clamp01(lex0 + 0.6 * syn_hits)
           rel_ctx = clamp01(rel0 - 0.4 * ant_hits)
 
           intent0 =
             intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
 
-          # Optional override from nested :features (for tests/synthetic inputs)
           feat_override =
             Safe.get(c, :features) ||
               Safe.get(c, "features") ||
@@ -440,7 +479,6 @@ defmodule Brain.LIFG.Stage1 do
         |> Enum.map(&elem(&1, 0))
         |> Enum.reject(&(&1 == chosen_id))
 
-      # Backwards-compatible choice shape
       choice = %{
         token_index: tok_index,
         index: tok_index,
@@ -463,7 +501,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # Char-gram drop: emit telemetry with the *underlying lexeme* when possible.
   defp handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx) do
     tele_phrase = telemetry_phrase(tok, token_phrase)
 
@@ -485,7 +522,6 @@ defmodule Brain.LIFG.Stage1 do
     |> Map.update!(:chargram, &(&1 + 1))
   end
 
-  # Boundary/shape drop (non-char-gram reasons)
   defp handle_boundary_drop(_tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx) do
     :telemetry.execute(
       ctx.boundary_event,
@@ -538,7 +574,6 @@ defmodule Brain.LIFG.Stage1 do
   @impl true
   def terminate(_reason, _state), do: :ok
 
-  # Convenience: optional public status/0 for dashboards
   def status do
     case Process.whereis(__MODULE__) do
       nil -> %{}
@@ -546,7 +581,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # Group ALL handle_call/3 clauses together
   @impl true
   def handle_call(:status, _from, state) do
     reply = %{
@@ -588,7 +622,6 @@ defmodule Brain.LIFG.Stage1 do
     {:reply, final, state}
   end
 
-  # Telemetry bridge
   @doc false
   def on_mood_update(_event, measurements, _meta, %{pid: pid}) when is_pid(pid) do
     send(pid, {:mood_update, measurements})
@@ -635,7 +668,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # If the token is an MWE, prefer phrase-like senses.
   defp restrict_to_phrase_if_mwe(candidates, false), do: candidates
 
   defp restrict_to_phrase_if_mwe(candidates, true) when is_list(candidates) do
@@ -662,48 +694,31 @@ defmodule Brain.LIFG.Stage1 do
 
   # ---------- Candidate bucket extraction ----------
 
-  # Prefer explicit sense maps; fall back to candidates_by_token; otherwise
-  # synthesize buckets from :active_cells (used in WM gating tests).
   defp buckets_from_si(si0) do
-    sense = Safe.get(si0, :sense_candidates, nil)
+    sc =
+      case Safe.get(si0, :sense_candidates, %{}) do
+        %{} = m -> m
+        _ -> %{}
+      end
 
-    cond do
-      good_bucket_map?(sense) ->
-        sense
+    cbt =
+      case Safe.get(si0, :candidates_by_token, %{}) do
+        %{} = m -> m
+        _ -> %{}
+      end
 
-      true ->
-        cbt = Safe.get(si0, :candidates_by_token, nil)
+    ac_map =
+      case (Safe.get(si0, :active_cells) || Safe.get(si0, "active_cells") || []) do
+        list when is_list(list) and list != [] ->
+          list |> Enum.map(&Safe.to_plain/1) |> active_cells_to_buckets()
 
-        cond do
-          good_bucket_map?(cbt) ->
-            cbt
+        _ ->
+          %{}
+      end
 
-          true ->
-            ac =
-              Safe.get(si0, :active_cells) ||
-                Safe.get(si0, "active_cells") ||
-                []
-
-            if is_list(ac) and ac != [] do
-              ac
-              |> Enum.map(&Safe.to_plain/1)
-              |> active_cells_to_buckets()
-            else
-              %{}
-            end
-        end
-    end
+    Map.merge(ac_map, Map.merge(cbt, sc))
   end
 
-  defp good_bucket_map?(m) when is_map(m), do: map_size(m) > 0
-  defp good_bucket_map?(_), do: false
-
-  # Group active cells by token_index and turn each into a Stage-1 candidate.
-  #
-  # This covers the WM tests where we only have :active_cells with:
-  #   • token_index
-  #   • id + features (first test)
-  #   • chosen_id + scores (second test)
   defp active_cells_to_buckets(cells) do
     cells
     |> Enum.group_by(fn cell ->
@@ -745,8 +760,6 @@ defmodule Brain.LIFG.Stage1 do
     }
   end
 
-  # For the WM test with `scores: %{"THIS/strong" => 0.6}`,
-  # pick a sensible scalar score to seed activation.
   defp cell_score_from_map(cell) do
     scores =
       Safe.get(cell, :scores) ||
@@ -792,32 +805,34 @@ defmodule Brain.LIFG.Stage1 do
 
   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
-  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
-          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
   defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
     source =
-      Brain.Utils.Safe.get(tok, :source) ||
-        Brain.Utils.Safe.get(tok, "source")
+      Safe.get(tok, :source) ||
+        Safe.get(tok, "source")
 
     kind =
-      Brain.Utils.Safe.get(tok, :kind) ||
-        Brain.Utils.Safe.get(tok, "kind")
+      Safe.get(tok, :kind) ||
+        Safe.get(tok, "kind")
 
     flag =
-      Brain.Utils.Safe.get(tok, :chargram?, false) ||
-        Brain.Utils.Safe.get(tok, "chargram?", false)
+      Safe.get(tok, :chargram?, false) ||
+        Safe.get(tok, "chargram?", false)
 
     cond do
-      # Any explicit char-gram hint → treat as char-gram
       source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-        kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
           flag ->
         {:error, :chargram}
 
       true ->
-        phrase_raw = Brain.Utils.Safe.get(tok, :phrase)
+        phrase_raw =
+          Safe.get(tok, :phrase) ||
+            Safe.get(tok, "phrase") ||
+            Safe.get(tok, :lemma) ||
+            Safe.get(tok, "lemma") ||
+            Safe.get(tok, :word) ||
+            Safe.get(tok, "word")
 
-        # Empty phrases are always treated as char-grams.
         if phrase_nil_or_empty?(phrase_norm) or phrase_nil_or_empty?(phrase_raw) do
           {:error, :chargram}
         else
@@ -830,76 +845,124 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # --- MWE path: must still match the span; otherwise it's junk ---
-  defp boundary_check_mwe(sentence, tok, phrase_norm) do
-    case {sentence, Safe.get(tok, :span)} do
-      {s, {start, stop}}
-      when is_binary(s) and is_integer(start) and is_integer(stop) and
-             start >= 0 and stop > start and stop <= byte_size(s) ->
-        len = stop - start
-        sub_norm = s |> binary_part(start, len) |> norm()
+  defp normalize_span(sentence, {start, b}, phrase_norm)
+       when is_binary(sentence) and is_integer(start) and is_integer(b) do
+    size = byte_size(sentence)
 
-        if sub_norm == phrase_norm do
-          # Proper aligned MWE: bypass strict boundary checks.
+    candidates = [
+      {start, b},
+      {start, b - start},
+      {start, b - start + 1}
+    ]
+
+    match =
+      Enum.find_value(candidates, fn {s, len} ->
+        if s >= 0 and len > 0 and s + len <= size and span_sub_norm(sentence, s, len) == phrase_norm do
+          {s, len}
+        else
+          nil
+        end
+      end)
+
+    match ||
+      Enum.find_value(candidates, fn {s, len} ->
+        if s >= 0 and len > 0 and s + len <= size, do: {s, len}, else: nil
+      end) ||
+      {start, 0}
+  end
+
+  defp normalize_span(_sentence, _span, _phrase_norm), do: {0, 0}
+
+  defp tok_span(tok) do
+    case {Safe.get(tok, :span), Safe.get(tok, "span")} do
+      {{a, b}, _} when is_integer(a) and is_integer(b) -> {a, b}
+      {_, {a, b}} when is_integer(a) and is_integer(b) -> {a, b}
+      _ -> nil
+    end
+  end
+
+  defp span_sub_norm(sentence, start, len) do
+    try do
+      sentence
+      |> binary_part(start, len)
+      |> norm()
+    rescue
+      _ -> ""
+    end
+  end
+
+  defp byte_at(bin, idx) when is_binary(bin) and is_integer(idx) do
+    if idx >= 0 and idx < byte_size(bin), do: :binary.at(bin, idx), else: nil
+  end
+
+  defp word_byte?(nil), do: false
+
+  defp word_byte?(c) when is_integer(c) do
+    (c >= ?0 and c <= ?9) or
+      (c >= ?a and c <= ?z) or
+      (c >= ?A and c <= ?Z) or
+      c == ?_
+  end
+
+  defp boundary_check_mwe(sentence, tok, phrase_norm) do
+    span = tok_span(tok)
+
+    case {sentence, span} do
+      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
+        {s0, len} = normalize_span(s, {start, b}, phrase_norm)
+
+        if len > 0 and span_sub_norm(s, s0, len) == phrase_norm do
           :ok
         else
-          # Span text doesn't match the phrase → treat as char-gram.
           {:error, :chargram}
         end
 
       _ ->
-        # No usable span: accept only "shapely" MWEs, otherwise char-gram.
         if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
     end
   end
 
-  # --- Unigram path: full span + boundary invariants ---
   defp boundary_check_unigram(sentence, tok, phrase_norm) do
-    case {sentence, Safe.get(tok, :span)} do
-      {s, {start, stop}}
-      when is_binary(s) and is_integer(start) and is_integer(stop) and
-             start >= 0 and stop > start and stop <= byte_size(s) ->
-        len = stop - start
-        sub_norm = s |> binary_part(start, len) |> norm()
+    span = tok_span(tok)
+
+    case {sentence, span} do
+      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
+        {s0, len} = normalize_span(s, {start, b}, phrase_norm)
+        size = byte_size(s)
+        stop = s0 + len
+        sub_norm = if(len > 0 and stop <= size, do: span_sub_norm(s, s0, len), else: "")
 
         cond do
-          # The span text does not match the token phrase at all.
+          len <= 0 or stop > size ->
+            if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm),
+              do: :ok,
+              else: {:error, :chargram}
+
           sub_norm != phrase_norm ->
             cond do
-              # For a unigram token whose "phrase" contains a space
-              # (like "ck t"), treat this mismatch as a char-gram.
               String.contains?(phrase_norm, " ") ->
                 {:error, :chargram}
 
-              # Otherwise, clean-looking words/phrases are span mismatches.
               phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) ->
                 {:error, :span_mismatch}
 
-              # Fallback: weird junk ⇒ char-gram.
               true ->
                 {:error, :chargram}
             end
 
           true ->
-            # Enforce word boundaries (no letter/digit immediately outside the span).
             left_ok =
-              start == 0 or
-                not word_char?(String.at(s, start - 1))
+              s0 == 0 or
+                not word_byte?(byte_at(s, s0 - 1))
 
             right_ok =
-              stop == byte_size(s) or
-                not word_char?(String.at(s, stop))
+              stop == size or
+                not word_byte?(byte_at(s, stop))
 
-            if left_ok and right_ok do
-              :ok
-            else
-              {:error, :nonword_edges}
-            end
+            if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
         end
 
       _ ->
-        # No span at all (typical synthetic / SI-only tests): allow clean
-        # words/phrases, treat everything else as char-grams.
         if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) do
           :ok
         else
@@ -943,16 +1006,6 @@ defmodule Brain.LIFG.Stage1 do
 
   defp phrase_valid_mwe?(_), do: false
 
-  defp word_char?(nil), do: false
-
-  defp word_char?(<<cp::utf8>>) do
-    (cp >= ?0 and cp <= ?9) or
-      (cp >= ?a and cp <= ?z) or
-      (cp >= ?A and cp <= ?Z)
-  end
-
-  defp word_char?(_), do: false
-
   # ---------- Mood / Cerebellum helpers ----------
 
   defp apply_mood_if_up(base, token, sense_id) do
@@ -989,7 +1042,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # Use Brain.MoodWeights.bias/3 for the scalar; multiply: final = base * (1 + bias).
   defp mood_factor(nil, opts), do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}
 
   defp mood_factor(mood, opts) do
@@ -1119,8 +1171,8 @@ defmodule Brain.LIFG.Stage1 do
   defp maybe_boost_greeting_phrase(base, _lemma_norm, _pos, _tag), do: base
 
   defp guess_activation(c) do
-    norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
-    if String.contains?(to_string(norm), " "), do: 0.30, else: 0.25
+    norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
+    if String.contains?(to_string(norm0), " "), do: 0.30, else: 0.25
   end
 
   defp softmax([]), do: []
@@ -1279,9 +1331,6 @@ defmodule Brain.LIFG.Stage1 do
 
   # ───────────────────────── Reanalysis hook ─────────────────────────
 
-  # Only applies when opts include :reanalysis or :reanalysis?
-  #   • Uses a fail_fun from opts if present
-  #   • Otherwise builds a fail_fun that respects per-sense `veto?: true`
   defp maybe_reanalyse(%{choices: choices} = out, si0, opts) do
     reanalysis? =
       Keyword.get(opts, :reanalysis, false) or
@@ -1305,8 +1354,6 @@ defmodule Brain.LIFG.Stage1 do
 
   defp maybe_reanalyse(out, _si0, _opts), do: out
 
-  # Build a fail_fun/1 that returns true when the chosen sense comes
-  # from a candidate flagged as `veto?: true` in `si.sense_candidates`.
   defp build_veto_fail_fun(%{sense_candidates: sc}) when is_map(sc) do
     veto_lookup =
       sc
@@ -1345,4 +1392,21 @@ defmodule Brain.LIFG.Stage1 do
       :ok
     end
   end
+
+  # Merge Stage1 opts with SI.lifg_opts (if present).
+  defp merged_lifg_opts(si, opts) when is_map(si) and is_list(opts) do
+    si_opts =
+      case Map.get(si, :lifg_opts) do
+        kw when is_list(kw) -> kw
+        m when is_map(m) -> Enum.into(m, [])
+        _ -> []
+      end
+
+    # Stage1 opts should win on conflicts (so tests/explicit calls override config).
+    Keyword.merge(si_opts, opts)
+  end
+
+  defp merged_lifg_opts(_si, opts) when is_list(opts), do: opts
+  defp merged_lifg_opts(_si, _opts), do: []
 end
+

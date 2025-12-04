@@ -6,6 +6,7 @@ defmodule Brain.Pipeline.LIFGStage1 do
   alias Brain.LIFG.Gate, as: LIFGGate
 
   @pipeline_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
+  @no_candidates_event [:brain, :pipeline, :lifg_stage1, :no_candidates]
 
   @spec run(map() | [map()], term(), keyword(), map()) :: {{:ok, map()}, map()}
   def run(si_or_cands, _ctx_vec, opts, state) when is_list(opts) and is_map(state) do
@@ -15,6 +16,13 @@ defmodule Brain.Pipeline.LIFGStage1 do
     # Build inputs (tokens + sentence) so PFC can see tokens for intent biasing
     %{tokens: tokens0, sentence: sentence} = build_lifg_inputs(si_or_cands)
 
+    # NEW: self-name detection (independent of whether Stage-1 has candidates)
+    self = detect_self_name(tokens0, sentence)
+
+    state0 =
+      state
+      |> Map.put(:attention, Map.get(state, :attention, %{}) |> Map.put(:self_name, self))
+
     # Enrich SI for PFC policy (ensures tokens present)
     si_for_policy = enrich_for_policy(si_or_cands, tokens0)
 
@@ -23,14 +31,10 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
     lifg_opts =
       [scores: :all, normalize: :softmax, parallel: :auto]
-      # PFC tunes margins, pMTG mode, deltas, gate_into_wm, etc.
       |> Keyword.merge(pfc_opts)
-      # explicit caller opts take precedence
       |> Keyword.merge(opts)
 
-    # IMPORTANT:
-    #   • Preserve existing candidate info (:sense_candidates, :active_cells, etc.)
-    #   • Just overlay normalized :tokens and :sentence for Stage-1.
+    # Preserve existing candidate info; overlay normalized :tokens/:sentence for Stage-1.
     base_si =
       case si_or_cands do
         m when is_map(m) -> m
@@ -42,9 +46,15 @@ defmodule Brain.Pipeline.LIFGStage1 do
       |> Map.put(:tokens, tokens0)
       |> Map.put(:sentence, sentence)
       |> Map.put_new(:trace, [])
-      |> LIFG.disambiguate_stage1(lifg_opts)
 
-    {:ok, out0} = lifg_out_from_trace(si1)
+    # NEW: don’t crash if SI has no candidates; just no-op Stage-1
+    si2 = safe_disambiguate_stage1(si1, lifg_opts)
+
+    {:ok, out0_raw} = lifg_out_from_trace(si2)
+
+    out0 =
+      out0_raw
+      |> Map.update(:audit, %{}, fn audit -> Map.put(audit || %{}, :self_name, self) end)
 
     out0 =
       case Brain.LIFG.Hygiene.run(%{}, out0.choices, []) do
@@ -58,12 +68,12 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
     _ = maybe_ingest_atl(out0.choices, tokens0)
     _ = maybe_consult_pmtg(out0.choices, tokens0)
-    _ = maybe_store_episode(tokens0, si1, out0)
+    _ = maybe_store_episode(tokens0, si2, out0)
 
     {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
     _ = Brain.__pipeline_apply_control_signals__(boosts2, inhib2, lifg_opts)
 
-    state1 = Brain.apply_decay(state, now_ms)
+    state1 = Brain.apply_decay(state0, now_ms)
 
     state2 =
       if Keyword.get(lifg_opts, :gate_into_wm, false) do
@@ -74,11 +84,8 @@ defmodule Brain.Pipeline.LIFGStage1 do
             Application.get_env(:brain, :lifg_min_score, 0.6)
           )
 
-        # Primary path: dedicated LIFG gate module.
-        lifg_cands =
-          LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
+        lifg_cands = LIFGGate.stage1_wm_candidates(out0.choices, now_ms, min)
 
-        # Fallback: synthesize WM candidates directly from Stage-1 choices
         lifg_cands2 =
           case lifg_cands do
             [] -> lifg_wm_candidates_fallback(out0.choices, now_ms, min)
@@ -122,14 +129,110 @@ defmodule Brain.Pipeline.LIFGStage1 do
     {{:ok, out0}, state3}
   end
 
-  # ───────────────────────── trace → output ─────────────────────────
+  # ───────────────────────── Stage-1 safety ─────────────────────────
 
-  defp lifg_out_from_trace(%{trace: [ev | _]}) do
-    audit = Map.drop(ev, [:choices, :boosts, :inhibitions])
-    {:ok, %{choices: ev.choices, boosts: ev.boosts, inhibitions: ev.inhibitions, audit: audit}}
+  defp safe_disambiguate_stage1(si, lifg_opts) do
+    try do
+      LIFG.disambiguate_stage1(si, lifg_opts)
+    rescue
+      e in ArgumentError ->
+        msg = Exception.message(e)
+
+        if is_binary(msg) and String.contains?(msg, "Cannot extract LIFG candidates") do
+          :telemetry.execute(@no_candidates_event, %{count: 1}, %{stage: :lifg_stage1})
+          si
+        else
+          reraise e, __STACKTRACE__
+        end
+    end
   end
 
-  defp lifg_out_from_trace(%{trace: []}),
+  # ───────────────────────── self name ─────────────────────────
+
+  defp detect_self_name(tokens, sentence) do
+    names =
+      Application.get_env(:brain, :self_names, [])
+      |> List.wrap()
+      |> Enum.map(&norm_surface/1)
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
+
+    token_hit =
+      tokens
+      |> List.wrap()
+      |> Enum.find_value(fn t ->
+        surface =
+          (t[:phrase] || t["phrase"] || t[:word] || t["word"] || t[:lemma] || t["lemma"] || "")
+          |> norm_surface()
+
+        if surface != "" and MapSet.member?(names, surface) do
+          idx = t[:index] || t["index"] || t[:token_index] || t["token_index"]
+
+          %{
+            hit?: true,
+            match: surface,
+            token_index: (is_integer(idx) && idx) || nil,
+            source: :tokens
+          }
+        else
+          nil
+        end
+      end)
+
+    cond do
+      is_map(token_hit) ->
+        token_hit
+
+      is_binary(sentence) and sentence != "" ->
+        sent_hit =
+          sentence
+          |> words_from_sentence()
+          |> Enum.find(&MapSet.member?(names, &1))
+
+        if is_binary(sent_hit) do
+          %{hit?: true, match: sent_hit, token_index: nil, source: :sentence}
+        else
+          %{hit?: false, match: nil, token_index: nil, source: nil}
+        end
+
+      true ->
+        %{hit?: false, match: nil, token_index: nil, source: nil}
+    end
+  end
+
+  defp words_from_sentence(sentence) when is_binary(sentence) do
+    Regex.scan(~r/[\p{L}\p{N}_']+/u, sentence)
+    |> Enum.map(fn [w] -> norm_surface(w) end)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp words_from_sentence(_), do: []
+
+  defp norm_surface(x) when is_binary(x) do
+    x
+    |> String.downcase()
+    |> String.trim()
+    # FIX: don't use ~s() with a ")" inside the delimiter; use a normal string instead
+    |> String.trim("'\".,!?;:()[]{}<>")
+  end
+
+  defp norm_surface(_), do: ""
+
+  # ───────────────────────── trace → output ─────────────────────────
+
+  defp lifg_out_from_trace(%{trace: [ev | _]}) when is_map(ev) do
+    choices = Map.get(ev, :choices) || Map.get(ev, "choices") || []
+    boosts = Map.get(ev, :boosts) || Map.get(ev, "boosts") || []
+    inhibitions = Map.get(ev, :inhibitions) || Map.get(ev, "inhibitions") || []
+
+    audit =
+      ev
+      |> Map.drop([:choices, "choices", :boosts, "boosts", :inhibitions, "inhibitions"])
+
+    {:ok, %{choices: choices, boosts: boosts, inhibitions: inhibitions, audit: audit}}
+  end
+
+  defp lifg_out_from_trace(_),
     do:
       {:ok, %{choices: [], boosts: [], inhibitions: [], audit: %{stage: :lifg_stage1, groups: 0}}}
 
@@ -391,9 +494,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
             Map.get(si_or_cands, "tokens") ||
             []
 
-        # IMPORTANT:
-        #   • Do NOT re-normalize here.
-        #   • Stage-1 will run Brain.LIFG.Guard.sanitize/1 over whatever we pass.
         tokens =
           if is_list(tokens0) do
             tokens0
@@ -404,7 +504,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
         %{tokens: tokens, sentence: sentence}
 
       is_list(si_or_cands) ->
-        # Legacy path: list of winners/choices; there is no sentence/tokens here.
         %{tokens: [], sentence: nil}
 
       true ->
@@ -412,4 +511,3 @@ defmodule Brain.Pipeline.LIFGStage1 do
     end
   end
 end
-

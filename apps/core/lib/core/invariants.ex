@@ -1,3 +1,4 @@
+# apps/core/lib/core/invariants.ex
 defmodule Core.Invariants do
   @moduledoc ~S"""
   Runtime invariants for the Core/LIFG pipeline.
@@ -22,7 +23,14 @@ defmodule Core.Invariants do
         1) All single-word tokens come before any MWEs.
         2) Single-word token starts are non-decreasing.
         3) MWE spans are non-decreasing by `{start, end}`.
-      Tokens without a valid `span: {start, len}` are ignored for these checks.
+
+      Tokens without a valid `span: {start, end}` are ignored for these checks.
+
+  Notes on span shape:
+
+  - The pipeline may produce `{start, end_exclusive}` (preferred).
+  - Some legacy/synthetic inputs may carry `{start, len}`.
+  - We accept either by disambiguating using the sentence slice match.
   """
 
   @doc "Raises if any token is a char-gram (whitespace in `phrase` without `mw: true`)."
@@ -60,7 +68,7 @@ defmodule Core.Invariants do
           false
 
         # Single-word tokens must (a) be a boundary word and, if they carry a
-        # char-span, (b) align to boundaries in the sentence slice.
+        # span, (b) align to boundaries in the sentence slice.
         %{phrase: phrase} = t when is_binary(phrase) ->
           p = norm(phrase)
 
@@ -69,7 +77,7 @@ defmodule Core.Invariants do
               true
 
             String.contains?(p, " ") ->
-              # Single-word check only; embedded whitespace without `mw: true` is invalid.
+              # Embedded whitespace without `mw: true` is invalid.
               true
 
             not MapSet.member?(words, p) ->
@@ -97,7 +105,7 @@ defmodule Core.Invariants do
   2) Non-MWE spans are non-decreasing by start.
   3) MWE spans are non-decreasing by {start, end}.
 
-  Tokens without a valid `span: {start, len}` are ignored for ordering checks.
+  Tokens without a valid `span: {start, end}` are ignored for ordering checks.
   """
   @spec assert_sorted_spans!([map()]) :: :ok
   def assert_sorted_spans!(tokens) when is_list(tokens) do
@@ -115,10 +123,10 @@ defmodule Core.Invariants do
       end
     end
 
-    # Consider only tokens that have a well-formed char span.
+    # Consider only tokens that have a well-formed span.
     with_spans =
       Enum.filter(tokens, fn
-        %{span: {s, e}} when is_integer(s) and is_integer(e) and s >= 0 and e >= 0 -> true
+        %{span: {s, e}} when is_integer(s) and is_integer(e) and s >= 0 and e > s -> true
         _ -> false
       end)
 
@@ -146,63 +154,83 @@ defmodule Core.Invariants do
 
   # ── helpers ──────────────────────────────────────────────────────────────
 
-  # If a token carries a char span, ensure the slice matches the phrase
+  # If a token carries a span, ensure the slice matches the phrase
   # and that the slice begins/ends on word boundaries.
-  defp align_span_violation?(%{span: {start, len}, phrase: phrase}, sent_norm, phrase_norm)
-       when is_integer(start) and is_integer(len) and is_binary(sent_norm) and is_binary(phrase) do
-    # Slice guard
-    in_bounds? = start >= 0 and len > 0 and start + len <= String.length(sent_norm)
+  defp align_span_violation?(%{span: {start, second}}, sent_norm, phrase_norm)
+       when is_integer(start) and is_integer(second) and is_binary(sent_norm) and is_binary(phrase_norm) do
+    case disambiguate_span(sent_norm, phrase_norm, start, second) do
+      {:ok, {s, e}} ->
+        # boundary check: previous and next bytes must NOT be word bytes (or OOB)
+        prev = if s == 0, do: nil, else: :binary.at(sent_norm, s - 1)
+        nxt  = if e == byte_size(sent_norm), do: nil, else: :binary.at(sent_norm, e)
 
-    if not in_bounds? do
-      # If the span is malformed, treat as violation.
-      true
-    else
-      slice = String.slice(sent_norm, start, len) |> norm()
-      slice_mismatch? = slice != phrase_norm
+        boundary_ok? = boundary_byte?(prev) and boundary_byte?(nxt)
+        not boundary_ok?
 
-      # Boundary check: previous and next chars must be boundary or OOB.
-      prev = if start - 1 < 0, do: ?\s, else: String.at(sent_norm, start - 1)
+      :mismatch ->
+        true
 
-      next =
-        if start + len >= String.length(sent_norm),
-          do: ?\s,
-          else: String.at(sent_norm, start + len)
-
-      boundary? = boundary_char?(prev) and boundary_char?(next)
-
-      slice_mismatch? or not boundary?
+      :invalid ->
+        true
     end
   end
 
   defp align_span_violation?(_t, _sent_norm, _phrase_norm), do: false
 
-  defp boundary_char?(nil), do: true
+  # Accept either:
+  #   • {start, end_exclusive}   (preferred)
+  #   • {start, len}            (legacy)
+  #
+  # We disambiguate by choosing the in-bounds candidate whose slice matches `phrase_norm`.
+  defp disambiguate_span(sent_norm, phrase_norm, start, second) do
+    bytes = byte_size(sent_norm)
+    ph_len = byte_size(phrase_norm)
 
-  defp boundary_char?(<<c::utf8>>) do
-    # Treat letters, digits, and underscore as non-boundary; everything else as boundary.
-    not match?(true, letter_or_digit_or_uscore?(c))
-  end
+    candidates =
+      [
+        {start, second},          # treat second as end_exclusive
+        {start, start + second},  # treat second as len
+        {start, start + ph_len}   # treat as phrase length
+      ]
+      |> Enum.uniq()
+      |> Enum.filter(fn {s, e} -> s >= 0 and e > s and e <= bytes end)
 
-  defp letter_or_digit_or_uscore?(c) do
-    # ASCII fast path; for non-ASCII, rely on Unicode properties via Regex
-    cond do
-      c in ?0..?9 ->
-        true
+    case candidates do
+      [] ->
+        :invalid
 
-      c in ?A..?Z ->
-        true
+      list ->
+        match =
+          Enum.find(list, fn {s, e} ->
+            norm(slice_bytes(sent_norm, s, e)) == phrase_norm
+          end)
 
-      c in ?a..?z ->
-        true
-
-      c == ?_ ->
-        true
-
-      true ->
-        # Non-ASCII: consider as letter/digit if it matches \p{L} or \p{N}
-        Regex.match?(~r/^\p{L}$|^\p{N}$/u, <<c::utf8>>)
+        if match, do: {:ok, match}, else: :mismatch
     end
   end
+
+  defp slice_bytes(sent, s, e) when is_binary(sent) and is_integer(s) and is_integer(e) and e > s do
+    try do
+      :binary.part(sent, s, e - s)
+    rescue
+      _ -> ""
+    end
+  end
+
+  defp slice_bytes(_, _, _), do: ""
+
+  defp boundary_byte?(nil), do: true
+  defp boundary_byte?(c) when is_integer(c), do: not word_byte?(c)
+  defp boundary_byte?(_), do: true
+
+  defp word_byte?(b) when is_integer(b) do
+    (b >= ?0 and b <= ?9) or
+      (b >= ?A and b <= ?Z) or
+      (b >= ?a and b <= ?z) or
+      b == ?_
+  end
+
+  defp word_byte?(_), do: false
 
   defp normalize_sentence(s) when is_binary(s) do
     s
@@ -213,8 +241,7 @@ defmodule Core.Invariants do
 
   defp split_words(s) when is_binary(s) do
     # Split on non-word characters (anything that is not letter, number, or underscore)
-    s
-    |> String.split(~r/[^\p{L}\p{N}_]+/u, trim: true)
+    String.split(s, ~r/[^\p{L}\p{N}_]+/u, trim: true)
   end
 
   defp norm(nil), do: ""
@@ -228,3 +255,4 @@ defmodule Core.Invariants do
 
   defp norm(v), do: norm(Kernel.to_string(v))
 end
+

@@ -17,12 +17,10 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   alias SymbrellaWeb.Region.BaseArt
   alias SymbrellaWeb.Components.Brain.Regions
 
-  # Public entry point used by BrainLive.render/1
   def brain(assigns) do
     assigns =
       assigns
       |> Map.put_new(:selected, :lifg)
-      # optional external region listing
       |> Map.put_new(:regions, [])
       |> Map.put_new(:clock, %{})
       |> Map.put_new(:intent, %{})
@@ -30,15 +28,12 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:auto, false)
       |> Map.put_new(:region, %{})
       |> Map.put_new(:region_state, %{})
-      # ← status comes from LiveView
       |> Map.put_new(:region_status, %{})
-      # optional per-region overrides
       |> Map.put_new(:region_tweaks, %{})
-      # optional override SVG string
       |> Map.put_new(:svg_base, nil)
-      # put :vb from svg override or BaseArt
+      |> Map.put_new(:bb_filter, "")
+      |> Map.put_new(:wm, %{})
       |> assign_viewbox()
-      # aligned by default
       |> Map.put_new(:pan, %{x: 0, y: 0})
       |> Map.put_new(:scale, 1.00)
 
@@ -66,8 +61,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
             vb={@vb}
           />
         </div>
-        
-    <!-- Wrap the summary card so we can float a copy button in its top-right -->
+
         <div class="relative h-full">
           <% copy_id = "region-summary-copy-#{@selected}" %>
 
@@ -98,6 +92,16 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         </div>
       </div>
       
+    <!-- Blackboard + WM -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SymbrellaWeb.BrainHTML.blackboard_panel
+          events={get_in(@region_state, [:workspace]) || []}
+          filter={@bb_filter}
+          limit={50}
+        />
+        <SymbrellaWeb.BrainHTML.wm_panel wm={@wm} />
+      </div>
+      
     <!-- Live state + Module Status -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SymbrellaWeb.BrainHTML.live_state_panel state={@region_state} />
@@ -112,7 +116,6 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     """
   end
 
-  # --- Header (moved) --------------------------------------------------------
   defp brain_header(assigns) do
     selected = assigns[:selected] || :lifg
     base_opts = Regions.region_options(assigns[:regions] || [])
@@ -153,7 +156,6 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     """
   end
 
-  # --- Brain map (moved) -----------------------------------------------------
   attr :svg_base, :any, required: false
   attr :vb, :map, default: %{minx: 0, miny: 0, w: 516, h: 406}
   attr :selected, :atom, default: :lifg
@@ -198,17 +200,14 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
             .r-label{opacity:0; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#111;}
             g.region:hover .r-label{opacity:.9}
           </style>
-          
-    <!-- Pan/scale applies to base art and overlays together -->
+
           <g
             transform={"translate(#{@pan.x},#{@pan.y}) scale(#{@scale})"}
             class="pointer-events-auto"
             vector-effect="non-scaling-stroke"
           >
-            <!-- Base art (component returns a <g>) -->
             <BaseArt.group svg={@svg_base} />
-            
-    <!-- Region overlays (same coordinate system as base) -->
+
             <%= for key <- @draw_order do %>
               <% defn = RegionRegistry.defn(key) %>
 
@@ -261,7 +260,6 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     """
   end
 
-  # local helper so brain/1 can compute @vb without depending on BrainHTML internals
   defp assign_viewbox(assigns) do
     vb = BaseArt.viewbox(Map.get(assigns, :svg_base))
     Map.put(assigns, :vb, vb)

@@ -215,8 +215,15 @@ defmodule Brain.ATL do
         slate
       end
 
-    candidates = promote_sense_candidates_from_slate(slate1, opts)
-    Map.put(si, :sense_candidates, candidates)
+candidates = promote_sense_candidates_from_slate(slate1, opts)
+
+existing0 = Map.get(si, :sense_candidates) || %{}
+existing = if is_map(existing0), do: existing0, else: %{}
+
+merged = merge_sense_candidates(existing, candidates)
+
+Map.put(si, :sense_candidates, merged)
+
   end
 
   # Inject winners for child unigrams when an MWE |phrase|fallback is the winner.
@@ -608,4 +615,25 @@ defmodule Brain.ATL do
       _ -> {0, 0}
     end
   end
+
+defp merge_sense_candidates(a, b) when is_map(a) and is_map(b) do
+  a
+  |> Map.merge(b, fn _idx, old_list, new_list ->
+    merge_candidate_lists(old_list, new_list)
+  end)
+  |> SlateFilter.sanitize_map()
+end
+
+defp merge_candidate_lists(old_list, new_list) do
+  old = List.wrap(old_list)
+  new = List.wrap(new_list)
+
+  (new ++ old)
+  |> Enum.map(&Safe.to_plain/1)
+  |> Enum.filter(&is_map/1)
+  |> Enum.uniq_by(fn c -> c[:id] || c["id"] end)
+  |> Enum.reject(fn c -> is_nil(c[:id] || c["id"]) end)
+end
+
+
 end

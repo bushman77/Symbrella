@@ -7,7 +7,8 @@ defmodule Brain.WM.Focus do
 
   @type wm_item :: map()
 
-  @spec run(map(), list() | map(), map() | keyword()) :: {[wm_item()], non_neg_integer(), non_neg_integer()}
+  @spec run(map(), list() | map(), map() | keyword()) ::
+          {[wm_item()], non_neg_integer(), non_neg_integer()}
   def run(state, cands_or_si, _opts) when is_map(state) do
     now = System.system_time(:millisecond)
 
@@ -163,4 +164,3 @@ defmodule Brain.WM.Focus do
 
   defp guess_lemma_from_id(_), do: nil
 end
-

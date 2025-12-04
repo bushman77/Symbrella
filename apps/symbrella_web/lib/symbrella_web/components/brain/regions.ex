@@ -13,7 +13,6 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
 
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
 
-  # Prefrontal macro → children; used by draw_regions/1
   @region_groups %{
     prefrontal: ~w(dlpfc vmpfc dmpfc fpc lifg ofc)a
   }
@@ -27,7 +26,6 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
 
   def label_for(other), do: other |> to_string() |> String.upcase()
 
-  # Local fallback so this module is self-contained
   defp default_label(:lifg), do: "LIFG"
   defp default_label(:pmtg), do: "PMTG"
   defp default_label(:ofc), do: "OFC"
@@ -113,7 +111,6 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
 
   # ---------- Region Summary (component) --------------------------------------
 
-  # Kept public so it can be called as <Regions.region_summary ... />
   attr :region, :map, default: %{}
   attr :selected, :atom, default: :lifg
   attr :state, :any, default: nil
@@ -122,8 +119,12 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
   attr :region_state, :map, default: nil
 
   def region_summary(assigns) do
-    region = Map.get(assigns, :region, %{})
     selected = Map.get(assigns, :selected, :lifg)
+
+    # Base meta comes from registry (if present), then assigns.region overrides it.
+    meta = meta_from_registry(selected)
+    region_over = normalize_map(Map.get(assigns, :region, %{}))
+    region = Map.merge(meta, region_over)
 
     state_map =
       assigns[:state] ||
@@ -133,14 +134,26 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
         %{}
 
     title =
-      Map.get(region, :title) ||
-        selected |> Atom.to_string() |> String.upcase()
+      mget(region, :title) ||
+        mget(region, :label) ||
+        label_for(selected)
 
-    subtitle = Map.get(region, :subtitle) || default_subtitle(selected)
-    desc = Map.get(region, :desc) || default_region_desc(selected)
-    mods = Map.get(region, :modules, [])
-    telem = Map.get(region, :telemetry, [])
-    confs = Map.get(region, :config_examples, [])
+    subtitle =
+      mget(region, :subtitle) ||
+        mget(region, :summary_title) ||
+        default_subtitle(selected)
+
+    desc =
+      mget(region, :desc) ||
+        mget(region, :summary) ||
+        mget(region, :description) ||
+        default_region_desc(selected)
+
+    mods = listify(mget(region, :modules) || mget(region, :mods) || mget(region, :module))
+    telem = listify(mget(region, :telemetry) || mget(region, :telem))
+
+    confs =
+      listify(mget(region, :config_examples) || mget(region, :config) || mget(region, :confs))
 
     assigns =
       assigns
@@ -165,7 +178,7 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
           <% else %>
             <ul class="text-xs space-y-1">
               <%= for m <- @mods do %>
-                <li><code>{m}</code></li>
+                <li><code>{inspect(m)}</code></li>
               <% end %>
             </ul>
           <% end %>
@@ -178,7 +191,7 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
           <% else %>
             <ul class="text-xs space-y-1">
               <%= for t <- @telem do %>
-                <li><code>{t}</code></li>
+                <li><code>{inspect(t)}</code></li>
               <% end %>
             </ul>
           <% end %>
@@ -191,7 +204,7 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
           <% else %>
             <ul class="text-xs space-y-1">
               <%= for c <- @confs do %>
-                <li><code>{c}</code></li>
+                <li><code>{inspect(c)}</code></li>
               <% end %>
             </ul>
           <% end %>
@@ -208,6 +221,35 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
     """
   end
 
+  # --- registry meta extractor -----------------------------------------------
+
+  defp meta_from_registry(selected) when is_atom(selected) do
+    base =
+      try do
+        defn = RegionRegistry.defn(selected)
+
+        cond do
+          is_map(defn) and Map.has_key?(defn, :__struct__) -> Map.from_struct(defn)
+          is_map(defn) -> defn
+          true -> %{}
+        end
+      rescue
+        _ -> %{}
+      end
+
+    %{
+      title: mget(base, :title) || mget(base, :label) || label_for(selected),
+      subtitle: mget(base, :subtitle) || mget(base, :summary_title),
+      desc: mget(base, :desc) || mget(base, :summary) || mget(base, :description),
+      modules: listify(mget(base, :modules) || mget(base, :mods) || mget(base, :module)),
+      telemetry: listify(mget(base, :telemetry) || mget(base, :telem)),
+      config_examples:
+        listify(mget(base, :config_examples) || mget(base, :config) || mget(base, :confs))
+    }
+  end
+
+  defp meta_from_registry(_), do: %{}
+
   # --- local helpers used by the summary -------------------------------------
 
   defp default_subtitle(:lifg), do: "Competitive Sense Selection"
@@ -219,4 +261,14 @@ defmodule SymbrellaWeb.Components.Brain.Regions do
         "scoring (lex_fit, rel_prior, activation, intent_bias)."
 
   defp default_region_desc(_), do: "Overview of the selected module."
+
+  defp normalize_map(%{} = m), do: m
+  defp normalize_map(_), do: %{}
+
+  defp mget(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
+  defp mget(_, _), do: nil
+
+  defp listify(nil), do: []
+  defp listify(v) when is_list(v), do: v
+  defp listify(v), do: [v]
 end

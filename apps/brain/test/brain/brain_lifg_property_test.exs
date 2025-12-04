@@ -140,4 +140,3 @@ defmodule BrainLIFGPropertyTest do
     end
   end
 end
-

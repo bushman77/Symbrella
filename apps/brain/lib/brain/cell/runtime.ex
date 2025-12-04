@@ -64,4 +64,3 @@ defmodule Brain.Cell.Runtime do
     end
   end
 end
-

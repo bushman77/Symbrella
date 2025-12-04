@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/pfc.ex
 defmodule Brain.PFC do
   @moduledoc """
   Prefrontal Cortex (controller) — policy for semantic selection.
@@ -159,14 +160,15 @@ defmodule Brain.PFC do
   def handle_call({:policy, si}, _from, %State{} = st) do
     goal = st.last_goal || safe_latest_intent()
     wm = safe_wm()
-    pol = compute_policy(si, goal, wm, st)
+    meta = safe_meta()
+    pol = compute_policy(si, goal, wm, st, meta)
 
     snap = %{
       mode: st.mode,
       goal: goal,
       wm: %{size: wm_size(wm), capacity: wm_cap(wm)},
       policy: pol |> Enum.into(%{}),
-      meta: safe_meta()
+      meta: meta
     }
 
     :telemetry.execute([:brain, :pfc, :policy], %{wm_size: wm_size(wm)}, snap)
@@ -177,7 +179,8 @@ defmodule Brain.PFC do
   def handle_call(:status, _from, %State{} = st) do
     goal = st.last_goal || safe_latest_intent()
     wm = safe_wm()
-    pol = compute_policy(%{}, goal, wm, st) |> Enum.into(%{})
+    meta = safe_meta()
+    pol = compute_policy(%{}, goal, wm, st, meta) |> Enum.into(%{})
 
     snapshot = %{
       mode: st.mode,
@@ -185,7 +188,7 @@ defmodule Brain.PFC do
       overrides: st.overrides,
       wm: %{size: wm_size(wm), capacity: wm_cap(wm)},
       policy: pol,
-      meta: safe_meta()
+      meta: meta
     }
 
     :telemetry.execute([:brain, :pfc, :status], %{wm_size: wm_size(wm)}, snapshot)
@@ -194,7 +197,7 @@ defmodule Brain.PFC do
 
   # ── Policy engine (meta-aware) ──────────────────────────────────────────────
 
-  defp compute_policy(si, goal, wm, %State{} = st) do
+  defp compute_policy(si, goal, wm, %State{} = st, meta) do
     defaults = st.defaults
     ov = st.overrides
 
@@ -205,13 +208,16 @@ defmodule Brain.PFC do
     conf_goal = clamp01(goal[:confidence] || goal["confidence"] || 0.0)
     wm_fill = wm_fill_ratio(wm)
 
-    meta = safe_meta()
     m_conf = clamp01((meta[:conf] || 1.0) * 1.0)
     m_conflict = clamp01((meta[:conflict] || 0.0) * 1.0)
     m_surprise = clamp01((meta[:surprise] || 0.0) * 1.0)
 
     # Be conservative: effective confidence = min(goal_conf, meta_conf)
     conf_eff = min(conf_goal, m_conf)
+
+    # Self-name attention hit? (based on current SI + configured self_names)
+    self_name = self_name_hit(si)
+    self_hit? = Map.get(self_name, :hit?, false)
 
     # Dynamic thresholds (gentle, monotonic):
     # - Loosen a touch when low confidence
@@ -239,18 +245,35 @@ defmodule Brain.PFC do
         true -> mt_mode
       end
 
+    # Human-ish: hearing your name makes you "snap to"
+    mt_dyn =
+      if self_hit? and not Map.has_key?(ov, :margin_threshold) do
+        max(mt_load - 0.02, 0.05)
+      else
+        mt_load
+      end
+
     # When to consult pMTG
     pmtg_mode =
       cond do
         Map.has_key?(ov, :pmtg_mode) -> Map.get(ov, :pmtg_mode)
+        self_hit? -> :boost
         conf_eff < 0.55 -> :boost
         m_surprise >= 0.30 -> :boost
         m_conflict >= 0.50 -> :boost
         true -> defaults.pmtg_mode
       end
 
-    # Conflict raises the admission bar a bit
-    lifg_min_score = clamp01(0.60 + 0.10 * m_conflict)
+    # Conflict raises the admission bar a bit (overrideable)
+    lifg_min_score0 = clamp01(0.60 + 0.10 * m_conflict)
+    lifg_min_score1 = Map.get(ov, :lifg_min_score, lifg_min_score0)
+
+    lifg_min_score =
+      if self_hit? and not Map.has_key?(ov, :lifg_min_score) do
+        max(lifg_min_score1 - 0.05, 0.20)
+      else
+        lifg_min_score1
+      end
 
     acc_tau =
       Map.get(ov, :acc_conflict_tau) ||
@@ -269,7 +292,7 @@ defmodule Brain.PFC do
         bias_weight * bias_scale_for(conf_eff, st.mode)
       )
 
-    base_boost =
+    base_boost0 =
       Map.get(ov, :base_boost) ||
         case st.mode do
           :conservative -> defaults.base_boost * 0.9
@@ -277,7 +300,14 @@ defmodule Brain.PFC do
           :adventurous -> defaults.base_boost * 1.1
         end
 
-    base_inhib =
+    base_boost =
+      if self_hit? and not Map.has_key?(ov, :base_boost) do
+        clamp(base_boost0 * 1.10, 0.01, 0.50)
+      else
+        base_boost0
+      end
+
+    base_inhib0 =
       Map.get(ov, :base_inhib) ||
         case st.mode do
           :conservative -> defaults.base_inhib * 1.1
@@ -285,10 +315,17 @@ defmodule Brain.PFC do
           :adventurous -> defaults.base_inhib * 0.9
         end
 
+    base_inhib =
+      if self_hit? and not Map.has_key?(ov, :base_inhib) do
+        clamp(base_inhib0 * 0.95, 0.01, 0.50)
+      else
+        base_inhib0
+      end
+
     [
       weights:
         Map.put(weights0, :intent_bias, weights0.intent_bias || defaults.weights.intent_bias),
-      margin_threshold: Map.get(ov, :margin_threshold, mt_load),
+      margin_threshold: Map.get(ov, :margin_threshold, mt_dyn),
       min_margin: Map.get(ov, :min_margin, defaults.min_margin),
       pmtg_mode: pmtg_mode,
       acc_conflict_tau: acc_tau,
@@ -347,6 +384,12 @@ defmodule Brain.PFC do
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
   defp clamp01(_), do: 0.0
 
+  defp clamp(x, lo, hi) when is_number(x) and is_number(lo) and is_number(hi) do
+    x |> max(lo) |> min(hi)
+  end
+
+  defp clamp(_x, lo, _hi), do: lo
+
   defp bias_scale_for(conf, mode) do
     base =
       cond do
@@ -374,6 +417,110 @@ defmodule Brain.PFC do
   end
 
   defp intent_bias_map_from_si(_, _, _), do: %{}
+
+  # ── Self-name detection (config-driven) ─────────────────────────────────────
+
+  defp self_names() do
+    Application.get_env(:brain, :self_names, ["symbrella"])
+    |> List.wrap()
+    |> Enum.map(&norm_surface/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp self_name_hit(si) when is_map(si) do
+    names = self_names()
+
+    if names == [] do
+      %{hit?: false, match: nil, token_indexes: []}
+    else
+      tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+      sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
+
+      case hit_from_tokens(tokens, names) do
+        {:hit, match, idxs} ->
+          %{hit?: true, match: match, token_indexes: idxs}
+
+        :miss ->
+          if hit_from_sentence(sentence, names) do
+            # no stable token indexes in this path
+            %{hit?: true, match: first_sentence_match(sentence, names), token_indexes: []}
+          else
+            %{hit?: false, match: nil, token_indexes: []}
+          end
+      end
+    end
+  end
+
+  defp self_name_hit(_), do: %{hit?: false, match: nil, token_indexes: []}
+
+  defp hit_from_tokens(tokens, names) when is_list(tokens) do
+    Enum.reduce_while(tokens, :miss, fn t, _acc ->
+      phrase = norm_surface(to_string(t[:phrase] || t["phrase"] || ""))
+
+      case Enum.find(names, fn n -> n == phrase end) do
+        nil ->
+          {:cont, :miss}
+
+        match ->
+          idx = t[:index] || t["index"]
+          idxs = if is_integer(idx), do: [idx], else: []
+          {:halt, {:hit, match, idxs}}
+      end
+    end)
+  end
+
+  defp hit_from_tokens(_tokens, _names), do: :miss
+
+  defp hit_from_sentence(sentence, names) when is_binary(sentence) do
+    s = norm_sentence(sentence)
+
+    padded =
+      (" " <> s <> " ")
+      |> String.replace(~r/\s+/u, " ")
+
+    Enum.any?(names, fn n ->
+      n1 = n |> String.replace(~r/\s+/u, " ")
+      n1 != "" and String.contains?(padded, " " <> n1 <> " ")
+    end)
+  end
+
+  defp hit_from_sentence(_sentence, _names), do: false
+
+  defp first_sentence_match(sentence, names) when is_binary(sentence) do
+    s = norm_sentence(sentence)
+
+    padded =
+      (" " <> s <> " ")
+      |> String.replace(~r/\s+/u, " ")
+
+    Enum.find(names, fn n ->
+      n1 = n |> String.replace(~r/\s+/u, " ")
+      n1 != "" and String.contains?(padded, " " <> n1 <> " ")
+    end)
+  end
+
+  defp first_sentence_match(_sentence, _names), do: nil
+
+  defp norm_sentence(x) when is_binary(x) do
+    x
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/[^[:alnum:]\s]+/u, " ")
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  defp norm_sentence(_), do: ""
+
+  defp norm_surface(x) when is_binary(x) do
+    x
+    |> String.downcase()
+    |> String.trim()
+    |> String.trim("\"'.,!?;:()[]{}<>")
+  end
+
+  defp norm_surface(_), do: ""
 
   defp normalize_goal(m) do
     intent0 = m[:intent] || m["intent"]
@@ -414,5 +561,30 @@ defmodule Brain.PFC do
 
     at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
     %{intent: intent, keyword: to_string(kw0), confidence: conf, at_ms: at_ms}
+  end
+
+  # ── Test helper (pure, no global PFC state needed) ──────────────────────────
+
+  if Mix.env() == :test do
+    @doc false
+    def __test_compute_policy__(
+          si,
+          goal \\ %{},
+          wm \\ %{wm: [], cfg: %{capacity: 7}},
+          meta \\ %{},
+          opts \\ []
+        )
+        when is_map(si) and is_map(goal) and is_map(wm) and is_map(meta) and is_list(opts) do
+      mode = Keyword.get(opts, :mode, :balanced)
+      overrides = Keyword.get(opts, :overrides, %{})
+
+      st = %State{
+        mode: mode,
+        last_goal: normalize_goal(goal),
+        overrides: overrides
+      }
+
+      compute_policy(si, st.last_goal, wm, st, meta)
+    end
   end
 end
