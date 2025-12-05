@@ -28,7 +28,12 @@ defmodule Brain.Blackboard do
     [:brain, :wm, :update],
     [:brain, :pipeline, :lifg_stage1, :stop],
     [:brain, :pfc, :policy],
-    [:brain, :pfc, :status]
+    [:brain, :pfc, :status],
+
+    # Optional but ML-useful:
+    [:brain, :lifg, :confidence],
+    [:brain, :intent, :selected],
+    [:core, :intent, :selected]
   ]
 
   # ——— Public API ———
@@ -154,7 +159,6 @@ defmodule Brain.Blackboard do
 
   defp safe_attach_telemetry do
     try do
-      # If it already exists, telemetry returns {:error, :already_exists}
       :telemetry.attach_many(
         @telemetry_id,
         @telemetry_events,
@@ -190,3 +194,4 @@ defmodule Brain.Blackboard do
     end
   end
 end
+

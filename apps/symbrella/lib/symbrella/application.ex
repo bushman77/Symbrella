@@ -1,4 +1,3 @@
-# apps/symbrella/lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
   use Application
@@ -64,7 +63,10 @@ defmodule Symbrella.Application do
       {Brain.DLPFC, act_on_thalamus: true},
       {Brain.ACC, keep: 300},
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
-      {Brain.Blackboard, []}
+
+      # Event bridge first, then ML consumer that finalizes turn records
+      {Brain.Blackboard, []},
+      Brain.ML
 
       # 🚫 Do NOT start SymbrellaWeb.Endpoint here.
       # The web app owns its endpoint under SymbrellaWeb.Application.
@@ -98,3 +100,4 @@ defmodule Symbrella.Application do
     end
   end
 end
+
