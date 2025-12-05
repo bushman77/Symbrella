@@ -13,6 +13,10 @@ defmodule Core.BrainAdapter do
   @hippo_writer :"Elixir.Brain.Hippocampus.Writer"
   @amyg :"Elixir.Brain.Amygdala"
 
+  # NEW (affect)
+  @affect_appraisal :"Elixir.Brain.AffectiveAppraisal"
+  @mood_core :"Elixir.Brain.MoodCore"
+
   @timeout 2_000
 
   @type cell_id :: binary()
@@ -176,6 +180,53 @@ defmodule Core.BrainAdapter do
   end
 
   def maybe_amygdala_react(si, _opts), do: si
+
+  @doc """
+  Affective appraisal hook (NEW):
+    - Calls Brain.AffectiveAppraisal.appraise/1 (if available)
+    - Casts MoodCore.apply_appraisal/1 (best-effort; safe when MoodCore not running)
+    - Attaches :appraisal onto SI for UI/trace
+  """
+  @spec maybe_apply_affective_appraisal(map(), keyword()) :: map()
+  def maybe_apply_affective_appraisal(%{} = si, opts) when is_list(opts) do
+    opt = Keyword.get(opts, :affective_appraisal, :inherit)
+    env_on = Application.get_env(:brain, :affective_appraisal, :on) != :off
+
+    enabled =
+      case opt do
+        :off -> false
+        false -> false
+        :inherit -> env_on
+        _ -> true
+      end
+
+    cond do
+      not enabled ->
+        si
+
+      not (Code.ensure_loaded?(@affect_appraisal) and function_exported?(@affect_appraisal, :appraise, 1)) ->
+        si
+
+      true ->
+        appraisal =
+          try do
+            apply(@affect_appraisal, :appraise, [si])
+          rescue
+            _ -> nil
+          catch
+            _, _ -> nil
+          end
+
+        if is_map(appraisal) do
+          _ = safe_apply(@mood_core, :apply_appraisal, [appraisal], :ok)
+          Map.put(si, :appraisal, appraisal)
+        else
+          si
+        end
+    end
+  end
+
+  def maybe_apply_affective_appraisal(si, _opts), do: si
 
   @doc """
   ATL ingest/reduce. Writes :atl_slate and a trace entry.
@@ -352,3 +403,4 @@ defmodule Core.BrainAdapter do
     end
   end
 end
+

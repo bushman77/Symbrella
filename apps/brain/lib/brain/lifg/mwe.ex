@@ -538,13 +538,32 @@ defmodule Brain.LIFG.MWE do
 
   defp unigram_neighbor_idxs(_), do: []
 
-  # IMPORTANT: spans are treated as {start, end}, not {start, len}
-  defp inside?({s, e}, {ps, pe})
-       when is_integer(s) and is_integer(e) and is_integer(ps) and is_integer(pe) do
-    s >= ps and e <= pe
+# spans are treated as {start, len}
+# Accept spans as either {start, end_exclusive} or {start, len}.
+# We normalize both to {start, end_exclusive} before containment checks.
+defp inside?(child_span, parent_span) do
+  case {to_end_span(child_span), to_end_span(parent_span)} do
+    {{cs, ce}, {ps, pe}} when cs >= ps and ce <= pe -> true
+    _ -> false
   end
+end
+defp inside?(_, _), do: false
 
-  defp inside?(_, _), do: false
+defp to_end_span({s, b})
+     when is_integer(s) and is_integer(b) and s >= 0 and b >= 0 do
+  cond do
+    # Treat as {start, end_exclusive} when it looks like an end position.
+    b > s ->
+      {s, b}
+
+    # Otherwise treat as {start, len}.
+    true ->
+      {s, s + b}
+  end
+end
+
+defp to_end_span(_), do: nil
+
 
   defp down(s) when is_binary(s),
     do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")

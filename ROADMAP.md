@@ -52,17 +52,17 @@ We will use a compact appraisal output:
 - **Dominance / Control** `[-1.0..1.0]` (controlled vs in-control)
 - **Tags** `[:praise, :insult, :threat, :uncertainty, :question, :command, :self_reference, ...]`
 
-This is compatible with long‑standing psychological affect models (valence/arousal and PAD-style framing). citeturn17search32turn17search33
+Design note: this is explicitly an **engineering representation** intended to be stable, testable, and interpretable.
 
 ### 3.2 Neuromodulator correspondences (simplified but grounded)
 We implement the following as **engineering correlates**, not one‑to‑one truths:
 
-- **Dopamine (DA):** reward prediction error / learning signal; motivational salience (esp. positive valence + novelty). citeturn15search28  
-- **Norepinephrine (NE; locus coeruleus):** arousal and alerting; adaptive gain/interrupt-like behavior (esp. high arousal, threat, surprise). citeturn13search22  
-- **Acetylcholine (ACh):** attentional precision and uncertainty management (often framed as “expected uncertainty” vs NE “unexpected uncertainty”). citeturn11view3turn8view6  
-- **Serotonin (5‑HT):** aversive processing, behavioral inhibition/avoidance modulation, and reward vs punishment signaling patterns. citeturn14search26  
+- **Dopamine (DA):** reward prediction error / learning signal; motivational salience (especially positive valence + novelty/praise tags).
+- **Norepinephrine (NE; locus coeruleus):** arousal and alerting; “gain control” and interrupt-like behavior (especially high arousal, threat, surprise).
+- **Acetylcholine (ACh):** attentional precision and uncertainty management (useful framing: expected uncertainty vs NE for unexpected uncertainty).
+- **Serotonin (5‑HT):** behavioral inhibition/avoidance modulation; aversive processing and reward–punishment signaling patterns (coarse proxy, not a claim of biosim fidelity).
 
-**Design implication:** we treat DA/NE/ACh/5‑HT as *control knobs* for:
+**Design implication:** we treat DA/NE/ACh/5‑HT as *bounded control knobs* for:
 - learning rate / plasticity
 - vigilance / interrupt threshold
 - exploration vs exploitation bias
@@ -72,12 +72,12 @@ We implement the following as **engineering correlates**, not one‑to‑one tru
 
 ## 4) Where This Lives (Fit to Symbrella’s Architecture)
 ### 4.1 Modules (proposed; names can be adjusted)
-- `Brain.AffectiveAppraisal` (pure-ish appraisal; returns a struct/map)
+- `Brain.AffectiveAppraisal` (appraisal; returns a struct/map; deterministic + testable)
 - `Brain.MoodCore.apply_appraisal/1` (state update + decay-aware bounded adjustments)
-- `Core` pipeline hook (or via `Core.BrainAdapter` if you want runtime-only bridging)
+- `Core` pipeline hook (or routed through `Core.BrainAdapter` when you want runtime-only coupling)
 
 ### 4.2 No new umbrella app required
-Grok’s “mix new apps/affective_appraisal --sup” is **not aligned** with the current guardrails (single umbrella-root supervisor; avoid new app Applications). Prefer a module under `apps/brain.   application to be supervised under apos/symbrella
+A separate `apps/affective_appraisal --sup` is **not aligned** with current guardrails. Prefer implementing these capabilities **inside `apps/brain`** (and wiring from `core`), supervised under the single umbrella root (`Symbrella.Application`).
 
 ---
 
@@ -86,7 +86,7 @@ Grok’s “mix new apps/affective_appraisal --sup” is **not aligned** with th
 **Goal:** deterministic appraisal with evidence, testability, and extensibility.
 
 **Inputs:**
-- `SemanticInput` (intent, tokens, senses, relations, mood snapshot if present)
+- `SemanticInput` (intent, tokens, senses, relations, optional mood snapshot)
 - surface sentence (optional but preferred)
 
 **Output (example):**
@@ -106,7 +106,7 @@ Grok’s “mix new apps/affective_appraisal --sup” is **not aligned** with th
 ```
 
 **Rule set (start minimal, expand safely):**
-- affect lexicon (start with ~50 “strong” words; later move to hundreds)
+- affect lexicon (start with ~50 “strong” words; later expand)
 - negation handling (“not good”, “never again”)
 - intensifiers/diminishers (“very”, “kind of”)
 - direct address and blame (“you are…”, “this sucks”)
@@ -115,44 +115,44 @@ Grok’s “mix new apps/affective_appraisal --sup” is **not aligned** with th
 - questions/commands (punctuation + intent signals)
 
 **Deliverables:**
-- new `Brain.AffectiveAppraisal.appraise/1` + unit tests
-- event `[:brain, :affect, :appraisal]` with meta `{valence, arousal, dominance, tags, v}`
+- `Brain.AffectiveAppraisal.appraise/1` + unit tests
+- telemetry event `[:brain, :affect, :appraisal]` with meta `{valence, arousal, dominance, tags, v}`
 
 ---
 
 ### Phase 2 — MoodCore Instant Reactivity (bounded deltas + decay)
-**Goal:** every input produces a measurable, bounded modulation.
+**Goal:** each input produces a measurable, bounded modulation.
 
 **Key requirements:**
 - apply deltas with clamps (no exploding state)
 - decay continues to work as designed (appraisal is additive, not replacement)
-- derive higher-level mood outputs (`exploration`, `vigilance`, `plasticity`, `inhibition`) from chemistry
+- compute derived outputs (`exploration`, `vigilance`, `plasticity`, `inhibition`) from chemistry
 
-**Illustrative mapping (tunable constants, not “truth”):**
-- DA responds to positive valence + novelty/praise
-- NE responds primarily to arousal + threat/urgency
+**Illustrative mapping (tunable constants; treated as policy):**
+- DA responds to positive valence + novelty/praise tags
+- NE responds primarily to arousal + threat/urgency tags
 - ACh responds to uncertainty markers/questions/conflicts
-- 5‑HT responds to social threat/insult and control/dominance signals
+- 5‑HT responds to social threat/insult and dominance/control signals
 
 **Deliverables:**
 - `Brain.MoodCore.apply_appraisal/1`
-- event `[:brain, :mood, :appraisal_applied]` including `delta_*` fields and `count: 1`
+- telemetry event `[:brain, :mood, :appraisal_applied]` including `delta_*` fields and `count: 1`
 
 ---
 
 ### Phase 3 — Telemetry + LiveView “It’s Alive” Feedback Loop
 **Goal:** the “dance” is visible in real time.
 
-**Telemetry events (min set):**
+**Telemetry events (minimum set):**
 - `[:brain, :affect, :appraisal]` (raw appraisal + tags + evidence summary)
 - `[:brain, :mood, :appraisal_applied]` (deltas + resulting levels)
 - reuse existing mood update event `[:brain, :mood, :update]` as needed
 
 **UI updates (minimum viable):**
 - add an “Appraisal” mini panel beside current mood HUD:
-  - V/A/D sparkline or rolling last‑N values
+  - rolling last‑N V/A/D values
   - tags chips
-  - “reason” preview (top 3 evidence hits)
+  - a short evidence preview (top 3 hits)
 
 ---
 
@@ -161,12 +161,13 @@ Grok’s “mix new apps/affective_appraisal --sup” is **not aligned** with th
 
 **Coupling points (aligned to existing regions):**
 - **Curiosity loop:** increase proposal rate under higher DA and moderate ACh; reduce under high NE/low 5‑HT.
-- **WM/attention gating:** high NE raises interrupt sensitivity and shortens persistence; higher ACh increases precision/attention to “uncertainty‑reducing” cues.
-- **Memory writes (Hippocampus):** probability-of-write increases with salience (|valence| high) and novelty (DA proxy), but can be throttled under overload (NE high).
+- **WM/attention gating:** high NE raises interrupt sensitivity and shortens persistence; higher ACh increases attention to “uncertainty‑reducing” cues.
+- **Memory writes (Hippocampus):** increase write likelihood with salience (|valence| high) and novelty (DA proxy), throttled under overload (NE high).
 - **Response planning:** route through `Core.Response` tone/mode selection using appraisal tags + mood snapshot.
 
-Deliverables:
-- small, explicit bias functions with unit tests and telemetry counters for each influence
+**Deliverables:**
+- small, explicit bias functions with unit tests
+- telemetry counters for each influence point (so behavior coupling is measurable)
 
 ---
 
@@ -176,15 +177,15 @@ Deliverables:
 1. Log samples:
    - embeddings (phrase, semantic)
    - rule appraisal (V/A/D + tags)
-   - downstream outcomes (user feedback, reply success metrics if available)
+   - downstream outcomes (user feedback + response metrics when available)
 2. Train a tiny MLP (Axon/Nx) offline or on-device when feasible.
 3. Runtime blending:
    - start with `rules 0.9 / ml 0.1`
    - increase only after stability checks pass
 
-Deliverables:
+**Deliverables:**
 - `db` schema/table for `affective_samples`
-- versioned predictor weights + hot‑swap strategy (no brain restart)
+- versioned predictor weights + safe hot‑swap strategy (no brain restart)
 
 ---
 
@@ -192,8 +193,8 @@ Deliverables:
 ### 6.1 Validation
 - Unit tests for:
   - negation scopes
-  - address targeting (:self vs :assistant vs :other)
-  - bounds/clamps maintained
+  - address targeting (`:self` vs `:assistant` vs `:other`)
+  - bounds/clamps always maintained
 - Property tests:
   - appraisal output ranges always respected
   - telemetry meta always includes `count` and `v`
@@ -201,14 +202,14 @@ Deliverables:
 ### 6.2 Safety commitments
 - No claims of “sentience”; treat as *simulated affective control*
 - Avoid manipulative reward loops; keep settings visible and tunable
-- Provide “mute affect” or “debug mode” toggle for testing
+- Provide a “mute affect” or “debug mode” toggle for testing
 
 ---
 
 ## 7) Minimal Weekly Plan (Practical Execution Order)
 1. Finish Procedural Checklist item (1) (Guard spans + telemetry meta)
 2. Implement Phase 1 (50-word appraisal + tests + telemetry)
-3. Implement Phase 2 (MoodCore.apply_appraisal/1 + clamps + telemetry)
+3. Implement Phase 2 (`MoodCore.apply_appraisal/1` + clamps + telemetry)
 4. Implement Phase 3 (HUD/telemetry wiring)
 5. Add one coupling point (Curiosity bias) with measurable effect
 
@@ -226,4 +227,3 @@ end
 ```
 
 If you prefer runtime-only coupling, route updates through your existing Core↔Brain adapter.
-

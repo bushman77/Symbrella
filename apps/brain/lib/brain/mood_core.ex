@@ -16,6 +16,7 @@ defmodule Brain.MoodCore do
     [:brain, :mood, :update]
     [:brain, :mood, :saturation]
     [:brain, :mood, :shock]
+    [:brain, :mood, :appraisal_applied]    (NEW)
 
   Config (:brain, Brain.MoodCore) — all fields optional:
     baseline:           %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50} | keyword | nil
@@ -34,6 +35,10 @@ defmodule Brain.MoodCore do
     If Brain.AffectLatents.compute/2 is available, we attach TRCS-style
     latents (e.g. :threat, :reward, :control, :safety) into telemetry
     meas/meta under :latents.
+
+  Appraisal hook (NEW):
+    apply_appraisal/1 applies small bounded deltas derived from V/A/D + tags.
+    This is an engineering control correlate (not a biological simulation).
   """
 
   use GenServer
@@ -41,6 +46,7 @@ defmodule Brain.MoodCore do
   @event_update [:brain, :mood, :update]
   @event_saturation [:brain, :mood, :saturation]
   @event_shock [:brain, :mood, :shock]
+  @event_appraisal_applied [:brain, :mood, :appraisal_applied]
 
   # ---------- Public API ----------
 
@@ -96,6 +102,18 @@ defmodule Brain.MoodCore do
   def apply_intent(intent, confidence \\ 1.0) when is_atom(intent) and is_number(confidence) do
     GenServer.cast(__MODULE__, {:apply_intent, intent, confidence})
   end
+
+  @doc """
+  Apply an affective appraisal map (V/A/D + tags). Safe no-op for non-maps.
+
+  Expected shape (minimum):
+      %{valence: v, arousal: a, dominance: d, tags: [...]}
+  """
+  def apply_appraisal(%{} = appraisal) do
+    GenServer.cast(__MODULE__, {:apply_appraisal, appraisal})
+  end
+
+  def apply_appraisal(_), do: :ok
 
   @doc """
   Lightweight arousal/plasticity nudge from recent activation load (active_cells map or list).
@@ -212,6 +230,38 @@ defmodule Brain.MoodCore do
       |> emit({:intent, intent}, 0, :bump)
 
     {:noreply, st}
+  end
+
+  @impl true
+  def handle_cast({:apply_appraisal, appraisal}, st) when is_map(appraisal) do
+    {raw_deltas, app_meta} = appraisal_to_deltas(appraisal)
+    deltas = sanitize_deltas(raw_deltas, st.max_delta_per_tick)
+
+    st2 =
+      st
+      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> emit(:appraisal, 0, :bump)
+
+    :telemetry.execute(
+      @event_appraisal_applied,
+      %{
+        count: 1,
+        delta_da: Map.get(deltas, :da, 0.0) * 1.0,
+        delta_5ht: Map.get(deltas, :"5ht", 0.0) * 1.0,
+        delta_glu: Map.get(deltas, :glu, 0.0) * 1.0,
+        delta_ne: Map.get(deltas, :ne, 0.0) * 1.0
+      },
+      app_meta
+      |> Map.put(:dt_ms, 0)
+      |> Map.put(:source, :appraisal)
+      |> Map.put(:cause, :appraisal)
+    )
+
+    {:noreply, st2}
+  rescue
+    _ -> {:noreply, st}
+  catch
+    _, _ -> {:noreply, st}
   end
 
   @impl true
@@ -446,6 +496,92 @@ defmodule Brain.MoodCore do
   defp put_levels(st, f),
     do: %{st | levels: Map.new(st.levels, fn {k, v} -> {k, f.(v, k)} end)}
 
+  # ---------- Appraisal mapping (NEW) ----------
+
+  defp appraisal_to_deltas(appraisal) when is_map(appraisal) do
+    v = to_float_num(Map.get(appraisal, :valence, 0.0), 0.0) |> clamp11()
+    a = to_float_num(Map.get(appraisal, :arousal, 0.0), 0.0) |> clamp01()
+    d = to_float_num(Map.get(appraisal, :dominance, 0.0), 0.0) |> clamp11()
+
+    tags = appraisal |> Map.get(:tags, []) |> coerce_tags()
+
+    praise? = MapSet.member?(tags, :praise)
+    insult? = MapSet.member?(tags, :insult)
+    threat? = MapSet.member?(tags, :threat)
+    urgency? = MapSet.member?(tags, :urgency)
+    uncertain? = MapSet.member?(tags, :uncertainty)
+    question? = MapSet.member?(tags, :question)
+
+    # Deltas are intentionally small; max_delta_per_tick remains the hard cap.
+    da =
+      0.06 * v +
+        0.02 * a +
+        (if praise?, do: 0.03, else: 0.0) +
+        (if insult?, do: -0.02, else: 0.0)
+
+    s5 =
+      0.07 * v +
+        0.05 * d +
+        (if praise?, do: 0.015, else: 0.0) +
+        (if insult?, do: -0.05, else: 0.0) +
+        (if threat?, do: -0.03, else: 0.0)
+
+    ne =
+      0.08 * a +
+        (if threat?, do: 0.05, else: 0.0) +
+        (if urgency?, do: 0.03, else: 0.0) +
+        (if d < -0.2, do: 0.02, else: 0.0)
+
+    glu =
+      0.03 * a +
+        (if uncertain?, do: 0.05, else: 0.0) +
+        (if question?, do: 0.02, else: 0.0)
+
+    meta = %{
+      appraisal: %{
+        v: Map.get(appraisal, :v, 1),
+        valence: v,
+        arousal: a,
+        dominance: d,
+        tags: MapSet.to_list(tags) |> Enum.sort()
+      }
+    }
+
+    {%{da: da, "5ht": s5, ne: ne, glu: glu}, meta}
+  end
+
+  defp appraisal_to_deltas(_), do: {%{}, %{}}
+
+  defp coerce_tags(tags) when is_list(tags) do
+    tags
+    |> Enum.map(fn
+      t when is_atom(t) -> t
+      t when is_binary(t) ->
+        t |> String.trim() |> String.downcase() |> String.replace(~r/\s+/, "_") |> String.replace("-", "_") |> String.to_atom()
+
+      _ ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> MapSet.new()
+  end
+
+  defp coerce_tags(_), do: MapSet.new()
+
+  defp to_float_num(v, default) when is_number(v), do: v * 1.0
+
+  defp to_float_num(v, default) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {n, _} -> n
+      _ -> default * 1.0
+    end
+  end
+
+  defp to_float_num(_, default), do: default * 1.0
+
+  defp clamp11(x) when is_number(x), do: min(1.0, max(-1.0, x))
+  defp clamp01(x) when is_number(x), do: min(1.0, max(0.0, x))
+
   # ---------- Intent / Load mapping (new) ----------
 
   defp intent_to_deltas(:abuse, conf) do
@@ -575,8 +711,6 @@ defmodule Brain.MoodCore do
         end
     end
   end
-
-  defp choose_tone(_), do: :neutral
 
   defp choose_tone(_), do: :neutral
 
@@ -726,3 +860,4 @@ defmodule Brain.MoodCore do
 
   defp to_float(_, default), do: default * 1.0
 end
+

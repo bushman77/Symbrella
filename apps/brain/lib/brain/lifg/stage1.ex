@@ -297,6 +297,31 @@ end
       token_phrase
   end
 
+  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
+          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+  defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
+    source = Safe.get(tok, :source) || Safe.get(tok, "source")
+    kind   = Safe.get(tok, :kind) || Safe.get(tok, "kind")
+    flag   = Safe.get(tok, :chargram?, false) || Safe.get(tok, "chargram?", false)
+
+    cond do
+      source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
+          flag ->
+        {:error, :chargram}
+
+      phrase_nil_or_empty?(phrase_norm) ->
+        {:error, :chargram}
+
+      token_mwe? ->
+        boundary_check_mwe(sentence, tok, phrase_norm)
+
+      true ->
+        boundary_check_unigram(sentence, tok, phrase_norm)
+    end
+  end
+
+
   defp score_tokens(tokens, ctx) do
     acc0 = %{
       choices: [],
@@ -805,70 +830,54 @@ end
 
   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
-  defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
-    source =
-      Safe.get(tok, :source) ||
-        Safe.get(tok, "source")
+  defp boundary_check_mwe(sentence, tok, phrase_norm) do
+    span = tok_span(tok)
 
-    kind =
-      Safe.get(tok, :kind) ||
-        Safe.get(tok, "kind")
+    case {sentence, span} do
+      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
+        {s0, stop} = normalize_span(s, {start, b}, phrase_norm)
+        len = stop - s0
 
-    flag =
-      Safe.get(tok, :chargram?, false) ||
-        Safe.get(tok, "chargram?", false)
-
-    cond do
-      source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-          flag ->
-        {:error, :chargram}
-
-      true ->
-        phrase_raw =
-          Safe.get(tok, :phrase) ||
-            Safe.get(tok, "phrase") ||
-            Safe.get(tok, :lemma) ||
-            Safe.get(tok, "lemma") ||
-            Safe.get(tok, :word) ||
-            Safe.get(tok, "word")
-
-        if phrase_nil_or_empty?(phrase_norm) or phrase_nil_or_empty?(phrase_raw) do
-          {:error, :chargram}
+        if len > 0 and span_sub_norm(s, s0, len) == phrase_norm do
+          :ok
         else
-          if token_mwe? do
-            boundary_check_mwe(sentence, tok, phrase_norm)
-          else
-            boundary_check_unigram(sentence, tok, phrase_norm)
-          end
+          {:error, :chargram}
         end
+
+      _ ->
+        if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
     end
   end
 
+  # Normalize ambiguous {start, b} into {start, end_exclusive}.
+  # b may be: end_exclusive, len, or end_inclusive.
   defp normalize_span(sentence, {start, b}, phrase_norm)
        when is_binary(sentence) and is_integer(start) and is_integer(b) do
     size = byte_size(sentence)
 
-    candidates = [
-      {start, b},
-      {start, b - start},
-      {start, b - start + 1}
-    ]
+    candidates =
+      [
+        # treat b as end_exclusive
+        {start, b},
+        # treat b as len
+        {start, start + b},
+        # treat b as end_inclusive
+        {start, b + 1},
+        # treat phrase length as authoritative (bytes of normalized phrase)
+        {start, start + byte_size(to_string(phrase_norm || ""))}
+      ]
+      |> Enum.uniq()
+      |> Enum.filter(fn {s, e} -> s >= 0 and e > s and e <= size end)
 
     match =
-      Enum.find_value(candidates, fn {s, len} ->
-        if s >= 0 and len > 0 and s + len <= size and span_sub_norm(sentence, s, len) == phrase_norm do
-          {s, len}
-        else
-          nil
-        end
+      Enum.find_value(candidates, fn {s, e} ->
+        len = e - s
+        if span_sub_norm(sentence, s, len) == phrase_norm, do: {s, e}, else: nil
       end)
 
     match ||
-      Enum.find_value(candidates, fn {s, len} ->
-        if s >= 0 and len > 0 and s + len <= size, do: {s, len}, else: nil
-      end) ||
-      {start, 0}
+      Enum.find_value(candidates, fn {s, e} -> if s >= 0 and e > s and e <= size, do: {s, e}, else: nil end) ||
+      {start, start}
   end
 
   defp normalize_span(_sentence, _span, _phrase_norm), do: {0, 0}
@@ -927,9 +936,9 @@ end
 
     case {sentence, span} do
       {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
-        {s0, len} = normalize_span(s, {start, b}, phrase_norm)
+        {s0, stop} = normalize_span(s, {start, b}, phrase_norm)
         size = byte_size(s)
-        stop = s0 + len
+        len = stop - s0
         sub_norm = if(len > 0 and stop <= size, do: span_sub_norm(s, s0, len), else: "")
 
         cond do
@@ -951,14 +960,8 @@ end
             end
 
           true ->
-            left_ok =
-              s0 == 0 or
-                not word_byte?(byte_at(s, s0 - 1))
-
-            right_ok =
-              stop == size or
-                not word_byte?(byte_at(s, stop))
-
+            left_ok = s0 == 0 or not word_byte?(byte_at(s, s0 - 1))
+            right_ok = stop == size or not word_byte?(byte_at(s, stop))
             if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
         end
 
