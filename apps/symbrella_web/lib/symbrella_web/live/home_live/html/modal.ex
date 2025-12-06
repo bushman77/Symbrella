@@ -38,7 +38,6 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     >
       <div class="h-full w-full bg-white">
         <div class="h-full w-full max-w-none flex flex-col">
-          <!-- Sticky top bar (CLOSE ONLY) -->
           <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
             <div class="flex items-center justify-end">
               <button
@@ -51,8 +50,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
               </button>
             </div>
           </div>
-          
-    <!-- Scrollable body -->
+
           <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 overflow-x-hidden">
             <div class="grid gap-3 w-full">
               <div
@@ -107,18 +105,36 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     """
   end
 
-  # ---------- builder (callable by ChatLive.HTML via defdelegate) ----------
+  # ---------- builder ----------
 
   @doc """
   Builds a sectioned explanation payload from a message-like map.
-  Expected keys: :id, :text, :from, :intent, :confidence, :tone, etc.
+
+  Optional (preferred for "Senses selected"):
+    :senses_selected => [%{label: "...", definition: "..."}, ...]
   """
   def explain_payload_for(message) when is_map(message) do
     text = to_string(message[:text] || "")
-    {main, extra} = split_lexical_tail(text)
+    {main0, extra0} = split_lexical_tail(text)
 
-    {meta_line, extra_wo_meta} = extract_meta_line(extra || "")
+    # 1) meta line: try tail first, then main (some pipelines append meta into main)
+    {meta_line1, extra_wo_meta} = extract_meta_line(extra0 || "")
+    {meta_line2, main_wo_meta} = if meta_line1 == nil, do: extract_meta_line(main0), else: {nil, main0}
+    meta_line = meta_line1 || meta_line2
+    main1 = if meta_line1 == nil and meta_line2 != nil, do: main_wo_meta, else: main0
+
     meta = merge_meta(message, parse_meta_line(meta_line))
+
+    # 2) strip the leading tone line from "Message" content (tone already has its own section)
+    main =
+      main1
+      |> strip_leading_tone(meta[:tone])
+      |> String.trim()
+
+    structured_senses =
+      message[:senses_selected] ||
+        get_in(message, [:from, :senses_selected]) ||
+        []
 
     bullets =
       extra_wo_meta
@@ -128,7 +144,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     sections =
       []
       |> maybe_add_intent_tone_section(meta, meta_line)
-      |> maybe_add_definitions_section(bullets)
+      |> maybe_add_senses_selected_section(structured_senses, bullets)
       |> maybe_add_similar_terms_section(bullets)
       |> maybe_add_antonyms_section(bullets)
       |> maybe_add_message_section(main)
@@ -140,7 +156,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     }
   end
 
-  # ---------- payload normalizer (prevents blank modal / string-key payloads) ----------
+  # ---------- payload normalizer ----------
 
   defp pget(map, key, default \\ nil)
 
@@ -173,7 +189,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           from: from,
           intent: pget(payload, :intent),
           confidence: pget(payload, :confidence),
-          tone: pget(payload, :tone)
+          tone: pget(payload, :tone),
+          senses_selected: pget(payload, :senses_selected)
         }
 
         built = explain_payload_for(msg)
@@ -225,6 +242,38 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   end
 
   defp split_lexical_tail(other), do: {to_string(other), nil}
+
+  # NEW: if the first line is a tone label ("warm"), drop it from Message display
+  defp strip_leading_tone(text, tone) when is_binary(text) do
+    t =
+      cond do
+        is_atom(tone) -> Atom.to_string(tone)
+        is_binary(tone) -> tone |> String.trim() |> String.trim_leading(":")
+        true -> nil
+      end
+
+    if is_binary(t) and t != "" do
+      lines = String.split(text, "\n", trim: false)
+
+      case lines do
+        [first | rest] ->
+          f = String.trim(first)
+
+          if f == t or f == ":" <> t do
+            rest |> Enum.join("\n") |> String.trim_leading()
+          else
+            text
+          end
+
+        _ ->
+          text
+      end
+    else
+      text
+    end
+  end
+
+  defp strip_leading_tone(other, _), do: to_string(other)
 
   defp extract_meta_line(extra) when is_binary(extra) do
     lines = String.split(extra, "\n", trim: false)
@@ -338,23 +387,33 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
   defp safe_float(v), do: safe_float(to_string(v))
 
-  # ---------- bullet parsing ----------
+  # ---------- bullet parsing (fallback) ----------
 
   defp parse_reading_bullets(extra) when is_binary(extra) do
     extra
     |> String.split("\n", trim: false)
     |> Enum.map(&String.trim/1)
-    |> Enum.filter(&(&1 != ""))
-    |> Enum.filter(&String.starts_with?(&1, "• "))
-    |> Enum.map(&parse_reading_bullet/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.filter(&bullet_line?/1)
+    |> Enum.map(&strip_bullet_prefix/1)
+    |> Enum.map(&parse_reading_bullet_content/1)
     |> Enum.reject(&is_nil/1)
   end
 
   defp parse_reading_bullets(_), do: []
 
-  defp parse_reading_bullet("• " <> rest) do
-    rest = String.trim(rest)
+  defp bullet_line?(line) when is_binary(line), do: Regex.match?(~r/^(?:•|·|-|\*)\s*/u, line)
+  defp bullet_line?(_), do: false
 
+  defp strip_bullet_prefix(line) when is_binary(line) do
+    Regex.replace(~r/^(?:•|·|-|\*)\s*/u, line, "")
+    |> String.trim()
+  end
+
+  defp strip_bullet_prefix(other), do: to_string(other)
+
+  defp parse_reading_bullet_content(rest) when is_binary(rest) do
+    rest = String.trim(rest)
     parts = split_dash(rest, 3)
 
     {head, desc0, qual0} =
@@ -395,7 +454,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     }
   end
 
-  defp parse_reading_bullet(_), do: nil
+  defp parse_reading_bullet_content(_), do: nil
 
   defp blank_to_nil(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
   defp blank_to_nil(_), do: nil
@@ -510,20 +569,43 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     end
   end
 
-  defp maybe_add_definitions_section(sections, bullets) when is_list(bullets) do
-    defs =
-      bullets
-      |> Enum.filter(fn b -> is_binary(b[:desc]) and String.trim(b[:desc]) != "" end)
-      |> Enum.map(fn b -> %{label: b.label, body: b.desc} end)
+  defp maybe_add_senses_selected_section(sections, structured_senses, bullets) do
+    items_from_struct =
+      structured_senses
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(fn s ->
+        label = s[:label] || s[:raw] || s[:token] || "Sense"
+        defn = s[:definition] || s[:def] || s[:gloss] || s[:body] || ""
+        body = if is_binary(defn) and String.trim(defn) != "", do: defn, else: "(definition unavailable)"
+        %{label: to_string(label), body: body}
+      end)
 
-    if defs != [] do
+    items =
+      if items_from_struct != [] do
+        items_from_struct
+      else
+        bullets
+        |> Enum.map(fn b ->
+          body =
+            cond do
+              is_binary(b[:desc]) and String.trim(b[:desc]) != "" -> b[:desc]
+              true -> "(definition unavailable)"
+            end
+
+          %{label: b.label, body: body}
+        end)
+      end
+
+    if items != [] do
       sections ++
         [
           %{
-            key: :definitions,
-            title: "Definitions / senses",
-            hint: "Glosses shown for surfaced tokens.",
-            items: defs
+            key: :senses_selected,
+            title: "Senses selected",
+            tag: "#{length(items)}",
+            hint: "Selected sense per token (with a best-available gloss).",
+            items: items
           }
         ]
     else
@@ -582,7 +664,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           %{
             key: :message,
             title: "Message",
-            hint: "Main assistant text (excluding the lexical/debug tail).",
+            hint: "Main assistant text (excluding tone/meta lines and lexical/debug tail).",
             items: [%{label: "content", body: m}]
           }
         ]
@@ -608,3 +690,4 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     end
   end
 end
+

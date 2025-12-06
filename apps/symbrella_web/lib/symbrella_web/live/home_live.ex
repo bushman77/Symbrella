@@ -1,3 +1,4 @@
+# apps/symbrella_web/lib/symbrella_web/live/home_live.ex
 defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
@@ -7,17 +8,15 @@ defmodule SymbrellaWeb.HomeLive do
 
   @choice_preview_limit 3
   @def_char_limit 120
+  @senses_modal_limit 24
 
   # ---------- helpers ----------
 
   defp sanitize_user_text(text) do
     text
     |> to_string()
-    # CRLF -> LF
     |> String.replace(~r/\r\n?/, "\n")
-    # strip trailing spaces
     |> String.replace(~r/[ \t]+(\n)/, "\\1")
-    # collapse 3+ newlines
     |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
   end
@@ -27,8 +26,6 @@ defmodule SymbrellaWeb.HomeLive do
   defp to_bot_reply(text) when is_binary(text), do: %{text: text}
   defp to_bot_reply(other), do: %{text: inspect(other)}
 
-  # A tiny formatter so the UI shows something friendly when SI comes back.
-  # (kept as a fallback if the planner module isn't present)
   defp format_si_reply(si) do
     tokens = Map.get(si, :tokens, [])
     cells = Map.get(si, :active_cells, Map.get(si, :cells, []))
@@ -63,10 +60,9 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  # Show winner + score; append a definition with smart fallbacks.
   defp format_choice_with_def(choice, cells) do
-    lemma = choice[:lemma] || ""
-    id = choice[:id]
+    lemma = choice[:lemma] || choice[:token] || ""
+    id = choice[:id] || choice[:chosen_id]
     score = fmt_score(choice[:score])
 
     alt =
@@ -80,15 +76,152 @@ defmodule SymbrellaWeb.HomeLive do
     if defn == "", do: head, else: head <> " — " <> defn
   end
 
+  # ---------- NEW: definitions from si.sense_candidates ----------
+
+  defp cand_get(map, key) when is_map(map) and is_atom(key) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
+
+  defp cand_get(map, key) when is_map(map), do: Map.get(map, key)
+  defp cand_get(_, _), do: nil
+
+  defp candidate_definition_from_si(si, choice) when is_map(si) do
+    sc = Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates") || %{}
+
+    id = choice[:id] || choice[:chosen_id]
+    tok_idx = choice[:token_index] || choice[:tok_index] || choice[:index]
+
+    # try by token index first
+    by_tok =
+      case tok_idx do
+        nil ->
+          []
+
+        i ->
+          Map.get(sc, i) ||
+            Map.get(sc, Integer.to_string(i)) ||
+            Map.get(sc, to_string(i)) ||
+            []
+      end
+
+    # fallback: search across all buckets for matching id
+    all_lists =
+      if is_list(by_tok) and by_tok != [] do
+        [by_tok]
+      else
+        sc
+        |> Enum.flat_map(fn
+          {_k, v} when is_list(v) -> [v]
+          _ -> []
+        end)
+      end
+
+    cand =
+      all_lists
+      |> Enum.flat_map(fn v -> if is_list(v), do: v, else: [] end)
+      |> Enum.find(fn c ->
+        cand_id = cand_get(c, :id) || cand_get(c, :chosen_id)
+        cand_id == id
+      end)
+
+    (cand_get(cand, :definition) ||
+       cand_get(cand, :def) ||
+       cand_get(cand, :gloss) ||
+       cand_get(cand, :meaning) ||
+       "")
+    |> to_string()
+    |> gloss()
+  end
+
+  defp candidate_definition_from_si(_, _), do: ""
+
+  # Build Senses Selected for the Explain modal (structured, with defs).
+  defp build_senses_selected(si) when is_map(si) do
+    choices = Map.get(si, :lifg_choices, []) || []
+    cells = Map.get(si, :active_cells, Map.get(si, :cells, [])) || []
+
+    {items, _seen} =
+      choices
+      |> Enum.reduce({[], MapSet.new()}, fn ch, {acc, seen} ->
+        lemma = ch[:lemma] || ch[:token] || ch[:surface] || ""
+        id = ch[:id] || ch[:chosen_id]
+        pos = ch[:pos] || ch[:chosen_pos]
+        src = ch[:src] || ch[:source]
+        score = ch[:score]
+        tok_idx = ch[:token_index] || ch[:tok_index] || ch[:index]
+
+        surface =
+          ch[:surface] ||
+            ch[:raw_phrase] ||
+            ch[:token_phrase] ||
+            lemma
+
+        key = {tok_idx, id, pos, src, surface, lemma}
+
+        if MapSet.member?(seen, key) do
+          {acc, seen}
+        else
+          label =
+            [
+              safe_str(surface),
+              " → ",
+              safe_str(lemma),
+              " pos=",
+              safe_str(pos),
+              " src=",
+              safe_str(src),
+              " score=",
+              fmt_score(score)
+            ]
+            |> IO.iodata_to_binary()
+            |> String.trim()
+
+          defn0 = definition_for_choice(ch, cells)
+
+          defn =
+            if defn0 != "" do
+              defn0
+            else
+              candidate_definition_from_si(si, ch)
+            end
+
+          item = %{
+            label: label,
+            definition: defn
+          }
+
+          {[item | acc], MapSet.put(seen, key)}
+        end
+      end)
+
+    items
+    |> Enum.reverse()
+    |> Enum.take(@senses_modal_limit)
+  end
+
+  defp build_senses_selected(_), do: []
+
+  defp safe_str(nil), do: ""
+  defp safe_str(v) when is_atom(v), do: Atom.to_string(v)
+  defp safe_str(v) when is_binary(v), do: v
+  defp safe_str(v), do: to_string(v)
+
   defp definition_for_choice(choice, cells) do
     by_id = index_cells_by_id(cells)
     by_norm = index_cells_by_norm(cells)
 
-    id = choice[:id]
+    id = choice[:id] || choice[:chosen_id]
     alt_ids = List.wrap(choice[:alt_ids])
-    lemma_norm = norm_text(choice[:lemma] || "")
+    lemma_norm = norm_text(choice[:lemma] || choice[:token] || "")
 
-    # 1) chosen id
+    direct =
+      choice[:definition] ||
+        choice[:def] ||
+        choice[:gloss] ||
+        choice[:meaning]
+
+    with_direct = direct |> gloss()
+
     with_choice =
       by_id
       |> Map.get(id)
@@ -96,11 +229,13 @@ defmodule SymbrellaWeb.HomeLive do
       |> gloss()
 
     cond do
+      with_direct != "" ->
+        with_direct
+
       with_choice != "" ->
         with_choice
 
       true ->
-        # 2) first alt id with a def
         with_alt = first_def_from_ids(alt_ids, by_id)
 
         cond do
@@ -108,7 +243,6 @@ defmodule SymbrellaWeb.HomeLive do
             with_alt
 
           true ->
-            # 3a) same norm as chosen id (parsed from id)
             idn = id_norm(id)
 
             with_same_norm =
@@ -122,7 +256,6 @@ defmodule SymbrellaWeb.HomeLive do
                 with_same_norm
 
               true ->
-                # 3b) any cell matching lemma norm
                 with_lemma =
                   by_norm
                   |> Map.get(lemma_norm)
@@ -132,7 +265,6 @@ defmodule SymbrellaWeb.HomeLive do
                 if with_lemma != "" do
                   with_lemma
                 else
-                  # FINAL FALLBACK: remote lexicon disabled → no external lookup
                   lexicon_def(lemma_norm)
                 end
             end
@@ -162,13 +294,11 @@ defmodule SymbrellaWeb.HomeLive do
     Enum.reduce(cells || [], %{}, fn c, acc ->
       case cell_norm(c) do
         nil -> acc
-        # keep first with that norm
         n -> Map.put_new(acc, n, c)
       end
     end)
   end
 
-  # NOTE: Use Map.get to support structs (Ecto schemas) and plain maps.
   defp cell_id(c) when is_map(c) do
     case Map.get(c, :id) || Map.get(c, "id") do
       id when is_binary(id) -> id
@@ -193,8 +323,14 @@ defmodule SymbrellaWeb.HomeLive do
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
 
-  defp cell_def(c) when is_map(c),
-    do: Map.get(c, :definition) || Map.get(c, "definition")
+  defp cell_def(c) when is_map(c) do
+    Map.get(c, :definition) ||
+      Map.get(c, "definition") ||
+      Map.get(c, :def) ||
+      Map.get(c, "def") ||
+      Map.get(c, :gloss) ||
+      Map.get(c, "gloss")
+  end
 
   defp cell_def(_), do: nil
 
@@ -228,14 +364,10 @@ defmodule SymbrellaWeb.HomeLive do
     |> String.trim()
   end
 
-  # Final fallback (remote OFF): don't query anything; show no extra gloss.
   defp lexicon_def(_), do: ""
 
   # ---------- Planner integration ----------
 
-  # Compose:
-  #   tone line
-  #   + main text
   defp compose_tone_and_main(tone, main_text) do
     tone_line =
       case tone do
@@ -260,13 +392,20 @@ defmodule SymbrellaWeb.HomeLive do
     |> Enum.join("\n\n")
   end
 
-  # Build a lexical "tail" string (By the way...) from SI, for modal use.
   defp build_lexical_tail(si) do
-    token_count = si |> Map.get(:tokens, []) |> length()
+    tokens = Map.get(si, :tokens)
+    token_structs = Map.get(si, :token_structs)
+
+    token_count =
+      cond do
+        is_list(tokens) and tokens != [] -> length(tokens)
+        is_list(token_structs) -> length(token_structs)
+        true -> 0
+      end
 
     max_items =
       cond do
-        token_count <= 0 -> 0
+        token_count <= 0 -> 3
         token_count <= 4 -> token_count
         true -> 3
       end
@@ -280,7 +419,6 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  # Prefer mood from this run’s SI (prevents “last-turn mood bleed”).
   defp mood_from_si(si) when is_map(si) do
     case Map.get(si, :mood) do
       %{} = m -> m
@@ -288,13 +426,7 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  # Build the visible text + an internal modal "source" that includes
-  # lexical tail + intent/tone explanation lines.
-  #
-  # IMPORTANT: do NOT pull intent from Brain.latest_intent/0 here.
-  # Always derive from the *current* SI to avoid cross-turn bleed.
   defp build_planned_reply(user_text) do
-    # Run the full golden pipeline
     si =
       Core.resolve_input(user_text,
         mode: :prod,
@@ -303,8 +435,8 @@ defmodule SymbrellaWeb.HomeLive do
       )
 
     lexical_tail = build_lexical_tail(si)
+    senses_selected = build_senses_selected(si)
 
-    # 1️⃣ Preferred path: pipeline already attached response fields
     case Map.get(si, :response_text) do
       text when is_binary(text) and text != "" ->
         tone = Map.get(si, :response_tone, :warm)
@@ -324,12 +456,11 @@ defmodule SymbrellaWeb.HomeLive do
           tone: tone,
           meta: meta,
           si: si,
+          senses_selected: senses_selected,
           explain_text: explain_text
         }
 
       _ ->
-        # 2️⃣ Fallback: use the planner directly (legacy path)
-        # Derive intent/confidence/keyword from THIS si (not global last intent).
         si_like = %{
           intent: Map.get(si, :intent, :unknown),
           confidence: Map.get(si, :confidence, 0.0),
@@ -359,11 +490,11 @@ defmodule SymbrellaWeb.HomeLive do
               tone: tone,
               meta: meta,
               si: si,
+              senses_selected: senses_selected,
               explain_text: explain_text
             }
 
           true ->
-            # 3️⃣ Final fallback: SI debug string so we never go silent
             debug_text = format_si_reply(si)
             visible = compose_tone_and_main(nil, debug_text)
 
@@ -376,6 +507,7 @@ defmodule SymbrellaWeb.HomeLive do
             %{
               text: visible,
               si: si,
+              senses_selected: senses_selected,
               explain_text: explain_text
             }
         end
@@ -405,10 +537,8 @@ defmodule SymbrellaWeb.HomeLive do
        pending_task: nil,
        cancelled_ref: nil,
        session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
-       # Explain modal state
        explain_open?: false,
        explain_payload: %{},
-       # Local lookup so Explain works even if button only sends "id"
        message_text_by_id: initial_text_by_id,
        explain_by_id: initial_explain_by_id
      )
@@ -424,7 +554,6 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_event("send", %{"message" => raw}, socket) do
     text = sanitize_user_text(raw)
 
-    # Block empty sends or if a turn is already running
     if text == "" or socket.assigns.bot_typing do
       {:noreply, socket}
     else
@@ -456,10 +585,8 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  # 🔍 Explain modal open
   @impl true
   def handle_event("explain_open", %{"id" => id} = params, socket) do
-    # If the button was updated to also send text, use it. Otherwise use our local maps.
     text =
       case params do
         %{"text" => t} when is_binary(t) -> t
@@ -473,18 +600,15 @@ defmodule SymbrellaWeb.HomeLive do
     {:noreply, assign(socket, explain_open?: true, explain_payload: payload)}
   end
 
-  # ❎ Explain modal close
   @impl true
   def handle_event("explain_close", _params, socket) do
     {:noreply, assign(socket, explain_open?: false, explain_payload: %{})}
   end
 
-  # 🛑 User clicked Stop
   @impl true
   def handle_event("stop", _params, socket) do
     case socket.assigns.pending_task do
       %Task{} = task ->
-        # Mark this ref as cancelled so :DOWN doesn’t create an error bubble.
         _ = Task.shutdown(task, :brutal_kill)
         Process.demonitor(task.ref, [:flush])
 
@@ -514,7 +638,6 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  # ✅ Task succeeded — accept map, text, or tuple payloads
   @impl true
   def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
     Process.demonitor(ref, [:flush])
@@ -523,11 +646,25 @@ defmodule SymbrellaWeb.HomeLive do
     reply_text = reply.text
     tone = Map.get(reply, :tone)
     meta = Map.get(reply, :meta)
+    si = Map.get(reply, :si, %{})
     explain_text = Map.get(reply, :explain_text, reply_text)
+    senses_selected = Map.get(reply, :senses_selected, [])
+
+    intent = Map.get(si, :intent)
+    confidence = Map.get(si, :confidence)
 
     bot_id = "b-" <> Integer.to_string(System.unique_integer([:positive]))
 
-    explain_payload = ChatHTML.explain_payload_for(%{id: bot_id, text: explain_text})
+    explain_payload =
+      ChatHTML.explain_payload_for(%{
+        id: bot_id,
+        text: explain_text,
+        tone: tone,
+        intent: intent,
+        confidence: confidence,
+        from: meta || %{},
+        senses_selected: senses_selected
+      })
 
     bot = %{
       id: bot_id,
@@ -542,7 +679,6 @@ defmodule SymbrellaWeb.HomeLive do
      |> assign(
        bot_typing: false,
        pending_task: nil,
-       # Store the full explain text for safety; modal can use this even without cached payload.
        message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, explain_text),
        explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
      )
@@ -550,13 +686,11 @@ defmodule SymbrellaWeb.HomeLive do
      |> push_event("chat:scroll", %{to: "composer"})}
   end
 
-  # 🧹 Ignore stale Task result messages (e.g. if a Task died after stop).
   @impl true
   def handle_info({ref, _payload}, socket) when is_reference(ref) do
     {:noreply, socket}
   end
 
-  # ❌ Task exited — distinguish user cancel vs real error
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, reason}, socket) do
     cond do
@@ -593,3 +727,4 @@ defmodule SymbrellaWeb.HomeLive do
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
 end
+

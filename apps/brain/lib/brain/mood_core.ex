@@ -568,7 +568,7 @@ defmodule Brain.MoodCore do
 
   defp coerce_tags(_), do: MapSet.new()
 
-  defp to_float_num(v, default) when is_number(v), do: v * 1.0
+  defp to_float_num(v, _default) when is_number(v), do: v * 1.0
 
   defp to_float_num(v, default) when is_binary(v) do
     case Float.parse(String.trim(v)) do

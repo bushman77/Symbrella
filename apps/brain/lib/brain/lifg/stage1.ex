@@ -744,19 +744,38 @@ end
     Map.merge(ac_map, Map.merge(cbt, sc))
   end
 
-  defp active_cells_to_buckets(cells) do
-    cells
-    |> Enum.group_by(fn cell ->
+defp active_cells_to_buckets(cells) when is_list(cells) do
+  cells
+  |> Enum.map(&Safe.to_plain/1)
+  |> Enum.reduce(%{}, fn cell, acc ->
+    idx =
       case {Safe.get(cell, :token_index), Safe.get(cell, "token_index")} do
-        {i, _} when is_integer(i) -> i
-        {_, i} when is_integer(i) -> i
-        _ -> 0
+        {i, _} when is_integer(i) and i >= 0 -> i
+        {_, i} when is_integer(i) and i >= 0 -> i
+        _ -> :skip
       end
-    end)
-    |> Enum.into(%{}, fn {idx, group} ->
-      {idx, Enum.map(group, &active_cell_to_candidate/1)}
-    end)
-  end
+
+    case idx do
+      :skip ->
+        # Critical: do NOT dump unindexed cells into bucket 0.
+        # Unindexed cells are not sentence-aligned and will pollute disambiguation.
+        acc
+
+      i ->
+        cand = active_cell_to_candidate(cell)
+
+        # Defensive: ignore candidates without usable IDs
+        id = Safe.get(cand, :id) || Safe.get(cand, "id")
+
+        if is_nil(id) do
+          acc
+        else
+          Map.update(acc, i, [cand], fn lst -> [cand | lst] end)
+        end
+    end
+  end)
+  |> Enum.into(%{}, fn {idx, list} -> {idx, Enum.reverse(list)} end)
+end
 
   defp active_cell_to_candidate(cell) do
     id =
@@ -827,7 +846,6 @@ end
   defp guess_cell_lemma(id), do: to_string(id)
 
   # ---------- Boundary / char-gram guard with reasons ----------
-
   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
   defp boundary_check_mwe(sentence, tok, phrase_norm) do
@@ -848,8 +866,8 @@ end
         if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
     end
   end
-
-  # Normalize ambiguous {start, b} into {start, end_exclusive}.
+  
+ # Normalize ambiguous {start, b} into {start, end_exclusive}.
   # b may be: end_exclusive, len, or end_inclusive.
   defp normalize_span(sentence, {start, b}, phrase_norm)
        when is_binary(sentence) and is_integer(start) and is_integer(b) do
@@ -913,25 +931,7 @@ end
       c == ?_
   end
 
-  defp boundary_check_mwe(sentence, tok, phrase_norm) do
-    span = tok_span(tok)
-
-    case {sentence, span} do
-      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
-        {s0, len} = normalize_span(s, {start, b}, phrase_norm)
-
-        if len > 0 and span_sub_norm(s, s0, len) == phrase_norm do
-          :ok
-        else
-          {:error, :chargram}
-        end
-
-      _ ->
-        if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
-    end
-  end
-
-  defp boundary_check_unigram(sentence, tok, phrase_norm) do
+    defp boundary_check_unigram(sentence, tok, phrase_norm) do
     span = tok_span(tok)
 
     case {sentence, span} do
@@ -1178,29 +1178,29 @@ end
     if String.contains?(to_string(norm0), " "), do: 0.30, else: 0.25
   end
 
-  defp softmax([]), do: []
+defp softmax([]), do: []
 
-  defp softmax(xs) when is_list(xs) do
-    m = Enum.max(xs, fn -> 0.0 end)
-    exs = Enum.map(xs, fn x -> :math.exp(x * 1.0 - m) end)
-    z = Enum.sum(exs)
+defp softmax(xs) do
+  xs = Enum.map(xs, &to_float/1)
+  m  = Enum.max(xs)
+  exps = Enum.map(xs, fn x -> :math.exp(x - m) end)
+  denom = Enum.sum(exps)
 
-    cond do
-      z <= 0.0 ->
-        n = length(xs)
-        if n == 0, do: [], else: List.duplicate(1.0 / n, n)
+  cond do
+    denom == 0.0 ->
+      # Defensive: uniform instead of all-zero
+      n = length(xs)
+      u = 1.0 / n
+      Enum.map(xs, fn _ -> u end)
 
-      true ->
-        probs0 = Enum.map(exs, &(&1 / z))
-        sum0 = Enum.sum(probs0)
-
-        if sum0 > 0.0 do
-          Enum.map(probs0, &(&1 / sum0))
-        else
-          probs0
-        end
-    end
+    true ->
+      Enum.map(exps, &(&1 / denom))
   end
+end
+
+defp to_float(x) when is_float(x), do: x
+defp to_float(x) when is_integer(x), do: x * 1.0
+defp to_float(_), do: 0.0
 
   defp norm(nil), do: ""
 

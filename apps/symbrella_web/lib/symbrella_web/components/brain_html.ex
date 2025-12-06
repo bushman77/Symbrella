@@ -284,8 +284,9 @@ defmodule SymbrellaWeb.BrainHTML do
         <%= if @view == [] do %>
           <div class="text-sm text-gray-500 dark:text-gray-400">— no events —</div>
         <% else %>
-          <%= for ev <- @view do %>
-            <details class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+            <%= for ev <- @view do %>
+              <details open class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+
               <summary class="cursor-pointer text-sm">
                 <span class="font-mono text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
                   {to_string(ev.tag)}
