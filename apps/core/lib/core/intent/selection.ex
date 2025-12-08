@@ -2,19 +2,141 @@ defmodule Core.Intent.Selection do
   @moduledoc """
   Lightweight intent selector with cue-based confidence.
 
-  Returns SI with :intent, :keyword, :confidence.
-  Appends {:intent, %{...}} to si.trace.
-  Emits [:core,:intent,:selected] and [:brain,:intent,:selected].
+  This module is a fast, dependency-light classifier intended to run early in the Core
+  pipeline. It assigns:
+
+  * `:intent` — one of the supported intent atoms
+  * `:keyword` — a normalized “cue string” extracted from the input (sentence/tokens/keyword)
+  * `:confidence` — a numeric confidence score derived from cue scorer margins
+
+  The primary goal is to provide a stable intent hint (and keyword cue) for later stages
+  such as response planning, gating, and (optionally) ML upgrades.
+
+  ## Input / output shape
+
+  Public API operates on an “SI-like” map:
+
+  * If the input is a map containing the `:sentence` key, it returns an updated map.
+  * Otherwise, it returns the input unchanged.
+
+  The returned map will include `:intent`, `:keyword`, and `:confidence`.
+
+  ## Trace
+
+  `select/2` prepends a tuple entry to the input `:trace` list:
+
+  * `{:intent, %{keyword: kw, intent: intent, confidence: conf}}`
+
+  If `:trace` is missing, it is created as a list.
+
+  ## Side effects (best-effort, non-fatal)
+
+  After selecting intent, the module attempts (fail-open) to:
+
+  1. Update Brain “latest intent” snapshot (if Brain is present).
+  2. Broadcast an intent payload on `"brain:intent"` via `Brain.Bus` (if available).
+  3. Emit telemetry events:
+     * `[:core, :intent, :selected]`
+     * `[:brain, :intent, :selected]`
+
+  These side effects are intentionally guarded so Core can run in test environments
+  without Brain processes.
+
+  ## Optional ML “quick win” kick
+
+  If enabled by config, after emitting intent the module will spawn a lightweight task
+  to call `Brain.lifg_stage1/3` with a small delay. This is designed to ensure a
+  Stage-1 stop event exists so Brain-side ML can “upgrade” a pending turn.
+
+  Config keys:
+
+      config :core, :kick_lifg_stage1_after_intent?, false
+      config :core, :kick_lifg_stage1_delay_ms, 15
+      config :core, :kick_lifg_stage1_opts, []
+
+  Default behavior is disabled.
+
+  ## Supported intents
+
+  * `:greet`
+  * `:translate`
+  * `:abuse`
+  * `:insult`
+  * `:command`
+  * `:feedback`
+  * `:ask`
+  * `:unknown`
+
   """
 
   @type si :: map()
-  # add :feedback
-  # add :feedback to the intent union
   @type intent :: :greet | :translate | :abuse | :insult | :command | :feedback | :ask | :unknown
 
-  # include :feedback in precedence (after :command, before :ask)
   @precedence [:greet, :translate, :abuse, :insult, :command, :feedback, :ask]
 
+  @doc ~S"""
+  Select an intent from an SI-like map and attach `:intent`, `:keyword`, and `:confidence`.
+
+  The selector is cue-based:
+
+  * A keyword cue is extracted from (in order):
+    1) `si.keyword` (if present and non-empty)
+    2) `si.tokens` (preferring the “largest” multiword phrase)
+    3) `si.sentence` (fallback)
+
+  * The cue is normalized (lowercased, whitespace-collapsed, redundant punctuation reduced).
+  * A set of per-intent scorers produces scores in `0.0..1.0`.
+  * The highest score is selected; near-ties are broken using `@precedence`.
+  * Confidence is computed from the top score and its margin over the second-best.
+
+  Unknown fallback:
+
+  * If the top score is below a fixed threshold, `{ :unknown, 0.40 }` is returned.
+
+  The function returns the updated map and also emits/broadcasts (best-effort) intent metadata.
+
+  ## Options
+
+  Currently unused; reserved for future tuning.
+
+  ## Examples
+
+  Basic greeting classification:
+
+      iex> old = Application.get_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> out = Core.Intent.Selection.select(%{sentence: "Hello!!!", trace: []})
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, old)
+      iex> out.intent == :greet and out.keyword == "hello" and out.confidence >= 0.6
+      true
+      iex> match?([{:intent, %{intent: :greet, keyword: "hello"}} | _], out.trace)
+      true
+
+  Translation cue detection:
+
+      iex> old = Application.get_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> out = Core.Intent.Selection.select(%{sentence: "translate hola to English", trace: []})
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, old)
+      iex> out.intent
+      :translate
+
+  Prefer multiword keyword extracted from tokens:
+
+      iex> toks = [%{phrase: "good"}, %{phrase: "good afternoon"}]
+      iex> old = Application.get_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, false)
+      iex> out = Core.Intent.Selection.select(%{sentence: "", tokens: toks, trace: []})
+      iex> Application.put_env(:core, :kick_lifg_stage1_after_intent?, old)
+      iex> out.keyword
+      "good afternoon"
+
+  Non-SI-like input (missing `:sentence`) is returned unchanged:
+
+      iex> Core.Intent.Selection.select(%{text: "hello"})
+      %{text: "hello"}
+
+  """
   @spec select(si(), Keyword.t()) :: si()
   def select(si, _opts \\ [])
 
@@ -38,7 +160,7 @@ defmodule Core.Intent.Selection do
         &[{:intent, %{keyword: kw, intent: intent, confidence: conf}} | &1]
       )
 
-    emit(intent, kw, conf, text)
+    emit(si2, intent, kw, conf, text)
     si2
   end
 
@@ -46,9 +168,7 @@ defmodule Core.Intent.Selection do
 
   # ─────────────────────────── emit ───────────────────────────
 
-  # apps/core/lib/core/intent/selection.ex
-
-  defp emit(intent, kw, conf, text)
+  defp emit(%{} = si, intent, kw, conf, text)
        when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
     meas = %{confidence: conf}
 
@@ -85,14 +205,78 @@ defmodule Core.Intent.Selection do
       :telemetry.execute([:brain, :intent, :selected], meas, payload)
     end
 
+    # 4) Optional ML upgrade kick: ensure Stage1 stop event actually happens
+    _ = maybe_kick_lifg_stage1(si, payload)
+
     :ok
   end
 
-  defp emit(_, _, _, _), do: :ok
+  defp emit(_, _, _, _, _), do: :ok
+
+  # ─────────────────────── ML quick-win kick ───────────────────────
+
+  defp maybe_kick_lifg_stage1(%{} = si, %{} = payload) do
+    enabled? =
+      Application.get_env(:core, :kick_lifg_stage1_after_intent?, false)
+      |> truthy?()
+
+    if enabled? do
+      delay_ms =
+        Application.get_env(:core, :kick_lifg_stage1_delay_ms, 15)
+        |> normalize_nonneg_int(15)
+
+      opts =
+        Application.get_env(:core, :kick_lifg_stage1_opts, [])
+        |> List.wrap()
+
+      sentence =
+        (si[:sentence] || si["sentence"] || payload[:text] || payload["text"])
+        |> case do
+          s when is_binary(s) and s != "" -> s
+          _ -> nil
+        end
+
+      tokens =
+        (si[:tokens] || si["tokens"] || [])
+        |> case do
+          t when is_list(t) -> t
+          _ -> []
+        end
+
+      si_stage1 = %{sentence: sentence, tokens: tokens}
+
+      _ =
+        Task.start(fn ->
+          # Delay so Brain.ML reliably sees the intent open before the stop event upgrades the record.
+          if delay_ms > 0, do: Process.sleep(delay_ms)
+
+          try do
+            if Code.ensure_loaded?(Brain) and function_exported?(Brain, :lifg_stage1, 3) do
+              _ = Brain.lifg_stage1(si_stage1, [], opts)
+            end
+          rescue
+            _ -> :ok
+          catch
+            :exit, _ -> :ok
+            _, _ -> :ok
+          end
+        end)
+
+      :ok
+    else
+      :ok
+    end
+  end
+
+  defp maybe_kick_lifg_stage1(_, _), do: :ok
+
+  defp truthy?(v) when v in [true, "true", :true, 1, "1", "yes", "on"], do: true
+  defp truthy?(_), do: false
+
+  defp normalize_nonneg_int(v, default) when is_integer(v) and v >= 0, do: v
+  defp normalize_nonneg_int(_v, default), do: default
 
   # ─────────────────────── normalization ───────────────────────
-
-  # apps/core/lib/core/intent/selection.ex
 
   defp extract_keyword(%{keyword: kw}) when is_binary(kw) and kw != "" do
     kw |> String.trim() |> squish() |> String.downcase()
@@ -115,10 +299,8 @@ defmodule Core.Intent.Selection do
 
   defp token_phrase(%{phrase: p}) when is_binary(p), do: p
   defp token_phrase(%{"phrase" => p}) when is_binary(p), do: p
-  # (optional fallbacks if your tokens sometimes carry normalized text)
   defp token_phrase(%{norm: p}) when is_binary(p), do: p
   defp token_phrase(%{"norm" => p}) when is_binary(p), do: p
-  # if token is already a string, use it directly
   defp token_phrase(p) when is_binary(p), do: p
   defp token_phrase(_), do: ""
 
@@ -144,9 +326,7 @@ defmodule Core.Intent.Selection do
     s
     |> String.downcase()
     |> squish()
-    # collapse !!!, ???, ...
     |> String.replace(~r/([!?.,])\1+/u, "\\1")
-    # loooove -> loove
     |> String.replace(~r/([a-z])\1{2,}/u, "\\1\\1")
     |> String.trim(".!,? ")
   end
@@ -177,14 +357,12 @@ defmodule Core.Intent.Selection do
       abuse: score_abuse(kw),
       insult: score_insult(kw),
       command: score_command(kw),
-      # ← NEW/ensure present
       feedback: score_feedback(kw),
       ask: score_question(kw)
     }
 
     {label, top, second} = pick_label(scores)
 
-    # gate :ask if not question-shaped (defensive)
     label =
       case label do
         :ask -> if looks_like_question?(kw), do: :ask, else: :unknown
@@ -193,7 +371,6 @@ defmodule Core.Intent.Selection do
 
     conf = conf_from_scores(top, second)
 
-    # if everything is extremely weak, allow unknown
     if top < 0.35, do: {:unknown, 0.40}, else: {label, conf}
   end
 
@@ -210,7 +387,6 @@ defmodule Core.Intent.Selection do
         [{_, v2} | _] -> v2
       end
 
-    # resolve near ties by precedence
     near_ties =
       sorted
       |> Enum.filter(fn {_k, v} -> abs(v - best) <= 0.05 end)
@@ -228,21 +404,18 @@ defmodule Core.Intent.Selection do
 
   defp conf_from_scores(top, second) do
     margin = max(top - second, 0.0)
-    # emphasize both absolute evidence (top) and separation (margin)
     conf = 0.65 * top + 0.35 * margin
     if conf > 1.0, do: 1.0, else: conf
   end
 
   # ─────────────── cue scorers (0.0 .. 1.0) ───────────────
-  # Thanks/praise/soft critique (avoid insult words which are handled elsewhere)
+
   defp score_feedback(s) do
-    # Positive thanks/praise
     pos_thanks? =
       Regex.match?(~r/\b(thanks|thank\s+you|thx|ty)\b/i, s) or
         Regex.match?(~r/\b(appreciate(?:\s+it)?|i\s+appreciate(?:\s+it)?)\b/i, s) or
         Regex.match?(~r/\b(nice\s+work|good\s+job|well\s+done|awesome|great\s+job)\b/i, s)
 
-    # Light negative feedback (don’t collide with abuse/insult)
     neg_soft? =
       Regex.match?(~r/\bnot\s+working\b/i, s) or
         Regex.match?(~r/\bdoes(?:\s*|')?nt\s+work\b/i, s) or
@@ -256,11 +429,9 @@ defmodule Core.Intent.Selection do
     end
   end
 
-  # Imperatives like "please build...", "send me...", "fix this", "open ..."
   defp score_command(s) do
     qmark = String.contains?(s, "?")
 
-    # Do NOT treat explicit "translate ..." as a command; let :translate win cleanly.
     if Regex.match?(~r/\btranslate\b/i, s) do
       0.0
     else
@@ -281,7 +452,6 @@ defmodule Core.Intent.Selection do
     end
   end
 
-  # elongated greetings (heeellooo, heyyy, hiii, yooo, gm, good morning/…)
   defp score_greet(s) do
     base = if Regex.match?(greet_rx(), s), do: 0.70, else: 0.0
     extra = if base > 0.0 and String.contains?(s, "!"), do: 0.10, else: 0.0
@@ -289,9 +459,6 @@ defmodule Core.Intent.Selection do
   end
 
   defp greet_rx do
-    # Start-of-string greetings with elongations.
-    # - 'yo' must NOT be followed by an apostrophe (so it won't match "you're")
-    # - require a word boundary or punctuation/end after the greeting token
     ~r/
     ^
     (?:
@@ -328,7 +495,6 @@ defmodule Core.Intent.Selection do
     end
   end
 
-  # strong phrase → highest, word-only → medium-high
   defp score_abuse(s) do
     phrase_hit? = Enum.any?(abuse_phrase_regexes(), &Regex.match?(&1, s))
 
@@ -340,9 +506,7 @@ defmodule Core.Intent.Selection do
         end
 
     cond do
-      # was 0.95
       phrase_hit? -> 0.98
-      # mild words-only hit slightly lower
       word_hit? -> 0.70
       true -> 0.0
     end
@@ -378,12 +542,9 @@ defmodule Core.Intent.Selection do
     greet = Regex.match?(greet_rx(), s)
 
     cond do
-      # real questions: strong
       qm and starter -> 0.90
       starter -> 0.70
-      # expressive greeting like "hello?!" or "heyy??" — treat as greeting, not question
       qm and greet -> 0.20
-      # lone question mark with no interrogative — mild signal
       qm -> 0.55
       true -> 0.0
     end
@@ -428,3 +589,4 @@ defmodule Core.Intent.Selection do
     if terms == [], do: nil, else: compiled_word_regex(terms)
   end
 end
+

@@ -1,11 +1,51 @@
+# lib/core/token_filters.ex
 defmodule Core.TokenFilters do
   @moduledoc """
-  Token filtering + span/wordgram utilities for the Core pipeline.
+  Token filtering and sentence-span utilities used by the Core pipeline.
 
-  Hosts:
-    • prune/2
-    • rebuild_word_ngrams/2
-    • keep_only_word_boundary_tokens/1
+  This module provides three public utilities:
+
+  * `prune/2` — drops obviously-invalid tokens (bad spans, too-small `n`, etc.) with a safety
+    fallback to the original list if pruning would remove everything.
+  * `rebuild_word_ngrams/2` — rebuilds a clean token list directly from the sentence by generating
+    word n-grams with stable spans.
+  * `keep_only_word_boundary_tokens/1` — verifies tokens are *span-backed* by the sentence: a token
+    is kept only if its `:span` slice matches its `:phrase` after normalization (with a safety
+    fallback if everything would be removed).
+
+  ## Token expectations
+
+  This module is intentionally tolerant of token shapes. It supports:
+
+  * `%Core.Token{}` (preferred)
+  * maps with the needed keys (e.g., `%{span: {start, len}, n: 2, phrase: "..."}`)
+
+  The functions use only these keys:
+
+  * `:span` — expected as `{start, len}` or sometimes `{start, stop}`; the code accepts either form
+    in a best-effort way.
+  * `:n` — n-gram size (integer), used by `prune/2`.
+  * `:phrase` — token text, used by `keep_only_word_boundary_tokens/1`.
+  * `:index` — optional; `rebuild_word_ngrams/2` will populate it only if the current `Core.Token`
+    struct supports it.
+
+  ## Sentence normalization and span units
+
+  `rebuild_word_ngrams/2` and `keep_only_word_boundary_tokens/1` normalize the sentence by:
+
+  * trimming leading/trailing whitespace
+  * collapsing internal whitespace runs to a single space
+
+  Spans produced/verified are grapheme indices suitable for `String.slice/3` on the normalized
+  sentence.
+
+  ## Tracing
+
+  If the input has a `:trace` field (map or `%Core.SemanticInput{}`), each public function
+  prepends an entry:
+
+  * `%{stage: <atom>, meta: <map>, ts_ms: <integer>}`
+
   """
 
   alias Core.{SemanticInput, Token}
@@ -16,9 +56,61 @@ defmodule Core.TokenFilters do
   @token_keys Token.__struct__() |> Map.from_struct() |> Map.keys() |> MapSet.new()
   @token_has_index MapSet.member?(@token_keys, :index)
 
-  @doc """
-  Prunes tokens with a safety guard: if pruning would yield an empty list,
-  keep the original tokens.
+  @doc ~S"""
+  Prune a token list using a conservative safety filter.
+
+  This function removes tokens that fail basic structural checks:
+
+  * token must have a `:span` of `{start, len_or_stop}` with integer components
+  * token must have `:n >= :min_n` (default `1`)
+  * token must have a non-degenerate span:
+    * accepts `{start, len}` when `len > 0`
+    * also accepts `{start, stop}` when `stop > start` (best-effort support)
+
+  **Safety guard:** if pruning would yield an empty list, the original token list is retained.
+
+  The returned value preserves the input container shape:
+
+  * `%Core.SemanticInput{}` in → `%Core.SemanticInput{}` out
+  * map in → map out
+  * anything else → returned unchanged
+
+  ## Options
+
+  * `:min_n` (pos_integer, default: `1`) — minimum n-gram size a token must have to be kept.
+
+  ## Trace
+
+  Adds a `:token_prune` trace entry with:
+
+  * `:min_n` — used threshold
+  * `:kept` — count of tokens in the final list
+  * `:removed` — count of tokens that *would have been removed* (based on the pre-fallback kept set)
+  * `:fallback?` — whether the safety guard kept the original list
+
+  ## Examples
+
+      iex> toks = [
+      ...>   %{span: {0, 2}, n: 1, phrase: "hi"},
+      ...>   %{span: {0, 0}, n: 1, phrase: "bad"},
+      ...>   %{span: {3, 5}, n: 2, phrase: "there"}
+      ...> ]
+      iex> si = %{tokens: toks, trace: []}
+      iex> out = Core.TokenFilters.prune(si, min_n: 2)
+      iex> Enum.map(out.tokens, &Map.get(&1, :phrase))
+      ["there"]
+      iex> match?([%{stage: :token_prune, meta: %{min_n: 2, kept: 1}} | _], out.trace)
+      true
+
+  Demonstrating the safety guard (pruning would remove everything, so original tokens are kept):
+
+      iex> out2 = Core.TokenFilters.prune(si, min_n: 3)
+      iex> Enum.map(out2.tokens, &Map.get(&1, :phrase))
+      ["hi", "bad", "there"]
+      iex> [%{stage: :token_prune, meta: meta} | _] = out2.trace
+      iex> meta.fallback?
+      true
+
   """
   @spec prune(SemanticInput.t() | map(), opts()) :: SemanticInput.t() | map()
   def prune(%SemanticInput{tokens: toks} = si, opts) when is_list(toks) do
@@ -75,13 +167,45 @@ defmodule Core.TokenFilters do
 
   defp prune_tokens(_toks, _opts), do: {[], 0}
 
-  @doc """
-  Rebuild word n-grams from the sentence with stable, span-backed tokens.
+  @doc ~S"""
+  Rebuild word n-grams directly from the sentence with stable, span-backed tokens.
 
-  Generates n-grams up to `max_n`.
+  This is the “ground truth” token constructor for word-level n-grams:
 
-  NOTE on spans:
-    • spans are `{start, len}` **grapheme indices** over the normalized sentence.
+  * normalizes the sentence (trim + collapse whitespace)
+  * splits into whitespace-delimited words
+  * generates n-grams up to `max_n` at each start word
+  * emits tokens ordered by start word, then descending n (e.g., 3-gram, 2-gram, 1-gram)
+  * assigns a stable `:index` in emission order *only if* the current `Core.Token` struct supports it
+
+  Each emitted token includes:
+
+  * `:phrase` — the n-gram text (joined by single spaces)
+  * `:span` — `{start, len}` over the normalized sentence (grapheme indices)
+  * `:n` — the n-gram size
+  * `:mw` — `true` for multiword n-grams (`n > 1`)
+  * `:instances` — an empty list (placeholder for later enrichment stages)
+
+  ## Trace
+
+  Adds a `:rebuild_word_ngrams` trace entry with:
+
+  * `:max_n`
+  * `:token_count`
+
+  ## Examples
+
+      iex> si = %{sentence: "  hi   there  ", tokens: [], trace: []}
+      iex> out = Core.TokenFilters.rebuild_word_ngrams(si, 3)
+      iex> out.sentence
+      "hi there"
+      iex> Enum.map(out.tokens, &Map.get(&1, :phrase))
+      ["hi there", "hi", "there"]
+      iex> Enum.map(out.tokens, &Map.get(&1, :span))
+      [{0, 8}, {0, 2}, {3, 5}]
+      iex> match?([%{stage: :rebuild_word_ngrams, meta: %{max_n: 3}} | _], out.trace)
+      true
+
   """
   @spec rebuild_word_ngrams(SemanticInput.t() | map(), pos_integer()) :: SemanticInput.t() | map()
   def rebuild_word_ngrams(%SemanticInput{sentence: s} = si, max_n)
@@ -137,10 +261,45 @@ defmodule Core.TokenFilters do
     {s_norm, tokens}
   end
 
-  @doc """
-  Drops tokens whose `span` does not match the sentence slice (after normalization).
+  @doc ~S"""
+  Keep only tokens whose `:span` matches their sentence slice (after normalization).
 
-  Safety guard: if filtering yields `[]`, we keep the original tokens.
+  This is a *span-backed token verification* pass. A token is kept when:
+
+  * the sentence is normalized (trim + collapse whitespace)
+  * the token has a valid integer `:span` of `{start, len_or_stop}` with `start >= 0`
+  * slicing the normalized sentence at that span yields text that normalizes to the same value
+    as the token’s `:phrase`
+
+  **Safety guard:** if filtering would yield an empty list, the original token list is retained.
+
+  Notes:
+
+  * This function verifies “token text matches the exact sentence slice at its span.”
+    It does not explicitly check “word boundary” characters before/after the span.
+  * Spans are interpreted as `{start, len}` first; if that fails, `{start, stop}` is attempted.
+
+  ## Trace
+
+  Adds a `:token_boundary` trace entry with:
+
+  * `:kept` — count of tokens in the final list
+  * `:removed` — count of tokens that *would have been removed* (based on the pre-fallback kept set)
+  * `:fallback?` — whether the safety guard kept the original list
+
+  ## Examples
+
+      iex> toks = [
+      ...>   %{span: {0, 2}, phrase: "hi"},
+      ...>   %{span: {2, 5}, phrase: "there"} # wrong start; would not match slice " there"
+      ...> ]
+      iex> si = %{sentence: "hi there", tokens: toks, trace: []}
+      iex> out = Core.TokenFilters.keep_only_word_boundary_tokens(si)
+      iex> Enum.map(out.tokens, &Map.get(&1, :phrase))
+      ["hi"]
+      iex> match?([%{stage: :token_boundary, meta: %{kept: 1, fallback?: false}} | _], out.trace)
+      true
+
   """
   @spec keep_only_word_boundary_tokens(SemanticInput.t() | map()) :: SemanticInput.t() | map()
   def keep_only_word_boundary_tokens(%SemanticInput{sentence: s, tokens: toks} = si)
@@ -305,3 +464,4 @@ defmodule Core.TokenFilters do
 
   defp put_trace_any(other, _stage, _meta), do: other
 end
+

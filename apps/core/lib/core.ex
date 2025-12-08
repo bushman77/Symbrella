@@ -11,6 +11,13 @@ defmodule Core do
   • MWE Signatures are optional early and required late (unless disabled).
   • All Brain interactions are guarded so tests without Brain processes still pass.
   • Response planning is delegated to `Core.Response.Attach`.
+
+  ## Examples
+
+      iex> si = Core.resolve_input("good afternoon", mode: :test)
+      iex> {si.sentence, si.source, is_list(si.tokens)}
+      {"good afternoon", :test, true}
+
   """
 
   alias Core.BrainAdapter
@@ -64,6 +71,111 @@ defmodule Core do
 
   # ───────────────────────── Public API ───────────────────────────────────────
 
+  @doc """
+  Resolve a raw input string into a `Core.SemanticInput` by running Core’s semantic pipeline.
+
+  This is the primary entry point for transforming user text into structured state that can be
+  consumed by the downstream “brain regions”. It has two operational modes:
+
+  ## 1) Front-half shaping (always runs)
+
+  These steps run regardless of mode so you always get a coherent `%SemanticInput{}`:
+
+  - **Tokenize**
+    Calls `Core.LIFG.Input.tokenize/2` to turn the raw string into initial tokens.
+
+  - **Wrap into `SemanticInput`**
+    Calls `wrap_si/2` to guarantee the output is a `%SemanticInput{}` with at least:
+    `:sentence`, `:tokens`, `:source`, and `:trace`.
+
+  - **Rebuild word n-grams**
+    Calls `TokenFilters.rebuild_word_ngrams/2` to synthesize word-level n-gram tokens
+    up to `opts[:max_wordgram_n]` (default `3`). These n-grams support multiword matching
+    and later sense competition.
+
+  - **Attach execution metadata**
+    - `:source` is set to `:prod` or `:test` based on `opts[:mode]`
+    - `:trace` is ensured to exist
+    - `:lifg_opts` is attached after merging app defaults
+      (`Application.get_env(:brain, :lifg_defaults, [])`) with `opts[:lifg_opts]`
+
+  - **Intent selection**
+    Calls `Core.Intent.Selection.select/2` to attach intent/keyword/confidence signals.
+    This call may return either:
+    - an SI-like map/struct, or
+    - `{si, result}`
+
+    Both forms are normalized into a `%SemanticInput{}` via `coerce_si/1`.
+
+  ## 2) Production pipeline (runs only when `opts[:mode] == :prod`)
+
+  When in `:prod` mode, the function continues with the full cognitive pipeline:
+
+  - **STM (short-term memory)**
+    Uses `brain_roundtrip(&BrainAdapter.stm/1)` to safely call Brain and merge back only
+    known `SemanticInput` fields.
+
+  - **Word-boundary filtering**
+    `TokenFilters.keep_only_word_boundary_tokens/1` removes tokens that do not align to
+    word boundaries (guardrail against substrings leaking into sense selection).
+
+  - **MWE Signatures (early bias)**
+    `maybe_run_mwe(:early, ...)` optionally applies early multiword bias to improve downstream
+    selection before LTM is loaded.
+
+  - **LTM (long-term memory via DB lookup)**
+    `ltm_stage/2` calls `Db.ltm/2`, merges returned rows into `:active_cells`, dedupes by `id`,
+    and updates `:activation_summary.db_hits`.
+
+  - **Word-boundary filtering again**
+    Re-applies boundary filtering after LTM augmentation.
+
+  - **MWE Signatures (late bias)**
+    `maybe_run_mwe(:late, ...)` runs again late when evidence is strongest (tokens + LTM + intent).
+
+  - **Relations**
+    `Core.Relations.attach_edges/1` attaches relational edges among tokens/cells.
+
+  - **Episode + affect hooks**
+    `BrainAdapter.maybe_attach_episodes/2` and `BrainAdapter.maybe_amygdala_react/2`
+    optionally enrich with episodic recall and affective modulation.
+
+  - **LIFG Stage-1**
+    `run_lifg_and_attach/2` runs competitive sense selection and attaches winners/margins/guards.
+
+  - **ATL integration and pairing**
+    `BrainAdapter.maybe_ingest_atl/2` and `BrainAdapter.atl_attach_lifg_pairs/2` attach ATL outputs
+    and connect LIFG winners into ATL pair structures.
+
+  - **Hippocampus**
+    `BrainAdapter.maybe_encode_hippocampus/1` encodes an episode candidate; optional persistence
+    occurs via `BrainAdapter.maybe_persist_episode/2`.
+
+  - **Response planning**
+    `maybe_build_response_plan/2` delegates to `Core.Response.Attach` to attach response policy outputs.
+
+  - **Notify Brain**
+    `BrainAdapter.notify_activation/2` emits/records an activation event for observers/telemetry/UI.
+
+  ## Options
+
+  - `:mode` — `:prod` (default) runs the full pipeline; any other value stops after intent selection.
+  - `:max_wordgram_n` — maximum size for word n-grams used in the n-gram rebuild step (default `3`).
+  - `:lifg_opts` — overrides merged into `Application.get_env(:brain, :lifg_defaults, [])`.
+  - `:mwe_signatures` — `:inherit` (default), `:off`/`false`, or any truthy value to enable.
+  - `:mwe_extra_lex`, `:mwe_multiplier`, `:mwe_demote_funcs?` — forwarded into MWE signature passes.
+
+  ## Examples
+
+      iex> si = Core.resolve_input("good afternoon", mode: :test)
+      iex> si.sentence
+      "good afternoon"
+      iex> si.source
+      :test
+      iex> is_list(si.tokens)
+      true
+
+  """
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
     mode = Keyword.get(opts, :mode, :prod)
@@ -211,3 +323,4 @@ defmodule Core do
     end
   end
 end
+

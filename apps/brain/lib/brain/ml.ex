@@ -1,4 +1,4 @@
-  defmodule Brain.ML do
+defmodule Brain.ML do
   @moduledoc """
   Brain.ML — turn-level feature assembly for Axon training and UI explainability.
 
@@ -188,7 +188,11 @@
   def handle_info({:mood_update, m, _meta}, state), do: {:noreply, %{state | last_mood: m}}
   def handle_info({:mood_event, m, _meta}, state), do: {:noreply, %{state | last_mood: m}}
 
+  # LIFG topic shapes can drift; accept a few common variants
   def handle_info({:lifg_update, m}, state), do: {:noreply, %{state | last_lifg: m}}
+  def handle_info({:lifg, m}, state), do: {:noreply, %{state | last_lifg: m}}
+  def handle_info({:lifg_stage1, m}, state), do: {:noreply, %{state | last_lifg: m}}
+
   def handle_info({:wm, m}, state), do: {:noreply, %{state | last_wm: m}}
   def handle_info({:wm_update, m}, state), do: {:noreply, %{state | last_wm: m}}
 
@@ -215,8 +219,7 @@
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ───────────────────────── Turn open/finalize ─────────────────────────
-  # IMPORTANT: The backstop timer message needs the correct turn_id.
-  # We fix the placeholder scheduling by re-scheduling with the real id at open time.
+
   defp open_pending_turn(%{backstop_ms: ms} = state, intent_payload, source) do
     now_ms = now_ms()
 
@@ -246,13 +249,6 @@
     end
   end
 
-  defp schedule_backstop(ms) when is_integer(ms) and ms > 0 do
-    # We'll overwrite this ref if a new pending turn opens
-    Process.send_after(self(), {:finalize_pending, :_pending_id_placeholder}, ms)
-  end
-
-  defp schedule_backstop(_), do: nil
-
   defp cancel_pending_timer(%{pending: %{timer_ref: tref}} = state) when is_reference(tref) do
     _ = Process.cancel_timer(tref)
     put_in(state, [:pending, :timer_ref], nil)
@@ -261,8 +257,8 @@
   defp cancel_pending_timer(state), do: state
 
   defp maybe_finalize_pending(%{pending: nil} = state, _turn_id), do: state
-  defp maybe_finalize_pending(%{pending: %{id: id}} = state, turn_id) when id != turn_id,
-    do: state
+  defp maybe_finalize_pending(%{pending: %{id: id}} = state, turn_id) when id != turn_id, do: state
+
   defp maybe_finalize_pending(%{pending: pending} = state, _turn_id) do
     now_ms = now_ms()
 
@@ -281,7 +277,10 @@
           at_ms: now_ms
         }
 
-        rec = build_turn_record(state, trigger, pending.id, pending.opened_at_ms, pending.intent, pending.text)
+        # IMPORTANT: On backstop we DO NOT attempt to pull LIFG directly,
+        # because Stage1 may not have run for this turn.
+        rec =
+          build_turn_record(state, trigger, pending.id, pending.opened_at_ms, pending.intent, pending.text)
 
         state
         |> publish_and_push(rec, :append_or_replace)
@@ -292,9 +291,15 @@
   end
 
   defp mark_pending_finalized(%{pending: pending} = state, now_ms) when is_map(pending) do
-    pending2 = pending |> Map.put(:finalized?, true) |> Map.put(:finalized_at_ms, now_ms) |> Map.put(:timer_ref, nil)
+    pending2 =
+      pending
+      |> Map.put(:finalized?, true)
+      |> Map.put(:finalized_at_ms, now_ms)
+      |> Map.put(:timer_ref, nil)
+
     %{state | pending: pending2}
   end
+
   defp mark_pending_finalized(state, _), do: state
 
   defp schedule_pending_cleanup(state, turn_id) do
@@ -328,7 +333,8 @@
     {turn_id, opened_at_ms, intent_payload, text} =
       cond do
         is_map(pending) and not too_old?(pending.opened_at_ms, now_ms, state.pending_max_age_ms) ->
-          {pending.id, pending.opened_at_ms, pending.intent || state.last_intent, pending.text || extract_text_any(state.last_intent, state.last_blackboard)}
+          {pending.id, pending.opened_at_ms, pending.intent || state.last_intent,
+           pending.text || extract_text_any(state.last_intent, state.last_blackboard)}
 
         true ->
           {new_turn_id(), now_ms, state.last_intent, extract_text_any(state.last_intent, state.last_blackboard)}
@@ -342,12 +348,34 @@
       at_ms: mget(bb_env, :at_ms) || now_ms
     }
 
-    rec = build_turn_record(state, trigger, turn_id, opened_at_ms, intent_payload, text)
+    # KEY HARDENING:
+    # When we see the Stage1 stop event, we pull the LIFG state directly to guarantee winners,
+    # even if nothing ever published on "brain:lifg" (or message shapes drifted).
+    state2 =
+      case safe_fetch_lifg_state_for_upgrade() do
+        nil -> state
+        lifg_state -> %{state | last_lifg: lifg_state}
+      end
 
-    state
+    rec = build_turn_record(state2, trigger, turn_id, opened_at_ms, intent_payload, text)
+
+    state2
     |> cancel_pending_timer()
     |> publish_and_push(rec, :append_or_replace)
     |> Map.put(:pending, nil)
+  end
+
+  defp safe_fetch_lifg_state_for_upgrade do
+    cond do
+      Code.ensure_loaded?(Brain.LIFG) and function_exported?(Brain.LIFG, :get_state, 0) ->
+        case safe_call(fn -> Brain.LIFG.get_state() end) do
+          {:ok, st} -> st
+          _ -> nil
+        end
+
+      true ->
+        nil
+    end
   end
 
   # ───────────────────────── Record construction ─────────────────────────
@@ -369,6 +397,8 @@
       intent: intent_payload || state.last_intent,
       mood: state.last_mood,
       wm: state.last_wm,
+
+      # LIFG (winners for explainability)
       lifg: lifg_block(state),
 
       # The trigger
@@ -394,10 +424,13 @@
   defp lifg_block(state) do
     lifg = state.last_lifg
 
-    winners =
+    {choices, token_meta} =
       lifg
-      |> extract_lifg_choices()
-      |> Enum.map(&normalize_choice/1)
+      |> extract_lifg_choices_and_tokens()
+
+    winners =
+      choices
+      |> Enum.map(&normalize_choice(&1, token_meta))
       |> maybe_hydrate_lex(state.hydrate_lex?)
 
     %{
@@ -406,85 +439,93 @@
     }
   end
 
-  # Push new turns, but if we’re “upgrading” an already-backstopped turn_id, replace it.
-  defp publish_and_push(state, rec, mode) do
-    publish_turn_record(rec, state)
+  # ───────────────────────── Choice extraction + token meta ─────────────────────────
 
-    turns0 = state.turns || []
-    turns1 =
-      case mode do
-        :append_or_replace -> replace_or_prepend(turns0, rec, state.keep_turns)
-        _ -> [rec | turns0] |> Enum.take(state.keep_turns)
-      end
+  defp extract_lifg_choices_and_tokens(nil), do: {[], %{}}
 
-    %{state | last_turn: rec, turns: turns1}
-  end
+  defp extract_lifg_choices_and_tokens(%{} = m) do
+    last =
+      mget(m, :last) ||
+        mget_in(m, [:state, :last]) ||
+        mget_in(m, [:lifg, :last]) ||
+        mget_in(m, [:out, :last])
 
-  defp replace_or_prepend(turns, %{turn_id: tid} = rec, keep) when is_list(turns) do
-    {found?, turns2} =
-      Enum.reduce(turns, {false, []}, fn t, {found, acc} ->
-        if (is_map(t) and mget(t, :turn_id) == tid) do
-          {true, [rec | acc]}
-        else
-          {found, [t | acc]}
-        end
+    tokens =
+      (mget(m, :tokens) ||
+         mget_in(m, [:state, :tokens]) ||
+         (is_map(last) && (mget(last, :tokens) || mget(last, "tokens"))) ||
+         [])
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+
+    token_meta =
+      Enum.reduce(tokens, %{}, fn t, acc ->
+        idx = mget(t, :index) || mget(t, :token_index)
+        if is_integer(idx), do: Map.put(acc, idx, t), else: acc
       end)
 
-    turns3 = turns2 |> Enum.reverse()
+    choices =
+      (mget(m, :choices) ||
+         mget(m, :winners) ||
+         mget_in(m, [:out, :choices]) ||
+         mget_in(m, [:lifg, :choices]) ||
+         (is_map(last) && (mget(last, :choices) || mget(last, "choices"))) ||
+         [])
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
 
-    if found? do
-      turns3 |> Enum.take(keep)
-    else
-      [rec | turns] |> Enum.take(keep)
-    end
+    {choices, token_meta}
   end
 
-  defp replace_or_prepend(_turns, rec, keep), do: [rec] |> Enum.take(keep)
+  defp extract_lifg_choices_and_tokens(_), do: {[], %{}}
 
-  defp too_old?(opened_at_ms, now_ms, max_age_ms)
-       when is_integer(opened_at_ms) and is_integer(now_ms) and is_integer(max_age_ms) do
-    (now_ms - opened_at_ms) > max_age_ms
-  end
-
-  defp too_old?(_, _, _), do: false
-
-  defp new_turn_id, do: :erlang.unique_integer([:positive, :monotonic])
-
-  defp now_ms, do: System.system_time(:millisecond)
-
-  # ───────────────────────── Choice extraction + hydration ─────────────────────────
-
-  defp extract_lifg_choices(nil), do: []
-
-  defp extract_lifg_choices(%{} = m) do
-    (mget(m, :choices) ||
-       mget(m, :winners) ||
-       mget_in(m, [:out, :choices]) ||
-       mget_in(m, [:lifg, :choices]) ||
-       [])
-    |> List.wrap()
-    |> Enum.filter(&is_map/1)
-  end
-
-  defp extract_lifg_choices(_), do: []
-
-  defp normalize_choice(%{} = ch) do
+  defp normalize_choice(%{} = ch, token_meta) when is_map(token_meta) do
     id =
       ch[:chosen_id] ||
         ch["chosen_id"] ||
         ch[:id] ||
         ch["id"]
 
+    tok_idx = ch[:token_index] || ch["token_index"]
+
+    tok = if is_integer(tok_idx), do: Map.get(token_meta, tok_idx), else: nil
+
+    {chosen_word, chosen_pos, chosen_sense} = parse_cell_id(id)
+
+    alt_ids0 = ch[:alt_ids] || ch["alt_ids"] || []
+    alt_ids = alt_ids0 |> List.wrap() |> Enum.take(12)
+
     %{
-      token_index: ch[:token_index] || ch["token_index"],
+      token_index: tok_idx,
+      phrase: tok && (mget(tok, :phrase) || mget(tok, :raw) || mget(tok, :text)),
+      span: tok && (mget(tok, :span) || mget(tok, :range)),
+      mw: tok && (mget(tok, :mw) || mget(tok, :multiword)),
       lemma: ch[:lemma] || ch["lemma"],
       chosen_id: id,
+      chosen_word: chosen_word,
+      chosen_pos: chosen_pos,
+      chosen_sense: chosen_sense,
       margin: ch[:margin] || ch["margin"],
       score: ch[:score] || ch["score"] || ch[:prob] || ch["prob"],
+      # keep scores optional; can be large, but retained for now
       scores: ch[:scores] || ch["scores"],
-      alt_ids: ch[:alt_ids] || ch["alt_ids"] || []
+      alt_ids: alt_ids
     }
   end
+
+  defp parse_cell_id(id) when is_binary(id) do
+    # expected "word|pos|sense" (sense may be int or "fallback")
+    parts = String.split(id, "|", parts: 3)
+
+    case parts do
+      [w, pos, sense] -> {w, pos, sense}
+      [w, pos] -> {w, pos, nil}
+      [w] -> {w, nil, nil}
+      _ -> {nil, nil, nil}
+    end
+  end
+
+  defp parse_cell_id(_), do: {nil, nil, nil}
 
   defp maybe_hydrate_lex(winners, false), do: winners
 
@@ -586,6 +627,60 @@
     end
   end
 
+  # Push new turns, but if we’re “upgrading” an already-backstopped turn_id, replace it.
+  defp publish_and_push(state, rec, mode) do
+    publish_turn_record(rec, state)
+
+    turns0 = state.turns || []
+
+    turns1 =
+      case mode do
+        :append_or_replace -> replace_or_prepend(turns0, rec, state.keep_turns)
+        _ -> [rec | turns0] |> Enum.take(state.keep_turns)
+      end
+
+    %{state | last_turn: rec, turns: turns1}
+  end
+
+  defp replace_or_prepend(turns, %{turn_id: tid} = rec, keep) when is_list(turns) do
+    {found?, turns2} =
+      Enum.reduce(turns, {false, []}, fn t, {found, acc} ->
+        if is_map(t) and mget(t, :turn_id) == tid do
+          {true, [rec | acc]}
+        else
+          {found, [t | acc]}
+        end
+      end)
+
+    turns3 = turns2 |> Enum.reverse()
+
+    if found?, do: turns3 |> Enum.take(keep), else: [rec | turns] |> Enum.take(keep)
+  end
+
+  defp replace_or_prepend(_turns, rec, keep), do: [rec] |> Enum.take(keep)
+
+  defp too_old?(opened_at_ms, now_ms, max_age_ms)
+       when is_integer(opened_at_ms) and is_integer(now_ms) and is_integer(max_age_ms) do
+    (now_ms - opened_at_ms) > max_age_ms
+  end
+
+  defp too_old?(_, _, _), do: false
+
+  defp new_turn_id, do: :erlang.unique_integer([:positive, :monotonic])
+  defp now_ms, do: System.system_time(:millisecond)
+
+  # ───────────────────────── Safe call ─────────────────────────
+
+  defp safe_call(fun) when is_function(fun, 0) do
+    try do
+      {:ok, fun.()}
+    rescue
+      _ -> :error
+    catch
+      _, _ -> :error
+    end
+  end
+
   # ───────────────────────── Small utilities ─────────────────────────
 
   defp truthy?(v) when v in [true, "true", :true, 1, "1", "yes", "on"], do: true
@@ -603,4 +698,4 @@
 
   defp mget_in(_, _), do: nil
 end
-
+ 

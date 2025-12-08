@@ -2,31 +2,20 @@ defmodule Brain.Telemetry do
   @moduledoc """
   Attach lightweight telemetry handlers for Brain events.
 
-  ## What it logs
-  When `Brain.lifg_stage1/3` completes it emits:
-      :telemetry.execute(
-        [:brain, :pipeline, :lifg_stage1, :stop],
-        %{duration_ms: ms},
-        %{groups: ..., ctx_dim: ..., normalize: ..., scores_mode: ..., parallel: ...}
-      )
+  Currently logs the LIFG Stage-1 pipeline stop event:
 
-  This module provides `attach!/0` to log that event as a single concise line.
+      [:brain, :pipeline, :lifg_stage1, :stop]
 
-  ## Usage
-      # in your Application start/2 (umbrella or app that owns Brain)
-      def start(_type, _args) do
-        children = [
-          # ... your Registry, DynamicSupervisor, etc ...
-        ]
+  Emitters may provide different metadata shapes depending on which wrapper produced
+  the event. This logger supports both:
 
-        # Attach once at boot:
-        Brain.Telemetry.attach!()
+  - Newer pipeline wrapper meta:
+      %{winners: n, boosts: n, inhibitions: n, ...}
 
-        Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
-      end
+  - Older meta (or additional optional fields):
+      %{groups: ..., ctx_dim: ..., normalize: ..., scores_mode: ..., parallel: ...}
 
-  ## Optional: Detach (e.g., in tests)
-      Brain.Telemetry.detach!()
+  Use `attach!/0` once at boot. Safe to call multiple times.
   """
 
   require Logger
@@ -35,53 +24,69 @@ defmodule Brain.Telemetry do
   @handler_id "brain-lifg-stage1-logger"
 
   @doc """
-  Attach a logger handler for the LIFG Stage‑1 stop event.
+  Attach a logger handler for the LIFG Stage-1 stop event.
   Safe to call multiple times (subsequent calls are ignored).
   """
   def attach!() do
-    :telemetry.attach(
-      @handler_id,
-      @event,
-      &__MODULE__.handle_lifg_stop/4,
-      nil
-    )
-
-    :ok
-  catch
-    # already attached
-    :error, {:badarg, _} -> :ok
+    try do
+      :telemetry.attach(@handler_id, @event, &__MODULE__.handle_lifg_stop/4, nil)
+      :ok
+    rescue
+      ArgumentError ->
+        # already attached (or invalid args); treat as OK for "attach once" semantics
+        :ok
+    catch
+      :error, {:badarg, _} -> :ok
+    end
   end
 
   @doc """
-  Detach the logger handler. No‑op if not attached.
+  Detach the logger handler. No-op if not attached.
   """
   def detach!() do
-    :telemetry.detach(@handler_id)
-    :ok
-  catch
-    :error, {:badarg, _} -> :ok
+    try do
+      :telemetry.detach(@handler_id)
+      :ok
+    rescue
+      ArgumentError -> :ok
+    catch
+      :error, {:badarg, _} -> :ok
+    end
   end
 
   @doc false
   def handle_lifg_stop(_event, measurements, metadata, _config) do
-    # Measurements
     duration_ms = Map.get(measurements, :duration_ms, 0)
 
-    # Metadata (as emitted by Brain.lifg_stage1)
+    winners = Map.get(metadata, :winners)
+    boosts = Map.get(metadata, :boosts)
+    inhibitions = Map.get(metadata, :inhibitions)
+
+    # Optional/legacy fields (log if present)
     groups = Map.get(metadata, :groups)
     ctx_dim = Map.get(metadata, :ctx_dim)
     norm = Map.get(metadata, :normalize)
-    scores = Map.get(metadata, :scores_mode)
+    scores = Map.get(metadata, :scores_mode) || Map.get(metadata, :scores)
     parallel = Map.get(metadata, :parallel)
 
     Logger.info(fn ->
-      "[LIFG] #{duration_ms}ms groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
-        "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
+      base =
+        "[LIFG] #{duration_ms}ms" <>
+          (if is_integer(winners), do: " winners=#{winners}", else: "") <>
+          (if is_integer(boosts), do: " boosts=#{boosts}", else: "") <>
+          (if is_integer(inhibitions), do: " inhibitions=#{inhibitions}", else: "")
+
+      extras =
+        " groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
+          "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
+
+      base <> extras
     end)
   end
 
-  # lib/brain/telemetry.ex
-  def meta(extra \\ %{}) do
+  # helper for other telemetry sites (kept for compatibility)
+  def meta(extra \\ %{}) when is_map(extra) do
     Map.merge(%{v: 3}, extra)
   end
 end
+
