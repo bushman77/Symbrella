@@ -33,6 +33,7 @@ defmodule Brain do
 
   alias Brain.Cell.Runtime, as: CellRT
   alias Brain.WM.Focus, as: WMFocus
+  alias Brain.Config, as: BrainConfig
 
   # ───────────────────────── Region Macro (re-export) ─────────────────────────
 
@@ -486,6 +487,7 @@ defmodule Brain do
   def init(:ok) do
     {:ok,
      %{
+       assistant: BrainConfig.assistant(),
        history: [],
        active_cells: %{},
        attention: %{},

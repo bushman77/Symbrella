@@ -1,6 +1,13 @@
 # config/config.exs
 import Config
 
+import Config
+
+config :symbrella, :assistant,
+  name: "Symbrella",
+  norm: "symbrella",
+  aliases: ["symbrella"]
+
 # ───────────────────────────── Mailer ─────────────────────────────
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
 

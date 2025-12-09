@@ -16,6 +16,7 @@ defmodule Core.LexicalExplain do
   @default_max_items 2
   @default_max_syns 3
   @default_def_len 120
+  @default_ex_len 120
   @default_min_syn_len 4
 
   # Suppress function-words & chat glue from explain tail.
@@ -113,23 +114,32 @@ defmodule Core.LexicalExplain do
     norm = cell_norm_key(c)
     word = norm_text(cell_word(c) || "")
 
+    whitelist? = MapSet.size(allowed_norms) > 0
+
+    selected_by_whitelist? =
+      if whitelist? do
+        MapSet.member?(allowed_norms, norm) or
+          (word != "" and MapSet.member?(allowed_norms, word))
+      else
+        false
+      end
+
     ok? =
       cond do
         norm in [nil, ""] -> false
-        not single_word?(norm) -> false
-        MapSet.member?(@stopwords, norm) -> false
+        (not single_word?(norm)) and not selected_by_whitelist? -> false
+        MapSet.member?(@stopwords, norm) and not selected_by_whitelist? -> false
         String.length(norm) < 2 -> false
         norm =~ ~r/^\d+$/u -> false
         norm =~ ~r/^[[:punct:]]+$/u -> false
-        word != "" and MapSet.member?(@stopwords, word) -> false
+        word != "" and MapSet.member?(@stopwords, word) and not selected_by_whitelist? -> false
         true -> true
       end
 
     ok? =
       ok? and
-        if MapSet.size(allowed_norms) > 0 do
-          MapSet.member?(allowed_norms, norm) or
-            (word != "" and MapSet.member?(allowed_norms, word))
+        if whitelist? do
+          selected_by_whitelist?
         else
           true
         end
@@ -205,6 +215,7 @@ defmodule Core.LexicalExplain do
           word: cell_word(c) || norm,
           pos: pos_label(pos_class(c)),
           definition: cell_def(c),
+          example: cell_example(c),
           synonyms: cell_synonyms(c)
         }
     end
@@ -281,7 +292,7 @@ defmodule Core.LexicalExplain do
   # Formatting
   # ────────────────────────────────────────────────────────────────────────────
 
-  defp format_head(%{word: word, pos: pos, definition: defn, synonyms: syns}, max_syns, sentence) do
+  defp format_head(%{word: word, pos: pos, definition: defn, example: ex, synonyms: syns}, max_syns, sentence) do
     label_pos =
       case pos do
         nil -> ""
@@ -290,6 +301,7 @@ defmodule Core.LexicalExplain do
       end
 
     gloss = gloss(defn || "")
+    ex_str = gloss_example(ex || "")
 
     syn_str =
       syns
@@ -300,7 +312,13 @@ defmodule Core.LexicalExplain do
         list -> " — similar to " <> Enum.join(list, ", ")
       end
 
-    "• #{word}#{label_pos} — #{gloss}#{syn_str}"
+    ex_tail =
+      case ex_str do
+        "" -> ""
+        e -> " — e.g., " <> e
+      end
+
+    "• #{word}#{label_pos} — #{gloss}#{ex_tail}#{syn_str}"
   end
 
   defp normalize_synonyms(syns, sentence) do
@@ -336,32 +354,54 @@ defmodule Core.LexicalExplain do
     end
   end
 
+  defp gloss_example(nil), do: ""
+  defp gloss_example(""), do: ""
+
+  defp gloss_example(str) when is_binary(str) do
+    s =
+      str
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
+
+    if String.length(s) <= @default_ex_len do
+      s
+    else
+      String.slice(s, 0, @default_ex_len) <> "…"
+    end
+  end
+
   # ────────────────────────────────────────────────────────────────────────────
   # Token whitelist (only explain what the user actually wrote)
   # ────────────────────────────────────────────────────────────────────────────
 
+  defp phrase_norms(nil), do: []
+  defp phrase_norms(""), do: []
+
+  defp phrase_norms(p) when is_binary(p) do
+    n = norm_text(p)
+
+    parts =
+      n
+      |> String.split(~r/\s+/u, trim: true)
+
+    ([n] ++ parts)
+    |> Enum.uniq()
+    |> Enum.reject(&(&1 in [nil, ""]))
+  end
+
   defp allowed_norms_from_tokens(tokens) when is_list(tokens) do
     tokens
     |> Enum.flat_map(fn
-      %{phrase: p} = tok ->
-        n = Map.get(tok, :n, 1)
-        mw = Map.get(tok, :mw, false)
-
-        if n == 1 and mw in [false, nil] do
-          [norm_text(p)]
-        else
-          []
-        end
+      %{phrase: p} ->
+        phrase_norms(p)
 
       p when is_binary(p) ->
-        [norm_text(p)]
+        phrase_norms(p)
 
       _ ->
         []
     end)
     |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.reject(&MapSet.member?(@stopwords, &1))
-    |> Enum.reject(&Regex.match?(~r/\s/u, &1))
     |> MapSet.new()
   end
 
@@ -421,6 +461,11 @@ defmodule Core.LexicalExplain do
 
   defp cell_def(_), do: nil
 
+  defp cell_example(c) when is_map(c),
+    do: Map.get(c, :example) || Map.get(c, "example") || Map.get(c, :ex) || Map.get(c, "ex")
+
+  defp cell_example(_), do: nil
+
   defp cell_synonyms(c) when is_map(c) do
     case Map.get(c, :synonyms) || Map.get(c, "synonyms") do
       list when is_list(list) -> list
@@ -441,3 +486,4 @@ defmodule Core.LexicalExplain do
     |> String.trim()
   end
 end
+

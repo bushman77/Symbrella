@@ -74,13 +74,23 @@ defmodule Brain.PMTG do
 
   @impl true
   def init(opts) do
-    keep = Keyword.get(opts, :window_keep, Application.get_env(:brain, :pmtg_window_keep, 50))
-    mode = Keyword.get(opts, :mode, Application.get_env(:brain, :pmtg_mode, :boost))
+    # Region start_link/1 may pass a map (common under supervisors). Do not use Keyword.get/3 here.
+    opts_map = Brain.Region.opts_to_map(opts)
+
+    keep =
+      Map.get(opts_map, :window_keep) ||
+        Map.get(opts_map, "window_keep") ||
+        Application.get_env(:brain, :pmtg_window_keep, 50)
+
+    mode =
+      Map.get(opts_map, :mode) ||
+        Map.get(opts_map, "mode") ||
+        Application.get_env(:brain, :pmtg_mode, :boost)
 
     {:ok,
      %{
        region: :pmtg,
-       opts: %{mode: mode, window_keep: keep} |> Map.merge(Map.new(opts)),
+       opts: %{mode: mode, window_keep: keep} |> Map.merge(opts_map),
        window_keep: keep,
        window: [],
        last: nil
@@ -89,14 +99,22 @@ defmodule Brain.PMTG do
 
   @impl true
   def handle_cast({:configure, opts}, state) do
-    opts_map = Map.new(opts)
-    keep = Map.get(opts_map, :window_keep, state.window_keep)
-    mode = Map.get(opts_map, :mode, Map.get(state.opts, :mode))
+    opts_map = Brain.Region.opts_to_map(opts)
+
+    keep =
+      Map.get(opts_map, :window_keep) ||
+        Map.get(opts_map, "window_keep") ||
+        state.window_keep
+
+    mode =
+      Map.get(opts_map, :mode) ||
+        Map.get(opts_map, "mode") ||
+        Map.get(state.opts, :mode)
 
     {:noreply,
      state
      |> Map.put(:window_keep, keep)
-     |> Map.put(:opts, Map.merge(state.opts, %{mode: mode} |> Map.merge(opts_map)))}
+     |> Map.put(:opts, state.opts |> Map.merge(%{mode: mode, window_keep: keep}) |> Map.merge(opts_map))}
   end
 
   @impl true
@@ -340,11 +358,6 @@ defmodule Brain.PMTG do
   end
 
   # ─────────────── Sense compatibility (MWE vs unigram) ───────────────
-  #
-  # Required behavior for tests:
-  # - If token is MWE but lexicon has 0 MWE-compatible senses, KEEP original lexicon
-  #   (do not erase it), and emit [:brain, :pmtg, :no_mwe_senses] with kept=0.
-  #
 
   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
   def enforce_sense_compatibility(evidence, tokens)
@@ -380,20 +393,14 @@ defmodule Brain.PMTG do
     end)
   end
 
-  # Returns: {lexicon_to_use, kept_compatible_count, fallback?}
   defp filter_lexicon_for_token(lexicon, token) when is_list(lexicon) and is_map(token) do
     mwe? = token_mwe?(token)
     unigram? = token_unigram?(token)
 
     cond do
-      mwe? ->
-        filter_by_space_compat(lexicon, true)
-
-      unigram? ->
-        filter_by_space_compat(lexicon, false)
-
-      true ->
-        {lexicon, length(lexicon), false}
+      mwe? -> filter_by_space_compat(lexicon, true)
+      unigram? -> filter_by_space_compat(lexicon, false)
+      true -> {lexicon, length(lexicon), false}
     end
   end
 
@@ -415,7 +422,6 @@ defmodule Brain.PMTG do
         {compatible, length(compatible), false}
 
       true ->
-        # fallback: KEEP original lexicon, but report 0 compatible kept
         {lexicon, 0, true}
     end
   end
@@ -545,7 +551,6 @@ defmodule Brain.PMTG do
     {:ok, %{si: si2, choices: choices}}
   end
 
-  # Deterministic tie-breaker for rerun outputs using the rerun slate + weights.
   defp break_rerun_ties(choices, slate_by_tidx, weights, opts)
        when is_list(choices) and is_map(slate_by_tidx) and is_map(weights) do
     eps = Keyword.get(opts, :rerun_tie_epsilon, 1.0e-9) * 1.0
@@ -555,12 +560,8 @@ defmodule Brain.PMTG do
       cands = Map.get(slate_by_tidx, tidx, [])
 
       cond do
-        cands == [] ->
-          ch
-
-        not tied_choice?(ch, eps) ->
-          ch
-
+        cands == [] -> ch
+        not tied_choice?(ch, eps) -> ch
         true ->
           {best_id, best, second, score_map} = best_candidate(cands, weights)
 
@@ -880,7 +881,7 @@ defmodule Brain.PMTG do
     end)
   end
 
-  # ── Local token helpers (avoid repeating the :atom/"string" dance) ──────────
+  # ── Local token helpers ───────────────────────────────────────────────────
 
   defp token_index_of(%{} = t),
     do: t[:index] || t["index"] || t[:token_index] || t["token_index"]

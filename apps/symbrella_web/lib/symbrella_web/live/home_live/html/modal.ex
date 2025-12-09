@@ -577,7 +577,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> Enum.map(fn s ->
         label = s[:label] || s[:raw] || s[:token] || "Sense"
         defn = s[:definition] || s[:def] || s[:gloss] || s[:body] || ""
-        body = if is_binary(defn) and String.trim(defn) != "", do: defn, else: "(definition unavailable)"
+        ex = s[:example] || s[:ex] || nil
+        body = sense_body(defn, ex)
         %{label: to_string(label), body: body}
       end)
 
@@ -689,5 +690,27 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       items
     end
   end
+  
+  defp sense_body(defn, ex) do
+    d = defn
+    e = ex
+
+    cond do
+      present?(d) and present?(e) ->
+        "#{d}\nExample: #{e}"
+
+      present?(d) ->
+        d
+
+      present?(e) ->
+        "Example: #{e}"
+
+      true ->
+        "(definition unavailable)"
+    end
+  end
+
+  defp present?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present?(_), do: false
 end
 

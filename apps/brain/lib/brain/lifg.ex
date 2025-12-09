@@ -1,3 +1,4 @@
+#apps/brain/lib/brain/lifg.ex
 defmodule Brain.LIFG do
   @moduledoc """
   Left Inferior Frontal Gyrus (LIFG) — Competitive Sense Selection.
@@ -13,36 +14,22 @@ defmodule Brain.LIFG do
     and only apply pMTG if `conflict >= acc_conflict_tau`. When ACC is absent,
     behavior is unchanged (pMTG applies according to opts).
 
-  Central config (`config/config.exs`):
-
-      config :brain,
-        lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10},
-        lifg_stage1_scores_mode: :all,  # or :top2 | :none
-        lifg_min_margin: 0.05,
-        lifg_stage1_mwe_fallback: true,
-        pmtg_mode: :boost,
-        pmtg_margin_threshold: 0.15,
-        pmtg_window_keep: 50,
-        acc_conflict_tau: 0.50
-
-  Telemetry (emitted by `run/2`):
-    • [:brain, :lifg, :pmtg_decision]
-      measurements: %{needy: non_neg_integer()}
-      metadata: %{apply?: boolean(), mode: atom(), acc_present?: boolean(), acc_conflict: float(), acc_tau: float()}
+  Assistant identity (Option B):
+    If a token matches `Brain.Config.assistant/0` (name/norm/aliases), LIFG injects a
+    system-entity candidate into `si.sense_candidates[token_index]` so the assistant
+    name is handled as an internal entity (not a dictionary lookup).
   """
 
   use Brain, region: :lifg
   require Logger
 
   alias Brain.Utils.Safe
+  alias Brain.Config, as: BrainConfig
   alias Brain.LIFG.{Input, Post, Explanation}
 
-  # Slim helpers (lived in separate files)
   alias Brain.LIFG.{
     MWE,
-    # ensure apps/brain/lib/brain/lifg/choices.ex is present
     Choices,
-    # ensure apps/brain/lib/brain/lifg/legacy.ex is present
     Legacy,
     Stage1Bridge,
     ACCGate,
@@ -50,8 +37,6 @@ defmodule Brain.LIFG do
     Recorder,
     Config
   }
-
-  # ── Stable registered name / lifecycle helpers ─────────────────────────────
 
   @doc "Stable registered name used for calls/whereis (pairs with UI call_target/1)."
   def name, do: __MODULE__
@@ -91,8 +76,6 @@ defmodule Brain.LIFG do
   def start_link(opts) when is_list(opts) or is_map(opts) do
     GenServer.start_link(__MODULE__, Map.new(opts), name: name())
   end
-
-  # ── Server bootstrap & runtime config ──────────────────────────────────────
 
   @impl true
   def init(opts) do
@@ -156,7 +139,6 @@ defmodule Brain.LIFG do
 
   @impl true
   def handle_cast({:record_last, payload}, state) when is_map(payload) do
-    # Central enrichment point: attach explanation + weak_decision flag (idempotent & safe)
     enriched = attach_explanation(payload)
     {:noreply, %{state | last: enriched}}
   end
@@ -180,6 +162,7 @@ defmodule Brain.LIFG do
       |> Map.put(:sense_candidates, slate)
       |> Map.delete(:candidates_by_token)
       |> Map.put_new(:trace, [])
+      |> ensure_assistant_candidates()
       |> MWE.ensure_mwe_candidates(opts)
       |> MWE.absorb_unigrams_into_mwe(opts)
       |> MWE.backfill_unigrams_from_active_cells(opts)
@@ -277,12 +260,10 @@ defmodule Brain.LIFG do
     7) Post.finalize: non-overlap cover and optional reanalysis
   """
   @spec run(map(), keyword()) ::
-          {:ok,
-           %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
+          {:ok, %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
           | {:error, term()}
   def run(si, opts \\ []) when is_map(si) and is_list(opts) do
     try do
-      # 1) ATL finalize (optional)
       {si1, slate} =
         if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :finalize, 2) do
           case Brain.ATL.finalize(si, opts) do
@@ -293,10 +274,8 @@ defmodule Brain.LIFG do
           {si, %{}}
         end
 
-      # 2) Attach slate → sense_candidates (optional)
       si2 =
-        if Code.ensure_loaded?(Brain.ATL) and
-             function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
+        if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
           case Brain.ATL.attach_sense_candidates(
                  si1,
                  slate,
@@ -310,8 +289,11 @@ defmodule Brain.LIFG do
           si1
         end
 
-      # 2b) Ensure MWE candidates exist for MWE tokens that lack them
-      # 2b) Ensure + normalize MWE candidates the same way as disambiguate_stage1/2
+      si2 =
+        si2
+        |> Map.put(:atl_slate, slate)
+        |> ensure_assistant_candidates()
+
       si2a =
         si2
         |> MWE.ensure_mwe_candidates(opts)
@@ -326,12 +308,10 @@ defmodule Brain.LIFG do
       min_margin =
         Keyword.get(opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-      # Env-driven weights with optional per-call overrides
       weights_for_stage1 =
         Config.lifg_weights()
         |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
 
-      # 3) Stage-1 disambiguation
       stage1_result =
         Stage1Bridge.safe_call(
           si2a,
@@ -352,28 +332,14 @@ defmodule Brain.LIFG do
             |> Enum.map(&Safe.to_plain/1)
             |> Choices.augment(si3, min_margin)
 
-          # 4) Fallback-rerun (P-201)
           {si3a, choices} =
-            FallbackRerun.maybe_rerun(
-              si3,
-              choices0,
-              weights_for_stage1,
-              scores_mode,
-              margin_thr,
-              opts
-            )
+            FallbackRerun.maybe_rerun(si3, choices0, weights_for_stage1, scores_mode, margin_thr, opts)
 
-          # 5) ACC (optional). If present, record conflict & gate pMTG by threshold.
           {si3b, acc_conflict, acc_present?} = ACCGate.assess(si3a, choices, opts)
 
           acc_conf_tau =
-            Keyword.get(
-              opts,
-              :acc_conflict_tau,
-              Application.get_env(:brain, :acc_conflict_tau, 0.50)
-            )
+            Keyword.get(opts, :acc_conflict_tau, Application.get_env(:brain, :acc_conflict_tau, 0.50))
 
-          # Identify "needy" (low margin or low p(top1)) with alternatives
           needy =
             Enum.filter(choices, fn ch ->
               m = (ch[:margin] || 1.0) * 1.0
@@ -388,15 +354,11 @@ defmodule Brain.LIFG do
               (m < margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and alts?
             end)
 
-          # 6) pMTG consult (respect ACC gate when ACC is present)
-          pmtg_mode =
-            Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+          pmtg_mode = Keyword.get(opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
 
           pmtg_apply? =
-            Keyword.get(opts, :pmtg_apply?, true) and
-              (not acc_present? or acc_conflict >= acc_conf_tau)
+            Keyword.get(opts, :pmtg_apply?, true) and (not acc_present? or acc_conflict >= acc_conf_tau)
 
-          # Emit decision telemetry
           :telemetry.execute(
             [:brain, :lifg, :pmtg_decision],
             %{needy: length(needy)},
@@ -422,10 +384,7 @@ defmodule Brain.LIFG do
                          mode: :rerun,
                          rerun_only_if_hits: Keyword.get(opts, :rerun_only_if_hits, true),
                          rerun_weights_bump:
-                           Keyword.get(opts, :rerun_weights_bump, %{
-                             lex_fit: 0.05,
-                             rel_prior: 0.05
-                           })
+                           Keyword.get(opts, :rerun_weights_bump, %{lex_fit: 0.05, rel_prior: 0.05})
                        ) do
                     {:ok, %{si: si_after, choices: merged}} -> {si_after, merged}
                     _ -> {si3b, choices}
@@ -447,7 +406,6 @@ defmodule Brain.LIFG do
               {si3b, choices}
             end
 
-          # 7) Post.finalize — non-overlap cover + optional reanalysis
           post_out =
             Post.finalize(
               final_si,
@@ -471,14 +429,7 @@ defmodule Brain.LIFG do
               flips: post_out.flips
             })
 
-          {:ok,
-           %{
-             si: post_out.si,
-             choices: post_out.choices,
-             slate: slate,
-             cover: post_out.cover,
-             flips: post_out.flips
-           }}
+          {:ok, %{si: post_out.si, choices: post_out.choices, slate: slate, cover: post_out.cover, flips: post_out.flips}}
 
         {:error, reason} ->
           _ =
@@ -492,9 +443,7 @@ defmodule Brain.LIFG do
       e ->
         Logger.error("LIFG full run failed: #{inspect(e)}")
 
-        _ =
-          Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
-
+        _ = Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
         {:error, e}
     end
   end
@@ -561,16 +510,129 @@ defmodule Brain.LIFG do
 
   def low_confidence?(_choice, _opts), do: true
 
-  # ── Small internal helpers ─────────────────────────────────────────────────
+  # ── Internal helpers ───────────────────────────────────────────────────────
 
-  # Flatten :lifg_opts embedded as kw/map into a keyword list
   defp flatten_lifg_opts(nil), do: []
   defp flatten_lifg_opts(%{} = m), do: Map.to_list(m)
   defp flatten_lifg_opts(kw) when is_list(kw), do: kw
 
-  # Attach explanation (idempotent, rescue-safe). Adds:
-  #   :explanation (map), :explanation_text (string),
-  #   and bumps :audit.weak_decisions to 1 if decision is weak.
+  defp ensure_assistant_candidates(%{} = si) do
+    tokens = Safe.get(si, :tokens, []) |> List.wrap()
+
+    if tokens == [] do
+      si
+    else
+      sc0 = Safe.get(si, :sense_candidates, %{}) || %{}
+      sc = if is_map(sc0), do: sc0, else: %{}
+      a = BrainConfig.assistant()
+      assistant_id = "#{a.norm}|assistant|0"
+
+      {sc2, added_idxs} =
+        tokens
+        |> Enum.with_index()
+        |> Enum.reduce({sc, []}, fn {tok, i}, {acc, added} ->
+          idx = token_index(tok, i)
+
+          if BrainConfig.assistant_match?(tok) and is_integer(idx) do
+            if has_candidate_id?(acc, idx, assistant_id) do
+              {acc, added}
+            else
+              cand = assistant_candidate(a, tok, idx, assistant_id)
+              {put_candidate(acc, idx, cand), [idx | added]}
+            end
+          else
+            {acc, added}
+          end
+        end)
+
+      if added_idxs == [] do
+        si
+      else
+        evt = {:assistant_identity, %{token_indices: Enum.reverse(added_idxs), id: assistant_id}}
+
+        si
+        |> Map.put(:sense_candidates, sc2)
+        |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
+      end
+    end
+  end
+
+  defp ensure_assistant_candidates(other), do: other
+
+  defp token_index(tok, fallback) when is_map(tok) do
+    v = Map.get(tok, :index) || Map.get(tok, "index")
+    if is_integer(v), do: v, else: fallback
+  end
+
+  defp token_index(_tok, fallback), do: fallback
+
+  defp assistant_candidate(a, tok, token_index, id) do
+    raw =
+      Map.get(tok, :phrase) ||
+        Map.get(tok, "phrase") ||
+        Map.get(tok, :norm) ||
+        Map.get(tok, "norm") ||
+        Map.get(tok, :text) ||
+        Map.get(tok, "text") ||
+        Map.get(tok, :word) ||
+        Map.get(tok, "word") ||
+        ""
+
+    matched = norm_text(raw)
+
+    %{
+      id: id,
+      token_index: token_index,
+      # Use the matched surface as lemma (useful for traces), but keep norm as assistant.norm
+      lemma: matched,
+      norm: a.norm,
+      pos: "assistant",
+      from: :assistant_identity,
+      rank: 0,
+      # Conservative but strong prior; Stage1 still re-scores.
+      score: 0.95,
+      margin: 1.0,
+      features: %{assistant: true, matched: matched},
+      raw: %{from: :assistant_identity, assistant: a}
+    }
+  end
+
+  defp put_candidate(sc, idx, cand) do
+    Map.update(sc, idx, [cand], fn list ->
+      ([cand] ++ List.wrap(list))
+      |> Enum.map(&Safe.to_plain/1)
+      |> Enum.filter(&is_map/1)
+      |> Enum.uniq_by(fn c -> c[:id] || c["id"] end)
+      |> Enum.reject(fn c -> is_nil(c[:id] || c["id"]) end)
+    end)
+  end
+
+  defp has_candidate_id?(sc, idx, id) when is_map(sc) and is_integer(idx) and is_binary(id) do
+    case Map.get(sc, idx) do
+      nil ->
+        false
+
+      list when is_list(list) ->
+        Enum.any?(list, fn c ->
+          cid = (is_map(c) && (Map.get(c, :id) || Map.get(c, "id"))) || nil
+          cid == id
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp has_candidate_id?(_, _, _), do: false
+
+  defp norm_text(nil), do: ""
+
+  defp norm_text(v) when is_binary(v),
+    do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  defp norm_text(v),
+    do: v |> Kernel.to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
   defp attach_explanation(%{} = last) do
     already? = Map.has_key?(last, :explanation) or Map.has_key?(last, :explanation_text)
 
@@ -585,7 +647,6 @@ defmodule Brain.LIFG do
       last
     else
       weak? = get_in(exp, [:decision, :weak?]) || false
-
       audit0 = last[:audit] || %{}
 
       audit =
@@ -616,3 +677,4 @@ defmodule Brain.LIFG do
     end
   end
 end
+
