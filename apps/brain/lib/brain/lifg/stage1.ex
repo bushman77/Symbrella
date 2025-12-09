@@ -141,10 +141,10 @@ sent =
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
 
 chargram_event =
-  Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation])
+  Keyword.get(opts, :chargram_event, [:brain, :lifg, :stage1, :chargram_violation])
 
 boundary_event =
-  Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
+  Keyword.get(opts, :boundary_event, [:brain, :lifg, :stage1, :boundary_drop])
 
       mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
 
@@ -181,14 +181,25 @@ boundary_event =
         |> Enum.uniq()
         |> Enum.sort()
 
-      audit =
-        build_audit(
-          acc.kept,
-          dropped_total,
-          rejected_all,
-          acc.chargram + acc.boundary_drops + guard_drops,
-          acc.weak
-        )
+missing_tokens =
+        acc.no_cand_tokens
+        |> Enum.uniq()
+        |> Enum.sort()
+
+guardrail_violations = acc.chargram + acc.boundary_drops + guard_drops
+
+audit =
+  build_audit(
+    acc.kept,
+    dropped_total,
+    rejected_all,
+    guardrail_violations,
+    acc.weak,
+    acc.no_cand,
+    missing_tokens
+  )
+  |> Map.put(:guard_drops, guard_drops)
+  |> Map.put(:boundary_drop_count, acc.boundary_drops)
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
       {:ok, maybe_reanalyse(out, si1, opts)}
@@ -328,6 +339,7 @@ end
       weak: 0,
       kept: 0,
       no_cand: 0,
+      no_cand_tokens: [],
       rejected: [],
       chargram: 0,
       boundary_drops: 0
@@ -370,8 +382,10 @@ end
       |> restrict_to_phrase_if_mwe(token_mwe?)
 
     if cand_list == [] do
-      acc2 = Map.update!(acc, :no_cand, &(&1 + 1))
-
+      acc2 =
+        acc
+        |> Map.update!(:no_cand, &(&1 + 1))
+        |> Map.update!(:no_cand_tokens, &[tok_index | &1])
       if ctx.mwe_fallback? and token_mwe? and orig_cands == [] do
         emit_mwe_fallback(ctx.mwe_event, tok_index, raw_phrase, 0.0)
       end
@@ -1320,14 +1334,24 @@ defp to_float(_), do: 0.0
     end
   end
 
-  defp build_audit(kept, dropped, rejected_by_boundary, chargram_drops, weak) do
-    %{
+defp build_audit(
+         kept,
+         dropped,
+         rejected_by_boundary,
+         chargram_drops,
+         weak,
+         missing_cand,
+         missing_cand_tokens
+       ) do
+%{
       feature_mix: :lifg_stage1,
       kept_tokens: kept,
       dropped_tokens: dropped,
       boundary_drops: length(rejected_by_boundary),
       rejected_by_boundary: rejected_by_boundary,
       chargram_violation: chargram_drops,
+missing_candidates: missing_cand,
+      missing_candidate_tokens: missing_cand_tokens,
       weak_decisions: weak
     }
   end

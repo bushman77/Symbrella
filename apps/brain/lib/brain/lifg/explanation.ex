@@ -75,7 +75,7 @@ defmodule Brain.LIFG.Explanation do
       " · bias " <> fmt(m[:intent_bias])
   end
 
-  defp guards_text(%{chargram_violation: v, rejected_by_boundary: r}) do
+defp guards_text(%{chargram_violation: v, rejected_by_boundary: r} = g) do
     parts = []
     parts = if is_number(v) and v > 0, do: parts ++ ["chargram=" <> to_string(v)], else: parts
 
@@ -83,7 +83,25 @@ defmodule Brain.LIFG.Explanation do
       if is_list(r) and r != [],
         do: parts ++ ["boundary=" <> Integer.to_string(length(r))],
         else: parts
+parts =
+      case Map.get(g, :missing_candidates) do
+        n when is_integer(n) and n > 0 -> parts ++ ["missing_candidates=" <> Integer.to_string(n)]
+        _ -> parts
+      end
 
+    parts =
+      case Map.get(g, :missing_candidate_tokens) do
+        [_ | _] = idxs ->
+          joined =
+            idxs
+            |> Enum.map(&Integer.to_string/1)
+            |> Enum.join(",")
+
+          parts ++ ["missing_idx=[" <> joined <> "]"]
+
+        _ ->
+          parts
+      end
     if parts == [], do: "none", else: Enum.join(parts, ", ")
   end
 

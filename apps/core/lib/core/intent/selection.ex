@@ -273,7 +273,7 @@ defmodule Core.Intent.Selection do
   defp truthy?(v) when v in [true, "true", :true, 1, "1", "yes", "on"], do: true
   defp truthy?(_), do: false
 
-  defp normalize_nonneg_int(v, default) when is_integer(v) and v >= 0, do: v
+  defp normalize_nonneg_int(v, _default) when is_integer(v) and v >= 0, do: v
   defp normalize_nonneg_int(_v, default), do: default
 
   # ─────────────────────── normalization ───────────────────────

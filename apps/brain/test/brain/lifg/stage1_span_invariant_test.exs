@@ -125,6 +125,8 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
       # But total "dropped_tokens" counts missing-candidate tokens as dropped (via no_cand).
       assert audit.kept_tokens == 4
       assert audit.dropped_tokens == 2
+      assert audit.missing_candidates == 2
+assert audit.missing_candidate_tokens == [2, 5]
     end
   end
 
