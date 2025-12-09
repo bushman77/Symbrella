@@ -1,10 +1,44 @@
 defmodule Core.BrainAdapter do
   @moduledoc """
-  Runtime bridge for Core → Brain(+regions). Centralizes guarded calls so Core stays slim.
+  Runtime bridge for Core → Brain (+regions).
 
-  Notes:
-  - All functions are best-effort: they never crash the Core pipeline.
-  - Uses module-atoms (:"Elixir.Brain.*") + apply/3 to avoid hard compile coupling.
+  This module centralizes **guarded, best-effort** interactions with Brain-side
+  processes so Core’s pipeline code can remain slim and resilient.
+
+  Design goals:
+
+  - **Runtime-only coupling:** Uses module atoms like `:"Elixir.Brain.Hippocampus"` and
+    `apply/3` so Core does not depend on Brain modules at compile time.
+  - **Best-effort semantics:** Functions that participate in the Core pipeline are
+    written to **avoid crashing** the caller when Brain or a region is not running.
+  - **Explicit exceptions:** A small number of “direct call” helpers (`snapshot/0`,
+    `cell_call/2`) use `GenServer.call/3` directly and will exit if Brain is not available.
+    Use `available?/0` to guard those calls.
+
+  ## Processes / regions addressed
+
+  - `@brain` — central Brain process (registered name: `:"Elixir.Brain"`)
+  - `@atl` — ATL region
+  - `@hippo` — Hippocampus region
+  - `@hippo_writer` — Hippocampus persistence helper
+  - `@amyg` — Amygdala affective hook (optional)
+  - `@affect_appraisal` — AffectiveAppraisal (optional)
+  - `@mood_core` — MoodCore (optional)
+
+  ## Common calling patterns
+
+  Guarding direct calls:
+
+      iex> if Core.BrainAdapter.available?(), do: is_map(Core.BrainAdapter.snapshot()), else: true
+      true
+
+  Best-effort pipeline calls return the input unchanged (or a benign default) when
+  the target module/process is unavailable.
+
+  ## Telemetry
+
+  Some functions emit telemetry (e.g., episodes attach). This module uses a small
+  local `emit/3` helper that becomes a no-op if `:telemetry` is not available.
   """
 
   @brain :"Elixir.Brain"
@@ -13,15 +47,23 @@ defmodule Core.BrainAdapter do
   @hippo_writer :"Elixir.Brain.Hippocampus.Writer"
   @amyg :"Elixir.Brain.Amygdala"
 
-  # NEW (affect)
+  # Affect
   @affect_appraisal :"Elixir.Brain.AffectiveAppraisal"
   @mood_core :"Elixir.Brain.MoodCore"
 
   @timeout 2_000
 
+  @typedoc "BrainCell identifier (typically a persisted id like \"good|noun|0\")."
   @type cell_id :: binary()
+
+  @typedoc "Items that can reference a cell: ids, maps, or structs carrying an `:id`."
   @type cell_item :: cell_id | map() | struct()
 
+  @typedoc """
+  Part-of-speech tag (Core-level type union).
+
+  This is intentionally permissive; downstream can treat unknown atoms as `:other`.
+  """
   @type pos ::
           :noun
           | :verb
@@ -40,7 +82,20 @@ defmodule Core.BrainAdapter do
           | :x
           | atom()
 
+  @typedoc """
+  Lookup key used by the synonyms API.
+
+  - `cell_id()` — direct sense/cell id
+  - `{lemma, pos}` — lemma and POS tuple
+  - `{:mwe, [tokens]}` — multiword expression key
+  """
   @type key :: cell_id | {binary(), pos} | {:mwe, [binary()]}
+
+  @typedoc """
+  Synonym record returned by Brain.
+
+  Keys are best-effort and may be `nil` depending on source/adapter implementation.
+  """
   @type syn_obj :: %{
           term: binary(),
           pos: pos | nil,
@@ -48,19 +103,41 @@ defmodule Core.BrainAdapter do
           source: atom() | nil,
           key: key | nil
         }
+
+  @typedoc "Synonyms results keyed by the original request keys."
   @type syn_result :: %{optional(key()) => [syn_obj()]}
 
   # ───────────────────────── Base availability ─────────────────────────
 
-  @doc "Is the Brain process currently available?"
+  @doc """
+  Returns `true` if the Brain process is currently available (registered and alive).
+
+  This is the recommended guard before calling “direct-call” functions such as
+  `snapshot/0` and `cell_call/2`.
+
+  ## Examples
+
+      iex> is_boolean(Core.BrainAdapter.available?())
+      true
+  """
   @spec available?() :: boolean()
   def available?, do: is_pid(Process.whereis(@brain))
 
   # ───────────────────────── Existing API (kept) ─────────────────────────
 
   @doc """
-  Activate a list of cells (rows, maps with :id, or ids). Payload is optional.
-  Fire-and-forget cast; returns :ok.
+  Activates a list of cells (rows, maps with `:id`, or ids). Payload is optional.
+
+  This is a fire-and-forget `GenServer.cast/2` to the Brain process.
+  It returns `:ok` even if Brain is not running (the message is simply not delivered).
+
+  ## Examples
+
+      iex> Core.BrainAdapter.activate_cells([], %{})
+      :ok
+
+      iex> Core.BrainAdapter.activate_cells(["good|noun|0"], %{delta: 0.1})
+      :ok
   """
   @spec activate_cells([cell_item()], map()) :: :ok
   def activate_cells(items, payload \\ %{})
@@ -70,25 +147,77 @@ defmodule Core.BrainAdapter do
     GenServer.cast(@brain, {:activate_cells, items, payload})
   end
 
-  @doc "Fetch a full snapshot of Brain state."
+  @doc """
+  Fetches a snapshot of Brain state via `GenServer.call/3`.
+
+  This is a **direct** call. If Brain is not running, this call will exit.
+
+  Prefer guarding with `available?/0`:
+
+      iex> if Core.BrainAdapter.available?(), do: is_map(Core.BrainAdapter.snapshot()), else: true
+      true
+  """
   @spec snapshot() :: map()
   def snapshot, do: GenServer.call(@brain, :snapshot, @timeout)
 
-  @doc "Call a specific neuron by id with a request (routed by Brain)."
+  @doc """
+  Calls a specific neuron by id with a request (routed by Brain).
+
+  This is a **direct** call. If Brain is not running, this call will exit.
+  Guard with `available?/0` when used in optional paths.
+
+  ## Examples
+
+      iex> if Core.BrainAdapter.available?(), do: Core.BrainAdapter.cell_call("x|noun|0", :ping) != nil, else: true
+      true
+  """
   @spec cell_call(cell_id(), term()) :: term()
   def cell_call(id, req), do: GenServer.call(@brain, {:cell, id, req}, @timeout)
 
-  @doc "Cast a message to a specific neuron by id."
+  @doc """
+  Casts a message to a specific neuron by id.
+
+  This is fire-and-forget; returns `:ok` regardless of Brain availability.
+
+  ## Examples
+
+      iex> Core.BrainAdapter.cell_cast("x|noun|0", :ping)
+      :ok
+  """
   @spec cell_cast(cell_id(), term()) :: :ok
   def cell_cast(id, msg), do: GenServer.cast(@brain, {:cell, id, msg})
 
   # ───────────────────────── Synonyms (P-201) ─────────────────────────
 
   @doc """
-  Batch synonym retrieval via Brain. Accepts cell_ids, {lemma,pos} tuples,
-  or MWEs as {:mwe, [tokens]}. Returns {:ok, %{key => [syn_obj]}} or {:error, reason}.
+  Retrieves synonyms via Brain for a batch of keys.
 
-  This is a runtime call; if Brain isn't available, returns {:error, :unavailable}.
+  Accepts:
+  - `cell_id()` values
+  - `{lemma, pos}` tuples
+  - MWEs as `{:mwe, [tokens]}`
+
+  Returns:
+
+  - `{:ok, %{key => [syn_obj]}}` on success
+  - `{:error, :unavailable}` when Brain is not available
+  - `{:error, reason}` for other call failures
+
+  This function is **best-effort** and will not crash the Core pipeline.
+
+  ## Examples
+
+      iex> Core.BrainAdapter.synonyms_for_keys([], %{})
+      {:ok, %{}}
+
+      iex> ok? =
+      ...>   case Core.BrainAdapter.synonyms_for_keys([{"good", :adj}]) do
+      ...>     {:error, :unavailable} -> true
+      ...>     {:ok, m} when is_map(m) -> true
+      ...>     _ -> false
+      ...>   end
+      iex> ok?
+      true
   """
   @spec synonyms_for_keys([key()], map() | keyword()) :: {:ok, syn_result()} | {:error, term()}
   def synonyms_for_keys(keys, opts \\ %{})
@@ -102,8 +231,21 @@ defmodule Core.BrainAdapter do
   # ───────────────────────── Core pipeline helpers ─────────────────────────
 
   @doc """
-  Brain STM stage (for Core.brain_roundtrip/2).
-  Returns a map (mergeable) or a non-map that Core will ignore.
+  Runs Brain STM stage (for `Core.brain_roundtrip/2`) in a best-effort manner.
+
+  - When Brain exports `stm/1`, it is invoked.
+  - Otherwise returns `:unavailable`.
+
+  Callers typically treat non-map results as “ignore”.
+
+  ## Examples
+
+      iex> out = Core.BrainAdapter.stm(%{sentence: "hi"})
+      iex> is_map(out) or out == :unavailable
+      true
+
+      iex> Core.BrainAdapter.stm("passthrough")
+      "passthrough"
   """
   @spec stm(map()) :: map() | term()
   def stm(%{} = si_map) do
@@ -113,7 +255,19 @@ defmodule Core.BrainAdapter do
   def stm(other), do: other
 
   @doc """
-  ATL attach pairs (for Core.brain_roundtrip/2).
+  Attaches ATL ↔ LIFG pairing information (for `Core.brain_roundtrip/2`) best-effort.
+
+  - Calls `Brain.ATL.attach_lifg_pairs/2` if available.
+  - Otherwise returns `:unavailable`.
+
+  ## Examples
+
+      iex> out = Core.BrainAdapter.atl_attach_lifg_pairs(%{tokens: []}, [])
+      iex> is_map(out) or out == :unavailable
+      true
+
+      iex> Core.BrainAdapter.atl_attach_lifg_pairs("passthrough", [])
+      "passthrough"
   """
   @spec atl_attach_lifg_pairs(map(), keyword()) :: map() | term()
   def atl_attach_lifg_pairs(%{} = si_map, opts) when is_list(opts) do
@@ -123,7 +277,25 @@ defmodule Core.BrainAdapter do
   def atl_attach_lifg_pairs(other, _opts), do: other
 
   @doc """
-  Episodes attach (best-effort). Mirrors the old Core implementation.
+  Optionally attaches episodic recall evidence using Hippocampus (best-effort).
+
+  Behavior:
+  - If episodes are disabled (via opts/env) or Hippocampus is not running, returns `si` unchanged.
+  - Otherwise calls `Brain.Hippocampus.attach_episodes/2` and expects a map back.
+  - If episodes were attached, emits `[:brain, :core, :episodes_attached]` with `%{count: n}`.
+
+  Options used:
+  - `:episodes` (boolean | nil) — overrides env
+  - `:recall_source` — forwarded to Hippocampus as `:source` when present
+  - `:episode_embedding` — forwarded as `:embedding` when present
+
+  ## Examples
+
+  Deterministic “off” behavior:
+
+      iex> si = %{evidence: %{}}
+      iex> Core.BrainAdapter.maybe_attach_episodes(si, episodes: false) == si
+      true
   """
   @spec maybe_attach_episodes(map(), keyword()) :: map()
   def maybe_attach_episodes(%{} = si, opts) when is_list(opts) do
@@ -159,7 +331,17 @@ defmodule Core.BrainAdapter do
   def maybe_attach_episodes(si, _opts), do: si
 
   @doc """
-  Amygdala hook: fast affective appraisal between episodes + LIFG.
+  Amygdala hook: fast affective reaction between episodes and LIFG (best-effort).
+
+  If `Brain.Amygdala.react/2` is available, it is invoked. When it returns a map,
+  it is attached as `si.emotion`.
+
+  ## Examples
+
+      iex> si = %{sentence: "hi"}
+      iex> out = Core.BrainAdapter.maybe_amygdala_react(si, [])
+      iex> is_map(out) and (out == si or Map.has_key?(out, :emotion))
+      true
   """
   @spec maybe_amygdala_react(map(), keyword()) :: map()
   def maybe_amygdala_react(%{} = si, opts) when is_list(opts) do
@@ -182,10 +364,25 @@ defmodule Core.BrainAdapter do
   def maybe_amygdala_react(si, _opts), do: si
 
   @doc """
-  Affective appraisal hook (NEW):
-    - Calls Brain.AffectiveAppraisal.appraise/1 (if available)
-    - Casts MoodCore.apply_appraisal/1 (best-effort; safe when MoodCore not running)
-    - Attaches :appraisal onto SI for UI/trace
+  Affective appraisal hook (best-effort).
+
+  When enabled, this:
+
+  1. Calls `Brain.AffectiveAppraisal.appraise/1` (if available).
+  2. Casts `Brain.MoodCore.apply_appraisal/1` (best-effort).
+  3. Attaches the appraisal map onto `si.appraisal`.
+
+  Enable/disable logic:
+  - `opts[:affective_appraisal]` can be `:off | false | :inherit | true`
+  - when `:inherit`, uses `config :brain, :affective_appraisal` (default `:on`)
+
+  ## Examples
+
+  Deterministic off:
+
+      iex> si = %{sentence: "hi"}
+      iex> Core.BrainAdapter.maybe_apply_affective_appraisal(si, affective_appraisal: :off) == si
+      true
   """
   @spec maybe_apply_affective_appraisal(map(), keyword()) :: map()
   def maybe_apply_affective_appraisal(%{} = si, opts) when is_list(opts) do
@@ -229,7 +426,25 @@ defmodule Core.BrainAdapter do
   def maybe_apply_affective_appraisal(si, _opts), do: si
 
   @doc """
-  ATL ingest/reduce. Writes :atl_slate and a trace entry.
+  ATL ingest/reduce (best-effort).
+
+  If `si` contains `:lifg_choices` and `:tokens`, and there are choices:
+
+  - If ATL is running, calls `ATL.ingest/2`
+  - Otherwise calls `ATL.reduce/2`
+
+  When a map slate is returned, it writes:
+
+  - `si.atl_slate = slate`
+  - prepends a trace entry with summary counters
+
+  ## Examples
+
+  No choices → unchanged:
+
+      iex> si = %{lifg_choices: [], tokens: [%{index: 0}]}
+      iex> Core.BrainAdapter.maybe_ingest_atl(si, []) == si
+      true
   """
   @spec maybe_ingest_atl(map(), keyword()) :: map()
   def maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
@@ -243,7 +458,6 @@ defmodule Core.BrainAdapter do
           _ -> safe_apply(@atl, :reduce, [choices, tokens], %{})
         end
 
-      # If ATL isn't available, slate might be non-map. Preserve safety.
       if is_map(slate) do
         si
         |> Map.put(:atl_slate, slate)
@@ -269,7 +483,20 @@ defmodule Core.BrainAdapter do
   def maybe_ingest_atl(si, _opts), do: si
 
   @doc """
-  Hippocampus encode from :atl_slate. Writes :episode summary.
+  Encodes an episode from `si.atl_slate` using Hippocampus (best-effort).
+
+  If Hippocampus is running and `encode/1` returns a map, a compact summary is written to:
+
+  - `si.episode = %{ts_ms: ..., token_count: ..., winner_count: ...}`
+
+  Otherwise returns `si` unchanged.
+
+  ## Examples
+
+      iex> si = %{atl_slate: %{winner_count: 1}}
+      iex> out = Core.BrainAdapter.maybe_encode_hippocampus(si)
+      iex> is_map(out) and (out == si or Map.has_key?(out, :episode))
+      true
   """
   @spec maybe_encode_hippocampus(map()) :: map()
   def maybe_encode_hippocampus(%{atl_slate: slate} = si) when is_map(slate) do
@@ -291,7 +518,23 @@ defmodule Core.BrainAdapter do
   def maybe_encode_hippocampus(si), do: si
 
   @doc """
-  Optional episode persistence (best-effort).
+  Optionally persists an episode via Hippocampus.Writer (best-effort).
+
+  Calls `Brain.Hippocampus.Writer.maybe_persist/2` when available.
+
+  Options forwarded:
+  - `:persist_episodes` → `persist: ...`
+  - `:episode_embedding` → `embedding: ...`
+  - `:user_id` → `user_id: ...`
+
+  Always returns a map; if the writer is unavailable or returns a non-map, the input `si` is returned.
+
+  ## Examples
+
+      iex> si = %{episode: %{ts_ms: 1}}
+      iex> out = Core.BrainAdapter.maybe_persist_episode(si, persist_episodes: false)
+      iex> is_map(out)
+      true
   """
   @spec maybe_persist_episode(map(), keyword()) :: map()
   def maybe_persist_episode(%{} = si, opts) when is_list(opts) do
@@ -319,7 +562,21 @@ defmodule Core.BrainAdapter do
   def maybe_persist_episode(si, _opts), do: si
 
   @doc """
-  Notify Brain activation (cast). Adds a small trace entry either way.
+  Notifies Brain of activation (best-effort cast) and records a trace entry.
+
+  - If `si.active_cells` is non-empty, calls `activate_cells/2` with a small payload.
+  - Always prepends a trace tuple: `{:activated, %{...}}`
+
+  Options:
+  - `:delta` (default `0.1`)
+  - `:decay` (default `0.98`)
+
+  ## Examples
+
+      iex> si = %{active_cells: [], lifg_choices: []}
+      iex> out = Core.BrainAdapter.notify_activation(si, [])
+      iex> match?([{:activated, _} | _], out.trace)
+      true
   """
   @spec notify_activation(map(), keyword()) :: map()
   def notify_activation(%{} = si, opts) when is_list(opts) do
