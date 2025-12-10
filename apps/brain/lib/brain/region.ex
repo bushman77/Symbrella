@@ -5,8 +5,13 @@ defmodule Brain.Region do
   Extracted from `Brain` to keep the Brain coordinator smaller while preserving
   the existing `use Brain, region: :xyz` API (re-exported by Brain).
 
+  Key compatibility rule:
+    * **`init/1` receives a keyword list by default** (as before), so existing
+      region modules that do `Keyword.get(opts, ...)` do not break.
+    * The macro still normalizes and stores `:opts` as a map in the region state.
+
   This macro provides:
-    - start_link/1 with optional :name (atom/module or registered name)
+    - start_link/1 with optional :name (module/atom or registered name)
     - child_spec/1
     - default init/call/cast/info handlers
     - defoverridable for easy customization
@@ -15,11 +20,10 @@ defmodule Brain.Region do
     - :region
     - :opts (map)
     - :stats (map)
-    - :assistant (from `Brain.Config.assistant/0` when available)
+    - :assistant (from `Brain.Config.assistant/0`, when available)
   """
 
   @doc false
-  @spec opts_to_map(map() | keyword() | any()) :: map()
   def opts_to_map(%{} = m), do: m
 
   def opts_to_map(opts) when is_list(opts) do
@@ -33,38 +37,30 @@ defmodule Brain.Region do
   def opts_to_map(_), do: %{}
 
   @doc false
-  @spec opt(map() | keyword() | any(), atom() | binary(), any()) :: any()
-  def opt(opts, key, default \\ nil) do
-    m = opts_to_map(opts)
-
-    cond do
-      is_atom(key) ->
-        Map.get(m, key) || Map.get(m, Atom.to_string(key)) || default
-
-      is_binary(key) ->
-        Map.get(m, key) || Map.get(m, String.to_atom(key)) || default
-
-      true ->
-        default
-    end
-  end
+  def opts_to_init_arg(opts) when is_list(opts), do: opts
+  def opts_to_init_arg(%{} = m), do: Map.to_list(m)
+  def opts_to_init_arg(_), do: []
 
   @doc false
-  @spec start_name(atom() | module(), map()) :: any()
   def start_name(default_name, %{} = opts_map) do
     Map.get(opts_map, :name) || Map.get(opts_map, "name") || default_name
   end
 
   @doc false
-  @spec base_state(atom(), map() | keyword() | any()) :: map()
   def base_state(region, opts) do
     opts_map = opts_to_map(opts)
 
     assistant =
-      if Code.ensure_loaded?(Brain.Config) and function_exported?(Brain.Config, :assistant, 0) do
-        Brain.Config.assistant()
-      else
-        nil
+      try do
+        if Code.ensure_loaded?(Brain.Config) and function_exported?(Brain.Config, :assistant, 0) do
+          Brain.Config.assistant()
+        else
+          %{}
+        end
+      rescue
+        _ -> %{}
+      catch
+        _, _ -> %{}
       end
 
     %{
@@ -96,9 +92,8 @@ defmodule Brain.Region do
       def start_link(opts \\ []) do
         opts_map = Brain.Region.opts_to_map(opts)
         name = Brain.Region.start_name(__MODULE__, opts_map)
-
-        # Important: pass `opts` through as-is so regions can accept either a keyword list or a map.
-        GenServer.start_link(__MODULE__, opts, name: name)
+        init_arg = Brain.Region.opts_to_init_arg(opts)
+        GenServer.start_link(__MODULE__, init_arg, name: name)
       end
 
       @doc false
@@ -117,6 +112,10 @@ defmodule Brain.Region do
 
       @impl true
       def handle_call(:status, _from, state), do: {:reply, state, state}
+
+      @impl true
+      def handle_call(other, _from, state),
+        do: {:reply, {:error, {:unknown_call, other}}, state}
 
       @impl true
       def handle_cast(_msg, state), do: {:noreply, state}

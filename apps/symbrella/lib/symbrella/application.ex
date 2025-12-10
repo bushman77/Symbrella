@@ -36,10 +36,6 @@ defmodule Symbrella.Application do
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # ── Background maintenance (decoupled) ───────────────────────────────
-      # NOTE: The standalone Curiosity app has been removed (Checklist item 1).
-      # Keep Core.Curiosity (NegCache sweeps) for now; fold later into Brain.Idle.
-
       # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
       {Brain.MoodCore, []},
       {Brain.MoodPolicy, []},
@@ -64,8 +60,13 @@ defmodule Symbrella.Application do
       {Brain.ACC, keep: 300},
       {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
 
-      # Event bridge first, then ML consumer that finalizes turn records
+      # Event bridge first, then consumers
       {Brain.Blackboard, []},
+
+      # Self model (subscribes to Blackboard topic)
+      {Brain.SelfPortrait, []},
+
+      # ML consumer that finalizes turn records
       Brain.ML
 
       # 🚫 Do NOT start SymbrellaWeb.Endpoint here.

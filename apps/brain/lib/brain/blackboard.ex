@@ -33,7 +33,14 @@ defmodule Brain.Blackboard do
     # Optional but ML-useful:
     [:brain, :lifg, :confidence],
     [:brain, :intent, :selected],
-    [:core, :intent, :selected]
+    [:core, :intent, :selected],
+
+    # SelfPortrait-friendly signals (compact, high-signal)
+    [:brain, :lifg, :stage1, :winner],
+    [:brain, :lifg, :stage1, :boundary_drop],
+    [:brain, :lifg, :stage1, :chargram_violation],
+    [:brain, :pmtg, :consult],
+    [:brain, :pmtg, :no_mwe_senses]
   ]
 
   # ——— Public API ———
