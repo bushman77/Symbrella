@@ -1,44 +1,47 @@
 defmodule Brain.LIFG.Stage2 do
   @moduledoc """
-  LIFG.Stage2 — sentence-level coherence and reanalysis.
+  LIFG.Stage2 — sentence-level coherence and reanalysis (scaffold).
 
   This module is the second stage in the LIFG pipeline. While Stage1 performs
-  **per-token competitive sense selection**, Stage2 is responsible (long-term)
-  for evaluating **sentence-level interpretations** and, when appropriate,
+  **per-token competitive sense selection**, Stage2 will be responsible for
+  evaluating **sentence-level interpretations** and, when appropriate,
   reanalysing ambiguous tokens to prefer a globally coherent reading.
 
-  Current status (Phase 1 — observational only)
-  ---------------------------------------------
-  Stage2 is currently *read-only* with respect to sense choices:
+  Current status (scaffold)
+  -------------------------
+  This is an inert, non-invasive stub:
 
-    * `run/2` never raises.
-    * It does **not** flip any Stage1 winners or mutate tokens.
-    * When a Stage1 event is present, it:
-        - computes sentence-level conflict / margin metrics,
-        - builds a Stage2 event,
-        - pushes that event onto `si.trace` (head-first),
-        - attaches a lightweight `:lifg_stage2` summary on `si`,
-        - and returns `{:ok, %{si: si_after, event: stage2_event}}`.
-    * When no Stage1 event is found, it returns
-        - `{:skip, %{si: si, reason: :no_stage1_event}}`.
+    * `run/2` never raises and never mutates the input `si`.
+    * If there is **no Stage1 event** in `si.trace`, it returns
+      `{:skip, %{si: si, reason: :no_stage1_event}}`.
+    * If there **is** a Stage1 event, it returns
+      `{:skip, %{si: si, reason: :not_enabled}}`.
+    * No telemetry is emitted yet.
+    * No wiring has been added from `Brain.LIFG` into Stage2.
 
-  This makes Stage2 safe to call from the pipeline: it surfaces useful metrics
-  for BrainLive / ACC / PMTG without changing the underlying disambiguation.
+  This allows the rest of the system (and tests) to compile and call into
+  Stage2 safely, while we iteratively implement:
 
-  Forward-looking contract
-  ------------------------
-  In later phases, `run/2` may:
+    * beam search over per-token candidates,
+    * global scoring (lexical fit, schema roles, episodes, intent),
+    * low-margin reanalysis and flips,
+    * a Stage2 trace event and sentence-level structure attached to `si`.
 
-    1. Construct a bounded set of sentence-level interpretations using a beam
-       search over per-token candidates.
-    2. Score each interpretation using a global scoring mix:
+  Intended contract (forward-looking)
+  -----------------------------------
+  Once implemented, the `run/2` function is expected to:
+
+    1. Read the last Stage1 event from `si.trace` (where `stage == :lifg_stage1`).
+    2. Construct a small set of sentence-level interpretations using a bounded
+       beam search over per-token candidates.
+    3. Score each interpretation using a global scoring mix:
          * lexical fit (Stage1 probabilities),
          * schema/coherence (roles, POS, pattern roles),
          * episode support (Hippocampus),
          * intent alignment.
-    3. Select the best interpretation and optionally flip low-margin tokens
+    4. Select the best interpretation and optionally flip low-margin tokens
        where the global gain is sufficient.
-    4. Attach:
+    5. Attach:
          * final Stage2 choices (per token),
          * Stage2 meta (scores, flips, conflict metrics),
          * a sentence-level structure (e.g. `:sentence_graph`),
@@ -46,19 +49,18 @@ defmodule Brain.LIFG.Stage2 do
 
   Return shape
   ------------
-  `run/2` can return one of:
+  When fully implemented, `run/2` will return one of:
 
     * `{:ok, %{si: si_after, event: stage2_event}}`
     * `{:skip, %{si: si, reason: reason_atom}}`
     * `{:error, reason}`
 
-  Callers should treat Stage2 as optional and **fail-open**:
-  if it returns `{:skip, ...}` or `{:error, ...}`, they can
-  continue with the Stage1 result unchanged.
+  In the scaffold:
 
-  This module is intentionally pure (no GenServer) and lives entirely under
-  the `Brain.LIFG` namespace to keep region responsibilities local and avoid
-  cross-app coupling.
+    * If there is **no Stage1 event** in `si.trace` (including missing/empty trace),
+      we return `{:skip, %{si: si, reason: :no_stage1_event}}`.
+    * If a Stage1 event is present, we return
+      `{:skip, %{si: si, reason: :not_enabled}}`.
   """
 
   require Logger
@@ -94,194 +96,97 @@ defmodule Brain.LIFG.Stage2 do
   @doc """
   Run LIFG Stage2 on the given semantic input `si`.
 
-  Phase 1 behavior (observational only):
+  Scaffold behavior:
 
     * Merges `opts` with a default option set.
-    * Looks for the most recent Stage1 event (`%{stage: :lifg_stage1, ...}`) in
-      `si.trace`.
-    * If no Stage1 event is found:
-        - logs a debug message,
-        - returns `{:skip, %{si: si, reason: :no_stage1_event}}`.
-    * If a Stage1 event is found:
-        - computes conflict / margin metrics over Stage1 choices,
-        - constructs a Stage2 event (no flips, no alterations to choices),
-        - attaches that event to `si.trace` (head-first),
-        - attaches a small `:lifg_stage2` summary map on `si`,
-        - returns `{:ok, %{si: si_after, event: stage2_event}}`.
+    * Peeks at the latest Stage1 event in `si.trace` (if any).
+    * If no Stage1 event is found, returns:
+        `{:skip, %{si: si, reason: :no_stage1_event}}`.
+    * If a Stage1 event is found, returns:
+        `{:skip, %{si: si, reason: :not_enabled}}`.
 
-  This function does **not** alter token winners, sense ids, or margins. It is
-  safe to treat Stage1 as the sole decider of per-token sense selection for now.
+  Once Stage2 is implemented, this function will:
+
+    * inspect the last Stage1 event from `si.trace`,
+    * construct a bounded set of sentence-level interpretations,
+    * select the best interpretation via a global scoring mix,
+    * optionally flip low-margin token senses,
+    * and return `{:ok, %{si: si_after, event: stage2_event}}`.
   """
   @spec run(si(), opts()) :: run_result()
   def run(%{} = si, opts \\ []) do
-    eff_opts = merge_opts(opts)
+    _eff_opts = merge_opts(opts)
 
-    case fetch_stage1_event(si) do
-      {:ok, stage1_ev} ->
-        conflict = compute_conflict_metrics(stage1_ev, eff_opts)
+    case stage1_snapshot(si) do
+      {:ok, %{si: si1, event: ev}} ->
+        choices_len =
+          ev
+          |> Map.get(:choices, [])
+          |> case do
+            list when is_list(list) -> length(list)
+            _ -> 0
+          end
 
-        event = %{
-          stage: :lifg_stage2,
-          decisions: [],
-          flips: [],
-          interpretations: [],
-          conflict: conflict,
-          stage1_ref: %{
-            margin_threshold: conflict.stage1_margin_threshold,
-            scores_mode: conflict.stage1_scores_mode,
-            token_count: conflict.token_count
-          },
-          meta: %{
-            reanalysis_triggered?: false,
-            mode: :observational
-          }
-        }
+        Logger.debug(fn ->
+          "[LIFG.Stage2] scaffold not_enabled (stage1_choices=#{choices_len})"
+        end)
 
-        si_after =
-          si
-          |> put_stage2_trace(event)
-          |> Map.put(:lifg_stage2, %{conflict: conflict, opts: eff_opts})
+        # Stage1 has run; Stage2 exists but is not active yet.
+        {:skip, %{si: si1, reason: :not_enabled}}
 
-        {:ok, %{si: si_after, event: event}}
+      {:skip, %{si: si1, reason: :no_stage1_event}} = skip ->
+        # Stage1 has not run (no event in trace) — surface this explicitly.
+        Logger.debug(fn ->
+          "[LIFG.Stage2] skip (reason=:no_stage1_event, sentence=#{inspect(si1[:sentence])})"
+        end)
 
-      :error ->
-        Logger.debug(fn -> "[LIFG.Stage2] skipped (no Stage1 event)" end)
-        {:skip, %{si: si, reason: :no_stage1_event}}
+        skip
+
+      {:error, reason} ->
+        Logger.error("LIFG.Stage2 run/2 error in scaffold: #{inspect(reason)}")
+        {:error, reason}
     end
-  rescue
-    exception ->
-      Logger.error(fn ->
-        "[LIFG.Stage2] error: " <>
-          Exception.format(:error, exception, __STACKTRACE__)
-      end)
-
-      {:error, exception}
   end
 
-  # ────────────────────── internal helpers ──────────────────────
+  # ────────────────────── internal helpers (scaffold) ──────────────────────
 
   @spec merge_opts(opts()) :: opts()
   defp merge_opts(opts) when is_list(opts) do
     Keyword.merge(@default_opts, opts)
   end
 
-  @spec fetch_stage1_event(si()) :: {:ok, map()} | :error
-  defp fetch_stage1_event(%{} = si) do
-    trace =
-      case Map.fetch(si, :trace) do
-        {:ok, t} when is_list(t) -> t
-        _ -> []
-      end
+  @doc false
+  @spec stage1_snapshot(si()) ::
+          {:ok, %{si: si(), event: map()}}
+          | {:skip, %{si: si(), reason: :no_stage1_event}}
+          | {:error, term()}
+  defp stage1_snapshot(%{} = si) do
+    trace = Map.get(si, :trace, nil)
 
-    case Enum.find(trace, fn
-           %{stage: :lifg_stage1} -> true
-           _ -> false
-         end) do
-      nil -> :error
-      ev -> {:ok, ev}
+    cond do
+      is_list(trace) ->
+        # Find the most recent Stage1 event (we assume head-first trace).
+        case Enum.find(trace, fn ev ->
+               is_map(ev) and Map.get(ev, :stage) == :lifg_stage1
+             end) do
+          nil ->
+            {:skip, %{si: si, reason: :no_stage1_event}}
+
+          ev ->
+            {:ok, %{si: si, event: ev}}
+        end
+
+      trace == nil ->
+        # No trace at all — no Stage1 event.
+        {:skip, %{si: si, reason: :no_stage1_event}}
+
+      true ->
+        # Unexpected shape for trace; treat as “no Stage1 event” but be defensive.
+        {:skip, %{si: Map.put(si, :trace, List.wrap(trace)), reason: :no_stage1_event}}
     end
-  end
-
-  @spec compute_conflict_metrics(map(), opts()) :: map()
-  defp compute_conflict_metrics(stage1_ev, eff_opts) do
-    choices = Map.get(stage1_ev, :choices, [])
-
-    margins =
-      Enum.map(choices, fn ch ->
-        Map.get(ch, :margin) ||
-          Map.get(ch, "margin") ||
-          0.0
-      end)
-
-    {avg_margin, min_margin, max_margin} =
-      case margins do
-        [] ->
-          {0.0, 0.0, 0.0}
-
-        _ ->
-          sum = Enum.sum(margins)
-          count = length(margins)
-          avg = sum / count
-          {avg, Enum.min(margins), Enum.max(margins)}
-      end
-
-    token_count = length(choices)
-
-    reanalysis_thr =
-      Keyword.get(eff_opts, :reanalysis_margin_threshold, 0.10)
-
-    needy_count =
-      Enum.count(margins, fn m -> m < reanalysis_thr end)
-
-    stage1_opts = Map.get(stage1_ev, :opts, %{})
-
-    stage1_margin_thr =
-      Map.get(stage1_opts, :margin_threshold) ||
-        Map.get(stage1_opts, "margin_threshold") ||
-        nil
-
-    stage1_scores_mode =
-      Map.get(stage1_opts, :scores) ||
-        Map.get(stage1_opts, "scores") ||
-        nil
-
-    guards = Map.get(stage1_ev, :guards, %{})
-    audit = Map.get(stage1_ev, :audit, %{})
-
-    weak_decisions =
-      Map.get(audit, :weak_decisions) ||
-        Map.get(audit, "weak_decisions") ||
-        0
-
-    boundary_drops =
-      Map.get(audit, :boundary_drops) ||
-        Map.get(audit, "boundary_drops") ||
-        0
-
-    missing_candidates =
-      Map.get(guards, :missing_candidates) ||
-        Map.get(guards, "missing_candidates") ||
-        Map.get(audit, :missing_candidates) ||
-        Map.get(audit, "missing_candidates") ||
-        0
-
-    conflict_score =
-      margins
-      |> case do
-        [] -> 0.0
-        _ -> 1.0 - avg_margin
-      end
-      |> clamp(0.0, 1.0)
-
-    %{
-      avg_margin: avg_margin,
-      min_margin: min_margin,
-      max_margin: max_margin,
-      token_count: token_count,
-      needy_count: needy_count,
-      needy_threshold: reanalysis_thr,
-      stage1_margin_threshold: stage1_margin_thr,
-      stage1_scores_mode: stage1_scores_mode,
-      weak_decisions: weak_decisions,
-      boundary_drops: boundary_drops,
-      missing_candidates: missing_candidates,
-      conflict_score: conflict_score
-    }
-  end
-
-  @spec put_stage2_trace(si(), map()) :: si()
-  defp put_stage2_trace(%{} = si, event) do
-    Map.update(si, :trace, [event], fn
-      list when is_list(list) -> [event | list]
-      _ -> [event]
-    end)
-  end
-
-  @spec clamp(number(), number(), number()) :: number()
-  defp clamp(v, min, max) do
-    v
-    |> max(min)
-    |> min(max)
+  rescue
+    e ->
+      {:error, e}
   end
 end
 
