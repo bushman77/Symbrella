@@ -254,7 +254,6 @@ def disambiguate_stage1(%{} = si, opts) do
 end
 
   # ── Full pipeline (optional ATL + ACC + pMTG) ──────────────────────────────
-
   @doc """
   Full LIFG pipeline:
     1) ATL finalize → slate (if available)
@@ -264,6 +263,14 @@ end
     5) ACC assess (optional; computes :conflict and appends trace)
     6) pMTG consult (sync rerun or async boost/none), gated by ACC when available
     7) Post.finalize: non-overlap cover and optional reanalysis
+    8) (Planned) LIFG.Stage2 sentence-level coherence:
+       - not yet wired into this function,
+       - will run after `Post.finalize/2` to score whole-sentence interpretations
+         and optionally reanalyse low-margin tokens when global gain is sufficient.
+
+  Notes:
+  - This function is the region-level orchestration entry point.
+  - Callers that only need per-token sense selection can use `disambiguate_stage1/1,2`.
   """
   @spec run(map(), keyword()) ::
           {:ok, %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
