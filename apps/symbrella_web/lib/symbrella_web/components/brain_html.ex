@@ -1,4 +1,4 @@
-# apps/symbrella_web/lib/symbrella_web/components/brain_html.ex
+# apps/symbrella_web/lib/symbrella_web/brain_html.ex
 defmodule SymbrellaWeb.BrainHTML do
   @moduledoc """
   Presentation helpers for the Brain dashboard (HUD, status, mood, etc.).
@@ -29,6 +29,8 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :wm, :any, default: nil
   # attention/meta (optional; supports self-name hit)
   attr :attention, :any, default: nil
+  # SelfPortrait snapshot (optional)
+  attr :self_portrait, :any, default: nil
 
   def hud_row(assigns) do
     snap = assigns[:snapshot] || %{}
@@ -127,6 +129,28 @@ defmodule SymbrellaWeb.BrainHTML do
         self_hit?(snap) or
         truthy?(assigns[:self_hit])
 
+    # SelfPortrait: prefer explicit assigns, fall back to snapshot.self_portrait
+    sp =
+      nonempty_map(assigns[:self_portrait]) ||
+        nonempty_map(mget(snap, :self_portrait)) ||
+        %{}
+
+    sp_traits = mget(sp, :traits) || %{}
+    sp_patterns = mget(sp, :patterns) || %{}
+
+    sp_conf = mget(sp_traits, :confidence_baseline)
+    sp_stab = mget(sp_traits, :stability)
+    sp_cur = mget(sp_traits, :curiosity_bias)
+
+    sp_bd = mget(sp_patterns, :boundary_drops) || 0
+    sp_cg = mget(sp_patterns, :chargram_violations) || 0
+    sp_no_mwe = mget(sp_patterns, :no_mwe_senses) || 0
+
+    show_self_portrait? =
+      (is_map(sp_traits) and map_size(sp_traits) > 0) or
+        (is_map(sp_patterns) and map_size(sp_patterns) > 0) or
+        self_hit
+
     assigns =
       assigns
       |> assign(:seq, seq)
@@ -146,6 +170,13 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:wm_ratio, wm_ratio)
       |> assign(:self_hit, self_hit)
       |> assign(:self_match, self_match)
+      |> assign(:show_self_portrait, show_self_portrait?)
+      |> assign(:sp_conf, sp_conf)
+      |> assign(:sp_stab, sp_stab)
+      |> assign(:sp_cur, sp_cur)
+      |> assign(:sp_bd, sp_bd)
+      |> assign(:sp_cg, sp_cg)
+      |> assign(:sp_no_mwe, sp_no_mwe)
 
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
@@ -186,14 +217,20 @@ defmodule SymbrellaWeb.BrainHTML do
         <span class="font-mono">{@wm_ratio}</span>
       </.chip>
 
-      <%= if @self_hit do %>
+      <%= if @show_self_portrait do %>
         <.chip>
           <span class="font-semibold">Self</span>
-          <%= if is_binary(@self_match) and @self_match != "" do %>
+
+          <%= if @self_hit and is_binary(@self_match) and @self_match != "" do %>
             <code class="px-1">{@self_match}</code>
-          <% else %>
-            <span class="opacity-70">hit</span>
           <% end %>
+
+          · <span class="opacity-70">conf</span> {fmt(@sp_conf)}
+          · <span class="opacity-70">stab</span> {fmt(@sp_stab)}
+          · <span class="opacity-70">cur</span> {fmt(@sp_cur)}
+          · <span class="opacity-70">bd</span> {to_string(@sp_bd)}
+          · <span class="opacity-70">cg</span> {to_string(@sp_cg)}
+          · <span class="opacity-70">no_mwe</span> {to_string(@sp_no_mwe)}
         </.chip>
       <% end %>
 
@@ -240,6 +277,7 @@ defmodule SymbrellaWeb.BrainHTML do
       end
 
     view = filtered |> Enum.take(assigns[:limit] || 50)
+    decorated = decorate_bb_view(view)
 
     assigns =
       assigns
@@ -248,6 +286,7 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:count, length(normalized))
       |> assign(:fcount, length(filtered))
       |> assign(:view, view)
+      |> assign(:decorated, decorated)
 
     ~H"""
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
@@ -284,22 +323,42 @@ defmodule SymbrellaWeb.BrainHTML do
         <%= if @view == [] do %>
           <div class="text-sm text-gray-500 dark:text-gray-400">— no events —</div>
         <% else %>
-            <%= for ev <- @view do %>
-              <details open class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+          <%= for item <- @decorated do %>
+            <%= case item do %>
+              <% {:sep, sep} -> %>
+                <div class="my-2 flex items-center gap-2">
+                  <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
+                  <div class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    <%= sep.label %>
+                  </div>
+                  <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
+                </div>
 
-              <summary class="cursor-pointer text-sm">
-                <span class="font-mono text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
-                  {to_string(ev.tag)}
-                </span>
-                <span class="opacity-70 mr-2">
-                  {format_age(@now, ev.at_ms)}
-                </span>
-                <span class="text-gray-700 dark:text-gray-200">
-                  {ev.preview}
-                </span>
-              </summary>
-              <pre class="mt-2 text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5"><%= inspect(ev.env, pretty: true, width: 100, limit: :infinity) %></pre>
-            </details>
+              <% {:ev, ev} -> %>
+                <details open class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+                  <summary class="cursor-pointer text-sm">
+                    <span class="font-mono text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
+                      {to_string(ev.tag)}
+                    </span>
+
+                    <%= if is_integer(ev.frame_seq) do %>
+                      <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
+                        F{to_string(ev.frame_seq)}
+                      </span>
+                    <% end %>
+
+                    <span class="opacity-70 mr-2">
+                      {format_age(@now, ev.at_ms)}
+                    </span>
+
+                    <span class="text-gray-700 dark:text-gray-200">
+                      {ev.preview}
+                    </span>
+                  </summary>
+
+                  <pre class="mt-2 text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5"><%= inspect(ev.env, pretty: true, width: 100, limit: :infinity) %></pre>
+                </details>
+            <% end %>
           <% end %>
         <% end %>
       </div>
@@ -308,9 +367,23 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   defp normalize_bb_event(%{at_ms: at, tag: tag, env: env} = m) do
+    env_map = if(is_map(env), do: env, else: %{})
+
+    frame_seq = mget(env_map, :frame_seq)
+    frame_ts_ms = ms_from_env(env_map)
+
+    at_ms =
+      cond do
+        is_integer(at) and at > 0 -> at
+        is_integer(frame_ts_ms) and frame_ts_ms > 0 -> frame_ts_ms
+        true -> 0
+      end
+
     %{
       id: Map.get(m, :id),
-      at_ms: if(is_integer(at), do: at, else: 0),
+      at_ms: at_ms,
+      frame_seq: if(is_integer(frame_seq), do: frame_seq, else: nil),
+      frame_ts_ms: if(is_integer(frame_ts_ms), do: frame_ts_ms, else: 0),
       tag: tag || :event,
       env: env,
       preview: preview_env(env)
@@ -318,14 +391,112 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   defp normalize_bb_event(env) do
+    env_map = if(is_map(env), do: env, else: %{})
+    frame_seq = mget(env_map, :frame_seq)
+    frame_ts_ms = ms_from_env(env_map)
+
     %{
       id: nil,
-      at_ms: 0,
+      at_ms: if(is_integer(frame_ts_ms) and frame_ts_ms > 0, do: frame_ts_ms, else: 0),
+      frame_seq: if(is_integer(frame_seq), do: frame_seq, else: nil),
+      frame_ts_ms: if(is_integer(frame_ts_ms), do: frame_ts_ms, else: 0),
       tag: :event,
       env: env,
       preview: preview_env(env)
     }
   end
+
+  defp ms_from_env(%{} = env) do
+    v =
+      mget(env, :at_ms) ||
+        mget(env, :ts_ms) ||
+        mget(env, :frame_ts_ms)
+
+    to_ms(v)
+  end
+
+  defp ms_from_env(_), do: 0
+
+  defp to_ms(v) when is_integer(v), do: v
+
+  defp to_ms(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {i, _} -> i
+      _ -> 0
+    end
+  end
+
+  defp to_ms(_), do: 0
+
+  defp decorate_bb_view(events) when is_list(events) do
+    {items, _prev} =
+      Enum.reduce(events, {[], nil}, fn ev, {acc, prev} ->
+        acc2 =
+          case separator_for(prev, ev) do
+            nil -> acc
+            sep -> [{:sep, sep} | acc]
+          end
+
+        {[{:ev, ev} | acc2], ev}
+      end)
+
+    Enum.reverse(items)
+  end
+
+  defp decorate_bb_view(_), do: []
+
+  defp separator_for(nil, ev) do
+    %{label: separator_label(:start, ev)}
+  end
+
+  defp separator_for(prev, ev) when is_map(prev) and is_map(ev) do
+    prev_seq = prev[:frame_seq]
+    ev_seq = ev[:frame_seq]
+
+    cond do
+      is_integer(prev_seq) and is_integer(ev_seq) and prev_seq != ev_seq ->
+        %{label: separator_label(:frame, ev)}
+
+      is_integer(prev[:at_ms]) and is_integer(ev[:at_ms]) and abs(prev[:at_ms] - ev[:at_ms]) > 1_500 ->
+        %{label: separator_label(:timegap, ev)}
+
+      true ->
+        nil
+    end
+  end
+
+  defp separator_for(_prev, _ev), do: nil
+
+  defp separator_label(kind, ev) do
+    seq = ev[:frame_seq]
+    ts = ev[:frame_ts_ms]
+    ts_s = if(is_integer(ts) and ts > 0, do: format_ts(ts), else: "—")
+
+    base =
+      cond do
+        is_integer(seq) -> "Frame #{seq}"
+        true -> "Frame"
+      end
+
+    case kind do
+      :start -> "#{base} · #{ts_s}"
+      :frame -> "#{base} · #{ts_s}"
+      :timegap -> "— #{base} · #{ts_s} —"
+      _ -> "#{base} · #{ts_s}"
+    end
+  end
+
+  defp format_ts(ms) when is_integer(ms) and ms > 0 do
+    try do
+      ms
+      |> DateTime.from_unix!(:millisecond)
+      |> Calendar.strftime("%H:%M:%S")
+    rescue
+      _ -> "#{ms}ms"
+    end
+  end
+
+  defp format_ts(_), do: "—"
 
   defp preview_env(env) do
     s = inspect(env, pretty: false, limit: 50, printable_limit: 300)

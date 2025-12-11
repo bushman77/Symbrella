@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/self_portrait.ex
 defmodule Brain.SelfPortrait do
   @moduledoc """
   SelfPortrait — region wrapper (GenServer) for a compact self-model snapshot.
@@ -58,7 +59,8 @@ defmodule Brain.SelfPortrait do
      Map.merge(base, %{
        portrait: portrait,
        topic: topic,
-       subscribed?: false
+       subscribed?: false,
+       opts: opts
      })}
   end
 
@@ -78,6 +80,9 @@ defmodule Brain.SelfPortrait do
         {:noreply, state}
     end
   end
+
+  @impl true
+  def handle_info(:subscribe_pubsub, state), do: {:noreply, state}
 
   # Consume Blackboard broadcasts (telemetry-shaped payloads)
   @impl true
@@ -123,8 +128,12 @@ defmodule Brain.SelfPortrait do
 
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, state.portrait, state}
+
   @impl true
-  def handle_call(:reset, _from, state), do: {:reply, :ok, %{state | portrait: Model.new(state.opts || [])}}
+  def handle_call(:reset, _from, state) do
+    opts = Map.get(state, :opts, []) || []
+    {:reply, :ok, %{state | portrait: Model.new(opts)}}
+  end
 
   # ───────────────────────────── helpers ─────────────────────────────
 

@@ -79,7 +79,9 @@ defmodule Brain.LIFG.Recorder do
 
   Fields:
     * `:tokens` — minimal token info (index/phrase/mw/n/span)
-    * `:choices` — winner + scores per token (normalized), margin, alt_ids
+    * `:choices` — winner + scores per token (normalized), margin, alt_ids, slate_alt_ids
+        - `:alt_ids` are scored competitors (derived upstream; Option A keeps slate-only out)
+        - `:slate_alt_ids` are slate-only candidates (Option A), separate from scored competitors
     * `:finalists` — score ranking per token
     * `:guards` — boundary/chargram guard counters
     * `:feature_mix` — Stage-1 weights used
@@ -125,7 +127,7 @@ defmodule Brain.LIFG.Recorder do
       chargram_violation:
         (is_map(audit) && Map.get(audit, :chargram_violation)) ||
           Safe.get(si, :chargram_violation, 0) || 0,
-rejected_by_boundary: (is_map(audit) && Map.get(audit, :rejected_by_boundary)) || [],
+      rejected_by_boundary: (is_map(audit) && Map.get(audit, :rejected_by_boundary)) || [],
       missing_candidates: (is_map(audit) && Map.get(audit, :missing_candidates)) || 0,
       missing_candidate_tokens:
         (is_map(audit) && Map.get(audit, :missing_candidate_tokens)) || []
@@ -140,12 +142,23 @@ rejected_by_boundary: (is_map(audit) && Map.get(audit, :rejected_by_boundary)) |
       tokens: tokens,
       choices:
         Enum.map(choices, fn ch ->
+          alt_ids =
+            (Safe.get(ch, :alt_ids, []) || [])
+            |> Enum.reject(&is_nil/1)
+            |> Enum.map(&to_string/1)
+
+          slate_alt_ids =
+            (Safe.get(ch, :slate_alt_ids, []) || [])
+            |> Enum.reject(&is_nil/1)
+            |> Enum.map(&to_string/1)
+
           %{
             token_index: Safe.get(ch, :token_index, 0),
             chosen_id: Safe.get(ch, :chosen_id),
             margin: Safe.get(ch, :margin, 0.0),
             scores: Safe.get(ch, :scores, %{}) || %{},
-            alt_ids: Safe.get(ch, :alt_ids, []) || []
+            alt_ids: alt_ids,
+            slate_alt_ids: slate_alt_ids
           }
         end),
       finalists: finalists,
@@ -156,3 +169,4 @@ rejected_by_boundary: (is_map(audit) && Map.get(audit, :rejected_by_boundary)) |
     }
   end
 end
+

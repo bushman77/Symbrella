@@ -47,20 +47,22 @@ defmodule Brain.LIFG.Guard do
       tokens
       |> Enum.with_index()
       |> Enum.map_reduce(0, fn {tok, fallback_idx}, cursor ->
-t0 = mapify(tok)
-idx = fallback_idx
+        t0 = mapify(tok)
 
-t1 =
-  t0
-  |> Map.put(:index, idx)
-  |> Map.put(:token_index, idx)
+        # CRITICAL: preserve upstream token indexing when present; only fallback to enumeration.
+        idx = tok_index(t0, fallback_idx)
 
-phrase =
-  tok_phrase(t1) ||
-    phrase_from_id(Map.get(t1, :id) || Map.get(t1, "id")) ||
-    ""
+        t1 =
+          t0
+          |> Map.put(:index, idx)
+          |> Map.put(:token_index, idx)
 
-t2 = ensure_phrase_and_norm(t1, phrase)
+        phrase =
+          tok_phrase(t1) ||
+            phrase_from_id(Map.get(t1, :id) || Map.get(t1, "id")) ||
+            ""
+
+        t2 = ensure_phrase_and_norm(t1, phrase)
 
         span0 = Map.get(t2, :span) || Map.get(t2, "span")
         {span1, cursor2} = normalize_or_recover_span(span0, phrase, sent, cursor)
@@ -84,7 +86,7 @@ t2 = ensure_phrase_and_norm(t1, phrase)
   defp emit_chargram_violation(tok, phrase) do
     meta = %{
       reason: :chargram,
-      token_index: tok_index(tok),
+      token_index: tok_index(tok, 0),
       phrase: phrase,
       span: Map.get(tok, :span) || Map.get(tok, "span"),
       mw: tok_mw?(tok),
@@ -107,7 +109,7 @@ t2 = ensure_phrase_and_norm(t1, phrase)
       %{},
       %{
         reason: reason,
-        token_index: tok_index(tok),
+        token_index: tok_index(tok, 0),
         phrase: phrase,
         span: span,
         mw: tok_mw?(tok),
@@ -232,16 +234,34 @@ t2 = ensure_phrase_and_norm(t1, phrase)
 
   defp tok_phrase(_), do: nil
 
-defp tok_index(%{} = t) do
-  Map.get(t, :token_index) ||
-    Map.get(t, "token_index") ||
-    Map.get(t, :index) ||
-    Map.get(t, "index") ||
-    Map.get(t, :token_index) ||
-    Map.get(t, "token_index")
-end
+  defp tok_index(%{} = t, fallback) do
+    raw =
+      Map.get(t, :token_index) ||
+        Map.get(t, "token_index") ||
+        Map.get(t, :index) ||
+        Map.get(t, "index")
 
-  defp tok_index(_), do: nil
+    coerce_nonneg_int(raw, fallback)
+  end
+
+  defp tok_index(_t, fallback), do: fallback
+
+  defp coerce_nonneg_int(v, _fallback) when is_integer(v) and v >= 0, do: v
+  defp coerce_nonneg_int(v, fallback) when is_integer(v), do: fallback
+
+  defp coerce_nonneg_int(v, fallback) when is_float(v) do
+    n = trunc(v)
+    if n >= 0, do: n, else: fallback
+  end
+
+  defp coerce_nonneg_int(v, fallback) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {n, _} when is_integer(n) and n >= 0 -> n
+      _ -> fallback
+    end
+  end
+
+  defp coerce_nonneg_int(_v, fallback), do: fallback
 
   defp tok_mw?(%{} = t) do
     mw_flag = Map.get(t, :mw) == true or Map.get(t, "mw") == true

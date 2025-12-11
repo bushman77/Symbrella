@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/lifg/stage1.ex
 defmodule Brain.LIFG.Stage1 do
   @moduledoc """
   LIFG.Stage1 — first-pass disambiguation scoring.
@@ -28,6 +29,21 @@ defmodule Brain.LIFG.Stage1 do
   • [:brain, :lifg, :chargram_violation]   — char-gram drops (measurements = %{})
   • [:brain, :lifg, :boundary_drop]        — boundary guard drops (measurements = %{})
   • [:brain, :pmtg, :mwe_fallback_emitted] — MWE tokens with no senses (measurements = %{count: 1})
+
+  NEW (summary for self-model / Blackboard bridge)
+  -----------------------------------------------
+  • [:brain, :pipeline, :lifg_stage1, :stop]
+      - measurements include high-level counts
+      - meta includes margins + fallback/guard counters + basic context
+
+  NEW (timestamp / frame separator)
+  --------------------------------
+  Stage1 stamps each run with:
+    - si.frame_seq
+    - si.frame_ts_ms
+    - si.frame_run_id
+    - si.frame (map)
+  and also emits these into telemetry meta so the UI (Blackboard) can separate runs cleanly.
   """
 
   use Brain, region: :lifg_stage1
@@ -71,6 +87,9 @@ defmodule Brain.LIFG.Stage1 do
   # Default event for MWE fallback telemetry (tests attach to this)
   @mwe_fallback_event [:brain, :pmtg, :mwe_fallback_emitted]
 
+  # Summary event (Blackboard typically bridges this)
+  @stage1_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
+
   # ---------- Public server API (mood) ----------
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -78,28 +97,30 @@ defmodule Brain.LIFG.Stage1 do
 
   # ---------- Public Stage1 API (pure scoring) ----------
 
-  @spec run(map()) ::
-          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si), do: run(si, [])
 
-  @spec run(map(), keyword()) ::
-          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
-sent0 = Safe.get(si, :sentence) || Safe.get(si, "sentence")
+      sent0 = Safe.get(si, :sentence) || Safe.get(si, "sentence")
 
-sent =
-  if is_binary(sent0) and String.trim(sent0) != "" do
-    sent0
-  else
-    nil
-  end
+      sent =
+        if is_binary(sent0) and String.trim(sent0) != "" do
+          sent0
+        else
+          nil
+        end
+
+      # NEW: stamp this run with a stable frame/timestamp identity for UI + debugging.
+      frame = build_frame(si, opts)
+      si_base = put_frame(si, frame)
 
       # 1) Tokens + Guard preprocessing (may drop tokens)
-      {tokens, guard_rejected, guard_drops} = prepare_tokens(si, sent)
+      {tokens, guard_rejected, guard_drops} = prepare_tokens(si_base, sent)
 
       # Ensure the SI actually carries the sanitized tokens (critical for span logic)
-      si0 = Map.put(si, :tokens, tokens)
+      si0 = Map.put(si_base, :tokens, tokens)
 
       # Wire candidate slate from active_cells + MWE fallback/backfill
       lifg_opts = merged_lifg_opts(si0, opts)
@@ -128,23 +149,24 @@ sent =
         Keyword.get(
           opts,
           :margin_threshold,
-          Application.get_env(:brain, :lifg_min_margin, @default_margin_thr)
+          lifg_default(:margin_threshold, Application.get_env(:brain, :lifg_margin_threshold, @default_margin_thr))
         )
 
       min_margin =
         Keyword.get(
           opts,
           :min_margin,
-          Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
+          lifg_default(:min_margin, Application.get_env(:brain, :lifg_min_margin, @default_min_margin))
         )
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
 
-chargram_event =
-  Keyword.get(opts, :chargram_event, [:brain, :lifg, :stage1, :chargram_violation])
+      # Event names (allow override)
+      chargram_event =
+        Keyword.get(opts, :chargram_event, [:brain, :lifg, :stage1, :chargram_violation])
 
-boundary_event =
-  Keyword.get(opts, :boundary_event, [:brain, :lifg, :stage1, :boundary_drop])
+      boundary_event =
+        Keyword.get(opts, :boundary_event, [:brain, :lifg, :stage1, :boundary_drop])
 
       mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
 
@@ -154,6 +176,9 @@ boundary_event =
           :mwe_fallback,
           Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
         )
+
+      stop_event =
+        Keyword.get(opts, :stage1_stop_event, @stage1_stop_event)
 
       # 4) Main scoring loop
       {choices, acc} =
@@ -169,7 +194,12 @@ boundary_event =
           chargram_event: chargram_event,
           boundary_event: boundary_event,
           mwe_event: mwe_event,
-          mwe_fallback?: mwe_fallback?
+          mwe_fallback?: mwe_fallback?,
+          stage1_stop_event: stop_event,
+          # NEW: frame stamping for all telemetry events
+          frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
+          frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
+          frame_run_id: Safe.get(si1, :frame_run_id) || Safe.get(si1, "frame_run_id")
         })
 
       # 5) Audit + reanalysis hook
@@ -181,27 +211,32 @@ boundary_event =
         |> Enum.uniq()
         |> Enum.sort()
 
-missing_tokens =
+      missing_tokens =
         acc.no_cand_tokens
         |> Enum.uniq()
         |> Enum.sort()
 
-guardrail_violations = acc.chargram + acc.boundary_drops + guard_drops
+      guardrail_violations = acc.chargram + acc.boundary_drops + guard_drops
 
-audit =
-  build_audit(
-    acc.kept,
-    dropped_total,
-    rejected_all,
-    guardrail_violations,
-    acc.weak,
-    acc.no_cand,
-    missing_tokens
-  )
-  |> Map.put(:guard_drops, guard_drops)
-  |> Map.put(:boundary_drop_count, acc.boundary_drops)
+      audit =
+        build_audit(
+          acc.kept,
+          dropped_total,
+          rejected_all,
+          guardrail_violations,
+          acc.weak,
+          acc.no_cand,
+          missing_tokens
+        )
+        |> Map.put(:guard_drops, guard_drops)
+        |> Map.put(:boundary_drop_count, acc.boundary_drops)
+        |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
+
+      # NEW: emit summary telemetry for Blackboard→SelfPortrait
+      emit_stage1_stop(ctx_from_run(si1, sent, opts), out.choices, audit, acc, stop_event, weights, scores_mode, margin_thr, min_margin)
+
       {:ok, maybe_reanalyse(out, si1, opts)}
     rescue
       e -> {:error, e}
@@ -229,6 +264,31 @@ audit =
   end
 
   # ---------- Internal helpers for run/2 ------------------------------------
+
+  defp lifg_default(key, fallback) do
+    case Application.get_env(:brain, :lifg_defaults) do
+      kw when is_list(kw) -> Keyword.get(kw, key, fallback)
+      %{} = m -> Map.get(m, key, fallback)
+      _ -> fallback
+    end
+  end
+
+  defp ctx_from_run(si1, sent, opts) do
+    %{
+      sentence: sent,
+      intent: Safe.get(si1, :intent) || Safe.get(si1, "intent"),
+      confidence:
+        Safe.get(si1, :confidence) ||
+          Safe.get(si1, "confidence") ||
+          Safe.get(si1, :intent_confidence) ||
+          Safe.get(si1, "intent_confidence"),
+      source: Keyword.get(opts, :source, :run),
+      # NEW: frame stamps (for timestamp separators downstream)
+      frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
+      frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
+      frame_run_id: Safe.get(si1, :frame_run_id) || Safe.get(si1, "frame_run_id")
+    }
+  end
 
   defp prepare_tokens(si0, sent) do
     {raw_tokens, raw_indices} =
@@ -265,40 +325,56 @@ audit =
     {tokens, guard_rejected, guard_drops}
   end
 
-  defp token_index(tok, fallback_idx) do
-    case {Safe.get(tok, :index), Safe.get(tok, "index")} do
-      {i, _} when is_integer(i) -> i
-      {_, i} when is_integer(i) -> i
-      _ -> fallback_idx
+defp token_index(tok, fallback_idx) do
+  raw =
+    Safe.get(tok, :token_index) ||
+      Safe.get(tok, "token_index") ||
+      Safe.get(tok, :index) ||
+      Safe.get(tok, "index")
+
+  idx =
+    cond do
+      is_integer(raw) -> raw
+      is_float(raw) -> trunc(raw)
+      is_binary(raw) ->
+        case Integer.parse(String.trim(raw)) do
+          {n, _} -> n
+          :error -> fallback_idx
+        end
+
+      true ->
+        fallback_idx
+    end
+
+  if is_integer(idx) and idx >= 0, do: idx, else: fallback_idx
+end
+
+  defp token_raw_phrase(tok) do
+    Safe.get(tok, :phrase) ||
+      Safe.get(tok, "phrase") ||
+      Safe.get(tok, :lemma) ||
+      Safe.get(tok, "lemma") ||
+      Safe.get(tok, :word) ||
+      Safe.get(tok, "word") ||
+      phrase_from_id(Safe.get(tok, :id) || Safe.get(tok, "id")) ||
+      ""
+  end
+
+  defp phrase_from_id(id) when is_binary(id) do
+    case String.split(id, "|", parts: 2) do
+      [ph, _rest] -> ph
+      _ -> nil
     end
   end
 
-defp token_raw_phrase(tok) do
-  Safe.get(tok, :phrase) ||
-    Safe.get(tok, "phrase") ||
-    Safe.get(tok, :lemma) ||
-    Safe.get(tok, "lemma") ||
-    Safe.get(tok, :word) ||
-    Safe.get(tok, "word") ||
-    phrase_from_id(Safe.get(tok, :id) || Safe.get(tok, "id")) ||
-    ""
-end
+  defp phrase_from_id(_), do: nil
 
-defp phrase_from_id(id) when is_binary(id) do
-  case String.split(id, "|", parts: 2) do
-    [ph, _rest] -> ph
-    _ -> nil
+  defp token_mwe?(tok) do
+    n_val = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
+    has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
+    id = to_string(Safe.get(tok, :id) || Safe.get(tok, "id") || "")
+    has_mw_flag || (is_integer(n_val) and n_val > 1) || String.contains?(id, "|phrase|")
   end
-end
-
-defp phrase_from_id(_), do: nil
-
-defp token_mwe?(tok) do
-  n_val = Safe.get(tok, :n) || Safe.get(tok, "n") || 1
-  has_mw_flag = Safe.get(tok, :mw, false) || Safe.get(tok, "mw", false)
-  id = to_string(Safe.get(tok, :id) || Safe.get(tok, "id") || "")
-  has_mw_flag || (is_integer(n_val) and n_val > 1) || String.contains?(id, "|phrase|")
-end
 
   defp telemetry_phrase(tok, token_phrase) do
     Safe.get(tok, :lemma) ||
@@ -312,8 +388,8 @@ end
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
   defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
     source = Safe.get(tok, :source) || Safe.get(tok, "source")
-    kind   = Safe.get(tok, :kind) || Safe.get(tok, "kind")
-    flag   = Safe.get(tok, :chargram?, false) || Safe.get(tok, "chargram?", false)
+    kind = Safe.get(tok, :kind) || Safe.get(tok, "kind")
+    flag = Safe.get(tok, :chargram?, false) || Safe.get(tok, "chargram?", false)
 
     cond do
       source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
@@ -332,7 +408,6 @@ end
     end
   end
 
-
   defp score_tokens(tokens, ctx) do
     acc0 = %{
       choices: [],
@@ -342,7 +417,8 @@ end
       no_cand_tokens: [],
       rejected: [],
       chargram: 0,
-      boundary_drops: 0
+      boundary_drops: 0,
+      mwe_fallbacks: 0
     }
 
     final =
@@ -386,11 +462,16 @@ end
         acc
         |> Map.update!(:no_cand, &(&1 + 1))
         |> Map.update!(:no_cand_tokens, &[tok_index | &1])
-      if ctx.mwe_fallback? and token_mwe? and orig_cands == [] do
-        emit_mwe_fallback(ctx.mwe_event, tok_index, raw_phrase, 0.0)
-      end
 
-      acc2
+      acc3 =
+        if ctx.mwe_fallback? and token_mwe? and orig_cands == [] do
+          emit_mwe_fallback(ctx.mwe_event, ctx, tok_index, raw_phrase, 0.0)
+          Map.update!(acc2, :mwe_fallbacks, &(&1 + 1))
+        else
+          acc2
+        end
+
+      acc3
     else
       bias_val = get_float(ctx.bias_map, tok_index, 0.0)
       {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
@@ -552,6 +633,9 @@ end
         mw: token_mwe?,
         reason: :chargram,
         count: 1,
+        frame_seq: ctx.frame_seq,
+        frame_ts_ms: ctx.frame_ts_ms,
+        frame_run_id: ctx.frame_run_id,
         v: 2
       }
     )
@@ -571,6 +655,9 @@ end
         mw: token_mwe?,
         reason: reason,
         count: 1,
+        frame_seq: ctx.frame_seq,
+        frame_ts_ms: ctx.frame_ts_ms,
+        frame_run_id: ctx.frame_run_id,
         v: 2
       }
     )
@@ -578,6 +665,103 @@ end
     acc
     |> Map.update!(:rejected, &[tok_index | &1])
     |> Map.update!(:boundary_drops, &(&1 + 1))
+  end
+
+  # ---------- NEW: Stage1 summary telemetry (for Blackboard→SelfPortrait) ----------
+
+  defp emit_stage1_stop(run_ctx, choices, audit, acc, event, weights, scores_mode, margin_thr, min_margin)
+       when is_list(choices) and is_map(audit) and is_map(acc) and is_list(event) do
+    ts = System.system_time(:millisecond)
+
+    margins =
+      choices
+      |> Enum.map(fn ch -> get_num(ch, :margin, get_num(ch, :prob_margin, 0.0)) end)
+      |> Enum.map(&clamp01/1)
+
+    probs =
+      choices
+      |> Enum.map(fn ch -> get_num(ch, :prob, get_num(ch, :score, 0.0)) end)
+      |> Enum.map(&clamp01/1)
+
+    {margin_min, margin_mean} = {min_or_zero(margins), mean_or_zero(margins)}
+    {p1_min, p1_mean} = {min_or_zero(probs), mean_or_zero(probs)}
+
+    fallback_winners =
+      Enum.count(choices, fn ch ->
+        id = Safe.get(ch, :chosen_id) || Safe.get(ch, :id) || Safe.get(ch, "chosen_id") || Safe.get(ch, "id") || ""
+        String.contains?(to_string(id), "|phrase|fallback")
+      end)
+
+    frame_seq = Map.get(run_ctx, :frame_seq)
+    frame_ts_ms = Map.get(run_ctx, :frame_ts_ms) || ts
+    frame_run_id = Map.get(run_ctx, :frame_run_id)
+
+    meta = %{
+      at_ms: ts,
+      ts_ms: ts,
+      frame_seq: frame_seq,
+      frame_ts_ms: frame_ts_ms,
+      frame_run_id: frame_run_id,
+
+      sentence: Map.get(run_ctx, :sentence),
+      intent: Map.get(run_ctx, :intent),
+      confidence: Map.get(run_ctx, :confidence),
+      source: Map.get(run_ctx, :source, :run),
+
+      # counters (best-effort stable keys for self-model)
+      kept_tokens: Map.get(audit, :kept_tokens, acc.kept),
+      dropped_tokens: Map.get(audit, :dropped_tokens, 0),
+      weak_decisions: Map.get(audit, :weak_decisions, acc.weak),
+      missing_candidates: Map.get(audit, :missing_candidates, acc.no_cand),
+      missing_candidate_tokens: Map.get(audit, :missing_candidate_tokens, []),
+
+      boundary_drops: acc.boundary_drops,
+      chargram_violation: acc.chargram,
+      guard_drops: Map.get(audit, :guard_drops, 0),
+      guardrail_violations: Map.get(audit, :chargram_violation, 0),
+
+      mwe_fallbacks: acc.mwe_fallbacks,
+      fallback_winners: fallback_winners,
+
+      margin_min: Float.round(margin_min, 6),
+      margin_mean: Float.round(margin_mean, 6),
+      p1_min: Float.round(p1_min, 6),
+      p1_mean: Float.round(p1_mean, 6),
+
+      scores_mode: scores_mode,
+      margin_threshold: margin_thr * 1.0,
+      min_margin: min_margin * 1.0,
+      weights: weights,
+      v: 2
+    }
+
+    meas = %{
+      kept: acc.kept,
+      weak: acc.weak,
+      missing: acc.no_cand,
+      boundary_drops: acc.boundary_drops,
+      chargram: acc.chargram,
+      mwe_fallbacks: acc.mwe_fallbacks,
+      fallback_winners: fallback_winners
+    }
+
+    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute(event, meas, meta)
+    else
+      :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp min_or_zero([]), do: 0.0
+  defp min_or_zero(xs), do: Enum.min(xs, fn -> 0.0 end) * 1.0
+
+  defp mean_or_zero([]), do: 0.0
+
+  defp mean_or_zero(xs) do
+    n = length(xs)
+    if n == 0, do: 0.0, else: Enum.sum(xs) / (n * 1.0)
   end
 
   # ---------- GenServer lifecycle (mood) ----------
@@ -713,10 +897,10 @@ end
     phrase_like =
       Enum.filter(candidates, fn c ->
         id = Safe.get(c, :id) || Safe.get(c, "id")
-        norm = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word)
+        norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word)
 
         id_s = to_string(id || "")
-        norm_s = to_string(norm || "")
+        norm_s = to_string(norm0 || "")
 
         String.contains?(id_s, "|phrase|") or String.contains?(norm_s, " ")
       end)
@@ -758,38 +942,38 @@ end
     Map.merge(ac_map, Map.merge(cbt, sc))
   end
 
-defp active_cells_to_buckets(cells) when is_list(cells) do
-  cells
-  |> Enum.map(&Safe.to_plain/1)
-  |> Enum.reduce(%{}, fn cell, acc ->
-    idx =
-      case {Safe.get(cell, :token_index), Safe.get(cell, "token_index")} do
-        {i, _} when is_integer(i) and i >= 0 -> i
-        {_, i} when is_integer(i) and i >= 0 -> i
-        _ -> :skip
-      end
-
-    case idx do
-      :skip ->
-        # Critical: do NOT dump unindexed cells into bucket 0.
-        # Unindexed cells are not sentence-aligned and will pollute disambiguation.
-        acc
-
-      i ->
-        cand = active_cell_to_candidate(cell)
-
-        # Defensive: ignore candidates without usable IDs
-        id = Safe.get(cand, :id) || Safe.get(cand, "id")
-
-        if is_nil(id) do
-          acc
-        else
-          Map.update(acc, i, [cand], fn lst -> [cand | lst] end)
+  defp active_cells_to_buckets(cells) when is_list(cells) do
+    cells
+    |> Enum.map(&Safe.to_plain/1)
+    |> Enum.reduce(%{}, fn cell, acc ->
+      idx =
+        case {Safe.get(cell, :token_index), Safe.get(cell, "token_index")} do
+          {i, _} when is_integer(i) and i >= 0 -> i
+          {_, i} when is_integer(i) and i >= 0 -> i
+          _ -> :skip
         end
-    end
-  end)
-  |> Enum.into(%{}, fn {idx, list} -> {idx, Enum.reverse(list)} end)
-end
+
+      case idx do
+        :skip ->
+          # Critical: do NOT dump unindexed cells into bucket 0.
+          # Unindexed cells are not sentence-aligned and will pollute disambiguation.
+          acc
+
+        i ->
+          cand = active_cell_to_candidate(cell)
+
+          # Defensive: ignore candidates without usable IDs
+          id = Safe.get(cand, :id) || Safe.get(cand, "id")
+
+          if is_nil(id) do
+            acc
+          else
+            Map.update(acc, i, [cand], fn lst -> [cand | lst] end)
+          end
+      end
+    end)
+    |> Enum.into(%{}, fn {idx, list} -> {idx, Enum.reverse(list)} end)
+  end
 
   defp active_cell_to_candidate(cell) do
     id =
@@ -859,9 +1043,8 @@ end
 
   defp guess_cell_lemma(id), do: to_string(id)
 
-  # ---------- Boundary / char-gram guard with reasons ----------
-  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
-          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+  # ---------- Boundary helpers ----------
+
   defp boundary_check_mwe(sentence, tok, phrase_norm) do
     span = tok_span(tok)
 
@@ -880,8 +1063,8 @@ end
         if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
     end
   end
-  
- # Normalize ambiguous {start, b} into {start, end_exclusive}.
+
+  # Normalize ambiguous {start, b} into {start, end_exclusive}.
   # b may be: end_exclusive, len, or end_inclusive.
   defp normalize_span(sentence, {start, b}, phrase_norm)
        when is_binary(sentence) and is_integer(start) and is_integer(b) do
@@ -945,7 +1128,7 @@ end
       c == ?_
   end
 
-    defp boundary_check_unigram(sentence, tok, phrase_norm) do
+  defp boundary_check_unigram(sentence, tok, phrase_norm) do
     span = tok_span(tok)
 
     case {sentence, span} do
@@ -1106,6 +1289,82 @@ end
     do:
       to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
+  # ---------- NEW: frame stamping helpers ----------
+
+  defp build_frame(si, opts) when is_map(si) and is_list(opts) do
+    ts_opt = Keyword.get(opts, :frame_ts_ms)
+    seq_opt = Keyword.get(opts, :frame_seq)
+
+    ts =
+      cond do
+        is_integer(ts_opt) and ts_opt > 0 ->
+          ts_opt
+
+        true ->
+          si_ts = Safe.get(si, :frame_ts_ms) || Safe.get(si, "frame_ts_ms")
+
+          cond do
+            is_integer(si_ts) and si_ts > 0 ->
+              si_ts
+
+            true ->
+              System.system_time(:millisecond)
+          end
+      end
+
+    seq =
+      cond do
+        is_integer(seq_opt) ->
+          seq_opt
+
+        true ->
+          si_seq = Safe.get(si, :frame_seq) || Safe.get(si, "frame_seq")
+
+          cond do
+            is_integer(si_seq) ->
+              si_seq
+
+            true ->
+              clock = Safe.get(si, :clock) || Safe.get(si, "clock") || %{}
+              clock_seq = Safe.get(clock, :seq) || Safe.get(clock, "seq")
+
+              if is_integer(clock_seq) do
+                clock_seq
+              else
+                :erlang.unique_integer([:positive, :monotonic])
+              end
+          end
+      end
+
+    run_id = :erlang.unique_integer([:positive, :monotonic])
+
+    %{
+      seq: seq,
+      ts_ms: ts,
+      run_id: run_id
+    }
+  end
+
+  defp build_frame(_si, _opts) do
+    ts = System.system_time(:millisecond)
+
+    %{
+      seq: :erlang.unique_integer([:positive, :monotonic]),
+      ts_ms: ts,
+      run_id: :erlang.unique_integer([:positive, :monotonic])
+    }
+  end
+
+  defp put_frame(%{} = si, %{seq: seq, ts_ms: ts, run_id: run_id} = frame) do
+    si
+    |> Map.put(:frame, frame)
+    |> Map.put(:frame_seq, seq)
+    |> Map.put(:frame_ts_ms, ts)
+    |> Map.put(:frame_run_id, run_id)
+  end
+
+  defp put_frame(si, _frame), do: si
+
   # ---------- Small utils ----------
 
   defp sense_id_for(c, token_phrase) do
@@ -1192,29 +1451,29 @@ end
     if String.contains?(to_string(norm0), " "), do: 0.30, else: 0.25
   end
 
-defp softmax([]), do: []
+  defp softmax([]), do: []
 
-defp softmax(xs) do
-  xs = Enum.map(xs, &to_float/1)
-  m  = Enum.max(xs)
-  exps = Enum.map(xs, fn x -> :math.exp(x - m) end)
-  denom = Enum.sum(exps)
+  defp softmax(xs) do
+    xs = Enum.map(xs, &to_float/1)
+    m = Enum.max(xs)
+    exps = Enum.map(xs, fn x -> :math.exp(x - m) end)
+    denom = Enum.sum(exps)
 
-  cond do
-    denom == 0.0 ->
-      # Defensive: uniform instead of all-zero
-      n = length(xs)
-      u = 1.0 / n
-      Enum.map(xs, fn _ -> u end)
+    cond do
+      denom == 0.0 ->
+        # Defensive: uniform instead of all-zero
+        n = length(xs)
+        u = 1.0 / n
+        Enum.map(xs, fn _ -> u end)
 
-    true ->
-      Enum.map(exps, &(&1 / denom))
+      true ->
+        Enum.map(exps, &(&1 / denom))
+    end
   end
-end
 
-defp to_float(x) when is_float(x), do: x
-defp to_float(x) when is_integer(x), do: x * 1.0
-defp to_float(_), do: 0.0
+  defp to_float(x) when is_float(x), do: x
+  defp to_float(x) when is_integer(x), do: x * 1.0
+  defp to_float(_), do: 0.0
 
   defp norm(nil), do: ""
 
@@ -1334,7 +1593,7 @@ defp to_float(_), do: 0.0
     end
   end
 
-defp build_audit(
+  defp build_audit(
          kept,
          dropped,
          rejected_by_boundary,
@@ -1343,14 +1602,14 @@ defp build_audit(
          missing_cand,
          missing_cand_tokens
        ) do
-%{
+    %{
       feature_mix: :lifg_stage1,
       kept_tokens: kept,
       dropped_tokens: dropped,
       boundary_drops: length(rejected_by_boundary),
       rejected_by_boundary: rejected_by_boundary,
       chargram_violation: chargram_drops,
-missing_candidates: missing_cand,
+      missing_candidates: missing_cand,
       missing_candidate_tokens: missing_cand_tokens,
       weak_decisions: weak
     }
@@ -1406,11 +1665,15 @@ missing_candidates: missing_cand,
 
   # ---------- MWE fallback telemetry ----------
 
-  defp emit_mwe_fallback(event, idx, phrase, score) do
+  defp emit_mwe_fallback(event, ctx, idx, phrase, score) do
     meta = %{
       token_index: idx,
       phrase: to_string(phrase || ""),
-      score: score
+      score: score,
+      frame_seq: Map.get(ctx, :frame_seq),
+      frame_ts_ms: Map.get(ctx, :frame_ts_ms),
+      frame_run_id: Map.get(ctx, :frame_run_id),
+      v: 2
     }
 
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do

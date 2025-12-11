@@ -9,9 +9,14 @@ defmodule Brain.LIFG.FallbackRerun do
   • Rerun Stage-1 with unchanged knobs.
   • Emit trace + telemetry.
   • Return the updated `si` and **augmented** choices (margin/alt_ids normalized).
+
+  Option A semantics (via `Brain.LIFG.Choices`):
+  • `:alt_ids` are *scored competitors only* (keys from `:scores`, excluding `:chosen_id`)
+  • `:slate_alt_ids` are slate-only bucket candidates not present in `:scores`
   """
 
   alias Brain.Utils.Safe
+  alias Brain.LIFG.Choices
 
   @doc """
   Maybe rerun Stage-1, returning `{si_out, choices_out}`.
@@ -87,7 +92,12 @@ defmodule Brain.LIFG.FallbackRerun do
            ) do
         {:ok, %{si: si_rerun, choices: raw2}} ->
           min_margin = Keyword.get(opts, :min_margin, 0.05)
-          choices2 = augment_choices(raw2, si_rerun, min_margin)
+
+          # IMPORTANT: use the canonical augmenter so Option A separation holds:
+          # - alt_ids = scored competitors only
+          # - slate_alt_ids = slate-only bucket candidates
+          choices2 = Choices.augment(raw2, si_rerun, min_margin)
+
           {si_rerun, choices2}
 
         _ ->
@@ -144,91 +154,15 @@ defmodule Brain.LIFG.FallbackRerun do
     end)
   end
 
-  # ---------- choice augmentation (kept local to preserve old contract) ----------
-
-  defp augment_choices(raw_choices, si_after, min_margin) when is_list(raw_choices) do
-    slate =
-      Safe.get(si_after, :sense_candidates, %{}) ||
-        Safe.get(si_after, :candidates_by_token, %{}) || %{}
-
-    Enum.map(raw_choices, fn ch0 ->
-      ch = Safe.to_plain(ch0)
-      idx = Safe.get(ch, :token_index, 0)
-      scores = Safe.get(ch, :scores, %{}) || %{}
-
-      chosen_id =
-        case Safe.get(ch, :chosen_id) do
-          nil ->
-            case scores |> Enum.max_by(fn {_id, s} -> s end, fn -> nil end) do
-              {id, _} -> id
-              _ -> nil
-            end
-
-          x ->
-            x
-        end
-
-      alt_from_scores = if map_size(scores) > 0, do: Map.keys(scores), else: []
-
-      slate_alts =
-        case Map.get(slate, idx) do
-          list when is_list(list) ->
-            list
-            |> Enum.map(fn c ->
-              c = Safe.to_plain(c)
-              Safe.get(c, :id) || Safe.get(c, :lemma) || Safe.get(c, :word)
-            end)
-            |> Enum.reject(&is_nil/1)
-
-          _ ->
-            []
-        end
-
-      chosen_id_s = if is_nil(chosen_id), do: nil, else: to_string(chosen_id)
-
-      alt_ids =
-        (Safe.get(ch, :alt_ids, []) ++ alt_from_scores ++ slate_alts)
-        |> Enum.map(&to_string/1)
-        |> Enum.reject(&(&1 in [nil, ""]))
-        |> Enum.uniq()
-        |> then(fn ids -> if chosen_id_s, do: ids -- [chosen_id_s], else: ids end)
-
-      singleton? = length(alt_ids) == 0
-
-      margin0 =
-        case Safe.get(ch, :margin) do
-          m when is_number(m) and m > 0.0 and not singleton? ->
-            m
-
-          _ ->
-            vals = scores |> Map.values() |> Enum.sort(:desc)
-
-            case vals do
-              [a, b | _] -> a - b
-              [_a] -> 0.0
-              _ -> 0.0
-            end
-        end
-
-      margin = Float.round(Kernel.max(margin0, min_margin), 6)
-
-      ch
-      |> Map.put(:chosen_id, chosen_id_s)
-      |> Map.put(:alt_ids, alt_ids)
-      |> Map.put(:margin, margin)
-    end)
-  end
-
   # ---------- tiny utils duplicated locally to avoid cross-deps ----------
 
-  defp inside?({s, l}, {ps, pl})
-       when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
-    e = s + l
-    pe = ps + pl
-    s >= ps and e <= pe
-  end
+defp inside?({s, e}, {ps, pe})
+     when is_integer(s) and is_integer(e) and is_integer(ps) and is_integer(pe) do
+  # closed-open containment: [s, e) inside [ps, pe)
+  s >= ps and e <= pe
+end
 
-  defp inside?(_, _), do: false
+defp inside?(_, _), do: false
 
   defp down(s) when is_binary(s),
     do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
@@ -243,3 +177,4 @@ defmodule Brain.LIFG.FallbackRerun do
     end
   end
 end
+

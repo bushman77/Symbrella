@@ -1,4 +1,3 @@
-# apps/symbrella_web/lib/symbrella_web/live/brain_live.ex
 defmodule SymbrellaWeb.BrainLive do
   @moduledoc """
   LiveView for the Brain dashboard.
@@ -52,6 +51,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:hippo_metrics, fn -> %{} end)
       |> assign_new(:region_state, fn -> %{workspace: [], snapshot: %{}} end)
       |> assign_new(:region_status, fn -> %{} end)
+      |> assign_new(:self_portrait, fn -> %{} end)
       |> assign_new(:auto, fn -> false end)
       |> assign_new(:clock, fn -> %{} end)
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
@@ -475,6 +475,58 @@ defmodule SymbrellaWeb.BrainLive do
   defp normalize_map(%{} = m), do: m
   defp normalize_map(other), do: %{value: other}
 
+  # ---- SelfPortrait fetch ----------------------------------------------------
+
+  defp fetch_self_portrait do
+    fun =
+      cond do
+        Code.ensure_loaded?(Brain.SelfPortrait) and function_exported?(Brain.SelfPortrait, :snapshot, 0) ->
+          fn -> Brain.SelfPortrait.snapshot() end
+
+        Code.ensure_loaded?(Brain.SelfPortrait) and function_exported?(Brain.SelfPortrait, :snapshot, 1) ->
+          fn -> Brain.SelfPortrait.snapshot(Brain.SelfPortrait) end
+
+        true ->
+          nil
+      end
+
+    if is_nil(fun) do
+      %{}
+    else
+      case safe_call(fun) do
+        {:ok, %{} = p} -> normalize_self_portrait(p)
+        {:ok, other} -> %{value: other}
+        _ -> %{}
+      end
+    end
+  end
+
+  defp normalize_self_portrait(%{portrait: %{} = p}), do: normalize_self_portrait(p)
+  defp normalize_self_portrait(%{"portrait" => %{} = p}), do: normalize_self_portrait(p)
+
+  defp normalize_self_portrait(%{__struct__: _} = s),
+    do: s |> Map.from_struct() |> normalize_self_portrait()
+
+  defp normalize_self_portrait(%{} = p) do
+    p
+    |> Map.update(:traits, %{}, &(&1 || %{}))
+    |> Map.update(:patterns, %{}, &(&1 || %{}))
+    |> Map.update(:sources, %{}, &(&1 || %{}))
+    |> Map.update(:last_events, [], &(&1 || []))
+  end
+
+  defp normalize_self_portrait(other), do: %{value: other}
+
+#  defp attach_self_portrait(%{} = snapshot, %{} = sp) do
+#    if map_size(sp) > 0 do
+#      Map.put(snapshot, :self_portrait, sp)
+#    else
+#      snapshot
+#    end
+#  end
+
+#  defp attach_self_portrait(snapshot, _), do: snapshot
+
   # ---- All-regions aggregation ----------------------------------------------
 
   defp collect_all_region_status do
@@ -556,22 +608,32 @@ defmodule SymbrellaWeb.BrainLive do
   defp status_val(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp status_val(_, _), do: nil
 
-  defp refresh_selected(socket) do
-    selected = socket.assigns[:selected] || default_selected()
-    {snapshot, status} = fetch_snapshot_and_status(selected)
+defp refresh_selected(socket) do
+  selected = socket.assigns[:selected] || default_selected()
+  {snapshot, status} = fetch_snapshot_and_status(selected)
 
-    socket
-    |> assign(:snapshot, snapshot)
-    |> assign(:region_status, status)
-    |> assign(:all_status, collect_all_region_status())
-    |> assign(:regions, RegionRegistry.keys())
-    |> assign(:region, region_meta_for(selected))
-    |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
-    |> update(:region_state, fn st ->
-      st = st || %{}
-      st |> Map.put(:snapshot, snapshot)
-    end)
-  end
+  self_portrait = fetch_self_portrait()
+
+  snapshot =
+    cond do
+      is_map(snapshot) -> Map.put(snapshot, :self_portrait, self_portrait)
+      snapshot == nil -> %{self_portrait: self_portrait}
+      true -> %{value: snapshot, self_portrait: self_portrait}
+    end
+
+  socket
+  |> assign(:snapshot, snapshot)
+  |> assign(:region_status, status)
+  |> assign(:self_portrait, self_portrait)
+  |> assign(:all_status, collect_all_region_status())
+  |> assign(:regions, RegionRegistry.keys())
+  |> assign(:region, region_meta_for(selected))
+  |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
+  |> update(:region_state, fn st ->
+    st = st || %{}
+    st |> Map.put(:snapshot, snapshot)
+  end)
+end
 
   # --- All-regions status grid ----------------------------------------------
 
@@ -852,3 +914,4 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp bb_tag(_), do: :event
 end
+

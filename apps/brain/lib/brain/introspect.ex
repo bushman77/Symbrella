@@ -60,13 +60,25 @@ defmodule Brain.Introspect do
         :down
       end
 
+    portrait =
+      if region == :self_portrait do
+        case state do
+          %{portrait: p} -> p
+          %{"portrait" => p} -> p
+          _ -> nil
+        end
+      else
+        nil
+      end
+
     %{
       region: region,
       running?: is_pid(pid) and Process.alive?(pid),
       pid: pid,
       module: mod,
       info: info,
-      state: state
+      state: state,
+      portrait: portrait
     }
   end
 
@@ -75,6 +87,7 @@ defmodule Brain.Introspect do
     do: [
       :lifg,
       :pmtg,
+      :self_portrait,
       :hippocampus,
       :thalamus,
       :ofc,
@@ -89,6 +102,7 @@ defmodule Brain.Introspect do
 
   defp module_for(:lifg), do: Brain.LIFG
   defp module_for(:pmtg), do: Brain.PMTG
+  defp module_for(:self_portrait), do: Brain.SelfPortrait
   defp module_for(:hippocampus), do: Brain.Hippocampus
   defp module_for(:thalamus), do: Brain.Thalamus
   defp module_for(:ofc), do: Brain.OFC
@@ -374,3 +388,4 @@ defmodule Brain.Introspect do
 
   # ===== end =================================================================
 end
+

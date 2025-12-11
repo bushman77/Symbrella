@@ -1,3 +1,4 @@
+# apps/brain/test/brain/self_portrait_model_test.exs
 defmodule Brain.SelfPortrait.ModelTest do
   use ExUnit.Case, async: true
 

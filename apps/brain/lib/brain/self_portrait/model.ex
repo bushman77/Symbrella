@@ -10,10 +10,14 @@ defmodule Brain.SelfPortrait.Model do
   but tests should primarily target this module.
 
   Portrait fields:
-    * :traits    — slow-moving scalars (0..1) updated via small EWMA steps
-    * :patterns  — counters for recurrent issues / behaviors
-    * :sources   — counts by event namespace head (e.g., :brain, :core)
+    * :traits      — slow-moving scalars (0..1) updated via small EWMA steps
+    * :patterns    — counters for recurrent issues / behaviors
+    * :sources     — counts by event namespace head (e.g., :brain, :core)
     * :last_events — bounded rolling buffer for introspection/debugging
+
+  Supported inputs:
+    * Blackboard-style payloads: %{kind: :telemetry, event: [...], measurements: %{}, meta: %{}}
+    * Any map with at least :kind / :event.
   """
 
   @type event :: map()
@@ -33,7 +37,7 @@ defmodule Brain.SelfPortrait.Model do
   @spec new(keyword() | map()) :: t()
   def new(opts \\ []) do
     opts_map = Brain.Region.opts_to_map(opts)
-    max_events = clamp_int(Map.get(opts_map, :max_events, @default_max_events), 5, 500)
+    max_events = clamp_int(Map.get(opts_map, :max_events, @default_max_events), 1, 500)
 
     %{
       version: 1,
@@ -91,80 +95,140 @@ defmodule Brain.SelfPortrait.Model do
     %{portrait | sources: src}
   end
 
-  defp bump_patterns(%{} = portrait, :telemetry, event, _ev) when is_list(event) do
-    p = portrait.patterns
+  defp bump_patterns(%{} = portrait, :telemetry, event, ev) when is_list(event) do
+    p0 = portrait.patterns
 
-    p =
+    p1 =
       cond do
         event == [:brain, :wm, :update] ->
-          Map.update(p, :wm_updates, 1, &(&1 + 1))
+          Map.update(p0, :wm_updates, 1, &(&1 + 1))
 
         event == [:brain, :pmtg, :consult] ->
-          Map.update(p, :pmtg_consults, 1, &(&1 + 1))
+          Map.update(p0, :pmtg_consults, 1, &(&1 + 1))
 
         event == [:brain, :pmtg, :no_mwe_senses] ->
-          Map.update(p, :no_mwe_senses, 1, &(&1 + 1))
+          Map.update(p0, :no_mwe_senses, 1, &(&1 + 1))
+
+        # Stage1 emits this when MWE tokens had no senses (fallback token)
+        event == [:brain, :pmtg, :mwe_fallback_emitted] ->
+          Map.update(p0, :no_mwe_senses, 1, &(&1 + 1))
 
         contains?(event, :boundary_drop) ->
-          Map.update(p, :boundary_drops, 1, &(&1 + 1))
+          Map.update(p0, :boundary_drops, 1, &(&1 + 1))
 
         contains?(event, :chargram_violation) ->
-          Map.update(p, :chargram_violations, 1, &(&1 + 1))
+          Map.update(p0, :chargram_violations, 1, &(&1 + 1))
 
         contains?(event, :gate_failure) ->
-          Map.update(p, :gate_failures, 1, &(&1 + 1))
+          Map.update(p0, :gate_failures, 1, &(&1 + 1))
 
         contains?(event, :fallback) and contains?(event, :winner) ->
-          Map.update(p, :fallback_wins, 1, &(&1 + 1))
+          Map.update(p0, :fallback_wins, 1, &(&1 + 1))
 
         true ->
-          p
+          p0
       end
 
-    %{portrait | patterns: p}
+    # NEW: also read counters from meta/measurements (covers summary events like
+    # [:brain, :pipeline, :lifg_stage1, :stop])
+    p2 = apply_meta_counters(p1, ev)
+
+    %{portrait | patterns: p2}
   end
 
   defp bump_patterns(portrait, _kind, _event, _ev), do: portrait
 
+  defp apply_meta_counters(patterns, ev) when is_map(patterns) and is_map(ev) do
+    meas = Map.get(ev, :measurements) || Map.get(ev, "measurements") || %{}
+    meta = Map.get(ev, :meta) || Map.get(ev, "meta") || %{}
+
+    bd =
+      int_or_0(get_any(meta, [:boundary_drops, :boundary_drop_count, "boundary_drops", "boundary_drop_count"])) +
+        int_or_0(get_any(meas, [:boundary_drops, "boundary_drops"]))
+
+    cg =
+      int_or_0(get_any(meta, [:chargram_violation, :chargram, "chargram_violation", "chargram"])) +
+        int_or_0(get_any(meas, [:chargram, "chargram"]))
+
+    no_mwe =
+      int_or_0(get_any(meta, [:no_mwe_senses, :mwe_fallbacks, "no_mwe_senses", "mwe_fallbacks"])) +
+        int_or_0(get_any(meas, [:mwe_fallbacks, "mwe_fallbacks"]))
+
+    fb =
+      int_or_0(get_any(meta, [:fallback_winners, :fallback_wins, "fallback_winners", "fallback_wins"])) +
+        int_or_0(get_any(meas, [:fallback_winners, "fallback_winners"]))
+
+    patterns
+    |> bump_by(:boundary_drops, bd)
+    |> bump_by(:chargram_violations, cg)
+    |> bump_by(:no_mwe_senses, no_mwe)
+    |> bump_by(:fallback_wins, fb)
+  rescue
+    _ -> patterns
+  end
+
+  defp bump_by(pats, _k, 0), do: pats
+
+  defp bump_by(pats, k, n) when is_integer(n) and n > 0 do
+    Map.update(pats, k, n, &(&1 + n))
+  end
+
+  defp bump_by(pats, _k, _n), do: pats
+
   defp bump_traits(%{} = portrait, :telemetry, event, ev) when is_list(event) do
-    traits = portrait.traits
+    traits0 = portrait.traits
+
+    meta = Map.get(ev, :meta) || Map.get(ev, "meta") || %{}
+    meas = Map.get(ev, :measurements) || Map.get(ev, "measurements") || %{}
 
     # Confidence: softly track margin if present (best-effort).
     margin =
-      Map.get(ev, :meta, %{})
-      |> get_any([:margin, "margin", :prob_margin, "prob_margin"])
-      |> num_or_nil()
+      get_any(meta, [:margin_mean, :margin, :prob_margin, "margin_mean", "margin", "prob_margin"]) ||
+        get_any(meas, [:margin_mean, "margin_mean"])
 
-    traits =
-      if is_number(margin) do
-        conf = clamp_float(margin * 1.0, 0.0, 1.0)
-        Map.put(traits, :confidence_baseline, ewma(traits.confidence_baseline, conf, 0.05))
-      else
-        traits
+    traits1 =
+      case num_or_nil(margin) do
+        m when is_number(m) ->
+          conf = clamp_float(m * 1.0, 0.0, 1.0)
+          Map.put(traits0, :confidence_baseline, ewma(traits0.confidence_baseline, conf, 0.06))
+
+        _ ->
+          traits0
       end
 
-    # Stability: drift down on error-ish events, drift up on WM updates.
-    traits =
+    # Stability: drift down on guardrail-ish activity; drift up on WM updates.
+    weak_n =
+      int_or_0(get_any(meta, [:weak_decisions, "weak_decisions"])) +
+        int_or_0(get_any(meas, [:weak, "weak"]))
+
+    viol_n =
+      int_or_0(get_any(meta, [:guardrail_violations, "guardrail_violations"])) +
+        int_or_0(get_any(meta, [:boundary_drops, :boundary_drop_count, "boundary_drops", "boundary_drop_count"])) +
+        int_or_0(get_any(meta, [:chargram_violation, :chargram, "chargram_violation", "chargram"]))
+
+    traits2 =
       cond do
         event == [:brain, :wm, :update] ->
-          Map.put(traits, :stability, ewma(traits.stability, 0.60, 0.03))
+          Map.put(traits1, :stability, ewma(traits1.stability, 0.60, 0.03))
 
-        contains?(event, :boundary_drop) or contains?(event, :chargram_violation) ->
-          Map.put(traits, :stability, ewma(traits.stability, 0.35, 0.06))
+        weak_n > 0 or viol_n > 0 ->
+          penalty = clamp_float(0.05 * weak_n + 0.10 * viol_n, 0.0, 0.60)
+          target = clamp_float(0.65 - penalty, 0.0, 1.0)
+          Map.put(traits1, :stability, ewma(traits1.stability, target, 0.06))
 
         true ->
-          traits
+          traits1
       end
 
     # Curiosity: if pMTG consult fires, nudge upward (retrieval drive).
-    traits =
+    traits3 =
       if event == [:brain, :pmtg, :consult] do
-        Map.put(traits, :curiosity_bias, ewma(traits.curiosity_bias, 0.65, 0.04))
+        Map.put(traits2, :curiosity_bias, ewma(traits2.curiosity_bias, 0.65, 0.04))
       else
-        traits
+        traits2
       end
 
-    %{portrait | traits: clamp_traits(traits)}
+    %{portrait | traits: clamp_traits(traits3)}
   end
 
   defp bump_traits(portrait, _kind, _event, _ev), do: portrait
@@ -191,6 +255,17 @@ defmodule Brain.SelfPortrait.Model do
       end
     end)
   end
+
+  defp int_or_0(v) when is_integer(v), do: v
+  defp int_or_0(v) when is_float(v), do: trunc(v)
+  defp int_or_0(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {i, _} -> i
+      _ -> 0
+    end
+  end
+
+  defp int_or_0(_), do: 0
 
   defp num_or_nil(v) when is_integer(v), do: v * 1.0
   defp num_or_nil(v) when is_float(v), do: v
@@ -223,12 +298,12 @@ defmodule Brain.SelfPortrait.Model do
     end)
   end
 
-  defp clamp_float(x, lo, hi) when x < lo, do: lo
-  defp clamp_float(x, lo, hi) when x > hi, do: hi
+  defp clamp_float(x, lo, _hi) when x < lo, do: lo
+  defp clamp_float(x, _lo, hi) when x > hi, do: hi
   defp clamp_float(x, _lo, _hi), do: x
 
-  defp clamp_int(x, lo, hi) when is_integer(x) and x < lo, do: lo
-  defp clamp_int(x, lo, hi) when is_integer(x) and x > hi, do: hi
+  defp clamp_int(x, lo, _hi) when is_integer(x) and x < lo, do: lo
+  defp clamp_int(x, _lo, hi) when is_integer(x) and x > hi, do: hi
   defp clamp_int(x, _lo, _hi) when is_integer(x), do: x
   defp clamp_int(_, lo, _hi), do: lo
 
