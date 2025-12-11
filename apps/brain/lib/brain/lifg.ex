@@ -149,103 +149,109 @@ defmodule Brain.LIFG do
   Pure, stateless Stage-1 wrapper over `Brain.LIFG.Stage1.run/2`.
   Preserves legacy event shape with `:choices/:boosts/:inhibitions`.
   """
-  @spec disambiguate_stage1(map()) :: map()
-  def disambiguate_stage1(%{} = si), do: disambiguate_stage1(si, [])
+@spec disambiguate_stage1(map()) :: map()
+def disambiguate_stage1(%{} = si), do: disambiguate_stage1(si, [])
 
-  @spec disambiguate_stage1(map(), keyword()) :: map()
-  def disambiguate_stage1(%{} = si, opts) do
-    si_plain = Safe.to_plain(si)
-    slate = Input.slate_for(si_plain)
+@spec disambiguate_stage1(map(), keyword()) :: map()
+def disambiguate_stage1(%{} = si, opts) do
+  si_plain = Safe.to_plain(si)
+  slate = Input.slate_for(si_plain)
 
-    si_for_stage =
-      si_plain
-      |> Map.put(:sense_candidates, slate)
-      |> Map.delete(:candidates_by_token)
-      |> Map.put_new(:trace, [])
-      |> ensure_assistant_candidates()
-      |> MWE.ensure_mwe_candidates(opts)
-      |> MWE.absorb_unigrams_into_mwe(opts)
-      |> MWE.backfill_unigrams_from_active_cells(opts)
+  si_for_stage =
+    si_plain
+    |> Map.put(:sense_candidates, slate)
+    |> Map.delete(:candidates_by_token)
+    |> Map.put_new(:trace, [])
+    |> ensure_assistant_candidates()
+    |> MWE.ensure_mwe_candidates(opts)
+    |> MWE.absorb_unigrams_into_mwe(opts)
+    |> MWE.backfill_unigrams_from_active_cells(opts)
 
-    eff_opts =
-      si_for_stage
-      |> Map.get(:lifg_opts, [])
-      |> flatten_lifg_opts()
-      |> Keyword.merge(flatten_lifg_opts(opts))
+  eff_opts =
+    si_for_stage
+    |> Map.get(:lifg_opts, [])
+    |> flatten_lifg_opts()
+    |> Keyword.merge(flatten_lifg_opts(opts))
 
-    scores_mode =
-      Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
+  scores_mode =
+    Keyword.get(eff_opts, :scores, Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
 
-    margin_thr = Keyword.get(eff_opts, :margin_threshold, 0.15)
+  margin_thr = Keyword.get(eff_opts, :margin_threshold, 0.15)
 
-    min_margin =
-      Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
+  min_margin =
+    Keyword.get(eff_opts, :min_margin, Application.get_env(:brain, :lifg_min_margin, 0.05))
 
-    stage_weights =
-      Config.lifg_weights()
-      |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
+  stage_weights =
+    Config.lifg_weights()
+    |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
 
-    res =
-      Stage1Bridge.safe_call(
-        si_for_stage,
-        [
-          weights: stage_weights,
-          scores: scores_mode,
+  res =
+    Stage1Bridge.safe_call(
+      si_for_stage,
+      [
+        weights: stage_weights,
+        scores: scores_mode,
+        margin_threshold: margin_thr,
+        chargram_event: [:brain, :lifg, :chargram_violation],
+        boundary_event: [:brain, :lifg, :boundary_drop]
+      ],
+      eff_opts
+    )
+
+  case Stage1Bridge.normalize_result(res) do
+    {:ok, si_after, raw_choices, audit} ->
+      # 1) Plain choices with true margins from Stage1
+      base_choices =
+        raw_choices
+        |> Enum.map(&Safe.to_plain/1)
+
+      # 2) Compute boosts / inhibitions from *raw* margins
+      {boosts_out, inhibitions_out} =
+        Legacy.boosts_inhibitions(base_choices, margin_thr, scores_mode, eff_opts)
+
+      # 3) Augment choices for downstream consumers (alt_ids, min_margin, etc.)
+      choices =
+        base_choices
+        |> Choices.augment(si_after, min_margin)
+
+      _ =
+        Recorder.maybe_record_last(__MODULE__, :stage1, si_after, choices, audit, %{
+          scores_mode: scores_mode,
           margin_threshold: margin_thr,
-          chargram_event: [:brain, :lifg, :chargram_violation],
-          boundary_event: [:brain, :lifg, :boundary_drop]
-        ],
-        eff_opts
-      )
+          weights: stage_weights
+        })
 
-    case Stage1Bridge.normalize_result(res) do
-      {:ok, si_after, raw_choices, audit} ->
-        choices =
-          raw_choices
-          |> Enum.map(&Safe.to_plain/1)
-          |> Choices.augment(si_after, min_margin)
+      evt = %{
+        stage: :lifg_stage1,
+        choices: choices,
+        boosts: boosts_out,
+        inhibitions: inhibitions_out,
+        opts: Enum.into(eff_opts, %{})
+      }
 
-        {boosts_out, inhibitions_out} =
-          Legacy.boosts_inhibitions(choices, margin_thr, scores_mode, eff_opts)
+      Map.update(si_after, :trace, [evt], fn tr -> [evt | tr] end)
 
-        _ =
-          Recorder.maybe_record_last(__MODULE__, :stage1, si_after, choices, audit, %{
-            scores_mode: scores_mode,
-            margin_threshold: margin_thr,
-            weights: stage_weights
-          })
+    {:error, reason} ->
+      Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
 
-        evt = %{
-          stage: :lifg_stage1,
-          choices: choices,
-          boosts: boosts_out,
-          inhibitions: inhibitions_out,
-          opts: Enum.into(eff_opts, %{})
-        }
+      _ =
+        Recorder.maybe_record_last(__MODULE__, :stage1_error, si_for_stage, [], %{}, %{
+          error: inspect(reason)
+        })
 
-        Map.update(si_after, :trace, [evt], fn tr -> [evt | tr] end)
+      evt = %{
+        stage: :lifg_stage1,
+        choices: [],
+        boosts: [],
+        inhibitions: [],
+        opts: Enum.into(Keyword.put(eff_opts, :error, inspect(reason)), %{})
+      }
 
-      {:error, reason} ->
-        Logger.error("LIFG Stage1 run failed: #{inspect(reason)}")
-
-        _ =
-          Recorder.maybe_record_last(__MODULE__, :stage1_error, si_for_stage, [], %{}, %{
-            error: inspect(reason)
-          })
-
-        evt = %{
-          stage: :lifg_stage1,
-          choices: [],
-          boosts: [],
-          inhibitions: [],
-          opts: Enum.into(Keyword.put(eff_opts, :error, inspect(reason)), %{})
-        }
-
-        si_for_stage
-        |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
-        |> Map.put(:lifg_error, inspect(reason))
-    end
+      si_for_stage
+      |> Map.update(:trace, [evt], fn tr -> [evt | tr] end)
+      |> Map.put(:lifg_error, inspect(reason))
   end
+end
 
   # ── Full pipeline (optional ATL + ACC + pMTG) ──────────────────────────────
 
@@ -511,6 +517,156 @@ defmodule Brain.LIFG do
   def low_confidence?(_choice, _opts), do: true
 
   # ── Internal helpers ───────────────────────────────────────────────────────
+  # ─────────────────────── Fallback feedback helper ───────────────────────
+
+  defp fallback_feedback_from_slate(si_after, choices, margin_thr, eff_opts)
+       when is_map(si_after) and is_list(choices) and is_list(eff_opts) do
+    thr = margin_thr * 1.0
+
+    boost_amt = Keyword.get(eff_opts, :boost_amount, 0.05) * 1.0
+    inhib_amt = Keyword.get(eff_opts, :inhib_amount, 0.02) * 1.0
+
+    slate = Map.get(si_after, :sense_candidates, %{}) || %{}
+
+    # Index winners by token index
+    winners_by_idx =
+      Enum.reduce(choices, %{}, fn ch, acc ->
+        tidx =
+          Map.get(ch, :token_index) ||
+            Map.get(ch, "token_index") ||
+            Map.get(ch, :index) ||
+            Map.get(ch, "index") ||
+            0
+
+        Map.put(acc, tidx, ch)
+      end)
+
+    Enum.reduce(slate, %{boosts: [], inhibitions: []}, fn {raw_idx, senses}, acc ->
+      tidx = normalize_idx(raw_idx)
+      ch = Map.get(winners_by_idx, tidx)
+
+      case ch do
+        nil ->
+          acc
+
+        _ ->
+          margin =
+            (Map.get(ch, :margin) ||
+               Map.get(ch, "margin") ||
+               Map.get(ch, :prob_margin) ||
+               Map.get(ch, "prob_margin") ||
+               1.0)
+            |> Kernel.*(1.0)
+
+          chosen_id =
+            Map.get(ch, :chosen_id) ||
+              Map.get(ch, "chosen_id") ||
+              Map.get(ch, :id) ||
+              Map.get(ch, "id")
+
+          sense_list =
+            senses
+            |> List.wrap()
+            |> Enum.map(&Safe.to_plain/1)
+
+          cond do
+            not is_integer(tidx) or not is_binary(chosen_id) ->
+              acc
+
+            # Clear margin: boost winner
+            margin >= thr ->
+              boost = %{token_index: tidx, id: chosen_id, amount: boost_amt}
+              %{acc | boosts: [boost | acc.boosts]}
+
+            # Tight margin with multiple senses: inhibit all non-winners
+            margin < thr and sense_list != [] ->
+              inhib_ids =
+                sense_list
+                |> Enum.map(fn s ->
+                  s[:id] || s["id"] || s[:lemma] || s["lemma"]
+                end)
+                |> Enum.reject(&is_nil/1)
+                |> Enum.reject(&(&1 == chosen_id))
+                |> Enum.uniq()
+
+              inhibs =
+                Enum.map(inhib_ids, fn sid ->
+                  %{token_index: tidx, id: sid, amount: inhib_amt}
+                end)
+
+              %{acc | inhibitions: inhibs ++ acc.inhibitions}
+
+            true ->
+              acc
+          end
+      end
+    end)
+  end
+
+  defp normalize_idx(i) when is_integer(i) and i >= 0, do: i
+
+  defp normalize_idx(b) when is_binary(b) do
+    case Integer.parse(b) do
+      {n, _} when n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp normalize_idx(_), do: 0
+
+  # ─────────────────────── Fallback feedback helper ───────────────────────
+
+  defp fallback_feedback_from_choices(choices, margin_thr, eff_opts)
+       when is_list(choices) and is_list(eff_opts) do
+    thr = margin_thr * 1.0
+
+    boost_amt = Keyword.get(eff_opts, :boost_amount, 0.05) * 1.0
+    inhib_amt = Keyword.get(eff_opts, :inhib_amount, 0.02) * 1.0
+
+    Enum.reduce(choices, %{boosts: [], inhibitions: []}, fn ch, acc ->
+      margin =
+        (Map.get(ch, :margin) || Map.get(ch, :prob_margin) || 1.0)
+        |> Kernel.*(1.0)
+
+      tok_idx =
+        Map.get(ch, :token_index) ||
+          Map.get(ch, :index) ||
+          0
+
+      chosen =
+        Map.get(ch, :chosen_id) ||
+          Map.get(ch, :id)
+
+      alt_ids =
+        ch
+        |> Map.get(:alt_ids, [])
+        |> List.wrap()
+        |> Enum.uniq()
+
+      cond do
+        not is_integer(tok_idx) or not is_binary(chosen) ->
+          acc
+
+        # Clear margin: winner gets a boost
+        margin >= thr and alt_ids != [] ->
+          boost = %{token_index: tok_idx, id: chosen, amount: boost_amt}
+          %{acc | boosts: [boost | acc.boosts]}
+
+        # Tight margin with alternatives: losers get inhibited
+        margin < thr and alt_ids != [] ->
+          inhibs =
+            Enum.map(alt_ids, fn aid ->
+              %{token_index: tok_idx, id: aid, amount: inhib_amt}
+            end)
+
+          %{acc | inhibitions: inhibs ++ acc.inhibitions}
+
+        true ->
+          acc
+      end
+    end)
+  end
+
 
   defp flatten_lifg_opts(nil), do: []
   defp flatten_lifg_opts(%{} = m), do: Map.to_list(m)

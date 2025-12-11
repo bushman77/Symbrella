@@ -201,18 +201,35 @@ defmodule Brain.LIFG.Input do
 
       base =
         cond do
-          is_map(scores) ->
+          # scores map: treat each {id, score} as a candidate, but *keep* features/etc from cell
+          is_map(scores) and map_size(scores) > 0 ->
             for {id, s} <- scores do
-              normalize_candidate(%{token_index: idx, id: id, score: s}, idx)
+              cell
+              |> Map.put(:token_index, idx)
+              |> Map.put(:id, id)
+              |> Map.put(:score, s)
+              |> normalize_candidate(idx)
             end
 
+          # explicit chosen_id: treat it as a single candidate at full score, preserving features
           id = Safe.get(cell, :chosen_id) ->
-            [normalize_candidate(%{token_index: idx, id: id, score: 1.0}, idx)]
+            cell
+            |> Map.put(:token_index, idx)
+            |> Map.put(:id, id)
+            |> Map.put(:score, 1.0)
+            |> then(&[normalize_candidate(&1, idx)])
 
+          # generic id: preserve features and other fields, normalize id/score
           id = Safe.get(cell, :id) ->
             s = Safe.get(cell, :score, 0.0)
-            [normalize_candidate(%{token_index: idx, id: id, score: s}, idx)]
 
+            cell
+            |> Map.put(:token_index, idx)
+            |> Map.put(:id, id)
+            |> Map.put(:score, s)
+            |> then(&[normalize_candidate(&1, idx)])
+
+          # lemma/word only: synthesize a POS-tagged id but still carry cell fields through
           lemma0 = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
             s = Safe.get(cell, :score, 0.0)
 
@@ -227,17 +244,12 @@ defmodule Brain.LIFG.Input do
 
             id = ensure_pos_tagged_id(lemma, cell)
 
-            [
-              normalize_candidate(
-                %{
-                  token_index: idx,
-                  id: id,
-                  lemma: String.downcase(lemma),
-                  score: s
-                },
-                idx
-              )
-            ]
+            cell
+            |> Map.put(:token_index, idx)
+            |> Map.put(:id, id)
+            |> Map.put(:lemma, String.downcase(lemma))
+            |> Map.put(:score, s)
+            |> then(&[normalize_candidate(&1, idx)])
 
           true ->
             []

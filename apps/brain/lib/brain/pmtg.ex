@@ -15,6 +15,8 @@ defmodule Brain.PMTG do
   use Brain, region: :pmtg
   @name __MODULE__
 
+  alias Brain.LIFG.Prior
+
   @type si :: map()
   @type choice :: map()
 
@@ -498,11 +500,18 @@ defmodule Brain.PMTG do
             syns = Map.get(s, :synonyms) || Map.get(s, "synonyms") || []
             feats_from_sense = Map.get(s, :features) || %{}
 
+            # Tiny epsilon to break ties across senses by stable order
             eps = 1.0e-6 * (1000 - i)
+
+            # Static prior from Brain.LIFG.Prior (fallback to 0.50 if anything is weird)
+            prior =
+              s
+              |> Prior.prior_for_cell()
+              |> prior_or_default(0.50)
 
             base_feats = %{
               lex_fit: 0.60,
-              rel_prior: 0.50,
+              rel_prior: prior,
               activation: 0.0,
               intent_bias: 0.0,
               pos: pos,
@@ -514,7 +523,8 @@ defmodule Brain.PMTG do
             feats =
               base_feats
               |> Map.merge(feats_from_sense, fn _k, _base, from_sense -> from_sense end)
-              |> Map.update(:rel_prior, 0.50 + eps, &(&1 + eps))
+              # Always keep a tiny ordering epsilon on rel_prior to avoid exact ties
+              |> Map.update(:rel_prior, prior + eps, &(&1 + eps))
               |> maybe_salutation_nudge(si, tidx)
 
             %{id: id, features: feats}
@@ -643,6 +653,9 @@ defmodule Brain.PMTG do
   defp num(v) when is_integer(v), do: v * 1.0
   defp num(v) when is_float(v), do: v
   defp num(_), do: 0.0
+
+  defp prior_or_default(v, default) when is_number(v), do: v * 1.0
+  defp prior_or_default(_v, default), do: default * 1.0
 
   defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
     phrase =
