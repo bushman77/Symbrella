@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/acc.ex
 defmodule Brain.ACC do
   @moduledoc """
   ACC — conflict/uncertainty monitor, modulated by mood, with decay.
@@ -212,9 +213,13 @@ defmodule Brain.ACC do
         0.0
 
       _pid ->
-        case GenServer.call(server, :status) do
-          %{conflict: c} when is_number(c) -> max(0.0, min(1.0, c * 1.0))
-          _ -> 0.0
+        try do
+          case GenServer.call(server, :status) do
+            %{conflict: c} when is_number(c) -> max(0.0, min(1.0, c * 1.0))
+            _ -> 0.0
+          end
+        catch
+          :exit, _ -> 0.0
         end
     end
   end
@@ -334,10 +339,35 @@ defmodule Brain.ACC do
 
   # ---- Params & helpers -----------------------------------------------------
 
-  def set_params(server \\ __MODULE__, opts) when is_list(opts) or is_map(opts),
-    do: GenServer.call(server, {:set_params, opts})
+  # Fail-open when ACC isn't running (or exits mid-call).
+  def set_params(server \\ __MODULE__, opts) when is_list(opts) or is_map(opts) do
+    case Process.whereis(server) do
+      nil ->
+        :ok
 
-  def get_params(server \\ __MODULE__), do: GenServer.call(server, :get_params)
+      _pid ->
+        try do
+          GenServer.call(server, {:set_params, opts})
+        catch
+          :exit, _ -> :ok
+        end
+    end
+  end
+
+  # Fail-open when ACC isn't running (or exits mid-call).
+  def get_params(server \\ __MODULE__) do
+    case Process.whereis(server) do
+      nil ->
+        effective_params([])
+
+      _pid ->
+        try do
+          GenServer.call(server, :get_params)
+        catch
+          :exit, _ -> effective_params([])
+        end
+    end
+  end
 
   defp effective_params(opts) do
     %{
@@ -511,3 +541,4 @@ defmodule Brain.ACC do
     out2
   end
 end
+

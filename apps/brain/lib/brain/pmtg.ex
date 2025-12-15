@@ -654,8 +654,10 @@ defmodule Brain.PMTG do
   defp num(v) when is_float(v), do: v
   defp num(_), do: 0.0
 
-defp prior_or_default(v, _default) when is_number(v), do: v * 1.0
-defp prior_or_default(_v, default), do: default * 1.0
+  # NOTE: Avoid unused-var warnings: the first clause does not use the default.
+  defp prior_or_default(v, _default) when is_number(v), do: v * 1.0
+  defp prior_or_default(_v, default), do: default * 1.0
+
   defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
     phrase =
       si
