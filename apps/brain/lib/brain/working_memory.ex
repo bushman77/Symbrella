@@ -18,7 +18,7 @@ defmodule Brain.WorkingMemory do
   Notes:
 
   • Backwards compatible with older entries like `%{id: "A", score: 0.4, ts: 1}`.
-    We infer activation from `score` when missing, and we preserve/refresh `:ts`.
+  • WM ingests only **committed** semantic items.
   """
 
   @type wm_item :: %{
@@ -39,6 +39,37 @@ defmodule Brain.WorkingMemory do
           merge_duplicates?: boolean()
         }
 
+  # ────────────────────── NEW: Stage2 ingestion ──────────────────────
+
+  @doc """
+  Ingest Stage2 decisions into working memory.
+
+  Only `{:commit, choice}` decisions are admitted.
+  Deferred or collapsed items are ignored by design.
+
+  This keeps WM free of ambiguity and preserves uncertainty upstream.
+  """
+  @spec ingest_stage2(
+          wm :: [wm_item()],
+          stage2_decisions :: list(),
+          now_ms :: non_neg_integer(),
+          cfg :: cfg()
+        ) :: [wm_item()]
+  def ingest_stage2(wm, decisions, now_ms, cfg) when is_list(decisions) do
+    decisions
+    |> Enum.reduce(wm, fn
+      {:commit, choice}, acc ->
+        item = normalize(choice, now_ms, source: :lifg_stage2)
+        upsert(acc, item, cfg)
+
+      # Explicitly ignore deferred / collapsed items
+      _, acc ->
+        acc
+    end)
+  end
+
+  # ────────────────────── Existing API (unchanged) ──────────────────────
+
   @spec normalize(map(), non_neg_integer(), keyword()) :: wm_item()
   def normalize(%{} = cand, now_ms, opts \\ []) do
     raw =
@@ -51,7 +82,6 @@ defmodule Brain.WorkingMemory do
     score = (cand[:score] || raw) * 1.0
     ts = now_ms
 
-    # Try to recover a "reason" tag from either the candidate or its nested payload.
     base_reason =
       cand[:reason] ||
         cand["reason"] ||
@@ -60,21 +90,18 @@ defmodule Brain.WorkingMemory do
           _ -> nil
         end
 
-    # If no explicit reason, infer for known probe shapes (e.g. curiosity probes).
     reason = base_reason || infer_reason(cand)
 
-    # Ensure the payload we store carries the reason (if any),
-    # so callers like CuriosityFlowTest can introspect payload[:reason].
     payload =
       case reason do
         nil -> cand
         r -> Map.put(cand, :reason, r)
       end
 
-    # Prefer explicit source, otherwise fall back to reason, then :unknown
     src =
       cand[:source] ||
         cand["source"] ||
+        Keyword.get(opts, :source) ||
         reason ||
         :unknown
 
@@ -115,7 +142,6 @@ defmodule Brain.WorkingMemory do
   @spec decay([wm_item()], non_neg_integer(), pos_integer()) :: [wm_item()]
   def decay(wm, now_ms, decay_ms) when is_integer(decay_ms) and decay_ms > 0 do
     Enum.map(wm, fn it ->
-      # Use last_bump → inserted_at → ts → now as recency anchor
       ts =
         it[:last_bump] ||
           it[:inserted_at] ||
@@ -144,94 +170,43 @@ defmodule Brain.WorkingMemory do
 
   @spec remove([wm_item()], any()) :: {[wm_item()], non_neg_integer()}
   def remove(wm, id) when not is_function(id) do
-    {kept, _dropped} = Enum.split_with(wm, fn it -> it.id != id end)
+    {kept, _} = Enum.split_with(wm, fn it -> it.id != id end)
     {kept, length(wm) - length(kept)}
   end
 
   def remove(wm, fun) when is_function(fun, 1) do
-    {kept, _dropped} = Enum.split_with(wm, fn it -> fun.(it) == false end)
+    {kept, _} = Enum.split_with(wm, fn it -> fun.(it) == false end)
     {kept, length(wm) - length(kept)}
   end
 
-  # --- internal helpers -------------------------------------------------------
+  # ────────────────────── Internal helpers (unchanged) ──────────────────────
 
-  # Heuristic "why is this here?" inference for probes, used only
-  # when no explicit :reason was provided upstream.
   defp infer_reason(cand) do
-    id =
-      cand[:id] ||
-        cand["id"] ||
-        ""
-
-    lemma =
-      cand[:lemma] ||
-        cand["lemma"] ||
-        cand[:word] ||
-        cand["word"] ||
-        cand[:phrase] ||
-        cand["phrase"] ||
-        ""
-
+    id = cand[:id] || cand["id"] || ""
+    lemma = cand[:lemma] || cand["lemma"] || cand[:word] || cand["word"] || ""
     source = cand[:source] || cand["source"] || nil
 
-    id_down =
-      case id do
-        b when is_binary(b) -> String.downcase(b)
-        _ -> ""
-      end
-
-    lemma_down =
-      case lemma do
-        b when is_binary(b) -> String.downcase(b)
-        _ -> ""
-      end
-
+    id_down = if is_binary(id), do: String.downcase(id), else: ""
+    lemma_down = if is_binary(lemma), do: String.downcase(lemma), else: ""
     source_down =
-      case source do
-        b when is_binary(b) -> String.downcase(b)
-        a when is_atom(a) -> Atom.to_string(a) |> String.downcase()
-        _ -> ""
+      cond do
+        is_binary(source) -> String.downcase(source)
+        is_atom(source) -> source |> Atom.to_string() |> String.downcase()
+        true -> ""
       end
 
     cond do
-      # Explicit curiosity source
-      source_down == "curiosity" ->
-        :curiosity
-
-      # Canonical curiosity probe ids: "curiosity|probe|..."
-      String.starts_with?(id_down, "curiosity|probe|") ->
-        :curiosity
-
-      String.contains?(id_down, "curiosity|probe|") ->
-        :curiosity
-
-      # NEW: modern curiosity probe ids from Thalamus/OFC/BG/DLPFC:
-      # e.g. "probe|drop", "probe|keep", "probe|ofc|69"
-      String.starts_with?(id_down, "probe|") and lemma_down == "probe" ->
-        :curiosity
-
-      # Fallback: explicit lemma "curiosity"
-      lemma_down == "curiosity" ->
-        :curiosity
-
-      true ->
-        nil
+      source_down == "curiosity" -> :curiosity
+      String.starts_with?(id_down, "curiosity|probe|") -> :curiosity
+      String.starts_with?(id_down, "probe|") and lemma_down == "probe" -> :curiosity
+      lemma_down == "curiosity" -> :curiosity
+      true -> nil
     end
   end
 
   defp merge_items(existing, item) do
-    ts_existing =
-      existing[:ts] ||
-        existing[:last_bump] ||
-        existing[:inserted_at] ||
-        0
-
-    ts_item =
-      item[:ts] ||
-        item[:last_bump] ||
-        item[:inserted_at] ||
-        0
-
+    ts_existing = existing[:ts] || existing[:last_bump] || existing[:inserted_at] || 0
+    ts_item = item[:ts] || item[:last_bump] || item[:inserted_at] || 0
     ts = max(ts_existing, ts_item)
 
     last_bump_existing = existing[:last_bump] || ts_existing
@@ -242,13 +217,13 @@ defmodule Brain.WorkingMemory do
       | activation: max(existing[:activation] || 0.0, item[:activation] || 0.0),
         score: max(existing[:score] || 0.0, item[:score] || 0.0),
         ts: ts,
-        inserted_at: existing[:inserted_at] || existing[:ts] || item[:inserted_at] || ts,
+        inserted_at: existing[:inserted_at] || item[:inserted_at] || ts,
         last_bump: max(last_bump_existing, last_bump_item),
         payload: Map.merge(existing[:payload] || %{}, item[:payload] || %{})
     }
   end
 
   defp same_identity?(a, b), do: a.id == b.id
-
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
 end
+

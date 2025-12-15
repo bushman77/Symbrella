@@ -1,66 +1,25 @@
 defmodule Brain.LIFG.Stage2 do
   @moduledoc """
-  LIFG.Stage2 — sentence-level coherence and reanalysis (scaffold).
+  LIFG.Stage2 — commitment arbitration and suppression.
 
-  This module is the second stage in the LIFG pipeline. While Stage1 performs
-  **per-token competitive sense selection**, Stage2 will be responsible for
-  evaluating **sentence-level interpretations** and, when appropriate,
-  reanalysing ambiguous tokens to prefer a globally coherent reading.
+  Stage2 sits between Stage1 (competitive sense selection) and downstream
+  integration (WM, ATL, Hippocampus).
 
-  Current status (scaffold)
-  -------------------------
-  This is an inert, non-invasive stub:
+  Responsibilities (current):
+    • Select a single dominant MWE (if any)
+    • Suppress weaker overlapping MWEs and weak unigrams
+    • Commit high-confidence winners
+    • Defer low-margin winners
+    • Emit a clear, auditable Stage2 trace event
 
-    * `run/2` never raises and never mutates the input `si`.
-    * If there is **no Stage1 event** in `si.trace`, it returns
-      `{:skip, %{si: si, reason: :no_stage1_event}}`.
-    * If there **is** a Stage1 event, it returns
-      `{:skip, %{si: si, reason: :not_enabled}}`.
-    * No telemetry is emitted yet.
-    * No wiring has been added from `Brain.LIFG` into Stage2.
+  Non-responsibilities (by design):
+    • No re-scoring
+    • No beam search
+    • No PMTG consultation
+    • No WM mutation
+    • No sense flipping
 
-  This allows the rest of the system (and tests) to compile and call into
-  Stage2 safely, while we iteratively implement:
-
-    * beam search over per-token candidates,
-    * global scoring (lexical fit, schema roles, episodes, intent),
-    * low-margin reanalysis and flips,
-    * a Stage2 trace event and sentence-level structure attached to `si`.
-
-  Intended contract (forward-looking)
-  -----------------------------------
-  Once implemented, the `run/2` function is expected to:
-
-    1. Read the last Stage1 event from `si.trace` (where `stage == :lifg_stage1`).
-    2. Construct a small set of sentence-level interpretations using a bounded
-       beam search over per-token candidates.
-    3. Score each interpretation using a global scoring mix:
-         * lexical fit (Stage1 probabilities),
-         * schema/coherence (roles, POS, pattern roles),
-         * episode support (Hippocampus),
-         * intent alignment.
-    4. Select the best interpretation and optionally flip low-margin tokens
-       where the global gain is sufficient.
-    5. Attach:
-         * final Stage2 choices (per token),
-         * Stage2 meta (scores, flips, conflict metrics),
-         * a sentence-level structure (e.g. `:sentence_graph`),
-         * and a Stage2 trace event onto `si.trace`.
-
-  Return shape
-  ------------
-  When fully implemented, `run/2` will return one of:
-
-    * `{:ok, %{si: si_after, event: stage2_event}}`
-    * `{:skip, %{si: si, reason: reason_atom}}`
-    * `{:error, reason}`
-
-  In the scaffold:
-
-    * If there is **no Stage1 event** in `si.trace` (including missing/empty trace),
-      we return `{:skip, %{si: si, reason: :no_stage1_event}}`.
-    * If a Stage1 event is present, we return
-      `{:skip, %{si: si, reason: :not_enabled}}`.
+  This keeps Stage2 principled, deterministic, and low-risk.
   """
 
   require Logger
@@ -68,125 +27,287 @@ defmodule Brain.LIFG.Stage2 do
   @type si :: map()
   @type choice :: map()
 
+  @type decision ::
+          {:commit, choice()}
+          | {:defer, choice(), reason :: atom()}
+          | {:collapse, mwe_choice :: choice(), suppressed :: [choice()]}
+
   @type opts :: [
-          max_interpretations: pos_integer(),
-          max_alternatives_per_token: pos_integer(),
           reanalysis_margin_threshold: float(),
-          global_weight_lex: float(),
-          global_weight_schema: float(),
-          global_weight_episode: float(),
-          global_weight_intent: float()
+          enable_stage2: boolean()
         ]
 
-  @type run_ok :: {:ok, %{si: si(), event: map()}}
-  @type run_skip :: {:skip, %{si: si(), reason: atom()}}
-  @type run_error :: {:error, term()}
-  @type run_result :: run_ok() | run_skip() | run_error()
-
   @default_opts [
-    max_interpretations: 8,
-    max_alternatives_per_token: 2,
     reanalysis_margin_threshold: 0.10,
-    global_weight_lex: 0.6,
-    global_weight_schema: 0.3,
-    global_weight_episode: 0.1,
-    global_weight_intent: 0.0
+    enable_stage2: false
   ]
 
+  # ───────────────────────── Public API ─────────────────────────
+
   @doc """
-  Run LIFG Stage2 on the given semantic input `si`.
+  Run Stage2.
 
-  Scaffold behavior:
+  Contract (tests rely on this):
 
-    * Merges `opts` with a default option set.
-    * Peeks at the latest Stage1 event in `si.trace` (if any).
-    * If no Stage1 event is found, returns:
-        `{:skip, %{si: si, reason: :no_stage1_event}}`.
-    * If a Stage1 event is found, returns:
-        `{:skip, %{si: si, reason: :not_enabled}}`.
+  * If a Stage1 trace event is present and Stage2 is **not enabled**, return:
+    `{:skip, %{si: si, reason: :not_enabled}}`
 
-  Once Stage2 is implemented, this function will:
-
-    * inspect the last Stage1 event from `si.trace`,
-    * construct a bounded set of sentence-level interpretations,
-    * select the best interpretation via a global scoring mix,
-    * optionally flip low-margin token senses,
-    * and return `{:ok, %{si: si_after, event: stage2_event}}`.
+  Otherwise, Stage2 will:
+  * locate the Stage1 event (if present),
+  * derive decisions from Stage1 choices,
+  * emit a Stage2 trace event,
+  * and return `{:ok, %{si: si2, event: event}}`.
   """
-  @spec run(si(), opts()) :: run_result()
-  def run(%{} = si, opts \\ []) do
-    _eff_opts = merge_opts(opts)
+  @spec run(si(), opts()) ::
+          {:ok, %{si: si(), event: map()}}
+          | {:skip, %{si: si(), reason: atom()}}
+          | {:error, term()}
+  def run(si, opts \\ [])
 
-    case stage1_snapshot(si) do
-      {:ok, %{si: si1, event: ev}} ->
-        choices_len =
-          ev
-          |> Map.get(:choices, [])
-          |> case do
-            list when is_list(list) -> length(list)
-            _ -> 0
+  def run(%{} = si, opts) when is_list(opts) do
+    eff_opts = Keyword.merge(@default_opts, opts)
+
+    trace =
+      case Map.get(si, :trace) do
+        t when is_list(t) -> t
+        _ -> []
+      end
+
+    stage1_present? = Enum.any?(trace, fn ev -> is_map(ev) and (ev[:stage] || ev["stage"]) == :lifg_stage1 end)
+
+    if stage1_present? and not Keyword.get(eff_opts, :enable_stage2, false) do
+      {:skip, %{si: si, reason: :not_enabled}}
+    else
+      do_run(si, eff_opts)
+    end
+  end
+
+  def run(other, _opts), do: {:error, {:bad_si, other}}
+
+  # ───────────────────────── Decision Core ─────────────────────────
+
+  @spec decide([choice()], opts()) :: [decision()]
+  def decide(choices, opts) when is_list(choices) and is_list(opts) do
+    threshold = Keyword.get(opts, :reanalysis_margin_threshold, 0.10) * 1.0
+
+    {mwes, unigrams} =
+      Enum.split_with(choices, fn ch ->
+        Map.get(ch, :mw?, false) == true or Map.get(ch, :mw, false) == true
+      end)
+
+    dominant_mwe = select_dominant_mwe(mwes)
+
+    {collapse_decisions, suppressed_unigram_idxs} =
+      collapse_from_dominant_mwe(dominant_mwe, unigrams, threshold)
+
+    mwe_deferrals =
+      mwes
+      |> Enum.reject(&(&1 == dominant_mwe))
+      |> Enum.map(&{:defer, &1, :suppressed_by_dominant_mwe})
+
+    unigram_decisions =
+      unigrams
+      |> Enum.reject(fn u ->
+        idx = Map.get(u, :token_index, Map.get(u, "token_index", -1))
+        MapSet.member?(suppressed_unigram_idxs, idx)
+      end)
+      |> Enum.map(&commit_or_defer(&1, threshold))
+
+    collapse_decisions ++ mwe_deferrals ++ unigram_decisions
+  end
+
+  # ───────────────────────── Runner ─────────────────────────
+
+  defp do_run(%{} = si, opts) do
+    trace =
+      case Map.get(si, :trace) do
+        t when is_list(t) -> t
+        _ -> []
+      end
+
+    with {:ok, %{event: stage1_event}} <- stage1_snapshot(si) do
+      choices0 =
+        stage1_event[:choices] ||
+          stage1_event["choices"] ||
+          Map.get(si, :lifg_choices) ||
+          Map.get(si, "lifg_choices") ||
+          []
+
+      choices = choices0 |> List.wrap() |> Enum.filter(&is_map/1)
+
+      decisions = decide(choices, opts)
+      event = stage2_event(stage1_event, decisions)
+
+      si2 =
+        si
+        |> Map.put(:trace, [event | trace])
+
+      {:ok, %{si: si2, event: event}}
+    else
+      {:skip, _} = skip -> skip
+      {:error, _} = err -> err
+      other -> {:error, {:stage2_unexpected, other}}
+    end
+  end
+
+  # ───────────────────────── Commitment Logic ─────────────────────────
+
+  defp commit_or_defer(choice, threshold) do
+    if weak?(choice, threshold) do
+      {:defer, choice, :low_margin}
+    else
+      {:commit, choice}
+    end
+  end
+
+  defp weak?(choice, threshold) do
+    (Map.get(choice, :margin, Map.get(choice, "margin", 0.0)) * 1.0) < threshold
+  end
+
+  # ───────────────────────── Dominant MWE ─────────────────────────
+
+  @spec select_dominant_mwe([choice()]) :: choice() | nil
+  defp select_dominant_mwe([]), do: nil
+
+  defp select_dominant_mwe(mwes) do
+    mwes
+    |> Enum.sort_by(fn mwe ->
+      {
+        -mwe_span_size(mwe),
+        -(Map.get(mwe, :margin, Map.get(mwe, "margin", 0.0)) * 1.0),
+        Map.get(mwe, :token_index, Map.get(mwe, "token_index", 0))
+      }
+    end)
+    |> hd()
+  end
+
+  defp mwe_span_size(%{span: {s, e}})
+       when is_integer(s) and is_integer(e),
+       do: max(e - s, 0)
+
+  defp mwe_span_size(%{span: [s, e]})
+       when is_integer(s) and is_integer(e),
+       do: max(e - s, 0)
+
+  defp mwe_span_size(%{span: %{start: s, stop: e}})
+       when is_integer(s) and is_integer(e),
+       do: max(e - s, 0)
+
+  defp mwe_span_size(%{n: n}) when is_integer(n), do: max(n, 0)
+  defp mwe_span_size(_), do: 0
+
+  # ───────────────────────── Span Suppression ─────────────────────────
+
+  defp collapse_from_dominant_mwe(nil, _unigrams, _threshold),
+    do: {[], MapSet.new()}
+
+  defp collapse_from_dominant_mwe(mwe, unigrams, threshold) do
+    suppressed =
+      Enum.filter(unigrams, fn u ->
+        weak?(u, threshold) and covers_span?(mwe, u)
+      end)
+
+    dominant_decision =
+      case commit_or_defer(mwe, threshold) do
+        {:commit, _} = d ->
+          if suppressed == [] do
+            [d]
+          else
+            [{:collapse, mwe, suppressed}]
           end
 
-        Logger.debug(fn ->
-          "[LIFG.Stage2] scaffold not_enabled (stage1_choices=#{choices_len})"
-        end)
+        {:defer, _c, _r} = d ->
+          # If dominant MWE is weak, do not “collapse”; just defer it.
+          [d]
+      end
 
-        # Stage1 has run; Stage2 exists but is not active yet.
-        {:skip, %{si: si1, reason: :not_enabled}}
+    idxs =
+      suppressed
+      |> Enum.map(fn u -> Map.get(u, :token_index, Map.get(u, "token_index", -1)) end)
+      |> MapSet.new()
 
-      {:skip, %{si: si1, reason: :no_stage1_event}} = skip ->
-        # Stage1 has not run (no event in trace) — surface this explicitly.
-        Logger.debug(fn ->
-          "[LIFG.Stage2] skip (reason=:no_stage1_event, sentence=#{inspect(si1[:sentence])})"
-        end)
+    {dominant_decision, idxs}
+  end
 
-        skip
+  defp covers_span?(%{} = mwe, %{} = u) do
+    case {span_tuple(mwe), span_tuple(u)} do
+      {{s1, e1}, {s2, e2}}
+      when is_integer(s1) and is_integer(e1) and is_integer(s2) and is_integer(e2) ->
+        s1 <= s2 and e1 >= e2
 
-      {:error, reason} ->
-        Logger.error("LIFG.Stage2 run/2 error in scaffold: #{inspect(reason)}")
-        {:error, reason}
+      _ ->
+        false
     end
   end
 
-  # ────────────────────── internal helpers (scaffold) ──────────────────────
+  defp covers_span?(_, _), do: false
 
-  @spec merge_opts(opts()) :: opts()
-  defp merge_opts(opts) when is_list(opts) do
-    Keyword.merge(@default_opts, opts)
+  defp span_tuple(%{span: {s, e}}) when is_integer(s) and is_integer(e), do: {s, e}
+  defp span_tuple(%{span: [s, e]}) when is_integer(s) and is_integer(e), do: {s, e}
+  defp span_tuple(%{span: %{start: s, stop: e}}) when is_integer(s) and is_integer(e), do: {s, e}
+
+  defp span_tuple(%{start: s, stop: e}) when is_integer(s) and is_integer(e), do: {s, e}
+  defp span_tuple(%{start: s, end: e}) when is_integer(s) and is_integer(e), do: {s, e}
+  defp span_tuple(%{start: s, stop: e}) when is_integer(s) and is_integer(e), do: {s, e}
+  defp span_tuple(_), do: nil
+
+  # ───────────────────────── Trace Event ─────────────────────────
+
+  defp stage2_event(stage1_event, decisions) do
+    {committed, deferred, collapsed} =
+      Enum.reduce(decisions, {[], [], []}, fn
+        {:commit, c}, {cm, df, cl} ->
+          {[choice_id(c) | cm], df, cl}
+
+        {:defer, c, _reason}, {cm, df, cl} ->
+          {cm, [choice_id(c) | df], cl}
+
+        {:collapse, mwe, suppressed}, {cm, df, cl} ->
+          {
+            [choice_id(mwe) | cm],
+            df,
+            [{choice_id(mwe), Enum.map(suppressed, &choice_id/1)} | cl]
+          }
+      end)
+
+    %{
+      stage: :lifg_stage2,
+      source_stage1: stage1_event[:stage] || stage1_event["stage"] || :lifg_stage1,
+      committed: Enum.reverse(committed),
+      deferred: Enum.reverse(deferred),
+      collapsed: Enum.reverse(collapsed),
+      ts_ms: System.system_time(:millisecond)
+    }
   end
 
-  @doc false
-  @spec stage1_snapshot(si()) ::
-          {:ok, %{si: si(), event: map()}}
-          | {:skip, %{si: si(), reason: :no_stage1_event}}
-          | {:error, term()}
+  defp choice_id(%{} = c) do
+    (Map.get(c, :chosen_id) ||
+       Map.get(c, "chosen_id") ||
+       Map.get(c, :id) ||
+       Map.get(c, "id") ||
+       Map.get(c, :lemma) ||
+       Map.get(c, "lemma") ||
+       "unknown")
+    |> to_string()
+  end
+
+  defp choice_id(_), do: "unknown"
+
+  # ───────────────────────── Stage1 Snapshot ─────────────────────────
+
   defp stage1_snapshot(%{} = si) do
-    trace = Map.get(si, :trace, nil)
-
-    cond do
-      is_list(trace) ->
-        # Find the most recent Stage1 event (we assume head-first trace).
-        case Enum.find(trace, fn ev ->
-               is_map(ev) and Map.get(ev, :stage) == :lifg_stage1
-             end) do
-          nil ->
-            {:skip, %{si: si, reason: :no_stage1_event}}
-
-          ev ->
-            {:ok, %{si: si, event: ev}}
+    case Map.get(si, :trace) do
+      trace when is_list(trace) ->
+        case Enum.find(trace, fn ev -> is_map(ev) and (ev[:stage] || ev["stage"]) == :lifg_stage1 end) do
+          nil -> {:skip, %{si: si, reason: :no_stage1_event}}
+          ev -> {:ok, %{si: si, event: ev}}
         end
 
-      trace == nil ->
-        # No trace at all — no Stage1 event.
+      _ ->
         {:skip, %{si: si, reason: :no_stage1_event}}
-
-      true ->
-        # Unexpected shape for trace; treat as “no Stage1 event” but be defensive.
-        {:skip, %{si: Map.put(si, :trace, List.wrap(trace)), reason: :no_stage1_event}}
     end
   rescue
-    e ->
-      {:error, e}
+    e -> {:error, e}
   end
 end
 

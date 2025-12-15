@@ -1,5 +1,8 @@
-# apps/brain/test/test_helper.exs
 ExUnit.start()
+
+# Ensure the umbrella root is running for brain integration tests.
+# This boots singletons like Brain.Thalamus/PMTG/PFC under the preferred topology.
+_ = Application.ensure_all_started(:symbrella)
 
 # Start a single shared Sandbox owner for the whole test run.
 # (Do NOT call Sandbox.mode/2 when using the owner API.)
@@ -29,3 +32,4 @@ end
   &Brain.TestHooks.lifg_handle/4,
   self()
 )
+

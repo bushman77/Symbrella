@@ -4,8 +4,8 @@ defmodule Brain.LIFG.Hygiene do
     • Sanitizes score maps (drops non-numeric / NaN)
     • Computes softmax probabilities as `:probs` (uniform fallback if degenerate)
     • Adds `:p_top1` and `:prob_margin` (= p1 - p2)
-    • Dedups `:alt_ids` and removes `:chosen_id` from it
-    • Flags `:needs_rerun` (by margin / p_top1 / alt_ids)
+    • Dedups `:alt_ids` and removes chosen_id from it
+    • Flags `:needs_rerun` (by margin / p_top1 *when alts exist*)
     • Emits telemetry: [:brain, :hygiene, :wipe]
   """
 
@@ -27,6 +27,8 @@ defmodule Brain.LIFG.Hygiene do
 
       {cleaned, stats} =
         Enum.map_reduce(choices, %{sanitized: 0, needs_rerun: 0}, fn ch, acc ->
+          chosen = ch[:chosen_id] || ch[:id]
+
           # 1) sanitize & normalize scores -> probs
           scores_in = Map.get(ch, :scores, %{}) || %{}
           {probs0, dropped} = normalize_scores_map(scores_in)
@@ -36,9 +38,8 @@ defmodule Brain.LIFG.Hygiene do
               map_size(probs0) > 0 ->
                 probs0
 
-              # fallback: if no numeric scores, prefer a degenerate distribution on chosen_id (if any)
-              id = ch[:chosen_id] ->
-                %{id => 1.0}
+              is_binary(chosen) ->
+                %{chosen => 1.0}
 
               true ->
                 %{}
@@ -48,17 +49,33 @@ defmodule Brain.LIFG.Hygiene do
           {p1, p2} = top2_probs(probs)
           prob_margin = max(p1 - p2, 0.0)
 
-          # 3) alt_ids: dedup & remove chosen
+          # 3) alt_ids: dedup & remove chosen; backfill from probs if missing
+          alt_ids_in = (ch[:alt_ids] || []) |> List.wrap()
+
           alt_ids2 =
-            (ch[:alt_ids] || [])
-            |> Enum.reject(&(&1 == ch[:chosen_id]))
+            alt_ids_in
+            |> Enum.reject(&(&1 == chosen))
             |> Enum.uniq()
 
-          # 4) needs_rerun: margin/p_top1/alt_ids
+          alt_ids2 =
+            cond do
+              alt_ids2 != [] ->
+                alt_ids2
+
+              is_binary(chosen) and map_size(probs) > 1 ->
+                probs
+                |> Enum.sort_by(fn {_id, p} -> -p end)
+                |> Enum.map(&elem(&1, 0))
+                |> Enum.reject(&(&1 == chosen))
+                |> Enum.take(1)
+
+              true ->
+                []
+            end
+
+          # 4) needs_rerun: only when confidence is low *and* there is a real alternative
           needs? =
-            (ch[:margin] || 0.0) < min_margin or
-              p1 < p_min or
-              alt_ids2 != []
+            (((ch[:margin] || 0.0) < min_margin) or (p1 < p_min)) and alt_ids2 != []
 
           ch2 =
             ch
@@ -144,3 +161,4 @@ defmodule Brain.LIFG.Hygiene do
     end
   end
 end
+

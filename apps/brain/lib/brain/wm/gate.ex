@@ -6,27 +6,41 @@ defmodule Brain.WM.Gate do
   Entry point: `ingest_from_si/3` — returns a new `state`.
   """
 
+  @wm_gate_event [:brain, :wm, :gate]
+
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @spec ingest_from_si(map(), map(), keyword()) :: map()
+  def ingest_from_si(state, si, opts \\ [])
+
   def ingest_from_si(state, si, opts) when is_map(state) and is_map(si) and is_list(opts) do
-    if Keyword.get(opts, :gate_into_wm, false) do
-      allow_fb? = get_in(state, [:wm_cfg, :allow_fallback_into_wm?]) || false
+    allow_fb? =
+      Keyword.get(opts, :allow_phrase_fallback?, false) or
+        Keyword.get(opts, :allow_fallback?, false)
 
-      tuples = lifg_pairs_to_tuples(si)
+    min_score =
+      opts
+      |> Keyword.get(:min_score, 0.0)
+      |> as_float()
+      |> clamp01()
 
-      state2 =
-        if tuples != [] do
-          gate_pairs_into_wm_state(state, tuples, allow_fb?)
-        else
-          gate_winners_into_wm_state(state, si, allow_fb?)
-        end
+    gate_event = Keyword.get(opts, :gate_event, @wm_gate_event)
 
-      bump_wm_ts(state2)
-    else
-      state
-    end
+    tuples = lifg_pairs_to_tuples(si)
+
+    state1 =
+      cond do
+        tuples != [] ->
+          gate_pairs(state, tuples, allow_fb?, min_score, gate_event)
+
+        true ->
+          gate_winners(state, si, allow_fb?, min_score, gate_event)
+      end
+
+    bump_wm_ts(state1)
   end
+
+  def ingest_from_si(state, _si, _opts), do: state
 
   # ── Pair normalization (SI → tuples) ────────────────────────────────────────
 
@@ -60,7 +74,7 @@ defmodule Brain.WM.Gate do
         sc = m[:weight] || m["weight"] || 1.0
         if ms && us, do: [{to_string(mwe), ms, to_string(uni), us, sc}], else: []
 
-      # already-normalized tuple forms (avoid binding unused vars)
+      # already-normalized tuple forms
       tup when is_tuple(tup) and tuple_size(tup) == 5 ->
         [tup]
 
@@ -74,55 +88,177 @@ defmodule Brain.WM.Gate do
 
   # ── Gating reducers ─────────────────────────────────────────────────────────
 
-  # Pairs: bump unigram (always), and MWE only if allowed (or not a fallback)
-  defp gate_pairs_into_wm_state(state, tuples, allow_fb?) do
+  defp gate_pairs(state, tuples, allow_fb?, min_score, gate_event) do
     Enum.reduce(tuples, state, fn
       {mwe, _ms, uni, _us, sc}, st ->
-        st1 =
-          if allow_fb? or not phrase_fallback_id?(mwe) do
-            wm_put(st, mwe, clamp01(as_float(sc)))
+        score = clamp01(as_float(sc))
+
+        st =
+          if score >= min_score do
+            st |> admit_lifg_id(uni, score, %{lemma: lemma_from_id(uni)}, gate_event)
           else
             st
           end
 
-        wm_put(st1, uni, clamp01(as_float(sc)))
+        cond do
+          score < min_score ->
+            st
+
+          not allow_fb? and phrase_fallback_id?(mwe) ->
+            st
+
+          true ->
+            admit_lifg_id(st, mwe, score, %{lemma: lemma_from_id(mwe)}, gate_event)
+        end
 
       {ida, idb}, st ->
-        st
-        |> (fn st0 ->
-              if allow_fb? or not phrase_fallback_id?(ida), do: wm_put(st0, ida, 0.3), else: st0
-            end).()
-        |> wm_put(idb, 0.3)
+        # Legacy form: treat as weak evidence unless overridden by opts
+        score = clamp01(as_float(Keyword.get([], :legacy_pair_score, 0.3)))
+
+        st =
+          if score >= min_score do
+            st |> admit_lifg_id(to_string(idb), score, %{lemma: lemma_from_id(to_string(idb))}, gate_event)
+          else
+            st
+          end
+
+        cond do
+          score < min_score ->
+            st
+
+          not allow_fb? and phrase_fallback_id?(to_string(ida)) ->
+            st
+
+          true ->
+            admit_lifg_id(st, to_string(ida), score, %{lemma: lemma_from_id(to_string(ida))}, gate_event)
+        end
 
       _, st ->
         st
     end)
   end
 
-  # Winners-only fallback path
-  defp gate_winners_into_wm_state(state, si, allow_fb?) do
+  defp gate_winners(state, si, allow_fb?, min_score, gate_event) do
     winners = (si[:lifg_choices] || si["lifg_choices"] || []) |> List.wrap()
 
     Enum.reduce(winners, state, fn w, st ->
-      id = w[:id] || w["id"]
-      score = w[:score] || w["score"] || 1.0
+      id = w[:chosen_id] || w["chosen_id"] || w[:id] || w["id"]
+      score = w[:score] || w["score"] || w[:prob] || w["prob"] || 1.0
+      tok_i = w[:token_index] || w["token_index"] || w[:index] || w["index"]
 
       cond do
-        is_nil(id) -> st
-        phrase_fallback_id?(id) and not allow_fb? -> st
-        true -> wm_put(st, id, clamp01(as_float(score)))
+        is_nil(id) ->
+          st
+
+        phrase_fallback_id?(to_string(id)) and not allow_fb? ->
+          st
+
+        clamp01(as_float(score)) < min_score ->
+          st
+
+        true ->
+          admit_lifg_id(
+            st,
+            to_string(id),
+            clamp01(as_float(score)),
+            %{lemma: lemma_from_id(to_string(id)), token_index: tok_i},
+            gate_event
+          )
       end
     end)
   end
 
-  # ── Local, WM-scoped helpers (kept here to avoid coupling with Brain) ───────
+  # ── Admission: update state.active_cells (if map) + state.wm (if list) + telemetry ──
 
-  defp wm_put(%{active_cells: ac} = state, id, score)
-       when is_binary(id) and is_number(score) do
-    key = normalize_cell_id(id)
-    ac2 = Map.update(ac || %{}, key, score, &(&1 + score))
-    %{state | active_cells: ac2}
+  defp admit_lifg_id(state, id, score, payload_meta, gate_event)
+       when is_binary(id) and is_number(score) and is_map(payload_meta) do
+    now = System.system_time(:millisecond)
+
+    payload =
+      %{
+        id: id,
+        source: :lifg,
+        lemma: Map.get(payload_meta, :lemma, lemma_from_id(id)),
+        score: score
+      }
+      |> maybe_put(:token_index, Map.get(payload_meta, :token_index))
+
+    state =
+      state
+      |> maybe_put_active_cells(id, score)
+      |> maybe_upsert_wm_item(id, score, payload, now)
+
+    emit_gate(gate_event, %{score: score}, %{decision: :allow, source: :lifg, id: id})
+    state
   end
+
+  defp maybe_put_active_cells(state, id, score) do
+    case Map.get(state, :active_cells) do
+      ac when is_map(ac) ->
+        key = normalize_cell_id(id)
+        ac2 = Map.update(ac || %{}, key, score, &(&1 + score))
+        Map.put(state, :active_cells, ac2)
+
+      _ ->
+        state
+    end
+  end
+
+  defp maybe_upsert_wm_item(state, id, score, payload, now_ms) do
+    case Map.get(state, :wm) do
+      nil ->
+        Map.put(state, :wm, [new_wm_item(id, score, payload, now_ms)])
+
+      list when is_list(list) ->
+        rest =
+          Enum.reject(list, fn it ->
+            Map.get(it, :id) == id and Map.get(it, :source) == :lifg
+          end)
+
+        item0 = Enum.find(list, fn it -> Map.get(it, :id) == id and Map.get(it, :source) == :lifg end)
+
+        item =
+          if is_map(item0) do
+            item0
+            |> Map.put(:payload, payload)
+            |> Map.put(:score, max(as_float(Map.get(item0, :score, 0.0)), score))
+            |> Map.put(:last_bump, now_ms)
+          else
+            new_wm_item(id, score, payload, now_ms)
+          end
+
+        Map.put(state, :wm, [item | rest])
+
+      _ ->
+        state
+    end
+  end
+
+  defp new_wm_item(id, score, payload, now_ms) do
+    %{
+      id: id,
+      source: :lifg,
+      activation: 1.0,
+      payload: payload,
+      ts: now_ms,
+      inserted_at: now_ms,
+      score: score,
+      last_bump: now_ms
+    }
+  end
+
+  defp emit_gate(ev, meas, meta) do
+    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute(ev, meas, meta)
+    else
+      :ok
+    end
+  end
+
+  defp maybe_put(m, _k, nil), do: m
+  defp maybe_put(m, k, v), do: Map.put(m, k, v)
+
+  # ── Local helpers ───────────────────────────────────────────────────────────
 
   defp bump_wm_ts(state),
     do: Map.put(state, :wm_last_ms, System.system_time(:millisecond))
@@ -139,6 +275,13 @@ defmodule Brain.WM.Gate do
     do: String.contains?(id, "|phrase|fallback")
 
   defp phrase_fallback_id?(_), do: false
+
+  defp lemma_from_id(id) when is_binary(id) do
+    case String.split(id, "|", parts: 2) do
+      [lemma, _] -> lemma
+      _ -> id
+    end
+  end
 
   # --- converters ---
   defp as_float(nil), do: 0.0
@@ -157,3 +300,4 @@ defmodule Brain.WM.Gate do
   defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0
   defp clamp01(x) when is_number(x), do: x
 end
+

@@ -594,10 +594,19 @@ end
           _ -> %{}
         end
 
+      runner_up_id =
+        case ranked do
+          [_first, {id2, _p2} | _] -> id2
+          _ -> nil
+        end
+
+      # Contract: expose *only* the runner-up, and only when the decision is “weak”.
       alt_ids =
-        ranked
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.reject(&(&1 == chosen_id))
+        if is_binary(runner_up_id) and margin < ctx.margin_thr do
+          [runner_up_id]
+        else
+          []
+        end
 
       choice = %{
         token_index: tok_index,

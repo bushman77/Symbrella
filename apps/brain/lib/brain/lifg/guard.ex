@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/lifg/guard.ex
 defmodule Brain.LIFG.Guard do
   @moduledoc """
   Slate-level token guard for the LIFG path.
@@ -11,7 +12,10 @@ defmodule Brain.LIFG.Guard do
       * emit `[:brain, :lifg, :boundary_drop]` with meta including `mw: false/true`
   - Always:
       * drop classic char-gram symptoms (non-mw tokens whose phrase contains whitespace)
+      * drop explicit char-grams (source/kind flags)
       * emit `[:brain, :lifg, :chargram_violation]` where meta.reason == :chargram
+        and meta.v == 2
+      * in `:test`, also emit `[:test, :lifg, :chargram_violation_tripwire]`
   - When sentence is NOT present:
       * be permissive — do NOT drop tokens just because `:span` is missing
         (property tests build synthetic inputs without spans/sentences)
@@ -49,7 +53,7 @@ defmodule Brain.LIFG.Guard do
       |> Enum.map_reduce(0, fn {tok, fallback_idx}, cursor ->
         t0 = mapify(tok)
 
-        # CRITICAL: preserve upstream token indexing when present; only fallback to enumeration.
+        # Preserve upstream token indexing when present; only fallback to enumeration.
         idx = tok_index(t0, fallback_idx)
 
         t1 =
@@ -75,26 +79,45 @@ defmodule Brain.LIFG.Guard do
         {t3, cursor2}
       end)
 
-    toks2
-    |> Enum.reject(&drop_chargram?/1)
+    {kept, dropped} = split_chargrams(toks2)
+    maybe_emit_chargram_violation_group(dropped)
+
+    kept
     |> maybe_drop_by_boundary(sent)
     |> sort_by_span_if_present()
   end
 
   # ── Telemetry helpers ─────────────────────────────────────────────────
 
-  defp emit_chargram_violation(tok, phrase) do
+  defp maybe_emit_chargram_violation_group([]), do: :ok
+
+  defp maybe_emit_chargram_violation_group(dropped) when is_list(dropped) do
+    # Deterministic "primary" offender selection:
+    # prefer cross-word chargrams (these are what tests assert), else explicit, else first.
+    {tok0, sr0, phrase0} =
+      Enum.find(dropped, fn {_t, sr, _ph} -> sr == :cross_word end) ||
+        Enum.find(dropped, fn {_t, sr, _ph} -> sr == :explicit end) ||
+        hd(dropped)
+
+    idx0 = tok_index(tok0, 0)
+    span0 = Map.get(tok0, :span) || Map.get(tok0, "span")
+    mw0 = tok_mw?(tok0)
+
     meta = %{
       reason: :chargram,
-      token_index: tok_index(tok, 0),
-      phrase: phrase,
-      span: Map.get(tok, :span) || Map.get(tok, "span"),
-      mw: tok_mw?(tok),
-      count: 1,
+      subreason: sr0,
+      token_index: idx0,
+      phrase: phrase0,
+      span: span0,
+      mw: mw0,
+      count: length(dropped),
+      token_indexes: Enum.map(dropped, fn {t, _sr, _ph} -> tok_index(t, 0) end),
+      phrases: Enum.map(dropped, fn {_t, _sr, ph} -> ph end),
+      subreasons: Enum.map(dropped, fn {_t, sr, _ph} -> sr end),
+      pid: self(),
       v: 2
     }
 
-    # Tests assert measurements == %{}
     safe_telemetry(@chargram_event, %{}, meta)
 
     if test_env?() do
@@ -103,7 +126,6 @@ defmodule Brain.LIFG.Guard do
   end
 
   defp emit_boundary_drop(tok, reason, phrase, span) do
-    # Tests assert measurements == %{}
     safe_telemetry(
       @boundary_drop_event,
       %{},
@@ -134,25 +156,37 @@ defmodule Brain.LIFG.Guard do
 
   # ── Char-gram dropping (always active) ────────────────────────────────
 
-  defp drop_chargram?(tok) when is_map(tok) do
-    mw? = tok_mw?(tok)
-    phrase = tok_phrase(tok) || ""
+  defp split_chargrams(tokens) when is_list(tokens) do
+    Enum.reduce(tokens, {[], []}, fn tok, {kept, dropped} ->
+      phrase = tok_phrase(tok) || ""
+      mw? = tok_mw?(tok)
 
-    cond do
-      explicit_chargram?(tok) and not mw? ->
-        emit_chargram_violation(tok, phrase)
-        true
+      cond do
+        mw? ->
+          {[tok | kept], dropped}
 
-      (not mw?) and is_binary(phrase) and String.contains?(phrase, " ") ->
-        emit_chargram_violation(tok, phrase)
-        true
-
-      true ->
-        false
-    end
+        true ->
+          case chargram_subreason(tok, phrase) do
+            nil -> {[tok | kept], dropped}
+            sr -> {kept, [{tok, sr, phrase} | dropped]}
+          end
+      end
+    end)
+    |> then(fn {kept, dropped} -> {Enum.reverse(kept), Enum.reverse(dropped)} end)
   end
 
-  defp drop_chargram?(_), do: false
+  defp chargram_subreason(tok, phrase) do
+    cond do
+      explicit_chargram?(tok) ->
+        :explicit
+
+      is_binary(phrase) and String.match?(phrase, ~r/\s/u) ->
+        :cross_word
+
+      true ->
+        nil
+    end
+  end
 
   defp explicit_chargram?(t) when is_map(t) do
     Map.get(t, :chargram) in [true, "true"] or
@@ -285,34 +319,20 @@ defmodule Brain.LIFG.Guard do
   defp ensure_phrase_and_norm(%{} = t, phrase) do
     phrase1 =
       cond do
-        is_binary(Map.get(t, :phrase)) and String.trim(Map.get(t, :phrase)) != "" ->
-          Map.get(t, :phrase)
-
-        is_binary(Map.get(t, "phrase")) and String.trim(Map.get(t, "phrase")) != "" ->
-          Map.get(t, "phrase")
-
-        is_binary(phrase) and String.trim(phrase) != "" ->
-          phrase
-
-        true ->
-          ""
+        is_binary(Map.get(t, :phrase)) and String.trim(Map.get(t, :phrase)) != "" -> Map.get(t, :phrase)
+        is_binary(Map.get(t, "phrase")) and String.trim(Map.get(t, "phrase")) != "" -> Map.get(t, "phrase")
+        is_binary(phrase) and String.trim(phrase) != "" -> phrase
+        true -> ""
       end
 
     t1 = Map.put(t, :phrase, phrase1)
 
     norm1 =
       cond do
-        is_binary(Map.get(t, :norm)) and String.trim(Map.get(t, :norm)) != "" ->
-          Map.get(t, :norm)
-
-        is_binary(Map.get(t, "norm")) and String.trim(Map.get(t, "norm")) != "" ->
-          Map.get(t, "norm")
-
-        is_binary(phrase1) and String.trim(phrase1) != "" ->
-          norm_phrase(phrase1)
-
-        true ->
-          ""
+        is_binary(Map.get(t, :norm)) and String.trim(Map.get(t, :norm)) != "" -> Map.get(t, :norm)
+        is_binary(Map.get(t, "norm")) and String.trim(Map.get(t, "norm")) != "" -> Map.get(t, "norm")
+        is_binary(phrase1) and String.trim(phrase1) != "" -> norm_phrase(phrase1)
+        true -> ""
       end
 
     Map.put(t1, :norm, norm1)
@@ -353,7 +373,6 @@ defmodule Brain.LIFG.Guard do
 
   defp normalize_sentence(_), do: nil
 
-  # Stage1-compatible normalizer (same shape as Stage1.norm/1)
   defp norm_phrase(nil), do: ""
 
   defp norm_phrase(v) when is_binary(v) do
@@ -368,7 +387,6 @@ defmodule Brain.LIFG.Guard do
   defp norm_phrase(v), do: v |> to_string() |> norm_phrase()
 
   # ── Span normalization + recovery ─────────────────────────────────────
-  # Canonical output: {start, end_exclusive}
 
   defp normalize_or_recover_span({s, x}, phrase, sent, cursor)
        when is_integer(s) and is_integer(x) and s >= 0 do
@@ -409,15 +427,10 @@ defmodule Brain.LIFG.Guard do
 
     candidates =
       [
-        # treat x as end_exclusive
         if(x > s, do: {s, x}, else: nil),
-        # treat x as len
         if(x > 0, do: {s, s + x}, else: nil),
-        # treat x as end_inclusive
         if(x >= s, do: {s, x + 1}, else: nil),
-        # phrase-length fallback
         if(ph_len > 0, do: {s, s + ph_len}, else: nil),
-        # unigram word-span fallback
         word_span_at(sent, s)
       ]
       |> Enum.reject(&is_nil/1)
@@ -444,7 +457,6 @@ defmodule Brain.LIFG.Guard do
     end
   end
 
-  # Regex-based recovery that preserves byte offsets in the ORIGINAL sentence.
   defp recover_span(sent, phrase, cursor)
        when is_binary(sent) and is_binary(phrase) and is_integer(cursor) and cursor >= 0 do
     ph = String.trim(phrase)

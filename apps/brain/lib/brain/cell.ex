@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/cell.ex
 defmodule Brain.Cell do
   @moduledoc """
   One cell process. Registers under Brain.Registry by its id.
@@ -5,13 +6,6 @@ defmodule Brain.Cell do
 
   ## Invariants (guarding against DB leaks)
   • IDs must be shaped like: `"word or phrase|pos(|suffix)?"`
-    - Examples:
-      - `"man|noun|0"`
-      - `"hello there|phrase|fallback"`
-    - Disallowed:
-      - anything containing `|unk|` or segment `"unk"`
-      - anything containing segment `"seed"`
-      - unknown POS
   • On invalid IDs, the process is **not started**; we raise and emit telemetry
     `[:brain, :cell, :id_rejected]` with %{id, reason}.
   """
@@ -22,16 +16,11 @@ defmodule Brain.Cell do
 
   @allowed_pos ~w(
     noun verb adjective adverb interjection phrase proper_noun pronoun
-    determiner preposition conjunction numeral particle
+    determiner preposition conjunction numeral particle assistant
   )
 
-  # Full shape check with explicit POS in second segment.
-  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/u
-
-  # Basic preflight shape (up to 3 segments; allows spaces and unicode, but no pipes inside segments)
+  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle|assistant)(\|[A-Za-z0-9_]+)?$/u
   @basic_id_regex ~r/^[^|]+(\|[^|]+){1,2}$/u
-
-  # ───────────────────────── Public ─────────────────────────
 
   @doc """
   Start a `Brain.Cell`.
@@ -46,12 +35,10 @@ defmodule Brain.Cell do
       |> extract_id()
       |> normalize_id()
 
-    # Fast preflight: reject obviously bad shapes (including "/" unless tests allow it)
     if bad_shape?(id) do
       return_reject!(id, :bad_shape)
     end
 
-    # Full semantic validation (POS, reserved segments, trailing pipes, etc.)
     id = validate_id!(id)
 
     GenServer.start_link(__MODULE__, %{id: id, data: arg, activation: 0}, name: Brain.via(id))
@@ -66,9 +53,7 @@ defmodule Brain.Cell do
       |> normalize_id()
       |> then(fn s -> not bad_shape?(s) end)
       |> case do
-        false ->
-          false
-
+        false -> false
         true ->
           validate_id!(normalize_id(to_string(id)))
           true
@@ -77,8 +62,6 @@ defmodule Brain.Cell do
       _ -> false
     end
   end
-
-  # ──────────────────────── GenServer ───────────────────────
 
   @impl true
   def init(state), do: {:ok, state}
@@ -96,10 +79,7 @@ defmodule Brain.Cell do
       |> coerce_number(1)
 
     a2 = a + delta
-
-    # Report back so Brain.active_cells fills in
     GenServer.cast(Brain, {:activation_report, id, a2})
-
     {:noreply, %{st | activation: a2}}
   end
 
@@ -109,7 +89,6 @@ defmodule Brain.Cell do
   defp extract_id(id) when is_binary(id), do: id
   defp extract_id(other), do: raise(ArgumentError, "Unsupported cell arg: #{inspect(other)}")
 
-  # Trim and collapse accidental whitespace; reject trailing pipes later in validate.
   defp normalize_id(id) do
     id
     |> String.trim()
@@ -119,26 +98,22 @@ defmodule Brain.Cell do
   defp validate_id!(id) when is_binary(id) do
     segments = String.split(id, "|", trim: true)
 
-    # Basic segment count: word|pos or word|pos|suffix
     case segments do
       [_, _pos] -> :ok
       [_, _pos, _suffix] -> :ok
       _ -> return_reject!(id, :bad_shape_segments)
     end
 
-    # No 'unk' or 'seed' in any segment
     if Enum.any?(segments, &(&1 == "unk" or &1 == "seed")) do
       return_reject!(id, :placeholder_segment)
     end
 
-    # POS must be whitelisted
     pos = Enum.at(segments, 1)
 
     unless pos in @allowed_pos do
       return_reject!(id, {:unknown_pos, pos})
     end
 
-    # Final regex guard (catches trailing pipes and oddities)
     unless Regex.match?(@id_regex, id) do
       return_reject!(id, :regex_mismatch)
     end
@@ -147,7 +122,6 @@ defmodule Brain.Cell do
   end
 
   defp return_reject!(id, reason) do
-    # Telemetry for quick source tracing in logs/tests
     :telemetry.execute([:brain, :cell, :id_rejected], %{count: 1}, %{id: id, reason: reason})
 
     Logger.warning("Brain.Cell id rejected",
@@ -163,9 +137,7 @@ defmodule Brain.Cell do
 
   defp coerce_number(x, _default) when is_binary(x) do
     case Integer.parse(x) do
-      {n, ""} ->
-        n
-
+      {n, ""} -> n
       _ ->
         case Float.parse(x) do
           {f, ""} -> f
@@ -176,18 +148,16 @@ defmodule Brain.Cell do
 
   defp coerce_number(_x, default), do: default
 
-  # Now *used* in start_link/1 as a quick preflight.
-  # - Allows unicode & spaces in segments
-  # - Forbids "/" unless :brain, :allow_test_ids is true (handy for unit tests)
+  # Test-only relaxation: allow "/" in IDs during Mix.env() == :test (or via explicit config).
   defp bad_shape?(id) when is_binary(id) do
-    allow = Application.get_env(:brain, :allow_test_ids, false)
+    allow =
+      Application.get_env(:brain, :allow_test_ids, false) or
+        (Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test)
 
     cond do
-      # Disallow "/" in production unless explicitly permitted for tests
       String.contains?(id, "/") and not allow ->
         true
 
-      # Must look like "seg|seg" or "seg|seg|seg", no pipes inside segments
       not Regex.match?(@basic_id_regex, id) ->
         true
 
@@ -198,3 +168,4 @@ defmodule Brain.Cell do
 
   defp bad_shape?(_), do: true
 end
+
