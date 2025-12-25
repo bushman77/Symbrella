@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/working_memory.ex
 defmodule Brain.WorkingMemory do
   @moduledoc """
   Pure working-memory utilities (no process state).
@@ -39,15 +40,21 @@ defmodule Brain.WorkingMemory do
           merge_duplicates?: boolean()
         }
 
-  # ────────────────────── NEW: Stage2 ingestion ──────────────────────
+  # ────────────────────── Stage2 ingestion ──────────────────────
 
   @doc """
   Ingest Stage2 decisions into working memory.
 
-  Only `{:commit, choice}` decisions are admitted.
-  Deferred or collapsed items are ignored by design.
+  Supports multiple Stage2 decision encodings:
 
-  This keeps WM free of ambiguity and preserves uncertainty upstream.
+    * `{:commit, choice}`
+    * `{:allow, choice}` / `{:boost, choice}` (treated as commit)
+    * `%{decision: :allow | :boost, ...}` (treated as commit)
+    * `%{action: :commit, ...}` (treated as commit)
+
+  Only committed items are admitted.
+
+  Important: Tests expect `source: :lifg` for Stage2-gated entries.
   """
   @spec ingest_stage2(
           wm :: [wm_item()],
@@ -57,16 +64,45 @@ defmodule Brain.WorkingMemory do
         ) :: [wm_item()]
   def ingest_stage2(wm, decisions, now_ms, cfg) when is_list(decisions) do
     decisions
-    |> Enum.reduce(wm, fn
-      {:commit, choice}, acc ->
-        item = normalize(choice, now_ms, source: :lifg_stage2)
-        upsert(acc, item, cfg)
+    |> Enum.reduce(wm, fn dec, acc ->
+      case normalize_stage2_decision(dec) do
+        {:commit, %{} = choice} ->
+          # Default source must be :lifg for the test expectations.
+          item = normalize(choice, now_ms, source: :lifg)
+          upsert(acc, item, cfg)
 
-      # Explicitly ignore deferred / collapsed items
-      _, acc ->
-        acc
+        _ ->
+          acc
+      end
     end)
   end
+
+  def ingest_stage2(wm, _decisions, _now_ms, _cfg), do: wm
+
+  defp normalize_stage2_decision({:commit, %{} = choice}), do: {:commit, choice}
+  defp normalize_stage2_decision({:allow, %{} = choice}), do: {:commit, Map.put_new(choice, :decision, :allow)}
+  defp normalize_stage2_decision({:boost, %{} = choice}), do: {:commit, Map.put_new(choice, :decision, :boost)}
+
+  defp normalize_stage2_decision(%{} = m) do
+    decision = m[:decision] || m["decision"]
+    action = m[:action] || m["action"]
+
+    cond do
+      action == :commit or action == "commit" ->
+        {:commit, m}
+
+      decision in [:allow, :boost] ->
+        {:commit, m}
+
+      decision in ["allow", "boost"] ->
+        {:commit, Map.put(m, :decision, String.to_atom(decision))}
+
+      true ->
+        :skip
+    end
+  end
+
+  defp normalize_stage2_decision(_), do: :skip
 
   # ────────────────────── Existing API (unchanged) ──────────────────────
 

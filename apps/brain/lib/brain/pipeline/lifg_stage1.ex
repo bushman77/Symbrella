@@ -3,6 +3,7 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   alias Brain.Episodes.Writer, as: EpWriter
   alias Brain.LIFG
+  alias Brain.WorkingMemory
 
   @pipeline_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
   @no_candidates_event [:brain, :pipeline, :lifg_stage1, :no_candidates]
@@ -16,11 +17,11 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
     %{tokens: tokens0, sentence: sentence} = build_lifg_inputs(si_or_cands)
 
-    self = detect_self_name(tokens0, sentence)
+    self_name = detect_self_name(tokens0, sentence)
 
     state0 =
       state
-      |> Map.put(:attention, Map.get(state, :attention, %{}) |> Map.put(:self_name, self))
+      |> Map.put(:attention, Map.get(state, :attention, %{}) |> Map.put(:self_name, self_name))
 
     si_for_policy = enrich_for_policy(si_or_cands, tokens0)
 
@@ -51,7 +52,7 @@ defmodule Brain.Pipeline.LIFGStage1 do
     out0 =
       out0_raw
       |> Map.update(:audit, %{}, fn audit ->
-        Map.put(audit || %{}, :self_name, self)
+        Map.put(audit || %{}, :self_name, self_name)
       end)
 
     out0 =
@@ -70,11 +71,17 @@ defmodule Brain.Pipeline.LIFGStage1 do
     {boosts2, inhib2} = maybe_rescale_signals(out0, lifg_opts)
     _ = Brain.__pipeline_apply_control_signals__(boosts2, inhib2, lifg_opts)
 
-    # ── Brain-owned WM maintenance only (no mutation) ─────────────────
+    # ── Brain-owned WM maintenance (decay + optional gating + eviction) ─────────
 
-    state1 =
+    stateA =
       state0
       |> Brain.apply_decay(now_ms)
+
+    stateB =
+      maybe_gate_into_wm(stateA, si2, lifg_opts, now_ms)
+
+    state1 =
+      stateB
       |> Brain.evict_if_needed()
 
     :telemetry.execute(
@@ -214,6 +221,185 @@ defmodule Brain.Pipeline.LIFGStage1 do
         {boosts2, inhib2}
     end
   end
+
+  # ───────────────────────── WM gating (tests depend on this) ─────────
+
+  defp maybe_gate_into_wm(state, si, opts, now_ms) when is_map(state) and is_map(si) do
+    gate? = Keyword.get(opts, :gate_into_wm, false)
+
+    if gate? do
+      ev1 =
+        case Map.get(si, :trace) do
+          [ev | _] when is_map(ev) -> ev
+          _ -> %{}
+        end
+
+      decisions = stage2_decisions(ev1, si, opts)
+
+      wm0 = Map.get(state, :wm, [])
+
+      cfg =
+        Map.get(state, :wm_cfg) ||
+          %{
+            capacity: Application.get_env(:brain, :wm_capacity, 64),
+            decay_ms: Application.get_env(:brain, :wm_decay_ms, 20_000),
+            gate_threshold: Keyword.get(opts, :lifg_min_score, 0.6),
+            merge_duplicates?: true
+          }
+
+      wm1 = WorkingMemory.ingest_stage2(wm0, decisions, now_ms, cfg)
+      added = max(length(wm1) - length(wm0), 0)
+
+      emit_gate_decisions(decisions)
+
+      :telemetry.execute(
+        [:brain, :wm, :update],
+        %{added: added, size: length(wm1)},
+        %{reason: :gate_from_lifg}
+      )
+
+      Map.put(state, :wm, wm1)
+    else
+      state
+    end
+  end
+
+  defp maybe_gate_into_wm(state, _si, _opts, _now_ms), do: state
+
+defp stage2_decisions(ev1, si, opts) do
+  # Fallback: commit any choice with score >= lifg_min_score
+  min_score = (Keyword.get(opts, :lifg_min_score, 0.6) || 0.6) * 1.0
+
+  choices =
+    (ev1[:choices] || ev1["choices"] || [])
+    |> List.wrap()
+
+  fallback =
+    for ch <- choices,
+        score = gate_score(ch),
+        score >= min_score do
+      ch
+      |> Map.merge(%{decision: :allow, source: :lifg, score: score})
+    end
+
+  st2 = Brain.LIFG.Stage2
+
+  if Code.ensure_loaded?(st2) and function_exported?(st2, :run, 2) do
+    try do
+      case apply(st2, :run, [si, opts]) do
+        {:ok, %{event: ev2}} ->
+          decisions = Map.get(ev2, :decisions, []) |> List.wrap()
+
+          if decisions != [] do
+            Enum.map(decisions, &ensure_decision_score!/1)
+          else
+            fallback
+          end
+
+        {:skip, _} ->
+          fallback
+
+        _ ->
+          fallback
+      end
+    rescue
+      _ -> fallback
+    catch
+      :exit, _ -> fallback
+    end
+  else
+    fallback
+  end
+end
+
+# Prefer probability-like confidence for gating (p_top1 / probs / scores), not raw prior :score.
+defp gate_score(%{} = ch) do
+  score0 = ch[:score] || ch["score"]
+
+  score01 =
+    cond do
+      is_number(score0) and score0 >= 0.0 and score0 <= 1.0 ->
+        score0 * 1.0
+
+      is_binary(score0) ->
+        case Float.parse(score0) do
+          {f, ""} when f >= 0.0 and f <= 1.0 -> f
+          _ -> 0.0
+        end
+
+      true ->
+        0.0
+    end
+
+  p_top1 =
+    case ch[:p_top1] || ch["p_top1"] do
+      p when is_number(p) -> p * 1.0
+      p when is_binary(p) ->
+        case Float.parse(p) do
+          {f, ""} -> f
+          _ -> nil
+        end
+      _ ->
+        nil
+    end
+
+  p1 =
+    cond do
+      is_number(p_top1) ->
+        p_top1
+
+      Code.ensure_loaded?(LIFG) and function_exported?(LIFG, :top1_prob, 1) ->
+        LIFG.top1_prob(ch)
+
+      true ->
+        score01
+    end
+
+  max(score01, p1)
+  |> max(0.0)
+  |> min(1.0)
+end
+
+defp gate_score(_), do: 0.0
+
+defp ensure_decision_score!({tag, %{} = ch}) when tag in [:commit, :allow, :boost],
+  do: {tag, Map.put(ch, :score, gate_score(ch))}
+
+defp ensure_decision_score!(%{} = m),
+  do: Map.put(m, :score, gate_score(m))
+
+defp ensure_decision_score!(other), do: other
+
+  defp emit_gate_decisions(decisions) when is_list(decisions) do
+    Enum.each(decisions, fn dec ->
+      {choice, decision} =
+        case dec do
+          {:commit, %{} = ch} -> {ch, :allow}
+          {:allow, %{} = ch} -> {ch, :allow}
+          {:boost, %{} = ch} -> {ch, :boost}
+          %{} = m ->
+            d = m[:decision] || m["decision"] || :allow
+            d = if is_binary(d), do: String.to_atom(d), else: d
+            {m, d}
+          _ ->
+            {nil, nil}
+        end
+
+      if is_map(choice) and decision in [:allow, :boost] do
+score = gate_score(choice)
+        id = choice[:chosen_id] || choice["chosen_id"] || choice[:id] || choice["id"]
+        ti = choice[:token_index] || choice["token_index"]
+
+        :telemetry.execute(
+          [:brain, :gate, :decision],
+          %{score: score},
+          %{decision: decision, source: :lifg, id: id, token_index: ti}
+        )
+      end
+    end)
+  end
+
+  defp emit_gate_decisions(_), do: :ok
 
   # ───────────────────────── ACC / PFC / Inputs ──────────────────────
 
@@ -356,4 +542,3 @@ defmodule Brain.Pipeline.LIFGStage1 do
     Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test
   end
 end
-
