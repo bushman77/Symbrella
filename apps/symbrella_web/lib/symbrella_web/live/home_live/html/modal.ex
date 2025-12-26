@@ -119,7 +119,10 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
     # 1) meta line: try tail first, then main (some pipelines append meta into main)
     {meta_line1, extra_wo_meta} = extract_meta_line(extra0 || "")
-    {meta_line2, main_wo_meta} = if meta_line1 == nil, do: extract_meta_line(main0), else: {nil, main0}
+
+    {meta_line2, main_wo_meta} =
+      if meta_line1 == nil, do: extract_meta_line(main0), else: {nil, main0}
+
     meta_line = meta_line1 || meta_line2
     main1 = if meta_line1 == nil and meta_line2 != nil, do: main_wo_meta, else: main0
 
@@ -690,7 +693,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       items
     end
   end
-  
+
   defp sense_body(defn, ex) do
     d = defn
     e = ex
@@ -713,4 +716,3 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   defp present?(v) when is_binary(v), do: String.trim(v) != ""
   defp present?(_), do: false
 end
-

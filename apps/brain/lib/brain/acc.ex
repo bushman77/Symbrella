@@ -541,4 +541,3 @@ defmodule Brain.ACC do
     out2
   end
 end
-

@@ -19,39 +19,43 @@ defmodule Brain.LIFG.Stage2 do
   @gate_event_test [:brain, :gate, :decision]
   @gate_event_compat [:brain, :wm, :gate]
 
-@spec run(map() | struct(), keyword()) ::
-        {:ok, %{si: map() | struct(), event: map()}}
-        | {:skip, %{si: map() | struct(), reason: term()}}
-        | {:error, term()}
-def run(si, opts \\ []) do
-  case extract_stage1_event(si) do
-    {:ok, ev1} ->
-      if stage2_enabled?(opts) do
-        case decide(ev1, si, opts) do
-          {:ok, decisions, ev2} ->
-            {:ok, %{si: si, event: Map.put(ev2, :decisions, decisions)}}
+  @spec run(map() | struct(), keyword()) ::
+          {:ok, %{si: map() | struct(), event: map()}}
+          | {:skip, %{si: map() | struct(), reason: term()}}
+          | {:error, term()}
+  def run(si, opts \\ []) do
+    case extract_stage1_event(si) do
+      {:ok, ev1} ->
+        if stage2_enabled?(opts) do
+          case decide(ev1, si, opts) do
+            {:ok, decisions, ev2} ->
+              {:ok, %{si: si, event: Map.put(ev2, :decisions, decisions)}}
 
-          {:skip, reason} ->
-            {:skip, %{si: si, reason: reason}}
+            {:skip, reason} ->
+              {:skip, %{si: si, reason: reason}}
 
-          {:error, reason} ->
-            {:error, reason}
+            {:error, reason} ->
+              {:error, reason}
+          end
+        else
+          {:skip, %{si: si, reason: :not_enabled}}
         end
-      else
-        {:skip, %{si: si, reason: :not_enabled}}
-      end
 
-    {:skip, reason} ->
-      {:skip, %{si: si, reason: reason}}
+      {:skip, reason} ->
+        {:skip, %{si: si, reason: reason}}
+    end
   end
-end
 
-defp stage2_enabled?(opts) when is_list(opts) do
-  # Default is OFF (tests expect :not_enabled when Stage1 exists).
-  Keyword.get(opts, :lifg_stage2_enabled, Application.get_env(:brain, :lifg_stage2_enabled, false))
-end
+  defp stage2_enabled?(opts) when is_list(opts) do
+    # Default is OFF (tests expect :not_enabled when Stage1 exists).
+    Keyword.get(
+      opts,
+      :lifg_stage2_enabled,
+      Application.get_env(:brain, :lifg_stage2_enabled, false)
+    )
+  end
 
-defp stage2_enabled?(_), do: Application.get_env(:brain, :lifg_stage2_enabled, false)
+  defp stage2_enabled?(_), do: Application.get_env(:brain, :lifg_stage2_enabled, false)
 
   # ───────────────────────────────────────────────────────────────────────────
   # Stage1 event extraction
@@ -65,7 +69,7 @@ defp stage2_enabled?(_), do: Application.get_env(:brain, :lifg_stage2_enabled, f
       |> List.wrap()
       |> Enum.find(fn e ->
         is_map(e) and
-          ((Map.get(e, :stage) == :lifg_stage1) or (Map.get(e, "stage") == :lifg_stage1) or
+          (Map.get(e, :stage) == :lifg_stage1 or Map.get(e, "stage") == :lifg_stage1 or
              Map.has_key?(e, :choices) or Map.has_key?(e, "choices"))
       end)
 

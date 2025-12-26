@@ -823,4 +823,3 @@ defmodule SymbrellaWeb.HomeLive do
     |> Enum.find("", fn v -> is_binary(v) and String.trim(v) != "" end)
   end
 end
-

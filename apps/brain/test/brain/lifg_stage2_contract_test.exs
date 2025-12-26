@@ -63,4 +63,3 @@ defmodule Brain.LIFGStage2ContractTest do
     assert si1[:sentence] == "test sentence"
   end
 end
-

@@ -26,4 +26,3 @@ defmodule Brain.LIFG.InputTest do
     assert is_number(score)
   end
 end
-

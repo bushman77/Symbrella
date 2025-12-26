@@ -42,7 +42,8 @@ defmodule Brain.SelfPortrait do
 
     topic =
       try do
-        if Code.ensure_loaded?(Brain.Blackboard) and function_exported?(Brain.Blackboard, :topic, 0) do
+        if Code.ensure_loaded?(Brain.Blackboard) and
+             function_exported?(Brain.Blackboard, :topic, 0) do
           Brain.Blackboard.topic()
         else
           "brain:blackboard"
@@ -161,4 +162,3 @@ defmodule Brain.SelfPortrait do
     end
   end
 end
-

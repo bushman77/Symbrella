@@ -88,7 +88,8 @@ defmodule Brain.LIFG.ChoicesTest do
           "a|noun|0" => 0.9,
           "b|noun|0" => 0.1
         },
-        alt_ids: ["x|noun|0"] # must not appear in alt_ids for Option A
+        # must not appear in alt_ids for Option A
+        alt_ids: ["x|noun|0"]
       }
     ]
 
@@ -101,4 +102,3 @@ defmodule Brain.LIFG.ChoicesTest do
     assert Enum.sort(ch.slate_alt_ids) == ["x|noun|0"]
   end
 end
-

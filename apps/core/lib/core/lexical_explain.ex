@@ -127,7 +127,7 @@ defmodule Core.LexicalExplain do
     ok? =
       cond do
         norm in [nil, ""] -> false
-        (not single_word?(norm)) and not selected_by_whitelist? -> false
+        not single_word?(norm) and not selected_by_whitelist? -> false
         MapSet.member?(@stopwords, norm) and not selected_by_whitelist? -> false
         String.length(norm) < 2 -> false
         norm =~ ~r/^\d+$/u -> false
@@ -292,7 +292,11 @@ defmodule Core.LexicalExplain do
   # Formatting
   # ────────────────────────────────────────────────────────────────────────────
 
-  defp format_head(%{word: word, pos: pos, definition: defn, example: ex, synonyms: syns}, max_syns, sentence) do
+  defp format_head(
+         %{word: word, pos: pos, definition: defn, example: ex, synonyms: syns},
+         max_syns,
+         sentence
+       ) do
     label_pos =
       case pos do
         nil -> ""
@@ -486,4 +490,3 @@ defmodule Core.LexicalExplain do
     |> String.trim()
   end
 end
-

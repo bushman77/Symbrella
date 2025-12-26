@@ -51,4 +51,3 @@ defmodule Brain.SelfPortrait.ModelTest do
     assert p1.traits.curiosity_bias >= c0
   end
 end
-

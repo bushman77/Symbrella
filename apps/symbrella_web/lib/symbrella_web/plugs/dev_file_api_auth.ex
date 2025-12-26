@@ -58,4 +58,3 @@ defmodule SymbrellaWeb.Plugs.DevFileApiAuth do
     end
   end
 end
-

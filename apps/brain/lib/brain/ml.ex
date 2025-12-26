@@ -128,7 +128,6 @@ defmodule Brain.ML do
        last_turn: nil,
        turns: [],
        keep_turns: keep_turns,
-
        hydrate_lex?: hydrate_lex?,
        publish_blackboard?: publish_blackboard?
      }}
@@ -236,16 +235,19 @@ defmodule Brain.ML do
           nil
         end
 
-      %{state0 | pending: %{
-        id: turn_id,
-        opened_at_ms: now_ms,
-        source: source,
-        intent: intent_payload,
-        text: extract_text_any(intent_payload, state0.last_blackboard),
-        timer_ref: tref,
-        finalized?: false,
-        finalized_at_ms: nil
-      }}
+      %{
+        state0
+        | pending: %{
+            id: turn_id,
+            opened_at_ms: now_ms,
+            source: source,
+            intent: intent_payload,
+            text: extract_text_any(intent_payload, state0.last_blackboard),
+            timer_ref: tref,
+            finalized?: false,
+            finalized_at_ms: nil
+          }
+      }
     end
   end
 
@@ -257,7 +259,9 @@ defmodule Brain.ML do
   defp cancel_pending_timer(state), do: state
 
   defp maybe_finalize_pending(%{pending: nil} = state, _turn_id), do: state
-  defp maybe_finalize_pending(%{pending: %{id: id}} = state, turn_id) when id != turn_id, do: state
+
+  defp maybe_finalize_pending(%{pending: %{id: id}} = state, turn_id) when id != turn_id,
+    do: state
 
   defp maybe_finalize_pending(%{pending: pending} = state, _turn_id) do
     now_ms = now_ms()
@@ -280,7 +284,14 @@ defmodule Brain.ML do
         # IMPORTANT: On backstop we DO NOT attempt to pull LIFG directly,
         # because Stage1 may not have run for this turn.
         rec =
-          build_turn_record(state, trigger, pending.id, pending.opened_at_ms, pending.intent, pending.text)
+          build_turn_record(
+            state,
+            trigger,
+            pending.id,
+            pending.opened_at_ms,
+            pending.intent,
+            pending.text
+          )
 
         state
         |> publish_and_push(rec, :append_or_replace)
@@ -317,7 +328,7 @@ defmodule Brain.ML do
   defp maybe_finalize_turn_from_blackboard(state, %{} = env) do
     kind = mget(env, :kind)
 
-    if kind == :telemetry and (mget(env, :event) == @pipeline_stop_event) do
+    if kind == :telemetry and mget(env, :event) == @pipeline_stop_event do
       finalize_on_pipeline_stop(state, env)
     else
       state
@@ -337,7 +348,8 @@ defmodule Brain.ML do
            pending.text || extract_text_any(state.last_intent, state.last_blackboard)}
 
         true ->
-          {new_turn_id(), now_ms, state.last_intent, extract_text_any(state.last_intent, state.last_blackboard)}
+          {new_turn_id(), now_ms, state.last_intent,
+           extract_text_any(state.last_intent, state.last_blackboard)}
       end
 
     trigger = %{
@@ -618,7 +630,19 @@ defmodule Brain.ML do
           v: rec.v,
           turn_id: rec.turn_id,
           hint: "turn record (ML)",
-          turn: Map.take(rec, [:v, :turn_id, :opened_at_ms, :at_ms, :text, :intent, :mood, :wm, :lifg, :trigger])
+          turn:
+            Map.take(rec, [
+              :v,
+              :turn_id,
+              :opened_at_ms,
+              :at_ms,
+              :text,
+              :intent,
+              :mood,
+              :wm,
+              :lifg,
+              :trigger
+            ])
         })
 
       :ok
@@ -661,7 +685,7 @@ defmodule Brain.ML do
 
   defp too_old?(opened_at_ms, now_ms, max_age_ms)
        when is_integer(opened_at_ms) and is_integer(now_ms) and is_integer(max_age_ms) do
-    (now_ms - opened_at_ms) > max_age_ms
+    now_ms - opened_at_ms > max_age_ms
   end
 
   defp too_old?(_, _, _), do: false
@@ -683,7 +707,7 @@ defmodule Brain.ML do
 
   # ───────────────────────── Small utilities ─────────────────────────
 
-  defp truthy?(v) when v in [true, "true", :true, 1, "1", "yes", "on"], do: true
+  defp truthy?(v) when v in [true, "true", true, 1, "1", "yes", "on"], do: true
   defp truthy?(_), do: false
 
   defp mget(%{} = m, k), do: Map.get(m, k) || Map.get(m, to_string(k))
@@ -698,4 +722,3 @@ defmodule Brain.ML do
 
   defp mget_in(_, _), do: nil
 end
- 

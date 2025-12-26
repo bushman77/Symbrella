@@ -193,12 +193,12 @@ defmodule Brain.LIFG do
     assistant_slate = slate_from_assistant_candidates(si_for_stage1)
 
     # Ensure MWE helpers cannot wipe out the base per-token competition
-slate_final =
-  si_for_stage1
-  |> Map.get(:sense_candidates)
-  |> ensure_map()
-  |> merge_slate_maps(slate0)
-  |> merge_slate_maps(assistant_slate)
+    slate_final =
+      si_for_stage1
+      |> Map.get(:sense_candidates)
+      |> ensure_map()
+      |> merge_slate_maps(slate0)
+      |> merge_slate_maps(assistant_slate)
 
     si_for_stage = Map.put(si_for_stage1, :sense_candidates, slate_final)
 
@@ -217,13 +217,18 @@ slate_final =
           raw_choices
           |> Enum.map(&Safe.to_plain/1)
           |> normalize_choice_token_indices(si_after)
-          |> maybe_backfill_probs_and_margin(cfg.scores_mode, si_after, cfg.stage_weights, eff_opts)
+          |> maybe_backfill_probs_and_margin(
+            cfg.scores_mode,
+            si_after,
+            cfg.stage_weights,
+            eff_opts
+          )
           |> Choices.augment(si_after, cfg.min_margin)
           |> normalize_choice_token_indices(si_after)
           |> attach_slate_alt_ids(si_after)
           |> normalize_choices_for_downstream(si_after, eff_opts)
 
-{boosts_out, inhibitions_out} =
+        {boosts_out, inhibitions_out} =
           control_signals(choices, si_after, cfg.scores_mode, cfg.margin_thr, eff_opts)
 
         _ =
@@ -278,7 +283,8 @@ slate_final =
     7) Post.finalize: non-overlap cover and optional reanalysis
   """
   @spec run(map(), keyword()) ::
-          {:ok, %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
+          {:ok,
+           %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
           | {:error, term()}
   def run(si, opts \\ []) when is_map(si) and is_list(opts) do
     try do
@@ -293,7 +299,8 @@ slate_final =
         end
 
       si2 =
-        if Code.ensure_loaded?(Brain.ATL) and function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
+        if Code.ensure_loaded?(Brain.ATL) and
+             function_exported?(Brain.ATL, :attach_sense_candidates, 3) do
           case Brain.ATL.attach_sense_candidates(
                  si1,
                  slate,
@@ -317,7 +324,6 @@ slate_final =
 
       eff_opts = stage1_effective_opts(si2, opts)
       cfg = stage1_config(eff_opts)
-
       weights_for_stage1 = cfg.stage_weights
 
       case run_stage1(si2, cfg, eff_opts) do
@@ -329,7 +335,12 @@ slate_final =
             raw_choices
             |> Enum.map(&Safe.to_plain/1)
             |> normalize_choice_token_indices(si3a)
-            |> maybe_backfill_probs_and_margin(cfg.scores_mode, si3a, weights_for_stage1, eff_opts)
+            |> maybe_backfill_probs_and_margin(
+              cfg.scores_mode,
+              si3a,
+              weights_for_stage1,
+              eff_opts
+            )
             |> Choices.augment(si3a, cfg.min_margin)
             |> normalize_choice_token_indices(si3a)
             |> attach_slate_alt_ids(si3a)
@@ -351,7 +362,11 @@ slate_final =
           {si3c, acc_conflict, acc_present?} = ACCGate.assess(si3b, choices, eff_opts)
 
           acc_conf_tau =
-            Keyword.get(eff_opts, :acc_conflict_tau, Application.get_env(:brain, :acc_conflict_tau, 0.50))
+            Keyword.get(
+              eff_opts,
+              :acc_conflict_tau,
+              Application.get_env(:brain, :acc_conflict_tau, 0.50)
+            )
 
           needy =
             Enum.filter(choices, fn ch ->
@@ -362,10 +377,12 @@ slate_final =
               (m < cfg.margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and alts?
             end)
 
-          pmtg_mode = Keyword.get(eff_opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
+          pmtg_mode =
+            Keyword.get(eff_opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
 
           pmtg_apply? =
-            Keyword.get(eff_opts, :pmtg_apply?, true) and (not acc_present? or acc_conflict >= acc_conf_tau)
+            Keyword.get(eff_opts, :pmtg_apply?, true) and
+              (not acc_present? or acc_conflict >= acc_conf_tau)
 
           :telemetry.execute(
             [:brain, :lifg, :pmtg_decision],
@@ -392,7 +409,10 @@ slate_final =
                          mode: :rerun,
                          rerun_only_if_hits: Keyword.get(eff_opts, :rerun_only_if_hits, true),
                          rerun_weights_bump:
-                           Keyword.get(eff_opts, :rerun_weights_bump, %{lex_fit: 0.05, rel_prior: 0.05})
+                           Keyword.get(eff_opts, :rerun_weights_bump, %{
+                             lex_fit: 0.05,
+                             rel_prior: 0.05
+                           })
                        ) do
                     {:ok, %{si: si_after, choices: merged}} ->
                       {si_after, normalize_choices_for_downstream(merged, si_after, eff_opts)}
@@ -441,7 +461,13 @@ slate_final =
             })
 
           {:ok,
-           %{si: post_out.si, choices: post_out.choices, slate: slate, cover: post_out.cover, flips: post_out.flips}}
+           %{
+             si: post_out.si,
+             choices: post_out.choices,
+             slate: slate,
+             cover: post_out.cover,
+             flips: post_out.flips
+           }}
 
         {:error, reason} ->
           _ =
@@ -454,7 +480,10 @@ slate_final =
     rescue
       e ->
         Logger.error("LIFG full run failed: #{inspect(e)}")
-        _ = Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
+
+        _ =
+          Recorder.maybe_record_last(__MODULE__, :run_exception, si, [], %{}, %{error: inspect(e)})
+
         {:error, e}
     end
   end
@@ -503,7 +532,7 @@ slate_final =
   @spec top1_prob(map()) :: float()
   def top1_prob(choice) when is_map(choice) do
     m0 = Safe.get(choice, :scores, %{}) || %{}
-    m = if is_map(m0) and map_size(m0) > 0, do: m0, else: (Safe.get(choice, :probs, %{}) || %{})
+    m = if is_map(m0) and map_size(m0) > 0, do: m0, else: Safe.get(choice, :probs, %{}) || %{}
     m |> Map.values() |> Enum.max(fn -> 0.0 end)
   end
 
@@ -529,44 +558,42 @@ slate_final =
 
   # ── Stage-1 core execution helpers ─────────────────────────────────────────
 
-# ── Stage-1 core execution helpers ─────────────────────────────────────────
+  defp stage1_effective_opts(si_for_stage, opts) do
+    base =
+      si_for_stage
+      |> Map.get(:lifg_opts, [])
+      |> flatten_lifg_opts()
 
-defp stage1_effective_opts(si_for_stage, opts) do
-  base =
-    si_for_stage
-    |> Map.get(:lifg_opts, [])
-    |> flatten_lifg_opts()
+    base
+    |> Keyword.merge(flatten_lifg_opts(opts))
+    # Critical: do NOT allow nil to override defaults downstream.
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
 
-  base
-  |> Keyword.merge(flatten_lifg_opts(opts))
-  # Critical: do NOT allow nil to override defaults downstream.
-  |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-end
+  defp stage1_config(eff_opts) do
+    default_scores = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
 
-defp stage1_config(eff_opts) do
-  default_scores = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
+    scores_mode =
+      Keyword.get(eff_opts, :scores) || default_scores
 
-  scores_mode =
-    (Keyword.get(eff_opts, :scores) || default_scores)
+    margin_thr =
+      (Keyword.get(eff_opts, :margin_threshold) || 0.15) * 1.0
 
-  margin_thr =
-    (Keyword.get(eff_opts, :margin_threshold) || 0.15) * 1.0
+    min_margin =
+      (Keyword.get(eff_opts, :min_margin) ||
+         Application.get_env(:brain, :lifg_min_margin, 0.05)) * 1.0
 
-  min_margin =
-    (Keyword.get(eff_opts, :min_margin) ||
-       Application.get_env(:brain, :lifg_min_margin, 0.05)) * 1.0
+    stage_weights =
+      Config.lifg_weights()
+      |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
 
-  stage_weights =
-    Config.lifg_weights()
-    |> Map.merge(Map.new(Keyword.get(eff_opts, :weights, [])))
-
-  %{
-    scores_mode: scores_mode,
-    margin_thr: margin_thr,
-    min_margin: min_margin,
-    stage_weights: stage_weights
-  }
-end
+    %{
+      scores_mode: scores_mode,
+      margin_thr: margin_thr,
+      min_margin: min_margin,
+      stage_weights: stage_weights
+    }
+  end
 
   defp stage1_bridge_opts(scores_mode, stage_weights, margin_thr) do
     [
@@ -578,7 +605,8 @@ end
     ]
   end
 
-  defp run_stage1(si_for_stage, cfg, eff_opts) when is_map(si_for_stage) and is_map(cfg) and is_list(eff_opts) do
+  defp run_stage1(si_for_stage, cfg, eff_opts)
+       when is_map(si_for_stage) and is_map(cfg) and is_list(eff_opts) do
     res =
       Stage1Bridge.safe_call(
         si_for_stage,
@@ -599,7 +627,8 @@ end
     slate = slate_from_si(si_for_stage)
 
     cond do
-      is_map(Map.get(si_after, :sense_candidates)) and map_size(Map.get(si_after, :sense_candidates)) > 0 ->
+      is_map(Map.get(si_after, :sense_candidates)) and
+          map_size(Map.get(si_after, :sense_candidates)) > 0 ->
         si_after
 
       is_map(slate) and map_size(slate) > 0 ->
@@ -717,27 +746,27 @@ end
 
   # ── Slate extraction (Stage-1 input contract) ──────────────────────────────
 
-defp slate_from_si(%{} = si) do
-  # Primary: already-built competition slate
-  sc =
-    Map.get(si, :sense_candidates) ||
-      Map.get(si, "sense_candidates") ||
-      %{}
+  defp slate_from_si(%{} = si) do
+    # Primary: already-built competition slate
+    sc =
+      Map.get(si, :sense_candidates) ||
+        Map.get(si, "sense_candidates") ||
+        %{}
 
-  sc = ensure_map(sc)
+    sc = ensure_map(sc)
 
-  if map_size(sc) > 0 do
-    sc
-  else
-    # Fallback: build a per-token slate from active_cells (what your test provides)
-    ac =
-      Map.get(si, :active_cells) ||
-        Map.get(si, "active_cells") ||
-        []
+    if map_size(sc) > 0 do
+      sc
+    else
+      # Fallback: build a per-token slate from active_cells (what your test provides)
+      ac =
+        Map.get(si, :active_cells) ||
+          Map.get(si, "active_cells") ||
+          []
 
-    slate_from_candidate_list(ac)
+      slate_from_candidate_list(ac)
+    end
   end
-end
 
   defp slate_from_si(_), do: %{}
 
@@ -790,12 +819,28 @@ end
         true ->
           Map.merge(
             Map.take(c0, [
-              :lex_fit, :rel_prior, :activation, :intent_bias, :embedding,
-              :pos, :lemma, :norm, :score, :rank
+              :lex_fit,
+              :rel_prior,
+              :activation,
+              :intent_bias,
+              :embedding,
+              :pos,
+              :lemma,
+              :norm,
+              :score,
+              :rank
             ]),
             Map.take(p0, [
-              :lex_fit, :rel_prior, :activation, :intent_bias, :embedding,
-              :pos, :lemma, :norm, :score, :rank
+              :lex_fit,
+              :rel_prior,
+              :activation,
+              :intent_bias,
+              :embedding,
+              :pos,
+              :lemma,
+              :norm,
+              :score,
+              :rank
             ])
           )
       end
@@ -868,9 +913,14 @@ end
 
   defp bucket_for_slate(slate, idx) when is_map(slate) do
     cond do
-      Map.has_key?(slate, idx) -> List.wrap(Map.get(slate, idx))
-      is_integer(idx) and Map.has_key?(slate, Integer.to_string(idx)) -> List.wrap(Map.get(slate, Integer.to_string(idx)))
-      true -> []
+      Map.has_key?(slate, idx) ->
+        List.wrap(Map.get(slate, idx))
+
+      is_integer(idx) and Map.has_key?(slate, Integer.to_string(idx)) ->
+        List.wrap(Map.get(slate, Integer.to_string(idx)))
+
+      true ->
+        []
     end
   end
 
@@ -898,14 +948,18 @@ end
           end
 
         alt_ids0 = List.wrap(Map.get(chp, :alt_ids) || Map.get(chp, "alt_ids") || [])
-        slate_alts0 = List.wrap(Map.get(chp, :slate_alt_ids) || Map.get(chp, "slate_alt_ids") || [])
+
+        slate_alts0 =
+          List.wrap(Map.get(chp, :slate_alt_ids) || Map.get(chp, "slate_alt_ids") || [])
 
         slate_bucket_ids =
           slate
           |> bucket_for_slate(idx)
           |> List.wrap()
           |> Enum.map(&Safe.to_plain/1)
-          |> Enum.map(fn s -> s[:id] || s["id"] || s[:chosen_id] || s["chosen_id"] || s[:lemma] || s["lemma"] end)
+          |> Enum.map(fn s ->
+            s[:id] || s["id"] || s[:chosen_id] || s["chosen_id"] || s[:lemma] || s["lemma"]
+          end)
           |> Enum.reject(&is_nil/1)
           |> Enum.map(&to_string/1)
           |> Enum.reject(fn id -> is_binary(wid) and id == wid end)
@@ -940,14 +994,15 @@ end
   end
 
   defp maybe_put_if_binary(m, _k, _v), do: m
-defp slate_from_assistant_candidates(%{} = si) do
-  cands =
-    Map.get(si, :assistant_candidates) ||
-      Map.get(si, "assistant_candidates") ||
-      []
 
-  slate_from_candidate_list(cands)
-end
+  defp slate_from_assistant_candidates(%{} = si) do
+    cands =
+      Map.get(si, :assistant_candidates) ||
+        Map.get(si, "assistant_candidates") ||
+        []
+
+    slate_from_candidate_list(cands)
+  end
 
   # ── Prob/margin backfill for scores=:none ──────────────────────────────────
 
@@ -963,86 +1018,90 @@ end
     Enum.map(choices1, &ensure_choice_probs_and_margin/1)
   end
 
-defp ensure_choice_probs_and_margin(ch0) when is_map(ch0) do
-  ch = Safe.to_plain(ch0)
+  defp maybe_backfill_probs_and_margin(other, _scores_mode, _si_after, _weights, _eff_opts),
+    do: other
 
-  chosen =
+  defp ensure_choice_probs_and_margin(ch0) when is_map(ch0) do
+    ch = Safe.to_plain(ch0)
+
+    chosen =
+      ch
+      |> choice_winner_id()
+      |> normalize_signal_id()
+
+    ch =
+      ch
+      |> maybe_put_if_binary(:chosen_id, chosen)
+      |> maybe_put_if_binary(:winner_id, chosen)
+
+    probs =
+      ch
+      |> build_prob_map(chosen)
+
+    {p1, p2} = top2_probs(probs)
+
+    margin =
+      case fetch_explicit_margin(ch) do
+        m when is_number(m) and m >= 0.0 -> m * 1.0
+        _ -> max(p1 - p2, 0.0)
+      end
+
+    score =
+      case Map.get(ch, :score) || Map.get(ch, "score") do
+        s when is_number(s) -> s * 1.0
+        _ -> p1
+      end
+
     ch
-    |> choice_winner_id()
-    |> normalize_signal_id()
-
-  ch =
-    ch
-    |> maybe_put_if_binary(:chosen_id, chosen)
-    |> maybe_put_if_binary(:winner_id, chosen)
-
-  probs =
-    ch
-    |> build_prob_map(chosen)
-
-  {p1, p2} = top2_probs(probs)
-
-  margin =
-    case fetch_explicit_margin(ch) do
-      m when is_number(m) and m >= 0.0 -> m * 1.0
-      _ -> max(p1 - p2, 0.0)
-    end
-
-  score =
-    case Map.get(ch, :score) || Map.get(ch, "score") do
-      s when is_number(s) -> s * 1.0
-      _ -> p1
-    end
-
-  ch
-  |> Map.put(:probs, probs)
-  |> Map.put(:margin, margin)
-  |> Map.put(:p_top1, p1)
-  |> Map.put(:score, score)
-end
-defp ensure_choice_probs_and_margin(other), do: other
-
-defp build_prob_map(ch, chosen) do
-  probs0 = Map.get(ch, :probs) || Map.get(ch, "probs")
-  scores0 = Map.get(ch, :scores) || Map.get(ch, "scores")
-
-  probs =
-    cond do
-      is_map(probs0) and map_size(probs0) > 0 ->
-        normalize_prob_map(probs0)
-
-      is_map(scores0) and map_size(scores0) > 0 ->
-        probs_from_scores(scores0)
-
-      is_binary(chosen) ->
-        %{chosen => 1.0}
-
-      true ->
-        %{}
-    end
-
-  # guarantee at least {chosen => 1.0} when we have a winner
-  if probs == %{} and is_binary(chosen), do: %{chosen => 1.0}, else: probs
-end
-
-defp top2_probs(probs) when is_map(probs) do
-  probs
-  |> Map.values()
-  |> Enum.sort(:desc)
-  |> case do
-    [a, b | _] -> {a * 1.0, b * 1.0}
-    [a] -> {a * 1.0, 0.0}
-    _ -> {0.0, 0.0}
+    |> Map.put(:probs, probs)
+    |> Map.put(:margin, margin)
+    |> Map.put(:p_top1, p1)
+    |> Map.put(:score, score)
   end
-end
 
-defp top2_probs(_), do: {0.0, 0.0}
+  defp ensure_choice_probs_and_margin(other), do: other
 
-defp fetch_explicit_margin(ch) when is_map(ch) do
-  Map.get(ch, :margin) || Map.get(ch, "margin")
-end
+  defp build_prob_map(ch, chosen) do
+    probs0 = Map.get(ch, :probs) || Map.get(ch, "probs")
+    scores0 = Map.get(ch, :scores) || Map.get(ch, "scores")
 
-defp fetch_explicit_margin(_), do: nil
+    probs =
+      cond do
+        is_map(probs0) and map_size(probs0) > 0 ->
+          normalize_prob_map(probs0)
+
+        is_map(scores0) and map_size(scores0) > 0 ->
+          probs_from_scores(scores0)
+
+        is_binary(chosen) ->
+          %{chosen => 1.0}
+
+        true ->
+          %{}
+      end
+
+    # guarantee at least {chosen => 1.0} when we have a winner
+    if probs == %{} and is_binary(chosen), do: %{chosen => 1.0}, else: probs
+  end
+
+  defp top2_probs(probs) when is_map(probs) do
+    probs
+    |> Map.values()
+    |> Enum.sort(:desc)
+    |> case do
+      [a, b | _] -> {a * 1.0, b * 1.0}
+      [a] -> {a * 1.0, 0.0}
+      _ -> {0.0, 0.0}
+    end
+  end
+
+  defp top2_probs(_), do: {0.0, 0.0}
+
+  defp fetch_explicit_margin(ch) when is_map(ch) do
+    Map.get(ch, :margin) || Map.get(ch, "margin")
+  end
+
+  defp fetch_explicit_margin(_), do: nil
 
   defp normalize_prob_map(m) when is_map(m) do
     items = Enum.map(m, fn {k, v} -> {to_string(k), max(num(v), 0.0)} end)
@@ -1144,7 +1203,9 @@ defp fetch_explicit_margin(_), do: nil
           senses
           |> List.wrap()
           |> Enum.map(&Safe.to_plain/1)
-          |> Enum.map(fn s -> s[:id] || s["id"] || s[:chosen_id] || s["chosen_id"] || s[:lemma] || s["lemma"] end)
+          |> Enum.map(fn s ->
+            s[:id] || s["id"] || s[:chosen_id] || s["chosen_id"] || s[:lemma] || s["lemma"]
+          end)
           |> Enum.reject(&is_nil/1)
           |> Enum.map(&to_string/1)
           |> Enum.uniq()
@@ -1192,7 +1253,8 @@ defp fetch_explicit_margin(_), do: nil
         idx = normalize_idx(choice_token_index(ch))
         wid = normalize_signal_id(choice_winner_id(ch))
 
-        if is_integer(idx) and idx >= 0 and is_binary(wid) and not MapSet.member?(have, {idx, wid}) do
+        if is_integer(idx) and idx >= 0 and is_binary(wid) and
+             not MapSet.member?(have, {idx, wid}) do
           [%{token_index: idx, id: wid, amount: boost_amt}]
         else
           []
@@ -1306,7 +1368,9 @@ defp fetch_explicit_margin(_), do: nil
 
         case kind do
           :boost ->
-            if is_integer(idx) and idx >= 0 and wid == id, do: [%{token_index: idx, id: id, amount: amt}], else: []
+            if is_integer(idx) and idx >= 0 and wid == id,
+              do: [%{token_index: idx, id: id, amount: amt}],
+              else: []
 
           :inhib ->
             cids =
@@ -1335,7 +1399,10 @@ defp fetch_explicit_margin(_), do: nil
   end
 
   defp normalize_signal_id(v) when is_atom(v), do: v |> Atom.to_string() |> normalize_signal_id()
-  defp normalize_signal_id(v) when is_integer(v) or is_float(v), do: v |> to_string() |> normalize_signal_id()
+
+  defp normalize_signal_id(v) when is_integer(v) or is_float(v),
+    do: v |> to_string() |> normalize_signal_id()
+
   defp normalize_signal_id(_), do: nil
 
   defp normalize_amount(v, _default_amt) when is_number(v), do: v * 1.0
@@ -1361,14 +1428,14 @@ defp fetch_explicit_margin(_), do: nil
       |> Enum.map(&to_string/1)
 
     score_keys =
-      case (Map.get(ch, :scores) || Map.get(ch, "scores") || %{}) do
+      case Map.get(ch, :scores) || Map.get(ch, "scores") || %{} do
         m when is_map(m) -> Map.keys(m) |> Enum.map(&to_string/1)
         l when is_list(l) -> l |> safe_kv_list_to_map() |> Map.keys() |> Enum.map(&to_string/1)
         _ -> []
       end
 
     prob_keys =
-      case (Map.get(ch, :probs) || Map.get(ch, "probs") || %{}) do
+      case Map.get(ch, :probs) || Map.get(ch, "probs") || %{} do
         m when is_map(m) -> Map.keys(m) |> Enum.map(&to_string/1)
         l when is_list(l) -> l |> safe_kv_list_to_map() |> Map.keys() |> Enum.map(&to_string/1)
         _ -> []
@@ -1438,16 +1505,7 @@ defp fetch_explicit_margin(_), do: nil
             _ -> %{}
           end
 
-        {p1, p2} =
-          probs
-          |> Map.values()
-          |> Enum.sort(:desc)
-          |> case do
-            [a, b | _] -> {a, b}
-            [a] -> {a, 0.0}
-            _ -> {0.0, 0.0}
-          end
-
+        {p1, p2} = top2_probs(probs)
         margin = max(p1 - p2, 0.0)
 
         ch
@@ -1466,10 +1524,29 @@ defp fetch_explicit_margin(_), do: nil
     w_act = Map.get(weights, :activation, 0.0) * 1.0
     w_int = Map.get(weights, :intent_bias, 0.0) * 1.0
 
-    lex = num(Map.get(feats, :lex_fit) || Map.get(feats, "lex_fit") || get_in(feats, [:features, :lex_fit]) || 0.0)
-    rel = num(Map.get(feats, :rel_prior) || Map.get(feats, "rel_prior") || get_in(feats, [:features, :rel_prior]) || 0.0)
-    act = num(Map.get(feats, :activation) || Map.get(feats, "activation") || get_in(feats, [:features, :activation]) || 0.0)
-    ib = num(Map.get(feats, :intent_bias) || Map.get(feats, "intent_bias") || get_in(feats, [:features, :intent_bias]) || 0.0)
+    lex =
+      num(
+        Map.get(feats, :lex_fit) || Map.get(feats, "lex_fit") ||
+          get_in(feats, [:features, :lex_fit]) || 0.0
+      )
+
+    rel =
+      num(
+        Map.get(feats, :rel_prior) || Map.get(feats, "rel_prior") ||
+          get_in(feats, [:features, :rel_prior]) || 0.0
+      )
+
+    act =
+      num(
+        Map.get(feats, :activation) || Map.get(feats, "activation") ||
+          get_in(feats, [:features, :activation]) || 0.0
+      )
+
+    ib =
+      num(
+        Map.get(feats, :intent_bias) || Map.get(feats, "intent_bias") ||
+          get_in(feats, [:features, :intent_bias]) || 0.0
+      )
 
     w_lex * lex + w_rel * rel + w_act * act + w_int * ib
   end
@@ -1583,71 +1660,72 @@ defp fetch_explicit_margin(_), do: nil
   defp fallback_feedback_from_slate(_si_after, _choices, _margin_thr, _eff_opts),
     do: %{boosts: [], inhibitions: []}
 
+  defp fallback_feedback_from_choices(choices, margin_thr, eff_opts)
+       when is_list(choices) and is_list(eff_opts) do
+    thr = (margin_thr || 0.0) * 1.0
+    boost_amt = Keyword.get(eff_opts, :boost_amount, 0.05) * 1.0
+    inhib_amt = Keyword.get(eff_opts, :inhib_amount, 0.02) * 1.0
 
+    Enum.reduce(choices, %{boosts: [], inhibitions: []}, fn ch0, acc ->
+      ch = Safe.to_plain(ch0)
 
-defp fallback_feedback_from_choices(choices, margin_thr, eff_opts)
-     when is_list(choices) and is_list(eff_opts) do
-  thr = (margin_thr || 0.0) * 1.0
-  boost_amt = Keyword.get(eff_opts, :boost_amount, 0.05) * 1.0
-  inhib_amt = Keyword.get(eff_opts, :inhib_amount, 0.02) * 1.0
+      margin = choice_margin(ch)
+      tok_idx = normalize_idx(choice_token_index(ch))
+      chosen = choice_winner_id(ch)
 
-  Enum.reduce(choices, %{boosts: [], inhibitions: []}, fn ch0, acc ->
-    ch = Safe.to_plain(ch0)
-
-    margin = choice_margin(ch)
-    tok_idx = normalize_idx(choice_token_index(ch))
-    chosen = choice_winner_id(ch)
-
-    alt_ids0 =
-      List.wrap(Map.get(ch, :alt_ids) || Map.get(ch, "alt_ids") || [])
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&to_string/1)
-      |> Enum.reject(&(&1 == chosen))
-      |> Enum.uniq()
-
-    ranked =
-      cond do
-        is_map(Map.get(ch, :probs) || Map.get(ch, "probs")) ->
-          pmap = Map.get(ch, :probs) || Map.get(ch, "probs")
-          Enum.map(pmap, fn {k, v} -> {to_string(k), max(num(v), 0.0)} end)
-
-        is_map(Map.get(ch, :scores) || Map.get(ch, "scores")) ->
-          smap = Map.get(ch, :scores) || Map.get(ch, "scores")
-          Enum.map(smap, fn {k, v} -> {to_string(k), num(v)} end)
-
-        true ->
-          []
-      end
-
-    alt_ids =
-      if alt_ids0 != [] do
-        alt_ids0
-      else
-        ranked
-        |> Enum.sort_by(fn {_id, v} -> -v end)
-        |> Enum.map(&elem(&1, 0))
+      alt_ids0 =
+        List.wrap(Map.get(ch, :alt_ids) || Map.get(ch, "alt_ids") || [])
+        |> Enum.reject(&is_nil/1)
+        |> Enum.map(&to_string/1)
         |> Enum.reject(&(&1 == chosen))
         |> Enum.uniq()
-        |> Enum.take(8)
+
+      ranked =
+        cond do
+          is_map(Map.get(ch, :probs) || Map.get(ch, "probs")) ->
+            pmap = Map.get(ch, :probs) || Map.get(ch, "probs")
+            Enum.map(pmap, fn {k, v} -> {to_string(k), max(num(v), 0.0)} end)
+
+          is_map(Map.get(ch, :scores) || Map.get(ch, "scores")) ->
+            smap = Map.get(ch, :scores) || Map.get(ch, "scores")
+            Enum.map(smap, fn {k, v} -> {to_string(k), num(v)} end)
+
+          true ->
+            []
+        end
+
+      alt_ids =
+        if alt_ids0 != [] do
+          alt_ids0
+        else
+          ranked
+          |> Enum.sort_by(fn {_id, v} -> -v end)
+          |> Enum.map(&elem(&1, 0))
+          |> Enum.reject(&(&1 == chosen))
+          |> Enum.uniq()
+          |> Enum.take(8)
+        end
+
+      cond do
+        not is_integer(tok_idx) or tok_idx < 0 or not is_binary(chosen) ->
+          acc
+
+        margin >= thr ->
+          boost = %{token_index: tok_idx, id: chosen, amount: boost_amt}
+          %{acc | boosts: [boost | acc.boosts]}
+
+        alt_ids != [] ->
+          inhibs =
+            Enum.map(alt_ids, fn aid -> %{token_index: tok_idx, id: aid, amount: inhib_amt} end)
+
+          %{acc | inhibitions: inhibs ++ acc.inhibitions}
+
+        true ->
+          acc
       end
+    end)
+  end
 
-    cond do
-      not is_integer(tok_idx) or tok_idx < 0 or not is_binary(chosen) ->
-        acc
-
-      margin >= thr ->
-        boost = %{token_index: tok_idx, id: chosen, amount: boost_amt}
-        %{acc | boosts: [boost | acc.boosts]}
-
-      alt_ids != [] ->
-        inhibs = Enum.map(alt_ids, fn aid -> %{token_index: tok_idx, id: aid, amount: inhib_amt} end)
-        %{acc | inhibitions: inhibs ++ acc.inhibitions}
-
-      true ->
-        acc
-    end
-  end)
-end
   defp fallback_feedback_from_choices(_choices, _margin_thr, _eff_opts),
     do: %{boosts: [], inhibitions: []}
 
@@ -1698,18 +1776,18 @@ end
 
   # ── Assistant identity injection ───────────────────────────────────────────
 
-defp id_equiv?(a0, b0) do
-  a = normalize_signal_id(a0)
-  b = normalize_signal_id(b0)
+  defp id_equiv?(a0, b0) do
+    a = normalize_signal_id(a0)
+    b = normalize_signal_id(b0)
 
-  cond do
-    not is_binary(a) or not is_binary(b) -> false
-    a == b -> true
-    String.starts_with?(a, b <> "|") -> true
-    String.starts_with?(b, a <> "|") -> true
-    true -> false
+    cond do
+      not is_binary(a) or not is_binary(b) -> false
+      a == b -> true
+      String.starts_with?(a, b <> "|") -> true
+      String.starts_with?(b, a <> "|") -> true
+      true -> false
+    end
   end
-end
 
   defp ensure_assistant_candidates(%{} = si) do
     tokens = Safe.get(si, :tokens, []) |> List.wrap()
@@ -1824,7 +1902,12 @@ end
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
   defp norm_text(v),
-    do: v |> Kernel.to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+    do:
+      v
+      |> Kernel.to_string()
+      |> String.downcase()
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
 
   # ── Explanation enrichment ─────────────────────────────────────────────────
 
@@ -1872,71 +1955,38 @@ end
     end
   end
 
-defp slate_from_candidate_list(list) when is_list(list) do
-  list
-  |> Enum.map(&Safe.to_plain/1)
-  |> Enum.reduce(%{}, fn c, acc ->
-    idx0 =
-      c[:token_index] || c["token_index"] ||
-        c[:index] || c["index"]
+  # ── Minimal slate builder (used only as fallback) ──────────────────────────
+  defp slate_from_candidate_list(list) when is_list(list) do
+    list
+    |> Enum.map(&Safe.to_plain/1)
+    |> Enum.reduce(%{}, fn c, acc ->
+      idx0 = c[:token_index] || c["token_index"] || c[:index] || c["index"]
+      idx = normalize_idx(idx0)
 
-    idx = normalize_idx(idx0)
+      id0 =
+        c[:id] || c["id"] ||
+          c[:chosen_id] || c["chosen_id"] ||
+          c[:winner_id] || c["winner_id"]
 
-    id0 =
-      c[:id] || c["id"] ||
-        c[:chosen_id] || c["chosen_id"] ||
-        c[:winner_id] || c["winner_id"]
+      cond do
+        not (is_integer(idx) and idx >= 0) ->
+          acc
 
-    cond do
-      not (is_integer(idx) and idx >= 0) ->
-        acc
+        is_nil(id0) ->
+          acc
 
-      is_nil(id0) ->
-        acc
+        true ->
+          sid = to_string(id0)
 
-      true ->
-        sid = to_string(id0)
+          Map.update(acc, idx, [%{id: sid}], fn xs ->
+            [%{id: sid} | xs]
+          end)
+      end
+    end)
+    |> Enum.into(%{}, fn {idx, xs} ->
+      {idx, xs |> Enum.reverse() |> Enum.uniq_by(&Map.get(&1, :id))}
+    end)
+  end
 
-        Map.update(acc, idx, [%{id: sid}], fn xs ->
-          [%{id: sid} | xs]
-        end)
-    end
-  end)
-  |> Enum.into(%{}, fn {idx, xs} ->
-    {idx, xs |> Enum.reverse() |> Enum.uniq_by(&Map.get(&1, :id))}
-  end)
+  defp slate_from_candidate_list(_), do: %{}
 end
-
-defp slate_from_candidate_list(list) when is_list(list) do
-  list
-  |> Enum.map(&Safe.to_plain/1)
-  |> Enum.reduce(%{}, fn c, acc ->
-    idx0 = c[:token_index] || c["token_index"] || c[:index] || c["index"]
-    idx = normalize_idx(idx0)
-
-    id0 = c[:id] || c["id"] || c[:chosen_id] || c["chosen_id"] || c[:winner_id] || c["winner_id"]
-
-    cond do
-      not (is_integer(idx) and idx >= 0) ->
-        acc
-
-      is_nil(id0) ->
-        acc
-
-      true ->
-        sid = to_string(id0)
-
-        Map.update(acc, idx, [%{id: sid}], fn xs ->
-          [%{id: sid} | xs]
-        end)
-    end
-  end)
-  |> Enum.into(%{}, fn {idx, xs} ->
-    {idx, xs |> Enum.reverse() |> Enum.uniq_by(& &1.id)}
-  end)
-end
-
-defp slate_from_candidate_list(_), do: %{}
-
-end
-

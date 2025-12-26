@@ -619,52 +619,52 @@ defmodule Brain do
     {:noreply, %{state | last_intent: li}}
   end
 
-@impl true
-def handle_cast({:gate_from_lifg, si, opts}, state) do
-  now_ms = System.system_time(:millisecond)
+  @impl true
+  def handle_cast({:gate_from_lifg, si, opts}, state) do
+    now_ms = System.system_time(:millisecond)
 
-  with {:ok, %{si: _si2, event: stage2_event}} <-
-         Brain.LIFG.Stage2.run(si, opts) do
-    decisions = Map.get(stage2_event, :decisions, [])
+    with {:ok, %{si: _si2, event: stage2_event}} <-
+           Brain.LIFG.Stage2.run(si, opts) do
+      decisions = Map.get(stage2_event, :decisions, [])
 
-    wm2 =
-      Brain.WorkingMemory.ingest_stage2(
-        state.wm,
-        decisions,
-        now_ms,
-        state.wm_cfg
+      wm2 =
+        Brain.WorkingMemory.ingest_stage2(
+          state.wm,
+          decisions,
+          now_ms,
+          state.wm_cfg
+        )
+
+      state2 =
+        state
+        |> Map.put(:wm, wm2)
+        |> Brain.decay_and_evict(now_ms)
+
+      emit_wm_update(
+        state.wm_cfg.capacity,
+        length(state2.wm),
+        count_added(state.wm, state2.wm),
+        count_removed(state.wm, state2.wm),
+        :lifg_stage2
       )
 
-    state2 =
-      state
-      |> Map.put(:wm, wm2)
-      |> Brain.decay_and_evict(now_ms)
+      _ = safe_mood_update_wm(state2.wm)
 
-    emit_wm_update(
-      state.wm_cfg.capacity,
-      length(state2.wm),
-      count_added(state.wm, state2.wm),
-      count_removed(state.wm, state2.wm),
-      :lifg_stage2
-    )
+      {:noreply, state2}
+    else
+      {:skip, _reason} ->
+        # Stage2 chose not to act; preserve WM exactly
+        {:noreply, state}
 
-    _ = safe_mood_update_wm(state2.wm)
-
-    {:noreply, state2}
-  else
-    {:skip, _reason} ->
-      # Stage2 chose not to act; preserve WM exactly
-      {:noreply, state}
-
-    {:error, reason} ->
-      Logger.error("gate_from_lifg Stage2 error: #{inspect(reason)}")
-      {:noreply, state}
+      {:error, reason} ->
+        Logger.error("gate_from_lifg Stage2 error: #{inspect(reason)}")
+        {:noreply, state}
+    end
   end
-end
 
   # ───────────────────────── Public helper: recall → WM ───────────────────────
-defp count_added(before, aftr), do: max(length(aftr) - length(before), 0)
-defp count_removed(before, aftr), do: max(length(before) - length(aftr), 0)
+  defp count_added(before, aftr), do: max(length(aftr) - length(before), 0)
+  defp count_removed(before, aftr), do: max(length(before) - length(aftr), 0)
 
   @doc ~S"""
   Return the last intent payload stored in the Brain server, if any.
@@ -1040,73 +1040,75 @@ defp count_removed(before, aftr), do: max(length(before) - length(aftr), 0)
   end
 
   # ───────────────────────── Control signal emission ─────────────────────────
-defp apply_control_signals(boosts, inhibitions, opts) do
-  coalesce? = Keyword.get(opts, :coalesce, true)
-  conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
-  delta_key = Keyword.get(opts, :delta_key, :delta)
+  defp apply_control_signals(boosts, inhibitions, opts) do
+    coalesce? = Keyword.get(opts, :coalesce, true)
+    conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())
+    delta_key = Keyword.get(opts, :delta_key, :delta)
 
-  pairs =
-    normalize_signal_pairs(boosts, +1, delta_key) ++
-      normalize_signal_pairs(inhibitions, -1, delta_key)
+    pairs =
+      normalize_signal_pairs(boosts, +1, delta_key) ++
+        normalize_signal_pairs(inhibitions, -1, delta_key)
 
-  signals = if coalesce?, do: ControlSignals.coalesce_pairs(pairs), else: pairs
+    signals = if coalesce?, do: ControlSignals.coalesce_pairs(pairs), else: pairs
 
-  signals
-  |> Task.async_stream(
-    fn {id, delta} ->
-      CellRT.ensure_started(id, id)
-      payload = %{delta_key => delta}
-      GenServer.cast(CellRT.via(id), {:activate, payload})
-    end,
-    max_concurrency: conc,
-    timeout: :infinity
-  )
-  |> Stream.run()
+    signals
+    |> Task.async_stream(
+      fn {id, delta} ->
+        CellRT.ensure_started(id, id)
+        payload = %{delta_key => delta}
+        GenServer.cast(CellRT.via(id), {:activate, payload})
+      end,
+      max_concurrency: conc,
+      timeout: :infinity
+    )
+    |> Stream.run()
 
-  :ok
-end
-
-defp normalize_signal_pairs(list, sign, delta_key) do
-  list
-  |> List.wrap()
-  |> Enum.flat_map(fn
-    {id, delta} ->
-      id2 = normalize_id(id)
-      d = sign * abs(num(delta))
-      if is_nil(id2) or d == 0.0, do: [], else: [{id2, d}]
-
-    %{} = m ->
-      id = Map.get(m, :id) || Map.get(m, "id")
-      raw =
-        Map.get(m, delta_key) || Map.get(m, :delta) || Map.get(m, "delta") ||
-          Map.get(m, :amount) || Map.get(m, "amount")
-
-      id2 = normalize_id(id)
-      d = sign * abs(num(raw))
-      if is_nil(id2) or d == 0.0, do: [], else: [{id2, d}]
-
-    _other ->
-      []
-  end)
-end
-
-defp normalize_id(nil), do: nil
-defp normalize_id(v) do
-  s = v |> to_string() |> String.trim()
-  if s == "", do: nil, else: s
-end
-
-defp num(v) when is_integer(v), do: v * 1.0
-defp num(v) when is_float(v), do: v
-
-defp num(v) when is_binary(v) do
-  case Float.parse(String.trim(v)) do
-    {f, _rest} -> f
-    _ -> 0.0
+    :ok
   end
-end
 
-defp num(_), do: 0.0
+  defp normalize_signal_pairs(list, sign, delta_key) do
+    list
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      {id, delta} ->
+        id2 = normalize_id(id)
+        d = sign * abs(num(delta))
+        if is_nil(id2) or d == 0.0, do: [], else: [{id2, d}]
+
+      %{} = m ->
+        id = Map.get(m, :id) || Map.get(m, "id")
+
+        raw =
+          Map.get(m, delta_key) || Map.get(m, :delta) || Map.get(m, "delta") ||
+            Map.get(m, :amount) || Map.get(m, "amount")
+
+        id2 = normalize_id(id)
+        d = sign * abs(num(raw))
+        if is_nil(id2) or d == 0.0, do: [], else: [{id2, d}]
+
+      _other ->
+        []
+    end)
+  end
+
+  defp normalize_id(nil), do: nil
+
+  defp normalize_id(v) do
+    s = v |> to_string() |> String.trim()
+    if s == "", do: nil, else: s
+  end
+
+  defp num(v) when is_integer(v), do: v * 1.0
+  defp num(v) when is_float(v), do: v
+
+  defp num(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {f, _rest} -> f
+      _ -> 0.0
+    end
+  end
+
+  defp num(_), do: 0.0
 
   # ───────────────────────── Centralized WM helpers ───────────────────────────
 
@@ -1190,4 +1192,3 @@ defp num(_), do: 0.0
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0
 end
-

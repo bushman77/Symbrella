@@ -80,7 +80,7 @@ defmodule Brain.LIFG.BoundaryGuard do
 
       cond do
         # cross-word non-mw => char-gram symptom
-        (not mw?) and String.match?(phrase, ~r/\s/u) ->
+        not mw? and String.match?(phrase, ~r/\s/u) ->
           emit_chargram_violation(tok, :cross_word)
           acc
 
@@ -186,7 +186,7 @@ defmodule Brain.LIFG.BoundaryGuard do
         span =
           cond do
             x > 0 and x == phrase_len -> {s, s + x}
-            x > s and (x - s) == phrase_len -> {s, x}
+            x > s and x - s == phrase_len -> {s, x}
             x > 0 -> {s, s + x}
             true -> nil
           end
@@ -196,7 +196,7 @@ defmodule Brain.LIFG.BoundaryGuard do
       true ->
         cand_end = {s, x}
         cand_len = {s, s + x}
-        cand_ph  = {s, s + byte_size(phrase)}
+        cand_ph = {s, s + byte_size(phrase)}
 
         candidates =
           [cand_end, cand_len, cand_ph]
@@ -299,18 +299,18 @@ defmodule Brain.LIFG.BoundaryGuard do
 
   defp word_byte?(_), do: false
 
-defp safe_slice_bytes(sent, s, e) do
-  cond do
-    not valid_span_bytes?(sent, {s, e}) ->
-      ""
+  defp safe_slice_bytes(sent, s, e) do
+    cond do
+      not valid_span_bytes?(sent, {s, e}) ->
+        ""
 
-    true ->
-      slice = binary_part(sent, s, e - s)
-      if String.valid?(slice), do: slice, else: ""
+      true ->
+        slice = binary_part(sent, s, e - s)
+        if String.valid?(slice), do: slice, else: ""
+    end
+  rescue
+    _ -> ""
   end
-rescue
-  _ -> ""
-end
 
   defp span_start(tok) do
     case Map.get(tok, :span) || Map.get(tok, "span") do
@@ -319,46 +319,46 @@ end
     end
   end
 
-defp down(s) when is_binary(s) do
-  if String.valid?(s) do
-    s
-    |> String.downcase()
-    |> String.trim()
-    |> String.replace(~r/\s+/u, " ")
-  else
-    ascii_norm(s)
-  end
-end
-
-defp down(_), do: ""
-
-defp ascii_norm(bin) when is_binary(bin) do
-  {acc, _last_space?} =
-    bin
-    |> :binary.bin_to_list()
-    |> Enum.reduce({[], true}, fn b, {acc, last_space?} ->
-      cond do
-        b in [?\s, ?\t, ?\n, ?\r] ->
-          if last_space?, do: {acc, true}, else: {[?\s | acc], true}
-
-        b >= ?A and b <= ?Z ->
-          {[b + 32 | acc], false}
-
-        true ->
-          {[b | acc], false}
-      end
-    end)
-
-  out = Enum.reverse(acc)
-
-  out =
-    case out do
-      [] -> []
-      _ -> if List.last(out) == ?\s, do: Enum.drop(out, -1), else: out
+  defp down(s) when is_binary(s) do
+    if String.valid?(s) do
+      s
+      |> String.downcase()
+      |> String.trim()
+      |> String.replace(~r/\s+/u, " ")
+    else
+      ascii_norm(s)
     end
+  end
 
-  :erlang.list_to_binary(out)
-end
+  defp down(_), do: ""
+
+  defp ascii_norm(bin) when is_binary(bin) do
+    {acc, _last_space?} =
+      bin
+      |> :binary.bin_to_list()
+      |> Enum.reduce({[], true}, fn b, {acc, last_space?} ->
+        cond do
+          b in [?\s, ?\t, ?\n, ?\r] ->
+            if last_space?, do: {acc, true}, else: {[?\s | acc], true}
+
+          b >= ?A and b <= ?Z ->
+            {[b + 32 | acc], false}
+
+          true ->
+            {[b | acc], false}
+        end
+      end)
+
+    out = Enum.reverse(acc)
+
+    out =
+      case out do
+        [] -> []
+        _ -> if List.last(out) == ?\s, do: Enum.drop(out, -1), else: out
+      end
+
+    :erlang.list_to_binary(out)
+  end
 
   # IMPORTANT: tests want meta.reason == :chargram (NOT :cross_word / :span_mismatch)
   defp emit_chargram_violation(tok, detail) do
@@ -407,4 +407,3 @@ end
   defp mapify(%{} = m), do: m
   defp mapify(other), do: %{phrase: to_string(other)}
 end
-

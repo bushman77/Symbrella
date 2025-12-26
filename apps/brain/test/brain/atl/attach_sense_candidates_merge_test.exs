@@ -45,7 +45,10 @@ defmodule Brain.ATL.AttachSenseCandidatesMergeTest do
     assert Enum.any?(si2.sense_candidates[5], &((&1.id || &1[:id]) == "symbrella|noun|0"))
 
     assert Map.has_key?(si2.sense_candidates, 1)
-    assert Enum.any?(si2.sense_candidates[1], &((&1.id || &1[:id]) == "good evening|phrase|fallback"))
+
+    assert Enum.any?(
+             si2.sense_candidates[1],
+             &((&1.id || &1[:id]) == "good evening|phrase|fallback")
+           )
   end
 end
-

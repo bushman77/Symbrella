@@ -53,4 +53,3 @@ defmodule Core.MWE.InjectorSpanTest do
     assert by_phrase["kick the bucket"].span == {0, 3}
   end
 end
-

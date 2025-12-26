@@ -29,9 +29,12 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
                {0, {0, 22}},
                {1, {0, 12}},
                {2, {0, 4}},
-               {3, {5, 22}},  # "evening symbrella" is 17 bytes → 5 + 17 = 22
-               {4, {5, 12}},  # "evening" is 7 bytes → 5 + 7 = 12
-               {5, {13, 22}}  # "symbrella" is 9 bytes → 13 + 9 = 22
+               # "evening symbrella" is 17 bytes → 5 + 17 = 22
+               {3, {5, 22}},
+               # "evening" is 7 bytes → 5 + 7 = 12
+               {4, {5, 12}},
+               # "symbrella" is 9 bytes → 13 + 9 = 22
+               {5, {13, 22}}
              ]
 
       # Strong invariant: normalized span slice should match phrase
@@ -49,10 +52,18 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
         intent: :greet,
         confidence: 0.7,
         sense_candidates: %{
-          0 => [%{id: "good evening symbrella|phrase|fallback", lemma: "good evening symbrella", pos: "phrase"}],
+          0 => [
+            %{
+              id: "good evening symbrella|phrase|fallback",
+              lemma: "good evening symbrella",
+              pos: "phrase"
+            }
+          ],
           1 => [%{id: "good evening|phrase|fallback", lemma: "good evening", pos: "phrase"}],
           2 => [%{id: "good|adj|0", lemma: "good", pos: "adj"}],
-          3 => [%{id: "evening symbrella|phrase|fallback", lemma: "evening symbrella", pos: "phrase"}],
+          3 => [
+            %{id: "evening symbrella|phrase|fallback", lemma: "evening symbrella", pos: "phrase"}
+          ],
           4 => [
             %{id: "evening|noun|0", lemma: "evening", pos: "noun"},
             %{id: "evening|verb|0", lemma: "evening", pos: "verb"}
@@ -92,9 +103,17 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
         intent: :greet,
         confidence: 0.7,
         sense_candidates: %{
-          0 => [%{id: "good evening symbrella|phrase|fallback", lemma: "good evening symbrella", pos: "phrase"}],
+          0 => [
+            %{
+              id: "good evening symbrella|phrase|fallback",
+              lemma: "good evening symbrella",
+              pos: "phrase"
+            }
+          ],
           1 => [%{id: "good evening|phrase|fallback", lemma: "good evening", pos: "phrase"}],
-          3 => [%{id: "evening symbrella|phrase|fallback", lemma: "evening symbrella", pos: "phrase"}],
+          3 => [
+            %{id: "evening symbrella|phrase|fallback", lemma: "evening symbrella", pos: "phrase"}
+          ],
           4 => [
             %{id: "evening|noun|0", lemma: "evening", pos: "noun"},
             %{id: "evening|verb|0", lemma: "evening", pos: "verb"}
@@ -126,7 +145,7 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
       assert audit.kept_tokens == 4
       assert audit.dropped_tokens == 2
       assert audit.missing_candidates == 2
-assert audit.missing_candidate_tokens == [2, 5]
+      assert audit.missing_candidate_tokens == [2, 5]
     end
   end
 
@@ -135,4 +154,3 @@ assert audit.missing_candidate_tokens == [2, 5]
     String.slice(sentence, start, len)
   end
 end
-

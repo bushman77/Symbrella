@@ -46,9 +46,9 @@ defmodule Brain.LIFG.Legacy do
           end
 
         loser_ids =
-          (scores |> Map.keys() |> Enum.reject(&(&1 == chosen_id))) ++
-            normalize_ids_list(Safe.get(ch, :alt_ids, [])) ++
-            normalize_ids_list(Safe.get(ch, :slate_alt_ids, []))
+          ((scores |> Map.keys() |> Enum.reject(&(&1 == chosen_id))) ++
+             normalize_ids_list(Safe.get(ch, :alt_ids, [])) ++
+             normalize_ids_list(Safe.get(ch, :slate_alt_ids, [])))
           |> Enum.reject(&is_nil/1)
           |> Enum.reject(&(&1 == chosen_id))
           |> Enum.uniq()
@@ -87,7 +87,7 @@ defmodule Brain.LIFG.Legacy do
   defp normalize_scores_map(m) when is_map(m) do
     Enum.reduce(m, %{}, fn {k, v}, acc ->
       id = normalize_id(k)
-      s = (if is_number(v), do: v * 1.0, else: 0.0) |> max(0.0)
+      s = if(is_number(v), do: v * 1.0, else: 0.0) |> max(0.0)
 
       if is_nil(id) do
         acc
@@ -117,4 +117,3 @@ defmodule Brain.LIFG.Legacy do
   defp to_pair({id, amt}), do: {to_string(id), (amt || 0.0) * 1.0}
   defp to_pair(_), do: nil
 end
-

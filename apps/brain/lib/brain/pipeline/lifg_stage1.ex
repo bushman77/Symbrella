@@ -266,127 +266,137 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   defp maybe_gate_into_wm(state, _si, _opts, _now_ms), do: state
 
-defp stage2_decisions(ev1, si, opts) do
-  # Fallback: commit any choice with score >= lifg_min_score
-  min_score = (Keyword.get(opts, :lifg_min_score, 0.6) || 0.6) * 1.0
+  defp stage2_decisions(ev1, si, opts) do
+    # Fallback: commit any choice with score >= lifg_min_score
+    min_score = (Keyword.get(opts, :lifg_min_score, 0.6) || 0.6) * 1.0
 
-  choices =
-    (ev1[:choices] || ev1["choices"] || [])
-    |> List.wrap()
+    choices =
+      (ev1[:choices] || ev1["choices"] || [])
+      |> List.wrap()
 
-  fallback =
-    for ch <- choices,
-        score = gate_score(ch),
-        score >= min_score do
-      ch
-      |> Map.merge(%{decision: :allow, source: :lifg, score: score})
-    end
+    fallback =
+      for ch <- choices,
+          score = gate_score(ch),
+          score >= min_score do
+        ch
+        |> Map.merge(%{decision: :allow, source: :lifg, score: score})
+      end
 
-  st2 = Brain.LIFG.Stage2
+    st2 = Brain.LIFG.Stage2
 
-  if Code.ensure_loaded?(st2) and function_exported?(st2, :run, 2) do
-    try do
-      case apply(st2, :run, [si, opts]) do
-        {:ok, %{event: ev2}} ->
-          decisions = Map.get(ev2, :decisions, []) |> List.wrap()
+    if Code.ensure_loaded?(st2) and function_exported?(st2, :run, 2) do
+      try do
+        case apply(st2, :run, [si, opts]) do
+          {:ok, %{event: ev2}} ->
+            decisions = Map.get(ev2, :decisions, []) |> List.wrap()
 
-          if decisions != [] do
-            Enum.map(decisions, &ensure_decision_score!/1)
-          else
+            if decisions != [] do
+              Enum.map(decisions, &ensure_decision_score!/1)
+            else
+              fallback
+            end
+
+          {:skip, _} ->
             fallback
+
+          _ ->
+            fallback
+        end
+      rescue
+        _ -> fallback
+      catch
+        :exit, _ -> fallback
+      end
+    else
+      fallback
+    end
+  end
+
+  # Prefer probability-like confidence for gating (p_top1 / probs / scores), not raw prior :score.
+  defp gate_score(%{} = ch) do
+    score0 = ch[:score] || ch["score"]
+
+    score01 =
+      cond do
+        is_number(score0) and score0 >= 0.0 and score0 <= 1.0 ->
+          score0 * 1.0
+
+        is_binary(score0) ->
+          case Float.parse(score0) do
+            {f, ""} when f >= 0.0 and f <= 1.0 -> f
+            _ -> 0.0
           end
 
-        {:skip, _} ->
-          fallback
+        true ->
+          0.0
+      end
+
+    p_top1 =
+      case ch[:p_top1] || ch["p_top1"] do
+        p when is_number(p) ->
+          p * 1.0
+
+        p when is_binary(p) ->
+          case Float.parse(p) do
+            {f, ""} -> f
+            _ -> nil
+          end
 
         _ ->
-          fallback
+          nil
       end
-    rescue
-      _ -> fallback
-    catch
-      :exit, _ -> fallback
-    end
-  else
-    fallback
+
+    p1 =
+      cond do
+        is_number(p_top1) ->
+          p_top1
+
+        Code.ensure_loaded?(LIFG) and function_exported?(LIFG, :top1_prob, 1) ->
+          LIFG.top1_prob(ch)
+
+        true ->
+          score01
+      end
+
+    max(score01, p1)
+    |> max(0.0)
+    |> min(1.0)
   end
-end
 
-# Prefer probability-like confidence for gating (p_top1 / probs / scores), not raw prior :score.
-defp gate_score(%{} = ch) do
-  score0 = ch[:score] || ch["score"]
+  defp gate_score(_), do: 0.0
 
-  score01 =
-    cond do
-      is_number(score0) and score0 >= 0.0 and score0 <= 1.0 ->
-        score0 * 1.0
+  defp ensure_decision_score!({tag, %{} = ch}) when tag in [:commit, :allow, :boost],
+    do: {tag, Map.put(ch, :score, gate_score(ch))}
 
-      is_binary(score0) ->
-        case Float.parse(score0) do
-          {f, ""} when f >= 0.0 and f <= 1.0 -> f
-          _ -> 0.0
-        end
+  defp ensure_decision_score!(%{} = m),
+    do: Map.put(m, :score, gate_score(m))
 
-      true ->
-        0.0
-    end
-
-  p_top1 =
-    case ch[:p_top1] || ch["p_top1"] do
-      p when is_number(p) -> p * 1.0
-      p when is_binary(p) ->
-        case Float.parse(p) do
-          {f, ""} -> f
-          _ -> nil
-        end
-      _ ->
-        nil
-    end
-
-  p1 =
-    cond do
-      is_number(p_top1) ->
-        p_top1
-
-      Code.ensure_loaded?(LIFG) and function_exported?(LIFG, :top1_prob, 1) ->
-        LIFG.top1_prob(ch)
-
-      true ->
-        score01
-    end
-
-  max(score01, p1)
-  |> max(0.0)
-  |> min(1.0)
-end
-
-defp gate_score(_), do: 0.0
-
-defp ensure_decision_score!({tag, %{} = ch}) when tag in [:commit, :allow, :boost],
-  do: {tag, Map.put(ch, :score, gate_score(ch))}
-
-defp ensure_decision_score!(%{} = m),
-  do: Map.put(m, :score, gate_score(m))
-
-defp ensure_decision_score!(other), do: other
+  defp ensure_decision_score!(other), do: other
 
   defp emit_gate_decisions(decisions) when is_list(decisions) do
     Enum.each(decisions, fn dec ->
       {choice, decision} =
         case dec do
-          {:commit, %{} = ch} -> {ch, :allow}
-          {:allow, %{} = ch} -> {ch, :allow}
-          {:boost, %{} = ch} -> {ch, :boost}
+          {:commit, %{} = ch} ->
+            {ch, :allow}
+
+          {:allow, %{} = ch} ->
+            {ch, :allow}
+
+          {:boost, %{} = ch} ->
+            {ch, :boost}
+
           %{} = m ->
             d = m[:decision] || m["decision"] || :allow
             d = if is_binary(d), do: String.to_atom(d), else: d
             {m, d}
+
           _ ->
             {nil, nil}
         end
 
       if is_map(choice) and decision in [:allow, :boost] do
-score = gate_score(choice)
+        score = gate_score(choice)
         id = choice[:chosen_id] || choice["chosen_id"] || choice[:id] || choice["id"]
         ti = choice[:token_index] || choice["token_index"]
 
@@ -440,7 +450,8 @@ score = gate_score(choice)
   end
 
   defp enrich_for_policy(si_or_cands, tokens),
-    do: if(is_map(si_or_cands), do: Map.put(si_or_cands, :tokens, tokens), else: %{tokens: tokens})
+    do:
+      if(is_map(si_or_cands), do: Map.put(si_or_cands, :tokens, tokens), else: %{tokens: tokens})
 
   defp build_lifg_inputs(%{} = si) do
     %{

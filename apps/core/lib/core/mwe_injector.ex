@@ -156,4 +156,3 @@ defmodule Core.MWE.Injector do
   defp single_word_string?(p) when is_binary(p), do: not String.contains?(p, " ")
   defp single_word_string?(_), do: false
 end
-

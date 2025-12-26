@@ -18,118 +18,118 @@ defmodule Brain.LIFG.Choices do
   @type choice :: map()
   @type si :: map()
 
-# apps/brain/lib/brain/lifg/choices.ex
+  # apps/brain/lib/brain/lifg/choices.ex
 
-@spec augment([choice], si, number()) :: [choice]
-def augment(raw_choices, si_after, min_margin) when is_list(raw_choices) and is_map(si_after) do
-  slate0 =
-    Safe.get(si_after, :sense_candidates, %{}) ||
-      Safe.get(si_after, :candidates_by_token, %{}) || %{}
+  @spec augment([choice], si, number()) :: [choice]
+  def augment(raw_choices, si_after, min_margin) when is_list(raw_choices) and is_map(si_after) do
+    slate0 =
+      Safe.get(si_after, :sense_candidates, %{}) ||
+        Safe.get(si_after, :candidates_by_token, %{}) || %{}
 
-  slate = if is_map(slate0), do: slate0, else: %{}
+    slate = if is_map(slate0), do: slate0, else: %{}
 
-  Enum.map(raw_choices, fn ch0 ->
-    ch = Safe.to_plain(ch0)
-    idx = normalize_idx(Safe.get(ch, :token_index, 0))
+    Enum.map(raw_choices, fn ch0 ->
+      ch = Safe.to_plain(ch0)
+      idx = normalize_idx(Safe.get(ch, :token_index, 0))
 
-scores0 = Safe.get(ch, :scores, %{}) || %{}
-scores = score_map(scores0)
+      scores0 = Safe.get(ch, :scores, %{}) || %{}
+      scores = score_map(scores0)
 
-probs0 = Safe.get(ch, :probs, %{}) || %{}
-    probs = score_map(probs0)
+      probs0 = Safe.get(ch, :probs, %{}) || %{}
+      probs = score_map(probs0)
 
-    score_map_for_ids =
-      cond do
-        map_size(scores) > 0 -> scores
-        map_size(probs) > 0 -> probs
-        true -> %{}
-      end
+      score_map_for_ids =
+        cond do
+          map_size(scores) > 0 -> scores
+          map_size(probs) > 0 -> probs
+          true -> %{}
+        end
 
-    chosen_id =
-      case Safe.get(ch, :chosen_id) do
-        nil ->
-          case Enum.max_by(score_map_for_ids, fn {_id, s} -> num(s) end, fn -> nil end) do
-            {id, _} -> id
-            _ -> Safe.get(ch, :id) || Safe.get(ch, :winner_id)
-          end
+      chosen_id =
+        case Safe.get(ch, :chosen_id) do
+          nil ->
+            case Enum.max_by(score_map_for_ids, fn {_id, s} -> num(s) end, fn -> nil end) do
+              {id, _} -> id
+              _ -> Safe.get(ch, :id) || Safe.get(ch, :winner_id)
+            end
 
-        x ->
-          x
-      end
+          x ->
+            x
+        end
 
-    chosen_id_s = normalize_id(chosen_id)
+      chosen_id_s = normalize_id(chosen_id)
 
-    scored_ids =
-      score_map_for_ids
-      |> Map.keys()
-      |> Enum.map(&normalize_id/1)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
+      scored_ids =
+        score_map_for_ids
+        |> Map.keys()
+        |> Enum.map(&normalize_id/1)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
 
-    alt_ids =
-      case chosen_id_s do
-        nil -> scored_ids
-        _ -> scored_ids -- [chosen_id_s]
-      end
+      alt_ids =
+        case chosen_id_s do
+          nil -> scored_ids
+          _ -> scored_ids -- [chosen_id_s]
+        end
 
-    slate_ids_all =
-      case bucket_for(slate, idx) do
-        list when is_list(list) ->
-          list
-          |> Enum.map(fn c ->
-            c = Safe.to_plain(c)
-            Safe.get(c, :id) || Safe.get(c, :lemma) || Safe.get(c, :word)
-          end)
-          |> Enum.map(&normalize_id/1)
-          |> Enum.reject(&is_nil/1)
-          |> Enum.uniq()
+      slate_ids_all =
+        case bucket_for(slate, idx) do
+          list when is_list(list) ->
+            list
+            |> Enum.map(fn c ->
+              c = Safe.to_plain(c)
+              Safe.get(c, :id) || Safe.get(c, :lemma) || Safe.get(c, :word)
+            end)
+            |> Enum.map(&normalize_id/1)
+            |> Enum.reject(&is_nil/1)
+            |> Enum.uniq()
 
-        _ ->
-          []
-      end
+          _ ->
+            []
+        end
 
-    slate_alt_ids =
-      slate_ids_all
-      |> Kernel.--(scored_ids)
-      |> then(fn ids -> if chosen_id_s, do: ids -- [chosen_id_s], else: ids end)
-      |> Enum.uniq()
+      slate_alt_ids =
+        slate_ids_all
+        |> Kernel.--(scored_ids)
+        |> then(fn ids -> if chosen_id_s, do: ids -- [chosen_id_s], else: ids end)
+        |> Enum.uniq()
 
-    margin0 =
-      case Safe.get(ch, :margin) do
-        m when is_number(m) and m > 0.0 ->
-          m * 1.0
+      margin0 =
+        case Safe.get(ch, :margin) do
+          m when is_number(m) and m > 0.0 ->
+            m * 1.0
 
-        _ ->
-          vals =
-            score_map_for_ids
-            |> Map.values()
-            |> Enum.map(&num/1)
-            |> Enum.sort(:desc)
+          _ ->
+            vals =
+              score_map_for_ids
+              |> Map.values()
+              |> Enum.map(&num/1)
+              |> Enum.sort(:desc)
 
-          case vals do
-            [a, b | _] -> a - b
-            _ -> 0.0
-          end
-      end
+            case vals do
+              [a, b | _] -> a - b
+              _ -> 0.0
+            end
+        end
 
-    score_count = map_size(score_map_for_ids)
+      score_count = map_size(score_map_for_ids)
 
-    margin =
-      cond do
-        score_count == 0 -> 0.0
-        score_count < 2 -> max(margin0, min_margin * 1.0)
-        true -> max(margin0, 0.0)
-      end
-      |> Float.round(6)
+      margin =
+        cond do
+          score_count == 0 -> 0.0
+          score_count < 2 -> max(margin0, min_margin * 1.0)
+          true -> max(margin0, 0.0)
+        end
+        |> Float.round(6)
 
-    ch
-    |> Map.put(:token_index, idx)
-    |> Map.put(:chosen_id, chosen_id_s)
-    |> Map.put(:alt_ids, alt_ids)
-    |> Map.put(:slate_alt_ids, slate_alt_ids)
-    |> Map.put(:margin, margin)
-  end)
-end
+      ch
+      |> Map.put(:token_index, idx)
+      |> Map.put(:chosen_id, chosen_id_s)
+      |> Map.put(:alt_ids, alt_ids)
+      |> Map.put(:slate_alt_ids, slate_alt_ids)
+      |> Map.put(:margin, margin)
+    end)
+  end
 
   defp bucket_for(slate, idx) when is_map(slate) do
     cond do
@@ -184,22 +184,20 @@ end
   defp num(_), do: 0.0
   defp score_map(m) when is_map(m), do: m
 
-defp score_map(list) when is_list(list) do
-  cond do
-    Keyword.keyword?(list) ->
-      Enum.into(list, %{})
+  defp score_map(list) when is_list(list) do
+    cond do
+      Keyword.keyword?(list) ->
+        Enum.into(list, %{})
 
-    Enum.all?(list, &match?({_, _}, &1)) ->
-      Enum.into(list, %{})
+      Enum.all?(list, &match?({_, _}, &1)) ->
+        Enum.into(list, %{})
 
-    true ->
-      %{}
+      true ->
+        %{}
+    end
+  rescue
+    _ -> %{}
   end
-rescue
-  _ -> %{}
+
+  defp score_map(_), do: %{}
 end
-
-defp score_map(_), do: %{}
-
-end
-

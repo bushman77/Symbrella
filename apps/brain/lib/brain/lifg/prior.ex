@@ -164,10 +164,10 @@ defmodule Brain.LIFG.Prior do
     |> Safe.ensure_list()
     |> Enum.map(&Safe.to_plain/1)
     |> Enum.reduce([], fn
-      ("tag:" <> rest, acc) when is_binary(rest) ->
+      "tag:" <> rest, acc when is_binary(rest) ->
         [String.downcase(String.trim(rest)) | acc]
 
-      (_, acc) ->
+      _, acc ->
         acc
     end)
   end
@@ -242,7 +242,6 @@ defmodule Brain.LIFG.Prior do
       {true, :marked_variant} -> 0.7
       {true, :marginal} -> 0.4
       {true, :exotic} -> 0.2
-
       # Open-class defaults
       {false, :core_everyday} -> 0.8
       {false, :marked_variant} -> 0.5
@@ -283,4 +282,3 @@ defmodule Brain.LIFG.Prior do
   defp to_string_if_present(v) when is_binary(v), do: v
   defp to_string_if_present(v), do: to_string(v)
 end
-

@@ -117,7 +117,13 @@ defmodule Brain.WM.Gate do
 
         st =
           if score >= min_score do
-            st |> admit_lifg_id(to_string(idb), score, %{lemma: lemma_from_id(to_string(idb))}, gate_event)
+            st
+            |> admit_lifg_id(
+              to_string(idb),
+              score,
+              %{lemma: lemma_from_id(to_string(idb))},
+              gate_event
+            )
           else
             st
           end
@@ -130,7 +136,13 @@ defmodule Brain.WM.Gate do
             st
 
           true ->
-            admit_lifg_id(st, to_string(ida), score, %{lemma: lemma_from_id(to_string(ida))}, gate_event)
+            admit_lifg_id(
+              st,
+              to_string(ida),
+              score,
+              %{lemma: lemma_from_id(to_string(ida))},
+              gate_event
+            )
         end
 
       _, st ->
@@ -215,7 +227,8 @@ defmodule Brain.WM.Gate do
             Map.get(it, :id) == id and Map.get(it, :source) == :lifg
           end)
 
-        item0 = Enum.find(list, fn it -> Map.get(it, :id) == id and Map.get(it, :source) == :lifg end)
+        item0 =
+          Enum.find(list, fn it -> Map.get(it, :id) == id and Map.get(it, :source) == :lifg end)
 
         item =
           if is_map(item0) do
@@ -300,4 +313,3 @@ defmodule Brain.WM.Gate do
   defp clamp01(x) when is_number(x) and x > 1.0, do: 1.0
   defp clamp01(x) when is_number(x), do: x
 end
-

@@ -401,7 +401,8 @@ defmodule Core.BrainAdapter do
       not enabled ->
         si
 
-      not (Code.ensure_loaded?(@affect_appraisal) and function_exported?(@affect_appraisal, :appraise, 1)) ->
+      not (Code.ensure_loaded?(@affect_appraisal) and
+               function_exported?(@affect_appraisal, :appraise, 1)) ->
         si
 
       true ->
@@ -660,4 +661,3 @@ defmodule Core.BrainAdapter do
     end
   end
 end
-

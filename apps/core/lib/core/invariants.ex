@@ -157,12 +157,13 @@ defmodule Core.Invariants do
   # If a token carries a span, ensure the slice matches the phrase
   # and that the slice begins/ends on word boundaries.
   defp align_span_violation?(%{span: {start, second}}, sent_norm, phrase_norm)
-       when is_integer(start) and is_integer(second) and is_binary(sent_norm) and is_binary(phrase_norm) do
+       when is_integer(start) and is_integer(second) and is_binary(sent_norm) and
+              is_binary(phrase_norm) do
     case disambiguate_span(sent_norm, phrase_norm, start, second) do
       {:ok, {s, e}} ->
         # boundary check: previous and next bytes must NOT be word bytes (or OOB)
         prev = if s == 0, do: nil, else: :binary.at(sent_norm, s - 1)
-        nxt  = if e == byte_size(sent_norm), do: nil, else: :binary.at(sent_norm, e)
+        nxt = if e == byte_size(sent_norm), do: nil, else: :binary.at(sent_norm, e)
 
         boundary_ok? = boundary_byte?(prev) and boundary_byte?(nxt)
         not boundary_ok?
@@ -188,9 +189,12 @@ defmodule Core.Invariants do
 
     candidates =
       [
-        {start, second},          # treat second as end_exclusive
-        {start, start + second},  # treat second as len
-        {start, start + ph_len}   # treat as phrase length
+        # treat second as end_exclusive
+        {start, second},
+        # treat second as len
+        {start, start + second},
+        # treat as phrase length
+        {start, start + ph_len}
       ]
       |> Enum.uniq()
       |> Enum.filter(fn {s, e} -> s >= 0 and e > s and e <= bytes end)
@@ -209,7 +213,8 @@ defmodule Core.Invariants do
     end
   end
 
-  defp slice_bytes(sent, s, e) when is_binary(sent) and is_integer(s) and is_integer(e) and e > s do
+  defp slice_bytes(sent, s, e)
+       when is_binary(sent) and is_integer(s) and is_integer(e) and e > s do
     try do
       :binary.part(sent, s, e - s)
     rescue
@@ -255,4 +260,3 @@ defmodule Core.Invariants do
 
   defp norm(v), do: norm(Kernel.to_string(v))
 end
-

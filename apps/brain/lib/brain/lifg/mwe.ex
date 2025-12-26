@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/lifg/mwe.ex
 defmodule Brain.LIFG.MWE do
   @moduledoc """
   MWE + backfill helpers for LIFG Stage-1.
@@ -8,6 +9,11 @@ defmodule Brain.LIFG.MWE do
     - Backfill real phrase/unigram candidates from `si.active_cells`
     - Optionally backfill from Db when enabled via `:db_backfill?` or app env
     - Optionally absorb unigram cell senses into overlapping MWE buckets
+
+  Key invariants (important):
+    - Bucketing is done by token's true `:index`/`:token_index` (not list position).
+    - `sense_candidates` keys are normalized to integer token indices when possible.
+    - Fallback phrase ids use normalized norm keys (downcased, trimmed, single-space).
   """
 
   import Ecto.Query, only: [from: 2]
@@ -37,6 +43,7 @@ defmodule Brain.LIFG.MWE do
     - Early-return if fallback disabled
     - Suppresses fallbacks for phrases that start/end with function words
       (prevents "kick the", "the bucket", etc.)
+    - Buckets by token's true :index/:token_index (not list position)
   """
   @spec ensure_mwe_candidates(map(), keyword()) :: map()
   def ensure_mwe_candidates(%{tokens: tokens} = si, opts) when is_list(tokens) do
@@ -50,32 +57,41 @@ defmodule Brain.LIFG.MWE do
     if not enable? do
       si
     else
-      sc0 = Map.get(si, :sense_candidates, %{})
+      sc0 =
+        si
+        |> Map.get(:sense_candidates, %{})
+        |> ensure_map()
+        |> normalize_sc_keys()
 
       {sc, emitted} =
-        Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+        Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, list_i}, {acc, n} ->
+          tidx = token_index(tok, list_i)
+
           token_n = Safe.get(tok, :n, if(Safe.get(tok, :mw, false), do: 2, else: 1))
-          phrase = Safe.get(tok, :phrase) || Safe.get(tok, :lemma)
+          phrase0 = Safe.get(tok, :phrase) || Safe.get(tok, :lemma)
           mw? = Safe.get(tok, :mw, token_n > 1)
 
           cond do
-            not mw? or is_nil(phrase) ->
+            not mw? or is_nil(phrase0) or not (is_integer(tidx) and tidx >= 0) ->
               {acc, n}
 
             # IMPORTANT: "compatible" means a *real* phrase sense, not our fallback
-            has_compatible_mwe?(acc, idx) ->
+            has_compatible_mwe?(acc, tidx) ->
               {acc, n}
 
-            not allow_fallback_phrase?(phrase) ->
+            not allow_fallback_phrase?(phrase0) ->
               {acc, n}
 
             true ->
+              # Normalize for stable ids/keys
+              nk = norm_key(phrase0)
+
               score_guess =
-                idx
+                tidx
                 |> unigram_neighbor_idxs()
                 |> Enum.map(fn j ->
                   acc
-                  |> Map.get(j, [])
+                  |> get_bucket(j)
                   |> Enum.map(&Map.get(&1, :score, 0.0))
                   |> Enum.max(fn -> 0.0 end)
                 end)
@@ -86,9 +102,9 @@ defmodule Brain.LIFG.MWE do
                 |> min(0.45)
 
               candidate = %{
-                id: "#{phrase}|phrase|fallback",
-                lemma: phrase,
-                norm: phrase,
+                id: "#{nk}|phrase|fallback",
+                lemma: phrase0,
+                norm: nk,
                 mw: true,
                 pos: :phrase,
                 rel_prior: 0.30,
@@ -96,11 +112,14 @@ defmodule Brain.LIFG.MWE do
                 source: :mwe_fallback
               }
 
-              updated = Map.update(acc, idx, [candidate], fn lst -> [candidate | lst] end)
+              updated = put_candidate(acc, tidx, candidate)
 
+              # Keep `phrase` as the normalized key (stable + matches your current test),
+              # but also include `surface` for debugging/UI if needed.
               safe_exec_telemetry(@mwe_fallback_event, %{count: 1}, %{
-                token_index: idx,
-                phrase: phrase,
+                token_index: tidx,
+                phrase: nk,
+                surface: phrase0,
                 score: candidate.score
               })
 
@@ -118,13 +137,20 @@ defmodule Brain.LIFG.MWE do
   @doc """
   Opt-in: absorb unigram senses from active_cells into overlapping MWE buckets.
   Enabled with opts: `[absorb_unigrams_into_mwe?: true]`.
+
+  Buckets by the MWE token's true :index/:token_index.
   """
   @spec absorb_unigrams_into_mwe(map(), keyword()) :: map()
   def absorb_unigrams_into_mwe(%{tokens: toks} = si, opts) when is_list(toks) do
     if not Keyword.get(opts, :absorb_unigrams_into_mwe?, false) do
       si
     else
-      sc0 = Map.get(si, :sense_candidates, %{})
+      sc0 =
+        si
+        |> Map.get(:sense_candidates, %{})
+        |> ensure_map()
+        |> normalize_sc_keys()
+
       cells = Safe.get(si, :active_cells, []) |> Enum.map(&Safe.to_plain/1)
 
       cells_by_norm =
@@ -133,17 +159,18 @@ defmodule Brain.LIFG.MWE do
         end)
 
       updated =
-        Enum.reduce(Enum.with_index(toks), sc0, fn {tok, idx}, acc ->
+        Enum.reduce(Enum.with_index(toks), sc0, fn {tok, list_i}, acc ->
+          tidx = token_index(tok, list_i)
           n = Safe.get(tok, :n, 1)
           mw? = Safe.get(tok, :mw, n > 1)
           mwe_span = Safe.get(tok, :span)
 
-          if mw? and is_tuple(mwe_span) do
+          if mw? and is_tuple(mwe_span) and is_integer(tidx) and tidx >= 0 do
             child_norms =
               toks
               |> Enum.with_index()
-              |> Enum.filter(fn {t, j} ->
-                j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), mwe_span)
+              |> Enum.filter(fn {t, _j} ->
+                Safe.get(t, :n, 1) == 1 and inside?(t, mwe_span)
               end)
               |> Enum.map(fn {t, _} ->
                 (Safe.get(t, :phrase) || Safe.get(t, :word) || "") |> down()
@@ -172,10 +199,10 @@ defmodule Brain.LIFG.MWE do
               acc
             else
               merged =
-                (absorbed ++ Map.get(acc, idx, []))
+                (absorbed ++ get_bucket(acc, tidx))
                 |> Enum.uniq_by(&(&1[:id] || &1["id"]))
 
-              Map.put(acc, idx, merged)
+              Map.put(acc, tidx, merged)
             end
           else
             acc
@@ -194,12 +221,19 @@ defmodule Brain.LIFG.MWE do
 
   Opt:
     * `:db_backfill?` (default from app env `:brain, :lifg_db_backfill`, true)
+
+  Buckets by token's true :index/:token_index.
   """
   @spec backfill_real_mwe_from_active_cells(map(), keyword()) :: map()
   def backfill_real_mwe_from_active_cells(si, opts \\ [])
 
   def backfill_real_mwe_from_active_cells(si, opts) when is_map(si) and is_list(opts) do
-    sc0 = Map.get(si, :sense_candidates, %{})
+    sc0 =
+      si
+      |> Map.get(:sense_candidates, %{})
+      |> ensure_map()
+      |> normalize_sc_keys()
+
     tokens = Map.get(si, :tokens, [])
     cells = Map.get(si, :active_cells, [])
 
@@ -217,13 +251,15 @@ defmodule Brain.LIFG.MWE do
     needed_norms =
       tokens
       |> Enum.with_index()
-      |> Enum.reduce(MapSet.new(), fn {tok, idx}, acc ->
+      |> Enum.reduce(MapSet.new(), fn {tok, list_i}, acc ->
+        tidx = token_index(tok, list_i)
+
         phrase = Safe.get(tok, :phrase)
         mw? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
-        bucket = Map.get(sc0, idx, [])
+        bucket = if is_integer(tidx) and tidx >= 0, do: get_bucket(sc0, tidx), else: []
 
         cond do
-          not mw? or is_nil(phrase) ->
+          not mw? or is_nil(phrase) or not (is_integer(tidx) and tidx >= 0) ->
             acc
 
           has_real_phrase_bucket?(bucket) ->
@@ -249,13 +285,15 @@ defmodule Brain.LIFG.MWE do
       end
 
     {sc, added} =
-      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, idx}, {acc, n} ->
+      Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, list_i}, {acc, n} ->
+        tidx = token_index(tok, list_i)
+
         phrase = Safe.get(tok, :phrase)
         mw? = Safe.get(tok, :mw, false) or Safe.get(tok, :n, 1) > 1
-        bucket = Map.get(acc, idx, [])
+        bucket = if is_integer(tidx) and tidx >= 0, do: get_bucket(acc, tidx), else: []
 
         cond do
-          not mw? or is_nil(phrase) ->
+          not mw? or is_nil(phrase) or not (is_integer(tidx) and tidx >= 0) ->
             {acc, n}
 
           has_real_phrase_bucket?(bucket) ->
@@ -280,13 +318,13 @@ defmodule Brain.LIFG.MWE do
               rows ->
                 cands =
                   Enum.map(rows, fn c ->
-                    id = Safe.get(c, :id) || "#{phrase}|phrase|0"
+                    id = Safe.get(c, :id) || "#{nk}|phrase|0"
                     act = Safe.get(c, :activation, 0.25)
 
                     %{
                       id: to_string(id),
                       lemma: phrase,
-                      norm: phrase,
+                      norm: nk,
                       mw: true,
                       pos: :phrase,
                       rel_prior: 0.30,
@@ -296,7 +334,10 @@ defmodule Brain.LIFG.MWE do
                     }
                   end)
 
-                {Map.put(acc, idx, cands ++ bucket), n + length(cands)}
+                merged =
+                  Enum.uniq_by(cands ++ bucket, fn c -> to_string(Safe.get(c, :id) || "") end)
+
+                {Map.put(acc, tidx, merged), n + length(cands)}
             end
         end
       end)
@@ -307,10 +348,17 @@ defmodule Brain.LIFG.MWE do
   @doc """
   If a unigram token has no unigram candidates but `active_cells` has matching real cells,
   inject small-prior unigram candidates.
+
+  Buckets by token's true :index/:token_index.
   """
   @spec backfill_unigrams_from_active_cells(map(), keyword()) :: map()
   def backfill_unigrams_from_active_cells(%{} = si, opts) when is_list(opts) do
-    sc0 = Map.get(si, :sense_candidates, %{})
+    sc0 =
+      si
+      |> Map.get(:sense_candidates, %{})
+      |> ensure_map()
+      |> normalize_sc_keys()
+
     tokens = Map.get(si, :tokens, [])
     cells = Map.get(si, :active_cells, [])
 
@@ -328,7 +376,8 @@ defmodule Brain.LIFG.MWE do
     {sc, added} =
       tokens
       |> Enum.with_index()
-      |> Enum.reduce({sc0, 0}, fn {tok, idx}, {acc, n} ->
+      |> Enum.reduce({sc0, 0}, fn {tok, list_i}, {acc, n} ->
+        tidx = token_index(tok, list_i)
         n_tok = Safe.get(tok, :n, 1)
         mw? = Safe.get(tok, :mw, n_tok > 1)
 
@@ -338,12 +387,12 @@ defmodule Brain.LIFG.MWE do
             Safe.get(tok, :lemma)
 
         cond do
-          mw? or is_nil(surface) ->
+          mw? or is_nil(surface) or not (is_integer(tidx) and tidx >= 0) ->
             {acc, n}
 
           true ->
             nk = norm_key(surface)
-            bucket = Map.get(acc, idx, [])
+            bucket = get_bucket(acc, tidx)
 
             if Enum.any?(bucket, &unigram_candidate?/1) do
               {acc, n}
@@ -389,11 +438,16 @@ defmodule Brain.LIFG.MWE do
                     {acc, n}
                   else
                     safe_exec_telemetry(@unigram_backfill_event, %{count: length(cands)}, %{
-                      token_index: idx,
-                      norm: surface
+                      token_index: tidx,
+                      norm: nk
                     })
 
-                    {Map.put(acc, idx, cands ++ bucket), n + length(cands)}
+                    merged =
+                      Enum.uniq_by(cands ++ bucket, fn c ->
+                        to_string(c[:id] || c["id"] || "")
+                      end)
+
+                    {Map.put(acc, tidx, merged), n + length(cands)}
                   end
               end
             end
@@ -407,24 +461,30 @@ defmodule Brain.LIFG.MWE do
 
   @doc """
   Build a debug map of heads per token index using child unigrams inside each MWE span.
+
+  If tokens are not stored in index order, this still resolves by matching token :index.
   """
   @spec heads_for_indices(map(), [integer()]) :: map()
   def heads_for_indices(si, idxs) when is_list(idxs) do
     toks = Safe.get(si, :tokens, [])
 
     Enum.reduce(idxs, %{}, fn idx, acc ->
+      tok =
+        Enum.find(toks, fn t -> token_index(t, nil) == idx end) ||
+          Enum.at(toks, idx)
+
       heads =
-        case Enum.at(toks, idx) do
+        case tok do
           nil ->
             []
 
-          tok ->
-            span = Safe.get(tok, :span)
+          tok0 ->
+            span = Safe.get(tok0, :span)
 
             toks
             |> Enum.with_index()
-            |> Enum.filter(fn {t, j} ->
-              j != idx and Safe.get(t, :n, 1) == 1 and inside?(Safe.get(t, :span), span)
+            |> Enum.filter(fn {t, _j} ->
+              Safe.get(t, :n, 1) == 1 and inside?(t, span)
             end)
             |> Enum.map(fn {t, _} ->
               Safe.get(t, :phrase) || Safe.get(t, :word) || Safe.get(t, :lemma) || ""
@@ -440,6 +500,52 @@ defmodule Brain.LIFG.MWE do
   def heads_for_indices(_si, _idxs), do: %{}
 
   # ── Private helpers ──────────────────────────────────────────────────
+
+  defp ensure_map(m) when is_map(m), do: m
+  defp ensure_map(_), do: %{}
+
+  # Unify sense_candidates keys to integer token indices where possible.
+  # If keys are strings like "5", this merges them into 5.
+  defp normalize_sc_keys(sc) when is_map(sc) do
+    Enum.reduce(sc, %{}, fn {k, v}, acc ->
+      idx = parse_nonneg_int(k)
+
+      if is_integer(idx) do
+        Map.update(acc, idx, List.wrap(v), fn prev -> prev ++ List.wrap(v) end)
+      else
+        Map.update(acc, k, List.wrap(v), fn prev -> prev ++ List.wrap(v) end)
+      end
+    end)
+  end
+
+  defp normalize_sc_keys(_), do: %{}
+
+  defp get_bucket(sc, idx) when is_map(sc) and is_integer(idx) do
+    cond do
+      Map.has_key?(sc, idx) ->
+        List.wrap(Map.get(sc, idx))
+
+      Map.has_key?(sc, Integer.to_string(idx)) ->
+        List.wrap(Map.get(sc, Integer.to_string(idx)))
+
+      true ->
+        []
+    end
+  end
+
+  defp get_bucket(_sc, _idx), do: []
+
+  defp put_candidate(sc, idx, cand) when is_map(sc) and is_integer(idx) and is_map(cand) do
+    Map.update(sc, idx, [cand], fn list ->
+      ([cand] ++ List.wrap(list))
+      |> Enum.map(&Safe.to_plain/1)
+      |> Enum.filter(&is_map/1)
+      |> Enum.uniq_by(fn c -> c[:id] || c["id"] end)
+      |> Enum.reject(fn c -> is_nil(c[:id] || c["id"]) end)
+    end)
+  end
+
+  defp put_candidate(sc, _idx, _cand), do: sc
 
   defp fetch_phrase_cells_by_norm(norms) when is_list(norms) do
     norms = norms |> Enum.reject(&(&1 in [nil, ""])) |> Enum.uniq()
@@ -492,7 +598,7 @@ defmodule Brain.LIFG.MWE do
   # “Compatible MWE” === has a *real* phrase sense, not our fallback.
   defp has_compatible_mwe?(sc, idx) do
     sc
-    |> Map.get(idx, [])
+    |> get_bucket(idx)
     |> Enum.any?(&real_phrase_candidate?/1)
   end
 
@@ -538,32 +644,62 @@ defmodule Brain.LIFG.MWE do
 
   defp unigram_neighbor_idxs(_), do: []
 
-# spans are treated as {start, len}
-# Accept spans as either {start, end_exclusive} or {start, len}.
-# We normalize both to {start, end_exclusive} before containment checks.
-defp inside?(child_span, parent_span) do
-  case {to_end_span(child_span), to_end_span(parent_span)} do
-    {{cs, ce}, {ps, pe}} when cs >= ps and ce <= pe -> true
-    _ -> false
+  # Token-aware containment:
+  # - Accept spans as either {start, end_exclusive} or {start, len}.
+  # - Disambiguate using the token surface length when available.
+  defp inside?(%{} = child_tok, parent_span) do
+    child_span = Safe.get(child_tok, :span)
+
+    surface =
+      Safe.get(child_tok, :phrase) ||
+        Safe.get(child_tok, :word) ||
+        Safe.get(child_tok, :lemma) ||
+        ""
+
+    slen =
+      case surface do
+        s when is_binary(s) -> String.length(s)
+        _ -> nil
+      end
+
+    inside_spans?(child_span, parent_span, slen)
   end
-end
-defp inside?(_, _), do: false
 
-defp to_end_span({s, b})
-     when is_integer(s) and is_integer(b) and s >= 0 and b >= 0 do
-  cond do
-    # Treat as {start, end_exclusive} when it looks like an end position.
-    b > s ->
-      {s, b}
-
-    # Otherwise treat as {start, len}.
-    true ->
-      {s, s + b}
+  defp inside?(child_span, parent_span) do
+    inside_spans?(child_span, parent_span, nil)
   end
-end
 
-defp to_end_span(_), do: nil
+  defp inside_spans?(child_span, parent_span, surface_len) do
+    case {to_end_span(child_span, surface_len), to_end_span(parent_span, nil)} do
+      {{cs, ce}, {ps, pe}} when cs >= ps and ce <= pe -> true
+      _ -> false
+    end
+  end
 
+  defp inside?(_, _), do: false
+
+  defp to_end_span({s, b}, surface_len)
+       when is_integer(s) and is_integer(b) and s >= 0 and b >= 0 do
+    # If we can, disambiguate using surface length:
+    # - If b equals surface length and (b - s) does not, treat as {start, len}
+    # - If (b - s) equals surface length, treat as {start, end_exclusive}
+    cond do
+      is_integer(surface_len) and surface_len > 0 and b == surface_len and b - s != surface_len ->
+        {s, s + b}
+
+      is_integer(surface_len) and surface_len > 0 and b - s == surface_len ->
+        {s, b}
+
+      # fallback heuristic (best-effort)
+      b > s ->
+        {s, b}
+
+      true ->
+        {s, s + b}
+    end
+  end
+
+  defp to_end_span(_span, _surface_len), do: nil
 
   defp down(s) when is_binary(s),
     do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
@@ -572,6 +708,30 @@ defp to_end_span(_), do: nil
 
   defp norm_key(v) when is_binary(v), do: down(v)
   defp norm_key(_), do: ""
+
+  # Prefer explicit token :index / :token_index over list position.
+  defp token_index(tok, fallback) when is_map(tok) do
+    v =
+      Safe.get(tok, :index) ||
+        Safe.get(tok, "index") ||
+        Safe.get(tok, :token_index) ||
+        Safe.get(tok, "token_index")
+
+    if is_integer(v) and v >= 0, do: v, else: fallback
+  end
+
+  defp token_index(_tok, fallback), do: fallback
+
+  defp parse_nonneg_int(i) when is_integer(i) and i >= 0, do: i
+
+  defp parse_nonneg_int(b) when is_binary(b) do
+    case Integer.parse(b) do
+      {n, _} when n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_nonneg_int(_), do: nil
 
   defp cell_to_unigram_candidate(cell, surface) do
     raw_pos = Safe.get(cell, :pos) || Safe.get(cell, "pos") || :other
@@ -604,7 +764,7 @@ defp to_end_span(_), do: nil
       lemma: surface,
       norm: surface,
       mw: false,
-      # FIX: canonicalize cand.pos to match synthesized id + tests ("proper noun" -> "proper_noun")
+      # canonicalize cand.pos to match synthesized id + tests ("proper noun" -> "proper_noun")
       pos: pos_norm,
       rel_prior: 0.20,
       activation: (Safe.get(cell, :activation, 0.25) || 0.25) * 1.0,

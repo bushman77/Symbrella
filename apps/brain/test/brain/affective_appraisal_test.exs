@@ -71,4 +71,3 @@ defmodule Brain.AffectiveAppraisalTest do
     assert is_list(meta[:tags])
   end
 end
-

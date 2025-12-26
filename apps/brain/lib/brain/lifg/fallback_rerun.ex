@@ -1,4 +1,4 @@
-#apps/brain/lib/brain/lifg/fallback_rerun.ex
+# apps/brain/lib/brain/lifg/fallback_rerun.ex
 defmodule Brain.LIFG.FallbackRerun do
   @moduledoc """
   P-201 fallback rerun for cases where a token's winner is a `|phrase|fallback`
@@ -109,7 +109,8 @@ defmodule Brain.LIFG.FallbackRerun do
             weights: weights_for_stage1,
             scores: scores_mode,
             margin_threshold: margin_thr,
-            chargram_event: Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
+            chargram_event:
+              Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
             boundary_event: Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
           )
         rescue
@@ -280,4 +281,3 @@ defmodule Brain.LIFG.FallbackRerun do
     end
   end
 end
-

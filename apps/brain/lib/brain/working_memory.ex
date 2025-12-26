@@ -80,8 +80,12 @@ defmodule Brain.WorkingMemory do
   def ingest_stage2(wm, _decisions, _now_ms, _cfg), do: wm
 
   defp normalize_stage2_decision({:commit, %{} = choice}), do: {:commit, choice}
-  defp normalize_stage2_decision({:allow, %{} = choice}), do: {:commit, Map.put_new(choice, :decision, :allow)}
-  defp normalize_stage2_decision({:boost, %{} = choice}), do: {:commit, Map.put_new(choice, :decision, :boost)}
+
+  defp normalize_stage2_decision({:allow, %{} = choice}),
+    do: {:commit, Map.put_new(choice, :decision, :allow)}
+
+  defp normalize_stage2_decision({:boost, %{} = choice}),
+    do: {:commit, Map.put_new(choice, :decision, :boost)}
 
   defp normalize_stage2_decision(%{} = m) do
     decision = m[:decision] || m["decision"]
@@ -224,6 +228,7 @@ defmodule Brain.WorkingMemory do
 
     id_down = if is_binary(id), do: String.downcase(id), else: ""
     lemma_down = if is_binary(lemma), do: String.downcase(lemma), else: ""
+
     source_down =
       cond do
         is_binary(source) -> String.downcase(source)
@@ -262,4 +267,3 @@ defmodule Brain.WorkingMemory do
   defp same_identity?(a, b), do: a.id == b.id
   defp clamp01(x) when is_number(x), do: x |> max(0.0) |> min(1.0)
 end
-

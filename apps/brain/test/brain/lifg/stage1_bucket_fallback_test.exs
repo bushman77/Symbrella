@@ -19,9 +19,30 @@ defmodule Brain.LIFG.Stage1BucketFallbackTest do
 
       # Partial slate (typical of "winners-only" promotion)
       sense_candidates: %{
-        0 => [%{id: "good evening symbrella|phrase|fallback", norm: "good evening symbrella", pos: "phrase", activation: 0.3}],
-        1 => [%{id: "good evening|phrase|fallback", norm: "good evening", pos: "phrase", activation: 0.3}],
-        3 => [%{id: "evening symbrella|phrase|fallback", norm: "evening symbrella", pos: "phrase", activation: 0.3}],
+        0 => [
+          %{
+            id: "good evening symbrella|phrase|fallback",
+            norm: "good evening symbrella",
+            pos: "phrase",
+            activation: 0.3
+          }
+        ],
+        1 => [
+          %{
+            id: "good evening|phrase|fallback",
+            norm: "good evening",
+            pos: "phrase",
+            activation: 0.3
+          }
+        ],
+        3 => [
+          %{
+            id: "evening symbrella|phrase|fallback",
+            norm: "evening symbrella",
+            pos: "phrase",
+            activation: 0.3
+          }
+        ],
         4 => [
           %{id: "evening|noun|0", norm: "evening", pos: "noun", activation: 0.25},
           %{id: "evening|verb|0", norm: "evening", pos: "verb", activation: 0.25}
@@ -45,4 +66,3 @@ defmodule Brain.LIFG.Stage1BucketFallbackTest do
     assert idxs == [0, 1, 2, 3, 4, 5]
   end
 end
-

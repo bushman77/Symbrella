@@ -121,6 +121,10 @@ defmodule Brain.LIFG.Input do
 
   # ───────────────────────────── Helpers (private) ─────────────────────────────
 
+  defp ensure_list(v) when is_list(v), do: v
+  defp ensure_list(nil), do: []
+  defp ensure_list(v), do: [v]
+
   # Group a flat candidate list by token index, preserving original order per index.
   defp group_by_token_index(cands) when is_list(cands) do
     cands
@@ -142,7 +146,7 @@ defmodule Brain.LIFG.Input do
 
       list =
         senses
-        |> Safe.ensure_list()
+        |> ensure_list()
         |> Enum.reject(&is_nil/1)
         |> Enum.map(&Safe.to_plain/1)
         |> Enum.map(&normalize_candidate(&1, idx))
@@ -159,7 +163,7 @@ defmodule Brain.LIFG.Input do
       idx = parse_idx(tidx)
 
       senses
-      |> Safe.ensure_list()
+      |> ensure_list()
       |> Enum.reject(&is_nil/1)
       |> Enum.map(&Safe.to_plain/1)
       |> Enum.map(&normalize_candidate(&1, idx))
@@ -201,7 +205,6 @@ defmodule Brain.LIFG.Input do
 
       base =
         cond do
-          # scores map: treat each {id, score} as a candidate, but *keep* features/etc from cell
           is_map(scores) and map_size(scores) > 0 ->
             for {id, s} <- scores do
               cell
@@ -211,7 +214,6 @@ defmodule Brain.LIFG.Input do
               |> normalize_candidate(idx)
             end
 
-          # explicit chosen_id: treat it as a single candidate at full score, preserving features
           id = Safe.get(cell, :chosen_id) ->
             cell
             |> Map.put(:token_index, idx)
@@ -219,7 +221,6 @@ defmodule Brain.LIFG.Input do
             |> Map.put(:score, 1.0)
             |> then(&[normalize_candidate(&1, idx)])
 
-          # generic id: preserve features and other fields, normalize id/score
           id = Safe.get(cell, :id) ->
             s = Safe.get(cell, :score, 0.0)
 
@@ -229,7 +230,6 @@ defmodule Brain.LIFG.Input do
             |> Map.put(:score, s)
             |> then(&[normalize_candidate(&1, idx)])
 
-          # lemma/word only: synthesize a POS-tagged id but still carry cell fields through
           lemma0 = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
             s = Safe.get(cell, :score, 0.0)
 
@@ -269,7 +269,6 @@ defmodule Brain.LIFG.Input do
       |> Map.get(:token_index, Map.get(m, "token_index", default_idx))
       |> parse_idx()
 
-    # Prefer explicit :id; otherwise promote :lemma/:word into :id so Stage-1 can use it.
     raw_id =
       m[:id] || m["id"] ||
         m[:lemma] || m["lemma"] ||
@@ -295,12 +294,10 @@ defmodule Brain.LIFG.Input do
       |> maybe_put(:id, id)
       |> maybe_put(:score, score)
 
-    # Ensure we don't leak structs or nested exotic types
     Safe.to_plain(out)
   end
 
   defp normalize_candidate(other, default_idx) do
-    # catch-all for bare ids/lemmas etc.
     id =
       other
       |> to_string_if_present()
@@ -380,4 +377,3 @@ defmodule Brain.LIFG.Input do
 
   defp ensure_pos_tagged_id(_lemma, _cell), do: nil
 end
-

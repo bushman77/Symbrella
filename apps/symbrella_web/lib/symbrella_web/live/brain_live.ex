@@ -1,3 +1,4 @@
+# apps/symbrella_web/lib/symbrella_web/live/brain_live.ex
 defmodule SymbrellaWeb.BrainLive do
   @moduledoc """
   LiveView for the Brain dashboard.
@@ -480,10 +481,12 @@ defmodule SymbrellaWeb.BrainLive do
   defp fetch_self_portrait do
     fun =
       cond do
-        Code.ensure_loaded?(Brain.SelfPortrait) and function_exported?(Brain.SelfPortrait, :snapshot, 0) ->
+        Code.ensure_loaded?(Brain.SelfPortrait) and
+            function_exported?(Brain.SelfPortrait, :snapshot, 0) ->
           fn -> Brain.SelfPortrait.snapshot() end
 
-        Code.ensure_loaded?(Brain.SelfPortrait) and function_exported?(Brain.SelfPortrait, :snapshot, 1) ->
+        Code.ensure_loaded?(Brain.SelfPortrait) and
+            function_exported?(Brain.SelfPortrait, :snapshot, 1) ->
           fn -> Brain.SelfPortrait.snapshot(Brain.SelfPortrait) end
 
         true ->
@@ -516,16 +519,6 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   defp normalize_self_portrait(other), do: %{value: other}
-
-#  defp attach_self_portrait(%{} = snapshot, %{} = sp) do
-#    if map_size(sp) > 0 do
-#      Map.put(snapshot, :self_portrait, sp)
-#    else
-#      snapshot
-#    end
-#  end
-
-#  defp attach_self_portrait(snapshot, _), do: snapshot
 
   # ---- All-regions aggregation ----------------------------------------------
 
@@ -608,32 +601,33 @@ defmodule SymbrellaWeb.BrainLive do
   defp status_val(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp status_val(_, _), do: nil
 
-defp refresh_selected(socket) do
-  selected = socket.assigns[:selected] || default_selected()
-  {snapshot, status} = fetch_snapshot_and_status(selected)
+  defp refresh_selected(socket) do
+    selected = socket.assigns[:selected] || default_selected()
+    {snapshot, status} = fetch_snapshot_and_status(selected)
 
-  self_portrait = fetch_self_portrait()
+    self_portrait = fetch_self_portrait()
 
-  snapshot =
-    cond do
-      is_map(snapshot) -> Map.put(snapshot, :self_portrait, self_portrait)
-      snapshot == nil -> %{self_portrait: self_portrait}
-      true -> %{value: snapshot, self_portrait: self_portrait}
-    end
+    snapshot =
+      cond do
+        is_map(snapshot) -> Map.put(snapshot, :self_portrait, self_portrait)
+        snapshot == nil -> %{self_portrait: self_portrait}
+        true -> %{value: snapshot, self_portrait: self_portrait}
+      end
 
-  socket
-  |> assign(:snapshot, snapshot)
-  |> assign(:region_status, status)
-  |> assign(:self_portrait, self_portrait)
-  |> assign(:all_status, collect_all_region_status())
-  |> assign(:regions, RegionRegistry.keys())
-  |> assign(:region, region_meta_for(selected))
-  |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
-  |> update(:region_state, fn st ->
-    st = st || %{}
-    st |> Map.put(:snapshot, snapshot)
-  end)
-end
+    socket
+    |> assign(:snapshot, snapshot)
+    |> assign(:region_status, status)
+    |> assign(:self_portrait, self_portrait)
+    |> assign(:all_status, collect_all_region_status())
+    |> assign(:regions, RegionRegistry.keys())
+    |> assign(:region, region_meta_for(selected))
+    |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
+    |> refresh_wm_from_brain()
+    |> update(:region_state, fn st ->
+      st = st || %{}
+      st |> Map.put(:snapshot, snapshot)
+    end)
+  end
 
   # --- All-regions status grid ----------------------------------------------
 
@@ -853,9 +847,19 @@ end
 
   defp maybe_assign_wm(socket, wm, src) do
     case wm do
-      nil -> socket
-      %{} = m -> assign(socket, :wm, Map.merge(%{source: src, updated_at: now_ms()}, m))
-      _ -> assign(socket, :wm, %{source: src, updated_at: now_ms(), value: wm})
+      nil ->
+        socket
+
+      %{} = m ->
+        # If someone passed a Brain.snapshot_wm-like map, normalize it
+        if is_list(mget(m, :wm)) do
+          assign(socket, :wm, normalize_wm_snapshot(m, src))
+        else
+          assign(socket, :wm, Map.merge(%{source: src, updated_at: now_ms()}, m))
+        end
+
+      other ->
+        assign(socket, :wm, %{source: src, updated_at: now_ms(), value: other})
     end
   end
 
@@ -876,6 +880,7 @@ end
       socket
       |> maybe_assign_intent(extract_intent_any(env), "blackboard")
       |> maybe_assign_wm(extract_wm_any(env), "blackboard")
+      |> maybe_refresh_wm_on_wm_update(env)
 
     bb_event = wrap_bb_event(env)
 
@@ -913,5 +918,51 @@ end
   end
 
   defp bb_tag(_), do: :event
-end
 
+  defp maybe_refresh_wm_on_wm_update(socket, %{} = env) do
+    kind = mget(env, :kind)
+    event = mget(env, :event)
+
+    if kind == :telemetry and event == [:brain, :wm, :update] do
+      refresh_wm_from_brain(socket)
+    else
+      socket
+    end
+  end
+
+  defp refresh_wm_from_brain(socket) do
+    case fetch_wm_snapshot() do
+      {:ok, %{} = wm} -> assign(socket, :wm, wm)
+      _ -> socket
+    end
+  end
+
+  defp fetch_wm_snapshot do
+    cond do
+      Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) ->
+        case safe_call(fn -> Brain.snapshot_wm() end) do
+          {:ok, %{} = snap} -> {:ok, normalize_wm_snapshot(snap, "brain")}
+          other -> other
+        end
+
+      true ->
+        :error
+    end
+  end
+
+  defp normalize_wm_snapshot(%{} = snap, src) do
+    items = List.wrap(mget(snap, :wm) || [])
+    cfg = mget(snap, :cfg) || %{}
+    cap = mget(cfg, :capacity)
+
+    %{
+      source: src,
+      updated_at: now_ms(),
+      size: length(items),
+      capacity: cap,
+      items: items,
+      attention: mget(snap, :attention) || %{},
+      cfg: cfg
+    }
+  end
+end

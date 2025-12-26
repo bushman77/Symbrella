@@ -224,13 +224,12 @@ defmodule SymbrellaWeb.BrainHTML do
           <%= if @self_hit and is_binary(@self_match) and @self_match != "" do %>
             <code class="px-1">{@self_match}</code>
           <% end %>
-
-          · <span class="opacity-70">conf</span> {fmt(@sp_conf)}
-          · <span class="opacity-70">stab</span> {fmt(@sp_stab)}
-          · <span class="opacity-70">cur</span> {fmt(@sp_cur)}
-          · <span class="opacity-70">bd</span> {to_string(@sp_bd)}
-          · <span class="opacity-70">cg</span> {to_string(@sp_cg)}
-          · <span class="opacity-70">no_mwe</span> {to_string(@sp_no_mwe)}
+          · <span class="opacity-70">conf</span> {fmt(@sp_conf)} ·
+          <span class="opacity-70">stab</span> {fmt(@sp_stab)} ·
+          <span class="opacity-70">cur</span> {fmt(@sp_cur)} ·
+          <span class="opacity-70">bd</span> {to_string(@sp_bd)} ·
+          <span class="opacity-70">cg</span> {to_string(@sp_cg)} ·
+          <span class="opacity-70">no_mwe</span> {to_string(@sp_no_mwe)}
         </.chip>
       <% end %>
 
@@ -244,6 +243,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # HUD chip component (internal)
   slot :inner_block, required: true
+
   defp chip(assigns) do
     ~H"""
     <span class="text-xs px-2 py-1 rounded-md border bg-white/70 text-zinc-700 flex items-center gap-1">
@@ -271,8 +271,8 @@ defmodule SymbrellaWeb.BrainHTML do
         normalized
       else
         Enum.filter(normalized, fn ev ->
-          (to_string(ev.tag) |> String.downcase() |> String.contains?(q)) or
-            (ev.preview |> String.downcase() |> String.contains?(q))
+          to_string(ev.tag) |> String.downcase() |> String.contains?(q) or
+            ev.preview |> String.downcase() |> String.contains?(q)
         end)
       end
 
@@ -329,13 +329,15 @@ defmodule SymbrellaWeb.BrainHTML do
                 <div class="my-2 flex items-center gap-2">
                   <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
                   <div class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    <%= sep.label %>
+                    {sep.label}
                   </div>
                   <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
                 </div>
-
               <% {:ev, ev} -> %>
-                <details open class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2">
+                <details
+                  open
+                  class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-neutral-950/20 p-2"
+                >
                   <summary class="cursor-pointer text-sm">
                     <span class="font-mono text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 mr-2">
                       {to_string(ev.tag)}
@@ -457,7 +459,8 @@ defmodule SymbrellaWeb.BrainHTML do
       is_integer(prev_seq) and is_integer(ev_seq) and prev_seq != ev_seq ->
         %{label: separator_label(:frame, ev)}
 
-      is_integer(prev[:at_ms]) and is_integer(ev[:at_ms]) and abs(prev[:at_ms] - ev[:at_ms]) > 1_500 ->
+      is_integer(prev[:at_ms]) and is_integer(ev[:at_ms]) and
+          abs(prev[:at_ms] - ev[:at_ms]) > 1_500 ->
         %{label: separator_label(:timegap, ev)}
 
       true ->
@@ -517,10 +520,21 @@ defmodule SymbrellaWeb.BrainHTML do
   def wm_panel(assigns) do
     wm = assigns[:wm] || %{}
 
+    items =
+      cond do
+        is_map(wm) and is_list(wm[:items]) -> wm[:items]
+        is_map(wm) and is_list(wm[:wm]) -> wm[:wm]
+        is_map(wm) and is_list(wm[:value]) -> wm[:value]
+        true -> []
+      end
+
+    empty? = items == []
+
     assigns =
       assigns
       |> assign(:wm, wm)
-      |> assign(:empty?, wm == %{} or wm == nil)
+      |> assign(:items, items)
+      |> assign(:empty?, empty?)
 
     ~H"""
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
@@ -528,7 +542,9 @@ defmodule SymbrellaWeb.BrainHTML do
         <div class="text-sm font-semibold text-gray-700 dark:text-gray-200">Working Memory (WM)</div>
         <div class="text-xs text-gray-500 dark:text-gray-400">
           <%= if is_map(@wm) do %>
-            <%= if @wm[:source] do %>source: <span class="font-mono">{to_string(@wm[:source])}</span><% end %>
+            <%= if @wm[:source] do %>
+              source: <span class="font-mono">{to_string(@wm[:source])}</span>
+            <% end %>
           <% else %>
             —
           <% end %>
@@ -547,6 +563,7 @@ defmodule SymbrellaWeb.BrainHTML do
   # --- Live state ------------------------------------------------------------
 
   attr :state, :any, default: %{}
+
   def live_state_panel(assigns) do
     st = assigns[:state] || %{}
 
@@ -746,7 +763,9 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp mood_val(_, _), do: nil
 
-  defp truthy?(v) when v in [true, "true", "TRUE", "1", 1, :true, :yes, "yes", "on", "ON"], do: true
+  defp truthy?(v) when v in [true, "true", "TRUE", "1", 1, true, :yes, "yes", "on", "ON"],
+    do: true
+
   defp truthy?(_), do: false
 
   defp self_hit?(snap) do
@@ -766,4 +785,3 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp normalize_wm(_), do: nil
 end
-

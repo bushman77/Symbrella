@@ -72,9 +72,9 @@ defmodule Brain.Telemetry do
     Logger.info(fn ->
       base =
         "[LIFG] #{duration_ms}ms" <>
-          (if is_integer(winners), do: " winners=#{winners}", else: "") <>
-          (if is_integer(boosts), do: " boosts=#{boosts}", else: "") <>
-          (if is_integer(inhibitions), do: " inhibitions=#{inhibitions}", else: "")
+          if(is_integer(winners), do: " winners=#{winners}", else: "") <>
+          if(is_integer(boosts), do: " boosts=#{boosts}", else: "") <>
+          if is_integer(inhibitions), do: " inhibitions=#{inhibitions}", else: ""
 
       extras =
         " groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
@@ -89,4 +89,3 @@ defmodule Brain.Telemetry do
     Map.merge(%{v: 3}, extra)
   end
 end
-

@@ -270,7 +270,7 @@ defmodule Core.Intent.Selection do
 
   defp maybe_kick_lifg_stage1(_, _), do: :ok
 
-  defp truthy?(v) when v in [true, "true", :true, 1, "1", "yes", "on"], do: true
+  defp truthy?(v) when v in [true, "true", true, 1, "1", "yes", "on"], do: true
   defp truthy?(_), do: false
 
   defp normalize_nonneg_int(v, _default) when is_integer(v) and v >= 0, do: v
@@ -589,4 +589,3 @@ defmodule Core.Intent.Selection do
     if terms == [], do: nil, else: compiled_word_regex(terms)
   end
 end
-

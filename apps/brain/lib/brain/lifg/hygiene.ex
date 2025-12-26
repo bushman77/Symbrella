@@ -75,7 +75,7 @@ defmodule Brain.LIFG.Hygiene do
 
           # 4) needs_rerun: only when confidence is low *and* there is a real alternative
           needs? =
-            (((ch[:margin] || 0.0) < min_margin) or (p1 < p_min)) and alt_ids2 != []
+            ((ch[:margin] || 0.0) < min_margin or p1 < p_min) and alt_ids2 != []
 
           ch2 =
             ch
@@ -161,4 +161,3 @@ defmodule Brain.LIFG.Hygiene do
     end
   end
 end
-

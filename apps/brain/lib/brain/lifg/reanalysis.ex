@@ -28,18 +28,18 @@ defmodule Brain.LIFG.Reanalysis do
         if fail_fun.(ch) do
           case ch.alt_ids do
             [next | rest] ->
-old = ch.chosen_id
-next_s = to_string(next)
+              old = ch.chosen_id
+              next_s = to_string(next)
 
-alt2 =
-  (rest ++ [old])
-  |> Enum.reject(&is_nil/1)
-  |> Enum.map(&to_string/1)
+              alt2 =
+                (rest ++ [old])
+                |> Enum.reject(&is_nil/1)
+                |> Enum.map(&to_string/1)
 
-flipped =
-  ch
-  |> Map.put(:chosen_id, next_s)
-  |> Map.put(:alt_ids, alt2)
+              flipped =
+                ch
+                |> Map.put(:chosen_id, next_s)
+                |> Map.put(:alt_ids, alt2)
 
               :telemetry.execute(
                 [:brain, :lifg, :reanalysis, :fallback],

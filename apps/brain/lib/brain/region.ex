@@ -155,4 +155,3 @@ defmodule Brain.Region do
     end
   end
 end
-

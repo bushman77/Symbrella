@@ -116,7 +116,10 @@ defmodule Brain.PMTG do
     {:noreply,
      state
      |> Map.put(:window_keep, keep)
-     |> Map.put(:opts, state.opts |> Map.merge(%{mode: mode, window_keep: keep}) |> Map.merge(opts_map))}
+     |> Map.put(
+       :opts,
+       state.opts |> Map.merge(%{mode: mode, window_keep: keep}) |> Map.merge(opts_map)
+     )}
   end
 
   @impl true
@@ -280,8 +283,7 @@ defmodule Brain.PMTG do
         Map.merge(base, %{
           variants_tried: variants,
           variants_hit: %{
-            episodes:
-              Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
+            episodes: Enum.map(eps_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"])),
             lexicon: Enum.map(lex_hits, &(&1[:lemma] || &1["lemma"] || &1[:id] || &1["id"]))
           }
         })
@@ -321,7 +323,8 @@ defmodule Brain.PMTG do
     injected = Keyword.get(opts, :lexicon_mod)
 
     cond do
-      is_atom(injected) and Code.ensure_loaded?(injected) and function_exported?(injected, :lookup, 2) ->
+      is_atom(injected) and Code.ensure_loaded?(injected) and
+          function_exported?(injected, :lookup, 2) ->
         safe_call(fn -> injected.lookup(lemma, limit) end)
 
       true ->
@@ -570,8 +573,12 @@ defmodule Brain.PMTG do
       cands = Map.get(slate_by_tidx, tidx, [])
 
       cond do
-        cands == [] -> ch
-        not tied_choice?(ch, eps) -> ch
+        cands == [] ->
+          ch
+
+        not tied_choice?(ch, eps) ->
+          ch
+
         true ->
           {best_id, best, second, score_map} = best_candidate(cands, weights)
 
@@ -927,4 +934,3 @@ defmodule Brain.PMTG do
     end
   end
 end
-

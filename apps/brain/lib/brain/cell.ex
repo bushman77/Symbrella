@@ -240,4 +240,3 @@ defmodule Brain.Cell do
 
   defp coerce_number(_x, default), do: default
 end
-

@@ -143,7 +143,14 @@ defmodule Brain.SelfPortrait.Model do
     meta = Map.get(ev, :meta) || Map.get(ev, "meta") || %{}
 
     bd =
-      int_or_0(get_any(meta, [:boundary_drops, :boundary_drop_count, "boundary_drops", "boundary_drop_count"])) +
+      int_or_0(
+        get_any(meta, [
+          :boundary_drops,
+          :boundary_drop_count,
+          "boundary_drops",
+          "boundary_drop_count"
+        ])
+      ) +
         int_or_0(get_any(meas, [:boundary_drops, "boundary_drops"]))
 
     cg =
@@ -155,7 +162,9 @@ defmodule Brain.SelfPortrait.Model do
         int_or_0(get_any(meas, [:mwe_fallbacks, "mwe_fallbacks"]))
 
     fb =
-      int_or_0(get_any(meta, [:fallback_winners, :fallback_wins, "fallback_winners", "fallback_wins"])) +
+      int_or_0(
+        get_any(meta, [:fallback_winners, :fallback_wins, "fallback_winners", "fallback_wins"])
+      ) +
         int_or_0(get_any(meas, [:fallback_winners, "fallback_winners"]))
 
     patterns
@@ -203,8 +212,17 @@ defmodule Brain.SelfPortrait.Model do
 
     viol_n =
       int_or_0(get_any(meta, [:guardrail_violations, "guardrail_violations"])) +
-        int_or_0(get_any(meta, [:boundary_drops, :boundary_drop_count, "boundary_drops", "boundary_drop_count"])) +
-        int_or_0(get_any(meta, [:chargram_violation, :chargram, "chargram_violation", "chargram"]))
+        int_or_0(
+          get_any(meta, [
+            :boundary_drops,
+            :boundary_drop_count,
+            "boundary_drops",
+            "boundary_drop_count"
+          ])
+        ) +
+        int_or_0(
+          get_any(meta, [:chargram_violation, :chargram, "chargram_violation", "chargram"])
+        )
 
     traits2 =
       cond do
@@ -258,6 +276,7 @@ defmodule Brain.SelfPortrait.Model do
 
   defp int_or_0(v) when is_integer(v), do: v
   defp int_or_0(v) when is_float(v), do: trunc(v)
+
   defp int_or_0(v) when is_binary(v) do
     case Integer.parse(v) do
       {i, _} -> i
@@ -309,4 +328,3 @@ defmodule Brain.SelfPortrait.Model do
 
   defp now_ms, do: System.system_time(:millisecond)
 end
-

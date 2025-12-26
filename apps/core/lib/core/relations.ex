@@ -224,4 +224,3 @@ defmodule Core.Relations do
 
   defp normalize(_), do: ""
 end
-

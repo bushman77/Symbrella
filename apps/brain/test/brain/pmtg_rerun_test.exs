@@ -73,4 +73,3 @@ defmodule Brain.PMTG.RerunTest do
     assert_receive {:telemetry, [:brain, :pmtg, :rerun], _meas, _meta}, 500
   end
 end
-

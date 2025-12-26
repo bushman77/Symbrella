@@ -59,8 +59,8 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
           </span>
         <% end %>
       </div>
-
-      <!-- Token strip -->
+      
+    <!-- Token strip -->
       <div class="mt-3 flex flex-wrap gap-2">
         <%= if Enum.empty?(@tokens) do %>
           <span class="text-xs opacity-60">— no tokens —</span>
@@ -115,8 +115,8 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
           <% end %>
         <% end %>
       </div>
-
-      <!-- Selected token detail -->
+      
+    <!-- Selected token detail -->
       <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div class="lg:col-span-1 rounded-2xl border p-4 dark:border-neutral-800">
           <h4 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Token</h4>
@@ -124,9 +124,17 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
           <%= if @selected_token do %>
             <ul class="mt-2 text-xs space-y-1 text-zinc-800 dark:text-zinc-200">
               <li><span class="opacity-60">raw:</span> <code>{token_raw(@selected_token)}</code></li>
-              <li><span class="opacity-60">norm:</span> <code>{token_norm(@selected_token)}</code></li>
-              <li><span class="opacity-60">span:</span> <code>{inspect(token_span(@selected_token))}</code></li>
-              <li><span class="opacity-60">mwe?:</span> <code>{inspect(token_mwe?(@selected_token))}</code></li>
+              <li>
+                <span class="opacity-60">norm:</span> <code>{token_norm(@selected_token)}</code>
+              </li>
+              <li>
+                <span class="opacity-60">span:</span>
+                <code>{inspect(token_span(@selected_token))}</code>
+              </li>
+              <li>
+                <span class="opacity-60">mwe?:</span>
+                <code>{inspect(token_mwe?(@selected_token))}</code>
+              </li>
             </ul>
           <% else %>
             <div class="mt-2 text-xs opacity-60">— no selection —</div>
@@ -193,7 +201,9 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
                 </thead>
                 <tbody>
                   <%= if Enum.empty?(candidates) do %>
-                    <tr><td colspan="5" class="py-2 opacity-60">— no candidates —</td></tr>
+                    <tr>
+                      <td colspan="5" class="py-2 opacity-60">— no candidates —</td>
+                    </tr>
                   <% else %>
                     <%= for {c, idx} <- Enum.with_index(Enum.take(candidates, 8), 1) do %>
                       <tr class="border-t dark:border-neutral-800">
@@ -250,7 +260,10 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
   defp mget(_, _), do: nil
 
   defp sense_entry(senses, nil) when is_map(senses), do: nil
-  defp sense_entry(senses, i) when is_map(senses), do: Map.get(senses, i) || Map.get(senses, to_string(i))
+
+  defp sense_entry(senses, i) when is_map(senses),
+    do: Map.get(senses, i) || Map.get(senses, to_string(i))
+
   defp sense_entry(_, _), do: nil
 
   defp default_selected(tokens, senses) do
@@ -339,4 +352,3 @@ defmodule SymbrellaWeb.Components.Brain.SenseSlate do
 
   defp factors_inline(_), do: ""
 end
-

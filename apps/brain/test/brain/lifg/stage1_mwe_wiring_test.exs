@@ -25,4 +25,3 @@ defmodule Brain.LIFG.Stage1MWEWiringTest do
            end)
   end
 end
-

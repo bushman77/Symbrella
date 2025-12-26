@@ -319,20 +319,34 @@ defmodule Brain.LIFG.Guard do
   defp ensure_phrase_and_norm(%{} = t, phrase) do
     phrase1 =
       cond do
-        is_binary(Map.get(t, :phrase)) and String.trim(Map.get(t, :phrase)) != "" -> Map.get(t, :phrase)
-        is_binary(Map.get(t, "phrase")) and String.trim(Map.get(t, "phrase")) != "" -> Map.get(t, "phrase")
-        is_binary(phrase) and String.trim(phrase) != "" -> phrase
-        true -> ""
+        is_binary(Map.get(t, :phrase)) and String.trim(Map.get(t, :phrase)) != "" ->
+          Map.get(t, :phrase)
+
+        is_binary(Map.get(t, "phrase")) and String.trim(Map.get(t, "phrase")) != "" ->
+          Map.get(t, "phrase")
+
+        is_binary(phrase) and String.trim(phrase) != "" ->
+          phrase
+
+        true ->
+          ""
       end
 
     t1 = Map.put(t, :phrase, phrase1)
 
     norm1 =
       cond do
-        is_binary(Map.get(t, :norm)) and String.trim(Map.get(t, :norm)) != "" -> Map.get(t, :norm)
-        is_binary(Map.get(t, "norm")) and String.trim(Map.get(t, "norm")) != "" -> Map.get(t, "norm")
-        is_binary(phrase1) and String.trim(phrase1) != "" -> norm_phrase(phrase1)
-        true -> ""
+        is_binary(Map.get(t, :norm)) and String.trim(Map.get(t, :norm)) != "" ->
+          Map.get(t, :norm)
+
+        is_binary(Map.get(t, "norm")) and String.trim(Map.get(t, "norm")) != "" ->
+          Map.get(t, "norm")
+
+        is_binary(phrase1) and String.trim(phrase1) != "" ->
+          norm_phrase(phrase1)
+
+        true ->
+          ""
       end
 
     Map.put(t1, :norm, norm1)
@@ -434,7 +448,9 @@ defmodule Brain.LIFG.Guard do
         word_span_at(sent, s)
       ]
       |> Enum.reject(&is_nil/1)
-      |> Enum.filter(fn {a, b} -> is_integer(a) and is_integer(b) and a >= 0 and b > a and b <= len_sent end)
+      |> Enum.filter(fn {a, b} ->
+        is_integer(a) and is_integer(b) and a >= 0 and b > a and b <= len_sent
+      end)
       |> Enum.uniq()
 
     match =
@@ -541,4 +557,3 @@ defmodule Brain.LIFG.Guard do
     end
   end
 end
-

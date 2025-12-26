@@ -81,9 +81,23 @@ defmodule Brain.AffectiveAppraisal do
     "not sure" => {:uncertainty, +0.00, +0.10, -0.20}
   }
 
-  @negations MapSet.new(~w(not no never dont can't cant wont won't isnt isn't arent aren't wasnt wasn't))
-  @intensifiers %{"very" => 1.25, "really" => 1.20, "so" => 1.15, "extremely" => 1.35, "super" => 1.35}
-  @diminishers %{"kinda" => 0.80, "kindof" => 0.80, "sorta" => 0.80, "somewhat" => 0.85, "maybe" => 0.90}
+  @negations MapSet.new(
+               ~w(not no never dont can't cant wont won't isnt isn't arent aren't wasnt wasn't)
+             )
+  @intensifiers %{
+    "very" => 1.25,
+    "really" => 1.20,
+    "so" => 1.15,
+    "extremely" => 1.35,
+    "super" => 1.35
+  }
+  @diminishers %{
+    "kinda" => 0.80,
+    "kindof" => 0.80,
+    "sorta" => 0.80,
+    "somewhat" => 0.85,
+    "maybe" => 0.90
+  }
 
   @second_person MapSet.new(~w(you your you're youre u ur))
   @first_person MapSet.new(~w(i me my mine i'm im myself))
@@ -382,4 +396,3 @@ defmodule Brain.AffectiveAppraisal do
     end
   end
 end
-

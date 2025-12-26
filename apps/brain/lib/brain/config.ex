@@ -99,4 +99,3 @@ defmodule Brain.Config do
     |> String.trim()
   end
 end
-

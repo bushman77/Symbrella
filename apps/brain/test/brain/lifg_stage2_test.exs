@@ -36,4 +36,3 @@ defmodule Brain.LIFG.Stage2Test do
     assert si_after == si
   end
 end
-

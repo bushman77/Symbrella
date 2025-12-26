@@ -101,4 +101,3 @@ defmodule Symbrella.Application do
     end
   end
 end
-

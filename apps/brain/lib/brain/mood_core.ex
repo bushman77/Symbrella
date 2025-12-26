@@ -516,26 +516,26 @@ defmodule Brain.MoodCore do
     da =
       0.06 * v +
         0.02 * a +
-        (if praise?, do: 0.03, else: 0.0) +
-        (if insult?, do: -0.02, else: 0.0)
+        if(praise?, do: 0.03, else: 0.0) +
+        if insult?, do: -0.02, else: 0.0
 
     s5 =
       0.07 * v +
         0.05 * d +
-        (if praise?, do: 0.015, else: 0.0) +
-        (if insult?, do: -0.05, else: 0.0) +
-        (if threat?, do: -0.03, else: 0.0)
+        if(praise?, do: 0.015, else: 0.0) +
+        if(insult?, do: -0.05, else: 0.0) +
+        if threat?, do: -0.03, else: 0.0
 
     ne =
       0.08 * a +
-        (if threat?, do: 0.05, else: 0.0) +
-        (if urgency?, do: 0.03, else: 0.0) +
-        (if d < -0.2, do: 0.02, else: 0.0)
+        if(threat?, do: 0.05, else: 0.0) +
+        if(urgency?, do: 0.03, else: 0.0) +
+        if d < -0.2, do: 0.02, else: 0.0
 
     glu =
       0.03 * a +
-        (if uncertain?, do: 0.05, else: 0.0) +
-        (if question?, do: 0.02, else: 0.0)
+        if(uncertain?, do: 0.05, else: 0.0) +
+        if question?, do: 0.02, else: 0.0
 
     meta = %{
       appraisal: %{
@@ -555,9 +555,16 @@ defmodule Brain.MoodCore do
   defp coerce_tags(tags) when is_list(tags) do
     tags
     |> Enum.map(fn
-      t when is_atom(t) -> t
+      t when is_atom(t) ->
+        t
+
       t when is_binary(t) ->
-        t |> String.trim() |> String.downcase() |> String.replace(~r/\s+/, "_") |> String.replace("-", "_") |> String.to_atom()
+        t
+        |> String.trim()
+        |> String.downcase()
+        |> String.replace(~r/\s+/, "_")
+        |> String.replace("-", "_")
+        |> String.to_atom()
 
       _ ->
         nil
@@ -860,4 +867,3 @@ defmodule Brain.MoodCore do
 
   defp to_float(_, default), do: default * 1.0
 end
-

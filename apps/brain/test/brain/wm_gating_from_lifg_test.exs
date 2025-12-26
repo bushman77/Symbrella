@@ -224,7 +224,12 @@ defmodule Brain.WMGatingFromLIFGTest do
   # prefer p_top1/prob if present; otherwise fall back to score; clamp to 0..1.
   defp gate_score(%{} = ch) do
     s = to_float01(Map.get(ch, :score) || Map.get(ch, "score"))
-    p = to_float01(Map.get(ch, :p_top1) || Map.get(ch, "p_top1") || Map.get(ch, :prob) || Map.get(ch, "prob"))
+
+    p =
+      to_float01(
+        Map.get(ch, :p_top1) || Map.get(ch, "p_top1") || Map.get(ch, :prob) || Map.get(ch, "prob")
+      )
+
     max(s, p)
   end
 
@@ -242,4 +247,3 @@ defmodule Brain.WMGatingFromLIFGTest do
 
   defp to_float01(_), do: 0.0
 end
-
