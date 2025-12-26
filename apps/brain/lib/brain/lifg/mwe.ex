@@ -647,27 +647,31 @@ defmodule Brain.LIFG.MWE do
   # Token-aware containment:
   # - Accept spans as either {start, end_exclusive} or {start, len}.
   # - Disambiguate using the token surface length when available.
-  defp inside?(%{} = child_tok, parent_span) do
-    child_span = Safe.get(child_tok, :span)
+defp inside?(%{} = child_tok, parent_span) do
+  child_span = Safe.get(child_tok, :span)
 
-    surface =
-      Safe.get(child_tok, :phrase) ||
-        Safe.get(child_tok, :word) ||
-        Safe.get(child_tok, :lemma) ||
-        ""
+  surface =
+    Safe.get(child_tok, :phrase) ||
+      Safe.get(child_tok, :word) ||
+      Safe.get(child_tok, :lemma) ||
+      ""
 
-    slen =
-      case surface do
-        s when is_binary(s) -> String.length(s)
-        _ -> nil
-      end
+  slen =
+    case surface do
+      s when is_binary(s) -> String.length(s)
+      _ -> nil
+    end
 
-    inside_spans?(child_span, parent_span, slen)
-  end
+  inside_spans?(child_span, parent_span, slen)
+end
 
-  defp inside?(child_span, parent_span) do
-    inside_spans?(child_span, parent_span, nil)
-  end
+defp inside?(child_span, parent_span)
+     when is_tuple(child_span) and tuple_size(child_span) == 2 and
+          is_tuple(parent_span) and tuple_size(parent_span) == 2 do
+  inside_spans?(child_span, parent_span, nil)
+end
+
+defp inside?(_, _), do: false
 
   defp inside_spans?(child_span, parent_span, surface_len) do
     case {to_end_span(child_span, surface_len), to_end_span(parent_span, nil)} do
@@ -675,8 +679,6 @@ defmodule Brain.LIFG.MWE do
       _ -> false
     end
   end
-
-  defp inside?(_, _), do: false
 
   defp to_end_span({s, b}, surface_len)
        when is_integer(s) and is_integer(b) and s >= 0 and b >= 0 do
