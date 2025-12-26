@@ -40,4 +40,3 @@ defmodule Brain.LIFG.MWEFallbackTelemetryTest do
     refute_receive {:fb, _meas, _meta}, 50
   end
 end
-

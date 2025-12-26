@@ -663,6 +663,7 @@ defmodule Brain do
   end
 
   # ───────────────────────── Public helper: recall → WM ───────────────────────
+
   defp count_added(before, aftr), do: max(length(aftr) - length(before), 0)
   defp count_removed(before, aftr), do: max(length(before) - length(aftr), 0)
 
@@ -722,7 +723,7 @@ defmodule Brain do
   @doc ~S"""
   Recall from Hippocampus and gate results into WM.
 
-  This function calls `Brain.Hippocampus.recall/2` and converts recall results into
+  This function calls `Brain.Hippocampus.recall/2` (best-effort) and converts recall results into
   candidate WM items, then focuses them into WM via `focus/2`.
 
   Because recall availability is environment-dependent, this doctest only asserts export:
@@ -733,51 +734,128 @@ defmodule Brain do
   """
   @spec focus_from_recall(map() | list(), keyword()) :: [map()]
   def focus_from_recall(si_or_cues, recall_opts \\ []) do
-    results = Brain.Hippocampus.recall(si_or_cues, recall_opts)
+    sentence = extract_sentence(si_or_cues)
+    results = safe_hippo_recall(si_or_cues, recall_opts)
 
     cands =
-      if is_list(results) and results != [] do
-        Enum.map(results, fn r ->
-          slate = get_in(r, [:episode, :slate]) || get_in(r, ["episode", "slate"])
+      case results do
+        list when is_list(list) and list != [] ->
+          Enum.map(list, &recall_result_to_wm_candidate/1)
 
-          lemma =
-            Map.get(r, :lemma) ||
-              Map.get(r, "lemma") ||
-              (slate && first_lemma_from_slate(slate)) ||
-              ""
-
-          id = Map.get(r, :id) || Map.get(r, "id") || (lemma != "" && "#{lemma}|ltm") || "ltm"
-
-          %{
-            token_index: Map.get(r, :token_index) || Map.get(r, "token_index") || 0,
-            id: to_string(id),
-            lemma: to_string(lemma),
-            score: Map.get(r, :score) || Map.get(r, "score") || 1.0,
-            source: :ltm,
-            reason: :hippocampus,
-            payload: r
-          }
-        end)
-      else
-        si_or_cues
-        |> cues_to_candidates()
-        |> Enum.map(fn c ->
-          lemma = (c[:lemma] || c["lemma"] || "") |> to_string()
-          id = c[:id] || c["id"] || (lemma != "" && "#{lemma}|ltm") || "ltm"
-
-          %{
-            token_index: c[:token_index] || c["token_index"] || 0,
-            id: to_string(id),
-            lemma: lemma,
-            score: c[:score] || c["score"] || 1.0,
-            source: :ltm,
-            reason: :hippocampus_fallback
-          }
-        end)
+        _ ->
+          si_or_cues
+          |> cues_to_candidates(sentence)
+          |> Enum.map(&cue_to_wm_candidate/1)
       end
 
-    gencall(@name, {:focus, cands, %{}})
+    focus(cands, [])
   end
+
+  defp safe_hippo_recall(si_or_cues, recall_opts) do
+    if Code.ensure_loaded?(Brain.Hippocampus) and
+         function_exported?(Brain.Hippocampus, :recall, 2) do
+      try do
+        Brain.Hippocampus.recall(si_or_cues, recall_opts)
+      rescue
+        _ -> []
+      catch
+        :exit, _ -> []
+      end
+    else
+      []
+    end
+  end
+
+  defp recall_result_to_wm_candidate(r) when is_map(r) do
+    slate = get_in(r, [:episode, :slate]) || get_in(r, ["episode", "slate"])
+
+    lemma =
+      Map.get(r, :lemma) ||
+        Map.get(r, "lemma") ||
+        (slate && first_lemma_from_slate(slate)) ||
+        ""
+
+    lemma_s = to_string(lemma)
+
+    id =
+      Map.get(r, :id) ||
+        Map.get(r, "id") ||
+        (lemma_s != "" && "#{lemma_s}|ltm") ||
+        "ltm"
+
+    %{
+      token_index: as_nonneg_int(Map.get(r, :token_index) || Map.get(r, "token_index") || 0),
+      id: to_string(id),
+      lemma: lemma_s,
+      score: as_float(Map.get(r, :score) || Map.get(r, "score") || 1.0),
+      source: :ltm,
+      reason: :hippocampus,
+      payload: r
+    }
+  end
+
+  defp recall_result_to_wm_candidate(other) do
+    %{
+      token_index: 0,
+      id: "ltm",
+      lemma: "ltm",
+      score: 0.0,
+      source: :ltm,
+      reason: :hippocampus,
+      payload: other
+    }
+  end
+
+  defp cue_to_wm_candidate(c) when is_map(c) do
+    lemma = to_string(c[:lemma] || c["lemma"] || "")
+    id = c[:id] || c["id"] || (lemma != "" && "#{lemma}|ltm") || "ltm"
+
+    %{
+      token_index: as_nonneg_int(c[:token_index] || c["token_index"] || 0),
+      id: to_string(id),
+      lemma: lemma,
+      score: as_float(c[:score] || c["score"] || 1.0),
+      source: :ltm,
+      reason: :hippocampus_fallback
+    }
+  end
+
+  defp cue_to_wm_candidate(other) do
+    %{
+      token_index: 0,
+      id: "ltm",
+      lemma: "ltm",
+      score: 0.0,
+      source: :ltm,
+      reason: :hippocampus_fallback,
+      payload: other
+    }
+  end
+
+  defp extract_sentence(%{} = m), do: Map.get(m, :sentence) || Map.get(m, "sentence")
+  defp extract_sentence(_), do: nil
+
+  defp as_nonneg_int(n) when is_integer(n) and n >= 0, do: n
+
+  defp as_nonneg_int(n) when is_binary(n) do
+    case Integer.parse(String.trim(n)) do
+      {i, _} when i >= 0 -> i
+      _ -> 0
+    end
+  end
+
+  defp as_nonneg_int(_), do: 0
+
+  defp as_float(n) when is_number(n), do: n * 1.0
+
+  defp as_float(n) when is_binary(n) do
+    case Float.parse(String.trim(n)) do
+      {f, _} -> f
+      _ -> 0.0
+    end
+  end
+
+  defp as_float(_), do: 0.0
 
   # ───────────────────────── WM decay & eviction (τ-model) ────────────────────
 
@@ -925,7 +1003,9 @@ defmodule Brain do
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
 
-  defp cues_to_candidates(cues) do
+  defp cues_to_candidates(cues), do: cues_to_candidates(cues, nil)
+
+  defp cues_to_candidates(cues, sentence) do
     winners =
       case cues do
         %{winners: ws} when is_list(ws) -> ws
@@ -935,38 +1015,72 @@ defmodule Brain do
         x -> [x]
       end
 
-    Enum.map(winners, fn w ->
+    sent = normalize_sentence(sentence)
+
+    Enum.flat_map(winners, fn w ->
       cond do
         is_map(w) and (w[:id] || w["id"]) ->
           id = w[:id] || w["id"]
 
-          %{
-            token_index: w[:token_index] || w["token_index"] || 0,
-            id: to_string(id),
-            score: w[:score] || w["score"] || 1.0
-          }
+          [
+            %{
+              token_index: w[:token_index] || w["token_index"] || 0,
+              id: to_string(id),
+              score: w[:score] || w["score"] || 1.0
+            }
+          ]
 
         is_map(w) and (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) ->
           lemma = (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) |> to_string()
 
-          %{
-            token_index: w[:token_index] || w["token_index"] || 0,
-            lemma: lemma,
-            score: w[:score] || w["score"] || 1.0
-          }
+          [
+            %{
+              token_index: w[:token_index] || w["token_index"] || 0,
+              lemma: lemma,
+              score: w[:score] || w["score"] || 1.0
+            }
+          ]
 
         is_binary(w) and String.contains?(w, "|") ->
-          %{token_index: 0, id: w, score: 1.0}
+          [%{token_index: 0, id: w, score: 1.0}]
 
-        is_binary(w) ->
-          l = String.downcase(w)
-          %{token_index: 0, id: "#{l}|phrase|fallback", lemma: l, score: 1.0, source: :runtime}
+is_binary(w) ->
+        l =
+          w
+          |> String.downcase()
+          |> String.replace(~r/\s+/u, " ")
+          |> String.trim()
 
+        cond do
+          l == "" ->
+            []
+
+          # If we can validate against a sentence and it clearly doesn't match, skip.
+          sent != "" and not String.contains?(sent, l) ->
+            []
+
+          # Otherwise, treat this as an LTM recall cue (lets WMFocus mint "#{lemma}|ltm").
+          true ->
+            [
+              %{
+                token_index: 0,
+                lemma: l,
+                score: 0.30,
+                source: :ltm,
+                reason: :hippocampus_fallback
+              }
+            ]
+        end
         true ->
-          %{token_index: 0, score: 0.0}
+          []
       end
     end)
   end
+
+  defp normalize_sentence(s) when is_binary(s),
+    do: s |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  defp normalize_sentence(_), do: ""
 
   defp first_lemma_from_slate(%{winners: winners}) when is_list(winners) do
     winners
@@ -1040,6 +1154,7 @@ defmodule Brain do
   end
 
   # ───────────────────────── Control signal emission ─────────────────────────
+
   defp apply_control_signals(boosts, inhibitions, opts) do
     coalesce? = Keyword.get(opts, :coalesce, true)
     conc = Keyword.get(opts, :signal_concurrency, System.schedulers_online())

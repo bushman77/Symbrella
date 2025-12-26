@@ -1,4 +1,4 @@
-# apps/core/lib/core.ex
+#apps/core/lib/core.ex
 defmodule Core do
   @moduledoc """
   Pipeline:
@@ -56,6 +56,13 @@ defmodule Core do
                            :sense_candidates
                          ])
 
+  @doc false
+  @spec __merge_brain_out__(SemanticInput.t() | map() | String.t(), map()) :: SemanticInput.t()
+  def __merge_brain_out__(si_or_map, %{} = brain_out) do
+    si = coerce_si(si_or_map)
+    merge_into_si(si, brain_out)
+  end
+
   defp coerce_si(%SemanticInput{} = si), do: si
 
   defp coerce_si(%{} = m) do
@@ -84,9 +91,19 @@ defmodule Core do
         MapSet.member?(@brain_merge_blocklist, k) ->
           acc
 
+        k == :trace and is_list(v) ->
+          merge_trace(acc, v)
+
         true ->
           Map.put(acc, k, v)
       end
+    end)
+  end
+
+  defp merge_trace(%SemanticInput{} = si, brain_trace) when is_list(brain_trace) do
+    Map.update(si, :trace, brain_trace, fn core_trace ->
+      # Both traces are treated as newest-first lists. Keep Brain events first.
+      brain_trace ++ core_trace
     end)
   end
 
@@ -248,8 +265,6 @@ defmodule Core do
 
   # ─────────────────────── Evidence hygiene ────────────────────────────
 
-  # Some stages (e.g., relations) may create an empty evidence shell.
-  # Certain tests expect :evidence to remain nil unless real evidence exists.
   defp maybe_drop_empty_evidence(%{} = si) do
     case Map.get(si, :evidence) do
       %{relations: []} = ev when map_size(ev) == 1 ->

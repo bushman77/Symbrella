@@ -68,7 +68,9 @@ defmodule Brain.LIFG.MWETest do
     assert Enum.any?(sc[5], fn c -> (c[:id] || c["id"]) == "good evening|phrase|fallback" end)
 
     # Critical: must NOT land under token index 2 ("are")
-    refute Enum.any?(Map.get(sc, 2, []), fn c -> (c[:id] || c["id"]) == "good evening|phrase|fallback" end)
+    refute Enum.any?(Map.get(sc, 2, []), fn c ->
+             (c[:id] || c["id"]) == "good evening|phrase|fallback"
+           end)
 
     # And must suppress function-word-edge fallbacks
     refute Map.has_key?(sc, 6)
@@ -98,4 +100,3 @@ defmodule Brain.LIFG.MWETest do
     assert (cand[:pos] || cand["pos"]) == "proper_noun"
   end
 end
-

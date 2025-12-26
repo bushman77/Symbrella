@@ -1728,4 +1728,3 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 end
-

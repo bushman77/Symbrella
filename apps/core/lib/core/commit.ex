@@ -1,3 +1,4 @@
+#apps/core/lib/core/commit.ex
 defmodule Core.Commit do
   @moduledoc """
   Finalize/Output commit for the Core pipeline.
@@ -39,7 +40,6 @@ defmodule Core.Commit do
         }
       end)
 
-    # Compact episodes summary (stable for UI/logs)
     episodes =
       case get_in(si, [:evidence, :episodes]) do
         list when is_list(list) ->
@@ -100,7 +100,6 @@ defmodule Core.Commit do
     %{output: output, si: si2}
   end
 
-  # Local telemetry shim
   defp emit(ev, meas, meta) do
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
       :telemetry.execute(ev, meas, meta)
@@ -109,3 +108,4 @@ defmodule Core.Commit do
     end
   end
 end
+

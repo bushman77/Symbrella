@@ -197,4 +197,3 @@ defmodule Core.SemanticInput do
     end
   end
 end
-

@@ -1,3 +1,4 @@
+#apps/brain/lib/brain/pipeline/lifg_stage1.ex
 defmodule Brain.Pipeline.LIFGStage1 do
   @moduledoc false
 
@@ -313,57 +314,71 @@ defmodule Brain.Pipeline.LIFGStage1 do
   end
 
   # Prefer probability-like confidence for gating (p_top1 / probs / scores), not raw prior :score.
+  # FIX: also read ch[:probs][chosen_id] / ch[:scores][chosen_id] when Stage1 produced softmax maps.
   defp gate_score(%{} = ch) do
-    score0 = ch[:score] || ch["score"]
+    chosen_id =
+      ch[:chosen_id] || ch["chosen_id"] ||
+        ch[:id] || ch["id"]
 
-    score01 =
-      cond do
-        is_number(score0) and score0 >= 0.0 and score0 <= 1.0 ->
-          score0 * 1.0
-
-        is_binary(score0) ->
-          case Float.parse(score0) do
-            {f, ""} when f >= 0.0 and f <= 1.0 -> f
-            _ -> 0.0
-          end
-
-        true ->
-          0.0
-      end
-
-    p_top1 =
-      case ch[:p_top1] || ch["p_top1"] do
-        p when is_number(p) ->
-          p * 1.0
-
-        p when is_binary(p) ->
-          case Float.parse(p) do
-            {f, ""} -> f
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
+    score01 = num01(ch[:score] || ch["score"])
+    p_top1 = num01(ch[:p_top1] || ch["p_top1"])
+    from_maps = prob_from_maps(ch, chosen_id)
 
     p1 =
       cond do
         is_number(p_top1) ->
           p_top1
 
+        is_number(from_maps) ->
+          from_maps
+
         Code.ensure_loaded?(LIFG) and function_exported?(LIFG, :top1_prob, 1) ->
-          LIFG.top1_prob(ch)
+          num01(LIFG.top1_prob(ch)) || score01 || 0.0
 
         true ->
-          score01
+          score01 || 0.0
       end
 
-    max(score01, p1)
+    max(score01 || 0.0, p1 || 0.0)
     |> max(0.0)
     |> min(1.0)
   end
 
   defp gate_score(_), do: 0.0
+
+  defp prob_from_maps(_ch, nil), do: nil
+
+  defp prob_from_maps(ch, chosen_id) do
+    probs = ch[:probs] || ch["probs"]
+    scores = ch[:scores] || ch["scores"]
+
+    cond do
+      is_map(probs) ->
+        num01(Map.get(probs, chosen_id))
+
+      is_map(scores) ->
+        num01(Map.get(scores, chosen_id))
+
+      true ->
+        nil
+    end
+  end
+
+  defp num01(nil), do: nil
+  defp num01(v) when is_integer(v), do: num01(v * 1.0)
+
+  defp num01(v) when is_float(v) do
+    if v >= 0.0 and v <= 1.0, do: v, else: nil
+  end
+
+  defp num01(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {f, _} when f >= 0.0 and f <= 1.0 -> f
+      _ -> nil
+    end
+  end
+
+  defp num01(_), do: nil
 
   defp ensure_decision_score!({tag, %{} = ch}) when tag in [:commit, :allow, :boost],
     do: {tag, Map.put(ch, :score, gate_score(ch))}
@@ -553,3 +568,4 @@ defmodule Brain.Pipeline.LIFGStage1 do
     Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test
   end
 end
+
