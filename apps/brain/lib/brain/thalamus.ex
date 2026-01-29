@@ -25,7 +25,7 @@ defmodule Brain.Thalamus do
         ofc_blended?: boolean, ofc_value: float | nil, ofc_weight: float,
         acc_applied?: boolean, acc_conflict: float | nil, acc_alpha: float,
         mood_applied?: boolean, mood_factor: float,
-        mood_snapshot: %{exploration:, inhibition:, vigilance:, plasticity:},
+        mood_snapshot: %{exploration:, inhibition:, vigilance:, plasticity:} | nil,
         mood_weights: %{expl:, inhib:, vigil:, plast:}, mood_cap: float,
         v: 2
       }
@@ -260,17 +260,9 @@ defmodule Brain.Thalamus do
       |> meta_get(:probe_id, "curiosity|probe|unknown")
       |> to_string()
 
+    # Always update the cached value (OFC can revise), while bumping recency + bounding the cache.
     {cache2, order2} =
-      case Map.fetch(state.ofc_cache, probe_id) do
-        # First OFC signal for this probe_id: store it (bounded cache)
-        :error ->
-          put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
-
-        # We already have an OFC value for this probe_id; keep it, just bump recency
-        {:ok, _existing} ->
-          order1 = [probe_id | Enum.reject(state.ofc_order, &(&1 == probe_id))]
-          {state.ofc_cache, order1}
-      end
+      put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
 
     {:noreply, %{state | ofc_cache: cache2, ofc_order: order2}}
   end
@@ -321,7 +313,7 @@ defmodule Brain.Thalamus do
         {probe1, blended_score, false}
       end
 
-    # 4) Mood bias
+    # 4) Mood bias (bounded). Even if mood is nil, report effective weights/cap for transparency.
     {mood_factor, mood_applied?, mood_snapshot, mood_weights, mood_cap} =
       compute_mood_factor(state)
 
@@ -365,8 +357,9 @@ defmodule Brain.Thalamus do
 
   # ── Mood math ──────────────────────────────────────────────────────────────
 
-  defp compute_mood_factor(%{mood: nil} = _state) do
-    {1.0, false, nil, nil, cfg_mood_cap([])}
+  defp compute_mood_factor(%{mood: nil, opts: opts}) do
+    # No mood snapshot yet; do not apply mood, but still surface effective knobs.
+    {1.0, false, nil, cfg_mood_weights(opts), cfg_mood_cap(opts)}
   end
 
   defp compute_mood_factor(%{mood: mood, opts: opts}) do

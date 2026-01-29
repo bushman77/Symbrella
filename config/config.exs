@@ -77,6 +77,7 @@ config :brain,
     failure: %{da: -0.01, "5ht": 0.02, glu: 0.00, ne: 0.02}
   }
 
+config :brain, :blackboard_window_size, 100
 # MoodCore — explicit module config (kept separate on purpose)
 config :brain, Brain.MoodCore,
   half_life_ms: 12_000,

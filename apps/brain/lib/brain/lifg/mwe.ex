@@ -500,6 +500,15 @@ defmodule Brain.LIFG.MWE do
   def heads_for_indices(_si, _idxs), do: %{}
 
   # ── Private helpers ──────────────────────────────────────────────────
+# apps/brain/lib/brain/lifg/mwe.ex
+def function_word?(w) when is_binary(w) do
+  w = w |> String.downcase() |> String.trim()
+
+  w in @preps or w in @dets or w in @conjs or w in @auxes or
+    w in @modals or w in @pron or w in @neg
+end
+
+def function_word?(_), do: false
 
   defp ensure_map(m) when is_map(m), do: m
   defp ensure_map(_), do: %{}
@@ -712,16 +721,16 @@ defmodule Brain.LIFG.MWE do
   defp norm_key(_), do: ""
 
   # Prefer explicit token :index / :token_index over list position.
+# Prefer explicit token :token_index over :index (list position).
   defp token_index(tok, fallback) when is_map(tok) do
     v =
-      Safe.get(tok, :index) ||
-        Safe.get(tok, "index") ||
-        Safe.get(tok, :token_index) ||
-        Safe.get(tok, "token_index")
+      Safe.get(tok, :token_index) ||
+        Safe.get(tok, "token_index") ||
+        Safe.get(tok, :index) ||
+        Safe.get(tok, "index")
 
     if is_integer(v) and v >= 0, do: v, else: fallback
   end
-
   defp token_index(_tok, fallback), do: fallback
 
   defp parse_nonneg_int(i) when is_integer(i) and i >= 0, do: i
@@ -790,7 +799,11 @@ defmodule Brain.LIFG.MWE do
     end
   end
 
-  # Reject fallback MWEs that start/end with function words (prevents "kick the", "the bucket", etc.)
+
+# Reject fallback MWEs that are mostly scaffolding:
+  # - Always reject if head OR tail is a function word
+  # - For 3+ grams, also reject if 2+ tokens are function words
+  #   (kills "what do you", "do you think", "we should do", etc.)
   defp allow_fallback_phrase?(phrase) when is_binary(phrase) do
     parts =
       phrase
@@ -804,19 +817,19 @@ defmodule Brain.LIFG.MWE do
       [_] ->
         false
 
-      _ ->
-        head = hd(parts)
-        tail = List.last(parts)
-        not (function_word_str?(head) or function_word_str?(tail))
+      [a, b] ->
+        # strict for bigrams
+        function_word?(a) == false and function_word?(b) == false
+
+      xs when length(xs) >= 3 ->
+        head = hd(xs)
+        tail = List.last(xs)
+        fn_count = Enum.count(xs, &function_word?/1)
+
+        not (function_word?(head) or function_word?(tail) or fn_count >= 2)
     end
   end
 
   defp allow_fallback_phrase?(_), do: false
 
-  defp function_word_str?(w) when is_binary(w) do
-    w in @preps or w in @dets or w in @conjs or w in @auxes or w in @modals or w in @pron or
-      w in @neg
-  end
-
-  defp function_word_str?(_), do: false
 end

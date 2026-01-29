@@ -7,43 +7,26 @@ defmodule Brain.LIFG.Stage1 do
   ----------------
   • Score sense candidates per token using a weighted feature mix:
       - :lex_fit     — lexical compatibility with the token (esp. for MWEs)
-      - :rel_prior   — relational prior / heuristic prior from candidate
-      - :activation  — candidate prior activation / score (DB or slate)
-      - :intent_bias — bias from `si.intent_bias[token_index]` (e.g., MWE signatures)
-  • Apply mood nudging (multiplicative factor) if the Stage1 server is running.
-  • Apply Cerebellum calibration (tiny delta-scores) when margin is thin.
+      - :rel_prior   — relational/heuristic prior from candidate/id
+      - :activation  — candidate activation/score (DB, slate, or synthesized)
+      - :intent_bias — bias from `si.intent_bias[token_index]`
+  • Apply mood nudging if the Stage1 server is running (best-effort, never blocks).
+  • Apply Cerebellum calibration (best-effort) and learn after the decision.
   • Normalize to probabilities (softmax), compute margins, return winners.
-  • Learn online in Cerebellum after the decision.
+  • Emit a Stage1 summary event for Blackboard/SelfPortrait.
 
-  Integrations
-  ------------
-  • Optional mood updates via telemetry: [:brain, :mood, :update]
-  • Cerebellum forward model via Brain.Cerebellum.{calibrate_scores, learn_lifg}
-  • NOTE: To avoid circular GenServer calls, semantic adjustments must be applied upstream
-    (e.g., enrich `si.intent_bias` before Stage1). The Stage1 server process
-    does not call out to other GenServers during `handle_call/3`.
+  Notes
+  -----
+  Stage1 is intentionally side-effect-light. It must not depend on other GenServers
+  during `handle_call/3`. Any semantic enrichment should occur upstream.
 
   Telemetry
   ---------
-  • [:brain, :lifg, :stage1, :score]       — per-candidate mood-applied score
-  • [:brain, :lifg, :chargram_violation]   — char-gram drops (measurements = %{})
-  • [:brain, :lifg, :boundary_drop]        — boundary guard drops (measurements = %{})
-  • [:brain, :pmtg, :mwe_fallback_emitted] — MWE tokens with no senses (measurements = %{count: 1})
-
-  NEW (summary for self-model / Blackboard bridge)
-  -----------------------------------------------
+  • [:brain, :lifg, :stage1, :score]
+  • [:brain, :lifg, :stage1, :boundary_drop]
+  • [:brain, :lifg, :stage1, :chargram_violation]
+  • [:brain, :pmtg, :mwe_fallback_emitted]
   • [:brain, :pipeline, :lifg_stage1, :stop]
-      - measurements include high-level counts
-      - meta includes margins + fallback/guard counters + basic context
-
-  NEW (timestamp / frame separator)
-  --------------------------------
-  Stage1 stamps each run with:
-    - si.frame_seq
-    - si.frame_ts_ms
-    - si.frame_run_id
-    - si.frame (map)
-  and also emits these into telemetry meta so the UI (Blackboard) can separate runs cleanly.
   """
 
   use Brain, region: :lifg_stage1
@@ -90,6 +73,24 @@ defmodule Brain.LIFG.Stage1 do
   # Summary event (Blackboard typically bridges this)
   @stage1_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
 
+  # When true, Stage1 synthesizes a deterministic phrase fallback candidate for MWEs
+  # that have no candidates (prevents “missing_candidates” drops).
+  @default_stage1_local_mwe_fallback true
+
+  # Function-word set used to reject junk MWE fallbacks like "to go", "going to", etc.
+  # (kept local so Stage1 compiles standalone).
+  @function_words MapSet.new(
+                    ~w(
+                      of to in on at by for from with about into over after between through during before under without within along across behind beyond up down off near among
+                      the a an this that these those some any each every no neither either
+                      and or but nor so yet for
+                      be am is are was were being been do does did have has had having
+                      can could may might must shall should will would
+                      i you he she it we they me him her us them my your his her our their mine yours hers ours theirs myself yourself himself herself itself ourselves yourselves themselves
+                      not never
+                    )
+                  )
+
   # ---------- Public server API (mood) ----------
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -100,8 +101,7 @@ defmodule Brain.LIFG.Stage1 do
   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si), do: run(si, [])
 
-  @spec run(map(), keyword()) ::
-          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
       sent0 = Safe.get(si, :sentence) || Safe.get(si, "sentence")
@@ -113,26 +113,33 @@ defmodule Brain.LIFG.Stage1 do
           nil
         end
 
-      # NEW: stamp this run with a stable frame/timestamp identity for UI + debugging.
+      # Stamp this run for downstream/UI separation.
       frame = build_frame(si, opts)
-      si_base = put_frame(si, frame)
+
+      si_base =
+        si
+        |> put_frame(frame)
+        |> maybe_reset_sense_candidates(opts)
+        |> stamp_slates(frame)
 
       # 1) Tokens + Guard preprocessing (may drop tokens)
       {tokens, guard_rejected, guard_drops} = prepare_tokens(si_base, sent)
 
-      # Ensure the SI actually carries the sanitized tokens (critical for span logic)
+      # Ensure SI carries sanitized tokens (critical for span logic)
       si0 = Map.put(si_base, :tokens, tokens)
 
       # Wire candidate slate from active_cells + MWE fallback/backfill
       lifg_opts = merged_lifg_opts(si0, opts)
 
-      si1 =
-        si0
-        |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
-        |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
-        |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
+si1 =
+  si0
+  |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
+  |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
+  |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
 
-      buckets = buckets_from_si(si1)
+si1 = stamp_slates(si1, frame)
+      buckets = buckets_from_si(si1, tokens)
+
 
       # 2) Effective knobs
       weights =
@@ -150,20 +157,14 @@ defmodule Brain.LIFG.Stage1 do
         Keyword.get(
           opts,
           :margin_threshold,
-          lifg_default(
-            :margin_threshold,
-            Application.get_env(:brain, :lifg_margin_threshold, @default_margin_thr)
-          )
+          lifg_default(:margin_threshold, Application.get_env(:brain, :lifg_margin_threshold, @default_margin_thr))
         )
 
       min_margin =
         Keyword.get(
           opts,
           :min_margin,
-          lifg_default(
-            :min_margin,
-            Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
-          )
+          lifg_default(:min_margin, Application.get_env(:brain, :lifg_min_margin, @default_min_margin))
         )
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
@@ -178,21 +179,21 @@ defmodule Brain.LIFG.Stage1 do
       mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
 
       mwe_fallback? =
+        Keyword.get(opts, :mwe_fallback, Application.get_env(:brain, :lifg_stage1_mwe_fallback, true))
+
+      stage1_local_mwe_fallback? =
         Keyword.get(
           opts,
-          :mwe_fallback,
-          Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
+          :stage1_local_mwe_fallback,
+          Application.get_env(:brain, :lifg_stage1_local_mwe_fallback, @default_stage1_local_mwe_fallback)
         )
 
-      stop_event =
-        Keyword.get(opts, :stage1_stop_event, @stage1_stop_event)
+      stop_event = Keyword.get(opts, :stage1_stop_event, @stage1_stop_event)
 
-      # Reanalysis flag (used to ensure runner-up is available when vetoed)
-      reanalysis? =
-        Keyword.get(opts, :reanalysis, false) or
-          Keyword.get(opts, :reanalysis?, false)
+      # Reanalysis flag (ensures runner-up is available when vetoed)
+      reanalysis? = Keyword.get(opts, :reanalysis, false) or Keyword.get(opts, :reanalysis?, false)
 
-      # 4) Main scoring loop
+      # 3) Main scoring loop
       {choices, acc} =
         score_tokens(tokens, %{
           si: si1,
@@ -207,15 +208,16 @@ defmodule Brain.LIFG.Stage1 do
           boundary_event: boundary_event,
           mwe_event: mwe_event,
           mwe_fallback?: mwe_fallback?,
+          stage1_local_mwe_fallback?: stage1_local_mwe_fallback?,
           stage1_stop_event: stop_event,
           reanalysis?: reanalysis?,
-          # NEW: frame stamping for all telemetry events
+          # frame stamping for all telemetry events
           frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
           frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
           frame_run_id: Safe.get(si1, :frame_run_id) || Safe.get(si1, "frame_run_id")
         })
 
-      # 5) Audit + reanalysis hook
+      # 4) Audit + reanalysis hook
       dropped_total = acc.boundary_drops + acc.chargram + acc.no_cand + guard_drops
 
       rejected_all =
@@ -232,22 +234,13 @@ defmodule Brain.LIFG.Stage1 do
       guardrail_violations = acc.chargram + acc.boundary_drops + guard_drops
 
       audit =
-        build_audit(
-          acc.kept,
-          dropped_total,
-          rejected_all,
-          guardrail_violations,
-          acc.weak,
-          acc.no_cand,
-          missing_tokens
-        )
+        build_audit(acc.kept, dropped_total, rejected_all, guardrail_violations, acc.weak, acc.no_cand, missing_tokens)
         |> Map.put(:guard_drops, guard_drops)
         |> Map.put(:boundary_drop_count, acc.boundary_drops)
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
 
-      # NEW: emit summary telemetry for Blackboard→SelfPortrait
       emit_stage1_stop(
         ctx_from_run(si1, sent, opts),
         out.choices,
@@ -269,24 +262,18 @@ defmodule Brain.LIFG.Stage1 do
   @spec run(map(), map() | keyword(), keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, weights_or_kw, opts) when is_list(opts) do
-    # IMPORTANT: tolerate legacy ctx (e.g., [0.0]) passed as arg2.
-    # Only treat arg2 as weights when it is a map or a proper keyword list.
+    # Tolerate legacy ctx passed as arg2; only treat arg2 as weights when it is a map or keyword list.
     weights_map =
       cond do
-        is_map(weights_or_kw) ->
-          weights_or_kw
-
-        is_list(weights_or_kw) and Keyword.keyword?(weights_or_kw) ->
-          Map.new(weights_or_kw)
-
-        true ->
-          %{}
+        is_map(weights_or_kw) -> weights_or_kw
+        is_list(weights_or_kw) and Keyword.keyword?(weights_or_kw) -> Map.new(weights_or_kw)
+        true -> %{}
       end
 
     run(si, Keyword.merge(opts, weights: weights_map))
   end
 
-  # ---------- Internal helpers for run/2 ------------------------------------
+  # ---------- Internal helpers for run/2 ----------
 
   defp merged_lifg_opts(si0, opts) do
     base =
@@ -319,12 +306,53 @@ defmodule Brain.LIFG.Stage1 do
           Safe.get(si1, :intent_confidence) ||
           Safe.get(si1, "intent_confidence"),
       source: Keyword.get(opts, :source, :run),
-      # NEW: frame stamps (for timestamp separators downstream)
       frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
       frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
       frame_run_id: Safe.get(si1, :frame_run_id) || Safe.get(si1, "frame_run_id")
     }
   end
+
+defp maybe_reset_sense_candidates(%{} = si, opts) do
+  if Keyword.get(opts, :preserve_sense_candidates, false) do
+    si
+  else
+    # Clear *only* if the slate is stamped for a different frame run.
+    # If there is no stamp, treat it as caller-owned (tests / PMTG) and keep it.
+    run_id =
+      Safe.get(si, :frame_run_id) ||
+        Safe.get(si, "frame_run_id") ||
+        (Safe.get(si, :frame) && Safe.get(Safe.get(si, :frame), :run_id)) ||
+        (Safe.get(si, "frame") && Safe.get(Safe.get(si, "frame"), "run_id"))
+
+    si
+    |> maybe_reset_one_slate(:sense_candidates, :sense_candidates_frame_run_id, run_id)
+    |> maybe_reset_one_slate(:candidates_by_token, :candidates_by_token_frame_run_id, run_id)
+  end
+end
+
+defp maybe_reset_sense_candidates(si, _opts), do: si
+
+defp maybe_reset_one_slate(%{} = si, field, stamp_field, run_id) do
+  stamp = Safe.get(si, stamp_field) || Safe.get(si, to_string(stamp_field))
+
+  cond do
+    is_nil(run_id) ->
+      # No run id => permissive
+      si
+
+    is_nil(stamp) ->
+      # No stamp => caller-owned input, keep it
+      si
+
+    stamp == run_id ->
+      si
+
+    true ->
+      si
+      |> Map.put(field, %{})
+      |> Map.put(stamp_field, run_id)
+  end
+end
 
   defp prepare_tokens(si0, sent) do
     {raw_tokens, raw_indices} =
@@ -332,9 +360,7 @@ defmodule Brain.LIFG.Stage1 do
       |> Safe.get(:tokens, [])
       |> Enum.map(&Safe.to_plain/1)
       |> Enum.with_index()
-      |> Enum.map(fn {tok, fallback_idx} ->
-        {tok, token_index(tok, fallback_idx)}
-      end)
+      |> Enum.map(fn {tok, fallback_idx} -> {tok, token_index(tok, fallback_idx)} end)
       |> Enum.unzip()
 
     sanitized =
@@ -348,7 +374,11 @@ defmodule Brain.LIFG.Stage1 do
 
     kept_indices =
       tokens
-      |> Enum.map(&token_index(&1, 0))
+      |> Enum.with_index()
+      |> Enum.map(fn {tok, fallback_idx} ->
+        # Do NOT collapse missing indexes to 0.
+        token_index(tok, fallback_idx)
+      end)
 
     guard_rejected =
       raw_indices
@@ -370,12 +400,8 @@ defmodule Brain.LIFG.Stage1 do
 
     idx =
       cond do
-        is_integer(raw) ->
-          raw
-
-        is_float(raw) ->
-          trunc(raw)
-
+        is_integer(raw) -> raw
+        is_float(raw) -> trunc(raw)
         is_binary(raw) ->
           case Integer.parse(String.trim(raw)) do
             {n, _} -> n
@@ -424,6 +450,8 @@ defmodule Brain.LIFG.Stage1 do
       token_phrase
   end
 
+  # ---------- Boundary / chargram guard ----------
+
   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
   defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
@@ -433,8 +461,7 @@ defmodule Brain.LIFG.Stage1 do
 
     cond do
       source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-        kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-          flag ->
+          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or flag ->
         {:error, :chargram}
 
       phrase_nil_or_empty?(phrase_norm) ->
@@ -447,6 +474,8 @@ defmodule Brain.LIFG.Stage1 do
         boundary_check_unigram(sentence, tok, phrase_norm)
     end
   end
+
+  # ---------- Scoring loop ----------
 
   defp score_tokens(tokens, ctx) do
     acc0 = %{
@@ -492,10 +521,45 @@ defmodule Brain.LIFG.Stage1 do
       Map.get(ctx.buckets, tok_index, [])
       |> Enum.map(&Safe.to_plain/1)
 
-    cand_list =
+    cand_list0 =
       orig_cands
       |> Enum.filter(&is_map/1)
       |> restrict_to_phrase_if_mwe(token_mwe?)
+      |> restrict_phrase_match_if_mwe(token_mwe?, token_phrase)
+
+    {cand_list, synth_mwe_fallback?} =
+      cond do
+        cand_list0 != [] ->
+          {cand_list0, false}
+
+        ctx.mwe_fallback? and ctx.stage1_local_mwe_fallback? and token_mwe? and
+            allow_mwe_fallback_phrase?(token_phrase) ->
+          emit_mwe_fallback(ctx.mwe_event, ctx, tok_index, raw_phrase, 1.0)
+
+          fallback_id = "#{token_phrase}|phrase|fallback"
+
+          {[
+             %{
+               id: fallback_id,
+               lemma: token_phrase,
+               norm: token_phrase,
+               pos: "phrase",
+               activation: 0.30,
+               score: 0.30
+             }
+           ], true}
+
+        true ->
+          {cand_list0, false}
+      end
+
+    # Count synthesized fallbacks as fallbacks (keeps audit + stop telemetry coherent)
+    acc =
+      if synth_mwe_fallback? do
+        Map.update!(acc, :mwe_fallbacks, &(&1 + 1))
+      else
+        acc
+      end
 
     if cand_list == [] do
       acc2 =
@@ -503,15 +567,12 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.update!(:no_cand, &(&1 + 1))
         |> Map.update!(:no_cand_tokens, &[tok_index | &1])
 
-      acc3 =
-        if ctx.mwe_fallback? and token_mwe? and orig_cands == [] do
-          emit_mwe_fallback(ctx.mwe_event, ctx, tok_index, raw_phrase, 0.0)
-          Map.update!(acc2, :mwe_fallbacks, &(&1 + 1))
-        else
-          acc2
-        end
-
-      acc3
+      # Preserve old counter behavior if still empty and MWE fallback path was enabled.
+      if ctx.mwe_fallback? and token_mwe? do
+        Map.update!(acc2, :mwe_fallbacks, &(&1 + 1))
+      else
+        acc2
+      end
     else
       bias_val = get_float(ctx.bias_map, tok_index, 0.0)
       {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
@@ -549,25 +610,10 @@ defmodule Brain.LIFG.Stage1 do
               Safe.get(c, "features") ||
               %{}
 
-          lex =
-            feat_override
-            |> get_num(:lex_fit, lex_ctx)
-            |> clamp01()
-
-          rel =
-            feat_override
-            |> get_num(:rel_prior, rel_ctx)
-            |> clamp01()
-
-          act =
-            feat_override
-            |> get_num(:activation, act0)
-            |> clamp01()
-
-          intent_feat =
-            feat_override
-            |> get_num(:intent_bias, intent0)
-            |> clamp01()
+          lex = feat_override |> get_num(:lex_fit, lex_ctx) |> clamp01()
+          rel = feat_override |> get_num(:rel_prior, rel_ctx) |> clamp01()
+          act = feat_override |> get_num(:activation, act0) |> clamp01()
+          intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
           base0 =
             (ctx.weights[:lex_fit] * lex +
@@ -647,19 +693,11 @@ defmodule Brain.LIFG.Stage1 do
           false
         end
 
-      # Contract: expose *only* the runner-up, and only when the decision is “weak”.
-      # Exception: if reanalysis is enabled and the winner is vetoed, ensure we have
-      # at least one alternative to promote even if margin is strong.
       alt_ids =
         cond do
-          is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? ->
-            [runner_up_id]
-
-          is_binary(runner_up_id) and margin < ctx.margin_thr ->
-            [runner_up_id]
-
-          true ->
-            []
+          is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? -> [runner_up_id]
+          is_binary(runner_up_id) and margin < ctx.margin_thr -> [runner_up_id]
+          true -> []
         end
 
       choice = %{
@@ -779,94 +817,149 @@ defmodule Brain.LIFG.Stage1 do
     |> Map.update!(:boundary_drops, &(&1 + 1))
   end
 
-  # ---------- NEW: Stage1 summary telemetry (for Blackboard→SelfPortrait) ----------
+  # ---------- Stage1 summary telemetry ----------
 
-  defp emit_stage1_stop(
-         run_ctx,
-         choices,
-         audit,
-         acc,
-         event,
-         weights,
-         scores_mode,
-         margin_thr,
-         min_margin
-       )
-       when is_list(choices) and is_map(audit) and is_map(acc) and is_list(event) do
-    ts = System.system_time(:millisecond)
+defp emit_stage1_stop(
+       run_ctx,
+       choices,
+       audit,
+       acc,
+       event,
+       weights,
+       scores_mode,
+       margin_thr,
+       min_margin
+     )
+     when is_list(choices) and is_map(audit) and is_map(acc) and is_list(event) do
+  ts = System.system_time(:millisecond)
 
-    margins =
-      choices
-      |> Enum.map(fn ch -> get_num(ch, :margin, get_num(ch, :prob_margin, 0.0)) end)
-      |> Enum.map(&clamp01/1)
+  frame_seq = Map.get(run_ctx, :frame_seq)
+  frame_ts_ms = Map.get(run_ctx, :frame_ts_ms) || ts
+  frame_run_id = Map.get(run_ctx, :frame_run_id)
 
-    probs =
-      choices
-      |> Enum.map(fn ch -> get_num(ch, :prob, get_num(ch, :score, 0.0)) end)
-      |> Enum.map(&clamp01/1)
+  # Prefer audit (post-processed) but fall back to acc (raw loop counters).
+  kept_tokens = audit_get(audit, :kept_tokens, acc.kept)
+  dropped_tokens = audit_get(audit, :dropped_tokens, 0)
+  weak_decisions = audit_get(audit, :weak_decisions, acc.weak)
+  missing_candidates = audit_get(audit, :missing_candidates, acc.no_cand)
+  missing_candidate_tokens = audit_get(audit, :missing_candidate_tokens, [])
+  guard_drops = audit_get(audit, :guard_drops, 0)
+  guardrail_violations = audit_get(audit, :chargram_violation, 0)
 
-    {margin_min, margin_mean} = {min_or_zero(margins), mean_or_zero(margins)}
-    {p1_min, p1_mean} = {min_or_zero(probs), mean_or_zero(probs)}
+  boundary_drops = acc.boundary_drops
+  chargram = acc.chargram
+  mwe_fallbacks = acc.mwe_fallbacks
 
-    fallback_winners =
-      Enum.count(choices, fn ch ->
-        id =
-          Safe.get(ch, :chosen_id) || Safe.get(ch, :id) || Safe.get(ch, "chosen_id") ||
-            Safe.get(ch, "id") || ""
+  {fallback_winners, margins, probs} = summarize_choices(choices)
 
-        String.contains?(to_string(id), "|phrase|fallback")
-      end)
+  {margin_min, margin_mean} = {min_or_zero(margins), mean_or_zero(margins)}
+  {p1_min, p1_mean} = {min_or_zero(probs), mean_or_zero(probs)}
 
-    frame_seq = Map.get(run_ctx, :frame_seq)
-    frame_ts_ms = Map.get(run_ctx, :frame_ts_ms) || ts
-    frame_run_id = Map.get(run_ctx, :frame_run_id)
+  total = max(kept_tokens + dropped_tokens, 0)
+  kept_rate = safe_div(kept_tokens, total)
+  weak_rate = safe_div(weak_decisions, max(kept_tokens, 0))
+  fallback_rate = safe_div(fallback_winners, max(kept_tokens, 0))
+  missing_rate = safe_div(missing_candidates, max(total, 0))
 
-    meta = %{
-      at_ms: ts,
-      ts_ms: ts,
-      frame_seq: frame_seq,
-      frame_ts_ms: frame_ts_ms,
-      frame_run_id: frame_run_id,
-      sentence: Map.get(run_ctx, :sentence),
-      intent: Map.get(run_ctx, :intent),
-      confidence: Map.get(run_ctx, :confidence),
-      source: Map.get(run_ctx, :source, :run),
-      kept_tokens: Map.get(audit, :kept_tokens, acc.kept),
-      dropped_tokens: Map.get(audit, :dropped_tokens, 0),
-      weak_decisions: Map.get(audit, :weak_decisions, acc.weak),
-      missing_candidates: Map.get(audit, :missing_candidates, acc.no_cand),
-      missing_candidate_tokens: Map.get(audit, :missing_candidate_tokens, []),
-      boundary_drops: acc.boundary_drops,
-      chargram_violation: acc.chargram,
-      guard_drops: Map.get(audit, :guard_drops, 0),
-      guardrail_violations: Map.get(audit, :chargram_violation, 0),
-      mwe_fallbacks: acc.mwe_fallbacks,
-      fallback_winners: fallback_winners,
-      margin_min: Float.round(margin_min, 6),
-      margin_mean: Float.round(margin_mean, 6),
-      p1_min: Float.round(p1_min, 6),
-      p1_mean: Float.round(p1_mean, 6),
-      scores_mode: scores_mode,
-      margin_threshold: margin_thr * 1.0,
-      min_margin: min_margin * 1.0,
-      weights: weights,
-      v: 2
-    }
+  meta = %{
+    at_ms: ts,
+    ts_ms: ts,
+    frame_seq: frame_seq,
+    frame_ts_ms: frame_ts_ms,
+    frame_run_id: frame_run_id,
 
-    meas = %{
-      kept: acc.kept,
-      weak: acc.weak,
-      missing: acc.no_cand,
-      boundary_drops: acc.boundary_drops,
-      chargram: acc.chargram,
-      mwe_fallbacks: acc.mwe_fallbacks,
-      fallback_winners: fallback_winners
-    }
+    sentence: Map.get(run_ctx, :sentence),
+    intent: Map.get(run_ctx, :intent),
+    confidence: Map.get(run_ctx, :confidence),
+    source: Map.get(run_ctx, :source, :run),
 
-    :telemetry.execute(event, meas, meta)
-  rescue
-    _ -> :ok
+    kept_tokens: kept_tokens,
+    dropped_tokens: dropped_tokens,
+    weak_decisions: weak_decisions,
+
+    missing_candidates: missing_candidates,
+    missing_candidate_tokens: missing_candidate_tokens,
+
+    boundary_drops: boundary_drops,
+    chargram_violation: chargram,
+    guard_drops: guard_drops,
+    guardrail_violations: guardrail_violations,
+
+    mwe_fallbacks: mwe_fallbacks,
+    fallback_winners: fallback_winners,
+
+    margin_min: Float.round(margin_min, 6),
+    margin_mean: Float.round(margin_mean, 6),
+    p1_min: Float.round(p1_min, 6),
+    p1_mean: Float.round(p1_mean, 6),
+
+    # Handy derived scalars for gating and UI.
+    rates: %{
+      kept: Float.round(kept_rate, 6),
+      weak: Float.round(weak_rate, 6),
+      fallback_win: Float.round(fallback_rate, 6),
+      missing: Float.round(missing_rate, 6)
+    },
+
+    scores_mode: scores_mode,
+    margin_threshold: margin_thr * 1.0,
+    min_margin: min_margin * 1.0,
+    weights: weights,
+    v: 3
+  }
+
+  meas = %{
+    kept: kept_tokens,
+    dropped: dropped_tokens,
+    weak: weak_decisions,
+    missing: missing_candidates,
+    boundary_drops: boundary_drops,
+    chargram: chargram,
+    guard_drops: guard_drops,
+    mwe_fallbacks: mwe_fallbacks,
+    fallback_winners: fallback_winners
+  }
+
+  :telemetry.execute(event, meas, meta)
+rescue
+  _ -> :ok
+end
+
+defp summarize_choices(choices) do
+  fallback_winners =
+    Enum.count(choices, fn ch ->
+      id =
+        Safe.get(ch, :chosen_id) || Safe.get(ch, :id) ||
+          Safe.get(ch, "chosen_id") || Safe.get(ch, "id") || ""
+
+      String.contains?(to_string(id), "|phrase|fallback")
+    end)
+
+  margins =
+    choices
+    |> Enum.map(fn ch -> get_num(ch, :margin, get_num(ch, :prob_margin, 0.0)) end)
+    |> Enum.map(&clamp01/1)
+
+  probs =
+    choices
+    |> Enum.map(fn ch -> get_num(ch, :prob, get_num(ch, :score, 0.0)) end)
+    |> Enum.map(&clamp01/1)
+
+  {fallback_winners, margins, probs}
+end
+
+defp audit_get(audit, k, default) when is_map(audit) do
+  case {Map.get(audit, k), Map.get(audit, to_string(k))} do
+    {nil, nil} -> default
+    {v, nil} -> v
+    {nil, v} -> v
+    {v, _} -> v
   end
+end
+
+defp safe_div(_a, b) when not is_number(b) or b <= 0, do: 0.0
+defp safe_div(a, b) when is_number(a) and is_number(b), do: (a * 1.0) / (b * 1.0)
+defp safe_div(_a, _b), do: 0.0
 
   defp min_or_zero([]), do: 0.0
   defp min_or_zero(xs), do: Enum.min(xs, fn -> 0.0 end) * 1.0
@@ -1031,32 +1124,51 @@ defmodule Brain.LIFG.Stage1 do
 
   # ---------- Candidate bucket extraction ----------
 
-  defp buckets_from_si(si0) do
-    sc =
-      case Safe.get(si0, :sense_candidates, %{}) do
-        %{} = m -> m
-        _ -> %{}
-      end
+defp buckets_from_si(si0, tokens) do
+  sc =
+    case Safe.get(si0, :sense_candidates, %{}) do
+      %{} = m -> m
+      _ -> %{}
+    end
 
-    cbt =
-      case Safe.get(si0, :candidates_by_token, %{}) do
-        %{} = m -> m
-        _ -> %{}
-      end
+  cbt =
+    case Safe.get(si0, :candidates_by_token, %{}) do
+      %{} = m -> m
+      _ -> %{}
+    end
 
-    ac_map =
-      case Safe.get(si0, :active_cells) || Safe.get(si0, "active_cells") || [] do
-        list when is_list(list) and list != [] ->
-          list |> Enum.map(&Safe.to_plain/1) |> active_cells_to_buckets()
+  ac_map =
+    case Safe.get(si0, :active_cells) || Safe.get(si0, "active_cells") || [] do
+      list when is_list(list) and list != [] ->
+        token_phrase_by_idx = token_phrase_by_idx(tokens)
 
-        _ ->
-          %{}
-      end
+        list
+        |> Enum.map(&Safe.to_plain/1)
+        |> active_cells_to_buckets(token_phrase_by_idx)
 
-    Map.merge(ac_map, Map.merge(cbt, sc))
+      _ ->
+        %{}
+    end
+
+  ac_map
+  |> Map.merge(cbt) # candidates_by_token overrides active_cells
+  |> Map.merge(sc)  # sense_candidates overrides both
+end
+
+  defp token_phrase_by_idx(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {tok, fallback_idx}, acc ->
+      idx = token_index(tok, fallback_idx)
+      phrase = tok |> token_raw_phrase() |> norm()
+      Map.put(acc, idx, phrase)
+    end)
   end
 
-  defp active_cells_to_buckets(cells) when is_list(cells) do
+  defp token_phrase_by_idx(_), do: %{}
+
+  defp active_cells_to_buckets(cells, token_phrase_by_idx)
+       when is_list(cells) and is_map(token_phrase_by_idx) do
     cells
     |> Enum.map(&Safe.to_plain/1)
     |> Enum.reduce(%{}, fn cell, acc ->
@@ -1069,17 +1181,22 @@ defmodule Brain.LIFG.Stage1 do
 
       case idx do
         :skip ->
-          # Critical: do NOT dump unindexed cells into bucket 0.
           acc
 
         i ->
           cand = active_cell_to_candidate(cell)
           id = Safe.get(cand, :id) || Safe.get(cand, "id")
 
-          if is_nil(id) do
-            acc
-          else
-            Map.update(acc, i, [cand], fn lst -> [cand | lst] end)
+          # Reject stale/misaligned active-cell candidates whose lemma doesn't match this token.
+          tok_phrase = Map.get(token_phrase_by_idx, i, "")
+          cand_lemma = Safe.get(cand, :lemma) || Safe.get(cand, "lemma") || guess_cell_lemma(id)
+
+          aligned? = tok_phrase == "" or norm(to_string(cand_lemma || "")) == tok_phrase
+
+          cond do
+            not aligned? -> acc
+            is_nil(id) -> acc
+            true -> Map.update(acc, i, [cand], fn lst -> [cand | lst] end)
           end
       end
     end)
@@ -1208,9 +1325,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp span_sub_norm(sentence, start, len) do
     try do
-      sentence
-      |> binary_part(start, len)
-      |> norm()
+      sentence |> binary_part(start, len) |> norm()
     rescue
       _ -> ""
     end
@@ -1223,10 +1338,7 @@ defmodule Brain.LIFG.Stage1 do
   defp word_byte?(nil), do: false
 
   defp word_byte?(c) when is_integer(c) do
-    (c >= ?0 and c <= ?9) or
-      (c >= ?a and c <= ?z) or
-      (c >= ?A and c <= ?Z) or
-      c == ?_
+    (c >= ?0 and c <= ?9) or (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or c == ?_
   end
 
   defp boundary_check_unigram(sentence, tok, phrase_norm) do
@@ -1276,11 +1388,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp phrase_nil_or_empty?(nil), do: true
   defp phrase_nil_or_empty?(""), do: true
-
-  defp phrase_nil_or_empty?(p) when is_binary(p) do
-    String.trim(p) == ""
-  end
-
+  defp phrase_nil_or_empty?(p) when is_binary(p), do: String.trim(p) == ""
   defp phrase_nil_or_empty?(_), do: false
 
   defp phrase_valid_unigram?(phrase) when is_binary(phrase) do
@@ -1375,8 +1483,7 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp cfg_mw(opts) do
-    val =
-      get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
+    val = get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
 
     %{
       expl: to_small(val[:expl] || val["expl"] || @default_mw.expl),
@@ -1387,10 +1494,9 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp cfg_cap(opts),
-    do:
-      to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
+    do: to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
-  # ---------- NEW: frame stamping helpers ----------
+  # ---------- Frame stamping helpers ----------
 
   defp build_frame(si, opts) when is_map(si) and is_list(opts) do
     ts_opt = Keyword.get(opts, :frame_ts_ms)
@@ -1403,11 +1509,7 @@ defmodule Brain.LIFG.Stage1 do
 
         true ->
           si_ts = Safe.get(si, :frame_ts_ms) || Safe.get(si, "frame_ts_ms")
-
-          cond do
-            is_integer(si_ts) and si_ts > 0 -> si_ts
-            true -> System.system_time(:millisecond)
-          end
+          if is_integer(si_ts) and si_ts > 0, do: si_ts, else: System.system_time(:millisecond)
       end
 
     seq =
@@ -1435,7 +1537,6 @@ defmodule Brain.LIFG.Stage1 do
       end
 
     run_id = :erlang.unique_integer([:positive, :monotonic])
-
     %{seq: seq, ts_ms: ts, run_id: run_id}
   end
 
@@ -1475,7 +1576,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp pos_of(c) do
     p = Safe.get(c, :pos) || Safe.get(c, "pos") || "other"
-    to_string(p) |> String.downcase()
+    p |> to_string() |> String.downcase()
   end
 
   defp guess_rel_prior(c, id, token_phrase) do
@@ -1511,9 +1612,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp parse_sense_id(other), do: parse_sense_id(to_string(other))
 
-  defp apply_phrase_fallback_adjustment(base, "phrase", "fallback"),
-    do: clamp(base + 0.02, 0.0, 1.0)
-
+  defp apply_phrase_fallback_adjustment(base, "phrase", "fallback"), do: clamp(base + 0.02, 0.0, 1.0)
   defp apply_phrase_fallback_adjustment(base, _pos, _tag), do: base
 
   defp maybe_boost_greeting_phrase(base, lemma_norm, "phrase", "fallback") do
@@ -1612,14 +1711,9 @@ defmodule Brain.LIFG.Stage1 do
     i = Safe.get(si0, :intent)
 
     cond do
-      is_binary(i) ->
-        i
-
-      is_map(i) ->
-        to_string(Safe.get(i, :intent) || Safe.get(i, :name) || Safe.get(i, :type) || "none")
-
-      true ->
-        "none"
+      is_binary(i) -> i
+      is_map(i) -> to_string(Safe.get(i, :intent) || Safe.get(i, :name) || Safe.get(i, :type) || "none")
+      true -> "none"
     end
   end
 
@@ -1663,15 +1757,7 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  defp build_audit(
-         kept,
-         dropped,
-         rejected_by_boundary,
-         chargram_drops,
-         weak,
-         missing_cand,
-         missing_cand_tokens
-       ) do
+  defp build_audit(kept, dropped, rejected_by_boundary, chargram_drops, weak, missing_cand, missing_cand_tokens) do
     %{
       feature_mix: :lifg_stage1,
       kept_tokens: kept,
@@ -1685,21 +1771,16 @@ defmodule Brain.LIFG.Stage1 do
     }
   end
 
-  # ───────────────────────── Reanalysis hook ─────────────────────────
+  # ---------- Reanalysis hook ----------
 
-  defp maybe_reanalyse(%{choices: choices} = out, si0, opts) do
-    reanalysis? =
-      Keyword.get(opts, :reanalysis, false) or
-        Keyword.get(opts, :reanalysis?, false)
+  defp maybe_reanalyse(%{choices: _choices} = out, _si0, opts) do
+    reanalysis? = Keyword.get(opts, :reanalysis, false) or Keyword.get(opts, :reanalysis?, false)
 
     if not reanalysis? do
       out
     else
-      fail_fun =
-        Keyword.get(opts, :fail_fun) ||
-          build_veto_fail_fun(si0)
-
-      %{choices: flipped, flips: n} = Reanalysis.fallback(choices, fail_fun, opts)
+      fail_fun = Keyword.get(opts, :fail_fun) || build_veto_fail_fun(out.si || %{})
+      %{choices: flipped, flips: n} = Reanalysis.fallback(out.choices, fail_fun, opts)
 
       audit0 = out.audit || %{}
       audit = Map.update(audit0, :flips, n, &(&1 + n))
@@ -1727,4 +1808,106 @@ defmodule Brain.LIFG.Stage1 do
         end
     end
   end
+
+  # ---------- Candidate filters (MWE hygiene) ----------
+
+  defp restrict_phrase_match_if_mwe(cands, false, _token_phrase), do: cands
+
+  defp restrict_phrase_match_if_mwe(cands, true, token_phrase) when is_list(cands) do
+    tp = norm(token_phrase)
+
+    if tp == "" do
+      []
+    else
+      Enum.filter(cands, fn c ->
+        id = to_string(Safe.get(c, :id) || Safe.get(c, "id") || "")
+
+        cn =
+          norm(
+            Safe.get(c, :norm) ||
+              Safe.get(c, "norm") ||
+              Safe.get(c, :lemma) ||
+              Safe.get(c, "lemma") ||
+              Safe.get(c, :word) ||
+              Safe.get(c, "word") ||
+              ""
+          )
+
+        cn == tp or String.starts_with?(id, tp <> "|phrase|")
+      end)
+    end
+  end
+
+  defp restrict_phrase_match_if_mwe(cands, _mwe, _tp), do: cands
+
+# Reject local fallback MWEs that are mostly scaffolding:
+  # - Reject if head OR tail is a function word
+  # - For 3+ grams, also reject if 2+ tokens are function words
+  #   (kills "what do you", "do you think", "we should do", etc.)
+  defp allow_mwe_fallback_phrase?(phrase) when is_binary(phrase) do
+    parts =
+      phrase
+      |> norm()
+      |> String.split(" ", trim: true)
+
+    case parts do
+      [] ->
+        false
+
+      [_] ->
+        false
+
+      [a, b] ->
+        (not Brain.LIFG.MWE.function_word?(a)) and (not Brain.LIFG.MWE.function_word?(b))
+
+      xs when length(xs) >= 3 ->
+        head = hd(xs)
+        tail = List.last(xs)
+        fn_count = Enum.count(xs, &Brain.LIFG.MWE.function_word?/1)
+
+        not (Brain.LIFG.MWE.function_word?(head) or Brain.LIFG.MWE.function_word?(tail) or fn_count >= 2)
+    end
+  end
+
+  defp allow_mwe_fallback_phrase?(_), do: false
+
+
+# ---------- Slate/frame stamping helpers ----------
+
+defp stamp_slates(%{} = si, %{seq: seq, ts_ms: ts, run_id: run_id}) do
+  si
+  |> Map.update(:sense_candidates, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
+  |> Map.update(:candidates_by_token, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
+  |> Map.update(:active_cells, Safe.get(si, :active_cells, []), &stamp_list(&1, seq, ts, run_id))
 end
+
+defp stamp_slates(si, _frame), do: si
+
+defp stamp_bucket_map(%{} = m, seq, ts, run_id) do
+  Enum.into(m, %{}, fn {k, v} ->
+    {k, stamp_list(v, seq, ts, run_id)}
+  end)
+end
+
+defp stamp_bucket_map(_other, _seq, _ts, _run_id), do: %{}
+
+defp stamp_list(list, seq, ts, run_id) when is_list(list) do
+  Enum.map(list, fn item ->
+    item
+    |> Safe.to_plain()
+    |> maybe_stamp(seq, ts, run_id)
+  end)
+end
+
+defp stamp_list(_other, _seq, _ts, _run_id), do: []
+
+defp maybe_stamp(%{} = m, seq, ts, run_id) do
+  m
+  |> Map.put_new(:frame_seq, seq)
+  |> Map.put_new(:frame_ts_ms, ts)
+  |> Map.put_new(:frame_run_id, run_id)
+end
+
+defp maybe_stamp(other, _seq, _ts, _run_id), do: other
+end
+
