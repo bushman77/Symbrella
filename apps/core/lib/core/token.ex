@@ -8,13 +8,14 @@ defmodule Core.Token do
   NEW:
     • Explicit punctuation splitting & tagging (Unicode-safe).
       - Punctuation is *not* included in word-grams.
-      - In `span_mode: :chars`, punctuation tokens are emitted with char spans.
+      - In `span_mode: :chars`, punctuation tokens are emitted with spans.
       - In `span_mode: :words`, punctuation tokens are omitted (word-grams only).
-    • `span_mode: :words | :chars` (default `:words`). When `:chars`, n-gram spans use
-      character indices over the normalized sentence (end-exclusive: `{start, end}`) and
-      punctuation tokens are included as single-symbol tokens with `kind: :punct`.
-    • `to_char_spans/1,2` — convert existing word spans to char spans (unchanged).
-    • `check_span_invariants/1` — optional invariant validation (unchanged).
+    • `span_mode: :words | :chars` (default `:words`).
+      When `:chars`, n-gram spans use **BYTE OFFSETS** over the normalized sentence
+      (end-exclusive: `{start, end}`) and punctuation tokens are included as single-symbol
+      tokens with `kind: :punct`.
+    • `to_char_spans/1,2` — convert existing word spans to **byte spans** (end-exclusive).
+    • `check_span_invariants/1` — optional invariant validation.
 
   `tokenize/2` returns a %Core.SemanticInput{sentence, tokens}.
   """
@@ -61,7 +62,7 @@ defmodule Core.Token do
       |> String.trim()
       |> String.replace(~r/\s+/u, " ")
 
-    # 1) Scan the normalized string into primitive tokens (words & punct) with char (grapheme) spans.
+    # 1) Scan the normalized string into primitive tokens (words & punct) with BYTE spans.
     prim = scan_primitive_tokens(s)
 
     # 2) Derive the list of word tokens (order preserved).
@@ -153,14 +154,14 @@ defmodule Core.Token do
   # Deterministic scanner with a separate running-word buffer.
   # Returns a list of maps: %{text,start,stop,kind,:subpos?}
   #
-  # NOTE: start/stop are *grapheme indices* (compatible with String.slice/3).
+  # NOTE: start/stop are **BYTE OFFSETS** (end-exclusive) over the normalized sentence.
   defp scan_primitive_tokens(s) do
     graphemes = String.graphemes(s)
 
     {idx, run, acc} =
       Enum.reduce(graphemes, {0, nil, []}, fn g, {i, run, acc} ->
         cls = char_class(g)
-        w = 1
+        w = byte_size(g)
 
         case {cls, run} do
           {:space, nil} ->
@@ -195,7 +196,7 @@ defmodule Core.Token do
         {text, st, _en} -> [%{text: text, start: st, stop: idx, kind: :word} | acc]
       end
 
-    acc |> Enum.reverse()
+    Enum.reverse(acc)
   end
 
   # ---------- n-gram builder over word tokens ----------
@@ -224,6 +225,7 @@ defmodule Core.Token do
           span =
             case span_mode do
               :words -> {wi, wi + n}
+              # byte offsets
               :chars -> {first.start, last.stop}
             end
 
@@ -240,11 +242,11 @@ defmodule Core.Token do
     end
   end
 
-  # ---------- legacy helpers (unchanged) ----------
+  # ---------- legacy helpers (byte spans) ----------
 
   @doc """
   Convert a `%Core.SemanticInput{}` whose tokens use word-index spans `{i, i+n}`
-  into **character spans** over the input sentence.
+  into **byte spans** over the input sentence.
 
   Returns an updated `%Core.SemanticInput{}`.
   """
@@ -254,7 +256,7 @@ defmodule Core.Token do
   end
 
   @doc """
-  Convert a list of `%Core.Token{}` (word-index spans) into **character spans** `{start, end}`
+  Convert a list of `%Core.Token{}` (word-index spans) into **byte spans** `{start, end}`
   over the given normalized sentence `s`. End is exclusive.
 
   This is precise for your normalized splitter (single spaces between words).
@@ -268,10 +270,10 @@ defmodule Core.Token do
       cond do
         is_integer(i) and is_integer(j) and i >= 0 and j >= i and j <= length(words) and
             n == j - i ->
-          start_char = Enum.at(starts, i, 0)
+          start_b = Enum.at(starts, i, 0)
           last_idx = j - 1
-          end_char = Enum.at(ends, last_idx, start_char)
-          %__MODULE__{tok | span: {start_char, end_char}}
+          end_b = Enum.at(ends, last_idx, start_b)
+          %__MODULE__{tok | span: {start_b, end_b}}
 
         true ->
           tok
@@ -286,7 +288,8 @@ defmodule Core.Token do
     {_cur, starts_acc, ends_acc} =
       Enum.reduce(Enum.with_index(words), {0, [], []}, fn {w, idx}, {cur, sacc, eacc} ->
         s = cur
-        e = s + String.length(w)
+        e = s + byte_size(w)
+        # space is 1 byte
         next = if idx < len - 1, do: e + 1, else: e
         {next, [s | sacc], [e | eacc]}
       end)
@@ -297,7 +300,7 @@ defmodule Core.Token do
   @doc """
   Optional invariant check:
     • spans are non-decreasing by start
-    • each token's phrase equals String.slice(sentence, start, end-start)
+    • each token's phrase equals the **byte slice** of sentence `[start, end)`
   """
   @spec check_span_invariants(Core.SemanticInput.t()) ::
           {:ok, Core.SemanticInput.t()} | {:error, [map()]}
@@ -309,7 +312,7 @@ defmodule Core.Token do
         p = Map.get(t, :phrase) || Map.get(t, "phrase") || ""
         span_raw = Map.get(t, :span) || Map.get(t, "span") || {0, 0}
         {st, en} = normalize_span(span_raw)
-        slice = safe_slice(s, st, en)
+        slice = safe_slice_bytes(s, st, en)
 
         reasons = []
         reasons = if is_binary(p), do: reasons, else: [{:phrase_type, p} | reasons]
@@ -344,10 +347,22 @@ defmodule Core.Token do
   defp normalize_span([st, en]) when is_integer(st) and is_integer(en), do: {st, en}
   defp normalize_span(_), do: {0, 0}
 
-  defp safe_slice(s, st, en)
+  defp safe_slice_bytes(s, st, en)
        when is_binary(s) and is_integer(st) and is_integer(en) and en >= st do
-    String.slice(s, st, en - st) || ""
+    len = byte_size(s)
+
+    cond do
+      st < 0 or en < 0 or st > len or en > len ->
+        ""
+
+      true ->
+        try do
+          binary_part(s, st, en - st)
+        rescue
+          _ -> ""
+        end
+    end
   end
 
-  defp safe_slice(_s, _st, _en), do: ""
+  defp safe_slice_bytes(_s, _st, _en), do: ""
 end

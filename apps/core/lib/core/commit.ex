@@ -1,4 +1,4 @@
-#apps/core/lib/core/commit.ex
+# apps/core/lib/core/commit.ex
 defmodule Core.Commit do
   @moduledoc """
   Finalize/Output commit for the Core pipeline.
@@ -108,4 +108,3 @@ defmodule Core.Commit do
     end
   end
 end
-

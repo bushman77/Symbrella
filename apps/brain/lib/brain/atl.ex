@@ -311,14 +311,20 @@ defmodule Brain.ATL do
   defp phrase_fallback?(id) when is_binary(id), do: String.contains?(id, "|phrase|fallback")
   defp phrase_fallback?(_), do: false
 
-  defp inside?({s, l}, {ps, pl})
-       when is_integer(s) and is_integer(l) and is_integer(ps) and is_integer(pl) do
-    e = s + l
-    pe = ps + pl
+  defp inside?({s, e}, {ps, pe})
+       when is_integer(s) and is_integer(e) and is_integer(ps) and is_integer(pe) do
     s >= ps and e <= pe
   end
 
   defp inside?(_, _), do: false
+
+defp span_for(tokens, idx) do
+  case Enum.find(tokens, &(&1[:index] == idx)) do
+    %{span: {s, e}} when is_integer(s) and is_integer(e) and e >= s -> {s, e}
+    %{span: {s, l}} when is_integer(s) and is_integer(l) and l > 0 -> {s, s + l}
+    _ -> {0, 0}
+  end
+end
 
   defp down(nil), do: ""
 
@@ -607,13 +613,6 @@ defmodule Brain.ATL do
   end
 
   defp derive_lifg_pairs(_, _, _), do: []
-
-  defp span_for(tokens, idx) do
-    case Enum.find(tokens, &(&1[:index] == idx)) do
-      %{span: {s, l}} when is_integer(s) and is_integer(l) -> {s, l}
-      _ -> {0, 0}
-    end
-  end
 
   defp merge_sense_candidates(a, b) when is_map(a) and is_map(b) do
     a

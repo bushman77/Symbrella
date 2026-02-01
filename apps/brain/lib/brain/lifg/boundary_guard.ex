@@ -4,8 +4,9 @@ defmodule Brain.LIFG.BoundaryGuard do
 
   Goals:
   - Accepts both list input and SI-like maps (`%{tokens: [...]}` or %{"tokens" => [...]})
-  - Normalizes spans to `{start, end}` (end is exclusive, byte offsets)
-  - Recovers missing/broken spans by searching the sentence left-to-right (when available)
+  - Normalizes spans to `{start, end}` (end is exclusive) in **byte offsets**
+  - Handles mixed span units (byte vs grapheme) by matching against the sentence
+  - Recovers missing/broken spans by searching the original sentence left-to-right
   - Drops classic char-gram symptoms:
       * non-mw tokens whose phrase contains whitespace
       * tokens with unrecoverable spans (rare; we try hard to synthesize)
@@ -55,7 +56,7 @@ defmodule Brain.LIFG.BoundaryGuard do
   def sanitize(tokens, sentence) when is_list(tokens) do
     sent = if is_binary(sentence), do: sentence, else: nil
 
-    {toks2, _cursor} =
+    {toks2, _cursor_bytes} =
       tokens
       |> Enum.map(&mapify/1)
       |> Enum.map_reduce(0, fn tok, cursor ->
@@ -92,7 +93,6 @@ defmodule Brain.LIFG.BoundaryGuard do
           [tok | acc]
 
         true ->
-          # boundary violation (non-mw)
           emit_boundary_drop(tok, sent)
           acc
       end
@@ -161,119 +161,233 @@ defmodule Brain.LIFG.BoundaryGuard do
   end
 
   defp put_span(%{} = t, nil) do
-    # Keep consistent shape: if somehow nil slips through, don't crash callers.
     t |> Map.delete(:span) |> Map.delete("span")
   end
 
   defp put_span(t, _), do: t
 
   # ──────────────────────────────────────────────────────────
-  # Span normalization + recovery
+  # Span normalization + recovery (output is BYTE OFFSETS)
   # ──────────────────────────────────────────────────────────
 
-  # Normalizes span to {start,end_exclusive}.
-  # Accepts either {start,end} OR {start,len}. With sentence present, picks the
-  # interpretation whose slice matches phrase (case/space-insensitive).
-  defp normalize_or_recover_span({s, x}, phrase, sent, cursor)
+  defp normalize_or_recover_span({s, x}, phrase, sent, cursor_bytes)
        when is_integer(s) and is_integer(x) and s >= 0 do
     phrase = to_string(phrase || "")
 
     cond do
       not is_binary(sent) ->
-        # No sentence: heuristic (prefer len-form when it matches phrase length)
-        phrase_len = byte_size(phrase)
-
+        # Without sentence, assume values are bytes and prefer len-form.
         span =
           cond do
-            x > 0 and x == phrase_len -> {s, s + x}
-            x > s and x - s == phrase_len -> {s, x}
-            x > 0 -> {s, s + x}
+            x > 0 and x < s -> {s, s + x}
+            x > 0 and x >= s -> {s, s + x}
             true -> nil
           end
 
-        {span, next_cursor(span, cursor)}
+        {span, next_cursor(span, cursor_bytes)}
 
       true ->
-        cand_end = {s, x}
-        cand_len = {s, s + x}
-        cand_ph = {s, s + byte_size(phrase)}
+        # With sentence, spans may be:
+        #  - {start,end} in bytes
+        #  - {start,len} in bytes
+        #  - {start,end} in graphemes
+        #  - {start,len} in graphemes
+        #
+        # We generate candidates in both unit systems, convert grapheme candidates to bytes,
+        # and pick the first whose slice matches the phrase (case/space-insensitive).
+        span =
+          pick_best_span(sent, phrase, s, x) ||
+            # If we can't match, still choose a sane candidate (bytes first) so we don't explode.
+            first_sane_span(sent, phrase, s, x)
 
-        candidates =
-          [cand_end, cand_len, cand_ph]
-          |> Enum.uniq()
-          |> Enum.filter(&valid_span_bytes?(sent, &1))
-
-        winner =
-          Enum.find(candidates, fn {ss, ee} ->
-            down(safe_slice_bytes(sent, ss, ee)) == down(phrase)
-          end) ||
-            Enum.find(candidates, fn {_ss, ee} -> ee == s + x end) ||
-            List.first(candidates)
-
-        {winner, next_cursor(winner, cursor)}
+        {span, next_cursor(span, cursor_bytes)}
     end
   end
 
-  defp normalize_or_recover_span(_bad, phrase, sent, cursor) do
+  defp normalize_or_recover_span(_bad, phrase, sent, cursor_bytes) do
     phrase = to_string(phrase || "")
 
-    case recover_span(sent, phrase, cursor) do
+    case recover_span(sent, phrase, cursor_bytes) do
       {span, cursor2} ->
         {span, cursor2}
 
       nil ->
-        # Monotonic fallback span (keeps tests happy + keeps pipeline stable)
-        if is_binary(phrase) and phrase != "" and is_integer(cursor) and cursor >= 0 do
-          e = cursor + byte_size(phrase)
-          {{cursor, e}, e}
+        # Monotonic fallback span (bytes). Clamp to sentence bytes if available.
+        if is_binary(phrase) and phrase != "" and is_integer(cursor_bytes) and cursor_bytes >= 0 do
+          e0 = cursor_bytes + byte_size(phrase)
+
+          span =
+            if is_binary(sent) do
+              len = byte_size(sent)
+              e = min(e0, len)
+              if e > cursor_bytes, do: {cursor_bytes, e}, else: nil
+            else
+              {cursor_bytes, e0}
+            end
+
+          {span, next_cursor(span, cursor_bytes)}
         else
-          {nil, cursor}
+          {nil, cursor_bytes}
         end
     end
+  end
+
+  defp pick_best_span(sent, phrase, s, x) do
+    byte_len = byte_size(sent)
+    g_len = String.length(sent)
+    ph_blen = byte_size(phrase)
+    ph_glen = if String.valid?(phrase), do: String.length(phrase), else: ph_blen
+
+    candidates =
+      [
+        {:byte, {s, x}},          # maybe end-form
+        {:byte, {s, s + x}},      # maybe len-form
+        {:byte, {s, s + ph_blen}},# phrase length in bytes
+
+        {:gr, {s, x}},            # maybe end-form in graphemes
+        {:gr, {s, s + x}},        # maybe len-form in graphemes
+        {:gr, {s, s + ph_glen}}   # phrase length in graphemes
+      ]
+      |> Enum.uniq()
+
+    Enum.find_value(candidates, fn
+      {:byte, {ss, ee}} ->
+        if ss >= 0 and ee > ss and ee <= byte_len and slice_matches?(sent, ss, ee, phrase) do
+          {ss, ee}
+        else
+          nil
+        end
+
+      {:gr, {gs, ge}} ->
+        if gs >= 0 and ge > gs and ge <= g_len do
+          {bs, be} = gspan_to_bspan(sent, {gs, ge})
+
+          if bs >= 0 and be > bs and be <= byte_len and slice_matches?(sent, bs, be, phrase) do
+            {bs, be}
+          else
+            nil
+          end
+        else
+          nil
+        end
+    end)
+  end
+
+  defp first_sane_span(sent, phrase, s, x) do
+    byte_len = byte_size(sent)
+    g_len = String.length(sent)
+    ph_blen = byte_size(phrase)
+    ph_glen = if String.valid?(phrase), do: String.length(phrase), else: ph_blen
+
+    byte_candidates =
+      [
+        {s, x},
+        {s, s + x},
+        {s, s + ph_blen}
+      ]
+      |> Enum.uniq()
+      |> Enum.filter(fn {ss, ee} -> ss >= 0 and ee > ss and ee <= byte_len end)
+
+    case byte_candidates do
+      [h | _] ->
+        h
+
+      [] ->
+        gr_candidates =
+          [
+            {s, x},
+            {s, s + x},
+            {s, s + ph_glen}
+          ]
+          |> Enum.uniq()
+          |> Enum.filter(fn {gs, ge} -> gs >= 0 and ge > gs and ge <= g_len end)
+
+        case gr_candidates do
+          [h | _] ->
+            {bs, be} = gspan_to_bspan(sent, h)
+            if bs >= 0 and be > bs and be <= byte_len, do: {bs, be}, else: nil
+
+          [] ->
+            nil
+        end
+    end
+  end
+
+  defp slice_matches?(sent, s, e, phrase) do
+    down(safe_slice_bytes(sent, s, e)) == down(phrase)
+  end
+
+  defp gspan_to_bspan(sent, {gs, ge}) do
+    {gpos_to_bpos(sent, gs), gpos_to_bpos(sent, ge)}
+  end
+
+  defp gpos_to_bpos(_sent, gpos) when not is_integer(gpos) or gpos <= 0, do: 0
+
+  defp gpos_to_bpos(sent, gpos) do
+    # byte offset of the first gpos graphemes
+    byte_size(String.slice(sent, 0, gpos))
+  rescue
+    _ -> 0
   end
 
   defp next_cursor(nil, cursor), do: cursor
   defp next_cursor({_, e}, cursor) when is_integer(e), do: max(cursor, e)
   defp next_cursor(_, cursor), do: cursor
 
-  defp recover_span(sent, phrase, cursor)
-       when is_binary(sent) and is_binary(phrase) and is_integer(cursor) and cursor >= 0 do
-    sent2 = down(sent)
-    ph2 = down(phrase)
-    cur = min(cursor, byte_size(sent2))
+  # Recover span in the ORIGINAL sentence. This keeps offsets correct.
+  defp recover_span(sent, phrase, cursor_bytes)
+       when is_binary(sent) and is_binary(phrase) and is_integer(cursor_bytes) and cursor_bytes >= 0 do
+    ph = String.trim(phrase)
 
-    rest = binary_part(sent2, cur, byte_size(sent2) - cur)
+    if ph == "" do
+      nil
+    else
+      start_at = min(max(cursor_bytes, 0), byte_size(sent))
 
-    case :binary.match(rest, ph2) do
-      :nomatch ->
-        nil
+      part =
+        try do
+          binary_part(sent, start_at, byte_size(sent) - start_at)
+        rescue
+          _ -> sent
+        end
 
-      {pos, _len} ->
-        s = cur + pos
-        e = s + byte_size(ph2)
-        {{s, e}, e}
+      re = Regex.compile!(Regex.escape(ph), "iu")
+
+      case Regex.run(re, part, return: :index) do
+        nil ->
+          nil
+
+        [{pos, len} | _] ->
+          s = start_at + pos
+          e = s + len
+          {{s, e}, e}
+      end
     end
   end
 
   defp recover_span(_, _, _), do: nil
 
-  defp valid_span_bytes?(sent, {s, e})
-       when is_binary(sent) and is_integer(s) and is_integer(e) do
-    s >= 0 and e > s and e <= byte_size(sent)
+  defp safe_slice_bytes(sent, s, e) do
+    cond do
+      not is_binary(sent) or not is_integer(s) or not is_integer(e) ->
+        ""
+
+      s < 0 or e <= s or e > byte_size(sent) ->
+        ""
+
+      true ->
+        slice = binary_part(sent, s, e - s)
+        if String.valid?(slice), do: slice, else: ""
+    end
+  rescue
+    _ -> ""
   end
 
-  defp valid_span_bytes?(_, _), do: false
-
   # ──────────────────────────────────────────────────────────
-  # Boundary checks (byte-based; spans are byte offsets)
+  # Boundary checks (BYTE OFFSETS)
   # ──────────────────────────────────────────────────────────
 
-  defp boundary_ok?(_sent, {s, e}, true)
-       when is_integer(s) and is_integer(e) do
-    # mw tokens are allowed to cross word boundaries; just require sane span
-    e > s and s >= 0
-  end
-
+  defp boundary_ok?(_sent, _span, true), do: true
   defp boundary_ok?(nil, _span, _mw?), do: true
 
   defp boundary_ok?(sent, {s, e}, _mw?)
@@ -281,7 +395,7 @@ defmodule Brain.LIFG.BoundaryGuard do
     len = byte_size(sent)
 
     cond do
-      s < 0 or e < 0 or e > len or e <= s ->
+      s < 0 or e <= s or e > len ->
         false
 
       true ->
@@ -298,19 +412,6 @@ defmodule Brain.LIFG.BoundaryGuard do
   end
 
   defp word_byte?(_), do: false
-
-  defp safe_slice_bytes(sent, s, e) do
-    cond do
-      not valid_span_bytes?(sent, {s, e}) ->
-        ""
-
-      true ->
-        slice = binary_part(sent, s, e - s)
-        if String.valid?(slice), do: slice, else: ""
-    end
-  rescue
-    _ -> ""
-  end
 
   defp span_start(tok) do
     case Map.get(tok, :span) || Map.get(tok, "span") do
@@ -360,7 +461,6 @@ defmodule Brain.LIFG.BoundaryGuard do
     :erlang.list_to_binary(out)
   end
 
-  # IMPORTANT: tests want meta.reason == :chargram (NOT :cross_word / :span_mismatch)
   defp emit_chargram_violation(tok, detail) do
     if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
       :telemetry.execute(
@@ -401,9 +501,8 @@ defmodule Brain.LIFG.BoundaryGuard do
     end
   end
 
-  # ---- internals -----------------------------------------------------------
-
   defp mapify(%_{} = s), do: Map.from_struct(s)
   defp mapify(%{} = m), do: m
   defp mapify(other), do: %{phrase: to_string(other)}
 end
+

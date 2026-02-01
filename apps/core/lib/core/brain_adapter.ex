@@ -1,4 +1,4 @@
-#apps/core/lib/core/brain_adapter.ex
+# apps/core/lib/core/brain_adapter.ex
 defmodule Core.BrainAdapter do
   @moduledoc """
   Runtime bridge for Core → Brain (+regions).
@@ -269,7 +269,8 @@ defmodule Core.BrainAdapter do
       not enabled ->
         si
 
-      not (Code.ensure_loaded?(@affect_appraisal) and function_exported?(@affect_appraisal, :appraise, 1)) ->
+      not (Code.ensure_loaded?(@affect_appraisal) and
+               function_exported?(@affect_appraisal, :appraise, 1)) ->
         si
 
       true ->
@@ -300,7 +301,7 @@ defmodule Core.BrainAdapter do
   - If ATL is running, calls `ATL.ingest/2`
   - Otherwise calls `ATL.reduce/2`
   """
-@spec maybe_ingest_atl(map(), keyword()) :: map()
+  @spec maybe_ingest_atl(map(), keyword()) :: map()
   def maybe_ingest_atl(%{lifg_choices: choices, tokens: tokens} = si, _opts)
       when is_list(choices) and is_list(tokens) do
     if choices == [] do
@@ -340,6 +341,7 @@ defmodule Core.BrainAdapter do
   rescue
     _ -> si
   end
+
   def maybe_ingest_atl(si, _opts), do: si
 
   @doc """
@@ -484,4 +486,3 @@ defmodule Core.BrainAdapter do
     end
   end
 end
-

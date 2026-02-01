@@ -29,7 +29,9 @@ defmodule Brain.SelfNameTest do
     res = SelfName.detect(tokens, nil, names: ["Bradley Smith"])
     assert res.hit? == true
     assert res.token_indexes == [1, 2]
-    assert [%{name: "Bradley Smith", token_indexes: [1, 2], span: {_start, 2}}] = res.matches
+
+    assert [%{name: "Bradley Smith", token_indexes: [1, 2], span: {start, stop}}] = res.matches
+    assert stop - start == 2
   end
 
   test "does not match substrings" do

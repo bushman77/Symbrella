@@ -500,15 +500,15 @@ defmodule Brain.LIFG.MWE do
   def heads_for_indices(_si, _idxs), do: %{}
 
   # ── Private helpers ──────────────────────────────────────────────────
-# apps/brain/lib/brain/lifg/mwe.ex
-def function_word?(w) when is_binary(w) do
-  w = w |> String.downcase() |> String.trim()
+  # apps/brain/lib/brain/lifg/mwe.ex
+  def function_word?(w) when is_binary(w) do
+    w = w |> String.downcase() |> String.trim()
 
-  w in @preps or w in @dets or w in @conjs or w in @auxes or
-    w in @modals or w in @pron or w in @neg
-end
+    w in @preps or w in @dets or w in @conjs or w in @auxes or
+      w in @modals or w in @pron or w in @neg
+  end
 
-def function_word?(_), do: false
+  def function_word?(_), do: false
 
   defp ensure_map(m) when is_map(m), do: m
   defp ensure_map(_), do: %{}
@@ -721,7 +721,7 @@ def function_word?(_), do: false
   defp norm_key(_), do: ""
 
   # Prefer explicit token :index / :token_index over list position.
-# Prefer explicit token :token_index over :index (list position).
+  # Prefer explicit token :token_index over :index (list position).
   defp token_index(tok, fallback) when is_map(tok) do
     v =
       Safe.get(tok, :token_index) ||
@@ -731,6 +731,7 @@ def function_word?(_), do: false
 
     if is_integer(v) and v >= 0, do: v, else: fallback
   end
+
   defp token_index(_tok, fallback), do: fallback
 
   defp parse_nonneg_int(i) when is_integer(i) and i >= 0, do: i
@@ -799,8 +800,7 @@ def function_word?(_), do: false
     end
   end
 
-
-# Reject fallback MWEs that are mostly scaffolding:
+  # Reject fallback MWEs that are mostly scaffolding:
   # - Always reject if head OR tail is a function word
   # - For 3+ grams, also reject if 2+ tokens are function words
   #   (kills "what do you", "do you think", "we should do", etc.)
@@ -831,5 +831,4 @@ def function_word?(_), do: false
   end
 
   defp allow_fallback_phrase?(_), do: false
-
 end

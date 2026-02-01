@@ -1,4 +1,4 @@
-#apps/core/lib/core.ex
+# apps/core/lib/core.ex
 defmodule Core do
   @moduledoc """
   Pipeline:
@@ -353,4 +353,3 @@ defmodule Core do
   defp cell_id(id) when is_binary(id), do: id
   defp cell_id(_), do: nil
 end
-

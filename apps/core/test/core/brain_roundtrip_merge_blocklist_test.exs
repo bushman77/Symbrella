@@ -53,4 +53,3 @@ defmodule Core.BrainRoundtripMergeBlocklistTest do
     assert Enum.take(out.trace, 2) == [%{stage: :brain_stm}, %{stage: :core_seed}]
   end
 end
-

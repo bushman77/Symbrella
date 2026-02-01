@@ -1044,33 +1044,34 @@ defmodule Brain do
         is_binary(w) and String.contains?(w, "|") ->
           [%{token_index: 0, id: w, score: 1.0}]
 
-is_binary(w) ->
-        l =
-          w
-          |> String.downcase()
-          |> String.replace(~r/\s+/u, " ")
-          |> String.trim()
+        is_binary(w) ->
+          l =
+            w
+            |> String.downcase()
+            |> String.replace(~r/\s+/u, " ")
+            |> String.trim()
 
-        cond do
-          l == "" ->
-            []
+          cond do
+            l == "" ->
+              []
 
-          # If we can validate against a sentence and it clearly doesn't match, skip.
-          sent != "" and not String.contains?(sent, l) ->
-            []
+            # If we can validate against a sentence and it clearly doesn't match, skip.
+            sent != "" and not String.contains?(sent, l) ->
+              []
 
-          # Otherwise, treat this as an LTM recall cue (lets WMFocus mint "#{lemma}|ltm").
-          true ->
-            [
-              %{
-                token_index: 0,
-                lemma: l,
-                score: 0.30,
-                source: :ltm,
-                reason: :hippocampus_fallback
-              }
-            ]
-        end
+            # Otherwise, treat this as an LTM recall cue (lets WMFocus mint "#{lemma}|ltm").
+            true ->
+              [
+                %{
+                  token_index: 0,
+                  lemma: l,
+                  score: 0.30,
+                  source: :ltm,
+                  reason: :hippocampus_fallback
+                }
+              ]
+          end
+
         true ->
           []
       end

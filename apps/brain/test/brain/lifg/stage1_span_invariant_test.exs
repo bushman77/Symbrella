@@ -134,7 +134,7 @@ defmodule Brain.LIFG.Stage1SpanInvariantTest do
         choices
         |> Enum.map(& &1.token_index)
         |> Enum.sort()
-
+IO.inspect(audit, label: "AUDIT")
       assert token_indices == [0, 1, 3, 4]
 
       # The important diagnostic: nothing was dropped by boundary/chargram.

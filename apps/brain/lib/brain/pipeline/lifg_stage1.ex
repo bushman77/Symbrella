@@ -1,4 +1,4 @@
-#apps/brain/lib/brain/pipeline/lifg_stage1.ex
+# apps/brain/lib/brain/pipeline/lifg_stage1.ex
 defmodule Brain.Pipeline.LIFGStage1 do
   @moduledoc false
 
@@ -568,4 +568,3 @@ defmodule Brain.Pipeline.LIFGStage1 do
     Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test
   end
 end
-

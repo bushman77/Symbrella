@@ -79,8 +79,7 @@ defmodule Brain.LIFG.Stage1 do
 
   # Function-word set used to reject junk MWE fallbacks like "to go", "going to", etc.
   # (kept local so Stage1 compiles standalone).
-  @function_words MapSet.new(
-                    ~w(
+  @function_words MapSet.new(~w(
                       of to in on at by for from with about into over after between through during before under without within along across behind beyond up down off near among
                       the a an this that these those some any each every no neither either
                       and or but nor so yet for
@@ -88,8 +87,7 @@ defmodule Brain.LIFG.Stage1 do
                       can could may might must shall should will would
                       i you he she it we they me him her us them my your his her our their mine yours hers ours theirs myself yourself himself herself itself ourselves yourselves themselves
                       not never
-                    )
-                  )
+                    ))
 
   # ---------- Public server API (mood) ----------
 
@@ -101,7 +99,8 @@ defmodule Brain.LIFG.Stage1 do
   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si), do: run(si, [])
 
-  @spec run(map(), keyword()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  @spec run(map(), keyword()) ::
+          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def run(si, opts) when is_map(si) and is_list(opts) do
     try do
       sent0 = Safe.get(si, :sentence) || Safe.get(si, "sentence")
@@ -131,15 +130,14 @@ defmodule Brain.LIFG.Stage1 do
       # Wire candidate slate from active_cells + MWE fallback/backfill
       lifg_opts = merged_lifg_opts(si0, opts)
 
-si1 =
-  si0
-  |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
-  |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
-  |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
+      si1 =
+        si0
+        |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
+        |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
+        |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
 
-si1 = stamp_slates(si1, frame)
+      si1 = stamp_slates(si1, frame)
       buckets = buckets_from_si(si1, tokens)
-
 
       # 2) Effective knobs
       weights =
@@ -157,14 +155,20 @@ si1 = stamp_slates(si1, frame)
         Keyword.get(
           opts,
           :margin_threshold,
-          lifg_default(:margin_threshold, Application.get_env(:brain, :lifg_margin_threshold, @default_margin_thr))
+          lifg_default(
+            :margin_threshold,
+            Application.get_env(:brain, :lifg_margin_threshold, @default_margin_thr)
+          )
         )
 
       min_margin =
         Keyword.get(
           opts,
           :min_margin,
-          lifg_default(:min_margin, Application.get_env(:brain, :lifg_min_margin, @default_min_margin))
+          lifg_default(
+            :min_margin,
+            Application.get_env(:brain, :lifg_min_margin, @default_min_margin)
+          )
         )
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
@@ -179,19 +183,28 @@ si1 = stamp_slates(si1, frame)
       mwe_event = Keyword.get(opts, :mwe_event, @mwe_fallback_event)
 
       mwe_fallback? =
-        Keyword.get(opts, :mwe_fallback, Application.get_env(:brain, :lifg_stage1_mwe_fallback, true))
+        Keyword.get(
+          opts,
+          :mwe_fallback,
+          Application.get_env(:brain, :lifg_stage1_mwe_fallback, true)
+        )
 
       stage1_local_mwe_fallback? =
         Keyword.get(
           opts,
           :stage1_local_mwe_fallback,
-          Application.get_env(:brain, :lifg_stage1_local_mwe_fallback, @default_stage1_local_mwe_fallback)
+          Application.get_env(
+            :brain,
+            :lifg_stage1_local_mwe_fallback,
+            @default_stage1_local_mwe_fallback
+          )
         )
 
       stop_event = Keyword.get(opts, :stage1_stop_event, @stage1_stop_event)
 
       # Reanalysis flag (ensures runner-up is available when vetoed)
-      reanalysis? = Keyword.get(opts, :reanalysis, false) or Keyword.get(opts, :reanalysis?, false)
+      reanalysis? =
+        Keyword.get(opts, :reanalysis, false) or Keyword.get(opts, :reanalysis?, false)
 
       # 3) Main scoring loop
       {choices, acc} =
@@ -234,7 +247,15 @@ si1 = stamp_slates(si1, frame)
       guardrail_violations = acc.chargram + acc.boundary_drops + guard_drops
 
       audit =
-        build_audit(acc.kept, dropped_total, rejected_all, guardrail_violations, acc.weak, acc.no_cand, missing_tokens)
+        build_audit(
+          acc.kept,
+          dropped_total,
+          rejected_all,
+          guardrail_violations,
+          acc.weak,
+          acc.no_cand,
+          missing_tokens
+        )
         |> Map.put(:guard_drops, guard_drops)
         |> Map.put(:boundary_drop_count, acc.boundary_drops)
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
@@ -312,84 +333,104 @@ si1 = stamp_slates(si1, frame)
     }
   end
 
-defp maybe_reset_sense_candidates(%{} = si, opts) do
-  if Keyword.get(opts, :preserve_sense_candidates, false) do
-    si
-  else
-    # Clear *only* if the slate is stamped for a different frame run.
-    # If there is no stamp, treat it as caller-owned (tests / PMTG) and keep it.
-    run_id =
-      Safe.get(si, :frame_run_id) ||
-        Safe.get(si, "frame_run_id") ||
-        (Safe.get(si, :frame) && Safe.get(Safe.get(si, :frame), :run_id)) ||
-        (Safe.get(si, "frame") && Safe.get(Safe.get(si, "frame"), "run_id"))
+  defp maybe_reset_sense_candidates(%{} = si, opts) do
+    if Keyword.get(opts, :preserve_sense_candidates, false) do
+      si
+    else
+      # Clear *only* if the slate is stamped for a different frame run.
+      # If there is no stamp, treat it as caller-owned (tests / PMTG) and keep it.
+      run_id =
+        Safe.get(si, :frame_run_id) ||
+          Safe.get(si, "frame_run_id") ||
+          (Safe.get(si, :frame) && Safe.get(Safe.get(si, :frame), :run_id)) ||
+          (Safe.get(si, "frame") && Safe.get(Safe.get(si, "frame"), "run_id"))
 
-    si
-    |> maybe_reset_one_slate(:sense_candidates, :sense_candidates_frame_run_id, run_id)
-    |> maybe_reset_one_slate(:candidates_by_token, :candidates_by_token_frame_run_id, run_id)
+      si
+      |> maybe_reset_one_slate(:sense_candidates, :sense_candidates_frame_run_id, run_id)
+      |> maybe_reset_one_slate(:candidates_by_token, :candidates_by_token_frame_run_id, run_id)
+    end
   end
+
+  defp maybe_reset_sense_candidates(si, _opts), do: si
+
+  defp maybe_reset_one_slate(%{} = si, field, stamp_field, run_id) do
+    stamp = Safe.get(si, stamp_field) || Safe.get(si, to_string(stamp_field))
+
+    cond do
+      is_nil(run_id) ->
+        # No run id => permissive
+        si
+
+      is_nil(stamp) ->
+        # No stamp => caller-owned input, keep it
+        si
+
+      stamp == run_id ->
+        si
+
+      true ->
+        si
+        |> Map.put(field, %{})
+        |> Map.put(stamp_field, run_id)
+    end
+  end
+
+defp prepare_tokens(si0, sent0) do
+  sent_raw = Map.get(si0, :sentence) || Map.get(si0, "sentence") || sent0
+
+  sent =
+    case sent_raw do
+      s when is_binary(s) ->
+        if String.trim(s) == "", do: nil, else: s
+
+      _ ->
+        nil
+    end
+
+  toks0 = Map.get(si0, :tokens) || Map.get(si0, "tokens") || []
+
+  raw_tokens =
+    toks0
+    |> Enum.with_index()
+    |> Enum.map(fn {tok, fallback_idx} ->
+      t = Safe.to_plain(tok)
+      idx = token_index(t, fallback_idx)
+
+      t
+      |> Map.put(:index, idx)
+      |> Map.put("index", idx)
+      |> Map.put(:token_index, idx)
+      |> Map.put("token_index", idx)
+    end)
+
+  raw_indices =
+    raw_tokens
+    |> Enum.map(&token_index(&1, -1))
+    |> Enum.reject(&(&1 < 0))
+
+  sanitized =
+    Guard.sanitize(%{tokens: raw_tokens, sentence: sent})
+
+  # IMPORTANT: keep Guard output shape; do NOT Safe.to_plain again here
+  tokens0 = Map.get(sanitized, :tokens) || Map.get(sanitized, "tokens") || []
+
+  tokens =
+    tokens0
+    |> Enum.map(&force_end_exclusive_span(&1, sent))
+
+  kept_indices =
+    tokens
+    |> Enum.map(&token_index(&1, -1))
+    |> Enum.reject(&(&1 < 0))
+
+  guard_rejected =
+    raw_indices
+    |> Enum.uniq()
+    |> Enum.reject(&(&1 in kept_indices))
+    |> Enum.sort()
+
+  {tokens, guard_rejected, length(guard_rejected)}
 end
-
-defp maybe_reset_sense_candidates(si, _opts), do: si
-
-defp maybe_reset_one_slate(%{} = si, field, stamp_field, run_id) do
-  stamp = Safe.get(si, stamp_field) || Safe.get(si, to_string(stamp_field))
-
-  cond do
-    is_nil(run_id) ->
-      # No run id => permissive
-      si
-
-    is_nil(stamp) ->
-      # No stamp => caller-owned input, keep it
-      si
-
-    stamp == run_id ->
-      si
-
-    true ->
-      si
-      |> Map.put(field, %{})
-      |> Map.put(stamp_field, run_id)
-  end
-end
-
-  defp prepare_tokens(si0, sent) do
-    {raw_tokens, raw_indices} =
-      si0
-      |> Safe.get(:tokens, [])
-      |> Enum.map(&Safe.to_plain/1)
-      |> Enum.with_index()
-      |> Enum.map(fn {tok, fallback_idx} -> {tok, token_index(tok, fallback_idx)} end)
-      |> Enum.unzip()
-
-    sanitized =
-      %{tokens: raw_tokens, sentence: sent}
-      |> Guard.sanitize()
-
-    tokens =
-      sanitized
-      |> Map.get(:tokens, [])
-      |> Enum.map(&Safe.to_plain/1)
-
-    kept_indices =
-      tokens
-      |> Enum.with_index()
-      |> Enum.map(fn {tok, fallback_idx} ->
-        # Do NOT collapse missing indexes to 0.
-        token_index(tok, fallback_idx)
-      end)
-
-    guard_rejected =
-      raw_indices
-      |> Enum.uniq()
-      |> Enum.reject(&(&1 in kept_indices))
-      |> Enum.sort()
-
-    guard_drops = length(guard_rejected)
-
-    {tokens, guard_rejected, guard_drops}
-  end
 
   defp token_index(tok, fallback_idx) do
     raw =
@@ -400,8 +441,12 @@ end
 
     idx =
       cond do
-        is_integer(raw) -> raw
-        is_float(raw) -> trunc(raw)
+        is_integer(raw) ->
+          raw
+
+        is_float(raw) ->
+          trunc(raw)
+
         is_binary(raw) ->
           case Integer.parse(String.trim(raw)) do
             {n, _} -> n
@@ -461,7 +506,7 @@ end
 
     cond do
       source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-          kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or flag ->
+        kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or flag ->
         {:error, :chargram}
 
       phrase_nil_or_empty?(phrase_norm) ->
@@ -819,147 +864,140 @@ end
 
   # ---------- Stage1 summary telemetry ----------
 
-defp emit_stage1_stop(
-       run_ctx,
-       choices,
-       audit,
-       acc,
-       event,
-       weights,
-       scores_mode,
-       margin_thr,
-       min_margin
-     )
-     when is_list(choices) and is_map(audit) and is_map(acc) and is_list(event) do
-  ts = System.system_time(:millisecond)
+  defp emit_stage1_stop(
+         run_ctx,
+         choices,
+         audit,
+         acc,
+         event,
+         weights,
+         scores_mode,
+         margin_thr,
+         min_margin
+       )
+       when is_list(choices) and is_map(audit) and is_map(acc) and is_list(event) do
+    ts = System.system_time(:millisecond)
 
-  frame_seq = Map.get(run_ctx, :frame_seq)
-  frame_ts_ms = Map.get(run_ctx, :frame_ts_ms) || ts
-  frame_run_id = Map.get(run_ctx, :frame_run_id)
+    frame_seq = Map.get(run_ctx, :frame_seq)
+    frame_ts_ms = Map.get(run_ctx, :frame_ts_ms) || ts
+    frame_run_id = Map.get(run_ctx, :frame_run_id)
 
-  # Prefer audit (post-processed) but fall back to acc (raw loop counters).
-  kept_tokens = audit_get(audit, :kept_tokens, acc.kept)
-  dropped_tokens = audit_get(audit, :dropped_tokens, 0)
-  weak_decisions = audit_get(audit, :weak_decisions, acc.weak)
-  missing_candidates = audit_get(audit, :missing_candidates, acc.no_cand)
-  missing_candidate_tokens = audit_get(audit, :missing_candidate_tokens, [])
-  guard_drops = audit_get(audit, :guard_drops, 0)
-  guardrail_violations = audit_get(audit, :chargram_violation, 0)
+    # Prefer audit (post-processed) but fall back to acc (raw loop counters).
+    kept_tokens = audit_get(audit, :kept_tokens, acc.kept)
+    dropped_tokens = audit_get(audit, :dropped_tokens, 0)
+    weak_decisions = audit_get(audit, :weak_decisions, acc.weak)
+    missing_candidates = audit_get(audit, :missing_candidates, acc.no_cand)
+    missing_candidate_tokens = audit_get(audit, :missing_candidate_tokens, [])
+    guard_drops = audit_get(audit, :guard_drops, 0)
+    guardrail_violations = audit_get(audit, :chargram_violation, 0)
 
-  boundary_drops = acc.boundary_drops
-  chargram = acc.chargram
-  mwe_fallbacks = acc.mwe_fallbacks
+    boundary_drops = acc.boundary_drops
+    chargram = acc.chargram
+    mwe_fallbacks = acc.mwe_fallbacks
 
-  {fallback_winners, margins, probs} = summarize_choices(choices)
+    {fallback_winners, margins, probs} = summarize_choices(choices)
 
-  {margin_min, margin_mean} = {min_or_zero(margins), mean_or_zero(margins)}
-  {p1_min, p1_mean} = {min_or_zero(probs), mean_or_zero(probs)}
+    {margin_min, margin_mean} = {min_or_zero(margins), mean_or_zero(margins)}
+    {p1_min, p1_mean} = {min_or_zero(probs), mean_or_zero(probs)}
 
-  total = max(kept_tokens + dropped_tokens, 0)
-  kept_rate = safe_div(kept_tokens, total)
-  weak_rate = safe_div(weak_decisions, max(kept_tokens, 0))
-  fallback_rate = safe_div(fallback_winners, max(kept_tokens, 0))
-  missing_rate = safe_div(missing_candidates, max(total, 0))
+    total = max(kept_tokens + dropped_tokens, 0)
+    kept_rate = safe_div(kept_tokens, total)
+    weak_rate = safe_div(weak_decisions, max(kept_tokens, 0))
+    fallback_rate = safe_div(fallback_winners, max(kept_tokens, 0))
+    missing_rate = safe_div(missing_candidates, max(total, 0))
 
-  meta = %{
-    at_ms: ts,
-    ts_ms: ts,
-    frame_seq: frame_seq,
-    frame_ts_ms: frame_ts_ms,
-    frame_run_id: frame_run_id,
+    meta = %{
+      at_ms: ts,
+      ts_ms: ts,
+      frame_seq: frame_seq,
+      frame_ts_ms: frame_ts_ms,
+      frame_run_id: frame_run_id,
+      sentence: Map.get(run_ctx, :sentence),
+      intent: Map.get(run_ctx, :intent),
+      confidence: Map.get(run_ctx, :confidence),
+      source: Map.get(run_ctx, :source, :run),
+      kept_tokens: kept_tokens,
+      dropped_tokens: dropped_tokens,
+      weak_decisions: weak_decisions,
+      missing_candidates: missing_candidates,
+      missing_candidate_tokens: missing_candidate_tokens,
+      boundary_drops: boundary_drops,
+      chargram_violation: chargram,
+      guard_drops: guard_drops,
+      guardrail_violations: guardrail_violations,
+      mwe_fallbacks: mwe_fallbacks,
+      fallback_winners: fallback_winners,
+      margin_min: Float.round(margin_min, 6),
+      margin_mean: Float.round(margin_mean, 6),
+      p1_min: Float.round(p1_min, 6),
+      p1_mean: Float.round(p1_mean, 6),
 
-    sentence: Map.get(run_ctx, :sentence),
-    intent: Map.get(run_ctx, :intent),
-    confidence: Map.get(run_ctx, :confidence),
-    source: Map.get(run_ctx, :source, :run),
+      # Handy derived scalars for gating and UI.
+      rates: %{
+        kept: Float.round(kept_rate, 6),
+        weak: Float.round(weak_rate, 6),
+        fallback_win: Float.round(fallback_rate, 6),
+        missing: Float.round(missing_rate, 6)
+      },
+      scores_mode: scores_mode,
+      margin_threshold: margin_thr * 1.0,
+      min_margin: min_margin * 1.0,
+      weights: weights,
+      v: 3
+    }
 
-    kept_tokens: kept_tokens,
-    dropped_tokens: dropped_tokens,
-    weak_decisions: weak_decisions,
+    meas = %{
+      kept: kept_tokens,
+      dropped: dropped_tokens,
+      weak: weak_decisions,
+      missing: missing_candidates,
+      boundary_drops: boundary_drops,
+      chargram: chargram,
+      guard_drops: guard_drops,
+      mwe_fallbacks: mwe_fallbacks,
+      fallback_winners: fallback_winners
+    }
 
-    missing_candidates: missing_candidates,
-    missing_candidate_tokens: missing_candidate_tokens,
-
-    boundary_drops: boundary_drops,
-    chargram_violation: chargram,
-    guard_drops: guard_drops,
-    guardrail_violations: guardrail_violations,
-
-    mwe_fallbacks: mwe_fallbacks,
-    fallback_winners: fallback_winners,
-
-    margin_min: Float.round(margin_min, 6),
-    margin_mean: Float.round(margin_mean, 6),
-    p1_min: Float.round(p1_min, 6),
-    p1_mean: Float.round(p1_mean, 6),
-
-    # Handy derived scalars for gating and UI.
-    rates: %{
-      kept: Float.round(kept_rate, 6),
-      weak: Float.round(weak_rate, 6),
-      fallback_win: Float.round(fallback_rate, 6),
-      missing: Float.round(missing_rate, 6)
-    },
-
-    scores_mode: scores_mode,
-    margin_threshold: margin_thr * 1.0,
-    min_margin: min_margin * 1.0,
-    weights: weights,
-    v: 3
-  }
-
-  meas = %{
-    kept: kept_tokens,
-    dropped: dropped_tokens,
-    weak: weak_decisions,
-    missing: missing_candidates,
-    boundary_drops: boundary_drops,
-    chargram: chargram,
-    guard_drops: guard_drops,
-    mwe_fallbacks: mwe_fallbacks,
-    fallback_winners: fallback_winners
-  }
-
-  :telemetry.execute(event, meas, meta)
-rescue
-  _ -> :ok
-end
-
-defp summarize_choices(choices) do
-  fallback_winners =
-    Enum.count(choices, fn ch ->
-      id =
-        Safe.get(ch, :chosen_id) || Safe.get(ch, :id) ||
-          Safe.get(ch, "chosen_id") || Safe.get(ch, "id") || ""
-
-      String.contains?(to_string(id), "|phrase|fallback")
-    end)
-
-  margins =
-    choices
-    |> Enum.map(fn ch -> get_num(ch, :margin, get_num(ch, :prob_margin, 0.0)) end)
-    |> Enum.map(&clamp01/1)
-
-  probs =
-    choices
-    |> Enum.map(fn ch -> get_num(ch, :prob, get_num(ch, :score, 0.0)) end)
-    |> Enum.map(&clamp01/1)
-
-  {fallback_winners, margins, probs}
-end
-
-defp audit_get(audit, k, default) when is_map(audit) do
-  case {Map.get(audit, k), Map.get(audit, to_string(k))} do
-    {nil, nil} -> default
-    {v, nil} -> v
-    {nil, v} -> v
-    {v, _} -> v
+    :telemetry.execute(event, meas, meta)
+  rescue
+    _ -> :ok
   end
-end
 
-defp safe_div(_a, b) when not is_number(b) or b <= 0, do: 0.0
-defp safe_div(a, b) when is_number(a) and is_number(b), do: (a * 1.0) / (b * 1.0)
-defp safe_div(_a, _b), do: 0.0
+  defp summarize_choices(choices) do
+    fallback_winners =
+      Enum.count(choices, fn ch ->
+        id =
+          Safe.get(ch, :chosen_id) || Safe.get(ch, :id) ||
+            Safe.get(ch, "chosen_id") || Safe.get(ch, "id") || ""
+
+        String.contains?(to_string(id), "|phrase|fallback")
+      end)
+
+    margins =
+      choices
+      |> Enum.map(fn ch -> get_num(ch, :margin, get_num(ch, :prob_margin, 0.0)) end)
+      |> Enum.map(&clamp01/1)
+
+    probs =
+      choices
+      |> Enum.map(fn ch -> get_num(ch, :prob, get_num(ch, :score, 0.0)) end)
+      |> Enum.map(&clamp01/1)
+
+    {fallback_winners, margins, probs}
+  end
+
+  defp audit_get(audit, k, default) when is_map(audit) do
+    case {Map.get(audit, k), Map.get(audit, to_string(k))} do
+      {nil, nil} -> default
+      {v, nil} -> v
+      {nil, v} -> v
+      {v, _} -> v
+    end
+  end
+
+  defp safe_div(_a, b) when not is_number(b) or b <= 0, do: 0.0
+  defp safe_div(a, b) when is_number(a) and is_number(b), do: a * 1.0 / (b * 1.0)
+  defp safe_div(_a, _b), do: 0.0
 
   defp min_or_zero([]), do: 0.0
   defp min_or_zero(xs), do: Enum.min(xs, fn -> 0.0 end) * 1.0
@@ -1124,36 +1162,38 @@ defp safe_div(_a, _b), do: 0.0
 
   # ---------- Candidate bucket extraction ----------
 
-defp buckets_from_si(si0, tokens) do
-  sc =
-    case Safe.get(si0, :sense_candidates, %{}) do
-      %{} = m -> m
-      _ -> %{}
-    end
+  defp buckets_from_si(si0, tokens) do
+    sc =
+      case Safe.get(si0, :sense_candidates, %{}) do
+        %{} = m -> m
+        _ -> %{}
+      end
 
-  cbt =
-    case Safe.get(si0, :candidates_by_token, %{}) do
-      %{} = m -> m
-      _ -> %{}
-    end
+    cbt =
+      case Safe.get(si0, :candidates_by_token, %{}) do
+        %{} = m -> m
+        _ -> %{}
+      end
 
-  ac_map =
-    case Safe.get(si0, :active_cells) || Safe.get(si0, "active_cells") || [] do
-      list when is_list(list) and list != [] ->
-        token_phrase_by_idx = token_phrase_by_idx(tokens)
+    ac_map =
+      case Safe.get(si0, :active_cells) || Safe.get(si0, "active_cells") || [] do
+        list when is_list(list) and list != [] ->
+          token_phrase_by_idx = token_phrase_by_idx(tokens)
 
-        list
-        |> Enum.map(&Safe.to_plain/1)
-        |> active_cells_to_buckets(token_phrase_by_idx)
+          list
+          |> Enum.map(&Safe.to_plain/1)
+          |> active_cells_to_buckets(token_phrase_by_idx)
 
-      _ ->
-        %{}
-    end
+        _ ->
+          %{}
+      end
 
-  ac_map
-  |> Map.merge(cbt) # candidates_by_token overrides active_cells
-  |> Map.merge(sc)  # sense_candidates overrides both
-end
+    ac_map
+    # candidates_by_token overrides active_cells
+    |> Map.merge(cbt)
+    # sense_candidates overrides both
+    |> Map.merge(sc)
+  end
 
   defp token_phrase_by_idx(tokens) when is_list(tokens) do
     tokens
@@ -1315,21 +1355,69 @@ end
 
   defp normalize_span(_sentence, _span, _phrase_norm), do: {0, 0}
 
-  defp tok_span(tok) do
+defp tok_span(tok) do
+  span =
     case {Safe.get(tok, :span), Safe.get(tok, "span")} do
       {{a, b}, _} when is_integer(a) and is_integer(b) -> {a, b}
       {_, {a, b}} when is_integer(a) and is_integer(b) -> {a, b}
       _ -> nil
     end
-  end
 
-  defp span_sub_norm(sentence, start, len) do
-    try do
-      sentence |> binary_part(start, len) |> norm()
-    rescue
-      _ -> ""
-    end
+  phrase = Safe.get(tok, :phrase) || Safe.get(tok, "phrase") || ""
+  plen = if is_binary(phrase), do: String.length(String.trim(phrase)), else: 0
+
+  case span do
+    {s, x} when is_integer(s) and is_integer(x) ->
+      cond do
+        s < 0 or x < 0 ->
+          nil
+
+        # If tuple is {start, len} and len matches phrase length → convert to {start,end}
+        plen > 0 and x == plen ->
+          {s, s + x}
+
+        # If tuple is {start, end} and (end-start) matches phrase length → keep
+        plen > 0 and x >= s and (x - s) == plen ->
+          {s, x}
+
+        # If x < s, it can’t be end → treat as len
+        x < s and x > 0 ->
+          {s, s + x}
+
+        # Fallback: assume x is end
+        x > s ->
+          {s, x}
+
+        true ->
+          nil
+      end
+
+    _ ->
+      nil
   end
+end
+
+defp span_sub_norm(sentence, start, x) do
+  try do
+    cond do
+      not is_binary(sentence) or not is_integer(start) or not is_integer(x) ->
+        ""
+
+      x <= 0 ->
+        ""
+
+      # If x looks like an end (>= start), prefer end semantics
+      x >= start ->
+        (String.slice(sentence, start, x - start) || "") |> norm()
+
+      # Otherwise treat as len
+      true ->
+        (String.slice(sentence, start, x) || "") |> norm()
+    end
+  rescue
+    _ -> ""
+  end
+end
 
   defp byte_at(bin, idx) when is_binary(bin) and is_integer(idx) do
     if idx >= 0 and idx < byte_size(bin), do: :binary.at(bin, idx), else: nil
@@ -1483,7 +1571,8 @@ end
   end
 
   defp cfg_mw(opts) do
-    val = get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
+    val =
+      get_opt(opts, :mood_weights, Application.get_env(:brain, :lifg_mood_weights, @default_mw))
 
     %{
       expl: to_small(val[:expl] || val["expl"] || @default_mw.expl),
@@ -1494,7 +1583,8 @@ end
   end
 
   defp cfg_cap(opts),
-    do: to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
+    do:
+      to_cap(get_opt(opts, :mood_cap, Application.get_env(:brain, :lifg_mood_cap, @default_cap)))
 
   # ---------- Frame stamping helpers ----------
 
@@ -1612,7 +1702,9 @@ end
 
   defp parse_sense_id(other), do: parse_sense_id(to_string(other))
 
-  defp apply_phrase_fallback_adjustment(base, "phrase", "fallback"), do: clamp(base + 0.02, 0.0, 1.0)
+  defp apply_phrase_fallback_adjustment(base, "phrase", "fallback"),
+    do: clamp(base + 0.02, 0.0, 1.0)
+
   defp apply_phrase_fallback_adjustment(base, _pos, _tag), do: base
 
   defp maybe_boost_greeting_phrase(base, lemma_norm, "phrase", "fallback") do
@@ -1711,9 +1803,14 @@ end
     i = Safe.get(si0, :intent)
 
     cond do
-      is_binary(i) -> i
-      is_map(i) -> to_string(Safe.get(i, :intent) || Safe.get(i, :name) || Safe.get(i, :type) || "none")
-      true -> "none"
+      is_binary(i) ->
+        i
+
+      is_map(i) ->
+        to_string(Safe.get(i, :intent) || Safe.get(i, :name) || Safe.get(i, :type) || "none")
+
+      true ->
+        "none"
     end
   end
 
@@ -1757,7 +1854,15 @@ end
     end
   end
 
-  defp build_audit(kept, dropped, rejected_by_boundary, chargram_drops, weak, missing_cand, missing_cand_tokens) do
+  defp build_audit(
+         kept,
+         dropped,
+         rejected_by_boundary,
+         chargram_drops,
+         weak,
+         missing_cand,
+         missing_cand_tokens
+       ) do
     %{
       feature_mix: :lifg_stage1,
       kept_tokens: kept,
@@ -1840,7 +1945,7 @@ end
 
   defp restrict_phrase_match_if_mwe(cands, _mwe, _tp), do: cands
 
-# Reject local fallback MWEs that are mostly scaffolding:
+  # Reject local fallback MWEs that are mostly scaffolding:
   # - Reject if head OR tail is a function word
   # - For 3+ grams, also reject if 2+ tokens are function words
   #   (kills "what do you", "do you think", "we should do", etc.)
@@ -1858,56 +1963,136 @@ end
         false
 
       [a, b] ->
-        (not Brain.LIFG.MWE.function_word?(a)) and (not Brain.LIFG.MWE.function_word?(b))
+        not Brain.LIFG.MWE.function_word?(a) and not Brain.LIFG.MWE.function_word?(b)
 
       xs when length(xs) >= 3 ->
         head = hd(xs)
         tail = List.last(xs)
         fn_count = Enum.count(xs, &Brain.LIFG.MWE.function_word?/1)
 
-        not (Brain.LIFG.MWE.function_word?(head) or Brain.LIFG.MWE.function_word?(tail) or fn_count >= 2)
+        not (Brain.LIFG.MWE.function_word?(head) or Brain.LIFG.MWE.function_word?(tail) or
+               fn_count >= 2)
     end
   end
 
   defp allow_mwe_fallback_phrase?(_), do: false
 
+  # ---------- Slate/frame stamping helpers ----------
 
-# ---------- Slate/frame stamping helpers ----------
+  defp stamp_slates(%{} = si, %{seq: seq, ts_ms: ts, run_id: run_id}) do
+    si
+    |> Map.update(:sense_candidates, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
+    |> Map.update(:candidates_by_token, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
+    |> Map.update(
+      :active_cells,
+      Safe.get(si, :active_cells, []),
+      &stamp_list(&1, seq, ts, run_id)
+    )
+  end
 
-defp stamp_slates(%{} = si, %{seq: seq, ts_ms: ts, run_id: run_id}) do
-  si
-  |> Map.update(:sense_candidates, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
-  |> Map.update(:candidates_by_token, %{}, &stamp_bucket_map(&1, seq, ts, run_id))
-  |> Map.update(:active_cells, Safe.get(si, :active_cells, []), &stamp_list(&1, seq, ts, run_id))
+  defp stamp_slates(si, _frame), do: si
+
+  defp stamp_bucket_map(%{} = m, seq, ts, run_id) do
+    Enum.into(m, %{}, fn {k, v} ->
+      {k, stamp_list(v, seq, ts, run_id)}
+    end)
+  end
+
+  defp stamp_bucket_map(_other, _seq, _ts, _run_id), do: %{}
+
+  defp stamp_list(list, seq, ts, run_id) when is_list(list) do
+    Enum.map(list, fn item ->
+      item
+      |> Safe.to_plain()
+      |> maybe_stamp(seq, ts, run_id)
+    end)
+  end
+
+  defp stamp_list(_other, _seq, _ts, _run_id), do: []
+
+  defp maybe_stamp(%{} = m, seq, ts, run_id) do
+    m
+    |> Map.put_new(:frame_seq, seq)
+    |> Map.put_new(:frame_ts_ms, ts)
+    |> Map.put_new(:frame_run_id, run_id)
+  end
+
+  defp maybe_stamp(other, _seq, _ts, _run_id), do: other
+defp force_end_exclusive_span(tok, nil), do: tok
+
+defp force_end_exclusive_span(tok, sent) when is_map(tok) and is_binary(sent) do
+  phrase = token_phrase(tok)
+  span0 = token_span(tok)
+
+  case {span0, phrase} do
+    {{s, x}, ph} when is_integer(s) and is_integer(x) and s >= 0 and is_binary(ph) and ph != "" ->
+      ph_len = byte_size(ph)
+
+      candidates =
+        [
+          {s, x},         # treat x as end
+          {s, s + x},     # treat x as len
+          {s, s + ph_len} # treat phrase len
+        ]
+        |> Enum.uniq()
+        |> Enum.filter(&valid_span_bytes?(sent, &1))
+
+      winner =
+        Enum.find(candidates, fn {a, b} ->
+          safe_slice_bytes(sent, a, b) == ph
+        end) ||
+          Enum.find(candidates, fn {a, b} ->
+            safe_slice_bytes(sent, a, b) != ""
+          end) ||
+          nil
+
+      maybe_put_span(tok, winner)
+
+    _ ->
+      tok
+  end
 end
 
-defp stamp_slates(si, _frame), do: si
-
-defp stamp_bucket_map(%{} = m, seq, ts, run_id) do
-  Enum.into(m, %{}, fn {k, v} ->
-    {k, stamp_list(v, seq, ts, run_id)}
-  end)
+defp token_phrase(t) when is_map(t) do
+  Map.get(t, :phrase) ||
+    Map.get(t, "phrase") ||
+    Map.get(t, :lemma) ||
+    Map.get(t, "lemma") ||
+    Map.get(t, :norm) ||
+    Map.get(t, "norm") ||
+    ""
 end
 
-defp stamp_bucket_map(_other, _seq, _ts, _run_id), do: %{}
+defp token_phrase(_), do: ""
 
-defp stamp_list(list, seq, ts, run_id) when is_list(list) do
-  Enum.map(list, fn item ->
-    item
-    |> Safe.to_plain()
-    |> maybe_stamp(seq, ts, run_id)
-  end)
+defp token_span(t) when is_map(t) do
+  case Map.get(t, :span) || Map.get(t, "span") do
+    {s, e} when is_integer(s) and is_integer(e) -> {s, e}
+    [s, e] when is_integer(s) and is_integer(e) -> {s, e}
+    _ -> nil
+  end
 end
 
-defp stamp_list(_other, _seq, _ts, _run_id), do: []
+defp token_span(_), do: nil
 
-defp maybe_stamp(%{} = m, seq, ts, run_id) do
-  m
-  |> Map.put_new(:frame_seq, seq)
-  |> Map.put_new(:frame_ts_ms, ts)
-  |> Map.put_new(:frame_run_id, run_id)
+defp maybe_put_span(tok, nil), do: tok
+
+defp maybe_put_span(tok, {s, e}) when is_map(tok) and is_integer(s) and is_integer(e) do
+  tok
+  |> Map.put(:span, {s, e})
+  |> Map.put("span", {s, e})
 end
 
-defp maybe_stamp(other, _seq, _ts, _run_id), do: other
+defp valid_span_bytes?(sent, {s, e})
+     when is_binary(sent) and is_integer(s) and is_integer(e) do
+  s >= 0 and e > s and e <= byte_size(sent)
 end
 
+defp valid_span_bytes?(_, _), do: false
+
+defp safe_slice_bytes(sent, s, e) do
+  binary_part(sent, s, e - s)
+rescue
+  _ -> ""
+end
+end

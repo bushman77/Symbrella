@@ -150,7 +150,7 @@ defmodule Brain.Blackboard do
     payload2 = ensure_at_ms(payload)
 
     history1 =
-      [payload2 | (state.history || [])]
+      [payload2 | state.history || []]
       |> Enum.take(state.window_size)
 
     {:noreply, %{state | last: payload2, history: history1}}
@@ -215,7 +215,8 @@ defmodule Brain.Blackboard do
     end
   end
 
-  defp ensure_at_ms(other), do: %{kind: :message, payload: other, at_ms: System.system_time(:millisecond)}
+  defp ensure_at_ms(other),
+    do: %{kind: :message, payload: other, at_ms: System.system_time(:millisecond)}
 
   defp safe_subscribe do
     try do

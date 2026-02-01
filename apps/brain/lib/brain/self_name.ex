@@ -13,7 +13,7 @@ defmodule Brain.SelfName do
 
   @type match_t :: %{
           name: binary(),
-          span: {non_neg_integer(), pos_integer()},
+          span: {non_neg_integer(), non_neg_integer()},
           token_indexes: [non_neg_integer()]
         }
 
@@ -147,7 +147,7 @@ defmodule Brain.SelfName do
 
           match = %{
             name: name,
-            span: {start, wlen},
+            span: {start, start + wlen},
             token_indexes: idxs
           }
 
