@@ -1,5 +1,6 @@
 # P-201 — Tokenizer defaults (test): words-only, no char-grams
 import Config
+config :brain, :ml_enabled, false
 
 config :db, Db.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
