@@ -57,12 +57,54 @@ lifg_min_score =
   end
 
 # NEW: episodic attach master switch (EPISODES_MODE=on|off; default on)
+# EPISODES_MODE can be: off | on | async | async_embedding
 episodes_mode =
-  case System.get_env("EPISODES_MODE", "on") |> String.downcase() do
+  case System.get_env("EPISODES_MODE", "async_embedding") |> String.downcase() do
     "off" -> :off
-    _ -> :on
+    "on" -> :on
+    "sync" -> :on
+    "async" -> :async
+    "async_embedding" -> :async_embedding
+    _ -> :async_embedding
   end
 
+# Explicit persistence switch (EPISODES_PERSIST=on|off); default ON if you’re enabling episodes_mode
+episodes_persist =
+  case System.get_env("EPISODES_PERSIST") do
+    nil ->
+      # sensible default: persist unless mode is off
+      episodes_mode != :off
+
+    v ->
+      case String.downcase(v) do
+        "1" -> true
+        "true" -> true
+        "yes" -> true
+        "on" -> true
+        _ -> false
+      end
+  end
+
+episodes_tags =
+  System.get_env("EPISODES_TAGS", "auto,lifg")
+  |> String.split(",", trim: true)
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+
+config :brain,
+  self_names: ["symbrella"],
+  pmtg_mode: pmtg_mode,
+  pmtg_margin_threshold: pmtg_margin,
+  pmtg_window_keep: pmtg_keep,
+  hippo_meta_dup_count: true,
+  lifg_min_score: lifg_min_score,
+
+  # episodes
+  episodes_mode: episodes_mode,
+  episodes_persist: episodes_persist,
+  episodes_tags: episodes_tags,
+
+  lifg_stage1_mwe_fallback: true
 # NEW: optional defaults for DB/Hybrid recall (all overridable per request)
 hippo_recall_source =
   case System.get_env("HIPPO_RECALL_SOURCE", "") |> String.downcase() do

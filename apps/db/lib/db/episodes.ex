@@ -346,4 +346,35 @@ defmodule Db.Episodes do
     mag_b = :math.sqrt(Enum.reduce(query_emb, 0.0, fn x, s -> s + x * x end))
     if mag_a == 0 or mag_b == 0, do: nil, else: dot / (mag_a * mag_b)
   end
+
+
+def last_20() do
+Ecto.Adapters.SQL.query!(
+  Db,
+  "select id, inserted_at, tags from episodes order by inserted_at desc limit 20",
+  []
+)
+end
+
+def lifg_errors() do
+Ecto.Adapters.SQL.query!(
+  Db,
+  "select id, inserted_at, tags from episodes where tags @> ARRAY['lifg_error']::text[] order by inserted_at desc limit 50",
+  []
+)
+end
+
+defp episodes_per_day() do
+Ecto.Adapters.SQL.query!(
+  Db,
+  """
+  select date_trunc('day', inserted_at) as day, count(*)
+  from episodes
+  group by 1
+  order by 1 desc
+  limit 14
+  """,
+  []
+)
+end
 end

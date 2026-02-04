@@ -15,9 +15,12 @@ defmodule Core.Token do
       (end-exclusive: `{start, end}`) and punctuation tokens are included as single-symbol
       tokens with `kind: :punct`.
     • `to_char_spans/1,2` — convert existing word spans to **byte spans** (end-exclusive).
-    • `check_span_invariants/1` — optional invariant validation.
+    • `check_span_invariants/1,2` — optional invariant validation.
 
-  `tokenize/2` returns a %Core.SemanticInput{sentence, tokens}.
+  Compatibility:
+    • Implements the Access behaviour so callers can do `token[:mw]` or `token["mw"]`.
+
+  `tokenize/2` returns a `%Core.SemanticInput{sentence, tokens}`.
   """
 
   @enforce_keys [:phrase, :span, :n]
@@ -50,6 +53,76 @@ defmodule Core.Token do
         }
 
   @type span_mode :: :words | :chars
+
+  # ───────────────────────────────────────────────────────────────────
+  # Access behaviour (token[:phrase] / token["mw"] etc.)
+  # ───────────────────────────────────────────────────────────────────
+
+  @behaviour Access
+
+  @impl Access
+  def fetch(%__MODULE__{} = token, key) do
+    key = normalize_key(key)
+
+    if is_atom(key) and Map.has_key?(token, key) do
+      {:ok, Map.get(token, key)}
+    else
+      :error
+    end
+  end
+
+  @impl Access
+  def get_and_update(%__MODULE__{} = token, key, fun) when is_function(fun, 1) do
+    key = normalize_key(key)
+
+    if is_atom(key) and Map.has_key?(token, key) do
+      current = Map.get(token, key)
+
+      case fun.(current) do
+        {get, update} -> {get, Map.put(token, key, update)}
+        :pop -> {current, Map.put(token, key, nil)}
+        other -> raise ArgumentError, "invalid get_and_update return: #{inspect(other)}"
+      end
+    else
+      raise KeyError, key: key, term: token
+    end
+  end
+
+  @impl Access
+  def pop(%__MODULE__{} = token, key) do
+    key = normalize_key(key)
+
+    if is_atom(key) and Map.has_key?(token, key) do
+      {Map.get(token, key), Map.put(token, key, nil)}
+    else
+      {nil, token}
+    end
+  end
+
+  defp normalize_key(k) when is_atom(k), do: k
+
+  defp normalize_key(k) when is_binary(k) do
+    case k do
+      "index" -> :index
+      "token_index" -> :index
+      "phrase" -> :phrase
+      "span" -> :span
+      "mw" -> :mw
+      "source" -> :source
+      "instances" -> :instances
+      "n" -> :n
+      "kind" -> :kind
+      "pos" -> :pos
+      "subpos" -> :subpos
+      _ -> k
+    end
+  end
+
+  defp normalize_key(k), do: k
+
+  # ───────────────────────────────────────────────────────────────────
+  # Tokenization
+  # ───────────────────────────────────────────────────────────────────
 
   @spec tokenize(String.t(), keyword()) :: Core.SemanticInput.t()
   def tokenize(sentence, opts \\ []) when is_binary(sentence) do
@@ -298,13 +371,59 @@ defmodule Core.Token do
   end
 
   @doc """
-  Optional invariant check:
-    • spans are non-decreasing by start
-    • each token's phrase equals the **byte slice** of sentence `[start, end)`
+  Optional invariant check.
+
+  Two supported shapes:
+
+    * `check_span_invariants(%Core.SemanticInput{})`
+      - spans are non-decreasing by start
+      - each token's phrase equals the **byte slice** of sentence `[start, end)`
+
+    * `check_span_invariants(tokens)` (tokens list)
+      - only checks start-order monotonicity (no sentence slice validation)
+
+  Returns `{:ok, input}` or `{:error, failures}`.
   """
   @spec check_span_invariants(Core.SemanticInput.t()) ::
           {:ok, Core.SemanticInput.t()} | {:error, [map()]}
-  def check_span_invariants(%Core.SemanticInput{sentence: s, tokens: tokens} = si) do
+  def check_span_invariants(%Core.SemanticInput{} = si) do
+    check_span_invariants(si, :strict)
+  end
+
+  @spec check_span_invariants([t]) :: {:ok, [t]} | {:error, [map()]}
+  def check_span_invariants(tokens) when is_list(tokens) do
+    {failures, _last_start} =
+      tokens
+      |> Enum.with_index()
+      |> Enum.reduce({[], -1}, fn {t, idx}, {acc, last_start} ->
+        span_raw = Map.get(t, :span) || Map.get(t, "span") || {0, 0}
+        {st, en} = normalize_span(span_raw)
+
+        reasons = []
+        reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
+        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+
+        if reasons == [] do
+          {acc, st}
+        else
+          fail = %{
+            index: idx,
+            token: t,
+            normalized_span: {st, en},
+            reasons: Enum.reverse(reasons)
+          }
+
+          {[fail | acc], st}
+        end
+      end)
+
+    case failures do
+      [] -> {:ok, tokens}
+      _ -> {:error, Enum.reverse(failures)}
+    end
+  end
+
+  defp check_span_invariants(%Core.SemanticInput{sentence: s, tokens: tokens} = si, :strict) do
     {failures, _last_start} =
       tokens
       |> Enum.with_index()

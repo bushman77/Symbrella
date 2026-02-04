@@ -204,11 +204,18 @@ defmodule Core do
 
   # ─────────────────────── LIFG attach (extracted) ───────────────────────
 
-  defp run_lifg_and_attach(%{} = si, lifg_opts) when is_list(lifg_opts),
-    do: LIFGAttach.run_and_attach(si, lifg_opts)
+defp run_lifg_and_attach(%{} = si, lifg_opts) when is_list(lifg_opts) do
+  case Brain.Pipeline.LIFGStage1.run(si, lifg_opts) do
+    {{:ok, out}, _state} ->
+      # Merge LIFG output back into SI
+      Map.merge(si, out)
 
-  defp run_lifg_and_attach(si, _lifg_opts), do: si
+    _ ->
+      si
+  end
+end
 
+defp run_lifg_and_attach(si, _lifg_opts), do: si
   # ─────────────────────── LTM orchestrator ────────────────────────────
 
   defp ltm_stage(%{} = si, opts) do
