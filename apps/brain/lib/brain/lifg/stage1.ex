@@ -294,6 +294,26 @@ defmodule Brain.LIFG.Stage1 do
     run(si, Keyword.merge(opts, weights: weights_map))
   end
 
+@doc """
+  Back-compat entrypoint for pipeline callers that still invoke `choose/3`.
+
+  Accepts:
+    - tokens: list of Core.Token (or token-maps)
+    - sense_candidates: map token_index => candidates
+    - opts: keyword passed through to `run/2`
+  """
+  @spec choose(list(), map() | nil, keyword()) ::
+          {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+  def choose(tokens, sense_candidates, opts \\ [])
+      when is_list(tokens) and (is_map(sense_candidates) or is_nil(sense_candidates)) and is_list(opts) do
+    si = %{
+      tokens: tokens,
+      sense_candidates: (sense_candidates || %{})
+    }
+
+    run(si, opts)
+  end
+
   # ---------- Internal helpers for run/2 ----------
 
   defp merged_lifg_opts(si0, opts) do
