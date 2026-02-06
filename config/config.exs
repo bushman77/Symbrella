@@ -85,6 +85,18 @@ config :brain, Brain.MoodCore,
   init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
 
 # ───────────────────────────── Web ────────────────────────────────
+config :llm, Llm,
+  model_path: Path.expand("~/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
+  llama_server: "llama-server",
+  auto_start_on_boot?: true,
+  allow_lazy_start?: true,       # ok to leave true; still autostarts anyway
+  auto_restart_on_crash?: true,
+  host: "127.0.0.1",
+  port: 0,
+  ctx: 2048,
+  threads: 4,
+  heartbeat_ms: 15_000
+
 # Symbrella app opts
 config :symbrella,
   resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]

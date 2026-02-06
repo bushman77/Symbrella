@@ -1,3 +1,4 @@
+# apps/symbrella/lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
   use Application
@@ -7,19 +8,6 @@ defmodule Symbrella.Application do
     # Ensure DETS dir exists for NegCache
     neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
     File.mkdir_p!(Path.dirname(neg_path))
-
-    # Optional: LLM boot options (env-driven; reserved for future use)
-    _llm_opts =
-      [
-        base_url: System.get_env("OLLAMA_API_BASE"),
-        model: System.get_env("OLLAMA_MODEL"),
-        timeout: 60_000,
-        auto_start_on_boot?: true,
-        pull_on_boot?: true,
-        warm_on_boot?: true,
-        boot_timeout: 60_000
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     children = [
       {Phoenix.PubSub, name: Symbrella.PubSub},
@@ -35,6 +23,10 @@ defmodule Symbrella.Application do
       {Task.Supervisor, name: Symbrella.TaskSup},
       {Finch, name: Lexicon.Finch},
       {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
+
+      # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
+      # NOTE: This is intentionally owned by the umbrella-root supervisor.
+      {Llm, []},
 
       # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
       {Brain.MoodCore, []},
@@ -78,6 +70,7 @@ defmodule Symbrella.Application do
 
     # Attach telemetry handlers AFTER the tree is live (safe-guarded)
     safe_attach(fn -> Brain.Telemetry.attach!() end)
+
     # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
     safe_attach(fn -> Core.Curiosity.Bridge.attach() end)
 
