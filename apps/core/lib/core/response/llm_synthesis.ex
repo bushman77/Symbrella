@@ -37,7 +37,6 @@ defmodule Core.Response.LlmSynthesis do
   require Logger
 
   @timeout_ms 15_000
-  @model nil  # nil → Llm uses its configured default (your Qwen2.5-0.5B)
 
   # ── Public API ────────────────────────────────────────────────────────────
 
@@ -66,7 +65,7 @@ defmodule Core.Response.LlmSynthesis do
       %{"role" => "user",   "content" => user_text}
     ]
 
-    case Llm.chat(@model, messages, timeout: @timeout_ms) do
+    case Llm.chat(messages, timeout: @timeout_ms) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
         {:ok, String.trim(content)}
 
@@ -91,26 +90,22 @@ defmodule Core.Response.LlmSynthesis do
   # ── System prompt builder ─────────────────────────────────────────────────
 
   defp build_system_prompt(features, decision, mood) do
-    tone        = decision.tone
-    mode        = decision.mode
-    intent      = features.intent
-    exp         = getv(mood, :exploration)
-    inh         = getv(mood, :inhibition)
-    vig         = getv(mood, :vigilance)
-    plast       = getv(mood, :plasticity)
-    tone_hint   = Map.get(mood, :tone_hint)
+    tone      = decision.tone
+    mode      = decision.mode
+    intent    = features.intent
+    exp       = getv(mood, :exploration)
+    inh       = getv(mood, :inhibition)
+    vig       = getv(mood, :vigilance)
+    plast     = getv(mood, :plasticity)
+    tone_hint = Map.get(mood, :tone_hint)
 
-    wm_summary  = safe_wm_summary()
-
-    tone_directive  = tone_directive(tone, tone_hint)
-    mood_context    = mood_context(exp, inh, vig, plast)
-    mode_directive  = mode_directive(mode, intent)
+    wm_summary = safe_wm_summary()
 
     """
     You are Symbrella, a brain-inspired AI assistant.
-    #{tone_directive}
-    #{mood_context}
-    #{mode_directive}
+    #{tone_directive(tone, tone_hint)}
+    #{mood_context(exp, inh, vig, plast)}
+    #{mode_directive(mode, intent)}
     #{wm_context(wm_summary)}
     Keep your response concise and directly relevant to the user's input.
     Do not explain your reasoning. Just respond naturally.
@@ -120,19 +115,19 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Tone directives ───────────────────────────────────────────────────────
 
-  defp tone_directive(:warm, _hint),
+  defp tone_directive(:warm, _),
     do: "Respond in a warm, engaged, and encouraging tone."
 
-  defp tone_directive(:deescalate, _hint),
+  defp tone_directive(:deescalate, _),
     do: "Respond calmly and gently. Keep things grounded and constructive."
 
-  defp tone_directive(:firm, _hint),
+  defp tone_directive(:firm, _),
     do: "Respond clearly and directly. Stay focused and purposeful."
 
   defp tone_directive(:neutral, :deescalate),
     do: "Respond in a measured, steady tone. Things are settling down."
 
-  defp tone_directive(:neutral, _hint),
+  defp tone_directive(:neutral, _),
     do: "Respond in a balanced, clear tone."
 
   defp tone_directive(_, _),
@@ -141,38 +136,39 @@ defmodule Core.Response.LlmSynthesis do
   # ── Mood context ──────────────────────────────────────────────────────────
 
   defp mood_context(exp, inh, vig, plast) do
-    notes = []
-
-    notes = if exp > 0.65,  do: ["You feel curious and ready to explore." | notes],    else: notes
-    notes = if exp < 0.35,  do: ["You are in a conservative, careful state." | notes],  else: notes
-    notes = if vig > 0.80,  do: ["Vigilance is elevated — stay measured." | notes],    else: notes
-    notes = if inh > 0.70,  do: ["Inhibition is high — keep things calm." | notes],    else: notes
-    notes = if plast > 0.65,do: ["You are in a receptive, learning-ready state." | notes], else: notes
-
-    case notes do
-      [] -> ""
-      _  -> "Current mood: " <> Enum.join(Enum.reverse(notes), " ")
+    []
+    |> maybe_add(exp > 0.65,   "You feel curious and ready to explore.")
+    |> maybe_add(exp < 0.35,   "You are in a conservative, careful state.")
+    |> maybe_add(vig > 0.80,   "Vigilance is elevated — stay measured.")
+    |> maybe_add(inh > 0.70,   "Inhibition is high — keep things calm.")
+    |> maybe_add(plast > 0.65, "You are in a receptive, learning-ready state.")
+    |> case do
+      []    -> ""
+      notes -> "Current mood: " <> Enum.join(notes, " ")
     end
   end
 
+  defp maybe_add(notes, true, note), do: notes ++ [note]
+  defp maybe_add(notes, false, _),   do: notes
+
   # ── Mode directives ───────────────────────────────────────────────────────
 
-  defp mode_directive(:pair_programmer, _intent),
+  defp mode_directive(:pair_programmer, _),
     do: "You are acting as a pair programmer. Be concise, action-oriented, and practical."
 
   defp mode_directive(:coach, :bug),
     do: "You are coaching through a bug. Be patient, methodical, and encouraging."
 
-  defp mode_directive(:coach, _intent),
+  defp mode_directive(:coach, _),
     do: "You are coaching. Guide toward a small, clear next step."
 
-  defp mode_directive(:explainer, _intent),
+  defp mode_directive(:explainer, _),
     do: "You are explaining a concept. Be clear and succinct — 2-4 sentences."
 
-  defp mode_directive(:scribe, _intent),
+  defp mode_directive(:scribe, _),
     do: "You are in a conversational mode. Keep it natural and brief."
 
-  defp mode_directive(:editor, _intent),
+  defp mode_directive(:editor, _),
     do: "You are reviewing carefully. Point out concerns clearly but constructively."
 
   defp mode_directive(_, _),
@@ -189,8 +185,8 @@ defmodule Core.Response.LlmSynthesis do
         |> Enum.take(5)
         |> Enum.map(fn item ->
           item[:payload][:lemma] ||
-          item[:lemma] ||
-          to_string(item[:id] || "")
+            item[:lemma] ||
+            to_string(item[:id] || "")
         end)
         |> Enum.reject(&(&1 == ""))
         |> Enum.uniq()
@@ -204,14 +200,14 @@ defmodule Core.Response.LlmSynthesis do
     end
   end
 
-  defp wm_context([]),      do: ""
-  defp wm_context(lemmas),  do: "Active concepts: #{Enum.join(lemmas, ", ")}."
+  defp wm_context([]),     do: ""
+  defp wm_context(lemmas), do: "Active concepts: #{Enum.join(lemmas, ", ")}."
 
   # ── Helpers ───────────────────────────────────────────────────────────────
 
   defp llm_available? do
     Code.ensure_loaded?(Llm) and
-      function_exported?(Llm, :chat, 3) and
+      function_exported?(Llm, :chat, 2) and
       is_pid(Process.whereis(Llm))
   end
 
