@@ -35,7 +35,7 @@ defmodule Core.Response do
   alias Core.Response.Modes
   alias Core.Response.Guardrails
   alias Core.Response.Skills
-
+  alias Core.Response.LlmSynthesis
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
   # ────────────────────────────────────────────────────────────────────────────
@@ -101,14 +101,19 @@ defmodule Core.Response do
     skill = forced_skill || Skills.pick(text_in, features, decision)
 
     # Final text: skill wins if it produces inline text; otherwise a mode template
-    text =
-      case skill do
-        %{inline_text: s} when is_binary(s) and s != "" ->
-          s
+     text =
+       case skill do
+         %{inline_text: s} when is_binary(s) and s != "" ->
+           # Inline skills (greet, time) bypass LLM — they're already correct.
+           s
 
-        _ ->
-          Modes.compose(intent, decision.tone, decision.mode)
-      end
+         _ ->
+           # Try LLM synthesis shaped by brain state; fall back to templates.
+           case LlmSynthesis.generate(text_in, features, decision, mood) do
+             {:ok, llm_text} -> llm_text
+             {:error, _}     -> Modes.compose(intent, decision.tone, decision.mode)
+           end
+       end
 
     # High-level interaction profile (for UI, tests, debugging)
     profile = classify_profile(features, decision, guard)
