@@ -326,6 +326,8 @@ defmodule Brain.Thalamus do
     %{wm: wm, cfg: cfg, attention: attn} = Brain.snapshot_wm()
     {decision, s} = Brain.BasalGanglia.decide(wm, probe, attn, cfg)
 
+Logger.info("Thalamus decision: #{decision}, score: #{s}, probe_score: #{probe.score}")
+
     # 6) Emit
     :telemetry.execute(
       [:brain, :thalamus, :curiosity, :decision],

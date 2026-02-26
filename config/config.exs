@@ -1,8 +1,7 @@
 # config/config.exs
 import Config
 
-import Config
-
+# ───────────────────────────── Assistant ─────────────────────────────
 config :symbrella, :assistant,
   name: "Symbrella",
   norm: "symbrella",
@@ -12,7 +11,6 @@ config :symbrella, :assistant,
 config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Local
 
 # ───────────────────────────── Core ───────────────────────────────
-# Synonyms (decoupled from :db, via external provider that calls Db.Lexicon)
 config :core, Core.Recall.Synonyms,
   provider: Core.Recall.Synonyms.Providers.External,
   cache?: true,
@@ -20,65 +18,61 @@ config :core, Core.Recall.Synonyms,
   top_k: 12
 
 config :core, Core.Recall.Synonyms.Providers.External,
-  # You implement this in :db
   mfa: {Db.Lexicon, :lookup_synonyms, []}
 
-# Core defaults
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
 
-# Curiosity bridge (kept as-is)
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
 
 # ─────────────────────────── Brain (central) ──────────────────────
-# Single consolidated block; preserves your effective weights and options.
 config :brain,
   pubsub: Symbrella.PubSub,
-  # pMTG
-  # :boost | :rerun | :none
   pmtg_mode: :boost,
   pmtg_margin_threshold: 0.15,
   pmtg_window_keep: 50,
-  # LIFG (Stage-1)
   lifg_defaults: [inject_child_unigrams?: true],
   lifg_stage1_weights: %{lex_fit: 0.40, rel_prior: 0.35, activation: 0.15, intent_bias: 0.10},
-  # or :top2 | :none
   lifg_stage1_scores_mode: :all,
   lifg_min_margin: 0.05,
   lifg_stage1_mwe_fallback: true,
   lifg_slate_filter_rules: [
-    %{lemma: "a", allow: ~w(det article particle), drop_others?: true},
-    %{lemma: "A", allow: ~w(det article particle), drop_others?: true},
-    %{lemma: "eat", allow: ~w(verb), drop_others?: true}
+    %{lemma: "a", allow: [:det, :article, :particle], drop_others?: true},
+    %{lemma: "A", allow: [:det, :article, :particle], drop_others?: true},
+    %{lemma: "eat", allow: [:verb], drop_others?: true}
   ],
-  # ACC gate
   acc_conflict_tau: 0.50,
-  # Working memory shaping
-  # per-second exponential decay (≈5.8s half-life)
   wm_decay_lambda: 0.12,
   wm_score_min: 0.0,
   wm_score_max: 1.0,
   lifg_mood_weights: %{expl: 0.02, inhib: -0.03, vigil: 0.02, plast: 0.00},
   lifg_mood_cap: 0.05,
-  # Hippocampus defaults
   hpc_half_life_ms: 300_000,
   hpc_window_keep: 300,
   hpc_min_jaccard: 0.0,
   hpc_recall_limit: 3,
-  # Priming knobs
   hippo_priming: :on,
   hippo_priming_vectors: %{
     success: %{da: 0.02, "5ht": -0.01, glu: 0.02, ne: 0.01},
     failure: %{da: -0.01, "5ht": 0.02, glu: 0.00, ne: 0.02}
-  }
+  },
+
+  # Gating adjustments to allow first WM inserts
+  gate_threshold: 0.25,
+  prefer_sources: [:curiosity, :hippocampus, :pmtg, :lifg, :runtime, :recency, :intent],
+  fullness_penalty_mult: 0.10,
+  thalamus_acc_alpha: 0.15,
+  thalamus_mood_weights: %{expl: 0.10, inhib: -0.02, vigil: -0.01, plast: 0.08},
+  thalamus_mood_cap: 0.30,
+  capacity: 12
 
 config :brain, :blackboard_window_size, 100
-# MoodCore — explicit module config (kept separate on purpose)
+
 config :brain, Brain.MoodCore,
   half_life_ms: 12_000,
   clock: :cycle,
@@ -86,10 +80,10 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("~/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
   llama_server: "llama-server",
   auto_start_on_boot?: true,
-  allow_lazy_start?: true,       # ok to leave true; still autostarts anyway
+  allow_lazy_start?: true,
   auto_restart_on_crash?: true,
   host: "127.0.0.1",
   port: 0,
@@ -97,14 +91,11 @@ config :llm, Llm,
   threads: 4,
   heartbeat_ms: 15_000
 
-# Symbrella app opts
 config :symbrella,
   resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]
 
-# Generators
 config :symbrella_web, generators: [context_app: :symbrella]
 
-# Endpoint (base/static config)
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
@@ -119,8 +110,14 @@ config :symbrella_web, SymbrellaWeb.Endpoint,
 config :esbuild,
   version: "0.25.4",
   default: [
-    args:
-      ~w(js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    args: [
+      "js/app.js",
+      "--bundle",
+      "--target=es2017",
+      "--outdir=../priv/static/assets",
+      "--external:/fonts/*",
+      "--external:/images/*"
+    ],
     cd: Path.expand("../apps/symbrella_web/assets", __DIR__),
     env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
   ]
@@ -128,8 +125,11 @@ config :esbuild,
 config :tailwind,
   version: "3.4.10",
   default: [
-    args:
-      ~w(--config=tailwind.config.js --input=css/app.css --output=../priv/static/assets/app.css),
+    args: [
+      "--config=tailwind.config.js",
+      "--input=css/app.css",
+      "--output=../priv/static/assets/app.css"
+    ],
     cd: Path.expand("../apps/symbrella_web/assets", __DIR__)
   ]
 
@@ -148,7 +148,7 @@ config :logger, :console,
 # ───────────────────────────── Phoenix ────────────────────────────
 config :phoenix, :json_library, Jason
 
-# ─────────────────────────────  DB  ───────────────────────────────
+# ───────────────────────────── DB ───────────────────────────────
 config :db, ecto_repos: [Db]
 
 config :db, Db,
@@ -160,10 +160,8 @@ config :db, Db,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10,
   types: Db.PostgrexTypes,
-  # silence SQL logs by default (opt in at runtime via DB_LOG=true)
-  log: System.get_env("DB_LOG", "false") in ~w(true 1 on yes)
+  log: System.get_env("DB_LOG", "false") in ["true", "1", "on", "yes"]
 
-# Embeddings (placeholders; wire up your module)
 config :db, :embedding_dim, 1536
 config :db, :embedder, MyEmbeddings
 
