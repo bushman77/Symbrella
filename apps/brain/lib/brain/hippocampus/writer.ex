@@ -246,9 +246,7 @@ end
     end
   end
 
-  defp user_id_from(_payload, opts) do
-    Keyword.get(opts, :user_id)
-  end
+defp user_id_from(_payload, opts), do: Keyword.get(opts, :user_id)
 
   defp maybe_prime(_payload, _opts), do: :ok
 

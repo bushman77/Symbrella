@@ -42,6 +42,10 @@ defmodule Brain.Hippocampus do
     slate
   end
 
+@spec fact(atom()) :: term() | nil
+def fact(key) when is_atom(key),
+  do: GenServer.call(__MODULE__, {:fact, key})
+
   @spec recall(list() | map(), keyword()) :: list()
   def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
     do: GenServer.call(__MODULE__, {:recall, cues, normalize_opts(opts)})
@@ -79,6 +83,48 @@ defmodule Brain.Hippocampus do
 
     {:ok, state}
   end
+
+@impl true
+def handle_call({:fact, key}, _from, state) do
+  {:reply, find_fact_in_window(state.window, key), state}
+end
+
+defp find_fact_in_window(window, key) when is_list(window) do
+  # window is newest-first; return first match
+  Enum.find_value(window, fn {_at, ep} ->
+    if fact_episode?(ep, key), do: fact_value(ep), else: nil
+  end)
+end
+
+defp find_fact_in_window(_window, _key), do: nil
+
+defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
+  tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
+
+  Enum.any?(tags, fn t ->
+    s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
+    String.downcase(s) == "user_name"
+  end)
+end
+
+defp fact_episode?(_ep, _key), do: false
+
+defp fact_value(%{meta: meta} = ep) do
+  meta[:value] || meta["value"] || fact_value_from_si(ep)
+end
+
+defp fact_value(_), do: nil
+
+defp fact_value_from_si(%{slate: slate}) do
+  si = slate[:si] || slate["si"] || %{}
+
+  get_in(si, [:episode, :meta, :value]) ||
+    get_in(si, ["episode", "meta", "value"]) ||
+    get_in(si, ["episode", "meta", :value]) ||
+    get_in(si, [:episode, "meta", "value"])
+end
+
+defp fact_value_from_si(_), do: nil
 
   @impl true
   def handle_call({:encode, slate, meta_in}, from, state) do
@@ -198,29 +244,39 @@ defmodule Brain.Hippocampus do
     end
   end
 
-  defp db_row_to_episode(row) do
-    tokens = List.wrap(Map.get(row, :tokens) || [])
+defp db_row_to_episode(row) do
+  tokens = List.wrap(Map.get(row, :tokens) || [])
 
-    norms =
-      tokens
-      |> Enum.reject(&Normalize.empty?/1)
-      |> MapSet.new()
+  norms =
+    tokens
+    |> Enum.reject(&Normalize.empty?/1)
+    |> MapSet.new()
 
-    %{
-      slate: %{
-        tags: Map.get(row, :tags) || [],
-        si: Map.get(row, :si) || %{},
-        tokens: tokens
-      },
-      meta: %{
-        source: :db,
-        episode_id: Map.get(row, :id),
-        inserted_at: Map.get(row, :inserted_at),
-        tags: Map.get(row, :tags) || []
-      },
-      norms: norms
-    }
-  end
+  si = Map.get(row, :si) || %{}
+  tags = Map.get(row, :tags) || []
+
+  meta_value =
+    get_in(si, ["episode", "meta", "value"]) ||
+      get_in(si, [:episode, :meta, :value]) ||
+      get_in(si, ["episode", "meta", :value]) ||
+      get_in(si, [:episode, "meta", "value"])
+
+  %{
+    slate: %{
+      tags: tags,
+      si: si,
+      tokens: tokens
+    },
+    meta: %{
+      source: :db,
+      episode_id: Map.get(row, :id),
+      inserted_at: Map.get(row, :inserted_at),
+      tags: tags,
+      value: meta_value
+    },
+    norms: norms
+  }
+end
 
   # ────────────────────────────────────────────────────────────────────────────
   # Recall

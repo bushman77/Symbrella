@@ -43,32 +43,170 @@ defmodule Core.Response do
   # ────────────────────────────────────────────────────────────────────────────
 
 @spec plan(si_like(), mood_like()) :: {atom(), String.t(), map()}
-def plan(si, mood \\ %{}) when is_map(si) and is_map(mood) do
+def plan(si, mood \\ %{})
+
+def plan(si, mood) when is_map(si) and is_map(mood) do
   intent0 = Map.get(si, :intent, :unknown)
   conf = clamp01(Map.get(si, :confidence, 0.0))
   text_in = si_text(si)
   session_id = session_id(si)
-
-  vig = getv(mood, :vigilance)
-  inh = getv(mood, :inhibition)
-  exp = getv(mood, :exploration)
-  pls = getv(mood, :plasticity)
-  tone_hint = Map.get(mood, :tone_hint)
-
-  intent = Policy.normalize_intent(intent0, text_in)
-
-  guard = Guardrails.detect(text_in)
-  benign? = Policy.benign_text?(text_in)
-  hostile? = Policy.hostile_text?(text_in)
-  command? = Policy.command?(text_in)
-
-  confidence_bucket = bucket_confidence(conf)
-  vigilance_bucket = bucket_vigilance(vig)
-  risk_bucket = if guard.guardrail?, do: :high, else: :low
-
   extracted_name = extract_user_name(text_in)
 
-  features = %{
+  # Hard precedence: identity questions never go to skills/LLM.
+  if asking_for_user_name?(text_in) do
+    name = recalled_user_name(extracted_name)
+
+    text =
+      if is_binary(name) and name != "" do
+        "Your name is #{name}."
+      else
+        "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
+      end
+
+    meta = %{
+      action: :identity,
+      session_id: session_id,
+      user_name: name,
+      source: :hippocampus_fact,
+      intent_original: intent0,
+      confidence: conf
+    }
+
+    record_turn(session_id, text_in, text)
+    :telemetry.execute([:core, :response, :plan], %{}, meta)
+
+    {:warm, text, meta}
+  else
+    {vig, inh, exp, pls, tone_hint} = mood_sample(mood)
+
+    intent = Policy.normalize_intent(intent0, text_in)
+    guard = Guardrails.detect(text_in)
+
+    benign? = Policy.benign_text?(text_in)
+    hostile? = Policy.hostile_text?(text_in)
+    command? = Policy.command?(text_in)
+
+    confidence_bucket = bucket_confidence(conf)
+    vigilance_bucket = bucket_vigilance(vig)
+    risk_bucket = if guard.guardrail?, do: :high, else: :low
+
+    features =
+      build_features(%{
+        session_id: session_id,
+        intent0: intent0,
+        intent: intent,
+        text_in: text_in,
+        conf: conf,
+        confidence_bucket: confidence_bucket,
+        vig: vig,
+        inh: inh,
+        exp: exp,
+        pls: pls,
+        vigilance_bucket: vigilance_bucket,
+        tone_hint: tone_hint,
+        benign?: benign?,
+        hostile?: hostile?,
+        command?: command?,
+        risk_bucket: risk_bucket,
+        guard: guard,
+        extracted_name: extracted_name
+      })
+
+    {decision, skill} = decide_and_pick_skill(features, guard, text_in)
+
+    name_claim? = name_claim?(extracted_name, text_in)
+    maybe_persist_user_name(name_claim?, extracted_name, text_in)
+
+    forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
+
+    text =
+      forced_identity ||
+        inline_skill_text(skill) ||
+        llm_or_template(text_in, features, decision, mood, intent)
+
+    record_turn(session_id, text_in, text)
+
+    profile = classify_profile(features, decision, guard)
+
+    planner_explanation =
+      build_planner_explanation(
+        intent,
+        conf,
+        decision.tone,
+        decision.mode,
+        tone_hint,
+        vig,
+        inh,
+        exp,
+        benign?,
+        hostile?,
+        risk_bucket,
+        decision.overrides
+      )
+
+    meta =
+      build_meta(%{
+        decision: decision,
+        intent0: intent0,
+        intent: intent,
+        conf: conf,
+        confidence_bucket: confidence_bucket,
+        risk_bucket: risk_bucket,
+        profile: profile,
+        benign?: benign?,
+        hostile?: hostile?,
+        tone_hint: tone_hint,
+        mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
+        skill: skill,
+        guard: guard,
+        session_id: session_id,
+        extracted_name: extracted_name,
+        planner_explanation: planner_explanation
+      })
+
+    :telemetry.execute([:core, :response, :plan], %{}, meta)
+
+    {decision.tone, text, meta}
+  end
+end
+
+def plan(_si, _mood), do: {:neutral, "", %{error: :invalid_args}}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+defp mood_sample(mood) do
+  {
+    getv(mood, :vigilance),
+    getv(mood, :inhibition),
+    getv(mood, :exploration),
+    getv(mood, :plasticity),
+    Map.get(mood, :tone_hint)
+  }
+end
+
+defp build_features(%{
+       session_id: session_id,
+       intent0: intent0,
+       intent: intent,
+       text_in: text_in,
+       conf: conf,
+       confidence_bucket: confidence_bucket,
+       vig: vig,
+       inh: inh,
+       exp: exp,
+       pls: pls,
+       vigilance_bucket: vigilance_bucket,
+       tone_hint: tone_hint,
+       benign?: benign?,
+       hostile?: hostile?,
+       command?: command?,
+       risk_bucket: risk_bucket,
+       guard: guard,
+       extracted_name: extracted_name
+     }) do
+  %{
     session_id: session_id,
     intent_in: intent0,
     intent: intent,
@@ -92,70 +230,92 @@ def plan(si, mood \\ %{}) when is_map(si) and is_map(mood) do
     guardrail_flags: guard.flags,
     user_name: extracted_name
   }
+end
 
+defp decide_and_pick_skill(features, guard, text_in) do
   decision0 = Policy.decide(features)
   {decision, forced_skill} = force_overrides(features, decision0, guard)
   skill = forced_skill || Skills.pick(text_in, features, decision)
+  {decision, skill}
+end
 
-  # ── Durable identity handling (survives reboot) ────────────────────────────
-  name_claim? = is_binary(extracted_name) and extracted_name != "" and not asking_for_user_name?(text_in)
+defp name_claim?(name, text_in) do
+  is_binary(name) and name != "" and not asking_for_user_name?(text_in)
+end
 
-  if name_claim? do
-    persist_user_name_episode(extracted_name, text_in)
+defp maybe_persist_user_name(true, name, text_in), do: persist_user_name_episode(name, text_in)
+defp maybe_persist_user_name(_, _name, _text_in), do: :ok
+
+defp forced_identity_text(text_in, extracted_name, name_claim?) do
+  cond do
+    asking_for_user_name?(text_in) ->
+      name =
+        normalize_name(extracted_name) ||
+          (Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) &&
+             Brain.Hippocampus.fact(:user_name))
+
+      if is_binary(name) and name != "" do
+        "Your name is #{name}."
+      else
+        # IMPORTANT: return a string (non-nil) so we never fall through to LLM.
+        "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
+      end
+
+    name_claim? ->
+      name = normalize_name(extracted_name)
+      if name, do: "Nice to meet you, #{name}. I’ll remember that.", else: nil
+
+    true ->
+      nil
   end
+end
 
-  forced_identity_text =
-    cond do
-      asking_for_user_name?(text_in) ->
-        case recalled_user_name(extracted_name) do
-          nil -> nil
-          name -> "Your name is #{name}."
-        end
+defp normalize_name(name) when is_binary(name) do
+  n =
+    name
+    |> String.trim()
+    |> String.replace(~r/\s+/u, " ")
 
-      name_claim? ->
-        "Nice to meet you, #{extracted_name}. I’ll remember that."
+  if n == "", do: nil, else: n
+end
 
-      true ->
-        nil
-    end
+defp normalize_name(_), do: nil
 
-  text =
-    cond do
-      is_binary(forced_identity_text) ->
-        forced_identity_text
+defp fallback_name(nil, _text_in), do: nil
 
-      inline_skill_text(skill) != nil ->
-        inline_skill_text(skill)
+defp fallback_name(_maybe_name, _text_in) do
+  case recalled_user_name(nil) do
+    v when is_binary(v) and v != "" -> v
+    _ -> nil
+  end
+end
 
-      true ->
-        case LlmSynthesis.generate(text_in, features, decision, mood) do
-          {:ok, llm_text} -> llm_text
-          {:error, _} -> Modes.compose(intent, decision.tone, decision.mode)
-        end
-    end
+defp llm_or_template(text_in, features, decision, mood, intent) do
+  case LlmSynthesis.generate(text_in, features, decision, mood) do
+    {:ok, llm_text} -> llm_text
+    {:error, _} -> Modes.compose(intent, decision.tone, decision.mode)
+  end
+end
 
-  # ── Short-term coherence (ETS) ─────────────────────────────────────────────
-  record_turn(session_id, text_in, text)
-
-  profile = classify_profile(features, decision, guard)
-
-  planner_explanation =
-    build_planner_explanation(
-      intent,
-      conf,
-      decision.tone,
-      decision.mode,
-      tone_hint,
-      vig,
-      inh,
-      exp,
-      benign?,
-      hostile?,
-      risk_bucket,
-      decision.overrides
-    )
-
-  meta = %{
+defp build_meta(%{
+       decision: decision,
+       intent0: intent0,
+       intent: intent,
+       conf: conf,
+       confidence_bucket: confidence_bucket,
+       risk_bucket: risk_bucket,
+       profile: profile,
+       benign?: benign?,
+       hostile?: hostile?,
+       tone_hint: tone_hint,
+       mood_sample: mood_sample,
+       skill: skill,
+       guard: guard,
+       session_id: session_id,
+       extracted_name: extracted_name,
+       planner_explanation: planner_explanation
+     }) do
+  %{
     policy_version: decision.policy_version,
     intent_inferred: intent,
     intent_original: intent0,
@@ -169,7 +329,7 @@ def plan(si, mood \\ %{}) when is_map(si) and is_map(mood) do
     benign: benign?,
     hostile: hostile?,
     tone_hint: tone_hint,
-    mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
+    mood_sample: mood_sample,
     scores: decision.scores,
     overrides: decision.overrides,
     chosen_skill: (skill && skill.id) || nil,
@@ -181,12 +341,7 @@ def plan(si, mood \\ %{}) when is_map(si) and is_map(mood) do
     user_name: extracted_name,
     explanation: planner_explanation
   }
-
-  :telemetry.execute([:core, :response, :plan], %{}, meta)
-
-  {decision.tone, text, meta}
 end
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Durable name memory (Hippocampus)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,13 +374,8 @@ defp recalled_user_name(extracted_name) do
     is_binary(extracted_name) and extracted_name != "" ->
       extracted_name
 
-    Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :recall, 2) ->
-      Brain.Hippocampus.recall(["user_name", "my name"], source: :memory, limit: 8, ignore_head: false)
-      |> Enum.find_value(fn rec ->
-        get_in(rec, [:episode, :meta, :value]) ||
-          get_in(rec, [:episode, :meta, "value"])
-      end)
-      |> case do
+    Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) ->
+      case Brain.Hippocampus.fact(:user_name) do
         v when is_binary(v) and v != "" -> v
         _ -> nil
       end
@@ -592,4 +742,13 @@ end
     do: :erlang.float_to_binary(v * 1.0, decimals: decimals)
 
   defp fmtf(_v, _d), do: "0.00"
+
+defp hippo_fact(key) when is_atom(key) do
+  if Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) do
+    Brain.Hippocampus.fact(key)
+  else
+    nil
+  end
+end
+
 end
