@@ -81,6 +81,7 @@ defmodule Core.SemanticInput do
           mwe_matches: list() | nil,
 
           # execution/frame metadata
+          session_id: term() | nil,
           frame: map() | nil,
           frame_ts_ms: integer() | nil,
           frame_seq: integer() | nil,
@@ -110,6 +111,7 @@ defmodule Core.SemanticInput do
             emotion: nil,
             appraisal: nil,
             mwe_matches: nil,
+            session_id: nil,
             frame: nil,
             frame_ts_ms: nil,
             frame_seq: nil,

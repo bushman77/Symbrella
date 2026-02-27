@@ -76,4 +76,54 @@ defmodule Brain.Hippocampus.Config do
 
     mix_env == :test
   end
+
+@doc """
+Merge per-call options into the base options map, normalizing values.
+
+- `base` is typically the configured `state.opts`.
+- `incoming` is a map of per-call overrides.
+
+Recognized keys:
+  :window_keep, :half_life_ms, :recall_limit, :min_jaccard, :recall_source, :source, :limit
+"""
+@spec merge_opts(map(), map()) :: map()
+def merge_opts(base, incoming) when is_map(base) and is_map(incoming) do
+  merged = Map.merge(base, incoming)
+
+  # allow aliases
+  recall_source =
+    merged
+    |> Map.get(:source, Map.get(merged, :recall_source, @default_recall_source))
+    |> normalize_source()
+
+  limit =
+    merged
+    |> Map.get(:limit, Map.get(merged, :recall_limit, @default_recall_limit))
+    |> normalize_limit()
+
+  keep =
+    merged
+    |> Map.get(:window_keep, @default_keep)
+    |> normalize_keep()
+
+  half_life =
+    merged
+    |> Map.get(:half_life_ms, @default_half_life)
+    |> normalize_half_life()
+
+  min_j =
+    merged
+    |> Map.get(:min_jaccard, @default_min_jaccard)
+    |> normalize_min_jaccard()
+
+  merged
+  |> Map.put(:recall_source, recall_source)
+  |> Map.put(:source, recall_source)
+  |> Map.put(:recall_limit, limit)
+  |> Map.put(:limit, limit)
+  |> Map.put(:window_keep, keep)
+  |> Map.put(:half_life_ms, half_life)
+  |> Map.put(:min_jaccard, min_j)
+end
+
 end

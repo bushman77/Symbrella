@@ -3,32 +3,33 @@ defmodule Core.Response do
   Response — small policy engine that maps (intent × mood × text) → {tone, text, meta}.
 
   Public API:
-    • plan/2 — given an SI-like map and an optional mood-like map, decide tone/mode/action,
+    • plan/2 — given an SI-like map and optional mood-like map, decide tone/mode/action,
       optionally fire one micro-skill (inline text), and return {tone, text, meta}.
     • annotate_si/2 — convenience helper that runs plan/2 and attaches
       :response_tone, :response_text, :response_meta onto an SI-like map/struct.
 
-  Notes:
-    • This is the successor to the earlier response module (module renamed).
-    • Children live under `Core.Response.*` (Policy, Modes, Guardrails, Skills).
-    • Emits telemetry: [:core, :response, :plan].
+  Children live under `Core.Response.*` (Policy, Modes, Guardrails, Skills, LlmSynthesis).
+  Emits telemetry: [:core, :response, :plan].
   """
 
   @type si_like :: %{
-          optional(:intent) => atom,
-          optional(:keyword) => any,
-          optional(:confidence) => number,
-          optional(:text) => String.t()
+          optional(:intent) => atom(),
+          optional(:keyword) => any(),
+          optional(:confidence) => number(),
+          optional(:text) => String.t(),
+          optional(:session_id) => term(),
+          optional(:session) => term(),
+          optional(:conversation_id) => term()
         }
 
   @type mood_like :: %{
           optional(:mood) => %{
-            optional(:exploration) => number,
-            optional(:inhibition) => number,
-            optional(:vigilance) => number,
-            optional(:plasticity) => number
+            optional(:exploration) => number(),
+            optional(:inhibition) => number(),
+            optional(:vigilance) => number(),
+            optional(:plasticity) => number()
           },
-          optional(:tone_hint) => atom
+          optional(:tone_hint) => atom()
         }
 
   alias Core.Response.Policy
@@ -36,135 +37,205 @@ defmodule Core.Response do
   alias Core.Response.Guardrails
   alias Core.Response.Skills
   alias Core.Response.LlmSynthesis
+
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
   # ────────────────────────────────────────────────────────────────────────────
 
-  @spec plan(si_like, mood_like) :: {atom, String.t(), map}
-  def plan(si, mood \\ %{}) do
-    intent0 = Map.get(si, :intent, :unknown)
-    conf = clamp01(Map.get(si, :confidence, 0.0))
-    text_in = to_string(Map.get(si, :text) || Map.get(si, :keyword) || "")
+@spec plan(si_like(), mood_like()) :: {atom(), String.t(), map()}
+def plan(si, mood \\ %{}) when is_map(si) and is_map(mood) do
+  intent0 = Map.get(si, :intent, :unknown)
+  conf = clamp01(Map.get(si, :confidence, 0.0))
+  text_in = si_text(si)
+  session_id = session_id(si)
 
-    # Mood indices (work with nested or flat)
-    vig = getv(mood, :vigilance)
-    inh = getv(mood, :inhibition)
-    exp = getv(mood, :exploration)
-    pls = getv(mood, :plasticity)
-    tone_hint = Map.get(mood, :tone_hint)
+  vig = getv(mood, :vigilance)
+  inh = getv(mood, :inhibition)
+  exp = getv(mood, :exploration)
+  pls = getv(mood, :plasticity)
+  tone_hint = Map.get(mood, :tone_hint)
 
-    # Normalize intent from raw text when classifier is unknown/coarse
-    intent = Policy.normalize_intent(intent0, text_in)
+  intent = Policy.normalize_intent(intent0, text_in)
 
-    # Guardrails & lexical flags
-    guard = Guardrails.detect(text_in)
-    benign? = Policy.benign_text?(text_in)
-    hostile? = Policy.hostile_text?(text_in)
-    command? = Policy.command?(text_in)
+  guard = Guardrails.detect(text_in)
+  benign? = Policy.benign_text?(text_in)
+  hostile? = Policy.hostile_text?(text_in)
+  command? = Policy.command?(text_in)
 
-    # Buckets & context (cooldown could be supplied later; start at 0)
-    confidence_bucket = bucket_confidence(conf)
-    vigilance_bucket = bucket_vigilance(vig)
-    risk_bucket = if guard.guardrail?, do: :high, else: :low
-    cooldown = 0
+  confidence_bucket = bucket_confidence(conf)
+  vigilance_bucket = bucket_vigilance(vig)
+  risk_bucket = if guard.guardrail?, do: :high, else: :low
 
-    features = %{
-      intent_in: intent0,
-      intent: intent,
-      text: text_in,
-      conf: conf,
-      confidence_bucket: confidence_bucket,
-      vig: vig,
-      inh: inh,
-      exp: exp,
-      plast: pls,
-      vigilance_bucket: vigilance_bucket,
-      tone_hint: tone_hint,
-      benign?: benign?,
-      hostile?: hostile?,
-      command?: command?,
-      cooldown: cooldown,
-      episode_bias: 0.0,
-      guardrail?: guard.guardrail?,
-      approve_token?: guard.approve_token?,
-      risk_bucket: risk_bucket,
-      guardrail_flags: guard.flags
+  extracted_name = extract_user_name(text_in)
+
+  features = %{
+    session_id: session_id,
+    intent_in: intent0,
+    intent: intent,
+    text: text_in,
+    conf: conf,
+    confidence_bucket: confidence_bucket,
+    vig: vig,
+    inh: inh,
+    exp: exp,
+    plast: pls,
+    vigilance_bucket: vigilance_bucket,
+    tone_hint: tone_hint,
+    benign?: benign?,
+    hostile?: hostile?,
+    command?: command?,
+    cooldown: 0,
+    episode_bias: 0.0,
+    guardrail?: guard.guardrail?,
+    approve_token?: guard.approve_token?,
+    risk_bucket: risk_bucket,
+    guardrail_flags: guard.flags,
+    user_name: extracted_name
+  }
+
+  decision0 = Policy.decide(features)
+  {decision, forced_skill} = force_overrides(features, decision0, guard)
+  skill = forced_skill || Skills.pick(text_in, features, decision)
+
+  # ── Durable identity handling (survives reboot) ────────────────────────────
+  name_claim? = is_binary(extracted_name) and extracted_name != "" and not asking_for_user_name?(text_in)
+
+  if name_claim? do
+    persist_user_name_episode(extracted_name, text_in)
+  end
+
+  forced_identity_text =
+    cond do
+      asking_for_user_name?(text_in) ->
+        case recalled_user_name(extracted_name) do
+          nil -> nil
+          name -> "Your name is #{name}."
+        end
+
+      name_claim? ->
+        "Nice to meet you, #{extracted_name}. I’ll remember that."
+
+      true ->
+        nil
+    end
+
+  text =
+    cond do
+      is_binary(forced_identity_text) ->
+        forced_identity_text
+
+      inline_skill_text(skill) != nil ->
+        inline_skill_text(skill)
+
+      true ->
+        case LlmSynthesis.generate(text_in, features, decision, mood) do
+          {:ok, llm_text} -> llm_text
+          {:error, _} -> Modes.compose(intent, decision.tone, decision.mode)
+        end
+    end
+
+  # ── Short-term coherence (ETS) ─────────────────────────────────────────────
+  record_turn(session_id, text_in, text)
+
+  profile = classify_profile(features, decision, guard)
+
+  planner_explanation =
+    build_planner_explanation(
+      intent,
+      conf,
+      decision.tone,
+      decision.mode,
+      tone_hint,
+      vig,
+      inh,
+      exp,
+      benign?,
+      hostile?,
+      risk_bucket,
+      decision.overrides
+    )
+
+  meta = %{
+    policy_version: decision.policy_version,
+    intent_inferred: intent,
+    intent_original: intent0,
+    confidence: conf,
+    confidence_bucket: confidence_bucket,
+    risk_bucket: risk_bucket,
+    tone: decision.tone,
+    mode: decision.mode,
+    action: decision.action,
+    profile: profile,
+    benign: benign?,
+    hostile: hostile?,
+    tone_hint: tone_hint,
+    mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
+    scores: decision.scores,
+    overrides: decision.overrides,
+    chosen_skill: (skill && skill.id) || nil,
+    skill_reason: (skill && skill.reason) || nil,
+    guardrail?: guard.guardrail?,
+    approve_token?: guard.approve_token?,
+    guardrail_flags: guard.flags,
+    session_id: session_id,
+    user_name: extracted_name,
+    explanation: planner_explanation
+  }
+
+  :telemetry.execute([:core, :response, :plan], %{}, meta)
+
+  {decision.tone, text, meta}
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Durable name memory (Hippocampus)
+# ─────────────────────────────────────────────────────────────────────────────
+
+defp persist_user_name_episode(name, raw_text) when is_binary(name) do
+  if Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :encode, 2) do
+    slate = %{
+      sentence: raw_text,
+      winners: [%{lemma: name}],
+      tokens: [name],
+      tags: ["fact", "user_name"]
     }
-
-    # Policy decision (tone/mode/action + scores/overrides)
-    decision0 = Policy.decide(features)
-
-    # Hard overrides for smalltalk / utility queries (prevents “dev menu” bleed).
-    {decision, forced_skill} = force_overrides(features, decision0, guard)
-
-    # Optional micro-skill — at most one inline helper
-    skill = forced_skill || Skills.pick(text_in, features, decision)
-
-    # Final text: skill wins if it produces inline text; otherwise a mode template
-     text =
-       case skill do
-         %{inline_text: s} when is_binary(s) and s != "" ->
-           # Inline skills (greet, time) bypass LLM — they're already correct.
-           s
-
-         _ ->
-           # Try LLM synthesis shaped by brain state; fall back to templates.
-           case LlmSynthesis.generate(text_in, features, decision, mood) do
-             {:ok, llm_text} -> llm_text
-             {:error, _}     -> Modes.compose(intent, decision.tone, decision.mode)
-           end
-       end
-
-    # High-level interaction profile (for UI, tests, debugging)
-    profile = classify_profile(features, decision, guard)
-
-    # Planner, compact, deterministic explanation (for UI + tests)
-    planner_explanation =
-      build_planner_explanation(
-        intent,
-        conf,
-        decision.tone,
-        decision.mode,
-        tone_hint,
-        vig,
-        inh,
-        exp,
-        benign?,
-        hostile?,
-        risk_bucket,
-        decision.overrides
-      )
 
     meta = %{
-      policy_version: decision.policy_version,
-      intent_inferred: intent,
-      intent_original: intent0,
-      confidence: conf,
-      confidence_bucket: confidence_bucket,
-      risk_bucket: risk_bucket,
-      tone: decision.tone,
-      mode: decision.mode,
-      action: decision.action,
-      profile: profile,
-      benign: benign?,
-      hostile: hostile?,
-      tone_hint: tone_hint,
-      mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
-      scores: decision.scores,
-      overrides: decision.overrides,
-      chosen_skill: (skill && skill.id) || nil,
-      skill_reason: (skill && skill.reason) || nil,
-      guardrail?: guard.guardrail?,
-      approve_token?: guard.approve_token?,
-      guardrail_flags: guard.flags,
-      explanation: planner_explanation
+      tags: ["fact", "user_name"],
+      scope: :chat,
+      kind: :fact,
+      key: :user_name,
+      value: name
     }
 
-    # Telemetry — safe if :telemetry is in deps (it is in Phoenix projects)
-    :telemetry.execute([:core, :response, :plan], %{}, meta)
-
-    {decision.tone, text, meta}
+    _ = Brain.Hippocampus.encode(slate, meta)
   end
+
+  :ok
+end
+
+defp recalled_user_name(extracted_name) do
+  cond do
+    is_binary(extracted_name) and extracted_name != "" ->
+      extracted_name
+
+    Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :recall, 2) ->
+      Brain.Hippocampus.recall(["user_name", "my name"], source: :memory, limit: 8, ignore_head: false)
+      |> Enum.find_value(fn rec ->
+        get_in(rec, [:episode, :meta, :value]) ||
+          get_in(rec, [:episode, :meta, "value"])
+      end)
+      |> case do
+        v when is_binary(v) and v != "" -> v
+        _ -> nil
+      end
+
+    true ->
+      nil
+  end
+end
+
+  def plan(_si, _mood), do: {:neutral, "", %{error: :invalid_args}}
 
   @doc """
   Convenience helper: annotate an SI-like map/struct with planner output.
@@ -176,7 +247,7 @@ defmodule Core.Response do
 
   Any map or struct is accepted; keys are added via Map.put/3.
   """
-  @spec annotate_si(map(), mood_like) :: map()
+  @spec annotate_si(map(), mood_like()) :: map()
   def annotate_si(si, mood \\ %{})
 
   def annotate_si(si, mood) when is_map(si) do
@@ -188,8 +259,19 @@ defmodule Core.Response do
     |> Map.put(:response_meta, meta)
   end
 
-  # If something non-map sneaks through, just return it unchanged.
   def annotate_si(other, _mood), do: other
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Session context recording (ETS in LlmSynthesis)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp record_turn(session_id, user_text, assistant_text) do
+    if function_exported?(LlmSynthesis, :record_turn, 3) do
+      _ = LlmSynthesis.record_turn(session_id, user_text, assistant_text)
+    end
+
+    :ok
+  end
 
   # ────────────────────────────────────────────────────────────────────────────
   # Smalltalk / utility overrides (fixes “pair_programmer menu on greet/time”)
@@ -268,7 +350,6 @@ defmodule Core.Response do
 
     case safe_shift_zone(utc, "America/Vancouver") do
       {:ok, dt} ->
-        # Example: "2:16 PM"
         formatted = Calendar.strftime(dt, "%-I:%M %p")
         "It’s #{formatted} (America/Vancouver)."
 
@@ -288,25 +369,10 @@ defmodule Core.Response do
     end
   end
 
-  defp put_decision(decision, kvs) when is_list(kvs) do
-    Enum.reduce(kvs, decision, fn {k, v}, acc -> Map.put(acc, k, v) end)
-  end
-
-  defp add_decision_override(decision, flag) do
-    existing = Map.get(decision, :overrides)
-    Map.put(decision, :overrides, add_override(existing, flag))
-  end
-
-  defp add_override(nil, flag), do: [flag]
-  defp add_override(list, flag) when is_list(list), do: Enum.uniq([flag | list])
-  defp add_override(map, flag) when is_map(map), do: Map.put(map, flag, true)
-  defp add_override(other, flag), do: Enum.uniq([flag, other])
-
   # ────────────────────────────────────────────────────────────────────────────
   # Profile classification
   # ────────────────────────────────────────────────────────────────────────────
 
-  # Prefer explicit profile from Policy.scores; otherwise infer from tone/mode/flags.
   defp classify_profile(features, decision, guard) do
     scores = decision.scores || %{}
 
@@ -317,7 +383,7 @@ defmodule Core.Response do
       _ ->
         cond do
           guard.guardrail? or features.risk_bucket == :high or
-            features.intent in [:abuse] or features.hostile? ->
+              features.intent in [:abuse] or features.hostile? ->
             :firm_guardian
 
           decision.mode == :explainer ->
@@ -382,32 +448,27 @@ defmodule Core.Response do
   end
 
   defp because_reasons(:deescalate, vig, _inh, _exp, _b, h, risk, _hint, _ovr) do
-    base = []
-    base = if vig >= 0.98, do: base ++ [:vigilance_extreme], else: base
-    base = if vig >= 0.85 and vig < 0.98, do: base ++ [:vigilance_high], else: base
-    base = if h, do: base ++ [:hostile_text], else: base
-    base = if risk == :high, do: base ++ [:guardrail_risk], else: base
-    if base == [], do: [:policy_default], else: base
+    []
+    |> maybe_add(vig >= 0.98, :vigilance_extreme)
+    |> maybe_add(vig >= 0.85 and vig < 0.98, :vigilance_high)
+    |> maybe_add(h, :hostile_text)
+    |> maybe_add(risk == :high, :guardrail_risk)
+    |> default_reason()
   end
 
   defp because_reasons(:warm, vig, inh, exp, b, _h, _risk, _hint, _ovr) do
-    base = []
-    base = if b, do: base ++ [:benign_text], else: base
-    base = if exp >= 0.35 and inh >= 0.30 and vig < 0.98, do: base ++ [:explore_ok], else: base
-    if base == [], do: [:policy_default], else: base
+    []
+    |> maybe_add(b, :benign_text)
+    |> maybe_add(exp >= 0.35 and inh >= 0.30 and vig < 0.98, :explore_ok)
+    |> default_reason()
   end
 
   defp because_reasons(:neutral, vig, inh, exp, _b, _h, risk, _hint, _ovr) do
-    base = []
-    base = if risk == :high, do: base ++ [:guardrail_risk], else: base
-    base = if vig >= 0.98, do: base ++ [:vigilance_extreme], else: base
-
-    base =
-      if vig < 0.98 and not (exp >= 0.45 and inh >= 0.35),
-        do: base ++ [:conservative],
-        else: base
-
-    if base == [], do: [:policy_default], else: base
+    []
+    |> maybe_add(risk == :high, :guardrail_risk)
+    |> maybe_add(vig >= 0.98, :vigilance_extreme)
+    |> maybe_add(vig < 0.98 and not (exp >= 0.45 and inh >= 0.35), :conservative)
+    |> default_reason()
   end
 
   defp because_reasons(:firm, _vig, _inh, _exp, _b, _h, _risk, _hint, _ovr),
@@ -415,6 +476,12 @@ defmodule Core.Response do
 
   defp because_reasons(_other, _vig, _inh, _exp, _b, _h, _risk, _hint, _ovr),
     do: [:policy_default]
+
+  defp default_reason([]), do: [:policy_default]
+  defp default_reason(list), do: list
+
+  defp maybe_add(list, true, item), do: list ++ [item]
+  defp maybe_add(list, false, _item), do: list
 
   defp reason_suffix([]), do: ""
   defp reason_suffix(list), do: " because=" <> Enum.map_join(list, ",", &to_string/1)
@@ -426,8 +493,81 @@ defmodule Core.Response do
   defp hint_suffix(hint), do: " [hint=" <> to_string(hint) <> "]"
 
   # ────────────────────────────────────────────────────────────────────────────
+  # Name extraction / name query detection
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp extract_user_name(text) when is_binary(text) do
+    case Regex.run(~r/\bmy name is\s+([A-Za-z][A-Za-z'\- ]{0,40})\b/i, text) do
+      [_, name] ->
+        name =
+          name
+          |> String.trim()
+          |> String.replace(~r/\s+/u, " ")
+          |> String.split(" ", trim: true)
+          |> Enum.take(3)
+          |> Enum.join(" ")
+
+        if name == "", do: nil, else: name
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extract_user_name(_), do: nil
+
+  defp asking_for_user_name?(text) when is_binary(text) do
+    t =
+      text
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{N}\s\?]/u, "")
+      |> String.trim()
+
+    t == "what is my name" or t == "what is my name?" or
+      t == "whats my name" or t == "whats my name?" or
+      String.contains?(t, "what is my name") or
+      String.contains?(t, "whats my name")
+  end
+
+  defp asking_for_user_name?(_), do: false
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Decision helpers
+  # ────────────────────────────────────────────────────────────────────────────
+
+  defp put_decision(decision, kvs) when is_list(kvs) do
+    Enum.reduce(kvs, decision, fn {k, v}, acc -> Map.put(acc, k, v) end)
+  end
+
+  defp add_decision_override(decision, flag) do
+    existing = Map.get(decision, :overrides)
+    Map.put(decision, :overrides, add_override(existing, flag))
+  end
+
+  defp add_override(nil, flag), do: [flag]
+  defp add_override(list, flag) when is_list(list), do: Enum.uniq([flag | list])
+  defp add_override(map, flag) when is_map(map), do: Map.put(map, flag, true)
+  defp add_override(other, flag), do: Enum.uniq([flag, other])
+
+  defp inline_skill_text(%{inline_text: s}) when is_binary(s) and s != "", do: s
+  defp inline_skill_text(_), do: nil
+
+  # ────────────────────────────────────────────────────────────────────────────
   # Utils (local)
   # ────────────────────────────────────────────────────────────────────────────
+
+  defp session_id(si) when is_map(si) do
+    Map.get(si, :session_id) ||
+      Map.get(si, :session) ||
+      Map.get(si, :conversation_id) ||
+      :global
+  end
+
+  defp si_text(si) when is_map(si) do
+    si
+    |> Map.get(:text, Map.get(si, :keyword, ""))
+    |> to_string()
+  end
 
   defp getv(mood, key) do
     case {get_in(mood, [:mood, key]), Map.get(mood, key)} do
@@ -449,7 +589,7 @@ defmodule Core.Response do
   defp bucket_vigilance(_), do: :normal
 
   defp fmtf(v, decimals) when is_number(v),
-    do: :erlang.float_to_binary(v, decimals: decimals)
+    do: :erlang.float_to_binary(v * 1.0, decimals: decimals)
 
   defp fmtf(_v, _d), do: "0.00"
 end

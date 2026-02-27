@@ -132,6 +132,11 @@ defmodule Db do
 
   def word_exists?(_, _opts), do: false
 
+
+  def insrt_all(table, rows, opt) do
+    #Db.insert_all("episodes", [row], on_conflict: :nothing)
+    Repo.insert_all(table, rows, opt)
+  end
   # -- helpers ----------------------------------------------------------------
 
   # Accept token map or string, extract phrase text
