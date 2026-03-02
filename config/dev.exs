@@ -41,6 +41,8 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
+config :core, :log_llm_prompts?, true
+
 config :brain, Brain.CycleClock, hz: 20
 
 config :brain, Brain.MoodCore,

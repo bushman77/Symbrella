@@ -41,7 +41,6 @@ defmodule Brain.LIFG.Cover do
            ], [span | taken]}
         end
       end)
-
     %{si: si0, cover: Enum.reverse(cover)}
   end
 

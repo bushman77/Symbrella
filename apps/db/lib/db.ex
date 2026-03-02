@@ -1,16 +1,27 @@
+# apps/db/lib/db.ex
 defmodule Db do
   @moduledoc """
   Umbrella-wide Repo (single database).
 
   Long-term memory (LTM) helpers:
-  • Collect normalized `norm`s from `si.tokens`.
+  • Collect normalized `norm`s from `si.tokens` (preserving token indices).
   • Load matching `Db.BrainCell` rows (active-only by default).
-  • Report which norms are missing so callers can decide whether to create.
+  • Annotate returned rows with `token_index` so downstream LIFG bucketing works.
+  • Report which norms are missing so callers can decide what to do (no auto-enrich).
   • Return loaded rows along with a set of DB hits.
 
   ## Options
     * `:only_active` (boolean, default: `true`) — filter rows with `status == "active"`.
     * `:limit_per_norm` (pos_integer | :all, default: `:all`) — cap rows returned per norm.
+
+  ## Return shape
+  `ltm/2` returns rows as **plain maps** (not Ecto structs) so we can include:
+
+    * `:token_index` — the token position in the input SI
+    * `:id`, `:lemma`, `:norm`, `:pos`, `:definition`, `:example`, `:synonyms`, `:antonyms`, `:score`, `:source`
+
+  This is intentional: DB BrainCell rows are lexicon senses and do not carry token indices;
+  LIFG Stage1 buckets candidates by token index.
   """
 
   use Ecto.Repo,
@@ -28,36 +39,51 @@ defmodule Db do
   Look up BrainCell rows for the tokens inside an SI-like map.
 
   `si.tokens` may contain:
-  • maps with `:phrase` (preferred) or `:norm`
+  • maps with `:phrase` (preferred) or `:norm` (or string keys)
   • plain strings
 
   Returns `{:ok, %{rows: rows, missing_norms: missing, db_hits: MapSet.t()}}`.
 
+  Rows are returned as plain maps with a required `:token_index` key.
+
   See module docs for options.
   """
   @spec ltm(map(), keyword()) ::
-          {:ok, %{rows: [Db.BrainCell.t()], missing_norms: [binary()], db_hits: MapSet.t()}}
+          {:ok,
+           %{
+             rows: [map()],
+             missing_norms: [binary()],
+             db_hits: MapSet.t()
+           }}
   def ltm(si, opts \\ [])
 
   def ltm(%{tokens: tokens} = _si, opts) when is_list(tokens) do
     only_active? = Keyword.get(opts, :only_active, true)
     limit_per_norm = Keyword.get(opts, :limit_per_norm, :all)
 
-    norms =
+    token_norms =
       tokens
-      |> Enum.map(&token_to_phrase/1)
-      |> Enum.map(&norm/1)
-      |> Enum.reject(&(&1 == ""))
+      |> Enum.with_index()
+      |> Enum.map(fn {tok, fallback_idx} ->
+        idx = token_index(tok, fallback_idx)
+        phrase = token_to_phrase(tok)
+        {idx, norm(phrase)}
+      end)
+      |> Enum.reject(fn {_idx, n} -> n == "" end)
+
+    uniq_norms =
+      token_norms
+      |> Enum.map(fn {_idx, n} -> n end)
       |> Enum.uniq()
 
-    if norms == [] do
+    if uniq_norms == [] do
       {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
     else
       where_dyn =
         if only_active? do
-          dynamic([b], b.status == "active" and b.norm in ^norms)
+          dynamic([b], b.status == "active" and b.norm in ^uniq_norms)
         else
-          dynamic([b], b.norm in ^norms)
+          dynamic([b], b.norm in ^uniq_norms)
         end
 
       base_q =
@@ -89,11 +115,30 @@ defmodule Db do
             from(b in base_q, select: b)
         end
 
-      rows = Db.all(q)
+      rows0 = Db.all(q)
 
-      existing = MapSet.new(for r <- rows, do: r.norm)
-      missing = Enum.reject(norms, &MapSet.member?(existing, &1))
-      hits = existing
+      existing_norms = MapSet.new(for r <- rows0, do: r.norm)
+      missing = Enum.reject(uniq_norms, &MapSet.member?(existing_norms, &1))
+      hits = existing_norms
+
+      # Expand DB rows across all token indices that requested that norm.
+      # This produces per-token candidates suitable for LIFG Stage1 bucketing.
+      token_idxs_by_norm =
+        token_norms
+        |> Enum.reduce(%{}, fn {idx, n}, acc ->
+          Map.update(acc, n, [idx], fn lst -> [idx | lst] end)
+        end)
+        |> Enum.into(%{}, fn {n, idxs} -> {n, Enum.uniq(idxs)} end)
+
+      rows =
+        rows0
+        |> Enum.flat_map(fn r ->
+          idxs = Map.get(token_idxs_by_norm, r.norm, [])
+
+          Enum.map(idxs, fn idx ->
+            braincell_to_candidate_map(r, idx)
+          end)
+        end)
 
       {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
     end
@@ -139,6 +184,27 @@ defmodule Db do
   end
   # -- helpers ----------------------------------------------------------------
 
+  defp braincell_to_candidate_map(%BrainCell{} = r, token_index) when is_integer(token_index) do
+    # Keep the surface/sense identity stable via `id` (word|pos|sense_index),
+    # and provide lemma/norm + pos for downstream scoring.
+    %{
+      id: r.id,
+      token_index: token_index,
+      lemma: to_string(r.norm || r.word || ""),
+      norm: to_string(r.norm || ""),
+      word: to_string(r.word || ""),
+      pos: r.pos,
+      definition: r.definition,
+      example: r.example,
+      synonyms: List.wrap(r.synonyms),
+      antonyms: List.wrap(r.antonyms),
+      # A light prior score; Stage1 feature mix can incorporate this.
+      # Keep moderate so it doesn't drown relation/intent signals.
+      score: 0.5,
+      source: :ltm
+    }
+  end
+
   # Accept token map or string, extract phrase text
   defp token_to_phrase(%{phrase: p}) when is_binary(p), do: p
   defp token_to_phrase(%{"phrase" => p}) when is_binary(p), do: p
@@ -146,6 +212,14 @@ defmodule Db do
   defp token_to_phrase(%{"norm" => n}) when is_binary(n), do: n
   defp token_to_phrase(s) when is_binary(s), do: s
   defp token_to_phrase(_), do: ""
+
+  # Prefer explicit token index when present; fall back to enumeration index.
+  defp token_index(%{index: i}, _fallback) when is_integer(i) and i >= 0, do: i
+  defp token_index(%{"index" => i}, _fallback) when is_integer(i) and i >= 0, do: i
+  defp token_index(%{token_index: i}, _fallback) when is_integer(i) and i >= 0, do: i
+  defp token_index(%{"token_index" => i}, _fallback) when is_integer(i) and i >= 0, do: i
+  defp token_index(_tok, fallback_idx) when is_integer(fallback_idx) and fallback_idx >= 0,
+    do: fallback_idx
 
   # P-213: Unicode-punctuation-safe normalization for lookups
   defp norm(nil), do: ""

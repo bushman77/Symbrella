@@ -137,6 +137,7 @@ defmodule Brain.LIFG.Stage1 do
         |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
 
       si1 = stamp_slates(si1, frame)
+
       buckets = buckets_from_si(si1, tokens)
 
       # 2) Effective knobs
@@ -261,7 +262,6 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
-
       emit_stage1_stop(
         ctx_from_run(si1, sent, opts),
         out.choices,

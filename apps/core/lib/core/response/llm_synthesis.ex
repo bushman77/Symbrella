@@ -3,22 +3,37 @@ defmodule Core.Response.LlmSynthesis do
   @moduledoc """
   LLM-backed response synthesis for Core.Response with bounded multi-turn context.
 
-  IMPORTANT: ETS ownership
-  ------------------------
-  This module stores recent chat turns in ETS. ETS tables are owned by the process
-  that creates them. Since LLM calls often happen inside short-lived Task processes,
-  we create the ETS table with a long-lived `:heir` process so the table survives
-  after the Task exits.
+  Stores recent turn history in ETS keyed by `session_id`.
+
+  ETS ownership note:
+  ETS tables are owned by the creating process. If LLM calls happen inside
+  short-lived Task processes, ETS would disappear when the Task exits. To avoid
+  that, we attempt to create the ETS table with a long-lived `:heir` process.
   """
 
   require Logger
 
+  # Suppress compile-time warnings if the llm app isn't built/loaded yet.
+  @compile {:no_warn_undefined, Llm}
+
   @timeout_ms 15_000
+
+  # Keep N user/assistant turn pairs (N*2 messages).
   @history_turn_pairs 6
+
+  # Per-message clamp for stored history.
   @max_item_chars 1_600
 
   @ets_table :core_llm_chat_history
   @heir_data :core_llm_chat_history
+
+  # Toggle prompt logging (dev-only recommended):
+  #   config :core, :log_llm_prompts?, true
+  @log_prompts? Application.compile_env(:core, :log_llm_prompts?, false)
+
+  # Safety caps so logs don't explode.
+  @max_system_chars 8_000
+  @max_user_chars 2_000
 
   # ── Public API ────────────────────────────────────────────────────────────
 
@@ -46,12 +61,15 @@ defmodule Core.Response.LlmSynthesis do
     session_id = Map.get(features, :session_id, :global)
 
     history = history_messages(session_id, @history_turn_pairs)
-    Logger.warning("[LlmSynthesis] session=#{inspect(session_id)} hist_msgs=#{length(history)}")
 
     messages =
       [%{"role" => "system", "content" => system_prompt}] ++
         history ++
         [%{"role" => "user", "content" => user_text}]
+
+    if @log_prompts? do
+      log_prompt_bundle(messages, features, decision, mood)
+    end
 
     case Llm.chat(messages, timeout: @timeout_ms) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
@@ -69,7 +87,7 @@ defmodule Core.Response.LlmSynthesis do
     end
   rescue
     e ->
-      Logger.debug("[LlmSynthesis] Exception: #{inspect(e)}")
+      Logger.debug("[LlmSynthesis] Exception: #{Exception.message(e)}")
       {:error, :exception}
   catch
     :exit, reason ->
@@ -77,44 +95,44 @@ defmodule Core.Response.LlmSynthesis do
       {:error, :exit}
   end
 
-  # ── ETS ownership & initialization ─────────────────────────────────────────
+  # ── ETS initialization / ownership ─────────────────────────────────────────
 
-defp ensure_table! do
-  case :ets.whereis(@ets_table) do
-    :undefined ->
-      heir = heir_pid()
+  defp ensure_table! do
+    case :ets.whereis(@ets_table) do
+      :undefined ->
+        heir = heir_pid()
 
-      opts =
-        [
-          :named_table,
-          :public,
-          :set,
-          {:read_concurrency, true},
-          {:write_concurrency, true}
-        ] ++
-          if is_pid(heir) do
-            [{:heir, heir, @heir_data}]
-          else
-            []
-          end
+        opts =
+          [
+            :named_table,
+            :public,
+            :set,
+            {:read_concurrency, true},
+            {:write_concurrency, true}
+          ] ++
+            if is_pid(heir) do
+              [{:heir, heir, @heir_data}]
+            else
+              []
+            end
 
-      _tid = :ets.new(@ets_table, opts)
+        _tid = :ets.new(@ets_table, opts)
 
-      Logger.warning(
-        "[LlmSynthesis] ETS created table=#{inspect(@ets_table)} owner=#{inspect(self())} heir=#{inspect(heir)}"
-      )
+        Logger.debug(
+          "[LlmSynthesis] ETS created table=#{inspect(@ets_table)} owner=#{inspect(self())} heir=#{inspect(heir)}"
+        )
 
-      :ok
+        :ok
 
-    _tid ->
-      :ok
+      _tid ->
+        :ok
+    end
   end
-end
 
-  # Prefer a long-lived process as heir so the ETS table survives Task exit.
-  # 1) Llm GenServer (ideal)
-  # 2) Symbrella.TaskSup (often registered supervisor)
-  # 3) Fallback to nil (table will be short-lived if created inside a Task)
+  # Prefer a long-lived process as heir so ETS survives Task exit.
+  # 1) Llm GenServer (best)
+  # 2) Umbrella Task supervisor (if registered)
+  # 3) nil (no heir)
   defp heir_pid do
     cond do
       Code.ensure_loaded?(Llm) and is_pid(Process.whereis(Llm)) ->
@@ -128,7 +146,7 @@ end
     end
   end
 
-  # ── Context store (ETS) ───────────────────────────────────────────────────
+  # ── History store (ETS) ───────────────────────────────────────────────────
 
   defp history_messages(session_id, turn_pairs) when is_integer(turn_pairs) and turn_pairs > 0 do
     msgs =
@@ -158,7 +176,6 @@ end
       |> trim_history(@history_turn_pairs)
 
     :ets.insert(@ets_table, {session_id, next})
-    Logger.warning("[LlmSynthesis] remember ok session=#{inspect(session_id)} msgs=#{length(next)}")
     :ok
   rescue
     e ->
@@ -187,31 +204,90 @@ end
 
   defp clamp_text(other), do: other |> to_string() |> clamp_text()
 
+  # ── Prompt logging (safe + capped) ─────────────────────────────────────────
+
+  defp log_prompt_bundle(messages, features, decision, mood) do
+    req = :erlang.unique_integer([:positive])
+    intent = Map.get(features, :intent)
+    mode = Map.get(decision, :mode)
+    tone = Map.get(decision, :tone)
+    tone_hint = Map.get(mood, :tone_hint)
+
+    {system, user} = extract_system_user(messages)
+    {sys2, sys_trunc?} = cap_text(system, @max_system_chars)
+    {usr2, usr_trunc?} = cap_text(user, @max_user_chars)
+
+    Logger.info("""
+    [LlmSynthesis] PROMPT_BEGIN req=#{req} intent=#{inspect(intent)} mode=#{inspect(mode)} tone=#{inspect(tone)} tone_hint=#{inspect(tone_hint)}
+    ---SYSTEM sha256=#{sha256_hex(system)} chars=#{String.length(system)} truncated=#{sys_trunc?}---
+    #{sys2}
+    ---USER sha256=#{sha256_hex(user)} chars=#{String.length(user)} truncated=#{usr_trunc?}---
+    #{usr2}
+    PROMPT_END
+    """)
+  rescue
+    e ->
+      Logger.debug("[LlmSynthesis] prompt log failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp extract_system_user(messages) when is_list(messages) do
+    sys =
+      messages
+      |> Enum.find(%{}, fn m -> Map.get(m, "role") == "system" end)
+      |> Map.get("content", "")
+
+    usr =
+      messages
+      |> Enum.reverse()
+      |> Enum.find(%{}, fn m -> Map.get(m, "role") == "user" end)
+      |> Map.get("content", "")
+
+    {to_string(sys || ""), to_string(usr || "")}
+  end
+
+  defp extract_system_user(_), do: {"", ""}
+
+  defp cap_text(text, max_chars) when is_binary(text) and is_integer(max_chars) and max_chars > 0 do
+    if String.length(text) <= max_chars do
+      {text, false}
+    else
+      {String.slice(text, 0, max_chars) <> "…", true}
+    end
+  end
+
+  defp cap_text(other, max_chars), do: cap_text(to_string(other || ""), max_chars)
+
+  defp sha256_hex(text) when is_binary(text) do
+    :crypto.hash(:sha256, text)
+    |> Base.encode16(case: :lower)
+  end
+
   # ── System prompt builder ─────────────────────────────────────────────────
 
-defp build_system_prompt(features, decision, mood) do
-  tone = decision.tone
-  mode = decision.mode
-  intent = features.intent
-  exp = getv(mood, :exploration)
-  inh = getv(mood, :inhibition)
-  vig = getv(mood, :vigilance)
-  plast = getv(mood, :plasticity)
-  tone_hint = Map.get(mood, :tone_hint)
+  defp build_system_prompt(features, decision, mood) do
+    tone = decision.tone
+    mode = decision.mode
+    intent = features.intent
+    exp = getv(mood, :exploration)
+    inh = getv(mood, :inhibition)
+    vig = getv(mood, :vigilance)
+    plast = getv(mood, :plasticity)
+    tone_hint = Map.get(mood, :tone_hint)
 
-  wm_summary = safe_wm_summary()
+    wm_summary = safe_wm_summary()
 
-  """
-  You are Symbrella, a brain-inspired AI assistant.
-  #{tone_directive(tone, tone_hint)}
-  #{mood_context(exp, inh, vig, plast)}
-  #{mode_directive(mode, intent)}
-  #{wm_context(wm_summary)}
-  Keep your response concise and directly relevant to the user's input.
-  Do not explain your reasoning. Just respond naturally.
-  """
-  |> String.trim()
-end
+    """
+    You are Symbrella, a brain-inspired AI assistant.
+    #{tone_directive(tone, tone_hint)}
+    #{mood_context(exp, inh, vig, plast)}
+    #{mode_directive(mode, intent)}
+    #{wm_context(wm_summary)}
+    Keep your response concise and directly relevant to the user's input.
+    Do not explain your reasoning. Just respond naturally.
+    """
+    |> String.trim()
+  end
 
   defp tone_directive(:warm, _), do: "Respond in a warm, engaged, and encouraging tone."
   defp tone_directive(:deescalate, _), do: "Respond calmly and gently. Keep things grounded and constructive."
@@ -236,13 +312,26 @@ end
   defp maybe_add(notes, true, note), do: notes ++ [note]
   defp maybe_add(notes, false, _), do: notes
 
-  defp mode_directive(:pair_programmer, _), do: "You are acting as a pair programmer. Be concise, action-oriented, and practical."
-  defp mode_directive(:coach, :bug), do: "You are coaching through a bug. Be patient, methodical, and encouraging."
-  defp mode_directive(:coach, _), do: "You are coaching. Guide toward a small, clear next step."
-  defp mode_directive(:explainer, _), do: "You are explaining a concept. Be clear and succinct — 2-4 sentences."
-  defp mode_directive(:scribe, _), do: "You are in a conversational mode. Keep it natural and brief."
-  defp mode_directive(:editor, _), do: "You are reviewing carefully. Point out concerns clearly but constructively."
-  defp mode_directive(_, _), do: "Respond helpfully."
+  defp mode_directive(:pair_programmer, _),
+    do: "You are acting as a pair programmer. Be concise, action-oriented, and practical."
+
+  defp mode_directive(:coach, :bug),
+    do: "You are coaching through a bug. Be patient, methodical, and encouraging."
+
+  defp mode_directive(:coach, _),
+    do: "You are coaching. Guide toward a small, clear next step."
+
+  defp mode_directive(:explainer, _),
+    do: "You are explaining a concept. Be clear and succinct — 2-4 sentences."
+
+  defp mode_directive(:scribe, _),
+    do: "You are in a conversational mode. Keep it natural and brief."
+
+  defp mode_directive(:editor, _),
+    do: "You are reviewing carefully. Point out concerns clearly but constructively."
+
+  defp mode_directive(_, _),
+    do: "Respond helpfully."
 
   defp safe_wm_summary do
     if Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) do
@@ -252,7 +341,9 @@ end
         wm
         |> Enum.take(5)
         |> Enum.map(fn item ->
-          item[:payload][:lemma] || item[:lemma] || to_string(item[:id] || "")
+          item[:payload][:lemma] ||
+            item[:lemma] ||
+            to_string(item[:id] || "")
         end)
         |> Enum.reject(&(&1 == ""))
         |> Enum.uniq()
@@ -269,8 +360,12 @@ end
   defp wm_context([]), do: ""
   defp wm_context(lemmas), do: "Active concepts: #{Enum.join(lemmas, ", ")}."
 
+  # ── Helpers ───────────────────────────────────────────────────────────────
+
   defp llm_available? do
-    Code.ensure_loaded?(Llm) and function_exported?(Llm, :chat, 2) and is_pid(Process.whereis(Llm))
+    Code.ensure_loaded?(Llm) and
+      function_exported?(Llm, :chat, 2) and
+      is_pid(Process.whereis(Llm))
   end
 
   defp getv(mood, key) do

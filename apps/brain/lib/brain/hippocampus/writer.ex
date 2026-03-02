@@ -1,257 +1,274 @@
 # apps/brain/lib/brain/hippocampus/writer.ex
 defmodule Brain.Hippocampus.Writer do
   @moduledoc """
-  Persistence boundary for Hippocampus episodes.
+  Hippocampus episode persistence.
 
-  Accepts:
-    • Hippocampus episode shape: %{slate: map(), meta: map(), norms: MapSet.t()}
-    • SI-like shape: %{
-        sentence: ..., tokens: ..., atl_slate: ..., evidence: ...
-      }
+  IMPORTANT:
+  - brain must not depend on core (db <- brain <- core <- web).
+  - Therefore, anything we persist must be JSON-safe without requiring Core structs
+    (e.g., `%Core.Token{}`) to implement Jason.Encoder.
 
-  Writes into Db via insert_all into "episodes".
+  This module deep-normalizes incoming SI/episode payloads into plain maps/lists
+  before JSON encoding, preventing Jason.Encoder crashes.
   """
 
   require Logger
 
-  alias Brain.Hippocampus.Normalize
+  alias Brain.Utils.Safe
+  alias Db.Repo
 
-  @type opts :: keyword() | map()
+  @episodes_table "episodes"
 
-@spec maybe_persist(map(), opts) :: map()
-def maybe_persist(%{} = payload, opts \\ []) do
-  opts = normalize_opts(opts)
+  # ---------------------------------------------------------------------------
+  # Public
+  # ---------------------------------------------------------------------------
 
-  if enabled?(opts) and repo_ready?() do
-    payload
-    |> build_row(opts)
-    |> ensure_timestamps()
-    |> insert_row!()
-  end
+  @doc """
+  Persist an episode if enabled via opts.
 
-  maybe_prime(payload, opts)
-  payload
-end
+  Expects:
+    - `episode` map-like (may contain structs)
+    - `opts` keyword with `:persist?` boolean
 
-defp insert_row!(row) when is_map(row) do
-  # Let it crash on failure (no try/rescue). This makes DB problems visible immediately.
-  _ = Db.insert_all("episodes", [row], on_conflict: :nothing)
-  :ok
-end
+  Returns:
+    - :ok (best-effort; never raises to callers)
+  """
+  @spec maybe_persist(map(), keyword()) :: :ok
+  def maybe_persist(%{} = episode, opts) when is_list(opts) do
+    if Keyword.get(opts, :persist?, true) do
+      try do
+        insert_row!(episode)
+        :ok
+      rescue
+        e ->
+          Logger.debug("Hippo.Writer failed: #{Exception.message(e)}")
+          :ok
+      catch
+        :exit, reason ->
+          Logger.debug("Hippo.Writer exit: #{inspect(reason)}")
+          :ok
 
-defp ensure_timestamps(%{} = row) do
-  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-
-  row
-  |> Map.put_new(:inserted_at, now)
-  |> Map.put_new(:updated_at, now)
-end
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Row builder (episode-aware)
-  # ────────────────────────────────────────────────────────────────────────────
-
-  defp build_row(payload, opts) do
-    {tokens, tags, si_blob} =
-      cond do
-        hippo_episode?(payload) ->
-          {
-            tokens_from_episode(payload),
-            tags_from_episode(payload),
-            compact_episode(payload)
-          }
-
-        true ->
-          {
-            tokens_from_si(payload),
-            tags_from_si(payload),
-            compact_si(payload)
-          }
+        kind, reason ->
+          Logger.debug("Hippo.Writer throw/error: #{inspect({kind, reason})}")
+          :ok
       end
+    else
+      :ok
+    end
+  end
+
+  def maybe_persist(_other, _opts), do: :ok
+
+  @doc """
+  Insert an episode row (raises on DB errors).
+
+  This is called internally by `maybe_persist/2` and is allowed to raise;
+  callers are expected to wrap it.
+  """
+  @spec insert_row!(map()) :: :ok
+  def insert_row!(%{} = episode) do
+    row = episode_row(episode)
+
+    Repo.insert_all(@episodes_table, [row],
+      on_conflict: :nothing,
+      conflict_target: [:signature]
+    )
+
+    :ok
+  end
+
+  # ---------------------------------------------------------------------------
+  # Row builder
+  # ---------------------------------------------------------------------------
+
+  defp episode_row(%{} = episode) do
+    ep = deep_plain(episode)
+
+    at_ms = now_ms()
+    signature = build_signature(ep)
+
+    si = Safe.get(ep, :si) || Safe.get(ep, "si") || %{}
+    cues = Safe.get(ep, :cues) || Safe.get(ep, "cues") || []
+    winners = Safe.get(ep, :winners) || Safe.get(ep, "winners") || []
+    emotion = Safe.get(ep, :emotion) || Safe.get(ep, "emotion") || %{}
+    meta = Safe.get(ep, :meta) || Safe.get(ep, "meta") || %{}
+
+    # Compact payloads *and* enforce JSON-safe shapes.
+    si2 = compact_si(si)
+    emotion2 = compact_emotion(emotion)
+    winners2 = compact_winners(winners)
 
     %{
-      user_id: user_id_from(payload, opts),
-      tokens: tokens,
-      token_count: length(tokens),
-      si: si_blob,
-      tags: tags,
-      embedding: embedding_from(opts)
+      signature: signature,
+      at_ms: Safe.get(ep, :at_ms) || Safe.get(ep, "at_ms") || at_ms,
+      cues: Jason.encode!(deep_plain(cues)),
+      winners: Jason.encode!(deep_plain(winners2)),
+      si: Jason.encode!(deep_plain(si2)),
+      emotion: Jason.encode!(deep_plain(emotion2)),
+      meta: Jason.encode!(deep_plain(meta)),
+      inserted_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
     }
   end
 
-  defp hippo_episode?(%{slate: %{}, meta: %{}, norms: %MapSet{}}), do: true
-  defp hippo_episode?(_), do: false
+  # ---------------------------------------------------------------------------
+  # Compactors (JSON-safe)
+  # ---------------------------------------------------------------------------
 
-  defp compact_episode(%{slate: slate, meta: meta, norms: norms}) do
-    %{
-      episode: %{
-        slate: slate,
-        meta: meta,
-        norms: MapSet.to_list(norms || MapSet.new())
-      }
-    }
-  end
+  # Keep only a bounded slice of SI. Must be JSON-safe.
+  defp compact_si(si) do
+    si0 = deep_plain(si)
 
-  defp compact_si(%{} = si) do
-    # Keep it small; avoid huge nested blobs when possible.
-    %{
-      sentence: si[:sentence] || si["sentence"],
-      tokens: si[:tokens] || si["tokens"] || [],
-      atl_slate: si[:atl_slate] || si["atl_slate"],
-      evidence: si[:evidence] || si["evidence"]
-    }
-  end
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Episode tokens/tags
-  # ────────────────────────────────────────────────────────────────────────────
-
-  defp tokens_from_episode(%{norms: %MapSet{} = norms}) do
-    norms
-    |> MapSet.to_list()
-    |> Enum.map(&norm/1)
-    |> Enum.reject(&Normalize.empty?/1)
-    |> Enum.uniq()
-  end
-
-  defp tokens_from_episode(_), do: []
-
-  defp tags_from_episode(%{meta: meta, slate: slate}) do
-    meta_tags = meta[:tags] || meta["tags"]
-    slate_tags = slate[:tags] || slate["tags"]
-
-    base =
-      cond do
-        is_list(meta_tags) -> meta_tags
-        is_list(slate_tags) -> slate_tags
-        true -> []
-      end
-
-    (["hippo"] ++ base)
-    |> Enum.map(&to_string/1)
-    |> Enum.map(&String.downcase/1)
-    |> Enum.uniq()
-  end
-
-  defp tags_from_episode(_), do: ["hippo"]
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # SI tokens/tags (legacy auto/lifg path)
-  # ────────────────────────────────────────────────────────────────────────────
-
-  defp tokens_from_si(si) do
+    # Keep tokens minimal and JSON-safe. Tokens may be Core.Token structs.
     toks =
-      (si[:tokens] || si["tokens"] || [])
+      si0
+      |> Safe.get(:tokens, [])
       |> List.wrap()
-      |> Enum.flat_map(&token_extract/1)
+      |> Enum.take(64)
+      |> Enum.map(&compact_token/1)
 
-    winners =
-      (get_in(si, [:atl_slate, :winners]) ||
-         get_in(si, ["atl_slate", "winners"]) ||
-         [])
+    # Active cells can include Db.BrainCell structs. Make them plain and bounded.
+    active =
+      si0
+      |> Safe.get(:active_cells, [])
       |> List.wrap()
-      |> Enum.flat_map(&winner_extract/1)
+      |> Enum.take(128)
+      |> Enum.map(&compact_active_cell/1)
 
-    (toks ++ winners)
-    |> Enum.map(&norm/1)
-    |> Enum.reject(&Normalize.empty?/1)
-    |> Enum.uniq()
+    trace =
+      si0
+      |> Safe.get(:trace, [])
+      |> List.wrap()
+      |> Enum.take(64)
+      |> Enum.map(&deep_plain/1)
+
+    %{
+      sentence: Safe.get(si0, :sentence),
+      intent: Safe.get(si0, :intent),
+      keyword: Safe.get(si0, :keyword),
+      confidence: Safe.get(si0, :confidence),
+      lifg_choices: Safe.get(si0, :lifg_choices),
+      lifg_opts: Safe.get(si0, :lifg_opts),
+      tokens: toks,
+      active_cells: active,
+      trace: trace
+    }
   end
 
-  defp tags_from_si(si) do
-    # Prefer explicit tags if present (caller can pass them)
-    tags =
-      si[:tags] || si["tags"] ||
-        get_in(si, [:atl_slate, :tags]) ||
-        get_in(si, ["atl_slate", "tags"]) ||
-        []
+  defp compact_token(tok) do
+    t = deep_plain(tok)
 
-    tags =
-      cond do
-        is_list(tags) -> tags
-        true -> []
-      end
-
-    base =
-      if tags == [] do
-        ["hippo", "auto", "lifg"]
-      else
-        ["hippo" | tags]
-      end
-
-    base
-    |> Enum.map(&to_string/1)
-    |> Enum.map(&String.downcase/1)
-    |> Enum.uniq()
+    %{
+      index: Safe.get(t, :index) || Safe.get(t, :token_index),
+      token_index: Safe.get(t, :token_index) || Safe.get(t, :index),
+      phrase: Safe.get(t, :phrase),
+      norm: Safe.get(t, :norm),
+      span: Safe.get(t, :span),
+      mw: Safe.get(t, :mw),
+      n: Safe.get(t, :n),
+      kind: Safe.get(t, :kind),
+      pos: Safe.get(t, :pos),
+      subpos: Safe.get(t, :subpos),
+      source: Safe.get(t, :source)
+    }
   end
 
-  defp token_extract(%{} = t) do
-    cond do
-      is_binary(t[:phrase]) -> [t[:phrase]]
-      is_binary(t["phrase"]) -> [t["phrase"]]
-      is_binary(t[:lemma]) -> [t[:lemma]]
-      is_binary(t["lemma"]) -> [t["lemma"]]
-      is_binary(t[:norm]) -> [t[:norm]]
-      is_binary(t["norm"]) -> [t["norm"]]
-      is_binary(t[:word]) -> [t[:word]]
-      is_binary(t["word"]) -> [t["word"]]
-      true -> []
-    end
+  defp compact_active_cell(cell) do
+    c = deep_plain(cell)
+
+    %{
+      id: Safe.get(c, :id),
+      norm: Safe.get(c, :norm),
+      lemma: Safe.get(c, :lemma),
+      pos: Safe.get(c, :pos),
+      token_index: Safe.get(c, :token_index),
+      score: Safe.get(c, :score),
+      source: Safe.get(c, :source)
+    }
   end
 
-  defp token_extract(s) when is_binary(s), do: [s]
-  defp token_extract(_), do: []
+  defp compact_winners(winners) do
+    winners
+    |> List.wrap()
+    |> Enum.take(32)
+    |> Enum.map(fn w ->
+      x = deep_plain(w)
 
-  defp winner_extract(%{} = w) do
-    cond do
-      is_binary(w[:lemma]) -> [w[:lemma]]
-      is_binary(w["lemma"]) -> [w["lemma"]]
-      is_binary(w[:norm]) -> [w[:norm]]
-      is_binary(w["norm"]) -> [w["norm"]]
-      is_binary(w[:id]) -> [w[:id]]
-      is_binary(w["id"]) -> [w["id"]]
-      true -> []
-    end
+      %{
+        id: Safe.get(x, :id),
+        norm: Safe.get(x, :norm),
+        lemma: Safe.get(x, :lemma),
+        token_index: Safe.get(x, :token_index),
+        score: Safe.get(x, :score),
+        margin: Safe.get(x, :margin),
+        raw: Safe.get(x, :raw)
+      }
+    end)
   end
 
-  defp winner_extract(s) when is_binary(s), do: [s]
-  defp winner_extract(_), do: []
+  defp compact_emotion(emotion) do
+    e = deep_plain(emotion)
 
-  defp norm(v) when is_binary(v) do
-    v
-    |> String.downcase()
-    |> String.replace(~r/\s+/u, " ")
-    |> String.trim()
+    # Keep only stable fields; avoid huge/volatile payloads.
+    %{
+      valence: Safe.get(e, :valence),
+      arousal: Safe.get(e, :arousal),
+      tone_reaction: Safe.get(e, :tone_reaction),
+      latents: Safe.get(e, :latents),
+      from: Safe.get(e, :from)
+    }
   end
 
-  defp norm(v), do: v |> to_string() |> norm()
+  # ---------------------------------------------------------------------------
+  # Signature
+  # ---------------------------------------------------------------------------
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Gating / opts / embedding
-  # ────────────────────────────────────────────────────────────────────────────
+  defp build_signature(ep) do
+    # Signature should be stable and not include structs.
+    cues =
+      ep
+      |> Safe.get(:cues, [])
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.map(&String.downcase/1)
+      |> Enum.sort()
+      |> Enum.take(16)
 
-  defp enabled?(opts) do
-    # default true; caller can disable by persist: false
-    Keyword.get(opts, :persist, true)
+    win_ids =
+      ep
+      |> Safe.get(:winners, [])
+      |> List.wrap()
+      |> Enum.map(&deep_plain/1)
+      |> Enum.map(fn w -> Safe.get(w, :id) || "" end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.sort()
+      |> Enum.take(16)
+
+    base = Enum.join(cues, "|") <> "||" <> Enum.join(win_ids, "|")
+    :crypto.hash(:sha256, base) |> Base.encode16(case: :lower)
   end
 
-  defp repo_ready? do
-    Code.ensure_loaded?(Db) and function_exported?(Db, :insert_all, 3)
+  # ---------------------------------------------------------------------------
+  # Deep normalization (JSON-safe)
+  # ---------------------------------------------------------------------------
+
+  # Convert any nested structs into JSON-safe maps recursively.
+  defp deep_plain(%_{} = s) do
+    s
+    |> Map.from_struct()
+    |> Map.drop([:__struct__, :__meta__])
+    |> Enum.map(fn {k, v} -> {k, deep_plain(v)} end)
+    |> Map.new()
   end
 
-  defp embedding_from(opts) do
-    case Keyword.get(opts, :embedding) do
-      nil -> nil
-      emb -> emb
-    end
+  defp deep_plain(%{} = m) do
+    m
+    |> Enum.map(fn {k, v} -> {k, deep_plain(v)} end)
+    |> Map.new()
   end
 
-defp user_id_from(_payload, opts), do: Keyword.get(opts, :user_id)
+  defp deep_plain(list) when is_list(list), do: Enum.map(list, &deep_plain/1)
+  defp deep_plain(other), do: other
 
-  defp maybe_prime(_payload, _opts), do: :ok
-
-  defp normalize_opts(opts) when is_list(opts), do: opts
-  defp normalize_opts(%{} = opts), do: Enum.into(opts, [])
-  defp normalize_opts(nil), do: []
-  defp normalize_opts(_), do: []
+  defp now_ms, do: System.system_time(:millisecond)
 end

@@ -5,30 +5,41 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   Guardrails:
   - brain must not depend on core (db <- brain <- core <- web)
-  - therefore do NOT pattern-match on `%Core.SemanticInput{}` here.
+  - do NOT pattern-match on `%Core.SemanticInput{}` here.
   - accept any map-like SI that carries `:tokens` (or "tokens") list.
 
-  Returns:
-    {:ok, %{si: si, cover: cover, choices: choices, boosts: boosts, inhibitions: inhibitions, audit: audit}}
-  or
-    {:error, exception}
+  Contract (important — Brain.handle_call relies on this):
+    run/4 returns {{:ok | :error, payload}, state}
+
+  Payload shape on success:
+    %{
+      si: map(),
+      choices: list(),
+      cover: list(),
+      boosts: list(),
+      inhibitions: list(),
+      audit: map()
+    }
   """
 
   require Logger
-  alias Brain.LIFG.Stage1
+
+  alias Brain.LIFG.{Post, Stage1}
+
+  @type out_t :: %{
+          si: map(),
+          choices: list(),
+          cover: list(),
+          boosts: list(),
+          inhibitions: list(),
+          audit: map()
+        }
 
   # -------------------------------------------------------------------
-  # Public API
+  # Public API (run/2)
   # -------------------------------------------------------------------
 
-  @doc """
-  Primary entry used in multiple places (including Brain).
-
-  Supports:
-    - run(si_map, cfg_map_or_kw)
-    - run(tokens_list, cfg_map_or_kw)  (treated as %{tokens: tokens})
-  """
-  @spec run(map() | list(), map() | keyword()) :: {:ok, map()} | {:error, any()}
+  @spec run(map() | list(), map() | keyword()) :: {:ok, out_t()} | {:error, any()}
   def run(si_or_tokens, cfg) when is_list(cfg), do: run(si_or_tokens, Map.new(cfg))
 
   def run(tokens, %{} = cfg) when is_list(tokens) do
@@ -41,59 +52,46 @@ defmodule Brain.Pipeline.LIFGStage1 do
     if is_list(tokens) do
       run_tokens(tokens, si0, cfg)
     else
-      out = %{
-        si: si0,
-        cover: [],
-        choices: [],
-        boosts: [],
-        inhibitions: [],
-        audit: %{stage: :lifg_stage1, reason: :no_tokens}
-      }
-
-      {:ok, out}
+      {:ok,
+       %{
+         si: si0,
+         cover: [],
+         choices: [],
+         boosts: [],
+         inhibitions: [],
+         audit: %{stage: :lifg_stage1, reason: :no_tokens}
+       }}
     end
-  rescue
-    err ->
-      st = __STACKTRACE__
-      Logger.error(fn -> "[LIFGStage1] crash: " <> format_error(err, st) end)
-      {:error, err}
-  catch
-    kind, reason ->
-      st = __STACKTRACE__
-      err = normalize_catch(kind, reason, st)
-      Logger.error(fn -> "[LIFGStage1] crash: " <> format_error(err, st) end)
-      {:error, err}
   end
 
-  @doc """
-  Back-compat entry: Brain.handle_call is currently invoking `run/4`.
+  # -------------------------------------------------------------------
+  # Public API (run/4) — back-compat for Brain.handle_call
+  # -------------------------------------------------------------------
 
-  Accepts either:
-    - an SI-like map/struct (map-shaped), OR
-    - a tokens list
-
-  `lifg_opts` should be a keyword list (or map) of LIFG options,
-  and `state` is an opaque pipeline state map.
-  """
-  @spec run(map() | list(), any(), keyword() | map(), map()) :: {:ok, map()} | {:error, any()}
+  @spec run(map() | list(), any(), keyword() | map(), map()) ::
+          {{:ok, out_t()} | {:error, any()}, map()}
   def run(si_or_tokens, ctx_vec, lifg_opts, state) when is_list(si_or_tokens) do
     cfg = %{ctx_vec: ctx_vec, lifg_opts: lifg_opts, state: state}
-    run(%{tokens: si_or_tokens}, cfg)
+
+    case run(%{tokens: si_or_tokens}, cfg) do
+      {:ok, out} -> {{:ok, out}, state}
+      {:error, err} -> {{:error, err}, state}
+    end
   end
 
   def run(%{} = si0, ctx_vec, lifg_opts, state) do
     cfg = %{ctx_vec: ctx_vec, lifg_opts: lifg_opts, state: state}
-    run(si0, cfg)
+
+    case run(si0, cfg) do
+      {:ok, out} -> {{:ok, out}, state}
+      {:error, err} -> {{:error, err}, state}
+    end
   end
 
-  @doc """
-  Extract a compact `lifg_choices` list from a pipeline output.
+  # -------------------------------------------------------------------
+  # Helpers
+  # -------------------------------------------------------------------
 
-  Accepts:
-    - `{:ok, %{cover: cover, ...}}`
-    - `%{cover: cover, ...}`
-    - `{:ok, %{si: %{lifg_choices: ...}}}` etc (best-effort)
-  """
   @spec extract_lifg_choices(any()) :: list(map())
   def extract_lifg_choices({:ok, %{} = out}), do: extract_lifg_choices(out)
 
@@ -114,12 +112,10 @@ defmodule Brain.Pipeline.LIFGStage1 do
   def extract_lifg_choices(_), do: []
 
   # -------------------------------------------------------------------
-  # Internals
+  # Core implementation
   # -------------------------------------------------------------------
 
   defp run_tokens(tokens, si0, cfg) do
-    ctx_vec = Map.get(cfg, :ctx_vec) || Map.get(cfg, "ctx_vec")
-
     lifg_opts =
       Map.get(cfg, :lifg_opts) ||
         Map.get(cfg, "lifg_opts") ||
@@ -127,38 +123,60 @@ defmodule Brain.Pipeline.LIFGStage1 do
         Map.get(si0, "lifg_opts") ||
         []
 
-    stage_opts = [
-      ctx_vec: ctx_vec,
-      lifg_opts: lifg_opts,
-      state: Map.get(cfg, :state) || Map.get(cfg, "state") || %{}
-    ]
+    # Stage1.run/2 expects an SI-like map (it will source candidates from:
+    # - si.sense_candidates / si.candidates_by_token (if present)
+    # - si.active_cells (common in prod)
+    si_for_stage =
+      si0
+      |> ensure_tokens(tokens)
+      |> Brain.Utils.Safe.to_plain()
 
     t0 = System.monotonic_time(:millisecond)
-    res = Stage1.choose(tokens, ctx_vec, stage_opts)
+    res = Stage1.run(si_for_stage, lifg_opts)
     dt = System.monotonic_time(:millisecond) - t0
 
-    log_summary(dt, res)
-
     case res do
-      {:ok, %{} = out} ->
-        {:ok, ensure_si(out, si0)}
+      {:ok, %{si: si1, choices: choices, audit: audit}} ->
+        # Compute cover AFTER Stage1, before logging.
+        post =
+          Post.finalize(si1, choices,
+            reanalysis?:
+              Keyword.get(lifg_opts, :reanalysis?, false) or
+                Keyword.get(lifg_opts, :reanalysis, false),
+            allow_overlaps?: Keyword.get(lifg_opts, :allow_overlaps?, false)
+          )
 
-      {:error, %{} = err} ->
+        out = %{
+          si: si1,
+          choices: choices,
+          cover: Map.get(post, :cover, []),
+          boosts: [],
+          inhibitions: [],
+          audit: audit
+        }
+
+        log_summary(dt, {:ok, out})
+        {:ok, out}
+
+      {:error, err} ->
+        log_summary(dt, {:error, err})
         {:error, err}
 
       other ->
-        {:error,
-         RuntimeError.exception(
-           "Unexpected return from Brain.LIFG.Stage1.choose/3: #{inspect(other)}"
-         )}
+        err =
+          RuntimeError.exception(
+            "Unexpected return from Brain.LIFG.Stage1.run/2: #{inspect(other)}"
+          )
+
+        log_summary(dt, {:error, err})
+        {:error, err}
     end
   end
 
-  defp ensure_si(%{} = out, si0) do
-    case Map.get(out, :si) do
-      %{} -> out
-      _ -> Map.put(out, :si, si0)
-    end
+  defp ensure_tokens(%{} = si, tokens) when is_list(tokens) do
+    si
+    |> Map.put(:tokens, tokens)
+    |> Map.put("tokens", tokens)
   end
 
   defp fetch_tokens(%{} = si0) do
@@ -172,16 +190,11 @@ defmodule Brain.Pipeline.LIFGStage1 do
   defp normalize_cover(cover) when is_list(cover) do
     cover
     |> Enum.map(fn item ->
-      id = Map.get(item, :id) || Map.get(item, "id")
-      token_index = Map.get(item, :token_index) || Map.get(item, "token_index")
-      span = Map.get(item, :span) || Map.get(item, "span")
-      margin = Map.get(item, :margin) || Map.get(item, "margin")
-
       %{
-        token_index: token_index,
-        id: id,
-        span: span,
-        margin: margin
+        token_index: Map.get(item, :token_index) || Map.get(item, "token_index"),
+        id: Map.get(item, :id) || Map.get(item, "id"),
+        span: Map.get(item, :span) || Map.get(item, "span"),
+        margin: Map.get(item, :margin) || Map.get(item, "margin")
       }
     end)
     |> Enum.reject(fn m -> is_nil(m.id) end)
@@ -193,37 +206,26 @@ defmodule Brain.Pipeline.LIFGStage1 do
     winners = out |> Map.get(:cover, []) |> length()
     boosts = out |> Map.get(:boosts, []) |> length()
     inhibs = out |> Map.get(:inhibitions, []) |> length()
+    choices_count = out |> Map.get(:choices, []) |> length()
+
+    audit = Map.get(out, :audit, %{})
+    weak = if is_map(audit), do: Map.get(audit, :weak_decisions), else: nil
+    missing = if is_map(audit), do: Map.get(audit, :missing_candidates), else: nil
 
     Logger.info(fn ->
-      "[LIFG] #{dt_ms}ms winners=#{winners} boosts=#{boosts} inhibitions=#{inhibs} groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil"
+      weak_s = if is_integer(weak), do: " weak=#{weak}", else: ""
+      miss_s = if is_integer(missing), do: " missing=#{missing}", else: ""
+
+      "[LIFG] #{dt_ms}ms choices=#{choices_count} winners=#{winners} boosts=#{boosts} inhibitions=#{inhibs}" <>
+        weak_s <>
+        miss_s <>
+        " groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil"
     end)
   end
 
   defp log_summary(dt_ms, {:error, err}) do
-    Logger.error(fn -> "[LIFGStage1] #{dt_ms}ms error: " <> format_error(err, []) end)
+    Logger.error(fn -> "[LIFGStage1] #{dt_ms}ms error: " <> Exception.message(err) end)
   end
 
   defp log_summary(_dt_ms, _other), do: :ok
-
-  defp normalize_catch(:exit, reason, _st),
-    do: RuntimeError.exception("exit: #{inspect(reason)}")
-
-  defp normalize_catch(:throw, reason, _st),
-    do: RuntimeError.exception("throw: #{inspect(reason)}")
-
-  defp normalize_catch(:error, reason, _st) when is_exception(reason),
-    do: reason
-
-  defp normalize_catch(kind, reason, _st),
-    do: RuntimeError.exception("#{inspect(kind)}: #{inspect(reason)}")
-
-  defp format_error({err, st}, _fallback_st) when is_list(st) do
-    if is_exception(err), do: Exception.format(:error, err, st), else: inspect({err, st})
-  end
-
-  defp format_error(err, st) when is_list(st) do
-    if is_exception(err), do: Exception.format(:error, err, st), else: inspect(err)
-  end
-
-  defp format_error(err, _st), do: inspect(err)
 end

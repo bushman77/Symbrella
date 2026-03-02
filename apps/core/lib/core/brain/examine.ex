@@ -79,9 +79,7 @@ defmodule Core.Brain.Examine do
     |> Enum.each(fn
       {:ok, label, state} ->
         if compact? do
-          IO.inspect(compact_state(state), label: label)
         else
-          IO.inspect(state, label: label)
         end
 
       {:missing, label} ->

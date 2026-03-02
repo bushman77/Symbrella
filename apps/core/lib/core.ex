@@ -2,15 +2,15 @@
 defmodule Core do
   @moduledoc """
   Pipeline:
-  Tokenize → Rebuild word n-grams → STM → LTM (DB read/enrich)
-  → MWE Signatures (late bias) → (Episodes attach) → LIFG Stage-1 → ATL → Hippocampus encode
+  Tokenize → Rebuild word n-grams → STM → LTM (DB read)
+  → MWE Signatures (early/late bias) → Relations → Episodes attach → Amygdala react
+  → LIFG Stage-1 (via Brain GenServer for WM updates) → ATL → Hippocampus encode
   → (Optional) Persist episode → Notify Brain → Response plan attach.
 
   Notes:
-  • `resolve_input/2` defaults to :prod mode and runs the full pipeline.
-  • LTM no longer seeds or refetches via Lexicon — DB is the source of truth.
-  • MWE Signatures are optional early and required late (unless disabled).
-  • All Brain interactions are guarded so tests without Brain processes still pass.
+  • `resolve_input/2` defaults to :prod and runs the full pipeline.
+  • LTM reads from DB (Db.ltm/2). No Lexicon seeding/enrichment.
+  • Brain roundtrips are guarded so tests can run without Brain processes.
   • Response planning is delegated to `Core.Response.Attach`.
 
   ## Examples
@@ -22,7 +22,6 @@ defmodule Core do
 
   alias Core.BrainAdapter
   alias Core.Intent.Selection
-  alias Core.LIFG.Attach, as: LIFGAttach
   alias Core.MWE.Signatures
   alias Core.Response.Attach, as: ResponseAttach
   alias Core.SemanticInput
@@ -122,6 +121,11 @@ defmodule Core do
   @doc """
   Resolve a raw input string into a `Core.SemanticInput` by running Core’s semantic pipeline.
 
+  Options:
+    • mode: :prod | :test (default :prod)
+    • max_wordgram_n: integer (default 3)
+    • lifg_opts: keyword (merged with :brain, :lifg_defaults)
+
   See module docs for the end-to-end pipeline description.
   """
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
@@ -202,23 +206,92 @@ defmodule Core do
 
   defp maybe_build_response_plan(si, _opts), do: si
 
-  # ─────────────────────── LIFG attach (extracted) ───────────────────────
+  # ─────────────────────── LIFG attach (WM-aware) ───────────────────────
+  #
+  # IMPORTANT:
+  # If you want Working Memory (WM) updated, you must run LIFG through the Brain GenServer.
+  # The Brain server can apply gating and update its internal WM/attention state.
+  #
+  # Message shape (Brain side):
+  #   GenServer.call(Brain, {:lifg_stage1, si_map, ctx_vec, lifg_opts}, :infinity)
+  #
+  # We attach:
+  #   • si.lifg_choices (normalized cover/choices list, best-effort)
+  #   • si.trace merge (best-effort)
+  #
+  defp run_lifg_and_attach(%{} = si, lifg_opts) when is_list(lifg_opts) do
+    if Code.ensure_loaded?(Brain) and is_pid(Process.whereis(Brain)) do
+      ctx_vec = Keyword.get(lifg_opts, :ctx_vec, [])
 
-defp run_lifg_and_attach(%{} = si, lifg_opts) when is_list(lifg_opts) do
-  case Brain.Pipeline.LIFGStage1.run(si, lifg_opts) do
-    {{:ok, out}, _state} ->
-      # Merge LIFG output back into SI
-      Map.merge(si, out)
+      reply =
+        try do
+          GenServer.call(Brain, {:lifg_stage1, si, ctx_vec, lifg_opts}, :infinity)
+        rescue
+          _ -> {:error, :lifg_call_failed}
+        catch
+          :exit, _ -> {:error, :lifg_call_exit}
+        end
 
-    _ ->
+      attach_lifg_reply(si, reply)
+    else
       si
+    end
   end
-end
 
-defp run_lifg_and_attach(si, _lifg_opts), do: si
+  defp run_lifg_and_attach(si, _lifg_opts), do: si
+
+  defp attach_lifg_reply(%{} = si, {:ok, %{} = out}) do
+    lifg_choices =
+      cond do
+        Code.ensure_loaded?(Brain.Pipeline.LIFGStage1) and
+            function_exported?(Brain.Pipeline.LIFGStage1, :extract_lifg_choices, 1) ->
+          Brain.Pipeline.LIFGStage1.extract_lifg_choices(out)
+
+        is_list(Map.get(out, :cover)) ->
+          Map.get(out, :cover)
+
+        is_list(get_in(out, [:si, :lifg_choices])) ->
+          get_in(out, [:si, :lifg_choices])
+
+        true ->
+          []
+      end
+
+    si2 =
+      if is_list(lifg_choices) do
+        Map.put(si, :lifg_choices, lifg_choices)
+      else
+        si
+      end
+
+    merge_brain_trace(si2, out)
+  end
+
+  # Some Brain paths may return a tuple or embed out under {:ok, out}
+  defp attach_lifg_reply(%{} = si, {{:ok, %{} = out}, _state}), do: attach_lifg_reply(si, {:ok, out})
+  defp attach_lifg_reply(%{} = si, {:error, _reason}), do: si
+  defp attach_lifg_reply(%{} = si, _other), do: si
+
+  defp merge_brain_trace(%{} = si, %{} = out) do
+    brain_trace =
+      cond do
+        is_list(Map.get(out, :trace)) -> Map.get(out, :trace)
+        is_list(get_in(out, [:si, :trace])) -> get_in(out, [:si, :trace])
+        true -> []
+      end
+
+    if is_list(brain_trace) and brain_trace != [] do
+      Map.update(si, :trace, brain_trace, fn core_trace ->
+        brain_trace ++ core_trace
+      end)
+    else
+      si
+    end
+  end
+
   # ─────────────────────── LTM orchestrator ────────────────────────────
 
-  defp ltm_stage(%{} = si, opts) do
+  defp ltm_stage(%{} = si, opts) when is_list(opts) do
     case Db.ltm(si, opts) do
       {:ok, %{rows: rows, db_hits: db_hits}} ->
         existing =
@@ -228,8 +301,7 @@ defp run_lifg_and_attach(si, _lifg_opts), do: si
           end
 
         active_cells =
-          existing
-          |> Kernel.++(rows)
+          (existing ++ rows)
           |> Enum.flat_map(&sanitize_cell/1)
           |> Enum.reject(&(cell_id(&1) == nil))
           |> Enum.uniq_by(&cell_id/1)
@@ -263,7 +335,7 @@ defp run_lifg_and_attach(si, _lifg_opts), do: si
         |> Map.put(:active_cells, active_cells)
         |> Map.put(:activation_summary, activation_summary)
 
-      _ ->
+      _other ->
         si
     end
   end
