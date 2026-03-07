@@ -163,21 +163,20 @@ defmodule Brain.Pipeline.LIFGStage1 do
   # -------------------------------------------------------------------
 
   defp run_tokens(tokens, si0, ctx_vec, lifg_opts, state) do
-    # Stage1.choose/3 expects:
-    #   - arg1: token list (plain maps)   ✅
-    #   - arg2: ctx vec (list)           ✅
-    #   - arg3: keyword opts             ✅
-    #
-    # It must NOT receive Core.Token structs or Core.SemanticInput structs.
-    t0 = System.monotonic_time(:millisecond)
+# Stage1.run/2 is the correct bridge here: it needs the full SI map so it can
+# use sentence/intent/active_cells/sense_candidates/candidates_by_token/etc.
+t0 = System.monotonic_time(:millisecond)
 
-    res =
-      Stage1.choose(tokens, ctx_vec,
-        ctx_vec: ctx_vec,
-        lifg_opts: lifg_opts,
-        state: state
-      )
+si_for_stage1 =
+  si0
+  |> Map.put(:tokens, tokens)
+  |> Map.put(:lifg_opts, lifg_opts)
 
+res =
+  Stage1.run(
+    si_for_stage1,
+    Keyword.merge(lifg_opts, ctx_vec: ctx_vec, state: state)
+  )
     dt = System.monotonic_time(:millisecond) - t0
 
     case res do
@@ -231,31 +230,81 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   defp ingest_wm(state, _si), do: state
 
-  defp ensure_si_has_lifg_choices(%{} = out) do
-    si = Map.get(out, :si, %{}) |> Safe.to_plain()
+defp ensure_si_has_lifg_choices(%{} = out) do
+  si = Map.get(out, :si, %{}) |> Safe.to_plain()
 
-    lifg_choices =
-      out
-      |> extract_lifg_choices()
-      |> Enum.map(fn ch ->
-        id = ch[:id] || ch["id"] || ch[:chosen_id] || ch["chosen_id"]
-        tok_i = ch[:token_index] || ch["token_index"] || ch[:index] || ch["index"]
-        span = ch[:span] || ch["span"]
-        margin = ch[:margin] || ch["margin"] || 0.0
+  cover =
+    out
+    |> Map.get(:cover, [])
+    |> List.wrap()
+    |> Enum.map(&Safe.to_plain/1)
 
-        %{
-          id: to_string(id),
-          chosen_id: to_string(id),
-          token_index: tok_i,
-          span: span,
-          margin: as_float(margin),
-          # conservative: WM needs a score; margin is the only safe scalar here.
-          score: clamp01(as_float(margin))
-        }
-      end)
+  choices =
+    out
+    |> Map.get(:choices, [])
+    |> List.wrap()
+    |> Enum.map(&Safe.to_plain/1)
 
-    Map.put(si, :lifg_choices, lifg_choices)
-  end
+  choice_by_key = lifg_choice_lookup(choices)
+
+  lifg_choices =
+    cover
+    |> Enum.map(fn cov ->
+      id = cov[:id] || cov["id"] || cov[:chosen_id] || cov["chosen_id"]
+      tok_i = cov[:token_index] || cov["token_index"] || cov[:index] || cov["index"]
+      span = cov[:span] || cov["span"]
+
+      raw_choice =
+        Map.get(choice_by_key, {tok_i, to_string(id)}, %{})
+
+      prob =
+        raw_choice[:prob] ||
+          raw_choice["prob"] ||
+          raw_choice[:score] ||
+          raw_choice["score"] ||
+          0.0
+
+      margin =
+        cov[:margin] ||
+          cov["margin"] ||
+          raw_choice[:margin] ||
+          raw_choice["margin"] ||
+          raw_choice[:prob_margin] ||
+          raw_choice["prob_margin"] ||
+          0.0
+
+      %{
+        id: to_string(id),
+        chosen_id: to_string(id),
+        token_index: tok_i,
+        span: span,
+        prob: as_float(prob),
+        margin: as_float(margin),
+        score: clamp01(as_float(prob)),
+        source: :lifg
+      }
+    end)
+    |> Enum.reject(fn ch ->
+      ch.id == "" or is_nil(ch.token_index)
+    end)
+
+  Map.put(si, :lifg_choices, lifg_choices)
+end
+
+defp lifg_choice_lookup(choices) when is_list(choices) do
+  Enum.reduce(choices, %{}, fn ch, acc ->
+    tok_i = ch[:token_index] || ch["token_index"] || ch[:index] || ch["index"]
+    id = ch[:chosen_id] || ch["chosen_id"] || ch[:id] || ch["id"]
+
+    cond do
+      is_nil(tok_i) or is_nil(id) ->
+        acc
+
+      true ->
+        Map.put(acc, {tok_i, to_string(id)}, ch)
+    end
+  end)
+end
 
   defp ensure_cover(%{} = out, lifg_opts) do
     cover = Map.get(out, :cover)
@@ -299,11 +348,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
   defp fetch_ctx_vec(cfg) do
     v = Map.get(cfg, :ctx_vec) || Map.get(cfg, "ctx_vec")
     if is_list(v), do: v, else: []
-  end
-
-  defp fetch_state(cfg) do
-    s = Map.get(cfg, :state) || Map.get(cfg, "state") || %{}
-    if is_map(s), do: s, else: %{}
   end
 
   defp fetch_lifg_opts(si0, cfg) do

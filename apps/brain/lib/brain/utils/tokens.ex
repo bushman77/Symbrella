@@ -122,20 +122,6 @@ defp find_from_bytes(sentence, phrase, cursor)
   end
 end
 
-  defp find_from_grapheme(gsent, phrase, cursor) do
-    plen = String.length(phrase)
-    max_start = max(length(gsent) - plen, 0)
-    target = String.downcase(phrase)
-    do_find_from(gsent, target, cursor, max_start, plen)
-  end
-
-  defp do_find_from(_gsent, _target, pos, max_start, _plen) when pos > max_start, do: nil
-
-  defp do_find_from(gsent, target, pos, max_start, plen) do
-    slice = gsent |> Enum.slice(pos, plen) |> Enum.join() |> String.downcase()
-    if slice == target, do: pos, else: do_find_from(gsent, target, pos + 1, max_start, plen)
-  end
-
 @spec span_from_token(map()) :: {:ok, integer(), integer()} | :error
 def span_from_token(t) when is_map(t) do
   span = Map.get(t, :span) || Map.get(t, "span")

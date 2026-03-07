@@ -84,47 +84,6 @@ def fact(key) when is_atom(key),
     {:ok, state}
   end
 
-@impl true
-def handle_call({:fact, key}, _from, state) do
-  {:reply, find_fact_in_window(state.window, key), state}
-end
-
-defp find_fact_in_window(window, key) when is_list(window) do
-  # window is newest-first; return first match
-  Enum.find_value(window, fn {_at, ep} ->
-    if fact_episode?(ep, key), do: fact_value(ep), else: nil
-  end)
-end
-
-defp find_fact_in_window(_window, _key), do: nil
-
-defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
-  tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
-
-  Enum.any?(tags, fn t ->
-    s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
-    String.downcase(s) == "user_name"
-  end)
-end
-
-defp fact_episode?(_ep, _key), do: false
-
-defp fact_value(%{meta: meta} = ep) do
-  meta[:value] || meta["value"] || fact_value_from_si(ep)
-end
-
-defp fact_value(_), do: nil
-
-defp fact_value_from_si(%{slate: slate}) do
-  si = slate[:si] || slate["si"] || %{}
-
-  get_in(si, [:episode, :meta, :value]) ||
-    get_in(si, ["episode", "meta", "value"]) ||
-    get_in(si, ["episode", "meta", :value]) ||
-    get_in(si, [:episode, "meta", "value"])
-end
-
-defp fact_value_from_si(_), do: nil
 
   @impl true
   def handle_call({:encode, slate, meta_in}, from, state) do
@@ -208,6 +167,49 @@ defp fact_value_from_si(_), do: nil
        opts: state.opts
      }, state}
   end
+
+@impl true
+def handle_call({:fact, key}, _from, state) do
+  {:reply, find_fact_in_window(state.window, key), state}
+end
+
+defp find_fact_in_window(window, key) when is_list(window) do
+  # window is newest-first; return first match
+  Enum.find_value(window, fn {_at, ep} ->
+    if fact_episode?(ep, key), do: fact_value(ep), else: nil
+  end)
+end
+
+defp find_fact_in_window(_window, _key), do: nil
+
+defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
+  tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
+
+  Enum.any?(tags, fn t ->
+    s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
+    String.downcase(s) == "user_name"
+  end)
+end
+
+defp fact_episode?(_ep, _key), do: false
+
+defp fact_value(%{meta: meta} = ep) do
+  meta[:value] || meta["value"] || fact_value_from_si(ep)
+end
+
+defp fact_value(_), do: nil
+
+defp fact_value_from_si(%{slate: slate}) do
+  si = slate[:si] || slate["si"] || %{}
+
+  get_in(si, [:episode, :meta, :value]) ||
+    get_in(si, ["episode", "meta", "value"]) ||
+    get_in(si, ["episode", "meta", :value]) ||
+    get_in(si, [:episode, "meta", "value"])
+end
+
+defp fact_value_from_si(_), do: nil
+
 
   # ────────────────────────────────────────────────────────────────────────────
   # Warm start: rehydrate window from DB

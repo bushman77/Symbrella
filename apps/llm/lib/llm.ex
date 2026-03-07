@@ -577,7 +577,7 @@ end
     end
   end
 
-  defp http_post(state, path, body_map, opts \\ []) do
+  defp http_post(state, path, body_map, opts) do
     timeout = Keyword.get(opts, :timeout, state.timeout)
     url = state.endpoint <> path
 
@@ -715,7 +715,6 @@ end
     end
   end
 
-@impl true
 def stop(_state) do
   :ok
 end 

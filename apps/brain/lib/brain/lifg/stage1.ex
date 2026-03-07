@@ -79,15 +79,6 @@ defmodule Brain.LIFG.Stage1 do
 
   # Function-word set used to reject junk MWE fallbacks like "to go", "going to", etc.
   # (kept local so Stage1 compiles standalone).
-  @function_words MapSet.new(~w(
-                      of to in on at by for from with about into over after between through during before under without within along across behind beyond up down off near among
-                      the a an this that these those some any each every no neither either
-                      and or but nor so yet for
-                      be am is are was were being been do does did have has had having
-                      can could may might must shall should will would
-                      i you he she it we they me him her us them my your his her our their mine yours hers ours theirs myself yourself himself herself itself ourselves yourselves themselves
-                      not never
-                    ))
 
   # ---------- Public server API (mood) ----------
 

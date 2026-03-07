@@ -44,53 +44,51 @@ defmodule Core.Brain.Examine do
     • supervisor: pid or module name of supervisor to discover children from (optional)
     • discover_from_sup?: boolean (default false unless all?: true)
   """
-  def examine(opts \\ []) do
-    compact? = Keyword.get(opts, :compact?, false)
-    ui_only? = Keyword.get(opts, :ui_only?, true)
-    all? = Keyword.get(opts, :all?, false)
 
-    base_regions =
-      cond do
-        is_list(Keyword.get(opts, :regions)) ->
-          Keyword.fetch!(opts, :regions)
+def examine(opts \\ []) do
+  _compact? = Keyword.get(opts, :compact?, false)
+  ui_only? = Keyword.get(opts, :ui_only?, true)
+  all? = Keyword.get(opts, :all?, false)
 
-        all? ->
-          @ui_regions ++ @extra_regions
+  base_regions =
+    cond do
+      is_list(Keyword.get(opts, :regions)) ->
+        Keyword.fetch!(opts, :regions)
 
-        ui_only? ->
-          @ui_regions
+      all? ->
+        @ui_regions ++ @extra_regions
 
-        true ->
-          @default_regions
-      end
+      ui_only? ->
+        @ui_regions
 
-    sup = Keyword.get(opts, :supervisor, nil)
-    discover? = Keyword.get(opts, :discover_from_sup?, all?)
-    discovered = if discover? and not is_nil(sup), do: discover_regions_from_sup(sup), else: []
+      true ->
+        @default_regions
+    end
 
-    regions =
-      (base_regions ++ discovered)
-      |> uniq_regions()
-      |> apply_only_filter(Keyword.get(opts, :only))
-      |> apply_exclude_filter(Keyword.get(opts, :exclude))
+  sup = Keyword.get(opts, :supervisor, nil)
+  discover? = Keyword.get(opts, :discover_from_sup?, all?)
+  discovered = if discover? and not is_nil(sup), do: discover_regions_from_sup(sup), else: []
 
-    regions
-    |> Enum.map(&safe_invoke/1)
-    |> Enum.each(fn
-      {:ok, label, state} ->
-        if compact? do
-        else
-        end
+  regions =
+    (base_regions ++ discovered)
+    |> uniq_regions()
+    |> apply_only_filter(Keyword.get(opts, :only))
+    |> apply_exclude_filter(Keyword.get(opts, :exclude))
 
-      {:missing, label} ->
-        IO.puts("#{label}: (not running / no module)")
+  regions
+  |> Enum.map(&safe_invoke/1)
+  |> Enum.each(fn
+    {:ok, _label, _state} -> :ok
 
-      {:error, label, reason} ->
-        IO.puts("#{label}: ERROR #{inspect(reason)}")
-    end)
+    {:missing, label} ->
+      IO.puts("#{label}: (not running / no module)")
 
-    :ok
-  end
+    {:error, label, reason} ->
+      IO.puts("#{label}: ERROR #{inspect(reason)}")
+  end)
+
+  :ok
+end
 
   # ───────────────────────── helpers ─────────────────────────
 
@@ -226,17 +224,4 @@ defmodule Core.Brain.Examine do
       _ -> false
     end)
   end
-
-  defp compact_state(%{} = map) do
-    keys = Map.keys(map)
-
-    %{
-      __summary__: true,
-      size: map_size(map),
-      keys: Enum.take(Enum.sort(keys), 10)
-    }
-  end
-
-  defp compact_state(list) when is_list(list), do: %{__summary__: true, length: length(list)}
-  defp compact_state(other), do: other
 end

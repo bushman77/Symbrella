@@ -281,15 +281,6 @@ end
 
 defp normalize_name(_), do: nil
 
-defp fallback_name(nil, _text_in), do: nil
-
-defp fallback_name(_maybe_name, _text_in) do
-  case recalled_user_name(nil) do
-    v when is_binary(v) and v != "" -> v
-    _ -> nil
-  end
-end
-
 defp llm_or_template(text_in, features, decision, mood, intent) do
   case LlmSynthesis.generate(text_in, features, decision, mood) do
     {:ok, llm_text} -> llm_text
@@ -384,8 +375,6 @@ defp recalled_user_name(extracted_name) do
       nil
   end
 end
-
-  def plan(_si, _mood), do: {:neutral, "", %{error: :invalid_args}}
 
   @doc """
   Convenience helper: annotate an SI-like map/struct with planner output.
@@ -742,13 +731,4 @@ end
     do: :erlang.float_to_binary(v * 1.0, decimals: decimals)
 
   defp fmtf(_v, _d), do: "0.00"
-
-defp hippo_fact(key) when is_atom(key) do
-  if Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) do
-    Brain.Hippocampus.fact(key)
-  else
-    nil
-  end
-end
-
 end

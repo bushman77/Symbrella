@@ -15,7 +15,7 @@ defmodule Brain.Hippocampus.Writer do
   require Logger
 
   alias Brain.Utils.Safe
-  alias Db.Repo
+  alias Db
 
   @episodes_table "episodes"
 
@@ -69,10 +69,10 @@ defmodule Brain.Hippocampus.Writer do
   def insert_row!(%{} = episode) do
     row = episode_row(episode)
 
-    Repo.insert_all(@episodes_table, [row],
-      on_conflict: :nothing,
-      conflict_target: [:signature]
-    )
+Db.insert_all(@episodes_table, [row],
+  on_conflict: :nothing,
+  conflict_target: [:signature]
+)
 
     :ok
   end

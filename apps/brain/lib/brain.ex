@@ -1003,8 +1003,6 @@ defmodule Brain do
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
 
-  defp cues_to_candidates(cues), do: cues_to_candidates(cues, nil)
-
   defp cues_to_candidates(cues, sentence) do
     winners =
       case cues do

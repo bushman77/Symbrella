@@ -363,18 +363,4 @@ Ecto.Adapters.SQL.query!(
   []
 )
 end
-
-defp episodes_per_day() do
-Ecto.Adapters.SQL.query!(
-  Db,
-  """
-  select date_trunc('day', inserted_at) as day, count(*)
-  from episodes
-  group by 1
-  order by 1 desc
-  limit 14
-  """,
-  []
-)
-end
 end

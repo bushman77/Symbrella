@@ -178,10 +178,10 @@ defmodule Db do
   def word_exists?(_, _opts), do: false
 
 
-  def insrt_all(table, rows, opt) do
-    #Db.insert_all("episodes", [row], on_conflict: :nothing)
-    Repo.insert_all(table, rows, opt)
-  end
+def insrt_all(table, rows, opt) do
+  insert_all(table, rows, opt)
+end
+
   # -- helpers ----------------------------------------------------------------
 
   defp braincell_to_candidate_map(%BrainCell{} = r, token_index) when is_integer(token_index) do

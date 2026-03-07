@@ -80,7 +80,7 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("\~/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/gemma-2-2b-it-Q4_K_M.gguf"),
   llama_server: "llama-server",
   auto_start_on_boot?: true,
   allow_lazy_start?: true,

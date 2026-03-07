@@ -57,10 +57,7 @@ defmodule Llm.Pos do
     strong_opts = Util.ensure_min_predict(base_options, 160)
 
     # Single JSON pass via chat (OpenAI-compatible)
-    prompt_json =
-      [Prompts.pos_system_prompt(), "", "Return ONLY the JSON object.", "word: " <> w]
-      |> Enum.join("\n")
-
+    
     msgs = [
       %{"role" => "system", "content" => Prompts.pos_system_prompt()},
       %{"role" => "user", "content" => "Return ONLY the JSON object.\nword: " <> w}
