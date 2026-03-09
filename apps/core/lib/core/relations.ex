@@ -3,8 +3,8 @@ defmodule Core.Relations do
   Zero-write relations reader and evidence annotator.
 
   This module enriches a SemanticInput-like map (`si`) by *reading* lexical relations
-  (synonyms, antonyms, and homonyms) from `Db.BrainCell` rows corresponding to the
-  norms present in `si.tokens`.
+  (synonyms, antonyms, and homonyms) from `Db.BrainCell` rows that match the norms
+  present in `si.tokens`.
 
   It performs **no database writes**.
 
@@ -12,18 +12,18 @@ defmodule Core.Relations do
 
   The function appends relation edges into `si.evidence[:relations]` using compact tuples:
 
-    * `{:syn, from_norm, to_norm, 0.6}` — synonym edge (supportive association)
-    * `{:ant, from_norm, to_norm, -0.4}` — antonym edge (inhibitory association)
+    * `{:syn, from_norm, to_norm, 0.6}` — synonym edge
+    * `{:ant, from_norm, to_norm, -0.4}` — antonym edge
     * `{:hom, norm, sense_id, 0.5}` — homonym edge from a norm to one candidate sense id
 
-  These are meant as *evidence* for downstream scoring, not absolute truth.
+  These edges are evidence for downstream scoring, not absolute truth.
 
   ## Optional active-cell priming
 
-  When `attach_related_cells?: true` (default), the module can also pull `Db.BrainCell`
-  rows for related norms (from synonym/antonym edges) and merge them into
-  `si.active_cells` with a **soft** activation (defaults `:activation` and
-  `:modulated_activation` to `0.5` when absent).
+  When `attach_related_cells?: true` (default), the module also fetches related
+  `Db.BrainCell` rows for synonym/antonym targets and merges **plain maps** into
+  `si.active_cells` with soft activation values. This avoids leaking Ecto structs into
+  the active-cell path.
 
   ## Telemetry
 
@@ -48,26 +48,50 @@ defmodule Core.Relations do
   alias Db
   import Ecto.Query, only: [from: 2]
 
+  @syn_weight 0.6
+  @ant_weight -0.4
+  @hom_weight 0.5
+  @soft_activation 0.5
+
   @typedoc """
   A compact relation edge stored in `si.evidence[:relations]`.
-
-  Weights are fixed heuristics:
-    * synonyms: `0.6`
-    * antonyms: `-0.4`
-    * homonyms: `0.5`
   """
   @type edge ::
           {:syn, String.t(), String.t(), float()}
           | {:ant, String.t(), String.t(), float()}
           | {:hom, String.t(), String.t(), float()}
 
+  @type relation_row :: %{
+          required(:id) => String.t(),
+          required(:norm) => String.t(),
+          optional(:pos) => String.t() | nil,
+          optional(:synonyms) => [String.t()],
+          optional(:antonyms) => [String.t()]
+        }
+
+  @type related_cell :: %{
+          required(:id) => String.t(),
+          required(:norm) => String.t(),
+          optional(:pos) => String.t() | nil,
+          optional(:lemma) => String.t(),
+          optional(:word) => String.t(),
+          optional(:definition) => String.t() | nil,
+          optional(:example) => String.t() | nil,
+          optional(:synonyms) => [String.t()],
+          optional(:antonyms) => [String.t()],
+          optional(:source) => atom(),
+          optional(:score) => float(),
+          optional(:activation) => float(),
+          optional(:modulated_activation) => float()
+        }
+
   @doc """
   Attaches synonym/antonym/homonym edges to `si.evidence[:relations]`, optionally
   priming `si.active_cells` with softly-activated related entries.
 
-  The function extracts norms from `si.tokens` by reading `token.phrase` and `token.word`,
-  normalizing them (lowercase, trim, collapse whitespace), and querying `Db.BrainCell`
-  for matching active rows (`status == "active"`).
+  The function extracts norms from `si.tokens` by reading `token.phrase`, `token.word`,
+  and `token.norm`, normalizing them (lowercase, trim, collapse whitespace), and querying
+  `Db.BrainCell` for matching active rows (`status == "active"`).
 
   Edges are appended (not replaced) if `si.evidence[:relations]` already exists.
 
@@ -76,150 +100,228 @@ defmodule Core.Relations do
     * `:attach_related_cells?` (boolean, default: `true`)
       When true, additionally fetches active `Db.BrainCell` rows for related norms
       discovered via synonym/antonym edges and merges them into `si.active_cells`
-      with soft activation.
-
-  ## Examples
-
-  No tokens: produces an empty relations list and leaves `active_cells` unchanged.
-
-      iex> si = %{tokens: [], evidence: %{}, active_cells: [%{id: "keep|noun|0"}]}
-      iex> out = Core.Relations.attach_edges(si, attach_related_cells?: true)
-      iex> out.evidence.relations
-      []
-      iex> out.active_cells
-      [%{id: "keep|noun|0"}]
-
-  Defensive behavior: if `si.tokens` is not enumerable, returns the original input.
-
-      iex> si = %{tokens: :oops, evidence: %{}}
-      iex> Core.Relations.attach_edges(si) == si
-      true
+      as plain maps with soft activation.
   """
   @spec attach_edges(map(), keyword()) :: map()
   def attach_edges(si, opts \\ []) when is_map(si) do
     attach_related_cells? = Keyword.get(opts, :attach_related_cells?, true)
 
-    norms =
-      (Map.get(si, :tokens, []) || [])
-      |> Enum.flat_map(&[Map.get(&1, :phrase), Map.get(&1, :word)])
-      |> Enum.filter(&is_binary/1)
-      |> Enum.map(&normalize/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
+    norms = extract_norms(si)
+    rows = load_relation_rows(norms)
 
-    rows =
-      if norms == [] do
-        []
-      else
-        Db.all(
-          from(c in Db.BrainCell,
-            where: c.norm in ^norms and c.status == "active",
-            select: %{
-              id: c.id,
-              norm: c.norm,
-              pos: c.pos,
-              synonyms: c.synonyms,
-              antonyms: c.antonyms
-            }
-          )
-        )
-      end
+    syn_edges = synonym_edges(rows)
+    ant_edges = antonym_edges(rows)
+    hom_edges = homonym_edges(rows)
+    edges = Enum.uniq(syn_edges ++ ant_edges ++ hom_edges)
 
-    hom =
-      rows
-      |> Enum.group_by(& &1.norm)
-      |> Enum.map(fn {norm, rs} -> {norm, Enum.map(rs, & &1.id)} end)
-      |> Map.new()
-
-    syn_edges =
-      for r <- rows,
-          s <- List.wrap(r.synonyms || []),
-          s_norm = normalize(s),
-          s_norm != "" do
-        {:syn, r.norm, s_norm, 0.6}
-      end
-
-    ant_edges =
-      for r <- rows,
-          a <- List.wrap(r.antonyms || []),
-          a_norm = normalize(a),
-          a_norm != "" do
-        {:ant, r.norm, a_norm, -0.4}
-      end
-
-    hom_edges =
-      for {norm, sense_ids} <- hom, sid <- sense_ids do
-        {:hom, norm, sid, 0.5}
-      end
-
-    edges = syn_edges ++ ant_edges ++ hom_edges
-
-    # --- SAFE evidence update (works even if :evidence isn't a struct field) ---
-    ev0 = Map.get(si, :evidence) || %{}
-    evidence = Map.update(ev0, :relations, edges, fn xs -> xs ++ edges end)
-    si_with_ev = Map.put(si, :evidence, evidence)
-
-    si_final =
-      if attach_related_cells? do
-        maybe_attach_related_cells(si_with_ev, edges)
-      else
-        si_with_ev
-      end
-
-    :telemetry.execute(
-      [:core, :relations, :edges_attached],
-      %{count: length(edges)},
-      %{syn: length(syn_edges), ant: length(ant_edges), hom: length(hom_edges)}
-    )
-
-    si_final
+    si
+    |> put_relation_evidence(edges)
+    |> maybe_attach_related_cells(edges, attach_related_cells?)
+    |> emit_telemetry(length(syn_edges), length(ant_edges), length(hom_edges), length(edges))
   rescue
     _ -> si
   end
 
-  # ------- internals -------
+  # -- extraction -------------------------------------------------------------
 
-  defp maybe_attach_related_cells(si, edges) do
-    related_norms =
-      edges
-      |> Enum.flat_map(fn
-        {:syn, _n, syn_norm, _w} -> [syn_norm]
-        {:ant, _n, ant_norm, _w} -> [ant_norm]
-        {:hom, _n, _sid, _w} -> []
-      end)
-      |> Enum.uniq()
+  defp extract_norms(%{} = si) do
+    si
+    |> Map.get(:tokens, Map.get(si, "tokens", []))
+    |> List.wrap()
+    |> Enum.flat_map(&token_texts/1)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&normalize/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp token_texts(%{} = token) do
+    [
+      Map.get(token, :phrase) || Map.get(token, "phrase"),
+      Map.get(token, :word) || Map.get(token, "word"),
+      Map.get(token, :norm) || Map.get(token, "norm")
+    ]
+  end
+
+  defp token_texts(_), do: []
+
+  # -- DB reads ----------------------------------------------------------------
+
+  defp load_relation_rows([]), do: []
+
+  defp load_relation_rows(norms) when is_list(norms) do
+    Db.all(
+      from(c in Db.BrainCell,
+        where: c.norm in ^norms and c.status == "active",
+        select: %{
+          id: c.id,
+          norm: c.norm,
+          pos: c.pos,
+          synonyms: c.synonyms,
+          antonyms: c.antonyms
+        }
+      )
+    )
+  rescue
+    _ -> []
+  end
+
+  defp fetch_related_cells([]), do: []
+
+  defp fetch_related_cells(norms) when is_list(norms) do
+    Db.all(
+      from(c in Db.BrainCell,
+        where: c.norm in ^norms and c.status == "active",
+        select: %{
+          id: c.id,
+          norm: c.norm,
+          pos: c.pos,
+          word: c.word,
+          definition: c.definition,
+          example: c.example,
+          synonyms: c.synonyms,
+          antonyms: c.antonyms
+        }
+      )
+    )
+    |> Enum.map(&soften_related_cell/1)
+  rescue
+    _ -> []
+  end
+
+  # -- edge building ----------------------------------------------------------
+
+  defp synonym_edges(rows) do
+    for row <- rows,
+        synonym <- List.wrap(Map.get(row, :synonyms) || []),
+        norm = normalize(synonym),
+        norm != "" do
+      {:syn, row.norm, norm, @syn_weight}
+    end
+  end
+
+  defp antonym_edges(rows) do
+    for row <- rows,
+        antonym <- List.wrap(Map.get(row, :antonyms) || []),
+        norm = normalize(antonym),
+        norm != "" do
+      {:ant, row.norm, norm, @ant_weight}
+    end
+  end
+
+  defp homonym_edges(rows) do
+    rows
+    |> Enum.group_by(& &1.norm, & &1.id)
+    |> Enum.flat_map(fn {norm, ids} ->
+      Enum.map(ids, fn id -> {:hom, norm, id, @hom_weight} end)
+    end)
+  end
+
+  # -- SI updates -------------------------------------------------------------
+
+  defp put_relation_evidence(si, edges) when is_map(si) and is_list(edges) do
+    evidence0 = current_evidence(si)
+    relations0 = current_relations(evidence0)
+    evidence1 = Map.put(evidence0, :relations, relations0 ++ edges)
+    Map.put(si, :evidence, evidence1)
+  end
+
+  defp maybe_attach_related_cells(si, _edges, false), do: si
+
+  defp maybe_attach_related_cells(si, edges, true) when is_map(si) and is_list(edges) do
+    related_norms = related_norms(edges)
 
     if related_norms == [] do
       si
     else
-      rows = fetch_cells_by_norms(related_norms)
+      related_cells = fetch_related_cells(related_norms)
+      active_cells = current_active_cells(si)
 
       merged =
-        (Map.get(si, :active_cells, []) || [])
-        |> Kernel.++(Enum.map(rows, &soften/1))
-        |> Enum.uniq_by(&get_id/1)
+        (active_cells ++ related_cells)
+        |> Enum.uniq_by(&cell_identity/1)
 
       Map.put(si, :active_cells, merged)
     end
   end
 
-  defp fetch_cells_by_norms(ns) do
-    Db.all(from(c in Db.BrainCell, where: c.norm in ^ns and c.status == "active"))
-  rescue
-    _ -> []
+  defp maybe_attach_related_cells(si, _edges, _flag), do: si
+
+  defp related_norms(edges) do
+    edges
+    |> Enum.flat_map(fn
+      {:syn, _from_norm, to_norm, _weight} -> [to_norm]
+      {:ant, _from_norm, to_norm, _weight} -> [to_norm]
+      {:hom, _norm, _sense_id, _weight} -> []
+    end)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&normalize/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
   end
 
-  defp soften(%{} = row) do
-    row
-    |> Map.put_new(:modulated_activation, 0.5)
-    |> Map.put_new(:activation, 0.5)
+  # -- telemetry --------------------------------------------------------------
+
+  defp emit_telemetry(si, syn_count, ant_count, hom_count, total_edges) do
+    :telemetry.execute(
+      [:core, :relations, :edges_attached],
+      %{count: total_edges},
+      %{syn: syn_count, ant: ant_count, hom: hom_count}
+    )
+
+    si
   end
 
-  defp get_id(%{id: id}), do: id
-  defp get_id(%{"id" => id}), do: id
+  # -- normalization helpers --------------------------------------------------
+
+  defp current_evidence(si) when is_map(si) do
+    case Map.get(si, :evidence) || Map.get(si, "evidence") do
+      %{} = evidence -> evidence
+      _ -> %{}
+    end
+  end
+
+  defp current_relations(evidence) when is_map(evidence) do
+    case Map.get(evidence, :relations) || Map.get(evidence, "relations") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp current_active_cells(si) when is_map(si) do
+    case Map.get(si, :active_cells) || Map.get(si, "active_cells") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp soften_related_cell(%{} = row) do
+    %{
+      id: Map.get(row, :id),
+      source: :relations,
+      norm: Map.get(row, :norm),
+      pos: Map.get(row, :pos),
+      lemma: Map.get(row, :norm),
+      word: Map.get(row, :word),
+      definition: Map.get(row, :definition),
+      example: Map.get(row, :example),
+      synonyms: List.wrap(Map.get(row, :synonyms)),
+      antonyms: List.wrap(Map.get(row, :antonyms)),
+      score: @soft_activation,
+      activation: @soft_activation,
+      modulated_activation: @soft_activation
+    }
+  end
+
+  defp cell_identity(%{id: id}) when is_binary(id), do: id
+  defp cell_identity(%{"id" => id}) when is_binary(id), do: id
+  defp cell_identity(other), do: other
 
   defp normalize(s) when is_binary(s) do
-    s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+    s
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/\s+/u, " ")
   end
 
   defp normalize(_), do: ""

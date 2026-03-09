@@ -196,68 +196,93 @@ defmodule Brain.LIFG.Input do
   #  - scores: %{id => p, ...}
   #  - chosen_id: "w|pos|sense"
   #  - id / lemma / word with optional :score
-  defp candidates_from_active_cells(ac) when is_list(ac) do
-    ac
-    |> Enum.flat_map(fn cell0 ->
-      cell = Safe.to_plain(cell0)
-      idx = parse_idx(Safe.get(cell, :token_index, 0))
-      scores = Safe.get(cell, :scores)
+defp candidates_from_active_cells(ac) when is_list(ac) do
+  parse_token_index = fn cell ->
+    case Safe.get(cell, :token_index) do
+      i when is_integer(i) and i >= 0 ->
+        i
 
-      base =
-        cond do
-          is_map(scores) and map_size(scores) > 0 ->
-            for {id, s} <- scores do
-              cell
-              |> Map.put(:token_index, idx)
-              |> Map.put(:id, id)
-              |> Map.put(:score, s)
-              |> normalize_candidate(idx)
-            end
-
-          id = Safe.get(cell, :chosen_id) ->
-            cell
-            |> Map.put(:token_index, idx)
-            |> Map.put(:id, id)
-            |> Map.put(:score, 1.0)
-            |> then(&[normalize_candidate(&1, idx)])
-
-          id = Safe.get(cell, :id) ->
-            s = Safe.get(cell, :score, 0.0)
-
-            cell
-            |> Map.put(:token_index, idx)
-            |> Map.put(:id, id)
-            |> Map.put(:score, s)
-            |> then(&[normalize_candidate(&1, idx)])
-
-          lemma0 = Safe.get(cell, :lemma) || Safe.get(cell, :word) ->
-            s = Safe.get(cell, :score, 0.0)
-
-            lemma =
-              lemma0
-              |> to_string_if_present()
-              |> case do
-                nil -> ""
-                v -> v
-              end
-              |> String.trim()
-
-            id = ensure_pos_tagged_id(lemma, cell)
-
-            cell
-            |> Map.put(:token_index, idx)
-            |> Map.put(:id, id)
-            |> Map.put(:lemma, String.downcase(lemma))
-            |> Map.put(:score, s)
-            |> then(&[normalize_candidate(&1, idx)])
-
-          true ->
-            []
+      i when is_binary(i) ->
+        case Integer.parse(i) do
+          {n, _} when n >= 0 -> n
+          _ -> nil
         end
 
-      Enum.reject(base, &reject_bad_candidate/1)
-    end)
+      _ ->
+        nil
+    end
   end
+
+  ac
+  |> Enum.flat_map(fn cell0 ->
+    cell = Safe.to_plain(cell0)
+    idx = parse_token_index.(cell)
+
+    case idx do
+      nil ->
+        []
+
+      _ ->
+        scores = Safe.get(cell, :scores)
+        chosen_id = Safe.get(cell, :chosen_id)
+        id = Safe.get(cell, :id)
+        score = Safe.get(cell, :score, 0.0)
+        lemma0 = Safe.get(cell, :lemma) || Safe.get(cell, :word)
+
+        base =
+          cond do
+            is_map(scores) and map_size(scores) > 0 ->
+              for {cand_id, cand_score} <- scores do
+                cell
+                |> Map.put(:token_index, idx)
+                |> Map.put(:id, cand_id)
+                |> Map.put(:score, cand_score)
+                |> normalize_candidate(idx)
+              end
+
+            is_binary(chosen_id) ->
+              [
+                cell
+                |> Map.put(:token_index, idx)
+                |> Map.put(:id, chosen_id)
+                |> Map.put(:score, 1.0)
+                |> normalize_candidate(idx)
+              ]
+
+            is_binary(id) ->
+              [
+                cell
+                |> Map.put(:token_index, idx)
+                |> Map.put(:id, id)
+                |> Map.put(:score, score)
+                |> normalize_candidate(idx)
+              ]
+
+            true ->
+              lemma =
+                case lemma0 do
+                  nil -> ""
+                  v -> v |> to_string() |> String.trim()
+                end
+
+              if lemma == "" do
+                []
+              else
+                [
+                  cell
+                  |> Map.put(:token_index, idx)
+                  |> Map.put(:id, ensure_pos_tagged_id(lemma, cell))
+                  |> Map.put(:lemma, String.downcase(lemma))
+                  |> Map.put(:score, score)
+                  |> normalize_candidate(idx)
+                ]
+              end
+          end
+
+        Enum.reject(base, &reject_bad_candidate/1)
+    end
+  end)
+end
 
   # ───────────────────────────── Normalization utilities ─────────────────────────────
 

@@ -746,29 +746,27 @@ defmodule Brain.LIFG do
 
   # ── Slate extraction (Stage-1 input contract) ──────────────────────────────
 
-  defp slate_from_si(%{} = si) do
-    # Primary: already-built competition slate
-    sc =
-      Map.get(si, :sense_candidates) ||
-        Map.get(si, "sense_candidates") ||
-        %{}
+defp slate_from_si(%{} = si) do
+  sc =
+    Map.get(si, :sense_candidates) ||
+      Map.get(si, "sense_candidates") ||
+      %{}
 
-    sc = ensure_map(sc)
+  sc = ensure_map(sc)
 
-    if map_size(sc) > 0 do
-      sc
-    else
-      # Fallback: build a per-token slate from active_cells (what your test provides)
-      ac =
-        Map.get(si, :active_cells) ||
-          Map.get(si, "active_cells") ||
-          []
+  cond do
+    map_size(sc) > 0 ->
+      Brain.LIFG.Input.slate_for(%{sense_candidates: sc})
 
-      slate_from_candidate_list(ac)
-    end
+    true ->
+      case Map.get(si, :active_cells) || Map.get(si, "active_cells") || [] do
+        ac when is_list(ac) -> Brain.LIFG.Input.slate_for(ac)
+        _ -> %{}
+      end
   end
+end
 
-  defp slate_from_si(_), do: %{}
+defp slate_from_si(_), do: %{}
 
   defp normalize_slate_map(m) when is_map(m) do
     Enum.reduce(m, %{}, fn {k, v}, acc ->
@@ -995,14 +993,14 @@ defmodule Brain.LIFG do
 
   defp maybe_put_if_binary(m, _k, _v), do: m
 
-  defp slate_from_assistant_candidates(%{} = si) do
-    cands =
-      Map.get(si, :assistant_candidates) ||
-        Map.get(si, "assistant_candidates") ||
-        []
+defp slate_from_assistant_candidates(%{} = si) do
+  cands =
+    Map.get(si, :assistant_candidates) ||
+      Map.get(si, "assistant_candidates") ||
+      []
 
-    slate_from_candidate_list(cands)
-  end
+  Brain.LIFG.Input.slate_for(cands)
+end
 
   # ── Prob/margin backfill for scores=:none ──────────────────────────────────
 
@@ -1954,39 +1952,4 @@ defmodule Brain.LIFG do
       _, _ -> %{}
     end
   end
-
-  # ── Minimal slate builder (used only as fallback) ──────────────────────────
-  defp slate_from_candidate_list(list) when is_list(list) do
-    list
-    |> Enum.map(&Safe.to_plain/1)
-    |> Enum.reduce(%{}, fn c, acc ->
-      idx0 = c[:token_index] || c["token_index"] || c[:index] || c["index"]
-      idx = normalize_idx(idx0)
-
-      id0 =
-        c[:id] || c["id"] ||
-          c[:chosen_id] || c["chosen_id"] ||
-          c[:winner_id] || c["winner_id"]
-
-      cond do
-        not (is_integer(idx) and idx >= 0) ->
-          acc
-
-        is_nil(id0) ->
-          acc
-
-        true ->
-          sid = to_string(id0)
-
-          Map.update(acc, idx, [%{id: sid}], fn xs ->
-            [%{id: sid} | xs]
-          end)
-      end
-    end)
-    |> Enum.into(%{}, fn {idx, xs} ->
-      {idx, xs |> Enum.reverse() |> Enum.uniq_by(&Map.get(&1, :id))}
-    end)
-  end
-
-  defp slate_from_candidate_list(_), do: %{}
 end

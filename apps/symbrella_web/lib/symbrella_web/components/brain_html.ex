@@ -515,50 +515,82 @@ defmodule SymbrellaWeb.BrainHTML do
 
   # --- Working memory panel --------------------------------------------------
 
-  attr :wm, :any, default: %{}
+# --- Working memory panel --------------------------------------------------
 
-  def wm_panel(assigns) do
-    wm = assigns[:wm] || %{}
+# --- Working memory panel --------------------------------------------------
 
-    items =
-      cond do
-        is_map(wm) and is_list(wm[:items]) -> wm[:items]
-        is_map(wm) and is_list(wm[:wm]) -> wm[:wm]
-        is_map(wm) and is_list(wm[:value]) -> wm[:value]
-        true -> []
-      end
+attr :wm, :any, default: %{}
 
-    empty? = items == []
+def wm_panel(assigns) do
+  wm = assigns[:wm] || %{}
 
-    assigns =
-      assigns
-      |> assign(:wm, wm)
-      |> assign(:items, items)
-      |> assign(:empty?, empty?)
+  items =
+    cond do
+      is_map(wm) and is_list(wm[:items]) -> wm[:items]
+      is_map(wm) and is_list(wm[:wm]) -> wm[:wm]
+      is_map(wm) and is_list(wm[:value]) -> wm[:value]
+      true -> []
+    end
 
-    ~H"""
-    <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-semibold text-gray-700 dark:text-gray-200">Working Memory (WM)</div>
-        <div class="text-xs text-gray-500 dark:text-gray-400">
+  empty? = items == []
+
+  assigns =
+    assigns
+    |> assign(:wm, wm)
+    |> assign(:items, items)
+    |> assign(:empty?, empty?)
+    |> assign(:copy_target_id, "wm-copy-target")
+    |> assign(:copy_button_id, "wm-copy-btn")
+
+  ~H"""
+  <section class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          Working Memory (WM)
+        </h3>
+
+        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           <%= if is_map(@wm) do %>
             <%= if @wm[:source] do %>
-              source: <span class="font-mono">{to_string(@wm[:source])}</span>
+              source: {to_string(@wm[:source])}
+            <% else %>
+              —
             <% end %>
           <% else %>
             —
           <% end %>
-        </div>
+        </p>
       </div>
 
-      <%= if @empty? do %>
-        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">— no WM observed yet —</div>
-      <% else %>
-        <pre class="mt-3 text-xs leading-5 overflow-x-auto p-2 rounded bg-black/5 dark:bg-white/5"><%= inspect(@wm, pretty: true, width: 100, limit: :infinity) %></pre>
+      <%= unless @empty? do %>
+        <button
+          id={@copy_button_id}
+          type="button"
+          phx-hook="ClipboardCopy"
+          data-clipboard-target={"##{@copy_target_id}"}
+          class="inline-flex items-center gap-2 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          aria-label="Copy working memory"
+          title="Copy working memory"
+        >
+          Copy
+        </button>
       <% end %>
     </div>
-    """
-  end
+
+    <%= if @empty? do %>
+      <div class="mt-3 rounded-xl border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        — no WM observed yet —
+      </div>
+    <% else %>
+      <pre
+        id={@copy_target_id}
+        class="mt-3 overflow-x-auto rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-100"
+      ><%= inspect(@wm, pretty: true, width: 100, limit: :infinity) %></pre>
+    <% end %>
+  </section>
+  """
+end
 
   # --- Live state ------------------------------------------------------------
 

@@ -1,4 +1,3 @@
-# apps/db/lib/db.ex
 defmodule Db do
   @moduledoc """
   Umbrella-wide Repo (single database).
@@ -29,11 +28,18 @@ defmodule Db do
     adapter: Ecto.Adapters.Postgres,
     priv: "priv/db"
 
-  # Need full query macros (row_number/0, over/2, subquery/1, etc.)
   import Ecto.Query
   alias Db.BrainCell
 
   @type norm :: String.t()
+
+  # Item 1: closed-class inventory pruning at LTM retrieval time.
+  # This intentionally handles only the currently observed troublemakers.
+  @closed_class_allowed_pos_by_norm %{
+    "is" => ["verb", "aux", "auxiliary", "copula"],
+    "my" => ["det", "determiner", "possessive", "possessive_determiner", "pronoun", "adj", "adjective"],
+    "what" => ["pronoun", "det", "determiner", "interrogative", "particle"]
+  }
 
   @doc """
   Look up BrainCell rows for the tokens inside an SI-like map.
@@ -79,6 +85,8 @@ defmodule Db do
     if uniq_norms == [] do
       {:ok, %{rows: [], missing_norms: [], db_hits: MapSet.new()}}
     else
+      token_meta_by_idx = token_meta_by_idx(tokens)
+
       where_dyn =
         if only_active? do
           dynamic([b], b.status == "active" and b.norm in ^uniq_norms)
@@ -91,21 +99,18 @@ defmodule Db do
           where: ^where_dyn
         )
 
-      # Optional per-norm limiting via window function (row_number over partition)
       q =
         case limit_per_norm do
           :all ->
             from(b in base_q, select: b)
 
           n when is_integer(n) and n > 0 ->
-            # 1) Select a map with the struct and the row_number window
             q1 =
               from(b in base_q,
                 select: %{b: b, rn: over(row_number(), :norm_part)},
                 windows: [norm_part: [partition_by: b.norm, order_by: [desc: b.updated_at]]]
               )
 
-            # 2) Filter by rn in the outer query and select the original struct
             from(s in subquery(q1),
               where: s.rn <= ^n,
               select: s.b
@@ -117,12 +122,6 @@ defmodule Db do
 
       rows0 = Db.all(q)
 
-      existing_norms = MapSet.new(for r <- rows0, do: r.norm)
-      missing = Enum.reject(uniq_norms, &MapSet.member?(existing_norms, &1))
-      hits = existing_norms
-
-      # Expand DB rows across all token indices that requested that norm.
-      # This produces per-token candidates suitable for LIFG Stage1 bucketing.
       token_idxs_by_norm =
         token_norms
         |> Enum.reduce(%{}, fn {idx, n}, acc ->
@@ -132,13 +131,23 @@ defmodule Db do
 
       rows =
         rows0
-        |> Enum.flat_map(fn r ->
-          idxs = Map.get(token_idxs_by_norm, r.norm, [])
+        |> Enum.flat_map(fn row ->
+          idxs = Map.get(token_idxs_by_norm, row.norm, [])
 
-          Enum.map(idxs, fn idx ->
-            braincell_to_candidate_map(r, idx)
+          Enum.flat_map(idxs, fn idx ->
+            token_meta = Map.get(token_meta_by_idx, idx, %{})
+
+            if keep_ltm_row_for_token?(row, token_meta) do
+              [braincell_to_candidate_map(row, idx)]
+            else
+              []
+            end
           end)
         end)
+
+      kept_norms = MapSet.new(for r <- rows, do: r.norm)
+      missing = Enum.reject(uniq_norms, &MapSet.member?(kept_norms, &1))
+      hits = kept_norms
 
       {:ok, %{rows: rows, missing_norms: missing, db_hits: hits}}
     end
@@ -177,16 +186,13 @@ defmodule Db do
 
   def word_exists?(_, _opts), do: false
 
-
-def insrt_all(table, rows, opt) do
-  insert_all(table, rows, opt)
-end
+  def insrt_all(table, rows, opt) do
+    insert_all(table, rows, opt)
+  end
 
   # -- helpers ----------------------------------------------------------------
 
   defp braincell_to_candidate_map(%BrainCell{} = r, token_index) when is_integer(token_index) do
-    # Keep the surface/sense identity stable via `id` (word|pos|sense_index),
-    # and provide lemma/norm + pos for downstream scoring.
     %{
       id: r.id,
       token_index: token_index,
@@ -198,11 +204,74 @@ end
       example: r.example,
       synonyms: List.wrap(r.synonyms),
       antonyms: List.wrap(r.antonyms),
-      # A light prior score; Stage1 feature mix can incorporate this.
-      # Keep moderate so it doesn't drown relation/intent signals.
       score: 0.5,
       source: :ltm
     }
+  end
+
+  defp token_meta_by_idx(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {tok, fallback_idx}, acc ->
+      idx = token_index(tok, fallback_idx)
+      surface = token_to_phrase(tok)
+      token_norm = norm(surface)
+
+      Map.put(acc, idx, %{
+        surface: surface,
+        norm: token_norm
+      })
+    end)
+  end
+
+  defp token_meta_by_idx(_), do: %{}
+
+  defp keep_ltm_row_for_token?(%BrainCell{} = row, %{norm: token_norm, surface: surface}) do
+    row_pos = normalize_pos(row.pos)
+    row_word = normalize_word(row.word)
+
+    cond do
+      lowercase_surface?(surface) and acronymish_or_titlecase_noun_row?(row_word, row_pos) ->
+        false
+
+      token_norm in Map.keys(@closed_class_allowed_pos_by_norm) ->
+        row_pos in Map.fetch!(@closed_class_allowed_pos_by_norm, token_norm)
+
+      true ->
+        true
+    end
+  end
+
+  defp keep_ltm_row_for_token?(%BrainCell{}, _), do: true
+
+  defp normalize_pos(nil), do: ""
+
+  defp normalize_pos(pos) do
+    pos
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/\s+/, "_")
+    |> String.replace("-", "_")
+  end
+
+  defp normalize_word(nil), do: ""
+
+  defp normalize_word(word) do
+    word
+    |> to_string()
+    |> String.trim()
+  end
+
+  defp lowercase_surface?(surface) when is_binary(surface) do
+    s = String.trim(surface)
+    s != "" and s == String.downcase(s)
+  end
+
+  defp lowercase_surface?(_), do: false
+
+  defp acronymish_or_titlecase_noun_row?(row_word, row_pos) do
+    row_pos == "noun" and row_word != "" and row_word != String.downcase(row_word)
   end
 
   # Accept token map or string, extract phrase text
@@ -218,6 +287,7 @@ end
   defp token_index(%{"index" => i}, _fallback) when is_integer(i) and i >= 0, do: i
   defp token_index(%{token_index: i}, _fallback) when is_integer(i) and i >= 0, do: i
   defp token_index(%{"token_index" => i}, _fallback) when is_integer(i) and i >= 0, do: i
+
   defp token_index(_tok, fallback_idx) when is_integer(fallback_idx) and fallback_idx >= 0,
     do: fallback_idx
 
@@ -228,7 +298,6 @@ end
     s
     |> String.downcase()
     |> String.trim()
-    # strip leading/trailing punctuation (Unicode-aware); keep inner apostrophes/hyphens
     |> String.replace(~r/^\p{P}+/u, "")
     |> String.replace(~r/\p{P}+$/u, "")
     |> String.replace(~r/\s+/u, " ")
