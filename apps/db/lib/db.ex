@@ -37,7 +37,15 @@ defmodule Db do
   # This intentionally handles only the currently observed troublemakers.
   @closed_class_allowed_pos_by_norm %{
     "is" => ["verb", "aux", "auxiliary", "copula"],
-    "my" => ["det", "determiner", "possessive", "possessive_determiner", "pronoun", "adj", "adjective"],
+    "my" => [
+      "det",
+      "determiner",
+      "possessive",
+      "possessive_determiner",
+      "pronoun",
+      "adj",
+      "adjective"
+    ],
     "what" => ["pronoun", "det", "determiner", "interrogative", "particle"]
   }
 

@@ -79,10 +79,10 @@ defmodule SymbrellaWeb.HomeLive do
           )
           |> push_event("chat:scroll", %{to: "composer"})
 
-task =
-  Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-    build_planned_reply(text, socket.assigns.session_id)
-  end)
+        task =
+          Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
+            build_planned_reply(text, socket.assigns.session_id)
+          end)
 
         {:noreply, assign(socket, :pending_task, task)}
     end
@@ -232,73 +232,72 @@ task =
   # ─────────────────────────────────────────────────────────────────────────────
   # Planner integration
   # ─────────────────────────────────────────────────────────────────────────────
-defp build_planned_reply(user_text, session_id) do
-  si =
-    Core.resolve_input(user_text,
-      mode: :prod,
-      enrich_lexicon?: true,
-      lexicon_stage?: true
-    )
-    |> Map.put(:session_id, session_id)
+  defp build_planned_reply(user_text, session_id) do
+    si =
+      Core.resolve_input(user_text,
+        mode: :prod,
+        enrich_lexicon?: true,
+        lexicon_stage?: true
+      )
+      |> Map.put(:session_id, session_id)
 
-  lexical_tail = build_lexical_tail(si)
-  senses_selected = build_senses_selected(si)
-  mood = mood_from_si(si)
+    lexical_tail = build_lexical_tail(si)
+    senses_selected = build_senses_selected(si)
+    mood = mood_from_si(si)
 
-  si_like = %{
-    session_id: session_id,
-    intent: Map.get(si, :intent, :unknown),
-    confidence: Map.get(si, :confidence, 0.0),
-    keyword: Map.get(si, :keyword, ""),
-    text: user_text,
-    tokens: Map.get(si, :tokens, []),
-    source: Map.get(si, :source, :user)
-  }
+    si_like = %{
+      session_id: session_id,
+      intent: Map.get(si, :intent, :unknown),
+      confidence: Map.get(si, :confidence, 0.0),
+      keyword: Map.get(si, :keyword, ""),
+      text: user_text,
+      tokens: Map.get(si, :tokens, []),
+      source: Map.get(si, :source, :user)
+    }
 
-  # Prefer planner/LLM path; fall back to Core-produced response_text; then debug.
-  {tone, reply_text, meta} =
-    cond do
-      Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
-        Response.plan(si_like, mood)
+    # Prefer planner/LLM path; fall back to Core-produced response_text; then debug.
+    {tone, reply_text, meta} =
+      cond do
+        Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
+          Response.plan(si_like, mood)
 
-      is_binary(Map.get(si, :response_text)) and Map.get(si, :response_text) != "" ->
-        {
-          Map.get(si, :response_tone, :warm),
-          Map.get(si, :response_text),
-          Map.get(si, :response_meta, %{})
-        }
+        is_binary(Map.get(si, :response_text)) and Map.get(si, :response_text) != "" ->
+          {
+            Map.get(si, :response_tone, :warm),
+            Map.get(si, :response_text),
+            Map.get(si, :response_meta, %{})
+          }
 
-      true ->
-        {nil, format_si_reply(si), %{}}
+        true ->
+          {nil, format_si_reply(si), %{}}
+      end
+
+    # UI-visible rendering (tone line + body)
+    visible = compose_tone_and_main(tone, reply_text)
+
+    explain_text =
+      join_blocks([
+        visible,
+        lexical_tail,
+        get_in(meta || %{}, [:explanation, :text])
+      ])
+
+    # Record turn for multi-turn context stitching.
+    # IMPORTANT: record *reply_text* (no tone prefix) to keep history clean.
+    if Code.ensure_loaded?(Core.Response.LlmSynthesis) and
+         function_exported?(Core.Response.LlmSynthesis, :record_turn, 3) do
+      _ = Core.Response.LlmSynthesis.record_turn(session_id, user_text, reply_text)
     end
 
-  # UI-visible rendering (tone line + body)
-  visible = compose_tone_and_main(tone, reply_text)
-
-  explain_text =
-    join_blocks([
-      visible,
-      lexical_tail,
-      get_in(meta || %{}, [:explanation, :text])
-    ])
-
-  # Record turn for multi-turn context stitching.
-  # IMPORTANT: record *reply_text* (no tone prefix) to keep history clean.
-  if Code.ensure_loaded?(Core.Response.LlmSynthesis) and
-       function_exported?(Core.Response.LlmSynthesis, :record_turn, 3) do
-    _ = Core.Response.LlmSynthesis.record_turn(session_id, user_text, reply_text)
+    %{
+      text: visible,
+      tone: tone,
+      meta: meta,
+      si: si,
+      senses_selected: senses_selected,
+      explain_text: explain_text
+    }
   end
-
-  %{
-    text: visible,
-    tone: tone,
-    meta: meta,
-    si: si,
-    senses_selected: senses_selected,
-    explain_text: explain_text
-  }
-end
-
 
   defp build_lexical_tail(si) do
     tokens = Map.get(si, :tokens)

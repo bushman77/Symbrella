@@ -35,9 +35,18 @@ defmodule Brain.Hippocampus.Writer do
   """
   @spec maybe_persist(map(), keyword()) :: :ok
   def maybe_persist(%{} = episode, opts) when is_list(opts) do
-    if Keyword.get(opts, :persist?, true) do
+    persist? = Keyword.get(opts, :persist?, Keyword.get(opts, :persist, true))
+    priming? = Keyword.get(opts, :priming, false)
+
+    episode_plain = deep_plain(episode)
+
+    if priming? do
+      maybe_emit_priming(episode_plain)
+    end
+
+    if persist? do
       try do
-        insert_row!(episode)
+        insert_row!(episode_plain)
         :ok
       rescue
         e ->
@@ -57,6 +66,51 @@ defmodule Brain.Hippocampus.Writer do
     end
   end
 
+  defp maybe_emit_priming(%{} = episode) do
+    case priming_outcome(episode) do
+      :neutral ->
+        :ok
+
+      outcome when outcome in [:success, :failure] ->
+        if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+          :telemetry.execute(
+            [:brain, :hippo, :priming],
+            %{count: 1},
+            %{outcome: outcome}
+          )
+        end
+
+        :ok
+    end
+  end
+
+  defp priming_outcome(%{} = ep) do
+    cond do
+      get_in(ep, [:reanalysis, :gave_up]) == true ->
+        :failure
+
+      success_episode?(ep) ->
+        :success
+
+      true ->
+        :neutral
+    end
+  end
+
+  defp success_episode?(ep) do
+    winners =
+      get_in(ep, [:atl_slate, :winners]) ||
+        get_in(ep, ["atl_slate", "winners"]) ||
+        []
+
+    conf =
+      get_in(ep, [:intent, :confidence]) ||
+        get_in(ep, ["intent", "confidence"]) ||
+        0.0
+
+    winners != [] and is_number(conf) and conf >= 0.5
+  end
+
   def maybe_persist(_other, _opts), do: :ok
 
   @doc """
@@ -69,10 +123,10 @@ defmodule Brain.Hippocampus.Writer do
   def insert_row!(%{} = episode) do
     row = episode_row(episode)
 
-Db.insert_all(@episodes_table, [row],
-  on_conflict: :nothing,
-  conflict_target: [:signature]
-)
+    Db.insert_all(@episodes_table, [row],
+      on_conflict: :nothing,
+      conflict_target: [:signature]
+    )
 
     :ok
   end

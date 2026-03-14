@@ -1,7 +1,7 @@
 # P-201 — Tokenizer defaults (dev): words-only, no char-grams
 import Config
 config :brain, :ml_enabled, false
-  
+
 config :symbrella_web, SymbrellaWeb.Endpoint,
   server: true,
   http: [ip: {0, 0, 0, 0}, port: 4000],

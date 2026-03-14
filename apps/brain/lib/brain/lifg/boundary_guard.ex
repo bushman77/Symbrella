@@ -195,9 +195,9 @@ defmodule Brain.LIFG.BoundaryGuard do
         #
         # We generate candidates in both unit systems, convert grapheme candidates to bytes,
         # and pick the first whose slice matches the phrase (case/space-insensitive).
+        # If we can't match, still choose a sane candidate (bytes first) so we don't explode.
         span =
           pick_best_span(sent, phrase, s, x) ||
-            # If we can't match, still choose a sane candidate (bytes first) so we don't explode.
             first_sane_span(sent, phrase, s, x)
 
         {span, next_cursor(span, cursor_bytes)}
@@ -240,13 +240,18 @@ defmodule Brain.LIFG.BoundaryGuard do
 
     candidates =
       [
-        {:byte, {s, x}},          # maybe end-form
-        {:byte, {s, s + x}},      # maybe len-form
-        {:byte, {s, s + ph_blen}},# phrase length in bytes
-
-        {:gr, {s, x}},            # maybe end-form in graphemes
-        {:gr, {s, s + x}},        # maybe len-form in graphemes
-        {:gr, {s, s + ph_glen}}   # phrase length in graphemes
+        # maybe end-form
+        {:byte, {s, x}},
+        # maybe len-form
+        {:byte, {s, s + x}},
+        # phrase length in bytes
+        {:byte, {s, s + ph_blen}},
+        # maybe end-form in graphemes
+        {:gr, {s, x}},
+        # maybe len-form in graphemes
+        {:gr, {s, s + x}},
+        # phrase length in graphemes
+        {:gr, {s, s + ph_glen}}
       ]
       |> Enum.uniq()
 
@@ -336,7 +341,8 @@ defmodule Brain.LIFG.BoundaryGuard do
 
   # Recover span in the ORIGINAL sentence. This keeps offsets correct.
   defp recover_span(sent, phrase, cursor_bytes)
-       when is_binary(sent) and is_binary(phrase) and is_integer(cursor_bytes) and cursor_bytes >= 0 do
+       when is_binary(sent) and is_binary(phrase) and is_integer(cursor_bytes) and
+              cursor_bytes >= 0 do
     ph = String.trim(phrase)
 
     if ph == "" do
@@ -505,4 +511,3 @@ defmodule Brain.LIFG.BoundaryGuard do
   defp mapify(%{} = m), do: m
   defp mapify(other), do: %{phrase: to_string(other)}
 end
-

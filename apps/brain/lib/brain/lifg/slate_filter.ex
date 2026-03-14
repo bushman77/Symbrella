@@ -43,7 +43,18 @@ defmodule Brain.LIFG.SlateFilter do
     |> Enum.map(fn r ->
       %{
         lemma: down(r[:lemma]),
-        allow: r[:allow] |> List.wrap() |> MapSet.new(),
+        allow:
+          r[:allow]
+          |> List.wrap()
+          |> Enum.map(fn v ->
+            v
+            |> to_string()
+            |> String.downcase()
+            |> String.trim()
+            |> String.replace(~r/\s+/, "_")
+            |> String.replace("-", "_")
+          end)
+          |> MapSet.new(),
         drop_others?: !!r[:drop_others?]
       }
     end)
@@ -100,8 +111,16 @@ defmodule Brain.LIFG.SlateFilter do
 
   defp pos_from_id(id) when is_binary(id) do
     case String.split(id, "|") do
-      [_lemma, pos, _sense] -> pos
-      _ -> nil
+      [_lemma, pos, _sense] ->
+        pos
+        |> to_string()
+        |> String.downcase()
+        |> String.trim()
+        |> String.replace(~r/\s+/, "_")
+        |> String.replace("-", "_")
+
+      _ ->
+        nil
     end
   end
 

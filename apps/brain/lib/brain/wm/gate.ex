@@ -6,7 +6,7 @@ defmodule Brain.WM.Gate do
   Entry point: `ingest_from_si/3` — returns a new `state`.
   """
 
-  @wm_gate_event [:brain, :wm, :gate]
+  @wm_gate_event [:brain, :gate, :decision]
 
   # ── Public API ──────────────────────────────────────────────────────────────
 

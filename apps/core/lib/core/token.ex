@@ -401,7 +401,9 @@ defmodule Core.Token do
 
         reasons = []
         reasons = if en >= st, do: reasons, else: [{:order, {st, en}} | reasons]
-        reasons = if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
+
+        reasons =
+          if st >= last_start, do: reasons, else: [{:start_order, {last_start, st}} | reasons]
 
         if reasons == [] do
           {acc, st}

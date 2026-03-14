@@ -17,8 +17,7 @@ config :core, Core.Recall.Synonyms,
   ttl_ms: 60_000,
   top_k: 12
 
-config :core, Core.Recall.Synonyms.Providers.External,
-  mfa: {Db.Lexicon, :lookup_synonyms, []}
+config :core, Core.Recall.Synonyms.Providers.External, mfa: {Db.Lexicon, :lookup_synonyms, []}
 
 config :core,
   recall_budget_ms: :infinity,
@@ -80,7 +79,7 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("\~/models/gemma-2-2b-it-Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
   llama_server: "llama-server",
   auto_start_on_boot?: true,
   allow_lazy_start?: true,

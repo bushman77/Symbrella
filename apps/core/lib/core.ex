@@ -268,7 +268,9 @@ defmodule Core do
   end
 
   # Some Brain paths may return a tuple or embed out under {:ok, out}
-  defp attach_lifg_reply(%{} = si, {{:ok, %{} = out}, _state}), do: attach_lifg_reply(si, {:ok, out})
+  defp attach_lifg_reply(%{} = si, {{:ok, %{} = out}, _state}),
+    do: attach_lifg_reply(si, {:ok, out})
+
   defp attach_lifg_reply(%{} = si, {:error, _reason}), do: si
   defp attach_lifg_reply(%{} = si, _other), do: si
 

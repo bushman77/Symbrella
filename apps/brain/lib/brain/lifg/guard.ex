@@ -2,23 +2,35 @@ defmodule Brain.LIFG.Guard do
   @moduledoc """
   Slate-level token guard for the LIFG path.
 
-  Contract (per tests):
-  - Accepts SI-like maps containing `:tokens` or `"tokens"` and returns same shape.
+  Contract
+  --------
+  - Accepts SI-like maps containing `:tokens` or `"tokens"` and returns the same shape.
   - Accepts bare token lists and returns a list.
   - When sentence is present:
       * normalize/recover spans
       * drop tokens that do not start/end on word boundaries (unless `mw: true`)
-      * emit `[:brain, :lifg, :boundary_drop]` with meta including `mw: false/true`
+      * emit boundary-drop telemetry with metadata
   - Always:
-      * drop classic char-gram symptoms (non-mw tokens whose phrase contains whitespace)
+      * drop classic char-gram symptoms (non-MWE tokens whose phrase contains whitespace)
       * drop explicit char-grams (source/kind flags)
-      * emit `[:brain, :lifg, :chargram_violation]` where meta.reason == :chargram
-        and meta.v == 2
-      * in `:test`, also emit `[:test, :lifg, :chargram_violation_tripwire]`
+      * emit char-gram telemetry with `meta.reason == :chargram` and `meta.v == 2`
+      * in `:test`, also emit the tripwire event
   - When sentence is NOT present:
       * be permissive — do NOT drop tokens just because `:span` is missing
 
-  Span convention (per tests): `{start, end_exclusive}` in bytes.
+  Span convention
+  ---------------
+  After `sanitize/1` or `sanitize/2`, internal spans are canonical byte offsets in:
+
+      {start_byte, end_exclusive_byte}
+
+  Raw input may still arrive as legacy ambiguous tuples or tagged tuples such as:
+
+      {:end_exclusive, start, stop}
+      {:length, start, len}
+
+  Guard normalizes these once. Invalid or unrecoverable spans become absent/nil and
+  are not guessed downstream.
   """
 
   @chargram_event [:brain, :lifg, :chargram_violation]
@@ -28,12 +40,12 @@ defmodule Brain.LIFG.Guard do
   @type token :: map()
   @type si_like :: map()
 
-  # ── Public ────────────────────────────────────────────────────────────
+  # ── Public API ────────────────────────────────────────────────────────
 
   @spec sanitize(si_like | [token]) :: si_like | [token]
   def sanitize(%{tokens: toks} = si) when is_list(toks) do
     sent = Map.get(si, :sentence) || Map.get(si, "sentence")
-    toks2 = sanitize(toks, sent)
+    toks2 = sanitize_tokens(toks, sent, guard_events([]))
 
     si
     |> Map.put(:tokens, toks2)
@@ -42,18 +54,52 @@ defmodule Brain.LIFG.Guard do
 
   def sanitize(%{"tokens" => toks} = si) when is_list(toks) do
     sent = Map.get(si, :sentence) || Map.get(si, "sentence")
-    toks2 = sanitize(toks, sent)
+    toks2 = sanitize_tokens(toks, sent, guard_events([]))
 
     si
     |> Map.put("tokens", toks2)
     |> maybe_put(:tokens, toks2)
   end
 
-  def sanitize(tokens) when is_list(tokens), do: sanitize(tokens, nil)
+  def sanitize(tokens) when is_list(tokens), do: sanitize_tokens(tokens, nil, guard_events([]))
   def sanitize(other), do: other
 
+  @spec sanitize(si_like, keyword()) :: si_like
+  def sanitize(%{tokens: toks} = si, opts) when is_list(toks) and is_list(opts) do
+    sent = Map.get(si, :sentence) || Map.get(si, "sentence")
+    events = if Keyword.keyword?(opts), do: guard_events(opts), else: guard_events([])
+    toks2 = sanitize_tokens(toks, sent, events)
+
+    si
+    |> Map.put(:tokens, toks2)
+    |> maybe_put("tokens", toks2)
+  end
+
+  def sanitize(%{"tokens" => toks} = si, opts) when is_list(toks) and is_list(opts) do
+    sent = Map.get(si, :sentence) || Map.get(si, "sentence")
+    events = if Keyword.keyword?(opts), do: guard_events(opts), else: guard_events([])
+    toks2 = sanitize_tokens(toks, sent, events)
+
+    si
+    |> Map.put("tokens", toks2)
+    |> maybe_put(:tokens, toks2)
+  end
+
   @spec sanitize([token], String.t() | nil) :: [token]
-  def sanitize(tokens, sentence) when is_list(tokens) do
+  def sanitize(tokens, sentence)
+      when is_list(tokens) and (is_binary(sentence) or is_nil(sentence)) do
+    sanitize_tokens(tokens, sentence, guard_events([]))
+  end
+
+  @spec sanitize([token], keyword()) :: [token]
+  def sanitize(tokens, opts) when is_list(tokens) and is_list(opts) do
+    events = if Keyword.keyword?(opts), do: guard_events(opts), else: guard_events([])
+    sanitize_tokens(tokens, nil, events)
+  end
+
+  # ── Internal worker ───────────────────────────────────────────────────
+
+  defp sanitize_tokens(tokens, sentence, events) when is_list(tokens) do
     sent = normalize_sentence(sentence)
 
     {normed, _cursor} =
@@ -63,7 +109,6 @@ defmodule Brain.LIFG.Guard do
         t0 = mapify(tok)
         idx = tok_index(t0, fallback_idx)
 
-        # Ensure Stage1 can read either atom OR string keys.
         t1 =
           t0
           |> put_both(:index, idx)
@@ -91,12 +136,50 @@ defmodule Brain.LIFG.Guard do
 
     {kept, dropped} = split_chargrams(normed)
 
-    maybe_emit_chargram_violation_group(dropped)
+    maybe_emit_chargram_violation_group(dropped, events)
 
     kept
-    |> maybe_drop_by_boundary(sent)
+    |> maybe_drop_by_boundary(sent, events)
     |> sort_by_span_then_index()
   end
+
+  # ── Event resolution ──────────────────────────────────────────────────
+
+  defp guard_events(opts) when is_list(opts) do
+    chargram_event =
+      Keyword.get(
+        opts,
+        :guard_chargram_event,
+        Keyword.get(opts, :chargram_event, @chargram_event)
+      )
+
+    boundary_event =
+      Keyword.get(
+        opts,
+        :guard_boundary_event,
+        Keyword.get(opts, :boundary_event, @boundary_drop_event)
+      )
+
+    tripwire_event =
+      Keyword.get(
+        opts,
+        :guard_chargram_tripwire_event,
+        Keyword.get(
+          opts,
+          :chargram_tripwire_event,
+          if(test_event?(chargram_event), do: chargram_event, else: @chargram_tripwire_event)
+        )
+      )
+
+    %{
+      chargram_event: chargram_event,
+      boundary_event: boundary_event,
+      chargram_tripwire_event: tripwire_event
+    }
+  end
+
+  defp test_event?([:test | _]), do: true
+  defp test_event?(_), do: false
 
   # ── Chargrams ─────────────────────────────────────────────────────────
 
@@ -145,10 +228,9 @@ defmodule Brain.LIFG.Guard do
 
   defp explicit_chargram?(_), do: false
 
-  # IMPORTANT: tests want meta.reason == :chargram and meta.v == 2
-  defp maybe_emit_chargram_violation_group([]), do: :ok
+  defp maybe_emit_chargram_violation_group([], _events), do: :ok
 
-  defp maybe_emit_chargram_violation_group(dropped) when is_list(dropped) do
+  defp maybe_emit_chargram_violation_group(dropped, events) when is_list(dropped) do
     {tok0, sr0, phrase0} =
       Enum.find(dropped, fn {_t, sr, _ph} -> sr == :cross_word end) ||
         Enum.find(dropped, fn {_t, sr, _ph} -> sr == :explicit end) ||
@@ -169,18 +251,18 @@ defmodule Brain.LIFG.Guard do
       v: 2
     }
 
-    safe_telemetry(@chargram_event, %{count: length(dropped)}, meta)
+    safe_telemetry(events.chargram_event, %{}, meta)
 
     if test_env?() do
-      safe_telemetry(@chargram_tripwire_event, %{count: length(dropped)}, meta)
+      safe_telemetry(events.chargram_tripwire_event, %{}, meta)
     end
   end
 
-  # ── Boundary (only when sentence exists) ───────────────────────────────
+  # ── Boundary (only when sentence exists) ──────────────────────────────
 
-  defp maybe_drop_by_boundary(tokens, nil), do: tokens
+  defp maybe_drop_by_boundary(tokens, nil, _events), do: tokens
 
-  defp maybe_drop_by_boundary(tokens, sent) when is_binary(sent) do
+  defp maybe_drop_by_boundary(tokens, sent, events) when is_binary(sent) do
     Enum.reject(tokens, fn tok ->
       mw? = tok_mw?(tok)
       phrase = tok_phrase(tok) || ""
@@ -190,16 +272,15 @@ defmodule Brain.LIFG.Guard do
         mw? ->
           false
 
-        not is_tuple(span) ->
-          # With sentence present we *try* to recover; if we still have no span, treat as chargram.
-          emit_chargram_violation(tok, :bad_span, phrase, span)
+        not valid_span_tuple?(span) ->
+          emit_chargram_violation(tok, :bad_span, phrase, span, events)
           true
 
         boundary_ok?(sent, span) ->
           false
 
         true ->
-          emit_boundary_drop(tok, :boundary, phrase, span, sent)
+          emit_boundary_drop(tok, :boundary, phrase, span, sent, events)
           true
       end
     end)
@@ -228,7 +309,7 @@ defmodule Brain.LIFG.Guard do
 
   defp word_byte?(_), do: false
 
-  defp emit_boundary_drop(tok, reason, phrase, span, sent) do
+  defp emit_boundary_drop(tok, reason, phrase, span, sent, events) do
     meta = %{
       reason: reason,
       token_index: tok_index(tok, 0),
@@ -247,10 +328,10 @@ defmodule Brain.LIFG.Guard do
       v: 2
     }
 
-    safe_telemetry(@boundary_drop_event, %{count: 1}, meta)
+    safe_telemetry(events.boundary_event, %{}, meta)
   end
 
-  defp emit_chargram_violation(tok, detail, phrase, span) do
+  defp emit_chargram_violation(tok, detail, phrase, span, events) do
     meta = %{
       reason: :chargram,
       subreason: detail,
@@ -262,17 +343,23 @@ defmodule Brain.LIFG.Guard do
       v: 2
     }
 
-    safe_telemetry(@chargram_event, %{count: 1}, meta)
+    safe_telemetry(events.chargram_event, %{}, meta)
 
     if test_env?() do
-      safe_telemetry(@chargram_tripwire_event, %{count: 1}, meta)
+      safe_telemetry(events.chargram_tripwire_event, %{}, meta)
     end
   end
 
-  # ── Span normalization + recovery (BYTE OFFSETS) ───────────────────────
+  # ── Span normalization + recovery (BYTE OFFSETS) ──────────────────────
 
-  # Input may be {start,end} OR {start,len}. With sentence present, choose the one
-  # whose slice matches the phrase (exact, then normalized).
+  defp normalize_or_recover_span({:end_exclusive, s, e}, phrase, sent, cursor) do
+    normalize_or_recover_span({s, e}, phrase, sent, cursor)
+  end
+
+  defp normalize_or_recover_span({:length, s, len}, phrase, sent, cursor) do
+    normalize_or_recover_span({s, s + len}, phrase, sent, cursor)
+  end
+
   defp normalize_or_recover_span({s, x}, phrase, sent, cursor)
        when is_integer(s) and is_integer(x) and s >= 0 do
     phrase_bin = to_string(phrase || "")
@@ -298,9 +385,8 @@ defmodule Brain.LIFG.Guard do
             Enum.find(candidates, fn {a, b} ->
               norm_phrase(safe_slice(sent, a, b - a)) == norm_phrase(phrase_bin)
             end) ||
-            # Heuristic when sentence exists but phrase is empty/odd:
-            (if x == ph_len, do: cand_len, else: nil) ||
-            (if x > s and (x - s) == ph_len, do: cand_end, else: nil) ||
+            if(x == ph_len, do: cand_len, else: nil) ||
+            if(x > s and x - s == ph_len, do: cand_end, else: nil) ||
             cand_ph ||
             cand_len ||
             cand_end
@@ -308,14 +394,19 @@ defmodule Brain.LIFG.Guard do
         {winner, next_cursor(winner, cursor)}
 
       true ->
-        # No sentence: prefer len-form when it matches phrase bytes; else keep permissive.
         span =
           cond do
-            ph_len > 0 and x == ph_len -> {s, s + x}
-            x < s and x > 0 -> {s, s + x}
-            x > s -> {s, x}
-            x > 0 -> {s, s + x}
-            true -> nil
+            ph_len > 0 ->
+              {s, s + ph_len}
+
+            x > s ->
+              {s, x}
+
+            x > 0 ->
+              {s, s + x}
+
+            true ->
+              nil
           end
 
         {span, next_cursor(span, cursor)}
@@ -377,7 +468,7 @@ defmodule Brain.LIFG.Guard do
     _ -> ""
   end
 
-  # ── Sorting (deterministic ties) ───────────────────────────────────────
+  # ── Sorting ───────────────────────────────────────────────────────────
 
   defp sort_by_span_then_index(list) when is_list(list) do
     if Enum.all?(list, &valid_span?/1) do
@@ -399,10 +490,15 @@ defmodule Brain.LIFG.Guard do
 
   defp valid_span?(_), do: false
 
+  defp valid_span_tuple?({s, e}) when is_integer(s) and is_integer(e) and s >= 0 and e > s,
+    do: true
+
+  defp valid_span_tuple?(_), do: false
+
   defp span_start({s, _e}) when is_integer(s), do: s
   defp span_start(_), do: 9_999_999
 
-  # ── Token field helpers ────────────────────────────────────────────────
+  # ── Token field helpers ───────────────────────────────────────────────
 
   defp tok_phrase(%{} = t) do
     Map.get(t, :phrase) ||
@@ -509,8 +605,7 @@ defmodule Brain.LIFG.Guard do
 
   defp maybe_put_span(t, {s, e})
        when is_map(t) and is_integer(s) and is_integer(e) and s >= 0 and e > s do
-    t
-    |> put_both(:span, {s, e})
+    put_both(t, :span, {s, e})
   end
 
   defp maybe_put_span(t, _), do: t
@@ -566,7 +661,7 @@ defmodule Brain.LIFG.Guard do
 
   defp norm_phrase(v), do: v |> to_string() |> norm_phrase()
 
-  # ── Misc ───────────────────────────────────────────────────────────────
+  # ── Misc ──────────────────────────────────────────────────────────────
 
   defp mapify(%_{} = s), do: Map.from_struct(s)
   defp mapify(%{} = m), do: m

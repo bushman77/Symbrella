@@ -21,7 +21,7 @@ defmodule Brain.Hippocampus.Recall do
           {[scored()], map(), map()}
   def run(cues, window, opts) when (is_list(cues) or is_map(cues)) and is_list(window) do
     # Use the same clock family as `encode/2` (monotonic).
-    now = System.monotonic_time(:millisecond)
+    now = System.system_time(:millisecond)
     limit = Keyword.get(opts, :limit, 3)
     half_life = Keyword.get(opts, :half_life_ms, 300_000)
     min_jacc = Keyword.get(opts, :min_jaccard, 0.0)

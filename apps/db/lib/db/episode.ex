@@ -448,37 +448,36 @@ defmodule Db.Episode do
   defp to_pgvector(list) when is_list(list), do: {:ok, Pgvector.new(list)}
   defp to_pgvector(other), do: {:error, "invalid embedding param: #{inspect(other)}"}
 
-@doc """
-Fetch most recent episodes (newest first).
+  @doc """
+  Fetch most recent episodes (newest first).
 
-Used by Brain.Hippocampus to warm its in-memory window after reboot.
-"""
-@spec recent(pos_integer()) :: [t()]
-def recent(limit \\ 200) when is_integer(limit) and limit > 0 do
-  import Ecto.Query, only: [from: 2]
+  Used by Brain.Hippocampus to warm its in-memory window after reboot.
+  """
+  @spec recent(pos_integer()) :: [t()]
+  def recent(limit \\ 200) when is_integer(limit) and limit > 0 do
+    import Ecto.Query, only: [from: 2]
 
-  from(e in __MODULE__,
-    order_by: [desc: e.inserted_at],
-    limit: ^limit
-  )
-  |> Db.all()
-end
-
-@spec insert_row(map()) :: {:ok, integer()} | {:error, term()}
-def insert_row(%{} = row) do
-  now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-
-  row =
-    row
-    |> Map.put_new(:inserted_at, now)
-    |> Map.put_new(:updated_at, now)
-
-  try do
-    {n, _} = Db.insert_all("episodes", [row], on_conflict: :nothing)
-    {:ok, n}
-  rescue
-    e -> {:error, e}
+    from(e in __MODULE__,
+      order_by: [desc: e.inserted_at],
+      limit: ^limit
+    )
+    |> Db.all()
   end
-end
 
+  @spec insert_row(map()) :: {:ok, integer()} | {:error, term()}
+  def insert_row(%{} = row) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    row =
+      row
+      |> Map.put_new(:inserted_at, now)
+      |> Map.put_new(:updated_at, now)
+
+    try do
+      {n, _} = Db.insert_all("episodes", [row], on_conflict: :nothing)
+      {:ok, n}
+    rescue
+      e -> {:error, e}
+    end
+  end
 end

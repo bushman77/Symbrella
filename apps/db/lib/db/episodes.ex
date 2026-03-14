@@ -347,20 +347,19 @@ defmodule Db.Episodes do
     if mag_a == 0 or mag_b == 0, do: nil, else: dot / (mag_a * mag_b)
   end
 
+  def last_20() do
+    Ecto.Adapters.SQL.query!(
+      Db,
+      "select id, inserted_at, tags from episodes order by inserted_at desc limit 20",
+      []
+    )
+  end
 
-def last_20() do
-Ecto.Adapters.SQL.query!(
-  Db,
-  "select id, inserted_at, tags from episodes order by inserted_at desc limit 20",
-  []
-)
-end
-
-def lifg_errors() do
-Ecto.Adapters.SQL.query!(
-  Db,
-  "select id, inserted_at, tags from episodes where tags @> ARRAY['lifg_error']::text[] order by inserted_at desc limit 50",
-  []
-)
-end
+  def lifg_errors() do
+    Ecto.Adapters.SQL.query!(
+      Db,
+      "select id, inserted_at, tags from episodes where tags @> ARRAY['lifg_error']::text[] order by inserted_at desc limit 50",
+      []
+    )
+  end
 end

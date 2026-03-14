@@ -202,7 +202,11 @@ defmodule Brain.LIFG do
 
     si_for_stage = Map.put(si_for_stage1, :sense_candidates, slate_final)
 
-    eff_opts = stage1_effective_opts(si_for_stage, opts)
+    eff_opts =
+      opts
+      |> Keyword.put_new(:scores, :all)
+      |> then(&stage1_effective_opts(si_for_stage, &1))
+
     cfg = stage1_config(eff_opts)
 
     case run_stage1(si_for_stage, cfg, eff_opts) do
@@ -746,27 +750,27 @@ defmodule Brain.LIFG do
 
   # ── Slate extraction (Stage-1 input contract) ──────────────────────────────
 
-defp slate_from_si(%{} = si) do
-  sc =
-    Map.get(si, :sense_candidates) ||
-      Map.get(si, "sense_candidates") ||
-      %{}
+  defp slate_from_si(%{} = si) do
+    sc =
+      Map.get(si, :sense_candidates) ||
+        Map.get(si, "sense_candidates") ||
+        %{}
 
-  sc = ensure_map(sc)
+    sc = ensure_map(sc)
 
-  cond do
-    map_size(sc) > 0 ->
-      Brain.LIFG.Input.slate_for(%{sense_candidates: sc})
+    cond do
+      map_size(sc) > 0 ->
+        Brain.LIFG.Input.slate_for(%{sense_candidates: sc})
 
-    true ->
-      case Map.get(si, :active_cells) || Map.get(si, "active_cells") || [] do
-        ac when is_list(ac) -> Brain.LIFG.Input.slate_for(ac)
-        _ -> %{}
-      end
+      true ->
+        case Map.get(si, :active_cells) || Map.get(si, "active_cells") || [] do
+          ac when is_list(ac) -> Brain.LIFG.Input.slate_for(ac)
+          _ -> %{}
+        end
+    end
   end
-end
 
-defp slate_from_si(_), do: %{}
+  defp slate_from_si(_), do: %{}
 
   defp normalize_slate_map(m) when is_map(m) do
     Enum.reduce(m, %{}, fn {k, v}, acc ->
@@ -993,14 +997,14 @@ defp slate_from_si(_), do: %{}
 
   defp maybe_put_if_binary(m, _k, _v), do: m
 
-defp slate_from_assistant_candidates(%{} = si) do
-  cands =
-    Map.get(si, :assistant_candidates) ||
-      Map.get(si, "assistant_candidates") ||
-      []
+  defp slate_from_assistant_candidates(%{} = si) do
+    cands =
+      Map.get(si, :assistant_candidates) ||
+        Map.get(si, "assistant_candidates") ||
+        []
 
-  Brain.LIFG.Input.slate_for(cands)
-end
+    Brain.LIFG.Input.slate_for(cands)
+  end
 
   # ── Prob/margin backfill for scores=:none ──────────────────────────────────
 

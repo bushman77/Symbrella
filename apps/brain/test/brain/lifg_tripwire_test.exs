@@ -5,7 +5,7 @@ defmodule Brain.LIFG.TripwireTest do
   alias Brain.LIFG.Stage1
 
   # Use a test-only event so we don't collide with other tests
-  @event [:test, :lifg, :chargram_violation_tripwire]
+  @event [:test, :lifg, :chargram_violation_tripwire, :tripwire_test]
 
   test "drops misaligned char-grams and emits telemetry" do
     si = %{
@@ -28,7 +28,10 @@ defmodule Brain.LIFG.TripwireTest do
         fn ->
           # IMPORTANT: override the chargram_event so only this test sees it
           assert {:ok, %{choices: choices, audit: audit}} =
-                   Stage1.run(si, chargram_event: @event)
+                   Stage1.run(si,
+                     chargram_event: @event,
+                     guard_chargram_tripwire_event: @event
+                   )
 
           # only token 1 remains
           assert Enum.map(choices, & &1.token_index) == [1]

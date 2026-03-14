@@ -103,8 +103,8 @@ config :brain,
   episodes_mode: episodes_mode,
   episodes_persist: episodes_persist,
   episodes_tags: episodes_tags,
-
   lifg_stage1_mwe_fallback: true
+
 # NEW: optional defaults for DB/Hybrid recall (all overridable per request)
 hippo_recall_source =
   case System.get_env("HIPPO_RECALL_SOURCE", "") |> String.downcase() do

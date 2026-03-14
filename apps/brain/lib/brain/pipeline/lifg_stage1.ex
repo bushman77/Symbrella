@@ -106,7 +106,11 @@ defmodule Brain.Pipeline.LIFGStage1 do
     lifg_opts3 = Keyword.put_new(lifg_opts2, :gate_into_wm, true)
 
     if tokens == [] do
-      {{:ok, empty_out(si_plain, :no_tokens)}, state}
+      out0 = empty_out(si_plain, :no_tokens)
+      self_name = detect_self_name(si_plain)
+      out1 = put_self_name_audit(out0, self_name)
+      state1 = put_self_name_attention(state, self_name)
+      {{:ok, out1}, state1}
     else
       run_tokens(tokens, si_plain, ctx_vec, lifg_opts3, state)
     end
@@ -163,20 +167,21 @@ defmodule Brain.Pipeline.LIFGStage1 do
   # -------------------------------------------------------------------
 
   defp run_tokens(tokens, si0, ctx_vec, lifg_opts, state) do
-# Stage1.run/2 is the correct bridge here: it needs the full SI map so it can
-# use sentence/intent/active_cells/sense_candidates/candidates_by_token/etc.
-t0 = System.monotonic_time(:millisecond)
+    # Stage1.run/2 is the correct bridge here: it needs the full SI map so it can
+    # use sentence/intent/active_cells/sense_candidates/candidates_by_token/etc.
+    t0 = System.monotonic_time(:millisecond)
 
-si_for_stage1 =
-  si0
-  |> Map.put(:tokens, tokens)
-  |> Map.put(:lifg_opts, lifg_opts)
+    si_for_stage1 =
+      si0
+      |> Map.put(:tokens, tokens)
+      |> Map.put(:lifg_opts, lifg_opts)
 
-res =
-  Stage1.run(
-    si_for_stage1,
-    Keyword.merge(lifg_opts, ctx_vec: ctx_vec, state: state)
-  )
+    res =
+      Stage1.run(
+        si_for_stage1,
+        Keyword.merge(lifg_opts, ctx_vec: ctx_vec, state: state)
+      )
+
     dt = System.monotonic_time(:millisecond) - t0
 
     case res do
@@ -193,14 +198,19 @@ res =
         # IMPORTANT: log AFTER cover is finalized
         log_summary(dt, {:ok, out2})
 
+        self_name = detect_self_name(si1)
+        out3 = put_self_name_audit(out2, self_name)
+
         state2 =
           if Keyword.get(lifg_opts, :gate_into_wm, false) do
-            ingest_wm(state, si1)
+            ingest_wm(state, si1, lifg_opts)
           else
             state
           end
 
-        {{:ok, out2}, state2}
+        state3 = put_self_name_attention(state2, self_name)
+
+        {{:ok, out3}, state3}
 
       {:error, %{} = err} ->
         log_summary(dt, {:error, err})
@@ -212,99 +222,164 @@ res =
     end
   end
 
-  defp ingest_wm(state, si) when is_map(state) and is_map(si) do
-    allow_fb? = get_in(state, [:wm_cfg, :allow_fallback_into_wm?]) == true
+  defp ingest_wm(state, si, lifg_opts)
+       when is_map(state) and is_map(si) and is_list(lifg_opts) do
+    allow_fb? =
+      case Keyword.fetch(lifg_opts, :allow_fallback_into_wm?) do
+        {:ok, v} ->
+          v == true
+
+        :error ->
+          case Keyword.fetch(lifg_opts, :allow_fallback?) do
+            {:ok, v} -> v == true
+            :error -> true
+          end
+      end
 
     min_score =
-      case get_in(state, [:wm_cfg, :gate_threshold]) do
+      case Keyword.get(lifg_opts, :lifg_min_score, get_in(state, [:wm_cfg, :gate_threshold])) do
         n when is_number(n) -> n * 1.0
         _ -> 0.0
       end
 
-    WMGate.ingest_from_si(state, si,
-      allow_fallback?: allow_fb?,
-      allow_phrase_fallback?: allow_fb?,
-      min_score: min_score
+    wm_before = Map.get(state, :wm, [])
+    capacity = get_in(state, [:wm_cfg, :capacity]) || length(wm_before)
+
+    state2 =
+      WMGate.ingest_from_si(state, si,
+        allow_fallback?: allow_fb?,
+        allow_phrase_fallback?: allow_fb?,
+        min_score: min_score,
+        gate_event: [:brain, :gate, :decision]
+      )
+
+    wm_after = Map.get(state2, :wm, [])
+
+    added = wm_added_count(wm_before, wm_after)
+    removed = wm_removed_count(wm_before, wm_after)
+
+    Brain.__pipeline_emit_wm_update__(
+      capacity,
+      length(wm_after),
+      added,
+      removed,
+      :gate_from_lifg
     )
+
+    _ = Brain.__pipeline_safe_mood_update_wm__(wm_after)
+
+    state2
   end
 
-  defp ingest_wm(state, _si), do: state
+  defp ingest_wm(state, _si, _lifg_opts), do: state
 
-defp ensure_si_has_lifg_choices(%{} = out) do
-  si = Map.get(out, :si, %{}) |> Safe.to_plain()
+  defp wm_added_count(before_wm, after_wm)
+       when is_list(before_wm) and is_list(after_wm) do
+    before_ids =
+      before_wm
+      |> Enum.map(fn item -> {Map.get(item, :id), Map.get(item, :source)} end)
+      |> MapSet.new()
 
-  cover =
-    out
-    |> Map.get(:cover, [])
-    |> List.wrap()
-    |> Enum.map(&Safe.to_plain/1)
-
-  choices =
-    out
-    |> Map.get(:choices, [])
-    |> List.wrap()
-    |> Enum.map(&Safe.to_plain/1)
-
-  choice_by_key = lifg_choice_lookup(choices)
-
-  lifg_choices =
-    cover
-    |> Enum.map(fn cov ->
-      id = cov[:id] || cov["id"] || cov[:chosen_id] || cov["chosen_id"]
-      tok_i = cov[:token_index] || cov["token_index"] || cov[:index] || cov["index"]
-      span = cov[:span] || cov["span"]
-
-      raw_choice =
-        Map.get(choice_by_key, {tok_i, to_string(id)}, %{})
-
-      prob =
-        raw_choice[:prob] ||
-          raw_choice["prob"] ||
-          raw_choice[:score] ||
-          raw_choice["score"] ||
-          0.0
-
-      margin =
-        cov[:margin] ||
-          cov["margin"] ||
-          raw_choice[:margin] ||
-          raw_choice["margin"] ||
-          raw_choice[:prob_margin] ||
-          raw_choice["prob_margin"] ||
-          0.0
-
-      %{
-        id: to_string(id),
-        chosen_id: to_string(id),
-        token_index: tok_i,
-        span: span,
-        prob: as_float(prob),
-        margin: as_float(margin),
-        score: clamp01(as_float(prob)),
-        source: :lifg
-      }
+    after_wm
+    |> Enum.reject(fn item ->
+      MapSet.member?(before_ids, {Map.get(item, :id), Map.get(item, :source)})
     end)
-    |> Enum.reject(fn ch ->
-      ch.id == "" or is_nil(ch.token_index)
+    |> length()
+  end
+
+  defp wm_added_count(_, _), do: 0
+
+  defp wm_removed_count(before_wm, after_wm)
+       when is_list(before_wm) and is_list(after_wm) do
+    after_ids =
+      after_wm
+      |> Enum.map(fn item -> {Map.get(item, :id), Map.get(item, :source)} end)
+      |> MapSet.new()
+
+    before_wm
+    |> Enum.reject(fn item ->
+      MapSet.member?(after_ids, {Map.get(item, :id), Map.get(item, :source)})
     end)
+    |> length()
+  end
 
-  Map.put(si, :lifg_choices, lifg_choices)
-end
+  defp wm_removed_count(_, _), do: 0
 
-defp lifg_choice_lookup(choices) when is_list(choices) do
-  Enum.reduce(choices, %{}, fn ch, acc ->
-    tok_i = ch[:token_index] || ch["token_index"] || ch[:index] || ch["index"]
-    id = ch[:chosen_id] || ch["chosen_id"] || ch[:id] || ch["id"]
+  defp ensure_si_has_lifg_choices(%{} = out) do
+    si = Map.get(out, :si, %{}) |> Safe.to_plain()
 
-    cond do
-      is_nil(tok_i) or is_nil(id) ->
-        acc
+    cover =
+      out
+      |> Map.get(:cover, [])
+      |> List.wrap()
+      |> Enum.map(&Safe.to_plain/1)
 
-      true ->
-        Map.put(acc, {tok_i, to_string(id)}, ch)
-    end
-  end)
-end
+    choices =
+      out
+      |> Map.get(:choices, [])
+      |> List.wrap()
+      |> Enum.map(&Safe.to_plain/1)
+
+    choice_by_key = lifg_choice_lookup(choices)
+
+    lifg_choices =
+      cover
+      |> Enum.map(fn cov ->
+        id = cov[:id] || cov["id"] || cov[:chosen_id] || cov["chosen_id"]
+        tok_i = cov[:token_index] || cov["token_index"] || cov[:index] || cov["index"]
+        span = cov[:span] || cov["span"]
+
+        raw_choice =
+          Map.get(choice_by_key, {tok_i, to_string(id)}, %{})
+
+        prob =
+          raw_choice[:prob] ||
+            raw_choice["prob"] ||
+            raw_choice[:score] ||
+            raw_choice["score"] ||
+            0.0
+
+        margin =
+          cov[:margin] ||
+            cov["margin"] ||
+            raw_choice[:margin] ||
+            raw_choice["margin"] ||
+            raw_choice[:prob_margin] ||
+            raw_choice["prob_margin"] ||
+            0.0
+
+        %{
+          id: to_string(id),
+          chosen_id: to_string(id),
+          token_index: tok_i,
+          span: span,
+          prob: as_float(prob),
+          margin: as_float(margin),
+          score: clamp01(as_float(prob)),
+          source: :lifg
+        }
+      end)
+      |> Enum.reject(fn ch ->
+        ch.id == "" or is_nil(ch.token_index)
+      end)
+
+    Map.put(si, :lifg_choices, lifg_choices)
+  end
+
+  defp lifg_choice_lookup(choices) when is_list(choices) do
+    Enum.reduce(choices, %{}, fn ch, acc ->
+      tok_i = ch[:token_index] || ch["token_index"] || ch[:index] || ch["index"]
+      id = ch[:chosen_id] || ch["chosen_id"] || ch[:id] || ch["id"]
+
+      cond do
+        is_nil(tok_i) or is_nil(id) ->
+          acc
+
+        true ->
+          Map.put(acc, {tok_i, to_string(id)}, ch)
+      end
+    end)
+  end
 
   defp ensure_cover(%{} = out, lifg_opts) do
     cover = Map.get(out, :cover)
@@ -395,6 +470,91 @@ end
   end
 
   defp normalize_cover(_), do: []
+
+  defp detect_self_name(%{} = si) do
+    names =
+      Application.get_env(:brain, :self_names, [])
+      |> List.wrap()
+      |> Enum.map(&normalize_name_text/1)
+      |> Enum.reject(&(&1 == ""))
+
+    matched =
+      cond do
+        names == [] ->
+          nil
+
+        true ->
+          token_match =
+            si
+            |> fetch_tokens()
+            |> List.wrap()
+            |> Enum.map(&Safe.to_plain/1)
+            |> Enum.find_value(fn tok ->
+              raw =
+                Map.get(tok, :phrase) ||
+                  Map.get(tok, "phrase") ||
+                  Map.get(tok, :word) ||
+                  Map.get(tok, "word") ||
+                  Map.get(tok, :lemma) ||
+                  Map.get(tok, "lemma") ||
+                  ""
+
+              norm = normalize_name_text(raw)
+              if norm in names, do: norm, else: nil
+            end)
+
+          token_match ||
+            (
+              sent = Map.get(si, :sentence) || Map.get(si, "sentence") || ""
+              sent_norm = normalize_name_text(sent)
+
+              Enum.find(names, fn name ->
+                name != "" and String.contains?(sent_norm, name)
+              end)
+            )
+      end
+
+    %{
+      hit?: is_binary(matched),
+      match: matched || nil
+    }
+  end
+
+  defp detect_self_name(_), do: %{hit?: false, match: nil}
+
+  defp put_self_name_audit(%{} = out, self_name) when is_map(self_name) do
+    audit =
+      out
+      |> Map.get(:audit, %{})
+      |> Map.put(:self_name, self_name)
+
+    Map.put(out, :audit, audit)
+  end
+
+  defp put_self_name_audit(out, _self_name), do: out
+
+  defp put_self_name_attention(%{} = state, self_name) when is_map(self_name) do
+    attention =
+      state
+      |> Map.get(:attention, %{})
+      |> Map.put(:self_name, self_name)
+
+    Map.put(state, :attention, attention)
+  end
+
+  defp put_self_name_attention(state, _self_name), do: state
+
+  defp normalize_name_text(nil), do: ""
+
+  defp normalize_name_text(v) when is_binary(v) do
+    v
+    |> String.downcase()
+    |> String.replace(~r/[^\p{L}\p{N}\s]+/u, " ")
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  defp normalize_name_text(v), do: v |> to_string() |> normalize_name_text()
 
   defp log_summary(dt_ms, {:ok, %{} = out}) do
     winners = out |> Map.get(:cover, []) |> length()

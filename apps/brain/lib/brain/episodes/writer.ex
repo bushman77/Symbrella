@@ -27,12 +27,22 @@ defmodule Brain.Episodes.Writer do
 
     cond do
       mode == :off ->
-        :telemetry.execute(@tele, %{skipped: 1}, %{mode: :off, async_embedding?: false, tags: tags})
+        :telemetry.execute(@tele, %{skipped: 1}, %{
+          mode: :off,
+          async_embedding?: false,
+          tags: tags
+        })
+
         :ok
 
       not persist? ->
         # Always emit telemetry so debugging doesn't go dark when persistence is off.
-        :telemetry.execute(@tele, %{skipped: 1}, %{mode: mode, async_embedding?: async_embedding?, tags: tags})
+        :telemetry.execute(@tele, %{skipped: 1}, %{
+          mode: mode,
+          async_embedding?: async_embedding?,
+          tags: tags
+        })
+
         :ok
 
       mode in [:async, :async_embedding] ->
@@ -72,7 +82,12 @@ defmodule Brain.Episodes.Writer do
     try do
       case Episodes.write_episode(si_or_payload, tags: tags, async_embedding: async_embedding?) do
         {:ok, _ep} ->
-          :telemetry.execute(@tele, %{ok: 1}, %{mode: mode, async_embedding?: async_embedding?, tags: tags})
+          :telemetry.execute(@tele, %{ok: 1}, %{
+            mode: mode,
+            async_embedding?: async_embedding?,
+            tags: tags
+          })
+
           :ok
 
         {:error, reason} ->
@@ -97,7 +112,12 @@ defmodule Brain.Episodes.Writer do
         :telemetry.execute(
           @tele,
           %{fail: 1},
-          %{mode: mode, async_embedding?: async_embedding?, tags: tags, reason: Exception.message(e)}
+          %{
+            mode: mode,
+            async_embedding?: async_embedding?,
+            tags: tags,
+            reason: Exception.message(e)
+          }
         )
 
         :error

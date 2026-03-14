@@ -44,6 +44,7 @@ defmodule Llm do
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
   # ────────────────────────────────────────────────────────────────────────────
+  def hello, do: :world
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -131,7 +132,8 @@ defmodule Llm do
       heartbeat_ms: Keyword.get(boot, :heartbeat_ms, @default_heartbeat_ms),
 
       # runtime
-      status: :stopped,         # :stopped | :starting | :ready | :crashed | :failed
+      # :stopped | :starting | :ready | :crashed | :failed
+      status: :stopped,
       llama_port: nil,
       served_by_us?: false,
       endpoint: nil,
@@ -424,7 +426,13 @@ defmodule Llm do
          {:ok, port_int, state} <- ensure_port_bound(state),
          {:ok, port} <- spawn_llama_server(state, port_int),
          endpoint <- "http://#{state.host}:#{port_int}",
-         state <- %{state | llama_port: port, served_by_us?: true, endpoint: endpoint, status: :starting},
+         state <- %{
+           state
+           | llama_port: port,
+             served_by_us?: true,
+             endpoint: endpoint,
+             status: :starting
+         },
          {:ok, state} <- wait_ready(state) do
       {:ok, %{state | status: :ready}}
     else
@@ -478,39 +486,39 @@ defmodule Llm do
 
     Logger.debug("Llm spawning: #{exe} #{Enum.join(args, " ")}")
 
-port =
-  Port.open(
-    {:spawn_executable, to_charlist(exe)},
-    [
-      :binary,
-      :exit_status,
-      :use_stdio,
-      :eof,
-      :stderr_to_stdout,
-      {:line, 16_384},
-      args: Enum.map(args, &to_charlist/1)
-    ]
-  )
+    port =
+      Port.open(
+        {:spawn_executable, to_charlist(exe)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :eof,
+          :stderr_to_stdout,
+          {:line, 16_384},
+          args: Enum.map(args, &to_charlist/1)
+        ]
+      )
 
     {:ok, port}
   rescue
     e -> {:error, {:spawn_failed, e}}
   end
 
-defp wait_ready(state) do
-  wait_ready_loop(state, @ready_poll_attempts)
-end
-
-defp wait_ready_loop(_state, 0), do: {:error, :not_ready_timeout}
-
-defp wait_ready_loop(state, n) when n > 0 do
-  if reachable?(state, 1_250) do
-    {:ok, state}
-  else
-    Process.sleep(@ready_poll_sleep_ms)
-    wait_ready_loop(state, n - 1)
+  defp wait_ready(state) do
+    wait_ready_loop(state, @ready_poll_attempts)
   end
-end
+
+  defp wait_ready_loop(_state, 0), do: {:error, :not_ready_timeout}
+
+  defp wait_ready_loop(state, n) when n > 0 do
+    if reachable?(state, 1_250) do
+      {:ok, state}
+    else
+      Process.sleep(@ready_poll_sleep_ms)
+      wait_ready_loop(state, n - 1)
+    end
+  end
 
   defp reachable?(%{endpoint: nil}, _timeout), do: false
 
@@ -548,7 +556,8 @@ end
     :ok
   end
 
-  defp reset_backoff(state), do: %{state | restart_backoff_ms: @backoff_min, restart_timer_ref: nil}
+  defp reset_backoff(state),
+    do: %{state | restart_backoff_ms: @backoff_min, restart_timer_ref: nil}
 
   defp bump_backoff(state) do
     next = min(max(state.restart_backoff_ms * 2, @backoff_min), @backoff_max)
@@ -584,7 +593,12 @@ end
     json = Jason.encode!(body_map)
 
     req =
-      Finch.build(:post, url, [{"content-type", "application/json"}, {"accept", "application/json"}], json)
+      Finch.build(
+        :post,
+        url,
+        [{"content-type", "application/json"}, {"accept", "application/json"}],
+        json
+      )
 
     case Finch.request(req, state.finch, receive_timeout: timeout) do
       {:ok, %{status: s, body: body}} when s in 200..299 ->
@@ -625,7 +639,10 @@ end
     end)
   end
 
-  defp extract_chat_content(%{"choices" => [%{"message" => %{"content" => c}} | _]}) when is_binary(c), do: c
+  defp extract_chat_content(%{"choices" => [%{"message" => %{"content" => c}} | _]})
+       when is_binary(c),
+       do: c
+
   defp extract_chat_content(%{"choices" => [%{"text" => c} | _]}) when is_binary(c), do: c
   defp extract_chat_content(_), do: ""
 
@@ -715,8 +732,7 @@ end
     end
   end
 
-def stop(_state) do
-  :ok
-end 
-
+  def stop(_state) do
+    :ok
+  end
 end

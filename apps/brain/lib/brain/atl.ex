@@ -318,13 +318,13 @@ defmodule Brain.ATL do
 
   defp inside?(_, _), do: false
 
-defp span_for(tokens, idx) do
-  case Enum.find(tokens, &(&1[:index] == idx)) do
-    %{span: {s, e}} when is_integer(s) and is_integer(e) and e >= s -> {s, e}
-    %{span: {s, l}} when is_integer(s) and is_integer(l) and l > 0 -> {s, s + l}
-    _ -> {0, 0}
+  defp span_for(tokens, idx) do
+    case Enum.find(tokens, &(&1[:index] == idx)) do
+      %{span: {s, e}} when is_integer(s) and is_integer(e) and e >= s -> {s, e}
+      %{span: {s, l}} when is_integer(s) and is_integer(l) and l > 0 -> {s, s + l}
+      _ -> {0, 0}
+    end
   end
-end
 
   defp down(nil), do: ""
 

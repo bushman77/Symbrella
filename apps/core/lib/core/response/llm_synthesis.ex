@@ -248,7 +248,8 @@ defmodule Core.Response.LlmSynthesis do
 
   defp extract_system_user(_), do: {"", ""}
 
-  defp cap_text(text, max_chars) when is_binary(text) and is_integer(max_chars) and max_chars > 0 do
+  defp cap_text(text, max_chars)
+       when is_binary(text) and is_integer(max_chars) and max_chars > 0 do
     if String.length(text) <= max_chars do
       {text, false}
     else
@@ -290,9 +291,15 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp tone_directive(:warm, _), do: "Respond in a warm, engaged, and encouraging tone."
-  defp tone_directive(:deescalate, _), do: "Respond calmly and gently. Keep things grounded and constructive."
+
+  defp tone_directive(:deescalate, _),
+    do: "Respond calmly and gently. Keep things grounded and constructive."
+
   defp tone_directive(:firm, _), do: "Respond clearly and directly. Stay focused and purposeful."
-  defp tone_directive(:neutral, :deescalate), do: "Respond in a measured, steady tone. Things are settling down."
+
+  defp tone_directive(:neutral, :deescalate),
+    do: "Respond in a measured, steady tone. Things are settling down."
+
   defp tone_directive(:neutral, _), do: "Respond in a balanced, clear tone."
   defp tone_directive(_, _), do: "Respond helpfully and clearly."
 

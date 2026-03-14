@@ -113,7 +113,7 @@ defmodule Brain.LIFG.Stage1 do
         |> stamp_slates(frame)
 
       # 1) Tokens + Guard preprocessing (may drop tokens)
-      {tokens, guard_rejected, guard_drops} = prepare_tokens(si_base, sent)
+      {tokens, guard_rejected, guard_drops} = prepare_tokens(si_base, sent, opts)
 
       # Ensure SI carries sanitized tokens (critical for span logic)
       si0 = Map.put(si_base, :tokens, tokens)
@@ -253,6 +253,7 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
+
       emit_stage1_stop(
         ctx_from_run(si1, sent, opts),
         out.choices,
@@ -285,7 +286,7 @@ defmodule Brain.LIFG.Stage1 do
     run(si, Keyword.merge(opts, weights: weights_map))
   end
 
-@doc """
+  @doc """
   Back-compat entrypoint for pipeline callers that still invoke `choose/3`.
 
   Accepts:
@@ -296,10 +297,11 @@ defmodule Brain.LIFG.Stage1 do
   @spec choose(list(), map() | nil, keyword()) ::
           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
   def choose(tokens, sense_candidates, opts \\ [])
-      when is_list(tokens) and (is_map(sense_candidates) or is_nil(sense_candidates)) and is_list(opts) do
+      when is_list(tokens) and (is_map(sense_candidates) or is_nil(sense_candidates)) and
+             is_list(opts) do
     si = %{
       tokens: tokens,
-      sense_candidates: (sense_candidates || %{})
+      sense_candidates: sense_candidates || %{}
     }
 
     run(si, opts)
@@ -386,62 +388,70 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-defp prepare_tokens(si0, sent0) do
-  sent_raw = Map.get(si0, :sentence) || Map.get(si0, "sentence") || sent0
+  defp prepare_tokens(si0, sent0, opts) do
+    sent_raw = Map.get(si0, :sentence) || Map.get(si0, "sentence") || sent0
 
-  sent =
-    case sent_raw do
-      s when is_binary(s) ->
-        if String.trim(s) == "", do: nil, else: s
+    sent =
+      case sent_raw do
+        s when is_binary(s) ->
+          if String.trim(s) == "", do: nil, else: s
 
-      _ ->
-        nil
-    end
+        _ ->
+          nil
+      end
 
-  toks0 = Map.get(si0, :tokens) || Map.get(si0, "tokens") || []
+    toks0 = Map.get(si0, :tokens) || Map.get(si0, "tokens") || []
 
-  raw_tokens =
-    toks0
-    |> Enum.with_index()
-    |> Enum.map(fn {tok, fallback_idx} ->
-      t = Safe.to_plain(tok)
-      idx = token_index(t, fallback_idx)
+    raw_tokens =
+      toks0
+      |> Enum.with_index()
+      |> Enum.map(fn {tok, fallback_idx} ->
+        t = Safe.to_plain(tok)
+        idx = token_index(t, fallback_idx)
 
-      t
-      |> Map.put(:index, idx)
-      |> Map.put("index", idx)
-      |> Map.put(:token_index, idx)
-      |> Map.put("token_index", idx)
-    end)
+        t
+        |> Map.put(:index, idx)
+        |> Map.put("index", idx)
+        |> Map.put(:token_index, idx)
+        |> Map.put("token_index", idx)
+      end)
 
-  raw_indices =
-    raw_tokens
-    |> Enum.map(&token_index(&1, -1))
-    |> Enum.reject(&(&1 < 0))
+    raw_indices =
+      raw_tokens
+      |> Enum.map(&token_index(&1, -1))
+      |> Enum.reject(&(&1 < 0))
 
-  sanitized =
-    Guard.sanitize(%{tokens: raw_tokens, sentence: sent})
+    guard_opts =
+      Keyword.take(opts, [
+        :chargram_event,
+        :boundary_event,
+        :chargram_tripwire_event,
+        :guard_chargram_event,
+        :guard_boundary_event,
+        :guard_chargram_tripwire_event
+      ])
 
-  # IMPORTANT: keep Guard output shape; do NOT Safe.to_plain again here
-  tokens0 = Map.get(sanitized, :tokens) || Map.get(sanitized, "tokens") || []
+    sanitized =
+      Guard.sanitize(%{tokens: raw_tokens, sentence: sent}, guard_opts)
 
-  tokens =
-    tokens0
-    |> Enum.map(&force_end_exclusive_span(&1, sent))
+    # IMPORTANT: keep Guard output shape; do NOT Safe.to_plain again here
+    tokens0 = Map.get(sanitized, :tokens) || Map.get(sanitized, "tokens") || []
 
-  kept_indices =
-    tokens
-    |> Enum.map(&token_index(&1, -1))
-    |> Enum.reject(&(&1 < 0))
+    tokens = tokens0
 
-  guard_rejected =
-    raw_indices
-    |> Enum.uniq()
-    |> Enum.reject(&(&1 in kept_indices))
-    |> Enum.sort()
+    kept_indices =
+      tokens
+      |> Enum.map(&token_index(&1, -1))
+      |> Enum.reject(&(&1 < 0))
 
-  {tokens, guard_rejected, length(guard_rejected)}
-end
+    guard_rejected =
+      raw_indices
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in kept_indices))
+      |> Enum.sort()
+
+    {tokens, guard_rejected, length(guard_rejected)}
+  end
 
   defp token_index(tok, fallback_idx) do
     raw =
@@ -1265,6 +1275,8 @@ end
     lemma =
       Safe.get(cell, :lemma) ||
         Safe.get(cell, "lemma") ||
+        Safe.get(cell, :word) ||
+        Safe.get(cell, "word") ||
         guess_cell_lemma(id)
 
     features =
@@ -1307,9 +1319,26 @@ end
   end
 
   defp guess_cell_lemma(id) when is_binary(id) do
-    case String.split(id, "|") do
-      [lemma | _] -> lemma
-      _ -> id
+    id = String.trim(id)
+
+    cond do
+      id == "" ->
+        ""
+
+      String.contains?(id, "|") ->
+        case String.split(id, "|", parts: 2) do
+          [lemma, _rest] -> lemma
+          _ -> id
+        end
+
+      String.contains?(id, "/") ->
+        case String.split(id, "/", parts: 2) do
+          [lemma, _rest] -> lemma
+          _ -> id
+        end
+
+      true ->
+        id
     end
   end
 
@@ -1321,11 +1350,8 @@ end
     span = tok_span(tok)
 
     case {sentence, span} do
-      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
-        {s0, stop} = normalize_span(s, {start, b}, phrase_norm)
-        len = stop - s0
-
-        if len > 0 and span_sub_norm(s, s0, len) == phrase_norm do
+      {s, {start, stop}} when is_binary(s) ->
+        if span_sub_norm(s, start, stop) == phrase_norm do
           :ok
         else
           {:error, :chargram}
@@ -1337,98 +1363,44 @@ end
   end
 
   # Normalize ambiguous {start, b} into {start, end_exclusive}.
-  defp normalize_span(sentence, {start, b}, phrase_norm)
-       when is_binary(sentence) and is_integer(start) and is_integer(b) do
-    size = byte_size(sentence)
-
-    candidates =
-      [
-        {start, b},
-        {start, start + b},
-        {start, b + 1},
-        {start, start + byte_size(to_string(phrase_norm || ""))}
-      ]
-      |> Enum.uniq()
-      |> Enum.filter(fn {s, e} -> s >= 0 and e > s and e <= size end)
-
-    match =
-      Enum.find_value(candidates, fn {s, e} ->
-        len = e - s
-        if span_sub_norm(sentence, s, len) == phrase_norm, do: {s, e}, else: nil
-      end)
-
-    match ||
-      Enum.find_value(candidates, fn {s, e} ->
-        if s >= 0 and e > s and e <= size, do: {s, e}, else: nil
-      end) ||
-      {start, start}
+  defp normalize_span(sentence, {start, stop}, _phrase_norm)
+       when is_binary(sentence) and is_integer(start) and is_integer(stop) and
+              start >= 0 and stop > start and stop <= byte_size(sentence) do
+    {start, stop}
   end
 
-  defp normalize_span(_sentence, _span, _phrase_norm), do: {0, 0}
+  defp normalize_span(_sentence, _span, _phrase_norm), do: nil
 
-defp tok_span(tok) do
-  span =
-    case {Safe.get(tok, :span), Safe.get(tok, "span")} do
-      {{a, b}, _} when is_integer(a) and is_integer(b) -> {a, b}
-      {_, {a, b}} when is_integer(a) and is_integer(b) -> {a, b}
-      _ -> nil
+  defp tok_span(tok) do
+    case Safe.get(tok, :span) || Safe.get(tok, "span") do
+      {s, e} when is_integer(s) and is_integer(e) and s >= 0 and e > s ->
+        {s, e}
+
+      [s, e] when is_integer(s) and is_integer(e) and s >= 0 and e > s ->
+        {s, e}
+
+      _ ->
+        nil
     end
+  end
 
-  phrase = Safe.get(tok, :phrase) || Safe.get(tok, "phrase") || ""
-  plen = if is_binary(phrase), do: String.length(String.trim(phrase)), else: 0
-
-  case span do
-    {s, x} when is_integer(s) and is_integer(x) ->
+  defp span_sub_norm(sentence, start, stop) do
+    try do
       cond do
-        s < 0 or x < 0 ->
-          nil
+        not is_binary(sentence) or not is_integer(start) or not is_integer(stop) ->
+          ""
 
-        # If tuple is {start, len} and len matches phrase length → convert to {start,end}
-        plen > 0 and x == plen ->
-          {s, s + x}
-
-        # If tuple is {start, end} and (end-start) matches phrase length → keep
-        plen > 0 and x >= s and (x - s) == plen ->
-          {s, x}
-
-        # If x < s, it can’t be end → treat as len
-        x < s and x > 0 ->
-          {s, s + x}
-
-        # Fallback: assume x is end
-        x > s ->
-          {s, x}
+        start < 0 or stop <= start or stop > byte_size(sentence) ->
+          ""
 
         true ->
-          nil
+          binary_part(sentence, start, stop - start)
+          |> norm()
       end
-
-    _ ->
-      nil
-  end
-end
-
-defp span_sub_norm(sentence, start, x) do
-  try do
-    cond do
-      not is_binary(sentence) or not is_integer(start) or not is_integer(x) ->
-        ""
-
-      x <= 0 ->
-        ""
-
-      # If x looks like an end (>= start), prefer end semantics
-      x >= start ->
-        (String.slice(sentence, start, x - start) || "") |> norm()
-
-      # Otherwise treat as len
-      true ->
-        (String.slice(sentence, start, x) || "") |> norm()
+    rescue
+      _ -> ""
     end
-  rescue
-    _ -> ""
   end
-end
 
   defp byte_at(bin, idx) when is_binary(bin) and is_integer(idx) do
     if idx >= 0 and idx < byte_size(bin), do: :binary.at(bin, idx), else: nil
@@ -1444,18 +1416,11 @@ end
     span = tok_span(tok)
 
     case {sentence, span} do
-      {s, {start, b}} when is_binary(s) and is_integer(start) and is_integer(b) ->
-        {s0, stop} = normalize_span(s, {start, b}, phrase_norm)
+      {s, {start, stop}} when is_binary(s) ->
         size = byte_size(s)
-        len = stop - s0
-        sub_norm = if(len > 0 and stop <= size, do: span_sub_norm(s, s0, len), else: "")
+        sub_norm = span_sub_norm(s, start, stop)
 
         cond do
-          len <= 0 or stop > size ->
-            if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm),
-              do: :ok,
-              else: {:error, :chargram}
-
           sub_norm != phrase_norm ->
             cond do
               String.contains?(phrase_norm, " ") ->
@@ -1469,8 +1434,9 @@ end
             end
 
           true ->
-            left_ok = s0 == 0 or not word_byte?(byte_at(s, s0 - 1))
+            left_ok = start == 0 or not word_byte?(byte_at(s, start - 1))
             right_ok = stop == size or not word_byte?(byte_at(s, stop))
+
             if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
         end
 
@@ -2029,81 +1995,6 @@ end
   end
 
   defp maybe_stamp(other, _seq, _ts, _run_id), do: other
-defp force_end_exclusive_span(tok, nil), do: tok
 
-defp force_end_exclusive_span(tok, sent) when is_map(tok) and is_binary(sent) do
-  phrase = token_phrase(tok)
-  span0 = token_span(tok)
-
-  case {span0, phrase} do
-    {{s, x}, ph} when is_integer(s) and is_integer(x) and s >= 0 and is_binary(ph) and ph != "" ->
-      ph_len = byte_size(ph)
-
-      candidates =
-        [
-          {s, x},         # treat x as end
-          {s, s + x},     # treat x as len
-          {s, s + ph_len} # treat phrase len
-        ]
-        |> Enum.uniq()
-        |> Enum.filter(&valid_span_bytes?(sent, &1))
-
-      winner =
-        Enum.find(candidates, fn {a, b} ->
-          safe_slice_bytes(sent, a, b) == ph
-        end) ||
-          Enum.find(candidates, fn {a, b} ->
-            safe_slice_bytes(sent, a, b) != ""
-          end) ||
-          nil
-
-      maybe_put_span(tok, winner)
-
-    _ ->
-      tok
-  end
-end
-
-defp token_phrase(t) when is_map(t) do
-  Map.get(t, :phrase) ||
-    Map.get(t, "phrase") ||
-    Map.get(t, :lemma) ||
-    Map.get(t, "lemma") ||
-    Map.get(t, :norm) ||
-    Map.get(t, "norm") ||
-    ""
-end
-
-defp token_phrase(_), do: ""
-
-defp token_span(t) when is_map(t) do
-  case Map.get(t, :span) || Map.get(t, "span") do
-    {s, e} when is_integer(s) and is_integer(e) -> {s, e}
-    [s, e] when is_integer(s) and is_integer(e) -> {s, e}
-    _ -> nil
-  end
-end
-
-defp token_span(_), do: nil
-
-defp maybe_put_span(tok, nil), do: tok
-
-defp maybe_put_span(tok, {s, e}) when is_map(tok) and is_integer(s) and is_integer(e) do
-  tok
-  |> Map.put(:span, {s, e})
-  |> Map.put("span", {s, e})
-end
-
-defp valid_span_bytes?(sent, {s, e})
-     when is_binary(sent) and is_integer(s) and is_integer(e) do
-  s >= 0 and e > s and e <= byte_size(sent)
-end
-
-defp valid_span_bytes?(_, _), do: false
-
-defp safe_slice_bytes(sent, s, e) do
-  binary_part(sent, s, e - s)
-rescue
-  _ -> ""
-end
+  defp maybe_put_span(tok, nil), do: tok
 end

@@ -45,50 +45,51 @@ defmodule Core.Brain.Examine do
     • discover_from_sup?: boolean (default false unless all?: true)
   """
 
-def examine(opts \\ []) do
-  _compact? = Keyword.get(opts, :compact?, false)
-  ui_only? = Keyword.get(opts, :ui_only?, true)
-  all? = Keyword.get(opts, :all?, false)
+  def examine(opts \\ []) do
+    _compact? = Keyword.get(opts, :compact?, false)
+    ui_only? = Keyword.get(opts, :ui_only?, true)
+    all? = Keyword.get(opts, :all?, false)
 
-  base_regions =
-    cond do
-      is_list(Keyword.get(opts, :regions)) ->
-        Keyword.fetch!(opts, :regions)
+    base_regions =
+      cond do
+        is_list(Keyword.get(opts, :regions)) ->
+          Keyword.fetch!(opts, :regions)
 
-      all? ->
-        @ui_regions ++ @extra_regions
+        all? ->
+          @ui_regions ++ @extra_regions
 
-      ui_only? ->
-        @ui_regions
+        ui_only? ->
+          @ui_regions
 
-      true ->
-        @default_regions
-    end
+        true ->
+          @default_regions
+      end
 
-  sup = Keyword.get(opts, :supervisor, nil)
-  discover? = Keyword.get(opts, :discover_from_sup?, all?)
-  discovered = if discover? and not is_nil(sup), do: discover_regions_from_sup(sup), else: []
+    sup = Keyword.get(opts, :supervisor, nil)
+    discover? = Keyword.get(opts, :discover_from_sup?, all?)
+    discovered = if discover? and not is_nil(sup), do: discover_regions_from_sup(sup), else: []
 
-  regions =
-    (base_regions ++ discovered)
-    |> uniq_regions()
-    |> apply_only_filter(Keyword.get(opts, :only))
-    |> apply_exclude_filter(Keyword.get(opts, :exclude))
+    regions =
+      (base_regions ++ discovered)
+      |> uniq_regions()
+      |> apply_only_filter(Keyword.get(opts, :only))
+      |> apply_exclude_filter(Keyword.get(opts, :exclude))
 
-  regions
-  |> Enum.map(&safe_invoke/1)
-  |> Enum.each(fn
-    {:ok, _label, _state} -> :ok
+    regions
+    |> Enum.map(&safe_invoke/1)
+    |> Enum.each(fn
+      {:ok, _label, _state} ->
+        :ok
 
-    {:missing, label} ->
-      IO.puts("#{label}: (not running / no module)")
+      {:missing, label} ->
+        IO.puts("#{label}: (not running / no module)")
 
-    {:error, label, reason} ->
-      IO.puts("#{label}: ERROR #{inspect(reason)}")
-  end)
+      {:error, label, reason} ->
+        IO.puts("#{label}: ERROR #{inspect(reason)}")
+    end)
 
-  :ok
-end
+    :ok
+  end
 
   # ───────────────────────── helpers ─────────────────────────
 

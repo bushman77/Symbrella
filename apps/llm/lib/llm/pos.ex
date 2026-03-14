@@ -57,7 +57,7 @@ defmodule Llm.Pos do
     strong_opts = Util.ensure_min_predict(base_options, 160)
 
     # Single JSON pass via chat (OpenAI-compatible)
-    
+
     msgs = [
       %{"role" => "system", "content" => Prompts.pos_system_prompt()},
       %{"role" => "user", "content" => "Return ONLY the JSON object.\nword: " <> w}
@@ -88,7 +88,14 @@ defmodule Llm.Pos do
     case result do
       {:ok, %{"word" => ^w, "entries" => entries}} ->
         entries2 =
-          ensure_syn_ant_entries(entries, w, strong_opts, keep_alive, io_timeout, require_nonempty)
+          ensure_syn_ant_entries(
+            entries,
+            w,
+            strong_opts,
+            keep_alive,
+            io_timeout,
+            require_nonempty
+          )
 
         {:ok, %{"word" => w, "entries" => entries2}}
 
@@ -110,7 +117,12 @@ defmodule Llm.Pos do
       }
     ]
 
-    case safe_chat(msgs, temperature: 0.0, options: Util.ensure_min_predict(options, 160), keep_alive: keep_alive, timeout: io_timeout) do
+    case safe_chat(msgs,
+           temperature: 0.0,
+           options: Util.ensure_min_predict(options, 160),
+           keep_alive: keep_alive,
+           timeout: io_timeout
+         ) do
       {:ok, tsv} ->
         entries = Util.tsv_to_entries(tsv, @pos_tags) |> Util.only_word(w)
 

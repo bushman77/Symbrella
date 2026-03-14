@@ -13,13 +13,11 @@ defmodule Brain.Hippocampus.Window do
 
     case window do
       [{_at_head, ep_head} | tail] ->
-        if MapSet.equal?(
-             Map.get(new_ep, :norms, MapSet.new()),
-             Map.get(ep_head, :norms, MapSet.new())
-           ) do
-          # De-dup: refresh timestamp, adopt newest slate, merge meta (new wins), bump dup_count
-          merged_meta = Map.merge(ep_head.meta || %{}, new_ep.meta || %{})
-          refreshed = %{ep_head | slate: new_ep.slate, meta: merged_meta} |> Dup.bump_dup_count()
+        if dedup_same_episode?(ep_head, new_ep) do
+          refreshed =
+            ep_head
+            |> Dup.bump_dup_count()
+
           trim([{now, refreshed} | tail], keep)
         else
           trim([{now, new_ep} | window], keep)
@@ -29,6 +27,31 @@ defmodule Brain.Hippocampus.Window do
         trim([{now, new_ep}], keep)
     end
   end
+
+  defp dedup_same_episode?(ep1, ep2) do
+    MapSet.equal?(Map.get(ep1, :norms, MapSet.new()), Map.get(ep2, :norms, MapSet.new())) and
+      dedup_scope_key(Map.get(ep1, :meta, %{})) == dedup_scope_key(Map.get(ep2, :meta, %{}))
+  end
+
+  defp dedup_scope_key(meta) when is_map(meta) do
+    scope = meta[:scope] || meta["scope"]
+
+    cond do
+      is_map(scope) ->
+        {:scope, Enum.sort(scope)}
+
+      Map.has_key?(meta, :tenant) or Map.has_key?(meta, "tenant") ->
+        {:tenant, meta[:tenant] || meta["tenant"]}
+
+      Map.has_key?(meta, :conv_id) or Map.has_key?(meta, "conv_id") ->
+        {:conv_id, meta[:conv_id] || meta["conv_id"]}
+
+      true ->
+        :global
+    end
+  end
+
+  defp dedup_scope_key(_), do: :global
 
   @spec trim([{non_neg_integer(), episode()}], pos_integer()) ::
           [{non_neg_integer(), episode()}]

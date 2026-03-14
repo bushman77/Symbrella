@@ -24,7 +24,11 @@ defmodule Brain.Hippocampus do
 
   @type slate :: map()
   @type meta :: map()
-  @type episode :: %{required(:slate) => slate(), required(:meta) => meta(), required(:norms) => MapSet.t()}
+  @type episode :: %{
+          required(:slate) => slate(),
+          required(:meta) => meta(),
+          required(:norms) => MapSet.t()
+        }
   @type window :: [{non_neg_integer(), episode()}]
 
   @boot_warm_limit 200
@@ -42,9 +46,9 @@ defmodule Brain.Hippocampus do
     slate
   end
 
-@spec fact(atom()) :: term() | nil
-def fact(key) when is_atom(key),
-  do: GenServer.call(__MODULE__, {:fact, key})
+  @spec fact(atom()) :: term() | nil
+  def fact(key) when is_atom(key),
+    do: GenServer.call(__MODULE__, {:fact, key})
 
   @spec recall(list() | map(), keyword()) :: list()
   def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
@@ -56,7 +60,8 @@ def fact(key) when is_atom(key),
   end
 
   @spec configure(keyword()) :: :ok
-  def configure(opts) when is_list(opts), do: GenServer.call(__MODULE__, {:configure, normalize_opts(opts)})
+  def configure(opts) when is_list(opts),
+    do: GenServer.call(__MODULE__, {:configure, normalize_opts(opts)})
 
   @spec reset() :: :ok
   def reset, do: GenServer.call(__MODULE__, :reset)
@@ -84,7 +89,6 @@ def fact(key) when is_atom(key),
     {:ok, state}
   end
 
-
   @impl true
   def handle_call({:encode, slate, meta_in}, from, state) do
     at = System.system_time(:millisecond)
@@ -108,18 +112,36 @@ def fact(key) when is_atom(key),
 
     maybe_persist(ep, state1)
 
-    Telemetry.emit_write(%{count: 1}, %{at: at, norms_count: MapSet.size(norms), window_keep: state.window_keep})
-    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], %{count: 1}, %{at: at})
+    write_meas = %{
+      count: 1,
+      window_size: length(window1),
+      norms_count: MapSet.size(norms)
+    }
+
+    write_meta = %{
+      at: at,
+      window_keep: state.window_keep,
+      meta: meta
+    }
+
+    Telemetry.emit_write(write_meas, write_meta)
+    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], write_meas, write_meta)
 
     {:reply, :ok, state1}
   end
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
-    {results, meta} = do_recall(cues, state, opts)
+    {results, meas, meta} = do_recall(cues, state, opts)
 
-    Telemetry.emit_recall(%{count: length(results)}, meta)
-    Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :recall], %{count: length(results)}, meta)
+    Telemetry.emit_recall(meas, meta)
+
+    Telemetry.maybe_echo_to_caller(
+      from,
+      [:brain, :hippocampus, :recall],
+      meas,
+      meta
+    )
 
     {:reply, results, state}
   end
@@ -129,7 +151,7 @@ def fact(key) when is_atom(key),
     # For attach we usually want to include head as well unless caller overrides.
     opts = Map.put_new(opts, :ignore_head, false)
 
-    {results, _meta} = do_recall(si, state, opts)
+    {results, _meas, _meta} = do_recall(si, state, opts)
 
     episodes =
       results
@@ -168,48 +190,47 @@ def fact(key) when is_atom(key),
      }, state}
   end
 
-@impl true
-def handle_call({:fact, key}, _from, state) do
-  {:reply, find_fact_in_window(state.window, key), state}
-end
+  @impl true
+  def handle_call({:fact, key}, _from, state) do
+    {:reply, find_fact_in_window(state.window, key), state}
+  end
 
-defp find_fact_in_window(window, key) when is_list(window) do
-  # window is newest-first; return first match
-  Enum.find_value(window, fn {_at, ep} ->
-    if fact_episode?(ep, key), do: fact_value(ep), else: nil
-  end)
-end
+  defp find_fact_in_window(window, key) when is_list(window) do
+    # window is newest-first; return first match
+    Enum.find_value(window, fn {_at, ep} ->
+      if fact_episode?(ep, key), do: fact_value(ep), else: nil
+    end)
+  end
 
-defp find_fact_in_window(_window, _key), do: nil
+  defp find_fact_in_window(_window, _key), do: nil
 
-defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
-  tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
+  defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
+    tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
 
-  Enum.any?(tags, fn t ->
-    s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
-    String.downcase(s) == "user_name"
-  end)
-end
+    Enum.any?(tags, fn t ->
+      s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
+      String.downcase(s) == "user_name"
+    end)
+  end
 
-defp fact_episode?(_ep, _key), do: false
+  defp fact_episode?(_ep, _key), do: false
 
-defp fact_value(%{meta: meta} = ep) do
-  meta[:value] || meta["value"] || fact_value_from_si(ep)
-end
+  defp fact_value(%{meta: meta} = ep) do
+    meta[:value] || meta["value"] || fact_value_from_si(ep)
+  end
 
-defp fact_value(_), do: nil
+  defp fact_value(_), do: nil
 
-defp fact_value_from_si(%{slate: slate}) do
-  si = slate[:si] || slate["si"] || %{}
+  defp fact_value_from_si(%{slate: slate}) do
+    si = slate[:si] || slate["si"] || %{}
 
-  get_in(si, [:episode, :meta, :value]) ||
-    get_in(si, ["episode", "meta", "value"]) ||
-    get_in(si, ["episode", "meta", :value]) ||
-    get_in(si, [:episode, "meta", "value"])
-end
+    get_in(si, [:episode, :meta, :value]) ||
+      get_in(si, ["episode", "meta", "value"]) ||
+      get_in(si, ["episode", "meta", :value]) ||
+      get_in(si, [:episode, "meta", "value"])
+  end
 
-defp fact_value_from_si(_), do: nil
-
+  defp fact_value_from_si(_), do: nil
 
   # ────────────────────────────────────────────────────────────────────────────
   # Warm start: rehydrate window from DB
@@ -246,51 +267,57 @@ defp fact_value_from_si(_), do: nil
     end
   end
 
-defp db_row_to_episode(row) do
-  tokens = List.wrap(Map.get(row, :tokens) || [])
+  defp db_row_to_episode(row) do
+    tokens = List.wrap(Map.get(row, :tokens) || [])
 
-  norms =
-    tokens
-    |> Enum.reject(&Normalize.empty?/1)
-    |> MapSet.new()
+    norms =
+      tokens
+      |> Enum.reject(&Normalize.empty?/1)
+      |> MapSet.new()
 
-  si = Map.get(row, :si) || %{}
-  tags = Map.get(row, :tags) || []
+    si = Map.get(row, :si) || %{}
+    tags = Map.get(row, :tags) || []
 
-  meta_value =
-    get_in(si, ["episode", "meta", "value"]) ||
-      get_in(si, [:episode, :meta, :value]) ||
-      get_in(si, ["episode", "meta", :value]) ||
-      get_in(si, [:episode, "meta", "value"])
+    meta_value =
+      get_in(si, ["episode", "meta", "value"]) ||
+        get_in(si, [:episode, :meta, :value]) ||
+        get_in(si, ["episode", "meta", :value]) ||
+        get_in(si, [:episode, "meta", "value"])
 
-  %{
-    slate: %{
-      tags: tags,
-      si: si,
-      tokens: tokens
-    },
-    meta: %{
-      source: :db,
-      episode_id: Map.get(row, :id),
-      inserted_at: Map.get(row, :inserted_at),
-      tags: tags,
-      value: meta_value
-    },
-    norms: norms
-  }
-end
+    %{
+      slate: %{
+        tags: tags,
+        si: si,
+        tokens: tokens
+      },
+      meta: %{
+        source: :db,
+        episode_id: Map.get(row, :id),
+        inserted_at: Map.get(row, :inserted_at),
+        tags: tags,
+        value: meta_value
+      },
+      norms: norms
+    }
+  end
 
   # ────────────────────────────────────────────────────────────────────────────
   # Recall
   # ────────────────────────────────────────────────────────────────────────────
 
-  defp do_recall(cues, state, opts) do
-    cues = cue_map(cues)
+  defp do_recall(cues0, state, opts) do
+    cue_input = cues0
+    cues = cue_map(cues0)
 
     source = Map.get(opts, :source) || Map.get(opts, :recall_source) || :memory
     limit = Map.get(opts, :limit) || Map.get(opts, :recall_limit) || state.opts.recall_limit
 
-    ignore_head = Map.get(opts, :ignore_head, :auto)
+    ignore_head =
+      case {Map.get(opts, :ignore_head, :auto), cue_input} do
+        {:auto, cues} when is_list(cues) -> :never
+        {v, _} -> v
+      end
+
     min_jaccard = Map.get(opts, :min_jaccard, state.opts.min_jaccard)
     half_life_ms = Map.get(opts, :half_life_ms, state.opts.half_life_ms)
     scope = Map.get(opts, :scope)
@@ -305,10 +332,10 @@ end
       window_len: length(state.window)
     }
 
-    {res, meta} =
-      case normalize_source(source) do
-        :db ->
-          DB.recall(%{
+    case normalize_source(source) do
+      :db ->
+        results =
+          DB.recall(
             cues: cues,
             embedding: Map.get(opts, :embedding),
             limit: limit,
@@ -316,10 +343,24 @@ end
             min_jaccard: min_jaccard,
             scope: scope,
             window: state.window
-          })
+          )
 
-        :hybrid ->
-          DB.recall(%{
+        meas = %{
+          cue_count: length(Normalize.extract_norms_from_any(cues)),
+          window_size: length(state.window),
+          returned: length(results),
+          top_score:
+            case results do
+              [%{score: s} | _] -> s
+              _ -> 0.0
+            end
+        }
+
+        {results, meas, base_meta}
+
+      :hybrid ->
+        results =
+          DB.recall(
             cues: cues,
             embedding: Map.get(opts, :embedding),
             limit: limit,
@@ -328,23 +369,33 @@ end
             scope: scope,
             window: state.window,
             hybrid?: true
-          })
+          )
 
-        _ ->
-          # IMPORTANT: Recall.run/3 is run(cues, window, keyword_opts)
-          {results, _sc_meta, _dbg} =
-            Recall.run(cues, state.window,
-              limit: limit,
-              half_life_ms: half_life_ms,
-              min_jaccard: min_jaccard,
-              scope: scope,
-              ignore_head: ignore_head
-            )
+        meas = %{
+          cue_count: length(Normalize.extract_norms_from_any(cues)),
+          window_size: length(state.window),
+          returned: length(results),
+          top_score:
+            case results do
+              [%{score: s} | _] -> s
+              _ -> 0.0
+            end
+        }
 
-          {results, %{}}
-      end
+        {results, meas, base_meta}
 
-    {res, Map.merge(base_meta, meta)}
+      _ ->
+        {results, meas, dbg_meta} =
+          Recall.run(cues, state.window,
+            limit: limit,
+            half_life_ms: half_life_ms,
+            min_jaccard: min_jaccard,
+            scope: scope,
+            ignore_head: ignore_head
+          )
+
+        {results, meas, Map.merge(base_meta, dbg_meta)}
+    end
   end
 
   defp cue_map(%_{} = struct), do: Map.from_struct(struct)
@@ -399,7 +450,8 @@ end
       meta
     else
       snap =
-        if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
+        if Code.ensure_loaded?(Brain.MoodCore) and
+             function_exported?(Brain.MoodCore, :snapshot, 0) do
           try do
             Brain.MoodCore.snapshot()
           rescue
