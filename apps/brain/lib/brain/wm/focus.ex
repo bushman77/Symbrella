@@ -14,10 +14,10 @@ defmodule Brain.WM.Focus do
 
     wm_cfg0 = Map.get(state, :wm_cfg, %{})
 
-    cfg = %{
-      capacity: Map.get(wm_cfg0, :capacity, 3),
-      decay_ms: Map.get(wm_cfg0, :decay_ms, 8_000)
-    }
+    cfg =
+      wm_cfg0
+      |> Map.put_new(:capacity, 3)
+      |> Map.put_new(:decay_ms, 8_000)
 
     attention0 = Map.get(state, :attention, %{})
 

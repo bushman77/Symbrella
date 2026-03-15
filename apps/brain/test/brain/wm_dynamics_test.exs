@@ -1,40 +1,43 @@
 defmodule BrainWMDynamicsTest do
   use ExUnit.Case, async: true
+
   alias Brain
 
   # Minimal but realistic WM config for these tests.
   # Includes everything Brain.WM.Policy.normalize_cfg/1 expects.
-  defp state(cap) do
+  defp state(cap, wm_cfg_overrides \\ %{}) do
+    wm_cfg = %{
+      capacity: cap,
+      decay_ms: 8_000,
+      gate_threshold: 0.0,
+      fallback_scale: 0.5,
+      lemma_budget: 16,
+      replace_margin: 0.05,
+      allow_unk?: true,
+      allow_seed?: true,
+      allow_fallback_into_wm?: true,
+      merge_duplicates?: true,
+      # keep these neutral so they do not skew behavior
+      half_life_ms: 7_500,
+      novelty_window: 16,
+      novelty_weight: 0.0,
+      intent_weight: 0.0,
+      recency_weight: 0.0,
+      outcome_weight: 0.0,
+      current_intent: nil,
+      semantic_boost: 0.0
+    }
+
     %{
       wm: [],
-      wm_cfg: %{
-        capacity: cap,
-        decay_ms: 8_000,
-        gate_threshold: 0.0,
-        fallback_scale: 0.5,
-        lemma_budget: 16,
-        replace_margin: 0.05,
-        allow_unk?: true,
-        allow_seed?: true,
-        allow_fallback_into_wm?: true,
-        merge_duplicates?: true,
-        # new knobs – keep them neutral so they don't skew behavior
-        half_life_ms: 7_500,
-        novelty_window: 16,
-        novelty_weight: 0.0,
-        intent_weight: 0.0,
-        recency_weight: 0.0,
-        outcome_weight: 0.0,
-        current_intent: nil,
-        semantic_boost: 0.0
-      }
+      wm_cfg: Map.merge(wm_cfg, wm_cfg_overrides)
     }
   end
 
-  test "gates one candidate and clamps score with min_score" do
+  test "admits one candidate and preserves score" do
     s0 = state(3)
 
-    c = [
+    cands = [
       %{
         id: "X/1",
         token_index: 0,
@@ -45,9 +48,8 @@ defmodule BrainWMDynamicsTest do
       }
     ]
 
-    {wm1, added, removed} = Brain.__test_do_focus__(s0, c, %{})
+    {wm1, added, removed} = Brain.__test_do_focus__(s0, cands, %{})
 
-    # New contract: `added` / `removed` are counts, not id lists
     assert added >= 1
     assert removed == 0
 
@@ -57,7 +59,7 @@ defmodule BrainWMDynamicsTest do
     assert_in_delta first.score, 0.2, 1.0e-6
   end
 
-  test "duplicate sense adds a refreshed entry and keeps the old one" do
+  test "merge_duplicates?: true merges duplicate identity into one WM entry" do
     s0 = %{
       state(3)
       | wm: [
@@ -66,29 +68,44 @@ defmodule BrainWMDynamicsTest do
         ]
     }
 
-    c1 = [%{id: "A", token_index: 0, score: 0.6}]
-    {wm1, added, removed} = Brain.__test_do_focus__(s0, c1, %{})
+    cands = [
+      %{id: "A", token_index: 0, lemma: "a", score: 0.6, source: :lifg}
+    ]
 
-    # Under the current Brain contract:
-    # - we add one extra item
-    # - we don't evict anything
+    {wm1, added, removed} = Brain.__test_do_focus__(s0, cands, %{})
+
+    # One candidate was admitted, but because merge_duplicates? is true,
+    # WM should contain a single merged entry for "A".
     assert added == 1
     assert removed == 0
 
-    # We now have two entries in WM (both for "A")
-    assert length(wm1) == 2
-    assert Enum.count(wm1, &(&1.id == "A")) == 2
-
-    # And at least one of them reflects the refreshed score
-    best_for_a =
-      wm1
-      |> Enum.filter(&(&1.id == "A"))
-      |> Enum.max_by(&(&1.score || 0.0))
-
-    assert_in_delta best_for_a.score, 0.6, 1.0e-6
+    assert length(wm1) == 1
+    [only] = wm1
+    assert only.id == "A"
+    assert_in_delta only.score, 0.6, 1.0e-6
   end
 
-  test "capacity respected; lowest score evicted on overflow" do
+  test "honors gate_threshold from state.wm_cfg for non-preferred source candidates" do
+    s0 = state(3, %{gate_threshold: 0.8})
+
+    cands = [
+      %{
+        id: "weak|noun|0",
+        token_index: 0,
+        lemma: "weak",
+        score: 0.0,
+        source: :test
+      }
+    ]
+
+    {wm1, added, removed} = Brain.__test_do_focus__(s0, cands, %{})
+
+    assert wm1 == []
+    assert added == 0
+    assert removed == 0
+  end
+
+  test "capacity respected; newest admission is retained and tail is trimmed" do
     s0 = %{
       state(2)
       | wm: [
@@ -97,22 +114,22 @@ defmodule BrainWMDynamicsTest do
         ]
     }
 
-    c = [%{id: "C", token_index: 0, score: 0.9}]
-    {wm1, _added, _removed} = Brain.__test_do_focus__(s0, c, %{})
+    cands = [
+      %{id: "C", token_index: 0, lemma: "c", score: 0.9, source: :lifg}
+    ]
 
-    # WM capacity stays at 2
+    {wm1, added, removed} = Brain.__test_do_focus__(s0, cands, %{})
+
+    assert added == 1
+    assert removed == 1
     assert length(wm1) == 2
 
-    ids =
-      wm1
-      |> Enum.map(& &1.id)
-      |> Enum.sort()
-
-    # One of A/B must have been evicted; C must be present.
-    assert ids in [Enum.sort(["A", "C"]), Enum.sort(["B", "C"])]
+    # Current WM contract is prepend + trim:
+    # [C | [A, B]] -> take(2) => [C, A]
+    assert Enum.map(wm1, & &1.id) == ["C", "A"]
   end
 
-  test "tie-break by recency on equal score" do
+  test "newest equal-score admissions stay at the front" do
     s0 = %{
       state(2)
       | wm: [
@@ -120,20 +137,19 @@ defmodule BrainWMDynamicsTest do
         ]
     }
 
-    c = [
-      %{id: "B", token_index: 0, score: 0.5},
-      %{id: "C", token_index: 1, score: 0.5}
+    cands = [
+      %{id: "B", token_index: 0, lemma: "b", score: 0.5, source: :lifg},
+      %{id: "C", token_index: 1, lemma: "c", score: 0.5, source: :lifg}
     ]
 
-    {wm1, _added, _removed} = Brain.__test_do_focus__(s0, c, %{})
+    {wm1, added, removed} = Brain.__test_do_focus__(s0, cands, %{})
 
-    # WM will hold the top 2 with score 0.5; we only care about recency order.
+    assert added == 2
+    assert removed == 1
     assert length(wm1) == 2
 
-    [first, second | _] = wm1
-    assert first.score == 0.5
-    assert second.score == 0.5
-    # newest should float to the front among equal-score items
-    assert first.ts >= second.ts
+    # Both new candidates are prepended in arrival order, so the later one
+    # stays at the very front after trimming.
+    assert Enum.map(wm1, & &1.id) == ["C", "B"]
   end
 end

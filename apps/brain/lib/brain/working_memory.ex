@@ -253,15 +253,13 @@ defmodule Brain.WorkingMemory do
     last_bump_existing = existing[:last_bump] || ts_existing
     last_bump_item = item[:last_bump] || ts_item
 
-    %{
-      existing
-      | activation: max(existing[:activation] || 0.0, item[:activation] || 0.0),
-        score: max(existing[:score] || 0.0, item[:score] || 0.0),
-        ts: ts,
-        inserted_at: existing[:inserted_at] || item[:inserted_at] || ts,
-        last_bump: max(last_bump_existing, last_bump_item),
-        payload: Map.merge(existing[:payload] || %{}, item[:payload] || %{})
-    }
+    existing
+    |> Map.put(:activation, max(existing[:activation] || 0.0, item[:activation] || 0.0))
+    |> Map.put(:score, max(existing[:score] || 0.0, item[:score] || 0.0))
+    |> Map.put(:ts, ts)
+    |> Map.put(:inserted_at, existing[:inserted_at] || item[:inserted_at] || ts)
+    |> Map.put(:last_bump, max(last_bump_existing, last_bump_item))
+    |> Map.put(:payload, Map.merge(existing[:payload] || %{}, item[:payload] || %{}))
   end
 
   defp same_identity?(a, b), do: a.id == b.id
