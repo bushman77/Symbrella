@@ -24,6 +24,7 @@ defmodule Brain.ML do
   require Logger
 
   alias Brain.Bus
+  alias Brain.ML.LIFG, as: MLLIFG
 
   @blackboard_topic "brain:blackboard"
   @ml_topic "brain:ml"
@@ -341,15 +342,25 @@ defmodule Brain.ML do
     now_ms = now_ms()
     pending = state.pending
 
+    event_text = extract_text_any(state.last_intent, bb_env)
+    recent_turn = recent_turn_for_text(state, event_text, now_ms)
+
     {turn_id, opened_at_ms, intent_payload, text} =
       cond do
         is_map(pending) and not too_old?(pending.opened_at_ms, now_ms, state.pending_max_age_ms) ->
           {pending.id, pending.opened_at_ms, pending.intent || state.last_intent,
-           pending.text || extract_text_any(state.last_intent, state.last_blackboard)}
+           pending.text || event_text ||
+             extract_text_any(state.last_intent, state.last_blackboard)}
+
+        is_map(recent_turn) ->
+          {mget(recent_turn, :turn_id),
+           mget(recent_turn, :opened_at_ms) || mget(recent_turn, :at_ms),
+           mget(recent_turn, :intent) || state.last_intent,
+           event_text || mget(recent_turn, :text)}
 
         true ->
           {new_turn_id(), now_ms, state.last_intent,
-           extract_text_any(state.last_intent, state.last_blackboard)}
+           event_text || extract_text_any(state.last_intent, state.last_blackboard)}
       end
 
     trigger = %{
@@ -360,11 +371,10 @@ defmodule Brain.ML do
       at_ms: mget(bb_env, :at_ms) || now_ms
     }
 
-    # KEY HARDENING:
-    # When we see the Stage1 stop event, we pull the LIFG state directly to guarantee winners,
-    # even if nothing ever published on "brain:lifg" (or message shapes drifted).
+    # Use the Stage1 stop event payload for this turn instead of sampling latest LIFG state,
+    # which can race with another turn.
     state2 =
-      case safe_fetch_lifg_state_for_upgrade() do
+      case lifg_state_from_pipeline_stop(bb_env) do
         nil -> state
         lifg_state -> %{state | last_lifg: lifg_state}
       end
@@ -377,18 +387,45 @@ defmodule Brain.ML do
     |> Map.put(:pending, nil)
   end
 
-  defp safe_fetch_lifg_state_for_upgrade do
-    cond do
-      Code.ensure_loaded?(Brain.LIFG) and function_exported?(Brain.LIFG, :get_state, 0) ->
-        case safe_call(fn -> Brain.LIFG.get_state() end) do
-          {:ok, st} -> st
-          _ -> nil
-        end
+  defp lifg_state_from_pipeline_stop(%{} = bb_env) do
+    meta = mget(bb_env, :meta) || %{}
 
-      true ->
-        nil
-    end
+    %{
+      region: :lifg,
+      last: %{
+        meta: meta,
+        tokens: mget(meta, :tokens) || [],
+        source: mget(meta, :source),
+        guards: %{
+          chargram_violation: mget(meta, :chargram_violation),
+          missing_candidate_tokens: mget(meta, :missing_candidate_tokens) || [],
+          missing_candidates: mget(meta, :missing_candidates),
+          rejected_by_boundary: mget(meta, :rejected_by_boundary) || []
+        },
+        intent: mget(meta, :intent),
+        confidence: mget(meta, :confidence),
+        feature_mix: :lifg_stage1,
+        ts_ms: mget(meta, :ts_ms),
+        choices: mget(meta, :choices) || [],
+        audit: %{
+          boundary_drops: mget(meta, :boundary_drops),
+          chargram_violation: mget(meta, :chargram_violation),
+          dropped_tokens: mget(meta, :dropped_tokens),
+          kept_tokens: mget(meta, :kept_tokens),
+          missing_candidate_tokens: mget(meta, :missing_candidate_tokens) || [],
+          missing_candidates: mget(meta, :missing_candidates),
+          rejected_by_boundary: mget(meta, :rejected_by_boundary) || [],
+          weak_decisions: mget(meta, :weak_decisions),
+          guard_drops: mget(meta, :guard_drops),
+          mwe_fallbacks: mget(meta, :mwe_fallbacks)
+        },
+        finalists: mget(meta, :finalists) || [],
+        si_sentence: mget(meta, :sentence)
+      }
+    }
   end
+
+  defp lifg_state_from_pipeline_stop(_), do: nil
 
   # ───────────────────────── Record construction ─────────────────────────
 
@@ -433,153 +470,7 @@ defmodule Brain.ML do
     if is_binary(t) and t != "", do: t, else: nil
   end
 
-  defp lifg_block(state) do
-    lifg = state.last_lifg
-
-    {choices, token_meta} =
-      lifg
-      |> extract_lifg_choices_and_tokens()
-
-    winners =
-      choices
-      |> Enum.map(&normalize_choice(&1, token_meta))
-      |> maybe_hydrate_lex(state.hydrate_lex?)
-
-    %{
-      last_update: lifg,
-      winners: winners
-    }
-  end
-
-  # ───────────────────────── Choice extraction + token meta ─────────────────────────
-
-  defp extract_lifg_choices_and_tokens(nil), do: {[], %{}}
-
-  defp extract_lifg_choices_and_tokens(%{} = m) do
-    last =
-      mget(m, :last) ||
-        mget_in(m, [:state, :last]) ||
-        mget_in(m, [:lifg, :last]) ||
-        mget_in(m, [:out, :last])
-
-    tokens =
-      (mget(m, :tokens) ||
-         mget_in(m, [:state, :tokens]) ||
-         (is_map(last) && (mget(last, :tokens) || mget(last, "tokens"))) ||
-         [])
-      |> List.wrap()
-      |> Enum.filter(&is_map/1)
-
-    token_meta =
-      Enum.reduce(tokens, %{}, fn t, acc ->
-        idx = mget(t, :index) || mget(t, :token_index)
-        if is_integer(idx), do: Map.put(acc, idx, t), else: acc
-      end)
-
-    choices =
-      (mget(m, :choices) ||
-         mget(m, :winners) ||
-         mget_in(m, [:out, :choices]) ||
-         mget_in(m, [:lifg, :choices]) ||
-         (is_map(last) && (mget(last, :choices) || mget(last, "choices"))) ||
-         [])
-      |> List.wrap()
-      |> Enum.filter(&is_map/1)
-
-    {choices, token_meta}
-  end
-
-  defp extract_lifg_choices_and_tokens(_), do: {[], %{}}
-
-  defp normalize_choice(%{} = ch, token_meta) when is_map(token_meta) do
-    id =
-      ch[:chosen_id] ||
-        ch["chosen_id"] ||
-        ch[:id] ||
-        ch["id"]
-
-    tok_idx = ch[:token_index] || ch["token_index"]
-
-    tok = if is_integer(tok_idx), do: Map.get(token_meta, tok_idx), else: nil
-
-    {chosen_word, chosen_pos, chosen_sense} = parse_cell_id(id)
-
-    alt_ids0 = ch[:alt_ids] || ch["alt_ids"] || []
-    alt_ids = alt_ids0 |> List.wrap() |> Enum.take(12)
-
-    %{
-      token_index: tok_idx,
-      phrase: tok && (mget(tok, :phrase) || mget(tok, :raw) || mget(tok, :text)),
-      span: tok && (mget(tok, :span) || mget(tok, :range)),
-      mw: tok && (mget(tok, :mw) || mget(tok, :multiword)),
-      lemma: ch[:lemma] || ch["lemma"],
-      chosen_id: id,
-      chosen_word: chosen_word,
-      chosen_pos: chosen_pos,
-      chosen_sense: chosen_sense,
-      margin: ch[:margin] || ch["margin"],
-      score: ch[:score] || ch["score"] || ch[:prob] || ch["prob"],
-      # keep scores optional; can be large, but retained for now
-      scores: ch[:scores] || ch["scores"],
-      alt_ids: alt_ids
-    }
-  end
-
-  defp parse_cell_id(id) when is_binary(id) do
-    # expected "word|pos|sense" (sense may be int or "fallback")
-    parts = String.split(id, "|", parts: 3)
-
-    case parts do
-      [w, pos, sense] -> {w, pos, sense}
-      [w, pos] -> {w, pos, nil}
-      [w] -> {w, nil, nil}
-      _ -> {nil, nil, nil}
-    end
-  end
-
-  defp parse_cell_id(_), do: {nil, nil, nil}
-
-  defp maybe_hydrate_lex(winners, false), do: winners
-
-  defp maybe_hydrate_lex(winners, true) when is_list(winners) do
-    Enum.map(winners, fn w ->
-      id = w[:chosen_id]
-
-      lex =
-        if is_binary(id) and Code.ensure_loaded?(Db) and Code.ensure_loaded?(Db.BrainCell) do
-          safe_fetch_cell_lex(id)
-        else
-          nil
-        end
-
-      if is_map(lex), do: Map.put(w, :lex, lex), else: w
-    end)
-  end
-
-  defp safe_fetch_cell_lex(id) do
-    try do
-      case Db.get(Db.BrainCell, id) do
-        nil ->
-          nil
-
-        row ->
-          %{
-            id: row.id,
-            word: Map.get(row, :word),
-            pos: Map.get(row, :pos),
-            type: Map.get(row, :type),
-            definition: Map.get(row, :definition),
-            example: Map.get(row, :example),
-            synonyms: Map.get(row, :synonyms),
-            antonyms: Map.get(row, :antonyms)
-          }
-      end
-    rescue
-      _ -> nil
-    catch
-      _, _ -> nil
-    end
-  end
+  defp lifg_block(state), do: MLLIFG.build_block(state.last_lifg, state.hydrate_lex?)
 
   # ───────────────────────── PubSub helpers ─────────────────────────
 
@@ -683,6 +574,25 @@ defmodule Brain.ML do
 
   defp replace_or_prepend(_turns, rec, keep), do: [rec] |> Enum.take(keep)
 
+  defp recent_turn_for_text(state, text, now_ms) when is_binary(text) and text != "" do
+    case state.last_turn do
+      %{} = turn ->
+        turn_text = mget(turn, :text)
+        turn_at = mget(turn, :at_ms)
+
+        if turn_text == text and is_integer(turn_at) and now_ms - turn_at <= 500 do
+          turn
+        else
+          nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp recent_turn_for_text(_state, _text, _now_ms), do: nil
+
   defp too_old?(opened_at_ms, now_ms, max_age_ms)
        when is_integer(opened_at_ms) and is_integer(now_ms) and is_integer(max_age_ms) do
     now_ms - opened_at_ms > max_age_ms
@@ -693,18 +603,6 @@ defmodule Brain.ML do
   defp new_turn_id, do: :erlang.unique_integer([:positive, :monotonic])
   defp now_ms, do: System.system_time(:millisecond)
 
-  # ───────────────────────── Safe call ─────────────────────────
-
-  defp safe_call(fun) when is_function(fun, 0) do
-    try do
-      {:ok, fun.()}
-    rescue
-      _ -> :error
-    catch
-      _, _ -> :error
-    end
-  end
-
   # ───────────────────────── Small utilities ─────────────────────────
 
   defp truthy?(v) when v in [true, "true", true, 1, "1", "yes", "on"], do: true
@@ -712,13 +610,4 @@ defmodule Brain.ML do
 
   defp mget(%{} = m, k), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp mget(_, _), do: nil
-
-  defp mget_in(m, [k | rest]) when is_map(m) do
-    case mget(m, k) do
-      %{} = next -> mget_in(next, rest)
-      other -> other
-    end
-  end
-
-  defp mget_in(_, _), do: nil
 end

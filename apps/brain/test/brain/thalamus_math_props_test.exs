@@ -1,3 +1,4 @@
+# apps/brain/test/brain/thalamus_math_props_test.exs
 defmodule Brain.ThalamusMathProps_Test do
   use ExUnit.Case, async: false
 
@@ -36,33 +37,42 @@ defmodule Brain.ThalamusMathProps_Test do
     end
   end
 
+  defp require_running!(mod) when is_atom(mod) do
+    case Process.whereis(mod) do
+      pid when is_pid(pid) ->
+        :ok
+
+      nil ->
+        flunk("""
+        #{inspect(mod)} is not running.
+
+        These tests assume singleton Brain regions are started under Symbrella.Application.
+        Do not start ad hoc local copies from the test.
+        """)
+    end
+  end
+
   # --- setup ----------------------------------------------------------------
 
   setup_all do
-    case Process.whereis(Brain) do
-      nil -> start_supervised!(Brain)
-      _pid -> :ok
-    end
-
-    case Process.whereis(Brain.Thalamus) do
-      nil ->
-        flunk("""
-        Brain.Thalamus is not running.
-
-        These tests assume the singleton is already started under the umbrella root.
-        """)
-
-      _pid ->
-        :ok
-    end
-
+    require_running!(Brain)
+    require_running!(Brain.Thalamus)
+    require_running!(Brain.OFC)
+    require_running!(Brain.DLPFC)
     :ok
   end
 
   setup do
+    :ok = Brain.Thalamus.reset()
+    :ok = Brain.OFC.reset()
+    :ok = Brain.DLPFC.reset()
+    :ok = Brain.defocus(fn _ -> true end)
+
     id = "th-math-#{System.unique_integer([:positive])}"
     :ok = :telemetry.attach(id, @th_event, &__MODULE__.handle_decision/4, self())
     on_exit(fn -> :telemetry.detach(id) end)
+
+    drain!()
     :ok
   end
 

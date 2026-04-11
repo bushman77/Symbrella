@@ -145,6 +145,8 @@ defmodule SymbrellaWeb.BrainHTML do
     sp_bd = mget(sp_patterns, :boundary_drops) || 0
     sp_cg = mget(sp_patterns, :chargram_violations) || 0
     sp_no_mwe = mget(sp_patterns, :no_mwe_senses) || 0
+    sp_lifg_gap = mget(sp_patterns, :lifg_payload_gaps) || 0
+    sp_lifg_pos = mget(sp_patterns, :lifg_pos_anomalies) || 0
 
     show_self_portrait? =
       (is_map(sp_traits) and map_size(sp_traits) > 0) or
@@ -177,6 +179,8 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:sp_bd, sp_bd)
       |> assign(:sp_cg, sp_cg)
       |> assign(:sp_no_mwe, sp_no_mwe)
+      |> assign(:sp_lifg_gap, sp_lifg_gap)
+      |> assign(:sp_lifg_pos, sp_lifg_pos)
 
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
@@ -229,7 +233,8 @@ defmodule SymbrellaWeb.BrainHTML do
           <span class="opacity-70">cur</span> {fmt(@sp_cur)} ·
           <span class="opacity-70">bd</span> {to_string(@sp_bd)} ·
           <span class="opacity-70">cg</span> {to_string(@sp_cg)} ·
-          <span class="opacity-70">no_mwe</span> {to_string(@sp_no_mwe)}
+          <span class="opacity-70">no_mwe</span> {to_string(@sp_no_mwe)} ·
+          <span class="opacity-70">lifg_gap</span> {to_string(@sp_lifg_gap)}
         </.chip>
       <% end %>
 
@@ -501,7 +506,23 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp format_ts(_), do: "—"
 
-  defp preview_env(env) do
+  defp preview_env(%{} = env) do
+    case {mget(env, :kind), mget(env, :event)} do
+      {:telemetry, [:brain, :self_portrait, :monitor]} ->
+        meta = mget(env, :meta) || %{}
+        issue = mget(meta, :issue) || :unknown
+        severity = mget(meta, :severity) || :info
+
+        "self_portrait monitor: #{issue} #{severity}"
+
+      _ ->
+        inspect_preview(env)
+    end
+  end
+
+  defp preview_env(env), do: inspect_preview(env)
+
+  defp inspect_preview(env) do
     s = inspect(env, pretty: false, limit: 50, printable_limit: 300)
     if byte_size(s) > 120, do: binary_part(s, 0, 120) <> "…", else: s
   end

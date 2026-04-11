@@ -31,6 +31,19 @@ defmodule Brain.Hippocampus do
         }
   @type window :: [{non_neg_integer(), episode()}]
 
+  @typedoc """
+  Ranked recall result.
+
+  * `:score` is the backend-specific relevance score.
+  * `:at` is the episode timestamp in milliseconds.
+  * `:episode` contains the remembered `%{slate, meta, norms}` payload.
+  """
+  @type recall_result :: %{
+          required(:score) => float(),
+          required(:at) => non_neg_integer(),
+          required(:episode) => episode()
+        }
+
   @boot_warm_limit 200
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -50,10 +63,27 @@ defmodule Brain.Hippocampus do
   def fact(key) when is_atom(key),
     do: GenServer.call(__MODULE__, {:fact, key})
 
-  @spec recall(list() | map(), keyword()) :: list()
+  @doc """
+  Recall ranked episodes for cues from the configured source.
+
+  Sources:
+
+    * `:memory` - in-memory symbolic window scored by Jaccard overlap and recency.
+    * `:db` - pgvector-backed DB recall via `Db.Episode`; requires `:embedding`.
+    * `:hybrid` - memory recall plus DB recall when `:embedding` is supplied.
+
+  Returns a list of `%{score, at, episode}` maps.
+  """
+  @spec recall(list() | map(), keyword()) :: [recall_result()]
   def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
     do: GenServer.call(__MODULE__, {:recall, cues, normalize_opts(opts)})
 
+  @doc """
+  Recall episodes and attach them under `si.evidence[:episodes]`.
+
+  Attached episodes keep the same `%{score, at, episode}` recall result shape, with
+  `episode.slate.winners` normalized for downstream inspection when possible.
+  """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
     GenServer.call(__MODULE__, {:attach, si, normalize_opts(opts)})
@@ -359,22 +389,45 @@ defmodule Brain.Hippocampus do
         {results, meas, base_meta}
 
       :hybrid ->
-        results =
-          DB.recall(
-            cues: cues,
-            embedding: Map.get(opts, :embedding),
+        {memory_results, memory_meas, memory_meta} =
+          Recall.run(cues, state.window,
             limit: limit,
             half_life_ms: half_life_ms,
             min_jaccard: min_jaccard,
             scope: scope,
-            window: state.window,
-            hybrid?: true
+            ignore_head: ignore_head
           )
 
+        db_results =
+          case Map.get(opts, :embedding) do
+            nil ->
+              []
+
+            embedding ->
+              DB.recall(
+                cues: cues,
+                embedding: embedding,
+                limit: limit,
+                half_life_ms: half_life_ms,
+                min_jaccard: min_jaccard,
+                scope: scope,
+                window: state.window,
+                hybrid?: true
+              )
+          end
+
+        results =
+          (memory_results ++ db_results)
+          |> Enum.sort_by(fn r -> {Map.get(r, :score, 0.0), Map.get(r, :at, 0)} end, :desc)
+          |> Enum.take(limit)
+
         meas = %{
-          cue_count: length(Normalize.extract_norms_from_any(cues)),
+          cue_count:
+            Map.get(memory_meas, :cue_count, length(Normalize.extract_norms_from_any(cues))),
           window_size: length(state.window),
           returned: length(results),
+          memory_returned: length(memory_results),
+          db_returned: length(db_results),
           top_score:
             case results do
               [%{score: s} | _] -> s
@@ -382,7 +435,8 @@ defmodule Brain.Hippocampus do
             end
         }
 
-        {results, meas, base_meta}
+        meta = Map.merge(base_meta, Map.put(memory_meta, :hybrid_db?, db_results != []))
+        {results, meas, meta}
 
       _ ->
         {results, meas, dbg_meta} =

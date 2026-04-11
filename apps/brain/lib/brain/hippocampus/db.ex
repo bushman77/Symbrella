@@ -29,8 +29,6 @@ defmodule Brain.Hippocampus.DB do
   """
 
   alias Db.Episode
-  require Logger
-
   @type recall_r :: %{score: float(), at: non_neg_integer(), episode: map()}
 
   @spec recall(keyword()) :: [recall_r]
@@ -95,10 +93,6 @@ defmodule Brain.Hippocampus.DB do
       end
     end)
     |> Enum.sort_by(& &1.score, :desc)
-  rescue
-    e ->
-      Logger.error("Hippo.DB recall failed: #{Exception.message(e)}")
-      []
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────

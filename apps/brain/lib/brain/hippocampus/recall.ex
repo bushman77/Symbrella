@@ -125,7 +125,7 @@ defmodule Brain.Hippocampus.Recall do
   # List-form cues (["alpha"], ["hello", "world"], etc.)
   defp cues_to_set(cues) when is_list(cues) do
     cues
-    |> Enum.flat_map(&tokenize_term/1)
+    |> Enum.flat_map(&winner_terms/1)
     |> Enum.reject(&(&1 == ""))
     |> MapSet.new()
   end
@@ -135,28 +135,7 @@ defmodule Brain.Hippocampus.Recall do
     winners = slate[:winners] || slate["winners"] || []
 
     winners
-    |> Enum.flat_map(fn
-      # NEW: winner is already a simple term (string/atom)
-      w when is_binary(w) or is_atom(w) ->
-        tokenize_term(w)
-
-      # Original behaviour: winner is a map with lemma/norm/word/id
-      %{} = w ->
-        [
-          w[:lemma],
-          w["lemma"],
-          w[:norm],
-          w["norm"],
-          w[:word],
-          w["word"],
-          w[:id],
-          w["id"]
-        ]
-        |> Enum.flat_map(&tokenize_term/1)
-
-      _ ->
-        []
-    end)
+    |> Enum.flat_map(&winner_terms/1)
     |> Enum.reject(&(&1 == ""))
     |> MapSet.new()
   end
@@ -258,4 +237,22 @@ defmodule Brain.Hippocampus.Recall do
   defp normalize_ignore(:never), do: :never
   defp normalize_ignore(:auto), do: :auto
   defp normalize_ignore(_unknown), do: :auto
+
+  defp winner_terms(%{} = w) do
+    primary =
+      w[:lemma] ||
+        w["lemma"] ||
+        w[:norm] ||
+        w["norm"] ||
+        w[:word] ||
+        w["word"]
+
+    case primary do
+      nil -> tokenize_term(w[:id] || w["id"])
+      value -> tokenize_term(value)
+    end
+  end
+
+  defp winner_terms(w) when is_binary(w) or is_atom(w), do: tokenize_term(w)
+  defp winner_terms(_), do: []
 end

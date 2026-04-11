@@ -1,3 +1,4 @@
+# apps/brain/test/brain/thalamus_telemetry_contract_test.exs
 defmodule Brain.ThalamusTelemetryContract_Test do
   use ExUnit.Case, async: false
 
@@ -9,28 +10,43 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     :ok
   end
 
-  setup_all do
-    case Process.whereis(Brain) do
-      nil -> start_supervised!(Brain)
-      _pid -> :ok
+  defp drain! do
+    receive do
+      {:decision, _m, _meta} -> drain!()
+    after
+      10 -> :ok
     end
+  end
 
-    case Process.whereis(Brain.Thalamus) do
+  defp require_running!(mod) when is_atom(mod) do
+    case Process.whereis(mod) do
+      pid when is_pid(pid) ->
+        :ok
+
       nil ->
         flunk("""
-        Brain.Thalamus is not running.
+        #{inspect(mod)} is not running.
 
-        These tests assume the singleton is already started under the umbrella root.
+        These tests assume singleton Brain regions are started under Symbrella.Application.
+        Do not start ad hoc local copies from the test.
         """)
-
-      _pid ->
-        :ok
     end
+  end
 
+  setup_all do
+    require_running!(Brain)
+    require_running!(Brain.Thalamus)
+    require_running!(Brain.OFC)
+    require_running!(Brain.DLPFC)
     :ok
   end
 
   setup ctx do
+    :ok = Brain.Thalamus.reset()
+    :ok = Brain.OFC.reset()
+    :ok = Brain.DLPFC.reset()
+    :ok = Brain.defocus(fn _ -> true end)
+
     # Fresh, deterministic params for each test
     :ok = Brain.Thalamus.set_params(ofc_weight: 0.5, acc_alpha: 0.5)
 
@@ -38,6 +54,7 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     :ok = :telemetry.attach(id, @th_event, &__MODULE__.handle_decision/4, self())
     on_exit(fn -> :telemetry.detach(id) end)
 
+    drain!()
     {:ok, ctx}
   end
 

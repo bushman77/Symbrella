@@ -144,10 +144,10 @@ defmodule Core.Intent.Selection do
     kw0 = extract_keyword(si)
     kw = normalize_text(kw0)
 
-    {intent, conf} = infer_intent(kw)
-
     text0 = text_from_si(si, kw)
     text = normalize_text(text0)
+
+    {intent, conf} = infer_intent(kw, text)
 
     si2 =
       si
@@ -348,9 +348,11 @@ defmodule Core.Intent.Selection do
 
   # ──────────────────── cue-based inference ────────────────────
 
-  defp infer_intent(kw) when kw in ["", nil], do: {:unknown, 0.0}
+  defp infer_intent(kw, _text) when kw in ["", nil], do: {:unknown, 0.0}
 
-  defp infer_intent(kw) do
+  defp infer_intent(kw, text) do
+    question_cue = question_cue(kw, text)
+
     scores = %{
       greet: score_greet(kw),
       translate: score_translate(kw),
@@ -358,20 +360,29 @@ defmodule Core.Intent.Selection do
       insult: score_insult(kw),
       command: score_command(kw),
       feedback: score_feedback(kw),
-      ask: score_question(kw)
+      ask: score_question(question_cue)
     }
 
     {label, top, second} = pick_label(scores)
 
     label =
       case label do
-        :ask -> if looks_like_question?(kw), do: :ask, else: :unknown
+        :ask -> if looks_like_question?(question_cue), do: :ask, else: :unknown
         other -> other
       end
 
     conf = conf_from_scores(top, second)
 
     if top < 0.35, do: {:unknown, 0.40}, else: {label, conf}
+  end
+
+  defp question_cue(kw, text) do
+    text = normalize_text(text || "")
+
+    cond do
+      score_question(text) >= 0.70 -> text
+      true -> kw
+    end
   end
 
   defp pick_label(scores) do

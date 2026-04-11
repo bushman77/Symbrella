@@ -68,7 +68,10 @@ defmodule SymbrellaWeb.BrainLive do
         :ok = Bus.subscribe(@blackboard_topic)
         Enum.each(@hud_topics, &Bus.subscribe/1)
         :timer.send_interval(@refresh_ms, :refresh_selected)
-        MoodHud.attach(socket)
+
+        socket
+        |> MoodHud.attach()
+        |> seed_blackboard_history()
       else
         socket
       end
@@ -887,7 +890,7 @@ defmodule SymbrellaWeb.BrainLive do
     {:noreply,
      update(socket, :region_state, fn st ->
        st = st || %{}
-       ws = [bb_event | st[:workspace] || []] |> Enum.take(100)
+       ws = upsert_blackboard_event(bb_event, st[:workspace] || [], 100)
        Map.put(st, :workspace, ws)
      end)}
   end
@@ -895,11 +898,62 @@ defmodule SymbrellaWeb.BrainLive do
   defp wrap_bb_event(env) do
     %{
       id: :erlang.unique_integer([:positive, :monotonic]),
-      at_ms: now_ms(),
+      at_ms: mget(env, :at_ms) || now_ms(),
       tag: bb_tag(env),
       env: env
     }
   end
+
+  defp seed_blackboard_history(socket) do
+    history =
+      cond do
+        Code.ensure_loaded?(Brain.Blackboard) and
+            function_exported?(Brain.Blackboard, :history, 1) ->
+          case safe_call(fn -> Brain.Blackboard.history(50) end) do
+            {:ok, events} when is_list(events) -> events
+            _ -> []
+          end
+
+        true ->
+          []
+      end
+
+    events =
+      history
+      |> Enum.reverse()
+      |> Enum.reduce([], fn env, acc ->
+        env
+        |> wrap_bb_event()
+        |> upsert_blackboard_event(acc, 100)
+      end)
+
+    update(socket, :region_state, fn st ->
+      st = st || %{}
+      Map.put(st, :workspace, events)
+    end)
+  end
+
+  defp upsert_blackboard_event(%{env: %{} = env} = event, events, keep) when is_list(events) do
+    case {mget(env, :kind), mget(env, :turn_id)} do
+      {:ml_turn, turn_id} when not is_nil(turn_id) ->
+        rest =
+          Enum.reject(events, fn
+            %{env: %{} = other} ->
+              mget(other, :kind) == :ml_turn and mget(other, :turn_id) == turn_id
+
+            _ ->
+              false
+          end)
+
+        [event | rest] |> Enum.take(keep)
+
+      _ ->
+        [event | events] |> Enum.take(keep)
+    end
+  end
+
+  defp upsert_blackboard_event(event, events, keep),
+    do: [event | List.wrap(events)] |> Enum.take(keep)
 
   defp bb_tag(%{} = env) do
     cond do

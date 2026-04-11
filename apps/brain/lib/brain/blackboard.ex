@@ -44,7 +44,8 @@ defmodule Brain.Blackboard do
     [:brain, :lifg, :stage1, :boundary_drop],
     [:brain, :lifg, :stage1, :chargram_violation],
     [:brain, :pmtg, :consult],
-    [:brain, :pmtg, :no_mwe_senses]
+    [:brain, :pmtg, :no_mwe_senses],
+    [:brain, :self_portrait, :monitor]
   ]
 
   # ——— Public API ———

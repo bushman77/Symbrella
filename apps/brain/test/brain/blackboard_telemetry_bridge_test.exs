@@ -55,6 +55,23 @@ defmodule Brain.BlackboardTelemetryBridgeTest do
                    500
   end
 
+  test "bridges [:brain, :self_portrait, :monitor] telemetry onto brain:blackboard" do
+    :telemetry.execute(
+      [:brain, :self_portrait, :monitor],
+      %{count: 1},
+      %{issue: :lifg_payload_gap, severity: :warning}
+    )
+
+    assert_receive {:blackboard,
+                    %{
+                      kind: :telemetry,
+                      event: [:brain, :self_portrait, :monitor],
+                      measurements: %{count: 1},
+                      meta: %{issue: :lifg_payload_gap, severity: :warning}
+                    }},
+                   500
+  end
+
   defp ensure_ready do
     wait_until(fn ->
       s = Blackboard.state()

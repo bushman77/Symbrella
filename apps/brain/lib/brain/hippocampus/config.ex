@@ -3,9 +3,9 @@ defmodule Brain.Hippocampus.Config do
   Defaults and normalizers for Hippocampus.
 
   Adds a `:recall_source` knob to choose the recall backend:
-    • :memory — current in-memory window (default)
-    • :db     — pgvector-backed recall via Db.Episode
-    • :hybrid — merge memory + db results
+    • :memory — current in-memory symbolic window (default)
+    • :db     — pgvector-backed recall via Db.Episode; requires an embedding
+    • :hybrid — memory recall plus DB recall when an embedding is supplied
   """
 
   @default_keep 300

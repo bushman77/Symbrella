@@ -663,6 +663,9 @@ defmodule Core.Response do
       text
       |> String.downcase()
       |> String.replace(~r/[^\p{L}\p{N}\s\?]/u, "")
+      |> String.replace(~r/\bwa+hat\b/u, "what")
+      |> String.replace(~r/\bna+me\b/u, "name")
+      |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 
     t == "what is my name" or t == "what is my name?" or

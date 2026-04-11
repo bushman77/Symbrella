@@ -70,4 +70,21 @@ defmodule Brain.HippocampusRecallTest do
     assert length(res) == 2
     assert Enum.all?(res, fn r -> r.score > 0.0 end)
   end
+
+  test "ignore_head :auto skips the current map-shaped context when it exactly matches" do
+    Hippocampus.encode(slate_with("alpha"), %{})
+
+    assert Hippocampus.recall(slate_with("alpha"), ignore_head: :auto) == []
+
+    results = Hippocampus.recall(slate_with("alpha"), ignore_head: :never)
+    assert length(results) == 1
+  end
+
+  test "score is exact Jaccard overlap times recency" do
+    Hippocampus.encode(slate_multi(["alpha", "beta"]), %{})
+
+    [%{score: score}] = Hippocampus.recall(["alpha"], ignore_head: :never, limit: 1)
+
+    assert_in_delta score, 0.5, 0.0001
+  end
 end

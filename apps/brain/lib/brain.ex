@@ -33,7 +33,11 @@ defmodule Brain do
 
   alias Brain.Cell.Runtime, as: CellRT
   alias Brain.WM.Focus, as: WMFocus
+  alias Brain.WM.Recall, as: WMRecall
+  alias Brain.MoodHooks
   alias Brain.Config, as: BrainConfig
+
+  alias Brain.WM.Policy, as: WMPolicy
 
   # ───────────────────────── Region Macro (re-export) ─────────────────────────
 
@@ -66,7 +70,6 @@ defmodule Brain do
 
   alias Db.BrainCell, as: Row
   alias Brain.Utils.ControlSignals
-  alias Brain.Utils.Numbers
   alias Brain.Utils.Tokens
   alias Brain.WorkingMemory
 
@@ -734,128 +737,10 @@ defmodule Brain do
   """
   @spec focus_from_recall(map() | list(), keyword()) :: [map()]
   def focus_from_recall(si_or_cues, recall_opts \\ []) do
-    sentence = extract_sentence(si_or_cues)
-    results = safe_hippo_recall(si_or_cues, recall_opts)
-
-    cands =
-      case results do
-        list when is_list(list) and list != [] ->
-          Enum.map(list, &recall_result_to_wm_candidate/1)
-
-        _ ->
-          si_or_cues
-          |> cues_to_candidates(sentence)
-          |> Enum.map(&cue_to_wm_candidate/1)
-      end
-
-    focus(cands, [])
+    si_or_cues
+    |> WMRecall.candidates_for_focus(recall_opts)
+    |> focus([])
   end
-
-  defp safe_hippo_recall(si_or_cues, recall_opts) do
-    if Code.ensure_loaded?(Brain.Hippocampus) and
-         function_exported?(Brain.Hippocampus, :recall, 2) do
-      try do
-        Brain.Hippocampus.recall(si_or_cues, recall_opts)
-      rescue
-        _ -> []
-      catch
-        :exit, _ -> []
-      end
-    else
-      []
-    end
-  end
-
-  defp recall_result_to_wm_candidate(r) when is_map(r) do
-    slate = get_in(r, [:episode, :slate]) || get_in(r, ["episode", "slate"])
-
-    lemma =
-      Map.get(r, :lemma) ||
-        Map.get(r, "lemma") ||
-        (slate && first_lemma_from_slate(slate)) ||
-        ""
-
-    lemma_s = to_string(lemma)
-
-    id =
-      Map.get(r, :id) ||
-        Map.get(r, "id") ||
-        (lemma_s != "" && "#{lemma_s}|ltm") ||
-        "ltm"
-
-    %{
-      token_index: as_nonneg_int(Map.get(r, :token_index) || Map.get(r, "token_index") || 0),
-      id: to_string(id),
-      lemma: lemma_s,
-      score: as_float(Map.get(r, :score) || Map.get(r, "score") || 1.0),
-      source: :ltm,
-      reason: :hippocampus,
-      payload: r
-    }
-  end
-
-  defp recall_result_to_wm_candidate(other) do
-    %{
-      token_index: 0,
-      id: "ltm",
-      lemma: "ltm",
-      score: 0.0,
-      source: :ltm,
-      reason: :hippocampus,
-      payload: other
-    }
-  end
-
-  defp cue_to_wm_candidate(c) when is_map(c) do
-    lemma = to_string(c[:lemma] || c["lemma"] || "")
-    id = c[:id] || c["id"] || (lemma != "" && "#{lemma}|ltm") || "ltm"
-
-    %{
-      token_index: as_nonneg_int(c[:token_index] || c["token_index"] || 0),
-      id: to_string(id),
-      lemma: lemma,
-      score: as_float(c[:score] || c["score"] || 1.0),
-      source: :ltm,
-      reason: :hippocampus_fallback
-    }
-  end
-
-  defp cue_to_wm_candidate(other) do
-    %{
-      token_index: 0,
-      id: "ltm",
-      lemma: "ltm",
-      score: 0.0,
-      source: :ltm,
-      reason: :hippocampus_fallback,
-      payload: other
-    }
-  end
-
-  defp extract_sentence(%{} = m), do: Map.get(m, :sentence) || Map.get(m, "sentence")
-  defp extract_sentence(_), do: nil
-
-  defp as_nonneg_int(n) when is_integer(n) and n >= 0, do: n
-
-  defp as_nonneg_int(n) when is_binary(n) do
-    case Integer.parse(String.trim(n)) do
-      {i, _} when i >= 0 -> i
-      _ -> 0
-    end
-  end
-
-  defp as_nonneg_int(_), do: 0
-
-  defp as_float(n) when is_number(n), do: n * 1.0
-
-  defp as_float(n) when is_binary(n) do
-    case Float.parse(String.trim(n)) do
-      {f, _} -> f
-      _ -> 0.0
-    end
-  end
-
-  defp as_float(_), do: 0.0
 
   # ───────────────────────── WM decay & eviction (τ-model) ────────────────────
 
@@ -880,24 +765,7 @@ defmodule Brain do
       true
 
   """
-  def apply_decay(%{wm: wm} = state, now_ms) when is_list(wm) and is_integer(now_ms) do
-    last_raw = Map.get(state, :wm_last_ms, nil)
-    last = if is_integer(last_raw), do: last_raw, else: now_ms
-    dt = max(now_ms - last, 0)
-    k = Numbers.decay_factor_ms(dt)
-
-    wm2 =
-      Enum.map(wm, fn
-        %{score: s} = e when is_number(s) -> %{e | score: Numbers.clamp01(s * k)}
-        e -> e
-      end)
-
-    state
-    |> Map.put(:wm, wm2)
-    |> Map.put(:wm_last_ms, now_ms)
-  end
-
-  def apply_decay(state, _now_ms), do: state
+  def apply_decay(state, now_ms), do: WMPolicy.apply_decay(state, now_ms)
 
   @doc ~S"""
   Evict WM entries if the list exceeds configured capacity.
@@ -924,21 +792,7 @@ defmodule Brain do
       2
 
   """
-  def evict_if_needed(%{wm: wm, wm_cfg: %{capacity: cap}} = state)
-      when is_list(wm) and is_integer(cap) and cap >= 0 do
-    if length(wm) <= cap do
-      state
-    else
-      kept =
-        wm
-        |> Enum.sort_by(fn e -> {Map.get(e, :score, 0.0), Map.get(e, :ts, 0)} end, :desc)
-        |> Enum.take(cap)
-
-      Map.put(state, :wm, kept)
-    end
-  end
-
-  def evict_if_needed(state), do: state
+  def evict_if_needed(state), do: WMPolicy.evict_if_needed(state)
 
   @doc ~S"""
   Convenience helper to apply decay and then evict to capacity.
@@ -955,11 +809,7 @@ defmodule Brain do
       true
 
   """
-  def decay_and_evict(state, now_ms) do
-    state
-    |> apply_decay(now_ms)
-    |> evict_if_needed()
-  end
+  def decay_and_evict(state, now_ms), do: WMPolicy.decay_and_evict(state, now_ms)
 
   # ───────────────────────── Misc helpers ─────────────────────────────────────
 
@@ -1002,102 +852,6 @@ defmodule Brain do
   def via(id) when is_binary(id), do: CellRT.via(id)
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
-
-  defp cues_to_candidates(cues, sentence) do
-    winners =
-      case cues do
-        %{winners: ws} when is_list(ws) -> ws
-        %{"winners" => ws} when is_list(ws) -> ws
-        l when is_list(l) -> l
-        nil -> []
-        x -> [x]
-      end
-
-    sent = normalize_sentence(sentence)
-
-    Enum.flat_map(winners, fn w ->
-      cond do
-        is_map(w) and (w[:id] || w["id"]) ->
-          id = w[:id] || w["id"]
-
-          [
-            %{
-              token_index: w[:token_index] || w["token_index"] || 0,
-              id: to_string(id),
-              score: w[:score] || w["score"] || 1.0
-            }
-          ]
-
-        is_map(w) and (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) ->
-          lemma = (w[:lemma] || w["lemma"] || w[:phrase] || w["phrase"]) |> to_string()
-
-          [
-            %{
-              token_index: w[:token_index] || w["token_index"] || 0,
-              lemma: lemma,
-              score: w[:score] || w["score"] || 1.0
-            }
-          ]
-
-        is_binary(w) and String.contains?(w, "|") ->
-          [%{token_index: 0, id: w, score: 1.0}]
-
-        is_binary(w) ->
-          l =
-            w
-            |> String.downcase()
-            |> String.replace(~r/\s+/u, " ")
-            |> String.trim()
-
-          cond do
-            l == "" ->
-              []
-
-            # If we can validate against a sentence and it clearly doesn't match, skip.
-            sent != "" and not String.contains?(sent, l) ->
-              []
-
-            # Otherwise, treat this as an LTM recall cue (lets WMFocus mint "#{lemma}|ltm").
-            true ->
-              [
-                %{
-                  token_index: 0,
-                  lemma: l,
-                  score: 0.30,
-                  source: :ltm,
-                  reason: :hippocampus_fallback
-                }
-              ]
-          end
-
-        true ->
-          []
-      end
-    end)
-  end
-
-  defp normalize_sentence(s) when is_binary(s),
-    do: s |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
-
-  defp normalize_sentence(_), do: ""
-
-  defp first_lemma_from_slate(%{winners: winners}) when is_list(winners) do
-    winners
-    |> Enum.find_value(fn w ->
-      w[:lemma] || w["lemma"] || parse_id_word(w[:id] || w["id"]) || w[:word] || w["word"]
-    end) || "ltm"
-  end
-
-  defp first_lemma_from_slate(_), do: "ltm"
-
-  defp parse_id_word(nil), do: nil
-
-  defp parse_id_word(id) when is_binary(id) do
-    case String.split(id, "|", parts: 2) do
-      [w | _] -> w
-      _ -> nil
-    end
-  end
 
   # Small normalizers for WM config
   defp norm_pos_int(n, _d) when is_integer(n) and n > 0, do: n
@@ -1277,31 +1031,12 @@ defmodule Brain do
 
   # ───────────────────────── MoodCore safe hooks ──────────────────────────────
 
-  defp safe_mood_apply_intent(intent, conf) do
-    if Code.ensure_loaded?(Brain.MoodCore) and
-         function_exported?(Brain.MoodCore, :apply_intent, 2) do
-      Brain.MoodCore.apply_intent(intent, conf)
-    else
-      :ok
-    end
-  end
+  defp safe_mood_apply_intent(intent, conf), do: MoodHooks.apply_intent(intent, conf)
 
-  defp safe_mood_register_activation(active_cells) do
-    if Code.ensure_loaded?(Brain.MoodCore) and
-         function_exported?(Brain.MoodCore, :register_activation, 1) do
-      Brain.MoodCore.register_activation(active_cells)
-    else
-      :ok
-    end
-  end
+  defp safe_mood_register_activation(active_cells),
+    do: MoodHooks.register_activation(active_cells)
 
-  defp safe_mood_update_wm(wm_list) do
-    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :update_wm, 1) do
-      Brain.MoodCore.update_wm(wm_list)
-    else
-      :ok
-    end
-  end
+  defp safe_mood_update_wm(wm_list), do: MoodHooks.update_wm(wm_list)
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0

@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/ofc.ex
 defmodule Brain.OFC do
   @moduledoc """
   OFC — value estimation for proposals, gently shaped by mood.
@@ -88,6 +89,15 @@ defmodule Brain.OFC do
   def get_params(server \\ __MODULE__),
     do: GenServer.call(server, :get_params)
 
+  @doc """
+  Reset runtime state on the already-running OFC singleton.
+
+  This clears transient mood/cache-like state and live overrides while keeping
+  the process alive and its telemetry handlers attached.
+  """
+  def reset(server \\ __MODULE__),
+    do: GenServer.call(server, :reset)
+
   # ---- Telemetry bridges ----------------------------------------------------
 
   def on_curiosity(_ev, meas, meta, %{pid: pid}) when is_pid(pid),
@@ -111,6 +121,17 @@ defmodule Brain.OFC do
   @impl GenServer
   def handle_call(:get_params, _from, state) do
     {:reply, effective_params(state.opts), state}
+  end
+
+  @impl GenServer
+  def handle_call(:reset, _from, state) do
+    state2 =
+      state
+      |> Map.put(:opts, [])
+      |> Map.put(:mood, nil)
+      |> Map.put(:mood_last_ms, nil)
+
+    {:reply, :ok, state2}
   end
 
   @impl GenServer

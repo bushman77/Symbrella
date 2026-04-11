@@ -55,7 +55,9 @@ defmodule Brain.SelfPortrait.Model do
         boundary_drops: 0,
         chargram_violations: 0,
         gate_failures: 0,
-        fallback_wins: 0
+        fallback_wins: 0,
+        lifg_payload_gaps: 0,
+        lifg_pos_anomalies: 0
       },
       sources: %{},
       last_events: [],
@@ -172,8 +174,112 @@ defmodule Brain.SelfPortrait.Model do
     |> bump_by(:chargram_violations, cg)
     |> bump_by(:no_mwe_senses, no_mwe)
     |> bump_by(:fallback_wins, fb)
-  rescue
-    _ -> patterns
+    |> bump_by(:lifg_payload_gaps, lifg_payload_gap_count(ev))
+    |> bump_by(:lifg_pos_anomalies, lifg_pos_anomaly_count(ev))
+  end
+
+  defp lifg_pos_anomaly_count(%{} = ev) do
+    event = Map.get(ev, :event) || Map.get(ev, "event")
+    meta = Map.get(ev, :meta) || Map.get(ev, "meta") || %{}
+
+    cond do
+      event != [:brain, :pipeline, :lifg_stage1, :stop] ->
+        0
+
+      get_any(meta, [:intent, "intent"]) not in [:greet, "greet"] ->
+        0
+
+      true ->
+        tokens_by_index =
+          meta
+          |> get_any([:tokens, "tokens"])
+          |> list_or_empty()
+          |> Enum.into(%{}, fn tok ->
+            {token_index(tok), normalize_phrase(get_any(tok, [:phrase, "phrase"]))}
+          end)
+
+        meta
+        |> get_any([:choices, "choices"])
+        |> list_or_empty()
+        |> Enum.count(fn choice ->
+          phrase = Map.get(tokens_by_index, token_index(choice))
+          chosen_id = get_any(choice, [:chosen_id, "chosen_id"]) || ""
+          pos = choice_pos(choice)
+
+          phrase == "good" and (pos == "verb" or String.contains?(chosen_id, "|verb|"))
+        end)
+    end
+  end
+
+  defp lifg_pos_anomaly_count(_), do: 0
+
+  defp list_or_empty(list) when is_list(list), do: list
+  defp list_or_empty(_), do: []
+
+  defp token_index(%{} = item),
+    do: int_or_0(get_any(item, [:token_index, :index, "token_index", "index"]))
+
+  defp token_index(_), do: 0
+
+  defp choice_pos(%{} = choice) do
+    case get_any(choice, [:chosen_pos, "chosen_pos"]) do
+      pos when is_atom(pos) -> Atom.to_string(pos)
+      pos when is_binary(pos) -> String.downcase(pos)
+      _ -> chosen_id_pos(get_any(choice, [:chosen_id, "chosen_id"]))
+    end
+  end
+
+  defp choice_pos(_), do: nil
+
+  defp chosen_id_pos(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [_word, pos, _sense] -> String.downcase(pos)
+      _ -> nil
+    end
+  end
+
+  defp chosen_id_pos(_), do: nil
+
+  defp normalize_phrase(phrase) when is_binary(phrase) do
+    phrase
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp normalize_phrase(_), do: ""
+
+  defp lifg_payload_gap_count(%{} = ev) do
+    event = Map.get(ev, :event) || Map.get(ev, "event")
+    meta = Map.get(ev, :meta) || Map.get(ev, "meta") || %{}
+    meas = Map.get(ev, :measurements) || Map.get(ev, "measurements") || %{}
+
+    kept =
+      int_or_0(get_any(meta, [:kept_tokens, "kept_tokens"])) +
+        int_or_0(get_any(meas, [:kept, "kept"]))
+
+    cond do
+      event != [:brain, :pipeline, :lifg_stage1, :stop] ->
+        0
+
+      kept <= 0 ->
+        0
+
+      missing_payload_list?(meta, :tokens) or missing_payload_list?(meta, :choices) or
+          missing_payload_list?(meta, :finalists) ->
+        1
+
+      true ->
+        0
+    end
+  end
+
+  defp lifg_payload_gap_count(_), do: 0
+
+  defp missing_payload_list?(%{} = meta, key) do
+    case get_any(meta, [key, to_string(key)]) do
+      list when is_list(list) -> list == []
+      _ -> true
+    end
   end
 
   defp bump_by(pats, _k, 0), do: pats

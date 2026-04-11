@@ -7,10 +7,6 @@ defmodule Brain.SelfPortrait do
     * Subscribes to the Blackboard PubSub stream (topic: `Brain.Blackboard.topic/0`)
     * Updates an in-memory portrait via `Brain.SelfPortrait.Model.observe/2`
     * Provides a stable `snapshot/0` API for other regions/modules
-
-  This is intentionally best-effort:
-    * If PubSub isn't ready yet, it retries.
-    * If Blackboard isn't present, it falls back to the default topic name.
   """
 
   use Brain, region: :self_portrait
@@ -22,8 +18,6 @@ defmodule Brain.SelfPortrait do
   @name __MODULE__
   @retry_ms 50
 
-  # ───────────────────────────── Public API ─────────────────────────────
-
   @spec snapshot(pid() | module()) :: map()
   def snapshot(server \\ @name), do: GenServer.call(server, :snapshot)
 
@@ -33,26 +27,11 @@ defmodule Brain.SelfPortrait do
   @spec observe(map()) :: :ok
   def observe(%{} = ev), do: GenServer.cast(@name, {:observe, ev})
 
-  # ───────────────────────────── GenServer ─────────────────────────────
-
   @impl true
   def init(opts) do
     base = Brain.Region.base_state(:self_portrait, opts)
     portrait = Model.new(opts)
-
-    topic =
-      try do
-        if Code.ensure_loaded?(Brain.Blackboard) and
-             function_exported?(Brain.Blackboard, :topic, 0) do
-          Brain.Blackboard.topic()
-        else
-          "brain:blackboard"
-        end
-      rescue
-        _ -> "brain:blackboard"
-      catch
-        _, _ -> "brain:blackboard"
-      end
+    topic = blackboard_topic()
 
     send(self(), :subscribe_pubsub)
 
@@ -85,19 +64,12 @@ defmodule Brain.SelfPortrait do
   @impl true
   def handle_info(:subscribe_pubsub, state), do: {:noreply, state}
 
-  # Consume Blackboard broadcasts (telemetry-shaped payloads)
   @impl true
   def handle_info({:blackboard, %{} = payload}, state) do
-    portrait =
-      try do
-        Model.observe(state.portrait, payload)
-      rescue
-        _ -> state.portrait
-      catch
-        _, _ -> state.portrait
-      end
+    portrait0 = state.portrait
+    portrait = Model.observe(portrait0, payload)
+    maybe_emit_monitor(portrait0, portrait)
 
-    # Optional: emit a lightweight update signal for observers
     safe_telemetry(
       [:brain, :self_portrait, :update],
       %{events: 1},
@@ -112,14 +84,9 @@ defmodule Brain.SelfPortrait do
 
   @impl true
   def handle_cast({:observe, %{} = ev}, state) do
-    portrait =
-      try do
-        Model.observe(state.portrait, ev)
-      rescue
-        _ -> state.portrait
-      catch
-        _, _ -> state.portrait
-      end
+    portrait0 = state.portrait
+    portrait = Model.observe(portrait0, ev)
+    maybe_emit_monitor(portrait0, portrait)
 
     {:noreply, %{state | portrait: portrait}}
   end
@@ -136,29 +103,49 @@ defmodule Brain.SelfPortrait do
     {:reply, :ok, %{state | portrait: Model.new(opts)}}
   end
 
-  # ───────────────────────────── helpers ─────────────────────────────
-
-  defp safe_subscribe(topic) do
-    try do
-      :ok = Bus.subscribe(topic)
-    rescue
-      e -> {:error, e}
-    catch
-      :exit, reason -> {:error, reason}
+  defp blackboard_topic do
+    if Code.ensure_loaded?(Brain.Blackboard) and function_exported?(Brain.Blackboard, :topic, 0) do
+      Brain.Blackboard.topic()
+    else
+      "brain:blackboard"
     end
   end
 
+  defp safe_subscribe(topic) do
+    Bus.subscribe(topic)
+  end
+
+  defp maybe_emit_monitor(before, after_) do
+    before_gaps = get_in(before, [:patterns, :lifg_payload_gaps]) || 0
+    after_gaps = get_in(after_, [:patterns, :lifg_payload_gaps]) || 0
+
+    if after_gaps > before_gaps do
+      safe_telemetry(
+        [:brain, :self_portrait, :monitor],
+        %{count: after_gaps - before_gaps},
+        %{issue: :lifg_payload_gap, severity: :warning}
+      )
+    end
+
+    before_pos = get_in(before, [:patterns, :lifg_pos_anomalies]) || 0
+    after_pos = get_in(after_, [:patterns, :lifg_pos_anomalies]) || 0
+
+    if after_pos > before_pos do
+      safe_telemetry(
+        [:brain, :self_portrait, :monitor],
+        %{count: after_pos - before_pos},
+        %{issue: :lifg_pos_anomaly, severity: :warning}
+      )
+    end
+
+    :ok
+  end
+
   defp safe_telemetry(event, measurements, meta) do
-    try do
-      if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
-        :telemetry.execute(event, measurements, meta)
-      else
-        :ok
-      end
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
+    if Code.ensure_loaded?(:telemetry) and function_exported?(:telemetry, :execute, 3) do
+      :telemetry.execute(event, measurements, meta)
+    else
+      :ok
     end
   end
 end

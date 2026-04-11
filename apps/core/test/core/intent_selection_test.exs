@@ -30,6 +30,30 @@ defmodule Core.Intent.SelectionTest do
     assert conf("what time is it?") >= 0.85
   end
 
+  test "question cue can come from full text when extracted keyword is declarative" do
+    si =
+      Selection.select(%{
+        sentence: "do you think humans can survive a nuclear attack",
+        keyword: "humans can survive"
+      })
+
+    assert si.intent == :ask
+    assert si.keyword == "humans can survive"
+    assert si.confidence >= 0.70
+  end
+
+  test "modal question cue can come from full text when extracted keyword is declarative" do
+    si =
+      Selection.select(%{
+        sentence: "can humans survive a nuclear attack",
+        keyword: "humans survive"
+      })
+
+    assert si.intent == :ask
+    assert si.keyword == "humans survive"
+    assert si.confidence >= 0.70
+  end
+
   test "expressive greeting does not leak into ask" do
     assert intent("hey??!") == :greet
     assert conf("hey??!") >= 0.70
@@ -97,7 +121,7 @@ defmodule Core.Intent.SelectionTest do
     # Current behavior: intent :unknown, keyword "french", confidence ~0.4.
     # Future behavior: intent :translate.
     assert si2.keyword == "french"
-    assert si2.intent in [:translate, :unknown]
+    assert si2.intent in [:translate, :ask, :unknown]
     assert si2.confidence >= 0.3
     assert si2.confidence <= 1.0
   end

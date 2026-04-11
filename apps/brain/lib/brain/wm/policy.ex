@@ -1,47 +1,43 @@
 defmodule Brain.WM.Policy do
   @moduledoc """
-  Working-Memory admission policy.
+  Working-memory policy.
 
   Responsibilities:
-  • Compute gate scores for candidates (score shaping)
-  • Decide allow/block/boost using thresholds and budgets
-  • Helpers (lemma budget, semantic bias, fallbacks)
 
-  This keeps your **public API** intact:
-    - acceptable_candidate?/2
-    - gate_score_for/3
-    - decide_gate_policy/4
-
-  Enhancements:
-  • Recency decay (seconds-scale) via `cand[:ts_ms]`
-  • Novelty boost using recent WM contents (computed in decide/4)
-  • Intent nudge (light preference for current intent)
-  • Outcome uplift (bounded, from `cand[:episodes]` or `cand[:episode_score]`)
-  • Preserves fallback scaling, lemma budget, and source preferences
+  * admission policy
+  * gate scoring
+  * retention policy
+  * decay and eviction helpers
   """
 
   alias Brain.Utils.Numbers
 
-  @type cfg ::
-          %{
-            required(:gate_threshold) => number(),
-            required(:fallback_scale) => number(),
-            required(:lemma_budget) => pos_integer(),
-            required(:replace_margin) => number(),
-            required(:allow_unk?) => boolean(),
-            required(:allow_seed?) => boolean(),
-            required(:allow_fallback_into_wm?) => boolean(),
-            optional(:half_life_ms) => pos_integer(),
-            optional(:novelty_window) => non_neg_integer(),
-            optional(:novelty_weight) => number(),
-            optional(:intent_weight) => number(),
-            optional(:recency_weight) => number(),
-            optional(:outcome_weight) => number(),
-            optional(:current_intent) => atom() | nil,
-            optional(:semantic_boost) => number()
-          }
+  @type cfg :: %{
+          required(:gate_threshold) => number(),
+          required(:fallback_scale) => number(),
+          required(:lemma_budget) => pos_integer(),
+          required(:replace_margin) => number(),
+          required(:allow_unk?) => boolean(),
+          required(:allow_seed?) => boolean(),
+          required(:allow_fallback_into_wm?) => boolean(),
+          optional(:half_life_ms) => pos_integer(),
+          optional(:novelty_window) => non_neg_integer(),
+          optional(:novelty_weight) => number(),
+          optional(:intent_weight) => number(),
+          optional(:recency_weight) => number(),
+          optional(:outcome_weight) => number(),
+          optional(:current_intent) => atom() | nil,
+          optional(:semantic_boost) => number(),
+          optional(:capacity) => non_neg_integer()
+        }
 
-  # >>> NEW: default gating config used to fill in missing keys <<<
+  @type wm_entry :: map()
+  @type wm_state :: %{
+          required(:wm) => [wm_entry()],
+          optional(:wm_cfg) => cfg(),
+          optional(:wm_last_ms) => integer() | nil
+        }
+
   @default_cfg %{
     gate_threshold: 0.0,
     fallback_scale: 0.70,
@@ -57,14 +53,11 @@ defmodule Brain.WM.Policy do
     recency_weight: 0.10,
     outcome_weight: 0.10,
     current_intent: nil,
-    semantic_boost: 0.10
+    semantic_boost: 0.10,
+    capacity: 7
   }
 
-  # Normalize *any* cfg (even %{capacity: 3, decay_ms: 8000}) into a full cfg
-  defp normalize_cfg(nil), do: @default_cfg
-  defp normalize_cfg(cfg) when is_map(cfg), do: Map.merge(@default_cfg, cfg)
-
-  # --- Public API -------------------------------------------------------------
+  # Public API: Admission
 
   @spec acceptable_candidate?(map(), cfg()) :: boolean()
   def acceptable_candidate?(cand, cfg) do
@@ -73,108 +66,53 @@ defmodule Brain.WM.Policy do
     id = to_string(cand[:id] || "")
     pos = to_string(get_in(cand, [:pos]) || get_in(cand, [:features, :pos]) || "")
 
-    allow_unk? = Map.get(cfg, :allow_unk?, true)
-    allow_seed? = Map.get(cfg, :allow_seed?, true)
-
     cond do
-      not allow_seed? and String.ends_with?(id, "|seed|") -> false
-      not allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
+      not cfg.allow_seed? and String.ends_with?(id, "|seed|") -> false
+      not cfg.allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
       true -> true
     end
   end
 
-  @doc """
-  Compute a *base* gate score for `cand`.
-
-  Inputs:
-    • cand[:score] / cand[:activation_snapshot]   → base signal
-    • `salience` (0..1)                            → external salience (e.g., attention/conflict)
-    • Recency, intent, semantic_bias, fallback scaling, source preference
-
-  Note:
-    • Novelty (requires WM context) and outcome uplift are added in decide/4.
-  """
   @spec gate_score_for(map(), number(), cfg()) :: float()
   def gate_score_for(cand, salience, cfg) do
     cfg = normalize_cfg(cfg)
 
-    base =
-      (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
+    base = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
+    prefer = if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
+    scaled_base = maybe_scale_fallback(base, cand, cfg)
+    sem_boost = semantic_boost(cand, cfg)
 
-    prefer =
-      if cand[:source] in [:runtime, :recency, :lifg, :ltm], do: 0.10, else: 0.0
-
-    b_scaled =
-      if fallback_id?(cand[:id]) do
-        scale = Map.get(cfg, :fallback_scale, 0.70)
-        base * scale
-      else
-        base
-      end
-
-    sem_boost =
-      case safe_sem_bias(cand) do
-        b when is_number(b) -> Map.get(cfg, :semantic_boost, 0.10) * Numbers.clamp01(b)
-        _ -> 0.0
-      end
-
-    # --- Recency & Intent nudges (light, bounded) ---
-    recency_nudge = recency_nudge(cand, cfg)
-    intent_nudge = intent_nudge(cand, cfg)
-
-    b_scaled
+    scaled_base
     |> Kernel.+(0.5 * Numbers.clamp01(salience))
     |> Kernel.+(prefer)
     |> Kernel.+(sem_boost)
-    |> Kernel.+(recency_nudge)
-    |> Kernel.+(intent_nudge)
+    |> Kernel.+(recency_nudge(cand, cfg))
+    |> Kernel.+(intent_nudge(cand, cfg))
     |> Kernel.-(diversity_penalty(cand, cfg))
     |> Numbers.clamp01()
   end
 
-  @doc """
-  Decide gate policy using the base `gate_score` plus WM-aware terms.
-
-  Adds:
-    • Novelty boost (vs. recent WM contents)
-    • Outcome uplift (bounded)
-  Respects:
-    • Lemma budget (replace only if margin beat)
-    • Fallback rules and gate threshold
-    • Source preference bump
-
-  Returns `{decision, final_score}` where decision ∈ `:allow | :block | :boost`.
-  """
-  @spec decide_gate_policy([map()], map(), float(), cfg()) ::
-          {:allow | :block | :boost, float()}
+  @spec decide_gate_policy([map()], map(), float(), cfg()) :: {:allow | :block | :boost, float()}
   def decide_gate_policy(wm, cand, gate_score, cfg) do
     cfg = normalize_cfg(cfg)
 
     prefer_source? = cand[:source] in [:runtime, :recency, :lifg, :ltm]
-    thr = Map.fetch!(cfg, :gate_threshold)
-    allow_fallback? = Map.get(cfg, :allow_fallback_into_wm?, false)
+    thr = cfg.gate_threshold
+    allow_fallback? = cfg.allow_fallback_into_wm?
     is_fallback = fallback_id?(cand[:id])
 
     {within_budget?, beats_by?} = within_lemma_budget?(wm, cand, cfg)
 
-    # WM-aware shaping (computed here because novelty needs WM context)
-    novelty_boost =
-      novelty_boost(wm, cand, cfg)
-
-    outcome_uplift =
-      outcome_uplift(cand, cfg)
-
     final_score =
       gate_score
-      |> Kernel.+(novelty_boost)
-      |> Kernel.+(outcome_uplift)
+      |> Kernel.+(novelty_boost(wm, cand, cfg))
+      |> Kernel.+(outcome_uplift(cand, cfg))
       |> Numbers.clamp01()
 
     cond do
       not within_budget? and not beats_by? ->
         {:block, final_score}
 
-      # P-206: fallbacks must meet normal threshold unless explicitly allowed
       is_fallback and not allow_fallback? ->
         if final_score >= thr, do: {:allow, final_score}, else: {:block, final_score}
 
@@ -192,20 +130,67 @@ defmodule Brain.WM.Policy do
     end
   end
 
-  # --- Internals --------------------------------------------------------------
+  # Public API: Retention
+
+  @spec apply_decay(wm_state(), integer()) :: wm_state()
+  def apply_decay(%{wm: wm} = state, now_ms) when is_list(wm) and is_integer(now_ms) do
+    dt = elapsed_ms(state, now_ms)
+    decay_factor = Numbers.decay_factor_ms(dt)
+
+    state
+    |> Map.put(:wm, decay_wm_entries(wm, decay_factor))
+    |> Map.put(:wm_last_ms, now_ms)
+  end
+
+  def apply_decay(state, _now_ms), do: state
+
+  @spec evict_if_needed(wm_state()) :: wm_state()
+  def evict_if_needed(%{wm: wm, wm_cfg: %{capacity: cap}} = state)
+      when is_list(wm) and is_integer(cap) and cap >= 0 do
+    if length(wm) <= cap do
+      state
+    else
+      Map.put(state, :wm, keep_best_entries(wm, cap))
+    end
+  end
+
+  def evict_if_needed(state), do: state
+
+  @spec decay_and_evict(wm_state(), integer()) :: wm_state()
+  def decay_and_evict(state, now_ms) do
+    state
+    |> apply_decay(now_ms)
+    |> evict_if_needed()
+  end
+
+  # Config
+
+  defp normalize_cfg(nil), do: @default_cfg
+  defp normalize_cfg(cfg) when is_map(cfg), do: Map.merge(@default_cfg, cfg)
+
+  # Admission helpers
+
+  defp maybe_scale_fallback(base, cand, cfg) do
+    if fallback_id?(cand[:id]), do: base * cfg.fallback_scale, else: base
+  end
+
+  defp semantic_boost(cand, cfg) do
+    case safe_sem_bias(cand) do
+      bias when is_number(bias) -> cfg.semantic_boost * Numbers.clamp01(bias)
+      _ -> 0.0
+    end
+  end
 
   defp fallback_id?(nil), do: false
   defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
   defp fallback_id?(_), do: false
 
-  # Placeholder for future anti-redundancy; keep zero for now
   defp diversity_penalty(_cand, _cfg), do: 0.0
 
-  @spec within_lemma_budget?([map()], map(), cfg()) :: {boolean(), boolean()}
   defp within_lemma_budget?(wm, cand, cfg) do
     lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
-    budget = Map.get(cfg, :lemma_budget, 2)
-    margin = Map.get(cfg, :replace_margin, 0.10)
+    budget = cfg.lemma_budget
+    margin = cfg.replace_margin
 
     if lemma == "" or budget <= 0 do
       {true, true}
@@ -233,72 +218,73 @@ defmodule Brain.WM.Policy do
 
   defp guess_lemma_from_id(id) when is_binary(id) do
     case String.split(id, "|", parts: 2) do
-      [w | _] -> w
+      [word | _] -> word
       _ -> nil
     end
   end
 
-  defp guess_lemma_from_id(_), do: nil
-
-  # --- New scoring helpers ----------------------------------------------------
-
-  # Light, seconds-scale recency nudge; safe if ts_ms missing.
-  defp recency_nudge(cand, cfg) do
-    now = System.system_time(:millisecond)
-    half = Map.get(cfg, :half_life_ms, 7_500)
-    wt = Map.get(cfg, :recency_weight, 0.10)
-
-    ts = cand[:ts_ms]
-    dt = if is_integer(ts) and ts > 0, do: max(0, now - ts), else: 0
-    decay = :math.pow(0.5, dt / max(1, half))
-
-    wt * decay
-  end
-
-  # Small nudge when candidate intent matches current intent.
-  defp intent_nudge(cand, cfg) do
-    cur = Map.get(cfg, :current_intent)
-    wt = Map.get(cfg, :intent_weight, 0.05)
-    cin = cand[:intent] || get_in(cand, [:features, :intent])
-
-    if cur && cin && cur == cin, do: wt, else: 0.0
-  end
-
-  # Novelty boost based on whether the lemma is absent from recent WM items.
   defp novelty_boost(wm, cand, cfg) do
-    window = Map.get(cfg, :novelty_window, 16)
-    wt = Map.get(cfg, :novelty_weight, 0.15)
+    weight = cfg.novelty_weight || 0.0
 
-    lemma = to_string(cand[:lemma] || guess_lemma_from_id(cand[:id]) || "")
-
-    if lemma == "" do
+    if weight <= 0.0 do
       0.0
     else
-      recent =
-        wm
-        |> Enum.take(-window)
-        |> Enum.map(&to_string(&1[:lemma] || ""))
-        |> MapSet.new()
+      recent_items = Enum.take(wm, cfg.novelty_window || 0)
+      cand_id = normalize_value(cand[:id])
+      cand_lemma = normalize_value(cand[:lemma] || guess_lemma_from_id(cand[:id]))
 
-      if MapSet.member?(recent, lemma), do: 0.0, else: wt
+      repeated? =
+        Enum.any?(recent_items, fn item ->
+          same_id? = cand_id != "" and normalize_value(item[:id]) == cand_id
+          same_lemma? = cand_lemma != "" and normalize_value(item[:lemma]) == cand_lemma
+          same_id? or same_lemma?
+        end)
+
+      if repeated?, do: 0.0, else: Numbers.clamp01(weight)
     end
   end
 
-  # Outcome uplift: accept either a single score (0..1) or a list(%{score: 0..1})
   defp outcome_uplift(cand, cfg) do
-    wt = Map.get(cfg, :outcome_weight, 0.10)
+    weight = cfg.outcome_weight || 0.0
+
+    if weight <= 0.0 do
+      0.0
+    else
+      raw = cand[:episode_score] || episode_score_from_list(cand[:episodes]) || 0.0
+      Numbers.clamp01(weight * numeric(raw))
+    end
+  end
+
+  defp recency_nudge(cand, cfg) do
+    weight = cfg.recency_weight || 0.0
+    ts_ms = timestamp_ms(cand)
 
     cond do
-      is_number(cand[:episode_score]) ->
-        wt * Numbers.clamp01(cand[:episode_score])
+      weight <= 0.0 ->
+        0.0
 
-      is_list(cand[:episodes]) ->
-        best =
-          cand[:episodes]
-          |> Enum.map(&Map.get(&1, :score, 0.0))
-          |> Enum.max(fn -> 0.0 end)
+      is_nil(ts_ms) ->
+        0.0
 
-        wt * Numbers.clamp01(best)
+      true ->
+        now_ms = System.system_time(:millisecond)
+        dt = max(now_ms - ts_ms, 0)
+        half_life_ms = max(cfg.half_life_ms || 7_500, 1)
+        recency = :math.exp(-dt / half_life_ms)
+        Numbers.clamp01(weight * recency)
+    end
+  end
+
+  defp intent_nudge(cand, cfg) do
+    weight = cfg.intent_weight || 0.0
+    current_intent = cfg.current_intent
+
+    cond do
+      weight <= 0.0 or is_nil(current_intent) ->
+        0.0
+
+      intent_matches?(cand, current_intent) ->
+        Numbers.clamp01(weight)
 
       true ->
         0.0
@@ -306,12 +292,100 @@ defmodule Brain.WM.Policy do
   end
 
   defp safe_sem_bias(cand) do
-    try do
-      Brain.Semantics.bias_for(cand)
-    rescue
+    bias =
+      cand[:semantic_bias] || cand[:sem_bias] || get_in(cand, [:features, :semantic_bias]) ||
+        get_in(cand, [:features, :sem_bias])
+
+    case bias do
+      value when is_number(value) -> value * 1.0
       _ -> 0.0
-    catch
-      _, _ -> 0.0
     end
+  end
+
+  defp intent_matches?(cand, current_intent) do
+    cand_intent = cand[:intent] || cand[:intent_tag] || get_in(cand, [:features, :intent])
+
+    cond do
+      cand_intent == current_intent ->
+        true
+
+      is_binary(cand_intent) ->
+        cand_intent == Atom.to_string(current_intent)
+
+      true ->
+        false
+    end
+  end
+
+  defp episode_score_from_list(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      %{score: score} -> numeric(score)
+      %{"score" => score} -> numeric(score)
+      _ -> 0.0
+    end)
+    |> Enum.max(fn -> 0.0 end)
+  end
+
+  defp episode_score_from_list(_), do: 0.0
+
+  defp timestamp_ms(cand) do
+    ts = cand[:ts_ms] || cand[:timestamp_ms] || cand[:ts]
+
+    case ts do
+      value when is_integer(value) -> value
+      value when is_float(value) -> round(value)
+      _ -> nil
+    end
+  end
+
+  defp numeric(value) when is_integer(value), do: value * 1.0
+  defp numeric(value) when is_float(value), do: value
+
+  defp numeric(value) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {parsed, _} -> parsed
+      _ -> 0.0
+    end
+  end
+
+  defp numeric(_), do: 0.0
+
+  defp normalize_value(nil), do: ""
+
+  defp normalize_value(value) do
+    value
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  # Retention helpers
+
+  defp elapsed_ms(state, now_ms) do
+    case Map.get(state, :wm_last_ms) do
+      last_ms when is_integer(last_ms) -> max(now_ms - last_ms, 0)
+      _ -> 0
+    end
+  end
+
+  defp decay_wm_entries(wm, decay_factor) do
+    Enum.map(wm, &decay_entry(&1, decay_factor))
+  end
+
+  defp decay_entry(%{score: score} = entry, decay_factor) when is_number(score) do
+    %{entry | score: Numbers.clamp01(score * decay_factor)}
+  end
+
+  defp decay_entry(entry, _decay_factor), do: entry
+
+  defp keep_best_entries(wm, cap) do
+    wm
+    |> Enum.sort_by(&entry_sort_key/1, :desc)
+    |> Enum.take(cap)
+  end
+
+  defp entry_sort_key(entry) do
+    {Map.get(entry, :score, 0.0), Map.get(entry, :ts, 0)}
   end
 end

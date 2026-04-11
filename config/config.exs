@@ -17,8 +17,6 @@ config :core, Core.Recall.Synonyms,
   ttl_ms: 60_000,
   top_k: 12
 
-config :core, Core.Recall.Synonyms.Providers.External, mfa: {Db.Lexicon, :lookup_synonyms, []}
-
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity,

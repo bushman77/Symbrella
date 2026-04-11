@@ -53,12 +53,21 @@ defmodule Brain.LIFG.Stage1 do
 
   @pos_prior %{
     "phrase" => 0.98,
+    "pronoun" => 1.0,
+    "pron" => 1.0,
+    "determiner" => 0.99,
+    "det" => 0.99,
     "verb" => 0.96,
     "adj" => 0.95,
     "adv" => 0.94,
     "noun" => 0.93,
     "other" => 0.93
   }
+  @closed_class_pronouns MapSet.new(~w(
+                           i me you he him she her it we us they them
+                           who whom whose myself yourself himself herself
+                           itself ourselves yourselves themselves
+                         ))
 
   @greeting_lemmas MapSet.new([
                      "hey how is",
@@ -125,12 +134,11 @@ defmodule Brain.LIFG.Stage1 do
         si0
         |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
         |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
+        |> ensure_closed_class_candidates()
         |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
 
       si1 = stamp_slates(si1, frame)
-
       buckets = buckets_from_si(si1, tokens)
-
       # 2) Effective knobs
       weights =
         Application.get_env(:brain, :lifg_stage1_weights, @default_weights)
@@ -340,6 +348,7 @@ defmodule Brain.LIFG.Stage1 do
           Safe.get(si1, :intent_confidence) ||
           Safe.get(si1, "intent_confidence"),
       source: Keyword.get(opts, :source, :run),
+      tokens: Safe.get(si1, :tokens) || Safe.get(si1, "tokens") || [],
       frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
       frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
       frame_run_id: Safe.get(si1, :frame_run_id) || Safe.get(si1, "frame_run_id")
@@ -642,6 +651,7 @@ defmodule Brain.LIFG.Stage1 do
     else
       bias_val = get_float(ctx.bias_map, tok_index, 0.0)
       {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
+      closed_class_slate? = Enum.any?(cand_list, &closed_class_candidate?/1)
 
       scored_trip =
         Enum.map(cand_list, fn c ->
@@ -688,7 +698,13 @@ defmodule Brain.LIFG.Stage1 do
                ctx.weights[:intent_bias] * intent_feat)
             |> clamp01()
 
-          hom_bump = if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
+          hom_bump =
+            if closed_class_slate? do
+              0.0
+            else
+              if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
+            end
+
           base = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
 
           feat = %{
@@ -712,7 +728,12 @@ defmodule Brain.LIFG.Stage1 do
       cereb_opts =
         kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: ctx.margin_thr)
 
-      cal_scores = cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
+      cal_scores =
+        if closed_class_slate? do
+          base_scores
+        else
+          cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
+        end
 
       logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
       probs = softmax(logits)
@@ -737,7 +758,10 @@ defmodule Brain.LIFG.Stage1 do
       margin0 = top_p - second_p
       margin = Float.round(max(margin0, ctx.min_margin), 6)
 
-      _ = cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
+      _ =
+        unless closed_class_slate? do
+          cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
+        end
 
       scores_out =
         case ctx.scores_mode do
@@ -927,12 +951,34 @@ defmodule Brain.LIFG.Stage1 do
     fallback_rate = safe_div(fallback_winners, max(kept_tokens, 0))
     missing_rate = safe_div(missing_candidates, max(total, 0))
 
+    lifg_payload =
+      Brain.LIFG.Recorder.build_last_payload(
+        :stage1,
+        %{
+          tokens: Map.get(run_ctx, :tokens) || [],
+          sentence: Map.get(run_ctx, :sentence),
+          intent: Map.get(run_ctx, :intent),
+          confidence: Map.get(run_ctx, :confidence)
+        },
+        choices,
+        audit,
+        %{
+          scores_mode: scores_mode,
+          margin_threshold: margin_thr * 1.0,
+          min_margin: min_margin * 1.0,
+          weights: weights
+        }
+      )
+
     meta = %{
       at_ms: ts,
       ts_ms: ts,
       frame_seq: frame_seq,
       frame_ts_ms: frame_ts_ms,
       frame_run_id: frame_run_id,
+      tokens: Map.get(lifg_payload, :tokens, []),
+      choices: Map.get(lifg_payload, :choices, []),
+      finalists: Map.get(lifg_payload, :finalists, []),
       sentence: Map.get(run_ctx, :sentence),
       intent: Map.get(run_ctx, :intent),
       confidence: Map.get(run_ctx, :confidence),
@@ -1182,6 +1228,159 @@ defmodule Brain.LIFG.Stage1 do
   defp function_pos?(_), do: false
 
   # ---------- Candidate bucket extraction ----------
+  defp ensure_closed_class_candidates(%{} = si) do
+    tokens = Safe.get(si, :tokens, []) || []
+
+    sc0 =
+      case Safe.get(si, :sense_candidates, %{}) do
+        %{} = m -> m
+        _ -> %{}
+      end
+
+    sc =
+      tokens
+      |> Enum.with_index()
+      |> Enum.reduce(sc0, fn {tok, fallback_idx}, acc ->
+        idx = token_index(tok, fallback_idx)
+        phrase = tok |> token_raw_phrase() |> norm()
+
+        cond do
+          token_mwe?(tok) ->
+            acc
+
+          not MapSet.member?(@closed_class_pronouns, phrase) ->
+            acc
+
+          true ->
+            upsert_closed_class_candidate(acc, idx, closed_class_pronoun_candidate(phrase))
+        end
+      end)
+
+    Map.put(si, :sense_candidates, sc)
+  end
+
+  defp ensure_closed_class_candidates(other), do: other
+
+  defp candidate_bucket(sc, idx) when is_map(sc) do
+    bucket = Map.get(sc, idx) || Map.get(sc, to_string(idx)) || []
+
+    cond do
+      is_list(bucket) -> bucket
+      is_nil(bucket) -> []
+      true -> [bucket]
+    end
+  end
+
+  defp closed_class_candidate?(cand) when is_map(cand) do
+    pos = cand |> pos_of() |> String.downcase()
+    id = cand |> sense_id_for("") |> to_string()
+
+    pos in ["pronoun", "pron", "determiner", "det"] or
+      String.contains?(id, "|pronoun|") or
+      String.contains?(id, "|pron|") or
+      String.contains?(id, "|determiner|") or
+      String.contains?(id, "|det|")
+  end
+
+  defp closed_class_candidate?(_), do: false
+
+  defp pronoun_candidate?(cand) when is_map(cand) do
+    pos =
+      cand
+      |> pos_of()
+      |> String.downcase()
+
+    id = cand |> sense_id_for("") |> to_string()
+
+    pos in ["pronoun", "pron"] or
+      String.contains?(id, "|pronoun|") or
+      String.contains?(id, "|pron|")
+  end
+
+  defp pronoun_candidate?(_), do: false
+
+  defp upsert_closed_class_candidate(sc, idx, cand) when is_map(sc) do
+    key =
+      cond do
+        Map.has_key?(sc, idx) -> idx
+        Map.has_key?(sc, to_string(idx)) -> to_string(idx)
+        true -> idx
+      end
+
+    Map.update(sc, key, [cand], fn
+      list when is_list(list) ->
+        if Enum.any?(list, &pronoun_candidate?/1) do
+          Enum.map(list, fn
+            %{} = existing ->
+              if pronoun_candidate?(existing) do
+                upgrade_closed_class_candidate(existing, cand)
+              else
+                existing
+              end
+
+            existing ->
+              existing
+          end)
+        else
+          list ++ [cand]
+        end
+
+      %{} = existing ->
+        if pronoun_candidate?(existing) do
+          upgrade_closed_class_candidate(existing, cand)
+        else
+          [existing, cand]
+        end
+
+      other ->
+        [other, cand]
+    end)
+  end
+
+  defp upgrade_closed_class_candidate(existing, override) do
+    features =
+      (Safe.get(existing, :features) || Safe.get(existing, "features") || %{})
+      |> Map.merge(Safe.get(override, :features, %{}))
+
+    existing
+    |> Map.put(:features, features)
+    |> Map.put(:activation, Safe.get(override, :activation, 0.95))
+    |> Map.put(:score, Safe.get(override, :score, 0.95))
+    |> Map.put(:source, :closed_class)
+  end
+
+  defp put_sense_candidate(sc, idx, cand) when is_map(sc) do
+    key =
+      cond do
+        Map.has_key?(sc, idx) -> idx
+        Map.has_key?(sc, to_string(idx)) -> to_string(idx)
+        true -> idx
+      end
+
+    Map.update(sc, key, [cand], fn
+      list when is_list(list) -> list ++ [cand]
+      other -> [other, cand]
+    end)
+  end
+
+  defp closed_class_pronoun_candidate(phrase) do
+    %{
+      id: "#{phrase}|pronoun|0",
+      lemma: phrase,
+      norm: phrase,
+      mw: false,
+      pos: "pronoun",
+      activation: 0.95,
+      score: 0.95,
+      source: :closed_class,
+      features: %{
+        lex_fit: 1.0,
+        rel_prior: 1.0,
+        activation: 0.95,
+        intent_bias: 0.0
+      }
+    }
+  end
 
   defp buckets_from_si(si0, tokens) do
     sc =

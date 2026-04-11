@@ -1,3 +1,4 @@
+# apps/brain/lib/brain/dlpfc.ex
 defmodule Brain.DLPFC do
   @moduledoc """
   DLPFC — execution/goal holder for tiny exploratory acts.
@@ -37,6 +38,17 @@ defmodule Brain.DLPFC do
   @spec set_opts(Keyword.t() | map()) :: :ok
   def set_opts(opts) when is_list(opts) or is_map(opts) do
     GenServer.cast(__MODULE__, {:set_opts, Map.new(opts)})
+  end
+
+  @doc """
+  Reset runtime state on the already-running DLPFC singleton.
+
+  This clears transient cached state and live opts while keeping the process
+  alive and its telemetry handlers attached.
+  """
+  @spec reset(server :: pid() | atom()) :: :ok
+  def reset(server \\ __MODULE__) do
+    GenServer.call(server, :reset)
   end
 
   # ─────────────── Region lifecycle ───────────────
@@ -98,6 +110,21 @@ defmodule Brain.DLPFC do
   end
 
   def on_thalamus_decision(_, _, _, _), do: :ok
+
+  # ─────────────── GenServer calls ───────────────
+
+  @impl GenServer
+  def handle_call(:reset, _from, state) do
+    state2 =
+      state
+      |> Map.put(:opts, %{})
+      |> Map.put(:last_probe, nil)
+
+    {:reply, :ok, state2}
+  end
+
+  @impl GenServer
+  def handle_call(other, _from, state), do: {:reply, {:error, {:unknown_call, other}}, state}
 
   # ─────────────── GenServer casts ───────────────
 

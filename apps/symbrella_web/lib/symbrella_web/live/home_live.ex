@@ -255,18 +255,18 @@ defmodule SymbrellaWeb.HomeLive do
       source: Map.get(si, :source, :user)
     }
 
-    # Prefer planner/LLM path; fall back to Core-produced response_text; then debug.
+    # Prefer the response already attached by Core.resolve_input/2; otherwise fall back to planner.
     {tone, reply_text, meta} =
       cond do
-        Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
-          Response.plan(si_like, mood)
-
         is_binary(Map.get(si, :response_text)) and Map.get(si, :response_text) != "" ->
           {
             Map.get(si, :response_tone, :warm),
             Map.get(si, :response_text),
             Map.get(si, :response_meta, %{})
           }
+
+        Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
+          Response.plan(si_like, mood)
 
         true ->
           {nil, format_si_reply(si), %{}}

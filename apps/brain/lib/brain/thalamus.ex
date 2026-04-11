@@ -97,6 +97,17 @@ defmodule Brain.Thalamus do
   end
 
   @doc """
+  Reset runtime state on the already-running Thalamus singleton.
+
+  This clears transient caches and live overrides while keeping the process
+  alive and its telemetry handlers attached.
+  """
+  @spec reset(server :: pid() | atom()) :: :ok
+  def reset(server \\ __MODULE__) do
+    GenServer.call(server, :reset)
+  end
+
+  @doc """
   Return a compact status snapshot for UI/diagnostics.
   """
   @spec status(server :: pid() | atom()) :: {:ok, map()} | {:error, term()}
@@ -208,6 +219,21 @@ defmodule Brain.Thalamus do
     opts_norm = normalize_opts(opts_in)
     new_opts = Keyword.merge(state.opts, opts_norm)
     {:reply, :ok, %{state | opts: new_opts}}
+  end
+
+  @impl GenServer
+  def handle_call(:reset, _from, state) do
+    state2 =
+      state
+      |> Map.put(:opts, [])
+      |> Map.put(:ofc_cache, %{})
+      |> Map.put(:ofc_order, [])
+      |> Map.put(:acc_conflict, nil)
+      |> Map.put(:acc_last_ms, nil)
+      |> Map.put(:mood, nil)
+      |> Map.put(:mood_last_ms, nil)
+
+    {:reply, :ok, state2}
   end
 
   @impl GenServer
