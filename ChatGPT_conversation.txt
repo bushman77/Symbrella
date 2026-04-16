@@ -1,0 +1,831 @@
+Symbrella_elixir_sources_20260412_130859.zip
+Zip Archive
+ok what pices of the brain would you have an axon model for in the brain
+
+I would not put an Axon model over the whole brain. I would use it only where fuzzy pattern learning beats explicit rules.
+
+For your kind of system, the best brain pieces to give an Axon model are these:
+
+1. Sensory / perception layer
+This is the strongest candidate.
+Use Axon to turn raw input into richer signals:
+
+    text embeddings
+
+    token context vectors
+
+    phrase similarity
+
+    semantic compression
+
+    anomaly detection in input streams
+
+This is like your artificial sensory cortex. It takes noisy input and produces useful features for the rest of the system.
+
+2. Salience / attention gating
+A small Axon model fits well here.
+Its job would be to decide:
+
+    what deserves focus
+
+    what should enter working memory
+
+    what should be ignored
+
+    what is emotionally or contextually important
+
+That maps well to a blend of thalamus + attentional cortex behavior.
+
+3. Intent classification / disambiguation
+You are already near this area. This is one of the most natural places for Axon.
+
+Use it for:
+
+    intent classification
+
+    sense ranking
+
+    ambiguity resolution
+
+    context-sensitive interpretation
+
+This is less “a whole brain region” and more a function spread across temporal + frontal language areas.
+
+4. Hippocampal recall scoring
+I would not let Axon replace the hippocampus logic, but I would absolutely use it to help rank recall candidates.
+
+So keep:
+
+    symbolic episodes
+
+    recency
+
+    tags
+
+    Jaccard / structural recall
+
+Then add Axon for:
+
+    embedding similarity
+
+    latent cue matching
+
+    “which memory feels most relevant right now”
+
+That gives you a very good artificial hippocampus assistant, not a full replacement.
+
+5. Emotional / valuation layer
+A compact model could estimate latent internal state from ongoing events:
+
+    arousal
+
+    valence
+
+    novelty
+
+    reward expectation
+
+    frustration / confidence shifts
+
+That is useful for something like amygdala + limbic valuation.
+Not as a “feeling generator,” but as a modulation system for behavior and response tone.
+
+6. Motor / response selection policy
+Not full text generation at first. More like a policy network that helps choose:
+
+    answer style
+
+    whether to ask, explain, confirm, or act
+
+    response confidence
+
+    verbosity
+
+    urgency
+
+That is closest to prefrontal action selection.
+Pieces I would not primarily make Axon-based
+
+These should stay mostly symbolic / OTP / explicit-state driven in your system:
+
+Working memory
+This should remain structured, inspectable, and controllable.
+
+Executive control rules
+Your orchestration, routing, and safety logic should stay explicit.
+
+BrainCell identity / graph structure
+Cells, relationships, neurotransmitter state, and activation flow are better as symbolic state plus learned modifiers.
+
+Long-term knowledge store
+Facts, definitions, relations, and episodes should stay persistent and explainable.
+Best mapping for Symbrella specifically
+
+If I were placing Axon inside your current architecture, I would prioritize it like this:
+
+    Input encoder
+    Turns sentence/tokens/phrases into embeddings and contextual features.
+
+    Intent + sense scorer
+    Helps LIFG/semantic disambiguation choose among candidates.
+
+    Recall ranker
+    Scores which episodes or cells are most relevant.
+
+    Salience modulator
+    Helps Brain decide what gets boosted into focus.
+
+    Mood/valuation estimator
+    Produces internal modulation signals, not final decisions.
+
+That would give you a very strong neuro-symbolic split:
+
+    Axon learns soft patterns
+
+    Brain / BrainCell / Core keep structure, memory, routing, and explainability
+
+If you want the most biologically sensible analogy
+
+A good rule is:
+
+    use Axon for cortex-like pattern extraction
+
+    use symbolic modules for hippocampal memory records
+
+    use explicit control logic for prefrontal governance
+
+    use state variables for neuromodulation
+
+    use graph/process architecture for cell assemblies and long-term structure
+
+My strongest recommendation
+
+For your project, the single best first Axon “brain piece” is:
+
+semantic perception + disambiguation
+
+Because it gives you the most value with the least architectural damage.
+
+So in plain terms:
+
+    let Axon help the system understand
+
+    do not let Axon own the whole system’s memory or reasoning
+
+That keeps Symbrella brain-like, inspectable, and stable.
+
+I can sketch a concrete Symbrella brain map next: which modules stay symbolic and which ones become Axon-backed.
+
+remeber this list for the future
+
+Got it — I’ll keep that list in mind going forward.
+
+so now id like to review this proposition 
+1. Sensory / perception layer
+what do we have that can be used already for the basis of this model?
+
+Yes — you already have a solid base for a sensory / perception model.
+
+From the code you uploaded, the best answer is: the perception stack is already half-built symbolically. What is missing is mostly the learned encoder on top of it, not the scaffolding underneath.
+
+Here is what you already have that can serve as the basis.
+1. Clean raw input intake
+
+You already have a disciplined front door for text.
+
+    Core.Token
+
+    Core.Input
+
+    Core.LIFG.Input
+
+That gives you:
+
+    word-first tokenization
+
+    char-span safety
+
+    stable token indices
+
+    punctuation handling
+
+    char-gram rejection
+
+    boundary enforcement
+
+    LIFG-safe normalization
+
+That is exactly the kind of preprocessing a perception model wants.
+A model is only as good as the stream it is fed, and you already have a much cleaner stream than most projects start with.
+2. A canonical carrier for perceptual state
+
+Core.SemanticInput is a very strong foundation.
+
+It already holds the kinds of things a perception model would either consume or produce:
+
+    sentence
+
+    tokens
+
+    active_cells
+
+    sense_candidates
+
+    intent
+
+    keyword
+
+    confidence
+
+    intent_bias
+
+    evidence
+
+    emotion
+
+    appraisal
+
+    trace
+
+That means you do not need to invent a new data structure for the model.
+SemanticInput is already the natural place where a learned perceptual layer can write its outputs.
+
+In other words:
+
+    symbolic pipeline prepares SI
+
+    Axon model reads from SI
+
+    model writes enriched perceptual signals back into SI
+
+That is a clean neuro-symbolic boundary.
+3. Multiword and phrase perception
+
+You already have phrase-level perception beginnings through:
+
+    Core.MWE.Injector
+
+    MWE fields on tokens like mw
+
+    span-aware token handling
+
+    phrase ordering and injection rules
+
+That matters a lot, because perception should not just see isolated words.
+It should recognize chunks like:
+
+    “kick the bucket”
+
+    “good morning”
+
+    “my name”
+
+    “how are you”
+
+So for an Axon encoder, you already have the groundwork for:
+
+    unigram perception
+
+    phrase perception
+
+    candidate phrase competition
+
+That is a major advantage.
+4. Candidate and lexical grounding
+
+You already have symbolic lexical grounding via:
+
+    Core.Pipeline.LTM
+
+    active_cells
+
+    sense_candidates
+
+    DB-backed BrainCell rows
+
+    lexicon / LTM retrieval
+
+That means the model does not need to hallucinate meaning from scratch.
+Instead, it can learn to score or contextualize existing candidates.
+
+That is ideal.
+
+A first perception model should probably not output final meanings directly.
+It should help with things like:
+
+    contextual token embeddings
+
+    salience scores
+
+    candidate ranking hints
+
+    ambiguity pressure
+
+    lexical fit signals
+
+Since your system already gathers candidates, the model can act as a perceptual scorer, not a total replacement.
+5. Early intent cues already exist
+
+Core.Intent.Selection gives you a lightweight early classifier.
+
+That is useful for two reasons:
+
+First, it gives the system an already-available supervisory signal.
+Second, it gives your future model contextual bias.
+
+So the perceptual model can condition on:
+
+    current sentence
+
+    extracted keyword
+
+    provisional intent
+
+    confidence
+
+That lets perception be context-sensitive instead of purely lexical.
+
+For example, the word “translate” in a sentence can shift the encoder’s interpretation of nearby tokens.
+You already have that bias source.
+6. Optional POS and lexical enrichment path
+
+Llm.Pos gives you an optional enrichment path for words.
+
+I would not make this the core of perception, but it is useful as a support layer.
+
+It can help provide:
+
+    POS labels
+
+    lemma normalization
+
+    synonym/antonym enrichments
+
+    fallback lexical structure for sparse areas
+
+So even before a full Axon model, you already have ways to create richer supervision and richer token metadata.
+7. Episodic context can already be attached
+
+You also have:
+
+    Core.Brain.Episodes.attach
+
+    Core.Brain.Hippocampus
+
+    episode/evidence attachment into SI
+
+That is important because perception in your architecture does not have to be blind to memory.
+
+A stronger encoder later could consume:
+
+    current tokens
+
+    attached episode evidence
+
+    token-level candidates
+
+    active cells
+
+That would let perception become contextual and memory-conditioned, which is much more brain-like.
+8. Activation hooks already exist
+
+You already have bridges that make perceptual output matter downstream:
+
+    Core.Brain.Activation.notify
+
+    Core.Brain.STM
+
+    Brain.Pipeline.LIFGStage1
+
+    Brain.MoodCore.register_activation/1
+
+That means when perception gets stronger, the rest of the brain can already react.
+
+So the model will not live in isolation.
+Its outputs can influence:
+
+    activation
+
+    gating
+
+    STM enrichment
+
+    later disambiguation
+
+    eventually salience and mood modulation
+
+That is exactly what you want.
+9. You already have a placeholder vector interface
+
+Core.Vectors is primitive right now, but it is strategically important.
+
+It means your codebase already has a conceptual slot for:
+
+    embeddings
+
+    vector fetch
+
+    semantic similarity
+
+    learned representations
+
+Right now it is a deterministic stub, but architecturally that is fine.
+It gives you the seam where Axon-based embeddings or encoder outputs can later plug in.
+10. LIFG Stage1 is already a great supervision source
+
+This is a big one.
+
+Brain.Pipeline.LIFGStage1 and the surrounding LIFG machinery already perform structured disambiguation. That means your existing symbolic system can serve as a teacher.
+
+So for a first perception model, you already have training targets like:
+
+    which candidate won
+
+    which alternatives lost
+
+    confidence margins
+
+    needy vs confident choices
+
+    reanalysis cases
+
+    boundary violations
+
+    char-gram violations
+
+That is gold.
+
+Instead of training from nothing, you can distill from your current pipeline.
+So what do you already have, in plain English?
+
+You already have:
+
+    clean tokenized input
+
+    stable spans and indices
+
+    phrase injection
+
+    lexical candidate retrieval
+
+    symbolic disambiguation targets
+
+    intent hints
+
+    episodic context hooks
+
+    activation bridges
+
+    a place to store enriched perceptual outputs
+
+That is enough to build v1 of a sensory/perception Axon model right now.
+What the first model should probably consume
+
+I would make the first encoder read things like:
+
+    token phrase
+
+    token span
+
+    mw
+
+    token position/index
+
+    candidate count for that token
+
+    candidate priors or scores
+
+    optional POS
+
+    current intent hint
+
+    recalled evidence presence
+
+    maybe active-cell activation hints
+
+And produce:
+
+    contextual token embedding
+
+    salience score
+
+    ambiguity score
+
+    candidate-ranking bias
+
+    phrase coherence score
+
+Not final reasoning.
+Just perceptual enrichment.
+What is still missing
+
+The missing piece is not structure. The missing piece is mainly learned representation.
+
+Right now you still need:
+
+    a real embedding/encoder model in Axon
+
+    a training dataset made from your current SI + LIFG outputs
+
+    a compact feature serializer from SemanticInput into tensors
+
+    a place to persist learned weights
+
+That is the gap.
+My conclusion
+
+For proposition 1. Sensory / perception layer, your strongest existing basis is:
+
+    Core.Token
+
+    Core.LIFG.Input
+
+    Core.SemanticInput
+
+    Core.MWE.Injector
+
+    Core.Pipeline.LTM
+
+    sense_candidates
+
+    Brain.Pipeline.LIFGStage1
+
+    Core.Brain.Episodes.attach
+
+    Core.Vectors
+
+That is already enough to justify building the first Axon model there before anywhere else.
+
+The perception model would not be starting from zero at all.
+It would be sitting on top of a mature symbolic preprocessing and candidate-generation layer.
+
+Next, I can break this into a concrete v1 Axon model spec for Symbrella: inputs, targets, tensor shape, and exactly where it should plug into the pipeline.
+
+ok lets start on Sensory / perception layer 
+
+Good. We should start with the smallest useful perception slice, not a giant “brain vision” subsystem.
+First slice to build
+
+Build a token-and-phrase perception encoder that reads the current SemanticInput and writes back a few learned signals:
+
+    token_vectors
+
+    salience
+
+    ambiguity
+
+    candidate_bias
+
+That gives you immediate value without replacing your symbolic stack.
+Best insertion point in your current pipeline
+
+From your current Core.run_prod_pipeline/3, the cleanest place is:
+
+|> Core.Brain.Episodes.attach(opts)
+|> Core.Pipeline.Perception.run(opts)
+|> Core.Brain.Amygdala.react(opts)
+|> LifgAttach.run_and_attach(lifg_opts)
+
+Why here:
+
+    tokens are already normalized
+
+    MWE passes already ran
+
+    LTM already attached active_cells
+
+    episodes/evidence are available
+
+    perception can enrich SI right before affect + LIFG use it
+
+So the perception layer becomes a semantic enrichment stage, not a replacement stage.
+What you already have for its input
+
+These are the exact pieces already strong enough to feed v1:
+
+From Core.SemanticInput
+
+    sentence
+
+    tokens
+
+    active_cells
+
+    sense_candidates
+
+    intent
+
+    keyword
+
+    confidence
+
+    evidence
+
+    episode
+
+From tokenization / normalization
+
+    Core.Token
+
+    Core.Input
+
+    Core.LIFG.Input
+
+From lexical grounding
+
+    Core.Pipeline.LTM
+
+From phrase perception
+
+    Core.MWE.Injector and MWE stages
+
+That is enough to build a real first model.
+What v1 should do
+
+Not reasoning. Not response generation. Not whole-brain control.
+
+Just this:
+1. Encode each token/phrase in context
+
+Take the current token plus nearby context and produce a learned vector.
+2. Estimate salience
+
+Which tokens or MWEs deserve extra focus?
+3. Estimate ambiguity
+
+Which tokens are easy versus likely to need LIFG help?
+4. Bias candidate ranking
+
+Produce a soft learned nudge for sense_candidates, without replacing symbolic scoring.
+Recommended module split
+
+Keep orchestration symbolic and inference isolated.
+Core side
+
+Core.Pipeline.Perception
+
+Responsibility:
+
+    read SI
+
+    extract model features
+
+    call backend
+
+    attach outputs back onto SI
+
+Brain / ML side
+
+Brain.ML.Perception
+
+Responsibility:
+
+    Axon model definition
+
+    inference
+
+    model loading
+
+    tensor conversion helpers
+
+That fits your architecture better than stuffing Axon logic directly into Core.
+What to add to SemanticInput
+
+Do not overload old fields. Add a dedicated surface for perception outputs.
+
+Something like:
+
+perception: %{
+  token_vectors: %{token_index => list_or_tensor_ref},
+  salience: %{token_index => float},
+  ambiguity: %{token_index => float},
+  candidate_bias: %{token_index => %{candidate_id => float}},
+  phrase_coherence: %{token_index => float}
+}
+
+That keeps it explicit and inspectable.
+What the first model should consume
+
+For each token or MWE:
+
+    surface phrase
+
+    token index
+
+    span
+
+    mw
+
+    local context window
+
+    candidate count
+
+    candidate prior scores if present
+
+    provisional intent
+
+    evidence-present flag
+
+    episode-present flag
+
+That is enough for a first pass.
+
+You do not need full embeddings from a giant external model to start.
+What the first model should output
+
+Per token:
+
+    vector — learned representation
+
+    salience — 0.0 to 1.0
+
+    ambiguity — 0.0 to 1.0
+
+Optional per candidate:
+
+    bias[candidate_id] — positive or negative adjustment
+
+That gives LIFG something useful without surrendering control.
+Best training target for v1
+
+Your best early supervision is already in the system:
+
+    LIFG winners
+
+    LIFG margins
+
+    singleton vs competitive buckets
+
+    reanalysis cases
+
+    MWE competition outcomes
+
+So v1 can be trained as a teacher-assisted auxiliary model:
+
+    predict which tokens are ambiguous
+
+    predict whether a candidate set will be competitive
+
+    predict which candidate will win
+
+    learn contextual vectors that help those tasks
+
+That is much easier than trying to train a full semantic system from scratch.
+Concrete v1 objective
+
+I would make the first objective:
+
+“Given SI before LIFG final choice, predict per-token ambiguity and a bias over candidate senses.”
+
+That is the highest-value first version because it directly helps the part of the brain you already care about.
+The first implementation milestone
+
+Not training yet.
+
+First milestone is:
+Milestone 1
+
+Create a no-op perception stage with the real contract.
+
+That means:
+
+    add Core.Pipeline.Perception.run/2
+
+    add perception field to SemanticInput
+
+    wire stage into pipeline
+
+    attach deterministic placeholder outputs
+
+    make LIFG ignore them for now unless enabled
+
+That gives you the seam. After that, Axon can slide in cleanly.
+Best first deterministic placeholder
+
+Before Axon, use hand-built outputs such as:
+
+    salience up for MWEs
+
+    salience up for tokens with many candidates
+
+    ambiguity up for tokens with close candidate scores
+
+    ambiguity down for singleton buckets
+
+That lets you verify the stage is useful before training anything.
+The move I would make first
+
+Step 1: add the perception carrier field and a Core.Pipeline.Perception stage that emits deterministic placeholder salience and ambiguity.
+
+That is the correct starting point because it creates the contract without destabilizing the rest of Symbrella.
+
+Paste these files next and I’ll map the exact edits tightly against your current code:
+
+    apps/core/lib/core/semantic_input.ex
+
+    apps/core/lib/core.ex
+
+    apps/brain/lib/brain/pipeline/lifg_stage1.ex
+
+
+

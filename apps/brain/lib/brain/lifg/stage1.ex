@@ -173,6 +173,21 @@ defmodule Brain.LIFG.Stage1 do
 
       bias_map = Keyword.get(opts, :intent_bias, Safe.get(si1, :intent_bias, %{})) || %{}
 
+      perception_candidate_bias? =
+        Keyword.get(
+          opts,
+          :perception_candidate_bias?,
+          Application.get_env(:brain, :lifg_perception_candidate_bias?, false)
+        )
+
+      perception_bias_scale =
+        Keyword.get(
+          opts,
+          :perception_bias_scale,
+          Application.get_env(:brain, :lifg_perception_bias_scale, 0.05)
+        )
+        |> to_float()
+
       # Event names (allow override)
       chargram_event =
         Keyword.get(opts, :chargram_event, [:brain, :lifg, :stage1, :chargram_violation])
@@ -217,6 +232,8 @@ defmodule Brain.LIFG.Stage1 do
           margin_thr: margin_thr,
           min_margin: min_margin,
           bias_map: bias_map,
+          perception_candidate_bias?: perception_candidate_bias?,
+          perception_bias_scale: perception_bias_scale,
           chargram_event: chargram_event,
           boundary_event: boundary_event,
           mwe_event: mwe_event,
@@ -698,6 +715,11 @@ defmodule Brain.LIFG.Stage1 do
                ctx.weights[:intent_bias] * intent_feat)
             |> clamp01()
 
+          perception_bias =
+            perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
+
+          perception_delta = perception_bias * ctx.perception_bias_scale
+
           hom_bump =
             if closed_class_slate? do
               0.0
@@ -705,14 +727,15 @@ defmodule Brain.LIFG.Stage1 do
               if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
             end
 
-          base = apply_mood_if_up(clamp01(base0 + hom_bump), tok, id)
+          base = apply_mood_if_up(clamp01(base0 + perception_delta + hom_bump), tok, id)
 
           feat = %{
             id: id,
             lex_fit: lex,
             rel_prior: rel,
             activation: act,
-            intent_bias: intent_feat
+            intent_bias: intent_feat,
+            perception_bias: perception_bias
           }
 
           {id, base, feat}
@@ -1261,16 +1284,6 @@ defmodule Brain.LIFG.Stage1 do
 
   defp ensure_closed_class_candidates(other), do: other
 
-  defp candidate_bucket(sc, idx) when is_map(sc) do
-    bucket = Map.get(sc, idx) || Map.get(sc, to_string(idx)) || []
-
-    cond do
-      is_list(bucket) -> bucket
-      is_nil(bucket) -> []
-      true -> [bucket]
-    end
-  end
-
   defp closed_class_candidate?(cand) when is_map(cand) do
     pos = cand |> pos_of() |> String.downcase()
     id = cand |> sense_id_for("") |> to_string()
@@ -1347,20 +1360,6 @@ defmodule Brain.LIFG.Stage1 do
     |> Map.put(:activation, Safe.get(override, :activation, 0.95))
     |> Map.put(:score, Safe.get(override, :score, 0.95))
     |> Map.put(:source, :closed_class)
-  end
-
-  defp put_sense_candidate(sc, idx, cand) when is_map(sc) do
-    key =
-      cond do
-        Map.has_key?(sc, idx) -> idx
-        Map.has_key?(sc, to_string(idx)) -> to_string(idx)
-        true -> idx
-      end
-
-    Map.update(sc, key, [cand], fn
-      list when is_list(list) -> list ++ [cand]
-      other -> [other, cand]
-    end)
   end
 
   defp closed_class_pronoun_candidate(phrase) do
@@ -1561,15 +1560,6 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
-  # Normalize ambiguous {start, b} into {start, end_exclusive}.
-  defp normalize_span(sentence, {start, stop}, _phrase_norm)
-       when is_binary(sentence) and is_integer(start) and is_integer(stop) and
-              start >= 0 and stop > start and stop <= byte_size(sentence) do
-    {start, stop}
-  end
-
-  defp normalize_span(_sentence, _span, _phrase_norm), do: nil
-
   defp tok_span(tok) do
     case Safe.get(tok, :span) || Safe.get(tok, "span") do
       {s, e} when is_integer(s) and is_integer(e) and s >= 0 and e > s ->
@@ -1694,6 +1684,45 @@ defmodule Brain.LIFG.Stage1 do
         base
     end
   end
+
+  defp perception_candidate_bias(_si, _tok_index, _id, false), do: 0.0
+
+  defp perception_candidate_bias(si, tok_index, id, true)
+       when is_map(si) and is_integer(tok_index) and is_binary(id) do
+    si
+    |> Safe.get(:perception, %{})
+    |> case do
+      %{} = perception ->
+        perception
+        |> Safe.get(:candidate_bias, %{})
+        |> candidate_bias_for(tok_index, id)
+
+      _ ->
+        0.0
+    end
+  end
+
+  defp perception_candidate_bias(_si, _tok_index, _id, _enabled?), do: 0.0
+
+  defp candidate_bias_for(%{} = bias_map, tok_index, id) do
+    bucket =
+      Map.get(bias_map, tok_index) ||
+        Map.get(bias_map, to_string(tok_index)) ||
+        %{}
+
+    case bucket do
+      %{} = bucket_map ->
+        bucket_map
+        |> Map.get(id, Map.get(bucket_map, to_string(id), 0.0))
+        |> to_float()
+        |> clamp(-1.0, 1.0)
+
+      _ ->
+        0.0
+    end
+  end
+
+  defp candidate_bias_for(_bias_map, _tok_index, _id), do: 0.0
 
   defp cereb_calibrate(si0, base_scores, feats, opts) do
     try do
@@ -2194,6 +2223,4 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp maybe_stamp(other, _seq, _ts, _run_id), do: other
-
-  defp maybe_put_span(tok, nil), do: tok
 end

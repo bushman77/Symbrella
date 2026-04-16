@@ -6,8 +6,8 @@ defmodule Symbrella.Application do
   @impl true
   def start(_type, _args) do
     # Ensure DETS dir exists for NegCache
-    neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
-    File.mkdir_p!(Path.dirname(neg_path))
+    # neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
+    # File.mkdir_p!(Path.dirname(neg_path))
 
     children = [
       {Phoenix.PubSub, name: Symbrella.PubSub},
@@ -22,7 +22,7 @@ defmodule Symbrella.Application do
       # ── Caches / services ────────────────────────────────────────────────
       {Task.Supervisor, name: Symbrella.TaskSup},
       {Finch, name: Lexicon.Finch},
-      {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
+      # {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
       # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
       # NOTE: This is intentionally owned by the umbrella-root supervisor.
@@ -44,6 +44,7 @@ defmodule Symbrella.Application do
       {Brain.ATL, keep: 300},
       Brain.Curiosity,
       {Brain.Hippocampus, keep: 300},
+      Brain.Meta,
       Brain.PFC,
       Brain.Thalamus,
       Brain.Temporal,

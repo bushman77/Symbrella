@@ -154,6 +154,10 @@ config :brain, :hippo_db_defaults,
   recall_min_sim: hippo_recall_min_sim,
   recall_half_life_s: hippo_recall_half_life_s
 
+config :brain, Brain.SelfCalibration.Logger,
+  enabled?: true,
+  path: "priv/self_calibration/samples.jsonl"
+
 # ───────── Logger runtime overrides ─────────
 log_level =
   case System.get_env("LOG_LEVEL", "info") |> String.downcase() do

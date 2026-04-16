@@ -9,5 +9,6 @@ defmodule Core.Pipeline do
   - `Core.Pipeline.LTM`
   - `Core.Pipeline.Candidates`
   - `Core.Pipeline.Evidence`
+  - `Core.Pipeline.Perception`
   """
 end

@@ -25,7 +25,7 @@ defmodule Brain.AffectiveAppraisal do
   """
 
   alias Brain.Utils.Safe
-
+  alias Brain.Attribution
   @event [:brain, :affect, :appraisal]
   @v 1
 
@@ -99,9 +99,6 @@ defmodule Brain.AffectiveAppraisal do
     "maybe" => 0.90
   }
 
-  @second_person MapSet.new(~w(you your you're youre u ur))
-  @first_person MapSet.new(~w(i me my mine i'm im myself))
-
   @known_intents %{
     "abuse" => :abuse,
     "gratitude" => :gratitude,
@@ -144,8 +141,8 @@ defmodule Brain.AffectiveAppraisal do
       |> apply_intent_bias(intent)
       |> apply_question_command_bias(sent, words, intent)
 
-    target = detect_target(words)
-    result = finalize(acc, target)
+    attribution = Attribution.classify(words)
+    result = finalize(acc, attribution)
 
     hit_count = length(result.evidence.hits)
 
@@ -160,11 +157,11 @@ defmodule Brain.AffectiveAppraisal do
     meta = %{
       v: @v,
       tags: result.tags,
-      target: target,
+      target: attribution.target,
+      attribution_source: attribution.source,
+      attribution_confidence: attribution.confidence,
       intent: intent,
       evidence_top: result.evidence_top,
-
-      # Mirror numerics into meta so tests/assertions can read them there (too).
       valence: meas.valence,
       arousal: meas.arousal,
       dominance: meas.dominance,
@@ -358,15 +355,7 @@ defmodule Brain.AffectiveAppraisal do
     end
   end
 
-  defp detect_target(words) do
-    cond do
-      Enum.any?(words, &MapSet.member?(@second_person, &1)) -> :assistant
-      Enum.any?(words, &MapSet.member?(@first_person, &1)) -> :self
-      true -> :unknown
-    end
-  end
-
-  defp finalize(%{valence: v, arousal: a, dominance: d, tags: tags, hits: hits}, target) do
+  defp finalize(%{valence: v, arousal: a, dominance: d, tags: tags, hits: hits}, attribution) do
     hits_sorted =
       hits
       |> Enum.reject(fn h -> String.starts_with?(h.term, "__") end)
@@ -379,7 +368,11 @@ defmodule Brain.AffectiveAppraisal do
       arousal: clamp01(a),
       dominance: clamp11(d),
       tags: MapSet.to_list(tags) |> Enum.sort(),
-      evidence: %{hits: hits_sorted, target: target},
+      evidence: %{
+        hits: hits_sorted,
+        target: attribution.target,
+        attribution: attribution
+      },
       evidence_top: evidence_top,
       v: @v
     }

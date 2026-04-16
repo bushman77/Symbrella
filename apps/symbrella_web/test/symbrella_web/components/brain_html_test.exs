@@ -81,6 +81,41 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     assert html =~ "2"
   end
 
+  test "hud_row renders self-model state" do
+    html =
+      render_component(&BrainHTML.hud_row/1,
+        self_model: %Brain.SelfModel{
+          confidence: 0.75,
+          uncertainty: 0.25,
+          stability: 0.8,
+          vigilance: 0.6,
+          cognitive_load: 0.5,
+          active_goals: [%{id: "phase-1"}],
+          last_appraisal: %{evidence: %{target: :assistant}},
+          last_lifg: %{choices_count: 2},
+          continuity: %{
+            reboot_restored?: true,
+            degraded?: false,
+            restore_reason: :restored,
+            source_snapshot_v: 1
+          }
+        },
+        mood: %{levels: %{}, derived: %{}}
+      )
+
+    assert html =~ "SelfModel"
+    assert html =~ "conf"
+    assert html =~ "0.750"
+    assert html =~ "target"
+    assert html =~ "assistant"
+    assert html =~ "lifg"
+    assert html =~ "2"
+    assert html =~ "continuity"
+    assert html =~ "restored"
+    assert html =~ "reason"
+    assert html =~ "v"
+  end
+
   test "blackboard_panel renders readable self-monitor previews" do
     html =
       render_component(&BrainHTML.blackboard_panel/1,

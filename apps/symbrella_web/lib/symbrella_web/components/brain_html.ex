@@ -31,6 +31,7 @@ defmodule SymbrellaWeb.BrainHTML do
   attr :attention, :any, default: nil
   # SelfPortrait snapshot (optional)
   attr :self_portrait, :any, default: nil
+  attr :self_model, :any, default: nil
 
   def hud_row(assigns) do
     snap = assigns[:snapshot] || %{}
@@ -153,6 +154,17 @@ defmodule SymbrellaWeb.BrainHTML do
         (is_map(sp_patterns) and map_size(sp_patterns) > 0) or
         self_hit
 
+    self_model =
+      nonempty_map(assigns[:self_model]) ||
+        nonempty_map(mget(snap, :self_model)) ||
+        %{}
+
+    sm_appraisal = mget(self_model, :last_appraisal) || %{}
+    sm_lifg = mget(self_model, :last_lifg) || %{}
+    sm_continuity = mget(self_model, :continuity) || %{}
+    sm_goals = List.wrap(mget(self_model, :active_goals) || [])
+    show_self_model? = is_map(self_model) and map_size(self_model) > 0
+
     assigns =
       assigns
       |> assign(:seq, seq)
@@ -181,6 +193,19 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:sp_no_mwe, sp_no_mwe)
       |> assign(:sp_lifg_gap, sp_lifg_gap)
       |> assign(:sp_lifg_pos, sp_lifg_pos)
+      |> assign(:show_self_model, show_self_model?)
+      |> assign(:sm_conf, mget(self_model, :confidence))
+      |> assign(:sm_uncertainty, mget(self_model, :uncertainty))
+      |> assign(:sm_stability, mget(self_model, :stability))
+      |> assign(:sm_vigilance, mget(self_model, :vigilance))
+      |> assign(:sm_cognitive_load, mget(self_model, :cognitive_load))
+      |> assign(:sm_goal_count, length(sm_goals))
+      |> assign(:sm_appraisal_target, mget(mget(sm_appraisal, :evidence) || %{}, :target))
+      |> assign(:sm_lifg_choices_count, mget(sm_lifg, :choices_count))
+      |> assign(:sm_continuity_restored, truthy?(mget(sm_continuity, :reboot_restored?)))
+      |> assign(:sm_continuity_degraded, truthy?(mget(sm_continuity, :degraded?)))
+      |> assign(:sm_continuity_reason, mget(sm_continuity, :restore_reason))
+      |> assign(:sm_continuity_snapshot_v, mget(sm_continuity, :source_snapshot_v))
 
     ~H"""
     <div class="flex flex-wrap items-center gap-2">
@@ -237,7 +262,40 @@ defmodule SymbrellaWeb.BrainHTML do
           <span class="opacity-70">lifg_gap</span> {to_string(@sp_lifg_gap)}
         </.chip>
       <% end %>
-
+      <%= if @show_self_model do %>
+        <.chip>
+          <span class="font-semibold">SelfModel</span>
+          <span class="opacity-70">conf</span> {fmt(@sm_conf)} ·
+          <span class="opacity-70">unc</span> {fmt(@sm_uncertainty)} ·
+          <span class="opacity-70">stab</span> {fmt(@sm_stability)} ·
+          <span class="opacity-70">vig</span> {fmt(@sm_vigilance)} ·
+          <span class="opacity-70">load</span> {fmt(@sm_cognitive_load)} ·
+          <span class="opacity-70">goals</span> {to_string(@sm_goal_count)}
+          <%= if @sm_appraisal_target do %>
+            · <span class="opacity-70">target</span> {to_string(@sm_appraisal_target)}
+          <% end %>
+          <%= if @sm_lifg_choices_count do %>
+            · <span class="opacity-70">lifg</span> {to_string(@sm_lifg_choices_count)}
+          <% end %>
+          <%= if @sm_continuity_restored or @sm_continuity_degraded or @sm_continuity_reason do %>
+            · <span class="opacity-70">continuity</span>
+            <%= cond do %>
+              <% @sm_continuity_restored -> %>
+                restored
+              <% @sm_continuity_degraded -> %>
+                degraded
+              <% true -> %>
+                observed
+            <% end %>
+            <%= if @sm_continuity_reason do %>
+              <span class="opacity-70">reason</span> {to_string(@sm_continuity_reason)}
+            <% end %>
+            <%= if @sm_continuity_snapshot_v do %>
+              <span class="opacity-70">v</span> {to_string(@sm_continuity_snapshot_v)}
+            <% end %>
+          <% end %>
+        </.chip>
+      <% end %>
       <.chip>
         <button class="text-xs border px-2 py-1 rounded" phx-click="refresh">Refresh</button>
         <span class="opacity-60">Auto:</span> {(@auto_on && "ON") || "OFF"}

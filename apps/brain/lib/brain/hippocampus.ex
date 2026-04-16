@@ -59,6 +59,40 @@ defmodule Brain.Hippocampus do
     slate
   end
 
+  @doc """
+  Write an explicitly self-tagged autobiographical episode.
+
+  This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
+  provide a small `kind` and JSON-safe `payload`; Hippocampus supplies stable
+  self/autobiographical tags so later recall can filter these episodes without
+  inferring selfhood from free text.
+  """
+  @spec write_self_memory(atom() | String.t(), map(), map()) :: map()
+  def write_self_memory(kind, payload, meta \\ %{}) when is_map(payload) and is_map(meta) do
+    kind_s = normalize_self_kind(kind)
+
+    slate = %{
+      winners: self_memory_winners(kind_s, payload),
+      tags: ["self", "self_memory", "autobiographical", kind_s],
+      payload: payload
+    }
+
+    meta =
+      meta
+      |> Map.put(:kind, kind_s)
+      |> Map.put(:subject, :symbrella)
+      |> Map.put(:self?, true)
+      |> Map.put(:autobiographical?, true)
+      |> Map.update(:tags, slate.tags, fn tags ->
+        (List.wrap(tags) ++ slate.tags)
+        |> Enum.map(&to_string/1)
+        |> Enum.uniq()
+      end)
+      |> Map.put(:payload, payload)
+
+    encode(slate, meta)
+  end
+
   @spec fact(atom()) :: term() | nil
   def fact(key) when is_atom(key),
     do: GenServer.call(__MODULE__, {:fact, key})
@@ -77,6 +111,17 @@ defmodule Brain.Hippocampus do
   @spec recall(list() | map(), keyword()) :: [recall_result()]
   def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
     do: GenServer.call(__MODULE__, {:recall, cues, normalize_opts(opts)})
+
+  @doc """
+  Recall only explicitly self-tagged autobiographical episodes.
+
+  This filter does not infer selfhood from free text. An episode must carry the
+  write-side self-memory contract, either through metadata booleans or stable
+  self/autobiographical tags.
+  """
+  @spec recall_self_memories(list() | map(), keyword()) :: [recall_result()]
+  def recall_self_memories(cues, opts \\ []) when is_list(cues) or is_map(cues),
+    do: GenServer.call(__MODULE__, {:recall_self, cues, normalize_opts(opts)})
 
   @doc """
   Recall episodes and attach them under `si.evidence[:episodes]`.
@@ -177,6 +222,45 @@ defmodule Brain.Hippocampus do
   end
 
   @impl true
+  def handle_call({:recall_self, cues, opts}, from, state) do
+    limit = Map.get(opts, :limit) || Map.get(opts, :recall_limit) || state.opts.recall_limit
+
+    candidate_limit =
+      Map.get(opts, :candidate_limit) ||
+        max(limit * 4, max(length(state.window), limit))
+
+    {results, meas, meta} =
+      do_recall(cues, state, Map.put(opts, :limit, candidate_limit))
+
+    self_results =
+      results
+      |> Enum.filter(&self_memory_result?/1)
+      |> Enum.take(limit)
+
+    meas =
+      meas
+      |> Map.put(:returned, length(self_results))
+      |> Map.put(:candidate_returned, length(results))
+      |> Map.put(:top_score, top_score(self_results))
+
+    meta =
+      meta
+      |> Map.put(:filter, :autobiographical_self_memory)
+      |> Map.put(:candidate_limit, candidate_limit)
+
+    Telemetry.emit_recall(meas, meta)
+
+    Telemetry.maybe_echo_to_caller(
+      from,
+      [:brain, :hippocampus, :recall],
+      meas,
+      meta
+    )
+
+    {:reply, self_results, state}
+  end
+
+  @impl true
   def handle_call({:attach, si, opts}, _from, state) do
     # For attach we usually want to include head as well unless caller overrides.
     opts = Map.put_new(opts, :ignore_head, false)
@@ -261,6 +345,74 @@ defmodule Brain.Hippocampus do
   end
 
   defp fact_value_from_si(_), do: nil
+
+  defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
+    self_memory_meta?(meta) or self_memory_tags?(meta) or self_memory_tags?(slate)
+  end
+
+  defp self_memory_result?(_), do: false
+
+  defp self_memory_meta?(meta) when is_map(meta) do
+    truthy_meta?(meta, :self?) and truthy_meta?(meta, :autobiographical?)
+  end
+
+  defp self_memory_meta?(_), do: false
+
+  defp truthy_meta?(meta, key) when is_atom(key) do
+    Map.get(meta, key) == true or Map.get(meta, Atom.to_string(key)) == true
+  end
+
+  defp self_memory_tags?(map) when is_map(map) do
+    tags =
+      map
+      |> tag_values()
+      |> Enum.map(&tag_string/1)
+
+    "self_memory" in tags and "autobiographical" in tags
+  end
+
+  defp self_memory_tags?(_), do: false
+
+  defp tag_values(map) when is_map(map) do
+    List.wrap(Map.get(map, :tags) || Map.get(map, "tags") || [])
+  end
+
+  defp tag_string(tag) when is_binary(tag), do: tag |> String.trim() |> String.downcase()
+  defp tag_string(tag) when is_atom(tag), do: tag |> Atom.to_string() |> tag_string()
+  defp tag_string(tag), do: tag |> to_string() |> tag_string()
+
+  defp top_score([%{score: score} | _]) when is_float(score), do: score
+  defp top_score([%{score: score} | _]) when is_integer(score), do: score * 1.0
+  defp top_score(_), do: 0.0
+
+  defp normalize_self_kind(kind) when is_atom(kind),
+    do: kind |> Atom.to_string() |> normalize_self_kind()
+
+  defp normalize_self_kind(kind) when is_binary(kind) do
+    kind
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9_:-]+/, "_")
+    |> case do
+      "" -> "self_event"
+      value -> value
+    end
+  end
+
+  defp self_memory_winners(kind, payload) do
+    payload_terms =
+      payload
+      |> Map.take([:goal, :restore_reason, :target, :focus, :event])
+      |> Map.values()
+      |> Enum.map(&to_string/1)
+      |> Enum.reject(&(&1 == ""))
+
+    ["symbrella", "self", "self_memory", "autobiographical", kind | payload_terms]
+    |> Enum.uniq()
+    |> Enum.map(fn lemma ->
+      %{id: "#{lemma}|self_memory|0", lemma: lemma}
+    end)
+  end
 
   # ────────────────────────────────────────────────────────────────────────────
   # Warm start: rehydrate window from DB

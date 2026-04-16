@@ -77,4 +77,77 @@ defmodule Brain.HippocampusBehaviorTest do
     assert length(res_low) == 1
     assert hd(res_low).score > 0.0
   end
+
+  test "write_self_memory/3 writes explicitly self-tagged autobiographical episodes" do
+    Hippocampus.write_self_memory(:continuity_restored, %{
+      restore_reason: :restored,
+      source_snapshot_v: 1
+    })
+
+    %{window: [{_at, ep} | _]} = Hippocampus.snapshot()
+
+    assert ep.meta.self? == true
+    assert ep.meta.autobiographical? == true
+    assert ep.meta.subject == :symbrella
+    assert ep.meta.kind == "continuity_restored"
+    assert "self" in ep.meta.tags
+    assert "self_memory" in ep.meta.tags
+    assert "autobiographical" in ep.meta.tags
+    assert "continuity_restored" in ep.meta.tags
+
+    assert MapSet.member?(ep.norms, "symbrella")
+    assert MapSet.member?(ep.norms, "self_memory")
+    assert MapSet.member?(ep.norms, "continuity_restored")
+  end
+
+  test "self-tagged memories are recallable through normal Hippocampus recall" do
+    Hippocampus.write_self_memory(:goal_update, %{
+      goal: "phase_7",
+      event: "hud continuity complete"
+    })
+
+    [%{episode: %{meta: meta}} | _] =
+      Hippocampus.recall(["self_memory"], limit: 3, ignore_head: :never)
+
+    assert meta.self? == true
+    assert meta.autobiographical? == true
+    assert meta.kind == "goal_update"
+  end
+
+  test "recall_self_memories/2 returns only self-tagged autobiographical episodes" do
+    Hippocampus.write_self_memory(:goal_update, %{
+      goal: "phase_7",
+      event: "hud continuity complete"
+    })
+
+    Hippocampus.encode(slate_with("phase_7"), %{
+      source: :ordinary_episode,
+      tags: ["not_self"]
+    })
+
+    results =
+      Hippocampus.recall_self_memories(["phase_7"], limit: 5, ignore_head: :never)
+
+    assert length(results) == 1
+
+    [%{episode: %{meta: meta}}] = results
+
+    assert meta.self? == true
+    assert meta.autobiographical? == true
+    assert meta.kind == "goal_update"
+  end
+
+  test "recall_self_memories/2 respects requested limit after filtering" do
+    Hippocampus.write_self_memory(:goal_update, %{goal: "phase_7", event: "one"})
+    Hippocampus.encode(slate_with("phase_7"), %{source: :ordinary_episode})
+    Hippocampus.write_self_memory(:continuity_restored, %{goal: "phase_7", event: "two"})
+
+    results =
+      Hippocampus.recall_self_memories(["phase_7"], limit: 1, ignore_head: :never)
+
+    assert length(results) == 1
+    [%{episode: %{meta: meta}}] = results
+    assert meta.self? == true
+    assert meta.autobiographical? == true
+  end
 end

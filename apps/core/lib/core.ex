@@ -8,7 +8,7 @@ defmodule Core do
   alias Core.Response.Attach, as: ResponseAttach
   alias Core.SemanticInput
   alias Core.TokenFilters
-
+  alias Core.Brain.Introspection, as: BrainIntrospection
   @type opts :: keyword()
 
   @si_template %SemanticInput{}
@@ -85,8 +85,10 @@ defmodule Core do
     |> Core.Relations.attach_edges()
     |> Core.Pipeline.Evidence.drop_empty()
     |> Core.Brain.Episodes.attach(opts)
+    |> Core.Pipeline.Perception.run(opts)
     |> Core.Brain.Amygdala.react(opts)
     |> LifgAttach.run_and_attach(lifg_opts)
+    |> BrainIntrospection.update_self_model(opts)
     |> Core.Brain.ATL.ingest(atl_opts)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
     |> Core.Brain.Hippocampus.encode()

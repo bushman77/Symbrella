@@ -25,6 +25,13 @@ defmodule Brain.Meta do
 
   @impl true
   def init(opts) do
+    opts =
+      cond do
+        is_map(opts) -> opts
+        Keyword.keyword?(opts) -> Map.new(opts)
+        true -> %{}
+      end
+
     st = %{
       region: :meta,
       conf: 1.0,
@@ -37,7 +44,6 @@ defmodule Brain.Meta do
       h_reasons: nil
     }
 
-    # Attach telemetry listeners with the server pid in config
     h_conf = attach(@ev_conf, &__MODULE__.on_confidence/4, self())
     h_conflict = attach(@ev_conflict, &__MODULE__.on_conflict/4, self())
     h_reasons = attach(@ev_reasons, &__MODULE__.on_reasons/4, self())

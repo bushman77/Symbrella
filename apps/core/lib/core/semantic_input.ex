@@ -20,6 +20,7 @@ defmodule Core.SemanticInput do
     • sense_candidates
     • lifg_opts / lifg_choices / acc_conflict
     • atl_slate
+    • perception
     • activation_summary
     • evidence
     • episode
@@ -61,6 +62,7 @@ defmodule Core.SemanticInput do
           lifg_opts: keyword() | nil,
           lifg_choices: list() | nil,
           acc_conflict: number() | nil,
+          perception: map() | nil,
 
           # integration products
           atl_slate: map() | nil,
@@ -76,7 +78,8 @@ defmodule Core.SemanticInput do
           # affect
           emotion: map() | nil,
           appraisal: map() | nil,
-
+          mood: map() | nil,
+          self_model: term() | nil,
           # misc products some stages attach
           mwe_matches: list() | nil,
 
@@ -101,6 +104,7 @@ defmodule Core.SemanticInput do
             lifg_opts: nil,
             lifg_choices: nil,
             acc_conflict: nil,
+            perception: nil,
             atl_slate: nil,
             activation_summary: %{db_hits: MapSet.new()},
             evidence: nil,
@@ -110,6 +114,8 @@ defmodule Core.SemanticInput do
             response_meta: nil,
             emotion: nil,
             appraisal: nil,
+            mood: nil,
+            self_model: nil,
             mwe_matches: nil,
             session_id: nil,
             frame: nil,

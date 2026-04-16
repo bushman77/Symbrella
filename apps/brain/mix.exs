@@ -31,6 +31,8 @@ defmodule Brain.MixProject do
       {:stream_data, "~> 1.2", only: :test, override: true},
       {:benchee, "~> 1.4", only: [:dev, :test], runtime: false},
       {:benchee_markdown, "~> 0.3", only: [:dev, :test], runtime: false},
+      {:nx, "~> 0.9"},
+      {:axon, "~> 0.8"},
       {:db, in_umbrella: true}
     ]
   end

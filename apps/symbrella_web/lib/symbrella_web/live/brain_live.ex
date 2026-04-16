@@ -53,6 +53,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:region_state, fn -> %{workspace: [], snapshot: %{}} end)
       |> assign_new(:region_status, fn -> %{} end)
       |> assign_new(:self_portrait, fn -> %{} end)
+      |> assign_new(:self_model, fn -> %{} end)
       |> assign_new(:auto, fn -> false end)
       |> assign_new(:clock, fn -> %{} end)
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
@@ -106,6 +107,16 @@ defmodule SymbrellaWeb.BrainLive do
   # ---------------------------------------------------------------------------
   # Params & UI events
   # ---------------------------------------------------------------------------
+  defp fetch_self_model do
+    cond do
+      Code.ensure_loaded?(Brain.Introspection) and
+          function_exported?(Brain.Introspection, :snapshot, 0) ->
+        Brain.Introspection.snapshot()
+
+      true ->
+        %{}
+    end
+  end
 
   defp default_selected do
     keys = RegionRegistry.keys()
@@ -609,6 +620,7 @@ defmodule SymbrellaWeb.BrainLive do
     {snapshot, status} = fetch_snapshot_and_status(selected)
 
     self_portrait = fetch_self_portrait()
+    self_model = fetch_self_model()
 
     snapshot =
       cond do
@@ -625,6 +637,7 @@ defmodule SymbrellaWeb.BrainLive do
     |> assign(:regions, RegionRegistry.keys())
     |> assign(:region, region_meta_for(selected))
     |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
+    |> assign(:self_model, self_model)
     |> refresh_wm_from_brain()
     |> update(:region_state, fn st ->
       st = st || %{}

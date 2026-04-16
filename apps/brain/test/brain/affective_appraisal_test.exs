@@ -70,4 +70,23 @@ defmodule Brain.AffectiveAppraisalTest do
     assert is_number(meta[:dominance])
     assert is_list(meta[:tags])
   end
+
+  test "first-person user statement targets :user" do
+    si = %{sentence: "I feel unsure."}
+
+    a = AffectiveAppraisal.appraise(si)
+
+    assert a.evidence.target == :user
+  end
+
+  test "phase 3 attribution examples classify assistant user other and system targets" do
+    assert AffectiveAppraisal.appraise(%{sentence: "you are wrong"}).evidence.target == :assistant
+    assert AffectiveAppraisal.appraise(%{sentence: "I feel lost"}).evidence.target == :user
+    assert AffectiveAppraisal.appraise(%{sentence: "he insulted me"}).evidence.target == :other
+
+    system_target =
+      AffectiveAppraisal.appraise(%{sentence: "the system is unstable"}).evidence.target
+
+    assert system_target in [:system, :world]
+  end
 end

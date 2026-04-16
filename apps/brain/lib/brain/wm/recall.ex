@@ -25,9 +25,12 @@ defmodule Brain.WM.Recall do
   defp safe_hippo_recall(si_or_cues, recall_opts) do
     if Code.ensure_loaded?(Brain.Hippocampus) and
          function_exported?(Brain.Hippocampus, :recall, 2) do
+      Brain.Hippocampus.recall(si_or_cues, recall_opts)
     else
       []
     end
+  catch
+    :exit, _ -> []
   end
 
   defp recall_result_to_wm_candidate(r) when is_map(r) do
