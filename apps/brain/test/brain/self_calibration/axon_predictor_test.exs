@@ -96,4 +96,61 @@ defmodule Brain.SelfCalibration.AxonPredictorTest do
     assert value >= 0.0
     assert value <= 1.0
   end
+
+  test "predicts from saved and loaded trained artifact" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "symbrella-self-calibration-artifact-#{System.unique_integer([:positive])}.bin"
+      )
+
+    on_exit(fn -> File.rm(path) end)
+
+    # Train a model from the synthetic bootstrap dataset
+    bootstrap_path =
+      Path.expand(
+        "../../../priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl",
+        __DIR__
+      )
+
+    {:ok, samples} = Dataset.load_jsonl(bootstrap_path)
+    rows = Dataset.to_rows(samples)
+    {:ok, batch} = Tensor.from_rows(rows)
+    {:ok, artifact} = Training.train(batch, epochs: 3, hidden_units: 8)
+
+    # Save the artifact
+    assert :ok = Artifact.save(artifact, path)
+
+    # Load the artifact
+    assert {:ok, loaded_artifact} = Artifact.load(path)
+
+    # Verify the loaded artifact has the same key properties
+    assert loaded_artifact.status == :trained
+    assert loaded_artifact.source == :axon
+    assert loaded_artifact.model_version == AxonModel.model_version()
+    assert loaded_artifact.feature_names == Dataset.feature_names()
+    assert loaded_artifact.label_names == Dataset.label_names()
+    assert loaded_artifact.feature_schema_v == 1
+    assert loaded_artifact.params != nil
+
+    # Create a test sample from the dataset
+    test_sample = sample()
+
+    # Test prediction with the original artifact
+    assert {:ok, original_prediction} = AxonPredictor.predict(artifact, batch)
+    assert_bounded(original_prediction.confidence)
+    assert_bounded(original_prediction.uncertainty)
+    assert_bounded(original_prediction.stability)
+
+    # Test prediction with the loaded artifact
+    assert {:ok, loaded_prediction} = AxonPredictor.predict(loaded_artifact, batch)
+    assert_bounded(loaded_prediction.confidence)
+    assert_bounded(loaded_prediction.uncertainty)
+    assert_bounded(loaded_prediction.stability)
+
+    # Verify predictions are very close (allowing for minor floating point differences)
+    assert abs(original_prediction.confidence - loaded_prediction.confidence) < 0.0001
+    assert abs(original_prediction.uncertainty - loaded_prediction.uncertainty) < 0.0001
+    assert abs(original_prediction.stability - loaded_prediction.stability) < 0.0001
+  end
 end

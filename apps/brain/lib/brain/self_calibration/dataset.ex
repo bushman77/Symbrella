@@ -81,6 +81,7 @@ defmodule Brain.SelfCalibration.Dataset do
     %Sample{
       features: atomize_known_keys(Map.get(map, "features") || Map.get(map, :features) || %{}),
       labels: atomize_known_keys(Map.get(map, "labels") || Map.get(map, :labels) || %{}),
+      raw: normalize_raw(Map.get(map, "raw") || Map.get(map, :raw) || %{}),
       source: atomize_source(Map.get(map, "source") || Map.get(map, :source)),
       meta: atomize_known_keys(Map.get(map, "meta") || Map.get(map, :meta) || %{}),
       v: int_value(Map.get(map, "v") || Map.get(map, :v) || 1)
@@ -114,6 +115,7 @@ defmodule Brain.SelfCalibration.Dataset do
       "stability" -> :stability
       "feature_schema_v" -> :feature_schema_v
       "self_model_v" -> :self_model_v
+      "label_source" -> :label_source
       other -> other
     end
   end
@@ -147,6 +149,8 @@ defmodule Brain.SelfCalibration.Dataset do
   end
 
   defp number(_), do: 0.0
+  defp normalize_raw(%{} = raw), do: raw
+  defp normalize_raw(_), do: %{}
 
   defp int_value(value) when is_integer(value), do: value
 
@@ -159,9 +163,10 @@ defmodule Brain.SelfCalibration.Dataset do
 
   defp int_value(_), do: 1
 
-  defp atomize_source(value) when value in [:runtime, :test, :reviewed], do: value
+  defp atomize_source(value) when value in [:runtime, :test, :reviewed, :synthetic], do: value
   defp atomize_source("runtime"), do: :runtime
   defp atomize_source("test"), do: :test
   defp atomize_source("reviewed"), do: :reviewed
+  defp atomize_source("synthetic"), do: :synthetic
   defp atomize_source(_), do: :runtime
 end

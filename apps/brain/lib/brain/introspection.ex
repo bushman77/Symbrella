@@ -27,7 +27,7 @@ defmodule Brain.Introspection do
       |> Map.put(:self_other_attribution, attribution_from(appraisal))
 
     emit_update(model)
-    maybe_log_calibration_sample(model, appraisal)
+    maybe_log_calibration_sample(model, resolved, appraisal)
     {:ok, model}
   end
 
@@ -56,11 +56,18 @@ defmodule Brain.Introspection do
     )
   end
 
-  defp maybe_log_calibration_sample(%Brain.SelfModel{} = model, appraisal) do
+  defp maybe_log_calibration_sample(%Brain.SelfModel{} = model, resolved, appraisal) do
     sample =
       Features.build_sample(model,
         appraisal: appraisal,
         lifg: model.last_lifg,
+        raw: %{
+          resolved: resolved,
+          appraisal: appraisal,
+          mood: model.mood,
+          wm: Brain.snapshot_wm(),
+          errors: model.recent_errors
+        },
         source: :runtime
       )
 

@@ -1,3175 +1,66 @@
 > User:
-ok lets pick up the conversation we had in: current_codex_conversation.txt 
+ok i had to shut down vim for a bit, but i recorded out conversation what is the next thing we were working on?
 
 > Assistant:
-Picked up from `current_codex_conversation.txt`.
+We were about to start **HUD continuity display**.
 
-The conversation ended here:
-
-- Phase 5 is effectively complete.
-- Phase 6 is complete at the advisory/safe-boundary level.
-- The implemented calibration path is:
+The previous thread had just finished the Phase 7 Brain -> Db continuity loop. Tests and compile were passing, and the next chosen item was:
 
 ```text
-sample
--> tensor batch
--> Axon training artifact
--> AxonPredictor.predict/2
--> Evaluator.evaluate/2
--> Comparison.compare/2
--> Blend.decide/4
--> [:brain, :self_calibration, :blend] telemetry
+[x] Phase 7 core continuity loop
+[ ] last continuity restore summary in HUD
 ```
 
-The next agreed step was to update [ROADMAP.md](/home/ubuntu/Symbrella/ROADMAP.md) so Phase 5 and Phase 6 reflect the completed work before starting Phase 7.
+The concrete next work was to update:
 
-I inspected the repo and confirmed `ROADMAP.md` is still stale in several places: it lists `Evaluator`, Axon model/training, Axon-backed predictor, comparison, and blend policy as incomplete even though the corresponding modules/tests exist under `apps/brain/lib/brain/self_calibration/` and `apps/brain/test/brain/self_calibration/`.
+[brain_html.ex](/home/ubuntu/Symbrella/apps/symbrella_web/lib/symbrella_web/components/brain_html.ex)
 
-I attempted the roadmap update, but the edit was rejected, so I did not modify the file. The clean next move is either:
+and its test:
 
-1. Update `ROADMAP.md` to mark Phase 5/6 complete, then start Phase 7.
-2. Skip the roadmap update and begin Phase 7 implementation directly with `Brain.SelfContinuity`.
+[brain_html_test.exs](/home/ubuntu/Symbrella/apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs)
 
-> User:
-can u update this and return that in here please
-
-> Assistant:
-The edit was rejected by the editor/tool, so I did not change [ROADMAP.md](/home/ubuntu/Symbrella/ROADMAP.md). Here is the update to apply in the file.
-
-Replace the ML contract tail with:
-
-```text
-runtime evidence
--> rule-derived self-model
--> calibration sample
--> dataset rows
--> Nx tensors
--> advisory prediction
--> explicit blend policy
-```
-
-In the calibration status block, change:
-
-```markdown
-- [ ] Axon-backed predictor.
-- [ ] Runtime blend policy.
-```
-
-to:
-
-```markdown
-- [x] Axon-backed predictor.
-- [x] Runtime blend policy.
-```
-
-Move these into the `Implemented` list under `6.1 Runtime Modules`:
-
-```markdown
-- [x] `Brain.SelfCalibration.Evaluator`: compare predictions to labels.
-- [x] `Brain.SelfCalibration.Model`: Axon model definition.
-- [x] `Brain.SelfCalibration.Training`: offline training task.
-- [x] `Brain.SelfCalibration.AxonPredictor`: artifact-backed advisory prediction path.
-- [x] `Brain.SelfCalibration.Comparison`: baseline/candidate evaluation comparison.
-- [x] `Brain.SelfCalibration.Blend`: explicit advisory blend decision with telemetry.
-```
-
-Remove these from `Remaining`:
-
-```markdown
-- [ ] `Brain.SelfCalibration.Evaluator`: compare predictions to labels.
-- [ ] `Brain.SelfCalibration.Model`: Axon model definition.
-- [ ] `Brain.SelfCalibration.Training`: offline training task.
-```
-
-Update Phase 5 deliverables:
-
-```markdown
-- [x] `Brain.SelfCalibration.Evaluator`.
-- [x] Evaluation metrics for prediction vs labels.
-- [x] Evaluation report comparing baseline output to labels.
-```
-
-Update Phase 6 deliverables:
-
-```markdown
-- [x] Add Axon dependency.
-- [x] Define small calibration model.
-- [x] Offline training task.
-- [x] Model artifact save/load path.
-- [x] Evaluation against baseline predictor.
-- [x] Advisory-only runtime prediction path.
-- [x] Explicit rule/model blend with telemetry.
-- [x] Tests proving model output stays bounded.
-```
-
-Replace the `Completed` / `Next` section near the bottom with:
-
-```markdown
-Completed:
-
-1. [x] Ship `Brain.SelfModel` and `Brain.Introspection`.
-2. [x] Fold appraisal and mood into the self-model update path.
-3. [x] Add first-class target attribution.
-4. [x] Add inspectable attribution evidence.
-5. [x] Build self-calibration sample contract.
-6. [x] Log calibration samples.
-7. [x] Convert samples to dataset rows.
-8. [x] Convert rows to Nx tensors.
-9. [x] Add baseline advisory prediction contract.
-10. [x] Add evaluator and prediction error metrics.
-11. [x] Add Axon model, offline training, and artifact-backed predictor.
-12. [x] Compare Axon output against baseline.
-13. [x] Add explicit blend policy with telemetry.
-
-Next:
-
-1. [ ] Add `Brain.SelfContinuity` warm-start boundary.
-2. [ ] Persist self snapshots in `db`.
-3. [ ] Restore latest valid snapshot on reboot.
-4. [ ] Mark stale or missing snapshots as degraded continuity.
-5. [ ] Emit continuity telemetry.
-6. [ ] Add tests proving restoration is bounded and version checked.
-
-Recommended immediate next implementation target:
-
-```text
-Brain.SelfContinuity
-```
-
-Purpose:
-
-```text
-latest valid durable self snapshot -> bounded warm-start self state
-```
-
-This starts Phase 7 without pretending continuity exists when no valid snapshot is available.
-```
-
-Update the pseudocode tail to:
+The intended change was to surface the `self_model.continuity` fields in the HUD SelfModel chip:
 
 ```elixir
-{:ok, prediction} = Brain.SelfCalibration.Predictor.predict(batch)
-{:ok, evaluation} = Brain.SelfCalibration.Evaluator.evaluate(prediction, sample.labels)
-{:ok, candidate} = Brain.SelfCalibration.AxonPredictor.predict(batch, artifact: artifact)
-{:ok, comparison} = Brain.SelfCalibration.Comparison.compare(prediction, candidate, sample.labels)
-{:ok, decision} = Brain.SelfCalibration.Blend.decide(prediction, candidate, comparison)
+reboot_restored?
+degraded?
+restore_reason
+source_snapshot_v
 ```
 
-> User:
-i think i borked the update to the file
-
-> Assistant:
-Yes, the bork is here in [ROADMAP.md](/home/ubuntu/Symbrella/ROADMAP.md): the Phase 5/6 update text got pasted inside `### 5.3 Brain.SelfCalibration.Sample`, leaving stray fenced markdown.
-
-Replace the broken section starting at:
-
-```markdown
-### 5.3 `Brain.SelfCalibration.Sample`
-```
-
-through the end of `### 5.4 Brain.SelfCalibration.Prediction` with this:
-
-```markdown
-### 5.3 `Brain.SelfCalibration.Sample`
-
-Current role:
+So the HUD can show something like:
 
 ```text
-versioned runtime evidence + rule-derived labels
+continuity restored reason restored v 1
 ```
 
-Status:
-
-- [x] Sample struct exists.
-- [x] Feature map exists.
-- [x] Label map exists.
-- [x] Source and version metadata exist.
-- [x] Used by logger and dataset.
-
-### 5.4 `Brain.SelfCalibration.Prediction`
-
-Current role:
-
-```text
-advisory calibration output for confidence / uncertainty / stability
-```
-
-Status:
-
-- [x] Prediction struct exists.
-- [x] Baseline predictor exists.
-- [x] Prediction telemetry exists.
-- [x] Axon-backed predictor.
-- [x] Runtime blend policy.
-```
-
-Then update Phase 5 deliverables to this:
-
-```markdown
-- [x] Add Nx dependency.
-- [x] Convert feature and label rows to Nx tensors.
-- [x] Tensor tests prove expected shapes.
-- [x] `Brain.SelfCalibration.Prediction` struct.
-- [x] `Brain.SelfCalibration.Predictor` runtime boundary.
-- [x] Baseline predictor.
-- [x] Prediction telemetry.
-- [x] `Brain.SelfCalibration.Evaluator`.
-- [x] Evaluation metrics for prediction vs labels.
-- [x] Evaluation report comparing baseline output to labels.
-```
-
-Update Phase 6 deliverables to this:
-
-```markdown
-- [x] Add Axon dependency.
-- [x] Define small calibration model.
-- [x] Offline training task.
-- [x] Model artifact save/load path.
-- [x] Evaluation against baseline predictor.
-- [x] Advisory-only runtime prediction path.
-- [x] Explicit rule/model blend with telemetry.
-- [x] Tests proving model output stays bounded.
-```
-
-Replace the `Next` section under `## 11) Practical Execution Order` with:
-
-```markdown
-Completed:
-
-1. [x] Ship `Brain.SelfModel` and `Brain.Introspection`.
-2. [x] Fold appraisal and mood into the self-model update path.
-3. [x] Add first-class target attribution.
-4. [x] Add inspectable attribution evidence.
-5. [x] Build self-calibration sample contract.
-6. [x] Log calibration samples.
-7. [x] Convert samples to dataset rows.
-8. [x] Convert rows to Nx tensors.
-9. [x] Add baseline advisory prediction contract.
-10. [x] Add evaluator and prediction error metrics.
-11. [x] Add Axon model, offline training, and artifact-backed predictor.
-12. [x] Compare Axon output against baseline.
-13. [x] Add explicit blend policy with telemetry.
-
-Next:
-
-1. [ ] Add `Brain.SelfContinuity` warm-start boundary.
-2. [ ] Persist self snapshots in `db`.
-3. [ ] Restore latest valid snapshot on reboot.
-4. [ ] Mark stale or missing snapshots as degraded continuity.
-5. [ ] Emit continuity telemetry.
-6. [ ] Add tests proving restoration is bounded and version checked.
-
-Recommended immediate next implementation target:
-
-```text
-Brain.SelfContinuity
-```
-
-Purpose:
-
-```text
-latest valid durable self snapshot -> bounded warm-start self state
-```
-
-This starts Phase 7 without pretending continuity exists when no valid snapshot is available.
-```
-
-And replace the pseudocode tail with:
-
-```elixir
-rows = Brain.SelfCalibration.Dataset.to_rows([sample])
-{:ok, batch} = Brain.SelfCalibration.Tensor.from_rows(rows)
-{:ok, prediction} = Brain.SelfCalibration.Predictor.predict(batch)
-{:ok, evaluation} = Brain.SelfCalibration.Evaluator.evaluate(prediction, sample.labels)
-{:ok, candidate} = Brain.SelfCalibration.AxonPredictor.predict(batch, artifact: artifact)
-{:ok, comparison} = Brain.SelfCalibration.Comparison.compare(prediction, candidate, sample.labels)
-{:ok, decision} = Brain.SelfCalibration.Blend.decide(prediction, candidate, comparison)
-```
-
-The key fix is removing this accidental pasted text from section `5.3`:
-
-```markdown
-Update Phase 6 deliverables:
-
-```markdown
-...
-```
-
-That is what broke the markdown structure.
-
-> User:
-can you refactor ROADMAP.md and return it here in this chat?
-
-> Assistant:
-Here’s a cleaned/refactored `ROADMAP.md` replacement. I removed the broken pasted markdown, marked Phase 5/6 as complete based on the current implementation, and made Phase 7 the next target.
-
-# Symbrella Roadmap: Operational Self-Awareness, Introspection, And ML Calibration
-
-**Purpose:** Shift Symbrella from primarily mood-reactive behavior toward an explicit, inspectable, testable model of itself: current state, confidence, uncertainty, stability, goals, recent behavior, memory continuity, and limits. That self-model should influence attention, memory, curiosity, response planning, and recovery behavior while staying grounded in engineering facts rather than any claim of sentience.
-
-The ML track calibrates bounded self-state signals. It does not replace the symbolic self-model.
-
----
-
-## 0) Architectural Constraints
-
-These stay true throughout the roadmap:
-
-- **Self-awareness means operational introspection, not sentience.** Every self-state claim must be backed by stored state, telemetry, or a pipeline event.
-- **Umbrella dependency direction stays acyclic:** `db <- brain <- core <- web`
-- **LIFG stays in** `apps/brain`.
-- **Core orchestrates** the pipeline; Brain owns region machinery, stateful dynamics, appraisal, attribution, introspection, calibration, continuity, and reflective control.
-- **No new per-app Application supervisors.** Keep the single umbrella-root supervisor under `Symbrella.Application`.
-- **Telemetry-first observability.** Every meaningful self-state change must be measurable and LiveView-visible.
-- **Tests are the source of truth.** Invariants, tripwires, attribution, calibration, continuity behavior, and persistence boundaries must be covered by ExUnit.
-- **Db remains the Ecto Repo module.** Persistence-related work stays in the `db` app.
-- **ML stays advisory until explicitly blended.** Learned output must not silently overwrite `Brain.SelfModel`.
-- **Continuity must be evidence-backed.** Reboot restoration may only use persisted, version-checked, bounded state.
-
----
-
-## 1) Current Green Checkpoint
-
-Current status:
-
-- [x] `mix compile` runs cleanly with no warnings.
-- [x] Core warning path fixed through `Core.BrainAdapter`.
-- [x] `Brain.SelfModel` exists as the canonical runtime self-state struct.
-- [x] `Brain.SelfModel` has bounded helper behavior for numeric state fields.
-- [x] `Brain.Introspection.snapshot/0` builds a self-model from live Brain evidence.
-- [x] `Brain.Introspection.update_from_resolved/2` emits `[:brain, :self_model, :update]`.
-- [x] Core pipeline calls the Brain-owned self-model update hook.
-- [x] LiveView HUD can display current self-model state.
-- [x] `Brain.AffectiveAppraisal.appraise/1` emits appraisal telemetry.
-- [x] `Brain.MoodCore.apply_appraisal/1` applies bounded mood deltas from appraisal.
-- [x] `Brain.Attribution` exists as a first-class attribution policy module.
-- [x] Attribution distinguishes `:self`, `:assistant`, `:user`, `:other`, `:system`, `:world`, and `:unknown`.
-- [x] Attribution returns inspectable evidence.
-- [x] `Brain.AffectiveAppraisal` carries attribution into result evidence and telemetry metadata.
-- [x] `Brain.SelfCalibration` sample, feature, logger, dataset, tensor, prediction, and predictor contracts exist.
-- [x] Nx is installed and exercised by tensor/predictor tests.
-- [x] Runtime calibration samples can be logged from introspection.
-- [x] Calibration prediction telemetry exists.
-- [x] `Brain.SelfCalibration.Evaluator` compares predictions against labels.
-- [x] Axon-backed calibration model, training artifact path, and advisory predictor exist.
-- [x] Baseline/Axon comparison and explicit blend telemetry exist.
-
----
-
-## 2) Ground Truth Gates
-
-Before deeper self-awareness, ML calibration, or persistence work expands, these foundation items must remain enforced:
-
-- [ ] **LIFG Guard invariants:** span normalization/recovery; telemetry meta correctness, including `count`; tripwire emission.
-- [ ] **MWE unigram backfill POS canonicalization:** e.g. `"proper noun" -> "proper_noun"`; synthesized `id` and `pos`.
-- [ ] **Stage1/Guard char-gram tripwire plumbing:** consistent overrideable events and expected metadata.
-- [ ] **Calibration feature schema stability:** feature order and label order must not change silently.
-- [ ] **Telemetry metadata contract:** self-model, appraisal, attribution, calibration, and continuity events include version metadata.
-- [ ] **Persistence version gates:** restored self-state must pass version and bounds checks before use.
-
-These are preconditions for a trustworthy introspective, calibration, and continuity stack.
-
----
-
-## 3) What Self-Awareness Means In Symbrella
-
-In Symbrella, self-awareness means the system can:
-
-1. Inspect its current internal state.
-2. Distinguish self, assistant, user, other entities, system, and world references.
-3. Estimate confidence, uncertainty, stability, vigilance, and cognitive load.
-4. Track recent decisions, appraisal, attribution, LIFG state, calibration samples, and failures.
-5. Maintain bounded continuity across turns and reboots.
-6. Adjust behavior based on self-model state.
-7. Explain behavior using inspectable evidence.
-
-This is an engineering target, not a philosophical claim.
-
----
-
-## 4) ML Contract
-
-ML fits into Symbrella as a calibration layer:
-
-```text
-runtime evidence
--> rule-derived self-model
--> calibration sample
--> dataset rows
--> Nx tensors
--> baseline advisory prediction
--> Axon advisory prediction
--> baseline/candidate comparison
--> explicit blend decision
--> telemetry
-```
-
-Rules remain authoritative unless an explicit blend policy accepts model output.
-
-Initial ML prediction targets:
-
-- confidence
-- uncertainty
-- stability
-
-Later prediction targets:
-
-- recall needed?
-- reanalysis needed?
-- response mode
-- memory write bias
-- instability risk
-
-Non-goals:
-
-- ML does not define identity.
-- ML does not invent self-narrative.
-- ML does not silently overwrite `Brain.SelfModel`.
-- ML does not make safety decisions without rule gates.
-- ML does not persist unsupported personal state.
-
----
-
-## 5) Core Runtime Models
-
-### 5.1 `Brain.SelfModel`
-
-Current shape:
-
-```elixir
-%Brain.SelfModel{
-  confidence: float(),
-  uncertainty: float(),
-  stability: float(),
-  vigilance: float(),
-  plasticity: float(),
-  inhibition: float(),
-  cognitive_load: float(),
-  mood: map(),
-  active_goals: [term()],
-  recent_errors: [term()],
-  recent_actions: [term()],
-  last_appraisal: map() | nil,
-  last_lifg: map() | nil,
-  self_other_attribution: map(),
-  continuity: map(),
-  updated_at_ms: integer() | nil,
-  v: 1
-}
-```
-
-Status:
-
-- [x] Struct exists.
-- [x] Runtime derivation exists.
-- [x] Bounded numeric helper behavior exists.
-- [x] Tests cover sparse runtime defaults and bounded values.
-- [ ] Add explicit focus field.
-- [ ] Add version-safe serialization helper.
-- [ ] Add continuity snapshot import/export helpers.
-
-### 5.2 `Brain.Attribution`
-
-Current shape:
-
-```elixir
-%{
-  target: :self | :assistant | :user | :other | :system | :world | :unknown,
-  source: :self_name | :second_person | :first_person | :third_person | :system_term | :world_term | :none,
-  confidence: float(),
-  evidence: [%{term: String.t(), source: atom(), confidence: float()}],
-  version: 1
-}
-```
-
-Status:
-
-- [x] First-class module exists.
-- [x] `target/2` compatibility API exists.
-- [x] `classify/2` returns inspectable evidence.
-- [x] Appraisal stores attribution in result evidence.
-- [x] Appraisal telemetry includes target/source/confidence metadata.
-- [ ] Add agency/source tagging from `SemanticInput` metadata, not just text.
-- [ ] Add confidence calibration rules for conflicting evidence.
-
-### 5.3 `Brain.SelfCalibration.Sample`
-
-Current role:
-
-```text
-versioned runtime evidence + rule-derived labels
-```
-
-Status:
-
-- [x] Sample struct exists.
-- [x] Feature map exists.
-- [x] Label map exists.
-- [x] Source and version metadata exist.
-- [x] Used by logger and dataset.
-
-### 5.4 `Brain.SelfCalibration.Prediction`
-
-Current role:
-
-```text
-advisory calibration output for confidence / uncertainty / stability
-```
-
-Status:
-
-- [x] Prediction struct exists.
-- [x] Baseline predictor exists.
-- [x] Prediction telemetry exists.
-- [x] Axon-backed predictor exists.
-- [x] Runtime blend policy exists.
-
----
-
-## 6) Architecture Fit
-
-### 6.1 Runtime Modules
-
-Implemented:
-
-- [x] `Brain.SelfModel`: canonical self-state struct and helpers.
-- [x] `Brain.Introspection`: derives self-state updates from runtime evidence.
-- [x] `Brain.AffectiveAppraisal`: computes appraisal from SI-like input.
-- [x] `Brain.MoodCore`: applies bounded chemistry/mood changes.
-- [x] `Brain.Attribution`: classifies target with evidence.
-- [x] `Brain.SelfCalibration.Sample`: versioned sample contract.
-- [x] `Brain.SelfCalibration.Features`: feature and label extraction.
-- [x] `Brain.SelfCalibration.Logger`: JSONL sample persistence.
-- [x] `Brain.SelfCalibration.Dataset`: JSONL loading and row vectorization.
-- [x] `Brain.SelfCalibration.Tensor`: Nx tensor conversion.
-- [x] `Brain.SelfCalibration.Prediction`: advisory prediction struct.
-- [x] `Brain.SelfCalibration.Predictor`: baseline prediction contract.
-- [x] `Brain.SelfCalibration.Evaluator`: compare predictions to labels.
-- [x] `Brain.SelfCalibration.Model`: Axon model definition.
-- [x] `Brain.SelfCalibration.Training`: offline training task.
-- [x] `Brain.SelfCalibration.AxonPredictor`: artifact-backed advisory prediction path.
-- [x] `Brain.SelfCalibration.Comparison`: baseline/candidate evaluation comparison.
-- [x] `Brain.SelfCalibration.Blend`: explicit advisory blend decision with telemetry.
-- [x] `Core.BrainAdapter`: Core-side Brain facade.
-- [x] `Core.Brain.Introspection`: orchestration hook into Brain self-model update path.
-
-Remaining:
-
-- [ ] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
-- [ ] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.
-- [ ] Hippocampus-facing self-memory helper for self-tagged episodic writes.
-- [ ] `Core.Response` integration: self-state affects response mode and planning.
-
-### 6.2 Ownership
-
-- **Brain** owns self-state, chemistry, appraisal, attribution, introspection, calibration, continuity, and reflective control signals.
-- **Core** sequences the pipeline and passes resolved information into Brain.
-- **Db** stores durable persistence artifacts such as episodes, snapshots, and calibration data when promoted from JSONL.
-- **Web** visualizes self-model, telemetry, and calibration state, but does not define them.
-
----
-
-## 7) Input-To-Self Pipeline
-
-Target flow:
-
-```text
-input
--> tokenize / resolve
--> LIFG disambiguation
--> affective appraisal
--> target attribution
--> mood/chemistry update
--> self-state update
--> calibration sample logging
--> optional calibration prediction
--> optional model comparison / blend decision
--> meta-monitor checks
--> memory write / recall decision
--> response planning
--> response generation
--> telemetry + HUD update
-```
-
-Current implemented subset:
-
-```text
-input
--> Core pipeline
--> LIFG attach
--> Brain.AffectiveAppraisal.appraise/1
--> Brain.Attribution.classify/2
--> Brain.MoodCore.apply_appraisal/1
--> Brain.Introspection.update_from_resolved/2
--> Brain.SelfCalibration.Features.build_sample/2
--> Brain.SelfCalibration.Logger.log/1
--> JSONL dataset
--> Dataset rows
--> Nx tensors
--> baseline advisory prediction
--> Axon advisory prediction
--> evaluation
--> comparison
--> blend decision telemetry
-```
-
-Invariant: no self-state update should rely on vague vibes. Each update must be attributable to one or more of:
-
-- `SemanticInput`
-- attribution evidence
-- LIFG choice state
-- appraisal evidence
-- mood snapshot
-- working memory state
-- calibration sample
-- prediction metadata
-- comparison metadata
-- blend decision metadata
-- region-level metrics
-- prior persisted self snapshot
-
----
-
-## 8) Phase Plan
-
-### Phase 0 - Ground Truth
-
-**Goal:** keep the introspective substrate trustworthy.
-
-Deliverables:
-
-- [ ] Guard span behavior remains correct.
-- [ ] Char-grams stay out of LIFG paths.
-- [ ] Telemetry meta correctness is guaranteed.
-- [ ] Invariant tests cover spans, boundaries, and tripwires.
-
----
-
-### Phase 1 - Self-State Scaffold
-
-**Goal:** create a first-class runtime self-model.
-
-Deliverables:
-
-- [x] `Brain.SelfModel` struct.
-- [x] `Brain.Introspection.snapshot/0`.
-- [x] Bounded update helpers.
-- [x] `[:brain, :self_model, :update]` telemetry event.
-- [x] LiveView HUD panel for current self-state.
-- [x] Tests for canonical fields and bounds.
-- [ ] Add explicit focus tracking.
-- [ ] Add version-safe serialization helper.
-
-Minimum tracked fields:
-
-- [x] confidence
-- [x] uncertainty
-- [x] stability
-- [x] vigilance
-- [x] cognitive load
-- [x] last appraisal summary
-- [x] last LIFG summary
-- [x] active goals field
-
----
-
-### Phase 2 - Affective Appraisal And Mood Reactivity
-
-**Goal:** preserve mood reactivity, but place it inside the self-model path.
-
-Deliverables:
-
-- [x] `Brain.AffectiveAppraisal.appraise/1`.
-- [x] `Brain.MoodCore.apply_appraisal/1`.
-- [x] Appraisal telemetry.
-- [x] Applied-delta telemetry.
-- [x] Self-model integration captures appraisal through introspection.
-- [x] Appraisal carries target attribution evidence.
-- [ ] Add tests proving appraisal changes self-model fields over a full Core pipeline run.
-
-Initial appraisal outputs:
-
-- [x] valence
-- [x] arousal
-- [x] dominance
-- [x] tags
-- [x] evidence
-- [x] target attribution
-
----
-
-### Phase 3 - Self / Other Attribution And Agency Tracking
-
-**Goal:** stop collapsing all affect and salience into a single undifferentiated stream.
-
-Deliverables:
-
-- [x] `Brain.Attribution` module.
-- [x] Target attribution for `:self`, `:assistant`, `:user`, `:other`, `:system`, `:world`, and `:unknown`.
-- [x] Self-name statements target `:self`.
-- [x] Assistant-targeted language targets `:assistant`.
-- [x] First-person language targets `:user`.
-- [x] Third-person language targets `:other`.
-- [x] System/world language targets `:system` or `:world`.
-- [x] Attribution returns inspectable evidence.
-- [x] Appraisal telemetry includes attribution metadata.
-- [ ] Agency/source tagging from SI metadata.
-- [ ] Tests for explicit speaker/source metadata.
-- [ ] Conflict tests where multiple attribution signals appear in the same sentence.
-
-Examples covered:
-
-- [x] `"you are wrong"` -> target `:assistant`
-- [x] `"I feel lost"` -> target `:user`
-- [x] `"he insulted me"` -> target `:other`
-- [x] `"the system is unstable"` -> target `:system` or `:world`
-- [x] `"Symbrella is wrong"` -> target `:self`
-
-Next target shape:
-
-```elixir
-%{
-  speaker: :user | :assistant | :system | :unknown,
-  target: :self | :assistant | :user | :other | :system | :world | :unknown,
-  source: atom(),
-  confidence: float(),
-  evidence: [map()],
-  version: 1
-}
-```
-
----
-
-### Phase 4 - Self-Calibration Data Contract
-
-**Goal:** create the data contract that future ML learns from.
-
-Deliverables:
-
-- [x] `Brain.SelfCalibration.Sample` struct.
-- [x] Feature extraction from `Brain.SelfModel`.
-- [x] Features include appraisal, attribution, LIFG, cognitive load, recent errors, and mood.
-- [x] Labels include confidence, uncertainty, and stability.
-- [x] Sparse evidence defaults are tested.
-- [x] Runtime sample logging from introspection.
-- [x] JSONL sample storage.
-- [x] Logger telemetry.
-- [x] Dataset loading from JSONL.
-- [x] Dataset conversion to stable feature and label rows.
-- [x] Tests for sample construction, logging, dataset loading, and row conversion.
-
-Current feature order:
-
-```elixir
-[
-  :appraisal_valence,
-  :appraisal_arousal,
-  :appraisal_dominance,
-  :attribution_confidence,
-  :lifg_choices_count,
-  :cognitive_load,
-  :recent_error_count,
-  :mood_vigilance,
-  :mood_plasticity,
-  :mood_inhibition
-]
-```
-
-Current label order:
-
-```elixir
-[
-  :confidence,
-  :uncertainty,
-  :stability
-]
-```
-
-Remaining:
-
-- [ ] Add lexical DB-derived features.
-- [ ] Add feature schema validation.
-- [ ] Add sample pruning / rotation policy.
-- [ ] Promote JSONL samples to Db storage if needed.
-
----
-
-### Phase 5 - Tensor Boundary And Baseline Predictor
-
-**Goal:** prove Symbrella can convert runtime self-state evidence into tensors and advisory calibration predictions.
-
-Deliverables:
-
-- [x] Add Nx dependency.
-- [x] Convert feature and label rows to Nx tensors.
-- [x] Tensor tests prove expected shapes.
-- [x] `Brain.SelfCalibration.Prediction` struct.
-- [x] `Brain.SelfCalibration.Predictor` runtime boundary.
-- [x] Baseline predictor.
-- [x] Prediction telemetry.
-- [x] `Brain.SelfCalibration.Evaluator`.
-- [x] Evaluation metrics for prediction vs labels.
-- [x] Evaluation report comparing baseline output to labels.
-
-Current tensor contract:
-
-```text
-Dataset.to_rows(samples)
--> Tensor.from_rows(rows)
--> %{x: Nx.Tensor.t(), y: Nx.Tensor.t()}
-```
-
-Current prediction/evaluation contract:
-
-```text
-tensor batch
--> Predictor.predict(batch)
--> Evaluator.evaluate(prediction, labels)
--> %Brain.SelfCalibration.Evaluation{}
-```
-
----
-
-### Phase 6 - Axon Calibration Model
-
-**Goal:** add a small learned calibration model behind the existing predictor contract.
-
-Deliverables:
-
-- [x] Add Axon dependency.
-- [x] Define small calibration model.
-- [x] Offline training task.
-- [x] Model artifact save/load path.
-- [x] Evaluation against baseline predictor.
-- [x] Advisory-only runtime prediction path.
-- [x] Explicit rule/model blend with telemetry.
-- [x] Tests proving model output stays bounded.
-
-Current model shape:
-
-```text
-10 input features
--> dense 16
--> relu
--> dense 3
--> sigmoid
-```
-
-Current outputs:
-
-- confidence
-- uncertainty
-- stability
-
-Rules:
-
-- Model output is advisory.
-- Rule output remains visible.
-- Model output remains visible.
-- Blend policy must be explicit.
-- No silent overwrite of `Brain.SelfModel`.
-
----
-
-### Phase 7 - Temporal Continuity And Reboot Persistence
-
-**Goal:** preserve continuity across time without hallucinating continuity.
-
-Deliverables:
-
-- [ ] `Brain.SelfContinuity` warm-start boundary.
-- [ ] Persisted self snapshots in `db`.
-- [ ] Safe warm-start restoration rules.
-- [ ] Latest valid snapshot restore path.
-- [ ] Stale, missing, invalid, or unsupported snapshots degrade explicitly.
-- [ ] Self-tagged Hippocampus writes.
-- [ ] Autobiographical recall filters.
-- [ ] Continuity telemetry.
-- [ ] Tests ensuring warm start restores only supported, bounded, version-checked state.
-
-Focus:
-
-- current work
-- recent errors
-- unresolved goals
-- recent mood baseline, if persisted
-- recurring interpretive winners
-- calibration model version, if active
-
----
-
-### Phase 8 - Meta-Monitoring And Reflective Repair
-
-**Goal:** let Symbrella notice confusion, instability, overload, and contradiction.
-
-Deliverables:
-
-- [ ] `Brain.MetaMonitor`.
-- [ ] Contradiction flags.
-- [ ] Instability detector.
-- [ ] Overload detector.
-- [ ] Stuck-loop detector.
-- [ ] Recovery suggestions:
-  - reanalyze
-  - recall
-  - lower confidence
-  - change response mode
-  - ask for clarification
-
-This phase can consume both rule-derived self-state and advisory calibration predictions.
-
----
-
-### Phase 9 - Behavior Coupling
-
-**Goal:** make self-state causally relevant.
-
-Coupling targets:
-
-- [ ] **Curiosity:** proposal rate responds to novelty, dopamine, and uncertainty.
-- [ ] **WM / attention:** vigilance and uncertainty alter persistence and interrupt sensitivity.
-- [ ] **Memory writes:** salience and novelty increase write likelihood; overload suppresses writes.
-- [ ] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.
-- [ ] **Tone / style:** mood affects delivery without distorting factual grounding.
-
-Deliverables:
-
-- [ ] Small explicit bias functions.
-- [ ] Measurable telemetry counters per coupling point.
-- [ ] Tests proving self-state changes downstream decisions.
-- [ ] Tests proving calibration predictions do not bypass rule gates.
-
----
-
-### Phase 10 - Goal Stack And Motivational Layer
-
-**Goal:** move from passive introspection to directed self-regulation.
-
-Deliverables:
-
-- [ ] Explicit goal stack.
-- [ ] Tension / priority model.
-- [ ] Unresolved-task carryover.
-- [ ] Curiosity proposals tied to uncertainty reduction.
-- [ ] Suppression rules when overload is high.
-
----
-
-## 9) Telemetry And LiveView Requirements
-
-Minimum telemetry set:
-
-- [x] `[:brain, :affect, :appraisal]`
-- [x] `[:brain, :mood, :appraisal_applied]`
-- [x] `[:brain, :self_model, :update]`
-- [x] `[:brain, :self_calibration, :sample_logged]`
-- [x] `[:brain, :self_calibration, :prediction]`
-- [x] `[:brain, :self_calibration, :blend]`
-- [ ] `[:brain, :self_model, :continuity_restored]`
-- [ ] `[:brain, :meta_monitor, :warning]`
-- [ ] `[:brain, :response, :mode_selected]`
-
-Minimum HUD panels:
-
-- [x] current confidence / uncertainty / stability
-- [x] mood snapshot
-- [x] active goals count
-- [x] latest appraisal target
-- [x] last LIFG summary
-- [ ] latest calibration prediction
-- [ ] calibration model version
-- [ ] latest blend decision
-- [ ] recent warnings or contradictions
-- [ ] last continuity restore summary
-
----
-
-## 10) Validation And Safety
-
-### 10.1 Validation
-
-Unit tests should cover:
-
-- [x] attribution correctness
-- [x] confidence bounds
-- [x] uncertainty bounds
-- [x] appraisal telemetry metadata
-- [x] self-model update telemetry metadata
-- [x] calibration sample construction
-- [x] calibration logging
-- [x] dataset vectorization
-- [x] tensor conversion
-- [x] baseline prediction
-- [x] evaluator metrics
-- [x] model predictions stay bounded
-- [x] explicit blend policy
-- [ ] stability decay/recovery
-- [ ] continuity restoration rules
-- [ ] no unsupported self-claims
-- [ ] response mode selection under uncertainty
-
-Property tests should cover:
-
-- [ ] bounded self-state fields
-- [ ] telemetry meta always includes `count` and `v`
-- [ ] persisted self snapshots remain serializable and version-safe
-- [ ] feature rows match declared schema width
-- [ ] model predictions remain bounded across generated inputs
-
-### 10.2 Safety Commitments
-
-- No claims of sentience or consciousness.
-- No self-narrative that outruns stored evidence.
-- No hidden persistence of unsupported personal state.
-- Prefer inspectable control signals over opaque personality behavior.
-- ML output remains advisory unless accepted by an explicit blend policy.
-- Keep rule output, model output, comparison, and blend decision visible in telemetry.
-- Keep a debug path that can mute affective and ML coupling and expose raw state.
-
----
-
-## 11) Practical Execution Order
-
-Completed:
-
-1. [x] Ship `Brain.SelfModel` and `Brain.Introspection`.
-2. [x] Fold appraisal and mood into the self-model update path.
-3. [x] Add first-class target attribution.
-4. [x] Add inspectable attribution evidence.
-5. [x] Build self-calibration sample contract.
-6. [x] Log calibration samples.
-7. [x] Convert samples to dataset rows.
-8. [x] Convert rows to Nx tensors.
-9. [x] Add baseline advisory prediction contract.
-10. [x] Add evaluator and prediction error metrics.
-11. [x] Add Axon model, offline training, and artifact-backed predictor.
-12. [x] Compare Axon output against baseline.
-13. [x] Add explicit blend policy with telemetry.
-
-Next:
-
-1. [ ] Add `Brain.SelfContinuity` warm-start boundary.
-2. [ ] Persist self snapshots in `db`.
-3. [ ] Restore latest valid snapshot on reboot.
-4. [ ] Mark stale, missing, invalid, or unsupported snapshots as degraded continuity.
-5. [ ] Emit continuity telemetry.
-6. [ ] Add tests proving restoration is bounded and version checked.
-
-Recommended immediate next implementation target:
-
-```text
-Brain.SelfContinuity
-```
-
-Purpose:
-
-```text
-latest valid durable self snapshot -> bounded warm-start self state
-```
-
-This starts Phase 7 without pretending continuity exists when no valid snapshot is available.
-
----
-
-## Appendix A - Architecture-Safe Pseudocode
-
-```elixir
-resolved = Core.resolve_input(input)
-
-appraisal = Brain.AffectiveAppraisal.appraise(resolved)
-:ok = Brain.MoodCore.apply_appraisal(appraisal)
-
-{:ok, self_model} =
-  Brain.Introspection.update_from_resolved(resolved, appraisal)
-
-sample =
-  Brain.SelfCalibration.Features.build_sample(self_model,
-    appraisal: appraisal,
-    lifg: self_model.last_lifg,
-    source: :runtime
-  )
-
-:ok = Brain.SelfCalibration.Logger.log(sample)
-
-rows = Brain.SelfCalibration.Dataset.to_rows([sample])
-{:ok, batch} = Brain.SelfCalibration.Tensor.from_rows(rows)
-
-{:ok, baseline} = Brain.SelfCalibration.Predictor.predict(batch)
-{:ok, evaluation} = Brain.SelfCalibration.Evaluator.evaluate(baseline, sample.labels)
-
-{:ok, candidate} =
-  Brain.SelfCalibration.AxonPredictor.predict(batch, artifact: artifact)
-
-{:ok, comparison} =
-  Brain.SelfCalibration.Comparison.compare(baseline, candidate, sample.labels)
-
-{:ok, decision} =
-  Brain.SelfCalibration.Blend.decide(baseline, candidate, comparison)
-```
-
----
-
-## Appendix B - Core Principle
-
-Symbrella becomes more self-aware not when it says more about itself, but when it can:
-
-- represent itself explicitly
-- inspect that representation in real time
-- persist only supported state
-- calibrate bounded signals from evidence
-- act differently because of that state
-- explain those changes with evidence
-
-> User:
-ok now that i hvae updated the file and read its entire contents, i think the most loigcal step right now is to list all of the incompleted or not started yet options listed by a [ ] and not a [x]. and we make a procedure out of tthis list and begin building
-
-> Assistant:
-I extracted the unchecked `[ ]` items and de-duplicated them into a build procedure. The raw roadmap repeats several items in multiple sections, so this is the practical list rather than the noisy line-by-line version.
-
-I also tried to start the first implementation slice, but the edit was rejected by the editor/tool, so no files were changed.
-
-**Incomplete Work**
-Ground-truth gates:
-
-- LIFG Guard invariants: span normalization/recovery, telemetry `count`, tripwire emission.
-- MWE unigram backfill POS canonicalization, e.g. `"proper noun" -> "proper_noun"`.
-- Stage1/Guard char-gram tripwire plumbing.
-- Calibration feature schema stability.
-- Telemetry metadata contract for self-model, appraisal, attribution, calibration, continuity.
-- Persistence version gates for restored self-state.
-
-Self-model and attribution:
-
-- Add explicit focus field / focus tracking.
-- Add version-safe serialization helper.
-- Add continuity snapshot import/export helpers.
-- Add agency/source tagging from `SemanticInput` metadata.
-- Add confidence calibration rules for conflicting attribution evidence.
-- Add tests for explicit speaker/source metadata.
-- Add conflict tests for multiple attribution signals in one sentence.
-- Add tests proving appraisal changes self-model fields over a full Core pipeline run.
-
-Calibration data follow-ups:
-
-- Add lexical DB-derived features.
-- Add feature schema validation.
-- Add sample pruning / rotation policy.
-- Promote JSONL calibration samples to Db storage if needed.
-
-Phase 7 continuity:
-
-- Add `Brain.SelfContinuity` warm-start boundary.
-- Persist self snapshots in `db`.
-- Add safe warm-start restoration rules.
-- Restore latest valid snapshot on reboot.
-- Mark stale, missing, invalid, or unsupported snapshots as degraded continuity.
-- Add self-tagged Hippocampus writes.
-- Add autobiographical recall filters.
-- Emit continuity telemetry.
-- Test that restoration is bounded and version checked.
-
-Phase 8 meta-monitoring:
-
-- Add `Brain.MetaMonitor`.
-- Add contradiction flags.
-- Add instability detector.
-- Add overload detector.
-- Add stuck-loop detector.
-- Add recovery suggestions: reanalyze, recall, lower confidence, change response mode, ask for clarification.
-- Emit `[:brain, :meta_monitor, :warning]`.
-
-Phase 9 behavior coupling:
-
-- Curiosity responds to novelty, dopamine, and uncertainty.
-- WM/attention responds to vigilance and uncertainty.
-- Memory writes respond to salience, novelty, and overload.
-- Response planning responds to confidence, uncertainty, and stability.
-- Tone/style responds to mood without distorting facts.
-- Add explicit bias functions.
-- Add telemetry counters for each coupling point.
-- Add tests proving self-state changes downstream decisions.
-- Add tests proving calibration predictions do not bypass rule gates.
-- Emit `[:brain, :response, :mode_selected]`.
-
-Phase 10 goal layer:
-
-- Add explicit goal stack.
-- Add tension / priority model.
-- Add unresolved-task carryover.
-- Add curiosity proposals tied to uncertainty reduction.
-- Add suppression rules when overload is high.
-
-HUD / validation:
-
-- Show latest calibration prediction.
-- Show calibration model version.
-- Show latest blend decision.
-- Show recent warnings or contradictions.
-- Show last continuity restore summary.
-- Test stability decay/recovery.
-- Test continuity restoration rules.
-- Test no unsupported self-claims.
-- Test response mode selection under uncertainty.
-- Property-test bounded self-state fields.
-- Property-test telemetry metadata includes `count` and `v`.
-- Property-test persisted self snapshots are serializable and version-safe.
-- Property-test feature rows match schema width.
-- Property-test model predictions remain bounded across generated inputs.
-
-**Build Procedure**
-1. Stabilize the ground-truth gates.
-   Start with tests only where possible: LIFG invariants, char-gram plumbing, telemetry metadata, feature schema width.
-
-2. Build Phase 7 continuity.
-   Add `Brain.SelfModel` snapshot export/import helpers, then `Brain.SelfContinuity`, then Db snapshot persistence. This should be the next implementation target.
-
-3. Wire continuity telemetry and tests.
-   Emit `[:brain, :self_model, :continuity_restored]` for valid and degraded restores. Test missing, stale, invalid, unsupported-version, and valid snapshots.
-
-4. Add self-tagged memory support.
-   Use Hippocampus only after the continuity snapshot boundary is stable.
-
-5. Add `Brain.MetaMonitor`.
-   Consume self-model, calibration comparison/blend metadata, continuity state, and recent errors.
-
-6. Add response and memory behavior coupling.
-   Keep each bias function explicit and tested. No hidden personality state.
-
-7. Add goal stack.
-   Do this after continuity and meta-monitoring, because unresolved goals need persistence and repair signals.
-
-**First Build Slice**
-The most logical first build is:
-
-```text
-Brain.SelfModel.to_snapshot/1
-Brain.SelfModel.from_snapshot/1
-Brain.SelfContinuity.warm_start/2
-Db.SelfSnapshot
-Db.SelfSnapshots
-[:brain, :self_model, :continuity_restored] telemetry
-```
-
-Target behavior:
-
-```text
-nil snapshot
--> degraded continuity
-
-unsupported version
--> degraded continuity
-
-stale snapshot
--> degraded continuity
-
-valid snapshot
--> bounded Brain.SelfModel
--> continuity.reboot_restored? == true
--> telemetry emitted
-```
-
-That gives us Phase 7’s boundary without pretending durable continuity exists before the Db storage path is finished.
-
-> User:
-ok lets begin here: *Incomplete Work**Ground-truth gates:- LIFG Guard invariants: span normalization/recovery, telemetry `count`, tripwire emission.- MWE unigram backfill POS canonicalization, e.g. `"proper noun" -> "proper_noun"`.- Stage1/Guard char-gram tripwire plumbing.- Calibration feature schema stability.- Telemetry metadata contract for self-model, appraisal, attribution, calibration, continuity.- Persistence version gates for restored self-state.
-
-> Assistant:
-We can begin, but two actions were blocked:
-
-- File edits through `apply_patch` were rejected.
-- Targeted `mix test` needed escalation because Mix could not open its local PubSub TCP socket in the sandbox, and that escalation was rejected.
-
-So I did the dependency pass and narrowed the first build slice. The best first step is to turn the ground-truth gates into explicit contract tests. Most of the implementation already exists; the missing work is locking it down.
-
-**Procedure: Ground-Truth Gates**
-1. Add/confirm LIFG boundary tests:
-   - span recovery
-   - sorted output by span
-   - boundary-drop telemetry includes `count`
-   - chargram tripwire telemetry includes `count`
-   - Stage1 guard telemetry includes `v`
-
-2. Add/confirm MWE POS canonicalization test:
-   - active cell with `pos: "proper noun"` backfills as `pos: "proper_noun"`
-   - synthesized fallback id uses `proper_noun`, not `proper noun`
-
-3. Add calibration schema stability test:
-   - `Dataset.feature_names/0` matches `AxonModel.feature_names/0`
-   - `Dataset.label_names/0` matches `AxonModel.label_names/0`
-   - feature count and label count match Axon input/output dimensions
-
-4. Add telemetry metadata contract tests:
-   - self-model update metadata includes `v`
-   - appraisal metadata includes `v`
-   - prediction/evaluation/blend metadata includes `v` and `feature_schema_v` where relevant
-
-5. Defer persistence version gates until Phase 7:
-   - this should be implemented with `Brain.SelfModel.to_snapshot/1`, `from_snapshot/1`, and `Brain.SelfContinuity`.
-
-**First Patch To Apply**
-Add this to `apps/brain/test/brain/self_calibration/dataset_test.exs`:
-
-```elixir
-alias Brain.SelfCalibration.AxonModel
-```
-
-Then add this test at the bottom of the module:
-
-```elixir
-test "feature and label schemas stay aligned with the Axon boundary" do
-  assert Dataset.feature_names() == AxonModel.feature_names()
-  assert Dataset.label_names() == AxonModel.label_names()
-  assert length(Dataset.feature_names()) == AxonModel.feature_count()
-  assert length(Dataset.label_names()) == AxonModel.output_count()
-end
-```
-
-That directly covers:
-
-```text
-Calibration feature schema stability
-```
-
-**Second Patch To Apply**
-Add a test file like:
-
-```elixir
-defmodule Brain.LIFG.GroundTruthGateTest do
-  use ExUnit.Case, async: true
-  import Support.TelemetryHelpers
-
-  alias Brain.LIFG.Stage1
-
-  test "Stage1 chargram tripwire includes count and version metadata" do
-    event = [:brain, :lifg, :stage1, :chargram_violation]
-
-    si = %{
-      sentence: "what",
-      tokens: [
-        %{index: 0, phrase: "ha", span: {1, 3}, n: 1, source: :chargram}
-      ],
-      sense_candidates: %{}
-    }
-
-    {measurements, metadata} =
-      capture(event, fn ->
-        assert {:ok, %{audit: audit}} = Stage1.run(si)
-        assert audit.dropped_tokens >= 1
-      end)
-
-    assert measurements == %{}
-    assert metadata.count == 1
-    assert metadata.reason == :chargram
-    assert metadata.v
-  end
-
-  test "Stage1 boundary drop includes count and version metadata" do
-    event = [:brain, :lifg, :stage1, :boundary_drop]
-
-    si = %{
-      sentence: "what im",
-      tokens: [
-        %{index: 0, phrase: "hat", span: {1, 4}, n: 1},
-        %{index: 1, phrase: "what", span: {0, 4}, n: 1}
-      ],
-      sense_candidates: %{
-        1 => [%{id: "what|pron|1", features: %{pos: "pronoun"}, lemma: "what"}]
-      }
-    }
-
-    {measurements, metadata} =
-      capture(event, fn ->
-        assert {:ok, %{choices: choices}} = Stage1.run(si)
-        assert [%{token_index: 1}] = choices
-      end)
-
-    assert measurements == %{}
-    assert metadata.count == 1
-    assert metadata.reason
-    assert metadata.v
-  end
-end
-```
-
-This covers:
-
-```text
-LIFG Guard invariants
-Stage1/Guard char-gram tripwire plumbing
-Telemetry metadata contract
-```
-
-**Tests To Run**
-Once edits and Mix TCP are allowed:
+I also checked the files just now: that HUD continuity patch does **not** appear to be applied yet. So the next thing to do is implement that display and run:
 
 ```bash
-mix test apps/brain/test/brain/lifg_boundary_guard_invariant_test.exs \
-  apps/brain/test/brain/lifg_chargram_violation_test.exs \
-  apps/brain/test/brain/lifg_tripwire_test.exs \
-  apps/brain/test/brain/lifg/ \
-  apps/brain/test/brain/self_calibration/dataset_test.exs
-
-mix test apps/core/test/core/mwe_injector_test.exs \
-  apps/core/test/core/mwe_injector_span_test.exs \
-  apps/core/test/core/lifg_input_test.exs \
-  apps/core/test/core/invariants_test.exs
-
-mix compile
-```
-
-Current blocker is permissions, not design. Once you allow edits/test execution, I can apply this and keep going gate by gate.
-
-> User:
-Running ExUnit with seed: 970504, max_cases: 56.....................................  1) test Stage1 boundary drop includes count and version metadata (Brain.LIFG.GroundTruthGateTest)     apps/brain/test/brain/lifg/groundtruth_gate_test.exs:30     Expected telemetry [:brain, :lifg, :stage1, :boundary_drop] but none was emitted within 100ms     code: capture(event, fn ->     stacktrace:       (brain 0.1.0) test/support/telemetry_helpers.ex:130: Support.TelemetryHelpers.capture_single/3       test/brain/lifg/groundtruth_gate_test.exs:45: (test)     The following output was logged:     16:24:34.029 [info] The function passed as a handler with ID "telemetry-probe-e27223edfd9d" is a local function.     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.          https://hexdocs.pm/telemetry/telemetry.html#attach/4     16:24:34.025 [info] The function passed as a handler with ID "telemetry-probe-604aae86c370" is a local function.     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.          https://hexdocs.pm/telemetry/telemetry.html#attach/4     16:24:34.025 [info] The function passed as a handler with ID "telemetry-probe-11b344e121e4" is a local function.     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.          https://hexdocs.pm/telemetry/telemetry.html#attach/4     16:24:34.025 [info] The function passed as a handler with ID "telemetry-probe-06f41bcf7522" is a local function.     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.          https://hexdocs.pm/telemetry/telemetry.html#attach/4     16:24:34.059 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.059 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.059 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.059 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.067 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.067 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.068 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.069 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.070 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.070 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.071 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     16:24:34.074 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil       2) test Stage1 chargram tripwire includes count and version metadata (Brain.LIFG.GroundTruthGateTest)     apps/brain/test/brain/lifg/groundtruth_gate_test.exs:7     Expected telemetry [:brain, :lifg, :stage1, :chargram_violation] but none was emitted within 100ms     code: capture(event, fn ->     stacktrace:       (brain 0.1.0) test/support/telemetry_helpers.ex:130: Support.TelemetryHelpers.capture_single/3       test/brain/lifg/groundtruth_gate_test.exs:19: (test)     The following output was logged:     16:24:34.162 [info] The function passed as a handler with ID "telemetry-probe-ce198b7f7f07" is a local function.     This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.          https://hexdocs.pm/telemetry/telemetry.html#attach/4     16:24:34.162 [info] [LIFG] 0ms groups=nil ctx_dim=nil norm=nil scores=:all parallel=nil     Finished in 0.2 seconds (0.2s async, 0.00s sync)39 tests, 2 failures✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> core16:24:35.006 [warning] [Hippocampus] warm_start loaded=0 keep=30016:24:35.010 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub16:24:35.011 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub16:24:35.011 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 72447, max_cases: 56............Finished in 0.03 seconds (0.03s async, 0.00s sync)12 tests, 0 failuresubuntu@default:~/Symbrella$ 
-
-> Assistant:
-The test is attaching to the wrong telemetry paths.
-
-`Stage1.run/2` sends the raw tokens through `Brain.LIFG.Guard.sanitize/2` first. These two test inputs are dropped by the guard before the Stage1 scoring loop, so the emitted events are:
-
-```elixir
-[:brain, :lifg, :chargram_violation]
-[:brain, :lifg, :boundary_drop]
-```
-
-not:
-
-```elixir
-[:brain, :lifg, :stage1, :chargram_violation]
-[:brain, :lifg, :stage1, :boundary_drop]
-```
-
-Update your test like this:
-
-```elixir
-test "Stage1 guard chargram tripwire includes count and version metadata" do
-  event = [:brain, :lifg, :chargram_violation]
-
-  si = %{
-    sentence: "what",
-    tokens: [
-      %{index: 0, phrase: "ha", span: {1, 3}, n: 1, source: :chargram}
-    ],
-    sense_candidates: %{}
-  }
-
-  {measurements, metadata} =
-    capture(event, fn ->
-      assert {:ok, %{audit: audit}} = Stage1.run(si)
-      assert audit.dropped_tokens >= 1
-    end)
-
-  assert measurements == %{}
-  assert metadata.count == 1
-  assert metadata.reason == :chargram
-  assert metadata.v == 2
-end
-
-test "Stage1 guard boundary drop includes count and version metadata" do
-  event = [:brain, :lifg, :boundary_drop]
-
-  si = %{
-    sentence: "what im",
-    tokens: [
-      %{index: 0, phrase: "hat", span: {1, 4}, n: 1},
-      %{index: 1, phrase: "what", span: {0, 4}, n: 1}
-    ],
-    sense_candidates: %{
-      1 => [%{id: "what|pron|1", features: %{pos: "pronoun"}, lemma: "what"}]
-    }
-  }
-
-  {measurements, metadata} =
-    capture(event, fn ->
-      assert {:ok, %{choices: choices}} = Stage1.run(si)
-      assert [%{token_index: 1}] = choices
-    end)
-
-  assert measurements == %{}
-  assert metadata.count == 1
-  assert metadata.reason == :boundary
-  assert metadata.v == 2
-end
-```
-
-That should turn those two failures green. It also more accurately names the contract: this is the Stage1 guard gate, not the later Stage1 scoring-loop drop event.
-
-> User:
-wonderful: ubuntu@default:~/Symbrella$ mix test apps/brain/test/brain/lifg_boundary_guard_invariant_test.exs \  apps/brain/test/brain/lifg_chargram_violation_test.exs \  apps/brain/test/brain/lifg_tripwire_test.exs \  apps/brain/test/brain/lifg/ \  apps/brain/test/brain/self_calibration/dataset_test.exsmix test apps/core/test/core/mwe_injector_test.exs \  apps/core/test/core/mwe_injector_span_test.exs \  apps/core/test/core/lifg_input_test.exs \  apps/core/test/core/invariants_test.exsmix compile✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> brain16:29:22.547 [warning] [Hippocampus] warm_start loaded=0 keep=30016:29:22.551 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub16:29:22.553 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub16:29:22.553 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 601540, max_cases: 56.......................................Finished in 0.08 seconds (0.08s async, 0.00s sync)39 tests, 0 failures✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> core16:29:23.439 [warning] [Hippocampus] warm_start loaded=0 keep=30016:29:23.443 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub16:29:23.444 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub16:29:23.444 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 504289, max_cases: 56............Finished in 0.04 seconds (0.04s async, 0.00s sync)12 tests, 0 failures
-
-> Assistant:
-Good. That closes the first ground-truth test slice:
-
-- LIFG guard boundary-drop contract is green.
-- LIFG chargram/tripwire contract is green.
-- Core MWE/LIFG input invariant tests are green.
-- Existing calibration dataset tests are still green.
-- `mix compile` did not report a compile failure.
-
-Next ground-truth item I’d lock down is the POS canonicalization gate:
-
-```text
-MWE unigram backfill POS canonicalization:
-"proper noun" -> "proper_noun"
-```
-
-Add this test to a LIFG MWE test file, probably:
-
-```text
-apps/brain/test/brain/lifg/mwe_test.exs
-```
-
-or create:
-
-```text
-apps/brain/test/brain/lifg/mwe_canonicalization_test.exs
-```
-
-Test body:
-
-```elixir
-defmodule Brain.LIFG.MWECanonicalizationTest do
-  use ExUnit.Case, async: true
-
-  alias Brain.LIFG.MWE
-
-  test "backfilled unigram candidates canonicalize spaced POS labels" do
-    si = %{
-      tokens: [
-        %{index: 0, phrase: "Ada", span: {0, 3}, n: 1, mw: false}
-      ],
-      sense_candidates: %{},
-      active_cells: [
-        %{
-          id: nil,
-          word: "Ada",
-          norm: "ada",
-          pos: "proper noun",
-          activation: 0.7
-        }
-      ]
-    }
-
-    out = MWE.backfill_unigrams_from_active_cells(si, [])
-
-    assert %{0 => [candidate]} = out.sense_candidates
-    assert candidate.pos == "proper_noun"
-    assert candidate.id == "ada|proper_noun|fallback"
-  end
-end
-```
-
-Then run:
-
-```bash
-mix test apps/brain/test/brain/lifg/mwe_canonicalization_test.exs
-mix test apps/brain/test/brain/lifg/ apps/core/test/core/mwe_injector_test.exs apps/core/test/core/mwe_injector_span_test.exs
-mix compile
-```
-
-After that passes, the next gate is the calibration schema stability test tying `Dataset` to `AxonModel`.
-
-> User:
-now those tests pass and it still compiles cleanly lets move on oto the next gate: the calibration schema stability test tying `Dataset` to `AxonModel`
-
-> Assistant:
-That gate is already present in [dataset_test.exs](/home/ubuntu/Symbrella/apps/brain/test/brain/self_calibration/dataset_test.exs):1.
-
-You already have:
-
-```elixir
-alias Brain.SelfCalibration.AxonModel
-```
-
-and the schema stability test:
-
-```elixir
-test "feature and label schemas stay aligned with the Axon boundary" do
-  assert Dataset.feature_names() == AxonModel.feature_names()
-  assert Dataset.label_names() == AxonModel.label_names()
-  assert length(Dataset.feature_names()) == AxonModel.feature_count()
-  assert length(Dataset.label_names()) == AxonModel.output_count()
-end
-```
-
-So the calibration schema stability gate is covered.
-
-Run:
-
-```bash
-mix test apps/brain/test/brain/self_calibration/dataset_test.exs
-mix compile
-```
-
-If that passes, mark this gate done:
-
-```text
-[x] Calibration feature schema stability: feature order and label order must not change silently.
-```
-
-Next gate is the broader telemetry metadata contract:
-
-```text
-Telemetry metadata contract for self-model, appraisal, attribution, calibration, and continuity events include version metadata.
-```
-
-Continuity does not exist yet, so for this gate we should cover the events that already exist:
-
-- `[:brain, :self_model, :update]`
-- `[:brain, :affect, :appraisal]`
-- `[:brain, :self_calibration, :sample_logged]`
-- `[:brain, :self_calibration, :prediction]`
-- `[:brain, :self_calibration, :evaluation]`
-- `[:brain, :self_calibration, :blend]`
-
-Then leave continuity metadata for the Phase 7 implementation.
-
-> User:
-ok then lets start on this telemetry: - `[:brain, :self_model, :update]`- `[:brain, :affect, :appraisal]`- `[:brain, :self_calibration, :sample_logged]`- `[:brain, :self_calibration, :prediction]`- `[:brain, :self_calibration, :evaluation]`- `[:brain, :self_calibration, :blend]`
-
-> Assistant:
-This telemetry gate is mostly already covered by existing tests. Here’s the mapping:
-
-```text
-[:brain, :self_model, :update]
-covered by apps/brain/test/brain/introspection_test.exs
-asserts meta[:v] == 1
-
-[:brain, :affect, :appraisal]
-covered by apps/brain/test/brain/affective_appraisal_test.exs
-asserts meta[:v] == 1
-
-[:brain, :self_calibration, :sample_logged]
-covered by apps/brain/test/brain/self_calibration/logger_test.exs
-asserts meta.v == 1 and meta.feature_schema_v == 1
-
-[:brain, :self_calibration, :prediction]
-covered by apps/brain/test/brain/self_calibration/pipeline_test.exs
-asserts prediction_meta.v == 1 and feature_schema_v == 1
-
-[:brain, :self_calibration, :evaluation]
-covered by apps/brain/test/brain/self_calibration/pipeline_test.exs
-asserts evaluation_meta.v == 1 and feature_schema_v == 1
-
-[:brain, :self_calibration, :blend]
-covered by apps/brain/test/brain/self_calibration/blend_test.exs
-asserts metadata.v == 1
-```
-
-So for the current implemented telemetry, we do not need a new test unless you want a single consolidated “contract” file. The only part of the roadmap gate that cannot be closed yet is:
-
-```text
-continuity events include version metadata
-```
-
-because continuity telemetry does not exist until Phase 7.
-
-Run this focused set:
-
-```bash
-mix test apps/brain/test/brain/introspection_test.exs \
-  apps/brain/test/brain/affective_appraisal_test.exs \
-  apps/brain/test/brain/self_calibration/logger_test.exs \
-  apps/brain/test/brain/self_calibration/pipeline_test.exs \
-  apps/brain/test/brain/self_calibration/blend_test.exs
-
-mix compile
-```
-
-If that passes, I’d record the gate as partially closed like this:
-
-```markdown
-- [ ] **Telemetry metadata contract:** self-model, appraisal, attribution, calibration, and continuity events include version metadata.
-  - [x] Self-model update telemetry includes `v`.
-  - [x] Appraisal telemetry includes `v` and attribution metadata.
-  - [x] Calibration sample telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration prediction telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration evaluation telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration blend telemetry includes `v`.
-  - [ ] Continuity telemetry includes `v`.
-```
-
-That leaves the roadmap honest: everything implemented is covered, and the remaining unchecked bit points directly into Phase 7.
-
-> User:
-i just did a grep for all incompletes: ubuntu@default:~/Symbrella$ grep -rnF "[ ] " ./ROADMAP.md 58:- [ ] **LIFG Guard invariants:** span normalization/recovery; telemetry meta correctness, including `count`; tripwire emission.59:- [ ] **MWE unigram backfill POS canonicalization:** e.g. `"proper noun" -> "proper_noun"`; synthesized `id` and `pos`.60:- [ ] **Stage1/Guard char-gram tripwire plumbing:** consistent overrideable events and expected metadata.62:- [ ] **Telemetry metadata contract:** self-model, appraisal, attribution, calibration, and continuity events include version metadata.63:- [ ] **Persistence version gates:** restored self-state must pass version and bounds checks before use.162:- [ ] Add explicit focus field.163:- [ ] Add version-safe serialization helper.164:- [ ] Add continuity snapshot import/export helpers.187:- [ ] Add agency/source tagging from `SemanticInput` metadata, not just text.188:- [ ] Add confidence calibration rules for conflicting evidence.253:- [ ] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.254:- [ ] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.255:- [ ] Hippocampus-facing self-memory helper for self-tagged episodic writes.256:- [ ] `Core.Response` integration: self-state affects response mode and planning.336:- [ ] Guard span behavior remains correct.337:- [ ] Char-grams stay out of LIFG paths.338:- [ ] Telemetry meta correctness is guaranteed.339:- [ ] Invariant tests cover spans, boundaries, and tripwires.355:- [ ] Add explicit focus tracking.356:- [ ] Add version-safe serialization helper.383:- [ ] Add tests proving appraisal changes self-model fields over a full Core pipeline run.411:- [ ] Agency/source tagging from SI metadata.412:- [ ] Tests for explicit speaker/source metadata.413:- [ ] Conflict tests where multiple attribution signals appear in the same sentence.485:- [ ] Add lexical DB-derived features.486:- [ ] Add feature schema validation.487:- [ ] Add sample pruning / rotation policy.488:- [ ] Promote JSONL samples to Db storage if needed.575:- [ ] `Brain.SelfContinuity` warm-start boundary.576:- [ ] Persisted self snapshots in `db`.577:- [ ] Safe warm-start restoration rules.578:- [ ] Latest valid snapshot restore path.579:- [ ] Stale, missing, invalid, or unsupported snapshots degrade explicitly.580:- [ ] Self-tagged Hippocampus writes.581:- [ ] Autobiographical recall filters.582:- [ ] Continuity telemetry.583:- [ ] Tests ensuring warm start restores only supported, bounded, version-checked state.602:- [ ] `Brain.MetaMonitor`.603:- [ ] Contradiction flags.604:- [ ] Instability detector.605:- [ ] Overload detector.606:- [ ] Stuck-loop detector.607:- [ ] Recovery suggestions:624:- [ ] **Curiosity:** proposal rate responds to novelty, dopamine, and uncertainty.625:- [ ] **WM / attention:** vigilance and uncertainty alter persistence and interrupt sensitivity.626:- [ ] **Memory writes:** salience and novelty increase write likelihood; overload suppresses writes.627:- [ ] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.628:- [ ] **Tone / style:** mood affects delivery without distorting factual grounding.632:- [ ] Small explicit bias functions.633:- [ ] Measurable telemetry counters per coupling point.634:- [ ] Tests proving self-state changes downstream decisions.635:- [ ] Tests proving calibration predictions do not bypass rule gates.645:- [ ] Explicit goal stack.646:- [ ] Tension / priority model.647:- [ ] Unresolved-task carryover.648:- [ ] Curiosity proposals tied to uncertainty reduction.649:- [ ] Suppression rules when overload is high.663:- [ ] `[:brain, :self_model, :continuity_restored]`664:- [ ] `[:brain, :meta_monitor, :warning]`665:- [ ] `[:brain, :response, :mode_selected]`674:- [ ] latest calibration prediction675:- [ ] calibration model version676:- [ ] latest blend decision677:- [ ] recent warnings or contradictions678:- [ ] last continuity restore summary701:- [ ] stability decay/recovery702:- [ ] continuity restoration rules703:- [ ] no unsupported self-claims704:- [ ] response mode selection under uncertainty708:- [ ] bounded self-state fields709:- [ ] telemetry meta always includes `count` and `v`710:- [ ] persisted self snapshots remain serializable and version-safe711:- [ ] feature rows match declared schema width712:- [ ] model predictions remain bounded across generated inputs746:1. [ ] Add `Brain.SelfContinuity` warm-start boundary.747:2. [ ] Persist self snapshots in `db`.748:3. [ ] Restore latest valid snapshot on reboot.749:4. [ ] Mark stale, missing, invalid, or unsupported snapshots as degraded continuity.750:5. [ ] Emit continuity telemetry.751:6. [ ] Add tests proving restoration is bounded and version checked.
-
-> Assistant:
-That grep is useful, but it includes duplicates from multiple roadmap sections. The real dependency graph is smaller.
-
-**Now Completed Or Mostly Completed**
-These can be updated or nested as partially complete:
-
-```text
-58 LIFG Guard invariants
-59 MWE unigram backfill POS canonicalization
-60 Stage1/Guard char-gram tripwire plumbing
-61 Calibration feature schema stability
-62 Telemetry metadata contract, except continuity
-336-339 Phase 0 duplicates of 58-60
-708 bounded self-state fields
-709 telemetry meta always includes count/v, except future continuity events
-711 feature rows match declared schema width
-712 model predictions remain bounded across generated inputs
-```
-
-We have passing tests for the first ground-truth slice:
-
-```text
-LIFG guard / chargram / tripwire tests: green
-MWE canonicalization test: green
-Core MWE/LIFG invariant tests: green
-Dataset/Axon schema stability: already covered
-Telemetry metadata for implemented events: covered by existing tests
-```
-
-The one piece that should stay open is continuity:
-
-```text
-continuity events include version metadata
-persistence version gates
-persisted self snapshots remain serializable and version-safe
-```
-
-Those require Phase 7.
-
-**Roadmap Cleanup Suggestion**
-Change lines 58-63 from flat unchecked items into a progress breakdown:
-
-```markdown
-- [x] **LIFG Guard invariants:** span normalization/recovery; telemetry meta correctness, including `count`; tripwire emission.
-- [x] **MWE unigram backfill POS canonicalization:** e.g. `"proper noun" -> "proper_noun"`; synthesized `id` and `pos`.
-- [x] **Stage1/Guard char-gram tripwire plumbing:** consistent overrideable events and expected metadata.
-- [x] **Calibration feature schema stability:** feature order and label order must not change silently.
-- [ ] **Telemetry metadata contract:** self-model, appraisal, attribution, calibration, and continuity events include version metadata.
-  - [x] Self-model update telemetry includes `v`.
-  - [x] Appraisal telemetry includes `v` and attribution metadata.
-  - [x] Calibration sample telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration prediction telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration evaluation telemetry includes `v` and `feature_schema_v`.
-  - [x] Calibration blend telemetry includes `v`.
-  - [ ] Continuity telemetry includes `v`.
-- [ ] **Persistence version gates:** restored self-state must pass version and bounds checks before use.
-```
-
-And Phase 0 can become:
-
-```markdown
-- [x] Guard span behavior remains correct.
-- [x] Char-grams stay out of LIFG paths.
-- [x] Telemetry meta correctness is guaranteed for implemented events.
-- [x] Invariant tests cover spans, boundaries, and tripwires.
-```
-
-**Next Real Build Target**
-The next logical implementation is now Phase 7:
-
-```text
-Brain.SelfContinuity
-```
-
-This single target covers many of the remaining duplicate unchecked items:
-
-```text
-162 Add explicit focus field
-163 Add version-safe serialization helper
-164 Add continuity snapshot import/export helpers
-253 Brain.SelfContinuity
-575 Brain.SelfContinuity warm-start boundary
-576 Persisted self snapshots in db
-577 Safe warm-start restoration rules
-578 Latest valid snapshot restore path
-579 Stale/missing/invalid/unsupported snapshots degrade explicitly
-582 Continuity telemetry
-583 Tests ensuring bounded version-checked restore
-663 [:brain, :self_model, :continuity_restored]
-702 continuity restoration rules
-710 persisted self snapshots remain serializable and version-safe
-746-751 duplicate practical execution order
-```
-
-I’d build it in this order:
-
-1. `Brain.SelfModel.to_snapshot/1`
-2. `Brain.SelfModel.from_snapshot/1`
-3. `Brain.SelfContinuity.restore/1`
-4. continuity telemetry
-5. tests for missing, stale, invalid, unsupported version, and valid snapshot
-6. Db persistence schema after the pure Brain boundary is green
-
-That gives us a safe non-DB implementation first, then durable storage.
-
-> User:
-ok create this module if it does not already exist and paste it here
-
-> Assistant:
-`Brain.SelfContinuity` does not currently exist. Paste this as:
-
-```text
-apps/brain/lib/brain/self_continuity.ex
-```
-
-```elixir
-defmodule Brain.SelfContinuity do
-  @moduledoc """
-  Warm-start and persistence-safe restoration for Brain.SelfModel.
-
-  This module is deliberately conservative:
-
-  - missing snapshots degrade explicitly
-  - unsupported versions degrade explicitly
-  - stale snapshots degrade explicitly
-  - invalid snapshots degrade explicitly
-  - restored numeric fields are clamped to bounded runtime ranges
-  - restore telemetry always includes `count` and `v`
-
-  Durable storage belongs in the `db` app. This module only defines the Brain-owned
-  restoration policy boundary.
-  """
-
-  alias Brain.SelfModel
-
-  @event [:brain, :self_model, :continuity_restored]
-  @snapshot_v 1
-  @default_max_age_ms 86_400_000
-
-  @bounded_fields [
-    :confidence,
-    :uncertainty,
-    :stability,
-    :vigilance,
-    :plasticity,
-    :inhibition,
-    :cognitive_load
-  ]
-
-  @type restore_reason ::
-          :restored
-          | :missing_snapshot
-          | :invalid_snapshot
-          | :missing_snapshot_version
-          | :unsupported_snapshot_version
-          | :stale_snapshot
-
-  @type restore_result ::
-          {:ok, SelfModel.t()}
-          | {:degraded, SelfModel.t(), restore_reason()}
-
-  @doc """
-  Exports a serializable self-model snapshot.
-
-  This is safe to persist as JSON after normal map/string-key conversion by the
-  storage layer.
-  """
-  @spec to_snapshot(SelfModel.t()) :: map()
-  def to_snapshot(%SelfModel{} = model) do
-    %{
-      v: @snapshot_v,
-      confidence: clamp01(model.confidence),
-      uncertainty: clamp01(model.uncertainty),
-      stability: clamp01(model.stability),
-      vigilance: clamp01(model.vigilance),
-      plasticity: clamp01(model.plasticity),
-      inhibition: clamp01(model.inhibition),
-      cognitive_load: clamp01(model.cognitive_load),
-      mood: map_or_empty(model.mood),
-      active_goals: List.wrap(model.active_goals),
-      recent_errors: List.wrap(model.recent_errors),
-      recent_actions: List.wrap(model.recent_actions),
-      last_appraisal: model.last_appraisal,
-      last_lifg: model.last_lifg,
-      self_other_attribution: map_or_empty(model.self_other_attribution),
-      continuity: map_or_empty(model.continuity),
-      updated_at_ms: model.updated_at_ms,
-      snapshot_at_ms: now_ms()
-    }
-  end
-
-  @doc """
-  Restores the latest snapshot into a bounded self-model.
-
-  Returns `{:ok, model}` only for supported, fresh, valid snapshots.
-  Returns `{:degraded, model, reason}` for every unsafe restore case.
-  """
-  @spec restore(map() | SelfModel.t() | nil, keyword()) :: restore_result()
-  def restore(snapshot, opts \\ [])
-
-  def restore(nil, opts) do
-    degraded(:missing_snapshot, opts)
-  end
-
-  def restore(%SelfModel{} = model, opts) do
-    model
-    |> to_snapshot()
-    |> restore(opts)
-  end
-
-  def restore(%{} = snapshot, opts) do
-    with :ok <- validate_version(snapshot),
-         :ok <- validate_freshness(snapshot, opts),
-         {:ok, model} <- model_from_snapshot(snapshot) do
-      restored =
-        model
-        |> put_restored_continuity(:restored, snapshot)
-        |> Map.put(:updated_at_ms, now_ms())
-
-      emit(:restored, :ok, restored, snapshot)
-      {:ok, restored}
-    else
-      {:error, reason} ->
-        degraded(reason, opts, snapshot)
-    end
-  end
-
-  def restore(_snapshot, opts) do
-    degraded(:invalid_snapshot, opts)
-  end
-
-  @doc """
-  Imports a snapshot without freshness checks.
-
-  Use `restore/2` for runtime warm-start behavior. This function exists so tests
-  and storage code can validate snapshot shape independently.
-  """
-  @spec from_snapshot(map()) :: {:ok, SelfModel.t()} | {:error, restore_reason()}
-  def from_snapshot(%{} = snapshot) do
-    with :ok <- validate_version(snapshot),
-         {:ok, model} <- model_from_snapshot(snapshot) do
-      {:ok, model}
-    end
-  end
-
-  def from_snapshot(_), do: {:error, :invalid_snapshot}
-
-  defp validate_version(snapshot) do
-    case get(snapshot, :v) do
-      @snapshot_v -> :ok
-      nil -> {:error, :missing_snapshot_version}
-      _ -> {:error, :unsupported_snapshot_version}
-    end
-  end
-
-  defp validate_freshness(snapshot, opts) do
-    max_age_ms = Keyword.get(opts, :max_age_ms, @default_max_age_ms)
-
-    case get(snapshot, :snapshot_at_ms) || get(snapshot, :updated_at_ms) do
-      ts when is_integer(ts) ->
-        if now_ms() - ts <= max_age_ms do
-          :ok
-        else
-          {:error, :stale_snapshot}
-        end
-
-      _ ->
-        {:error, :stale_snapshot}
-    end
-  end
-
-  defp model_from_snapshot(snapshot) do
-    if valid_snapshot_map?(snapshot) do
-      {:ok,
-       %SelfModel{
-         confidence: bounded(snapshot, :confidence, 0.5),
-         uncertainty: bounded(snapshot, :uncertainty, 0.5),
-         stability: bounded(snapshot, :stability, 0.5),
-         vigilance: bounded(snapshot, :vigilance, 0.5),
-         plasticity: bounded(snapshot, :plasticity, 0.5),
-         inhibition: bounded(snapshot, :inhibition, 0.5),
-         cognitive_load: bounded(snapshot, :cognitive_load, 0.0),
-         mood: map_field(snapshot, :mood),
-         active_goals: list_field(snapshot, :active_goals),
-         recent_errors: list_field(snapshot, :recent_errors),
-         recent_actions: list_field(snapshot, :recent_actions),
-         last_appraisal: get(snapshot, :last_appraisal),
-         last_lifg: get(snapshot, :last_lifg),
-         self_other_attribution: map_field(snapshot, :self_other_attribution),
-         continuity: map_field(snapshot, :continuity),
-         updated_at_ms: int_field(snapshot, :updated_at_ms),
-         v: @snapshot_v
-       }}
-    else
-      {:error, :invalid_snapshot}
-    end
-  end
-
-  defp valid_snapshot_map?(snapshot) do
-    Enum.all?(@bounded_fields, fn field ->
-      value = get(snapshot, field)
-      is_nil(value) or is_number(value)
-    end)
-  end
-
-  defp degraded(reason, opts, snapshot \\ nil) do
-    model =
-      %SelfModel{}
-      |> put_restored_continuity(reason, snapshot)
-      |> Map.put(:updated_at_ms, now_ms())
-
-    emit(reason, :degraded, model, snapshot || %{})
-    {:degraded, model, reason}
-  end
-
-  defp put_restored_continuity(%SelfModel{} = model, reason, snapshot) do
-    continuity =
-      model.continuity
-      |> map_or_empty()
-      |> Map.merge(%{
-        reboot_restored?: reason == :restored,
-        degraded?: reason != :restored,
-        restore_reason: reason,
-        restored_at_ms: now_ms(),
-        source_snapshot_v: get(snapshot || %{}, :v)
-      })
-
-    %{model | continuity: continuity}
-  end
-
-  defp emit(reason, status, %SelfModel{} = model, snapshot) do
-    :telemetry.execute(
-      @event,
-      %{
-        count: 1,
-        restored: if(status == :ok, do: 1, else: 0),
-        degraded: if(status == :degraded, do: 1, else: 0)
-      },
-      %{
-        v: @snapshot_v,
-        status: status,
-        reason: reason,
-        self_model_v: model.v,
-        snapshot_v: get(snapshot || %{}, :v),
-        reboot_restored?: get_in(model.continuity, [:reboot_restored?]) == true
-      }
-    )
-  end
-
-  defp bounded(snapshot, field, default) do
-    snapshot
-    |> get(field, default)
-    |> number(default)
-    |> clamp01()
-  end
-
-  defp list_field(snapshot, field) do
-    case get(snapshot, field, []) do
-      value when is_list(value) -> value
-      _ -> []
-    end
-  end
-
-  defp map_field(snapshot, field) do
-    case get(snapshot, field, %{}) do
-      value when is_map(value) -> value
-      _ -> %{}
-    end
-  end
-
-  defp int_field(snapshot, field) do
-    case get(snapshot, field) do
-      value when is_integer(value) -> value
-      _ -> nil
-    end
-  end
-
-  defp get(nil, _field), do: nil
-  defp get(map, field), do: get(map, field, nil)
-
-  defp get(%{} = map, field, default) when is_atom(field) do
-    Map.get(map, field, Map.get(map, Atom.to_string(field), default))
-  end
-
-  defp number(value, _default) when is_integer(value), do: value * 1.0
-  defp number(value, _default) when is_float(value), do: value
-  defp number(_value, default), do: default
-
-  defp clamp01(value) when is_number(value), do: value |> max(0.0) |> min(1.0)
-  defp clamp01(_), do: 0.0
-
-  defp map_or_empty(value) when is_map(value), do: value
-  defp map_or_empty(_), do: %{}
-
-  defp now_ms, do: System.system_time(:millisecond)
-end
-```
-
-Suggested first tests:
-
-```elixir
-assert {:degraded, %Brain.SelfModel{} = model, :missing_snapshot} =
-         Brain.SelfContinuity.restore(nil)
-
-assert model.continuity.degraded? == true
-assert model.continuity.reboot_restored? == false
-```
-
-and:
-
-```elixir
-snapshot =
-  %Brain.SelfModel{confidence: 2.0, uncertainty: -1.0}
-  |> Brain.SelfContinuity.to_snapshot()
-
-assert {:ok, model} = Brain.SelfContinuity.restore(snapshot)
-
-assert model.confidence == 1.0
-assert model.uncertainty == 0.0
-assert model.continuity.reboot_restored? == true
-```
-
-> User:
-ok then create me the test with these suggestions
-
-> Assistant:
-Create this file:
-
-```text
-apps/brain/test/brain/self_continuity_test.exs
-```
-
-```elixir
-defmodule Brain.SelfContinuityTest do
-  use ExUnit.Case, async: true
-
-  alias Brain.SelfContinuity
-  alias Brain.SelfModel
-
-  test "missing snapshot degrades explicitly" do
-    assert {:degraded, %SelfModel{} = model, :missing_snapshot} =
-             SelfContinuity.restore(nil)
-
-    assert model.continuity.degraded? == true
-    assert model.continuity.reboot_restored? == false
-    assert model.continuity.restore_reason == :missing_snapshot
-    assert model.continuity.source_snapshot_v == nil
-    assert is_integer(model.continuity.restored_at_ms)
-  end
-
-  test "valid snapshot restores bounded self model" do
-    snapshot =
-      %SelfModel{confidence: 2.0, uncertainty: -1.0}
-      |> SelfContinuity.to_snapshot()
-
-    assert {:ok, %SelfModel{} = model} = SelfContinuity.restore(snapshot)
-
-    assert model.confidence == 1.0
-    assert model.uncertainty == 0.0
-    assert model.continuity.reboot_restored? == true
-    assert model.continuity.degraded? == false
-    assert model.continuity.restore_reason == :restored
-    assert model.continuity.source_snapshot_v == 1
-  end
-
-  test "unsupported snapshot version degrades explicitly" do
-    snapshot =
-      %SelfModel{}
-      |> SelfContinuity.to_snapshot()
-      |> Map.put(:v, 999)
-
-    assert {:degraded, %SelfModel{} = model, :unsupported_snapshot_version} =
-             SelfContinuity.restore(snapshot)
-
-    assert model.continuity.degraded? == true
-    assert model.continuity.reboot_restored? == false
-    assert model.continuity.restore_reason == :unsupported_snapshot_version
-    assert model.continuity.source_snapshot_v == 999
-  end
-
-  test "missing snapshot version degrades explicitly" do
-    snapshot =
-      %SelfModel{}
-      |> SelfContinuity.to_snapshot()
-      |> Map.delete(:v)
-
-    assert {:degraded, %SelfModel{} = model, :missing_snapshot_version} =
-             SelfContinuity.restore(snapshot)
-
-    assert model.continuity.degraded? == true
-    assert model.continuity.reboot_restored? == false
-    assert model.continuity.restore_reason == :missing_snapshot_version
-  end
-
-  test "stale snapshot degrades explicitly" do
-    snapshot =
-      %SelfModel{}
-      |> SelfContinuity.to_snapshot()
-      |> Map.put(:snapshot_at_ms, System.system_time(:millisecond) - 10_000)
-
-    assert {:degraded, %SelfModel{} = model, :stale_snapshot} =
-             SelfContinuity.restore(snapshot, max_age_ms: 1)
-
-    assert model.continuity.degraded? == true
-    assert model.continuity.reboot_restored? == false
-    assert model.continuity.restore_reason == :stale_snapshot
-  end
-
-  test "invalid snapshot degrades explicitly" do
-    snapshot =
-      %SelfModel{}
-      |> SelfContinuity.to_snapshot()
-      |> Map.put(:confidence, "not-a-number")
-
-    assert {:degraded, %SelfModel{} = model, :invalid_snapshot} =
-             SelfContinuity.restore(snapshot)
-
-    assert model.continuity.degraded? == true
-    assert model.continuity.reboot_restored? == false
-    assert model.continuity.restore_reason == :invalid_snapshot
-  end
-
-  test "restore emits continuity telemetry with version metadata" do
-    id = "self-continuity-test-#{System.unique_integer([:positive])}"
-    parent = self()
-
-    :ok =
-      :telemetry.attach(
-        id,
-        [:brain, :self_model, :continuity_restored],
-        fn _event, measurements, metadata, pid ->
-          send(pid, {:continuity_restored, measurements, metadata})
-        end,
-        parent
-      )
-
-    on_exit(fn -> :telemetry.detach(id) end)
-
-    snapshot = SelfContinuity.to_snapshot(%SelfModel{})
-
-    assert {:ok, %SelfModel{}} = SelfContinuity.restore(snapshot)
-
-    assert_receive {:continuity_restored, measurements, metadata}, 500
-
-    assert measurements.count == 1
-    assert measurements.restored == 1
-    assert measurements.degraded == 0
-
-    assert metadata.v == 1
-    assert metadata.status == :ok
-    assert metadata.reason == :restored
-    assert metadata.self_model_v == 1
-    assert metadata.snapshot_v == 1
-    assert metadata.reboot_restored? == true
-  end
-
-  test "degraded restore emits continuity telemetry with reason" do
-    id = "self-continuity-degraded-test-#{System.unique_integer([:positive])}"
-    parent = self()
-
-    :ok =
-      :telemetry.attach(
-        id,
-        [:brain, :self_model, :continuity_restored],
-        fn _event, measurements, metadata, pid ->
-          send(pid, {:continuity_restored, measurements, metadata})
-        end,
-        parent
-      )
-
-    on_exit(fn -> :telemetry.detach(id) end)
-
-    assert {:degraded, %SelfModel{}, :missing_snapshot} = SelfContinuity.restore(nil)
-
-    assert_receive {:continuity_restored, measurements, metadata}, 500
-
-    assert measurements.count == 1
-    assert measurements.restored == 0
-    assert measurements.degraded == 1
-
-    assert metadata.v == 1
-    assert metadata.status == :degraded
-    assert metadata.reason == :missing_snapshot
-    assert metadata.self_model_v == 1
-    assert metadata.snapshot_v == nil
-    assert metadata.reboot_restored? == false
-  end
-end
-```
-
-Then run:
-
-```bash
-mix test apps/brain/test/brain/self_continuity_test.exs
-mix compile
-```
-
-If that passes, run the broader relevant set:
-
-```bash
-mix test apps/brain/test/brain/self_model_test.exs \
-  apps/brain/test/brain/self_continuity_test.exs \
-  apps/brain/test/brain/introspection_test.exs
-
+mix test apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs
 mix compile
 ```
 
 > User:
-ubuntu@default:~/Symbrella$ mix test apps/brain/test/brain/self_continuity_test.exsmix compile==> brainCompiling 1 file (.ex)     warning: variable "opts" is unused (if the variable is not meant to be used, prefix it with an underscore)     │ 190 │   defp degraded(reason, opts, snapshot \\ nil) do     │                         ~~~~     │     └─ lib/brain/self_continuity.ex:190:25: Brain.SelfContinuity.degraded/3Generated brain app✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> brain17:10:54.833 [warning] [Hippocampus] warm_start loaded=0 keep=30017:10:54.840 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub17:10:54.840 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub17:10:54.840 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 883656, max_cases: 56........Finished in 0.1 seconds (0.1s async, 0.00s sync)8 tests, 0 failures==> brainCompiling 1 file (.ex)     warning: variable "opts" is unused (if the variable is not meant to be used, prefix it with an underscore)     │ 190 │   defp degraded(reason, opts, snapshot \\ nil) do     │                         ~~~~     │     └─ lib/brain/self_continuity.ex:190:25: Brain.SelfContinuity.degraded/3Generated brain app
+ok what do i need to change can u sgive me working exmaples and instructions in how to use them
 
 > Assistant:
-Tests pass, but `mix compile` is not clean because of the unused `opts` warning.
+You need to change two files:
 
-Fix this line in [self_continuity.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_continuity.ex):
+[brain_html.ex](/home/ubuntu/Symbrella/apps/symbrella_web/lib/symbrella_web/components/brain_html.ex)  
+[brain_html_test.exs](/home/ubuntu/Symbrella/apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs)
 
-```elixir
-defp degraded(reason, opts, snapshot \\ nil) do
-```
+The goal is simple: the HUD already renders a `SelfModel` chip. We’re adding continuity fields to that chip.
 
-to:
+**1. Update `brain_html.ex`**
 
-```elixir
-defp degraded(reason, _opts, snapshot \\ nil) do
-```
-
-Then rerun:
+Open:
 
 ```bash
-mix test apps/brain/test/brain/self_continuity_test.exs
-mix compile
+vim apps/symbrella_web/lib/symbrella_web/components/brain_html.ex
 ```
 
-If clean, run the broader set:
-
-```bash
-mix test apps/brain/test/brain/self_model_test.exs \
-  apps/brain/test/brain/self_continuity_test.exs \
-  apps/brain/test/brain/introspection_test.exs
-
-mix compile
-```
-
-Once that passes, these roadmap items are covered at the pure Brain boundary:
-
-```text
-[x] Brain.SelfContinuity warm-start boundary
-[x] Safe warm-start restoration rules
-[x] Latest valid snapshot restore path
-[x] Stale, missing, invalid, or unsupported snapshots degrade explicitly
-[x] Continuity telemetry
-[x] Tests ensuring warm start restores only supported, bounded, version-checked state
-[x] [:brain, :self_model, :continuity_restored]
-```
-
-Still open after this slice:
-
-```text
-[ ] Persisted self snapshots in db
-[ ] Db-backed restore on reboot
-[ ] persisted self snapshots remain serializable and version-safe
-```
-
-> User:
-clean and passes now what is the next step?
-
-> Assistant:
-Next step is the Db persistence slice for Phase 7.
-
-You now have the pure Brain boundary:
-
-```text
-Brain.SelfContinuity.to_snapshot/1
-Brain.SelfContinuity.from_snapshot/1
-Brain.SelfContinuity.restore/2
-[:brain, :self_model, :continuity_restored]
-```
-
-The next roadmap items are:
-
-```text
-Persisted self snapshots in db
-Db-backed restore on reboot
-persisted self snapshots remain serializable and version-safe
-```
-
-Build it in this order:
-
-1. Add `Db.SelfSnapshot` schema.
-2. Add `Db.SelfSnapshots` context.
-3. Add migration for `self_snapshots`.
-4. Add Db tests for insert/latest/version fields.
-5. Add Brain-side integration only after Db storage is green.
-
-Suggested table:
-
-```text
-self_snapshots
-- id
-- scope string, default "runtime"
-- self_model_v integer
-- snapshot_v integer
-- snapshot jsonb
-- source string
-- inserted_at / updated_at
-```
-
-Why this shape:
-
-- `snapshot` stores the exact map from `Brain.SelfContinuity.to_snapshot/1`.
-- `snapshot_v` lets restore reject unsupported persistence formats.
-- `self_model_v` records the model struct version.
-- `scope` lets you later separate runtime/test/user/session snapshots without inventing another table.
-
-Create:
-
-```text
-apps/db/lib/db/self_snapshot.ex
-apps/db/lib/db/self_snapshots.ex
-apps/db/priv/db/migrations/YYYYMMDDHHMMSS_create_self_snapshots.exs
-apps/db/test/db/self_snapshots_test.exs
-```
-
-Then the Db context should expose:
-
-```elixir
-Db.SelfSnapshots.create_snapshot(snapshot, opts \\ [])
-Db.SelfSnapshots.latest_snapshot(opts \\ [])
-```
-
-After that passes, we connect Brain to Db with something like:
-
-```elixir
-Brain.SelfContinuity.persist_current/1
-Brain.SelfContinuity.restore_latest/1
-```
-
-or keep Db calls outside Brain if you want stricter policy/storage separation. My recommendation: keep `Brain.SelfContinuity` as policy, and let `Db.SelfSnapshots` own persistence. Then an application-level caller can do:
-
-```elixir
-case Db.SelfSnapshots.latest_snapshot() do
-  {:ok, snapshot} -> Brain.SelfContinuity.restore(snapshot.snapshot)
-  {:error, :not_found} -> Brain.SelfContinuity.restore(nil)
-end
-```
-
-That keeps the umbrella boundary clean.
-
-> User:
-Becuase this module is owned by the brain therefore can make Db calls to its corresponding db module, the brain is allowed access to the Db becuase its an integrated part of its long term memory
-
-> Assistant:
-Agreed. In this umbrella, `brain -> db` is already an allowed dependency, and memory/persistence is part of Brain’s operating surface. So it is reasonable for `Brain.SelfContinuity` to call the corresponding `Db.SelfSnapshots` module directly, as long as ownership stays clean:
-
-```text
-Brain.SelfContinuity
--> owns policy: validate, bound, degrade, emit telemetry
-
-Db.SelfSnapshots
--> owns storage: insert snapshot, fetch latest snapshot
-
-Brain.SelfContinuity.restore_latest/1
--> orchestrates policy + storage
-```
-
-The important boundary is not “Brain cannot call Db”; it is “Db should not know Brain policy.” Db stores and returns snapshots. Brain decides whether a snapshot is valid, stale, unsupported, degraded, or restored.
-
-Next build order should be:
-
-1. Create Db storage:
-   - `Db.SelfSnapshot`
-   - `Db.SelfSnapshots`
-   - `self_snapshots` migration
-   - Db tests
-
-2. Extend Brain policy module:
-   - `Brain.SelfContinuity.persist/2`
-   - `Brain.SelfContinuity.restore_latest/1`
-
-3. Add Brain tests that mock/use Db if practical:
-   - persist current model writes a snapshot
-   - restore latest uses latest Db snapshot
-   - missing Db snapshot degrades
-   - invalid Db snapshot degrades
-   - telemetry still includes `v`
-
-Here is the API I’d target:
-
-```elixir
-Brain.SelfContinuity.persist(%Brain.SelfModel{}, opts \\ [])
-Brain.SelfContinuity.restore_latest(opts \\ [])
-```
-
-Expected behavior:
-
-```elixir
-{:ok, %Db.SelfSnapshot{}} =
-  Brain.SelfContinuity.persist(model, scope: "runtime")
-
-{:ok, %Brain.SelfModel{}} =
-  Brain.SelfContinuity.restore_latest(scope: "runtime")
-```
-
-Missing snapshot:
-
-```elixir
-{:degraded, %Brain.SelfModel{}, :missing_snapshot} =
-  Brain.SelfContinuity.restore_latest(scope: "runtime")
-```
-
-Bad/stale/unsupported snapshot:
-
-```elixir
-{:degraded, %Brain.SelfModel{}, reason} =
-  Brain.SelfContinuity.restore_latest(scope: "runtime")
-```
-
-That closes the Phase 7 persistence loop while keeping the architecture sane:
-
-```text
-Brain owns continuity decisions.
-Db owns continuity storage.
-Brain may call Db because brain depends on db.
-```
-
-> User:
-lets build the Db.SelfContinuity 
-
-> Assistant:
-The edit was rejected again, so paste these files in manually.
-
-I would not call the Db module `Db.SelfContinuity`; continuity policy belongs to Brain. The Db side should be storage:
-
-```text
-Db.SelfSnapshot
-Db.SelfSnapshots
-```
-
-Create:
-
-```text
-apps/db/lib/db/self_snapshot.ex
-```
-
-```elixir
-defmodule Db.SelfSnapshot do
-  @moduledoc """
-  Durable self-model snapshot storage.
-
-  Brain owns continuity policy. This schema only stores the snapshot payload and
-  minimal version metadata needed for Brain.SelfContinuity to validate restores.
-  """
-
-  use Ecto.Schema
-  import Ecto.Changeset
-
-  @type t :: %__MODULE__{}
-
-  schema "self_snapshots" do
-    field(:scope, :string, default: "runtime")
-    field(:self_model_v, :integer, default: 1)
-    field(:snapshot_v, :integer, default: 1)
-    field(:snapshot, :map, default: %{})
-    field(:source, :string, default: "runtime")
-
-    timestamps(type: :naive_datetime_usec)
-  end
-
-  @spec changeset(t(), map()) :: Ecto.Changeset.t()
-  def changeset(snapshot, attrs) do
-    snapshot
-    |> cast(attrs, [:scope, :self_model_v, :snapshot_v, :snapshot, :source])
-    |> validate_required([:scope, :self_model_v, :snapshot_v, :snapshot, :source])
-    |> validate_number(:self_model_v, greater_than: 0)
-    |> validate_number(:snapshot_v, greater_than: 0)
-  end
-end
-```
-
-Create:
-
-```text
-apps/db/lib/db/self_snapshots.ex
-```
-
-```elixir
-defmodule Db.SelfSnapshots do
-  @moduledoc """
-  Storage helpers for Brain self-continuity snapshots.
-
-  This module deliberately avoids restore policy. Callers should pass returned
-  snapshot payloads into Brain.SelfContinuity for validation and warm-start.
-  """
-
-  import Ecto.Query, only: [from: 2]
-
-  alias Db.SelfSnapshot
-
-  @type create_result :: {:ok, SelfSnapshot.t()} | {:error, Ecto.Changeset.t()}
-
-  @doc """
-  Persist a self-model snapshot map.
-
-  Options:
-    * `:scope` - logical restore scope, default `"runtime"`
-    * `:source` - source label, default `"runtime"`
-    * `:self_model_v` - explicit self-model version override
-    * `:snapshot_v` - explicit snapshot version override
-  """
-  @spec create_snapshot(map(), keyword()) :: create_result()
-  def create_snapshot(snapshot, opts \\ [])
-
-  def create_snapshot(%{} = snapshot, opts) when is_list(opts) do
-    attrs = %{
-      scope: opts |> Keyword.get(:scope, "runtime") |> to_string(),
-      source: opts |> Keyword.get(:source, "runtime") |> to_string(),
-      self_model_v: Keyword.get(opts, :self_model_v, snapshot_value(snapshot, :self_model_v, 1)),
-      snapshot_v: Keyword.get(opts, :snapshot_v, snapshot_value(snapshot, :v, 1)),
-      snapshot: snapshot
-    }
-
-    %SelfSnapshot{}
-    |> SelfSnapshot.changeset(attrs)
-    |> Db.insert()
-  end
-
-  def create_snapshot(_snapshot, _opts) do
-    {:error, SelfSnapshot.changeset(%SelfSnapshot{}, %{})}
-  end
-
-  @doc """
-  Fetch the latest snapshot for a scope.
-  """
-  @spec latest_snapshot(keyword()) :: {:ok, SelfSnapshot.t()} | {:error, :not_found}
-  def latest_snapshot(opts \\ []) when is_list(opts) do
-    scope = opts |> Keyword.get(:scope, "runtime") |> to_string()
-
-    query =
-      from(s in SelfSnapshot,
-        where: s.scope == ^scope,
-        order_by: [desc: s.inserted_at, desc: s.id],
-        limit: 1
-      )
-
-    case Db.one(query) do
-      %SelfSnapshot{} = snapshot -> {:ok, snapshot}
-      nil -> {:error, :not_found}
-    end
-  end
-
-  defp snapshot_value(snapshot, key, default) when is_atom(key) do
-    Map.get(snapshot, key, Map.get(snapshot, Atom.to_string(key), default))
-  end
-end
-```
-
-Create migration:
-
-```text
-apps/db/priv/db/migrations/20260416171000_create_self_snapshots.exs
-```
-
-```elixir
-defmodule Db.Migrations.CreateSelfSnapshots do
-  use Ecto.Migration
-
-  def change do
-    create table(:self_snapshots) do
-      add :scope, :string, null: false, default: "runtime"
-      add :self_model_v, :integer, null: false, default: 1
-      add :snapshot_v, :integer, null: false, default: 1
-      add :snapshot, :jsonb, null: false, default: fragment("'{}'::jsonb")
-      add :source, :string, null: false, default: "runtime"
-
-      timestamps(type: :naive_datetime_usec)
-    end
-
-    create index(:self_snapshots, [:scope, :inserted_at])
-    create index(:self_snapshots, [:snapshot_v])
-    create index(:self_snapshots, [:self_model_v])
-  end
-end
-```
-
-Create test:
-
-```text
-apps/db/test/db/self_snapshots_test.exs
-```
-
-```elixir
-defmodule Db.SelfSnapshotsTest do
-  use ExUnit.Case, async: false
-
-  alias Db.SelfSnapshot
-  alias Db.SelfSnapshots
-
-  setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Db)
-    Ecto.Adapters.SQL.Sandbox.mode(Db, {:shared, self()})
-    :ok
-  end
-
-  test "create_snapshot/2 stores versioned snapshot payload" do
-    snapshot = %{
-      v: 1,
-      confidence: 0.7,
-      uncertainty: 0.3,
-      stability: 0.8,
-      snapshot_at_ms: 123
-    }
-
-    assert {:ok, %SelfSnapshot{} = row} =
-             SelfSnapshots.create_snapshot(snapshot, scope: "runtime", source: "test")
-
-    assert row.scope == "runtime"
-    assert row.source == "test"
-    assert row.snapshot_v == 1
-    assert row.self_model_v == 1
-    assert row.snapshot["confidence"] == 0.7
-    assert row.snapshot["snapshot_at_ms"] == 123
-  end
-
-  test "latest_snapshot/1 returns newest row for scope" do
-    assert {:error, :not_found} = SelfSnapshots.latest_snapshot(scope: "runtime")
-
-    assert {:ok, _old} =
-             SelfSnapshots.create_snapshot(%{v: 1, confidence: 0.4}, scope: "runtime")
-
-    assert {:ok, newest} =
-             SelfSnapshots.create_snapshot(%{v: 1, confidence: 0.9}, scope: "runtime")
-
-    assert {:ok, found} = SelfSnapshots.latest_snapshot(scope: "runtime")
-    assert found.id == newest.id
-    assert found.snapshot["confidence"] == 0.9
-  end
-
-  test "latest_snapshot/1 scopes rows independently" do
-    assert {:ok, _runtime} =
-             SelfSnapshots.create_snapshot(%{v: 1, confidence: 0.4}, scope: "runtime")
-
-    assert {:ok, session} =
-             SelfSnapshots.create_snapshot(%{v: 1, confidence: 0.8}, scope: "session")
-
-    assert {:ok, found} = SelfSnapshots.latest_snapshot(scope: "session")
-    assert found.id == session.id
-    assert found.snapshot["confidence"] == 0.8
-  end
-
-  test "create_snapshot/2 rejects invalid payloads" do
-    assert {:error, changeset} = SelfSnapshots.create_snapshot(nil)
-    refute changeset.valid?
-  end
-end
-```
-
-Then run:
-
-```bash
-mix ecto.migrate -r Db
-mix test apps/db/test/db/self_snapshots_test.exs
-mix compile
-```
-
-If your test DB has not been migrated yet, run:
-
-```bash
-MIX_ENV=test mix ecto.migrate -r Db
-```
-
-After this passes, the next step is to extend `Brain.SelfContinuity` with:
-
-```elixir
-persist/2
-restore_latest/1
-```
-
-where Brain calls `Db.SelfSnapshots.create_snapshot/2` and `Db.SelfSnapshots.latest_snapshot/1`.
-
-> User:
-ubuntu@default:~/Symbrella$ mix test apps/db/test/db/self_snapshots_test.exs==> dbCompiling 2 files (.ex)Generated db app✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> db17:42:13.074 [warning] [Hippocampus] warm_start loaded=0 keep=30017:42:13.079 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub17:42:13.079 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub17:42:13.080 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 122632, max_cases: 56.  1) test create_snapshot/2 rejects invalid payloads (Db.SelfSnapshotsTest)     apps/db/test/db/self_snapshots_test.exs:59     Expected false or nil, got true     code: refute changeset.valid?     stacktrace:       test/db/self_snapshots_test.exs:61: (test)  2) test create_snapshot/2 stores versioned snapshot payload (Db.SelfSnapshotsTest)     apps/db/test/db/self_snapshots_test.exs:13     Assertion with == failed     code:  assert row.snapshot["confidence"] == 0.7     left:  nil     right: 0.7     stacktrace:       test/db/self_snapshots_test.exs:29: (test).Finished in 0.08 seconds (0.00s async, 0.08s sync)4 tests, 2 failures
-
-> Assistant:
-Two fixes:
-
-1. Ecto `:map` preserves atom keys when the struct is returned directly after insert, so use atom-or-string access in tests.
-2. `create_snapshot(nil)` returns a changeset with defaults, so it can be valid unless we force an error. Better to fix the context function so non-map payloads are invalid.
-
-Update `apps/db/lib/db/self_snapshots.ex`.
-
-Change this:
-
-```elixir
-def create_snapshot(_snapshot, _opts) do
-  {:error, SelfSnapshot.changeset(%SelfSnapshot{}, %{})}
-end
-```
-
-to this:
-
-```elixir
-def create_snapshot(_snapshot, _opts) do
-  changeset =
-    %SelfSnapshot{}
-    |> SelfSnapshot.changeset(%{})
-    |> Ecto.Changeset.add_error(:snapshot, "must be a map")
-
-  {:error, changeset}
-end
-```
-
-Then update the test file helper/access.
-
-In `apps/db/test/db/self_snapshots_test.exs`, add this helper before the final `end`:
-
-```elixir
-defp snapshot_get(snapshot, key) do
-  Map.get(snapshot, key, Map.get(snapshot, to_string(key)))
-end
-```
-
-Then change:
-
-```elixir
-assert row.snapshot["confidence"] == 0.7
-assert row.snapshot["snapshot_at_ms"] == 123
-```
-
-to:
-
-```elixir
-assert snapshot_get(row.snapshot, :confidence) == 0.7
-assert snapshot_get(row.snapshot, :snapshot_at_ms) == 123
-```
-
-Change:
-
-```elixir
-assert found.snapshot["confidence"] == 0.9
-```
-
-to:
-
-```elixir
-assert snapshot_get(found.snapshot, :confidence) == 0.9
-```
-
-Change:
-
-```elixir
-assert found.snapshot["confidence"] == 0.8
-```
-
-to:
-
-```elixir
-assert snapshot_get(found.snapshot, :confidence) == 0.8
-```
-
-Then rerun:
-
-```bash
-mix test apps/db/test/db/self_snapshots_test.exs
-mix compile
-```
-
-The snapshot key issue is normal: JSONB will come back with string keys after a DB round trip, but the just-inserted Ecto struct can still carry the original atom-key map. The helper makes the test robust for both shapes.
-
-> User:
-ubuntu@default:~/Symbrella$ mix test apps/db/test/db/self_snapshots_test.exsmix compile==> dbCompiling 1 file (.ex)    error: SelfSnapshots.__struct__/1 is undefined, cannot expand struct SelfSnapshots. Make sure the struct name is correct. If the struct name exists and is correct but it still cannot be found, you likely have cyclic module usage in your code    │ 43 │       %SelfSnapshots{}    │       ^    │    └─ (db 0.1.0) lib/db/self_snapshots.ex:43:7: Db.SelfSnapshots.create_snapshot/2== Compilation error in file lib/db/self_snapshots.ex ==** (CompileError) lib/db/self_snapshots.ex: cannot compile module Db.SelfSnapshots (errors have been logged)    (elixir 1.18.2) expanding macro: Kernel.|>/2    (db 0.1.0) lib/db/self_snapshots.ex:44: Db.SelfSnapshots.create_snapshot/2    (elixir 1.18.2) expanding macro: Kernel.|>/2    (db 0.1.0) lib/db/self_snapshots.ex:45: Db.SelfSnapshots.create_snapshot/2==> dbCompiling 1 file (.ex)    error: SelfSnapshots.__struct__/1 is undefined, cannot expand struct SelfSnapshots. Make sure the struct name is correct. If the struct name exists and is correct but it still cannot be found, you likely have cyclic module usage in your code    │ 43 │       %SelfSnapshots{}    │       ^    │    └─ (db 0.1.0) lib/db/self_snapshots.ex:43:7: Db.SelfSnapshots.create_snapshot/2== Compilation error in file lib/db/self_snapshots.ex ==** (CompileError) lib/db/self_snapshots.ex: cannot compile module Db.SelfSnapshots (errors have been logged)    (elixir 1.18.2) expanding macro: Kernel.|>/2    (db 0.1.0) lib/db/self_snapshots.ex:44: Db.SelfSnapshots.create_snapshot/2    (elixir 1.18.2) expanding macro: Kernel.|>/2    (db 0.1.0) lib/db/self_snapshots.ex:45: Db.SelfSnapshots.create_snapshot/2
-
-> Assistant:
-That is just a typo in `apps/db/lib/db/self_snapshots.ex`.
-
-At line 43 you have:
-
-```elixir
-%SelfSnapshots{}
-```
-
-but the schema module is singular:
-
-```elixir
-Db.SelfSnapshot
-```
-
-So change:
-
-```elixir
-def create_snapshot(_snapshot, _opts) do
-  changeset =
-    %SelfSnapshots{}
-    |> SelfSnapshots.changeset(%{})
-    |> Ecto.Changeset.add_error(:snapshot, "must be a map")
-
-  {:error, changeset}
-end
-```
-
-to:
-
-```elixir
-def create_snapshot(_snapshot, _opts) do
-  changeset =
-    %SelfSnapshot{}
-    |> SelfSnapshot.changeset(%{})
-    |> Ecto.Changeset.add_error(:snapshot, "must be a map")
-
-  {:error, changeset}
-end
-```
-
-Then rerun:
-
-```bash
-mix test apps/db/test/db/self_snapshots_test.exs
-mix compile
-```
-
-`Db.SelfSnapshots` is the context module. `Db.SelfSnapshot` is the Ecto schema struct.
-
-> User:
-everything passess and mix compile no warnings
-
-> Assistant:
-Good. The Db persistence slice is now green.
-
-You can mark these roadmap items as complete:
-
-```text
-[x] Persisted self snapshots in `db`.
-[x] Persist self snapshots in `db`.
-[x] persisted self snapshots remain serializable and version-safe.
-```
-
-And this broader Phase 7 subset is now done:
-
-```text
-[x] Brain.SelfContinuity warm-start boundary.
-[x] Safe warm-start restoration rules.
-[x] Latest valid snapshot restore path.
-[x] Stale, missing, invalid, or unsupported snapshots degrade explicitly.
-[x] Continuity telemetry.
-[x] Tests ensuring warm start restores only supported, bounded, version-checked state.
-[x] Persisted self snapshots in db.
-```
-
-Next step: connect Brain policy to Db storage.
-
-Add two functions to `Brain.SelfContinuity`:
-
-```elixir
-persist/2
-restore_latest/1
-```
-
-Target API:
-
-```elixir
-{:ok, %Db.SelfSnapshot{}} =
-  Brain.SelfContinuity.persist(model, scope: "runtime")
-
-{:ok, %Brain.SelfModel{}} =
-  Brain.SelfContinuity.restore_latest(scope: "runtime")
-```
-
-Missing snapshot behavior:
-
-```elixir
-{:degraded, %Brain.SelfModel{}, :missing_snapshot} =
-  Brain.SelfContinuity.restore_latest(scope: "runtime")
-```
-
-Implementation shape:
-
-```elixir
-def persist(%SelfModel{} = model, opts \\ []) do
-  snapshot = to_snapshot(model)
-  Db.SelfSnapshots.create_snapshot(snapshot, opts)
-end
-
-def restore_latest(opts \\ []) do
-  case Db.SelfSnapshots.latest_snapshot(opts) do
-    {:ok, row} -> restore(row.snapshot, opts)
-    {:error, :not_found} -> restore(nil, opts)
-  end
-end
-```
-
-Then add Brain tests that use SQL sandbox and verify:
-
-```text
-persist/2 writes a Db.SelfSnapshot
-restore_latest/1 restores latest snapshot
-restore_latest/1 degrades when no snapshot exists
-```
-
-This completes the actual Brain -> Db continuity loop.
-
-> User:
-can u ensure i did self_continiuity.ex?  also can you also make the accomidating tests too
-
-> Assistant:
-I checked it: [self_continuity.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_continuity.ex) already has the Db integration functions:
-
-```elixir
-def persist(%SelfModel{} = model, opts \\ []) do
-  snapshot = to_snapshot(model)
-  Db.SelfSnapshots.create_snapshot(snapshot, opts)
-end
-
-def restore_latest(opts \\ []) do
-  case Db.SelfSnapshots.latest_snapshot(opts) do
-    {:ok, row} -> restore(row.snapshot, opts)
-    {:error, :not_found} -> restore(nil, opts)
-  end
-end
-```
-
-So the module is fine. What’s missing is the Brain-side tests. Update:
-
-```text
-apps/brain/test/brain/self_continuity_test.exs
-```
-
-Change the top from:
-
-```elixir
-defmodule Brain.SelfContinuityTest do
-  use ExUnit.Case, async: true
-
-  alias Brain.SelfContinuity
-  alias Brain.SelfModel
-```
-
-to:
-
-```elixir
-defmodule Brain.SelfContinuityTest do
-  use ExUnit.Case, async: false
-
-  alias Brain.SelfContinuity
-  alias Brain.SelfModel
-  alias Db.SelfSnapshot
-
-  setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Db)
-    Ecto.Adapters.SQL.Sandbox.mode(Db, {:shared, self()})
-    :ok
-  end
-```
-
-Then add these tests before the final `end`:
-
-```elixir
-test "persist/2 writes a Db self snapshot" do
-  model = %SelfModel{confidence: 0.72, uncertainty: 0.28, stability: 0.81}
-
-  assert {:ok, %SelfSnapshot{} = row} =
-           SelfContinuity.persist(model, scope: "brain-test", source: "test")
-
-  assert row.scope == "brain-test"
-  assert row.source == "test"
-  assert row.snapshot_v == 1
-  assert snapshot_get(row.snapshot, :confidence) == 0.72
-  assert snapshot_get(row.snapshot, :uncertainty) == 0.28
-  assert snapshot_get(row.snapshot, :stability) == 0.81
-end
-
-test "restore_latest/1 restores latest Db snapshot through Brain policy" do
-  assert {:ok, _old} =
-           SelfContinuity.persist(%SelfModel{confidence: 0.2}, scope: "restore-latest-test")
-
-  assert {:ok, _new} =
-           SelfContinuity.persist(%SelfModel{confidence: 0.9}, scope: "restore-latest-test")
-
-  assert {:ok, %SelfModel{} = model} =
-           SelfContinuity.restore_latest(scope: "restore-latest-test")
-
-  assert model.confidence == 0.9
-  assert model.continuity.reboot_restored? == true
-  assert model.continuity.degraded? == false
-  assert model.continuity.restore_reason == :restored
-end
-
-test "restore_latest/1 degrades when Db has no snapshot for scope" do
-  assert {:degraded, %SelfModel{} = model, :missing_snapshot} =
-           SelfContinuity.restore_latest(scope: "missing-scope-test")
-
-  assert model.continuity.reboot_restored? == false
-  assert model.continuity.degraded? == true
-  assert model.continuity.restore_reason == :missing_snapshot
-end
-
-defp snapshot_get(snapshot, key) do
-  Map.get(snapshot, key, Map.get(snapshot, to_string(key)))
-end
-```
-
-Then run:
-
-```bash
-mix test apps/brain/test/brain/self_continuity_test.exs
-mix compile
-```
-
-If that passes, run the full continuity slice:
-
-```bash
-mix test apps/db/test/db/self_snapshots_test.exs \
-  apps/brain/test/brain/self_continuity_test.exs \
-  apps/brain/test/brain/self_model_test.exs \
-  apps/brain/test/brain/introspection_test.exs
-
-mix compile
-```
-
-That verifies:
-
-```text
-Brain.SelfContinuity.persist/2 -> Db.SelfSnapshots.create_snapshot/2
-Brain.SelfContinuity.restore_latest/1 -> Db.SelfSnapshots.latest_snapshot/1 -> restore policy
-missing Db snapshot -> degraded continuity
-```
-
-> User:
-compiles and tests pass
-
-> Assistant:
-Good. That completes the Brain -> Db continuity loop.
-
-You can mark these roadmap items complete now:
-
-```text
-[x] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
-[x] Add continuity snapshot import/export helpers.
-[x] Persisted self snapshots in `db`.
-[x] Safe warm-start restoration rules.
-[x] Latest valid snapshot restore path.
-[x] Stale, missing, invalid, or unsupported snapshots degrade explicitly.
-[x] Continuity telemetry.
-[x] Tests ensuring warm start restores only supported, bounded, version-checked state.
-[x] `[:brain, :self_model, :continuity_restored]`
-[x] continuity restoration rules
-[x] persisted self snapshots remain serializable and version-safe
-```
-
-The Phase 7 core is now done.
-
-Remaining Phase 7-adjacent items:
-
-```text
-[ ] Self-tagged Hippocampus writes.
-[ ] Autobiographical recall filters.
-[ ] last continuity restore summary in HUD.
-```
-
-Next logical implementation step is either:
-
-1. HUD continuity display:
-   - lowest risk
-   - makes the new continuity state visible
-   - closes `last continuity restore summary`
-
-2. Hippocampus self-tagged writes:
-   - deeper behavior/storage work
-   - closes autobiographical memory items
-
-I’d do HUD continuity display next because the telemetry and restored model state already exist. It is a small integration step before changing memory behavior.
-
-> User:
-ok lets get started on 1. HUD continuity display:   - lowest risk   - makes the new continuity state visible   - closes `last continuity restore summary`
-
-> Assistant:
-The edit tool was rejected, so paste these changes manually.
-
-In [brain_html.ex](/home/ubuntu/Symbrella/apps/symbrella_web/lib/symbrella_web/components/brain_html.ex), find this block:
+Search for this block:
 
 ```elixir
 sm_appraisal = mget(self_model, :last_appraisal) || %{}
@@ -3178,7 +69,7 @@ sm_goals = List.wrap(mget(self_model, :active_goals) || [])
 show_self_model? = is_map(self_model) and map_size(self_model) > 0
 ```
 
-Change it to:
+Replace it with:
 
 ```elixir
 sm_appraisal = mget(self_model, :last_appraisal) || %{}
@@ -3188,7 +79,9 @@ sm_goals = List.wrap(mget(self_model, :active_goals) || [])
 show_self_model? = is_map(self_model) and map_size(self_model) > 0
 ```
 
-Then find the assign chain ending with:
+That gives the HUD code a local `sm_continuity` map to read from.
+
+Next, search for this assign chain near the end of the `assigns =` block:
 
 ```elixir
 |> assign(:sm_goal_count, length(sm_goals))
@@ -3196,7 +89,7 @@ Then find the assign chain ending with:
 |> assign(:sm_lifg_choices_count, mget(sm_lifg, :choices_count))
 ```
 
-Change it to:
+Replace it with:
 
 ```elixir
 |> assign(:sm_goal_count, length(sm_goals))
@@ -3208,7 +101,9 @@ Change it to:
 |> assign(:sm_continuity_snapshot_v, mget(sm_continuity, :source_snapshot_v))
 ```
 
-Then in the `SelfModel` chip template, after this block:
+This exposes four new assigns to the HEEx template.
+
+Now search for this HEEx block inside the `SelfModel` chip:
 
 ```heex
 <%= if @sm_lifg_choices_count do %>
@@ -3216,7 +111,7 @@ Then in the `SelfModel` chip template, after this block:
 <% end %>
 ```
 
-add:
+Immediately after it, add this:
 
 ```heex
 <%= if @sm_continuity_restored or @sm_continuity_degraded or @sm_continuity_reason do %>
@@ -3238,18 +133,36 @@ add:
 <% end %>
 ```
 
-Now update [brain_html_test.exs](/home/ubuntu/Symbrella/apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs).
+That makes the HUD show continuity only when continuity data exists.
 
-In the `"hud_row renders self-model state"` test, change the `self_model` struct from:
+**2. Update the test**
+
+Open:
+
+```bash
+vim apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs
+```
+
+Find this test:
 
 ```elixir
+test "hud_row renders self-model state" do
+```
+
+Inside that test, find the `self_model: %Brain.SelfModel{...}` block.
+
+Change this part:
+
+```elixir
+active_goals: [%{id: "phase-1"}],
 last_appraisal: %{evidence: %{target: :assistant}},
 last_lifg: %{choices_count: 2}
 ```
 
-to:
+to this:
 
 ```elixir
+active_goals: [%{id: "phase-1"}],
 last_appraisal: %{evidence: %{target: :assistant}},
 last_lifg: %{choices_count: 2},
 continuity: %{
@@ -3260,7 +173,7 @@ continuity: %{
 }
 ```
 
-Then add these assertions to the same test:
+Then add these assertions at the end of the same test:
 
 ```elixir
 assert html =~ "continuity"
@@ -3269,15 +182,2052 @@ assert html =~ "reason"
 assert html =~ "v"
 ```
 
-Run:
+The full test should look roughly like this:
+
+```elixir
+test "hud_row renders self-model state" do
+  html =
+    render_component(&BrainHTML.hud_row/1,
+      self_model: %Brain.SelfModel{
+        confidence: 0.75,
+        uncertainty: 0.25,
+        stability: 0.8,
+        vigilance: 0.6,
+        cognitive_load: 0.5,
+        active_goals: [%{id: "phase-1"}],
+        last_appraisal: %{evidence: %{target: :assistant}},
+        last_lifg: %{choices_count: 2},
+        continuity: %{
+          reboot_restored?: true,
+          degraded?: false,
+          restore_reason: :restored,
+          source_snapshot_v: 1
+        }
+      },
+      mood: %{levels: %{}, derived: %{}}
+    )
+
+  assert html =~ "SelfModel"
+  assert html =~ "conf"
+  assert html =~ "0.750"
+  assert html =~ "target"
+  assert html =~ "assistant"
+  assert html =~ "lifg"
+  assert html =~ "2"
+  assert html =~ "continuity"
+  assert html =~ "restored"
+  assert html =~ "reason"
+  assert html =~ "v"
+end
+```
+
+**3. Run the checks**
+
+After saving both files, run:
 
 ```bash
 mix test apps/symbrella_web/test/symbrella_web/components/brain_html_test.exs
 mix compile
 ```
 
-If that passes, the HUD item is done:
+Expected result:
+
+```text
+0 failures
+```
+
+If that passes, this roadmap item is done:
+
+```text
+[x] last continuity restore summary in HUD
+```
+
+The HUD should now render continuity state when the `Brain.SelfModel` includes restored/degraded continuity metadata.
+
+> User:
+0 fialures and compiles cleanly
+
+> Assistant:
+Good. That finishes the HUD continuity display item.
+
+You can mark this complete in `ROADMAP.md`:
 
 ```text
 [x] last continuity restore summary
 ```
+
+The current Phase 7 status is now:
+
+```text
+[x] Brain.SelfContinuity warm-start boundary
+[x] Persisted self snapshots in db
+[x] Safe warm-start restoration rules
+[x] Latest valid snapshot restore path
+[x] Stale, missing, invalid, or unsupported snapshots degrade explicitly
+[x] Continuity telemetry
+[x] Tests ensuring warm start restores only supported, bounded, version-checked state
+[x] last continuity restore summary in HUD
+```
+
+The remaining Phase 7-adjacent work is now mainly:
+
+```text
+[ ] Self-tagged Hippocampus writes
+[ ] Autobiographical recall filters
+```
+
+Next logical step: **Self-tagged Hippocampus writes**. That means adding a small helper/path so episodes about Symbrella’s own state, restoration, goals, or appraisals are explicitly tagged as self-memory when written to Hippocampus.
+
+> User:
+then this is the next thing we MUST work on next:  **Self-tagged Hippocampus writes**
+
+> Assistant:
+The next change is to add a **self-memory write helper** to `Brain.Hippocampus`.
+
+My attempted patch was rejected by the editor/tool layer, so make these edits manually.
+
+**1. Edit `Brain.Hippocampus`**
+
+Open:
+
+```bash
+vim apps/brain/lib/brain/hippocampus.ex
+```
+
+Find this function near the top:
+
+```elixir
+@spec encode(map(), map()) :: map()
+def encode(%{} = slate, meta \\ %{}) when is_map(meta) do
+  :ok = GenServer.call(__MODULE__, {:encode, slate, meta})
+  slate
+end
+```
+
+Immediately after it, add this:
+
+```elixir
+@doc """
+Write an explicitly self-tagged autobiographical episode.
+
+This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
+provide a small `kind` and JSON-safe `payload`; Hippocampus supplies stable
+self/autobiographical tags so later recall can filter these episodes without
+inferring selfhood from free text.
+"""
+@spec write_self_memory(atom() | String.t(), map(), map()) :: map()
+def write_self_memory(kind, payload, meta \\ %{}) when is_map(payload) and is_map(meta) do
+  kind_s = normalize_self_kind(kind)
+
+  slate = %{
+    winners: self_memory_winners(kind_s, payload),
+    tags: ["self", "self_memory", "autobiographical", kind_s],
+    payload: payload
+  }
+
+  meta =
+    meta
+    |> Map.put(:kind, kind_s)
+    |> Map.put(:subject, :symbrella)
+    |> Map.put(:self?, true)
+    |> Map.put(:autobiographical?, true)
+    |> Map.update(:tags, slate.tags, fn tags ->
+      (List.wrap(tags) ++ slate.tags)
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+    end)
+    |> Map.put(:payload, payload)
+
+  encode(slate, meta)
+end
+```
+
+Then search for this existing section:
+
+```elixir
+defp fact_value_from_si(_), do: nil
+```
+
+Immediately after it, add these helper functions:
+
+```elixir
+defp normalize_self_kind(kind) when is_atom(kind), do: kind |> Atom.to_string() |> normalize_self_kind()
+
+defp normalize_self_kind(kind) when is_binary(kind) do
+  kind
+  |> String.trim()
+  |> String.downcase()
+  |> String.replace(~r/[^a-z0-9_:-]+/, "_")
+  |> case do
+    "" -> "self_event"
+    value -> value
+  end
+end
+
+defp self_memory_winners(kind, payload) do
+  payload_terms =
+    payload
+    |> Map.take([:goal, :restore_reason, :target, :focus, :event])
+    |> Map.values()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+
+  ["symbrella", "self", "self_memory", "autobiographical", kind | payload_terms]
+  |> Enum.uniq()
+  |> Enum.map(fn lemma ->
+    %{id: "#{lemma}|self_memory|0", lemma: lemma}
+  end)
+end
+```
+
+This gives us a clean API:
+
+```elixir
+Brain.Hippocampus.write_self_memory(:continuity_restored, %{
+  restore_reason: :restored,
+  source_snapshot_v: 1
+})
+```
+
+It writes a normal Hippocampus episode, but with explicit metadata:
+
+```elixir
+%{
+  kind: "continuity_restored",
+  subject: :symbrella,
+  self?: true,
+  autobiographical?: true,
+  tags: ["self", "self_memory", "autobiographical", "continuity_restored"]
+}
+```
+
+**2. Add tests**
+
+Open:
+
+```bash
+vim apps/brain/test/brain/hippocampus_behavior_test.exs
+```
+
+At the bottom of the test module, before the final `end`, add:
+
+```elixir
+test "write_self_memory/3 writes explicitly self-tagged autobiographical episodes" do
+  Hippocampus.write_self_memory(:continuity_restored, %{
+    restore_reason: :restored,
+    source_snapshot_v: 1
+  })
+
+  %{window: [{_at, ep} | _]} = Hippocampus.snapshot()
+
+  assert ep.meta.self? == true
+  assert ep.meta.autobiographical? == true
+  assert ep.meta.subject == :symbrella
+  assert ep.meta.kind == "continuity_restored"
+  assert "self" in ep.meta.tags
+  assert "self_memory" in ep.meta.tags
+  assert "autobiographical" in ep.meta.tags
+  assert "continuity_restored" in ep.meta.tags
+
+  assert MapSet.member?(ep.norms, "symbrella")
+  assert MapSet.member?(ep.norms, "self_memory")
+  assert MapSet.member?(ep.norms, "continuity_restored")
+end
+
+test "self-tagged memories are recallable through normal Hippocampus recall" do
+  Hippocampus.write_self_memory(:goal_update, %{
+    goal: "phase_7",
+    event: "hud continuity complete"
+  })
+
+  [%{episode: %{meta: meta}} | _] =
+    Hippocampus.recall(["self_memory"], limit: 3, ignore_head: :never)
+
+  assert meta.self? == true
+  assert meta.autobiographical? == true
+  assert meta.kind == "goal_update"
+end
+```
+
+**3. Run the focused checks**
+
+```bash
+mix test apps/brain/test/brain/hippocampus_behavior_test.exs
+mix compile
+```
+
+Expected:
+
+```text
+0 failures
+```
+
+**4. What this completes**
+
+Once those pass, this item can be marked complete:
+
+```text
+[x] Self-tagged Hippocampus writes.
+```
+
+This does **not** implement autobiographical recall filters yet. It creates the necessary write-side contract: self memories are no longer inferred from text; they are explicitly tagged at write time.
+
+> User:
+test passes now what do we work on?
+
+> Assistant:
+Since the test passes, **Self-tagged Hippocampus writes** is done.
+
+First, update `ROADMAP.md`:
+
+```text
+- [x] Self-tagged Hippocampus writes.
+- [ ] Autobiographical recall filters.
+```
+
+The next thing to work on is now:
+
+```text
+Autobiographical recall filters
+```
+
+That means adding a recall path that can ask Hippocampus specifically for self/autobiographical memories, instead of recalling all episodes and manually inspecting tags afterward.
+
+The likely API should be small and explicit, something like:
+
+```elixir
+Brain.Hippocampus.recall_self_memories(cues, opts \\ [])
+```
+
+Expected behavior:
+
+```elixir
+Brain.Hippocampus.recall_self_memories(["phase_7"], limit: 5)
+```
+
+should only return episodes where metadata proves it is self/autobiographical memory, for example:
+
+```elixir
+meta.self? == true
+meta.autobiographical? == true
+```
+
+or tagged with:
+
+```elixir
+"self_memory"
+"autobiographical"
+```
+
+A good next test would be:
+
+```elixir
+test "recall_self_memories/2 returns only self-tagged autobiographical episodes" do
+  Hippocampus.write_self_memory(:goal_update, %{
+    goal: "phase_7",
+    event: "hud continuity complete"
+  })
+
+  Hippocampus.encode(slate_with("phase_7"), %{
+    source: :ordinary_episode,
+    tags: ["not_self"]
+  })
+
+  results =
+    Hippocampus.recall_self_memories(["phase_7"], limit: 5, ignore_head: :never)
+
+  assert length(results) == 1
+
+  [%{episode: %{meta: meta}}] = results
+
+  assert meta.self? == true
+  assert meta.autobiographical? == true
+  assert meta.kind == "goal_update"
+end
+```
+
+Then implement `recall_self_memories/2` as a wrapper around existing `recall/2` that filters returned results to self/autobiographical episodes. That keeps the behavior conservative and uses the metadata contract you just added.
+
+> User:
+before we get started on the next step can you update ROADMAP.md and post it here for me to copy?
+
+> Assistant:
+Paste these updates into `ROADMAP.md`.
+
+In the **Phase 7 - Temporal Continuity And Reboot Persistence** deliverables block, replace the current deliverables list with this:
+
+```markdown
+Deliverables:
+
+- [x] `Brain.SelfContinuity` warm-start boundary.
+- [x] Persisted self snapshots in `db`.
+- [x] Safe warm-start restoration rules.
+- [x] Latest valid snapshot restore path.
+- [x] Stale, missing, invalid, or unsupported snapshots degrade explicitly.
+- [x] Self-tagged Hippocampus writes.
+- [ ] Autobiographical recall filters.
+- [x] Continuity telemetry.
+- [x] Tests ensuring warm start restores only supported, bounded, version-checked state.
+- [x] Persisted self snapshots in db.
+```
+
+Then in the **Minimum HUD panels** block, change this line:
+
+```markdown
+- [ ] last continuity restore summary
+```
+
+to:
+
+```markdown
+- [x] last continuity restore summary
+```
+
+Optionally, also update the telemetry list because continuity telemetry is now implemented. Change this line:
+
+```markdown
+- [ ] `[:brain, :self_model, :continuity_restored]`
+```
+
+to:
+
+```markdown
+- [x] `[:brain, :self_model, :continuity_restored]`
+```
+
+After those edits, the only remaining Phase 7 item should be:
+
+```markdown
+- [ ] Autobiographical recall filters.
+```
+
+> User:
+ok file updated, now we need to proceed with the next step
+
+> Assistant:
+The next step is **Autobiographical recall filters**. Since the patch tool was rejected again, paste these changes manually.
+
+**1. Update `apps/brain/lib/brain/hippocampus.ex`**
+
+Find the existing public `recall/2` function:
+
+```elixir
+@spec recall(list() | map(), keyword()) :: [recall_result()]
+def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
+  do: GenServer.call(__MODULE__, {:recall, cues, normalize_opts(opts)})
+```
+
+Immediately after it, add:
+
+```elixir
+@doc """
+Recall only explicitly self-tagged autobiographical episodes.
+
+This filter does not infer selfhood from free text. An episode must carry the
+write-side self-memory contract, either through metadata booleans or stable
+self/autobiographical tags.
+"""
+@spec recall_self_memories(list() | map(), keyword()) :: [recall_result()]
+def recall_self_memories(cues, opts \\ []) when is_list(cues) or is_map(cues),
+  do: GenServer.call(__MODULE__, {:recall_self, cues, normalize_opts(opts)})
+```
+
+Then find the existing `handle_call({:recall, ...})` block:
+
+```elixir
+@impl true
+def handle_call({:recall, cues, opts}, from, state) do
+  {results, meas, meta} = do_recall(cues, state, opts)
+
+  Telemetry.emit_recall(meas, meta)
+
+  Telemetry.maybe_echo_to_caller(
+    from,
+    [:brain, :hippocampus, :recall],
+    meas,
+    meta
+  )
+
+  {:reply, results, state}
+end
+```
+
+Immediately after it, add:
+
+```elixir
+@impl true
+def handle_call({:recall_self, cues, opts}, from, state) do
+  limit = Map.get(opts, :limit) || Map.get(opts, :recall_limit) || state.opts.recall_limit
+
+  candidate_limit =
+    Map.get(opts, :candidate_limit) ||
+      max(limit * 4, max(length(state.window), limit))
+
+  {results, meas, meta} =
+    do_recall(cues, state, Map.put(opts, :limit, candidate_limit))
+
+  self_results =
+    results
+    |> Enum.filter(&self_memory_result?/1)
+    |> Enum.take(limit)
+
+  meas =
+    meas
+    |> Map.put(:returned, length(self_results))
+    |> Map.put(:candidate_returned, length(results))
+    |> Map.put(:top_score, top_score(self_results))
+
+  meta =
+    meta
+    |> Map.put(:filter, :autobiographical_self_memory)
+    |> Map.put(:candidate_limit, candidate_limit)
+
+  Telemetry.emit_recall(meas, meta)
+
+  Telemetry.maybe_echo_to_caller(
+    from,
+    [:brain, :hippocampus, :recall],
+    meas,
+    meta
+  )
+
+  {:reply, self_results, state}
+end
+```
+
+Then find this existing helper:
+
+```elixir
+defp fact_value_from_si(_), do: nil
+```
+
+Immediately after it, add:
+
+```elixir
+defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
+  self_memory_meta?(meta) or self_memory_tags?(meta) or self_memory_tags?(slate)
+end
+
+defp self_memory_result?(_), do: false
+
+defp self_memory_meta?(meta) when is_map(meta) do
+  truthy_meta?(meta, :self?) and truthy_meta?(meta, :autobiographical?)
+end
+
+defp self_memory_meta?(_), do: false
+
+defp truthy_meta?(meta, key) when is_atom(key) do
+  Map.get(meta, key) == true or Map.get(meta, Atom.to_string(key)) == true
+end
+
+defp self_memory_tags?(map) when is_map(map) do
+  tags =
+    map
+    |> tag_values()
+    |> Enum.map(&tag_string/1)
+
+  "self_memory" in tags and "autobiographical" in tags
+end
+
+defp self_memory_tags?(_), do: false
+
+defp tag_values(map) when is_map(map) do
+  List.wrap(Map.get(map, :tags) || Map.get(map, "tags") || [])
+end
+
+defp tag_string(tag) when is_binary(tag), do: tag |> String.trim() |> String.downcase()
+defp tag_string(tag) when is_atom(tag), do: tag |> Atom.to_string() |> tag_string()
+defp tag_string(tag), do: tag |> to_string() |> tag_string()
+
+defp top_score([%{score: score} | _]) when is_float(score), do: score
+defp top_score([%{score: score} | _]) when is_integer(score), do: score * 1.0
+defp top_score(_), do: 0.0
+```
+
+**2. Add tests**
+
+Open:
+
+```bash
+vim apps/brain/test/brain/hippocampus_behavior_test.exs
+```
+
+Add these tests before the final `end`:
+
+```elixir
+test "recall_self_memories/2 returns only self-tagged autobiographical episodes" do
+  Hippocampus.write_self_memory(:goal_update, %{
+    goal: "phase_7",
+    event: "hud continuity complete"
+  })
+
+  Hippocampus.encode(slate_with("phase_7"), %{
+    source: :ordinary_episode,
+    tags: ["not_self"]
+  })
+
+  results =
+    Hippocampus.recall_self_memories(["phase_7"], limit: 5, ignore_head: :never)
+
+  assert length(results) == 1
+
+  [%{episode: %{meta: meta}}] = results
+
+  assert meta.self? == true
+  assert meta.autobiographical? == true
+  assert meta.kind == "goal_update"
+end
+
+test "recall_self_memories/2 respects requested limit after filtering" do
+  Hippocampus.write_self_memory(:goal_update, %{goal: "phase_7", event: "one"})
+  Hippocampus.encode(slate_with("phase_7"), %{source: :ordinary_episode})
+  Hippocampus.write_self_memory(:continuity_restored, %{goal: "phase_7", event: "two"})
+
+  results =
+    Hippocampus.recall_self_memories(["phase_7"], limit: 1, ignore_head: :never)
+
+  assert length(results) == 1
+  [%{episode: %{meta: meta}}] = results
+  assert meta.self? == true
+  assert meta.autobiographical? == true
+end
+```
+
+**3. Run checks**
+
+```bash
+mix test apps/brain/test/brain/hippocampus_behavior_test.exs
+mix compile
+```
+
+If those pass, mark this in `ROADMAP.md`:
+
+```markdown
+- [x] Autobiographical recall filters.
+```
+
+That completes the remaining Phase 7 deliverable.
+
+> User:
+ubuntu@default:~/Symbrella$ mix test apps/brain/test/brain/hippocampus_behavior_test.exsmix compile==> brainCompiling 14 files (.ex)     warning: clauses with the same name and arity (number of arguments) should be grouped together, "defp fact_value_from_si/1" was previously defined (lib/brain/hippocampus.ex:338)     │ 385 │   defp fact_value_from_si(_), do: nil     │        ~     │     └─ lib/brain/hippocampus.ex:385:8Generated brain app==> coreCompiling 1 file (.ex)Generated core app✔ negcache cleared: /home/ubuntu/Symbrella/_build/test/lib/core/priv/negcache✔ negcache cleared: /home/ubuntu/Symbrella/apps/core/priv/negcache==> brain04:40:40.858 [warning] [Hippocampus] warm_start loaded=0 keep=30004:40:40.863 [info] [Blackboard] subscribed to brain:blackboard on Symbrella.PubSub04:40:40.863 [info] [SelfPortrait] subscribed to brain:blackboard on Symbrella.PubSub04:40:40.863 [info] [Brain.ML] subscribed to 6 topics on Symbrella.PubSubRunning ExUnit with seed: 909265, max_cases: 56.......Finished in 0.1 seconds (0.00s async, 0.1s sync)7 tests, 0 failures
+
+> Assistant:
+Tests are green, but fix the warning before calling this done.
+
+In [hippocampus.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/hippocampus.ex):385, this line is in the wrong place:
+
+```elixir
+defp fact_value_from_si(_), do: nil
+```
+
+It needs to sit immediately after the first `fact_value_from_si/1` clause, before the new `self_memory_result?/1` helpers.
+
+Change this section from:
+
+```elixir
+defp fact_value_from_si(%{slate: slate}) do
+  si = slate[:si] || slate["si"] || %{}
+
+  get_in(si, [:episode, :meta, :value]) ||
+    get_in(si, ["episode", "meta", "value"]) ||
+    get_in(si, ["episode", "meta", :value]) ||
+    get_in(si, [:episode, "meta", "value"])
+end
+
+defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
+```
+
+to:
+
+```elixir
+defp fact_value_from_si(%{slate: slate}) do
+  si = slate[:si] || slate["si"] || %{}
+
+  get_in(si, [:episode, :meta, :value]) ||
+    get_in(si, ["episode", "meta", "value"]) ||
+    get_in(si, ["episode", "meta", :value]) ||
+    get_in(si, [:episode, "meta", "value"])
+end
+
+defp fact_value_from_si(_), do: nil
+
+defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
+```
+
+Then delete the later duplicate line currently after `top_score/1`:
+
+```elixir
+defp fact_value_from_si(_), do: nil
+```
+
+So this part should end like:
+
+```elixir
+defp top_score([%{score: score} | _]) when is_float(score), do: score
+defp top_score([%{score: score} | _]) when is_integer(score), do: score * 1.0
+defp top_score(_), do: 0.0
+
+defp normalize_self_kind(kind) when is_atom(kind),
+  do: kind |> Atom.to_string() |> normalize_self_kind()
+```
+
+Then rerun:
+
+```bash
+mix test apps/brain/test/brain/hippocampus_behavior_test.exs
+mix compile
+```
+
+Expected: still `7 tests, 0 failures`, and the warning should be gone.
+
+> User:
+tests pass no warnings
+
+> Assistant:
+Good. That completes **Autobiographical recall filters**.
+
+Update `ROADMAP.md` now:
+
+```markdown
+- [x] Autobiographical recall filters.
+```
+
+At this point Phase 7 should be fully complete:
+
+```markdown
+- [x] `Brain.SelfContinuity` warm-start boundary.
+- [x] Persisted self snapshots in `db`.
+- [x] Safe warm-start restoration rules.
+- [x] Latest valid snapshot restore path.
+- [x] Stale, missing, invalid, or unsupported snapshots degrade explicitly.
+- [x] Self-tagged Hippocampus writes.
+- [x] Autobiographical recall filters.
+- [x] Continuity telemetry.
+- [x] Tests ensuring warm start restores only supported, bounded, version-checked state.
+- [x] Persisted self snapshots in db.
+```
+
+Next major roadmap item is **Phase 8 - Meta-Monitoring And Reflective Repair**.
+
+The first sensible Phase 8 target is:
+
+```markdown
+[ ] `Brain.MetaMonitor`
+```
+
+That should start small: detect explicit warning states from the existing self-model, such as high uncertainty, low stability, high cognitive load, or recent errors, and emit:
+
+```elixir
+[:brain, :meta_monitor, :warning]
+```
+
+with `count` and `v` metadata.
+
+> User:
+before we carry on i want to commit to github, write me a short commit message
+
+> Assistant:
+Use:
+
+```text
+Complete Phase 7 continuity and autobiographical memory
+```
+
+> User:
+if we are ready for The first sensible Phase 8 target is:```markdown[ ] `Brain.MetaMonitor` lets get started
+
+> Assistant:
+The edit tool was rejected again, so paste this manually.
+
+Create this new file:
+
+[meta_monitor.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/meta_monitor.ex)
+
+```elixir
+defmodule Brain.MetaMonitor do
+  @moduledoc """
+  Phase 8 meta-monitoring policy for explicit self-state warnings.
+
+  This module consumes the canonical `Brain.SelfModel` and reports inspectable
+  warning states. It does not mutate the self-model or make recovery decisions.
+  """
+
+  alias Brain.SelfModel
+
+  @event [:brain, :meta_monitor, :warning]
+  @v 1
+
+  @default_thresholds %{
+    uncertainty: 0.75,
+    stability: 0.25,
+    cognitive_load: 0.85,
+    recent_errors: 1
+  }
+
+  @type warning_kind ::
+          :high_uncertainty
+          | :low_stability
+          | :high_cognitive_load
+          | :recent_errors
+
+  @type warning :: %{
+          required(:kind) => warning_kind(),
+          required(:severity) => :info | :warning | :critical,
+          required(:value) => number(),
+          required(:threshold) => number()
+        }
+
+  @doc """
+  Detect meta-monitor warnings without emitting telemetry.
+  """
+  @spec warnings(SelfModel.t(), keyword()) :: [warning()]
+  def warnings(%SelfModel{} = model, opts \\ []) do
+    thresholds = thresholds(opts)
+
+    []
+    |> maybe_warn(
+      model.uncertainty >= thresholds.uncertainty,
+      :high_uncertainty,
+      model.uncertainty,
+      thresholds.uncertainty,
+      severity_high(model.uncertainty, 0.9)
+    )
+    |> maybe_warn(
+      model.stability <= thresholds.stability,
+      :low_stability,
+      model.stability,
+      thresholds.stability,
+      severity_low(model.stability, 0.15)
+    )
+    |> maybe_warn(
+      model.cognitive_load >= thresholds.cognitive_load,
+      :high_cognitive_load,
+      model.cognitive_load,
+      thresholds.cognitive_load,
+      severity_high(model.cognitive_load, 0.95)
+    )
+    |> maybe_warn(
+      recent_error_count(model) >= thresholds.recent_errors,
+      :recent_errors,
+      recent_error_count(model),
+      thresholds.recent_errors,
+      :warning
+    )
+    |> Enum.reverse()
+  end
+
+  @doc """
+  Detect warnings and emit one telemetry event when warnings are present.
+
+  Returns `{:ok, warnings}` when no warning exists and `{:warning, warnings}`
+  when one or more warning states are detected.
+  """
+  @spec check(SelfModel.t(), keyword()) :: {:ok | :warning, [warning()]}
+  def check(%SelfModel{} = model, opts \\ []) do
+    warnings = warnings(model, opts)
+
+    if warnings == [] do
+      {:ok, []}
+    else
+      emit(warnings, model)
+      {:warning, warnings}
+    end
+  end
+
+  defp maybe_warn(acc, false, _kind, _value, _threshold, _severity), do: acc
+
+  defp maybe_warn(acc, true, kind, value, threshold, severity) do
+    [
+      %{
+        kind: kind,
+        severity: severity,
+        value: number(value),
+        threshold: number(threshold)
+      }
+      | acc
+    ]
+  end
+
+  defp thresholds(opts) do
+    user = Keyword.get(opts, :thresholds, %{})
+
+    @default_thresholds
+    |> Map.merge(Map.new(user))
+    |> Map.update!(:uncertainty, &number/1)
+    |> Map.update!(:stability, &number/1)
+    |> Map.update!(:cognitive_load, &number/1)
+    |> Map.update!(:recent_errors, &number/1)
+  end
+
+  defp recent_error_count(%SelfModel{} = model) do
+    model.recent_errors
+    |> List.wrap()
+    |> Enum.reduce(0, fn
+      %{count: count}, acc when is_number(count) -> acc + count
+      %{"count" => count}, acc when is_number(count) -> acc + count
+      _error, acc -> acc + 1
+    end)
+  end
+
+  defp emit(warnings, %SelfModel{} = model) do
+    :telemetry.execute(
+      @event,
+      %{
+        count: length(warnings),
+        critical: Enum.count(warnings, &(&1.severity == :critical))
+      },
+      %{
+        v: @v,
+        self_model_v: model.v,
+        warning_kinds: Enum.map(warnings, & &1.kind),
+        severities: Enum.map(warnings, & &1.severity)
+      }
+    )
+  end
+
+  defp severity_high(value, critical_at) when is_number(value) and value >= critical_at,
+    do: :critical
+
+  defp severity_high(_value, _critical_at), do: :warning
+
+  defp severity_low(value, critical_at) when is_number(value) and value <= critical_at,
+    do: :critical
+
+  defp severity_low(_value, _critical_at), do: :warning
+
+  defp number(value) when is_integer(value), do: value * 1.0
+  defp number(value) when is_float(value), do: value
+  defp number(_), do: 0.0
+end
+```
+
+Then create this test file:
+
+[meta_monitor_test.exs](/home/ubuntu/Symbrella/apps/brain/test/brain/meta_monitor_test.exs)
+
+```elixir
+defmodule Brain.MetaMonitorTest do
+  use ExUnit.Case, async: false
+
+  alias Brain.{MetaMonitor, SelfModel}
+
+  test "warnings/2 detects high uncertainty, low stability, overload, and recent errors" do
+    warnings =
+      MetaMonitor.warnings(%SelfModel{
+        uncertainty: 0.8,
+        stability: 0.2,
+        cognitive_load: 0.9,
+        recent_errors: [%{kind: :lifg_payload_gaps, count: 2}]
+      })
+
+    assert Enum.any?(warnings, &(&1.kind == :high_uncertainty))
+    assert Enum.any?(warnings, &(&1.kind == :low_stability))
+    assert Enum.any?(warnings, &(&1.kind == :high_cognitive_load))
+    assert Enum.any?(warnings, &(&1.kind == :recent_errors))
+  end
+
+  test "warnings/2 returns empty list for stable self-model" do
+    assert MetaMonitor.warnings(%SelfModel{
+             uncertainty: 0.2,
+             stability: 0.8,
+             cognitive_load: 0.1,
+             recent_errors: []
+           }) == []
+  end
+
+  test "check/2 emits warning telemetry with count and v metadata" do
+    handler_id = "meta-monitor-warning-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:brain, :meta_monitor, :warning],
+        fn event, meas, meta, _ ->
+          send(parent, {:telemetry, event, meas, meta})
+        end,
+        nil
+      )
+
+    assert {:warning, warnings} =
+             MetaMonitor.check(%SelfModel{
+               uncertainty: 0.95,
+               stability: 0.1,
+               cognitive_load: 0.2,
+               recent_errors: []
+             })
+
+    assert length(warnings) == 2
+
+    assert_receive {:telemetry, [:brain, :meta_monitor, :warning], meas, meta}, 100
+
+    assert meas.count == 2
+    assert meas.critical == 2
+    assert meta.v == 1
+    assert meta.self_model_v == 1
+    assert :high_uncertainty in meta.warning_kinds
+    assert :low_stability in meta.warning_kinds
+
+    :telemetry.detach(handler_id)
+  end
+
+  test "check/2 does not emit telemetry when there are no warnings" do
+    handler_id = "meta-monitor-no-warning-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:brain, :meta_monitor, :warning],
+        fn event, meas, meta, _ ->
+          send(parent, {:telemetry, event, meas, meta})
+        end,
+        nil
+      )
+
+    assert {:ok, []} =
+             MetaMonitor.check(%SelfModel{
+               uncertainty: 0.1,
+               stability: 0.9,
+               cognitive_load: 0.1,
+               recent_errors: []
+             })
+
+    refute_receive {:telemetry, [:brain, :meta_monitor, :warning], _meas, _meta}, 50
+
+    :telemetry.detach(handler_id)
+  end
+end
+```
+
+Run:
+
+```bash
+mix test apps/brain/test/brain/meta_monitor_test.exs
+mix compile
+```
+
+If those pass, Phase 8 has its first working piece:
+
+```markdown
+[x] `Brain.MetaMonitor`
+```
+
+Do not mark the specific detector deliverables complete yet unless you want to count these threshold checks as the first version of instability/overload detection. The conservative roadmap update is only `Brain.MetaMonitor` and telemetry `[:brain, :meta_monitor, :warning]`.
+
+> User:
+compiles and passes
+
+> Assistant:
+Good. Mark these in `ROADMAP.md`:
+
+```markdown
+- [x] `Brain.MetaMonitor`.
+```
+
+And in the telemetry section:
+
+```markdown
+- [x] `[:brain, :meta_monitor, :warning]`
+```
+
+I’d leave these unchecked for now:
+
+```markdown
+- [ ] Contradiction flags.
+- [ ] Instability detector.
+- [ ] Overload detector.
+- [ ] Stuck-loop detector.
+```
+
+Even though the first `MetaMonitor` implementation detects low stability and high load, the conservative interpretation is that we’ve created the monitor and telemetry boundary. The specific detector deliverables can be tightened next with dedicated tests and policies.
+
+Next target:
+
+```markdown
+[ ] Instability detector.
+```
+
+That should formalize the low-stability warning into an explicit detector contract, likely with a helper or warning shape that proves:
+
+```elixir
+%{kind: :instability, severity: ..., evidence: ...}
+```
+
+rather than the current generic `:low_stability` warning.
+
+> User:
+my question is how are we utilizing the model we trained in our test?  
+
+> Assistant:
+Right now, we are **not using the trained model in live/runtime behavior**.
+
+What we have is an **advisory calibration track**, and the tests prove the pieces work:
+
+1. `Training.train/2` builds an Axon artifact from a tensor batch.
+2. `AxonPredictor.predict/2` can run inference from that trained artifact.
+3. `Evaluator.evaluate/2` compares the Axon prediction against labels.
+4. `Comparison.compare/2` compares Axon vs baseline.
+5. `Blend.decide/4` can make an advisory decision, but defaults to observe-only and does **not** mutate `Brain.SelfModel`.
+
+The key line is in [training.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/training.ex):
+
+```elixir
+Training artifacts are advisory. They are not applied to Brain.SelfModel
+```
+
+And [axon_predictor.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/axon_predictor.ex) says:
+
+```elixir
+This module performs inference only. It does not train, compare, or blend
+output into Brain.SelfModel.
+```
+
+So the trained model is currently used **inside tests only** to prove:
+
+```text
+sample -> tensor batch -> trained Axon artifact -> prediction -> evaluation -> comparison -> advisory blend
+```
+
+At runtime, `Brain.Introspection` is still using the symbolic/rule path:
+
+[brain/introspection.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/introspection.ex)
+
+```elixir
+snapshot()
+|> Map.put(:last_appraisal, appraisal)
+|> Map.put(:last_lifg, ...)
+|> Map.put(:self_other_attribution, ...)
+```
+
+Then it emits self-model telemetry and logs calibration samples. It does **not** load a trained Axon artifact or call `AxonPredictor.predict/2`.
+
+So the accurate status is:
+
+```text
+Implemented:
+[x] Trainable Axon calibration artifact
+[x] Axon inference path
+[x] Baseline vs Axon comparison
+[x] Advisory blend policy
+[x] Runtime sample logging
+
+Not implemented yet:
+[ ] Persist/load trained model artifact for runtime use
+[ ] Run AxonPredictor during Brain.Introspection
+[ ] Surface latest calibration prediction in HUD
+[ ] Apply calibration output to behavior or response planning
+```
+
+This is intentional so far: the model is a calibration advisor, not a controller. The next integration step, when we choose to do it, should be **runtime advisory inference**, not direct mutation of `Brain.SelfModel`.
+
+> User:
+now for the machine learning we have now what is the shape of data you would suggest in creating a jsonl file to use as a training source?
+
+> Assistant:
+For the ML we have now, the training source should be **JSONL with one `Brain.SelfCalibration.Sample` per line**.
+
+Current loader expects this shape:
+
+```json
+{
+  "features": {},
+  "labels": {},
+  "source": "reviewed",
+  "meta": {},
+  "v": 1
+}
+```
+
+The important part is that `features` and `labels` use the exact schema already defined in `Brain.SelfCalibration.Dataset`.
+
+Recommended full line shape:
+
+```json
+{"v":1,"source":"reviewed","features":{"appraisal_valence":-0.2,"appraisal_arousal":0.5,"appraisal_dominance":-0.1,"attribution_confidence":0.9,"lifg_choices_count":2,"cognitive_load":0.4,"recent_error_count":1,"mood_vigilance":0.6,"mood_plasticity":0.7,"mood_inhibition":0.3},"labels":{"confidence":0.8,"uncertainty":0.2,"stability":0.75},"meta":{"feature_schema_v":1,"self_model_v":1,"label_source":"human_reviewed","notes":"clear attribution, moderate load"}}
+```
+
+For a real file:
+
+```jsonl
+{"v":1,"source":"reviewed","features":{"appraisal_valence":-0.2,"appraisal_arousal":0.5,"appraisal_dominance":-0.1,"attribution_confidence":0.9,"lifg_choices_count":2,"cognitive_load":0.4,"recent_error_count":1,"mood_vigilance":0.6,"mood_plasticity":0.7,"mood_inhibition":0.3},"labels":{"confidence":0.8,"uncertainty":0.2,"stability":0.75},"meta":{"feature_schema_v":1,"self_model_v":1,"label_source":"human_reviewed","scenario":"normal"}}
+{"v":1,"source":"reviewed","features":{"appraisal_valence":-0.7,"appraisal_arousal":0.8,"appraisal_dominance":-0.4,"attribution_confidence":0.35,"lifg_choices_count":5,"cognitive_load":0.9,"recent_error_count":3,"mood_vigilance":0.85,"mood_plasticity":0.3,"mood_inhibition":0.7},"labels":{"confidence":0.25,"uncertainty":0.8,"stability":0.25},"meta":{"feature_schema_v":1,"self_model_v":1,"label_source":"human_reviewed","scenario":"overload"}}
+{"v":1,"source":"reviewed","features":{"appraisal_valence":0.4,"appraisal_arousal":0.3,"appraisal_dominance":0.5,"attribution_confidence":0.95,"lifg_choices_count":1,"cognitive_load":0.15,"recent_error_count":0,"mood_vigilance":0.35,"mood_plasticity":0.65,"mood_inhibition":0.2},"labels":{"confidence":0.9,"uncertainty":0.1,"stability":0.85},"meta":{"feature_schema_v":1,"self_model_v":1,"label_source":"human_reviewed","scenario":"stable"}}
+```
+
+**Feature Schema**
+
+These are the only feature keys the current dataset uses, in this exact model order:
+
+```elixir
+[
+  :appraisal_valence,
+  :appraisal_arousal,
+  :appraisal_dominance,
+  :attribution_confidence,
+  :lifg_choices_count,
+  :cognitive_load,
+  :recent_error_count,
+  :mood_vigilance,
+  :mood_plasticity,
+  :mood_inhibition
+]
+```
+
+Suggested ranges:
+
+```text
+appraisal_valence       -1.0..1.0
+appraisal_arousal        0.0..1.0
+appraisal_dominance     -1.0..1.0
+attribution_confidence   0.0..1.0
+lifg_choices_count       integer count, usually 0..10
+cognitive_load           0.0..1.0
+recent_error_count       integer count, usually 0..10
+mood_vigilance           0.0..1.0
+mood_plasticity          0.0..1.0
+mood_inhibition          0.0..1.0
+```
+
+**Label Schema**
+
+These are the training targets:
+
+```elixir
+[
+  :confidence,
+  :uncertainty,
+  :stability
+]
+```
+
+Suggested ranges:
+
+```text
+confidence   0.0..1.0
+uncertainty  0.0..1.0
+stability    0.0..1.0
+```
+
+**What I’d Recommend**
+
+Use `source: "reviewed"` for hand-curated training data. Runtime logs can be useful, but reviewed rows are better for initial training because labels like `confidence`, `uncertainty`, and `stability` are judgments. If we train only on the model’s own current self-model labels, the model mostly learns to imitate the symbolic rules rather than improve calibration.
+
+A good starting dataset would include balanced scenarios:
+
+```text
+stable / clear interpretation
+uncertain attribution
+high cognitive load
+low stability
+recent LIFG errors
+high arousal but high confidence
+negative appraisal but stable state
+low attribution confidence with many choices
+```
+
+Keep every line self-contained and numeric. The current loader skips invalid JSON lines and defaults missing numeric fields to `0.0`, so for training quality you should include **all features and all labels** on every reviewed row.
+
+> User:
+gpt says this : My recommendation is to store three layers in each JSONL row:raw/source data you observed,derived features that Symbrella computed,labels/targets that you add later for supervision.
+
+> Assistant:
+GPT’s recommendation is right, with one important constraint: **our current training loader only consumes `features` and `labels`**. So we can absolutely store `raw/source data`, but it should live under `meta` or a new top-level field that the loader safely ignores until we upgrade it.
+
+Best shape for us right now:
+
+```json
+{
+  "v": 1,
+  "source": "reviewed",
+  "raw": {},
+  "features": {},
+  "labels": {},
+  "meta": {}
+}
+```
+
+Current code behavior:
+
+```text
+features -> used for x tensor
+labels   -> used for y tensor
+source   -> parsed
+meta     -> parsed
+raw      -> currently ignored by Dataset.load_jsonl/1
+```
+
+So the recommended JSONL row should be:
+
+```jsonl
+{"v":1,"source":"reviewed","raw":{"text":"can you explain your working memory?","resolved":{"intent":"ask","lifg_choices":["working memory"],"acc_conflict":0.1},"appraisal":{"valence":0.2,"arousal":0.3,"dominance":0.4,"target":"assistant"},"mood":{"vigilance":0.35,"plasticity":0.65,"inhibition":0.2},"wm":{"size":2,"capacity":7},"errors":[]},"features":{"appraisal_valence":0.2,"appraisal_arousal":0.3,"appraisal_dominance":0.4,"attribution_confidence":0.9,"lifg_choices_count":1,"cognitive_load":0.2857,"recent_error_count":0,"mood_vigilance":0.35,"mood_plasticity":0.65,"mood_inhibition":0.2},"labels":{"confidence":0.9,"uncertainty":0.1,"stability":0.85},"meta":{"feature_schema_v":1,"self_model_v":1,"label_source":"human_reviewed","scenario":"stable_clear_interpretation"}}
+```
+
+That gives us all three layers:
+
+```text
+raw       = audit trail / future feature engineering
+features  = current model input
+labels    = supervised target
+```
+
+I would **not** put raw observations only in `meta`, because `meta` is better for bookkeeping: schema versions, reviewer, scenario, timestamp, label source, notes. A top-level `raw` field is cleaner.
+
+For now, the loader will ignore `raw`, which is fine. Later we can upgrade `Brain.SelfCalibration.Dataset` or `Sample` to preserve `raw` explicitly if we want.
+
+Recommended final contract:
+
+```json
+{
+  "v": 1,
+  "source": "runtime|reviewed|test",
+  "raw": {
+    "text": "...",
+    "resolved": {},
+    "appraisal": {},
+    "mood": {},
+    "wm": {},
+    "self_model": {},
+    "errors": []
+  },
+  "features": {
+    "appraisal_valence": 0.0,
+    "appraisal_arousal": 0.0,
+    "appraisal_dominance": 0.0,
+    "attribution_confidence": 0.0,
+    "lifg_choices_count": 0,
+    "cognitive_load": 0.0,
+    "recent_error_count": 0,
+    "mood_vigilance": 0.0,
+    "mood_plasticity": 0.0,
+    "mood_inhibition": 0.0
+  },
+  "labels": {
+    "confidence": 0.0,
+    "uncertainty": 0.0,
+    "stability": 0.0
+  },
+  "meta": {
+    "feature_schema_v": 1,
+    "self_model_v": 1,
+    "label_source": "human_reviewed",
+    "scenario": "...",
+    "reviewer": "...",
+    "notes": "..."
+  }
+}
+```
+
+One caution: if we use a top-level `raw` field now, current `Sample` does not store it after loading. It is safe for the file, but ignored by training. That is acceptable if the goal is future-proofing the dataset.
+
+> User:
+i have had gpt synthesize a file for use with our training aspect
+
+> Assistant:
+This file looks usable as a **synthetic bootstrap dataset**, with one code-level caveat.
+
+I checked:
+
+```text
+250 lines
+250 valid JSON objects
+0 rows missing required feature keys
+0 rows missing required label keys
+10 balanced scenarios, 25 rows each
+```
+
+Scenario distribution:
+
+```text
+25 edge_outlier
+25 high_arousal_unstable
+25 high_inhibition_rigid
+25 high_wm_load
+25 low_confidence_low_conflict
+25 mild_ambiguity
+25 recent_error_recovery
+25 recovery_improvement_transition
+25 stable_clear_interpretation
+25 strong_ambiguity_conflict
+```
+
+Observed numeric ranges are sane:
+
+```text
+appraisal_valence       -0.3499..0.4499
+appraisal_arousal        0.0508..0.9669
+appraisal_dominance      0.0950..0.7497
+attribution_confidence   0.1266..0.9796
+lifg_choices_count       1..4
+cognitive_load           0.1111..1.0
+recent_error_count       0..2
+mood_vigilance           0.12..0.9595
+mood_plasticity          0.0804..0.9258
+mood_inhibition          0.0574..0.9545
+
+confidence               0.09..0.9
+uncertainty              0.0675..0.7863
+stability                0.0948..0.85
+```
+
+Averages:
+
+```text
+confidence_avg   0.4602
+uncertainty_avg  0.3830
+stability_avg    0.4236
+```
+
+The important issue: your rows use:
+
+```json
+"source": "synthetic"
+```
+
+But the current loader only recognizes:
+
+```elixir
+:runtime
+:test
+:reviewed
+```
+
+So right now, `Dataset.load_jsonl/1` will silently map `"synthetic"` to `:runtime`.
+
+That is not fatal for training, because `source` is not part of the tensor features. But it is bad provenance. We should fix the loader before treating this dataset seriously.
+
+Change [sample.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/sample.ex) type from:
+
+```elixir
+source: :runtime | :test | :reviewed,
+```
+
+to:
+
+```elixir
+source: :runtime | :test | :reviewed | :synthetic,
+```
+
+Then in [dataset.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/dataset.ex), change:
+
+```elixir
+defp atomize_source(value) when value in [:runtime, :test, :reviewed], do: value
+defp atomize_source("runtime"), do: :runtime
+defp atomize_source("test"), do: :test
+defp atomize_source("reviewed"), do: :reviewed
+defp atomize_source(_), do: :runtime
+```
+
+to:
+
+```elixir
+defp atomize_source(value) when value in [:runtime, :test, :reviewed, :synthetic], do: value
+defp atomize_source("runtime"), do: :runtime
+defp atomize_source("test"), do: :test
+defp atomize_source("reviewed"), do: :reviewed
+defp atomize_source("synthetic"), do: :synthetic
+defp atomize_source(_), do: :runtime
+```
+
+I’d also add a tiny dataset test for that.
+
+Use this file as:
+
+```text
+bootstrap pretraining / smoke training / schema validation
+```
+
+Do **not** treat it as ground truth calibration yet. Synthetic rows are useful to make the model learn shape and monotonic relationships, but later we should mix in reviewed runtime samples so the model learns Symbrella’s actual behavior rather than GPT’s synthetic assumptions.
+
+Next practical step: update the loader to preserve `:synthetic`, then run `Dataset.load_jsonl/1 -> Tensor.from_rows/1 -> Training.train/2` against this file.
+
+> User:
+lets get started on that
+
+> Assistant:
+The code-side loader change is already in place in your buffer:
+
+```elixir
+defp atomize_source(value) when value in [:runtime, :test, :reviewed, :synthetic], do: value
+defp atomize_source("synthetic"), do: :synthetic
+```
+
+And [sample.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/sample.ex) already includes `:synthetic` in the type. The only thing I’d add now is a regression test.
+
+Paste this into [dataset_test.exs](/home/ubuntu/Symbrella/apps/brain/test/brain/self_calibration/dataset_test.exs), after the `"loads JSONL samples and skips invalid lines"` test and before `"missing values default to zero rows"`:
+
+```elixir
+test "loads synthetic JSONL source without rewriting provenance" do
+  path =
+    Path.join(
+      System.tmp_dir!(),
+      "symbrella-self-calibration-synthetic-#{System.unique_integer([:positive])}.jsonl"
+    )
+
+  on_exit(fn -> File.rm(path) end)
+
+  encoded =
+    Jason.encode!(%{
+      v: 1,
+      source: "synthetic",
+      features: %{
+        appraisal_valence: 0.1,
+        appraisal_arousal: 0.2,
+        appraisal_dominance: 0.3,
+        attribution_confidence: 0.4,
+        lifg_choices_count: 2,
+        cognitive_load: 0.5,
+        recent_error_count: 1,
+        mood_vigilance: 0.6,
+        mood_plasticity: 0.7,
+        mood_inhibition: 0.8
+      },
+      labels: %{confidence: 0.9, uncertainty: 0.1, stability: 0.85},
+      meta: %{feature_schema_v: 1, label_source: "synthetic_symbrella_guided"}
+    })
+
+  File.write!(path, encoded <> "\n")
+
+  assert {:ok, [loaded]} = Dataset.load_jsonl(path)
+  assert loaded.source == :synthetic
+  assert loaded.meta.label_source == "synthetic_symbrella_guided"
+
+  rows = Dataset.to_rows([loaded])
+
+  assert rows.x == [[0.1, 0.2, 0.3, 0.4, 2.0, 0.5, 1.0, 0.6, 0.7, 0.8]]
+  assert rows.y == [[0.9, 0.1, 0.85]]
+end
+```
+
+Then run:
+
+```bash
+mix test apps/brain/test/brain/self_calibration/dataset_test.exs
+mix compile
+```
+
+I tried to run the focused test here, but this environment blocked Mix’s local PubSub socket with `:eperm`, and the escalated run was rejected. So you’ll need to run the two commands locally like before.
+
+After that passes, the next practical ML check is to train against your bootstrap file:
+
+```elixir
+path = "apps/brain/priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl"
+
+{:ok, samples} = Brain.SelfCalibration.Dataset.load_jsonl(path)
+rows = Brain.SelfCalibration.Dataset.to_rows(samples)
+{:ok, batch} = Brain.SelfCalibration.Tensor.from_rows(rows)
+{:ok, artifact} = Brain.SelfCalibration.Training.train(batch, epochs: 5, hidden_units: 8)
+```
+
+But first lock in the `:synthetic` provenance test.
+
+> User:
+Running ExUnit with seed: 227560, max_cases: 56  1) test loads synthetic JSONL source without rewriting provenance (Brain.SelfCalibration.DatasetTest)     apps/brain/test/brain/self_calibration/dataset_test.exs:83     ** (KeyError) key :label_source not found in: %{:feature_schema_v => 1, "label_source" => "synthetic_symbrella_guided"}     code: assert loaded.meta.label_source == "synthetic_symbrella_guided"     stacktrace:       test/brain/self_calibration/dataset_test.exs:116: (test)....Finished in 0.09 seconds (0.09s async, 0.00s sync)5 tests, 1 failure==> brainCompiling 2 files (.ex)Generated brain appubuntu@default:~/Symbrella$ 
+
+> Assistant:
+The loader only atomizes known keys in `meta`. It knows `feature_schema_v` and `self_model_v`, but not `label_source`, so that key stays as a string:
+
+```elixir
+%{:feature_schema_v => 1, "label_source" => "synthetic_symbrella_guided"}
+```
+
+You have two clean options. I’d use option A.
+
+**Option A: Update the test only**
+
+Change this assertion:
+
+```elixir
+assert loaded.meta.label_source == "synthetic_symbrella_guided"
+```
+
+to:
+
+```elixir
+assert loaded.meta["label_source"] == "synthetic_symbrella_guided"
+```
+
+That matches current loader behavior and keeps metadata flexible.
+
+Then rerun:
+
+```bash
+mix test apps/brain/test/brain/self_calibration/dataset_test.exs
+mix compile
+```
+
+**Option B: Teach the loader about `label_source`**
+
+In [dataset.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/dataset.ex), add this to `known_key/1`:
+
+```elixir
+"label_source" -> :label_source
+```
+
+near:
+
+```elixir
+"feature_schema_v" -> :feature_schema_v
+"self_model_v" -> :self_model_v
+```
+
+Then your original test assertion is fine.
+
+I’d choose **Option A** because `meta` is open-ended provenance data. We only need atomized keys for fields the code actually treats as stable schema.
+
+> User:
+tests pass clean compile
+
+> Assistant:
+Good. That locks in synthetic provenance support.
+
+Current ML/data status:
+
+```text
+[x] JSONL loader accepts source: "synthetic"
+[x] Sample source type includes :synthetic
+[x] Dataset test proves synthetic provenance is preserved
+[x] Synthetic bootstrap file is valid JSONL with complete feature/label rows
+```
+
+Next useful step is to run the actual training path against:
+
+```text
+apps/brain/priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl
+```
+
+The goal is to prove:
+
+```text
+JSONL file -> Dataset.load_jsonl/1 -> Dataset.to_rows/1 -> Tensor.from_rows/1 -> Training.train/2
+```
+
+works on the 250-row file, not just on tiny test fixtures.
+
+You can do that with:
+
+```bash
+mix run -e '
+path = "apps/brain/priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl"
+
+{:ok, samples} = Brain.SelfCalibration.Dataset.load_jsonl(path)
+rows = Brain.SelfCalibration.Dataset.to_rows(samples)
+{:ok, batch} = Brain.SelfCalibration.Tensor.from_rows(rows)
+{:ok, artifact} = Brain.SelfCalibration.Training.train(batch, epochs: 5, hidden_units: 8)
+
+IO.inspect(%{
+  samples: length(samples),
+  status: artifact.status,
+  source: artifact.source,
+  model_version: artifact.model_version,
+  epochs: artifact.metrics.epochs,
+  feature_schema_v: artifact.feature_schema_v,
+  trained?: artifact.meta.trained?
+})
+'
+```
+
+Expected output shape:
+
+```elixir
+%{
+  samples: 250,
+  status: :trained,
+  source: :axon,
+  model_version: "axon-tiny-v1",
+  epochs: 5,
+  feature_schema_v: 1,
+  trained?: true
+}
+```
+
+If that works, the synthetic dataset is ready as a bootstrap training source.
+
+> User:
+that was fast: %{  status: :trained,  source: :axon,  samples: 250,  epochs: 5,  model_version: "axon-tiny-v1",  feature_schema_v: 1,  trained?: true}
+
+> Assistant:
+Good. That proves the full bootstrap training path works:
+
+```text
+synthetic JSONL -> Dataset -> Tensor batch -> Axon training artifact
+```
+
+Current ML status is now:
+
+```text
+[x] Synthetic JSONL bootstrap dataset exists
+[x] Loader preserves :synthetic provenance
+[x] Dataset converts 250 rows into tensor-ready rows
+[x] Axon model trains successfully on the bootstrap file
+```
+
+The important limitation is still:
+
+```text
+The artifact is trained in memory only.
+```
+
+We are not persisting/loading it yet, and runtime introspection is not using it yet.
+
+Next sensible ML step is one of these:
+
+```text
+1. Add a focused test that trains from the synthetic bootstrap file.
+2. Add artifact save/load support.
+3. Add runtime advisory inference using a loaded artifact.
+```
+
+I’d do **1 first** because it locks in the file as a supported training fixture without changing runtime behavior. Then **2** gives us a real artifact boundary. Then **3** wires it into advisory runtime prediction.
+
+> User:
+yes lets commence on #1
+
+> Assistant:
+The patch tool was rejected again, so paste this test manually into:
+
+[training_test.exs](/home/ubuntu/Symbrella/apps/brain/test/brain/self_calibration/training_test.exs)
+
+Add it after the existing test:
+
+```elixir
+test "trains tiny advisory axon artifact for one epoch" do
+  ...
+end
+```
+
+Paste this before `defp sample_batch do`:
+
+```elixir
+test "trains advisory axon artifact from synthetic bootstrap JSONL fixture" do
+  path =
+    Path.expand(
+      "../../../priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl",
+      __DIR__
+    )
+
+  assert {:ok, samples} = Dataset.load_jsonl(path)
+  assert length(samples) == 250
+  assert Enum.all?(samples, &(&1.source == :synthetic or &1.source == :reviewed))
+  assert Enum.count(samples, &(&1.source == :synthetic)) == 249
+
+  rows = Dataset.to_rows(samples)
+
+  assert length(rows.x) == 250
+  assert length(rows.y) == 250
+  assert rows.feature_names == Dataset.feature_names()
+  assert rows.label_names == Dataset.label_names()
+
+  assert {:ok, batch} = Tensor.from_rows(rows)
+  assert {:ok, %Training{} = artifact} = Training.train(batch, epochs: 2, hidden_units: 8)
+
+  assert artifact.status == :trained
+  assert artifact.source == :axon
+  assert artifact.model_version == AxonModel.model_version()
+  assert artifact.feature_names == Dataset.feature_names()
+  assert artifact.label_names == Dataset.label_names()
+  assert artifact.feature_schema_v == 1
+  assert artifact.metrics.epochs == 2
+  assert artifact.meta.batch_size == 250
+  assert artifact.meta.hidden_units == 8
+  assert artifact.meta.trained? == true
+  assert artifact.params != nil
+end
+```
+
+Then run:
+
+```bash
+mix test apps/brain/test/brain/self_calibration/training_test.exs
+mix compile
+```
+
+One note: the fixture currently has `249` synthetic rows and `1` reviewed row, based on the earlier check. If you later make all 250 rows synthetic, change this assertion:
+
+```elixir
+assert Enum.count(samples, &(&1.source == :synthetic)) == 249
+```
+
+to:
+
+```elixir
+assert Enum.count(samples, &(&1.source == :synthetic)) == 250
+```
+
+For the current file, use `249`.
+
+> User:
+passes
+
+> Assistant:
+Good. That locks in the synthetic bootstrap file as a real supported training fixture.
+
+ML status now:
+
+```text
+[x] Synthetic JSONL source is preserved as :synthetic
+[x] Synthetic bootstrap fixture loads through Dataset
+[x] Fixture converts to tensor rows
+[x] Axon artifact trains from the 250-row fixture in tests
+```
+
+Next ML step is **artifact save/load support**.
+
+That should add a persistence boundary for the trained artifact, probably something like:
+
+```elixir
+Brain.SelfCalibration.Artifact.save(artifact, path)
+Brain.SelfCalibration.Artifact.load(path)
+```
+
+The artifact should preserve:
+
+```text
+model_version
+feature_schema_v
+feature_names
+label_names
+input_name
+status
+metrics
+meta
+params
+```
+
+Once save/load works, the runtime can load an artifact and run advisory inference without retraining on boot.
+
+> User:
+ok where do we begin
+
+> Assistant:
+Begin with **artifact save/load support**, but keep it deliberately narrow.
+
+We need a new module:
+
+```text
+apps/brain/lib/brain/self_calibration/artifact.ex
+```
+
+Its job:
+
+```elixir
+Brain.SelfCalibration.Artifact.save(artifact, path)
+Brain.SelfCalibration.Artifact.load(path)
+```
+
+First version should persist the trained `Training` struct using Erlang term serialization, not JSON. Reason: `artifact.params` contains Nx/Axon parameter tensors or nested tensor data, which is not naturally JSON-safe.
+
+Use:
+
+```elixir
+:erlang.term_to_binary(artifact)
+:erlang.binary_to_term(binary, [:safe])
+```
+
+This is fine for a local trusted artifact file. Later, if we want portable/interoperable artifacts, we can add a stricter format.
+
+**Step 1: Create the module**
+
+Create:
+
+[artifact.ex](/home/ubuntu/Symbrella/apps/brain/lib/brain/self_calibration/artifact.ex)
+
+```elixir
+defmodule Brain.SelfCalibration.Artifact do
+  @moduledoc """
+  Persistence boundary for self-calibration training artifacts.
+
+  Artifacts are trusted local files. They contain Axon model params, so the first
+  persistence format uses Erlang external term format instead of JSON.
+  """
+
+  alias Brain.SelfCalibration.Training
+
+  @type load_result :: {:ok, Training.t()} | {:error, term()}
+
+  @spec save(Training.t(), Path.t()) :: :ok | {:error, term()}
+  def save(%Training{} = artifact, path) when is_binary(path) do
+    with :ok <- ensure_parent_dir(path),
+         binary <- :erlang.term_to_binary(artifact),
+         :ok <- File.write(path, binary) do
+      :ok
+    end
+  end
+
+  def save(_artifact, _path), do: {:error, :invalid_artifact}
+
+  @spec load(Path.t()) :: load_result()
+  def load(path) when is_binary(path) do
+    with {:ok, binary} <- File.read(path),
+         {:ok, artifact} <- decode(binary),
+         :ok <- validate(artifact) do
+      {:ok, artifact}
+    end
+  end
+
+  def load(_path), do: {:error, :invalid_path}
+
+  defp ensure_parent_dir(path) do
+    path
+    |> Path.dirname()
+    |> File.mkdir_p()
+  end
+
+  defp decode(binary) when is_binary(binary) do
+    try do
+      {:ok, :erlang.binary_to_term(binary, [:safe])}
+    rescue
+      ArgumentError -> {:error, :invalid_artifact_binary}
+    end
+  end
+
+  defp validate(%Training{} = artifact) do
+    cond do
+      artifact.model == nil -> {:error, :missing_model}
+      artifact.params == nil -> {:error, :missing_params}
+      artifact.feature_names == [] -> {:error, :missing_feature_names}
+      artifact.label_names == [] -> {:error, :missing_label_names}
+      true -> :ok
+    end
+  end
+
+  defp validate(_artifact), do: {:error, :invalid_artifact}
+end
+```
+
+**Step 2: Add a test**
+
+Create:
+
+```text
+apps/brain/test/brain/self_calibration/artifact_test.exs
+```
+
+```elixir
+defmodule Brain.SelfCalibration.ArtifactTest do
+  use ExUnit.Case, async: true
+
+  alias Brain.SelfCalibration.Artifact
+  alias Brain.SelfCalibration.AxonModel
+  alias Brain.SelfCalibration.Dataset
+  alias Brain.SelfCalibration.Sample
+  alias Brain.SelfCalibration.Tensor
+  alias Brain.SelfCalibration.Training
+
+  test "saves and loads a trained calibration artifact" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "symbrella-self-calibration-artifact-#{System.unique_integer([:positive])}.bin"
+      )
+
+    on_exit(fn -> File.rm(path) end)
+
+    assert {:ok, batch} = sample_batch()
+    assert {:ok, %Training{} = artifact} = Training.train(batch, epochs: 1, hidden_units: 4)
+
+    assert :ok = Artifact.save(artifact, path)
+    assert {:ok, %Training{} = loaded} = Artifact.load(path)
+
+    assert loaded.status == :trained
+    assert loaded.source == :axon
+    assert loaded.model_version == AxonModel.model_version()
+    assert loaded.feature_names == Dataset.feature_names()
+    assert loaded.label_names == Dataset.label_names()
+    assert loaded.feature_schema_v == 1
+    assert loaded.metrics.epochs == 1
+    assert loaded.meta.trained? == true
+    assert loaded.params != nil
+    assert inspect(loaded.model) =~ "#Axon<"
+  end
+
+  test "load/1 rejects invalid artifact files" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "symbrella-invalid-artifact-#{System.unique_integer([:positive])}.bin"
+      )
+
+    on_exit(fn -> File.rm(path) end)
+
+    File.write!(path, "not an artifact")
+
+    assert Artifact.load(path) == {:error, :invalid_artifact_binary}
+  end
+
+  defp sample_batch do
+    %Sample{
+      features: %{
+        appraisal_valence: -0.2,
+        appraisal_arousal: 0.5,
+        appraisal_dominance: -0.1,
+        attribution_confidence: 0.9,
+        lifg_choices_count: 2,
+        cognitive_load: 0.4,
+        recent_error_count: 1,
+        mood_vigilance: 0.6,
+        mood_plasticity: 0.7,
+        mood_inhibition: 0.3
+      },
+      labels: %{confidence: 0.8, uncertainty: 0.2, stability: 0.75}
+    }
+    |> then(&Dataset.to_rows([&1]))
+    |> Tensor.from_rows()
+  end
+end
+```
+
+**Step 3: Run**
+
+```bash
+mix test apps/brain/test/brain/self_calibration/artifact_test.exs
+mix compile
+```
+
+If that passes, we have a real persistence boundary for trained artifacts. Then the next step is loading that artifact for advisory prediction.
+
+> User:
+tests pass mix compiles
+
+> Assistant:
+Good. Artifact persistence is now in place.
+
+Current ML status:
+
+```text
+[x] Train from synthetic bootstrap JSONL fixture
+[x] Save trained artifact to disk
+[x] Load trained artifact from disk
+[x] Reject invalid artifact files
+```
+
+Next step is **loaded-artifact advisory prediction**.
+
+That means adding a test that proves this full path works:
+
+```text
+JSONL fixture
+-> Dataset.load_jsonl/1
+-> Dataset.to_rows/1
+-> Tensor.from_rows/1
+-> Training.train/2
+-> Artifact.save/2
+-> Artifact.load/1
+-> AxonPredictor.predict/2
+```
+
+The point is to prove a saved and reloaded artifact still works for inference, not just metadata.
+
+Add a test either to `artifact_test.exs` or `axon_predictor_test.exs`. I’d put it in:
+
+```text
+apps/brain/test/brain/self_calibration/axon_predictor_test.exs
+```
+
+Test name:
+
+```elixir
+test "predicts from saved and loaded trained artifact"
+```
+
+After that passes, the next real runtime step is adding a loader function/config path so runtime can load the latest artifact without retraining.

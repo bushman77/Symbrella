@@ -45,6 +45,41 @@ defmodule Brain.SelfCalibration.TrainingTest do
     assert artifact.params != nil
   end
 
+  test "trains advisory axon artifact from synthetic bootstrap JSONL fixture" do
+    path =
+      Path.expand(
+        "../../../priv/self_calibration/symbrella_synthetic_bootstrap_250.jsonl",
+        __DIR__
+      )
+
+    assert {:ok, samples} = Dataset.load_jsonl(path)
+    assert length(samples) == 250
+    assert Enum.all?(samples, &(&1.source == :synthetic or &1.source == :reviewed))
+    assert Enum.count(samples, &(&1.source == :synthetic)) == 249
+
+    rows = Dataset.to_rows(samples)
+
+    assert length(rows.x) == 250
+    assert length(rows.y) == 250
+    assert rows.feature_names == Dataset.feature_names()
+    assert rows.label_names == Dataset.label_names()
+
+    assert {:ok, batch} = Tensor.from_rows(rows)
+    assert {:ok, %Training{} = artifact} = Training.train(batch, epochs: 2, hidden_units: 8)
+
+    assert artifact.status == :trained
+    assert artifact.source == :axon
+    assert artifact.model_version == AxonModel.model_version()
+    assert artifact.feature_names == Dataset.feature_names()
+    assert artifact.label_names == Dataset.label_names()
+    assert artifact.feature_schema_v == 1
+    assert artifact.metrics.epochs == 2
+    assert artifact.meta.batch_size == 250
+    assert artifact.meta.hidden_units == 8
+    assert artifact.meta.trained? == true
+    assert artifact.params != nil
+  end
+
   defp sample_batch do
     %Sample{
       features: %{

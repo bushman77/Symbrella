@@ -30,6 +30,7 @@ defmodule Brain.SelfCalibration.Features do
         uncertainty: number(self_model.uncertainty),
         stability: number(self_model.stability)
       },
+      raw: normalize_raw(Keyword.get(opts, :raw, %{})),
       source: Keyword.get(opts, :source, :runtime),
       meta: %{
         self_model_v: self_model.v,
@@ -58,7 +59,8 @@ defmodule Brain.SelfCalibration.Features do
   defp count(value) when is_integer(value), do: value
   defp count(value) when is_list(value), do: length(value)
   defp count(_), do: 0
-
+  defp normalize_raw(%{} = raw), do: raw
+  defp normalize_raw(_), do: %{}
   defp number(value) when is_integer(value), do: value * 1.0
   defp number(value) when is_float(value), do: value
   defp number(_), do: 0.0

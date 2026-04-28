@@ -1,5 +1,6 @@
 defmodule Brain.IntrospectionTest do
   use ExUnit.Case, async: false
+  alias Brain.SelfCalibration.Logger, as: CalibrationLogger
 
   setup do
     ensure_started(Brain)
@@ -60,5 +61,60 @@ defmodule Brain.IntrospectionTest do
     assert meta[:v] == 1
     assert meta[:target] == :assistant
     assert meta[:lifg_choices_count] == 1
+  end
+
+  test "logs calibration sample with bounded raw runtime context" do
+    old_cfg = Application.get_env(:brain, CalibrationLogger)
+
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "symbrella-introspection-calibration-#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    Application.put_env(:brain, CalibrationLogger, enabled?: true, path: path)
+
+    on_exit(fn ->
+      if old_cfg do
+        Application.put_env(:brain, CalibrationLogger, old_cfg)
+      else
+        Application.delete_env(:brain, CalibrationLogger)
+      end
+
+      File.rm(path)
+    end)
+
+    resolved = %{
+      lifg_choices: [%{id: "hello|interjection|0"}],
+      acc_conflict: 0.0509,
+      frame_run_id: "frame-test"
+    }
+
+    appraisal = %{
+      valence: 0.2,
+      arousal: 0.3,
+      dominance: 0.4,
+      evidence: %{
+        target: :assistant,
+        attribution: %{confidence: 0.9}
+      }
+    }
+
+    assert {:ok, %Brain.SelfModel{}} =
+             Brain.Introspection.update_from_resolved(resolved, appraisal)
+
+    assert [line] = path |> File.read!() |> String.split("\n", trim: true)
+    assert {:ok, decoded} = Jason.decode(line)
+
+    assert decoded["source"] == "runtime"
+    assert decoded["raw"]["resolved"]["acc_conflict"] == 0.0509
+    assert decoded["raw"]["resolved"]["frame_run_id"] == "frame-test"
+    assert decoded["raw"]["appraisal"]["valence"] == 0.2
+    assert decoded["raw"]["wm"]
+    assert decoded["raw"]["errors"] == []
+
+    assert decoded["features"]["lifg_choices_count"] == 1
+    assert decoded["features"]["appraisal_valence"] == 0.2
+    assert decoded["features"]["attribution_confidence"] == 0.9
   end
 end

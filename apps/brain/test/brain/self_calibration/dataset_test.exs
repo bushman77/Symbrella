@@ -80,6 +80,47 @@ defmodule Brain.SelfCalibration.DatasetTest do
     assert rows.y == [[0.8, 0.0, 0.0]]
   end
 
+  test "loads synthetic JSONL source without rewriting provenance" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "symbrella-self-calibration-synthetic-#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    on_exit(fn -> File.rm(path) end)
+
+    encoded =
+      Jason.encode!(%{
+        v: 1,
+        source: "synthetic",
+        features: %{
+          appraisal_valence: 0.1,
+          appraisal_arousal: 0.2,
+          appraisal_dominance: 0.3,
+          attribution_confidence: 0.4,
+          lifg_choices_count: 2,
+          cognitive_load: 0.5,
+          recent_error_count: 1,
+          mood_vigilance: 0.6,
+          mood_plasticity: 0.7,
+          mood_inhibition: 0.8
+        },
+        labels: %{confidence: 0.9, uncertainty: 0.1, stability: 0.85},
+        meta: %{feature_schema_v: 1, label_source: "synthetic_symbrella_guided"}
+      })
+
+    File.write!(path, encoded <> "\n")
+
+    assert {:ok, [loaded]} = Dataset.load_jsonl(path)
+    assert loaded.source == :synthetic
+    assert loaded.meta.label_source == "synthetic_symbrella_guided"
+
+    rows = Dataset.to_rows([loaded])
+
+    assert rows.x == [[0.1, 0.2, 0.3, 0.4, 2.0, 0.5, 1.0, 0.6, 0.7, 0.8]]
+    assert rows.y == [[0.9, 0.1, 0.85]]
+  end
+
   test "missing values default to zero rows" do
     rows = Dataset.to_rows([%Sample{}])
 

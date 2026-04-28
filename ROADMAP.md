@@ -262,7 +262,7 @@ Implemented:
 Remaining:
 
 - [ ] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
-- [ ] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.
+- [x] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.
 - [ ] Hippocampus-facing self-memory helper for self-tagged episodic writes.
 - [ ] `Core.Response` integration: self-state affects response mode and planning.
 
@@ -611,7 +611,7 @@ Focus:
 
 Deliverables:
 
-- [ ] `Brain.MetaMonitor`.
+- [x] `Brain.MetaMonitor`.
 - [ ] Contradiction flags.
 - [ ] Instability detector.
 - [ ] Overload detector.
@@ -645,6 +645,19 @@ Deliverables:
 - [ ] Measurable telemetry counters per coupling point.
 - [ ] Tests proving self-state changes downstream decisions.
 - [ ] Tests proving calibration predictions do not bypass rule gates.
+## 9) Telemetry And LiveView Requirements
+
+Minimum telemetry set:
+
+- [x] `[:brain, :affect, :appraisal]`
+- [x] `[:brain, :mood, :appraisal_applied]`
+- [x] `[:brain, :self_model, :update]`
+- [x] `[:brain, :self_calibration, :sample_logged]`
+- [x] `[:brain, :self_calibration, :prediction]`
+- [x] `[:brain, :self_calibration, :blend]`
+- [x] `[:brain, :self_model, :continuity_restored]`
+- [x] `[:brain, :meta_monitor, :warning]`
+- [ ] `[:brain, :response, :mode_selected]`
 
 ---
 
@@ -662,19 +675,6 @@ Deliverables:
 
 ---
 
-## 9) Telemetry And LiveView Requirements
-
-Minimum telemetry set:
-
-- [x] `[:brain, :affect, :appraisal]`
-- [x] `[:brain, :mood, :appraisal_applied]`
-- [x] `[:brain, :self_model, :update]`
-- [x] `[:brain, :self_calibration, :sample_logged]`
-- [x] `[:brain, :self_calibration, :prediction]`
-- [x] `[:brain, :self_calibration, :blend]`
-- [x] `[:brain, :self_model, :continuity_restored]`
-- [ ] `[:brain, :meta_monitor, :warning]`
-- [ ] `[:brain, :response, :mode_selected]`
 
 Minimum HUD panels:
 
