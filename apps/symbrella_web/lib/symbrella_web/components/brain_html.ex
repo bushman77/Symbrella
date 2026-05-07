@@ -341,6 +341,9 @@ defmodule SymbrellaWeb.BrainHTML do
 
     view = filtered |> Enum.take(assigns[:limit] || 50)
     decorated = decorate_bb_view(view)
+    copy_target_id = "blackboard-copy-target"
+    copy_button_id = "blackboard-copy-btn"
+    copy_dump = blackboard_copy_dump(filtered)
 
     assigns =
       assigns
@@ -350,6 +353,9 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:fcount, length(filtered))
       |> assign(:view, view)
       |> assign(:decorated, decorated)
+      |> assign(:copy_target_id, copy_target_id)
+      |> assign(:copy_button_id, copy_button_id)
+      |> assign(:copy_dump, copy_dump)
 
     ~H"""
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
@@ -373,6 +379,18 @@ defmodule SymbrellaWeb.BrainHTML do
             />
           </form>
           <button
+            id={@copy_button_id}
+            type="button"
+            phx-hook="ClipboardCopy"
+            data-clipboard-target={"##{@copy_target_id}"}
+            class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 dark:border-gray-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-neutral-900 disabled:opacity-60"
+            aria-label="Copy blackboard feed"
+            title="Copy blackboard feed"
+          >
+            <.icon name="hero-clipboard-document" class="w-3.5 h-3.5" />
+            <span>Copy</span>
+          </button>
+          <button
             type="button"
             phx-click="bb_clear"
             class="rounded-md border border-gray-200 dark:border-gray-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-neutral-900"
@@ -381,6 +399,8 @@ defmodule SymbrellaWeb.BrainHTML do
           </button>
         </div>
       </div>
+
+      <pre id={@copy_target_id} class="sr-only"><%= @copy_dump %></pre>
 
       <div class="mt-3 space-y-2">
         <%= if @view == [] do %>
@@ -583,6 +603,35 @@ defmodule SymbrellaWeb.BrainHTML do
   defp inspect_preview(env) do
     s = inspect(env, pretty: false, limit: 50, printable_limit: 300)
     if byte_size(s) > 120, do: binary_part(s, 0, 120) <> "…", else: s
+  end
+
+  defp blackboard_copy_dump(events) when is_list(events) do
+    events
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n\n", fn {ev, idx} ->
+      [
+        "##{idx} tag=#{to_string(ev.tag)}",
+        copy_frame_line(ev),
+        "preview=#{ev.preview}",
+        inspect(ev.env, pretty: true, width: 100, limit: :infinity)
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+    end)
+  end
+
+  defp blackboard_copy_dump(_), do: ""
+
+  defp copy_frame_line(ev) when is_map(ev) do
+    seq = ev[:frame_seq]
+    ts = ev[:frame_ts_ms] || ev[:at_ms]
+
+    cond do
+      is_integer(seq) and is_integer(ts) and ts > 0 -> "frame=#{seq} at=#{format_ts(ts)}"
+      is_integer(seq) -> "frame=#{seq}"
+      is_integer(ts) and ts > 0 -> "at=#{format_ts(ts)}"
+      true -> ""
+    end
   end
 
   defp format_age(now_ms, at_ms) when is_integer(at_ms) and at_ms > 0 do

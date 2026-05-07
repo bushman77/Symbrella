@@ -12,12 +12,15 @@ defmodule Core.Response.LlmSynthesis do
 
   require Logger
 
+  alias Core.Telemetry
   alias Core.Response.LlmPrompt
 
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
   @compile {:no_warn_undefined, Brain}
   @compile {:no_warn_undefined, Brain.Introspection}
+  @compile {:no_warn_undefined, Brain.Introspect}
+  @compile {:no_warn_undefined, Brain.MoodCore}
 
   @timeout_ms 15_000
 
@@ -64,6 +67,7 @@ defmodule Core.Response.LlmSynthesis do
     session_id = Map.get(context, :session_id, :global)
 
     system_prompt = LlmPrompt.build_system_prompt(context)
+    emit_prompt_event(system_prompt, user_text, context)
     history = history_messages(session_id, @history_turn_pairs)
 
     messages =
@@ -102,11 +106,13 @@ defmodule Core.Response.LlmSynthesis do
   defp prompt_context(user_text, features, decision, mood) do
     wm_items = safe_wm_items()
     self_model = safe_self_model()
+    runtime_state = safe_runtime_state(wm_items)
 
     features =
       features
       |> ensure_map()
       |> put_if_missing(:self_model, self_model)
+      |> put_if_missing(:runtime_state, runtime_state)
 
     %{
       user_text: user_text,
@@ -115,6 +121,7 @@ defmodule Core.Response.LlmSynthesis do
       mood: ensure_map(mood),
       wm_items: wm_items,
       self_model: self_model,
+      runtime_state: runtime_state,
       comprehension: Map.get(features, :comprehension),
       session_id: Map.get(features, :session_id, :global)
     }
@@ -261,6 +268,37 @@ defmodule Core.Response.LlmSynthesis do
       :ok
   end
 
+  defp emit_prompt_event(system_prompt, user_text, context) do
+    {system_preview, system_truncated?} = cap_text(system_prompt, @max_system_chars)
+    {user_preview, user_truncated?} = cap_text(user_text, @max_user_chars)
+
+    Telemetry.emit(
+      [:core, :response, :prompt],
+      %{
+        system_chars: String.length(system_prompt),
+        user_chars: String.length(to_string(user_text || ""))
+      },
+      %{
+        session_id: Map.get(context, :session_id, :global),
+        intent: get_in_map(context, [:features, :intent]),
+        mode: get_in_map(context, [:decision, :mode]),
+        tone: get_in_map(context, [:decision, :tone]),
+        response_profile: prompt_line_value(system_prompt, "Response profile:"),
+        simulated_affect: prompt_line_value(system_prompt, "Simulated affect:"),
+        personality_state: prompt_line_value(system_prompt, "Personality state:"),
+        system_sha256: sha256_hex(system_prompt),
+        system_prompt: system_preview,
+        system_truncated?: system_truncated?,
+        user_text: user_preview,
+        user_truncated?: user_truncated?
+      }
+    )
+  rescue
+    e ->
+      Logger.debug("[LlmSynthesis] prompt telemetry failed: #{Exception.message(e)}")
+      :ok
+  end
+
   defp extract_system_user(messages) when is_list(messages) do
     sys =
       messages
@@ -293,6 +331,26 @@ defmodule Core.Response.LlmSynthesis do
     :crypto.hash(:sha256, text)
     |> Base.encode16(case: :lower)
   end
+
+  defp prompt_line_value(prompt, prefix) when is_binary(prompt) and is_binary(prefix) do
+    prompt
+    |> String.split("\n")
+    |> Enum.find("", &String.starts_with?(&1, prefix))
+    |> String.replace_prefix(prefix, "")
+    |> String.trim()
+    |> String.trim_trailing(".")
+  end
+
+  defp get_in_map(map, keys) when is_map(map) and is_list(keys) do
+    Enum.reduce_while(keys, map, fn key, acc ->
+      case map_get(acc, key) do
+        nil -> {:halt, nil}
+        value -> {:cont, value}
+      end
+    end)
+  end
+
+  defp get_in_map(_, _), do: nil
 
   defp safe_wm_items do
     if Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) do
@@ -328,6 +386,160 @@ defmodule Core.Response.LlmSynthesis do
     end
   end
 
+  defp safe_runtime_state(wm_items) do
+    mood = safe_mood_snapshot()
+    lifg = safe_lifg_runtime()
+    wm = wm_runtime(wm_items)
+
+    %{
+      source: :brain,
+      phase: :prompt_context,
+      status: :ready,
+      mood: mood_values(mood),
+      neuromodulators: neuromodulator_values(mood),
+      tone_hint: map_get(mood, :tone_hint),
+      wm: wm,
+      lifg: lifg
+    }
+  end
+
+  defp safe_mood_snapshot do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
+      try do
+        Brain.MoodCore.snapshot()
+      rescue
+        _ -> %{}
+      catch
+        :exit, _ -> %{}
+      end
+    else
+      %{}
+    end
+  end
+
+  defp safe_lifg_runtime do
+    if Code.ensure_loaded?(Brain.Introspect) and function_exported?(Brain.Introspect, :snapshot, 1) do
+      try do
+        Brain.Introspect.snapshot(:lifg)
+        |> lifg_runtime_from_snapshot()
+      rescue
+        _ -> %{}
+      catch
+        :exit, _ -> %{}
+      end
+    else
+      %{}
+    end
+  end
+
+  defp lifg_runtime_from_snapshot(%{} = snapshot) do
+    state = map_get(snapshot, :state, %{})
+    last = map_get(state, :last, %{})
+    audit = map_get(last, :audit, %{})
+    guards = map_get(last, :guards, %{})
+    meta = map_get(last, :meta, %{})
+    choices = List.wrap(map_get(last, :choices, []))
+
+    missing = number(map_get(guards, :missing_candidates) || map_get(audit, :missing_candidates))
+    weak = number(map_get(audit, :weak_decisions))
+    fallback = number(map_get(audit, :fallback_winners) || map_get(audit, :mwe_fallbacks))
+    chargram = number(map_get(guards, :chargram_violation) || map_get(audit, :chargram_violation))
+    boundary = boundary_count(guards, audit)
+    acc_conflict = map_get(meta, :acc_conflict)
+
+    degraded? =
+      missing > 0 or weak > 0 or fallback > 0 or chargram > 0 or boundary > 0 or
+        (is_number(acc_conflict) and acc_conflict >= 0.5)
+
+    %{
+      focused?: true,
+      running?: map_get(snapshot, :running?) == true,
+      intent: map_get(last, :intent),
+      confidence: map_get(last, :confidence),
+      choices_count: length(choices),
+      missing_candidates: missing,
+      weak_decisions: weak,
+      fallback_winners: fallback,
+      chargram_violations: chargram,
+      boundary_drops: boundary,
+      acc_conflict: acc_conflict,
+      degraded?: degraded?
+    }
+  end
+
+  defp lifg_runtime_from_snapshot(_), do: %{}
+
+  defp wm_runtime(wm_items) when is_list(wm_items) do
+    capacity =
+      if Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) do
+        try do
+          case Brain.snapshot_wm() do
+            %{cfg: %{capacity: cap}} when is_number(cap) -> cap
+            _ -> nil
+          end
+        rescue
+          _ -> nil
+        catch
+          :exit, _ -> nil
+        end
+      end
+
+    size = length(wm_items)
+    load = if is_number(capacity) and capacity > 0, do: size / capacity, else: nil
+
+    %{
+      size: size,
+      capacity: capacity,
+      load: load,
+      concepts: LlmPrompt.summarize_wm(wm_items)
+    }
+  end
+
+  defp mood_values(mood) do
+    case map_get(mood, :mood) do
+      values when is_map(values) ->
+        %{
+          exploration: map_get(values, :exploration),
+          inhibition: map_get(values, :inhibition),
+          vigilance: map_get(values, :vigilance),
+          plasticity: map_get(values, :plasticity)
+        }
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp neuromodulator_values(mood) do
+    case map_get(mood, :levels) do
+      levels when is_map(levels) ->
+        %{
+          dopamine: map_get(levels, :da),
+          serotonin: map_get(levels, :"5ht"),
+          glutamate: map_get(levels, :glu),
+          norepinephrine: map_get(levels, :ne)
+        }
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp boundary_count(guards, audit) do
+    rejected = map_get(guards, :rejected_by_boundary) || map_get(audit, :rejected_by_boundary)
+
+    cond do
+      is_list(rejected) -> length(rejected)
+      is_binary(rejected) -> String.length(rejected)
+      is_number(map_get(audit, :boundary_drops)) -> map_get(audit, :boundary_drops)
+      true -> 0
+    end
+  end
+
+  defp number(value) when is_integer(value), do: value
+  defp number(value) when is_float(value), do: round(value)
+  defp number(_), do: 0
+
   defp self_model_log(nil), do: nil
 
   defp self_model_log(model) do
@@ -343,6 +555,14 @@ defmodule Core.Response.LlmSynthesis do
   defp model_value(model, key) when is_map(model), do: Map.get(model, key)
 
   defp model_value(_, _), do: nil
+
+  defp map_get(map, key, default \\ nil)
+
+  defp map_get(map, key, default) when is_map(map) and is_atom(key) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
+
+  defp map_get(_, _, default), do: default
 
   defp ensure_map(map) when is_map(map), do: map
   defp ensure_map(_), do: %{}

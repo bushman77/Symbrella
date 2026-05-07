@@ -43,11 +43,11 @@ defmodule Core.Response.ModesTest do
     end
   end
 
-  describe "compose/4 – pair_programmer warm collaborator" do
-    test "warm pair_programmer copy mentions plan and full file option" do
-      text = Modes.compose(:refactor, :warm, :pair_programmer, %{})
+  describe "compose/4 – collaborator warm collaborator" do
+    test "warm collaborator copy mentions path and full file option" do
+      text = Modes.compose(:refactor, :warm, :collaborator, %{})
 
-      assert text =~ "concise plan"
+      assert text =~ "concise path"
       assert text =~ "full file"
       assert text =~ "paste-ready"
     end

@@ -72,6 +72,35 @@ defmodule Brain.BlackboardTelemetryBridgeTest do
                    500
   end
 
+  test "bridges [:core, :response, :prompt] telemetry onto brain:blackboard" do
+    :telemetry.execute(
+      [:core, :response, :prompt],
+      %{system_chars: 120, user_chars: 37},
+      %{
+        response_profile: "self_state_boundary",
+        simulated_affect: "label=steady_care",
+        system_prompt: "You are Symbrella.\nResponse profile: self_state_boundary.",
+        system_truncated?: false
+      }
+    )
+
+    assert_receive {:blackboard,
+                    %{
+                      kind: :telemetry,
+                      event: [:core, :response, :prompt],
+                      measurements: %{system_chars: 120, user_chars: 37},
+                      meta: %{
+                        response_profile: "self_state_boundary",
+                        simulated_affect: "label=steady_care",
+                        system_prompt: prompt,
+                        system_truncated?: false
+                      }
+                    }},
+                   500
+
+    assert prompt =~ "Response profile: self_state_boundary"
+  end
+
   defp ensure_ready do
     wait_until(fn ->
       s = Blackboard.state()

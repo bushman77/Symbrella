@@ -150,4 +150,39 @@ defmodule Brain.HippocampusBehaviorTest do
     assert meta.self? == true
     assert meta.autobiographical? == true
   end
+
+  test "fact/1 recognizes user_name by explicit fact key even without user_name tag" do
+    Hippocampus.encode(slate_with("Curtis"), %{
+      kind: :fact,
+      key: :user_name,
+      value: "Curtis",
+      tags: ["fact"]
+    })
+
+    assert Hippocampus.fact(:user_name) == "Curtis"
+  end
+
+  test "fact/1 recognizes user_name key nested in episode metadata" do
+    Hippocampus.encode(
+      %{
+        winners: [%{id: "Curtis|proper|0", lemma: "Curtis"}],
+        si: %{"episode" => %{"meta" => %{"key" => "user_name", "value" => "Curtis"}}}
+      },
+      %{tags: ["fact"]}
+    )
+
+    assert Hippocampus.fact(:user_name) == "Curtis"
+  end
+
+  test "fact/1 recognizes user_name key in persisted DB si metadata shape" do
+    Hippocampus.encode(
+      %{
+        winners: [%{id: "Bradley|proper|0", lemma: "Bradley"}],
+        si: %{"meta" => %{"key" => "user_name", "value" => "Bradley"}}
+      },
+      %{tags: ["fact"]}
+    )
+
+    assert Hippocampus.fact(:user_name) == "Bradley"
+  end
 end

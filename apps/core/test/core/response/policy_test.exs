@@ -119,7 +119,7 @@ defmodule Core.Response.PolicyTest do
   end
 
   describe "decide/1 – warm collaborator profile" do
-    test "benign helpful intent with normal vigilance and high confidence chooses warm pair programmer" do
+    test "benign helpful intent with normal vigilance and high confidence chooses warm collaborator" do
       f =
         features(%{
           intent: :refactor,
@@ -135,7 +135,7 @@ defmodule Core.Response.PolicyTest do
 
       decision = Policy.decide(f)
 
-      assert decision.mode == :pair_programmer
+      assert decision.mode == :collaborator
       assert decision.action == :act_first
       assert decision.tone == :warm
 
@@ -147,7 +147,7 @@ defmodule Core.Response.PolicyTest do
              } = decision.scores
     end
 
-    test "benign helpful intent with normal vigilance and medium confidence also chooses warm pair programmer" do
+    test "benign helpful intent with normal vigilance and medium confidence also chooses warm collaborator" do
       f =
         features(%{
           intent: :plan,
@@ -163,7 +163,7 @@ defmodule Core.Response.PolicyTest do
 
       decision = Policy.decide(f)
 
-      assert decision.mode == :pair_programmer
+      assert decision.mode == :collaborator
       assert decision.action == :act_first
       assert decision.tone == :warm
 
@@ -191,11 +191,34 @@ defmodule Core.Response.PolicyTest do
 
       decision = Policy.decide(f)
 
-      refute decision.mode == :pair_programmer
+      refute decision.mode == :collaborator
       refute decision.tone == :warm
 
       # Scores should not carry the warm_collaborator profile
       refute match?(%{profile: :warm_collaborator}, decision.scores)
+    end
+  end
+
+  describe "decide/1 – conversational fallback" do
+    test "ask-style self-state concern stays in scribe mode" do
+      f =
+        features(%{
+          intent: :ask,
+          intent_in: :ask,
+          text: "how are you, im concerned about you",
+          vig: 0.4,
+          vigilance_bucket: :normal,
+          risk_bucket: :low,
+          benign?: true,
+          hostile?: false,
+          confidence_bucket: :med
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.mode == :scribe
+      assert decision.action == :offer_options
+      refute Map.get(decision.scores, :profile) == :warm_collaborator
     end
   end
 

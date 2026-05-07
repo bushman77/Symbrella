@@ -67,7 +67,7 @@ Hooks.ClipboardCopy = {
     this.targetSelector = this.el.dataset.clipboardTarget
     this.onClick = async () => {
       const target = document.querySelector(this.targetSelector)
-      const text = target?.innerText || ""
+      const text = target?.textContent || target?.innerText || ""
       if (!text) return
       try { await navigator.clipboard.writeText(text) } catch (_) { /* fallback handled elsewhere if you added it */ }
       // quick visual feedback
@@ -318,4 +318,3 @@ window.addEventListener("phx:page-loading-stop", () => topbar.hide())
 
 liveSocket.connect()
 window.liveSocket = liveSocket
-

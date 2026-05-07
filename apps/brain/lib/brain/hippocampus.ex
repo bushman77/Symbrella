@@ -321,10 +321,11 @@ defmodule Brain.Hippocampus do
   defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
     tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
 
-    Enum.any?(tags, fn t ->
-      s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
-      String.downcase(s) == "user_name"
-    end)
+    fact_key?(meta, :user_name) or fact_key?(slate, :user_name) or fact_key_from_si?(slate, :user_name) or
+      Enum.any?(tags, fn t ->
+        s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
+        String.downcase(s) == "user_name"
+      end)
   end
 
   defp fact_episode?(_ep, _key), do: false
@@ -338,13 +339,43 @@ defmodule Brain.Hippocampus do
   defp fact_value_from_si(%{slate: slate}) do
     si = slate[:si] || slate["si"] || %{}
 
-    get_in(si, [:episode, :meta, :value]) ||
+    get_in(si, [:meta, :value]) ||
+      get_in(si, ["meta", "value"]) ||
+      get_in(si, ["meta", :value]) ||
+      get_in(si, [:meta, "value"]) ||
+      get_in(si, [:episode, :meta, :value]) ||
       get_in(si, ["episode", "meta", "value"]) ||
       get_in(si, ["episode", "meta", :value]) ||
       get_in(si, [:episode, "meta", "value"])
   end
 
   defp fact_value_from_si(_), do: nil
+
+  defp fact_key?(map, key) when is_map(map) and is_atom(key) do
+    value = Map.get(map, :key) || Map.get(map, "key")
+    value == key or to_string(value || "") == Atom.to_string(key)
+  end
+
+  defp fact_key?(_, _), do: false
+
+  defp fact_key_from_si?(%{si: si}, key), do: fact_key_from_si?(si, key)
+  defp fact_key_from_si?(%{"si" => si}, key), do: fact_key_from_si?(si, key)
+
+  defp fact_key_from_si?(si, key) when is_map(si) and is_atom(key) do
+    value =
+      get_in(si, [:meta, :key]) ||
+        get_in(si, ["meta", "key"]) ||
+        get_in(si, ["meta", :key]) ||
+        get_in(si, [:meta, "key"]) ||
+        get_in(si, [:episode, :meta, :key]) ||
+        get_in(si, ["episode", "meta", "key"]) ||
+        get_in(si, ["episode", "meta", :key]) ||
+        get_in(si, [:episode, "meta", "key"])
+
+    value == key or to_string(value || "") == Atom.to_string(key)
+  end
+
+  defp fact_key_from_si?(_, _), do: false
 
   defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
     self_memory_meta?(meta) or self_memory_tags?(meta) or self_memory_tags?(slate)
@@ -460,8 +491,22 @@ defmodule Brain.Hippocampus do
     si = Map.get(row, :si) || %{}
     tags = Map.get(row, :tags) || []
 
+    meta_key =
+      get_in(si, ["meta", "key"]) ||
+        get_in(si, [:meta, :key]) ||
+        get_in(si, ["meta", :key]) ||
+        get_in(si, [:meta, "key"]) ||
+        get_in(si, ["episode", "meta", "key"]) ||
+        get_in(si, [:episode, :meta, :key]) ||
+        get_in(si, ["episode", "meta", :key]) ||
+        get_in(si, [:episode, "meta", "key"])
+
     meta_value =
-      get_in(si, ["episode", "meta", "value"]) ||
+      get_in(si, ["meta", "value"]) ||
+        get_in(si, [:meta, :value]) ||
+        get_in(si, ["meta", :value]) ||
+        get_in(si, [:meta, "value"]) ||
+        get_in(si, ["episode", "meta", "value"]) ||
         get_in(si, [:episode, :meta, :value]) ||
         get_in(si, ["episode", "meta", :value]) ||
         get_in(si, [:episode, "meta", "value"])
@@ -477,6 +522,7 @@ defmodule Brain.Hippocampus do
         episode_id: Map.get(row, :id),
         inserted_at: Map.get(row, :inserted_at),
         tags: tags,
+        key: meta_key,
         value: meta_value
       },
       norms: norms

@@ -420,7 +420,7 @@ defmodule Core.Response do
   end
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Smalltalk / utility overrides (fixes “pair_programmer menu on greet/time”)
+  # Smalltalk / utility overrides (keeps utility turns out of implementation mode)
   # ────────────────────────────────────────────────────────────────────────────
 
   defp force_overrides(features, decision, guard) do
@@ -549,7 +549,7 @@ defmodule Core.Response do
           decision.mode == :explainer ->
             :calm_explainer
 
-          decision.tone == :warm and decision.mode == :pair_programmer ->
+          decision.tone == :warm and decision.mode == :collaborator ->
             :warm_collaborator
 
           decision.mode == :coach and features.intent == :bug ->

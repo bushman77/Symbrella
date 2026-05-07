@@ -57,7 +57,7 @@ defmodule Core.Response.LlmPromptTest do
 
   test "build_system_prompt/4 injects active concepts from WM" do
     features = %{intent: :command}
-    decision = %{tone: :warm, mode: :pair_programmer}
+    decision = %{tone: :warm, mode: :collaborator}
     mood = %{tone_hint: :neutral}
 
     wm = [
@@ -73,14 +73,14 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Tone: warm, engaged, and encouraging."
 
     assert prompt =~
-             "Use technical-work behavior only when the user's current message explicitly asks for code"
+             "Use implementation behavior only when the user's current message explicitly asks for code"
 
     assert prompt =~ "Active concepts: working, memory, you."
   end
 
   test "build_system_prompt/4 surfaces working-memory concepts ahead of filler terms when WM front is topic-first" do
     features = %{intent: :command}
-    decision = %{tone: :warm, mode: :pair_programmer}
+    decision = %{tone: :warm, mode: :collaborator}
     mood = %{tone_hint: :neutral}
 
     wm = [
@@ -99,7 +99,7 @@ defmodule Core.Response.LlmPromptTest do
 
   test "build_system_prompt/4 omits active concepts line when WM is empty" do
     features = %{intent: :command}
-    decision = %{tone: :warm, mode: :pair_programmer}
+    decision = %{tone: :warm, mode: :collaborator}
     mood = %{}
 
     prompt = LlmPrompt.build_system_prompt(features, decision, mood, [])
@@ -130,5 +130,148 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "understood=buy drugs"
     assert prompt =~ "uncertain=get wasted"
     assert prompt =~ "degraded=true"
+  end
+
+  test "build_system_prompt/1 chooses safety redirect profile from guardrail evidence" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{intent: :illicit_request, guardrail?: true, risk_bucket: :high},
+        decision: %{tone: :firm, mode: :editor, action: :safe_redirect},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response profile: safety_redirect."
+    assert prompt =~ "decline unsafe or disallowed help briefly"
+  end
+
+  test "build_system_prompt/1 chooses semantic repair profile from degraded comprehension" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          confidence_bucket: :low,
+          comprehension: %{degraded?: true, uncertain: ["referent"], reasons: [:weak_decision_rate_high]}
+        },
+        decision: %{tone: :neutral, mode: :coach},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response profile: semantic_repair."
+    assert prompt =~ "separate what is understood from what is uncertain"
+  end
+
+  test "build_system_prompt/1 chooses brain explainer profile from policy profile" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{intent: :question, text: "how does working memory change your answer?"},
+        decision: %{tone: :warm, mode: :explainer, scores: %{profile: :calm_explainer}},
+        mood: %{},
+        wm_items: [%{id: "working memory|phrase|0", payload: %{lemma: "working memory"}}]
+      })
+
+    assert prompt =~ "Response profile: brain_explainer."
+    assert prompt =~ "software control signals and evidence sources"
+  end
+
+  test "build_system_prompt/1 includes compact runtime neuromodulator and LIFG state" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          text: "what does lifg think?",
+          runtime_state: %{
+            source: :brain,
+            phase: :prompt_context,
+            status: :ready,
+            mood: %{exploration: 0.4, inhibition: 0.6, vigilance: 0.4, plasticity: 0.4},
+            neuromodulators: %{
+              dopamine: 0.4,
+              serotonin: 0.6,
+              glutamate: 0.4,
+              norepinephrine: 0.4
+            },
+            wm: %{size: 2, capacity: 7, load: 2 / 7},
+            lifg: %{
+              focused?: true,
+              running?: true,
+              intent: :unknown,
+              confidence: 0.4,
+              choices_count: 46,
+              missing_candidates: 65,
+              weak_decisions: 3,
+              fallback_winners: 15,
+              chargram_violations: 1,
+              boundary_drops: 1,
+              acc_conflict: 0.5,
+              degraded?: true
+            }
+          }
+        },
+        decision: %{tone: :neutral, mode: :coach},
+        mood: %{},
+        wm_items: [%{id: "working memory|phrase|core", payload: %{lemma: "working memory"}}]
+      })
+
+    assert prompt =~ "Runtime state:"
+    assert prompt =~ "neuromodulators=da=0.4, 5ht=0.6, glu=0.4, ne=0.4"
+    assert prompt =~ "lifg="
+    assert prompt =~ "missing=65"
+    assert prompt =~ "fallback=15"
+    assert prompt =~ "degraded=true"
+    assert prompt =~ "Response profile: semantic_repair."
+  end
+
+  test "build_system_prompt/1 chooses self check profile from elevated vigilance" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          runtime_state: %{
+            mood: %{vigilance: 0.86},
+            neuromodulators: %{norepinephrine: 0.84}
+          }
+        },
+        decision: %{tone: :neutral, mode: :coach},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response profile: self_check."
+  end
+
+  test "build_system_prompt/1 routes self-state concern away from semantic repair" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :ask,
+          text: "how are you feeling, im concerned about you.",
+          runtime_state: %{
+            mood: %{exploration: 0.4, inhibition: 0.6, vigilance: 0.4, plasticity: 0.4},
+            neuromodulators: %{norepinephrine: 0.4},
+            lifg: %{
+              degraded?: true,
+              confidence: 0.7,
+              missing_candidates: 11,
+              weak_decisions: 8,
+              fallback_winners: 3
+            }
+          }
+        },
+        decision: %{tone: :warm, mode: :chat},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response profile: self_state_boundary."
+    assert prompt =~ "Simulated affect: label=steady_care"
+    assert prompt =~ "warmth, bounded honesty, and a brief self-state explanation"
+    assert prompt =~ "Symbrella's runtime-derived tone, not human emotion or consciousness"
+    assert prompt =~ "does not have human feelings or consciousness"
+    assert prompt =~ "Do not call yourself a generic tool"
+    assert prompt =~ "do not end with a generic service offer"
+    assert prompt =~ "Do not describe Symbrella as a generic tool"
+    refute prompt =~ "Response profile: semantic_repair."
   end
 end

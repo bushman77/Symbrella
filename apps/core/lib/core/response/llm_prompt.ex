@@ -1,6 +1,9 @@
 defmodule Core.Response.LlmPrompt do
   @moduledoc false
 
+  alias Core.Response.Affect
+  alias Core.Response.Personality
+
   @summary_window 5
 
   @low_info_terms MapSet.new([
@@ -88,6 +91,9 @@ defmodule Core.Response.LlmPrompt do
     self_model = prompt_self_model(features, decision, mood)
     runtime_state = prompt_runtime_state(features, decision, mood)
     comprehension = prompt_comprehension(features, decision, mood)
+    profile_context = %{runtime_state: runtime_state, comprehension: comprehension}
+    personality = Personality.decide(features, decision, mood, wm_items, profile_context)
+    affect = Affect.simulate(personality, runtime_state || %{}, comprehension || %{}, features)
 
     [
       "You are Symbrella.",
@@ -95,6 +101,7 @@ defmodule Core.Response.LlmPrompt do
       "Use mood, working memory, self-state, intent, policy decision, and recent conversation as behavioral context.",
       "Answer ordinary everyday questions as ordinary conversation.",
       "Do not roleplay as a generic coding assistant unless the user's request is actually about code.",
+      "Do not describe Symbrella as a generic tool when answering questions about Symbrella's own state.",
       "Do not append offers about coding, simulations, visualization, implementation, or technical context unless the user explicitly asks for that.",
       "Do not claim sentience, consciousness, feelings, or certainty beyond the runtime evidence.",
       "When the user says something is wrong, slow down and briefly self-check against the prior answer.",
@@ -106,7 +113,12 @@ defmodule Core.Response.LlmPrompt do
       runtime_state_context(runtime_state),
       comprehension_context(comprehension),
       decision_context(intent, mode, action, skill, guardrail?),
+      personality_context(personality),
+      affect_context(affect),
+      response_profile_context(Personality.profile(personality)),
       mode_directive(mode, intent),
+      Personality.directive(personality),
+      Affect.directive(affect),
       wm_context(wm_summary),
       "Respond to the user's actual request in the most natural useful form.",
       "For simple factual questions, answer directly and stop.",
@@ -211,6 +223,11 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add_present("source", state_value(state, :source))
       |> maybe_add_present("phase", state_value(state, :phase))
       |> maybe_add_present("status", state_value(state, :status))
+      |> maybe_add_present("tone_hint", state_value(state, :tone_hint))
+      |> maybe_add_runtime_mood(state_value(state, :mood))
+      |> maybe_add_neuromodulators(state_value(state, :neuromodulators))
+      |> maybe_add_runtime_wm(state_value(state, :wm))
+      |> maybe_add_lifg_runtime(state_value(state, :lifg))
 
     case notes do
       [] -> ""
@@ -258,6 +275,131 @@ defmodule Core.Response.LlmPrompt do
       _ -> "Runtime decision: #{Enum.join(notes, "; ")}."
     end
   end
+
+  defp personality_context(%{} = personality) do
+    values =
+      []
+      |> maybe_add_present("temperament", map_get(personality, :temperament))
+      |> maybe_add_number("assertiveness", map_get(personality, :assertiveness))
+      |> maybe_add_number("curiosity", map_get(personality, :curiosity))
+      |> maybe_add_number("restraint", map_get(personality, :restraint))
+      |> maybe_add_number("warmth", map_get(personality, :warmth))
+      |> maybe_add_number("self_check", map_get(personality, :self_check))
+      |> maybe_add_number("abstraction", map_get(personality, :abstraction))
+      |> maybe_add_present("depth", map_get(personality, :explanation_depth))
+      |> maybe_add_personality_reasons(map_get(personality, :reasons, []))
+
+    case values do
+      [] -> ""
+      _ -> "Personality state: #{Enum.join(values, "; ")}."
+    end
+  end
+
+  defp personality_context(_), do: ""
+
+  defp response_profile_context(profile), do: "Response profile: #{profile}."
+
+  defp affect_context(%{} = affect) do
+    values =
+      []
+      |> maybe_add_present("label", map_get(affect, :label))
+      |> maybe_add_number("valence", map_get(affect, :valence))
+      |> maybe_add_number("arousal", map_get(affect, :arousal))
+      |> maybe_add_number("confidence", map_get(affect, :confidence))
+      |> maybe_add_number("warmth", map_get(affect, :social_warmth))
+      |> maybe_add_number("uncertainty", map_get(affect, :uncertainty))
+      |> maybe_add_number("pressure", map_get(affect, :pressure))
+      |> maybe_add_present("expression", map_get(affect, :expression))
+      |> maybe_add_affect_reasons(map_get(affect, :reasons, []))
+
+    case values do
+      [] -> ""
+      _ -> "Simulated affect: #{Enum.join(values, "; ")}."
+    end
+  end
+
+  defp affect_context(_), do: ""
+
+  defp maybe_add_runtime_mood(notes, mood) when is_map(mood) do
+    values =
+      []
+      |> maybe_add_number("exploration", map_get(mood, :exploration))
+      |> maybe_add_number("inhibition", map_get(mood, :inhibition))
+      |> maybe_add_number("vigilance", map_get(mood, :vigilance))
+      |> maybe_add_number("plasticity", map_get(mood, :plasticity))
+
+    maybe_add(notes, values != [], "mood=#{Enum.join(values, ", ")}")
+  end
+
+  defp maybe_add_runtime_mood(notes, _), do: notes
+
+  defp maybe_add_neuromodulators(notes, mods) when is_map(mods) do
+    values =
+      []
+      |> maybe_add_number("da", map_get(mods, :dopamine))
+      |> maybe_add_number("5ht", map_get(mods, :serotonin))
+      |> maybe_add_number("glu", map_get(mods, :glutamate))
+      |> maybe_add_number("ne", map_get(mods, :norepinephrine))
+
+    maybe_add(notes, values != [], "neuromodulators=#{Enum.join(values, ", ")}")
+  end
+
+  defp maybe_add_neuromodulators(notes, _), do: notes
+
+  defp maybe_add_runtime_wm(notes, wm) when is_map(wm) do
+    details =
+      []
+      |> maybe_add_present("size", map_get(wm, :size))
+      |> maybe_add_present("capacity", map_get(wm, :capacity))
+      |> maybe_add_number("load", map_get(wm, :load))
+
+    maybe_add(notes, details != [], "wm=#{Enum.join(details, ", ")}")
+  end
+
+  defp maybe_add_runtime_wm(notes, _), do: notes
+
+  defp maybe_add_lifg_runtime(notes, lifg) when is_map(lifg) do
+    details =
+      []
+      |> maybe_add_present("focused", map_get(lifg, :focused?))
+      |> maybe_add_present("running", map_get(lifg, :running?))
+      |> maybe_add_present("intent", map_get(lifg, :intent))
+      |> maybe_add_number("confidence", map_get(lifg, :confidence))
+      |> maybe_add_present("choices", map_get(lifg, :choices_count))
+      |> maybe_add_present("missing", map_get(lifg, :missing_candidates))
+      |> maybe_add_present("weak", map_get(lifg, :weak_decisions))
+      |> maybe_add_present("fallback", map_get(lifg, :fallback_winners))
+      |> maybe_add_present("chargram", map_get(lifg, :chargram_violations))
+      |> maybe_add_present("boundary", map_get(lifg, :boundary_drops))
+      |> maybe_add_number("acc_conflict", map_get(lifg, :acc_conflict))
+      |> maybe_add_present("degraded", map_get(lifg, :degraded?))
+
+    maybe_add(notes, details != [], "lifg=#{Enum.join(details, ", ")}")
+  end
+
+  defp maybe_add_lifg_runtime(notes, _), do: notes
+
+  defp maybe_add_personality_reasons(notes, reasons) when is_list(reasons) do
+    values =
+      reasons
+      |> Enum.take(4)
+      |> join_values()
+
+    maybe_add(notes, values != "", "reasons=#{values}")
+  end
+
+  defp maybe_add_personality_reasons(notes, _), do: notes
+
+  defp maybe_add_affect_reasons(notes, reasons) when is_list(reasons) do
+    values =
+      reasons
+      |> Enum.take(4)
+      |> join_values()
+
+    maybe_add(notes, values != "", "reasons=#{values}")
+  end
+
+  defp maybe_add_affect_reasons(notes, _), do: notes
 
   defp skill_label(nil), do: nil
 
@@ -328,8 +470,8 @@ defmodule Core.Response.LlmPrompt do
     end
   end
 
-  defp mode_directive(:pair_programmer, _) do
-    "Use technical-work behavior only when the user's current message explicitly asks for code, debugging, files, commands, architecture, or implementation. Otherwise answer normally."
+  defp mode_directive(:collaborator, _) do
+    "Use implementation behavior only when the user's current message explicitly asks for code, debugging, files, commands, architecture, or implementation. Otherwise answer normally."
   end
 
   defp mode_directive(:coach, :bug) do

@@ -110,7 +110,7 @@ defmodule Core.Response.Policy do
         true ->
           %{
             tone: :neutral,
-            mode: :pair_programmer,
+            mode: :scribe,
             action: :offer_options,
             scores: %{fallback: true},
             overrides: []
@@ -182,7 +182,7 @@ defmodule Core.Response.Policy do
         f.vigilance_bucket == :normal and f.confidence_bucket in [:high, :med] ->
         %{
           tone: :warm,
-          mode: :pair_programmer,
+          mode: :collaborator,
           action: :act_first,
           scores: %{
             profile: :warm_collaborator,
@@ -198,7 +198,7 @@ defmodule Core.Response.Policy do
           {:high, _c, false} ->
             %{
               tone: :neutral,
-              mode: :pair_programmer,
+              mode: :collaborator,
               action: :act_first,
               scores: %{vigilance: :high},
               overrides: []
@@ -208,7 +208,7 @@ defmodule Core.Response.Policy do
           {:extreme, _c, _} ->
             %{
               tone: :neutral,
-              mode: :pair_programmer,
+              mode: :collaborator,
               action: :offer_options,
               scores: %{vigilance: :extreme},
               overrides: []
@@ -246,7 +246,7 @@ defmodule Core.Response.Policy do
           {_v, :high, false} ->
             %{
               tone: :warm,
-              mode: :pair_programmer,
+              mode: :collaborator,
               action: :act_first,
               scores: %{conf: :high},
               overrides: []
@@ -255,7 +255,7 @@ defmodule Core.Response.Policy do
           {_v, :med, false} ->
             %{
               tone: :neutral,
-              mode: :pair_programmer,
+              mode: :collaborator,
               action: :act_first,
               scores: %{conf: :med},
               overrides: []

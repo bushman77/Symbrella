@@ -25,13 +25,13 @@ defmodule Core.Response.PlanWarmCollaboratorFlowTest do
 
     # Policy shape: warm collaborator
     assert tone == :warm
-    assert meta.mode == :pair_programmer
+    assert meta.mode == :collaborator
     assert meta.action == :act_first
     assert meta.intent_inferred == :refactor
     assert meta.profile == :warm_collaborator
 
-    # Text should look like warm pair-programmer, not greeting/coach/editor.
-    assert text =~ "plan"
+    # Text should look like warm collaborator, not greeting/coach/editor.
+    assert text =~ "path"
     assert text =~ "full file"
     assert text =~ "paste-ready"
   end

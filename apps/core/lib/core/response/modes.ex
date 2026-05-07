@@ -9,7 +9,7 @@ defmodule Core.Response.Modes do
     compose(intent, tone, mode, opts) :: String.t()
 
   Supported `mode`s:
-    :pair_programmer | :coach | :scribe | :editor | :explainer
+    :collaborator | :coach | :scribe | :editor | :explainer
 
   Optional `opts` slots (ignored if absent):
     :file_hint    — short path/module to reflect (e.g., "apps/brain/lib/brain/lifg.ex")
@@ -40,7 +40,7 @@ defmodule Core.Response.Modes do
           | :unknown
 
   @type tone :: :warm | :neutral | :firm | :deescalate
-  @type mode :: :pair_programmer | :coach | :scribe | :editor | :explainer
+  @type mode :: :collaborator | :coach | :scribe | :editor | :explainer
 
   @type opts :: %{
           optional(:file_hint) => String.t(),
@@ -96,25 +96,25 @@ defmodule Core.Response.Modes do
 
   # ── Helpful intents (build/plan/refactor/etc.) ──────────────────────────────
 
-  # Pair-programmer: act-focused; invite "full file" only on safe/neutral paths.
-  def compose(intent, tone, :pair_programmer, raw_opts) when intent in @helpful_intents do
+  # Collaborator: act-focused; invite "full file" only on safe/neutral paths.
+  def compose(intent, tone, :collaborator, raw_opts) when intent in @helpful_intents do
     opts = normalize_opts(raw_opts)
-    seed = opts[:variant_seed] || stable_seed(intent, tone, :pair_programmer, opts)
+    seed = opts[:variant_seed] || stable_seed(intent, tone, :collaborator, opts)
 
     base =
       case tone do
         :warm ->
-          "Here's a concise plan. Say \"full file\" for a paste-ready drop-in."
+          "Here's a concise path. Say \"full file\" only if you want a paste-ready drop-in."
 
         :neutral ->
           choose(seed, [
-            "Here's the plan and a next step. Say \"full file\" for a paste-ready module.",
-            "Plan incoming plus the first action. Ask for \"full file\" if you want a drop-in.",
-            "Short plan + next move. Say \"full file\" for a ready-to-paste version."
+            "Here's the path and a next step. Ask for \"full file\" only if you want a paste-ready module.",
+            "Plan plus first action. Ask for \"full file\" if you want a drop-in.",
+            "Short path plus next move. Say \"full file\" for a ready-to-paste version."
           ])
 
         _other ->
-          "I'll keep it focused and safe. Say \"full file\" if you want the drop-in."
+          "I'll keep it focused and safe. Ask for a drop-in only if you need one."
       end
 
     with_file_hint(base, opts[:file_hint])

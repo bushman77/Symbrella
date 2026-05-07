@@ -29,7 +29,7 @@ defmodule Core.Response.PlanCalmExplainerFlowTest do
     assert meta.intent_inferred == :explain
     assert meta.profile == :calm_explainer
 
-    # Should be using explainer bullets, not pair_programmer/coach/editor copy
+    # Should be using explainer bullets, not collaborator/coach/editor copy
     assert text =~ "Here's the short version of how this works"
     assert text =~ "1) What changes, at a glance"
   end

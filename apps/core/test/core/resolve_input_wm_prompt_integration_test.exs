@@ -58,7 +58,7 @@ defmodule Core.ResolveInputWMPromptIntegrationTest do
     prompt =
       LlmPrompt.build_system_prompt(
         %{intent: :command},
-        %{tone: :warm, mode: :pair_programmer},
+        %{tone: :warm, mode: :collaborator},
         %{tone_hint: :neutral},
         wm
       )
