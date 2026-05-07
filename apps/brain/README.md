@@ -1,231 +1,153 @@
-# Brain â€” Process Layer of Symbrella
+# Brain - Process Layer of Symbrella
 
-This app hosts the **process-level â€œbrainâ€** for Symbrellaâ€™s Neuro-Symbolic Synthetic Intelligence (NSSI).
+This app hosts the process-level "brain" for Symbrella's Neuro-Symbolic
+Synthetic Intelligence (NSSI).
 
-Scientific accuracy note: Brain region names in this app are engineering
-analogies, not biological proof. See
+Scientific accuracy note: Brain region names are engineering analogies, not
+biological proof. See
 [`docs/brain-core-scientific-contract.md`](../../docs/brain-core-scientific-contract.md)
-for the project-wide contract that separates testable software guarantees from
+for the project-wide contract that separates software guarantees from
 brain-inspired terminology.
 
-Where `core` is mostly about **data structures and orchestration**, `brain` is about **running processes**:
-OTP regions for things like LIFG, Hippocampus, Thalamus, Curiosity, Working Memory, and gating/valuation loops.
+Where `core` is mostly about data structures and orchestration, `brain` is
+about running processes: OTP regions for LIFG, Hippocampus, Thalamus, Curiosity,
+Working Memory, mood, self-model, timing, and gating/valuation loops.
 
-At a high level:
+Design rule:
 
-- Models multiple **brain-inspired regions** as OTP processes (LIFG, Hippocampus, ACC, OFC, DLPFC, Basal Ganglia, Thalamus, Curiosity, etc.).
-- Maintains **working memory (WM)** as a normalized, capacity-limited list with decay and gating.
-- Coordinates **episodic memory** (Hippocampus) and its windowed recall.
-- Runs the **LIFG Stage-1 sense selection** over candidates prepared by `core` (no tokenization lives here).
-- Implements the **Curiosity â†’ Thalamus â†’ BG/WM â†’ DLPFC** loop that decides which small exploratory probes deserve focus.
-- Exposes **telemetry events** that the UI (and tests) rely on to explain what the brain is doing.
+```text
+db <- brain <- core <- web
+```
 
-> Design rule: `db â† brain â† core â† web`  
-> Brain depends on `db`, **never** on `core` or `symbrella_web`. Core calls into Brain as a client.
-
----
+Brain depends on `db`, never on `core` or `symbrella_web`. Core calls into Brain
+as a client.
 
 ## Responsibilities
 
-### 1. Regions as OTP processes
+### Regions as OTP Processes
 
-Each major region is a module under `Brain.*` and typically `use Brain, region: :name`:
+Major regions live under `Brain.*` and commonly `use Brain, region: :name`.
+Important modules include:
 
-- `Brain.LIFG` â€” Stage-1 sense selection (competitive scoring over `si.sense_candidates`).
-- `Brain.Hippocampus` â€” episodic memory entry point (writes/recall/telemetry).
-- `Brain.Thalamus` â€” relay & arbitration layer for curiosity/value/conflict/mood signals.
-- `Brain.Curiosity` â€” proposes exploratory probes (does not write WM directly).
-- `Brain.BasalGanglia` â€” pure WM gate; decides `:allow | :boost | :block`.
-- `Brain.WorkingMemory` â€” normalizes items, applies decay, and keeps WM bounded.
-- `Brain.DLPFC` â€” turns approved probes into **focus actions** via `Brain.focus/2`.
-- `Brain.MoodCore` / `Brain.MoodPolicy` â€” mood vector calculation and modulation hooks.
-- Additional regions (ACC, OFC/vmPFC, etc.) sit alongside these and communicate via telemetry and messages.
+- `Brain.LIFG` / `Brain.LIFG.Stage1` / `Brain.LIFG.Stage2` - sense selection,
+  fallback/reanalysis, and post-selection integration.
+- `Brain.Hippocampus` - episodic memory write, recall, scoring, evidence, and
+  telemetry.
+- `Brain.Thalamus` - relay and arbitration for curiosity, value, conflict, and
+  mood signals.
+- `Brain.Curiosity` - exploratory probe generation.
+- `Brain.BasalGanglia` - pure WM gate returning `:allow`, `:boost`, or `:block`.
+- `Brain.WorkingMemory` and `Brain.WM.*` - item normalization, decay, focus,
+  recall, policy, and gating helpers.
+- `Brain.DLPFC` - turns approved thalamus decisions into focus actions.
+- `Brain.ACC`, `Brain.OFC`, `Brain.VmPFC`, `Brain.PFC`, `Brain.PMTG`,
+  `Brain.ATL`, `Brain.Temporal`, `Brain.Cerebellum`, and `Brain.Amygdala` -
+  region-level control, value, semantic, temporal, model, and affect signals.
+- `Brain.MoodCore`, `Brain.MoodPolicy`, and `Brain.MoodWeights` - mood vector
+  calculation and modulation.
+- `Brain.Blackboard`, `Brain.SelfModel`, `Brain.SelfPortrait`,
+  `Brain.SelfContinuity`, and `Brain.MetaMonitor` - cross-region state and
+  self-model surfaces.
+- `Brain.CycleClock` and `Brain.CycleMetrics` - runtime cycle timing.
 
-Most regions:
+Most regions keep a small public API, emit telemetry, and keep math/scoring
+helpers pure where possible.
 
-- Have a **pure core** of scoring / math utilities.
-- Wrap that logic in a **GenServer** (or equivalent) for long-running behaviour.
-- Expose a small public API (`nudge/0`, `snapshot/0`, `set_params/1`, etc.) plus telemetry.
+### Working Memory
 
-### 2. Working Memory (WM)
+`Brain.WorkingMemory` defines the canonical WM item shape:
 
-`Brain.WorkingMemory` is a pure module; it does not own a process. It defines the WM item shape and the operations used everywhere:
+```elixir
+%{
+  id: term(),
+  source: atom() | String.t() | nil,
+  activation: float(),
+  score: float(),
+  ts: non_neg_integer(),
+  inserted_at: non_neg_integer(),
+  last_bump: non_neg_integer(),
+  payload: map()
+}
+```
 
-- `normalize/3` turns arbitrary candidates into WM items:
+WM updates should pass through the Brain gate path:
 
-  ```elixir
-  %{
-    id: term(),
-    source: atom() | String.t() | nil,
-    activation: float(),
-    score: float(),
-    ts: non_neg_integer(),
-    inserted_at: non_neg_integer(),
-    last_bump: non_neg_integer(),
-    payload: map()
-  }
-  ```
+1. `Brain.BasalGanglia.decide/4` decides admission.
+2. `Brain.WorkingMemory.normalize/3`, `upsert/3`, `decay/3`, and `trim/2`
+   maintain the list.
 
-- `upsert/3` merges duplicates (by `id`) and refreshes timestamps.
-- `decay/3` applies half-life style decay based on the last bump / insertion time.
-- `trim/2` enforces WM capacity.
-- `remove/2` drops items by `id` or predicate.
+Do not hand-craft WM items in unrelated modules.
 
-WM is **always** updated via:
+### LIFG
 
-1. Basal Ganglia (`Brain.BasalGanglia.decide/4`) to determine whether to admit/boost/block.
-2. `Brain.WorkingMemory.normalize/3` + `upsert/3` to actually change the WM list.
+Core prepares `si.sense_candidates`; Brain consumes them.
 
-No other module should be hand-crafting WM items.
+LIFG contracts:
 
-### 3. Hippocampus (episodic memory)
+- no char-grams in Stage-1 input,
+- spans must align to word boundaries unless `mw: true`,
+- MWEs are produced from word-level n-grams upstream in Core,
+- decisions include winners, finalists, margins, audit data, and telemetry,
+- weak or incompatible choices can trigger fallback/reanalysis paths.
 
-`Brain.Hippocampus` and its `hippocampus/*` helpers implement a small, windowed episodic memory:
+Relevant tests live under `apps/brain/test/brain/lifg*` and
+`apps/brain/test/brain/lifg/*`.
 
-- Writes happen at **consolidation time** (e.g., ATL finalize) with:
-  - token set,
-  - meta scope/outcome,
-  - timestamps,
-  - optional embedding (via `db`).
-- In-memory window is bounded (configurable `window_keep`).
-- Recall combines:
-  - **token overlap** (Jaccard),
-  - **recency** (configurable half-life),
-  - optional **outcome uplift**.
-- Recall results are attached back to `Core.SemanticInput` via `evidence[:episodes]` so LIFG/WM can bias decisions without hard overrides.
+### Hippocampus
 
-Runtime tuning is available via config and `Brain.Hippocampus` helper functions.
+`Brain.Hippocampus` implements bounded episodic memory:
 
-### 4. LIFG Stage-1 (competitive sense selection)
+- writes at consolidation time,
+- windowed in-memory recall,
+- Db-backed episode storage through `Db.Episode` / `Db.Episodes`,
+- token overlap, recency, outcome uplift, and optional vector evidence,
+- evidence attachment back into semantic state for later scoring.
 
-`Brain.LIFG` and `Brain.LIFG.Stage1` implement the **first pass** of sense selection. Core prepares a **sense slate** in `si.sense_candidates[token_index]`; LIFG consumes that slate and emits winners + audit.
+### Curiosity -> Thalamus -> DLPFC -> WM
 
-Main responsibilities:
+This loop decides whether small exploratory probes deserve focus:
 
-- Read candidate senses from `si.sense_candidates[token_index]` (prepared by Core).
-- Enforce LIFG path invariants, implemented by `Brain.LIFG.BoundaryGuard` and `Brain.LIFG.Stage1Guard`:
-  - **No char-grams** in the LIFG path (hard drop + audit counter).
-  - **Boundary guard:** spans must align to word boundaries unless `mw: true`.
-  - MWEs are always formed from **word-level n-grams** upstream in Core; LIFG never generates char-grams.
-- Score candidates with a weighted mix of:
-  - lexical fit,
-  - prior / activation,
-  - intent bias,
-  - (eventually) episode-based boosts from Hippocampus.
-- Produce, per token index:
-  - the chosen sense id,
-  - full ranking (`finalists`),
-  - `margin` vs. the runner-up,
-  - an `audit` map describing drops and weak decisions.
+1. `Brain.Curiosity` emits a proposal.
+2. `Brain.Thalamus` blends curiosity score, OFC value, ACC conflict, and mood.
+3. `Brain.DLPFC` listens for approved decisions.
+4. `Brain.focus/2` sends the candidate through Basal Ganglia and Working Memory.
 
-Typical `last` state from `Brain.LIFG.status/0` includes:
+Invariants:
 
-- `tokens` â€” the candidate tokens/MWEs with spans and `mw` flags.
-- `guards` â€” raw guard info (e.g. `chargram_violation`, `rejected_by_boundary` indices).
-- `audit` â€” summarized counts: `kept_tokens`, `dropped_tokens`, `boundary_drops`, `chargram_violation`, `weak_decisions`, etc.
-- `choices` / `finalists` â€” winners and rankings per `token_index`.
-- `intent` / `confidence` â€” intent bias used during scoring.
-- `opts` â€” resolved runtime config (weights, scores mode, `margin_threshold`, `mwe_fallback`, ACC tau, pMTG mode).
+- Curiosity and Thalamus do not mutate WM directly.
+- DLPFC is the actor that turns approved curiosity decisions into focus.
+- Curiosity-derived WM items preserve `payload[:reason] == :curiosity`.
 
-Tests under `apps/brain/test/brain/lifg_*_test.exs` enforce:
+## Telemetry and UI
 
-- No char-grams in LIFG Stage-1 input.
-- Boundary-only spans unless `mw: true`.
-- Stable span ordering by start position.
-- MWE fallback behaviour when phrase-level interpretations win over word senses.
-- Telemetry + audit contracts for violations and decisions.
+Brain emits telemetry for LIFG decisions, guard violations, hippocampus recall,
+curiosity proposals, thalamus decisions, WM gating, mood, and runtime cycle
+signals. Tests use helpers in `apps/brain/test/support`.
 
-### 5. Curiosity â†’ Thalamus â†’ BG/WM â†’ DLPFC
+`apps/symbrella_web` consumes selected snapshots and telemetry for the `/brain`
+dashboard.
 
-This loop encodes â€œtiny exploratory actsâ€ that may or may not earn a slot in WM:
-
-1. `Brain.Curiosity` emits a probe as telemetry (`[:curiosity, :proposal]`).  
-   - Provides `probe.id`, `lemma`, `score` in `[0,1]`, and `reason: :curiosity`.
-2. `Brain.Thalamus` listens, blends in **OFC value**, **ACC conflict**, and **Mood**, and emits a decision:  
-   - Telemetry: `[:brain, :thalamus, :curiosity, :decision]` with `decision â^^ :allow | :boost | :block` and a blended score in `[0,1]`.
-   - Runtime parameters are managed via `Brain.Thalamus.get_params/0` and `set_params/1` (e.g. `:ofc_weight`, `:acc_alpha`, `:mood_cap`, `:mood_weights`).  
-   - Property tests (`Brain.ThalamusMathProps_Test`) enforce monotonicity and clamping.
-3. `Brain.DLPFC` hears the decision; when allowed/boosted, it calls `Brain.focus/2` with the cached probe.
-4. `Brain.focus/2` runs the WM pipeline, which always passes through:
-   - Basal Ganglia (pure decision),
-   - WorkingMemory (normalize + upsert/trim).
-
-Key invariants (enforced by tests):
-
-- Only DLPFC in this loop is allowed to call `Brain.focus/2` for curiosity probes.
-- Curiosity and Thalamus never mutate WM directly.
-- WM items derived from curiosity have `payload[:reason] == :curiosity` for explainability.
-
-See `Brain.CuriosityFlowTest` and Thalamus/DLPFC tests for the contract.
-
----
-
-## Telemetry
-
-Brain emits a rich telemetry surface, including (but not limited to):
-
-- **LIFG**  
-  - Stage-1 scoring and decisions (e.g. `[:brain, :lifg, :stage1, :score]`, `[:brain, :lifg, :stage1, :decision]`).  
-  - Guard violations and audit events (e.g. `[:brain, :lifg, :stage1, :violation]` for char-grams / boundary issues).
-
-- **Hippocampus**  
-  - Episode writes and recalls (window size, Jaccard scores, recency/outcome effects).
-
-- **Curiosity / Thalamus / BG / DLPFC**  
-  - Curiosity proposals (`[:curiosity, :proposal]`).  
-  - Thalamus decisions (`[:brain, :thalamus, :curiosity, :decision]`) with OFC/ACC/mood metadata.  
-  - WM gating and admission events from Basal Ganglia and DLPFC.
-
-Tests use `apps/brain/test/support/telemetry_helpers.exs` to assert shapes and invariants.  
-The Phoenix UI (Symbrella Brain dashboard) also consumes these events to render region panels and reason traces.
-
----
-
-## How Core and Web use Brain
-
-- **Core** treats Brain as a service:
-  - Calls into Brain for STM/WM and episodic interaction.
-  - Does not live inside Brain or depend on Brain internals.
-- **Web** (`symbrella_web`) interacts with Brain via:
-  - `GenServer.call/2` for snapshots (e.g., `Brain.snapshot/0`),
-  - PubSub/telemetry for live dashboards.
-
-If you are working in Web or Core, donâ€™t import Brain internals; stick to the public APIs and structures.
-
----
-
-## Running tests
+## Running Tests
 
 From the umbrella root:
 
 ```bash
-# Brain-only tests
 mix test apps/brain/test
-
-# LIFG stack
-mix test apps/brain/test/brain/lifg_*_test.exs
-
-# Curiosity / Thalamus / WM loop
+mix test apps/brain/test/brain/lifg_stage1_invariants_test.exs
+mix test apps/brain/test/brain/lifg_stage2_contract_test.exs
 mix test apps/brain/test/brain/curiosity_flow_test.exs
 mix test apps/brain/test/brain/thalamus_*test.exs
+mix test apps/brain/test/brain/wm_*test.exs
 ```
 
-You can also run individual files or focused tests via standard `ExUnit` patterns.
+## Changing Brain
 
----
+When adding or changing a region:
 
-## Adding or changing a region
-
-When you introduce a new Brain region or modify an existing one:
-
-1. Keep the **dependency rule**: `db â† brain â† core â† web`.
-2. Provide a small, pure core of logic that is testable without processes.
-3. Wrap it in a minimal process module if you need concurrency/state.
-4. Emit telemetry for:
-   - key inputs,
-   - decisions,
-   - errors or invariant violations.
-5. Add or update tests under `apps/brain/test/brain/â€¦`.
-6. If the regionâ€™s behaviour impacts LIFG/WM/Hippocampus, update the guardrails document (`SYMBRELLA_PROJECT_GUARDRAILS.md`) so the contract stays in sync.
-
-This keeps Brain explainable, testable, and honest about how it reaches decisions.
+1. Keep the dependency rule: `db <- brain <- core <- web`.
+2. Put scoring/math in pure helpers where practical.
+3. Wrap only the long-lived stateful behavior in processes.
+4. Emit telemetry for major inputs, decisions, and invariant failures.
+5. Add focused tests under `apps/brain/test/brain`.
+6. Update guardrails when behavior changes the LIFG, WM, or Hippocampus
+   contract.

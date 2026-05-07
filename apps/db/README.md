@@ -50,7 +50,15 @@ These schemas are the persistent backing for Brain and Core:
     - serialized parameters or references to files.
   - Used by `Brain.Cerebellum.Store` to load/update trained models.
 
-- Other helper modules (e.g. `Db.PostgrexTypes`, import helpers) live here as well.
+- `Db.SelfSnapshot`
+  - Stores self-model/self-portrait snapshots emitted by Brain.
+  - Used for continuity and later inspection of the system's self-state over
+    time.
+
+- JSONL and import helpers (`Db.JSONL.*`, `Db.Import`) support loading local
+  lexical/brain-cell data.
+
+- Other helper modules (e.g. `Db.PostgrexTypes`) live here as well.
   They are considered **infrastructure**, not business logic.
 
 ---
@@ -82,6 +90,7 @@ Migrations live under:
 ```text
 apps/db/priv/db/migrations     # core DB structures (brain_cells, episodes, models, …)
 apps/db/priv/repo/migrations   # legacy / bootstrap migrations
+apps/db/priv/scripts           # import/bootstrap scripts
 ```
 
 Typical tables include:
@@ -89,6 +98,7 @@ Typical tables include:
 - `brain_cells`
 - `episodes`
 - `cerebellum_models` (if present)
+- `self_snapshots`
 
 Run migrations from the umbrella root:
 
@@ -98,6 +108,11 @@ mix ecto.create -r Db
 
 # run migrations
 mix ecto.migrate -r Db
+
+# umbrella helper aliases
+mix db.setup
+mix db.migrate
+mix db.reset
 ```
 
 > Reminder: the repo module is **`Db`**, not `Db.Repo`.
@@ -133,3 +148,5 @@ For higher‑level logic:
 - Add small utility scripts/tests for DB‑only concerns (index health, vacuum hints).
 - Expand schemas as new brain regions gain persistent state (e.g., more detailed
   episode metadata, statistics, or model registries).
+- Keep migrations owned by this app even when a higher-level Brain or Core
+  feature drives the need for a new table.

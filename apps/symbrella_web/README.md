@@ -2,7 +2,7 @@
 
 `SymbrellaWeb` is the Phoenix web application for the **Symbrella — Neuro‑Symbolic Synthetic Intelligence (NSSI)** umbrella.
 It provides the browser UI, including the **Brain dashboard** that visualizes brain regions, mood, intent, and working memory
-over live telemetry from the `brain` and `core` apps.
+over live telemetry and snapshots from the `brain` and `core` apps.
 
 This app does **not** own any business logic or persistence. It renders what the rest of the umbrella is thinking and doing.
 
@@ -15,7 +15,7 @@ At a high level:
 - **`db`** — Postgres + pgvector, schemas like `Db.BrainCell` and `Db.Episode`.
 - **`brain`** — OTP regions (LIFG, Hippocampus, Curiosity, Thalamus, WM, etc.), working memory and episodic recall.
 - **`core`** — Orchestration, tokenization, intent classification, semantic input pipeline.
-- **`symbrella_web` (this app)** — Phoenix/LiveView UI and telemetry‑driven brain visualizations.
+- **`symbrella_web` (this app)** — Phoenix/LiveView UI, home/chat surface, and telemetry‑driven brain visualizations.
 
 `SymbrellaWeb` is responsible for:
 
@@ -23,6 +23,7 @@ At a high level:
 - Rendering the **Brain dashboard** UI (brain map SVG, region overlays, status panels).
 - Showing HUD chips for **intent**, **mood**, and **cycle clock** driven by telemetry.
 - Surfacing snapshots from `Brain` (e.g. working memory, region state) in a safe, read‑only way.
+- Routing `/`, `/brain`, and `/brain/:region`.
 
 All stateful behavior stays in other apps; the web layer only calls public APIs and GenServers.
 
@@ -33,9 +34,9 @@ All stateful behavior stays in other apps; the web layer only calls public APIs 
 The most important modules live under `apps/symbrella_web/lib/symbrella_web`:
 
 - **LiveViews**
-  - `live/brain_live.ex` — main Brain dashboard LiveView.
+  - `live/brain_live.ex` — main Brain dashboard LiveView for `/brain` and `/brain/:region`.
   - `live/brain_live/mood_hud.ex` — mood HUD telemetry wiring.
-  - `live/home_live.ex` and `live/home_live/html.ex` — simple home page LiveView.
+  - `live/home_live.ex` and `live/home_live/html.ex` — home/chat LiveView surface.
 
 - **Brain components**
   - `components/brain/brain_panels.ex` — top‑level brain layout (header, HUD, map, info panel).
@@ -43,11 +44,15 @@ The most important modules live under `apps/symbrella_web/lib/symbrella_web`:
   - `components/brain/regions.ex` — region overlay registry + helpers.
   - `components/brain/info_panel.ex` — region info / status panel.
   - `components/brain/hippo_panel.ex` — Hippocampus / episodic memory panel.
-  - `components/brain/intent_chip.ex`, `components/brain/lifg_decision.ex`, etc. — small HUD and decision widgets.
+  - `components/brain/intent_chip.ex`, `components/brain/lifg_decision.ex`,
+    `components/brain/sense_slate.ex`, etc. — HUD, slate, and decision widgets.
+  - `components/cycle_hud.ex`, `components/mood_chip.ex`, and
+    `components/intent_chip.ex` — shared compact HUD components.
 
 - **Region overlays**
   - `region/*.ex` — small modules describing SVG overlay geometry and metadata for each brain region
     (LIFG, Hippocampus, Thalamus, PMTG, Temporal, Cerebellum, etc.).
+  - `region/registry.ex` — region lookup and metadata registry.
 
 - **Telemetry helpers**
   - `hud/telemetry.ex` — helpers for wiring telemetry into HUD components.
@@ -85,7 +90,7 @@ mix phx.server
 Then open:
 
 - **App root:** <http://localhost:4000>
-- **Brain dashboard:** linked from the home page (and typically available as a LiveView route from the navbar).
+- **Brain dashboard:** <http://localhost:4000/brain>
 
 The web app expects the `db`, `brain`, and `core` apps to be running in the same umbrella (which `mix phx.server` does for you via `Symbrella.Application`).
 

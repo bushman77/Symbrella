@@ -8,7 +8,7 @@ engineering analogy. See
 [`docs/brain-core-scientific-contract.md`](../../docs/brain-core-scientific-contract.md)
 for the testable contract and prohibited overclaims.
 
-Core **does not** run its own supervision tree or talk to the database directly.  
+Core **does not** run its own supervision tree or own database persistence.
 Instead, it acts as the *translator and traffic controller* between:
 
 - the outside world (strings, UI, API),
@@ -23,10 +23,11 @@ At a high level, Symbrella’s processing pipeline looks like:
 
 ```elixir
 phrase
-|> Core.Token.tokenize()      # word tokens, sentence-aware spans
-|> Brain.stm()                # working memory / activation (apps/brain)
-|> Db.ltm()                   # long-term memory fetch (apps/db)
-|> Core.Lexicon.all()         # lexicon lookups + semantic enrichment
+|> Core.LIFG.Input.tokenize() # word tokens, sentence-aware spans
+|> Core.Brain.STM.run()       # working memory / activation (apps/brain)
+|> Core.MWE.Stage.run(:early) # word-level MWE candidates
+|> Core.Pipeline.LTM.run()    # long-term memory fetch through Db
+|> Core.LIFG.Attach.run_and_attach()
 ```
 
 Within that flow, **Core owns**:
@@ -58,6 +59,8 @@ It tracks (among other fields):
 - `sense_candidates` — **per-token sense slates** that LIFG consumes.
 - `activation_summary` — snapshot from Brain (active cells / WM).
 - `pattern_roles` — structural tags used by the intent matrix and, later, ACC/OFC.
+- `evidence` — attached recall, lexical, or episode evidence used by later
+  stages without forcing a hard decision.
 
 Everything Core does is centered around evolving this struct cleanly from “raw text” to “ready for LIFG + recall + response”.
 
@@ -165,6 +168,24 @@ That keeps the umbrella dependency chain clean and acyclic.
 
 ---
 
+### 7. Response planning (`Core.Response.*`)
+
+Core owns the response policy surface that turns semantic state into an output
+plan. Important modules include:
+
+- `Core.Response.Policy` — chooses response mode and safety posture.
+- `Core.Response.Modes` — mode-specific phrasing strategy.
+- `Core.Response.Personality` and `Core.Response.Affect` — style and affect
+  shaping based on state.
+- `Core.Response.Guardrails` — response-level constraints.
+- `Core.Response.LlmPrompt` and `Core.Response.LlmSynthesis` — prompt building
+  and optional calls into `apps/llm`.
+
+Brain supplies signals; Llm supplies model text when needed. Core owns the
+decision about how those pieces become a response.
+
+---
+
 ## How to use Core (inside the umbrella)
 
 Core is **not** meant to be published as a standalone Hex package right now.  
@@ -173,18 +194,12 @@ It is built to be used from other apps in the Symbrella umbrella (Brain, Web, CL
 Typical usage from another app:
 
 ```elixir
-# 1. Build an initial SemanticInput from a sentence
-si0 = %Core.SemanticInput{sentence: "alpha beta"}
+# Run the production semantic pipeline
+si1 = Core.resolve_input("alpha beta", mode: :prod)
 
-# 2. Run the Core pipeline (tokenization, intent, etc.)
-si1 =
-  si0
-  |> Core.LIFG.Input.tokenize()
-  |> Core.Intent.normalize_and_select()
-  # |> Core.Recall.Plan.execute(si1)      # (example; depends on your call sites)
-
-# 3. Hand off to Brain for focus / LIFG / WM
-:ok = Core.BrainAdapter.run(si1)
+# Inspect the enriched state
+si1.lifg_choices
+si1.response_plan
 ```
 
 Exact entrypoints evolve over time, but the pattern remains:
@@ -213,6 +228,7 @@ Core tries to keep a **strong test harness** around:
 - MWE injection behavior,
 - intent matrix and fallback behavior,
 - recall planning and execution,
+- response policy and LLM prompt shaping,
 - SemanticInput structure & sense slate behavior.
 
 ---
@@ -225,7 +241,8 @@ Core tries to keep a **strong test harness** around:
 - adjust tokenization / MWE rules for LIFG safety,
 - tune intent resolution or fallback behavior,
 - refine recall planning and execution,
-- add new telemetry around semantic pipeline stages.
+- add new telemetry around semantic pipeline stages,
+- adjust response planning, prompt construction, or model-synthesis policy.
 
 **Do not change Core** to:
 

@@ -76,13 +76,13 @@ mix phx.server
 
 ## Apps at a glance
 
-- **apps/brain** — Brain regions + working memory. Owns LIFG selection, the Curiosity → Thalamus → BasalGanglia → DLPFC → WM loop, and episodic coordination (Hippocampus).
-- **apps/core** — Orchestrates the pipeline (tokenize → Brain STM → Db LTM → Lexicon). SemanticInput, MWE injection, invariants.
-- **apps/db** — Ecto schemas (BrainCell, Episode, Lexicon) + Repo; pgvector support for embeddings.
-- **apps/lexicon** — Adapter layer for dictionary/lexicon sources.
-- **apps/llm** — LLM client surface (work in progress).
-- **apps/symbrella** — Umbrella runtime; single supervisor tree.
-- **apps/symbrella_web** — Phoenix LiveView UI (brain view, chat hooks, etc.).
+- **apps/brain** — OTP brain regions, working memory, LIFG Stage-1/Stage-2, episodic recall, curiosity/thalamus/DLPFC gating, mood, self-model, cycle clock, and telemetry.
+- **apps/core** — Semantic orchestration: tokenization, `Core.SemanticInput`, MWE injection, sense slates, intent selection, recall planning, response policy, and LLM synthesis hooks.
+- **apps/db** — Ecto repo `Db`, schemas, migrations, pgvector support, JSONL import helpers, episodes, brain cells, cerebellum models, and self snapshots.
+- **apps/lexicon** — External dictionary/lexicon adapter surface used by Core enrichment.
+- **apps/llm** — Local llama.cpp/`llama-server` runner and `Req` client for chat, model listing, and embeddings.
+- **apps/symbrella** — Umbrella runtime supervisor: PubSub, Db, Brain regions, LLM runner, telemetry bridges, and shared infrastructure.
+- **apps/symbrella_web** — Phoenix LiveView UI: home/chat surface, `/brain` dashboard, region overlays, HUD chips, and telemetry-driven panels.
 
 ---
 
@@ -99,7 +99,7 @@ User prompt                          Sensor / user input
       │                                         │
       ▼                                         ▼
 Orchestrator / agent                Core.resolve_input/2
-(choose tools, model, plan)         (Tokenize → LTM → MWE → LIFG)
+(choose tools, model, plan)         (Tokenize → MWE → LTM → evidence → LIFG)
       │                                         │
       ▼                                         ▼
 Reasoning model (LLM)                Brain regions:
@@ -185,9 +185,9 @@ Symbrella is intentionally built as a **transparent brain**, not a sealed black 
 
 ---
 
-## Curiosity loop — current implementation (Nov 2025)
+## Curiosity Loop
 
-The **curiosity loop** is a concrete example of how regions cooperate:
+The **curiosity loop** is a concrete example of how regions cooperate today:
 
 > Curiosity → Thalamus → BasalGanglia → DLPFC → WorkingMemory
 
@@ -260,9 +260,9 @@ flowchart TD
   C["Core (pipeline)"]
   D[(Postgres + pgvector)]
 
-  A --> B
   A --> C
-  B --> C
+  A --> B
+  C --> B
   C --> D
   B --> D
 ```
@@ -271,25 +271,26 @@ flowchart TD
 
 ```elixir
 phrase
-|> Core.Token.tokenize()   # word tokens first; sentence-aware spans
-|> Brain.stm()             # short-term focus/activation (processes)
-|> Db.ltm()                # long-term memory fetch (rows)
-|> Core.Lexicon.all()      # dictionary lookups as needed
+|> Core.LIFG.Input.tokenize() # word tokens first; sentence-aware spans
+|> Core.Brain.STM.run()       # short-term focus/activation
+|> Core.MWE.Stage.run(:early) # word-level MWE candidates
+|> Core.Pipeline.LTM.run()    # long-term memory fetch through Db
+|> Core.LIFG.Attach.run_and_attach()
 ```
 
 ---
 
-## LIFG DoD — working checklist (Nov 20, 2025 snapshot)
+## Current LIFG / WM Contract
 
 - [x] No char-grams in LIFG path (enforced + unit test)
 - [x] Boundary guard (drop non-word-boundary substrings unless `mw: true`)
-- [ ] MWE injection pass (word-level n-grams before LIFG)
+- [x] MWE injection pass (word-level n-grams before LIFG)
 - [x] Sense slate in SI (`si.sense_candidates` keyed by token index)
-- [ ] Reanalysis fallback (flip to next-best on integration failure)
+- [x] Reanalysis/fallback support for weak or incompatible decisions
 - [x] Telemetry tripwire (log/drop if a char-gram reaches LIFG)
-- [ ] Priming cache (optional; recency boost for recent winners)
+- [x] Hippocampus-backed priming/episode evidence for recall-aware decisions
 - [x] Invariant tests (spans sorted; no char-grams; boundary-only unless `mw: true`)
-- [ ] Config defaults (test/dev: `tokenizer_mode: :words`, `tokenizer_emit_chargrams: false`)
+- [x] Config defaults (dev/test: `tokenizer_defaults: [mode: :words, emit_chargrams: false]`)
 
 Details and rationale live in **SYMBRELLA_PROJECT_GUARDRAILS.md**.
 
@@ -312,9 +313,8 @@ mix test apps/brain/test/brain/lifg_guard_test.exs
 mix test apps/brain/test/brain/curiosity_flow_test.exs
 mix test apps/brain/test/brain/thalamus_*test.exs
 
-# micro-benchmarks (examples)
-mix run apps/brain/bench/brain_stage1_bench.exs
-mix run apps/brain/bench/brain_lifg_bench_v2_1.exs
+# micro-benchmarks / benchmark scripts when present
+mix test apps/brain/test/brain/bench/bench_brain_lifg_bench.exs
 ```
 
 **Telemetry testing**  
@@ -323,9 +323,9 @@ mix run apps/brain/bench/brain_lifg_bench_v2_1.exs
 **Tokenizer defaults (dev/test):**
 
 ```elixir
-config :core,
-  tokenizer_mode: :words,
-  tokenizer_emit_chargrams: false
+config :core, :tokenizer_defaults,
+  mode: :words,
+  emit_chargrams: false
 ```
 
 ---
@@ -333,13 +333,13 @@ config :core,
 ## Repository layout (high level snapshot)
 
 - Root docs: `README.md`, `README_BRAIN_CHAIN.md`, `SYMBRELLA_PROJECT_GUARDRAILS.md`, `AGENTS.md`, `PROJECT-RESUME-PLAYBOOK.md`
-- `apps/brain`: all brain regions, LIFG stack, Hippocampus, Thalamus, WM, curiosity loop, plus tests and benches.
-- `apps/core`: pipeline orchestration, SemanticInput, MWE injector, sense slate, recall planner/executor, invariants, tokenizer.
-- `apps/db`: Ecto schemas (BrainCell, Episode, Lexicon), migrations, pgvector types, `Db` repo module.
-- `apps/lexicon`: lexicon behaviour and adapters.
-- `apps/llm`: LLM client surface (Axon / external backends).
-- `apps/symbrella`: umbrella runtime, supervision tree.
-- `apps/symbrella_web`: Phoenix LiveView UI, assets, brain dashboard.
+- `apps/brain`: brain regions, LIFG stack, Stage-2/blackboard bridge, Hippocampus, Thalamus, WM, curiosity loop, mood, self model, cycle metrics, tests, and benchmarks.
+- `apps/core`: pipeline orchestration, SemanticInput, tokenizer, MWE injector, sense slate, intent, recall planner/executor, response policy, LLM prompt/synthesis hooks, and invariants.
+- `apps/db`: Ecto schemas, migrations, pgvector types, JSONL import tools, `Db` repo module, episodes, self snapshots, and model metadata.
+- `apps/lexicon`: external lexicon adapter.
+- `apps/llm`: local llama.cpp runner and Req-based HTTP client.
+- `apps/symbrella`: umbrella runtime and top-level supervision tree.
+- `apps/symbrella_web`: Phoenix LiveView UI, assets, home/chat surface, and brain dashboard.
 - `config/*.exs`: environment config, including tokenizer defaults and brain/region settings.
 
 ---
