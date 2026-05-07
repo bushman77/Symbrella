@@ -202,10 +202,19 @@ defmodule Brain.PMTG do
         }
       end)
 
-    ev = %{stage: :pmtg, needy_count: length(needy), planned_queries: length(queries)}
+    ev = %{
+      stage: :pmtg,
+      input_summary: %{token_count: token_count(si)},
+      decision: if(queries == [], do: :skip, else: :plan),
+      reason: if(needy == [], do: :no_needy_lifg_choices, else: :weak_or_conflicted_lifg_choices),
+      scores: %{needy_ratio: needy_ratio(si, needy), planned_queries: length(queries)},
+      meta: %{needy_count: length(needy), planned_queries: length(queries)},
+      ts_ms: System.system_time(:millisecond)
+    }
+
     si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
 
-    audit = %{stage: :pmtg, needy_count: ev.needy_count}
+    audit = %{stage: :pmtg, needy_count: length(needy)}
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
     {:ok, %{si: si2, queries: queries, audit: Map.put(audit, :timing_ms, timing_ms)}}
   end
@@ -440,7 +449,7 @@ defmodule Brain.PMTG do
           orig: length(orig_lex),
           kept: 0,
           token_index: token_index_of(token) || ev[:token_index] || ev["token_index"] || 0,
-          phrase: token_phrase_of(token) || ev[:lemma] || ev["lemma"] || ""
+          phrase: token_phrase_of(token)
         }
       )
     end
@@ -661,9 +670,7 @@ defmodule Brain.PMTG do
   defp num(v) when is_float(v), do: v
   defp num(_), do: 0.0
 
-  # NOTE: Avoid unused-var warnings: the first clause does not use the default.
   defp prior_or_default(v, _default) when is_number(v), do: v * 1.0
-  defp prior_or_default(_v, default), do: default * 1.0
 
   defp maybe_salutation_nudge(feats, si, tidx) when is_map(feats) do
     phrase =
@@ -706,13 +713,13 @@ defmodule Brain.PMTG do
     %{need: need, si: si1, queries: queries, evidence: evidence, thr: thr, pmin: pmin, mode: mode}
   end
 
-  defp apply_mode(si1, _need, list, evidence, mode, opts, emit_mode: emit_mode) do
+  defp apply_mode(si1, need, list, evidence, mode, opts, emit_mode: emit_mode) do
     case mode do
       :boost ->
         do_boost(evidence, opts)
         {list, false, si1}
 
-      :rerun ->
+      :rerun when need != [] and evidence != [] ->
         case do_rerun(si1, evidence, opts) do
           {:ok, %{si: si2, choices: rerun_choices}} ->
             emit_rerun_event(rerun_choices, emit_mode)
@@ -722,9 +729,21 @@ defmodule Brain.PMTG do
             {list, false, si1}
         end
 
+      :rerun ->
+        {list, false, si1}
+
       _ ->
         {list, false, si1}
     end
+  end
+
+  defp token_count(%{tokens: tokens}) when is_list(tokens), do: length(tokens)
+  defp token_count(%{"tokens" => tokens}) when is_list(tokens), do: length(tokens)
+  defp token_count(_), do: 0
+
+  defp needy_ratio(si, needy) when is_list(needy) do
+    total = max(token_count(si), 1)
+    (length(needy) / total) |> min(1.0) |> max(0.0)
   end
 
   defp build_last_and_window(si1, queries, evidence, need, state, timing_ms) do
@@ -751,13 +770,25 @@ defmodule Brain.PMTG do
       alts = Map.get(ch, :alt_ids, [])
       p1 = p_top1(ch)
 
-      low_margin? = is_number(m) and m < thr * 1.0
-      low_prob? = is_number(p1) and p1 < pmin * 1.0
+      low_margin? = m < thr * 1.0
+      low_prob? = p1 < pmin * 1.0
       has_alts? = is_list(alts) and length(alts) > 0
+      weak? = Map.get(ch, :weak?) == true or Map.get(ch, "weak?") == true
+      fallback? = fallback_choice?(ch)
 
-      (low_margin? or low_prob?) and has_alts?
+      ((low_margin? or low_prob?) and has_alts?) or weak? or fallback?
     end)
   end
+
+  defp fallback_choice?(choice) when is_map(choice) do
+    id =
+      Map.get(choice, :chosen_id) || Map.get(choice, "chosen_id") ||
+        Map.get(choice, :id) || Map.get(choice, "id") || ""
+
+    String.ends_with?(to_string(id), "|fallback")
+  end
+
+  defp fallback_choice?(_), do: false
 
   defp p_top1(ch) do
     chosen_id = Map.get(ch, :chosen_id) || Map.get(ch, :id)

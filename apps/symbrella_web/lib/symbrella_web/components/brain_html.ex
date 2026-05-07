@@ -163,7 +163,7 @@ defmodule SymbrellaWeb.BrainHTML do
     sm_lifg = mget(self_model, :last_lifg) || %{}
     sm_continuity = mget(self_model, :continuity) || %{}
     sm_goals = List.wrap(mget(self_model, :active_goals) || [])
-    show_self_model? = is_map(self_model) and map_size(self_model) > 0
+    show_self_model? = map_size(self_model) > 0
 
     assigns =
       assigns
@@ -440,7 +440,7 @@ defmodule SymbrellaWeb.BrainHTML do
     at_ms =
       cond do
         is_integer(at) and at > 0 -> at
-        is_integer(frame_ts_ms) and frame_ts_ms > 0 -> frame_ts_ms
+        frame_ts_ms > 0 -> frame_ts_ms
         true -> 0
       end
 
@@ -448,7 +448,7 @@ defmodule SymbrellaWeb.BrainHTML do
       id: Map.get(m, :id),
       at_ms: at_ms,
       frame_seq: if(is_integer(frame_seq), do: frame_seq, else: nil),
-      frame_ts_ms: if(is_integer(frame_ts_ms), do: frame_ts_ms, else: 0),
+      frame_ts_ms: frame_ts_ms,
       tag: tag || :event,
       env: env,
       preview: preview_env(env)
@@ -462,9 +462,9 @@ defmodule SymbrellaWeb.BrainHTML do
 
     %{
       id: nil,
-      at_ms: if(is_integer(frame_ts_ms) and frame_ts_ms > 0, do: frame_ts_ms, else: 0),
+      at_ms: if(frame_ts_ms > 0, do: frame_ts_ms, else: 0),
       frame_seq: if(is_integer(frame_seq), do: frame_seq, else: nil),
-      frame_ts_ms: if(is_integer(frame_ts_ms), do: frame_ts_ms, else: 0),
+      frame_ts_ms: frame_ts_ms,
       tag: :event,
       env: env,
       preview: preview_env(env)

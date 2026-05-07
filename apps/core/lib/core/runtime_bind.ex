@@ -62,7 +62,7 @@ defmodule Core.RuntimeBind do
     {matches, count, brain_ref} =
       case snapshot do
         nil ->
-          {[], 0, Map.get(si, :brain_state_ref)}
+          {[], 0, nil}
 
         {ref, list} when is_list(list) ->
           m = collect_matches(phrases, {ref, list}, hitmap: hitmap)
@@ -70,11 +70,11 @@ defmodule Core.RuntimeBind do
 
         %{} = snap ->
           m = collect_matches(phrases, snap, hitmap: hitmap)
-          {m, length(m), Map.get(snap, :ref, Map.get(si, :brain_state_ref))}
+          {m, length(m), Map.get(snap, :ref)}
 
         fun when is_function(fun, 1) or is_function(fun, 2) ->
           m = collect_matches(phrases, fun, hitmap: hitmap)
-          {m, length(m), Map.get(si, :brain_state_ref)}
+          {m, length(m), nil}
       end
 
     # Merge with existing (existing first for stable left-bias),

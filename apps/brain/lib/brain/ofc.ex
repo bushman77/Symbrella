@@ -26,7 +26,6 @@ defmodule Brain.OFC do
   """
 
   use Brain, region: :ofc
-  require Logger
 
   @cur_handler_prefix "brain-ofc-curiosity-"
   @mood_handler_prefix "brain-ofc-mood-"

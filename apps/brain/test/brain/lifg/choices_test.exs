@@ -33,8 +33,8 @@ defmodule Brain.LIFG.ChoicesTest do
     # slate candidates not present in scores (and not chosen) => surfaced separately
     assert Enum.sort(ch.slate_alt_ids) == ["evening|noun|0", "evening|verb|0"]
 
-    # singleton gap => 0.0, floor to min_margin
-    assert ch.margin == 0.05
+    # singleton gap stays honest; no confidence is invented
+    assert ch.margin == 0.0
   end
 
   test "margin is computed from top-2 gap when missing, and only floored if below min_margin" do

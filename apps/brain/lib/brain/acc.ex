@@ -18,7 +18,6 @@ defmodule Brain.ACC do
   """
 
   use Brain, region: :acc
-  require Logger
 
   @cur_handler_prefix "brain-acc-curiosity-"
   @mood_handler_prefix "brain-acc-mood-"

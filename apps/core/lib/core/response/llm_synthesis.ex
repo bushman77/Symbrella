@@ -14,8 +14,10 @@ defmodule Core.Response.LlmSynthesis do
 
   alias Core.Response.LlmPrompt
 
-  # Suppress compile-time warnings if the llm app isn't built/loaded yet.
+  # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
+  @compile {:no_warn_undefined, Brain}
+  @compile {:no_warn_undefined, Brain.Introspection}
 
   @timeout_ms 15_000
 
@@ -58,11 +60,10 @@ defmodule Core.Response.LlmSynthesis do
   defp do_generate(user_text, features, decision, mood) do
     ensure_table!()
 
-    system_prompt =
-      LlmPrompt.build_system_prompt(features, decision, mood, safe_wm_items())
+    context = prompt_context(user_text, features, decision, mood)
+    session_id = Map.get(context, :session_id, :global)
 
-    session_id = Map.get(features, :session_id, :global)
-
+    system_prompt = LlmPrompt.build_system_prompt(context)
     history = history_messages(session_id, @history_turn_pairs)
 
     messages =
@@ -71,7 +72,7 @@ defmodule Core.Response.LlmSynthesis do
         [%{"role" => "user", "content" => user_text}]
 
     if @log_prompts? do
-      log_prompt_bundle(messages, features, decision, mood)
+      log_prompt_bundle(messages, context)
     end
 
     case Llm.chat(messages, timeout: @timeout_ms) do
@@ -96,6 +97,27 @@ defmodule Core.Response.LlmSynthesis do
     :exit, reason ->
       Logger.debug("[LlmSynthesis] Exit: #{inspect(reason)}")
       {:error, :exit}
+  end
+
+  defp prompt_context(user_text, features, decision, mood) do
+    wm_items = safe_wm_items()
+    self_model = safe_self_model()
+
+    features =
+      features
+      |> ensure_map()
+      |> put_if_missing(:self_model, self_model)
+
+    %{
+      user_text: user_text,
+      features: features,
+      decision: ensure_map(decision),
+      mood: ensure_map(mood),
+      wm_items: wm_items,
+      self_model: self_model,
+      comprehension: Map.get(features, :comprehension),
+      session_id: Map.get(features, :session_id, :global)
+    }
   end
 
   # ── ETS initialization / ownership ─────────────────────────────────────────
@@ -209,8 +231,13 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Prompt logging (safe + capped) ─────────────────────────────────────────
 
-  defp log_prompt_bundle(messages, features, decision, mood) do
+  defp log_prompt_bundle(messages, context) do
     req = :erlang.unique_integer([:positive])
+    features = Map.get(context, :features, %{})
+    decision = Map.get(context, :decision, %{})
+    mood = Map.get(context, :mood, %{})
+    self_model = Map.get(context, :self_model)
+
     intent = Map.get(features, :intent)
     mode = Map.get(decision, :mode)
     tone = Map.get(decision, :tone)
@@ -221,7 +248,7 @@ defmodule Core.Response.LlmSynthesis do
     {usr2, usr_trunc?} = cap_text(user, @max_user_chars)
 
     Logger.info("""
-    [LlmSynthesis] PROMPT_BEGIN req=#{req} intent=#{inspect(intent)} mode=#{inspect(mode)} tone=#{inspect(tone)} tone_hint=#{inspect(tone_hint)}
+    [LlmSynthesis] PROMPT_BEGIN req=#{req} intent=#{inspect(intent)} mode=#{inspect(mode)} tone=#{inspect(tone)} tone_hint=#{inspect(tone_hint)} self_model=#{inspect(self_model_log(self_model))}
     ---SYSTEM sha256=#{sha256_hex(system)} chars=#{String.length(system)} truncated=#{sys_trunc?}---
     #{sys2}
     ---USER sha256=#{sha256_hex(user)} chars=#{String.length(user)} truncated=#{usr_trunc?}---
@@ -281,6 +308,52 @@ defmodule Core.Response.LlmSynthesis do
       end
     else
       []
+    end
+  end
+
+  defp safe_self_model do
+    cond do
+      Code.ensure_loaded?(Brain.Introspection) and
+          function_exported?(Brain.Introspection, :snapshot, 0) ->
+        try do
+          Brain.Introspection.snapshot()
+        rescue
+          _ -> nil
+        catch
+          :exit, _ -> nil
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  defp self_model_log(nil), do: nil
+
+  defp self_model_log(model) do
+    %{
+      v: model_value(model, :v),
+      confidence: model_value(model, :confidence),
+      uncertainty: model_value(model, :uncertainty),
+      stability: model_value(model, :stability),
+      cognitive_load: model_value(model, :cognitive_load)
+    }
+  end
+
+  defp model_value(model, key) when is_map(model), do: Map.get(model, key)
+
+  defp model_value(_, _), do: nil
+
+  defp ensure_map(map) when is_map(map), do: map
+  defp ensure_map(_), do: %{}
+
+  defp put_if_missing(map, _key, nil), do: map
+
+  defp put_if_missing(map, key, value) when is_map(map) do
+    if Map.has_key?(map, key) or Map.has_key?(map, Atom.to_string(key)) do
+      map
+    else
+      Map.put(map, key, value)
     end
   end
 

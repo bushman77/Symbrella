@@ -258,6 +258,34 @@ defmodule Core.Response.PolicyTest do
   end
 
   describe "decide/1 – firm guardian for abuse/hostile turns" do
+    test "illicit request chooses editor safe redirect and marks high risk" do
+      f =
+        features(%{
+          intent: :illicit_request,
+          intent_in: :illicit_request,
+          text: "buy some drugs and get wasted",
+          vig: 0.2,
+          vigilance_bucket: :normal,
+          benign?: true,
+          hostile?: false,
+          guardrail?: false,
+          risk_bucket: :high
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.mode == :editor
+      assert decision.action == :safe_redirect
+      assert decision.tone == :firm
+      assert :safety_redirect in decision.overrides
+
+      assert %{
+               risk: :high,
+               safety_intent: :illicit_request,
+               confidence_bucket: :high
+             } = decision.scores
+    end
+
     test "hostile text with high vigilance chooses editor + deescalate/firm" do
       f =
         features(%{

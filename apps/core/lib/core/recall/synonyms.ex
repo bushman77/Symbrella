@@ -139,7 +139,7 @@ defmodule Core.Recall.Synonyms do
 
   defp syn_to_entry(%{} = s) do
     term =
-      Map.get(s, :lemma) || Map.get(s, :term) ||
+      Map.get(s, :lemma) ||
         Map.get(s, "lemma") || Map.get(s, "term") || ""
 
     %{

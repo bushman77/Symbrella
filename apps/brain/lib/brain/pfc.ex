@@ -23,7 +23,6 @@ defmodule Brain.PFC do
   """
 
   use Brain, region: :pfc
-  require Logger
 
   # ── Public API ──────────────────────────────────────────────────────────────
 

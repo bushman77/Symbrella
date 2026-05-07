@@ -26,13 +26,13 @@ defmodule Core.Brain.Introspection do
         |> Map.put(:appraisal, appraisal)
         |> Map.put(:mood, mood || %{})
         |> Map.put(:self_model, self_model)
-        |> Map.update(:trace, [], fn trace ->
-          [
-            {:self_model,
-             %{confidence: self_model.confidence, uncertainty: self_model.uncertainty}}
-            | trace
-          ]
-        end)
+        |> Core.Pipeline.Trace.append(
+          :self_model,
+          decision: :updated,
+          reason: :resolved_input_appraisal,
+          scores: %{confidence: self_model.confidence, uncertainty: self_model.uncertainty},
+          meta: %{confidence: self_model.confidence, uncertainty: self_model.uncertainty}
+        )
 
       _ ->
         Map.put(si, :appraisal, appraisal)

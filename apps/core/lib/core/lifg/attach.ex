@@ -122,18 +122,17 @@ defmodule Core.LIFG.Attach do
           end)
           |> mwe_shadow(tokens_for_choices)
 
-        ev = %{
-          stage: :lifg_run,
-          ts_ms: System.system_time(:millisecond),
-          choice_count: length(raw_choices),
-          flips: flips
-        }
-
         si_after
         |> Map.put(:atl_slate, slate)
         |> Map.put(:lifg_choices, lifg_choices)
         |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
-        |> Map.update(:trace, [], &[ev | &1])
+        |> Core.Pipeline.Trace.append(
+          :lifg_run,
+          decision: :attached,
+          reason: :stage1_choices_available,
+          scores: %{choice_count: length(raw_choices), flips: flips},
+          meta: %{choice_count: length(raw_choices), flips: flips}
+        )
 
       _ ->
         si

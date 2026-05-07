@@ -671,8 +671,6 @@ defmodule Brain.LIFG.Guard do
     if Map.has_key?(m, k), do: Map.put(m, k, v), else: m
   end
 
-  defp maybe_put(m, _k, _v), do: m
-
   defp put_both(%{} = m, k, v) when is_atom(k) do
     m
     |> Map.put(k, v)

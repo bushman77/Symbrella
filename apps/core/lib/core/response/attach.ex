@@ -119,7 +119,8 @@ defmodule Core.Response.Attach do
       intent: intent,
       keyword: keyword,
       confidence: confidence,
-      text: text
+      text: text,
+      comprehension: si_get(si, :comprehension)
     }
   end
 
@@ -322,7 +323,6 @@ defmodule Core.Response.Attach do
 
   defp si_put(%SemanticInput{} = si, k, v), do: Map.put(si, k, v)
   defp si_put(%{} = si, k, v), do: Map.put(si, k, v)
-  defp si_put(si, _k, _v), do: si
 
   defp get_in_map(map, path) when is_map(map) do
     Enum.reduce(path, map, fn key, acc ->

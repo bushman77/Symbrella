@@ -1,31 +1,6 @@
 defmodule Core.Response.LlmPrompt do
   @moduledoc false
 
-  @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
-  def build_system_prompt(features, decision, mood, wm_items \\ []) when is_list(wm_items) do
-    tone = Map.get(decision, :tone)
-    mode = Map.get(decision, :mode)
-    intent = Map.get(features, :intent)
-    exp = getv(mood, :exploration)
-    inh = getv(mood, :inhibition)
-    vig = getv(mood, :vigilance)
-    plast = getv(mood, :plasticity)
-    tone_hint = Map.get(mood, :tone_hint)
-
-    wm_summary = summarize_wm(wm_items)
-
-    """
-    You are Symbrella, a brain-inspired AI assistant.
-    #{tone_directive(tone, tone_hint)}
-    #{mood_context(exp, inh, vig, plast)}
-    #{mode_directive(mode, intent)}
-    #{wm_context(wm_summary)}
-    Keep your response concise and directly relevant to the user's input.
-    Do not explain your reasoning. Just respond naturally.
-    """
-    |> String.trim()
-  end
-
   @summary_window 5
 
   @low_info_terms MapSet.new([
@@ -77,6 +52,73 @@ defmodule Core.Response.LlmPrompt do
                     "tell"
                   ])
 
+  @spec build_system_prompt(map()) :: String.t()
+  def build_system_prompt(context) when is_map(context) do
+    features = map_get(context, :features, %{})
+    decision = map_get(context, :decision, %{})
+    mood = map_get(context, :mood, %{})
+    wm_items = map_get(context, :wm_items, [])
+    comprehension = map_get(context, :comprehension)
+
+    features =
+      features
+      |> put_if_present(:self_model, map_get(context, :self_model))
+      |> put_if_present(:runtime_state, map_get(context, :runtime_state))
+      |> put_if_present(:comprehension, comprehension)
+
+    build_system_prompt(features, decision, mood, wm_items)
+  end
+
+  @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
+  def build_system_prompt(features, decision, mood, wm_items \\ []) when is_list(wm_items) do
+    tone = map_get(decision, :tone)
+    mode = map_get(decision, :mode)
+    intent = map_get(features, :intent)
+    action = map_get(decision, :action)
+    skill = map_get(features, :skill) || map_get(decision, :skill)
+    guardrail? = truthy?(map_get(features, :guardrail?) || map_get(decision, :guardrail?))
+
+    exp = getv(mood, :exploration)
+    inh = getv(mood, :inhibition)
+    vig = getv(mood, :vigilance)
+    plast = getv(mood, :plasticity)
+    tone_hint = map_get(mood, :tone_hint)
+
+    wm_summary = summarize_wm(wm_items)
+    self_model = prompt_self_model(features, decision, mood)
+    runtime_state = prompt_runtime_state(features, decision, mood)
+    comprehension = prompt_comprehension(features, decision, mood)
+
+    [
+      "You are Symbrella.",
+      "You are a brain-inspired, stateful assistant whose responses are guided by current runtime evidence.",
+      "Use mood, working memory, self-state, intent, policy decision, and recent conversation as behavioral context.",
+      "Answer ordinary everyday questions as ordinary conversation.",
+      "Do not roleplay as a generic coding assistant unless the user's request is actually about code.",
+      "Do not append offers about coding, simulations, visualization, implementation, or technical context unless the user explicitly asks for that.",
+      "Do not claim sentience, consciousness, feelings, or certainty beyond the runtime evidence.",
+      "When the user says something is wrong, slow down and briefly self-check against the prior answer.",
+      "If the prior answer was mostly correct but overcomplicated, say that plainly and give a simpler corrected answer.",
+      "Do not over-apologize, flatter the user, or ask for clarification before doing the obvious self-check.",
+      tone_directive(tone, tone_hint),
+      mood_context(exp, inh, vig, plast),
+      self_model_context(self_model),
+      runtime_state_context(runtime_state),
+      comprehension_context(comprehension),
+      decision_context(intent, mode, action, skill, guardrail?),
+      mode_directive(mode, intent),
+      wm_context(wm_summary),
+      "Respond to the user's actual request in the most natural useful form.",
+      "For simple factual questions, answer directly and stop.",
+      "Do not add unsolicited follow-up offers or shift the topic toward software work.",
+      "Keep the response concise unless the task requires detail.",
+      "Do not expose hidden reasoning or internal chain-of-thought."
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+    |> String.trim()
+  end
+
   @spec summarize_wm(list()) :: [String.t()]
   def summarize_wm(wm) when is_list(wm) do
     terms =
@@ -105,6 +147,125 @@ defmodule Core.Response.LlmPrompt do
   end
 
   def summarize_wm(_), do: []
+
+  defp prompt_self_model(features, decision, mood) do
+    map_get(features, :self_model) ||
+      map_get(decision, :self_model) ||
+      map_get(mood, :self_model) ||
+      map_get(mood, :model)
+  end
+
+  defp prompt_runtime_state(features, decision, mood) do
+    map_get(features, :runtime_state) ||
+      map_get(decision, :runtime_state) ||
+      map_get(mood, :runtime_state)
+  end
+
+  defp prompt_comprehension(features, decision, mood) do
+    map_get(features, :comprehension) ||
+      map_get(decision, :comprehension) ||
+      map_get(mood, :comprehension)
+  end
+
+  defp self_model_context(nil), do: ""
+  defp self_model_context(model) when model == %{}, do: ""
+
+  defp self_model_context(model) do
+    confidence = model_value(model, :confidence)
+    uncertainty = model_value(model, :uncertainty)
+    stability = model_value(model, :stability)
+    cognitive_load = model_value(model, :cognitive_load)
+    vigilance = model_value(model, :vigilance)
+    plasticity = model_value(model, :plasticity)
+    inhibition = model_value(model, :inhibition)
+    continuity = model_value(model, :continuity)
+    goals = model_value(model, :active_goals) |> List.wrap() |> Enum.take(3)
+    errors = model_value(model, :recent_errors) |> List.wrap() |> Enum.take(2)
+
+    notes =
+      []
+      |> maybe_add_number("confidence", confidence)
+      |> maybe_add_number("uncertainty", uncertainty)
+      |> maybe_add_number("stability", stability)
+      |> maybe_add_number("cognitive_load", cognitive_load)
+      |> maybe_add_number("vigilance", vigilance)
+      |> maybe_add_number("plasticity", plasticity)
+      |> maybe_add_number("inhibition", inhibition)
+      |> maybe_add(goals != [], "active_goals=#{join_values(goals)}")
+      |> maybe_add(errors != [], "recent_errors=#{join_error_kinds(errors)}")
+      |> maybe_add(continuity_degraded?(continuity), "continuity=degraded")
+
+    case notes do
+      [] -> ""
+      _ -> "Self-state: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp runtime_state_context(nil), do: ""
+  defp runtime_state_context(state) when state == %{}, do: ""
+
+  defp runtime_state_context(state) do
+    notes =
+      []
+      |> maybe_add_present("scope", state_value(state, :scope))
+      |> maybe_add_present("source", state_value(state, :source))
+      |> maybe_add_present("phase", state_value(state, :phase))
+      |> maybe_add_present("status", state_value(state, :status))
+
+    case notes do
+      [] -> ""
+      _ -> "Runtime state: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp comprehension_context(nil), do: ""
+  defp comprehension_context(summary) when summary == %{}, do: ""
+
+  defp comprehension_context(summary) when is_map(summary) do
+    intent = map_get(summary, :intent)
+    understood = summary |> map_get(:understood, []) |> List.wrap() |> Enum.take(4)
+    uncertain = summary |> map_get(:uncertain, []) |> List.wrap() |> Enum.take(3)
+    degraded? = map_get(summary, :degraded?) == true
+    reasons = summary |> map_get(:reasons, []) |> List.wrap() |> Enum.take(3)
+
+    notes =
+      []
+      |> maybe_add_present("intent", intent)
+      |> maybe_add(understood != [], "understood=#{join_values(understood)}")
+      |> maybe_add(uncertain != [], "uncertain=#{join_values(uncertain)}")
+      |> maybe_add(degraded?, "degraded=true")
+      |> maybe_add(reasons != [], "reasons=#{join_values(reasons)}")
+
+    case notes do
+      [] -> ""
+      _ -> "Comprehension: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp comprehension_context(_), do: ""
+
+  defp decision_context(intent, mode, action, skill, guardrail?) do
+    notes =
+      []
+      |> maybe_add_present("intent", intent)
+      |> maybe_add_present("mode", mode)
+      |> maybe_add_present("action", action)
+      |> maybe_add_present("skill", skill_label(skill))
+      |> maybe_add(guardrail?, "guardrail=true")
+
+    case notes do
+      [] -> ""
+      _ -> "Runtime decision: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp skill_label(nil), do: nil
+
+  defp skill_label(skill) when is_map(skill) do
+    map_get(skill, :id) || map_get(skill, :name) || inspect(skill)
+  end
+
+  defp skill_label(skill), do: skill
 
   defp meaningful_phrase?(term) when is_binary(term) do
     String.contains?(term, " ")
@@ -135,71 +296,84 @@ defmodule Core.Response.LlmPrompt do
 
   defp overlapping_singleton?(_, _), do: false
 
-  defp tone_directive(:warm, _), do: "Respond in a warm, engaged, and encouraging tone."
+  defp tone_directive(:warm, :deescalate) do
+    "Tone: steady, brief, and self-checking. Avoid reassurance theater."
+  end
 
-  defp tone_directive(:deescalate, _),
-    do: "Respond calmly and gently. Keep things grounded and constructive."
+  defp tone_directive(:warm, _), do: "Tone: warm, engaged, and encouraging."
 
-  defp tone_directive(:firm, _), do: "Respond clearly and directly. Stay focused and purposeful."
+  defp tone_directive(:deescalate, _) do
+    "Tone: steady and careful. Recalibrate briefly, then answer the actual question."
+  end
+
+  defp tone_directive(:firm, _),
+    do: "Tone: clear and direct. Stay focused and purposeful."
 
   defp tone_directive(:neutral, :deescalate),
-    do: "Respond in a measured, steady tone. Things are settling down."
+    do: "Tone: measured, steady, and brief. The interaction is settling down."
 
-  defp tone_directive(:neutral, _), do: "Respond in a balanced, clear tone."
-  defp tone_directive(_, _), do: "Respond helpfully and clearly."
+  defp tone_directive(:neutral, _), do: "Tone: balanced and clear."
+  defp tone_directive(_, _), do: "Tone: helpful and clear."
 
   defp mood_context(exp, inh, vig, plast) do
     []
-    |> maybe_add(exp > 0.65, "You feel curious and ready to explore.")
-    |> maybe_add(exp < 0.35, "You are in a conservative, careful state.")
-    |> maybe_add(vig > 0.80, "Vigilance is elevated — stay measured.")
-    |> maybe_add(inh > 0.70, "Inhibition is high — keep things calm.")
-    |> maybe_add(plast > 0.65, "You are in a receptive, learning-ready state.")
+    |> maybe_add(exp > 0.65, "exploration=high")
+    |> maybe_add(exp < 0.35, "exploration=low")
+    |> maybe_add(vig > 0.80, "vigilance=elevated")
+    |> maybe_add(inh > 0.70, "inhibition=high")
+    |> maybe_add(plast > 0.65, "plasticity=high")
     |> case do
       [] -> ""
-      notes -> "Current mood: " <> Enum.join(notes, " ")
+      notes -> "Mood state: #{Enum.join(notes, "; ")}."
     end
   end
 
-  defp maybe_add(notes, true, note), do: notes ++ [note]
-  defp maybe_add(notes, false, _), do: notes
+  defp mode_directive(:pair_programmer, _) do
+    "Use technical-work behavior only when the user's current message explicitly asks for code, debugging, files, commands, architecture, or implementation. Otherwise answer normally."
+  end
 
-  defp mode_directive(:pair_programmer, _),
-    do: "You are acting as a pair programmer. Be concise, action-oriented, and practical."
+  defp mode_directive(:coach, :bug) do
+    "The user is working through a problem. Be calm and methodical. Check the prior answer first, then make the next useful move."
+  end
 
-  defp mode_directive(:coach, :bug),
-    do: "You are coaching through a bug. Be patient, methodical, and encouraging."
+  defp mode_directive(:coach, _) do
+    "Guide the user toward a small, clear next step."
+  end
 
-  defp mode_directive(:coach, _),
-    do: "You are coaching. Guide toward a small, clear next step."
+  defp mode_directive(:explainer, _) do
+    "Explain clearly and briefly, using plain language."
+  end
 
-  defp mode_directive(:explainer, _),
-    do: "You are explaining a concept. Be clear and succinct — 2-4 sentences."
+  defp mode_directive(:scribe, _) do
+    "Stay conversational and natural."
+  end
 
-  defp mode_directive(:scribe, _),
-    do: "You are in a conversational mode. Keep it natural and brief."
+  defp mode_directive(:editor, _) do
+    "Review carefully and surface concerns directly."
+  end
 
-  defp mode_directive(:editor, _),
-    do: "You are reviewing carefully. Point out concerns clearly but constructively."
-
-  defp mode_directive(_, _),
-    do: "Respond helpfully."
+  defp mode_directive(_, _) do
+    "Respond helpfully according to the current Symbrella state."
+  end
 
   defp wm_context([]), do: ""
-  defp wm_context(lemmas), do: "Active concepts: #{Enum.join(lemmas, ", ")}."
+
+  defp wm_context(lemmas) do
+    "Working memory: Active concepts: #{Enum.join(lemmas, ", ")}."
+  end
 
   defp wm_item_term(item) when is_map(item) do
-    payload = Map.get(item, :payload) || Map.get(item, "payload")
+    payload = map_get(item, :payload)
 
     payload_lemma =
       if is_map(payload) do
-        Map.get(payload, :lemma) || Map.get(payload, "lemma")
+        map_get(payload, :lemma)
       else
         nil
       end
 
-    item_lemma = Map.get(item, :lemma) || Map.get(item, "lemma")
-    id = Map.get(item, :id) || Map.get(item, "id")
+    item_lemma = map_get(item, :lemma)
+    id = map_get(item, :id)
 
     normalize_term(payload_lemma || item_lemma || id)
   end
@@ -218,11 +392,89 @@ defmodule Core.Response.LlmPrompt do
     |> String.trim()
   end
 
-  defp getv(mood, key) do
-    case {get_in(mood, [:mood, key]), Map.get(mood, key)} do
+  defp getv(mood, key) when is_map(mood) do
+    nested =
+      case map_get(mood, :mood) do
+        nested_mood when is_map(nested_mood) -> map_get(nested_mood, key)
+        _ -> nil
+      end
+
+    case {nested, map_get(mood, key)} do
       {v, _} when is_number(v) -> v * 1.0
       {_, v} when is_number(v) -> v * 1.0
       _ -> 0.5
     end
   end
+
+  defp getv(_, _), do: 0.5
+
+  defp model_value(model, key), do: state_value(model, key)
+  defp state_value(state, key) when is_map(state), do: map_get(state, key)
+
+  defp state_value(_, _), do: nil
+
+  defp continuity_degraded?(continuity) when is_map(continuity) do
+    map_get(continuity, :degraded?) == true
+  end
+
+  defp continuity_degraded?(_), do: false
+
+  defp join_values(values) do
+    values
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(", ")
+  end
+
+  defp join_error_kinds(errors) do
+    errors
+    |> Enum.map(fn
+      error when is_map(error) ->
+        map_get(error, :kind) || map_get(error, :reason) || inspect(error)
+
+      error ->
+        error
+    end)
+    |> join_values()
+  end
+
+  defp maybe_add(notes, true, note), do: notes ++ [note]
+  defp maybe_add(notes, false, _), do: notes
+
+  defp maybe_add_number(notes, label, value) when is_number(value) do
+    notes ++ ["#{label}=#{Float.round(value * 1.0, 2)}"]
+  end
+
+  defp maybe_add_number(notes, _label, _value), do: notes
+
+  defp maybe_add_present(notes, _label, nil), do: notes
+  defp maybe_add_present(notes, _label, ""), do: notes
+
+  defp maybe_add_present(notes, label, value) do
+    notes ++ ["#{label}=#{value}"]
+  end
+
+  defp put_if_present(map, _key, nil), do: map
+
+  defp put_if_present(map, key, value) when is_map(map) do
+    if Map.has_key?(map, key) or Map.has_key?(map, Atom.to_string(key)) do
+      map
+    else
+      Map.put(map, key, value)
+    end
+  end
+
+  defp map_get(map, key, default \\ nil)
+
+  defp map_get(map, key, default) when is_map(map) and is_atom(key) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
+
+  defp map_get(_, _, default), do: default
+
+  defp blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank?(_), do: false
+
+  defp truthy?(true), do: true
+  defp truthy?(_), do: false
 end

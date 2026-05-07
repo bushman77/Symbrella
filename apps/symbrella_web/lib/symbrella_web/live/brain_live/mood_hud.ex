@@ -10,8 +10,6 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   """
 
   use SymbrellaWeb, :html
-  require Logger
-
   @defaults %{
     levels: %{
       da: 0.35,
@@ -462,7 +460,6 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       :cool -> "Cool"
       :deescalate -> "De-escalate"
       :neutral -> "Neutral"
-      nil -> "Neutral"
     end
   end
 

@@ -2,6 +2,12 @@
 
 This app hosts the **process-level â€œbrainâ€** for Symbrellaâ€™s Neuro-Symbolic Synthetic Intelligence (NSSI).
 
+Scientific accuracy note: Brain region names in this app are engineering
+analogies, not biological proof. See
+[`docs/brain-core-scientific-contract.md`](../../docs/brain-core-scientific-contract.md)
+for the project-wide contract that separates testable software guarantees from
+brain-inspired terminology.
+
 Where `core` is mostly about **data structures and orchestration**, `brain` is about **running processes**:
 OTP regions for things like LIFG, Hippocampus, Thalamus, Curiosity, Working Memory, and gating/valuation loops.
 

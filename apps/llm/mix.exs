@@ -21,8 +21,7 @@ defmodule Llm.MixProject do
 
   def deps do
     [
-      {:tesla, "~> 1.9"},
-      {:finch, "~> 0.17"},
+      {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:castore, "~> 1.0"}
     ]

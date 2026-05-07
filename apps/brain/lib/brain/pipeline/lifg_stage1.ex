@@ -216,9 +216,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
         log_summary(dt, {:error, err})
         {{:error, err}, state}
 
-      other ->
-        raise RuntimeError,
-              "Unexpected return from Brain.LIFG.Stage1.choose/3: #{inspect(other)}"
     end
   end
 
@@ -590,8 +587,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
     Logger.error(fn -> "[LIFGStage1] #{dt_ms}ms error: " <> format_error(err, []) end)
   end
 
-  defp log_summary(_dt_ms, _other), do: :ok
-
   defp normalize_catch(:exit, reason, _st),
     do: RuntimeError.exception("exit: #{inspect(reason)}")
 
@@ -611,8 +606,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
   defp format_error(err, st) when is_list(st) do
     if is_exception(err), do: Exception.format(:error, err, st), else: inspect(err)
   end
-
-  defp format_error(err, _st), do: inspect(err)
 
   defp as_float(v) when is_float(v), do: v
   defp as_float(v) when is_integer(v), do: v * 1.0

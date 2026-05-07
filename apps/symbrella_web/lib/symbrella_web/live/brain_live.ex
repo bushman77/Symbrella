@@ -94,13 +94,15 @@ defmodule SymbrellaWeb.BrainLive do
         else: Map.put(assigns, :mood, MoodHud.defaults())
 
     ~H"""
-    {BrainHTML.brain(assigns)}
+    <Layouts.app flash={@flash} current_scope={assigns[:current_scope]}>
+      {BrainHTML.brain(assigns)}
 
-    <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
-    <.mood_hud mood={@mood} />
+      <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
+      <.mood_hud mood={@mood} />
 
-    <.selected_region_status selected={@selected} status={@region_status} />
-    <.regions_status_grid all_status={@all_status} />
+      <.selected_region_status selected={@selected} status={@region_status} />
+      <.regions_status_grid all_status={@all_status} />
+    </Layouts.app>
     """
   end
 
@@ -625,7 +627,6 @@ defmodule SymbrellaWeb.BrainLive do
     snapshot =
       cond do
         is_map(snapshot) -> Map.put(snapshot, :self_portrait, self_portrait)
-        snapshot == nil -> %{self_portrait: self_portrait}
         true -> %{value: snapshot, self_portrait: self_portrait}
       end
 
@@ -883,9 +884,6 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp maybe_assign_intent(socket, %{} = intent, src),
     do: assign(socket, :intent, stamp_intent(intent, src))
-
-  defp maybe_assign_intent(socket, intent, src),
-    do: assign(socket, :intent, stamp_intent(normalize_intent(intent, src), src))
 
   # ---------------------------------------------------------------------------
   # Blackboard handler (now wraps events with timestamp + tag)

@@ -24,8 +24,8 @@ defmodule Brain.LIFG.SenseSlateTest do
 
     {:ok, %{choices: choices, audit: audit}} = Stage1.run(si, [])
     assert length(choices) == 2
-    assert audit.weak_decisions == 0
-    assert Enum.any?(choices, &(&1.chosen_id == "hello|noun|0"))
+    assert audit.weak_decisions == 1
+    assert Enum.any?(choices, &(&1.chosen_id == "hello|interjection|0"))
     assert Enum.any?(choices, &(&1.chosen_id == "there|noun|0"))
   end
 

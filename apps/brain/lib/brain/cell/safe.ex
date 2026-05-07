@@ -24,7 +24,6 @@ defmodule Brain.Cell.Safe do
         warn_ms: 200
   """
 
-  require Logger
   alias Brain.Cell.Telemetry, as: CellTelemetry
 
   @cfg Application.compile_env(:brain, __MODULE__, [])

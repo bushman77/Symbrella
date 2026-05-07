@@ -91,8 +91,10 @@ defmodule Core do
     |> BrainIntrospection.update_self_model(opts)
     |> Core.Brain.ATL.ingest(atl_opts)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
+    |> Core.Comprehension.Summary.attach(opts)
     |> Core.Brain.Hippocampus.encode()
     |> Core.Brain.Hippocampus.persist(opts)
+    |> Core.Brain.WM.focus_prompt_topics(opts)
     |> maybe_build_response_plan(opts)
     |> Core.Brain.Activation.notify(opts)
   end

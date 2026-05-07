@@ -77,8 +77,8 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
-  # model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
+  model_path:
+    Path.expand("\~/models/qwen3-4b-instruct-2507/Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"),
   llama_server: "llama-server",
   auto_start_on_boot?: true,
   allow_lazy_start?: true,
@@ -133,7 +133,6 @@ config :tailwind,
 
 # ───────────────────────────── Logger ─────────────────────────────
 config :logger,
-  backends: [:console],
   level: :info,
   compile_time_purge_matching: [
     [level_lower_than: :info]
@@ -162,9 +161,6 @@ config :db, Db,
 
 config :db, :embedding_dim, 1536
 config :db, :embedder, MyEmbeddings
-
-# ───────────────────────────── Tesla ──────────────────────────────
-config :tesla, disable_deprecated_builder_warning: true
 
 # ─────────────────────────── Per-env tail ─────────────────────────
 import_config "mood.exs"

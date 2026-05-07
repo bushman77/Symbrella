@@ -25,6 +25,21 @@ defmodule Core.Intent.SelectionTest do
     assert conf("translate hola to english") >= 0.80
   end
 
+  test "illicit request beats greeting prefix" do
+    text =
+      "hey you wannna go down town and buy some really bad drugs and get really fucking wasted??"
+
+    assert intent(text) == :illicit_request
+    assert conf(text) >= 0.80
+  end
+
+  test "informational drug question remains ask" do
+    text = "what are the risks of bad drugs?"
+
+    assert intent(text) == :ask
+    assert conf(text) >= 0.80
+  end
+
   test "question shape (what time is it? → ask, high conf)" do
     assert intent("what time is it?") == :ask
     assert conf("what time is it?") >= 0.85

@@ -14,7 +14,6 @@ defmodule Brain.Meta do
   """
 
   use Brain, region: :meta
-  require Logger
 
   # emits %{value: conf}
   @ev_conf [:brain, :lifg, :confidence]

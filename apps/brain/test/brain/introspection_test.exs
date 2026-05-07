@@ -7,6 +7,7 @@ defmodule Brain.IntrospectionTest do
     ensure_started(Brain.MoodCore)
     ensure_started(Brain.Meta)
     ensure_started(Brain.SelfPortrait)
+    :ok = Brain.SelfPortrait.reset()
 
     :ok
   end

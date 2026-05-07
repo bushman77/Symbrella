@@ -55,21 +55,22 @@ defmodule Brain.LIFG.FallbackRerun do
     needs_rerun? =
       rerun_on_fallback? and idxs != [] and not allow_fallback_into_wm?
 
-    IO.inspect(
-      %{
-        rerun_on_fallback?: rerun_on_fallback?,
-        debug_rerun?: debug_rerun?,
-        allow_fallback_into_wm?: allow_fallback_into_wm?,
-        wm_present?: wm_present?,
-        idxs: idxs,
-        needs_rerun?: needs_rerun?
-      },
-      label: "[LIFG maybe_rerun gate]",
-      charlists: :as_lists
-    )
+    if debug_rerun? do
+      IO.inspect(
+        %{
+          rerun_on_fallback?: rerun_on_fallback?,
+          debug_rerun?: debug_rerun?,
+          allow_fallback_into_wm?: allow_fallback_into_wm?,
+          wm_present?: wm_present?,
+          idxs: idxs,
+          needs_rerun?: needs_rerun?
+        },
+        label: "[LIFG maybe_rerun gate]",
+        charlists: :as_lists
+      )
+    end
 
     if not needs_rerun? do
-      IO.puts("[LIFG maybe_rerun] skipping rerun")
       {si, choices0}
     else
       rerun_id = unique_rerun_id()
@@ -215,7 +216,14 @@ defmodule Brain.LIFG.FallbackRerun do
           margin_threshold: margin_thr,
           chargram_event:
             Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
-          boundary_event: Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop])
+          boundary_event: Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop]),
+          stage1_stop_event:
+            Keyword.get(opts, :rerun_stage1_stop_event, [
+              :brain,
+              :pipeline,
+              :lifg_stage1,
+              :rerun_stop
+            ])
         )
       rescue
         e -> {:error, {:exception, e}}

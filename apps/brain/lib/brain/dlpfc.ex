@@ -18,7 +18,6 @@ defmodule Brain.DLPFC do
   """
 
   use Brain, region: :dlpfc
-  require Logger
 
   @t_handler "brain-dlpfc-thalamus-"
   @c_handler "brain-dlpfc-curiosity-"

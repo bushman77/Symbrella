@@ -300,8 +300,6 @@ defmodule Db do
     do: fallback_idx
 
   # P-213: Unicode-punctuation-safe normalization for lookups
-  defp norm(nil), do: ""
-
   defp norm(s) when is_binary(s) do
     s
     |> String.downcase()

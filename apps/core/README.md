@@ -3,6 +3,11 @@
 > Core is the **semantic pipeline** of the Symbrella umbrella.  
 > It turns raw text into a rich `Core.SemanticInput` struct, resolves intent, plans recall, and coordinates with the synthetic brain (`apps/brain`) and storage (`apps/db`).
 
+Scientific accuracy note: Core and Brain use brain-inspired vocabulary as an
+engineering analogy. See
+[`docs/brain-core-scientific-contract.md`](../../docs/brain-core-scientific-contract.md)
+for the testable contract and prohibited overclaims.
+
 Core **does not** run its own supervision tree or talk to the database directly.  
 Instead, it acts as the *translator and traffic controller* between:
 

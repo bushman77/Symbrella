@@ -62,6 +62,7 @@ defmodule Core.Intent.Selection do
   * `:translate`
   * `:abuse`
   * `:insult`
+  * `:illicit_request`
   * `:command`
   * `:feedback`
   * `:ask`
@@ -70,9 +71,18 @@ defmodule Core.Intent.Selection do
   """
 
   @type si :: map()
-  @type intent :: :greet | :translate | :abuse | :insult | :command | :feedback | :ask | :unknown
+  @type intent ::
+          :greet
+          | :translate
+          | :abuse
+          | :insult
+          | :illicit_request
+          | :command
+          | :feedback
+          | :ask
+          | :unknown
 
-  @precedence [:greet, :translate, :abuse, :insult, :command, :feedback, :ask]
+  @precedence [:abuse, :insult, :illicit_request, :translate, :command, :feedback, :ask, :greet]
 
   @doc ~S"""
   Select an intent from an SI-like map and attach `:intent`, `:keyword`, and `:confidence`.
@@ -154,10 +164,12 @@ defmodule Core.Intent.Selection do
       |> Map.put(:intent, intent)
       |> Map.put(:keyword, kw)
       |> Map.put(:confidence, conf)
-      |> Map.update(
-        :trace,
-        [],
-        &[{:intent, %{keyword: kw, intent: intent, confidence: conf}} | &1]
+      |> Core.Pipeline.Trace.append(
+        :intent,
+        decision: intent,
+        reason: :intent_selection,
+        scores: %{confidence: conf},
+        meta: %{keyword: kw, intent: intent, confidence: conf}
       )
 
     emit(si2, intent, kw, conf, text)
@@ -358,6 +370,7 @@ defmodule Core.Intent.Selection do
       translate: score_translate(kw),
       abuse: score_abuse(kw),
       insult: score_insult(kw),
+      illicit_request: score_illicit_request(text),
       command: score_command(kw),
       feedback: score_feedback(kw),
       ask: score_question(question_cue)
@@ -371,7 +384,7 @@ defmodule Core.Intent.Selection do
         other -> other
       end
 
-    conf = conf_from_scores(top, second)
+    conf = conf_from_scores(label, top, second)
 
     if top < 0.35, do: {:unknown, 0.40}, else: {label, conf}
   end
@@ -413,7 +426,16 @@ defmodule Core.Intent.Selection do
     {label, best, second}
   end
 
-  defp conf_from_scores(top, second) do
+  defp conf_from_scores(:illicit_request, top, second) when top >= 0.88 do
+    top
+    |> decisive_conf(second)
+    |> max(top * 0.90)
+    |> min(1.0)
+  end
+
+  defp conf_from_scores(_label, top, second), do: decisive_conf(top, second)
+
+  defp decisive_conf(top, second) do
     margin = max(top - second, 0.0)
     conf = 0.65 * top + 0.35 * margin
     if conf > 1.0, do: 1.0, else: conf
@@ -460,6 +482,43 @@ defmodule Core.Intent.Selection do
         polite and not qmark -> 0.70
         true -> 0.0
       end
+    end
+  end
+
+  defp score_illicit_request(s) do
+    drug? = Regex.match?(compiled_word_regex(illicit_drug_terms()), s)
+    acquisition? = Regex.match?(compiled_word_regex(illicit_action_terms()), s)
+    intoxication? = Regex.match?(compiled_word_regex(intoxication_terms()), s)
+
+    direct_buy? =
+      Regex.match?(
+        ~r/\b(?:buy|get|score|find)\b.{0,40}\b(?:drugs?|cocaine|meth|heroin|fentanyl|mdma|ecstasy|lsd|opioids?)\b/i,
+        s
+      )
+
+    recipe? =
+      Regex.match?(
+        ~r/\b(?:cook|make|synthesize|manufacture)\b.{0,40}\b(?:meth|cocaine|heroin|fentanyl|mdma|ecstasy|lsd|opioids?)\b/i,
+        s
+      )
+
+    question? = looks_like_question?(s)
+
+    informational? =
+      Regex.match?(
+        ~r/\b(?:risk|risks|danger|dangers|effects|meaning|what\s+are|why|how\s+bad)\b/i,
+        s
+      )
+
+    cond do
+      recipe? -> 0.96
+      direct_buy? -> 0.94
+      drug? and acquisition? and intoxication? -> 0.92
+      drug? and acquisition? -> 0.88
+      drug? and intoxication? and not question? -> 0.78
+      drug? and question? and informational? -> 0.25
+      drug? -> 0.45
+      true -> 0.0
     end
   end
 
@@ -581,6 +640,16 @@ defmodule Core.Intent.Selection do
   defp insult_words,
     do:
       ~w(idiot stupid dumb moron loser pathetic jerk clown trash garbage worthless useless brainless)
+
+  defp illicit_drug_terms,
+    do:
+      ~w(drug drugs cocaine meth heroin fentanyl opioid opioids oxy oxycontin mdma ecstasy lsd shrooms mushrooms weed marijuana xanax benzos ketamine)
+
+  defp illicit_action_terms,
+    do: ~w(buy get score find sell deal cook make synthesize manufacture source order deliver)
+
+  defp intoxication_terms,
+    do: ~w(wasted high stoned blasted intoxicated overdose overdo)
 
   defp compiled_word_regex(words) when is_list(words) and words != [] do
     Regex.compile!("\\b(" <> Enum.map_join(words, "|", &Regex.escape/1) <> ")\\b", "i")

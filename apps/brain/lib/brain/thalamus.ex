@@ -402,10 +402,10 @@ defmodule Brain.Thalamus do
     cap = cfg_mood_cap(opts)
 
     raw =
-      dx.expl * (w.expl || 0.0) +
-        dx.inhib * (w.inhib || 0.0) +
-        dx.vigil * (w.vigil || 0.0) +
-        dx.plast * (w.plast || 0.0)
+      dx.expl * w.expl +
+        dx.inhib * w.inhib +
+        dx.vigil * w.vigil +
+        dx.plast * w.plast
 
     factor = 1.0 + max(-cap, min(cap, raw))
     {factor, true, mood, w, cap}

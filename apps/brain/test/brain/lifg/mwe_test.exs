@@ -44,7 +44,7 @@ defmodule Brain.LIFG.MWETest do
     assert cand.pos == "proper_noun"
   end
 
-  test "ensure_mwe_candidates buckets by token :index and suppresses function-word-edge MWEs" do
+  test "ensure_mwe_candidates buckets by token :index and suppresses function-word MWEs" do
     si = %{
       tokens: [
         %{index: 1, n: 1, mw: false, phrase: "how", span: {0, 3}},
@@ -52,7 +52,9 @@ defmodule Brain.LIFG.MWETest do
         # list position = 2, token index = 5 (historical mis-bucketing trap)
         %{index: 5, n: 2, mw: true, phrase: "Good   Evening", span: {8, 20}},
         # function-word edge: must not emit fallback
-        %{index: 6, n: 2, mw: true, phrase: "the bucket", span: {21, 31}}
+        %{index: 6, n: 2, mw: true, phrase: "the bucket", span: {21, 31}},
+        # internal function word: must not emit local fallback either
+        %{index: 7, n: 3, mw: true, phrase: "town and buy", span: {32, 44}}
       ],
       sense_candidates: %{
         1 => [%{id: "how|verb|0", score: 0.30}],
@@ -74,6 +76,7 @@ defmodule Brain.LIFG.MWETest do
 
     # And must suppress function-word-edge fallbacks
     refute Map.has_key?(sc, 6)
+    refute Map.has_key?(sc, 7)
   end
 
   test "unigram backfill uses token :index and canonicalizes pos for synthesized ids" do

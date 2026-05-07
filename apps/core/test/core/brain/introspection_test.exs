@@ -8,6 +8,7 @@ defmodule Core.Brain.IntrospectionTest do
     ensure_started(Brain.MoodCore)
     ensure_started(Brain.Meta)
     ensure_started(Brain.SelfPortrait)
+    :ok = Brain.SelfPortrait.reset()
 
     :ok
   end
@@ -35,7 +36,9 @@ defmodule Core.Brain.IntrospectionTest do
     assert %Brain.SelfModel{} = out.self_model
     assert out.self_model.last_appraisal == out.appraisal
     assert out.self_model.last_lifg.choices_count == 1
-    assert [{:self_model, %{confidence: _, uncertainty: _}} | _] = out.trace
+    assert [%{stage: :self_model, decision: :updated, scores: scores} | _] = out.trace
+    assert is_number(scores.confidence)
+    assert is_number(scores.uncertainty)
   end
 
   test "update_self_model can be disabled" do

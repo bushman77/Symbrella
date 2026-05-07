@@ -272,8 +272,7 @@ defmodule SymbrellaWeb.HomeLive do
           {nil, format_si_reply(si), %{}}
       end
 
-    # UI-visible rendering (tone line + body)
-    visible = compose_tone_and_main(tone, reply_text)
+    visible = reply_text
 
     explain_text =
       join_blocks([
@@ -281,13 +280,6 @@ defmodule SymbrellaWeb.HomeLive do
         lexical_tail,
         get_in(meta || %{}, [:explanation, :text])
       ])
-
-    # Record turn for multi-turn context stitching.
-    # IMPORTANT: record *reply_text* (no tone prefix) to keep history clean.
-    if Code.ensure_loaded?(Core.Response.LlmSynthesis) and
-         function_exported?(Core.Response.LlmSynthesis, :record_turn, 3) do
-      _ = Core.Response.LlmSynthesis.record_turn(session_id, user_text, reply_text)
-    end
 
     %{
       text: visible,
@@ -331,19 +323,6 @@ defmodule SymbrellaWeb.HomeLive do
       %{} = m -> m
       _ -> %{}
     end
-  end
-
-  defp compose_tone_and_main(tone, main_text) do
-    tone_line =
-      case tone do
-        t when is_atom(t) -> Atom.to_string(t)
-        t when is_binary(t) -> t
-        _ -> nil
-      end
-
-    [tone_line, main_text]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join("\n")
   end
 
   defp join_blocks(blocks) when is_list(blocks) do
@@ -432,8 +411,6 @@ defmodule SymbrellaWeb.HomeLive do
     |> Enum.reverse()
     |> Enum.take(@senses_modal_limit)
   end
-
-  defp build_senses_selected(_), do: []
 
   defp si_cells(si) do
     Map.get(si, :active_cells, Map.get(si, :cells, [])) || []

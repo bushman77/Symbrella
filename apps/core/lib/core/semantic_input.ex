@@ -20,6 +20,7 @@ defmodule Core.SemanticInput do
     • sense_candidates
     • lifg_opts / lifg_choices / acc_conflict
     • atl_slate
+    • comprehension
     • perception
     • activation_summary
     • evidence
@@ -66,6 +67,7 @@ defmodule Core.SemanticInput do
 
           # integration products
           atl_slate: map() | nil,
+          comprehension: map() | nil,
           activation_summary: map() | nil,
           evidence: map() | nil,
           episode: map() | nil,
@@ -106,6 +108,7 @@ defmodule Core.SemanticInput do
             acc_conflict: nil,
             perception: nil,
             atl_slate: nil,
+            comprehension: nil,
             activation_summary: %{db_hits: MapSet.new()},
             evidence: nil,
             episode: nil,

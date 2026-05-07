@@ -208,7 +208,7 @@ defmodule Brain.WM.Gate do
     case Map.get(state, :active_cells) do
       ac when is_map(ac) ->
         key = normalize_cell_id(id)
-        ac2 = Map.update(ac || %{}, key, score, &(&1 + score))
+        ac2 = Map.update(ac, key, score, &(&1 + score))
         Map.put(state, :active_cells, ac2)
 
       _ ->

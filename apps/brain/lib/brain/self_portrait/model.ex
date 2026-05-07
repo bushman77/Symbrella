@@ -52,6 +52,8 @@ defmodule Brain.SelfPortrait.Model do
         wm_updates: 0,
         pmtg_consults: 0,
         no_mwe_senses: 0,
+        mwe_fallbacks: 0,
+        mwe_compat_misses: 0,
         boundary_drops: 0,
         chargram_violations: 0,
         gate_failures: 0,
@@ -72,7 +74,7 @@ defmodule Brain.SelfPortrait.Model do
     kind = Map.get(ev, :kind) || Map.get(ev, "kind")
 
     portrait
-    |> bump_source(event)
+    |> bump_source(event, ev)
     |> bump_patterns(kind, event, ev)
     |> bump_traits(kind, event, ev)
     |> push_event(ev)
@@ -83,12 +85,8 @@ defmodule Brain.SelfPortrait.Model do
 
   # ───────────────────────── internals ─────────────────────────
 
-  defp bump_source(%{} = portrait, event) do
-    head =
-      case event do
-        [h | _] -> h
-        _ -> :unknown
-      end
+  defp bump_source(%{} = portrait, event, ev) do
+    head = source_head(event, ev)
 
     src =
       portrait.sources
@@ -96,6 +94,35 @@ defmodule Brain.SelfPortrait.Model do
 
     %{portrait | sources: src}
   end
+
+  defp source_head([h | _], _ev), do: h
+
+  defp source_head(_event, ev) when is_map(ev) do
+    cond do
+      get_any(ev, [:region, "region"]) in [:ml, "ml"] ->
+        :brain
+
+      get_any(ev, [:kind, "kind"]) in [:ml_turn, "ml_turn"] ->
+        :brain
+
+      source_known?(get_any(ev, [:source, "source"])) ->
+        normalize_source(get_any(ev, [:source, "source"]))
+
+      true ->
+        :unknown
+    end
+  end
+
+  defp source_head(_event, _ev), do: :unknown
+
+  defp source_known?(source), do: normalize_source(source) != :unknown
+
+  defp normalize_source(source) when source in [:brain, :core, :ml], do: source
+
+  defp normalize_source(source) when source in ["brain", "core", "ml"],
+    do: String.to_existing_atom(source)
+
+  defp normalize_source(_), do: :unknown
 
   defp bump_patterns(%{} = portrait, :telemetry, event, ev) when is_list(event) do
     p0 = portrait.patterns
@@ -109,11 +136,15 @@ defmodule Brain.SelfPortrait.Model do
           Map.update(p0, :pmtg_consults, 1, &(&1 + 1))
 
         event == [:brain, :pmtg, :no_mwe_senses] ->
-          Map.update(p0, :no_mwe_senses, 1, &(&1 + 1))
+          p0
+          |> Map.update(:no_mwe_senses, 1, &(&1 + 1))
+          |> Map.update(:mwe_compat_misses, 1, &(&1 + 1))
 
-        # Stage1 emits this when MWE tokens had no senses (fallback token)
+        # Stage1 emits this when local fallback had to stand in for a phrase.
+        # Keep it separate from pMTG compatibility misses; otherwise
+        # SelfPortrait cannot tell weak supply from true "no compatible MWE sense".
         event == [:brain, :pmtg, :mwe_fallback_emitted] ->
-          Map.update(p0, :no_mwe_senses, 1, &(&1 + 1))
+          Map.update(p0, :mwe_fallbacks, 1, &(&1 + 1))
 
         contains?(event, :boundary_drop) ->
           Map.update(p0, :boundary_drops, 1, &(&1 + 1))
@@ -160,7 +191,11 @@ defmodule Brain.SelfPortrait.Model do
         int_or_0(get_any(meas, [:chargram, "chargram"]))
 
     no_mwe =
-      int_or_0(get_any(meta, [:no_mwe_senses, :mwe_fallbacks, "no_mwe_senses", "mwe_fallbacks"])) +
+      int_or_0(get_any(meta, [:no_mwe_senses, "no_mwe_senses"])) +
+        int_or_0(get_any(meas, [:no_mwe_senses, "no_mwe_senses"]))
+
+    mwe_fallbacks =
+      int_or_0(get_any(meta, [:mwe_fallbacks, "mwe_fallbacks"])) +
         int_or_0(get_any(meas, [:mwe_fallbacks, "mwe_fallbacks"]))
 
     fb =
@@ -173,6 +208,8 @@ defmodule Brain.SelfPortrait.Model do
     |> bump_by(:boundary_drops, bd)
     |> bump_by(:chargram_violations, cg)
     |> bump_by(:no_mwe_senses, no_mwe)
+    |> bump_by(:mwe_compat_misses, no_mwe)
+    |> bump_by(:mwe_fallbacks, mwe_fallbacks)
     |> bump_by(:fallback_wins, fb)
     |> bump_by(:lifg_payload_gaps, lifg_payload_gap_count(ev))
     |> bump_by(:lifg_pos_anomalies, lifg_pos_anomaly_count(ev))

@@ -17,10 +17,10 @@ defmodule Brain.Utils.ControlSignals do
 
   defp to_pair({id, amt}) when is_binary(id) and is_number(amt), do: {id, amt}
   defp to_pair({id, _ti, amt}) when is_binary(id) and is_number(amt), do: {id, amt}
-  defp to_pair(%{id: id, amount: amt}) when is_binary(id) and is_number(amt), do: {id, amt}
-
   defp to_pair(%{id: id, token_index: _ti, amount: amt}) when is_binary(id) and is_number(amt),
     do: {id, amt}
+
+  defp to_pair(%{id: id, amount: amt}) when is_binary(id) and is_number(amt), do: {id, amt}
 
   defp to_pair(_), do: {:__invalid, 0.0}
 end

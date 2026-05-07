@@ -14,17 +14,13 @@ defmodule Core.Pipeline.Candidates do
 
     si
     |> Map.put(:sense_candidates, %{})
-    |> Map.update(:trace, [], fn tr ->
-      [
-        %{
-          stage: :reset_sense_candidates,
-          where: tag,
-          dropped: dropped,
-          ts_ms: System.system_time(:millisecond)
-        }
-        | tr
-      ]
-    end)
+    |> Core.Pipeline.Trace.append(
+      :reset_sense_candidates,
+      decision: :reset,
+      reason: :phase_boundary,
+      scores: %{dropped: dropped},
+      meta: %{where: tag, dropped: dropped}
+    )
   end
 
   def reset(si, _tag), do: si

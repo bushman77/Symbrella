@@ -433,7 +433,7 @@ defmodule Brain.Hippocampus do
             Window.append_or_refresh_head(win, ep, keep)
           end)
 
-        Logger.warning("[Hippocampus] warm_start loaded=#{length(rows)} keep=#{keep}")
+        Logger.info("[Hippocampus] warm_start loaded=#{length(rows)} keep=#{keep}")
         {:ok, Map.put(state, :window, window1)}
       rescue
         e ->
@@ -674,7 +674,7 @@ defmodule Brain.Hippocampus do
       latents = Map.get(snap, :latents) || %{}
       tone_hint = Map.get(snap, :tone_hint) || Map.get(snap, :tone) || :neutral
 
-      tone_from_meta = meta[:tone_reaction] || meta["tone_reaction"] || tone_hint || :neutral
+      tone_from_meta = meta[:tone_reaction] || meta["tone_reaction"] || tone_hint
 
       header = %{
         tone_reaction: tone_from_meta,

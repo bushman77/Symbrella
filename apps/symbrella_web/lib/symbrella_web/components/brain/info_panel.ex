@@ -181,7 +181,6 @@ defmodule SymbrellaWeb.Components.Brain.InfoPanel do
 
   # --- tiny helpers ----------------------------------------------------------
 
-  defp mget(nil, _k), do: nil
   defp mget(m, k) when is_map(m), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp mget(_, _), do: nil
 

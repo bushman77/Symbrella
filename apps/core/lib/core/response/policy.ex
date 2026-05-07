@@ -76,6 +76,20 @@ defmodule Core.Response.Policy do
             overrides: []
           }
 
+        # Safety-sensitive acquisition/intoxication requests
+        f.intent == :illicit_request ->
+          %{
+            tone: if(f.vig > 0.5, do: :deescalate, else: :firm),
+            mode: :editor,
+            action: :safe_redirect,
+            scores: %{
+              vigilance: f.vig,
+              risk: :high,
+              safety_intent: :illicit_request
+            },
+            overrides: [:safety_redirect]
+          }
+
         # Social intents
         f.intent in [:greeting, :gratitude, :smalltalk] ->
           tone = if f.vig >= 0.95, do: :deescalate, else: :warm

@@ -248,7 +248,7 @@ defmodule Brain.Utils.Tokens do
 
       true ->
         try do
-          String.slice(s, st, en - st) || ""
+          String.slice(s, st, en - st)
         rescue
           _ -> ""
         end

@@ -115,7 +115,7 @@ defmodule Brain.LIFG.Stage2 do
         score = score_for(ch, chosen_id)
         margin = margin_for(ch)
 
-        if is_integer(ti) and ti >= 0 and is_binary(chosen_id) and score >= min_score do
+        if ti >= 0 and is_binary(chosen_id) and score >= min_score do
           decision = if margin >= boost_margin, do: :boost, else: :allow
 
           lemma =
@@ -299,13 +299,7 @@ defmodule Brain.LIFG.Stage2 do
 
   defp to_plain_map(m) when is_map(m), do: m
 
-  defp to_plain_map(m) do
-    try do
-      Map.from_struct(m)
-    rescue
-      _ -> %{}
-    end
-  end
+  defp to_plain_map(_), do: %{}
 
   defp num(v) when is_integer(v), do: v * 1.0
   defp num(v) when is_float(v), do: v

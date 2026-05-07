@@ -3,7 +3,9 @@ defmodule Core.Intent.Normalize do
   Normalize mixed input maps into a safe, canonical intent map:
 
       %{
-        intent:    :ask | :tell | :affirm | :deny | :greet | :bye | :meta | :why | :help | :debug | :unknown,
+        intent:    :ask | :translate | :abuse | :insult | :command | :feedback |
+                   :illicit_request | :tell | :affirm | :deny | :greet | :bye |
+                   :meta | :why | :help | :debug | :unknown,
         keyword:   String.t() | nil,
         confidence: float in 0.0..1.0 | nil
       }
@@ -31,8 +33,20 @@ defmodule Core.Intent.Normalize do
     "y" => :affirm,
     "no" => :deny,
     "n" => :deny,
-    "question" => :ask,
     "ask" => :ask,
+    "question" => :ask,
+    "translate" => :translate,
+    "translation" => :translate,
+    "abuse" => :abuse,
+    "insult" => :insult,
+    "command" => :command,
+    "instruction" => :command,
+    "feedback" => :feedback,
+    "illicit" => :illicit_request,
+    "illicit request" => :illicit_request,
+    "illicit_request" => :illicit_request,
+    "safety risk" => :illicit_request,
+    "safety_risk" => :illicit_request,
     "help" => :help,
     "why" => :why,
     "debug" => :debug
@@ -69,7 +83,7 @@ defmodule Core.Intent.Normalize do
     alias_intent = Map.get(@alias_map, v)
 
     cond do
-      is_atom(alias_intent) and Core.Intent.valid?(alias_intent) ->
+      not is_nil(alias_intent) and Core.Intent.valid?(alias_intent) ->
         alias_intent
 
       true ->

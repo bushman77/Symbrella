@@ -20,6 +20,7 @@ defmodule Core.Response.Modes do
 
   @type intent ::
           :abuse
+          | :illicit_request
           | :greeting
           | :greet
           | :gratitude
@@ -63,6 +64,10 @@ defmodule Core.Response.Modes do
 
   def compose(:abuse, :firm, _mode, _opts),
     do: "Let's keep it constructive. Name the file or task you want changed and I'll proceed."
+
+  def compose(:illicit_request, _tone, _mode, _opts),
+    do:
+      "I can't help with buying drugs or getting wasted. I can help with safety, health risks, or getting support instead."
 
   # ── Greetings & Social ──────────────────────────────────────────────────────
 

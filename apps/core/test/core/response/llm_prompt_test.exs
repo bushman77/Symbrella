@@ -68,11 +68,12 @@ defmodule Core.Response.LlmPromptTest do
 
     prompt = LlmPrompt.build_system_prompt(features, decision, mood, wm)
 
-    assert prompt =~ "You are Symbrella, a brain-inspired AI assistant."
-    assert prompt =~ "Respond in a warm, engaged, and encouraging tone."
+    assert prompt =~ "You are Symbrella."
+    assert prompt =~ "brain-inspired, stateful assistant"
+    assert prompt =~ "Tone: warm, engaged, and encouraging."
 
     assert prompt =~
-             "You are acting as a pair programmer. Be concise, action-oriented, and practical."
+             "Use technical-work behavior only when the user's current message explicitly asks for code"
 
     assert prompt =~ "Active concepts: working, memory, you."
   end
@@ -104,5 +105,30 @@ defmodule Core.Response.LlmPromptTest do
     prompt = LlmPrompt.build_system_prompt(features, decision, mood, [])
 
     refute prompt =~ "Active concepts:"
+  end
+
+  test "build_system_prompt/1 includes comprehension summary when present" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :illicit_request,
+          comprehension: %{
+            intent: :illicit_request,
+            understood: ["buy drugs"],
+            uncertain: ["get wasted"],
+            degraded?: true,
+            reasons: [:fallback_rate_high]
+          }
+        },
+        decision: %{tone: :firm, mode: :editor},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Comprehension:"
+    assert prompt =~ "intent=illicit_request"
+    assert prompt =~ "understood=buy drugs"
+    assert prompt =~ "uncertain=get wasted"
+    assert prompt =~ "degraded=true"
   end
 end

@@ -37,15 +37,15 @@ defmodule Brain.SelfModel do
     patterns = Map.get(self_portrait, :patterns, %{})
     mood = Map.get(mood_snapshot, :mood, %{})
 
-    confidence = number(meta[:conf] || traits[:confidence_baseline] || 0.5)
+    confidence = bounded(meta[:conf] || traits[:confidence_baseline] || 0.5)
 
     %__MODULE__{
       confidence: confidence,
       uncertainty: clamp01(1.0 - confidence),
-      stability: number(traits[:stability] || 0.5),
-      vigilance: number(mood[:vigilance] || 0.5),
-      plasticity: number(mood[:plasticity] || 0.5),
-      inhibition: number(mood[:inhibition] || 0.5),
+      stability: bounded(traits[:stability] || 0.5),
+      vigilance: bounded(mood[:vigilance] || 0.5),
+      plasticity: bounded(mood[:plasticity] || 0.5),
+      inhibition: bounded(mood[:inhibition] || 0.5),
       cognitive_load: cognitive_load(wm_snapshot),
       mood: mood_snapshot,
       recent_errors: recent_errors(patterns),
@@ -77,6 +77,8 @@ defmodule Brain.SelfModel do
   defp number(value) when is_integer(value), do: value * 1.0
   defp number(value) when is_float(value), do: value
   defp number(_), do: 0.0
+
+  defp bounded(value), do: value |> number() |> clamp01()
 
   defp clamp01(value) when is_number(value), do: value |> max(0.0) |> min(1.0)
   defp clamp01(_), do: 0.0

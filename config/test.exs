@@ -35,6 +35,15 @@ config :symbrella, Symbrella.Mailer, adapter: Swoosh.Adapters.Test
 config :swoosh, :api_client, false
 
 # -------------------------------
+# LLM runner (disabled unless a test opts in)
+# -------------------------------
+config :llm, Llm,
+  auto_start_on_boot?: false,
+  allow_lazy_start?: false,
+  auto_restart_on_crash?: false,
+  heartbeat_ms: 0
+
+# -------------------------------
 # Logger / ExUnit
 # -------------------------------
 config :logger, level: :warning

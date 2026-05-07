@@ -377,22 +377,34 @@ defmodule Brain.LIFG do
               m = (ch[:margin] || 1.0) * 1.0
               alts? = (ch[:alt_ids] || []) != []
               p1 = top1_prob(ch)
+              weak? = ch[:weak?] == true or ch["weak?"] == true
+              fallback? = fallback_choice?(ch)
 
-              (m < cfg.margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and alts?
+              ((m < cfg.margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and
+                 alts?) or weak? or fallback?
             end)
 
           pmtg_mode =
             Keyword.get(eff_opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
 
+          degraded? = audit[:degraded?] == true or audit["degraded?"] == true
+          acc_epsilon = Application.get_env(:brain, :acc_conflict_epsilon, 1.0e-6)
+
+          force_pmtg? =
+            degraded? or
+              length(needy) >= Application.get_env(:brain, :pmtg_force_needy_count, 3)
+
           pmtg_apply? =
             Keyword.get(eff_opts, :pmtg_apply?, true) and
-              (not acc_present? or acc_conflict >= acc_conf_tau)
+              (force_pmtg? or not acc_present? or acc_conflict + acc_epsilon >= acc_conf_tau)
 
           :telemetry.execute(
             [:brain, :lifg, :pmtg_decision],
             %{needy: length(needy)},
             %{
               apply?: pmtg_apply?,
+              force?: force_pmtg?,
+              degraded?: degraded?,
               mode: pmtg_mode,
               acc_present?: acc_present?,
               acc_conflict: acc_conflict * 1.0,
@@ -542,6 +554,16 @@ defmodule Brain.LIFG do
 
   def top1_prob(_), do: 0.0
 
+  defp fallback_choice?(choice) when is_map(choice) do
+    id =
+      choice[:chosen_id] || choice["chosen_id"] ||
+        choice[:id] || choice["id"] || ""
+
+    String.ends_with?(to_string(id), "|fallback")
+  end
+
+  defp fallback_choice?(_), do: false
+
   @doc """
   Low-confidence predicate used by pMTG gate.
   Defaults: tau_confident=0.20, p_min=0.65. Returns true when pMTG should fire.
@@ -554,8 +576,9 @@ defmodule Brain.LIFG do
     m = (Safe.get(choice, :margin, 0.0) || 0.0) * 1.0
     p1 = top1_prob(choice)
     alts? = (Safe.get(choice, :alt_ids, []) || []) != []
+    weak? = Safe.get(choice, :weak?, false) == true or Safe.get(choice, "weak?", false) == true
 
-    alts? and (m < tau or p1 < p_min)
+    fallback_choice?(choice) or weak? or (alts? and (m < tau or p1 < p_min))
   end
 
   def low_confidence?(_choice, _opts), do: true
@@ -611,10 +634,24 @@ defmodule Brain.LIFG do
 
   defp run_stage1(si_for_stage, cfg, eff_opts)
        when is_map(si_for_stage) and is_map(cfg) and is_list(eff_opts) do
+    bridge_opts =
+      stage1_bridge_opts(cfg.scores_mode, cfg.stage_weights, cfg.margin_thr)
+      |> Keyword.merge(
+        Keyword.take(eff_opts, [
+          :boundary_event,
+          :chargram_event,
+          :mwe_event,
+          :mwe_fallback,
+          :source,
+          :stage1_local_mwe_fallback,
+          :stage1_stop_event
+        ])
+      )
+
     res =
       Stage1Bridge.safe_call(
         si_for_stage,
-        stage1_bridge_opts(cfg.scores_mode, cfg.stage_weights, cfg.margin_thr),
+        bridge_opts,
         eff_opts
       )
 
@@ -896,8 +933,7 @@ defmodule Brain.LIFG do
             end)
             |> Enum.reject(&is_nil/1)
             |> Enum.map(&to_string/1)
-            |> Enum.reject(fn id -> is_binary(chosen) and id == chosen end)
-            |> Enum.uniq()
+            |> collapse_competitor_ids(chosen)
 
           if alts == [] do
             chp
@@ -910,8 +946,6 @@ defmodule Brain.LIFG do
       end)
     end
   end
-
-  defp attach_slate_alt_ids(choices, _si_after) when is_list(choices), do: choices
 
   defp bucket_for_slate(slate, idx) when is_map(slate) do
     cond do
@@ -965,13 +999,14 @@ defmodule Brain.LIFG do
           |> Enum.reject(&is_nil/1)
           |> Enum.map(&to_string/1)
           |> Enum.reject(fn id -> is_binary(wid) and id == wid end)
-          |> Enum.uniq()
+
+        slate_alt_ids = collapse_competitor_ids(slate_bucket_ids, wid)
 
         alt_ids =
-          (alt_ids0 ++ slate_alts0 ++ slate_bucket_ids)
+          (alt_ids0 ++ slate_alts0 ++ slate_alt_ids)
           |> Enum.map(&to_string/1)
           |> Enum.reject(&(&1 in [nil, ""]))
-          |> Enum.uniq()
+          |> collapse_competitor_ids(wid)
 
         chp
         |> Map.put(:token_index, idx)
@@ -980,6 +1015,7 @@ defmodule Brain.LIFG do
         |> Map.put_new(:source, :lifg)
         |> Map.put(:score, score)
         |> Map.put(:alt_ids, alt_ids)
+        |> Map.put(:slate_alt_ids, slate_alt_ids)
 
       other ->
         other
@@ -1180,7 +1216,7 @@ defmodule Brain.LIFG do
         ch = Safe.to_plain(ch0)
         idx = normalize_idx(choice_token_index(ch))
         wid = normalize_signal_id(choice_winner_id(ch))
-        if is_integer(idx) and idx >= 0 and is_binary(wid), do: Map.put(acc, idx, wid), else: acc
+        if idx >= 0 and is_binary(wid), do: Map.put(acc, idx, wid), else: acc
       end)
 
     have_boost = MapSet.new(Enum.map(boosts, fn b -> {b[:token_index], b[:id]} end))
@@ -1255,7 +1291,7 @@ defmodule Brain.LIFG do
         idx = normalize_idx(choice_token_index(ch))
         wid = normalize_signal_id(choice_winner_id(ch))
 
-        if is_integer(idx) and idx >= 0 and is_binary(wid) and
+        if idx >= 0 and is_binary(wid) and
              not MapSet.member?(have, {idx, wid}) do
           [%{token_index: idx, id: wid, amount: boost_amt}]
         else
@@ -1286,7 +1322,7 @@ defmodule Brain.LIFG do
         idx = normalize_idx(choice_token_index(ch))
         wid = normalize_signal_id(choice_winner_id(ch))
 
-        if is_integer(idx) and idx >= 0 do
+        if idx >= 0 do
           competitor_ids(ch)
           |> Enum.reject(&is_nil/1)
           |> Enum.map(&to_string/1)
@@ -1370,7 +1406,7 @@ defmodule Brain.LIFG do
 
         case kind do
           :boost ->
-            if is_integer(idx) and idx >= 0 and wid == id,
+            if idx >= 0 and wid == id,
               do: [%{token_index: idx, id: id, amount: amt}],
               else: []
 
@@ -1382,7 +1418,7 @@ defmodule Brain.LIFG do
               |> Enum.reject(&is_nil/1)
               |> Enum.uniq()
 
-            if is_integer(idx) and idx >= 0 and id in cids and id != wid,
+            if idx >= 0 and id in cids and id != wid,
               do: [%{token_index: idx, id: id, amount: amt}],
               else: []
         end
@@ -1406,6 +1442,58 @@ defmodule Brain.LIFG do
     do: v |> to_string() |> normalize_signal_id()
 
   defp normalize_signal_id(_), do: nil
+
+  defp collapse_competitor_ids(ids, chosen_id) when is_list(ids) do
+    chosen_family = sense_family_key(chosen_id)
+
+    ids
+    |> Enum.map(&normalize_signal_id/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(fn id -> id == chosen_id or sense_family_key(id) == chosen_family end)
+    |> Enum.uniq_by(&sense_family_key/1)
+  end
+
+  defp collapse_competitor_ids(_ids, _chosen_id), do: []
+
+  defp sense_family_key(nil), do: nil
+
+  defp sense_family_key(id) do
+    case String.split(to_string(id), "|") do
+      [lemma, pos, tag | _] ->
+        {String.downcase(lemma), pos_family(pos), collapseable_tag(tag)}
+
+      [lemma, pos] ->
+        {String.downcase(lemma), pos_family(pos), :untagged}
+
+      [lemma] ->
+        {String.downcase(lemma), :unknown, :untagged}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp collapseable_tag("fallback"), do: :fallback
+
+  defp collapseable_tag(tag) when is_binary(tag) do
+    case Integer.parse(tag) do
+      {_n, ""} -> :numbered_sense
+      _ -> {:explicit_tag, tag}
+    end
+  end
+
+  defp collapseable_tag(tag), do: {:explicit_tag, tag}
+
+  defp pos_family(pos) do
+    case String.downcase(to_string(pos || "")) do
+      p when p in ["pron", "pronoun"] -> "pronoun"
+      p when p in ["det", "determiner", "article"] -> "determiner"
+      p when p in ["conj", "conjunction", "connector", "cc"] -> "conjunction"
+      p when p in ["adv", "adverb", "intensifier"] -> "adverb"
+      p when p in ["interj", "interjection", "greeting"] -> "interjection"
+      p -> p
+    end
+  end
 
   defp normalize_amount(v, _default_amt) when is_number(v), do: v * 1.0
   defp normalize_amount(_v, default_amt), do: default_amt * 1.0
@@ -1626,7 +1714,7 @@ defmodule Brain.LIFG do
           |> Enum.map(&Safe.to_plain/1)
 
         cond do
-          not is_integer(tidx) or tidx < 0 or not is_binary(chosen_id) ->
+          tidx < 0 or not is_binary(chosen_id) ->
             acc
 
           sense_list == [] ->
@@ -1709,7 +1797,7 @@ defmodule Brain.LIFG do
         end
 
       cond do
-        not is_integer(tok_idx) or tok_idx < 0 or not is_binary(chosen) ->
+        tok_idx < 0 or not is_binary(chosen) ->
           acc
 
         margin >= thr ->
@@ -1832,8 +1920,6 @@ defmodule Brain.LIFG do
     end
   end
 
-  defp ensure_assistant_candidates(other), do: other
-
   defp token_index(tok, fallback) when is_map(tok) do
     v = Map.get(tok, :index) || Map.get(tok, "index")
     if is_integer(v), do: v, else: fallback
@@ -1898,8 +1984,6 @@ defmodule Brain.LIFG do
 
   defp has_candidate_id?(_, _, _), do: false
 
-  defp norm_text(nil), do: ""
-
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
@@ -1941,12 +2025,10 @@ defmodule Brain.LIFG do
     end
   end
 
-  defp attach_explanation(other), do: other
-
   defp safe_build_explanation(last) do
     try do
       if Code.ensure_loaded?(Explanation) and function_exported?(Explanation, :build, 1) do
-        Explanation.build(last) || %{}
+        Explanation.build(last)
       else
         %{}
       end

@@ -152,8 +152,6 @@ defmodule Brain.LIFG.BoundaryGuard do
     |> Map.put("norm", n)
   end
 
-  defp put_phrase_norm(t, _), do: t
-
   defp put_span(%{} = t, {s, e}) when is_integer(s) and is_integer(e) do
     t
     |> Map.put(:span, {s, e})

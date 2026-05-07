@@ -177,7 +177,7 @@ defmodule Core.Token do
     tokens =
       tokens
       |> Enum.with_index()
-      |> Enum.map(fn {t, idx} -> %__MODULE__{t | index: idx} end)
+      |> Enum.map(fn {%__MODULE__{} = t, idx} -> %__MODULE__{t | index: idx} end)
 
     %Core.SemanticInput{sentence: s, tokens: tokens}
   end

@@ -181,7 +181,7 @@ defmodule Brain.Cerebellum do
 
   defp candidate_id(%{id: id}), do: id
   defp candidate_id(%{cell_id: id}), do: id
-  defp candidate_id(other), do: Map.get(other, :id) || Map.get(other, :cell_id)
+  defp candidate_id(_), do: nil
 
   defp feat(c) do
     [

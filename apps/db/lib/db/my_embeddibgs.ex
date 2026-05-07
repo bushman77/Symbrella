@@ -8,9 +8,7 @@ defmodule MyEmbeddings do
   end
 
   def embed!(text) when is_binary(text) do
-    case embed(text) do
-      {:ok, vec} -> vec
-      other -> raise "Embedding failed: #{inspect(other)}"
-    end
+    {:ok, vec} = embed(text)
+    vec
   end
 end

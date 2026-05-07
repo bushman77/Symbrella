@@ -4,7 +4,7 @@ defmodule Llm do
   Symbrella-owned llama.cpp runner.
 
   This GenServer *owns* the external `llama-server` OS process and exposes a small
-  OpenAI-compatible HTTP client (Finch) for:
+  OpenAI-compatible HTTP client (Req) for:
     - GET  /v1/models
     - POST /v1/chat/completions
     - POST /v1/embeddings
@@ -22,8 +22,6 @@ defmodule Llm do
   require Logger
 
   @type message :: %{required(:role) => String.t(), required(:content) => String.t()}
-
-  @finch_default __MODULE__.Finch
 
   @default_host "127.0.0.1"
   @default_ctx 2048
@@ -98,22 +96,12 @@ defmodule Llm do
     env = Application.get_env(:llm, __MODULE__, [])
     boot = Keyword.merge(env, opts, fn _k, _v1, v2 -> v2 end)
 
-    finch_name = Keyword.get(boot, :finch_name, @finch_default)
-    pools = Keyword.get(boot, :pools, %{default: [size: 8, count: 1]})
-
-    case Finch.start_link(name: finch_name, pools: pools) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-      {:error, reason} -> Logger.warning("Llm Finch start failed: #{inspect(reason)}")
-    end
-
     model_path = Keyword.get(boot, :model_path) || System.get_env("LLAMA_MODEL_PATH")
 
     llama_server =
       Keyword.get(boot, :llama_server, System.get_env("LLAMA_SERVER") || "llama-server")
 
     state = %{
-      finch: finch_name,
       timeout: Keyword.get(boot, :timeout, @call_timeout_default),
 
       # runner config
@@ -565,18 +553,16 @@ defmodule Llm do
   end
 
   # ────────────────────────────────────────────────────────────────────────────
-  # HTTP (Finch + Jason)
+  # HTTP (Req)
   # ────────────────────────────────────────────────────────────────────────────
 
   defp http_get(state, path, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, state.timeout)
     url = state.endpoint <> path
 
-    req = Finch.build(:get, url, [{"accept", "application/json"}])
-
-    case Finch.request(req, state.finch, receive_timeout: timeout) do
+    case Req.get(url, headers: [{"accept", "application/json"}], receive_timeout: timeout) do
       {:ok, %{status: s, body: body}} when s in 200..299 ->
-        decode_json(body)
+        {:ok, body}
 
       {:ok, %{status: s, body: body}} ->
         {:error, {:http_status, s, safe_body(body)}}
@@ -590,19 +576,13 @@ defmodule Llm do
     timeout = Keyword.get(opts, :timeout, state.timeout)
     url = state.endpoint <> path
 
-    json = Jason.encode!(body_map)
-
-    req =
-      Finch.build(
-        :post,
-        url,
-        [{"content-type", "application/json"}, {"accept", "application/json"}],
-        json
-      )
-
-    case Finch.request(req, state.finch, receive_timeout: timeout) do
+    case Req.post(url,
+           json: body_map,
+           headers: [{"accept", "application/json"}],
+           receive_timeout: timeout
+         ) do
       {:ok, %{status: s, body: body}} when s in 200..299 ->
-        decode_json(body)
+        {:ok, body}
 
       {:ok, %{status: s, body: body}} ->
         {:error, {:http_status, s, safe_body(body)}}
@@ -612,16 +592,11 @@ defmodule Llm do
     end
   end
 
-  defp decode_json(body) when is_binary(body) do
-    case Jason.decode(body) do
-      {:ok, map} -> {:ok, map}
-      {:error, e} -> {:error, {:json_decode_failed, e, safe_body(body)}}
-    end
-  end
-
   defp safe_body(body) when is_binary(body) do
     if byte_size(body) > 2_000, do: binary_part(body, 0, 2_000) <> "…", else: body
   end
+
+  defp safe_body(body), do: inspect(body, printable_limit: 2_000, limit: 50)
 
   # ────────────────────────────────────────────────────────────────────────────
   # Response extraction

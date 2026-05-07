@@ -51,6 +51,50 @@ defmodule Brain.SelfPortrait.ModelTest do
     assert p1.traits.curiosity_bias >= c0
   end
 
+  test "separates local MWE fallbacks from pMTG compatibility misses" do
+    p0 = Model.new()
+
+    p1 =
+      Model.observe(p0, %{
+        kind: :telemetry,
+        event: [:brain, :pmtg, :mwe_fallback_emitted],
+        measurements: %{count: 1},
+        meta: %{phrase: "buy some really"},
+        at_ms: 1
+      })
+
+    assert p1.patterns.mwe_fallbacks == 1
+    assert p1.patterns.no_mwe_senses == 0
+
+    p2 =
+      Model.observe(p1, %{
+        kind: :telemetry,
+        event: [:brain, :pmtg, :no_mwe_senses],
+        measurements: %{orig: 2, kept: 0},
+        meta: %{phrase: "hot dog"},
+        at_ms: 2
+      })
+
+    assert p2.patterns.mwe_fallbacks == 1
+    assert p2.patterns.no_mwe_senses == 1
+    assert p2.patterns.mwe_compat_misses == 1
+  end
+
+  test "attributes ML turn records to brain source instead of unknown" do
+    p0 = Model.new()
+
+    p1 =
+      Model.observe(p0, %{
+        kind: :ml_turn,
+        region: :ml,
+        turn_id: 1,
+        at_ms: 1
+      })
+
+    assert p1.sources.brain == 1
+    refute Map.has_key?(p1.sources, :unknown)
+  end
+
   test "tracks LIFG Stage1 summary payload gaps" do
     p0 = Model.new()
 

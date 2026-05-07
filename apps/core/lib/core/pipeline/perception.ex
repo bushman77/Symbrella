@@ -15,19 +15,21 @@ defmodule Core.Pipeline.Perception do
 
     si
     |> Map.put(:perception, perception)
-    |> Map.update(:trace, [], fn trace ->
-      [
-        %{
-          stage: :perception,
-          backend: perception.backend,
-          version: perception.version,
-          token_count: perception.meta.token_count,
-          candidate_bucket_count: perception.meta.candidate_bucket_count,
-          ts_ms: System.system_time(:millisecond)
-        }
-        | trace
-      ]
-    end)
+    |> Core.Pipeline.Trace.append(
+      :perception,
+      decision: :attached,
+      reason: :deterministic_perception,
+      scores: %{
+        token_count: perception.meta.token_count,
+        candidate_bucket_count: perception.meta.candidate_bucket_count
+      },
+      meta: %{
+        backend: perception.backend,
+        version: perception.version,
+        token_count: perception.meta.token_count,
+        candidate_bucket_count: perception.meta.candidate_bucket_count
+      }
+    )
   end
 
   def run(si, _opts), do: si

@@ -342,7 +342,6 @@ defmodule Core.LexicalExplain do
     end)
   end
 
-  defp gloss(nil), do: ""
   defp gloss(""), do: ""
 
   defp gloss(str) when is_binary(str) do
@@ -358,7 +357,6 @@ defmodule Core.LexicalExplain do
     end
   end
 
-  defp gloss_example(nil), do: ""
   defp gloss_example(""), do: ""
 
   defp gloss_example(str) when is_binary(str) do

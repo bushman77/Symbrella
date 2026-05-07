@@ -862,6 +862,7 @@ defmodule Brain do
   defp norm_float_01_or(_, d), do: d
 
   defp extract_items(list) when is_list(list), do: list
+  defp extract_items(%Row{} = row), do: [row]
 
   defp extract_items(%{} = si) do
     case Map.get(si, :active_cells, []) do
@@ -874,7 +875,6 @@ defmodule Brain do
     end
   end
 
-  defp extract_items(%Row{} = row), do: [row]
   defp extract_items(id) when is_binary(id), do: [id]
   defp extract_items(_other), do: []
 

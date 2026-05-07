@@ -4,14 +4,14 @@ defmodule Brain.LIFG.Stage1MWEWiringTest do
 
   alias Brain.LIFG.Stage1
 
-  test "Stage1 wires MWE fallback so MWEs get a phrase|fallback candidate" do
+  test "Stage1 wires conservative MWE fallback so content MWEs get a phrase|fallback candidate" do
     si = %{
-      sentence: "kick the bucket",
+      sentence: "really bad drugs",
       tokens: [
-        %{index: 0, phrase: "kick", span: {0, 4}, n: 1, mw: false},
-        %{index: 1, phrase: "the", span: {5, 8}, n: 1, mw: false},
-        %{index: 2, phrase: "bucket", span: {9, 15}, n: 1, mw: false},
-        %{index: 3, phrase: "kick the bucket", span: {0, 15}, n: 3, mw: true}
+        %{index: 0, phrase: "really", span: {0, 6}, n: 1, mw: false},
+        %{index: 1, phrase: "bad", span: {7, 10}, n: 1, mw: false},
+        %{index: 2, phrase: "drugs", span: {11, 16}, n: 1, mw: false},
+        %{index: 3, phrase: "really bad drugs", span: {0, 16}, n: 3, mw: true}
       ],
       sense_candidates: %{},
       active_cells: []
@@ -21,7 +21,7 @@ defmodule Brain.LIFG.Stage1MWEWiringTest do
 
     assert Enum.any?(choices, fn c ->
              chosen = Map.get(c, :chosen_id) || Map.get(c, "chosen_id")
-             chosen == "kick the bucket|phrase|fallback"
+             chosen == "really bad drugs|phrase|fallback"
            end)
   end
 end

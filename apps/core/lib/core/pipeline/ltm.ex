@@ -27,11 +27,7 @@ defmodule Core.Pipeline.LTM do
           |> Enum.reject(&(cell_id(&1) == nil))
           |> Enum.uniq_by(&cell_id/1)
 
-        db_hits_ms =
-          case db_hits do
-            %MapSet{} = ms -> ms
-            other -> MapSet.new(List.wrap(other))
-          end
+        db_hits_ms = db_hits
 
         activation_summary0 =
           case Map.get(si, :activation_summary) do
@@ -56,8 +52,6 @@ defmodule Core.Pipeline.LTM do
         |> Map.put(:active_cells, active_cells)
         |> Map.put(:activation_summary, activation_summary)
 
-      _ ->
-        si
     end
   end
 

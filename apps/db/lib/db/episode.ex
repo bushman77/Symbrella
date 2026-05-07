@@ -414,6 +414,8 @@ defmodule Db.Episode do
   end
 
   # Core recursive converter: Handles structs, maps, lists, MapSets, and tuples.
+  defp to_plain_map(%MapSet{} = set), do: Enum.to_list(set)
+
   defp to_plain_map(%{__struct__: _} = struct) do
     struct
     |> Map.from_struct()
@@ -427,7 +429,6 @@ defmodule Db.Episode do
 
   defp to_plain_map(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, to_plain_map(v)} end)
   defp to_plain_map(list) when is_list(list), do: Enum.map(list, &to_plain_map/1)
-  defp to_plain_map(%MapSet{} = set), do: Enum.to_list(set)
   defp to_plain_map(value), do: value
 
   # Specialized handling for known non-JSON nests in si (e.g., activation_summary, trace)

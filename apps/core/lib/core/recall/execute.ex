@@ -640,11 +640,7 @@ defmodule Core.Recall.Execute do
           function_exported?(Hippocampus, :attach_episodes, 2) ->
         qset = query_norms(si)
 
-        cues_list =
-          case qset do
-            %MapSet{} -> MapSet.to_list(qset)
-            other -> other
-          end
+        cues_list = MapSet.to_list(qset)
 
         hippo_opts2 =
           hippo_opts
@@ -858,9 +854,6 @@ defmodule Core.Recall.Execute do
           v = Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
           if is_binary(v) and v != "", do: [normalize(v)], else: []
 
-        %Core.Token{phrase: p} when is_binary(p) and p != "" ->
-          [normalize(p)]
-
         _ ->
           []
       end)
@@ -931,27 +924,7 @@ defmodule Core.Recall.Execute do
   defp set_nonempty?(%MapSet{} = s), do: MapSet.size(s) > 0
   defp set_nonempty?(_), do: false
 
-  defp winners_to_norms(%SI{} = si) do
-    slate = Map.get(si, :slate)
-
-    winners =
-      case slate do
-        %{} -> Map.get(slate, :winners)
-        _ -> nil
-      end
-
-    winners
-    |> List.wrap()
-    |> Enum.flat_map(fn
-      %{} = m ->
-        val = Map.get(m, :lemma) || Map.get(m, :norm) || Map.get(m, :text) || Map.get(m, :phrase)
-        if is_binary(val) and val != "", do: [normalize(val)], else: []
-
-      _ ->
-        []
-    end)
-    |> MapSet.new()
-  end
+  defp winners_to_norms(%SI{}), do: MapSet.new()
 
   # Core.Token does NOT have :norm — use :phrase (and accept maps with :norm/:text/:phrase)
   defp tokens_to_norms(tokens) when is_list(tokens) do

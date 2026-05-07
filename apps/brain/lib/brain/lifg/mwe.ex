@@ -822,11 +822,11 @@ defmodule Brain.LIFG.MWE do
         function_word?(a) == false and function_word?(b) == false
 
       xs when length(xs) >= 3 ->
-        head = hd(xs)
-        tail = List.last(xs)
-        fn_count = Enum.count(xs, &function_word?/1)
-
-        not (function_word?(head) or function_word?(tail) or fn_count >= 2)
+        # Sliding ngrams with any function word are usually scaffolding
+        # ("hey you wanna", "town and buy", "buy some really"). If a true
+        # function-word MWE exists, real phrase backfill can still supply it;
+        # local fallback should stay conservative.
+        not Enum.any?(xs, &function_word?/1)
     end
   end
 

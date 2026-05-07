@@ -400,5 +400,4 @@ defmodule Brain.LIFG.Input do
     end
   end
 
-  defp ensure_pos_tagged_id(_lemma, _cell), do: nil
 end

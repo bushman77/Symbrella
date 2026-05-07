@@ -9,8 +9,8 @@ defmodule Brain.LIFG.Choices do
     - When `:scores` is absent/empty (e.g. `scores: :none`), we treat `:probs` as the scoring map
       for enumerating scored ids.
   • `:slate_alt_ids` are slate-only candidates (present in SI slate, absent from scoring map).
-  • Apply `min_margin` floor when scoring is singleton-like (score-map has < 2 entries).
-    (If the scoring map is empty, margin stays 0.0 — we do not invent confidence.)
+  • Preserve honest margins. Singleton score maps stay at margin `0.0` unless the
+    scorer explicitly supplied a positive margin.
   """
 
   alias Brain.Utils.Safe
@@ -21,7 +21,8 @@ defmodule Brain.LIFG.Choices do
   # apps/brain/lib/brain/lifg/choices.ex
 
   @spec augment([choice], si, number()) :: [choice]
-  def augment(raw_choices, si_after, min_margin) when is_list(raw_choices) and is_map(si_after) do
+  def augment(raw_choices, si_after, _min_margin)
+      when is_list(raw_choices) and is_map(si_after) do
     slate0 =
       Safe.get(si_after, :sense_candidates, %{}) ||
         Safe.get(si_after, :candidates_by_token, %{}) || %{}
@@ -112,14 +113,8 @@ defmodule Brain.LIFG.Choices do
             end
         end
 
-      score_count = map_size(score_map_for_ids)
-
       margin =
-        cond do
-          score_count == 0 -> 0.0
-          score_count < 2 -> max(margin0, min_margin * 1.0)
-          true -> max(margin0, 0.0)
-        end
+        max(margin0, 0.0)
         |> Float.round(6)
 
       ch

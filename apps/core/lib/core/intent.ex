@@ -9,6 +9,12 @@ defmodule Core.Intent do
 
   @allowed_intents ~w(
     ask
+    translate
+    abuse
+    insult
+    command
+    feedback
+    illicit_request
     tell
     affirm
     deny

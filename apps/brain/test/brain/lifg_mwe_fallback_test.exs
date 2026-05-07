@@ -84,4 +84,44 @@ defmodule Brain.LIFG.MWEFallbackTelemetryTest do
     assert meta.confidence == 0.7
     assert meta.sentence == "Hello there"
   end
+
+  test "fallback rerun emits a distinct stop event instead of duplicating normal stage1 stop" do
+    si = %{
+      sentence: "Really bad drugs",
+      tokens: [
+        %{index: 0, n: 3, phrase: "Really bad drugs", mw: true, span: {0, 16}},
+        %{index: 1, n: 1, phrase: "really", lemma: "really", span: {0, 6}},
+        %{index: 2, n: 1, phrase: "bad", lemma: "bad", span: {7, 10}},
+        %{index: 3, n: 1, phrase: "drugs", lemma: "drugs", span: {11, 16}}
+      ],
+      sense_candidates: %{},
+      active_cells: []
+    }
+
+    normal_event = [:test, :brain, :pipeline, :lifg_stage1, :stop]
+    rerun_event = [:test, :brain, :pipeline, :lifg_stage1, :rerun_stop]
+    handler_id = "stage1-rerun-stop-test-#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             :telemetry.attach_many(
+               handler_id,
+               [normal_event, rerun_event],
+               fn event, _meas, meta, pid -> send(pid, {:stage1_stop_event, event, meta}) end,
+               self()
+             )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert {:ok, _} =
+             Brain.LIFG.run(si,
+               mwe_fallback: true,
+               scores: :all,
+               stage1_stop_event: normal_event,
+               rerun_stage1_stop_event: rerun_event
+             )
+
+    assert_receive {:stage1_stop_event, ^normal_event, _meta}, 200
+    assert_receive {:stage1_stop_event, ^rerun_event, _meta}, 200
+    refute_receive {:stage1_stop_event, ^normal_event, _meta}, 50
+  end
 end

@@ -4,31 +4,29 @@ defmodule Llm.Http do
   alias Llm.Const
   alias Llm.Util
 
-  def client(state, opts) do
+  def get_json(state, path, opts) do
     timeout = Keyword.get(opts, :timeout, state.timeout)
 
-    Tesla.client(
-      [
-        {Tesla.Middleware.BaseUrl, state.base_url},
-        {Tesla.Middleware.JSON, engine: Jason},
-        {Tesla.Middleware.Headers, [{"content-type", "application/json"}]}
-      ],
-      {Tesla.Adapter.Finch, name: state.finch, receive_timeout: timeout, pool_timeout: timeout}
-    )
-  end
-
-  def get_json(state, path, opts) do
-    case Tesla.get(client(state, opts), path) do
-      {:ok, %Tesla.Env{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
-      {:ok, %Tesla.Env{status: code, body: resp}} -> {:error, {:http_error, code, resp}}
+    case Req.get(state.base_url <> path,
+           headers: [{"accept", "application/json"}],
+           receive_timeout: timeout
+         ) do
+      {:ok, %{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
+      {:ok, %{status: code, body: resp}} -> {:error, {:http_error, code, resp}}
       {:error, reason} -> {:error, {:transport, reason}}
     end
   end
 
   def post_json(state, path, body, opts) do
-    case Tesla.post(client(state, opts), path, body) do
-      {:ok, %Tesla.Env{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
-      {:ok, %Tesla.Env{status: code, body: resp}} -> {:error, {:http_error, code, resp}}
+    timeout = Keyword.get(opts, :timeout, state.timeout)
+
+    case Req.post(state.base_url <> path,
+           json: body,
+           headers: [{"accept", "application/json"}],
+           receive_timeout: timeout
+         ) do
+      {:ok, %{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
+      {:ok, %{status: code, body: resp}} -> {:error, {:http_error, code, resp}}
       {:error, reason} -> {:error, {:transport, reason}}
     end
   end

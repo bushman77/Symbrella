@@ -69,6 +69,51 @@ defmodule Brain.LIFG.Stage1 do
                            itself ourselves yourselves themselves
                          ))
 
+  @closed_class_defaults %{
+    "and" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
+    "or" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
+    "but" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
+    "nor" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
+    "so" => %{pos: "conjunction", rel_prior: 0.98, activation: 0.93},
+    "yet" => %{pos: "conjunction", rel_prior: 0.98, activation: 0.93},
+    "really" => %{pos: "adverb", rel_prior: 1.0, activation: 0.96},
+    "very" => %{pos: "adverb", rel_prior: 1.0, activation: 0.96},
+    "quite" => %{pos: "adverb", rel_prior: 0.98, activation: 0.93},
+    "some" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
+    "the" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
+    "a" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
+    "an" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
+    "hey" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
+    "hi" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
+    "hello" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
+    "what" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
+    "who" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
+    "whom" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
+    "which" => %{pos: "determiner", rel_prior: 0.98, activation: 0.94},
+    "do" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "does" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "did" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "in" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
+    "about" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
+    "of" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
+    "to" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94},
+    "for" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94},
+    "with" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94},
+    "on" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94},
+    "at" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94},
+    "from" => %{pos: "preposition", rel_prior: 0.98, activation: 0.94}
+  }
+
+  @closed_class_pos_aliases %{
+    "conjunction" => ["conjunction", "conj", "connector", "cc"],
+    "adverb" => ["adverb", "adv", "intensifier"],
+    "determiner" => ["determiner", "det", "article"],
+    "pronoun" => ["pronoun", "pron"],
+    "interjection" => ["interjection", "interj", "greeting"],
+    "preposition" => ["preposition", "prep", "adposition"],
+    "auxiliary" => ["auxiliary", "aux", "modal"]
+  }
+
   @greeting_lemmas MapSet.new([
                      "hey how is",
                      "how are you",
@@ -276,6 +321,10 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:guard_drops, guard_drops)
         |> Map.put(:boundary_drop_count, acc.boundary_drops)
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
+        |> Map.put(:fallback_winners, acc.fallback_winners)
+        |> Map.put(:low_confidence_decisions, acc.low_confidence)
+        |> Map.put(:pos_anomalies, acc.pos_anomalies)
+        |> mark_degraded()
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
 
@@ -579,7 +628,10 @@ defmodule Brain.LIFG.Stage1 do
       rejected: [],
       chargram: 0,
       boundary_drops: 0,
-      mwe_fallbacks: 0
+      mwe_fallbacks: 0,
+      fallback_winners: 0,
+      low_confidence: 0,
+      pos_anomalies: 0
     }
 
     final =
@@ -616,6 +668,8 @@ defmodule Brain.LIFG.Stage1 do
     cand_list0 =
       orig_cands
       |> Enum.filter(&is_map/1)
+      |> restrict_to_token_alignment(token_phrase, token_mwe?)
+      |> collapse_duplicate_sense_candidates(token_phrase)
       |> restrict_to_phrase_if_mwe(token_mwe?)
       |> restrict_phrase_match_if_mwe(token_mwe?, token_phrase)
 
@@ -654,17 +708,9 @@ defmodule Brain.LIFG.Stage1 do
       end
 
     if cand_list == [] do
-      acc2 =
-        acc
-        |> Map.update!(:no_cand, &(&1 + 1))
-        |> Map.update!(:no_cand_tokens, &[tok_index | &1])
-
-      # Preserve old counter behavior if still empty and MWE fallback path was enabled.
-      if ctx.mwe_fallback? and token_mwe? do
-        Map.update!(acc2, :mwe_fallbacks, &(&1 + 1))
-      else
-        acc2
-      end
+      acc
+      |> Map.update!(:no_cand, &(&1 + 1))
+      |> Map.update!(:no_cand_tokens, &[tok_index | &1])
     else
       bias_val = get_float(ctx.bias_map, tok_index, 0.0)
       {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
@@ -708,6 +754,10 @@ defmodule Brain.LIFG.Stage1 do
           act = feat_override |> get_num(:activation, act0) |> clamp01()
           intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
+          pos_bias =
+            closed_class_pos_bias(token_phrase, pos) +
+              local_context_pos_bias(acc, tok, pos)
+
           base0 =
             (ctx.weights[:lex_fit] * lex +
                ctx.weights[:rel_prior] * rel +
@@ -727,7 +777,13 @@ defmodule Brain.LIFG.Stage1 do
               if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
             end
 
-          base = apply_mood_if_up(clamp01(base0 + perception_delta + hom_bump), tok, id)
+          base =
+            base0
+            |> Kernel.+(perception_delta)
+            |> Kernel.+(hom_bump)
+            |> Kernel.+(pos_bias)
+            |> clamp01()
+            |> apply_mood_if_up(tok, id)
 
           feat = %{
             id: id,
@@ -766,7 +822,7 @@ defmodule Brain.LIFG.Stage1 do
         |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
         |> Enum.sort_by(fn {_id, p} -> -p end)
 
-      {chosen_id, top_p} =
+      {chosen_id, top_p0} =
         case ranked do
           [{id1, p1} | _] -> {id1, p1}
           _ -> {nil, 0.0}
@@ -778,8 +834,25 @@ defmodule Brain.LIFG.Stage1 do
           _ -> 0.0
         end
 
-      margin0 = top_p - second_p
-      margin = Float.round(max(margin0, ctx.min_margin), 6)
+      fallback_winner? = fallback_sense_id?(chosen_id)
+      fallback_only? = fallback_winner? and length(ranked) == 1
+
+      singleton_closed_class? =
+        length(ranked) == 1 and
+          Enum.any?(cand_list, fn c ->
+            sense_id_for(c, token_phrase) == chosen_id and closed_class_candidate?(c)
+          end)
+
+      top_p = reliability_capped_top_p(top_p0, fallback_winner?, fallback_only?)
+
+      margin0 =
+        cond do
+          length(ranked) >= 2 -> top_p - second_p
+          singleton_closed_class? -> 1.0
+          true -> 0.0
+        end
+
+      margin = Float.round(max(margin0, 0.0), 6)
 
       _ =
         unless closed_class_slate? do
@@ -788,7 +861,7 @@ defmodule Brain.LIFG.Stage1 do
 
       scores_out =
         case ctx.scores_mode do
-          :all -> Map.new(ranked)
+          :all -> scores_map_with_capped_top(ranked, chosen_id, top_p)
           :top2 -> ranked |> Enum.take(2) |> Map.new()
           _ -> %{}
         end
@@ -813,9 +886,16 @@ defmodule Brain.LIFG.Stage1 do
           true -> []
         end
 
+      margin_weak? = margin < ctx.margin_thr
+
+      low_confidence? =
+        not singleton_closed_class? and
+          (top_p < Application.get_env(:brain, :acc_p_min, 0.65) or fallback_winner?)
+
       choice = %{
         token_index: tok_index,
         index: tok_index,
+        span_start: token_start(tok),
         id: chosen_id,
         chosen_id: chosen_id,
         veto?: chosen_veto?,
@@ -824,14 +904,40 @@ defmodule Brain.LIFG.Stage1 do
         scores: scores_out,
         alt_ids: alt_ids,
         margin: margin,
-        prob_margin: margin
+        prob_margin: margin,
+        weak?: margin_weak? or low_confidence?,
+        margin_weak?: margin_weak?,
+        low_confidence?: low_confidence?,
+        reliability:
+          cond do
+            fallback_winner? -> :fallback_unknown
+            singleton_closed_class? -> :deterministic_closed_class
+            margin_weak? -> :weak_margin
+            true -> :selected
+          end
       }
 
-      weak_next = if margin < ctx.margin_thr, do: acc.weak + 1, else: acc.weak
+      weak_next = if margin_weak?, do: acc.weak + 1, else: acc.weak
+
+      low_confidence_next =
+        if low_confidence?, do: acc.low_confidence + 1, else: acc.low_confidence
+
+      pos_anomaly_next =
+        if pos_anomaly?(token_phrase, chosen_id),
+          do: acc.pos_anomalies + 1,
+          else: acc.pos_anomalies
+
+      fallback_winners_next =
+        if fallback_winner?,
+          do: acc.fallback_winners + 1,
+          else: acc.fallback_winners
 
       acc
       |> Map.update!(:choices, &[choice | &1])
       |> Map.put(:weak, weak_next)
+      |> Map.put(:low_confidence, low_confidence_next)
+      |> Map.put(:pos_anomalies, pos_anomaly_next)
+      |> Map.put(:fallback_winners, fallback_winners_next)
       |> Map.update!(:kept, &(&1 + 1))
     end
   end
@@ -954,6 +1060,7 @@ defmodule Brain.LIFG.Stage1 do
     kept_tokens = audit_get(audit, :kept_tokens, acc.kept)
     dropped_tokens = audit_get(audit, :dropped_tokens, 0)
     weak_decisions = audit_get(audit, :weak_decisions, acc.weak)
+    low_confidence_decisions = audit_get(audit, :low_confidence_decisions, acc.low_confidence)
     missing_candidates = audit_get(audit, :missing_candidates, acc.no_cand)
     missing_candidate_tokens = audit_get(audit, :missing_candidate_tokens, [])
     guard_drops = audit_get(audit, :guard_drops, 0)
@@ -971,6 +1078,7 @@ defmodule Brain.LIFG.Stage1 do
     total = max(kept_tokens + dropped_tokens, 0)
     kept_rate = safe_div(kept_tokens, total)
     weak_rate = safe_div(weak_decisions, max(kept_tokens, 0))
+    low_confidence_rate = safe_div(low_confidence_decisions, max(kept_tokens, 0))
     fallback_rate = safe_div(fallback_winners, max(kept_tokens, 0))
     missing_rate = safe_div(missing_candidates, max(total, 0))
 
@@ -1009,6 +1117,7 @@ defmodule Brain.LIFG.Stage1 do
       kept_tokens: kept_tokens,
       dropped_tokens: dropped_tokens,
       weak_decisions: weak_decisions,
+      low_confidence_decisions: low_confidence_decisions,
       missing_candidates: missing_candidates,
       missing_candidate_tokens: missing_candidate_tokens,
       boundary_drops: boundary_drops,
@@ -1026,6 +1135,7 @@ defmodule Brain.LIFG.Stage1 do
       rates: %{
         kept: Float.round(kept_rate, 6),
         weak: Float.round(weak_rate, 6),
+        low_confidence: Float.round(low_confidence_rate, 6),
         fallback_win: Float.round(fallback_rate, 6),
         missing: Float.round(missing_rate, 6)
       },
@@ -1040,6 +1150,7 @@ defmodule Brain.LIFG.Stage1 do
       kept: kept_tokens,
       dropped: dropped_tokens,
       weak: weak_decisions,
+      low_confidence: low_confidence_decisions,
       missing: missing_candidates,
       boundary_drops: boundary_drops,
       chargram: chargram,
@@ -1246,6 +1357,99 @@ defmodule Brain.LIFG.Stage1 do
     end
   end
 
+  defp restrict_to_token_alignment(candidates, token_phrase, token_mwe?)
+       when is_list(candidates) do
+    tp = norm(token_phrase)
+
+    Enum.filter(candidates, fn c ->
+      candidate_aligned_to_token?(c, tp, token_mwe?)
+    end)
+  end
+
+  defp restrict_to_token_alignment(candidates, _token_phrase, _token_mwe?), do: candidates
+
+  defp candidate_aligned_to_token?(_c, "", _token_mwe?), do: false
+
+  defp candidate_aligned_to_token?(c, token_phrase, token_mwe?) when is_map(c) do
+    id = Safe.get(c, :id) || Safe.get(c, "id")
+    {id_lemma, id_pos, _tag} = parse_sense_id(to_string(id || ""))
+
+    cand_norm =
+      norm(
+        Safe.get(c, :norm) ||
+          Safe.get(c, "norm") ||
+          Safe.get(c, :lemma) ||
+          Safe.get(c, "lemma") ||
+          Safe.get(c, :word) ||
+          Safe.get(c, "word") ||
+          id_lemma
+      )
+
+    id_lemma_norm = norm(id_lemma)
+
+    cond do
+      token_mwe? ->
+        cand_norm == token_phrase or
+          (id_lemma_norm == token_phrase and id_pos == "phrase")
+
+      true ->
+        cand_norm == token_phrase or id_lemma_norm == token_phrase
+    end
+  end
+
+  defp candidate_aligned_to_token?(_c, _token_phrase, _token_mwe?), do: false
+
+  defp collapse_duplicate_sense_candidates(candidates, token_phrase) when is_list(candidates) do
+    candidates
+    |> Enum.group_by(&candidate_family_key(&1, token_phrase))
+    |> Enum.map(fn {_family, grouped} -> choose_representative_candidate(grouped) end)
+  end
+
+  defp collapse_duplicate_sense_candidates(candidates, _token_phrase), do: candidates
+
+  defp candidate_family_key(c, token_phrase) do
+    id = sense_id_for(c, token_phrase)
+    {lemma, pos, tag} = parse_sense_id(id)
+
+    {
+      norm(
+        Safe.get(c, :norm) || Safe.get(c, "norm") || Safe.get(c, :lemma) ||
+          Safe.get(c, "lemma") || lemma
+      ),
+      closed_class_pos_family(pos),
+      collapseable_sense_tag(tag)
+    }
+  end
+
+  defp collapseable_sense_tag("fallback"), do: :fallback
+
+  defp collapseable_sense_tag(tag) when is_binary(tag) do
+    case Integer.parse(tag) do
+      {_n, ""} -> :numbered_sense
+      _ -> {:explicit_tag, tag}
+    end
+  end
+
+  defp collapseable_sense_tag(tag), do: {:explicit_tag, tag}
+
+  defp choose_representative_candidate([single]), do: single
+
+  defp choose_representative_candidate(grouped) when is_list(grouped) do
+    grouped
+    |> Enum.sort_by(fn c ->
+      source = Safe.get(c, :source) || Safe.get(c, "source")
+      fallback? = fallback_sense_id?(Safe.get(c, :id) || Safe.get(c, "id"))
+      score = Safe.get(c, :score, Safe.get(c, "score", Safe.get(c, :activation, 0.0)))
+
+      {
+        if(source == :closed_class or source == "closed_class", do: 0, else: 1),
+        if(fallback?, do: 1, else: 0),
+        -to_float(score)
+      }
+    end)
+    |> hd()
+  end
+
   defp function_pos?(p) when is_binary(p), do: String.downcase(p) in @function_pos
   defp function_pos?(p) when is_atom(p), do: function_pos?(Atom.to_string(p))
   defp function_pos?(_), do: false
@@ -1271,11 +1475,14 @@ defmodule Brain.LIFG.Stage1 do
           token_mwe?(tok) ->
             acc
 
-          not MapSet.member?(@closed_class_pronouns, phrase) ->
-            acc
+          MapSet.member?(@closed_class_pronouns, phrase) ->
+            upsert_closed_class_candidate(acc, idx, closed_class_pronoun_candidate(phrase))
+
+          Map.has_key?(@closed_class_defaults, phrase) ->
+            upsert_closed_class_candidate(acc, idx, closed_class_default_candidate(phrase))
 
           true ->
-            upsert_closed_class_candidate(acc, idx, closed_class_pronoun_candidate(phrase))
+            acc
         end
       end)
 
@@ -1288,29 +1495,50 @@ defmodule Brain.LIFG.Stage1 do
     pos = cand |> pos_of() |> String.downcase()
     id = cand |> sense_id_for("") |> to_string()
 
-    pos in ["pronoun", "pron", "determiner", "det"] or
+    pos in [
+      "pronoun",
+      "pron",
+      "determiner",
+      "det",
+      "conjunction",
+      "conj",
+      "connector",
+      "cc",
+      "adverb",
+      "adv",
+      "intensifier",
+      "interjection",
+      "interj",
+      "greeting",
+      "preposition",
+      "prep",
+      "adposition",
+      "auxiliary",
+      "aux",
+      "modal"
+    ] or
       String.contains?(id, "|pronoun|") or
       String.contains?(id, "|pron|") or
       String.contains?(id, "|determiner|") or
-      String.contains?(id, "|det|")
+      String.contains?(id, "|det|") or
+      String.contains?(id, "|conjunction|") or
+      String.contains?(id, "|conj|") or
+      String.contains?(id, "|connector|") or
+      String.contains?(id, "|adverb|") or
+      String.contains?(id, "|adv|") or
+      String.contains?(id, "|intensifier|") or
+      String.contains?(id, "|interjection|") or
+      String.contains?(id, "|interj|") or
+      String.contains?(id, "|greeting|") or
+      String.contains?(id, "|preposition|") or
+      String.contains?(id, "|prep|") or
+      String.contains?(id, "|adposition|") or
+      String.contains?(id, "|auxiliary|") or
+      String.contains?(id, "|aux|") or
+      String.contains?(id, "|modal|")
   end
 
   defp closed_class_candidate?(_), do: false
-
-  defp pronoun_candidate?(cand) when is_map(cand) do
-    pos =
-      cand
-      |> pos_of()
-      |> String.downcase()
-
-    id = cand |> sense_id_for("") |> to_string()
-
-    pos in ["pronoun", "pron"] or
-      String.contains?(id, "|pronoun|") or
-      String.contains?(id, "|pron|")
-  end
-
-  defp pronoun_candidate?(_), do: false
 
   defp upsert_closed_class_candidate(sc, idx, cand) when is_map(sc) do
     key =
@@ -1322,27 +1550,37 @@ defmodule Brain.LIFG.Stage1 do
 
     Map.update(sc, key, [cand], fn
       list when is_list(list) ->
-        if Enum.any?(list, &pronoun_candidate?/1) do
-          Enum.map(list, fn
-            %{} = existing ->
-              if pronoun_candidate?(existing) do
-                upgrade_closed_class_candidate(existing, cand)
-              else
-                existing
-              end
+        cond do
+          Enum.any?(list, &same_closed_class_candidate?(&1, cand)) ->
+            Enum.map(list, fn
+              %{} = existing ->
+                if same_closed_class_candidate?(existing, cand) do
+                  upgrade_closed_class_candidate(existing, cand)
+                else
+                  existing
+                end
 
-            existing ->
-              existing
-          end)
-        else
-          list ++ [cand]
+              existing ->
+                existing
+            end)
+
+          Enum.any?(list, &same_closed_class_family?(&1, cand)) ->
+            list
+
+          true ->
+            list ++ [cand]
         end
 
       %{} = existing ->
-        if pronoun_candidate?(existing) do
-          upgrade_closed_class_candidate(existing, cand)
-        else
-          [existing, cand]
+        cond do
+          same_closed_class_candidate?(existing, cand) ->
+            upgrade_closed_class_candidate(existing, cand)
+
+          same_closed_class_family?(existing, cand) ->
+            existing
+
+          true ->
+            [existing, cand]
         end
 
       other ->
@@ -1362,6 +1600,60 @@ defmodule Brain.LIFG.Stage1 do
     |> Map.put(:source, :closed_class)
   end
 
+  defp same_closed_class_candidate?(existing, override)
+       when is_map(existing) and is_map(override) do
+    existing_lemma =
+      norm(
+        Safe.get(existing, :norm) || Safe.get(existing, :lemma) || Safe.get(existing, "norm") ||
+          Safe.get(existing, "lemma") ||
+          phrase_from_id(Safe.get(existing, :id) || Safe.get(existing, "id"))
+      )
+
+    override_lemma =
+      norm(
+        Safe.get(override, :norm) || Safe.get(override, :lemma) || Safe.get(override, "norm") ||
+          Safe.get(override, "lemma") ||
+          phrase_from_id(Safe.get(override, :id) || Safe.get(override, "id"))
+      )
+
+    existing_lemma == override_lemma and
+      closed_class_pos_family(pos_of(existing)) == closed_class_pos_family(pos_of(override)) and
+      same_closed_class_tag_family?(existing, override)
+  end
+
+  defp same_closed_class_candidate?(_existing, _override), do: false
+
+  defp same_closed_class_family?(existing, override) when is_map(existing) and is_map(override) do
+    existing_lemma =
+      norm(
+        Safe.get(existing, :norm) || Safe.get(existing, :lemma) || Safe.get(existing, "norm") ||
+          Safe.get(existing, "lemma") ||
+          phrase_from_id(Safe.get(existing, :id) || Safe.get(existing, "id"))
+      )
+
+    override_lemma =
+      norm(
+        Safe.get(override, :norm) || Safe.get(override, :lemma) || Safe.get(override, "norm") ||
+          Safe.get(override, "lemma") ||
+          phrase_from_id(Safe.get(override, :id) || Safe.get(override, "id"))
+      )
+
+    existing_lemma == override_lemma and
+      closed_class_pos_family(pos_of(existing)) == closed_class_pos_family(pos_of(override))
+  end
+
+  defp same_closed_class_family?(_existing, _override), do: false
+
+  defp same_closed_class_tag_family?(existing, override) do
+    {_existing_lemma, _existing_pos, existing_tag} =
+      parse_sense_id(to_string(Safe.get(existing, :id) || Safe.get(existing, "id") || ""))
+
+    {_override_lemma, _override_pos, override_tag} =
+      parse_sense_id(to_string(Safe.get(override, :id) || Safe.get(override, "id") || ""))
+
+    collapseable_sense_tag(existing_tag) == collapseable_sense_tag(override_tag)
+  end
+
   defp closed_class_pronoun_candidate(phrase) do
     %{
       id: "#{phrase}|pronoun|0",
@@ -1376,6 +1668,28 @@ defmodule Brain.LIFG.Stage1 do
         lex_fit: 1.0,
         rel_prior: 1.0,
         activation: 0.95,
+        intent_bias: 0.0
+      }
+    }
+  end
+
+  defp closed_class_default_candidate(phrase) do
+    spec = Map.fetch!(@closed_class_defaults, phrase)
+    pos = spec.pos
+
+    %{
+      id: "#{phrase}|#{pos}|0",
+      lemma: phrase,
+      norm: phrase,
+      mw: false,
+      pos: pos,
+      activation: spec.activation,
+      score: spec.activation,
+      source: :closed_class,
+      features: %{
+        lex_fit: 1.0,
+        rel_prior: spec.rel_prior,
+        activation: spec.activation,
         intent_bias: 0.0
       }
     }
@@ -1763,10 +2077,10 @@ defmodule Brain.LIFG.Stage1 do
           }
 
           raw =
-            dx.expl * (w.expl || 0.0) +
-              dx.inhib * (w.inhib || 0.0) +
-              dx.vigil * (w.vigil || 0.0) +
-              dx.plast * (w.plast || 0.0)
+            dx.expl * w.expl +
+              dx.inhib * w.inhib +
+              dx.vigil * w.vigil +
+              dx.plast * w.plast
 
           clamp(raw, -cap, cap)
       end
@@ -1870,9 +2184,23 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp pos_of(c) do
-    p = Safe.get(c, :pos) || Safe.get(c, "pos") || "other"
+    p =
+      Safe.get(c, :pos) ||
+        Safe.get(c, "pos") ||
+        pos_from_id(Safe.get(c, :id) || Safe.get(c, "id")) ||
+        "other"
+
     p |> to_string() |> String.downcase()
   end
+
+  defp pos_from_id(id) when is_binary(id) do
+    case String.split(id, "|") do
+      [_lemma, pos | _] -> pos
+      _ -> nil
+    end
+  end
+
+  defp pos_from_id(_), do: nil
 
   defp guess_rel_prior(c, id, token_phrase) do
     norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || Safe.get(c, :word) || ""
@@ -1908,7 +2236,7 @@ defmodule Brain.LIFG.Stage1 do
   defp parse_sense_id(other), do: parse_sense_id(to_string(other))
 
   defp apply_phrase_fallback_adjustment(base, "phrase", "fallback"),
-    do: clamp(base + 0.02, 0.0, 1.0)
+    do: clamp(base - 0.20, 0.0, 1.0)
 
   defp apply_phrase_fallback_adjustment(base, _pos, _tag), do: base
 
@@ -1920,7 +2248,165 @@ defmodule Brain.LIFG.Stage1 do
 
   defp guess_activation(c) do
     norm0 = Safe.get(c, :norm) || Safe.get(c, :lemma) || ""
-    if String.contains?(to_string(norm0), " "), do: 0.30, else: 0.25
+    id = Safe.get(c, :id) || Safe.get(c, "id")
+
+    cond do
+      fallback_sense_id?(id) -> 0.12
+      String.contains?(to_string(norm0), " ") -> 0.30
+      true -> 0.25
+    end
+  end
+
+  defp fallback_sense_id?(id) when is_binary(id), do: String.ends_with?(id, "|fallback")
+  defp fallback_sense_id?(id), do: id |> to_string() |> fallback_sense_id?()
+
+  defp reliability_capped_top_p(top_p, true, true) do
+    min(top_p * 1.0, Application.get_env(:brain, :lifg_fallback_only_confidence_cap, 0.35))
+    |> Float.round(6)
+  end
+
+  defp reliability_capped_top_p(top_p, true, false) do
+    min(top_p * 1.0, Application.get_env(:brain, :lifg_fallback_confidence_cap, 0.55))
+    |> Float.round(6)
+  end
+
+  defp reliability_capped_top_p(top_p, _fallback?, _fallback_only?), do: top_p * 1.0
+
+  defp scores_map_with_capped_top(ranked, chosen_id, top_p) do
+    Enum.into(ranked, %{}, fn
+      {id, _p} when id == chosen_id -> {id, top_p}
+      pair -> pair
+    end)
+  end
+
+  defp closed_class_pos_bias(token_phrase, pos) do
+    case Map.get(@closed_class_defaults, token_phrase) do
+      %{pos: expected_pos} ->
+        if closed_class_pos_family(pos) == closed_class_pos_family(expected_pos) do
+          0.12
+        else
+          -0.45
+        end
+
+      _ ->
+        0.0
+    end
+  end
+
+  defp local_context_pos_bias(acc, tok, pos) when is_map(acc) and is_map(tok) do
+    current_start = token_start(tok)
+    candidate_family = syntactic_pos_family(pos)
+
+    acc
+    |> Map.get(:choices, [])
+    |> nearest_left_choice(current_start)
+    |> previous_choice_pos_family()
+    |> context_bias_for(candidate_family)
+  end
+
+  defp local_context_pos_bias(_acc, _tok, _pos), do: 0.0
+
+  defp nearest_left_choice(choices, current_start) when is_list(choices) do
+    choices
+    |> Enum.filter(fn ch -> choice_start(ch) < current_start end)
+    |> Enum.max_by(&choice_start/1, fn -> nil end)
+  end
+
+  defp previous_choice_pos_family(nil), do: nil
+
+  defp previous_choice_pos_family(choice) when is_map(choice) do
+    id =
+      Safe.get(choice, :chosen_id) || Safe.get(choice, :id) ||
+        Safe.get(choice, "chosen_id") || Safe.get(choice, "id")
+
+    {_lemma, pos, _tag} = parse_sense_id(to_string(id || ""))
+    syntactic_pos_family(pos)
+  end
+
+  defp previous_choice_pos_family(_), do: nil
+
+  defp context_bias_for(:preposition, candidate_family)
+       when candidate_family in [:noun, :proper_noun, :phrase],
+       do: 0.18
+
+  defp context_bias_for(:preposition, candidate_family)
+       when candidate_family in [:verb, :auxiliary, :preposition],
+       do: -0.16
+
+  defp context_bias_for(:determiner, candidate_family)
+       when candidate_family in [:noun, :proper_noun, :adjective, :phrase],
+       do: 0.22
+
+  defp context_bias_for(:determiner, candidate_family)
+       when candidate_family in [:verb, :auxiliary, :preposition, :conjunction],
+       do: -0.20
+
+  defp context_bias_for(:auxiliary, :verb), do: 0.18
+  defp context_bias_for(:auxiliary, :auxiliary), do: -0.12
+
+  defp context_bias_for(:auxiliary, candidate_family)
+       when candidate_family in [:noun, :proper_noun], do: -0.08
+
+  defp context_bias_for(:pronoun, candidate_family) when candidate_family in [:verb, :auxiliary],
+    do: 0.08
+
+  defp context_bias_for(_prev_family, _candidate_family), do: 0.0
+
+  defp syntactic_pos_family(pos) do
+    p = pos |> to_string() |> String.downcase()
+
+    cond do
+      p in ["noun", "n", "common_noun"] -> :noun
+      p in ["proper_noun", "proper noun", "propn", "proper"] -> :proper_noun
+      p in ["verb", "v"] -> :verb
+      p in ["adjective", "adj"] -> :adjective
+      p in ["phrase", "mwe", "multiword"] -> :phrase
+      p in ["pronoun", "pron"] -> :pronoun
+      p in ["determiner", "det", "article"] -> :determiner
+      p in ["preposition", "prep", "adposition"] -> :preposition
+      p in ["auxiliary", "aux", "modal"] -> :auxiliary
+      p in ["conjunction", "conj", "connector", "cc"] -> :conjunction
+      p in ["adverb", "adv", "intensifier"] -> :adverb
+      p in ["interjection", "interj", "greeting"] -> :interjection
+      true -> :other
+    end
+  end
+
+  defp token_start(tok) when is_map(tok) do
+    case Safe.get(tok, :span) || Safe.get(tok, "span") do
+      {start, _stop} when is_integer(start) -> start
+      [start, _stop] when is_integer(start) -> start
+      _ -> token_index(tok, 0) * 10_000
+    end
+  end
+
+  defp token_start(_), do: 0
+
+  defp choice_start(choice) when is_map(choice) do
+    Safe.get(choice, :span_start) || Safe.get(choice, "span_start") ||
+      (Safe.get(choice, :token_index) || Safe.get(choice, :index) ||
+         Safe.get(choice, "token_index") || Safe.get(choice, "index") || 0) * 10_000
+  end
+
+  defp choice_start(_), do: 0
+
+  defp closed_class_pos_family(pos) do
+    p = pos |> to_string() |> String.downcase()
+
+    Enum.find_value(@closed_class_pos_aliases, p, fn {family, aliases} ->
+      if p in aliases, do: family, else: nil
+    end)
+  end
+
+  defp pos_anomaly?(token_phrase, chosen_id) do
+    case Map.get(@closed_class_defaults, token_phrase) do
+      %{pos: expected_pos} ->
+        {_lemma, chosen_pos, _tag} = parse_sense_id(to_string(chosen_id || ""))
+        closed_class_pos_family(chosen_pos) != closed_class_pos_family(expected_pos)
+
+      _ ->
+        false
+    end
   end
 
   defp softmax([]), do: []
@@ -2081,6 +2567,54 @@ defmodule Brain.LIFG.Stage1 do
     }
   end
 
+  defp mark_degraded(audit) when is_map(audit) do
+    kept = max(get_num(audit, :kept_tokens, 0.0), 0.0)
+    total = max(kept + max(get_num(audit, :dropped_tokens, 0.0), 0.0), 1.0)
+
+    fallback_winners = get_num(audit, :fallback_winners, 0.0)
+    mwe_fallbacks = get_num(audit, :mwe_fallbacks, 0.0)
+
+    fallback_rate = fallback_winners / max(kept, 1.0)
+    fallback_emit_rate = mwe_fallbacks / total
+    missing_rate = get_num(audit, :missing_candidates, 0.0) / total
+    weak_rate = get_num(audit, :weak_decisions, 0.0) / max(kept, 1.0)
+    low_confidence_rate = get_num(audit, :low_confidence_decisions, 0.0) / max(kept, 1.0)
+    pos_anomalies = get_num(audit, :pos_anomalies, 0.0)
+
+    degraded? =
+      fallback_rate >= Application.get_env(:brain, :lifg_degraded_fallback_rate, 0.25) or
+        fallback_emit_rate >=
+          Application.get_env(:brain, :lifg_degraded_mwe_fallback_emit_rate, 0.25) or
+        missing_rate >= Application.get_env(:brain, :lifg_degraded_missing_rate, 0.25) or
+        weak_rate >= Application.get_env(:brain, :lifg_degraded_weak_rate, 0.35) or
+        low_confidence_rate >=
+          Application.get_env(:brain, :lifg_degraded_low_confidence_rate, 0.35) or
+        pos_anomalies > 0.0
+
+    reasons =
+      []
+      |> maybe_reason(:fallback_winner_rate_high, fallback_rate >= 0.25)
+      |> maybe_reason(:mwe_fallback_emit_rate_high, fallback_emit_rate >= 0.25)
+      |> maybe_reason(:missing_candidate_rate_high, missing_rate >= 0.25)
+      |> maybe_reason(:weak_decision_rate_high, weak_rate >= 0.35)
+      |> maybe_reason(:low_confidence_rate_high, low_confidence_rate >= 0.35)
+      |> maybe_reason(:pos_anomalies, pos_anomalies > 0.0)
+
+    audit
+    |> Map.put(:degraded?, degraded?)
+    |> Map.put(:degraded_reasons, Enum.reverse(reasons))
+    |> Map.put(:rates, %{
+      fallback: Float.round(fallback_rate, 6),
+      mwe_fallback_emit: Float.round(fallback_emit_rate, 6),
+      missing: Float.round(missing_rate, 6),
+      weak: Float.round(weak_rate, 6),
+      low_confidence: Float.round(low_confidence_rate, 6)
+    })
+  end
+
+  defp maybe_reason(reasons, reason, true), do: [reason | reasons]
+  defp maybe_reason(reasons, _reason, false), do: reasons
+
   # ---------- Reanalysis hook ----------
 
   defp maybe_reanalyse(%{choices: _choices} = out, _si0, opts) do
@@ -2171,12 +2705,7 @@ defmodule Brain.LIFG.Stage1 do
         not Brain.LIFG.MWE.function_word?(a) and not Brain.LIFG.MWE.function_word?(b)
 
       xs when length(xs) >= 3 ->
-        head = hd(xs)
-        tail = List.last(xs)
-        fn_count = Enum.count(xs, &Brain.LIFG.MWE.function_word?/1)
-
-        not (Brain.LIFG.MWE.function_word?(head) or Brain.LIFG.MWE.function_word?(tail) or
-               fn_count >= 2)
+        not Enum.any?(xs, &Brain.LIFG.MWE.function_word?/1)
     end
   end
 

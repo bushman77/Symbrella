@@ -167,7 +167,9 @@ log_level =
     _ -> :info
   end
 
-config :logger, level: log_level
+if config_env() != :test do
+  config :logger, level: log_level
+end
 
 # ───────── Ecto Repo runtime overrides ─────────
 # Silence SQL query spam unless DB_LOG=true
@@ -215,12 +217,14 @@ if config_env() == :prod do
   config :swoosh, local: false
 end
 
-config :llm, Llm,
-  # keep daemon up
-  auto_start_on_boot?: true,
-  # optional: prefetch model
-  pull_on_boot?: true,
-  # <- critical: DO NOT warm on boot
-  warm_on_boot?: false,
-  warm_on_restart?: false,
-  pull_on_restart?: false
+if config_env() != :test do
+  config :llm, Llm,
+    # keep daemon up
+    auto_start_on_boot?: true,
+    # optional: prefetch model
+    pull_on_boot?: true,
+    # <- critical: DO NOT warm on boot
+    warm_on_boot?: false,
+    warm_on_restart?: false,
+    pull_on_restart?: false
+end

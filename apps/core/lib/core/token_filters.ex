@@ -349,8 +349,8 @@ defmodule Core.TokenFilters do
           {a, b} when is_integer(a) and is_integer(b) and a >= 0 ->
             # Prefer {start,len}; fall back to {start,stop}.
             cond do
-              b > 0 and norm_text(String.slice(s_norm, a, b) || "") == phrase -> true
-              b > a and norm_text(String.slice(s_norm, a, b - a) || "") == phrase -> true
+              b > 0 and norm_text(String.slice(s_norm, a, b)) == phrase -> true
+              b > a and norm_text(String.slice(s_norm, a, b - a)) == phrase -> true
               true -> false
             end
 
@@ -445,8 +445,6 @@ defmodule Core.TokenFilters do
   defp tok_phrase(_), do: ""
 
   defp put_tokens(%SemanticInput{} = si, toks), do: %SemanticInput{si | tokens: toks}
-  defp put_tokens(%{} = si, toks), do: Map.put(si, :tokens, toks)
-  defp put_tokens(si, _toks), do: si
 
   defp put_trace_any(%SemanticInput{} = si, stage, meta) do
     ts_ms = System.system_time(:millisecond)
@@ -462,5 +460,4 @@ defmodule Core.TokenFilters do
     Map.put(si, :trace, trace)
   end
 
-  defp put_trace_any(other, _stage, _meta), do: other
 end

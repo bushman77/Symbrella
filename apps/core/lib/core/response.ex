@@ -88,7 +88,7 @@ defmodule Core.Response do
 
       confidence_bucket = bucket_confidence(conf)
       vigilance_bucket = bucket_vigilance(vig)
-      risk_bucket = if guard.guardrail?, do: :high, else: :low
+      risk_bucket = if guard.guardrail? or intent == :illicit_request, do: :high, else: :low
 
       features =
         build_features(%{
@@ -109,7 +109,8 @@ defmodule Core.Response do
           command?: command?,
           risk_bucket: risk_bucket,
           guard: guard,
-          extracted_name: extracted_name
+          extracted_name: extracted_name,
+          comprehension: Map.get(si, :comprehension)
         })
 
       {decision, skill} = decide_and_pick_skill(features, guard, text_in)
@@ -161,7 +162,8 @@ defmodule Core.Response do
           guard: guard,
           session_id: session_id,
           extracted_name: extracted_name,
-          planner_explanation: planner_explanation
+          planner_explanation: planner_explanation,
+          comprehension: Map.get(features, :comprehension)
         })
 
       :telemetry.execute([:core, :response, :plan], %{}, meta)
@@ -204,7 +206,8 @@ defmodule Core.Response do
          command?: command?,
          risk_bucket: risk_bucket,
          guard: guard,
-         extracted_name: extracted_name
+         extracted_name: extracted_name,
+         comprehension: comprehension
        }) do
     %{
       session_id: session_id,
@@ -228,7 +231,8 @@ defmodule Core.Response do
       approve_token?: guard.approve_token?,
       risk_bucket: risk_bucket,
       guardrail_flags: guard.flags,
-      user_name: extracted_name
+      user_name: extracted_name,
+      comprehension: comprehension
     }
   end
 
@@ -428,6 +432,20 @@ defmodule Core.Response do
       guard.guardrail? ->
         {decision, nil}
 
+      intent == :illicit_request ->
+        decision =
+          decision
+          |> put_decision(tone: decision.tone, mode: :editor, action: :safe_redirect)
+          |> add_decision_override(:illicit_request_redirect)
+
+        {decision,
+         %{
+           id: :illicit_request_redirect,
+           reason: :illicit_request,
+           inline_text:
+             "I can't help with buying drugs or getting wasted. I can help with safety, health risks, or getting support instead."
+         }}
+
       # Time questions should answer with a direct time snippet (not the dev menu).
       time_query?(text) ->
         decision =
@@ -525,7 +543,7 @@ defmodule Core.Response do
       _ ->
         cond do
           guard.guardrail? or features.risk_bucket == :high or
-            features.intent in [:abuse] or features.hostile? ->
+            features.intent in [:abuse, :illicit_request] or features.hostile? ->
             :firm_guardian
 
           decision.mode == :explainer ->
@@ -625,7 +643,6 @@ defmodule Core.Response do
   defp maybe_add(list, true, item), do: list ++ [item]
   defp maybe_add(list, false, _item), do: list
 
-  defp reason_suffix([]), do: ""
   defp reason_suffix(list), do: " because=" <> Enum.map_join(list, ",", &to_string/1)
 
   defp mode_suffix(nil), do: ""
