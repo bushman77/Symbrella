@@ -80,9 +80,34 @@ defmodule Core.Intent.Selection do
           | :command
           | :feedback
           | :ask
+          | :ask_info
+          | :brain_introspect
+          | :code
+          | :debug
+          | :define
+          | :help
+          | :memory_write
+          | :tell
           | :unknown
 
-  @precedence [:abuse, :insult, :illicit_request, :translate, :command, :feedback, :ask, :greet]
+  @precedence [
+    :abuse,
+    :insult,
+    :illicit_request,
+    :memory_write,
+    :debug,
+    :code,
+    :brain_introspect,
+    :define,
+    :translate,
+    :command,
+    :help,
+    :ask_info,
+    :feedback,
+    :ask,
+    :tell,
+    :greet
+  ]
 
   @doc ~S"""
   Select an intent from an SI-like map and attach `:intent`, `:keyword`, and `:confidence`.
@@ -157,19 +182,20 @@ defmodule Core.Intent.Selection do
     text0 = text_from_si(si, kw)
     text = normalize_text(text0)
 
-    {intent, conf} = infer_intent(kw, text)
+    {intent, conf, evidence} = infer_intent(kw, text, Map.get(si, :tokens, []))
 
     si2 =
       si
       |> Map.put(:intent, intent)
       |> Map.put(:keyword, kw)
       |> Map.put(:confidence, conf)
+      |> Map.put(:intent_evidence, evidence)
       |> Core.Pipeline.Trace.append(
         :intent,
         decision: intent,
         reason: :intent_selection,
         scores: %{confidence: conf},
-        meta: %{keyword: kw, intent: intent, confidence: conf}
+        meta: %{keyword: kw, intent: intent, confidence: conf, evidence: evidence}
       )
 
     emit(si2, intent, kw, conf, text)
@@ -360,21 +386,40 @@ defmodule Core.Intent.Selection do
 
   # ──────────────────── cue-based inference ────────────────────
 
-  defp infer_intent(kw, _text) when kw in ["", nil], do: {:unknown, 0.0}
+  defp infer_intent(kw, text, tokens) do
+    if blank?(kw) and blank?(text) and tokens == [] do
+      {:unknown, 0.0, []}
+    else
+      do_infer_intent(kw || "", text || "", tokens)
+    end
+  end
 
-  defp infer_intent(kw, text) do
+  defp do_infer_intent(kw, text, tokens) do
     question_cue = question_cue(kw, text)
+    token_terms = token_terms(tokens)
 
-    scores = %{
-      greet: score_greet(kw),
-      translate: score_translate(kw),
-      abuse: score_abuse(kw),
-      insult: score_insult(kw),
-      illicit_request: score_illicit_request(text),
-      command: score_command(kw),
-      feedback: score_feedback(kw),
-      ask: score_question(question_cue)
-    }
+    cue_scores =
+      %{
+        greet: max(score_greet(kw), score_greet(text)),
+        translate: max(score_translate(kw), score_translate(text)),
+        abuse: max(score_abuse(kw), score_abuse(text)),
+        insult: max(score_insult(kw), score_insult(text)),
+        illicit_request: score_illicit_request(text),
+        command: max(score_command(kw), score_command(text)),
+        feedback: max(score_feedback(kw), score_feedback(text)),
+        ask: score_question(question_cue),
+        ask_info: score_ask_info(text),
+        brain_introspect: score_brain_introspect(text),
+        code: score_code(text),
+        debug: score_debug(text),
+        define: score_define(text),
+        help: score_help(text),
+        memory_write: score_memory_write(text),
+        tell: score_tell(text)
+      }
+
+    matrix_scores = matrix_scores(token_terms)
+    scores = merge_scores(cue_scores, matrix_scores)
 
     {label, top, second} = pick_label(scores)
 
@@ -385,8 +430,36 @@ defmodule Core.Intent.Selection do
       end
 
     conf = conf_from_scores(label, top, second)
+    evidence = score_evidence(scores, label, top, second)
 
-    if top < 0.35, do: {:unknown, 0.40}, else: {label, conf}
+    if top < 0.35, do: {:unknown, 0.40, evidence}, else: {label, conf, evidence}
+  end
+
+  defp merge_scores(left, right) do
+    Map.merge(left, right, fn _intent, a, b -> max(a, b) end)
+  end
+
+  defp matrix_scores(tokens) do
+    tokens
+    |> Core.Intent.Matrix.score(nil)
+    |> Enum.reduce(%{}, fn %{intent: intent, score: score}, acc ->
+      Map.put(acc, normalize_matrix_intent(intent), clamp01(score))
+    end)
+  end
+
+  defp normalize_matrix_intent(:ask_info), do: :ask_info
+  defp normalize_matrix_intent(intent), do: intent
+
+  defp score_evidence(scores, label, top, second) do
+    runner_up =
+      scores
+      |> Enum.reject(fn {intent, _score} -> intent == label end)
+      |> Enum.max_by(fn {_intent, score} -> score end, fn -> {:unknown, 0.0} end)
+
+    [
+      %{intent: label, score: Float.round(top * 1.0, 4), role: :winner},
+      %{intent: elem(runner_up, 0), score: Float.round(second * 1.0, 4), role: :runner_up}
+    ]
   end
 
   defp question_cue(kw, text) do
@@ -478,7 +551,7 @@ defmodule Core.Intent.Selection do
       polite = Regex.match?(~r/\bplease\b/i, s)
 
       cond do
-        strong and not qmark -> 0.85
+        strong and not qmark -> 0.95
         polite and not qmark -> 0.70
         true -> 0.0
       end
@@ -523,23 +596,13 @@ defmodule Core.Intent.Selection do
   end
 
   defp score_greet(s) do
-    base = if Regex.match?(greet_rx(), s), do: 0.70, else: 0.0
+    base = if Regex.match?(greet_rx(), s), do: 0.76, else: 0.0
     extra = if base > 0.0 and String.contains?(s, "!"), do: 0.10, else: 0.0
     min(1.0, base + extra)
   end
 
   defp greet_rx do
-    ~r/
-    ^
-    (?:
-      h+e+l{1,2}o+(?:\b|[!.?]|$) |
-      he+y+(?:\b|[!.?]|$)        |
-      hi+(?:\b|[!.?]|$)          |
-      yo+(?!')(?:\b|[!.?]|$)     |
-      gm\b |
-      good\s+(?:morning|afternoon|evening)\b
-    )
-  /ix
+    ~r/^\s*(?:h+e+l{1,2}o+|he+y+|hi+|yo+|gm|good\s+(?:morning|afternoon|evening))\b/i
   end
 
   defp score_translate(s) do
@@ -621,6 +684,135 @@ defmodule Core.Intent.Selection do
   end
 
   defp looks_like_question?(s), do: score_question(s) >= 0.70
+
+  defp score_ask_info(s) do
+    recall? =
+      Regex.match?(
+        ~r/\b(what|where|who|when)\b.{0,60}\b(did\s+i\s+(?:say|tell|mention)|my|me|remember|recall)\b/i,
+        s
+      ) or Regex.match?(~r/\bwhat\s+did\s+i\s+tell\s+you\b/i, s)
+
+    cond do
+      recall? ->
+        0.88
+
+      looks_like_question?(s) and Regex.match?(~r/\b(my|me|remember|recall|stored|saved)\b/i, s) ->
+        0.76
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_brain_introspect(s) do
+    domain? =
+      Regex.match?(
+        ~r/\b(symbrella|lifg|pmtg|hippocampus|thalamus|working\s+memory|semantic|intent|recall|brain|core)\b/i,
+        s
+      )
+
+    introspect? =
+      Regex.match?(
+        ~r/\b(how|why|what)\b.{0,60}\b(you|your|symbrella|pipeline|recognize|understand|figure|decide|intent)\b/i,
+        s
+      )
+
+    cond do
+      domain? and introspect? -> 0.94
+      domain? and looks_like_question?(s) -> 0.68
+      true -> 0.0
+    end
+  end
+
+  defp score_code(s) do
+    cond do
+      Regex.match?(~r/```|~H|defmodule|mix\s+(test|compile|ecto)|iex\b/i, s) ->
+        0.88
+
+      Regex.match?(~r/\b(function|module|test|compile|migration|schema|liveview|phoenix)\b/i, s) ->
+        0.58
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_debug(s) do
+    cond do
+      Regex.match?(
+        ~r/\b(debug|bug|broken|failed|failing|failure|error|crash|stacktrace|regression|ambiguity|ambiguous)\b/i,
+        s
+      ) ->
+        0.94
+
+      Regex.match?(
+        ~r/\b(can'?t|cannot|won'?t|doesn'?t)\b.{0,40}\b(work|compile|run|recognize|figure)\b/i,
+        s
+      ) ->
+        0.80
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_define(s) do
+    cond do
+      Regex.match?(~r/^\s*(define|what(?:'s| is) the meaning of|what does .+ mean)\b/i, s) -> 0.94
+      Regex.match?(~r/^\s*what\s+is\s+\w+/i, s) -> 0.62
+      true -> 0.0
+    end
+  end
+
+  defp score_help(s) do
+    cond do
+      Regex.match?(~r/^\s*(help|can you help|i need help|walk me through)\b/i, s) ->
+        0.82
+
+      Regex.match?(~r/\b(how should i|what should i do|next step|where do we start)\b/i, s) ->
+        0.68
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_memory_write(s) do
+    cond do
+      Regex.match?(~r/^\s*(remember|please remember|save|store|note)\b/i, s) -> 0.92
+      Regex.match?(~r/\b(remember|save|store|note)\b.{0,80}\b(that|this|my|i)\b/i, s) -> 0.86
+      Regex.match?(~r/^\s*my\s+.+\s+(?:is|are)\s+.+/i, s) -> 0.58
+      Regex.match?(~r/^\s*i\s+(?:live|am|work|prefer|like|have)\b/i, s) -> 0.56
+      true -> 0.0
+    end
+  end
+
+  defp score_tell(s) do
+    cond do
+      Regex.match?(~r/^\s*(i|my|we|our)\b/i, s) and not looks_like_question?(s) -> 0.56
+      true -> 0.0
+    end
+  end
+
+  defp token_terms(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.map(&token_term/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp token_terms(_), do: []
+
+  defp token_term(token) when is_binary(token), do: normalize_text(token)
+  defp token_term(%{phrase: phrase}) when is_binary(phrase), do: normalize_text(phrase)
+  defp token_term(%{"phrase" => phrase}) when is_binary(phrase), do: normalize_text(phrase)
+  defp token_term(%{norm: norm}) when is_binary(norm), do: normalize_text(norm)
+  defp token_term(%{"norm" => norm}) when is_binary(norm), do: normalize_text(norm)
+  defp token_term(_), do: ""
+
+  defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
+
+  defp clamp01(n) when is_number(n), do: n |> max(0.0) |> min(1.0)
+  defp clamp01(_), do: 0.0
 
   # ─────────────── word lists / config helpers ───────────────
 

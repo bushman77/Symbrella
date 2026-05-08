@@ -23,6 +23,15 @@ export const ChatInput = {
     // ---- IME (composition) guards
     this.onCompStart = () => (this.composing = true)
     this.onCompEnd   = () => (this.composing = false)
+    this.clearInput = () => {
+      ta.value = ""
+      ta.dispatchEvent(new Event("input", { bubbles: true }))
+      this.resize()
+    }
+
+    this.onSubmit = () => {
+      requestAnimationFrame(() => this.clearInput())
+    }
 
     // ---- key handling with self-heal for printable char drop
     this.onKeyDown = (e) => {
@@ -54,9 +63,7 @@ export const ChatInput = {
         this.submitting = true
 
         this.pushEvent("send", { message: ta.value })
-        ta.value = ""
-        ta.dispatchEvent(new Event("input", { bubbles: true }))
-        this.resize()
+        this.clearInput()
 
         setTimeout(() => (this.submitting = false), 120)
         return
@@ -66,15 +73,15 @@ export const ChatInput = {
       if (e.key === "Escape") ta.blur()
     }
 
+    this.form = ta.closest("form")
+    this.form?.addEventListener("submit", this.onSubmit)
     ta.addEventListener("keydown", this.onKeyDown)
     ta.addEventListener("input", this.resize)
     ta.addEventListener("compositionstart", this.onCompStart)
     ta.addEventListener("compositionend", this.onCompEnd)
 
     this.handleEvent("chat:clear-input", () => {
-      ta.value = ""
-      ta.dispatchEvent(new Event("input", { bubbles: true }))
-      this.resize()
+      this.clearInput()
     })
 
     ta.setAttribute("enterkeyhint", "send")
@@ -87,6 +94,7 @@ export const ChatInput = {
 
   destroyed() {
     const ta = this.el
+    this.form?.removeEventListener("submit", this.onSubmit)
     ta.removeEventListener("keydown", this.onKeyDown)
     ta.removeEventListener("input", this.resize)
     ta.removeEventListener("compositionstart", this.onCompStart)

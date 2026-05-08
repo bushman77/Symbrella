@@ -9,13 +9,20 @@ defmodule Core.Intent do
 
   @allowed_intents ~w(
     ask
+    ask_info
+    brain_introspect
+    code
+    define
     translate
     abuse
     insult
     command
     feedback
     illicit_request
+    memory_write
     tell
+    statement
+    question
     affirm
     deny
     greet

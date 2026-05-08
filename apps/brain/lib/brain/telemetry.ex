@@ -56,32 +56,38 @@ defmodule Brain.Telemetry do
 
   @doc false
   def handle_lifg_stop(_event, measurements, metadata, _config) do
-    duration_ms = Map.get(measurements, :duration_ms, 0)
+    if lifg_stage1_logs?() do
+      duration_ms = Map.get(measurements, :duration_ms, 0)
 
-    winners = Map.get(metadata, :winners)
-    boosts = Map.get(metadata, :boosts)
-    inhibitions = Map.get(metadata, :inhibitions)
+      winners = Map.get(metadata, :winners)
+      boosts = Map.get(metadata, :boosts)
+      inhibitions = Map.get(metadata, :inhibitions)
 
-    # Optional/legacy fields (log if present)
-    groups = Map.get(metadata, :groups)
-    ctx_dim = Map.get(metadata, :ctx_dim)
-    norm = Map.get(metadata, :normalize)
-    scores = Map.get(metadata, :scores_mode) || Map.get(metadata, :scores)
-    parallel = Map.get(metadata, :parallel)
+      # Optional/legacy fields (log if present)
+      groups = Map.get(metadata, :groups)
+      ctx_dim = Map.get(metadata, :ctx_dim)
+      norm = Map.get(metadata, :normalize)
+      scores = Map.get(metadata, :scores_mode) || Map.get(metadata, :scores)
+      parallel = Map.get(metadata, :parallel)
 
-    Logger.info(fn ->
-      base =
-        "[LIFG] #{duration_ms}ms" <>
-          if(is_integer(winners), do: " winners=#{winners}", else: "") <>
-          if(is_integer(boosts), do: " boosts=#{boosts}", else: "") <>
-          if is_integer(inhibitions), do: " inhibitions=#{inhibitions}", else: ""
+      Logger.info(fn ->
+        base =
+          "[LIFG] #{duration_ms}ms" <>
+            if(is_integer(winners), do: " winners=#{winners}", else: "") <>
+            if(is_integer(boosts), do: " boosts=#{boosts}", else: "") <>
+            if is_integer(inhibitions), do: " inhibitions=#{inhibitions}", else: ""
 
-      extras =
-        " groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
-          "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
+        extras =
+          " groups=#{inspect(groups)} ctx_dim=#{inspect(ctx_dim)} " <>
+            "norm=#{inspect(norm)} scores=#{inspect(scores)} parallel=#{inspect(parallel)}"
 
-      base <> extras
-    end)
+        base <> extras
+      end)
+    end
+  end
+
+  defp lifg_stage1_logs? do
+    Application.get_env(:brain, :log_lifg_stage1?, false) in [true, "true", "1", 1, "yes", "on"]
   end
 
   # helper for other telemetry sites (kept for compatibility)

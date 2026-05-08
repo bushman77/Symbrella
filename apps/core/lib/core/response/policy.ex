@@ -12,7 +12,8 @@ defmodule Core.Response.Policy do
   """
 
   @helpful_intents ~w(
-    question instruction help command refactor review plan diagram explain bug optimize benchmark
+    ask_info brain_introspect code command debug define explain help instruction memory_write
+    question refactor review plan diagram bug optimize benchmark tell
   )a
 
   @type features :: %{

@@ -32,7 +32,7 @@ defmodule Core.Intent.Matrix do
     domain_hint: 0.40
   }
 
-  @spec score([token()], list() | nil, keyword()) :: [candidate()]
+  @spec score([term()], list() | nil, keyword()) :: [candidate()]
   def score(tokens, pos_list \\ nil, opts \\ []) do
     toks = normalize_tokens(tokens)
     w = Map.merge(@default_w, Map.new(Keyword.get(opts, :weights, %{})))
@@ -160,7 +160,22 @@ defmodule Core.Intent.Matrix do
   # ── helpers ────────────────────────────────────────────────────────────────
 
   defp normalize_tokens(nil), do: []
-  defp normalize_tokens(toks) when is_list(toks), do: Enum.map(toks, &String.downcase/1)
+
+  defp normalize_tokens(toks) when is_list(toks) do
+    toks
+    |> Enum.map(&token_text/1)
+    |> Enum.map(&String.downcase/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp token_text(token) when is_binary(token), do: String.trim(token)
+  defp token_text(%{phrase: phrase}) when is_binary(phrase), do: String.trim(phrase)
+  defp token_text(%{"phrase" => phrase}) when is_binary(phrase), do: String.trim(phrase)
+  defp token_text(%{norm: norm}) when is_binary(norm), do: String.trim(norm)
+  defp token_text(%{"norm" => norm}) when is_binary(norm), do: String.trim(norm)
+  defp token_text(%{lemma: lemma}) when is_binary(lemma), do: String.trim(lemma)
+  defp token_text(%{"lemma" => lemma}) when is_binary(lemma), do: String.trim(lemma)
+  defp token_text(_), do: ""
 
   defp has_phrase?(text, phrases) do
     Enum.any?(phrases, fn p ->

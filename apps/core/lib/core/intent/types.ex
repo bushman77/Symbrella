@@ -8,8 +8,16 @@ defmodule Core.Intent.Types do
           | :define
           | :translate
           | :ask_info
+          | :ask
+          | :question
           | :code
           | :brain_introspect
+          | :command
+          | :debug
+          | :feedback
+          | :help
+          | :memory_write
+          | :tell
           | :none
 
   @intents [
@@ -17,8 +25,16 @@ defmodule Core.Intent.Types do
     :define,
     :translate,
     :ask_info,
+    :ask,
+    :question,
     :code,
     :brain_introspect,
+    :command,
+    :debug,
+    :feedback,
+    :help,
+    :memory_write,
+    :tell,
     :none
   ]
 
@@ -36,8 +52,16 @@ defmodule Core.Intent.Types do
   def normalize("define"), do: :define
   def normalize("translation" <> _), do: :translate
   def normalize("translate"), do: :translate
+  def normalize("ask"), do: :ask
+  def normalize("question"), do: :question
   def normalize("ask_info"), do: :ask_info
   def normalize("code"), do: :code
   def normalize("brain_introspect"), do: :brain_introspect
+  def normalize("command"), do: :command
+  def normalize("debug"), do: :debug
+  def normalize("feedback"), do: :feedback
+  def normalize("help"), do: :help
+  def normalize("memory_write"), do: :memory_write
+  def normalize("tell"), do: :tell
   def normalize(_), do: :none
 end

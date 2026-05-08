@@ -215,7 +215,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
       {:error, %{} = err} ->
         log_summary(dt, {:error, err})
         {{:error, err}, state}
-
     end
   end
 
@@ -554,33 +553,35 @@ defmodule Brain.Pipeline.LIFGStage1 do
   defp normalize_name_text(v), do: v |> to_string() |> normalize_name_text()
 
   defp log_summary(dt_ms, {:ok, %{} = out}) do
-    winners = out |> Map.get(:cover, []) |> length()
-    boosts = out |> Map.get(:boosts, []) |> length()
-    inhibs = out |> Map.get(:inhibitions, []) |> length()
-    choices_count = out |> Map.get(:choices, []) |> length()
-    audit = Map.get(out, :audit, %{})
+    if lifg_stage1_logs?() do
+      winners = out |> Map.get(:cover, []) |> length()
+      boosts = out |> Map.get(:boosts, []) |> length()
+      inhibs = out |> Map.get(:inhibitions, []) |> length()
+      choices_count = out |> Map.get(:choices, []) |> length()
+      audit = Map.get(out, :audit, %{})
 
-    weak =
-      case audit do
-        %{} -> Map.get(audit, :weak_decisions, nil)
-        _ -> nil
-      end
+      weak =
+        case audit do
+          %{} -> Map.get(audit, :weak_decisions, nil)
+          _ -> nil
+        end
 
-    missing =
-      case audit do
-        %{} -> Map.get(audit, :missing_candidates, nil)
-        _ -> nil
-      end
+      missing =
+        case audit do
+          %{} -> Map.get(audit, :missing_candidates, nil)
+          _ -> nil
+        end
 
-    Logger.info(fn ->
-      weak_s = if is_integer(weak), do: " weak=#{weak}", else: ""
-      miss_s = if is_integer(missing), do: " missing=#{missing}", else: ""
+      Logger.info(fn ->
+        weak_s = if is_integer(weak), do: " weak=#{weak}", else: ""
+        miss_s = if is_integer(missing), do: " missing=#{missing}", else: ""
 
-      "[LIFG] #{dt_ms}ms choices=#{choices_count} winners=#{winners} boosts=#{boosts} inhibitions=#{inhibs}" <>
-        weak_s <>
-        miss_s <>
-        " groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil"
-    end)
+        "[LIFG] #{dt_ms}ms choices=#{choices_count} winners=#{winners} boosts=#{boosts} inhibitions=#{inhibs}" <>
+          weak_s <>
+          miss_s <>
+          " groups=nil ctx_dim=nil norm=nil scores=nil parallel=nil"
+      end)
+    end
   end
 
   defp log_summary(dt_ms, {:error, err}) do
@@ -598,6 +599,10 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   defp normalize_catch(kind, reason, _st),
     do: RuntimeError.exception("#{inspect(kind)}: #{inspect(reason)}")
+
+  defp lifg_stage1_logs? do
+    Application.get_env(:brain, :log_lifg_stage1?, false) in [true, "true", "1", 1, "yes", "on"]
+  end
 
   defp format_error({err, st}, _fallback_st) when is_list(st) do
     if is_exception(err), do: Exception.format(:error, err, st), else: inspect({err, st})

@@ -7,6 +7,7 @@ defmodule SymbrellaWeb.HomeLive do
   alias Core.Response
   alias Core.Curiosity.EpisodeProbe
   alias Core.LexicalExplain
+  import Ecto.Query, only: [from: 2]
 
   @choice_preview_limit 3
   @def_char_limit 120
@@ -403,7 +404,6 @@ defmodule SymbrellaWeb.HomeLive do
       |> Map.put(:session_id, session_id)
 
     lexical_tail = build_lexical_tail(si)
-    senses_selected = build_senses_selected(si)
     mood = mood_from_si(si)
 
     si_like = %{
@@ -434,6 +434,7 @@ defmodule SymbrellaWeb.HomeLive do
       end
 
     visible = reply_text
+    senses_selected = build_senses_selected(si, visible)
 
     explain_text =
       join_blocks([
@@ -501,16 +502,25 @@ defmodule SymbrellaWeb.HomeLive do
   # Senses Selected builder (NO Db calls; respects db <- brain <- core <- web)
   # ─────────────────────────────────────────────────────────────────────────────
 
-  defp build_senses_selected(%{} = si) do
-    choices = Map.get(si, :lifg_choices, []) || []
-    cells = si_cells(si)
+  defp build_senses_selected(%{} = si, reply_text) do
+    case phrase_reference_sense(si, reply_text) do
+      nil -> build_token_senses_selected(si)
+      phrase_item -> [phrase_item]
+    end
+  end
+
+  defp build_token_senses_selected(%{} = si) do
+    raw_choices = Map.get(si, :lifg_choices, []) || []
+    cells = si_cells(si) ++ candidate_cells_from_si(si) ++ db_cells_for_choices(raw_choices)
+    sense_glossary = build_sense_glossary(si, raw_choices, cells)
+    choices = explainable_choices(raw_choices, cells, sense_glossary)
 
     {items, _seen} =
       Enum.reduce(choices, {[], MapSet.new()}, fn ch, {acc, seen} ->
         tok_idx = ch[:token_index] || ch[:tok_index] || ch[:index]
 
         id = ch[:id] || ch[:chosen_id]
-        pos = ch[:pos] || ch[:chosen_pos]
+        pos = display_pos(ch)
         src = ch[:src] || ch[:source]
         score = ch[:score]
 
@@ -545,14 +555,18 @@ defmodule SymbrellaWeb.HomeLive do
 
           defn =
             first_present([
+              contextual_definition_for_choice(ch),
               definition_for_choice(ch, cells),
-              candidate_definition_from_si(si, ch)
+              candidate_definition_from_si(si, ch),
+              glossary_field(sense_glossary, ch, :definition),
+              generated_definition(ch)
             ])
 
           ex =
             first_present([
               example_for_choice(ch, cells),
-              candidate_example_from_si(si, ch)
+              candidate_example_from_si(si, ch),
+              glossary_field(sense_glossary, ch, :example)
             ])
 
           item = %{
@@ -573,9 +587,134 @@ defmodule SymbrellaWeb.HomeLive do
     |> Enum.take(@senses_modal_limit)
   end
 
+  defp explainable_choices(choices, cells, sense_glossary) when is_list(choices) do
+    choices
+    |> Enum.reject(&suppress_explain_choice?(&1, cells, sense_glossary))
+  end
+
+  defp explainable_choices(_, _, _), do: []
+
+  defp suppress_explain_choice?(choice, cells, sense_glossary) when is_map(choice) do
+    generated_only? = stored_definition_for_choice(choice, cells, sense_glossary) == ""
+
+    (phrase_choice?(choice) and low_confidence_choice?(choice) and generated_only?) or
+      (closed_class_choice?(choice) and generated_only?)
+  end
+
+  defp suppress_explain_choice?(_, _, _), do: true
+
+  defp stored_definition_for_choice(choice, cells, sense_glossary) do
+    first_present([
+      definition_for_choice(choice, cells),
+      glossary_field(sense_glossary, choice, :definition)
+    ])
+  end
+
+  defp phrase_reference_sense(%{} = si, reply_text) do
+    sentence = Map.get(si, :sentence) || Map.get(si, "sentence") || ""
+    phrase = sentence |> to_string() |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+    cond do
+      phrase == "" ->
+        nil
+
+      reference_reply?(reply_text) ->
+        %{
+          token_index: 0,
+          id: "#{String.downcase(phrase)}|phrase|reference",
+          alt_ids: [],
+          label: "#{phrase} → #{phrase} pos=phrase src=reply-reference score=1.00",
+          definition: reference_definition(phrase, reply_text),
+          example: ""
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  defp phrase_reference_sense(_, _), do: nil
+
+  defp reference_reply?(reply_text) when is_binary(reply_text) do
+    text = String.downcase(reply_text)
+
+    String.contains?(text, "reference to") or
+      String.contains?(text, "film") or
+      String.contains?(text, "movie") or
+      String.contains?(text, "book") or
+      String.contains?(text, "song") or
+      String.contains?(text, "album") or
+      String.contains?(text, "title")
+  end
+
+  defp reference_reply?(_), do: false
+
+  defp reference_definition(phrase, reply_text) do
+    kind =
+      reply_text
+      |> to_string()
+      |> String.downcase()
+      |> cond_kind()
+
+    "Recognized as a #{kind} reference/title phrase: \"#{phrase}\". Interpreted as one named reference, not as separate word senses."
+  end
+
+  defp cond_kind(text) do
+    cond do
+      String.contains?(text, "film") or String.contains?(text, "movie") -> "film"
+      String.contains?(text, "book") -> "book"
+      String.contains?(text, "song") -> "song"
+      String.contains?(text, "album") -> "album"
+      true -> "cultural"
+    end
+  end
+
   defp si_cells(si) do
     Map.get(si, :active_cells, Map.get(si, :cells, [])) || []
   end
+
+  defp candidate_cells_from_si(%{} = si) do
+    si
+    |> sense_candidate_values()
+    |> Enum.map(&candidate_to_cell/1)
+    |> Enum.reject(&(&1 == %{}))
+  end
+
+  defp sense_candidate_values(%{} = si) do
+    case Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates") || %{} do
+      %{} = sc ->
+        sc
+        |> Enum.flat_map(fn
+          {_key, values} when is_list(values) -> values
+          {_key, value} -> List.wrap(value)
+        end)
+        |> Enum.filter(&is_map/1)
+
+      values when is_list(values) ->
+        Enum.filter(values, &is_map/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp candidate_to_cell(candidate) when is_map(candidate) do
+    id = cand_get(candidate, :id) || cand_get(candidate, :chosen_id)
+    norm = cand_get(candidate, :norm) || cand_get(candidate, :lemma) || cand_get(candidate, :word)
+
+    %{}
+    |> maybe_put_nonblank(:id, id)
+    |> maybe_put_nonblank(
+      :word,
+      cand_get(candidate, :word) || cand_get(candidate, :surface) || norm
+    )
+    |> maybe_put_nonblank(:norm, norm || id_norm(id))
+    |> maybe_put_nonblank(:pos, cand_get(candidate, :pos) || pos_from_id(id))
+    |> maybe_put_nonblank(:definition, candidate_definition(candidate))
+    |> maybe_put_nonblank(:example, candidate_example(candidate))
+  end
+
+  defp candidate_to_cell(_), do: %{}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Candidate field lookups from si.sense_candidates
@@ -594,8 +733,9 @@ defmodule SymbrellaWeb.HomeLive do
   defp candidate_field_from_si(%{} = si, choice, keys) when is_list(keys) do
     sc = Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates") || %{}
 
-    id = choice[:id] || choice[:chosen_id]
+    ids = compatible_choice_ids(choice)
     tok_idx = choice[:token_index] || choice[:tok_index] || choice[:index]
+    choice_norms = choice_norms(choice)
 
     by_tok =
       case tok_idx do
@@ -625,7 +765,10 @@ defmodule SymbrellaWeb.HomeLive do
       |> Enum.flat_map(fn v -> if is_list(v), do: v, else: [] end)
       |> Enum.find(fn c ->
         cand_id = cand_get(c, :id) || cand_get(c, :chosen_id)
-        cand_id == id
+        cand_norm = cand_get(c, :norm) || cand_get(c, :lemma) || cand_get(c, :word)
+
+        (is_binary(cand_id) and cand_id in ids) ||
+          norm_text(cand_norm || "") in choice_norms
       end)
 
     keys
@@ -642,6 +785,194 @@ defmodule SymbrellaWeb.HomeLive do
   defp cand_get(map, key) when is_map(map), do: Map.get(map, key)
   defp cand_get(_, _), do: nil
 
+  defp candidate_definition(candidate) when is_map(candidate) do
+    candidate
+    |> candidate_field([:definition, :def, :gloss, :meaning])
+    |> gloss()
+  end
+
+  defp candidate_example(candidate) when is_map(candidate) do
+    candidate
+    |> candidate_field([:example, :ex, :usage, :sample])
+    |> gloss()
+  end
+
+  defp candidate_field(candidate, keys) when is_map(candidate) do
+    Enum.find_value(keys, fn key -> cand_get(candidate, key) end)
+  end
+
+  defp display_pos(choice) when is_map(choice) do
+    choice[:pos] ||
+      choice[:chosen_pos] ||
+      contextual_pos_for_choice(choice)
+  end
+
+  defp display_pos(_), do: nil
+
+  defp contextual_definition_for_choice(choice) when is_map(choice) do
+    case primary_choice_norm(choice) do
+      "why" ->
+        "Interrogative word used to ask for a reason or cause."
+
+      "do" ->
+        "Auxiliary verb used to form a question, negation, or emphasis."
+
+      "does" ->
+        "Auxiliary verb used to form a question, negation, or emphasis."
+
+      "did" ->
+        "Auxiliary verb used to form a question, negation, or emphasis."
+
+      "bury" ->
+        "To put, hide, or cover something under earth or another material."
+
+      "buries" ->
+        "To put, hide, or cover something under earth or another material."
+
+      "buried" ->
+        "Put, hidden, or covered under earth or another material."
+
+      "poop" ->
+        "Feces, or to defecate; the everyday bodily-waste sense."
+
+      "poops" ->
+        "Feces, or defecates; the everyday bodily-waste sense."
+
+      _ ->
+        ""
+    end
+  end
+
+  defp contextual_definition_for_choice(_), do: ""
+
+  defp contextual_pos_for_choice(choice) when is_map(choice) do
+    case primary_choice_norm(choice) do
+      "why" -> "interrogative"
+      norm when norm in ["do", "does", "did"] -> "aux"
+      norm when norm in ["bury", "buries", "buried"] -> "verb"
+      norm when norm in ["poop", "poops"] -> "noun/verb"
+      _ -> nil
+    end
+  end
+
+  defp primary_choice_norm(choice) when is_map(choice) do
+    choice
+    |> choice_norms()
+    |> List.first()
+    |> Kernel.||("")
+  end
+
+  defp phrase_choice?(choice) when is_map(choice) do
+    id = choice[:id] || choice[:chosen_id]
+    pos = safe_str(choice[:pos] || choice[:chosen_pos])
+
+    phrase_text =
+      choice[:surface] ||
+        choice[:raw_phrase] ||
+        choice[:token_phrase] ||
+        choice[:lemma] ||
+        choice[:token]
+
+    String.downcase(pos) == "phrase" or
+      (is_binary(id) and String.contains?(id, "|phrase")) or
+      word_count(phrase_text) > 1
+  end
+
+  defp low_confidence_choice?(choice) when is_map(choice) do
+    case numeric_score(choice[:score]) do
+      nil -> false
+      score -> score < 0.5
+    end
+  end
+
+  defp closed_class_choice?(choice) when is_map(choice) do
+    pos =
+      choice[:pos] ||
+        choice[:chosen_pos] ||
+        pos_from_id(choice[:id] || choice[:chosen_id])
+
+    norm =
+      choice
+      |> choice_norms()
+      |> List.first()
+
+    safe_str(pos) in ["det", "determiner", "article", "prep", "preposition", "conj", "particle"] or
+      norm in ["the", "a", "an", "of", "to", "in", "on", "at", "by", "for", "and", "or"]
+  end
+
+  defp compatible_choice_ids(choice) when is_map(choice) do
+    choice_norms = choice_norms(choice)
+
+    [choice[:id], choice[:chosen_id] | List.wrap(choice[:alt_ids])]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.filter(fn id ->
+      idn = norm_text(id_norm(id))
+
+      idn == "" or
+        idn in choice_norms or
+        phrase_id_compatible?(id, choice_norms)
+    end)
+    |> Enum.uniq()
+  end
+
+  defp compatible_choice_ids(_), do: []
+
+  defp phrase_id_compatible?(id, choice_norms) when is_binary(id) do
+    String.contains?(id, "|phrase") and norm_text(id_norm(id)) in choice_norms
+  end
+
+  defp phrase_id_compatible?(_, _), do: false
+
+  defp choice_norms(choice) when is_map(choice) do
+    norms =
+      [
+        choice[:norm],
+        choice[:lemma],
+        choice[:token],
+        choice[:surface],
+        choice[:raw_phrase],
+        choice[:token_phrase]
+      ]
+      |> Enum.map(&norm_text/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    if norms == [] do
+      (choice[:id] || choice[:chosen_id])
+      |> id_norm()
+      |> norm_text()
+      |> case do
+        "" -> []
+        norm -> [norm]
+      end
+    else
+      norms
+    end
+  end
+
+  defp choice_norms(_), do: []
+
+  defp word_count(value) do
+    value
+    |> norm_text()
+    |> case do
+      "" -> 0
+      text -> text |> String.split(" ") |> length()
+    end
+  end
+
+  defp numeric_score(nil), do: nil
+  defp numeric_score(score) when is_number(score), do: score
+
+  defp numeric_score(score) when is_binary(score) do
+    case Float.parse(String.trim(score)) do
+      {parsed, _} -> parsed
+      _ -> nil
+    end
+  end
+
+  defp numeric_score(_), do: nil
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Definition/example resolution (cells + choice + alt_ids)
   # ─────────────────────────────────────────────────────────────────────────────
@@ -651,8 +982,8 @@ defmodule SymbrellaWeb.HomeLive do
     by_norm = index_cells_by_norm(cells)
 
     id = choice[:id] || choice[:chosen_id]
-    alt_ids = List.wrap(choice[:alt_ids])
-    lemma_norm = norm_text(choice[:lemma] || choice[:token] || "")
+    ids = compatible_choice_ids(choice)
+    choice_norms = choice_norms(choice)
 
     direct =
       choice[:definition] ||
@@ -663,10 +994,14 @@ defmodule SymbrellaWeb.HomeLive do
     with_direct = gloss(direct)
 
     with_choice =
-      by_id
-      |> Map.get(id)
-      |> cell_def()
-      |> gloss()
+      if id in ids do
+        by_id
+        |> Map.get(id)
+        |> cell_def()
+        |> gloss()
+      else
+        ""
+      end
 
     cond do
       with_direct != "" ->
@@ -676,30 +1011,189 @@ defmodule SymbrellaWeb.HomeLive do
         with_choice
 
       true ->
-        with_alt = first_def_from_ids(alt_ids, by_id)
+        with_alt = first_def_from_ids(ids -- [id], by_id)
 
         cond do
           with_alt != "" ->
             with_alt
 
           true ->
-            idn = id_norm(id)
-
-            first_present([
-              by_norm |> Map.get(idn) |> cell_def() |> gloss(),
-              by_norm |> Map.get(lemma_norm) |> cell_def() |> gloss()
-            ])
+            first_def_from_norms(choice_norms, by_norm)
         end
     end
   end
+
+  defp db_cells_for_choices(choices) when is_list(choices) do
+    if Code.ensure_loaded?(Db) and Code.ensure_loaded?(Db.BrainCell) do
+      ids =
+        choices
+        |> Enum.flat_map(&compatible_choice_ids/1)
+        |> Enum.reject(&String.contains?(&1, "|fallback"))
+        |> Enum.uniq()
+
+      norms =
+        choices
+        |> Enum.flat_map(&choice_norms/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.uniq()
+
+      if ids == [] and norms == [] do
+        []
+      else
+        try do
+          from(c in Db.BrainCell,
+            where:
+              (not is_nil(c.id) and c.id in ^ids) or
+                (not is_nil(c.norm) and c.norm in ^norms),
+            select: %{
+              id: c.id,
+              word: c.word,
+              norm: c.norm,
+              pos: c.pos,
+              definition: c.definition,
+              example: c.example
+            },
+            limit: 50
+          )
+          |> Db.all()
+        rescue
+          _ -> []
+        catch
+          _, _ -> []
+        end
+      end
+    else
+      []
+    end
+  end
+
+  defp db_cells_for_choices(_), do: []
+
+  defp build_sense_glossary(%{} = si, choices, cells) do
+    sense_candidate_values(si)
+    |> Kernel.++(List.wrap(choices))
+    |> Kernel.++(List.wrap(cells))
+    |> Enum.reduce(%{}, fn source, acc ->
+      defn = source_definition(source)
+      ex = source_example(source)
+
+      if defn == "" and ex == "" do
+        acc
+      else
+        source
+        |> source_keys()
+        |> Enum.reduce(acc, fn key, acc2 ->
+          Map.update(acc2, key, %{definition: defn, example: ex}, fn old ->
+            %{
+              definition: first_present([old.definition, defn]),
+              example: first_present([old.example, ex])
+            }
+          end)
+        end)
+      end
+    end)
+  end
+
+  defp build_sense_glossary(_, _, _), do: %{}
+
+  defp glossary_field(glossary, choice, field) when is_map(glossary) and is_map(choice) do
+    choice
+    |> choice_lookup_keys()
+    |> Enum.find_value("", fn key ->
+      case Map.get(glossary, key) do
+        %{^field => value} when is_binary(value) and value != "" -> value
+        _ -> nil
+      end
+    end)
+  end
+
+  defp glossary_field(_, _, _), do: ""
+
+  defp source_keys(source) when is_map(source) do
+    id = cand_get(source, :id) || cand_get(source, :chosen_id)
+    alt_ids = List.wrap(cand_get(source, :alt_ids))
+
+    norm =
+      cand_get(source, :norm) ||
+        cand_get(source, :lemma) ||
+        cand_get(source, :token) ||
+        cand_get(source, :surface) ||
+        cand_get(source, :word) ||
+        id_norm(id)
+
+    ([id | alt_ids]
+     |> Enum.filter(&is_binary/1)
+     |> Enum.map(&{:id, &1})) ++
+      case norm_text(norm) do
+        "" -> []
+        n -> [{:norm, n}]
+      end
+  end
+
+  defp source_keys(_), do: []
+
+  defp choice_lookup_keys(choice) when is_map(choice) do
+    id_keys =
+      choice
+      |> compatible_choice_ids()
+      |> Enum.map(&{:id, &1})
+
+    norm_keys =
+      choice
+      |> choice_norms()
+      |> Enum.map(&{:norm, &1})
+
+    id_keys ++ norm_keys
+  end
+
+  defp source_definition(source) when is_map(source) do
+    source
+    |> candidate_field([:definition, :def, :gloss, :meaning])
+    |> gloss()
+  end
+
+  defp source_definition(_), do: ""
+
+  defp source_example(source) when is_map(source) do
+    source
+    |> candidate_field([:example, :ex, :usage, :sample])
+    |> gloss()
+  end
+
+  defp source_example(_), do: ""
+
+  defp generated_definition(choice) when is_map(choice) do
+    lemma =
+      choice[:lemma] ||
+        choice[:token] ||
+        choice[:surface] ||
+        id_norm(choice[:id] || choice[:chosen_id])
+
+    pos = choice[:pos] || choice[:chosen_pos] || pos_from_id(choice[:id] || choice[:chosen_id])
+    lemma = norm_text(lemma)
+    pos = safe_str(pos)
+
+    cond do
+      lemma == "" ->
+        "Selected sense; no stored dictionary gloss is attached yet."
+
+      pos != "" ->
+        "Selected #{pos} sense for \"#{lemma}\"; no stored dictionary gloss is attached yet."
+
+      true ->
+        "Selected sense for \"#{lemma}\"; no stored dictionary gloss is attached yet."
+    end
+  end
+
+  defp generated_definition(_), do: "Selected sense; no stored dictionary gloss is attached yet."
 
   defp example_for_choice(choice, cells) do
     by_id = index_cells_by_id(cells)
     by_norm = index_cells_by_norm(cells)
 
     id = choice[:id] || choice[:chosen_id]
-    alt_ids = List.wrap(choice[:alt_ids])
-    lemma_norm = norm_text(choice[:lemma] || choice[:token] || "")
+    ids = compatible_choice_ids(choice)
+    choice_norms = choice_norms(choice)
 
     direct =
       choice[:example] ||
@@ -710,10 +1204,14 @@ defmodule SymbrellaWeb.HomeLive do
     with_direct = gloss(direct)
 
     with_choice =
-      by_id
-      |> Map.get(id)
-      |> cell_ex()
-      |> gloss()
+      if id in ids do
+        by_id
+        |> Map.get(id)
+        |> cell_ex()
+        |> gloss()
+      else
+        ""
+      end
 
     cond do
       with_direct != "" ->
@@ -723,19 +1221,14 @@ defmodule SymbrellaWeb.HomeLive do
         with_choice
 
       true ->
-        with_alt = first_ex_from_ids(alt_ids, by_id)
+        with_alt = first_ex_from_ids(ids -- [id], by_id)
 
         cond do
           with_alt != "" ->
             with_alt
 
           true ->
-            idn = id_norm(id)
-
-            first_present([
-              by_norm |> Map.get(idn) |> cell_ex() |> gloss(),
-              by_norm |> Map.get(lemma_norm) |> cell_ex() |> gloss()
-            ])
+            first_ex_from_norms(choice_norms, by_norm)
         end
     end
   end
@@ -749,11 +1242,29 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
+  defp first_def_from_norms([], _by_norm), do: ""
+
+  defp first_def_from_norms([h | t], by_norm) do
+    case by_norm |> Map.get(h) |> cell_def() |> gloss() do
+      "" -> first_def_from_norms(t, by_norm)
+      d -> d
+    end
+  end
+
   defp first_ex_from_ids([], _by_id), do: ""
 
   defp first_ex_from_ids([h | t], by_id) do
     case by_id |> Map.get(h) |> cell_ex() |> gloss() do
       "" -> first_ex_from_ids(t, by_id)
+      e -> e
+    end
+  end
+
+  defp first_ex_from_norms([], _by_norm), do: ""
+
+  defp first_ex_from_norms([h | t], by_norm) do
+    case by_norm |> Map.get(h) |> cell_ex() |> gloss() do
+      "" -> first_ex_from_norms(t, by_norm)
       e -> e
     end
   end
@@ -799,6 +1310,15 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
+
+  defp pos_from_id(id) when is_binary(id) do
+    case String.split(id, "|") do
+      [_lemma, pos | _] -> pos
+      _ -> nil
+    end
+  end
+
+  defp pos_from_id(_), do: nil
 
   defp cell_def(c) when is_map(c) do
     Map.get(c, :definition) ||
@@ -932,6 +1452,8 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp fmt_score(s), do: to_string(s)
 
+  defp norm_text(nil), do: ""
+
   defp norm_text(v) when is_binary(v),
     do: v |> String.downcase() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
@@ -942,4 +1464,12 @@ defmodule SymbrellaWeb.HomeLive do
     list
     |> Enum.find("", fn v -> is_binary(v) and String.trim(v) != "" end)
   end
+
+  defp maybe_put_nonblank(map, _key, nil), do: map
+
+  defp maybe_put_nonblank(map, key, value) when is_binary(value) do
+    if String.trim(value) == "", do: map, else: Map.put(map, key, value)
+  end
+
+  defp maybe_put_nonblank(map, key, value), do: Map.put(map, key, value)
 end
