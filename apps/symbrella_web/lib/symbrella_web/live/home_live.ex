@@ -811,8 +811,17 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp contextual_definition_for_choice(choice) when is_map(choice) do
     case primary_choice_norm(choice) do
+      "trying" ->
+        "Attempting or making an effort to do something."
+
+      "try" ->
+        "To attempt or make an effort to do something."
+
       "why" ->
         "Interrogative word used to ask for a reason or cause."
+
+      "to" ->
+        "Function word marking an infinitive verb or direction toward something."
 
       "do" ->
         "Auxiliary verb used to form a question, negation, or emphasis."
@@ -822,6 +831,24 @@ defmodule SymbrellaWeb.HomeLive do
 
       "did" ->
         "Auxiliary verb used to form a question, negation, or emphasis."
+
+      "make" ->
+        "To create, cause, produce, or bring something about."
+
+      "makes" ->
+        "Creates, causes, produces, or brings something about."
+
+      "made" ->
+        "Created, caused, produced, or brought about."
+
+      "my" ->
+        "Possessive determiner meaning belonging to or associated with the speaker."
+
+      "you" ->
+        "Second-person pronoun referring to the person or people being addressed."
+
+      "your" ->
+        "Possessive determiner meaning belonging to or associated with the person addressed."
 
       "bury" ->
         "To put, hide, or cover something under earth or another material."
@@ -838,6 +865,9 @@ defmodule SymbrellaWeb.HomeLive do
       "poops" ->
         "Feces, or defecates; the everyday bodily-waste sense."
 
+      "better" ->
+        "More good, useful, suitable, healthy, or desirable than before."
+
       _ ->
         ""
     end
@@ -847,10 +877,16 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp contextual_pos_for_choice(choice) when is_map(choice) do
     case primary_choice_norm(choice) do
+      norm when norm in ["trying", "try"] -> "verb"
       "why" -> "interrogative"
+      "to" -> "particle/preposition"
       norm when norm in ["do", "does", "did"] -> "aux"
+      norm when norm in ["make", "makes", "made"] -> "verb"
+      "my" -> "possessive"
+      norm when norm in ["you", "your"] -> "pronoun"
       norm when norm in ["bury", "buries", "buried"] -> "verb"
       norm when norm in ["poop", "poops"] -> "noun/verb"
+      "better" -> "adjective/adverb"
       _ -> nil
     end
   end
@@ -1175,17 +1211,18 @@ defmodule SymbrellaWeb.HomeLive do
 
     cond do
       lemma == "" ->
-        "Selected sense; no stored dictionary gloss is attached yet."
+        "Selected lexical sense from context; no stored dictionary gloss is attached yet."
 
       pos != "" ->
-        "Selected #{pos} sense for \"#{lemma}\"; no stored dictionary gloss is attached yet."
+        "Context selected \"#{lemma}\" as a #{pos} sense, but no stored dictionary gloss is attached yet."
 
       true ->
-        "Selected sense for \"#{lemma}\"; no stored dictionary gloss is attached yet."
+        "Context selected the lexical sense for \"#{lemma}\", but no stored dictionary gloss is attached yet."
     end
   end
 
-  defp generated_definition(_), do: "Selected sense; no stored dictionary gloss is attached yet."
+  defp generated_definition(_),
+    do: "Selected lexical sense from context; no stored dictionary gloss is attached yet."
 
   defp example_for_choice(choice, cells) do
     by_id = index_cells_by_id(cells)
