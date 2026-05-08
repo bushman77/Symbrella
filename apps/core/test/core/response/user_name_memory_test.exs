@@ -30,4 +30,76 @@ defmodule Core.Response.UserNameMemoryTest do
     assert meta.user_name == "Curtis"
     refute text =~ "I don"
   end
+
+  test "explicit remember directive stores and recalls a user fact" do
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :statement,
+        confidence: 0.9,
+        text: "remember that my favorite color is blue"
+      })
+
+    assert text == "I’ll remember that your favorite color is blue."
+    assert meta.action == :remember_fact
+    assert meta.fact_key == "favorite_color"
+
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :question,
+        confidence: 0.9,
+        text: "what is my favorite color?"
+      })
+
+    assert text == "Your favorite color is blue."
+    assert meta.action == :recall_fact
+    assert meta.fact_key == "favorite_color"
+  end
+
+  test "direct user fact claim stores and recalls without remember prefix" do
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :statement,
+        confidence: 0.9,
+        text: "my sisters name is Mary-Anne"
+      })
+
+    assert text == "I’ve noted that your sisters name is Mary-Anne."
+    assert meta.action == :remember_fact
+    assert meta.fact_key == "sisters_name"
+
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :question,
+        confidence: 0.9,
+        text: "what is my sisters name"
+      })
+
+    assert text == "Your sisters name is Mary-Anne."
+    assert meta.action == :recall_fact
+    assert meta.fact_key == "sisters_name"
+  end
+
+  test "location memory stores live-in phrasing and recalls where-do-i-live" do
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :statement,
+        confidence: 0.9,
+        text: "i live in Richmond, BC, please remeber that"
+      })
+
+    assert text == "I’ve noted that your location is Richmond, BC."
+    assert meta.action == :remember_fact
+    assert meta.fact_key == "location"
+
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :question,
+        confidence: 0.9,
+        text: "where do i live"
+      })
+
+    assert text == "Your location is Richmond, BC."
+    assert meta.action == :recall_fact
+    assert meta.fact_key == "location"
+  end
 end

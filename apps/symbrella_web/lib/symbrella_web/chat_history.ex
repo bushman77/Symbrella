@@ -17,7 +17,9 @@ defmodule SymbrellaWeb.ChatHistory do
           required(:role) => atom(),
           required(:text) => String.t(),
           optional(:tone) => atom(),
-          optional(:meta) => map()
+          optional(:meta) => map(),
+          optional(:explain_text) => String.t(),
+          optional(:explain_payload) => map()
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -93,10 +95,14 @@ defmodule SymbrellaWeb.ChatHistory do
     out
     |> maybe_put(:tone, message[:tone] || message["tone"])
     |> maybe_put(:meta, message[:meta] || message["meta"])
+    |> maybe_put(:explain_text, message[:explain_text] || message["explain_text"])
+    |> maybe_put(:explain_payload, message[:explain_payload] || message["explain_payload"])
   end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, :meta, value) when not is_map(value), do: map
+  defp maybe_put(map, :explain_payload, value) when not is_map(value), do: map
+  defp maybe_put(map, :explain_text, value) when not is_binary(value), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp normalize_role(role) when role in [:user, :assistant, :system], do: role

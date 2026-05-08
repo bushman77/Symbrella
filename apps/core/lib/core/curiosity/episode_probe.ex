@@ -54,7 +54,7 @@ defmodule Core.Curiosity.EpisodeProbe do
         true ->
           si
           |> recent_episode_results(cfg)
-          |> choose_candidate(session_state, cfg)
+          |> choose_candidate(session_state, cfg, text_from_si(si))
           |> question_result()
       end
 
@@ -64,6 +64,29 @@ defmodule Core.Curiosity.EpisodeProbe do
   end
 
   def maybe_question(_si, _mood, _opts), do: :none
+
+  @spec idle_question(term(), keyword()) :: {:ok, String.t(), map()} | :none
+  def idle_question(session_id, opts \\ []) do
+    cfg = config(opts)
+
+    if Keyword.get(cfg, :enabled?, true) do
+      session_id = session_id || :global
+      now_ms = System.system_time(:millisecond)
+      {session_state, all_state} = next_session_state(session_id)
+
+      result =
+        cfg
+        |> unknown_intent_episode_results(opts)
+        |> choose_candidate(session_state, cfg, "")
+        |> idle_question_result()
+
+      session_state = update_session_state(session_state, result, now_ms, cfg)
+      put_state(Map.put(all_state, session_id, session_state))
+      result
+    else
+      :none
+    end
+  end
 
   @spec build_question(map()) :: {:ok, String.t(), map()} | :none
   def build_question(%{} = candidate), do: question_result(candidate)
@@ -163,6 +186,104 @@ defmodule Core.Curiosity.EpisodeProbe do
     _, _ -> []
   end
 
+  defp unknown_intent_episode_results(cfg, opts) do
+    max_recent = cfg |> Keyword.get(:max_recent, 40) |> positive_int_or(40)
+
+    opts
+    |> Keyword.get(:episodes)
+    |> case do
+      list when is_list(list) -> list
+      _ -> db_recent_episodes(max_recent)
+    end
+    |> Enum.filter(&unknown_intent_episode?/1)
+    |> Enum.take(max_recent)
+    |> Enum.map(&episode_to_result/1)
+  end
+
+  defp db_recent_episodes(limit) do
+    cond do
+      not module_loaded?(Db.Episode) ->
+        []
+
+      not function_exported?(Db.Episode, :recent, 1) ->
+        []
+
+      true ->
+        Db.Episode.recent(limit)
+    end
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp unknown_intent_episode?(episode) when is_map(episode) do
+    intent =
+      Map.get(episode, :intent) ||
+        Map.get(episode, "intent") ||
+        get_in_path(episode, [:meta, :intent]) ||
+        get_in_path(episode, ["meta", "intent"])
+
+    intent in [nil, "", :unknown, "unknown"]
+  end
+
+  defp unknown_intent_episode?(_), do: false
+
+  defp episode_to_result(%{episode: _} = result), do: result
+  defp episode_to_result(%{"episode" => _} = result), do: result
+
+  defp episode_to_result(%{} = episode) do
+    at = episode_at_ms(episode)
+    sentence = Map.get(episode, :sentence) || Map.get(episode, "sentence")
+    tokens = Map.get(episode, :tokens) || Map.get(episode, "tokens") || []
+    winners = Map.get(episode, :winners) || Map.get(episode, "winners") || %{}
+    tags = Map.get(episode, :tags) || Map.get(episode, "tags") || []
+    meta = Map.get(episode, :meta) || Map.get(episode, "meta") || %{}
+
+    %{
+      score: 0.0,
+      at: at,
+      episode: %{
+        slate: %{
+          sentence: sentence,
+          tokens: tokens,
+          winners: winners,
+          tags: tags
+        },
+        meta:
+          Map.merge(meta, %{
+            id: Map.get(episode, :id) || Map.get(episode, "id"),
+            intent: Map.get(episode, :intent) || Map.get(episode, "intent") || "unknown",
+            confidence: Map.get(episode, :confidence) || Map.get(episode, "confidence"),
+            uncertainty: Map.get(episode, :uncertainty) || Map.get(episode, "uncertainty"),
+            tags: tags
+          })
+      }
+    }
+  end
+
+  defp episode_at_ms(%{} = episode) do
+    value =
+      Map.get(episode, :inserted_at) ||
+        Map.get(episode, "inserted_at") ||
+        Map.get(episode, :at) ||
+        Map.get(episode, "at")
+
+    cond do
+      is_integer(value) ->
+        value
+
+      match?(%NaiveDateTime{}, value) ->
+        value |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:millisecond)
+
+      match?(%DateTime{}, value) ->
+        DateTime.to_unix(value, :millisecond)
+
+      true ->
+        0
+    end
+  end
+
   defp module_loaded?(module) do
     case Code.ensure_loaded(module) do
       {:module, ^module} -> true
@@ -170,15 +291,19 @@ defmodule Core.Curiosity.EpisodeProbe do
     end
   end
 
-  defp choose_candidate(results, state, cfg) do
+  defp choose_candidate(results, state, cfg, current_text) do
     min_uncertainty = cfg |> Keyword.get(:min_uncertainty, 0.35) |> number_or(0.35)
     asked = MapSet.new(Map.get(state, :asked, []))
+    current_topic = current_text |> to_string() |> compact_topic() |> normalized_topic()
 
     results
     |> Enum.map(&candidate_from_result/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.reject(&MapSet.member?(asked, &1.signature))
     |> Enum.reject(&clarified?/1)
+    |> Enum.reject(&(normalized_topic(&1.topic) == current_topic))
+    |> Enum.reject(&question_topic?/1)
+    |> Enum.reject(&fact_memory_topic?/1)
     |> Enum.filter(&(&1.uncertainty >= min_uncertainty))
     |> Enum.sort_by(&{&1.uncertainty, &1.recency}, :desc)
     |> List.first()
@@ -224,6 +349,23 @@ defmodule Core.Curiosity.EpisodeProbe do
        topic: candidate.topic,
        uncertainty: Float.round(candidate.uncertainty, 3),
        reason: candidate.reason,
+       episode_at: candidate.at,
+       signature: candidate.signature
+     }}
+  end
+
+  defp idle_question_result(nil), do: :none
+
+  defp idle_question_result(%{} = candidate) do
+    question =
+      "Curiosity check: I found an earlier message I still do not understand: " <>
+        "\"#{candidate.topic}\". What did you mean by that?"
+
+    {:ok, question,
+     %{
+       topic: candidate.topic,
+       uncertainty: Float.round(candidate.uncertainty, 3),
+       reason: :idle_unknown_intent,
        episode_at: candidate.at,
        signature: candidate.signature
      }}
@@ -443,6 +585,42 @@ defmodule Core.Curiosity.EpisodeProbe do
     |> Enum.map(&String.downcase/1)
     |> Enum.any?(&(&1 in ["clarified", "curiosity_clarified"]))
   end
+
+  defp question_topic?(%{topic: topic}) when is_binary(topic) do
+    topic
+    |> String.downcase()
+    |> String.trim()
+    |> then(fn t ->
+      String.ends_with?(t, "?") or
+        Regex.match?(
+          ~r/^(what|where|when|why|how|who|which|do|does|did|can|could|should|would|is|are)\b/u,
+          t
+        )
+    end)
+  end
+
+  defp question_topic?(_), do: false
+
+  defp fact_memory_topic?(%{slate: slate, meta: meta}) do
+    tags =
+      List.wrap(Map.get(slate, :tags) || Map.get(slate, "tags")) ++
+        List.wrap(Map.get(meta, :tags) || Map.get(meta, "tags"))
+
+    kind = Map.get(meta, :kind) || Map.get(meta, "kind")
+
+    Enum.any?(tags, &(String.downcase(to_string(&1)) in ["fact", "user_fact", "user_name"])) or
+      String.downcase(to_string(kind || "")) == "fact"
+  end
+
+  defp normalized_topic(topic) when is_binary(topic) do
+    topic
+    |> String.downcase()
+    |> String.replace(~r/[^\p{L}\p{N}\s]/u, "")
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  defp normalized_topic(_), do: ""
 
   defp signature_for(topic, at, slate, meta) do
     id =

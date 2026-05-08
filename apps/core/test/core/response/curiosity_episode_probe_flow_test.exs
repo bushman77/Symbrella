@@ -36,7 +36,7 @@ defmodule Core.Response.CuriosityEpisodeProbeFlowTest do
     :ok
   end
 
-  test "response planner appends an occasional hippocampal clarification question" do
+  test "response planner does not append hippocampal clarification questions inline" do
     si = %{
       intent: :question,
       confidence: 0.7,
@@ -58,10 +58,8 @@ defmodule Core.Response.CuriosityEpisodeProbeFlowTest do
 
     {_tone, text, meta} = Response.plan(si, @mood)
 
-    assert text =~ "Curiosity check:"
-    assert text =~ "a clock that told stories"
-    assert meta.curiosity_probe.topic == "a clock that told stories"
-    assert meta.curiosity_probe.reason == :explicit_uncertainty
+    refute text =~ "Curiosity check:"
+    assert is_nil(meta.curiosity_probe)
   end
 
   test "response planner does not append curiosity during guardrail pressure" do
@@ -90,7 +88,7 @@ defmodule Core.Response.CuriosityEpisodeProbeFlowTest do
     assert is_nil(meta.curiosity_probe)
   end
 
-  test "response planner can append curiosity after casual chat" do
+  test "response planner keeps casual chat separate from idle curiosity" do
     si = %{
       intent: :unknown,
       confidence: 0.2,
@@ -113,7 +111,7 @@ defmodule Core.Response.CuriosityEpisodeProbeFlowTest do
     {_tone, text, meta} = Response.plan(si, @mood)
 
     assert text =~ "Yeah, that was an interesting one."
-    assert text =~ "Curiosity check:"
-    assert meta.curiosity_probe.topic == "a clock that told stories"
+    refute text =~ "Curiosity check:"
+    assert is_nil(meta.curiosity_probe)
   end
 end

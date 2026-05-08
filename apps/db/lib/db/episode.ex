@@ -1,6 +1,6 @@
 defmodule Db.Episode do
   @moduledoc """
-  Ecto schema for hippocampus episodes (persistent slates).
+  Ecto schema for hippocampus episodes.
 
   Notes
   -----
@@ -9,7 +9,8 @@ defmodule Db.Episode do
     matches `@embedding_dim`.
   • `token_count` is derived from the (possibly updated) `:tokens` field so it stays
     consistent even if callers forget to set it.
-  • `si` is normalized to a plain map, recursively converting structs (e.g., `Core.SemanticInput`, `%Db.BrainCell{}`) and data structures (e.g., `MapSet` to list) for JSONB serialization.
+  • `si` is a virtual compatibility field for older callers. Persistent rows store
+    compact recall fields instead of the full semantic input/slate payload.
 
   Query helpers
   -------------
@@ -44,7 +45,7 @@ defmodule Db.Episode do
     field(:winners, :map, default: %{})
     field(:affect, :map, default: %{})
     field(:uncertainty, :float)
-    field(:si, :map, default: %{})
+    field(:si, :map, virtual: true, default: %{})
     field(:meta, :map, default: %{})
     field(:embedding, Pgvector.Ecto.Vector)
     field(:tags, {:array, :string}, default: [])
@@ -56,7 +57,7 @@ defmodule Db.Episode do
   - Ensures `:tokens` is an array of strings (coerces with `to_string/1`).
   - Derives `:token_count` from `:tokens`.
   - Validates `:embedding` length for both list and `%Pgvector{}`.
-  - Normalizes `:si` to a plain map for JSONB serialization.
+  - Normalizes virtual `:si` only for compatibility with older callers.
   """
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(ep, attrs) do
@@ -81,7 +82,7 @@ defmodule Db.Episode do
       :tags,
       :embedding
     ])
-    |> validate_required([:tokens, :si])
+    |> validate_required([:tokens])
     |> normalize_compact_fields()
     |> normalize_tokens()
     |> normalize_si()
@@ -184,7 +185,16 @@ defmodule Db.Episode do
           where: not is_nil(e.embedding),
           select: %{
             id: e.id,
-            si: e.si,
+            si: %{
+              "sentence" => e.sentence,
+              "normalized_text" => e.normalized_text,
+              "intent" => e.intent,
+              "confidence" => e.confidence,
+              "affect" => e.affect,
+              "uncertainty" => e.uncertainty,
+              "slate" => %{"winners" => e.winners, "tokens" => e.tokens},
+              "meta" => e.meta
+            },
             tags: e.tags,
             inserted_at: e.inserted_at,
             distance: fragment("? <-> ?", e.embedding, type(^emb, Pgvector.Ecto.Vector))
@@ -265,7 +275,16 @@ defmodule Db.Episode do
           where: fragment("? && ?", e.tokens, ^cue),
           select: %{
             id: e.id,
-            si: e.si,
+            si: %{
+              "sentence" => e.sentence,
+              "normalized_text" => e.normalized_text,
+              "intent" => e.intent,
+              "confidence" => e.confidence,
+              "affect" => e.affect,
+              "uncertainty" => e.uncertainty,
+              "slate" => %{"winners" => e.winners, "tokens" => e.tokens},
+              "meta" => e.meta
+            },
             tags: e.tags,
             inserted_at: e.inserted_at,
             tokens: e.tokens
@@ -382,9 +401,7 @@ defmodule Db.Episode do
         changeset
 
       %{} = si ->
-        normalized = to_plain_map(si)
-        Logger.debug("Si normalized: #{inspect(Map.keys(normalized), limit: 10)}")
-        put_change(changeset, :si, normalized)
+        put_change(changeset, :si, to_plain_map(si))
 
       other ->
         add_error(changeset, :si, "must be a map, got: #{inspect(other)}")
@@ -505,8 +522,11 @@ defmodule Db.Episode do
 
   defp build_si_from_slate(slate, meta) do
     %{
-      "slate" => to_plain_map(slate),
-      "meta" => to_plain_map(meta || %{})
+      "slate" => %{
+        "winners" => compact_winners(map_get_any(slate, :winners)),
+        "tokens" => compact_slate_tokens(map_get_any(slate, :tokens))
+      },
+      "meta" => compact_meta(meta || %{})
     }
   end
 
@@ -606,11 +626,81 @@ defmodule Db.Episode do
 
   defp compact_meta(_), do: %{}
 
-  defp compact_winners(%{"items" => items}) when is_list(items), do: %{"items" => items}
-  defp compact_winners(%{items: items}) when is_list(items), do: %{"items" => items}
-  defp compact_winners(list) when is_list(list), do: %{"items" => Enum.take(list, 12)}
-  defp compact_winners(%{} = map), do: map
+  defp compact_winners(%{"items" => items}) when is_list(items),
+    do: %{"items" => compact_winner_items(items)}
+
+  defp compact_winners(%{items: items}) when is_list(items),
+    do: %{"items" => compact_winner_items(items)}
+
+  defp compact_winners(list) when is_list(list), do: %{"items" => compact_winner_items(list)}
+
+  defp compact_winners(%{} = map),
+    do: map |> Map.get("items", Map.get(map, :items, [])) |> compact_winners()
+
   defp compact_winners(_), do: %{}
+
+  defp compact_winner_items(items) do
+    items
+    |> Enum.take(12)
+    |> Enum.map(&compact_winner/1)
+    |> Enum.reject(&(&1 == %{}))
+  end
+
+  defp compact_winner(%{} = winner) do
+    id = map_get_any(winner, :id)
+    {norm_from_id, pos_from_id} = parse_winner_id(id)
+
+    %{}
+    |> maybe_put_json("id", id)
+    |> maybe_put_json("norm", map_get_any(winner, :norm) || norm_from_id)
+    |> maybe_put_json("lemma", map_get_any(winner, :lemma))
+    |> maybe_put_json(
+      "pos",
+      map_get_any(winner, :pos) || map_get_any(winner, :subpos) || pos_from_id
+    )
+    |> maybe_put_json("score", first_number([map_get_any(winner, :score)]))
+    |> maybe_put_json("margin", first_number([map_get_any(winner, :margin)]))
+    |> maybe_put_json("token_index", map_get_any(winner, :token_index))
+  end
+
+  defp compact_winner(value) when is_binary(value), do: %{"norm" => value}
+  defp compact_winner(_), do: %{}
+
+  defp compact_slate_tokens(tokens) when is_list(tokens) do
+    tokens
+    |> Enum.take(32)
+    |> Enum.map(fn
+      token when is_binary(token) ->
+        token
+
+      %{} = token ->
+        first_present([
+          map_get_any(token, :norm),
+          map_get_any(token, :phrase),
+          map_get_any(token, :lemma)
+        ])
+
+      token ->
+        to_string(token)
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp compact_slate_tokens(_), do: []
+
+  defp parse_winner_id(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [norm, pos, _] -> {norm, pos}
+      [norm, pos] -> {norm, pos}
+      [norm] -> {norm, nil}
+    end
+  end
+
+  defp parse_winner_id(_), do: {nil, nil}
+
+  defp maybe_put_json(map, _key, nil), do: map
+  defp maybe_put_json(map, _key, ""), do: map
+  defp maybe_put_json(map, key, value), do: Map.put(map, key, value)
 
   defp choose_tokens(attrs, si) do
     cond do
@@ -731,6 +821,7 @@ defmodule Db.Episode do
       limit: ^limit
     )
     |> Db.all()
+    |> Enum.map(&put_compact_si/1)
   end
 
   @doc """
@@ -744,6 +835,26 @@ defmodule Db.Episode do
       order_by: [desc: e.inserted_at]
     )
     |> Db.all()
+    |> Enum.map(&put_compact_si/1)
+  end
+
+  defp put_compact_si(%__MODULE__{} = episode) do
+    %{
+      episode
+      | si: %{
+          "sentence" => episode.sentence,
+          "normalized_text" => episode.normalized_text,
+          "intent" => episode.intent,
+          "confidence" => episode.confidence,
+          "affect" => episode.affect || %{},
+          "uncertainty" => episode.uncertainty,
+          "slate" => %{
+            "winners" => episode.winners || %{},
+            "tokens" => episode.tokens || []
+          },
+          "meta" => episode.meta || %{}
+        }
+    }
   end
 
   @spec insert_row(map()) :: {:ok, integer()} | {:error, term()}

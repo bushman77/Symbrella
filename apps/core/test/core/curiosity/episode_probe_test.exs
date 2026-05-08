@@ -141,6 +141,102 @@ defmodule Core.Curiosity.EpisodeProbeTest do
     assert meta.topic == "i need to figure out what im doing"
   end
 
+  test "does not ask about the current question-shaped utterance" do
+    si = %{
+      text: "where do i live",
+      session_id: "current-question-session",
+      evidence: %{
+        episodes: [
+          %{
+            score: 0.1,
+            at: 999,
+            episode: %{
+              slate: %{sentence: "where do i live", winners: []},
+              meta: %{confidence: 0.1}
+            }
+          }
+        ]
+      }
+    }
+
+    assert :none =
+             EpisodeProbe.maybe_question(si, calm_mood(),
+               every_turns: 1,
+               min_gap_ms: 0,
+               min_uncertainty: 0.2
+             )
+  end
+
+  test "does not ask clarification questions about stored user facts" do
+    si = %{
+      text: "continue",
+      session_id: "fact-memory-session",
+      evidence: %{
+        episodes: [
+          %{
+            score: 0.1,
+            at: 1000,
+            episode: %{
+              slate: %{sentence: "i live in Richmond, BC", tags: ["fact", "user_fact"]},
+              meta: %{kind: :fact, key: "location", value: "Richmond, BC", tags: ["fact"]}
+            }
+          }
+        ]
+      }
+    }
+
+    assert :none =
+             EpisodeProbe.maybe_question(si, calm_mood(),
+               every_turns: 1,
+               min_gap_ms: 0,
+               min_uncertainty: 0.2
+             )
+  end
+
+  test "idle_question asks about a recent unknown-intent episode" do
+    episodes = [
+      %{
+        id: 42,
+        sentence: "the blue bracket thing",
+        intent: "unknown",
+        confidence: 0.2,
+        tokens: ["blue", "bracket", "thing"],
+        tags: [],
+        inserted_at: ~N[2026-05-08 12:00:00]
+      }
+    ]
+
+    assert {:ok, question, meta} =
+             EpisodeProbe.idle_question("idle-unknown-session",
+               episodes: episodes,
+               min_uncertainty: 0.2
+             )
+
+    assert question =~ "I found an earlier message"
+    assert question =~ "the blue bracket thing"
+    assert question =~ "What did you mean by that?"
+    assert meta.topic == "the blue bracket thing"
+    assert meta.reason == :idle_unknown_intent
+  end
+
+  test "idle_question ignores known-intent episodes" do
+    episodes = [
+      %{
+        id: 43,
+        sentence: "my location is Richmond",
+        intent: "statement",
+        confidence: 0.9,
+        inserted_at: ~N[2026-05-08 12:00:00]
+      }
+    ]
+
+    assert :none =
+             EpisodeProbe.idle_question("idle-known-session",
+               episodes: episodes,
+               min_uncertainty: 0.2
+             )
+  end
+
   defp uncertain_si(session_id) do
     %{
       text: "continue",

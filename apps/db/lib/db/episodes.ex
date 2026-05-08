@@ -353,9 +353,43 @@ defmodule Db.Episodes do
       %{"winners" => winners} when is_list(winners) -> winners
       _ -> []
     end
+    |> Enum.take(12)
+    |> Enum.map(&compact_winner/1)
+    |> Enum.reject(&(&1 == %{}))
   end
 
   defp compact_winners(_), do: []
+
+  defp compact_winner(%{} = winner) do
+    id = Map.get(winner, :id) || Map.get(winner, "id")
+    {norm_from_id, pos_from_id} = parse_winner_id(id)
+
+    %{}
+    |> maybe_put("id", id)
+    |> maybe_put("norm", Map.get(winner, :norm) || Map.get(winner, "norm") || norm_from_id)
+    |> maybe_put("lemma", Map.get(winner, :lemma) || Map.get(winner, "lemma"))
+    |> maybe_put(
+      "pos",
+      Map.get(winner, :pos) || Map.get(winner, "pos") || Map.get(winner, :subpos) ||
+        Map.get(winner, "subpos") || pos_from_id
+    )
+    |> maybe_put("score", compact_number(Map.get(winner, :score) || Map.get(winner, "score")))
+    |> maybe_put("margin", compact_number(Map.get(winner, :margin) || Map.get(winner, "margin")))
+    |> maybe_put("token_index", Map.get(winner, :token_index) || Map.get(winner, "token_index"))
+  end
+
+  defp compact_winner(value) when is_binary(value), do: %{"norm" => value}
+  defp compact_winner(_), do: %{}
+
+  defp parse_winner_id(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [norm, pos, _] -> {norm, pos}
+      [norm, pos] -> {norm, pos}
+      [norm] -> {norm, nil}
+    end
+  end
+
+  defp parse_winner_id(_), do: {nil, nil}
 
   defp compact_meta(si) when is_map(si) do
     %{}

@@ -102,6 +102,10 @@ config :symbrella,
 
 config :symbrella_web, generators: [context_app: :symbrella]
 
+config :symbrella_web, SymbrellaWeb.HomeLive,
+  curiosity_idle_enabled?: false,
+  curiosity_idle_ms: 180_000
+
 config :symbrella_web, SymbrellaWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,

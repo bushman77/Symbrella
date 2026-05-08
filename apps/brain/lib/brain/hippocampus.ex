@@ -93,8 +93,8 @@ defmodule Brain.Hippocampus do
     encode(slate, meta)
   end
 
-  @spec fact(atom()) :: term() | nil
-  def fact(key) when is_atom(key),
+  @spec fact(atom() | String.t()) :: term() | nil
+  def fact(key) when is_atom(key) or is_binary(key),
     do: GenServer.call(__MODULE__, {:fact, key})
 
   @doc """
@@ -318,13 +318,13 @@ defmodule Brain.Hippocampus do
 
   defp find_fact_in_window(_window, _key), do: nil
 
-  defp fact_episode?(%{meta: meta, slate: slate}, :user_name) do
+  defp fact_episode?(%{meta: meta, slate: slate}, key) do
     tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
 
-    fact_key?(meta, :user_name) or fact_key?(slate, :user_name) or fact_key_from_si?(slate, :user_name) or
+    fact_key?(meta, key) or fact_key?(slate, key) or fact_key_from_si?(slate, key) or
       Enum.any?(tags, fn t ->
         s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
-        String.downcase(s) == "user_name"
+        normalize_fact_key(s) == normalize_fact_key(key)
       end)
   end
 
@@ -351,9 +351,9 @@ defmodule Brain.Hippocampus do
 
   defp fact_value_from_si(_), do: nil
 
-  defp fact_key?(map, key) when is_map(map) and is_atom(key) do
+  defp fact_key?(map, key) when is_map(map) and (is_atom(key) or is_binary(key)) do
     value = Map.get(map, :key) || Map.get(map, "key")
-    value == key or to_string(value || "") == Atom.to_string(key)
+    normalize_fact_key(value) == normalize_fact_key(key)
   end
 
   defp fact_key?(_, _), do: false
@@ -361,7 +361,7 @@ defmodule Brain.Hippocampus do
   defp fact_key_from_si?(%{si: si}, key), do: fact_key_from_si?(si, key)
   defp fact_key_from_si?(%{"si" => si}, key), do: fact_key_from_si?(si, key)
 
-  defp fact_key_from_si?(si, key) when is_map(si) and is_atom(key) do
+  defp fact_key_from_si?(si, key) when is_map(si) and (is_atom(key) or is_binary(key)) do
     value =
       get_in(si, [:meta, :key]) ||
         get_in(si, ["meta", "key"]) ||
@@ -372,10 +372,25 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", :key]) ||
         get_in(si, [:episode, "meta", "key"])
 
-    value == key or to_string(value || "") == Atom.to_string(key)
+    normalize_fact_key(value) == normalize_fact_key(key)
   end
 
   defp fact_key_from_si?(_, _), do: false
+
+  defp normalize_fact_key(nil), do: nil
+
+  defp normalize_fact_key(key) do
+    key
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "_")
+    |> String.trim("_")
+    |> case do
+      "" -> nil
+      value -> value
+    end
+  end
 
   defp self_memory_result?(%{episode: %{meta: meta, slate: slate}}) do
     self_memory_meta?(meta) or self_memory_tags?(meta) or self_memory_tags?(slate)

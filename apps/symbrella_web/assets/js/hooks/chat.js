@@ -54,6 +54,9 @@ export const ChatInput = {
         this.submitting = true
 
         this.pushEvent("send", { message: ta.value })
+        ta.value = ""
+        ta.dispatchEvent(new Event("input", { bubbles: true }))
+        this.resize()
 
         setTimeout(() => (this.submitting = false), 120)
         return
@@ -67,6 +70,12 @@ export const ChatInput = {
     ta.addEventListener("input", this.resize)
     ta.addEventListener("compositionstart", this.onCompStart)
     ta.addEventListener("compositionend", this.onCompEnd)
+
+    this.handleEvent("chat:clear-input", () => {
+      ta.value = ""
+      ta.dispatchEvent(new Event("input", { bubbles: true }))
+      this.resize()
+    })
 
     ta.setAttribute("enterkeyhint", "send")
     this.resize()
@@ -84,4 +93,3 @@ export const ChatInput = {
     ta.removeEventListener("compositionend", this.onCompEnd)
   }
 }
-

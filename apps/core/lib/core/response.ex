@@ -38,7 +38,6 @@ defmodule Core.Response do
   alias Core.Response.Skills
   alias Core.Response.LlmSynthesis
   alias Core.Response.SelfStateSummary
-  alias Core.Curiosity.EpisodeProbe
 
   @compile {:no_warn_undefined, Brain.MoodCore}
 
@@ -55,137 +54,154 @@ defmodule Core.Response do
     text_in = si_text(si)
     session_id = session_id(si)
     extracted_name = extract_user_name(text_in)
+    remember_fact = extract_remember_fact(text_in)
+    direct_fact = extract_direct_fact(text_in)
+    fact_query_key = extract_fact_query_key(text_in)
 
-    # Hard precedence: identity questions never go to skills/LLM.
-    if asking_for_user_name?(text_in) do
-      name = recalled_user_name(extracted_name)
+    case memory_reply_for(%{
+           intent0: intent0,
+           conf: conf,
+           text_in: text_in,
+           session_id: session_id,
+           extracted_name: extracted_name,
+           remember_fact: remember_fact,
+           direct_fact: direct_fact,
+           fact_query_key: fact_query_key
+         }) do
+      {_, _, _} = reply ->
+        reply
 
-      text =
-        if is_binary(name) and name != "" do
-          "Your name is #{name}."
-        else
-          "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
-        end
+      nil ->
+        intent = Policy.normalize_intent(intent0, text_in)
+        _ = maybe_apply_mood_intent(intent, conf, text_in)
 
-      meta = %{
-        action: :identity,
-        session_id: session_id,
-        user_name: name,
-        source: :hippocampus_fact,
-        intent_original: intent0,
-        confidence: conf
-      }
+        {vig, inh, exp, pls, tone_hint} = mood_sample(mood)
+        guard = Guardrails.detect(text_in)
 
-      record_turn(session_id, text_in, text)
-      :telemetry.execute([:core, :response, :plan], %{}, meta)
+        benign? = Policy.benign_text?(text_in)
+        hostile? = Policy.hostile_text?(text_in)
+        command? = Policy.command?(text_in)
 
-      {:warm, text, meta}
-    else
-      intent = Policy.normalize_intent(intent0, text_in)
-      _ = maybe_apply_mood_intent(intent, conf, text_in)
+        confidence_bucket = bucket_confidence(conf)
+        vigilance_bucket = bucket_vigilance(vig)
+        risk_bucket = if guard.guardrail? or intent == :illicit_request, do: :high, else: :low
 
-      {vig, inh, exp, pls, tone_hint} = mood_sample(mood)
-      guard = Guardrails.detect(text_in)
+        features =
+          build_features(%{
+            session_id: session_id,
+            intent0: intent0,
+            intent: intent,
+            text_in: text_in,
+            conf: conf,
+            confidence_bucket: confidence_bucket,
+            vig: vig,
+            inh: inh,
+            exp: exp,
+            pls: pls,
+            vigilance_bucket: vigilance_bucket,
+            tone_hint: tone_hint,
+            benign?: benign?,
+            hostile?: hostile?,
+            command?: command?,
+            risk_bucket: risk_bucket,
+            guard: guard,
+            extracted_name: extracted_name,
+            comprehension: Map.get(si, :comprehension),
+            prefrontal: Map.get(si, :prefrontal),
+            control_signals: Map.get(si, :control_signals)
+          })
 
-      benign? = Policy.benign_text?(text_in)
-      hostile? = Policy.hostile_text?(text_in)
-      command? = Policy.command?(text_in)
+        {decision, skill} = decide_and_pick_skill(features, guard, text_in)
 
-      confidence_bucket = bucket_confidence(conf)
-      vigilance_bucket = bucket_vigilance(vig)
-      risk_bucket = if guard.guardrail? or intent == :illicit_request, do: :high, else: :low
+        name_claim? = name_claim?(extracted_name, text_in)
+        maybe_persist_user_name(name_claim?, extracted_name, text_in)
 
-      features =
-        build_features(%{
-          session_id: session_id,
-          intent0: intent0,
-          intent: intent,
-          text_in: text_in,
-          conf: conf,
-          confidence_bucket: confidence_bucket,
-          vig: vig,
-          inh: inh,
-          exp: exp,
-          pls: pls,
-          vigilance_bucket: vigilance_bucket,
-          tone_hint: tone_hint,
-          benign?: benign?,
-          hostile?: hostile?,
-          command?: command?,
-          risk_bucket: risk_bucket,
-          guard: guard,
-          extracted_name: extracted_name,
-          comprehension: Map.get(si, :comprehension),
-          prefrontal: Map.get(si, :prefrontal),
-          control_signals: Map.get(si, :control_signals)
-        })
+        forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
 
-      {decision, skill} = decide_and_pick_skill(features, guard, text_in)
+        text0 =
+          forced_identity ||
+            inline_skill_text(skill) ||
+            llm_or_template(text_in, features, decision, mood, intent)
 
-      name_claim? = name_claim?(extracted_name, text_in)
-      maybe_persist_user_name(name_claim?, extracted_name, text_in)
+        {text, curiosity_probe} =
+          maybe_append_curiosity_question(text0, si, mood, features, decision, guard, skill)
 
-      forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
+        record_turn(session_id, text_in, text)
 
-      text0 =
-        forced_identity ||
-          inline_skill_text(skill) ||
-          llm_or_template(text_in, features, decision, mood, intent)
+        profile = classify_profile(features, decision, guard)
 
-      {text, curiosity_probe} =
-        maybe_append_curiosity_question(text0, si, mood, features, decision, guard, skill)
+        planner_explanation =
+          build_planner_explanation(
+            intent,
+            conf,
+            decision.tone,
+            decision.mode,
+            tone_hint,
+            vig,
+            inh,
+            exp,
+            benign?,
+            hostile?,
+            risk_bucket,
+            decision.overrides
+          )
 
-      record_turn(session_id, text_in, text)
+        meta =
+          build_meta(%{
+            decision: decision,
+            intent0: intent0,
+            intent: intent,
+            conf: conf,
+            confidence_bucket: confidence_bucket,
+            risk_bucket: risk_bucket,
+            profile: profile,
+            benign?: benign?,
+            hostile?: hostile?,
+            tone_hint: tone_hint,
+            mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
+            skill: skill,
+            guard: guard,
+            session_id: session_id,
+            extracted_name: extracted_name,
+            planner_explanation: planner_explanation,
+            comprehension: Map.get(features, :comprehension),
+            prefrontal: Map.get(features, :prefrontal),
+            control_signals: Map.get(features, :control_signals),
+            curiosity_probe: curiosity_probe
+          })
 
-      profile = classify_profile(features, decision, guard)
+        :telemetry.execute([:core, :response, :plan], %{}, meta)
 
-      planner_explanation =
-        build_planner_explanation(
-          intent,
-          conf,
-          decision.tone,
-          decision.mode,
-          tone_hint,
-          vig,
-          inh,
-          exp,
-          benign?,
-          hostile?,
-          risk_bucket,
-          decision.overrides
-        )
-
-      meta =
-        build_meta(%{
-          decision: decision,
-          intent0: intent0,
-          intent: intent,
-          conf: conf,
-          confidence_bucket: confidence_bucket,
-          risk_bucket: risk_bucket,
-          profile: profile,
-          benign?: benign?,
-          hostile?: hostile?,
-          tone_hint: tone_hint,
-          mood_sample: %{exploration: exp, inhibition: inh, vigilance: vig, plasticity: pls},
-          skill: skill,
-          guard: guard,
-          session_id: session_id,
-          extracted_name: extracted_name,
-          planner_explanation: planner_explanation,
-          comprehension: Map.get(features, :comprehension),
-          prefrontal: Map.get(features, :prefrontal),
-          control_signals: Map.get(features, :control_signals),
-          curiosity_probe: curiosity_probe
-        })
-
-      :telemetry.execute([:core, :response, :plan], %{}, meta)
-
-      {decision.tone, text, meta}
+        {decision.tone, text, meta}
     end
   end
 
   def plan(_si, _mood), do: {:neutral, "", %{error: :invalid_args}}
+
+  @spec memory_reply(si_like()) :: {atom(), String.t(), map()} | nil
+  def memory_reply(si) when is_map(si) do
+    intent0 = Map.get(si, :intent, :unknown)
+    conf = clamp01(Map.get(si, :confidence, 0.0))
+    text_in = si_text(si)
+    session_id = session_id(si)
+    extracted_name = extract_user_name(text_in)
+    remember_fact = extract_remember_fact(text_in)
+    direct_fact = extract_direct_fact(text_in)
+    fact_query_key = extract_fact_query_key(text_in)
+
+    memory_reply_for(%{
+      intent0: intent0,
+      conf: conf,
+      text_in: text_in,
+      session_id: session_id,
+      extracted_name: extracted_name,
+      remember_fact: remember_fact,
+      direct_fact: direct_fact,
+      fact_query_key: fact_query_key
+    })
+  end
+
+  def memory_reply(_), do: nil
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Helpers
@@ -327,41 +343,12 @@ defmodule Core.Response do
 
   defp maybe_append_curiosity_question(text, si, mood, features, decision, guard, skill)
        when is_binary(text) do
-    cond do
-      text == "" ->
-        {text, nil}
-
-      guard.guardrail? or features.risk_bucket == :high ->
-        {text, nil}
-
-      suppress_curiosity_skill?(skill) ->
-        {text, nil}
-
-      decision.action in [:safe_redirect, :ask_first] ->
-        {text, nil}
-
-      true ->
-        si_for_probe =
-          si
-          |> Map.put_new(:text, features.text)
-          |> Map.put_new(:session_id, features.session_id)
-
-        case EpisodeProbe.maybe_question(si_for_probe, mood) do
-          {:ok, question, meta} ->
-            {text <> "\n\n" <> question, meta}
-
-          :none ->
-            {text, nil}
-        end
-    end
+    _ = {si, mood, features, decision, guard, skill}
+    {text, nil}
   end
 
   defp maybe_append_curiosity_question(text, _si, _mood, _features, _decision, _guard, _skill),
     do: {text, nil}
-
-  defp suppress_curiosity_skill?(nil), do: false
-  defp suppress_curiosity_skill?(%{id: id}) when id in [:casual_chat, :greet], do: false
-  defp suppress_curiosity_skill?(_skill), do: true
 
   defp build_meta(%{
          decision: decision,
@@ -415,6 +402,104 @@ defmodule Core.Response do
   # Durable name memory (Hippocampus)
   # ─────────────────────────────────────────────────────────────────────────────
 
+  defp memory_reply_for(%{
+         intent0: intent0,
+         conf: conf,
+         text_in: text_in,
+         session_id: session_id,
+         extracted_name: extracted_name,
+         remember_fact: remember_fact,
+         direct_fact: direct_fact,
+         fact_query_key: fact_query_key
+       }) do
+    cond do
+      asking_for_user_name?(text_in) ->
+        name = recalled_user_name(extracted_name)
+
+        text =
+          if is_binary(name) and name != "" do
+            "Your name is #{name}."
+          else
+            "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
+          end
+
+        meta = %{
+          action: :identity,
+          session_id: session_id,
+          user_name: name,
+          source: :hippocampus_fact,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_memory_reply(session_id, text_in, text, meta)
+
+      remember_fact ->
+        {key, label, value} = remember_fact
+        text = remember_fact_response(key, label, value, text_in, true)
+
+        meta = %{
+          action: :remember_fact,
+          session_id: session_id,
+          fact_key: key,
+          fact_label: label,
+          source: :hippocampus_fact,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_memory_reply(session_id, text_in, text, meta)
+
+      direct_fact ->
+        {key, label, value} = direct_fact
+        text = remember_fact_response(key, label, value, text_in, false)
+
+        meta = %{
+          action: :remember_fact,
+          session_id: session_id,
+          fact_key: key,
+          fact_label: label,
+          source: :hippocampus_fact,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_memory_reply(session_id, text_in, text, meta)
+
+      fact_query_key ->
+        {key, label} = fact_query_key
+        value = recalled_fact(key)
+
+        text =
+          if is_binary(value) and value != "" do
+            "Your #{label} is #{value}."
+          else
+            "I don’t know your #{label} yet—tell me “remember that my #{label} is …” and I’ll remember it."
+          end
+
+        meta = %{
+          action: :recall_fact,
+          session_id: session_id,
+          fact_key: key,
+          fact_label: label,
+          source: :hippocampus_fact,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_memory_reply(session_id, text_in, text, meta)
+
+      true ->
+        nil
+    end
+  end
+
+  defp finish_memory_reply(session_id, text_in, text, meta) do
+    record_turn(session_id, text_in, text)
+    :telemetry.execute([:core, :response, :plan], %{}, meta)
+    {:warm, text, meta}
+  end
+
   defp persist_user_name_episode(name, raw_text) when is_binary(name) do
     if Code.ensure_loaded?(Brain.Hippocampus) and
          function_exported?(Brain.Hippocampus, :encode, 2) do
@@ -439,6 +524,46 @@ defmodule Core.Response do
     :ok
   end
 
+  defp remember_fact_response(key, label, value, raw_text, explicit?)
+       when is_binary(key) and is_binary(label) and is_binary(value) do
+    persist_user_fact_episode(key, label, value, raw_text)
+
+    if explicit? do
+      "I’ll remember that your #{label} is #{value}."
+    else
+      "I’ve noted that your #{label} is #{value}."
+    end
+  end
+
+  defp persist_user_fact_episode(key, label, value, raw_text)
+       when is_binary(key) and is_binary(value) do
+    if Code.ensure_loaded?(Brain.Hippocampus) and
+         function_exported?(Brain.Hippocampus, :encode, 2) do
+      tokens = key |> String.split("_", trim: true) |> Enum.uniq()
+
+      slate = %{
+        sentence: raw_text,
+        winners: [%{id: "#{key}|fact|0", lemma: key, norm: key}],
+        tokens: Enum.uniq([key, value | tokens]),
+        tags: ["fact", "user_fact", key]
+      }
+
+      meta = %{
+        tags: ["fact", "user_fact", key],
+        scope: :chat,
+        subject: :user,
+        kind: :fact,
+        key: key,
+        label: label,
+        value: value
+      }
+
+      _ = Brain.Hippocampus.encode(slate, meta)
+    end
+
+    :ok
+  end
+
   defp recalled_user_name(extracted_name) do
     cond do
       is_binary(extracted_name) and extracted_name != "" ->
@@ -454,6 +579,17 @@ defmodule Core.Response do
         nil
     end
   end
+
+  defp recalled_fact(key) when is_binary(key) do
+    if Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) do
+      case Brain.Hippocampus.fact(key) do
+        v when is_binary(v) and v != "" -> v
+        _ -> nil
+      end
+    end
+  end
+
+  defp recalled_fact(_), do: nil
 
   @doc """
   Convenience helper: annotate an SI-like map/struct with planner output.
@@ -882,6 +1018,131 @@ defmodule Core.Response do
   end
 
   defp extract_user_name(_), do: nil
+
+  defp extract_remember_fact(text) when is_binary(text) do
+    with [_, body] <- Regex.run(~r/^\s*rem?em?ber(?:\s+that)?\s+(.+?)\s*[\.\!]*\s*$/iu, text),
+         {label, value} <- split_fact_body(body),
+         key when is_binary(key) <- fact_key(label) do
+      {key, label, value}
+    else
+      _ -> nil
+    end
+  end
+
+  defp extract_remember_fact(_), do: nil
+
+  defp extract_direct_fact(text) when is_binary(text) do
+    cond do
+      asking_for_user_name?(text) ->
+        nil
+
+      extract_fact_query_key(text) ->
+        nil
+
+      location = extract_location_fact(text) ->
+        location
+
+      true ->
+        with {label, value} <- split_fact_body(text),
+             key when is_binary(key) <- fact_key(label) do
+          {key, label, value}
+        else
+          _ -> nil
+        end
+    end
+  end
+
+  defp extract_direct_fact(_), do: nil
+
+  defp extract_fact_query_key(text) when is_binary(text) do
+    cond do
+      Regex.match?(~r/^\s*where\s+do\s+i\s+live\s*\??\s*$/iu, text) ->
+        {"location", "location"}
+
+      true ->
+        with [_, label] <- Regex.run(~r/^\s*what\s+is\s+my\s+(.+?)\s*\??\s*$/iu, text),
+             key when is_binary(key) <- fact_key(label) do
+          {key, normalize_fact_label(label)}
+        else
+          _ -> nil
+        end
+    end
+  end
+
+  defp extract_fact_query_key(_), do: nil
+
+  defp extract_location_fact(text) when is_binary(text) do
+    case Regex.run(
+           ~r/^\s*i\s+live\s+in\s+(.+?)[\.\!]*\s*$/iu,
+           text
+         ) do
+      [_, value] ->
+        value =
+          value
+          |> strip_remember_suffix()
+          |> normalize_fact_value()
+
+        if value == "", do: nil, else: {"location", "location", value}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp strip_remember_suffix(value) when is_binary(value) do
+    value
+    |> String.replace(
+      ~r/(?:,\s*)?(?:please\s+)?rem?em?ber\s+that\s*$/iu,
+      ""
+    )
+    |> String.trim()
+  end
+
+  defp split_fact_body(body) when is_binary(body) do
+    case Regex.run(~r/^\s*(?:my\s+)?(.+?)\s+(?:is|=)\s+(.+?)\s*$/iu, body) do
+      [_, label, value] ->
+        label = normalize_fact_label(label)
+        value = normalize_fact_value(value)
+
+        if label != "" and value != "" and not reserved_fact_label?(label) do
+          {label, value}
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp fact_key(label) when is_binary(label) do
+    label
+    |> normalize_fact_label()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, "_")
+    |> String.trim("_")
+    |> case do
+      "" -> nil
+      "name" -> nil
+      key -> key
+    end
+  end
+
+  defp normalize_fact_label(label) when is_binary(label) do
+    label
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/^(?:my|the)\s+/iu, "")
+    |> String.replace(~r/\s+/u, " ")
+  end
+
+  defp normalize_fact_value(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim_trailing(".")
+  end
+
+  defp reserved_fact_label?("name"), do: true
+  defp reserved_fact_label?(_), do: false
 
   defp asking_for_user_name?(text) when is_binary(text) do
     t =

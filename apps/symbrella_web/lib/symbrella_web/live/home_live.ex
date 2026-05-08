@@ -5,6 +5,7 @@ defmodule SymbrellaWeb.HomeLive do
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
   alias SymbrellaWeb.ChatHistory
   alias Core.Response
+  alias Core.Curiosity.EpisodeProbe
   alias Core.LexicalExplain
 
   @choice_preview_limit 3
@@ -19,11 +20,21 @@ defmodule SymbrellaWeb.HomeLive do
   def mount(_params, _session, socket) do
     initial = initial_messages()
 
-    initial_text_by_id = Map.new(initial, fn msg -> {msg.id, msg.text} end)
+    initial_text_by_id =
+      Map.new(initial, fn msg ->
+        {msg.id, Map.get(msg, :explain_text, msg.text)}
+      end)
 
     initial_explain_by_id =
       Map.new(initial, fn msg ->
-        {msg.id, ChatHTML.explain_payload_for(%{id: msg.id, text: msg.text})}
+        payload =
+          Map.get(msg, :explain_payload) ||
+            ChatHTML.explain_payload_for(%{
+              id: msg.id,
+              text: Map.get(msg, :explain_text, msg.text)
+            })
+
+        {msg.id, payload}
       end)
 
     {:ok,
@@ -37,10 +48,12 @@ defmodule SymbrellaWeb.HomeLive do
        session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
        explain_open?: false,
        explain_payload: %{},
+       curiosity_idle_ref: nil,
        message_text_by_id: initial_text_by_id,
        explain_by_id: initial_explain_by_id
      )
-     |> stream(:messages, initial)}
+     |> stream(:messages, initial)
+     |> schedule_curiosity_idle()}
   end
 
   @impl true
@@ -70,6 +83,7 @@ defmodule SymbrellaWeb.HomeLive do
 
         socket =
           socket
+          |> cancel_curiosity_idle()
           |> stream_insert(:messages, msg)
           |> assign(
             draft: "",
@@ -77,6 +91,7 @@ defmodule SymbrellaWeb.HomeLive do
             cancelled_ref: nil,
             message_text_by_id: Map.put(socket.assigns.message_text_by_id, msg_id, text)
           )
+          |> push_event("chat:clear-input", %{})
           |> push_event("chat:scroll", %{to: "composer"})
 
         ChatHistory.append(msg)
@@ -177,7 +192,9 @@ defmodule SymbrellaWeb.HomeLive do
       role: :assistant,
       text: reply_text,
       tone: tone,
-      meta: meta
+      meta: meta,
+      explain_text: explain_text,
+      explain_payload: explain_payload
     }
 
     ChatHistory.append(bot)
@@ -191,7 +208,8 @@ defmodule SymbrellaWeb.HomeLive do
        explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
      )
      |> stream_insert(:messages, bot)
-     |> push_event("chat:scroll", %{to: "composer"})}
+     |> push_event("chat:scroll", %{to: "composer"})
+     |> schedule_curiosity_idle()}
   end
 
   @impl true
@@ -228,10 +246,65 @@ defmodule SymbrellaWeb.HomeLive do
            explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
          )
          |> stream_insert(:messages, msg)
-         |> push_event("chat:scroll", %{to: "composer"})}
+         |> push_event("chat:scroll", %{to: "composer"})
+         |> schedule_curiosity_idle()}
 
       true ->
         {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info({:curiosity_idle, ref}, socket) do
+    cond do
+      not match?({^ref, _timer_ref}, socket.assigns.curiosity_idle_ref) ->
+        {:noreply, socket}
+
+      socket.assigns.bot_typing or match?(%Task{}, socket.assigns.pending_task) ->
+        {:noreply, schedule_curiosity_idle(socket)}
+
+      true ->
+        socket = assign(socket, :curiosity_idle_ref, nil)
+
+        case EpisodeProbe.idle_question(socket.assigns.session_id) do
+          {:ok, question, meta} ->
+            bot_id = "c-" <> Integer.to_string(System.unique_integer([:positive]))
+
+            explain_payload =
+              ChatHTML.explain_payload_for(%{
+                id: bot_id,
+                text: question,
+                tone: :curious,
+                intent: :curiosity,
+                confidence: meta[:uncertainty],
+                from: meta
+              })
+
+            bot = %{
+              id: bot_id,
+              role: :assistant,
+              text: question,
+              tone: :curious,
+              meta: meta,
+              explain_text: question,
+              explain_payload: explain_payload
+            }
+
+            ChatHistory.append(bot)
+
+            {:noreply,
+             socket
+             |> assign(
+               message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, question),
+               explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
+             )
+             |> stream_insert(:messages, bot)
+             |> push_event("chat:scroll", %{to: "composer"})
+             |> schedule_curiosity_idle()}
+
+          :none ->
+            {:noreply, schedule_curiosity_idle(socket)}
+        end
     end
   end
 
@@ -245,10 +318,81 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
+  defp schedule_curiosity_idle(socket) do
+    socket = cancel_curiosity_idle(socket)
+
+    if connected?(socket) and curiosity_idle_enabled?() and curiosity_idle_ms() > 0 do
+      ref = make_ref()
+      timer_ref = Process.send_after(self(), {:curiosity_idle, ref}, curiosity_idle_ms())
+      assign(socket, :curiosity_idle_ref, {ref, timer_ref})
+    else
+      assign(socket, :curiosity_idle_ref, nil)
+    end
+  end
+
+  defp cancel_curiosity_idle(socket) do
+    case Map.get(socket.assigns, :curiosity_idle_ref) do
+      nil -> socket
+      {_ref, timer_ref} -> Process.cancel_timer(timer_ref)
+      timer_ref when is_reference(timer_ref) -> Process.cancel_timer(timer_ref)
+    end
+
+    assign(socket, :curiosity_idle_ref, nil)
+  end
+
+  defp curiosity_idle_ms do
+    home_live_config()
+    |> Keyword.get(:curiosity_idle_ms, 180_000)
+    |> case do
+      value when is_integer(value) and value >= 0 -> value
+      _ -> 180_000
+    end
+  end
+
+  defp curiosity_idle_enabled? do
+    home_live_config()
+    |> Keyword.get(:curiosity_idle_enabled?, false)
+    |> Kernel.==(true)
+  end
+
+  defp home_live_config do
+    Application.get_env(:symbrella_web, __MODULE__, [])
+  end
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Planner integration
   # ─────────────────────────────────────────────────────────────────────────────
   defp build_planned_reply(user_text, session_id) do
+    memory_si_like = %{
+      session_id: session_id,
+      intent: :unknown,
+      confidence: 1.0,
+      text: user_text,
+      source: :user
+    }
+
+    memory_reply =
+      if Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1) do
+        Response.memory_reply(memory_si_like)
+      end
+
+    case memory_reply do
+      {tone, reply_text, meta} ->
+        %{
+          text: reply_text,
+          tone: tone,
+          meta: meta,
+          si: memory_si_like,
+          senses_selected: [],
+          explain_text: reply_text
+        }
+
+      nil ->
+        build_semantic_reply(user_text, session_id)
+    end
+  end
+
+  defp build_semantic_reply(user_text, session_id) do
     si =
       Core.resolve_input(user_text,
         mode: :prod,
