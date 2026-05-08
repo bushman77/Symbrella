@@ -9,9 +9,7 @@ defmodule Symbrella.Application do
     # neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
     # File.mkdir_p!(Path.dirname(neg_path))
 
-    children = [
-      {Phoenix.PubSub, name: Symbrella.PubSub},
-
+    app_children = [
       # ── DB ────────────────────────────────────────────────────────────────
       Db,
 
@@ -66,6 +64,8 @@ defmodule Symbrella.Application do
       # The web app owns its endpoint under SymbrellaWeb.Application.
     ]
 
+    children = maybe_pubsub_child() ++ app_children
+
     {:ok, sup} =
       Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
 
@@ -92,6 +92,13 @@ defmodule Symbrella.Application do
       _ -> :ok
     catch
       _, _ -> :ok
+    end
+  end
+
+  defp maybe_pubsub_child do
+    case Process.whereis(Symbrella.PubSub) do
+      nil -> [{Phoenix.PubSub, name: Symbrella.PubSub}]
+      _pid -> []
     end
   end
 end

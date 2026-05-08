@@ -29,6 +29,18 @@ defmodule Brain.VmPFC do
           optional(:prior) => number()
         }
 
+  @doc "Return compact dashboard status for the pure vmPFC planner."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :vmpfc,
+      status: :available,
+      mode: :pure,
+      function: :compute_utility,
+      telemetry: [[:brain, :vmpfc, :utility]]
+    }
+  end
+
   @spec compute_utility(ctx) :: %{utility_prior: float(), explore_rate: float()}
   def compute_utility(ctx) when is_map(ctx) do
     success = clamp01(Map.get(ctx, :recent_success_rate, 0.5))

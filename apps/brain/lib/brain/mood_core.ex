@@ -100,7 +100,7 @@ defmodule Brain.MoodCore do
       Brain.MoodCore.apply_intent(:abuse, 0.98)
   """
   def apply_intent(intent, confidence \\ 1.0) when is_atom(intent) and is_number(confidence) do
-    GenServer.cast(__MODULE__, {:apply_intent, intent, confidence})
+    GenServer.call(__MODULE__, {:apply_intent, intent, confidence})
   end
 
   @doc """
@@ -110,7 +110,7 @@ defmodule Brain.MoodCore do
       %{valence: v, arousal: a, dominance: d, tags: [...]}
   """
   def apply_appraisal(%{} = appraisal) do
-    GenServer.cast(__MODULE__, {:apply_appraisal, appraisal})
+    GenServer.call(__MODULE__, {:apply_appraisal, appraisal})
   end
 
   def apply_appraisal(_), do: :ok
@@ -166,6 +166,7 @@ defmodule Brain.MoodCore do
       last_dt_ms: 0,
       last_levels: coerce_keys(init_lv),
       sat_counts: %{da: 0, "5ht": 0, glu: 0, ne: 0},
+      mood_trace: [],
       clock:
         case Keyword.get(cfg, :clock, :cycle) do
           :cycle -> :cycle
@@ -221,43 +222,12 @@ defmodule Brain.MoodCore do
 
   @impl true
   def handle_cast({:apply_intent, intent, conf}, st) do
-    deltas = intent_to_deltas(intent, conf)
-    deltas = sanitize_deltas(deltas, st.max_delta_per_tick)
-
-    st =
-      st
-      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
-      |> emit({:intent, intent}, 0, :bump)
-
-    {:noreply, st}
+    {:noreply, apply_intent_to_state(st, intent, conf)}
   end
 
   @impl true
   def handle_cast({:apply_appraisal, appraisal}, st) when is_map(appraisal) do
-    {raw_deltas, app_meta} = appraisal_to_deltas(appraisal)
-    deltas = sanitize_deltas(raw_deltas, st.max_delta_per_tick)
-
-    st2 =
-      st
-      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
-      |> emit(:appraisal, 0, :bump)
-
-    :telemetry.execute(
-      @event_appraisal_applied,
-      %{
-        count: 1,
-        delta_da: Map.get(deltas, :da, 0.0) * 1.0,
-        delta_5ht: Map.get(deltas, :"5ht", 0.0) * 1.0,
-        delta_glu: Map.get(deltas, :glu, 0.0) * 1.0,
-        delta_ne: Map.get(deltas, :ne, 0.0) * 1.0
-      },
-      app_meta
-      |> Map.put(:dt_ms, 0)
-      |> Map.put(:source, :appraisal)
-      |> Map.put(:cause, :appraisal)
-    )
-
-    {:noreply, st2}
+    {:noreply, apply_appraisal_to_state(st, appraisal)}
   rescue
     _ -> {:noreply, st}
   catch
@@ -289,6 +259,22 @@ defmodule Brain.MoodCore do
   end
 
   @impl true
+  def handle_call({:apply_intent, intent, conf}, _from, st) do
+    st = apply_intent_to_state(st, intent, conf)
+    {:reply, decorate_snapshot(st), st}
+  end
+
+  @impl true
+  def handle_call({:apply_appraisal, appraisal}, _from, st) when is_map(appraisal) do
+    st = apply_appraisal_to_state(st, appraisal)
+    {:reply, decorate_snapshot(st), st}
+  rescue
+    _ -> {:reply, decorate_snapshot(st), st}
+  catch
+    _, _ -> {:reply, decorate_snapshot(st), st}
+  end
+
+  @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, decorate_snapshot(state), state}
 
   @impl true
@@ -300,6 +286,7 @@ defmodule Brain.MoodCore do
       |> Map.put(:levels, lv)
       |> Map.put(:last_levels, lv)
       |> Map.put(:sat_counts, %{da: 0, "5ht": 0, glu: 0, ne: 0})
+      |> Map.put(:mood_trace, [])
       |> Map.put(:last_ts, now_ms())
       |> Map.put(:last_dt_ms, 0)
 
@@ -363,6 +350,42 @@ defmodule Brain.MoodCore do
     {:reply, decorate_snapshot(new), new}
   end
 
+  defp apply_intent_to_state(st, intent, conf) do
+    deltas = intent_to_deltas(intent, conf)
+    deltas = sanitize_deltas(deltas, st.max_delta_per_tick)
+
+    st
+    |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+    |> emit({:intent, intent}, 0, :bump)
+  end
+
+  defp apply_appraisal_to_state(st, appraisal) do
+    {raw_deltas, app_meta} = appraisal_to_deltas(appraisal)
+    deltas = sanitize_deltas(raw_deltas, st.max_delta_per_tick)
+
+    st2 =
+      st
+      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> emit(:appraisal, 0, :bump)
+
+    :telemetry.execute(
+      @event_appraisal_applied,
+      %{
+        count: 1,
+        delta_da: Map.get(deltas, :da, 0.0) * 1.0,
+        delta_5ht: Map.get(deltas, :"5ht", 0.0) * 1.0,
+        delta_glu: Map.get(deltas, :glu, 0.0) * 1.0,
+        delta_ne: Map.get(deltas, :ne, 0.0) * 1.0
+      },
+      app_meta
+      |> Map.put(:dt_ms, 0)
+      |> Map.put(:source, :appraisal)
+      |> Map.put(:cause, :appraisal)
+    )
+
+    st2
+  end
+
   @impl true
   def terminate(_reason, %{telemetry_id: id}) when is_binary(id) do
     :telemetry.detach(id)
@@ -418,6 +441,7 @@ defmodule Brain.MoodCore do
     }
 
     tone = choose_tone(mood)
+    pressure = pressure_label(mood)
 
     meas0 = %{
       da: da,
@@ -428,12 +452,14 @@ defmodule Brain.MoodCore do
       inhibition: inhibition,
       vigilance: vigilance,
       plasticity: plasticity,
-      tone: tone
+      tone: tone,
+      pressure_label: pressure
     }
 
     meta0 =
       %{source: source, cause: cause, dt_ms: dt_ms}
-      |> Map.put(:mood, %{levels: lv, derived: mood, tone: tone})
+      |> Map.put(:mood, %{levels: lv, derived: mood, tone: tone, pressure_label: pressure})
+      |> Map.put(:pressure_label, pressure)
 
     # Optional TRCS latents
     latents = maybe_compute_latents(meas0, meta0)
@@ -468,7 +494,10 @@ defmodule Brain.MoodCore do
       :telemetry.execute(@event_shock, Map.put(meas, :delta_norm, dx), meta)
     end
 
-    %{st | last_levels: lv, sat_counts: sat_counts}
+    st
+    |> Map.put(:last_levels, lv)
+    |> Map.put(:sat_counts, sat_counts)
+    |> maybe_append_mood_trace(source, cause, dt_ms, prev, lv, mood, tone)
   end
 
   defp decorate_snapshot(%{levels: lv, last_dt_ms: dt} = st) do
@@ -487,7 +516,13 @@ defmodule Brain.MoodCore do
     tone_hint = choose_tone(mood)
 
     base =
-      %{mood: mood, tone_hint: tone_hint, dt_ms: dt}
+      %{
+        mood: mood,
+        tone_hint: tone_hint,
+        pressure_label: pressure_label(mood),
+        dt_ms: dt,
+        mood_trace: Map.get(st, :mood_trace, [])
+      }
       |> maybe_put_latents(maybe_compute_latents(%{levels: lv, mood: mood}, %{}))
 
     Map.merge(st, base)
@@ -679,6 +714,10 @@ defmodule Brain.MoodCore do
       vig >= hot_vig_min and inh <= hot_inh_max ->
         :deescalate
 
+      # 1b) Middle pressure: not a full de-escalation gate, but not calm.
+      vig >= 0.50 and inh <= 0.55 ->
+        :cautious
+
       # 2) Friendly / engaged:
       #    exploration above mid, inhibition not too low, vigilance not spiking.
       exp >= warm_exp_min and inh >= 0.50 and vig <= warm_vig_max ->
@@ -707,6 +746,9 @@ defmodule Brain.MoodCore do
           axis == :deescalate and vig >= hot_vig_min ->
             :deescalate
 
+          axis == :deescalate and vig >= 0.50 and inh <= 0.55 ->
+            :cautious
+
           axis == :warm and exp >= warm_exp_min ->
             :warm
 
@@ -720,6 +762,50 @@ defmodule Brain.MoodCore do
   end
 
   defp choose_tone(_), do: :neutral
+
+  defp pressure_label(%{vigilance: vig, inhibition: inh, exploration: exp, plasticity: pls}) do
+    vig = (vig || 0.5) * 1.0
+    inh = (inh || 0.5) * 1.0
+    exp = (exp || 0.5) * 1.0
+    pls = (pls || 0.5) * 1.0
+
+    cond do
+      vig >= 0.65 and inh <= 0.55 -> :deescalation_pressure
+      vig >= 0.50 and inh <= 0.55 -> :cautious_emergency_attention
+      vig >= 0.50 -> :heightened_attention
+      inh >= 0.60 and vig < 0.45 -> :steady_restraint
+      exp >= 0.60 or pls >= 0.60 -> :engaged_adaptation
+      true -> :baseline
+    end
+  end
+
+  defp pressure_label(_), do: :baseline
+
+  defp maybe_append_mood_trace(st, _source, :decay, _dt_ms, _prev, _lv, _mood, _tone), do: st
+
+  defp maybe_append_mood_trace(st, source, cause, dt_ms, prev, lv, mood, tone) do
+    entry = %{
+      at_ms: System.system_time(:millisecond),
+      source: source,
+      cause: cause,
+      dt_ms: dt_ms,
+      deltas: %{
+        da: Float.round(Map.get(lv, :da, 0.0) - Map.get(prev, :da, 0.0), 4),
+        "5ht": Float.round(Map.get(lv, :"5ht", 0.0) - Map.get(prev, :"5ht", 0.0), 4),
+        glu: Float.round(Map.get(lv, :glu, 0.0) - Map.get(prev, :glu, 0.0), 4),
+        ne: Float.round(Map.get(lv, :ne, 0.0) - Map.get(prev, :ne, 0.0), 4)
+      },
+      mood: mood,
+      tone: tone,
+      pressure_label: pressure_label(mood)
+    }
+
+    trace =
+      [entry | Map.get(st, :mood_trace, [])]
+      |> Enum.take(12)
+
+    Map.put(st, :mood_trace, trace)
+  end
 
   # ---------- small helpers ----------
 

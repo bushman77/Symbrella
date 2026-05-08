@@ -19,6 +19,7 @@ defmodule SymbrellaWeb.Router do
     pipe_through :browser
 
     live "/", HomeLive, :index
+    live "/episodes", EpisodesLive
     live "/brain", BrainLive
     # Optional deep-linking to a specific region (e.g., /brain/lifg)
     live "/brain/:region", BrainLive

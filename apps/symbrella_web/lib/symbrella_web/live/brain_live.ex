@@ -485,7 +485,9 @@ defmodule SymbrellaWeb.BrainLive do
         Logger.debug("BrainLive safe_call error: #{inspect(e)}")
         :error
     catch
-      _ -> :error
+      kind, reason ->
+        Logger.debug("BrainLive safe_call caught #{inspect(kind)}: #{inspect(reason)}")
+        :error
     end
   end
 

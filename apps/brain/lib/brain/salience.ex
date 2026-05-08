@@ -23,6 +23,18 @@ defmodule Brain.Salience do
           optional(:wm_load) => number()
         }
 
+  @doc "Return compact dashboard status for the pure salience planner."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :salience,
+      status: :available,
+      mode: :pure,
+      function: :salience_nudge,
+      telemetry: [[:brain, :salience, :boost]]
+    }
+  end
+
   @spec salience_nudge(ctx) :: %{salience_boost: float()}
   def salience_nudge(ctx) when is_map(ctx) do
     novelty = clamp01(Map.get(ctx, :novelty, 0.0))

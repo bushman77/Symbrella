@@ -97,6 +97,11 @@ defmodule Brain.OFC do
   def reset(server \\ __MODULE__),
     do: GenServer.call(server, :reset)
 
+  @doc "Return compact OFC process status for dashboards."
+  @spec status(pid() | atom()) :: map()
+  def status(server \\ __MODULE__),
+    do: GenServer.call(server, :status, 150)
+
   # ---- Telemetry bridges ----------------------------------------------------
 
   def on_curiosity(_ev, meas, meta, %{pid: pid}) when is_pid(pid),
@@ -123,6 +128,11 @@ defmodule Brain.OFC do
   end
 
   @impl GenServer
+  def handle_call(:status, _from, state) do
+    {:reply, status_from_state(state), state}
+  end
+
+  @impl GenServer
   def handle_call(:reset, _from, state) do
     state2 =
       state
@@ -131,6 +141,20 @@ defmodule Brain.OFC do
       |> Map.put(:mood_last_ms, nil)
 
     {:reply, :ok, state2}
+  end
+
+  defp status_from_state(%{} = state) do
+    %{
+      region: Map.get(state, :region, :ofc),
+      status: :up,
+      mood: Map.get(state, :mood),
+      mood_last_ms: Map.get(state, :mood_last_ms),
+      params: effective_params(Map.get(state, :opts, [])),
+      telemetry_handlers: %{
+        curiosity: Map.get(state, :cur_handler),
+        mood: Map.get(state, :mood_handler)
+      }
+    }
   end
 
   @impl GenServer

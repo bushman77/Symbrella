@@ -184,6 +184,9 @@ plan. Important modules include:
 Brain supplies signals; Llm supplies model text when needed. Core owns the
 decision about how those pieces become a response.
 
+The concrete mood/personality/LLM prompt mapping is documented in
+[`docs/modulator-to-prompt-contract.md`](../../docs/modulator-to-prompt-contract.md).
+
 ---
 
 ## How to use Core (inside the umbrella)

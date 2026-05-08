@@ -28,5 +28,5 @@ defmodule SymbrellaWeb.Region.Lifg do
         "Z",
     colors: {"#F43F5E", "#E11D48"},
     anchor: {206, 222},
-    tweak: %{dx: -90, dy: -10, s: 1.00}
+    tweak: %{dx: 0, dy: 0, s: 1.00}
 end

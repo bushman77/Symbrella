@@ -20,6 +20,8 @@ defmodule Core.Response.Attach do
 
   alias Core.SemanticInput
 
+  @compile {:no_warn_undefined, Brain.MoodCore}
+
   @type opts :: keyword()
 
   @stopwords MapSet.new([
@@ -120,7 +122,11 @@ defmodule Core.Response.Attach do
       keyword: keyword,
       confidence: confidence,
       text: text,
-      comprehension: si_get(si, :comprehension)
+      evidence: si_get(si, :evidence),
+      comprehension: si_get(si, :comprehension),
+      prefrontal: si_get(si, :prefrontal),
+      control_signals: si_get(si, :control_signals),
+      session_id: si_get(si, :session_id)
     }
   end
 
@@ -182,6 +188,16 @@ defmodule Core.Response.Attach do
   defp find_intent_trace(_), do: nil
 
   defp build_response_mood_like(%{} = si, _opts) do
+    case live_mood_like() do
+      %{} = live when map_size(live) > 0 ->
+        live
+
+      _ ->
+        mood_like_from_si(si)
+    end
+  end
+
+  defp mood_like_from_si(%{} = si) do
     case si_get(si, :mood) do
       %{} = mood ->
         %{mood: mood, tone_hint: tone_hint_from_emotion(si)}
@@ -220,6 +236,26 @@ defmodule Core.Response.Attach do
           },
           tone_hint: tone_hint_from_emotion(si)
         }
+    end
+  end
+
+  defp live_mood_like do
+    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
+      try do
+        case Brain.MoodCore.snapshot() do
+          %{mood: %{} = mood} = snap ->
+            %{mood: mood, tone_hint: Map.get(snap, :tone_hint)}
+
+          _ ->
+            %{}
+        end
+      rescue
+        _ -> %{}
+      catch
+        :exit, _ -> %{}
+      end
+    else
+      %{}
     end
   end
 

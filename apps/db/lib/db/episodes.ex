@@ -298,6 +298,8 @@ defmodule Db.Episodes do
     |> Enum.join("\n")
   end
 
+  def si_text_for_embedding(_), do: ""
+
   # Accept string tokens or token maps with :phrase / :norm keys
   @spec token_to_text(term()) :: String.t()
   defp token_to_text(t) when is_binary(t), do: t
@@ -323,12 +325,67 @@ defmodule Db.Episodes do
   defp new_episode_attrs(si, tokens_norm, opts) do
     %{
       user_id: Keyword.get(opts, :user_id),
+      session_id: compact_string(Map.get(si, :session_id) || Keyword.get(opts, :session_id)),
+      conversation_id:
+        compact_string(Map.get(si, :conversation_id) || Keyword.get(opts, :conversation_id)),
+      source: compact_string(Map.get(si, :source) || Keyword.get(opts, :source)),
+      role: compact_string(Map.get(si, :role) || Keyword.get(opts, :role)),
+      sentence: compact_string(Map.get(si, :sentence)),
+      normalized_text: normalize_text(Map.get(si, :sentence)),
+      intent: compact_string(Map.get(si, :intent)) || "unknown",
+      confidence: compact_number(Map.get(si, :confidence)),
       tokens: tokens_norm,
       token_count: length(tokens_norm),
+      winners: %{"items" => compact_winners(si)},
+      affect: Map.get(si, :emotion) || Map.get(si, :appraisal) || %{},
+      uncertainty: compact_number(Map.get(si, :uncertainty)),
       si: si,
+      meta: compact_meta(si),
       tags: Keyword.get(opts, :tags, [])
     }
   end
+
+  defp compact_winners(si) when is_map(si) do
+    si
+    |> Map.get(:atl_slate, %{})
+    |> case do
+      %{winners: winners} when is_list(winners) -> winners
+      %{"winners" => winners} when is_list(winners) -> winners
+      _ -> []
+    end
+  end
+
+  defp compact_winners(_), do: []
+
+  defp compact_meta(si) when is_map(si) do
+    %{}
+    |> maybe_put(:keyword, Map.get(si, :keyword))
+    |> maybe_put(:response_tone, Map.get(si, :response_tone))
+    |> maybe_put(:response_meta, Map.get(si, :response_meta))
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp compact_string(nil), do: nil
+  defp compact_string(value), do: value |> to_string() |> String.trim() |> blank_to_nil()
+
+  defp normalize_text(nil), do: nil
+
+  defp normalize_text(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+    |> blank_to_nil()
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
+
+  defp compact_number(value) when is_number(value), do: value * 1.0
+  defp compact_number(_), do: nil
 
   # Fallback local cosine similarity when DB distance not available
   @spec compute_emb_sim_fallback(term(), embedding() | nil) :: float() | nil

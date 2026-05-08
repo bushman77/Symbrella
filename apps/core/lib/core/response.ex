@@ -37,6 +37,10 @@ defmodule Core.Response do
   alias Core.Response.Guardrails
   alias Core.Response.Skills
   alias Core.Response.LlmSynthesis
+  alias Core.Response.SelfStateSummary
+  alias Core.Curiosity.EpisodeProbe
+
+  @compile {:no_warn_undefined, Brain.MoodCore}
 
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
@@ -77,9 +81,10 @@ defmodule Core.Response do
 
       {:warm, text, meta}
     else
-      {vig, inh, exp, pls, tone_hint} = mood_sample(mood)
-
       intent = Policy.normalize_intent(intent0, text_in)
+      _ = maybe_apply_mood_intent(intent, conf, text_in)
+
+      {vig, inh, exp, pls, tone_hint} = mood_sample(mood)
       guard = Guardrails.detect(text_in)
 
       benign? = Policy.benign_text?(text_in)
@@ -110,7 +115,9 @@ defmodule Core.Response do
           risk_bucket: risk_bucket,
           guard: guard,
           extracted_name: extracted_name,
-          comprehension: Map.get(si, :comprehension)
+          comprehension: Map.get(si, :comprehension),
+          prefrontal: Map.get(si, :prefrontal),
+          control_signals: Map.get(si, :control_signals)
         })
 
       {decision, skill} = decide_and_pick_skill(features, guard, text_in)
@@ -120,10 +127,13 @@ defmodule Core.Response do
 
       forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
 
-      text =
+      text0 =
         forced_identity ||
           inline_skill_text(skill) ||
           llm_or_template(text_in, features, decision, mood, intent)
+
+      {text, curiosity_probe} =
+        maybe_append_curiosity_question(text0, si, mood, features, decision, guard, skill)
 
       record_turn(session_id, text_in, text)
 
@@ -163,7 +173,10 @@ defmodule Core.Response do
           session_id: session_id,
           extracted_name: extracted_name,
           planner_explanation: planner_explanation,
-          comprehension: Map.get(features, :comprehension)
+          comprehension: Map.get(features, :comprehension),
+          prefrontal: Map.get(features, :prefrontal),
+          control_signals: Map.get(features, :control_signals),
+          curiosity_probe: curiosity_probe
         })
 
       :telemetry.execute([:core, :response, :plan], %{}, meta)
@@ -188,6 +201,21 @@ defmodule Core.Response do
     }
   end
 
+  defp maybe_apply_mood_intent(intent, confidence, text)
+       when is_atom(intent) and is_number(confidence) do
+    if Code.ensure_loaded?(Brain.MoodCore) and
+         function_exported?(Brain.MoodCore, :apply_intent, 2) and
+         not read_only_mood_query?(text) do
+      Brain.MoodCore.apply_intent(intent, confidence)
+    else
+      :ok
+    end
+  end
+
+  defp maybe_apply_mood_intent(_intent, _confidence, _text), do: :ok
+
+  defp read_only_mood_query?(text), do: mood_indices_query?(text)
+
   defp build_features(%{
          session_id: session_id,
          intent0: intent0,
@@ -207,7 +235,9 @@ defmodule Core.Response do
          risk_bucket: risk_bucket,
          guard: guard,
          extracted_name: extracted_name,
-         comprehension: comprehension
+         comprehension: comprehension,
+         prefrontal: prefrontal,
+         control_signals: control_signals
        }) do
     %{
       session_id: session_id,
@@ -232,7 +262,9 @@ defmodule Core.Response do
       risk_bucket: risk_bucket,
       guardrail_flags: guard.flags,
       user_name: extracted_name,
-      comprehension: comprehension
+      comprehension: comprehension,
+      prefrontal: prefrontal,
+      control_signals: control_signals
     }
   end
 
@@ -293,6 +325,44 @@ defmodule Core.Response do
     end
   end
 
+  defp maybe_append_curiosity_question(text, si, mood, features, decision, guard, skill)
+       when is_binary(text) do
+    cond do
+      text == "" ->
+        {text, nil}
+
+      guard.guardrail? or features.risk_bucket == :high ->
+        {text, nil}
+
+      suppress_curiosity_skill?(skill) ->
+        {text, nil}
+
+      decision.action in [:safe_redirect, :ask_first] ->
+        {text, nil}
+
+      true ->
+        si_for_probe =
+          si
+          |> Map.put_new(:text, features.text)
+          |> Map.put_new(:session_id, features.session_id)
+
+        case EpisodeProbe.maybe_question(si_for_probe, mood) do
+          {:ok, question, meta} ->
+            {text <> "\n\n" <> question, meta}
+
+          :none ->
+            {text, nil}
+        end
+    end
+  end
+
+  defp maybe_append_curiosity_question(text, _si, _mood, _features, _decision, _guard, _skill),
+    do: {text, nil}
+
+  defp suppress_curiosity_skill?(nil), do: false
+  defp suppress_curiosity_skill?(%{id: id}) when id in [:casual_chat, :greet], do: false
+  defp suppress_curiosity_skill?(_skill), do: true
+
   defp build_meta(%{
          decision: decision,
          intent0: intent0,
@@ -309,7 +379,8 @@ defmodule Core.Response do
          guard: guard,
          session_id: session_id,
          extracted_name: extracted_name,
-         planner_explanation: planner_explanation
+         planner_explanation: planner_explanation,
+         curiosity_probe: curiosity_probe
        }) do
     %{
       policy_version: decision.policy_version,
@@ -335,7 +406,8 @@ defmodule Core.Response do
       guardrail_flags: guard.flags,
       session_id: session_id,
       user_name: extracted_name,
-      explanation: planner_explanation
+      explanation: planner_explanation,
+      curiosity_probe: curiosity_probe
     }
   end
 
@@ -460,6 +532,72 @@ defmodule Core.Response do
            inline_text: time_inline_text()
          }}
 
+      mood_indices_query?(text) ->
+        decision =
+          decision
+          |> put_decision(tone: :neutral, mode: :explainer, action: :answer)
+          |> add_decision_override(:mood_indices_answer)
+
+        {decision,
+         %{
+           id: :mood_indices,
+           reason: :mood_indices_query,
+           inline_text: SelfStateSummary.mood_indices_answer()
+         }}
+
+      self_portrait_query?(text) ->
+        decision =
+          decision
+          |> put_decision(mode: :explainer, action: :answer)
+          |> add_decision_override(:self_portrait_answer)
+
+        {decision,
+         %{
+           id: :self_portrait,
+           reason: :self_portrait_query,
+           inline_text: SelfStateSummary.self_portrait_answer()
+         }}
+
+      self_check_query?(text) ->
+        decision =
+          decision
+          |> put_decision(tone: :neutral, mode: :explainer, action: :answer)
+          |> add_decision_override(:runtime_self_check)
+
+        {decision,
+         %{
+           id: :runtime_self_check,
+           reason: :self_check_query,
+           inline_text: SelfStateSummary.self_check_answer()
+         }}
+
+      alarm_request?(text) ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :answer)
+          |> add_decision_override(:alarm_capability_answer)
+
+        {decision,
+         %{
+           id: :alarm_capability,
+           reason: :alarm_request,
+           inline_text:
+             "I can't set a real device alarm yet. I can help you phrase one or keep a note here, but I don't have a phone/OS alarm integration wired in."
+         }}
+
+      casual_chat?(text) ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :answer)
+          |> add_decision_override(:casual_chat_answer)
+
+        {decision,
+         %{
+           id: :casual_chat,
+           reason: :casual_chat,
+           inline_text: casual_chat_inline_text(text)
+         }}
+
       # Greetings should greet in chat mode (not “pick one: full file / fix / plan”).
       intent in [:greet] and features.benign? and not features.hostile? ->
         decision =
@@ -489,6 +627,76 @@ defmodule Core.Response do
   end
 
   defp time_query?(_), do: false
+
+  defp mood_indices_query?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    Regex.match?(~r/\b(my|your|current|live)?\s*mood\s+(indices|index|state|levels)\b/u, t) or
+      Regex.match?(~r/\bhow\s+(is|are)\s+(your\s+)?mood\b/u, t)
+  end
+
+  defp mood_indices_query?(_), do: false
+
+  defp self_portrait_query?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    Regex.match?(~r/\b(self[-\s]?portrait|self[-\s]?state|self[-\s]?model)\b/u, t) and
+      Regex.match?(~r/\b(how|what|where|get|show|see|view|fetch|read|inspect|snapshot)\b/u, t)
+  end
+
+  defp self_portrait_query?(_), do: false
+
+  defp self_check_query?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    Regex.match?(
+      ~r/\b(self[-\s]?check|check yourself|check your state|runtime self[-\s]?check)\b/u,
+      t
+    ) or
+      (String.contains?(t, "something is wrong") and
+         (String.contains?(t, "dangerous") or String.contains?(t, "unstable")))
+  end
+
+  defp self_check_query?(_), do: false
+
+  defp alarm_request?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    Regex.match?(~r/\b(set|make|create|start|schedule)\s+(an?\s+)?(alarm|timer|reminder)\b/u, t) or
+      Regex.match?(~r/\b(alarm|timer|reminder)\s+(for|at|in)\b/u, t) or
+      (String.contains?(t, "alarm") and Regex.match?(~r/\b(can|could|able|you)\b/u, t))
+  end
+
+  defp alarm_request?(_), do: false
+
+  defp casual_chat?(text) when is_binary(text) do
+    t = String.downcase(text) |> String.trim()
+
+    Regex.match?(~r/^(?:ha)+h?[\p{P}\s]*$/u, t) or
+      Regex.match?(~r/^(lol|lmao|rofl)[\p{P}\s]*$/u, t) or
+      Regex.match?(
+        ~r/\b(that was|this is|that is|that'?s)\s+(interesting|funny|wild|cool|neat|weird)\b/u,
+        t
+      ) or
+      Regex.match?(~r/\b((?:ha)+h?|lol|lmao)\b/u, t)
+  end
+
+  defp casual_chat?(_), do: false
+
+  defp casual_chat_inline_text(text) do
+    t = String.downcase(to_string(text))
+
+    cond do
+      String.contains?(t, "interesting") ->
+        "Yeah, that was an interesting one."
+
+      String.contains?(t, "funny") or Regex.match?(~r/\b((?:ha)+h?|lol|lmao)\b/u, t) ->
+        "Haha, yeah."
+
+      true ->
+        "Yeah, I am with you."
+    end
+  end
 
   defp greet_inline_text(text) do
     t = String.downcase(to_string(text))

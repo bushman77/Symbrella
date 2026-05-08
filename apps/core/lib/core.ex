@@ -42,6 +42,7 @@ defmodule Core do
       |> wrap_si(phrase)
       |> TokenFilters.rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put(:session_id, Keyword.get(opts, :session_id))
       |> Map.put_new(:trace, [])
       |> Map.put(:lifg_opts, lifg_opts)
 
@@ -92,6 +93,7 @@ defmodule Core do
     |> Core.Brain.ATL.ingest(atl_opts)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
     |> Core.Comprehension.Summary.attach(opts)
+    |> Core.Brain.Prefrontal.attach(opts)
     |> Core.Brain.Hippocampus.encode()
     |> Core.Brain.Hippocampus.persist(opts)
     |> Core.Brain.WM.focus_prompt_topics(opts)

@@ -21,6 +21,7 @@ defmodule Core.SemanticInput do
     • lifg_opts / lifg_choices / acc_conflict
     • atl_slate
     • comprehension
+    • prefrontal / control_signals
     • perception
     • activation_summary
     • evidence
@@ -68,6 +69,8 @@ defmodule Core.SemanticInput do
           # integration products
           atl_slate: map() | nil,
           comprehension: map() | nil,
+          prefrontal: map() | nil,
+          control_signals: map() | nil,
           activation_summary: map() | nil,
           evidence: map() | nil,
           episode: map() | nil,
@@ -109,6 +112,8 @@ defmodule Core.SemanticInput do
             perception: nil,
             atl_slate: nil,
             comprehension: nil,
+            prefrontal: nil,
+            control_signals: nil,
             activation_summary: %{db_hits: MapSet.new()},
             evidence: nil,
             episode: nil,

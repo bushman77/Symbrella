@@ -40,6 +40,10 @@ defmodule Brain.ATL do
   @spec snapshot() :: map()
   def snapshot, do: GenServer.call(@name, :snapshot)
 
+  @doc "Return compact ATL process status for dashboards."
+  @spec status() :: map()
+  def status, do: GenServer.call(@name, :status, 150)
+
   @doc "Clear rolling window & counters."
   @spec reset() :: :ok
   def reset, do: GenServer.call(@name, :reset)
@@ -96,8 +100,30 @@ defmodule Brain.ATL do
   def handle_call(:snapshot, _from, state), do: {:reply, state, state}
 
   @impl true
+  def handle_call(:status, _from, state), do: {:reply, status_from_state(state), state}
+
+  @impl true
   def handle_call(:reset, _from, state) do
     {:reply, :ok, %{state | last_slate: %{}, concept_counts: %{}, sense_counts: %{}, window: []}}
+  end
+
+  defp status_from_state(%{} = state) do
+    last_slate = Map.get(state, :last_slate, %{})
+    window = Map.get(state, :window, [])
+    concept_counts = Map.get(state, :concept_counts, %{})
+    sense_counts = Map.get(state, :sense_counts, %{})
+
+    %{
+      region: Map.get(state, :region, :atl),
+      status: :up,
+      keep: Map.get(state, :keep, 0),
+      window_count: length(List.wrap(window)),
+      concept_count: map_size(concept_counts),
+      sense_count: map_size(sense_counts),
+      last_winner_count: Map.get(last_slate, :winner_count, 0),
+      last_concept_count: last_slate |> Map.get(:by_norm, %{}) |> map_size(),
+      last_sense_count: last_slate |> Map.get(:by_id, %{}) |> map_size()
+    }
   end
 
   # ── Pure reducers (no server) ───────────────────────────────────────────
@@ -473,8 +499,8 @@ defmodule Brain.ATL do
   @spec attach_lifg_pairs(map(), keyword()) :: map()
   def attach_lifg_pairs(si, opts \\ []) when is_map(si) do
     if Keyword.get(opts, :derive_lifg_pairs?, true) do
-      tokens = Map.get(si, :tokens, [])
-      slate = Map.get(si, :atl_slate, %{})
+      tokens = si |> Map.get(:tokens, []) |> list_or_empty()
+      slate = si |> Map.get(:atl_slate, %{}) |> map_or_empty()
       winners = Map.get(slate, :winners, [])
 
       pairs_rich_or_tuples =
@@ -545,13 +571,15 @@ defmodule Brain.ATL do
           |> Enum.group_by(fn {ti, _} -> ti end, fn {_ti, id} -> id end)
 
         evidence1 =
-          (Map.get(si, :evidence) || %{})
+          si
+          |> Map.get(:evidence, %{})
+          |> map_or_empty()
           |> Map.put(:lifg_pairs, pairs_simple)
           |> Map.put(:lifg_pairs_by_token, by_token)
           |> maybe_put(:lifg_pairs_rich, pairs_rich, not Enum.empty?(pairs_rich))
 
         trace1 =
-          (Map.get(si, :trace) || []) ++
+          (si |> Map.get(:trace, []) |> list_or_empty()) ++
             [
               {:lifg_pairs, %{count: length(pairs_simple), rich: length(pairs_rich)}}
             ]
@@ -572,6 +600,12 @@ defmodule Brain.ATL do
 
   defp maybe_put(map, _k, _v, false), do: map
   defp maybe_put(map, k, v, true), do: Map.put(map, k, v)
+
+  defp map_or_empty(%{} = map), do: map
+  defp map_or_empty(_), do: %{}
+
+  defp list_or_empty(list) when is_list(list), do: list
+  defp list_or_empty(_), do: []
 
   # (derive_lifg_pairs/3 and helpers remain unchanged)
   defp derive_lifg_pairs(winners, tokens, cells) when is_list(winners) and is_list(tokens) do

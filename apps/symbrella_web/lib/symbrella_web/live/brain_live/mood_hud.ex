@@ -10,6 +10,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   """
 
   use SymbrellaWeb, :html
+
   @defaults %{
     levels: %{
       da: 0.35,
@@ -234,12 +235,16 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     derived = Map.get(mood, :derived, @defaults.derived)
     tone = Map.get(mood, :tone, @defaults.tone)
     tone_since = Map.get(mood, :tone_since, @defaults.tone_since)
+    pressure_label = Map.get(mood, :pressure_label, :baseline)
+    mood_trace = Map.get(mood, :mood_trace, [])
 
     mood = %{
       levels: levels,
       derived: derived,
       tone: tone,
-      tone_since: tone_since
+      tone_since: tone_since,
+      pressure_label: pressure_label,
+      mood_trace: mood_trace
     }
 
     socket
@@ -247,6 +252,8 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     |> Phoenix.Component.assign(:mood_derived, derived)
     |> Phoenix.Component.assign(:mood_tone, tone)
     |> Phoenix.Component.assign(:mood_tone_since, tone_since)
+    |> Phoenix.Component.assign(:mood_pressure_label, pressure_label)
+    |> Phoenix.Component.assign(:mood_trace, mood_trace)
     |> Phoenix.Component.assign(:mood, mood)
   end
 
@@ -312,7 +319,10 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
           mood_map,
           :tone_since,
           Map.get(mood_map, "tone_since", prev_since)
-        )
+        ),
+      pressure_label:
+        Map.get(mood_map, :pressure_label, Map.get(mood_map, "pressure_label", :baseline)),
+      mood_trace: Map.get(mood_map, :mood_trace, Map.get(mood_map, "mood_trace", []))
     }
   end
 
@@ -364,14 +374,41 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
       levels: levels,
       derived: derived,
       tone: tone,
-      tone_since: prev_since
+      tone_since: prev_since,
+      pressure_label: Map.get(meta, :pressure_label, Map.get(meta, "pressure_label", :baseline)),
+      mood_trace:
+        Map.get(meta, :mood_trace, Map.get(meta, "mood_trace")) ||
+          recent_trace_from_telemetry(prev_mood, levels, derived, tone, meas, meta)
     }
+  end
+
+  defp recent_trace_from_telemetry(prev_mood, levels, derived, tone, meas, meta) do
+    prev_levels = Map.get(prev_mood, :levels, @defaults.levels)
+
+    entry = %{
+      source: Map.get(meta, :source, Map.get(meta, "source", :telemetry)),
+      cause: Map.get(meta, :cause, Map.get(meta, "cause", :update)),
+      pressure_label: Map.get(meta, :pressure_label, Map.get(meas, :pressure_label, :baseline)),
+      tone: tone,
+      mood: derived,
+      deltas: %{
+        da: number(Map.get(levels, :da, Map.get(levels, "da"))) - number(prev_levels[:da]),
+        "5ht":
+          number(Map.get(levels, :"5ht", Map.get(levels, "5ht"))) - number(prev_levels[:"5ht"]),
+        glu: number(Map.get(levels, :glu, Map.get(levels, "glu"))) - number(prev_levels[:glu]),
+        ne: number(Map.get(levels, :ne, Map.get(levels, "ne"))) - number(prev_levels[:ne])
+      }
+    }
+
+    [entry | Map.get(prev_mood, :mood_trace, [])]
+    |> Enum.take(5)
   end
 
   # Take derived indices and turn them into a tone, mirroring MoodCore.choose_tone/1
   defp derive_tone_from_derived(%{vigilance: vig, inhibition: inh, exploration: exp}, _fallback) do
     cond do
       vig > 0.65 -> :deescalate
+      vig >= 0.50 and inh <= 0.55 -> :cautious
       inh > 0.65 and exp < 0.35 -> :cool
       exp > 0.45 and inh >= 0.40 -> :warm
       true -> :neutral
@@ -420,6 +457,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   defp tone_rank(:neutral), do: 0
   defp tone_rank(:warm), do: 1
   defp tone_rank(:cool), do: 1
+  defp tone_rank(:cautious), do: 1
   defp tone_rank(:deescalate), do: 2
   defp tone_rank(_), do: 0
 
@@ -433,6 +471,9 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
 
   defp tone_class(:deescalate),
     do: "border-red-400 text-red-700"
+
+  defp tone_class(:cautious),
+    do: "border-amber-400 text-amber-700"
 
   # Backwards-compat / legacy names if anything else sets them
   defp tone_class(:positive),
@@ -449,6 +490,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     case normalize_tone(tone) do
       :warm -> "bg-amber-400 dark:bg-amber-300"
       :cool -> "bg-sky-400 dark:bg-sky-300"
+      :cautious -> "bg-amber-500 dark:bg-amber-300"
       :deescalate -> "bg-rose-400 dark:bg-rose-300"
       :neutral -> "bg-zinc-400 dark:bg-zinc-300"
     end
@@ -458,6 +500,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     case normalize_tone(tone) do
       :warm -> "Warm"
       :cool -> "Cool"
+      :cautious -> "Cautious"
       :deescalate -> "De-escalate"
       :neutral -> "Neutral"
     end
@@ -470,6 +513,7 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
     case t |> String.trim() |> String.downcase() do
       "warm" -> :warm
       "cool" -> :cool
+      "cautious" -> :cautious
       "deescalate" -> :deescalate
       "de-escalate" -> :deescalate
       "de_escalate" -> :deescalate
@@ -479,6 +523,9 @@ defmodule SymbrellaWeb.BrainLive.MoodHud do
   end
 
   defp normalize_tone(_), do: :neutral
+
+  defp number(value) when is_number(value), do: value * 1.0
+  defp number(_), do: 0.0
 
   defp fmt(nil), do: "—"
 

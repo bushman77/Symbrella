@@ -40,7 +40,65 @@ defmodule Db.EpisodesTest do
     assert {:ok, %Episode{} = ep} = Episodes.write_episode(si)
     assert ep.tokens == ["order", "adapter", "maple"]
     assert ep.token_count == 3
+    assert ep.sentence == "Order adapter maple"
+    assert ep.normalized_text == "order adapter maple"
+    assert ep.intent == "purchase"
     refute is_nil(ep.embedding)
+  end
+
+  test "episodes always store an intent fallback" do
+    assert {:ok, %Episode{} = ep} =
+             Episodes.write_episode(%{
+               tokens: ["unclear", "thing"],
+               sentence: "unclear thing"
+             })
+
+    assert ep.intent == "unknown"
+  end
+
+  test "hippocampus payloads coerce atom intents before insert" do
+    assert {:ok, %Episode{} = ep} =
+             Episode.insert(%{
+               slate: %{
+                 winners: [%{lemma: "run around", norm: "run around"}]
+               },
+               meta: %{
+                 sentence: "run around and poop",
+                 intent: :unknown
+               },
+               norms: ["run around"]
+             })
+
+    assert ep.sentence == "run around and poop"
+    assert ep.intent == "unknown"
+    assert ep.tokens == ["run around"]
+  end
+
+  test "Episode.list_all/0 returns persisted episodes newest first" do
+    assert {:ok, old} =
+             Episode.insert(%{
+               si: %{sentence: "old episode"},
+               tokens: ["old"],
+               tags: ["list_all"]
+             })
+
+    Process.sleep(2)
+
+    assert {:ok, new} =
+             Episode.insert(%{
+               si: %{sentence: "new episode"},
+               tokens: ["new"],
+               tags: ["list_all"]
+             })
+
+    assert new.sentence == "new episode"
+    assert new.normalized_text == "new episode"
+
+    ids = Episode.list_all() |> Enum.map(& &1.id)
+
+    assert new.id in ids
+    assert old.id in ids
+    assert Enum.find_index(ids, &(&1 == new.id)) < Enum.find_index(ids, &(&1 == old.id))
   end
 
   test "write_episode/2 (async) inserts without embedding, update_embedding/2 patches later" do

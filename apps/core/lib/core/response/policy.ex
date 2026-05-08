@@ -378,7 +378,7 @@ defmodule Core.Response.Policy do
     t = dn(t)
 
     Regex.match?(
-      ~r/\b(symbrella|lifg|working memory|wm|hippocampus|pmtg|amygdala|brain dashboard|episodes?)\b/i,
+      ~r/\b(symbrella|lifg|working memory|wm|hippocampus|pmtg|amygdala|brain dashboard|episodes?|self[-\s]?portrait|self[-\s]?state|self[-\s]?model)\b/i,
       t
     )
   end

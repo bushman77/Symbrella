@@ -223,6 +223,34 @@ defmodule Core.Response.PolicyTest do
   end
 
   describe "decide/1 – calm explainer profile" do
+    test "self portrait question is recognized as brain meta" do
+      f =
+        features(%{
+          intent: :question,
+          intent_in: :question,
+          text: "how do we get your self portrait?",
+          vig: 0.35,
+          vigilance_bucket: :normal,
+          risk_bucket: :low,
+          benign?: true,
+          hostile?: false,
+          confidence_bucket: :med
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.mode == :explainer
+      assert decision.action == :offer_options
+      assert decision.tone == :warm
+
+      assert %{
+               profile: :calm_explainer,
+               vigilance: :normal,
+               conf: :med,
+               confidence_bucket: :med
+             } = decision.scores
+    end
+
     test "meta explainer about Symbrella brain chooses explainer mode with calm_explainer profile" do
       f =
         features(%{

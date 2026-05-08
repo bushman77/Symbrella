@@ -31,9 +31,21 @@ defmodule Db.Episode do
 
   schema "episodes" do
     field(:user_id, :binary_id)
+    field(:session_id, :string)
+    field(:conversation_id, :string)
+    field(:source, :string)
+    field(:role, :string)
+    field(:sentence, :string)
+    field(:normalized_text, :string)
+    field(:intent, :string)
+    field(:confidence, :float)
     field(:tokens, {:array, :string}, default: [])
     field(:token_count, :integer, default: 0)
+    field(:winners, :map, default: %{})
+    field(:affect, :map, default: %{})
+    field(:uncertainty, :float)
     field(:si, :map, default: %{})
+    field(:meta, :map, default: %{})
     field(:embedding, Pgvector.Ecto.Vector)
     field(:tags, {:array, :string}, default: [])
     timestamps(type: :naive_datetime_usec)
@@ -49,11 +61,35 @@ defmodule Db.Episode do
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(ep, attrs) do
     ep
-    |> cast(attrs, [:user_id, :tokens, :token_count, :si, :tags, :embedding])
+    |> cast(attrs, [
+      :user_id,
+      :session_id,
+      :conversation_id,
+      :source,
+      :role,
+      :sentence,
+      :normalized_text,
+      :intent,
+      :confidence,
+      :tokens,
+      :token_count,
+      :winners,
+      :affect,
+      :uncertainty,
+      :si,
+      :meta,
+      :tags,
+      :embedding
+    ])
     |> validate_required([:tokens, :si])
+    |> normalize_compact_fields()
     |> normalize_tokens()
     |> normalize_si()
+    |> normalize_meta()
+    |> normalize_json_field(:winners, %{})
+    |> normalize_json_field(:affect, %{})
     |> put_token_count()
+    |> put_normalized_text()
     |> validate_embedding_shape()
   end
 
@@ -76,17 +112,20 @@ defmodule Db.Episode do
 
   def insert(%{slate: slate} = attrs) when is_map(attrs) do
     # Adapt Hippocampus payload → episodes row
-    si = build_si_from_slate(slate, Map.get(attrs, :meta, %{}))
+    meta = Map.get(attrs, :meta, Map.get(attrs, "meta", %{}))
+    si = build_si_from_slate(slate, meta)
     tokens = choose_tokens(attrs, si)
     tags = Map.get(attrs, :tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
     embedding = Map.get(attrs, :embedding)
 
     base =
-      %{
+      attrs
+      |> compact_attrs(si)
+      |> Map.merge(%{
         si: si,
         tokens: tokens,
         tags: tags
-      }
+      })
       |> maybe_put_embedding(embedding)
 
     base
@@ -296,6 +335,34 @@ defmodule Db.Episode do
 
   # ───────────────────────── Changeset helpers ─────────────────────────
 
+  defp normalize_compact_fields(changeset) do
+    changeset
+    |> stringify_field(:session_id)
+    |> stringify_field(:conversation_id)
+    |> stringify_field(:source)
+    |> stringify_field(:role)
+    |> stringify_field(:sentence)
+    |> stringify_field(:normalized_text)
+    |> stringify_field(:intent)
+  end
+
+  defp stringify_field(changeset, field) do
+    case get_change(changeset, field) do
+      nil ->
+        changeset
+
+      value ->
+        value =
+          value
+          |> to_string()
+          |> String.trim()
+
+        if value == "",
+          do: put_change(changeset, field, nil),
+          else: put_change(changeset, field, value)
+    end
+  end
+
   defp normalize_tokens(changeset) do
     case get_change(changeset, :tokens) do
       nil ->
@@ -324,9 +391,51 @@ defmodule Db.Episode do
     end
   end
 
+  defp normalize_meta(changeset) do
+    case get_change(changeset, :meta) do
+      nil ->
+        changeset
+
+      %{} = meta ->
+        put_change(changeset, :meta, to_plain_map(meta))
+
+      other ->
+        add_error(changeset, :meta, "must be a map, got: #{inspect(other)}")
+    end
+  end
+
+  defp normalize_json_field(changeset, field, default) do
+    case get_change(changeset, field, get_field(changeset, field)) do
+      nil ->
+        put_change(changeset, field, default)
+
+      value when is_map(value) or is_list(value) ->
+        put_change(changeset, field, to_plain_map(value))
+
+      other ->
+        add_error(changeset, field, "must be a JSON map/list, got: #{inspect(other)}")
+    end
+  end
+
   defp put_token_count(changeset) do
     tokens = get_field(changeset, :tokens) || []
     put_change(changeset, :token_count, length(tokens))
+  end
+
+  defp put_normalized_text(changeset) do
+    existing = get_field(changeset, :normalized_text)
+    sentence = get_field(changeset, :sentence)
+
+    cond do
+      is_binary(existing) and existing != "" ->
+        changeset
+
+      is_binary(sentence) and sentence != "" ->
+        put_change(changeset, :normalized_text, normalize_text(sentence))
+
+      true ->
+        changeset
+    end
   end
 
   defp validate_embedding_shape(changeset) do
@@ -371,11 +480,15 @@ defmodule Db.Episode do
   # ───────────────────────── Normalizers & builders ─────────────────────────
 
   defp normalize_direct_attrs(attrs) do
-    %{
+    si = Map.get(attrs, :si) || Map.get(attrs, "si") || %{}
+    compact = compact_attrs(attrs, si)
+
+    compact
+    |> Map.merge(%{
       si: Map.get(attrs, :si) || Map.get(attrs, "si") || %{},
       tokens: attrs |> Map.get(:tokens, Map.get(attrs, "tokens", [])) |> ensure_string_list(),
       tags: attrs |> Map.get(:tags, Map.get(attrs, "tags", [])) |> ensure_string_list()
-    }
+    })
     |> maybe_put_embedding(Map.get(attrs, :embedding, Map.get(attrs, "embedding")))
   end
 
@@ -397,6 +510,108 @@ defmodule Db.Episode do
     }
   end
 
+  defp compact_attrs(attrs, si) do
+    meta = Map.get(attrs, :meta) || Map.get(attrs, "meta") || si_map_get(si, :meta, %{})
+    slate = Map.get(attrs, :slate) || Map.get(attrs, "slate") || si_map_get(si, :slate, %{})
+
+    sentence =
+      first_present([
+        map_get_any(attrs, :sentence),
+        map_get_any(si, :sentence),
+        map_get_any(meta, :sentence)
+      ])
+
+    intent =
+      first_present([
+        map_get_any(attrs, :intent),
+        map_get_any(si, :intent),
+        map_get_any(meta, :intent)
+      ])
+
+    confidence =
+      first_number([
+        map_get_any(attrs, :confidence),
+        map_get_any(si, :confidence),
+        map_get_any(meta, :confidence)
+      ])
+
+    %{
+      user_id: map_get_any(attrs, :user_id),
+      session_id:
+        first_present([
+          map_get_any(attrs, :session_id),
+          map_get_any(si, :session_id),
+          map_get_any(meta, :session_id)
+        ]),
+      conversation_id:
+        first_present([
+          map_get_any(attrs, :conversation_id),
+          map_get_any(si, :conversation_id),
+          map_get_any(meta, :conversation_id)
+        ]),
+      source:
+        first_present([
+          map_get_any(attrs, :source),
+          map_get_any(si, :source),
+          map_get_any(meta, :source)
+        ]),
+      role:
+        first_present([
+          map_get_any(attrs, :role),
+          map_get_any(si, :role),
+          map_get_any(meta, :role)
+        ]),
+      sentence: sentence,
+      normalized_text:
+        first_present([map_get_any(attrs, :normalized_text), normalize_text(sentence)]),
+      intent: intent || "unknown",
+      confidence: confidence,
+      winners: compact_winners(map_get_any(attrs, :winners) || map_get_any(slate, :winners)),
+      affect:
+        map_get_any(attrs, :affect) ||
+          map_get_any(si, :emotion) ||
+          map_get_any(meta, :emotion) ||
+          %{},
+      uncertainty:
+        first_number([
+          map_get_any(attrs, :uncertainty),
+          map_get_any(si, :uncertainty),
+          map_get_any(meta, :uncertainty)
+        ]),
+      meta: compact_meta(meta)
+    }
+  end
+
+  defp compact_meta(meta) when is_map(meta) do
+    meta
+    |> Map.take([
+      :kind,
+      "kind",
+      :key,
+      "key",
+      :value,
+      "value",
+      :subject,
+      "subject",
+      :self?,
+      "self?",
+      :autobiographical?,
+      "autobiographical?",
+      :response_tone,
+      "response_tone",
+      :response_meta,
+      "response_meta"
+    ])
+  end
+
+  defp compact_meta(_), do: %{}
+
+  defp compact_winners(%{"items" => items}) when is_list(items), do: %{"items" => items}
+  defp compact_winners(%{items: items}) when is_list(items), do: %{"items" => items}
+  defp compact_winners(list) when is_list(list), do: %{"items" => Enum.take(list, 12)}
+  defp compact_winners(%{} = map), do: map
+  defp compact_winners(_), do: %{}
+
   defp choose_tokens(attrs, si) do
     cond do
       is_list(attrs[:norms]) ->
@@ -410,6 +625,59 @@ defmodule Db.Episode do
 
       true ->
         []
+    end
+  end
+
+  defp map_get_any(map, key) when is_map(map) and is_atom(key) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
+
+  defp map_get_any(_, _), do: nil
+
+  defp si_map_get(map, key, default) when is_map(map) and is_atom(key) do
+    map_get_any(map, key) || default
+  end
+
+  defp si_map_get(_, _, default), do: default
+
+  defp first_present(values) when is_list(values) do
+    Enum.find_value(values, fn
+      nil ->
+        nil
+
+      value when is_binary(value) ->
+        value = String.trim(value)
+        if value == "", do: nil, else: value
+
+      value ->
+        value
+        |> to_string()
+        |> String.trim()
+        |> case do
+          "" -> nil
+          text -> text
+        end
+    end)
+  end
+
+  defp first_number(values) when is_list(values) do
+    Enum.find_value(values, fn
+      value when is_number(value) -> value * 1.0
+      _ -> nil
+    end)
+  end
+
+  defp normalize_text(nil), do: nil
+
+  defp normalize_text(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+    |> case do
+      "" -> nil
+      text -> text
     end
   end
 
@@ -461,6 +729,19 @@ defmodule Db.Episode do
     from(e in __MODULE__,
       order_by: [desc: e.inserted_at],
       limit: ^limit
+    )
+    |> Db.all()
+  end
+
+  @doc """
+  Fetch all persisted episodes, newest first.
+  """
+  @spec list_all() :: [t()]
+  def list_all do
+    import Ecto.Query, only: [from: 2]
+
+    from(e in __MODULE__,
+      order_by: [desc: e.inserted_at]
     )
     |> Db.all()
   end

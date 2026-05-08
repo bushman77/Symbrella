@@ -348,6 +348,7 @@ config :core, :tokenizer_defaults,
 
 - **Guardrails:** `SYMBRELLA_PROJECT_GUARDRAILS.md`
 - **Brain chain notes:** `README_BRAIN_CHAIN.md`
+- **Modulator-to-prompt contract:** `docs/modulator-to-prompt-contract.md`
 - **Agents overview:** `AGENTS.md`
 - **Resume playbook:** `PROJECT-RESUME-PLAYBOOK.md`
 

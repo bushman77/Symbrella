@@ -26,6 +26,18 @@ defmodule Brain.DmPFC do
           optional(:gain) => number()
         }
 
+  @doc "Return compact dashboard status for the pure dmPFC planner."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :dmpfc,
+      status: :available,
+      mode: :pure,
+      function: :calibrate_confidence,
+      telemetry: [[:brain, :dmpfc, :calibration]]
+    }
+  end
+
   @spec calibrate_confidence(ctx) :: %{confidence_scale: float(), acc_conflict_gain: float()}
   def calibrate_confidence(ctx) when is_map(ctx) do
     pred = clamp01(Map.get(ctx, :predicted_confidence, 0.5))

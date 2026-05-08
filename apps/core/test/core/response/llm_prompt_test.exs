@@ -70,12 +70,29 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "You are Symbrella."
     assert prompt =~ "brain-inspired, stateful assistant"
+    assert prompt =~ "local Symbrella umbrella"
     assert prompt =~ "Tone: warm, engaged, and encouraging."
 
     assert prompt =~
              "Use implementation behavior only when the user's current message explicitly asks for code"
 
     assert prompt =~ "Active concepts: working, memory, you."
+  end
+
+  test "build_system_prompt/4 prevents generic remote-server and no-memory claims" do
+    prompt =
+      LlmPrompt.build_system_prompt(
+        %{intent: :question, text: "what happens in your digital traces?"},
+        %{tone: :neutral, mode: :chat},
+        %{tone_hint: :neutral},
+        [%{id: "working memory|phrase|core", payload: %{lemma: "working memory"}}]
+      )
+
+    assert prompt =~ "Do not claim you are a remote-server model"
+    assert prompt =~ "Do not claim you have no memory or no traces"
+    assert prompt =~ "conversation context, working memory, episodic memory, database rows, logs"
+    assert prompt =~ "accept that local-runtime premise"
+    assert prompt =~ "Active concepts: working memory."
   end
 
   test "build_system_prompt/4 surfaces working-memory concepts ahead of filler terms when WM front is topic-first" do
@@ -151,7 +168,11 @@ defmodule Core.Response.LlmPromptTest do
         features: %{
           intent: :question,
           confidence_bucket: :low,
-          comprehension: %{degraded?: true, uncertain: ["referent"], reasons: [:weak_decision_rate_high]}
+          comprehension: %{
+            degraded?: true,
+            uncertain: ["referent"],
+            reasons: [:weak_decision_rate_high]
+          }
         },
         decision: %{tone: :neutral, mode: :coach},
         mood: %{},
@@ -185,6 +206,14 @@ defmodule Core.Response.LlmPromptTest do
             source: :brain,
             phase: :prompt_context,
             status: :ready,
+            pressure_label: :cautious_emergency_attention,
+            mood_trace: [
+              %{
+                source: :appraisal,
+                pressure_label: :cautious_emergency_attention,
+                deltas: %{ne: 0.06, "5ht": -0.04}
+              }
+            ],
             mood: %{exploration: 0.4, inhibition: 0.6, vigilance: 0.4, plasticity: 0.4},
             neuromodulators: %{
               dopamine: 0.4,
@@ -215,6 +244,8 @@ defmodule Core.Response.LlmPromptTest do
       })
 
     assert prompt =~ "Runtime state:"
+    assert prompt =~ "pressure_label=cautious_emergency_attention"
+    assert prompt =~ "mood_trace=:appraisal:cautious_emergency_attention:ne=+0.06,5ht=-0.04"
     assert prompt =~ "neuromodulators=da=0.4, 5ht=0.6, glu=0.4, ne=0.4"
     assert prompt =~ "lifg="
     assert prompt =~ "missing=65"

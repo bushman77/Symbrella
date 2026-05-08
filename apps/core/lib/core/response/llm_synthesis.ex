@@ -14,6 +14,7 @@ defmodule Core.Response.LlmSynthesis do
 
   alias Core.Telemetry
   alias Core.Response.LlmPrompt
+  alias Core.Response.SelfStateSummary
 
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
@@ -21,6 +22,7 @@ defmodule Core.Response.LlmSynthesis do
   @compile {:no_warn_undefined, Brain.Introspection}
   @compile {:no_warn_undefined, Brain.Introspect}
   @compile {:no_warn_undefined, Brain.MoodCore}
+  @compile {:no_warn_undefined, Brain.SelfPortrait}
 
   @timeout_ms 15_000
 
@@ -35,7 +37,6 @@ defmodule Core.Response.LlmSynthesis do
 
   # Toggle prompt logging (dev-only recommended):
   #   config :core, :log_llm_prompts?, true
-  @log_prompts? Application.compile_env(:core, :log_llm_prompts?, false)
 
   # Safety caps so logs don't explode.
   @max_system_chars 8_000
@@ -75,7 +76,7 @@ defmodule Core.Response.LlmSynthesis do
         history ++
         [%{"role" => "user", "content" => user_text}]
 
-    if @log_prompts? do
+    if log_prompts?() do
       log_prompt_bundle(messages, context)
     end
 
@@ -238,6 +239,10 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Prompt logging (safe + capped) ─────────────────────────────────────────
 
+  defp log_prompts? do
+    Application.get_env(:core, :log_llm_prompts?, false) == true
+  end
+
   defp log_prompt_bundle(messages, context) do
     req = :erlang.unique_integer([:positive])
     features = Map.get(context, :features, %{})
@@ -390,17 +395,47 @@ defmodule Core.Response.LlmSynthesis do
     mood = safe_mood_snapshot()
     lifg = safe_lifg_runtime()
     wm = wm_runtime(wm_items)
+    self_portrait = safe_self_portrait_snapshot()
 
-    %{
+    runtime = %{
       source: :brain,
       phase: :prompt_context,
       status: :ready,
       mood: mood_values(mood),
       neuromodulators: neuromodulator_values(mood),
       tone_hint: map_get(mood, :tone_hint),
+      pressure_label: map_get(mood, :pressure_label),
+      mood_trace: mood |> map_get(:mood_trace, []) |> List.wrap() |> Enum.take(3),
       wm: wm,
-      lifg: lifg
+      lifg: lifg,
+      self_portrait: self_portrait
     }
+
+    Map.put(
+      runtime,
+      :self_state_summary,
+      SelfStateSummary.prompt_line(%{
+        mood: mood,
+        self_portrait: self_portrait,
+        wm: %{wm: wm_items, cfg: %{capacity: map_get(wm, :capacity)}},
+        lifg: %{state: %{last: lifg}, running?: map_get(lifg, :running?)}
+      })
+    )
+  end
+
+  defp safe_self_portrait_snapshot do
+    if Code.ensure_loaded?(Brain.SelfPortrait) and
+         function_exported?(Brain.SelfPortrait, :snapshot, 0) do
+      try do
+        Brain.SelfPortrait.snapshot()
+      rescue
+        _ -> %{}
+      catch
+        :exit, _ -> %{}
+      end
+    else
+      %{}
+    end
   end
 
   defp safe_mood_snapshot do
@@ -418,7 +453,8 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp safe_lifg_runtime do
-    if Code.ensure_loaded?(Brain.Introspect) and function_exported?(Brain.Introspect, :snapshot, 1) do
+    if Code.ensure_loaded?(Brain.Introspect) and
+         function_exported?(Brain.Introspect, :snapshot, 1) do
       try do
         Brain.Introspect.snapshot(:lifg)
         |> lifg_runtime_from_snapshot()

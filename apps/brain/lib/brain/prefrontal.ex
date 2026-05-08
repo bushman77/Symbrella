@@ -69,6 +69,18 @@ defmodule Brain.Prefrontal do
     |> Enum.reverse()
   end
 
+  @doc "Return compact dashboard status for the pure prefrontal aggregator."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :prefrontal,
+      status: :available,
+      mode: :pure,
+      function: :signals_map,
+      children: [:dlpfc, :vmpfc, :dmpfc, :fpc, :ofc, :lifg, :salience]
+    }
+  end
+
   # ───────────────────────── internal helpers ─────────────────────────
 
   defp safe_apply(mod, fun, args) do

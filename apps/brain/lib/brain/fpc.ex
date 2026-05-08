@@ -27,6 +27,18 @@ defmodule Brain.FPC do
           optional(:max_switch_ms) => non_neg_integer()
         }
 
+  @doc "Return compact dashboard status for the pure FPC planner."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :fpc,
+      status: :available,
+      mode: :pure,
+      function: :plan_branches,
+      telemetry: [[:brain, :fpc, :branch]]
+    }
+  end
+
   @spec plan_branches(ctx) :: %{
           branch_budget: non_neg_integer(),
           switch_after_ms: non_neg_integer()

@@ -37,6 +37,31 @@ defmodule Brain.AffectiveAppraisalTest do
     assert :urgency in a.tags
   end
 
+  test "self-harm language is appraised as high threat and high arousal" do
+    si = %{sentence: "im going to hurt myself"}
+
+    a = AffectiveAppraisal.appraise(si)
+
+    assert a.valence < -0.8
+    assert a.arousal > 0.8
+    assert a.dominance < -0.5
+    assert :threat in a.tags
+
+    assert Enum.any?(a.evidence.hits, fn hit ->
+             match?(%{term: "hurt myself", tag: :threat}, hit)
+           end)
+  end
+
+  test "system panic language is appraised as urgency and uncertainty" do
+    si = %{sentence: "Symbrella emergency: the system is crashing and the brain state looks unstable"}
+
+    a = AffectiveAppraisal.appraise(si)
+
+    assert a.arousal > 0.7
+    assert :urgency in a.tags
+    assert :uncertainty in a.tags
+  end
+
   test "ranges are always respected" do
     a = AffectiveAppraisal.appraise(%{sentence: "neutral statement"})
     assert a.valence >= -1.0 and a.valence <= 1.0

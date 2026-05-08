@@ -127,6 +127,9 @@ signals. Tests use helpers in `apps/brain/test/support`.
 `apps/symbrella_web` consumes selected snapshots and telemetry for the `/brain`
 dashboard.
 
+For the current mood/personality/LLM prompting contract, see
+[`docs/modulator-to-prompt-contract.md`](../../docs/modulator-to-prompt-contract.md).
+
 ## Running Tests
 
 From the umbrella root:

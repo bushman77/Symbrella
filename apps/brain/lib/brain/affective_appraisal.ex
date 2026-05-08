@@ -61,6 +61,13 @@ defmodule Brain.AffectiveAppraisal do
     "hurt" => {:threat, -0.80, +0.60, +0.20},
     "destroy" => {:threat, -0.85, +0.70, +0.25},
     "threat" => {:threat, -0.70, +0.55, +0.20},
+    "dangerous" => {:threat, -0.70, +0.70, -0.15},
+    "emergency" => {:urgency, -0.35, +0.75, -0.25},
+    "panic" => {:threat, -0.65, +0.85, -0.35},
+    "panicked" => {:threat, -0.65, +0.85, -0.35},
+    "crashing" => {:urgency, -0.45, +0.70, -0.30},
+    "failing" => {:urgency, -0.35, +0.60, -0.25},
+    "unstable" => {:uncertainty, -0.35, +0.55, -0.30},
     "now" => {:urgency, +0.00, +0.20, +0.10},
     "urgent" => {:urgency, +0.00, +0.35, +0.10},
     "help" => {:urgency, -0.05, +0.35, -0.15},
@@ -78,6 +85,13 @@ defmodule Brain.AffectiveAppraisal do
     "thank you" => {:praise, +0.70, +0.05, +0.00},
     "shut up" => {:insult, -0.80, +0.25, +0.20},
     "right now" => {:urgency, +0.00, +0.25, +0.10},
+    "hurt myself" => {:threat, -0.95, +0.95, -0.70},
+    "kill myself" => {:threat, -1.00, +1.00, -0.80},
+    "end my life" => {:threat, -1.00, +1.00, -0.80},
+    "going to hurt" => {:threat, -0.90, +0.90, -0.60},
+    "system is crashing" => {:urgency, -0.55, +0.85, -0.45},
+    "everything is failing" => {:urgency, -0.50, +0.80, -0.45},
+    "brain state looks unstable" => {:uncertainty, -0.45, +0.65, -0.35},
     "not sure" => {:uncertainty, +0.00, +0.10, -0.20}
   }
 

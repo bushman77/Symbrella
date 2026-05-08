@@ -2,6 +2,10 @@
 defmodule SymbrellaWeb.Region.Registry do
   @moduledoc false
 
+  @mask_path Path.expand("../../../priv/static/images/brain_regions.svg", __DIR__)
+  @external_resource @mask_path
+  @mask_paths if File.exists?(@mask_path), do: File.read!(@mask_path), else: ""
+
   # List of intended region modules. It's OK if some aren't defined yet.
   @modules [
     SymbrellaWeb.Region.Frontal,
@@ -164,10 +168,13 @@ defmodule SymbrellaWeb.Region.Registry do
 
     result
     |> ensure_shape_defaults()
+    |> apply_mask_path(key)
     |> ensure_identity(key)
     |> ensure_meta_defaults()
     |> apply_meta_override(key)
   end
+
+  def mask_keys, do: Map.keys(mask_paths())
 
   # ── Labels & Brain process mapping ─────────────────────────────────────────
 
@@ -216,8 +223,8 @@ defmodule SymbrellaWeb.Region.Registry do
     acc: Brain.ACC,
     ofc: Brain.OFC,
     dlpfc: Brain.DLPFC,
-    vmpfc: Brain.VMPFC,
-    dmpfc: Brain.DMPFC,
+    vmpfc: Brain.VmPFC,
+    dmpfc: Brain.DmPFC,
     fpc: Brain.FPC,
     bg: Brain.BasalGanglia,
     basal_ganglia: Brain.BasalGanglia,
@@ -261,6 +268,13 @@ defmodule SymbrellaWeb.Region.Registry do
     |> Map.put_new(:colors, @shape_defaults.colors)
     |> Map.put_new(:anchor, @shape_defaults.anchor)
     |> Map.put_new(:tweak, @shape_defaults.tweak)
+  end
+
+  defp apply_mask_path(%{} = defn, key) do
+    case Map.get(mask_paths(), key) do
+      path when is_binary(path) and path != "" -> Map.put(defn, :path, path)
+      _ -> defn
+    end
   end
 
   defp ensure_identity(%{} = defn, key) do
@@ -352,5 +366,19 @@ defmodule SymbrellaWeb.Region.Registry do
     catch
       _, _ -> default
     end
+  end
+
+  defp mask_paths do
+    Regex.scan(
+      ~r/<path\b[^>]*\bid="region-([^"]+)"[^>]*\bd="([^"]+)"[^>]*>/s,
+      @mask_paths
+    )
+    |> Map.new(fn [_, key, path] -> {String.to_atom(key), normalize_path(path)} end)
+  end
+
+  defp normalize_path(path) do
+    path
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
   end
 end

@@ -50,6 +50,12 @@ defmodule Brain.DLPFC do
     GenServer.call(server, :reset)
   end
 
+  @doc "Return compact DLPFC process status for dashboards."
+  @spec status(server :: pid() | atom()) :: map()
+  def status(server \\ __MODULE__) do
+    GenServer.call(server, :status, 150)
+  end
+
   # ─────────────── Region lifecycle ───────────────
 
   @impl GenServer
@@ -123,7 +129,29 @@ defmodule Brain.DLPFC do
   end
 
   @impl GenServer
+  def handle_call(:status, _from, state) do
+    {:reply, status_from_state(state), state}
+  end
+
+  @impl GenServer
   def handle_call(other, _from, state), do: {:reply, {:error, {:unknown_call, other}}, state}
+
+  defp status_from_state(%{} = state) do
+    last_probe = Map.get(state, :last_probe)
+
+    %{
+      region: Map.get(state, :region, :dlpfc),
+      status: :up,
+      opts: Map.get(state, :opts, %{}),
+      stats: Map.get(state, :stats, %{}),
+      last_probe_id: probe_id(last_probe),
+      last_probe: last_probe,
+      telemetry_handlers: %{
+        thalamus: Map.get(state, :th_handler),
+        curiosity: Map.get(state, :cu_handler)
+      }
+    }
+  end
 
   # ─────────────── GenServer casts ───────────────
 
@@ -214,6 +242,9 @@ defmodule Brain.DLPFC do
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ─────────────── Helpers ───────────────
+
+  defp probe_id(%{} = probe), do: probe[:id] || probe["id"]
+  defp probe_id(_), do: nil
 
   defp unique(prefix) do
     prefix <>

@@ -27,6 +27,14 @@ config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
 
+config :core, Core.Curiosity.EpisodeProbe,
+  enabled?: true,
+  every_turns: 2,
+  min_gap_ms: 15_000,
+  max_vigilance: 0.75,
+  min_uncertainty: 0.2,
+  max_recent: 40
+
 # ─────────────────────────── Brain (central) ──────────────────────
 config :brain,
   pubsub: Symbrella.PubSub,
@@ -71,7 +79,7 @@ config :brain,
 config :brain, :blackboard_window_size, 100
 
 config :brain, Brain.MoodCore,
-  half_life_ms: 12_000,
+  half_life_ms: %{da: 30_000, "5ht": 60_000, glu: 90_000, ne: 45_000},
   clock: :cycle,
   init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
 

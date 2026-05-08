@@ -17,10 +17,10 @@ config :brain, Brain.MoodCore,
   },
   # Half-life (ms) per neuromodulator — how fast it drifts back to baseline
   half_life_ms: %{
-    da: 18_000,
-    "5ht": 14_000,
-    glu: 55_000,
-    ne: 14_000
+    da: 30_000,
+    "5ht": 60_000,
+    glu: 90_000,
+    ne: 45_000
   },
   # Max delta we allow per “tick” (MoodCore will clamp)
   max_delta_per_tick: 0.06,

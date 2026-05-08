@@ -828,14 +828,19 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:levels, Map.get(mood, :levels, %{}) || %{})
       |> assign(:derived, Map.get(mood, :derived, %{}) || %{})
       |> assign(:tone, Map.get(mood, :tone, :neutral) || :neutral)
+      |> assign(:pressure_label, Map.get(mood, :pressure_label, :baseline) || :baseline)
+      |> assign(:mood_trace, mood |> Map.get(:mood_trace, []) |> List.wrap() |> Enum.take(5))
 
     ~H"""
     <div class="border rounded-xl p-4 shadow-sm">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold">Mood</h2>
-        <span class={["text-xs px-2 py-1 rounded border", tone_class(@tone)]}>
-          {to_string(@tone)}
-        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-zinc-500">{to_string(@pressure_label)}</span>
+          <span class={["text-xs px-2 py-1 rounded border", tone_class(@tone)]}>
+            {to_string(@tone)}
+          </span>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
@@ -853,6 +858,15 @@ defmodule SymbrellaWeb.BrainHTML do
           <.kv label="Inhibition" value={fmt(@derived[:inhibition])} />
           <.kv label="Vigilance" value={fmt(@derived[:vigilance])} />
           <.kv label="Plasticity" value={fmt(@derived[:plasticity])} />
+        </div>
+      </div>
+
+      <div :if={@mood_trace != []} class="mt-4 border-t pt-3">
+        <h3 class="text-sm text-zinc-500 mb-1">Recent pressure</h3>
+        <div class="space-y-1">
+          <div :for={entry <- @mood_trace} class="text-xs font-mono text-zinc-600">
+            {format_mood_trace(entry)}
+          </div>
         </div>
       </div>
     </div>
@@ -875,6 +889,7 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp tone_class(:positive), do: "border-green-400 text-green-600"
   defp tone_class(:negative), do: "border-red-400 text-red-600"
+  defp tone_class(:cautious), do: "border-amber-400 text-amber-700"
   defp tone_class(_), do: "border-zinc-300 text-zinc-600"
 
   defp fmt(nil), do: "—"
@@ -883,6 +898,35 @@ defmodule SymbrellaWeb.BrainHTML do
     do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
 
   defp fmt(v), do: to_string(v)
+
+  defp format_mood_trace(%{} = entry) do
+    source = Map.get(entry, :source) || Map.get(entry, "source")
+    pressure = Map.get(entry, :pressure_label) || Map.get(entry, "pressure_label")
+    deltas = Map.get(entry, :deltas) || Map.get(entry, "deltas") || %{}
+
+    delta_text =
+      [:ne, :"5ht", :da, :glu]
+      |> Enum.map(fn key ->
+        value = Map.get(deltas, key, Map.get(deltas, Atom.to_string(key)))
+        if is_number(value), do: "#{key}=#{format_signed(value)}", else: nil
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(" ")
+
+    [inspect(source), pressure && "-> #{pressure}", delta_text]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
+  end
+
+  defp format_mood_trace(_), do: ""
+
+  defp format_signed(value) when is_number(value) do
+    rounded = Float.round(value * 1.0, 2)
+    sign = if rounded >= 0, do: "+", else: ""
+    sign <> :erlang.float_to_binary(rounded, decimals: 2)
+  end
+
+  defp format_signed(_), do: "n/a"
 
   defp fmt_pct(nil), do: "--"
   defp fmt_pct(v) when is_integer(v), do: "#{v}%"

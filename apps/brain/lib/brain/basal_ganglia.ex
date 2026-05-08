@@ -19,6 +19,18 @@ defmodule Brain.BasalGanglia do
   """
 
   @type decision :: :allow | :boost | :block
+
+  @doc "Return compact dashboard status for the stateless basal ganglia gate."
+  @spec status() :: map()
+  def status do
+    %{
+      region: :basal_ganglia,
+      status: :available,
+      mode: :pure,
+      function: :decide
+    }
+  end
+
   @spec decide([map()], map(), map(), map()) :: {decision(), float()}
   def decide(wm, cand, attn, cfg)
       when is_list(wm) and is_map(cand) and is_map(attn) and is_map(cfg) do

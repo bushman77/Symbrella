@@ -41,13 +41,13 @@ config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
 
-config :core, :log_llm_prompts?, true
+config :core, :log_llm_prompts?, false
 
 config :brain, Brain.CycleClock, hz: 20
 
 config :brain, Brain.MoodCore,
   clock: :cycle,
-  half_life_ms: 12_000,
+  half_life_ms: %{da: 30_000, "5ht": 60_000, glu: 90_000, ne: 45_000},
   init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
 
 # config/dev.exs (and prod.exs)

@@ -59,6 +59,43 @@ defmodule Brain.MoodCoreTest do
     assert s1.levels.ne < s0.levels.ne
   end
 
+  test "apply_appraisal synchronously raises vigilance for crisis language" do
+    before = Brain.MoodCore.snapshot()
+
+    after_ =
+      %{sentence: "im going to hurt myself"}
+      |> Brain.AffectiveAppraisal.appraise()
+      |> Brain.MoodCore.apply_appraisal()
+
+    assert after_.levels.ne > before.levels.ne
+    assert after_.levels[:"5ht"] < before.levels[:"5ht"]
+    assert after_.mood.vigilance > before.mood.vigilance
+    assert after_.tone_hint in [:deescalate, :cautious, :neutral]
+    assert after_.pressure_label in [:deescalation_pressure, :cautious_emergency_attention]
+    assert [%{source: :appraisal, pressure_label: label} | _] = after_.mood_trace
+    assert label in [:deescalation_pressure, :cautious_emergency_attention]
+  end
+
+  test "apply_intent is synchronous so immediate snapshots see the turn bump" do
+    before = Brain.MoodCore.snapshot()
+
+    returned = Brain.MoodCore.apply_intent(:question, 1.0)
+    after_ = Brain.MoodCore.snapshot()
+
+    assert returned.levels.da > before.levels.da
+    assert returned.levels.ne > before.levels.ne
+    assert after_.levels.da == returned.levels.da
+    assert after_.levels.ne == returned.levels.ne
+  end
+
+  test "moderate vigilance with reduced inhibition yields cautious middle tone" do
+    snap =
+      Brain.MoodCore.configure(init: %{da: 0.5, "5ht": 0.48, glu: 0.5, ne: 0.53})
+
+    assert snap.tone_hint == :cautious
+    assert snap.pressure_label == :cautious_emergency_attention
+  end
+
   test "shock and saturation telemetry fire" do
     parent = self()
 

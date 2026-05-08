@@ -3,6 +3,7 @@ defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
 
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
+  alias SymbrellaWeb.ChatHistory
   alias Core.Response
   alias Core.LexicalExplain
 
@@ -16,15 +17,14 @@ defmodule SymbrellaWeb.HomeLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    initial = [
-      %{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}
-    ]
+    initial = initial_messages()
 
-    initial_text_by_id = %{"m1" => "Welcome to Symbrella chat  👋"}
+    initial_text_by_id = Map.new(initial, fn msg -> {msg.id, msg.text} end)
 
-    initial_explain_by_id = %{
-      "m1" => ChatHTML.explain_payload_for(%{id: "m1", text: "Welcome to Symbrella chat  👋"})
-    }
+    initial_explain_by_id =
+      Map.new(initial, fn msg ->
+        {msg.id, ChatHTML.explain_payload_for(%{id: msg.id, text: msg.text})}
+      end)
 
     {:ok,
      socket
@@ -79,6 +79,8 @@ defmodule SymbrellaWeb.HomeLive do
           )
           |> push_event("chat:scroll", %{to: "composer"})
 
+        ChatHistory.append(msg)
+
         task =
           Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
             build_planned_reply(text, socket.assigns.session_id)
@@ -119,6 +121,9 @@ defmodule SymbrellaWeb.HomeLive do
         bot_text = "(stopped)"
 
         payload = ChatHTML.explain_payload_for(%{id: bot_id, text: bot_text})
+        stopped = %{id: bot_id, role: :assistant, text: bot_text}
+
+        ChatHistory.append(stopped)
 
         {:noreply,
          socket
@@ -129,7 +134,7 @@ defmodule SymbrellaWeb.HomeLive do
            message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
            explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
          )
-         |> stream_insert(:messages, %{id: bot_id, role: :assistant, text: bot_text})
+         |> stream_insert(:messages, stopped)
          |> push_event("chat:scroll", %{to: "composer"})}
 
       _ ->
@@ -175,6 +180,8 @@ defmodule SymbrellaWeb.HomeLive do
       meta: meta
     }
 
+    ChatHistory.append(bot)
+
     {:noreply,
      socket
      |> assign(
@@ -210,6 +217,8 @@ defmodule SymbrellaWeb.HomeLive do
           text: bot_text
         }
 
+        ChatHistory.append(msg)
+
         {:noreply,
          socket
          |> assign(
@@ -229,6 +238,13 @@ defmodule SymbrellaWeb.HomeLive do
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
 
+  defp initial_messages do
+    case ChatHistory.list() do
+      [] -> [%{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}]
+      messages -> messages
+    end
+  end
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Planner integration
   # ─────────────────────────────────────────────────────────────────────────────
@@ -237,7 +253,8 @@ defmodule SymbrellaWeb.HomeLive do
       Core.resolve_input(user_text,
         mode: :prod,
         enrich_lexicon?: true,
-        lexicon_stage?: true
+        lexicon_stage?: true,
+        session_id: session_id
       )
       |> Map.put(:session_id, session_id)
 

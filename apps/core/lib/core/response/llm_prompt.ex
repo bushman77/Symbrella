@@ -91,6 +91,7 @@ defmodule Core.Response.LlmPrompt do
     self_model = prompt_self_model(features, decision, mood)
     runtime_state = prompt_runtime_state(features, decision, mood)
     comprehension = prompt_comprehension(features, decision, mood)
+    control_signals = prompt_control_signals(features, decision, mood)
     profile_context = %{runtime_state: runtime_state, comprehension: comprehension}
     personality = Personality.decide(features, decision, mood, wm_items, profile_context)
     affect = Affect.simulate(personality, runtime_state || %{}, comprehension || %{}, features)
@@ -98,7 +99,11 @@ defmodule Core.Response.LlmPrompt do
     [
       "You are Symbrella.",
       "You are a brain-inspired, stateful assistant whose responses are guided by current runtime evidence.",
+      "You run as part of the user's local Symbrella umbrella when this Phoenix app is running on their machine.",
       "Use mood, working memory, self-state, intent, policy decision, and recent conversation as behavioral context.",
+      "Do not claim you are a remote-server model, cloud service, or generic hosted chatbot unless runtime evidence explicitly says so.",
+      "Do not claim you have no memory or no traces. Instead, distinguish conversation context, working memory, episodic memory, database rows, logs, and temporary runtime traces when relevant.",
+      "When the user says they installed or run Symbrella locally, accept that local-runtime premise and answer from Symbrella's architecture.",
       "Answer ordinary everyday questions as ordinary conversation.",
       "Do not roleplay as a generic coding assistant unless the user's request is actually about code.",
       "Do not describe Symbrella as a generic tool when answering questions about Symbrella's own state.",
@@ -112,6 +117,7 @@ defmodule Core.Response.LlmPrompt do
       self_model_context(self_model),
       runtime_state_context(runtime_state),
       comprehension_context(comprehension),
+      control_signals_context(control_signals),
       decision_context(intent, mode, action, skill, guardrail?),
       personality_context(personality),
       affect_context(affect),
@@ -179,6 +185,13 @@ defmodule Core.Response.LlmPrompt do
       map_get(mood, :comprehension)
   end
 
+  defp prompt_control_signals(features, decision, mood) do
+    map_get(features, :control_signals) ||
+      map_get(decision, :control_signals) ||
+      map_get(mood, :control_signals) ||
+      features |> map_get(:prefrontal, %{}) |> map_get(:signals)
+  end
+
   defp self_model_context(nil), do: ""
   defp self_model_context(model) when model == %{}, do: ""
 
@@ -224,16 +237,63 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add_present("phase", state_value(state, :phase))
       |> maybe_add_present("status", state_value(state, :status))
       |> maybe_add_present("tone_hint", state_value(state, :tone_hint))
+      |> maybe_add_present("pressure_label", state_value(state, :pressure_label))
+      |> maybe_add_mood_trace(state_value(state, :mood_trace))
       |> maybe_add_runtime_mood(state_value(state, :mood))
       |> maybe_add_neuromodulators(state_value(state, :neuromodulators))
       |> maybe_add_runtime_wm(state_value(state, :wm))
       |> maybe_add_lifg_runtime(state_value(state, :lifg))
+      |> maybe_add_present("self_state_summary", state_value(state, :self_state_summary))
 
     case notes do
       [] -> ""
       _ -> "Runtime state: #{Enum.join(notes, "; ")}."
     end
   end
+
+  defp maybe_add_mood_trace(list, trace) when is_list(trace) and trace != [] do
+    items =
+      trace
+      |> Enum.take(3)
+      |> Enum.map(&summarize_mood_trace_entry/1)
+      |> Enum.reject(&(&1 == ""))
+
+    case items do
+      [] -> list
+      _ -> list ++ ["mood_trace=#{Enum.join(items, " | ")}"]
+    end
+  end
+
+  defp maybe_add_mood_trace(list, _), do: list
+
+  defp summarize_mood_trace_entry(%{} = entry) do
+    source = map_get(entry, :source)
+    pressure = map_get(entry, :pressure_label)
+    deltas = map_get(entry, :deltas, %{})
+
+    delta_text =
+      [:ne, :"5ht", :da, :glu]
+      |> Enum.map(fn key ->
+        value = map_get(deltas, key)
+        if is_number(value), do: "#{key}=#{signed(value)}", else: nil
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(",")
+
+    [inspect(source), pressure, delta_text]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(":")
+  end
+
+  defp summarize_mood_trace_entry(_), do: ""
+
+  defp signed(value) when is_number(value) do
+    rounded = Float.round(value * 1.0, 2)
+    sign = if rounded >= 0, do: "+", else: ""
+    sign <> :erlang.float_to_binary(rounded, decimals: 2)
+  end
+
+  defp signed(_), do: "n/a"
 
   defp comprehension_context(nil), do: ""
   defp comprehension_context(summary) when summary == %{}, do: ""
@@ -260,6 +320,31 @@ defmodule Core.Response.LlmPrompt do
   end
 
   defp comprehension_context(_), do: ""
+
+  defp control_signals_context(nil), do: ""
+  defp control_signals_context(signals) when signals == %{}, do: ""
+
+  defp control_signals_context(signals) when is_map(signals) do
+    notes =
+      []
+      |> maybe_add_present("policy", map_get(signals, :policy))
+      |> maybe_add_present("top_k", map_get(signals, :top_k))
+      |> maybe_add_present("max_retries", map_get(signals, :max_retries))
+      |> maybe_add_present("branch_budget", map_get(signals, :branch_budget))
+      |> maybe_add_present("switch_after_ms", map_get(signals, :switch_after_ms))
+      |> maybe_add_number("utility_prior", map_get(signals, :utility_prior))
+      |> maybe_add_number("explore_rate", map_get(signals, :explore_rate))
+      |> maybe_add_number("salience_boost", map_get(signals, :salience_boost))
+      |> maybe_add_number("confidence_scale", map_get(signals, :confidence_scale))
+      |> maybe_add_number("acc_conflict_gain", map_get(signals, :acc_conflict_gain))
+
+    case notes do
+      [] -> ""
+      _ -> "Semantic control: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp control_signals_context(_), do: ""
 
   defp decision_context(intent, mode, action, skill, guardrail?) do
     notes =
