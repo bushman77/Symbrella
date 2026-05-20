@@ -42,6 +42,8 @@ defmodule Brain.MLResponseCompleteTest do
     assert turn.response.prompt_response_profile == "brain_explainer"
     assert turn.response.simulated_affect == "label=steady_focus; intensity=0.62"
     assert turn.response.personality_state == "temperament=steady; depth=normal"
+    assert turn.response.reflection.status == :accept
+    assert turn.response.reflection.draft_sha256 == "draft-sha"
     assert turn.response.symbolic_frame == %{intent: :ask, lifg: %{choices_count: 1}}
     assert turn.response.metadata.user_text == text
     assert turn.response.metadata.prompt_response_profile == "brain_explainer"
@@ -106,6 +108,15 @@ defmodule Brain.MLResponseCompleteTest do
         prompt_response_profile: "brain_explainer",
         simulated_affect: "label=steady_focus; intensity=0.62",
         personality_state: "temperament=steady; depth=normal",
+        reflection: %{
+          v: 1,
+          status: :accept,
+          issues: [],
+          applied?: false,
+          repair_count: 0,
+          draft_sha256: "draft-sha",
+          final_sha256: "draft-sha"
+        },
         system_sha256: "fake-prompt-sha",
         symbolic_frame: %{intent: :ask, lifg: %{choices_count: 1}}
       }

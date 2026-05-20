@@ -170,9 +170,9 @@ Status:
 - [x] Runtime derivation exists.
 - [x] Bounded numeric helper behavior exists.
 - [x] Tests cover sparse runtime defaults and bounded values.
-- [ ] Add explicit focus field.
-- [ ] Add version-safe serialization helper.
-- [ ] Add continuity snapshot import/export helpers.
+- [x] Add explicit focus field.
+- [x] Add version-safe serialization helper.
+- [x] Add continuity snapshot import/export helpers.
 
 ### 5.2 `Brain.Attribution`
 
@@ -261,10 +261,10 @@ Implemented:
 
 Remaining:
 
-- [ ] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
+- [x] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
 - [x] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.
 - [ ] Hippocampus-facing self-memory helper for self-tagged episodic writes.
-- [ ] `Core.Response` integration: self-state affects response mode and planning.
+- [x] `Core.Response` integration: self-state affects response mode and planning.
 
 ### 6.2 Ownership
 
@@ -363,8 +363,8 @@ Deliverables:
 - [x] `[:brain, :self_model, :update]` telemetry event.
 - [x] LiveView HUD panel for current self-state.
 - [x] Tests for canonical fields and bounds.
-- [ ] Add explicit focus tracking.
-- [ ] Add version-safe serialization helper.
+- [x] Add explicit focus tracking.
+- [x] Add version-safe serialization helper.
 
 Minimum tracked fields:
 
@@ -612,11 +612,11 @@ Focus:
 Deliverables:
 
 - [x] `Brain.MetaMonitor`.
-- [ ] Contradiction flags.
-- [ ] Instability detector.
-- [ ] Overload detector.
-- [ ] Stuck-loop detector.
-- [ ] Recovery suggestions:
+- [x] Contradiction flags.
+- [x] Instability detector.
+- [x] Overload detector.
+- [x] Stuck-loop detector.
+- [x] Recovery suggestions:
   - reanalyze
   - recall
   - lower confidence
@@ -636,14 +636,14 @@ Coupling targets:
 - [ ] **Curiosity:** proposal rate responds to novelty, dopamine, and uncertainty.
 - [ ] **WM / attention:** vigilance and uncertainty alter persistence and interrupt sensitivity.
 - [ ] **Memory writes:** salience and novelty increase write likelihood; overload suppresses writes.
-- [ ] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.
+- [x] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.
 - [ ] **Tone / style:** mood affects delivery without distorting factual grounding.
 
 Deliverables:
 
 - [ ] Small explicit bias functions.
-- [ ] Measurable telemetry counters per coupling point.
-- [ ] Tests proving self-state changes downstream decisions.
+- [x] Measurable telemetry counters per coupling point.
+- [x] Tests proving self-state changes downstream decisions.
 - [ ] Tests proving calibration predictions do not bypass rule gates.
 ## 9) Telemetry And LiveView Requirements
 
@@ -657,7 +657,7 @@ Minimum telemetry set:
 - [x] `[:brain, :self_calibration, :blend]`
 - [x] `[:brain, :self_model, :continuity_restored]`
 - [x] `[:brain, :meta_monitor, :warning]`
-- [ ] `[:brain, :response, :mode_selected]`
+- [x] `[:brain, :response, :mode_selected]`
 
 ---
 
@@ -713,11 +713,11 @@ Unit tests should cover:
 - [ ] stability decay/recovery
 - [ ] continuity restoration rules
 - [ ] no unsupported self-claims
-- [ ] response mode selection under uncertainty
+- [x] response mode selection under uncertainty
 
 Property tests should cover:
 
-- [ ] bounded self-state fields
+- [x] bounded self-state fields
 - [ ] telemetry meta always includes `count` and `v`
 - [ ] persisted self snapshots remain serializable and version-safe
 - [ ] feature rows match declared schema width

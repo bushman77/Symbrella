@@ -108,6 +108,7 @@ defmodule Core.Response do
             risk_bucket: risk_bucket,
             guard: guard,
             extracted_name: extracted_name,
+            evidence: Map.get(si, :evidence),
             comprehension: Map.get(si, :comprehension),
             prefrontal: Map.get(si, :prefrontal),
             control_signals: Map.get(si, :control_signals),
@@ -229,6 +230,7 @@ defmodule Core.Response do
   defp maybe_apply_mood_intent(intent, confidence, text)
        when is_atom(intent) and is_number(confidence) do
     if Code.ensure_loaded?(Brain.MoodCore) and
+         is_pid(Process.whereis(Brain.MoodCore)) and
          function_exported?(Brain.MoodCore, :apply_intent, 2) and
          not read_only_mood_query?(text) do
       Brain.MoodCore.apply_intent(intent, confidence)
@@ -239,7 +241,10 @@ defmodule Core.Response do
 
   defp maybe_apply_mood_intent(_intent, _confidence, _text), do: :ok
 
-  defp read_only_mood_query?(text), do: mood_indices_query?(text)
+  defp read_only_mood_query?(text) do
+    mood_indices_query?(text) or self_state_feeling_query?(text) or self_portrait_query?(text) or
+      self_check_query?(text)
+  end
 
   defp build_features(%{
          session_id: session_id,
@@ -260,6 +265,7 @@ defmodule Core.Response do
          risk_bucket: risk_bucket,
          guard: guard,
          extracted_name: extracted_name,
+         evidence: evidence,
          comprehension: comprehension,
          prefrontal: prefrontal,
          control_signals: control_signals,
@@ -293,6 +299,7 @@ defmodule Core.Response do
       risk_bucket: risk_bucket,
       guardrail_flags: guard.flags,
       user_name: extracted_name,
+      evidence: evidence,
       comprehension: comprehension,
       prefrontal: prefrontal,
       control_signals: control_signals,
@@ -790,6 +797,19 @@ defmodule Core.Response do
              "You may be right to challenge me. I might have misread something or overstated it. Show me what felt dishonest, and I'll trace it plainly."
          }}
 
+      idle_curiosity_casual_turn?(features) ->
+        decision =
+          decision
+          |> put_decision(tone: :neutral, mode: :chat, action: :answer)
+          |> add_decision_override(:idle_curiosity_casual_answer)
+
+        {decision,
+         %{
+           id: :idle_curiosity_casual,
+           reason: :casual_episode_probe_boundary,
+           inline_text: "Yeah, that was an interesting one."
+         }}
+
       # Time questions should answer with a direct time snippet (not the dev menu).
       time_query?(text) ->
         decision =
@@ -906,6 +926,27 @@ defmodule Core.Response do
   end
 
   defp trust_language?(_), do: false
+
+  defp idle_curiosity_casual_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+
+    interesting_laugh? =
+      is_binary(text) and
+        Regex.match?(~r/\binteresting\b/iu, text) and
+        Regex.match?(~r/\b(ha(?:ha)+|ha+|lol|lmao)\b/iu, text)
+
+    interesting_laugh? and has_episode_probe_evidence?(features)
+  end
+
+  defp idle_curiosity_casual_turn?(_), do: false
+
+  defp has_episode_probe_evidence?(features) do
+    case Map.get(features, :evidence) do
+      %{episodes: episodes} when is_list(episodes) and episodes != [] -> true
+      %{"episodes" => episodes} when is_list(episodes) and episodes != [] -> true
+      _ -> false
+    end
+  end
 
   defp mood_indices_query?(text) when is_binary(text) do
     t = String.downcase(text)
@@ -1315,6 +1356,7 @@ defmodule Core.Response do
               :self_portrait,
               :runtime_self_check,
               :trust_repair,
+              :idle_curiosity_casual,
               :alarm_capability
             ] and is_binary(s) and s != "" do
     s

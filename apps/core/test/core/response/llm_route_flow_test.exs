@@ -20,7 +20,15 @@ defmodule Core.Response.LlmRouteFlowTest do
     @impl true
     def handle_call({:chat, messages, opts}, _from, test_pid) do
       send(test_pid, {:llm_chat, messages, opts})
-      {:reply, {:ok, %{content: "LLM verbalized the symbolic posture."}}, test_pid}
+
+      text =
+        if messages |> List.last() |> Map.get("content", "") |> String.contains?("fuzzy") do
+          "Please provide more information so I can assist you today."
+        else
+          "LLM verbalized the symbolic posture."
+        end
+
+      {:reply, {:ok, %{content: text}}, test_pid}
     end
   end
 
@@ -76,5 +84,69 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute text =~ "Full file"
 
     assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "Core.Response.plan owns LLM history recording once per turn" do
+    session_id = "single-owner-history-#{System.unique_integer([:positive])}"
+
+    first = %{
+      intent: :refactor,
+      confidence: 0.92,
+      text: "first history turn",
+      session_id: session_id
+    }
+
+    second = %{
+      intent: :refactor,
+      confidence: 0.92,
+      text: "second history turn",
+      session_id: session_id
+    }
+
+    {_tone, "LLM verbalized the symbolic posture.", _meta} = Response.plan(first, %{})
+    assert_receive {:llm_chat, _first_messages, _opts}
+
+    {_tone, "LLM verbalized the symbolic posture.", _meta} = Response.plan(second, %{})
+    assert_receive {:llm_chat, second_messages, _opts}
+
+    history_messages =
+      second_messages
+      |> Enum.reject(&(&1["role"] == "system"))
+      |> Enum.drop(-1)
+
+    assert history_messages == [
+             %{"role" => "user", "content" => "first history turn"},
+             %{"role" => "assistant", "content" => "LLM verbalized the symbolic posture."}
+           ]
+  end
+
+  test "fuzzy LLM drafts are reflected into bounded clarification" do
+    handler_id = "llm-route-reflection-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :ok =
+      Core.Telemetry.attach(
+        handler_id,
+        [:core, :response, :complete],
+        fn event, measurements, metadata, _ ->
+          send(parent, {:complete, event, measurements, metadata})
+        end,
+        nil
+      )
+
+    si = %{intent: :unknown, confidence: 0.1, text: "this fuzzy thing feels off"}
+
+    {_tone, text, _meta} = Response.plan(si, %{})
+
+    assert text =~ "What part should I focus on first?"
+
+    assert_receive {:llm_chat, _messages, _opts}
+    assert_receive {:complete, [:core, :response, :complete], _measurements, complete_meta}, 200
+
+    assert complete_meta.reflection.status == :clarify
+    assert :too_generic in complete_meta.reflection.issues
+    assert complete_meta.reflection.applied? == true
+
+    Core.Telemetry.detach(handler_id)
   end
 end

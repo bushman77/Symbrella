@@ -2,7 +2,8 @@ defmodule Core.Response.LlmSynthesis do
   @moduledoc """
   LLM-backed response synthesis for Core.Response with bounded multi-turn context.
 
-  Stores recent turn history in ETS keyed by `session_id`.
+  Reads recent turn history from ETS keyed by `session_id`.
+  `Core.Response.plan/2` owns recording via `record_turn/3`.
 
   ETS ownership note:
   ETS tables are owned by the creating process. If LLM calls happen inside
@@ -15,6 +16,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Telemetry
   alias Core.Response.Context
   alias Core.Response.LlmPrompt
+  alias Core.Response.ReflectionLoop
   alias Core.Response.SelfStateSummary
 
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
@@ -83,9 +85,9 @@ defmodule Core.Response.LlmSynthesis do
 
     case llm_client().chat(messages, timeout: @timeout_ms) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
-        out = String.trim(content)
-        remember(session_id, user_text, out)
-        emit_complete_event(user_text, out, context, system_prompt)
+        draft = String.trim(content)
+        {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
+        emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out}
 
       {:ok, other} ->
@@ -301,7 +303,7 @@ defmodule Core.Response.LlmSynthesis do
       :ok
   end
 
-  defp emit_complete_event(user_text, assistant_text, context, system_prompt) do
+  defp emit_complete_event(user_text, assistant_text, context, system_prompt, reflection) do
     {user_preview, user_truncated?} = cap_text(user_text, @max_user_chars)
     {assistant_preview, assistant_truncated?} = cap_text(assistant_text, @max_user_chars)
     prompt_fields = prompt_fields(system_prompt)
@@ -327,7 +329,8 @@ defmodule Core.Response.LlmSynthesis do
         user_text: user_preview,
         user_truncated?: user_truncated?,
         assistant_text: assistant_preview,
-        assistant_truncated?: assistant_truncated?
+        assistant_truncated?: assistant_truncated?,
+        reflection: reflection_summary(reflection)
       }
     )
   rescue
@@ -335,6 +338,26 @@ defmodule Core.Response.LlmSynthesis do
       Logger.debug("[LlmSynthesis] complete telemetry failed: #{Exception.message(e)}")
       :ok
   end
+
+  defp reflection_summary(%{} = reflection) do
+    Map.take(reflection, [
+      :v,
+      :status,
+      :confidence,
+      :issues,
+      :critique,
+      :repair_instruction,
+      :applied?,
+      :repair_count,
+      :draft_sha256,
+      :final_sha256,
+      :draft_text,
+      :final_text,
+      :at_ms
+    ])
+  end
+
+  defp reflection_summary(_), do: nil
 
   defp extract_system_user(messages) when is_list(messages) do
     sys =

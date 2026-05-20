@@ -467,6 +467,7 @@ defmodule Brain.ML do
       prompt_response_profile: mget(meta, :prompt_response_profile),
       simulated_affect: mget(meta, :simulated_affect),
       personality_state: mget(meta, :personality_state),
+      reflection: mget(meta, :reflection),
       system_sha256: mget(meta, :system_sha256),
       symbolic_frame: mget(meta, :symbolic_frame),
       metadata: meta,
