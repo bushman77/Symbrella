@@ -399,17 +399,17 @@ defmodule Llm do
     end
   end
 
-  defp ensure_serving(state, _timeout_ms, allow_start?: true) do
+  defp ensure_serving(state, timeout_ms, allow_start?: true) do
     cond do
       state.status == :ready and reachable?(state, 1_000) ->
         {:ok, state}
 
       true ->
-        do_spawn(%{state | status: :starting})
+        do_spawn(%{state | status: :starting}, timeout_ms)
     end
   end
 
-  defp do_spawn(state) do
+  defp do_spawn(state, timeout_ms) do
     with :ok <- validate_model_path(state.model_path),
          {:ok, port_int, state} <- ensure_port_bound(state),
          {:ok, port} <- spawn_llama_server(state, port_int),
@@ -421,7 +421,7 @@ defmodule Llm do
              endpoint: endpoint,
              status: :starting
          },
-         {:ok, state} <- wait_ready(state) do
+         {:ok, state} <- wait_ready(state, timeout_ms) do
       {:ok, %{state | status: :ready}}
     else
       {:error, reason} ->
@@ -493,8 +493,9 @@ defmodule Llm do
     e -> {:error, {:spawn_failed, e}}
   end
 
-  defp wait_ready(state) do
-    wait_ready_loop(state, @ready_poll_attempts)
+  defp wait_ready(state, timeout_ms) do
+    attempts = max(@ready_poll_attempts, ceil(timeout_ms / @ready_poll_sleep_ms))
+    wait_ready_loop(state, attempts)
   end
 
   defp wait_ready_loop(_state, 0), do: {:error, :not_ready_timeout}

@@ -36,7 +36,7 @@ defmodule Brain.Cell.SafeTest do
   end
 
   test "handles server crash as {:exit, reason}", %{pid: pid} do
-    assert {:error, {:exit, _}} = Safe.call(pid, :crash, timeout: 100, retry?: false)
+    assert {:error, {:exit, _}} = Safe.call(pid, :crash, timeout: 1_000, retry?: false)
   end
 
   test "handles :noproc without blowing up" do

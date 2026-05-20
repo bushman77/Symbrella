@@ -147,8 +147,6 @@ defmodule Brain.ThalamusMathProps_Test do
         mood_weights: zero_mood
       )
 
-    :telemetry.execute([:brain, :acc, :conflict], %{conflict: 1.0}, %{})
-
     probe_id = "probe|acc|mono"
     base = 0.9
 
@@ -157,6 +155,8 @@ defmodule Brain.ThalamusMathProps_Test do
     scores =
       for alpha <- alphas do
         :ok = Brain.Thalamus.set_params(ofc_weight: 0.0, acc_alpha: alpha)
+        :telemetry.execute([:brain, :acc, :conflict], %{conflict: 1.0}, %{})
+        _ = Brain.Thalamus.get_params()
 
         :telemetry.execute(
           [:curiosity, :proposal],
@@ -167,6 +167,7 @@ defmodule Brain.ThalamusMathProps_Test do
         meta = recv_for_probe!(probe_id)
         s = meta[:probe][:score]
 
+        assert meta[:acc_conflict] == 1.0
         # Brake never increases score, and stays within [0, base]
         assert s <= base + 1.0e-6
         assert s >= 0.0 - 1.0e-6

@@ -103,6 +103,45 @@ defmodule Core do
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
 
+  @brain_merge_blocklist MapSet.new([
+                           :sentence,
+                           :source,
+                           :tokens,
+                           :token_structs,
+                           :pos_list,
+                           :cells,
+                           :pattern_roles,
+                           :phrase_matches,
+                           :sense_candidates,
+                           :candidates_by_token
+                         ])
+
+  def __merge_brain_out__(%SemanticInput{} = si, %{} = brain_out) do
+    allowed =
+      brain_out
+      |> Enum.filter(fn {key, _value} ->
+        is_atom(key) and MapSet.member?(@si_fields, key) and
+          not MapSet.member?(@brain_merge_blocklist, key) and key != :trace
+      end)
+      |> Map.new()
+
+    trace =
+      List.wrap(Map.get(brain_out, :trace)) ++
+        List.wrap(Map.get(si, :trace))
+
+    si
+    |> Map.from_struct()
+    |> Map.merge(allowed)
+    |> Map.put(:trace, trace)
+    |> then(&struct(SemanticInput, &1))
+  end
+
+  def __merge_brain_out__(si, brain_out) when is_map(si) and is_map(brain_out) do
+    si
+    |> coerce_si()
+    |> __merge_brain_out__(brain_out)
+  end
+
   defp maybe_build_response_plan(%{} = si, opts),
     do: ResponseAttach.maybe_build_response_plan(si, opts)
 

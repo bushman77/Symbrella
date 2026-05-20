@@ -124,6 +124,26 @@ defmodule Core.Response.LlmPromptTest do
     refute prompt =~ "Active concepts:"
   end
 
+  test "build_system_prompt/4 converts raw modulator object into behavioral response policy" do
+    prompt =
+      LlmPrompt.build_system_prompt(
+        %{intent: :greeting, text: "good morning symbrella"},
+        %{tone: :neutral, mode: :chat},
+        %{:da => 0.52, "5ht" => 0.68, :glu => 0.46, :ne => 0.44},
+        []
+      )
+
+    assert prompt =~ "Runtime state:"
+    assert prompt =~ "mood=exploration=0.49, inhibition=0.68, vigilance=0.44, plasticity=0.49"
+    assert prompt =~ "neuromodulators=da=0.52, 5ht=0.68, glu=0.46, ne=0.44"
+    assert prompt =~ "Response policy:"
+    assert prompt =~ "tone=warm_grounded"
+    assert prompt =~ "curiosity=light"
+    assert prompt =~ "pressure=low"
+    assert prompt =~ "Respond warmly, calmly, and briefly"
+    refute prompt =~ "I feel serotonin"
+  end
+
   test "build_system_prompt/1 includes comprehension summary when present" do
     prompt =
       LlmPrompt.build_system_prompt(%{
@@ -149,6 +169,63 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "degraded=true"
   end
 
+  test "build_system_prompt/1 includes compact symbolic frame when present" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{intent: :question},
+        decision: %{tone: :neutral, mode: :explainer},
+        mood: %{},
+        wm_items: [],
+        symbolic_frame: %{
+          intent: :question,
+          confidence: 0.76,
+          keyword: "response loop",
+          lexical: %{
+            token_count: 4,
+            active_cells_count: 2,
+            sense_candidates_count: 3,
+            top_terms: ["symbolic brain", "response"]
+          },
+          lifg: %{choices_count: 2, acc_conflict: 0.51, degraded?: true},
+          episode: :present
+        }
+      })
+
+    assert prompt =~ "Symbolic frame:"
+    assert prompt =~ "intent=question"
+    assert prompt =~ "confidence=0.76"
+    assert prompt =~ "top_terms=symbolic brain, response"
+    assert prompt =~ "lifg_degraded=true"
+    assert prompt =~ "episode=present"
+  end
+
+  test "build_system_prompt/1 includes response posture as hidden shaping context" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          confidence_bucket: :med,
+          symbolic_frame: %{
+            lexical: %{top_terms: ["response pipeline", "posture"]},
+            lifg: %{degraded?: false}
+          },
+          control_signals: %{policy: :focused, top_k: 3}
+        },
+        decision: %{tone: :neutral, mode: :explainer, action: :answer},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response posture:"
+    assert prompt =~ "use these internal labels only as hidden shaping context"
+    assert prompt =~ "do not quote them directly"
+    assert prompt =~ "intent=question"
+    assert prompt =~ "mode=explainer"
+    assert prompt =~ "action=answer"
+    assert prompt =~ "terms=response pipeline, posture"
+    assert prompt =~ "control=policy=focused, top_k=3"
+  end
+
   test "build_system_prompt/1 chooses safety redirect profile from guardrail evidence" do
     prompt =
       LlmPrompt.build_system_prompt(%{
@@ -160,6 +237,9 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "Response profile: safety_redirect."
     assert prompt =~ "decline unsafe or disallowed help briefly"
+    assert prompt =~ "Response posture:"
+    assert prompt =~ "guardrail=true"
+    assert prompt =~ "move=brief safe redirect"
   end
 
   test "build_system_prompt/1 chooses semantic repair profile from degraded comprehension" do
@@ -181,6 +261,29 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "Response profile: semantic_repair."
     assert prompt =~ "separate what is understood from what is uncertain"
+    assert prompt =~ "Response posture:"
+    assert prompt =~ "confidence=low"
+    assert prompt =~ "comprehension=degraded"
+    assert prompt =~ "move=state what is understood, then ask one targeted question only if necessary"
+  end
+
+  test "build_system_prompt/1 nudges concrete engineering action for high-confidence technical work" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :refactor,
+          confidence_bucket: :high,
+          text: "refactor the response pipeline"
+        },
+        decision: %{tone: :warm, mode: :collaborator, action: :act_first},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "Response profile: technical_work."
+    assert prompt =~ "Response posture:"
+    assert prompt =~ "confidence=high"
+    assert prompt =~ "move=make the next concrete engineering action"
   end
 
   test "build_system_prompt/1 chooses brain explainer profile from policy profile" do
@@ -194,6 +297,8 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "Response profile: brain_explainer."
     assert prompt =~ "software control signals and evidence sources"
+    assert prompt =~
+             "move=explain Symbrella as software control signals and evidence, not sentience"
   end
 
   test "build_system_prompt/1 includes compact runtime neuromodulator and LIFG state" do

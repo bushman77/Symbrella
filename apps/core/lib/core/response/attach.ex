@@ -19,6 +19,7 @@ defmodule Core.Response.Attach do
   """
 
   alias Core.SemanticInput
+  alias Core.Response.Context
 
   @compile {:no_warn_undefined, Brain.MoodCore}
 
@@ -126,6 +127,17 @@ defmodule Core.Response.Attach do
       comprehension: si_get(si, :comprehension),
       prefrontal: si_get(si, :prefrontal),
       control_signals: si_get(si, :control_signals),
+      tokens: si_get(si, :tokens),
+      active_cells: si_get(si, :active_cells),
+      sense_candidates: si_get(si, :sense_candidates),
+      lifg_choices: si_get(si, :lifg_choices),
+      acc_conflict: si_get(si, :acc_conflict),
+      perception: si_get(si, :perception),
+      atl_slate: si_get(si, :atl_slate),
+      episode: si_get(si, :episode),
+      mwe_matches: si_get(si, :mwe_matches),
+      self_model: si_get(si, :self_model),
+      turn_context: Context.from_si(si),
       session_id: si_get(si, :session_id)
     }
   end

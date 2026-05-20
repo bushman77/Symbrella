@@ -41,6 +41,7 @@ defmodule Brain.ML do
 
   # Blackboard bridges this telemetry, so we finalize/upgrade on that event.
   @pipeline_stop_event [:brain, :pipeline, :lifg_stage1, :stop]
+  @response_complete_event [:core, :response, :complete]
 
   @retry_ms 50
 
@@ -329,10 +330,15 @@ defmodule Brain.ML do
   defp maybe_finalize_turn_from_blackboard(state, %{} = env) do
     kind = mget(env, :kind)
 
-    if kind == :telemetry and mget(env, :event) == @pipeline_stop_event do
-      finalize_on_pipeline_stop(state, env)
-    else
-      state
+    case {kind, mget(env, :event)} do
+      {:telemetry, @pipeline_stop_event} ->
+        finalize_on_pipeline_stop(state, env)
+
+      {:telemetry, @response_complete_event} ->
+        upgrade_on_response_complete(state, env)
+
+      _ ->
+        state
     end
   end
 
@@ -426,6 +432,98 @@ defmodule Brain.ML do
   end
 
   defp lifg_state_from_pipeline_stop(_), do: nil
+
+  defp upgrade_on_response_complete(state, bb_env) do
+    now_ms = now_ms()
+    response = response_block_from_complete(bb_env, now_ms)
+    user_text = response |> mget(:metadata) |> mget(:user_text)
+
+    case turn_for_response_complete(state, user_text, now_ms) do
+      %{} = turn ->
+        upgraded =
+          turn
+          |> Map.put(:response, response)
+          |> Map.put(:at_ms, now_ms)
+
+        state
+        |> publish_and_push(upgraded, :append_or_replace)
+
+      nil ->
+        state
+    end
+  end
+
+  defp response_block_from_complete(%{} = bb_env, now_ms) do
+    meta = mget(bb_env, :meta) || %{}
+    measurements = mget(bb_env, :measurements) || %{}
+
+    %{
+      assistant_text: mget(meta, :assistant_text),
+      assistant_chars: mget(measurements, :assistant_chars),
+      user_chars: mget(measurements, :user_chars),
+      tone: mget(meta, :tone),
+      mode: mget(meta, :mode),
+      response_profile: mget(meta, :response_profile),
+      prompt_response_profile: mget(meta, :prompt_response_profile),
+      simulated_affect: mget(meta, :simulated_affect),
+      personality_state: mget(meta, :personality_state),
+      system_sha256: mget(meta, :system_sha256),
+      symbolic_frame: mget(meta, :symbolic_frame),
+      metadata: meta,
+      at_ms: mget(bb_env, :at_ms) || now_ms
+    }
+    |> drop_nil_values()
+  end
+
+  defp turn_for_response_complete(state, user_text, now_ms) do
+    pending_id =
+      case state.pending do
+        %{id: id} -> id
+        _ -> nil
+      end
+
+    by_pending =
+      if is_nil(pending_id) do
+        nil
+      else
+        find_recent_turn(state, fn turn -> mget(turn, :turn_id) == pending_id end)
+      end
+
+    by_text =
+      if is_binary(user_text) and user_text != "" do
+        find_recent_turn(state, fn turn -> same_turn_text?(mget(turn, :text), user_text) end)
+      end
+
+    by_recency =
+      case state.last_turn do
+        %{} = turn ->
+          at_ms = mget(turn, :at_ms)
+
+          if is_integer(at_ms) and now_ms - at_ms <= state.pending_max_age_ms do
+            turn
+          end
+
+        _ ->
+          nil
+      end
+
+    by_pending || by_text || by_recency
+  end
+
+  defp find_recent_turn(state, predicate) when is_function(predicate, 1) do
+    (state.turns || [])
+    |> Enum.find(fn
+      %{} = turn -> predicate.(turn)
+      _ -> false
+    end)
+  end
+
+  defp same_turn_text?(turn_text, user_text) when is_binary(turn_text) and is_binary(user_text) do
+    turn_text == user_text or String.starts_with?(turn_text, user_text) or
+      String.starts_with?(user_text, turn_text)
+  end
+
+  defp same_turn_text?(_, _), do: false
 
   # ───────────────────────── Record construction ─────────────────────────
 
@@ -532,6 +630,7 @@ defmodule Brain.ML do
               :mood,
               :wm,
               :lifg,
+              :response,
               :trigger
             ])
         })
@@ -610,4 +709,10 @@ defmodule Brain.ML do
 
   defp mget(%{} = m, k), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp mget(_, _), do: nil
+
+  defp drop_nil_values(%{} = map) do
+    map
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Enum.into(%{})
+  end
 end

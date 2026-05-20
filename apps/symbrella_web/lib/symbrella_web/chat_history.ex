@@ -18,6 +18,7 @@ defmodule SymbrellaWeb.ChatHistory do
           required(:text) => String.t(),
           optional(:tone) => atom(),
           optional(:meta) => map(),
+          optional(:mods) => map(),
           optional(:explain_text) => String.t(),
           optional(:explain_payload) => map()
         }
@@ -95,12 +96,14 @@ defmodule SymbrellaWeb.ChatHistory do
     out
     |> maybe_put(:tone, message[:tone] || message["tone"])
     |> maybe_put(:meta, message[:meta] || message["meta"])
+    |> maybe_put(:mods, message[:mods] || message["mods"])
     |> maybe_put(:explain_text, message[:explain_text] || message["explain_text"])
     |> maybe_put(:explain_payload, message[:explain_payload] || message["explain_payload"])
   end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, :meta, value) when not is_map(value), do: map
+  defp maybe_put(map, :mods, value) when not is_map(value), do: map
   defp maybe_put(map, :explain_payload, value) when not is_map(value), do: map
   defp maybe_put(map, :explain_text, value) when not is_binary(value), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

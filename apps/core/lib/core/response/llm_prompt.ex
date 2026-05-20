@@ -2,6 +2,7 @@ defmodule Core.Response.LlmPrompt do
   @moduledoc false
 
   alias Core.Response.Affect
+  alias Core.Response.AffectPolicy
   alias Core.Response.Personality
 
   @summary_window 5
@@ -59,21 +60,24 @@ defmodule Core.Response.LlmPrompt do
   def build_system_prompt(context) when is_map(context) do
     features = map_get(context, :features, %{})
     decision = map_get(context, :decision, %{})
-    mood = map_get(context, :mood, %{})
+    mood = map_get(context, :mood, %{}) |> AffectPolicy.normalize()
     wm_items = map_get(context, :wm_items, [])
     comprehension = map_get(context, :comprehension)
+    symbolic_frame = map_get(context, :symbolic_frame)
 
     features =
       features
       |> put_if_present(:self_model, map_get(context, :self_model))
       |> put_if_present(:runtime_state, map_get(context, :runtime_state))
       |> put_if_present(:comprehension, comprehension)
+      |> put_if_present(:symbolic_frame, symbolic_frame)
 
     build_system_prompt(features, decision, mood, wm_items)
   end
 
   @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
   def build_system_prompt(features, decision, mood, wm_items \\ []) when is_list(wm_items) do
+    mood = AffectPolicy.normalize(mood)
     tone = map_get(decision, :tone)
     mode = map_get(decision, :mode)
     intent = map_get(features, :intent)
@@ -92,8 +96,11 @@ defmodule Core.Response.LlmPrompt do
     runtime_state = prompt_runtime_state(features, decision, mood)
     comprehension = prompt_comprehension(features, decision, mood)
     control_signals = prompt_control_signals(features, decision, mood)
+    symbolic_frame = prompt_symbolic_frame(features, decision, mood)
+    response_policy = map_get(mood, :response_policy)
     profile_context = %{runtime_state: runtime_state, comprehension: comprehension}
     personality = Personality.decide(features, decision, mood, wm_items, profile_context)
+    response_profile = Personality.profile(personality)
     affect = Affect.simulate(personality, runtime_state || %{}, comprehension || %{}, features)
 
     [
@@ -104,7 +111,9 @@ defmodule Core.Response.LlmPrompt do
       "Do not claim you are a remote-server model, cloud service, or generic hosted chatbot unless runtime evidence explicitly says so.",
       "Do not claim you have no memory or no traces. Instead, distinguish conversation context, working memory, episodic memory, database rows, logs, and temporary runtime traces when relevant.",
       "When the user says they installed or run Symbrella locally, accept that local-runtime premise and answer from Symbrella's architecture.",
+      "When asked how you feel, answer as Symbrella's software self-state: name the current mood indices, raw neuromodulator-inspired controls, pressure label, and interpretation when available. Do not answer with generic assistant phrases like 'How can I assist you today?'.",
       "Answer ordinary everyday questions as ordinary conversation.",
+      "For greetings and smalltalk, respond socially and briefly; do not ask for code, errors, files, or implementation targets.",
       "Do not roleplay as a generic coding assistant unless the user's request is actually about code.",
       "Do not describe Symbrella as a generic tool when answering questions about Symbrella's own state.",
       "Do not append offers about coding, simulations, visualization, implementation, or technical context unless the user explicitly asks for that.",
@@ -116,12 +125,22 @@ defmodule Core.Response.LlmPrompt do
       mood_context(exp, inh, vig, plast),
       self_model_context(self_model),
       runtime_state_context(runtime_state),
+      symbolic_frame_context(symbolic_frame),
       comprehension_context(comprehension),
       control_signals_context(control_signals),
+      response_policy_context(response_policy),
       decision_context(intent, mode, action, skill, guardrail?),
       personality_context(personality),
       affect_context(affect),
-      response_profile_context(Personality.profile(personality)),
+      response_profile_context(response_profile),
+      response_posture_context(
+        features,
+        decision,
+        response_profile,
+        comprehension,
+        symbolic_frame,
+        control_signals
+      ),
       mode_directive(mode, intent),
       Personality.directive(personality),
       Affect.directive(affect),
@@ -192,6 +211,12 @@ defmodule Core.Response.LlmPrompt do
       features |> map_get(:prefrontal, %{}) |> map_get(:signals)
   end
 
+  defp prompt_symbolic_frame(features, decision, mood) do
+    map_get(features, :symbolic_frame) ||
+      map_get(decision, :symbolic_frame) ||
+      map_get(mood, :symbolic_frame)
+  end
+
   defp self_model_context(nil), do: ""
   defp self_model_context(model) when model == %{}, do: ""
 
@@ -250,6 +275,39 @@ defmodule Core.Response.LlmPrompt do
       _ -> "Runtime state: #{Enum.join(notes, "; ")}."
     end
   end
+
+  defp symbolic_frame_context(nil), do: ""
+  defp symbolic_frame_context(frame) when frame == %{}, do: ""
+
+  defp symbolic_frame_context(frame) when is_map(frame) do
+    lexical = map_get(frame, :lexical, %{})
+    lifg = map_get(frame, :lifg, %{})
+
+    notes =
+      []
+      |> maybe_add_present("intent", map_get(frame, :intent))
+      |> maybe_add_number("confidence", map_get(frame, :confidence))
+      |> maybe_add_present("keyword", map_get(frame, :keyword))
+      |> maybe_add_present("tokens", map_get(lexical, :token_count))
+      |> maybe_add_present("active_cells", map_get(lexical, :active_cells_count))
+      |> maybe_add_present("sense_candidates", map_get(lexical, :sense_candidates_count))
+      |> maybe_add_present("mwe_matches", map_get(lexical, :mwe_matches_count))
+      |> maybe_add_top_terms(map_get(lexical, :top_terms))
+      |> maybe_add_present("lifg_choices", map_get(lifg, :choices_count))
+      |> maybe_add_number("acc_conflict", map_get(lifg, :acc_conflict))
+      |> maybe_add(map_get(lifg, :degraded?) == true, "lifg_degraded=true")
+      |> maybe_add_present("perception", map_get(frame, :perception))
+      |> maybe_add_present("atl_slate", map_get(frame, :atl_slate))
+      |> maybe_add_present("episode", map_get(frame, :episode))
+      |> maybe_add_present("self_model", map_get(frame, :self_model))
+
+    case notes do
+      [] -> ""
+      _ -> "Symbolic frame: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp symbolic_frame_context(_), do: ""
 
   defp maybe_add_mood_trace(list, trace) when is_list(trace) and trace != [] do
     items =
@@ -346,6 +404,39 @@ defmodule Core.Response.LlmPrompt do
 
   defp control_signals_context(_), do: ""
 
+  defp response_policy_context(nil), do: ""
+  defp response_policy_context(policy) when policy == %{}, do: ""
+
+  defp response_policy_context(policy) when is_map(policy) do
+    notes =
+      []
+      |> maybe_add_present("social_state", map_get(policy, :social_state))
+      |> maybe_add_present("tone", map_get(policy, :tone))
+      |> maybe_add_present("verbosity", map_get(policy, :verbosity))
+      |> maybe_add_present("curiosity", map_get(policy, :curiosity))
+      |> maybe_add_present("caution", map_get(policy, :caution))
+      |> maybe_add_present("pressure", map_get(policy, :emotional_pressure))
+      |> maybe_add_present("defensiveness", map_get(policy, :defensiveness))
+      |> maybe_add_present("next_action", map_get(policy, :next_action))
+      |> maybe_add_avoid(map_get(policy, :avoid))
+      |> maybe_add_present("self_check", map_get(policy, :self_check))
+      |> maybe_add_present("depth", map_get(policy, :explanation_depth))
+      |> maybe_add_present("instruction", map_get(policy, :instruction))
+
+    case notes do
+      [] -> ""
+      _ -> "Response policy: #{Enum.join(notes, "; ")}."
+    end
+  end
+
+  defp response_policy_context(_), do: ""
+
+  defp maybe_add_avoid(notes, avoid) when is_list(avoid) and avoid != [] do
+    notes ++ ["avoid=#{join_values(avoid)}"]
+  end
+
+  defp maybe_add_avoid(notes, _), do: notes
+
   defp decision_context(intent, mode, action, skill, guardrail?) do
     notes =
       []
@@ -383,6 +474,147 @@ defmodule Core.Response.LlmPrompt do
   defp personality_context(_), do: ""
 
   defp response_profile_context(profile), do: "Response profile: #{profile}."
+
+  defp response_posture_context(
+         features,
+         decision,
+         profile,
+         comprehension,
+         symbolic_frame,
+         control_signals
+       ) do
+    intent = map_get(features, :intent)
+    mode = map_get(decision, :mode)
+    action = map_get(decision, :action)
+    confidence = map_get(features, :confidence_bucket)
+    guardrail? = truthy?(map_get(features, :guardrail?) || map_get(decision, :guardrail?))
+
+    notes =
+      []
+      |> maybe_add_present("intent", intent)
+      |> maybe_add_present("mode", mode)
+      |> maybe_add_present("action", action)
+      |> maybe_add_present("profile", profile)
+      |> maybe_add_present("confidence", confidence)
+      |> maybe_add_comprehension_posture(comprehension)
+      |> maybe_add_symbolic_terms(symbolic_frame)
+      |> maybe_add_control_posture(control_signals)
+      |> maybe_add_present("guardrail", guardrail?)
+      |> maybe_add_response_move(
+        features,
+        decision,
+        profile,
+        comprehension,
+        symbolic_frame,
+        guardrail?
+      )
+
+    case notes do
+      [] ->
+        ""
+
+      _ ->
+        "Response posture: use these internal labels only as hidden shaping context; do not quote them directly. " <>
+          Enum.join(notes, "; ") <> "."
+    end
+  end
+
+  defp maybe_add_comprehension_posture(notes, summary) when is_map(summary) do
+    degraded? = map_get(summary, :degraded?) == true
+    uncertain = summary |> map_get(:uncertain, []) |> List.wrap() |> Enum.take(3)
+
+    notes
+    |> maybe_add(degraded?, "comprehension=degraded")
+    |> maybe_add(uncertain != [], "uncertain=#{join_values(uncertain)}")
+  end
+
+  defp maybe_add_comprehension_posture(notes, _), do: notes
+
+  defp maybe_add_symbolic_terms(notes, frame) when is_map(frame) do
+    lexical = map_get(frame, :lexical, %{})
+    terms = lexical |> map_get(:top_terms, []) |> List.wrap() |> Enum.take(4)
+    lifg = map_get(frame, :lifg, %{})
+
+    notes
+    |> maybe_add(terms != [], "terms=#{join_values(terms)}")
+    |> maybe_add(map_get(lifg, :degraded?) == true, "lifg=degraded")
+  end
+
+  defp maybe_add_symbolic_terms(notes, _), do: notes
+
+  defp maybe_add_control_posture(notes, signals) when is_map(signals) and signals != %{} do
+    values =
+      []
+      |> maybe_add_present("policy", map_get(signals, :policy))
+      |> maybe_add_present("top_k", map_get(signals, :top_k))
+      |> maybe_add_present("branch_budget", map_get(signals, :branch_budget))
+      |> maybe_add_number("confidence_scale", map_get(signals, :confidence_scale))
+
+    maybe_add(notes, values != [], "control=#{Enum.join(values, ", ")}")
+  end
+
+  defp maybe_add_control_posture(notes, _), do: notes
+
+  defp maybe_add_response_move(
+         notes,
+         _features,
+         _decision,
+         _profile,
+         _comprehension,
+         _frame,
+         true
+       ) do
+    notes ++ ["move=brief safe redirect"]
+  end
+
+  defp maybe_add_response_move(notes, features, decision, profile, comprehension, frame, false) do
+    confidence = map_get(features, :confidence_bucket)
+    mode = map_get(decision, :mode)
+    action = map_get(decision, :action)
+
+    cond do
+      degraded_posture?(comprehension, frame) or confidence == :low ->
+        notes ++
+          [
+            "move=state what is understood, then ask one targeted question only if necessary"
+          ]
+
+      profile == :brain_explainer ->
+        notes ++
+          [
+            "move=explain Symbrella as software control signals and evidence, not sentience"
+          ]
+
+      technical_posture?(mode, action, profile, confidence) ->
+        notes ++ ["move=make the next concrete engineering action"]
+
+      profile == :social_chat ->
+        notes ++ ["move=answer naturally without turning it into implementation work"]
+
+      true ->
+        notes
+    end
+  end
+
+  defp degraded_posture?(comprehension, frame) do
+    comprehension_degraded? =
+      is_map(comprehension) and map_get(comprehension, :degraded?) == true
+
+    lifg_degraded? =
+      if is_map(frame) do
+        frame |> map_get(:lifg, %{}) |> map_get(:degraded?) == true
+      else
+        false
+      end
+
+    comprehension_degraded? or lifg_degraded?
+  end
+
+  defp technical_posture?(mode, action, profile, confidence) do
+    confidence == :high and
+      (profile == :technical_work or
+         (mode == :collaborator and action in [:act_first, :answer]))
+  end
 
   defp affect_context(%{} = affect) do
     values =
@@ -442,6 +674,13 @@ defmodule Core.Response.LlmPrompt do
   end
 
   defp maybe_add_runtime_wm(notes, _), do: notes
+
+  defp maybe_add_top_terms(notes, terms) when is_list(terms) do
+    values = terms |> Enum.take(5) |> join_values()
+    maybe_add(notes, values != "", "top_terms=#{values}")
+  end
+
+  defp maybe_add_top_terms(notes, _), do: notes
 
   defp maybe_add_lifg_runtime(notes, lifg) when is_map(lifg) do
     details =

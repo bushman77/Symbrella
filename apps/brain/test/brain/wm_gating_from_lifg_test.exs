@@ -76,21 +76,26 @@ defmodule Brain.WMGatingFromLIFGTest do
     si = %{
       sentence: "Hello there",
       tokens: [
-        %{word: "Hello", start: 0, stop: 5, kind: :word, pos: "intj"},
-        %{word: "there", start: 6, stop: 11, kind: :word, pos: "adv"}
+        %{
+          index: 0,
+          phrase: "Hello there",
+          span: {0, 11},
+          kind: :word,
+          pos: "phrase",
+          n: 2,
+          mw: true
+        }
       ],
       sense_candidates: %{
         0 => [
           %{
-            id: "Hello there|phrase|fallback",
+            id: "Hello there|phrase|greeting",
             lemma: "Hello there",
             pos: "phrase",
             mw: true,
             score: 1.0
           }
-        ],
-        1 => [%{id: "hello|interjection|2", lemma: "hello", pos: "intj", score: 0.50}],
-        2 => [%{id: "there|noun|0", lemma: "there", pos: "noun", score: 0.08}]
+        ]
       }
     }
 
@@ -101,10 +106,9 @@ defmodule Brain.WMGatingFromLIFGTest do
         lifg_min_score: min_score
       )
 
-    # Stage1 still returns both winners (phrase + token sense)
-    assert [%{chosen_id: id0}, %{chosen_id: id1}] = out.choices
-    assert id0 == "Hello there|phrase|fallback"
-    assert id1 == "hello|interjection|2"
+    # Stage1 returns the phrase winner from the canonical MWE token.
+    assert [%{chosen_id: id0}] = out.choices
+    assert id0 == "Hello there|phrase|greeting"
 
     # Telemetry: at least 1 gate decision and a WM update with added > 0
     assert_receive {:gate, %{score: s1}, %{decision: dec1, source: :lifg}}

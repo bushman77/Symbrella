@@ -101,6 +101,34 @@ defmodule Brain.BlackboardTelemetryBridgeTest do
     assert prompt =~ "Response profile: self_state_boundary"
   end
 
+  test "bridges [:core, :response, :complete] telemetry onto brain:blackboard" do
+    :telemetry.execute(
+      [:core, :response, :complete],
+      %{assistant_chars: 18, user_chars: 12},
+      %{
+        user_text: "close loop",
+        assistant_text: "Loop is closed.",
+        tone: :warm,
+        mode: :explainer,
+        response_profile: :brain_explainer,
+        symbolic_frame: %{intent: :command}
+      }
+    )
+
+    assert_receive {:blackboard,
+                    %{
+                      kind: :telemetry,
+                      event: [:core, :response, :complete],
+                      measurements: %{assistant_chars: 18, user_chars: 12},
+                      meta: %{
+                        assistant_text: "Loop is closed.",
+                        response_profile: :brain_explainer,
+                        symbolic_frame: %{intent: :command}
+                      }
+                    }},
+                   500
+  end
+
   defp ensure_ready do
     wait_until(fn ->
       s = Blackboard.state()

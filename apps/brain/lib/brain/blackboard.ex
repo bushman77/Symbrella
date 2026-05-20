@@ -39,6 +39,7 @@ defmodule Brain.Blackboard do
     [:brain, :intent, :selected],
     [:core, :intent, :selected],
     [:core, :response, :prompt],
+    [:core, :response, :complete],
 
     # SelfPortrait-friendly signals (compact, high-signal)
     [:brain, :lifg, :stage1, :winner],

@@ -29,8 +29,10 @@ defmodule Core.Response.PlanCalmExplainerFlowTest do
     assert meta.intent_inferred == :explain
     assert meta.profile == :calm_explainer
 
-    # Should be using explainer bullets, not collaborator/coach/editor copy
-    assert text =~ "Here's the short version of how this works"
-    assert text =~ "1) What changes, at a glance"
+    # With no LLM registered in this test, text comes from the deterministic fallback.
+    assert text =~ "Suggested next step:"
+    assert text =~ "Explain from the available Symbrella evidence without implying sentience."
+    refute text =~ "Here's the short version of how this works"
+    refute text =~ "1) What changes, at a glance"
   end
 end

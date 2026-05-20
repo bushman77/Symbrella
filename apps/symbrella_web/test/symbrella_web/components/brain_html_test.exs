@@ -67,6 +67,39 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     refute html =~ "— no events —"
   end
 
+  test "blackboard_panel previews upgraded ml_turn response records" do
+    html =
+      render_component(&BrainHTML.blackboard_panel/1,
+        events: [
+          %{
+            id: 1,
+            at_ms: System.system_time(:millisecond),
+            tag: :ml,
+            env: %{
+              kind: :ml_turn,
+              region: :ml,
+              turn_id: 43,
+              hint: "turn record (ML)",
+              turn: %{
+                text: "close the loop",
+                response: %{
+                  assistant_text: "The response loop is now recorded.",
+                  response_profile: :brain_explainer,
+                  mode: :explainer
+                }
+              }
+            }
+          }
+        ],
+        filter: "",
+        limit: 50
+      )
+
+    assert html =~ "ml_turn response"
+    assert html =~ "brain_explainer"
+    assert html =~ "The response loop is now recorded."
+  end
+
   test "hud_row renders self-monitoring lifg payload gap count" do
     html =
       render_component(&BrainHTML.hud_row/1,

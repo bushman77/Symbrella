@@ -14,6 +14,11 @@ defmodule BrainLIFGIntegrationTest do
 
     tokens = Enum.map(token_idxs, fn i -> %{index: i, phrase: "t#{i}"} end)
 
+    cands =
+      Enum.map(cands, fn cand ->
+        Map.put_new(cand, :lemma, "t#{cand.token_index}")
+      end)
+
     si =
       struct(SemanticInput, %{
         tokens: tokens,

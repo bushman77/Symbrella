@@ -3,57 +3,7 @@ defmodule Core.Response.ModesTest do
 
   alias Core.Response.Modes
 
-  describe "compose/4 – coach mode for bug intents" do
-    test "bug + deescalate uses the reassuring 'test failures are frustrating' copy" do
-      text = Modes.compose(:bug, :deescalate, :coach, %{})
-
-      assert text =~ "Test failures are frustrating but fixable"
-      assert text =~ "one failure at a time"
-    end
-
-    test "bug + warm uses the 'let's get this test passing' copy" do
-      text = Modes.compose(:bug, :warm, :coach, %{})
-
-      assert text =~ "Let's get this test passing"
-      assert text =~ "start from the failing output"
-    end
-
-    test "bug + neutral still uses the bug-specific coach copy" do
-      text = Modes.compose(:bug, :neutral, :coach, %{})
-
-      assert text =~ "Let's get this test passing"
-      assert text =~ "start from the failing output"
-    end
-
-    test "non-bug helpful intents keep the generic coach copy" do
-      text = Modes.compose(:question, :neutral, :coach, %{})
-
-      assert text =~ "Let's pick a small next step."
-      assert text =~ "A) I act. B) clarify one detail."
-    end
-
-    test "next_step hint gets appended correctly" do
-      text =
-        Modes.compose(:bug, :warm, :coach, %{
-          next_step: "Run `mix test` only for the failing file."
-        })
-
-      assert text =~ "Let's get this test passing."
-      assert text =~ "Suggested next step: Run `mix test` only for the failing file."
-    end
-  end
-
-  describe "compose/4 – collaborator warm collaborator" do
-    test "warm collaborator copy mentions path and full file option" do
-      text = Modes.compose(:refactor, :warm, :collaborator, %{})
-
-      assert text =~ "concise path"
-      assert text =~ "full file"
-      assert text =~ "paste-ready"
-    end
-  end
-
-  describe "compose/4 – abuse + tones (firm guardian)" do
+  describe "compose/4 – safety fallbacks" do
     test "abuse + deescalate uses respectful boundary copy" do
       text = Modes.compose(:abuse, :deescalate, :editor, %{})
 
@@ -69,13 +19,32 @@ defmodule Core.Response.ModesTest do
     end
   end
 
-  describe "compose/4 – explainer mode (calm explainer)" do
-    test "explainer mode returns compact bullet outline" do
-      text = Modes.compose(:explain, :warm, :explainer, %{})
+  describe "compose/4 – deterministic fallback only" do
+    test "uses contextual fallback copy instead of the old static drop-in response" do
+      text =
+        Modes.compose(:unknown, :neutral, :unknown_mode, %{
+          variant_seed: 1,
+          next_step: "Ask one targeted question."
+        })
 
-      assert text =~ "Here's the short version of how this works"
-      assert text =~ "1) What changes, at a glance"
-      assert text =~ "5) When to prefer a full file"
+      refute text =~ "Ready. Point me at the module"
+      refute text =~ "clean drop-in"
+      assert text =~ "Give me the next concrete target"
+      assert text =~ "Suggested next step: Ask one targeted question."
+    end
+
+    test "does not emit normal-mode canned menus or drop-in invitations" do
+      text =
+        Modes.compose(:refactor, :warm, :collaborator, %{
+          variant_seed: 0,
+          file_hint: "apps/core/lib/core/response.ex"
+        })
+
+      refute text =~ "Welcome"
+      refute text =~ "full file"
+      refute text =~ "paste-ready"
+      refute text =~ "drop-in"
+      assert text =~ "Relevant target: `apps/core/lib/core/response.ex`."
     end
   end
 end

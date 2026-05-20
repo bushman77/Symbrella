@@ -79,6 +79,14 @@ defmodule Core.Response.UserNameMemoryTest do
     assert meta.fact_key == "sisters_name"
   end
 
+  test "definition questions are not stored as direct user facts" do
+    assert Response.memory_reply(%{
+             intent: :unknown,
+             confidence: 1.0,
+             text: "what is the meaning of poop"
+           }) == nil
+  end
+
   test "location memory stores live-in phrasing and recalls where-do-i-live" do
     {_tone, text, meta} =
       Response.plan(%{

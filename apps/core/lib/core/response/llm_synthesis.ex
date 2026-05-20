@@ -13,6 +13,7 @@ defmodule Core.Response.LlmSynthesis do
   require Logger
 
   alias Core.Telemetry
+  alias Core.Response.Context
   alias Core.Response.LlmPrompt
   alias Core.Response.SelfStateSummary
 
@@ -80,10 +81,11 @@ defmodule Core.Response.LlmSynthesis do
       log_prompt_bundle(messages, context)
     end
 
-    case Llm.chat(messages, timeout: @timeout_ms) do
+    case llm_client().chat(messages, timeout: @timeout_ms) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
         out = String.trim(content)
         remember(session_id, user_text, out)
+        emit_complete_event(user_text, out, context, system_prompt)
         {:ok, out}
 
       {:ok, other} ->
@@ -115,17 +117,11 @@ defmodule Core.Response.LlmSynthesis do
       |> put_if_missing(:self_model, self_model)
       |> put_if_missing(:runtime_state, runtime_state)
 
-    %{
-      user_text: user_text,
-      features: features,
-      decision: ensure_map(decision),
-      mood: ensure_map(mood),
+    Context.from_response_parts(user_text, features, ensure_map(decision), ensure_map(mood), %{
       wm_items: wm_items,
       self_model: self_model,
-      runtime_state: runtime_state,
-      comprehension: Map.get(features, :comprehension),
-      session_id: Map.get(features, :session_id, :global)
-    }
+      runtime_state: runtime_state
+    })
   end
 
   # ── ETS initialization / ownership ─────────────────────────────────────────
@@ -276,6 +272,7 @@ defmodule Core.Response.LlmSynthesis do
   defp emit_prompt_event(system_prompt, user_text, context) do
     {system_preview, system_truncated?} = cap_text(system_prompt, @max_system_chars)
     {user_preview, user_truncated?} = cap_text(user_text, @max_user_chars)
+    prompt_fields = prompt_fields(system_prompt)
 
     Telemetry.emit(
       [:core, :response, :prompt],
@@ -288,9 +285,9 @@ defmodule Core.Response.LlmSynthesis do
         intent: get_in_map(context, [:features, :intent]),
         mode: get_in_map(context, [:decision, :mode]),
         tone: get_in_map(context, [:decision, :tone]),
-        response_profile: prompt_line_value(system_prompt, "Response profile:"),
-        simulated_affect: prompt_line_value(system_prompt, "Simulated affect:"),
-        personality_state: prompt_line_value(system_prompt, "Personality state:"),
+        response_profile: Map.get(prompt_fields, :response_profile),
+        simulated_affect: Map.get(prompt_fields, :simulated_affect),
+        personality_state: Map.get(prompt_fields, :personality_state),
         system_sha256: sha256_hex(system_prompt),
         system_prompt: system_preview,
         system_truncated?: system_truncated?,
@@ -301,6 +298,41 @@ defmodule Core.Response.LlmSynthesis do
   rescue
     e ->
       Logger.debug("[LlmSynthesis] prompt telemetry failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp emit_complete_event(user_text, assistant_text, context, system_prompt) do
+    {user_preview, user_truncated?} = cap_text(user_text, @max_user_chars)
+    {assistant_preview, assistant_truncated?} = cap_text(assistant_text, @max_user_chars)
+    prompt_fields = prompt_fields(system_prompt)
+    prompt_profile = Map.get(prompt_fields, :response_profile)
+
+    Telemetry.emit(
+      [:core, :response, :complete],
+      %{
+        user_chars: String.length(to_string(user_text || "")),
+        assistant_chars: String.length(to_string(assistant_text || ""))
+      },
+      %{
+        session_id: Map.get(context, :session_id, :global),
+        intent: get_in_map(context, [:features, :intent]),
+        mode: get_in_map(context, [:decision, :mode]),
+        tone: get_in_map(context, [:decision, :tone]),
+        response_profile: response_profile_value(prompt_profile, context),
+        prompt_response_profile: prompt_profile,
+        simulated_affect: Map.get(prompt_fields, :simulated_affect),
+        personality_state: Map.get(prompt_fields, :personality_state),
+        system_sha256: sha256_hex(system_prompt),
+        symbolic_frame: Map.get(context, :symbolic_frame),
+        user_text: user_preview,
+        user_truncated?: user_truncated?,
+        assistant_text: assistant_preview,
+        assistant_truncated?: assistant_truncated?
+      }
+    )
+  rescue
+    e ->
+      Logger.debug("[LlmSynthesis] complete telemetry failed: #{Exception.message(e)}")
       :ok
   end
 
@@ -337,6 +369,16 @@ defmodule Core.Response.LlmSynthesis do
     |> Base.encode16(case: :lower)
   end
 
+  defp prompt_fields(system_prompt) when is_binary(system_prompt) do
+    %{
+      response_profile: prompt_line_value(system_prompt, "Response profile:"),
+      simulated_affect: prompt_line_value(system_prompt, "Simulated affect:"),
+      personality_state: prompt_line_value(system_prompt, "Personality state:")
+    }
+  end
+
+  defp prompt_fields(_), do: %{}
+
   defp prompt_line_value(prompt, prefix) when is_binary(prompt) and is_binary(prefix) do
     prompt
     |> String.split("\n")
@@ -344,7 +386,38 @@ defmodule Core.Response.LlmSynthesis do
     |> String.replace_prefix(prefix, "")
     |> String.trim()
     |> String.trim_trailing(".")
+    |> blank_to_nil()
   end
+
+  defp response_profile_value(prompt_profile, context) do
+    prompt_profile
+    |> existing_atom_value()
+    |> case do
+      nil -> get_in_map(context, [:decision, :response_profile])
+      value -> value
+    end
+  end
+
+  defp existing_atom_value(value) when is_atom(value), do: value
+
+  defp existing_atom_value(value) when is_binary(value) do
+    try do
+      String.to_existing_atom(value)
+    rescue
+      ArgumentError -> value
+    end
+  end
+
+  defp existing_atom_value(_), do: nil
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(value), do: value
 
   defp get_in_map(map, keys) when is_map(map) and is_list(keys) do
     Enum.reduce_while(keys, map, fn key, acc ->
@@ -616,8 +689,14 @@ defmodule Core.Response.LlmSynthesis do
   # ── Helpers ───────────────────────────────────────────────────────────────
 
   defp llm_available? do
-    Code.ensure_loaded?(Llm) and
-      function_exported?(Llm, :chat, 2) and
-      is_pid(Process.whereis(Llm))
+    client = llm_client()
+
+    Code.ensure_loaded?(client) and
+      function_exported?(client, :chat, 2) and
+      is_pid(Process.whereis(client))
+  end
+
+  defp llm_client do
+    Application.get_env(:core, :llm_client, Llm)
   end
 end

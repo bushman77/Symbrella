@@ -43,6 +43,9 @@ config :llm, Llm,
   auto_restart_on_crash?: false,
   heartbeat_ms: 0
 
+config :llm, Llm.BootGate,
+  enabled?: false
+
 # -------------------------------
 # Logger / ExUnit
 # -------------------------------

@@ -1,15 +1,12 @@
 defmodule Core.Response.Modes do
   @moduledoc """
-  Mode → text templates for Core.Response.
-  Terse, action-oriented, and predictable (no randomness).
+  Deterministic fallback text for Core.Response when LLM synthesis is unavailable.
+  Terse, contextual, and predictable (no randomness).
 
   Public API
   ----------
     compose(intent, tone, mode) :: String.t()
     compose(intent, tone, mode, opts) :: String.t()
-
-  Supported `mode`s:
-    :collaborator | :coach | :scribe | :editor | :explainer
 
   Optional `opts` slots (ignored if absent):
     :file_hint    — short path/module to reflect (e.g., "apps/brain/lib/brain/lifg.ex")
@@ -49,10 +46,6 @@ defmodule Core.Response.Modes do
           optional(:variant_seed) => non_neg_integer()
         }
 
-  @helpful_intents ~w(
-    question instruction help command refactor review plan diagram explain bug optimize benchmark
-  )a
-
   @doc "Backward-compatible 3-arity; delegates to compose/4 with an empty opts map."
   @spec compose(intent, tone, mode) :: String.t()
   def compose(intent, tone, mode), do: compose(intent, tone, mode, %{})
@@ -69,111 +62,17 @@ defmodule Core.Response.Modes do
     do:
       "I can't help with buying drugs or getting wasted. I can help with safety, health risks, or getting support instead."
 
-  # ── Greetings & Social ──────────────────────────────────────────────────────
+  def compose(:greeting, _tone, _mode, raw_opts),
+    do: greeting_text(normalize_opts(raw_opts))
 
-  # Some upstream code may send :greet; normalize here for safety.
-  def compose(intent, :warm, _mode, _opts) when intent in [:greeting, :greet],
-    do:
-      "Welcome to Symbrella 👋\n" <>
-        "I'm ready to help. Quick picks:\n" <>
-        "• Full file drop-in — say the path\n" <>
-        "• Fix a warning/test — paste the error line\n" <>
-        "• Plan next steps — I'll outline a short path\n" <>
-        "• Peek at the brain — ask for WM or LIFG snapshot"
+  def compose(:greet, _tone, _mode, raw_opts),
+    do: greeting_text(normalize_opts(raw_opts))
 
-  def compose(intent, _tone, _mode, _opts) when intent in [:greeting, :greet],
-    do:
-      "Welcome back. Pick one to begin:\n" <>
-        "• Full file drop-in — say the path\n" <>
-        "• Fix a warning/test — paste the error line\n" <>
-        "• Plan next steps — say \"plan\" for a quick outline"
+  def compose(:smalltalk, _tone, _mode, _opts),
+    do: "I'm here and ready to talk."
 
   def compose(:gratitude, _tone, _mode, _opts),
-    do: "Appreciate it. Let's keep momentum—what's the very next change?"
-
-  def compose(:smalltalk, :warm, _mode, _opts),
-    do: "👋 All set here—want to point me at a file or module?"
-
-  # ── Helpful intents (build/plan/refactor/etc.) ──────────────────────────────
-
-  # Collaborator: act-focused; invite "full file" only on safe/neutral paths.
-  def compose(intent, tone, :collaborator, raw_opts) when intent in @helpful_intents do
-    opts = normalize_opts(raw_opts)
-    seed = opts[:variant_seed] || stable_seed(intent, tone, :collaborator, opts)
-
-    base =
-      case tone do
-        :warm ->
-          "Here's a concise path. Say \"full file\" only if you want a paste-ready drop-in."
-
-        :neutral ->
-          choose(seed, [
-            "Here's the path and a next step. Ask for \"full file\" only if you want a paste-ready module.",
-            "Plan plus first action. Ask for \"full file\" if you want a drop-in.",
-            "Short path plus next move. Say \"full file\" for a ready-to-paste version."
-          ])
-
-        _other ->
-          "I'll keep it focused and safe. Ask for a drop-in only if you need one."
-      end
-
-    with_file_hint(base, opts[:file_hint])
-  end
-
-  # Coach: steer to small next step; bug-aware for test failures.
-  def compose(intent, tone, :coach, raw_opts) when intent in @helpful_intents do
-    opts = normalize_opts(raw_opts)
-
-    base =
-      case {intent, tone} do
-        {:bug, :deescalate} ->
-          "Test failures are frustrating but fixable. We'll take it one failure at a time—what's the most painful one right now?"
-
-        {:bug, _} ->
-          "Let's get this test passing. We'll start from the failing output and narrow down the cause together."
-
-        {_other_intent, :deescalate} ->
-          "No rush. One step at a time—what's top priority right now?"
-
-        {_other_intent, _} ->
-          "Let's pick a small next step. A) I act. B) clarify one detail."
-      end
-
-    with_next_step(base, opts[:next_step])
-  end
-
-  # Scribe: keep things moving without adding risk.
-  def compose(_intent, :warm, :scribe, _opts),
-    do: "On it. I'll keep it friendly and concise—what's next?"
-
-  def compose(_intent, _tone, :scribe, _opts),
-    do: "Got it. I can capture a quick TODO list or prep a short outline—your call."
-
-  # Editor: guardrails or review tone (single clause; accepts map or keyword opts)
-  def compose(_intent, _tone, :editor, raw_opts) do
-    opts = normalize_opts(raw_opts)
-
-    case opts[:flag] do
-      nil ->
-        "I'll review and point out the risky spots, then offer a safe diff or a full-file alternative."
-
-      flag ->
-        "That change risks a guardrail (#{inspect(flag)}). I can propose a safer path, or proceed if you send \"Approve: P-###\"."
-    end
-  end
-
-  # Explainer: compact 3–5 bullets; no "full file" invite here unless planner decides elsewhere.
-  def compose(_intent, _tone, :explainer, _opts) do
-    """
-    Here's the short version of how this works:
-    1) What changes, at a glance
-    2) Where it lives in the repo
-    3) The key constraint or gotcha
-    4) How to test quickly
-    5) When to prefer a full file
-    """
-    |> String.trim()
-  end
+    do: "You're welcome."
 
   # ── Fallbacks ───────────────────────────────────────────────────────────────
 
@@ -189,16 +88,17 @@ defmodule Core.Response.Modes do
   def compose(_intent, :firm, _mode, raw_opts) do
     opts = normalize_opts(raw_opts)
 
-    with_file_hint("Got it—staying focused and brief. Name the file or module.", opts[:file_hint])
+    with_file_hint("Got it. Send the concrete target or error and I'll keep the next step focused.", opts[:file_hint])
   end
 
-  def compose(_intent, _tone, _mode, raw_opts) do
+  def compose(intent, tone, mode, raw_opts) do
     opts = normalize_opts(raw_opts)
+    seed = opts[:variant_seed] || stable_seed(intent, tone, mode, opts)
 
-    with_file_hint(
-      "Ready. Point me at the module and I'll produce a clean drop-in.",
-      opts[:file_hint]
-    )
+    seed
+    |> fallback_base()
+    |> with_next_step(opts[:next_step])
+    |> with_file_hint(opts[:file_hint])
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -206,7 +106,7 @@ defmodule Core.Response.Modes do
   defp with_file_hint(text, nil), do: text
 
   defp with_file_hint(text, hint) when is_binary(hint) and hint != "" do
-    text <> "\n" <> "I can prep a drop-in for `#{hint}`."
+    text <> "\n" <> "Relevant target: `#{hint}`."
   end
 
   defp with_file_hint(text, _), do: text
@@ -232,7 +132,29 @@ defmodule Core.Response.Modes do
   defp normalize_opts(%{} = opts), do: opts
   defp normalize_opts(_), do: %{}
 
+  defp fallback_base(seed) do
+    choose(seed, [
+      "I need one concrete target before I can make this useful. Send the module, file, or failing output.",
+      "Give me the next concrete target and I'll tailor the response to that context.",
+      "I can help from here, but I need the specific module, file, or behavior you want changed.",
+      "Point me at the code or error you want handled and I'll respond with the next practical step."
+    ])
+  end
+
+  defp greeting_text(opts) do
+    text = String.downcase(to_string(opts[:text] || opts[:user_text] || ""))
+
+    cond do
+      String.contains?(text, "good morning") -> "Good morning. I'm here with you."
+      String.contains?(text, "good afternoon") -> "Good afternoon. I'm here with you."
+      String.contains?(text, "good evening") -> "Good evening. I'm here with you."
+      true -> "Hello. I'm here with you."
+    end
+  end
+
   defp stable_seed(intent, tone, mode, opts) do
-    :erlang.phash2({intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag)})
+    :erlang.phash2(
+      {intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag), Map.get(opts, :next_step)}
+    )
   end
 end

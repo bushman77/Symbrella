@@ -36,6 +36,7 @@ defmodule Core.Response do
   alias Core.Response.Modes
   alias Core.Response.Guardrails
   alias Core.Response.Skills
+  alias Core.Response.AffectPolicy
   alias Core.Response.LlmSynthesis
   alias Core.Response.SelfStateSummary
 
@@ -49,6 +50,7 @@ defmodule Core.Response do
   def plan(si, mood \\ %{})
 
   def plan(si, mood) when is_map(si) and is_map(mood) do
+    mood = AffectPolicy.normalize(mood)
     intent0 = Map.get(si, :intent, :unknown)
     conf = clamp01(Map.get(si, :confidence, 0.0))
     text_in = si_text(si)
@@ -108,7 +110,11 @@ defmodule Core.Response do
             extracted_name: extracted_name,
             comprehension: Map.get(si, :comprehension),
             prefrontal: Map.get(si, :prefrontal),
-            control_signals: Map.get(si, :control_signals)
+            control_signals: Map.get(si, :control_signals),
+            response_policy: Map.get(mood, :response_policy),
+            turn_context: Map.get(si, :turn_context),
+            symbolic_frame: Map.get(si, :symbolic_frame),
+            self_model: Map.get(si, :self_model)
           })
 
         {decision, skill} = decide_and_pick_skill(features, guard, text_in)
@@ -120,7 +126,7 @@ defmodule Core.Response do
 
         text0 =
           forced_identity ||
-            inline_skill_text(skill) ||
+            deterministic_inline_text(skill) ||
             llm_or_template(text_in, features, decision, mood, intent)
 
         {text, curiosity_probe} =
@@ -208,6 +214,8 @@ defmodule Core.Response do
   # ─────────────────────────────────────────────────────────────────────────────
 
   defp mood_sample(mood) do
+    mood = AffectPolicy.normalize(mood)
+
     {
       getv(mood, :vigilance),
       getv(mood, :inhibition),
@@ -253,7 +261,11 @@ defmodule Core.Response do
          extracted_name: extracted_name,
          comprehension: comprehension,
          prefrontal: prefrontal,
-         control_signals: control_signals
+         control_signals: control_signals,
+         response_policy: response_policy,
+         turn_context: turn_context,
+         symbolic_frame: symbolic_frame,
+         self_model: self_model
        }) do
     %{
       session_id: session_id,
@@ -280,7 +292,11 @@ defmodule Core.Response do
       user_name: extracted_name,
       comprehension: comprehension,
       prefrontal: prefrontal,
-      control_signals: control_signals
+      control_signals: control_signals,
+      response_policy: response_policy,
+      turn_context: turn_context,
+      symbolic_frame: symbolic_frame,
+      self_model: self_model
     }
   end
 
@@ -337,9 +353,72 @@ defmodule Core.Response do
   defp llm_or_template(text_in, features, decision, mood, intent) do
     case LlmSynthesis.generate(text_in, features, decision, mood) do
       {:ok, llm_text} -> llm_text
-      {:error, _} -> Modes.compose(intent, decision.tone, decision.mode)
+
+      {:error, _} ->
+        Modes.compose(
+          intent,
+          decision.tone,
+          decision.mode,
+          template_opts(text_in, features, decision)
+        )
     end
   end
+
+  defp template_opts(text_in, features, decision) do
+    %{
+      text: text_in,
+      variant_seed:
+        :erlang.phash2(
+          {text_in, Map.get(features, :intent), Map.get(features, :confidence_bucket),
+           Map.get(decision, :tone), Map.get(decision, :mode), Map.get(decision, :action)}
+        ),
+      next_step: template_next_step(features, decision),
+      file_hint: template_file_hint(text_in, features)
+    }
+  end
+
+  defp template_next_step(features, decision) do
+    cond do
+      Map.get(features, :guardrail?) or Map.get(features, :risk_bucket) == :high ->
+        "Give a brief safe redirect."
+
+      Map.get(features, :confidence_bucket) == :low or comprehension_degraded?(features) ->
+        "State what is understood, then ask one targeted question only if necessary."
+
+      Map.get(decision, :action) == :act_first ->
+        "Make the next concrete engineering move."
+
+      Map.get(decision, :mode) == :explainer ->
+        "Explain from the available Symbrella evidence without implying sentience."
+
+      true ->
+        nil
+    end
+  end
+
+  defp comprehension_degraded?(features) do
+    comprehension = Map.get(features, :comprehension)
+
+    lifg_degraded? =
+      case Map.get(features, :symbolic_frame) do
+        %{lifg: %{degraded?: true}} -> true
+        %{"lifg" => %{"degraded?" => true}} -> true
+        _ -> false
+      end
+
+    (is_map(comprehension) and Map.get(comprehension, :degraded?) == true) or lifg_degraded?
+  end
+
+  defp template_file_hint(_text_in, %{file_hint: hint}) when is_binary(hint), do: hint
+
+  defp template_file_hint(text_in, _features) when is_binary(text_in) do
+    case Regex.run(~r/(?:apps|lib|test|config)\/[A-Za-z0-9_\.\/-]+/u, text_in) do
+      [hint | _] -> hint
+      _ -> nil
+    end
+  end
+
+  defp template_file_hint(_text_in, _features), do: nil
 
   defp maybe_append_curiosity_question(text, si, mood, features, decision, guard, skill)
        when is_binary(text) do
@@ -654,6 +733,21 @@ defmodule Core.Response do
              "I can't help with buying drugs or getting wasted. I can help with safety, health risks, or getting support instead."
          }}
 
+      trust_repair_turn?(features) ->
+        decision =
+          decision
+          |> put_decision(tone: :deescalate, mode: :chat, action: :trust_repair)
+          |> put_in([:scores, :profile], :trust_repair)
+          |> add_decision_override(:trust_repair)
+
+        {decision,
+         %{
+           id: :trust_repair,
+           reason: :trust_rupture,
+           inline_text:
+             "You may be right to challenge me. I might have misread something or overstated it. Show me what felt dishonest, and I'll trace it plainly."
+         }}
+
       # Time questions should answer with a direct time snippet (not the dev menu).
       time_query?(text) ->
         decision =
@@ -681,10 +775,23 @@ defmodule Core.Response do
            inline_text: SelfStateSummary.mood_indices_answer()
          }}
 
+      self_state_feeling_query?(text) ->
+        decision =
+          decision
+          |> put_decision(tone: :neutral, mode: :explainer, action: :answer)
+          |> add_decision_override(:self_state_feeling_answer)
+
+        {decision,
+         %{
+           id: :self_state_feeling,
+           reason: :self_state_feeling_query,
+           inline_text: SelfStateSummary.feeling_answer()
+         }}
+
       self_portrait_query?(text) ->
         decision =
           decision
-          |> put_decision(mode: :explainer, action: :answer)
+          |> put_decision(tone: :neutral, mode: :explainer, action: :answer)
           |> add_decision_override(:self_portrait_answer)
 
         {decision,
@@ -721,33 +828,6 @@ defmodule Core.Response do
              "I can't set a real device alarm yet. I can help you phrase one or keep a note here, but I don't have a phone/OS alarm integration wired in."
          }}
 
-      casual_chat?(text) ->
-        decision =
-          decision
-          |> put_decision(tone: :warm, mode: :chat, action: :answer)
-          |> add_decision_override(:casual_chat_answer)
-
-        {decision,
-         %{
-           id: :casual_chat,
-           reason: :casual_chat,
-           inline_text: casual_chat_inline_text(text)
-         }}
-
-      # Greetings should greet in chat mode (not “pick one: full file / fix / plan”).
-      intent in [:greet] and features.benign? and not features.hostile? ->
-        decision =
-          decision
-          |> put_decision(tone: :warm, mode: :chat, action: :greet)
-          |> add_decision_override(:greet_override)
-
-        {decision,
-         %{
-           id: :greet,
-           reason: :greet,
-           inline_text: greet_inline_text(text)
-         }}
-
       true ->
         {decision, nil}
     end
@@ -764,6 +844,27 @@ defmodule Core.Response do
 
   defp time_query?(_), do: false
 
+  defp trust_repair_turn?(features) when is_map(features) do
+    policy = Map.get(features, :response_policy, %{})
+
+    trust_policy? =
+      Map.get(policy, :social_state) == :trust_rupture or
+        Map.get(policy, :next_action) == :invite_correction
+
+    trust_language?(Map.get(features, :text, "")) and trust_policy?
+  end
+
+  defp trust_repair_turn?(_), do: false
+
+  defp trust_language?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(liar|lying|lied|dishonest|not honest|bullshit|gaslighting|made that up|making that up)\b/iu,
+      text
+    )
+  end
+
+  defp trust_language?(_), do: false
+
   defp mood_indices_query?(text) when is_binary(text) do
     t = String.downcase(text)
 
@@ -772,6 +873,17 @@ defmodule Core.Response do
   end
 
   defp mood_indices_query?(_), do: false
+
+  defp self_state_feeling_query?(text) when is_binary(text) do
+    t = String.downcase(text)
+
+    Regex.match?(
+      ~r/\b(how are you feeling|how do you feel|how are you doing|how are you|are you ok|are you okay)\b/u,
+      t
+    )
+  end
+
+  defp self_state_feeling_query?(_), do: false
 
   defp self_portrait_query?(text) when is_binary(text) do
     t = String.downcase(text)
@@ -804,49 +916,6 @@ defmodule Core.Response do
   end
 
   defp alarm_request?(_), do: false
-
-  defp casual_chat?(text) when is_binary(text) do
-    t = String.downcase(text) |> String.trim()
-
-    Regex.match?(~r/^(?:ha)+h?[\p{P}\s]*$/u, t) or
-      Regex.match?(~r/^(lol|lmao|rofl)[\p{P}\s]*$/u, t) or
-      Regex.match?(
-        ~r/\b(that was|this is|that is|that'?s)\s+(interesting|funny|wild|cool|neat|weird)\b/u,
-        t
-      ) or
-      Regex.match?(~r/\b((?:ha)+h?|lol|lmao)\b/u, t)
-  end
-
-  defp casual_chat?(_), do: false
-
-  defp casual_chat_inline_text(text) do
-    t = String.downcase(to_string(text))
-
-    cond do
-      String.contains?(t, "interesting") ->
-        "Yeah, that was an interesting one."
-
-      String.contains?(t, "funny") or Regex.match?(~r/\b((?:ha)+h?|lol|lmao)\b/u, t) ->
-        "Haha, yeah."
-
-      true ->
-        "Yeah, I am with you."
-    end
-  end
-
-  defp greet_inline_text(text) do
-    t = String.downcase(to_string(text))
-
-    cond do
-      String.contains?(t, "good morning") -> "Good morning 👋"
-      String.contains?(t, "good afternoon") -> "Good afternoon 👋"
-      String.contains?(t, "good evening") -> "Good evening 👋"
-      String.contains?(t, "good night") -> "Good night 👋"
-      String.contains?(t, "hello") -> "Hello 👋"
-      String.contains?(t, "hi") -> "Hi 👋"
-      true -> "Hey 👋"
-    end
-  end
 
   defp time_inline_text() do
     # Prefer America/Vancouver when tzdata is available; fall back to UTC.
@@ -881,7 +950,7 @@ defmodule Core.Response do
     scores = decision.scores || %{}
 
     case Map.get(scores, :profile) do
-      p when p in [:warm_collaborator, :gentle_bug_coach, :calm_explainer] ->
+      p when p in [:warm_collaborator, :gentle_bug_coach, :calm_explainer, :trust_repair] ->
         p
 
       _ ->
@@ -1036,6 +1105,12 @@ defmodule Core.Response do
       asking_for_user_name?(text) ->
         nil
 
+      self_check_query?(text) ->
+        nil
+
+      question_shaped?(text) ->
+        nil
+
       extract_fact_query_key(text) ->
         nil
 
@@ -1070,6 +1145,15 @@ defmodule Core.Response do
   end
 
   defp extract_fact_query_key(_), do: nil
+
+  defp question_shaped?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/^\s*(?:who|what|when|where|why|how|do|does|did|can|could|will|would|should|is|are|am|have|has|had|may|might|was|were)\b/iu,
+      text
+    ) or String.contains?(text, "?")
+  end
+
+  defp question_shaped?(_), do: false
 
   defp extract_location_fact(text) when is_binary(text) do
     case Regex.run(
@@ -1180,8 +1264,21 @@ defmodule Core.Response do
   defp add_override(map, flag) when is_map(map), do: Map.put(map, flag, true)
   defp add_override(other, flag), do: Enum.uniq([flag, other])
 
-  defp inline_skill_text(%{inline_text: s}) when is_binary(s) and s != "", do: s
-  defp inline_skill_text(_), do: nil
+  defp deterministic_inline_text(%{id: id, inline_text: s})
+       when id in [
+              :illicit_request_redirect,
+              :time,
+              :mood_indices,
+              :self_state_feeling,
+              :self_portrait,
+              :runtime_self_check,
+              :trust_repair,
+              :alarm_capability
+            ] and is_binary(s) and s != "" do
+    s
+  end
+
+  defp deterministic_inline_text(_), do: nil
 
   # ────────────────────────────────────────────────────────────────────────────
   # Utils (local)

@@ -2,6 +2,8 @@ defmodule Brain.SelfCalibration.AxonPredictorTest do
   use ExUnit.Case, async: true
 
   alias Brain.SelfCalibration.AxonPredictor
+  alias Brain.SelfCalibration.Artifact
+  alias Brain.SelfCalibration.AxonModel
   alias Brain.SelfCalibration.Comparison
   alias Brain.SelfCalibration.Dataset
   alias Brain.SelfCalibration.Evaluation

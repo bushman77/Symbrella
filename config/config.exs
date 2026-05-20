@@ -20,8 +20,17 @@ config :core, Core.Recall.Synonyms,
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity,
+  llm_client: Llm,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
+
+config :core, :llm_synthesis,
+  timeout_ms: 15_000,
+  history_turn_pairs: 6,
+  max_item_chars: 1_600,
+  max_system_chars: 8_000,
+  max_user_chars: 2_000,
+  degraded_acc_conflict_min: 0.5
 
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
@@ -85,10 +94,10 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path:
-    Path.expand("\~/models/qwen3-4b-instruct-2507/Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"),
+  model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
+  # model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
   llama_server: "llama-server",
-  auto_start_on_boot?: true,
+  auto_start_on_boot?: false,
   allow_lazy_start?: true,
   auto_restart_on_crash?: true,
   host: "127.0.0.1",
@@ -96,6 +105,43 @@ config :llm, Llm,
   ctx: 2048,
   threads: 4,
   heartbeat_ms: 15_000
+
+config :llm, Llm.BootGate,
+  enabled?: true,
+  timeout: 120_000
+
+config :llm, :runner,
+  host: "127.0.0.1",
+  ctx: 2048,
+  threads: 4,
+  temperature: 0.4,
+  call_timeout_ms: 60_000,
+  heartbeat_ms: 15_000,
+  ready_poll_attempts: 80,
+  ready_poll_sleep_ms: 250,
+  models_timeout_cap_ms: 8_000,
+  ready_probe_timeout_ms: 1_250,
+  log_ring_max: 200,
+  backoff_min_ms: 250,
+  backoff_max_ms: 10_000,
+  line_buffer: 16_384,
+  body_preview_chars: 2_000,
+  log_line_chars: 4_000
+
+config :llm, :generation,
+  chat_model: "local",
+  embedding_model: "local",
+  stream?: false,
+  temperature: 0.4,
+  keep_alive: "10m",
+  stable_runner_opts: %{
+    num_ctx: 1024,
+    top_k: 1,
+    top_p: 1.0,
+    repeat_penalty: 1.0,
+    seed: 42,
+    num_predict: 80
+  }
 
 config :symbrella,
   resolve_input_opts: [mode: :prod, enrich_lexicon?: true, lexicon_stage?: true]

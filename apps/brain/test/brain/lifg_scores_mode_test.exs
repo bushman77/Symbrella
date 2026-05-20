@@ -14,9 +14,9 @@ defmodule Brain.LIFGScoresModeTest do
       tokens: [%{index: 0, phrase: "x"}],
       sense_candidates: %{
         0 => [
-          %{id: "a", features: %{lex_fit: 1.0}},
-          %{id: "b", features: %{lex_fit: 0.9}},
-          %{id: "c", features: %{lex_fit: 0.1}}
+          %{id: "x|sense|a", lemma: "x", features: %{lex_fit: 1.0}},
+          %{id: "x|sense|b", lemma: "x", features: %{lex_fit: 0.9}},
+          %{id: "x|sense|c", lemma: "x", features: %{lex_fit: 0.1}}
         ]
       }
     }
@@ -24,7 +24,7 @@ defmodule Brain.LIFGScoresModeTest do
     {:ok, %{choices: [ch]}} = Brain.LIFG.Stage1.run(si)
     # should only include top2 scores in the map
     assert map_size(ch.scores) in [1, 2]
-    refute Map.has_key?(ch.scores, "c")
+    refute Map.has_key?(ch.scores, "x|sense|c")
   end
 
   test "Stage1 opts override env scores mode" do
@@ -34,8 +34,8 @@ defmodule Brain.LIFGScoresModeTest do
       tokens: [%{index: 0, phrase: "x"}],
       sense_candidates: %{
         0 => [
-          %{id: "a", features: %{lex_fit: 1.0}},
-          %{id: "b", features: %{lex_fit: 0.9}}
+          %{id: "x|sense|a", lemma: "x", features: %{lex_fit: 1.0}},
+          %{id: "x|sense|b", lemma: "x", features: %{lex_fit: 0.9}}
         ]
       }
     }

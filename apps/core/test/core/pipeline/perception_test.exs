@@ -42,6 +42,6 @@ defmodule Core.Pipeline.PerceptionTest do
     assert ambiguity[0] > ambiguity[1]
     assert candidate_bias[0]["bank|noun|finance"] > candidate_bias[0]["bank|noun|river-edge"]
     assert phrase_coherence[1] > phrase_coherence[0]
-    assert [%{stage: :perception, backend: :deterministic} | _] = out.trace
+    assert [%{stage: :perception, meta: %{backend: :deterministic}} | _] = out.trace
   end
 end

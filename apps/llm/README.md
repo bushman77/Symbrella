@@ -11,6 +11,8 @@ starts or talks to the model backend.
 ## Current Role
 
 - Starts and supervises a local `llama-server` OS process when configured.
+- Provides `Llm.BootGate` so the umbrella can block startup until the runner is
+  reachable.
 - Polls readiness and restarts after crashes when policy allows it.
 - Exposes OpenAI-compatible endpoints through `Req`:
   - `GET /v1/models`
@@ -51,13 +53,17 @@ Useful config keys:
 config :llm, Llm,
   model_path: "/path/to/model.gguf",
   llama_server: "llama-server",
-  auto_start_on_boot?: true,
+  auto_start_on_boot?: false,
   allow_lazy_start?: true,
   auto_restart_on_crash?: true,
   host: "127.0.0.1",
   port: 0,
   ctx: 2048,
   threads: 4
+
+config :llm, Llm.BootGate,
+  enabled?: true,
+  timeout: 120_000
 ```
 
 ## Boundaries

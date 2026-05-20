@@ -220,11 +220,15 @@ end
 if config_env() != :test do
   config :llm, Llm,
     # keep daemon up
-    auto_start_on_boot?: true,
+    auto_start_on_boot?: false,
     # optional: prefetch model
     pull_on_boot?: true,
     # <- critical: DO NOT warm on boot
     warm_on_boot?: false,
     warm_on_restart?: false,
     pull_on_restart?: false
+
+  config :llm, Llm.BootGate,
+    enabled?: true,
+    timeout: 120_000
 end

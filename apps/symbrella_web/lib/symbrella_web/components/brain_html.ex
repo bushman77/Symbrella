@@ -586,6 +586,9 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp preview_env(%{} = env) do
     case {mget(env, :kind), mget(env, :event)} do
+      {:ml_turn, _} ->
+        preview_ml_turn(env)
+
       {:telemetry, [:brain, :self_portrait, :monitor]} ->
         meta = mget(env, :meta) || %{}
         issue = mget(meta, :issue) || :unknown
@@ -599,6 +602,26 @@ defmodule SymbrellaWeb.BrainHTML do
   end
 
   defp preview_env(env), do: inspect_preview(env)
+
+  defp preview_ml_turn(%{} = env) do
+    turn = mget(env, :turn) || %{}
+    response = mget(turn, :response) || %{}
+
+    case mget(response, :assistant_text) do
+      text when is_binary(text) and text != "" ->
+        profile = mget(response, :response_profile) || "response"
+        mode = mget(response, :mode) || "mode?"
+
+        "ml_turn response: #{profile} #{mode} #{preview_text(text)}"
+
+      _ ->
+        "ml_turn #{mget(env, :hint) || "turn record"}"
+    end
+  end
+
+  defp preview_text(text) when is_binary(text) do
+    if byte_size(text) > 80, do: binary_part(text, 0, 80) <> "…", else: text
+  end
 
   defp inspect_preview(env) do
     s = inspect(env, pretty: false, limit: 50, printable_limit: 300)

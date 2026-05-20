@@ -30,9 +30,10 @@ defmodule Core.Response.PlanWarmCollaboratorFlowTest do
     assert meta.intent_inferred == :refactor
     assert meta.profile == :warm_collaborator
 
-    # Text should look like warm collaborator, not greeting/coach/editor.
-    assert text =~ "path"
-    assert text =~ "full file"
-    assert text =~ "paste-ready"
+    # With no LLM registered in this test, text comes from the deterministic fallback.
+    assert text =~ "Suggested next step: Make the next concrete engineering move."
+    refute text =~ "full file"
+    refute text =~ "paste-ready"
+    refute text =~ "drop-in"
   end
 end

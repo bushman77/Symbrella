@@ -31,6 +31,7 @@ runtime behavior until the code owns them.
 Brain.MoodCore raw levels
   -> derived mood indices
   -> tone_hint telemetry/snapshot
+  -> Core.Response.AffectPolicy response policy
   -> Core.Response.Personality bounded response state
   -> Core.Response.LlmPrompt system prompt
   -> LLM response behavior
@@ -51,6 +52,7 @@ These modules own the current implementation:
 | Intent nudges | `Brain.MoodPolicy` and `Brain.MoodCore.apply_intent/2` | Convert intent or intent telemetry into small bounded deltas |
 | Appraisal nudges | `Brain.MoodCore.apply_appraisal/1` | Convert V/A/D plus tags into bounded deltas |
 | Mood scoring helpers | `Brain.MoodWeights` | Convert mood snapshots into bounded score bias for Brain scoring paths |
+| Response affect policy | `Core.Response.AffectPolicy` | Convert raw `%{da, "5ht", glu, ne}` state into derived mood indices, interpreted state, and prompt-facing response policy |
 | Response personality | `Core.Response.Personality` | Convert mood/runtime evidence into prompt-facing response posture |
 | Prompt construction | `Core.Response.LlmPrompt` | Write mood, runtime, personality, affect, decision, and WM into the LLM system prompt |
 | LLM call boundary | `Core.Response.LlmSynthesis` | Collect runtime evidence, build the prompt, call `Llm`, and retain prompt summary metadata |
@@ -147,6 +149,50 @@ Thresholds live in `config/mood.exs` under `config :brain, :mood_tone`.
 
 Tone hint is advisory. It may steer prompt tone, but it must not override
 guardrails, comprehension failures, or explicit user intent.
+
+## Response Policy
+
+`Core.Response.AffectPolicy` is the deterministic adapter for the raw umbrella
+object discussed in design notes:
+
+```elixir
+%{da: 0.52, "5ht": 0.68, glu: 0.46, ne: 0.44}
+```
+
+That object must not be handed to an LLM as if the model naturally understands
+the intended behavior. The adapter normalizes raw modulators into:
+
+```elixir
+%{
+  raw_modulators: %{da: 0.52, "5ht": 0.68, glu: 0.46, ne: 0.44},
+  interpreted_state: %{
+    exploration: :mild,
+    inhibition: :high,
+    plasticity: :mild,
+    vigilance: :mild
+  },
+  response_policy: %{
+    social_state: :ordinary,
+    tone: :warm_grounded,
+    verbosity: :concise,
+    curiosity: :light,
+    caution: :normal,
+    emotional_pressure: :low
+  }
+}
+```
+
+`Core.Response.LlmPrompt` includes the response policy as behavioral instruction
+and keeps raw modulator names framed as software control signals. This is the
+reliability boundary: the LLM is instructed to respond warmly, calmly, briefly,
+carefully, or curiously according to the policy, not asked to infer behavior
+from neurotransmitter labels.
+
+Conflict-heavy social turns get a stronger veto. When norepinephrine-like
+vigilance is high enough and serotonin-like inhibition is reduced, the adapter
+marks `social_state: :trust_rupture`, `tone: :calm_accountable`, and
+`next_action: :invite_correction`. The response planner must not let
+engineering fallback text win in that state.
 
 ## Personality State
 
@@ -323,14 +369,16 @@ For ordinary changes to the current four-modulator prompt behavior:
    or tone selection change.
 2. Update `config/mood.exs` only if thresholds, baselines, half-lives, or gains
    change.
-3. Update `Core.Response.Personality` if derived mood should affect behavior
+3. Update `Core.Response.AffectPolicy` if raw modulator values should map to
+   different interpreted states or prompt-facing response policy.
+4. Update `Core.Response.Personality` if derived mood should affect behavior
    fields differently.
-4. Update `Core.Response.LlmPrompt` if prompt text, prompt sections, or boundary
+5. Update `Core.Response.LlmPrompt` if prompt text, prompt sections, or boundary
    language changes.
-5. Update `Core.Response.LlmSynthesis` only if runtime evidence collection or
+6. Update `Core.Response.LlmSynthesis` only if runtime evidence collection or
    prompt metadata changes.
-6. Add or adjust tests in the required test areas.
-7. Update this document in the same change.
+7. Add or adjust tests in the required test areas.
+8. Update this document in the same change.
 
 ## Extension Rules
 
@@ -340,8 +388,9 @@ Before adding a new modulator:
 2. Define decay, baseline, clamping, and telemetry fields.
 3. Define derived indices or update existing formulas.
 4. Update `Core.Response.Personality` mappings.
-5. Update `Core.Response.LlmPrompt` prompt sections.
-6. Add focused tests for the new behavior.
-7. Update this contract and `config/mood.exs`.
+5. Update `Core.Response.AffectPolicy` mappings.
+6. Update `Core.Response.LlmPrompt` prompt sections.
+7. Add focused tests for the new behavior.
+8. Update this contract and `config/mood.exs`.
 
 Do not add prompt language for a modulator that is only a design idea.

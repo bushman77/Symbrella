@@ -8,7 +8,7 @@ defmodule Core.Response.CasualChatFlowTest do
     tone_hint: nil
   }
 
-  test "casual reactions do not fall into the scribe TODO template" do
+  test "casual reactions route through LLM/fallback instead of inline chat templates" do
     si = %{
       intent: :unknown,
       confidence: 0.2,
@@ -17,21 +17,22 @@ defmodule Core.Response.CasualChatFlowTest do
 
     {tone, text, meta} = Response.plan(si, @mood)
 
-    assert tone == :warm
-    assert meta.action == :answer
-    assert :casual_chat_answer in meta.overrides
-    assert text =~ "interesting"
+    assert tone == :neutral
+    assert meta.mode == :scribe
+    assert meta.action == :offer_options
+    refute :casual_chat_answer in meta.overrides
     refute text =~ "quick TODO list"
     refute text =~ "short outline"
+    refute text =~ "interesting one"
   end
 
-  test "laughter-only turns get a conversational fallback" do
+  test "laughter-only turns do not use a canned inline laugh response" do
     si = %{intent: :unknown, confidence: 0.1, text: "hahahah"}
 
     {_tone, text, meta} = Response.plan(si, @mood)
 
-    assert :casual_chat_answer in meta.overrides
-    assert text =~ "Haha"
+    refute :casual_chat_answer in meta.overrides
+    refute text =~ "Haha"
     refute text =~ "quick TODO list"
   end
 

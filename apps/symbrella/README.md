@@ -16,7 +16,7 @@ runtime and cross-app services.
 - `Brain.Registry` and `Brain.CellSup`
 - `Symbrella.TaskSup`
 - `Lexicon.Finch`
-- the local `Llm` runner
+- the local `Llm` runner and boot gate, which waits for `llama-server`
 - Brain mood and policy services
 - LIFG Stage-1 scoring
 - Brain regions such as Amygdala, Cerebellum, LIFG, PMTG, ATL, Curiosity,

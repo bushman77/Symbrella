@@ -51,4 +51,28 @@ defmodule Core.Response.MoodIndicesFlowTest do
     refute text =~ "short outline"
     refute text =~ "reflect a calm"
   end
+
+  test "answers feeling questions from live neuromodulator self-state" do
+    si = %{
+      intent: :question,
+      confidence: 0.9,
+      text: "how are you feeling?"
+    }
+
+    {tone, text, meta} = Response.plan(si, %{})
+
+    assert tone == :neutral
+    assert meta.mode == :explainer
+    assert meta.action == :answer
+    assert meta.chosen_skill == :self_state_feeling
+    assert :self_state_feeling_answer in meta.overrides
+
+    assert text =~ "software self-state"
+    assert text =~ "Exploration:"
+    assert text =~ "Raw modulators:"
+    assert text =~ "ne=0.53"
+    assert text =~ "cautious emergency attention"
+
+    refute text =~ "How can I assist you today"
+  end
 end

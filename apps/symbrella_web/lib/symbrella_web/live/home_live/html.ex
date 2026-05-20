@@ -29,10 +29,12 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   # Explain button (passes id + text as fallback)
   attr :msg_id, :string, required: true
   attr :text, :string, default: ""
+  attr :mods, :map, default: %{}
 
   def assistant_actions(assigns) do
     ~H"""
-    <div class="mt-2 flex justify-end">
+    <div class="mt-2 flex flex-wrap items-center justify-end gap-2">
+      <.neuromod_badge mods={@mods} />
       <button
         type="button"
         phx-click="explain_open"
@@ -42,6 +44,32 @@ defmodule SymbrellaWeb.ChatLive.HTML do
       >
         Explain
       </button>
+    </div>
+    """
+  end
+
+  attr :mods, :map, default: %{}
+
+  def neuromod_badge(assigns) do
+    ~H"""
+    <div
+      :if={neuromod_available?(@mods)}
+      class="flex flex-wrap items-center justify-end gap-1 text-[10px] leading-none text-slate-300"
+      title={neuromod_title(@mods)}
+      aria-label={neuromod_title(@mods)}
+    >
+      <span class="rounded-lg border border-slate-700/70 bg-slate-950/35 px-1.5 py-1">
+        da {fmt_mod(raw_mod(@mods, :da))}
+      </span>
+      <span class="rounded-lg border border-slate-700/70 bg-slate-950/35 px-1.5 py-1">
+        5ht {fmt_mod(raw_mod(@mods, :"5ht"))}
+      </span>
+      <span class="rounded-lg border border-slate-700/70 bg-slate-950/35 px-1.5 py-1">
+        glu {fmt_mod(raw_mod(@mods, :glu))}
+      </span>
+      <span class="rounded-lg border border-slate-700/70 bg-slate-950/35 px-1.5 py-1">
+        ne {fmt_mod(raw_mod(@mods, :ne))}
+      </span>
     </div>
     """
   end
@@ -59,6 +87,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
           <.assistant_actions
             msg_id={message_id(@m, @dom_id)}
             text={to_string(@m.text || "")}
+            mods={Map.get(@m, :mods, %{})}
           />
         <% else %>
           <p class="whitespace-pre-wrap">{@m.text}</p>
@@ -206,4 +235,47 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   end
 
   defp split_lexical_tail(other), do: {to_string(other), nil}
+
+  defp neuromod_available?(mods) when is_map(mods) do
+    levels = Map.get(mods, :levels, %{})
+    mood = Map.get(mods, :mood, %{})
+    Enum.any?([:da, :"5ht", :glu, :ne], &is_number(map_get(levels, &1))) or
+      Enum.any?([:exploration, :inhibition, :vigilance, :plasticity], &is_number(map_get(mood, &1)))
+  end
+
+  defp neuromod_available?(_), do: false
+
+  defp raw_mod(mods, key) when is_map(mods), do: mods |> Map.get(:levels, %{}) |> map_get(key)
+  defp raw_mod(_, _), do: nil
+
+  defp fmt_mod(value) when is_number(value), do: :erlang.float_to_binary(value * 1.0, decimals: 2)
+  defp fmt_mod(_), do: "--"
+
+  defp neuromod_title(mods) do
+    mood = if is_map(mods), do: Map.get(mods, :mood, %{}), else: %{}
+    pressure = if is_map(mods), do: map_get(mods, :pressure_label), else: nil
+
+    [
+      "Neuromodulators",
+      "da=#{fmt_mod(raw_mod(mods, :da))}",
+      "5ht=#{fmt_mod(raw_mod(mods, :"5ht"))}",
+      "glu=#{fmt_mod(raw_mod(mods, :glu))}",
+      "ne=#{fmt_mod(raw_mod(mods, :ne))}",
+      "expl=#{fmt_mod(map_get(mood, :exploration))}",
+      "inhib=#{fmt_mod(map_get(mood, :inhibition))}",
+      "vigil=#{fmt_mod(map_get(mood, :vigilance))}",
+      "plast=#{fmt_mod(map_get(mood, :plasticity))}",
+      pressure && "pressure=#{pressure}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" | ")
+  end
+
+  defp map_get(map, key, default \\ nil)
+
+  defp map_get(map, key, default) when is_map(map) and is_atom(key) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
+
+  defp map_get(_, _, default), do: default
 end

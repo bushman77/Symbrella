@@ -25,6 +25,7 @@ defmodule Symbrella.Application do
       # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
       # NOTE: This is intentionally owned by the umbrella-root supervisor.
       {Llm, []},
+      {Llm.BootGate, []},
 
       # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
       {Brain.MoodCore, []},

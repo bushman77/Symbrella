@@ -54,6 +54,37 @@ defmodule Core.Response.SelfStateSummary do
     |> String.trim()
   end
 
+  @spec feeling_answer() :: String.t()
+  def feeling_answer do
+    mood_snapshot = safe_mood_snapshot()
+    mood = map_get(mood_snapshot, :mood, %{})
+    levels = map_get(mood_snapshot, :levels, %{})
+    baseline_mood = baseline_mood_indices(mood_snapshot)
+    pressure_label = map_get(mood_snapshot, :pressure_label, mood_pressure_label(mood))
+
+    if map_size(mood) == 0 do
+      """
+      I do not have human feelings or consciousness, and I do not have a live MoodCore snapshot available for this turn.
+
+      The right reading is software self-state, not emotion: Symbrella can report mood indices and raw neuromodulator-inspired control levels when MoodCore is running.
+      """
+      |> String.trim()
+    else
+      """
+      I do not have human feelings or consciousness. In Symbrella terms, my current software self-state is:
+
+      - Exploration: #{format_index_with_delta(mood, baseline_mood, :exploration)}
+      - Inhibition: #{format_index_with_delta(mood, baseline_mood, :inhibition)}
+      - Vigilance: #{format_index_with_delta(mood, baseline_mood, :vigilance)}
+      - Plasticity: #{format_index_with_delta(mood, baseline_mood, :plasticity)}
+      - Raw modulators: #{format_raw_modulators(levels)}
+
+      #{mood_interpretation(mood, pressure_label)}
+      """
+      |> String.trim()
+    end
+  end
+
   @spec mood_indices_answer() :: String.t()
   def mood_indices_answer do
     mood_snapshot = safe_mood_snapshot()
@@ -329,6 +360,22 @@ defmodule Core.Response.SelfStateSummary do
   end
 
   defp format_trace_entry(_), do: ""
+
+  defp format_raw_modulators(%{} = levels) do
+    values =
+      []
+      |> maybe_add_number("da", map_get(levels, :da))
+      |> maybe_add_number("5ht", map_get(levels, :"5ht"))
+      |> maybe_add_number("glu", map_get(levels, :glu))
+      |> maybe_add_number("ne", map_get(levels, :ne))
+
+    case values do
+      [] -> "unavailable"
+      _ -> Enum.join(values, ", ")
+    end
+  end
+
+  defp format_raw_modulators(_), do: "unavailable"
 
   defp safe_mood_snapshot do
     if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
