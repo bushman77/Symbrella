@@ -39,6 +39,7 @@ defmodule Brain.SelfModelTest do
     assert model.confidence == 0.6
     assert model.uncertainty == 0.4
     assert model.stability == 0.8
+    assert model.focus == :balanced
     assert model.vigilance == 0.9
     assert model.plasticity == 0.4
     assert model.inhibition == 0.3
@@ -73,6 +74,7 @@ defmodule Brain.SelfModelTest do
     assert model.confidence == 0.5
     assert model.uncertainty == 0.5
     assert model.stability == 0.5
+    assert model.focus == :balanced
     assert model.vigilance == 0.5
     assert model.plasticity == 0.5
     assert model.inhibition == 0.5
@@ -108,5 +110,36 @@ defmodule Brain.SelfModelTest do
     assert model.plasticity == 0.0
     assert model.inhibition == 1.0
     assert model.cognitive_load == 1.0
+  end
+
+  test "exports and imports versioned bounded snapshots" do
+    model = %Brain.SelfModel{
+      confidence: 1.4,
+      uncertainty: -0.2,
+      stability: 0.25,
+      focus: :clarify,
+      cognitive_load: 0.9,
+      active_goals: [:answer],
+      continuity: %{reboot_restored?: true},
+      v: 1
+    }
+
+    snapshot = Brain.SelfModel.export(model)
+
+    assert snapshot.v == 1
+    assert snapshot.confidence == 1.0
+    assert snapshot.uncertainty == 0.0
+    assert snapshot.focus == :clarify
+
+    assert {:ok, restored} = Brain.SelfModel.import(Map.put(snapshot, "focus", "stabilize"))
+    assert %Brain.SelfModel{} = restored
+    assert restored.confidence == 1.0
+    assert restored.uncertainty == 0.0
+    assert restored.focus == :clarify
+  end
+
+  test "rejects unsupported continuity snapshot versions" do
+    assert {:error, {:unsupported_version, 2}} =
+             Brain.SelfModel.import_continuity(%{v: 2, confidence: 0.5})
   end
 end

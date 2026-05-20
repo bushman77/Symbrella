@@ -122,13 +122,18 @@ defmodule Core.Response.Policy do
     {tone2, overrides2} = benign_override(base.tone, base.overrides, f)
     {tone3, overrides3} = anti_sticky(tone2, overrides2, f)
 
+    {base2, tone4, overrides4, self_state_effects} =
+      self_state_override(base, tone3, overrides3, f)
+
     %{
       policy_version: pv,
-      tone: tone3,
-      mode: base.mode,
-      action: base.action,
-      scores: Map.put(base.scores, :confidence_bucket, f.confidence_bucket),
-      overrides: overrides3
+      tone: tone4,
+      mode: base2.mode,
+      action: base2.action,
+      scores: Map.put(base2.scores, :confidence_bucket, f.confidence_bucket),
+      overrides: overrides4,
+      self_state: Map.get(f, :self_state, %{}),
+      self_state_effects: self_state_effects
     }
   end
 
@@ -301,6 +306,64 @@ defmodule Core.Response.Policy do
       {:neutral, [:anti_sticky | overrides]}
     else
       {tone, overrides}
+    end
+  end
+
+  defp self_state_override(base, tone, overrides, f) do
+    state = Map.get(f, :self_state, %{})
+    effects = state |> Map.get(:effects, []) |> List.wrap()
+
+    cond do
+      :stabilize_before_acting in effects ->
+        {
+          base
+          |> Map.put(:mode, :coach)
+          |> Map.put(:action, :ask_first)
+          |> Map.update(:scores, %{self_state: :stabilize}, &Map.put(&1, :self_state, :stabilize)),
+          :neutral,
+          [:self_state_stabilize | overrides],
+          effects
+        }
+
+      :reduce_scope in effects ->
+        {
+          base
+          |> Map.put(:mode, :coach)
+          |> Map.put(:action, :offer_options)
+          |> Map.update(
+            :scores,
+            %{self_state: :reduce_scope},
+            &Map.put(&1, :self_state, :reduce_scope)
+          ),
+          tone,
+          [:self_state_reduce_scope | overrides],
+          effects
+        }
+
+      :prefer_repair in effects ->
+        {
+          base
+          |> Map.put(:mode, :explainer)
+          |> Map.put(:action, :offer_options)
+          |> Map.update(:scores, %{self_state: :repair}, &Map.put(&1, :self_state, :repair)),
+          :neutral,
+          [:self_state_repair | overrides],
+          effects
+        }
+
+      :hedge_under_uncertainty in effects or :ask_clarifying_question in effects ->
+        {
+          base
+          |> Map.put(:mode, :coach)
+          |> Map.put(:action, :offer_options)
+          |> Map.update(:scores, %{self_state: :clarify}, &Map.put(&1, :self_state, :clarify)),
+          if(tone == :warm, do: :neutral, else: tone),
+          [:self_state_clarify | overrides],
+          effects
+        }
+
+      true ->
+        {base, tone, overrides, effects}
     end
   end
 

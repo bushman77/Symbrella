@@ -15,7 +15,9 @@ defmodule Brain.MetaMonitor do
     uncertainty: 0.75,
     stability: 0.25,
     cognitive_load: 0.85,
-    recent_errors: 1
+    recent_errors: 1,
+    contradiction_delta: 0.65,
+    stuck_loop_repeats: 3
   }
 
   @type warning_kind ::
@@ -23,6 +25,8 @@ defmodule Brain.MetaMonitor do
           | :low_stability
           | :high_cognitive_load
           | :recent_errors
+          | :contradiction
+          | :stuck_loop
 
   @type warning :: %{
           required(:kind) => warning_kind(),
@@ -39,6 +43,13 @@ defmodule Brain.MetaMonitor do
     thresholds = thresholds(opts)
 
     []
+    |> maybe_warn(
+      contradiction?(model, thresholds),
+      :contradiction,
+      abs(number(model.confidence) - number(model.uncertainty)),
+      thresholds.contradiction_delta,
+      :warning
+    )
     |> maybe_warn(
       model.uncertainty >= thresholds.uncertainty,
       :high_uncertainty,
@@ -67,7 +78,35 @@ defmodule Brain.MetaMonitor do
       thresholds.recent_errors,
       :warning
     )
+    |> maybe_warn(
+      stuck_loop?(model, thresholds),
+      :stuck_loop,
+      repeated_action_count(model),
+      thresholds.stuck_loop_repeats,
+      :warning
+    )
     |> Enum.reverse()
+  end
+
+  @doc """
+  Returns bounded repair suggestions for warning states.
+  """
+  @spec recovery_suggestions([warning()] | SelfModel.t()) :: [atom()]
+  def recovery_suggestions(%SelfModel{} = model),
+    do: model |> warnings() |> recovery_suggestions()
+
+  def recovery_suggestions(warnings) when is_list(warnings) do
+    warnings
+    |> Enum.flat_map(fn
+      %{kind: :high_uncertainty} -> [:ask_clarifying_question]
+      %{kind: :low_stability} -> [:slow_down, :prefer_evidence]
+      %{kind: :high_cognitive_load} -> [:reduce_scope, :defer_memory_writes]
+      %{kind: :recent_errors} -> [:run_self_check]
+      %{kind: :contradiction} -> [:surface_uncertainty, :prefer_evidence]
+      %{kind: :stuck_loop} -> [:change_strategy, :ask_for_target]
+      _ -> []
+    end)
+    |> Enum.uniq()
   end
 
   @doc """
@@ -111,6 +150,8 @@ defmodule Brain.MetaMonitor do
     |> Map.update!(:stability, &number/1)
     |> Map.update!(:cognitive_load, &number/1)
     |> Map.update!(:recent_errors, &number/1)
+    |> Map.update!(:contradiction_delta, &number/1)
+    |> Map.update!(:stuck_loop_repeats, &number/1)
   end
 
   defp recent_error_count(%SelfModel{} = model) do
@@ -134,10 +175,55 @@ defmodule Brain.MetaMonitor do
         v: @v,
         self_model_v: model.v,
         warning_kinds: Enum.map(warnings, & &1.kind),
-        severities: Enum.map(warnings, & &1.severity)
+        severities: Enum.map(warnings, & &1.severity),
+        recovery_suggestions: recovery_suggestions(warnings)
       }
     )
   end
+
+  defp contradiction?(%SelfModel{} = model, thresholds) do
+    high_confidence_and_uncertainty? =
+      model.confidence >= 0.75 and model.uncertainty >= 0.75
+
+    divergent_confidence? =
+      abs(number(model.confidence) - number(model.uncertainty)) >= thresholds.contradiction_delta and
+        model.stability <= 0.35
+
+    attribution_conflict? =
+      case model.self_other_attribution do
+        %{conflict?: true} -> true
+        %{"conflict?" => true} -> true
+        %{conflict: true} -> true
+        %{"conflict" => true} -> true
+        _ -> false
+      end
+
+    high_confidence_and_uncertainty? or divergent_confidence? or attribution_conflict?
+  end
+
+  defp stuck_loop?(%SelfModel{} = model, thresholds) do
+    repeated_action_count(model) >= thresholds.stuck_loop_repeats
+  end
+
+  defp repeated_action_count(%SelfModel{} = model) do
+    model.recent_actions
+    |> List.wrap()
+    |> Enum.map(&action_signature/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.frequencies()
+    |> Map.values()
+    |> case do
+      [] -> 0
+      counts -> Enum.max(counts)
+    end
+  end
+
+  defp action_signature(%{event: event}), do: event
+  defp action_signature(%{"event" => event}), do: event
+  defp action_signature(%{action: action}), do: action
+  defp action_signature(%{"action" => action}), do: action
+  defp action_signature(action) when is_atom(action) or is_binary(action), do: action
+  defp action_signature(_), do: nil
 
   defp severity_high(value, critical_at) when is_number(value) and value >= critical_at,
     do: :critical

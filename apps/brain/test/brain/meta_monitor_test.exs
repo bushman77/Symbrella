@@ -18,6 +18,36 @@ defmodule Brain.MetaMonitorTest do
     assert Enum.any?(warnings, &(&1.kind == :recent_errors))
   end
 
+  test "warnings/2 detects contradictions and stuck loops" do
+    warnings =
+      MetaMonitor.warnings(%SelfModel{
+        confidence: 0.9,
+        uncertainty: 0.9,
+        stability: 0.7,
+        recent_actions: [
+          %{action: :ask_clarifying_question},
+          %{action: :ask_clarifying_question},
+          %{action: :ask_clarifying_question}
+        ]
+      })
+
+    assert Enum.any?(warnings, &(&1.kind == :contradiction))
+    assert Enum.any?(warnings, &(&1.kind == :stuck_loop))
+  end
+
+  test "recovery_suggestions/1 maps warnings to bounded repair actions" do
+    suggestions =
+      MetaMonitor.recovery_suggestions([
+        %{kind: :high_cognitive_load},
+        %{kind: :contradiction},
+        %{kind: :stuck_loop}
+      ])
+
+    assert :reduce_scope in suggestions
+    assert :surface_uncertainty in suggestions
+    assert :change_strategy in suggestions
+  end
+
   test "warnings/2 returns empty list for stable self-model" do
     assert MetaMonitor.warnings(%SelfModel{
              uncertainty: 0.2,
@@ -59,6 +89,7 @@ defmodule Brain.MetaMonitorTest do
     assert meta.self_model_v == 1
     assert :high_uncertainty in meta.warning_kinds
     assert :low_stability in meta.warning_kinds
+    assert :prefer_evidence in meta.recovery_suggestions
 
     :telemetry.detach(handler_id)
   end

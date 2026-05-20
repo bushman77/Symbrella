@@ -177,6 +177,7 @@ defmodule Core.Response do
           })
 
         :telemetry.execute([:core, :response, :plan], %{}, meta)
+        emit_mode_selected(meta)
 
         {decision.tone, text, meta}
     end
@@ -267,6 +268,8 @@ defmodule Core.Response do
          symbolic_frame: symbolic_frame,
          self_model: self_model
        }) do
+    self_state = self_state_effects(self_model)
+
     %{
       session_id: session_id,
       intent_in: intent0,
@@ -296,7 +299,8 @@ defmodule Core.Response do
       response_policy: response_policy,
       turn_context: turn_context,
       symbolic_frame: symbolic_frame,
-      self_model: self_model
+      self_model: self_model,
+      self_state: self_state
     }
   end
 
@@ -352,7 +356,8 @@ defmodule Core.Response do
 
   defp llm_or_template(text_in, features, decision, mood, intent) do
     case LlmSynthesis.generate(text_in, features, decision, mood) do
-      {:ok, llm_text} -> llm_text
+      {:ok, llm_text} ->
+        llm_text
 
       {:error, _} ->
         Modes.compose(
@@ -422,8 +427,22 @@ defmodule Core.Response do
 
   defp maybe_append_curiosity_question(text, si, mood, features, decision, guard, skill)
        when is_binary(text) do
-    _ = {si, mood, features, decision, guard, skill}
-    {text, nil}
+    _ = {si, mood}
+
+    cond do
+      guard.guardrail? or skill != nil ->
+        {text, nil}
+
+      String.contains?(text, "?") ->
+        {text, nil}
+
+      curiosity_probe?(features, decision) ->
+        probe = curiosity_probe_text(features)
+        {text <> " " <> probe, %{text: probe, reason: :uncertainty_reduction}}
+
+      true ->
+        {text, nil}
+    end
   end
 
   defp maybe_append_curiosity_question(text, _si, _mood, _features, _decision, _guard, _skill),
@@ -473,9 +492,32 @@ defmodule Core.Response do
       session_id: session_id,
       user_name: extracted_name,
       explanation: planner_explanation,
-      curiosity_probe: curiosity_probe
+      curiosity_probe: curiosity_probe,
+      self_state: Map.get(decision, :self_state),
+      self_state_effects: Map.get(decision, :self_state_effects, [])
     }
   end
+
+  defp emit_mode_selected(meta) when is_map(meta) do
+    self_state = Map.get(meta, :self_state, %{})
+
+    :telemetry.execute(
+      [:brain, :response, :mode_selected],
+      %{count: 1},
+      %{
+        v: 1,
+        mode: Map.get(meta, :mode),
+        tone: Map.get(meta, :tone),
+        action: Map.get(meta, :action),
+        confidence: Map.get(meta, :confidence),
+        self_model_v: map_get(self_state, :v),
+        focus: map_get(self_state, :focus),
+        effects: Map.get(meta, :self_state_effects, [])
+      }
+    )
+  end
+
+  defp emit_mode_selected(_), do: :ok
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Durable name memory (Hippocampus)
@@ -1280,6 +1322,60 @@ defmodule Core.Response do
 
   defp deterministic_inline_text(_), do: nil
 
+  defp self_state_effects(nil), do: %{}
+
+  defp self_state_effects(self_model) when is_map(self_model) do
+    confidence = number(map_get(self_model, :confidence, 0.5))
+    uncertainty = number(map_get(self_model, :uncertainty, 0.5))
+    stability = number(map_get(self_model, :stability, 0.5))
+    cognitive_load = number(map_get(self_model, :cognitive_load, 0.0))
+    focus = normalize_focus(map_get(self_model, :focus, :balanced))
+
+    effects =
+      []
+      |> maybe_effect(uncertainty >= 0.7, :hedge_under_uncertainty)
+      |> maybe_effect(stability <= 0.35, :prefer_repair)
+      |> maybe_effect(cognitive_load >= 0.85, :reduce_scope)
+      |> maybe_effect(focus == :clarify, :ask_clarifying_question)
+      |> maybe_effect(focus == :stabilize, :stabilize_before_acting)
+      |> Enum.reverse()
+
+    %{
+      v: map_get(self_model, :v, 1),
+      confidence: clamp01(confidence),
+      uncertainty: clamp01(uncertainty),
+      stability: clamp01(stability),
+      cognitive_load: clamp01(cognitive_load),
+      focus: focus,
+      effects: effects
+    }
+  end
+
+  defp self_state_effects(_), do: %{}
+
+  defp maybe_effect(effects, true, effect), do: [effect | effects]
+  defp maybe_effect(effects, false, _effect), do: effects
+
+  defp curiosity_probe?(features, decision) do
+    self_state = Map.get(features, :self_state, %{})
+
+    uncertainty = map_get(self_state, :uncertainty, 0.0)
+    focus = map_get(self_state, :focus, :balanced)
+    effects = map_get(self_state, :effects, [])
+
+    effects != [] and
+      (Map.get(decision, :action) in [:offer_options, :ask_first] or
+         uncertainty >= 0.7 or focus == :clarify or :ask_clarifying_question in List.wrap(effects))
+  end
+
+  defp curiosity_probe_text(features) do
+    case map_get(Map.get(features, :self_state, %{}), :focus, :balanced) do
+      :clarify -> "What detail would reduce the uncertainty most?"
+      :stabilize -> "What should I verify first before moving further?"
+      _ -> "What is the most important detail to resolve next?"
+    end
+  end
+
   # ────────────────────────────────────────────────────────────────────────────
   # Utils (local)
   # ────────────────────────────────────────────────────────────────────────────
@@ -1296,6 +1392,31 @@ defmodule Core.Response do
     |> Map.get(:text, Map.get(si, :keyword, ""))
     |> to_string()
   end
+
+  defp map_get(map, key, default \\ nil)
+
+  defp map_get(map, key, default) when is_map(map),
+    do: Map.get(map, key, Map.get(map, to_string(key), default))
+
+  defp map_get(_map, _key, default), do: default
+
+  defp number(value) when is_integer(value), do: value * 1.0
+  defp number(value) when is_float(value), do: value
+  defp number(_), do: 0.0
+
+  defp normalize_focus(focus) when focus in [:balanced, :clarify, :execute, :stabilize],
+    do: focus
+
+  defp normalize_focus(focus) when is_binary(focus) do
+    case focus do
+      "clarify" -> :clarify
+      "execute" -> :execute
+      "stabilize" -> :stabilize
+      _ -> :balanced
+    end
+  end
+
+  defp normalize_focus(_), do: :balanced
 
   defp getv(mood, key) do
     case {get_in(mood, [:mood, key]), Map.get(mood, key)} do

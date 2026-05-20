@@ -222,6 +222,55 @@ defmodule Core.Response.PolicyTest do
     end
   end
 
+  describe "decide/1 – self-state coupling" do
+    test "high uncertainty shifts helpful work toward clarification" do
+      f =
+        features(%{
+          intent: :refactor,
+          intent_in: :refactor,
+          text: "fix the response planner",
+          confidence_bucket: :high,
+          self_state: %{
+            uncertainty: 0.82,
+            stability: 0.6,
+            cognitive_load: 0.2,
+            focus: :clarify,
+            effects: [:hedge_under_uncertainty, :ask_clarifying_question]
+          }
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.mode == :coach
+      assert decision.action == :offer_options
+      assert decision.tone == :neutral
+      assert :self_state_clarify in decision.overrides
+      assert :hedge_under_uncertainty in Map.get(decision, :self_state_effects)
+    end
+
+    test "overload shifts helpful work toward reduced scope" do
+      f =
+        features(%{
+          intent: :command,
+          intent_in: :command,
+          text: "implement the whole roadmap",
+          self_state: %{
+            uncertainty: 0.4,
+            stability: 0.7,
+            cognitive_load: 0.92,
+            focus: :stabilize,
+            effects: [:reduce_scope, :stabilize_before_acting]
+          }
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.mode == :coach
+      assert decision.action == :ask_first
+      assert :self_state_stabilize in decision.overrides
+    end
+  end
+
   describe "decide/1 – calm explainer profile" do
     test "self portrait question is recognized as brain meta" do
       f =
