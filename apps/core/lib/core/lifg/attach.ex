@@ -112,10 +112,17 @@ defmodule Core.LIFG.Attach do
                   {chosen_id, base_score}
               end
 
+            chosen_candidate = candidate_for_choice(si_after, token_index, chosen_id2)
+
             %{
               token_index: token_index,
-              lemma: token_norm,
+              lemma: choice_lemma(chosen_candidate, token_norm),
               id: chosen_id2,
+              pos: candidate_pos(chosen_candidate) || id_pos(chosen_id2),
+              source: candidate_source(chosen_candidate),
+              definition:
+                candidate_field(chosen_candidate, [:definition, :def, :gloss, :meaning]),
+              example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
               score: score2
             }
@@ -218,6 +225,43 @@ defmodule Core.LIFG.Attach do
       _ -> nil
     end
   end
+
+  defp candidate_for_choice(si, token_index, chosen_id)
+       when is_map(si) and is_integer(token_index) do
+    sc = Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates") || %{}
+
+    bucket =
+      Map.get(sc, token_index) ||
+        Map.get(sc, Integer.to_string(token_index)) ||
+        Map.get(sc, to_string(token_index)) ||
+        []
+
+    Enum.find(List.wrap(bucket), fn
+      %{} = cand -> candidate_field(cand, [:id, :chosen_id]) == chosen_id
+      _ -> false
+    end)
+  end
+
+  defp candidate_for_choice(_si, _token_index, _chosen_id), do: nil
+
+  defp choice_lemma(%{} = cand, fallback) do
+    candidate_field(cand, [:lemma, :canonical, :norm, :word]) || fallback
+  end
+
+  defp choice_lemma(_cand, fallback), do: fallback
+  defp candidate_pos(%{} = cand), do: candidate_field(cand, [:pos, :chosen_pos])
+  defp candidate_pos(_), do: nil
+
+  defp candidate_source(%{} = cand), do: candidate_field(cand, [:source, :src])
+  defp candidate_source(_), do: nil
+
+  defp candidate_field(%{} = cand, keys) when is_list(keys) do
+    Enum.find_value(keys, fn key ->
+      Map.get(cand, key) || Map.get(cand, Atom.to_string(key))
+    end)
+  end
+
+  defp candidate_field(_, _), do: nil
 
   # ───────────────────────── norm ─────────────────────────
 

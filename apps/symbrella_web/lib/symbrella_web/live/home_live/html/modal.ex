@@ -139,6 +139,12 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         get_in(message, [:from, :senses_selected]) ||
         []
 
+    symbolic_frame =
+      pget(message, :symbolic_frame) ||
+        message |> pget(:from, %{}) |> pget(:symbolic_frame)
+
+    action_selection = action_selection_from_message(message)
+
     bullets =
       extra_wo_meta
       |> parse_reading_bullets()
@@ -148,6 +154,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       []
       |> maybe_add_intent_tone_section(meta, meta_line)
       |> maybe_add_senses_selected_section(structured_senses, bullets)
+      |> maybe_add_event_frame_section(symbolic_frame)
+      |> maybe_add_action_selection_section(action_selection)
       |> maybe_add_similar_terms_section(bullets)
       |> maybe_add_antonyms_section(bullets)
       |> maybe_add_message_section(main)
@@ -193,7 +201,11 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           intent: pget(payload, :intent),
           confidence: pget(payload, :confidence),
           tone: pget(payload, :tone),
-          senses_selected: pget(payload, :senses_selected)
+          senses_selected: pget(payload, :senses_selected),
+          symbolic_frame: pget(payload, :symbolic_frame) || pget(from, :symbolic_frame),
+          selected_action: pget(payload, :selected_action),
+          action_candidates: pget(payload, :action_candidates),
+          action_meta: pget(payload, :action_meta)
         }
 
         built = explain_payload_for(msg)
@@ -343,6 +355,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       tone: message[:tone] || from[:tone_reaction] || parsed[:tone],
       because: message[:tone_because] || from[:source_latents] || parsed[:because],
       mode: message[:mode] || parsed[:mode],
+      response_source: message[:response_source] || from[:response_source],
+      response_fallback_reason:
+        message[:response_fallback_reason] || from[:response_fallback_reason],
       raw: parsed[:raw]
     }
     |> drop_blank(:because)
@@ -546,7 +561,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   defp maybe_add_intent_tone_section(sections, meta, meta_line) do
     has_any? =
       meta[:intent] || meta[:confidence] || meta[:tone] || meta[:because] || meta[:mode] ||
-        meta_line
+        meta[:response_source] || meta[:response_fallback_reason] || meta_line
 
     if has_any? do
       items =
@@ -556,6 +571,11 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("tone", meta[:tone] && ":#{meta[:tone]}")
         |> maybe_kv("because", meta[:because])
         |> maybe_kv("mode", meta[:mode])
+        |> maybe_kv("response source", meta[:response_source] && ":#{meta[:response_source]}")
+        |> maybe_kv(
+          "fallback reason",
+          meta[:response_fallback_reason] && ":#{meta[:response_fallback_reason]}"
+        )
         |> maybe_raw("raw line", meta[:raw], meta_line)
 
       sections ++
@@ -616,6 +636,212 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       sections
     end
   end
+
+  defp maybe_add_event_frame_section(sections, frame)
+       when is_map(frame) and map_size(frame) > 0 do
+    title =
+      frame
+      |> pget(:type, :event_frame)
+      |> format_frame_value()
+
+    items =
+      frame
+      |> event_frame_items()
+      |> Enum.map(fn {label, value} ->
+        %{label: label, body: format_frame_value(value)}
+      end)
+
+    sections ++
+      [
+        %{
+          key: :event_frame,
+          title: "Semantic event frame",
+          tag: title,
+          hint: "Structured meaning extracted from the selected senses and intent.",
+          items: items
+        }
+      ]
+  end
+
+  defp maybe_add_event_frame_section(sections, _), do: sections
+
+  defp maybe_add_action_selection_section(sections, action_selection)
+       when is_map(action_selection) and map_size(action_selection) > 0 do
+    selected = pget(action_selection, :selected)
+    action_meta = pget(action_selection, :meta, %{})
+    candidates = pget(action_selection, :candidates, [])
+
+    items =
+      []
+      |> maybe_kv("selected action", selected && format_frame_value(selected))
+      |> maybe_kv("safety gate", pget(action_meta, :safety_gate) |> format_optional_value())
+      |> maybe_kv("confidence", pget(action_meta, :confidence) |> format_optional_value())
+      |> maybe_kv("action candidates", format_action_candidates(candidates))
+
+    if items != [] do
+      sections ++
+        [
+          %{
+            key: :action_selection,
+            title: "Action selection",
+            tag: selected && format_frame_value(selected),
+            hint: "Agentic action chosen after semantic framing and safety gating.",
+            items: items
+          }
+        ]
+    else
+      sections
+    end
+  end
+
+  defp maybe_add_action_selection_section(sections, _), do: sections
+
+  defp action_selection_from_message(message) when is_map(message) do
+    from = pget(message, :from, %{})
+    direct_meta = pget(message, :action_meta)
+    response_action_meta = pget(from, :agent_action_meta)
+    meta = first_map([direct_meta, response_action_meta])
+
+    selected =
+      pget(message, :selected_action) ||
+        pget(meta, :selected) ||
+        pget(from, :agent_selected_action)
+
+    candidates =
+      pget(message, :action_candidates) ||
+        pget(meta, :candidates) ||
+        []
+
+    %{
+      selected: selected,
+      candidates: List.wrap(candidates),
+      meta: meta || %{}
+    }
+    |> Enum.reject(fn {_key, value} -> not frame_present?(value) end)
+    |> Map.new()
+  end
+
+  defp first_map(values) when is_list(values) do
+    Enum.find(values, &is_map/1)
+  end
+
+  defp format_optional_value(nil), do: nil
+  defp format_optional_value(value), do: format_frame_value(value)
+
+  defp format_action_candidates(candidates) when is_list(candidates) do
+    candidates
+    |> Enum.map(&format_action_candidate/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+    |> blank_to_nil()
+  end
+
+  defp format_action_candidates(_), do: nil
+
+  defp format_action_candidate(%{} = candidate) do
+    action = pget(candidate, :action) || pget(candidate, :selected)
+    score = pget(candidate, :score)
+    reason = pget(candidate, :reason)
+
+    [
+      maybe_format_candidate_part(action),
+      if(frame_present?(score), do: "score=#{format_frame_value(score)}"),
+      if(frame_present?(reason), do: "reason=#{format_frame_value(reason)}")
+    ]
+    |> Enum.filter(&present?/1)
+    |> Enum.join(" · ")
+  end
+
+  defp format_action_candidate(candidate), do: format_frame_value(candidate)
+
+  defp maybe_format_candidate_part(value) do
+    if frame_present?(value), do: format_frame_value(value)
+  end
+
+  defp event_frame_items(frame) when is_map(frame) do
+    preferred = [
+      :type,
+      :subject,
+      :event,
+      :medication,
+      :consequence,
+      :temporal_context,
+      :domain,
+      :polarity,
+      :confidence
+    ]
+
+    preferred_items =
+      preferred
+      |> Enum.filter(fn key -> frame_present?(pget(frame, key)) end)
+      |> Enum.map(fn key -> {format_frame_key(key), pget(frame, key)} end)
+
+    remaining_items =
+      frame
+      |> Enum.reject(fn {key, value} ->
+        normalized_key = normalize_frame_key(key)
+        normalized_key in preferred or not frame_present?(value)
+      end)
+      |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+      |> Enum.map(fn {key, value} -> {format_frame_key(key), value} end)
+
+    preferred_items ++ remaining_items
+  end
+
+  defp frame_present?(nil), do: false
+  defp frame_present?(""), do: false
+  defp frame_present?([]), do: false
+  defp frame_present?(map) when is_map(map), do: map_size(map) > 0
+  defp frame_present?(_), do: true
+  defp normalize_frame_key(key) when is_atom(key), do: key
+
+  defp normalize_frame_key(key) when is_binary(key) do
+    key
+    |> String.trim()
+    |> String.to_existing_atom()
+  rescue
+    ArgumentError -> key
+  end
+
+  defp normalize_frame_key(key), do: key
+
+  defp format_frame_key(key) when is_atom(key) do
+    key
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+  end
+
+  defp format_frame_key(key) when is_binary(key) do
+    key
+    |> String.trim()
+    |> String.replace("_", " ")
+  end
+
+  defp format_frame_key(key), do: to_string(key)
+
+  defp format_frame_value(nil), do: ""
+  defp format_frame_value(value) when is_atom(value), do: ":#{value}"
+
+  defp format_frame_value(value) when is_float(value) do
+    :erlang.float_to_binary(value, decimals: 2)
+  end
+
+  defp format_frame_value(value) when is_integer(value), do: Integer.to_string(value)
+  defp format_frame_value(value) when is_binary(value), do: value
+
+  defp format_frame_value(value) when is_list(value) do
+    value
+    |> Enum.map(&format_frame_value/1)
+    |> Enum.join(", ")
+  end
+
+  defp format_frame_value(value) when is_map(value) do
+    value
+    |> Enum.map(fn {k, v} -> "#{format_frame_key(k)}=#{format_frame_value(v)}" end)
+    |> Enum.join("\n")
+  end
+
+  defp format_frame_value(value), do: inspect(value)
 
   defp maybe_add_similar_terms_section(sections, bullets) when is_list(bullets) do
     sims =

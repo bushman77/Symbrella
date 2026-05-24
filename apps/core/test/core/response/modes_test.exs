@@ -46,5 +46,18 @@ defmodule Core.Response.ModesTest do
       refute text =~ "drop-in"
       assert text =~ "Relevant target: `apps/core/lib/core/response.ex`."
     end
+
+    test "health support fallback avoids engineering language" do
+      text = Modes.compose(:health_support, :warm, :supportive_care, %{})
+
+      assert text =~ "pharmacist or prescriber"
+      assert text =~ "missed medication dose"
+      assert text =~ "should not tell you how to change the dose"
+
+      refute text =~ "module"
+      refute text =~ "file"
+      refute text =~ "failing output"
+      refute text =~ "engineering move"
+    end
   end
 end

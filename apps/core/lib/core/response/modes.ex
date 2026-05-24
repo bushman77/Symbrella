@@ -24,6 +24,7 @@ defmodule Core.Response.Modes do
           | :smalltalk
           | :question
           | :instruction
+          | :health_support
           | :help
           | :command
           | :refactor
@@ -37,7 +38,7 @@ defmodule Core.Response.Modes do
           | :unknown
 
   @type tone :: :warm | :neutral | :firm | :deescalate
-  @type mode :: :collaborator | :coach | :scribe | :editor | :explainer
+  @type mode :: :collaborator | :coach | :scribe | :editor | :explainer | :supportive_care
 
   @type opts :: %{
           optional(:file_hint) => String.t(),
@@ -61,6 +62,10 @@ defmodule Core.Response.Modes do
   def compose(:illicit_request, _tone, _mode, _opts),
     do:
       "I can't help with buying drugs or getting wasted. I can help with safety, health risks, or getting support instead."
+
+  def compose(:health_support, _tone, _mode, _opts),
+    do:
+      "That sounds rough. If you are unsure what to do after a missed medication dose, check with your pharmacist or prescriber. I can help you set up a reminder plan or think through what to ask them, but I should not tell you how to change the dose."
 
   def compose(:greeting, _tone, _mode, raw_opts),
     do: greeting_text(normalize_opts(raw_opts))
@@ -88,7 +93,10 @@ defmodule Core.Response.Modes do
   def compose(_intent, :firm, _mode, raw_opts) do
     opts = normalize_opts(raw_opts)
 
-    with_file_hint("Got it. Send the concrete target or error and I'll keep the next step focused.", opts[:file_hint])
+    with_file_hint(
+      "Got it. Send the concrete target or error and I'll keep the next step focused.",
+      opts[:file_hint]
+    )
   end
 
   def compose(intent, tone, mode, raw_opts) do
@@ -154,7 +162,8 @@ defmodule Core.Response.Modes do
 
   defp stable_seed(intent, tone, mode, opts) do
     :erlang.phash2(
-      {intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag), Map.get(opts, :next_step)}
+      {intent, tone, mode, Map.get(opts, :file_hint), Map.get(opts, :flag),
+       Map.get(opts, :next_step)}
     )
   end
 end

@@ -65,6 +65,7 @@ defmodule Core.Intent.Selection do
   * `:illicit_request`
   * `:command`
   * `:feedback`
+  * `:health_support`
   * `:ask`
   * `:unknown`
 
@@ -79,6 +80,7 @@ defmodule Core.Intent.Selection do
           | :illicit_request
           | :command
           | :feedback
+          | :health_support
           | :ask
           | :ask_info
           | :brain_introspect
@@ -101,6 +103,7 @@ defmodule Core.Intent.Selection do
     :define,
     :translate,
     :command,
+    :health_support,
     :help,
     :ask_info,
     :feedback,
@@ -177,12 +180,19 @@ defmodule Core.Intent.Selection do
 
   def select(%{sentence: _} = si, _opts) do
     kw0 = extract_keyword(si)
-    kw = normalize_text(kw0)
+    kw_fuzzy = interpret_keyword(kw0)
+    kw = normalize_text(kw_fuzzy.text)
 
     text0 = text_from_si(si, kw)
-    text = normalize_text(text0)
+    text_fuzzy = Core.Text.Fuzzy.interpret(text0)
+    text = normalize_text(text_fuzzy.text)
+    primary = primary_utterance(text)
+    kw = primary_keyword(kw, primary)
 
-    {intent, conf, evidence} = infer_intent(kw, text, Map.get(si, :tokens, []))
+    {intent, conf, evidence0} = infer_intent(kw, text, primary, Map.get(si, :tokens, []))
+    fuzzy_evidence = fuzzy_evidence([kw_fuzzy, text_fuzzy])
+    opener_evidence = opener_evidence(primary)
+    evidence = evidence0 ++ fuzzy_evidence ++ opener_evidence
 
     si2 =
       si
@@ -190,6 +200,8 @@ defmodule Core.Intent.Selection do
       |> Map.put(:keyword, kw)
       |> Map.put(:confidence, conf)
       |> Map.put(:intent_evidence, evidence)
+      |> maybe_put_fuzzy_text(text_fuzzy)
+      |> maybe_put_primary_utterance(primary)
       |> Core.Pipeline.Trace.append(
         :intent,
         decision: intent,
@@ -204,20 +216,151 @@ defmodule Core.Intent.Selection do
 
   def select(si, _opts), do: si
 
+  defp interpret_keyword(kw) when is_binary(kw) do
+    if String.contains?(kw, ".") do
+      %{
+        original: kw,
+        normalized: kw,
+        text: kw,
+        corrections: [],
+        aliases: [],
+        confidence: 0.0,
+        evidence: []
+      }
+    else
+      Core.Text.Fuzzy.interpret(kw)
+    end
+  end
+
+  defp interpret_keyword(kw), do: Core.Text.Fuzzy.interpret(kw)
+
+  defp primary_keyword(kw, %{opener_intent: :greet, text: primary_text})
+       when is_binary(primary_text) and primary_text != "" do
+    if String.starts_with?(kw, "good ") or Regex.match?(~r/^(hello|hi|hey|yo)\b/u, kw) do
+      primary_text
+    else
+      kw
+    end
+  end
+
+  defp primary_keyword(kw, _primary), do: kw
+
+  defp maybe_put_primary_utterance(si, %{opener_intent: nil}), do: maybe_put_topic_metadata(si)
+
+  defp maybe_put_primary_utterance(si, primary) do
+    si
+    |> Map.put(:opener_intent, primary.opener_intent)
+    |> Map.put(:opener_text, primary.opener_text)
+    |> Map.put(:primary_text, primary.text)
+    |> maybe_put_topic_metadata()
+  end
+
+  defp maybe_put_topic_metadata(%{primary_text: text} = si), do: put_topic_metadata(si, text)
+
+  defp maybe_put_topic_metadata(%{fuzzy_text: %{text: text}} = si),
+    do: put_topic_metadata(si, text)
+
+  defp maybe_put_topic_metadata(%{sentence: text} = si), do: put_topic_metadata(si, text)
+  defp maybe_put_topic_metadata(si), do: si
+
+  defp put_topic_metadata(si, text) do
+    si
+    |> maybe_put(:conversation_act, conversation_act(text))
+    |> maybe_put(:topic_domain, topic_domain(text))
+  end
+
+  defp maybe_put(si, _key, nil), do: si
+  defp maybe_put(si, key, value), do: Map.put(si, key, value)
+
+  defp maybe_put_fuzzy_text(si, %{corrections: [], aliases: []}), do: si
+
+  defp maybe_put_fuzzy_text(si, fuzzy) do
+    Map.put(si, :fuzzy_text, %{
+      original: fuzzy.original,
+      normalized: fuzzy.normalized,
+      text: fuzzy.text,
+      confidence: fuzzy.confidence,
+      corrections: fuzzy.corrections,
+      aliases: fuzzy.aliases
+    })
+  end
+
+  defp fuzzy_evidence(fuzzy_results) do
+    fuzzy_results
+    |> Enum.flat_map(&Map.get(&1, :evidence, []))
+    |> Enum.uniq()
+  end
+
+  defp primary_utterance(text) when is_binary(text) do
+    case Regex.run(
+           ~r/^\s*((?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b)[\s,!.:-]*(.+)$/iu,
+           text
+         ) do
+      [_, opener, rest] ->
+        primary_text = normalize_text(rest)
+
+        if substantive_primary?(primary_text) do
+          %{
+            text: primary_text,
+            opener_text: normalize_text(opener),
+            opener_intent: :greet
+          }
+        else
+          %{text: text, opener_text: nil, opener_intent: nil}
+        end
+
+      _ ->
+        %{text: text, opener_text: nil, opener_intent: nil}
+    end
+  end
+
+  defp primary_utterance(_), do: %{text: "", opener_text: nil, opener_intent: nil}
+
+  defp substantive_primary?(text) do
+    word_count(text) >= 3 or
+      Regex.match?(
+        ~r/\b(?:help|remember|forgot|missed|sleep|sleeping|bug|error|fix|what|where|who|why|how|can|could|please)\b/u,
+        text
+      )
+  end
+
+  defp opener_evidence(%{opener_intent: nil}), do: []
+
+  defp opener_evidence(%{
+         opener_intent: opener_intent,
+         opener_text: opener_text,
+         text: primary_text
+       }) do
+    [
+      %{
+        role: :social_opener,
+        intent: opener_intent,
+        text: opener_text,
+        primary_text: primary_text
+      }
+    ]
+  end
+
   # ─────────────────────────── emit ───────────────────────────
 
   defp emit(%{} = si, intent, kw, conf, text)
        when is_atom(intent) and is_binary(kw) and is_number(conf) and is_binary(text) do
     meas = %{confidence: conf}
 
-    payload = %{
-      label: Atom.to_string(intent),
-      intent: intent,
-      keyword: kw,
-      confidence: conf,
-      source: :core,
-      text: text
-    }
+    payload =
+      %{
+        label: Atom.to_string(intent),
+        intent: intent,
+        keyword: kw,
+        confidence: conf,
+        source: :core,
+        text: text
+      }
+      |> maybe_payload(:opener_intent, Map.get(si, :opener_intent))
+      |> maybe_payload(:opener_text, Map.get(si, :opener_text))
+      |> maybe_payload(:primary_text, Map.get(si, :primary_text))
+      |> maybe_payload(:conversation_act, Map.get(si, :conversation_act))
+      |> maybe_payload(:topic_domain, Map.get(si, :topic_domain))
 
     # 1) Update Brain.last_intent (for mood + snapshot)
     _ =
@@ -250,6 +393,9 @@ defmodule Core.Intent.Selection do
   end
 
   defp emit(_, _, _, _, _), do: :ok
+
+  defp maybe_payload(payload, _key, nil), do: payload
+  defp maybe_payload(payload, key, value), do: Map.put(payload, key, value)
 
   # ─────────────────────── ML quick-win kick ───────────────────────
 
@@ -320,14 +466,32 @@ defmodule Core.Intent.Selection do
     kw |> String.trim() |> squish() |> String.downcase()
   end
 
-  defp extract_keyword(%{tokens: tokens}) when is_list(tokens) do
-    tokens
-    |> Enum.map(&token_phrase/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&squish/1)
-    |> Enum.uniq()
-    |> prefer_multiword_keyword()
+  defp extract_keyword(%{tokens: tokens} = si) when is_list(tokens) do
+    if tokens == [] do
+      extract_keyword(Map.delete(si, :tokens))
+    else
+      tokens
+      |> Enum.map(&token_phrase/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&squish/1)
+      |> Enum.uniq()
+      |> prefer_multiword_keyword()
+    end
+  end
+
+  defp extract_keyword(%{"tokens" => tokens} = si) when is_list(tokens) do
+    if tokens == [] do
+      extract_keyword(Map.delete(si, "tokens"))
+    else
+      tokens
+      |> Enum.map(&token_phrase/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&squish/1)
+      |> Enum.uniq()
+      |> prefer_multiword_keyword()
+    end
   end
 
   defp extract_keyword(%{sentence: s}) when is_binary(s),
@@ -366,7 +530,7 @@ defmodule Core.Intent.Selection do
     |> squish()
     |> String.replace(~r/([!?.,])\1+/u, "\\1")
     |> String.replace(~r/([a-z])\1{2,}/u, "\\1\\1")
-    |> String.trim(".!,? ")
+    |> String.replace(~r/^[\.!,\?\s]+|[\.!,\?\s]+$/u, "")
   end
 
   defp normalize_text(other), do: other |> to_string() |> normalize_text()
@@ -386,36 +550,39 @@ defmodule Core.Intent.Selection do
 
   # ──────────────────── cue-based inference ────────────────────
 
-  defp infer_intent(kw, text, tokens) do
+  defp infer_intent(kw, text, primary, tokens) do
     if blank?(kw) and blank?(text) and tokens == [] do
       {:unknown, 0.0, []}
     else
-      do_infer_intent(kw || "", text || "", tokens)
+      do_infer_intent(kw || "", text || "", primary, tokens)
     end
   end
 
-  defp do_infer_intent(kw, text, tokens) do
-    question_cue = question_cue(kw, text)
+  defp do_infer_intent(kw, text, primary, tokens) do
+    scoring_text = primary.text || text
+    question_cue = question_cue(kw, scoring_text)
     token_terms = token_terms(tokens)
+    greet_score = greeting_score(kw, text, primary)
 
     cue_scores =
       %{
-        greet: max(score_greet(kw), score_greet(text)),
-        translate: max(score_translate(kw), score_translate(text)),
-        abuse: max(score_abuse(kw), score_abuse(text)),
-        insult: max(score_insult(kw), score_insult(text)),
-        illicit_request: score_illicit_request(text),
-        command: max(score_command(kw), score_command(text)),
-        feedback: max(score_feedback(kw), score_feedback(text)),
+        greet: greet_score,
+        translate: max(score_translate(kw), score_translate(scoring_text)),
+        abuse: max(score_abuse(kw), score_abuse(scoring_text)),
+        insult: max(score_insult(kw), score_insult(scoring_text)),
+        illicit_request: max(score_illicit_request(text), score_illicit_request(scoring_text)),
+        command: max(score_command(kw), score_command(scoring_text)),
+        feedback: max(score_feedback(kw), score_feedback(scoring_text)),
         ask: score_question(question_cue),
-        ask_info: score_ask_info(text),
-        brain_introspect: score_brain_introspect(text),
-        code: score_code(text),
-        debug: score_debug(text),
-        define: score_define(text),
-        help: score_help(text),
-        memory_write: score_memory_write(text),
-        tell: score_tell(text)
+        ask_info: score_ask_info(scoring_text),
+        brain_introspect: score_brain_introspect(scoring_text),
+        code: score_code(scoring_text),
+        debug: score_debug(scoring_text),
+        define: score_define(scoring_text),
+        health_support: score_health_support(scoring_text),
+        help: score_help(scoring_text),
+        memory_write: score_memory_write(scoring_text),
+        tell: score_tell(scoring_text)
       }
 
     matrix_scores = matrix_scores(token_terms)
@@ -470,6 +637,18 @@ defmodule Core.Intent.Selection do
       true -> kw
     end
   end
+
+  defp greeting_score(kw, text, %{opener_intent: :greet, text: primary_text}) do
+    base = max(score_greet(kw), score_greet(text))
+
+    if substantive_primary?(primary_text) do
+      min(base, 0.25)
+    else
+      base
+    end
+  end
+
+  defp greeting_score(kw, text, _primary), do: max(score_greet(kw), score_greet(text))
 
   defp pick_label(scores) do
     sorted =
@@ -676,7 +855,7 @@ defmodule Core.Intent.Selection do
 
     cond do
       qm and starter -> 0.90
-      starter -> 0.70
+      starter -> 0.90
       qm and greet -> 0.20
       qm -> 0.55
       true -> 0.0
@@ -688,9 +867,10 @@ defmodule Core.Intent.Selection do
   defp score_ask_info(s) do
     recall? =
       Regex.match?(
-        ~r/\b(what|where|who|when)\b.{0,60}\b(did\s+i\s+(?:say|tell|mention)|my|me|remember|recall)\b/i,
+        ~r/\b(what|whats|where|who|when)\b.{0,60}\b(did\s+i\s+(?:say|tell|mention)|my|me|remember|recall)\b/i,
         s
-      ) or Regex.match?(~r/\bwhat\s+did\s+i\s+tell\s+you\b/i, s)
+      ) or Regex.match?(~r/\bwhat\s+did\s+i\s+tell\s+you\b/i, s) or
+        Regex.match?(~r/^\s*(?:do|did|can|could)\s+you\s+(?:remember|recall|know)\s+my\b/i, s)
 
     cond do
       recall? ->
@@ -764,6 +944,26 @@ defmodule Core.Intent.Selection do
     end
   end
 
+  defp score_health_support(s) do
+    sleep? = Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|exhausted|rest)\b/i, s)
+    med? = Regex.match?(~r/\b(medication|medicine|meds|dose|quetiapine|seroquel)\b/i, s)
+    missed? = Regex.match?(~r/\b(forgot|missed|skip(?:ped)?|forget)\b/i, s)
+
+    distress? =
+      Regex.match?(~r/\b(trouble|can't|cannot|can\s+not|hard\s+time|problem|issue)\b/i, s)
+
+    self_disclosure? = Regex.match?(~r/^\s*(i|i've|i have|i'm|i am|my)\b/i, s)
+
+    cond do
+      med? and missed? and sleep? -> 0.94
+      med? and missed? -> 0.88
+      sleep? and distress? and self_disclosure? -> 0.82
+      med? and distress? -> 0.78
+      sleep? and self_disclosure? -> 0.62
+      true -> 0.0
+    end
+  end
+
   defp score_help(s) do
     cond do
       Regex.match?(~r/^\s*(help|can you help|i need help|walk me through)\b/i, s) ->
@@ -779,6 +979,7 @@ defmodule Core.Intent.Selection do
 
   defp score_memory_write(s) do
     cond do
+      looks_like_question?(s) -> 0.0
       Regex.match?(~r/^\s*(remember|please remember|save|store|note)\b/i, s) -> 0.92
       Regex.match?(~r/\b(remember|save|store|note)\b.{0,80}\b(that|this|my|i)\b/i, s) -> 0.86
       Regex.match?(~r/^\s*my\s+.+\s+(?:is|are)\s+.+/i, s) -> 0.58
@@ -791,6 +992,43 @@ defmodule Core.Intent.Selection do
     cond do
       Regex.match?(~r/^\s*(i|my|we|our)\b/i, s) and not looks_like_question?(s) -> 0.56
       true -> 0.0
+    end
+  end
+
+  defp conversation_act(text) do
+    cond do
+      score_health_support(text) >= 0.70 and
+          Regex.match?(~r/^\s*(i|i've|i have|i'm|i am|my)\b/i, text) ->
+        :personal_disclosure
+
+      score_question(text) >= 0.70 ->
+        :question
+
+      score_memory_write(text) >= 0.70 ->
+        :memory_directive
+
+      score_command(text) >= 0.70 ->
+        :instruction
+
+      true ->
+        nil
+    end
+  end
+
+  defp topic_domain(text) do
+    cond do
+      Regex.match?(~r/\b(quetiapine|seroquel|medication|medicine|meds|dose)\b/i, text) and
+          Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|rest)\b/i, text) ->
+        :health_sleep_medication
+
+      Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|rest)\b/i, text) ->
+        :health_sleep
+
+      Regex.match?(~r/\b(quetiapine|seroquel|medication|medicine|meds|dose)\b/i, text) ->
+        :health_medication
+
+      true ->
+        nil
     end
   end
 

@@ -286,6 +286,13 @@ defmodule Core.Response.LlmPrompt do
     notes =
       []
       |> maybe_add_present("intent", map_get(frame, :intent))
+      |> maybe_add_present("event", map_get(frame, :event))
+      |> maybe_add_present("subject", map_get(frame, :subject))
+      |> maybe_add_present("medication", map_get(frame, :medication))
+      |> maybe_add_present("consequence", map_get(frame, :consequence))
+      |> maybe_add_present("temporal_context", map_get(frame, :temporal_context))
+      |> maybe_add_present("domain", map_get(frame, :domain))
+      |> maybe_add_present("polarity", map_get(frame, :polarity))
       |> maybe_add_number("confidence", map_get(frame, :confidence))
       |> maybe_add_present("keyword", map_get(frame, :keyword))
       |> maybe_add_present("tokens", map_get(lexical, :token_count))
@@ -585,6 +592,12 @@ defmodule Core.Response.LlmPrompt do
             "move=explain Symbrella as software control signals and evidence, not sentience"
           ]
 
+      mode == :supportive_care or map_get(features, :intent) == :health_support ->
+        notes ++
+          [
+            "move=acknowledge health concern; avoid dose instructions; suggest pharmacist or prescriber guidance if unsure"
+          ]
+
       technical_posture?(mode, action, profile, confidence) ->
         notes ++ ["move=make the next concrete engineering action"]
 
@@ -816,6 +829,10 @@ defmodule Core.Response.LlmPrompt do
 
   defp mode_directive(:editor, _) do
     "Review carefully and surface concerns directly."
+  end
+
+  defp mode_directive(:supportive_care, :health_support) do
+    "Use supportive health-safety posture. Acknowledge the concern, do not provide dosing instructions, do not suggest changing medication schedules, and recommend checking with a pharmacist or prescriber if the user is unsure what to do after a missed dose."
   end
 
   defp mode_directive(_, _) do

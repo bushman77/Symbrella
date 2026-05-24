@@ -93,6 +93,7 @@ defmodule Core.Response.Attach do
             meta
             |> ensure_map()
             |> Map.put_new(:allowed_norms, allowed_norms_from_tokens(si_get(si, :tokens)))
+            |> attach_action_selection_meta(si)
 
           {tone2, text2, meta3} = maybe_apply_guardrails(si, {tone, text, meta2}, opts)
 
@@ -137,6 +138,10 @@ defmodule Core.Response.Attach do
       episode: si_get(si, :episode),
       mwe_matches: si_get(si, :mwe_matches),
       self_model: si_get(si, :self_model),
+      symbolic_frame: si_get(si, :symbolic_frame),
+      selected_action: si_get(si, :selected_action),
+      action_candidates: si_get(si, :action_candidates),
+      action_meta: si_get(si, :action_meta),
       turn_context: Context.from_si(si),
       session_id: si_get(si, :session_id)
     }
@@ -380,4 +385,17 @@ defmodule Core.Response.Attach do
       end
     end)
   end
+
+  defp attach_action_selection_meta(meta, si) when is_map(meta) and is_map(si) do
+    meta
+    |> maybe_put_meta(:agent_selected_action, si_get(si, :selected_action))
+    |> maybe_put_meta(:agent_action_candidates, si_get(si, :action_candidates))
+    |> maybe_put_meta(:agent_action_meta, si_get(si, :action_meta))
+  end
+
+  defp attach_action_selection_meta(meta, _si), do: meta
+
+  defp maybe_put_meta(meta, _key, nil), do: meta
+  defp maybe_put_meta(meta, _key, []), do: meta
+  defp maybe_put_meta(meta, key, value), do: Map.put_new(meta, key, value)
 end

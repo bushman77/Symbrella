@@ -38,4 +38,43 @@ defmodule Core.Intent.SelectionCorpusTest do
     assert si.intent == :unknown
     assert si.confidence <= 0.4
   end
+
+  test "uses fuzzy cue repair before symbolic scoring" do
+    si = Selection.select(%{sentence: "wahts my naem?", tokens: [], trace: []})
+
+    assert si.intent == :ask_info
+    assert si.keyword == "whats my name"
+    assert %{text: "whats my name?", aliases: [:asking_for_user_name]} = si.fuzzy_text
+    assert [%{role: :winner, intent: :ask_info} | _] = si.intent_evidence
+    assert Enum.any?(si.intent_evidence, &(&1.role == :fuzzy_correction))
+    assert Enum.any?(si.intent_evidence, &(&1.role == :fuzzy_alias))
+  end
+
+  test "social opener does not dominate medication and sleep disclosure" do
+    si =
+      Selection.select(%{
+        sentence:
+          "Good morning, I've been having trouble sleeping because I forgot my quitiapine",
+        tokens: [],
+        trace: []
+      })
+
+    assert si.intent == :health_support
+    assert si.opener_intent == :greet
+    assert si.opener_text == "good morning"
+    assert si.primary_text == "i've been having trouble sleeping because i forgot my quetiapine"
+    assert si.conversation_act == :personal_disclosure
+    assert si.topic_domain == :health_sleep_medication
+
+    assert [%{role: :winner, intent: :health_support} | _] = si.intent_evidence
+    assert Enum.any?(si.intent_evidence, &(&1.role == :social_opener))
+  end
+
+  test "social opener keeps primary question as main intent" do
+    si = Selection.select(%{sentence: "Yo, do you remember my name?", tokens: [], trace: []})
+
+    assert si.intent == :ask_info
+    assert si.opener_intent == :greet
+    assert si.primary_text == "do you remember my name"
+  end
 end

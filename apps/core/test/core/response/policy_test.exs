@@ -357,6 +357,35 @@ defmodule Core.Response.PolicyTest do
     end
   end
 
+  describe "decide/1 – supportive care profile" do
+    test "health support does not use collaborator action-first mode" do
+      f =
+        features(%{
+          intent: :health_support,
+          intent_in: :health_support,
+          text: "i forgot my quetiapine and haven't been able to sleep",
+          confidence_bucket: :med,
+          vig: 0.3,
+          vigilance_bucket: :normal,
+          risk_bucket: :low,
+          benign?: true,
+          hostile?: false
+        })
+
+      decision = Policy.decide(f)
+
+      assert decision.tone == :warm
+      assert decision.mode == :supportive_care
+      assert decision.action == :safe_support
+
+      assert %{
+               profile: :supportive_care,
+               health_support: true,
+               confidence_bucket: :med
+             } = decision.scores
+    end
+  end
+
   describe "decide/1 – firm guardian for abuse/hostile turns" do
     test "illicit request chooses editor safe redirect and marks high risk" do
       f =

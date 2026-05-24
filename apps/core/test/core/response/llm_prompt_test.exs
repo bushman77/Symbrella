@@ -199,6 +199,32 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "episode=present"
   end
 
+  test "build_system_prompt/1 includes health event-frame slots" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{intent: :health_support},
+        decision: %{tone: :warm, mode: :supportive_care},
+        mood: %{},
+        wm_items: [],
+        symbolic_frame: %{
+          event: :forgot_medication,
+          subject: :user,
+          medication: "quetiapine",
+          consequence: :sleep_inability,
+          temporal_context: :now,
+          domain: :health_support,
+          polarity: :negative,
+          confidence: 0.9
+        }
+      })
+
+    assert prompt =~ "Symbolic frame:"
+    assert prompt =~ "event=forgot_medication"
+    assert prompt =~ "medication=quetiapine"
+    assert prompt =~ "consequence=sleep_inability"
+    assert prompt =~ "polarity=negative"
+  end
+
   test "build_system_prompt/1 includes response posture as hidden shaping context" do
     prompt =
       LlmPrompt.build_system_prompt(%{
@@ -264,7 +290,9 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Response posture:"
     assert prompt =~ "confidence=low"
     assert prompt =~ "comprehension=degraded"
-    assert prompt =~ "move=state what is understood, then ask one targeted question only if necessary"
+
+    assert prompt =~
+             "move=state what is understood, then ask one targeted question only if necessary"
   end
 
   test "build_system_prompt/1 nudges concrete engineering action for high-confidence technical work" do
@@ -297,6 +325,7 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "Response profile: brain_explainer."
     assert prompt =~ "software control signals and evidence sources"
+
     assert prompt =~
              "move=explain Symbrella as software control signals and evidence, not sentience"
   end

@@ -103,6 +103,9 @@ defmodule Core.Response.Policy do
             overrides: []
           }
 
+        f.intent == :health_support ->
+          health_support_decision(f)
+
         # Helpful intents
         f.intent in @helpful_intents ->
           helpful_decision(f)
@@ -134,6 +137,27 @@ defmodule Core.Response.Policy do
       overrides: overrides4,
       self_state: Map.get(f, :self_state, %{}),
       self_state_effects: self_state_effects
+    }
+  end
+
+  defp health_support_decision(f) do
+    tone =
+      case f.vigilance_bucket do
+        :extreme -> :neutral
+        _ -> :warm
+      end
+
+    %{
+      tone: tone,
+      mode: :supportive_care,
+      action: :safe_support,
+      scores: %{
+        profile: :supportive_care,
+        vigilance: f.vigilance_bucket,
+        conf: f.confidence_bucket,
+        health_support: true
+      },
+      overrides: []
     }
   end
 

@@ -15,6 +15,7 @@ defmodule Core.Intent.Types do
           | :command
           | :debug
           | :feedback
+          | :health_support
           | :help
           | :memory_write
           | :tell
@@ -32,6 +33,7 @@ defmodule Core.Intent.Types do
     :command,
     :debug,
     :feedback,
+    :health_support,
     :help,
     :memory_write,
     :tell,
@@ -60,6 +62,8 @@ defmodule Core.Intent.Types do
   def normalize("command"), do: :command
   def normalize("debug"), do: :debug
   def normalize("feedback"), do: :feedback
+  def normalize("health_support"), do: :health_support
+  def normalize("health support"), do: :health_support
   def normalize("help"), do: :help
   def normalize("memory_write"), do: :memory_write
   def normalize("tell"), do: :tell

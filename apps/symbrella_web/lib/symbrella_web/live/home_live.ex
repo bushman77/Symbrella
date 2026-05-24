@@ -168,6 +168,7 @@ defmodule SymbrellaWeb.HomeLive do
     tone = Map.get(reply, :tone)
     meta = Map.get(reply, :meta)
     si = Map.get(reply, :si, %{})
+    symbolic_frame = Map.get(reply, :symbolic_frame) || Map.get(si, :symbolic_frame)
 
     explain_text = Map.get(reply, :explain_text, reply_text)
     senses_selected = Map.get(reply, :senses_selected, [])
@@ -185,7 +186,11 @@ defmodule SymbrellaWeb.HomeLive do
         intent: intent,
         confidence: confidence,
         from: meta || %{},
-        senses_selected: senses_selected
+        senses_selected: senses_selected,
+        symbolic_frame: symbolic_frame,
+        selected_action: Map.get(si, :selected_action),
+        action_candidates: Map.get(si, :action_candidates),
+        action_meta: Map.get(si, :action_meta)
       })
 
     bot = %{
@@ -449,6 +454,7 @@ defmodule SymbrellaWeb.HomeLive do
       tone: tone,
       meta: meta,
       si: si,
+      symbolic_frame: Map.get(si, :symbolic_frame),
       senses_selected: senses_selected,
       explain_text: explain_text,
       mods: neuromodulator_badge(meta)
@@ -626,9 +632,10 @@ defmodule SymbrellaWeb.HomeLive do
 
           ex =
             first_present([
-              example_for_choice(ch, cells),
+              contextual_example_for_choice(ch),
               candidate_example_from_si(si, ch),
-              glossary_field(sense_glossary, ch, :example)
+              glossary_field(sense_glossary, ch, :example),
+              example_for_choice(ch, cells)
             ])
 
           item = %{
@@ -882,8 +889,20 @@ defmodule SymbrellaWeb.HomeLive do
       "why" ->
         "Interrogative word used to ask for a reason or cause."
 
+      "i" ->
+        "First-person singular pronoun; speaker self-reference."
+
+      "me" ->
+        "First-person singular pronoun referring to the speaker as object."
+
       "to" ->
         "Function word marking an infinitive verb or direction toward something."
+
+      "and" ->
+        "Coordinating conjunction linking clauses, phrases, or items."
+
+      "now" ->
+        "Temporal adverb meaning at the present time."
 
       "do" ->
         "Auxiliary verb used to form a question, negation, or emphasis."
@@ -893,6 +912,45 @@ defmodule SymbrellaWeb.HomeLive do
 
       "did" ->
         "Auxiliary verb used to form a question, negation, or emphasis."
+
+      "been" ->
+        "Past participle of be used as an auxiliary in verb phrases."
+
+      "have" ->
+        "Auxiliary or main verb used to mark possession, experience, or perfect tense."
+
+      "can" ->
+        "Modal auxiliary marking ability, possibility, or permission."
+
+      "cannot" ->
+        "Negative modal auxiliary meaning can not; marks inability or impossibility."
+
+      "can't" ->
+        "Contraction of cannot; negative modal auxiliary marking inability."
+
+      "not" ->
+        "Negation particle marking that a proposition or verb phrase is negative."
+
+      "having" ->
+        "Present participle of have, often used in verb phrases such as having trouble."
+
+      "able" ->
+        "Adjective meaning having the capacity or ability to do something."
+
+      "forgot" ->
+        "Past-tense action of forgetting or failing to remember."
+
+      "sleep" ->
+        "To rest in a state of reduced consciousness; also the state of such rest."
+
+      "sleeping" ->
+        "Resting in a state of reduced consciousness."
+
+      "quetiapine" ->
+        "Medication entity; an antipsychotic medicine often discussed in dosing or missed-dose contexts."
+
+      "medication" ->
+        "Medicine or treatment substance taken for health reasons."
 
       "make" ->
         "To create, cause, produce, or bring something about."
@@ -937,12 +995,40 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp contextual_definition_for_choice(_), do: ""
 
+  defp contextual_example_for_choice(choice) when is_map(choice) do
+    case primary_choice_norm(choice) do
+      "i" -> "I forgot my medication."
+      "my" -> "I forgot my medication."
+      "and" -> "I forgot my medication and I cannot sleep."
+      "now" -> "Now I cannot sleep."
+      "can" -> "I can sleep."
+      "cannot" -> "I cannot sleep."
+      "can't" -> "I can't sleep."
+      "not" -> "I can not sleep."
+      "quetiapine" -> "I forgot my quetiapine."
+      _ -> ""
+    end
+  end
+
+  defp contextual_example_for_choice(_), do: ""
+
   defp contextual_pos_for_choice(choice) when is_map(choice) do
     case primary_choice_norm(choice) do
       norm when norm in ["trying", "try"] -> "verb"
       "why" -> "interrogative"
+      "i" -> "pronoun"
+      "me" -> "pronoun"
       "to" -> "particle/preposition"
-      norm when norm in ["do", "does", "did"] -> "aux"
+      "and" -> "conjunction"
+      "now" -> "adverb"
+      norm when norm in ["do", "does", "did", "been", "have", "can", "cannot", "can't"] -> "aux"
+      "not" -> "particle"
+      "having" -> "verb"
+      "able" -> "adjective"
+      "forgot" -> "verb"
+      norm when norm in ["sleep", "sleeping"] -> "verb/noun"
+      "quetiapine" -> "medication"
+      "medication" -> "noun"
       norm when norm in ["make", "makes", "made"] -> "verb"
       "my" -> "possessive"
       norm when norm in ["you", "your"] -> "pronoun"

@@ -339,9 +339,6 @@ defmodule SymbrellaWeb.RoleplayLive do
     }
 
     case Core.RoleplayTurn.run(request) do
-      {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]}} ->
-        {:ok, content}
-
       {:ok, %{choices: [%{message: %{content: content}} | _]}} ->
         {:ok, content}
 

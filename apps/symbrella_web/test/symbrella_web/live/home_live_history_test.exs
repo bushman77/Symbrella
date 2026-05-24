@@ -63,6 +63,37 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     assert html =~ "0.91"
   end
 
+  test "explain payload includes action selection agency surface" do
+    payload =
+      SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
+        id: "b-action",
+        text: "Please contact your pharmacist about the missed medication.",
+        intent: :health_support,
+        confidence: 0.85,
+        tone: :warm,
+        symbolic_frame: %{
+          type: :health_support_event,
+          event: :forgot_medication,
+          medication: "quetiapine"
+        },
+        selected_action: :safe_support,
+        action_candidates: [
+          %{action: :safe_support, score: 0.94, reason: :health_boundary},
+          %{action: :store_memory, score: 0.12, reason: :low_relevance}
+        ],
+        action_meta: %{selected: :safe_support, safety_gate: :approved, confidence: 0.94}
+      })
+
+    action_section =
+      Enum.find(payload.sections, fn section -> section.key == :action_selection end)
+
+    assert action_section.title == "Action selection"
+    assert action_section.tag == ":safe_support"
+    assert Enum.any?(action_section.items, &(&1.label == "selected action" and &1.body == ":safe_support"))
+    assert Enum.any?(action_section.items, &(&1.label == "safety gate" and &1.body == ":approved"))
+    assert Enum.any?(action_section.items, &(&1.label == "action candidates" and &1.body =~ ":store_memory"))
+  end
+
   test "chat stores and recalls direct user facts before attached LLM responses", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
 

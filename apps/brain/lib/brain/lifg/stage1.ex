@@ -70,6 +70,24 @@ defmodule Brain.LIFG.Stage1 do
                          ))
 
   @closed_class_defaults %{
+    "my" => %{
+      pos: "determiner",
+      rel_prior: 1.0,
+      activation: 0.97,
+      definition: "Possessive determiner meaning belonging to or associated with the speaker.",
+      example: "I forgot my medication."
+    },
+    "your" => %{
+      pos: "determiner",
+      rel_prior: 1.0,
+      activation: 0.97,
+      definition:
+        "Possessive determiner meaning belonging to or associated with the person addressed."
+    },
+    "his" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "her" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "our" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "their" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
     "and" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
     "or" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
     "but" => %{pos: "conjunction", rel_prior: 1.0, activation: 0.96},
@@ -93,6 +111,57 @@ defmodule Brain.LIFG.Stage1 do
     "do" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
     "does" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
     "did" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "can" => %{
+      pos: "auxiliary",
+      rel_prior: 1.0,
+      activation: 0.96,
+      definition: "Modal auxiliary marking ability, possibility, or permission.",
+      example: "I can sleep."
+    },
+    "cannot" => %{
+      pos: "auxiliary",
+      rel_prior: 1.0,
+      activation: 0.97,
+      definition: "Negative modal auxiliary meaning can not; marks inability or impossibility.",
+      example: "I cannot sleep."
+    },
+    "can't" => %{
+      pos: "auxiliary",
+      rel_prior: 1.0,
+      activation: 0.97,
+      definition: "Contraction of cannot; negative modal auxiliary marking inability.",
+      example: "I can't sleep."
+    },
+    "am" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "is" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "are" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "was" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "were" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "be" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "being" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "been" => %{
+      pos: "auxiliary",
+      rel_prior: 1.0,
+      activation: 0.96,
+      definition: "Past participle of be used as an auxiliary in verb phrases."
+    },
+    "have" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "has" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "had" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
+    "now" => %{
+      pos: "adverb",
+      rel_prior: 1.0,
+      activation: 0.96,
+      definition: "Temporal adverb meaning at the present time.",
+      example: "Now I cannot sleep."
+    },
+    "not" => %{
+      pos: "particle",
+      rel_prior: 1.0,
+      activation: 0.97,
+      definition: "Negation particle marking that a proposition or verb phrase is negative.",
+      example: "I can not sleep."
+    },
     "in" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
     "about" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
     "of" => %{pos: "preposition", rel_prior: 1.0, activation: 0.96},
@@ -107,11 +176,31 @@ defmodule Brain.LIFG.Stage1 do
   @closed_class_pos_aliases %{
     "conjunction" => ["conjunction", "conj", "connector", "cc"],
     "adverb" => ["adverb", "adv", "intensifier"],
-    "determiner" => ["determiner", "det", "article"],
+    "determiner" => ["determiner", "det", "article", "possessive", "possessive determiner"],
     "pronoun" => ["pronoun", "pron"],
     "interjection" => ["interjection", "interj", "greeting"],
     "preposition" => ["preposition", "prep", "adposition"],
-    "auxiliary" => ["auxiliary", "aux", "modal"]
+    "auxiliary" => ["auxiliary", "aux", "modal"],
+    "particle" => ["particle", "negation", "neg", "negative"]
+  }
+
+  @entity_defaults %{
+    "quetiapine" => %{
+      pos: "entity",
+      entity_type: :medication,
+      activation: 0.95,
+      source: :medical_entity_fallback,
+      definition: "Medication or drug name mentioned by the user.",
+      example: "I forgot my quetiapine."
+    },
+    "seroquel" => %{
+      pos: "entity",
+      entity_type: :medication,
+      activation: 0.95,
+      source: :medical_entity_fallback,
+      definition: "Medication or drug brand name mentioned by the user.",
+      example: "I forgot my Seroquel."
+    }
   }
 
   @greeting_lemmas MapSet.new([
@@ -1481,6 +1570,9 @@ defmodule Brain.LIFG.Stage1 do
           Map.has_key?(@closed_class_defaults, phrase) ->
             upsert_closed_class_candidate(acc, idx, closed_class_default_candidate(phrase))
 
+          Map.has_key?(@entity_defaults, phrase) ->
+            upsert_entity_candidate(acc, idx, entity_default_candidate(phrase))
+
           true ->
             acc
         end
@@ -1500,6 +1592,7 @@ defmodule Brain.LIFG.Stage1 do
       "pron",
       "determiner",
       "det",
+      "possessive",
       "conjunction",
       "conj",
       "connector",
@@ -1515,12 +1608,17 @@ defmodule Brain.LIFG.Stage1 do
       "adposition",
       "auxiliary",
       "aux",
-      "modal"
+      "modal",
+      "particle",
+      "negation",
+      "neg",
+      "negative"
     ] or
       String.contains?(id, "|pronoun|") or
       String.contains?(id, "|pron|") or
       String.contains?(id, "|determiner|") or
       String.contains?(id, "|det|") or
+      String.contains?(id, "|possessive|") or
       String.contains?(id, "|conjunction|") or
       String.contains?(id, "|conj|") or
       String.contains?(id, "|connector|") or
@@ -1535,10 +1633,40 @@ defmodule Brain.LIFG.Stage1 do
       String.contains?(id, "|adposition|") or
       String.contains?(id, "|auxiliary|") or
       String.contains?(id, "|aux|") or
-      String.contains?(id, "|modal|")
+      String.contains?(id, "|modal|") or
+      String.contains?(id, "|particle|") or
+      String.contains?(id, "|negation|") or
+      String.contains?(id, "|neg|")
   end
 
   defp closed_class_candidate?(_), do: false
+
+  defp upsert_entity_candidate(sc, idx, cand) when is_map(sc) do
+    key =
+      cond do
+        Map.has_key?(sc, idx) -> idx
+        Map.has_key?(sc, to_string(idx)) -> to_string(idx)
+        true -> idx
+      end
+
+    Map.update(sc, key, [cand], fn
+      list when is_list(list) ->
+        if Enum.any?(list, &same_sense_id?(&1, cand)), do: list, else: list ++ [cand]
+
+      %{} = existing ->
+        if same_sense_id?(existing, cand), do: existing, else: [existing, cand]
+
+      other ->
+        [other, cand]
+    end)
+  end
+
+  defp same_sense_id?(existing, override) when is_map(existing) and is_map(override) do
+    (Safe.get(existing, :id) || Safe.get(existing, "id")) ==
+      (Safe.get(override, :id) || Safe.get(override, "id"))
+  end
+
+  defp same_sense_id?(_existing, _override), do: false
 
   defp upsert_closed_class_candidate(sc, idx, cand) when is_map(sc) do
     key =
@@ -1594,10 +1722,35 @@ defmodule Brain.LIFG.Stage1 do
       |> Map.merge(Safe.get(override, :features, %{}))
 
     existing
+    |> Map.put(
+      :id,
+      Safe.get(override, :id) || Safe.get(override, "id") || Safe.get(existing, :id)
+    )
+    |> Map.put(
+      :lemma,
+      Safe.get(override, :lemma) || Safe.get(override, "lemma") || Safe.get(existing, :lemma)
+    )
+    |> Map.put(
+      :norm,
+      Safe.get(override, :norm) || Safe.get(override, "norm") || Safe.get(existing, :norm)
+    )
+    |> Map.put(
+      :pos,
+      Safe.get(override, :pos) || Safe.get(override, "pos") || Safe.get(existing, :pos)
+    )
+    |> maybe_put_closed_class_field(:definition, override)
+    |> maybe_put_closed_class_field(:example, override)
     |> Map.put(:features, features)
     |> Map.put(:activation, Safe.get(override, :activation, 0.95))
     |> Map.put(:score, Safe.get(override, :score, 0.95))
     |> Map.put(:source, :closed_class)
+  end
+
+  defp maybe_put_closed_class_field(existing, key, override) do
+    case Safe.get(override, key) || Safe.get(override, Atom.to_string(key)) do
+      value when is_binary(value) and value != "" -> Map.put(existing, key, value)
+      _ -> existing
+    end
   end
 
   defp same_closed_class_candidate?(existing, override)
@@ -1664,6 +1817,8 @@ defmodule Brain.LIFG.Stage1 do
       activation: 0.95,
       score: 0.95,
       source: :closed_class,
+      definition: pronoun_definition(phrase),
+      example: pronoun_example(phrase),
       features: %{
         lex_fit: 1.0,
         rel_prior: 1.0,
@@ -1686,6 +1841,8 @@ defmodule Brain.LIFG.Stage1 do
       activation: spec.activation,
       score: spec.activation,
       source: :closed_class,
+      definition: Map.get(spec, :definition) || closed_class_definition(phrase, pos),
+      example: Map.get(spec, :example) || closed_class_example(phrase, pos),
       features: %{
         lex_fit: 1.0,
         rel_prior: spec.rel_prior,
@@ -1694,6 +1851,83 @@ defmodule Brain.LIFG.Stage1 do
       }
     }
   end
+
+  defp entity_default_candidate(phrase) do
+    spec = Map.fetch!(@entity_defaults, phrase)
+    pos = spec.pos
+
+    %{
+      id: "#{phrase}|#{pos}|#{spec.entity_type}",
+      lemma: phrase,
+      norm: phrase,
+      mw: false,
+      pos: pos,
+      entity_type: spec.entity_type,
+      activation: spec.activation,
+      score: spec.activation,
+      source: spec.source,
+      definition: spec.definition,
+      example: spec.example,
+      features: %{
+        lex_fit: 1.0,
+        rel_prior: 1.0,
+        activation: spec.activation,
+        intent_bias: 0.0
+      }
+    }
+  end
+
+  defp pronoun_definition("i"),
+    do: "First-person singular pronoun; speaker self-reference."
+
+  defp pronoun_definition("me"),
+    do: "First-person singular pronoun referring to the speaker as object."
+
+  defp pronoun_definition("you"),
+    do: "Second-person pronoun referring to the person or people being addressed."
+
+  defp pronoun_definition(_phrase),
+    do: "Pronoun used as a grammatical participant in the utterance."
+
+  defp pronoun_example("i"), do: "I forgot my medication."
+  defp pronoun_example("me"), do: "This affects me."
+  defp pronoun_example("you"), do: "You can ask a pharmacist."
+  defp pronoun_example(_phrase), do: ""
+
+  defp closed_class_definition("and", _pos),
+    do: "Coordinating conjunction linking clauses, phrases, or items."
+
+  defp closed_class_definition("or", _pos), do: "Coordinating conjunction marking an alternative."
+  defp closed_class_definition("but", _pos), do: "Coordinating conjunction marking contrast."
+
+  defp closed_class_definition("now", _pos),
+    do: "Temporal adverb meaning at the present time."
+
+  defp closed_class_definition("not", _pos),
+    do: "Negation particle marking that a proposition or verb phrase is negative."
+
+  defp closed_class_definition(_phrase, "preposition"),
+    do: "Function word marking a grammatical relation."
+
+  defp closed_class_definition(_phrase, "auxiliary"),
+    do: "Auxiliary verb supporting tense, question, negation, or verb phrase structure."
+
+  defp closed_class_definition(_phrase, "determiner"),
+    do: "Determiner specifying reference for a noun phrase."
+
+  defp closed_class_definition(_phrase, "adverb"),
+    do: "Adverb modifying a verb, adjective, or clause."
+
+  defp closed_class_definition(_phrase, "particle"),
+    do: "Particle marking grammatical meaning such as negation."
+
+  defp closed_class_definition(_phrase, "interjection"), do: "Social interjection or greeting."
+  defp closed_class_definition(_phrase, _pos), do: "Closed-class grammatical function word."
+
+  defp closed_class_example("and", _pos),
+    do: "I forgot my medication and I cannot sleep."
+
+  defp closed_class_example(_phrase, _pos), do: ""
 
   defp buckets_from_si(si0, tokens) do
     sc =
@@ -2367,6 +2601,7 @@ defmodule Brain.LIFG.Stage1 do
       p in ["auxiliary", "aux", "modal"] -> :auxiliary
       p in ["conjunction", "conj", "connector", "cc"] -> :conjunction
       p in ["adverb", "adv", "intensifier"] -> :adverb
+      p in ["particle", "negation", "neg", "negative"] -> :particle
       p in ["interjection", "interj", "greeting"] -> :interjection
       true -> :other
     end

@@ -125,10 +125,19 @@ defmodule Core.Response do
 
         forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
 
-        text0 =
-          forced_identity ||
-            deterministic_inline_text(skill) ||
-            llm_or_template(text_in, features, decision, mood, intent)
+        inline_text = deterministic_inline_text(skill)
+
+        {text0, response_source, response_fallback_reason} =
+          cond do
+            is_binary(forced_identity) ->
+              {forced_identity, :forced_identity, nil}
+
+            is_binary(inline_text) ->
+              {inline_text, :inline_skill, nil}
+
+            true ->
+              llm_or_template(text_in, features, decision, mood, intent)
+          end
 
         {text, curiosity_probe} =
           maybe_append_curiosity_question(text0, si, mood, features, decision, guard, skill)
@@ -174,7 +183,9 @@ defmodule Core.Response do
             comprehension: Map.get(features, :comprehension),
             prefrontal: Map.get(features, :prefrontal),
             control_signals: Map.get(features, :control_signals),
-            curiosity_probe: curiosity_probe
+            curiosity_probe: curiosity_probe,
+            response_source: response_source,
+            response_fallback_reason: response_fallback_reason
           })
 
         :telemetry.execute([:core, :response, :plan], %{}, meta)
@@ -364,17 +375,27 @@ defmodule Core.Response do
   defp llm_or_template(text_in, features, decision, mood, intent) do
     case LlmSynthesis.generate(text_in, features, decision, mood) do
       {:ok, llm_text} ->
-        llm_text
+        {llm_text, :llm, nil}
 
-      {:error, _} ->
-        Modes.compose(
-          intent,
-          decision.tone,
-          decision.mode,
-          template_opts(text_in, features, decision)
-        )
+      {:error, reason} ->
+        {
+          Modes.compose(
+            intent,
+            decision.tone,
+            decision.mode,
+            template_opts(text_in, features, decision)
+          ),
+          :template_fallback,
+          normalize_fallback_reason(reason)
+        }
     end
   end
+
+  defp normalize_fallback_reason(reason) when is_atom(reason), do: reason
+  defp normalize_fallback_reason({reason, _}) when is_atom(reason), do: reason
+  defp normalize_fallback_reason(%{reason: reason}) when is_atom(reason), do: reason
+  defp normalize_fallback_reason(%{"reason" => reason}) when is_atom(reason), do: reason
+  defp normalize_fallback_reason(_), do: :unknown
 
   defp template_opts(text_in, features, decision) do
     %{
@@ -391,6 +412,9 @@ defmodule Core.Response do
 
   defp template_next_step(features, decision) do
     cond do
+      Map.get(features, :intent) == :health_support ->
+        "Use safe health-support posture: acknowledge, avoid dose instructions, and suggest pharmacist or prescriber guidance."
+
       Map.get(features, :guardrail?) or Map.get(features, :risk_bucket) == :high ->
         "Give a brief safe redirect."
 
@@ -472,7 +496,9 @@ defmodule Core.Response do
          session_id: session_id,
          extracted_name: extracted_name,
          planner_explanation: planner_explanation,
-         curiosity_probe: curiosity_probe
+         curiosity_probe: curiosity_probe,
+         response_source: response_source,
+         response_fallback_reason: response_fallback_reason
        }) do
     %{
       policy_version: decision.policy_version,
@@ -499,6 +525,8 @@ defmodule Core.Response do
       session_id: session_id,
       user_name: extracted_name,
       explanation: planner_explanation,
+      response_source: response_source,
+      response_fallback_reason: response_fallback_reason,
       curiosity_probe: curiosity_probe,
       self_state: Map.get(decision, :self_state),
       self_state_effects: Map.get(decision, :self_state_effects, [])
@@ -1033,11 +1061,21 @@ defmodule Core.Response do
     scores = decision.scores || %{}
 
     case Map.get(scores, :profile) do
-      p when p in [:warm_collaborator, :gentle_bug_coach, :calm_explainer, :trust_repair] ->
+      p
+      when p in [
+             :warm_collaborator,
+             :gentle_bug_coach,
+             :calm_explainer,
+             :trust_repair,
+             :supportive_care
+           ] ->
         p
 
       _ ->
         cond do
+          features.intent == :health_support or decision.mode == :supportive_care ->
+            :supportive_care
+
           guard.guardrail? or features.risk_bucket == :high or
             features.intent in [:abuse, :illicit_request] or features.hostile? ->
             :firm_guardian
@@ -1312,19 +1350,19 @@ defmodule Core.Response do
   defp reserved_fact_label?(_), do: false
 
   defp asking_for_user_name?(text) when is_binary(text) do
+    fuzzy = Core.Text.Fuzzy.interpret(text)
+
     t =
-      text
-      |> String.downcase()
+      fuzzy.text
       |> String.replace(~r/[^\p{L}\p{N}\s\?]/u, "")
-      |> String.replace(~r/\bwa+hat\b/u, "what")
-      |> String.replace(~r/\bna+me\b/u, "name")
       |> String.replace(~r/\s+/u, " ")
       |> String.trim()
 
     t == "what is my name" or t == "what is my name?" or
       t == "whats my name" or t == "whats my name?" or
       String.contains?(t, "what is my name") or
-      String.contains?(t, "whats my name")
+      String.contains?(t, "whats my name") or
+      :asking_for_user_name in fuzzy.aliases
   end
 
   defp asking_for_user_name?(_), do: false

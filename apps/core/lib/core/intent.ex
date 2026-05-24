@@ -18,6 +18,7 @@ defmodule Core.Intent do
     insult
     command
     feedback
+    health_support
     illicit_request
     memory_write
     tell

@@ -31,6 +31,24 @@ defmodule Core.Response.UserNameMemoryTest do
     refute text =~ "I don"
   end
 
+  test "fuzzy name question reads user_name fact from hippocampal memory" do
+    Brain.Hippocampus.encode(
+      %{winners: [%{id: "Curtis|proper|0", lemma: "Curtis"}]},
+      %{kind: :fact, key: :user_name, value: "Curtis", tags: ["fact"]}
+    )
+
+    {_tone, text, meta} =
+      Response.plan(%{
+        intent: :question,
+        confidence: 0.9,
+        text: "wahts my naem?"
+      })
+
+    assert text == "Your name is Curtis."
+    assert meta.action == :identity
+    assert meta.user_name == "Curtis"
+  end
+
   test "explicit remember directive stores and recalls a user fact" do
     {_tone, text, meta} =
       Response.plan(%{

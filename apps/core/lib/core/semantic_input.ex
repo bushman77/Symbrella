@@ -15,6 +15,7 @@ defmodule Core.SemanticInput do
     • trace         — ordered list of stage events (maps/tuples)
 
   Frequently-attached fields (kept on the struct):
+    • selected_action / action_candidates / action_meta
     • intent / keyword / confidence
     • intent_bias
     • sense_candidates
@@ -27,6 +28,7 @@ defmodule Core.SemanticInput do
     • evidence
     • episode
     • response_text / response_tone / response_meta
+    • symbolic_frame
     • emotion / appraisal
     • frame / frame_ts_ms / frame_seq / frame_run_id
   """
@@ -79,6 +81,10 @@ defmodule Core.SemanticInput do
           response_text: String.t() | nil,
           response_tone: atom() | nil,
           response_meta: map() | nil,
+          symbolic_frame: map() | nil,
+          selected_action: atom() | nil,
+          action_candidates: list() | nil,
+          action_meta: map() | nil,
 
           # affect
           emotion: map() | nil,
@@ -120,6 +126,10 @@ defmodule Core.SemanticInput do
             response_text: nil,
             response_tone: nil,
             response_meta: nil,
+            symbolic_frame: nil,
+            selected_action: nil,
+            action_candidates: nil,
+            action_meta: nil,
             emotion: nil,
             appraisal: nil,
             mood: nil,

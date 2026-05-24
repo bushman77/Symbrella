@@ -85,6 +85,7 @@ defmodule Core.Response.Context do
       perception: present_summary(map_get(si, :perception)),
       atl_slate: present_summary(map_get(si, :atl_slate)),
       episode: present_summary(map_get(si, :episode)),
+      event: present_summary(map_get(si, :symbolic_frame)),
       self_model: present_summary(map_get(si, :self_model))
     }
     |> drop_empty()

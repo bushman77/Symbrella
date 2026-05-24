@@ -61,6 +61,8 @@ defmodule Core.Response.LlmRouteFlowTest do
     assert text == "LLM verbalized the symbolic posture."
     assert meta.mode == :collaborator
     assert meta.action == :act_first
+    assert meta.response_source == :llm
+    refute meta.response_fallback_reason
 
     assert_receive {:llm_chat, messages, opts}
     assert Keyword.get(opts, :timeout)
@@ -80,6 +82,8 @@ defmodule Core.Response.LlmRouteFlowTest do
 
     assert text == "LLM verbalized the symbolic posture."
     assert meta.intent_inferred == :greeting
+    assert meta.response_source == :llm
+    refute meta.response_fallback_reason
     refute text =~ "Quick picks"
     refute text =~ "Full file"
 
