@@ -190,6 +190,24 @@ defmodule Brain.SelfContinuityTest do
     assert model.continuity.restore_reason == :restored
   end
 
+  test "warm_start/1 stores current runtime continuity context" do
+    on_exit(fn -> SelfContinuity.forget_warm_start() end)
+
+    model = %SelfModel{
+      confidence: 0.77,
+      active_goals: [
+        %{id: "carryover", label: "carry over task", priority: 0.8, tension: 0.7}
+      ]
+    }
+
+    assert {:ok, _row} = SelfContinuity.persist(model, scope: "warm-start-test")
+    assert {:ok, %SelfModel{} = restored} = SelfContinuity.warm_start(scope: "warm-start-test")
+    assert {:ok, ^restored} = SelfContinuity.current()
+    assert restored.confidence == 0.77
+    assert [%{}] = restored.active_goals
+    assert restored.continuity.reboot_restored? == true
+  end
+
   test "restore_latest/1 degrades when Db has no snapshot for scope" do
     assert {:degraded, %SelfModel{} = model, :missing_snapshot} =
              SelfContinuity.restore_latest(scope: "missing-scope-test")

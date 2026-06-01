@@ -226,5 +226,7 @@ if config_env() != :test do
   config :llm, Llm.BootGate,
     # Blocks app startup here; Phoenix starts after :symbrella finishes booting.
     enabled?: true,
-    timeout: 120_000
+    trime_out: 600_000
+
+  #    timeout: 120_000
 end

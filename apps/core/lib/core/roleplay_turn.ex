@@ -1,6 +1,6 @@
 defmodule Core.RoleplayTurn do
   @moduledoc """
-  First roleplay-turn seam for Symbrella's OpenAI-compatible gateway.
+  Roleplay-turn adapter for Symbrella's OpenAI-compatible gateway.
 
   This module receives an OpenAI-style chat-completion request from
   SymbrellaWeb, normalizes the messages, sends them to the local LLM layer,
@@ -11,11 +11,13 @@ defmodule Core.RoleplayTurn do
       SillyTavern
         -> SymbrellaWeb /v1/chat/completions
         -> Core.RoleplayTurn.run/1
+        -> Core.resolve_input/2
+        -> hidden bounded brain-state context
         -> Llm.chat/2
         -> OpenAI-compatible response
 
-  This module intentionally does not touch Brain, DB, Hippocampus, LIFG,
-  PMTG, ATL, WorkingMemory, or MoodCore yet.
+  Brain state is used only as hidden control context for the latest user input.
+  It must not be quoted directly into the roleplay response.
   """
 
   @default_model "symbrella-rp"
@@ -195,12 +197,6 @@ defmodule Core.RoleplayTurn do
       )
 
     {:ok, brain_context_from_si(si)}
-  rescue
-    error ->
-      {:error, error}
-  catch
-    kind, reason ->
-      {:error, {kind, reason}}
   end
 
   defp brain_context_from_si(si) when is_map(si) do

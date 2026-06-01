@@ -6,12 +6,16 @@ defmodule Brain.Introspection do
   alias Brain.SelfCalibration.Logger, as: CalibrationLogger
 
   def snapshot do
-    Brain.SelfModel.from_runtime(
-      self_portrait: Brain.SelfPortrait.snapshot(),
-      meta: Brain.Meta.status(),
-      mood: Brain.MoodCore.snapshot(),
-      wm: Brain.snapshot_wm()
-    )
+    model =
+      Brain.SelfModel.from_runtime(
+        self_portrait: Brain.SelfPortrait.snapshot(),
+        meta: Brain.Meta.status(),
+        mood: Brain.MoodCore.snapshot(),
+        wm: Brain.snapshot_wm(),
+        goals: Brain.GoalStack.active_goals()
+      )
+
+    apply_warm_start(model)
   end
 
   def update_from_resolved(resolved, appraisal) when is_map(resolved) and is_map(appraisal) do
@@ -25,6 +29,7 @@ defmodule Brain.Introspection do
         frame_run_id: Map.get(resolved, :frame_run_id)
       })
       |> Map.put(:self_other_attribution, attribution_from(appraisal))
+      |> update_goal_stack()
 
     emit_update(model)
     maybe_log_calibration_sample(model, resolved, appraisal)
@@ -36,6 +41,33 @@ defmodule Brain.Introspection do
   defp attribution_from(%{evidence: %{target: target}}), do: %{target: target}
   defp attribution_from(%{target: target}), do: %{target: target}
   defp attribution_from(_), do: %{}
+
+  defp apply_warm_start(%Brain.SelfModel{} = model) do
+    case Brain.SelfContinuity.current() do
+      {:ok, restored} ->
+        continuity =
+          model.continuity
+          |> map_or_empty()
+          |> Map.merge(map_or_empty(restored.continuity))
+          |> Map.put(:warm_started?, true)
+
+        active_goals =
+          case model.active_goals do
+            [] -> List.wrap(restored.active_goals)
+            goals -> goals
+          end
+
+        %{model | continuity: continuity, active_goals: active_goals}
+
+      _ ->
+        model
+    end
+  end
+
+  defp update_goal_stack(%Brain.SelfModel{} = model) do
+    _ = Brain.GoalStack.reduce_uncertainty(model)
+    %{model | active_goals: Brain.GoalStack.active_goals()}
+  end
 
   defp emit_update(%Brain.SelfModel{} = model) do
     :telemetry.execute(
@@ -76,4 +108,7 @@ defmodule Brain.Introspection do
       {:error, _reason} -> :ok
     end
   end
+
+  defp map_or_empty(value) when is_map(value), do: value
+  defp map_or_empty(_), do: %{}
 end

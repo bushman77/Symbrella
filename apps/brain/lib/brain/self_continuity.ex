@@ -18,6 +18,7 @@ defmodule Brain.SelfContinuity do
   alias Brain.SelfModel
 
   @event [:brain, :self_model, :continuity_restored]
+  @warm_start_key {__MODULE__, :warm_start}
   @snapshot_v 1
   @default_max_age_ms 86_400_000
 
@@ -53,6 +54,40 @@ defmodule Brain.SelfContinuity do
       {:ok, row} -> restore(row.snapshot, opts)
       {:error, :not_found} -> restore(nil, opts)
     end
+  end
+
+  @doc """
+  Restores the latest persisted self snapshot and exposes it as runtime warm-start
+  context for the next live introspection snapshots.
+  """
+  @spec warm_start(keyword()) :: restore_result()
+  def warm_start(opts \\ []) do
+    result = restore_latest(opts)
+
+    model =
+      case result do
+        {:ok, %SelfModel{} = restored} -> restored
+        {:degraded, %SelfModel{} = degraded, _reason} -> degraded
+      end
+
+    :persistent_term.put(@warm_start_key, model)
+    restore_goals(model)
+    result
+  end
+
+  @doc "Returns the current boot warm-start model, if one has been established."
+  @spec current() :: {:ok, SelfModel.t()} | {:error, :missing_warm_start}
+  def current do
+    case :persistent_term.get(@warm_start_key, nil) do
+      %SelfModel{} = model -> {:ok, model}
+      _ -> {:error, :missing_warm_start}
+    end
+  end
+
+  @doc false
+  def forget_warm_start do
+    :persistent_term.erase(@warm_start_key)
+    :ok
   end
 
   @doc """
@@ -208,6 +243,15 @@ defmodule Brain.SelfContinuity do
     emit(reason, :degraded, model, snapshot || %{})
     {:degraded, model, reason}
   end
+
+  defp restore_goals(%SelfModel{active_goals: goals}) when is_list(goals) do
+    case Process.whereis(Brain.GoalStack) do
+      nil -> :ok
+      _pid -> Brain.GoalStack.restore_active(goals)
+    end
+  end
+
+  defp restore_goals(_model), do: :ok
 
   defp put_restored_continuity(%SelfModel{} = model, reason, snapshot) do
     continuity =

@@ -33,6 +33,7 @@ defmodule Brain.SelfModel do
     meta = Map.get(runtime, :meta, %{})
     mood_snapshot = Map.get(runtime, :mood, %{})
     wm_snapshot = Map.get(runtime, :wm, %{})
+    goals = Map.get(runtime, :goals, [])
 
     traits = Map.get(self_portrait, :traits, %{})
     patterns = Map.get(self_portrait, :patterns, %{})
@@ -53,6 +54,7 @@ defmodule Brain.SelfModel do
       inhibition: bounded(mood[:inhibition] || 0.5),
       cognitive_load: cognitive_load,
       mood: mood_snapshot,
+      active_goals: active_goals(goals),
       recent_errors: recent_errors(patterns),
       recent_actions: Map.get(self_portrait, :last_events, []),
       updated_at_ms: System.system_time(:millisecond)
@@ -162,6 +164,25 @@ defmodule Brain.SelfModel do
       end
     end)
   end
+
+  defp active_goals(goals) when is_list(goals) do
+    Enum.map(goals, fn
+      %{id: id, label: label, priority: priority, tension: tension} = goal ->
+        %{
+          id: id,
+          label: label,
+          priority: bounded(priority),
+          tension: bounded(tension),
+          source: Map.get(goal, :source),
+          reason: Map.get(goal, :reason)
+        }
+
+      other ->
+        other
+    end)
+  end
+
+  defp active_goals(_), do: []
 
   defp number(value) when is_integer(value), do: value * 1.0
   defp number(value) when is_float(value), do: value

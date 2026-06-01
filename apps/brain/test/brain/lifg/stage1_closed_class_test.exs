@@ -25,6 +25,36 @@ defmodule Brain.LIFG.Stage1ClosedClassTest do
     assert choice.scores["you|pronoun|0"] > choice.scores["you|noun|0"]
   end
 
+  test "prefers interrogative how and determiner any over open-class dictionary senses" do
+    si = %{
+      sentence: "how do i stimulate you? any ideas?",
+      tokens: [
+        %{index: 0, phrase: "how", n: 1, mw: false, span: {0, 3}},
+        %{index: 1, phrase: "do", n: 1, mw: false, span: {4, 6}},
+        %{index: 2, phrase: "i", n: 1, mw: false, span: {7, 8}},
+        %{index: 3, phrase: "any", n: 1, mw: false, span: {24, 27}}
+      ],
+      sense_candidates: %{
+        0 => [%{id: "how|noun|0", pos: "noun", norm: "how", activation: 0.9}],
+        1 => [%{id: "do|verb|0", pos: "verb", norm: "do", activation: 0.9}],
+        2 => [%{id: "i|noun|0", pos: "noun", norm: "i", activation: 0.9}],
+        3 => [
+          %{id: "any|pronoun|1", pos: "pronoun", norm: "any", activation: 0.9},
+          %{id: "any|adverb|1", pos: "adverb", norm: "any", activation: 0.9}
+        ]
+      }
+    }
+
+    assert {:ok, %{choices: choices}} = Stage1.run(si, scores: :all)
+
+    by_index = Map.new(choices, &{&1.token_index, &1})
+
+    assert by_index[0].chosen_id == "how|adverb|0"
+    assert by_index[1].chosen_id == "do|auxiliary|0"
+    assert by_index[2].chosen_id == "i|pronoun|0"
+    assert by_index[3].chosen_id == "any|determiner|0"
+  end
+
   test "upgrades an existing pronoun candidate so you does not resolve to the rare verb sense" do
     si = %{
       sentence: "you",

@@ -106,12 +106,16 @@ defmodule Brain.Curiosity do
     opts = normalize_opts(opts_in)
     now_ms = System.system_time(:millisecond)
 
-    {probe, base_score} = build_probe(state, opts)
+    {probe, base_score, self_state} = build_probe(state, opts)
 
     :telemetry.execute(
       [:curiosity, :proposal],
-      %{score: base_score},
-      %{probe: probe}
+      %{
+        score: base_score,
+        uncertainty: Map.get(self_state, :uncertainty, 0.0),
+        novelty: Map.get(self_state, :novelty, 0.0)
+      },
+      %{probe: probe, reason: Map.get(self_state, :reason)}
     )
 
     {:noreply,
@@ -124,12 +128,16 @@ defmodule Brain.Curiosity do
 
   @impl GenServer
   def handle_info(:tick, %{} = state) do
-    {probe, base_score} = build_probe(state, %{})
+    {probe, base_score, self_state} = build_probe(state, %{})
 
     :telemetry.execute(
       [:curiosity, :proposal],
-      %{score: base_score},
-      %{probe: probe}
+      %{
+        score: base_score,
+        uncertainty: Map.get(self_state, :uncertainty, 0.0),
+        novelty: Map.get(self_state, :novelty, 0.0)
+      },
+      %{probe: probe, reason: Map.get(self_state, :reason)}
     )
 
     next_timer =
@@ -152,10 +160,12 @@ defmodule Brain.Curiosity do
   defp build_probe(state, opts) do
     seq = Map.get(state, :seq, 0)
 
+    self_state = curiosity_self_state(opts)
+
     base =
-      case get_opt(opts, :score, 0.55) do
+      case get_opt(opts, :score, :auto) do
         v when is_number(v) -> clamp01(v)
-        _ -> 0.55
+        _ -> curiosity_score(self_state)
       end
 
     raw_id = get_opt(opts, :id, "curiosity|probe|alpha_zero") |> to_string()
@@ -173,7 +183,65 @@ defmodule Brain.Curiosity do
       score: base
     }
 
-    {probe, base}
+    {probe, base, self_state}
+  end
+
+  defp curiosity_self_state(opts) do
+    case get_opt(opts, :self_state, nil) do
+      %{} = state ->
+        normalize_self_state(state)
+
+      _ ->
+        runtime_self_state()
+    end
+  end
+
+  defp runtime_self_state do
+    required = [Brain, Brain.Meta, Brain.MoodCore, Brain.SelfPortrait]
+
+    if Enum.all?(required, &(Process.whereis(&1) != nil)) do
+      Brain.Introspection.snapshot()
+      |> normalize_self_state()
+      |> Map.put_new(:reason, :runtime_self_state)
+    else
+      %{
+        uncertainty: 0.5,
+        novelty: 0.3,
+        exploration: 0.4,
+        dopamine: 0.4,
+        reason: :default_self_state
+      }
+    end
+  end
+
+  defp normalize_self_state(%{} = state) do
+    mood = map_get(state, :mood, %{})
+    mood_map = map_get(mood, :mood, mood)
+    levels = map_get(mood, :levels, %{})
+
+    %{
+      uncertainty: state |> map_get(:uncertainty, 0.5) |> number_or(0.5) |> clamp01(),
+      novelty: state |> map_get(:novelty, inferred_novelty(state)) |> number_or(0.3) |> clamp01(),
+      exploration: mood_map |> map_get(:exploration, 0.4) |> number_or(0.4) |> clamp01(),
+      dopamine: levels |> map_get(:da, 0.4) |> number_or(0.4) |> clamp01(),
+      reason: map_get(state, :reason, :self_state)
+    }
+  end
+
+  defp curiosity_score(%{} = self_state) do
+    uncertainty = Map.get(self_state, :uncertainty, 0.5)
+    novelty = Map.get(self_state, :novelty, 0.3)
+    exploration = Map.get(self_state, :exploration, 0.4)
+    dopamine = Map.get(self_state, :dopamine, 0.4)
+
+    clamp01(0.25 + uncertainty * 0.30 + novelty * 0.20 + exploration * 0.15 + dopamine * 0.10)
+  end
+
+  defp inferred_novelty(%{} = state) do
+    recent_errors = state |> map_get(:recent_errors, []) |> List.wrap()
+    active_goals = state |> map_get(:active_goals, []) |> List.wrap()
+
+    clamp01(length(recent_errors) * 0.12 + length(active_goals) * 0.08)
   end
 
   defp ensure_probe_id(id, seq) do
@@ -210,6 +278,16 @@ defmodule Brain.Curiosity do
   defp get_opt(opts, key, default) when is_list(opts), do: Keyword.get(opts, key, default)
   defp get_opt(%{} = opts, key, default), do: Map.get(opts, key, default)
   defp get_opt(_opts, _key, default), do: default
+
+  defp map_get(%{} = map, key, default) when is_atom(key) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
+
+  defp map_get(_map, _key, default), do: default
+
+  defp number_or(value, _default) when is_integer(value), do: value * 1.0
+  defp number_or(value, _default) when is_float(value), do: value
+  defp number_or(_value, default), do: default
 
   defp normalize_opts(opts) when is_list(opts) do
     if Keyword.keyword?(opts), do: opts, else: []

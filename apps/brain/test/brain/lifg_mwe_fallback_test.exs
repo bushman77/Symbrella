@@ -40,6 +40,29 @@ defmodule Brain.LIFG.MWEFallbackTelemetryTest do
     refute_receive {:fb, _meas, _meta}, 50
   end
 
+  test "does not synthesize fallback for content plus pronoun phrase with punctuation" do
+    si = %{
+      sentence: "stimulate you?",
+      tokens: [
+        %{index: 0, n: 2, phrase: "stimulate you?", mw: true, span: {0, 14}},
+        %{index: 1, n: 1, phrase: "stimulate", span: {0, 9}},
+        %{index: 2, n: 1, phrase: "you?", span: {10, 14}}
+      ],
+      sense_candidates: %{}
+    }
+
+    assert {:ok, %{choices: choices, audit: audit}} =
+             Brain.LIFG.Stage1.run(si, mwe_fallback: true, scores: :all)
+
+    refute Enum.any?(choices, fn choice ->
+             choice.chosen_id == "stimulate you|phrase|fallback" or
+               choice.chosen_id == "stimulate you?|phrase|fallback"
+           end)
+
+    assert audit.mwe_fallbacks == 0
+    assert audit.fallback_winners == 0
+  end
+
   test "stage1 stop telemetry includes tokens choices and finalists" do
     si = %{
       sentence: "Hello there",

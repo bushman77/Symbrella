@@ -46,6 +46,7 @@ defmodule Symbrella.Application do
         {Brain.Hippocampus, keep: 300},
         Brain.Meta,
         Brain.PFC,
+        {Brain.GoalStack, []},
         Brain.Thalamus,
         Brain.Temporal,
         Brain.OFC,
@@ -78,6 +79,11 @@ defmodule Symbrella.Application do
 
     # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
     safe_attach(fn -> Core.Curiosity.Bridge.attach() end)
+
+    _ =
+      Brain.SelfContinuity.warm_start(
+        scope: Application.get_env(:brain, :self_snapshot_scope, "runtime")
+      )
 
     {:ok, sup}
   end

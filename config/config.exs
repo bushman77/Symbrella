@@ -223,6 +223,7 @@ config :db, Db,
   log: System.get_env("DB_LOG", "false") in ["true", "1", "on", "yes"]
 
 config :db, :embedding_dim, 1536
+config :db, :brain_cell_embedding_dim, 768
 config :db, :embedder, MyEmbeddings
 
 # ─────────────────────────── Per-env tail ─────────────────────────

@@ -32,6 +32,7 @@ defmodule Db do
   alias Db.BrainCell
 
   @type norm :: String.t()
+  @brain_cell_embedding_dim Application.compile_env(:db, :brain_cell_embedding_dim, 768)
 
   # Item 1: closed-class inventory pruning at LTM retrieval time.
   # This intentionally handles only the currently observed troublemakers.
@@ -194,11 +195,198 @@ defmodule Db do
 
   def word_exists?(_, _opts), do: false
 
+  @doc """
+  Returns active BrainCell word candidates that are spelling-near `term`.
+
+  This is a candidate generator for fuzzy repair. It intentionally uses pg_trgm
+  and shape filters, not wildcard phrase searches.
+  """
+  @spec fuzzy_word_candidates(term(), keyword()) :: [map()]
+  def fuzzy_word_candidates(term, opts \\ [])
+
+  def fuzzy_word_candidates(term, opts) when is_binary(term) do
+    only_active? = Keyword.get(opts, :only_active, true)
+    limit = Keyword.get(opts, :limit, 12)
+    min_similarity = Keyword.get(opts, :min_similarity, 0.35)
+    max_length_delta = Keyword.get(opts, :max_length_delta, 2)
+
+    case norm(term) do
+      "" ->
+        []
+
+      n ->
+        initial = String.first(n) || ""
+        n_len = String.length(n)
+
+        status_filter =
+          if only_active? do
+            dynamic([b], b.status == "active")
+          else
+            dynamic([_b], true)
+          end
+
+        from(b in BrainCell,
+          where: ^status_filter,
+          where: b.norm != ^n,
+          where: fragment("left(?::text, 1) = ?", b.norm, ^initial),
+          where:
+            fragment("abs(char_length(?::text) - ?) <= ?", b.norm, ^n_len, ^max_length_delta),
+          where: fragment("similarity(?::text, ?) >= ?", b.norm, ^n, ^min_similarity),
+          order_by: [
+            desc: fragment("similarity(?::text, ?)", b.norm, ^n),
+            asc: fragment("abs(char_length(?::text) - ?)", b.norm, ^n_len)
+          ],
+          limit: ^limit,
+          select: %{
+            id: b.id,
+            norm: type(b.norm, :string),
+            word: type(b.word, :string),
+            pos: b.pos,
+            spelling_score: fragment("similarity(?::text, ?)", b.norm, ^n),
+            source: "db_trigram"
+          }
+        )
+        |> Db.all()
+    end
+  end
+
+  def fuzzy_word_candidates(_, _opts), do: []
+
+  @doc """
+  Reranks spelling candidates with pgvector context evidence from `brain_cells`.
+
+  `query_embedding` must match the `brain_cells.embedding` dimension
+  (`config :db, :brain_cell_embedding_dim`, currently 768). Vector evidence is
+  soft evidence: callers should still keep exact norm checks and spelling gates.
+  """
+  @spec rerank_word_candidates([String.t()] | [map()], [number()] | Pgvector.t(), keyword()) :: [
+          map()
+        ]
+  def rerank_word_candidates(candidates, query_embedding, opts \\ [])
+
+  def rerank_word_candidates(candidates, query_embedding, opts)
+      when is_list(candidates) and is_list(query_embedding) do
+    with {:ok, query_vec} <- brain_cell_pgvector(query_embedding) do
+      rerank_word_candidates_with_vector(candidates, query_vec, opts)
+    else
+      {:error, _reason} -> []
+    end
+  end
+
+  def rerank_word_candidates(candidates, %Pgvector{} = query_embedding, opts)
+      when is_list(candidates) do
+    rerank_word_candidates_with_vector(candidates, query_embedding, opts)
+  end
+
+  def rerank_word_candidates(_, _, _), do: []
+
+  @doc """
+  Generates spelling candidates for `term`, then reranks those candidates by
+  contextual pgvector similarity when a query embedding is available.
+  """
+  @spec context_word_candidates(term(), [number()] | Pgvector.t() | nil, keyword()) :: [map()]
+  def context_word_candidates(term, query_embedding, opts \\ [])
+
+  def context_word_candidates(term, nil, opts), do: fuzzy_word_candidates(term, opts)
+
+  def context_word_candidates(term, query_embedding, opts) do
+    candidates = fuzzy_word_candidates(term, opts)
+
+    case rerank_word_candidates(candidates, query_embedding, opts) do
+      [] -> candidates
+      reranked -> reranked
+    end
+  end
+
   def insrt_all(table, rows, opt) do
     insert_all(table, rows, opt)
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  defp brain_cell_pgvector(list) when is_list(list) do
+    if length(list) == @brain_cell_embedding_dim do
+      {:ok, Pgvector.new(list)}
+    else
+      {:error, {:wrong_embedding_size, length(list)}}
+    end
+  end
+
+  defp candidate_norms(candidates) do
+    candidates
+    |> Enum.map(&candidate_norm/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp candidate_norm(candidate) when is_binary(candidate), do: norm(candidate)
+  defp candidate_norm(%{norm: value}) when is_binary(value), do: norm(value)
+  defp candidate_norm(%{"norm" => value}) when is_binary(value), do: norm(value)
+  defp candidate_norm(%{word: value}) when is_binary(value), do: norm(value)
+  defp candidate_norm(%{"word" => value}) when is_binary(value), do: norm(value)
+  defp candidate_norm(_), do: ""
+
+  defp candidate_spelling_scores(candidates) do
+    Enum.reduce(candidates, %{}, fn candidate, acc ->
+      norm = candidate_norm(candidate)
+      score = candidate_score(candidate)
+
+      if norm == "" or is_nil(score) do
+        acc
+      else
+        Map.put(acc, norm, score)
+      end
+    end)
+  end
+
+  defp candidate_score(%{spelling_score: score}) when is_number(score), do: score * 1.0
+  defp candidate_score(%{"spelling_score" => score}) when is_number(score), do: score * 1.0
+  defp candidate_score(_), do: nil
+
+  defp rerank_word_candidates_with_vector(candidates, query_vec, opts) do
+    norms = candidate_norms(candidates)
+
+    if norms == [] do
+      []
+    else
+      spelling_scores = candidate_spelling_scores(candidates)
+      limit = Keyword.get(opts, :limit, length(norms))
+      only_active? = Keyword.get(opts, :only_active, true)
+
+      status_filter =
+        if only_active? do
+          dynamic([b], b.status == "active")
+        else
+          dynamic([_b], true)
+        end
+
+      from(b in BrainCell,
+        where: ^status_filter,
+        where: b.norm in ^norms,
+        where: not is_nil(b.embedding),
+        order_by: fragment("? <-> ?", b.embedding, type(^query_vec, Pgvector.Ecto.Vector)),
+        limit: ^limit,
+        select: %{
+          id: b.id,
+          norm: type(b.norm, :string),
+          word: type(b.word, :string),
+          pos: b.pos,
+          distance: fragment("? <-> ?", b.embedding, type(^query_vec, Pgvector.Ecto.Vector)),
+          context_score:
+            fragment(
+              "1.0 / (1.0 + (? <-> ?))",
+              b.embedding,
+              type(^query_vec, Pgvector.Ecto.Vector)
+            ),
+          source: "db_pgvector"
+        }
+      )
+      |> Db.all()
+      |> Enum.map(fn row ->
+        Map.put(row, :spelling_score, Map.get(spelling_scores, norm(row.norm)))
+      end)
+    end
+  end
 
   defp braincell_to_candidate_map(%BrainCell{} = r, token_index) when is_integer(token_index) do
     %{

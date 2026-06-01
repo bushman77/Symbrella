@@ -120,7 +120,7 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
     assert :low_confidence_rate_high in audit.degraded_reasons
   end
 
-  test "suppressed MWE spans count as missing candidates but not fallback emissions" do
+  test "suppressed MWE spans are ignored as probes instead of counted as missing candidates" do
     si = %{
       sentence: "town and buy",
       tokens: [
@@ -132,7 +132,8 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
     assert {:ok, %{choices: [], audit: audit}} =
              Stage1.run(si, scores: :all, mwe_fallback: true)
 
-    assert audit.missing_candidates == 1
+    assert audit.missing_candidates == 0
+    assert audit.ignored_mwe_probes == 1
     assert audit.mwe_fallbacks == 0
     assert audit.fallback_winners == 0
     assert audit.rates.fallback == 0.0

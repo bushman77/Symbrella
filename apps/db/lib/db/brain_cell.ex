@@ -54,6 +54,8 @@ defmodule Db.BrainCell do
     determiner preposition conjunction numeral particle
   )
 
+  @embedding_dim Application.compile_env(:db, :brain_cell_embedding_dim, 768)
+
   # Allows third segment to be alnum/underscore (index or tag like "fallback")
   @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/
 
@@ -97,10 +99,10 @@ defmodule Db.BrainCell do
 
     field(:position, {:array, :float})
     field(:connections, {:array, :map}, default: [])
+    field(:embedding, Pgvector.Ecto.Vector)
     field(:last_dose_at, :utc_datetime_usec)
     field(:last_substance, :string)
     field(:token_id, :integer)
-    # field :embedding, Pgvector.Ecto.Vector
 
     timestamps()
   end
@@ -126,9 +128,40 @@ defmodule Db.BrainCell do
     |> validate_id_not_placeholder()
     |> validate_change(:id, &validate_id_shape/2)
     |> validate_id_pos_matches_column()
+    |> validate_embedding_shape()
   end
 
   # ───────────────────────── helpers ─────────────────────────
+
+  defp validate_embedding_shape(changeset) do
+    val = get_change(changeset, :embedding, get_field(changeset, :embedding))
+
+    cond do
+      is_nil(val) ->
+        changeset
+
+      match?(%Pgvector{}, val) ->
+        validate_embedding_list(changeset, Pgvector.to_list(val))
+
+      is_list(val) ->
+        validate_embedding_list(changeset, val)
+
+      true ->
+        add_error(changeset, :embedding, "embedding must be a list of floats or a %Pgvector{}")
+    end
+  end
+
+  defp validate_embedding_list(changeset, list) when is_list(list) do
+    if length(list) == @embedding_dim do
+      changeset
+    else
+      add_error(
+        changeset,
+        :embedding,
+        "embedding length must be #{@embedding_dim} (got #{length(list)})"
+      )
+    end
+  end
 
   defp normalize_text_fields(changeset) do
     changeset

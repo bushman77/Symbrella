@@ -77,4 +77,52 @@ defmodule Core.Text.FuzzyTest do
     assert fuzzy.corrections == []
     assert :fact_query in fuzzy.aliases
   end
+
+  test "protects caller-known vocabulary before fuzzy repair" do
+    fuzzy = Fuzzy.interpret("my new plaace", known_word?: &(&1 == "plaace"))
+
+    assert fuzzy.text == "my new plaace"
+    assert fuzzy.corrections == []
+  end
+
+  test "uses wildcard context frames to prefer phrase-compatible repairs" do
+    fuzzy = Fuzzy.interpret("my new plaace", known_word?: fn _ -> false end)
+
+    assert fuzzy.text == "my new place"
+
+    assert [
+             %{original: "plaace", replacement: "place", reason: :context_frame}
+           ] = fuzzy.corrections
+  end
+
+  test "context frames can contribute candidates without creating trusted phrases" do
+    fuzzy = Fuzzy.interpret("math exma", known_word?: fn _ -> false end)
+
+    assert fuzzy.text == "math exam"
+
+    assert [
+             %{original: "exma", replacement: "exam", reason: :context_frame}
+           ] = fuzzy.corrections
+
+    refute Map.has_key?(fuzzy, :mwe)
+  end
+
+  test "semantic candidate scores can break spelling ties without becoming hard truth" do
+    fuzzy =
+      Fuzzy.interpret("plaase",
+        known_word?: fn _ -> false end,
+        candidate_lookup: fn _ ->
+          [
+            %{norm: "please", context_score: 0.94},
+            %{norm: "place", context_score: 0.10}
+          ]
+        end
+      )
+
+    assert fuzzy.text == "please"
+
+    assert [
+             %{original: "plaase", replacement: "please", reason: :pgvector_context}
+           ] = fuzzy.corrections
+  end
 end

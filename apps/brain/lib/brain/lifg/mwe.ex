@@ -502,7 +502,7 @@ defmodule Brain.LIFG.MWE do
   # ── Private helpers ──────────────────────────────────────────────────
   # apps/brain/lib/brain/lifg/mwe.ex
   def function_word?(w) when is_binary(w) do
-    w = w |> String.downcase() |> String.trim()
+    w = norm_key(w)
 
     w in @preps or w in @dets or w in @conjs or w in @auxes or
       w in @modals or w in @pron or w in @neg
@@ -712,8 +712,13 @@ defmodule Brain.LIFG.MWE do
 
   defp to_end_span(_span, _surface_len), do: nil
 
-  defp down(s) when is_binary(s),
-    do: s |> String.downcase() |> String.trim() |> String.replace(~r/\s+/, " ")
+  defp down(s) when is_binary(s) do
+    s
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+    |> String.replace(~r/\s+/, " ")
+  end
 
   defp down(_), do: ""
 

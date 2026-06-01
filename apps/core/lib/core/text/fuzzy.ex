@@ -105,12 +105,23 @@ defmodule Core.Text.Fuzzy do
   @lexicon ~w(
     about address again am are answer bad because believe blue brain call can
     color could did do does drugs english explain favorite fix forgot have hello
-    help hippocampus how i in is issue know live location me mean memory message
-    mix my name please quetiapine recall remember richmond risks run save show
-    sister sleep sleeping state store tell test thanks that the their there
-    thing this time to translate trouble what whats when where who why will you
-    your
+    help hippocampus home homework house how i in is issue know live location me
+    mean memory message mix my name place please quetiapine recall remember
+    richmond risks run save show sister sleep sleeping state store tell test
+    thanks that the their there thing this time to translate trouble what whats
+    when where who why will you your
   )
+
+  @context_frames [
+    %{pattern: ["new", :slot], prefers: ~w(place house home apartment)},
+    %{pattern: ["my", "new", :slot], prefers: ~w(place house home apartment)},
+    %{pattern: ["move", "into", :slot], prefers: ~w(place house home apartment)},
+    %{pattern: ["move", "into", "my", :slot], prefers: ~w(place house home apartment)},
+    %{pattern: ["paid", "for", :slot], prefers: ~w(place house home apartment)},
+    %{pattern: ["math", :slot], prefers: ~w(test homework exam)},
+    %{pattern: ["help", "me", "with", :slot], prefers: []},
+    %{pattern: ["can", "you", "help", "me", "with", :slot], prefers: []}
+  ]
 
   @identity_query_phrases [
     "what is my name",
@@ -203,10 +214,12 @@ defmodule Core.Text.Fuzzy do
 
   defp correct_text(text, opts) do
     max_distance = Keyword.get(opts, :max_distance, 2)
+    words = String.split(text, " ", trim: true)
+    bare_words = Enum.map(words, &bare_word/1)
 
-    text
-    |> String.split(" ", trim: true)
-    |> Enum.map(&correct_word(&1, max_distance))
+    words
+    |> Enum.with_index()
+    |> Enum.map(fn {word, index} -> correct_word(word, index, bare_words, max_distance, opts) end)
     |> Enum.reduce({[], []}, fn {word, correction}, {words, corrections} ->
       corrections = if correction, do: corrections ++ [correction], else: corrections
       {words ++ [word], corrections}
@@ -214,11 +227,14 @@ defmodule Core.Text.Fuzzy do
     |> then(fn {words, corrections} -> {Enum.join(words, " "), corrections} end)
   end
 
-  defp correct_word(word, max_distance) do
-    bare = String.trim(word, "?")
+  defp correct_word(word, index, words, max_distance, opts) do
+    bare = bare_word(word)
 
     cond do
       bare == "" ->
+        {word, nil}
+
+      known_word?(bare, opts) ->
         {word, nil}
 
       bare in @lexicon ->
@@ -232,29 +248,235 @@ defmodule Core.Text.Fuzzy do
         {word, nil}
 
       true ->
-        fuzzy_word_match(word, bare, max_distance)
+        fuzzy_word_match(word, bare, index, words, max_distance, opts)
     end
   end
 
-  defp fuzzy_word_match(word, bare, max_distance) do
-    @lexicon
-    |> Enum.map(fn candidate -> {candidate, damerau_levenshtein(bare, candidate)} end)
-    |> Enum.filter(fn {candidate, distance} ->
+  defp bare_word(word), do: String.trim(word, "?")
+
+  defp known_word?(word, opts) do
+    case Keyword.get(opts, :known_word?) do
+      fun when is_function(fun, 1) -> fun.(word)
+      _ -> db_word_exists?(word)
+    end
+  end
+
+  defp db_word_exists?(word) do
+    Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) and db_started?() and
+      apply(Db, :word_exists?, [word])
+  end
+
+  defp db_started? do
+    Enum.any?(Application.started_applications(), fn {app, _description, _version} ->
+      app == :db
+    end)
+  end
+
+  defp fuzzy_word_match(word, bare, index, words, max_distance, opts) do
+    preferred = context_preferred_candidates(words, index)
+
+    (@lexicon ++ preferred)
+    |> normalize_candidate_specs()
+    |> merge_candidate_specs(lookup_candidate_specs(bare, opts))
+    |> Enum.map(fn candidate -> candidate_score(bare, candidate, preferred) end)
+    |> Enum.filter(fn {candidate, distance, _score, _reason} ->
       distance > 0 and distance <= max_distance and plausible_distance?(bare, candidate, distance) and
         same_initial?(bare, candidate)
     end)
-    |> Enum.sort_by(fn {candidate, distance} ->
-      {distance, abs(String.length(candidate) - String.length(bare))}
+    |> Enum.sort_by(fn {candidate, distance, score, reason} ->
+      {-score, distance, abs(String.length(candidate) - String.length(bare)), reason_rank(reason)}
     end)
-    |> List.first()
+    |> clear_winner()
     |> case do
       nil ->
         {word, nil}
 
-      {replacement, distance} ->
-        score = if distance == 1, do: 0.88, else: 0.79
+      {replacement, _distance, score, reason} ->
         corrected = preserve_question_mark(word, replacement)
-        {corrected, correction(bare, replacement, score, :edit_distance)}
+        {corrected, correction(bare, replacement, score, reason)}
+    end
+  end
+
+  defp candidate_score(bare, %{word: candidate} = candidate_spec, preferred) do
+    distance = damerau_levenshtein(bare, candidate)
+    base = if distance == 1, do: 0.88, else: 0.79
+    frame? = Map.get(candidate_spec, :frame?, false) or candidate in preferred
+    semantic_score = Map.get(candidate_spec, :context_score, 0.0)
+
+    score =
+      base
+      |> add_score(if(frame?, do: 0.08, else: 0.0))
+      |> add_score(min(semantic_score, 1.0) * 0.06)
+      |> min(0.97)
+
+    reason =
+      cond do
+        frame? -> :context_frame
+        semantic_score > 0.0 -> :pgvector_context
+        true -> :edit_distance
+      end
+
+    {candidate, distance, score, reason}
+  end
+
+  defp add_score(score, amount), do: score + amount
+
+  defp clear_winner([]), do: nil
+
+  defp clear_winner([winner]), do: winner
+
+  defp clear_winner([{_candidate, _distance, score, _reason} = winner | rest]) do
+    {_candidate, _distance, second_score, _reason} = List.first(rest)
+
+    if score - second_score >= 0.06 do
+      winner
+    end
+  end
+
+  defp reason_rank(:context_frame), do: 0
+  defp reason_rank(:pgvector_context), do: 1
+  defp reason_rank(:edit_distance), do: 2
+  defp reason_rank(_), do: 3
+
+  defp lookup_candidate_specs(word, opts) do
+    case Keyword.get(opts, :candidate_words) do
+      words when is_list(words) ->
+        normalize_candidate_specs(words)
+
+      _ ->
+        case Keyword.get(opts, :candidate_lookup) do
+          fun when is_function(fun, 1) -> word |> fun.() |> normalize_candidate_specs()
+          _ -> db_candidate_specs(word, opts)
+        end
+    end
+  end
+
+  defp db_candidate_specs(word, opts) do
+    cond do
+      not db_started?() ->
+        []
+
+      Keyword.has_key?(opts, :context_embedding) and
+        Code.ensure_loaded?(Db) and function_exported?(Db, :context_word_candidates, 3) ->
+        Db
+        |> apply(:context_word_candidates, [
+          word,
+          Keyword.fetch!(opts, :context_embedding),
+          db_candidate_opts(opts)
+        ])
+        |> normalize_candidate_specs()
+
+      Code.ensure_loaded?(Db) and function_exported?(Db, :fuzzy_word_candidates, 2) ->
+        Db
+        |> apply(:fuzzy_word_candidates, [word, db_candidate_opts(opts)])
+        |> normalize_candidate_specs()
+
+      true ->
+        []
+    end
+  end
+
+  defp db_candidate_opts(opts) do
+    [
+      limit: Keyword.get(opts, :candidate_limit, 12),
+      only_active: Keyword.get(opts, :only_active, true)
+    ]
+  end
+
+  defp normalize_candidate_specs(words) when is_list(words) do
+    words
+    |> Enum.map(&normalize_candidate_spec/1)
+    |> Enum.reject(&is_nil/1)
+    |> merge_candidate_specs([])
+  end
+
+  defp normalize_candidate_specs(_), do: []
+
+  defp normalize_candidate_spec(word) when is_binary(word) do
+    word = normalize_candidate_word(word)
+    if word == "", do: nil, else: %{word: word}
+  end
+
+  defp normalize_candidate_spec(%{} = candidate) do
+    word =
+      candidate
+      |> candidate_word()
+      |> normalize_candidate_word()
+
+    if word == "" do
+      nil
+    else
+      %{
+        word: word,
+        context_score: candidate_float(candidate, :context_score),
+        spelling_score: candidate_float(candidate, :spelling_score)
+      }
+    end
+  end
+
+  defp normalize_candidate_spec(_), do: nil
+
+  defp normalize_candidate_word(word) when is_binary(word) do
+    word
+    |> Core.Text.normalize()
+    |> String.downcase()
+  end
+
+  defp normalize_candidate_word(_), do: ""
+
+  defp candidate_word(%{norm: word}) when is_binary(word), do: word
+  defp candidate_word(%{"norm" => word}) when is_binary(word), do: word
+  defp candidate_word(%{word: word}) when is_binary(word), do: word
+  defp candidate_word(%{"word" => word}) when is_binary(word), do: word
+  defp candidate_word(%{replacement: word}) when is_binary(word), do: word
+  defp candidate_word(%{"replacement" => word}) when is_binary(word), do: word
+  defp candidate_word(_), do: ""
+
+  defp candidate_float(candidate, key) do
+    value = Map.get(candidate, key) || Map.get(candidate, Atom.to_string(key)) || 0.0
+    if is_number(value), do: value * 1.0, else: 0.0
+  end
+
+  defp merge_candidate_specs(left, right) do
+    (left ++ right)
+    |> Enum.reduce(%{}, fn %{word: word} = candidate, acc ->
+      Map.update(acc, word, candidate, &merge_candidate_spec(&1, candidate))
+    end)
+    |> Map.values()
+  end
+
+  defp merge_candidate_spec(left, right) do
+    %{
+      word: left.word,
+      frame?: Map.get(left, :frame?, false) or Map.get(right, :frame?, false),
+      context_score: max(Map.get(left, :context_score, 0.0), Map.get(right, :context_score, 0.0)),
+      spelling_score:
+        max(Map.get(left, :spelling_score, 0.0), Map.get(right, :spelling_score, 0.0))
+    }
+  end
+
+  defp context_preferred_candidates(words, index) do
+    @context_frames
+    |> Enum.filter(&frame_matches?(&1.pattern, words, index))
+    |> Enum.flat_map(& &1.prefers)
+    |> Enum.uniq()
+  end
+
+  defp frame_matches?(pattern, words, index) do
+    slot_index = Enum.find_index(pattern, &(&1 == :slot))
+
+    if is_integer(slot_index) do
+      start_index = index - slot_index
+
+      start_index >= 0 and start_index + length(pattern) <= length(words) and
+        pattern
+        |> Enum.with_index()
+        |> Enum.all?(fn
+          {:slot, _offset} -> true
+          {expected, offset} -> Enum.at(words, start_index + offset) == expected
+        end)
+    else
+      false
     end
   end
 

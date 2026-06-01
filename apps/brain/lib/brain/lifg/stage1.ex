@@ -105,10 +105,24 @@ defmodule Brain.LIFG.Stage1 do
     "hey" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
     "hi" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
     "hello" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
+    "how" => %{
+      pos: "adverb",
+      rel_prior: 1.0,
+      activation: 0.96,
+      definition: "Interrogative adverb asking about manner, method, or condition.",
+      example: "How do I stimulate you?"
+    },
     "what" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
     "who" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
     "whom" => %{pos: "pronoun", rel_prior: 0.99, activation: 0.95},
     "which" => %{pos: "determiner", rel_prior: 0.98, activation: 0.94},
+    "any" => %{
+      pos: "determiner",
+      rel_prior: 0.99,
+      activation: 0.95,
+      definition: "Determiner used before a noun to indicate an indefinite amount or choice.",
+      example: "Any ideas?"
+    },
     "do" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
     "does" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
     "did" => %{pos: "auxiliary", rel_prior: 0.98, activation: 0.94},
@@ -412,6 +426,7 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:boundary_drop_count, acc.boundary_drops)
         |> Map.put(:mwe_fallbacks, acc.mwe_fallbacks)
         |> Map.put(:fallback_winners, acc.fallback_winners)
+        |> Map.put(:ignored_mwe_probes, acc.ignored_mwe_probes)
         |> Map.put(:low_confidence_decisions, acc.low_confidence)
         |> Map.put(:pos_anomalies, acc.pos_anomalies)
         |> mark_degraded()
@@ -720,6 +735,7 @@ defmodule Brain.LIFG.Stage1 do
       boundary_drops: 0,
       mwe_fallbacks: 0,
       fallback_winners: 0,
+      ignored_mwe_probes: 0,
       low_confidence: 0,
       pos_anomalies: 0
     }
@@ -797,247 +813,253 @@ defmodule Brain.LIFG.Stage1 do
         acc
       end
 
-    if cand_list == [] do
-      acc
-      |> Map.update!(:no_cand, &(&1 + 1))
-      |> Map.update!(:no_cand_tokens, &[tok_index | &1])
-    else
-      bias_val = get_float(ctx.bias_map, tok_index, 0.0)
-      {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
-      closed_class_slate? = Enum.any?(cand_list, &closed_class_candidate?/1)
+    cond do
+      cand_list == [] and token_mwe? and not allow_mwe_fallback_phrase?(token_phrase) ->
+        Map.update!(acc, :ignored_mwe_probes, &(&1 + 1))
 
-      scored_rows =
-        Enum.map(cand_list, fn c ->
-          id = sense_id_for(c, token_phrase)
-          pos = pos_of(c)
+      cand_list == [] ->
+        acc
+        |> Map.update!(:no_cand, &(&1 + 1))
+        |> Map.update!(:no_cand_tokens, &[tok_index | &1])
 
-          cnrm =
-            norm(
-              Safe.get(c, :norm) ||
-                Safe.get(c, :lemma) ||
-                Safe.get(c, :word) ||
-                token_phrase
-            )
+      true ->
+        bias_val = get_float(ctx.bias_map, tok_index, 0.0)
+        {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
+        closed_class_slate? = Enum.any?(cand_list, &closed_class_candidate?/1)
 
-          lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
+        scored_rows =
+          Enum.map(cand_list, fn c ->
+            id = sense_id_for(c, token_phrase)
+            pos = pos_of(c)
 
-          rel0 =
-            guess_rel_prior(c, id, token_phrase)
-            |> clamp01()
+            cnrm =
+              norm(
+                Safe.get(c, :norm) ||
+                  Safe.get(c, :lemma) ||
+                  Safe.get(c, :word) ||
+                  token_phrase
+              )
 
-          act0 =
-            clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
+            lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
-          lex_ctx = clamp01(lex0 + 0.6 * syn_hits)
-          rel_ctx = clamp01(rel0 - 0.4 * ant_hits)
+            rel0 =
+              guess_rel_prior(c, id, token_phrase)
+              |> clamp01()
 
-          intent0 =
-            intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
+            act0 =
+              clamp01(Safe.get(c, :activation, Safe.get(c, :score, guess_activation(c))))
 
-          feat_override =
-            Safe.get(c, :features) ||
-              Safe.get(c, "features") ||
-              %{}
+            lex_ctx = clamp01(lex0 + 0.6 * syn_hits)
+            rel_ctx = clamp01(rel0 - 0.4 * ant_hits)
 
-          lex = feat_override |> get_num(:lex_fit, lex_ctx) |> clamp01()
-          rel = feat_override |> get_num(:rel_prior, rel_ctx) |> clamp01()
-          act = feat_override |> get_num(:activation, act0) |> clamp01()
-          intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
+            intent0 =
+              intent_alignment_feature(bias_val, token_mwe?, cnrm, token_phrase, pos)
 
-          pos_bias =
-            closed_class_pos_bias(token_phrase, pos) +
-              local_context_pos_bias(acc, tok, pos)
+            feat_override =
+              Safe.get(c, :features) ||
+                Safe.get(c, "features") ||
+                %{}
 
-          perception_bias =
-            perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
+            lex = feat_override |> get_num(:lex_fit, lex_ctx) |> clamp01()
+            rel = feat_override |> get_num(:rel_prior, rel_ctx) |> clamp01()
+            act = feat_override |> get_num(:activation, act0) |> clamp01()
+            intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
-          perception_delta = perception_bias * ctx.perception_bias_scale
+            pos_bias =
+              closed_class_pos_bias(token_phrase, pos) +
+                local_context_pos_bias(acc, tok, pos)
 
-          hom_bump =
-            if closed_class_slate? do
-              0.0
-            else
-              if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
-            end
+            perception_bias =
+              perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
 
-          feat = %{
-            id: id,
-            lex_fit: lex,
-            rel_prior: rel,
-            activation: act,
-            intent_bias: intent_feat,
-            perception_bias: perception_bias
-          }
+            perception_delta = perception_bias * ctx.perception_bias_scale
 
-          %{
-            id: id,
-            token: tok,
-            features: feat,
-            perception_delta: perception_delta,
-            hom_bump: hom_bump,
-            pos_bias: pos_bias
-          }
-        end)
+            hom_bump =
+              if closed_class_slate? do
+                0.0
+              else
+                if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
+              end
 
-      numeric_scores = Numeric.weighted_scores(Enum.map(scored_rows, & &1.features), ctx.weights)
+            feat = %{
+              id: id,
+              lex_fit: lex,
+              rel_prior: rel,
+              activation: act,
+              intent_bias: intent_feat,
+              perception_bias: perception_bias
+            }
 
-      scored_trip =
-        scored_rows
-        |> Enum.zip(numeric_scores)
-        |> Enum.map(fn {row, base0} ->
-          base =
-            base0
-            |> Kernel.+(row.perception_delta)
-            |> Kernel.+(row.hom_bump)
-            |> Kernel.+(row.pos_bias)
-            |> clamp01()
-            |> apply_mood_if_up(row.token, row.id)
-
-          {row.id, base, row.features}
-        end)
-
-      ids = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
-      base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
-      feats = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
-
-      ctx_key =
-        Cerebellum.context_key({:lifg_stage1, intent: intent_key(ctx.si), mwe: token_mwe?})
-
-      cereb_opts =
-        kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: ctx.margin_thr)
-
-      cal_scores =
-        if closed_class_slate? do
-          base_scores
-        else
-          cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
-        end
-
-      logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
-      probs = Numeric.softmax(logits)
-
-      ranked =
-        Enum.zip(ids, probs)
-        |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
-        |> Enum.sort_by(fn {_id, p} -> -p end)
-
-      {chosen_id, top_p0} =
-        case ranked do
-          [{id1, p1} | _] -> {id1, p1}
-          _ -> {nil, 0.0}
-        end
-
-      second_p =
-        case ranked do
-          [_first, {_id2, p2} | _] -> p2
-          _ -> 0.0
-        end
-
-      fallback_winner? = fallback_sense_id?(chosen_id)
-      fallback_only? = fallback_winner? and length(ranked) == 1
-
-      singleton_closed_class? =
-        length(ranked) == 1 and
-          Enum.any?(cand_list, fn c ->
-            sense_id_for(c, token_phrase) == chosen_id and closed_class_candidate?(c)
+            %{
+              id: id,
+              token: tok,
+              features: feat,
+              perception_delta: perception_delta,
+              hom_bump: hom_bump,
+              pos_bias: pos_bias
+            }
           end)
 
-      top_p = reliability_capped_top_p(top_p0, fallback_winner?, fallback_only?)
+        numeric_scores =
+          Numeric.weighted_scores(Enum.map(scored_rows, & &1.features), ctx.weights)
 
-      margin0 =
-        cond do
-          length(ranked) >= 2 -> top_p - second_p
-          singleton_closed_class? -> 1.0
-          true -> 0.0
-        end
+        scored_trip =
+          scored_rows
+          |> Enum.zip(numeric_scores)
+          |> Enum.map(fn {row, base0} ->
+            base =
+              base0
+              |> Kernel.+(row.perception_delta)
+              |> Kernel.+(row.hom_bump)
+              |> Kernel.+(row.pos_bias)
+              |> clamp01()
+              |> apply_mood_if_up(row.token, row.id)
 
-      margin = Float.round(max(margin0, 0.0), 6)
+            {row.id, base, row.features}
+          end)
 
-      _ =
-        unless closed_class_slate? do
-          cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
-        end
+        ids = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
+        base_scores = Map.new(scored_trip, fn {id, b, _} -> {id, b} end)
+        feats = Enum.map(scored_trip, fn {_id, _b, f} -> f end)
 
-      scores_out =
-        case ctx.scores_mode do
-          :all -> scores_map_with_capped_top(ranked, chosen_id, top_p)
-          :top2 -> ranked |> Enum.take(2) |> Map.new()
-          _ -> %{}
-        end
+        ctx_key =
+          Cerebellum.context_key({:lifg_stage1, intent: intent_key(ctx.si), mwe: token_mwe?})
 
-      runner_up_id =
-        case ranked do
-          [_first, {id2, _p2} | _] -> id2
-          _ -> nil
-        end
+        cereb_opts =
+          kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: ctx.margin_thr)
 
-      chosen_veto? =
-        if is_binary(chosen_id) do
-          candidate_veto?(cand_list, token_phrase, chosen_id)
-        else
-          false
-        end
-
-      alt_ids =
-        cond do
-          is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? -> [runner_up_id]
-          is_binary(runner_up_id) and margin < ctx.margin_thr -> [runner_up_id]
-          true -> []
-        end
-
-      margin_weak? = margin < ctx.margin_thr
-
-      low_confidence? =
-        not singleton_closed_class? and
-          (top_p < Application.get_env(:brain, :acc_p_min, 0.65) or fallback_winner?)
-
-      choice = %{
-        token_index: tok_index,
-        index: tok_index,
-        span_start: token_start(tok),
-        id: chosen_id,
-        chosen_id: chosen_id,
-        veto?: chosen_veto?,
-        score: top_p,
-        prob: top_p,
-        scores: scores_out,
-        alt_ids: alt_ids,
-        margin: margin,
-        prob_margin: margin,
-        weak?: margin_weak? or low_confidence?,
-        margin_weak?: margin_weak?,
-        low_confidence?: low_confidence?,
-        reliability:
-          cond do
-            fallback_winner? -> :fallback_unknown
-            singleton_closed_class? -> :deterministic_closed_class
-            margin_weak? -> :weak_margin
-            true -> :selected
+        cal_scores =
+          if closed_class_slate? do
+            base_scores
+          else
+            cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
           end
-      }
 
-      weak_next = if margin_weak?, do: acc.weak + 1, else: acc.weak
+        logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
+        probs = Numeric.softmax(logits)
 
-      low_confidence_next =
-        if low_confidence?, do: acc.low_confidence + 1, else: acc.low_confidence
+        ranked =
+          Enum.zip(ids, probs)
+          |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
+          |> Enum.sort_by(fn {_id, p} -> -p end)
 
-      pos_anomaly_next =
-        if pos_anomaly?(token_phrase, chosen_id),
-          do: acc.pos_anomalies + 1,
-          else: acc.pos_anomalies
+        {chosen_id, top_p0} =
+          case ranked do
+            [{id1, p1} | _] -> {id1, p1}
+            _ -> {nil, 0.0}
+          end
 
-      fallback_winners_next =
-        if fallback_winner?,
-          do: acc.fallback_winners + 1,
-          else: acc.fallback_winners
+        second_p =
+          case ranked do
+            [_first, {_id2, p2} | _] -> p2
+            _ -> 0.0
+          end
 
-      acc
-      |> Map.update!(:choices, &[choice | &1])
-      |> Map.put(:weak, weak_next)
-      |> Map.put(:low_confidence, low_confidence_next)
-      |> Map.put(:pos_anomalies, pos_anomaly_next)
-      |> Map.put(:fallback_winners, fallback_winners_next)
-      |> Map.update!(:kept, &(&1 + 1))
+        fallback_winner? = fallback_sense_id?(chosen_id)
+        fallback_only? = fallback_winner? and length(ranked) == 1
+
+        singleton_closed_class? =
+          length(ranked) == 1 and
+            Enum.any?(cand_list, fn c ->
+              sense_id_for(c, token_phrase) == chosen_id and closed_class_candidate?(c)
+            end)
+
+        top_p = reliability_capped_top_p(top_p0, fallback_winner?, fallback_only?)
+
+        margin0 =
+          cond do
+            length(ranked) >= 2 -> top_p - second_p
+            singleton_closed_class? -> 1.0
+            true -> 0.0
+          end
+
+        margin = Float.round(max(margin0, 0.0), 6)
+
+        _ =
+          unless closed_class_slate? do
+            cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
+          end
+
+        scores_out =
+          case ctx.scores_mode do
+            :all -> scores_map_with_capped_top(ranked, chosen_id, top_p)
+            :top2 -> ranked |> Enum.take(2) |> Map.new()
+            _ -> %{}
+          end
+
+        runner_up_id =
+          case ranked do
+            [_first, {id2, _p2} | _] -> id2
+            _ -> nil
+          end
+
+        chosen_veto? =
+          if is_binary(chosen_id) do
+            candidate_veto?(cand_list, token_phrase, chosen_id)
+          else
+            false
+          end
+
+        alt_ids =
+          cond do
+            is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? -> [runner_up_id]
+            is_binary(runner_up_id) and margin < ctx.margin_thr -> [runner_up_id]
+            true -> []
+          end
+
+        margin_weak? = margin < ctx.margin_thr
+
+        low_confidence? =
+          not singleton_closed_class? and
+            (top_p < Application.get_env(:brain, :acc_p_min, 0.65) or fallback_winner?)
+
+        choice = %{
+          token_index: tok_index,
+          index: tok_index,
+          span_start: token_start(tok),
+          id: chosen_id,
+          chosen_id: chosen_id,
+          veto?: chosen_veto?,
+          score: top_p,
+          prob: top_p,
+          scores: scores_out,
+          alt_ids: alt_ids,
+          margin: margin,
+          prob_margin: margin,
+          weak?: margin_weak? or low_confidence?,
+          margin_weak?: margin_weak?,
+          low_confidence?: low_confidence?,
+          reliability:
+            cond do
+              fallback_winner? -> :fallback_unknown
+              singleton_closed_class? -> :deterministic_closed_class
+              margin_weak? -> :weak_margin
+              true -> :selected
+            end
+        }
+
+        weak_next = if margin_weak?, do: acc.weak + 1, else: acc.weak
+
+        low_confidence_next =
+          if low_confidence?, do: acc.low_confidence + 1, else: acc.low_confidence
+
+        pos_anomaly_next =
+          if pos_anomaly?(token_phrase, chosen_id),
+            do: acc.pos_anomalies + 1,
+            else: acc.pos_anomalies
+
+        fallback_winners_next =
+          if fallback_winner?,
+            do: acc.fallback_winners + 1,
+            else: acc.fallback_winners
+
+        acc
+        |> Map.update!(:choices, &[choice | &1])
+        |> Map.put(:weak, weak_next)
+        |> Map.put(:low_confidence, low_confidence_next)
+        |> Map.put(:pos_anomalies, pos_anomaly_next)
+        |> Map.put(:fallback_winners, fallback_winners_next)
+        |> Map.update!(:kept, &(&1 + 1))
     end
   end
 

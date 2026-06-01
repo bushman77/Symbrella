@@ -633,7 +633,7 @@ This phase can consume both rule-derived self-state and advisory calibration pre
 
 Coupling targets:
 
-- [ ] **Curiosity:** proposal rate responds to novelty, dopamine, and uncertainty.
+- [x] **Curiosity:** proposal score responds to novelty, exploration/dopamine, and uncertainty.
 - [ ] **WM / attention:** vigilance and uncertainty alter persistence and interrupt sensitivity.
 - [ ] **Memory writes:** salience and novelty increase write likelihood; overload suppresses writes.
 - [x] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.
@@ -667,10 +667,10 @@ Minimum telemetry set:
 
 Deliverables:
 
-- [ ] Explicit goal stack.
-- [ ] Tension / priority model.
-- [ ] Unresolved-task carryover.
-- [ ] Curiosity proposals tied to uncertainty reduction.
+- [x] Explicit goal stack.
+- [x] Tension / priority model.
+- [x] Unresolved-task carryover through bounded self-continuity snapshots.
+- [x] Curiosity proposals tied to uncertainty reduction.
 - [ ] Suppression rules when overload is high.
 
 ---

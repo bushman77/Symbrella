@@ -1,360 +1,271 @@
-# Symbrella — Neuro-Symbolic Synthetic Intelligence (NSSI)
+# Symbrella
 
-**Erlang/OTP:** 28 • **Elixir:** 1.18.x • **Phoenix:** 1.8.x (Bandit)
+**Neuro-Symbolic Synthetic Intelligence for Elixir/Phoenix**
 
-> Symbrella is an NSSI (Neuro‑Symbolic Synthetic Intelligence) umbrella app.  
-> It models brain‑inspired regions (LIFG, PMTG, Hippocampus, ACC, Basal Ganglia, Thalamus, DLPFC, etc.) as OTP processes, combining symbolic structure with learned signals (Axon/Nx, embeddings, episodic recall).
+Symbrella is a Phoenix umbrella application that experiments with a long-lived,
+inspectable synthetic brain. It models cognition as cooperating OTP processes:
+working memory, hippocampal recall, language interpretation, mood, curiosity,
+attention gates, action selection, and local LLM support.
 
-Symbrella treats your phone (and eventually real robots) as a **body**, and this umbrella as a **brain**.  
-It combines:
+The project treats a phone, browser, VR cockpit, or future robot as a possible
+body, while the umbrella application acts as the brain. The goal is not to hide
+all reasoning behind one model call. The goal is to make the cognitive loop
+visible, testable, and debuggable.
 
-- **Neural models** (Axon/Nx, embeddings)  
-- **Symbolic control** (GenServers, policies, Ecto-backed memory)  
-- **Brain-inspired regions** (LIFG, PMTG, Hippocampus, WM, Mood, Curiosity, Thalamus, DLPFC, Cerebellum, etc.)
+## Runtime Stack
 
-…into a single, inspectable cognitive system you can run locally.
+- **Erlang/OTP:** 28
+- **Elixir:** 1.18.x
+- **Phoenix:** 1.8.x with Bandit
+- **UI:** Phoenix LiveView, Tailwind CSS v4, esbuild
+- **Persistence:** Ecto, PostgreSQL, pgvector-ready schemas
+- **LLM integration:** local llama.cpp / `llama-server` runner plus `Req` HTTP client
 
----
+## What Symbrella Does Today
 
-## Why Symbrella?
+Symbrella currently provides:
 
-Most AI systems today look like this:
+- A supervised OTP brain runtime with named regions such as LIFG, PMTG, ATL,
+  Hippocampus, ACC, OFC, Thalamus, Basal Ganglia, DLPFC, Cerebellum, Mood, and
+  Curiosity.
+- A `Core.resolve_input/2` semantic pipeline for tokenization, word-gram
+  rebuilding, MWE injection, memory lookup, evidence attachment, perception,
+  LIFG decisions, response planning, hippocampal encoding, and activation
+  telemetry.
+- Working-memory admission policies with capacity, decay, duplicate handling,
+  diversity, fallback, and threshold controls.
+- Hippocampus-backed episode persistence through the `Db` app.
+- Local model orchestration through the `Llm` app.
+- Phoenix LiveView surfaces for chat/home, brain inspection, episodes, mood
+  HUDs, region overlays, and telemetry-driven panels.
+- Test coverage for tokenizer invariants, LIFG/WM contracts, hippocampal
+  persistence, curiosity/thalamus flow, DB schemas, and LiveView surfaces.
 
-> “Send text to a big model in the cloud → get a text answer back.”
+## Umbrella Apps
 
-Symbrella is for people who want more:
+| App | Purpose |
+| --- | --- |
+| `apps/brain` | OTP brain regions, working memory, LIFG stage scoring, Hippocampus, Thalamus, DLPFC, Mood, Curiosity, Cerebellum, cycle metrics, telemetry, and region macros. |
+| `apps/core` | Semantic orchestration: tokenization, `Core.SemanticInput`, MWE stages, LTM evidence, perception, LIFG attachment, event frames, response planning, and brain integration. |
+| `apps/db` | Ecto repo `Db`, migrations, schemas, pgvector types, JSONL import tools, episodes, brain cells, agency events, cerebellum models, and self snapshots. |
+| `apps/lexicon` | External dictionary and lexical adapter surface used by Core enrichment. |
+| `apps/llm` | Local LLM daemon, boot gate, model control, prompts, embeddings/chat HTTP calls, and llama.cpp integration. |
+| `apps/symbrella` | Main runtime supervisor for shared infrastructure, Db, Brain regions, LLM services, PubSub, and telemetry bridges. |
+| `apps/symbrella_web` | Phoenix endpoint, router, LiveViews, components, region art, brain dashboard, chat/home UI, episode browser, and assets. |
 
-- A **long-lived brain** with state, mood, memories, and habits.  
-- A **cognitive pipeline** you can actually see and debug.  
-- A path from **phone** → **VR cockpit** → **physical robot** without changing the mental model.
+## High-Level Architecture
 
-Instead of treating AI as a black-box API, Symbrella treats it as a **living system** with regions, episodes, and working memory.
+```mermaid
+flowchart TD
+  UI["Phoenix LiveView UI"]
+  Core["Core semantic pipeline"]
+  Brain["Brain OTP regions"]
+  Db[("PostgreSQL / Ecto / pgvector")]
+  Llm["Local LLM runner"]
+  Sensors["Sensors / future body inputs"]
 
-Modern AI stacks are converging on a similar pattern:
+  Sensors --> Core
+  UI --> Core
+  UI --> Brain
+  Core --> Brain
+  Brain --> Db
+  Core --> Db
+  Core --> Llm
+  Brain --> UI
+```
 
-> **Neural core** + **symbolic wrapper** + **tools & memory**.
+## Core Cognitive Pipeline
 
-Reasoning models (e.g. “reasoning” LLMs and agent frameworks) follow this pattern, even if they don’t use brain metaphors or region names.
+The production path starts in `Core.resolve_input/2` and currently follows this
+shape:
 
-Symbrella lives in that same ecosystem, but pushes harder on the **“actual brain”** side:
+```elixir
+phrase
+|> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+|> Core.TokenFilters.rebuild_word_ngrams(max_n)
+|> Core.Intent.Selection.select(opts)
+|> Core.Brain.STM.run()
+|> Core.MWE.Stage.run(:early, opts)
+|> Core.Pipeline.LTM.run(opts)
+|> Core.MWE.Stage.run(:late, opts)
+|> Core.Relations.attach_edges()
+|> Core.Brain.Episodes.attach(opts)
+|> Core.Pipeline.Perception.run(opts)
+|> Core.Brain.Amygdala.react(opts)
+|> Core.LIFG.Attach.run_and_attach(lifg_opts)
+|> Core.Semantic.EventFrames.attach(opts)
+|> Core.Brain.Prefrontal.attach(opts)
+|> Core.Brain.ActionSelection.attach(opts)
+|> Core.Brain.WM.focus_prompt_topics(opts)
+|> Core.Response.Attach.maybe_build_response_plan(opts)
+|> Core.Brain.Hippocampus.encode()
+|> Core.Brain.Hippocampus.persist(opts)
+|> Core.Brain.Activation.notify(opts)
+```
 
-- Named cortical/subcortical regions instead of anonymous “agents”  
-- Explicit Working Memory and episodic recall stages  
-- Mood / neuromodulators that can influence control flow  
-- An explicit path to **embodiment** (phone sensors, VR, robots)
+That pipeline is intentionally explicit. Each stage can attach evidence,
+telemetry, trace entries, or persisted memory without making the whole system a
+single opaque model call.
 
-See **SYMBRELLA_PROJECT_GUARDRAILS.md** for module boundaries, approval protocol, and invariants.
+## Brain Runtime
 
----
+The root supervisor in `apps/symbrella` starts the shared runtime:
+
+- `Db`
+- `Brain.Registry` and `Brain.CellSup`
+- `Phoenix.PubSub`
+- `Llm` and `Llm.BootGate`
+- mood and policy processes
+- LIFG Stage-1 scoring
+- named brain regions
+- curiosity/thalamus/DLPFC/WM loop
+- blackboard and self-continuity processes
+- optional camera observation bridge
+
+Region modules use the local region macro:
+
+```elixir
+defmodule Brain.SomeRegion do
+  use Brain, region: :some_region
+end
+```
+
+This keeps brain regions as normal Elixir modules and OTP processes instead of a
+separate agent framework.
+
+## Curiosity And Attention Loop
+
+A concrete runtime loop exists today:
+
+```text
+Curiosity -> Thalamus -> BasalGanglia -> DLPFC -> WorkingMemory
+```
+
+In broad terms:
+
+1. `Brain.Curiosity` proposes a probe.
+2. `Brain.Thalamus` blends curiosity with OFC value, ACC conflict, and mood.
+3. `Brain.BasalGanglia` scores admission against WM capacity, duplicates,
+   source preferences, and cooldowns.
+4. `Brain.DLPFC` acts on allowed or boosted thalamic decisions.
+5. `Brain.WorkingMemory` normalizes, merges, decays, trims, and emits telemetry.
+
+Tests around this loop live under `apps/brain/test/brain`.
 
 ## Quickstart
 
-```bash
-# from the umbrella root
-mix deps.get
+From the umbrella root:
 
-# (first time on a machine) install asset tool binaries
+```bash
+mix deps.get
+mix db.setup
+mix assets.build
+mix phx.server
+```
+
+Open:
+
+```text
+http://localhost:4000
+```
+
+If you are setting up asset tool binaries for the first time:
+
+```bash
 cd apps/symbrella_web
 mix tailwind.install --if-missing
 mix esbuild.install --if-missing
 cd ../../
-
-# build assets (manual on purpose)
-mix tailwind default
-mix esbuild default
-
-# run the server
-mix phx.server
-
-# App: http://localhost:4000
-# Re-run the two commands whenever you change CSS/JS:
-#   mix tailwind default
-#   mix esbuild default
 ```
 
----
-
-## Apps at a glance
-
-- **apps/brain** — OTP brain regions, working memory, LIFG Stage-1/Stage-2, episodic recall, curiosity/thalamus/DLPFC gating, mood, self-model, cycle clock, and telemetry.
-- **apps/core** — Semantic orchestration: tokenization, `Core.SemanticInput`, MWE injection, sense slates, intent selection, recall planning, response policy, and LLM synthesis hooks.
-- **apps/db** — Ecto repo `Db`, schemas, migrations, pgvector support, JSONL import helpers, episodes, brain cells, cerebellum models, and self snapshots.
-- **apps/lexicon** — External dictionary/lexicon adapter surface used by Core enrichment.
-- **apps/llm** — Local llama.cpp/`llama-server` runner and `Req` client for chat, model listing, and embeddings.
-- **apps/symbrella** — Umbrella runtime supervisor: PubSub, Db, Brain regions, LLM runner, telemetry bridges, and shared infrastructure.
-- **apps/symbrella_web** — Phoenix LiveView UI: home/chat surface, `/brain` dashboard, region overlays, HUD chips, and telemetry-driven panels.
-
----
-
-## Symbrella in the AI landscape
-
-At a high level, you can think of Symbrella next to a “typical” modern reasoning stack:
-
-```text
-┌────────────────────────────┐        ┌────────────────────────────┐
-│ OpenAI-style Reasoning     │        │ Symbrella Brain Stack      │
-└────────────────────────────┘        └────────────────────────────┘
-
-User prompt                          Sensor / user input
-      │                                         │
-      ▼                                         ▼
-Orchestrator / agent                Core.resolve_input/2
-(choose tools, model, plan)         (Tokenize → MWE → LTM → evidence → LIFG)
-      │                                         │
-      ▼                                         ▼
-Reasoning model (LLM)                Brain regions:
-(internal chain-of-thought)          LIFG ⇄ ATL ⇄ Hippocampus ⇄ WM ⇄ Mood ⇄ Cerebellum
-      │                                         │
-      ▼                                         ▼
-Tools (search, code, DB, …)          Curiosity, Thalamus, BasalGanglia, DLPFC, tools/sensors
-      │                                         │
-      ▼                                         ▼
-Answer synthesis                     Phrase / action / UI output
-      │                                         │
-      ▼                                         ▼
-   User                                 User / robot / VR scene
-```
-
-Both sides have:
-
-- A **neural engine** that does the heavy “thinking”  
-- A **symbolic / programmatic layer** that controls flow, tools, and memory  
-- Some notion of **context and history** beyond a single request  
-
-The difference is how explicit and “brain-like” those pieces are.
-
-### Neural core
-
-| Aspect                | OpenAI-style reasoning stack                                 | Symbrella                                             |
-|----------------------|--------------------------------------------------------------|-------------------------------------------------------|
-| Engine               | Large transformer reasoning model                            | Axon/Nx models, embeddings, small task-specific nets |
-| How it’s used        | Called via API by an orchestrator / agent                    | Called from Brain/Core as one piece of the pipeline  |
-| Visibility           | Internal chain-of-thought mostly hidden from users           | Activations and decisions can be exposed via WM, telemetry, UI |
-
-Symbrella leans into **small, inspectable circuits** instead of a single giant opaque model.
-
-### Symbolic / control layer
-
-| Aspect          | OpenAI-style reasoning stack                     | Symbrella brain stack                                 |
-|----------------|---------------------------------------------------|-------------------------------------------------------|
-| Orchestration  | Agents, planners, tool routers                    | `Brain` as central coordinator + `use Brain, region:` macros |
-| Control flow   | “If task X → call tool Y → call model Z”          | Region graph: LIFG → ATL → Hippocampus → WM/Mood/etc. |
-| Representation | JSON, workflows, system prompts                   | GenServers, structs, Ecto schemas, SemanticInput state |
-
-Symbrella’s “agents” are literally **named brain regions** with explicit responsibilities.
-
-### Memory
-
-| Type                 | OpenAI-style reasoning stack                        | Symbrella                                                 |
-|----------------------|-----------------------------------------------------|-----------------------------------------------------------|
-| Short-term context   | Chat history + hidden scratchpad tokens             | Working Memory (WM) focus set + SI trace + `active_cells` |
-| Long-term knowledge  | Model weights, plus external RAG/vector stores      | BrainCell DB, Lexicon, and future pgvector recall         |
-| Episodic memory      | Often app-specific logs or vector DB entries        | `Brain.Hippocampus` + `Db.Episode`, recency & outcome uplift |
-
-Symbrella treats **episodic memory** as a first-class brain stage, not just a feature of a retrieval library.
-
-### Attention, gating, and meta-control
-
-| Aspect          | OpenAI-style reasoning stack                  | Symbrella                                           |
-|----------------|-----------------------------------------------|-----------------------------------------------------|
-| Attention      | Transformer attention + orchestrator hints    | WM admission policy + focus thresholds + gate scores |
-| Gating         | System prompts, reasoning_effort, tool rules  | `Brain.WM.Policy`, LIFG Stage-1 scores, ACC/OFC/Thalamus gates |
-| Meta-signals   | Mostly hidden policies and heuristics         | **Mood** (dopamine/serotonin), Curiosity, ACC inputs |
-
-Symbrella’s control flow is designed to be **mood-sensitive**: neuromodulators and curiosity can actually shift thresholds and choices.
-
-### Tools, sensors, and embodiment
-
-| Aspect          | OpenAI-style reasoning stack         | Symbrella                                                |
-|----------------|---------------------------------------|----------------------------------------------------------|
-| Tools          | HTTP APIs, search, code execution     | Sensors (camera), HTTP APIs, DB, future robot actuators |
-| Environment    | Cloud services, browser clients       | Termux on Android, Phoenix/LiveView, VR/3D dashboards    |
-| Embodiment     | Usually none (pure service)           | **Phone as body**, VR “desk” as cockpit, future robots  |
-
-A key design goal of Symbrella is to **live inside a body**—starting with a phone and VR headset, expanding to hardware.
-
-### Introspection and debugging
-
-| Aspect        | OpenAI-style reasoning stack          | Symbrella                                        |
-|---------------|----------------------------------------|--------------------------------------------------|
-| Telemetry     | Extensive internal metrics (not public) | `Brain.Introspect`, region status, WM snapshots   |
-| Visuals       | Internal dashboards                    | BrainLive, SVG region overlays, VR desk cockpit  |
-| Granularity   | High internally, low externally        | You can expose **every stage**, every region, every WM slot |
-
-Symbrella is intentionally built as a **transparent brain**, not a sealed black box.
-
----
-
-## Curiosity Loop
-
-The **curiosity loop** is a concrete example of how regions cooperate today:
-
-> Curiosity → Thalamus → BasalGanglia → DLPFC → WorkingMemory
-
-Roughly:
-
-1. **`Brain.Curiosity`**  
-   - Generates small “what if?” probes on demand (via `nudge/0` or future schedulers).  
-   - Emits telemetry on `[:curiosity, :proposal]` with a `probe` payload:
-     - `id`, `lemma`, `score` in `[0,1]`, `reason: :curiosity`, `source: :runtime`.
-
-2. **`Brain.Thalamus`**  
-   - Listens for curiosity proposals.  
-   - Blends:
-     - base curiosity score,
-     - **OFC** value (exploit vs explore),
-     - **ACC** conflict (brake),
-     - **Mood** (exploration/inhibition/vigilance/plasticity).  
-   - Emits `[:brain, :thalamus, :curiosity, :decision]` telemetry with:
-     - measurements: `score` in `[0,1]`,  
-     - metadata: `decision` (`:allow | :boost | :block`), `ofc_value`, `ofc_weight`,  
-       `acc_conflict`, `acc_alpha`, mood fields, etc.  
-   - Parameters are surfaced via `Brain.Thalamus.get_params/0` and wired to
-     `Application` env (e.g. `:thalamus_ofc_weight`, `:thalamus_acc_alpha`, `:thalamus_mood_cap`).
-
-3. **`Brain.BasalGanglia`** (stateless gate)  
-   - `decide/4` takes:
-     - current WM (newest-first),
-     - the candidate probe,
-     - an attention context,
-     - config (capacity, thresholds, source preferences, cooldown).  
-   - Returns `{decision, score}` where `decision ∈ :allow | :boost | :block`.  
-   - Uses:
-     - WM fullness / capacity,
-     - duplicate detection and cooldown rebump,
-     - per-source boost/dispreference.
-
-4. **`Brain.DLPFC`**  
-   - First-class region (`use Brain, region: :dlpfc`).  
-   - Subscribes to:
-     - curiosity proposals (`[:curiosity, :proposal]`) to **cache the last probe**, and  
-     - Thalamus decisions (`[:brain, :thalamus, :curiosity, :decision]`).  
-   - When `:act_on_thalamus` is enabled and decision is `:allow` or `:boost`,
-     DLPFC calls `Brain.focus/2` with the cached probe → a WM item is inserted.
-
-5. **`Brain.WorkingMemory`**  
-   - Normalizes the candidate probe into a WM item with a consistent shape:  
-     `id`, `source`, `activation`, `score`, `ts`, `inserted_at`, `last_bump`, `payload`.  
-   - Handles:
-     - decay over time (half-life style),
-     - duplicate merging,
-     - trimming to capacity.
-
-The whole loop is covered by tests such as:
-
-- `Brain.CuriosityFlowTest` — end-to-end:  
-  `Curiosity → Thalamus(+OFC/ACC/mood) → BG → DLPFC → WM` inserts a `reason: :curiosity` item.
-- `Brain.ThalamusParams_Test` — config → params contract.  
-- `Brain.ThalamusTelemetryContract_Test` — telemetry shape and math (`ofc_weight`, `acc_alpha`, score).  
-- `Brain.ThalamusMathProps_Test` — monotonicity and braking properties.  
-- `Brain.BasalGanglia*Test` — gating edges and smoke tests.
-
----
-
-## Architecture (high level)
-
-```mermaid
-flowchart TD
-  A["Phoenix UI (LiveView)"]
-  B["Brain (OTP regions)"]
-  C["Core (pipeline)"]
-  D[(Postgres + pgvector)]
-
-  A --> C
-  A --> B
-  C --> B
-  C --> D
-  B --> D
-```
-
-**Golden pipeline**
-
-```elixir
-phrase
-|> Core.LIFG.Input.tokenize() # word tokens first; sentence-aware spans
-|> Core.Brain.STM.run()       # short-term focus/activation
-|> Core.MWE.Stage.run(:early) # word-level MWE candidates
-|> Core.Pipeline.LTM.run()    # long-term memory fetch through Db
-|> Core.LIFG.Attach.run_and_attach()
-```
-
----
-
-## Current LIFG / WM Contract
-
-- [x] No char-grams in LIFG path (enforced + unit test)
-- [x] Boundary guard (drop non-word-boundary substrings unless `mw: true`)
-- [x] MWE injection pass (word-level n-grams before LIFG)
-- [x] Sense slate in SI (`si.sense_candidates` keyed by token index)
-- [x] Reanalysis/fallback support for weak or incompatible decisions
-- [x] Telemetry tripwire (log/drop if a char-gram reaches LIFG)
-- [x] Hippocampus-backed priming/episode evidence for recall-aware decisions
-- [x] Invariant tests (spans sorted; no char-grams; boundary-only unless `mw: true`)
-- [x] Config defaults (dev/test: `tokenizer_defaults: [mode: :words, emit_chargrams: false]`)
-
-Details and rationale live in **SYMBRELLA_PROJECT_GUARDRAILS.md**.
-
----
-
-## Development tips
+## Common Commands
 
 ```bash
-# run everything
-mix test
-
-# format + compile
-mix format
+# compile the umbrella
 mix compile
 
-# run a single test file
-mix test apps/brain/test/brain/lifg_guard_test.exs
+# run all tests; this also prepares the test DB and clears negcache
+mix test
 
-# curiosity / thalamus loop
+# run a specific test file
 mix test apps/brain/test/brain/curiosity_flow_test.exs
-mix test apps/brain/test/brain/thalamus_*test.exs
 
-# micro-benchmarks / benchmark scripts when present
-mix test apps/brain/test/brain/bench/bench_brain_lifg_bench.exs
+# format code
+mix format
+
+# build assets
+mix assets.build
+
+# production-style asset build
+mix assets.deploy
+
+# reset local DB
+mix db.reset
 ```
 
-**Telemetry testing**  
-`test/support/telemetry_helpers.exs` provides `capture/3` (assert emitted) and you can add `refute_emitted/3` similarly.
+## Database Notes
 
-**Tokenizer defaults (dev/test):**
+The root aliases target the `Db` repo:
 
-```elixir
-config :core, :tokenizer_defaults,
-  mode: :words,
-  emit_chargrams: false
+```bash
+mix db.setup
+mix db.migrate
+mix db.rollback
+mix db.migrations
+mix db.reset
 ```
 
----
+Episode, self-snapshot, agency-event, brain-cell, and cerebellum-model schemas
+live in `apps/db`. JSONL import helpers live under `apps/db/lib/db/jsonl`.
 
-## Repository layout (high level snapshot)
+## Local LLM Notes
 
-- Root docs: `README.md`, `README_BRAIN_CHAIN.md`, `SYMBRELLA_PROJECT_GUARDRAILS.md`, `AGENTS.md`, `PROJECT-RESUME-PLAYBOOK.md`
-- `apps/brain`: brain regions, LIFG stack, Stage-2/blackboard bridge, Hippocampus, Thalamus, WM, curiosity loop, mood, self model, cycle metrics, tests, and benchmarks.
-- `apps/core`: pipeline orchestration, SemanticInput, tokenizer, MWE injector, sense slate, intent, recall planner/executor, response policy, LLM prompt/synthesis hooks, and invariants.
-- `apps/db`: Ecto schemas, migrations, pgvector types, JSONL import tools, `Db` repo module, episodes, self snapshots, and model metadata.
-- `apps/lexicon`: external lexicon adapter.
-- `apps/llm`: local llama.cpp runner and Req-based HTTP client.
-- `apps/symbrella`: umbrella runtime and top-level supervision tree.
-- `apps/symbrella_web`: Phoenix LiveView UI, assets, home/chat surface, and brain dashboard.
-- `config/*.exs`: environment config, including tokenizer defaults and brain/region settings.
+The `apps/llm` application owns local model boot and HTTP integration. It is
+designed around llama.cpp / `llama-server` and uses `Req` for HTTP requests.
 
----
+Do not add HTTP client dependencies such as HTTPoison, Tesla, or `:httpc` for
+new work in this codebase. Use `Req`.
 
-## Docs & references
+## Project Invariants
 
-- **Guardrails:** `SYMBRELLA_PROJECT_GUARDRAILS.md`
-- **Brain chain notes:** `README_BRAIN_CHAIN.md`
-- **Modulator-to-prompt contract:** `docs/modulator-to-prompt-contract.md`
-- **Agents overview:** `AGENTS.md`
-- **Resume playbook:** `PROJECT-RESUME-PLAYBOOK.md`
+Important current contracts:
 
----
+- LIFG token paths operate on word tokens and word-grams, not character-grams.
+- MWE candidates are injected at word boundaries.
+- Sense slates are carried on `Core.SemanticInput`.
+- Working memory is newest-first and controlled through explicit policy knobs.
+- Curiosity decisions emit telemetry with score and decision metadata.
+- LiveView collection rendering should use streams for growing collections.
+- Phoenix templates should use HEEx, `Layouts.app`, imported form/input
+  components, and Tailwind classes.
 
-## Approval protocol
+See `SYMBRELLA_PROJECT_GUARDRAILS.md` for deeper boundaries and approval rules.
 
-Nothing merges or “goes live” without an explicit approval token (see `SYMBRELLA_PROJECT_GUARDRAILS.md`).  
-Example: `Approve: P-021 (FileScope: README.md)`.
+## Repository Guide
+
+- `README_BRAIN_CHAIN.md` - deeper notes on the brain chain.
+- `SYMBRELLA_PROJECT_GUARDRAILS.md` - project invariants, boundaries, and approval protocol.
+- `ROADMAP.md` - planning notes.
+- `PROJECT-RESUME-PLAYBOOK.md` - continuation and handoff notes.
+- `docs/brain-core-scientific-contract.md` - brain/core contract notes.
+- `docs/modulator-to-prompt-contract.md` - modulator-to-prompt interface notes.
+- `apps/*/README.md` - app-local notes where present.
+
+## Development Style
+
+This project favors explicit Elixir/Phoenix code over hidden orchestration:
+
+- use OTP processes for runtime state and region behavior;
+- keep cognitive stages independently testable;
+- preserve telemetry and trace data for debugging;
+- treat errors as useful developer feedback;
+- avoid broad `try`/`rescue` wrappers unless there is a narrow, justified
+  boundary;
+- keep UI behavior in LiveView modules and `assets/js`, not inline scripts.
+
+## Current Status
+
+Symbrella is an active research and application codebase. It is not a packaged
+library and not a generic chatbot shell. The most important thing to preserve is
+the inspectable cognitive architecture: named regions, explicit memory, visible
+control flow, and a clear route from text interaction to embodied input/output.
