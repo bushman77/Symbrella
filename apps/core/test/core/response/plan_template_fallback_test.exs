@@ -33,4 +33,23 @@ defmodule Core.Response.PlanTemplateFallbackTest do
     refute text =~ "error"
     refute text =~ "Suggested next step:"
   end
+
+  test "personal finance fallback does not use engineering language" do
+    si = %{
+      intent: :help,
+      confidence: 0.8,
+      text: "so far i checked it on credit karma, and setup an appoinment with a debt consolidating place"
+    }
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert meta.intent_inferred == :help
+    assert text =~ "Before committing to consolidation"
+    assert text =~ "Suggested next step:"
+    assert text =~ "debts, balances, interest rates"
+    refute text =~ "engineering"
+    refute text =~ "module"
+    refute text =~ "file"
+    refute text =~ "code"
+  end
 end

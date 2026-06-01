@@ -4,6 +4,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.Affect
   alias Core.Response.AffectPolicy
   alias Core.Response.Personality
+  alias Core.Response.Topics
 
   @summary_window 5
 
@@ -118,6 +119,8 @@ defmodule Core.Response.LlmPrompt do
       "Do not describe Symbrella as a generic tool when answering questions about Symbrella's own state.",
       "Do not append offers about coding, simulations, visualization, implementation, or technical context unless the user explicitly asks for that.",
       "Do not claim sentience, consciousness, feelings, or certainty beyond the runtime evidence.",
+      "Internal state lines are private control context. Use them to shape tone, caution, confidence, and depth; do not quote them, summarize them, label them, or print their field names in normal answers.",
+      "Never expose control labels such as Runtime decision, Response policy, Personality state, Temperament, Assertiveness, Curiosity, Restraint, Self-check, Abstraction, Reasons, LIFG, PMTG, da, 5ht, glu, or ne unless the user explicitly asks to inspect internal state.",
       "When the user says something is wrong, slow down and briefly self-check against the prior answer.",
       "If the prior answer was mostly correct but overcomplicated, say that plainly and give a simpler corrected answer.",
       "Do not over-apologize, flatter the user, or ask for clarification before doing the obvious self-check.",
@@ -578,8 +581,27 @@ defmodule Core.Response.LlmPrompt do
     confidence = map_get(features, :confidence_bucket)
     mode = map_get(decision, :mode)
     action = map_get(decision, :action)
+    skill = map_get(features, :skill) || map_get(decision, :skill)
 
     cond do
+      skill == :personal_life_update ->
+        notes ++
+          [
+            "move=acknowledge the personal milestone warmly; do not turn it into a task; ask one natural follow-up question"
+          ]
+
+      alien_life_thread_followup?(features) ->
+        notes ++
+          [
+            "move=continue the alien-life conversation; separate plausible speculation from confirmed evidence; do not claim lost context"
+          ]
+
+      cosmic_life_text?(map_get(features, :text)) ->
+        notes ++
+          [
+            "move=answer the alien-life question directly as ordinary conversation; say alien life is plausible but unconfirmed; do not mention internal state or policy"
+          ]
+
       degraded_posture?(comprehension, frame) or confidence == :low ->
         notes ++
           [
@@ -622,6 +644,30 @@ defmodule Core.Response.LlmPrompt do
 
     comprehension_degraded? or lifg_degraded?
   end
+
+  defp alien_life_thread_followup?(features) when is_map(features) do
+    context_topic?(map_get(features, :context_status), :alien_life) and
+      Topics.followup?(to_string(map_get(features, :text, "")), :alien_life)
+  end
+
+  defp alien_life_thread_followup?(_), do: false
+
+  defp context_topic?(context_status, topic) when is_map(context_status) do
+    context_status
+    |> map_get(:topics, %{})
+    |> Topics.has?(topic)
+  end
+
+  defp context_topic?(_, _), do: false
+
+  defp cosmic_life_text?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(aliens?|extraterrestrial|life\s+elsewhere|universe|galax(?:y|ies)|solar\s+system|planet|planets|exoplanets?|ufos?|uaps?|unidentified\s+(?:flying\s+)?objects?|disclosure|declassif(?:y|ied|ication)|footage)\b/iu,
+      text
+    )
+  end
+
+  defp cosmic_life_text?(_), do: false
 
   defp technical_posture?(mode, action, profile, confidence) do
     confidence == :high and

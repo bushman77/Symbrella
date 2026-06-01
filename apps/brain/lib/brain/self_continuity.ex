@@ -72,14 +72,14 @@ defmodule Brain.SelfContinuity do
       plasticity: clamp01(model.plasticity),
       inhibition: clamp01(model.inhibition),
       cognitive_load: clamp01(model.cognitive_load),
-      mood: map_or_empty(model.mood),
-      active_goals: List.wrap(model.active_goals),
-      recent_errors: List.wrap(model.recent_errors),
-      recent_actions: List.wrap(model.recent_actions),
-      last_appraisal: model.last_appraisal,
-      last_lifg: model.last_lifg,
-      self_other_attribution: map_or_empty(model.self_other_attribution),
-      continuity: map_or_empty(model.continuity),
+      mood: model.mood |> map_or_empty() |> json_safe(),
+      active_goals: model.active_goals |> List.wrap() |> json_safe(),
+      recent_errors: model.recent_errors |> List.wrap() |> json_safe(),
+      recent_actions: model.recent_actions |> List.wrap() |> json_safe(),
+      last_appraisal: json_safe(model.last_appraisal),
+      last_lifg: json_safe(model.last_lifg),
+      self_other_attribution: model.self_other_attribution |> map_or_empty() |> json_safe(),
+      continuity: model.continuity |> map_or_empty() |> json_safe(),
       updated_at_ms: model.updated_at_ms,
       snapshot_at_ms: now_ms()
     }
@@ -287,6 +287,42 @@ defmodule Brain.SelfContinuity do
 
   defp map_or_empty(value) when is_map(value), do: value
   defp map_or_empty(_), do: %{}
+
+  defp json_safe(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp json_safe(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp json_safe(%Date{} = value), do: Date.to_iso8601(value)
+  defp json_safe(%Time{} = value), do: Time.to_iso8601(value)
+
+  defp json_safe(%_{} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Map.drop([:__meta__])
+    |> json_safe()
+  end
+
+  defp json_safe(%{} = map) do
+    Map.new(map, fn {key, value} -> {json_key(key), json_safe(value)} end)
+  end
+
+  defp json_safe(list) when is_list(list), do: Enum.map(list, &json_safe/1)
+
+  defp json_safe(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> json_safe()
+  end
+
+  defp json_safe(value)
+       when is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value),
+       do: value
+
+  defp json_safe(value) when is_atom(value), do: value
+  defp json_safe(value), do: inspect(value)
+
+  defp json_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp json_key(key) when is_binary(key), do: key
+  defp json_key(key) when is_integer(key), do: Integer.to_string(key)
+  defp json_key(key), do: inspect(key)
 
   defp now_ms, do: System.system_time(:millisecond)
 end

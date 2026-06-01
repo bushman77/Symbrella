@@ -27,6 +27,10 @@ defmodule Core.Response.UserNameMemoryTest do
 
     assert text == "Your name is Curtis."
     assert meta.action == :identity
+    assert meta.intent_inferred == :name_query
+    assert meta.response_source == :memory
+    assert meta.memory_key == :user_name
+    assert meta.memory_source == :hippocampus_fact
     assert meta.user_name == "Curtis"
     refute text =~ "I don"
   end

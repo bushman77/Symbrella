@@ -219,16 +219,12 @@ end
 
 if config_env() != :test do
   config :llm, Llm,
-    # keep daemon up
-    auto_start_on_boot?: false,
-    # optional: prefetch model
-    pull_on_boot?: true,
-    # <- critical: DO NOT warm on boot
-    warm_on_boot?: false,
-    warm_on_restart?: false,
-    pull_on_restart?: false
+    # Synchronous startup is owned by Llm.BootGate below. Leave Llm's own
+    # async handle_continue autostart disabled to avoid a duplicate boot path.
+    auto_start_on_boot?: false
 
   config :llm, Llm.BootGate,
+    # Blocks app startup here; Phoenix starts after :symbrella finishes booting.
     enabled?: true,
     timeout: 120_000
 end

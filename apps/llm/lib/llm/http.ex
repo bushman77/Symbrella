@@ -9,7 +9,8 @@ defmodule Llm.Http do
 
     case Req.get(state.base_url <> path,
            headers: [{"accept", "application/json"}],
-           receive_timeout: timeout
+           receive_timeout: timeout,
+           retry: false
          ) do
       {:ok, %{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
       {:ok, %{status: code, body: resp}} -> {:error, {:http_error, code, resp}}
@@ -23,7 +24,8 @@ defmodule Llm.Http do
     case Req.post(state.base_url <> path,
            json: body,
            headers: [{"accept", "application/json"}],
-           receive_timeout: timeout
+           receive_timeout: timeout,
+           retry: false
          ) do
       {:ok, %{status: code, body: resp}} when code in 200..299 -> {:ok, resp}
       {:ok, %{status: code, body: resp}} -> {:error, {:http_error, code, resp}}

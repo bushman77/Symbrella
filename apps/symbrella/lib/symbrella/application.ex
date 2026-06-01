@@ -9,61 +9,64 @@ defmodule Symbrella.Application do
     # neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
     # File.mkdir_p!(Path.dirname(neg_path))
 
-    app_children = [
-      # ── DB ────────────────────────────────────────────────────────────────
-      Db,
+    app_children =
+      [
+        # ── DB ────────────────────────────────────────────────────────────────
+        Db,
 
-      # ── Foundations / infra (order matters) ───────────────────────────────
-      {Registry, keys: :unique, name: Brain.Registry},
-      {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
+        # ── Foundations / infra (order matters) ───────────────────────────────
+        {Registry, keys: :unique, name: Brain.Registry},
+        {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
 
-      # ── Caches / services ────────────────────────────────────────────────
-      {Task.Supervisor, name: Symbrella.TaskSup},
-      {Finch, name: Lexicon.Finch},
-      # {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
+        # ── Caches / services ────────────────────────────────────────────────
+        {Task.Supervisor, name: Symbrella.TaskSup},
+        {Finch, name: Lexicon.Finch},
+        # {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
 
-      # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
-      # NOTE: This is intentionally owned by the umbrella-root supervisor.
-      {Llm, []},
-      {Llm.BootGate, []},
+        # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
+        # NOTE: This is intentionally owned by the umbrella-root supervisor.
+        {Llm, []},
+        {Llm.BootGate, []},
 
-      # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
-      {Brain.MoodCore, []},
-      {Brain.MoodPolicy, []},
+        # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
+        {Brain.MoodCore, []},
+        {Brain.MoodPolicy, []},
 
-      # ── Stage-1 scoring server (mood-nudged) ─────────────────────────────
-      {Brain.LIFG.Stage1, []},
+        # ── Stage-1 scoring server (mood-nudged) ─────────────────────────────
+        {Brain.LIFG.Stage1, []},
 
-      # ── Brain servers / timing ───────────────────────────────────────────
-      Brain,
-      Brain.Amygdala,
-      Brain.Cerebellum,
-      Brain.LIFG,
-      Brain.PMTG,
-      {Brain.ATL, keep: 300},
-      Brain.Curiosity,
-      {Brain.Hippocampus, keep: 300},
-      Brain.Meta,
-      Brain.PFC,
-      Brain.Thalamus,
-      Brain.Temporal,
-      Brain.OFC,
-      {Brain.DLPFC, act_on_thalamus: true},
-      {Brain.ACC, keep: 300},
-      {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
+        # ── Brain servers / timing ───────────────────────────────────────────
+        Brain,
+        Brain.Amygdala,
+        Brain.Cerebellum,
+        Brain.LIFG,
+        Brain.PMTG,
+        {Brain.ATL, keep: 300},
+        Brain.Curiosity,
+        {Brain.Hippocampus, keep: 300},
+        Brain.Meta,
+        Brain.PFC,
+        Brain.Thalamus,
+        Brain.Temporal,
+        Brain.OFC,
+        {Brain.DLPFC, act_on_thalamus: true},
+        {Brain.ACC, keep: 300},
+        {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
 
-      # Event bridge first, then consumers
-      {Brain.Blackboard, []},
+        # Event bridge first, then consumers
+        {Brain.Blackboard, []}
+      ] ++
+        maybe_camera_child() ++
+        [
+          # Self model (subscribes to Blackboard topic)
+          {Brain.SelfPortrait, []},
 
-      # Self model (subscribes to Blackboard topic)
-      {Brain.SelfPortrait, []},
+          # ML consumer that finalizes turn records
+          Brain.ML
 
-      # ML consumer that finalizes turn records
-      Brain.ML
-
-      # 🚫 Do NOT start SymbrellaWeb.Endpoint here.
-      # The web app owns its endpoint under SymbrellaWeb.Application.
-    ]
+          # 🚫 Do NOT start SymbrellaWeb.Endpoint here.
+          # The web app owns its endpoint under SymbrellaWeb.Application.
+        ]
 
     children = maybe_pubsub_child() ++ app_children
 
@@ -101,5 +104,38 @@ defmodule Symbrella.Application do
       nil -> [{Phoenix.PubSub, name: Symbrella.PubSub}]
       _pid -> []
     end
+  end
+
+  defp maybe_camera_child do
+    opts = Application.get_env(:brain, Brain.Camera, [])
+
+    if camera_enabled?(opts) do
+      bridge_opts = Application.get_env(:brain, Brain.Camera.ObservationBridge, [])
+      decoder_opts = Application.get_env(:brain, Brain.Visual.DebugDecoder, [])
+
+      [
+        {Brain.Camera, opts},
+        {Brain.Camera.ObservationBridge, bridge_opts},
+        {Brain.Visual.DebugDecoder, decoder_opts}
+      ]
+    else
+      []
+    end
+  end
+
+  defp camera_enabled?(opts) when is_list(opts) do
+    Keyword.get(opts, :enabled?, false) in [true, "true", "1", 1, :on, "on", :yes, "yes"]
+  end
+
+  defp camera_enabled?(opts) when is_map(opts) do
+    opts
+    |> Map.get(:enabled?, false)
+    |> camera_enabled_value?()
+  end
+
+  defp camera_enabled?(_), do: false
+
+  defp camera_enabled_value?(value) do
+    value in [true, "true", "1", 1, :on, "on", :yes, "yes"]
   end
 end

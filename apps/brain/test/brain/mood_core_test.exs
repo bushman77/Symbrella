@@ -88,6 +88,34 @@ defmodule Brain.MoodCoreTest do
     assert after_.levels.ne == returned.levels.ne
   end
 
+  test "health support intent raises vigilance without saturating it" do
+    Brain.MoodCore.configure(init: %{da: 0.5, "5ht": 0.5, glu: 0.81, ne: 0.87})
+
+    after_ = Brain.MoodCore.apply_intent(:health_support, 1.0)
+
+    assert after_.levels.ne > 0.87
+    assert after_.levels.ne <= 0.88
+    assert after_.levels.glu <= 0.82
+    assert after_.levels.ne < 1.0
+    assert after_.levels.glu < 1.0
+  end
+
+  test "activation and working-memory load nudges do not pin vigilance or plasticity" do
+    Brain.MoodCore.configure(init: %{da: 0.5, "5ht": 0.5, glu: 0.81, ne: 0.85})
+
+    cells = for n <- 1..200, into: %{}, do: {"cell-#{n}", 1.0}
+    Brain.MoodCore.register_activation(cells)
+    Brain.MoodCore.update_wm(Enum.to_list(1..20))
+
+    Process.sleep(10)
+    after_ = Brain.MoodCore.snapshot()
+
+    assert after_.levels.ne <= 0.86
+    assert after_.levels.glu <= 0.82
+    assert after_.levels.ne < 1.0
+    assert after_.levels.glu < 1.0
+  end
+
   test "moderate vigilance with reduced inhibition yields cautious middle tone" do
     snap =
       Brain.MoodCore.configure(init: %{da: 0.5, "5ht": 0.48, glu: 0.5, ne: 0.53})

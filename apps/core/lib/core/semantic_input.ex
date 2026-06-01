@@ -30,6 +30,7 @@ defmodule Core.SemanticInput do
     • response_text / response_tone / response_meta
     • symbolic_frame
     • emotion / appraisal
+    • self_model / self_continuity
     • frame / frame_ts_ms / frame_seq / frame_run_id
   """
 
@@ -91,6 +92,7 @@ defmodule Core.SemanticInput do
           appraisal: map() | nil,
           mood: map() | nil,
           self_model: term() | nil,
+          self_continuity: map() | nil,
           # misc products some stages attach
           mwe_matches: list() | nil,
 
@@ -134,6 +136,7 @@ defmodule Core.SemanticInput do
             appraisal: nil,
             mood: nil,
             self_model: nil,
+            self_continuity: nil,
             mwe_matches: nil,
             session_id: nil,
             frame: nil,

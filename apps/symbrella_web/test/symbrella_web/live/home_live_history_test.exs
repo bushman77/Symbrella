@@ -87,11 +87,52 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     action_section =
       Enum.find(payload.sections, fn section -> section.key == :action_selection end)
 
+    assert Enum.count(payload.sections, &(&1.key == :action_selection)) == 1
     assert action_section.title == "Action selection"
     assert action_section.tag == ":safe_support"
-    assert Enum.any?(action_section.items, &(&1.label == "selected action" and &1.body == ":safe_support"))
-    assert Enum.any?(action_section.items, &(&1.label == "safety gate" and &1.body == ":approved"))
-    assert Enum.any?(action_section.items, &(&1.label == "action candidates" and &1.body =~ ":store_memory"))
+
+    assert Enum.any?(
+             action_section.items,
+             &(&1.label == "selected action" and &1.body == ":safe_support")
+           )
+
+    assert Enum.any?(
+             action_section.items,
+             &(&1.label == "safety gate" and &1.body == ":approved")
+           )
+
+    assert Enum.any?(
+             action_section.items,
+             &(&1.label == "candidates" and &1.body =~ ":store_memory")
+           )
+  end
+
+  test "explain payload attributes memory name replies to memory source" do
+    payload =
+      SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
+        id: "b-memory",
+        text: "Your name is Bradley.",
+        intent: :name_query,
+        confidence: 1.0,
+        tone: :warm,
+        from: %{
+          action: :identity,
+          intent_inferred: :name_query,
+          response_source: :memory,
+          memory_key: :user_name,
+          memory_source: :hippocampus_fact
+        }
+      })
+
+    section = Enum.find(payload.sections, fn section -> section.key == :intent_tone end)
+
+    assert section.title == "Intent & tone"
+    assert section.hint == "Memory attribution and tone metadata that shaped the reply."
+
+    assert Enum.any?(section.items, &(&1.label == "intent" and &1.body == ":name_query"))
+    assert Enum.any?(section.items, &(&1.label == "response source" and &1.body == ":memory"))
+    assert Enum.any?(section.items, &(&1.label == "memory key" and &1.body == ":user_name"))
+    assert Enum.any?(section.items, &(&1.label == "memory source" and &1.body == ":hippocampus_fact"))
   end
 
   test "chat stores and recalls direct user facts before attached LLM responses", %{conn: conn} do

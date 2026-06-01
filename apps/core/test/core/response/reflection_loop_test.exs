@@ -58,6 +58,84 @@ defmodule Core.Response.ReflectionLoopTest do
     assert reflection.applied? == true
   end
 
+  test "repairs leaked internal response-state labels" do
+    leaked = """
+    Uncertain: Good afternoon Symbrella, afternoon Symbrella, need help fixing.
+    Temperament: careful
+    Assertiveness: 0.3
+    Curiosity: 0.25
+    Restraint: 0.8
+    Warmth: 0.4
+    Self-check: 0.8
+    Abstraction: 0.25
+    Depth: brief
+    Reasons: LIFG degraded, comprehension degraded
+    Personality state: Temperament=careful; Assert
+    da 0.89 5ht 0.61 glu 0.82 ne 0.86
+    """
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(
+        "good afternoon symbrella, i need help fixing my bad credit",
+        leaked,
+        %{features: %{intent: :help, conf: 0.7}, decision: %{response_profile: :careful}}
+      )
+
+    refute final =~ "Temperament:"
+    refute final =~ "Personality state:"
+    refute final =~ "da 0.89"
+    assert final =~ "pulling your credit reports"
+    assert reflection.status == :repair
+    assert :leaked_hidden_context in reflection.issues
+    assert reflection.applied? == true
+  end
+
+  test "repairs alien answer that leaks internal policy wording" do
+    draft =
+      "I understand that you are uncertain about whether aliens might exist. My internal state suggests that I should offer options to clarify your intent. However, based on my current understanding, I cannot provide a definitive answer."
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(
+        "do you belive aliens might exist?",
+        draft,
+        %{features: %{intent: :question, conf: 0.4}, decision: %{response_profile: :social_chat}}
+      )
+
+    assert final =~ "Alien life might exist"
+    assert final =~ "plausible, not proven"
+    refute final =~ "internal state"
+    refute final =~ "clarify your intent"
+    assert reflection.status == :repair
+    assert :leaked_hidden_context in reflection.issues
+    assert reflection.applied? == true
+  end
+
+  test "repairs generic topic offer on alien follow-up" do
+    draft =
+      "Great! So, given our understanding and agreement on this topic, do you have any specific questions or topics you'd like to explore further?<|im_end"
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(
+        "whether or not are they going to be domineers or treat us with our own soverenty",
+        draft,
+        %{
+          features: %{
+            intent: :question,
+            conf: 0.4,
+            context_status: %{topics: %{alien_life?: true}}
+          },
+          decision: %{response_profile: :social_chat}
+        }
+      )
+
+    assert final =~ "alien-life thread"
+    assert final =~ "Sovereignty"
+    refute final =~ "specific questions"
+    refute final =~ "<|im_end"
+    assert reflection.status == :repair
+    assert :topic_dead_end in reflection.issues
+  end
+
   test "rejects unsafe drafts" do
     {:ok, final, reflection} =
       ReflectionLoop.review(

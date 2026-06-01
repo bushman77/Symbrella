@@ -139,11 +139,28 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         get_in(message, [:from, :senses_selected]) ||
         []
 
+    from = pget(message, :from, %{})
+
     symbolic_frame =
       pget(message, :symbolic_frame) ||
-        message |> pget(:from, %{}) |> pget(:symbolic_frame)
+        pget(from, :symbolic_frame)
 
-    action_selection = action_selection_from_message(message)
+    selected_action =
+      pget(message, :selected_action) ||
+        pget(from, :selected_action) ||
+        pget(from, :agent_selected_action)
+
+    action_candidates =
+      pget(message, :action_candidates) ||
+        pget(from, :action_candidates) ||
+        pget(from, :agent_action_candidates) ||
+        []
+
+    action_meta =
+      pget(message, :action_meta) ||
+        pget(from, :action_meta) ||
+        pget(from, :agent_action_meta) ||
+        %{}
 
     bullets =
       extra_wo_meta
@@ -155,7 +172,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> maybe_add_intent_tone_section(meta, meta_line)
       |> maybe_add_senses_selected_section(structured_senses, bullets)
       |> maybe_add_event_frame_section(symbolic_frame)
-      |> maybe_add_action_selection_section(action_selection)
+      |> maybe_add_action_selection_section(selected_action, action_candidates, action_meta)
       |> maybe_add_similar_terms_section(bullets)
       |> maybe_add_antonyms_section(bullets)
       |> maybe_add_message_section(main)
@@ -203,9 +220,18 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           tone: pget(payload, :tone),
           senses_selected: pget(payload, :senses_selected),
           symbolic_frame: pget(payload, :symbolic_frame) || pget(from, :symbolic_frame),
-          selected_action: pget(payload, :selected_action),
-          action_candidates: pget(payload, :action_candidates),
-          action_meta: pget(payload, :action_meta)
+          selected_action:
+            pget(payload, :selected_action) ||
+              pget(from, :selected_action) ||
+              pget(from, :agent_selected_action),
+          action_candidates:
+            pget(payload, :action_candidates) ||
+              pget(from, :action_candidates) ||
+              pget(from, :agent_action_candidates),
+          action_meta:
+            pget(payload, :action_meta) ||
+              pget(from, :action_meta) ||
+              pget(from, :agent_action_meta)
         }
 
         built = explain_payload_for(msg)
@@ -350,7 +376,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     from = message[:from] || %{}
 
     %{
-      intent: message[:intent] || from[:intent] || parsed[:intent],
+      intent: message[:intent] || from[:intent_inferred] || from[:intent] || parsed[:intent],
       confidence: message[:confidence] || from[:confidence] || parsed[:confidence],
       tone: message[:tone] || from[:tone_reaction] || parsed[:tone],
       because: message[:tone_because] || from[:source_latents] || parsed[:because],
@@ -358,6 +384,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       response_source: message[:response_source] || from[:response_source],
       response_fallback_reason:
         message[:response_fallback_reason] || from[:response_fallback_reason],
+      action: message[:action] || from[:action],
+      memory_key: message[:memory_key] || from[:memory_key] || from[:fact_key],
+      memory_source: message[:memory_source] || from[:memory_source] || from[:source],
       raw: parsed[:raw]
     }
     |> drop_blank(:because)
@@ -572,6 +601,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("because", meta[:because])
         |> maybe_kv("mode", meta[:mode])
         |> maybe_kv("response source", meta[:response_source] && ":#{meta[:response_source]}")
+        |> maybe_kv("action", meta[:action] && ":#{meta[:action]}")
+        |> maybe_kv("memory key", format_frame_value(meta[:memory_key]))
+        |> maybe_kv("memory source", meta[:memory_source] && ":#{meta[:memory_source]}")
         |> maybe_kv(
           "fallback reason",
           meta[:response_fallback_reason] && ":#{meta[:response_fallback_reason]}"
@@ -583,7 +615,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           %{
             key: :intent_tone,
             title: "Intent & tone",
-            hint: "Classifier + tone selection metadata that shaped the reply.",
+            hint: intent_tone_hint(meta),
             items: items
           }
         ]
@@ -591,6 +623,15 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       sections
     end
   end
+
+  defp intent_tone_hint(%{response_source: :memory}),
+    do: "Memory attribution and tone metadata that shaped the reply."
+
+  defp intent_tone_hint(%{response_source: "memory"}),
+    do: "Memory attribution and tone metadata that shaped the reply."
+
+  defp intent_tone_hint(_),
+    do: "Classifier + tone selection metadata that shaped the reply."
 
   defp maybe_add_senses_selected_section(sections, structured_senses, bullets) do
     items_from_struct =
@@ -664,99 +705,6 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   end
 
   defp maybe_add_event_frame_section(sections, _), do: sections
-
-  defp maybe_add_action_selection_section(sections, action_selection)
-       when is_map(action_selection) and map_size(action_selection) > 0 do
-    selected = pget(action_selection, :selected)
-    action_meta = pget(action_selection, :meta, %{})
-    candidates = pget(action_selection, :candidates, [])
-
-    items =
-      []
-      |> maybe_kv("selected action", selected && format_frame_value(selected))
-      |> maybe_kv("safety gate", pget(action_meta, :safety_gate) |> format_optional_value())
-      |> maybe_kv("confidence", pget(action_meta, :confidence) |> format_optional_value())
-      |> maybe_kv("action candidates", format_action_candidates(candidates))
-
-    if items != [] do
-      sections ++
-        [
-          %{
-            key: :action_selection,
-            title: "Action selection",
-            tag: selected && format_frame_value(selected),
-            hint: "Agentic action chosen after semantic framing and safety gating.",
-            items: items
-          }
-        ]
-    else
-      sections
-    end
-  end
-
-  defp maybe_add_action_selection_section(sections, _), do: sections
-
-  defp action_selection_from_message(message) when is_map(message) do
-    from = pget(message, :from, %{})
-    direct_meta = pget(message, :action_meta)
-    response_action_meta = pget(from, :agent_action_meta)
-    meta = first_map([direct_meta, response_action_meta])
-
-    selected =
-      pget(message, :selected_action) ||
-        pget(meta, :selected) ||
-        pget(from, :agent_selected_action)
-
-    candidates =
-      pget(message, :action_candidates) ||
-        pget(meta, :candidates) ||
-        []
-
-    %{
-      selected: selected,
-      candidates: List.wrap(candidates),
-      meta: meta || %{}
-    }
-    |> Enum.reject(fn {_key, value} -> not frame_present?(value) end)
-    |> Map.new()
-  end
-
-  defp first_map(values) when is_list(values) do
-    Enum.find(values, &is_map/1)
-  end
-
-  defp format_optional_value(nil), do: nil
-  defp format_optional_value(value), do: format_frame_value(value)
-
-  defp format_action_candidates(candidates) when is_list(candidates) do
-    candidates
-    |> Enum.map(&format_action_candidate/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n")
-    |> blank_to_nil()
-  end
-
-  defp format_action_candidates(_), do: nil
-
-  defp format_action_candidate(%{} = candidate) do
-    action = pget(candidate, :action) || pget(candidate, :selected)
-    score = pget(candidate, :score)
-    reason = pget(candidate, :reason)
-
-    [
-      maybe_format_candidate_part(action),
-      if(frame_present?(score), do: "score=#{format_frame_value(score)}"),
-      if(frame_present?(reason), do: "reason=#{format_frame_value(reason)}")
-    ]
-    |> Enum.filter(&present?/1)
-    |> Enum.join(" · ")
-  end
-
-  defp format_action_candidate(candidate), do: format_frame_value(candidate)
-
-  defp maybe_format_candidate_part(value) do
-    if frame_present?(value), do: format_frame_value(value)
-  end
 
   defp event_frame_items(frame) when is_map(frame) do
     preferred = [
@@ -842,6 +790,102 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   end
 
   defp format_frame_value(value), do: inspect(value)
+
+  defp maybe_add_action_selection_section(sections, selected_action, candidates, action_meta) do
+    selected =
+      selected_action ||
+        pget(action_meta || %{}, :selected)
+
+    candidates =
+      case candidates do
+        list when is_list(list) -> list
+        _ -> pget(action_meta || %{}, :candidates, [])
+      end
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+
+    if frame_present?(selected) or candidates != [] or frame_present?(action_meta) do
+      items =
+        []
+        |> maybe_kv("selected action", selected && format_frame_value(selected))
+        |> maybe_kv(
+          "safety gate",
+          action_meta |> pget(:safety_gate) |> maybe_format_frame_value()
+        )
+        |> maybe_kv("confidence", action_meta |> pget(:confidence) |> maybe_format_frame_value())
+        |> maybe_kv("version", action_meta |> pget(:version) |> maybe_format_frame_value())
+        |> maybe_kv("selected reason", selected_reason(action_meta))
+        |> add_action_candidates(candidates)
+
+      sections ++
+        [
+          %{
+            key: :action_selection,
+            title: "Action selection",
+            tag: selected && format_frame_value(selected),
+            hint: "Bounded internal/text action chosen before the response.",
+            items: items
+          }
+        ]
+    else
+      sections
+    end
+  end
+
+  defp add_action_candidates(items, candidates) when is_list(candidates) do
+    if candidates == [] do
+      items
+    else
+      body =
+        candidates
+        |> Enum.map(fn candidate ->
+          action = candidate |> pget(:action) |> format_frame_value()
+          score = candidate |> pget(:score) |> format_frame_value()
+          reason = candidate |> pget(:reason) |> format_frame_value()
+
+          speech? = pget(candidate, :speech_required?)
+          memory? = pget(candidate, :memory_relevant?)
+
+          extras =
+            []
+            |> maybe_inline_flag("speech", speech?)
+            |> maybe_inline_flag("memory", memory?)
+            |> Enum.join(", ")
+
+          base = "#{action} score=#{score} reason=#{reason}"
+
+          if extras == "" do
+            base
+          else
+            base <> " [" <> extras <> "]"
+          end
+        end)
+        |> Enum.join("\n")
+
+      items ++ [%{label: "candidates", body: body}]
+    end
+  end
+
+  defp add_action_candidates(items, _), do: items
+
+  defp selected_reason(action_meta) when is_map(action_meta) do
+    action_meta
+    |> pget(:selected_candidate, %{})
+    |> pget(:reason)
+    |> maybe_format_frame_value()
+  end
+
+  defp selected_reason(_), do: nil
+
+  defp maybe_inline_flag(items, _label, nil), do: items
+  defp maybe_inline_flag(items, _label, false), do: items
+  defp maybe_inline_flag(items, label, true), do: items ++ [label]
+
+  defp maybe_inline_flag(items, label, value),
+    do: items ++ ["#{label}=#{format_frame_value(value)}"]
+
+  defp maybe_format_frame_value(nil), do: nil
+  defp maybe_format_frame_value(value), do: format_frame_value(value)
 
   defp maybe_add_similar_terms_section(sections, bullets) when is_list(bullets) do
     sims =

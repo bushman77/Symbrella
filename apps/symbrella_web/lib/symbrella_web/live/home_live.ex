@@ -137,7 +137,7 @@ defmodule SymbrellaWeb.HomeLive do
         bot_text = "(stopped)"
 
         payload = ChatHTML.explain_payload_for(%{id: bot_id, text: bot_text})
-        stopped = %{id: bot_id, role: :assistant, text: bot_text}
+        stopped = %{id: bot_id, role: :assistant, text: bot_text, mods: neuromodulator_badge(%{})}
 
         ChatHistory.append(stopped)
 
@@ -170,11 +170,28 @@ defmodule SymbrellaWeb.HomeLive do
     si = Map.get(reply, :si, %{})
     symbolic_frame = Map.get(reply, :symbolic_frame) || Map.get(si, :symbolic_frame)
 
+    action_meta =
+      Map.get(reply, :action_meta) ||
+        Map.get(si, :action_meta) ||
+        map_get(meta, :agent_action_meta)
+
+    selected_action =
+      Map.get(reply, :selected_action) ||
+        Map.get(si, :selected_action) ||
+        map_get(meta, :agent_selected_action) ||
+        map_get(action_meta || %{}, :selected)
+
+    action_candidates =
+      Map.get(reply, :action_candidates) ||
+        Map.get(si, :action_candidates) ||
+        map_get(meta, :agent_action_candidates) ||
+        map_get(action_meta || %{}, :candidates, [])
+
     explain_text = Map.get(reply, :explain_text, reply_text)
     senses_selected = Map.get(reply, :senses_selected, [])
 
-    intent = Map.get(si, :intent)
-    confidence = Map.get(si, :confidence)
+    intent = map_get(meta, :intent_inferred) || Map.get(si, :intent)
+    confidence = map_get(meta, :confidence) || Map.get(si, :confidence)
 
     bot_id = "b-" <> Integer.to_string(System.unique_integer([:positive]))
 
@@ -188,9 +205,9 @@ defmodule SymbrellaWeb.HomeLive do
         from: meta || %{},
         senses_selected: senses_selected,
         symbolic_frame: symbolic_frame,
-        selected_action: Map.get(si, :selected_action),
-        action_candidates: Map.get(si, :action_candidates),
-        action_meta: Map.get(si, :action_meta)
+        selected_action: selected_action,
+        action_candidates: action_candidates,
+        action_meta: action_meta
       })
 
     bot = %{
@@ -293,6 +310,7 @@ defmodule SymbrellaWeb.HomeLive do
               text: question,
               tone: :curious,
               meta: meta,
+              mods: neuromodulator_badge(meta),
               explain_text: question,
               explain_payload: explain_payload
             }
@@ -455,6 +473,9 @@ defmodule SymbrellaWeb.HomeLive do
       meta: meta,
       si: si,
       symbolic_frame: Map.get(si, :symbolic_frame),
+      selected_action: Map.get(si, :selected_action),
+      action_candidates: Map.get(si, :action_candidates),
+      action_meta: Map.get(si, :action_meta),
       senses_selected: senses_selected,
       explain_text: explain_text,
       mods: neuromodulator_badge(meta)

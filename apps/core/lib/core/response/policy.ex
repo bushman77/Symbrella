@@ -448,13 +448,21 @@ defmodule Core.Response.Policy do
   end
 
   def greeting?(t),
-    do: Regex.match?(~r/\b(hi|hello|hey|hiya|yo|sup|good (morning|afternoon|evening))\b/i, t)
+    do:
+      Regex.match?(
+        ~r/\b(hi|hello|he+y+|hiya|yo|sup|good (morning|afternoon|evening))\b/i,
+        t
+      )
 
   def gratitude?(t),
     do: Regex.match?(~r/\b(thanks|thank you|appreciate it|ty)\b/i, t)
 
   def smalltalk?(t),
-    do: Regex.match?(~r/\b(how'?s it going|how are you|what'?s up|wyd)\b/i, t)
+    do:
+      Regex.match?(
+        ~r/\b(how'?s it going|how are you|wh+a+t'?s+\s*u+p+|what'?s up|wha+t+s+\s*u+p+|wyd|c+mon.*up)\b/i,
+        t
+      )
 
   def question?(t) do
     String.contains?(t, "?") or

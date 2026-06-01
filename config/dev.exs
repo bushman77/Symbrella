@@ -45,6 +45,17 @@ config :core, :log_llm_prompts?, false
 
 config :brain, Brain.CycleClock, hz: 20
 
+config :brain, Brain.Camera,
+  enabled?: true,
+  ffmpeg: "ffmpeg",
+  source: {:mjpeg_url, "http://192.168.1.138:4747/video?640x480"},
+  input_format: "mjpeg",
+  video_size: "640x480",
+  interval_ms: 10_000,
+  output_path: "/tmp/symbrella_camera/latest.jpg",
+  timeout_ms: 11_000,
+  loglevel: "warning"
+
 config :brain, Brain.MoodCore,
   clock: :cycle,
   half_life_ms: %{da: 30_000, "5ht": 60_000, glu: 90_000, ne: 45_000},

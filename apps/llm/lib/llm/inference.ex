@@ -41,7 +41,7 @@ defmodule Llm.Inference do
 
           case reply do
             {:ok, %{"message" => %{"content" => content}} = raw} ->
-              {:ok, %{content: content, raw: raw}, state3}
+              {:ok, %{content: sanitize_model_text(content), raw: raw}, state3}
 
             {:ok, raw} ->
               {:error, {:unexpected_response, raw}, state3}
@@ -57,6 +57,12 @@ defmodule Llm.Inference do
     else
       {:error, reason} -> {:error, reason, state}
     end
+  end
+
+  defp sanitize_model_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> String.trim()
   end
 
   @doc """

@@ -97,10 +97,10 @@ defmodule Core do
     |> Core.Comprehension.Summary.attach(opts)
     |> Core.Brain.Prefrontal.attach(opts)
     |> Core.Brain.ActionSelection.attach(opts)
-    |> Core.Brain.Hippocampus.encode()
-    |> Core.Brain.Hippocampus.persist(opts)
     |> Core.Brain.WM.focus_prompt_topics(opts)
     |> maybe_build_response_plan(opts)
+    |> Core.Brain.Hippocampus.encode()
+    |> Core.Brain.Hippocampus.persist(opts)
     |> Core.Brain.Activation.notify(opts)
   end
 

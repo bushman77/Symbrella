@@ -20,6 +20,7 @@ config :core, Core.Recall.Synonyms,
 config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity,
+  agency_ledger_enabled?: true,
   llm_client: Llm,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
@@ -94,9 +95,11 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
-  # model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
+  # model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
   llama_server: "llama-server",
+  # Synchronous boot is handled by Llm.BootGate. Keep the GenServer's own
+  # handle_continue autostart off so there is a single startup path.
   auto_start_on_boot?: false,
   allow_lazy_start?: true,
   auto_restart_on_crash?: true,
@@ -107,6 +110,8 @@ config :llm, Llm,
   heartbeat_ms: 15_000
 
 config :llm, Llm.BootGate,
+  # Blocks the umbrella root supervisor until llama-server answers /v1/models.
+  # SymbrellaWeb depends on :symbrella, so Phoenix starts only after this passes.
   enabled?: true,
   timeout: 120_000
 

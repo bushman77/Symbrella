@@ -561,7 +561,11 @@ defmodule Llm do
     timeout = Keyword.get(opts, :timeout, state.timeout)
     url = state.endpoint <> path
 
-    case Req.get(url, headers: [{"accept", "application/json"}], receive_timeout: timeout) do
+    case Req.get(url,
+           headers: [{"accept", "application/json"}],
+           receive_timeout: timeout,
+           retry: false
+         ) do
       {:ok, %{status: s, body: body}} when s in 200..299 ->
         {:ok, body}
 
@@ -580,7 +584,8 @@ defmodule Llm do
     case Req.post(url,
            json: body_map,
            headers: [{"accept", "application/json"}],
-           receive_timeout: timeout
+           receive_timeout: timeout,
+           retry: false
          ) do
       {:ok, %{status: s, body: body}} when s in 200..299 ->
         {:ok, body}
@@ -617,10 +622,18 @@ defmodule Llm do
 
   defp extract_chat_content(%{"choices" => [%{"message" => %{"content" => c}} | _]})
        when is_binary(c),
-       do: c
+       do: sanitize_model_text(c)
 
-  defp extract_chat_content(%{"choices" => [%{"text" => c} | _]}) when is_binary(c), do: c
+  defp extract_chat_content(%{"choices" => [%{"text" => c} | _]}) when is_binary(c),
+    do: sanitize_model_text(c)
+
   defp extract_chat_content(_), do: ""
+
+  defp sanitize_model_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> String.trim()
+  end
 
   defp extract_embedding_one(%{"data" => [%{"embedding" => emb} | _]}) when is_list(emb), do: emb
   defp extract_embedding_one(%{"embedding" => emb}) when is_list(emb), do: emb

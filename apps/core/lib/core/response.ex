@@ -87,6 +87,7 @@ defmodule Core.Response do
         confidence_bucket = bucket_confidence(conf)
         vigilance_bucket = bucket_vigilance(vig)
         risk_bucket = if guard.guardrail? or intent == :illicit_request, do: :high, else: :low
+        agency_memory = Core.Response.AgencyMemory.recall(session_id)
 
         features =
           build_features(%{
@@ -115,7 +116,8 @@ defmodule Core.Response do
             response_policy: Map.get(mood, :response_policy),
             turn_context: Map.get(si, :turn_context),
             symbolic_frame: Map.get(si, :symbolic_frame),
-            self_model: Map.get(si, :self_model)
+            self_model: Map.get(si, :self_model),
+            agency_memory: agency_memory
           })
 
         {decision, skill} = decide_and_pick_skill(features, guard, text_in)
@@ -185,11 +187,13 @@ defmodule Core.Response do
             control_signals: Map.get(features, :control_signals),
             curiosity_probe: curiosity_probe,
             response_source: response_source,
-            response_fallback_reason: response_fallback_reason
+            response_fallback_reason: response_fallback_reason,
+            agency_memory: agency_memory
           })
 
         :telemetry.execute([:core, :response, :plan], %{}, meta)
         emit_mode_selected(meta)
+        _ = Core.Response.AgencyLedger.record_response(text_in, text, features, meta)
 
         {decision.tone, text, meta}
     end
@@ -283,9 +287,13 @@ defmodule Core.Response do
          response_policy: response_policy,
          turn_context: turn_context,
          symbolic_frame: symbolic_frame,
-         self_model: self_model
+         self_model: self_model,
+         agency_memory: agency_memory
        }) do
-    self_state = self_state_effects(self_model)
+    self_state =
+      self_model
+      |> self_state_effects()
+      |> apply_agency_memory(agency_memory)
 
     %{
       session_id: session_id,
@@ -318,7 +326,8 @@ defmodule Core.Response do
       turn_context: turn_context,
       symbolic_frame: symbolic_frame,
       self_model: self_model,
-      self_state: self_state
+      self_state: self_state,
+      agency_memory: agency_memory
     }
   end
 
@@ -406,7 +415,8 @@ defmodule Core.Response do
            Map.get(decision, :tone), Map.get(decision, :mode), Map.get(decision, :action)}
         ),
       next_step: template_next_step(features, decision),
-      file_hint: template_file_hint(text_in, features)
+      file_hint: template_file_hint(text_in, features),
+      context_status: LlmSynthesis.history_status(Map.get(features, :session_id))
     }
   end
 
@@ -415,13 +425,25 @@ defmodule Core.Response do
       Map.get(features, :intent) == :health_support ->
         "Use safe health-support posture: acknowledge, avoid dose instructions, and suggest pharmacist or prescriber guidance."
 
+      personal_finance_text?(Map.get(features, :text)) ->
+        "Name the debts, balances, interest rates, payment status, and deadlines before choosing a repayment or consolidation plan."
+
+      peace_or_war_question_text?(Map.get(features, :text)) ->
+        nil
+
+      casual_or_companion_text?(Map.get(features, :text)) ->
+        nil
+
+      personal_life_update_text?(Map.get(features, :text)) ->
+        nil
+
       Map.get(features, :guardrail?) or Map.get(features, :risk_bucket) == :high ->
         "Give a brief safe redirect."
 
-      Map.get(features, :confidence_bucket) == :low or comprehension_degraded?(features) ->
+      low_confidence_task?(features) or comprehension_degraded_task?(features) ->
         "State what is understood, then ask one targeted question only if necessary."
 
-      Map.get(decision, :action) == :act_first ->
+      Map.get(decision, :action) == :act_first and technical_request?(features) ->
         "Make the next concrete engineering move."
 
       Map.get(decision, :mode) == :explainer ->
@@ -431,6 +453,83 @@ defmodule Core.Response do
         nil
     end
   end
+
+  defp technical_request?(features) when is_map(features) do
+    Map.get(features, :intent) in [
+      :code,
+      :command,
+      :debug,
+      :refactor,
+      :review,
+      :plan,
+      :diagram,
+      :bug,
+      :optimize,
+      :benchmark
+    ] or technical_text?(Map.get(features, :text))
+  end
+
+  defp technical_request?(_), do: false
+
+  defp low_confidence_task?(features) when is_map(features) do
+    Map.get(features, :confidence_bucket) == :low and technical_request?(features)
+  end
+
+  defp low_confidence_task?(_), do: false
+
+  defp comprehension_degraded_task?(features) when is_map(features) do
+    comprehension_degraded?(features) and technical_request?(features)
+  end
+
+  defp comprehension_degraded_task?(_), do: false
+
+  defp technical_text?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(code|coding|compile|compiler|debug|error|stacktrace|module|function|phoenix|elixir|liveview|server|repo|test|refactor|api|database|migration|deploy|pipeline)\b/iu,
+      text
+    )
+  end
+
+  defp technical_text?(_), do: false
+
+  defp personal_finance_text?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(credit|credit karma|debt|debts|consolidat(?:e|ion|ing)|collections?|collector|loan|loans|interest rate|apr|minimum payment|bankruptcy|charge[-\s]?off|delinquen|late payment)\b/iu,
+      text
+    )
+  end
+
+  defp personal_finance_text?(_), do: false
+
+  defp casual_or_companion_text?(text) when is_binary(text) do
+    not substantive_question_text?(text) and
+      Regex.match?(
+        ~r/\b(he+y+|hi+|hello|yo+|sup|wh+a+t'?s*\s*u+p+|wha+t+s+\s*u+p+|huh+\??|c+mon|companion|friend|talk|chat|made you|default responses?|not code|write code)\b/iu,
+        text
+      )
+  end
+
+  defp casual_or_companion_text?(_), do: false
+
+  defp peace_or_war_question_text?(text) when is_binary(text) do
+    Regex.match?(~r/\bwhat\s+do\s+you\s+think\s+(of|about)\b/iu, text) or
+      (Regex.match?(
+         ~r/\b(altern+a+tives?|options?|instead|other\s+ways?|peace|diplomacy|negotiation|de[-\s]?escalation|ceasefire|sanctions?|mediation|war)\b/iu,
+         text
+       ) and Regex.match?(~r/\b(war|conflict|fighting|violence)\b/iu, text))
+  end
+
+  defp peace_or_war_question_text?(_), do: false
+
+  defp substantive_question_text?(text) when is_binary(text) do
+    peace_or_war_question_text?(text) or
+      Regex.match?(
+        ~r/\b(what|why|how|when|where|who|which|should|could|would|can)\b/iu,
+        text
+      )
+  end
+
+  defp substantive_question_text?(_), do: false
 
   defp comprehension_degraded?(features) do
     comprehension = Map.get(features, :comprehension)
@@ -498,7 +597,8 @@ defmodule Core.Response do
          planner_explanation: planner_explanation,
          curiosity_probe: curiosity_probe,
          response_source: response_source,
-         response_fallback_reason: response_fallback_reason
+         response_fallback_reason: response_fallback_reason,
+         agency_memory: agency_memory
        }) do
     %{
       policy_version: decision.policy_version,
@@ -529,7 +629,8 @@ defmodule Core.Response do
       response_fallback_reason: response_fallback_reason,
       curiosity_probe: curiosity_probe,
       self_state: Map.get(decision, :self_state),
-      self_state_effects: Map.get(decision, :self_state_effects, [])
+      self_state_effects: Map.get(decision, :self_state_effects, []),
+      agency_memory: agency_memory
     }
   end
 
@@ -581,6 +682,10 @@ defmodule Core.Response do
 
         meta = %{
           action: :identity,
+          intent_inferred: :name_query,
+          response_source: :memory,
+          memory_key: :user_name,
+          memory_source: :hippocampus_fact,
           session_id: session_id,
           user_name: name,
           source: :hippocampus_fact,
@@ -596,6 +701,10 @@ defmodule Core.Response do
 
         meta = %{
           action: :remember_fact,
+          intent_inferred: :memory_write,
+          response_source: :memory,
+          memory_key: key,
+          memory_source: :hippocampus_fact,
           session_id: session_id,
           fact_key: key,
           fact_label: label,
@@ -612,6 +721,10 @@ defmodule Core.Response do
 
         meta = %{
           action: :remember_fact,
+          intent_inferred: :memory_write,
+          response_source: :memory,
+          memory_key: key,
+          memory_source: :hippocampus_fact,
           session_id: session_id,
           fact_key: key,
           fact_label: label,
@@ -635,6 +748,10 @@ defmodule Core.Response do
 
         meta = %{
           action: :recall_fact,
+          intent_inferred: :fact_query,
+          response_source: :memory,
+          memory_key: key,
+          memory_source: :hippocampus_fact,
           session_id: session_id,
           fact_key: key,
           fact_label: label,
@@ -651,6 +768,11 @@ defmodule Core.Response do
   end
 
   defp finish_memory_reply(session_id, text_in, text, meta) do
+    meta =
+      meta
+      |> Map.put_new(:response_source, :memory)
+      |> Map.put_new(:intent_inferred, Map.get(meta, :action))
+
     record_turn(session_id, text_in, text)
     :telemetry.execute([:core, :response, :plan], %{}, meta)
     {:warm, text, meta}
@@ -822,7 +944,49 @@ defmodule Core.Response do
            id: :trust_repair,
            reason: :trust_rupture,
            inline_text:
-             "You may be right to challenge me. I might have misread something or overstated it. Show me what felt dishonest, and I'll trace it plainly."
+             "You may be right to challenge me. I got pulled off the thread and answered like this was a task queue. I should stay with the conversation. Tell me what felt dishonest and I’ll stay grounded."
+         }}
+
+      companion_boundary_turn?(features) ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :companion_repair)
+          |> put_in([:scores, :profile], :companion_repair)
+          |> add_decision_override(:companion_repair)
+
+        {decision,
+         %{
+           id: :companion_repair,
+           reason: :companion_boundary,
+           inline_text:
+             "You're right. I shouldn't keep steering this into code. I'm here as a companion in this conversation, and I should answer you socially unless you ask for technical help."
+         }}
+
+      casual_companion_turn?(features) ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :answer)
+          |> add_decision_override(:casual_companion_answer)
+
+        {decision,
+         %{
+           id: :casual_companion,
+           reason: :casual_chat,
+           inline_text: casual_companion_text(text)
+         }}
+
+      personal_life_update_turn?(features) ->
+        decision =
+          decision
+          |> put_decision(tone: :warm, mode: :chat, action: :answer)
+          |> Map.put(:skill, :personal_life_update)
+          |> add_decision_override(:personal_life_update_answer)
+
+        {decision,
+         %{
+           id: :personal_life_update,
+           reason: :personal_life_update,
+           inline_text: personal_life_update_text(text)
          }}
 
       idle_curiosity_casual_turn?(features) ->
@@ -941,7 +1105,8 @@ defmodule Core.Response do
       Map.get(policy, :social_state) == :trust_rupture or
         Map.get(policy, :next_action) == :invite_correction
 
-    trust_language?(Map.get(features, :text, "")) and trust_policy?
+    trust_language?(Map.get(features, :text, "")) and
+      (trust_policy? or Map.get(features, :confidence_bucket) in [:low, :med, :high])
   end
 
   defp trust_repair_turn?(_), do: false
@@ -954,6 +1119,90 @@ defmodule Core.Response do
   end
 
   defp trust_language?(_), do: false
+
+  defp companion_boundary_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+
+    Regex.match?(
+      ~r/\b(didn'?t\s+(make|build)\s+you\s+to\s+(write\s+)?code|made\s+you\s+as\s+a\s+companion|you'?re\s+(a\s+)?companion|not\s+(a\s+)?code\s+(bot|assistant)|stop\s+(asking|talking)\s+about\s+code|default responses?)\b/iu,
+      text
+    )
+  end
+
+  defp companion_boundary_turn?(_), do: false
+
+  defp casual_companion_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+    intent = Map.get(features, :intent)
+
+    (intent == :smalltalk and not substantive_question_text?(text)) or
+      (casual_greeting?(text) and Map.get(features, :confidence_bucket) == :low and
+         not substantive_question_text?(text)) or
+      Regex.match?(
+        ~r/^\s*(huh+\??|no+|c+mon.*up|wh+a+t'?s*\s*u+p+\??|wha+t+s+\s*u+p+\??)\s*$/iu,
+        text
+      )
+  end
+
+  defp casual_companion_turn?(_), do: false
+
+  defp personal_life_update_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+
+    personal_life_update_text?(text) and not technical_text?(text)
+  end
+
+  defp personal_life_update_turn?(_), do: false
+
+  defp personal_life_update_text?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(my own place|own apartment|own house|new apartment|new place|getting (?:my )?own place|moving out|move into (?:my|our) place|got approved for (?:an apartment|a place)|signed (?:a )?lease)\b/iu,
+      text
+    )
+  end
+
+  defp personal_life_update_text?(_), do: false
+
+  defp personal_life_update_text(text) when is_binary(text) do
+    down = String.downcase(text)
+
+    cond do
+      Regex.match?(~r/\bgood\s+afternoon\b/u, down) ->
+        "Good afternoon. That sounds like a big step. Getting close to having your own place is exciting, and probably a little intense too. What part is feeling most real right now?"
+
+      true ->
+        "That sounds like a big step. Getting close to having your own place is exciting, and probably a little intense too. What part is feeling most real right now?"
+    end
+  end
+
+  defp personal_life_update_text(_), do: "That sounds like a big step. I’m here with you."
+
+  defp casual_greeting?(text) when is_binary(text) do
+    Regex.match?(~r/\b(he+y+|hi+|hello|yo+|sup)\b/iu, text) and
+      not Regex.match?(~r/\bgood\s+(morning|afternoon|evening)\b/iu, text)
+  end
+
+  defp casual_greeting?(_), do: false
+
+  defp casual_companion_text(text) when is_binary(text) do
+    down = String.downcase(text)
+
+    cond do
+      Regex.match?(~r/^\s*huh+\??\s*$/u, down) ->
+        "Yeah, that came out wrong. I’m here with you."
+
+      Regex.match?(~r/^\s*no+\s*$/u, down) ->
+        "Okay. I’ll stop pushing that direction."
+
+      Regex.match?(~r/(what'?s|whats|whaats|wats)\s+u+p|c+mon.*up/u, down) ->
+        "I’m here with you. On my side it’s just the current Symbrella state and this conversation, but I can still hang out and talk."
+
+      true ->
+        "Hey. I’m here with you."
+    end
+  end
+
+  defp casual_companion_text(_), do: "I’m here with you."
 
   defp idle_curiosity_casual_turn?(features) when is_map(features) do
     text = Map.get(features, :text, "")
@@ -1394,6 +1643,8 @@ defmodule Core.Response do
               :self_portrait,
               :runtime_self_check,
               :trust_repair,
+              :companion_repair,
+              :casual_companion,
               :idle_curiosity_casual,
               :alarm_capability
             ] and is_binary(s) and s != "" do
@@ -1432,6 +1683,28 @@ defmodule Core.Response do
   end
 
   defp self_state_effects(_), do: %{}
+
+  defp apply_agency_memory(self_state, agency_memory)
+       when is_map(self_state) and is_map(agency_memory) do
+    agency_effects = agency_memory |> map_get(:effects, []) |> List.wrap()
+
+    if agency_effects == [] do
+      self_state
+    else
+      effects =
+        self_state
+        |> map_get(:effects, [])
+        |> List.wrap()
+        |> Kernel.++(agency_effects)
+        |> Enum.uniq()
+
+      self_state
+      |> Map.put(:effects, effects)
+      |> Map.put(:agency_memory, Map.take(agency_memory, [:v, :event_count, :reasons, :stats]))
+    end
+  end
+
+  defp apply_agency_memory(self_state, _agency_memory), do: self_state
 
   defp maybe_effect(effects, true, effect), do: [effect | effects]
   defp maybe_effect(effects, false, _effect), do: effects

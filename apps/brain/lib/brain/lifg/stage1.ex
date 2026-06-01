@@ -35,6 +35,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.Cerebellum
   alias Brain.MoodWeights
   alias Brain.LIFG.Guard
+  alias Brain.LIFG.Stage1.Numeric
   alias Brain.LIFG.Reanalysis
 
   @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
@@ -805,7 +806,7 @@ defmodule Brain.LIFG.Stage1 do
       {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
       closed_class_slate? = Enum.any?(cand_list, &closed_class_candidate?/1)
 
-      scored_trip =
+      scored_rows =
         Enum.map(cand_list, fn c ->
           id = sense_id_for(c, token_phrase)
           pos = pos_of(c)
@@ -847,13 +848,6 @@ defmodule Brain.LIFG.Stage1 do
             closed_class_pos_bias(token_phrase, pos) +
               local_context_pos_bias(acc, tok, pos)
 
-          base0 =
-            (ctx.weights[:lex_fit] * lex +
-               ctx.weights[:rel_prior] * rel +
-               ctx.weights[:activation] * act +
-               ctx.weights[:intent_bias] * intent_feat)
-            |> clamp01()
-
           perception_bias =
             perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
 
@@ -866,14 +860,6 @@ defmodule Brain.LIFG.Stage1 do
               if relations_homonym_bonus?(ctx.si, c), do: 0.5, else: 0.0
             end
 
-          base =
-            base0
-            |> Kernel.+(perception_delta)
-            |> Kernel.+(hom_bump)
-            |> Kernel.+(pos_bias)
-            |> clamp01()
-            |> apply_mood_if_up(tok, id)
-
           feat = %{
             id: id,
             lex_fit: lex,
@@ -883,7 +869,31 @@ defmodule Brain.LIFG.Stage1 do
             perception_bias: perception_bias
           }
 
-          {id, base, feat}
+          %{
+            id: id,
+            token: tok,
+            features: feat,
+            perception_delta: perception_delta,
+            hom_bump: hom_bump,
+            pos_bias: pos_bias
+          }
+        end)
+
+      numeric_scores = Numeric.weighted_scores(Enum.map(scored_rows, & &1.features), ctx.weights)
+
+      scored_trip =
+        scored_rows
+        |> Enum.zip(numeric_scores)
+        |> Enum.map(fn {row, base0} ->
+          base =
+            base0
+            |> Kernel.+(row.perception_delta)
+            |> Kernel.+(row.hom_bump)
+            |> Kernel.+(row.pos_bias)
+            |> clamp01()
+            |> apply_mood_if_up(row.token, row.id)
+
+          {row.id, base, row.features}
         end)
 
       ids = Enum.map(scored_trip, fn {id, _b, _f} -> id end)
@@ -904,7 +914,7 @@ defmodule Brain.LIFG.Stage1 do
         end
 
       logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
-      probs = softmax(logits)
+      probs = Numeric.softmax(logits)
 
       ranked =
         Enum.zip(ids, probs)
@@ -2579,7 +2589,8 @@ defmodule Brain.LIFG.Stage1 do
   defp context_bias_for(:auxiliary, :auxiliary), do: -0.12
 
   defp context_bias_for(:auxiliary, candidate_family)
-       when candidate_family in [:noun, :proper_noun], do: -0.08
+       when candidate_family in [:noun, :proper_noun],
+       do: -0.08
 
   defp context_bias_for(:pronoun, candidate_family) when candidate_family in [:verb, :auxiliary],
     do: 0.08
@@ -2641,25 +2652,6 @@ defmodule Brain.LIFG.Stage1 do
 
       _ ->
         false
-    end
-  end
-
-  defp softmax([]), do: []
-
-  defp softmax(xs) do
-    xs = Enum.map(xs, &to_float/1)
-    m = Enum.max(xs)
-    exps = Enum.map(xs, fn x -> :math.exp(x - m) end)
-    denom = Enum.sum(exps)
-
-    cond do
-      denom == 0.0 ->
-        n = length(xs)
-        u = 1.0 / n
-        Enum.map(xs, fn _ -> u end)
-
-      true ->
-        Enum.map(exps, &(&1 / denom))
     end
   end
 

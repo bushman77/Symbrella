@@ -439,4 +439,59 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Do not describe Symbrella as a generic tool"
     refute prompt =~ "Response profile: semantic_repair."
   end
+
+  test "personal life update guides LLM instead of semantic repair" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :greeting,
+          text: "good afternoon symbrella im close to getting my own place",
+          confidence_bucket: :low
+        },
+        decision: %{tone: :warm, mode: :chat, action: :answer, skill: :personal_life_update},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "skill=personal_life_update"
+    assert prompt =~ "acknowledge the personal milestone warmly"
+    refute prompt =~ "state what is understood"
+  end
+
+  test "alien thread follow-up guides LLM instead of semantic repair" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          text: "yeahh the elite of this world would never admit it for what ever reason",
+          confidence_bucket: :low,
+          context_status: %{topics: %{alien_life?: true}}
+        },
+        decision: %{tone: :warm, mode: :chat, action: :answer},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "continue the alien-life conversation"
+    assert prompt =~ "separate plausible speculation from confirmed evidence"
+    refute prompt =~ "state what is understood"
+  end
+
+  test "alien question guides LLM to ordinary answer instead of semantic repair" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          text: "do you belive aliens might exist?",
+          confidence_bucket: :low
+        },
+        decision: %{tone: :warm, mode: :chat, action: :answer},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "answer the alien-life question directly"
+    assert prompt =~ "plausible but unconfirmed"
+    refute prompt =~ "state what is understood"
+  end
 end

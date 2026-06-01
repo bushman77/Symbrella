@@ -20,7 +20,7 @@ defmodule Core.Response.ModesTest do
   end
 
   describe "compose/4 – deterministic fallback only" do
-    test "uses contextual fallback copy instead of the old static drop-in response" do
+    test "uses conversational fallback copy for non-technical unknowns" do
       text =
         Modes.compose(:unknown, :neutral, :unknown_mode, %{
           variant_seed: 1,
@@ -29,8 +29,68 @@ defmodule Core.Response.ModesTest do
 
       refute text =~ "Ready. Point me at the module"
       refute text =~ "clean drop-in"
+      refute text =~ "module"
+      refute text =~ "file"
+      assert text =~ "I’m with you"
+      assert text =~ "Suggested next step: Ask one targeted question."
+    end
+
+    test "keeps technical fallback copy for technical requests" do
+      text =
+        Modes.compose(:unknown, :neutral, :unknown_mode, %{
+          text: "this compile error points at a Phoenix module",
+          variant_seed: 1,
+          next_step: "Ask one targeted question."
+        })
+
       assert text =~ "Give me the next concrete target"
       assert text =~ "Suggested next step: Ask one targeted question."
+    end
+
+    test "opinion questions are not treated as casual greeting fallback" do
+      text =
+        Modes.compose(:ask, :neutral, :scribe, %{
+          text: "hey what do you think of war?",
+          variant_seed: 0,
+          next_step: nil
+        })
+
+      assert text =~ "War"
+      assert text =~ "anti-suffering"
+      refute text =~ "Hey. I’m here with you."
+      refute text =~ "module"
+      refute text =~ "file"
+    end
+
+    test "personal housing update avoids generic comprehension fallback" do
+      text =
+        Modes.compose(:unknown, :neutral, :unknown_mode, %{
+          text: "good afternoon symbrella im close to getting my own place",
+          variant_seed: 3,
+          next_step: nil
+        })
+
+      assert text =~ "Good afternoon"
+      assert text =~ "own place"
+      refute text =~ "simpler words"
+      refute text =~ "Suggested next step"
+      refute text =~ "module"
+      refute text =~ "file"
+    end
+
+    test "war alternatives typo gets substantive fallback" do
+      text =
+        Modes.compose(:ask, :neutral, :scribe, %{
+          text: "what are alternnatives  too war",
+          variant_seed: 0,
+          next_step: nil
+        })
+
+      assert text =~ "Alternatives to war"
+      assert text =~ "diplomacy"
+      assert text =~ "ceasefires"
+      refute text =~ "what are you trying to talk through"
+      refute text =~ "Suggested next step"
     end
 
     test "does not emit normal-mode canned menus or drop-in invitations" do

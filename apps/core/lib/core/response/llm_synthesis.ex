@@ -18,6 +18,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPrompt
   alias Core.Response.ReflectionLoop
   alias Core.Response.SelfStateSummary
+  alias Core.Response.Topics
 
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
@@ -62,6 +63,44 @@ defmodule Core.Response.LlmSynthesis do
     remember(session_id, user_text, assistant_text)
   end
 
+  @spec history_status(term()) :: map()
+  def history_status(session_id) do
+    case :ets.whereis(@ets_table) do
+      :undefined ->
+        %{
+          table_present?: false,
+          history_present?: false,
+          message_count: 0,
+          turn_pairs: 0
+        }
+
+      _tid ->
+        messages =
+          case :ets.lookup(@ets_table, session_id) do
+            [{^session_id, list}] when is_list(list) -> list
+            _ -> []
+          end
+
+        %{
+          table_present?: true,
+          history_present?: messages != [],
+          message_count: length(messages),
+          turn_pairs: div(length(messages), 2),
+          topics: history_topics(messages)
+        }
+    end
+  rescue
+    _ ->
+      %{
+        table_present?: false,
+        history_present?: false,
+        message_count: 0,
+        turn_pairs: 0
+      }
+  end
+
+  defp history_topics(messages), do: Topics.from_messages(messages)
+
   # ── Internal ──────────────────────────────────────────────────────────────
 
   defp do_generate(user_text, features, decision, mood) do
@@ -85,7 +124,7 @@ defmodule Core.Response.LlmSynthesis do
 
     case llm_client().chat(messages, timeout: @timeout_ms) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
-        draft = String.trim(content)
+        draft = sanitize_model_text(content)
         {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out}
@@ -108,14 +147,23 @@ defmodule Core.Response.LlmSynthesis do
       {:error, :exit}
   end
 
+  defp sanitize_model_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> String.trim()
+  end
+
   defp prompt_context(user_text, features, decision, mood) do
     wm_items = safe_wm_items()
     self_model = safe_self_model()
     runtime_state = safe_runtime_state(wm_items)
+    session_id = Map.get(ensure_map(features), :session_id, :global)
+    context_status = history_status(session_id)
 
     features =
       features
       |> ensure_map()
+      |> put_if_missing(:context_status, context_status)
       |> put_if_missing(:self_model, self_model)
       |> put_if_missing(:runtime_state, runtime_state)
 

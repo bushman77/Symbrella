@@ -43,8 +43,7 @@ config :llm, Llm,
   auto_restart_on_crash?: false,
   heartbeat_ms: 0
 
-config :llm, Llm.BootGate,
-  enabled?: false
+config :llm, Llm.BootGate, enabled?: false
 
 # -------------------------------
 # Logger / ExUnit
@@ -66,6 +65,8 @@ config :phoenix_live_view,
 config :core, :tokenizer_defaults,
   mode: :words,
   emit_chargrams: false
+
+config :core, agency_ledger_enabled?: false
 
 # -------------------------------
 # Brain Configuration (FIXED)

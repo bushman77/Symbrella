@@ -240,7 +240,7 @@ defmodule Brain.MoodCore do
 
     st =
       st
-      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> put_levels(fn v, k -> apply_delta(v, Map.get(deltas, k, 0.0), k, load_caps()) end)
       |> emit(:activation, 0, :bump)
 
     {:noreply, st}
@@ -252,7 +252,7 @@ defmodule Brain.MoodCore do
 
     st =
       st
-      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> put_levels(fn v, k -> apply_delta(v, Map.get(deltas, k, 0.0), k, load_caps()) end)
       |> emit(:wm, 0, :bump)
 
     {:noreply, st}
@@ -355,17 +355,18 @@ defmodule Brain.MoodCore do
     deltas = sanitize_deltas(deltas, st.max_delta_per_tick)
 
     st
-    |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+    |> put_levels(fn v, k -> apply_delta(v, Map.get(deltas, k, 0.0), k, intent_caps(intent)) end)
     |> emit({:intent, intent}, 0, :bump)
   end
 
   defp apply_appraisal_to_state(st, appraisal) do
     {raw_deltas, app_meta} = appraisal_to_deltas(appraisal)
     deltas = sanitize_deltas(raw_deltas, st.max_delta_per_tick)
+    caps = appraisal_caps(appraisal)
 
     st2 =
       st
-      |> put_levels(fn v, k -> clamp(v + Map.get(deltas, k, 0.0)) end)
+      |> put_levels(fn v, k -> apply_delta(v, Map.get(deltas, k, 0.0), k, caps) end)
       |> emit(:appraisal, 0, :bump)
 
     :telemetry.execute(
@@ -648,6 +649,13 @@ defmodule Brain.MoodCore do
     %{da: +0.07 * k, ne: +0.07 * k}
   end
 
+  defp intent_to_deltas(:health_support, conf) do
+    # Health disclosures deserve careful attention, but ordinary missed-dose or
+    # sleep disclosures should not saturate vigilance/plasticity by themselves.
+    k = clamp_conf(conf)
+    %{"5ht": +0.02 * k, ne: +0.045 * k, glu: +0.015 * k}
+  end
+
   defp intent_to_deltas(:help, conf), do: intent_to_deltas(:question, conf)
   defp intent_to_deltas(:instruction, c), do: intent_to_deltas(:question, c)
 
@@ -674,6 +682,39 @@ defmodule Brain.MoodCore do
     density = min(1.0, (wm_list |> length()) / 7.0)
     %{ne: +0.05 * density, glu: +0.03 * density}
   end
+
+  defp apply_delta(v, delta, k, caps) when is_number(v) and is_number(delta) do
+    next = v + delta
+
+    cond do
+      delta > 0.0 ->
+        clamp(min(next, Map.get(caps, k, 1.0)))
+
+      true ->
+        clamp(max(next, Map.get(caps, {:floor, k}, 0.0)))
+    end
+  end
+
+  defp apply_delta(v, _delta, _k, _caps), do: clamp(v)
+
+  defp intent_caps(:abuse), do: %{ne: 1.0, glu: 0.90}
+  defp intent_caps(:insult), do: %{ne: 0.95, glu: 0.90}
+  defp intent_caps(:health_support), do: %{ne: 0.88, glu: 0.82}
+  defp intent_caps(_), do: %{ne: 0.90, glu: 0.85}
+
+  defp appraisal_caps(appraisal) when is_map(appraisal) do
+    tags = appraisal |> Map.get(:tags, []) |> coerce_tags()
+
+    if MapSet.member?(tags, :threat) do
+      %{ne: 1.0, glu: 0.90}
+    else
+      %{ne: 0.90, glu: 0.85}
+    end
+  end
+
+  defp appraisal_caps(_), do: %{ne: 0.90, glu: 0.85}
+
+  defp load_caps, do: %{ne: 0.86, glu: 0.82}
 
   # ---------- Tone selection (revised again – brain truth for tone_hint) ----------
 
