@@ -100,12 +100,12 @@ defmodule Core.Response.AgencyLedger do
     |> Enum.map(&safe_json/1)
   end
 
-  defp safe_json(value) when is_atom(value), do: Atom.to_string(value)
-  defp safe_json(value) when is_binary(value), do: value
+  defp safe_json(nil), do: nil
   defp safe_json(value) when is_boolean(value), do: value
+  defp safe_json(value) when is_binary(value), do: value
   defp safe_json(value) when is_integer(value), do: value
   defp safe_json(value) when is_float(value), do: value
-  defp safe_json(nil), do: nil
+  defp safe_json(value) when is_atom(value), do: Atom.to_string(value)
   defp safe_json(value), do: inspect(value)
 
   defp safe_key(key) when is_atom(key), do: Atom.to_string(key)

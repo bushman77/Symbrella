@@ -19,6 +19,7 @@ defmodule Core.SemanticInput do
     • selected_action / action_candidates / action_meta
     • intent / keyword / confidence
     • intent_bias
+    • token_cover / resolved_tokens
     • sense_candidates
     • lifg_opts / lifg_choices / acc_conflict
     • atl_slate
@@ -31,7 +32,7 @@ defmodule Core.SemanticInput do
     • response_text / response_tone / response_meta
     • symbolic_frame
     • emotion / appraisal
-    • self_model / self_continuity
+    • self_model / self_monitor / self_memory_recall / self_continuity
     • frame / frame_ts_ms / frame_seq / frame_run_id
   """
 
@@ -63,6 +64,8 @@ defmodule Core.SemanticInput do
           keyword: String.t() | nil,
           confidence: number() | nil,
           intent_bias: map(),
+          token_cover: list() | nil,
+          resolved_tokens: list() | nil,
 
           # candidates/winners
           sense_candidates: %{optional(non_neg_integer()) => [sense_candidate()]},
@@ -94,6 +97,8 @@ defmodule Core.SemanticInput do
           appraisal: map() | nil,
           mood: map() | nil,
           self_model: term() | nil,
+          self_monitor: map() | nil,
+          self_memory_recall: map() | nil,
           self_continuity: map() | nil,
           # misc products some stages attach
           mwe_matches: list() | nil,
@@ -116,6 +121,8 @@ defmodule Core.SemanticInput do
             keyword: nil,
             confidence: nil,
             intent_bias: %{},
+            token_cover: nil,
+            resolved_tokens: nil,
             sense_candidates: %{},
             lifg_opts: nil,
             lifg_choices: nil,
@@ -139,6 +146,8 @@ defmodule Core.SemanticInput do
             appraisal: nil,
             mood: nil,
             self_model: nil,
+            self_monitor: nil,
+            self_memory_recall: nil,
             self_continuity: nil,
             mwe_matches: nil,
             session_id: nil,

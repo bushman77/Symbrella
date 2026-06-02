@@ -89,6 +89,60 @@ defmodule Core.ResolveInputTest do
     Enum.filter([word_str, char_str], & &1)
   end
 
+  defp token_char_interval(token, sent) do
+    phrase =
+      token
+      |> Map.get(:phrase, "")
+      |> String.downcase()
+      |> String.trim()
+
+    {s, k} = Map.fetch!(token, :span)
+    sent_norm = sent |> String.trim() |> String.replace(~r/\s+/u, " ")
+
+    cond do
+      char_slice_matches?(sent_norm, s, k, phrase) ->
+        {s, s + k}
+
+      k > s and char_slice_matches?(sent_norm, s, k - s, phrase) ->
+        {s, k}
+
+      true ->
+        word_index_interval(sent_norm, s, k)
+    end
+  end
+
+  defp char_slice_matches?(sent, start, len, phrase)
+       when is_integer(start) and is_integer(len) and start >= 0 and len > 0 do
+    sent
+    |> String.slice(start, len)
+    |> to_string()
+    |> String.downcase()
+    |> String.trim()
+    |> Kernel.==(phrase)
+  end
+
+  defp char_slice_matches?(_sent, _start, _len, _phrase), do: false
+
+  defp word_index_interval(sent, start_word, stop_word) do
+    words = if sent == "", do: [], else: String.split(sent, " ")
+
+    starts =
+      words
+      |> Enum.reduce({[], 0}, fn word, {acc, pos} ->
+        {[pos | acc], pos + String.length(word) + 1}
+      end)
+      |> elem(0)
+      |> Enum.reverse()
+
+    ends = Enum.zip_with(starts, words, fn start, word -> start + String.length(word) end)
+
+    if start_word >= 0 and stop_word > start_word and stop_word <= length(words) do
+      {Enum.at(starts, start_word), Enum.at(ends, stop_word - 1)}
+    else
+      flunk("Cannot derive char interval for span #{inspect({start_word, stop_word})}")
+    end
+  end
+
   # ---- Tests ----------------------------------------------------------
 
   test "returns a SemanticInput struct and echoes the sentence/source" do
@@ -178,20 +232,20 @@ defmodule Core.ResolveInputTest do
     assert is_list(si.tokens)
   end
 
-  # Enable when your pipeline guarantees non-overlapping tokens:
-  @tag :skip
-  test "final tokens do not overlap (enable once de-overlap stage is wired)" do
+  test "final tokens do not overlap" do
     si = resolve("Kick the bucket today", phrase_repo: PhraseRepoFake)
 
-    ends =
-      Enum.map(si.tokens, fn t ->
-        {s, k} = t.span
-        # interpret as word spans against normalized sentence
-        words = si.sentence |> String.replace(~r/\s+/u, " ") |> String.split(" ")
-        stop = if k <= length(words), do: k, else: s + 1
-        {s, stop}
-      end)
+    intervals =
+      si.tokens
+      |> Enum.map(&token_char_interval(&1, si.sentence))
+      |> Enum.sort()
 
-    assert length(ends) > 0
+    overlaps =
+      intervals
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.filter(fn [{_a_start, a_stop}, {b_start, _b_stop}] -> a_stop > b_start end)
+
+    assert intervals != []
+    assert overlaps == []
   end
 end

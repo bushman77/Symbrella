@@ -19,7 +19,9 @@ defmodule Core.Response.Context do
       session_id: map_get(si, :session_id, :global),
       symbolic_frame: symbolic_frame(si),
       comprehension: map_get(si, :comprehension),
-      self_model: map_get(si, :self_model)
+      self_model: map_get(si, :self_model),
+      self_monitor: map_get(si, :self_monitor),
+      self_memory_recall: map_get(si, :self_memory_recall)
     }
     |> drop_empty()
   end
@@ -42,6 +44,18 @@ defmodule Core.Response.Context do
           map_get(features, :self_model),
           map_get(embedded, :self_model),
           map_get(runtime, :self_model)
+        ]),
+      self_monitor:
+        first_present([
+          map_get(features, :self_monitor),
+          map_get(embedded, :self_monitor),
+          map_get(runtime, :self_monitor)
+        ]),
+      self_memory_recall:
+        first_present([
+          map_get(features, :self_memory_recall),
+          map_get(embedded, :self_memory_recall),
+          map_get(runtime, :self_memory_recall)
         ]),
       runtime_state: map_get(runtime, :runtime_state),
       comprehension:
@@ -86,7 +100,9 @@ defmodule Core.Response.Context do
       atl_slate: present_summary(map_get(si, :atl_slate)),
       episode: present_summary(map_get(si, :episode)),
       event: present_summary(map_get(si, :symbolic_frame)),
-      self_model: present_summary(map_get(si, :self_model))
+      self_model: present_summary(map_get(si, :self_model)),
+      self_monitor: present_summary(map_get(si, :self_monitor)),
+      self_memory_recall: present_summary(map_get(si, :self_memory_recall))
     }
     |> drop_empty()
   end

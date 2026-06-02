@@ -137,18 +137,35 @@ defmodule Core.MWE.Injector do
   # ──────────────────────────────────────────────────────────
 
   # Prefer deriving the injected MWE span from the slice’s first/last token spans.
-  # Fallback keeps the old behavior ({i, i+n}) if spans aren’t usable.
+  # Supports word-index spans ({i, i+1}), char stop spans ({start, stop}), and
+  # char length spans ({start, length}). Fallback keeps {i, i+n} if spans are unusable.
   defp mwe_span_from_slice(slice, i, n) when is_list(slice) and is_integer(i) and is_integer(n) do
     fallback = {i, i + n}
 
-    spans = Enum.map(slice, &tok_span/1)
+    intervals =
+      slice
+      |> Enum.map(&token_interval/1)
 
-    case {List.first(spans), List.last(spans)} do
-      {{s, _}, {_, e}} when is_integer(s) and is_integer(e) and e > s ->
-        {s, e}
+    case {List.first(intervals), List.last(intervals)} do
+      {{s, _}, {_, e}} when is_integer(s) and is_integer(e) and e > s -> {s, e}
+      _ -> fallback
+    end
+  end
+
+  defp token_interval(token) do
+    phrase = tok_phrase(token)
+
+    case tok_span(token) do
+      {s, k} when is_integer(s) and is_integer(k) ->
+        cond do
+          is_binary(phrase) and String.length(phrase) == k -> {s, s + k}
+          k > s -> {s, k}
+          k > 0 -> {s, s + k}
+          true -> nil
+        end
 
       _ ->
-        fallback
+        nil
     end
   end
 

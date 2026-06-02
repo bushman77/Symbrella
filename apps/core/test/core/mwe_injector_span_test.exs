@@ -35,6 +35,25 @@ defmodule Core.MWE.InjectorSpanTest do
     assert by_phrase["morning symbrella"].span == {5, 22}
   end
 
+  test "inject derives MWE span from char length spans" do
+    tokens = [
+      %{phrase: "kick", span: {0, 4}, n: 1, mw: false},
+      %{phrase: "the", span: {5, 3}, n: 1, mw: false},
+      %{phrase: "bucket", span: {9, 6}, n: 1, mw: false},
+      %{phrase: "today", span: {16, 5}, n: 1, mw: false}
+    ]
+
+    exists? = fn phrase -> phrase in ["kick the", "kick the bucket"] end
+
+    out = Injector.inject(tokens, max_n: 3, exists?: exists?)
+
+    mwes = Enum.filter(out, &(&1[:mw] == true))
+    by_phrase = Map.new(mwes, fn t -> {t.phrase, t} end)
+
+    assert by_phrase["kick the"].span == {0, 8}
+    assert by_phrase["kick the bucket"].span == {0, 15}
+  end
+
   test "inject falls back to {i, i+n} when spans are missing/unusable" do
     tokens = [
       %{phrase: "kick", span: nil, n: 1, mw: false},

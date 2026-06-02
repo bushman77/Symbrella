@@ -58,4 +58,68 @@ defmodule Core.Response.SelfStateCouplingTest do
 
     :telemetry.detach(handler_id)
   end
+
+  test "plan/2 folds self-monitor recovery suggestions into self-state effects" do
+    {_tone, _text, meta} =
+      Response.plan(
+        %{
+          intent: :command,
+          confidence: 0.9,
+          text: "ship the next small step",
+          self_model: %{
+            v: 1,
+            uncertainty: 0.1,
+            confidence: 0.9,
+            stability: 0.8,
+            cognitive_load: 0.1,
+            focus: :execute
+          },
+          self_monitor: %{
+            status: :warning,
+            warnings: [%{kind: :high_cognitive_load, severity: :warning}],
+            recovery_suggestions: [:reduce_scope]
+          }
+        },
+        %{mood: %{vigilance: 0.2, inhibition: 0.2, exploration: 0.3, plasticity: 0.5}}
+      )
+
+    assert meta.mode == :coach
+    assert meta.action == :offer_options
+    assert :self_state_reduce_scope in meta.overrides
+    assert :reduce_scope in meta.self_state_effects
+    assert get_in(meta.self_state, [:self_monitor, :warning_kinds]) == [:high_cognitive_load]
+  end
+
+  test "plan/2 adapts from recalled autobiographical self-memory suggestions" do
+    {_tone, _text, meta} =
+      Response.plan(
+        %{
+          intent: :command,
+          confidence: 0.9,
+          text: "continue the work",
+          self_model: %{
+            v: 1,
+            uncertainty: 0.1,
+            confidence: 0.9,
+            stability: 0.8,
+            cognitive_load: 0.1,
+            focus: :execute
+          },
+          self_memory_recall: %{
+            source: :hippocampus,
+            memories: [%{kind: "self_monitor_warning"}],
+            warning_kinds: [:high_cognitive_load],
+            recovery_suggestions: [:reduce_scope]
+          }
+        },
+        %{mood: %{vigilance: 0.2, inhibition: 0.2, exploration: 0.3, plasticity: 0.5}}
+      )
+
+    assert meta.mode == :coach
+    assert meta.action == :offer_options
+    assert :self_state_reduce_scope in meta.overrides
+    assert :reduce_scope in meta.self_state_effects
+    assert get_in(meta.self_state, [:self_memory_recall, :memory_count]) == 1
+    assert get_in(meta.self_state, [:self_memory_recall, :warning_kinds]) == [:high_cognitive_load]
+  end
 end

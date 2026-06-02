@@ -117,6 +117,8 @@ defmodule Core.Response do
             turn_context: Map.get(si, :turn_context),
             symbolic_frame: Map.get(si, :symbolic_frame),
             self_model: Map.get(si, :self_model),
+            self_monitor: Map.get(si, :self_monitor),
+            self_memory_recall: Map.get(si, :self_memory_recall),
             agency_memory: agency_memory
           })
 
@@ -288,11 +290,15 @@ defmodule Core.Response do
          turn_context: turn_context,
          symbolic_frame: symbolic_frame,
          self_model: self_model,
+         self_monitor: self_monitor,
+         self_memory_recall: self_memory_recall,
          agency_memory: agency_memory
        }) do
     self_state =
       self_model
       |> self_state_effects()
+      |> apply_self_monitor(self_monitor)
+      |> apply_self_memory_recall(self_memory_recall)
       |> apply_agency_memory(agency_memory)
 
     %{
@@ -326,6 +332,8 @@ defmodule Core.Response do
       turn_context: turn_context,
       symbolic_frame: symbolic_frame,
       self_model: self_model,
+      self_monitor: self_monitor,
+      self_memory_recall: self_memory_recall,
       self_state: self_state,
       agency_memory: agency_memory
     }
@@ -1683,6 +1691,67 @@ defmodule Core.Response do
   end
 
   defp self_state_effects(_), do: %{}
+
+  defp apply_self_monitor(self_state, self_monitor)
+       when is_map(self_state) and is_map(self_monitor) do
+    monitor_effects =
+      self_monitor
+      |> map_get(:recovery_suggestions, [])
+      |> List.wrap()
+
+    monitor_warnings =
+      self_monitor
+      |> map_get(:warnings, [])
+      |> List.wrap()
+      |> Enum.map(&map_get(&1, :kind))
+      |> Enum.reject(&is_nil/1)
+
+    effects =
+      self_state
+      |> map_get(:effects, [])
+      |> List.wrap()
+      |> Kernel.++(monitor_effects)
+      |> Enum.uniq()
+
+    self_state
+    |> Map.put(:effects, effects)
+    |> Map.put(:self_monitor, %{
+      status: map_get(self_monitor, :status),
+      warning_kinds: monitor_warnings,
+      recovery_suggestions: monitor_effects
+    })
+  end
+
+  defp apply_self_monitor(self_state, _self_monitor), do: self_state
+
+  defp apply_self_memory_recall(self_state, self_memory_recall)
+       when is_map(self_state) and is_map(self_memory_recall) do
+    remembered_effects =
+      self_memory_recall
+      |> map_get(:recovery_suggestions, [])
+      |> List.wrap()
+
+    if remembered_effects == [] do
+      self_state
+    else
+      effects =
+        self_state
+        |> map_get(:effects, [])
+        |> List.wrap()
+        |> Kernel.++(remembered_effects)
+        |> Enum.uniq()
+
+      self_state
+      |> Map.put(:effects, effects)
+      |> Map.put(:self_memory_recall, %{
+        memory_count: length(List.wrap(map_get(self_memory_recall, :memories, []))),
+        warning_kinds: List.wrap(map_get(self_memory_recall, :warning_kinds, [])),
+        recovery_suggestions: remembered_effects
+      })
+    end
+  end
+
+  defp apply_self_memory_recall(self_state, _self_memory_recall), do: self_state
 
   defp apply_agency_memory(self_state, agency_memory)
        when is_map(self_state) and is_map(agency_memory) do

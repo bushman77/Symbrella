@@ -138,6 +138,8 @@ defmodule Core.Response.Attach do
       episode: si_get(si, :episode),
       mwe_matches: si_get(si, :mwe_matches),
       self_model: si_get(si, :self_model),
+      self_monitor: si_get(si, :self_monitor),
+      self_memory_recall: si_get(si, :self_memory_recall),
       symbolic_frame: si_get(si, :symbolic_frame),
       selected_action: si_get(si, :selected_action),
       action_candidates: si_get(si, :action_candidates),

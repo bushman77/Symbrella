@@ -254,7 +254,7 @@ defmodule Core.MWE.Signatures do
       Map.merge(old, bias2, fn _k, v1, v2 -> v1 + v2 end)
     end)
     |> Map.update(:mwe_matches, format_matches(matches), fn old ->
-      old ++ format_matches(matches)
+      List.wrap(old) ++ format_matches(matches)
     end)
     |> Map.update(:trace, [], fn tr ->
       [{:mwe_signatures, %{stage: stage, accepted: length(matches)}} | tr]

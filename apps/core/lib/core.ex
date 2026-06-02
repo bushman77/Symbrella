@@ -83,6 +83,7 @@ defmodule Core do
     |> Core.Pipeline.LTM.run(opts)
     |> TokenFilters.keep_only_word_boundary_tokens()
     |> Core.MWE.Stage.run(:late, opts)
+    |> Core.TokenResolution.resolve(opts)
     |> Core.Relations.attach_edges()
     |> Core.Pipeline.Evidence.drop_empty()
     |> Core.Brain.Episodes.attach(opts)
