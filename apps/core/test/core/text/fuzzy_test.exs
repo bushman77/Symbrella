@@ -78,6 +78,21 @@ defmodule Core.Text.FuzzyTest do
     assert :fact_query in fuzzy.aliases
   end
 
+  test "protects think and only repairs ddo in short conversational input" do
+    clean = Fuzzy.interpret("what do you think", known_word?: fn _ -> false end)
+
+    assert clean.text == "what do you think"
+    assert clean.corrections == []
+
+    typo = Fuzzy.interpret("what ddo you think", known_word?: fn _ -> false end)
+
+    assert typo.text == "what do you think"
+
+    assert [
+             %{original: "ddo", replacement: "do", reason: :known_typo}
+           ] = typo.corrections
+  end
+
   test "protects caller-known vocabulary before fuzzy repair" do
     fuzzy = Fuzzy.interpret("my new plaace", known_word?: &(&1 == "plaace"))
 

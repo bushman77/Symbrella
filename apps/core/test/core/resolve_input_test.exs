@@ -138,20 +138,25 @@ defmodule Core.ResolveInputTest do
     end
   end
 
-  test "multiword detection: tri-grams produce mw: true; phrase_repo opt tolerated" do
+  test "word-gram candidates are separated from confirmed MWE tokens" do
     si = resolve("Kick the bucket today", phrase_repo: PhraseRepoFake)
 
-    mw =
-      Enum.find(si.tokens, fn t ->
-        String.downcase(t.phrase) == "kick the bucket" and Map.get(t, :mw) in [true, true, 1]
+    candidate =
+      Enum.find(si.phrase_candidates, fn t ->
+        String.downcase(t.phrase) == "kick the bucket" and Map.get(t, :mw) == false and
+          Map.get(t, :confirmed?) == false
       end)
 
-    assert mw, """
-    Expected a multiword token 'Kick the bucket' with mw: true.
-    Got tokens:
+    assert candidate, """
+    Expected an unconfirmed phrase candidate 'Kick the bucket'.
+    Got phrase candidates:
 
-      #{inspect(token_sig(si.tokens), pretty: true)}
+      #{inspect(si.phrase_candidates, pretty: true)}
     """
+
+    refute Enum.any?(si.tokens, fn t ->
+             String.downcase(t.phrase) == "kick the bucket" and Map.get(t, :mw) == true
+           end)
 
     assert Enum.any?(si.tokens, fn t -> String.downcase(t.phrase) == "today" end)
   end

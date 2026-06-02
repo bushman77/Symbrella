@@ -2,8 +2,8 @@ defmodule Core.Token do
   @moduledoc """
   Core.Token carries the token struct **and** the tokenizer.
 
-  Emits **word-grams only** with **word-index** spans by default (end-exclusive: `{i, i+n}`).
-  Per start index, order is **longest → shortest**.
+  Emits boundary-clean word tokens in `tokens` and unconfirmed word-gram windows
+  in `phrase_candidates` by default. Word-index spans are end-exclusive: `{i, i+n}`.
 
   NEW:
     • Explicit punctuation splitting & tagging (Unicode-safe).
@@ -37,7 +37,9 @@ defmodule Core.Token do
             # "punct" for punctuation tokens (only when span_mode=:chars)
             pos: nil,
             # :sentence_final | :comma | :dash | ...
-            subpos: nil
+            subpos: nil,
+            # true only for repo-confirmed phrase tokens
+            confirmed?: false
 
   @type t :: %__MODULE__{
           index: nil | non_neg_integer(),
@@ -49,7 +51,8 @@ defmodule Core.Token do
           source: any(),
           kind: :word | :punct,
           pos: nil | String.t(),
-          subpos: nil | atom()
+          subpos: nil | atom(),
+          confirmed?: boolean()
         }
 
   @type span_mode :: :words | :chars
@@ -144,14 +147,15 @@ defmodule Core.Token do
       |> Enum.with_index()
       |> Enum.filter(fn {t, _i} -> t.kind == :word end)
 
-    # 3) Build word-grams (only over word tokens).
-    grams = build_wordgrams_from_word_tokens(word_tokens, max_n, span_mode)
+    # 3) Build boundary word tokens and keep unconfirmed word-grams separate.
+    {word_base_tokens, phrase_candidates} =
+      build_word_tokens_and_candidates(word_tokens, max_n, span_mode)
 
     # 4) Optionally include punctuation tokens in :chars mode.
     tokens =
       case span_mode do
         :words ->
-          grams
+          word_base_tokens
 
         :chars ->
           puncts =
@@ -170,7 +174,7 @@ defmodule Core.Token do
               }
             end)
 
-          (grams ++ puncts)
+          (word_base_tokens ++ puncts)
           |> Enum.sort_by(fn %__MODULE__{span: {st, _}} -> st end)
       end
 
@@ -179,7 +183,7 @@ defmodule Core.Token do
       |> Enum.with_index()
       |> Enum.map(fn {%__MODULE__{} = t, idx} -> %__MODULE__{t | index: idx} end)
 
-    %Core.SemanticInput{sentence: s, tokens: tokens}
+    %Core.SemanticInput{sentence: s, tokens: tokens, phrase_candidates: phrase_candidates}
   end
 
   # ---------- primitive scan (Unicode-safe) ----------
@@ -272,44 +276,83 @@ defmodule Core.Token do
     Enum.reverse(acc)
   end
 
-  # ---------- n-gram builder over word tokens ----------
+  # ---------- word token / phrase candidate builder ----------
 
   # word_tokens: [{%{text,start,stop,kind: :word}, primitive_index}, ...]
-  defp build_wordgrams_from_word_tokens(word_tokens, max_n, span_mode) do
+  defp build_word_tokens_and_candidates(word_tokens, max_n, span_mode) do
     k = length(word_tokens)
 
     if k == 0 do
+      {[], []}
+    else
+      base_tokens =
+        Enum.map(0..(k - 1), fn wi ->
+          {word, _} = Enum.at(word_tokens, wi)
+
+          span =
+            case span_mode do
+              :words -> {wi, wi + 1}
+              :chars -> {word.start, word.stop}
+            end
+
+          %__MODULE__{
+            phrase: word.text,
+            span: span,
+            mw: false,
+            confirmed?: false,
+            instances: [],
+            n: 1,
+            kind: :word
+          }
+        end)
+
+      phrase_candidates =
+        build_phrase_candidates(word_tokens, max_n, span_mode)
+
+      {base_tokens, phrase_candidates}
+    end
+  end
+
+  defp build_phrase_candidates(_word_tokens, max_n, _span_mode) when max_n < 2, do: []
+
+  defp build_phrase_candidates(word_tokens, max_n, span_mode) do
+    k = length(word_tokens)
+
+    if k < 2 do
       []
     else
       0..(k - 1)
       |> Enum.flat_map(fn wi ->
         max_here = min(max_n, k - wi)
 
-        for n <- max_here..1//-1 do
-          {first, _} = Enum.at(word_tokens, wi)
-          {last, _} = Enum.at(word_tokens, wi + n - 1)
+        if max_here < 2 do
+          []
+        else
+          for n <- max_here..2//-1 do
+            {first, _} = Enum.at(word_tokens, wi)
+            {last, _} = Enum.at(word_tokens, wi + n - 1)
 
-          phrase =
-            word_tokens
-            |> Enum.slice(wi, n)
-            |> Enum.map(fn {w, _} -> w.text end)
-            |> Enum.join(" ")
+            phrase =
+              word_tokens
+              |> Enum.slice(wi, n)
+              |> Enum.map(fn {w, _} -> w.text end)
+              |> Enum.join(" ")
 
-          span =
-            case span_mode do
-              :words -> {wi, wi + n}
-              # byte offsets
-              :chars -> {first.start, last.stop}
-            end
+            span =
+              case span_mode do
+                :words -> {wi, wi + n}
+                :chars -> {first.start, last.stop}
+              end
 
-          %__MODULE__{
-            phrase: phrase,
-            span: span,
-            mw: n > 1,
-            instances: [],
-            n: n,
-            kind: :word
-          }
+            %{
+              phrase: phrase,
+              span: span,
+              n: n,
+              mw: false,
+              confirmed?: false,
+              source: :phrase_candidate
+            }
+          end
         end
       end)
     end

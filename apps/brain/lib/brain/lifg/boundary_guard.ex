@@ -119,19 +119,10 @@ defmodule Brain.LIFG.BoundaryGuard do
   defp tok_phrase(_), do: nil
 
   defp tok_mw?(%{} = t) do
-    Map.get(t, :mw) == true or Map.get(t, "mw") == true or tok_n(t) > 1
+    Map.get(t, :mw) == true or Map.get(t, "mw") == true
   end
 
   defp tok_mw?(_), do: false
-
-  defp tok_n(%{} = t) do
-    case Map.get(t, :n) || Map.get(t, "n") do
-      i when is_integer(i) -> i
-      _ -> 1
-    end
-  end
-
-  defp tok_n(_), do: 1
 
   defp put_phrase_norm(%{} = t, phrase) do
     p =

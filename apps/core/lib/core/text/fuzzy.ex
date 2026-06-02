@@ -40,6 +40,7 @@ defmodule Core.Text.Fuzzy do
     "defintely" => "definitely",
     "didnt" => "did not",
     "doesnt" => "does not",
+    "ddo" => "do",
     "dont" => "do not",
     "exlain" => "explain",
     "exlpain" => "explain",
@@ -108,7 +109,7 @@ defmodule Core.Text.Fuzzy do
     help hippocampus home homework house how i in is issue know live location me
     mean memory message mix my name place please quetiapine recall remember
     richmond risks run save show sister sleep sleeping state store tell test
-    thanks that the their there thing this time to translate trouble what whats
+    thanks that the their there thing think this time to translate trouble what whats
     when where who why will you your
   )
 

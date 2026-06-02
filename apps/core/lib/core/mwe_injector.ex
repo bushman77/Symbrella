@@ -4,7 +4,7 @@ defmodule Core.MWE.Injector do
 
   - Accepts a list of single-word tokens (boundary-cleaned) with `span: {i, i+1}`.
   - Builds n-grams (default 2..4) and uses an `exists?/1` callback to decide which to inject.
-  - Emits `%{phrase, mw: true, span: {i, j}, n: n, source: :mwe}` tokens.
+  - Emits `%{phrase, mw: true, span: {i, j}, n: n, source: :mwe, confirmed?: true}` tokens.
   - Returns original + injected tokens, **deduped and ordered**: all single words first (by start),
     then MWEs (by start; shorter before longer at the same start).
   """
@@ -42,7 +42,11 @@ defmodule Core.MWE.Injector do
 
                 if exists?.(phrase2) do
                   span = mwe_span_from_slice(slice, i, n)
-                  [%{phrase: phrase2, mw: true, span: span, n: n, source: :mwe} | acc_in]
+
+                  [
+                    %{phrase: phrase2, mw: true, span: span, n: n, source: :mwe, confirmed?: true}
+                    | acc_in
+                  ]
                 else
                   acc_in
                 end

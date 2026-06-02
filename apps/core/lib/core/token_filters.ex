@@ -7,8 +7,8 @@ defmodule Core.TokenFilters do
 
   * `prune/2` — drops obviously-invalid tokens (bad spans, too-small `n`, etc.) with a safety
     fallback to the original list if pruning would remove everything.
-  * `rebuild_word_ngrams/2` — rebuilds a clean token list directly from the sentence by generating
-    word n-grams with stable spans.
+  * `rebuild_word_ngrams/2` — rebuilds clean base tokens directly from the sentence and stores
+    unconfirmed word n-grams separately as `:phrase_candidates`.
   * `keep_only_word_boundary_tokens/1` — verifies tokens are *span-backed* by the sentence: a token
     is kept only if its `:span` slice matches its `:phrase` after normalization (with a safety
     fallback if everything would be removed).
@@ -168,22 +168,22 @@ defmodule Core.TokenFilters do
   defp prune_tokens(_toks, _opts), do: {[], 0}
 
   @doc ~S"""
-  Rebuild word n-grams directly from the sentence with stable, span-backed tokens.
+  Rebuild base word tokens directly from the sentence with stable, span-backed phrase candidates.
 
-  This is the “ground truth” token constructor for word-level n-grams:
+  This is the “ground truth” token constructor for word-level input:
 
   * normalizes the sentence (trim + collapse whitespace)
   * splits into whitespace-delimited words
-  * generates n-grams up to `max_n` at each start word
-  * emits tokens ordered by start word, then descending n (e.g., 3-gram, 2-gram, 1-gram)
+  * emits base word tokens ordered by start word
+  * stores n-grams up to `max_n` at each start word in `:phrase_candidates`
   * assigns a stable `:index` in emission order *only if* the current `Core.Token` struct supports it
 
   Each emitted token includes:
 
-  * `:phrase` — the n-gram text (joined by single spaces)
+  * `:phrase` — the token text
   * `:span` — `{start, len}` over the normalized sentence (grapheme indices)
-  * `:n` — the n-gram size
-  * `:mw` — `true` for multiword n-grams (`n > 1`)
+  * `:n` — `1` for base tokens
+  * `:mw` — `false`; only confirmed MWE injection should set `mw: true`
   * `:instances` — an empty list (placeholder for later enrichment stages)
 
   ## Trace
@@ -200,9 +200,11 @@ defmodule Core.TokenFilters do
       iex> out.sentence
       "hi there"
       iex> Enum.map(out.tokens, &Map.get(&1, :phrase))
-      ["hi there", "hi", "there"]
+      ["hi", "there"]
+      iex> Enum.map(out.phrase_candidates, &Map.get(&1, :phrase))
+      ["hi there"]
       iex> Enum.map(out.tokens, &Map.get(&1, :span))
-      [{0, 8}, {0, 2}, {3, 5}]
+      [{0, 2}, {3, 5}]
       iex> match?([%{stage: :rebuild_word_ngrams, meta: %{max_n: 3}} | _], out.trace)
       true
 
@@ -210,11 +212,12 @@ defmodule Core.TokenFilters do
   @spec rebuild_word_ngrams(SemanticInput.t() | map(), pos_integer()) :: SemanticInput.t() | map()
   def rebuild_word_ngrams(%SemanticInput{sentence: s} = si, max_n)
       when is_binary(s) and is_integer(max_n) and max_n > 0 do
-    {s_norm, tokens} = build_ngrams(s, max_n)
+    {s_norm, tokens, phrase_candidates} = build_ngrams(s, max_n)
 
     si
     |> Map.put(:sentence, s_norm)
     |> Map.put(:tokens, tokens)
+    |> Map.put(:phrase_candidates, phrase_candidates)
     |> put_trace_any(:rebuild_word_ngrams, %{max_n: max_n, token_count: length(tokens)})
   end
 
@@ -222,11 +225,12 @@ defmodule Core.TokenFilters do
     s = Map.get(si, :sentence)
 
     if is_binary(s) do
-      {s_norm, tokens} = build_ngrams(s, max_n)
+      {s_norm, tokens, phrase_candidates} = build_ngrams(s, max_n)
 
       si
       |> Map.put(:sentence, s_norm)
       |> Map.put(:tokens, tokens)
+      |> Map.put(:phrase_candidates, phrase_candidates)
       |> put_trace_any(:rebuild_word_ngrams, %{max_n: max_n, token_count: length(tokens)})
     else
       si
@@ -246,19 +250,55 @@ defmodule Core.TokenFilters do
       else
         starts = word_starts(words)
 
-        for i <- 0..(wlen - 1),
-            n <- min(max_n, wlen - i)..1//-1 do
-          phrase = words |> Enum.slice(i, n) |> Enum.join(" ")
+        for i <- 0..(wlen - 1) do
+          phrase = Enum.at(words, i)
           start = Enum.at(starts, i, 0)
           len = String.length(phrase)
 
-          new_token(nil, {start, len}, n, phrase, n > 1)
+          new_token(nil, {start, len}, 1, phrase, false)
         end
         |> Enum.with_index()
         |> Enum.map(fn {t, idx} -> set_token_index(t, idx) end)
       end
 
-    {s_norm, tokens}
+    starts = if wlen == 0, do: [], else: word_starts(words)
+    phrase_candidates = build_phrase_candidates(words, starts, max_n)
+
+    {s_norm, tokens, phrase_candidates}
+  end
+
+  defp build_phrase_candidates(_words, _starts, max_n) when max_n < 2, do: []
+
+  defp build_phrase_candidates(words, starts, max_n) do
+    wlen = length(words)
+
+    if wlen < 2 do
+      []
+    else
+      0..(wlen - 1)
+      |> Enum.flat_map(fn i ->
+        max_here = min(max_n, wlen - i)
+
+        if max_here < 2 do
+          []
+        else
+          for n <- max_here..2//-1 do
+            phrase = words |> Enum.slice(i, n) |> Enum.join(" ")
+            start = Enum.at(starts, i, 0)
+            len = String.length(phrase)
+
+            %{
+              phrase: phrase,
+              span: {start, len},
+              n: n,
+              mw: false,
+              confirmed?: false,
+              source: :phrase_candidate
+            }
+          end
+        end
+      end)
+    end
   end
 
   @doc ~S"""
@@ -459,5 +499,4 @@ defmodule Core.TokenFilters do
     trace = [%{stage: stage, meta: meta, ts_ms: ts_ms} | tr]
     Map.put(si, :trace, trace)
   end
-
 end

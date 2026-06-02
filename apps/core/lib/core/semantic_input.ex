@@ -11,6 +11,7 @@ defmodule Core.SemanticInput do
     • sentence      — original input sentence (single source of truth)
     • source        — origin (:prod | :test | :user | etc.)
     • tokens        — token list (maps/structs)
+    • phrase_candidates — unconfirmed phrase windows derived from base tokens
     • active_cells  — lexicon/DB rows attached by downstream stages
     • trace         — ordered list of stage events (maps/tuples)
 
@@ -53,6 +54,7 @@ defmodule Core.SemanticInput do
           sentence: String.t() | nil,
           source: atom() | nil,
           tokens: [token()],
+          phrase_candidates: [map()],
           active_cells: [cell()],
           trace: list(),
 
@@ -107,6 +109,7 @@ defmodule Core.SemanticInput do
   defstruct sentence: nil,
             source: nil,
             tokens: [],
+            phrase_candidates: [],
             active_cells: [],
             trace: [],
             intent: nil,

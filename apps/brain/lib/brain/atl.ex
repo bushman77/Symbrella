@@ -271,8 +271,7 @@ defmodule Brain.ATL do
 
     extra =
       Enum.flat_map(Enum.with_index(tokens), fn {tok, idx_mwe} ->
-        n = Map.get(tok, :n, 1)
-        mw? = Map.get(tok, :mw, n > 1)
+        mw? = Map.get(tok, :mw, false)
 
         if not mw? do
           []

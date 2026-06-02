@@ -225,8 +225,7 @@ defmodule Core.Pipeline.Perception do
   defp token_phrase(_token), do: ""
 
   defp multiword?(%{} = token) do
-    n = mget(token, :n)
-    mget(token, :mw) == true or (is_integer(n) and n > 1)
+    mget(token, :mw) == true
   end
 
   defp multiword?(_token), do: false

@@ -555,12 +555,10 @@ defmodule Brain.LIFG.Guard do
 
   defp tok_mw?(%{} = t) do
     mw_flag = Map.get(t, :mw) == true or Map.get(t, "mw") == true
-    n = tok_n(t)
-
     id = to_string(Map.get(t, :id) || Map.get(t, "id") || "")
     pos = to_string(Map.get(t, :pos) || Map.get(t, "pos") || "")
 
-    mw_flag or n > 1 or String.contains?(id, "|phrase|") or String.downcase(pos) == "phrase"
+    mw_flag or String.contains?(id, "|phrase|") or String.downcase(pos) == "phrase"
   end
 
   defp tok_mw?(_), do: false

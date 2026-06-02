@@ -67,9 +67,8 @@ defmodule Brain.LIFG.MWE do
         Enum.reduce(Enum.with_index(tokens), {sc0, 0}, fn {tok, list_i}, {acc, n} ->
           tidx = token_index(tok, list_i)
 
-          token_n = Safe.get(tok, :n, if(Safe.get(tok, :mw, false), do: 2, else: 1))
           phrase0 = Safe.get(tok, :phrase) || Safe.get(tok, :lemma)
-          mw? = Safe.get(tok, :mw, token_n > 1)
+          mw? = Safe.get(tok, :mw, false)
 
           cond do
             not mw? or is_nil(phrase0) or not (is_integer(tidx) and tidx >= 0) ->
@@ -161,8 +160,7 @@ defmodule Brain.LIFG.MWE do
       updated =
         Enum.reduce(Enum.with_index(toks), sc0, fn {tok, list_i}, acc ->
           tidx = token_index(tok, list_i)
-          n = Safe.get(tok, :n, 1)
-          mw? = Safe.get(tok, :mw, n > 1)
+          mw? = Safe.get(tok, :mw, false)
           mwe_span = Safe.get(tok, :span)
 
           if mw? and is_tuple(mwe_span) and is_integer(tidx) and tidx >= 0 do
@@ -378,8 +376,7 @@ defmodule Brain.LIFG.MWE do
       |> Enum.with_index()
       |> Enum.reduce({sc0, 0}, fn {tok, list_i}, {acc, n} ->
         tidx = token_index(tok, list_i)
-        n_tok = Safe.get(tok, :n, 1)
-        mw? = Safe.get(tok, :mw, n_tok > 1)
+        mw? = Safe.get(tok, :mw, false)
 
         surface =
           Safe.get(tok, :phrase) ||

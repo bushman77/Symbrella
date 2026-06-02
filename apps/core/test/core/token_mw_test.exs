@@ -13,12 +13,14 @@ defmodule Core.TokenMWTest do
     end
   end
 
-  test "tokenizer builds MW tokens when repo knows the phrase" do
+  test "injector builds confirmed MW tokens when repo knows the phrase" do
     si = Core.Token.tokenize("Kick the bucket today")
+    tokens = Core.MWE.Injector.inject(si.tokens, exists?: &PhraseRepoFake.exists?/1)
 
-    assert Enum.any?(si.tokens, fn t ->
-             String.downcase(t.phrase) == "kick the bucket" and t.mw == true
+    assert Enum.any?(tokens, fn t ->
+             String.downcase(t.phrase) == "kick the bucket" and t.mw == true and
+               Map.get(t, :confirmed?) == true
            end),
-           "Tokenizer did not build 'kick the bucket' MW token. Got: #{inspect(si.tokens)}"
+           "Injector did not build confirmed 'kick the bucket' MW token. Got: #{inspect(tokens)}"
   end
 end

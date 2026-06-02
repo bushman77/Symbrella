@@ -17,7 +17,7 @@ defmodule Core.Semantic.EventFramesTest do
 
     out = EventFrames.attach(si)
 
-    assert out.symbolic_frame == %{
+    assert Map.drop(out.symbolic_frame, [:confidence]) == %{
              type: :health_support_event,
              subject: :user,
              event: :forgot_medication,
@@ -25,9 +25,10 @@ defmodule Core.Semantic.EventFramesTest do
              consequence: :sleep_inability,
              temporal_context: :now,
              domain: :health_support,
-             polarity: :negative,
-             confidence: 0.9
+             polarity: :negative
            }
+
+    assert out.symbolic_frame.confidence == 0.95
 
     assert [%{stage: :event_frame, decision: :attached} | _] = out.trace
   end

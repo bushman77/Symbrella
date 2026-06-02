@@ -16,9 +16,8 @@ defmodule Core.LIFG.InputTest do
     # tokenize/1 (binary) returns a list of %Core.Token{}
     tokens = Input.tokenize(sentence)
 
-    # Expect order: {0,11} "hello there", {0,5} "hello", {6,11} "there"
+    # Expect boundary-aligned base tokens only.
     assert Enum.map(tokens, &{&1.phrase, &1.span, &1.n}) == [
-             {"hello there", {0, 11}, 2},
              {"hello", {0, 5}, 1},
              {"there", {6, 11}, 1}
            ]
@@ -41,7 +40,6 @@ defmodule Core.LIFG.InputTest do
 
     # Same expected ordering and spans as the binary path
     assert Enum.map(si_out.tokens, &{&1.phrase, &1.span}) == [
-             {"hello there", {0, 11}},
              {"hello", {0, 5}},
              {"there", {6, 11}}
            ]
