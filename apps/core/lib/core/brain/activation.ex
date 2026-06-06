@@ -3,8 +3,6 @@ defmodule Core.Brain.Activation do
   Activation notification stage for `Core.SemanticInput`.
   """
 
-  alias Core.Brain.Runtime
-
   @spec notify(map(), keyword()) :: map()
   def notify(%{} = si, opts) when is_list(opts) do
     payload = %{
@@ -17,7 +15,7 @@ defmodule Core.Brain.Activation do
     lifg_count = si |> Map.get(:lifg_choices, []) |> length()
 
     if rows != [] do
-      _ = Runtime.apply_if_exported(Brain, :activate_cells, [rows, payload], :ok)
+      _ = Core.Brain.activate_cells(rows, payload)
     end
 
     Map.update(si, :trace, [], fn tr ->

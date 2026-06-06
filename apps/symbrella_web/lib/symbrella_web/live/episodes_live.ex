@@ -1,6 +1,8 @@
 defmodule SymbrellaWeb.EpisodesLive do
   use SymbrellaWeb, :live_view
 
+  alias SymbrellaWeb.EpisodesData
+
   @impl true
   def mount(_params, _session, socket) do
     episodes = load_episodes()
@@ -162,13 +164,7 @@ defmodule SymbrellaWeb.EpisodesLive do
     """
   end
 
-  defp load_episodes do
-    if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :list_all, 0) do
-      Db.Episode.list_all()
-    else
-      []
-    end
-  end
+  defp load_episodes, do: EpisodesData.list_all()
 
   defp episode_sentence(%{sentence: text}) when is_binary(text) and text != "", do: text
 

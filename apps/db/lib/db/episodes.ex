@@ -1,6 +1,11 @@
 defmodule Db.Episodes do
   @moduledoc """
-  Convenience helpers for creating and querying hippocampus episodes.
+  Context boundary for creating and querying hippocampus episodes.
+
+  `Db.Episode` owns the schema, changeset, and compatibility insert/query helpers.
+  This module is the higher-level episode context used by callers that want
+  normalized writes, embedding support, and hybrid recall without building Ecto
+  queries directly.
 
   Responsibilities:
   • Normalize + insert episodes (sync or async embedding)

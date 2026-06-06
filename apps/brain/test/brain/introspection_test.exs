@@ -102,7 +102,11 @@ defmodule Brain.IntrospectionTest do
     }
 
     assert {:ok, %Brain.SelfModel{}} =
-             Brain.Introspection.update_from_resolved(resolved, appraisal)
+             Brain.Introspection.update_from_resolved(resolved, appraisal,
+               calibration_log_path: path
+             )
+
+    assert wait_until(fn -> File.exists?(path) end, 500)
 
     assert [line] = path |> File.read!() |> String.split("\n", trim: true)
     assert {:ok, decoded} = Jason.decode(line)
@@ -117,5 +121,23 @@ defmodule Brain.IntrospectionTest do
     assert decoded["features"]["lifg_choices_count"] == 1
     assert decoded["features"]["appraisal_valence"] == 0.2
     assert decoded["features"]["attribution_confidence"] == 0.9
+  end
+
+  defp wait_until(fun, timeout_ms, step_ms \\ 10) when is_function(fun, 0) do
+    start_ms = System.monotonic_time(:millisecond)
+    do_wait_until(fun, start_ms, timeout_ms, step_ms)
+  end
+
+  defp do_wait_until(fun, start_ms, timeout_ms, step_ms) do
+    if fun.() do
+      true
+    else
+      if System.monotonic_time(:millisecond) - start_ms >= timeout_ms do
+        false
+      else
+        Process.sleep(step_ms)
+        do_wait_until(fun, start_ms, timeout_ms, step_ms)
+      end
+    end
   end
 end

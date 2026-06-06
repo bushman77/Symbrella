@@ -10,21 +10,19 @@ defmodule SymbrellaWeb.BrainLive do
   • Mood telemetry attach/detach delegated to MoodHud
   • Loads inline brain SVG from priv/static/images/brain.svg when available
   • ✅ Periodic, defensive region snapshot + status refresh
-  • ✅ Selected-region status panel (prefers GenServer.call(mod, :status))
+  • ✅ Selected-region status panel via `SymbrellaWeb.BrainRuntime`
   • ✅ All-regions status grid (fully registry-driven, no hard-coding)
   • ✅ Region Summary is now registry-driven (RegionRegistry.defn/1 → assigns.region)
   • ✅ Blackboard feed + WM panel (filterable + tolerant of shape drift)
   """
 
   use SymbrellaWeb, :live_view
-  require Logger
 
   alias SymbrellaWeb.BrainHTML
+  alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.BrainLive.MoodHud
   alias Brain.Bus
-  # Optional (used if present):
-  alias Brain.Introspect
 
   import SymbrellaWeb.BrainLive.MoodHud, only: [mood_hud: 1]
 
@@ -34,8 +32,8 @@ defmodule SymbrellaWeb.BrainLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    _ = ensure_optional(Brain.Cerebellum)
-    _ = ensure_optional(Brain.LIFG)
+    _ = BrainRuntime.ensure_optional(Brain.Cerebellum)
+    _ = BrainRuntime.ensure_optional(Brain.LIFG)
 
     selected0 = default_selected()
 
@@ -96,8 +94,8 @@ defmodule SymbrellaWeb.BrainLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={assigns[:current_scope]}>
       {BrainHTML.brain(assigns)}
-
-      <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
+      
+    <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
       <.mood_hud mood={@mood} />
 
       <.selected_region_status selected={@selected} status={@region_status} />
@@ -109,16 +107,7 @@ defmodule SymbrellaWeb.BrainLive do
   # ---------------------------------------------------------------------------
   # Params & UI events
   # ---------------------------------------------------------------------------
-  defp fetch_self_model do
-    cond do
-      Code.ensure_loaded?(Brain.Introspection) and
-          function_exported?(Brain.Introspection, :snapshot, 0) ->
-        Brain.Introspection.snapshot()
-
-      true ->
-        %{}
-    end
-  end
+  defp fetch_self_model, do: BrainRuntime.self_model_snapshot()
 
   defp default_selected do
     keys = RegionRegistry.keys()
@@ -264,20 +253,6 @@ defmodule SymbrellaWeb.BrainLive do
   # Internal helpers
   # ---------------------------------------------------------------------------
 
-  defp ensure_optional(mod) when is_atom(mod) do
-    cond do
-      Code.ensure_loaded?(mod) and function_exported?(mod, :ensure_started, 0) ->
-        try do
-          mod.ensure_started()
-        catch
-          _, _ -> :ok
-        end
-
-      true ->
-        :ok
-    end
-  end
-
   defp load_brain_svg do
     with {:ok, priv} <- safe_priv_dir(:symbrella_web),
          path <- Path.join([priv, "static", "images", "brain.svg"]),
@@ -342,185 +317,12 @@ defmodule SymbrellaWeb.BrainLive do
 
   # ---- Region fetchers ------------------------------------------------------
 
-  defp fetch_snapshot_and_status(region_key) do
-    snap =
-      cond do
-        Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :region_state, 1) ->
-          case safe_call(fn -> Introspect.region_state(region_key) end) do
-            {:ok, s} -> normalize_map(s)
-            _ -> fallback_snapshot(region_key)
-          end
-
-        true ->
-          fallback_snapshot(region_key)
-      end
-
-    {snap, get_region_status(region_key)}
-  end
-
-  defp fallback_snapshot(region_key) do
-    cond do
-      Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :snapshot, 0) ->
-        case safe_call(fn -> Introspect.snapshot() end) do
-          {:ok, s} ->
-            s = normalize_map(s)
-            regs = s[:regions] || s["regions"] || %{}
-
-            cond do
-              is_map(regs) and map_size(regs) > 0 ->
-                Map.get(regs, region_key) || Map.get(regs, to_string(region_key)) || %{}
-
-              true ->
-                direct_module_snapshot(region_key)
-            end
-
-          _ ->
-            direct_module_snapshot(region_key)
-        end
-
-      true ->
-        direct_module_snapshot(region_key)
-    end
-  end
-
-  defp direct_module_snapshot(region_key) do
-    mod = RegionRegistry.process_for(region_key) |> call_target()
-
-    cond do
-      is_nil(mod) ->
-        %{}
-
-      Code.ensure_loaded?(mod) and function_exported?(mod, :get_state, 0) ->
-        case safe_call(fn -> mod.get_state() end) do
-          {:ok, state} -> normalize_map(state)
-          _ -> %{}
-        end
-
-      true ->
-        %{}
-    end
-  end
-
-  defp get_region_status(region_key) do
-    mod = RegionRegistry.process_for(region_key) |> call_target()
-    try_direct_status(mod, region_key)
-  end
-
-  defp try_direct_status(nil, _rk), do: %{}
-
-  defp try_direct_status(mod, region_key) do
-    base = base_status_from_process(mod, region_key)
-
-    gs =
-      case safe_call(fn -> GenServer.call(mod, :status, 150) end) do
-        {:ok, s} when is_map(s) ->
-          s
-
-        _ ->
-          if Code.ensure_loaded?(mod) and function_exported?(mod, :status, 0) do
-            case safe_call(fn -> mod.status() end) do
-              {:ok, s} when is_map(s) -> s
-              _ -> %{}
-            end
-          else
-            %{}
-          end
-      end
-
-    Map.merge(base, gs)
-  end
-
-  defp base_status_from_process(mod, region_key) do
-    {pid, reg_name} = pid_of(mod)
-
-    case pid do
-      pid when is_pid(pid) ->
-        info = :erlang.process_info(pid, [:message_queue_len, :current_function])
-
-        %{
-          region: region_key,
-          status: :up,
-          pid: pid,
-          registered_name: reg_name,
-          queue: info[:message_queue_len] || 0,
-          current: info[:current_function] || :idle
-        }
-
-      _ ->
-        %{
-          region: region_key,
-          status: :down,
-          pid: nil,
-          queue: 0,
-          current: :idle
-        }
-    end
-  end
-
-  defp pid_of(mod) when is_atom(mod) do
-    cond do
-      function_exported?(mod, :name, 0) and is_pid(Process.whereis(mod.name())) ->
-        {Process.whereis(mod.name()), mod.name()}
-
-      is_pid(Process.whereis(mod)) ->
-        {Process.whereis(mod), mod}
-
-      true ->
-        {nil, nil}
-    end
-  end
-
-  defp call_target(mod) when is_atom(mod) do
-    cond do
-      mod == Brain.Lifg and Code.ensure_loaded?(Brain.LIFG) -> Brain.LIFG
-      true -> mod
-    end
-  end
-
-  defp safe_call(fun) when is_function(fun, 0) do
-    try do
-      {:ok, fun.()}
-    rescue
-      e ->
-        Logger.debug("BrainLive safe_call error: #{inspect(e)}")
-        :error
-    catch
-      kind, reason ->
-        Logger.debug("BrainLive safe_call caught #{inspect(kind)}: #{inspect(reason)}")
-        :error
-    end
-  end
-
-  defp normalize_map(%{} = m), do: m
-  defp normalize_map(other), do: %{value: other}
+  defp fetch_snapshot_and_status(region_key),
+    do: {BrainRuntime.region_snapshot(region_key), BrainRuntime.region_status(region_key)}
 
   # ---- SelfPortrait fetch ----------------------------------------------------
 
-  defp fetch_self_portrait do
-    fun =
-      cond do
-        Code.ensure_loaded?(Brain.SelfPortrait) and
-            function_exported?(Brain.SelfPortrait, :snapshot, 0) ->
-          fn -> Brain.SelfPortrait.snapshot() end
-
-        Code.ensure_loaded?(Brain.SelfPortrait) and
-            function_exported?(Brain.SelfPortrait, :snapshot, 1) ->
-          fn -> Brain.SelfPortrait.snapshot(Brain.SelfPortrait) end
-
-        true ->
-          nil
-      end
-
-    if is_nil(fun) do
-      %{}
-    else
-      case safe_call(fun) do
-        {:ok, %{} = p} -> normalize_self_portrait(p)
-        {:ok, other} -> %{value: other}
-        _ -> %{}
-      end
-    end
-  end
+  defp fetch_self_portrait, do: BrainRuntime.self_portrait_snapshot() |> normalize_self_portrait()
 
   defp normalize_self_portrait(%{portrait: %{} = p}), do: normalize_self_portrait(p)
   defp normalize_self_portrait(%{"portrait" => %{} = p}), do: normalize_self_portrait(p)
@@ -540,25 +342,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   # ---- All-regions aggregation ----------------------------------------------
 
-  defp collect_all_region_status do
-    RegionRegistry.keys()
-    |> Enum.map(fn key ->
-      mod = RegionRegistry.process_for(key) |> call_target()
-      {key, status_of(key, mod)}
-    end)
-    |> Enum.into(%{})
-  end
-
-  defp status_of(key, mod) when is_atom(mod) or is_nil(mod) do
-    mod = call_target(mod)
-    s = try_direct_status(mod, key)
-    {pid, _} = if mod, do: pid_of(mod), else: {nil, nil}
-
-    s
-    |> Map.put_new(:region, key)
-    |> Map.put_new(:pid, pid)
-    |> Map.put_new(:status, s[:status] || s["status"] || if(pid, do: :up, else: :down))
-  end
+  defp collect_all_region_status, do: BrainRuntime.all_region_status()
 
   # ---------------------------------------------------------------------------
   # Render helpers (panels)
@@ -723,26 +507,19 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp fetch_global_intent do
     intent_from_introspect =
-      if Code.ensure_loaded?(Introspect) and function_exported?(Introspect, :snapshot, 0) do
-        case safe_call(fn -> Introspect.snapshot() end) do
-          {:ok, snap} -> extract_intent_any(snap)
-          _ -> nil
-        end
-      else
-        nil
+      case BrainRuntime.introspection_snapshot() do
+        {:ok, snap} -> extract_intent_any(snap)
+        :error -> nil
       end
 
     case intent_from_introspect do
       nil ->
         cond do
-          Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot, 0) ->
-            case safe_call(fn -> Brain.snapshot() end) do
+          true ->
+            case BrainRuntime.brain_snapshot() do
               {:ok, st} -> extract_intent_any(st)
               _ -> nil
             end
-
-          true ->
-            nil
         end
 
       other ->
@@ -918,18 +695,7 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   defp seed_blackboard_history(socket) do
-    history =
-      cond do
-        Code.ensure_loaded?(Brain.Blackboard) and
-            function_exported?(Brain.Blackboard, :history, 1) ->
-          case safe_call(fn -> Brain.Blackboard.history(50) end) do
-            {:ok, events} when is_list(events) -> events
-            _ -> []
-          end
-
-        true ->
-          []
-      end
+    history = BrainRuntime.blackboard_history(50)
 
     events =
       history
@@ -1005,15 +771,9 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   defp fetch_wm_snapshot do
-    cond do
-      Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) ->
-        case safe_call(fn -> Brain.snapshot_wm() end) do
-          {:ok, %{} = snap} -> {:ok, normalize_wm_snapshot(snap, "brain")}
-          other -> other
-        end
-
-      true ->
-        :error
+    case BrainRuntime.wm_snapshot() do
+      {:ok, %{} = snap} -> {:ok, normalize_wm_snapshot(snap, "brain")}
+      other -> other
     end
   end
 

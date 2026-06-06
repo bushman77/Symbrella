@@ -107,6 +107,70 @@ That pipeline is intentionally explicit. Each stage can attach evidence,
 telemetry, trace entries, or persisted memory without making the whole system a
 single opaque model call.
 
+## Agency Path
+
+Symbrella already has the scaffold for agency, but the current path is still
+mostly internal decision-making rather than full agentic execution. The system
+can inspect itself, update a self-model, select a response posture, record
+agency events, reflect on outcomes, and recall recent agency pressure. The next
+architectural step is to make the decision/action contract explicit before
+adding more external abilities.
+
+Current agency-related surfaces include:
+
+- `Brain.ActionSelector` and `Core.Brain.ActionSelection` for selecting the
+  next response posture.
+- `Brain.SelfModel`, `Core.Brain.Introspection`, and `Brain.MetaMonitor` for
+  self-state, warnings, and recovery suggestions.
+- `Brain.GoalStack` for active cognitive goals, currently strongest around
+  uncertainty reduction.
+- `Core.Response.AgencyLedger`, `Core.Response.AgencyMemory`, and
+  `Core.Response.AgencyReflection` for event recording, recent pressure, and
+  response-level reflection.
+- `Brain.Camera.ObservationBridge` for conservative sensor observations that can
+  enter the cognitive loop without claiming ungrounded visual understanding.
+
+The desired agency loop is:
+
+```text
+Perceive
+-> Appraise
+-> Self-monitor
+-> Select action
+-> Build command
+-> Check permission/risk
+-> Execute or defer
+-> Record event
+-> Reflect
+-> Learn pressure for next time
+```
+
+Today the main missing middle is the controlled command boundary:
+
+- an `Agency.Decision` shape that carries selected action, candidates, reasons,
+  self-state, confidence, uncertainty, risk, permission needs, expected outcome,
+  actual outcome, reflection, and trace identity;
+- an `Agency.Command` shape for explicit requested actions such as
+  `:write_memory`, `:run_self_check`, `:set_goal`, `:complete_goal`, or
+  `:observe_environment`;
+- an `Agency.Executor` or actuator boundary that rejects unknown commands by
+  default, applies risk and permission policy, records every command, and keeps
+  world-changing actions out of ordinary response-selection code.
+
+The core rule for future agency work is:
+
+```text
+ActionSelector chooses.
+Executor acts.
+Ledger records.
+Reflection evaluates.
+Memory learns.
+```
+
+This keeps Symbrella's agency path inspectable and testable while leaving room
+for later capabilities such as repository search, file edits, embodied sensing,
+and other external actions.
+
 ## Brain Runtime
 
 The root supervisor in `apps/symbrella` starts the shared runtime:
@@ -235,6 +299,11 @@ Important current contracts:
 - Sense slates are carried on `Core.SemanticInput`.
 - Working memory is newest-first and controlled through explicit policy knobs.
 - Curiosity decisions emit telemetry with score and decision metadata.
+- Agency decisions must stay traceable from action selection through response
+  metadata, ledger events, reflection, and memory pressure.
+- Durable memory writes and world-changing actions should be governed by an
+  explicit command and permission policy, with low-level telemetry and ledger
+  traces as the exception.
 - LiveView collection rendering should use streams for growing collections.
 - Phoenix templates should use HEEx, `Layouts.app`, imported form/input
   components, and Tailwind classes.

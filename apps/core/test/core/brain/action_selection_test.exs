@@ -30,10 +30,39 @@ defmodule Core.Brain.ActionSelectionTest do
     assert out.selected_action == :safe_support
     assert is_list(out.action_candidates)
     assert %{selected: :safe_support} = out.action_meta
+    assert %Core.Agency.Decision{selected_action: :safe_support, trace_id: trace_id} = out.agency_decision
+    assert is_binary(trace_id)
+    assert out.agency_commands == []
+    assert out.agency_command_results == []
 
     assert Enum.any?(out.trace, fn
-             %{stage: :action_selection, decision: :safe_support} -> true
+             %{
+               stage: :action_selection,
+               decision: :safe_support,
+               meta: %{trace_id: ^trace_id, commands: []}
+             } ->
+               true
+
              _ -> false
            end)
+  end
+
+  test "proposes a permission-gated memory command for store_memory actions" do
+    si = %{
+      sentence: "Remember that my preferred editor is Vim.",
+      source: :test,
+      tokens: [],
+      trace: [],
+      intent: :memory_write,
+      confidence: 0.88,
+      mood: %{vigilance: 0.20, inhibition: 0.60, exploration: 0.40}
+    }
+
+    out = ActionSelection.attach(si, [])
+
+    assert out.selected_action == :store_memory
+    assert %Core.Agency.Decision{selected_action: :store_memory} = out.agency_decision
+    assert [%Core.Agency.Command{type: :write_memory, requires_permission?: true}] =
+             out.agency_commands
   end
 end

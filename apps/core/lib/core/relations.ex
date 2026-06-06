@@ -45,13 +45,11 @@ defmodule Core.Relations do
   it returns the original `si` unchanged.
   """
 
-  alias Db
-  import Ecto.Query, only: [from: 2]
+  alias Core.Relations.DbSource
 
   @syn_weight 0.6
   @ant_weight -0.4
   @hom_weight 0.5
-  @soft_activation 0.5
 
   @typedoc """
   A compact relation edge stored in `si.evidence[:relations]`.
@@ -107,7 +105,7 @@ defmodule Core.Relations do
     attach_related_cells? = Keyword.get(opts, :attach_related_cells?, true)
 
     norms = extract_norms(si)
-    rows = load_relation_rows(norms)
+    rows = DbSource.load_relation_rows(norms)
 
     syn_edges = synonym_edges(rows)
     ant_edges = antonym_edges(rows)
@@ -144,50 +142,6 @@ defmodule Core.Relations do
   end
 
   defp token_texts(_), do: []
-
-  # -- DB reads ----------------------------------------------------------------
-
-  defp load_relation_rows([]), do: []
-
-  defp load_relation_rows(norms) when is_list(norms) do
-    Db.all(
-      from(c in Db.BrainCell,
-        where: c.norm in ^norms and c.status == "active",
-        select: %{
-          id: c.id,
-          norm: c.norm,
-          pos: c.pos,
-          synonyms: c.synonyms,
-          antonyms: c.antonyms
-        }
-      )
-    )
-  rescue
-    _ -> []
-  end
-
-  defp fetch_related_cells([]), do: []
-
-  defp fetch_related_cells(norms) when is_list(norms) do
-    Db.all(
-      from(c in Db.BrainCell,
-        where: c.norm in ^norms and c.status == "active",
-        select: %{
-          id: c.id,
-          norm: c.norm,
-          pos: c.pos,
-          word: c.word,
-          definition: c.definition,
-          example: c.example,
-          synonyms: c.synonyms,
-          antonyms: c.antonyms
-        }
-      )
-    )
-    |> Enum.map(&soften_related_cell/1)
-  rescue
-    _ -> []
-  end
 
   # -- edge building ----------------------------------------------------------
 
@@ -234,7 +188,7 @@ defmodule Core.Relations do
     if related_norms == [] do
       si
     else
-      related_cells = fetch_related_cells(related_norms)
+      related_cells = DbSource.fetch_related_cells(related_norms)
       active_cells = current_active_cells(si)
 
       merged =
@@ -293,24 +247,6 @@ defmodule Core.Relations do
       list when is_list(list) -> list
       _ -> []
     end
-  end
-
-  defp soften_related_cell(%{} = row) do
-    %{
-      id: Map.get(row, :id),
-      source: :relations,
-      norm: Map.get(row, :norm),
-      pos: Map.get(row, :pos),
-      lemma: Map.get(row, :norm),
-      word: Map.get(row, :word),
-      definition: Map.get(row, :definition),
-      example: Map.get(row, :example),
-      synonyms: List.wrap(Map.get(row, :synonyms)),
-      antonyms: List.wrap(Map.get(row, :antonyms)),
-      score: @soft_activation,
-      activation: @soft_activation,
-      modulated_activation: @soft_activation
-    }
   end
 
   defp cell_identity(%{id: id}) when is_binary(id), do: id

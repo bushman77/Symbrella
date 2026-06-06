@@ -36,7 +36,7 @@ defmodule Brain.DLPFC do
   """
   @spec set_opts(Keyword.t() | map()) :: :ok
   def set_opts(opts) when is_list(opts) or is_map(opts) do
-    GenServer.cast(__MODULE__, {:set_opts, Map.new(opts)})
+    GenServer.call(__MODULE__, {:set_opts, Map.new(opts)})
   end
 
   @doc """
@@ -119,6 +119,19 @@ defmodule Brain.DLPFC do
   # ─────────────── GenServer calls ───────────────
 
   @impl GenServer
+  def handle_call({:set_opts, new_opts}, _from, state) when is_map(new_opts) do
+    merged = Map.merge(state.opts, new_opts)
+
+    :telemetry.execute(
+      [:brain, :dlpfc, :opts_updated],
+      %{},
+      %{opts: merged, v: 1}
+    )
+
+    {:reply, :ok, %{state | opts: merged}}
+  end
+
+  @impl GenServer
   def handle_call(:reset, _from, state) do
     state2 =
       state
@@ -154,19 +167,6 @@ defmodule Brain.DLPFC do
   end
 
   # ─────────────── GenServer casts ───────────────
-
-  @impl GenServer
-  def handle_cast({:set_opts, new_opts}, state) when is_map(new_opts) do
-    merged = Map.merge(state.opts, new_opts)
-
-    :telemetry.execute(
-      [:brain, :dlpfc, :opts_updated],
-      %{},
-      %{opts: merged, v: 1}
-    )
-
-    {:noreply, %{state | opts: merged}}
-  end
 
   @impl GenServer
   def handle_cast(_other, state), do: {:noreply, state}

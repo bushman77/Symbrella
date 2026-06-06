@@ -338,6 +338,9 @@ defmodule Core.Response.Policy do
     effects = state |> Map.get(:effects, []) |> List.wrap()
 
     cond do
+      base.mode == :supportive_care ->
+        {base, tone, overrides, effects}
+
       :stabilize_before_acting in effects ->
         {
           base

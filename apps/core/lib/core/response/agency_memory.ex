@@ -7,6 +7,8 @@ defmodule Core.Response.AgencyMemory do
   policy can already understand.
   """
 
+  alias Core.Response.AgencyMemory.Source
+
   @default_limit 12
   @max_limit 50
 
@@ -15,7 +17,7 @@ defmodule Core.Response.AgencyMemory do
     if enabled?() do
       limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
 
-      Db.AgencyEvents.recent(session_id: session_id, limit: limit)
+      Source.recent(session_id, limit: limit)
       |> summarize()
     else
       %{}

@@ -7,6 +7,8 @@ defmodule Core.Curiosity.EpisodeProbe do
   the current SI evidence or, as a fallback, the live Hippocampus window.
   """
 
+  alias Core.Curiosity.EpisodeProbe.Source
+
   @state_key {__MODULE__, :state}
 
   @defaults [
@@ -162,28 +164,7 @@ defmodule Core.Curiosity.EpisodeProbe do
   end
 
   defp hippocampus_window(limit) do
-    cond do
-      not module_loaded?(Brain.Hippocampus) ->
-        []
-
-      not function_exported?(Brain.Hippocampus, :snapshot, 0) ->
-        []
-
-      true ->
-        case Brain.Hippocampus.snapshot() do
-          %{window: window} when is_list(window) ->
-            window
-            |> Enum.take(limit)
-            |> Enum.map(fn {at, ep} -> %{score: 0.0, at: at, episode: ep} end)
-
-          _ ->
-            []
-        end
-    end
-  rescue
-    _ -> []
-  catch
-    _, _ -> []
+    Source.hippocampus_window(limit)
   end
 
   defp unknown_intent_episode_results(cfg, opts) do
@@ -201,20 +182,7 @@ defmodule Core.Curiosity.EpisodeProbe do
   end
 
   defp db_recent_episodes(limit) do
-    cond do
-      not module_loaded?(Db.Episode) ->
-        []
-
-      not function_exported?(Db.Episode, :recent, 1) ->
-        []
-
-      true ->
-        Db.Episode.recent(limit)
-    end
-  rescue
-    _ -> []
-  catch
-    _, _ -> []
+    Source.recent_db_episodes(limit)
   end
 
   defp unknown_intent_episode?(episode) when is_map(episode) do
@@ -281,13 +249,6 @@ defmodule Core.Curiosity.EpisodeProbe do
 
       true ->
         0
-    end
-  end
-
-  defp module_loaded?(module) do
-    case Code.ensure_loaded(module) do
-      {:module, ^module} -> true
-      _ -> false
     end
   end
 

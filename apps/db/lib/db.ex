@@ -1,6 +1,14 @@
 defmodule Db do
   @moduledoc """
-  Umbrella-wide Repo (single database).
+  Umbrella-wide Repo and legacy LTM facade.
+
+  Boundary role:
+  • `Db` is the Ecto repo module for the umbrella's single database.
+  • The LTM helpers in this module are the current DB context for `brain_cells`
+    retrieval used by Core's semantic pipeline.
+  • New persistence areas should prefer named context modules (`Db.Episodes`,
+    `Db.AgencyEvents`, `Db.SelfSnapshots`, `Db.BrainCellCorpus`) instead of
+    adding unrelated query helpers here.
 
   Long-term memory (LTM) helpers:
   • Collect normalized `norm`s from `si.tokens` (preserving token indices).

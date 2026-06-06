@@ -18,11 +18,11 @@ defmodule Core.Curiosity do
   If Llm.Pos is not available, we skip enrichment and renew NegCache TTL.
   """
 
-  # Suppress compile-time warnings about optional Llm.Pos
-  @compile {:no_warn_undefined, Llm.Pos}
-
   use GenServer
-  require Logger
+
+  alias Core.Curiosity.Enricher
+  alias Core.Curiosity.EnrichmentPolicy
+  alias Core.Curiosity.Persistence
 
   # 5m
   @default_interval_ms 300_000
@@ -105,116 +105,16 @@ defmodule Core.Curiosity do
   end
 
   defp process_phrase(phrase, state) do
-    res = llm_enrich(phrase, state)
+    phrase
+    |> Enricher.enrich(state)
+    |> EnrichmentPolicy.action_for_enrichment()
+    |> case do
+      {:persist, entries} ->
+        Persistence.persist(entries)
 
-    case res do
-      {:ok, %{"entries" => entries}} when is_list(entries) and entries != [] ->
-        persist(entries)
-
-      _ ->
-        # Still unknown or LLM unavailable → renew TTL to avoid hot-looping
+      :renew_negative_cache ->
         Core.NegCache.put(phrase)
         :ok
-    end
-  end
-
-  # LLM enrichment is optional and fully guarded
-  defp llm_enrich(phrase, state) do
-    if Code.ensure_loaded?(Llm.Pos) and function_exported?(Llm.Pos, :run, 2) do
-      try do
-        Llm.Pos.run(
-          phrase,
-          model: state.llm_model,
-          keep_alive: "5m",
-          timeout: :timer.seconds(20),
-          options: %{num_predict: 256, num_ctx: 1024, temperature: 0.0},
-          allow_builtin_lexicon: true,
-          require_nonempty_syn_ant?: false
-        )
-      rescue
-        e ->
-          Logger.warning("Curiosity: Llm.Pos.run/2 crashed: #{inspect(e)}")
-          {:error, e}
-      catch
-        kind, reason ->
-          Logger.warning("Curiosity: Llm.Pos.run/2 threw: #{inspect({kind, reason})}")
-          {:error, reason}
-      end
-    else
-      :undef
-    end
-  end
-
-  # -- Persistence -------------------------------------------
-
-  defp persist(entries) when is_list(entries) and entries != [] do
-    write_as_episodes(entries)
-    maybe_upsert_lexicon(entries)
-    :ok
-  end
-
-  defp persist(_), do: :ok
-
-  defp write_as_episodes(entries) do
-    ep_at = System.system_time(:millisecond)
-    hippo = Module.concat([Brain, Hippocampus])
-
-    for e <- entries do
-      episode = %{
-        source: :curiosity,
-        kind: :lexicon_seed,
-        payload: e,
-        at: ep_at
-      }
-
-      safe_apply(hippo, :write, [episode])
-    end
-
-    :ok
-  end
-
-  defp maybe_upsert_lexicon(entries) do
-    if Application.get_env(:core, :curiosity_allow_lexicon_writes, false) do
-      core_lex = Module.concat([Core, Lexicon])
-      db_lex = Module.concat([Db, Lexicon])
-
-      cond do
-        export?(core_lex, :upsert_fallbacks, 1) ->
-          safe_apply(core_lex, :upsert_fallbacks, [entries])
-
-        export?(db_lex, :bulk_upsert_senses, 1) ->
-          safe_apply(db_lex, :bulk_upsert_senses, [entries])
-
-        true ->
-          Logger.warning("Curiosity: no Lexicon upsert function found — skipping persist")
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  # -- Helpers -----------------------------------------------
-
-  defp export?(mod, fun, arity),
-    do: Code.ensure_loaded?(mod) and function_exported?(mod, fun, arity)
-
-  defp safe_apply(mod, fun, args) do
-    if export?(mod, fun, length(args)) do
-      try do
-        apply(mod, fun, args)
-      rescue
-        e ->
-          Logger.warning(
-            "Curiosity: #{inspect(mod)}.#{fun}/#{length(args)} failed: #{inspect(e)}"
-          )
-
-          :error
-      catch
-        _, _ -> :error
-      end
-    else
-      :undef
     end
   end
 

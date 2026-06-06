@@ -18,7 +18,10 @@ defmodule Brain.Introspection do
     apply_warm_start(model)
   end
 
-  def update_from_resolved(resolved, appraisal) when is_map(resolved) and is_map(appraisal) do
+  def update_from_resolved(resolved, appraisal, opts \\ [])
+
+  def update_from_resolved(resolved, appraisal, opts)
+      when is_map(resolved) and is_map(appraisal) and is_list(opts) do
     model =
       snapshot()
       |> Map.put(:last_appraisal, appraisal)
@@ -32,11 +35,11 @@ defmodule Brain.Introspection do
       |> update_goal_stack()
 
     emit_update(model)
-    maybe_log_calibration_sample(model, resolved, appraisal)
+    maybe_log_calibration_sample(model, resolved, appraisal, opts)
     {:ok, model}
   end
 
-  def update_from_resolved(_resolved, _appraisal), do: {:error, :invalid_args}
+  def update_from_resolved(_resolved, _appraisal, _opts), do: {:error, :invalid_args}
 
   defp attribution_from(%{evidence: %{target: target}}), do: %{target: target}
   defp attribution_from(%{target: target}), do: %{target: target}
@@ -88,7 +91,7 @@ defmodule Brain.Introspection do
     )
   end
 
-  defp maybe_log_calibration_sample(%Brain.SelfModel{} = model, resolved, appraisal) do
+  defp maybe_log_calibration_sample(%Brain.SelfModel{} = model, resolved, appraisal, opts) do
     sample =
       Features.build_sample(model,
         appraisal: appraisal,
@@ -103,9 +106,20 @@ defmodule Brain.Introspection do
         source: :runtime
       )
 
-    case CalibrationLogger.log(sample) do
+    case log_calibration_sample(sample, opts) do
       :ok -> :ok
       {:error, _reason} -> :ok
+    end
+  end
+
+  defp log_calibration_sample(sample, opts) do
+    case Keyword.get(opts, :calibration_log_path) do
+      path when is_binary(path) ->
+        CalibrationLogger.log(sample, enabled?: true, path: path)
+
+      _ ->
+        logger = Keyword.get(opts, :calibration_logger, CalibrationLogger)
+        logger.log(sample)
     end
   end
 

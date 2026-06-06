@@ -13,7 +13,13 @@ defmodule Brain.SelfCalibration.Logger do
   @spec log(Sample.t()) :: :ok | {:error, term()}
   def log(%Sample{} = sample) do
     cfg = Application.get_env(:brain, __MODULE__, [])
+    log(sample, cfg)
+  end
 
+  def log(_sample), do: {:error, :invalid_sample}
+
+  @spec log(Sample.t(), keyword()) :: :ok | {:error, term()}
+  def log(%Sample{} = sample, cfg) when is_list(cfg) do
     if Keyword.get(cfg, :enabled?, false) do
       path = Keyword.get(cfg, :path, "priv/self_calibration/samples.jsonl")
       do_log(sample, path)
@@ -22,7 +28,8 @@ defmodule Brain.SelfCalibration.Logger do
     end
   end
 
-  def log(_sample), do: {:error, :invalid_sample}
+  def log(%Sample{}, _cfg), do: {:error, :invalid_config}
+  def log(_sample, _cfg), do: {:error, :invalid_sample}
 
   defp do_log(%Sample{} = sample, path) when is_binary(path) do
     with :ok <- ensure_parent_dir(path),
@@ -44,8 +51,31 @@ defmodule Brain.SelfCalibration.Logger do
   defp encode_sample(%Sample{} = sample) do
     sample
     |> Map.from_struct()
+    |> json_safe()
     |> Jason.encode()
   end
+
+  defp json_safe(value) when is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value),
+    do: value
+
+  defp json_safe(value) when is_atom(value), do: Atom.to_string(value)
+
+  defp json_safe(value) when is_list(value), do: Enum.map(value, &json_safe/1)
+
+  defp json_safe(value) when is_map(value) do
+    value
+    |> maybe_from_struct()
+    |> Enum.into(%{}, fn {key, nested} -> {json_key(key), json_safe(nested)} end)
+  end
+
+  defp json_safe(value), do: inspect(value)
+
+  defp maybe_from_struct(%{__struct__: _} = value), do: Map.from_struct(value)
+  defp maybe_from_struct(value), do: value
+
+  defp json_key(key) when is_binary(key), do: key
+  defp json_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp json_key(key), do: inspect(key)
 
   defp emit_logged(%Sample{} = sample) do
     :telemetry.execute(

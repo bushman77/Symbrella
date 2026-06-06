@@ -17,6 +17,7 @@ defmodule Core.SemanticInput do
 
   Frequently-attached fields (kept on the struct):
     • selected_action / action_candidates / action_meta
+    • agency_decision / agency_commands / agency_command_results
     • intent / keyword / confidence
     • intent_bias
     • token_cover / resolved_tokens
@@ -91,6 +92,9 @@ defmodule Core.SemanticInput do
           selected_action: atom() | nil,
           action_candidates: list() | nil,
           action_meta: map() | nil,
+          agency_decision: term() | nil,
+          agency_commands: list() | nil,
+          agency_command_results: list() | nil,
 
           # affect
           emotion: map() | nil,
@@ -142,6 +146,9 @@ defmodule Core.SemanticInput do
             selected_action: nil,
             action_candidates: nil,
             action_meta: nil,
+            agency_decision: nil,
+            agency_commands: nil,
+            agency_command_results: nil,
             emotion: nil,
             appraisal: nil,
             mood: nil,

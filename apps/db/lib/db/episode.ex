@@ -1,6 +1,12 @@
 defmodule Db.Episode do
   @moduledoc """
-  Ecto schema for hippocampus episodes.
+  Ecto schema and low-level compatibility persistence for hippocampus episodes.
+
+  Boundary role:
+  • Keep schema, changeset, row normalization, and compatibility helpers here.
+  • Prefer `Db.Episodes` for higher-level application recall/write workflows.
+  • Avoid adding unrelated context queries here unless they are tightly coupled
+    to the `episodes` row shape or retained for Brain.Hippocampus compatibility.
 
   Notes
   -----

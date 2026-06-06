@@ -1,15 +1,15 @@
 defmodule SymbrellaWeb.Components.CycleHUD do
   @moduledoc """
-  Compact clock HUD showing seq/Hz/Δt/phase pulled from Brain.CycleClock.snapshot/0.
+  Compact clock HUD showing seq/Hz/Δt/phase pulled from the web Brain runtime boundary.
   Safe formatting for integers/floats/nils to avoid float_to_binary errors.
   """
   use Phoenix.Component
-  alias Brain.CycleClock
+  alias SymbrellaWeb.BrainRuntime
 
   attr :class, :string, default: ""
 
   def cycle_hud(assigns) do
-    snap = CycleClock.snapshot()
+    snap = BrainRuntime.cycle_snapshot()
     assigns = assign(assigns, snap: snap)
 
     ~H"""

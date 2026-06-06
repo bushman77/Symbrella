@@ -3,17 +3,16 @@ defmodule Core.Pipeline.LTM do
   Long-term memory enrichment stage for `Core.SemanticInput`.
 
   Responsibilities:
-  - read LTM matches from `Db.ltm/2`
+  - read LTM matches through `Core.Pipeline.LTM.Source`
   - merge normalized active cells into the SI
   - accumulate DB hit metadata into `:activation_summary`
   """
 
-  alias Db
-  alias Db.BrainCell
+  alias Core.Pipeline.LTM.Source
 
   @spec run(map(), keyword()) :: map()
   def run(%{} = si, opts) when is_list(opts) do
-    case Db.ltm(si, opts) do
+    case Source.ltm(si, opts) do
       {:ok, %{rows: rows, db_hits: db_hits}} ->
         existing =
           case Map.get(si, :active_cells, []) do
@@ -51,19 +50,16 @@ defmodule Core.Pipeline.LTM do
         si
         |> Map.put(:active_cells, active_cells)
         |> Map.put(:activation_summary, activation_summary)
-
     end
   end
 
   def run(si, _opts), do: si
 
-  defp sanitize_cell(%BrainCell{} = cell), do: [cell]
   defp sanitize_cell(%{id: _} = cell), do: [cell]
   defp sanitize_cell(%{"id" => _} = cell), do: [cell]
   defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
   defp sanitize_cell(_), do: []
 
-  defp cell_id(%BrainCell{id: id}), do: id
   defp cell_id(%{id: id}), do: id
   defp cell_id(%{"id" => id}), do: id
   defp cell_id(id) when is_binary(id), do: id

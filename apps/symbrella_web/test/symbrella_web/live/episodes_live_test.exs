@@ -5,12 +5,6 @@ defmodule SymbrellaWeb.EpisodesLiveTest do
 
   alias Db.Episode
 
-  setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Db)
-    Ecto.Adapters.SQL.Sandbox.mode(Db, {:shared, self()})
-    :ok
-  end
-
   test "renders persisted episodes from the database", %{conn: conn} do
     assert {:ok, episode} =
              Episode.insert(%{

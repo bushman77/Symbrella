@@ -88,7 +88,7 @@ defmodule Brain.Cell do
       |> coerce_number(1)
 
     a2 = a + delta
-    GenServer.cast(Brain, {:activation_report, id, a2})
+    Brain.report_activation(id, a2)
     {:noreply, %{st | activation: a2}}
   end
 

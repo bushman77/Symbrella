@@ -7,6 +7,9 @@ defmodule Core.Brain.ActionSelection do
   """
 
   alias Core.Pipeline.Trace
+  alias Core.Agency.Command
+  alias Core.Agency.Decision
+  alias Core.Agency.Executor
 
   @spec attach(map(), keyword()) :: map()
   def attach(si, opts \\ [])
@@ -24,20 +27,31 @@ defmodule Core.Brain.ActionSelection do
       selected = Map.get(result, :selected)
       candidates = Map.get(result, :candidates, [])
       confidence = Map.get(result, :confidence, 0.0)
+      decision = Decision.from_action_result(result, ctx)
+      commands = Command.from_decision(decision)
+      command_results = maybe_execute_commands(commands, opts)
 
       si
       |> Map.put(:selected_action, selected)
       |> Map.put(:action_candidates, candidates)
       |> Map.put(:action_meta, result)
+      |> Map.put(:agency_decision, decision)
+      |> Map.put(:agency_commands, commands)
+      |> Map.put(:agency_command_results, command_results)
       |> Trace.append(:action_selection,
         decision: selected || :none,
         reason: selected_reason(result),
         scores: %{confidence: confidence},
         meta: %{
+          trace_id: decision.trace_id,
           selected: selected,
           candidates: summarize_candidates(candidates),
           safety_gate: Map.get(result, :safety_gate),
-          version: Map.get(result, :version)
+          version: Map.get(result, :version),
+          risk: decision.risk,
+          permission: decision.permission,
+          commands: summarize_commands(commands),
+          command_results: summarize_command_results(command_results)
         }
       )
     else
@@ -67,6 +81,7 @@ defmodule Core.Brain.ActionSelection do
       lifg_choices: si_get(si, :lifg_choices),
       acc_conflict: si_get(si, :acc_conflict),
       response_meta: si_get(si, :response_meta),
+      self_monitor: si_get(si, :self_monitor),
       session_id: si_get(si, :session_id)
     }
   end
@@ -103,6 +118,44 @@ defmodule Core.Brain.ActionSelection do
   end
 
   defp summarize_candidates(_), do: []
+
+  defp summarize_commands(commands) when is_list(commands) do
+    Enum.map(commands, fn command ->
+      command = Command.to_map(command)
+
+      %{
+        id: Map.get(command, :id),
+        type: Map.get(command, :type),
+        risk: Map.get(command, :risk),
+        requires_permission?: Map.get(command, :requires_permission?)
+      }
+    end)
+  end
+
+  defp summarize_commands(_), do: []
+
+  defp summarize_command_results(results) when is_list(results) do
+    Enum.map(results, fn
+      %{} = result ->
+        Map.take(result, [:command_id, :type, :status, :reason])
+
+      other ->
+        %{status: :unknown, reason: inspect(other)}
+    end)
+  end
+
+  defp summarize_command_results(_), do: []
+
+  defp maybe_execute_commands(commands, opts) do
+    if Keyword.get(opts, :execute_agency_commands?, false) do
+      Executor.execute_all(commands,
+        permission?: Keyword.get(opts, :agency_permission?, false),
+        record?: Keyword.get(opts, :record_agency_commands?, true)
+      )
+    else
+      []
+    end
+  end
 
   defp si_get(map, key, default \\ nil)
 

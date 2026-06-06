@@ -22,8 +22,7 @@ defmodule Brain.WMGatingIntegrationTest do
       trace: []
     }
 
-    {:ok, _out} =
-      GenServer.call(Brain, {:lifg_stage1, si, [], [gate_into_wm: true]}, :infinity)
+    {:ok, _out} = Brain.lifg_stage1(si, [], gate_into_wm: true)
 
     %{wm: wm} = Brain.snapshot_wm()
     assert Enum.any?(wm, &(&1.id == "THIS/strong" and &1.source == :lifg))

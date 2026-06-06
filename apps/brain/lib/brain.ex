@@ -380,6 +380,12 @@ defmodule Brain do
     gencast(@name, {:activate_cells, rows_or_ids, payload})
   end
 
+  @doc false
+  @spec report_activation(String.t(), number()) :: :ok
+  def report_activation(id, activation) when is_binary(id) and is_number(activation) do
+    gencast(@name, {:activation_report, id, activation})
+  end
+
   @doc ~S"""
   Query a specific cell’s status synchronously.
 

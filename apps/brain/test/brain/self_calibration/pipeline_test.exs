@@ -1,5 +1,5 @@
 defmodule Brain.SelfCalibration.PipelineTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Brain.SelfCalibration.Comparison
   alias Brain.SelfCalibration.Dataset
@@ -64,9 +64,11 @@ defmodule Brain.SelfCalibration.PipelineTest do
     assert_bounded(evaluation.stability_error)
     assert_bounded(evaluation.mae)
 
-    assert_receive {:calibration_event, [:brain, :self_calibration, :prediction],
-                    %{count: 1, confidence: confidence}, prediction_meta},
-                   500
+    assert {:ok, %{measurements: %{confidence: confidence}, metadata: prediction_meta}} =
+             receive_calibration_event([:brain, :self_calibration, :prediction],
+               source: :baseline,
+               model_version: "baseline-v1"
+             )
 
     assert is_number(confidence)
     assert prediction_meta.source == :baseline
@@ -74,9 +76,11 @@ defmodule Brain.SelfCalibration.PipelineTest do
     assert prediction_meta.feature_schema_v == 1
     assert prediction_meta.v == 1
 
-    assert_receive {:calibration_event, [:brain, :self_calibration, :evaluation],
-                    %{count: 1, mae: mae}, evaluation_meta},
-                   500
+    assert {:ok, %{measurements: %{mae: mae}, metadata: evaluation_meta}} =
+             receive_calibration_event([:brain, :self_calibration, :evaluation],
+               source: :baseline,
+               model_version: "baseline-v1"
+             )
 
     assert is_number(mae)
     assert evaluation_meta.source == :baseline
@@ -105,5 +109,25 @@ defmodule Brain.SelfCalibration.PipelineTest do
     assert is_number(value)
     assert value >= 0.0
     assert value <= 1.0
+  end
+
+  defp receive_calibration_event(event, match, deadline_ms \\ 500) do
+    receive do
+      {:calibration_event, ^event, measurements, metadata} ->
+        if metadata_matches?(metadata, match) do
+          {:ok, %{measurements: measurements, metadata: metadata}}
+        else
+          receive_calibration_event(event, match, deadline_ms)
+        end
+    after
+      deadline_ms ->
+        {:error, :timeout}
+    end
+  end
+
+  defp metadata_matches?(metadata, match) do
+    Enum.all?(match, fn {key, expected} ->
+      Map.get(metadata, key) == expected
+    end)
   end
 end

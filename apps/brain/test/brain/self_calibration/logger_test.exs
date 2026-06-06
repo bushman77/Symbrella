@@ -74,6 +74,29 @@ defmodule Brain.SelfCalibration.LoggerTest do
     refute File.exists?(path)
   end
 
+  test "log sanitizes non-json runtime values", %{path: path} do
+    Application.put_env(:brain, Logger, enabled?: true, path: path)
+
+    sample = %Sample{
+      raw: %{
+        pid: self(),
+        ref: make_ref(),
+        tuple: {:ok, :runtime},
+        nested: [%{source: :brain}]
+      }
+    }
+
+    assert :ok = Logger.log(sample)
+
+    [line] = path |> File.read!() |> String.split("\n", trim: true)
+    assert {:ok, decoded} = Jason.decode(line)
+
+    assert is_binary(decoded["raw"]["pid"])
+    assert is_binary(decoded["raw"]["ref"])
+    assert decoded["raw"]["tuple"] == "{:ok, :runtime}"
+    assert decoded["raw"]["nested"] == [%{"source" => "brain"}]
+  end
+
   test "rejects invalid samples" do
     assert Logger.log(%{}) == {:error, :invalid_sample}
   end

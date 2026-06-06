@@ -48,6 +48,7 @@ defmodule Core.HealthSupportCognitionRegressionTest do
            end)
 
     assert %{selected: :safe_support, safety_gate: :approved} = si.action_meta
+    assert %Core.Agency.Decision{selected_action: :safe_support} = si.agency_decision
     assert is_number(si.symbolic_frame.confidence)
     assert si.symbolic_frame.confidence >= 0.75
 
@@ -74,6 +75,7 @@ defmodule Core.HealthSupportCognitionRegressionTest do
     assert meta.action == :safe_support
     assert meta.profile == :supportive_care
     assert meta.agent_selected_action == :safe_support
+    assert %Core.Agency.Decision{selected_action: :safe_support} = meta.agency_decision
 
     assert is_binary(si.response_text)
     assert si.response_text != ""

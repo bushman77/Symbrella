@@ -20,8 +20,7 @@ defmodule Core.Response.Attach do
 
   alias Core.SemanticInput
   alias Core.Response.Context
-
-  @compile {:no_warn_undefined, Brain.MoodCore}
+  alias Core.Response.RuntimeContext
 
   @type opts :: keyword()
 
@@ -144,6 +143,9 @@ defmodule Core.Response.Attach do
       selected_action: si_get(si, :selected_action),
       action_candidates: si_get(si, :action_candidates),
       action_meta: si_get(si, :action_meta),
+      agency_decision: si_get(si, :agency_decision),
+      agency_commands: si_get(si, :agency_commands),
+      agency_command_results: si_get(si, :agency_command_results),
       turn_context: Context.from_si(si),
       session_id: si_get(si, :session_id)
     }
@@ -207,7 +209,7 @@ defmodule Core.Response.Attach do
   defp find_intent_trace(_), do: nil
 
   defp build_response_mood_like(%{} = si, _opts) do
-    case live_mood_like() do
+    case RuntimeContext.mood_like() do
       %{} = live when map_size(live) > 0 ->
         live
 
@@ -255,26 +257,6 @@ defmodule Core.Response.Attach do
           },
           tone_hint: tone_hint_from_emotion(si)
         }
-    end
-  end
-
-  defp live_mood_like do
-    if Code.ensure_loaded?(Brain.MoodCore) and function_exported?(Brain.MoodCore, :snapshot, 0) do
-      try do
-        case Brain.MoodCore.snapshot() do
-          %{mood: %{} = mood} = snap ->
-            %{mood: mood, tone_hint: Map.get(snap, :tone_hint)}
-
-          _ ->
-            %{}
-        end
-      rescue
-        _ -> %{}
-      catch
-        :exit, _ -> %{}
-      end
-    else
-      %{}
     end
   end
 
@@ -393,6 +375,9 @@ defmodule Core.Response.Attach do
     |> maybe_put_meta(:agent_selected_action, si_get(si, :selected_action))
     |> maybe_put_meta(:agent_action_candidates, si_get(si, :action_candidates))
     |> maybe_put_meta(:agent_action_meta, si_get(si, :action_meta))
+    |> maybe_put_meta(:agency_decision, si_get(si, :agency_decision))
+    |> maybe_put_meta(:agency_commands, si_get(si, :agency_commands))
+    |> maybe_put_meta(:agency_command_results, si_get(si, :agency_command_results))
   end
 
   defp attach_action_selection_meta(meta, _si), do: meta

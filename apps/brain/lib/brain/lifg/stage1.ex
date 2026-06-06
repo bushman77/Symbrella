@@ -1596,6 +1596,9 @@ defmodule Brain.LIFG.Stage1 do
           token_mwe?(tok) ->
             acc
 
+          explicit_aligned_candidates?(acc, idx, phrase) ->
+            acc
+
           MapSet.member?(@closed_class_pronouns, phrase) ->
             upsert_closed_class_candidate(acc, idx, closed_class_pronoun_candidate(phrase))
 
@@ -1614,6 +1617,46 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp ensure_closed_class_candidates(other), do: other
+
+  defp explicit_aligned_candidates?(sc, idx, phrase) when is_map(sc) do
+    sc
+    |> sense_candidates_for_idx(idx)
+    |> Enum.any?(fn cand ->
+      cand = Safe.to_plain(cand)
+      source = Safe.get(cand, :source) || Safe.get(cand, "source")
+      id = Safe.get(cand, :id) || Safe.get(cand, "id")
+
+      source not in [:closed_class, "closed_class", :entity_default, "entity_default"] and
+        external_sense_id?(id) and
+        candidate_aligned_to_phrase?(cand, phrase)
+    end)
+  end
+
+  defp explicit_aligned_candidates?(_sc, _idx, _phrase), do: false
+
+  defp sense_candidates_for_idx(sc, idx) when is_map(sc) do
+    sc
+    |> Map.get(idx, Map.get(sc, to_string(idx), []))
+    |> List.wrap()
+  end
+
+  defp candidate_aligned_to_phrase?(cand, phrase) when is_map(cand) and is_binary(phrase) do
+    id = Safe.get(cand, :id) || Safe.get(cand, "id")
+
+    lemma =
+      Safe.get(cand, :lemma) ||
+        Safe.get(cand, "lemma") ||
+        Safe.get(cand, :norm) ||
+        Safe.get(cand, "norm") ||
+        guess_cell_lemma(id)
+
+    norm(to_string(lemma || "")) == phrase
+  end
+
+  defp candidate_aligned_to_phrase?(_cand, _phrase), do: false
+
+  defp external_sense_id?(id) when is_binary(id), do: not String.contains?(id, "|")
+  defp external_sense_id?(_id), do: false
 
   defp closed_class_candidate?(cand) when is_map(cand) do
     pos = cand |> pos_of() |> String.downcase()
