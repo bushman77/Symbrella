@@ -123,6 +123,7 @@ defmodule Llm do
       # :stopped | :starting | :ready | :crashed | :failed
       status: :stopped,
       llama_port: nil,
+      llama_os_pid: nil,
       served_by_us?: false,
       endpoint: nil,
       manual_stop?: false,
@@ -167,7 +168,7 @@ defmodule Llm do
     cancel_restart_timer(state)
 
     if state.served_by_us? and is_port(state.llama_port) do
-      Port.close(state.llama_port)
+      stop_runner_process(state.llama_port, state.llama_os_pid, 1_000)
     end
 
     :ok
@@ -195,6 +196,7 @@ defmodule Llm do
         ctx: state.ctx,
         threads: state.threads,
         reachable?: reachable?,
+        runner_os_pid: state.llama_os_pid,
         last_exit_status: state.last_exit_status,
         restart_backoff_ms: state.restart_backoff_ms
       }
@@ -211,7 +213,10 @@ defmodule Llm do
 
     cond do
       state.served_by_us? and is_port(state.llama_port) ->
-        Port.close(state.llama_port)
+        {_result, state_updates} =
+          stop_runner_process(state.llama_port, state.llama_os_pid, 2_000)
+
+        state = Map.merge(state, state_updates)
 
         {:reply, :ok,
          state
@@ -413,10 +418,12 @@ defmodule Llm do
     with :ok <- validate_model_path(state.model_path),
          {:ok, port_int, state} <- ensure_port_bound(state),
          {:ok, port} <- spawn_llama_server(state, port_int),
+         os_pid <- port_os_pid(port),
          endpoint <- "http://#{state.host}:#{port_int}",
          state <- %{
            state
            | llama_port: port,
+             llama_os_pid: os_pid,
              served_by_us?: true,
              endpoint: endpoint,
              status: :starting
@@ -520,7 +527,112 @@ defmodule Llm do
 
   defp drop_runner_state(state, status) do
     cancel_restart_timer(state)
-    %{state | llama_port: nil, endpoint: nil, status: status}
+    %{state | llama_port: nil, llama_os_pid: nil, endpoint: nil, status: status}
+  end
+
+  defp port_os_pid(port) when is_port(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} when is_integer(pid) -> pid
+      _ -> nil
+    end
+  end
+
+  defp stop_runner_process(port, os_pid, timeout_ms) when is_port(port) do
+    runner_pids = process_tree_pids(os_pid)
+    signal_runner_pids(runner_pids, "-TERM")
+
+    case wait_for_runner_exit(port, max(timeout_ms, 0)) do
+      {:ok, code, state_updates} ->
+        signal_runner_pids(runner_pids, "-KILL")
+        close_port_if_open(port)
+        {{:ok, code}, state_updates}
+
+      :timeout ->
+        signal_runner_pids(Enum.uniq(runner_pids ++ process_tree_pids(os_pid)), "-KILL")
+
+        case wait_for_runner_exit(port, 500) do
+          {:ok, code, state_updates} ->
+            close_port_if_open(port)
+            {{:ok, code}, state_updates}
+
+          :timeout ->
+            close_port_if_open(port)
+            {:timeout, %{last_exit_status: nil}}
+        end
+    end
+  end
+
+  defp process_tree_pids(nil), do: []
+
+  defp process_tree_pids(os_pid) when is_integer(os_pid) do
+    os_pid
+    |> child_os_pids()
+    |> Enum.flat_map(&process_tree_pids/1)
+    |> then(&[os_pid | &1])
+  end
+
+  defp signal_runner_pids(pids, signal) when is_list(pids) do
+    pids
+    |> Enum.reverse()
+    |> Enum.each(&signal_os_pid(&1, signal))
+  end
+
+  defp child_os_pids(os_pid) when is_integer(os_pid) do
+    case System.cmd("pgrep", ["-P", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split()
+        |> Enum.flat_map(fn pid ->
+          case Integer.parse(pid) do
+            {int, ""} -> [int]
+            _ -> []
+          end
+        end)
+
+      {_output, _status} ->
+        []
+    end
+  end
+
+  defp signal_os_pid(nil, _signal), do: :ok
+
+  defp signal_os_pid(os_pid, signal) when is_integer(os_pid) do
+    case System.cmd("kill", [signal, Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_output, 0} -> :ok
+      {_output, _status} -> :ok
+    end
+  end
+
+  defp close_port_if_open(port) when is_port(port) do
+    if Port.info(port) != nil do
+      Port.close(port)
+    end
+
+    :ok
+  end
+
+  defp wait_for_runner_exit(port, timeout_ms) when timeout_ms <= 0 do
+    receive do
+      {^port, {:exit_status, code}} ->
+        {:ok, code, %{last_exit_status: code}}
+
+      {^port, :closed} ->
+        {:ok, nil, %{}}
+    after
+      0 -> :timeout
+    end
+  end
+
+  defp wait_for_runner_exit(port, timeout_ms) do
+    receive do
+      {^port, {:exit_status, code}} ->
+        {:ok, code, %{last_exit_status: code}}
+
+      {^port, :closed} ->
+        {:ok, nil, %{}}
+    after
+      timeout_ms -> :timeout
+    end
   end
 
   # ────────────────────────────────────────────────────────────────────────────

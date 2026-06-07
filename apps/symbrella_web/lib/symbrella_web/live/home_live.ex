@@ -80,7 +80,8 @@ defmodule SymbrellaWeb.HomeLive do
         msg = %{
           id: msg_id,
           role: :user,
-          text: text
+          text: text,
+          session_id: socket.assigns.session_id
         }
 
         socket =
@@ -217,6 +218,8 @@ defmodule SymbrellaWeb.HomeLive do
       text: reply_text,
       tone: tone,
       meta: meta,
+      session_id: Map.get(si, :session_id) || socket.assigns.session_id,
+      si: si,
       mods: MoodBadge.build(meta),
       explain_text: explain_text,
       explain_payload: explain_payload

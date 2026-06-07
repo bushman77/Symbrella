@@ -27,4 +27,18 @@ defmodule SymbrellaWeb.ChatHistoryTest do
 
     assert [%{id: "m2", role: :assistant, text: "ok"}] = ChatHistory.list()
   end
+
+  test "keeps session and semantic snapshots for inspection routes" do
+    si = %Core.SemanticInput{sentence: "good afternoon symbrella", intent: :greet}
+
+    ChatHistory.append(%{
+      id: "b1",
+      role: :assistant,
+      text: "Good afternoon.",
+      session_id: "s-chat",
+      si: si
+    })
+
+    assert [%{session_id: "s-chat", si: ^si}] = ChatHistory.list()
+  end
 end

@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.Router do
 
     live "/", HomeLive, :index
     live "/episodes", EpisodesLive
+    live "/semantic", SemanticLive
     live "/brain", BrainLive
     # Optional deep-linking to a specific region (e.g., /brain/lifg)
     live "/brain/:region", BrainLive
