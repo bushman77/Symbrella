@@ -16,7 +16,7 @@ defmodule Brain.ML do
   - If Stage-1 never runs, the backstop timer still finalizes a minimal-but-valid record.
 
   Guardrails:
-  - Brain.ML does not depend on Core.
+  - Brain.ML delegates pure turn-record shaping to Brain.ML.Core.
   - Best-effort behavior; failures should not crash the system.
   """
 
@@ -24,6 +24,7 @@ defmodule Brain.ML do
   require Logger
 
   alias Brain.Bus
+  alias Brain.ML.Core
   alias Brain.ML.LIFG, as: MLLIFG
 
   @blackboard_topic "brain:blackboard"
@@ -244,7 +245,7 @@ defmodule Brain.ML do
             opened_at_ms: now_ms,
             source: source,
             intent: intent_payload,
-            text: extract_text_any(intent_payload, state0.last_blackboard),
+            text: Core.text_from(intent_payload, state0.last_blackboard),
             timer_ref: tref,
             finalized?: false,
             finalized_at_ms: nil
@@ -348,7 +349,7 @@ defmodule Brain.ML do
     now_ms = now_ms()
     pending = state.pending
 
-    event_text = extract_text_any(state.last_intent, bb_env)
+    event_text = Core.text_from(state.last_intent, bb_env)
     recent_turn = recent_turn_for_text(state, event_text, now_ms)
 
     {turn_id, opened_at_ms, intent_payload, text} =
@@ -356,7 +357,7 @@ defmodule Brain.ML do
         is_map(pending) and not too_old?(pending.opened_at_ms, now_ms, state.pending_max_age_ms) ->
           {pending.id, pending.opened_at_ms, pending.intent || state.last_intent,
            pending.text || event_text ||
-             extract_text_any(state.last_intent, state.last_blackboard)}
+             Core.text_from(state.last_intent, state.last_blackboard)}
 
         is_map(recent_turn) ->
           {mget(recent_turn, :turn_id),
@@ -366,21 +367,15 @@ defmodule Brain.ML do
 
         true ->
           {new_turn_id(), now_ms, state.last_intent,
-           event_text || extract_text_any(state.last_intent, state.last_blackboard)}
+           event_text || Core.text_from(state.last_intent, state.last_blackboard)}
       end
 
-    trigger = %{
-      kind: :telemetry,
-      event: mget(bb_env, :event),
-      measurements: mget(bb_env, :measurements) || %{},
-      meta: mget(bb_env, :meta) || %{},
-      at_ms: mget(bb_env, :at_ms) || now_ms
-    }
+    trigger = Core.trigger_from_blackboard(bb_env, now_ms)
 
     # Use the Stage1 stop event payload for this turn instead of sampling latest LIFG state,
     # which can race with another turn.
     state2 =
-      case lifg_state_from_pipeline_stop(bb_env) do
+      case Core.lifg_state_from_pipeline_stop(bb_env) do
         nil -> state
         lifg_state -> %{state | last_lifg: lifg_state}
       end
@@ -393,49 +388,9 @@ defmodule Brain.ML do
     |> Map.put(:pending, nil)
   end
 
-  defp lifg_state_from_pipeline_stop(%{} = bb_env) do
-    meta = mget(bb_env, :meta) || %{}
-
-    %{
-      region: :lifg,
-      last: %{
-        meta: meta,
-        tokens: mget(meta, :tokens) || [],
-        source: mget(meta, :source),
-        guards: %{
-          chargram_violation: mget(meta, :chargram_violation),
-          missing_candidate_tokens: mget(meta, :missing_candidate_tokens) || [],
-          missing_candidates: mget(meta, :missing_candidates),
-          rejected_by_boundary: mget(meta, :rejected_by_boundary) || []
-        },
-        intent: mget(meta, :intent),
-        confidence: mget(meta, :confidence),
-        feature_mix: :lifg_stage1,
-        ts_ms: mget(meta, :ts_ms),
-        choices: mget(meta, :choices) || [],
-        audit: %{
-          boundary_drops: mget(meta, :boundary_drops),
-          chargram_violation: mget(meta, :chargram_violation),
-          dropped_tokens: mget(meta, :dropped_tokens),
-          kept_tokens: mget(meta, :kept_tokens),
-          missing_candidate_tokens: mget(meta, :missing_candidate_tokens) || [],
-          missing_candidates: mget(meta, :missing_candidates),
-          rejected_by_boundary: mget(meta, :rejected_by_boundary) || [],
-          weak_decisions: mget(meta, :weak_decisions),
-          guard_drops: mget(meta, :guard_drops),
-          mwe_fallbacks: mget(meta, :mwe_fallbacks)
-        },
-        finalists: mget(meta, :finalists) || [],
-        si_sentence: mget(meta, :sentence)
-      }
-    }
-  end
-
-  defp lifg_state_from_pipeline_stop(_), do: nil
-
   defp upgrade_on_response_complete(state, bb_env) do
     now_ms = now_ms()
-    response = response_block_from_complete(bb_env, now_ms)
+    response = Core.response_from_complete(bb_env, now_ms)
     user_text = response |> mget(:metadata) |> mget(:user_text)
 
     case turn_for_response_complete(state, user_text, now_ms) do
@@ -451,29 +406,6 @@ defmodule Brain.ML do
       nil ->
         state
     end
-  end
-
-  defp response_block_from_complete(%{} = bb_env, now_ms) do
-    meta = mget(bb_env, :meta) || %{}
-    measurements = mget(bb_env, :measurements) || %{}
-
-    %{
-      assistant_text: mget(meta, :assistant_text),
-      assistant_chars: mget(measurements, :assistant_chars),
-      user_chars: mget(measurements, :user_chars),
-      tone: mget(meta, :tone),
-      mode: mget(meta, :mode),
-      response_profile: mget(meta, :response_profile),
-      prompt_response_profile: mget(meta, :prompt_response_profile),
-      simulated_affect: mget(meta, :simulated_affect),
-      personality_state: mget(meta, :personality_state),
-      reflection: mget(meta, :reflection),
-      system_sha256: mget(meta, :system_sha256),
-      symbolic_frame: mget(meta, :symbolic_frame),
-      metadata: meta,
-      at_ms: mget(bb_env, :at_ms) || now_ms
-    }
-    |> drop_nil_values()
   end
 
   defp turn_for_response_complete(state, user_text, now_ms) do
@@ -531,42 +463,18 @@ defmodule Brain.ML do
   defp build_turn_record(state, trigger, turn_id, opened_at_ms, intent_payload, text) do
     now_ms = now_ms()
 
-    %{
-      v: 1,
+    Core.build_turn_record(%{
       turn_id: turn_id,
       opened_at_ms: opened_at_ms,
       at_ms: now_ms,
-
-      # Training-grade input text (best-effort)
-      text: if(is_binary(text) and text != "", do: text, else: nil),
-
-      # Snapshot-ish features (latest known)
+      text: text,
       clock: state.last_clock,
       intent: intent_payload || state.last_intent,
       mood: state.last_mood,
       wm: state.last_wm,
-
-      # LIFG (winners for explainability)
       lifg: lifg_block(state),
-
-      # The trigger
-      trigger: %{
-        kind: mget(trigger, :kind),
-        event: mget(trigger, :event),
-        measurements: mget(trigger, :measurements) || %{},
-        meta: mget(trigger, :meta) || %{},
-        at_ms: mget(trigger, :at_ms) || now_ms
-      }
-    }
-  end
-
-  defp extract_text_any(intent_payload, bb_payload) do
-    t =
-      mget(intent_payload || %{}, :text) ||
-        mget(intent_payload || %{}, :sentence) ||
-        mget(bb_payload || %{}, :text)
-
-    if is_binary(t) and t != "", do: t, else: nil
+      trigger: trigger
+    })
   end
 
   defp lifg_block(state), do: MLLIFG.build_block(state.last_lifg, state.hydrate_lex?)
@@ -650,29 +558,12 @@ defmodule Brain.ML do
 
     turns1 =
       case mode do
-        :append_or_replace -> replace_or_prepend(turns0, rec, state.keep_turns)
+        :append_or_replace -> Core.replace_or_prepend(turns0, rec, state.keep_turns)
         _ -> [rec | turns0] |> Enum.take(state.keep_turns)
       end
 
     %{state | last_turn: rec, turns: turns1}
   end
-
-  defp replace_or_prepend(turns, %{turn_id: tid} = rec, keep) when is_list(turns) do
-    {found?, turns2} =
-      Enum.reduce(turns, {false, []}, fn t, {found, acc} ->
-        if is_map(t) and mget(t, :turn_id) == tid do
-          {true, [rec | acc]}
-        else
-          {found, [t | acc]}
-        end
-      end)
-
-    turns3 = turns2 |> Enum.reverse()
-
-    if found?, do: turns3 |> Enum.take(keep), else: [rec | turns] |> Enum.take(keep)
-  end
-
-  defp replace_or_prepend(_turns, rec, keep), do: [rec] |> Enum.take(keep)
 
   defp recent_turn_for_text(state, text, now_ms) when is_binary(text) and text != "" do
     case state.last_turn do
@@ -710,10 +601,4 @@ defmodule Brain.ML do
 
   defp mget(%{} = m, k), do: Map.get(m, k) || Map.get(m, to_string(k))
   defp mget(_, _), do: nil
-
-  defp drop_nil_values(%{} = map) do
-    map
-    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-    |> Enum.into(%{})
-  end
 end
