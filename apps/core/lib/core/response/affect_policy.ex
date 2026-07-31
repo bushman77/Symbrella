@@ -335,7 +335,7 @@ defmodule Core.Response.AffectPolicy do
       value when is_number(value) -> value * 1.0
       value when is_binary(value) ->
         case Float.parse(String.trim(value)) do
-          {number, _} -> number
+          {number, ""} -> number
           _ -> nil
         end
 

@@ -153,8 +153,8 @@ defmodule Brain.Meta do
           x
 
         x when is_binary(x) ->
-          case Float.parse(x) do
-            {f, _} -> f
+          case Float.parse(String.trim(x)) do
+            {f, ""} -> f
             _ -> nil
           end
 

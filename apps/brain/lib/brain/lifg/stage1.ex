@@ -58,11 +58,16 @@ defmodule Brain.LIFG.Stage1 do
     "pron" => 1.0,
     "determiner" => 0.99,
     "det" => 0.99,
+    # ← bumped up
+    "noun" => 0.97,
     "verb" => 0.96,
-    "adj" => 0.95,
-    "adv" => 0.94,
-    "noun" => 0.93,
-    "other" => 0.93
+    # ← added, lower than noun
+    "adjective" => 0.94,
+    "adj" => 0.94,
+    # ← added, lower than adjective
+    "adverb" => 0.93,
+    "adv" => 0.93,
+    "other" => 0.90
   }
   @closed_class_pronouns MapSet.new(~w(
                            i me you he him she her it we us they them
@@ -2589,15 +2594,24 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp closed_class_pos_bias(token_phrase, pos) do
-    case Map.get(@closed_class_defaults, token_phrase) do
-      %{pos: expected_pos} ->
+    cond do
+      Map.has_key?(@closed_class_defaults, token_phrase) ->
+        %{pos: expected_pos} = Map.get(@closed_class_defaults, token_phrase)
+
         if closed_class_pos_family(pos) == closed_class_pos_family(expected_pos) do
           0.12
         else
           -0.45
         end
 
-      _ ->
+      MapSet.member?(@closed_class_pronouns, token_phrase) ->
+        if closed_class_pos_family(pos) == closed_class_pos_family("pronoun") do
+          0.12
+        else
+          -0.45
+        end
+
+      true ->
         0.0
     end
   end

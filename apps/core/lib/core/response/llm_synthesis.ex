@@ -35,10 +35,11 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Public API ────────────────────────────────────────────────────────────
 
-  @spec generate(String.t(), map(), map(), map()) :: {:ok, String.t()} | {:error, term()}
-  def generate(user_text, features, decision, mood) do
+  @spec generate(String.t(), map(), map(), map(), atom() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  def generate(user_text, features, decision, mood, prompt_type) do
     if llm_available?() do
-      do_generate(user_text, features, decision, mood)
+      do_generate(user_text, features, decision, mood, prompt_type)
     else
       {:error, :llm_not_available}
     end
@@ -56,13 +57,13 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Internal ──────────────────────────────────────────────────────────────
 
-  defp do_generate(user_text, features, decision, mood) do
+  defp do_generate(user_text, features, decision, mood, prompt_type \\ nil) do
     LlmChatHistory.ensure_table!()
 
     context = prompt_context(user_text, features, decision, mood)
     session_id = Map.get(context, :session_id, :global)
 
-    system_prompt = LlmPrompt.build_system_prompt(context)
+    system_prompt = build_prompt(context, prompt_type)
     emit_prompt_event(system_prompt, user_text, context)
     history = LlmChatHistory.messages(session_id)
 
@@ -99,6 +100,9 @@ defmodule Core.Response.LlmSynthesis do
       Logger.debug("[LlmSynthesis] Exit: #{inspect(reason)}")
       {:error, :exit}
   end
+
+  defp build_prompt(context, :self_state_feeling), do: LlmPrompt.self_state_prompt(context)
+  defp build_prompt(context, _), do: LlmPrompt.build_system_prompt(context)
 
   defp sanitize_model_text(text) when is_binary(text) do
     text

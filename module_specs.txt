@@ -1,0 +1,2124 @@
+===== MODULE: Lexicon =====
+FILE: ./apps/lexicon/lib/lexicon.ex
+
+33:   @spec enrich(String.t(), keyword()) :: {:ok, enrich_ok()} | {:error, any()}
+
+
+===== MODULE: Db.AgencyEvent =====
+FILE: ./apps/db/lib/db/agency_event.ex
+
+33:   @spec changeset(t(), map()) :: Ecto.Changeset.t()
+
+
+===== MODULE: Db.NativeVocab =====
+FILE: ./apps/db/lib/db/native_vocab.ex
+
+19:   @special_tokens [
+20:     {"[PAD]", 0},
+21:     {"[UNK]", 1},
+22:     {"[BOS]", 2},
+23:     {"[EOS]", 3}
+24:   ]
+
+
+===== MODULE: Db.BrainCellEmbeddings =====
+FILE: ./apps/db/lib/db/brain_cell_embeddings.ex
+
+35:   @spec coverage() :: %{
+36:           total_cells: non_neg_integer(),
+37:           with_embedding: non_neg_integer(),
+38:           without_embedding: non_neg_integer()
+39:         }
+55:   @spec coverage_for_norm(String.t()) :: map()
+75:   @spec get_cell(brain_cell_id()) :: BrainCell.t() | nil
+85:   @spec get_cell!(brain_cell_id()) :: BrainCell.t()
+93:   @spec embedded?(brain_cell_id()) :: boolean()
+105:   @spec needs_embedding?(brain_cell_id()) :: boolean()
+119:   @spec missing_cells(keyword()) :: [BrainCell.t()]
+135:   @spec missing_cells_for_norm(String.t(), keyword()) :: [BrainCell.t()]
+159:   @spec cells_by_id_prefix(String.t(), keyword()) :: [BrainCell.t()]
+199:   @spec sense_text(BrainCell.t()) :: sense_text()
+229:   @spec missing_sense_texts(keyword()) :: [{BrainCell.t(), sense_text()}]
+244:   @spec put_embedding(brain_cell_id(), embedding_vector() | Pgvector.t()) ::
+245:           {:ok, BrainCell.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+256:   @spec put_embedding(BrainCell.t(), embedding_vector() | Pgvector.t()) ::
+257:           {:ok, BrainCell.t()} | {:error, Ecto.Changeset.t()}
+277:   @spec clear_embedding(brain_cell_id()) ::
+278:           {:ok, BrainCell.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+297:   @spec nearest(embedding_vector() | Pgvector.t(), keyword()) :: [map()]
+339:   @spec to_pgvector(embedding_vector()) :: {:ok, Pgvector.t()} | {:error, term()}
+
+
+===== MODULE: Db.JSONL.Util =====
+FILE: ./apps/db/lib/db/jsonl/util.ex
+
+4:   @spec ensure_map(any()) :: map()
+8:   @spec take_limit(Enumerable.t(), non_neg_integer() | :infinity) :: Enumerable.t()
+13:   @spec normalize_word(any()) :: String.t()
+22:   @spec normalize_tag(any()) :: String.t()
+31:   @spec normalize_atom(any()) :: String.t()
+40:   @spec flatten_term_list(any()) :: [String.t()]
+56:   @spec uniq_terms(any()) :: [String.t()]
+65:   @spec drop_self([String.t()], String.t()) :: [String.t()]
+
+
+===== MODULE: Db.JSONL.Populate =====
+FILE: ./apps/db/lib/db/jsonl/populate.ex
+
+6:   @spec populate_structs(String.t(), keyword()) :: {:ok, list(Db.BrainCell.t())} | {:error, any()}
+13:   @spec populate_structs_from_senses([map()], keyword()) :: list(Db.BrainCell.t())
+20:   @spec populate_structs_from_senses_with_counters([map()], map(), keyword()) ::
+21:           {list(Db.BrainCell.t()), map()}
+
+
+===== MODULE: Db.JSONL.IO =====
+FILE: ./apps/db/lib/db/jsonl/io.ex
+
+6:   @spec default_paths() :: [String.t()]
+23:   @spec default_path() :: String.t()
+28:   @spec head(non_neg_integer(), keyword()) :: {:ok, [binary()]} | {:error, any()}
+39:   @spec resolve_path(keyword()) :: String.t()
+47:   @spec stream_lines(String.t()) :: Enumerable.t()
+55:   @spec jason_available?() :: boolean()
+61:   @spec needles(String.t(), String.t()) :: {String.t(), String.t()}
+
+
+===== MODULE: Db.JSONL.Upsert =====
+FILE: ./apps/db/lib/db/jsonl/upsert.ex
+
+6:   @spec upsert_word(String.t(), keyword()) :: {:ok, map()} | {:error, any()}
+14:   @spec upsert_cells(list(), keyword()) :: {:ok, map()} | {:error, any()}
+82:   @spec safe_insert_all(module(), [map()], boolean(), :raise | :halt | :count) ::
+83:           {:ok, {non_neg_integer(), any()}} | {:error, any()}
+118:   @spec cell_to_attrs(Db.BrainCell.t() | map(), NaiveDateTime.t()) :: map()
+
+
+===== MODULE: Db.JSONL.Fetch =====
+FILE: ./apps/db/lib/db/jsonl/fetch.ex
+
+8:   @spec fetch_word_stream(String.t(), keyword()) :: {:ok, Enumerable.t()} | {:error, any()}
+14:   @spec fetch_word(String.t(), keyword()) :: {:ok, list(row() | binary())} | {:error, any()}
+29:   @spec fetch_senses(String.t(), keyword()) :: {:ok, list(map())} | {:error, any()}
+74:   @spec summarize_entries([row()]) :: map()
+98:   @spec summarize_senses([map()]) :: map()
+
+
+===== MODULE: Db.JSONL.Import =====
+FILE: ./apps/db/lib/db/jsonl/import.ex
+
+6:   @spec import_all(keyword()) :: {:ok, map()} | {:error, any()}
+
+
+===== MODULE: Db.Episode =====
+FILE: ./apps/db/lib/db/episode.ex
+
+68:   @spec changeset(t(), map()) :: Ecto.Changeset.t()
+112:   @spec insert(map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
+153:   @spec enqueue_write(map()) :: :ok
+171:   @spec knn([number()] | Pgvector.t(), keyword()) ::
+172:           [
+173:             %{
+174:               id: any(),
+175:               si: map(),
+176:               tags: [String.t()],
+177:               inserted_at: NaiveDateTime.t(),
+178:               distance: float()
+179:             }
+180:           ]
+263:   @spec recall([String.t()], keyword()) :: [recalled()]
+821:   @spec recent(pos_integer()) :: [t()]
+836:   @spec list_all() :: [t()]
+866:   @spec insert_row(map()) :: {:ok, integer()} | {:error, term()}
+
+
+===== MODULE: Db.BrainCellCorpus =====
+FILE: ./apps/db/lib/db/brain_cell_corpus.ex
+
+32:   @spec audit(keyword()) :: audit()
+49:   @spec sense_cards(keyword()) :: [map()]
+87:   @spec export_jsonl(Path.t(), keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+
+
+===== MODULE: Db.SelfSnapshots =====
+FILE: ./apps/db/lib/db/self_snapshots.ex
+
+24:   @spec create_snapshot(map(), keyword()) :: create_result()
+53:   @spec latest_snapshot(keyword()) :: {:ok, SelfSnapshot.t()} | {:error, :not_found}
+
+
+===== MODULE: Db.JSONL =====
+FILE: ./apps/db/lib/db/jsonl.ex
+
+39:   @spec default_paths() :: [String.t()]
+42:   @spec default_path() :: String.t()
+45:   @spec head(non_neg_integer(), keyword()) :: {:ok, [binary()]} | {:error, any()}
+50:   @spec fetch_word_stream(String.t(), [fetch_opt()]) :: {:ok, Enumerable.t()} | {:error, any()}
+53:   @spec fetch_word(String.t(), [fetch_opt()]) :: {:ok, list(row() | binary())} | {:error, any()}
+56:   @spec fetch_senses(String.t(), keyword()) :: {:ok, list(map())} | {:error, any()}
+61:   @spec populate_structs(String.t(), [populate_opt()]) ::
+62:           {:ok, list(Db.BrainCell.t())} | {:error, any()}
+65:   @spec populate_structs_from_senses([map()], [populate_opt()]) :: list(Db.BrainCell.t())
+71:   @spec upsert_word(String.t(), [upsert_opt()]) :: {:ok, map()} | {:error, any()}
+74:   @spec upsert_cells(list(), [upsert_opt()]) :: {:ok, map()} | {:error, any()}
+79:   @spec import_all([import_opt()]) :: {:ok, map()} | {:error, any()}
+84:   @spec summarize_entries([row()]) :: map()
+87:   @spec summarize_senses([map()]) :: map()
+
+
+===== MODULE: Db.BrainCell =====
+FILE: ./apps/db/lib/db/brain_cell.ex
+
+119:   @spec changeset(t(), map()) :: Ecto.Changeset.t()
+
+
+===== MODULE: Db.AgencyEvents =====
+FILE: ./apps/db/lib/db/agency_events.ex
+
+18:   @spec create_event(map()) :: create_result()
+46:   @spec recent(keyword()) :: [AgencyEvent.t()]
+
+
+===== MODULE: Db.SelfSnapshot =====
+FILE: ./apps/db/lib/db/self_snapshot.ex
+
+24:   @spec changeset(t(), map()) :: Ecto.Changeset.t()
+
+
+===== MODULE: Db.NativeTrainingBatch =====
+FILE: ./apps/db/lib/db/native_training_batch.ex
+
+66:   @spec from_norm(String.t(), keyword()) :: {:ok, t()} | {:error, term()}
+94:   @spec from_ids([String.t()], keyword()) :: {:ok, t()} | {:error, term()}
+127:   @spec build([BrainCell.t()], keyword()) :: {:ok, t()} | {:error, term()}
+
+
+===== MODULE: Db.Episodes =====
+FILE: ./apps/db/lib/db/episodes.ex
+
+61:   @spec write_episode(map(), keyword()) :: {:ok, Episode.t()} | {:error, term()}
+87:   @spec update_embedding(id(), embedding()) :: {:ok, Episode.t()} | {:error, Ecto.Changeset.t()}
+106:   @spec recall_hybrid(cues(), embedding() | String.t() | nil, keyword()) :: [recall_item()]
+223:   @spec find_by_lemma(String.t(), non_neg_integer()) :: [map()]
+241:   @spec search(String.t()) :: [map()]
+272:   @spec safe_embed(String.t()) :: {:ok, embedding()} | {:error, term()}
+288:   @spec si_text_for_embedding(map()) :: String.t()
+309:   @spec token_to_text(term()) :: String.t()
+324:   @spec normalize_tokens([term()]) :: [String.t()]
+329:   @spec new_episode_attrs(map(), [String.t()], keyword()) :: map()
+430:   @spec compute_emb_sim_fallback(term(), embedding() | nil) :: float() | nil
+
+
+===== MODULE: Db.NativeTokenWeights =====
+FILE: ./apps/db/lib/db/native_token_weights.ex
+
+67:   @spec weights_for_rows([token_row()], keyword()) :: {[weight_row()], stats()}
+107:   @spec weights_for_pair_rows([token_row()], [token_row()], keyword()) ::
+108:           {[weight_row()], [weight_row()], stats()}
+152:   @spec build_token_weights_by_id([token_row()], keyword()) :: %{token_id() => float()}
+202:   @spec normalize_mode(mode() | String.t()) :: mode()
+
+
+===== MODULE: Db =====
+FILE: ./apps/db/lib/db.ex
+
+105:   @spec ltm(map(), keyword()) ::
+106:           {:ok,
+107:            %{
+108:              rows: [map()],
+109:              missing_norms: [binary()],
+110:              db_hits: MapSet.t()
+111:            }}
+180:   @spec word_exists?(term()) :: boolean()
+
+181:   @spec word_exists?(term(), keyword()) :: boolean()
+210:   @spec fuzzy_word_candidates(term(), keyword()) :: [map()]
+275:   @spec rerank_word_candidates([String.t()] | [map()], [number()] | Pgvector.t(), keyword()) :: [
+276:           map()
+277:         ]
+300:   @spec context_word_candidates(term(), [number()] | Pgvector.t() | nil, keyword()) :: [map()]
+
+
+===== MODULE: Llm.Util =====
+FILE: ./apps/llm/lib/llm/util.ex
+
+15:   @spec sanitize_word(String.t()) :: String.t()
+24:   @spec default_example(String.t() | nil) :: String.t()
+32:   @spec maybe_put_format(map(), keyword()) :: map()
+41:   @spec maybe_put_keep_alive(map(), keyword()) :: map()
+50:   @spec put_temperature(map(), any()) :: map()
+56:   @spec put_options(map(), map()) :: map()
+62:   @spec ensure_min_predict(map(), integer()) :: map()
+70:   @spec decode_strict_json(String.t()) :: {:ok, map()} | {:error, term()}
+84:   @spec strip_fences(String.t()) :: String.t()
+94:   @spec extract_json_object(String.t()) :: String.t()
+115:   @spec fix_trailing_commas(String.t()) :: String.t()
+122:   @spec tsv_to_entries(String.t(), [String.t()]) :: [entry_map]
+156:   @spec split_fields(String.t()) :: [String.t()]
+169:   @spec parse_csv_words(String.t(), String.t() | nil) :: [String.t()]
+183:   @spec single_word?(String.t()) :: boolean()
+191:   @spec only_word([map()], String.t()) :: [map()]
+195:   @spec prefer_exact_lemma(map(), String.t()) :: {:ok, map()}
+204:   @spec validate_pos_payload(map(), [String.t()]) :: :ok | {:error, term()}
+212:   @spec valid_entry?(map(), [String.t()]) :: boolean()
+227:   @spec sanitize_syn_ant(any(), String.t() | nil) :: [String.t()]
+
+
+===== MODULE: Llm.Builtin =====
+FILE: ./apps/llm/lib/llm/builtin.ex
+
+11:   @spec entries_for(String.t()) :: [entry]
+
+
+===== MODULE: Core.Math =====
+FILE: ./apps/core/lib/math/math.ex
+
+41:   @spec r(integer(), integer()) :: rat
+51:   @spec r_add(rat, rat) :: rat
+54:   @spec r_sub(rat, rat) :: rat
+57:   @spec r_mul(rat, rat) :: rat
+60:   @spec r_div(rat, rat) :: rat
+64:   @spec r_neg(rat) :: rat
+67:   @spec r_pow(rat, non_neg_integer()) :: rat
+76:   @spec fit_polynomial([integer()], pos_integer()) ::
+77:           {:ok, {:binomial, binomial_coeffs}} | {:error, :not_polynomial}
+91:   @spec eval_binomial(binomial_coeffs, integer()) :: integer() | rat
+101:   @spec poly_from_binomial(binomial_coeffs) :: poly
+110:   @spec poly_eval(poly, integer()) :: integer() | rat
+117:   @spec pretty_poly(poly) :: String.t()
+131:   @spec verify_sequence([integer()], {:binomial, binomial_coeffs} | {:poly, poly}) ::
+132:           :ok | {:counterexample, non_neg_integer(), integer(), integer() | rat}
+136:   @spec check_identity(
+137:           {:binomial, binomial_coeffs} | {:poly, poly},
+138:           {:binomial, binomial_coeffs} | {:poly, poly},
+139:           Range.t()
+140:         ) ::
+141:           :likely_true | {:counterexample, integer(), integer() | rat, integer() | rat}
+
+
+===== MODULE: Core.Recall.Gate =====
+FILE: ./apps/core/lib/core/recall/gate.ex
+
+24:   @spec gate(SI.t(), keyword()) :: {:skip, SI.t()} | {:plan, Plan.t(), SI.t()}
+
+
+===== MODULE: Core.Recall.Execute =====
+FILE: ./apps/core/lib/core/recall/execute.ex
+
+44:   @spec execute(SI.t(), Plan.t(), keyword()) :: SI.t()
+
+
+===== MODULE: Core.Recall.Synonyms.Cache =====
+FILE: ./apps/core/lib/core/recall/synonyms/cache.ex
+
+13:   @spec get(term(), non_neg_integer()) :: nil | [map()]
+25:   @spec put(term(), [map()]) :: true
+
+
+===== MODULE: Core.Recall.Synonyms.Ranker =====
+FILE: ./apps/core/lib/core/recall/synonyms/ranker.ex
+
+17:   @spec rank(String.t(), [entry()], keyword()) :: [entry()]
+
+
+===== MODULE: Core.Recall.Synonyms.Normalize =====
+FILE: ./apps/core/lib/core/recall/synonyms/normalize.ex
+
+8:   @spec word(String.t()) :: String.t()
+16:   @spec pos(term()) :: pos()
+
+
+===== MODULE: Core.Recall.Synonyms =====
+FILE: ./apps/core/lib/core/recall/synonyms.ex
+
+31:   @spec for_keys([String.t() | {String.t(), atom()} | {:mwe, [String.t()]}], keyword()) :: map()
+49:   @spec lookup(word() | %{word: word(), pos: pos()}, keyword()) ::
+50:           {:ok, [entry()], %{cached?: boolean(), took_ms: non_neg_integer()}}
+104:   @spec expand([word() | %{word: word(), pos: pos()}], keyword()) ::
+105:           {:ok, [entry()], %{inputs: non_neg_integer(), unique: non_neg_integer()}}
+
+
+===== MODULE: Core.LexicalExplain =====
+FILE: ./apps/core/lib/core/lexical_explain.ex
+
+56:   @spec from_si(si_like, keyword()) :: String.t()
+86:   @spec from_cells(list(), keyword()) :: String.t()
+
+
+===== MODULE: Core.Pipeline.Candidates =====
+FILE: ./apps/core/lib/core/pipeline/candidates.ex
+
+10:   @spec reset(map(), term()) :: map()
+
+
+===== MODULE: Core.Pipeline.LTM =====
+FILE: ./apps/core/lib/core/pipeline/ltm.ex
+
+13:   @spec run(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Pipeline.Perception =====
+FILE: ./apps/core/lib/core/pipeline/perception.ex
+
+12:   @spec run(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Pipeline.Trace =====
+FILE: ./apps/core/lib/core/pipeline/trace.ex
+
+19:   @spec append(map(), atom(), keyword() | map()) :: map()
+25:   @spec event(map(), atom(), keyword() | map()) :: event()
+
+
+===== MODULE: Core.Pipeline.LTM.Source =====
+FILE: ./apps/core/lib/core/pipeline/ltm/source.ex
+
+8:   @spec ltm(map(), keyword()) :: {:ok, map()}
+
+
+===== MODULE: Core.Pipeline.Evidence =====
+FILE: ./apps/core/lib/core/pipeline/evidence.ex
+
+6:   @spec drop_empty(map()) :: map()
+
+
+===== MODULE: Core.RuntimeBind =====
+FILE: ./apps/core/lib/core/runtime_bind.ex
+
+46:   @spec bind(SemanticInput.t()) :: SemanticInput.t()
+49:   @spec bind(SemanticInput.t(), keyword()) :: SemanticInput.t()
+238:   @spec phrases_from_tokens(SemanticInput.t()) :: [binary()]
+259:   @spec phrase_hitmap(SemanticInput.t()) :: %{binary() => [%{tok_id: integer()}]}
+407:   @spec dedup_and_cap([map()], pos_integer()) :: [map()]
+
+
+===== MODULE: Core.Intent.Telemetry =====
+FILE: ./apps/core/lib/core/intent/telemetry.ex
+
+9:   @spec emit_selected(binary(), atom() | binary(), binary() | nil, number() | nil, atom()) :: :ok
+
+
+===== MODULE: Core.Intent.Normalize =====
+FILE: ./apps/core/lib/core/intent/normalize.ex
+
+72:   @spec normalize(map() | any()) :: t
+
+
+===== MODULE: Core.Intent.Matrix =====
+FILE: ./apps/core/lib/core/intent/matrix.ex
+
+35:   @spec score([term()], list() | nil, keyword()) :: [candidate()]
+
+
+===== MODULE: Core.Intent.Types =====
+FILE: ./apps/core/lib/core/intent/types.ex
+
+44:   @spec known() :: [intent()]
+51:   @spec normalize(term()) :: intent()
+
+
+===== MODULE: Core.Intent.Selection =====
+FILE: ./apps/core/lib/core/intent/selection.ex
+
+178:   @spec select(si(), Keyword.t()) :: si()
+
+
+===== MODULE: Core.Relations =====
+FILE: ./apps/core/lib/core/relations.ex
+
+103:   @spec attach_edges(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Text =====
+FILE: ./apps/core/lib/core/text.ex
+
+12:   @spec normalize(String.t()) :: String.t()
+
+
+===== MODULE: Core.MWE.Injector =====
+FILE: ./apps/core/lib/core/mwe_injector.ex
+
+14:   @spec inject([token], keyword()) :: [token]
+72:   @spec default_exists?(String.t()) :: boolean
+
+
+===== MODULE: Core.NegCache =====
+FILE: ./apps/core/lib/core/neg_cache.ex
+
+55:   @spec pop_expired_batch(pos_integer()) :: [binary()]
+60:   @spec stats() :: %{
+61:           dets_size: non_neg_integer(),
+62:           ets_size: non_neg_integer(),
+63:           ttl_ms: non_neg_integer()
+64:         }
+198:   @spec prune(Core.SemanticInput.t(), keyword()) :: Core.SemanticInput.t()
+
+
+===== MODULE: Core.Text.Fuzzy =====
+FILE: ./apps/core/lib/core/text/fuzzy.ex
+
+169:   @spec interpret(term(), Keyword.t()) :: interpretation()
+200:   @spec normalize(term(), Keyword.t()) :: String.t()
+206:   @spec alias?(term(), atom()) :: boolean()
+
+
+===== MODULE: Core.TokenResolution =====
+FILE: ./apps/core/lib/core/token_resolution.ex
+
+13:   @spec resolve(SemanticInput.t() | map(), keyword()) :: SemanticInput.t() | map()
+
+
+===== MODULE: Core.SemanticInput =====
+FILE: ./apps/core/lib/core/semantic_input.ex
+
+178:   @spec emit_sense_candidates(map(), non_neg_integer(), list(), String.t(), keyword()) :: map()
+238:   @spec get_sense_candidates(map(), non_neg_integer() | :all) :: list() | map()
+
+
+===== MODULE: Core.SenseSlate =====
+FILE: ./apps/core/lib/core/sense_slate.ex
+
+51:   @spec build([token], keyword()) :: slate
+85:   @spec attach(map() | struct(), slate) :: map() | struct()
+92:   @spec normalize_candidate(candidate_in) :: candidate_out | nil
+
+
+===== MODULE: Core.LIFG.Attach =====
+FILE: ./apps/core/lib/core/lifg/attach.ex
+
+24:   @spec run_and_attach(map(), keyword()) :: map()
+
+
+===== MODULE: Core.LIFG.FuzzyEntities =====
+FILE: ./apps/core/lib/core/lifg/fuzzy_entities.ex
+
+27:   @spec attach(map(), keyword()) :: map()
+
+
+===== MODULE: Core.LIFG.Input =====
+FILE: ./apps/core/lib/core/lifg/input.ex
+
+99:   @spec tokenize(String.t()) :: [token]
+
+100:   @spec tokenize(Core.SemanticInput.t()) :: Core.SemanticInput.t()
+168:   @spec tokenize(String.t(), keyword()) :: [token]
+
+169:   @spec tokenize(Core.SemanticInput.t(), keyword()) :: Core.SemanticInput.t()
+253:   @spec tokenizer_defaults() :: keyword()
+
+
+===== MODULE: Core.Agency.Decision =====
+FILE: ./apps/core/lib/core/agency/decision.ex
+
+46:   @spec from_action_result(map(), map()) :: t()
+77:   @spec to_map(t() | map()) :: map()
+
+
+===== MODULE: Core.Agency.Executor =====
+FILE: ./apps/core/lib/core/agency/executor.ex
+
+19:   @spec execute(Command.t() | map(), keyword()) :: result()
+39:   @spec execute_all([Command.t() | map()], keyword()) :: [result()]
+
+
+===== MODULE: Core.Agency.Command =====
+FILE: ./apps/core/lib/core/agency/command.ex
+
+42:   @spec from_decision(Decision.t() | map()) :: [t()]
+79:   @spec new(type(), Decision.t() | map(), keyword()) :: t()
+96:   @spec to_map(t() | map()) :: map()
+
+
+===== MODULE: Core.Telemetry =====
+FILE: ./apps/core/lib/core/telemetry.ex
+
+13:   @spec emit(event(), map(), map()) :: :ok
+23:   @spec attach(handler_id(), event(), handler_fun(), term()) :: :ok | {:error, :already_exists}
+34:   @spec attach_many(handler_id(), [event()], handler_fun(), term()) ::
+35:           :ok | {:error, :already_exists}
+46:   @spec detach(handler_id()) :: :ok
+
+
+===== MODULE: Core.Curiosity.EpisodeProbe.Source =====
+FILE: ./apps/core/lib/core/curiosity/episode_probe/source.ex
+
+12:   @spec hippocampus_window(pos_integer()) :: list(map())
+40:   @spec recent_db_episodes(pos_integer()) :: list()
+
+
+===== MODULE: Core.Curiosity.Persistence =====
+FILE: ./apps/core/lib/core/curiosity/persistence.ex
+
+8:   @spec persist(list()) :: :ok
+
+
+===== MODULE: Core.Curiosity.Enricher =====
+FILE: ./apps/core/lib/core/curiosity/enricher.ex
+
+10:   @spec enrich(String.t(), map()) :: term()
+
+
+===== MODULE: Core.Curiosity.EpisodeProbe =====
+FILE: ./apps/core/lib/core/curiosity/episode_probe.ex
+
+24:   @spec reset() :: :ok
+32:   @spec maybe_question(map(), map(), keyword()) :: {:ok, String.t(), map()} | :none
+70:   @spec idle_question(term(), keyword()) :: {:ok, String.t(), map()} | :none
+93:   @spec build_question(map()) :: {:ok, String.t(), map()} | :none
+
+
+===== MODULE: Core.Curiosity.Policy =====
+FILE: ./apps/core/lib/core/curiosity/policy.ex
+
+49:   @spec load() :: t()
+69:   @spec enrichment_enabled?(t()) :: boolean()
+76:   @spec llm_pos_enabled?(t()) :: boolean()
+
+
+===== MODULE: Core.Curiosity.EnrichmentPolicy =====
+FILE: ./apps/core/lib/core/curiosity/enrichment_policy.ex
+
+8:   @spec action_for_enrichment(term()) :: action()
+
+
+===== MODULE: Core.Relations.DbSource =====
+FILE: ./apps/core/lib/core/relations/db_source.ex
+
+14:   @spec load_relation_rows([String.t()]) :: [map()]
+34:   @spec fetch_related_cells([String.t()]) :: [map()]
+
+
+===== MODULE: Core.Semantic.EventFrames =====
+FILE: ./apps/core/lib/core/semantic/event_frames.ex
+
+13:   @spec attach(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Response.Modes =====
+FILE: ./apps/core/lib/core/response/modes.ex
+
+53:   @spec compose(intent, tone, mode) :: String.t()
+56:   @spec compose(intent, tone, mode, opts | keyword) :: String.t()
+
+
+===== MODULE: Core.Response.AgencyLedger =====
+FILE: ./apps/core/lib/core/response/agency_ledger.ex
+
+11:   @spec record_response(String.t(), String.t(), map(), map()) ::
+12:           :disabled | {:ok, Db.AgencyEvent.t()} | {:error, Ecto.Changeset.t()}
+26:   @spec record_command(map() | struct(), map(), keyword()) ::
+27:           :disabled | {:ok, Db.AgencyEvent.t()} | {:error, Ecto.Changeset.t()}
+
+
+===== MODULE: Core.Response.RuntimeContext =====
+FILE: ./apps/core/lib/core/response/runtime_context.ex
+
+25:   @spec snapshot() :: snapshot()
+37:   @spec mood_like() :: map()
+48:   @spec self_model_log(map() | nil) :: map() | nil
+61:   @spec lifg_runtime_from_snapshot(map()) :: map()
+
+
+===== MODULE: Core.Response.OverrideSkills =====
+FILE: ./apps/core/lib/core/response/override_skills.ex
+
+10:   @spec apply(map(), map(), map()) :: {map(), map() | nil}
+30:   @spec deterministic_inline_text(map() | nil) :: String.t() | nil
+50:   @spec read_only_mood_query?(String.t()) :: boolean()
+53:   @spec self_check_query?(String.t()) :: boolean()
+
+
+===== MODULE: Core.Response.Topics =====
+FILE: ./apps/core/lib/core/response/topics.ex
+
+12:   @spec labels(String.t() | any()) :: MapSet.t(label())
+25:   @spec from_messages([map()]) :: map()
+49:   @spec has?(map() | any(), label()) :: boolean()
+59:   @spec followup?(String.t() | any(), label()) :: boolean()
+
+
+===== MODULE: Core.Response.Meta =====
+FILE: ./apps/core/lib/core/response/meta.ex
+
+6:   @spec build(map()) :: map()
+69:   @spec classify_profile(map(), map(), map()) :: atom()
+108:   @spec planner_explanation(
+109:           atom(),
+110:           number(),
+111:           atom(),
+112:           atom(),
+113:           atom() | nil,
+114:           number(),
+115:           number(),
+116:           number(),
+117:           boolean(),
+118:           boolean(),
+119:           atom(),
+120:           term()
+121:         ) ::
+122:           map()
+165:   @spec bucket_confidence(number()) :: :low | :med | :high
+170:   @spec bucket_vigilance(number()) :: :extreme | :high | :normal
+
+
+===== MODULE: Core.Response.OverrideSkills.SelfState =====
+FILE: ./apps/core/lib/core/response/override_skills/self_state.ex
+
+9:   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
+75:   @spec read_only_mood_query?(String.t()) :: boolean()
+81:   @spec self_check_query?(String.t()) :: boolean()
+
+
+===== MODULE: Core.Response.OverrideSkills.Utility =====
+FILE: ./apps/core/lib/core/response/override_skills/utility.ex
+
+8:   @spec illicit_redirect(map(), map()) :: {:ok, {map(), map()}} | :pass
+29:   @spec time(map(), map()) :: {:ok, {map(), map()}} | :pass
+51:   @spec alarm(map(), map()) :: {:ok, {map(), map()}} | :pass
+
+
+===== MODULE: Core.Response.OverrideSkills.Decision =====
+FILE: ./apps/core/lib/core/response/override_skills/decision.ex
+
+4:   @spec put(map(), keyword()) :: map()
+9:   @spec add_override(map(), atom()) :: map()
+
+
+===== MODULE: Core.Response.OverrideSkills.Companion =====
+FILE: ./apps/core/lib/core/response/override_skills/companion.ex
+
+8:   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
+
+
+===== MODULE: Core.Response.Guardrails =====
+FILE: ./apps/core/lib/core/response/guardrails.ex
+
+23:   @spec detect(String.t()) :: %{guardrail?: boolean, approve_token?: boolean, flags: [atom]}
+47:   @spec run(String.t(), map(), map()) :: {String.t(), map()}
+50:   @spec enforce(String.t(), map(), map()) :: {String.t(), map()}
+53:   @spec apply(String.t(), map(), map()) :: {String.t(), map()}
+
+
+===== MODULE: Core.Response.LlmPrompt =====
+FILE: ./apps/core/lib/core/response/llm_prompt.ex
+
+10:   @spec build_system_prompt(map()) :: String.t()
+29:   @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
+112:   @spec summarize_wm(list()) :: [String.t()]
+
+
+===== MODULE: Core.Response.Memory =====
+FILE: ./apps/core/lib/core/response/memory.ex
+
+11:   @spec reply(map()) :: {atom(), String.t(), map()} | nil
+29:   @spec reply_for(map()) :: {atom(), String.t(), map()} | nil
+138:   @spec forced_identity_text(String.t(), String.t() | nil, boolean()) :: String.t() | nil
+161:   @spec extract_user_name(String.t()) :: String.t() | nil
+182:   @spec extract_remember_fact(String.t()) :: {String.t(), String.t(), String.t()} | nil
+195:   @spec extract_direct_fact(String.t()) :: {String.t(), String.t(), String.t()} | nil
+225:   @spec extract_fact_query_key(String.t()) :: {String.t(), String.t()} | nil
+243:   @spec asking_for_user_name?(String.t()) :: boolean()
+
+
+===== MODULE: Core.Response.AffectPolicy =====
+FILE: ./apps/core/lib/core/response/affect_policy.ex
+
+26:   @spec from_modulators(map()) :: t()
+49:   @spec normalize(map()) :: map()
+
+
+===== MODULE: Core.Response.Attach =====
+FILE: ./apps/core/lib/core/response/attach.ex
+
+73:   @spec maybe_build_response_plan(SemanticInput.t() | map(), opts()) :: SemanticInput.t() | map()
+
+
+===== MODULE: Core.Response.SelfStateFeatures =====
+FILE: ./apps/core/lib/core/response/self_state_features.ex
+
+6:   @spec self_state(map() | nil, map() | nil, map() | nil, map() | nil) :: map()
+15:   @spec append_curiosity_probe(String.t(), map(), map(), map(), map() | nil) ::
+16:           {String.t(), map() | nil}
+
+
+===== MODULE: Core.Response.LlmPrompt.WorkingMemory =====
+FILE: ./apps/core/lib/core/response/llm_prompt/working_memory.ex
+
+57:   @spec summarize(list()) :: [String.t()]
+
+
+===== MODULE: Core.Response.Context =====
+FILE: ./apps/core/lib/core/response/context.ex
+
+15:   @spec from_si(map()) :: t()
+31:   @spec from_response_parts(String.t(), map(), map(), map(), map()) :: t()
+91:   @spec symbolic_frame(map()) :: map()
+
+
+===== MODULE: Core.Response.AgencyMemory =====
+FILE: ./apps/core/lib/core/response/agency_memory.ex
+
+15:   @spec recall(term(), keyword()) :: map()
+27:   @spec summarize([map()]) :: map()
+
+
+===== MODULE: Core.Response.Policy =====
+FILE: ./apps/core/lib/core/response/policy.ex
+
+45:   @spec decide(features) :: %{
+46:           policy_version: String.t(),
+47:           tone: atom,
+48:           mode: atom,
+49:           action: atom,
+50:           scores: map,
+51:           overrides: list(atom)
+52:         }
+511:   @spec normalize_intent(atom, String.t()) :: atom
+
+
+===== MODULE: Core.Response.SideEffects =====
+FILE: ./apps/core/lib/core/response/side_effects.ex
+
+14:   @spec apply_mood_intent(atom(), number(), boolean()) :: :ok
+28:   @spec record_turn(term(), String.t(), String.t()) :: :ok
+37:   @spec emit_plan(map()) :: :ok
+45:   @spec emit_mode_selected(map()) :: :ok
+69:   @spec record_agency_response(String.t(), String.t(), map(), map()) :: :ok
+78:   @spec persist_user_name(String.t(), String.t()) :: :ok
+105:   @spec persist_user_fact(String.t(), String.t(), String.t(), String.t()) :: :ok
+137:   @spec recalled_user_name(String.t() | nil) :: String.t() | nil
+154:   @spec recalled_fact(String.t()) :: String.t() | nil
+
+
+===== MODULE: Core.Response.AgencyEventBuilder =====
+FILE: ./apps/core/lib/core/response/agency_event_builder.ex
+
+12:   @spec response_attrs(String.t(), String.t(), map(), map()) :: map()
+62:   @spec command_attrs(map() | struct(), map(), keyword()) :: map()
+
+
+===== MODULE: Core.Response.LlmHistory =====
+FILE: ./apps/core/lib/core/response/llm_history.ex
+
+10:   @spec append_turn(list(), String.t(), String.t(), pos_integer(), pos_integer()) :: list()
+27:   @spec recent(list(), pos_integer()) :: list()
+36:   @spec trim(list(), integer()) :: list()
+42:   @spec status(boolean(), list()) :: map()
+53:   @spec missing_status() :: map()
+63:   @spec clamp_text(term(), pos_integer()) :: String.t()
+
+
+===== MODULE: Core.Response.AgencyReflection =====
+FILE: ./apps/core/lib/core/response/agency_reflection.ex
+
+12:   @spec from_response(String.t(), String.t(), map(), map()) :: map()
+
+
+===== MODULE: Core.Response.AgencyMemory.Source =====
+FILE: ./apps/core/lib/core/response/agency_memory/source.ex
+
+9:   @spec recent(term(), keyword()) :: list(map())
+
+
+===== MODULE: Core.Response.LlmPromptEvents =====
+FILE: ./apps/core/lib/core/response/llm_prompt_events.ex
+
+9:   @spec prompt(String.t(), term(), map()) :: {map(), map()}
+39:   @spec complete(term(), term(), map(), String.t(), map() | nil) :: {map(), map()}
+73:   @spec cap_text(term(), pos_integer()) :: {String.t(), boolean()}
+85:   @spec sha256_hex(String.t()) :: String.t()
+91:   @spec prompt_fields(String.t()) :: map()
+102:   @spec extract_system_user(list()) :: {String.t(), String.t()}
+
+
+===== MODULE: Core.Response.SelfStateSummary =====
+FILE: ./apps/core/lib/core/response/self_state_summary.ex
+
+14:   @spec live_snapshot() :: map()
+24:   @spec self_portrait_answer() :: String.t()
+43:   @spec self_check_answer() :: String.t()
+57:   @spec feeling_answer() :: String.t()
+88:   @spec mood_indices_answer() :: String.t()
+115:   @spec summarize(map()) :: String.t()
+130:   @spec prompt_line(map()) :: String.t()
+
+
+===== MODULE: Core.Response.TemplateFallback =====
+FILE: ./apps/core/lib/core/response/template_fallback.ex
+
+8:   @spec opts(String.t(), map(), map()) :: map()
+23:   @spec normalize_reason(term()) :: atom()
+
+
+===== MODULE: Core.Response.Skills =====
+FILE: ./apps/core/lib/core/response/skills.ex
+
+23:   @spec pick(String.t(), features_like, decision_like) ::
+24:           nil | %{id: atom, inline_text: String.t(), reason: String.t()}
+
+
+===== MODULE: Core.Response.ReflectionLoop =====
+FILE: ./apps/core/lib/core/response/reflection_loop.ex
+
+38:   @spec review(String.t(), String.t(), map()) :: {:ok, String.t(), reflection()}
+75:   @spec needed?(map(), String.t()) :: boolean()
+
+
+===== MODULE: Core.Response.Affect =====
+FILE: ./apps/core/lib/core/response/affect.ex
+
+30:   @spec simulate(map(), map(), map(), map()) :: t()
+96:   @spec directive(t() | map()) :: String.t()
+
+
+===== MODULE: Core.Response.LlmChatHistory =====
+FILE: ./apps/core/lib/core/response/llm_chat_history.ex
+
+18:   @spec record_turn(term(), String.t(), String.t()) :: :ok
+39:   @spec messages(term(), pos_integer()) :: list()
+48:   @spec status(term()) :: map()
+58:   @spec ensure_table!() :: :ok
+
+
+===== MODULE: Core.Response.LlmSynthesis =====
+FILE: ./apps/core/lib/core/response/llm_synthesis.ex
+
+38:   @spec generate(String.t(), map(), map(), map()) :: {:ok, String.t()} | {:error, term()}
+47:   @spec record_turn(term(), String.t(), String.t()) :: :ok
+52:   @spec history_status(term()) :: map()
+
+
+===== MODULE: Core.Response.Personality =====
+FILE: ./apps/core/lib/core/response/personality.ex
+
+41:   @spec decide(map(), map(), map(), list(), map()) :: t()
+62:   @spec profile(t() | map()) :: response_profile()
+66:   @spec directive(t() | map()) :: String.t()
+
+
+===== MODULE: Core.Token =====
+FILE: ./apps/core/lib/core/token.ex
+
+130:   @spec tokenize(String.t(), keyword()) :: Core.SemanticInput.t()
+369:   @spec to_char_spans(Core.SemanticInput.t()) :: Core.SemanticInput.t()
+380:   @spec to_char_spans([t], String.t()) :: [t]
+430:   @spec check_span_invariants(Core.SemanticInput.t()) ::
+431:           {:ok, Core.SemanticInput.t()} | {:error, [map()]}
+436:   @spec check_span_invariants([t]) :: {:ok, [t]} | {:error, [map()]}
+
+
+===== MODULE: Core.Synonyms =====
+FILE: ./apps/core/lib/core/synonyms.ex
+
+43:   @spec for_keys([key()], keyword()) ::
+44:           {:ok, %{optional(key()) => [syn_obj()]},
+45:            %{cached?: boolean(), took_ms: non_neg_integer()}}
+109:   @spec alternates_for_winner(term() | map() | {:ok, map(), any()}, keyword()) ::
+110:           {:ok, [syn_obj()], %{cached?: boolean(), took_ms: non_neg_integer()}}
+141:   @spec expand_candidates(map(), keyword()) ::
+142:           {:ok, map(), %{added: non_neg_integer(), took_ms: non_neg_integer()}}
+
+
+===== MODULE: Core.RoleplayTurn =====
+FILE: ./apps/core/lib/core/roleplay_turn.ex
+
+33:   @spec run(request()) :: {:ok, response()} | {:error, map()}
+
+
+===== MODULE: Core.Intent =====
+FILE: ./apps/core/lib/core/intent.ex
+
+38:   @spec allowed() :: [atom()]
+42:   @spec valid?(term()) :: boolean()
+
+
+===== MODULE: Core.TokenFilters =====
+FILE: ./apps/core/lib/core/token_filters.ex
+
+115:   @spec prune(SemanticInput.t() | map(), opts()) :: SemanticInput.t() | map()
+212:   @spec rebuild_word_ngrams(SemanticInput.t() | map(), pos_integer()) :: SemanticInput.t() | map()
+344:   @spec keep_only_word_boundary_tokens(SemanticInput.t() | map()) :: SemanticInput.t() | map()
+
+
+===== MODULE: Core.Segmenter =====
+FILE: ./apps/core/lib/core/segmenter.ex
+
+51:   @spec segment_phrases(String.t(), keyword()) :: [segment]
+65:   @spec word_spans(String.t()) :: [span]
+78:   @spec build_segment([span], non_neg_integer(), pos_integer(), String.t()) :: map()
+97:   @spec all_chunks([span], pos_integer(), String.t()) :: [map()]
+
+
+===== MODULE: Core.MWE.Stage =====
+FILE: ./apps/core/lib/core/mwe/stage.ex
+
+8:   @spec run(map(), atom(), keyword()) :: map()
+
+
+===== MODULE: Core.Input =====
+FILE: ./apps/core/lib/core/input.ex
+
+8:   @spec tokenizer_defaults() :: map()
+41:   @spec drop_chargrams(%{tokens: list()} | list()) :: %{tokens: list()} | list()
+
+
+===== MODULE: Core.BrainAdapter =====
+FILE: ./apps/core/lib/core/brain_adapter.ex
+
+13:   @spec synonyms_for_keys([key()], map() | keyword()) ::
+14:           {:ok, %{optional(key()) => [String.t()]}} | {:error, term()}
+
+
+===== MODULE: Core.Invariants =====
+FILE: ./apps/core/lib/core/invariants.ex
+
+37:   @spec assert_no_chargrams!([map()]) :: :ok
+53:   @spec assert_boundary_only_or_mwe!([map()], String.t()) :: :ok
+110:   @spec assert_sorted_spans!([map()]) :: :ok
+
+
+===== MODULE: Core.Brain =====
+FILE: ./apps/core/lib/core/brain.ex
+
+18:   @spec activate_cells(list() | map(), map()) :: :ok
+
+
+===== MODULE: Core.PhraseRepo.DbSource =====
+FILE: ./apps/core/lib/core/phrase_repo/db_source.ex
+
+10:   @spec exists?(String.t()) :: boolean()
+
+
+===== MODULE: Core.Response =====
+FILE: ./apps/core/lib/core/response.ex
+
+52:   @spec plan(si_like(), mood_like()) :: {atom(), String.t(), map()}
+221:   @spec memory_reply(si_like()) :: {atom(), String.t(), map()} | nil
+392:   @spec annotate_si(map(), mood_like()) :: map()
+
+
+===== MODULE: Core.LexID =====
+FILE: ./apps/core/lib/core/lex_id.ex
+
+30:   @spec looks_like_id?(binary) :: boolean
+
+
+===== MODULE: Core.Brain.Prefrontal =====
+FILE: ./apps/core/lib/core/brain/prefrontal.ex
+
+10:   @spec attach(map(), keyword()) :: map()
+45:   @spec context_from_si(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.Amygdala =====
+FILE: ./apps/core/lib/core/brain/amygdala.ex
+
+6:   @spec react(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.WM =====
+FILE: ./apps/core/lib/core/brain/wm.ex
+
+26:   @spec focus_prompt_topics(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.Activation =====
+FILE: ./apps/core/lib/core/brain/activation.ex
+
+6:   @spec notify(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.Runtime =====
+FILE: ./apps/core/lib/core/brain/runtime.ex
+
+6:   @spec pid_alive?(atom()) :: boolean()
+14:   @spec apply_if_exported(module(), atom(), list(), term()) :: term()
+23:   @spec emit([atom()], map(), map()) :: :ok
+33:   @spec put_if_present(keyword(), atom(), term()) :: keyword()
+
+
+===== MODULE: Core.Brain.Index =====
+FILE: ./apps/core/lib/core/brain/index.ex
+
+4:   @spec ids_for_phrase(String.t()) :: [String.t()]
+
+
+===== MODULE: Core.Brain.ActionSelection =====
+FILE: ./apps/core/lib/core/brain/action_selection.ex
+
+14:   @spec attach(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.ATL =====
+FILE: ./apps/core/lib/core/brain/atl.ex
+
+8:   @spec ingest(map(), keyword()) :: map()
+49:   @spec attach_lifg_pairs(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.Introspection =====
+FILE: ./apps/core/lib/core/brain/introspection.ex
+
+6:   @spec update_self_model(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.Hippocampus =====
+FILE: ./apps/core/lib/core/brain/hippocampus.ex
+
+8:   @spec encode(map()) :: map()
+63:   @spec persist(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Brain.STM =====
+FILE: ./apps/core/lib/core/brain/stm.ex
+
+9:   @spec run(map()) :: map()
+
+
+===== MODULE: Core.Brain.Episodes =====
+FILE: ./apps/core/lib/core/brain/episodes.ex
+
+8:   @spec attach(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Commit =====
+FILE: ./apps/core/lib/core/commit.ex
+
+15:   @spec commit(map(), keyword()) :: %{output: map(), si: map()}
+
+
+===== MODULE: Core.Time =====
+FILE: ./apps/core/lib/core/time.ex
+
+9:   @spec mono_ms() :: integer
+14:   @spec system_ms() :: integer
+
+
+===== MODULE: Core.Comprehension.Summary =====
+FILE: ./apps/core/lib/core/comprehension/summary.ex
+
+24:   @spec attach(map(), keyword()) :: map()
+48:   @spec build(map(), keyword()) :: map()
+
+
+===== MODULE: Core.Vectors =====
+FILE: ./apps/core/lib/core/vectors.ex
+
+12:   @spec fetch(key()) :: vec() | nil
+
+
+===== MODULE: Core =====
+FILE: ./apps/core/lib/core.ex
+
+33:   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
+
+
+===== MODULE: Support.TelemetryHelpers =====
+FILE: ./apps/brain/test/support/telemetry_helpers.exs
+
+36:   @spec attach([event_path()] | event_path(), atom()) :: String.t()
+58:   @spec detach(String.t()) :: :ok
+66:   @spec drain(atom()) :: :ok
+80:   @spec capture(event_path(), (-> any), non_neg_integer()) :: {map(), map()}
+95:   @spec capture_any([event_path()] | event_path(), (-> any), non_neg_integer()) ::
+96:           {event_path(), map(), map()}
+108:   @spec capture_many([event_path()] | event_path(), (-> any), non_neg_integer()) ::
+109:           list({event_path(), map(), map()})
+126:   @spec refute_event(event_path(), (-> any), non_neg_integer()) :: :ok
+
+
+===== MODULE: Support.TelemetryHelpers =====
+FILE: ./apps/brain/test/support/telemetry_helpers.ex
+
+53:   @spec capture([atom()] | [[atom()]], (-> any()), non_neg_integer()) ::
+54:           {map(), map()} | {any(), [{[atom()], map(), map()}]}
+69:   @spec refute_event([atom()] | [[atom()]], (-> any()), non_neg_integer()) :: :ok
+81:   @spec attach_probe([[atom()]], pid(), String.t()) :: String.t()
+101:   @spec detach_probe(String.t()) :: :ok
+110:   @spec drain_mailbox() :: [term()]
+
+
+===== MODULE: Brain =====
+FILE: ./apps/brain/lib/brain.ex
+
+178:   @spec configure_wm(keyword()) :: :ok
+202:   @spec set_attention(map()) :: :ok
+228:   @spec focus(list() | map(), keyword()) :: [wm_item()]
+254:   @spec defocus(id() | (wm_item() -> boolean())) :: :ok
+278:   @spec snapshot_wm() :: %{wm: [wm_item()], cfg: wm_cfg(), attention: map()}
+295:   @spec child_spec(keyword()) :: Supervisor.child_spec()
+327:   @spec start_link(keyword()) :: GenServer.on_start()
+352:   @spec stm(map()) :: map()
+378:   @spec activate_cells([Row.t() | id()] | map(), map()) :: :ok
+384:   @spec report_activation(String.t(), number()) :: :ok
+408:   @spec cell_status(String.t()) :: {:ok, term()} | {:error, :not_found}
+438:   @spec cell_cast(String.t(), term()) :: :ok
+458:   @spec snapshot() :: state()
+486:   @spec lifg_stage1(map() | [map()], [number()], keyword()) ::
+487:           {:ok, %{choices: [map()], boosts: list(), inhibitions: list(), audit: map()}}
+488:           | {:error, term()}
+698:   @spec latest_intent() :: map() | nil
+729:   @spec set_latest_intent(map()) :: :ok
+744:   @spec focus_from_recall(map() | list(), keyword()) :: [map()]
+
+
+===== MODULE: Brain.Recall.Synonyms =====
+FILE: ./apps/brain/lib/brain/recall/synonyms.ex
+
+38:   @spec lookup(lemma, k) :: syns
+44:   @spec lookup_by_pos(lemma, pos, k) :: syns
+57:   @spec expand_for_tokens([token], keyword) :: %{
+58:           results:
+59:             list(%{index: non_neg_integer(), phrase: String.t(), pos: any(), synonyms: syns}),
+60:           hits: non_neg_integer(),
+61:           misses: non_neg_integer()
+62:         }
+100:   @spec do_lookup(lemma, String.t() | nil, k) :: syns
+
+
+===== MODULE: Brain.Temporal =====
+FILE: ./apps/brain/lib/brain/temporal.ex
+
+73:   @spec push(item()) :: :ok
+79:   @spec clear() :: :ok
+85:   @spec configure(keyword()) :: :ok
+99:   @spec status() :: map()
+
+
+===== MODULE: Brain.SelfPortrait =====
+FILE: ./apps/brain/lib/brain/self_portrait.ex
+
+21:   @spec snapshot(pid() | module()) :: map()
+24:   @spec reset(pid() | module()) :: :ok
+27:   @spec observe(map()) :: :ok
+
+
+===== MODULE: Brain.Prefrontal =====
+FILE: ./apps/brain/lib/brain/prefrontal.ex
+
+32:   @spec signals(map()) :: map() | struct()
+41:   @spec signals_map(map()) :: map()
+53:   @spec planner_parts(map()) :: [map()]
+73:   @spec status() :: map()
+
+
+===== MODULE: Brain.VmPFC =====
+FILE: ./apps/brain/lib/brain/vmpfc.ex
+
+33:   @spec status() :: map()
+44:   @spec compute_utility(ctx) :: %{utility_prior: float(), explore_rate: float()}
+
+
+===== MODULE: Brain.Meta =====
+FILE: ./apps/brain/lib/brain/meta.ex
+
+139:   @spec status() :: map()
+142:   @spec reasons() :: list()
+
+
+===== MODULE: Brain.Thalamus.Params =====
+FILE: ./apps/brain/lib/brain/thalamus/params.ex
+
+13:   @spec set_params(t(), keyword() | map()) :: t()
+
+
+===== MODULE: Brain.Pipeline.LIFGStage1 =====
+FILE: ./apps/brain/lib/brain/pipeline/lifg_stage1.ex
+
+41:   @spec run(map() | list(), map() | keyword()) :: {:ok, map()} | {:error, any()}
+86:   @spec run(map() | list(), any(), keyword() | map(), map()) :: {term(), map()}
+146:   @spec extract_lifg_choices(any()) :: list(map())
+
+
+===== MODULE: Brain.PFC =====
+FILE: ./apps/brain/lib/brain/pfc.ex
+
+37:   @spec set_goal(goal()) :: :ok
+41:   @spec set_mode(atom()) :: :ok
+45:   @spec set_overrides(map()) :: :ok
+66:   @spec policy(map()) :: keyword()
+
+
+===== MODULE: Brain.Hippocampus.Writer =====
+FILE: ./apps/brain/lib/brain/hippocampus/writer.ex
+
+34:   @spec maybe_persist(map(), keyword()) :: :ok
+120:   @spec insert_row!(map()) :: :ok
+
+
+===== MODULE: Brain.Hippocampus.Recall =====
+FILE: ./apps/brain/lib/brain/hippocampus/recall.ex
+
+20:   @spec run([String.t()] | map(), [{non_neg_integer(), episode()}], keyword()) ::
+21:           {[scored()], map(), map()}
+87:   @spec resolve_ignore_head(
+88:           [{non_neg_integer(), episode()}],
+89:           :auto | :always | :never | boolean(),
+90:           MapSet.t()
+91:         ) ::
+92:           {:ok, [{non_neg_integer(), episode()}]}
+
+
+===== MODULE: Brain.Hippocampus.Config =====
+FILE: ./apps/brain/lib/brain/hippocampus/config.ex
+
+19:   @spec defaults() :: %{
+20:           window_keep: pos_integer(),
+21:           half_life_ms: pos_integer(),
+22:           recall_limit: pos_integer(),
+23:           min_jaccard: float(),
+24:           recall_source: recall_source()
+25:         }
+36:   @spec normalize_keep(any()) :: pos_integer()
+40:   @spec normalize_half_life(any()) :: pos_integer()
+44:   @spec normalize_limit(any()) :: pos_integer()
+48:   @spec normalize_min_jaccard(any()) :: float()
+56:   @spec normalize_source(any()) :: recall_source()
+72:   @spec test_env?() :: boolean()
+89:   @spec merge_opts(map(), map()) :: map()
+
+
+===== MODULE: Brain.Hippocampus.Win =====
+FILE: ./apps/brain/lib/brain/hippocampus/window.ex
+
+9:   @spec append_or_refresh_head([{non_neg_integer(), episode()}], episode(), pos_integer()) ::
+10:           [{non_neg_integer(), episode()}]
+56:   @spec trim([{non_neg_integer(), episode()}], pos_integer()) ::
+57:           [{non_neg_integer(), episode()}]
+
+
+===== MODULE: Brain.Hippocampus.Telemetry =====
+FILE: ./apps/brain/lib/brain/hippocampus/telemetry.ex
+
+4:   @spec emit_write(map(), map()) :: :ok
+9:   @spec emit_recall(map(), map()) :: :ok
+14:   @spec maybe_echo_to_caller({pid(), term()}, [atom()], map(), map()) :: :ok
+
+
+===== MODULE: Brain.Hippocampus.Dup =====
+FILE: ./apps/brain/lib/brain/hippocampus/dup.ex
+
+15:   @spec bump_dup_count(%{meta: map()}) :: map()
+42:   @spec dup_count(map()) :: pos_integer()
+
+
+===== MODULE: Brain.Hippocampus.DB =====
+FILE: ./apps/brain/lib/brain/hippocampus/db.ex
+
+34:   @spec recall(keyword()) :: [recall_r]
+
+
+===== MODULE: Brain.Hippocampus.Scoring =====
+FILE: ./apps/brain/lib/brain/hippocampus/scoring.ex
+
+7:   @spec jaccard(MapSet.t(), MapSet.t()) :: float()
+19:   @spec recency_factor(non_neg_integer(), pos_integer()) :: float()
+
+
+===== MODULE: Brain.Hippocampus.Normalize =====
+FILE: ./apps/brain/lib/brain/hippocampus/normalize.ex
+
+30:   @spec extract_norms_from_any(term()) :: [norm]
+85:   @spec cue_set(term()) :: cue_set
+99:   @spec episode_token_set(term()) :: cue_set
+
+
+===== MODULE: Brain.Hippocampus.Evidence =====
+FILE: ./apps/brain/lib/brain/hippocampus/evidence.ex
+
+4:   @spec ensure_winners_for_evidence(%{episode: %{slate: map()}} | map()) :: map()
+
+
+===== MODULE: Brain.Amygdala =====
+FILE: ./apps/brain/lib/brain/amygdala.ex
+
+127:   @spec react(stimulus(), keyword()) :: reaction()
+136:   @spec snapshot() :: map()
+
+
+===== MODULE: Brain.SelfContinuity =====
+FILE: ./apps/brain/lib/brain/self_continuity.ex
+
+63:   @spec warm_start(keyword()) :: restore_result()
+79:   @spec current() :: {:ok, SelfModel.t()} | {:error, :missing_warm_start}
+99:   @spec to_snapshot(SelfModel.t()) :: map()
+129:   @spec restore(map() | SelfModel.t() | nil, keyword()) :: restore_result()
+169:   @spec from_snapshot(map()) :: {:ok, SelfModel.t()} | {:error, restore_reason()}
+
+
+===== MODULE: Brain.FPC =====
+FILE: ./apps/brain/lib/brain/fpc.ex
+
+31:   @spec status() :: map()
+42:   @spec plan_branches(ctx) :: %{
+43:           branch_budget: non_neg_integer(),
+44:           switch_after_ms: non_neg_integer()
+45:         }
+
+
+===== MODULE: Brain.Semantics =====
+FILE: ./apps/brain/lib/brain/semantics.ex
+
+33:   @spec anchors() :: map()
+47:   @spec bias_for(map() | String.t() | any()) :: float()
+99:   @spec regions_for(map() | String.t() | any()) :: [atom()]
+
+
+===== MODULE: Brain.MetaMonitor =====
+FILE: ./apps/brain/lib/brain/meta_monitor.ex
+
+41:   @spec warnings(SelfModel.t(), keyword()) :: [warning()]
+94:   @spec recovery_suggestions([warning()] | SelfModel.t()) :: [atom()]
+118:   @spec check(SelfModel.t(), keyword()) :: {:ok | :warning, [warning()]}
+
+
+===== MODULE: Brain.Cell =====
+FILE: ./apps/brain/lib/brain/cell.ex
+
+47:   @spec start_link(Row.t() | binary()) :: GenServer.on_start()
+60:   @spec valid_id?(term) :: boolean()
+
+
+===== MODULE: Brain.ActionSelector =====
+FILE: ./apps/brain/lib/brain/action_selector.ex
+
+41:   @spec select(map(), keyword()) :: result()
+
+
+===== MODULE: Brain.DLPFC.Policy =====
+FILE: ./apps/brain/lib/brain/dlpfc/policy.ex
+
+18:   @spec choose_policy(ctx) :: map()
+
+
+===== MODULE: Brain.DmPFC =====
+FILE: ./apps/brain/lib/brain/dmpfc.ex
+
+30:   @spec status() :: map()
+41:   @spec calibrate_confidence(ctx) :: %{confidence_scale: float(), acc_conflict_gain: float()}
+
+
+===== MODULE: Brain.LIFG =====
+FILE: ./apps/brain/lib/brain/lifg.ex
+
+43:   @spec child_spec(term()) :: Supervisor.child_spec()
+117:   @spec last(module()) :: map() | :empty
+167:   @spec disambiguate_stage1(map()) :: map()
+170:   @spec disambiguate_stage1(map(), keyword()) :: map()
+289:   @spec run(map(), keyword()) ::
+290:           {:ok,
+291:            %{si: map(), choices: list(), slate: map(), cover: list(), flips: non_neg_integer()}}
+292:           | {:error, term()}
+510:   @spec normalize_scores([number()]) :: [float()]
+529:   @spec cosine([number()] | nil, [number()] | nil) :: float()
+548:   @spec top1_prob(map()) :: float()
+571:   @spec low_confidence?(map(), keyword()) :: boolean()
+
+
+===== MODULE: Brain.ML.LIFG =====
+FILE: ./apps/brain/lib/brain/ml/lifg.ex
+
+6:   @spec build_block(term(), boolean()) :: map()
+
+
+===== MODULE: Brain.ML.Core =====
+FILE: ./apps/brain/lib/brain/ml/core.ex
+
+49:   @spec turn_schema_v() :: pos_integer()
+53:   @spec feature_schema_v() :: pos_integer()
+57:   @spec feature_names() :: [feature_name()]
+66:   @spec build_turn_record(map() | keyword()) :: turn_record()
+90:   @spec text_from(term(), term()) :: String.t() | nil
+101:   @spec trigger_from_blackboard(term(), integer()) :: map()
+122:   @spec lifg_state_from_pipeline_stop(term()) :: map() | nil
+169:   @spec validate_turn_record(term()) :: :ok | {:error, [atom()]}
+192:   @spec valid_turn_record?(term()) :: boolean()
+201:   @spec extract_features(map() | keyword()) :: features()
+232:   @spec feature_row(map() | keyword()) :: [number()]
+243:   @spec feature_batch([map() | keyword()]) :: %{
+244:           feature_schema_v: pos_integer(),
+245:           feature_names: [feature_name()],
+246:           x: [[number()]]
+247:         }
+262:   @spec normalize_lifg(term()) :: map()
+284:   @spec response_from_complete(term(), integer()) :: map() | nil
+310:   @spec normalize_response(term()) :: map() | nil
+335:   @spec replace_or_prepend(term(), map(), pos_integer()) :: [map()]
+
+
+===== MODULE: Brain.Config =====
+FILE: ./apps/brain/lib/brain/config.ex
+
+18:   @spec assistant() :: assistant()
+68:   @spec assistant_match?(map() | String.t() | atom() | nil) :: boolean()
+
+
+===== MODULE: Brain.PMTG =====
+FILE: ./apps/brain/lib/brain/pmtg.ex
+
+45:   @spec consult([choice()], [map()], keyword()) :: :ok
+51:   @spec consult_sync([choice()], [map()], keyword()) ::
+52:           {:ok,
+53:            %{
+54:              si: si(),
+55:              queries: [query()],
+56:              evidence: [evidence_item()],
+57:              choices: [choice()],
+58:              mode: atom(),
+59:              rerun?: boolean()
+60:            }}
+66:   @spec status(pid() | module()) :: map()
+69:   @spec configure(keyword()) :: :ok
+72:   @spec reset() :: :ok
+188:   @spec resolve(si(), [choice()], keyword()) ::
+189:           {:ok, %{si: si(), queries: [query()], audit: map()}}
+224:   @spec fetch_evidence([query()], [map()], keyword()) :: [evidence_item()]
+305:   @spec fetch_evidence([query()], keyword()) :: [evidence_item()]
+376:   @spec enforce_sense_compatibility([evidence_item()], [map()]) :: [evidence_item()]
+486:   @spec do_rerun(si(), [evidence_item()], keyword()) ::
+487:           {:ok, %{si: si(), choices: [choice()]}}
+
+
+===== MODULE: Brain.Episodes.Writer =====
+FILE: ./apps/brain/lib/brain/episodes/writer.ex
+
+21:   @spec store(map(), [String.t()], mode()) :: :ok
+58:   @spec async_embedding?(mode()) :: boolean()
+65:   @spec normalize_episode_mode(any()) :: mode()
+
+
+===== MODULE: Brain.Thalamus =====
+FILE: ./apps/brain/lib/brain/thalamus.ex
+
+55:   @spec set_params(server :: pid() | atom(), opts :: Keyword.t() | map()) :: :ok
+66:   @spec get_params(server :: pid() | atom()) :: %{
+67:           ofc_weight: float(),
+68:           acc_alpha: float(),
+69:           mood_weights: %{expl: float(), inhib: float(), vigil: float(), plast: float()},
+70:           mood_cap: float()
+71:         }
+105:   @spec reset(server :: pid() | atom()) :: :ok
+113:   @spec status(server :: pid() | atom()) :: {:ok, map()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfPortrait.Model =====
+FILE: ./apps/brain/lib/brain/self_portrait/model.ex
+
+37:   @spec new(keyword() | map()) :: t()
+71:   @spec observe(t(), event()) :: t()
+
+
+===== MODULE: Brain.LIFG.RelationSignals =====
+FILE: ./apps/brain/lib/brain/lifg/relation_signals.ex
+
+14:   @spec count_overlaps(map()) :: {non_neg_integer(), non_neg_integer()}
+31:   @spec homonym_bonus?(map(), candidate) :: boolean()
+
+
+===== MODULE: Brain.LIFG.Priors =====
+FILE: ./apps/brain/lib/brain/lifg/priors.ex
+
+45:   @spec rel_prior(id(), ctx()) :: float()
+62:   @spec parse_id(id()) :: {String.t(), String.t(), String.t()}
+
+
+===== MODULE: Brain.LIFG.Stage2 =====
+FILE: ./apps/brain/lib/brain/lifg/stage2.ex
+
+22:   @spec run(map() | struct(), keyword()) ::
+23:           {:ok, %{si: map() | struct(), event: map()}}
+24:           | {:skip, %{si: map() | struct(), reason: term()}}
+25:           | {:error, term()}
+
+
+===== MODULE: Brain.LIFG.Stage1Bridge =====
+FILE: ./apps/brain/lib/brain/lifg/stage1_bridge.ex
+
+17:   @spec safe_call(map(), keyword(), keyword() | map()) :: any
+35:   @spec normalize_result(term()) :: {:ok, map(), list(), map()} | {:error, term()}
+
+
+===== MODULE: Brain.LIFG.FallbackRerun =====
+FILE: ./apps/brain/lib/brain/lifg/fallback_rerun.ex
+
+47:   @spec maybe_rerun(map(), list(), map(), atom(), number(), keyword()) :: {map(), list()}
+143:   @spec fallback_winner_indices(list()) :: [non_neg_integer()]
+207:   @spec rerun_stage1(map(), map(), atom(), number(), keyword(), integer()) ::
+208:           {stage1_result(), non_neg_integer()}
+
+
+===== MODULE: Brain.LIFG.BoundaryGuard =====
+FILE: ./apps/brain/lib/brain/lifg/boundary_guard.ex
+
+25:   @spec sanitize(si_like | [token]) :: si_like | [token]
+55:   @spec sanitize([token], String.t() | nil) :: [token]
+
+
+===== MODULE: Brain.LIFG.Legacy =====
+FILE: ./apps/brain/lib/brain/lifg/legacy.ex
+
+27:   @spec boosts_inhibitions([choice], number(), atom(), opts_kw) :: {list(), list()}
+
+
+===== MODULE: Brain.LIFG.Reanalysis =====
+FILE: ./apps/brain/lib/brain/lifg/reanalysis.ex
+
+22:   @spec fallback(list(choice), (map() -> boolean()), keyword()) ::
+23:           %{choices: list(choice), flips: non_neg_integer()}
+
+
+===== MODULE: Brain.LIFG.ACCGate =====
+FILE: ./apps/brain/lib/brain/lifg/acc_gate.ex
+
+16:   @spec assess(map(), list(), keyword()) :: {map(), float(), boolean()}
+
+
+===== MODULE: Brain.LIFG.Gate =====
+FILE: ./apps/brain/lib/brain/lifg/gate.ex
+
+38:   @spec stage1_wm_candidates([lifg_choice()] | any(), non_neg_integer(), float()) :: [map()]
+
+
+===== MODULE: Brain.LIFG.Hygiene =====
+FILE: ./apps/brain/lib/brain/lifg/hygiene.ex
+
+15:   @spec run(map(), [choice()], keyword()) ::
+16:           {:ok, %{si: map(), choices: [choice()], audit: map()}} | {:error, term()}
+
+
+===== MODULE: Brain.LIFG.MWE =====
+FILE: ./apps/brain/lib/brain/lifg/mwe.ex
+
+48:   @spec ensure_mwe_candidates(map(), keyword()) :: map()
+142:   @spec absorb_unigrams_into_mwe(map(), keyword()) :: map()
+225:   @spec backfill_real_mwe_from_active_cells(map(), keyword()) :: map()
+352:   @spec backfill_unigrams_from_active_cells(map(), keyword()) :: map()
+464:   @spec heads_for_indices(map(), [integer()]) :: map()
+
+
+===== MODULE: Brain.LIFG.Config =====
+FILE: ./apps/brain/lib/brain/lifg/config.ex
+
+22:   @spec lifg_weights() :: map()
+34:   @spec effective_opts(map()) :: map()
+
+
+===== MODULE: Brain.LIFG.Explanation =====
+FILE: ./apps/brain/lib/brain/lifg/explanation.ex
+
+17:   @spec build(last_like) :: map()
+
+
+===== MODULE: Brain.LIFG.Stage1.Numeric =====
+FILE: ./apps/brain/lib/brain/lifg/stage1/numeric.ex
+
+19:   @spec feature_names() :: [atom()]
+28:   @spec weighted_scores([feature_row()], map() | keyword(), keyword()) :: [float()]
+40:   @spec softmax([number()], keyword()) :: [float()]
+55:   @spec nx_available?() :: boolean()
+
+
+===== MODULE: Brain.LIFG.Choices =====
+FILE: ./apps/brain/lib/brain/lifg/choices.ex
+
+23:   @spec augment([choice], si, number()) :: [choice]
+
+
+===== MODULE: Brain.LIFG.Input =====
+FILE: ./apps/brain/lib/brain/lifg/input.ex
+
+40:   @spec lifg_candidates!(list() | map()) :: [candidate()]
+97:   @spec slate_for(list() | map()) :: slate_map()
+
+
+===== MODULE: Brain.LIFG.Prior =====
+FILE: ./apps/brain/lib/brain/lifg/prior.ex
+
+98:   @spec prior_for_cell(cell_like()) :: float()
+123:   @spec pos_raw(map()) :: String.t() | nil
+156:   @spec tags(map()) :: [String.t()]
+175:   @spec closed_class?(String.t() | nil, map()) :: boolean()
+202:   @spec bucket_for(String.t() | nil, [String.t()], boolean()) :: bucket()
+237:   @spec base_prior(bucket(), boolean()) :: float()
+253:   @spec tweak_for_status(float(), String.t()) :: float()
+
+
+===== MODULE: Brain.LIFG.SemanticsAdapter =====
+FILE: ./apps/brain/lib/brain/lifg/semantics_adapter.ex
+
+28:   @spec adjust_ctx(map()) :: map()
+65:   @spec semantic_tags(term(), term()) :: [String.t()]
+77:   @spec semantic_distance(map(), map()) :: float() | nil
+81:   @spec inject(map()) :: map()
+
+
+===== MODULE: Brain.LIFG.Post =====
+FILE: ./apps/brain/lib/brain/lifg/post.ex
+
+30:   @spec finalize(map(), list(choice), keyword()) ::
+31:           %{si: map(), choices: list(choice), cover: list(map()), flips: non_neg_integer()}
+
+
+===== MODULE: Brain.LIFG.Cover =====
+FILE: ./apps/brain/lib/brain/lifg/cover.ex
+
+16:   @spec resolve_cover(map(), list(choice), keyword()) :: %{si: map(), cover: list(map())}
+
+
+===== MODULE: Brain.LIFG.Guard =====
+FILE: ./apps/brain/lib/brain/lifg/guard.ex
+
+45:   @spec sanitize(si_like | [token]) :: si_like | [token]
+67:   @spec sanitize(si_like, keyword()) :: si_like
+88:   @spec sanitize([token], String.t() | nil) :: [token]
+94:   @spec sanitize([token], keyword()) :: [token]
+
+
+===== MODULE: Brain.LIFG.Stage1 =====
+FILE: ./apps/brain/lib/brain/lifg/stage1.ex
+
+248:   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+251:   @spec run(map(), keyword()) ::
+252:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+454:   @spec run(map(), map() | keyword(), keyword()) ::
+455:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+476:   @spec choose(list(), map() | nil, keyword()) ::
+477:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+701:   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
+702:           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+
+
+===== MODULE: Brain.LIFG.Recorder =====
+FILE: ./apps/brain/lib/brain/lifg/recorder.ex
+
+42:   @spec maybe_record_last(atom() | pid(), atom() | String.t(), map(), list(), map(), map()) :: :ok
+71:   @spec maybe_record_last(atom() | String.t(), map(), list(), map(), map()) :: :ok
+91:   @spec build_last_payload(atom() | String.t(), map(), list(), map(), map()) :: payload
+
+
+===== MODULE: Brain.LIFG.Stage1.Guard =====
+FILE: ./apps/brain/lib/brain/lifg/stage1_guard.ex
+
+22:   @spec guard_token(map(), token()) :: {:ok, token()} | {:drop, :boundary} | {:drop, :chargram}
+52:   @spec boundary_ok?(String.t(), {non_neg_integer(), non_neg_integer()}, boolean()) :: boolean()
+63:   @spec chargram?(String.t(), token()) :: boolean()
+
+
+===== MODULE: Brain.ReflectiveControl =====
+FILE: ./apps/brain/lib/brain/reflective_control.ex
+
+35:   @spec review(String.t(), String.t(), map()) :: {:ok, String.t(), reflection()}
+75:   @spec needed?(map(), String.t()) :: boolean()
+
+
+===== MODULE: Brain.Introspect =====
+FILE: ./apps/brain/lib/brain/introspect.ex
+
+37:   @spec snapshot() :: map()
+44:   @spec snapshot(region) :: map()
+85:   @spec known_regions() :: [region]
+174:   @spec region_state(region) :: map()
+221:   @spec explain_turn(keyword | explain_opts) :: map()
+
+
+===== MODULE: Brain.AffectiveAppraisal =====
+FILE: ./apps/brain/lib/brain/affective_appraisal.ex
+
+125:   @spec appraise(map() | struct()) :: map()
+
+
+===== MODULE: Brain.GoalStack =====
+FILE: ./apps/brain/lib/brain/goal_stack.ex
+
+26:   @spec start_link(keyword()) :: GenServer.on_start()
+31:   @spec push(map() | keyword()) :: {:ok, goal()} | {:error, term()}
+36:   @spec complete(binary(), atom() | binary()) :: :ok | {:error, term()}
+41:   @spec reduce_uncertainty(map() | struct()) :: :ok | {:error, term()}
+64:   @spec restore_active([map()]) :: :ok | {:error, term()}
+69:   @spec active_goals(pos_integer()) :: [goal()]
+77:   @spec status() :: {:ok, map()} | {:error, term()}
+80:   @spec reset() :: :ok | {:error, term()}
+
+
+===== MODULE: Brain.Bus =====
+FILE: ./apps/brain/lib/brain/bus.ex
+
+17:   @spec name() :: bus_name()
+21:   @spec subscribe(String.t()) :: :ok
+27:   @spec unsubscribe(String.t()) :: :ok
+33:   @spec broadcast(String.t(), term()) :: :ok
+39:   @spec broadcast_from(pid(), String.t(), term()) :: :ok
+
+
+===== MODULE: Brain.BasalGanglia =====
+FILE: ./apps/brain/lib/brain/basal_ganglia.ex
+
+24:   @spec status() :: map()
+34:   @spec decide([map()], map(), map(), map()) :: {decision(), float()}
+
+
+===== MODULE: Brain.CycleClock =====
+FILE: ./apps/brain/lib/brain/cycle_clock.ex
+
+29:   @spec ensure_started() :: {:ok, pid()} | {:error, :not_started}
+41:   @spec snapshot() :: map()
+
+
+===== MODULE: Brain.Salience.SelfName =====
+FILE: ./apps/brain/lib/brain/salience/self_name.ex
+
+35:   @spec detect(binary() | list(), keyword()) :: result()
+
+
+===== MODULE: Brain.SelfName =====
+FILE: ./apps/brain/lib/brain/self_name.ex
+
+37:   @spec detect(list(), binary() | nil, keyword()) :: result_t()
+
+
+===== MODULE: Brain.WorkingMemory =====
+FILE: ./apps/brain/lib/brain/working_memory.ex
+
+59:   @spec ingest_stage2(
+60:           wm :: [wm_item()],
+61:           stage2_decisions :: list(),
+62:           now_ms :: non_neg_integer(),
+63:           cfg :: cfg()
+64:         ) :: [wm_item()]
+113:   @spec normalize(map(), non_neg_integer(), keyword()) :: wm_item()
+166:   @spec upsert([wm_item()], wm_item(), cfg()) :: [wm_item()]
+182:   @spec decay([wm_item()], non_neg_integer(), pos_integer()) :: [wm_item()]
+207:   @spec trim([wm_item()], pos_integer()) :: [wm_item()]
+211:   @spec remove([wm_item()], any()) :: {[wm_item()], non_neg_integer()}
+
+
+===== MODULE: Brain.CycleMetrics =====
+FILE: ./apps/brain/lib/brain/cycle_metrics.ex
+
+25:   @spec snapshot(map()) :: snapshot()
+
+
+===== MODULE: Brain.MoodWeights =====
+FILE: ./apps/brain/lib/brain/mood_weights.ex
+
+27:   @spec bias(mood_idx, map(), float()) :: float()
+43:   @spec axes(mood_idx) :: %{expl: float(), inhib: float(), vigil: float(), plast: float()}
+
+
+===== MODULE: Brain.DLPFC =====
+FILE: ./apps/brain/lib/brain/dlpfc.ex
+
+37:   @spec set_opts(Keyword.t() | map()) :: :ok
+48:   @spec reset(server :: pid() | atom()) :: :ok
+54:   @spec status(server :: pid() | atom()) :: map()
+
+
+===== MODULE: Brain.SelfCalibration.Predictor =====
+FILE: ./apps/brain/lib/brain/self_calibration/predictor.ex
+
+13:   @spec predict(map(), keyword()) :: {:ok, Prediction.t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Dataset =====
+FILE: ./apps/brain/lib/brain/self_calibration/dataset.ex
+
+43:   @spec load_jsonl(Path.t()) :: {:ok, [Sample.t()]} | {:error, term()}
+60:   @spec to_rows([Sample.t() | map()]) :: rows()
+
+
+===== MODULE: Brain.SelfCalibration.Artifact =====
+FILE: ./apps/brain/lib/brain/self_calibration/artifact.ex
+
+13:   @spec save(Training.t(), Path.t()) :: :ok | {:error, term()}
+24:   @spec load(Path.t()) :: load_result()
+
+
+===== MODULE: Brain.SelfCalibration.AxonPredictor =====
+FILE: ./apps/brain/lib/brain/self_calibration/axon_predictor.ex
+
+13:   @spec predict(Training.t(), map()) :: {:ok, Prediction.t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Model =====
+FILE: ./apps/brain/lib/brain/self_calibration/model.ex
+
+34:   @spec tiny_linear() :: t()
+63:   @spec predict(map(), t()) :: {:ok, Prediction.t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Comparison =====
+FILE: ./apps/brain/lib/brain/self_calibration/comparison.ex
+
+44:   @spec compare(Evaluation.t(), Evaluation.t(), keyword()) :: {:ok, t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Features =====
+FILE: ./apps/brain/lib/brain/self_calibration/features.ex
+
+8:   @spec build_sample(Brain.SelfModel.t(), keyword()) :: Sample.t()
+
+
+===== MODULE: Brain.SelfCalibration.Logger =====
+FILE: ./apps/brain/lib/brain/self_calibration/logger.ex
+
+13:   @spec log(Sample.t()) :: :ok | {:error, term()}
+21:   @spec log(Sample.t(), keyword()) :: :ok | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Training =====
+FILE: ./apps/brain/lib/brain/self_calibration/training.ex
+
+42:   @spec initialize(map(), keyword()) :: {:ok, t()} | {:error, term()}
+77:   @spec train(map(), keyword()) :: {:ok, t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Evaluator =====
+FILE: ./apps/brain/lib/brain/self_calibration/evaluator.ex
+
+13:   @spec evaluate(Prediction.t(), map() | Sample.t(), keyword()) ::
+14:           {:ok, Evaluation.t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Tensor =====
+FILE: ./apps/brain/lib/brain/self_calibration/tensor.ex
+
+16:   @spec from_rows(map()) :: {:ok, tensor_batch()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.Blend =====
+FILE: ./apps/brain/lib/brain/self_calibration/blend.ex
+
+42:   @spec decide(Prediction.t(), Prediction.t(), Comparison.t(), keyword()) ::
+43:           {:ok, t()} | {:error, term()}
+
+
+===== MODULE: Brain.SelfCalibration.AxonModel =====
+FILE: ./apps/brain/lib/brain/self_calibration/axon_model.ex
+
+15:   @spec build(keyword()) :: Axon.t()
+
+
+===== MODULE: Brain.Curiosity =====
+FILE: ./apps/brain/lib/brain/curiosity.ex
+
+37:   @spec nudge(Keyword.t() | map()) :: :ok
+45:   @spec status(server :: pid() | atom()) :: {:ok, map()} | {:error, term()}
+
+
+===== MODULE: Brain.ATL =====
+FILE: ./apps/brain/lib/brain/atl.ex
+
+28:   @spec ingest(map()) :: map()
+34:   @spec ingest(list(), list()) :: map()
+40:   @spec snapshot() :: map()
+44:   @spec status() :: map()
+48:   @spec reset() :: :ok
+132:   @spec reduce(map()) :: map()
+137:   @spec reduce(list(), list()) :: map()
+223:   @spec attach_sense_candidates(map(), map(), keyword()) :: map()
+369:   @spec promote_sense_candidates_from_slate(map(), keyword()) ::
+370:           %{non_neg_integer() => [map()]}
+462:   @spec finalize(map(), keyword()) :: {map(), map()}
+498:   @spec attach_lifg_pairs(map(), keyword()) :: map()
+
+
+===== MODULE: Brain.AffectLatents =====
+FILE: ./apps/brain/lib/brain/affect_latents.ex
+
+51:   @spec compute(mood_t, ctx_t) :: latents_t
+
+
+===== MODULE: Brain.ControlSignals =====
+FILE: ./apps/brain/lib/brain/control_signals.ex
+
+62:   @spec merge([map() | t()]) :: t()
+95:   @spec clamp(t()) :: t()
+112:   @spec combine([map() | t()]) :: t()
+
+
+===== MODULE: Brain.Hippocampus =====
+FILE: ./apps/brain/lib/brain/hippocampus.ex
+
+56:   @spec encode(map(), map()) :: map()
+70:   @spec write_self_memory(atom() | String.t(), map(), map()) :: map()
+96:   @spec fact(atom() | String.t()) :: term() | nil
+111:   @spec recall(list() | map(), keyword()) :: [recall_result()]
+122:   @spec recall_self_memories(list() | map(), keyword()) :: [recall_result()]
+132:   @spec attach_episodes(map(), keyword()) :: map()
+137:   @spec configure(keyword()) :: :ok
+141:   @spec reset() :: :ok
+144:   @spec snapshot() :: map()
+147:   @spec status() :: map()
+
+
+===== MODULE: Brain.Attention =====
+FILE: ./apps/brain/lib/brain/attention.ex
+
+10:   @spec salience(map(), map()) :: float()
+
+
+===== MODULE: Brain.Frontal =====
+FILE: ./apps/brain/lib/brain/frontal.ex
+
+11:   @spec status() :: map()
+
+
+===== MODULE: Brain.Salience =====
+FILE: ./apps/brain/lib/brain/salience.ex
+
+27:   @spec status() :: map()
+38:   @spec salience_nudge(ctx) :: %{salience_boost: float()}
+
+
+===== MODULE: Brain.Attribution =====
+FILE: ./apps/brain/lib/brain/attribution.ex
+
+14:   @spec target(String.t() | [String.t()] | nil, keyword()) :: target()
+
+
+===== MODULE: Brain.Utils.Safe =====
+FILE: ./apps/brain/lib/brain/utils/safe.ex
+
+16:   @spec to_plain(term()) :: map() | term()
+30:   @spec get(map() | struct(), atom() | String.t(), any()) :: any()
+56:   @spec get_in(map() | struct(), [atom() | String.t()]) :: any()
+65:   @spec ensure_list(term()) :: list()
+
+
+===== MODULE: Brain.Utils.Tokens =====
+FILE: ./apps/brain/lib/brain/utils/tokens.ex
+
+10:   @spec extract_tokens(map() | list(), list()) :: [map()]
+24:   @spec normalize_tokens(list(), binary() | nil) :: [map()]
+70:   @spec has_valid_span?(map()) :: boolean()
+78:   @spec fill_spans_left_to_right([map()], binary()) :: [map()]
+131:   @spec span_from_token(map()) :: {:ok, integer(), integer()} | :error
+214:   @spec build_tokens_from(list()) :: [map()]
+
+
+===== MODULE: Brain.Utils.ControlSignals =====
+FILE: ./apps/brain/lib/brain/utils/control_signals.ex
+
+7:   @spec coalesce_pairs(list()) :: list({binary(), number()})
+
+
+===== MODULE: Brain.Utils.Numbers =====
+FILE: ./apps/brain/lib/brain/utils/numbers.ex
+
+7:   @spec wm_decay_tau_ms() :: float()
+12:   @spec wm_score_bounds() :: {float(), float()}
+20:   @spec clamp01(number()) :: float()
+34:   @spec decay_factor_ms(non_neg_integer(), number()) :: float()
+
+
+===== MODULE: Brain.Cell.Safe =====
+FILE: ./apps/brain/lib/brain/cell/safe.ex
+
+50:   @spec call(GenServer.server(), term(), keyword()) :: {:ok, term()} | {:error, reason()}
+
+
+===== MODULE: Brain.Cell.Telemetry =====
+FILE: ./apps/brain/lib/brain/cell/telemetry.ex
+
+18:   @spec ensure_attached() :: :ok
+
+
+===== MODULE: Brain.Cell.Runtime =====
+FILE: ./apps/brain/lib/brain/cell/runtime.ex
+
+10:   @spec via(binary()) :: {:via, Registry, {module(), binary()}}
+13:   @spec ensure_start_and_cast(Row.t() | binary(), map()) :: :ok
+26:   @spec handle_map_item_activation(map(), map()) :: :ok
+52:   @spec ensure_started(binary(), term()) :: :ok
+
+
+===== MODULE: Brain.MoodHooks =====
+FILE: ./apps/brain/lib/brain/mood_hooks.ex
+
+6:   @spec apply_intent(atom(), number()) :: :ok | term()
+16:   @spec register_activation(map()) :: :ok | term()
+26:   @spec update_wm(list()) :: :ok | term()
+
+
+===== MODULE: Brain.OFC =====
+FILE: ./apps/brain/lib/brain/ofc.ex
+
+101:   @spec status(pid() | atom()) :: map()
+
+
+===== MODULE: Brain.WM.Recall =====
+FILE: ./apps/brain/lib/brain/wm/recall.ex
+
+9:   @spec candidates_for_focus(map() | list(), keyword()) :: [map()]
+
+
+===== MODULE: Brain.WM.Gate =====
+FILE: ./apps/brain/lib/brain/wm/gate.ex
+
+13:   @spec ingest_from_si(map(), map(), keyword()) :: map()
+48:   @spec lifg_pairs_to_tuples(map()) :: list()
+
+
+===== MODULE: Brain.WM.Focus =====
+FILE: ./apps/brain/lib/brain/wm/focus.ex
+
+10:   @spec run(map(), list() | map(), map() | keyword()) ::
+11:           {[wm_item()], non_neg_integer(), non_neg_integer()}
+
+
+===== MODULE: Brain.WM.Policy =====
+FILE: ./apps/brain/lib/brain/wm/policy.ex
+
+62:   @spec acceptable_candidate?(map(), cfg()) :: boolean()
+76:   @spec gate_score_for(map(), number(), cfg()) :: float()
+95:   @spec decide_gate_policy([map()], map(), float(), cfg()) :: {:allow | :block | :boost, float()}
+135:   @spec apply_decay(wm_state(), integer()) :: wm_state()
+147:   @spec evict_if_needed(wm_state()) :: wm_state()
+159:   @spec decay_and_evict(wm_state(), integer()) :: wm_state()
+
+
+===== MODULE: SymbrellaWeb.ChatHistory =====
+FILE: ./apps/symbrella_web/lib/symbrella_web/chat_history.ex
+
+28:   @spec start_link(keyword()) :: GenServer.on_start()
+33:   @spec list() :: [message()]
+38:   @spec append(message() | [message()]) :: :ok
+47:   @spec clear() :: :ok
+
+
+===== MODULE: SymbrellaWeb.BrainRuntime =====
+FILE: ./apps/symbrella_web/lib/symbrella_web/brain_runtime.ex
+
+27:   @spec ensure_optional(module()) :: :ok
+41:   @spec cycle_snapshot() :: map()
+49:   @spec mood_snapshot() :: map()
+61:   @spec introspection_snapshot() :: {:ok, map()} | :error
+76:   @spec brain_snapshot() :: {:ok, map()} | :error
+85:   @spec wm_snapshot() :: {:ok, map()} | :error
+94:   @spec self_model_snapshot() :: map()
+102:   @spec self_portrait_snapshot() :: map()
+129:   @spec region_snapshot(atom()) :: map()
+139:   @spec region_status(atom()) :: map()
+149:   @spec all_region_status() :: map()
+164:   @spec blackboard_history(non_neg_integer()) :: list()
+176:   @spec brain_cells_for_choices([String.t()], [String.t()]) :: list(map())
+
+
+===== MODULE: SymbrellaWeb.HomeLive.MoodBadge =====
+FILE: ./apps/symbrella_web/lib/symbrella_web/live/home_live/mood_badge.ex
+
+8:   @spec build(map() | nil) :: map()
+
+
+===== MODULE: SymbrellaWeb.EpisodesData =====
+FILE: ./apps/symbrella_web/lib/symbrella_web/episodes_data.ex
+
+11:   @spec list_all() :: list()
+
+
+===== MODULE: SymbrellaWeb.HUD.Telemetry =====
+FILE: ./apps/symbrella_web/lib/symbrella_web/hud/telemetry.ex
+
+29:   @spec ensure_attached() :: :ok
+69:   @spec snapshot() :: map()
+
+

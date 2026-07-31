@@ -22,9 +22,9 @@ defmodule SymbrellaWeb.Region.BaseArt do
                vb
                |> String.split(~r/\s+/, trim: true)
                |> Enum.map(fn s ->
-                 case Float.parse(s) do
-                   {f, _} -> f
-                   :error -> 0.0
+                 case Float.parse(String.trim(s)) do
+                   {f, ""} -> f
+                   _ -> 0.0
                  end
                end)
 
@@ -50,9 +50,9 @@ defmodule SymbrellaWeb.Region.BaseArt do
           vb
           |> String.split(~r/\s+/, trim: true)
           |> Enum.map(fn s ->
-            case Float.parse(s) do
-              {f, _} -> f
-              :error -> 0.0
+            case Float.parse(String.trim(s)) do
+              {f, ""} -> f
+              _ -> 0.0
             end
           end)
 

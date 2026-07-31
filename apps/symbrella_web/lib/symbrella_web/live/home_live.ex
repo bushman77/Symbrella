@@ -1123,7 +1123,7 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp numeric_score(score) when is_binary(score) do
     case Float.parse(String.trim(score)) do
-      {parsed, _} -> parsed
+      {parsed, ""} -> parsed
       _ -> nil
     end
   end

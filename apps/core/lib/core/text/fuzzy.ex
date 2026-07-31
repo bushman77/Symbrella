@@ -230,6 +230,7 @@ defmodule Core.Text.Fuzzy do
 
   defp correct_word(word, index, words, max_distance, opts) do
     bare = bare_word(word)
+    protected = Keyword.get(opts, :protected_words, MapSet.new([]))
 
     cond do
       bare == "" ->
@@ -246,6 +247,9 @@ defmodule Core.Text.Fuzzy do
         {corrected, correction(bare, replacement, 0.93, :known_typo)}
 
       String.length(bare) < 4 ->
+        {word, nil}
+
+      MapSet.member?(protected, bare) ->
         {word, nil}
 
       true ->
@@ -490,7 +494,10 @@ defmodule Core.Text.Fuzzy do
   defp plausible_distance?(_word, _candidate, _distance), do: false
 
   defp same_initial?(left, right) do
-    String.first(left) == String.first(right)
+    String.first(left) == String.first(right) or
+      (String.length(left) >= 4 and String.length(right) >= 4 and
+         String.at(left, 1) == String.first(right) and
+         String.first(left) == String.at(right, 1))
   end
 
   defp preserve_question_mark(word, replacement) do

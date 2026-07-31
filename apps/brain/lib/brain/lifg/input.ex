@@ -360,8 +360,8 @@ defmodule Brain.LIFG.Input do
   defp to_float_if_present(n) when is_integer(n), do: n * 1.0
 
   defp to_float_if_present(b) when is_binary(b) do
-    case Float.parse(b) do
-      {f, _} -> f
+    case Float.parse(String.trim(b)) do
+      {f, ""} -> f
       _ -> nil
     end
   end
@@ -378,14 +378,16 @@ defmodule Brain.LIFG.Input do
   # If upstream only gives us a lemma/word, synthesize a POS-tagged id so LIFG can treat it sanely.
   # Keeps anything already shaped like "x|pos|k".
   defp ensure_pos_tagged_id(lemma, cell) when is_binary(lemma) do
-    lemma_norm = String.downcase(String.trim(lemma))
+    # Strip leading/trailing punctuation that survived tokenization
+    lemma_clean = String.replace(lemma, ~r/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u, "")
+    lemma_norm = String.downcase(String.trim(lemma_clean))
 
     cond do
       lemma_norm == "" ->
         nil
 
-      String.contains?(lemma, "|") ->
-        lemma
+      String.contains?(lemma_clean, "|") ->
+        lemma_clean
 
       MapSet.member?(@self_names, lemma_norm) ->
         "#{lemma_norm}|proper_noun|fallback"
@@ -399,5 +401,4 @@ defmodule Brain.LIFG.Input do
         "#{lemma_norm}|#{pos}|fallback"
     end
   end
-
 end

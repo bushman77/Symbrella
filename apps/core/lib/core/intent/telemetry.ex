@@ -36,8 +36,8 @@ defmodule Core.Intent.Telemetry do
   defp normalize_confidence(c) when is_float(c), do: c
 
   defp normalize_confidence(c) when is_binary(c) do
-    case Float.parse(c) do
-      {f, _} -> f
+    case Float.parse(String.trim(c)) do
+      {f, ""} -> f
       _ -> 0.0
     end
   end

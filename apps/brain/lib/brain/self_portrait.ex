@@ -87,12 +87,53 @@ defmodule Brain.SelfPortrait do
     portrait0 = state.portrait
     portrait = Model.observe(portrait0, ev)
     maybe_emit_monitor(portrait0, portrait)
+    maybe_emit_salience(portrait)
 
     {:noreply, %{state | portrait: portrait}}
   end
 
   @impl true
   def handle_cast(_msg, state), do: {:noreply, state}
+
+  # ── Salience detection ──────────────────────────────────────────────────────
+  #
+  # When SelfPortrait detects something worth noticing (anomalies, pattern
+  # shifts, repeated events), emit a telemetry event. DriveLoop listens for
+  # this and decides whether to trigger an endogenous nudge based on idle time.
+
+  defp maybe_emit_salience(portrait) do
+    patterns = Map.get(portrait, :patterns, %{})
+    traits = Map.get(portrait, :traits, %{})
+
+    # Salience conditions — something interesting is happening
+    lifg_anomalies = Map.get(patterns, :lifg_pos_anomalies, 0)
+    boundary_drops = Map.get(patterns, :boundary_drops, 0)
+    fallback_wins = Map.get(patterns, :fallback_wins, 0)
+    gate_failures = Map.get(patterns, :gate_failures, 0)
+
+    # Curiosity bias from traits — higher bias = more likely to find things salient
+    curiosity_bias = Map.get(traits, :curiosity_bias, 0.5)
+
+    salient? =
+      lifg_anomalies > 0 or
+        boundary_drops > 2 or
+        fallback_wins > 0 or
+        gate_failures > 0
+
+    if salient? do
+      :telemetry.execute(
+        [:brain, :self_portrait, :salience],
+        %{
+          lifg_anomalies: lifg_anomalies,
+          boundary_drops: boundary_drops,
+          fallback_wins: fallback_wins,
+          gate_failures: gate_failures,
+          curiosity_bias: curiosity_bias
+        },
+        %{}
+      )
+    end
+  end
 
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, state.portrait, state}

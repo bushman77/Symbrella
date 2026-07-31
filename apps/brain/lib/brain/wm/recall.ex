@@ -117,7 +117,7 @@ defmodule Brain.WM.Recall do
 
   defp as_float(n) when is_binary(n) do
     case Float.parse(String.trim(n)) do
-      {f, _} -> f
+      {f, ""} -> f
       _ -> 0.0
     end
   end

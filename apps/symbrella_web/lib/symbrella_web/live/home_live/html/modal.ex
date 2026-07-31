@@ -427,7 +427,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
   defp safe_float(v) when is_binary(v) do
     case Float.parse(String.trim(v)) do
-      {f, _} -> f
+      {f, ""} -> f
       _ -> nil
     end
   end

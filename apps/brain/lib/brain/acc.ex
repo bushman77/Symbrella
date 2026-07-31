@@ -438,9 +438,9 @@ defmodule Brain.ACC do
               if v, do: 1.0, else: 0.0
 
             {v, _} when is_binary(v) ->
-              case Float.parse(v) do
-                {f, _} -> f
-                :error -> :nope
+              case Float.parse(String.trim(v)) do
+                {f, ""} -> f
+                _ -> :nope
               end
 
             {_, v} when is_integer(v) ->
@@ -453,9 +453,9 @@ defmodule Brain.ACC do
               if v, do: 1.0, else: 0.0
 
             {_, v} when is_binary(v) ->
-              case Float.parse(v) do
-                {f, _} -> f
-                :error -> :nope
+              case Float.parse(String.trim(v)) do
+                {f, ""} -> f
+                _ -> :nope
               end
 
             _ ->
@@ -479,9 +479,9 @@ defmodule Brain.ACC do
   defp coerce_default(d) when is_float(d), do: d
 
   defp coerce_default(d) when is_binary(d) do
-    case Float.parse(d) do
-      {f, _} -> f
-      :error -> nil
+    case Float.parse(String.trim(d)) do
+      {f, ""} -> f
+      _ -> nil
     end
   end
 

@@ -28,7 +28,7 @@ defmodule Core.Response.OverrideSkills.SelfState do
       self_state_feeling_query?(text) ->
         decision =
           decision
-          |> Decision.put(tone: :neutral, mode: :explainer, action: :answer)
+          |> Decision.put(tone: :warm, mode: :explainer, action: :answer)
           |> Decision.add_override(:self_state_feeling_answer)
 
         {:ok,
@@ -36,7 +36,7 @@ defmodule Core.Response.OverrideSkills.SelfState do
           %{
             id: :self_state_feeling,
             reason: :self_state_feeling_query,
-            inline_text: SelfStateSummary.feeling_answer()
+            llm_prompt: :self_state_feeling
           }}}
 
       self_portrait_query?(text) ->

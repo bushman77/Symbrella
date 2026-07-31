@@ -432,8 +432,8 @@ defmodule Brain.ATL do
   defp as_float(num) when is_number(num), do: num
 
   defp as_float(str) when is_binary(str) do
-    case Float.parse(str) do
-      {f, _} -> f
+    case Float.parse(String.trim(str)) do
+      {f, ""} -> f
       _ -> 0.0
     end
   end

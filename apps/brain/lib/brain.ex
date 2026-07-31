@@ -1014,8 +1014,8 @@ defmodule Brain do
           conf0 * 1.0
 
         is_binary(conf0) ->
-          case Float.parse(conf0) do
-            {f, _} -> f
+          case Float.parse(String.trim(conf0)) do
+            {f, ""} -> f
             _ -> 0.0
           end
 

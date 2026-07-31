@@ -433,8 +433,8 @@ defmodule Brain.SelfPortrait.Model do
   defp num_or_nil(v) when is_float(v), do: v
 
   defp num_or_nil(v) when is_binary(v) do
-    case Float.parse(v) do
-      {f, _} -> f
+    case Float.parse(String.trim(v)) do
+      {f, ""} -> f
       _ -> nil
     end
   end

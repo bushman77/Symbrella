@@ -61,7 +61,7 @@ defmodule Symbrella.Application do
         [
           # Self model (subscribes to Blackboard topic)
           {Brain.SelfPortrait, []},
-
+          Brain.DriveLoop,
           # ML consumer that finalizes turn records
           Brain.ML
 

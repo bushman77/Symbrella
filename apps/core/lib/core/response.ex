@@ -142,6 +142,7 @@ defmodule Core.Response do
         forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
 
         inline_text = OverrideSkills.deterministic_inline_text(skill)
+        llm_prompt_type = OverrideSkills.llm_prompt_override(skill)
 
         {text0, response_source, response_fallback_reason} =
           cond do
@@ -150,6 +151,9 @@ defmodule Core.Response do
 
             is_binary(inline_text) ->
               {inline_text, :inline_skill, nil}
+
+            is_atom(llm_prompt_type) ->
+              llm_or_template(text_in, features, decision, mood, intent, llm_prompt_type)
 
             true ->
               llm_or_template(text_in, features, decision, mood, intent)
@@ -360,8 +364,8 @@ defmodule Core.Response do
     Memory.forced_identity_text(text_in, extracted_name, name_claim?)
   end
 
-  defp llm_or_template(text_in, features, decision, mood, intent) do
-    case LlmSynthesis.generate(text_in, features, decision, mood) do
+  defp llm_or_template(text_in, features, decision, mood, intent, prompt_type \\ nil) do
+    case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
       {:ok, llm_text} ->
         {llm_text, :llm, nil}
 

@@ -33,7 +33,6 @@ defmodule Core.Response.OverrideSkills do
              :illicit_request_redirect,
              :time,
              :mood_indices,
-             :self_state_feeling,
              :self_portrait,
              :runtime_self_check,
              :trust_repair,
@@ -46,6 +45,10 @@ defmodule Core.Response.OverrideSkills do
   end
 
   def deterministic_inline_text(_), do: nil
+
+  @spec llm_prompt_override(map() | nil) :: atom() | nil
+  def llm_prompt_override(%{llm_prompt: prompt}) when is_atom(prompt), do: prompt
+  def llm_prompt_override(_), do: nil
 
   @spec read_only_mood_query?(String.t()) :: boolean()
   defdelegate read_only_mood_query?(text), to: SelfState

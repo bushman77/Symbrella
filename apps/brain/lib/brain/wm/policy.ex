@@ -344,7 +344,7 @@ defmodule Brain.WM.Policy do
 
   defp numeric(value) when is_binary(value) do
     case Float.parse(String.trim(value)) do
-      {parsed, _} -> parsed
+      {parsed, ""} -> parsed
       _ -> 0.0
     end
   end

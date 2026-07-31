@@ -306,7 +306,7 @@ defmodule Brain.LIFG.Stage2 do
 
   defp num(v) when is_binary(v) do
     case Float.parse(String.trim(v)) do
-      {f, _} -> f
+      {f, ""} -> f
       _ -> 0.0
     end
   end

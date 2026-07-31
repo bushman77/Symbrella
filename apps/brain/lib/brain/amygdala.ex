@@ -857,7 +857,7 @@ defmodule Brain.Amygdala do
 
   defp to_float(v, default) when is_binary(v) do
     case Float.parse(String.trim(v)) do
-      {n, _} -> n
+      {n, ""} -> n
       _ -> default * 1.0
     end
   end

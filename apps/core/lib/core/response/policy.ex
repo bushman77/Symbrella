@@ -7,6 +7,7 @@ defmodule Core.Response.Policy do
   • Safety/guardrail & hostility classification helpers.
   • Matrix-style decision: (features) → %{tone, mode, action, ...}.
   • Lightweight overrides: benign override, guardrail intercept, anti-sticky.
+  • Endogenous nudge handling for system-initiated impulses.
 
   This is intentionally deterministic and explainable.
   """
@@ -15,6 +16,8 @@ defmodule Core.Response.Policy do
     ask_info brain_introspect code command debug define explain help instruction memory_write
     question refactor review plan diagram bug optimize benchmark tell
   )a
+
+  @endogenous_intents ~w(endogenous_nudge curiosity_impulse)a
 
   @type features :: %{
           required(:intent) => atom,
@@ -52,6 +55,10 @@ defmodule Core.Response.Policy do
 
     base =
       cond do
+        # Endogenous nudge — system initiating, not responding to user input
+        f.intent in @endogenous_intents ->
+          endogenous_decision(f)
+
         # Guardrail intercept (unless approved)
         f.guardrail? and not f.approve_token? ->
           %{
@@ -92,7 +99,7 @@ defmodule Core.Response.Policy do
           }
 
         # Social intents
-        f.intent in [:greeting, :gratitude, :smalltalk] ->
+        f.intent in [:greet, :greeting, :gratitude, :smalltalk] ->
           tone = if f.vig >= 0.95, do: :deescalate, else: :warm
 
           %{
@@ -138,6 +145,86 @@ defmodule Core.Response.Policy do
       self_state: Map.get(f, :self_state, %{}),
       self_state_effects: self_state_effects
     }
+  end
+
+  # ── Endogenous nudge decision ───────────────────────────────────────────────
+  #
+  # System-initiated impulses from Brain.DriveLoop → Curiosity pipeline.
+  # These are NOT responses to user input. The "text" field contains the
+  # curiosity proposal or internal observation, not user text.
+  # Confidence comes from impulse strength, not intent classification.
+
+  defp endogenous_decision(f) do
+    cond do
+      # High inhibition + low confidence → dampen or suppress
+      f.inh > 0.8 and f.confidence_bucket == :low ->
+        %{
+          tone: :neutral,
+          mode: :nudge,
+          action: :suppress,
+          scores: %{
+            profile: :reserved_nudge,
+            inhibition: f.inh,
+            reason: :high_inhibition_low_confidence
+          },
+          overrides: [:high_inhibition_dampened]
+        }
+
+      # High inhibition but decent confidence → surface gently
+      f.inh > 0.8 ->
+        %{
+          tone: :neutral,
+          mode: :nudge,
+          action: :surface,
+          scores: %{
+            profile: :reserved_nudge,
+            inhibition: f.inh,
+            confidence: f.confidence_bucket
+          },
+          overrides: [:high_inhibition_gentle]
+        }
+
+      # High curiosity + high vigilance → surface with warmth
+      f.exp > 0.7 and f.vig > 0.7 ->
+        %{
+          tone: :warm,
+          mode: :nudge,
+          action: :surface,
+          scores: %{
+            profile: :curious_nudge,
+            exploration: f.exp,
+            vigilance: f.vig,
+            confidence: f.confidence_bucket
+          },
+          overrides: []
+        }
+
+      # Extreme vigilance → don't nudge, system is stressed
+      f.vigilance_bucket == :extreme ->
+        %{
+          tone: :neutral,
+          mode: :nudge,
+          action: :suppress,
+          scores: %{
+            profile: :vigilance_suppress,
+            vigilance: f.vigilance_bucket
+          },
+          overrides: [:extreme_vigilance_suppress]
+        }
+
+      # Default nudge — moderate curiosity, normal state
+      true ->
+        %{
+          tone: :neutral,
+          mode: :nudge,
+          action: :surface,
+          scores: %{
+            profile: :standard_nudge,
+            confidence: f.confidence_bucket
+          },
+          overrides: []
+        }
+    end
   end
 
   defp health_support_decision(f) do
@@ -312,6 +399,10 @@ defmodule Core.Response.Policy do
 
   defp benign_override(tone, overrides, f) do
     cond do
+      # Endogenous nudges don't get benign override — they're already internal
+      f.intent in @endogenous_intents ->
+        {tone, overrides}
+
       # Do not bump calm explainer; keep neutral for high vigilance.
       meta_explainer?(f) ->
         {tone, overrides}
@@ -326,10 +417,15 @@ defmodule Core.Response.Policy do
 
   # If prior deescalation is hinted but vigilance has cooled, lift to neutral.
   defp anti_sticky(tone, overrides, f) do
-    if f.tone_hint == :deescalate and f.vig < 0.75 and tone == :deescalate do
-      {:neutral, [:anti_sticky | overrides]}
-    else
+    # Endogenous nudges skip anti-sticky — they're not responses to prior turns
+    if f.intent in @endogenous_intents do
       {tone, overrides}
+    else
+      if f.tone_hint == :deescalate and f.vig < 0.75 and tone == :deescalate do
+        {:neutral, [:anti_sticky | overrides]}
+      else
+        {tone, overrides}
+      end
     end
   end
 
@@ -340,6 +436,21 @@ defmodule Core.Response.Policy do
     cond do
       base.mode == :supportive_care ->
         {base, tone, overrides, effects}
+
+      f.intent in [:greeting, :greet, :gratitude, :smalltalk] ->
+        {base, tone, overrides, effects}
+
+      # Endogenous nudges respect stabilize_before_acting — don't nudge if unstable
+      f.intent in @endogenous_intents and :stabilize_before_acting in effects ->
+        {
+          base
+          |> Map.put(:mode, :nudge)
+          |> Map.put(:action, :suppress)
+          |> Map.update(:scores, %{self_state: :stabilize}, &Map.put(&1, :self_state, :stabilize)),
+          :neutral,
+          [:self_state_stabilize | overrides],
+          effects
+        }
 
       :stabilize_before_acting in effects ->
         {

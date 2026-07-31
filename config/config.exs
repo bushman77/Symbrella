@@ -95,8 +95,9 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  # model_path: Path.expand("\~/models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"),
-  model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/qwen2.5-7b-instruct-gguf/Qwen2.5-7B-Instruct-Q4_K_M.gguf"),
+  # model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
+  # model_path: "/home/ubuntu/models/mythomax-l2-13b.Q4_K_M.gguf",
   llama_server: "llama-server",
   # Synchronous boot is handled by Llm.BootGate. Keep the GenServer's own
   # handle_continue autostart off so there is a single startup path.

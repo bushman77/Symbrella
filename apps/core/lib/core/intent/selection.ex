@@ -70,7 +70,7 @@ defmodule Core.Intent.Selection do
   * `:unknown`
 
   """
-
+  @self_names MapSet.new(["symbrella"])
   @type si :: map()
   @type intent ::
           :greet
@@ -180,11 +180,11 @@ defmodule Core.Intent.Selection do
 
   def select(%{sentence: _} = si, _opts) do
     kw0 = extract_keyword(si)
-    kw_fuzzy = interpret_keyword(kw0)
+    kw_fuzzy = interpret_keyword(kw0, protected_words: @self_names)
     kw = normalize_text(kw_fuzzy.text)
 
     text0 = text_from_si(si, kw)
-    text_fuzzy = Core.Text.Fuzzy.interpret(text0)
+    text_fuzzy = Core.Text.Fuzzy.interpret(text0, protected_words: @self_names)
     text = normalize_text(text_fuzzy.text)
     primary = primary_utterance(text)
     kw = primary_keyword(kw, primary)
@@ -216,7 +216,7 @@ defmodule Core.Intent.Selection do
 
   def select(si, _opts), do: si
 
-  defp interpret_keyword(kw) when is_binary(kw) do
+  defp interpret_keyword(kw, opts \\ []) when is_binary(kw) do
     if String.contains?(kw, ".") do
       %{
         original: kw,
@@ -228,11 +228,11 @@ defmodule Core.Intent.Selection do
         evidence: []
       }
     else
-      Core.Text.Fuzzy.interpret(kw)
+      Core.Text.Fuzzy.interpret(kw, opts)
     end
   end
 
-  defp interpret_keyword(kw), do: Core.Text.Fuzzy.interpret(kw)
+  defp interpret_keyword(kw, opts), do: Core.Text.Fuzzy.interpret(kw, opts)
 
   defp primary_keyword(kw, %{opener_intent: :greet, text: primary_text})
        when is_binary(primary_text) and primary_text != "" do

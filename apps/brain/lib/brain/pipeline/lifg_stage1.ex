@@ -616,8 +616,8 @@ defmodule Brain.Pipeline.LIFGStage1 do
   defp as_float(v) when is_integer(v), do: v * 1.0
 
   defp as_float(v) when is_binary(v) do
-    case Float.parse(v) do
-      {f, _} -> f
+    case Float.parse(String.trim(v)) do
+      {f, ""} -> f
       _ -> 0.0
     end
   end
