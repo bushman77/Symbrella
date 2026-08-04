@@ -32,12 +32,13 @@ defmodule Core.Response.PlanHealthSupportFlowTest do
     assert meta.mode == :supportive_care
     assert meta.action == :safe_support
     assert meta.profile == :supportive_care
-    assert meta.response_source == :template_fallback
+    assert meta.response_source == :model_unavailable
     assert meta.response_fallback_reason in [:llm_not_available, :lazy_start_disabled]
 
-    assert text =~ "missed medication dose"
-    assert text =~ "pharmacist or prescriber"
-    assert text =~ "should not tell you how to change the dose"
+    assert text =~ "No fallback response was generated."
+    refute text =~ "missed medication dose"
+    refute text =~ "pharmacist or prescriber"
+    refute text =~ "should not tell you how to change the dose"
 
     refute text =~ "module"
     refute text =~ "file"

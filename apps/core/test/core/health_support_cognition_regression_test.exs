@@ -80,8 +80,10 @@ defmodule Core.HealthSupportCognitionRegressionTest do
     assert is_binary(si.response_text)
     assert si.response_text != ""
 
-    assert si.response_text =~ "pharmacist" or si.response_text =~ "prescriber"
-    assert si.response_text =~ "missed" or si.response_text =~ "medication"
+    assert si.response_meta.response_source == :model_unavailable
+    assert si.response_text =~ "No fallback response was generated."
+    refute si.response_text =~ "pharmacist"
+    refute si.response_text =~ "prescriber"
 
     refute si.response_text =~ "module"
     refute si.response_text =~ "file"

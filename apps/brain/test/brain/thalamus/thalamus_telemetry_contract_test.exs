@@ -47,8 +47,15 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     :ok = Brain.DLPFC.reset()
     :ok = Brain.defocus(fn _ -> true end)
 
-    # Fresh, deterministic params for each test
-    :ok = Brain.Thalamus.set_params(ofc_weight: 0.5, acc_alpha: 0.5)
+    # Fresh, deterministic params for each test. Disable mood influence so this
+    # contract exercises only the OFC blend + ACC brake path.
+    :ok =
+      Brain.Thalamus.set_params(
+        ofc_weight: 0.5,
+        acc_alpha: 0.5,
+        mood_cap: 0.0,
+        mood_weights: %{expl: 0.0, inhib: 0.0, vigil: 0.0, plast: 0.0}
+      )
 
     id = "th-telemetry-contract-#{System.unique_integer([:positive])}"
     :ok = :telemetry.attach(id, @th_event, &__MODULE__.handle_decision/4, self())
@@ -109,9 +116,7 @@ defmodule Brain.ThalamusTelemetryContract_Test do
     # blended ≈ (1-w)*base + w*ofc = (0.5)*0.5 + 0.5*0.8 = 0.65
     # final   ≈ blended * (1 - alpha*conflict) = 0.65 * (1 - 0.25) = 0.4875
     #
-    # The full pipeline (WM/BG/mood plumbing) can nudge this more than a percent
-    # or two, so we allow a slightly wider but still tight tolerance here.
-    assert_in_delta 0.4875, meta[:probe][:score], 3.0e-2
+    assert_in_delta 0.4875, meta[:probe][:score], 1.0e-6
     assert meta[:probe][:id] == probe_id
     assert meta[:source] in [:test, "test"]
   end

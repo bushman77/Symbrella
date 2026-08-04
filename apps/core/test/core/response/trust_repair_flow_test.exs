@@ -20,8 +20,10 @@ defmodule Core.Response.TrustRepairFlowTest do
     assert meta.profile == :trust_repair
     assert :trust_repair in meta.overrides
 
-    assert text =~ "You may be right to challenge me"
-    assert text =~ "what felt dishonest"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "You may be right to challenge me"
+    refute text =~ "what felt dishonest"
     refute text =~ "next concrete target"
     refute text =~ "engineering move"
   end

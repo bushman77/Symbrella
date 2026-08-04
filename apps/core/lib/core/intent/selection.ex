@@ -216,7 +216,7 @@ defmodule Core.Intent.Selection do
 
   def select(si, _opts), do: si
 
-  defp interpret_keyword(kw, opts \\ []) when is_binary(kw) do
+  defp interpret_keyword(kw, opts) when is_binary(kw) do
     if String.contains?(kw, ".") do
       %{
         original: kw,

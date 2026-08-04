@@ -27,6 +27,7 @@ defmodule Core.Text.Fuzzy do
   @known_corrections %{
     "adress" => "address",
     "agian" => "again",
+    "alot" => "a lot",
     "answr" => "answer",
     "bcuz" => "because",
     "becuase" => "because",
@@ -63,28 +64,35 @@ defmodule Core.Text.Fuzzy do
     "msg" => "message",
     "nmae" => "name",
     "naem" => "name",
+    "occured" => "occurred",
     "plese" => "please",
     "pleae" => "please",
     "pls" => "please",
     "plz" => "please",
     "quitiapine" => "quetiapine",
     "quietapine" => "quetiapine",
+    "recieved" => "received",
     "recrod" => "record",
     "recal" => "recall",
     "remeber" => "remember",
+    "remeberd" => "remembered",
     "rember" => "remember",
     "remmeber" => "remember",
     "remembber" => "remember",
     "rmeember" => "remember",
+    "seperate" => "separate",
     "sotre" => "store",
     "teh" => "the",
     "thier" => "their",
     "thign" => "thing",
     "thnks" => "thanks",
+    "thru" => "through",
+    "tho" => "though",
     "thx" => "thanks",
     "transalte" => "translate",
     "tranlsate" => "translate",
     "u" => "you",
+    "untill" => "until",
     "waht" => "what",
     "wahts" => "whats",
     "wat" => "what",
@@ -92,6 +100,8 @@ defmodule Core.Text.Fuzzy do
     "wer" => "where",
     "wher" => "where",
     "whre" => "where",
+    "wich" => "which",
+    "wierd" => "weird",
     "whta" => "what",
     "wht" => "what",
     "wont" => "will not",
@@ -108,9 +118,9 @@ defmodule Core.Text.Fuzzy do
     color could did do does drugs english explain favorite fix forgot have hello
     help hippocampus home homework house how i in is issue know live location me
     mean memory message mix my name place please quetiapine recall remember
-    richmond risks run save show sister sleep sleeping state store tell test
+    remembered richmond risks run save show sister sleep sleeping state store tell test
     thanks that the their there thing think this time to translate trouble what whats
-    when where who why will you your
+    when where which who why will you your
   )
 
   @context_frames [
@@ -218,14 +228,15 @@ defmodule Core.Text.Fuzzy do
     words = String.split(text, " ", trim: true)
     bare_words = Enum.map(words, &bare_word/1)
 
-    words
-    |> Enum.with_index()
-    |> Enum.map(fn {word, index} -> correct_word(word, index, bare_words, max_distance, opts) end)
-    |> Enum.reduce({[], []}, fn {word, correction}, {words, corrections} ->
-      corrections = if correction, do: corrections ++ [correction], else: corrections
-      {words ++ [word], corrections}
-    end)
-    |> then(fn {words, corrections} -> {Enum.join(words, " "), corrections} end)
+    {corrected_words, corrections} =
+      words
+      |> Enum.with_index()
+      |> Enum.map(fn {word, index} ->
+        correct_word(word, index, bare_words, max_distance, opts)
+      end)
+      |> Enum.unzip()
+
+    {Enum.join(corrected_words, " "), Enum.reject(corrections, &is_nil/1)}
   end
 
   defp correct_word(word, index, words, max_distance, opts) do
@@ -236,15 +247,20 @@ defmodule Core.Text.Fuzzy do
       bare == "" ->
         {word, nil}
 
+      # Check if word is obsolete with a synonym in the DB
+      replacement = obsolete_synonym(bare, opts) ->
+        corrected = preserve_question_mark(word, replacement)
+        {corrected, correction(bare, replacement, 0.90, :obsolete_synonym)}
+
+      replacement = Map.get(@known_corrections, bare) ->
+        corrected = preserve_question_mark(word, replacement)
+        {corrected, correction(bare, replacement, 0.93, :known_typo)}
+
       known_word?(bare, opts) ->
         {word, nil}
 
       bare in @lexicon ->
         {word, nil}
-
-      replacement = Map.get(@known_corrections, bare) ->
-        corrected = preserve_question_mark(word, replacement)
-        {corrected, correction(bare, replacement, 0.93, :known_typo)}
 
       String.length(bare) < 4 ->
         {word, nil}
@@ -263,6 +279,38 @@ defmodule Core.Text.Fuzzy do
     case Keyword.get(opts, :known_word?) do
       fun when is_function(fun, 1) -> fun.(word)
       _ -> db_word_exists?(word)
+    end
+  end
+
+  defp obsolete_synonym(word, opts) do
+    case Keyword.get(opts, :obsolete_synonym?) do
+      false -> nil
+      _ -> db_obsolete_synonym(word)
+    end
+  end
+
+  defp db_obsolete_synonym(word) do
+    if db_started?() and Code.ensure_loaded?(Db) and
+         function_exported?(Db, :brain_cells_for_norm, 1) do
+      cells = apply(Db, :brain_cells_for_norm, [word])
+
+      all_inactive? =
+        cells != [] and
+          Enum.all?(cells, fn c ->
+            Map.get(c, :status) == "inactive" or Map.get(c, :status) == :inactive
+          end)
+
+      if all_inactive? do
+        cells
+        |> Enum.flat_map(fn c -> Map.get(c, :synonyms, []) end)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> List.first()
+      else
+        nil
+      end
+    else
+      nil
     end
   end
 
@@ -288,8 +336,8 @@ defmodule Core.Text.Fuzzy do
       distance > 0 and distance <= max_distance and plausible_distance?(bare, candidate, distance) and
         same_initial?(bare, candidate)
     end)
-    |> Enum.sort_by(fn {candidate, distance, score, reason} ->
-      {-score, distance, abs(String.length(candidate) - String.length(bare)), reason_rank(reason)}
+    |> Enum.sort_by(fn {_candidate, distance, score, reason} ->
+      {-score, distance, reason_rank(reason)}
     end)
     |> clear_winner()
     |> case do
@@ -330,13 +378,7 @@ defmodule Core.Text.Fuzzy do
 
   defp clear_winner([winner]), do: winner
 
-  defp clear_winner([{_candidate, _distance, score, _reason} = winner | rest]) do
-    {_candidate, _distance, second_score, _reason} = List.first(rest)
-
-    if score - second_score >= 0.06 do
-      winner
-    end
-  end
+  defp clear_winner([winner | _rest]), do: winner
 
   defp reason_rank(:context_frame), do: 0
   defp reason_rank(:pgvector_context), do: 1
@@ -384,7 +426,8 @@ defmodule Core.Text.Fuzzy do
   defp db_candidate_opts(opts) do
     [
       limit: Keyword.get(opts, :candidate_limit, 12),
-      only_active: Keyword.get(opts, :only_active, true)
+      only_active: Keyword.get(opts, :only_active, true),
+      min_similarity: Keyword.get(opts, :min_similarity, 0.28)
     ]
   end
 

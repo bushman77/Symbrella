@@ -28,15 +28,10 @@ defmodule Brain.Telemetry do
   Safe to call multiple times (subsequent calls are ignored).
   """
   def attach!() do
-    try do
-      :telemetry.attach(@handler_id, @event, &__MODULE__.handle_lifg_stop/4, nil)
-      :ok
-    rescue
-      ArgumentError ->
-        # already attached (or invalid args); treat as OK for "attach once" semantics
-        :ok
-    catch
-      :error, {:badarg, _} -> :ok
+    case :telemetry.attach(@handler_id, @event, &__MODULE__.handle_lifg_stop/4, nil) do
+      :ok -> :ok
+      {:error, :already_exists} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -44,13 +39,10 @@ defmodule Brain.Telemetry do
   Detach the logger handler. No-op if not attached.
   """
   def detach!() do
-    try do
-      :telemetry.detach(@handler_id)
-      :ok
-    rescue
-      ArgumentError -> :ok
-    catch
-      :error, {:badarg, _} -> :ok
+    case :telemetry.detach(@handler_id) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

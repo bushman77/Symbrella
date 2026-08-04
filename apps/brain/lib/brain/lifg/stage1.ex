@@ -963,11 +963,13 @@ defmodule Brain.LIFG.Stage1 do
         fallback_winner? = fallback_sense_id?(chosen_id)
         fallback_only? = fallback_winner? and length(ranked) == 1
 
+        closed_class_winner? =
+          Enum.any?(cand_list, fn c ->
+            sense_id_for(c, token_phrase) == chosen_id and closed_class_candidate?(c)
+          end)
+
         singleton_closed_class? =
-          length(ranked) == 1 and
-            Enum.any?(cand_list, fn c ->
-              sense_id_for(c, token_phrase) == chosen_id and closed_class_candidate?(c)
-            end)
+          length(ranked) == 1 and closed_class_winner?
 
         top_p = reliability_capped_top_p(top_p0, fallback_winner?, fallback_only?)
 
@@ -1007,12 +1009,17 @@ defmodule Brain.LIFG.Stage1 do
 
         alt_ids =
           cond do
-            is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? -> [runner_up_id]
-            is_binary(runner_up_id) and margin < ctx.margin_thr -> [runner_up_id]
-            true -> []
+            is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? ->
+              [runner_up_id]
+
+            is_binary(runner_up_id) and not closed_class_winner? and margin < ctx.margin_thr ->
+              [runner_up_id]
+
+            true ->
+              []
           end
 
-        margin_weak? = margin < ctx.margin_thr
+        margin_weak? = margin < ctx.margin_thr and not closed_class_winner?
 
         low_confidence? =
           not singleton_closed_class? and
@@ -2649,7 +2656,7 @@ defmodule Brain.LIFG.Stage1 do
   defp previous_choice_pos_family(_), do: nil
 
   defp context_bias_for(:preposition, candidate_family)
-       when candidate_family in [:noun, :proper_noun, :phrase],
+       when candidate_family in [:noun, :proper_noun, :pronoun, :phrase],
        do: 0.18
 
   defp context_bias_for(:preposition, candidate_family)

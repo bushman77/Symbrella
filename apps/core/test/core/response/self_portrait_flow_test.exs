@@ -3,7 +3,7 @@ defmodule Core.Response.SelfPortraitFlowTest do
 
   alias Core.Response
 
-  test "plan/2 answers self portrait access directly instead of scribe fallback" do
+  test "plan/2 routes self portrait access to the model instead of scribe fallback" do
     si = %{
       intent: :ask,
       keyword: "self portrait",
@@ -29,18 +29,16 @@ defmodule Core.Response.SelfPortraitFlowTest do
     assert meta.chosen_skill == :self_portrait
     assert :self_portrait_answer in meta.overrides
 
-    assert text =~ "Brain dashboard"
-    assert text =~ "/brain"
-    assert text =~ "Brain.SelfPortrait.snapshot()"
-    assert text =~ "Brain.Introspect.snapshot(:self_portrait)"
-    assert text =~ "Current live summary:"
-    assert text =~ "software self-state snapshot"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Brain dashboard"
+    refute text =~ "Current live summary:"
 
     refute text =~ "quick TODO list"
     refute text =~ "short outline"
   end
 
-  test "plan/2 answers runtime self-check directly instead of scribe fallback" do
+  test "plan/2 routes runtime self-check to the model instead of scribe fallback" do
     si = %{
       intent: :unknown,
       keyword: "dangerous",
@@ -66,9 +64,10 @@ defmodule Core.Response.SelfPortraitFlowTest do
     assert meta.chosen_skill == :runtime_self_check
     assert :runtime_self_check in meta.overrides
 
-    assert text =~ "runtime self-check"
-    assert text =~ "Current live summary:"
-    assert text =~ "software state"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "runtime self-check"
+    refute text =~ "Current live summary:"
 
     refute text =~ "quick TODO list"
     refute text =~ "short outline"

@@ -4,6 +4,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.Affect
   alias Core.Response.AffectPolicy
   alias Core.Response.BehavioralState
+  alias Core.Response.LlmPrompt.Compact
   alias Core.Response.LlmPrompt.WorkingMemory
   alias Core.Response.Personality
   alias Core.Response.Topics
@@ -38,6 +39,10 @@ defmodule Core.Response.LlmPrompt do
     guardrail? = truthy?(map_get(features, :guardrail?) || map_get(decision, :guardrail?))
     tone_hint = map_get(mood, :tone_hint)
 
+    features =
+      features
+      |> put_if_present(:skill, skill)
+
     wm_summary = summarize_wm(wm_items)
     self_model = prompt_self_model(features, decision, mood)
     runtime_state = prompt_runtime_state(features, decision, mood)
@@ -61,9 +66,13 @@ defmodule Core.Response.LlmPrompt do
 
     [
       # ── Identity ──
+      "You are Symbrella.",
       "You are Symbrella, a brain-inspired, stateful assistant running locally on the user's machine.",
       "Your responses are shaped by current runtime evidence: mood, working memory, self-state, intent, and recent conversation.",
+      "You are running inside the local Symbrella umbrella.",
       "Do not claim you are a remote-server model, cloud service, or generic hosted chatbot.",
+      "Do not describe Symbrella as a generic tool.",
+      "Do not claim you have no memory or no traces; accept that local-runtime premise and use conversation context, working memory, episodic memory, database rows, logs, and prompt-visible evidence when present.",
 
       # ── Behavioral rules ──
       "Answer ordinary questions as ordinary conversation.",
@@ -78,15 +87,28 @@ defmodule Core.Response.LlmPrompt do
       # ── Behavioral shaping (translated from internal state) ──
       tone_directive(tone, tone_hint),
       BehavioralState.directive(behavioral_state),
+      Compact.runtime_state(runtime_state),
       self_model_shaping(self_model),
       runtime_state_shaping(runtime_state),
+      Compact.comprehension(comprehension),
       comprehension_shaping(comprehension),
+      Compact.symbolic_frame(symbolic_frame),
       symbolic_frame_shaping(symbolic_frame),
+      Compact.response_policy(response_policy),
       response_policy_shaping(response_policy),
       decision_shaping(intent, mode, action, skill, guardrail?),
       personality_shaping(personality),
+      Compact.affect(affect),
       affect_shaping(affect),
       response_profile_context(response_profile),
+      Compact.response_posture(
+        features,
+        decision,
+        response_profile,
+        comprehension,
+        symbolic_frame,
+        guardrail?
+      ),
       response_posture_shaping(
         features,
         decision,
@@ -161,7 +183,7 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add(stability < 0.4, "your self-state is wobbly")
       |> maybe_add(cognitive_load > 0.7, "you are processing a lot")
       |> maybe_add(vigilance > 0.8, "you are highly vigilant")
-      |> maybe_add(goals != [], "you are tracking: #{join_values(goals)}")
+      |> maybe_add(goals != [], "you are tracking: #{Compact.values(goals)}")
       |> maybe_add(errors != [], "you noticed a recent error: #{join_error_kinds(errors)}")
 
     case notes do
@@ -219,7 +241,7 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add_present("intent", intent)
       |> maybe_add_present("domain", domain)
       |> maybe_add(present?(polarity), "polarity is #{polarity}")
-      |> maybe_add(terms != [], "key terms: #{join_values(terms)}")
+      |> maybe_add(terms != [], "key terms: #{Compact.values(terms)}")
 
     case notes do
       [] -> ""
@@ -240,8 +262,8 @@ defmodule Core.Response.LlmPrompt do
     notes =
       []
       |> maybe_add(degraded?, "comprehension is degraded")
-      |> maybe_add(understood != [], "you understood: #{join_values(understood)}")
-      |> maybe_add(uncertain != [], "you are uncertain about: #{join_values(uncertain)}")
+      |> maybe_add(understood != [], "you understood: #{Compact.values(understood)}")
+      |> maybe_add(uncertain != [], "you are uncertain about: #{Compact.values(uncertain)}")
 
     case notes do
       [] -> ""
@@ -267,7 +289,7 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add_present("verbosity", verbosity)
       |> maybe_add_present("curiosity", curiosity)
       |> maybe_add_present("caution", caution)
-      |> maybe_add(is_list(avoid) and avoid != [], "avoid: #{join_values(avoid)}")
+      |> maybe_add(is_list(avoid) and avoid != [], "avoid: #{Compact.values(avoid)}")
 
     case notes do
       [] -> ""
@@ -283,8 +305,8 @@ defmodule Core.Response.LlmPrompt do
       |> maybe_add_present("intent", intent)
       |> maybe_add_present("mode", mode)
       |> maybe_add_present("action", action)
-      |> maybe_add(present?(skill), "skill: #{skill_label(skill)}")
-      |> maybe_add(guardrail?, "guardrail is active")
+      |> maybe_add(present?(skill), "skill=#{skill_label(skill)}")
+      |> maybe_add(guardrail?, "guardrail=true")
 
     case notes do
       [] -> ""
@@ -365,7 +387,7 @@ defmodule Core.Response.LlmPrompt do
           "continue the alien-life conversation; separate plausible speculation from confirmed evidence"
 
         cosmic_life_text?(map_get(features, :text)) ->
-          "answer the alien-life question directly as ordinary conversation"
+          "answer the alien-life question directly as ordinary conversation; say alien life is plausible but unconfirmed"
 
         degraded_posture?(comprehension, frame) or confidence == :low ->
           "state what is understood, then ask one targeted question only if necessary"
@@ -493,7 +515,7 @@ defmodule Core.Response.LlmPrompt do
   defp wm_context([]), do: ""
 
   defp wm_context(lemmas) do
-    "Working memory: active concepts: #{Enum.join(lemmas, ", ")}."
+    "Working memory: Active concepts: #{Enum.join(lemmas, ", ")}."
   end
 
   # ── Helpers ──
@@ -501,13 +523,6 @@ defmodule Core.Response.LlmPrompt do
   defp model_value(model, key), do: state_value(model, key)
   defp state_value(state, key) when is_map(state), do: map_get(state, key)
   defp state_value(_, _), do: nil
-
-  defp join_values(values) do
-    values
-    |> Enum.map(&to_string/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(", ")
-  end
 
   defp join_error_kinds(errors) do
     errors
@@ -518,7 +533,7 @@ defmodule Core.Response.LlmPrompt do
       error ->
         error
     end)
-    |> join_values()
+    |> Compact.values()
   end
 
   defp maybe_add(notes, true, note), do: notes ++ [note]
@@ -528,7 +543,7 @@ defmodule Core.Response.LlmPrompt do
   defp maybe_add_present(notes, _label, ""), do: notes
 
   defp maybe_add_present(notes, label, value) do
-    notes ++ ["#{label}=#{value}"]
+    notes ++ ["#{Compact.value(label)}=#{Compact.value(value)}"]
   end
 
   defp put_if_present(map, _key, nil), do: map
@@ -580,8 +595,6 @@ defmodule Core.Response.LlmPrompt do
     features = map_get(context, :features, %{})
     decision = map_get(context, :decision, %{})
     mood = map_get(context, :mood, %{}) |> AffectPolicy.normalize()
-    wm_items = map_get(context, :wm_items, [])
-
     runtime_state = prompt_runtime_state(features, decision, mood)
     raw_mods = map_get(mood, :raw_modulators, %{})
 
@@ -635,8 +648,5 @@ defmodule Core.Response.LlmPrompt do
     end
   end
 
-  defp format_val(nil), do: "n/a"
-  defp format_val(v) when is_number(v), do: Float.round(v * 1.0, 2) |> to_string()
-  defp format_val(v), do: to_string(v)
   ####################################
 end

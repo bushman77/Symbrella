@@ -57,7 +57,7 @@ defmodule Core.Response.LlmSynthesis do
 
   # ── Internal ──────────────────────────────────────────────────────────────
 
-  defp do_generate(user_text, features, decision, mood, prompt_type \\ nil) do
+  defp do_generate(user_text, features, decision, mood, prompt_type) do
     LlmChatHistory.ensure_table!()
 
     context = prompt_context(user_text, features, decision, mood)
@@ -91,22 +91,18 @@ defmodule Core.Response.LlmSynthesis do
         Logger.debug("[LlmSynthesis] LLM error: #{inspect(reason)}")
         {:error, reason}
     end
-  rescue
-    e ->
-      Logger.debug("[LlmSynthesis] Exception: #{Exception.message(e)}")
-      {:error, :exception}
-  catch
-    :exit, reason ->
-      Logger.debug("[LlmSynthesis] Exit: #{inspect(reason)}")
-      {:error, :exit}
   end
 
-  defp build_prompt(context, :self_state_feeling), do: LlmPrompt.self_state_prompt(context)
+  defp build_prompt(context, prompt_type)
+       when prompt_type in [:mood_indices, :self_state_feeling, :self_portrait, :runtime_self_check],
+       do: LlmPrompt.self_state_prompt(context)
+
   defp build_prompt(context, _), do: LlmPrompt.build_system_prompt(context)
 
   defp sanitize_model_text(text) when is_binary(text) do
     text
     |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> String.replace(~r/\n*\s*\((?:note|explanation):\s*.*\)\s*$/ius, "")
     |> String.trim()
   end
 
@@ -162,19 +158,11 @@ defmodule Core.Response.LlmSynthesis do
     #{usr2}
     PROMPT_END
     """)
-  rescue
-    e ->
-      Logger.debug("[LlmSynthesis] prompt log failed: #{Exception.message(e)}")
-      :ok
   end
 
   defp emit_prompt_event(system_prompt, user_text, context) do
     {measurements, metadata} = LlmPromptEvents.prompt(system_prompt, user_text, context)
     Telemetry.emit([:core, :response, :prompt], measurements, metadata)
-  rescue
-    e ->
-      Logger.debug("[LlmSynthesis] prompt telemetry failed: #{Exception.message(e)}")
-      :ok
   end
 
   defp emit_complete_event(user_text, assistant_text, context, system_prompt, reflection) do
@@ -182,10 +170,6 @@ defmodule Core.Response.LlmSynthesis do
       LlmPromptEvents.complete(user_text, assistant_text, context, system_prompt, reflection)
 
     Telemetry.emit([:core, :response, :complete], measurements, metadata)
-  rescue
-    e ->
-      Logger.debug("[LlmSynthesis] complete telemetry failed: #{Exception.message(e)}")
-      :ok
   end
 
   defp ensure_map(map) when is_map(map), do: map

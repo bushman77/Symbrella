@@ -107,7 +107,7 @@ defmodule Core.Response.AgencyMemory do
   end
 
   defp fallback_event?(response_source, reasons) do
-    response_source in [:template_fallback, "template_fallback"] or
+    model_unavailable_source?(response_source) or
       present?(map_get(reasons, :fallback_reason))
   end
 
@@ -145,7 +145,7 @@ defmodule Core.Response.AgencyMemory do
     []
     |> maybe_effect(stats.repair_count >= 2, :recent_repairs)
     |> maybe_effect(stats.stabilize_count >= 2, :recent_stabilization)
-    |> maybe_effect(stats.fallback_count >= 2, :recent_template_fallbacks)
+    |> maybe_effect(stats.fallback_count >= 2, :recent_model_unavailable)
     |> maybe_effect(stats.reduce_scope_count >= 2, :recent_scope_reductions)
     |> maybe_effect(stats.clarify_count >= 2, :recent_clarifications)
     |> maybe_effect(stats.low_confidence_count >= 2, :recent_low_confidence)
@@ -164,6 +164,10 @@ defmodule Core.Response.AgencyMemory do
       signal?(signals, :reduce_scope) or adjustment in [:reduce_scope, "reduce_scope"],
       :reduce_scope
     )
+  end
+
+  defp model_unavailable_source?(source) do
+    source in [:model_unavailable, "model_unavailable"]
   end
 
   defp signal?(signals, signal), do: signal in signals or Atom.to_string(signal) in signals

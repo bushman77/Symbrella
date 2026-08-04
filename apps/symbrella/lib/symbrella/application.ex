@@ -74,11 +74,13 @@ defmodule Symbrella.Application do
     {:ok, sup} =
       Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
 
-    # Attach telemetry handlers AFTER the tree is live (safe-guarded)
-    safe_attach(fn -> Brain.Telemetry.attach!() end)
+    # Attach telemetry handlers AFTER the tree is live. Attach failures should
+    # fail boot instead of disappearing; duplicate attach is handled by the
+    # attaching modules.
+    :ok = Brain.Telemetry.attach!()
 
     # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
-    safe_attach(fn -> Core.Curiosity.Bridge.attach() end)
+    :ok = Core.Curiosity.Bridge.attach()
 
     _ =
       Brain.SelfContinuity.warm_start(
@@ -95,16 +97,6 @@ defmodule Symbrella.Application do
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
-  defp safe_attach(fun) when is_function(fun, 0) do
-    try do
-      fun.()
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
-  end
-
   defp maybe_pubsub_child do
     case Process.whereis(Symbrella.PubSub) do
       nil -> [{Phoenix.PubSub, name: Symbrella.PubSub}]

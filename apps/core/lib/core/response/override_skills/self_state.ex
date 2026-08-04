@@ -4,7 +4,6 @@ defmodule Core.Response.OverrideSkills.SelfState do
   """
 
   alias Core.Response.OverrideSkills.Decision
-  alias Core.Response.SelfStateSummary
 
   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
   def apply(features, decision) do
@@ -19,25 +18,25 @@ defmodule Core.Response.OverrideSkills.SelfState do
 
         {:ok,
          {decision,
-          %{
-            id: :mood_indices,
-            reason: :mood_indices_query,
-            inline_text: SelfStateSummary.mood_indices_answer()
-          }}}
+	          %{
+	            id: :mood_indices,
+	            reason: :mood_indices_query,
+	            llm_prompt: :mood_indices
+	          }}}
 
       self_state_feeling_query?(text) ->
         decision =
           decision
-          |> Decision.put(tone: :warm, mode: :explainer, action: :answer)
+          |> Decision.put(tone: :neutral, mode: :explainer, action: :answer)
           |> Decision.add_override(:self_state_feeling_answer)
 
         {:ok,
          {decision,
-          %{
-            id: :self_state_feeling,
-            reason: :self_state_feeling_query,
-            llm_prompt: :self_state_feeling
-          }}}
+	          %{
+	            id: :self_state_feeling,
+	            reason: :self_state_feeling_query,
+	            llm_prompt: :self_state_feeling
+	          }}}
 
       self_portrait_query?(text) ->
         decision =
@@ -47,11 +46,11 @@ defmodule Core.Response.OverrideSkills.SelfState do
 
         {:ok,
          {decision,
-          %{
-            id: :self_portrait,
-            reason: :self_portrait_query,
-            inline_text: SelfStateSummary.self_portrait_answer()
-          }}}
+	          %{
+	            id: :self_portrait,
+	            reason: :self_portrait_query,
+	            llm_prompt: :self_portrait
+	          }}}
 
       self_check_query?(text) ->
         decision =
@@ -61,11 +60,11 @@ defmodule Core.Response.OverrideSkills.SelfState do
 
         {:ok,
          {decision,
-          %{
-            id: :runtime_self_check,
-            reason: :self_check_query,
-            inline_text: SelfStateSummary.self_check_answer()
-          }}}
+	          %{
+	            id: :runtime_self_check,
+	            reason: :self_check_query,
+	            llm_prompt: :runtime_self_check
+	          }}}
 
       true ->
         :pass

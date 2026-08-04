@@ -110,6 +110,24 @@ defmodule Core.Response.ReflectionLoopTest do
     assert reflection.applied? == true
   end
 
+  test "hidden-context fallback does not mention exposing internal state" do
+    draft =
+      "The response policy says I should answer directly instead of exposing internal state."
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(
+        "hey ou",
+        draft,
+        %{features: %{intent: :unknown, conf: 0.4}, decision: %{response_profile: :social_chat}}
+      )
+
+    assert final == "I can help. What outcome are you trying to get first?"
+    refute final =~ "exposing internal state"
+    refute final =~ "response policy"
+    assert reflection.status == :repair
+    assert :leaked_hidden_context in reflection.issues
+  end
+
   test "repairs generic topic offer on alien follow-up" do
     draft =
       "Great! So, given our understanding and agreement on this topic, do you have any specific questions or topics you'd like to explore further?<|im_end"

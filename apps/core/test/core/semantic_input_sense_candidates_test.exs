@@ -5,6 +5,44 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
   @si %{}
 
+  describe "contract helpers" do
+    test "exposes a versioned field contract" do
+      assert SI.contract_version() == 1
+      assert :sentence in SI.contract_fields()
+      assert :agency_command_results in SI.contract_fields()
+    end
+
+    test "normalizes known string keys without atomizing arbitrary input" do
+      assert {:ok, %SI{} = si} =
+               SI.normalize_contract(%{
+                 "sentence" => "hello",
+                 "source" => :test,
+                 "tokens" => [],
+                 "trace" => [],
+                 "unknown_runtime_key" => "ignored"
+               })
+
+      assert si.sentence == "hello"
+      assert si.source == :test
+      assert si.tokens == []
+      refute Map.has_key?(Map.from_struct(si), :unknown_runtime_key)
+      assert :ok = SI.validate_contract(si)
+    end
+
+    test "reports contract shape problems as data" do
+      assert {:error, problems} =
+               SI.normalize_contract(%{
+                 sentence: {:not, :text},
+                 tokens: :not_a_list,
+                 confidence: :high
+               })
+
+      assert {:sentence, :expected_string_or_nil} in problems
+      assert {:tokens, :expected_list_or_nil} in problems
+      assert {:confidence, :expected_number_or_nil} in problems
+    end
+  end
+
   describe "emit_sense_candidates/5" do
     test "keeps near-winners within margin and applies top_k (sorted desc)" do
       scored = [

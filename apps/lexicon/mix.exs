@@ -17,13 +17,13 @@ defmodule Lexicon.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :hackney]
+      extra_applications: [:logger]
     ]
   end
 
   defp deps do
     [
-      {:hackney, "~> 1.25"},
+      {:req, "~> 0.5"},
       {:jason, "~> 1.4"}
     ]
   end

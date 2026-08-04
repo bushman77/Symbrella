@@ -21,6 +21,9 @@ config :core,
   recall_budget_ms: :infinity,
   recall_max_items: :infinity,
   agency_ledger_enabled?: true,
+  agency_execute_commands?: true,
+  agency_require_permission?: false,
+  agency_record_commands?: true,
   llm_client: Llm,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
@@ -95,9 +98,9 @@ config :brain, Brain.MoodCore,
 
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
-  model_path: Path.expand("\~/models/qwen2.5-7b-instruct-gguf/Qwen2.5-7B-Instruct-Q4_K_M.gguf"),
-  # model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
-  # model_path: "/home/ubuntu/models/mythomax-l2-13b.Q4_K_M.gguf",
+  # model_path: Path.expand("\~/models/qwen2.5-7b-instruct-gguf/Qwen2.5-7B-Instruct-Q4_K_M.gguf"),
+  model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
+  # model_path: "/home/ubuntu/llm-training/riptide-qa-3b-q4_k_m.gguf",
   llama_server: "llama-server",
   # Synchronous boot is handled by Llm.BootGate. Keep the GenServer's own
   # handle_continue autostart off so there is a single startup path.
@@ -185,10 +188,9 @@ config :esbuild,
   ]
 
 config :tailwind,
-  version: "3.4.10",
+  version: "4.1.7",
   default: [
     args: [
-      "--config=tailwind.config.js",
       "--input=css/app.css",
       "--output=../priv/static/assets/app.css"
     ],

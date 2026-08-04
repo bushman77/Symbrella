@@ -7,8 +7,6 @@ defmodule Core.Response.OverrideSkills.Companion do
 
   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
   def apply(features, decision) do
-    text = Map.get(features, :text, "")
-
     cond do
       trust_repair_turn?(features) ->
         decision =
@@ -19,12 +17,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-          %{
-            id: :trust_repair,
-            reason: :trust_rupture,
-            inline_text:
-              "You may be right to challenge me. I got pulled off the thread and answered like this was a task queue. I should stay with the conversation. Tell me what felt dishonest and I’ll stay grounded."
-          }}}
+	          %{
+	            id: :trust_repair,
+	            reason: :trust_rupture,
+	            llm_prompt: :trust_repair
+	          }}}
 
       companion_boundary_turn?(features) ->
         decision =
@@ -35,12 +32,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-          %{
-            id: :companion_repair,
-            reason: :companion_boundary,
-            inline_text:
-              "You're right. I shouldn't keep steering this into code. I'm here as a companion in this conversation, and I should answer you socially unless you ask for technical help."
-          }}}
+	          %{
+	            id: :companion_repair,
+	            reason: :companion_boundary,
+	            llm_prompt: :companion_repair
+	          }}}
 
       casual_companion_turn?(features) ->
         decision =
@@ -50,11 +46,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-          %{
-            id: :casual_companion,
-            reason: :casual_chat,
-            inline_text: casual_companion_text(text)
-          }}}
+	          %{
+	            id: :casual_companion,
+	            reason: :casual_chat,
+	            llm_prompt: :casual_companion
+	          }}}
 
       personal_life_update_turn?(features) ->
         decision =
@@ -65,11 +61,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-          %{
-            id: :personal_life_update,
-            reason: :personal_life_update,
-            inline_text: personal_life_update_text(text)
-          }}}
+	          %{
+	            id: :personal_life_update,
+	            reason: :personal_life_update,
+	            llm_prompt: :personal_life_update
+	          }}}
 
       idle_curiosity_casual_turn?(features) ->
         decision =
@@ -79,11 +75,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-          %{
-            id: :idle_curiosity_casual,
-            reason: :casual_episode_probe_boundary,
-            inline_text: "Yeah, that was an interesting one."
-          }}}
+	          %{
+	            id: :idle_curiosity_casual,
+	            reason: :casual_episode_probe_boundary,
+	            llm_prompt: :idle_curiosity_casual
+	          }}}
 
       true ->
         :pass
@@ -127,9 +123,8 @@ defmodule Core.Response.OverrideSkills.Companion do
     text = Map.get(features, :text, "")
     intent = Map.get(features, :intent)
 
-    (intent == :smalltalk and not substantive_question_text?(text)) or
-      (casual_greeting?(text) and Map.get(features, :confidence_bucket) == :low and
-         not substantive_question_text?(text)) or
+    (short_greeting_turn?(text) and not substantive_question_text?(text)) or
+      (intent == :smalltalk and not substantive_question_text?(text)) or
       Regex.match?(
         ~r/^\s*(huh+\??|no+|c+mon.*up|wh+a+t'?s*\s*u+p+\??|wha+t+s+\s*u+p+\??)\s*$/iu,
         text
@@ -155,20 +150,6 @@ defmodule Core.Response.OverrideSkills.Companion do
 
   defp personal_life_update_text?(_), do: false
 
-  defp personal_life_update_text(text) when is_binary(text) do
-    down = String.downcase(text)
-
-    cond do
-      Regex.match?(~r/\bgood\s+afternoon\b/u, down) ->
-        "Good afternoon. That sounds like a big step. Getting close to having your own place is exciting, and probably a little intense too. What part is feeling most real right now?"
-
-      true ->
-        "That sounds like a big step. Getting close to having your own place is exciting, and probably a little intense too. What part is feeling most real right now?"
-    end
-  end
-
-  defp personal_life_update_text(_), do: "That sounds like a big step. I’m here with you."
-
   defp casual_greeting?(text) when is_binary(text) do
     Regex.match?(~r/\b(he+y+|hi+|hello|yo+|sup)\b/iu, text) and
       not Regex.match?(~r/\bgood\s+(morning|afternoon|evening)\b/iu, text)
@@ -176,25 +157,15 @@ defmodule Core.Response.OverrideSkills.Companion do
 
   defp casual_greeting?(_), do: false
 
-  defp casual_companion_text(text) when is_binary(text) do
-    down = String.downcase(text)
+  defp short_greeting_turn?(text) when is_binary(text) do
+    trimmed = String.trim(text)
 
-    cond do
-      Regex.match?(~r/^\s*huh+\??\s*$/u, down) ->
-        "Yeah, that came out wrong. I’m here with you."
-
-      Regex.match?(~r/^\s*no+\s*$/u, down) ->
-        "Okay. I’ll stop pushing that direction."
-
-      Regex.match?(~r/(what'?s|whats|whaats|wats)\s+u+p|c+mon.*up/u, down) ->
-        "I’m here with you. On my side it’s just the current Symbrella state and this conversation, but I can still hang out and talk."
-
-      true ->
-        "Hey. I’m here with you."
-    end
+    String.length(trimmed) <= 48 and
+      (casual_greeting?(trimmed) or
+         Regex.match?(~r/\bgood\s+(morning|afternoon|evening)\b/iu, trimmed))
   end
 
-  defp casual_companion_text(_), do: "I’m here with you."
+  defp short_greeting_turn?(_), do: false
 
   defp idle_curiosity_casual_turn?(features) when is_map(features) do
     text = Map.get(features, :text, "")

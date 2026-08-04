@@ -47,4 +47,28 @@ defmodule Core.Response.CasualChatFlowTest do
     assert text =~ "can't set a real device alarm yet"
     refute text =~ "quick TODO list"
   end
+
+  test "good morning answers as a short social turn" do
+    si = %{intent: :unknown, confidence: 0.8, text: "good morning"}
+
+    {tone, text, meta} = Response.plan(si, @mood)
+
+    assert tone == :warm
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text == "Good morning. I’m here with you."
+    refute text =~ "How can I assist you today?"
+    refute text =~ "Note:"
+  end
+
+  test "typo-ish hey turns do not use canned hidden-state repair wording" do
+    si = %{intent: :unknown, confidence: 0.4, text: "hey ou"}
+
+    {_tone, text, meta} = Response.plan(si, @mood)
+
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text == "Hey. I’m here with you."
+    refute text =~ "exposing internal state"
+  end
 end

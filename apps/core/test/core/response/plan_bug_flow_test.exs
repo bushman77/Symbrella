@@ -30,8 +30,9 @@ defmodule Core.Response.PlanBugFlowTest do
     assert meta.intent_inferred == :bug
     assert meta.profile == :gentle_bug_coach
 
-    # With no LLM registered in this test, text comes from the deterministic fallback.
-    assert text =~ "Suggested next step: Make the next concrete engineering move."
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Suggested next step: Make the next concrete engineering move."
     refute text =~ "Let's get this test passing"
     refute text =~ "Test failures are frustrating"
   end

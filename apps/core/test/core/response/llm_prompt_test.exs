@@ -388,6 +388,33 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Response profile: semantic_repair."
   end
 
+  test "build_system_prompt/1 formats structured mood trace values without crashing" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :question,
+          text: "what happened in your response state?",
+          control_signals: %{source: {:intent, :greeting}},
+          runtime_state: %{
+            mood_trace: [
+              %{
+                source: {:intent, :greeting},
+                pressure_label: {:pressure, :low},
+                deltas: %{{:intent, :greeting} => 0.02, ne: 0.01}
+              }
+            ]
+          }
+        },
+        decision: %{tone: :neutral, mode: :coach},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "mood_trace=:{:intent, :greeting}:{:pressure, :low}:ne=+0.01"
+    assert prompt =~ "{:intent, :greeting}=+0.02"
+    assert prompt =~ "control=source={:intent, :greeting}"
+  end
+
   test "build_system_prompt/1 chooses self check profile from elevated vigilance" do
     prompt =
       LlmPrompt.build_system_prompt(%{

@@ -15,17 +15,19 @@ defmodule Core.Curiosity.Bridge do
   @default_min_gap_ms 30_000
 
   def attach do
-    _ = :telemetry.attach(@handler_id, [:curiosity, :proposal], &__MODULE__.handle/4, %{})
-    :ok
-  rescue
-    _ -> :ok
+    case :telemetry.attach(@handler_id, [:curiosity, :proposal], &__MODULE__.handle/4, %{}) do
+      :ok -> :ok
+      {:error, :already_exists} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def detach do
-    :telemetry.detach(@handler_id)
-    :ok
-  rescue
-    _ -> :ok
+    case :telemetry.detach(@handler_id) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def handle(_event, meas, _meta, _cfg) do

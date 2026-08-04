@@ -33,7 +33,6 @@ defmodule Core.Response do
         }
 
   alias Core.Response.Policy
-  alias Core.Response.Modes
   alias Core.Response.Guardrails
   alias Core.Response.Skills
   alias Core.Response.AffectPolicy
@@ -43,7 +42,6 @@ defmodule Core.Response do
   alias Core.Response.OverrideSkills
   alias Core.Response.SelfStateFeatures
   alias Core.Response.SideEffects
-  alias Core.Response.TemplateFallback
 
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
@@ -135,6 +133,7 @@ defmodule Core.Response do
           })
 
         {decision, skill} = decide_and_pick_skill(features, guard, text_in)
+        features = put_chosen_skill(features, skill)
 
         name_claim? = name_claim?(extracted_name, text_in)
         maybe_persist_user_name(name_claim?, extracted_name, text_in)
@@ -153,10 +152,10 @@ defmodule Core.Response do
               {inline_text, :inline_skill, nil}
 
             is_atom(llm_prompt_type) ->
-              llm_or_template(text_in, features, decision, mood, intent, llm_prompt_type)
+              llm_or_model_unavailable(text_in, features, decision, mood, intent, llm_prompt_type)
 
             true ->
-              llm_or_template(text_in, features, decision, mood, intent)
+              llm_or_model_unavailable(text_in, features, decision, mood, intent)
           end
 
         {text, curiosity_probe} =
@@ -364,23 +363,32 @@ defmodule Core.Response do
     Memory.forced_identity_text(text_in, extracted_name, name_claim?)
   end
 
-  defp llm_or_template(text_in, features, decision, mood, intent, prompt_type \\ nil) do
+  defp put_chosen_skill(features, %{id: id}) when is_map(features) and is_atom(id) do
+    Map.put(features, :skill, id)
+  end
+
+  defp put_chosen_skill(features, _skill), do: features
+
+  defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type \\ nil) do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
       {:ok, llm_text} ->
         {llm_text, :llm, nil}
 
       {:error, reason} ->
-        {
-          Modes.compose(
-            intent,
-            decision.tone,
-            decision.mode,
-            TemplateFallback.opts(text_in, features, decision)
-          ),
-          :template_fallback,
-          TemplateFallback.normalize_reason(reason)
-        }
+        normalized_reason = normalize_generation_reason(reason)
+
+        {model_unavailable_text(normalized_reason), :model_unavailable, normalized_reason}
     end
+  end
+
+  defp normalize_generation_reason(reason) when is_atom(reason), do: reason
+  defp normalize_generation_reason({reason, _}) when is_atom(reason), do: reason
+  defp normalize_generation_reason(%{reason: reason}) when is_atom(reason), do: reason
+  defp normalize_generation_reason(%{"reason" => reason}) when is_atom(reason), do: reason
+  defp normalize_generation_reason(_), do: :unknown
+
+  defp model_unavailable_text(reason) do
+    "Model unavailable (#{reason}). No fallback response was generated."
   end
 
   @doc """

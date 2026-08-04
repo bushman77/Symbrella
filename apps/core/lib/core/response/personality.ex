@@ -116,6 +116,9 @@ defmodule Core.Response.Personality do
       self_state_care_request?(features) ->
         :self_state_boundary
 
+      personal_life_update?(features) or alien_life_conversation?(features) ->
+        :social_chat
+
       degraded_comprehension?(comprehension) or degraded_runtime?(runtime_state) or
           low_confidence?(features) ->
         :semantic_repair
@@ -139,9 +142,11 @@ defmodule Core.Response.Personality do
   defp temperament(:semantic_repair, _runtime, _features, _decision), do: :careful
   defp temperament(:brain_explainer, _runtime, _features, _decision), do: :steady
   defp temperament(:self_state_boundary, _runtime, _features, _decision), do: :supportive
+
   defp temperament(:social_chat, runtime, _features, _decision) do
     if stable_and_curious?(runtime), do: :curious, else: :supportive
   end
+
   defp temperament(:technical_work, runtime, _features, _decision) do
     if stable_and_curious?(runtime), do: :curious, else: :direct
   end
@@ -157,6 +162,7 @@ defmodule Core.Response.Personality do
   defp assertiveness(:safety_redirect, _features, _runtime), do: 0.75
   defp assertiveness(:self_check, _features, _runtime), do: 0.35
   defp assertiveness(:semantic_repair, _features, _runtime), do: 0.3
+
   defp assertiveness(:technical_work, features, runtime) do
     confidence = map_get(features, :conf, 0.6)
     clamp01(0.55 + confidence * 0.25 - uncertainty_penalty(runtime))
@@ -185,6 +191,7 @@ defmodule Core.Response.Personality do
   defp warmth(:semantic_repair, _decision, _features), do: 0.4
   defp warmth(:self_state_boundary, _decision, _features), do: 0.72
   defp warmth(:social_chat, _decision, _features), do: 0.75
+
   defp warmth(_profile, decision, _features) do
     case map_get(decision, :tone) do
       :warm -> 0.7
@@ -210,6 +217,7 @@ defmodule Core.Response.Personality do
   defp explanation_depth(:self_check, _runtime), do: :brief
   defp explanation_depth(:semantic_repair, _runtime), do: :brief
   defp explanation_depth(:self_state_boundary, _runtime), do: :brief
+
   defp explanation_depth(:brain_explainer, runtime) do
     if stable_and_curious?(runtime), do: :deep, else: :normal
   end
@@ -229,7 +237,10 @@ defmodule Core.Response.Personality do
     |> maybe_reason(low_confidence?(features), :low_confidence)
     |> maybe_reason(self_state_care_request?(features), :self_state_care_request)
     |> maybe_reason(brain_facing?(features, []), :brain_facing_request)
-    |> maybe_reason(technical_work?(map_get(features, :intent), map_get(decision, :mode)), :technical_work)
+    |> maybe_reason(
+      technical_work?(map_get(features, :intent), map_get(decision, :mode)),
+      :technical_work
+    )
     |> default_reason(profile)
   end
 
@@ -290,8 +301,24 @@ defmodule Core.Response.Personality do
       |> to_string()
       |> String.downcase()
 
-    Regex.match?(~r/\b(how are you|how do you feel|how are you feeling|are you ok|are you okay)\b/u, text) or
+    Regex.match?(
+      ~r/\b(how are you|how do you feel|how are you feeling|are you ok|are you okay)\b/u,
+      text
+    ) or
       Regex.match?(~r/\b(concerned|concerend|concern|worried)\b.{0,30}\b(you|symbrella)\b/u, text)
+  end
+
+  defp personal_life_update?(features) do
+    map_get(features, :skill) == :personal_life_update
+  end
+
+  defp alien_life_conversation?(features) do
+    text = features |> map_get(:text, "") |> to_string()
+
+    Regex.match?(
+      ~r/\b(aliens?|extraterrestrial|life\s+elsewhere|universe|galax(?:y|ies)|solar\s+system|planet|planets|exoplanets?|ufos?|uaps?|unidentified\s+(?:flying\s+)?objects?|disclosure|declassif(?:y|ied|ication)|footage)\b/iu,
+      text
+    )
   end
 
   defp brain_facing?(features, wm_items) do
@@ -313,7 +340,8 @@ defmodule Core.Response.Personality do
   end
 
   defp stable_and_curious?(runtime) do
-    exploration(runtime) >= 0.65 and not high_vigilance?(runtime) and not degraded_runtime?(runtime)
+    exploration(runtime) >= 0.65 and not high_vigilance?(runtime) and
+      not degraded_runtime?(runtime)
   end
 
   defp uncertainty_penalty(runtime) do

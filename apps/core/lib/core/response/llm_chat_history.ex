@@ -6,14 +6,13 @@ defmodule Core.Response.LlmChatHistory do
   require Logger
 
   alias Core.Response.LlmHistory
+  alias Core.Response.LlmChatHistoryOwner
 
   @table :core_llm_chat_history
-  @heir_data :core_llm_chat_history
   @turn_pairs 6
   @max_item_chars 1_600
 
   @compile {:no_warn_undefined, Llm}
-  @compile {:no_warn_undefined, Symbrella.TaskSup}
 
   @spec record_turn(term(), String.t(), String.t()) :: :ok
   def record_turn(session_id, user_text, assistant_text) do
@@ -57,30 +56,7 @@ defmodule Core.Response.LlmChatHistory do
 
   @spec ensure_table!() :: :ok
   def ensure_table! do
-    case :ets.whereis(@table) do
-      :undefined ->
-        heir = heir_pid()
-
-        opts =
-          [
-            :named_table,
-            :public,
-            :set,
-            {:read_concurrency, true},
-            {:write_concurrency, true}
-          ] ++ if(is_pid(heir), do: [{:heir, heir, @heir_data}], else: [])
-
-        _tid = :ets.new(@table, opts)
-
-        Logger.debug(
-          "[LlmChatHistory] ETS created table=#{inspect(@table)} owner=#{inspect(self())} heir=#{inspect(heir)}"
-        )
-
-        :ok
-
-      _tid ->
-        :ok
-    end
+    LlmChatHistoryOwner.ensure_table!()
   end
 
   defp lookup_messages(session_id) do
@@ -93,19 +69,6 @@ defmodule Core.Response.LlmChatHistory do
           [{^session_id, list}] when is_list(list) -> list
           _ -> []
         end
-    end
-  end
-
-  defp heir_pid do
-    cond do
-      Code.ensure_loaded?(Llm) and is_pid(Process.whereis(Llm)) ->
-        Process.whereis(Llm)
-
-      Code.ensure_loaded?(Symbrella.TaskSup) and is_pid(Process.whereis(Symbrella.TaskSup)) ->
-        Process.whereis(Symbrella.TaskSup)
-
-      true ->
-        nil
     end
   end
 end

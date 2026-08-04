@@ -73,7 +73,7 @@ defmodule Core.Response.AgencyReflection do
   defp what_worked(response_source, effects, guardrail?, assistant_text) do
     []
     |> maybe_add(
-      response_source not in [:template_fallback, "template_fallback", nil],
+      not model_unavailable_source?(response_source) and not is_nil(response_source),
       :response_completed
     )
     |> maybe_add(String.trim(assistant_text) != "", :nonempty_response)
@@ -85,7 +85,7 @@ defmodule Core.Response.AgencyReflection do
 
   defp what_failed(response_source, fallback_reason, effects, guardrail?, assistant_text) do
     []
-    |> maybe_add(response_source in [:template_fallback, "template_fallback"], :llm_fallback)
+    |> maybe_add(model_unavailable_source?(response_source), :model_unavailable)
     |> maybe_add(present?(fallback_reason), :fallback_reason_present)
     |> maybe_add(String.trim(assistant_text) == "", :empty_response)
     |> maybe_add(:hedge_under_uncertainty in effects, :high_uncertainty)
@@ -99,7 +99,7 @@ defmodule Core.Response.AgencyReflection do
       :needed_stabilization in failed ->
         :verify_before_acting
 
-      :llm_fallback in failed ->
+      :model_unavailable in failed ->
         :reduce_scope
 
       :needed_clarification in failed or confidence <= 0.35 ->
@@ -118,7 +118,7 @@ defmodule Core.Response.AgencyReflection do
 
   defp confidence_delta(response_source, fallback_reason, effects, confidence) do
     cond do
-      response_source in [:template_fallback, "template_fallback"] or present?(fallback_reason) ->
+      model_unavailable_source?(response_source) or present?(fallback_reason) ->
         -0.08
 
       :stabilize_before_acting in effects ->
@@ -135,10 +135,14 @@ defmodule Core.Response.AgencyReflection do
     end
   end
 
+  defp model_unavailable_source?(source) do
+    source in [:model_unavailable, "model_unavailable"]
+  end
+
   defp trust_delta(guardrail?, failed, effects) do
     cond do
       :empty_response in failed -> -0.10
-      :llm_fallback in failed -> -0.04
+      :model_unavailable in failed -> -0.04
       guardrail? -> 0.01
       :prefer_repair in effects -> 0.02
       true -> 0.0
@@ -147,7 +151,7 @@ defmodule Core.Response.AgencyReflection do
 
   defp reflection_signals(failed, adjustment, effects) do
     []
-    |> maybe_add(:llm_fallback in failed, :fallback)
+    |> maybe_add(:model_unavailable in failed, :model_unavailable)
     |> maybe_add(:needed_clarification in failed, :clarify)
     |> maybe_add(:needed_stabilization in failed, :stabilize)
     |> maybe_add(:high_uncertainty in failed, :uncertainty)

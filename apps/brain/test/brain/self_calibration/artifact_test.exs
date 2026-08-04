@@ -18,7 +18,6 @@ defmodule Brain.SelfCalibration.ArtifactTest do
     on_exit(fn -> File.rm(path) end)
 
     assert {:ok, batch} = sample_batch()
-    batch |> IO.inspect()
     assert {:ok, %Training{} = artifact} = Training.train(batch, epochs: 1, hidden_units: 4)
 
     assert :ok = Artifact.save(artifact, path)

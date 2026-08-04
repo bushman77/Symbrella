@@ -35,11 +35,15 @@ defmodule Core do
     mode = Keyword.get(opts, :mode, :prod)
     max_n = Keyword.get(opts, :max_wordgram_n, 3)
     lifg_opts = build_lifg_opts(opts)
+    fuzzy? = Keyword.get(opts, :fuzzy, true)
+
+    fuzzy = if fuzzy?, do: Core.Text.Fuzzy.interpret(phrase, fuzzy_opts(opts)), else: nil
 
     si0 =
       phrase
-      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n)
+      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n, fuzzy: fuzzy?)
       |> wrap_si(phrase)
+      |> maybe_put_fuzzy(fuzzy)
       |> TokenFilters.rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
@@ -57,13 +61,36 @@ defmodule Core do
     coerce_si(out)
   end
 
+  defp maybe_put_fuzzy(si, nil), do: si
+
+  defp maybe_put_fuzzy(si, fuzzy) do
+    si
+    |> Map.put(:fuzzy_text, fuzzy)
+    |> Map.put(:fuzzy_corrections, fuzzy.corrections)
+    |> Map.put(:fuzzy_aliases, fuzzy.aliases)
+    |> Map.put(:fuzzy_confidence, fuzzy.confidence)
+  end
+
   defp build_lifg_opts(opts) do
     lifg_defaults = Application.get_env(:brain, :lifg_defaults, [])
     Keyword.merge(lifg_defaults, Keyword.get(opts, :lifg_opts, []))
   end
 
+  defp fuzzy_opts(opts) do
+    [
+      max_distance: Keyword.get(opts, :fuzzy_max_distance, 2),
+      protected_words: MapSet.new(["symbrella"]),
+      known_word?: fn word ->
+        Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) and
+          apply(Db, :word_exists?, [word])
+      end
+    ]
+  end
+
   defp apply_intent_selection(%{} = si, opts) do
-    case Selection.select(si, opts) do
+    aliases = Map.get(si, :fuzzy_aliases, [])
+
+    case Selection.select(si, Keyword.put(opts, :fuzzy_aliases, aliases)) do
       {si2, _res} -> coerce_si(si2)
       si2 -> coerce_si(si2)
     end

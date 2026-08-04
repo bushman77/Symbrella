@@ -110,7 +110,9 @@ defmodule Core.Response.CuriosityEpisodeProbeFlowTest do
 
     {_tone, text, meta} = Response.plan(si, @mood)
 
-    assert text =~ "Yeah, that was an interesting one."
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Yeah, that was an interesting one."
     refute text =~ "Curiosity check:"
     assert is_nil(meta.curiosity_probe)
   end

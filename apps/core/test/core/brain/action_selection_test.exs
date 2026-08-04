@@ -30,7 +30,10 @@ defmodule Core.Brain.ActionSelectionTest do
     assert out.selected_action == :safe_support
     assert is_list(out.action_candidates)
     assert %{selected: :safe_support} = out.action_meta
-    assert %Core.Agency.Decision{selected_action: :safe_support, trace_id: trace_id} = out.agency_decision
+
+    assert %Core.Agency.Decision{selected_action: :safe_support, trace_id: trace_id} =
+             out.agency_decision
+
     assert is_binary(trace_id)
     assert out.agency_commands == []
     assert out.agency_command_results == []
@@ -43,7 +46,8 @@ defmodule Core.Brain.ActionSelectionTest do
              } ->
                true
 
-             _ -> false
+             _ ->
+               false
            end)
   end
 
@@ -62,7 +66,16 @@ defmodule Core.Brain.ActionSelectionTest do
 
     assert out.selected_action == :store_memory
     assert %Core.Agency.Decision{selected_action: :store_memory} = out.agency_decision
+
     assert [%Core.Agency.Command{type: :write_memory, requires_permission?: true}] =
              out.agency_commands
+
+    assert [
+             %{
+               type: :write_memory,
+               status: :deferred,
+               reason: :permission_required
+             }
+           ] = out.agency_command_results
   end
 end

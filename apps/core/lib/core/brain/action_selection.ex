@@ -57,10 +57,6 @@ defmodule Core.Brain.ActionSelection do
     else
       si
     end
-  rescue
-    _ -> si
-  catch
-    _, _ -> si
   end
 
   def attach(si, _opts), do: si
@@ -147,14 +143,18 @@ defmodule Core.Brain.ActionSelection do
   defp summarize_command_results(_), do: []
 
   defp maybe_execute_commands(commands, opts) do
-    if Keyword.get(opts, :execute_agency_commands?, false) do
+    if agency_opt(opts, :execute_agency_commands?, :agency_execute_commands?, false) do
       Executor.execute_all(commands,
-        permission?: Keyword.get(opts, :agency_permission?, false),
-        record?: Keyword.get(opts, :record_agency_commands?, true)
+        permission?: agency_opt(opts, :agency_permission?, :agency_require_permission?, false),
+        record?: agency_opt(opts, :record_agency_commands?, :agency_record_commands?, true)
       )
     else
       []
     end
+  end
+
+  defp agency_opt(opts, opt_key, env_key, default) do
+    Keyword.get(opts, opt_key, Application.get_env(:core, env_key, default))
   end
 
   defp si_get(map, key, default \\ nil)

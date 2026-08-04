@@ -1,0 +1,207 @@
+# =============================================================================
+# Project: db
+# Generated: Fri Jul 31 01:19:45 PM PDT 2026
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FILE: mix.exs
+# -----------------------------------------------------------------------------
+
+defmodule Db.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :db,
+      version: "0.1.0",
+      build_path: "../../_build",
+      config_path: "../../config/config.exs",
+      deps_path: "../../deps",
+      lockfile: "../../mix.lock",
+      elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      deps: deps()
+    ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger, :ecto_sql, :postgrex]
+    ]
+  end
+
+  # compile test helpers only in test
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    [
+      {:ecto_sql, "~> 3.13"},
+      {:postgrex, ">= 0.0.0"},
+      # keep if you use the :vector column
+      {:pgvector, "~> 0.3.0"},
+      {:jason, "~> 1.4"}
+    ]
+  end
+end
+
+
+# -----------------------------------------------------------------------------
+# FILE: README.md
+# -----------------------------------------------------------------------------
+
+# Db — Persistence Layer for Symbrella
+
+This app is the **database + Ecto layer** for the Symbrella umbrella.  
+It owns all persistent storage for brain cells, episodes, and model metadata, and
+exposes a single Ecto repo module: `Db`.
+
+In the umbrella dependency chain, Db sits at the bottom:
+
+```text
+db ← brain ← core ← web
+```
+
+- **Nothing depends on Db “from the left”.**
+- **Brain, Core, and Web may depend on Db as a normal Ecto repo.**
+
+---
+
+## What lives here
+
+### 1. Repo
+
+- `Db` — the Ecto repo module (note: the repo is called `Db`, *not* `Db.Repo`).
+  - Used by other apps via `Db` / `Db.transaction/1` / `Db.query/3`, etc.
+  - Configured in the umbrella’s `config/*.exs` files.
+
+### 2. Schemas
+
+These schemas are the persistent backing for Brain and Core:
+
+- `Db.BrainCell`
+  - Stores the long‑term “lexicon” of **brain cells**:
+    - `id` (e.g. `"word|pos|sense"`) as primary key.
+    - POS / type information.
+    - neurotransmitter state and activation.
+    - connectivity / position metadata.
+  - Brain uses this as its *long‑term semantic memory*.
+
+- `Db.Episode`
+  - Episodic memory rows for **Hippocampus**:
+    - tokens / lemmas and counts,
+    - `meta` (scope, outcome flags, etc.),
+    - timestamps (`inserted_at`, `updated_at`),
+    - optional embedding column (pgvector) for similarity recall.
+  - Queried by `Brain.Hippocampus` when doing episode recall.
+
+- `Db.CerebellumModel` (and related helpers)
+  - Stores metadata and weights for **cerebellum‑style models**:
+    - model name + version,
+    - task / scope,
+    - serialized parameters or references to files.
+  - Used by `Brain.Cerebellum.Store` to load/update trained models.
+
+- `Db.SelfSnapshot`
+  - Stores self-model/self-portrait snapshots emitted by Brain.
+  - Used for continuity and later inspection of the system's self-state over
+    time.
+
+- JSONL and import helpers (`Db.JSONL.*`, `Db.Import`) support loading local
+  lexical/brain-cell data.
+
+- Other helper modules (e.g. `Db.PostgrexTypes`) live here as well.
+  They are considered **infrastructure**, not business logic.
+
+---
+
+## Role in the umbrella
+
+Db’s responsibilities:
+
+- Define **schemas and migrations** for:
+  - brain cells,
+  - episodes,
+  - model metadata,
+  - future storage (lexicon rows, statistics, etc.).
+- Provide a **single, well‑typed entry point** (`Db`) for all database access.
+- Keep higher‑level apps (Brain/Core/Web) free of migration and schema clutter.
+
+Db explicitly does **not**:
+
+- Implement working‑memory logic (that’s `Brain.WorkingMemory`).
+- Implement LIFG / curiosity / thalamus logic (all live in `apps/brain`).
+- Orchestrate the semantic pipeline (that’s `apps/core`).
+
+---
+
+## Migrations & structure
+
+Migrations live under:
+
+```text
+apps/db/priv/db/migrations     # core DB structures (brain_cells, episodes, models, …)
+apps/db/priv/repo/migrations   # legacy / bootstrap migrations
+apps/db/priv/scripts           # import/bootstrap scripts
+```
+
+Typical tables include:
+
+- `brain_cells`
+- `episodes`
+- `cerebellum_models` (if present)
+- `self_snapshots`
+
+Run migrations from the umbrella root:
+
+```bash
+# create the database (once per environment)
+mix ecto.create -r Db
+
+# run migrations
+mix ecto.migrate -r Db
+
+# umbrella helper aliases
+mix db.setup
+mix db.migrate
+mix db.reset
+```
+
+> Reminder: the repo module is **`Db`**, not `Db.Repo`.
+
+---
+
+## Using Db from other apps
+
+From any app in the umbrella (Brain, Core, etc.) you can call:
+
+```elixir
+# Basic query via Ecto
+Db.all(Db.BrainCell)
+
+# Transaction
+Db.transaction(fn ->
+  # read/write brain cells or episodes here
+end)
+```
+
+For higher‑level logic:
+
+- Brain modules (`Brain.Hippocampus`, `Brain.Cerebellum.Store`, etc.) should own
+  most of the **“what to store / when to write”** decisions.
+- Core and Web can read from Db directly when appropriate (offline tools, admin
+  dashboards), but should avoid duplicating Brain’s semantics.
+
+---
+
+## Notes for future work
+
+- Tighten pgvector integration for episode and model recall.
+- Add small utility scripts/tests for DB‑only concerns (index health, vacuum hints).
+- Expand schemas as new brain regions gain persistent state (e.g., more detailed
+  episode metadata, statistics, or model registries).
+- Keep migrations owned by this app even when a higher-level Brain or Core
+  feature drives the need for a new table.
+
+

@@ -623,8 +623,9 @@ FILE: ./apps/core/lib/core/response/override_skills.ex
 
 10:   @spec apply(map(), map(), map()) :: {map(), map() | nil}
 30:   @spec deterministic_inline_text(map() | nil) :: String.t() | nil
-50:   @spec read_only_mood_query?(String.t()) :: boolean()
-53:   @spec self_check_query?(String.t()) :: boolean()
+49:   @spec llm_prompt_override(map() | nil) :: atom() | nil
+53:   @spec read_only_mood_query?(String.t()) :: boolean()
+56:   @spec self_check_query?(String.t()) :: boolean()
 
 
 ===== MODULE: Core.Response.Topics =====
@@ -701,9 +702,10 @@ FILE: ./apps/core/lib/core/response/guardrails.ex
 ===== MODULE: Core.Response.LlmPrompt =====
 FILE: ./apps/core/lib/core/response/llm_prompt.ex
 
-10:   @spec build_system_prompt(map()) :: String.t()
-29:   @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
-112:   @spec summarize_wm(list()) :: [String.t()]
+11:   @spec build_system_prompt(map()) :: String.t()
+30:   @spec build_system_prompt(map(), map(), map(), list()) :: String.t()
+114:   @spec summarize_wm(list()) :: [String.t()]
+578:   @spec self_state_prompt(map()) :: String.t()
 
 
 ===== MODULE: Core.Response.Memory =====
@@ -772,7 +774,7 @@ FILE: ./apps/core/lib/core/response/policy.ex
 50:           scores: map,
 51:           overrides: list(atom)
 52:         }
-511:   @spec normalize_intent(atom, String.t()) :: atom
+514:   @spec normalize_intent(atom, String.t()) :: atom
 
 
 ===== MODULE: Core.Response.SideEffects =====
@@ -849,6 +851,14 @@ FILE: ./apps/core/lib/core/response/template_fallback.ex
 23:   @spec normalize_reason(term()) :: atom()
 
 
+===== MODULE: Core.Response.BehavioralState =====
+FILE: ./apps/core/lib/core/response/behavioral_state.ex
+
+25:   @spec compute(map(), map()) :: state()
+68:   @spec directive(state()) :: String.t()
+101:   @spec label(state()) :: String.t()
+
+
 ===== MODULE: Core.Response.Skills =====
 FILE: ./apps/core/lib/core/response/skills.ex
 
@@ -882,9 +892,10 @@ FILE: ./apps/core/lib/core/response/llm_chat_history.ex
 ===== MODULE: Core.Response.LlmSynthesis =====
 FILE: ./apps/core/lib/core/response/llm_synthesis.ex
 
-38:   @spec generate(String.t(), map(), map(), map()) :: {:ok, String.t()} | {:error, term()}
-47:   @spec record_turn(term(), String.t(), String.t()) :: :ok
-52:   @spec history_status(term()) :: map()
+38:   @spec generate(String.t(), map(), map(), map(), atom() | nil) ::
+39:           {:ok, String.t()} | {:error, term()}
+48:   @spec record_turn(term(), String.t(), String.t()) :: :ok
+53:   @spec history_status(term()) :: map()
 
 
 ===== MODULE: Core.Response.Personality =====
@@ -992,8 +1003,8 @@ FILE: ./apps/core/lib/core/phrase_repo/db_source.ex
 FILE: ./apps/core/lib/core/response.ex
 
 52:   @spec plan(si_like(), mood_like()) :: {atom(), String.t(), map()}
-221:   @spec memory_reply(si_like()) :: {atom(), String.t(), map()} | nil
-392:   @spec annotate_si(map(), mood_like()) :: map()
+225:   @spec memory_reply(si_like()) :: {atom(), String.t(), map()} | nil
+396:   @spec annotate_si(map(), mood_like()) :: map()
 
 
 ===== MODULE: Core.LexID =====
@@ -1676,15 +1687,15 @@ FILE: ./apps/brain/lib/brain/lifg/guard.ex
 ===== MODULE: Brain.LIFG.Stage1 =====
 FILE: ./apps/brain/lib/brain/lifg/stage1.ex
 
-248:   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
-251:   @spec run(map(), keyword()) ::
-252:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
-454:   @spec run(map(), map() | keyword(), keyword()) ::
-455:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
-476:   @spec choose(list(), map() | nil, keyword()) ::
-477:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
-701:   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
-702:           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
+253:   @spec run(map()) :: {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+256:   @spec run(map(), keyword()) ::
+257:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+459:   @spec run(map(), map() | keyword(), keyword()) ::
+460:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+481:   @spec choose(list(), map() | nil, keyword()) ::
+482:           {:ok, %{si: map(), choices: list(), audit: map()}} | {:error, term()}
+706:   @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
+707:           :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
 
 
 ===== MODULE: Brain.LIFG.Recorder =====

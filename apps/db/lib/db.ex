@@ -84,6 +84,32 @@ defmodule Db do
   }
 
   @doc """
+  Returns all BrainCell rows for a given word's normalized form.
+
+  Used by fuzzy repair to check if a word is obsolete (all senses inactive)
+  and retrieve synonyms for correction suggestions.
+
+  Unlike `word_exists?/2`, this returns the full rows so callers can inspect
+  `status`, `synonyms`, and other fields.
+  """
+  @spec brain_cells_for_norm(String.t()) :: [BrainCell.t()]
+  def brain_cells_for_norm(word) when is_binary(word) do
+    case norm(word) do
+      "" ->
+        []
+
+      n ->
+        from(b in BrainCell,
+          where: b.norm == ^n,
+          select: b
+        )
+        |> Db.all()
+    end
+  end
+
+  def brain_cells_for_norm(_word), do: []
+
+  @doc """
   Look up BrainCell rows for the tokens inside an SI-like map.
 
   `si.tokens` may contain:

@@ -16,10 +16,11 @@ defmodule Core.Response.CompanionContinuityTest do
     assert meta.mode == :chat
     assert meta.action == :answer
     assert :personal_life_update_answer in meta.overrides
-    assert meta.response_source == :template_fallback
+    assert meta.response_source == :model_unavailable
     refute meta.response_source == :inline_skill
-    assert text =~ "Good afternoon"
-    assert text =~ "own place"
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Good afternoon"
+    refute text =~ "own place"
     refute text =~ "simpler words"
     refute text =~ "Suggested next step"
     refute text =~ "module"
@@ -38,7 +39,9 @@ defmodule Core.Response.CompanionContinuityTest do
     assert tone == :warm
     assert meta.mode == :chat
     assert meta.action == :answer
-    assert text =~ "I’m here with you"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "I’m here with you"
     refute text =~ "module"
     refute text =~ "file"
     refute text =~ "code"
@@ -55,7 +58,9 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.mode == :chat
-    assert text =~ "came out wrong"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "came out wrong"
     refute text =~ "module"
     refute text =~ "file"
     refute text =~ "Suggested next step"
@@ -74,7 +79,9 @@ defmodule Core.Response.CompanionContinuityTest do
     assert meta.mode == :chat
     assert meta.action == :companion_repair
     assert :companion_repair in meta.overrides
-    assert text =~ "companion"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "companion"
     refute text =~ "module"
     refute text =~ "file"
     refute text =~ "Suggested next step"
@@ -92,7 +99,9 @@ defmodule Core.Response.CompanionContinuityTest do
     assert tone == :deescalate
     assert meta.mode == :chat
     assert meta.action == :trust_repair
-    assert text =~ "got pulled off the thread"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "got pulled off the thread"
     refute text =~ "module"
     refute text =~ "file"
   end
@@ -107,8 +116,10 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.intent_inferred == :ask
-    assert text =~ "War"
-    assert text =~ "anti-suffering"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "War"
+    refute text =~ "anti-suffering"
     refute text == "Hey. I’m here with you."
     refute text =~ "Suggested next step"
     refute text =~ "module"
@@ -125,9 +136,11 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.intent_inferred == :ask
-    assert text =~ "Alternatives to war"
-    assert text =~ "diplomacy"
-    assert text =~ "ceasefires"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Alternatives to war"
+    refute text =~ "diplomacy"
+    refute text =~ "ceasefires"
     refute text =~ "what are you trying to talk through"
     refute text =~ "Suggested next step"
     refute text =~ "module"
@@ -145,9 +158,11 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.intent_inferred in [:unknown, :question]
-    assert text =~ "scale changes the intuition"
-    assert text =~ "solar system"
-    assert text =~ "universe"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "scale changes the intuition"
+    refute text =~ "solar system"
+    refute text =~ "universe"
     refute text =~ "missed the thread"
     refute text =~ "Suggested next step"
     refute text =~ "module"
@@ -177,9 +192,11 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.intent_inferred in [:unknown, :question]
-    assert text =~ "same thread"
-    assert text =~ "UFO or UAP footage"
-    assert text =~ "not the same as confirmed alien life"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "same thread"
+    refute text =~ "UFO or UAP footage"
+    refute text =~ "not the same as confirmed alien life"
     refute text =~ "do not have prior chat context"
     refute text =~ "what are you trying to talk through"
     refute text =~ "missed the thread"
@@ -209,8 +226,10 @@ defmodule Core.Response.CompanionContinuityTest do
     {_tone, text, meta} = Response.plan(si, %{})
 
     assert meta.intent_inferred in [:unknown, :question]
-    assert text =~ "same alien-life thread"
-    assert text =~ "separate claim"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "same alien-life thread"
+    refute text =~ "separate claim"
     refute text =~ "simpler words"
     refute text =~ "Suggested next step"
     refute text =~ "module"
@@ -237,9 +256,11 @@ defmodule Core.Response.CompanionContinuityTest do
       session_id: session_id
     }
 
-    {_tone, text, _meta} = Response.plan(si, %{})
+    {_tone, text, meta} = Response.plan(si, %{})
 
-    assert text =~ "same alien-life thread"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "same alien-life thread"
     refute text =~ "turning it into a technical target"
     refute text =~ "simpler words"
   end
@@ -265,9 +286,11 @@ defmodule Core.Response.CompanionContinuityTest do
       session_id: session_id
     }
 
-    {_tone, text, _meta} = Response.plan(si, %{})
+    {_tone, text, meta} = Response.plan(si, %{})
 
-    assert text =~ "same alien-life thread"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "same alien-life thread"
     refute text =~ "turning it into a technical target"
     refute text =~ "simpler words"
   end
@@ -282,10 +305,12 @@ defmodule Core.Response.CompanionContinuityTest do
       session_id: session_id
     }
 
-    {_tone, text, _meta} = Response.plan(si, %{})
+    {_tone, text, meta} = Response.plan(si, %{})
 
-    assert text =~ "do not have prior chat context"
-    assert text =~ "alien-life thread"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "do not have prior chat context"
+    refute text =~ "alien-life thread"
     refute text =~ "That fits the same thread"
     refute text =~ "what are you trying to talk through"
     refute text =~ "missed the thread"

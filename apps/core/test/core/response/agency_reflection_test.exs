@@ -3,16 +3,16 @@ defmodule Core.Response.AgencyReflectionTest do
 
   alias Core.Response.AgencyReflection
 
-  test "from_response/4 records fallback as a scope-reduction adjustment" do
+  test "from_response/4 records model unavailability as a scope-reduction adjustment" do
     reflection =
       AgencyReflection.from_response(
         "what should we do?",
-        "Here is a fallback answer.",
+        "Model unavailable (llm_not_available). No fallback response was generated.",
         %{},
         %{
           action: :offer_options,
           mode: :coach,
-          response_source: :template_fallback,
+          response_source: :model_unavailable,
           response_fallback_reason: :llm_not_available,
           confidence: 0.4,
           self_state_effects: []
@@ -20,10 +20,10 @@ defmodule Core.Response.AgencyReflectionTest do
       )
 
     assert reflection.v == 1
-    assert :llm_fallback in reflection.what_failed
+    assert :model_unavailable in reflection.what_failed
     assert reflection.next_time_adjustment == :reduce_scope
     assert reflection.confidence_delta < 0.0
-    assert :fallback in reflection.signals
+    assert :model_unavailable in reflection.signals
     assert :reduce_scope in reflection.signals
   end
 

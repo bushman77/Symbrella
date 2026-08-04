@@ -17,16 +17,16 @@ defmodule Core.Response.AgencyMemoryTest do
     assert :recent_low_confidence in memory.reasons
   end
 
-  test "summarize/1 turns repeated fallback into reduce scope pressure" do
+  test "summarize/1 turns repeated model unavailability into reduce scope pressure" do
     events = [
-      %{decision: %{response_source: "template_fallback"}, reasons: %{fallback_reason: "llm"}},
-      %{decision: %{response_source: :template_fallback}, reasons: %{fallback_reason: :timeout}}
+      %{decision: %{response_source: "model_unavailable"}, reasons: %{fallback_reason: "llm"}},
+      %{decision: %{response_source: :model_unavailable}, reasons: %{fallback_reason: :timeout}}
     ]
 
     memory = AgencyMemory.summarize(events)
 
     assert :reduce_scope in memory.effects
-    assert :recent_template_fallbacks in memory.reasons
+    assert :recent_model_unavailable in memory.reasons
   end
 
   test "summarize/1 turns repeated repair effects into repair pressure" do

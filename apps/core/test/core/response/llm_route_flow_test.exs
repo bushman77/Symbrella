@@ -21,11 +21,18 @@ defmodule Core.Response.LlmRouteFlowTest do
     def handle_call({:chat, messages, opts}, _from, test_pid) do
       send(test_pid, {:llm_chat, messages, opts})
 
+      user_text = messages |> List.last() |> Map.get("content", "")
+
       text =
-        if messages |> List.last() |> Map.get("content", "") |> String.contains?("fuzzy") do
-          "Please provide more information so I can assist you today."
-        else
-          "LLM verbalized the symbolic posture."
+        cond do
+          String.contains?(user_text, "fuzzy") ->
+            "Please provide more information so I can assist you today."
+
+          String.contains?(user_text, "note leak") ->
+            "Here is the direct answer.\n\n(Note: The assistant's response is based on internal planning.)"
+
+          true ->
+            "LLM verbalized the symbolic posture."
         end
 
       {:reply, {:ok, %{content: text}}, test_pid}
@@ -75,7 +82,7 @@ defmodule Core.Response.LlmRouteFlowTest do
     assert system =~ "You are Symbrella."
   end
 
-  test "greetings use LLM synthesis instead of a canned menu when a client is available" do
+  test "short greetings route through LLM instead of inline social text" do
     si = %{intent: :unknown, confidence: 0.8, text: "hello there"}
 
     {_tone, text, meta} = Response.plan(si, %{})
@@ -86,6 +93,18 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute meta.response_fallback_reason
     refute text =~ "Quick picks"
     refute text =~ "Full file"
+    assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "LLM trailing assistant explanation notes are stripped from chat text" do
+    si = %{intent: :refactor, confidence: 0.92, text: "note leak in a refactor answer"}
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text == "Here is the direct answer."
+    assert meta.response_source == :llm
+    refute text =~ "Note:"
+    refute text =~ "assistant's response is based"
 
     assert_receive {:llm_chat, _messages, _opts}
   end

@@ -30,8 +30,9 @@ defmodule Core.Response.PlanAbuseFlowTest do
     assert meta.intent_inferred == :abuse
     assert meta.profile == :firm_guardian
 
-    # We should be using the abuse-specific boundary copy from Modes, not a generic editor template.
-    assert text =~ "respectful and useful" or text =~ "keep it constructive"
-    assert String.contains?(String.downcase(text), "changed")
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "respectful and useful"
+    refute text =~ "keep it constructive"
   end
 end

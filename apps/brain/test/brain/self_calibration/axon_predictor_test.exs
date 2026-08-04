@@ -135,9 +135,6 @@ defmodule Brain.SelfCalibration.AxonPredictorTest do
     assert loaded_artifact.feature_schema_v == 1
     assert loaded_artifact.params != nil
 
-    # Create a test sample from the dataset
-    test_sample = sample()
-
     # Test prediction with the original artifact
     assert {:ok, original_prediction} = AxonPredictor.predict(artifact, batch)
     assert_bounded(original_prediction.confidence)

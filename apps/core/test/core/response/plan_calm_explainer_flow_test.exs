@@ -29,9 +29,10 @@ defmodule Core.Response.PlanCalmExplainerFlowTest do
     assert meta.intent_inferred == :explain
     assert meta.profile == :calm_explainer
 
-    # With no LLM registered in this test, text comes from the deterministic fallback.
-    assert text =~ "Suggested next step:"
-    assert text =~ "Explain from the available Symbrella evidence without implying sentience."
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Suggested next step:"
+    refute text =~ "Explain from the available Symbrella evidence without implying sentience."
     refute text =~ "Here's the short version of how this works"
     refute text =~ "1) What changes, at a glance"
   end

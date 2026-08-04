@@ -336,7 +336,7 @@ defmodule Core.Response.ReflectionLoop do
         "Alien life might exist. The universe is enormous, and it would be surprising if Earth were the only place where life ever emerged. But confirmed evidence is still missing, so I’d call it plausible, not proven."
 
       true ->
-        "I can help. Let me answer the request directly instead of exposing internal state: what outcome are you trying to get first?"
+        "I can help. What outcome are you trying to get first?"
     end
   end
 

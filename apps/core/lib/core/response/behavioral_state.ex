@@ -7,8 +7,6 @@ defmodule Core.Response.BehavioralState do
   computes a behavioral state label from modulator combinations and returns
   a natural-language directive the LLM can actually use to shape its tone.
   """
-  alias Core.Response.BehavioralState
-
   @type state ::
           :curious_exploratory
           | :cautious_measured

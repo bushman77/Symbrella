@@ -24,7 +24,7 @@ defmodule Core.Response.MoodIndicesFlowTest do
     :ok
   end
 
-  test "answers mood index queries directly with pressure-aware wording" do
+  test "routes mood index queries through model synthesis" do
     si = %{
       intent: :question,
       keyword: "mood indices",
@@ -40,19 +40,17 @@ defmodule Core.Response.MoodIndicesFlowTest do
     assert meta.chosen_skill == :mood_indices
     assert :mood_indices_answer in meta.overrides
 
-    assert text =~ "Current mood indices:"
-    assert text =~ "Vigilance:"
-    assert text =~ "Vigilance: 0.53 (+0.13 from baseline)"
-    assert text =~ "Inhibition: 0.52 (-0.08 from baseline)"
-    assert text =~ "elevated vigilance"
-    assert text =~ "not a calm baseline"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "Current mood indices:"
+    refute text =~ "Vigilance: 0.53 (+0.13 from baseline)"
 
     refute text =~ "quick TODO list"
     refute text =~ "short outline"
     refute text =~ "reflect a calm"
   end
 
-  test "answers feeling questions from live neuromodulator self-state" do
+  test "routes feeling questions through model synthesis" do
     si = %{
       intent: :question,
       confidence: 0.9,
@@ -67,11 +65,10 @@ defmodule Core.Response.MoodIndicesFlowTest do
     assert meta.chosen_skill == :self_state_feeling
     assert :self_state_feeling_answer in meta.overrides
 
-    assert text =~ "software self-state"
-    assert text =~ "Exploration:"
-    assert text =~ "Raw modulators:"
-    assert text =~ "ne=0.53"
-    assert text =~ "cautious emergency attention"
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+    refute text =~ "software self-state"
+    refute text =~ "Raw modulators:"
 
     refute text =~ "How can I assist you today"
   end

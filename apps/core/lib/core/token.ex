@@ -132,26 +132,38 @@ defmodule Core.Token do
     max_n = Keyword.get(opts, :max_wordgram_n, 3) |> max(1)
     span_mode = Keyword.get(opts, :span_mode, :words)
 
+    # ── Step 1: Fuzzy repair the sentence BEFORE tokenization ──
+    # This corrects typos like "goode" → "good" using DB synonyms.
+    # Happens once, here, nowhere else.
     s =
-      sentence
+      if Keyword.get(opts, :fuzzy, true) do
+        Core.Text.Fuzzy.normalize(sentence, fuzzy_opts(opts))
+      else
+        sentence
+      end
+
+    # ── Step 2: Normalize whitespace ──
+    s =
+      s
       |> to_string()
       |> String.trim()
       |> String.replace(~r/\s+/u, " ")
 
-    # 1) Scan the normalized string into primitive tokens (words & punct) with BYTE spans.
+    # ── Step 3: Scan the normalized string into primitive tokens ──
+    # Returns words and punctuation with BYTE spans.
     prim = scan_primitive_tokens(s)
 
-    # 2) Derive the list of word tokens (order preserved).
+    # ── Step 4: Derive the list of word tokens (order preserved) ──
     word_tokens =
       prim
       |> Enum.with_index()
       |> Enum.filter(fn {t, _i} -> t.kind == :word end)
 
-    # 3) Build boundary word tokens and keep unconfirmed word-grams separate.
+    # ── Step 5: Build boundary word tokens and phrase candidates ──
     {word_base_tokens, phrase_candidates} =
       build_word_tokens_and_candidates(word_tokens, max_n, span_mode)
 
-    # 4) Optionally include punctuation tokens in :chars mode.
+    # ── Step 6: Optionally include punctuation tokens in :chars mode ──
     tokens =
       case span_mode do
         :words ->
@@ -178,12 +190,24 @@ defmodule Core.Token do
           |> Enum.sort_by(fn %__MODULE__{span: {st, _}} -> st end)
       end
 
+    # ── Step 7: Assign sequential indices to all tokens ──
     tokens =
       tokens
       |> Enum.with_index()
       |> Enum.map(fn {%__MODULE__{} = t, idx} -> %__MODULE__{t | index: idx} end)
 
+    # ── Step 8: Return the SemanticInput ──
     %Core.SemanticInput{sentence: s, tokens: tokens, phrase_candidates: phrase_candidates}
+  end
+
+  defp fuzzy_opts(opts) do
+    Keyword.take(opts, [
+      :max_distance,
+      :known_word?,
+      :candidate_words,
+      :candidate_lookup,
+      :context_embedding
+    ])
   end
 
   # ---------- primitive scan (Unicode-safe) ----------
