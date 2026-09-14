@@ -748,7 +748,10 @@ defmodule Brain.LIFG.MWE do
   defp parse_nonneg_int(_), do: nil
 
   defp cell_to_unigram_candidate(cell, surface) do
-    raw_pos = Safe.get(cell, :pos) || Safe.get(cell, "pos") || :other
+    raw_pos =
+      Safe.get(cell, :pos) ||
+        Safe.get(cell, "pos") ||
+        :other
 
     pos_norm =
       raw_pos
@@ -758,7 +761,9 @@ defmodule Brain.LIFG.MWE do
       |> String.replace(~r/\s+/, "_")
       |> String.replace("-", "_")
 
-    raw_id = Safe.get(cell, :id) || Safe.get(cell, "id")
+    raw_id =
+      Safe.get(cell, :id) ||
+        Safe.get(cell, "id")
 
     id =
       case raw_id do
@@ -770,16 +775,70 @@ defmodule Brain.LIFG.MWE do
 
         v ->
           s = to_string(v)
-          if s in ["", "nil"], do: "#{down(surface)}|#{pos_norm}|fallback", else: s
+
+          if s in ["", "nil"] do
+            "#{down(surface)}|#{pos_norm}|fallback"
+          else
+            s
+          end
       end
+
+    word =
+      Safe.get(cell, :word) ||
+        Safe.get(cell, "word") ||
+        surface
+
+    norm =
+      Safe.get(cell, :norm) ||
+        Safe.get(cell, "norm") ||
+        down(surface)
+
+    definition =
+      Safe.get(cell, :definition) ||
+        Safe.get(cell, "definition")
+
+    example =
+      Safe.get(cell, :example) ||
+        Safe.get(cell, "example")
+
+    synonyms =
+      Safe.get(cell, :synonyms) ||
+        Safe.get(cell, "synonyms") ||
+        []
+
+    antonyms =
+      Safe.get(cell, :antonyms) ||
+        Safe.get(cell, "antonyms") ||
+        []
+
+    semantic_atoms =
+      Safe.get(cell, :semantic_atoms) ||
+        Safe.get(cell, "semantic_atoms") ||
+        []
+
+    gram_function =
+      Safe.get(cell, :gram_function) ||
+        Safe.get(cell, "gram_function") ||
+        []
 
     %{
       id: id,
-      lemma: surface,
-      norm: surface,
+      lemma: word,
+      norm: norm,
       mw: false,
-      # canonicalize cand.pos to match synthesized id + tests ("proper noun" -> "proper_noun")
+
+      # Canonical POS used by Stage1.
       pos: pos_norm,
+
+      # Preserve sense-local lexical evidence from Db.BrainCell.
+      definition: definition,
+      example: example,
+      synonyms: List.wrap(synonyms),
+      antonyms: List.wrap(antonyms),
+      semantic_atoms: List.wrap(semantic_atoms),
+      gram_function: List.wrap(gram_function),
+
+      # Existing Stage1 priors.
       rel_prior: 0.20,
       activation: (Safe.get(cell, :activation, 0.25) || 0.25) * 1.0,
       score: 0.30,

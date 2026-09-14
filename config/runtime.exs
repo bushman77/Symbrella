@@ -22,18 +22,61 @@ pmtg_keep =
     _ -> 50
   end
 
-# Optional: override Stage-1 weights via "LIFG_WTS=lex,rel,act,prag"
+# Optional Stage-1 weight override.
+#
+# Preferred five-feature form:
+#
+#   LIFG_WTS=lex,context,rel,act,intent
+#
+# Example:
+#
+#   LIFG_WTS=0.20,0.40,0.20,0.10,0.10
+#
+# Legacy four-feature form remains accepted:
+#
+#   LIFG_WTS=lex,rel,act,intent
+#
+# In the legacy form context_fit remains disabled at 0.0.
 lifg_weights =
   case System.get_env("LIFG_WTS") do
     nil ->
       nil
 
     csv ->
-      parts = String.split(csv, ",")
+      parts =
+        csv
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
 
       case Enum.map(parts, &Float.parse/1) do
-        [{lex, _}, {rel, _}, {act, _}, {prag, _}] ->
-          %{lex_fit: lex, rel_prior: rel, activation: act, intent_bias: prag}
+        [
+          {lex, ""},
+          {context, ""},
+          {rel, ""},
+          {act, ""},
+          {intent, ""}
+        ] ->
+          %{
+            lex_fit: lex,
+            context_fit: context,
+            rel_prior: rel,
+            activation: act,
+            intent_bias: intent
+          }
+
+        [
+          {lex, ""},
+          {rel, ""},
+          {act, ""},
+          {intent, ""}
+        ] ->
+          %{
+            lex_fit: lex,
+            context_fit: 0.0,
+            rel_prior: rel,
+            activation: act,
+            intent_bias: intent
+          }
 
         _ ->
           nil
@@ -56,8 +99,16 @@ lifg_min_score =
     _ -> 0.35
   end
 
-# NEW: episodic attach master switch (EPISODES_MODE=on|off; default on)
-# EPISODES_MODE can be: off | on | async | async_embedding
+# ───────── Episodic runtime configuration ─────────
+
+# Episodic attach master switch.
+#
+# EPISODES_MODE:
+#   off
+#   on
+#   sync
+#   async
+#   async_embedding
 episodes_mode =
   case System.get_env("EPISODES_MODE", "async_embedding") |> String.downcase() do
     "off" -> :off
@@ -68,15 +119,17 @@ episodes_mode =
     _ -> :async_embedding
   end
 
-# Explicit persistence switch (EPISODES_PERSIST=on|off); default ON if you’re enabling episodes_mode
+# Explicit persistence switch.
+#
+# Defaults to persistence being enabled whenever episodic mode itself
+# is enabled.
 episodes_persist =
   case System.get_env("EPISODES_PERSIST") do
     nil ->
-      # sensible default: persist unless mode is off
       episodes_mode != :off
 
-    v ->
-      case String.downcase(v) do
+    value ->
+      case String.downcase(value) do
         "1" -> true
         "true" -> true
         "yes" -> true
@@ -91,6 +144,11 @@ episodes_tags =
   |> Enum.map(&String.trim/1)
   |> Enum.reject(&(&1 == ""))
 
+# ───────── Brain runtime configuration ─────────
+#
+# Keep the common Brain configuration in one place. More specialized
+# configuration, such as hippocampal DB recall defaults, lives below.
+
 config :brain,
   self_names: ["symbrella"],
   pmtg_mode: pmtg_mode,
@@ -99,13 +157,25 @@ config :brain,
   hippo_meta_dup_count: true,
   lifg_min_score: lifg_min_score,
 
-  # episodes
+  # Episodes
   episodes_mode: episodes_mode,
   episodes_persist: episodes_persist,
   episodes_tags: episodes_tags,
+
+  # LIFG
   lifg_stage1_mwe_fallback: true
 
-# NEW: optional defaults for DB/Hybrid recall (all overridable per request)
+# Apply optional Stage-1 runtime overrides only when explicitly supplied.
+if lifg_weights do
+  config :brain, :lifg_stage1_weights, lifg_weights
+end
+
+if lifg_scores_mode do
+  config :brain, :lifg_stage1_scores_mode, lifg_scores_mode
+end
+
+# ───────── Hippocampal DB / hybrid recall ─────────
+
 hippo_recall_source =
   case System.get_env("HIPPO_RECALL_SOURCE", "") |> String.downcase() do
     "db" -> :db
@@ -132,23 +202,7 @@ hippo_recall_half_life_s =
     _ -> 3600
   end
 
-config :brain,
-  self_names: ["symbrella"],
-  pmtg_mode: pmtg_mode,
-  pmtg_margin_threshold: pmtg_margin,
-  pmtg_window_keep: pmtg_keep,
-  hippo_meta_dup_count: true,
-  lifg_min_score: lifg_min_score,
-  # NEW:
-  episodes_mode: episodes_mode,
-  lifg_stage1_mwe_fallback: true
-
-if lifg_weights, do: config(:brain, :lifg_stage1_weights, lifg_weights)
-if lifg_scores_mode, do: config(:brain, :lifg_stage1_scores_mode, lifg_scores_mode)
-
-# NEW: defaults for DB/Hybrid episodic recall
 config :brain, :hippo_db_defaults,
-  # :memory | :db | :hybrid
   recall_source: hippo_recall_source,
   recall_k: hippo_recall_k,
   recall_min_sim: hippo_recall_min_sim,
@@ -159,6 +213,7 @@ config :brain, Brain.SelfCalibration.Logger,
   path: "priv/self_calibration/samples.jsonl"
 
 # ───────── Logger runtime overrides ─────────
+
 log_level =
   case System.get_env("LOG_LEVEL", "info") |> String.downcase() do
     "debug" -> :debug
@@ -172,10 +227,11 @@ if config_env() != :test do
 end
 
 # ───────── Ecto Repo runtime overrides ─────────
-# Silence SQL query spam unless DB_LOG=true
+
+# Silence SQL query spam unless DB_LOG=true.
 db_log =
   case System.get_env("DB_LOG", "false") |> String.downcase() do
-    s when s in ["1", "true", "yes"] -> true
+    value when value in ["1", "true", "yes"] -> true
     _ -> false
   end
 
@@ -183,21 +239,30 @@ repo_overrides =
   []
   |> then(fn acc ->
     case System.get_env("DATABASE_URL") do
-      nil -> acc
-      url -> Keyword.put(acc, :url, url)
+      nil ->
+        acc
+
+      url ->
+        Keyword.put(acc, :url, url)
     end
   end)
   |> then(fn acc ->
     case Integer.parse(System.get_env("POOL_SIZE", "")) do
-      {n, _} -> Keyword.put(acc, :pool_size, n)
-      _ -> acc
+      {n, _} ->
+        Keyword.put(acc, :pool_size, n)
+
+      _ ->
+        acc
     end
   end)
   |> Keyword.put(:log, db_log)
 
-if repo_overrides != [], do: config(:db, Db, repo_overrides)
+if repo_overrides != [] do
+  config :db, Db, repo_overrides
+end
 
 # ───────── Phoenix / prod only ─────────
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
@@ -210,21 +275,28 @@ if config_env() == :prod do
 
   config :symbrella_web, SymbrellaWeb.Endpoint,
     server: true,
-    http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
+    http: [
+      ip: {0, 0, 0, 0, 0, 0, 0, 0},
+      port: port
+    ],
     secret_key_base: secret_key_base
 
   config :swoosh, :api_client, Swoosh.ApiClient.Req
   config :swoosh, local: false
 end
 
+# ───────── LLM startup ─────────
+
 if config_env() != :test do
   config :llm, Llm,
-    # Synchronous startup is owned by Llm.BootGate below. Leave Llm's own
-    # async handle_continue autostart disabled to avoid a duplicate boot path.
+    # Synchronous startup is owned by Llm.BootGate below.
+    # Leave Llm's own async handle_continue autostart disabled
+    # to avoid a duplicate boot path.
     auto_start_on_boot?: false
 
   config :llm, Llm.BootGate,
-    # Blocks app startup here; Phoenix starts after :symbrella finishes booting.
+    # Blocks application startup here; Phoenix starts only after
+    # :symbrella finishes the LLM boot sequence.
     enabled?: true,
     timeout: 600_000
 end

@@ -37,8 +37,15 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Guard
   alias Brain.LIFG.Stage1.Numeric
   alias Brain.LIFG.Reanalysis
+  alias Brain.LIFG.ContextFit
 
-  @default_weights %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
+  @default_weights %{
+    lex_fit: 0.40,
+    context_fit: 0.00,
+    rel_prior: 0.30,
+    activation: 0.20,
+    intent_bias: 0.10
+  }
   @default_scores_mode :all
   @default_margin_thr 0.15
   @default_min_margin 0.05
@@ -847,6 +854,13 @@ defmodule Brain.LIFG.Stage1 do
 
             lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
+            context0 =
+              ContextFit.score(
+                ctx.sent,
+                token_phrase,
+                c
+              )
+
             rel0 =
               guess_rel_prior(c, id, token_phrase)
               |> clamp01()
@@ -870,6 +884,11 @@ defmodule Brain.LIFG.Stage1 do
             act = feat_override |> get_num(:activation, act0) |> clamp01()
             intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
+            context_fit =
+              feat_override
+              |> get_num(:context_fit, context0)
+              |> clamp01()
+
             pos_bias =
               closed_class_pos_bias(token_phrase, pos) +
                 local_context_pos_bias(acc, tok, pos)
@@ -889,6 +908,7 @@ defmodule Brain.LIFG.Stage1 do
             feat = %{
               id: id,
               lex_fit: lex,
+              context_fit: context_fit,
               rel_prior: rel,
               activation: act,
               intent_bias: intent_feat,
@@ -1544,12 +1564,16 @@ defmodule Brain.LIFG.Stage1 do
     id = sense_id_for(c, token_phrase)
     {lemma, pos, tag} = parse_sense_id(id)
 
+    pos_family =
+      closed_class_pos_family(pos) ||
+        String.downcase(to_string(pos || "other"))
+
     {
       norm(
         Safe.get(c, :norm) || Safe.get(c, "norm") || Safe.get(c, :lemma) ||
           Safe.get(c, "lemma") || lemma
       ),
-      closed_class_pos_family(pos),
+      pos_family,
       collapseable_sense_tag(tag)
     }
   end
@@ -1558,7 +1582,7 @@ defmodule Brain.LIFG.Stage1 do
 
   defp collapseable_sense_tag(tag) when is_binary(tag) do
     case Integer.parse(tag) do
-      {_n, ""} -> :numbered_sense
+      {n, ""} -> {:numbered_sense, n}
       _ -> {:explicit_tag, tag}
     end
   end

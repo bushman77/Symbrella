@@ -17,7 +17,8 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
       }
     }
 
-    assert {:ok, %{choices: [choice], audit: audit}} = Stage1.run(si, scores: :all)
+    assert {:ok, %{choices: [choice], audit: audit}} =
+             Stage1.run(si, scores: :all)
 
     assert choice.chosen_id == "hey|interjection|0"
     refute Map.has_key?(choice.scores, "morning|noun|0")
@@ -61,7 +62,8 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
       }
     }
 
-    assert {:ok, %{choices: choices, audit: audit}} = Stage1.run(si, scores: :all)
+    assert {:ok, %{choices: choices, audit: audit}} =
+             Stage1.run(si, scores: :all)
 
     by_index = Map.new(choices, &{&1.token_index, &1})
 
@@ -71,6 +73,7 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
     assert by_index[3].chosen_id == "about|preposition|0"
     assert by_index[4].chosen_id == "what|pronoun|0"
     assert by_index[5].chosen_id == "do|auxiliary|0"
+
     assert audit.weak_decisions == 0
     assert audit.low_confidence_decisions == 6
     assert audit.pos_anomalies == 0
@@ -90,7 +93,8 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
       }
     }
 
-    assert {:ok, %{choices: [choice], audit: audit}} = Stage1.run(si, scores: :all)
+    assert {:ok, %{choices: [choice], audit: audit}} =
+             Stage1.run(si, scores: :all)
 
     assert choice.chosen_id == "hey|interjection|0"
     assert choice.margin > 0.15
@@ -171,7 +175,8 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
       }
     }
 
-    assert {:ok, %{choices: choices}} = Stage1.run(si, scores: :all)
+    assert {:ok, %{choices: choices}} =
+             Stage1.run(si, scores: :all)
 
     by_index = Map.new(choices, &{&1.token_index, &1})
 
@@ -187,48 +192,186 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
     assert by_index[4].margin > 0.15
   end
 
-  test "duplicate sense ids collapse to a single lemma/pos family before scoring" do
-    cands =
-      for n <- 0..8 do
-        %{id: "go|verb|#{n}", lemma: "go", pos: "verb", activation: 0.5}
-      end
+  test "distinct numbered senses remain distinct before scoring" do
+    cands = [
+      %{
+        id: "bank|noun|1",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        activation: 0.5
+      },
+      %{
+        id: "bank|noun|11",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        activation: 0.5
+      },
+      %{
+        id: "bank|noun|22",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        activation: 0.5
+      },
+      %{
+        id: "bank|verb|1",
+        lemma: "bank",
+        norm: "bank",
+        pos: "verb",
+        activation: 0.5
+      }
+    ]
 
     si = %{
-      sentence: "go",
+      sentence: "bank",
       tokens: [
-        %{index: 0, phrase: "go", n: 1, mw: false, span: {0, 2}}
+        %{
+          index: 0,
+          token_index: 0,
+          phrase: "bank",
+          n: 1,
+          mw: false,
+          span: {0, 4}
+        }
       ],
       sense_candidates: %{0 => cands}
     }
 
-    assert {:ok, %{choices: [choice]}} = Stage1.run(si, scores: :all)
+    assert {:ok, %{choices: [choice]}} =
+             Stage1.run(
+               si,
+               scores: :all,
+               preserve_sense_candidates: true
+             )
 
-    assert map_size(choice.scores) == 1
-    assert choice.margin == 0.0
-    assert choice.weak?
+    assert map_size(choice.scores) == 4
+
+    assert Map.has_key?(choice.scores, "bank|noun|1")
+    assert Map.has_key?(choice.scores, "bank|noun|11")
+    assert Map.has_key?(choice.scores, "bank|noun|22")
+    assert Map.has_key?(choice.scores, "bank|verb|1")
   end
 
-  test "full LIFG output does not leak duplicate numbered variants back into alt ids" do
-    cands =
-      [%{id: "go|noun|0", lemma: "go", pos: "noun", activation: 0.4}] ++
-        for n <- 0..8 do
-          %{id: "go|verb|#{n}", lemma: "go", pos: "verb", activation: 0.5}
-        end
+  test "duplicate representations of the same exact sense collapse before scoring" do
+    cands = [
+      %{
+        id: "go|verb|3",
+        lemma: "go",
+        norm: "go",
+        pos: "verb",
+        source: :active_cells,
+        activation: 0.4
+      },
+      %{
+        id: "go|verb|3",
+        lemma: "go",
+        norm: "go",
+        pos: "verb",
+        source: :sense_candidates,
+        activation: 0.8
+      },
+      %{
+        id: "go|verb|4",
+        lemma: "go",
+        norm: "go",
+        pos: "verb",
+        source: :active_cells,
+        activation: 0.5
+      }
+    ]
 
     si = %{
       sentence: "go",
       tokens: [
-        %{index: 0, phrase: "go", n: 1, mw: false, span: {0, 2}}
+        %{
+          index: 0,
+          token_index: 0,
+          phrase: "go",
+          n: 1,
+          mw: false,
+          span: {0, 2}
+        }
       ],
       sense_candidates: %{0 => cands}
     }
 
-    assert {:ok, %{choices: [choice]}} = Brain.LIFG.run(si, pmtg_apply?: false)
+    assert {:ok, %{choices: [choice]}} =
+             Stage1.run(
+               si,
+               scores: :all,
+               preserve_sense_candidates: true
+             )
 
-    refute Enum.any?(choice.alt_ids, &String.match?(&1, ~r/^go\|verb\|\d+$/))
-    assert length(Enum.filter(choice.alt_ids, &String.starts_with?(&1, "go|noun|"))) <= 1
-    assert length(Enum.filter(choice.slate_alt_ids, &String.starts_with?(&1, "go|verb|"))) <= 1
-    assert length(Enum.filter(choice.slate_alt_ids, &String.starts_with?(&1, "go|noun|"))) <= 1
+    assert map_size(choice.scores) == 2
+
+    assert Map.has_key?(choice.scores, "go|verb|3")
+    assert Map.has_key?(choice.scores, "go|verb|4")
+  end
+
+  test "unigram backfill preserves exact-sense lexical evidence" do
+    cell = %{
+      id: "bank|noun|11",
+      word: "bank",
+      norm: "bank",
+      pos: "noun",
+      definition: "An edge of river, lake, or other watercourse.",
+      example: "Tiber trembled underneath her banks.",
+      synonyms: [],
+      antonyms: [],
+      semantic_atoms: [
+        "ety:2",
+        "cat:en:hydrology",
+        "pos_raw:noun"
+      ],
+      gram_function: [],
+      activation: 0.5
+    }
+
+    si = %{
+      sentence: "bank",
+      tokens: [
+        %{
+          index: 0,
+          token_index: 0,
+          phrase: "bank",
+          n: 1,
+          mw: false,
+          span: {0, 4}
+        }
+      ],
+      sense_candidates: %{},
+      active_cells: [cell]
+    }
+
+    assert {:ok, %{si: out}} =
+             Stage1.run(
+               si,
+               scores: :all,
+               db_backfill?: false
+             )
+
+    [candidate] = out.sense_candidates[0]
+
+    assert candidate.id == "bank|noun|11"
+    assert candidate.pos == "noun"
+
+    assert candidate.definition ==
+             "An edge of river, lake, or other watercourse."
+
+    assert candidate.example ==
+             "Tiber trembled underneath her banks."
+
+    assert candidate.synonyms == []
+    assert candidate.antonyms == []
+    assert candidate.gram_function == []
+
+    assert "ety:2" in candidate.semantic_atoms
+    assert "cat:en:hydrology" in candidate.semantic_atoms
+    assert "pos_raw:noun" in candidate.semantic_atoms
+
+    assert candidate.source == :active_cells
   end
 
   test "degraded LIFG pass forces pMTG decision past ACC threshold edge" do
@@ -239,11 +382,15 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
       :telemetry.attach(
         handler_id,
         [:brain, :lifg, :pmtg_decision],
-        fn event, meas, meta, _cfg -> send(parent, {:telemetry, event, meas, meta}) end,
+        fn event, meas, meta, _cfg ->
+          send(parent, {:telemetry, event, meas, meta})
+        end,
         nil
       )
 
-    on_exit(fn -> :telemetry.detach(handler_id) end)
+    on_exit(fn ->
+      :telemetry.detach(handler_id)
+    end)
 
     si = %{
       sentence: "really bad drugs",
@@ -262,9 +409,91 @@ defmodule Brain.LIFG.Stage1ReliabilityTest do
              )
 
     assert_receive {:telemetry, [:brain, :lifg, :pmtg_decision], %{needy: needy}, meta}, 500
+
     assert needy >= 1
     assert meta.apply?
     assert meta.force?
     assert meta.degraded?
+  end
+
+  test "context_fit makes the river-bank sense win" do
+    cands = [
+      %{
+        id: "bank|noun|11",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        definition: "An edge of river, lake, or other watercourse.",
+        example: "Tiber trembled underneath her banks.",
+        synonyms: [],
+        antonyms: [],
+        semantic_atoms: ["ety:2", "cat:en:hydrology", "pos_raw:noun"],
+        gram_function: [],
+        activation: 0.5
+      },
+      %{
+        id: "bank|noun|22",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        definition: "A contiguous block of memory that is of fixed, hardware-dependent size.",
+        example: nil,
+        synonyms: [],
+        antonyms: [],
+        semantic_atoms: ["ety:3", "cat:en:computing", "pos_raw:noun"],
+        gram_function: [],
+        activation: 0.5
+      },
+      %{
+        id: "bank|noun|23",
+        lemma: "bank",
+        norm: "bank",
+        pos: "noun",
+        definition: "(pinball) A set of multiple adjacent drop targets.",
+        example: nil,
+        synonyms: [],
+        antonyms: [],
+        semantic_atoms: ["ety:3", "cat:en:pinball", "qual:pinball", "pos_raw:noun"],
+        gram_function: [],
+        activation: 0.5
+      }
+    ]
+
+    si = %{
+      sentence: "I sat on the bank beside the river.",
+      tokens: [
+        %{
+          index: 0,
+          token_index: 0,
+          phrase: "bank",
+          n: 1,
+          mw: false,
+          span: {13, 17}
+        }
+      ],
+      sense_candidates: %{0 => cands}
+    }
+
+    assert {:ok, %{choices: [choice]}} =
+             Stage1.run(
+               si,
+               scores: :all,
+               preserve_sense_candidates: true,
+               weights: [
+                 lex_fit: 0.0,
+                 context_fit: 1.0,
+                 rel_prior: 0.0,
+                 activation: 0.0,
+                 intent_bias: 0.0
+               ]
+             )
+
+    assert choice.chosen_id == "bank|noun|11"
+
+    assert choice.scores["bank|noun|11"] >
+             choice.scores["bank|noun|22"]
+
+    assert choice.scores["bank|noun|11"] >
+             choice.scores["bank|noun|23"]
   end
 end

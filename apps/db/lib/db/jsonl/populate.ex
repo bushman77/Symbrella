@@ -3,7 +3,8 @@ defmodule Db.JSONL.Populate do
 
   alias Db.JSONL.{Fetch, Util}
 
-  @spec populate_structs(String.t(), keyword()) :: {:ok, list(Db.BrainCell.t())} | {:error, any()}
+  @spec populate_structs(String.t(), keyword()) ::
+          {:ok, list(Db.BrainCell.t())} | {:error, any()}
   def populate_structs(word, opts \\ []) when is_binary(word) do
     with {:ok, senses} <- Fetch.fetch_senses(word, opts) do
       {:ok, populate_structs_from_senses(senses, opts)}
@@ -12,7 +13,9 @@ defmodule Db.JSONL.Populate do
 
   @spec populate_structs_from_senses([map()], keyword()) :: list(Db.BrainCell.t())
   def populate_structs_from_senses(senses, opts \\ []) when is_list(senses) do
-    {cells, _counters} = populate_structs_from_senses_with_counters(senses, %{}, opts)
+    {cells, _counters} =
+      populate_structs_from_senses_with_counters(senses, %{}, opts)
+
     cells
   end
 
@@ -25,9 +28,6 @@ defmodule Db.JSONL.Populate do
     default_status = Keyword.get(opts, :status, "inactive")
     pos_fallback = Keyword.get(opts, :pos_fallback, "phrase")
     include_atoms? = Keyword.get(opts, :include_semantic_atoms?, true)
-    fill_missing? = Keyword.get(opts, :fill_missing_relations?, true)
-
-    rels_by_key = build_relations_index(senses, pos_fallback)
 
     Enum.map_reduce(senses, counters0, fn s, counters ->
       meta = Map.get(s, "_meta", %{})
@@ -44,41 +44,30 @@ defmodule Db.JSONL.Populate do
       definition = pick_definition(s)
       example = pick_example(s)
 
-      sense_syn = Util.flatten_term_list(Map.get(s, "synonyms"))
-      sense_ant = Util.flatten_term_list(Map.get(s, "antonyms"))
+      # Relations MUST remain attached to the exact dictionary sense that
+      # supplied them. Do not pool relations across {word, pos}, and do not
+      # copy entry-level relations into senses that did not explicitly
+      # contain those relations.
+      synonyms =
+        s
+        |> Map.get("synonyms")
+        |> Util.flatten_term_list()
+        |> Util.drop_self(word)
+        |> Util.uniq_terms()
 
-      entry_syn = Util.flatten_term_list(Map.get(meta, "entry_synonyms"))
-      entry_ant = Util.flatten_term_list(Map.get(meta, "entry_antonyms"))
+      antonyms =
+        s
+        |> Map.get("antonyms")
+        |> Util.flatten_term_list()
+        |> Util.drop_self(word)
+        |> Util.uniq_terms()
 
-      syn0 = (sense_syn ++ entry_syn) |> Util.drop_self(word) |> Util.uniq_terms()
-      ant0 = (sense_ant ++ entry_ant) |> Util.drop_self(word) |> Util.uniq_terms()
-
-      {synonyms, antonyms, rel_marks} =
-        if fill_missing? do
-          rel = Map.get(rels_by_key, key, %{syn: MapSet.new(), ant: MapSet.new()})
-
-          {syn1, marks1} =
-            if syn0 == [] and MapSet.size(rel.syn) > 0 do
-              {MapSet.to_list(rel.syn) |> Util.drop_self(word) |> Util.uniq_terms(),
-               ["rel:syn_pool"]}
-            else
-              {syn0, []}
-            end
-
-          {ant1, marks2} =
-            if ant0 == [] and MapSet.size(rel.ant) > 0 do
-              {MapSet.to_list(rel.ant) |> Util.drop_self(word) |> Util.uniq_terms(),
-               ["rel:ant_pool"]}
-            else
-              {ant0, []}
-            end
-
-          {syn1, ant1, marks1 ++ marks2}
-        else
-          {syn0, ant0, []}
-        end
-
-      gf = gram_function_from_tags(pos, Map.get(s, "tags"), Map.get(s, "raw_tags"))
+      gf =
+        gram_function_from_tags(
+          pos,
+          Map.get(s, "tags"),
+          Map.get(s, "raw_tags")
+        )
 
       semantic_atoms =
         if include_atoms? do
@@ -86,14 +75,19 @@ defmodule Db.JSONL.Populate do
 
           atoms =
             case Map.get(meta, "etymology_number") do
-              n when is_integer(n) -> Enum.uniq(["ety:#{n}" | atoms])
-              n when is_binary(n) and n != "" -> Enum.uniq(["ety:#{n}" | atoms])
-              _ -> atoms
+              n when is_integer(n) ->
+                Enum.uniq(["ety:#{n}" | atoms])
+
+              n when is_binary(n) and n != "" ->
+                Enum.uniq(["ety:#{n}" | atoms])
+
+              _ ->
+                atoms
             end
 
-          Enum.uniq(atoms ++ rel_marks)
+          Enum.uniq(atoms)
         else
-          rel_marks
+          []
         end
 
       cell = %Db.BrainCell{
@@ -122,32 +116,6 @@ defmodule Db.JSONL.Populate do
 
   # ───────────────────────── sense → braincell helpers ─────────────────────────
 
-  defp build_relations_index(senses, pos_fallback) do
-    Enum.reduce(senses, %{}, fn s, acc ->
-      meta = Map.get(s, "_meta", %{})
-      word = Util.normalize_word(Map.get(meta, "word") || Map.get(s, "word") || "")
-      raw_pos = Map.get(meta, "pos") || Map.get(s, "pos") || ""
-      pos = canonical_pos(raw_pos, pos_fallback)
-
-      key = {word, pos}
-
-      sense_syn = Util.flatten_term_list(Map.get(s, "synonyms"))
-      sense_ant = Util.flatten_term_list(Map.get(s, "antonyms"))
-      entry_syn = Util.flatten_term_list(Map.get(meta, "entry_synonyms"))
-      entry_ant = Util.flatten_term_list(Map.get(meta, "entry_antonyms"))
-
-      syn = MapSet.new(Util.drop_self(Util.uniq_terms(sense_syn ++ entry_syn), word))
-      ant = MapSet.new(Util.drop_self(Util.uniq_terms(sense_ant ++ entry_ant), word))
-
-      prev = Map.get(acc, key, %{syn: MapSet.new(), ant: MapSet.new()})
-
-      Map.put(acc, key, %{
-        syn: MapSet.union(prev.syn, syn),
-        ant: MapSet.union(prev.ant, ant)
-      })
-    end)
-  end
-
   defp canonical_pos(raw, fallback) do
     raw =
       raw
@@ -174,6 +142,8 @@ defmodule Db.JSONL.Populate do
       "intj" -> "interjection"
       "proper noun" -> "proper_noun"
       "proper_noun" -> "proper_noun"
+      "proper name" -> "proper_noun"
+      "name" -> "proper_noun"
       "propn" -> "proper_noun"
       "pronoun" -> "pronoun"
       "pron" -> "pronoun"
@@ -231,7 +201,8 @@ defmodule Db.JSONL.Populate do
         |> Enum.filter(fn t ->
           lt = String.downcase(t)
 
-          String.length(t) <= 24 and not String.starts_with?(lt, "of ") and
+          String.length(t) <= 24 and
+            not String.starts_with?(lt, "of ") and
             not String.starts_with?(lt, "with ")
         end)
         |> Enum.map(&Util.normalize_tag/1)
@@ -281,7 +252,12 @@ defmodule Db.JSONL.Populate do
     allow =
       case pos do
         "noun" ->
-          MapSet.new(["countable", "uncountable", "plural-only", "usually plural"])
+          MapSet.new([
+            "countable",
+            "uncountable",
+            "plural-only",
+            "usually plural"
+          ])
 
         "verb" ->
           MapSet.new([
@@ -297,7 +273,12 @@ defmodule Db.JSONL.Populate do
           ])
 
         "adjective" ->
-          MapSet.new(["attributive-only", "predicative-only", "postpositive", "comparative-only"])
+          MapSet.new([
+            "attributive-only",
+            "predicative-only",
+            "postpositive",
+            "comparative-only"
+          ])
 
         _ ->
           MapSet.new()
@@ -373,14 +354,20 @@ defmodule Db.JSONL.Populate do
 
     qual =
       case Map.get(sense, "qualifier") do
-        q when is_binary(q) and q != "" -> ["qual:" <> Util.normalize_atom(q)]
-        _ -> []
+        q when is_binary(q) and q != "" ->
+          ["qual:" <> Util.normalize_atom(q)]
+
+        _ ->
+          []
       end
 
     pos_atom =
       case to_string(raw_pos) do
-        "" -> []
-        p -> ["pos_raw:" <> Util.normalize_atom(p)]
+        "" ->
+          []
+
+        p ->
+          ["pos_raw:" <> Util.normalize_atom(p)]
       end
 
     (cats ++ tags ++ rawt ++ qual ++ pos_atom)

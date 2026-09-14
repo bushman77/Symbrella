@@ -81,9 +81,10 @@ config :brain,
   lifg_min_p_top1: 0.60,
   lifg_stage1_scores_mode: :all,
   lifg_stage1_weights: %{
-    lex_fit: 0.40,
-    rel_prior: 0.30,
-    activation: 0.20,
+    lex_fit: 0.20,
+    context_fit: 0.40,
+    rel_prior: 0.20,
+    activation: 0.10,
     intent_bias: 0.10
   },
 

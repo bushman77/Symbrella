@@ -6,10 +6,17 @@ defmodule Brain.LIFG.Stage1.Numeric do
   tensor math. Callers pass plain feature maps in and receive plain floats back.
   """
 
-  @feature_names [:lex_fit, :rel_prior, :activation, :intent_bias]
+  @feature_names [
+    :lex_fit,
+    :context_fit,
+    :rel_prior,
+    :activation,
+    :intent_bias
+  ]
 
   @type feature_row :: %{
           optional(:lex_fit) => number(),
+          optional(:context_fit) => number(),
           optional(:rel_prior) => number(),
           optional(:activation) => number(),
           optional(:intent_bias) => number()

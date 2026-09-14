@@ -560,7 +560,7 @@ defmodule SymbrellaWeb.HomeLive do
       Enum.reduce(choices, {[], MapSet.new()}, fn ch, {acc, seen} ->
         tok_idx = ch[:token_index] || ch[:tok_index] || ch[:index]
 
-        id = ch[:id] || ch[:chosen_id]
+        id = selected_choice_id(ch)
         pos = display_pos(ch)
         src = ch[:src] || ch[:source]
         score = ch[:score]
@@ -594,21 +594,23 @@ defmodule SymbrellaWeb.HomeLive do
             |> IO.iodata_to_binary()
             |> String.trim()
 
+          # Exact selected-sense evidence is authoritative. Contextual and
+          # generated text are presentation fallbacks only.
           defn =
             first_present([
-              contextual_definition_for_choice(ch),
               definition_for_choice(ch, cells),
               candidate_definition_from_si(si, ch),
               glossary_field(sense_glossary, ch, :definition),
+              contextual_definition_for_choice(ch),
               generated_definition(ch)
             ])
 
           ex =
             first_present([
-              contextual_example_for_choice(ch),
+              example_for_choice(ch, cells),
               candidate_example_from_si(si, ch),
               glossary_field(sense_glossary, ch, :example),
-              example_for_choice(ch, cells)
+              contextual_example_for_choice(ch)
             ])
 
           item = %{
@@ -774,10 +776,8 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp candidate_field_from_si(%{} = si, choice, keys) when is_list(keys) do
     sc = Map.get(si, :sense_candidates) || Map.get(si, "sense_candidates") || %{}
-
-    ids = compatible_choice_ids(choice)
+    selected_id = selected_choice_id(choice)
     tok_idx = choice[:token_index] || choice[:tok_index] || choice[:index]
-    choice_norms = choice_norms(choice)
 
     by_tok =
       case tok_idx do
@@ -791,30 +791,27 @@ defmodule SymbrellaWeb.HomeLive do
             []
       end
 
-    all_lists =
+    candidates =
       if is_list(by_tok) and by_tok != [] do
-        [by_tok]
+        by_tok
       else
         sc
         |> Enum.flat_map(fn
-          {_k, v} when is_list(v) -> [v]
+          {_k, values} when is_list(values) -> values
           _ -> []
         end)
       end
 
     cand =
-      all_lists
-      |> Enum.flat_map(fn v -> if is_list(v), do: v, else: [] end)
-      |> Enum.find(fn c ->
-        cand_id = cand_get(c, :id) || cand_get(c, :chosen_id)
-        cand_norm = cand_get(c, :norm) || cand_get(c, :lemma) || cand_get(c, :word)
-
-        (is_binary(cand_id) and cand_id in ids) ||
-          norm_text(cand_norm || "") in choice_norms
-      end)
+      if is_binary(selected_id) do
+        Enum.find(candidates, fn candidate ->
+          candidate_id = cand_get(candidate, :id) || cand_get(candidate, :chosen_id)
+          candidate_id == selected_id
+        end)
+      end
 
     keys
-    |> Enum.find_value(fn k -> cand_get(cand, k) end)
+    |> Enum.find_value(fn key -> cand_get(cand, key) end)
     |> Kernel.||("")
     |> to_string()
     |> gloss()
@@ -1020,7 +1017,7 @@ defmodule SymbrellaWeb.HomeLive do
   end
 
   defp phrase_choice?(choice) when is_map(choice) do
-    id = choice[:id] || choice[:chosen_id]
+    id = selected_choice_id(choice)
     pos = safe_str(choice[:pos] || choice[:chosen_pos])
 
     phrase_text =
@@ -1046,7 +1043,7 @@ defmodule SymbrellaWeb.HomeLive do
     pos =
       choice[:pos] ||
         choice[:chosen_pos] ||
-        pos_from_id(choice[:id] || choice[:chosen_id])
+        pos_from_id(selected_choice_id(choice))
 
     norm =
       choice
@@ -1057,28 +1054,22 @@ defmodule SymbrellaWeb.HomeLive do
       norm in ["the", "a", "an", "of", "to", "in", "on", "at", "by", "for", "and", "or"]
   end
 
-  defp compatible_choice_ids(choice) when is_map(choice) do
-    choice_norms = choice_norms(choice)
+  # The selected exact sense is authoritative for gloss presentation.
+  # Alternative IDs are useful for ranking/debugging, but must never donate
+  # a definition or example to the selected sense.
+  defp selected_choice_id(choice) when is_map(choice) do
+    choice[:chosen_id] || choice[:id]
+  end
 
-    [choice[:id], choice[:chosen_id] | List.wrap(choice[:alt_ids])]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.filter(fn id ->
-      idn = norm_text(id_norm(id))
+  defp selected_choice_id(_), do: nil
 
-      idn == "" or
-        idn in choice_norms or
-        phrase_id_compatible?(id, choice_norms)
-    end)
+  defp exact_choice_ids(choice) when is_map(choice) do
+    [choice[:chosen_id], choice[:id]]
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
     |> Enum.uniq()
   end
 
-  defp compatible_choice_ids(_), do: []
-
-  defp phrase_id_compatible?(id, choice_norms) when is_binary(id) do
-    String.contains?(id, "|phrase") and norm_text(id_norm(id)) in choice_norms
-  end
-
-  defp phrase_id_compatible?(_, _), do: false
+  defp exact_choice_ids(_), do: []
 
   defp choice_norms(choice) when is_map(choice) do
     norms =
@@ -1095,7 +1086,8 @@ defmodule SymbrellaWeb.HomeLive do
       |> Enum.uniq()
 
     if norms == [] do
-      (choice[:id] || choice[:chosen_id])
+      choice
+      |> selected_choice_id()
       |> id_norm()
       |> norm_text()
       |> case do
@@ -1131,27 +1123,15 @@ defmodule SymbrellaWeb.HomeLive do
   defp numeric_score(_), do: nil
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Definition/example resolution (cells + choice + alt_ids)
+  # Exact-sense definition/example resolution
   # ─────────────────────────────────────────────────────────────────────────────
 
   defp definition_for_choice(choice, cells) do
     by_id = index_cells_by_id(cells)
-    by_norm = index_cells_by_norm(cells)
+    id = selected_choice_id(choice)
 
-    id = choice[:id] || choice[:chosen_id]
-    ids = compatible_choice_ids(choice)
-    choice_norms = choice_norms(choice)
-
-    direct =
-      choice[:definition] ||
-        choice[:def] ||
-        choice[:gloss] ||
-        choice[:meaning]
-
-    with_direct = gloss(direct)
-
-    with_choice =
-      if id in ids do
+    exact =
+      if is_binary(id) do
         by_id
         |> Map.get(id)
         |> cell_def()
@@ -1160,38 +1140,34 @@ defmodule SymbrellaWeb.HomeLive do
         ""
       end
 
-    cond do
-      with_direct != "" ->
-        with_direct
+    direct =
+      choice[:definition] ||
+        choice[:def] ||
+        choice[:gloss] ||
+        choice[:meaning]
 
-      with_choice != "" ->
-        with_choice
-
-      true ->
-        with_alt = first_def_from_ids(ids -- [id], by_id)
-
-        cond do
-          with_alt != "" ->
-            with_alt
-
-          true ->
-            first_def_from_norms(choice_norms, by_norm)
-        end
-    end
+    first_present([
+      exact,
+      gloss(direct)
+    ])
   end
 
   defp db_cells_for_choices(choices) when is_list(choices) do
-    ids =
-      choices
-      |> Enum.flat_map(&compatible_choice_ids/1)
-      |> Enum.uniq()
+    {ids, norms} =
+      Enum.reduce(choices, {[], []}, fn choice, {ids_acc, norms_acc} ->
+        exact_ids = exact_choice_ids(choice)
 
-    norms =
-      choices
-      |> Enum.flat_map(&choice_norms/1)
-      |> Enum.uniq()
+        if exact_ids == [] do
+          {ids_acc, choice_norms(choice) ++ norms_acc}
+        else
+          {exact_ids ++ ids_acc, norms_acc}
+        end
+      end)
 
-    BrainRuntime.brain_cells_for_choices(ids, norms)
+    BrainRuntime.brain_cells_for_choices(
+      Enum.uniq(ids),
+      Enum.uniq(norms)
+    )
   end
 
   defp db_cells_for_choices(_), do: []
@@ -1238,39 +1214,19 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp source_keys(source) when is_map(source) do
     id = cand_get(source, :id) || cand_get(source, :chosen_id)
-    alt_ids = List.wrap(cand_get(source, :alt_ids))
 
-    norm =
-      cand_get(source, :norm) ||
-        cand_get(source, :lemma) ||
-        cand_get(source, :token) ||
-        cand_get(source, :surface) ||
-        cand_get(source, :word) ||
-        id_norm(id)
-
-    ([id | alt_ids]
-     |> Enum.filter(&is_binary/1)
-     |> Enum.map(&{:id, &1})) ++
-      case norm_text(norm) do
-        "" -> []
-        n -> [{:norm, n}]
-      end
+    case id do
+      id when is_binary(id) and id != "" -> [{:id, id}]
+      _ -> []
+    end
   end
 
   defp source_keys(_), do: []
 
   defp choice_lookup_keys(choice) when is_map(choice) do
-    id_keys =
-      choice
-      |> compatible_choice_ids()
-      |> Enum.map(&{:id, &1})
-
-    norm_keys =
-      choice
-      |> choice_norms()
-      |> Enum.map(&{:norm, &1})
-
-    id_keys ++ norm_keys
+    choice
+    |> exact_choice_ids()
+    |> Enum.map(&{:id, &1})
   end
 
   defp source_definition(source) when is_map(source) do
@@ -1294,9 +1250,9 @@ defmodule SymbrellaWeb.HomeLive do
       choice[:lemma] ||
         choice[:token] ||
         choice[:surface] ||
-        id_norm(choice[:id] || choice[:chosen_id])
+        id_norm(selected_choice_id(choice))
 
-    pos = choice[:pos] || choice[:chosen_pos] || pos_from_id(choice[:id] || choice[:chosen_id])
+    pos = choice[:pos] || choice[:chosen_pos] || pos_from_id(selected_choice_id(choice))
     lemma = norm_text(lemma)
     pos = safe_str(pos)
 
@@ -1317,22 +1273,10 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp example_for_choice(choice, cells) do
     by_id = index_cells_by_id(cells)
-    by_norm = index_cells_by_norm(cells)
+    id = selected_choice_id(choice)
 
-    id = choice[:id] || choice[:chosen_id]
-    ids = compatible_choice_ids(choice)
-    choice_norms = choice_norms(choice)
-
-    direct =
-      choice[:example] ||
-        choice[:ex] ||
-        choice[:usage] ||
-        choice[:sample]
-
-    with_direct = gloss(direct)
-
-    with_choice =
-      if id in ids do
+    exact =
+      if is_binary(id) do
         by_id
         |> Map.get(id)
         |> cell_ex()
@@ -1341,60 +1285,16 @@ defmodule SymbrellaWeb.HomeLive do
         ""
       end
 
-    cond do
-      with_direct != "" ->
-        with_direct
+    direct =
+      choice[:example] ||
+        choice[:ex] ||
+        choice[:usage] ||
+        choice[:sample]
 
-      with_choice != "" ->
-        with_choice
-
-      true ->
-        with_alt = first_ex_from_ids(ids -- [id], by_id)
-
-        cond do
-          with_alt != "" ->
-            with_alt
-
-          true ->
-            first_ex_from_norms(choice_norms, by_norm)
-        end
-    end
-  end
-
-  defp first_def_from_ids([], _by_id), do: ""
-
-  defp first_def_from_ids([h | t], by_id) do
-    case by_id |> Map.get(h) |> cell_def() |> gloss() do
-      "" -> first_def_from_ids(t, by_id)
-      d -> d
-    end
-  end
-
-  defp first_def_from_norms([], _by_norm), do: ""
-
-  defp first_def_from_norms([h | t], by_norm) do
-    case by_norm |> Map.get(h) |> cell_def() |> gloss() do
-      "" -> first_def_from_norms(t, by_norm)
-      d -> d
-    end
-  end
-
-  defp first_ex_from_ids([], _by_id), do: ""
-
-  defp first_ex_from_ids([h | t], by_id) do
-    case by_id |> Map.get(h) |> cell_ex() |> gloss() do
-      "" -> first_ex_from_ids(t, by_id)
-      e -> e
-    end
-  end
-
-  defp first_ex_from_norms([], _by_norm), do: ""
-
-  defp first_ex_from_norms([h | t], by_norm) do
-    case by_norm |> Map.get(h) |> cell_ex() |> gloss() do
-      "" -> first_ex_from_norms(t, by_norm)
-      e -> e
-    end
+    first_present([
+      exact,
+      gloss(direct)
+    ])
   end
 
   defp index_cells_by_id(cells) do
@@ -1402,15 +1302,6 @@ defmodule SymbrellaWeb.HomeLive do
       case cell_id(c) do
         nil -> acc
         id -> Map.put(acc, id, c)
-      end
-    end)
-  end
-
-  defp index_cells_by_norm(cells) do
-    Enum.reduce(cells || [], %{}, fn c, acc ->
-      case cell_norm(c) do
-        nil -> acc
-        n -> Map.put_new(acc, n, c)
       end
     end)
   end
@@ -1423,18 +1314,6 @@ defmodule SymbrellaWeb.HomeLive do
   end
 
   defp cell_id(_), do: nil
-
-  defp cell_norm(c) when is_map(c) do
-    cond do
-      is_binary(Map.get(c, :norm)) -> Map.get(c, :norm)
-      is_binary(Map.get(c, "norm")) -> Map.get(c, "norm")
-      is_binary(Map.get(c, :id)) -> id_norm(Map.get(c, :id))
-      is_binary(Map.get(c, "id")) -> id_norm(Map.get(c, "id"))
-      true -> nil
-    end
-  end
-
-  defp cell_norm(_), do: nil
 
   defp id_norm(nil), do: nil
   defp id_norm(id) when is_binary(id), do: id |> String.split("|") |> List.first()
@@ -1512,7 +1391,7 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp format_choice_with_def(choice, cells) do
     lemma = choice[:lemma] || choice[:token] || ""
-    id = choice[:id] || choice[:chosen_id]
+    id = selected_choice_id(choice)
     score = fmt_score(choice[:score])
 
     alt =
