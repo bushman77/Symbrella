@@ -17,7 +17,13 @@ defmodule Symbrella.Umbrella.MixProject do
   defp deps do
     [
       {:phoenix_live_view, ">= 0.0.0"},
-      {:mox, "~> 1.1", only: :test}
+      {:mox, "~> 1.1", only: :test},
+      # Transitive dep overrides for CVE fixes + divergence resolution
+      {:plug, "~> 1.20", override: true},
+      {:plug_crypto, "~> 2.2", override: true},
+      {:mint, "~> 1.8", override: true},
+      {:hpax, "~> 1.0.4", override: true},
+      {:decimal, "~> 3.0", override: true}
     ]
   end
 

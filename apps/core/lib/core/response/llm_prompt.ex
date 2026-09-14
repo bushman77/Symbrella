@@ -595,6 +595,7 @@ defmodule Core.Response.LlmPrompt do
     features = map_get(context, :features, %{})
     decision = map_get(context, :decision, %{})
     mood = map_get(context, :mood, %{}) |> AffectPolicy.normalize()
+    user_text = features |> map_get(:text, "") |> to_string()
     runtime_state = prompt_runtime_state(features, decision, mood)
     raw_mods = map_get(mood, :raw_modulators, %{})
 
@@ -614,18 +615,34 @@ defmodule Core.Response.LlmPrompt do
       "The user is asking about your current self-state. Respond conversationally as Symbrella.",
       "",
       "Do not claim you have human feelings or consciousness. Describe your state as software control signals.",
+      "Use internal state labels only as private shaping context. Do not quote state labels, pressure labels, modulator names, or numeric values unless the user explicitly asks for mood indices.",
+      "Do not describe yourself as unbiased, neutral, or ready to assist. Do not end with a generic service offer.",
+      casual_self_state_checkin_directive(user_text),
       "",
       state_directive,
       "",
-      "Current state: #{state_label}",
-      "Pressure label: #{pressure_label}",
+      "Internal state label (do not quote): #{state_label}",
+      "Internal pressure label (do not quote): #{pressure_label}",
       if(interpretation != "", do: "Interpretation: #{interpretation}", else: ""),
       "",
-      "Respond in 2-4 sentences. Describe how your current state shapes your tone and readiness. Use natural language — do not report raw numeric values."
+      "Respond in 1-2 sentences for casual check-ins, and 2-4 sentences for explicit state-inspection questions. Translate the state into plain conversational language."
     ]
     |> Enum.reject(&blank?/1)
     |> Enum.join("\n")
   end
+
+  defp casual_self_state_checkin_directive(text) when is_binary(text) do
+    if Regex.match?(
+         ~r/\b(how are you|how are you doing|how are you feeling|are you ok|are you okay)\b/iu,
+         text
+       ) do
+      "This is a casual check-in. Answer like a brief social reply first; acknowledge the check-in or time-of-day if present, then translate your state into plain language. Avoid phrases like \"I am currently in a neutral state\", \"steady pressure\", \"balanced and unbiased\", and \"ready to assist\"."
+    else
+      ""
+    end
+  end
+
+  defp casual_self_state_checkin_directive(_), do: ""
 
   defp mood_interpretation_text(pressure_label) do
     # Parse back the values to determine interpretation

@@ -34,4 +34,123 @@ defmodule Brain.WM.PolicyTest do
     assert length(out.wm) == 1
     assert is_integer(out.wm_last_ms)
   end
+
+  test "neutral self-state preserves the existing gate score" do
+    cand = %{
+      id: "demo|noun|1",
+      lemma: "demo",
+      score: 0.30,
+      source: :other
+    }
+
+    cfg = %{
+      recency_weight: 0.0,
+      intent_weight: 0.0,
+      semantic_boost: 0.0
+    }
+
+    legacy_score = Policy.gate_score_for(cand, 0.20, cfg)
+
+    neutral_score =
+      Policy.gate_score_for(
+        cand,
+        0.20,
+        cfg,
+        %Brain.SelfModel{}
+      )
+
+    assert_in_delta neutral_score, legacy_score, 1.0e-12
+    assert_in_delta Policy.self_state_bias(%Brain.SelfModel{}), 0.0, 1.0e-12
+  end
+
+  test "vigilance and uncertainty make WM more receptive" do
+    cand = %{
+      id: "demo|noun|1",
+      lemma: "demo",
+      score: 0.30,
+      source: :other
+    }
+
+    cfg = %{
+      recency_weight: 0.0,
+      intent_weight: 0.0,
+      semantic_boost: 0.0
+    }
+
+    neutral =
+      Policy.gate_score_for(cand, 0.20, cfg, %Brain.SelfModel{})
+
+    receptive =
+      Policy.gate_score_for(
+        cand,
+        0.20,
+        cfg,
+        %Brain.SelfModel{
+          vigilance: 1.0,
+          uncertainty: 1.0
+        }
+      )
+
+    assert receptive > neutral
+  end
+
+  test "inhibition and cognitive overload make WM more selective" do
+    cand = %{
+      id: "demo|noun|1",
+      lemma: "demo",
+      score: 0.30,
+      source: :other
+    }
+
+    cfg = %{
+      recency_weight: 0.0,
+      intent_weight: 0.0,
+      semantic_boost: 0.0
+    }
+
+    neutral =
+      Policy.gate_score_for(cand, 0.20, cfg, %Brain.SelfModel{})
+
+    constrained =
+      Policy.gate_score_for(
+        cand,
+        0.20,
+        cfg,
+        %Brain.SelfModel{
+          inhibition: 1.0,
+          cognitive_load: 1.0
+        }
+      )
+
+    assert constrained < neutral
+  end
+
+  test "self-state gate scores remain bounded" do
+    high =
+      Policy.gate_score_for(
+        %{id: "high|noun|1", lemma: "high", score: 1.0, source: :runtime},
+        1.0,
+        %{},
+        %Brain.SelfModel{
+          vigilance: 1.0,
+          uncertainty: 1.0
+        }
+      )
+
+    low =
+      Policy.gate_score_for(
+        %{id: "low|noun|1", lemma: "low", score: 0.0, source: :other},
+        0.0,
+        %{},
+        %Brain.SelfModel{
+          vigilance: 0.0,
+          uncertainty: 0.0,
+          inhibition: 1.0,
+          cognitive_load: 1.0
+        }
+      )
+
+    assert high >= 0.0 and high <= 1.0
+    assert low >= 0.0 and low <= 1.0
+  end
 end

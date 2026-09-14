@@ -17,8 +17,8 @@ defmodule Core.Intent.Matrix do
         }
 
   @greets ~w(hi hello hey yo sup howdy greetings)
-  @define_words ~w(define definition meaning what is what's whats)
-  @translate_words ~w(translate how do you say how to say)
+  @define_words ["define", "definition", "meaning", "what is", "what's", "whats"]
+  @translate_words ["translate", "how do you say", "how to say"]
   @code_markers ~w(mix iex elixir defmodule def fn end alias require import)
   @brain_words ~w(lifg pmtg hippocampus thalamus ofc cerebellum episodic lexicon si lifg_stage)
 

@@ -35,6 +35,8 @@ defmodule Core.Intent.Normalize do
     "n" => :deny,
     "ask" => :ask,
     "question" => :ask,
+    "smalltalk" => :smalltalk,
+    "small talk" => :smalltalk,
     "ask_info" => :ask_info,
     "ask info" => :ask_info,
     "define" => :define,

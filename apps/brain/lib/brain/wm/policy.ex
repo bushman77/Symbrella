@@ -75,6 +75,11 @@ defmodule Brain.WM.Policy do
 
   @spec gate_score_for(map(), number(), cfg()) :: float()
   def gate_score_for(cand, salience, cfg) do
+    gate_score_for(cand, salience, cfg, nil)
+  end
+
+  @spec gate_score_for(map(), number(), cfg(), map() | nil) :: float()
+  def gate_score_for(cand, salience, cfg, self_state) do
     cfg = normalize_cfg(cfg)
 
     base = (cand[:score] || cand[:activation_snapshot] || 0.0) * 1.0
@@ -89,6 +94,7 @@ defmodule Brain.WM.Policy do
     |> Kernel.+(recency_nudge(cand, cfg))
     |> Kernel.+(intent_nudge(cand, cfg))
     |> Kernel.-(diversity_penalty(cand, cfg))
+    |> Kernel.+(self_state_bias(self_state))
     |> Numbers.clamp01()
   end
 
@@ -169,6 +175,46 @@ defmodule Brain.WM.Policy do
   defp normalize_cfg(cfg) when is_map(cfg), do: Map.merge(@default_cfg, cfg)
 
   # Admission helpers
+  @doc false
+  @spec self_state_bias(map() | nil) :: float()
+  def self_state_bias(nil), do: 0.0
+
+  def self_state_bias(self_state) when is_map(self_state) do
+    vigilance = self_signal(self_state, :vigilance, 0.5)
+    uncertainty = self_signal(self_state, :uncertainty, 0.5)
+    inhibition = self_signal(self_state, :inhibition, 0.5)
+    cognitive_load = self_signal(self_state, :cognitive_load, 0.0)
+
+    vigilance_bias = 0.10 * (vigilance - 0.5)
+    uncertainty_bias = 0.08 * (uncertainty - 0.5)
+    inhibition_bias = -0.10 * (inhibition - 0.5)
+
+    overload_bias =
+      if cognitive_load > 0.65 do
+        overload = Numbers.clamp01((cognitive_load - 0.65) / 0.35)
+        -0.15 * overload
+      else
+        0.0
+      end
+
+    vigilance_bias + uncertainty_bias + inhibition_bias + overload_bias
+  end
+
+  def self_state_bias(_), do: 0.0
+
+  defp self_signal(self_state, key, default) do
+    value =
+      Map.get(
+        self_state,
+        key,
+        Map.get(self_state, to_string(key), default)
+      )
+
+    case value do
+      number when is_number(number) -> Numbers.clamp01(number)
+      _ -> default
+    end
+  end
 
   defp maybe_scale_fallback(base, cand, cfg) do
     if fallback_id?(cand[:id]), do: base * cfg.fallback_scale, else: base

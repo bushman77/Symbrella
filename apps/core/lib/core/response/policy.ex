@@ -512,22 +512,30 @@ defmodule Core.Response.Policy do
   # ── Intent normalization (text) ─────────────────────────────────────────────
 
   @spec normalize_intent(atom, String.t()) :: atom
-  def normalize_intent(intent, text) when intent in [:unknown, :other, nil] do
+  def normalize_intent(intent, text) do
     t = dn(text)
 
     cond do
-      greeting?(t) -> :greeting
-      gratitude?(t) -> :gratitude
-      smalltalk?(t) -> :smalltalk
-      bug_report?(t) -> :bug
-      question?(t) -> :question
-      command?(t) -> :command
-      true -> :unknown
-    end
-  end
+      self_state_checkin?(t) ->
+        :smalltalk
 
-  def normalize_intent(intent, text) do
-    if intent in [:statement, :other] and command?(dn(text)), do: :command, else: intent
+      intent in [:unknown, :other, nil] ->
+        cond do
+          greeting?(t) -> :greeting
+          gratitude?(t) -> :gratitude
+          smalltalk?(t) -> :smalltalk
+          bug_report?(t) -> :bug
+          question?(t) -> :question
+          command?(t) -> :command
+          true -> :unknown
+        end
+
+      intent == :statement and command?(t) ->
+        :command
+
+      true ->
+        intent
+    end
   end
 
   # ── Text helpers (shared with Response) ─────────────────────────────────────
@@ -577,6 +585,19 @@ defmodule Core.Response.Policy do
         ~r/\b(how'?s it going|how are you|wh+a+t'?s+\s*u+p+|what'?s up|wha+t+s+\s*u+p+|wyd|c+mon.*up)\b/i,
         t
       )
+
+  defp self_state_checkin?(t) when is_binary(t) do
+    Regex.match?(
+      ~r/^\s*(?:(?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b[\s,!.:-]*)?(?:symbrella\b[\s,!.:-]*)?how\s+are\s+you(?:\s+(?:doing|feeling|today|tonight|right\s+now|on\b|this\b|symbrella\b)|\s*[?.!]*$)/i,
+      t
+    ) or
+      Regex.match?(
+        ~r/^\s*(?:(?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b[\s,!.:-]*)?(?:symbrella\b[\s,!.:-]*)?(how\s+do\s+you\s+feel|are\s+you\s+ok|are\s+you\s+okay)\b/i,
+        t
+      )
+  end
+
+  defp self_state_checkin?(_), do: false
 
   def question?(t) do
     String.contains?(t, "?") or

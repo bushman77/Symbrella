@@ -25,6 +25,9 @@ defmodule Core.Response.LlmRouteFlowTest do
 
       text =
         cond do
+          String.contains?(user_text, "fine saturday") ->
+            "I am currently in a neutral state, with steady pressure. My tone is balanced and unbiased. I am always ready to assist you, regardless of my current state. How may I help you today?"
+
           String.contains?(user_text, "fuzzy") ->
             "Please provide more information so I can assist you today."
 
@@ -94,6 +97,48 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute text =~ "Quick picks"
     refute text =~ "Full file"
     assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "casual self-state check-ins use the anti-label self-state prompt" do
+    si = %{
+      intent: :greet,
+      confidence: 0.49,
+      text: "hey symbrella how are you on this fine saturday morning"
+    }
+
+    mood = %{
+      mood: %{exploration: 0.48, inhibition: 0.54, vigilance: 0.77, plasticity: 0.56},
+      pressure_label: :steady_restraint
+    }
+
+    {_tone, text, meta} = Response.plan(si, mood)
+
+    assert text =~ "Good morning."
+    assert text =~ "I'm running steady right now"
+    refute text =~ "neutral state"
+    refute text =~ "steady pressure"
+    refute text =~ "balanced and unbiased"
+    refute text =~ "ready to assist"
+    refute text =~ "How may I help you today"
+    assert meta.intent_inferred == :smalltalk
+    assert meta.mode == :explainer
+    assert meta.chosen_skill == :self_state_feeling
+    assert :self_state_feeling_answer in meta.overrides
+    assert meta.response_source == :llm
+
+    assert_receive {:llm_chat, messages, _opts}
+
+    system =
+      messages
+      |> Enum.find(fn msg -> msg["role"] == "system" end)
+      |> Map.fetch!("content")
+
+    assert system =~ "This is a casual check-in."
+    assert system =~ "Use internal state labels only as private shaping context"
+    assert system =~ "Do not describe yourself as unbiased, neutral, or ready to assist"
+    assert system =~ "Internal pressure label (do not quote): steady_restraint"
+    refute system =~ "Current state:"
+    refute system =~ "Pressure label:"
   end
 
   test "LLM trailing assistant explanation notes are stripped from chat text" do

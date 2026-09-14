@@ -45,6 +45,29 @@ defmodule Db.AgencyEventsTest do
     assert payload_get(found.outcome, :n) == 2
   end
 
+  test "create_event/1 normalizes nil top-level json fields to maps" do
+    attrs = %{
+      session_id: "nil-json-session",
+      action: :answer,
+      input: nil,
+      decision: nil,
+      reasons: nil,
+      self_model: nil,
+      self_state: nil,
+      outcome: nil,
+      reflection: nil
+    }
+
+    assert {:ok, %AgencyEvent{} = row} = AgencyEvents.create_event(attrs)
+    assert row.input == %{}
+    assert row.decision == %{}
+    assert row.reasons == %{}
+    assert row.self_model == %{}
+    assert row.self_state == %{}
+    assert row.outcome == %{}
+    assert row.reflection == %{}
+  end
+
   test "create_event/1 rejects invalid payloads" do
     assert {:error, changeset} = AgencyEvents.create_event(nil)
     refute changeset.valid?

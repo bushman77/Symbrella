@@ -47,8 +47,8 @@ defmodule Core.Response.AgencyEventBuilder do
         fallback_reason: safe_json(Map.get(meta, :response_fallback_reason)),
         agency_memory: safe_json(Map.get(features, :agency_memory, %{}))
       },
-      self_model: safe_json(Map.get(features, :self_model, %{})),
-      self_state: safe_json(Map.get(meta, :self_state, %{})),
+      self_model: safe_json_object(Map.get(features, :self_model)),
+      self_state: safe_json_object(Map.get(meta, :self_state)),
       outcome: %{
         assistant_text: clamp_text(assistant_text),
         assistant_chars: String.length(to_string(assistant_text || "")),
@@ -132,6 +132,14 @@ defmodule Core.Response.AgencyEventBuilder do
   defp safe_json(value) when is_float(value), do: value
   defp safe_json(value) when is_atom(value), do: Atom.to_string(value)
   defp safe_json(value), do: inspect(value)
+
+  defp safe_json_object(value) do
+    case safe_json(value) do
+      %{} = map -> map
+      nil -> %{}
+      other -> %{"value" => other}
+    end
+  end
 
   defp safe_key(key) when is_atom(key), do: Atom.to_string(key)
   defp safe_key(key) when is_binary(key), do: key

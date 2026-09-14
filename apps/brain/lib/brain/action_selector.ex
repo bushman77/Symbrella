@@ -103,6 +103,9 @@ defmodule Brain.ActionSelector do
           candidate(:observe_silently, 0.18, :no_extra_action_needed)
         ]
 
+      conversational_intent?(intent) and intent != :unknown ->
+        conversational_candidates()
+
       confidence < 0.45 ->
         [
           candidate(:ask_clarifying_question, 0.72, :low_confidence, speech_required?: true),
@@ -119,11 +122,7 @@ defmodule Brain.ActionSelector do
         ]
 
       conversational_intent?(intent) ->
-        [
-          candidate(:answer_user, 0.62, :conversation_continuation, speech_required?: true),
-          candidate(:observe_silently, 0.34, :low_pressure_turn),
-          candidate(:store_memory, 0.26, :possible_relationship_context, memory_relevant?: true)
-        ]
+        conversational_candidates()
 
       true ->
         [
@@ -249,6 +248,14 @@ defmodule Brain.ActionSelector do
       :reflect,
       :discussion,
       :unknown
+    ]
+  end
+
+  defp conversational_candidates do
+    [
+      candidate(:answer_user, 0.62, :conversation_continuation, speech_required?: true),
+      candidate(:observe_silently, 0.34, :low_pressure_turn),
+      candidate(:store_memory, 0.26, :possible_relationship_context, memory_relevant?: true)
     ]
   end
 

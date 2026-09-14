@@ -10,6 +10,7 @@ defmodule Core.Intent.Types do
           | :ask_info
           | :ask
           | :question
+          | :smalltalk
           | :code
           | :brain_introspect
           | :command
@@ -28,6 +29,7 @@ defmodule Core.Intent.Types do
     :ask_info,
     :ask,
     :question,
+    :smalltalk,
     :code,
     :brain_introspect,
     :command,
@@ -56,6 +58,7 @@ defmodule Core.Intent.Types do
   def normalize("translate"), do: :translate
   def normalize("ask"), do: :ask
   def normalize("question"), do: :question
+  def normalize("smalltalk"), do: :smalltalk
   def normalize("ask_info"), do: :ask_info
   def normalize("code"), do: :code
   def normalize("brain_introspect"), do: :brain_introspect

@@ -73,6 +73,8 @@ defmodule Brain.Introspection do
   end
 
   defp emit_update(%Brain.SelfModel{} = model) do
+    Brain.set_self_state(model)
+
     :telemetry.execute(
       [:brain, :self_model, :update],
       %{

@@ -66,6 +66,7 @@ defmodule Core.Intent.Selection do
   * `:command`
   * `:feedback`
   * `:health_support`
+  * `:smalltalk`
   * `:ask`
   * `:unknown`
 
@@ -81,6 +82,7 @@ defmodule Core.Intent.Selection do
           | :command
           | :feedback
           | :health_support
+          | :smalltalk
           | :ask
           | :ask_info
           | :brain_introspect
@@ -107,6 +109,7 @@ defmodule Core.Intent.Selection do
     :help,
     :ask_info,
     :feedback,
+    :smalltalk,
     :ask,
     :tell,
     :greet
@@ -293,7 +296,7 @@ defmodule Core.Intent.Selection do
 
   defp primary_utterance(text) when is_binary(text) do
     case Regex.run(
-           ~r/^\s*((?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b)[\s,!.:-]*(.+)$/iu,
+           ~r/^\s*((?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b(?:[\s,!.:-]+symbrella\b)?)[\s,!.:-]*(.+)$/iu,
            text
          ) do
       [_, opener, rest] ->
@@ -573,6 +576,7 @@ defmodule Core.Intent.Selection do
         illicit_request: max(score_illicit_request(text), score_illicit_request(scoring_text)),
         command: max(score_command(kw), score_command(scoring_text)),
         feedback: max(score_feedback(kw), score_feedback(scoring_text)),
+        smalltalk: score_smalltalk(scoring_text),
         ask: score_question(question_cue),
         ask_info: score_ask_info(scoring_text),
         brain_introspect: score_brain_introspect(scoring_text),
@@ -784,6 +788,28 @@ defmodule Core.Intent.Selection do
     ~r/^\s*(?:h+e+l{1,2}o+|he+y+|hi+|yo+|gm|good\s+(?:morning|afternoon|evening))\b/i
   end
 
+  defp score_smalltalk(s) do
+    cond do
+      Regex.match?(
+        ~r/^\s*(?:(?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b[\s,!.:-]*)?(?:symbrella\b[\s,!.:-]*)?how\s+are\s+you(?:\s+(?:doing|feeling|today|tonight|right\s+now|on\b|this\b|symbrella\b)|\s*[?.!]*$)/i,
+        s
+      ) ->
+        0.97
+
+      Regex.match?(
+        ~r/^\s*(?:(?:good\s+(?:morning|afternoon|evening)|hello|hi|hey|yo)\b[\s,!.:-]*)?(?:symbrella\b[\s,!.:-]*)?(how\s+do\s+you\s+feel|are\s+you\s+ok|are\s+you\s+okay)\b/i,
+        s
+      ) ->
+        0.95
+
+      Regex.match?(~r/^\s*(how'?s\s+it\s+going|what'?s\s+up|wha+t+s+\s+u+p+)\b/i, s) ->
+        0.88
+
+      true ->
+        0.0
+    end
+  end
+
   defp score_translate(s) do
     k1 = Regex.match?(~r/\btranslate\b/i, s)
 
@@ -898,6 +924,7 @@ defmodule Core.Intent.Selection do
       )
 
     cond do
+      score_smalltalk(s) > 0.0 -> 0.0
       domain? and introspect? -> 0.94
       domain? and looks_like_question?(s) -> 0.68
       true -> 0.0

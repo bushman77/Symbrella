@@ -3,14 +3,21 @@
 **Neuro-Symbolic Synthetic Intelligence for Elixir/Phoenix**
 
 Symbrella is a Phoenix umbrella application that experiments with a long-lived,
-inspectable synthetic brain. It models cognition as cooperating OTP processes:
-working memory, hippocampal recall, language interpretation, mood, curiosity,
-attention gates, action selection, and local LLM support.
+inspectable biologically-inspired computational architecture. It models
+cognition as cooperating OTP processes: working memory, hippocampal recall,
+language interpretation, mood, curiosity, attention gates, action selection,
+and local LLM support.
 
 The project treats a phone, browser, VR cockpit, or future robot as a possible
-body, while the umbrella application acts as the brain. The goal is not to hide
-all reasoning behind one model call. The goal is to make the cognitive loop
-visible, testable, and debuggable.
+body, while the umbrella application acts as the brain-like runtime. The goal is
+not to hide all reasoning behind one model call. The goal is to make the
+cognitive loop visible, testable, and debuggable.
+
+Symbrella's region names are engineering analogies grounded in broad functional
+neuroscience. They are computational analogues and functional correlates, not
+claims of biological equivalence. Symbrella is not a neuron-for-neuron brain
+simulation, not a clinically validated neurological model, and not proof of
+consciousness, sentience, feelings, or subjective experience.
 
 ## Runtime Stack
 
@@ -26,26 +33,30 @@ visible, testable, and debuggable.
 Symbrella currently provides:
 
 - A supervised OTP brain runtime with named regions such as LIFG, PMTG, ATL,
-  Hippocampus, ACC, OFC, Thalamus, Basal Ganglia, DLPFC, Cerebellum, Mood, and
+  Hippocampus, ACC, OFC, Thalamus, BasalGanglia, DLPFC, Cerebellum, Mood, and
   Curiosity.
 - A `Core.resolve_input/2` semantic pipeline for tokenization, word-gram
   rebuilding, MWE injection, memory lookup, evidence attachment, perception,
   LIFG decisions, response planning, hippocampal encoding, and activation
   telemetry.
-- Working-memory admission policies with capacity, decay, duplicate handling,
-  diversity, fallback, and threshold controls.
+- Working-memory policy/mechanics with capacity, decay, duplicate handling,
+  diversity, fallback, and threshold controls, plus ongoing consolidation toward
+  BasalGanglia-owned general admission.
 - Hippocampus-backed episode persistence through the `Db` app.
 - Local model orchestration through the `Llm` app.
 - Phoenix LiveView surfaces for chat/home, brain inspection, episodes, mood
   HUDs, region overlays, and telemetry-driven panels.
 - Test coverage for tokenizer invariants, LIFG/WM contracts, hippocampal
   persistence, curiosity/thalamus flow, DB schemas, and LiveView surfaces.
+- Initial Phase 9 self-state coupling, where bounded `Brain.SelfModel` signals
+  such as vigilance, uncertainty, inhibition, and cognitive load can affect WM
+  admission scoring through existing policy code.
 
 ## Umbrella Apps
 
 | App | Purpose |
 | --- | --- |
-| `apps/brain` | OTP brain regions, working memory, LIFG stage scoring, Hippocampus, Thalamus, DLPFC, Mood, Curiosity, Cerebellum, cycle metrics, telemetry, and region macros. |
+| `apps/brain` | OTP brain regions, LIFG Stage1/Stage2, BasalGanglia admission control, working memory mechanics, Hippocampus, Thalamus, DLPFC, Mood, Curiosity, Cerebellum, self-state, cycle metrics, telemetry, and region macros. |
 | `apps/core` | Semantic orchestration: tokenization, `Core.SemanticInput`, MWE stages, LTM evidence, perception, LIFG attachment, event frames, response planning, and brain integration. |
 | `apps/db` | Ecto repo `Db`, migrations, schemas, pgvector types, JSONL import tools, episodes, brain cells, agency events, cerebellum models, and self snapshots. |
 | `apps/lexicon` | External dictionary and lexical adapter surface used by Core enrichment. |
@@ -72,6 +83,74 @@ flowchart TD
   Core --> Db
   Core --> Llm
   Brain --> UI
+```
+
+## Cognitive Control Architecture
+
+Symbrella's intended control structure is recurrent cortical /
+basal-ganglia / thalamic control expressed as software responsibilities. For
+documentation and implementation planning, the main forward path is:
+
+```text
+Semantic / lexical representations
+-> LIFG Stage1
+   competitive semantic interpretation
+   "Which interpretation is winning?"
+-> LIFG Stage2
+   linguistic evidence finalization
+   winner / score / margin / ambiguity / conflict
+   "How strong was the linguistic decision?"
+-> ACC / cognitive-control context
+   conflict / uncertainty / task pressure
+-> BasalGanglia
+   canonical Working Memory admission gate
+   :allow | :boost | :block
+   "Should this representation update WM?"
+-> Thalamic relay / gating control
+-> DLPFC / PFC control
+   task-relevant maintenance / control
+-> WorkingMemory
+   maintain / normalize / merge / decay / evict
+```
+
+This is not meant to imply that human cognition is a simple one-way assembly
+line. Feedback is part of the architecture:
+
+```text
+WorkingMemory / PFC
+-> LIFG context
+-> BasalGanglia context
+-> memory retrieval
+-> attention/control
+-> SelfModel evidence
+```
+
+Current implementation:
+
+- `Brain.LIFG.Stage1` performs competitive semantic / word-sense selection and
+  emits winner information, confidence-like scores, margins, finalists, audit
+  data, and control evidence.
+- `Brain.LIFG.Stage2` exists and currently has commit-shaped behavior in parts
+  of the code. Architecturally it should finalize linguistic evidence for a
+  downstream gate, not serve as the canonical final Working Memory admission
+  authority.
+- `Brain.BasalGanglia` is the intended general Working Memory admission gate. It
+  owns decisions such as `:allow`, `:boost`, and `:block` over candidate
+  representations.
+- `Brain.WM.Policy` currently contains both admission and retention mechanics,
+  while `Brain.WorkingMemory` owns maintained active-representation mechanics.
+  Phase 9 work is consolidating general admission under `Brain.BasalGanglia`.
+- `Brain.SelfModel` integrates runtime evidence and can provide bounded
+  modulation to cognitive control, but it is not itself the gate.
+
+Architectural target:
+
+```text
+LIFG Stage1
+-> LIFG Stage2 linguistic evidence
+-> BasalGanglia canonical cognitive admission decision
+-> PFC / WorkingMemory control
+-> WorkingMemory mechanics
 ```
 
 ## Core Cognitive Pipeline
@@ -180,9 +259,9 @@ The root supervisor in `apps/symbrella` starts the shared runtime:
 - `Phoenix.PubSub`
 - `Llm` and `Llm.BootGate`
 - mood and policy processes
-- LIFG Stage-1 scoring
+- LIFG Stage1/Stage2 scoring and evidence finalization
 - named brain regions
-- curiosity/thalamus/DLPFC/WM loop
+- curiosity/thalamus/BasalGanglia/DLPFC/WM loop
 - blackboard and self-continuity processes
 - optional camera observation bridge
 
@@ -208,11 +287,21 @@ Curiosity -> Thalamus -> BasalGanglia -> DLPFC -> WorkingMemory
 In broad terms:
 
 1. `Brain.Curiosity` proposes a probe.
-2. `Brain.Thalamus` blends curiosity with OFC value, ACC conflict, and mood.
-3. `Brain.BasalGanglia` scores admission against WM capacity, duplicates,
-   source preferences, and cooldowns.
-4. `Brain.DLPFC` acts on allowed or boosted thalamic decisions.
-5. `Brain.WorkingMemory` normalizes, merges, decays, trims, and emits telemetry.
+2. `Brain.Thalamus` relays and arbitrates curiosity with OFC value, ACC
+   conflict, mood, and control context. It is not the semantic decision-maker.
+3. `Brain.BasalGanglia` is the intended canonical cognitive admission gate,
+   scoring candidates against evidence strength, attention/salience, WM
+   fullness, duplicates, cooldown, source preferences, goals/control context,
+   conflict, and bounded self-state modulation.
+4. `Brain.DLPFC` / PFC acts as an executive-control analogue over allowed or
+   boosted decisions. It should not become an uncontrolled direct writer to WM.
+5. `Brain.WorkingMemory` normalizes, maintains, merges, activates, decays,
+   trims, evicts, and emits telemetry for admitted active representations.
+
+Current code still has overlapping gate-like behavior in `Brain.LIFG.Stage2`,
+`Brain.WM.Policy`, and `Brain.BasalGanglia`. Phase 9A tracks the consolidation
+work so all WM ingress paths eventually obey the same inspectable cognitive
+gate.
 
 Tests around this loop live under `apps/brain/test/brain`.
 
@@ -297,7 +386,13 @@ Important current contracts:
 - LIFG token paths operate on word tokens and word-grams, not character-grams.
 - MWE candidates are injected at word boundaries.
 - Sense slates are carried on `Core.SemanticInput`.
-- Working memory is newest-first and controlled through explicit policy knobs.
+- LIFG selects/interprets; BasalGanglia gates; WorkingMemory maintains;
+  SelfModel modulates; Core orchestrates.
+- Working memory is newest-first, bounded, and controlled through explicit
+  policy knobs.
+- New WM ingress paths should flow through the canonical cognitive admission
+  gate rather than inserting arbitrary candidates directly into
+  `Brain.WorkingMemory`. Existing transitional paths remain roadmap work.
 - Curiosity decisions emit telemetry with score and decision metadata.
 - Agency decisions must stay traceable from action selection through response
   metadata, ledger events, reflection, and memory pressure.
@@ -338,3 +433,8 @@ Symbrella is an active research and application codebase. It is not a packaged
 library and not a generic chatbot shell. The most important thing to preserve is
 the inspectable cognitive architecture: named regions, explicit memory, visible
 control flow, and a clear route from text interaction to embodied input/output.
+
+The current roadmap frontier is Phase 9: cognitive gating consolidation and
+behavior coupling. The key architectural cleanup is to consolidate general
+Working Memory admission around `Brain.BasalGanglia` while preserving bounded
+self-state modulation, telemetry, and explicit tests for gate bypasses.

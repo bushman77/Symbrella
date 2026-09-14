@@ -45,6 +45,20 @@ defmodule Core.Intent.SelectionTest do
     assert conf("what time is it?") >= 0.85
   end
 
+  test "self-state check-in is smalltalk even when addressed to Symbrella" do
+    text = "How are you doing on this fine saturday afternoon Symbrella?"
+
+    assert intent(text) == :smalltalk
+    assert conf(text) >= 0.60
+  end
+
+  test "how are you using a tool remains an informational question" do
+    text = "How are you using LiveView?"
+
+    assert intent(text) == :ask
+    assert conf(text) >= 0.69
+  end
+
   test "question cue can come from full text when extracted keyword is declarative" do
     si =
       Selection.select(%{

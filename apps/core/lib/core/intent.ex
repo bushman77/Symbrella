@@ -24,6 +24,7 @@ defmodule Core.Intent do
     tell
     statement
     question
+    smalltalk
     affirm
     deny
     greet

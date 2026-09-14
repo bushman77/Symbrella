@@ -13,6 +13,7 @@ defmodule Core.Intent.SelectionCorpusTest do
     {"please run mix compile", :command},
     {"translate hola into English", :translate},
     {"thanks, that helped", :feedback},
+    {"hey symbrella how are you on this fine saturday morning", :smalltalk},
     {"hello there", :greet}
   ]
 

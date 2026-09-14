@@ -31,6 +31,19 @@ defmodule Core.Response.AgencyEventBuilderTest do
     assert is_map(attrs.reflection)
   end
 
+  test "defaults missing self model and state to non-null maps" do
+    attrs =
+      AgencyEventBuilder.response_attrs(
+        "How are you on this fine saturday afternoon Symbrella?",
+        "Good afternoon. I'm running steady right now.",
+        %{self_model: nil},
+        %{session_id: "s-1", action: :answer, self_state: nil}
+      )
+
+    assert attrs.self_model == %{}
+    assert attrs.self_state == %{}
+  end
+
   test "builds command event attrs without persistence" do
     attrs =
       AgencyEventBuilder.command_attrs(

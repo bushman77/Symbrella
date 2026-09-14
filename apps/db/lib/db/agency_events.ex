@@ -11,6 +11,7 @@ defmodule Db.AgencyEvents do
   alias Db.AgencyEvent
 
   @type create_result :: {:ok, AgencyEvent.t()} | {:error, Ecto.Changeset.t()}
+  @json_map_fields [:input, :decision, :reasons, :self_model, :self_state, :outcome, :reflection]
 
   @doc """
   Persist one agency event.
@@ -24,6 +25,7 @@ defmodule Db.AgencyEvents do
       |> normalize_string(:source, "runtime")
       |> normalize_string(:status, "observed")
       |> normalize_string(:action, nil)
+      |> normalize_json_maps()
       |> Map.put_new(:agency_v, 1)
 
     %AgencyEvent{}
@@ -67,6 +69,23 @@ defmodule Db.AgencyEvents do
       is_atom(value) -> Map.put(attrs, key, Atom.to_string(value))
       is_nil(default) -> attrs
       true -> Map.put(attrs, key, default)
+    end
+  end
+
+  defp normalize_json_maps(attrs) do
+    Enum.reduce(@json_map_fields, attrs, &normalize_json_map/2)
+  end
+
+  defp normalize_json_map(key, attrs) do
+    string_key = Atom.to_string(key)
+    missing = {:missing, key}
+    value = Map.get(attrs, key, Map.get(attrs, string_key, missing))
+
+    cond do
+      value == missing -> attrs
+      is_nil(value) -> Map.put(attrs, key, %{})
+      is_map(value) -> Map.put(attrs, key, value)
+      true -> Map.put(attrs, key, %{"value" => value})
     end
   end
 

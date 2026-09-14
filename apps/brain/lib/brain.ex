@@ -121,7 +121,8 @@ defmodule Brain do
           wm_cfg: wm_cfg(),
           activation_log: list(),
           wm_last_ms: non_neg_integer() | nil,
-          last_intent: map() | nil
+          last_intent: map() | nil,
+          self_state: map() | nil
         }
 
   # ── Small wrappers (hide raw GenServer.* from call-sites) ──────────────────
@@ -201,6 +202,11 @@ defmodule Brain do
   """
   @spec set_attention(map()) :: :ok
   def set_attention(ctx) when is_map(ctx), do: gencast(@name, {:set_attention, ctx})
+  @doc false
+  @spec set_self_state(map()) :: :ok
+  def set_self_state(%Brain.SelfModel{} = model) do
+    gencast(@name, {:set_self_state, model})
+  end
 
   @doc ~S"""
   Gate and update working memory given candidates (list) or an SI-like map.
@@ -504,7 +510,8 @@ defmodule Brain do
        wm_cfg: @wm_defaults,
        activation_log: [],
        wm_last_ms: nil,
-       last_intent: nil
+       last_intent: nil,
+       self_state: nil
      }}
   end
 
@@ -581,6 +588,11 @@ defmodule Brain do
   @impl true
   def handle_cast({:set_attention, ctx}, state),
     do: {:noreply, %{state | attention: Map.new(ctx)}}
+
+  @impl true
+  def handle_cast({:set_self_state, %Brain.SelfModel{} = model}, state) do
+    {:noreply, %{state | self_state: model}}
+  end
 
   @impl true
   def handle_cast({:activate_cells, rows_or_ids, payload}, state) do

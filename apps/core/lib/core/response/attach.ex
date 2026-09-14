@@ -18,6 +18,8 @@ defmodule Core.Response.Attach do
     • Optionally apply response guardrails if present.
   """
 
+  alias Core.Agency.Command
+  alias Core.Agency.Decision
   alias Core.SemanticInput
   alias Core.Response.Context
   alias Core.Response.RuntimeContext
@@ -88,15 +90,17 @@ defmodule Core.Response.Attach do
 
       case Core.Response.plan(si_like, mood_like) do
         {tone, text, meta} ->
+          {si2, meta} = reconcile_action_selection(si, meta, mood_like)
+
           meta2 =
             meta
             |> ensure_map()
-            |> Map.put_new(:allowed_norms, allowed_norms_from_tokens(si_get(si, :tokens)))
-            |> attach_action_selection_meta(si)
+            |> Map.put_new(:allowed_norms, allowed_norms_from_tokens(si_get(si2, :tokens)))
+            |> attach_action_selection_meta(si2)
 
-          {tone2, text2, meta3} = maybe_apply_guardrails(si, {tone, text, meta2}, opts)
+          {tone2, text2, meta3} = maybe_apply_guardrails(si2, {tone, text, meta2}, opts)
 
-          si
+          si2
           |> si_put(:response_tone, tone2)
           |> si_put(:response_text, text2)
           |> si_put(:response_meta, meta3)
@@ -370,6 +374,114 @@ defmodule Core.Response.Attach do
     end)
   end
 
+  defp reconcile_action_selection(si, meta, mood_like) when is_map(si) and is_map(meta) do
+    if stale_social_action_selection?(si, meta) do
+      result = conversational_action_result(mood_like)
+      ctx = action_context(si, meta, mood_like)
+      decision = Decision.from_action_result(result, ctx)
+      commands = Command.from_decision(decision)
+
+      si2 =
+        si
+        |> si_put(:selected_action, result.selected)
+        |> si_put(:action_candidates, result.candidates)
+        |> si_put(:action_meta, result)
+        |> si_put(:agency_decision, decision)
+        |> si_put(:agency_commands, commands)
+        |> si_put(:agency_command_results, [])
+
+      meta2 =
+        meta
+        |> Map.put(:agency_decision, decision)
+        |> Map.put(:agency_commands, commands)
+        |> Map.put(:agency_command_results, [])
+
+      {si2, meta2}
+    else
+      {si, meta}
+    end
+  end
+
+  defp reconcile_action_selection(si, meta, _mood_like), do: {si, ensure_map(meta)}
+
+  defp stale_social_action_selection?(si, meta) do
+    social_intent?(Map.get(meta, :intent_inferred)) and stale_action_selection?(si)
+  end
+
+  defp social_intent?(intent),
+    do: intent in [:greet, :greeting, :gratitude, :smalltalk, :feedback]
+
+  defp stale_action_selection?(si) do
+    selected = si_get(si, :selected_action)
+    reason = si |> si_get(:action_meta) |> selected_action_reason()
+
+    selected in [nil, :ask_clarifying_question, :observe_silently] or
+      reason in [:low_confidence, :unknown_intent, :avoid_overconfident_action]
+  end
+
+  defp selected_action_reason(%{} = action_meta) do
+    case Map.get(action_meta, :selected_candidate, Map.get(action_meta, "selected_candidate")) do
+      %{} = selected -> Map.get(selected, :reason, Map.get(selected, "reason"))
+      _ -> Map.get(action_meta, :selected_reason, Map.get(action_meta, "selected_reason"))
+    end
+  end
+
+  defp selected_action_reason(_), do: nil
+
+  defp conversational_action_result(mood_like) do
+    {inh, exp} = mood_values(mood_like)
+
+    candidates =
+      [
+        action_candidate(:answer_user, 0.62, :conversation_continuation, speech_required?: true),
+        action_candidate(:observe_silently, 0.34 + 0.10 * inh, :low_pressure_turn),
+        action_candidate(:store_memory, 0.26 + 0.04 * exp, :possible_relationship_context,
+          memory_relevant?: true
+        )
+      ]
+      |> Enum.map(&Map.update!(&1, :score, fn score -> score |> clamp01() |> Float.round(4) end))
+
+    selected = List.first(candidates)
+
+    %{
+      version: "action_selector.v1",
+      selected: selected.action,
+      selected_candidate: selected,
+      candidates: candidates,
+      confidence: selected.score,
+      safety_gate: :approved,
+      safety: %{decision: :approved, reason: :text_internal_action, action: selected.action}
+    }
+  end
+
+  defp action_candidate(action, score, reason, opts \\ []) do
+    %{
+      action: action,
+      score: score,
+      reason: reason,
+      speech_required?: Keyword.get(opts, :speech_required?, false),
+      memory_relevant?: Keyword.get(opts, :memory_relevant?, false)
+    }
+  end
+
+  defp mood_values(%{} = mood_like) do
+    mood = Map.get(mood_like, :mood, %{})
+    {number(Map.get(mood, :inhibition)), number(Map.get(mood, :exploration))}
+  end
+
+  defp mood_values(_), do: {0.0, 0.0}
+
+  defp action_context(si, meta, mood_like) do
+    %{
+      intent: Map.get(meta, :intent_inferred),
+      confidence: Map.get(meta, :confidence),
+      mood: Map.get(mood_like, :mood),
+      self_model: si_get(si, :self_model),
+      self_monitor: si_get(si, :self_monitor),
+      session_id: si_get(si, :session_id)
+    }
+  end
+
   defp attach_action_selection_meta(meta, si) when is_map(meta) and is_map(si) do
     meta
     |> maybe_put_meta(:agent_selected_action, si_get(si, :selected_action))
@@ -385,4 +497,8 @@ defmodule Core.Response.Attach do
   defp maybe_put_meta(meta, _key, nil), do: meta
   defp maybe_put_meta(meta, _key, []), do: meta
   defp maybe_put_meta(meta, key, value), do: Map.put_new(meta, key, value)
+
+  defp number(value) when is_integer(value), do: value * 1.0
+  defp number(value) when is_float(value), do: value
+  defp number(_), do: 0.0
 end

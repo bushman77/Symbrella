@@ -1,6 +1,6 @@
-# Symbrella Roadmap: Operational Self-Awareness, Introspection, And ML Calibration
+# Symbrella Roadmap: Cognitive Control, Operational Self-Awareness, And ML Calibration
 
-**Purpose:** Shift Symbrella from primarily mood-reactive behavior toward an explicit, inspectable, testable model of itself: current state, confidence, uncertainty, stability, goals, recent behavior, memory continuity, and limits. That self-model should influence attention, memory, curiosity, response planning, and recovery behavior while staying grounded in engineering facts rather than any claim of sentience.
+**Purpose:** Shift Symbrella from primarily mood-reactive behavior toward an explicit, inspectable, testable cognitive-control architecture: semantic evidence, bounded self-state, current goals, memory continuity, conflict, admission control, and response planning. The self-model should influence attention, memory, curiosity, response planning, and recovery behavior while staying grounded in engineering facts rather than any claim of sentience.
 
 The ML track calibrates bounded self-state signals. It does not replace the symbolic self-model.
 
@@ -20,6 +20,11 @@ These stay true throughout the roadmap:
 - **Db remains the Ecto Repo module.** Persistence-related work stays in the `db` app.
 - **ML stays advisory until explicitly blended.** Learned output must not silently overwrite `Brain.SelfModel`.
 - **Continuity must be evidence-backed.** Reboot restoration may only use persisted, version-checked, bounded state.
+- **BasalGanglia is the canonical target for general WM admission.** Gate decisions such as `:allow`, `:boost`, and `:block` should converge there.
+- **LIFG selects and finalizes linguistic evidence.** Stage1 performs competitive semantic interpretation; Stage2 should prepare post-selection evidence for downstream control rather than act as the final WM authority.
+- **WorkingMemory maintains admitted active representations.** It normalizes, merges, activates, decays, trims, evicts, enforces capacity, and emits telemetry.
+- **SelfModel modulates but does not gate.** Bounded self-state may bias cognitive control, but it must not bypass evidence, rule, or admission gates.
+- **The architecture is recurrent.** WorkingMemory/PFC feedback may affect LIFG context, BasalGanglia context, retrieval, attention/control, and SelfModel evidence.
 
 - [x] Guard span behavior remains correct.
 - [x] Char-grams stay out of LIFG paths.
@@ -31,7 +36,9 @@ These stay true throughout the roadmap:
 
 Current status:
 
-- [x] `mix compile` runs cleanly with no warnings.
+- [x] Umbrella compiles successfully.
+- [ ] Eliminate remaining compiler/type warnings in existing `db`, `core`, and
+  `symbrella_web` areas.
 - [x] Core warning path fixed through `Core.BrainAdapter`.
 - [x] `Brain.SelfModel` exists as the canonical runtime self-state struct.
 - [x] `Brain.SelfModel` has bounded helper behavior for numeric state fields.
@@ -52,6 +59,11 @@ Current status:
 - [x] `Brain.SelfCalibration.Evaluator` compares predictions against labels.
 - [x] Axon-backed calibration model, training artifact path, and advisory predictor exist.
 - [x] Baseline/Axon comparison and explicit blend telemetry exist.
+- [x] Initial SelfModel -> WM admission coupling exists for vigilance, uncertainty, inhibition, and cognitive load.
+- [x] Explicit bounded self-state bias function exists.
+- [x] Self-state gate contribution is telemetry-visible.
+- [x] Neutral/default self-state preserves previous gate behavior.
+- **Active frontier:** Phase 9 cognitive gating consolidation and behavior coupling.
 
 ---
 
@@ -62,7 +74,7 @@ Before deeper self-awareness, ML calibration, or persistence work expands, these
 - [x] **LIFG Guard invariants:** span normalization/recovery; telemetry meta correctness, including `count`; tripwire emission.
 - [x] **MWE unigram backfill POS canonicalization:** e.g. `"proper noun" -> "proper_noun"`; synthesized `id` and `pos`.
 - [x] **Stage1/Guard char-gram tripwire plumbing:** consistent overrideable events and expected metadata.
-- [x] **Calibration feature schema stability:** feature order and label order must not change silently.G
+- [x] **Calibration feature schema stability:** feature order and label order must not change silently.
 - [ ] **Telemetry metadata contract:** self-model, appraisal, attribution, calibration, and continuity events include version metadata.
   - [x] Self-model update telemetry includes `v`.
   - [x] Appraisal telemetry includes `v` and attribution metadata.
@@ -71,7 +83,7 @@ Before deeper self-awareness, ML calibration, or persistence work expands, these
   - [x] Calibration evaluation telemetry includes `v` and `feature_schema_v`.
   - [x] Calibration blend telemetry includes `v`.
   - [ ] Continuity telemetry includes `v`.
-- [ ] **Persistence version gates:** restored self-state must pass version and bounds checks before use.
+- [x] **Persistence version gates:** restored self-state must pass version and bounds checks before use.
 
 These are preconditions for a trustworthy introspective, calibration, and continuity stack.
 
@@ -173,6 +185,19 @@ Status:
 - [x] Add explicit focus field.
 - [x] Add version-safe serialization helper.
 - [x] Add continuity snapshot import/export helpers.
+- [x] Initial bounded modulation affects WM admission scoring through current
+  Phase 9 policy coupling.
+
+Control rule:
+
+```text
+SelfModel
+-> bounded modulation
+-> BasalGanglia / cognitive gating
+-> Working Memory update / hold
+```
+
+`Brain.SelfModel` is not itself the gate.
 
 ### 5.2 `Brain.Attribution`
 
@@ -258,12 +283,13 @@ Implemented:
 - [x] `Brain.SelfCalibration.Blend`: explicit advisory blend decision with telemetry.
 - [x] `Core.BrainAdapter`: Core-side Brain facade.
 - [x] `Core.Brain.Introspection`: orchestration hook into Brain self-model update path.
+- [x] Hippocampus-facing self-memory helper for self-tagged episodic writes.
 
-Remaining:
+Continuity and behavior status:
 
 - [x] `Brain.SelfContinuity`: warm-start and persistence-safe restoration.
 - [x] `Brain.MetaMonitor`: instability, contradiction, overload, uncertainty spikes.
-- [ ] Hippocampus-facing self-memory helper for self-tagged episodic writes.
+- [ ] Autobiographical recall filters.
 - [x] `Core.Response` integration: self-state affects response mode and planning.
 
 ### 6.2 Ownership
@@ -272,6 +298,49 @@ Remaining:
 - **Core** sequences the pipeline and passes resolved information into Brain.
 - **Db** stores durable persistence artifacts such as episodes, snapshots, and calibration data when promoted from JSONL.
 - **Web** visualizes self-model, telemetry, and calibration state, but does not define them.
+
+### 6.3 Cognitive-Control Ownership
+
+Target responsibility boundaries:
+
+```text
+LIFG Stage1:
+competitive semantic interpretation
+
+LIFG Stage2:
+post-selection linguistic evidence finalization
+
+ACC / control context:
+conflict, uncertainty, ambiguity, and task pressure
+
+BasalGanglia:
+canonical general Working Memory admission decision
+
+Thalamus:
+relay / arbitration / gating-control analogue
+
+DLPFC / PFC:
+executive and task-control maintenance
+
+WorkingMemory:
+active-representation mechanics
+
+SelfModel:
+bounded modulation and evidence summary, not the gate
+```
+
+Current overlap in `Brain.LIFG.Stage2`, `Brain.WM.Policy`, and
+`Brain.BasalGanglia` is an architecture-consolidation task. `Brain.WM.Policy`
+currently contains both admission and retention mechanics. The target split is:
+
+```text
+BasalGanglia:
+general cognitive admission decision
+
+WM policy / WorkingMemory:
+retention, decay, duplicate/lemma constraints,
+capacity, normalization, merge, and eviction
+```
 
 ---
 
@@ -283,6 +352,7 @@ Target flow:
 input
 -> tokenize / resolve
 -> LIFG disambiguation
+-> LIFG evidence finalization
 -> affective appraisal
 -> target attribution
 -> mood/chemistry update
@@ -291,6 +361,7 @@ input
 -> optional calibration prediction
 -> optional model comparison / blend decision
 -> meta-monitor checks
+-> BasalGanglia/control gate for WM admission where routed
 -> memory write / recall decision
 -> response planning
 -> response generation
@@ -317,6 +388,7 @@ input
 -> evaluation
 -> comparison
 -> blend decision telemetry
+-> initial bounded self-state contribution to WM admission scoring
 ```
 
 Invariant: no self-state update should rely on vague vibes. Each update must be attributable to one or more of:
@@ -333,6 +405,7 @@ Invariant: no self-state update should rely on vague vibes. Each update must be 
 - blend decision metadata
 - region-level metrics
 - prior persisted self snapshot
+- canonical gate telemetry where a candidate affects WorkingMemory
 
 ---
 
@@ -344,10 +417,10 @@ Invariant: no self-state update should rely on vague vibes. Each update must be 
 
 Deliverables:
 
-- [ ] Guard span behavior remains correct.
-- [ ] Char-grams stay out of LIFG paths.
-- [ ] Telemetry meta correctness is guaranteed.
-- [ ] Invariant tests cover spans, boundaries, and tripwires.
+- [x] Guard span behavior remains correct.
+- [x] Char-grams stay out of LIFG paths.
+- [x] Telemetry meta correctness is guaranteed for implemented events.
+- [x] Invariant tests cover spans, boundaries, and tripwires.
 
 ---
 
@@ -629,37 +702,66 @@ This phase can consume both rule-derived self-state and advisory calibration pre
 
 ### Phase 9 - Behavior Coupling
 
-**Goal:** make self-state causally relevant.
+**Current active frontier.**
+
+**Goal:** make self-state causally relevant without letting self-state bypass
+evidence, rule, or admission gates.
 
 Coupling targets:
 
 - [x] **Curiosity:** proposal score responds to novelty, exploration/dopamine, and uncertainty.
-- [ ] **WM / attention:** vigilance and uncertainty alter persistence and interrupt sensitivity.
+- [x] **WM / attention:** initial bounded vigilance, uncertainty, inhibition, and cognitive-load contribution exists in admission scoring.
 - [ ] **Memory writes:** salience and novelty increase write likelihood; overload suppresses writes.
 - [x] **Response planning:** confidence, uncertainty, and stability determine assert, hedge, explain, or repair.
 - [ ] **Tone / style:** mood affects delivery without distorting factual grounding.
+- [ ] **Overload suppression:** high load reduces write/amplification pressure before it becomes runaway behavior.
 
 Deliverables:
 
-- [ ] Small explicit bias functions.
+- [x] Small explicit bias function for current self-state WM admission contribution.
 - [x] Measurable telemetry counters per coupling point.
 - [x] Tests proving self-state changes downstream decisions.
 - [ ] Tests proving calibration predictions do not bypass rule gates.
-## 9) Telemetry And LiveView Requirements
+- [ ] Calibration-rule gate tests prove model/advisory signals stay bounded by explicit rules.
 
-Minimum telemetry set:
+### Phase 9A - Cognitive Gating Consolidation
 
-- [x] `[:brain, :affect, :appraisal]`
-- [x] `[:brain, :mood, :appraisal_applied]`
-- [x] `[:brain, :self_model, :update]`
-- [x] `[:brain, :self_calibration, :sample_logged]`
-- [x] `[:brain, :self_calibration, :prediction]`
-- [x] `[:brain, :self_calibration, :blend]`
-- [x] `[:brain, :self_model, :continuity_restored]`
-- [x] `[:brain, :meta_monitor, :warning]`
-- [x] `[:brain, :response, :mode_selected]`
+Goal:
 
----
+```text
+Make Working Memory admission biologically inspired,
+causally affected by bounded self-state, and governed
+by one inspectable cognitive-control path.
+```
+
+Deliverables:
+
+- [x] Initial SelfModel -> WM admission coupling exists for vigilance, uncertainty, inhibition, and cognitive load.
+- [x] Explicit bounded self-state bias function exists.
+- [x] Self-state gate contribution is telemetry-visible.
+- [x] Neutral/default self-state preserves previous gate behavior.
+- [ ] Consolidate final WM admission under `Brain.BasalGanglia`.
+- [ ] Redefine `Brain.LIFG.Stage2` as linguistic evidence finalization rather than final WM admission.
+- [ ] Route LIFG Stage2 candidates through the canonical cognitive gate.
+- [ ] Reconcile `Brain.WM.Policy` admission responsibilities with `Brain.BasalGanglia`.
+- [ ] Ensure all WM ingress paths obey the same canonical gate.
+- [ ] Ensure Hippocampus/recall ingress obeys the canonical gate.
+- [ ] Ensure Curiosity/Thalamus/DLPFC ingress obeys the canonical gate.
+- [ ] Tests proving no path bypasses the canonical gate.
+- [ ] Tests proving self-state modulation cannot bypass hard evidence/rule gates.
+- [ ] Preserve bounded scores and telemetry across all gate paths.
+
+Notes:
+
+- Existing direct or commit-oriented behavior in `Brain.LIFG.Stage2` is an
+  implementation area to consolidate, not the target architecture.
+- Current `Brain.WM.Policy` behavior includes both admission and retention
+  mechanics. The target is for BasalGanglia to own general admission while
+  WM policy / WorkingMemory own retention, duplicate/lemma constraints,
+  capacity, normalization, merge, decay, and eviction.
+- If code or config still uses `lifg_min_score`, treat that name as
+  implementation-specific. A future cleanup may generalize it to a concept such
+  as `evidence_floor` or `min_input_score`.
 
 ### Phase 10 - Goal Stack And Motivational Layer
 
@@ -675,6 +777,22 @@ Deliverables:
 
 ---
 
+## 9) Telemetry And LiveView Requirements
+
+Minimum telemetry set:
+
+- [x] `[:brain, :affect, :appraisal]`
+- [x] `[:brain, :mood, :appraisal_applied]`
+- [x] `[:brain, :self_model, :update]`
+- [x] `[:brain, :self_calibration, :sample_logged]`
+- [x] `[:brain, :self_calibration, :prediction]`
+- [x] `[:brain, :self_calibration, :blend]`
+- [x] `[:brain, :self_model, :continuity_restored]`
+- [x] `[:brain, :meta_monitor, :warning]`
+- [x] `[:brain, :response, :mode_selected]`
+- [x] Gate/admission telemetry exposes current self-state contribution where
+  the Phase 9 coupling is implemented.
+- [ ] Canonical BasalGanglia gate telemetry covers every WM ingress path.
 
 Minimum HUD panels:
 
@@ -711,7 +829,7 @@ Unit tests should cover:
 - [x] model predictions stay bounded
 - [x] explicit blend policy
 - [ ] stability decay/recovery
-- [ ] continuity restoration rules
+- [x] continuity restoration rules
 - [ ] no unsupported self-claims
 - [x] response mode selection under uncertainty
 
@@ -719,7 +837,7 @@ Property tests should cover:
 
 - [x] bounded self-state fields
 - [ ] telemetry meta always includes `count` and `v`
-- [ ] persisted self snapshots remain serializable and version-safe
+- [x] persisted self snapshots remain serializable and version-safe
 - [ ] feature rows match declared schema width
 - [ ] model predictions remain bounded across generated inputs
 
@@ -752,30 +870,40 @@ Completed:
 11. [x] Add Axon model, offline training, and artifact-backed predictor.
 12. [x] Compare Axon output against baseline.
 13. [x] Add explicit blend policy with telemetry.
+14. [x] Add `Brain.SelfContinuity` warm-start boundary.
+15. [x] Persist and restore bounded, version-checked self snapshots.
+16. [x] Add `Brain.MetaMonitor` warning and repair suggestions.
+17. [x] Add `Brain.GoalStack` and uncertainty-reduction pressure.
+18. [x] Couple response planning to bounded self-state.
+19. [x] Begin SelfModel -> WM admission coupling for vigilance, uncertainty,
+    inhibition, and cognitive load.
 
 Next:
 
-1. [ ] Add `Brain.SelfContinuity` warm-start boundary.
-2. [x] Persist self snapshots in `db`.
- - [x] persisted self snapshots remain serializable and version-safe.
-3. [ ] Restore latest valid snapshot on reboot.
-4. [ ] Mark stale, missing, invalid, or unsupported snapshots as degraded continuity.
-5. [ ] Emit continuity telemetry.
-6. [ ] Add tests proving restoration is bounded and version checked.
+1. [ ] Consolidate final WM admission under `Brain.BasalGanglia`.
+2. [ ] Route `Brain.LIFG.Stage2` candidates through the canonical cognitive gate.
+3. [ ] Reconcile `Brain.WM.Policy` admission responsibilities with
+   `Brain.BasalGanglia`.
+4. [ ] Ensure Hippocampus/recall and Curiosity/Thalamus/DLPFC ingress obey the
+   same gate.
+5. [ ] Add bypass tests proving no WM ingress path mutates WorkingMemory outside
+   the canonical gate.
+6. [ ] Finish Phase 9 behavior coupling for memory writes, tone/style,
+   overload suppression, and calibration-rule gate tests.
 
-Recommended immediate next implementation target:
+Recommended next implementation target:
 
 ```text
-Brain.SelfContinuity
+Phase 9A - Cognitive Gating Consolidation
 ```
 
 Purpose:
 
 ```text
-latest valid durable self snapshot -> bounded warm-start self state
+candidate evidence + bounded control context
+-> BasalGanglia canonical gate
+-> controlled PFC / WorkingMemory update
 ```
-
-This starts Phase 7 without pretending continuity exists when no valid snapshot is available.
 
 ---
 
@@ -813,6 +941,26 @@ rows = Brain.SelfCalibration.Dataset.to_rows([sample])
 
 {:ok, decision} =
   Brain.SelfCalibration.Blend.decide(baseline, candidate, comparison)
+
+candidate =
+  %{
+    source: :lifg_stage2,
+    winner: self_model.last_lifg,
+    score: self_model.confidence,
+    ambiguity: self_model.uncertainty
+  }
+
+gate_context =
+  %{
+    self_state: self_model,
+    conflict: :from_acc,
+    wm_state: :current_capacity_and_duplicates,
+    goals: self_model.active_goals
+  }
+
+# Target architecture: route general admission through the canonical
+# BasalGanglia/control gate before WorkingMemory mutation.
+gate_decision = {:basal_ganglia_gate, candidate, gate_context}
 ```
 
 ---

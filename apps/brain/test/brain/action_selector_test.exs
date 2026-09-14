@@ -53,6 +53,18 @@ defmodule Brain.ActionSelectorTest do
     assert result.selected == :ask_clarifying_question
   end
 
+  test "answers low-confidence known smalltalk instead of asking for clarification" do
+    result =
+      ActionSelector.select(%{
+        intent: :smalltalk,
+        confidence: 0.30,
+        mood: %{vigilance: 0.30, inhibition: 0.50, exploration: 0.30}
+      })
+
+    assert result.selected == :answer_user
+    assert result.selected_candidate.reason == :conversation_continuation
+  end
+
   test "selects refuse_or_redirect for safety-sensitive intents" do
     result =
       ActionSelector.select(%{

@@ -9,9 +9,9 @@ defmodule Brain.WM.Focus do
 
   @spec run(map(), list() | map(), map() | keyword()) ::
           {[wm_item()], non_neg_integer(), non_neg_integer()}
-  def run(state, cands_or_si, _opts) when is_map(state) do
+  def run(state, cands_or_si, opts) when is_map(state) do
     now = System.system_time(:millisecond)
-
+    self_state = self_state_from(state, opts)
     wm_cfg0 = Map.get(state, :wm_cfg, %{})
 
     cfg =
@@ -34,25 +34,48 @@ defmodule Brain.WM.Focus do
     cands_or_si
     |> normalize_candidates()
     |> Enum.reduce({base_wm, 0, 0}, fn cand, acc ->
-      focus_reduce_step(cand, acc, now, cfg, attn)
+      focus_reduce_step(cand, acc, now, cfg, attn, self_state)
     end)
     |> trim_and_count(cfg.capacity)
   end
 
   def run(_state, _cands_or_si, _opts), do: {[], 0, 0}
 
-  defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn) do
+  defp focus_reduce_step(cand, {wm_acc, a_cnt, r_cnt}, now, cfg, attn, self_state) do
     if not WMPolicy.acceptable_candidate?(cand, cfg) do
       {wm_acc, a_cnt, r_cnt}
     else
       salience = Attention.salience(cand, attn)
-      gate_score = WMPolicy.gate_score_for(cand, salience, cfg)
-      {decision, s} = WMPolicy.decide_gate_policy(wm_acc, cand, gate_score, cfg)
+
+      self_state_bias = WMPolicy.self_state_bias(self_state)
+
+      gate_score =
+        WMPolicy.gate_score_for(
+          cand,
+          salience,
+          cfg,
+          self_state
+        )
+
+      {decision, s} =
+        WMPolicy.decide_gate_policy(
+          wm_acc,
+          cand,
+          gate_score,
+          cfg
+        )
 
       :telemetry.execute(
         [:brain, :gate, :decision],
-        %{score: gate_score},
-        %{decision: decision, source: Map.get(cand, :source)}
+        %{
+          score: gate_score,
+          self_state_bias: self_state_bias
+        },
+        %{
+          decision: decision,
+          source: Map.get(cand, :source),
+          self_state_applied?: not is_nil(self_state)
+        }
       )
 
       case decision do
@@ -73,6 +96,20 @@ defmodule Brain.WM.Focus do
   defp trim_and_count({wm_tmp, a_cnt, r_cnt}, capacity) do
     wm_trim = WorkingMemory.trim(wm_tmp, capacity)
     {wm_trim, a_cnt, r_cnt + (length(wm_tmp) - length(wm_trim))}
+  end
+
+  defp self_state_from(state, opts) do
+    opts =
+      cond do
+        is_map(opts) -> opts
+        is_list(opts) -> Map.new(opts)
+        true -> %{}
+      end
+
+    case Map.get(opts, :self_state, Map.get(state, :self_state)) do
+      %{} = self_state -> self_state
+      _ -> nil
+    end
   end
 
   # ───────────────────────── Candidates normalization (WM) ─────────────────────

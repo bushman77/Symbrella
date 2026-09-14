@@ -3,11 +3,15 @@
 This document defines what Symbrella can honestly guarantee about `apps/brain`
 and `apps/core`.
 
-The project is brain-inspired. It is not a biological brain simulation, not a
-clinical model, and not evidence that the system has consciousness, feelings,
-sentience, or human-like subjective state. Region names such as LIFG, pMTG,
-Hippocampus, ACC, OFC, DLPFC, Thalamus, and Working Memory are engineering
-analogies for bounded software responsibilities.
+The project is biologically inspired. It is not a biological brain simulation,
+not a clinical model, and not evidence that the system has consciousness,
+feelings, sentience, or human-like subjective state. Region names such as LIFG,
+pMTG, Hippocampus, ACC, OFC, BasalGanglia, DLPFC, Thalamus, and Working Memory
+are engineering abstractions for bounded software responsibilities.
+
+When this project uses neuroscience language, the permitted claim is that a
+module is a computational analogue or functional correlate for an engineering
+role. The prohibited claim is biological equivalence.
 
 The guarantee we can make is narrower and testable:
 
@@ -21,6 +25,43 @@ The guarantee we can make is narrower and testable:
   metadata;
 - scientific terminology must not be used to overclaim beyond the measured
   behavior.
+
+## Cognitive-Control Contract
+
+The intended control structure is recurrent cortical / basal-ganglia /
+thalamic control expressed as software boundaries:
+
+```text
+Semantic / lexical representations
+-> LIFG Stage1
+   competitive semantic interpretation
+-> LIFG Stage2
+   linguistic evidence finalization
+-> ACC / cognitive-control context
+   conflict / uncertainty / task pressure
+-> BasalGanglia
+   canonical Working Memory admission gate
+-> Thalamic relay / gating control
+-> DLPFC / PFC control
+-> WorkingMemory
+   maintained active-representation store
+```
+
+Feedback is part of the design:
+
+```text
+WorkingMemory / PFC
+-> LIFG context
+-> BasalGanglia context
+-> memory retrieval
+-> attention/control
+-> SelfModel evidence
+```
+
+Current code is still consolidating overlapping gate-like behavior in
+`Brain.LIFG.Stage2`, `Brain.WM.Policy`, and `Brain.BasalGanglia`. The contract
+target is one inspectable cognitive admission path before general WorkingMemory
+mutation.
 
 ## Claim Classes
 
@@ -72,16 +113,18 @@ The code, UI, prompts, docs, and logs must not claim these as facts:
 | `Core.Intent.*` | Intent selection and confidence | Intent heuristic/classifier | Known intent atoms only, confidence bounded |
 | `Core.Recall.*` | Recall planning and episode merge | Memory cue planning | Top-k/window limits, safe fallbacks |
 | `Brain.LIFG.Stage1` | Competitive sense selection | LIFG-inspired disambiguation | Softmax/probability bounds, margins, audit counters |
+| `Brain.LIFG.Stage2` | Post-selection linguistic evidence finalization | LIFG-inspired evidence finalization | Winner identity preserved, score bounded, margin bounded/non-negative, traceable provenance, no unbounded processing, does not silently become an uncontrolled WM writer |
 | `Brain.PMTG` | Controlled semantic retrieval | pMTG-inspired retrieval | Weak-choice detection, query limits, no unbounded reruns |
 | `Brain.Hippocampus` | Episodic encode/recall | Hippocampus-inspired episodic memory | Window bounds, recency/Jaccard scoring, evidence provenance |
-| `Brain.WorkingMemory` | Capacity-limited active item set | Working-memory correlate | Capacity, decay, duplicate merge, payload shape |
-| `Brain.BasalGanglia` | Gate for WM admission | Basal-ganglia-inspired gating | `:allow | :boost | :block`, bounded scores |
+| `Brain.WorkingMemory` | Capacity-limited maintained active item set | Working-memory correlate | Capacity, normalization, activation, decay, duplicate merge, trimming, eviction, telemetry, payload shape |
+| `Brain.BasalGanglia` | Canonical target gate for general WM admission | Basal-ganglia-inspired gating | `:allow | :boost | :block`, bounded scores, traceable evidence/context, no LIFG-only assumption |
 | `Brain.Thalamus` | Arbitration/relay for curiosity/value/conflict | Thalamus-inspired relay | Score clamp, monotonic weighting tests |
 | `Brain.ACC` | Conflict/uncertainty monitor | ACC-inspired conflict correlate | Conflict in bounded range, decay behavior |
 | `Brain.OFC` / `Brain.VMPFC` | Proposal valuation | Value-estimation correlate | Bounded value, mood cap, risk/novelty weighting |
 | `Brain.DLPFC` / `Brain.PFC` | Execution and policy control | Executive-control correlate | No direct uncontrolled WM writes |
 | `Brain.MoodCore` | Bounded control vector | Neuromodulator-inspired control state | Level clamps, half-life decay, small deltas |
-| `Brain.Self*` | Runtime self-state summaries | Self-model correlate | Advisory only, no consciousness claims |
+| `Brain.SelfModel` | Runtime evidence integration and bounded control modulation | Self-model correlate / engineering abstraction | Bounded fields, evidence provenance, advisory/modulatory only, no consciousness claims, cannot bypass gates |
+| `Brain.Self*` | Continuity, calibration, introspection, and reflective helpers | Self-model-related engineering abstractions | Versioning, bounds, traceability, advisory-only ML unless explicitly blended |
 
 ## Pipeline Invariants
 
@@ -106,12 +149,20 @@ These are the invariants that should be treated as regression blockers.
   `{:error, reason}`.
 - Stage1 choices must include `token_index`, winner id, score/probability, and
   margin when available.
+- LIFG Stage2 must preserve winner provenance and produce bounded linguistic
+  evidence for downstream control.
 - PMTG must only query bounded evidence and either boost/inhibit or rerun through
   an explicit mode.
-- WM admission must pass through gate/policy code, not direct list mutation.
+- Architectural target: general WM admission must pass through the canonical
+  BasalGanglia/control gate before WorkingMemory mutation. Transitional
+  gate-like paths in Stage2 and WM policy are consolidation work, not the
+  desired endpoint.
 - Mood deltas must be small and clamped.
 - Self-model predictions are advisory metadata, never asserted as subjective
   state.
+- SelfModel modulation may bias cognitive control only through bounded,
+  telemetry-visible contributions and must not bypass hard evidence or rule
+  gates.
 
 ## Review Checklist
 
@@ -144,5 +195,10 @@ Remaining work to move closer to a strong guarantee:
   activation outputs;
 - add contract tests around full `Core.resolve_input/2` traces;
 - add integration tests proving PMTG reruns cannot loop unboundedly;
-- add tests proving curiosity/thalamus/DLPFC cannot write WM outside the gate;
+- consolidate overlapping admission logic in `Brain.LIFG.Stage2`,
+  `Brain.WM.Policy`, and `Brain.BasalGanglia`;
+- add tests proving LIFG, Hippocampus/recall, curiosity/thalamus/DLPFC, and any
+  other WM ingress path cannot write WM outside the canonical gate;
+- add tests proving self-state modulation cannot bypass hard evidence/rule
+  gates;
 - add a static documentation check that prohibits overclaim language.

@@ -433,6 +433,34 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Response profile: self_check."
   end
 
+  test "self_state_prompt treats casual how-are-you turns as social check-ins" do
+    prompt =
+      LlmPrompt.self_state_prompt(%{
+        features: %{
+          text: "hey symbrella how are you on this fine saturday morning"
+        },
+        decision: %{tone: :neutral, mode: :explainer, action: :answer},
+        mood: %{
+          mood: %{exploration: 0.48, inhibition: 0.54, vigilance: 0.77, plasticity: 0.56},
+          pressure_label: :steady_restraint
+        }
+      })
+
+    assert prompt =~ "This is a casual check-in."
+    assert prompt =~ "Answer like a brief social reply first"
+    assert prompt =~ "Use internal state labels only as private shaping context"
+    assert prompt =~ "Do not describe yourself as unbiased, neutral, or ready to assist"
+    assert prompt =~ "Internal state label (do not quote):"
+    assert prompt =~ "Internal pressure label (do not quote):"
+    assert prompt =~ "\"I am currently in a neutral state\""
+    assert prompt =~ "\"steady pressure\""
+    assert prompt =~ "\"balanced and unbiased\""
+    assert prompt =~ "\"ready to assist\""
+    refute prompt =~ "Current state:"
+    refute prompt =~ "Pressure label:"
+    refute prompt =~ "readiness"
+  end
+
   test "build_system_prompt/1 routes self-state concern away from semantic repair" do
     prompt =
       LlmPrompt.build_system_prompt(%{

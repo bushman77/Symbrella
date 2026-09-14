@@ -78,4 +78,22 @@ defmodule Core.Brain.ActionSelectionTest do
              }
            ] = out.agency_command_results
   end
+
+  test "keeps low-confidence smalltalk on the answer path" do
+    si = %{
+      sentence: "How are you doing on this fine saturday afternoon Symbrella?",
+      source: :test,
+      tokens: [],
+      trace: [],
+      intent: :smalltalk,
+      confidence: 0.30,
+      mood: %{vigilance: 0.30, inhibition: 0.50, exploration: 0.30}
+    }
+
+    out = ActionSelection.attach(si, [])
+
+    assert out.selected_action == :answer_user
+    assert %{selected: :answer_user} = out.action_meta
+    assert %Core.Agency.Decision{selected_action: :answer_user} = out.agency_decision
+  end
 end

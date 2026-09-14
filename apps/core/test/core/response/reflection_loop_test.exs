@@ -58,6 +58,29 @@ defmodule Core.Response.ReflectionLoopTest do
     assert reflection.applied? == true
   end
 
+  test "repairs robotic self-state check-in drafts" do
+    draft =
+      "I am currently in a neutral state, with steady pressure. My tone is balanced and unbiased. I am always ready to assist you, regardless of my current state. How may I help you today?"
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(
+        "hey symbrella how are you on this fine saturday morning",
+        draft,
+        %{features: %{intent: :greet, conf: 0.49}, decision: %{response_profile: :self_check}}
+      )
+
+    assert final =~ "Good morning."
+    assert final =~ "I'm running steady right now"
+    refute final =~ "neutral state"
+    refute final =~ "steady pressure"
+    refute final =~ "balanced and unbiased"
+    refute final =~ "ready to assist"
+    refute final =~ "How may I help you today"
+    assert reflection.status == :repair
+    assert :robotic_self_state in reflection.issues
+    assert reflection.applied? == true
+  end
+
   test "repairs leaked internal response-state labels" do
     leaked = """
     Uncertain: Good afternoon Symbrella, afternoon Symbrella, need help fixing.

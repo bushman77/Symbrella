@@ -89,6 +89,10 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
     |> maybe_issue(self_state_repair?(context), :self_state_repair)
     |> maybe_issue(self_state_question?(user_text), :self_state_claim_risk)
+    |> maybe_issue(
+      self_state_question?(user_text) and robotic_self_state_draft?(draft_text),
+      :robotic_self_state
+    )
     |> maybe_issue(overclaims_self_awareness?(draft_text), :overclaimed_self_awareness)
     |> maybe_issue(generic_draft?(draft_text), :too_generic)
     |> maybe_issue(topic_dead_end?(context, user_text, draft_text), :topic_dead_end)
@@ -106,6 +110,9 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :topic_dead_end in issues ->
+        {:repair, issues}
+
+      :robotic_self_state in issues ->
         {:repair, issues}
 
       :low_confidence in issues and (:unknown_intent in issues or :too_generic in issues) ->
@@ -142,6 +149,9 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
+        :robotic_self_state in issues ->
+          self_state_checkin_fallback(user_text)
+
         :leaked_hidden_context in issues and (final_text == "" or final_text == draft_text) ->
           hidden_context_fallback(user_text)
 
@@ -201,12 +211,23 @@ defmodule Core.Response.ReflectionLoop do
     t = String.downcase(text)
 
     Regex.match?(
-      ~r/\b(how are you feeling|how do you feel|self[-\s]?aware|conscious|sentient)\b/u,
+      ~r/\b(how are you|how are you doing|how are you feeling|how do you feel|are you ok|are you okay|self[-\s]?aware|conscious|sentient)\b/u,
       t
     )
   end
 
   defp self_state_question?(_), do: false
+
+  defp robotic_self_state_draft?(draft_text) when is_binary(draft_text) do
+    t = String.downcase(draft_text)
+
+    Regex.match?(
+      ~r/\b(neutral state|steady pressure|balanced and unbiased|ready to assist|regardless of my current state|how may i help you today)\b/u,
+      t
+    )
+  end
+
+  defp robotic_self_state_draft?(_), do: false
 
   defp overclaims_self_awareness?(draft_text) when is_binary(draft_text) do
     t = String.downcase(draft_text)
@@ -337,6 +358,25 @@ defmodule Core.Response.ReflectionLoop do
 
       true ->
         "I can help. What outcome are you trying to get first?"
+    end
+  end
+
+  defp self_state_checkin_fallback(user_text) do
+    prefix =
+      user_text
+      |> to_string()
+      |> String.downcase()
+      |> cond_time_prefix()
+
+    "#{prefix} I'm running steady right now: calm enough to keep this conversational, with enough focus to respond clearly."
+  end
+
+  defp cond_time_prefix(text) do
+    cond do
+      String.contains?(text, "morning") -> "Good morning."
+      String.contains?(text, "afternoon") -> "Good afternoon."
+      String.contains?(text, "evening") -> "Good evening."
+      true -> "I'm here."
     end
   end
 
