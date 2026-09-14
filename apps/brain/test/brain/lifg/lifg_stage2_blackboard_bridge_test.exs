@@ -6,10 +6,10 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
   alias Brain.Blackboard
 
   @moduledoc """
-  Integration coverage for the Stage2 gating path:
+  Integration coverage for the Stage2-to-canonical-admission path:
 
     Stage1-like trace → Brain.LIFG.Stage2.run/2 → Brain.gate_from_lifg/2
-      → WM update telemetry → Blackboard bridge → PubSub message
+      → Brain.WM.Admission → WM update telemetry → Blackboard bridge → PubSub message
 
   This test intentionally does NOT use `:telemetry.execute/3` to simulate WM updates.
   """
@@ -39,7 +39,7 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     :ok
   end
 
-  test "Stage2 emits gate decision and WM update is bridged onto brain:blackboard" do
+  test "Stage2 evidence receives a canonical gate decision and WM update is bridged" do
     # Stage2 expects a Stage1-ish event in trace with :choices.
     # Provide two choices: one above threshold (commit), one below (ignored).
     si = %{
@@ -87,6 +87,7 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     assert is_number(score) and score >= 0.60
     assert meta.source == :lifg
     assert meta.decision in [:allow, :boost]
+    assert meta.gate == :basal_ganglia
     assert meta.id == "hello there|phrase|fallback"
     assert meta.token_index == 0
 

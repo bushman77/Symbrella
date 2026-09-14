@@ -13,9 +13,11 @@ defmodule Brain.Curiosity do
 
     Brain.Curiosity.nudge/1
       → [:curiosity, :proposal]
-      → Brain.Thalamus (OFC blend + ACC brake + mood bias)
-      → Brain.BasalGanglia.decide/4
-      → WM insertion (via BG), visible in Brain.snapshot_wm/0.
+      → Brain.Thalamus (OFC blend + ACC brake + mood bias evidence)
+      → Brain.DLPFC launch
+      → Brain.focus/2
+      → Brain.WM.Admission + Brain.BasalGanglia.decide/4
+      → WM insertion, visible in Brain.snapshot_wm/0.
   """
 
   use Brain, region: :curiosity
@@ -282,7 +284,10 @@ defmodule Brain.Curiosity do
   defp get_opt(_opts, _key, default), do: default
 
   defp has_opt?(opts, key) when is_list(opts), do: Keyword.has_key?(opts, key)
-  defp has_opt?(%{} = opts, key), do: Map.has_key?(opts, key) or Map.has_key?(opts, to_string(key))
+
+  defp has_opt?(%{} = opts, key),
+    do: Map.has_key?(opts, key) or Map.has_key?(opts, to_string(key))
+
   defp has_opt?(_opts, _key), do: false
 
   defp map_get(%{} = map, key, default) when is_atom(key) do

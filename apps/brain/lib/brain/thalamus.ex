@@ -10,12 +10,10 @@ defmodule Brain.Thalamus do
     • [:brain, :mood, :update]        (derived mood indices from MoodCore)
 
   Flow per proposal:
-    1) Snapshot WM/Attention via `Brain.snapshot_wm/0`
-    2) Blend proposal score with latest OFC value (configurable weight)
-    3) Attenuate by latest ACC conflict (configurable alpha)
-    4) Apply **mood bias** to the score (bounded)
-    5) Gate with `Brain.BasalGanglia.decide/4`
-    6) Emit decision; DLPFC owns launching
+    1) Blend proposal score with latest OFC value (configurable weight)
+    2) Attenuate by latest ACC conflict (configurable alpha)
+    3) Apply **mood bias** to the score (bounded)
+    4) Emit arbitration evidence; DLPFC owns launching
 
   Emits:
     • [:brain, :thalamus, :curiosity, :decision]
@@ -27,6 +25,8 @@ defmodule Brain.Thalamus do
         mood_applied?: boolean, mood_factor: float,
         mood_snapshot: %{exploration:, inhibition:, vigilance:, plasticity:} | nil,
         mood_weights: %{expl:, inhib:, vigil:, plast:}, mood_cap: float,
+        gate: :thalamus_arbitration,
+        final_admission?: false,
         v: 2
       }
   """
@@ -348,11 +348,12 @@ defmodule Brain.Thalamus do
 
     probe = Map.put(probe2, :score, final_score)
 
-    # 5) Gate
-    %{wm: wm, cfg: cfg, attention: attn} = Brain.snapshot_wm()
-    {decision, s} = Brain.BasalGanglia.decide(wm, probe, attn, cfg)
+    # 5) Emit arbitration evidence. Final WM admission happens downstream in
+    # Brain.WM.Admission via Brain.BasalGanglia.
+    decision = :propose
+    s = final_score
 
-    Logger.info("Thalamus decision: #{decision}, score: #{s}, probe_score: #{probe.score}")
+    Logger.info("Thalamus arbitration: #{decision}, score: #{s}, probe_score: #{probe.score}")
 
     # 6) Emit
     :telemetry.execute(
@@ -373,6 +374,8 @@ defmodule Brain.Thalamus do
         mood_snapshot: mood_snapshot,
         mood_weights: mood_weights,
         mood_cap: mood_cap,
+        gate: :thalamus_arbitration,
+        final_admission?: false,
         v: 2
       }
     )

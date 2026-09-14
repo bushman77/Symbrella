@@ -18,6 +18,8 @@ defmodule Brain.BasalGanglia do
     :block_threshold, :block_threshold_disprefer
   """
 
+  alias Brain.WM.Policy, as: WMPolicy
+
   @type decision :: :allow | :boost | :block
 
   @doc "Return compact dashboard status for the stateless basal ganglia gate."
@@ -37,9 +39,17 @@ defmodule Brain.BasalGanglia do
     now = System.system_time(:millisecond)
     cfg = normalize_cfg(cfg)
 
+    if not WMPolicy.acceptable_candidate?(cand, cfg) do
+      {:block, 0.0}
+    else
+      decide_acceptable(now, wm, cand, attn, cfg)
+    end
+  end
+
+  defp decide_acceptable(now, wm, cand, attn, cfg) do
     capacity = cfg.capacity
     thr_base = cfg.gate_threshold
-    min_floor = cfg.lifg_min_score
+    min_floor = evidence_floor_for(cand, cfg)
     dup_pen = cfg.dup_penalty
     cooldown = cfg.cooldown_ms
     fmult = cfg.fullness_penalty_mult
@@ -58,10 +68,17 @@ defmodule Brain.BasalGanglia do
     thr_eff = max(thr_eff0, min_floor)
 
     # Base score (never undercut caller-provided score)
-    base =
+    base0 =
       cand
       |> Map.get(:score, Map.get(cand, :activation_snapshot, 0.0))
       |> to_float()
+
+    base =
+      if fallback_id?(Map.get(cand, :id)) and not cfg.allow_fallback_into_wm? do
+        base0 * cfg.fallback_scale
+      else
+        base0
+      end
 
     salience =
       try do
@@ -75,19 +92,21 @@ defmodule Brain.BasalGanglia do
         _ -> 0.0
       end
 
-    src_bonus =
-      cfg.source_boosts
-      |> Map.get(Map.get(cand, :source))
-      |> to_float()
+    src_bonus = source_bonus(cfg.source_boosts, Map.get(cand, :source))
+    sem_bonus = cfg.semantic_boost * safe_sem_bias(cand)
 
-    blended = clamp01(0.7 * base + 0.3 * salience + src_bonus)
+    blended = clamp01(0.7 * base + 0.3 * salience + src_bonus + sem_bonus)
     score0 = max(base, blended)
 
     {dup?, match} = duplicate_match(wm, cand)
 
-    score =
+    evidence_score =
       if(dup?, do: score0 * max(1.0 - dup_pen, 0.0), else: score0)
       |> clamp01()
+
+    self_state = Map.get(attn, :self_state, Map.get(cfg, :self_state))
+    self_state_bias = WMPolicy.self_state_bias(self_state)
+    score = clamp01(evidence_score + self_state_bias)
 
     recent? = cooldown_match?(match, now, cooldown)
 
@@ -97,7 +116,7 @@ defmodule Brain.BasalGanglia do
 
     cond do
       # Hard floor
-      score < min_floor ->
+      evidence_score < min_floor ->
         {:block, score}
 
       # Cooldown rebump
@@ -136,6 +155,11 @@ defmodule Brain.BasalGanglia do
       capacity: get_pos_int(Map.get(cfg, :capacity, 7), 7),
       gate_threshold: thr_base,
       lifg_min_score: clamp01(Map.get(cfg, :lifg_min_score, Map.get(cfg, :min_score, 0.0))),
+      evidence_floor: clamp01(Map.get(cfg, :evidence_floor, Map.get(cfg, :min_input_score, 0.0))),
+      # TODO(Phase 9B): move LIFG callers from :lifg_min_score to a general
+      # evidence-floor name if this threshold becomes non-linguistic.
+      allow_fallback_into_wm?: Map.get(cfg, :allow_fallback_into_wm?, false),
+      fallback_scale: clamp01(Map.get(cfg, :fallback_scale, 0.70)),
       source_boosts: Map.get(cfg, :source_boosts, %{}),
       prefer_sources:
         Map.get(
@@ -143,6 +167,7 @@ defmodule Brain.BasalGanglia do
           :prefer_sources,
           Map.get(cfg, :preferred_sources, [
             :hippocampus,
+            :curiosity,
             :pmtg,
             :lifg,
             :runtime,
@@ -159,7 +184,8 @@ defmodule Brain.BasalGanglia do
       boost_threshold_pref:
         clamp01(Map.get(cfg, :boost_threshold_pref, max(thr_base - 0.05, 0.0))),
       block_threshold: clamp01(Map.get(cfg, :block_threshold, 0.20)),
-      block_threshold_disprefer: clamp01(Map.get(cfg, :block_threshold_disprefer, 0.25))
+      block_threshold_disprefer: clamp01(Map.get(cfg, :block_threshold_disprefer, 0.25)),
+      semantic_boost: clamp01(Map.get(cfg, :semantic_boost, 0.0))
     }
   end
 
@@ -243,6 +269,39 @@ defmodule Brain.BasalGanglia do
   end
 
   defp parse_id_word(_), do: nil
+
+  defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
+  defp fallback_id?(_), do: false
+
+  defp evidence_floor_for(cand, cfg) do
+    case source_key(Map.get(cand, :source)) do
+      "lifg" -> cfg.lifg_min_score
+      _ -> cfg.evidence_floor
+    end
+  end
+
+  defp source_bonus(boosts, source) when is_map(boosts) do
+    source_key = source_key(source)
+
+    Enum.find_value(boosts, 0.0, fn {key, value} ->
+      if source_key(key) == source_key, do: to_float(value), else: nil
+    end)
+  end
+
+  defp source_bonus(_boosts, _source), do: 0.0
+
+  defp safe_sem_bias(cand) do
+    bias =
+      Map.get(cand, :semantic_bias) ||
+        Map.get(cand, :sem_bias) ||
+        get_in(cand, [:features, :semantic_bias]) ||
+        get_in(cand, [:features, :sem_bias])
+
+    case bias do
+      value when is_number(value) -> clamp01(value)
+      _ -> 0.0
+    end
+  end
 
   defp down(nil), do: nil
   defp down(b) when is_binary(b), do: String.downcase(b)

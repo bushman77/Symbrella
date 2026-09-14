@@ -80,38 +80,10 @@ defmodule Brain do
   # Telemetry constants
   @wm_update_event [:brain, :wm, :update]
 
-  @wm_defaults %{
-    capacity: 7,
-    decay_ms: 30_000,
-    gate_threshold: 0.4,
-    merge_duplicates?: true,
-    # Optional knobs (policy defaults preserve prior behavior):
-    lemma_budget: 2,
-    replace_margin: 0.10,
-    diversity_lambda: 0.06,
-    allow_unk?: true,
-    allow_seed?: true,
-    fallback_scale: 0.70,
-    # P-206: fallbacks must meet the normal threshold unless explicitly allowed
-    allow_fallback_into_wm?: false
-  }
-
   @type id :: any()
   @type wm_item :: map()
 
-  @type wm_cfg :: %{
-          capacity: pos_integer(),
-          decay_ms: pos_integer(),
-          gate_threshold: number(),
-          merge_duplicates?: boolean(),
-          lemma_budget: pos_integer(),
-          replace_margin: number(),
-          diversity_lambda: number(),
-          allow_unk?: boolean(),
-          allow_seed?: boolean(),
-          fallback_scale: number(),
-          allow_fallback_into_wm?: boolean()
-        }
+  @type wm_cfg :: map()
 
   @type state :: %{
           history: list(),
@@ -152,7 +124,7 @@ defmodule Brain do
   Configure working-memory policy knobs.
 
   This updates the in-server WM configuration. Any missing config keys are filled
-  from module defaults. WM is also trimmed to the new capacity immediately.
+  from `Brain.Config.wm/1`. WM is also trimmed to the new capacity immediately.
 
   Common options:
 
@@ -160,7 +132,7 @@ defmodule Brain do
   * `:decay_ms` (pos_integer) — policy half-life / decay control (implementation-dependent)
   * `:gate_threshold` (0.0..1.0) — minimum score to admit items into WM
   * `:merge_duplicates?` (boolean) — whether duplicates should merge
-  * and additional policy knobs present in `@wm_defaults`
+  * and additional policy knobs present in `Brain.Config.wm/0`
 
   Returns `:ok`.
 
@@ -507,7 +479,7 @@ defmodule Brain do
        active_cells: %{},
        attention: %{},
        wm: [],
-       wm_cfg: @wm_defaults,
+       wm_cfg: BrainConfig.wm(),
        activation_log: [],
        wm_last_ms: nil,
        last_intent: nil,
@@ -521,8 +493,6 @@ defmodule Brain do
   def handle_call({:configure_wm, opts}, _from, state) do
     cfg2 =
       state.wm_cfg
-      # guarantee missing keys are filled
-      |> Map.merge(@wm_defaults)
       |> merge_wm_opts(Map.new(opts))
 
     wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
@@ -642,30 +612,26 @@ defmodule Brain do
 
   @impl true
   def handle_cast({:gate_from_lifg, si, opts}, state) do
-    now_ms = System.system_time(:millisecond)
-
     with {:ok, %{si: _si2, event: stage2_event}} <-
            Brain.LIFG.Stage2.run(si, opts) do
       decisions = Map.get(stage2_event, :decisions, [])
 
-      wm2 =
-        Brain.WorkingMemory.ingest_stage2(
-          state.wm,
+      {wm2, added, removed} =
+        WMFocus.run(
+          state,
           decisions,
-          now_ms,
-          state.wm_cfg
+          opts
+          |> Map.new()
+          |> Map.put_new(:source, :lifg)
         )
 
-      state2 =
-        state
-        |> Map.put(:wm, wm2)
-        |> Brain.decay_and_evict(now_ms)
+      state2 = %{state | wm: wm2}
 
       emit_wm_update(
         state.wm_cfg.capacity,
         length(state2.wm),
-        count_added(state.wm, state2.wm),
-        count_removed(state.wm, state2.wm),
+        added,
+        removed,
         :lifg_stage2
       )
 
@@ -684,9 +650,6 @@ defmodule Brain do
   end
 
   # ───────────────────────── Public helper: recall → WM ───────────────────────
-
-  defp count_added(before, aftr), do: max(length(aftr) - length(before), 0)
-  defp count_removed(before, aftr), do: max(length(before) - length(aftr), 0)
 
   @doc ~S"""
   Return the last intent payload stored in the Brain server, if any.
@@ -871,14 +834,6 @@ defmodule Brain do
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
 
-  # Small normalizers for WM config
-  defp norm_pos_int(n, _d) when is_integer(n) and n > 0, do: n
-  defp norm_pos_int(_, d), do: d
-  defp norm_float_01(x, _d) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
-  defp norm_float_01(_, d), do: d
-  defp norm_float_01_or(x, _d) when is_number(x) and x >= 0 and x <= 1, do: x * 1.0
-  defp norm_float_01_or(_, d), do: d
-
   defp extract_items(list) when is_list(list), do: list
   defp extract_items(%Row{} = row), do: [row]
 
@@ -899,29 +854,9 @@ defmodule Brain do
   # ───────────────────────── Internal: WM cfg merge ───────────────────────────
 
   defp merge_wm_opts(cfg, opts) when is_map(cfg) and is_map(opts) do
-    %{
-      cfg
-      | capacity: norm_pos_int(Map.get(opts, :capacity, cfg.capacity), cfg.capacity),
-        decay_ms: norm_pos_int(Map.get(opts, :decay_ms, cfg.decay_ms), cfg.decay_ms),
-        gate_threshold:
-          norm_float_01(Map.get(opts, :gate_threshold, cfg.gate_threshold), cfg.gate_threshold),
-        merge_duplicates?: Map.get(opts, :merge_duplicates?, cfg.merge_duplicates?),
-        lemma_budget:
-          norm_pos_int(Map.get(opts, :lemma_budget, cfg.lemma_budget), cfg.lemma_budget),
-        replace_margin:
-          norm_float_01_or(Map.get(opts, :replace_margin, cfg.replace_margin), cfg.replace_margin),
-        diversity_lambda:
-          norm_float_01_or(
-            Map.get(opts, :diversity_lambda, cfg.diversity_lambda),
-            cfg.diversity_lambda
-          ),
-        allow_unk?: Map.get(opts, :allow_unk?, cfg.allow_unk?),
-        allow_seed?: Map.get(opts, :allow_seed?, cfg.allow_seed?),
-        fallback_scale:
-          norm_float_01_or(Map.get(opts, :fallback_scale, cfg.fallback_scale), cfg.fallback_scale),
-        allow_fallback_into_wm?:
-          Map.get(opts, :allow_fallback_into_wm?, cfg.allow_fallback_into_wm?)
-    }
+    cfg
+    |> Map.merge(opts)
+    |> BrainConfig.wm()
   end
 
   # ───────────────────────── Control signal emission ─────────────────────────

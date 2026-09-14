@@ -111,7 +111,7 @@ defmodule Brain.WMGatingFromLIFGTest do
     assert id0 == "Hello there|phrase|greeting"
 
     # Telemetry: at least 1 gate decision and a WM update with added > 0
-    assert_receive {:gate, %{score: s1}, %{decision: dec1, source: :lifg}}
+    assert_receive {:gate, %{score: s1}, %{decision: dec1, source: :lifg, gate: :basal_ganglia}}
                    when is_number(s1) and dec1 in [:allow, :boost]
 
     assert_receive {:wm, %{added: added, size: size}, %{reason: :gate_from_lifg}}
@@ -191,7 +191,13 @@ defmodule Brain.WMGatingFromLIFGTest do
                    when is_number(added) and added >= 1 and is_number(size) and size >= added
 
     # Gate decision event should reflect the admitted commit(s)
-    assert_receive {:gate, %{score: s}, %{id: "hello|interjection|2", decision: d, source: :lifg}}
+    assert_receive {:gate, %{score: s},
+                    %{
+                      id: "hello|interjection|2",
+                      decision: d,
+                      source: :lifg,
+                      gate: :basal_ganglia
+                    }}
                    when is_number(s) and d in [:allow, :boost]
 
     %{wm: wm} = Brain.snapshot_wm()
@@ -199,6 +205,7 @@ defmodule Brain.WMGatingFromLIFGTest do
 
     assert "hello|interjection|2" in ids_in_wm
     refute "Hello there|phrase|fallback" in ids_in_wm
+    assert Enum.count(wm, &(&1.id == "hello|interjection|2" and &1.source == :lifg)) == 1
   end
 
   # ───────────────────────── Helpers ─────────────────────────

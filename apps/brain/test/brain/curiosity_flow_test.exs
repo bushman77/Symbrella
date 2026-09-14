@@ -4,6 +4,11 @@ defmodule Brain.CuriosityFlowTest do
 
   @moduletag :curiosity_flow
 
+  def handle_gate(_event, meas, meta, pid) when is_pid(pid) do
+    send(pid, {:gate, meas, meta})
+    :ok
+  end
+
   setup_all do
     # These singleton regions are owned by the umbrella-root supervisor.
     # Tests should assert their presence, not attempt to start local copies.
@@ -24,6 +29,10 @@ defmodule Brain.CuriosityFlowTest do
 
     # Make sure DLPFC actually acts on Thalamus decisions for this flow test.
     :ok = Brain.DLPFC.set_opts(act_on_thalamus: true)
+
+    id = "curiosity-flow-gate-#{System.unique_integer([:positive])}"
+    :ok = :telemetry.attach(id, [:brain, :gate, :decision], &__MODULE__.handle_gate/4, self())
+    on_exit(fn -> :telemetry.detach(id) end)
 
     :ok
   end
@@ -51,6 +60,11 @@ defmodule Brain.CuriosityFlowTest do
     # Optional: double-check after the wait for better failure messages
     %{wm: wm_final} = Brain.snapshot_wm()
     assert has_curiosity?(wm_final) or initial_has_curiosity?
+
+    assert_receive {:gate, _meas, %{gate: :basal_ganglia, source: :curiosity, decision: decision}}
+
+    assert decision in [:allow, :boost]
+    refute_receive {:gate, _meas, %{source: :curiosity}}, 100
   end
 
   # ───────────── helpers ─────────────

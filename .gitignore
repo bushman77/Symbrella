@@ -63,4 +63,9 @@ apps/db/priv/kaikki.org-dictionary-English.jsonl
 # Massive Kaikki/Wiktextract dump (generated/local-only)
 apps/db/priv/english.jsonl
 apps/db/priv/english.7z
+# Kaikki / Wiktextract local corpus
+/apps/db/priv/raw-wiktextract-data.jsonl.gz
+/apps/db/priv/raw-wiktextract-data.jsonl.gz.part
+/apps/db/priv/english.jsonl
+/apps/db/priv/english.jsonl.tmp
 .aider*

@@ -23,7 +23,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
 
   alias Brain.LIFG.{Post, Stage1}
   alias Brain.Utils.Safe
-  alias Brain.WM.Gate, as: WMGate
 
   # -------------------------------------------------------------------
   # Public API (non-GenServer callers)
@@ -241,18 +240,18 @@ defmodule Brain.Pipeline.LIFGStage1 do
     wm_before = Map.get(state, :wm, [])
     capacity = get_in(state, [:wm_cfg, :capacity]) || length(wm_before)
 
-    state2 =
-      WMGate.ingest_from_si(state, si,
-        allow_fallback?: allow_fb?,
-        allow_phrase_fallback?: allow_fb?,
-        min_score: min_score,
-        gate_event: [:brain, :gate, :decision]
-      )
+    candidates = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
 
-    wm_after = Map.get(state2, :wm, [])
+    admission_opts =
+      lifg_opts
+      |> Keyword.put(:source, :lifg)
+      |> Keyword.put(:lifg_min_score, min_score)
+      |> Keyword.put(:allow_fallback_into_wm?, allow_fb?)
 
-    added = wm_added_count(wm_before, wm_after)
-    removed = wm_removed_count(wm_before, wm_after)
+    {wm_after, added, removed} =
+      Brain.__pipeline_do_focus__(state, candidates, admission_opts)
+
+    state2 = Map.put(state, :wm, wm_after)
 
     Brain.__pipeline_emit_wm_update__(
       capacity,
@@ -268,38 +267,6 @@ defmodule Brain.Pipeline.LIFGStage1 do
   end
 
   defp ingest_wm(state, _si, _lifg_opts), do: state
-
-  defp wm_added_count(before_wm, after_wm)
-       when is_list(before_wm) and is_list(after_wm) do
-    before_ids =
-      before_wm
-      |> Enum.map(fn item -> {Map.get(item, :id), Map.get(item, :source)} end)
-      |> MapSet.new()
-
-    after_wm
-    |> Enum.reject(fn item ->
-      MapSet.member?(before_ids, {Map.get(item, :id), Map.get(item, :source)})
-    end)
-    |> length()
-  end
-
-  defp wm_added_count(_, _), do: 0
-
-  defp wm_removed_count(before_wm, after_wm)
-       when is_list(before_wm) and is_list(after_wm) do
-    after_ids =
-      after_wm
-      |> Enum.map(fn item -> {Map.get(item, :id), Map.get(item, :source)} end)
-      |> MapSet.new()
-
-    before_wm
-    |> Enum.reject(fn item ->
-      MapSet.member?(after_ids, {Map.get(item, :id), Map.get(item, :source)})
-    end)
-    |> length()
-  end
-
-  defp wm_removed_count(_, _), do: 0
 
   defp ensure_si_has_lifg_choices(%{} = out) do
     si = Map.get(out, :si, %{}) |> Safe.to_plain()

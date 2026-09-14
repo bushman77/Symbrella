@@ -57,19 +57,42 @@ defmodule Symbrella.Umbrella.MixProject do
       {:"cache.nuke", [&__MODULE__.clean_negcache/1]},
 
       # DB lifecycle (Repo = Db) + negcache wipe
-      {:"db.setup", ["ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
+      {:"db.setup",
+       [
+         "ecto.create -r Db",
+         "ecto.migrate -r Db",
+         "negcache.clean"
+       ]},
       {:"db.reset",
-       ["ecto.drop -r Db", "ecto.create -r Db", "ecto.migrate -r Db", "negcache.clean"]},
+       [
+         "ecto.drop -r Db",
+         "ecto.create -r Db",
+         "ecto.migrate -r Db",
+         "negcache.clean"
+       ]},
+
+      # Complete DB + BrainCell dictionary rebuild
+      {:"db.rebuild",
+       [
+         "db.reset",
+         "run --no-start apps/db/priv/scripts/bootstrap_english_jsonl.exs -- --no-migrate"
+       ]},
       {:"db.migrate", ["ecto.migrate -r Db"]},
       {:"db.rollback", ["ecto.rollback -r Db"]},
       {:"db.migrations", ["ecto.migrations -r Db"]},
 
-      # convenience alias without a dot in the name
+      # convenience aliases
       {:dbreset, ["db.reset"]},
+      {:dbrebuild, ["db.rebuild"]},
 
       # assets
       {:"assets.build", ["tailwind default", "esbuild default"]},
-      {:"assets.deploy", ["tailwind default --minify", "esbuild default --minify", "phx.digest"]},
+      {:"assets.deploy",
+       [
+         "tailwind default --minify",
+         "esbuild default --minify",
+         "phx.digest"
+       ]},
 
       # tests — keep cache clean so negatives don't bleed between runs
       {:test,

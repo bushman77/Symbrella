@@ -1,22 +1,22 @@
 defmodule Brain.LIFG.Stage2 do
   @moduledoc """
-  LIFG.Stage2 — gating decisions for WM.
+  LIFG.Stage2 — linguistic evidence for WM admission.
 
   Consumes the latest Stage1 event in `si.trace` and emits `:decisions`
-  suitable for `Brain.WorkingMemory.ingest_stage2/4`.
+  suitable for canonical admission by `Brain.WM.Admission`.
 
-  Decision encoding:
+  Evidence encoding:
     * `{:commit, %{id, token_index, score, decision, source, ...}}`
 
-  Telemetry (kept compatible with tests + legacy listeners):
-    * `[:brain, :gate, :decision]` — (TEST EXPECTATION)
-    * `[:brain, :wm, :gate]`       — (legacy/compat)
+  Telemetry:
+    * `[:brain, :lifg, :stage2, :evidence]`
+    * `[:brain, :wm, :gate]` — legacy/compat, marked as non-final evidence
 
   Measurements: `%{score: float}`
-  Metadata: `%{decision: :allow | :boost, source: :lifg, id: ..., token_index: ...}`
+  Metadata includes `%{stage2_decision, source, id, token_index, final_admission?: false}`.
   """
 
-  @gate_event_test [:brain, :gate, :decision]
+  @evidence_event [:brain, :lifg, :stage2, :evidence]
   @gate_event_compat [:brain, :wm, :gate]
 
   @spec run(map() | struct(), keyword()) ::
@@ -134,7 +134,7 @@ defmodule Brain.LIFG.Stage2 do
             payload: %{stage: :lifg_stage2, from: :lifg_stage1}
           }
 
-          emit_gate(score, decision, chosen_id, ti)
+          emit_evidence(score, decision, chosen_id, ti)
           {[{:commit, commit} | acc], n + 1}
         else
           {acc, n}
@@ -159,11 +159,20 @@ defmodule Brain.LIFG.Stage2 do
   # Telemetry
   # ───────────────────────────────────────────────────────────────────────────
 
-  defp emit_gate(score, decision, id, token_index) do
+  defp emit_evidence(score, decision, id, token_index) do
     meas = %{score: score}
-    meta = %{decision: decision, source: :lifg, id: id, token_index: token_index}
 
-    :telemetry.execute(@gate_event_test, meas, meta)
+    meta = %{
+      stage2_decision: decision,
+      decision: decision,
+      source: :lifg,
+      id: id,
+      token_index: token_index,
+      gate: :lifg_stage2_evidence,
+      final_admission?: false
+    }
+
+    :telemetry.execute(@evidence_event, meas, meta)
     :telemetry.execute(@gate_event_compat, meas, meta)
   end
 

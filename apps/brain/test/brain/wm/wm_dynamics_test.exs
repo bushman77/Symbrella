@@ -10,6 +10,7 @@ defmodule BrainWMDynamicsTest do
       capacity: cap,
       decay_ms: 8_000,
       gate_threshold: 0.0,
+      lifg_min_score: 0.0,
       fallback_scale: 0.5,
       lemma_budget: 16,
       replace_margin: 0.05,

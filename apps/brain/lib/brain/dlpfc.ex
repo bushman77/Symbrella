@@ -10,7 +10,7 @@ defmodule Brain.DLPFC do
 
   Phase B (after we patch Thalamus to stop launching):
   • Toggle `:act_on_thalamus` to true to have DLPFC call `Brain.focus/2`
-    with a curiosity-labelled probe on `:allow | :boost`.
+    with a curiosity-labelled probe on thalamic `:propose` evidence.
 
   Notes:
   - First-class region via `use Brain, region: :dlpfc`.
@@ -227,7 +227,7 @@ defmodule Brain.DLPFC do
 
     state2 =
       case {act?, decision, has_probe} do
-        {true, d, true} when d in [:allow, "allow", :boost, "boost"] ->
+        {true, d, true} when d in [:propose, "propose", :allow, "allow", :boost, "boost"] ->
           _ = Brain.focus([probe], [])
           %{state | last_probe: probe}
 
