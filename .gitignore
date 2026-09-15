@@ -69,3 +69,4 @@ apps/db/priv/english.7z
 /apps/db/priv/english.jsonl
 /apps/db/priv/english.jsonl.tmp
 .aider*
+output.txt
