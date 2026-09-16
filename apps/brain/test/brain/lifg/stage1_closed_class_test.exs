@@ -55,6 +55,119 @@ defmodule Brain.LIFG.Stage1ClosedClassTest do
     assert by_index[3].chosen_id == "any|determiner|0"
   end
 
+  test "synthesizes configured self-name candidate after punctuation normalization" do
+    old_names = Application.get_env(:brain, :self_names)
+    Application.put_env(:brain, :self_names, ["symbrella"])
+
+    on_exit(fn ->
+      if is_nil(old_names),
+        do: Application.delete_env(:brain, :self_names),
+        else: Application.put_env(:brain, :self_names, old_names)
+    end)
+
+    sentence = "Hello Symbrella, how are you?"
+
+    si = %{
+      sentence: sentence,
+      tokens: tokens_for(sentence, ["Hello", "Symbrella,", "how", "are", "you?"]),
+      sense_candidates: %{}
+    }
+
+    assert {:ok, %{choices: choices, audit: audit}} = Stage1.run(si, scores: :all)
+    by_index = Map.new(choices, &{&1.token_index, &1})
+
+    assert by_index[1].chosen_id == "symbrella|proper_noun|self"
+    assert audit.missing_candidates == 0
+  end
+
+  test "does not compete with existing assistant identity candidate" do
+    old_names = Application.get_env(:brain, :self_names)
+    Application.put_env(:brain, :self_names, ["symbrella"])
+
+    on_exit(fn ->
+      if is_nil(old_names),
+        do: Application.delete_env(:brain, :self_names),
+        else: Application.put_env(:brain, :self_names, old_names)
+    end)
+
+    sentence = "Hello Symbrella"
+
+    si = %{
+      sentence: sentence,
+      tokens: tokens_for(sentence, ["Hello", "Symbrella"]),
+      sense_candidates: %{
+        1 => [
+          %{
+            id: "symbrella|assistant|0",
+            lemma: "symbrella",
+            norm: "symbrella",
+            pos: "assistant",
+            from: :assistant_identity,
+            score: 0.95
+          }
+        ]
+      }
+    }
+
+    assert {:ok, %{si: si_after, choices: choices}} = Stage1.run(si, scores: :all)
+    assistant_bucket = get_in(si_after, [:sense_candidates, 1])
+
+    assert [%{id: "symbrella|assistant|0"}] = assistant_bucket
+    refute Enum.any?(assistant_bucket, &(Map.get(&1, :id) == "symbrella|proper_noun|self"))
+    assert %{1 => %{chosen_id: "symbrella|assistant|0"}} = Map.new(choices, &{&1.token_index, &1})
+  end
+
+  test "uses greeting-chain and fine-day context to avoid weak POS winners" do
+    sentence = "Hello Symbrella, how are you doing on this fine day"
+    words = ["Hello", "Symbrella,", "how", "are", "you", "doing", "on", "this", "fine", "day"]
+
+    si = %{
+      sentence: sentence,
+      tokens: tokens_for(sentence, words),
+      sense_candidates: %{
+        2 => [
+          %{id: "how|noun|1", pos: "noun", norm: "how", activation: 0.9},
+          %{id: "how|adverb|1", pos: "adverb", norm: "how", activation: 0.9}
+        ],
+        3 => [
+          %{id: "are|noun|1", pos: "noun", norm: "are", activation: 0.9},
+          %{id: "are|auxiliary|0", pos: "auxiliary", norm: "are", activation: 0.9}
+        ],
+        4 => [
+          %{id: "you|verb|1", pos: "verb", norm: "you", activation: 0.9},
+          %{id: "you|pronoun|1", pos: "pronoun", norm: "you", activation: 0.9}
+        ],
+        5 => [
+          %{id: "doing|noun|1", pos: "noun", norm: "doing", activation: 0.9},
+          %{id: "doing|verb|1", pos: "verb", norm: "doing", activation: 0.9}
+        ],
+        7 => [
+          %{id: "this|pronoun|1", pos: "pronoun", norm: "this", activation: 0.9},
+          %{id: "this|determiner|1", pos: "determiner", norm: "this", activation: 0.9}
+        ],
+        8 => [
+          %{id: "fine|verb|5", pos: "verb", norm: "fine", activation: 0.9},
+          %{id: "fine|adjective|1", pos: "adjective", norm: "fine", activation: 0.9}
+        ],
+        9 => [
+          %{id: "day|verb|1", pos: "verb", norm: "day", activation: 0.9},
+          %{id: "day|noun|1", pos: "noun", norm: "day", activation: 0.9}
+        ]
+      }
+    }
+
+    assert {:ok, %{choices: choices}} = Stage1.run(si, scores: :all)
+    by_index = Map.new(choices, &{&1.token_index, &1})
+
+    assert by_index[2].chosen_id == "how|adverb|1"
+    assert by_index[3].chosen_id == "are|auxiliary|0"
+    assert by_index[4].chosen_id == "you|pronoun|1"
+    assert by_index[5].chosen_id == "doing|verb|1"
+    assert by_index[7].chosen_id == "this|determiner|1"
+    assert by_index[8].chosen_id == "fine|adjective|1"
+    assert by_index[9].chosen_id == "day|noun|1"
+  end
+
   test "upgrades an existing pronoun candidate so you does not resolve to the rare verb sense" do
     si = %{
       sentence: "you",
@@ -76,6 +189,21 @@ defmodule Brain.LIFG.Stage1ClosedClassTest do
     assert Map.has_key?(choice.scores, "you|verb|0")
     assert choice.scores["you|pronoun|0"] > choice.scores["you|verb|0"]
     assert choice.scores["you|pronoun|0"] > choice.scores["you|noun|0"]
+  end
+
+  defp tokens_for(sentence, words) do
+    {tokens, _offset} =
+      words
+      |> Enum.with_index()
+      |> Enum.map_reduce(0, fn {word, index}, offset ->
+        start = :binary.match(sentence, word, scope: {offset, byte_size(sentence) - offset})
+        {start_idx, len} = start
+        stop = start_idx + len
+
+        {%{index: index, phrase: word, n: 1, mw: false, span: {start_idx, stop}}, stop}
+      end)
+
+    tokens
   end
 
   test "prefers conversational function senses for first-person health disclosure tokens" do

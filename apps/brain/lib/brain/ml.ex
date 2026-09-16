@@ -356,7 +356,7 @@ defmodule Brain.ML do
       cond do
         is_map(pending) and not too_old?(pending.opened_at_ms, now_ms, state.pending_max_age_ms) ->
           {pending.id, pending.opened_at_ms, pending.intent || state.last_intent,
-           pending.text || event_text ||
+           event_text || pending.text ||
              Core.text_from(state.last_intent, state.last_blackboard)}
 
         is_map(recent_turn) ->

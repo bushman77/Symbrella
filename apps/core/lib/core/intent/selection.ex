@@ -359,6 +359,8 @@ defmodule Core.Intent.Selection do
         source: :core,
         text: text
       }
+      |> maybe_payload(:sentence, Map.get(si, :sentence))
+      |> maybe_fuzzy_payload(Map.get(si, :fuzzy_text))
       |> maybe_payload(:opener_intent, Map.get(si, :opener_intent))
       |> maybe_payload(:opener_text, Map.get(si, :opener_text))
       |> maybe_payload(:primary_text, Map.get(si, :primary_text))
@@ -399,6 +401,19 @@ defmodule Core.Intent.Selection do
 
   defp maybe_payload(payload, _key, nil), do: payload
   defp maybe_payload(payload, key, value), do: Map.put(payload, key, value)
+
+  defp maybe_fuzzy_payload(payload, %{corrections: corrections, aliases: aliases} = fuzzy)
+       when corrections != [] or aliases != [] do
+    payload
+    |> maybe_payload(:fuzzy_original, Map.get(fuzzy, :original))
+    |> maybe_payload(:fuzzy_normalized, Map.get(fuzzy, :normalized))
+    |> maybe_payload(:fuzzy_text, Map.get(fuzzy, :text))
+    |> maybe_payload(:fuzzy_confidence, Map.get(fuzzy, :confidence))
+    |> maybe_payload(:fuzzy_corrections, corrections)
+    |> maybe_payload(:fuzzy_aliases, aliases)
+  end
+
+  defp maybe_fuzzy_payload(payload, _fuzzy), do: payload
 
   # ─────────────────────── ML quick-win kick ───────────────────────
 

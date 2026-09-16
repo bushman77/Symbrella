@@ -81,6 +81,7 @@ defmodule Symbrella.Application do
 
     # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
     :ok = Core.Curiosity.Bridge.attach()
+    :ok = Core.Agency.AutonomyLoop.attach()
 
     _ =
       Brain.SelfContinuity.warm_start(

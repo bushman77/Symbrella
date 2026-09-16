@@ -178,14 +178,17 @@ defmodule Brain.Curiosity do
     source = get_opt(opts, :source, :curiosity)
     reason = get_opt(opts, :reason, :curiosity)
     seed = get_opt(opts, :seed, nil)
+    trace_id = get_opt(opts, :trace_id, nil)
 
-    probe = %{
-      id: id,
-      source: source,
-      reason: reason,
-      seed: seed,
-      score: base
-    }
+    probe =
+      %{
+        id: id,
+        source: source,
+        reason: reason,
+        seed: seed,
+        score: base
+      }
+      |> maybe_put_trace_id(trace_id)
 
     {probe, base, self_state}
   end
@@ -256,6 +259,11 @@ defmodule Brain.Curiosity do
       "#{id}|probe|#{seq}"
     end
   end
+
+  defp maybe_put_trace_id(probe, trace_id) when is_binary(trace_id),
+    do: Map.put(probe, :trace_id, trace_id)
+
+  defp maybe_put_trace_id(probe, _trace_id), do: probe
 
   defp bump_seq(state), do: Map.update(state, :seq, 1, &(&1 + 1))
 

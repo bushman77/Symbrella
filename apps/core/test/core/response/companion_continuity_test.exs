@@ -3,6 +3,43 @@ defmodule Core.Response.CompanionContinuityTest do
 
   alias Core.Response
 
+  test "symbrella definition questions use a grounded deterministic answer" do
+    si = %{
+      intent: :question,
+      confidence: 0.78,
+      text: "plus what is symbrella"
+    }
+
+    {tone, text, meta} = Response.plan(si, %{})
+
+    assert tone == :warm
+    assert meta.mode == :chat
+    assert meta.action == :answer
+    assert meta.response_source == :inline_skill
+    assert meta.chosen_skill == :symbrella_definition
+    assert :symbrella_definition_answer in meta.overrides
+    assert text =~ "local Phoenix umbrella app"
+    assert text =~ "semantic parsing, working memory, mood/control signals"
+    assert text =~ "not a generic task manager"
+    refute text =~ "helps you manage your tasks"
+    refute text =~ "learns from your interactions"
+    refute text =~ "How can I assist you"
+  end
+
+  test "symbrella module questions do not get flattened into the product definition" do
+    si = %{
+      intent: :question,
+      confidence: 0.78,
+      text: "what is Symbrella.Application"
+    }
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    refute meta.chosen_skill == :symbrella_definition
+    assert meta.response_source == :model_unavailable
+    assert text =~ "No fallback response was generated."
+  end
+
   test "personal housing update stays conversational instead of comprehension fallback" do
     si = %{
       intent: :unknown,

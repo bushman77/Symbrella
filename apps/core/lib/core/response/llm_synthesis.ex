@@ -24,7 +24,7 @@ defmodule Core.Response.LlmSynthesis do
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
 
-  @timeout_ms 15_000
+  @chat_opts [timeout: :infinity]
 
   # Toggle prompt logging (dev-only recommended):
   #   config :core, :log_llm_prompts?, true
@@ -76,7 +76,7 @@ defmodule Core.Response.LlmSynthesis do
       log_prompt_bundle(messages, context)
     end
 
-    case llm_client().chat(messages, timeout: @timeout_ms) do
+    case llm_client().chat(messages, @chat_opts) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
         draft = sanitize_model_text(content)
         {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
@@ -94,16 +94,63 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp build_prompt(context, prompt_type)
-       when prompt_type in [:mood_indices, :self_state_feeling, :self_portrait, :runtime_self_check],
+       when prompt_type in [
+              :mood_indices,
+              :self_state_feeling,
+              :self_portrait,
+              :runtime_self_check
+            ],
        do: LlmPrompt.self_state_prompt(context)
 
   defp build_prompt(context, _), do: LlmPrompt.build_system_prompt(context)
 
   defp sanitize_model_text(text) when is_binary(text) do
     text
-    |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> normalize_model_control_tokens()
+    |> strip_leading_assistant_marker()
+    |> truncate_generated_role_continuation()
     |> String.replace(~r/\n*\s*\((?:note|explanation):\s*.*\)\s*$/ius, "")
     |> String.trim()
+  end
+
+  defp normalize_model_control_tokens(text) do
+    text
+    |> String.replace(~r/<\|im_start\|>/u, "\n")
+    |> String.replace(~r/<\|(?:im_end|eot_id|endoftext|end_of_text)\|>/u, "\n")
+  end
+
+  defp strip_leading_assistant_marker(text) do
+    text
+    |> String.replace(~r/\A[ \t]*assistant[ \t]*:[ \t]*/iu, "")
+    |> String.replace(~r/\A[ \t]*assistant[ \t]*(?:\r?\n)+/iu, "")
+  end
+
+  defp truncate_generated_role_continuation(text) do
+    lines = String.split(text, ~r/\r?\n/u, trim: false)
+
+    {kept, _seen_content?} =
+      Enum.reduce_while(lines, {[], false}, fn line, {acc, seen_content?} ->
+        trimmed = String.trim(line)
+
+        cond do
+          seen_content? and generated_role_header?(trimmed) ->
+            {:halt, {acc, seen_content?}}
+
+          true ->
+            {:cont, {[line | acc], seen_content? or trimmed != ""}}
+        end
+      end)
+
+    kept
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  defp generated_role_header?(""), do: false
+
+  defp generated_role_header?(line) when is_binary(line) do
+    Regex.match?(~r/^(?:user|assistant|system)\s*$/iu, line) or
+      Regex.match?(~r/^(?:user|assistant|system)\s*:/iu, line)
   end
 
   defp prompt_context(user_text, features, decision, mood) do

@@ -306,7 +306,8 @@ defmodule Brain.Hippocampus do
 
   @impl true
   def handle_call({:fact, key}, _from, state) do
-    {:reply, find_fact_in_window(state.window, key), state}
+    value = find_fact_in_window(state.window, key) || find_fact_in_db(key)
+    {:reply, value, state}
   end
 
   defp find_fact_in_window(window, key) when is_list(window) do
@@ -318,17 +319,56 @@ defmodule Brain.Hippocampus do
 
   defp find_fact_in_window(_window, _key), do: nil
 
+  defp find_fact_in_db(key) when is_atom(key) or is_binary(key) do
+    if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :recent, 1) do
+      Db.Episode.recent(@boot_warm_limit)
+      |> Enum.find_value(fn row ->
+        row
+        |> db_row_to_episode()
+        |> fact_from_episode(key)
+      end)
+    end
+  end
+
+  defp find_fact_in_db(_key), do: nil
+
+  defp fact_from_episode(ep, key) do
+    if fact_episode?(ep, key), do: fact_value(ep), else: nil
+  end
+
   defp fact_episode?(%{meta: meta, slate: slate}, key) do
     tags = List.wrap(meta[:tags] || meta["tags"] || slate[:tags] || slate["tags"] || [])
 
-    fact_key?(meta, key) or fact_key?(slate, key) or fact_key_from_si?(slate, key) or
-      Enum.any?(tags, fn t ->
-        s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
-        normalize_fact_key(s) == normalize_fact_key(key)
-      end)
+    not self_fact_episode?(meta, slate, tags) and
+      (fact_key?(meta, key) or fact_key?(slate, key) or fact_key_from_si?(slate, key) or
+         Enum.any?(tags, fn t ->
+           s = if is_atom(t), do: Atom.to_string(t), else: to_string(t)
+           normalize_fact_key(s) == normalize_fact_key(key)
+         end))
   end
 
   defp fact_episode?(_ep, _key), do: false
+
+  defp self_fact_episode?(meta, slate, tags) do
+    subject = meta[:subject] || meta["subject"] || slate[:subject] || slate["subject"]
+
+    truthy_meta?(meta, :self?) or truthy_meta?(meta, :autobiographical?) or
+      truthy_meta?(slate, :self?) or truthy_meta?(slate, :autobiographical?) or
+      normalize_subject(subject) == "symbrella" or
+      Enum.any?(tags, fn tag ->
+        tag = tag |> to_string() |> String.downcase()
+        tag in ["self", "self_memory", "autobiographical"]
+      end)
+  end
+
+  defp normalize_subject(nil), do: nil
+
+  defp normalize_subject(subject) do
+    subject
+    |> to_string()
+    |> String.downcase()
+    |> String.trim()
+  end
 
   defp fact_value(%{meta: meta} = ep) do
     meta[:value] || meta["value"] || fact_value_from_si(ep)

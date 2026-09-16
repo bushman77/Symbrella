@@ -115,7 +115,7 @@ defmodule Core.Response do
             command?: command?,
             risk_bucket: risk_bucket,
             guard: guard,
-            extracted_name: extracted_name,
+            extracted_name: user_name_candidate(extracted_name),
             evidence: Map.get(si, :evidence),
             comprehension: Map.get(si, :comprehension),
             prefrontal: Map.get(si, :prefrontal),
@@ -197,7 +197,7 @@ defmodule Core.Response do
             skill: skill,
             guard: guard,
             session_id: session_id,
-            extracted_name: extracted_name,
+            extracted_name: user_name_candidate(extracted_name),
             planner_explanation: planner_explanation,
             comprehension: Map.get(features, :comprehension),
             prefrontal: Map.get(features, :prefrontal),
@@ -318,7 +318,7 @@ defmodule Core.Response do
       approve_token?: guard.approve_token?,
       risk_bucket: risk_bucket,
       guardrail_flags: guard.flags,
-      user_name: extracted_name,
+      user_name: user_name_candidate(extracted_name),
       evidence: evidence,
       comprehension: comprehension,
       prefrontal: prefrontal,
@@ -353,6 +353,11 @@ defmodule Core.Response do
   defp name_claim?(name, text_in) do
     is_binary(name) and name != "" and not Memory.asking_for_user_name?(text_in)
   end
+
+  defp user_name_candidate(name) when is_binary(name) and name != "",
+    do: SideEffects.recalled_user_name(name)
+
+  defp user_name_candidate(_), do: nil
 
   defp maybe_persist_user_name(true, name, text_in),
     do: SideEffects.persist_user_name(name, text_in)

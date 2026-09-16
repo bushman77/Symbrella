@@ -77,7 +77,7 @@ defmodule Core.Response.SideEffects do
 
   @spec persist_user_name(String.t(), String.t()) :: :ok
   def persist_user_name(name, raw_text) when is_binary(name) do
-    if Code.ensure_loaded?(Brain.Hippocampus) and
+    if not assistant_name?(name) and Code.ensure_loaded?(Brain.Hippocampus) and
          function_exported?(Brain.Hippocampus, :encode, 2) do
       slate = %{
         sentence: raw_text,
@@ -89,6 +89,7 @@ defmodule Core.Response.SideEffects do
       meta = %{
         tags: ["fact", "user_name"],
         scope: :chat,
+        subject: :user,
         kind: :fact,
         key: :user_name,
         value: name
@@ -138,11 +139,11 @@ defmodule Core.Response.SideEffects do
   def recalled_user_name(extracted_name) do
     cond do
       is_binary(extracted_name) and extracted_name != "" ->
-        extracted_name
+        reject_assistant_name(extracted_name)
 
       hippocampus_fact_available?() ->
         case Brain.Hippocampus.fact(:user_name) do
-          value when is_binary(value) and value != "" -> value
+          value when is_binary(value) and value != "" -> reject_assistant_name(value)
           _ -> nil
         end
 
@@ -164,7 +165,42 @@ defmodule Core.Response.SideEffects do
   def recalled_fact(_), do: nil
 
   defp hippocampus_fact_available? do
-    Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1)
+    Code.ensure_loaded?(Brain.Hippocampus) and function_exported?(Brain.Hippocampus, :fact, 1) and
+      is_pid(Process.whereis(Brain.Hippocampus))
+  end
+
+  defp reject_assistant_name(value) when is_binary(value) do
+    if assistant_name?(value), do: nil, else: value
+  end
+
+  defp assistant_name?(value) when is_binary(value) do
+    normalized = normalize_name(value)
+    assistant = Application.get_env(:symbrella, :assistant, [])
+
+    ([config_get(assistant, :name), config_get(assistant, :norm)] ++
+       List.wrap(config_get(assistant, :aliases, [])) ++ ["Symbrella", "symbrella"])
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&normalize_name/1)
+    |> Enum.any?(&(&1 == normalized))
+  end
+
+  defp config_get(config, key, default \\ nil)
+
+  defp config_get(config, key, default) when is_list(config) do
+    Keyword.get(config, key, default)
+  end
+
+  defp config_get(config, key, default) when is_map(config) do
+    Map.get(config, key, Map.get(config, Atom.to_string(key), default))
+  end
+
+  defp config_get(_config, _key, default), do: default
+
+  defp normalize_name(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
   end
 
   defp map_get(map, key, default \\ nil)

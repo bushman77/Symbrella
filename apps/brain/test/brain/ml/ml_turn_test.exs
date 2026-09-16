@@ -33,6 +33,22 @@ defmodule Brain.MLTurnTest do
     assert [%{chosen_id: "alpha|verb|1"} | _] = get_in(turn, [:lifg, :winners])
   end
 
+  test "pipeline stop sentence replaces synonym-expanded intent text" do
+    original =
+      "Hello Symbrella, how are you doing on this fine day #{System.unique_integer([:positive])}"
+
+    expanded = "adzooks symbrella wherewithal are thou doing leg this all right daylight"
+    pid = Process.whereis(Brain.ML)
+
+    send(pid, {:intent, %{text: expanded, label: "greet", intent: :greet, confidence: 0.61}})
+    send(pid, {:blackboard, stage1_stop_env(original, 1, "hello|interjection|1")})
+
+    turn = wait_for_turn(original, 1)
+
+    assert turn.text == original
+    refute turn.text == expanded
+  end
+
   defp stage1_stop_env(text, frame_run_id, chosen_id) do
     now = System.system_time(:millisecond)
 

@@ -30,10 +30,11 @@ defmodule Core.Response.OverrideSkills do
   @spec deterministic_inline_text(map() | nil) :: String.t() | nil
   def deterministic_inline_text(%{id: id, inline_text: s})
       when id in [
-	             :illicit_request_redirect,
-	             :time,
-	             :alarm_capability
-	           ] and is_binary(s) and s != "" do
+             :illicit_request_redirect,
+             :symbrella_definition,
+             :time,
+             :alarm_capability
+           ] and is_binary(s) and s != "" do
     s
   end
 

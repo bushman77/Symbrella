@@ -65,6 +65,7 @@ defmodule Brain.LIFG.Stage1 do
     "pron" => 1.0,
     "determiner" => 0.99,
     "det" => 0.99,
+    "proper_noun" => 0.98,
     # ← bumped up
     "noun" => 0.97,
     "verb" => 0.96,
@@ -114,6 +115,10 @@ defmodule Brain.LIFG.Stage1 do
     "the" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
     "a" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
     "an" => %{pos: "determiner", rel_prior: 0.99, activation: 0.94},
+    "this" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "that" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "these" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
+    "those" => %{pos: "determiner", rel_prior: 0.99, activation: 0.95},
     "hey" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
     "hi" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
     "hello" => %{pos: "interjection", rel_prior: 1.0, activation: 0.96},
@@ -891,7 +896,8 @@ defmodule Brain.LIFG.Stage1 do
 
             pos_bias =
               closed_class_pos_bias(token_phrase, pos) +
-                local_context_pos_bias(acc, tok, pos)
+                local_context_pos_bias(acc, tok, pos) +
+                token_window_pos_bias(ctx, tok, pos)
 
             perception_bias =
               perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
@@ -1641,6 +1647,12 @@ defmodule Brain.LIFG.Stage1 do
           Map.has_key?(@closed_class_defaults, phrase) ->
             upsert_closed_class_candidate(acc, idx, closed_class_default_candidate(phrase))
 
+          self_name?(phrase) and identity_candidate_present?(acc, idx, phrase) ->
+            acc
+
+          self_name?(phrase) ->
+            upsert_self_name_candidate(acc, idx, self_name_candidate(phrase))
+
           Map.has_key?(@entity_defaults, phrase) ->
             upsert_entity_candidate(acc, idx, entity_default_candidate(phrase))
 
@@ -1653,6 +1665,56 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp ensure_closed_class_candidates(other), do: other
+
+  defp self_name?(phrase) when is_binary(phrase) do
+    phrase in self_names()
+  end
+
+  defp self_name?(_), do: false
+
+  defp self_names do
+    :brain
+    |> Application.get_env(:self_names, [])
+    |> List.wrap()
+    |> Enum.map(&norm/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp self_name_candidate(phrase) do
+    %{
+      id: "#{phrase}|proper_noun|self",
+      lemma: phrase,
+      norm: phrase,
+      word: phrase,
+      pos: "proper_noun",
+      source: :self_name,
+      activation: 0.98,
+      score: 0.98,
+      rel_prior: 1.0,
+      definition: "Configured assistant self-name.",
+      example: "Hello #{phrase}."
+    }
+  end
+
+  defp identity_candidate_present?(sc, idx, phrase) when is_map(sc) do
+    sc
+    |> sense_candidates_for_idx(idx)
+    |> Enum.any?(fn cand ->
+      cand = Safe.to_plain(cand)
+      source = Safe.get(cand, :source) || Safe.get(cand, "source")
+      from = Safe.get(cand, :from) || Safe.get(cand, "from")
+      id = Safe.get(cand, :id) || Safe.get(cand, "id")
+      pos = pos_of(cand)
+
+      candidate_aligned_to_phrase?(cand, phrase) and
+        (source in [:self_name, "self_name"] or
+           from in [:assistant_identity, "assistant_identity"] or
+           pos in ["assistant", "self_name"] or
+           String.contains?(to_string(id || ""), "|assistant|"))
+    end)
+  end
+
+  defp identity_candidate_present?(_sc, _idx, _phrase), do: false
 
   defp explicit_aligned_candidates?(sc, idx, phrase) when is_map(sc) do
     sc
@@ -1770,6 +1832,10 @@ defmodule Brain.LIFG.Stage1 do
       other ->
         [other, cand]
     end)
+  end
+
+  defp upsert_self_name_candidate(sc, idx, cand) when is_map(sc) do
+    upsert_entity_candidate(sc, idx, cand)
   end
 
   defp same_sense_id?(existing, override) when is_map(existing) and is_map(override) do
@@ -2659,6 +2725,79 @@ defmodule Brain.LIFG.Stage1 do
   end
 
   defp local_context_pos_bias(_acc, _tok, _pos), do: 0.0
+
+  defp token_window_pos_bias(ctx, tok, pos) when is_map(ctx) and is_map(tok) do
+    token_phrase = tok |> token_raw_phrase() |> norm()
+    family = syntactic_pos_family(pos)
+
+    fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
+      greeting_chain_pos_bias(ctx, tok, token_phrase, family)
+  end
+
+  defp token_window_pos_bias(_ctx, _tok, _pos), do: 0.0
+
+  defp fine_day_pos_bias("fine", "day", :adjective), do: 0.34
+  defp fine_day_pos_bias("fine", "day", :verb), do: -0.34
+  defp fine_day_pos_bias("fine", "day", :noun), do: -0.08
+  defp fine_day_pos_bias(_phrase, _next_phrase, _family), do: 0.0
+
+  defp greeting_chain_pos_bias(ctx, tok, token_phrase, family) do
+    case greeting_expected_family(ctx, tok, token_phrase) do
+      nil ->
+        0.0
+
+      ^family ->
+        0.28
+
+      expected when expected in [:adverb, :auxiliary, :pronoun, :verb] ->
+        -0.24
+    end
+  end
+
+  defp greeting_expected_family(ctx, tok, token_phrase) do
+    phrases = token_phrases(ctx)
+    idx = token_index(tok, -1)
+    window = Enum.map(idx..(idx + 3), &Map.get(phrases, &1))
+
+    cond do
+      token_phrase == "how" and window == ["how", "are", "you", "doing"] ->
+        :adverb
+
+      token_phrase == "are" and
+          Enum.map((idx - 1)..(idx + 2), &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
+        :auxiliary
+
+      token_phrase == "you" and
+          Enum.map((idx - 2)..(idx + 1), &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
+        :pronoun
+
+      token_phrase == "doing" and
+          Enum.map((idx - 3)..idx, &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
+        :verb
+
+      true ->
+        nil
+    end
+  end
+
+  defp token_phrases(ctx) when is_map(ctx) do
+    ctx
+    |> Map.get(:si, %{})
+    |> Safe.get(:tokens, [])
+    |> List.wrap()
+    |> Enum.reduce(%{}, fn tok, acc ->
+      if is_map(tok) do
+        Map.put(acc, token_index(tok, map_size(acc)), tok |> token_raw_phrase() |> norm())
+      else
+        acc
+      end
+    end)
+  end
+
+  defp next_token_phrase(ctx, tok) do
+    idx = token_index(tok, -1)
+    ctx |> token_phrases() |> Map.get(idx + 1)
+  end
 
   defp nearest_left_choice(choices, current_start) when is_list(choices) do
     choices

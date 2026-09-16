@@ -140,7 +140,7 @@ defmodule Core.Response.Memory do
     cond do
       asking_for_user_name?(text_in) ->
         name =
-          normalize_name(extracted_name) ||
+          SideEffects.recalled_user_name(extracted_name) ||
             SideEffects.recalled_user_name(nil)
 
         if is_binary(name) and name != "" do
@@ -150,8 +150,13 @@ defmodule Core.Response.Memory do
         end
 
       name_claim? ->
-        name = normalize_name(extracted_name)
-        if name, do: "Nice to meet you, #{name}. I’ll remember that.", else: nil
+        case SideEffects.recalled_user_name(extracted_name) do
+          name when is_binary(name) and name != "" ->
+            "Nice to meet you, #{name}. I’ll remember that."
+
+          _ ->
+            "I should not store Symbrella as your name because that is my assistant identity."
+        end
 
       true ->
         nil
@@ -281,22 +286,15 @@ defmodule Core.Response.Memory do
     end
   end
 
-  defp normalize_name(name) when is_binary(name) do
-    n =
-      name
-      |> String.trim()
-      |> String.replace(~r/\s+/u, " ")
-
-    if n == "", do: nil, else: n
-  end
-
-  defp normalize_name(_), do: nil
-
   defp question_shaped?(text) when is_binary(text) do
     Regex.match?(
       ~r/^\s*(?:who|what|when|where|why|how|do|does|did|can|could|will|would|should|is|are|am|have|has|had|may|might|was|were)\b/iu,
       text
-    ) or String.contains?(text, "?")
+    ) or
+      Regex.match?(
+        ~r/\b(?:who|what|when|where|why|how)\s+(?:is|are|am|do|does|did|can|could|will|would|should|have|has|had|was|were|may|might)\b/iu,
+        text
+      ) or String.contains?(text, "?")
   end
 
   defp question_shaped?(_), do: false

@@ -8,6 +8,21 @@ defmodule Core.Response.OverrideSkills.Companion do
   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
   def apply(features, decision) do
     cond do
+      symbrella_definition_turn?(features) ->
+        decision =
+          decision
+          |> Decision.put(tone: :warm, mode: :chat, action: :answer)
+          |> put_in([:scores, :profile], :symbrella_definition)
+          |> Decision.add_override(:symbrella_definition_answer)
+
+        {:ok,
+         {decision,
+          %{
+            id: :symbrella_definition,
+            reason: :self_definition_question,
+            inline_text: symbrella_definition_text()
+          }}}
+
       trust_repair_turn?(features) ->
         decision =
           decision
@@ -17,11 +32,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-	          %{
-	            id: :trust_repair,
-	            reason: :trust_rupture,
-	            llm_prompt: :trust_repair
-	          }}}
+          %{
+            id: :trust_repair,
+            reason: :trust_rupture,
+            llm_prompt: :trust_repair
+          }}}
 
       companion_boundary_turn?(features) ->
         decision =
@@ -32,11 +47,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-	          %{
-	            id: :companion_repair,
-	            reason: :companion_boundary,
-	            llm_prompt: :companion_repair
-	          }}}
+          %{
+            id: :companion_repair,
+            reason: :companion_boundary,
+            llm_prompt: :companion_repair
+          }}}
 
       casual_companion_turn?(features) ->
         decision =
@@ -46,11 +61,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-	          %{
-	            id: :casual_companion,
-	            reason: :casual_chat,
-	            llm_prompt: :casual_companion
-	          }}}
+          %{
+            id: :casual_companion,
+            reason: :casual_chat,
+            llm_prompt: :casual_companion
+          }}}
 
       personal_life_update_turn?(features) ->
         decision =
@@ -61,11 +76,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-	          %{
-	            id: :personal_life_update,
-	            reason: :personal_life_update,
-	            llm_prompt: :personal_life_update
-	          }}}
+          %{
+            id: :personal_life_update,
+            reason: :personal_life_update,
+            llm_prompt: :personal_life_update
+          }}}
 
       idle_curiosity_casual_turn?(features) ->
         decision =
@@ -75,11 +90,11 @@ defmodule Core.Response.OverrideSkills.Companion do
 
         {:ok,
          {decision,
-	          %{
-	            id: :idle_curiosity_casual,
-	            reason: :casual_episode_probe_boundary,
-	            llm_prompt: :idle_curiosity_casual
-	          }}}
+          %{
+            id: :idle_curiosity_casual,
+            reason: :casual_episode_probe_boundary,
+            llm_prompt: :idle_curiosity_casual
+          }}}
 
       true ->
         :pass
@@ -98,6 +113,33 @@ defmodule Core.Response.OverrideSkills.Companion do
   end
 
   defp trust_repair_turn?(_), do: false
+
+  defp symbrella_definition_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+
+    symbrella_definition_text?(text) and not symbrella_module_reference?(text)
+  end
+
+  defp symbrella_definition_turn?(_), do: false
+
+  defp symbrella_definition_text?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(?:what\s+is|what's|what\s+does|explain|define|tell\s+me\s+about)\s+(?:the\s+)?symbrella\b/iu,
+      text
+    )
+  end
+
+  defp symbrella_definition_text?(_), do: false
+
+  defp symbrella_module_reference?(text) when is_binary(text) do
+    Regex.match?(~r/\bsymbrella\s*(?:\.|web\b)/iu, text)
+  end
+
+  defp symbrella_module_reference?(_), do: false
+
+  defp symbrella_definition_text do
+    "Symbrella is this local Phoenix umbrella app: a brain-inspired, neuro-symbolic chat and runtime experiment with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis. It is not a generic task manager, and I should not claim features unless this runtime actually exposes evidence for them."
+  end
 
   defp trust_language?(text) when is_binary(text) do
     Regex.match?(

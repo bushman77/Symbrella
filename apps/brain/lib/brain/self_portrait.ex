@@ -69,6 +69,7 @@ defmodule Brain.SelfPortrait do
     portrait0 = state.portrait
     portrait = Model.observe(portrait0, payload)
     maybe_emit_monitor(portrait0, portrait)
+    maybe_emit_salience(portrait0, portrait)
 
     safe_telemetry(
       [:brain, :self_portrait, :update],
@@ -87,7 +88,7 @@ defmodule Brain.SelfPortrait do
     portrait0 = state.portrait
     portrait = Model.observe(portrait0, ev)
     maybe_emit_monitor(portrait0, portrait)
-    maybe_emit_salience(portrait)
+    maybe_emit_salience(portrait0, portrait)
 
     {:noreply, %{state | portrait: portrait}}
   end
@@ -101,9 +102,10 @@ defmodule Brain.SelfPortrait do
   # shifts, repeated events), emit a telemetry event. DriveLoop listens for
   # this and decides whether to trigger an endogenous nudge based on idle time.
 
-  defp maybe_emit_salience(portrait) do
-    patterns = Map.get(portrait, :patterns, %{})
-    traits = Map.get(portrait, :traits, %{})
+  defp maybe_emit_salience(before, after_) do
+    before_patterns = Map.get(before, :patterns, %{})
+    patterns = Map.get(after_, :patterns, %{})
+    traits = Map.get(after_, :traits, %{})
 
     # Salience conditions — something interesting is happening
     lifg_anomalies = Map.get(patterns, :lifg_pos_anomalies, 0)
@@ -115,10 +117,10 @@ defmodule Brain.SelfPortrait do
     curiosity_bias = Map.get(traits, :curiosity_bias, 0.5)
 
     salient? =
-      lifg_anomalies > 0 or
-        boundary_drops > 2 or
-        fallback_wins > 0 or
-        gate_failures > 0
+      increased?(before_patterns, :lifg_pos_anomalies, lifg_anomalies) or
+        (boundary_drops > 2 and increased?(before_patterns, :boundary_drops, boundary_drops)) or
+        increased?(before_patterns, :fallback_wins, fallback_wins) or
+        increased?(before_patterns, :gate_failures, gate_failures)
 
     if salient? do
       :telemetry.execute(
@@ -133,6 +135,10 @@ defmodule Brain.SelfPortrait do
         %{}
       )
     end
+  end
+
+  defp increased?(patterns, key, value) do
+    value > Map.get(patterns, key, 0)
   end
 
   @impl true

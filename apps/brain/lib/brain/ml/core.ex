@@ -90,9 +90,10 @@ defmodule Brain.ML.Core do
   @spec text_from(term(), term()) :: String.t() | nil
   def text_from(intent_payload, bb_payload) do
     text =
-      mget(intent_payload || %{}, :text) ||
+      blackboard_text(bb_payload) ||
+        mget(intent_payload || %{}, :text) ||
         mget(intent_payload || %{}, :sentence) ||
-        mget(bb_payload || %{}, :text)
+        text_or_nil(mget(bb_payload || %{}, :text))
 
     text_or_nil(text)
   end
@@ -586,6 +587,16 @@ defmodule Brain.ML.Core do
 
   defp text_or_nil(value) when is_binary(value) and value != "", do: value
   defp text_or_nil(_), do: nil
+
+  defp blackboard_text(%{} = bb_payload) do
+    meta = mget(bb_payload, :meta) || %{}
+
+    text_or_nil(mget(meta, :sentence)) ||
+      text_or_nil(mget(meta, :user_text)) ||
+      text_or_nil(mget(bb_payload, :text))
+  end
+
+  defp blackboard_text(_), do: nil
 
   defp number(value) when is_integer(value), do: value * 1.0
   defp number(value) when is_float(value), do: value

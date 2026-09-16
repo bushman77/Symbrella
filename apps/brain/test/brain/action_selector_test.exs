@@ -53,6 +53,18 @@ defmodule Brain.ActionSelectorTest do
     assert result.selected == :ask_clarifying_question
   end
 
+  test "selects self_check for endogenous internal salience" do
+    result =
+      ActionSelector.select(%{
+        intent: :internal_salience,
+        confidence: 0.85,
+        mood: %{vigilance: 0.30, inhibition: 0.50, exploration: 0.30}
+      })
+
+    assert result.selected == :self_check
+    assert result.selected_candidate.reason == :endogenous_salience
+  end
+
   test "answers low-confidence known smalltalk instead of asking for clarification" do
     result =
       ActionSelector.select(%{

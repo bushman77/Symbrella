@@ -70,6 +70,8 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "You are Symbrella."
     assert prompt =~ "brain-inspired, stateful assistant"
+    assert prompt =~ "Symbrella is your assistant identity, never the user's name."
+    assert prompt =~ "Grounded definition: Symbrella is this local Phoenix umbrella app"
     assert prompt =~ "local Symbrella umbrella"
     assert prompt =~ "Tone: warm, engaged, and encouraging."
 
@@ -89,6 +91,7 @@ defmodule Core.Response.LlmPromptTest do
       )
 
     assert prompt =~ "Do not claim you are a remote-server model"
+    assert prompt =~ "Do not describe Symbrella as a task manager"
     assert prompt =~ "Do not claim you have no memory or no traces"
     assert prompt =~ "conversation context, working memory, episodic memory, database rows, logs"
     assert prompt =~ "accept that local-runtime premise"

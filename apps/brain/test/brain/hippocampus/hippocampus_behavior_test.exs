@@ -185,4 +185,26 @@ defmodule Brain.HippocampusBehaviorTest do
 
     assert Hippocampus.fact(:user_name) == "Bradley"
   end
+
+  test "fact/1 does not use self memory as the user's name" do
+    Hippocampus.encode(slate_with("Bradley"), %{
+      kind: :fact,
+      key: :user_name,
+      value: "Bradley",
+      subject: :user,
+      tags: ["fact", "user_name"]
+    })
+
+    Hippocampus.encode(slate_with("Symbrella"), %{
+      kind: :fact,
+      key: :user_name,
+      value: "Symbrella",
+      subject: :symbrella,
+      self?: true,
+      autobiographical?: true,
+      tags: ["fact", "user_name", "self", "self_memory", "autobiographical"]
+    })
+
+    assert Hippocampus.fact(:user_name) == "Bradley"
+  end
 end

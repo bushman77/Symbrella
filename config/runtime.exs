@@ -99,6 +99,40 @@ lifg_min_score =
     _ -> 0.35
   end
 
+log_cognition_pipeline? =
+  case System.get_env("LOG_COGNITION_PIPELINE", "false") |> String.downcase() do
+    value when value in ["1", "true", "yes", "on"] -> true
+    _ -> false
+  end
+
+log_lifg_stage1? =
+  case System.get_env("LOG_LIFG_STAGE1", "false") |> String.downcase() do
+    value when value in ["1", "true", "yes", "on"] -> true
+    _ -> false
+  end
+
+cognition_idle_status_ms =
+  case Integer.parse(System.get_env("COGNITION_IDLE_STATUS_MS", "0")) do
+    {n, _} when n >= 0 -> n
+    _ -> 0
+  end
+
+cognition_idle_threshold_ms =
+  case Integer.parse(System.get_env("COGNITION_IDLE_THRESHOLD_MS", "")) do
+    {n, _} when n >= 0 -> n
+    _ -> nil
+  end
+
+drive_loop_runtime_config =
+  [idle_status_interval_ms: cognition_idle_status_ms]
+  |> then(fn cfg ->
+    if is_integer(cognition_idle_threshold_ms) do
+      Keyword.put(cfg, :idle_threshold_ms, cognition_idle_threshold_ms)
+    else
+      cfg
+    end
+  end)
+
 # ───────── Episodic runtime configuration ─────────
 
 # Episodic attach master switch.
@@ -161,9 +195,13 @@ config :brain,
   episodes_mode: episodes_mode,
   episodes_persist: episodes_persist,
   episodes_tags: episodes_tags,
+  log_cognition_pipeline?: log_cognition_pipeline?,
+  log_lifg_stage1?: log_lifg_stage1?,
 
   # LIFG
   lifg_stage1_mwe_fallback: true
+
+config :brain, Brain.DriveLoop, drive_loop_runtime_config
 
 # Apply optional Stage-1 runtime overrides only when explicitly supplied.
 if lifg_weights do

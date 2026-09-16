@@ -29,12 +29,32 @@ defmodule Llm do
   @default_temperature 0.4
 
   @call_timeout_default 60_000
+  @chat_timeout_default :infinity
   @default_heartbeat_ms 15_000
 
   @ready_poll_attempts 80
   @ready_poll_sleep_ms 250
 
   @log_ring_max 200
+
+  @chat_stop_sequences [
+    "\nuser\n",
+    "\nuser:",
+    "\nUser\n",
+    "\nUser:",
+    "\nUSER\n",
+    "\nUSER:",
+    "\nsystem\n",
+    "\nsystem:",
+    "\nSystem\n",
+    "\nSystem:",
+    "<|im_start|>user",
+    "<|im_start|>system",
+    "<|im_end|>",
+    "<|eot_id|>",
+    "<|endoftext|>",
+    "<|end_of_text|>"
+  ]
 
   @backoff_min 250
   @backoff_max 10_000
@@ -80,7 +100,7 @@ defmodule Llm do
   end
 
   def chat(prompt, opts \\ []) do
-    GenServer.call(server(opts), {:chat, prompt, opts}, call_timeout(opts))
+    GenServer.call(server(opts), {:chat, prompt, opts}, chat_call_timeout(opts))
   end
 
   def embeddings(text_or_list, opts \\ []) do
@@ -121,6 +141,7 @@ defmodule Llm do
 
       # runtime
       # :stopped | :starting | :ready | :crashed | :failed
+      chat_timeout: Keyword.get(boot, :chat_timeout, @chat_timeout_default),
       status: :stopped,
       llama_port: nil,
       llama_os_pid: nil,
@@ -258,15 +279,17 @@ defmodule Llm do
   @impl true
   def handle_call({:chat, prompt, opts}, _from, state) do
     temperature = Keyword.get(opts, :temperature, state.temperature)
-    timeout = Keyword.get(opts, :timeout, state.timeout)
+    timeout = chat_receive_timeout(opts, state)
+    ready_timeout = Keyword.get(opts, :ready_timeout, state.timeout)
 
-    with {:ok, st} <- ensure_ready(state, timeout),
+    with {:ok, st} <- ensure_ready(state, ready_timeout),
          messages <- normalize_messages(prompt),
          body <- %{
            "model" => "local",
            "messages" => messages,
            "temperature" => temperature,
-           "stream" => false
+           "stream" => false,
+           "stop" => @chat_stop_sequences
          },
          {:ok, raw} <- http_post(st, "/v1/chat/completions", body, timeout: timeout),
          content <- extract_chat_content(raw) do
@@ -743,8 +766,50 @@ defmodule Llm do
 
   defp sanitize_model_text(text) when is_binary(text) do
     text
-    |> String.replace(~r/<\|(?:im_(?:end|start)|eot_id|endoftext|end_of_text)(?:\|>)?/u, "")
+    |> normalize_model_control_tokens()
+    |> strip_leading_assistant_marker()
+    |> truncate_generated_role_continuation()
     |> String.trim()
+  end
+
+  defp normalize_model_control_tokens(text) do
+    text
+    |> String.replace(~r/<\|im_start\|>/u, "\n")
+    |> String.replace(~r/<\|(?:im_end|eot_id|endoftext|end_of_text)\|>/u, "\n")
+  end
+
+  defp strip_leading_assistant_marker(text) do
+    text
+    |> String.replace(~r/\A[ \t]*assistant[ \t]*:[ \t]*/iu, "")
+    |> String.replace(~r/\A[ \t]*assistant[ \t]*(?:\r?\n)+/iu, "")
+  end
+
+  defp truncate_generated_role_continuation(text) do
+    lines = String.split(text, ~r/\r?\n/u, trim: false)
+
+    {kept, _seen_content?} =
+      Enum.reduce_while(lines, {[], false}, fn line, {acc, seen_content?} ->
+        trimmed = String.trim(line)
+
+        cond do
+          seen_content? and generated_role_header?(trimmed) ->
+            {:halt, {acc, seen_content?}}
+
+          true ->
+            {:cont, {[line | acc], seen_content? or trimmed != ""}}
+        end
+      end)
+
+    kept
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  defp generated_role_header?(""), do: false
+
+  defp generated_role_header?(line) when is_binary(line) do
+    Regex.match?(~r/^(?:user|assistant|system)\s*$/iu, line) or
+      Regex.match?(~r/^(?:user|assistant|system)\s*:/iu, line)
   end
 
   defp extract_embedding_one(%{"data" => [%{"embedding" => emb} | _]}) when is_list(emb), do: emb
@@ -805,6 +870,8 @@ defmodule Llm do
 
   defp server(opts), do: Keyword.get(opts, :name, __MODULE__)
   defp call_timeout(opts), do: Keyword.get(opts, :timeout, @call_timeout_default)
+  defp chat_call_timeout(opts), do: Keyword.get(opts, :call_timeout, :infinity)
+  defp chat_receive_timeout(opts, state), do: Keyword.get(opts, :timeout, state.chat_timeout)
 
   defp apply_overrides(state, opts) do
     state
@@ -816,6 +883,7 @@ defmodule Llm do
     |> maybe_put(:threads, Keyword.get(opts, :threads))
     |> maybe_put(:temperature, Keyword.get(opts, :temperature))
     |> maybe_put(:timeout, Keyword.get(opts, :timeout))
+    |> maybe_put(:chat_timeout, Keyword.get(opts, :chat_timeout))
   end
 
   defp maybe_put(state, _k, nil), do: state

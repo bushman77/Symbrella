@@ -164,7 +164,10 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
     Process.demonitor(ref, [:flush])
 
-    reply = to_bot_reply(payload)
+    reply =
+      payload
+      |> to_bot_reply()
+      |> enforce_identity_reply()
 
     reply_text = reply.text
     tone = Map.get(reply, :tone)
@@ -242,6 +245,11 @@ defmodule SymbrellaWeb.HomeLive do
 
   @impl true
   def handle_info({ref, _payload}, socket) when is_reference(ref) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:telemetry, _event, _measurements, _metadata}, socket) do
     {:noreply, socket}
   end
 
@@ -341,7 +349,7 @@ defmodule SymbrellaWeb.HomeLive do
   def render(assigns), do: ChatHTML.chat(assigns)
 
   defp initial_messages do
-    case ChatHistory.list() do
+    case ChatHistory.list() |> Enum.map(&sanitize_identity_leak_message/1) do
       [] -> [%{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}]
       messages -> messages
     end
@@ -417,7 +425,9 @@ defmodule SymbrellaWeb.HomeLive do
         }
 
       nil ->
-        build_semantic_reply(user_text, session_id)
+        user_text
+        |> build_semantic_reply(session_id)
+        |> enforce_identity_reply(user_text)
     end
   end
 
@@ -475,7 +485,7 @@ defmodule SymbrellaWeb.HomeLive do
       text: visible,
       tone: tone,
       meta: meta,
-      si: si,
+      si: Map.put(si, :text, user_text),
       symbolic_frame: Map.get(si, :symbolic_frame),
       selected_action: Map.get(si, :selected_action),
       action_candidates: Map.get(si, :action_candidates),
@@ -1422,6 +1432,114 @@ defmodule SymbrellaWeb.HomeLive do
   defp to_bot_reply(%{text: _} = reply), do: reply
   defp to_bot_reply(text) when is_binary(text), do: %{text: text}
   defp to_bot_reply(other), do: %{text: inspect(other)}
+
+  defp enforce_identity_reply(%{} = reply) do
+    si = Map.get(reply, :si, %{})
+
+    user_text =
+      case user_text_from_si(si) do
+        text when is_binary(text) and text != "" ->
+          text
+
+        _ ->
+          if assistant_identity_leak?(Map.get(reply, :text)), do: "what is my name?", else: nil
+      end
+
+    with true <- is_binary(user_text) and user_text != "",
+         true <- Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1),
+         {tone, text, meta} <-
+           Response.memory_reply(%{
+             intent: :unknown,
+             confidence: 1.0,
+             text: user_text,
+             session_id: map_get(si, :session_id),
+             source: :user
+           }),
+         true <- map_get(meta, :action) == :identity do
+      reply
+      |> Map.put(:text, text)
+      |> Map.put(:tone, tone)
+      |> Map.put(:meta, meta)
+      |> Map.put(:explain_text, text)
+    else
+      _ -> reply
+    end
+  end
+
+  defp enforce_identity_reply(reply), do: reply
+
+  defp enforce_identity_reply(%{} = reply, fallback_user_text)
+       when is_binary(fallback_user_text) do
+    si =
+      reply
+      |> Map.get(:si, %{})
+      |> case do
+        %{} = si -> Map.put_new(si, :text, fallback_user_text)
+        _ -> %{text: fallback_user_text}
+      end
+
+    reply
+    |> Map.put(:si, si)
+    |> enforce_identity_reply()
+  end
+
+  defp enforce_identity_reply(reply, _fallback_user_text), do: reply
+
+  defp user_text_from_si(%{} = si), do: map_get(si, :text) || map_get(si, :sentence)
+  defp user_text_from_si(_si), do: nil
+
+  defp sanitize_identity_leak_message(%{role: :assistant, text: text} = message)
+       when is_binary(text) do
+    if assistant_identity_leak?(text) do
+      case deterministic_identity_reply("what is my name?", map_get(message, :session_id)) do
+        {tone, reply_text, meta} ->
+          message
+          |> Map.put(:text, reply_text)
+          |> Map.put(:tone, tone)
+          |> Map.put(:meta, meta)
+          |> Map.put(:explain_text, reply_text)
+
+        nil ->
+          message
+          |> Map.put(
+            :text,
+            "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
+          )
+          |> Map.put(
+            :explain_text,
+            "I don’t know your name yet—tell me “my name is …” and I’ll remember it."
+          )
+      end
+    else
+      message
+    end
+  end
+
+  defp sanitize_identity_leak_message(message), do: message
+
+  defp assistant_identity_leak?(text) when is_binary(text) do
+    Regex.match?(~r/^\s*your\s+name\s+is\s+symbrella\.?\s*$/iu, text)
+  end
+
+  defp assistant_identity_leak?(_text), do: false
+
+  defp deterministic_identity_reply(user_text, session_id) do
+    if Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1) do
+      case Response.memory_reply(%{
+             intent: :unknown,
+             confidence: 1.0,
+             text: user_text,
+             session_id: session_id,
+             source: :user
+           }) do
+        {_, _, meta} = reply ->
+          if map_get(meta, :action) == :identity, do: reply, else: nil
+
+        _ ->
+          nil
+      end
+    end
+  end
 
   defp safe_str(nil), do: ""
   defp safe_str(v) when is_atom(v), do: Atom.to_string(v)

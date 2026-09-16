@@ -40,6 +40,10 @@ config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
 
+config :core, Core.Agency.AutonomyLoop,
+  enabled?: true,
+  record_commands?: true
+
 config :core, Core.Curiosity.EpisodeProbe,
   enabled?: true,
   every_turns: 2,
@@ -96,6 +100,10 @@ config :brain,
   capacity: 12
 
 config :brain, :blackboard_window_size, 100
+config :brain, :log_cognition_pipeline?, false
+config :brain, :log_lifg_stage1?, false
+
+config :brain, Brain.DriveLoop, idle_status_interval_ms: 0
 
 config :brain, Brain.MoodCore,
   half_life_ms: %{da: 30_000, "5ht": 60_000, glu: 90_000, ne: 45_000},

@@ -34,6 +34,20 @@ defmodule Core.Response.LlmRouteFlowTest do
           String.contains?(user_text, "note leak") ->
             "Here is the direct answer.\n\n(Note: The assistant's response is based on internal planning.)"
 
+          String.contains?(user_text, "continuation leak") ->
+            """
+            The sky is blue because shorter blue wavelengths scatter more strongly in the atmosphere.
+
+            user
+            what is the capital of France?
+            assistant
+            The capital of France is Paris.
+            user
+            who is the president of the united states?
+            assistant
+            The current president of the United States is Joe Biden.
+            """
+
           true ->
             "LLM verbalized the symbolic posture."
         end
@@ -152,6 +166,39 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute text =~ "assistant's response is based"
 
     assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "LLM generated transcript continuation is stripped from chat text and history" do
+    session_id = "continuation-leak-#{System.unique_integer([:positive])}"
+
+    si = %{
+      intent: :question,
+      confidence: 0.92,
+      text: "why is the sky blue? continuation leak",
+      session_id: session_id
+    }
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text ==
+             "The sky is blue because shorter blue wavelengths scatter more strongly in the atmosphere."
+
+    assert meta.response_source == :llm
+    refute text =~ "\nuser\n"
+    refute text =~ "\nassistant\n"
+    refute text =~ "capital of France"
+    refute text =~ "Joe Biden"
+
+    assert_receive {:llm_chat, _messages, _opts}
+
+    assert [
+             %{"role" => "user", "content" => "why is the sky blue? continuation leak"},
+             %{
+               "role" => "assistant",
+               "content" =>
+                 "The sky is blue because shorter blue wavelengths scatter more strongly in the atmosphere."
+             }
+           ] = Core.Response.LlmChatHistory.messages(session_id)
   end
 
   test "Core.Response.plan owns LLM history recording once per turn" do

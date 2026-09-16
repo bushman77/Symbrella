@@ -75,6 +75,13 @@ defmodule Brain.ActionSelector do
     frame_type = map_get(frame, :type)
 
     cond do
+      internal_salience_intent?(intent) ->
+        [
+          candidate(:self_check, 0.78, :endogenous_salience, memory_relevant?: true),
+          candidate(:observe_silently, 0.24, :low_external_value),
+          candidate(:answer_user, 0.05, :no_user_turn, speech_required?: true)
+        ]
+
       frame_type == :health_support_event ->
         health_support_event_candidates(frame)
 
@@ -157,9 +164,7 @@ defmodule Brain.ActionSelector do
         memory_relevant?: true
       ),
       candidate(:store_memory, memory_score, :personal_health_event, memory_relevant?: true),
-      candidate(:ask_clarifying_question, 0.34, :optional_health_followup,
-        speech_required?: true
-      ),
+      candidate(:ask_clarifying_question, 0.34, :optional_health_followup, speech_required?: true),
       candidate(:self_check, 0.30, :medical_boundary_check),
       candidate(:observe_silently, 0.16, :support_requested)
     ]
@@ -235,6 +240,15 @@ defmodule Brain.ActionSelector do
       :refactor,
       :review,
       :tell
+    ]
+  end
+
+  defp internal_salience_intent?(intent) do
+    intent in [
+      :internal_salience,
+      :endogenous,
+      :endogenous_salience,
+      :autonomous_self_check
     ]
   end
 

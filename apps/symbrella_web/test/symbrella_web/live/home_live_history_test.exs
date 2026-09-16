@@ -132,7 +132,11 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     assert Enum.any?(section.items, &(&1.label == "intent" and &1.body == ":name_query"))
     assert Enum.any?(section.items, &(&1.label == "response source" and &1.body == ":memory"))
     assert Enum.any?(section.items, &(&1.label == "memory key" and &1.body == ":user_name"))
-    assert Enum.any?(section.items, &(&1.label == "memory source" and &1.body == ":hippocampus_fact"))
+
+    assert Enum.any?(
+             section.items,
+             &(&1.label == "memory source" and &1.body == ":hippocampus_fact")
+           )
   end
 
   test "chat stores and recalls direct user facts before attached LLM responses", %{conn: conn} do
@@ -153,6 +157,72 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     Process.sleep(300)
     html = render(view)
     assert html =~ "Your sisters name is Mary-Anne."
+  end
+
+  test "chat recalls the user's name without using assistant identity", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("#chat-form")
+    |> render_submit(%{"message" => "my name is Bradley"})
+
+    Process.sleep(300)
+    html = render(view)
+    assert html =~ "Nice to meet you, Bradley. I’ll remember that."
+
+    view
+    |> element("#chat-form")
+    |> render_submit(%{"message" => "what is my name?"})
+
+    Process.sleep(300)
+    html = render(view)
+    assert html =~ "Your name is Bradley."
+    refute html =~ "Your name is Symbrella."
+  end
+
+  test "chat does not accept assistant identity as the user's name", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("#chat-form")
+    |> render_submit(%{"message" => "my name is Symbrella"})
+
+    Process.sleep(300)
+    html = render(view)
+    assert html =~ "I should not store Symbrella as your name because that is my assistant identity."
+    refute html =~ "Nice to meet you, Symbrella"
+
+    view
+    |> element("#chat-form")
+    |> render_submit(%{"message" => "what is my name?"})
+
+    Process.sleep(300)
+    html = render(view)
+    assert html =~ "I don’t know your name yet"
+    refute html =~ "Your name is Symbrella."
+  end
+
+  test "cached assistant identity leak is not rendered", %{conn: conn} do
+    Brain.Hippocampus.encode(
+      %{winners: [%{id: "Bradley|proper|0", lemma: "Bradley"}]},
+      %{
+        kind: :fact,
+        key: :user_name,
+        value: "Bradley",
+        subject: :user,
+        tags: ["fact", "user_name"]
+      }
+    )
+
+    ChatHistory.append([
+      %{id: "u-name", role: :user, text: "what is my name?"},
+      %{id: "b-bad-name", role: :assistant, text: "Your name is Symbrella."}
+    ])
+
+    {:ok, _view, html} = live(conn, ~p"/")
+
+    assert html =~ "Your name is Bradley."
+    refute html =~ "Your name is Symbrella."
   end
 
   test "chat stores location facts and does not append curiosity about the recall question", %{
