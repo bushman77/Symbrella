@@ -189,7 +189,10 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
 
     Process.sleep(300)
     html = render(view)
-    assert html =~ "I should not store Symbrella as your name because that is my assistant identity."
+
+    assert html =~
+             "I should not store Symbrella as your name because that is my assistant identity."
+
     refute html =~ "Nice to meet you, Symbrella"
 
     view
@@ -223,6 +226,18 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
 
     assert html =~ "Your name is Bradley."
     refute html =~ "Your name is Symbrella."
+  end
+
+  test "cached assistant name-question echo is rewritten", %{conn: conn} do
+    ChatHistory.append([
+      %{id: "u-name", role: :user, text: "what is my name?"},
+      %{id: "b-parrot-name", role: :assistant, text: "Symbrella: What is your name?"}
+    ])
+
+    {:ok, _view, html} = live(conn, ~p"/")
+
+    assert html =~ "I don’t know your name yet"
+    refute html =~ "Symbrella: What is your name?"
   end
 
   test "chat stores location facts and does not append curiosity about the recall question", %{

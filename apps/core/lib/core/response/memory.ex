@@ -215,6 +215,9 @@ defmodule Core.Response.Memory do
       location = extract_location_fact(text) ->
         location
 
+      not direct_fact_claim?(text) ->
+        nil
+
       true ->
         with {label, value} <- split_fact_body(text),
              key when is_binary(key) <- fact_key(label) do
@@ -298,6 +301,12 @@ defmodule Core.Response.Memory do
   end
 
   defp question_shaped?(_), do: false
+
+  defp direct_fact_claim?(text) when is_binary(text) do
+    Regex.match?(~r/^\s*my\s+.+\s+(?:is|=)\s+.+/iu, text)
+  end
+
+  defp direct_fact_claim?(_), do: false
 
   defp extract_location_fact(text) when is_binary(text) do
     case Regex.run(

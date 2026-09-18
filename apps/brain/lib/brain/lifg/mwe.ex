@@ -243,7 +243,7 @@ defmodule Brain.LIFG.MWE do
         String.contains?(id, "|phrase|") and not String.ends_with?(id, "|phrase|fallback")
       end)
       |> Enum.group_by(fn c ->
-        norm_key(Safe.get(c, :norm) || Safe.get(c, :word))
+        norm_key(Safe.get(c, :norm) || Safe.get(c, :word) || Safe.get(c, :lemma))
       end)
 
     needed_norms =
@@ -357,6 +357,7 @@ defmodule Brain.LIFG.MWE do
       |> ensure_map()
       |> normalize_sc_keys()
 
+    caller_supplied_partial_slate? = map_size(sc0) > 0
     tokens = Map.get(si, :tokens, [])
     cells = Map.get(si, :active_cells, [])
 
@@ -368,7 +369,7 @@ defmodule Brain.LIFG.MWE do
         String.contains?(id, "|phrase|")
       end)
       |> Enum.group_by(fn c ->
-        norm_key(Safe.get(c, :norm) || Safe.get(c, :word))
+        norm_key(Safe.get(c, :norm) || Safe.get(c, :word) || Safe.get(c, :lemma))
       end)
 
     {sc, added} =
@@ -406,7 +407,7 @@ defmodule Brain.LIFG.MWE do
                         Application.get_env(:brain, :lifg_db_backfill, true)
                       )
 
-                    if db_backfill? do
+                    if db_backfill? and not caller_supplied_partial_slate? do
                       fetch_unigram_cells_by_norm([nk]) |> Map.get(nk, [])
                     else
                       []
@@ -763,7 +764,9 @@ defmodule Brain.LIFG.MWE do
 
     raw_id =
       Safe.get(cell, :id) ||
-        Safe.get(cell, "id")
+        Safe.get(cell, "id") ||
+        Safe.get(cell, :chosen_id) ||
+        Safe.get(cell, "chosen_id")
 
     id =
       case raw_id do
@@ -786,11 +789,15 @@ defmodule Brain.LIFG.MWE do
     word =
       Safe.get(cell, :word) ||
         Safe.get(cell, "word") ||
+        Safe.get(cell, :lemma) ||
+        Safe.get(cell, "lemma") ||
         surface
 
     norm =
       Safe.get(cell, :norm) ||
         Safe.get(cell, "norm") ||
+        Safe.get(cell, :lemma) ||
+        Safe.get(cell, "lemma") ||
         down(surface)
 
     definition =
@@ -841,10 +848,41 @@ defmodule Brain.LIFG.MWE do
       # Existing Stage1 priors.
       rel_prior: 0.20,
       activation: (Safe.get(cell, :activation, 0.25) || 0.25) * 1.0,
-      score: 0.30,
+      score: cell_score(cell, id),
       source: :active_cells
     }
   end
+
+  defp cell_score(cell, id) do
+    scores =
+      Safe.get(cell, :scores) ||
+        Safe.get(cell, "scores") ||
+        %{}
+
+    cond do
+      is_map(scores) and Map.has_key?(scores, id) ->
+        to_float(Map.get(scores, id), 0.30)
+
+      is_map(scores) and Map.has_key?(scores, to_string(id)) ->
+        to_float(Map.get(scores, to_string(id)), 0.30)
+
+      true ->
+        Safe.get(cell, :score, Safe.get(cell, "score", 0.30))
+        |> to_float(0.30)
+    end
+  end
+
+  defp to_float(value, _default) when is_integer(value), do: value * 1.0
+  defp to_float(value, _default) when is_float(value), do: value
+
+  defp to_float(value, default) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {parsed, ""} -> parsed
+      _ -> default
+    end
+  end
+
+  defp to_float(_value, default), do: default
 
   defp unigram_candidate?(cand) when is_map(cand) do
     nrm = to_string(cand[:norm] || cand["norm"] || cand[:lemma] || cand["lemma"] || "")

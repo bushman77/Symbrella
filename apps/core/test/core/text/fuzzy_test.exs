@@ -78,6 +78,32 @@ defmodule Core.Text.FuzzyTest do
     assert :fact_query in fuzzy.aliases
   end
 
+  test "preserves known words before obsolete synonym rewrites" do
+    fuzzy =
+      Fuzzy.interpret("it feels pretty cold in here today",
+        obsolete_synonym?: true,
+        known_word?: fn
+          "it" -> true
+          "pretty" -> true
+          "cold" -> true
+          "here" -> true
+          "today" -> true
+          _ -> false
+        end,
+        candidate_words: []
+      )
+
+    assert fuzzy.text == "it feels pretty cold in here today"
+    assert fuzzy.corrections == []
+  end
+
+  test "preserves common temperature words during edit-distance repair" do
+    fuzzy = Fuzzy.interpret("pretty cold in here today")
+
+    assert fuzzy.text == "pretty cold in here today"
+    assert fuzzy.corrections == []
+  end
+
   test "protects think and only repairs ddo in short conversational input" do
     clean = Fuzzy.interpret("what do you think", known_word?: fn _ -> false end)
 

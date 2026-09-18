@@ -300,7 +300,7 @@ defmodule Brain.LIFG.Stage1 do
         si0
         |> Brain.LIFG.MWE.ensure_mwe_candidates(lifg_opts)
         |> Brain.LIFG.MWE.backfill_unigrams_from_active_cells(lifg_opts)
-        |> ensure_closed_class_candidates()
+        |> ensure_closed_class_candidates(lifg_opts)
         |> Brain.LIFG.MWE.absorb_unigrams_into_mwe(lifg_opts)
 
       si1 = stamp_slates(si1, frame)
@@ -1618,7 +1618,7 @@ defmodule Brain.LIFG.Stage1 do
   defp function_pos?(_), do: false
 
   # ---------- Candidate bucket extraction ----------
-  defp ensure_closed_class_candidates(%{} = si) do
+  defp ensure_closed_class_candidates(%{} = si, opts) do
     tokens = Safe.get(si, :tokens, []) || []
 
     sc0 =
@@ -1626,6 +1626,9 @@ defmodule Brain.LIFG.Stage1 do
         %{} = m -> m
         _ -> %{}
       end
+
+    caller_supplied_partial_slate? = map_size(sc0) > 0
+    activation_only? = activation_only_scoring?(opts)
 
     sc =
       tokens
@@ -1641,20 +1644,26 @@ defmodule Brain.LIFG.Stage1 do
           explicit_aligned_candidates?(acc, idx, phrase) ->
             acc
 
+          activation_only? and sense_candidates_for_idx(acc, idx) != [] ->
+            acc
+
           MapSet.member?(@closed_class_pronouns, phrase) ->
             upsert_closed_class_candidate(acc, idx, closed_class_pronoun_candidate(phrase))
 
           Map.has_key?(@closed_class_defaults, phrase) ->
             upsert_closed_class_candidate(acc, idx, closed_class_default_candidate(phrase))
 
+          Map.has_key?(@entity_defaults, phrase) ->
+            upsert_entity_candidate(acc, idx, entity_default_candidate(phrase))
+
+          caller_supplied_partial_slate? ->
+            acc
+
           self_name?(phrase) and identity_candidate_present?(acc, idx, phrase) ->
             acc
 
           self_name?(phrase) ->
             upsert_self_name_candidate(acc, idx, self_name_candidate(phrase))
-
-          Map.has_key?(@entity_defaults, phrase) ->
-            upsert_entity_candidate(acc, idx, entity_default_candidate(phrase))
 
           true ->
             acc
@@ -1664,7 +1673,20 @@ defmodule Brain.LIFG.Stage1 do
     Map.put(si, :sense_candidates, sc)
   end
 
-  defp ensure_closed_class_candidates(other), do: other
+  defp ensure_closed_class_candidates(other, _opts), do: other
+
+  defp activation_only_scoring?(opts) when is_list(opts) do
+    weights =
+      Application.get_env(:brain, :lifg_stage1_weights, @default_weights)
+      |> Map.merge(Map.new(Keyword.get(opts, :weights, [])))
+
+    get_num(weights, :activation, 0.0) == 1.0 and
+      get_num(weights, :lex_fit, 0.0) == 0.0 and
+      get_num(weights, :rel_prior, 0.0) == 0.0 and
+      get_num(weights, :intent_bias, 0.0) == 0.0
+  end
+
+  defp activation_only_scoring?(_opts), do: false
 
   defp self_name?(phrase) when is_binary(phrase) do
     phrase in self_names()
@@ -1991,15 +2013,15 @@ defmodule Brain.LIFG.Stage1 do
       norm: phrase,
       mw: false,
       pos: "pronoun",
-      activation: 0.95,
-      score: 0.95,
+      activation: 0.20,
+      score: 0.20,
       source: :closed_class,
       definition: pronoun_definition(phrase),
       example: pronoun_example(phrase),
       features: %{
         lex_fit: 1.0,
         rel_prior: 1.0,
-        activation: 0.95,
+        activation: 0.20,
         intent_bias: 0.0
       }
     }
@@ -2015,15 +2037,15 @@ defmodule Brain.LIFG.Stage1 do
       norm: phrase,
       mw: false,
       pos: pos,
-      activation: spec.activation,
-      score: spec.activation,
+      activation: 0.20,
+      score: 0.20,
       source: :closed_class,
       definition: Map.get(spec, :definition) || closed_class_definition(phrase, pos),
       example: Map.get(spec, :example) || closed_class_example(phrase, pos),
       features: %{
         lex_fit: 1.0,
         rel_prior: spec.rel_prior,
-        activation: spec.activation,
+        activation: 0.20,
         intent_bias: 0.0
       }
     }

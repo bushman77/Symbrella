@@ -34,6 +34,19 @@ defmodule Core.Response.LlmRouteFlowTest do
           String.contains?(user_text, "note leak") ->
             "Here is the direct answer.\n\n(Note: The assistant's response is based on internal planning.)"
 
+          String.contains?(user_text, "symbrella label leak") ->
+            "Symbrella: Here is the answer."
+
+          String.contains?(user_text, "symbrella continuation leak") ->
+            """
+            Here is the answer.
+
+            Symbrella:
+            What is your name?
+            user
+            what is my name?
+            """
+
           String.contains?(user_text, "continuation leak") ->
             """
             The sky is blue because shorter blue wavelengths scatter more strongly in the atmosphere.
@@ -199,6 +212,31 @@ defmodule Core.Response.LlmRouteFlowTest do
                  "The sky is blue because shorter blue wavelengths scatter more strongly in the atmosphere."
              }
            ] = Core.Response.LlmChatHistory.messages(session_id)
+  end
+
+  test "LLM generated Symbrella speaker labels are stripped" do
+    si = %{intent: :refactor, confidence: 0.92, text: "symbrella label leak"}
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text == "Here is the answer."
+    assert meta.response_source == :llm
+    refute text =~ "Symbrella:"
+
+    assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "LLM generated Symbrella transcript continuation is stripped" do
+    si = %{intent: :refactor, confidence: 0.92, text: "symbrella continuation leak"}
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text == "Here is the answer."
+    assert meta.response_source == :llm
+    refute text =~ "Symbrella:"
+    refute text =~ "What is your name?"
+
+    assert_receive {:llm_chat, _messages, _opts}
   end
 
   test "Core.Response.plan owns LLM history recording once per turn" do

@@ -19,7 +19,8 @@ defmodule Core.SemanticInput do
     • fuzzy_corrections / fuzzy_aliases / fuzzy_confidence
     • selected_action / action_candidates / action_meta
     • agency_decision / agency_commands / agency_command_results
-    • intent / keyword / confidence
+    • intent / keyword / confidence / opener_intent / opener_text / primary_text
+    • conversation_act / topic_domain / context_frame
     • intent_bias
     • token_cover / resolved_tokens
     • sense_candidates
@@ -69,6 +70,7 @@ defmodule Core.SemanticInput do
                 :episode,
                 :response_meta,
                 :symbolic_frame,
+                :context_frame,
                 :action_meta,
                 :emotion,
                 :appraisal,
@@ -78,7 +80,15 @@ defmodule Core.SemanticInput do
                 :self_continuity,
                 :frame
               ])
-  @atom_fields MapSet.new([:source, :intent, :response_tone, :selected_action])
+  @atom_fields MapSet.new([
+                 :source,
+                 :intent,
+                 :opener_intent,
+                 :conversation_act,
+                 :topic_domain,
+                 :response_tone,
+                 :selected_action
+               ])
   @number_fields MapSet.new([:fuzzy_confidence, :confidence, :acc_conflict])
   @integer_fields MapSet.new([:frame_ts_ms, :frame_seq, :frame_run_id])
 
@@ -111,6 +121,12 @@ defmodule Core.SemanticInput do
           intent: atom() | nil,
           keyword: String.t() | nil,
           confidence: number() | nil,
+          opener_intent: atom() | nil,
+          opener_text: String.t() | nil,
+          primary_text: String.t() | nil,
+          conversation_act: atom() | nil,
+          topic_domain: atom() | nil,
+          context_frame: map() | nil,
           intent_bias: map(),
           token_cover: list() | nil,
           resolved_tokens: list() | nil,
@@ -175,6 +191,12 @@ defmodule Core.SemanticInput do
             intent: nil,
             keyword: nil,
             confidence: nil,
+            opener_intent: nil,
+            opener_text: nil,
+            primary_text: nil,
+            conversation_act: nil,
+            topic_domain: nil,
+            context_frame: nil,
             intent_bias: %{},
             token_cover: nil,
             resolved_tokens: nil,
@@ -377,6 +399,8 @@ defmodule Core.SemanticInput do
 
   defp field_problem(:sentence, value), do: string_or_nil_problem(value)
   defp field_problem(:keyword, value), do: string_or_nil_problem(value)
+  defp field_problem(:opener_text, value), do: string_or_nil_problem(value)
+  defp field_problem(:primary_text, value), do: string_or_nil_problem(value)
   defp field_problem(:response_text, value), do: string_or_nil_problem(value)
   defp field_problem(:session_id, _value), do: nil
   defp field_problem(:self_model, _value), do: nil

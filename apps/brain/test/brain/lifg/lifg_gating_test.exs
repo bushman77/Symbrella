@@ -4,6 +4,8 @@ defmodule Brain.LIFGGatingTest do
   @strong_id "this|noun|0"
 
   setup do
+    %{cfg: original_wm_cfg} = Brain.snapshot_wm()
+
     original =
       Application.get_env(:brain, :lifg_stage1_weights) ||
         %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
@@ -17,11 +19,31 @@ defmodule Brain.LIFGGatingTest do
       intent_bias: 0.0
     })
 
+    :ok = Brain.configure_wm(Map.to_list(Brain.Config.wm_defaults()))
+    _ = Brain.defocus(fn _ -> true end)
+    reset_stage1_mood()
+
     on_exit(fn ->
       Application.put_env(:brain, :lifg_stage1_weights, original)
+      :ok = Brain.configure_wm(Map.to_list(original_wm_cfg))
+      _ = Brain.defocus(fn _ -> true end)
     end)
 
     :ok
+  end
+
+  defp reset_stage1_mood do
+    case Process.whereis(Brain.LIFG.Stage1) do
+      pid when is_pid(pid) ->
+        :sys.replace_state(pid, fn state ->
+          state
+          |> Map.put(:mood, nil)
+          |> Map.put(:mood_last_ms, nil)
+        end)
+
+      nil ->
+        :ok
+    end
   end
 
   test "lifg choices cross gate into WM with min_score" do
@@ -50,7 +72,7 @@ defmodule Brain.LIFGGatingTest do
     }
 
     # Keep the same call site; normalize with softmax so gate uses probabilities.
-    {:ok, _} =
+    {:ok, out} =
       Brain.lifg_stage1(
         si,
         # ctx arg (legacy/ignored by Stage1)
@@ -60,6 +82,11 @@ defmodule Brain.LIFGGatingTest do
         normalize: :softmax,
         scores: :all
       )
+
+    assert [%{chosen_id: @strong_id, score: score}] = out.choices
+    assert score >= 0.6
+    assert [%{id: @strong_id, source: :lifg, score: lifg_score}] = out.si.lifg_choices
+    assert lifg_score >= 0.6
 
     %{wm: wm} = Brain.snapshot_wm()
 

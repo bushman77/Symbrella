@@ -349,7 +349,7 @@ defmodule SymbrellaWeb.HomeLive do
   def render(assigns), do: ChatHTML.chat(assigns)
 
   defp initial_messages do
-    case ChatHistory.list() |> Enum.map(&sanitize_identity_leak_message/1) do
+    case ChatHistory.list() |> sanitize_cached_messages() do
       [] -> [%{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}]
       messages -> messages
     end
@@ -1442,7 +1442,9 @@ defmodule SymbrellaWeb.HomeLive do
           text
 
         _ ->
-          if assistant_identity_leak?(Map.get(reply, :text)), do: "what is my name?", else: nil
+          if identity_reply_needs_memory?(Map.get(reply, :text)),
+            do: "what is my name?",
+            else: nil
       end
 
     with true <- is_binary(user_text) and user_text != "",
@@ -1488,6 +1490,64 @@ defmodule SymbrellaWeb.HomeLive do
   defp user_text_from_si(%{} = si), do: map_get(si, :text) || map_get(si, :sentence)
   defp user_text_from_si(_si), do: nil
 
+  defp sanitize_cached_messages(messages) when is_list(messages) do
+    {messages, _previous_user_text} =
+      Enum.map_reduce(messages, nil, fn message, previous_user_text ->
+        sanitized = sanitize_cached_message(message, previous_user_text)
+
+        next_user_text =
+          case sanitized do
+            %{role: :user, text: text} when is_binary(text) -> text
+            _ -> previous_user_text
+          end
+
+        {sanitized, next_user_text}
+      end)
+
+    messages
+  end
+
+  defp sanitize_cached_messages(_), do: []
+
+  defp sanitize_cached_message(%{role: :assistant, text: text} = message, previous_user_text)
+       when is_binary(text) and is_binary(previous_user_text) do
+    cond do
+      cached_identity_reply_needs_memory?(text, previous_user_text) ->
+        rewrite_cached_identity_message(message, previous_user_text)
+
+      true ->
+        sanitize_identity_leak_message(message)
+    end
+  end
+
+  defp sanitize_cached_message(message, _previous_user_text),
+    do: sanitize_identity_leak_message(message)
+
+  defp cached_identity_reply_needs_memory?(assistant_text, user_text) do
+    identity_reply_needs_memory?(assistant_text) and
+      Code.ensure_loaded?(Response) and
+      function_exported?(Response, :memory_reply, 1) and
+      Code.ensure_loaded?(Core.Response.Memory) and
+      function_exported?(Core.Response.Memory, :asking_for_user_name?, 1) and
+      Core.Response.Memory.asking_for_user_name?(user_text)
+  end
+
+  defp rewrite_cached_identity_message(message, user_text) do
+    session_id = map_get(message, :session_id)
+
+    case deterministic_identity_reply(user_text, session_id) do
+      {tone, reply_text, meta} ->
+        message
+        |> Map.put(:text, reply_text)
+        |> Map.put(:tone, tone)
+        |> Map.put(:meta, meta)
+        |> Map.put(:explain_text, reply_text)
+
+      nil ->
+        sanitize_identity_leak_message(message)
+    end
+  end
+
   defp sanitize_identity_leak_message(%{role: :assistant, text: text} = message)
        when is_binary(text) do
     if assistant_identity_leak?(text) do
@@ -1517,11 +1577,29 @@ defmodule SymbrellaWeb.HomeLive do
 
   defp sanitize_identity_leak_message(message), do: message
 
+  defp identity_reply_needs_memory?(text) when is_binary(text) do
+    assistant_identity_leak?(text) or assistant_name_question_echo?(text)
+  end
+
+  defp identity_reply_needs_memory?(_text), do: false
+
   defp assistant_identity_leak?(text) when is_binary(text) do
     Regex.match?(~r/^\s*your\s+name\s+is\s+symbrella\.?\s*$/iu, text)
   end
 
   defp assistant_identity_leak?(_text), do: false
+
+  defp assistant_name_question_echo?(text) when is_binary(text) do
+    text
+    |> String.replace(~r/^\s*(?:symbrella|assistant)\s*:\s*/iu, "")
+    |> String.replace(~r/[^\p{L}\p{N}\s\?]/u, "")
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+    |> String.downcase()
+    |> Kernel.in(["what is your name", "what is your name?"])
+  end
+
+  defp assistant_name_question_echo?(_text), do: false
 
   defp deterministic_identity_reply(user_text, session_id) do
     if Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1) do

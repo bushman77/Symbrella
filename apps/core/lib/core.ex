@@ -79,6 +79,7 @@ defmodule Core do
   defp fuzzy_opts(opts) do
     [
       max_distance: Keyword.get(opts, :fuzzy_max_distance, 2),
+      obsolete_synonym?: false,
       protected_words: MapSet.new(["symbrella"]),
       known_word?: fn word ->
         Code.ensure_loaded?(Db) and function_exported?(Db, :word_exists?, 1) and

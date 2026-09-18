@@ -238,6 +238,8 @@ defmodule Brain.Thalamus do
 
   @impl GenServer
   def handle_call(:get_params, _from, state) do
+    state = drain_pending_signals(state)
+
     reply = %{
       ofc_weight: cfg_ofc_weight(state.opts),
       acc_alpha: cfg_acc_alpha(state.opts),
@@ -456,6 +458,44 @@ defmodule Brain.Thalamus do
       end
 
     {Map.put(cache1, key, val), order2}
+  end
+
+  defp drain_pending_signals(state) do
+    receive do
+      {:ofc_value, meas, meta} ->
+        value = meas |> get_num(:value, 0.0) |> clamp01()
+        probe_id = meta |> meta_get(:probe_id, "curiosity|probe|unknown") |> to_string()
+
+        {cache, order} =
+          put_ofc_value(state.ofc_cache, state.ofc_order, probe_id, value, @ofc_cache_max)
+
+        state
+        |> Map.put(:ofc_cache, cache)
+        |> Map.put(:ofc_order, order)
+        |> drain_pending_signals()
+
+      {:acc_conflict, meas} ->
+        state
+        |> Map.put(:acc_conflict, meas |> get_num(:conflict, 0.0) |> clamp01())
+        |> Map.put(:acc_last_ms, System.system_time(:millisecond))
+        |> drain_pending_signals()
+
+      {:mood_update, meas, _meta} ->
+        mood = %{
+          exploration: get_num(meas, :exploration, 0.5) |> clamp01(),
+          inhibition: get_num(meas, :inhibition, 0.5) |> clamp01(),
+          vigilance: get_num(meas, :vigilance, 0.5) |> clamp01(),
+          plasticity: get_num(meas, :plasticity, 0.5) |> clamp01()
+        }
+
+        state
+        |> Map.put(:mood, mood)
+        |> Map.put(:mood_last_ms, System.system_time(:millisecond))
+        |> drain_pending_signals()
+    after
+      0 ->
+        state
+    end
   end
 
   defp get_num(map, key, default) do

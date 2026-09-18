@@ -66,6 +66,12 @@ defmodule Core.Intent.Selection do
   * `:command`
   * `:feedback`
   * `:health_support`
+  * `:environment_observation`
+  * `:correction`
+  * `:affirm`
+  * `:deny`
+  * `:bye`
+  * `:statement`
   * `:smalltalk`
   * `:ask`
   * `:unknown`
@@ -80,8 +86,13 @@ defmodule Core.Intent.Selection do
           | :insult
           | :illicit_request
           | :command
+          | :correction
           | :feedback
           | :health_support
+          | :environment_observation
+          | :affirm
+          | :deny
+          | :bye
           | :smalltalk
           | :ask
           | :ask_info
@@ -91,6 +102,7 @@ defmodule Core.Intent.Selection do
           | :define
           | :help
           | :memory_write
+          | :statement
           | :tell
           | :unknown
 
@@ -105,13 +117,19 @@ defmodule Core.Intent.Selection do
     :define,
     :translate,
     :command,
+    :correction,
     :health_support,
+    :environment_observation,
     :help,
     :ask_info,
+    :affirm,
+    :deny,
+    :bye,
     :feedback,
     :smalltalk,
     :ask,
     :tell,
+    :statement,
     :greet
   ]
 
@@ -183,11 +201,12 @@ defmodule Core.Intent.Selection do
 
   def select(%{sentence: _} = si, _opts) do
     kw0 = extract_keyword(si)
-    kw_fuzzy = interpret_keyword(kw0, protected_words: @self_names)
+    fuzzy_opts = [protected_words: @self_names, obsolete_synonym?: false]
+    kw_fuzzy = interpret_keyword(kw0, fuzzy_opts)
     kw = normalize_text(kw_fuzzy.text)
 
     text0 = text_from_si(si, kw)
-    text_fuzzy = Core.Text.Fuzzy.interpret(text0, protected_words: @self_names)
+    text_fuzzy = Core.Text.Fuzzy.interpret(text0, fuzzy_opts)
     text = normalize_text(text_fuzzy.text)
     primary = primary_utterance(text)
     kw = primary_keyword(kw, primary)
@@ -266,10 +285,21 @@ defmodule Core.Intent.Selection do
   defp maybe_put_topic_metadata(%{sentence: text} = si), do: put_topic_metadata(si, text)
   defp maybe_put_topic_metadata(si), do: si
 
-  defp put_topic_metadata(si, text) do
+  defp put_topic_metadata(si, text) when is_binary(text) do
     si
     |> maybe_put(:conversation_act, conversation_act(text))
     |> maybe_put(:topic_domain, topic_domain(text))
+    |> maybe_put_context_frame(text)
+  end
+
+  defp put_topic_metadata(si, _text), do: si
+
+  defp maybe_put_context_frame(si, text) do
+    maybe_put(
+      si,
+      :context_frame,
+      context_frame(Map.get(si, :intent), text, Map.get(si, :conversation_act), Map.get(si, :topic_domain))
+    )
   end
 
   defp maybe_put(si, _key, nil), do: si
@@ -366,6 +396,7 @@ defmodule Core.Intent.Selection do
       |> maybe_payload(:primary_text, Map.get(si, :primary_text))
       |> maybe_payload(:conversation_act, Map.get(si, :conversation_act))
       |> maybe_payload(:topic_domain, Map.get(si, :topic_domain))
+      |> maybe_payload(:context_frame, Map.get(si, :context_frame))
 
     # 1) Update Brain.last_intent (for mood + snapshot)
     _ =
@@ -590,7 +621,11 @@ defmodule Core.Intent.Selection do
         insult: max(score_insult(kw), score_insult(scoring_text)),
         illicit_request: max(score_illicit_request(text), score_illicit_request(scoring_text)),
         command: max(score_command(kw), score_command(scoring_text)),
+        correction: score_correction(scoring_text),
         feedback: max(score_feedback(kw), score_feedback(scoring_text)),
+        affirm: score_affirm(scoring_text),
+        deny: score_deny(scoring_text),
+        bye: score_bye(scoring_text),
         smalltalk: score_smalltalk(scoring_text),
         ask: score_question(question_cue),
         ask_info: score_ask_info(scoring_text),
@@ -599,9 +634,11 @@ defmodule Core.Intent.Selection do
         debug: score_debug(scoring_text),
         define: score_define(scoring_text),
         health_support: score_health_support(scoring_text),
+        environment_observation: score_environment_observation(scoring_text),
         help: score_help(scoring_text),
         memory_write: score_memory_write(scoring_text),
-        tell: score_tell(scoring_text)
+        tell: score_tell(scoring_text),
+        statement: score_statement(scoring_text)
       }
 
     matrix_scores = matrix_scores(token_terms)
@@ -730,6 +767,64 @@ defmodule Core.Intent.Selection do
       pos_thanks? -> 0.85
       neg_soft? -> 0.70
       true -> 0.0
+    end
+  end
+
+  defp score_correction(s) do
+    cond do
+      Regex.match?(
+        ~r/\b(?:actually|i\s+mean|i\s+meant|what\s+i\s+meant|to\s+be\s+clear|let\s+me\s+rephrase)\b/i,
+        s
+      ) ->
+        0.88
+
+      Regex.match?(
+        ~r/\b(?:that's|that\s+is|this\s+is)\s+not\s+(?:what\s+i\s+meant|right|correct|it)\b/i,
+        s
+      ) ->
+        0.90
+
+      Regex.match?(~r/\b(?:you\s+misunderstood|not\s+what\s+i\s+said)\b/i, s) ->
+        0.92
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_affirm(s) do
+    cond do
+      Regex.match?(~r/^\s*(?:yes|yeah|yep|yup|sure|correct|right|exactly|ok|okay)\b/i, s) ->
+        0.82
+
+      Regex.match?(~r/\b(?:that's\s+right|that\s+is\s+right|sounds\s+good|works\s+for\s+me)\b/i, s) ->
+        0.78
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_deny(s) do
+    cond do
+      score_correction(s) > 0.0 ->
+        0.0
+
+      Regex.match?(~r/^\s*(?:no|nope|nah|not\s+really|never)\b/i, s) ->
+        0.82
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_bye(s) do
+    cond do
+      Regex.match?(~r/^\s*(?:bye|goodbye|good\s+bye|see\s+you|talk\s+to\s+you\s+later|later)\b/i, s) ->
+        0.84
+
+      true ->
+        0.0
     end
   end
 
@@ -1006,6 +1101,36 @@ defmodule Core.Intent.Selection do
     end
   end
 
+  defp score_affect_disclosure(s) do
+    self_subject? =
+      Regex.match?(~r/^\s*(?:i|i'm|i\s+am|i've|i\s+have|my)\b/i, s)
+
+    affect? =
+      Regex.match?(
+        ~r/\b(?:feel|feeling|am|i'm|tired|exhausted|sad|happy|angry|mad|anxious|stressed|scared|afraid|confused|lonely|overwhelmed|okay|ok|fine)\b/i,
+        s
+      )
+
+    cond do
+      self_subject? and affect? -> 0.80
+      Regex.match?(~r/^\s*(?:feeling|felt)\s+\w+/i, s) -> 0.70
+      true -> 0.0
+    end
+  end
+
+  defp score_preference_statement(s) do
+    cond do
+      Regex.match?(~r/^\s*i\s+(?:prefer|like|love|hate|dislike|enjoy|want|need)\b/i, s) ->
+        0.78
+
+      Regex.match?(~r/^\s*my\s+(?:preference|favorite|favourite)\b/i, s) ->
+        0.76
+
+      true ->
+        0.0
+    end
+  end
+
   defp score_help(s) do
     cond do
       Regex.match?(~r/^\s*(help|can you help|i need help|walk me through)\b/i, s) ->
@@ -1013,6 +1138,52 @@ defmodule Core.Intent.Selection do
 
       Regex.match?(~r/\b(how should i|what should i do|next step|where do we start)\b/i, s) ->
         0.68
+
+      true ->
+        0.0
+    end
+  end
+
+  defp score_environment_observation(s) do
+    environment_subject? =
+      Regex.match?(
+        ~r/\b(?:room|office|house|home|apartment|place|space|environment|inside|in\s+here|here)\b/i,
+        s
+      )
+
+    ambient_subject? =
+      Regex.match?(~r/^\s*(?:it|this)\s+(?:is|feels?|seems?|got|gets)\b/i, s)
+
+    cold_state? =
+      Regex.match?(~r/\b(?:cold|chilly|freezing|frigid|too\s+cold)\b/i, s)
+
+    temperature_state? =
+      Regex.match?(~r/\b(?:hot|warm|stuffy|humid|too\s+hot|too\s+warm)\b/i, s)
+
+    weather_question? =
+      Regex.match?(~r/\b(?:weather|outside|forecast|temperature\s+outside)\b/i, s)
+
+    ambient_time? =
+      Regex.match?(~r/\b(?:morning|afternoon|evening|tonight|today|now|right\s+now)\b/i, s)
+
+    observation_shape? =
+      Regex.match?(
+        ~r/\b(?:it|this|the\s+(?:room|office|house|home|apartment|place|space|environment))\s+(?:is|feels?|seems?|got|gets)\b/i,
+        s
+      )
+
+    cond do
+      weather_question? ->
+        0.0
+
+      environment_subject? and (cold_state? or temperature_state?) and observation_shape? ->
+        0.88
+
+      ambient_subject? and (cold_state? or temperature_state?) and ambient_time? ->
+        0.84
+
+      environment_subject? and (cold_state? or temperature_state?) ->
+        0.76
 
       true ->
         0.0
@@ -1032,16 +1203,69 @@ defmodule Core.Intent.Selection do
 
   defp score_tell(s) do
     cond do
+      score_affect_disclosure(s) >= 0.70 ->
+        0.82
+
+      score_preference_statement(s) >= 0.70 ->
+        0.78
+
       Regex.match?(~r/^\s*(i|my|we|our)\b/i, s) and not looks_like_question?(s) -> 0.56
+      true -> 0.0
+    end
+  end
+
+  defp score_statement(s) do
+    coherent_declarative? =
+      Regex.match?(
+        ~r/^\s*(?:i|i'm|i've|my|we|we're|our|this|that|it|the|there|symbrella)\b/i,
+        s
+      ) and
+        Regex.match?(
+          ~r/\b(?:am|is|are|was|were|feel|feels|seems|looks|think|want|need|like|prefer|have|has|had|means|works|does|did)\b/i,
+          s
+        )
+
+    cond do
+      looks_like_question?(s) -> 0.0
+      word_count(s) < 3 -> 0.0
+      score_greet(s) >= 0.70 -> 0.0
+      score_feedback(s) >= 0.70 -> 0.0
+      score_correction(s) >= 0.70 -> 0.0
+      score_health_support(s) >= 0.70 -> 0.0
+      score_environment_observation(s) >= 0.70 -> 0.0
+      score_memory_write(s) >= 0.70 -> 0.0
+      score_command(s) >= 0.70 -> 0.0
+      score_affirm(s) >= 0.70 -> 0.0
+      score_deny(s) >= 0.70 -> 0.0
+      score_bye(s) >= 0.70 -> 0.0
+      coherent_declarative? -> 0.42
       true -> 0.0
     end
   end
 
   defp conversation_act(text) do
     cond do
+      score_correction(text) >= 0.70 ->
+        :correction
+
+      score_affirm(text) >= 0.70 ->
+        :affirmation
+
+      score_deny(text) >= 0.70 ->
+        :denial
+
+      score_bye(text) >= 0.70 ->
+        :farewell
+
       score_health_support(text) >= 0.70 and
           Regex.match?(~r/^\s*(i|i've|i have|i'm|i am|my)\b/i, text) ->
         :personal_disclosure
+
+      score_affect_disclosure(text) >= 0.70 ->
+        :affect_disclosure
+
+      score_preference_statement(text) >= 0.70 ->
+        :preference_statement
 
       score_question(text) >= 0.70 ->
         :question
@@ -1049,8 +1273,14 @@ defmodule Core.Intent.Selection do
       score_memory_write(text) >= 0.70 ->
         :memory_directive
 
+      score_environment_observation(text) >= 0.70 ->
+        :environment_observation
+
       score_command(text) >= 0.70 ->
         :instruction
+
+      score_statement(text) >= 0.35 ->
+        :statement
 
       true ->
         nil
@@ -1059,9 +1289,18 @@ defmodule Core.Intent.Selection do
 
   defp topic_domain(text) do
     cond do
+      score_correction(text) >= 0.70 ->
+        :conversation_repair
+
       Regex.match?(~r/\b(quetiapine|seroquel|medication|medicine|meds|dose)\b/i, text) and
           Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|rest)\b/i, text) ->
         :health_sleep_medication
+
+      score_affect_disclosure(text) >= 0.70 ->
+        :personal_state
+
+      score_preference_statement(text) >= 0.70 ->
+        :user_preference
 
       Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|rest)\b/i, text) ->
         :health_sleep
@@ -1069,9 +1308,210 @@ defmodule Core.Intent.Selection do
       Regex.match?(~r/\b(quetiapine|seroquel|medication|medicine|meds|dose)\b/i, text) ->
         :health_medication
 
+      score_environment_observation(text) >= 0.70 ->
+        :environment_temperature
+
+      score_question(text) >= 0.70 ->
+        :information_request
+
       true ->
         nil
     end
+  end
+
+  defp context_frame(intent, text, conversation_act, topic_domain) do
+    base = %{
+      v: 1,
+      source: :symbolic,
+      certainty: context_certainty(intent, text),
+      intent: intent,
+      conversation_act: conversation_act,
+      topic_domain: topic_domain,
+      temporal_reference: temporal_reference(text)
+    }
+
+    frame =
+      cond do
+        score_correction(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :prior_context,
+            attribute: :interpretation,
+            state: :needs_repair,
+            target: :conversation
+          })
+
+        score_environment_observation(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :environment,
+            attribute: :temperature,
+            state: temperature_state(text),
+            target: :world
+          })
+
+        score_health_support(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :user,
+            attribute: :health,
+            state: health_state(text),
+            target: :user
+          })
+
+        score_affect_disclosure(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :user,
+            attribute: :affect,
+            state: affect_state(text),
+            target: :user
+          })
+
+        score_preference_statement(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :user,
+            attribute: :preference,
+            polarity: preference_polarity(text),
+            target: :user
+          })
+
+        score_affirm(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :prior_context,
+            attribute: :agreement,
+            state: :affirmed,
+            target: :conversation
+          })
+
+        score_deny(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :prior_context,
+            attribute: :agreement,
+            state: :denied,
+            target: :conversation
+          })
+
+        score_bye(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :conversation,
+            attribute: :social_boundary,
+            state: :closing,
+            target: :conversation
+          })
+
+        score_question(text) >= 0.70 ->
+          Map.merge(base, %{
+            subject: :unknown,
+            attribute: :information,
+            state: :requested,
+            target: :assistant
+          })
+
+        score_statement(text) >= 0.35 ->
+          Map.merge(base, %{
+            subject: statement_subject(text),
+            attribute: :assertion,
+            state: :stated,
+            target: statement_target(text)
+          })
+
+        true ->
+          nil
+      end
+
+    compact_frame(frame)
+  end
+
+  defp context_certainty(:unknown, _text), do: :low
+
+  defp context_certainty(intent, text) do
+    cond do
+      intent in [:abuse, :insult, :illicit_request, :command, :memory_write] -> :high
+      score_environment_observation(text) >= 0.70 -> :high
+      score_health_support(text) >= 0.70 -> :high
+      score_affect_disclosure(text) >= 0.70 -> :high
+      score_preference_statement(text) >= 0.70 -> :high
+      score_correction(text) >= 0.70 -> :high
+      score_statement(text) >= 0.35 -> :medium
+      true -> :low
+    end
+  end
+
+  defp temporal_reference(text) do
+    cond do
+      Regex.match?(~r/\btoday\b/i, text) -> :today
+      Regex.match?(~r/\bthis\s+morning\b|\bmorning\b/i, text) -> :morning
+      Regex.match?(~r/\bthis\s+afternoon\b|\bafternoon\b/i, text) -> :afternoon
+      Regex.match?(~r/\bthis\s+evening\b|\bevening\b/i, text) -> :evening
+      Regex.match?(~r/\btonight\b/i, text) -> :tonight
+      Regex.match?(~r/\btomorrow\b/i, text) -> :tomorrow
+      Regex.match?(~r/\byesterday\b/i, text) -> :yesterday
+      Regex.match?(~r/\b(?:now|right\s+now|currently)\b/i, text) -> :now
+      true -> nil
+    end
+  end
+
+  defp temperature_state(text) do
+    cond do
+      Regex.match?(~r/\b(?:cold|chilly|freezing|frigid|too\s+cold)\b/i, text) -> :cold
+      Regex.match?(~r/\b(?:hot|too\s+hot)\b/i, text) -> :hot
+      Regex.match?(~r/\b(?:warm|too\s+warm)\b/i, text) -> :warm
+      Regex.match?(~r/\bhumid\b/i, text) -> :humid
+      Regex.match?(~r/\bstuffy\b/i, text) -> :stuffy
+      true -> :temperature
+    end
+  end
+
+  defp health_state(text) do
+    cond do
+      Regex.match?(~r/\b(?:sleep|sleeping|insomnia|tired|exhausted|rest)\b/i, text) -> :sleep
+      Regex.match?(~r/\b(?:medication|medicine|meds|dose|quetiapine|seroquel)\b/i, text) -> :medication
+      true -> :health
+    end
+  end
+
+  defp affect_state(text) do
+    cond do
+      Regex.match?(~r/\b(?:tired|exhausted)\b/i, text) -> :tired
+      Regex.match?(~r/\b(?:sad|down)\b/i, text) -> :sad
+      Regex.match?(~r/\b(?:happy|good|great|fine|okay|ok)\b/i, text) -> :okay
+      Regex.match?(~r/\b(?:angry|mad)\b/i, text) -> :angry
+      Regex.match?(~r/\b(?:anxious|stressed|overwhelmed)\b/i, text) -> :anxious
+      Regex.match?(~r/\b(?:scared|afraid)\b/i, text) -> :scared
+      Regex.match?(~r/\bconfused\b/i, text) -> :confused
+      Regex.match?(~r/\blonely\b/i, text) -> :lonely
+      true -> :felt_state
+    end
+  end
+
+  defp preference_polarity(text) do
+    cond do
+      Regex.match?(~r/\b(?:hate|dislike|don't\s+like|do\s+not\s+like)\b/i, text) -> :negative
+      Regex.match?(~r/\b(?:prefer|like|love|enjoy|want|need)\b/i, text) -> :positive
+      true -> :neutral
+    end
+  end
+
+  defp statement_subject(text) do
+    cond do
+      Regex.match?(~r/^\s*(?:i|i'm|i've|my)\b/i, text) -> :user
+      Regex.match?(~r/^\s*(?:we|we're|our)\b/i, text) -> :shared_group
+      Regex.match?(~r/^\s*symbrella\b/i, text) -> :symbrella
+      true -> :world
+    end
+  end
+
+  defp statement_target(text) do
+    cond do
+      Regex.match?(~r/^\s*(?:i|i'm|i've|my)\b/i, text) -> :user
+      Regex.match?(~r/^\s*symbrella\b/i, text) -> :assistant
+      true -> :world
+    end
+  end
+
+  defp compact_frame(nil), do: nil
+
+  defp compact_frame(frame) do
+    frame
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp token_terms(tokens) when is_list(tokens) do

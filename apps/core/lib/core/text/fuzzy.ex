@@ -114,13 +114,16 @@ defmodule Core.Text.Fuzzy do
   }
 
   @lexicon ~w(
-    about address again am are answer bad because believe blue brain call can
-    color could did do does drugs english explain favorite fix forgot have hello
-    help hippocampus home homework house how i in is issue know live location me
-    mean memory message mix my name place please quetiapine recall remember
-    remembered richmond risks run save show sister sleep sleeping state store tell test
-    thanks that the their there thing think this time to translate trouble what whats
-    when where which who why will you your
+    about actually address afraid again am angry answer answers anxious apartment are bad
+    because believe blue brain bye call can chilly cold color concise confused correct could
+    did do does drugs english enjoy environment exhausted explain favorite feel feeling feels
+    fine fix forgot freezing goodbye happy hate have hello help here hippocampus home homework
+    hot house how humid i in inside is issue know later like live lonely location love mad me
+    mean meant memory message mix morning my name no office okay overwhelmed place please prefer
+    preference pretty quetiapine recall remember remembered richmond right risks room run sad
+    save scared show sister sleep sleeping space state store stressed stuffy sure tell test
+    thanks that the their there thing think this time tired to today translate trouble warm
+    what whats when where which who why will yes you your
   )
 
   @context_frames [
@@ -247,11 +250,6 @@ defmodule Core.Text.Fuzzy do
       bare == "" ->
         {word, nil}
 
-      # Check if word is obsolete with a synonym in the DB
-      replacement = obsolete_synonym(bare, opts) ->
-        corrected = preserve_question_mark(word, replacement)
-        {corrected, correction(bare, replacement, 0.90, :obsolete_synonym)}
-
       replacement = Map.get(@known_corrections, bare) ->
         corrected = preserve_question_mark(word, replacement)
         {corrected, correction(bare, replacement, 0.93, :known_typo)}
@@ -261,6 +259,10 @@ defmodule Core.Text.Fuzzy do
 
       bare in @lexicon ->
         {word, nil}
+
+      replacement = obsolete_synonym(bare, opts) ->
+        corrected = preserve_question_mark(word, replacement)
+        {corrected, correction(bare, replacement, 0.90, :obsolete_synonym)}
 
       String.length(bare) < 4 ->
         {word, nil}
@@ -284,8 +286,8 @@ defmodule Core.Text.Fuzzy do
 
   defp obsolete_synonym(word, opts) do
     case Keyword.get(opts, :obsolete_synonym?) do
-      false -> nil
-      _ -> db_obsolete_synonym(word)
+      true -> db_obsolete_synonym(word)
+      _ -> nil
     end
   end
 

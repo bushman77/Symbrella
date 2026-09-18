@@ -17,8 +17,10 @@ defmodule Core.Intent do
     abuse
     insult
     command
+    correction
     feedback
     health_support
+    environment_observation
     illicit_request
     memory_write
     tell

@@ -24,6 +24,8 @@ defmodule Llm.Inference do
     "\nsystem:",
     "\nSystem\n",
     "\nSystem:",
+    "\nSymbrella\n",
+    "\nSymbrella:",
     "<|im_start|>user",
     "<|im_start|>system",
     "<|im_end|>",
@@ -511,11 +513,11 @@ defmodule Llm.Inference do
   defp strip_leading_assistant_marker(text) do
     text
     |> String.replace(
-      ~r/\A[ \t]*assistant[ \t]*:[ \t]*/iu,
+      ~r/\A[ \t]*(?:assistant|symbrella)[ \t]*:[ \t]*/iu,
       ""
     )
     |> String.replace(
-      ~r/\A[ \t]*assistant[ \t]*(?:\r?\n)+/iu,
+      ~r/\A[ \t]*(?:assistant|symbrella)[ \t]*(?:\r?\n)+/iu,
       ""
     )
   end
@@ -567,11 +569,11 @@ defmodule Llm.Inference do
 
   defp generated_role_header?(line) when is_binary(line) do
     Regex.match?(
-      ~r/^(?:user|assistant|system)\s*$/iu,
+      ~r/^(?:user|assistant|system|symbrella)\s*$/iu,
       line
     ) or
       Regex.match?(
-        ~r/^(?:user|assistant|system)\s*:/iu,
+        ~r/^(?:user|assistant|system|symbrella)\s*:/iu,
         line
       )
   end

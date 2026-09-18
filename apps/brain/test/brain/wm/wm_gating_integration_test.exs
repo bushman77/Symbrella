@@ -5,6 +5,7 @@ defmodule Brain.WMGatingIntegrationTest do
     Process.whereis(Brain) || start_supervised!(Brain)
     Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
     Brain.Hippocampus.reset()
+    _ = Brain.defocus(fn _ -> true end)
     :ok
   end
 

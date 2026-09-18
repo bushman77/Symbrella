@@ -171,6 +171,19 @@ defmodule Brain.OFC do
 
   @impl GenServer
   def handle_info({:curiosity, meas, meta}, state) do
+    source = proposal_source(meta)
+
+    if synthetic_math_source?(source) do
+      {:noreply, state}
+    else
+      handle_curiosity_proposal(meas, meta, source, state)
+    end
+  end
+
+  @impl GenServer
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp handle_curiosity_proposal(meas, meta, source, state) do
     # Base features
     base_score = get_num(meas, :score, 0.0) |> clamp01()
     risk = get_num(meas, :risk, 0.0) |> clamp01()
@@ -185,7 +198,6 @@ defmodule Brain.OFC do
         end
 
     probe_id = to_string(probe_id || "curiosity|probe|unknown")
-    source = meta_get(meta, :source, nil)
 
     # Params
     %{
@@ -224,9 +236,6 @@ defmodule Brain.OFC do
 
     {:noreply, state}
   end
-
-  @impl GenServer
-  def handle_info(_, state), do: {:noreply, state}
 
   # ---- Math & helpers -------------------------------------------------------
 
@@ -318,6 +327,25 @@ defmodule Brain.OFC do
       {v, _} -> v
     end
   end
+
+  defp proposal_source(meta) when is_map(meta) do
+    direct = meta_get(meta, :source, nil)
+
+    if is_nil(direct) do
+      case meta_get(meta, :probe, %{}) do
+        %{} = probe -> probe[:source] || probe["source"]
+        _ -> nil
+      end
+    else
+      direct
+    end
+  end
+
+  defp proposal_source(_), do: nil
+
+  defp synthetic_math_source?(:math), do: true
+  defp synthetic_math_source?("math"), do: true
+  defp synthetic_math_source?(_), do: false
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x * 1.0))
   defp clamp01(_), do: 0.0

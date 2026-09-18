@@ -208,6 +208,7 @@ defmodule Core.Token do
       :candidate_lookup,
       :context_embedding
     ])
+    |> Keyword.put_new(:obsolete_synonym?, false)
   end
 
   # ---------- primitive scan (Unicode-safe) ----------

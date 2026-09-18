@@ -215,6 +215,14 @@ defmodule Core.Response.UserNameMemoryTest do
            }) == nil
   end
 
+  test "greeting plus environmental observation is not stored as direct user fact" do
+    assert Response.memory_reply(%{
+             intent: :environment_observation,
+             confidence: 0.9,
+             text: "good morning Symbrella, it is pretty chilly this morning"
+           }) == nil
+  end
+
   test "location memory stores live-in phrasing and recalls where-do-i-live" do
     {_tone, text, meta} =
       Response.plan(%{

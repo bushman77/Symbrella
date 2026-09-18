@@ -182,7 +182,7 @@ defmodule Brain.WM.Recall do
                 %{
                   token_index: 0,
                   lemma: l,
-                  score: 0.30,
+                  score: if(sent == "", do: 1.0, else: 0.30),
                   source: :ltm,
                   reason: :hippocampus_fallback
                 }

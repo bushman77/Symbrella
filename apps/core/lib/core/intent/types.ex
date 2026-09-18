@@ -13,12 +13,18 @@ defmodule Core.Intent.Types do
           | :smalltalk
           | :code
           | :brain_introspect
+          | :affirm
+          | :deny
+          | :bye
           | :command
+          | :correction
           | :debug
           | :feedback
           | :health_support
+          | :environment_observation
           | :help
           | :memory_write
+          | :statement
           | :tell
           | :none
 
@@ -32,12 +38,18 @@ defmodule Core.Intent.Types do
     :smalltalk,
     :code,
     :brain_introspect,
+    :affirm,
+    :deny,
+    :bye,
     :command,
+    :correction,
     :debug,
     :feedback,
     :health_support,
+    :environment_observation,
     :help,
     :memory_write,
+    :statement,
     :tell,
     :none
   ]
@@ -62,13 +74,23 @@ defmodule Core.Intent.Types do
   def normalize("ask_info"), do: :ask_info
   def normalize("code"), do: :code
   def normalize("brain_introspect"), do: :brain_introspect
+  def normalize("affirm"), do: :affirm
+  def normalize("yes"), do: :affirm
+  def normalize("deny"), do: :deny
+  def normalize("no"), do: :deny
+  def normalize("bye"), do: :bye
+  def normalize("goodbye"), do: :bye
   def normalize("command"), do: :command
+  def normalize("correction"), do: :correction
   def normalize("debug"), do: :debug
   def normalize("feedback"), do: :feedback
   def normalize("health_support"), do: :health_support
   def normalize("health support"), do: :health_support
+  def normalize("environment_observation"), do: :environment_observation
+  def normalize("environment observation"), do: :environment_observation
   def normalize("help"), do: :help
   def normalize("memory_write"), do: :memory_write
+  def normalize("statement"), do: :statement
   def normalize("tell"), do: :tell
   def normalize(_), do: :none
 end

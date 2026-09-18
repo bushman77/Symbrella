@@ -48,6 +48,8 @@ defmodule Llm do
     "\nsystem:",
     "\nSystem\n",
     "\nSystem:",
+    "\nSymbrella\n",
+    "\nSymbrella:",
     "<|im_start|>user",
     "<|im_start|>system",
     "<|im_end|>",
@@ -780,8 +782,8 @@ defmodule Llm do
 
   defp strip_leading_assistant_marker(text) do
     text
-    |> String.replace(~r/\A[ \t]*assistant[ \t]*:[ \t]*/iu, "")
-    |> String.replace(~r/\A[ \t]*assistant[ \t]*(?:\r?\n)+/iu, "")
+    |> String.replace(~r/\A[ \t]*(?:assistant|symbrella)[ \t]*:[ \t]*/iu, "")
+    |> String.replace(~r/\A[ \t]*(?:assistant|symbrella)[ \t]*(?:\r?\n)+/iu, "")
   end
 
   defp truncate_generated_role_continuation(text) do
@@ -808,8 +810,8 @@ defmodule Llm do
   defp generated_role_header?(""), do: false
 
   defp generated_role_header?(line) when is_binary(line) do
-    Regex.match?(~r/^(?:user|assistant|system)\s*$/iu, line) or
-      Regex.match?(~r/^(?:user|assistant|system)\s*:/iu, line)
+    Regex.match?(~r/^(?:user|assistant|system|symbrella)\s*$/iu, line) or
+      Regex.match?(~r/^(?:user|assistant|system|symbrella)\s*:/iu, line)
   end
 
   defp extract_embedding_one(%{"data" => [%{"embedding" => emb} | _]}) when is_list(emb), do: emb

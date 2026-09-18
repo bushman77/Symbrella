@@ -291,7 +291,18 @@ defmodule Brain.ACC do
   end
 
   @impl GenServer
-  def handle_info({:proposal, meas, _meta}, state) do
+  def handle_info({:proposal, meas, meta}, state) do
+    if synthetic_math_source?(proposal_source(meta)) do
+      {:noreply, state}
+    else
+      handle_curiosity_proposal(meas, state)
+    end
+  end
+
+  @impl GenServer
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp handle_curiosity_proposal(meas, state) do
     %{
       proposal_alpha: alpha,
       cap_per_proposal: cap,
@@ -333,8 +344,24 @@ defmodule Brain.ACC do
     {:noreply, st}
   end
 
-  @impl GenServer
-  def handle_info(_, state), do: {:noreply, state}
+  defp proposal_source(meta) when is_map(meta) do
+    direct = Map.get(meta, :source) || Map.get(meta, "source")
+
+    if is_nil(direct) do
+      case Map.get(meta, :probe) || Map.get(meta, "probe") do
+        %{} = probe -> Map.get(probe, :source) || Map.get(probe, "source")
+        _ -> nil
+      end
+    else
+      direct
+    end
+  end
+
+  defp proposal_source(_), do: nil
+
+  defp synthetic_math_source?(:math), do: true
+  defp synthetic_math_source?("math"), do: true
+  defp synthetic_math_source?(_), do: false
 
   # ---- Params & helpers -----------------------------------------------------
 
