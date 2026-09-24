@@ -31,6 +31,20 @@ defmodule Brain.ActionSelectorTest do
            end)
   end
 
+  test "selects safe_support for explicit self-harm disclosure even without a frame" do
+    result =
+      ActionSelector.select(%{
+        intent: :tell,
+        confidence: 0.56,
+        text: "I might hurt myself",
+        mood: %{vigilance: 0.80, inhibition: 0.50, exploration: 0.20}
+      })
+
+    assert result.selected == :safe_support
+    assert result.selected_candidate.reason == :self_harm_disclosure
+    assert result.safety_gate == :approved
+  end
+
   test "selects store_memory for explicit memory writes" do
     result =
       ActionSelector.select(%{

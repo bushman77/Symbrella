@@ -57,6 +57,9 @@ defmodule SymbrellaWeb.RoleplayLive do
   - Keep replies under 180 words.
   """
 
+  @max_prompt_messages 12
+  @max_prompt_content_chars 1_200
+
   @impl true
   def mount(_params, _session, socket) do
     initial_message = %{
@@ -105,8 +108,10 @@ defmodule SymbrellaWeb.RoleplayLive do
         }
 
         messages_for_llm =
-          socket.assigns.messages_for_llm ++
-            [%{"role" => "user", "content" => text}]
+          append_prompt_message(socket.assigns.messages_for_llm, %{
+            "role" => "user",
+            "content" => text
+          })
 
         system_prompt = socket.assigns.system_prompt
 
@@ -174,8 +179,10 @@ defmodule SymbrellaWeb.RoleplayLive do
     }
 
     messages_for_llm =
-      socket.assigns.messages_for_llm ++
-        [%{"role" => "assistant", "content" => assistant_message.text}]
+      append_prompt_message(socket.assigns.messages_for_llm, %{
+        "role" => "assistant",
+        "content" => assistant_message.text
+      })
 
     {:noreply,
      socket
@@ -328,10 +335,13 @@ defmodule SymbrellaWeb.RoleplayLive do
   end
 
   defp run_roleplay_turn(system_prompt, messages_for_llm) do
+    messages_for_llm = Enum.take(messages_for_llm, -@max_prompt_messages)
+
     request = %{
       "model" => "symbrella-rp",
       "stream" => false,
       "temperature" => 0.8,
+      "max_tokens" => 220,
       "messages" => [
         %{"role" => "system", "content" => system_prompt}
         | messages_for_llm
@@ -348,6 +358,18 @@ defmodule SymbrellaWeb.RoleplayLive do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp append_prompt_message(messages, %{"role" => role, "content" => content})
+       when is_list(messages) and is_binary(role) do
+    messages
+    |> Kernel.++([
+      %{
+        "role" => role,
+        "content" => Core.Response.LlmHistory.clamp_text(content, @max_prompt_content_chars)
+      }
+    ])
+    |> Enum.take(-@max_prompt_messages)
   end
 
   defp sanitize_user_text(text) do

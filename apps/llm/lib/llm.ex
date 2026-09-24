@@ -293,6 +293,7 @@ defmodule Llm do
            "stream" => false,
            "stop" => @chat_stop_sequences
          },
+         body <- maybe_put_positive_integer(body, "max_tokens", Keyword.get(opts, :max_tokens)),
          {:ok, raw} <- http_post(st, "/v1/chat/completions", body, timeout: timeout),
          content <- extract_chat_content(raw) do
       {:reply, {:ok, %{content: content, raw: raw}}, st}
@@ -890,6 +891,10 @@ defmodule Llm do
 
   defp maybe_put(state, _k, nil), do: state
   defp maybe_put(state, k, v), do: Map.put(state, k, v)
+
+  defp maybe_put_positive_integer(map, _key, value) when not is_integer(value), do: map
+  defp maybe_put_positive_integer(map, _key, value) when value <= 0, do: map
+  defp maybe_put_positive_integer(map, key, value), do: Map.put(map, key, value)
 
   defp free_local_port() do
     case :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}]) do

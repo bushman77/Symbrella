@@ -9,8 +9,8 @@ defmodule Core.Response.LlmChatHistory do
   alias Core.Response.LlmChatHistoryOwner
 
   @table :core_llm_chat_history
-  @turn_pairs 6
-  @max_item_chars 1_600
+  @default_turn_pairs 3
+  @default_max_item_chars 900
 
   @compile {:no_warn_undefined, Llm}
 
@@ -21,7 +21,13 @@ defmodule Core.Response.LlmChatHistory do
     previous = lookup_messages(session_id)
 
     next =
-      LlmHistory.append_turn(previous, user_text, assistant_text, @turn_pairs, @max_item_chars)
+      LlmHistory.append_turn(
+        previous,
+        user_text,
+        assistant_text,
+        configured_turn_pairs(),
+        configured_max_item_chars()
+      )
 
     :ets.insert(@table, {session_id, next})
     :ok
@@ -36,7 +42,7 @@ defmodule Core.Response.LlmChatHistory do
   end
 
   @spec messages(term(), pos_integer()) :: list()
-  def messages(session_id, turn_pairs \\ @turn_pairs) do
+  def messages(session_id, turn_pairs \\ configured_turn_pairs()) do
     ensure_table!()
 
     session_id
@@ -71,4 +77,22 @@ defmodule Core.Response.LlmChatHistory do
         end
     end
   end
+
+  defp configured_turn_pairs do
+    llm_config(:history_turn_pairs, @default_turn_pairs)
+  end
+
+  defp configured_max_item_chars do
+    llm_config(:max_item_chars, @default_max_item_chars)
+  end
+
+  defp llm_config(key, default) do
+    :core
+    |> Application.get_env(:llm_synthesis, [])
+    |> Keyword.get(key, default)
+    |> positive_integer(default)
+  end
+
+  defp positive_integer(value, _default) when is_integer(value) and value > 0, do: value
+  defp positive_integer(_value, default), do: default
 end

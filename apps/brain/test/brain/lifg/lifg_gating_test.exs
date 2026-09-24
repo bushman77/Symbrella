@@ -1,17 +1,20 @@
+# apps/brain/test/brain/lifg/lifg_gating_test.exs
 defmodule Brain.LIFGGatingTest do
   use ExUnit.Case, async: false
+  import Brain.TestHelpers
 
   @strong_id "this|noun|0"
 
   setup do
-    %{cfg: original_wm_cfg} = Brain.snapshot_wm()
+    original_state = Brain.snapshot()
+    {:ok, clean_state} = Brain.init(:ok)
+    :sys.replace_state(Process.whereis(Brain), fn _state -> clean_state end)
 
     original =
       Application.get_env(:brain, :lifg_stage1_weights) ||
         %{lex_fit: 0.40, rel_prior: 0.30, activation: 0.20, intent_bias: 0.10}
 
-    # For this test, make Stage-1 almost entirely activation-driven so that
-    # a high :score winner clearly crosses lifg_min_score when normalized.
+    # Make Stage-1 activation-driven to isolate score-based gating
     Application.put_env(:brain, :lifg_stage1_weights, %{
       lex_fit: 0.0,
       rel_prior: 0.0,
@@ -25,8 +28,7 @@ defmodule Brain.LIFGGatingTest do
 
     on_exit(fn ->
       Application.put_env(:brain, :lifg_stage1_weights, original)
-      :ok = Brain.configure_wm(Map.to_list(original_wm_cfg))
-      _ = Brain.defocus(fn _ -> true end)
+      :sys.replace_state(Process.whereis(Brain), fn _state -> original_state end)
     end)
 
     :ok
@@ -88,8 +90,15 @@ defmodule Brain.LIFGGatingTest do
     assert [%{id: @strong_id, source: :lifg, score: lifg_score}] = out.si.lifg_choices
     assert lifg_score >= 0.6
 
-    %{wm: wm} = Brain.snapshot_wm()
+    # 🧠 Wait for async WM write instead of snapshotting immediately
+    item = assert_wm_item_exists(@strong_id, 150)
 
-    assert Enum.any?(wm, &(&1.id == @strong_id and &1.source == :lifg))
+    # Verify full item shape
+    assert item.source == :lifg
+    assert item.score >= 0.6
+    assert item.id == @strong_id
+
+    # Optional: assert activation is reasonable
+    assert item.activation >= 0.6
   end
 end

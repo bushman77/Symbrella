@@ -23,6 +23,7 @@ defmodule Core.RoleplayTurn do
   @default_model "symbrella-rp"
   @default_temperature 0.7
   @default_timeout 120_000
+  @default_max_tokens 220
 
   @type request :: map()
   @type response :: map()
@@ -43,6 +44,7 @@ defmodule Core.RoleplayTurn do
     opts = [
       temperature: normalize_temperature(Map.get(request, "temperature")),
       timeout: normalize_timeout(Map.get(request, "timeout")),
+      max_tokens: normalize_max_tokens(Map.get(request, "max_tokens")),
       stop: normalize_stop(Map.get(request, "stop"))
     ]
 
@@ -91,6 +93,11 @@ defmodule Core.RoleplayTurn do
 
   defp normalize_timeout(value) when is_integer(value) and value > 0, do: value
   defp normalize_timeout(_value), do: @default_timeout
+
+  defp normalize_max_tokens(value) when is_integer(value) and value > 0,
+    do: min(value, @default_max_tokens)
+
+  defp normalize_max_tokens(_value), do: @default_max_tokens
 
   defp completion_response(model, content, raw) do
     %{

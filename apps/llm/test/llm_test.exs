@@ -61,6 +61,53 @@ defmodule LlmTest do
              Llm.status(name: name)
   end
 
+  test "chat forwards max_tokens to the OpenAI-compatible request body" do
+    name = :"llm_chat_test_#{System.unique_integer([:positive])}"
+
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "symbrella-llm-test-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(tmp_dir)
+
+    model_path = Path.join(tmp_dir, "model.gguf")
+    server_path = Path.join(tmp_dir, "fake_llama_server.py")
+    body_path = model_path <> ".chat_body"
+
+    File.write!(model_path, "fake model")
+    File.write!(server_path, fake_llama_server_script())
+    File.chmod!(server_path, 0o755)
+
+    {:ok, pid} =
+      Llm.start_link(
+        name: name,
+        auto_start_on_boot?: false,
+        allow_lazy_start?: true,
+        auto_restart_on_crash?: false,
+        heartbeat_ms: 0,
+        model_path: model_path,
+        llama_server: server_path,
+        timeout: 5_000,
+        port: 0
+      )
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    assert {:ok, %{content: "fake chat response"}} =
+             Llm.chat([%{"role" => "user", "content" => "hello"}],
+               name: name,
+               timeout: 5_000,
+               call_timeout: 6_000,
+               max_tokens: 17
+             )
+
+    body = body_path |> File.read!() |> Jason.decode!()
+    assert body["max_tokens"] == 17
+    assert body["messages"] == [%{"role" => "user", "content" => "hello"}]
+  end
+
   defp read_child_pid!(path), do: read_child_pid!(path, 20)
 
   defp read_child_pid!(path, 0) do
@@ -128,6 +175,31 @@ defmodule LlmTest do
         def do_GET(self):
             if self.path == "/v1/models":
                 body = json.dumps({"data": [{"id": "fake-local"}]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def do_POST(self):
+            if self.path == "/v1/chat/completions":
+                length = int(self.headers.get("content-length", "0"))
+                request_body = self.rfile.read(length)
+                with open(args.m + ".chat_body", "wb") as file:
+                    file.write(request_body)
+                body = json.dumps({
+                    "choices": [
+                        {"message": {"content": "fake chat response"}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2
+                    }
+                }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(body)))

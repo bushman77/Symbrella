@@ -16,7 +16,7 @@ defmodule Core.Comprehension.Summary do
   @fallback_rate_threshold 0.35
 
   @low_info_terms MapSet.new(~w(
-    a an the and or to of in on for with at by is are was were be been being
+    a an the and or to of in on for with at by beside near through is are was were be been being
     i you he she it we they me him her us them my your his its our their this
     that these those have has had do does did tell say ask about
   ))
@@ -54,8 +54,10 @@ defmodule Core.Comprehension.Summary do
     keyword = normalize_term(Map.get(si, :keyword) || Map.get(si, "keyword"))
     sentence = normalize_sentence(Map.get(si, :sentence) || Map.get(si, "sentence"))
     choices = List.wrap(Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || [])
+    tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
 
     {strong, weak, stats} = split_choice_terms(choices)
+    unresolved = unresolved_content_terms(tokens, choices)
 
     understood =
       []
@@ -67,10 +69,12 @@ defmodule Core.Comprehension.Summary do
 
     uncertain =
       weak
+      |> Kernel.++(unresolved)
       |> clean_terms()
       |> Enum.reject(&(&1 in understood))
       |> Enum.take(@summary_limit)
 
+    stats = Map.put(stats, :unresolved_content, length(unresolved))
     reasons = degradation_reasons(stats, choices)
     degraded? = reasons != []
 
@@ -81,6 +85,7 @@ defmodule Core.Comprehension.Summary do
       keyword: blank_to_nil(keyword),
       understood: understood,
       uncertain: uncertain,
+      unresolved: unresolved,
       degraded?: degraded?,
       reasons: reasons,
       stats: stats
@@ -131,6 +136,7 @@ defmodule Core.Comprehension.Summary do
     []
     |> maybe_reason(stats.fallback_rate >= @fallback_rate_threshold, :fallback_rate_high)
     |> maybe_reason(stats.weak_rate >= @weak_rate_threshold, :weak_decision_rate_high)
+    |> maybe_reason(Map.get(stats, :unresolved_content, 0) > 0, :unresolved_content_tokens)
   end
 
   defp maybe_add_keyword(acc, "", _intent), do: acc
@@ -196,6 +202,73 @@ defmodule Core.Comprehension.Summary do
   end
 
   defp fallback_choice?(_), do: false
+
+  defp unresolved_content_terms(tokens, choices) when is_list(tokens) and is_list(choices) do
+    chosen_indices =
+      choices
+      |> Enum.map(&choice_token_index/1)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    tokens
+    |> Enum.with_index()
+    |> Enum.reject(fn {token, fallback_idx} ->
+      token_index = token_index(token, fallback_idx)
+      MapSet.member?(chosen_indices, token_index)
+    end)
+    |> Enum.map(fn {token, _fallback_idx} -> token_term(token) end)
+    |> clean_terms()
+  end
+
+  defp unresolved_content_terms(_tokens, _choices), do: []
+
+  defp choice_token_index(choice) when is_map(choice) do
+    choice
+    |> map_get(:token_index)
+    |> integer_or_nil()
+  end
+
+  defp choice_token_index(_), do: nil
+
+  defp token_index(token, fallback_idx) when is_map(token) do
+    token
+    |> map_get(:token_index)
+    |> case do
+      nil -> map_get(token, :index)
+      value -> value
+    end
+    |> integer_or_nil()
+    |> case do
+      nil -> fallback_idx
+      index -> index
+    end
+  end
+
+  defp token_index(_token, fallback_idx), do: fallback_idx
+
+  defp token_term(token) when is_map(token) do
+    token
+    |> map_get(:norm)
+    |> case do
+      nil -> map_get(token, :phrase)
+      term -> term
+    end
+    |> normalize_term()
+  end
+
+  defp token_term(token) when is_binary(token), do: normalize_term(token)
+  defp token_term(_), do: ""
+
+  defp integer_or_nil(value) when is_integer(value) and value >= 0, do: value
+
+  defp integer_or_nil(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {index, _rest} when index >= 0 -> index
+      _ -> nil
+    end
+  end
+
+  defp integer_or_nil(_), do: nil
 
   defp clean_terms(terms) do
     terms

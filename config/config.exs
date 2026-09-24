@@ -29,9 +29,11 @@ config :core,
   mwe_general_bump: 0.01
 
 config :core, :llm_synthesis,
-  timeout_ms: 15_000,
-  history_turn_pairs: 6,
-  max_item_chars: 1_600,
+  timeout_ms: 10_000,
+  ready_timeout_ms: 2_500,
+  max_tokens: 220,
+  history_turn_pairs: 3,
+  max_item_chars: 900,
   max_system_chars: 8_000,
   max_user_chars: 2_000,
   degraded_acc_conflict_min: 0.5
@@ -113,7 +115,10 @@ config :brain, Brain.MoodCore,
 # ───────────────────────────── Web ────────────────────────────────
 config :llm, Llm,
   # model_path: Path.expand("\~/models/qwen2.5-7b-instruct-gguf/Qwen2.5-7B-Instruct-Q4_K_M.gguf"),
-  model_path: Path.expand("\~/models/mythomax-l2-13b.Q4_K_M.gguf"),
+  model_path:
+    Path.expand(
+      "\~/.cache/huggingface/hub/models--unsloth--Qwen3-Coder-30B-A3B-Instruct-GGUF/snapshots/b17cb02dd882d5b6ab62fc777ad2995f19668350/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+    ),
   # model_path: "/home/ubuntu/llm-training/riptide-qa-3b-q4_k_m.gguf",
   llama_server: "llama-server",
   # Synchronous boot is handled by Llm.BootGate. Keep the GenServer's own

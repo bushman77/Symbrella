@@ -273,6 +273,64 @@ defmodule Core.Response.LlmRouteFlowTest do
            ]
   end
 
+  test "LLM synthesis applies configured timeout, token, and history budgets" do
+    old_config = Application.get_env(:core, :llm_synthesis, [])
+
+    Application.put_env(
+      :core,
+      :llm_synthesis,
+      Keyword.merge(old_config,
+        timeout_ms: 1_234,
+        ready_timeout_ms: 333,
+        max_tokens: 44,
+        history_turn_pairs: 1,
+        max_item_chars: 12
+      )
+    )
+
+    on_exit(fn -> Application.put_env(:core, :llm_synthesis, old_config) end)
+
+    session_id = "resource-budget-#{System.unique_integer([:positive])}"
+
+    Core.Response.LlmChatHistory.record_turn(
+      session_id,
+      "first history turn should be dropped",
+      "first response should be dropped"
+    )
+
+    Core.Response.LlmChatHistory.record_turn(
+      session_id,
+      "recent",
+      "assistant answer is intentionally long"
+    )
+
+    si = %{
+      intent: :question,
+      confidence: 0.92,
+      text: "configured budget prompt",
+      session_id: session_id
+    }
+
+    {_tone, "LLM verbalized the symbolic posture.", meta} = Response.plan(si, %{})
+
+    assert meta.response_source == :llm
+    assert_receive {:llm_chat, messages, opts}
+    assert Keyword.get(opts, :timeout) == 1_234
+    assert Keyword.get(opts, :call_timeout) == 2_234
+    assert Keyword.get(opts, :ready_timeout) == 333
+    assert Keyword.get(opts, :max_tokens) == 44
+
+    history_messages =
+      messages
+      |> Enum.reject(&(&1["role"] == "system"))
+      |> Enum.drop(-1)
+
+    assert history_messages == [
+             %{"role" => "user", "content" => "recent"},
+             %{"role" => "assistant", "content" => "assistant an…"}
+           ]
+  end
+
   test "fuzzy LLM drafts are reflected into bounded clarification" do
     handler_id = "llm-route-reflection-#{System.unique_integer([:positive])}"
     parent = self()

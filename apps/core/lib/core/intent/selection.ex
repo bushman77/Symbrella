@@ -277,12 +277,18 @@ defmodule Core.Intent.Selection do
     |> maybe_put_topic_metadata()
   end
 
-  defp maybe_put_topic_metadata(%{primary_text: text} = si), do: put_topic_metadata(si, text)
+  defp maybe_put_topic_metadata(%{primary_text: text} = si)
+       when is_binary(text) and text != "",
+       do: put_topic_metadata(si, text)
 
-  defp maybe_put_topic_metadata(%{fuzzy_text: %{text: text}} = si),
-    do: put_topic_metadata(si, text)
+  defp maybe_put_topic_metadata(%{fuzzy_text: %{text: text}} = si)
+       when is_binary(text) and text != "",
+       do: put_topic_metadata(si, text)
 
-  defp maybe_put_topic_metadata(%{sentence: text} = si), do: put_topic_metadata(si, text)
+  defp maybe_put_topic_metadata(%{sentence: text} = si)
+       when is_binary(text) and text != "",
+       do: put_topic_metadata(si, text)
+
   defp maybe_put_topic_metadata(si), do: si
 
   defp put_topic_metadata(si, text) when is_binary(text) do
@@ -298,7 +304,12 @@ defmodule Core.Intent.Selection do
     maybe_put(
       si,
       :context_frame,
-      context_frame(Map.get(si, :intent), text, Map.get(si, :conversation_act), Map.get(si, :topic_domain))
+      context_frame(
+        Map.get(si, :intent),
+        text,
+        Map.get(si, :conversation_act),
+        Map.get(si, :topic_domain)
+      )
     )
   end
 
@@ -797,7 +808,10 @@ defmodule Core.Intent.Selection do
       Regex.match?(~r/^\s*(?:yes|yeah|yep|yup|sure|correct|right|exactly|ok|okay)\b/i, s) ->
         0.82
 
-      Regex.match?(~r/\b(?:that's\s+right|that\s+is\s+right|sounds\s+good|works\s+for\s+me)\b/i, s) ->
+      Regex.match?(
+        ~r/\b(?:that's\s+right|that\s+is\s+right|sounds\s+good|works\s+for\s+me)\b/i,
+        s
+      ) ->
         0.78
 
       true ->
@@ -820,7 +834,10 @@ defmodule Core.Intent.Selection do
 
   defp score_bye(s) do
     cond do
-      Regex.match?(~r/^\s*(?:bye|goodbye|good\s+bye|see\s+you|talk\s+to\s+you\s+later|later)\b/i, s) ->
+      Regex.match?(
+        ~r/^\s*(?:bye|goodbye|good\s+bye|see\s+you|talk\s+to\s+you\s+later|later)\b/i,
+        s
+      ) ->
         0.84
 
       true ->
@@ -1085,6 +1102,7 @@ defmodule Core.Intent.Selection do
     sleep? = Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|exhausted|rest)\b/i, s)
     med? = Regex.match?(~r/\b(medication|medicine|meds|dose|quetiapine|seroquel)\b/i, s)
     missed? = Regex.match?(~r/\b(forgot|missed|skip(?:ped)?|forget)\b/i, s)
+    self_harm? = self_harm_risk?(s)
 
     distress? =
       Regex.match?(~r/\b(trouble|can't|cannot|can\s+not|hard\s+time|problem|issue)\b/i, s)
@@ -1092,6 +1110,7 @@ defmodule Core.Intent.Selection do
     self_disclosure? = Regex.match?(~r/^\s*(i|i've|i have|i'm|i am|my)\b/i, s)
 
     cond do
+      self_harm? -> 0.96
       med? and missed? and sleep? -> 0.94
       med? and missed? -> 0.88
       sleep? and distress? and self_disclosure? -> 0.82
@@ -1209,8 +1228,11 @@ defmodule Core.Intent.Selection do
       score_preference_statement(s) >= 0.70 ->
         0.78
 
-      Regex.match?(~r/^\s*(i|my|we|our)\b/i, s) and not looks_like_question?(s) -> 0.56
-      true -> 0.0
+      Regex.match?(~r/^\s*(i|my|we|our)\b/i, s) and not looks_like_question?(s) ->
+        0.56
+
+      true ->
+        0.0
     end
   end
 
@@ -1295,6 +1317,9 @@ defmodule Core.Intent.Selection do
       Regex.match?(~r/\b(quetiapine|seroquel|medication|medicine|meds|dose)\b/i, text) and
           Regex.match?(~r/\b(sleep|sleeping|insomnia|tired|rest)\b/i, text) ->
         :health_sleep_medication
+
+      self_harm_risk?(text) ->
+        :health_crisis
 
       score_affect_disclosure(text) >= 0.70 ->
         :personal_state
@@ -1461,11 +1486,28 @@ defmodule Core.Intent.Selection do
 
   defp health_state(text) do
     cond do
-      Regex.match?(~r/\b(?:sleep|sleeping|insomnia|tired|exhausted|rest)\b/i, text) -> :sleep
-      Regex.match?(~r/\b(?:medication|medicine|meds|dose|quetiapine|seroquel)\b/i, text) -> :medication
-      true -> :health
+      self_harm_risk?(text) ->
+        :self_harm_risk
+
+      Regex.match?(~r/\b(?:sleep|sleeping|insomnia|tired|exhausted|rest)\b/i, text) ->
+        :sleep
+
+      Regex.match?(~r/\b(?:medication|medicine|meds|dose|quetiapine|seroquel)\b/i, text) ->
+        :medication
+
+      true ->
+        :health
     end
   end
+
+  defp self_harm_risk?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(?:hurt\s+myself|harm\s+myself|kill\s+myself|end\s+my\s+life|suicide|suicidal)\b/i,
+      text
+    )
+  end
+
+  defp self_harm_risk?(_), do: false
 
   defp affect_state(text) do
     cond do

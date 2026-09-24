@@ -73,6 +73,7 @@ defmodule Brain.ActionSelector do
     confidence = number(map_get(ctx, :confidence, 0.0))
     frame = map_get(ctx, :symbolic_frame, %{})
     frame_type = map_get(frame, :type)
+    text = map_get(ctx, :text, "")
 
     cond do
       internal_salience_intent?(intent) ->
@@ -84,6 +85,17 @@ defmodule Brain.ActionSelector do
 
       frame_type == :health_support_event ->
         health_support_event_candidates(frame)
+
+      self_harm_risk?(text) ->
+        [
+          candidate(:safe_support, 0.94, :self_harm_disclosure,
+            speech_required?: true,
+            memory_relevant?: true
+          ),
+          candidate(:self_check, 0.52, :safety_state_check),
+          candidate(:ask_clarifying_question, 0.36, :supportive_followup, speech_required?: true),
+          candidate(:observe_silently, 0.08, :support_requested)
+        ]
 
       intent == :health_support ->
         [
@@ -272,6 +284,15 @@ defmodule Brain.ActionSelector do
       candidate(:store_memory, 0.26, :possible_relationship_context, memory_relevant?: true)
     ]
   end
+
+  defp self_harm_risk?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(?:hurt\s+myself|harm\s+myself|kill\s+myself|end\s+my\s+life|suicide|suicidal)\b/i,
+      text
+    )
+  end
+
+  defp self_harm_risk?(_), do: false
 
   defp candidate(action, score, reason, opts \\ []) do
     %{

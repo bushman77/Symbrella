@@ -47,6 +47,40 @@ defmodule Core.Comprehension.SummaryTest do
     assert :weak_decision_rate_high in summary.reasons
   end
 
+  test "marks unresolved content tokens as uncertainty instead of silent understanding" do
+    si = %{
+      intent: :tell,
+      keyword: "beside",
+      sentence: "I sat on the bank beside the river",
+      confidence: 0.56,
+      tokens: [
+        %{token_index: 0, norm: "i"},
+        %{token_index: 1, norm: "sat"},
+        %{token_index: 2, norm: "on"},
+        %{token_index: 3, norm: "the"},
+        %{token_index: 4, norm: "bank"},
+        %{token_index: 5, norm: "beside"},
+        %{token_index: 6, norm: "the"},
+        %{token_index: 7, norm: "river"}
+      ],
+      lifg_choices: [
+        %{token_index: 0, id: "i|pronoun|0", lemma: "i", score: 1.0},
+        %{token_index: 2, id: "on|preposition|0", lemma: "on", score: 1.0},
+        %{token_index: 3, id: "the|determiner|0", lemma: "the", score: 1.0},
+        %{token_index: 6, id: "the|determiner|0", lemma: "the", score: 1.0}
+      ]
+    }
+
+    summary = Summary.build(si)
+
+    assert summary.unresolved == ["sat", "bank", "river"]
+    assert "bank" in summary.uncertain
+    assert "river" in summary.uncertain
+    assert summary.degraded?
+    assert :unresolved_content_tokens in summary.reasons
+    assert summary.stats.unresolved_content == 3
+  end
+
   test "attach writes summary and trace contract" do
     si =
       Summary.attach(%{

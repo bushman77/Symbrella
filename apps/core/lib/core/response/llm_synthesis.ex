@@ -24,8 +24,6 @@ defmodule Core.Response.LlmSynthesis do
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
 
-  @chat_opts [timeout: :infinity]
-
   # Toggle prompt logging (dev-only recommended):
   #   config :core, :log_llm_prompts?, true
 
@@ -65,7 +63,7 @@ defmodule Core.Response.LlmSynthesis do
 
     system_prompt = build_prompt(context, prompt_type)
     emit_prompt_event(system_prompt, user_text, context)
-    history = LlmChatHistory.messages(session_id)
+    history = LlmChatHistory.messages(session_id, history_turn_pairs())
 
     messages =
       [%{"role" => "system", "content" => system_prompt}] ++
@@ -76,7 +74,7 @@ defmodule Core.Response.LlmSynthesis do
       log_prompt_bundle(messages, context)
     end
 
-    case llm_client().chat(messages, @chat_opts) do
+    case llm_client().chat(messages, chat_opts()) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
         draft = sanitize_model_text(content)
         {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
@@ -245,4 +243,30 @@ defmodule Core.Response.LlmSynthesis do
   defp llm_client do
     Application.get_env(:core, :llm_client, Llm)
   end
+
+  defp chat_opts do
+    timeout_ms = llm_config(:timeout_ms, 10_000)
+    ready_timeout_ms = min(timeout_ms, llm_config(:ready_timeout_ms, 2_500))
+
+    [
+      timeout: timeout_ms,
+      call_timeout: timeout_ms + 1_000,
+      ready_timeout: ready_timeout_ms,
+      max_tokens: llm_config(:max_tokens, 220)
+    ]
+  end
+
+  defp history_turn_pairs do
+    llm_config(:history_turn_pairs, 3)
+  end
+
+  defp llm_config(key, default) do
+    :core
+    |> Application.get_env(:llm_synthesis, [])
+    |> Keyword.get(key, default)
+    |> positive_integer(default)
+  end
+
+  defp positive_integer(value, _default) when is_integer(value) and value > 0, do: value
+  defp positive_integer(_value, default), do: default
 end

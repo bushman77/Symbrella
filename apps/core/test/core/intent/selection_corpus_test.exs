@@ -78,6 +78,28 @@ defmodule Core.Intent.SelectionCorpusTest do
     assert Enum.any?(si.intent_evidence, &(&1.role == :social_opener))
   end
 
+  test "self-harm disclosure is health support instead of a generic tell" do
+    si = Selection.select(%{sentence: "I might hurt myself", tokens: [], trace: []})
+
+    assert si.intent == :health_support
+    assert si.confidence > 0.70
+    assert si.conversation_act == :personal_disclosure
+    assert si.topic_domain == :health_crisis
+    assert si.context_frame.subject == :user
+    assert si.context_frame.attribute == :health
+    assert si.context_frame.state == :self_harm_risk
+    assert [%{role: :winner, intent: :health_support} | _] = si.intent_evidence
+  end
+
+  test "resolve_input preserves context metadata for SemanticInput structs" do
+    si = Core.resolve_input("I might hurt myself", mode: :test)
+
+    assert si.intent == :health_support
+    assert si.conversation_act == :personal_disclosure
+    assert si.topic_domain == :health_crisis
+    assert si.context_frame.state == :self_harm_risk
+  end
+
   test "social opener keeps primary question as main intent" do
     si = Selection.select(%{sentence: "Yo, do you remember my name?", tokens: [], trace: []})
 

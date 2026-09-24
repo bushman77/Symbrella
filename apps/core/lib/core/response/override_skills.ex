@@ -17,6 +17,7 @@ defmodule Core.Response.OverrideSkills do
         &Utility.illicit_redirect/2,
         &Companion.apply/2,
         &Utility.time/2,
+        &Utility.current_events/2,
         &SelfState.apply/2,
         &Utility.alarm/2
       ])
@@ -33,6 +34,8 @@ defmodule Core.Response.OverrideSkills do
              :illicit_request_redirect,
              :symbrella_definition,
              :time,
+             :current_events_capability,
+             :recognizable_topic_fallback,
              :alarm_capability
            ] and is_binary(s) and s != "" do
     s
