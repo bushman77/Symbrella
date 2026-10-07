@@ -56,17 +56,17 @@ config/prod.secret.exs
 apps/core/priv/negcache/
 *.dets
 
-# Large local data you don't want in Git
+# ───────── Dictionary bootstrap artifacts ─────────
+# Massive Kaikki/Wiktextract raw dump (~20 GB)
+apps/db/priv/raw-wiktextract-data.jsonl.gz
+apps/db/priv/raw-wiktextract-data.jsonl.gz.part
+# Extracted English corpus (~2.6 GB)
+apps/db/priv/english.jsonl
+apps/db/priv/english.jsonl.tmp
+# Legacy filename from older script versions
 apps/db/priv/kaikki.org-dictionary-English.jsonl
 
-apps/db/priv/kaikki.org-dictionary-English.jsonl
-# Massive Kaikki/Wiktextract dump (generated/local-only)
-apps/db/priv/english.jsonl
-apps/db/priv/english.7z
-# Kaikki / Wiktextract local corpus
-/apps/db/priv/raw-wiktextract-data.jsonl.gz
-/apps/db/priv/raw-wiktextract-data.jsonl.gz.part
-/apps/db/priv/english.jsonl
-/apps/db/priv/english.jsonl.tmp
+# ───────── Misc ─────────
+pgvector/
 .aider*
 output.txt
