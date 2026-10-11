@@ -18,8 +18,8 @@ config :core, Core.Recall.Synonyms,
   top_k: 12
 
 config :core,
-  recall_budget_ms: :infinity,
-  recall_max_items: :infinity,
+  recall_budget_ms: 2000,
+  recall_max_items: 12,
   agency_ledger_enabled?: true,
   agency_execute_commands?: true,
   agency_require_permission?: false,
@@ -29,13 +29,13 @@ config :core,
   mwe_general_bump: 0.01
 
 config :core, :llm_synthesis,
-  timeout_ms: 10_000,
-  ready_timeout_ms: 2_500,
-  max_tokens: 220,
-  history_turn_pairs: 3,
-  max_item_chars: 900,
-  max_system_chars: 8_000,
-  max_user_chars: 2_000,
+  timeout_ms: 120_000,
+  ready_timeout_ms: 10_000,
+  max_tokens: 150,
+  history_turn_pairs: 2,
+  max_item_chars: 500,
+  max_system_chars: 4_000,
+  max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5
 
 config :core, Core.Curiosity.Bridge,
@@ -129,7 +129,7 @@ config :db, Db,
   hostname: System.get_env("PGHOST", "127.0.0.1"),
   port: String.to_integer(System.get_env("PGPORT", "5432")),
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10,
+  pool_size: 3,
   types: Db.PostgrexTypes,
   log: System.get_env("DB_LOG", "false") in ["true", "1", "on", "yes"]
 

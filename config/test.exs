@@ -49,7 +49,7 @@ config :llm, Llm.BootGate, enabled?: false
 # Logger / ExUnit
 # -------------------------------
 config :logger, level: :warning
-config :ex_unit, capture_log: true
+config :ex_unit, capture_log: false
 
 # -------------------------------
 # Phoenix runtime knobs for tests

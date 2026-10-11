@@ -39,6 +39,8 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Reanalysis
   alias Brain.LIFG.ContextFit
   alias Brain.LIFG.ClosedClass
+  alias Brain.LIFG.Stage1.PosBias
+  alias Brain.LIFG.Stage1.Boundary
 
   @default_weights %{
     lex_fit: 0.40,
@@ -539,39 +541,6 @@ defmodule Brain.LIFG.Stage1 do
     has_mw_flag || (is_integer(n_val) and n_val > 1) || String.contains?(id, "|phrase|")
   end
 
-  defp telemetry_phrase(tok, token_phrase) do
-    Safe.get(tok, :lemma) ||
-      Safe.get(tok, "lemma") ||
-      Safe.get(tok, :word) ||
-      Safe.get(tok, "word") ||
-      token_phrase
-  end
-
-  # ---------- Boundary / chargram guard ----------
-
-  @spec boundary_check(binary() | nil, map(), binary(), boolean()) ::
-          :ok | {:error, :chargram | :nonword_edges | :span_mismatch}
-  defp boundary_check(sentence, tok, phrase_norm, token_mwe?) do
-    source = Safe.get(tok, :source) || Safe.get(tok, "source")
-    kind = Safe.get(tok, :kind) || Safe.get(tok, "kind")
-    flag = Safe.get(tok, :chargram?, false) || Safe.get(tok, "chargram?", false)
-
-    cond do
-      source in [:chargram, :char_ngram, "chargram", "char_ngram"] or
-        kind in [:chargram, :char_ngram, "chargram", "char_ngram"] or flag ->
-        {:error, :chargram}
-
-      phrase_nil_or_empty?(phrase_norm) ->
-        {:error, :chargram}
-
-      token_mwe? ->
-        boundary_check_mwe(sentence, tok, phrase_norm)
-
-      true ->
-        boundary_check_unigram(sentence, tok, phrase_norm)
-    end
-  end
-
   # ---------- Scoring loop ----------
 
   defp score_tokens(tokens, ctx) do
@@ -599,23 +568,23 @@ defmodule Brain.LIFG.Stage1 do
     {final.choices, final}
   end
 
-  defp score_token(tok, acc, ctx) do
-    raw_phrase = token_raw_phrase(tok)
-    token_phrase = norm(raw_phrase)
-    token_mwe? = token_mwe?(tok)
-    tok_index = token_index(tok, 0)
+defp score_token(tok, acc, ctx) do
+  raw_phrase = token_raw_phrase(tok)
+  token_phrase = norm(raw_phrase)
+  token_mwe? = token_mwe?(tok)
+  tok_index = token_index(tok, 0)
 
-    case boundary_check(ctx.sent, tok, token_phrase, token_mwe?) do
-      :ok ->
-        score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx)
+  case Boundary.check(ctx.sent, tok, token_phrase, token_mwe?) do
+    :ok ->
+      score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx)
 
-      {:error, :chargram} ->
-        handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx)
+    {:error, :chargram} ->
+      Boundary.handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx)
 
-      {:error, reason} ->
-        handle_boundary_drop(tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx)
-    end
+    {:error, reason} ->
+      Boundary.handle_boundary_drop(tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx)
   end
+end
 
   defp score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx) do
     orig_cands =
@@ -676,7 +645,7 @@ defmodule Brain.LIFG.Stage1 do
       true ->
         bias_val = get_float(ctx.bias_map, tok_index, 0.0)
         {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
-        closed_class_slate? = Enum.any?(cand_list, &closed_class_candidate?/1)
+       closed_class_slate? = Enum.any?(cand_list, &ClosedClass.closed_class_candidate?/1) 
 
         scored_rows =
           Enum.map(cand_list, fn c ->
@@ -728,10 +697,10 @@ defmodule Brain.LIFG.Stage1 do
               |> get_num(:context_fit, context0)
               |> clamp01()
 
-            pos_bias =
-              ClosedClass.closed_class_pos_bias(token_phrase, pos) +
-                local_context_pos_bias(acc, tok, pos) +
-                token_window_pos_bias(ctx, tok, pos)
+           pos_bias =
+  ClosedClass.closed_class_pos_bias(token_phrase, pos) +
+    PosBias.local_context(acc, tok, pos) +
+    PosBias.window(ctx, tok, pos) 
 
             perception_bias =
               perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
@@ -887,7 +856,7 @@ defmodule Brain.LIFG.Stage1 do
         choice = %{
           token_index: tok_index,
           index: tok_index,
-          span_start: token_start(tok),
+          span_start: PosBias.token_start(tok), 
           id: chosen_id,
           chosen_id: chosen_id,
           veto?: chosen_veto?,
@@ -980,52 +949,6 @@ defmodule Brain.LIFG.Stage1 do
     :ok
   rescue
     _ -> :ok
-  end
-
-  defp handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx) do
-    tele_phrase = telemetry_phrase(tok, token_phrase)
-
-    :telemetry.execute(
-      ctx.chargram_event,
-      %{},
-      %{
-        token_index: tok_index,
-        phrase: tele_phrase,
-        mw: token_mwe?,
-        reason: :chargram,
-        count: 1,
-        frame_seq: ctx.frame_seq,
-        frame_ts_ms: ctx.frame_ts_ms,
-        frame_run_id: ctx.frame_run_id,
-        v: 2
-      }
-    )
-
-    acc
-    |> Map.update!(:rejected, &[tok_index | &1])
-    |> Map.update!(:chargram, &(&1 + 1))
-  end
-
-  defp handle_boundary_drop(_tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx) do
-    :telemetry.execute(
-      ctx.boundary_event,
-      %{},
-      %{
-        token_index: tok_index,
-        phrase: token_phrase,
-        mw: token_mwe?,
-        reason: reason,
-        count: 1,
-        frame_seq: ctx.frame_seq,
-        frame_ts_ms: ctx.frame_ts_ms,
-        frame_run_id: ctx.frame_run_id,
-        v: 2
-      }
-    )
-
-    acc
-    |> Map.update!(:rejected, &[tok_index | &1])
-    |> Map.update!(:boundary_drops, &(&1 + 1))
   end
 
   # ---------- Stage1 summary telemetry ----------
@@ -1611,133 +1534,6 @@ defmodule Brain.LIFG.Stage1 do
 
   defp guess_cell_lemma(id), do: to_string(id)
 
-  # ---------- Boundary helpers ----------
-
-  defp boundary_check_mwe(sentence, tok, phrase_norm) do
-    span = tok_span(tok)
-
-    case {sentence, span} do
-      {s, {start, stop}} when is_binary(s) ->
-        if span_sub_norm(s, start, stop) == phrase_norm do
-          :ok
-        else
-          {:error, :chargram}
-        end
-
-      _ ->
-        if phrase_valid_mwe?(phrase_norm), do: :ok, else: {:error, :chargram}
-    end
-  end
-
-  defp tok_span(tok) do
-    case Safe.get(tok, :span) || Safe.get(tok, "span") do
-      {s, e} when is_integer(s) and is_integer(e) and s >= 0 and e > s ->
-        {s, e}
-
-      [s, e] when is_integer(s) and is_integer(e) and s >= 0 and e > s ->
-        {s, e}
-
-      _ ->
-        nil
-    end
-  end
-
-  defp span_sub_norm(sentence, start, stop) do
-    try do
-      cond do
-        not is_binary(sentence) or not is_integer(start) or not is_integer(stop) ->
-          ""
-
-        start < 0 or stop <= start or stop > byte_size(sentence) ->
-          ""
-
-        true ->
-          binary_part(sentence, start, stop - start)
-          |> norm()
-      end
-    rescue
-      _ -> ""
-    end
-  end
-
-  defp byte_at(bin, idx) when is_binary(bin) and is_integer(idx) do
-    if idx >= 0 and idx < byte_size(bin), do: :binary.at(bin, idx), else: nil
-  end
-
-  defp word_byte?(nil), do: false
-
-  defp word_byte?(c) when is_integer(c) do
-    (c >= ?0 and c <= ?9) or (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or c == ?_
-  end
-
-  defp boundary_check_unigram(sentence, tok, phrase_norm) do
-    span = tok_span(tok)
-
-    case {sentence, span} do
-      {s, {start, stop}} when is_binary(s) ->
-        size = byte_size(s)
-        sub_norm = span_sub_norm(s, start, stop)
-
-        cond do
-          sub_norm != phrase_norm ->
-            cond do
-              String.contains?(phrase_norm, " ") ->
-                {:error, :chargram}
-
-              phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) ->
-                {:error, :span_mismatch}
-
-              true ->
-                {:error, :chargram}
-            end
-
-          true ->
-            left_ok = start == 0 or not word_byte?(byte_at(s, start - 1))
-            right_ok = stop == size or not word_byte?(byte_at(s, stop))
-
-            if left_ok and right_ok, do: :ok, else: {:error, :nonword_edges}
-        end
-
-      _ ->
-        if phrase_valid_unigram?(phrase_norm) or phrase_valid_mwe?(phrase_norm) do
-          :ok
-        else
-          {:error, :chargram}
-        end
-    end
-  end
-
-  # ---------- Phrase shape helpers ----------
-
-  defp phrase_nil_or_empty?(nil), do: true
-  defp phrase_nil_or_empty?(""), do: true
-  defp phrase_nil_or_empty?(p) when is_binary(p), do: String.trim(p) == ""
-  defp phrase_nil_or_empty?(_), do: false
-
-  defp phrase_valid_unigram?(phrase) when is_binary(phrase) do
-    clean =
-      phrase
-      |> String.downcase()
-      |> String.replace(~r/[^[:alnum:]]/u, "")
-      |> String.trim()
-
-    clean != "" and not String.contains?(clean, " ")
-  end
-
-  defp phrase_valid_unigram?(_), do: false
-
-  defp phrase_valid_mwe?(phrase) when is_binary(phrase) do
-    tokens =
-      phrase
-      |> String.downcase()
-      |> String.trim()
-      |> String.split(~r/\s+/, trim: true)
-
-    length(tokens) >= 2 and Enum.all?(tokens, &phrase_valid_unigram?/1)
-  end
-
-  defp phrase_valid_mwe?(_), do: false
-
   # ---------- Mood / Cerebellum helpers ----------
 
   defp apply_mood_if_up(base, token, sense_id) do
@@ -2032,178 +1828,6 @@ defmodule Brain.LIFG.Stage1 do
       pair -> pair
     end)
   end
-
-  defp local_context_pos_bias(acc, tok, pos) when is_map(acc) and is_map(tok) do
-    current_start = token_start(tok)
-    candidate_family = syntactic_pos_family(pos)
-
-    acc
-    |> Map.get(:choices, [])
-    |> nearest_left_choice(current_start)
-    |> previous_choice_pos_family()
-    |> context_bias_for(candidate_family)
-  end
-
-  defp local_context_pos_bias(_acc, _tok, _pos), do: 0.0
-
-  defp token_window_pos_bias(ctx, tok, pos) when is_map(ctx) and is_map(tok) do
-    token_phrase = tok |> token_raw_phrase() |> norm()
-    family = syntactic_pos_family(pos)
-
-    fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
-      greeting_chain_pos_bias(ctx, tok, token_phrase, family)
-  end
-
-  defp token_window_pos_bias(_ctx, _tok, _pos), do: 0.0
-
-  defp fine_day_pos_bias("fine", "day", :adjective), do: 0.34
-  defp fine_day_pos_bias("fine", "day", :verb), do: -0.34
-  defp fine_day_pos_bias("fine", "day", :noun), do: -0.08
-  defp fine_day_pos_bias(_phrase, _next_phrase, _family), do: 0.0
-
-  defp greeting_chain_pos_bias(ctx, tok, token_phrase, family) do
-    case greeting_expected_family(ctx, tok, token_phrase) do
-      nil ->
-        0.0
-
-      ^family ->
-        0.28
-
-      expected when expected in [:adverb, :auxiliary, :pronoun, :verb] ->
-        -0.24
-    end
-  end
-
-  defp greeting_expected_family(ctx, tok, token_phrase) do
-    phrases = token_phrases(ctx)
-    idx = token_index(tok, -1)
-    window = Enum.map(idx..(idx + 3), &Map.get(phrases, &1))
-
-    cond do
-      token_phrase == "how" and window == ["how", "are", "you", "doing"] ->
-        :adverb
-
-      token_phrase == "are" and
-          Enum.map((idx - 1)..(idx + 2), &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
-        :auxiliary
-
-      token_phrase == "you" and
-          Enum.map((idx - 2)..(idx + 1), &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
-        :pronoun
-
-      token_phrase == "doing" and
-          Enum.map((idx - 3)..idx, &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
-        :verb
-
-      true ->
-        nil
-    end
-  end
-
-  defp token_phrases(ctx) when is_map(ctx) do
-    ctx
-    |> Map.get(:si, %{})
-    |> Safe.get(:tokens, [])
-    |> List.wrap()
-    |> Enum.reduce(%{}, fn tok, acc ->
-      if is_map(tok) do
-        Map.put(acc, token_index(tok, map_size(acc)), tok |> token_raw_phrase() |> norm())
-      else
-        acc
-      end
-    end)
-  end
-
-  defp next_token_phrase(ctx, tok) do
-    idx = token_index(tok, -1)
-    ctx |> token_phrases() |> Map.get(idx + 1)
-  end
-
-  defp nearest_left_choice(choices, current_start) when is_list(choices) do
-    choices
-    |> Enum.filter(fn ch -> choice_start(ch) < current_start end)
-    |> Enum.max_by(&choice_start/1, fn -> nil end)
-  end
-
-  defp previous_choice_pos_family(nil), do: nil
-
-  defp previous_choice_pos_family(choice) when is_map(choice) do
-    id =
-      Safe.get(choice, :chosen_id) || Safe.get(choice, :id) ||
-        Safe.get(choice, "chosen_id") || Safe.get(choice, "id")
-
-    {_lemma, pos, _tag} = parse_sense_id(to_string(id || ""))
-    syntactic_pos_family(pos)
-  end
-
-  defp previous_choice_pos_family(_), do: nil
-
-  defp context_bias_for(:preposition, candidate_family)
-       when candidate_family in [:noun, :proper_noun, :pronoun, :phrase],
-       do: 0.18
-
-  defp context_bias_for(:preposition, candidate_family)
-       when candidate_family in [:verb, :auxiliary, :preposition],
-       do: -0.16
-
-  defp context_bias_for(:determiner, candidate_family)
-       when candidate_family in [:noun, :proper_noun, :adjective, :phrase],
-       do: 0.22
-
-  defp context_bias_for(:determiner, candidate_family)
-       when candidate_family in [:verb, :auxiliary, :preposition, :conjunction],
-       do: -0.20
-
-  defp context_bias_for(:auxiliary, :verb), do: 0.18
-  defp context_bias_for(:auxiliary, :auxiliary), do: -0.12
-
-  defp context_bias_for(:auxiliary, candidate_family)
-       when candidate_family in [:noun, :proper_noun],
-       do: -0.08
-
-  defp context_bias_for(:pronoun, candidate_family) when candidate_family in [:verb, :auxiliary],
-    do: 0.08
-
-  defp context_bias_for(_prev_family, _candidate_family), do: 0.0
-
-  defp syntactic_pos_family(pos) do
-    p = pos |> to_string() |> String.downcase()
-
-    cond do
-      p in ["noun", "n", "common_noun"] -> :noun
-      p in ["proper_noun", "proper noun", "propn", "proper"] -> :proper_noun
-      p in ["verb", "v"] -> :verb
-      p in ["adjective", "adj"] -> :adjective
-      p in ["phrase", "mwe", "multiword"] -> :phrase
-      p in ["pronoun", "pron"] -> :pronoun
-      p in ["determiner", "det", "article"] -> :determiner
-      p in ["preposition", "prep", "adposition"] -> :preposition
-      p in ["auxiliary", "aux", "modal"] -> :auxiliary
-      p in ["conjunction", "conj", "connector", "cc"] -> :conjunction
-      p in ["adverb", "adv", "intensifier"] -> :adverb
-      p in ["particle", "negation", "neg", "negative"] -> :particle
-      p in ["interjection", "interj", "greeting"] -> :interjection
-      true -> :other
-    end
-  end
-
-  defp token_start(tok) when is_map(tok) do
-    case Safe.get(tok, :span) || Safe.get(tok, "span") do
-      {start, _stop} when is_integer(start) -> start
-      [start, _stop] when is_integer(start) -> start
-      _ -> token_index(tok, 0) * 10_000
-    end
-  end
-
-  defp token_start(_), do: 0
-
-  defp choice_start(choice) when is_map(choice) do
-    Safe.get(choice, :span_start) || Safe.get(choice, "span_start") ||
-      (Safe.get(choice, :token_index) || Safe.get(choice, :index) ||
-         Safe.get(choice, "token_index") || Safe.get(choice, "index") || 0) * 10_000
-  end
-
-  defp choice_start(_), do: 0
 
   defp to_float(x) when is_float(x), do: x
   defp to_float(x) when is_integer(x), do: x * 1.0

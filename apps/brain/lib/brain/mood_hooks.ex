@@ -13,6 +13,14 @@ defmodule Brain.MoodHooks do
     end
   end
 
+  @doc """
+  Fires the orienting response based on novelty (0.0 to 1.0).
+  """
+  def orient(novelty) when is_float(novelty) do
+    Brain.MoodCore.orient(novelty)
+    :ok
+  end
+
   @spec register_activation(map()) :: :ok | term()
   def register_activation(active_cells) do
     if Code.ensure_loaded?(Brain.MoodCore) and

@@ -10,7 +10,7 @@ defmodule Brain do
      Manages:
      * Working Memory (WM) and attention context
      * Stage-1 pipeline orchestration (delegates to `Brain.Pipeline.LIFGStage1`)
-     * Fan-out “control signals” (boost/inhibit) to cell processes
+     * Fan-out "control signals" (boost/inhibit) to cell processes
      * Optional recall-to-WM ingestion from Hippocampus
 
   2) **Region helper macro**
@@ -36,26 +36,12 @@ defmodule Brain do
   alias Brain.WM.Recall, as: WMRecall
   alias Brain.MoodHooks
   alias Brain.Config, as: BrainConfig
-
   alias Brain.WM.Policy, as: WMPolicy
 
   # ───────────────────────── Region Macro (re-export) ─────────────────────────
 
   @doc ~S"""
   Re-export `Brain.Region` so region modules can use `use Brain, region: ...`.
-
-  This macro exists to keep existing region modules stable while allowing the
-  region implementation to live in `Brain.Region`.
-
-  ## Example
-
-      iex> [{mod, _bin}] =
-      ...>   Code.compile_string(
-      ...>     "defmodule Brain.DocTestRegion do\\n  use Brain, region: :lifg\\nend\\n"
-      ...>   )
-      iex> mod == Brain.DocTestRegion
-      true
-
   """
   defmacro __using__(opts) do
     quote location: :keep do
@@ -77,12 +63,10 @@ defmodule Brain do
   @registry Brain.Registry
   @cell_timeout 2_000
 
-  # Telemetry constants
   @wm_update_event [:brain, :wm, :update]
 
   @type id :: any()
   @type wm_item :: map()
-
   @type wm_cfg :: map()
 
   @type state :: %{
@@ -94,10 +78,11 @@ defmodule Brain do
           activation_log: list(),
           wm_last_ms: non_neg_integer() | nil,
           last_intent: map() | nil,
-          self_state: map() | nil
+          self_state: map() | nil,
+          last_stimulus_ms: non_neg_integer() | nil
         }
 
-  # ── Small wrappers (hide raw GenServer.* from call-sites) ──────────────────
+  # ── Small wrappers ──────────────────────────────────────────────────────────
 
   defp gencall(name, msg, timeout \\ 5_000), do: :gen_server.call(name, msg, timeout)
   defp gencast(name, msg), do: :gen_server.cast(name, msg)
@@ -120,156 +105,29 @@ defmodule Brain do
 
   # ── Public API: WM/Attention ────────────────────────────────────────────────
 
-  @doc ~S"""
-  Configure working-memory policy knobs.
-
-  This updates the in-server WM configuration. Any missing config keys are filled
-  from `Brain.Config.wm/1`. WM is also trimmed to the new capacity immediately.
-
-  Common options:
-
-  * `:capacity` (pos_integer) — max WM items retained
-  * `:decay_ms` (pos_integer) — policy half-life / decay control (implementation-dependent)
-  * `:gate_threshold` (0.0..1.0) — minimum score to admit items into WM
-  * `:merge_duplicates?` (boolean) — whether duplicates should merge
-  * and additional policy knobs present in `Brain.Config.wm/0`
-
-  Returns `:ok`.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.configure_wm(capacity: 3)
-      iex> Brain.snapshot_wm().cfg.capacity
-      3
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec configure_wm(keyword()) :: :ok
   def configure_wm(opts) when is_list(opts), do: gencall(@name, {:configure_wm, Map.new(opts)})
 
-  @doc ~S"""
-  Set an attention context map (asynchronous).
-
-  Attention is free-form metadata used by downstream policy and UI layers.
-  This is a `cast`, so it is applied asynchronously.
-
-  Returns `:ok`.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.set_attention(%{topic: :demo})
-      iex> Process.sleep(5)
-      iex> Brain.snapshot_wm().attention[:topic]
-      :demo
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec set_attention(map()) :: :ok
   def set_attention(ctx) when is_map(ctx), do: gencast(@name, {:set_attention, ctx})
+
   @doc false
   @spec set_self_state(map()) :: :ok
   def set_self_state(%Brain.SelfModel{} = model) do
     gencast(@name, {:set_self_state, model})
   end
 
-  @doc ~S"""
-  Gate and update working memory given candidates (list) or an SI-like map.
-
-  This calls the WM focus policy (`Brain.WM.Focus.run/3`) and updates WM in the server.
-  The returned WM list is **newest-first**.
-
-  Telemetry emitted:
-
-  * `[:brain, :wm, :update]` with measurements: `size`, `added`, `removed`, `capacity`
-
-  Returns the updated WM list.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> is_list(Brain.focus([], []))
-      true
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec focus(list() | map(), keyword()) :: [wm_item()]
   def focus(cands_or_si, opts \\ []), do: gencall(@name, {:focus, cands_or_si, Map.new(opts)})
 
-  @doc ~S"""
-  Remove an item from WM by id or predicate.
-
-  The argument may be:
-
-  * an id (as stored in WM entries), or
-  * a predicate function `(wm_item() -> boolean())`
-
-  This triggers a WM update telemetry event (reason `:defocus`) and updates MoodCore
-  (if available).
-
-  Returns `:ok`.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.defocus("missing-id")
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec defocus(id() | (wm_item() -> boolean())) :: :ok
   def defocus(id_or_fun), do: gencall(@name, {:defocus, id_or_fun})
 
-  @doc ~S"""
-  Snapshot WM state for UI/debug.
-
-  Returns a map:
-
-  * `:wm` — current WM list (newest-first)
-  * `:cfg` — current WM config
-  * `:attention` — current attention context
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> snap = Brain.snapshot_wm()
-      iex> is_list(snap.wm) and is_map(snap.cfg) and is_map(snap.attention)
-      true
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec snapshot_wm() :: %{wm: [wm_item()], cfg: wm_cfg(), attention: map()}
   def snapshot_wm, do: gencall(@name, :snapshot_wm)
 
-  # ── Public API: existing surface (unchanged) ────────────────────────────────
+  # ── Public API: existing surface ────────────────────────────────────────────
 
-  @doc ~S"""
-  Child spec for supervising `Brain` as a worker.
-
-  This is suitable for inclusion in a supervisor tree.
-
-  ## Example
-
-      iex> spec = Brain.child_spec([])
-      iex> spec.id == Brain and spec.type == :worker and is_map(spec)
-      true
-
-  """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{
@@ -281,78 +139,12 @@ defmodule Brain do
     }
   end
 
-  @doc ~S"""
-  Start the `Brain` GenServer registered under the `Brain` module name.
-
-  In most deployments, `Brain` is started by supervision. This function is still
-  useful for direct startup in tests.
-
-  Returns `{:ok, pid}` on success.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> if is_nil(pid0) do
-      ...>   {:ok, pid} = Brain.start_link([])
-      ...>   GenServer.stop(pid)
-      ...>   :ok
-      ...> else
-      ...>   :ok
-      ...> end
-      :ok
-
-  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts \\ []), do: GenServer.start_link(__MODULE__, :ok, name: @name)
 
-  @doc ~S"""
-  Merge short-term memory (STM) snapshot into an SI-like map.
-
-  This is a read-only helper that:
-
-  * attaches `:active_cells` from the server state into the input map
-  * normalizes `:tokens` using `Brain.Utils.Tokens.normalize_tokens/2` if a sentence is present
-
-  Returns the updated SI map.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> out = Brain.stm(%{sentence: "hi", tokens: []})
-      iex> out.active_cells == %{} and is_list(out.tokens)
-      true
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec stm(map()) :: map()
   def stm(si) when is_map(si), do: gencall(@name, {:stm, si})
 
-  @doc ~S"""
-  Activate a collection of cells asynchronously.
-
-  Accepts:
-
-  * a list of `%Db.BrainCell{}` rows,
-  * ids, or
-  * an SI-like map that can be reduced into activation items by `extract_items/1`.
-
-  `payload` defaults to `%{delta: 1}` and is forwarded to the cell runtime.
-
-  Returns `:ok` (cast).
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.activate_cells([], %{delta: 1})
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec activate_cells([Row.t() | id()] | map(), map()) :: :ok
   def activate_cells(rows_or_ids, payload \\ %{delta: 1}) when is_map(payload) do
     gencast(@name, {:activate_cells, rows_or_ids, payload})
@@ -364,108 +156,39 @@ defmodule Brain do
     gencast(@name, {:activation_report, id, activation})
   end
 
-  @doc ~S"""
-  Query a specific cell’s status synchronously.
-
-  This call requires `Brain.Registry` to be running (as it uses `Registry.lookup/2`).
-  If the id is not registered, returns `{:error, :not_found}`.
-
-  ## Example (not found)
-
-      iex> reg0 = Process.whereis(Brain.Registry)
-      iex> if is_nil(reg0), do: {:ok, _} = Registry.start_link(keys: :unique, name: Brain.Registry)
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> Brain.cell_status("does-not-exist")
-      {:error, :not_found}
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec cell_status(String.t()) :: {:ok, term()} | {:error, :not_found}
   def cell_status(id) when is_binary(id), do: gencall(@name, {:cell, id, :status})
 
-  # LIFG → WM gating (fires a cast; returns :ok)
   @doc false
   def gate_from_lifg(si, opts \\ []) when is_map(si) and is_list(opts) do
     gencast(@name, {:gate_from_lifg, si, opts})
     :ok
   end
 
-  @doc ~S"""
-  Send an asynchronous message to a cell by id.
-
-  This requires `Brain.Registry` to be running. If the cell is not present,
-  the message is ignored.
-
-  Returns `:ok`.
-
-  ## Example (no-op when missing)
-
-      iex> reg0 = Process.whereis(Brain.Registry)
-      iex> if is_nil(reg0), do: {:ok, _} = Registry.start_link(keys: :unique, name: Brain.Registry)
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.cell_cast("does-not-exist", :ping)
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec cell_cast(String.t(), term()) :: :ok
   def cell_cast(id, msg) when is_binary(id), do: gencast(@name, {:cell, id, msg})
 
-  @doc ~S"""
-  Non-mutating snapshot of the server state.
-
-  This is intended for web/debug inspection. It returns the full internal state map.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> s = Brain.snapshot()
-      iex> is_map(s) and Map.has_key?(s, :wm) and Map.has_key?(s, :wm_cfg)
-      true
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
   @spec snapshot() :: state()
   def snapshot, do: gencall(@name, :snapshot)
 
-  @doc ~S"""
-  Run LIFG Stage-1 and emit control signals.
-
-  This is the public Stage-1 entry point. Internally, the GenServer delegates to:
-
-  * `Brain.Pipeline.LIFGStage1.run/4`
-
-  It returns:
-
-  * `{:ok, %{choices, boosts, inhibitions, audit}}`, or
-  * `{:error, reason}`
-
-  Notes:
-
-  * This call uses `:infinity` timeout because Stage-1 may perform multiple sub-steps.
-  * It assumes downstream pipeline modules are available in the running system.
-
-  ## Example (export check)
-
-  The full pipeline is environment-dependent; this doctest only asserts the function exists:
-
-      iex> function_exported?(Brain, :lifg_stage1, 3)
-      true
-
-  """
   @spec lifg_stage1(map() | [map()], [number()], keyword()) ::
           {:ok, %{choices: [map()], boosts: list(), inhibitions: list(), audit: map()}}
           | {:error, term()}
   def lifg_stage1(si_or_candidates, context_vec, opts \\ []) when is_list(context_vec) do
     gencall(@name, {:lifg_stage1, si_or_candidates, context_vec, opts}, :infinity)
+  end
+
+  @spec latest_intent() :: map() | nil
+  def latest_intent, do: gencall(@name, :latest_intent)
+
+  @spec set_latest_intent(map()) :: :ok
+  def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent, m})
+
+  @spec focus_from_recall(map() | list(), keyword()) :: [map()]
+  def focus_from_recall(si_or_cues, recall_opts \\ []) do
+    si_or_cues
+    |> WMRecall.candidates_for_focus(recall_opts)
+    |> focus([])
   end
 
   # ───────────────────────── GenServer callbacks ──────────────────────────────
@@ -483,18 +206,16 @@ defmodule Brain do
        activation_log: [],
        wm_last_ms: nil,
        last_intent: nil,
-       self_state: nil
+       self_state: nil,
+       last_stimulus_ms: nil
      }}
   end
 
-  # group all handle_call/3 together
+  # ── handle_call clauses ─────────────────────────────────────────────────────
 
   @impl true
   def handle_call({:configure_wm, opts}, _from, state) do
-    cfg2 =
-      state.wm_cfg
-      |> merge_wm_opts(Map.new(opts))
-
+    cfg2 = merge_wm_opts(state.wm_cfg, Map.new(opts))
     wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
     {:reply, :ok, %{state | wm_cfg: cfg2, wm: wm2}}
   end
@@ -527,6 +248,8 @@ defmodule Brain do
 
   @impl true
   def handle_call({:stm, si}, _from, state) when is_map(si) do
+    state = maybe_orient(state)
+
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
     tokens1 = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
@@ -553,7 +276,7 @@ defmodule Brain do
   @impl true
   def handle_call(:latest_intent, _from, state), do: {:reply, state.last_intent, state}
 
-  # group all handle_cast/2 together
+  # ── handle_cast clauses ─────────────────────────────────────────────────────
 
   @impl true
   def handle_cast({:set_attention, ctx}, state),
@@ -627,20 +350,12 @@ defmodule Brain do
 
       state2 = %{state | wm: wm2}
 
-      emit_wm_update(
-        state.wm_cfg.capacity,
-        length(state2.wm),
-        added,
-        removed,
-        :lifg_stage2
-      )
-
+      emit_wm_update(state.wm_cfg.capacity, length(state2.wm), added, removed, :lifg_stage2)
       _ = safe_mood_update_wm(state2.wm)
 
       {:noreply, state2}
     else
       {:skip, _reason} ->
-        # Stage2 chose not to act; preserve WM exactly
         {:noreply, state}
 
       {:error, reason} ->
@@ -649,150 +364,18 @@ defmodule Brain do
     end
   end
 
-  # ───────────────────────── Public helper: recall → WM ───────────────────────
+  # ───────────────────────── WM decay & eviction ──────────────────────────────
 
-  @doc ~S"""
-  Return the last intent payload stored in the Brain server, if any.
-
-  This is typically set by `set_latest_intent/1` (called from Core) and used to inform
-  mood and UI snapshots.
-
-  Returns a normalized map or `nil`.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> Brain.latest_intent()
-      nil
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
-  @spec latest_intent() :: map() | nil
-  def latest_intent, do: gencall(@name, :latest_intent)
-
-  @doc ~S"""
-  Update the Brain server’s last intent snapshot (asynchronous).
-
-  The input map is normalized into:
-
-  * `:intent` (atom; unknown becomes `:unknown`)
-  * `:keyword` (string)
-  * `:confidence` (float)
-  * `:at_ms` (millisecond timestamp)
-
-  This also forwards intent to `Brain.MoodCore.apply_intent/2` if MoodCore is available.
-
-  Returns `:ok`.
-
-  ## Example
-
-      iex> pid0 = Process.whereis(Brain)
-      iex> started? = is_nil(pid0)
-      iex> if started?, do: {:ok, _} = GenServer.start_link(Brain, :ok, name: Brain)
-      iex> :ok = Brain.set_latest_intent(%{intent: :greet, keyword: "hello", confidence: 0.9})
-      iex> Process.sleep(5)
-      iex> li = Brain.latest_intent()
-      iex> li.intent == :greet and li.keyword == "hello" and li.confidence > 0.0
-      true
-      iex> if started?, do: GenServer.stop(Process.whereis(Brain)), else: :ok
-      :ok
-
-  """
-  @spec set_latest_intent(map()) :: :ok
-  def set_latest_intent(m) when is_map(m), do: gencast(@name, {:set_latest_intent, m})
-
-  @doc ~S"""
-  Recall from Hippocampus and gate results into WM.
-
-  This function calls `Brain.Hippocampus.recall/2` (best-effort) and converts recall results into
-  candidate WM items, then focuses them into WM via `focus/2`.
-
-  Because recall availability is environment-dependent, this doctest only asserts export:
-
-      iex> function_exported?(Brain, :focus_from_recall, 2)
-      true
-
-  """
-  @spec focus_from_recall(map() | list(), keyword()) :: [map()]
-  def focus_from_recall(si_or_cues, recall_opts \\ []) do
-    si_or_cues
-    |> WMRecall.candidates_for_focus(recall_opts)
-    |> focus([])
-  end
-
-  # ───────────────────────── WM decay & eviction (τ-model) ────────────────────
-
-  @doc ~S"""
-  Apply score decay to WM entries based on elapsed time.
-
-  This is a pure helper that expects a state map with:
-
-  * `:wm` — list of entries (optionally containing `:score`)
-  * `:wm_last_ms` — last timestamp used for decay (or `nil`)
-
-  The function computes `dt = now_ms - last_ms`, obtains a multiplicative decay factor
-  via `Brain.Utils.Numbers.decay_factor_ms/1`, and clamps scores into `0.0..1.0`.
-
-  Returns an updated state with `:wm` and `:wm_last_ms` adjusted.
-
-  ## Example
-
-      iex> s0 = %{wm: [%{id: "a", score: 1.0}], wm_last_ms: 0}
-      iex> s1 = Brain.apply_decay(s0, 10)
-      iex> is_list(s1.wm) and is_integer(s1.wm_last_ms)
-      true
-
-  """
   def apply_decay(state, now_ms), do: WMPolicy.apply_decay(state, now_ms)
-
-  @doc ~S"""
-  Evict WM entries if the list exceeds configured capacity.
-
-  The function expects a state map containing:
-
-  * `:wm` — list of entries
-  * `:wm_cfg.capacity` — integer capacity
-
-  If eviction is needed, entries are sorted by:
-
-  * score (descending), then
-  * timestamp `:ts` (descending; defaults to `0`)
-
-  Returns an updated state map.
-
-  ## Example
-
-      iex> st = %{wm: [%{id: 1, score: 0.2}, %{id: 2, score: 0.9}], wm_cfg: %{capacity: 1}}
-      iex> out = Brain.evict_if_needed(st)
-      iex> length(out.wm)
-      1
-      iex> hd(out.wm).id
-      2
-
-  """
   def evict_if_needed(state), do: WMPolicy.evict_if_needed(state)
-
-  @doc ~S"""
-  Convenience helper to apply decay and then evict to capacity.
-
-  Equivalent to:
-
-  * `state |> apply_decay(now_ms) |> evict_if_needed()`
-
-  ## Example
-
-      iex> st = %{wm: [%{id: 1, score: 0.2}, %{id: 2, score: 0.9}], wm_cfg: %{capacity: 1}, wm_last_ms: 0}
-      iex> out = Brain.decay_and_evict(st, 10)
-      iex> length(out.wm) == 1 and is_integer(out.wm_last_ms)
-      true
-
-  """
   def decay_and_evict(state, now_ms), do: WMPolicy.decay_and_evict(state, now_ms)
 
   # ───────────────────────── Misc helpers ─────────────────────────────────────
+
+  def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
+  def via(id) when is_binary(id), do: CellRT.via(id)
+
+  # ───────────────────────── Internal helpers ─────────────────────────────────
 
   defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
     meta = if reason, do: %{reason: reason}, else: %{}
@@ -804,44 +387,12 @@ defmodule Brain do
     )
   end
 
-  @doc ~S"""
-  Coalesce `{id, delta}` control-signal pairs.
-
-  This is a thin pass-through to `Brain.Utils.ControlSignals.coalesce_pairs/1`.
-
-  ## Example
-
-      iex> out = Brain.coalesce_pairs([{"a", 1}, {"a", 2}, {"b", -1}])
-      iex> is_list(out)
-      true
-
-  """
-  def coalesce_pairs(list), do: ControlSignals.coalesce_pairs(list)
-
-  @doc ~S"""
-  Return the `Registry`-based `via` tuple for a cell id.
-
-  This delegates to `Brain.Cell.Runtime.via/1` and is used to address cells without
-  leaking runtime details.
-
-  ## Example
-
-      iex> is_tuple(Brain.via("cell-1"))
-      true
-
-  """
-  def via(id) when is_binary(id), do: CellRT.via(id)
-
-  # ───────────────────────── Internal helpers ─────────────────────────────────
-
   defp extract_items(list) when is_list(list), do: list
   defp extract_items(%Row{} = row), do: [row]
 
   defp extract_items(%{} = si) do
     case Map.get(si, :active_cells, []) do
-      list when is_list(list) ->
-        list
-
+      list when is_list(list) -> list
       other ->
         Logger.warning("Brain.extract_items: :active_cells not a list (got #{inspect(other)})")
         []
@@ -851,15 +402,11 @@ defmodule Brain do
   defp extract_items(id) when is_binary(id), do: [id]
   defp extract_items(_other), do: []
 
-  # ───────────────────────── Internal: WM cfg merge ───────────────────────────
-
   defp merge_wm_opts(cfg, opts) when is_map(cfg) and is_map(opts) do
     cfg
     |> Map.merge(opts)
     |> BrainConfig.wm()
   end
-
-  # ───────────────────────── Control signal emission ─────────────────────────
 
   defp apply_control_signals(boosts, inhibitions, opts) do
     coalesce? = Keyword.get(opts, :coalesce, true)
@@ -931,25 +478,19 @@ defmodule Brain do
 
   defp num(_), do: 0.0
 
-  # ───────────────────────── Centralized WM helpers ───────────────────────────
-
   defp normalize_intent_map(m) do
     intent0 = m[:intent] || m["intent"]
 
     intent =
       cond do
-        is_atom(intent0) ->
-          intent0
-
+        is_atom(intent0) -> intent0
         is_binary(intent0) ->
           try do
             String.to_existing_atom(intent0)
           rescue
             _ -> :unknown
           end
-
-        true ->
-          :unknown
+        true -> :unknown
       end
 
     kw = m[:keyword] || m["keyword"] || ""
@@ -957,17 +498,13 @@ defmodule Brain do
 
     conf =
       cond do
-        is_number(conf0) ->
-          conf0 * 1.0
-
+        is_number(conf0) -> conf0 * 1.0
         is_binary(conf0) ->
           case Float.parse(String.trim(conf0)) do
             {f, ""} -> f
             _ -> 0.0
           end
-
-        true ->
-          0.0
+        true -> 0.0
       end
 
     at_ms = m[:at_ms] || m["at_ms"] || System.system_time(:millisecond)
@@ -984,12 +521,27 @@ defmodule Brain do
 
   # ───────────────────────── MoodCore safe hooks ──────────────────────────────
 
+  defp maybe_orient(state) do
+    now = System.system_time(:millisecond)
+    last = state.last_stimulus_ms || 0
+    dt = now - last
+
+    if dt > 2_000 do
+      novelty = min(dt / 5_000, 1.0)
+      safe_mood_orient(novelty)
+    end
+
+    %{state | last_stimulus_ms: now}
+  end
+
   defp safe_mood_apply_intent(intent, conf), do: MoodHooks.apply_intent(intent, conf)
 
   defp safe_mood_register_activation(active_cells),
     do: MoodHooks.register_activation(active_cells)
 
   defp safe_mood_update_wm(wm_list), do: MoodHooks.update_wm(wm_list)
+
+  defp safe_mood_orient(novelty), do: MoodHooks.orient(novelty)
 
   defp clamp01(x) when is_number(x), do: max(0.0, min(1.0, x))
   defp clamp01(_), do: 0.0

@@ -16,7 +16,7 @@ defmodule Brain.MoodCore do
     [:brain, :mood, :update]
     [:brain, :mood, :saturation]
     [:brain, :mood, :shock]
-    [:brain, :mood, :appraisal_applied]    (NEW)
+    [:brain, :mood, :appraisal_applied]
 
   Config (:brain, Brain.MoodCore) — all fields optional:
     baseline:           %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50} | keyword | nil
@@ -36,9 +36,14 @@ defmodule Brain.MoodCore do
     latents (e.g. :threat, :reward, :control, :safety) into telemetry
     meas/meta under :latents.
 
-  Appraisal hook (NEW):
+  Appraisal hook:
     apply_appraisal/1 applies small bounded deltas derived from V/A/D + tags.
     This is an engineering control correlate (not a biological simulation).
+
+  Orienting response:
+    orient/1 fires a sharp neuromodulatory spike on novel stimulus arrival.
+    Bypasses max_delta_per_tick (like intents/appraisals) to enable immediate
+    arousal before cortical processing begins.
   """
 
   use GenServer
@@ -51,6 +56,7 @@ defmodule Brain.MoodCore do
   # ---------- Public API ----------
 
   def start_link(_opts \\ []), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+
   def snapshot(), do: GenServer.call(__MODULE__, :snapshot)
 
   @doc """
@@ -92,7 +98,7 @@ defmodule Brain.MoodCore do
   @doc "Detach a previously registered subscriber id returned from subscribe/0."
   def detach(id) when is_binary(id), do: :telemetry.detach(id)
 
-  # -------- NEW PUBLIC HOOKS (additive) --------
+  # -------- Public hooks --------
 
   @doc """
   Intent → neuro deltas (scaled by confidence). Call this right after you set last_intent.
@@ -130,11 +136,21 @@ defmodule Brain.MoodCore do
     GenServer.cast(__MODULE__, {:wm, wm_list})
   end
 
+  @doc """
+  Fires the biological orienting response based on novelty (0.0 to 1.0).
+  Allows a sharp spike bypassing max_delta_per_tick, similar to intents/appraisals.
+
+  NE spikes for arousal, DA ticks up for engagement, Glu rises for cortical drive,
+  5HT dips slightly to shift from satiated rest toward active processing.
+  """
+  def orient(novelty) when is_float(novelty) do
+    GenServer.cast(__MODULE__, {:orient, novelty})
+  end
+
   # ---------- GenServer ----------
 
   @impl true
   def init(_opts) do
-    # Accept ANY shape (keyword, map, integer, string, nil)
     cfg = Application.get_env(:brain, __MODULE__, []) |> normalize_cfg()
 
     baseline =
@@ -218,8 +234,6 @@ defmodule Brain.MoodCore do
     {:noreply, new_state}
   end
 
-  # ---- NEW CASTS ----
-
   @impl true
   def handle_cast({:apply_intent, intent, conf}, st) do
     {:noreply, apply_intent_to_state(st, intent, conf)}
@@ -254,6 +268,25 @@ defmodule Brain.MoodCore do
       st
       |> put_levels(fn v, k -> apply_delta(v, Map.get(deltas, k, 0.0), k, load_caps()) end)
       |> emit(:wm, 0, :bump)
+
+    {:noreply, st}
+  end
+
+  @impl true
+  def handle_cast({:orient, novelty}, st) when is_float(novelty) do
+    deltas = %{
+      ne: 0.10 + 0.15 * novelty,
+      da: 0.05 + 0.10 * novelty,
+      glu: 0.05 + 0.10 * novelty,
+      "5ht": -0.05 * novelty
+    }
+
+    st =
+      st
+      |> put_levels(fn v, k ->
+        apply_delta(v, Map.get(deltas, k, 0.0), k, orient_caps())
+      end)
+      |> emit(:orient, 0, :bump)
 
     {:noreply, st}
   end
@@ -336,7 +369,6 @@ defmodule Brain.MoodCore do
         end
       end)
       |> then(fn s ->
-        # Optional init merge applied immediately (like a controlled bump without events)
         case get_map_like(cfg, :init) do
           %{} = init when map_size(init) > 0 ->
             lv = merge_defaults(s.levels, init)
@@ -413,7 +445,6 @@ defmodule Brain.MoodCore do
     emit(st, source, dt, :decay)
   end
 
-  # keep a convenience 3-arity (no default on the 4-arity head)
   defp emit(
          %{levels: lv, last_levels: prev, saturation_ticks: sat_n, shock_threshold: shock_thr} =
            st,
@@ -421,19 +452,16 @@ defmodule Brain.MoodCore do
          dt_ms,
          cause
        ) do
-    # Raw neuros
     da = Map.get(lv, :da, 0.5)
     s5 = Map.get(lv, :"5ht", 0.5)
     glu = Map.get(lv, :glu, 0.5)
     ne = Map.get(lv, :ne, 0.5)
 
-    # Derived mood indices
     exploration = 0.6 * da + 0.4 * ne
     inhibition = s5
     vigilance = ne
     plasticity = 0.5 * da + 0.5 * glu
 
-    # Bundle into a mood struct + tone so UI can see the "shape"
     mood = %{
       exploration: exploration,
       inhibition: inhibition,
@@ -462,7 +490,6 @@ defmodule Brain.MoodCore do
       |> Map.put(:mood, %{levels: lv, derived: mood, tone: tone, pressure_label: pressure})
       |> Map.put(:pressure_label, pressure)
 
-    # Optional TRCS latents
     latents = maybe_compute_latents(meas0, meta0)
 
     meas = maybe_put_latents(meas0, latents)
@@ -470,7 +497,6 @@ defmodule Brain.MoodCore do
 
     :telemetry.execute(@event_update, meas, meta)
 
-    # Saturation detector
     sat_counts =
       Enum.reduce([:da, :"5ht", :glu, :ne], st.sat_counts, fn k, acc ->
         v = Map.fetch!(lv, k)
@@ -482,7 +508,6 @@ defmodule Brain.MoodCore do
       :telemetry.execute(@event_saturation, meas, Map.put(meta, :ticks, sat_counts))
     end
 
-    # Shock detector (L2-norm of delta across neuros)
     dx =
       :math.sqrt(
         :math.pow(da - Map.get(prev, :da, da), 2) +
@@ -532,7 +557,7 @@ defmodule Brain.MoodCore do
   defp put_levels(st, f),
     do: %{st | levels: Map.new(st.levels, fn {k, v} -> {k, f.(v, k)} end)}
 
-  # ---------- Appraisal mapping (NEW) ----------
+  # ---------- Appraisal mapping ----------
 
   defp appraisal_to_deltas(appraisal) when is_map(appraisal) do
     v = to_float_num(Map.get(appraisal, :valence, 0.0), 0.0) |> clamp11()
@@ -548,7 +573,6 @@ defmodule Brain.MoodCore do
     uncertain? = MapSet.member?(tags, :uncertainty)
     question? = MapSet.member?(tags, :question)
 
-    # Deltas are intentionally small; max_delta_per_tick remains the hard cap.
     da =
       0.06 * v +
         0.02 * a +
@@ -625,10 +649,9 @@ defmodule Brain.MoodCore do
   defp clamp11(x) when is_number(x), do: min(1.0, max(-1.0, x))
   defp clamp01(x) when is_number(x), do: min(1.0, max(0.0, x))
 
-  # ---------- Intent / Load mapping (new) ----------
+  # ---------- Intent / Load mapping ----------
 
   defp intent_to_deltas(:abuse, conf) do
-    # Stress/hostility → ↑NE (vigilance), ↓5HT (inhibition), mild ↓DA (reward)
     k = clamp_conf(conf)
     %{ne: +0.25 * k, "5ht": -0.20 * k, da: -0.05 * k}
   end
@@ -644,14 +667,11 @@ defmodule Brain.MoodCore do
   end
 
   defp intent_to_deltas(:question, conf) do
-    # Curiosity → mild ↑DA (exploration) and ↑NE (attention)
     k = clamp_conf(conf)
     %{da: +0.07 * k, ne: +0.07 * k}
   end
 
   defp intent_to_deltas(:health_support, conf) do
-    # Health disclosures deserve careful attention, but ordinary missed-dose or
-    # sleep disclosures should not saturate vigilance/plasticity by themselves.
     k = clamp_conf(conf)
     %{"5ht": +0.02 * k, ne: +0.045 * k, glu: +0.015 * k}
   end
@@ -661,7 +681,6 @@ defmodule Brain.MoodCore do
 
   defp intent_to_deltas(_other, conf) do
     k = clamp_conf(conf)
-    # Default: tiny calming + slight plasticity
     %{"5ht": +0.03 * k, glu: +0.03 * k}
   end
 
@@ -674,7 +693,6 @@ defmodule Brain.MoodCore do
       end
 
     load = min(1.0, n / 120.0)
-    # Gentle: attention + learning + a hint of exploration
     %{ne: +0.08 * load, glu: +0.04 * load, da: +0.03 * load}
   end
 
@@ -716,7 +734,9 @@ defmodule Brain.MoodCore do
 
   defp load_caps, do: %{ne: 0.86, glu: 0.82}
 
-  # ---------- Tone selection (revised again – brain truth for tone_hint) ----------
+  defp orient_caps, do: %{ne: 1.0, da: 0.95, glu: 0.95, "5ht": 1.0}
+
+  # ---------- Tone selection ----------
 
   defp choose_tone(%{vigilance: vig, inhibition: inh, exploration: exp}) do
     cfg = Application.get_env(:brain, :mood_tone, [])
@@ -726,7 +746,6 @@ defmodule Brain.MoodCore do
     cool_cfg = Keyword.get(cfg, :cool, [])
     deesc_cfg = Keyword.get(cfg, :deescalate, [])
 
-    # De-escalate “hot” gate: high vigilance + low inhibition
     hot_vig_min = deesc_cfg[:vigilance_min] || 0.85
     hot_inh_max = deesc_cfg[:inhibition_max] || 0.60
 
@@ -743,44 +762,33 @@ defmodule Brain.MoodCore do
     i_dev = inh - 0.5
     v_dev = vig - 0.5
 
-    # “How far from the middle are we on any axis?”
     spread =
       [e_dev, i_dev, v_dev]
       |> Enum.map(&abs/1)
       |> Enum.max()
 
     cond do
-      # 1) Clearly “hot” / conflict:
-      #    very high vigilance AND not enough inhibition → deescalate.
       vig >= hot_vig_min and inh <= hot_inh_max ->
         :deescalate
 
-      # 1b) Middle pressure: not a full de-escalation gate, but not calm.
       vig >= 0.50 and inh <= 0.55 ->
         :cautious
 
-      # 2) Friendly / engaged:
-      #    exploration above mid, inhibition not too low, vigilance not spiking.
       exp >= warm_exp_min and inh >= 0.50 and vig <= warm_vig_max ->
         :warm
 
-      # 3) Cautious / inhibited (cool):
       inh >= cool_inh_min and exp <= 0.50 and vig <= warm_vig_max ->
         :cool
 
-      # 4) If everything is very close to the center, call it neutral.
       spread < neutral_band ->
         :neutral
 
-      # 5) Fallback: dominant positive axis, but bias toward deescalate
-      #    when vigilance is the biggest excursion.
       true ->
         {axis, dev} =
           [deescalate: v_dev, warm: e_dev, cool: i_dev]
           |> Enum.max_by(fn {_k, d} -> abs(d) end)
 
         cond do
-          # If the strongest axis is below center or tiny, stay neutral.
           dev <= 0.0 or abs(dev) < neutral_band ->
             :neutral
 
@@ -917,7 +925,6 @@ defmodule Brain.MoodCore do
 
   defp normalize_cfg(_), do: []
 
-  # Pull a map/keyword value from cfg and turn it into a map with our neuro keys
   defp get_map_like(cfg, key) do
     case Keyword.get(cfg, key, %{}) do
       %{} = m -> coerce_keys(m)
@@ -926,7 +933,6 @@ defmodule Brain.MoodCore do
     end
   end
 
-  # Merge a defaults map with an override map (override only known keys)
   defp merge_defaults(defaults, overrides) do
     overrides = coerce_keys(overrides || %{})
 
@@ -935,7 +941,6 @@ defmodule Brain.MoodCore do
     |> Map.new()
   end
 
-  # Accept per-neuro map OR a single integer/string and produce a full map
   defp resolve_half_life(defaults, val) when is_map(val) do
     merge_defaults(defaults, val)
   end
@@ -945,7 +950,6 @@ defmodule Brain.MoodCore do
   end
 
   defp resolve_half_life(_defaults, val) do
-    # number/string → broadcast to all neuros; fallback to sane defaults if invalid
     n =
       case val do
         i when is_integer(i) and i > 0 ->
