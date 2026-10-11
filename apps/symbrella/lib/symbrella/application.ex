@@ -1,116 +1,192 @@
-# apps/symbrella/lib/symbrella/application.ex
 defmodule Symbrella.Application do
   @moduledoc false
+
   use Application
 
   @impl true
   def start(_type, _args) do
-    # Ensure DETS dir exists for NegCache
-    # neg_path = Application.app_dir(:core, "priv/negcache/negcache.dets")
-    # File.mkdir_p!(Path.dirname(neg_path))
-
-    app_children =
-      [
-        # ── DB ────────────────────────────────────────────────────────────────
-        Db,
-
-        # ── Foundations / infra (order matters) ───────────────────────────────
-        {Registry, keys: :unique, name: Brain.Registry},
-        {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
-
-        # ── Caches / services ────────────────────────────────────────────────
-        {Task.Supervisor, name: Symbrella.TaskSup},
-        {Finch, name: Lexicon.Finch},
-        # {Core.NegCache, dets_path: neg_path, ttl: 30 * 24 * 60 * 60},
-
-        # ── Local LLM runner (llama.cpp / llama-server) ──────────────────────
-        # NOTE: This is intentionally owned by the umbrella-root supervisor.
-        {Llm, []},
-        {Llm.BootGate, []},
-
-        # ── Mood / policy should boot before LIFG.Stage1 to feed mood events ─
-        {Brain.MoodCore, []},
-        {Brain.MoodPolicy, []},
-
-        # ── Stage-1 scoring server (mood-nudged) ─────────────────────────────
-        {Brain.LIFG.Stage1, []},
-
-        # ── Brain servers / timing ───────────────────────────────────────────
-        Brain,
-        Brain.Amygdala,
-        Brain.Cerebellum,
-        Brain.LIFG,
-        Brain.PMTG,
-        {Brain.ATL, keep: 300},
-        Brain.Curiosity,
-        {Brain.Hippocampus, keep: 300},
-        Brain.Meta,
-        Brain.PFC,
-        {Brain.GoalStack, []},
-        Brain.Thalamus,
-        Brain.Temporal,
-        Brain.OFC,
-        {Brain.DLPFC, act_on_thalamus: true},
-        {Brain.ACC, keep: 300},
-        {Brain.CycleClock, Application.get_env(:brain, Brain.CycleClock, [])},
-
-        # Event bridge first, then consumers
-        {Brain.Blackboard, []}
-      ] ++
+    children =
+      maybe_pubsub_child() ++
+        infrastructure_children() ++
+        cognitive_children() ++
+        consumer_children() ++
+        maybe_ml_child() ++
         maybe_camera_child() ++
-        [
-          # Self model (subscribes to Blackboard topic)
-          {Brain.SelfPortrait, []},
-          Brain.DriveLoop,
-          # ML consumer that finalizes turn records
-          Brain.ML
+        clock_children()
 
-          # 🚫 Do NOT start SymbrellaWeb.Endpoint here.
-          # The web app owns its endpoint under SymbrellaWeb.Application.
-        ]
+    {:ok, supervisor} =
+      Supervisor.start_link(
+        children,
+        strategy: :one_for_one,
+        name: Symbrella.Supervisor
+      )
 
-    children = maybe_pubsub_child() ++ app_children
-
-    {:ok, sup} =
-      Supervisor.start_link(children, strategy: :one_for_one, name: Symbrella.Supervisor)
-
-    # Attach telemetry handlers AFTER the tree is live. Attach failures should
-    # fail boot instead of disappearing; duplicate attach is handled by the
-    # attaching modules.
+    # Register global telemetry handlers after the
+    # supervision tree has successfully started.
     :ok = Brain.Telemetry.attach!()
-
-    # NOTE: Bridge stays for now; when telemetry topics migrate, we'll remove/replace.
     :ok = Core.Curiosity.Bridge.attach()
     :ok = Core.Agency.AutonomyLoop.attach()
 
+    # Restore persistent self-state only after its
+    # supporting processes are available.
     _ =
       Brain.SelfContinuity.warm_start(
-        scope: Application.get_env(:brain, :self_snapshot_scope, "runtime")
+        scope:
+          Application.get_env(
+            :brain,
+            :self_snapshot_scope,
+            "runtime"
+          )
       )
 
-    {:ok, sup}
+    {:ok, supervisor}
   end
 
   @impl true
   def config_change(_changed, _new, _removed) do
-    # Root doesn’t own the Endpoint; nothing to forward here.
     :ok
   end
 
-  # ── helpers ────────────────────────────────────────────────────────────────
+  # --------------------------------------------------
+  # 1. PubSub
+  # --------------------------------------------------
+
   defp maybe_pubsub_child do
     case Process.whereis(Symbrella.PubSub) do
-      nil -> [{Phoenix.PubSub, name: Symbrella.PubSub}]
-      _pid -> []
+      nil ->
+        [{Phoenix.PubSub, name: Symbrella.PubSub}]
+
+      _pid ->
+        []
     end
   end
 
+  # --------------------------------------------------
+  # 2. Infrastructure
+  # --------------------------------------------------
+
+  defp infrastructure_children do
+    [
+      # Database must be available before memory,
+      # lexical hydration, and persistent stores.
+      Db,
+
+      # Dynamic brain-cell infrastructure.
+      {Registry, keys: :unique, name: Brain.Registry},
+      {DynamicSupervisor, name: Brain.CellSup, strategy: :one_for_one},
+
+      # Shared asynchronous work.
+      {Task.Supervisor, name: Symbrella.TaskSup},
+
+      # HTTP client infrastructure.
+      {Finch, name: Lexicon.Finch},
+
+      # Local LLM ownership and boot control.
+      {Llm, []},
+      {Llm.BootGate, []},
+
+      # Start the event bridge before the cognitive
+      # regions begin publishing runtime activity.
+      {Brain.Blackboard, []}
+    ]
+  end
+
+  # --------------------------------------------------
+  # 3. Cognitive foundations and processing
+  # --------------------------------------------------
+
+  defp cognitive_children do
+    [
+      # Neuromodulation and intent policy.
+      {Brain.MoodCore, []},
+      {Brain.MoodPolicy, []},
+
+      # Working memory and brain coordination.
+      Brain,
+
+      # Cognitive state and learning support.
+      Brain.Amygdala,
+      Brain.Cerebellum,
+      {Brain.Hippocampus, keep: 300},
+      Brain.Meta,
+
+      # Executive control and goal management.
+      Brain.PFC,
+      {Brain.GoalStack, []},
+
+      # Attention and evaluation.
+      Brain.Thalamus,
+      Brain.Temporal,
+      Brain.OFC,
+      {Brain.DLPFC, act_on_thalamus: true},
+      {Brain.ACC, keep: 300},
+
+      # Lexical and semantic infrastructure.
+      # Initialize supporting regions before LIFG.
+      Brain.PMTG,
+      {Brain.ATL, keep: 300},
+
+      # Stage1 uses mood and Cerebellum adjustments.
+      {Brain.LIFG.Stage1, []},
+      Brain.LIFG
+    ]
+  end
+
+  # --------------------------------------------------
+  # 4. Cognitive consumers
+  # --------------------------------------------------
+
+  defp consumer_children do
+    [
+      # Observes blackboard events.
+      {Brain.SelfPortrait, []},
+
+      # Processes curiosity proposals.
+      Brain.Curiosity,
+
+      # Observes self-portrait salience.
+      Brain.DriveLoop
+    ]
+  end
+
+  # --------------------------------------------------
+  # 5. Optional machine learning
+  # --------------------------------------------------
+
+  defp maybe_ml_child do
+    if Application.get_env(:brain, :ml_enabled, true) == true do
+      [Brain.ML]
+    else
+      []
+    end
+  end
+
+  # --------------------------------------------------
+  # 6. Optional camera pipeline
+  # --------------------------------------------------
+
   defp maybe_camera_child do
-    opts = Application.get_env(:brain, Brain.Camera, [])
+    opts =
+      Application.get_env(
+        :brain,
+        Brain.Camera,
+        []
+      )
 
     if camera_enabled?(opts) do
-      bridge_opts = Application.get_env(:brain, Brain.Camera.ObservationBridge, [])
-      decoder_opts = Application.get_env(:brain, Brain.Visual.DebugDecoder, [])
+      bridge_opts =
+        Application.get_env(
+          :brain,
+          Brain.Camera.ObservationBridge,
+          []
+        )
+
+      decoder_opts =
+        Application.get_env(
+          :brain,
+          Brain.Visual.DebugDecoder,
+          []
+        )
 
       [
         {Brain.Camera, opts},
@@ -122,8 +198,29 @@ defmodule Symbrella.Application do
     end
   end
 
+  # --------------------------------------------------
+  # 7. Periodic cognitive activity
+  # --------------------------------------------------
+
+  defp clock_children do
+    [
+      {Brain.CycleClock,
+       Application.get_env(
+         :brain,
+         Brain.CycleClock,
+         []
+       )}
+    ]
+  end
+
+  # --------------------------------------------------
+  # Camera configuration helpers
+  # --------------------------------------------------
+
   defp camera_enabled?(opts) when is_list(opts) do
-    Keyword.get(opts, :enabled?, false) in [true, "true", "1", 1, :on, "on", :yes, "yes"]
+    opts
+    |> Keyword.get(:enabled?, false)
+    |> camera_enabled_value?()
   end
 
   defp camera_enabled?(opts) when is_map(opts) do
@@ -135,6 +232,15 @@ defmodule Symbrella.Application do
   defp camera_enabled?(_), do: false
 
   defp camera_enabled_value?(value) do
-    value in [true, "true", "1", 1, :on, "on", :yes, "yes"]
+    value in [
+      true,
+      "true",
+      "1",
+      1,
+      :on,
+      "on",
+      :yes,
+      "yes"
+    ]
   end
 end
