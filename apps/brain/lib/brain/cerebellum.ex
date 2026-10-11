@@ -227,8 +227,7 @@ defmodule Brain.Cerebellum do
 
   defp feat(c) do
     [
-      # bias
-      1.0,
+      to_f(Map.get(c, :context_fit, 0.0)),
       to_f(Map.get(c, :lex_fit, 0.0)),
       to_f(Map.get(c, :rel_prior, 0.0)),
       to_f(Map.get(c, :activation, 0.0)),

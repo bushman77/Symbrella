@@ -58,3 +58,18 @@ config :brain, Brain.MoodCore,
   half_life_ms: %{da: 30_000, "5ht": 60_000, glu: 90_000, ne: 45_000},
   clock: :cycle,
   init: %{da: 0.35, "5ht": 0.50, glu: 0.40, ne: 0.50}
+
+# Cerebellum feature schema v2
+#
+# Feature order:
+# 0 context_fit
+# 1 lex_fit
+# 2 rel_prior
+# 3 activation
+# 4 intent_bias
+#
+# Versioning prevents existing v1 context hashes
+# from being reused by the new feature mapping.
+config :brain, :cerebellum, %{
+  feature_schema: 2
+}
