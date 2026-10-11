@@ -146,16 +146,14 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     |> element("#chat-form")
     |> render_submit(%{"message" => "my sisters name is Mary-Anne"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "I’ve noted that your sisters name is Mary-Anne."
 
     view
     |> element("#chat-form")
     |> render_submit(%{"message" => "what is my sisters name"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "Your sisters name is Mary-Anne."
   end
 
@@ -166,16 +164,14 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     |> element("#chat-form")
     |> render_submit(%{"message" => "my name is Bradley"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "Nice to meet you, Bradley. I’ll remember that."
 
     view
     |> element("#chat-form")
     |> render_submit(%{"message" => "what is my name?"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "Your name is Bradley."
     refute html =~ "Your name is Symbrella."
   end
@@ -187,8 +183,7 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     |> element("#chat-form")
     |> render_submit(%{"message" => "my name is Symbrella"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
 
     assert html =~
              "I should not store Symbrella as your name because that is my assistant identity."
@@ -199,8 +194,7 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     |> element("#chat-form")
     |> render_submit(%{"message" => "what is my name?"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "I don’t know your name yet"
     refute html =~ "Your name is Symbrella."
   end
@@ -249,18 +243,40 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     |> element("#chat-form")
     |> render_submit(%{"message" => "i live in Richmond, BC, please remeber that"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "I’ve noted that your location is Richmond, BC."
 
     view
     |> element("#chat-form")
     |> render_submit(%{"message" => "where do i live"})
 
-    Process.sleep(300)
-    html = render(view)
+    html = wait_for_reply(view)
     assert html =~ "Your location is Richmond, BC."
     refute html =~ "Curiosity check:"
     refute html =~ "Should I treat that as a feature idea"
+  end
+
+  # Wait for the asynchronous HomeLive task to finish.
+  # Unlike a fixed sleep, this observes actual UI state.
+  defp wait_for_reply(view, attempts \\ 200)
+
+  defp wait_for_reply(view, 0) do
+    html = render(view)
+
+    refute html =~ ~s(id="typing"),
+           "HomeLive reply did not finish within 10 seconds"
+
+    html
+  end
+
+  defp wait_for_reply(view, attempts) do
+    html = render(view)
+
+    if String.contains?(html, ~s(id="typing")) do
+      Process.sleep(50)
+      wait_for_reply(view, attempts - 1)
+    else
+      html
+    end
   end
 end

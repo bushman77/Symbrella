@@ -334,7 +334,8 @@ defmodule Brain.LIFG.Stage1 do
              is_list(opts) do
     si = %{
       tokens: tokens,
-      sense_candidates: sense_candidates || %{}    }
+      sense_candidates: sense_candidates || %{}
+    }
 
     run(si, opts)
   end
@@ -568,23 +569,23 @@ defmodule Brain.LIFG.Stage1 do
     {final.choices, final}
   end
 
-defp score_token(tok, acc, ctx) do
-  raw_phrase = token_raw_phrase(tok)
-  token_phrase = norm(raw_phrase)
-  token_mwe? = token_mwe?(tok)
-  tok_index = token_index(tok, 0)
+  defp score_token(tok, acc, ctx) do
+    raw_phrase = token_raw_phrase(tok)
+    token_phrase = norm(raw_phrase)
+    token_mwe? = token_mwe?(tok)
+    tok_index = token_index(tok, 0)
 
-  case Boundary.check(ctx.sent, tok, token_phrase, token_mwe?) do
-    :ok ->
-      score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx)
+    case Boundary.check(ctx.sent, tok, token_phrase, token_mwe?) do
+      :ok ->
+        score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx)
 
-    {:error, :chargram} ->
-      Boundary.handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx)
+      {:error, :chargram} ->
+        Boundary.handle_chargram_drop(tok, tok_index, token_phrase, token_mwe?, acc, ctx)
 
-    {:error, reason} ->
-      Boundary.handle_boundary_drop(tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx)
+      {:error, reason} ->
+        Boundary.handle_boundary_drop(tok, tok_index, token_phrase, token_mwe?, reason, acc, ctx)
+    end
   end
-end
 
   defp score_token_ok(tok, tok_index, raw_phrase, token_phrase, token_mwe?, acc, ctx) do
     orig_cands =
@@ -645,7 +646,7 @@ end
       true ->
         bias_val = get_float(ctx.bias_map, tok_index, 0.0)
         {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
-       closed_class_slate? = Enum.any?(cand_list, &ClosedClass.closed_class_candidate?/1) 
+        closed_class_slate? = Enum.any?(cand_list, &ClosedClass.closed_class_candidate?/1)
 
         scored_rows =
           Enum.map(cand_list, fn c ->
@@ -697,10 +698,10 @@ end
               |> get_num(:context_fit, context0)
               |> clamp01()
 
-           pos_bias =
-  ClosedClass.closed_class_pos_bias(token_phrase, pos) +
-    PosBias.local_context(acc, tok, pos) +
-    PosBias.window(ctx, tok, pos) 
+            pos_bias =
+              ClosedClass.closed_class_pos_bias(token_phrase, pos) +
+                PosBias.local_context(acc, tok, pos) +
+                PosBias.window(ctx, tok, pos)
 
             perception_bias =
               perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
@@ -797,10 +798,13 @@ end
             sense_id_for(c, token_phrase) == chosen_id and ClosedClass.closed_class_candidate?(c)
           end)
 
+        same_word_pos_tie? = same_word_pos_tie?(cand_list, token_phrase)
+
         singleton_closed_class? =
           length(ranked) == 1 and closed_class_winner?
 
         top_p = reliability_capped_top_p(top_p0, fallback_winner?, fallback_only?)
+
         margin0 =
           cond do
             length(ranked) >= 2 -> top_p - second_p
@@ -840,23 +844,26 @@ end
             is_binary(runner_up_id) and chosen_veto? and ctx.reanalysis? ->
               [runner_up_id]
 
-            is_binary(runner_up_id) and not closed_class_winner? and margin < ctx.margin_thr ->
+            is_binary(runner_up_id) and not closed_class_winner? and
+              not same_word_pos_tie? and margin < ctx.margin_thr ->
               [runner_up_id]
 
             true ->
               []
           end
 
-        margin_weak? = margin < ctx.margin_thr and not closed_class_winner?
+        margin_weak? =
+          margin < ctx.margin_thr and not closed_class_winner? and
+            not same_word_pos_tie?
 
         low_confidence? =
-          not singleton_closed_class? and
+          not singleton_closed_class? and not same_word_pos_tie? and
             (top_p < Application.get_env(:brain, :acc_p_min, 0.65) or fallback_winner?)
 
         choice = %{
           token_index: tok_index,
           index: tok_index,
-          span_start: PosBias.token_start(tok), 
+          span_start: PosBias.token_start(tok),
           id: chosen_id,
           chosen_id: chosen_id,
           veto?: chosen_veto?,
@@ -1253,6 +1260,7 @@ end
   end
 
   defp restrict_to_phrase_if_mwe(candidates, false), do: candidates
+
   defp restrict_to_phrase_if_mwe(candidates, true) when is_list(candidates) do
     phrase_like =
       Enum.filter(candidates, fn c ->
@@ -1312,6 +1320,35 @@ end
   end
 
   defp candidate_aligned_to_token?(_c, _token_phrase, _token_mwe?), do: false
+
+  defp same_word_pos_tie?(candidates, token_phrase)
+       when is_list(candidates) and length(candidates) > 1 do
+    signatures =
+      Enum.map(candidates, fn candidate ->
+        id = sense_id_for(candidate, token_phrase)
+        {lemma, pos, tag} = parse_sense_id(id)
+
+        definition =
+          Safe.get(candidate, :definition) ||
+            Safe.get(candidate, "definition")
+
+        numbered? = match?({_, ""}, Integer.parse(tag))
+
+        if numbered? and is_binary(definition) and
+             String.trim(definition) != "" do
+          {norm(lemma), pos, String.downcase(String.trim(definition))}
+        else
+          :not_equivalent
+        end
+      end)
+
+    case Enum.uniq(signatures) do
+      [{^token_phrase, _pos, _definition}] -> true
+      _ -> false
+    end
+  end
+
+  defp same_word_pos_tie?(_, _), do: false
 
   defp collapse_duplicate_sense_candidates(candidates, token_phrase) when is_list(candidates) do
     candidates
@@ -1615,7 +1652,8 @@ end
     w = cfg_mw(opts)
     cap = cfg_cap(opts)
 
-    bias =      try do
+    bias =
+      try do
         MoodWeights.bias(mood, w, cap)
       rescue
         _ ->
@@ -1900,6 +1938,7 @@ end
 
       is_map(i) ->
         to_string(Safe.get(i, :intent) || Safe.get(i, :name) || Safe.get(i, :type) || "none")
+
       true ->
         "none"
     end
