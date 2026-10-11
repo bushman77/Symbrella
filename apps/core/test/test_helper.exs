@@ -1,102 +1,234 @@
+# apps/core/test/test_helper.exs
 # UTF-8, LF endings
 
 ExUnit.start()
 
-# --- Helper module: keeps sandbox allowances stable for background GenServers
-# Avoids undefined-function errors by defining helpers inside a module.
-# Works across restarts of the named processes.
-
 defmodule Core.TestSandboxHelper do
-  @moduledoc false
+  @moduledoc """
+  Manages database sandbox ownership for Core tests.
 
-  def start_allow_loop(repo, owner_pid, names) when is_list(names) do
-    Enum.each(names, fn name ->
-      spawn_link(fn -> loop_allow(repo, owner_pid, name) end)
-    end)
+  Supports:
+    - Standalone Core test execution
+    - Umbrella-wide test execution
+    - Shared sandbox owner reuse
+    - Background GenServer allowances
+    - Recovery when supervised processes restart
+    - Safe cleanup of Core-owned resources
+  """
+
+  alias Ecto.Adapters.SQL.Sandbox
+
+  @owner_key {:symbrella, :sandbox_owner}
+
+  @poll_interval_ms 200
+  @check_interval_ms 1_000
+
+  # ----------------------------------------------------------
+  # Repository initialization
+  # ----------------------------------------------------------
+
+  def ensure_repo_started(repo) do
+    alive? =
+      try do
+        case Ecto.Repo.Registry.lookup(repo) do
+          pid when is_pid(pid) ->
+            Process.alive?(pid)
+
+          _ ->
+            false
+        end
+      rescue
+        _ -> false
+      end
+
+    if alive? do
+      :ok
+    else
+      case repo.start_link() do
+        {:ok, _pid} ->
+          :ok
+
+        {:error, {:already_started, _pid}} ->
+          :ok
+
+        other ->
+          raise "Failed to start #{inspect(repo)}: #{inspect(other)}"
+      end
+    end
   end
 
-  defp loop_allow(repo, owner_pid, name) when is_atom(name) do
-    pid = Process.whereis(name)
+  # ----------------------------------------------------------
+  # Shared sandbox ownership
+  # ----------------------------------------------------------
 
-    if is_pid(pid) do
-      safe_allow(repo, owner_pid, pid)
-      ref = Process.monitor(pid)
+  @doc """
+  Returns {owner_pid, created_here?}.
 
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-      after
-        1_000 -> :ok
+  Reuses a live owner established by Brain.
+  Otherwise creates a new owner for standalone Core tests.
+  """
+  def ensure_owner(repo) do
+    case :persistent_term.get(@owner_key, :undefined) do
+      pid when is_pid(pid) ->
+        if Process.alive?(pid) do
+          {pid, false}
+        else
+          :persistent_term.erase(@owner_key)
+          start_new_owner(repo)
+        end
+
+      _ ->
+        start_new_owner(repo)
+    end
+  end
+
+  defp start_new_owner(repo) do
+    pid = Sandbox.start_owner!(repo, shared: true)
+
+    :persistent_term.put(@owner_key, pid)
+
+    {pid, true}
+  end
+
+  # ----------------------------------------------------------
+  # Background process allowances
+  # ----------------------------------------------------------
+
+  @doc """
+  Maintains sandbox allowances for named processes.
+
+  Reapplies permissions after supervised process restarts.
+  Stops monitoring when the owner terminates.
+  """
+  def start_allow_loop(repo, owner_pid, names)
+      when is_pid(owner_pid) and is_list(names) do
+    Enum.each(names, fn
+      name when is_atom(name) ->
+        spawn(fn ->
+          allow_loop(repo, owner_pid, name)
+        end)
+
+      _ ->
+        :ok
+    end)
+
+    :ok
+  end
+
+  defp allow_loop(repo, owner_pid, name) do
+    if Process.alive?(owner_pid) do
+      case Process.whereis(name) do
+        pid when is_pid(pid) ->
+          safe_allow(repo, owner_pid, pid)
+          monitor_process(pid)
+
+        _ ->
+          Process.sleep(@poll_interval_ms)
       end
+
+      allow_loop(repo, owner_pid, name)
     else
-      Process.sleep(200)
+      :ok
+    end
+  end
+
+  defp monitor_process(pid) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} ->
+        :ok
+    after
+      @check_interval_ms ->
+        :ok
     end
 
-    loop_allow(repo, owner_pid, name)
+    Process.demonitor(ref, [:flush])
+    :ok
   end
 
   defp safe_allow(repo, owner_pid, pid) do
+    Sandbox.allow(repo, owner_pid, pid)
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # ----------------------------------------------------------
+  # Owner cleanup
+  # ----------------------------------------------------------
+
+  @doc """
+  Stops the sandbox owner only when Core created it.
+
+  Never terminates an owner inherited from Brain.
+  """
+  def cleanup_owner(_pid, false), do: :ok
+
+  def cleanup_owner(pid, true) do
     try do
-      Ecto.Adapters.SQL.Sandbox.allow(repo, owner_pid, pid)
+      if Process.alive?(pid) do
+        Sandbox.stop_owner(pid)
+      end
     rescue
       _ -> :ok
+    catch
+      :exit, _ -> :ok
+    after
+      if :persistent_term.get(@owner_key, :undefined) == pid do
+        :persistent_term.erase(@owner_key)
+      end
     end
+
+    :ok
   end
 end
 
-# --- Boot deps needed for Ecto SQL sandbox (idempotent) ---------------
+# ============================================================
+# Application initialization
+# ============================================================
+
 {:ok, _} = Application.ensure_all_started(:ecto_sql)
-_ = Application.ensure_all_started(:symbrella)
+{:ok, _} = Application.ensure_all_started(:symbrella)
 
-# --- Repo + Sandbox setup ----------------------------------------------
+# ============================================================
+# Database sandbox initialization
+# ============================================================
+
 if Code.ensure_loaded?(Db) do
-  # Ensure the Repo is running even when tests run with --no-start
-  repo_alive? =
-    try do
-      pid = Ecto.Repo.Registry.lookup(Db)
-      is_pid(pid) and Process.alive?(pid)
-    rescue
-      _ -> false
-    end
+  # Ensure the repository is available.
+  :ok = Core.TestSandboxHelper.ensure_repo_started(Db)
 
-  unless repo_alive? do
-    case Db.start_link() do
-      {:ok, _pid} ->
-        :ok
+  # Reuse Brain's owner in umbrella tests.
+  # Create our own in standalone Core tests.
+  {owner_pid, created_here?} =
+    Core.TestSandboxHelper.ensure_owner(Db)
 
-      {:error, {:already_started, _pid}} ->
-        :ok
+  # ----------------------------------------------------------
+  # Background process allowances
+  # ----------------------------------------------------------
 
-      other ->
-        raise "Failed to ensure Db repo started: #{inspect(other)}"
-    end
-  end
+  allow_names = [
+    Brain.PMTG,
+    Brain.Hippocampus
+  ]
 
-  # Manual sandbox + a suite-long shared owner
-  :ok = Ecto.Adapters.SQL.Sandbox.mode(Db, :manual)
+  :ok =
+    Core.TestSandboxHelper.start_allow_loop(
+      Db,
+      owner_pid,
+      allow_names
+    )
 
-  owner_pid =
-    case :persistent_term.get({:symbrella, :sandbox_owner}, :undefined) do
-      :undefined ->
-        pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
-        :persistent_term.put({:symbrella, :sandbox_owner}, pid)
+  # ----------------------------------------------------------
+  # Suite cleanup
+  # ----------------------------------------------------------
 
-        ExUnit.after_suite(fn _ ->
-          if Process.alive?(pid) do
-            try do
-              Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
-            rescue
-              _ -> :ok
-            end
-          end
-        end)
-
-        pid
-
-      pid when is_pid(pid) ->
-        pid
-    end
-
-  # Continuously (re)allow known background processes to use the owner's connection.
-  allow_names = [Brain.PMTG, Brain.Hippocampus]
-  Core.TestSandboxHelper.start_allow_loop(Db, owner_pid, allow_names)
+  ExUnit.after_suite(fn _results ->
+    Core.TestSandboxHelper.cleanup_owner(
+      owner_pid,
+      created_here?
+    )
+  end)
 end

@@ -35,7 +35,11 @@ defmodule SymbrellaWeb.ConnCase do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Db)
 
     unless tags[:async] do
-      Ecto.Adapters.SQL.Sandbox.mode(Db, {:shared, self()})
+      :ok =
+        Ecto.Adapters.SQL.Sandbox.mode(
+          Db,
+          {:shared, self()}
+        )
     end
 
     {:ok, conn: Phoenix.ConnTest.build_conn()}

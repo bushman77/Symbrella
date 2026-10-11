@@ -6,7 +6,16 @@ _ = Application.ensure_all_started(:symbrella)
 
 # Start a single shared Sandbox owner for the whole test run.
 # (Do NOT call Sandbox.mode/2 when using the owner API.)
-_ = Ecto.Adapters.SQL.Sandbox.start_owner!(Db, shared: true)
+owner_pid =
+  Ecto.Adapters.SQL.Sandbox.start_owner!(
+    Db,
+    shared: true
+  )
+
+:persistent_term.put(
+  {:symbrella, :sandbox_owner},
+  owner_pid
+)
 
 defmodule Brain.TestHooks do
   @moduledoc false
