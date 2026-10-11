@@ -106,6 +106,7 @@ defmodule Symbrella.Application do
 
       # Cognitive state and learning support.
       Brain.Amygdala,
+      Brain.Cerebellum.Store,
       Brain.Cerebellum,
       {Brain.Hippocampus, keep: 300},
       Brain.Meta,

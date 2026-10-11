@@ -23,6 +23,10 @@ defmodule Brain.Cerebellum.Store do
 
   # ---- Public API ------------------------------------------------------------
 
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
   def ensure_started do
     case Process.whereis(@name) do
       nil ->
