@@ -132,52 +132,94 @@ defmodule Brain.Cerebellum do
     - :lr (default cfg)
     - :margin_tau (default cfg)
   """
-  def learn_lifg(_si, chosen_id, candidates, base_scores, opts \\ []) do
-    scope = opts[:scope] || "lifg_stage1"
-    ctx = opts[:context_key] || context_key(:global)
-    margin_tau = opts[:margin_tau] || cfg(:margin_tau, 0.12)
-    lr = opts[:lr] || cfg(:lr, 0.05)
 
-    deltas = predict_lifg(nil, candidates, scope: scope, context_key: ctx)
+  def learn_lifg(_si, _chosen_id, candidates, base_scores, opts \\ [])
+      when is_list(candidates) and is_map(base_scores) do
+    case verified_target(candidates, opts[:supervision]) do
+      nil ->
+        # No independently verified label.
+        # Prediction remains enabled, but learning is blocked.
+        :ok
 
-    scorep = fn c ->
-      Map.get(base_scores, candidate_id(c), 0.0) + Map.get(deltas, candidate_id(c), 0.0)
-    end
+      target ->
+        scope = opts[:scope] || "lifg_stage1"
+        ctx = opts[:context_key] || context_key(:global)
+        margin_tau = opts[:margin_tau] || cfg(:margin_tau, 0.12)
+        lr = opts[:lr] || cfg(:lr, 0.05)
 
-    chosen = Enum.find(candidates, &(candidate_id(&1) == chosen_id)) || hd(candidates)
-    f_star = feat(chosen)
-    s_star = scorep.(chosen)
+        target_id = candidate_id(target)
 
-    {grad, loss_sum} =
-      candidates
-      |> Enum.reject(&(candidate_id(&1) == chosen_id))
-      |> Enum.reduce({zero_vec(), 0.0}, fn c, {acc, loss_acc} ->
-        s_j = scorep.(c)
-        loss = margin_tau - (s_star - s_j)
+        deltas =
+          predict_lifg(
+            nil,
+            candidates,
+            scope: scope,
+            context_key: ctx
+          )
 
-        if loss > 0.0 do
-          f_j = feat(c)
-          g = vec_scale(vec_sub(f_star, f_j), lr * loss)
-          {vec_add(acc, g), loss_acc + loss}
-        else
-          {acc, loss_acc}
+        scorep = fn candidate ->
+          id = candidate_id(candidate)
+
+          Map.get(base_scores, id, 0.0) +
+            Map.get(deltas, id, 0.0)
         end
-      end)
 
-    if not vec_zero?(grad) do
-      Store.learn(scope, ctx, grad, loss_sum, feature_schema: cfg(:feature_schema, 1))
+        target_features = feat(target)
+        target_score = scorep.(target)
 
-      :telemetry.execute(
-        [:brain, :cerebellum, :lifg, :learn],
-        %{update_norm: l2_norm(grad), loss: loss_sum},
-        %{scope: scope}
-      )
+        {grad, loss_sum} =
+          candidates
+          |> Enum.reject(&(candidate_id(&1) == target_id))
+          |> Enum.reduce({zero_vec(), 0.0}, fn candidate, {acc, loss_acc} ->
+            competing_score = scorep.(candidate)
+
+            loss = margin_tau - (target_score - competing_score)
+
+            if loss > 0.0 do
+              gradient =
+                target_features
+                |> vec_sub(feat(candidate))
+                |> vec_scale(lr * loss)
+
+              {vec_add(acc, gradient), loss_acc + loss}
+            else
+              {acc, loss_acc}
+            end
+          end)
+
+        unless vec_zero?(grad) do
+          Store.learn(
+            scope,
+            ctx,
+            grad,
+            loss_sum,
+            feature_schema: cfg(:feature_schema, 1)
+          )
+
+          :telemetry.execute(
+            [:brain, :cerebellum, :lifg, :learn],
+            %{update_norm: l2_norm(grad), loss: loss_sum},
+            %{scope: scope, supervision: :gold_label}
+          )
+        end
+
+        :ok
     end
-
-    :ok
   end
 
   # ------- Feature plumbing ---------------------------------------------------
+
+  defp verified_target(candidates, %{
+         source: :gold_label,
+         target_id: target_id
+       })
+       when is_binary(target_id) do
+    Enum.find(candidates, fn candidate ->
+      candidate_id(candidate) == target_id
+    end)
+  end
+
+  defp verified_target(_candidates, _supervision), do: nil
 
   defp candidate_id(%{id: id}), do: id
   defp candidate_id(%{cell_id: id}), do: id
