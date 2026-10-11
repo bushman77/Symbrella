@@ -14,42 +14,70 @@ defmodule Brain.ACCTest do
   test "emits conflict telemetry and flags needy under thresholds" do
     si = %{tokens: [%{index: 0}, %{index: 1}]}
 
-    # Two choices: one shaky (low margin, has alt) -> needy; one strong -> not needy
+    # One uncertain choice and one confident choice.
     choices = [
       %{
         token_index: 0,
         margin: 0.10,
         alt_ids: ["runner"],
-        scores: %{"x|sense|1" => 0.55, "x|sense|2" => 0.45}
+        scores: %{
+          "x|sense|1" => 0.55,
+          "x|sense|2" => 0.45
+        }
       },
       %{
         token_index: 1,
         margin: 0.60,
         alt_ids: [],
-        scores: %{"y|sense|1" => 0.92, "y|sense|2" => 0.08}
+        scores: %{
+          "y|sense|1" => 0.92,
+          "y|sense|2" => 0.08
+        }
       }
     ]
 
-    {meas, meta} =
-      capture(
-        [:brain, :acc, :conflict],
-        fn ->
-          {:ok, resp} = Brain.ACC.assess(si, choices)
-          assert is_float(resp.conflict)
-          assert resp.conflict >= 0.0 and resp.conflict <= 1.0
-          assert length(resp.needy) == 1
-          assert resp.audit.stage == :acc
-        end,
-        300
-      )
+    event = [:brain, :acc, :conflict]
+    probe_id = attach_probe([event])
 
-    assert meas[:n] == 2
-    assert meas[:needy] == 1
-    assert is_number(meas[:conflict])
+    try do
+      {:ok, resp} = Brain.ACC.assess(si, choices)
 
-    assert meta[:tau_m] >= 0.0
-    assert meta[:p_min] >= 0.0
-    assert is_map(meta[:weights])
+      # Verify ACC assessment results.
+      assert is_float(resp.conflict)
+      assert resp.conflict >= 0.0
+      assert resp.conflict <= 1.0
+      assert resp.needy == [0]
+      assert resp.audit.stage == :acc
+
+      expected_conflict = resp.conflict
+
+      # Match only the assessment event.
+      # Background :tick and :proposal events are ignored.
+      assert_receive {
+                       :telemetry,
+                       ^event,
+                       %{
+                         n: 2,
+                         needy: 1,
+                         conflict: ^expected_conflict
+                       },
+                       %{cause: :assess} = meta
+                     },
+                     300
+
+      # Validate telemetry metadata.
+      assert is_number(meta[:tau_m])
+      assert meta[:tau_m] >= 0.0
+
+      assert is_number(meta[:p_min])
+      assert meta[:p_min] >= 0.0
+
+      assert is_map(meta[:weights])
+      assert meta[:v] == 2
+    after
+      # Always detach, including when an assertion fails.
+      detach_probe(probe_id)
+    end
   end
 
   test "records into rolling window and status returns last payload" do
