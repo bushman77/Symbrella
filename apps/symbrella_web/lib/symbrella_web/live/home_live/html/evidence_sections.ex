@@ -173,7 +173,15 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   defp hypotheses_section(sections, _), do: sections
 
   defp append(sections, key, title, tag, hint, items) do
-    sections ++ [%{key: key, title: title, tag: tag, hint: hint, items: items}]
+    normalized_items =
+      Enum.map(items, fn
+        {label, datum} -> %{label: label, body: show(datum)}
+        %{} = item -> item
+      end)
+
+    sections ++ [%{
+      key: key, title: title, tag: tag, hint: hint, items: normalized_items
+    }]
   end
 
   defp value(items, _label, nil), do: items
@@ -184,6 +192,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp show(nil), do: "nil"
+  defp show(true), do: "true"
+  defp show(false), do: "false"
   defp show(v) when is_atom(v), do: ":#{v}"
   defp show(v) when is_binary(v), do: v
   defp show(v) when is_number(v), do: to_string(v)
