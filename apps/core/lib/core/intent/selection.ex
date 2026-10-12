@@ -403,6 +403,8 @@ defmodule Core.Intent.Selection do
         si
         |> Map.put(:intent, :command)
         |> Map.put(:confidence, confidence)
+        |> Map.put(:conversation_act, :instruction)
+        |> update_command_context_frame()
         |> Core.Pipeline.Trace.append(:intent_refinement,
           decision: :command,
           reason: :initial_verb_particle_imperative,
@@ -419,6 +421,33 @@ defmodule Core.Intent.Selection do
   end
 
   def refine_from_syntax(si), do: si
+
+  # A late correction must update the metadata used by response planning,
+  # not just the top-level intent displayed by the Explain panel.
+  defp update_command_context_frame(si) do
+    updated =
+      si
+      |> Map.get(:context_frame)
+      |> case do
+        %{} = frame ->
+          frame
+          |> Map.put(:intent, :command)
+          |> Map.put(:certainty, :high)
+          |> Map.put(:conversation_act, :instruction)
+
+        _ ->
+          %{
+            v: 1,
+            source: :symbolic,
+            intent: :command,
+            certainty: :high,
+            conversation_act: :instruction,
+            topic_domain: Map.get(si, :topic_domain)
+          }
+      end
+
+    Map.put(si, :context_frame, updated)
+  end
 
   defp initial_imperative?(tokens, signatures)
        when is_list(tokens) and is_list(signatures) do
