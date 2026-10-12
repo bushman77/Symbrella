@@ -33,6 +33,7 @@ defmodule Brain.LIFG.Stage1 do
 
   alias Brain.Utils.Safe
   alias Brain.Cerebellum
+  alias Brain.Cerebellum.Snapshot
   alias Brain.MoodWeights
   alias Brain.LIFG.Guard
   alias Brain.LIFG.Stage1.Numeric
@@ -244,6 +245,12 @@ defmodule Brain.LIFG.Stage1 do
           stage1_local_mwe_fallback?: stage1_local_mwe_fallback?,
           stage1_stop_event: stop_event,
           reanalysis?: reanalysis?,
+          cerebellum_snapshot_path:
+            Keyword.get(
+              opts,
+              :cerebellum_snapshot_path,
+              Application.get_env(:brain, :cerebellum_snapshot_path)
+            ),
           # frame stamping for all telemetry events
           frame_seq: Safe.get(si1, :frame_seq) || Safe.get(si1, "frame_seq"),
           frame_ts_ms: Safe.get(si1, :frame_ts_ms) || Safe.get(si1, "frame_ts_ms"),
@@ -698,6 +705,25 @@ defmodule Brain.LIFG.Stage1 do
               |> get_num(:context_fit, context0)
               |> clamp01()
 
+            # TEMPORARY DIAGNOSTIC — remove after investigation.
+            if id == "get|verb|19" do
+              IO.inspect(
+                %{
+                  token_index: tok_index,
+                  sentence: ctx.sent,
+                  candidate_id: id,
+                  calculated_context: context0,
+                  feature_override: feat_override,
+                  final_context: context_fit,
+                  definition: Safe.get(c, :definition),
+                  example: Safe.get(c, :example),
+                  candidate_keys: Map.keys(c)
+                },
+                label: "[STAGE1 CONTEXT DEBUG]",
+                limit: :infinity
+              )
+            end
+
             pos_bias =
               ClosedClass.closed_class_pos_bias(token_phrase, pos) +
                 PosBias.local_context(acc, tok, pos) +
@@ -759,6 +785,16 @@ defmodule Brain.LIFG.Stage1 do
 
         ctx_key =
           Cerebellum.context_key({:lifg_stage1, intent: intent_key(ctx.si), mwe: token_mwe?})
+
+        maybe_record_snapshot(
+          ctx,
+          token_phrase,
+          tok_index,
+          ctx_key,
+          feats,
+          base_scores,
+          closed_class_slate?
+        )
 
         cereb_opts =
           kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: ctx.margin_thr)
@@ -1644,6 +1680,50 @@ defmodule Brain.LIFG.Stage1 do
     catch
       _, _ -> :ok
     end
+  end
+
+  defp maybe_record_snapshot(
+         ctx,
+         token,
+         index,
+         context_key,
+         candidates,
+         base_scores,
+         closed_class?
+       ) do
+    path = Map.get(ctx, :cerebellum_snapshot_path)
+
+    if is_binary(path) and
+         length(candidates) >= 2 and
+         not closed_class? do
+      result =
+        Snapshot.record(path, %{
+          sentence: ctx.sent,
+          token: token,
+          token_index: index,
+          context_key: context_key,
+          candidates: candidates,
+          base_scores: base_scores
+        })
+
+      case result do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          :telemetry.execute(
+            [:brain, :cerebellum, :snapshot, :error],
+            %{count: 1},
+            %{reason: reason}
+          )
+      end
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp mood_factor(nil, opts), do: {1.0, 0.0, nil, cfg_mw(opts), cfg_cap(opts)}

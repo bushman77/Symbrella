@@ -461,25 +461,19 @@ defmodule Brain.ATL do
   """
   @spec finalize(map(), keyword()) :: {map(), map()}
   def finalize(si, _opts \\ []) when is_map(si) do
-    choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
-    tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+    choices =
+      Map.get(si, :lifg_choices) ||
+        Map.get(si, "lifg_choices") || []
+
+    tokens =
+      Map.get(si, :tokens) ||
+        Map.get(si, "tokens") || []
 
     slate =
-      cond do
-        is_list(choices) and choices != [] and is_list(tokens) ->
-          reduce(choices, tokens)
-
-        true ->
-          case Process.whereis(@name) do
-            nil ->
-              %{}
-
-            _pid ->
-              case snapshot() do
-                %{last_slate: sl} when is_map(sl) -> sl
-                _ -> %{}
-              end
-          end
+      if is_list(choices) and choices != [] and is_list(tokens) do
+        reduce(choices, tokens)
+      else
+        %{}
       end
 
     {si, slate}
