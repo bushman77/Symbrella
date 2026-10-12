@@ -18,6 +18,8 @@ defmodule Core.MWE.Signatures do
     * `demote_funcs?: boolean` — demote isolated function-word unigrams (default true)
   """
 
+  alias Core.MWE.Boundaries
+
   @min_n 2
   @max_n 5
 
@@ -202,7 +204,12 @@ defmodule Core.MWE.Signatures do
             indices_for(length(words), n)
             |> Enum.reduce([], fn i, acc2 ->
               seq = Enum.slice(words, i, n)
-              {phrase, pos_sig, kind} = classify_window(seq, tokens, stage, pos_cache, extra_lex)
+              {phrase, pos_sig, kind} =
+                if Boundaries.valid_window?(seq) do
+                  classify_window(seq, tokens, stage, pos_cache, extra_lex)
+                else
+                  {"", [], :none}
+                end
 
               if kind == :none do
                 acc2
