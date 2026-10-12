@@ -123,8 +123,14 @@ defmodule Core.Response.Context do
     active_cells = list_or_empty(map_get(si, :active_cells))
     sense_candidates = map_get(si, :sense_candidates, %{})
     mwe_matches = list_or_empty(map_get(si, :mwe_matches))
+    hypotheses = list_or_empty(map_get(si, :mwe_hypotheses))
 
     %{
+      unverified_mwes:
+        hypotheses
+        |> Enum.filter(&is_map/1)
+        |> Enum.take(@summary_limit)
+        |> Enum.map(&Map.take(&1, [:phrase, :category, :verified?])),
       token_count: length(tokens),
       active_cells_count: length(active_cells),
       sense_candidates_count: sense_candidate_count(sense_candidates),
