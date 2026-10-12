@@ -83,6 +83,91 @@ defmodule Core.TokenResolutionTest do
              Enum.filter(si.token_cover, &(&1.kind == :phrase))
   end
 
+  test "sentence grammar blocks false verb MWE over a noun object and particle" do
+    # Production smoke input: the dictionary has lights off|verb|1, but
+    # here "lights" is the noun object of an earlier verb "turn".
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "lights", pos: "verb"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "off", pos: "preposition"}
+    ]
+
+    si =
+      %SemanticInput{sentence: "Turn the lights off.", active_cells: cells, trace: []}
+      |> TokenFilters.rebuild_word_ngrams(3)
+      |> Core.MWE.Lexicon.attach(
+        mwe_lookup: fn _ ->
+          [%{id: "lights off|verb|1", norm: "lights off", pos: "verb"}]
+        end
+      )
+      |> Core.Syntax.Signatures.attach()
+      |> TokenResolution.resolve()
+
+    assert Enum.any?(si.sentence_signatures, fn
+             %{id: :verb_particle_construction,
+               roles: %{verb: 0, object: 2, particle: 3}} -> true
+             _ -> false
+           end)
+
+    # The dictionary entry remains available; only its incompatible cover is
+    # suppressed, so it cannot displace the independently supported object.
+    assert Enum.any?(si.mwe_lexicon, &(&1.phrase == "lights off"))
+    refute Enum.any?(si.token_cover, fn
+             %{kind: :phrase, token_span: {2, 3}} -> true
+             _ -> false
+           end)
+
+    {lifg_input, virtual} = Core.MWE.LIFGBridge.prepare(si)
+    assert virtual == %{}
+    assert lifg_input.tokens == si.tokens
+  end
+
+  test "a verb MWE is still available in its own verbal construction" do
+    cells = [
+      %{norm: "lights", pos: "verb"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "rocket", pos: "noun"},
+      %{norm: "the", pos: "determiner"}
+    ]
+
+    si =
+      %SemanticInput{sentence: "He lights off the rocket.", active_cells: cells, trace: []}
+      |> TokenFilters.rebuild_word_ngrams(3)
+      |> Core.MWE.Lexicon.attach(
+        mwe_lookup: fn _ ->
+          [%{id: "lights off|verb|1", norm: "lights off", pos: "verb"}]
+        end
+      )
+      |> Core.Syntax.Signatures.attach()
+      |> TokenResolution.resolve()
+
+    assert Enum.any?(si.token_cover, fn
+             %{kind: :phrase, token_span: {1, 2}, dictionary_backed?: true} -> true
+             _ -> false
+           end)
+
+    {_lifg_input, virtual} = Core.MWE.LIFGBridge.prepare(si)
+    assert map_size(virtual) == 1
+  end
+
+  test "token cover does not treat an end-exclusive span as a length at punctuation" do
+    si =
+      %SemanticInput{sentence: "Lights off.", trace: []}
+      |> TokenFilters.rebuild_word_ngrams(3)
+      |> Core.MWE.Lexicon.attach(
+        mwe_lookup: fn _ ->
+          [%{id: "lights off|verb|1", norm: "lights off", pos: "verb"}]
+        end
+      )
+      |> TokenResolution.resolve()
+
+    assert [%{kind: :phrase, token_span: {0, 1}, span: {0, 11}}] =
+             Enum.filter(si.token_cover, &(&1.kind == :phrase))
+  end
+
   test "curated lexical rules do not falsely claim dictionary priority" do
     si =
       %SemanticInput{sentence: "turn off the blue lights", tokens: [], trace: []}
