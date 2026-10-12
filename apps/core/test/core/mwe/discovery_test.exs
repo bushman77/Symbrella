@@ -139,6 +139,26 @@ defmodule Core.MWE.DiscoveryTest do
     }] = si.mwe_hypotheses
   end
 
+  test "ordinary noun/prepositional constituents are not automatically new MWEs" do
+    cells = [
+      %{norm: "in", pos: "preposition"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "quiet", pos: "adjective"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    si =
+      input("in the quiet garden", cells)
+      |> Core.Syntax.Signatures.attach()
+      |> Discovery.run()
+
+    assert Enum.any?(si.sentence_signatures, &(&1.id == :noun_phrase))
+    assert Enum.any?(si.sentence_signatures, &(&1.id == :prepositional_phrase))
+    assert si.mwe_hypotheses == []
+    assert si.mwe_lexicon == []
+    assert si.sense_candidates == %{}
+  end
+
   test "does not promote generic POS signatures into discovered lexical expressions" do
     si =
       input("open the file", [
