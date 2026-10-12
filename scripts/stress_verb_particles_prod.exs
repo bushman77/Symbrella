@@ -1,6 +1,7 @@
 # Run with:
 #   mix run scripts/stress_verb_particles_prod.exs
 #   VERB_PARTICLE_STRESS=full mix run scripts/stress_verb_particles_prod.exs
+#   VERB_PARTICLE_STRESS=power mix run scripts/stress_verb_particles_prod.exs
 #
 # Runs the same *production* Core.resolve_input pipeline used by Phoenix,
 # against the current lexical database. It may update normal cognitive
@@ -36,12 +37,18 @@ defmodule Symbrella.VerbParticleProductionSmoke do
   ]
 
   def run do
-    full? = System.get_env("VERB_PARTICLE_STRESS") == "full"
-    cases = if full?, do: @focus ++ @extended, else: @focus
+    mode = System.get_env("VERB_PARTICLE_STRESS", "focus")
+
+    cases =
+      case mode do
+        "full" -> @focus ++ @extended
+        "power" -> [{"Power the computer down.", :synonym}]
+        _ -> @focus
+      end
 
     IO.puts("\n=== Symbrella verb-particle production smoke ===")
     IO.puts("Production cognition pipeline: normal mood/memory side effects are possible.")
-    IO.puts("Mode: #{if(full?, do: "full", else: "focus")}\n")
+    IO.puts("Mode: #{mode}\n")
 
     for {sentence, category} <- cases do
       IO.puts("\n--- #{inspect(sentence)} [#{category}] ---")
