@@ -112,6 +112,37 @@ defmodule Core.MWE.LearningTest do
     assert Learning.snapshot(server).phrase_count == 0
   end
 
+  test "context statistics do not cross session boundaries" do
+    server = start_supervised!({Learning, name: nil})
+    first = %{make_input(~w(we phase out systems), [{1, 2}]) | session_id: "alpha"}
+    second = %{make_input(~w(they phase out products), [{1, 2}]) | session_id: "beta"}
+
+    alpha = Learning.observe(first, mwe_learning_server: server)
+    beta = Learning.observe(second, mwe_learning_server: server)
+
+    assert hd(alpha.mwe_hypotheses).observation_count == 1
+    assert hd(beta.mwe_hypotheses).observation_count == 1
+    assert Learning.snapshot(server).phrase_count == 2
+  end
+
+  test "database confirmation supersedes a previously observed hypothesis" do
+    server = start_supervised!({Learning, name: nil})
+    si = make_input(~w(we phase out systems), [{1, 2}])
+    observed = Learning.observe(si, mwe_learning_server: server)
+    assert hd(observed.mwe_hypotheses).observation_count == 1
+
+    known = %{si | mwe_lexicon: [
+      %{phrase: "phase out", senses: [%{id: "phase out|verb|1", pos: "verb"}]}
+    ]}
+
+    now_known = Learning.observe(known, mwe_learning_server: server)
+
+    refute Map.has_key?(hd(now_known.mwe_hypotheses), :review_status)
+    refute Map.has_key?(hd(now_known.mwe_hypotheses), :observation_count)
+    assert now_known.mwe_lexicon == known.mwe_lexicon
+    assert Learning.snapshot(server).phrase_count == 1
+  end
+
   test "disabled learning preserves the complete SI and reset clears counters" do
     server = start_supervised!({Learning, name: nil})
     si = make_input(~w(we phase out systems), [{1, 2}])
