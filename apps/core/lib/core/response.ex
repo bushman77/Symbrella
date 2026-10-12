@@ -133,7 +133,11 @@ defmodule Core.Response do
           })
 
         {decision, skill} = decide_and_pick_skill(features, guard, text_in)
-        features = put_chosen_skill(features, skill)
+        features =
+          features
+          |> put_chosen_skill(skill)
+          |> Map.put(:selected_action, Map.get(si, :selected_action))
+          |> Map.put(:action_meta, Map.get(si, :action_meta))
 
         name_claim? = name_claim?(extracted_name, text_in)
         maybe_persist_user_name(name_claim?, extracted_name, text_in)
