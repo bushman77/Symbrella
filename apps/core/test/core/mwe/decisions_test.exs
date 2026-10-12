@@ -86,6 +86,34 @@ defmodule Core.MWE.DecisionsTest do
     end
   end
 
+  test "dictionary verb cannot shadow noun object within enclosing particle construction" do
+    si = input(~w(turn the lights off))
+
+    signature = %{
+      id: :verb_particle_construction,
+      span: {0, 3},
+      roles: %{verb: 0, determiner: 1, object: 2, particle: 3}
+    }
+
+    false_phrase = %{
+      token_index: 4,
+      token_span: {2, 3},
+      phrase: "lights off",
+      id: "lights off|verb|1",
+      lemma: "lights off",
+      pos: "verb",
+      source: :mwe_lexicon,
+      score: 0.99
+    }
+
+    si = %{si | sentence_signatures: [signature], mwe_choices: [false_phrase]}
+    out = Decisions.attach(si)
+
+    assert out.semantic_choices == si.lifg_choices
+    assert out.lifg_choices == si.lifg_choices
+    assert out.mwe_choices == si.mwe_choices
+  end
+
   test "two occurrences yield separate phrase choices" do
     si = input(~w(turn off and turn off))
     result = Decisions.attach(%{si | mwe_choices: [phrase_choice(0, 1, 5), phrase_choice(3, 4, 6)]})
