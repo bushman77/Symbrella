@@ -106,6 +106,12 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       all_verb_particle_signatures:
         Enum.filter(signatures, &(Map.get(&1, :id) == :verb_particle_construction))
         |> Enum.map(&Map.take(&1, [:span, :roles, :evidence])),
+      unverified_phrasal_hypotheses:
+        Enum.filter(list(Map.get(si, :mwe_hypotheses)), fn h ->
+          Map.get(h, :category) == :phrasal_verb
+        end)
+        |> Enum.map(&Map.take(&1, [:phrase, :span, :constituent_indices,
+                                   :particle_position, :dictionary_check, :verified?])),
       semantic_winners:
         Enum.map(list(Map.get(si, :semantic_choices)), fn c ->
           Map.take(c, [:token_index, :id, :kind, :token_span, :lemma, :score, :definition])
