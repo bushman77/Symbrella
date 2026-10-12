@@ -107,12 +107,14 @@ defmodule Brain.LIFG.ContextFit do
     evidence = evidence_terms(candidate)
     weights = effective_weights(opts)
 
+    related_morphology? = Keyword.get(opts, :related_morphology?, false) == true
+
     matches = %{
-      definition: overlap(context, evidence.definition),
-      example: overlap(context, evidence.example),
-      synonyms: overlap(context, evidence.synonyms),
-      semantic_atoms: overlap(context, evidence.semantic_atoms),
-      gram_function: overlap(context, evidence.gram_function)
+      definition: overlap(context, evidence.definition, related_morphology?),
+      example: overlap(context, evidence.example, related_morphology?),
+      synonyms: overlap(context, evidence.synonyms, related_morphology?),
+      semantic_atoms: overlap(context, evidence.semantic_atoms, related_morphology?),
+      gram_function: overlap(context, evidence.gram_function, related_morphology?)
     }
 
     component_scores =
@@ -317,12 +319,28 @@ defmodule Brain.LIFG.ContextFit do
   # Matching
   # ---------------------------------------------------------------------------
 
-  defp overlap(%MapSet{} = context, %MapSet{} = evidence) do
-    context
-    |> MapSet.intersection(evidence)
+  defp overlap(%MapSet{} = context, %MapSet{} = evidence, related_morphology?) do
+    evidence
     |> MapSet.to_list()
+    |> Enum.filter(fn term ->
+      MapSet.member?(context, term) or
+        (related_morphology? and
+           Enum.any?(context, &related_word_form?(&1, term)))
+    end)
     |> Enum.sort()
   end
+
+  # A low-weight lexical bridge for productive word-family variants such as
+  # "electronic"/"electrical" or "computer"/"computing".
+  # It is opt-in, used by structural dictionary verification only. Similar
+  # spelling is evidence, not proof of equivalent word senses.
+  defp related_word_form?(a, b) when is_binary(a) and is_binary(b) do
+    String.length(a) >= 8 and String.length(b) >= 8 and
+      String.slice(a, 0, 6) == String.slice(b, 0, 6) and
+      Regex.match?(~r/^\p{L}+$/u, a) and Regex.match?(~r/^\p{L}+$/u, b)
+  end
+
+  defp related_word_form?(_, _), do: false
 
   # A single strong lexical hit should matter.
   #
