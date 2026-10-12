@@ -131,6 +131,7 @@ defmodule Brain.ATL.Constituents do
   defp matches_pos?(:pos_noun, pos), do: pos in ["noun", "proper_noun"]
   defp matches_pos?(:pos_verb, "verb"), do: true
   defp matches_pos?(:pos_particle, "particle"), do: true
+  defp matches_pos?(:pos_adverb, "adverb"), do: true
   defp matches_pos?(:pos_preposition, "preposition"), do: true
   defp matches_pos?(:pos_determiner, "determiner"), do: true
   defp matches_pos?(:pos_adjective, "adjective"), do: true
