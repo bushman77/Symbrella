@@ -9,7 +9,7 @@ defmodule Core.MWE.LexiconTest do
     |> TokenFilters.rebuild_word_ngrams(3)
   end
 
-  defp verb_sense(phrase, sense \ 2) do
+  defp verb_sense(phrase, sense \\ 2) do
     %{
       id: "#{phrase}|verb|#{sense}",
       norm: phrase,
