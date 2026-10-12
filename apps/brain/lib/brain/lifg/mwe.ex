@@ -240,7 +240,10 @@ defmodule Brain.LIFG.MWE do
       |> Enum.map(&Safe.to_plain/1)
       |> Enum.filter(fn c ->
         id = to_string(Safe.get(c, :id) || "")
-        String.contains?(id, "|phrase|") and not String.ends_with?(id, "|phrase|fallback")
+        phrase = norm_key(Safe.get(c, :norm) || Safe.get(c, :word))
+        String.contains?(phrase, " ") and
+          String.starts_with?(id, phrase <> "|") and
+          not String.ends_with?(id, "|fallback")
       end)
       |> Enum.group_by(fn c ->
         norm_key(Safe.get(c, :norm) || Safe.get(c, :word) || Safe.get(c, :lemma))
@@ -324,7 +327,9 @@ defmodule Brain.LIFG.MWE do
                       lemma: phrase,
                       norm: nk,
                       mw: true,
-                      pos: :phrase,
+                      pos: Safe.get(c, :pos),
+                      definition: Safe.get(c, :definition),
+                      gram_function: Safe.get(c, :gram_function, []),
                       rel_prior: 0.30,
                       activation: act * 1.0,
                       score: 0.30,
@@ -564,7 +569,7 @@ defmodule Brain.LIFG.MWE do
         rows =
           Db.all(
             from(c in BrainCell,
-              where: c.norm in ^norms and like(c.id, ^"%|phrase|%"),
+              where: c.norm in ^norms,
               select: c
             )
           )
@@ -626,20 +631,17 @@ defmodule Brain.LIFG.MWE do
   defp real_phrase_candidate?(c) when is_map(c) do
     id = to_string(c[:id] || c["id"] || "")
 
-    cond do
-      id == "" ->
-        false
+    norm = norm_key(c[:norm] || c["norm"] || c[:lemma] || c["lemma"])
 
-      String.ends_with?(id, "|phrase|fallback") ->
+    cond do
+      id == "" or String.ends_with?(id, "|fallback") ->
         false
 
       String.contains?(id, "|phrase|") ->
         true
 
       true ->
-        pos = c[:pos] || c["pos"]
-        norm = to_string(c[:norm] || c["norm"] || c[:lemma] || c["lemma"] || "")
-        pos in [:phrase, "phrase"] and String.contains?(norm, " ")
+        String.contains?(norm, " ") and String.starts_with?(id, norm <> "|")
     end
   end
 
