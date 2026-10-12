@@ -92,9 +92,16 @@ defmodule Core.MWE.Discovery do
     |> Enum.flat_map(fn
       %{id: :verb_particle_construction, roles: %{verb: verb_idx, particle: particle_idx}}
       when is_integer(verb_idx) and is_integer(particle_idx) and particle_idx > verb_idx ->
+        segment =
+          Enum.filter(words, fn word ->
+            word.index >= verb_idx and word.index <= particle_idx
+          end)
+
         with %{word: verb} <- Map.get(by_index, verb_idx),
              %{word: particle} <- Map.get(by_index, particle_idx),
-             true <- verb != "" and particle != "" do
+             true <- verb != "" and particle != "",
+             true <- length(segment) == particle_idx - verb_idx + 1,
+             true <- Boundaries.valid_window?(segment) do
           adjacent? = particle_idx == verb_idx + 1
 
           candidate =
