@@ -743,6 +743,8 @@ defmodule SymbrellaWeb.BrainLive do
     end
   end
 
+  defp bb_tag(_), do: :event
+
   defp bb_tag_payload(%{} = env) do
     cond do
       is_atom(mget(env, :region)) -> mget(env, :region)
@@ -758,8 +760,6 @@ defmodule SymbrellaWeb.BrainLive do
       true -> :event
     end
   end
-
-  defp bb_tag(_), do: :event
 
   defp maybe_refresh_wm_on_wm_update(socket, %{} = env) do
     kind = mget(env, :kind)
