@@ -6,6 +6,7 @@ defmodule SymbrellaWeb.HomeLive do
   alias SymbrellaWeb.ChatHistory
   alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.HomeLive.MoodBadge
+  alias SymbrellaWeb.HomeLive.ExplainEvidence
   alias Core.Response
   alias Core.Curiosity.EpisodeProbe
   alias Core.LexicalExplain
@@ -194,6 +195,10 @@ defmodule SymbrellaWeb.HomeLive do
 
     explain_text = Map.get(reply, :explain_text, reply_text)
     senses_selected = Map.get(reply, :senses_selected, [])
+    # This is the same SemanticInput the console/API diagnostics report.
+    # Pass a compact read-only projection; never reconstruct meaning from
+    # the assistant's conversational text or from isolated word choices.
+    cognition = ExplainEvidence.from_si(si)
 
     intent = map_get(meta, :intent_inferred) || Map.get(si, :intent)
     confidence = map_get(meta, :confidence) || Map.get(si, :confidence)
@@ -209,6 +214,7 @@ defmodule SymbrellaWeb.HomeLive do
         confidence: confidence,
         from: meta || %{},
         senses_selected: senses_selected,
+        cognition: cognition,
         symbolic_frame: symbolic_frame,
         selected_action: selected_action,
         action_candidates: action_candidates,
