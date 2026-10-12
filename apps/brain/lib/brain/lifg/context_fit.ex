@@ -119,7 +119,13 @@ defmodule Brain.LIFG.ContextFit do
 
     component_scores =
       Map.new(matches, fn {field, terms} ->
-        {field, overlap_strength(terms)}
+        # Related word-family matches contribute half the incremental evidence
+        # of an exact token match, rather than masquerading as exact identity.
+        exact_terms = overlap(context, Map.fetch!(evidence, field))
+        exact_strength = overlap_strength(exact_terms)
+        total_strength = overlap_strength(terms)
+
+        {field, exact_strength + 0.5 * max(total_strength - exact_strength, 0.0)}
       end)
 
     contributions =
