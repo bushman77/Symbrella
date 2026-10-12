@@ -347,9 +347,29 @@ defmodule Brain.LIFG.ContextFit do
   defp raw_tokens(_), do: []
 
   defp normalize_token(token) when is_binary(token) do
-    token
-    |> String.trim()
-    |> String.replace("’", "'")
+    normalized =
+      token
+      |> String.trim()
+      |> String.replace("’", "'")
+
+    # Lightweight, deterministic English inflection matching. This is
+    # lexical *comparison* only: dictionary IDs and original token surfaces
+    # are never rewritten. "lights" must match "light" in a sense gloss.
+    cond do
+      String.length(normalized) > 5 and String.ends_with?(normalized, "ies") ->
+        String.replace_suffix(normalized, "ies", "y")
+
+      String.length(normalized) > 5 and
+          Enum.any?(["sses", "ches", "shes", "xes", "zes"], &String.ends_with?(normalized, &1)) ->
+        String.slice(normalized, 0, String.length(normalized) - 2)
+
+      String.length(normalized) > 4 and String.ends_with?(normalized, "s") and
+          not String.ends_with?(normalized, "ss") ->
+        String.slice(normalized, 0, String.length(normalized) - 1)
+
+      true ->
+        normalized
+    end
   end
 
   defp reject_stopwords(terms) do
