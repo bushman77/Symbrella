@@ -27,16 +27,34 @@ defmodule Core.MWE.Lexicon do
       si
     else
       windows = windows(tokens, Keyword.get(opts, :mwe_max_n, @max_n))
-      terms = windows |> Enum.map(& &1.phrase) |> Enum.uniq() |> Enum.take(@max_terms)
+      distinct_terms = windows |> Enum.map(& &1.phrase) |> Enum.uniq()
+      terms = Enum.take(distinct_terms, @max_terms)
+      truncated? = length(distinct_terms) > @max_terms
 
-      if length(Enum.uniq_by(windows, & &1.phrase)) > @max_terms do
+      if truncated? do
         Logger.warning("[core/mwe] capped lexical MWE lookup at #{@max_terms} expressions")
       end
 
-      rows =
+      {rows, lookup_ok?} =
         case Keyword.get(opts, :mwe_lookup) do
-          fun when is_function(fun, 1) -> fun.(terms)
-          _ -> db_lookup(terms)
+          fun when is_function(fun, 1) ->
+            case fun.(terms) do
+              records when is_list(records) -> {records, true}
+              _ -> {[], false}
+            end
+
+          _ ->
+            case db_lookup(terms) do
+              {:ok, records} -> {records, true}
+              {:error, _reason} -> {[], false}
+            end
+        end
+
+      lookup_status =
+        cond do
+          not lookup_ok? -> :unavailable
+          truncated? -> :truncated
+          true -> :ok
         end
 
       by_norm =
@@ -81,6 +99,11 @@ defmodule Core.MWE.Lexicon do
 
       si
       |> Map.put(:mwe_lexicon, units)
+      |> Map.put(:mwe_lookup_meta, %{
+        status: lookup_status,
+        queried_term_count: length(terms),
+        truncated?: truncated?
+      })
       |> Map.update(:mwe_matches, matches, fn prior ->
         List.wrap(prior) ++ matches
       end)
@@ -123,10 +146,10 @@ defmodule Core.MWE.Lexicon do
     end
   end
 
-  defp db_lookup([]), do: []
+  defp db_lookup([]), do: {:ok, []}
 
   defp db_lookup(terms) do
-    Db.all(
+    rows = Db.all(
       from(c in Db.BrainCell,
         where: c.norm in ^terms,
         select: %{
@@ -139,10 +162,12 @@ defmodule Core.MWE.Lexicon do
         }
       )
     )
+
+    {:ok, rows}
   rescue
     exception ->
       Logger.warning("[core/mwe] lexical lookup unavailable: #{Exception.message(exception)}")
-      []
+      {:error, :unavailable}
   end
 
   defp sense(row) do
