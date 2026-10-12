@@ -54,6 +54,7 @@ defmodule Core.SemanticInput do
                  :agency_commands,
                  :agency_command_results,
                  :mwe_matches,
+                 :mwe_lexicon,
                  :sentence_signatures
                ])
 
@@ -223,6 +224,7 @@ defmodule Core.SemanticInput do
 
           # Multiword expressions
           mwe_matches: list() | nil,
+          mwe_lexicon: list(),
 
           # Execution/frame metadata
           session_id: term() | nil,
@@ -284,6 +286,7 @@ defmodule Core.SemanticInput do
             self_memory_recall: nil,
             self_continuity: nil,
             mwe_matches: nil,
+            mwe_lexicon: [],
             session_id: nil,
             frame: nil,
             frame_ts_ms: nil,
