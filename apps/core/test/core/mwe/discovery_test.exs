@@ -94,6 +94,51 @@ defmodule Core.MWE.DiscoveryTest do
     refute Enum.any?(si.mwe_hypotheses, &(&1.phrase == "the quantum"))
   end
 
+  test "a separated verb and particle emerge as grammatical MWE evidence, not a sense" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "particle"}
+    ]
+
+    si =
+      input("turn the lights off", cells)
+      |> Core.Syntax.Signatures.attach()
+      |> Discovery.run()
+
+    assert [%{
+      phrase: "turn off",
+      span: {0, 3},
+      constituent_indices: [0, 3],
+      particle_position: :separated,
+      dictionary_check: :not_checked,
+      category: :phrasal_verb,
+      status: :unverified,
+      verified?: false
+    }] = si.mwe_hypotheses
+
+    assert si.mwe_lexicon == []
+    assert si.sense_candidates == %{}
+    assert Enum.map(si.tokens, & &1.phrase) == ["turn", "the", "lights", "off"]
+  end
+
+  test "syntactic and adjacent POS evidence do not duplicate the same candidate" do
+    cells = [%{norm: "phase", pos: "verb"}, %{norm: "out", pos: "particle"}]
+
+    si =
+      input("phase out", cells)
+      |> Core.Syntax.Signatures.attach()
+      |> Discovery.run()
+
+    assert [%{
+      phrase: "phase out",
+      constituent_indices: [0, 1],
+      particle_position: :adjacent,
+      evidence: [:sentence_signature, :verb_particle_construction]
+    }] = si.mwe_hypotheses
+  end
+
   test "does not promote generic POS signatures into discovered lexical expressions" do
     si =
       input("open the file", [
