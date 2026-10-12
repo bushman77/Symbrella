@@ -139,7 +139,9 @@ defmodule Brain.LIFG.GrammarEvidence do
 
   defp support_for(_, _, _, _), do: 0.0
 
-  defp role_support(:verb_particle_construction, :particle), do: 0.18
+  # Stronger than isolated noun/adjective windows at the same token; the
+  # separated construction requires a compatible verb and intervening object.
+  defp role_support(:verb_particle_construction, :particle), do: 0.28
   defp role_support(:verb_particle_construction, :verb), do: 0.16
   defp role_support(:verb_particle_construction, :object), do: 0.12
   defp role_support(:verb_particle_construction, :determiner), do: 0.10
@@ -158,6 +160,7 @@ defmodule Brain.LIFG.GrammarEvidence do
   defp matches_pos?(:pos_noun, pos), do: pos in ["noun", "proper_noun"]
   defp matches_pos?(:pos_verb, "verb"), do: true
   defp matches_pos?(:pos_particle, "particle"), do: true
+  defp matches_pos?(:pos_adverb, "adverb"), do: true
   defp matches_pos?(:pos_determiner, "determiner"), do: true
   defp matches_pos?(:pos_preposition, "preposition"), do: true
   defp matches_pos?(:pos_adjective, "adjective"), do: true
