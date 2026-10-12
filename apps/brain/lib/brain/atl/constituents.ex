@@ -67,11 +67,13 @@ defmodule Brain.ATL.Constituents do
           |> Enum.find(&compatible_choice?(&1, features))
 
         if winner do
-          entry = %{
-            token_index: index,
-            sense_id: winner.id,
-            norm: winner.norm
-          }
+          entry =
+            %{
+              token_index: index,
+              sense_id: winner.id,
+              norm: winner.norm
+            }
+            |> maybe_mark_phrase_winner(Map.get(winner, :raw))
 
           {Map.put(resolved, role, entry), missing}
         else
@@ -97,6 +99,16 @@ defmodule Brain.ATL.Constituents do
       source: :sentence_signature
     }
   end
+
+  # The MWE's lexical choice may be anchored at the verb's original index.
+  # Keep its true phrase scope explicit rather than presenting it as a
+  # unigram sense at that index.
+  defp maybe_mark_phrase_winner(entry, %{kind: :mwe, token_span: {first, last}})
+       when is_integer(first) and is_integer(last) and last >= first do
+    Map.merge(entry, %{selection_scope: :lexical_mwe, token_span: {first, last}})
+  end
+
+  defp maybe_mark_phrase_winner(entry, _), do: entry
 
   defp compatible_choice?(%{id: id}, features) when is_binary(id) do
     if String.ends_with?(id, "|fallback") do
