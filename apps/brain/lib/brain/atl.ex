@@ -92,7 +92,6 @@ defmodule Brain.ATL do
     handle_call({:ingest, choices, tokens, []}, from, state)
   end
 
-  @impl true
   def handle_call({:ingest, choices, tokens, signatures}, _from, state) do
     slate = reduce(choices, tokens, signatures)
 
