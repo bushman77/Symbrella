@@ -105,6 +105,47 @@ defmodule Core.Syntax.SignaturesTest do
     assert :separated_particle in hd(separated).evidence
   end
 
+  test "real dictionary adverb/preposition particle senses support a separated verb" do
+    # Live smoke test showed no off|particle sense, only lexical adverb,
+    # preposition and noun alternatives. Syntax should preserve those IDs.
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "the", pos: "preposition"},
+      %{norm: "lights", pos: "verb"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "off", pos: "preposition"},
+      %{norm: "off", pos: "noun"},
+      %{norm: "off", pos: "adjective"}
+    ]
+
+    si = input("Turn the lights off.", cells)
+    signatures = Signatures.detect(si)
+
+    assert Enum.any?(signatures, fn
+             %{
+               id: :verb_particle_construction, span: {0, 3},
+               roles: %{verb: 0, determiner: 1, object: 2, particle: 3},
+               required_features: %{particle: particle_pos}
+             } -> :pos_adverb in particle_pos and :pos_preposition in particle_pos
+             _ -> false
+           end)
+
+    assert si.active_cells == cells
+  end
+
+  test "a general manner adverb never becomes a verb particle" do
+    cells = [
+      %{norm: "walk", pos: "verb"},
+      %{norm: "quickly", pos: "adverb"},
+      %{norm: "off", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("walk quickly", cells)
+    refute :verb_particle_construction in ids("walk off", cells)
+  end
+
   test "bare noun and pronoun objects can separate verb and particle" do
     cells = [
       %{norm: "turn", pos: "verb"},
