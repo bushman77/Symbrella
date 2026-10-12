@@ -233,6 +233,31 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert ExplainEvidence.from_si(invalid).verified_phrasal_meanings == []
   end
 
+  test "old cached Explain payloads are upgraded from saved Core state without duplication" do
+    original = %{
+      title: "Explain",
+      sections: [
+        %{key: :intent_tone, title: "Intent & tone",
+          items: [%{label: "tone", body: ":warm"}]},
+        %{key: :message, title: "Message",
+          items: [%{label: "content", body: "Already powered down."}]}
+      ]
+    }
+
+    upgraded = Modal.enrich_saved_payload(original, si(:power))
+    upgraded_twice = Modal.enrich_saved_payload(upgraded, si(:power))
+
+    assert upgraded == upgraded_twice
+    assert hd(upgraded.sections).key == :intent_tone
+    assert List.last(upgraded.sections).key == :message
+    assert section(upgraded, :verified_phrasal_meanings).items
+           |> Enum.any?(&(&1.label == "power down|verb|1"))
+    assert section(upgraded, :semantic_choices).items
+           |> Enum.any?(&(&1.label == "computer|noun|3"))
+
+    assert Modal.enrich_saved_payload(original, %{intent: :unknown}) == original
+  end
+
   test "memory and ordinary replies do not fabricate runtime semantic sections" do
     assert ExplainEvidence.from_si(nil) == %{}
     assert ExplainEvidence.from_si(%{text: "Your name is... "}) == %{}
