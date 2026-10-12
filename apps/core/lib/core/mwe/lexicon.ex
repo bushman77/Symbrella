@@ -12,6 +12,7 @@ defmodule Core.MWE.Lexicon do
   """
 
   import Ecto.Query, only: [from: 2]
+  alias Core.MWE.Boundaries
   require Logger
 
   @min_n 2
@@ -96,7 +97,11 @@ defmodule Core.MWE.Lexicon do
       |> Enum.filter(&(field(&1, :n) in [nil, 1]))
       |> Enum.with_index()
       |> Enum.map(fn {tok, index} ->
-        %{index: field(tok, :index) || index, word: norm(field(tok, :phrase))}
+        %{
+          index: field(tok, :index) || index,
+          phrase: field(tok, :phrase),
+          word: norm(field(tok, :phrase))
+        }
       end)
 
     count = length(words)
@@ -107,7 +112,8 @@ defmodule Core.MWE.Lexicon do
       for start <- 0..(count - @min_n),
           n <- @min_n..min(max_n, count - start),
           segment = Enum.slice(words, start, n),
-          Enum.all?(segment, &(&1.word != "")) do
+          Enum.all?(segment, &(&1.word != "")),
+          Boundaries.valid_window?(segment) do
         %{
           phrase: Enum.map_join(segment, " ", & &1.word),
           span: {hd(segment).index, List.last(segment).index},
