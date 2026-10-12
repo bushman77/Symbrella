@@ -31,11 +31,16 @@ defmodule SymbrellaWeb.HomeLive do
     initial_explain_by_id =
       Map.new(initial, fn msg ->
         payload =
-          Map.get(msg, :explain_payload) ||
-            ChatHTML.explain_payload_for(%{
-              id: msg.id,
-              text: Map.get(msg, :explain_text, msg.text)
-            })
+          case Map.get(msg, :explain_payload) do
+            %{} = saved ->
+              ChatHTML.enrich_saved_payload(saved, Map.get(msg, :si))
+
+            _ ->
+              ChatHTML.explain_payload_for(%{
+                id: msg.id,
+                text: Map.get(msg, :explain_text, msg.text)
+              })
+          end
 
         {msg.id, payload}
       end)
