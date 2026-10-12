@@ -47,7 +47,16 @@ defmodule Core.MWE.Learning do
 
   def observe(%{mwe_hypotheses: hypotheses} = si, opts)
       when is_list(hypotheses) and is_list(opts) do
-    if Keyword.get(opts, :mwe_learning, :on) in [:off, false] or hypotheses == [] do
+    # No learning from an unverified database lookup or a capped term query:
+    # absence of a result is not evidence of lexical absence in those cases.
+    lookup_ok? =
+      case Map.get(si, :mwe_lookup_meta) do
+        %{status: status} -> status == :ok
+        _ -> true
+      end
+
+    if Keyword.get(opts, :mwe_learning, :on) in [:off, false] or
+         hypotheses == [] or not lookup_ok? do
       si
     else
       server = Keyword.get(opts, :mwe_learning_server, __MODULE__)
