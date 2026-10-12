@@ -153,8 +153,7 @@ defmodule Symbrella.StressHTMLExplainParity do
     items = section_items(payload, :verified_phrasal_meanings)
 
     length(meanings) == length(items) and
-      Enum.zip(meanings, items)
-      |> Enum.all?(fn {meaning, item} ->
+      Enum.all?(Enum.zip(meanings, items), fn {meaning, item} ->
         item.label == Map.get(meaning, :id) and
           contains?(item.body, "definition: ", Map.get(meaning, :definition)) and
           contains?(item.body, "source: :", Map.get(meaning, :source)) and
@@ -168,8 +167,7 @@ defmodule Symbrella.StressHTMLExplainParity do
     items = section_items(payload, :semantic_choices)
 
     length(choices) == length(items) and
-      Enum.zip(choices, items)
-      |> Enum.all?(fn {choice, item} ->
+      Enum.all?(Enum.zip(choices, items), fn {choice, item} ->
         item.label == Map.get(choice, :id) and
           contains?(item.body, "definition: ", Map.get(choice, :definition)) and
           contains?(item.body, "score: ", Map.get(choice, :score))
