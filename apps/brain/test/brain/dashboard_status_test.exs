@@ -15,14 +15,34 @@ defmodule Brain.DashboardStatusTest do
   end
 
   test "OFC returns compact dashboard status" do
+    status = OFC.status()
+
     assert %{
              region: :ofc,
              status: :up,
-             mood: nil,
-             mood_last_ms: nil,
+             mood: mood,
+             mood_last_ms: mood_last_ms,
              params: %{risk_weight: _, novelty_weight: _, mood_cap: _, mood_weights: _},
              telemetry_handlers: %{curiosity: _, mood: _}
-           } = OFC.status()
+           } = status
+
+    # The live OFC receives mood telemetry asynchronously. reset/0 clears the
+    # cache, but another mood event may repopulate it before status/0 returns.
+    case {mood, mood_last_ms} do
+      {nil, nil} ->
+        :ok
+
+      {%{exploration: exploration, inhibition: inhibition,
+         vigilance: vigilance, plasticity: plasticity}, timestamp}
+      when is_integer(timestamp) ->
+        for value <- [exploration, inhibition, vigilance, plasticity] do
+          assert is_number(value)
+          assert value >= 0.0 and value <= 1.0
+        end
+
+      other ->
+        flunk("invalid OFC mood state: #{inspect(other)}")
+    end
   end
 
   test "DLPFC returns compact dashboard status" do
