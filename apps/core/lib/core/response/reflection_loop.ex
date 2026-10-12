@@ -252,12 +252,7 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp acknowledge_device_command(context) do
-    phrase = get_in_map(context, [:features, :comprehension, :lexical_meanings])
-             |> List.wrap()
-             |> Enum.find_value(fn meaning ->
-               if is_map(meaning) and is_binary(map_get(meaning, :phrase)),
-                 do: String.trim(map_get(meaning, :phrase))
-             end)
+    phrase = context |> verified_device_meaning() |> map_get(:phrase)
 
     "I understand that you're asking me to #{phrase} the device. " <>
       "I don't have a confirmed device-control connection or a reading of its current state, " <>
