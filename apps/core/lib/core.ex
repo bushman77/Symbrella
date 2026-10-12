@@ -113,6 +113,7 @@ defmodule Core do
     |> Core.MWE.Stage.run(:late, opts)
     |> Core.MWE.Lexicon.attach(opts)
     |> Core.Syntax.Signatures.attach()
+    |> Selection.refine_from_syntax()
     |> Core.MWE.Discovery.run(opts)
     |> Core.TokenResolution.resolve(opts)
     |> Core.Relations.attach_edges()
