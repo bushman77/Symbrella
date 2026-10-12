@@ -8,6 +8,7 @@ defmodule Core.Brain.ATL do
   @spec ingest(map(), keyword()) :: map()
   def ingest(%{lifg_choices: choices, tokens: tokens} = si, _opts)
       when is_list(choices) and is_list(tokens) do
+    signatures = List.wrap(Map.get(si, :sentence_signatures))
     # Virtual MWE decisions have already been reanchored to base-token indices.
     choices =
       case Map.get(si, :semantic_choices) do
@@ -22,13 +23,13 @@ defmodule Core.Brain.ATL do
         case Process.whereis(Brain.ATL) do
           pid when is_pid(pid) ->
             if Process.alive?(pid) do
-              Runtime.apply_if_exported(Brain.ATL, :ingest, [choices, tokens], %{})
+              Runtime.apply_if_exported(Brain.ATL, :ingest, [choices, tokens, signatures], %{})
             else
-              Runtime.apply_if_exported(Brain.ATL, :reduce, [choices, tokens], %{})
+              Runtime.apply_if_exported(Brain.ATL, :reduce, [choices, tokens, signatures], %{})
             end
 
           _ ->
-            Runtime.apply_if_exported(Brain.ATL, :reduce, [choices, tokens], %{})
+            Runtime.apply_if_exported(Brain.ATL, :reduce, [choices, tokens, signatures], %{})
         end
 
       if is_map(slate) do
