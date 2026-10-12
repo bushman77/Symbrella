@@ -165,6 +165,12 @@ defmodule Symbrella.VerbParticleProductionSmoke do
                                :reasons, :lexical_meanings])
           _ -> nil
         end,
+      object_sense_candidates:
+        if(category == :synonym, do: object_sense_candidates(si), else: []),
+      object_sense_refined?: Enum.any?(list(Map.get(si, :trace)), fn
+        %{stage: :object_sense_refinement, decision: :reranked} -> true
+        _ -> false
+      end),
       lexical_winners:
         Enum.map(choices, fn c ->
           %{
@@ -227,6 +233,33 @@ defmodule Symbrella.VerbParticleProductionSmoke do
        is_map(Map.get(si, :context_frame)) and
          Map.get(Map.get(si, :context_frame) || %{}, :intent) == :command}
     ]
+  end
+
+  defp object_sense_candidates(si) do
+    noun_index = 2
+    token =
+      si
+      |> Map.get(:tokens, [])
+      |> List.wrap()
+      |> Enum.find(&(Map.get(&1, :index) == noun_index))
+
+    target =
+      (if is_map(token), do: Map.get(token, :phrase), else: "")
+      |> to_string()
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}]/u, "")
+
+    si
+    |> Map.get(:active_cells, [])
+    |> List.wrap()
+    |> Enum.filter(fn cell ->
+      norm = Map.get(cell, :norm) || Map.get(cell, "norm")
+      pos = Map.get(cell, :pos) || Map.get(cell, "pos")
+      norm == target and pos == "noun"
+    end)
+    |> Enum.map(&Map.take(&1, [:id, :norm, :pos, :definition]))
+    |> Enum.uniq_by(&Map.get(&1, :id))
+    |> Enum.take(20)
   end
 
   defp alternate_checks(si) do
