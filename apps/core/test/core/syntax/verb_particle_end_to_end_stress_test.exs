@@ -102,6 +102,8 @@ defmodule Core.Syntax.VerbParticleEndToEndStressTest do
       "They turn the lights off.",
       "I turn the lights off.",
       "The lights turn off.",
+      "Lights off.",
+      "Turn off.",
       "Turn the lights quickly.",
       "Turn. the lights off."
     ]
