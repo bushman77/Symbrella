@@ -58,6 +58,7 @@ defmodule Core.SemanticInput do
                  :mwe_lexicon,
                  :mwe_hypotheses,
                  :mwe_choices,
+                 :lexical_constructions,
                  :sentence_signatures
                ])
 
@@ -231,6 +232,7 @@ defmodule Core.SemanticInput do
           mwe_lexicon: list(),
           mwe_hypotheses: list(),
           mwe_choices: list(),
+          lexical_constructions: list(),
 
           # Execution/frame metadata
           session_id: term() | nil,
@@ -296,6 +298,7 @@ defmodule Core.SemanticInput do
             mwe_lexicon: [],
             mwe_hypotheses: [],
             mwe_choices: [],
+            lexical_constructions: [],
             session_id: nil,
             frame: nil,
             frame_ts_ms: nil,
