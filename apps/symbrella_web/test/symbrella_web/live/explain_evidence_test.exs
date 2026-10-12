@@ -185,8 +185,10 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert Enum.any?(summary.items, &(&1.label == "degraded?" and &1.body == "true"))
     assert Enum.any?(summary.items, &(&1.label == "reasons" and &1.body =~ ":weak_decision_rate_high"))
 
-    assert section(result, :runtime_decision).items
-           |> Enum.any?(&(&1.label == "selected_action" and &1.body == ":answer_user"))
+    assert Enum.any?(
+             section(result, :runtime_decision).items,
+             &(&1.label == "selected_action" and &1.body == ":answer_user")
+           )
 
     assert section(result, :unverified_phrasal_hypotheses).hint =~
              "before the separate dictionary verification"
@@ -250,10 +252,15 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert upgraded == upgraded_twice
     assert hd(upgraded.sections).key == :intent_tone
     assert List.last(upgraded.sections).key == :message
-    assert section(upgraded, :verified_phrasal_meanings).items
-           |> Enum.any?(&(&1.label == "power down|verb|1"))
-    assert section(upgraded, :semantic_choices).items
-           |> Enum.any?(&(&1.label == "computer|noun|3"))
+    assert Enum.any?(
+             section(upgraded, :verified_phrasal_meanings).items,
+             &(&1.label == "power down|verb|1")
+           )
+
+    assert Enum.any?(
+             section(upgraded, :semantic_choices).items,
+             &(&1.label == "computer|noun|3")
+           )
 
     assert Modal.enrich_saved_payload(original, %{intent: :unknown}) == original
   end
