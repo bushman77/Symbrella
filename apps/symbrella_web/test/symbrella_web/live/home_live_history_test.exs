@@ -63,6 +63,67 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     assert html =~ "0.91"
   end
 
+  test "cached Explain preserves verified phrasal meaning and actual degraded state", %{conn: conn} do
+    alias SymbrellaWeb.HomeLive.ExplainEvidence
+    alias SymbrellaWeb.HomeLive.HTML.Modal
+
+    input = %{
+      intent: :command,
+      confidence: 0.82,
+      selected_action: :answer_user,
+      lifg_choices: [
+        %{id: "power|verb|1", token_index: 0, score: 0.04},
+        %{id: "computer|noun|3", token_index: 2, score: 0.20}
+      ],
+      semantic_choices: [
+        %{id: "power|verb|1", token_index: 0, score: 0.04},
+        %{id: "computer|noun|3", token_index: 2, score: 0.20}
+      ],
+      lexical_constructions: [
+        %{id: "power down|verb|1", phrase: "power down",
+          definition: "To switch off (something electrical).",
+          source: :verified_discontinuous_mwe,
+          dictionary_verified?: true,
+          context_score: 0.145,
+          constituent_indices: [0, 3], object_index: 2}
+      ],
+      comprehension: %{
+        understood: ["computer", "power down"],
+        uncertain: [], degraded?: true, reasons: [:weak_decision_rate_high]
+      }
+    }
+
+    payload =
+      Modal.explain_payload_for(%{
+        text: "The computer is already powered down.",
+        intent: :command,
+        confidence: 0.82,
+        cognition: ExplainEvidence.from_si(input)
+      })
+
+    ChatHistory.append(%{
+      id: "b-cognition-parity",
+      role: :assistant,
+      text: "The computer is already powered down.",
+      explain_text: "The computer is already powered down.",
+      explain_payload: payload
+    })
+
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("button[phx-value-id='b-cognition-parity']", "Explain")
+    |> render_click()
+
+    html = render(view)
+    assert html =~ "Verified phrase meanings"
+    assert html =~ "power down|verb|1"
+    assert html =~ "computer|noun|3"
+    assert html =~ "Canonical semantic winners"
+    assert html =~ "weak_decision_rate_high"
+    assert html =~ "The computer is already powered down."
+  end
+
   test "explain payload includes action selection agency surface" do
     payload =
       SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
