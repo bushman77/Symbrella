@@ -24,6 +24,14 @@ defmodule Core.Syntax.Signatures do
     {["noun", "noun"], [:modifier, :head]}
   ]
 
+  # These are lexical adverbs/prepositions that can also function as verbal
+  # particles. Unlike a generic verb + adverb rule this bounded inventory
+  # does not label ordinary manner adverbs ("walk quickly") as particles.
+  # A candidate still requires dictionary POS evidence on the specific word.
+  @particle_surfaces MapSet.new(~w(
+    up down off on out in over away back around through apart along aside
+  ))
+
   @pos_features %{
     "determiner" => :pos_determiner,
     "adjective" => :pos_adjective,
@@ -357,7 +365,7 @@ defmodule Core.Syntax.Signatures do
               :verb_particle_construction,
               {verb.index, particle.index},
               %{verb: verb.index, particle: particle.index},
-              %{verb: [:pos_verb], particle: [:pos_particle]},
+              %{verb: [:pos_verb], particle: particle_features(particle)},
               [:adjacent_particle]
             )
           ]
@@ -378,7 +386,7 @@ defmodule Core.Syntax.Signatures do
               :verb_particle_construction,
               {verb.index, particle.index},
               %{verb: verb.index, object: object.index, particle: particle.index},
-              %{verb: [:pos_verb], object: [:pos_noun_or_pronoun], particle: [:pos_particle]},
+              %{verb: [:pos_verb], object: [:pos_noun_or_pronoun], particle: particle_features(particle)},
               [:separated_particle, :object_between]
             )
           ]
@@ -407,7 +415,7 @@ defmodule Core.Syntax.Signatures do
                 verb: [:pos_verb],
                 determiner: [:pos_determiner],
                 object: [:pos_noun],
-                particle: [:pos_particle]
+                particle: particle_features(particle)
               },
               [:separated_particle, :determiner_noun_object]
             )
@@ -420,8 +428,21 @@ defmodule Core.Syntax.Signatures do
     adjacent ++ bare_object ++ determined_object
   end
 
-  defp verb_particle?(verb, particle),
-    do: pos?(verb, "verb") and pos?(particle, "particle")
+  defp verb_particle?(verb, particle) do
+    pos?(verb, "verb") and particle_features(particle) != []
+  end
+
+  defp particle_features(particle) do
+    direct = if pos?(particle, "particle"), do: [:pos_particle], else: []
+
+    if MapSet.member?(@particle_surfaces, particle.word) do
+      direct ++
+        (if pos?(particle, "adverb"), do: [:pos_adverb], else: []) ++
+        (if pos?(particle, "preposition"), do: [:pos_preposition], else: [])
+    else
+      direct
+    end
+  end
 
   defp valid_surface?(nodes) do
     nodes
