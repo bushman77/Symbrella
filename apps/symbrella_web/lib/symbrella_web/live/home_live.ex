@@ -561,9 +561,16 @@ defmodule SymbrellaWeb.HomeLive do
   # ─────────────────────────────────────────────────────────────────────────────
 
   defp build_senses_selected(%{} = si, reply_text) do
-    case phrase_reference_sense(si, reply_text) do
-      nil -> build_token_senses_selected(si)
-      phrase_item -> [phrase_item]
+    # Real LIFG selections win over any heuristic derived from response prose.
+    # Do not replace the exact dictionary evidence with an invented phrase ID
+    # just because an LLM sentence mentions a film, book, or reference.
+    case build_token_senses_selected(si) do
+      [_ | _] = senses -> senses
+      [] ->
+        case phrase_reference_sense(si, reply_text) do
+          nil -> []
+          hint -> [hint]
+        end
     end
   end
 
