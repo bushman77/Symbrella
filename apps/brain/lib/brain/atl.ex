@@ -19,6 +19,7 @@ defmodule Brain.ATL do
 
   alias Brain.Utils.Safe
   alias Brain.LIFG.SlateFilter
+  alias Brain.ATL.Constituents
 
   @name __MODULE__
 
@@ -26,14 +27,31 @@ defmodule Brain.ATL do
 
   @doc "Ingest a SemanticInput-like map with :lifg_choices and :tokens; returns a slate map."
   @spec ingest(map()) :: map()
-  def ingest(%{lifg_choices: choices, tokens: tokens}) do
-    GenServer.call(@name, {:ingest, List.wrap(choices), List.wrap(tokens)})
+  def ingest(%{lifg_choices: choices, tokens: tokens} = si) do
+    selected =
+      case Map.get(si, :semantic_choices) do
+        candidate_choices when is_list(candidate_choices) -> candidate_choices
+        _ -> choices
+      end
+
+    ingest(
+      List.wrap(selected),
+      List.wrap(tokens),
+      List.wrap(Map.get(si, :sentence_signatures))
+    )
   end
 
   @doc "Ingest raw winners + tokens; returns a slate map."
   @spec ingest(list(), list()) :: map()
   def ingest(choices, tokens) when is_list(choices) and is_list(tokens) do
     GenServer.call(@name, {:ingest, choices, tokens})
+  end
+
+  @doc "Ingest resolved winners and grammatical construction evidence."
+  @spec ingest(list(), list(), list()) :: map()
+  def ingest(choices, tokens, signatures)
+      when is_list(choices) and is_list(tokens) and is_list(signatures) do
+    GenServer.call(@name, {:ingest, choices, tokens, signatures})
   end
 
   @doc "Peek current ATL state."
@@ -70,8 +88,13 @@ defmodule Brain.ATL do
   end
 
   @impl true
-  def handle_call({:ingest, choices, tokens}, _from, state) do
-    slate = reduce(choices, tokens)
+  def handle_call({:ingest, choices, tokens}, from, state) do
+    handle_call({:ingest, choices, tokens, []}, from, state)
+  end
+
+  @impl true
+  def handle_call({:ingest, choices, tokens, signatures}, _from, state) do
+    slate = reduce(choices, tokens, signatures)
 
     concept_counts =
       slate.by_norm
@@ -130,19 +153,37 @@ defmodule Brain.ATL do
 
   @doc "Pure reducer (no server): takes %{lifg_choices, tokens}."
   @spec reduce(map()) :: map()
-  def reduce(%{lifg_choices: choices, tokens: tokens}),
-    do: reduce(List.wrap(choices), List.wrap(tokens))
+  def reduce(%{lifg_choices: choices, tokens: tokens} = si) do
+    selected =
+      case Map.get(si, :semantic_choices) do
+        candidate_choices when is_list(candidate_choices) -> candidate_choices
+        _ -> choices
+      end
+
+    reduce(
+      List.wrap(selected),
+      List.wrap(tokens),
+      List.wrap(Map.get(si, :sentence_signatures))
+    )
+  end
 
   @doc "Pure reducer (no server): takes winners and tokens directly."
   @spec reduce(list(), list()) :: map()
   def reduce(choices, tokens) when is_list(choices) and is_list(tokens) do
+    reduce(choices, tokens, [])
+  end
+
+  @doc "Pure reducer with optional grammatical constituent projection."
+  @spec reduce(list(), list(), list()) :: map()
+  def reduce(choices, tokens, signatures)
+      when is_list(choices) and is_list(tokens) and is_list(signatures) do
     winners =
       choices
       |> Enum.map(&normalize_choice/1)
       # only keep items with an id
       |> Enum.reject(&is_nil(&1.id))
 
-    %{
+    slate = %{
       tokens: tokens,
       token_count: length(tokens),
       winners: winners,
@@ -150,6 +191,12 @@ defmodule Brain.ATL do
       by_norm: Enum.group_by(winners, & &1.norm),
       by_id: Enum.group_by(winners, & &1.id)
     }
+
+    if signatures == [] do
+      slate
+    else
+      Constituents.attach(slate, signatures)
+    end
   end
 
   # ── Internals — normalize choice ─────────────────────────────────────────
