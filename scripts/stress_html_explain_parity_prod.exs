@@ -92,6 +92,7 @@ defmodule Symbrella.StressHTMLExplainParity do
         intent: Map.get(si, :intent),
         confidence: Map.get(si, :confidence),
         cognition: evidence,
+        from: Map.get(si, :response_meta) || %{},
         selected_action: Map.get(si, :selected_action),
         action_meta: Map.get(si, :action_meta)
       })
@@ -125,7 +126,9 @@ defmodule Symbrella.StressHTMLExplainParity do
       {"original Core comprehension degradation flag retained",
        check_comprehension(si, payload)},
       {"Core action selector evidence retained",
-       check_action(si, payload)}
+       check_action(si, payload)},
+      {"LLM reflection status and repair are faithful to Core response metadata",
+       check_response_reflection(si, payload)}
     ]
 
     Enum.each(checks, fn {label, passed?} ->
@@ -227,6 +230,31 @@ defmodule Symbrella.StressHTMLExplainParity do
     case Enum.find(Map.get(payload, :sections, []), &(Map.get(&1, :key) == key)) do
       %{items: items} -> Enum.map(items, &Map.get(&1, :label))
       _ -> []
+    end
+  end
+
+  defp check_response_reflection(si, payload) do
+    meta = Map.get(si, :response_meta) || %{}
+    reflection = Map.get(meta, :response_reflection)
+    section = Enum.find(Map.get(payload, :sections, []),
+      &(&1.key == :response_reflection))
+
+    case reflection do
+      %{status: status, issues: issues, applied?: applied?} ->
+        is_map(section) and
+          Enum.any?(section.items, fn i ->
+            i.label == "status" and i.body == ":#{status}"
+          end) and
+          Enum.any?(section.items, fn i ->
+            i.label == "applied?" and i.body == to_string(applied?)
+          end) and
+          Enum.any?(section.items, fn i ->
+            i.label == "issues" and
+              Enum.all?(issues, &String.contains?(i.body, Atom.to_string(&1)))
+          end)
+
+      _ ->
+        is_nil(section)
     end
   end
 
