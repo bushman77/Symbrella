@@ -9,7 +9,7 @@ defmodule Core.TokenResolution do
   """
 
   alias Core.SemanticInput
-  alias Core.MWE.Boundaries
+  alias Core.MWE.{Boundaries, GrammarPrecedence}
 
   @spec resolve(SemanticInput.t() | map(), keyword()) :: SemanticInput.t() | map()
   def resolve(si, opts \\ [])
@@ -133,9 +133,14 @@ defmodule Core.TokenResolution do
               List.wrap(Map.get(match, :sense_ids)) != []
           end)
 
-        [
-          %{
-            kind: :phrase,
+        if GrammarPrecedence.incompatible_verb_mwe?(
+             si, {start_index, end_index}, lexical_pos
+           ) do
+          []
+        else
+          [
+            %{
+              kind: :phrase,
             phrase: Enum.map_join(segment, " ", &text(&1, :phrase)),
             span: {first_start, last_stop - first_start},
             token_span: {start_index, end_index},
@@ -150,10 +155,11 @@ defmodule Core.TokenResolution do
             confirmed?: kind in [:lex, :both],
             start: first_start,
             stop: last_stop,
-            score: phrase_score(kind, length(segment)) +
-                     if(lexical_pos == [], do: 0.0, else: 0.5)
-          }
-        ]
+              score: phrase_score(kind, length(segment)) +
+                       if(lexical_pos == [], do: 0.0, else: 0.5)
+            }
+          ]
+        end
       else
         _ -> []
       end
@@ -219,8 +225,12 @@ defmodule Core.TokenResolution do
     case span do
       {start, len} when is_integer(start) and is_integer(len) ->
         cond do
-          slice_matches?(sentence, start, len, phrase) -> {start, start + len}
+          # Core word tokens may arrive with canonical end-exclusive spans.
+          # Check that interpretation first: a trailing "." can normalize
+          # to the same phrase even when treating the end as a length would
+          # produce an invalid overshooting character interval.
           len > start and slice_matches?(sentence, start, len - start, phrase) -> {start, len}
+          slice_matches?(sentence, start, len, phrase) -> {start, start + len}
           true -> {start, max(start + max(len, 1), start + 1)}
         end
 
