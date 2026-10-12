@@ -26,13 +26,15 @@ defmodule Core.LIFG.Attach do
     # Pass intent bias downstream (non-breaking; ignored if unused)
     lifg_opts2 = Keyword.put(lifg_opts, :intent_bias, Map.get(si, :intent_bias, %{}))
 
-    case safe_lifg_run(si, lifg_opts2) do
+    {lifg_input, virtual_mwes} = Core.MWE.LIFGBridge.prepare(si, lifg_opts)
+
+    case safe_lifg_run(lifg_input, lifg_opts2) do
       {:ok, %{si: si_after, choices: raw_choices, slate: slate, flips: flips}}
       when is_list(raw_choices) and is_map(slate) ->
         tokens_for_choices = Map.get(si_after, :tokens, tokens)
         intent_fallback = Map.get(si, :intent)
 
-        lifg_choices =
+        all_choices =
           raw_choices
           |> Enum.map(fn ch ->
             token_index = Map.get(ch, :token_index, 0)
@@ -139,9 +141,26 @@ defmodule Core.LIFG.Attach do
               score: score2
             }
           end)
-          |> mwe_shadow(tokens_for_choices)
 
-        si_after
+        {word_choices, mwe_choices} =
+          Core.MWE.LIFGBridge.split_choices(all_choices, virtual_mwes)
+
+        lifg_choices = mwe_shadow(word_choices, tokens_for_choices)
+
+        si_clean =
+          if map_size(virtual_mwes) > 0 do
+            si_after
+            |> Map.put(:tokens, tokens)
+            |> Map.update(:sense_candidates, %{}, fn buckets ->
+              Map.drop(buckets, Map.keys(virtual_mwes))
+            end)
+          else
+            si_after
+          end
+
+        si_clean
+        |> Map.put(:mwe_lexicon, Map.get(si, :mwe_lexicon, []))
+        |> Map.put(:mwe_choices, mwe_choices)
         |> Map.put(:atl_slate, slate)
         |> Map.put(:lifg_choices, lifg_choices)
         |> Map.put(:acc_conflict, Map.get(si_after, :acc_conflict, 0.0))
