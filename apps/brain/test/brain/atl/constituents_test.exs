@@ -96,6 +96,37 @@ defmodule Brain.ATL.ConstituentsTest do
     assert hd(slate.by_norm["garden"]).id == "garden|noun|1"
   end
 
+  test "adverb lexical sense resolves a grammatical particle without relabeling the sense ID" do
+    choices = [
+      winner("turn", "verb", 0),
+      winner("the", "determiner", 1),
+      winner("lights", "noun", 2),
+      winner("off", "adverb", 3)
+    ]
+
+    signatures = [
+      %{
+        id: :verb_particle_construction, span: {0, 3},
+        roles: %{verb: 0, determiner: 1, object: 2, particle: 3},
+        required_features: %{
+          verb: [:pos_verb], determiner: [:pos_determiner],
+          object: [:pos_noun], particle: [:pos_adverb, :pos_preposition]
+        }
+      }
+    ]
+
+    slate = ATL.reduce(choices, tokens(~w(turn the lights off)), signatures)
+
+    assert [%{
+      status: :resolved,
+      roles: %{particle: %{sense_id: "off|adverb|1", token_index: 3},
+               object: %{sense_id: "lights|noun|1", token_index: 2}}
+    }] = slate.constituents
+
+    assert Map.has_key?(slate.by_id, "off|adverb|1")
+    refute Map.has_key?(slate.by_id, "off|particle|1")
+  end
+
   test "ambiguous or absent winners produce partial structure, never invented senses" do
     choices = [winner("the", "determiner", 0), winner("record", "verb", 1)]
     sig = %{
