@@ -37,6 +37,38 @@ defmodule Brain.LIFG.ContextFitWindowTest do
     assert ContextFit.score("Turn off the employees.", "turn off", deactivate) == 0.0
   end
 
+  test "related morphology is opt-in for electrical/electronic lexical evidence" do
+    lexical_sense = %{definition: "To switch off something electrical."}
+
+    base =
+      ContextFit.score(
+        "Power the computer down.",
+        "power down",
+        lexical_sense,
+        extra_context: ["An electronic machine."]
+      )
+
+    related =
+      ContextFit.score(
+        "Power the computer down.",
+        "power down",
+        lexical_sense,
+        extra_context: ["An electronic machine."],
+        related_morphology?: true
+      )
+
+    assert base == 0.0
+    assert related > 0.0
+    assert "electrical" in
+             ContextFit.explain(
+               "Power the computer down.",
+               "power down",
+               lexical_sense,
+               extra_context: ["An electronic machine."],
+               related_morphology?: true
+             ).matches.definition
+  end
+
   test "nearby semantic evidence is preserved" do
     sentence = "I sat on the bank beside the river."
 
