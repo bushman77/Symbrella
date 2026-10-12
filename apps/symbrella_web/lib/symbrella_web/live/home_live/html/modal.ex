@@ -13,6 +13,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
   use SymbrellaWeb, :html
 
+  alias SymbrellaWeb.HomeLive.HTML.EvidenceSections
+
   # ---------- component ----------
 
   attr :open?, :boolean, default: false
@@ -134,6 +136,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> strip_leading_tone(meta[:tone])
       |> String.trim()
 
+    cognition = pget(message, :cognition)
+
     structured_senses =
       message[:senses_selected] ||
         get_in(message, [:from, :senses_selected]) ||
@@ -170,6 +174,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     sections =
       []
       |> maybe_add_intent_tone_section(meta, meta_line)
+      |> Kernel.++(EvidenceSections.build(cognition))
       |> maybe_add_senses_selected_section(structured_senses, bullets)
       |> maybe_add_event_frame_section(symbolic_frame)
       |> maybe_add_action_selection_section(selected_action, action_candidates, action_meta)
@@ -219,6 +224,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           confidence: pget(payload, :confidence),
           tone: pget(payload, :tone),
           senses_selected: pget(payload, :senses_selected),
+          cognition: pget(payload, :cognition),
           symbolic_frame: pget(payload, :symbolic_frame) || pget(from, :symbolic_frame),
           selected_action:
             pget(payload, :selected_action) ||
@@ -667,9 +673,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         [
           %{
             key: :senses_selected,
-            title: "Senses selected",
+            title: "Individual word senses (LIFG)",
             tag: "#{length(items)}",
-            hint: "Selected sense per token (with a best-available gloss).",
+            hint: "Raw word-level LIFG selections. Canonical semantic winners and verified multiword meanings are shown separately above.",
             items: items
           }
         ]
