@@ -94,6 +94,77 @@ defmodule Core.Intent.SelectionTest do
     assert i in [:unknown, :greet]
   end
 
+  test "unknown separated phrasal-verb imperative gains a grammar-backed command intent" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "adverb"}
+    ]
+
+    before =
+      %Core.SemanticInput{sentence: "Turn the lights off.", active_cells: cells}
+      |> Core.TokenFilters.rebuild_word_ngrams(3)
+      |> Map.from_struct()
+      |> Selection.select()
+      |> Core.Syntax.Signatures.attach()
+
+    assert before.intent == :unknown
+
+    after_ = Selection.refine_from_syntax(before)
+    assert after_.intent == :command
+    assert after_.confidence >= 0.80
+    assert Enum.any?(after_.trace, fn
+             %{stage: :intent_refinement, reason: :initial_verb_particle_imperative} -> true
+             _ -> false
+           end)
+    assert after_.tokens == before.tokens
+    assert after_.sentence_signatures == before.sentence_signatures
+  end
+
+  test "adjacent phrasal verb before a noun phrase can express an imperative" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"}
+    ]
+
+    si =
+      %Core.SemanticInput{sentence: "Turn off the lights.", active_cells: cells}
+      |> Core.TokenFilters.rebuild_word_ngrams(3)
+      |> Map.from_struct()
+      |> Selection.select()
+      |> Core.Syntax.Signatures.attach()
+      |> Selection.refine_from_syntax()
+
+    assert si.intent == :command
+  end
+
+  test "imperative refinement never overrides questions or stronger existing intents" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "adverb"}
+    ]
+
+    for sentence <- ["Turn the lights off?", "Can you turn the lights off?"] do
+      before =
+        %Core.SemanticInput{sentence: sentence, active_cells: cells}
+        |> Core.TokenFilters.rebuild_word_ngrams(3)
+        |> Map.from_struct()
+        |> Selection.select()
+        |> Core.Syntax.Signatures.attach()
+
+      assert Selection.refine_from_syntax(before).intent == before.intent
+    end
+
+    classified = %{intent: :health_support, sentence: "Turn the lights off.",
+                   sentence_signatures: [], tokens: []}
+    assert Selection.refine_from_syntax(classified) == classified
+  end
+
   test "command: please build the project" do
     assert intent("please build the project") == :command
     assert conf("please build the project") >= 0.80
