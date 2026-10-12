@@ -48,7 +48,8 @@ defmodule Core.MWE.Discovery do
       parts_of_speech = collect_pos(Map.get(si, :active_cells, []))
 
       hypotheses =
-        (curated_hypotheses(si, words) ++ productive_hypotheses(words, parts_of_speech))
+        (syntax_hypotheses(si, words) ++ curated_hypotheses(si, words) ++
+           productive_hypotheses(words, parts_of_speech))
         |> Enum.reject(fn candidate ->
           MapSet.member?(known, {candidate.span, candidate.phrase})
         end)
@@ -76,6 +77,46 @@ defmodule Core.MWE.Discovery do
   end
 
   def run(other, _opts), do: other
+
+  # Sentence signatures can identify a verb and its particle even when an
+  # object separates them. Such a candidate has two lexical constituents but
+  # its grammatical span covers intervening words. Do not treat the full span
+  # as the lexical phrase or pretend that an adjacent-phrase DB lookup checked
+  # a discontinuous pair.
+  defp syntax_hypotheses(si, words) do
+    by_index = Map.new(words, &{&1.index, &1})
+
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{id: :verb_particle_construction, roles: %{verb: verb_idx, particle: particle_idx}}
+      when is_integer(verb_idx) and is_integer(particle_idx) and particle_idx > verb_idx ->
+        with %{word: verb} <- Map.get(by_index, verb_idx),
+             %{word: particle} <- Map.get(by_index, particle_idx),
+             true <- verb != "" and particle != "" do
+          adjacent? = particle_idx == verb_idx + 1
+
+          candidate =
+            hypothesis(
+              verb <> " " <> particle,
+              {verb_idx, particle_idx},
+              :phrasal_verb,
+              [:sentence_signature, :verb_particle_construction]
+            )
+            |> Map.put(:constituent_indices, [verb_idx, particle_idx])
+            |> Map.put(:particle_position, if(adjacent?, do: :adjacent, else: :separated))
+            |> Map.put(:dictionary_check, if(adjacent?, do: :contiguous, else: :not_checked))
+
+          [candidate]
+        else
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+  end
 
   defp curated_hypotheses(si, words) do
     si
