@@ -124,8 +124,20 @@ defmodule Core.Response.Context do
     sense_candidates = map_get(si, :sense_candidates, %{})
     mwe_matches = list_or_empty(map_get(si, :mwe_matches))
     hypotheses = list_or_empty(map_get(si, :mwe_hypotheses))
+    verified = list_or_empty(map_get(si, :mwe_lexicon))
 
     %{
+      verified_mwes:
+        verified
+        |> Enum.filter(&is_map/1)
+        |> Enum.take(@summary_limit)
+        |> Enum.map(fn unit ->
+          %{
+            phrase: Map.get(unit, :phrase),
+            lexical_pos: Map.get(unit, :lexical_pos, []),
+            verified?: true
+          }
+        end),
       unverified_mwes:
         hypotheses
         |> Enum.filter(&is_map/1)
