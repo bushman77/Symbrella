@@ -38,12 +38,16 @@ defmodule Core.TokenResolutionTest do
   end
 
   test "can be disabled with opts" do
-    si =
+    original =
       %SemanticInput{sentence: "open the file", tokens: [], trace: []}
       |> TokenFilters.rebuild_word_ngrams(3)
-      |> TokenResolution.resolve(token_resolution: :off)
 
-    refute Map.get(si, :token_cover)
-    refute Map.get(si, :resolved_tokens)
+    si = TokenResolution.resolve(original, token_resolution: :off)
+
+    # Disabled means no transformation; SemanticInput defaults resolved_tokens to [].
+    assert si == original
+    assert si.token_cover == nil
+    assert si.resolved_tokens == []
+    refute Enum.any?(si.trace, &(&1.stage == :token_resolution))
   end
 end
