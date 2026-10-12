@@ -59,7 +59,19 @@ defmodule Core.MWE.Discovery do
         |> Enum.uniq_by(&{&1.span, &1.phrase})
         |> Enum.take(discovery_limit(opts))
 
-      Map.put(si, :mwe_hypotheses, hypotheses)
+      event = %{
+        stage: :mwe_discovery,
+        decision: :evaluated,
+        meta: %{
+          verified_count: MapSet.size(known),
+          hypothesis_count: length(hypotheses)
+        },
+        ts_ms: System.system_time(:millisecond)
+      }
+
+      si
+      |> Map.put(:mwe_hypotheses, hypotheses)
+      |> Map.update(:trace, [event], fn trace -> [event | List.wrap(trace)] end)
     end
   end
 
