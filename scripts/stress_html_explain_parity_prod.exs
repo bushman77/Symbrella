@@ -19,7 +19,8 @@ defmodule Symbrella.StressHTMLExplainParity do
     mode: :prod,
     enrich_lexicon?: true,
     lexicon_stage?: true,
-    lifg_opts: [grammar_weight: 1.0]
+    lifg_opts: [grammar_weight: 1.0],
+    session_id: "html-explain-parity"
   ]
 
   @focus [
@@ -111,6 +112,12 @@ defmodule Symbrella.StressHTMLExplainParity do
        canonical_ids == html_canonical_ids},
       {"all verified dictionary construction IDs match HTML exactly",
        selected_phrase_ids == html_phrases},
+      {"dictionary source, definition, and context scores match HTML",
+       match_phrase_evidence(si, payload)},
+      {"canonical dictionary gloss and scoring match HTML",
+       match_semantic_details(si, payload)},
+      {"syntax and ATL statuses match HTML",
+       match_grammar_details(si, payload)},
       {"expected phrase-level sense matches",
        if(is_binary(expected_id),
          do: expected_id in selected_phrase_ids,
@@ -134,6 +141,88 @@ defmodule Symbrella.StressHTMLExplainParity do
     }, pretty: true)
 
     if Enum.all?(checks, fn {_label, ok?} -> ok? end), do: :pass, else: :fail
+  end
+
+  defp match_phrase_evidence(si, payload) do
+    meanings =
+      si
+      |> Map.get(:lexical_constructions)
+      |> list()
+      |> Enum.filter(&(Map.get(&1, :dictionary_verified?) == true))
+
+    items = section_items(payload, :verified_phrasal_meanings)
+
+    length(meanings) == length(items) and
+      Enum.zip(meanings, items)
+      |> Enum.all?(fn {meaning, item} ->
+        item.label == Map.get(meaning, :id) and
+          contains?(item.body, "definition: ", Map.get(meaning, :definition)) and
+          contains?(item.body, "source: :", Map.get(meaning, :source)) and
+          contains?(item.body, "context_score: ", Map.get(meaning, :context_score)) and
+          contains?(item.body, "object_index: ", Map.get(meaning, :object_index))
+      end)
+  end
+
+  defp match_semantic_details(si, payload) do
+    choices = list(Map.get(si, :semantic_choices))
+    items = section_items(payload, :semantic_choices)
+
+    length(choices) == length(items) and
+      Enum.zip(choices, items)
+      |> Enum.all?(fn {choice, item} ->
+        item.label == Map.get(choice, :id) and
+          contains?(item.body, "definition: ", Map.get(choice, :definition)) and
+          contains?(item.body, "score: ", Map.get(choice, :score))
+      end)
+  end
+
+  defp match_grammar_details(si, payload) do
+    sigs =
+      si
+      |> Map.get(:sentence_signatures)
+      |> list()
+      |> Enum.filter(&(Map.get(&1, :id) == :verb_particle_construction))
+
+    atlas =
+      si
+      |> Map.get(:atl_slate, %{})
+      |> case do
+        %{} = state -> Map.get(state, :constituents)
+        _ -> []
+      end
+      |> list()
+      |> Enum.filter(&(Map.get(&1, :id) == :verb_particle_construction))
+
+    items = section_items(payload, :grammar_atl)
+    signatures_match? =
+      Enum.all?(sigs, fn sig ->
+        Enum.any?(items, fn item ->
+          item.label == "Syntax #{inspect(Map.get(sig, :span))}" and
+            contains?(item.body, "id: :", Map.get(sig, :id))
+        end)
+      end)
+
+    atlas_match? =
+      Enum.all?(atlas, fn con ->
+        Enum.any?(items, fn item ->
+          item.label == "ATL #{inspect(Map.get(con, :span))}" and
+            contains?(item.body, "status: :", Map.get(con, :status))
+        end)
+      end)
+
+    signatures_match? and atlas_match?
+  end
+
+  defp contains?(_body, _prefix, nil), do: true
+  defp contains?(body, prefix, value) when is_binary(body) do
+    String.contains?(body, prefix <> to_string(value))
+  end
+
+  defp section_items(payload, key) do
+    case Enum.find(Map.get(payload, :sections, []), &(Map.get(&1, :key) == key)) do
+      %{items: items} -> items
+      _ -> []
+    end
   end
 
   defp labels(payload, key) do
