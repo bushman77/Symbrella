@@ -24,6 +24,7 @@ defmodule Core.Response.Meta do
         curiosity_probe: curiosity_probe,
         response_source: response_source,
         response_fallback_reason: response_fallback_reason,
+        response_reflection: response_reflection,
         agency_decision: agency_decision,
         agency_commands: agency_commands,
         agency_command_results: agency_command_results,
@@ -56,6 +57,7 @@ defmodule Core.Response.Meta do
       explanation: planner_explanation,
       response_source: response_source,
       response_fallback_reason: response_fallback_reason,
+      response_reflection: reflection_summary(response_reflection),
       curiosity_probe: curiosity_probe,
       self_state: Map.get(decision, :self_state),
       self_state_effects: Map.get(decision, :self_state_effects, []),
@@ -65,6 +67,15 @@ defmodule Core.Response.Meta do
       agency_memory: agency_memory
     }
   end
+
+  # Only public, bounded review diagnostics enter chat metadata. Do not
+  # expose prompt internals or duplicate raw model drafts in HTML/history.
+  defp reflection_summary(%{} = reflection) do
+    Map.take(reflection, [:status, :issues, :applied?, :repair_count, :critique,
+                          :draft_sha256, :final_sha256])
+  end
+
+  defp reflection_summary(_), do: nil
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do
