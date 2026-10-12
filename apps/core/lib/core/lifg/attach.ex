@@ -171,6 +171,7 @@ defmodule Core.LIFG.Attach do
           scores: %{choice_count: length(raw_choices), flips: flips},
           meta: %{choice_count: length(raw_choices), flips: flips}
         )
+        |> Core.MWE.Decisions.attach()
 
       _ ->
         si
