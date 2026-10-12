@@ -142,7 +142,7 @@ defmodule Core.Response.Context do
         hypotheses
         |> Enum.filter(&is_map/1)
         |> Enum.take(@summary_limit)
-        |> Enum.map(&Map.take(&1, [:phrase, :category, :verified?, :observation_count, :distinct_contexts, :review_status])),
+        |> Enum.map(&Map.take(&1, [:phrase, :category, :verified?])),
       token_count: length(tokens),
       active_cells_count: length(active_cells),
       sense_candidates_count: sense_candidate_count(sense_candidates),
