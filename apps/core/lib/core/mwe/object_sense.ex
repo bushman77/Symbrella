@@ -139,8 +139,6 @@ defmodule Core.MWE.ObjectSense do
     end
   end
 
-  defp rank_object(_, _, _, _, _), do: nil
-
   defp object_candidates(si, index, term, selected) do
     bucket =
       case Map.get(si, :sense_candidates, %{}) do
