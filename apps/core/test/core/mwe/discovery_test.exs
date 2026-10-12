@@ -123,6 +123,31 @@ defmodule Core.MWE.DiscoveryTest do
     assert Enum.map(si.tokens, & &1.phrase) == ["turn", "the", "lights", "off"]
   end
 
+  test "a separated grammatical particle can be backed by a dictionary adverb" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "off", pos: "noun"}
+    ]
+
+    si =
+      input("turn the lights off", cells)
+      |> Core.Syntax.Signatures.attach()
+      |> Discovery.run()
+
+    assert Enum.any?(si.mwe_hypotheses, fn hypothesis ->
+             hypothesis.phrase == "turn off" and
+               hypothesis.span == {0, 3} and
+               hypothesis.constituent_indices == [0, 3] and
+               hypothesis.status == :unverified
+           end)
+
+    assert si.mwe_lexicon == []
+    assert si.sense_candidates == %{}
+  end
+
   test "syntactic and adjacent POS evidence do not duplicate the same candidate" do
     cells = [%{norm: "phase", pos: "verb"}, %{norm: "out", pos: "particle"}]
 
