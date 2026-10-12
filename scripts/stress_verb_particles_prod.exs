@@ -69,8 +69,13 @@ defmodule Symbrella.VerbParticleProductionSmoke do
 
         IO.inspect(report, limit: :infinity, pretty: true, width: 100)
 
-        if category in [:primary, :alternate] do
-          checks = if(category == :primary, do: primary_checks(si), else: alternate_checks(si))
+        if category in [:primary, :alternate, :synonym] do
+          checks =
+            case category do
+              :primary -> primary_checks(si)
+              :alternate -> alternate_checks(si)
+              :synonym -> synonym_checks(si, sentence)
+            end
           IO.puts("\n#{String.upcase(to_string(category))} CHECKS:")
           Enum.each(checks, fn {name, ok?} ->
             IO.puts("#{if(ok?, do: "PASS", else: "FAIL")} #{name}")
@@ -226,6 +231,33 @@ defmodule Symbrella.VerbParticleProductionSmoke do
        Enum.any?(semantic, &(&1.id == "turn off|verb|2"))},
       {"comprehension receives the verified dictionary meaning",
        Enum.any?(meanings, &(&1.id == "turn off|verb|2"))}
+    ]
+  end
+
+  defp synonym_checks(si, sentence) do
+    {verb_id, phrase_id} =
+      if String.starts_with?(String.downcase(sentence), "power") do
+        {"power|verb|", "power down|verb|1"}
+      else
+        {"switch|verb|", "switch off|verb|1"}
+      end
+
+    winners = list(Map.get(si, :lifg_choices))
+    meanings = list(Map.get(si, :lexical_constructions))
+
+    [
+      {"governing word retains an existing verb sense",
+       Enum.any?(winners, fn c ->
+         Map.get(c, :token_index) == 0 and
+           String.starts_with?(Map.get(c, :id, ""), verb_id)
+       end)},
+      {"ATL resolves the complete verb/object/particle roles",
+       Enum.any?(atlas_constituents(si), fn
+         %{id: :verb_particle_construction, span: {0, 3}, status: :resolved} -> true
+         _ -> false
+       end)},
+      {"verified dictionary meaning #{phrase_id}",
+       Enum.any?(meanings, &(Map.get(&1, :id) == phrase_id))}
     ]
   end
 
