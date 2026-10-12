@@ -644,7 +644,8 @@ defmodule Brain.LIFG do
           :mwe_fallback,
           :source,
           :stage1_local_mwe_fallback,
-          :stage1_stop_event
+          :stage1_stop_event,
+          :grammar_weight
         ])
       )
 

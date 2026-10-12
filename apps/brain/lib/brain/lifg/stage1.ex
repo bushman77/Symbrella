@@ -42,6 +42,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.ClosedClass
   alias Brain.LIFG.Stage1.PosBias
   alias Brain.LIFG.Stage1.Boundary
+  alias Brain.LIFG.GrammarEvidence
 
   @default_weights %{
     lex_fit: 0.40,
@@ -231,6 +232,7 @@ defmodule Brain.LIFG.Stage1 do
           si: si1,
           sent: sent,
           buckets: buckets,
+          grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
           weights: weights,
           scores_mode: scores_mode,
           margin_thr: margin_thr,
@@ -552,6 +554,12 @@ defmodule Brain.LIFG.Stage1 do
   # ---------- Scoring loop ----------
 
   defp score_tokens(tokens, ctx) do
+    grammar_context =
+      GrammarEvidence.prepare(Map.get(ctx, :si, %{}))
+
+    ctx =
+      Map.put(ctx, :grammar_context, grammar_context)
+
     acc0 = %{
       choices: [],
       weak: 0,
@@ -805,6 +813,14 @@ defmodule Brain.LIFG.Stage1 do
           else
             cereb_calibrate(ctx.si, base_scores, feats, cereb_opts)
           end
+
+        cal_scores =
+          GrammarEvidence.apply(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index,
+            Map.get(ctx, :grammar_weight, 0.0)
+          )
 
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
