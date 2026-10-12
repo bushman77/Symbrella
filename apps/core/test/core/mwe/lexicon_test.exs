@@ -51,6 +51,35 @@ defmodule Core.MWE.LexiconTest do
     assert cover.pos_patterns != []
   end
 
+  test "exact phrase lookup retains lexical evidence required for sense ranking" do
+    rows = [
+      %{
+        id: "turn off|verb|2",
+        norm: "turn off",
+        pos: "verb",
+        definition: "To deactivate a light.",
+        example: "Turn off the machine.",
+        synonyms: ["switch off", "deactivate"],
+        semantic_atoms: ["tag:transitive"],
+        status: "inactive",
+        gram_function: ["transitive"],
+        activation: 0.0
+      }
+    ]
+
+    by_phrase = Lexicon.lookup_senses(["turn off"], mwe_lookup: fn terms ->
+      assert terms == ["turn off"]
+      rows
+    end)
+
+    assert %{"turn off" => [%{id: "turn off|verb|2"} = sense]} = by_phrase
+    assert sense.example == "Turn off the machine."
+    assert "deactivate" in sense.synonyms
+    assert sense.semantic_atoms == ["tag:transitive"]
+    assert sense.status == "inactive"
+    assert sense.gram_function == ["transitive"]
+  end
+
   test "the same phrase at two positions keeps two independent spans" do
     result =
       input("turn off and turn off")
