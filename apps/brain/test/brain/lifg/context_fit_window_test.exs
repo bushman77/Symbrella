@@ -18,6 +18,25 @@ defmodule Brain.LIFG.ContextFitWindowTest do
     assert result.matches.example == []
   end
 
+  test "plural object agrees with singular dictionary definition without changing senses" do
+    deactivate = %{
+      definition: "To deactivate an appliance, light, mechanism, or functionality.",
+      example: "Turn off the machine and unplug it."
+    }
+
+    assert ContextFit.score("Turn the lights off.", "turn off", deactivate) > 0.0
+    assert ContextFit.score("Turn off the lights.", "turn off", deactivate) > 0.0
+
+    gloss = ContextFit.explain("Turn the lights off.", "turn off", deactivate)
+    assert "light" in gloss.matches.definition
+  end
+
+  test "a different object does not produce artificial light evidence" do
+    deactivate = %{definition: "To deactivate a light or lamp."}
+
+    assert ContextFit.score("Turn off the employees.", "turn off", deactivate) == 0.0
+  end
+
   test "nearby semantic evidence is preserved" do
     sentence = "I sat on the bank beside the river."
 
