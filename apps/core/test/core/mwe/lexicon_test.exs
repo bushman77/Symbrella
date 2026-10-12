@@ -90,7 +90,7 @@ defmodule Core.MWE.LexiconTest do
     assert result.mwe_lexicon == []
     assert Enum.any?(result.mwe_matches, &(&1.phrase == "turn off"))
     assert Enum.any?(result.token_cover, &(&1.kind == :phrase))
-    assert Enum.all?(result.token_cover, &(&1.lexical_pos in [nil, []]))
+    assert Enum.all?(result.token_cover, &(Map.get(&1, :lexical_pos) in [nil, []]))
   end
 
   test "lookup can be disabled without touching input" do
