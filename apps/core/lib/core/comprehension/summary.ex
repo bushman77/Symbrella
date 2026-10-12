@@ -387,6 +387,7 @@ defmodule Core.Comprehension.Summary do
       confidence: 0.0,
       keyword: nil,
       understood: [],
+      lexical_meanings: [],
       uncertain: [],
       degraded?: true,
       reasons: [:invalid_input],
