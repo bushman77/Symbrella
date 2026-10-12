@@ -124,6 +124,53 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     assert html =~ "The computer is already powered down."
   end
 
+  test "remount upgrades an old cached Explain payload from its saved SI", %{conn: conn} do
+    ChatHistory.append(%{
+      id: "b-legacy-semantics",
+      role: :assistant,
+      text: "The computer is already powered down.",
+      explain_text: "The computer is already powered down.",
+      si: %{
+        intent: :command,
+        confidence: 0.82,
+        semantic_choices: [%{id: "computer|noun|3", token_index: 2}],
+        lifg_choices: [%{id: "computer|noun|3", token_index: 2}],
+        lexical_constructions: [
+          %{id: "power down|verb|1", phrase: "power down",
+            definition: "To switch off something electrical.",
+            dictionary_verified?: true, source: :verified_discontinuous_mwe,
+            context_score: 0.145, object_index: 2, constituent_indices: [0, 3]}
+        ],
+        comprehension: %{
+          understood: ["computer", "power down"],
+          uncertain: [], degraded?: true, reasons: [:weak_decision_rate_high]
+        }
+      },
+      explain_payload: %{
+        title: "Explain",
+        sections: [
+          %{key: :intent_tone, title: "Intent & tone",
+            items: [%{label: "tone", body: ":warm"}]},
+          %{key: :message, title: "Message",
+            items: [%{label: "content", body: "The computer is already powered down."}]}
+        ]
+      }
+    })
+
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("button[phx-value-id='b-legacy-semantics']", "Explain")
+    |> render_click()
+
+    html = render(view)
+    assert html =~ "Verified phrase meanings"
+    assert html =~ "power down|verb|1"
+    assert html =~ "computer|noun|3"
+    assert html =~ "weak_decision_rate_high"
+    assert html =~ "Intent &amp; tone"
+  end
+
   test "explain payload includes action selection agency surface" do
     payload =
       SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
