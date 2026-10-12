@@ -796,7 +796,7 @@ defmodule SymbrellaWeb.BrainHTML do
           {:ok, "running"}
 
         stat[:status] == :available ->
-          {:ok, "available"
+          {:ok, "available"}
 
         stat[:status] == :down or stat[:error] in [:not_running, :noproc] ->
           {:warn, "not running"}
