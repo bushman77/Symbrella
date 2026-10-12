@@ -93,6 +93,9 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       context_intent: if(is_map(context), do: Map.get(context, :intent), else: nil),
       selected_action: Map.get(si, :selected_action),
       grammar_frame: frame,
+      all_verb_particle_signatures:
+        Enum.filter(signatures, &(Map.get(&1, :id) == :verb_particle_construction))
+        |> Enum.map(&Map.take(&1, [:span, :roles, :evidence])),
       lexical_winners:
         Enum.map(choices, fn c ->
           %{
@@ -143,7 +146,7 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       {"instruction conversation act", Map.get(si, :conversation_act) == :instruction},
       {"context intent consistent",
        is_map(Map.get(si, :context_frame)) and
-         get_in(si, [:context_frame, :intent]) == :command}
+         Map.get(Map.get(si, :context_frame) || %{}, :intent) == :command}
     ]
   end
 
