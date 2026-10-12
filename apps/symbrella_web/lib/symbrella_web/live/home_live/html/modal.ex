@@ -179,6 +179,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> maybe_add_senses_selected_section(structured_senses, bullets)
       |> maybe_add_event_frame_section(symbolic_frame)
       |> maybe_add_action_selection_section(selected_action, action_candidates, action_meta)
+      |> maybe_add_response_reflection_section(pget(from, :response_reflection))
       |> maybe_add_similar_terms_section(bullets)
       |> maybe_add_antonyms_section(bullets)
       |> maybe_add_message_section(main)
@@ -836,6 +837,41 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   end
 
   defp format_frame_value(value), do: inspect(value)
+
+  defp maybe_add_response_reflection_section(sections, reflection) when is_map(reflection) do
+    status = pget(reflection, :status)
+    issues = pget(reflection, :issues, [])
+    applied? = pget(reflection, :applied?)
+    count = pget(reflection, :repair_count)
+    critique = pget(reflection, :critique)
+
+    if frame_present?(status) do
+      items =
+        []
+        |> maybe_kv("status", format_frame_value(status))
+        |> maybe_kv("issues", format_frame_value(issues))
+        |> maybe_kv("applied?", format_frame_value(applied?))
+        |> maybe_kv("repair_count", format_frame_value(count))
+        |> maybe_kv("review summary", critique)
+        |> maybe_kv("draft SHA-256", pget(reflection, :draft_sha256))
+        |> maybe_kv("final SHA-256", pget(reflection, :final_sha256))
+
+      sections ++
+        [
+          %{
+            key: :response_reflection,
+            title: "LLM response review",
+            tag: format_frame_value(status),
+            hint: "Bounded post-generation review. A repair changes the LLM draft; it does not mean Core executed a physical action.",
+            items: items
+          }
+        ]
+    else
+      sections
+    end
+  end
+
+  defp maybe_add_response_reflection_section(sections, _), do: sections
 
   defp maybe_add_action_selection_section(sections, selected_action, candidates, action_meta) do
     selected =
