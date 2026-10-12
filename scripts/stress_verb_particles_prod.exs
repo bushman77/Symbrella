@@ -47,9 +47,24 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       IO.puts("\n--- #{inspect(sentence)} [#{category}] ---")
 
       try do
-        if not db_ready?(), do: throw(:database_unavailable_before_case)
+        started_before = postgres_started_at()
+        if is_nil(started_before), do: throw(:database_unavailable_before_case)
+
         si = Core.resolve_input(sentence, @options)
-        if not db_ready?(), do: throw(:database_unavailable_after_case)
+
+        started_after = postgres_started_at()
+
+        cond do
+          is_nil(started_after) ->
+            throw(:database_unavailable_after_case)
+
+          started_before != started_after ->
+            throw(:postgres_restarted_during_case)
+
+          true ->
+            :ok
+        end
+
         report = summarize(si, category)
 
         IO.inspect(report, limit: :infinity, pretty: true, width: 100)
@@ -71,6 +86,13 @@ defmodule Symbrella.VerbParticleProductionSmoke do
         exception ->
           IO.puts("ERROR: #{Exception.format(:error, exception, __STACKTRACE__)}")
       catch
+        :throw, reason when reason in [
+          :database_unavailable_before_case,
+          :database_unavailable_after_case,
+          :postgres_restarted_during_case
+        ] ->
+          IO.puts("INCOMPLETE: #{reason}. Do not score this case as a pass.")
+
         kind, reason ->
           IO.puts("ERROR: #{inspect({kind, reason})}")
       end
@@ -79,12 +101,20 @@ defmodule Symbrella.VerbParticleProductionSmoke do
     IO.puts("\nReview lexical *sense definitions* separately from grammatical role resolution.")
   end
 
-  defp db_ready? do
-    match?({:ok, _}, Ecto.Adapters.SQL.query(Db, "SELECT 1", [], timeout: 3_000))
+  defp postgres_started_at do
+    case Ecto.Adapters.SQL.query(
+           Db,
+           "SELECT pg_postmaster_start_time()",
+           [],
+           timeout: 3_000
+         ) do
+      {:ok, %{rows: [[started_at]]}} -> started_at
+      _ -> nil
+    end
   rescue
-    _ -> false
+    _ -> nil
   catch
-    _, _ -> false
+    _, _ -> nil
   end
 
   defp summarize(si, category) do
