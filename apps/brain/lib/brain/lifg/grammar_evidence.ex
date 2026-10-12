@@ -90,7 +90,7 @@ defmodule Brain.LIFG.GrammarEvidence do
          _cell
        )
        when role_index == index do
-    if id_pos(id) == "verb", do: 0.28, else: 0.0
+    if id_pos(id) == "verb", do: 0.65, else: 0.0
   end
 
   defp support_for(
@@ -100,7 +100,7 @@ defmodule Brain.LIFG.GrammarEvidence do
          _cell
        )
        when role_index == index do
-    if id_pos(id) == "particle", do: 0.20, else: 0.0
+    if id_pos(id) == "particle", do: 0.65, else: 0.0
   end
 
   defp support_for(_, _, _, _), do: 0.0

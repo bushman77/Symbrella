@@ -50,6 +50,20 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     assert Map.keys(result) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
   end
 
+  test "infinitive roles beat misleading noun and preposition priors" do
+    ctx =
+      context([
+        sign(:have_verb_to_infinitive,
+          %{auxiliary: 0, verb: 1, infinitive_marker: 2, complement: 3})
+      ])
+
+    complement = GE.apply(%{"leave|noun|4" => 0.65, "leave|verb|1" => 0.25}, ctx, 3, 1.0)
+    assert complement["leave|verb|1"] > complement["leave|noun|4"]
+
+    marker = GE.apply(%{"to|preposition|1" => 0.68, "to|particle|1" => 0.25}, ctx, 2, 1.0)
+    assert marker["to|particle|1"] > marker["to|preposition|1"]
+  end
+
   test "unrelated token index is unchanged" do
     ctx = context([sign(:finite_past_candidate, %{verb: 1})])
     assert GE.apply(@scores, ctx, 99, 1.0) == @scores
