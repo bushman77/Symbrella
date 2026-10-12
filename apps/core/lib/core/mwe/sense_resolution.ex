@@ -214,7 +214,7 @@ defmodule Core.MWE.SenseResolution do
     |> Map.get(:semantic_choices)
     |> List.wrap()
     |> Enum.flat_map(fn
-      %{kind: :mwe, source: :mwe_lexicon, id: id, token_span: {first, last}} = ch
+      %{kind: :mwe, source: :mwe_lexicon, id: id, token_span: {first, last}}
       when is_binary(id) and is_integer(first) and is_integer(last) ->
         unit =
           Enum.find(units, fn u ->
