@@ -9,8 +9,8 @@ defmodule Brain.ATL do
   Public API:
     - start_link/1         # provided by `use Brain, region: :atl`
     - ingest/1             # ingest %{lifg_choices, tokens} (server)
-    - ingest/2             # ingest choices + tokens directly (server)
-    - reduce/1,2           # pure version (no server required)
+    - ingest/2,3           # ingest choices and optional syntax signatures (server)
+    - reduce/1,2,3         # pure version (no server required)
     - snapshot/0           # peek state
     - reset/0              # clear rolling window & counters
   """
