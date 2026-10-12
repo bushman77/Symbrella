@@ -100,7 +100,10 @@ defmodule Brain.LIFG.ContextFit do
 
   def explain(sentence, target, candidate, opts)
       when is_map(candidate) and is_list(opts) do
-    context = context_terms(sentence, target)
+    context =
+      context_terms(sentence, target)
+      |> MapSet.union(additional_context_terms(Keyword.get(opts, :extra_context, [])))
+
     evidence = evidence_terms(candidate)
     weights = effective_weights(opts)
 
@@ -191,6 +194,20 @@ defmodule Brain.LIFG.ContextFit do
     local_words
     |> reject_stopwords()
     |> Enum.reject(&MapSet.member?(excluded, &1))
+    |> MapSet.new()
+  end
+
+  # A selected noun object's dictionary gloss may provide type evidence
+  # (e.g. "fan" -> "device") absent from the literal sentence. This is
+  # opt-in, bounded, and never expands from unselected candidate senses.
+  defp additional_context_terms(values) do
+    values
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.take(2)
+    |> Enum.flat_map(&raw_tokens/1)
+    |> reject_stopwords()
+    |> Enum.take(28)
     |> MapSet.new()
   end
 
