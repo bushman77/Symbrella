@@ -25,6 +25,9 @@ defmodule Core.Response.LlmRouteFlowTest do
 
       text =
         cond do
+          String.contains?(user_text, "power the computer down") ->
+            "I'm sorry, but I can't assist with that."
+
           String.contains?(user_text, "fine saturday") ->
             "I am currently in a neutral state, with steady pressure. My tone is balanced and unbiased. I am always ready to assist you, regardless of my current state. How may I help you today?"
 
@@ -110,6 +113,74 @@ defmodule Core.Response.LlmRouteFlowTest do
       |> Map.fetch!("content")
 
     assert system =~ "You are Symbrella."
+  end
+
+  test "real response planner repairs unsupported model refusal only with approved verified command" do
+    input = %{
+      intent: :command,
+      confidence: 0.82,
+      text: "power the computer down",
+      session_id: "verified-device-#{System.unique_integer([:positive])}",
+      selected_action: :answer_user,
+      action_meta: %{safety_gate: :approved},
+      comprehension: %{
+        degraded?: true,
+        reasons: [:weak_decision_rate_high],
+        understood: ["computer", "power down"],
+        uncertain: [],
+        unresolved: [],
+        lexical_meanings: [
+          %{
+            id: "power down|verb|1",
+            phrase: "power down",
+            source: :verified_discontinuous_mwe,
+            definition: "(ambitransitive) To switch off (something electrical).",
+            context_score: 0.145
+          }
+        ]
+      }
+    }
+
+    {_tone, reply, meta} = Response.plan(input, %{})
+
+    assert reply =~ "power down the device"
+    assert reply =~ "don't have a confirmed device-control connection"
+    refute reply =~ "already powered down"
+    refute reply =~ "I'm sorry, but I can't assist with that"
+    assert meta.response_source == :llm
+
+    assert %{status: :repair, applied?: true, issues: issues} = meta.response_reflection
+    assert :unsupported_device_refusal in issues
+    assert meta.response_reflection.draft_sha256 != meta.response_reflection.final_sha256
+
+    assert_receive {:llm_chat, messages, _opts}
+
+    system = messages |> Enum.find(&(&1["role"] == "system")) |> Map.fetch!("content")
+    assert system =~ "A dictionary-backed device command was understood"
+    assert system =~ "without inventing a device state"
+  end
+
+  test "no verified phrase means planner retains, not falsely repairs, a model refusal" do
+    input = %{
+      intent: :command,
+      confidence: 0.82,
+      text: "power the computer down",
+      session_id: "unverified-device-#{System.unique_integer([:positive])}",
+      selected_action: :answer_user,
+      action_meta: %{safety_gate: :approved},
+      comprehension: %{
+        degraded?: true,
+        understood: [], uncertain: ["computer"], unresolved: [],
+        lexical_meanings: []
+      }
+    }
+
+    {_tone, reply, meta} = Response.plan(input, %{})
+
+    assert reply == "I'm sorry, but I can't assist with that."
+    refute :unsupported_device_refusal in meta.response_reflection.issues
+    assert meta.response_reflection.applied? == false
+    assert_receive {:llm_chat, _messages, _opts}
   end
 
   test "short greetings route through LLM instead of inline social text" do
