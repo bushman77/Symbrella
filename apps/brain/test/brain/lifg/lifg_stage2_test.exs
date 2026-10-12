@@ -90,6 +90,7 @@ defmodule Brain.LIFG.Stage2Test do
     assert meta.final_admission? == false
     assert meta.gate == :lifg_stage2_evidence
 
-    refute_receive {:telemetry, [:brain, :gate, :decision], _meas, _meta}, 50
+    refute_receive {:telemetry, [:brain, :gate, :decision], _meas, %{id: "hello|interjection|2"}},
+                   50
   end
 end

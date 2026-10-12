@@ -159,18 +159,38 @@ defmodule Brain.LIFG.ContextFit do
   # ---------------------------------------------------------------------------
 
   defp context_terms(sentence, target) do
-    sentence_terms =
-      sentence
-      |> raw_tokens()
-      |> reject_stopwords()
+    words = raw_tokens(sentence)
+    target_words = raw_tokens(target)
 
-    target_terms =
-      target
-      |> raw_tokens()
-      |> MapSet.new()
+    # Locate the target phrase in the sentence.
+    start =
+      words
+      |> Enum.with_index()
+      |> Enum.find_value(fn {_word, index} ->
+        if target_words != [] and
+             Enum.slice(words, index, length(target_words)) == target_words do
+          index
+        end
+      end)
 
-    sentence_terms
-    |> Enum.reject(&MapSet.member?(target_terms, &1))
+    # Keep up to three words before and after the target.
+    # Fall back to existing whole-sentence behavior if
+    # the target cannot be located.
+    local_words =
+      if is_integer(start) do
+        left = max(start - 3, 0)
+        right = min(start + length(target_words) + 2, length(words) - 1)
+
+        Enum.slice(words, left, right - left + 1)
+      else
+        words
+      end
+
+    excluded = MapSet.new(target_words)
+
+    local_words
+    |> reject_stopwords()
+    |> Enum.reject(&MapSet.member?(excluded, &1))
     |> MapSet.new()
   end
 

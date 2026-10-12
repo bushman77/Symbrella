@@ -12,12 +12,7 @@ defmodule Brain.Cerebellum.SupervisedTraining do
 
   @scope_prefix "cerebellum_experiment:"
 
-  @features [
-    :lex_fit,
-    :rel_prior,
-    :activation,
-    :intent_bias
-  ]
+  @features [:context_fit, :lex_fit, :rel_prior, :activation, :intent_bias]
 
   def train(example, scope) do
     with :ok <- validate_scope(scope),

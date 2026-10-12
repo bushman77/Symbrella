@@ -89,7 +89,12 @@ defmodule Core.LIFG.Attach do
             pick_with_prior = fn ids ->
               Enum.max_by(
                 ids,
-                fn id -> score_of.(id) + Map.get(pos_prior, id_pos(id), 0.0) end,
+                fn id ->
+                  candidate_score = score_of.(id)
+                  prior = Map.get(pos_prior, id_pos(id), 0.0)
+
+                  candidate_score * (1.0 + prior)
+                end,
                 fn -> chosen_id end
               )
             end

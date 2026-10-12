@@ -86,6 +86,7 @@ defmodule Brain.Cerebellum.SupervisedTrainingTest do
       candidates: [
         %{
           id: preferred_id,
+          context_fit: 1.0,
           lex_fit: 1.0,
           rel_prior: 0.0,
           activation: 0.0,
@@ -93,6 +94,7 @@ defmodule Brain.Cerebellum.SupervisedTrainingTest do
         },
         %{
           id: "financial",
+          context_fit: 0.0,
           lex_fit: 0.0,
           rel_prior: 0.0,
           activation: 0.0,

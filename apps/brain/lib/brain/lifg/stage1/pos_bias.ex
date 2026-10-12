@@ -9,6 +9,22 @@ defmodule Brain.LIFG.Stage1.PosBias do
 
   alias Brain.Utils.Safe
 
+  # Common copular and change-of-state verb forms.
+  # This is grammatical vocabulary, not a sentence-specific exception.
+  @linking_verb_forms MapSet.new(~w(
+    am is are was were be been being
+    become becomes became
+    get gets got gotten
+    feel feels felt
+    seem seems seemed
+    look looks looked
+    sound sounds sounded
+    grow grows grew grown
+    turn turns turned
+    remain remains remained
+    stay stays stayed
+  ))
+
   # ===== Public API =====
 
   def local_context(acc, tok, pos) when is_map(acc) and is_map(tok) do
@@ -29,10 +45,102 @@ defmodule Brain.LIFG.Stage1.PosBias do
     family = syntactic_pos_family(pos)
 
     fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
-      greeting_chain_pos_bias(ctx, tok, token_phrase, family)
+      greeting_chain_pos_bias(ctx, tok, token_phrase, family) +
+      infinitive_object_bias(ctx, tok, family) +
+      coordinated_predicate_bias(ctx, tok, token_phrase, family) +
+      predicate_adjective_bias(ctx, tok, family)
   end
 
   def window(_ctx, _tok, _pos), do: 0.0
+
+  # Detect high-confidence infinitive constructions:
+  # "to get some cash", "to buy a car", etc.
+  #
+  # Avoid changing ordinary prepositional constructions,
+  # such as "to the bank" or "to school".
+
+  defp infinitive_object_bias(ctx, tok, family) do
+    phrases = token_phrases(ctx)
+    index = token_index(tok, -1)
+
+    previous = Map.get(phrases, index - 1)
+    following = Map.get(phrases, index + 1)
+
+    object_determiner? =
+      following in ~w(
+      a an the some any this that these those
+      my your his her its our their
+    )
+
+    if previous == "to" and object_determiner? do
+      case family do
+        :verb -> 0.30
+        :noun -> -0.15
+        :proper_noun -> -0.15
+        _ -> 0.0
+      end
+    else
+      0.0
+    end
+  end
+
+  # A linking/change-of-state verb following a conjunction
+  # is a plausible coordinated predicate.
+  #
+  # Examples:
+  #   "I went to the doctor and got sick."
+  #   "He stumbled and became dizzy."
+  #
+  # This is deliberately limited to recognized verb forms.
+  # It does NOT favor every word following "and".
+  defp coordinated_predicate_bias(ctx, tok, token_phrase, family) do
+    phrases = token_phrases(ctx)
+    idx = token_index(tok, -1)
+
+    previous = Map.get(phrases, idx - 1)
+    following = Map.get(phrases, idx + 1)
+
+    coordinated? =
+      previous in ["and", "but", "or"] and
+        is_binary(following) and
+        MapSet.member?(@linking_verb_forms, token_phrase)
+
+    if coordinated? do
+      case family do
+        :verb -> 0.30
+        :noun -> -0.12
+        :proper_noun -> -0.12
+        _ -> 0.0
+      end
+    else
+      0.0
+    end
+  end
+
+  # A predicate adjective may follow a copular or
+  # change-of-state verb:
+  #
+  #   "became tired"
+  #   "felt ill"
+  #   "got sick"
+  #
+  # Only reward adjective candidates here; don't
+  # automatically penalize nouns, because constructions
+  # like "got cash" are also grammatical.
+  defp predicate_adjective_bias(ctx, tok, :adjective) do
+    phrases = token_phrases(ctx)
+    idx = token_index(tok, -1)
+
+    previous = Map.get(phrases, idx - 1)
+
+    if MapSet.member?(@linking_verb_forms, previous) do
+      0.34
+    else
+      0.0
+    end
+  end
+
+  defp predicate_adjective_bias(_ctx, _tok, _family), do: 0.0
 
   def token_start(tok) when is_map(tok) do
     case Safe.get(tok, :span) || Safe.get(tok, "span") do
@@ -65,7 +173,8 @@ defmodule Brain.LIFG.Stage1.PosBias do
     window = Enum.map(idx..(idx + 3), &Map.get(phrases, &1))
 
     cond do
-      token_phrase == "how" and window == ["how", "are", "you", "doing"] -> :adverb
+      token_phrase == "how" and window == ["how", "are", "you", "doing"] ->
+        :adverb
 
       token_phrase == "are" and
           Enum.map((idx - 1)..(idx + 2), &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
@@ -79,7 +188,8 @@ defmodule Brain.LIFG.Stage1.PosBias do
           Enum.map((idx - 3)..idx, &Map.get(phrases, &1)) == ["how", "are", "you", "doing"] ->
         :verb
 
-      true -> nil
+      true ->
+        nil
     end
   end
 
@@ -121,10 +231,19 @@ defmodule Brain.LIFG.Stage1.PosBias do
 
   defp previous_choice_pos_family(_), do: nil
 
-  defp context_bias_for(:preposition, fam) when fam in [:noun, :proper_noun, :pronoun, :phrase], do: 0.18
-  defp context_bias_for(:preposition, fam) when fam in [:verb, :auxiliary, :preposition], do: -0.16
-  defp context_bias_for(:determiner, fam) when fam in [:noun, :proper_noun, :adjective, :phrase], do: 0.22
-  defp context_bias_for(:determiner, fam) when fam in [:verb, :auxiliary, :preposition, :conjunction], do: -0.20
+  defp context_bias_for(:preposition, fam) when fam in [:noun, :proper_noun, :pronoun, :phrase],
+    do: 0.18
+
+  defp context_bias_for(:preposition, fam) when fam in [:verb, :auxiliary, :preposition],
+    do: -0.16
+
+  defp context_bias_for(:determiner, fam) when fam in [:noun, :proper_noun, :adjective, :phrase],
+    do: 0.22
+
+  defp context_bias_for(:determiner, fam)
+       when fam in [:verb, :auxiliary, :preposition, :conjunction],
+       do: -0.20
+
   defp context_bias_for(:auxiliary, :verb), do: 0.18
   defp context_bias_for(:auxiliary, :auxiliary), do: -0.12
   defp context_bias_for(:auxiliary, fam) when fam in [:noun, :proper_noun], do: -0.08
@@ -182,14 +301,20 @@ defmodule Brain.LIFG.Stage1.PosBias do
 
     idx =
       cond do
-        is_integer(raw) -> raw
-        is_float(raw) -> trunc(raw)
+        is_integer(raw) ->
+          raw
+
+        is_float(raw) ->
+          trunc(raw)
+
         is_binary(raw) ->
           case Integer.parse(String.trim(raw)) do
             {n, _} -> n
             :error -> fallback_idx
           end
-        true -> fallback_idx
+
+        true ->
+          fallback_idx
       end
 
     if is_integer(idx) and idx >= 0, do: idx, else: fallback_idx
