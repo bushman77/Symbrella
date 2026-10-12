@@ -2,7 +2,7 @@ defmodule Core.MWE.Learning do
   @moduledoc """
   Bounded, in-memory contextual evidence for unverified MWE hypotheses.
 
-  One input turn is one observation per phrase/category, even if the phrase
+  One input turn is one observation per phrase/category within a session, even if the phrase
   occurs twice in that turn. A context is the immediately preceding and
   following word. Candidates reaching the conservative thresholds become
   :candidate_for_review, never verified dictionary senses.
@@ -101,7 +101,7 @@ defmodule Core.MWE.Learning do
          %{
            observation_count: record.observation_count,
            distinct_contexts: MapSet.size(record.contexts),
-           review_status: review_status(elem(key, 1), record)
+           review_status: review_status(elem(key, 2), record)
          }}
       end)
 
@@ -113,14 +113,15 @@ defmodule Core.MWE.Learning do
     words = indexed_words(Map.get(si, :tokens, []))
     hypotheses = List.wrap(Map.get(si, :mwe_hypotheses))
     verified = verified_phrases(Map.get(si, :mwe_lexicon, []))
+    session = Map.get(si, :session_id) || :local
 
-    # Every distinct phrase/category gets at most one observation in this
-    # turn. Multiple occurrences may contribute distinct contexts.
+    # Every distinct phrase/category gets at most one observation per turn
+    # within this session. Multiple occurrences may contribute distinct contexts.
     grouped =
       hypotheses
       |> Enum.filter(&candidate?/1)
       |> Enum.reject(&(MapSet.member?(verified, &1.phrase)))
-      |> Enum.group_by(&{&1.phrase, &1.category})
+      |> Enum.group_by(&{session, &1.phrase, &1.category})
 
     next_state =
       Enum.reduce(grouped, state, fn {key, candidates}, acc ->
@@ -135,16 +136,21 @@ defmodule Core.MWE.Learning do
     enriched =
       Enum.map(hypotheses, fn
         %{phrase: phrase, category: category} = item ->
-          case Map.get(next_state.records, {phrase, category}) do
-            nil ->
-              item
+          if MapSet.member?(verified, phrase) do
+            # A dictionary sense supersedes tentative evidence immediately.
+            item
+          else
+            case Map.get(next_state.records, {session, phrase, category}) do
+              nil ->
+                item
 
-            record ->
-              Map.merge(item, %{
-                observation_count: record.observation_count,
-                distinct_contexts: MapSet.size(record.contexts),
-                review_status: review_status(category, record)
-              })
+              record ->
+                Map.merge(item, %{
+                  observation_count: record.observation_count,
+                  distinct_contexts: MapSet.size(record.contexts),
+                  review_status: review_status(category, record)
+                })
+            end
           end
 
         other ->
@@ -227,10 +233,10 @@ defmodule Core.MWE.Learning do
 
   defp context_for(%{span: {first, last}}, words)
        when is_integer(first) and is_integer(last) do
-    {Map.get(words, first - 1, :begin), Map.get(words, last + 1, :end)}
+    :erlang.phash2({Map.get(words, first - 1, :begin), Map.get(words, last + 1, :end)})
   end
 
-  defp context_for(_, _), do: {:unknown, :unknown}
+  defp context_for(_, _), do: :erlang.phash2({:unknown, :unknown})
 
   defp review_status(category, record) do
     required = if category == :compound_noun, do: 5, else: 3
