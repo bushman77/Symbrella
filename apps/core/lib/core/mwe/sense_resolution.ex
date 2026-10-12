@@ -84,7 +84,9 @@ defmodule Core.MWE.SenseResolution do
   evidence contract for downstream comprehension and response planning.
   """
   @spec attach_verified(map(), keyword()) :: map()
-  def attach_verified(%{} = si, opts \\ []) when is_list(opts) do
+  def attach_verified(si, opts \\ [])
+
+  def attach_verified(%{} = si, opts) when is_list(opts) do
     verified_contiguous = contiguous_meanings(si)
     candidates = separated_candidates(si)
 
