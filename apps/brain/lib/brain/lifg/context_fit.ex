@@ -319,6 +319,8 @@ defmodule Brain.LIFG.ContextFit do
   # Matching
   # ---------------------------------------------------------------------------
 
+  defp overlap(context, evidence), do: overlap(context, evidence, false)
+
   defp overlap(%MapSet{} = context, %MapSet{} = evidence, related_morphology?) do
     evidence
     |> MapSet.to_list()
