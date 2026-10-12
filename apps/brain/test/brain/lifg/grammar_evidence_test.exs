@@ -79,7 +79,7 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     scores = %{"garden|noun|1" => 0.5, "garden|verb|1" => 0.5}
 
     updated = GE.apply(scores, ctx, 2, 1.0)
-    assert updated["garden|noun|1"] == 0.68
+    assert_in_delta updated["garden|noun|1"], 0.68, 1.0e-8
     assert updated["garden|verb|1"] == 0.5
     assert Map.keys(updated) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
     assert GE.apply(scores, ctx, 2, 0.0) == scores
