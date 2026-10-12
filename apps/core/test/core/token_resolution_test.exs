@@ -65,6 +65,24 @@ defmodule Core.TokenResolutionTest do
              ["the", "blue", "lights"]
   end
 
+  test "longer verified expression wins over an overlapping shorter verified expression" do
+    si =
+      %SemanticInput{sentence: "turn off the lights", tokens: [], trace: []}
+      |> TokenFilters.rebuild_word_ngrams(3)
+      |> Core.MWE.Lexicon.attach(
+        mwe_lookup: fn _ ->
+          [
+            %{id: "turn off|verb|2", norm: "turn off", pos: "verb"},
+            %{id: "turn off the|verb|1", norm: "turn off the", pos: "verb"}
+          ]
+        end
+      )
+      |> TokenResolution.resolve()
+
+    assert [%{phrase: "turn off the", dictionary_backed?: true, token_span: {0, 2}}] =
+             Enum.filter(si.token_cover, &(&1.kind == :phrase))
+  end
+
   test "curated lexical rules do not falsely claim dictionary priority" do
     si =
       %SemanticInput{sentence: "turn off the blue lights", tokens: [], trace: []}
