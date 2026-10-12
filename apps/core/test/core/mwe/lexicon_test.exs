@@ -74,8 +74,10 @@ defmodule Core.MWE.LexiconTest do
         end)
         |> TokenResolution.resolve()
 
-      assert [%{kind: :phrase, n: ^n, lexical_pos: ["phrase"]}] =
+      assert [%{kind: :phrase, n: ^n, lexical_pos: ["phrase"]} = cover] =
                Enum.filter(result.token_cover, &(&1.kind == :phrase))
+      assert cover.span == {0, String.length(phrase)}
+      assert cover.token_span == {0, n - 1}
       assert length(result.tokens) == n
     end
   end
