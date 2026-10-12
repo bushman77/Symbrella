@@ -124,6 +124,7 @@ defmodule Core do
     |> Core.LIFG.FuzzyEntities.attach(opts)
     |> LifgAttach.run_and_attach(lifg_opts)
     |> Core.MWE.SenseResolution.rerank_contiguous()
+    |> Core.MWE.ObjectSense.refine()
     |> Core.Semantic.EventFrames.attach(opts)
     |> BrainIntrospection.update_self_model(opts)
     |> Core.Brain.ATL.ingest(atl_opts)
