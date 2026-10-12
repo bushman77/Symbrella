@@ -14,6 +14,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   use SymbrellaWeb, :html
 
   alias SymbrellaWeb.HomeLive.HTML.EvidenceSections
+  alias SymbrellaWeb.HomeLive.ExplainEvidence
 
   # ---------- component ----------
 
@@ -188,6 +189,45 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       sections: sections
     }
   end
+
+  @doc """
+  Upgrade a historically cached Explain payload when its message preserved the
+  original SemanticInput. This retains tone, response, action, and old custom
+  sections while refreshing the Core-backed fields from their real source.
+  No DB calls, no re-inference, and repeated upgrades do not duplicate sections.
+  """
+  def enrich_saved_payload(payload, si) when is_map(payload) do
+    replacement =
+      si
+      |> ExplainEvidence.from_si()
+      |> EvidenceSections.build()
+
+    if replacement == [] do
+      payload
+    else
+      old =
+        payload
+        |> pget(:sections, [])
+        |> case do
+          list when is_list(list) -> list
+          _ -> []
+        end
+
+      new_keys = MapSet.new(Enum.map(replacement, &pget(&1, :key)))
+
+      retained =
+        Enum.reject(old, fn section ->
+          MapSet.member?(new_keys, pget(section, :key))
+        end)
+
+      {header, remaining} =
+        Enum.split_while(retained, &(pget(&1, :key) == :intent_tone))
+
+      Map.put(payload, :sections, header ++ replacement ++ remaining)
+    end
+  end
+
+  def enrich_saved_payload(payload, _si), do: payload
 
   # ---------- payload normalizer ----------
 
