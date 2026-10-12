@@ -155,6 +155,121 @@ defmodule Core.Syntax.SignaturesTest do
     assert :ok = SemanticInput.validate_contract(out)
   end
 
+  test "noun phrases preserve determiner, modifier and head roles" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "quiet", pos: "adjective"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("the quiet garden", cells))
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {0, 2} and
+               sig.roles == %{determiner: 0, modifier: 1, head: 2} and
+               sig.required_features.head == [:pos_noun]
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 2} and
+               sig.roles == %{modifier: 1, head: 2}
+           end)
+  end
+
+  test "prepositional phrases compose around noun phrase structure" do
+    cells = [
+      %{norm: "in", pos: "preposition"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "quiet", pos: "adjective"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("in the quiet garden", cells))
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 3}
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :prepositional_phrase and sig.span == {0, 3} and
+               sig.roles == %{
+                 preposition: 0, determiner: 1, modifier: 2,
+                 head: 3, object: 3
+               }
+           end)
+  end
+
+  test "bare nouns and pronouns form prepositional complements" do
+    cells = [
+      %{norm: "near", pos: "preposition"},
+      %{norm: "home", pos: "noun"},
+      %{norm: "with", pos: "preposition"},
+      %{norm: "her", pos: "pronoun"}
+    ]
+
+    for {sentence, index} <- [{"near home", 1}, {"with her", 1}] do
+      assert Enum.any?(Signatures.detect(input(sentence, cells)), fn sig ->
+               sig.id == :prepositional_phrase and sig.span == {0, index} and
+                 sig.roles == %{preposition: 0, object: index}
+             end)
+    end
+  end
+
+  test "grammar cannot cross punctuation or token index gaps" do
+    cells = [
+      %{norm: "in", pos: "preposition"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("in. the garden", cells))
+
+    refute Enum.any?(signatures, fn sig ->
+             sig.id == :prepositional_phrase
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 2}
+           end)
+
+    refute :noun_phrase in ids("the. garden", cells)
+  end
+
+  test "an infinitive verb is not misclassified as a preposition noun complement" do
+    cells = [
+      %{norm: "to", pos: "preposition"},
+      %{norm: "leave", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "station", pos: "noun"}
+    ]
+
+    refute :prepositional_phrase in ids("to leave", cells)
+
+    assert Enum.any?(Signatures.detect(input("to the station", cells)), fn sig ->
+             sig.id == :prepositional_phrase and sig.span == {0, 2}
+           end)
+  end
+
+  test "competing POS interpretations survive constituent recognition" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "record", pos: "verb"},
+      %{norm: "record", pos: "noun"}
+    ]
+
+    si = input("the record", cells)
+    out = Signatures.attach(si)
+
+    assert Enum.any?(out.sentence_signatures, fn sig ->
+             sig.id == :noun_phrase and sig.roles == %{determiner: 0, head: 1}
+           end)
+
+    assert out.tokens == si.tokens
+    assert out.active_cells == si.active_cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
   test "attach preserves sense candidates and records standard trace" do
     si = input("I have got very cold.")
     si = %{si | sense_candidates: %{2 => [%{id: "got|verb|4", score: 0.7}]}}
