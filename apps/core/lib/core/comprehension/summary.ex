@@ -53,7 +53,7 @@ defmodule Core.Comprehension.Summary do
     confidence = clamp01(Map.get(si, :confidence) || Map.get(si, "confidence") || 0.0)
     keyword = normalize_term(Map.get(si, :keyword) || Map.get(si, "keyword"))
     sentence = normalize_sentence(Map.get(si, :sentence) || Map.get(si, "sentence"))
-    choices = List.wrap(Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || [])
+    choices = resolved_choices(si)
     tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
 
     {strong, weak, stats} = split_choice_terms(choices)
@@ -93,6 +93,14 @@ defmodule Core.Comprehension.Summary do
   end
 
   def build(_si, _opts), do: empty_summary()
+
+  # A lexical phrase winner replaces covered words only in this derived view.
+  defp resolved_choices(si) do
+    case Map.get(si, :semantic_choices) || Map.get(si, "semantic_choices") do
+      choices when is_list(choices) -> choices
+      _ -> List.wrap(Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || [])
+    end
+  end
 
   defp split_choice_terms(choices) do
     total = length(choices)
@@ -206,8 +214,19 @@ defmodule Core.Comprehension.Summary do
   defp unresolved_content_terms(tokens, choices) when is_list(tokens) and is_list(choices) do
     chosen_indices =
       choices
-      |> Enum.map(&choice_token_index/1)
-      |> Enum.reject(&is_nil/1)
+      |> Enum.flat_map(fn choice ->
+        case map_get(choice, :token_span) do
+          {first, last} when is_integer(first) and is_integer(last) and
+                             first >= 0 and last >= first ->
+            Enum.to_list(first..last)
+
+          _ ->
+            case choice_token_index(choice) do
+              nil -> []
+              index -> [index]
+            end
+        end
+      end)
       |> MapSet.new()
 
     tokens
