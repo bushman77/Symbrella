@@ -127,6 +127,37 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     assert GE.apply(scores, ctx, 1, 1.0) == scores
   end
 
+  test "lexical adverb particle beats competing weak noun phrase evidence" do
+    signatures = [
+      %{
+        id: :noun_phrase, span: {2, 3},
+        roles: %{modifier: 2, head: 3},
+        required_features: %{modifier: [:pos_adjective], head: [:pos_noun]}
+      },
+      %{
+        id: :verb_particle_construction, span: {0, 3},
+        roles: %{verb: 0, determiner: 1, object: 2, particle: 3},
+        required_features: %{
+          verb: [:pos_verb], determiner: [:pos_determiner],
+          object: [:pos_noun], particle: [:pos_adverb, :pos_preposition]
+        }
+      }
+    ]
+
+    ctx = context(signatures)
+    candidates = %{
+      "off|adverb|1" => 0.5,
+      "off|preposition|1" => 0.5,
+      "off|noun|1" => 0.5
+    }
+
+    result = GE.apply(candidates, ctx, 3, 1.0)
+    assert result["off|adverb|1"] > result["off|noun|1"]
+    assert result["off|preposition|1"] > result["off|noun|1"]
+    assert Map.keys(result) |> Enum.sort() == Map.keys(candidates) |> Enum.sort()
+    assert GE.apply(candidates, ctx, 3, 0.0) == candidates
+  end
+
   test "structural grammar has bounded weighting and will not boost a synthetic fallback" do
     signature = %{
       id: :noun_phrase,
