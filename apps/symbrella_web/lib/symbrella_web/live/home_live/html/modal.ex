@@ -815,6 +815,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   defp format_frame_key(key), do: to_string(key)
 
   defp format_frame_value(nil), do: ""
+  defp format_frame_value(true), do: "true"
+  defp format_frame_value(false), do: "false"
   defp format_frame_value(value) when is_atom(value), do: ":#{value}"
 
   defp format_frame_value(value) when is_float(value) do
