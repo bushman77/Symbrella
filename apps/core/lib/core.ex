@@ -111,6 +111,7 @@ defmodule Core do
     |> Core.Pipeline.LTM.run(opts)
     |> TokenFilters.keep_only_word_boundary_tokens()
     |> Core.MWE.Stage.run(:late, opts)
+    |> Core.MWE.Lexicon.attach(opts)
     |> Core.Syntax.Signatures.attach()
     |> Core.TokenResolution.resolve(opts)
     |> Core.Relations.attach_edges()
