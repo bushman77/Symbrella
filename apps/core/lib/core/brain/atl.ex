@@ -8,6 +8,13 @@ defmodule Core.Brain.ATL do
   @spec ingest(map(), keyword()) :: map()
   def ingest(%{lifg_choices: choices, tokens: tokens} = si, _opts)
       when is_list(choices) and is_list(tokens) do
+    # Virtual MWE decisions have already been reanchored to base-token indices.
+    choices =
+      case Map.get(si, :semantic_choices) do
+        resolved when is_list(resolved) -> resolved
+        _ -> choices
+      end
+
     if choices == [] do
       si
     else
