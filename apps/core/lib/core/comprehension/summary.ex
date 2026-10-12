@@ -214,19 +214,7 @@ defmodule Core.Comprehension.Summary do
   defp unresolved_content_terms(tokens, choices) when is_list(tokens) and is_list(choices) do
     chosen_indices =
       choices
-      |> Enum.flat_map(fn choice ->
-        case map_get(choice, :token_span) do
-          {first, last} when is_integer(first) and is_integer(last) and
-                             first >= 0 and last >= first ->
-            Enum.to_list(first..last)
-
-          _ ->
-            case choice_token_index(choice) do
-              nil -> []
-              index -> [index]
-            end
-        end
-      end)
+      |> Enum.flat_map(&choice_covered_indices/1)
       |> MapSet.new()
 
     tokens
@@ -240,6 +228,22 @@ defmodule Core.Comprehension.Summary do
   end
 
   defp unresolved_content_terms(_tokens, _choices), do: []
+
+  defp choice_covered_indices(%{} = choice) do
+    case map_get(choice, :token_span) do
+      {first, last} when is_integer(first) and is_integer(last) and
+                         first >= 0 and last >= first ->
+        Enum.to_list(first..last)
+
+      _ ->
+        case choice_token_index(choice) do
+          nil -> []
+          index -> [index]
+        end
+    end
+  end
+
+  defp choice_covered_indices(_), do: []
 
   defp choice_token_index(choice) when is_map(choice) do
     choice
