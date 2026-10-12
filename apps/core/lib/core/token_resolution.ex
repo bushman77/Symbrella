@@ -56,37 +56,96 @@ defmodule Core.TokenResolution do
     |> maybe_limit(opts)
   end
 
+  # MWE match spans are inclusive base-token indices. Build character spans
+  # from those tokens rather than depending on precomputed 2/3-grams (the
+  # lexicon can recognize 4/5-grams, and a phrase may occur more than once).
   defp phrase_candidates(si, sentence) do
-    matches = si |> Map.get(:mwe_matches, []) |> List.wrap()
-    phrase_candidates = si |> Map.get(:phrase_candidates, []) |> List.wrap()
+    tokens =
+      si
+      |> Map.get(:tokens, [])
+      |> List.wrap()
+      |> Enum.filter(&(int_get(&1, :n, 1) == 1))
+      |> Enum.sort_by(&int_get(&1, :index, 0))
 
-    matches
-    |> Enum.flat_map(fn match ->
-      phrase = text(match, :phrase)
-      size = int_get(match, :size, 1)
-
-      phrase_candidates
-      |> Enum.filter(fn cand -> norm(text(cand, :phrase)) == norm(phrase) end)
-      |> Enum.map(fn cand ->
-        {start, stop} = interval(cand, sentence)
-        kind = atom_get(match, :kind, :pos)
-
-        %{
-          kind: :phrase,
-          phrase: text(cand, :phrase),
-          span: Map.get(cand, :span) || Map.get(cand, "span"),
-          n: int_get(cand, :n, size),
-          source: :token_resolution,
-          resolution: kind,
-          pos: Map.get(match, :pos) || Map.get(match, "pos") || [],
-          confirmed?: kind in [:lex, :both],
-          start: start,
-          stop: stop,
-          score: phrase_score(kind, size)
-        }
-      end)
+    si
+    |> Map.get(:mwe_matches, [])
+    |> List.wrap()
+    |> Enum.group_by(fn match ->
+      {Map.get(match, :span), norm(text(match, :phrase))}
     end)
-    |> Enum.uniq_by(fn c -> {norm(c.phrase), c.start, c.stop, c.resolution} end)
+    |> Enum.flat_map(fn {{span, phrase}, matches} ->
+      with {start_index, end_index} <- span,
+           true <- is_integer(start_index) and is_integer(end_index) and
+                     start_index >= 0 and end_index >= start_index,
+           segment <-
+             Enum.filter(tokens, fn tok ->
+               idx = int_get(tok, :index, -1)
+               idx >= start_index and idx <= end_index
+             end),
+           true <- length(segment) == end_index - start_index + 1,
+           true <- norm(Enum.map_join(segment, " ", &text(&1, :phrase))) == phrase do
+        {first_start, _} = interval(hd(segment), sentence)
+        {_, last_stop} = interval(List.last(segment), sentence)
+
+        # Prefer DB lexical evidence, then the later MWE detector pass.
+        {best, _} =
+          matches
+          |> Enum.with_index()
+          |> Enum.max_by(fn {match, order} ->
+            {if(Map.get(match, :source) == :db_lexicon, do: 1, else: 0), order}
+          end)
+
+        internal_patterns =
+          matches
+          |> Enum.reject(&(Map.get(&1, :source) == :db_lexicon))
+          |> Enum.map(&(Map.get(&1, :pos) || []))
+          |> Enum.uniq()
+
+        internal_pos =
+          matches
+          |> Enum.reject(&(Map.get(&1, :source) == :db_lexicon))
+          |> List.last()
+          |> case do
+            nil -> []
+            match -> Map.get(match, :pos) || []
+          end
+
+        lexical_pos =
+          matches
+          |> Enum.flat_map(&(Map.get(&1, :lexical_pos) || []))
+          |> Enum.uniq()
+
+        sense_ids =
+          matches
+          |> Enum.flat_map(&(Map.get(&1, :sense_ids) || []))
+          |> Enum.uniq()
+
+        kind = atom_get(best, :kind, :pos)
+
+        [
+          %{
+            kind: :phrase,
+            phrase: Enum.map_join(segment, " ", &text(&1, :phrase)),
+            span: {first_start, last_stop - first_start},
+            token_span: {start_index, end_index},
+            n: length(segment),
+            source: :token_resolution,
+            resolution: kind,
+            pos: internal_pos,
+            pos_patterns: internal_patterns,
+            lexical_pos: lexical_pos,
+            sense_ids: sense_ids,
+            confirmed?: kind in [:lex, :both],
+            start: first_start,
+            stop: last_stop,
+            score: phrase_score(kind, length(segment)) +
+                     if(lexical_pos == [], do: 0.0, else: 0.5)
+          }
+        ]
+      else
+        _ -> []
+      end
+    end)
   end
 
   defp base_candidates(tokens, sentence) do
@@ -206,6 +265,7 @@ defmodule Core.TokenResolution do
     |> to_string()
     |> String.downcase()
     |> String.trim()
+    |> String.replace(~r/^\p{P}+|\p{P}+$/u, "")
     |> String.replace(~r/\s+/u, " ")
   end
 end
