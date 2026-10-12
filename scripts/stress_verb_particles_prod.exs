@@ -54,9 +54,9 @@ defmodule Symbrella.VerbParticleProductionSmoke do
 
         IO.inspect(report, limit: :infinity, pretty: true, width: 100)
 
-        if category == :primary do
-          checks = primary_checks(si)
-          IO.puts("\nPRIMARY CHECKS:")
+        if category in [:primary, :alternate] do
+          checks = if(category == :primary, do: primary_checks(si), else: alternate_checks(si))
+          IO.puts("\n#{String.upcase(to_string(category))} CHECKS:")
           Enum.each(checks, fn {name, ok?} ->
             IO.puts("#{if(ok?, do: "PASS", else: "FAIL")} #{name}")
           end)
@@ -64,7 +64,7 @@ defmodule Symbrella.VerbParticleProductionSmoke do
           if Enum.any?(checks, fn {_name, ok?} -> not ok? end) do
             IO.puts("Result: production behavior still needs investigation.")
           else
-            IO.puts("Result: primary syntax + object + intent contract satisfied.")
+            IO.puts("Result: #{category} syntax and lexical meaning contract satisfied.")
           end
         end
       rescue
@@ -119,7 +119,8 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       comprehension:
         case Map.get(si, :comprehension) do
           %{} = summary ->
-            Map.take(summary, [:intent, :understood, :uncertain, :unresolved, :degraded?, :reasons])
+            Map.take(summary, [:intent, :understood, :uncertain, :unresolved, :degraded?,
+                               :reasons, :lexical_meanings])
           _ -> nil
         end,
       lexical_winners:
@@ -132,7 +133,12 @@ defmodule Symbrella.VerbParticleProductionSmoke do
           }
         end),
       mwe_winners:
-        Enum.map(mwe, &Map.take(&1, [:id, :token_span, :source, :phrase])),
+        Enum.map(mwe, &Map.take(&1, [:id, :token_span, :source, :phrase, :definition])),
+      verified_phrasal_meanings:
+        Enum.map(list(Map.get(si, :lexical_constructions)), fn meaning ->
+          Map.take(meaning, [:id, :phrase, :definition, :context_score,
+                             :source, :object_index, :constituent_indices])
+        end),
       atl_verb_particles:
         Enum.filter(atl, &(Map.get(&1, :id) == :verb_particle_construction))
         |> Enum.map(&Map.take(&1, [:span, :status, :roles, :unresolved_roles])),
@@ -157,6 +163,11 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       {"all four word winners present", Enum.all?(0..3, &Map.has_key?(selected, &1))},
       {"lights resolved as noun", String.contains?(Map.get(selected, 2, ""), "|noun|")},
       {"off has an actual dictionary sense", is_binary(Map.get(selected, 3))},
+      {"verified deactivation sense for separated phrasal verb",
+       Enum.any?(list(Map.get(si, :lexical_constructions)), fn meaning ->
+         meaning.id == "turn off|verb|2" and
+           meaning.source == :verified_discontinuous_mwe
+       end)},
       {"no spurious lights off verb MWE promoted",
        not Enum.any?(list(Map.get(si, :mwe_choices)), fn c ->
          Map.get(c, :token_span) == {2, 3} and
@@ -173,6 +184,18 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       {"context intent consistent",
        is_map(Map.get(si, :context_frame)) and
          Map.get(Map.get(si, :context_frame) || %{}, :intent) == :command}
+    ]
+  end
+
+  defp alternate_checks(si) do
+    semantic = list(Map.get(si, :semantic_choices))
+    meanings = list(Map.get(si, :lexical_constructions))
+
+    [
+      {"contiguous phrasal verb selects the deactivation sense",
+       Enum.any?(semantic, &(&1.id == "turn off|verb|2"))},
+      {"comprehension receives the verified dictionary meaning",
+       Enum.any?(meanings, &(&1.id == "turn off|verb|2"))}
     ]
   end
 
