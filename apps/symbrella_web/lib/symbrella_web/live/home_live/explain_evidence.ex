@@ -15,6 +15,19 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
 
   @spec from_si(map() | term()) :: map()
   def from_si(si) when is_map(si) do
+    # Fast-path memory, identity and fallback responses never went through the
+    # Core lexical pipeline; showing their stub :intent/:confidence as a Core
+    # runtime decision would be a misleading attribution.
+    if not substantive_cognition?(si) do
+      %{}
+    else
+      build(si)
+    end
+  end
+
+  def from_si(_), do: %{}
+
+  defp build(si) do
     comprehension = get(si, :comprehension)
 
     result = %{
@@ -58,7 +71,15 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
     if empty?(result), do: %{}, else: result
   end
 
-  def from_si(_), do: %{}
+  defp substantive_cognition?(si) do
+    Enum.any?([:lifg_choices, :semantic_choices, :lexical_constructions,
+               :sentence_signatures], fn key ->
+      case get(si, key) do
+        values when is_list(values) -> values != []
+        _ -> false
+      end
+    end) or is_map(get(si, :comprehension))
+  end
 
   defp runtime(si) do
     context = get(si, :context_frame)
