@@ -150,7 +150,9 @@ defmodule Core.MWE.ObjectSense do
           []
       end
 
-    (List.wrap(bucket) ++ List.wrap(Map.get(si, :active_cells)) ++ [selected])
+    # Prefer fully hydrated LTM dictionary records over shortened STM
+    # candidate projections when the same exact sense ID appears twice.
+    (List.wrap(Map.get(si, :active_cells)) ++ List.wrap(bucket) ++ [selected])
     |> Enum.filter(&is_map/1)
     |> Enum.filter(fn candidate ->
       id = field(candidate, :id)
