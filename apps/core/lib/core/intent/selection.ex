@@ -470,13 +470,15 @@ defmodule Core.Intent.Selection do
           separated? =
             is_integer(object) and 0 < object and object < particle and particle == last
 
+          # A two-word "lights off" may describe a state rather than
+          # request an action. Require a following nominal object before
+          # classifying an adjacent verb + particle as an imperative.
           adjacent? =
-            particle == 1 and
-              (particle == last or
-                 Enum.any?(signatures, fn
-                   %{id: :noun_phrase, span: {2, ^last}} -> true
-                   _ -> false
-                 end))
+            particle == 1 and last >= 3 and
+              Enum.any?(signatures, fn
+                %{id: :noun_phrase, span: {2, ^last}} -> true
+                _ -> false
+              end)
 
           separated? or adjacent?
 
