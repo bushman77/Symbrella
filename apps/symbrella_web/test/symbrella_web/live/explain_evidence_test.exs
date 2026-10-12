@@ -235,6 +235,28 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert ExplainEvidence.from_si(invalid).verified_phrasal_meanings == []
   end
 
+  test "the UI cannot silently omit Core semantic senses after the old 24-item display limit" do
+    choices =
+      Enum.map(1..36, fn i ->
+        %{id: "sample|noun|#{i}", token_index: i,
+          definition: "Real recorded sense #{i}", score: 0.2}
+      end)
+
+    input = %{sentence: "A long statement.", semantic_choices: choices,
+              lifg_choices: choices}
+
+    evidence = ExplainEvidence.from_si(input)
+    assert length(evidence.semantic_winners) == 36
+
+    result = Modal.explain_payload_for(%{
+      text: "A long response.",
+      cognition: evidence
+    })
+
+    assert length(section(result, :semantic_choices).items) == 36
+    assert List.last(section(result, :semantic_choices).items).label == "sample|noun|36"
+  end
+
   test "old cached Explain payloads are upgraded from saved Core state without duplication" do
     original = %{
       title: "Explain",
