@@ -385,6 +385,80 @@ defmodule Core.Intent.Selection do
     ]
   end
 
+  @doc """
+  Refine an otherwise unknown intent using the sentence signatures detected
+  after lexical hydration. This never executes the requested operation.
+  """
+  @spec refine_from_syntax(map()) :: map()
+  def refine_from_syntax(%{intent: :unknown} = si) do
+    sentence = Map.get(si, :sentence, "")
+    tokens = Map.get(si, :tokens, [])
+    signatures = Map.get(si, :sentence_signatures, [])
+
+    if is_binary(sentence) and not String.contains?(sentence, "?") and
+         initial_imperative?(tokens, signatures) do
+      confidence = 0.82
+
+      refined =
+        si
+        |> Map.put(:intent, :command)
+        |> Map.put(:confidence, confidence)
+        |> Core.Pipeline.Trace.append(:intent_refinement,
+          decision: :command,
+          reason: :initial_verb_particle_imperative,
+          scores: %{confidence: confidence},
+          meta: %{previous_intent: :unknown, source: :sentence_signatures}
+        )
+
+      # Same telemetry/broadcast contract as the original classification.
+      emit(refined, :command, Map.get(refined, :keyword) || "", confidence, sentence)
+      refined
+    else
+      si
+    end
+  end
+
+  def refine_from_syntax(si), do: si
+
+  defp initial_imperative?(tokens, signatures)
+       when is_list(tokens) and is_list(signatures) do
+    indices =
+      tokens
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :n, 1) == 1))
+      |> Enum.map(&Map.get(&1, :index))
+      |> Enum.filter(&is_integer/1)
+
+    if indices == [] do
+      false
+    else
+      last = Enum.max(indices)
+
+      Enum.any?(signatures, fn
+        %{id: :verb_particle_construction, roles: %{verb: 0, particle: particle} = roles}
+        when is_integer(particle) ->
+          object = Map.get(roles, :object)
+
+          separated? =
+            is_integer(object) and 0 < object and object < particle and particle == last
+
+          adjacent? =
+            particle == 1 and
+              (particle == last or
+                 Enum.any?(signatures, fn
+                   %{id: :noun_phrase, span: {2, ^last}} -> true
+                   _ -> false
+                 end))
+
+          separated? or adjacent?
+
+        _ ->
+          false
+      end)
+    end
+  end
+
+  defp initial_imperative?(_, _), do: false
+
   # ─────────────────────────── emit ───────────────────────────
 
   defp emit(%{} = si, intent, kw, conf, text)
