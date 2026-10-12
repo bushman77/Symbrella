@@ -47,7 +47,9 @@ defmodule Symbrella.VerbParticleProductionSmoke do
       IO.puts("\n--- #{inspect(sentence)} [#{category}] ---")
 
       try do
+        if not db_ready?(), do: throw(:database_unavailable_before_case)
         si = Core.resolve_input(sentence, @options)
+        if not db_ready?(), do: throw(:database_unavailable_after_case)
         report = summarize(si, category)
 
         IO.inspect(report, limit: :infinity, pretty: true, width: 100)
@@ -75,6 +77,14 @@ defmodule Symbrella.VerbParticleProductionSmoke do
     end
 
     IO.puts("\nReview lexical *sense definitions* separately from grammatical role resolution.")
+  end
+
+  defp db_ready? do
+    match?({:ok, _}, Ecto.Adapters.SQL.query(Db, "SELECT 1", [], timeout: 3_000))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
   end
 
   defp summarize(si, category) do
