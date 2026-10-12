@@ -1,6 +1,6 @@
 defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
   @moduledoc """
-  Read-only, bounded projection of the exact Core.SemanticInput returned by
+  Read-only projection of the exact Core.SemanticInput returned by
   Core.resolve_input/2 for one conversation turn.
 
   The UI must not infer a phrasal sense from word-level LIFG choices, promote
@@ -10,8 +10,6 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
   No DB access, extra inference or response generation takes place here.
   This data is safe to persist with a chat message's Explain payload.
   """
-
-  @limit 24
 
   @spec from_si(map() | term()) :: map()
   def from_si(si) when is_map(si) do
@@ -48,7 +46,6 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
         |> get(:sentence_signatures, [])
         |> list()
         |> Enum.filter(&(get(&1, :id) == :verb_particle_construction))
-        |> Enum.take(@limit)
         |> Enum.map(&pick(&1, [:id, :span, :roles, :evidence])),
       atl_verb_particles:
         si
@@ -56,14 +53,12 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
         |> get(:constituents, [])
         |> list()
         |> Enum.filter(&(get(&1, :id) == :verb_particle_construction))
-        |> Enum.take(@limit)
         |> Enum.map(&pick(&1, [:id, :span, :status, :roles, :unresolved_roles])),
       unverified_phrasal_hypotheses:
         si
         |> get(:mwe_hypotheses, [])
         |> list()
         |> Enum.filter(&(get(&1, :category) == :phrasal_verb))
-        |> Enum.take(@limit)
         |> Enum.map(&pick(&1, [:phrase, :span, :constituent_indices,
                                 :particle_position, :dictionary_check, :verified?]))
     }
@@ -104,7 +99,6 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
         is_binary(get(meaning, :id)) and
         is_binary(get(meaning, :definition))
     end)
-    |> Enum.take(@limit)
     |> Enum.map(&pick(&1, [:id, :phrase, :definition, :source, :context_score,
                            :span, :object_index, :constituent_indices]))
   end
@@ -121,7 +115,6 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
     |> get(key, [])
     |> list()
     |> Enum.filter(&is_map/1)
-    |> Enum.take(@limit)
     |> Enum.map(&pick(&1, fields))
   end
 
