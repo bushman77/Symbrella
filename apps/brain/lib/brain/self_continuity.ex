@@ -253,10 +253,27 @@ defmodule Brain.SelfContinuity do
 
   defp restore_goals(_model), do: :ok
 
+  # JSON persistence uses string keys. Collapse old keys before adding
+  # the current restoration result to avoid contradictory dashboard values.
+  defp normalize_continuity_keys(continuity) do
+    Enum.reduce(
+      [:reboot_restored?, :degraded?, :restore_reason, :restored_at_ms,
+       :source_snapshot_v, :recent_episode_ids, :warm_started?],
+      continuity,
+      fn key, acc ->
+        case Map.pop(acc, Atom.to_string(key)) do
+          {nil, next} -> next
+          {value, next} -> Map.put_new(next, key, value)
+        end
+      end
+    )
+  end
+
   defp put_restored_continuity(%SelfModel{} = model, reason, snapshot) do
     continuity =
       model.continuity
       |> map_or_empty()
+      |> normalize_continuity_keys()
       |> Map.merge(%{
         reboot_restored?: reason == :restored,
         degraded?: reason != :restored,

@@ -84,6 +84,7 @@ defmodule Core.Response.ReflectionLoop do
   defp collect_issues(context, user_text, draft_text) do
     []
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
+    |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
@@ -105,6 +106,9 @@ defmodule Core.Response.ReflectionLoop do
     cond do
       :unsafe in issues ->
         {:reject, issues}
+
+      :subject_reversal in issues ->
+        {:repair, issues}
 
       :leaked_hidden_context in issues or :overclaimed_self_awareness in issues ->
         {:repair, issues}
@@ -149,6 +153,10 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
+        :subject_reversal in issues ->
+          action = get_in_map(context, [:symbolic_frame, :event, :action])
+          "Understood, you need to #{action}."
+
         :robotic_self_state in issues ->
           self_state_checkin_fallback(user_text)
 
@@ -172,6 +180,19 @@ defmodule Core.Response.ReflectionLoop do
     {"I need to stop and ask for a clearer, safer target before answering.",
      "Reject unsafe draft.", 1}
   end
+
+  # Narrow semantic guard: never convert the user's need to leave
+  # into Symbrella's own intention to leave.
+  defp subject_reversal?(context, draft_text) when is_binary(draft_text) do
+    case get_in_map(context, [:symbolic_frame, :event]) do
+      %{type: :obligation_event, subject: :speaker, action: action} when is_binary(action) ->
+        Regex.match?(~r/\b(?:i'll|i will|let me)\s+#{Regex.escape(action)}\b/iu, draft_text)
+
+      _ -> false
+    end
+  end
+
+  defp subject_reversal?(_, _), do: false
 
   defp low_confidence?(context) do
     confidence =

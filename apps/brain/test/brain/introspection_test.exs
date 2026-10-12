@@ -35,6 +35,21 @@ defmodule Brain.IntrospectionTest do
     assert model.cognitive_load >= 0.0 and model.cognitive_load <= 1.0
   end
 
+  test "self-model uses the portrait baseline before meta confidence arrives" do
+    model =
+      Brain.SelfModel.from_runtime(%{
+        meta: %{conf: nil},
+        self_portrait: %{traits: %{confidence_baseline: 0.47, stability: 0.51}},
+        mood: %{mood: %{}},
+        wm: %{wm: [], cfg: %{capacity: 12}},
+        goals: []
+      })
+
+    assert model.confidence == 0.47
+    assert_in_delta model.uncertainty, 0.53, 0.000001
+    assert model.focus == :balanced
+  end
+
   test "update_from_resolved emits self-model telemetry with version metadata" do
     id = "self-model-update-test-#{System.unique_integer([:positive])}"
     parent = self()

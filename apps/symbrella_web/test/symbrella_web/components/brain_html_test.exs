@@ -4,6 +4,24 @@ defmodule SymbrellaWeb.BrainHTMLTest do
 
   alias SymbrellaWeb.BrainHTML
 
+  test "module status renders process-up and pure-module availability honestly" do
+    running = render_component(&BrainHTML.module_status_panel/1,
+      status: %{region: :lifg, status: :up, pid: self(), queue: 0},
+      selected: :lifg
+    )
+
+    assert running =~ "running"
+    refute running =~ "Status unavailable"
+
+    available = render_component(&BrainHTML.module_status_panel/1,
+      status: %{region: :salience, status: :available, mode: :pure},
+      selected: :salience
+    )
+
+    assert available =~ "available"
+    refute available =~ "Status unavailable"
+  end
+
   test "hud_row renders confidence float (0..1) as percent" do
     html =
       render_component(&BrainHTML.hud_row/1,

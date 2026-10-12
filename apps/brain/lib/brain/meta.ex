@@ -33,7 +33,8 @@ defmodule Brain.Meta do
 
     st = %{
       region: :meta,
-      conf: 1.0,
+      # Unknown until a real LIFG confidence event arrives.
+      conf: nil,
       conflict: 0.0,
       surprise: 0.0,
       last_reasons: [],

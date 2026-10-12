@@ -65,8 +65,10 @@ defmodule Core.Response.Context do
         ]),
       symbolic_frame:
         first_present([
-          map_get(features, :symbolic_frame),
-          map_get(embedded, :symbolic_frame)
+          # The bounded turn-context frame carries structured event roles.
+          # Prefer it to the raw event so generation and reflection agree.
+          map_get(embedded, :symbolic_frame),
+          map_get(features, :symbolic_frame)
         ]),
       session_id:
         first_present([
@@ -99,7 +101,7 @@ defmodule Core.Response.Context do
       perception: present_summary(map_get(si, :perception)),
       atl_slate: present_summary(map_get(si, :atl_slate)),
       episode: present_summary(map_get(si, :episode)),
-      event: present_summary(map_get(si, :symbolic_frame)),
+      event: semantic_event_summary(map_get(si, :symbolic_frame)),
       self_model: present_summary(map_get(si, :self_model)),
       self_monitor: present_summary(map_get(si, :self_monitor)),
       self_memory_recall: present_summary(map_get(si, :self_memory_recall))
@@ -201,6 +203,14 @@ defmodule Core.Response.Context do
 
   defp sense_candidate_count(list) when is_list(list), do: length(list)
   defp sense_candidate_count(_), do: 0
+
+  defp semantic_event_summary(%{} = event) do
+    event
+    |> Map.take([:type, :subject, :modality, :action, :confidence, :uncertain_roles])
+    |> drop_empty()
+  end
+
+  defp semantic_event_summary(_), do: nil
 
   defp present_summary(nil), do: nil
   defp present_summary(map) when map == %{}, do: nil

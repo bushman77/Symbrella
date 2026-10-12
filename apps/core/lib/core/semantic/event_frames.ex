@@ -14,7 +14,7 @@ defmodule Core.Semantic.EventFrames do
   def attach(si, _opts \\ [])
 
   def attach(%{} = si, _opts) do
-    case health_support_frame(si) do
+    case health_support_frame(si) || obligation_frame(si) do
       nil ->
         si
 
@@ -23,7 +23,7 @@ defmodule Core.Semantic.EventFrames do
         |> Map.put(:symbolic_frame, frame)
         |> Trace.append(:event_frame,
           decision: :attached,
-          reason: :health_support_semantics,
+          reason: :structured_semantics,
           scores: %{confidence: Map.get(frame, :confidence, 0.0)},
           meta: frame
         )
@@ -31,6 +31,53 @@ defmodule Core.Semantic.EventFrames do
   end
 
   def attach(other, _opts), do: other
+
+  # Recover a bounded agent/action proposition for recognized obligation.
+  # Reject implicit subject attribution: only explicit "I've" is supported.
+  defp obligation_frame(si) do
+    tokens = List.wrap(Map.get(si, :tokens))
+    choices = List.wrap(Map.get(si, :lifg_choices))
+
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.find_value(fn
+      %{id: :have_verb_to_infinitive, roles: %{auxiliary: aux, verb: verb, complement: comp}} ->
+        aux_token = Enum.find(tokens, &(map_get(&1, :index) == aux))
+        aux_word = if is_map(aux_token), do: map_get(aux_token, :phrase), else: nil
+        action_token = Enum.find(tokens, &(map_get(&1, :index) == comp))
+
+        action =
+          (if is_map(action_token), do: map_get(action_token, :phrase), else: "")
+          |> normalize()
+          |> String.replace(~r/[^\p{L}-]/u, "")
+
+        obligation? =
+          Enum.any?(choices, fn c ->
+            map_get(c, :token_index) == verb and map_get(c, :id) == "got|verb|1"
+          end)
+
+        complement_verb? =
+          Enum.any?(choices, fn c ->
+            map_get(c, :token_index) == comp and
+              String.contains?(to_string(map_get(c, :id) || ""), "|verb|")
+          end)
+
+        if is_binary(aux_word) and String.downcase(aux_word) == "i've" and
+             obligation? and action != "" do
+          %{
+            type: :obligation_event,
+            subject: :speaker,
+            modality: :obligation,
+            action: action,
+            confidence: if(complement_verb?, do: 0.8, else: 0.5),
+            uncertain_roles: if(complement_verb?, do: [], else: [:complement])
+          }
+        end
+
+      _ -> nil
+    end)
+  end
 
   defp health_support_frame(si) do
     texts = text_sources(si)

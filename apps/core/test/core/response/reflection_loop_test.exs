@@ -3,6 +3,23 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "repairs an obligation response that reverses the speaker and assistant" do
+    context = %{
+      features: %{intent: :tell, conf: 0.56},
+      symbolic_frame: %{
+        event: %{type: :obligation_event, subject: :speaker, action: "leave"}
+      }
+    }
+
+    {:ok, reply, reflection} =
+      ReflectionLoop.review("I've got to leave.", "I understand, I'll leave now.", context)
+
+    assert reply == "Understood, you need to leave."
+    assert reflection.status == :repair
+    assert :subject_reversal in reflection.issues
+    assert reflection.applied?
+  end
+
   test "accepts grounded drafts and records hashes" do
     {:ok, final, reflection} =
       ReflectionLoop.review(

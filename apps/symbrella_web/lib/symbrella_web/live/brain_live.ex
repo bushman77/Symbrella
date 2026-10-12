@@ -418,6 +418,7 @@ defmodule SymbrellaWeb.BrainLive do
 
     socket
     |> assign(:snapshot, snapshot)
+    |> assign(:clock, BrainRuntime.cycle_snapshot())
     |> assign(:region_status, status)
     |> assign(:self_portrait, self_portrait)
     |> assign(:all_status, collect_all_region_status())
@@ -735,6 +736,14 @@ defmodule SymbrellaWeb.BrainLive do
     do: [event | List.wrap(events)] |> Enum.take(keep)
 
   defp bb_tag(%{} = env) do
+    if mget(env, :kind) == :telemetry and is_list(mget(env, :event)) do
+      Enum.map_join(mget(env, :event), "/", &to_string/1)
+    else
+      bb_tag_payload(env)
+    end
+  end
+
+  defp bb_tag_payload(%{} = env) do
     cond do
       is_atom(mget(env, :region)) -> mget(env, :region)
       is_binary(mget(env, :region)) -> mget(env, :region)

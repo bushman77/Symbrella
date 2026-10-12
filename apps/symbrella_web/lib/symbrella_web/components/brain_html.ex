@@ -69,7 +69,7 @@ defmodule SymbrellaWeb.BrainHTML do
     seq = mget(clock, :seq) || "—"
     hz = mget(clock, :hz) || "—"
     dtms = mget(clock, :dt_ms) || mget(clock, :dt) || "—"
-    phi = mget(clock, :phi) || "—"
+    phi = mget(clock, :phi) || mget(clock, :phase) || "—"
 
     label =
       mget(intent, :label) ||
@@ -731,7 +731,11 @@ defmodule SymbrellaWeb.BrainHTML do
 
       <%= if @empty? do %>
         <div class="mt-3 rounded-xl border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          — no WM observed yet —
+          <%= if is_map(@wm) and is_integer(@wm[:capacity]) do %>
+             0 / {@wm[:capacity]} slots active
+           <% else %>
+             — working-memory snapshot unavailable —
+           <% end %>
         </div>
       <% else %>
         <pre
@@ -752,7 +756,8 @@ defmodule SymbrellaWeb.BrainHTML do
 
     assigns =
       assigns
-      |> assign(:proc, Map.get(st, :process) || Map.get(st, :process_name) || "N/A")
+      |> assign(:proc, Map.get(st, :process) || Map.get(st, :process_name) ||
+         Map.get(st, :registered_name) || "N/A")
       |> assign(:pid, Map.get(st, :pid) || "N/A")
       |> assign(:q, Map.get(st, :queue, 0))
       |> assign(:cur, Map.get(st, :current) || Map.get(st, :current_msg))
@@ -787,10 +792,13 @@ defmodule SymbrellaWeb.BrainHTML do
 
     {tag_level, tag_text} =
       cond do
-        Map.get(stat, :ok?, false) ->
+        stat[:status] in [:up, :running, :ok, :ready] or Map.get(stat, :ok?, false) ->
           {:ok, "running"}
 
-        stat[:error] in [:not_running, :noproc] ->
+        stat[:status] == :available ->
+          {:ok, "available"
+
+        stat[:status] == :down or stat[:error] in [:not_running, :noproc] ->
           {:warn, "not running"}
 
         true ->
@@ -817,10 +825,10 @@ defmodule SymbrellaWeb.BrainHTML do
       <%= if @status == %{} do %>
         <div class="text-sm text-zinc-400">No status available</div>
       <% else %>
-        <%= if Map.get(@status, :ok?) && not is_nil(Map.get(@status, :status)) do %>
+        <%= if @status[:status] in [:up, :running, :ok, :ready, :available] do %>
           <div class="text-sm text-zinc-500 mb-1">Details</div>
           <pre class="text-xs bg-zinc-50 p-2 rounded border overflow-x-auto">
-            <%= inspect(@status.status, limit: :infinity) %>
+            <%= inspect(@status, limit: :infinity) %>
           </pre>
         <% else %>
           <div class="text-sm">

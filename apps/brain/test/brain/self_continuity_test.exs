@@ -37,6 +37,26 @@ defmodule Brain.SelfContinuityTest do
     assert model.continuity.source_snapshot_v == 1
   end
 
+  test "restoration normalizes historical string-keyed continuity status" do
+    snapshot =
+      %SelfModel{}
+      |> SelfContinuity.to_snapshot()
+      |> Map.put(:continuity, %{
+        "degraded?" => true,
+        "reboot_restored?" => false,
+        "restore_reason" => "stale_snapshot",
+        "recent_episode_ids" => ["episode-1"]
+      })
+
+    assert {:ok, %SelfModel{} = model} = SelfContinuity.restore(snapshot)
+    assert model.continuity.degraded? == false
+    assert model.continuity.reboot_restored? == true
+    assert model.continuity.restore_reason == :restored
+    assert model.continuity.recent_episode_ids == ["episode-1"]
+    refute Map.has_key?(model.continuity, "degraded?")
+    refute Map.has_key?(model.continuity, "restore_reason")
+  end
+
   test "unsupported snapshot version degrades explicitly" do
     snapshot =
       %SelfModel{}

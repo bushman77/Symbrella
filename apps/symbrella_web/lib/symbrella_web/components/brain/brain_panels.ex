@@ -47,6 +47,9 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         mood={@mood}
         auto={@auto}
         snapshot={@snapshot}
+        wm={@wm}
+        self_portrait={assigns[:self_portrait]}
+        self_model={assigns[:self_model]}
       />
       
     <!-- Brain map + Region summary -->
@@ -104,7 +107,9 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       
     <!-- Live state + Module Status -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <SymbrellaWeb.BrainHTML.live_state_panel state={@region_state} />
+        <SymbrellaWeb.BrainHTML.live_state_panel
+          state={Map.merge(@region_status || %{}, %{state: @snapshot})}
+        />
         <SymbrellaWeb.BrainHTML.module_status_panel status={@region_status} selected={@selected} />
       </div>
       

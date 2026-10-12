@@ -112,6 +112,13 @@ defmodule Core.LIFG.Attach do
                   {chosen_id, base_score}
               end
 
+            # Preserve recognized infinitive roles through the final
+            # compatibility tie-break, which otherwise favors nouns.
+            {chosen_id2, score2} =
+              prefer_signature_role(
+                si_after, token_index, candidates, scores, chosen_id2, score2, lifg_opts
+              )
+
             chosen_candidate = candidate_for_choice(si_after, token_index, chosen_id2)
 
             %{
@@ -164,6 +171,42 @@ defmodule Core.LIFG.Attach do
 
       true ->
         {:error, :lifg_unavailable}
+    end
+  end
+
+  # A recognized infinitive requires the complement to be verbal and
+  # "to" to be a particle. Do not invent senses: use scored candidates only.
+  # This is opt-in with the existing grammar_weight setting.
+  defp prefer_signature_role(si, index, candidates, scores, winner, score, opts) do
+    weight = Keyword.get(opts, :grammar_weight, 0.0)
+
+    required_pos =
+      if is_number(weight) and weight > 0 do
+        si
+        |> Map.get(:sentence_signatures, [])
+        |> List.wrap()
+        |> Enum.find_value(fn
+          %{id: :have_verb_to_infinitive, roles: roles} when is_map(roles) ->
+            cond do
+              Map.get(roles, :complement) == index -> "verb"
+              Map.get(roles, :infinitive_marker) == index -> "particle"
+              true -> nil
+            end
+
+          _ -> nil
+        end)
+      end
+
+    matching =
+      if required_pos,
+        do: Enum.filter(candidates, &(id_pos(&1) == required_pos)),
+        else: []
+
+    if matching != [] and id_pos(winner) != required_pos do
+      best = Enum.max_by(matching, &Map.get(scores, &1, 0.0))
+      {best, Map.get(scores, best, score)}
+    else
+      {winner, score}
     end
   end
 

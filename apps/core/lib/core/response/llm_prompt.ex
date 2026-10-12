@@ -239,10 +239,22 @@ defmodule Core.Response.LlmPrompt do
     lexical = map_get(frame, :lexical, %{})
     terms = lexical |> map_get(:top_terms, []) |> List.wrap() |> Enum.take(3)
 
+    event = map_get(frame, :event, %{})
+
+    obligation_note =
+      case event do
+        %{type: :obligation_event, subject: :speaker, action: action}
+        when is_binary(action) ->
+          "the user (not Symbrella) needs to #{action}"
+
+        _ -> nil
+      end
+
     notes =
       []
       |> maybe_add_present("intent", intent)
       |> maybe_add_present("domain", domain)
+      |> maybe_add_present("agent/action", obligation_note)
       |> maybe_add(present?(polarity), "polarity is #{polarity}")
       |> maybe_add(terms != [], "key terms: #{Compact.values(terms)}")
 
