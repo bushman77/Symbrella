@@ -38,6 +38,31 @@ defmodule Core.MWE.DiscoveryTest do
     assert si.sense_candidates == %{}
   end
 
+  test "known and unknown MWEs coexist without confusing their provenance" do
+    si =
+      input("turn off then phase out", [
+        %{norm: "turn", pos: "verb"},
+        %{norm: "off", pos: "particle"},
+        %{norm: "phase", pos: "verb"},
+        %{norm: "out", pos: "particle"}
+      ])
+      |> Signatures.run(stage: :early)
+      |> Lexicon.attach(mwe_lookup: fn _ ->
+        [%{id: "turn off|verb|2", norm: "turn off", pos: "verb"}]
+      end)
+      |> Discovery.run()
+
+    assert Enum.any?(si.mwe_lexicon, &(&1.phrase == "turn off" and &1.span == {0, 1}))
+    assert [%{phrase: "phase out", span: {3, 4}, verified?: false}] =
+             si.mwe_hypotheses
+    refute Enum.any?(si.mwe_hypotheses, &(&1.phrase == "turn off"))
+    assert si.sense_candidates == %{}
+
+    summary = Core.Response.Context.symbolic_frame(si)
+    assert Enum.any?(summary.lexical.verified_mwes, &(&1.phrase == "turn off"))
+    assert Enum.any?(summary.lexical.unverified_mwes, &(&1.phrase == "phase out"))
+  end
+
   test "discovers a previously unseen phrasal verb from POS evidence" do
     si =
       input("we phase out", [
