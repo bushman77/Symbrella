@@ -34,7 +34,7 @@ defmodule Core.Response.LlmSynthesis do
   # ── Public API ────────────────────────────────────────────────────────────
 
   @spec generate(String.t(), map(), map(), map(), atom() | nil) ::
-          {:ok, String.t()} | {:error, term()}
+          {:ok, String.t(), map()} | {:error, term()}
   def generate(user_text, features, decision, mood, prompt_type) do
     if llm_available?() do
       do_generate(user_text, features, decision, mood, prompt_type)
@@ -79,7 +79,7 @@ defmodule Core.Response.LlmSynthesis do
         draft = sanitize_model_text(content)
         {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
         emit_complete_event(user_text, out, context, system_prompt, reflection)
-        {:ok, out}
+        {:ok, out, reflection}
 
       {:ok, other} ->
         Logger.debug("[LlmSynthesis] Unexpected LLM response: #{inspect(other)}")
