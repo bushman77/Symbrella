@@ -50,6 +50,7 @@ defmodule Core.SemanticInput do
                  :token_cover,
                  :resolved_tokens,
                  :lifg_choices,
+                 :semantic_choices,
                  :action_candidates,
                  :agency_commands,
                  :agency_command_results,
@@ -190,6 +191,7 @@ defmodule Core.SemanticInput do
           # LIFG
           lifg_opts: keyword() | nil,
           lifg_choices: list() | nil,
+          semantic_choices: list() | nil,
           acc_conflict: number() | nil,
           perception: map() | nil,
 
@@ -261,6 +263,7 @@ defmodule Core.SemanticInput do
             sense_candidates: %{},
             lifg_opts: nil,
             lifg_choices: nil,
+            semantic_choices: nil,
             acc_conflict: nil,
             perception: nil,
             atl_slate: nil,
