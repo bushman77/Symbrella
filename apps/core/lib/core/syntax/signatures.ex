@@ -12,6 +12,25 @@ defmodule Core.Syntax.Signatures do
   alias Core.Pipeline.Trace
   alias Core.MWE.Boundaries
 
+  # POS sequences are grammatical patterns, not MWE entries. Longer nominal
+  # patterns precede shorter constituents; valid overlapping hypotheses remain.
+  @noun_patterns [
+    {["determiner", "adjective", "adjective", "noun"],
+     [:determiner, :modifier_1, :modifier_2, :head]},
+    {["determiner", "adjective", "noun"], [:determiner, :modifier, :head]},
+    {["adjective", "adjective", "noun"], [:modifier_1, :modifier_2, :head]},
+    {["determiner", "noun"], [:determiner, :head]},
+    {["adjective", "noun"], [:modifier, :head]},
+    {["noun", "noun"], [:modifier, :head]}
+  ]
+
+  @pos_features %{
+    "determiner" => :pos_determiner,
+    "adjective" => :pos_adjective,
+    "noun" => :pos_noun,
+    "preposition" => :pos_preposition
+  }
+
   @have_words ~w(have has had)
   @have_contract ~r/^(?:i|you|we|they)'ve$/u
   @have_or_be_contract ~r/^(?:he|she|it|that|there|who)'s$/u
@@ -25,8 +44,11 @@ defmodule Core.Syntax.Signatures do
     lexicon = build_lexicon(cells)
     nodes = base_nodes(Map.get(si, :tokens, []), lexicon)
 
+    noun_phrases = noun_phrase_constructions(nodes)
+
     (finite_past(nodes) ++ perfect_predicates(nodes) ++ have_verb_infinitives(nodes) ++
-       verb_particle_constructions(nodes))
+       verb_particle_constructions(nodes) ++ noun_phrases ++
+       prepositional_phrase_constructions(nodes, noun_phrases))
     |> Enum.uniq_by(fn sig -> {sig.id, sig.span, sig.roles} end)
   end
 
@@ -210,6 +232,114 @@ defmodule Core.Syntax.Signatures do
         []
       end
     end)
+  end
+
+  # Nominal constituents do not imply that their word sequence is an MWE.
+  # Keep POS ambiguity: a token may offer noun and verb analyses.
+  defp noun_phrase_constructions(nodes) do
+    Enum.flat_map(@noun_patterns, fn {pattern, role_names} ->
+      nodes
+      |> Enum.chunk_every(length(pattern), 1, :discard)
+      |> Enum.flat_map(fn segment ->
+        compatible? =
+          Enum.zip(segment, pattern)
+          |> Enum.all?(fn {node, pos} -> pos?(node, pos) end)
+
+        if compatible? and valid_surface?(segment) do
+          roles =
+            Enum.zip(role_names, segment)
+            |> Map.new(fn {role, node} -> {role, node.index} end)
+
+          required_features =
+            Enum.zip(role_names, pattern)
+            |> Map.new(fn {role, pos} -> {role, [Map.fetch!(@pos_features, pos)]} end)
+
+          [
+            signature(
+              :noun_phrase,
+              {hd(segment).index, List.last(segment).index},
+              roles,
+              required_features,
+              [:nominal_constituent, :pos_pattern]
+            )
+          ]
+        else
+          []
+        end
+      end)
+    end)
+  end
+
+  # PP constituents are assembled from a preposition and a following NP.
+  # A bare noun or pronoun may also serve as the object of a preposition.
+  # Retain the nested NP signature and its head/other roles independently.
+  defp prepositional_phrase_constructions(nodes, noun_phrases) do
+    by_index = Map.new(nodes, &{&1.index, &1})
+
+    bare =
+      nodes
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [prep, object] = segment ->
+        if pos?(prep, "preposition") and
+             (pos?(object, "noun") or pos?(object, "pronoun")) and
+             valid_surface?(segment) do
+          [
+            signature(
+              :prepositional_phrase,
+              {prep.index, object.index},
+              %{preposition: prep.index, object: object.index},
+              %{
+                preposition: [:pos_preposition],
+                object: [:pos_noun_or_pronoun]
+              },
+              [:preposition, :bare_nominal_complement]
+            )
+          ]
+        else
+          []
+        end
+      end)
+
+    composed =
+      Enum.flat_map(noun_phrases, fn np ->
+        {first, last} = np.span
+        prep = Map.get(by_index, first - 1)
+
+        if prep && pos?(prep, "preposition") do
+          segment =
+            Enum.filter(nodes, fn node ->
+              node.index >= prep.index and node.index <= last
+            end)
+
+          if length(segment) == last - prep.index + 1 and valid_surface?(segment) do
+            roles =
+              np.roles
+              |> Map.put(:preposition, prep.index)
+              |> Map.put(:object, np.roles.head)
+
+            required_features =
+              np.required_features
+              |> Map.put(:preposition, [:pos_preposition])
+              |> Map.put(:object, [:pos_noun])
+
+            [
+              signature(
+                :prepositional_phrase,
+                {prep.index, last},
+                roles,
+                required_features,
+                [:preposition, :noun_phrase_complement]
+              )
+            ]
+          else
+            []
+          end
+        else
+          []
+        end
+      end)
+
+    bare ++ composed
   end
 
   # A grammatical verb-particle candidate can be adjacent ("turn off")
