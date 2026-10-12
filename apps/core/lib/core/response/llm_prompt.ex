@@ -95,6 +95,7 @@ defmodule Core.Response.LlmPrompt do
       runtime_state_shaping(runtime_state),
       Compact.comprehension(comprehension),
       comprehension_shaping(comprehension),
+      verified_device_command_shaping(features, comprehension, guardrail?),
       Compact.symbolic_frame(symbolic_frame),
       symbolic_frame_shaping(symbolic_frame),
       Compact.response_policy(response_policy),
@@ -297,6 +298,46 @@ defmodule Core.Response.LlmPrompt do
   end
 
   defp comprehension_shaping(_), do: ""
+
+  # A verified lexical construction is a stronger statement about the
+  # command's meaning than weak isolated-word scores, but it does not prove
+  # that any real-world action happened or that a device API exists.
+  defp verified_device_command_shaping(features, summary, guardrail?)
+       when is_map(features) and is_map(summary) do
+    valid? =
+      summary
+      |> map_get(:lexical_meanings, [])
+      |> List.wrap()
+      |> Enum.any?(fn meaning ->
+        phrase = map_get(meaning, :phrase)
+        definition = map_get(meaning, :definition)
+        source = map_get(meaning, :source)
+        score = map_get(meaning, :context_score)
+
+        source in [:mwe_lexicon, :verified_discontinuous_mwe] and
+          is_binary(phrase) and
+          is_binary(definition) and
+          is_number(score) and score >= 0.12 and
+          Regex.match?(~r/\b(?:switch\s+off|turn\s+off|power\s+down|shut\s+off|deactivat(?:e|ion)|disable)\b/iu, definition) and
+          Regex.match?(~r/\b(?:device|appliance|electrical|electronic|light|mechanism|functionality)\b/iu, definition)
+      end)
+
+    if map_get(features, :intent) == :command and
+         map_get(features, :risk_bucket) == :low and
+         not guardrail? and valid? and
+         map_get(summary, :uncertain, []) == [] and
+         map_get(summary, :unresolved, []) == [] do
+      "A dictionary-backed device command was understood. " <>
+        "Weak isolated-token scores do not negate the verified phrase meaning. " <>
+        "Acknowledge the understood instruction. If no actual connected control or telemetry is available, " <>
+        "state that limitation without inventing a device state or claiming the command was executed. " <>
+        "Do not produce a generic refusal solely because the command is imperative or comprehension has a degraded diagnostic."
+    else
+      ""
+    end
+  end
+
+  defp verified_device_command_shaping(_, _, _), do: ""
 
   defp response_policy_shaping(nil), do: ""
   defp response_policy_shaping(policy) when policy == %{}, do: ""
