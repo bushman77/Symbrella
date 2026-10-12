@@ -93,7 +93,7 @@ defmodule Brain.ATL.ConstituentsTest do
     assert pp.status == :resolved
     assert np.roles.head.sense_id == pp.roles.object.sense_id
     assert pp.roles.preposition.sense_id == "in|preposition|1"
-    assert slate.by_norm["garden"] |> hd() |> Map.fetch!(:id) == "garden|noun|1"
+    assert hd(slate.by_norm["garden"]).id == "garden|noun|1"
   end
 
   test "ambiguous or absent winners produce partial structure, never invented senses" do
