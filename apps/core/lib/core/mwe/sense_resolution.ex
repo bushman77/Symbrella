@@ -45,7 +45,7 @@ defmodule Core.MWE.SenseResolution do
 
         case qualified_winner(ranked) do
           %{sense: sense, score: evidence_score}
-          when is_map(choice) and is_binary(Map.get(choice, :id)) ->
+          when is_map(choice) ->
             if Map.get(choice, :id) != Map.get(sense, :id) do
               updated =
                 choice
