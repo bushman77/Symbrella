@@ -63,6 +63,7 @@ defmodule Core.SemanticInput do
 
   @map_fields MapSet.new([
                 :intent_bias,
+                :mwe_lookup_meta,
                 :sense_candidates,
                 :perception,
                 :atl_slate,
@@ -229,6 +230,7 @@ defmodule Core.SemanticInput do
           # Multiword expressions
           mwe_matches: list() | nil,
           mwe_lexicon: list(),
+          mwe_lookup_meta: map() | nil,
           mwe_hypotheses: list(),
           mwe_choices: list(),
 
@@ -294,6 +296,7 @@ defmodule Core.SemanticInput do
             self_continuity: nil,
             mwe_matches: nil,
             mwe_lexicon: [],
+            mwe_lookup_meta: nil,
             mwe_hypotheses: [],
             mwe_choices: [],
             session_id: nil,
