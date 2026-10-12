@@ -437,6 +437,7 @@ defmodule SymbrellaWeb.HomeLive do
         mode: :prod,
         enrich_lexicon?: true,
         lexicon_stage?: true,
+        lifg_opts: [grammar_weight: 1.0],
         session_id: session_id
       )
       |> Map.put(:session_id, session_id)
