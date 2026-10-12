@@ -10,6 +10,7 @@ defmodule Core.Syntax.Signatures do
   """
 
   alias Core.Pipeline.Trace
+  alias Core.MWE.Boundaries
 
   @have_words ~w(have has had)
   @have_contract ~r/^(?:i|you|we|they)'ve$/u
@@ -24,7 +25,8 @@ defmodule Core.Syntax.Signatures do
     lexicon = build_lexicon(cells)
     nodes = base_nodes(Map.get(si, :tokens, []), lexicon)
 
-    (finite_past(nodes) ++ perfect_predicates(nodes) ++ have_verb_infinitives(nodes))
+    (finite_past(nodes) ++ perfect_predicates(nodes) ++ have_verb_infinitives(nodes) ++
+       verb_particle_constructions(nodes))
     |> Enum.uniq_by(fn sig -> {sig.id, sig.span, sig.roles} end)
   end
 
@@ -115,7 +117,15 @@ defmodule Core.Syntax.Signatures do
           end
 
         entry = Map.get(lexicon, word, %{pos: MapSet.new(), morphology: MapSet.new()})
-        [%{index: index, word: word, pos: entry.pos, morphology: entry.morphology}]
+        [
+          %{
+            index: index,
+            word: word,
+            surface: get(token, :phrase),
+            pos: entry.pos,
+            morphology: entry.morphology
+          }
+        ]
       end
     end)
   end
@@ -200,6 +210,93 @@ defmodule Core.Syntax.Signatures do
         []
       end
     end)
+  end
+
+  # A grammatical verb-particle candidate can be adjacent ("turn off")
+  # or discontinuous ("turn the lights off"). This is not a lexical decision:
+  # the same surface may also be an ordinary verb + preposition construction.
+  # POS alternatives are preserved and no sense ID is assigned here.
+  defp verb_particle_constructions(nodes) do
+    adjacent =
+      nodes
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [verb, particle] = segment ->
+        if verb_particle?(verb, particle) and valid_surface?(segment) do
+          [
+            signature(
+              :verb_particle_construction,
+              {verb.index, particle.index},
+              %{verb: verb.index, particle: particle.index},
+              %{verb: [:pos_verb], particle: [:pos_particle]},
+              [:adjacent_particle]
+            )
+          ]
+        else
+          []
+        end
+      end)
+
+    bare_object =
+      nodes
+      |> Enum.chunk_every(3, 1, :discard)
+      |> Enum.flat_map(fn [verb, object, particle] = segment ->
+        if verb_particle?(verb, particle) and
+             (pos?(object, "noun") or pos?(object, "pronoun")) and
+             valid_surface?(segment) do
+          [
+            signature(
+              :verb_particle_construction,
+              {verb.index, particle.index},
+              %{verb: verb.index, object: object.index, particle: particle.index},
+              %{verb: [:pos_verb], object: [:pos_noun_or_pronoun], particle: [:pos_particle]},
+              [:separated_particle, :object_between]
+            )
+          ]
+        else
+          []
+        end
+      end)
+
+    determined_object =
+      nodes
+      |> Enum.chunk_every(4, 1, :discard)
+      |> Enum.flat_map(fn [verb, determiner, noun, particle] = segment ->
+        if verb_particle?(verb, particle) and pos?(determiner, "determiner") and
+             pos?(noun, "noun") and valid_surface?(segment) do
+          [
+            signature(
+              :verb_particle_construction,
+              {verb.index, particle.index},
+              %{
+                verb: verb.index,
+                determiner: determiner.index,
+                object: noun.index,
+                particle: particle.index
+              },
+              %{
+                verb: [:pos_verb],
+                determiner: [:pos_determiner],
+                object: [:pos_noun],
+                particle: [:pos_particle]
+              },
+              [:separated_particle, :determiner_noun_object]
+            )
+          ]
+        else
+          []
+        end
+      end)
+
+    adjacent ++ bare_object ++ determined_object
+  end
+
+  defp verb_particle?(verb, particle),
+    do: pos?(verb, "verb") and pos?(particle, "particle")
+
+  defp valid_surface?(nodes) do
+    nodes
+    |> Enum.map(fn node -> %{phrase: node.surface, index: node.index} end)
+    |> Boundaries.valid_window?()
   end
 
   defp signature(id, span, roles, required_features, evidence) do
