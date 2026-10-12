@@ -79,6 +79,82 @@ defmodule Core.Syntax.SignaturesTest do
     assert sig.roles == %{auxiliary: 0, verb: 1, infinitive_marker: 2, complement: 3}
   end
 
+  test "verb-particle grammar preserves role indices across both surface orders" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "off", pos: "particle"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"}
+    ]
+
+    adjacent =
+      Signatures.detect(input("turn off the lights", cells))
+      |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+    assert [%{span: {0, 1}, roles: %{verb: 0, particle: 1}}] = adjacent
+    assert :adjacent_particle in hd(adjacent).evidence
+
+    separated =
+      Signatures.detect(input("turn the lights off", cells))
+      |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+    assert [%{
+      span: {0, 3},
+      roles: %{verb: 0, determiner: 1, object: 2, particle: 3}
+    }] = separated
+    assert :separated_particle in hd(separated).evidence
+  end
+
+  test "bare noun and pronoun objects can separate verb and particle" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "it", pos: "pronoun"},
+      %{norm: "off", pos: "particle"}
+    ]
+
+    for {text, object} <- [{"turn lights off", 1}, {"turn it off", 1}] do
+      matches =
+        Signatures.detect(input(text, cells))
+        |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+      assert [%{roles: %{verb: 0, object: ^object, particle: 2}}] = matches
+    end
+  end
+
+  test "verb-object grammar is not mistaken for a verb-particle construction" do
+    cells = [
+      %{norm: "open", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "file", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("open the file", cells)
+    refute :verb_particle_construction in ids("open file", cells)
+  end
+
+  test "a period between verb and particle blocks grammatical phrase evidence" do
+    cells = [%{norm: "turn", pos: "verb"}, %{norm: "off", pos: "particle"}]
+
+    refute :verb_particle_construction in ids("turn. off", cells)
+    assert :verb_particle_construction in ids("turn off!", cells)
+  end
+
+  test "grammatical alternatives are retained without inventing senses" do
+    cells = [
+      %{norm: "turn", pos: "noun"},
+      %{norm: "turn", pos: "verb"},
+      %{norm: "off", pos: "particle"}
+    ]
+    si = input("turn off", cells)
+    out = Signatures.attach(si)
+
+    assert :verb_particle_construction in Enum.map(out.sentence_signatures, & &1.id)
+    assert out.active_cells == si.active_cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
   test "attach preserves sense candidates and records standard trace" do
     si = input("I have got very cold.")
     si = %{si | sense_candidates: %{2 => [%{id: "got|verb|4", score: 0.7}]}}
