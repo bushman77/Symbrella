@@ -142,6 +142,8 @@ defmodule Brain.ATL.ConstituentsTest do
       roles: %{verb: %{sense_id: "turn off|verb|2"}}
     }] = slate.constituents
 
+    assert hd(slate.constituents).roles.verb.selection_scope == :lexical_mwe
+    assert hd(slate.constituents).roles.verb.token_span == {0, 1}
     refute Map.has_key?(slate.by_norm, "turn")
     refute Map.has_key?(slate.by_norm, "off")
     assert Map.has_key?(slate.by_id, "turn off|verb|2")
