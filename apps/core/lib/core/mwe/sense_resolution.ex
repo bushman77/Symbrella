@@ -304,7 +304,10 @@ defmodule Core.MWE.SenseResolution do
         []
       end
 
-    ContextFit.score(Map.get(si, :sentence), phrase, sense, extra_context: extra)
+    ContextFit.score(Map.get(si, :sentence), phrase, sense,
+      extra_context: extra,
+      related_morphology?: true
+    )
   end
 
   defp maybe_trace_reselection(si, []), do: si
