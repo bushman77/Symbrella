@@ -137,6 +137,8 @@ defmodule Brain.LIFG.GrammarEvidence do
     end
   end
 
+  defp support_for(_, _, _, _), do: 0.0
+
   defp role_support(:verb_particle_construction, :particle), do: 0.18
   defp role_support(:verb_particle_construction, :verb), do: 0.16
   defp role_support(:verb_particle_construction, :object), do: 0.12
@@ -160,8 +162,6 @@ defmodule Brain.LIFG.GrammarEvidence do
   defp matches_pos?(:pos_preposition, "preposition"), do: true
   defp matches_pos?(:pos_adjective, "adjective"), do: true
   defp matches_pos?(_, _), do: false
-
-  defp support_for(_, _, _, _), do: 0.0
 
   defp simple_past?(cell) do
     tags = tags(cell)
