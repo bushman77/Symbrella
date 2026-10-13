@@ -144,7 +144,9 @@ defmodule Core.Neural.Catalog do
     error in File.Error -> {:error, {:archive_io_error, filename, error.reason}}
   end
 
-  defp classify(%{"record_type" => type} = record, file, line, type) do
+  defp classify(%{"record_type" => type} = record, file, line, expected_type)
+       when type == expected_type and
+              type in ["completed_turn", "memory_event", "human_feedback"] do
     with :ok <- validate_identity(record) do
       {category, subtype, groups, observations, provenance} =
         case type do
