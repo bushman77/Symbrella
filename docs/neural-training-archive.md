@@ -644,3 +644,74 @@ Regression test commands:
 mix test apps/brain/test/brain/neural/state_transition_pilot_test.exs \
   apps/brain/test/brain/neural/state_transition_residual_test.exs
 ```
+
+
+## Missing-data-safe state-transition training (schema v3)
+
+The previous version used flags such as `mood_da_present` as numerical **prediction
+targets** and scored zero placeholders for missing mood as if they were real
+measurements. This inflated persistence and model MSE, especially in the
+held-out session containing one incomplete conversation turn.
+
+Schema v3 preserves the 24 input features but adds a same-shaped
+`mask` tensor to each `StateTransitionBuilder` training/evaluation batch.
+
+- A numerical target counts only when the underlying measurement is present
+  in **both** adjacent turns of the same session. This is necessary when
+  training a *change*, and permits fair persistence comparisons.
+- `confidence_present`, all four raw neuromodulator presence bits,
+  `mood_present`, and `self_monitor_present` remain **inputs only**.
+  Their target-mask entries are zero, so Axon is not trained to predict
+  whether the logger emitted a record.
+- Derived mood values are individually validated. Semantic/action counts
+  require their source collections to exist; absence is not assumed to mean
+  an empty collection.
+- Episodic event counts are scored only when their turn actually has archived
+  memory event evidence. When no event was recorded, this initial version
+  conservatively marks count targets unobserved; a negative trace cannot
+  be reconstructed from the absence of a line.
+- `recall_hit_fraction` is a valid target only when recall attempts were
+  actually recorded. No attempt does not imply a measured 0% hit rate.
+- Input placeholders remain zero alongside their presence signals.
+  **Missing targets are never used for error gradients or evaluation MSE.**
+
+The custom Axon loss is:
+
+```text
+sum(mask * (prediction - target)^2) / sum(mask)
+```
+
+A residual network uses `target = next_observed_state - current_state`.
+The direct network uses `target = next_observed_state`. Both use **identical**
+masks, and both compare predictions to persistence over exactly the same
+observed cells. Dataset validation rejects batches with zero supervised cells
+rather than returning a misleading perfect score.
+
+The Mix output now prints valid **feature-pair cells** in each split and
+per-feature counts alongside errors. A feature with no valid target
+observations prints `n/a`, **not** `0.0`. The older v1/v2 runs should no
+longer be compared directly with these new masked MSE values.
+
+New separate artifacts:
+
+- `tmp/training/state_transition_v3_pilot.etf`
+- `tmp/training/state_transition_v3_smoke.etf`
+- `tmp/training/state_transition_residual_v3_pilot.etf`
+- `tmp/training/state_transition_residual_v3_smoke.etf`
+
+Command sequence:
+
+```sh
+cd ~/Symbrella
+mix test apps/brain/test/brain/neural/state_transition_pilot_test.exs \
+  apps/brain/test/brain/neural/state_transition_residual_test.exs
+mix neural.dataset --task state_transition
+mix neural.train --task state_transition
+mix neural.train --task state_transition_residual
+```
+
+The archive still contains one incomplete snapshot and remains unchanged.
+This fix addresses training/evaluation masking, **not** the underlying
+fast-path instrumentation gap; investigating when the upstream cognitive
+snapshot is skipped remains a separate task. The sample is still too small
+for meaningful conclusions about learned neural cognition.
