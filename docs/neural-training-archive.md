@@ -582,3 +582,65 @@ Do not expect the residual network to beat persistence with only six
 training transitions; the zero-output prior gives it a better starting point,
 not a guarantee of learning. Larger archives, stable state features, and
 multiple held-out sessions are still required before drawing conclusions.
+
+
+## Corrected mood extraction: cognitive transition feature schema v2
+
+**The original v1 16-feature training results are diagnostic only.** An
+archive inspection found the 13 completed turns stored two distinct mood
+representations:
+
+- `cognition.mood` has the **derived** indices `exploration`, `inhibition`,
+  `vigilance`, and `plasticity`.
+- `cognition.self_model.mood.levels` has raw MoodCore neuromodulator values
+  `da`, `5ht`, `glu`, and `ne` in 12 out of those 13 turns.
+
+The v1 feature extractor incorrectly searched the derived mood for raw
+neuromodulators, causing the raw features to become zero even though the
+historical archive had recorded them. **No recollection is needed.**
+
+The feature schema is now **v2, 24 features**: four raw neuromodulator readings
+read only from the nested self-model snapshot, a presence bit for **each** raw
+reading, four separate derived mood indices, the derived-mood presence bit,
+and the rest of the former numeric cognitive/memory features. A missing raw
+reading has numerical placeholder 0 **and** an explicit zero presence flag.
+Do not interpret a missing raw measurement as a biological baseline of zero.
+
+The dataset builder reports how many archived turns have complete raw
+neuromodulator snapshots:
+
+```sh
+mix neural.dataset --task state_transition
+```
+
+Then retrain each experimental model **against the corrected v2 features**:
+
+```sh
+mix neural.train --task state_transition
+mix neural.train --task state_transition_residual
+```
+
+New artifacts are kept separate from the flawed v1 experiments:
+
+- `tmp/training/state_transition_v2_pilot.etf`
+- `tmp/training/state_transition_v2_smoke.etf`
+- `tmp/training/state_transition_residual_v2_pilot.etf`
+- `tmp/training/state_transition_residual_v2_smoke.etf`
+
+The v1 checkpoint files remain untouched. Because the feature schema and
+number of MSE terms have changed, **do not directly compare v1 MSE to v2
+MSE as a neural architecture improvement**. For each run, compare the model
+with the **persistence baseline on that same v2 dataset**.
+
+As in previous stages, 6 training and 3 held-out transitions are far too few
+to conclude generalization. Missing-value flags make missingness explicit,
+but this initial model still uses placeholder zero targets in its overall MSE.
+A later masked-loss objective can avoid training continuous targets where the
+raw level is missing, and more recorded sessions are needed to validate it.
+
+Regression test commands:
+
+```sh
+mix test apps/brain/test/brain/neural/state_transition_pilot_test.exs \
+  apps/brain/test/brain/neural/state_transition_residual_test.exs
+```
