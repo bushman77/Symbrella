@@ -113,7 +113,14 @@ defmodule SymbrellaWeb.HomeLive do
 
         task =
           Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-            build_planned_reply(text, socket.assigns.session_id)
+            if training_archive_enabled?(), do: Brain.Hippocampus.TurnTrace.start()
+            planned = build_planned_reply(text, socket.assigns.session_id)
+
+            if training_archive_enabled?() do
+              Map.put(planned, :hippocampal_events, Brain.Hippocampus.TurnTrace.finish())
+            else
+              planned
+            end
           end)
 
         {:noreply, assign(socket, :pending_task, task)}
@@ -177,10 +184,25 @@ defmodule SymbrellaWeb.HomeLive do
   def handle_info({ref, payload}, %{assigns: %{pending_task: %Task{ref: ref}}} = socket) do
     Process.demonitor(ref, [:flush])
 
+    # The worker trace covers cognitive processing. A second, local trace
+    # covers any final identity-memory correction in this LiveView process.
+    if training_archive_enabled?(), do: Brain.Hippocampus.TurnTrace.start()
+
     reply =
       payload
       |> to_bot_reply()
       |> enforce_identity_reply()
+
+    final_memory_events =
+      if training_archive_enabled?(),
+        do: Brain.Hippocampus.TurnTrace.finish(),
+        else: []
+
+    worker_memory_events = Map.get(reply, :hippocampal_events) || []
+
+    reply =
+      reply
+      |> Map.put(:hippocampal_events, worker_memory_events ++ final_memory_events)
       |> Core.StateDump.capture(:chat_reply)
 
     reply_text = reply.text
@@ -249,7 +271,14 @@ defmodule SymbrellaWeb.HomeLive do
 
     ChatHistory.append(bot)
 
-    maybe_archive_completed_turn(socket.assigns, bot_id, reply_text, si, meta)
+    maybe_archive_completed_turn(
+      socket.assigns,
+      bot_id,
+      reply_text,
+      si,
+      meta,
+      Map.get(reply, :hippocampal_events, [])
+    )
 
     {:noreply,
      socket
@@ -373,7 +402,13 @@ defmodule SymbrellaWeb.HomeLive do
 
   # Archive only replies corresponding to a completed human message.
   # Curiosity / cancellation / crash messages do not masquerade as training turns.
-  defp maybe_archive_completed_turn(assigns, bot_id, reply_text, si, meta) do
+  defp training_archive_enabled? do
+    Application.get_env(:core, Core.TrainingArchive, [])
+    |> Keyword.get(:enabled?, false)
+    |> Kernel.==(true)
+  end
+
+  defp maybe_archive_completed_turn(assigns, bot_id, reply_text, si, meta, events) do
     case Map.get(assigns, :pending_user_turn) do
       %{id: turn_id, text: user_text} ->
         case Core.TrainingArchive.record_turn(%{
@@ -383,7 +418,8 @@ defmodule SymbrellaWeb.HomeLive do
                assistant_text: reply_text,
                assistant_message_id: bot_id,
                si: si,
-               response_meta: meta
+               response_meta: meta,
+               hippocampal_events: events
              }) do
           {:error, reason} ->
             Logger.warning("[TrainingArchive] could not record turn: #{inspect(reason)}")
