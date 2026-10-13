@@ -100,4 +100,32 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     File.write!(Path.join(dir, "memory_events.jsonl"), Jason.encode!(event) <> "\n")
     assert {:error, :truncated_hippocampal_trace} = StateTransitionBuilder.build(dir, smoke: true)
   end
+  test "observed hippocampal events become state features without relevance guesses", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4]}])
+
+    events = [
+      %{record_type: "memory_event", kind: "episodic_encode", session_id: "session-a", turn_id: "session-a-1"},
+      %{record_type: "memory_event", kind: "recall_attempt", session_id: "session-a", turn_id: "session-a-1", hit: true},
+      %{record_type: "memory_event", kind: "episodic_recall", session_id: "session-a", turn_id: "session-a-1"}
+    ]
+
+    File.write!(
+      Path.join(dir, "memory_events.jsonl"),
+      Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+    )
+
+    assert {:ok, data} = StateTransitionBuilder.build(dir, smoke: true)
+    assert data.metadata.input_events == 3
+
+    [row] = Nx.to_list(data.train.x)
+    features = StateTransitionBuilder.feature_names()
+
+    lookup = fn key -> Enum.at(row, Enum.find_index(features, &(&1 == key))) end
+    assert_in_delta lookup.(:episodic_encode_count), 1 / 16, 0.00001
+    assert_in_delta lookup.(:episodic_recall_count), 1 / 16, 0.00001
+    assert_in_delta lookup.(:recall_attempt_count), 1 / 16, 0.00001
+    assert_in_delta lookup.(:recall_hit_fraction), 1.0, 0.00001
+  end
+
+
 end
