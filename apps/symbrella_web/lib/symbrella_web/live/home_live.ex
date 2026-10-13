@@ -1,6 +1,7 @@
 # apps/symbrella_web/lib/symbrella_web/live/home_live.ex
 defmodule SymbrellaWeb.HomeLive do
   use SymbrellaWeb, :live_view
+  require Logger
 
   alias SymbrellaWeb.ChatLive.HTML, as: ChatHTML
   alias SymbrellaWeb.ChatHistory
@@ -52,6 +53,7 @@ defmodule SymbrellaWeb.HomeLive do
        draft: "",
        bot_typing: false,
        pending_task: nil,
+       pending_user_turn: nil,
        cancelled_ref: nil,
        session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
        explain_open?: false,
@@ -97,6 +99,10 @@ defmodule SymbrellaWeb.HomeLive do
           |> assign(
             draft: "",
             bot_typing: true,
+            pending_user_turn: %{
+              id: "turn-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+              text: text
+            },
             cancelled_ref: nil,
             message_text_by_id: Map.put(socket.assigns.message_text_by_id, msg_id, text)
           )
@@ -155,6 +161,7 @@ defmodule SymbrellaWeb.HomeLive do
            bot_typing: false,
            cancelled_ref: task.ref,
            pending_task: nil,
+           pending_user_turn: nil,
            message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
            explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
          )
@@ -242,11 +249,14 @@ defmodule SymbrellaWeb.HomeLive do
 
     ChatHistory.append(bot)
 
+    maybe_archive_completed_turn(socket.assigns, bot_id, reply_text, si, meta)
+
     {:noreply,
      socket
      |> assign(
        bot_typing: false,
        pending_task: nil,
+       pending_user_turn: nil,
        message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, explain_text),
        explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
      )
@@ -290,6 +300,7 @@ defmodule SymbrellaWeb.HomeLive do
          |> assign(
            bot_typing: false,
            pending_task: nil,
+           pending_user_turn: nil,
            message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, bot_text),
            explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, payload)
          )
@@ -359,6 +370,32 @@ defmodule SymbrellaWeb.HomeLive do
 
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
+
+  # Archive only replies corresponding to a completed human message.
+  # Curiosity / cancellation / crash messages do not masquerade as training turns.
+  defp maybe_archive_completed_turn(assigns, bot_id, reply_text, si, meta) do
+    case Map.get(assigns, :pending_user_turn) do
+      %{id: turn_id, text: user_text} ->
+        case Core.TrainingArchive.record_turn(%{
+               turn_id: turn_id,
+               session_id: assigns.session_id,
+               user_text: user_text,
+               assistant_text: reply_text,
+               assistant_message_id: bot_id,
+               si: si,
+               response_meta: meta
+             }) do
+          {:error, reason} ->
+            Logger.warning("[TrainingArchive] could not record turn: #{inspect(reason)}")
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp initial_messages do
     case ChatHistory.list() |> sanitize_cached_messages() do
