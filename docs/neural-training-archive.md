@@ -241,6 +241,10 @@ mix neural.dataset --task memory_relevance
 
 ### Current scope and non-goals
 
+- Per worker, at most 512 events are retained; reaching the limit writes a
+  `trace_truncated` marker. The training builder refuses to build a dataset
+  containing any truncated hippocampal trace, rather than silently training
+  on incomplete observations.
 - Tracing is **opt-in** and process-local; memory operations on independent
   background tasks or non-chat API calls are not automatically associated
   with an active chat turn.
