@@ -78,7 +78,7 @@ defmodule Brain.Hippocampus.TurnTrace do
         recall_id: recall_id,
         operation: operation,
         source: source,
-        cues: cues,
+        cues: cue_projection(cues),
         limit: option(options, :limit),
         result_count: length(results),
         hit?: results != []
@@ -104,6 +104,35 @@ defmodule Brain.Hippocampus.TurnTrace do
 
     :ok
   end
+
+  # Never copy the full SemanticInput into each retrieval event. Its nested
+  # lexical/candidate state can be very large and is already in turns.jsonl.
+  defp cue_projection(cues) when is_list(cues) do
+    cues
+    |> Enum.take(48)
+    |> Enum.map(&cue_term/1)
+  end
+
+  defp cue_projection(%{} = cues) do
+    %{
+      sentence: Map.get(cues, :sentence) || Map.get(cues, "sentence"),
+      winners: cue_projection(List.wrap(Map.get(cues, :winners) || Map.get(cues, "winners"))),
+      tokens: cue_projection(List.wrap(Map.get(cues, :tokens) || Map.get(cues, "tokens")))
+    }
+  end
+
+  defp cue_projection(_), do: []
+
+  defp cue_term(value) when is_binary(value), do: value
+  defp cue_term(value) when is_atom(value), do: Atom.to_string(value)
+  defp cue_term(%{} = value) do
+    Map.get(value, :norm) || Map.get(value, :lemma) || Map.get(value, :phrase) ||
+      Map.get(value, :word) || Map.get(value, :id) || Map.get(value, "norm") ||
+      Map.get(value, "lemma") || Map.get(value, "phrase") || Map.get(value, "word") ||
+      Map.get(value, "id") || inspect(value, limit: 3, printable_limit: 120)
+  end
+
+  defp cue_term(value), do: inspect(value, limit: 3, printable_limit: 120)
 
   defp append(event) do
     case Process.get(@key) do
