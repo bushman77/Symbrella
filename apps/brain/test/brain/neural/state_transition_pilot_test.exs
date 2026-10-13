@@ -27,7 +27,15 @@ defmodule Brain.Neural.StateTransitionPilotTest do
             cognition: %{
               confidence: conf,
               intent: "ask",
-              mood: %{"da" => conf, "5ht" => 0.5, "glu" => 0.3, "ne" => 0.2},
+              mood: %{
+                exploration: conf,
+                inhibition: 0.55,
+                vigilance: 0.4,
+                plasticity: 0.8
+              },
+              self_model: %{
+                mood: %{levels: %{da: conf, "5ht": 0.52, glu: 0.64, ne: 0.77}}
+              },
               tokens: [%{phrase: "hello"}, %{phrase: "world"}],
               lifg_choices: [%{id: "hello|noun|1"}],
               self_monitor: %{vigilance: 0.1}
@@ -44,6 +52,10 @@ defmodule Brain.Neural.StateTransitionPilotTest do
 
     assert {:ok, data} = StateTransitionBuilder.build(dir)
     assert data.metadata.input_turns == 5
+    assert data.metadata.complete_modulator_turns == 5
+    assert data.metadata.missing_modulator_turns == 0
+    assert data.metadata.feature_schema_version == 2
+    assert length(data.metadata.feature_names) == 24
     assert data.metadata.total_pairs == 3
     assert data.metadata.train_examples == 2
     assert data.metadata.eval_examples == 1
@@ -61,7 +73,7 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert_in_delta hd(y1), 0.4, 0.00001
 
     assert {:ok, model} = StateTransitionPilot.train(data, epochs: 1)
-    assert model.model_version == "state-transition-pilot-v1"
+    assert model.model_version == "state-transition-pilot-v2"
     assert model.evaluated? == true
     assert model.train_examples == 2
     assert model.eval_examples == 1
@@ -125,6 +137,67 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert_in_delta lookup.(:episodic_recall_count), 1 / 16, 0.00001
     assert_in_delta lookup.(:recall_attempt_count), 1 / 16, 0.00001
     assert_in_delta lookup.(:recall_hit_fraction), 1.0, 0.00001
+  end
+
+
+  test "archive-native mood derives raw levels from self_model and keeps derived mood separate", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4]}])
+    assert {:ok, data} = StateTransitionBuilder.build(dir, smoke: true)
+
+    [x] = Nx.to_list(data.train.x)
+    [y] = Nx.to_list(data.train.y)
+    features = StateTransitionBuilder.feature_names()
+    at = fn row, feature ->
+      row |> Enum.at(Enum.find_index(features, &(&1 == feature)))
+    end
+
+    assert_in_delta at.(x, :mood_da), 0.2, 0.000001
+    assert_in_delta at.(y, :mood_da), 0.4, 0.000001
+    assert_in_delta at.(x, :mood_5ht), 0.52, 0.000001
+    assert_in_delta at.(x, :mood_glu), 0.64, 0.000001
+    assert_in_delta at.(x, :mood_ne), 0.77, 0.000001
+    assert at.(x, :mood_da_present) == 1.0
+    assert at.(x, :mood_5ht_present) == 1.0
+    assert at.(x, :mood_glu_present) == 1.0
+    assert at.(x, :mood_ne_present) == 1.0
+    assert_in_delta at.(x, :mood_exploration), 0.2, 0.000001
+    assert_in_delta at.(x, :mood_inhibition), 0.55, 0.000001
+    assert_in_delta at.(x, :mood_vigilance), 0.4, 0.000001
+    assert_in_delta at.(x, :mood_plasticity), 0.8, 0.000001
+    assert at.(x, :mood_present) == 1.0
+  end
+
+  test "missing self_model mood is marked absent rather than treated as observed zero", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4]}])
+    path = Path.join(dir, "turns.jsonl")
+    [first, second] =
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    second = update_in(second, ["cognition"], &Map.delete(&1, "self_model"))
+
+    File.write!(path, Jason.encode!(first) <> "\n" <> Jason.encode!(second) <> "\n")
+    assert {:ok, data} = StateTransitionBuilder.build(dir, smoke: true)
+    assert data.metadata.complete_modulator_turns == 1
+    assert data.metadata.missing_modulator_turns == 1
+
+    [input] = Nx.to_list(data.train.x)
+    [target] = Nx.to_list(data.train.y)
+    features = StateTransitionBuilder.feature_names()
+    at = fn row, name -> Enum.at(row, Enum.find_index(features, &(&1 == name))) end
+
+    assert_in_delta at.(input, :mood_da), 0.2, 0.000001
+    assert at.(input, :mood_da_present) == 1.0
+    assert at.(target, :mood_da) == 0.0
+    assert at.(target, :mood_da_present) == 0.0
+    assert at.(target, :mood_5ht_present) == 0.0
+    assert at.(target, :mood_glu_present) == 0.0
+    assert at.(target, :mood_ne_present) == 0.0
+    # Missing raw levels are not incorrectly inferred from the derived mood.
+    assert_in_delta at.(target, :mood_exploration), 0.4, 0.000001
+    assert at.(target, :mood_present) == 1.0
   end
 
 
