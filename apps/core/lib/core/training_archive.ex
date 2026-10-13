@@ -60,6 +60,8 @@ defmodule Core.TrainingArchive do
     else
       :disabled
     end
+  rescue
+    _error -> {:error, :archive_exception}
   end
 
   def record_turn(_, _), do: {:error, :invalid_turn}
@@ -108,6 +110,8 @@ defmodule Core.TrainingArchive do
     else
       :disabled
     end
+  rescue
+    _error -> {:error, :archive_exception}
   end
 
   def record_feedback(_, _), do: {:error, :invalid_human_feedback}
