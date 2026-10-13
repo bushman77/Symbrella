@@ -519,3 +519,66 @@ Regression tests:
 mix test apps/core/test/core/neural/catalog_test.exs \
   apps/brain/test/brain/neural/state_transition_pilot_test.exs
 \`\`\`
+
+
+## Residual cognitive-state experiment (v1, separate from direct predictor)
+
+The first session-held-out direct Axon run on the initial archive had six
+training and three held-out transitions. Its reported **held-out** state MSE
+was **0.21468**, versus **0.10403** for the persistence baseline. With only
+three held-out transitions these are diagnostic, not statistically meaningful.
+
+We now have a second training objective that learns a residual instead of
+reconstructing the next state:
+
+```text
+observed delta = next_observed_state - current_state
+Axon(current_state) -> predicted delta
+predicted next state = clip(current_state + predicted delta, 0, 1)
+```
+
+The final Axon layer uses zero-initialized weights and biases. Before
+training, the residual is therefore exactly zero and the network reproduces
+the persistence baseline. During training it minimizes MSE between predicted
+and **observed** deltas. After training we report next-state MSE in the
+original 16-dimensional bounded state space, making comparisons with
+persistence and the direct pilot meaningful.
+
+The residual objective does not require manual relevance ratings. It uses
+the same chronological turns, same state feature schema, and same
+session-separated dataset as `state_transition`; only the model/learning
+objective differs.
+
+```sh
+cd ~/Symbrella
+mix test apps/brain/test/brain/neural/state_transition_residual_test.exs \
+  apps/brain/test/brain/neural/state_transition_pilot_test.exs
+
+# Independent holdout: uses the same deterministic session split as v1
+mix neural.train --task state_transition_residual
+
+# Optional engineering smoke test: NO independent evaluation
+mix neural.train --task state_transition_residual --smoke
+```
+
+Held-out output includes:
+
+- Total Axon and persistence next-state mean squared error
+- Each feature's Axon MSE, persistence MSE, and improvement
+  (`persistence_mse - model_mse`; positive favors Axon)
+- A clear sample-size warning and an explicit verdict on the observed sample
+
+New private artifacts:
+
+- `tmp/training/state_transition_residual_pilot.etf`
+- `tmp/training/state_transition_residual_smoke.etf`
+
+The **original** `state_transition_pilot.etf` and
+`state_transition_smoke.etf` are not overwritten. Like all initial Axon
+experiments, these weights are never connected to live cognitive state,
+response selection, or hippocampal ranking.
+
+Do not expect the residual network to beat persistence with only six
+training transitions; the zero-output prior gives it a better starting point,
+not a guarantee of learning. Larger archives, stable state features, and
+multiple held-out sessions are still required before drawing conclusions.
