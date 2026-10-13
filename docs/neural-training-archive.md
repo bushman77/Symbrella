@@ -310,3 +310,69 @@ Even after this change, a recall with no lexical overlap may be empty.
 If `cue_count=0` persists with real conversation tokens, inspect the
 upstream tokenization/recall invocation timing rather than changing the
 Jaccard threshold blindly.
+
+
+## First Axon experiment using existing archived memories
+
+The initial archive may contain multiple `attach` recall candidates but no
+`feedback.jsonl`. There is no valid supervised target until a person reviews
+those candidates. You can use **existing** candidates immediately; no
+LiveView review interface is required.
+
+```sh
+cd ~/Symbrella
+mix neural.review --dir tmp/training
+```
+
+The command pairs each archived ordinary `attach` episode with its original
+user question, shows the recalled content and retrieval score, then asks:
+
+- `y` = human judge says the episode is relevant to the user question
+- `n` = human judge says the episode is irrelevant
+- `s` = unsure / skip without adding any label
+- `q` = exit, retaining earlier reviews
+
+All actions except `y` and `n` are nonlabeling. The command appends verified
+`memory_relevance` feedback through `Core.TrainingArchive.record_feedback`.
+Already reviewed turn+episode pairs will not be relabeled by the queue. The
+records remain private under `tmp/training/`.
+
+For a first supervised **pipeline smoke test**, even when all reviewed turns
+share the same session:
+
+```sh
+mix neural.train --task memory_relevance --smoke
+```
+
+This mode passes all reviewed examples through the 12-feature builder,
+trains a tiny `12 -> 4 ReLU -> 1 sigmoid` Axon model with MSE loss, and
+saves `tmp/training/memory_relevance_smoke.etf`. It deliberately uses the
+**same examples** for training and reported in-sample loss: there is no holdout
+test or claim of generalization. A model trained on a handful of episodes is
+not ready to advise retrieval ranking.
+
+When the archive contains human-reviewed candidates from at least **two
+independent sessions**, use the normal session-disjoint builder and evaluation:
+
+```sh
+mix neural.dataset --task memory_relevance
+mix neural.train --task memory_relevance
+```
+
+Normal training compares held-out MSE against using the original hippocampal
+retrieval score as a relevance prediction, and writes the experimental
+checkpoint to `tmp/training/memory_relevance_pilot.etf`. Tiny training and
+evaluation splits have noisy estimates; these are research diagnostics.
+
+Both modes are strictly **offline** and **advisory**. Neither checkpoint is
+automatically loaded by Symbrella, and the live hippocampal retrieval and
+assistant responses are unchanged. No unreviewed samples are given guessed
+or pseudo-labels.
+
+Regression tests:
+
+```sh
+mix test apps/core/test/core/neural/review_queue_test.exs \
+  apps/brain/test/brain/neural/memory_relevance_pilot_test.exs \
+  apps/brain/test/brain/neural/training_builder_test.exs
+```
