@@ -1,60 +1,72 @@
 defmodule Mix.Tasks.Neural.Dataset do
   @moduledoc """
-  Build and summarize a reviewed neural training dataset without starting
-  the Symbrella runtime or changing model weights.
+  Inspect versioned Nx training datasets without changing model weights.
 
       mix neural.dataset --task memory_relevance
-      mix neural.dataset --task uncertainty --dir tmp/training
+      mix neural.dataset --task uncertainty
+      mix neural.dataset --task state_transition
+      mix neural.dataset --task state_transition --smoke
 
-  The command validates the private JSONL archives in the chosen directory.
-  It prints only counts and feature names, never conversation contents.
+  The state-transition dataset is self-supervised from observed successive
+  cognitive turns. Human-reviewed relevance/uncertainty remain separate.
   """
 
   use Mix.Task
 
-  @shortdoc "Validate reviewed Symbrella training archive and build Nx batches"
+  @shortdoc "Build and inspect Nx datasets from the Symbrella training archive"
 
   @impl Mix.Task
   def run(argv) do
     {opts, args, invalid} =
       OptionParser.parse(argv,
-        strict: [task: :string, dir: :string, eval_fraction: :float]
+        strict: [task: :string, dir: :string, eval_fraction: :float, smoke: :boolean]
       )
 
     if invalid != [] or args != [] do
-      Mix.raise("Invalid options. Usage: mix neural.dataset --task memory_relevance|uncertainty [--dir DIR]")
+      Mix.raise("Usage: mix neural.dataset --task memory_relevance|uncertainty|state_transition [--dir DIR] [--smoke]")
     end
 
     task =
       case Keyword.get(opts, :task) do
         "memory_relevance" -> :memory_relevance
         "uncertainty" -> :uncertainty
-        _ -> Mix.raise("Specify --task memory_relevance or --task uncertainty")
+        "state_transition" -> :state_transition
+        _ -> Mix.raise("Specify --task memory_relevance, uncertainty or state_transition")
       end
 
     Mix.Task.run("compile")
-
     dir = Keyword.get(opts, :dir, "tmp/training")
+    smoke? = Keyword.get(opts, :smoke, false)
 
-    build_opts =
-      case Keyword.fetch(opts, :eval_fraction) do
-        {:ok, fraction} -> [eval_fraction: fraction]
-        :error -> []
+    result =
+      case task do
+        :state_transition ->
+          Brain.Neural.StateTransitionBuilder.build(dir, smoke: smoke?)
+
+        task ->
+          if smoke? do
+            Brain.Neural.TrainingBuilder.build_smoke(dir, task)
+          else
+            fraction = Keyword.get(opts, :eval_fraction, 0.2)
+            Brain.Neural.TrainingBuilder.build(dir, task, eval_fraction: fraction)
+          end
       end
 
-    case Brain.Neural.TrainingBuilder.build(dir, task, build_opts) do
-      {:ok, %{metadata: metadata, train: train, eval: eval_batch}} ->
+    case result do
+      {:ok, %{metadata: metadata, train: train, eval: evaluation}} ->
         Mix.shell().info("Task: #{task}")
         Mix.shell().info("Feature schema: #{metadata.feature_schema_version}")
         Mix.shell().info("Features: #{inspect(metadata.feature_names)}")
         Mix.shell().info("Training rows: #{metadata.train_examples}")
         Mix.shell().info("Evaluation rows: #{metadata.eval_examples}")
         Mix.shell().info("Training tensor: #{inspect(Nx.shape(train.x))}")
-        Mix.shell().info("Evaluation tensor: #{inspect(Nx.shape(eval_batch.x))}")
-        Mix.shell().info("No weights were updated or saved.")
+        Mix.shell().info("Target tensor: #{inspect(Nx.shape(train.y))}")
+        Mix.shell().info("Evaluation tensor: #{inspect(Nx.shape(evaluation.x))}")
+        Mix.shell().info("Split mode: #{Map.get(metadata, :split_mode, :session_holdout)}")
+        Mix.shell().info("No model weights were changed.")
 
       {:error, reason} ->
-        Mix.raise("Cannot build reviewed training data: #{inspect(reason)}")
+        Mix.raise("Cannot build training data: #{inspect(reason)}")
     end
   end
 end
