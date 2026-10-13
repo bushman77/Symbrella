@@ -8,13 +8,13 @@ defmodule Brain.Neural.StateTransitionResidual do
   persistence baseline. A trained model must beat persistence on a held-out
   session before its added complexity can be justified.
 
-  Never loaded into live Symbrella. Inputs use the version-2 24-feature
+  Never loaded into live Symbrella. Inputs use the version-3 masked 24-feature
   projection from StateTransitionBuilder, NOT the raw object archive.
   """
 
-  alias Brain.Neural.StateTransitionBuilder
+  alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask}
 
-  @model_version "state-transition-residual-v2"
+  @model_version "state-transition-residual-v3"
   @default_epochs 25
   @default_hidden 8
 
@@ -55,9 +55,9 @@ defmodule Brain.Neural.StateTransitionResidual do
 
       params =
         model
-        |> Axon.Loop.trainer(:mean_squared_error, :sgd, log: 0)
+        |> Axon.Loop.trainer(&StateTransitionMask.loss/2, :sgd, log: 0)
         |> Axon.Loop.run(
-          [{train.x, observed_deltas}],
+          [{train.x, StateTransitionMask.targets(observed_deltas, train.mask)}],
           Axon.ModelState.empty(),
           epochs: epochs
         )
@@ -68,8 +68,8 @@ defmodule Brain.Neural.StateTransitionResidual do
 
       train_next = predict_next(train.x, train_delta)
       eval_next = predict_next(evaluation.x, eval_delta)
-      train_metrics = metrics(names, train_next, train.x, train.y)
-      eval_metrics = metrics(names, eval_next, evaluation.x, evaluation.y)
+      train_metrics = metrics(names, train_next, train.x, train.y, train.mask)
+      eval_metrics = metrics(names, eval_next, evaluation.x, evaluation.y, evaluation.mask)
 
       {:ok,
        %{
@@ -95,6 +95,9 @@ defmodule Brain.Neural.StateTransitionResidual do
          persistence_eval_mse: eval_metrics.persistence_mse,
          train_per_feature: train_metrics.per_feature,
          eval_per_feature: eval_metrics.per_feature,
+         valid_train_cells: train_metrics.valid_cells,
+         valid_eval_cells: eval_metrics.valid_cells,
+         mask_policy: :both_endpoints_observed_exclude_presence_indicators,
          deployment_status: :experimental_not_for_runtime
        }}
     end
@@ -115,44 +118,10 @@ defmodule Brain.Neural.StateTransitionResidual do
 
   def save(_, _), do: {:error, :invalid_artifact}
 
-  @doc """
-  Per-feature mean squared state error for model and persistence.
-  All rows are in observed-state space [0, 1], not in delta space.
-  """
-  @spec metrics([atom()], Nx.Tensor.t(), Nx.Tensor.t(), Nx.Tensor.t()) :: map()
-  def metrics(names, predicted, current, observed) when is_list(names) do
-    model_squared = Nx.pow(Nx.subtract(predicted, observed), 2)
-    baseline_squared = Nx.pow(Nx.subtract(current, observed), 2)
-
-    model_per_feature = mean_columns(model_squared)
-    baseline_per_feature = mean_columns(baseline_squared)
-
-    breakdown =
-      names
-      |> Enum.zip(Enum.zip(model_per_feature, baseline_per_feature))
-      |> Enum.map(fn {name, {model_error, base_error}} ->
-        %{
-          feature: name,
-          model_mse: model_error,
-          persistence_mse: base_error,
-          improvement: base_error - model_error
-        }
-      end)
-
-    %{
-      model_mse: overall_mse(model_squared),
-      persistence_mse: overall_mse(baseline_squared),
-      per_feature: breakdown
-    }
+  @doc "Per-feature state MSE, excluding any unobserved transition targets."
+  def metrics(names, predicted, current, observed, mask) do
+    StateTransitionMask.metrics(names, predicted, current, observed, mask)
   end
-
-  defp mean_columns(squared) do
-    squared
-    |> Nx.mean(axes: [0])
-    |> Nx.to_list()
-  end
-
-  defp overall_mse(squared), do: squared |> Nx.mean() |> Nx.to_number() |> Kernel.*(1.0)
 
   defp validate_options(epochs, hidden) do
     if is_integer(epochs) and epochs in 1..200 and
@@ -162,10 +131,6 @@ defmodule Brain.Neural.StateTransitionResidual do
   end
 
   defp validate_dataset(train, evaluation, meta, names) do
-    width = length(names)
-    training_shape = Nx.shape(train.x)
-    evaluation_shape = Nx.shape(evaluation.x)
-
     cond do
       meta[:task] != :state_transition ->
         {:error, :incorrect_training_task}
@@ -173,30 +138,26 @@ defmodule Brain.Neural.StateTransitionResidual do
       meta[:feature_schema_version] != StateTransitionBuilder.feature_schema_version() ->
         {:error, :feature_schema_mismatch}
 
-      train[:feature_names] != names or evaluation[:feature_names] != names ->
-        {:error, :feature_schema_mismatch}
-
-      not match?({n, ^width} when n > 0, training_shape) or
-          not match?({n, ^width} when n > 0, evaluation_shape) ->
-        {:error, :invalid_feature_tensor_shape}
-
-      Nx.shape(train.y) != training_shape or Nx.shape(evaluation.y) != evaluation_shape ->
-        {:error, :invalid_target_shape}
-
-      meta[:split_mode] == :in_sample_smoke ->
-        :ok
-
-      meta[:split_mode] != :session_holdout or
-          MapSet.size(MapSet.new(meta[:train_sessions] || [])) == 0 or
-          MapSet.size(MapSet.new(meta[:eval_sessions] || [])) == 0 or
-          not MapSet.disjoint?(
-            MapSet.new(meta[:train_sessions] || []),
-            MapSet.new(meta[:eval_sessions] || [])
-          ) ->
-        {:error, :session_leakage}
-
       true ->
-        :ok
+        with :ok <- StateTransitionMask.validate_batch(train, names),
+             :ok <- StateTransitionMask.validate_batch(evaluation, names) do
+          cond do
+            meta[:split_mode] == :in_sample_smoke ->
+              :ok
+
+            meta[:split_mode] != :session_holdout or
+                MapSet.size(MapSet.new(meta[:train_sessions] || [])) == 0 or
+                MapSet.size(MapSet.new(meta[:eval_sessions] || [])) == 0 or
+                not MapSet.disjoint?(
+                  MapSet.new(meta[:train_sessions] || []),
+                  MapSet.new(meta[:eval_sessions] || [])
+                ) ->
+              {:error, :session_leakage}
+
+            true ->
+              :ok
+          end
+        end
     end
   end
 end
