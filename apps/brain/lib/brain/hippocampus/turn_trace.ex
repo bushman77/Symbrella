@@ -46,6 +46,8 @@ defmodule Brain.Hippocampus.TurnTrace do
     end
 
     :ok
+  rescue
+    _ -> :ok
   end
 
   @doc "Record fact lookup success or miss."
@@ -61,6 +63,8 @@ defmodule Brain.Hippocampus.TurnTrace do
     end
 
     :ok
+  rescue
+    _ -> :ok
   end
 
   @doc """
@@ -103,6 +107,8 @@ defmodule Brain.Hippocampus.TurnTrace do
     end
 
     :ok
+  rescue
+    _ -> :ok
   end
 
   # Never copy the full SemanticInput into each retrieval event. Its nested
@@ -138,6 +144,12 @@ defmodule Brain.Hippocampus.TurnTrace do
     case Process.get(@key) do
       {count, events} when count < @max_events ->
         Process.put(@key, {count + 1, [event | events]})
+
+      {@max_events, events} ->
+        # Preserve an explicit truncation marker rather than silently
+        # presenting a partial retrieval history as a complete one.
+        Process.put(@key, {@max_events + 1,
+          [%{kind: :trace_truncated, limit: @max_events} | events]})
 
       _ ->
         :ok
