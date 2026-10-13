@@ -105,9 +105,10 @@ defmodule Mix.Tasks.Neural.Train do
     with {:ok, data} <- StateTransitionBuilder.build(dir, smoke: smoke?),
          {:ok, result} <- StateTransitionPilot.train(data, settings) do
       print_modulator_coverage(data)
-      Mix.shell().info("Experimental self-supervised cognitive-state Axon pilot (schema v2)")
+      Mix.shell().info("Experimental self-supervised cognitive-state Axon pilot (schema v3; observed-only targets)")
       Mix.shell().info("Training transitions: #{result.train_examples}")
       Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
+      Mix.shell().info("Valid observed feature pairs: #{result.valid_train_cells} training / #{result.valid_eval_cells} holdout")
       Mix.shell().info("Model training MSE: #{Float.round(result.train_mse, 5)}")
       Mix.shell().info("Persistence baseline training MSE: #{Float.round(result.persistence_train_mse, 5)}")
 
@@ -124,7 +125,7 @@ defmodule Mix.Tasks.Neural.Train do
         Mix.shell().info("WARNING: tiny transition sample, not evidence of useful learned cognition.")
       end
 
-      filename = if smoke?, do: "state_transition_v2_smoke.etf", else: "state_transition_v2_pilot.etf"
+      filename = if smoke?, do: "state_transition_v3_smoke.etf", else: "state_transition_v3_pilot.etf"
       path = Path.join(dir, filename)
 
       case StateTransitionPilot.save(result, path) do
@@ -141,9 +142,10 @@ defmodule Mix.Tasks.Neural.Train do
     with {:ok, data} <- StateTransitionBuilder.build(dir, smoke: smoke?),
          {:ok, result} <- StateTransitionResidual.train(data, settings) do
       print_modulator_coverage(data)
-      Mix.shell().info("Experimental residual cognitive-state Axon pilot (schema v2)")
+      Mix.shell().info("Experimental residual cognitive-state Axon pilot (schema v3; observed-only targets)")
       Mix.shell().info("Train transitions: #{result.train_examples}")
       Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
+      Mix.shell().info("Valid observed feature pairs: #{result.valid_train_cells} training / #{result.valid_eval_cells} holdout")
       Mix.shell().info("Model train MSE: #{Float.round(result.train_mse, 5)}")
       Mix.shell().info("Persistence train MSE: #{Float.round(result.persistence_train_mse, 5)}")
 
@@ -158,14 +160,15 @@ defmodule Mix.Tasks.Neural.Train do
 
       Mix.shell().info("Persistence #{if(smoke?, do: "in-sample", else: "holdout")} MSE: #{Float.round(result.persistence_eval_mse, 5)}")
       Mix.shell().info("Per-feature #{if(smoke?, do: "in-sample", else: "held-out")} errors (lower MSE is better):")
-      Mix.shell().info("  feature | residual MSE | persistence MSE | improvement")
+      Mix.shell().info("  feature | valid pairs | residual MSE | persistence MSE | improvement")
 
       Enum.each(result.eval_per_feature, fn row ->
         Mix.shell().info(
           "  #{row.feature}: " <>
-            "#{Float.round(row.model_mse, 6)} | " <>
-            "#{Float.round(row.persistence_mse, 6)} | " <>
-            "#{Float.round(row.improvement, 6)}"
+            "#{row.valid_pairs} | " <>
+            "#{format_metric(row.model_mse)} | " <>
+            "#{format_metric(row.persistence_mse)} | " <>
+            "#{format_metric(row.improvement)}"
         )
       end)
 
@@ -181,8 +184,8 @@ defmodule Mix.Tasks.Neural.Train do
 
       filename =
         if smoke?,
-          do: "state_transition_residual_v2_smoke.etf",
-          else: "state_transition_residual_v2_pilot.etf"
+          do: "state_transition_residual_v3_smoke.etf",
+          else: "state_transition_residual_v3_pilot.etf"
 
       path = Path.join(dir, filename)
 
@@ -205,6 +208,9 @@ defmodule Mix.Tasks.Neural.Train do
         "#{missing} incomplete/missing (per-level presence flags retained)."
     )
   end
+
+  defp format_metric(:not_observed), do: "n/a"
+  defp format_metric(value) when is_number(value), do: Float.round(value * 1.0, 6)
 
   defp complete(path) do
     Mix.shell().info("Saved offline experiment: #{path}")
