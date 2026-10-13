@@ -64,6 +64,54 @@ defmodule Core.TrainingArchive do
 
   def record_turn(_, _), do: {:error, :invalid_turn}
 
+  @doc """
+  Append an explicitly human-reviewed correction linked to an archived turn.
+
+  Required: :turn_id, :session_id, :reviewed_by and a nonempty :label map.
+  Feedback remains a separate file so raw observations are never overwritten.
+  No model training or weight update occurs in this function.
+  """
+  @spec record_feedback(map(), keyword()) :: :ok | :disabled | {:error, term()}
+  def record_feedback(attrs, opts \\ [])
+
+  def record_feedback(%{} = attrs, opts) when is_list(opts) do
+    config = Keyword.get(opts, :config, Application.get_env(:core, __MODULE__, []))
+
+    if Keyword.get(config, :enabled?, false) == true do
+      fields = [:turn_id, :session_id, :reviewed_by]
+
+      valid_fields? =
+        Enum.all?(fields, fn field ->
+          value = Map.get(attrs, field)
+          is_binary(value) and String.trim(value) != ""
+        end)
+
+      case {valid_fields?, Map.get(attrs, :label)} do
+        {true, %{} = label} when map_size(label) > 0 ->
+          event = %{
+            schema_version: @schema_version,
+            record_type: "human_feedback",
+            recorded_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+            session_id: attrs.session_id,
+            turn_id: attrs.turn_id,
+            reviewed_by: attrs.reviewed_by,
+            source: "human_review",
+            label: json_safe(label),
+            note: json_safe(Map.get(attrs, :note))
+          }
+
+          persist_feedback(config, event)
+
+        _ ->
+          {:error, :invalid_human_feedback}
+      end
+    else
+      :disabled
+    end
+  end
+
+  def record_feedback(_, _), do: {:error, :invalid_human_feedback}
+
   defp validate(attrs) do
     if Enum.all?([:turn_id, :session_id, :user_text, :assistant_text], fn field ->
          value = Map.get(attrs, field)
@@ -186,6 +234,23 @@ defmodule Core.TrainingArchive do
                   :ok <- append_json_lines(memory_path, events) do
                :ok
              end
+           end) do
+        :ok -> :ok
+        {:error, _} = error -> error
+        {:aborted, reason} -> {:error, {:lock_aborted, reason}}
+        other -> {:error, {:archive_write_failed, other}}
+      end
+    end
+  end
+
+  defp persist_feedback(config, event) do
+    dir = config |> Keyword.get(:dir, @default_dir) |> Path.expand()
+    path = Path.join(dir, "feedback.jsonl")
+
+    with :ok <- File.mkdir_p(dir),
+         :ok <- File.chmod(dir, 0o700) do
+      case :global.trans({{__MODULE__, dir}, self()}, fn ->
+             append_json_line(path, event)
            end) do
         :ok -> :ok
         {:error, _} = error -> error
