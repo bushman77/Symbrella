@@ -41,6 +41,9 @@ defmodule Brain.Neural.MemoryRelevancePilotTest do
     assert result.train_mse >= 0.0
     assert result.eval_mse >= 0.0
     assert result.baseline_eval_mse > 0.0
+    assert result.class_prior == 0.5
+    assert result.class_prior_train_mse == 0.25
+    assert result.class_prior_eval_mse == 0.25
     assert result.labels.train_positive == 1
   end
 
@@ -92,4 +95,23 @@ defmodule Brain.Neural.MemoryRelevancePilotTest do
     assert artifact.params != nil
     refute Map.has_key?(artifact, :user_text)
   end
+  test "single-class reviews reveal a zero-loss prevalence baseline in-sample" do
+    base = dataset()
+    labels = batch([0.1, 0.2], [1.0, 1.0])
+    data = %{
+      base |
+      train: labels,
+      eval: labels,
+      metadata: Map.put(base.metadata, :split_mode, :in_sample_smoke)
+    }
+
+    assert {:ok, result} = MemoryRelevancePilot.train(data, epochs: 1)
+    assert result.labels.train_positive == 2
+    assert result.class_prior == 1.0
+    assert result.class_prior_train_mse == 0.0
+    assert result.class_prior_eval_mse == 0.0
+    assert result.evaluated? == false
+  end
+
+
 end
