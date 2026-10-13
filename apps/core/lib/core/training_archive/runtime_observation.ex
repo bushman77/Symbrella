@@ -67,7 +67,13 @@ defmodule Core.TrainingArchive.RuntimeObservation do
     }
   end
 
-  defp map_get(map, key), do: Map.get(map, key, Map.get(map, String.to_existing_atom(key)))
+  defp map_get(map, key) do
+    Map.get(map, key) ||
+      Enum.find_value(map, fn
+        {atom, value} when is_atom(atom) -> if Atom.to_string(atom) == key, do: value
+        _ -> nil
+      end)
+  end
   defp map(%{} = value), do: value
   defp map(_), do: %{}
 
