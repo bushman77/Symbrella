@@ -228,4 +228,27 @@ defmodule Brain.Neural.TrainingBuilderTest do
     assert {:error, {:invalid_jsonl_record, "feedback.jsonl", 1}} =
              Builder.build(dir, :uncertainty)
   end
+  test "does not build labels when a hippocampal trace was truncated", %{dir: dir} do
+    write(dir, "turns.jsonl", [turn("session-1", "a"), turn("session-2", "b")])
+    write(dir, "feedback.jsonl", [
+      feedback("session-1", "a", %{kind: "uncertainty", value: 0.2}),
+      feedback("session-2", "b", %{kind: "uncertainty", value: 0.8})
+    ])
+
+    write(dir, "memory_events.jsonl", [
+      %{
+        record_type: "memory_event",
+        schema_version: 1,
+        kind: "trace_truncated",
+        session_id: "session-1",
+        turn_id: "a",
+        limit: 512
+      }
+    ])
+
+    assert {:error, :truncated_hippocampal_trace} =
+             Builder.build(dir, :uncertainty)
+  end
+
+
 end
