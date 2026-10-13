@@ -83,7 +83,9 @@ defmodule Brain.Hippocampus.TurnTrace do
         operation: operation,
         source: source,
         cues: cue_projection(cues),
+        cue_count: length(Brain.Hippocampus.Normalize.extract_norms_from_any(cues)),
         limit: option(options, :limit),
+        min_jaccard: option(options, :min_jaccard),
         result_count: length(results),
         hit?: results != []
       })
