@@ -24,9 +24,11 @@ defmodule Brain.Hippocampus.TurnTraceTest do
     assert [
              %{kind: :episodic_encode, episode: %{meta: %{origin: :test}}},
              %{kind: :recall_attempt, hit?: false, result_count: 0},
-             %{kind: :recall_attempt, hit?: true, result_count: 1, recall_id: recall_id},
-             %{kind: :episodic_recall, recall_id: ^recall_id, rank: 1, episode: %{slate: _}}
+             %{kind: :recall_attempt, hit?: true, result_count: 1, recall_id: attempt_id},
+             %{kind: :episodic_recall, recall_id: episode_id, rank: 1, episode: %{slate: _}}
            ] = TurnTrace.finish()
+
+    assert attempt_id == episode_id
 
     refute TurnTrace.active?()
     assert TurnTrace.finish() == []
@@ -68,6 +70,7 @@ defmodule Brain.Hippocampus.TurnTraceTest do
 
     assert TurnTrace.finish() == []
   end
+
   test "marks overflow instead of silently treating a partial trace as complete" do
     TurnTrace.start()
 
@@ -79,6 +82,4 @@ defmodule Brain.Hippocampus.TurnTraceTest do
     assert length(events) == 513
     assert List.last(events) == %{kind: :trace_truncated, limit: 512}
   end
-
-
 end
