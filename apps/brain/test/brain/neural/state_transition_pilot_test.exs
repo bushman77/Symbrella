@@ -256,4 +256,32 @@ defmodule Brain.Neural.StateTransitionPilotTest do
   end
 
 
+  test "direct Axon evaluation uses the same observation mask as the persistence baseline", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4, 0.6]}, {"session-b", [0.7, 0.8, 0.9]}])
+
+    path = Path.join(dir, "turns.jsonl")
+    [a1, a2, a3, b1, b2, b3] =
+      path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    b2 = update_in(b2, ["cognition"], &Map.delete(&1, "self_model"))
+    File.write!(path, Enum.map_join([a1, a2, a3, b1, b2, b3], "", &(Jason.encode!(&1) <> "\n")))
+
+    assert {:ok, data} = StateTransitionBuilder.build(dir)
+    assert data.metadata.eval_examples == 2
+    assert data.metadata.missing_modulator_turns == 1
+
+    names = StateTransitionBuilder.feature_names()
+    index = Enum.find_index(names, &(&1 == :mood_da))
+    assert Enum.all?(Nx.to_list(data.eval.mask), &(Enum.at(&1, index) == 0.0))
+
+    assert {:ok, result} = StateTransitionPilot.train(data, epochs: 1)
+    assert result.valid_eval_cells == data.metadata.eval_valid_cells
+    baseline = Brain.Neural.StateTransitionMask.metrics(
+      names, data.eval.x, data.eval.x, data.eval.y, data.eval.mask
+    )
+    assert_in_delta result.persistence_eval_mse, baseline.persistence_mse, 0.0000001
+    assert result.eval_mse >= 0.0
+  end
+
+
 end
