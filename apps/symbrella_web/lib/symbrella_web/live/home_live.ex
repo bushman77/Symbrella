@@ -174,6 +174,7 @@ defmodule SymbrellaWeb.HomeLive do
       payload
       |> to_bot_reply()
       |> enforce_identity_reply()
+      |> Core.StateDump.capture(:chat_reply)
 
     reply_text = reply.text
     tone = Map.get(reply, :tone)
