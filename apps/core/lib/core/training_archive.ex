@@ -145,6 +145,10 @@ defmodule Core.TrainingArchive do
       assistant_text: Map.fetch!(attrs, :assistant_text),
       response_meta: json_safe(meta),
       cognition: cognition(si),
+      # These describe observation completeness, not inferred cognition.
+      pipeline_status: json_safe(Map.get(attrs, :pipeline_status)),
+      runtime_observation: json_safe(Map.get(attrs, :runtime_observation)),
+      hippocampal_trace: trace_summary(Map.get(attrs, :hippocampal_trace)),
       training: %{review_status: "unreviewed", label: nil}
     }
 
@@ -164,6 +168,48 @@ defmodule Core.TrainingArchive do
     events = traced ++ attached ++ fact_memory_events(meta, session_id, turn_id)
 
     {:ok, turn, events}
+  end
+
+  # Missing trace metadata is UNKNOWN, never interpreted as a negative query.
+  # The combined trace covers the two observed LiveView processes only.
+  defp trace_summary(%{} = input) do
+    worker = map_or_empty(fetch(input, :worker))
+    final = map_or_empty(fetch(input, :final))
+    worker_status = fetch(worker, :status)
+    final_status = fetch(final, :status)
+    complete? = worker_status in ["complete", :complete] and
+                final_status in ["complete", :complete]
+    attempts = if complete?, do: trace_count(worker, :recall_attempts) +
+                                  trace_count(final, :recall_attempts), else: nil
+    misses = if complete?, do: trace_count(worker, :recall_misses) +
+                                trace_count(final, :recall_misses), else: nil
+
+    %{
+      status: if(complete?, do: "complete", else: "incomplete"),
+      scope: "worker_and_final_liveview_process",
+      recall_status:
+        cond do
+          not complete? -> "unknown"
+          attempts == 0 -> "not_attempted"
+          true -> "attempted"
+        end,
+      recall_attempts: attempts,
+      recall_misses: misses,
+      worker: json_safe(worker),
+      final: json_safe(final)
+    }
+  end
+
+  defp trace_summary(_), do: %{
+    status: "unknown", scope: "unknown", recall_status: "unknown",
+    recall_attempts: nil, recall_misses: nil
+  }
+
+  defp trace_count(map, key) do
+    case fetch(map, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
   end
 
   defp cognition(si) do
