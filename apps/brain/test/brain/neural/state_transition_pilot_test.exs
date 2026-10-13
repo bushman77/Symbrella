@@ -27,7 +27,7 @@ defmodule Brain.Neural.StateTransitionPilotTest do
             cognition: %{
               confidence: conf,
               intent: "ask",
-              mood: %{da: conf, "5ht": 0.5, glu: 0.3, ne: 0.2},
+              mood: %{"da" => conf, "5ht" => 0.5, "glu" => 0.3, "ne" => 0.2},
               tokens: [%{phrase: "hello"}, %{phrase: "world"}],
               lifg_choices: [%{id: "hello|noun|1"}],
               self_monitor: %{vigilance: 0.1}
