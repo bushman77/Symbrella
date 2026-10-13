@@ -55,6 +55,7 @@ defmodule Core.Comprehension.Summary do
     sentence = normalize_sentence(Map.get(si, :sentence) || Map.get(si, "sentence"))
     choices = resolved_choices(si)
     tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
+    lexical_meanings = verified_lexical_meanings(si)
 
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
@@ -63,15 +64,21 @@ defmodule Core.Comprehension.Summary do
       []
       |> maybe_add_keyword(keyword, intent)
       |> Kernel.++(intent_anchors(intent, sentence))
+      |> Kernel.++(Enum.map(lexical_meanings, & &1.phrase))
       |> Kernel.++(strong)
       |> clean_terms()
       |> Enum.take(@summary_limit)
+
+    lexical_parts =
+      lexical_meanings
+      |> Enum.flat_map(fn %{phrase: phrase} -> String.split(phrase, " ", trim: true) end)
+      |> MapSet.new()
 
     uncertain =
       weak
       |> Kernel.++(unresolved)
       |> clean_terms()
-      |> Enum.reject(&(&1 in understood))
+      |> Enum.reject(&(&1 in understood or MapSet.member?(lexical_parts, &1)))
       |> Enum.take(@summary_limit)
 
     stats = Map.put(stats, :unresolved_content, length(unresolved))
@@ -84,6 +91,7 @@ defmodule Core.Comprehension.Summary do
       confidence: confidence,
       keyword: blank_to_nil(keyword),
       understood: understood,
+      lexical_meanings: lexical_meanings,
       uncertain: uncertain,
       unresolved: unresolved,
       degraded?: degraded?,
@@ -93,6 +101,28 @@ defmodule Core.Comprehension.Summary do
   end
 
   def build(_si, _opts), do: empty_summary()
+
+  # A phrase is an understood *lexical meaning* only when a real dictionary
+  # sense has been verified and there was discriminating contextual evidence.
+  # This never upgrades raw LIFG unigram score estimates or invents a sense.
+  defp verified_lexical_meanings(si) do
+    si
+    |> Map.get(:lexical_constructions, [])
+    |> List.wrap()
+    |> Enum.filter(fn
+      %{dictionary_verified?: true, id: id, phrase: phrase, definition: definition,
+        context_score: score}
+      when is_binary(id) and is_binary(phrase) and is_binary(definition) and
+             is_number(score) and score >= 0.12 ->
+        true
+
+      _ ->
+        false
+    end)
+    |> Enum.map(&Map.take(&1, [:id, :phrase, :definition, :context_score, :source,
+                               :object_index, :constituent_indices]))
+    |> Enum.take(4)
+  end
 
   # A lexical phrase winner replaces covered words only in this derived view.
   defp resolved_choices(si) do
@@ -357,6 +387,7 @@ defmodule Core.Comprehension.Summary do
       confidence: 0.0,
       keyword: nil,
       understood: [],
+      lexical_meanings: [],
       uncertain: [],
       degraded?: true,
       reasons: [:invalid_input],

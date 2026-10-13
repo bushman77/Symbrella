@@ -18,6 +18,57 @@ defmodule Brain.LIFG.ContextFitWindowTest do
     assert result.matches.example == []
   end
 
+  test "plural object agrees with singular dictionary definition without changing senses" do
+    deactivate = %{
+      definition: "To deactivate an appliance, light, mechanism, or functionality.",
+      example: "Turn off the machine and unplug it."
+    }
+
+    assert ContextFit.score("Turn the lights off.", "turn off", deactivate) > 0.0
+    assert ContextFit.score("Turn off the lights.", "turn off", deactivate) > 0.0
+
+    gloss = ContextFit.explain("Turn the lights off.", "turn off", deactivate)
+    assert "light" in gloss.matches.definition
+  end
+
+  test "a different object does not produce artificial light evidence" do
+    deactivate = %{definition: "To deactivate a light or lamp."}
+
+    assert ContextFit.score("Turn off the employees.", "turn off", deactivate) == 0.0
+  end
+
+  test "related morphology is opt-in for electrical/electronic lexical evidence" do
+    lexical_sense = %{definition: "To switch off something electrical."}
+
+    base =
+      ContextFit.score(
+        "Power the computer down.",
+        "power down",
+        lexical_sense,
+        extra_context: ["An electronic machine."]
+      )
+
+    related =
+      ContextFit.score(
+        "Power the computer down.",
+        "power down",
+        lexical_sense,
+        extra_context: ["An electronic machine."],
+        related_morphology?: true
+      )
+
+    assert base == 0.0
+    assert related > 0.0
+    assert "electrical" in
+             ContextFit.explain(
+               "Power the computer down.",
+               "power down",
+               lexical_sense,
+               extra_context: ["An electronic machine."],
+               related_morphology?: true
+             ).matches.definition
+  end
+
   test "nearby semantic evidence is preserved" do
     sentence = "I sat on the bank beside the river."
 

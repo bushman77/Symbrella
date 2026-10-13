@@ -133,7 +133,11 @@ defmodule Core.Response do
           })
 
         {decision, skill} = decide_and_pick_skill(features, guard, text_in)
-        features = put_chosen_skill(features, skill)
+        features =
+          features
+          |> put_chosen_skill(skill)
+          |> Map.put(:selected_action, Map.get(si, :selected_action))
+          |> Map.put(:action_meta, Map.get(si, :action_meta))
 
         name_claim? = name_claim?(extracted_name, text_in)
         maybe_persist_user_name(name_claim?, extracted_name, text_in)
@@ -143,13 +147,13 @@ defmodule Core.Response do
         inline_text = OverrideSkills.deterministic_inline_text(skill)
         llm_prompt_type = OverrideSkills.llm_prompt_override(skill)
 
-        {text0, response_source, response_fallback_reason} =
+        {text0, response_source, response_fallback_reason, response_reflection} =
           cond do
             is_binary(forced_identity) ->
-              {forced_identity, :forced_identity, nil}
+              {forced_identity, :forced_identity, nil, nil}
 
             is_binary(inline_text) ->
-              {inline_text, :inline_skill, nil}
+              {inline_text, :inline_skill, nil, nil}
 
             is_atom(llm_prompt_type) ->
               llm_or_model_unavailable(text_in, features, decision, mood, intent, llm_prompt_type)
@@ -205,6 +209,7 @@ defmodule Core.Response do
             curiosity_probe: curiosity_probe,
             response_source: response_source,
             response_fallback_reason: response_fallback_reason,
+            response_reflection: response_reflection,
             agency_decision: Map.get(features, :agency_decision),
             agency_commands: Map.get(features, :agency_commands),
             agency_command_results: Map.get(features, :agency_command_results),
@@ -376,13 +381,16 @@ defmodule Core.Response do
 
   defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type \\ nil) do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
+      {:ok, llm_text, reflection} ->
+        {llm_text, :llm, nil, reflection}
+
       {:ok, llm_text} ->
-        {llm_text, :llm, nil}
+        {llm_text, :llm, nil, nil}
 
       {:error, reason} ->
         normalized_reason = normalize_generation_reason(reason)
 
-        {model_unavailable_text(normalized_reason), :model_unavailable, normalized_reason}
+        {model_unavailable_text(normalized_reason), :model_unavailable, normalized_reason, nil}
     end
   end
 

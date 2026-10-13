@@ -63,6 +63,159 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     assert html =~ "0.91"
   end
 
+  test "cached Explain preserves verified phrasal meaning and actual degraded state", %{conn: conn} do
+    alias SymbrellaWeb.HomeLive.ExplainEvidence
+    alias SymbrellaWeb.HomeLive.HTML.Modal
+
+    input = %{
+      intent: :command,
+      confidence: 0.82,
+      selected_action: :answer_user,
+      lifg_choices: [
+        %{id: "power|verb|1", token_index: 0, score: 0.04},
+        %{id: "computer|noun|3", token_index: 2, score: 0.20}
+      ],
+      semantic_choices: [
+        %{id: "power|verb|1", token_index: 0, score: 0.04},
+        %{id: "computer|noun|3", token_index: 2, score: 0.20}
+      ],
+      lexical_constructions: [
+        %{id: "power down|verb|1", phrase: "power down",
+          definition: "To switch off (something electrical).",
+          source: :verified_discontinuous_mwe,
+          dictionary_verified?: true,
+          context_score: 0.145,
+          constituent_indices: [0, 3], object_index: 2}
+      ],
+      comprehension: %{
+        understood: ["computer", "power down"],
+        uncertain: [], degraded?: true, reasons: [:weak_decision_rate_high]
+      }
+    }
+
+    payload =
+      Modal.explain_payload_for(%{
+        text: "The computer is already powered down.",
+        intent: :command,
+        confidence: 0.82,
+        cognition: ExplainEvidence.from_si(input)
+      })
+
+    ChatHistory.append(%{
+      id: "b-cognition-parity",
+      role: :assistant,
+      text: "The computer is already powered down.",
+      explain_text: "The computer is already powered down.",
+      explain_payload: payload
+    })
+
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("button[phx-value-id='b-cognition-parity']", "Explain")
+    |> render_click()
+
+    html = render(view)
+    assert html =~ "Verified phrase meanings"
+    assert html =~ "power down|verb|1"
+    assert html =~ "computer|noun|3"
+    assert html =~ "Canonical semantic winners"
+    assert html =~ "weak_decision_rate_high"
+    assert html =~ "The computer is already powered down."
+  end
+
+  test "remount upgrades an old cached Explain payload from its saved SI", %{conn: conn} do
+    ChatHistory.append(%{
+      id: "b-legacy-semantics",
+      role: :assistant,
+      text: "The computer is already powered down.",
+      explain_text: "The computer is already powered down.",
+      si: %{
+        intent: :command,
+        confidence: 0.82,
+        semantic_choices: [%{id: "computer|noun|3", token_index: 2}],
+        lifg_choices: [%{id: "computer|noun|3", token_index: 2}],
+        lexical_constructions: [
+          %{id: "power down|verb|1", phrase: "power down",
+            definition: "To switch off something electrical.",
+            dictionary_verified?: true, source: :verified_discontinuous_mwe,
+            context_score: 0.145, object_index: 2, constituent_indices: [0, 3]}
+        ],
+        comprehension: %{
+          understood: ["computer", "power down"],
+          uncertain: [], degraded?: true, reasons: [:weak_decision_rate_high]
+        }
+      },
+      explain_payload: %{
+        title: "Explain",
+        sections: [
+          %{key: :intent_tone, title: "Intent & tone",
+            items: [%{label: "tone", body: ":warm"}]},
+          %{key: :message, title: "Message",
+            items: [%{label: "content", body: "The computer is already powered down."}]}
+        ]
+      }
+    })
+
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view
+    |> element("button[phx-value-id='b-legacy-semantics']", "Explain")
+    |> render_click()
+
+    html = render(view)
+    assert html =~ "Verified phrase meanings"
+    assert html =~ "power down|verb|1"
+    assert html =~ "computer|noun|3"
+    assert html =~ "weak_decision_rate_high"
+    assert html =~ "Intent &amp; tone"
+  end
+
+  test "Explain shows actual post-draft LLM repair without confusing it with Core's action" do
+    payload =
+      SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
+        text: "I understand that you're asking me to power down the device.",
+        intent: :command,
+        selected_action: :answer_user,
+        action_meta: %{safety_gate: :approved},
+        from: %{
+          response_source: :llm,
+          response_reflection: %{
+            status: :repair,
+            issues: [:unsupported_device_refusal],
+            applied?: true,
+            repair_count: 1,
+            critique: "Draft required bounded repair.",
+            draft_sha256: "hash-before",
+            final_sha256: "hash-after"
+          }
+        }
+      })
+
+    review = Enum.find(payload.sections, &(&1.key == :response_reflection))
+    assert review.title == "LLM response review"
+    assert review.tag == ":repair"
+    assert Enum.any?(review.items,
+             &(&1.label == "issues" and &1.body =~ "unsupported_device_refusal"))
+    assert Enum.any?(review.items,
+             &(&1.label == "applied?" and &1.body in ["true", ":true"]))
+    assert Enum.any?(review.items,
+             &(&1.label == "repair_count" and &1.body == "1"))
+    assert Enum.any?(review.items,
+             &(&1.label == "draft SHA-256" and &1.body == "hash-before"))
+
+    action = Enum.find(payload.sections, &(&1.key == :action_selection))
+    assert action.tag == ":answer_user"
+
+    untouched =
+      SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{
+        text: "Your name is Mary.",
+        from: %{response_source: :memory}
+      })
+
+    refute Enum.any?(untouched.sections, &(&1.key == :response_reflection))
+  end
+
   test "explain payload includes action selection agency surface" do
     payload =
       SymbrellaWeb.HomeLive.HTML.Modal.explain_payload_for(%{

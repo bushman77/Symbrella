@@ -12,6 +12,7 @@ defmodule Core.MWE.Lexicon do
   """
 
   import Ecto.Query, only: [from: 2]
+  alias Core.MWE.Boundaries
   require Logger
 
   @min_n 2
@@ -32,25 +33,12 @@ defmodule Core.MWE.Lexicon do
         Logger.warning("[core/mwe] capped lexical MWE lookup at #{@max_terms} expressions")
       end
 
-      rows =
-        case Keyword.get(opts, :mwe_lookup) do
-          fun when is_function(fun, 1) -> fun.(terms)
-          _ -> db_lookup(terms)
-        end
-
-      by_norm =
-        rows
-        |> List.wrap()
-        |> Enum.filter(&is_map/1)
-        |> Enum.group_by(fn row -> norm(field(row, :norm) || field(row, :word)) end)
+      by_norm = lookup_senses(terms, opts)
 
       units =
         windows
         |> Enum.flat_map(fn window ->
-          senses =
-            Map.get(by_norm, window.phrase, [])
-            |> Enum.map(&sense/1)
-            |> Enum.filter(&(is_binary(&1.id) and is_binary(&1.pos)))
+          senses = Map.get(by_norm, window.phrase, [])
 
           if senses == [] do
             []
@@ -88,6 +76,42 @@ defmodule Core.MWE.Lexicon do
 
   def attach(other, _opts), do: other
 
+  @doc """
+  Read exact, verified dictionary senses for normalized phrase terms, without
+  changing the raw tokens or adding an invented sense. An injected
+  :mwe_lookup function keeps the resolver deterministic in unit tests.
+  """
+  @spec lookup_senses([String.t()], keyword()) :: %{optional(String.t()) => [map()]}
+  def lookup_senses(phrases, opts \\ []) when is_list(phrases) and is_list(opts) do
+    terms =
+      phrases
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&norm/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+      |> Enum.take(@max_terms)
+
+    rows =
+      case Keyword.get(opts, :mwe_lookup) do
+        fun when is_function(fun, 1) -> fun.(terms)
+        _ -> db_lookup(terms)
+      end
+
+    rows
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.group_by(fn row -> norm(field(row, :norm) || field(row, :word)) end)
+    |> Map.new(fn {phrase, grouped} ->
+      senses =
+        grouped
+        |> Enum.map(&sense/1)
+        |> Enum.filter(&(is_binary(&1.id) and is_binary(&1.pos)))
+        |> Enum.uniq_by(& &1.id)
+
+      {phrase, senses}
+    end)
+  end
+
   defp windows(tokens, maximum) do
     max_n = if is_integer(maximum), do: min(maximum, @max_n), else: @max_n
 
@@ -96,7 +120,11 @@ defmodule Core.MWE.Lexicon do
       |> Enum.filter(&(field(&1, :n) in [nil, 1]))
       |> Enum.with_index()
       |> Enum.map(fn {tok, index} ->
-        %{index: field(tok, :index) || index, word: norm(field(tok, :phrase))}
+        %{
+          index: field(tok, :index) || index,
+          phrase: field(tok, :phrase),
+          word: norm(field(tok, :phrase))
+        }
       end)
 
     count = length(words)
@@ -107,7 +135,8 @@ defmodule Core.MWE.Lexicon do
       for start <- 0..(count - @min_n),
           n <- @min_n..min(max_n, count - start),
           segment = Enum.slice(words, start, n),
-          Enum.all?(segment, &(&1.word != "")) do
+          Enum.all?(segment, &(&1.word != "")),
+          Boundaries.valid_window?(segment) do
         %{
           phrase: Enum.map_join(segment, " ", & &1.word),
           span: {hd(segment).index, List.last(segment).index},
@@ -128,6 +157,10 @@ defmodule Core.MWE.Lexicon do
           norm: c.norm,
           pos: c.pos,
           definition: c.definition,
+          example: c.example,
+          synonyms: c.synonyms,
+          semantic_atoms: c.semantic_atoms,
+          status: c.status,
           gram_function: c.gram_function,
           activation: c.activation
         }
@@ -145,6 +178,10 @@ defmodule Core.MWE.Lexicon do
       norm: norm(field(row, :norm) || field(row, :word)),
       pos: field(row, :pos),
       definition: field(row, :definition),
+      example: field(row, :example),
+      synonyms: field(row, :synonyms) || [],
+      semantic_atoms: field(row, :semantic_atoms) || [],
+      status: field(row, :status),
       gram_function: field(row, :gram_function) || [],
       activation: field(row, :activation)
     }

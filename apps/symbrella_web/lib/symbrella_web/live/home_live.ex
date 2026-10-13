@@ -6,6 +6,7 @@ defmodule SymbrellaWeb.HomeLive do
   alias SymbrellaWeb.ChatHistory
   alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.HomeLive.MoodBadge
+  alias SymbrellaWeb.HomeLive.ExplainEvidence
   alias Core.Response
   alias Core.Curiosity.EpisodeProbe
   alias Core.LexicalExplain
@@ -30,11 +31,16 @@ defmodule SymbrellaWeb.HomeLive do
     initial_explain_by_id =
       Map.new(initial, fn msg ->
         payload =
-          Map.get(msg, :explain_payload) ||
-            ChatHTML.explain_payload_for(%{
-              id: msg.id,
-              text: Map.get(msg, :explain_text, msg.text)
-            })
+          case Map.get(msg, :explain_payload) do
+            %{} = saved ->
+              ChatHTML.enrich_saved_payload(saved, Map.get(msg, :si))
+
+            _ ->
+              ChatHTML.explain_payload_for(%{
+                id: msg.id,
+                text: Map.get(msg, :explain_text, msg.text)
+              })
+          end
 
         {msg.id, payload}
       end)
@@ -194,6 +200,10 @@ defmodule SymbrellaWeb.HomeLive do
 
     explain_text = Map.get(reply, :explain_text, reply_text)
     senses_selected = Map.get(reply, :senses_selected, [])
+    # This is the same SemanticInput the console/API diagnostics report.
+    # Pass a compact read-only projection; never reconstruct meaning from
+    # the assistant's conversational text or from isolated word choices.
+    cognition = ExplainEvidence.from_si(si)
 
     intent = map_get(meta, :intent_inferred) || Map.get(si, :intent)
     confidence = map_get(meta, :confidence) || Map.get(si, :confidence)
@@ -209,6 +219,7 @@ defmodule SymbrellaWeb.HomeLive do
         confidence: confidence,
         from: meta || %{},
         senses_selected: senses_selected,
+        cognition: cognition,
         symbolic_frame: symbolic_frame,
         selected_action: selected_action,
         action_candidates: action_candidates,
@@ -555,9 +566,16 @@ defmodule SymbrellaWeb.HomeLive do
   # ─────────────────────────────────────────────────────────────────────────────
 
   defp build_senses_selected(%{} = si, reply_text) do
-    case phrase_reference_sense(si, reply_text) do
-      nil -> build_token_senses_selected(si)
-      phrase_item -> [phrase_item]
+    # Real LIFG selections win over any heuristic derived from response prose.
+    # Do not replace the exact dictionary evidence with an invented phrase ID
+    # just because an LLM sentence mentions a film, book, or reference.
+    case build_token_senses_selected(si) do
+      [_ | _] = senses -> senses
+      [] ->
+        case phrase_reference_sense(si, reply_text) do
+          nil -> []
+          hint -> [hint]
+        end
     end
   end
 

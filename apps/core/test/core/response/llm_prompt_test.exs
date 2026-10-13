@@ -172,6 +172,44 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "degraded=true"
   end
 
+  test "verified command with weak isolated token scores gets grounded control limits, not generic refusal" do
+    verified = %{
+      degraded?: true,
+      understood: ["computer", "power down"],
+      uncertain: [],
+      unresolved: [],
+      lexical_meanings: [
+        %{phrase: "power down", id: "power down|verb|1",
+          source: :verified_discontinuous_mwe,
+          context_score: 0.145,
+          definition: "(ambitransitive) To switch off (something electrical)."}
+      ]
+    }
+
+    features = %{
+      intent: :command, risk_bucket: :low, guardrail?: false,
+      text: "Power the computer down.", comprehension: verified
+    }
+
+    prompt =
+      LlmPrompt.build_system_prompt(features, %{tone: :warm, mode: :collaborator}, %{}, [])
+
+    assert prompt =~ "A dictionary-backed device command was understood"
+    assert prompt =~ "Weak isolated-token scores do not negate the verified phrase meaning"
+    assert prompt =~ "without inventing a device state"
+    assert prompt =~ "comprehension is degraded"
+
+    guarded = LlmPrompt.build_system_prompt(%{features | guardrail?: true},
+      %{tone: :neutral, mode: :collaborator}, %{}, [])
+    refute guarded =~ "A dictionary-backed device command was understood"
+
+    uncertain = LlmPrompt.build_system_prompt(
+      %{features | comprehension: %{verified | uncertain: ["computer"]}},
+      %{tone: :warm, mode: :collaborator}, %{}, []
+    )
+    refute uncertain =~ "A dictionary-backed device command was understood"
+  end
+
   test "build_system_prompt/1 includes compact symbolic frame when present" do
     prompt =
       LlmPrompt.build_system_prompt(%{

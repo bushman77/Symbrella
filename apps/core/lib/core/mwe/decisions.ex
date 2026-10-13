@@ -8,6 +8,8 @@ defmodule Core.MWE.Decisions do
   The derived :semantic_choices anchor each phrase at its first word index.
   """
 
+  alias Core.MWE.GrammarPrecedence
+
   @spec attach(map()) :: map()
   def attach(%{lifg_choices: words, tokens: tokens} = si)
       when is_list(words) and is_list(tokens) do
@@ -15,7 +17,7 @@ defmodule Core.MWE.Decisions do
       si
       |> Map.get(:mwe_choices, [])
       |> List.wrap()
-      |> Enum.filter(&valid_phrase_choice?(&1, tokens))
+      |> Enum.filter(&valid_phrase_choice?(&1, tokens, si))
       |> Enum.sort_by(fn choice ->
         {first, last} = choice.token_span
         {-(last - first + 1), first, choice.id}
@@ -59,7 +61,7 @@ defmodule Core.MWE.Decisions do
          phrase: phrase,
          token_span: {first, last},
          source: source
-       }, tokens)
+       } = choice, tokens, si)
        when is_binary(id) and is_binary(phrase) and is_integer(first) and
               is_integer(last) and is_list(tokens) do
     surface =
@@ -72,10 +74,13 @@ defmodule Core.MWE.Decisions do
       source in [:mwe_lexicon, "mwe_lexicon"] and
       not String.ends_with?(id, "|fallback") and
       normalize(surface) == normalize(phrase) and
-      id_lemma_matches?(id, phrase)
+      id_lemma_matches?(id, phrase) and
+      not GrammarPrecedence.incompatible_verb_mwe?(
+        si, {first, last}, Map.get(choice, :pos)
+      )
   end
 
-  defp valid_phrase_choice?(_, _), do: false
+  defp valid_phrase_choice?(_, _, _), do: false
 
   defp id_lemma_matches?(id, phrase) do
     case String.split(id, "|", parts: 2) do

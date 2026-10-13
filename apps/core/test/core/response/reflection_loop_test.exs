@@ -194,6 +194,89 @@ defmodule Core.Response.ReflectionLoopTest do
     assert :topic_dead_end in reflection.issues
   end
 
+  defp approved_power_command_context do
+    %{
+      features: %{
+        intent: :command,
+        conf: 0.82,
+        guardrail?: false,
+        risk_bucket: :low,
+        selected_action: :answer_user,
+        action_meta: %{safety_gate: :approved},
+        comprehension: %{
+          degraded?: true,
+          reasons: [:weak_decision_rate_high],
+          understood: ["computer", "power down"],
+          uncertain: [],
+          unresolved: [],
+          lexical_meanings: [
+            %{
+              id: "power down|verb|1",
+              phrase: "power down",
+              source: :verified_discontinuous_mwe,
+              definition: "(ambitransitive) To switch off (something electrical).",
+              context_score: 0.145
+            }
+          ]
+        }
+      },
+      decision: %{guardrail?: false, response_profile: :warm_collaborator}
+    }
+  end
+
+  test "repairs generic refusal to an approved verified device command, without inventing a device state" do
+    context = approved_power_command_context()
+
+    {:ok, reply, reflection} =
+      ReflectionLoop.review(
+        "Power the computer down.",
+        "I'm sorry, but I can't assist with that.",
+        context
+      )
+
+    assert reflection.status == :repair
+    assert :unsupported_device_refusal in reflection.issues
+    assert reflection.applied?
+    assert reflection.repair_count == 1
+    assert reply =~ "power down the device"
+    assert reply =~ "don't have a confirmed device-control connection"
+    refute reply =~ "already powered down"
+    refute reply =~ "I powered"
+  end
+
+  test "device-command refusal repair cannot bypass guardrails, uncertainty or unsupported lexical meaning" do
+    good = approved_power_command_context()
+    refusal = "I'm sorry, but I can't assist with that."
+
+    blocked_contexts = [
+      put_in(good, [:features, :risk_bucket], :high),
+      put_in(good, [:features, :guardrail?], true),
+      put_in(good, [:features, :selected_action], :safe_redirect),
+      put_in(good, [:features, :action_meta, :safety_gate], :denied),
+      put_in(good, [:features, :comprehension, :uncertain], ["computer"]),
+      put_in(good, [:features, :comprehension, :lexical_meanings], []),
+      put_in(good, [:features, :comprehension, :lexical_meanings, Access.at(0), :context_score], 0.0)
+    ]
+
+    Enum.each(blocked_contexts, fn ctx ->
+      {:ok, final, reflection} =
+        ReflectionLoop.review("Power the computer down.", refusal, ctx)
+
+      assert final == refusal
+      refute :unsupported_device_refusal in reflection.issues
+    end)
+
+    {:ok, explained_refusal, review} =
+      ReflectionLoop.review(
+        "Power the computer down.",
+        "I can't assist with that because this would harm another person.",
+        good
+      )
+
+    assert explained_refusal =~ "because this would harm"
+    refute :unsupported_device_refusal in review.issues
+  end
+
   test "rejects unsafe drafts" do
     {:ok, final, reflection} =
       ReflectionLoop.review(

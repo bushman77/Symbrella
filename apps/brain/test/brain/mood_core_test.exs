@@ -84,8 +84,15 @@ defmodule Brain.MoodCoreTest do
 
     assert returned.levels.da > before.levels.da
     assert returned.levels.ne > before.levels.ne
-    assert after_.levels.da == returned.levels.da
-    assert after_.levels.ne == returned.levels.ne
+
+    # apply_intent/2 is synchronous, but the supervised MoodCore still accepts
+    # scheduled decay ticks between its reply and the next snapshot. Verify
+    # that the applied bump is already visible without requiring the mood to
+    # remain bit-for-bit frozen while its clock is running.
+    assert_in_delta after_.levels.da, returned.levels.da, 0.01
+    assert_in_delta after_.levels.ne, returned.levels.ne, 0.01
+    assert after_.levels.da > before.levels.da
+    assert after_.levels.ne > before.levels.ne
   end
 
   test "health support intent raises vigilance without saturating it" do

@@ -81,6 +81,11 @@ defmodule Symbrella.Application do
       # HTTP client infrastructure.
       {Finch, name: Lexicon.Finch},
 
+      # The ETS chat-history owner must be supervised. Lazily starting it via
+      # start_link/1 from a request/test process links its lifetime to that
+      # caller and can terminate concurrent history reads.
+      Core.Response.LlmChatHistoryOwner,
+
       # Local LLM ownership and boot control.
       {Llm, []},
       {Llm.BootGate, []},

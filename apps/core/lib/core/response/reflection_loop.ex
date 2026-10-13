@@ -84,6 +84,7 @@ defmodule Core.Response.ReflectionLoop do
   defp collect_issues(context, user_text, draft_text) do
     []
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
+    |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
@@ -106,6 +107,9 @@ defmodule Core.Response.ReflectionLoop do
     cond do
       :unsafe in issues ->
         {:reject, issues}
+
+      :unsupported_device_refusal in issues ->
+        {:repair, issues}
 
       :subject_reversal in issues ->
         {:repair, issues}
@@ -153,6 +157,9 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
+        :unsupported_device_refusal in issues ->
+          acknowledge_device_command(context)
+
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
@@ -173,12 +180,83 @@ defmodule Core.Response.ReflectionLoop do
           final_text
       end
 
-    {final_text, "Repair unsupported self-claims or hidden-control wording before publishing.", 1}
+    instruction =
+      if :unsupported_device_refusal in issues do
+        "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
+      else
+        "Repair unsupported self-claims or hidden-control wording before publishing."
+      end
+
+    {final_text, instruction, 1}
   end
 
   defp apply_decision(:reject, _user_text, _draft_text, _issues, _context) do
     {"I need to stop and ask for a clearer, safer target before answering.",
      "Reject unsafe draft.", 1}
+  end
+
+  # A generic "can't assist" is not itself evidence of a safety issue.
+  # Repair it only if independent Core cognition has verified a mundane
+  # deactivation phrase AND approved a low-risk textual response. Do not override
+  # denials of specific dangerous actions, nuanced refusals, uncertain meanings,
+  # denied action selections, or guardrail decisions.
+  defp unfounded_device_refusal?(context, draft_text) do
+    generic_refusal?(draft_text) and low_risk_approved_command?(context) and
+      is_map(verified_device_meaning(context))
+  end
+
+  defp generic_refusal?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\A\s*(?:(?:i'm|i am)\s+sorry,?\s+but\s+)?i\s+(?:can't|cannot|can\s+not|am\s+unable\s+to)\s+(?:assist|help)(?:\s+you)?\s+with\s+(?:that|this)(?:\s+request)?[.!]?\s*\z/iu,
+      text
+    )
+  end
+
+  defp generic_refusal?(_), do: false
+
+  defp low_risk_approved_command?(context) do
+    intent = get_in_map(context, [:features, :intent])
+    confidence =
+      get_in_map(context, [:features, :conf]) ||
+        get_in_map(context, [:features, :confidence])
+    guarded? = get_in_map(context, [:features, :guardrail?])
+    decision_guarded? = get_in_map(context, [:decision, :guardrail?])
+    risk = get_in_map(context, [:features, :risk_bucket])
+    action = get_in_map(context, [:features, :selected_action])
+    gate = get_in_map(context, [:features, :action_meta, :safety_gate])
+
+    intent == :command and number(confidence) >= 0.7 and
+      guarded? == false and decision_guarded? != true and
+      risk == :low and action == :answer_user and gate == :approved and
+      get_in_map(context, [:features, :comprehension, :uncertain]) == [] and
+      get_in_map(context, [:features, :comprehension, :unresolved]) == []
+  end
+
+  defp verified_device_meaning(context) do
+    context
+    |> get_in_map([:features, :comprehension, :lexical_meanings])
+    |> List.wrap()
+    |> Enum.find(fn meaning ->
+      source = map_get(meaning, :source)
+      phrase = map_get(meaning, :phrase)
+      definition = map_get(meaning, :definition)
+      score = map_get(meaning, :context_score)
+
+      source in [:mwe_lexicon, :verified_discontinuous_mwe] and
+        is_binary(phrase) and phrase != "" and
+        is_binary(definition) and
+        number(score) >= 0.12 and
+        Regex.match?(~r/\b(?:switch\s+off|turn\s+off|power\s+down|shut\s+off|deactivat(?:e|ion)|disable)\b/iu, definition) and
+        Regex.match?(~r/\b(?:device|appliance|electrical|electronic|light|mechanism|functionality)\b/iu, definition)
+    end)
+  end
+
+  defp acknowledge_device_command(context) do
+    phrase = context |> verified_device_meaning() |> map_get(:phrase)
+
+    "I understand that you're asking me to #{phrase} the device. " <>
+      "I don't have a confirmed device-control connection or a reading of its current state, " <>
+      "so I can't carry out or verify that action from this chat."
   end
 
   # Narrow semantic guard: never convert the user's need to leave

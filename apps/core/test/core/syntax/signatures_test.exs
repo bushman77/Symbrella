@@ -79,6 +79,238 @@ defmodule Core.Syntax.SignaturesTest do
     assert sig.roles == %{auxiliary: 0, verb: 1, infinitive_marker: 2, complement: 3}
   end
 
+  test "verb-particle grammar preserves role indices across both surface orders" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "off", pos: "particle"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "lights", pos: "noun"}
+    ]
+
+    adjacent =
+      Signatures.detect(input("turn off the lights", cells))
+      |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+    assert [%{span: {0, 1}, roles: %{verb: 0, particle: 1}}] = adjacent
+    assert :adjacent_particle in hd(adjacent).evidence
+
+    separated =
+      Signatures.detect(input("turn the lights off", cells))
+      |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+    assert [%{
+      span: {0, 3},
+      roles: %{verb: 0, determiner: 1, object: 2, particle: 3}
+    }] = separated
+    assert :separated_particle in hd(separated).evidence
+  end
+
+  test "real dictionary adverb/preposition particle senses support a separated verb" do
+    # Live smoke test showed no off|particle sense, only lexical adverb,
+    # preposition and noun alternatives. Syntax should preserve those IDs.
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "the", pos: "preposition"},
+      %{norm: "lights", pos: "verb"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "off", pos: "adverb"},
+      %{norm: "off", pos: "preposition"},
+      %{norm: "off", pos: "noun"},
+      %{norm: "off", pos: "adjective"}
+    ]
+
+    si = input("Turn the lights off.", cells)
+    signatures = Signatures.detect(si)
+
+    assert Enum.any?(signatures, fn
+             %{
+               id: :verb_particle_construction, span: {0, 3},
+               roles: %{verb: 0, determiner: 1, object: 2, particle: 3},
+               required_features: %{particle: particle_pos}
+             } -> :pos_adverb in particle_pos and :pos_preposition in particle_pos
+             _ -> false
+           end)
+
+    assert si.active_cells == cells
+  end
+
+  test "a general manner adverb never becomes a verb particle" do
+    cells = [
+      %{norm: "walk", pos: "verb"},
+      %{norm: "quickly", pos: "adverb"},
+      %{norm: "off", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("walk quickly", cells)
+    refute :verb_particle_construction in ids("walk off", cells)
+  end
+
+  test "bare noun and pronoun objects can separate verb and particle" do
+    cells = [
+      %{norm: "turn", pos: "verb"},
+      %{norm: "lights", pos: "noun"},
+      %{norm: "it", pos: "pronoun"},
+      %{norm: "off", pos: "particle"}
+    ]
+
+    for {text, object} <- [{"turn lights off", 1}, {"turn it off", 1}] do
+      matches =
+        Signatures.detect(input(text, cells))
+        |> Enum.filter(&(&1.id == :verb_particle_construction))
+
+      assert [%{roles: %{verb: 0, object: ^object, particle: 2}}] = matches
+    end
+  end
+
+  test "verb-object grammar is not mistaken for a verb-particle construction" do
+    cells = [
+      %{norm: "open", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "file", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("open the file", cells)
+    refute :verb_particle_construction in ids("open file", cells)
+  end
+
+  test "a period between verb and particle blocks grammatical phrase evidence" do
+    cells = [%{norm: "turn", pos: "verb"}, %{norm: "off", pos: "particle"}]
+
+    refute :verb_particle_construction in ids("turn. off", cells)
+    assert :verb_particle_construction in ids("turn off!", cells)
+  end
+
+  test "grammatical alternatives are retained without inventing senses" do
+    cells = [
+      %{norm: "turn", pos: "noun"},
+      %{norm: "turn", pos: "verb"},
+      %{norm: "off", pos: "particle"}
+    ]
+    si = input("turn off", cells)
+    out = Signatures.attach(si)
+
+    assert :verb_particle_construction in Enum.map(out.sentence_signatures, & &1.id)
+    assert out.active_cells == si.active_cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
+  test "noun phrases preserve determiner, modifier and head roles" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "quiet", pos: "adjective"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("the quiet garden", cells))
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {0, 2} and
+               sig.roles == %{determiner: 0, modifier: 1, head: 2} and
+               sig.required_features.head == [:pos_noun]
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 2} and
+               sig.roles == %{modifier: 1, head: 2}
+           end)
+  end
+
+  test "prepositional phrases compose around noun phrase structure" do
+    cells = [
+      %{norm: "in", pos: "preposition"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "quiet", pos: "adjective"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("in the quiet garden", cells))
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 3}
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :prepositional_phrase and sig.span == {0, 3} and
+               sig.roles == %{
+                 preposition: 0, determiner: 1, modifier: 2,
+                 head: 3, object: 3
+               }
+           end)
+  end
+
+  test "bare nouns and pronouns form prepositional complements" do
+    cells = [
+      %{norm: "near", pos: "preposition"},
+      %{norm: "home", pos: "noun"},
+      %{norm: "with", pos: "preposition"},
+      %{norm: "her", pos: "pronoun"}
+    ]
+
+    for {sentence, index} <- [{"near home", 1}, {"with her", 1}] do
+      assert Enum.any?(Signatures.detect(input(sentence, cells)), fn sig ->
+               sig.id == :prepositional_phrase and sig.span == {0, index} and
+                 sig.roles == %{preposition: 0, object: index}
+             end)
+    end
+  end
+
+  test "grammar cannot cross punctuation or token index gaps" do
+    cells = [
+      %{norm: "in", pos: "preposition"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "garden", pos: "noun"}
+    ]
+
+    signatures = Signatures.detect(input("in. the garden", cells))
+
+    refute Enum.any?(signatures, fn sig ->
+             sig.id == :prepositional_phrase
+           end)
+
+    assert Enum.any?(signatures, fn sig ->
+             sig.id == :noun_phrase and sig.span == {1, 2}
+           end)
+
+    refute :noun_phrase in ids("the. garden", cells)
+  end
+
+  test "an infinitive verb is not misclassified as a preposition noun complement" do
+    cells = [
+      %{norm: "to", pos: "preposition"},
+      %{norm: "leave", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "station", pos: "noun"}
+    ]
+
+    refute :prepositional_phrase in ids("to leave", cells)
+
+    assert Enum.any?(Signatures.detect(input("to the station", cells)), fn sig ->
+             sig.id == :prepositional_phrase and sig.span == {0, 2}
+           end)
+  end
+
+  test "competing POS interpretations survive constituent recognition" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "record", pos: "verb"},
+      %{norm: "record", pos: "noun"}
+    ]
+
+    si = input("the record", cells)
+    out = Signatures.attach(si)
+
+    assert Enum.any?(out.sentence_signatures, fn sig ->
+             sig.id == :noun_phrase and sig.roles == %{determiner: 0, head: 1}
+           end)
+
+    assert out.tokens == si.tokens
+    assert out.active_cells == si.active_cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
   test "attach preserves sense candidates and records standard trace" do
     si = input("I have got very cold.")
     si = %{si | sense_candidates: %{2 => [%{id: "got|verb|4", score: 0.7}]}}

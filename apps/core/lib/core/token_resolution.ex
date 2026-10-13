@@ -9,6 +9,7 @@ defmodule Core.TokenResolution do
   """
 
   alias Core.SemanticInput
+  alias Core.MWE.{Boundaries, GrammarPrecedence}
 
   @spec resolve(SemanticInput.t() | map(), keyword()) :: SemanticInput.t() | map()
   def resolve(si, opts \\ [])
@@ -83,6 +84,7 @@ defmodule Core.TokenResolution do
                idx >= start_index and idx <= end_index
              end),
            true <- length(segment) == end_index - start_index + 1,
+           true <- Boundaries.valid_window?(segment),
            true <- norm(Enum.map_join(segment, " ", &text(&1, :phrase))) == phrase do
         {first_start, _} = interval(hd(segment), sentence)
         {_, last_stop} = interval(List.last(segment), sentence)
@@ -122,26 +124,42 @@ defmodule Core.TokenResolution do
 
         kind = atom_get(best, :kind, :pos)
 
-        [
-          %{
-            kind: :phrase,
-            phrase: Enum.map_join(segment, " ", &text(&1, :phrase)),
-            span: {first_start, last_stop - first_start},
-            token_span: {start_index, end_index},
-            n: length(segment),
-            source: :token_resolution,
-            resolution: kind,
-            pos: internal_pos,
-            pos_patterns: internal_patterns,
-            lexical_pos: lexical_pos,
-            sense_ids: sense_ids,
-            confirmed?: kind in [:lex, :both],
-            start: first_start,
-            stop: last_stop,
-            score: phrase_score(kind, length(segment)) +
-                     if(lexical_pos == [], do: 0.0, else: 0.5)
-          }
-        ]
+        # Verified dictionary senses outrank competing structural patterns,
+        # regardless of length. Curated phrase rules alone do not qualify.
+        dictionary_backed? =
+          Enum.any?(matches, fn match ->
+            Map.get(match, :source) == :db_lexicon and
+              List.wrap(Map.get(match, :lexical_pos)) != [] and
+              List.wrap(Map.get(match, :sense_ids)) != []
+          end)
+
+        if GrammarPrecedence.incompatible_verb_mwe?(
+             si, {start_index, end_index}, lexical_pos
+           ) do
+          []
+        else
+          [
+            %{
+              kind: :phrase,
+              phrase: Enum.map_join(segment, " ", &text(&1, :phrase)),
+              span: {first_start, last_stop - first_start},
+              token_span: {start_index, end_index},
+              n: length(segment),
+              source: :token_resolution,
+              resolution: kind,
+              pos: internal_pos,
+              pos_patterns: internal_patterns,
+              lexical_pos: lexical_pos,
+              sense_ids: sense_ids,
+              dictionary_backed?: dictionary_backed?,
+              confirmed?: kind in [:lex, :both],
+              start: first_start,
+              stop: last_stop,
+              score: phrase_score(kind, length(segment)) +
+                       if(lexical_pos == [], do: 0.0, else: 0.5)
+            }
+          ]
+        end
       else
         _ -> []
       end
@@ -171,7 +189,12 @@ defmodule Core.TokenResolution do
   defp phrase_score(:pos, size), do: 2.5 + size
   defp phrase_score(_kind, size), do: 2.0 + size
 
-  defp sort_key(c), do: {-c.score, c.start, -(c.stop - c.start), c.phrase}
+  # Apply lexical provenance before the length-based score so a long,
+  # generic grammatical construction cannot displace a real dictionary MWE.
+  defp sort_key(c) do
+    provenance_rank = if Map.get(c, :dictionary_backed?, false), do: 0, else: 1
+    {provenance_rank, -c.score, c.start, -(c.stop - c.start), c.phrase}
+  end
 
   defp take_nonoverlapping(candidates) do
     candidates
@@ -202,8 +225,12 @@ defmodule Core.TokenResolution do
     case span do
       {start, len} when is_integer(start) and is_integer(len) ->
         cond do
-          slice_matches?(sentence, start, len, phrase) -> {start, start + len}
+          # Core word tokens may arrive with canonical end-exclusive spans.
+          # Check that interpretation first: a trailing "." can normalize
+          # to the same phrase even when treating the end as a length would
+          # produce an invalid overshooting character interval.
           len > start and slice_matches?(sentence, start, len - start, phrase) -> {start, len}
+          slice_matches?(sentence, start, len, phrase) -> {start, start + len}
           true -> {start, max(start + max(len, 1), start + 1)}
         end
 

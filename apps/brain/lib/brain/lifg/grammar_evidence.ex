@@ -103,7 +103,68 @@ defmodule Brain.LIFG.GrammarEvidence do
     if id_pos(id) == "particle", do: 0.65, else: 0.0
   end
 
+  # Structural compatibility is a small *positive* signal for existing
+  # lexical candidates. POS features come from Core.Syntax.Signatures; this
+  # pass never manufactures IDs, removes alternatives, or replaces Stage1's
+  # existing ClosedClass/PosBias/ContextFit scoring.
+  @constituent_ids [:verb_particle_construction, :noun_phrase, :prepositional_phrase]
+
+  defp support_for(
+         %{id: construction, roles: roles, required_features: features},
+         index,
+         id,
+         _cell
+       )
+       when construction in @constituent_ids and is_map(roles) and
+              is_map(features) and is_binary(id) do
+    candidate_pos = id_pos(id)
+
+    if String.ends_with?(id, "|fallback") do
+      0.0
+    else
+      roles
+      |> Enum.flat_map(fn {role, role_index} ->
+        required = Map.get(features, role, [])
+
+        if role_index == index and
+             Enum.any?(List.wrap(required), &matches_pos?(&1, candidate_pos)) do
+          [role_support(construction, role)]
+        else
+          []
+        end
+      end)
+      |> Enum.max(fn -> 0.0 end)
+    end
+  end
+
   defp support_for(_, _, _, _), do: 0.0
+
+  # Stronger than isolated noun/adjective windows at the same token; the
+  # separated construction requires a compatible verb and intervening object.
+  defp role_support(:verb_particle_construction, :particle), do: 0.28
+  defp role_support(:verb_particle_construction, :verb), do: 0.16
+  defp role_support(:verb_particle_construction, :object), do: 0.12
+  defp role_support(:verb_particle_construction, :determiner), do: 0.10
+  defp role_support(:noun_phrase, :head), do: 0.18
+  defp role_support(:noun_phrase, :determiner), do: 0.14
+  defp role_support(:noun_phrase, role) when role in [:modifier, :modifier_1, :modifier_2], do: 0.12
+  defp role_support(:prepositional_phrase, :preposition), do: 0.18
+  defp role_support(:prepositional_phrase, role) when role in [:object, :head], do: 0.14
+  defp role_support(:prepositional_phrase, :determiner), do: 0.10
+  defp role_support(:prepositional_phrase, role) when role in [:modifier, :modifier_1, :modifier_2], do: 0.10
+  defp role_support(_, _), do: 0.0
+
+  defp matches_pos?(:pos_noun_or_pronoun, pos),
+    do: pos in ["noun", "proper_noun", "pronoun"]
+
+  defp matches_pos?(:pos_noun, pos), do: pos in ["noun", "proper_noun"]
+  defp matches_pos?(:pos_verb, "verb"), do: true
+  defp matches_pos?(:pos_particle, "particle"), do: true
+  defp matches_pos?(:pos_adverb, "adverb"), do: true
+  defp matches_pos?(:pos_determiner, "determiner"), do: true
+  defp matches_pos?(:pos_preposition, "preposition"), do: true
+  defp matches_pos?(:pos_adjective, "adjective"), do: true
+  defp matches_pos?(_, _), do: false
 
   defp simple_past?(cell) do
     tags = tags(cell)

@@ -100,21 +100,32 @@ defmodule Brain.LIFG.ContextFit do
 
   def explain(sentence, target, candidate, opts)
       when is_map(candidate) and is_list(opts) do
-    context = context_terms(sentence, target)
+    context =
+      context_terms(sentence, target)
+      |> MapSet.union(additional_context_terms(Keyword.get(opts, :extra_context, [])))
+
     evidence = evidence_terms(candidate)
     weights = effective_weights(opts)
 
+    related_morphology? = Keyword.get(opts, :related_morphology?, false) == true
+
     matches = %{
-      definition: overlap(context, evidence.definition),
-      example: overlap(context, evidence.example),
-      synonyms: overlap(context, evidence.synonyms),
-      semantic_atoms: overlap(context, evidence.semantic_atoms),
-      gram_function: overlap(context, evidence.gram_function)
+      definition: overlap(context, evidence.definition, related_morphology?),
+      example: overlap(context, evidence.example, related_morphology?),
+      synonyms: overlap(context, evidence.synonyms, related_morphology?),
+      semantic_atoms: overlap(context, evidence.semantic_atoms, related_morphology?),
+      gram_function: overlap(context, evidence.gram_function, related_morphology?)
     }
 
     component_scores =
       Map.new(matches, fn {field, terms} ->
-        {field, overlap_strength(terms)}
+        # Related word-family matches contribute half the incremental evidence
+        # of an exact token match, rather than masquerading as exact identity.
+        exact_terms = overlap(context, Map.fetch!(evidence, field))
+        exact_strength = overlap_strength(exact_terms)
+        total_strength = overlap_strength(terms)
+
+        {field, exact_strength + 0.5 * max(total_strength - exact_strength, 0.0)}
       end)
 
     contributions =
@@ -191,6 +202,20 @@ defmodule Brain.LIFG.ContextFit do
     local_words
     |> reject_stopwords()
     |> Enum.reject(&MapSet.member?(excluded, &1))
+    |> MapSet.new()
+  end
+
+  # A selected noun object's dictionary gloss may provide type evidence
+  # (e.g. "fan" -> "device") absent from the literal sentence. This is
+  # opt-in, bounded, and never expands from unselected candidate senses.
+  defp additional_context_terms(values) do
+    values
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.take(2)
+    |> Enum.flat_map(&raw_tokens/1)
+    |> reject_stopwords()
+    |> Enum.take(28)
     |> MapSet.new()
   end
 
@@ -300,12 +325,30 @@ defmodule Brain.LIFG.ContextFit do
   # Matching
   # ---------------------------------------------------------------------------
 
-  defp overlap(%MapSet{} = context, %MapSet{} = evidence) do
-    context
-    |> MapSet.intersection(evidence)
+  defp overlap(context, evidence), do: overlap(context, evidence, false)
+
+  defp overlap(%MapSet{} = context, %MapSet{} = evidence, related_morphology?) do
+    evidence
     |> MapSet.to_list()
+    |> Enum.filter(fn term ->
+      MapSet.member?(context, term) or
+        (related_morphology? and
+           Enum.any?(context, &related_word_form?(&1, term)))
+    end)
     |> Enum.sort()
   end
+
+  # A low-weight lexical bridge for productive word-family variants such as
+  # "electronic"/"electrical" or "computer"/"computing".
+  # It is opt-in, used by structural dictionary verification only. Similar
+  # spelling is evidence, not proof of equivalent word senses.
+  defp related_word_form?(a, b) when is_binary(a) and is_binary(b) do
+    String.length(a) >= 8 and String.length(b) >= 8 and
+      String.slice(a, 0, 6) == String.slice(b, 0, 6) and
+      Regex.match?(~r/^\p{L}+$/u, a) and Regex.match?(~r/^\p{L}+$/u, b)
+  end
+
+  defp related_word_form?(_, _), do: false
 
   # A single strong lexical hit should matter.
   #
@@ -347,9 +390,29 @@ defmodule Brain.LIFG.ContextFit do
   defp raw_tokens(_), do: []
 
   defp normalize_token(token) when is_binary(token) do
-    token
-    |> String.trim()
-    |> String.replace("’", "'")
+    normalized =
+      token
+      |> String.trim()
+      |> String.replace("’", "'")
+
+    # Lightweight, deterministic English inflection matching. This is
+    # lexical *comparison* only: dictionary IDs and original token surfaces
+    # are never rewritten. "lights" must match "light" in a sense gloss.
+    cond do
+      String.length(normalized) > 5 and String.ends_with?(normalized, "ies") ->
+        String.replace_suffix(normalized, "ies", "y")
+
+      String.length(normalized) > 5 and
+          Enum.any?(["sses", "ches", "shes", "xes", "zes"], &String.ends_with?(normalized, &1)) ->
+        String.slice(normalized, 0, String.length(normalized) - 2)
+
+      String.length(normalized) > 4 and String.ends_with?(normalized, "s") and
+          not String.ends_with?(normalized, "ss") ->
+        String.slice(normalized, 0, String.length(normalized) - 1)
+
+      true ->
+        normalized
+    end
   end
 
   defp reject_stopwords(terms) do

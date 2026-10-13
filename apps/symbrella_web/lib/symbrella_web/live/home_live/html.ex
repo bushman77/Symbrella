@@ -198,6 +198,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   # ---------- compatibility ----------
 
   defdelegate explain_payload_for(message), to: Modal
+  defdelegate enrich_saved_payload(payload, si), to: Modal
 
   # ---------- helpers ----------
 

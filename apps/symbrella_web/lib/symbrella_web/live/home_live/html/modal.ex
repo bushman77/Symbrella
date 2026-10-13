@@ -13,6 +13,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
   use SymbrellaWeb, :html
 
+  alias SymbrellaWeb.HomeLive.HTML.EvidenceSections
+  alias SymbrellaWeb.HomeLive.ExplainEvidence
+
   # ---------- component ----------
 
   attr :open?, :boolean, default: false
@@ -134,6 +137,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       |> strip_leading_tone(meta[:tone])
       |> String.trim()
 
+    cognition = pget(message, :cognition)
+
     structured_senses =
       message[:senses_selected] ||
         get_in(message, [:from, :senses_selected]) ||
@@ -170,9 +175,11 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     sections =
       []
       |> maybe_add_intent_tone_section(meta, meta_line)
+      |> Kernel.++(EvidenceSections.build(cognition))
       |> maybe_add_senses_selected_section(structured_senses, bullets)
       |> maybe_add_event_frame_section(symbolic_frame)
       |> maybe_add_action_selection_section(selected_action, action_candidates, action_meta)
+      |> maybe_add_response_reflection_section(pget(from, :response_reflection))
       |> maybe_add_similar_terms_section(bullets)
       |> maybe_add_antonyms_section(bullets)
       |> maybe_add_message_section(main)
@@ -183,6 +190,45 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       sections: sections
     }
   end
+
+  @doc """
+  Upgrade a historically cached Explain payload when its message preserved the
+  original SemanticInput. This retains tone, response, action, and old custom
+  sections while refreshing the Core-backed fields from their real source.
+  No DB calls, no re-inference, and repeated upgrades do not duplicate sections.
+  """
+  def enrich_saved_payload(payload, si) when is_map(payload) do
+    replacement =
+      si
+      |> ExplainEvidence.from_si()
+      |> EvidenceSections.build()
+
+    if replacement == [] do
+      payload
+    else
+      old =
+        payload
+        |> pget(:sections, [])
+        |> case do
+          list when is_list(list) -> list
+          _ -> []
+        end
+
+      new_keys = MapSet.new(Enum.map(replacement, &pget(&1, :key)))
+
+      retained =
+        Enum.reject(old, fn section ->
+          MapSet.member?(new_keys, pget(section, :key))
+        end)
+
+      {header, remaining} =
+        Enum.split_while(retained, &(pget(&1, :key) == :intent_tone))
+
+      Map.put(payload, :sections, header ++ replacement ++ remaining)
+    end
+  end
+
+  def enrich_saved_payload(payload, _si), do: payload
 
   # ---------- payload normalizer ----------
 
@@ -219,6 +265,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           confidence: pget(payload, :confidence),
           tone: pget(payload, :tone),
           senses_selected: pget(payload, :senses_selected),
+          cognition: pget(payload, :cognition),
           symbolic_frame: pget(payload, :symbolic_frame) || pget(from, :symbolic_frame),
           selected_action:
             pget(payload, :selected_action) ||
@@ -667,9 +714,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         [
           %{
             key: :senses_selected,
-            title: "Senses selected",
+            title: "Individual word senses (LIFG)",
             tag: "#{length(items)}",
-            hint: "Selected sense per token (with a best-available gloss).",
+            hint: "Raw word-level LIFG selections. Canonical semantic winners and verified multiword meanings are shown separately above.",
             items: items
           }
         ]
@@ -768,6 +815,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   defp format_frame_key(key), do: to_string(key)
 
   defp format_frame_value(nil), do: ""
+  defp format_frame_value(true), do: "true"
+  defp format_frame_value(false), do: "false"
   defp format_frame_value(value) when is_atom(value), do: ":#{value}"
 
   defp format_frame_value(value) when is_float(value) do
@@ -790,6 +839,41 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
   end
 
   defp format_frame_value(value), do: inspect(value)
+
+  defp maybe_add_response_reflection_section(sections, reflection) when is_map(reflection) do
+    status = pget(reflection, :status)
+    issues = pget(reflection, :issues, [])
+    applied? = pget(reflection, :applied?)
+    count = pget(reflection, :repair_count)
+    critique = pget(reflection, :critique)
+
+    if frame_present?(status) do
+      items =
+        []
+        |> maybe_kv("status", format_frame_value(status))
+        |> maybe_kv("issues", format_frame_value(issues))
+        |> maybe_kv("applied?", format_frame_value(applied?))
+        |> maybe_kv("repair_count", format_frame_value(count))
+        |> maybe_kv("review summary", critique)
+        |> maybe_kv("draft SHA-256", pget(reflection, :draft_sha256))
+        |> maybe_kv("final SHA-256", pget(reflection, :final_sha256))
+
+      sections ++
+        [
+          %{
+            key: :response_reflection,
+            title: "LLM response review",
+            tag: format_frame_value(status),
+            hint: "Bounded post-generation review. A repair changes the LLM draft; it does not mean Core executed a physical action.",
+            items: items
+          }
+        ]
+    else
+      sections
+    end
+  end
+
+  defp maybe_add_response_reflection_section(sections, _), do: sections
 
   defp maybe_add_action_selection_section(sections, selected_action, candidates, action_meta) do
     selected =
