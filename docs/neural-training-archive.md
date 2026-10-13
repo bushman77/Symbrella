@@ -268,3 +268,45 @@ mix test apps/brain/test/brain/hippocampus/turn_trace_test.exs
 mix test apps/core/test/core/training_archive_test.exs
 mix test apps/brain/test/brain/neural/training_builder_test.exs
 ```
+
+## Episodic attachment cue fix
+
+Live archive observations showed `attach: 0 results` while
+`recall_self` retrieved memories. Code inspection identified a cue mismatch:
+`Core.Recall.Execute` passes normalized words through
+`hippo_opts[:cues]`, but `Brain.Hippocampus.handle_call({:attach, ...})`
+previously passed the entire `SemanticInput` to a search implementation
+that reads `winners` from map-shaped cues. Ordinary
+`Core.SemanticInput` stores its lexical material in `tokens`.
+
+Attachment now honors provided non-empty `cues`. With no cues (or an empty
+list), it derives normalized terms from SI tokens when present; existing
+`winners`-based callers remain compatible. The observed query cues and
+the cues actually used for the lookup are now the same. Traced
+`recall_attempt` events also include `cue_count` and `min_jaccard`
+for diagnostic analysis.
+
+This is a retrieval correctness fix, not a similarity-threshold reduction:
+genuine zero-overlap searches still return no episode.
+
+Run the dedicated regression suites:
+
+```sh
+mix test apps/brain/test/brain/hippocampus/hippocampus_recall_test.exs \
+  apps/brain/test/brain/hippocampus/hippocampus_attach_episodes_test.exs \
+  apps/core/test/core/recall/execute_hippo_integration_test.exs \
+  apps/brain/test/brain/hippocampus/turn_trace_test.exs
+```
+
+Inspect new attempts after restarting the server:
+
+```sh
+jq -r 'select(.kind=="recall_attempt") |
+  [.operation, (.cue_count // "unknown"), (.min_jaccard // "default"),
+   .result_count, .hit] | @tsv' tmp/training/memory_events.jsonl | tail -20
+```
+
+Even after this change, a recall with no lexical overlap may be empty.
+If `cue_count=0` persists with real conversation tokens, inspect the
+upstream tokenization/recall invocation timing rather than changing the
+Jaccard threshold blindly.
