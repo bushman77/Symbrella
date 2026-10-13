@@ -6,7 +6,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
   x(t) -> y(t+1). The next observation is the target; no human rating,
   model output or guessed correctness label is used.
 
-  Feature schema v3 differentiates the *raw neuromodulator levels* stored at
+  Feature schema v4 differentiates the *raw neuromodulator levels* stored at
   cognition.self_model.mood.levels from derived mood indices at cognition.mood.
   Every raw level has its own presence flag. Missing readings are represented
   by 0 only alongside a false presence flag, and are EXCLUDED from the loss
@@ -18,7 +18,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
   It is NOT an encoder for all raw NLP content.
   """
 
-  @schema_version 3
+  @schema_version 4
   @feature_names [
     :confidence,
     :confidence_present,
@@ -85,6 +85,8 @@ defmodule Brain.Neural.StateTransitionBuilder do
            mask_policy: :both_endpoints_observed_exclude_presence_indicators,
            complete_modulator_turns: Enum.count(turns, &complete_modulators?/1),
            missing_modulator_turns: Enum.count(turns, &(not complete_modulators?(&1))),
+           complete_process_traces: Enum.count(turns, &trace_complete?/1),
+           memory_fast_path_turns: Enum.count(turns, &fast_path?/1),
            train_sessions: session_names(train),
            eval_sessions: session_names(evaluation),
            split_mode: if(smoke?, do: :in_sample_smoke, else: :session_holdout)
@@ -207,8 +209,9 @@ defmodule Brain.Neural.StateTransitionBuilder do
     cognitive = map(turn["cognition"])
     # The SI mood field is derived (exploration/inhibition/vigilance/plasticity).
     # Raw DA/5HT/Glu/NE are nested in the self-model's MoodCore snapshot.
-    derived_mood = map(cognitive["mood"])
-    raw_levels = raw_modulators(cognitive)
+    runtime = map(turn["runtime_observation"])
+    derived_mood = derived_mood(cognitive, runtime)
+    raw_levels = raw_modulators(cognitive, runtime)
 
     confidence = cognitive["confidence"]
     memory =
@@ -286,10 +289,11 @@ defmodule Brain.Neural.StateTransitionBuilder do
   # A memory event absent from the archive is UNKNOWN, not a verified zero.
   defp observation_mask(turn, stats) do
     cognition = map(turn["cognition"])
-    raw = raw_modulators(cognition)
-    derived = map(cognition["mood"])
+    runtime = map(turn["runtime_observation"])
+    raw = raw_modulators(cognition, runtime)
+    derived = derived_mood(cognition, runtime)
     mem = Map.get(stats, {turn["session_id"], turn["turn_id"]})
-    event_known? = is_map(mem)
+    event_known? = is_map(mem) or trace_complete?(turn)
     attempts? = event_known? and mem.attempts > 0
 
     [
@@ -325,18 +329,57 @@ defmodule Brain.Neural.StateTransitionBuilder do
   defp observed_collection?(v), do: is_list(v) or is_map(v)
 
 
-  defp raw_modulators(cognitive) do
-    cognitive
-    |> Map.get("self_model")
+  # A semantic turn has its own self-model snapshot. A fast-path turn may
+  # legitimately lack that entire pipeline; use independently observed
+  # completion-time MoodCore telemetry rather than guessing values.
+  defp raw_modulators(cognitive, runtime) do
+    from_self_model =
+      cognitive
+      |> Map.get("self_model")
+      |> map()
+      |> Map.get("mood")
+      |> map()
+      |> Map.get("levels")
+      |> map()
+
+    from_runtime = if runtime["status"] in ["captured", "partial"],
+      do: map(runtime["levels"]), else: %{}
+
+    Map.merge(from_runtime, from_self_model, fn _key, fallback, original ->
+      if is_number(original), do: original, else: fallback
+    end)
+  end
+
+  defp derived_mood(cognitive, runtime) do
+    self = map(cognitive["mood"])
+    fallback = if runtime["status"] in ["captured", "partial"],
+      do: map(runtime["mood"]), else: %{}
+
+    Map.merge(fallback, self, fn _key, measured, from_si ->
+      if is_number(from_si), do: from_si, else: measured
+    end)
+  end
+
+  defp trace_complete?(turn) do
+    turn
+    |> Map.get("hippocampal_trace")
     |> map()
-    |> Map.get("mood")
+    |> Map.get("status")
+    |> Kernel.==("complete")
+  end
+
+  defp fast_path?(turn) do
+    turn
+    |> Map.get("pipeline_status")
     |> map()
-    |> Map.get("levels")
-    |> map()
+    |> Map.get("route")
+    |> Kernel.==("memory_fast_path")
   end
 
   defp complete_modulators?(turn) do
-    raw = turn |> Map.get("cognition") |> map() |> raw_modulators()
+    cognitive = turn |> Map.get("cognition") |> map()
+    runtime = turn |> Map.get("runtime_observation") |> map()
+    raw = raw_modulators(cognitive, runtime)
     Enum.all?(
       [["da", "dopamine"], ["5ht", "serotonin", "ht"], ["glu", "glutamate"], ["ne", "norepinephrine"]],
       &has_mood_number?(raw, &1)
