@@ -191,14 +191,6 @@ defmodule Brain.Hippocampus do
     {:ok, state}
   end
 
-  @impl true
-  def handle_call({:encode, slate, meta_in}, from, state),
-    do: handle_encode_call(slate, meta_in, from, state, false)
-
-  @impl true
-  def handle_call({:encode, slate, meta_in, :trace}, from, state),
-    do: handle_encode_call(slate, meta_in, from, state, true)
-
   defp handle_encode_call(slate, meta_in, from, state, trace?) do
     at = System.system_time(:millisecond)
 
@@ -239,6 +231,14 @@ defmodule Brain.Hippocampus do
     reply = if trace?, do: {:ok, ep, at}, else: :ok
     {:reply, reply, state1}
   end
+
+  @impl true
+  def handle_call({:encode, slate, meta_in}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, false)
+
+  @impl true
+  def handle_call({:encode, slate, meta_in, :trace}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, true)
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
