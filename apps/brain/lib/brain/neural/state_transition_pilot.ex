@@ -9,7 +9,7 @@ defmodule Brain.Neural.StateTransitionPilot do
 
   alias Brain.Neural.StateTransitionBuilder
 
-  @model_version "state-transition-pilot-v1"
+  @model_version "state-transition-pilot-v2"
   @epochs 25
   @hidden 8
 
