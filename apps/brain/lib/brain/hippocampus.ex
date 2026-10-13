@@ -149,10 +149,14 @@ defmodule Brain.Hippocampus do
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
     options = normalize_opts(opts)
+    cues = attachment_cues(si, options)
+    options = Map.put(options, :cues, cues)
+
     attached = GenServer.call(__MODULE__, {:attach, si, options})
     evidence = Map.get(attached, :evidence) || %{}
     results = Map.get(evidence, :episodes) || []
-    cues = Map.get(options, :cues) || si
+
+    # Trace the exact cues used for retrieval, not the whole SemanticInput.
     TurnTrace.recall(:attach, cues, options, results)
     attached
   end
@@ -738,6 +742,36 @@ defmodule Brain.Hippocampus do
           )
 
         {results, meas, Map.merge(base_meta, dbg_meta)}
+    end
+  end
+
+  # Explicit nonempty cues always take precedence. A token-bearing
+  # SemanticInput isn't a %{winners: ...} recall slate, so derive normalized
+  # lexical cues when callers provide an empty list (or no :cues option).
+  # Preserve older map-shaped winner slates unchanged.
+  defp attachment_cues(si, opts) do
+    case Map.get(opts, :cues) do
+      cues when is_list(cues) and cues != [] ->
+        cues
+
+      %{} = cues when map_size(cues) > 0 ->
+        cues
+
+      _ ->
+        if has_winners?(si) do
+          si
+        else
+          tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+          extracted = Normalize.extract_norms_from_any(%{tokens: tokens})
+          if extracted == [], do: si, else: extracted
+        end
+    end
+  end
+
+  defp has_winners?(si) do
+    case Map.get(si, :winners) || Map.get(si, "winners") do
+      [_ | _] -> true
+      _ -> false
     end
   end
 
