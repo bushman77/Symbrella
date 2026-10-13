@@ -6,19 +6,31 @@ defmodule Brain.Neural.StateTransitionBuilder do
   x(t) -> y(t+1). The next observation is the target; no human rating,
   model output or guessed correctness label is used.
 
-  This v1 feature projection covers selected numeric cognitive state fields
-  and aggregate memory events. It is NOT an encoder for all raw NLP content.
-  Missing values are tracked where possible and otherwise represented as 0.
+  Feature schema v2 differentiates the *raw neuromodulator levels* stored at
+  cognition.self_model.mood.levels from derived mood indices at cognition.mood.
+  Every raw level has its own presence flag; missing readings are represented
+  by 0 only alongside a false presence flag. No missing readings are invented.
+
+  This projection covers selected numeric fields and aggregate memory events.
+  It is NOT an encoder for all raw NLP content.
   """
 
-  @schema_version 1
+  @schema_version 2
   @feature_names [
     :confidence,
     :confidence_present,
     :mood_da,
+    :mood_da_present,
     :mood_5ht,
+    :mood_5ht_present,
     :mood_glu,
+    :mood_glu_present,
     :mood_ne,
+    :mood_ne_present,
+    :mood_exploration,
+    :mood_inhibition,
+    :mood_vigilance,
+    :mood_plasticity,
     :mood_present,
     :input_token_count,
     :lifg_choices_count,
@@ -63,6 +75,8 @@ defmodule Brain.Neural.StateTransitionBuilder do
            total_pairs: length(pairs),
            input_turns: length(turns),
            input_events: length(events),
+           complete_modulator_turns: Enum.count(turns, &complete_modulators?/1),
+           missing_modulator_turns: Enum.count(turns, &(not complete_modulators?(&1))),
            train_sessions: session_names(train),
            eval_sessions: session_names(evaluation),
            split_mode: if(smoke?, do: :in_sample_smoke, else: :session_holdout)
@@ -179,9 +193,10 @@ defmodule Brain.Neural.StateTransitionBuilder do
 
   defp features(turn, stats) do
     cognitive = map(turn["cognition"])
-    mood = map(cognitive["mood"])
-    values = map(mood["levels"])
-    values = if map_size(values) == 0, do: mood, else: values
+    # The SI mood field is derived (exploration/inhibition/vigilance/plasticity).
+    # Raw DA/5HT/Glu/NE are nested in the self-model's MoodCore snapshot.
+    derived_mood = map(cognitive["mood"])
+    raw_levels = raw_modulators(cognitive)
 
     confidence = cognitive["confidence"]
     memory =
@@ -198,11 +213,19 @@ defmodule Brain.Neural.StateTransitionBuilder do
     [
       unit(confidence),
       bool(is_number(confidence)),
-      mood_unit(values, ["da", "dopamine"]),
-      mood_unit(values, ["5ht", "serotonin", "ht"]),
-      mood_unit(values, ["glu", "glutamate"]),
-      mood_unit(values, ["ne", "norepinephrine"]),
-      bool(map_size(values) > 0),
+      mood_unit(raw_levels, ["da", "dopamine"]),
+      bool(has_mood_number?(raw_levels, ["da", "dopamine"])),
+      mood_unit(raw_levels, ["5ht", "serotonin", "ht"]),
+      bool(has_mood_number?(raw_levels, ["5ht", "serotonin", "ht"])),
+      mood_unit(raw_levels, ["glu", "glutamate"]),
+      bool(has_mood_number?(raw_levels, ["glu", "glutamate"])),
+      mood_unit(raw_levels, ["ne", "norepinephrine"]),
+      bool(has_mood_number?(raw_levels, ["ne", "norepinephrine"])),
+      mood_unit(derived_mood, ["exploration"]),
+      mood_unit(derived_mood, ["inhibition"]),
+      mood_unit(derived_mood, ["vigilance"]),
+      mood_unit(derived_mood, ["plasticity"]),
+      bool(map_size(derived_mood) > 0),
       count(tokens, 64),
       count(size(cognitive["lifg_choices"]), 16),
       count(size(cognitive["semantic_choices"]), 16),
@@ -243,7 +266,36 @@ defmodule Brain.Neural.StateTransitionBuilder do
   defp tensor_batch(_), do: {:error, :empty_transition_batch}
 
   defp session_names(rows), do: rows |> Enum.map(& &1.session_id) |> Enum.uniq() |> Enum.sort()
-  defp mood_unit(mood, names), do: names |> Enum.find_value(0.0, &Map.get(mood, &1)) |> unit()
+
+  defp raw_modulators(cognitive) do
+    cognitive
+    |> Map.get("self_model")
+    |> map()
+    |> Map.get("mood")
+    |> map()
+    |> Map.get("levels")
+    |> map()
+  end
+
+  defp complete_modulators?(turn) do
+    raw = turn |> Map.get("cognition") |> map() |> raw_modulators()
+    Enum.all?(
+      [["da", "dopamine"], ["5ht", "serotonin", "ht"], ["glu", "glutamate"], ["ne", "norepinephrine"]],
+      &has_mood_number?(raw, &1)
+    )
+  end
+
+  defp mood_value(mood, names) do
+    Enum.find_value(names, fn name ->
+      case Map.get(mood, name) do
+        v when is_number(v) -> v
+        _ -> nil
+      end
+    end)
+  end
+
+  defp mood_unit(mood, names), do: mood |> mood_value(names) |> unit()
+  defp has_mood_number?(mood, names), do: is_number(mood_value(mood, names))
   defp unit(value) when is_number(value), do: max(0.0, min(value * 1.0, 1.0))
   defp unit(_), do: 0.0
   defp count(value, max_value), do: min(value, max_value) / max_value
