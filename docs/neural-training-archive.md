@@ -186,3 +186,81 @@ The Nx batches **are not directly compatible** with the existing
 output targets. The next phase is to define and train an explicit task-matched
 Axon circuit. This builder does not yet retrain, evaluate model predictions,
 checkpoint weights, or instrument *every* hippocampal write and recall attempt.
+
+## Hippocampal operation tracing (development milestone 2)
+
+When `SYMBRELLA_TRAINING_ARCHIVE=on` is set, a chat worker activates
+`Brain.Hippocampus.TurnTrace` while preparing a human-message reply.
+The final LiveView identity-correction path is traced separately and its
+events are combined with the worker's events.
+
+The Hippocampus public API now captures:
+
+- `episodic_encode`: an episode successfully written through
+  `Brain.Hippocampus.encode/2`; includes the actual episode, encoding time,
+  and a content fingerprint. This does not imply the episode was persisted to
+  PostgreSQL successfully, because the existing writer is best-effort.
+- `recall_attempt`: every observed call to `recall/2`,
+  `recall_self_memories/2`, or `attach_episodes/2`, including zero-result
+  attempts. Includes a per-query `recall_id`, projected cues, search
+  operation, requested source and candidate count.
+- `episodic_recall`: each ranked result from that call with its
+  `recall_id`, score, rank, episode content and fingerprint.
+- `fact_lookup`: attempted fact-key lookup and whether a result was found.
+  The result can contain private information; keep the JSONL files private.
+
+The previously implemented `fact_write`, `fact_recall`, and final
+`SemanticInput`-based attached-episode projections remain available.
+When a traced recalled episode matches one already attached to SemanticInput,
+the final-state fallback does not duplicate it.
+
+All events are joined with the same `session_id` and `turn_id` as
+`turns.jsonl`, written in the existing private `memory_events.jsonl`.
+
+From another Termux shell:
+
+```sh
+jq -r '.kind' tmp/training/memory_events.jsonl | sort | uniq -c
+
+jq -r 'select(.kind=="recall_attempt") |
+  [.turn_id,.operation,.result_count,.hit] | @tsv' \
+  tmp/training/memory_events.jsonl | tail -20
+
+jq -r 'select(.kind=="episodic_recall") |
+  [.turn_id,.episode_fingerprint,.rank,.score] | @tsv' \
+  tmp/training/memory_events.jsonl | tail -20
+```
+
+Review an actual `episodic_recall` fingerprint from the last command using
+`Core.TrainingArchive.record_feedback/1` as documented above. After
+reviewing examples from at least two separate sessions:
+
+```sh
+mix neural.dataset --task memory_relevance
+```
+
+### Current scope and non-goals
+
+- Tracing is **opt-in** and process-local; memory operations on independent
+  background tasks or non-chat API calls are not automatically associated
+  with an active chat turn.
+- A returned memory is a *candidate*, not proof it influenced the answer:
+  `used_in_response: null` means unknown. Humans must review relevance.
+- Search trace results come from Hippocampus before Core's additional local
+  Jaccard filter, if one applies. They may therefore include candidates that
+  the final SemanticInput does not retain.
+- Trace records do not themselves modify model weights or the Hippocampus
+  retrieval/admission policy.
+- Existing archive data is not retroactively populated; only **new**
+  interactions after restarting the runtime can produce these events.
+- A permanent database-stable episode ID and a review interface are follow-up
+  work. Current fingerprints are derived from episode content plus time, and
+  are not a substitute for a durable episode primary key.
+
+### Regression tests
+
+```sh
+mix test apps/brain/test/brain/hippocampus/turn_trace_test.exs
+mix test apps/core/test/core/training_archive_test.exs
+mix test apps/brain/test/brain/neural/training_builder_test.exs
+```
