@@ -925,7 +925,10 @@ defmodule SymbrellaWeb.BrainHTML do
 
   defp fmt(nil), do: "—"
 
-  defp fmt(v) when is_number(v),
+  defp fmt(v) when is_integer(v),
+    do: :io_lib.format("~.3f", [v * 1.0]) |> IO.iodata_to_binary()
+
+  defp fmt(v) when is_float(v),
     do: :io_lib.format("~.3f", [v]) |> IO.iodata_to_binary()
 
   defp fmt(v), do: to_string(v)
