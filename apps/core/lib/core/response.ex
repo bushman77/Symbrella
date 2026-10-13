@@ -384,9 +384,6 @@ defmodule Core.Response do
       {:ok, llm_text, reflection} ->
         {llm_text, :llm, nil, reflection}
 
-      {:ok, llm_text} ->
-        {llm_text, :llm, nil, nil}
-
       {:error, reason} ->
         normalized_reason = normalize_generation_reason(reason)
 
