@@ -294,7 +294,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
     derived = derived_mood(cognition, runtime)
     mem = Map.get(stats, {turn["session_id"], turn["turn_id"]})
     event_known? = is_map(mem) or trace_complete?(turn)
-    attempts? = event_known? and mem.attempts > 0
+    attempts? = is_map(mem) and mem.attempts > 0
 
     [
       observed_number?(cognition, "confidence"),
