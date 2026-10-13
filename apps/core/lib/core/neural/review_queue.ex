@@ -12,7 +12,13 @@ defmodule Core.Neural.ReviewQueue do
   @max_lines 50_000
 
   @spec pending(Path.t()) :: {:ok, [map()]} | {:error, term()}
-  def pending(dir) when is_binary(dir) do
+  def pending(dir), do: list_candidates(dir, :pending)
+
+  @doc "Show previously reviewed candidates for deliberate human relabeling."
+  @spec reviewed(Path.t()) :: {:ok, [map()]} | {:error, term()}
+  def reviewed(dir), do: list_candidates(dir, :reviewed)
+
+  defp list_candidates(dir, mode) when is_binary(dir) and mode in [:pending, :reviewed] do
     with {:ok, turns} <- read_jsonl(Path.join(dir, "turns.jsonl")),
          {:ok, events} <- read_jsonl(Path.join(dir, "memory_events.jsonl")),
          {:ok, feedback} <- read_jsonl(Path.join(dir, "feedback.jsonl"), true),
@@ -25,8 +31,9 @@ defmodule Core.Neural.ReviewQueue do
       reviewed =
         feedback
         |> Enum.filter(&get_in(&1, ["label", "kind"]) == "memory_relevance")
-        |> MapSet.new(fn record ->
-          {record["session_id"], record["turn_id"], get_in(record, ["label", "episode_fingerprint"])}
+        |> Enum.reduce(%{}, fn record, acc ->
+          key = {record["session_id"], record["turn_id"], get_in(record, ["label", "episode_fingerprint"])}
+          Map.put(acc, key, get_in(record, ["label", "relevant"]))
         end)
 
       examples =
@@ -41,8 +48,16 @@ defmodule Core.Neural.ReviewQueue do
           key = {event["session_id"], event["turn_id"], event["episode_fingerprint"]}
           turn = Map.get(turn_index, {event["session_id"], event["turn_id"]})
 
+          existing = Map.fetch(reviewed, key)
+          matches_mode? =
+            case {mode, existing} do
+              {:pending, :error} -> true
+              {:reviewed, {:ok, value}} when is_boolean(value) -> true
+              _ -> false
+            end
+
           if turn && is_binary(turn["user_text"]) and
-               not MapSet.member?(reviewed, key) and not MapSet.member?(seen, key) do
+               matches_mode? and not MapSet.member?(seen, key) do
             row = %{
               session_id: event["session_id"],
               turn_id: event["turn_id"],
@@ -50,7 +65,8 @@ defmodule Core.Neural.ReviewQueue do
               score: event["score"],
               user_text: turn["user_text"],
               assistant_text: turn["assistant_text"],
-              memory_summary: summary(event["episode"])
+              memory_summary: summary(event["episode"]),
+              previous_relevant: if(match?({:ok, _}, existing), do: elem(existing, 1), else: nil)
             }
 
             {[row | acc], MapSet.put(seen, key)}
@@ -65,38 +81,50 @@ defmodule Core.Neural.ReviewQueue do
     end
   end
 
-  def pending(_), do: {:error, :invalid_directory}
+  defp list_candidates(_, _), do: {:error, :invalid_directory}
 
-  @doc "Validate the still-pending candidate and append a human review."
-  @spec review(Path.t(), map(), boolean()) :: :ok | {:error, term()}
-  def review(dir, example, relevant)
-      when is_binary(dir) and is_map(example) and is_boolean(relevant) do
-    with {:ok, items} <- pending(dir),
-         true <- Enum.any?(items, fn candidate ->
+  @doc "Append a new human review, or an auditable correction if correct: true."
+  @spec review(Path.t(), map(), boolean(), keyword()) ::
+          :ok | :unchanged | {:error, term()}
+  def review(dir, example, relevant, opts \\ [])
+
+  def review(dir, example, relevant, opts)
+      when is_binary(dir) and is_map(example) and is_boolean(relevant) and is_list(opts) do
+    correction? = Keyword.get(opts, :correct, false) == true
+    source = if correction?, do: reviewed(dir), else: pending(dir)
+
+    with {:ok, items} <- source,
+         %{} = match <- Enum.find(items, fn candidate ->
            candidate.session_id == Map.get(example, :session_id) and
              candidate.turn_id == Map.get(example, :turn_id) and
              candidate.episode_fingerprint == Map.get(example, :episode_fingerprint)
          end) do
-      TrainingArchive.record_feedback(
-        %{
-          session_id: example.session_id,
-          turn_id: example.turn_id,
-          reviewed_by: "local_human_reviewer",
-          label: %{
-            kind: "memory_relevance",
-            episode_fingerprint: example.episode_fingerprint,
-            relevant: relevant
-          }
-        },
-        config: [enabled?: true, dir: dir]
-      )
+      if correction? and match.previous_relevant == relevant do
+        :unchanged
+      else
+        TrainingArchive.record_feedback(
+          %{
+            session_id: match.session_id,
+            turn_id: match.turn_id,
+            reviewed_by: "local_human_reviewer",
+            correction: correction?,
+            note: if(correction?, do: "Explicit correction of prior human relevance review", else: nil),
+            label: %{
+              kind: "memory_relevance",
+              episode_fingerprint: match.episode_fingerprint,
+              relevant: relevant
+            }
+          },
+          config: [enabled?: true, dir: dir]
+        )
+      end
     else
-      false -> {:error, :not_pending}
+      nil -> {:error, :not_pending}
       {:error, _} = error -> error
     end
   end
 
-  def review(_dir, _example, _relevant), do: {:error, :invalid_review}
+  def review(_dir, _example, _relevant, _opts), do: {:error, :invalid_review}
 
   defp read_jsonl(path, optional \\ false) do
     cond do
