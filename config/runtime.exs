@@ -260,6 +260,17 @@ config :core, Core.StateDump,
   mode: state_dump_mode,
   path: System.get_env("SYMBRELLA_STATE_DUMP_PATH", "tmp/state_dumps/symbrella_raw.log")
 
+# Explicit opt-in. Complete turns and recalled memories can contain private data.
+training_archive_enabled? =
+  case System.get_env("SYMBRELLA_TRAINING_ARCHIVE", "off") |> String.downcase() do
+    value when value in ["1", "true", "yes", "on"] -> true
+    _ -> false
+  end
+
+config :core, Core.TrainingArchive,
+  enabled?: training_archive_enabled?,
+  dir: System.get_env("SYMBRELLA_TRAINING_DIR", "tmp/training")
+
 config :brain, Brain.SelfCalibration.Logger,
   enabled?: true,
   path: "priv/self_calibration/samples.jsonl"
