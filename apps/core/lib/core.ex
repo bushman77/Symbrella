@@ -7,6 +7,7 @@ defmodule Core do
   alias Core.LIFG.Attach, as: LifgAttach
   alias Core.Response.Attach, as: ResponseAttach
   alias Core.SemanticInput
+  alias Core.StateDump
   alias Core.TokenFilters
   alias Core.Brain.Introspection, as: BrainIntrospection
   @type opts :: keyword()
@@ -49,8 +50,9 @@ defmodule Core do
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
       |> Map.put_new(:trace, [])
       |> Map.put(:lifg_opts, lifg_opts)
+      |> StateDump.capture(:initial)
 
-    si1 = apply_intent_selection(si0, opts)
+    si1 = apply_intent_selection(si0, opts) |> StateDump.capture(:intent_selected)
 
     out =
       case mode do
@@ -58,7 +60,10 @@ defmodule Core do
         _ -> si1
       end
 
-    coerce_si(out)
+    out
+    |> StateDump.capture(:pipeline_raw)
+    |> coerce_si()
+    |> StateDump.capture(:final)
   end
 
   defp maybe_put_fuzzy(si, nil), do: si
@@ -105,39 +110,73 @@ defmodule Core do
 
     si
     |> Core.Brain.STM.run()
+    |> StateDump.capture(:stm)
     |> Core.Pipeline.Candidates.reset(:post_stm)
+    |> StateDump.capture(:candidates_reset)
     |> TokenFilters.keep_only_word_boundary_tokens()
+    |> StateDump.capture(:word_boundaries)
     |> Core.MWE.Stage.run(:early, opts)
+    |> StateDump.capture(:mwe_early)
     |> Core.Pipeline.LTM.run(opts)
+    |> StateDump.capture(:ltm)
     |> TokenFilters.keep_only_word_boundary_tokens()
+    |> StateDump.capture(:word_boundaries)
     |> Core.MWE.Stage.run(:late, opts)
+    |> StateDump.capture(:mwe_late)
     |> Core.MWE.Lexicon.attach(opts)
+    |> StateDump.capture(:mwe_lexicon)
     |> Core.Syntax.Signatures.attach()
+    |> StateDump.capture(:sentence_signatures)
     |> Selection.refine_from_syntax()
+    |> StateDump.capture(:syntax_intent)
     |> Core.MWE.Discovery.run(opts)
+    |> StateDump.capture(:mwe_discovery)
     |> Core.TokenResolution.resolve(opts)
+    |> StateDump.capture(:token_resolution)
     |> Core.Relations.attach_edges()
+    |> StateDump.capture(:relation_edges)
     |> Core.Pipeline.Evidence.drop_empty()
+    |> StateDump.capture(:evidence)
     |> Core.Brain.Episodes.attach(opts)
+    |> StateDump.capture(:episodes)
     |> Core.Pipeline.Perception.run(opts)
+    |> StateDump.capture(:perception)
     |> Core.Brain.Amygdala.react(opts)
+    |> StateDump.capture(:amygdala)
     |> Core.LIFG.FuzzyEntities.attach(opts)
+    |> StateDump.capture(:fuzzy_entities)
     |> LifgAttach.run_and_attach(lifg_opts)
+    |> StateDump.capture(:lifg)
     |> Core.MWE.SenseResolution.rerank_contiguous()
+    |> StateDump.capture(:mwe_senses)
     |> Core.MWE.ObjectSense.refine()
+    |> StateDump.capture(:object_senses)
     |> Core.Semantic.EventFrames.attach(opts)
+    |> StateDump.capture(:event_frames)
     |> BrainIntrospection.update_self_model(opts)
+    |> StateDump.capture(:self_model)
     |> Core.Brain.ATL.ingest(atl_opts)
+    |> StateDump.capture(:atl)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
+    |> StateDump.capture(:atl_pairs)
     |> Core.MWE.SenseResolution.attach_verified(opts)
+    |> StateDump.capture(:verified_mwe_senses)
     |> Core.Comprehension.Summary.attach(opts)
+    |> StateDump.capture(:comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
+    |> StateDump.capture(:prefrontal)
     |> Core.Brain.ActionSelection.attach(opts)
+    |> StateDump.capture(:action_selection)
     |> Core.Brain.WM.focus_prompt_topics(opts)
+    |> StateDump.capture(:working_memory)
     |> maybe_build_response_plan(opts)
+    |> StateDump.capture(:response_plan)
     |> Core.Brain.Hippocampus.encode()
+    |> StateDump.capture(:hippocampus_encode)
     |> Core.Brain.Hippocampus.persist(opts)
+    |> StateDump.capture(:hippocampus_persist)
     |> Core.Brain.Activation.notify(opts)
+    |> StateDump.capture(:activation)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other

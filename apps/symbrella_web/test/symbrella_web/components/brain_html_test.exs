@@ -32,6 +32,17 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     assert html =~ "70.0%"
   end
 
+  test "hud_row formats integer clock telemetry without crashing" do
+    html =
+      render_component(&BrainHTML.hud_row/1,
+        clock: %{hz: 20, phi: 1},
+        mood: %{levels: %{}, derived: %{}}
+      )
+
+    assert html =~ "20.000"
+    assert html =~ "1.000"
+  end
+
   test "hud_row renders WM size/capacity" do
     html =
       render_component(&BrainHTML.hud_row/1,
