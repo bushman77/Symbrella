@@ -6,16 +6,19 @@ defmodule Brain.Neural.StateTransitionBuilder do
   x(t) -> y(t+1). The next observation is the target; no human rating,
   model output or guessed correctness label is used.
 
-  Feature schema v2 differentiates the *raw neuromodulator levels* stored at
+  Feature schema v3 differentiates the *raw neuromodulator levels* stored at
   cognition.self_model.mood.levels from derived mood indices at cognition.mood.
-  Every raw level has its own presence flag; missing readings are represented
-  by 0 only alongside a false presence flag. No missing readings are invented.
+  Every raw level has its own presence flag. Missing readings are represented
+  by 0 only alongside a false presence flag, and are EXCLUDED from the loss
+  and evaluation with a mask. No missing readings are invented. Only features
+  observed at BOTH ends of a transition are eligible training targets.
+  Flags are input-only, never targets.
 
   This projection covers selected numeric fields and aggregate memory events.
   It is NOT an encoder for all raw NLP content.
   """
 
-  @schema_version 2
+  @schema_version 3
   @feature_names [
     :confidence,
     :confidence_present,
@@ -75,6 +78,11 @@ defmodule Brain.Neural.StateTransitionBuilder do
            total_pairs: length(pairs),
            input_turns: length(turns),
            input_events: length(events),
+           train_valid_cells: count_valid_cells(train_batch),
+           eval_valid_cells: count_valid_cells(eval_batch),
+           train_possible_cells: length(train) * length(@feature_names),
+           eval_possible_cells: length(evaluation) * length(@feature_names),
+           mask_policy: :both_endpoints_observed_exclude_presence_indicators,
            complete_modulator_turns: Enum.count(turns, &complete_modulators?/1),
            missing_modulator_turns: Enum.count(turns, &(not complete_modulators?(&1))),
            train_sessions: session_names(train),
@@ -163,12 +171,16 @@ defmodule Brain.Neural.StateTransitionBuilder do
         session_turns
         |> Enum.chunk_every(2, 1, :discard)
         |> Enum.map(fn [current, next] ->
+          first_mask = observation_mask(current, stats)
+          next_mask = observation_mask(next, stats)
+
           %{
             session_id: session,
             from_turn_id: current["turn_id"],
             to_turn_id: next["turn_id"],
             x: features(current, stats),
-            y: features(next, stats)
+            y: features(next, stats),
+            mask: Enum.zip_with(first_mask, next_mask, fn a, b -> bool(a == 1.0 and b == 1.0) end)
           }
         end)
       end)
@@ -258,6 +270,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
      %{
        x: Nx.tensor(Enum.map(pairs, & &1.x), type: :f32),
        y: Nx.tensor(Enum.map(pairs, & &1.y), type: :f32),
+       mask: Nx.tensor(Enum.map(pairs, & &1.mask), type: :f32),
        feature_names: @feature_names,
        sample_refs: Enum.map(pairs, &%{session_id: &1.session_id, from: &1.from_turn_id, to: &1.to_turn_id})
      }}
@@ -266,6 +279,51 @@ defmodule Brain.Neural.StateTransitionBuilder do
   defp tensor_batch(_), do: {:error, :empty_transition_batch}
 
   defp session_names(rows), do: rows |> Enum.map(& &1.session_id) |> Enum.uniq() |> Enum.sort()
+  defp count_valid_cells(batch), do: batch.mask |> Nx.sum() |> Nx.to_number() |> round()
+
+  # Only actual measurements are prediction targets. Availability flags
+  # tell Axon what was observed but are never targets themselves.
+  # A memory event absent from the archive is UNKNOWN, not a verified zero.
+  defp observation_mask(turn, stats) do
+    cognition = map(turn["cognition"])
+    raw = raw_modulators(cognition)
+    derived = map(cognition["mood"])
+    mem = Map.get(stats, {turn["session_id"], turn["turn_id"]})
+    event_known? = is_map(mem)
+    attempts? = event_known? and mem.attempts > 0
+
+    [
+      observed_number?(cognition, "confidence"),
+      false,
+      has_mood_number?(raw, ["da", "dopamine"]),
+      false,
+      has_mood_number?(raw, ["5ht", "serotonin", "ht"]),
+      false,
+      has_mood_number?(raw, ["glu", "glutamate"]),
+      false,
+      has_mood_number?(raw, ["ne", "norepinephrine"]),
+      false,
+      has_mood_number?(derived, ["exploration"]),
+      has_mood_number?(derived, ["inhibition"]),
+      has_mood_number?(derived, ["vigilance"]),
+      has_mood_number?(derived, ["plasticity"]),
+      false,
+      is_list(cognition["tokens"]) or is_binary(turn["user_text"]),
+      observed_collection?(cognition["lifg_choices"]),
+      observed_collection?(cognition["semantic_choices"]),
+      observed_collection?(cognition["action_candidates"]),
+      event_known?,
+      event_known?,
+      event_known?,
+      attempts?,
+      false
+    ]
+    |> Enum.map(&bool/1)
+  end
+
+  defp observed_number?(map, key), do: is_number(Map.get(map, key))
+  defp observed_collection?(v), do: is_list(v) or is_map(v)
+
 
   defp raw_modulators(cognitive) do
     cognitive
