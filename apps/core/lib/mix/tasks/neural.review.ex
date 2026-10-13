@@ -15,8 +15,8 @@ defmodule Mix.Tasks.Neural.Review do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, rest, invalid} = OptionParser.parse(argv, strict: [dir: :string, recheck: :boolean])
-    if rest != [] or invalid != [], do: Mix.raise("Usage: mix neural.review [--dir DIR] [--recheck]")
+    {opts, rest, invalid} = OptionParser.parse(argv, strict: [dir: :string, recheck: :boolean, turn: :string])
+    if rest != [] or invalid != [], do: Mix.raise("Usage: mix neural.review [--dir DIR] [--recheck] [--turn TURN_ID]")
 
     Mix.Task.run("compile")
     dir = Keyword.get(opts, :dir, "tmp/training")
@@ -29,9 +29,19 @@ defmodule Mix.Tasks.Neural.Review do
         Mix.shell().info("No #{if(recheck?, do: "reviewed", else: "pending")} episodic attachment candidates.")
 
       {:ok, candidates} ->
-        Mix.shell().info("#{length(candidates)} memory candidates for #{if(recheck?, do: "rechecking", else: "review")}.")
-        Mix.shell().info("Only choose y/n when you can judge relevance from the evidence.")
-        review_each(dir, candidates, 1, recheck?)
+        turn_id = Keyword.get(opts, :turn)
+        selected =
+          if is_binary(turn_id) and turn_id != "",
+            do: Enum.filter(candidates, &(&1.turn_id == turn_id)),
+            else: candidates
+
+        if selected == [] do
+          Mix.shell().info("No matching memory candidates for the requested turn.")
+        else
+          Mix.shell().info("#{length(selected)} memory candidates for #{if(recheck?, do: "rechecking", else: "review")}.")
+          Mix.shell().info("Only choose y/n when you can judge relevance from the evidence.")
+          review_each(dir, selected, 1, recheck?)
+        end
 
       {:error, reason} ->
         Mix.raise("Cannot read review queue: #{inspect(reason)}")
