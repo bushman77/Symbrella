@@ -18,13 +18,13 @@ defmodule Mix.Tasks.Neural.Train do
   def run(argv) do
     {opts, positional, invalid} =
       OptionParser.parse(argv,
-        strict: [task: :string, dir: :string, epochs: :integer, hidden_units: :integer]
+        strict: [task: :string, dir: :string, epochs: :integer, hidden_units: :integer, smoke: :boolean]
       )
 
     if invalid != [] or positional != [] or
          Keyword.get(opts, :task) != "memory_relevance" do
       Mix.raise(
-        "Usage: mix neural.train --task memory_relevance [--dir DIR] [--epochs N]"
+        "Usage: mix neural.train --task memory_relevance [--dir DIR] [--epochs N] [--smoke]"
       )
     end
 
@@ -35,16 +35,31 @@ defmodule Mix.Tasks.Neural.Train do
       opts
       |> Keyword.take([:epochs, :hidden_units])
 
-    with {:ok, dataset} <- TrainingBuilder.build(dir, :memory_relevance),
+    smoke? = Keyword.get(opts, :smoke, false)
+
+    dataset_result =
+      if smoke?,
+        do: TrainingBuilder.build_smoke(dir, :memory_relevance),
+        else: TrainingBuilder.build(dir, :memory_relevance)
+
+    with {:ok, dataset} <- dataset_result,
          {:ok, artifact} <- MemoryRelevancePilot.train(dataset, options) do
       Mix.shell().info("Experimental memory-relevance Axon pilot")
       Mix.shell().info("Train: #{artifact.train_examples} reviewed candidates")
-      Mix.shell().info("Holdout: #{artifact.eval_examples} reviewed candidates")
       Mix.shell().info("Training sessions: #{length(artifact.train_sessions)}")
-      Mix.shell().info("Evaluation sessions: #{length(artifact.eval_sessions)}")
       Mix.shell().info("Training MSE: #{Float.round(artifact.train_mse, 5)}")
-      Mix.shell().info("Holdout MSE: #{Float.round(artifact.eval_mse, 5)}")
-      Mix.shell().info("Recall-score baseline holdout MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+
+      if smoke? do
+        Mix.shell().info("SMOKE TEST: training and evaluation use the SAME examples.")
+        Mix.shell().info("In-sample model MSE: #{Float.round(artifact.eval_mse, 5)}")
+        Mix.shell().info("In-sample baseline MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+        Mix.shell().info("NO holdout evaluation; the model has NOT demonstrated generalization.")
+      else
+        Mix.shell().info("Holdout: #{artifact.eval_examples} reviewed candidates")
+        Mix.shell().info("Evaluation sessions: #{length(artifact.eval_sessions)}")
+        Mix.shell().info("Holdout MSE: #{Float.round(artifact.eval_mse, 5)}")
+        Mix.shell().info("Recall-score baseline holdout MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+      end
 
       if artifact.train_examples < 20 or artifact.eval_examples < 20 do
         Mix.shell().info("WARNING: Tiny pilot sample: the metrics are not a reliable quality estimate.")
@@ -55,7 +70,8 @@ defmodule Mix.Tasks.Neural.Train do
         Mix.shell().info("WARNING: Training labels have only one class; collect both y and n.")
       end
 
-      path = Path.join(dir, "memory_relevance_pilot.etf")
+      filename = if smoke?, do: "memory_relevance_smoke.etf", else: "memory_relevance_pilot.etf"
+      path = Path.join(dir, filename)
 
       case MemoryRelevancePilot.save(artifact, path) do
         :ok ->
