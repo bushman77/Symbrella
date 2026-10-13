@@ -7,9 +7,9 @@ defmodule Brain.Neural.StateTransitionPilot do
   baseline. This is research only, not a live cognitive prediction circuit.
   """
 
-  alias Brain.Neural.StateTransitionBuilder
+  alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask}
 
-  @model_version "state-transition-pilot-v2"
+  @model_version "state-transition-pilot-v3"
   @epochs 25
   @hidden 8
 
@@ -32,12 +32,18 @@ defmodule Brain.Neural.StateTransitionPilot do
 
       params =
         model
-        |> Axon.Loop.trainer(:mean_squared_error, :sgd, log: 0)
-        |> Axon.Loop.run([{train.x, train.y}], Axon.ModelState.empty(), epochs: epochs)
+        |> Axon.Loop.trainer(&StateTransitionMask.loss/2, :sgd, log: 0)
+        |> Axon.Loop.run(
+          [{train.x, StateTransitionMask.targets(train.y, train.mask)}],
+          Axon.ModelState.empty(),
+          epochs: epochs
+        )
 
       {_initialize, predict} = Axon.build(model)
       train_prediction = predict.(params, train.x)
       eval_prediction = predict.(params, evaluation.x)
+      train_metrics = StateTransitionMask.metrics(features, train_prediction, train.x, train.y, train.mask)
+      eval_metrics = StateTransitionMask.metrics(features, eval_prediction, evaluation.x, evaluation.y, evaluation.mask)
 
       {:ok,
        %{
@@ -54,10 +60,15 @@ defmodule Brain.Neural.StateTransitionPilot do
          eval_sessions: meta.eval_sessions,
          split_mode: meta.split_mode,
          evaluated?: meta.split_mode == :session_holdout,
-         train_mse: mse(train_prediction, train.y),
-         eval_mse: mse(eval_prediction, evaluation.y),
-         persistence_train_mse: mse(train.x, train.y),
-         persistence_eval_mse: mse(evaluation.x, evaluation.y),
+         train_mse: train_metrics.model_mse,
+         eval_mse: eval_metrics.model_mse,
+         persistence_train_mse: train_metrics.persistence_mse,
+         persistence_eval_mse: eval_metrics.persistence_mse,
+         train_per_feature: train_metrics.per_feature,
+         eval_per_feature: eval_metrics.per_feature,
+         valid_train_cells: train_metrics.valid_cells,
+         valid_eval_cells: eval_metrics.valid_cells,
+         mask_policy: :both_endpoints_observed_exclude_presence_indicators,
          deployment_status: :experimental_not_for_runtime
        }}
     end
@@ -84,12 +95,7 @@ defmodule Brain.Neural.StateTransitionPilot do
       else: {:error, :invalid_training_options}
   end
 
-  defp validate_dataset(train, evaluation, meta, names, width) do
-    train_shape = Nx.shape(train.x)
-    eval_shape = Nx.shape(evaluation.x)
-    train_y_shape = Nx.shape(train.y)
-    eval_y_shape = Nx.shape(evaluation.y)
-
+  defp validate_dataset(train, evaluation, meta, names, _width) do
     cond do
       meta[:task] != :state_transition ->
         {:error, :incorrect_training_task}
@@ -97,33 +103,26 @@ defmodule Brain.Neural.StateTransitionPilot do
       meta[:feature_schema_version] != StateTransitionBuilder.feature_schema_version() ->
         {:error, :feature_schema_mismatch}
 
-      train[:feature_names] != names or evaluation[:feature_names] != names ->
-        {:error, :feature_schema_mismatch}
-
-      not match?({n, ^width} when n > 0, train_shape) or
-          not match?({n, ^width} when n > 0, eval_shape) ->
-        {:error, :invalid_feature_tensor_shape}
-
-      train_shape != train_y_shape or eval_shape != eval_y_shape ->
-        {:error, :invalid_target_shape}
-
-      meta[:split_mode] == :in_sample_smoke ->
-        :ok
-
-      not MapSet.disjoint?(MapSet.new(meta[:train_sessions] || []),
-            MapSet.new(meta[:eval_sessions] || [])) ->
-        {:error, :session_leakage}
-
       true ->
-        :ok
-    end
-  end
+        with :ok <- StateTransitionMask.validate_batch(train, names),
+             :ok <- StateTransitionMask.validate_batch(evaluation, names) do
+          cond do
+            meta[:split_mode] == :in_sample_smoke ->
+              :ok
 
-  defp mse(predictions, targets) do
-    Nx.subtract(predictions, targets)
-    |> Nx.pow(2)
-    |> Nx.mean()
-    |> Nx.to_number()
-    |> Kernel.*(1.0)
+            meta[:split_mode] != :session_holdout or
+                MapSet.size(MapSet.new(meta[:train_sessions] || [])) == 0 or
+                MapSet.size(MapSet.new(meta[:eval_sessions] || [])) == 0 or
+                not MapSet.disjoint?(
+                  MapSet.new(meta[:train_sessions] || []),
+                  MapSet.new(meta[:eval_sessions] || [])
+                ) ->
+              {:error, :session_leakage}
+
+            true ->
+              :ok
+          end
+        end
+    end
   end
 end
