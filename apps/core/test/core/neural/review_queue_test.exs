@@ -119,4 +119,42 @@ defmodule Core.Neural.ReviewQueueTest do
 
     assert {:ok, [_one]} = ReviewQueue.pending(dir)
   end
+  test "human can correct a previous y to n without erasing the original feedback", %{dir: dir} do
+    record(dir, "session-a", "t1", "hockey", 0.2)
+    record(dir, "session-b", "t2", "biology", 0.1)
+
+    {:ok, [a, b]} = ReviewQueue.pending(dir)
+    assert :ok == ReviewQueue.review(dir, a, true)
+    assert :ok == ReviewQueue.review(dir, b, true)
+
+    assert {:ok, [reviewed_a, reviewed_b]} = ReviewQueue.reviewed(dir)
+    assert reviewed_a.previous_relevant == true
+    assert reviewed_b.previous_relevant == true
+    assert :unchanged == ReviewQueue.review(dir, reviewed_a, true, correct: true)
+
+    assert :ok == ReviewQueue.review(dir, reviewed_a, false, correct: true)
+
+    # Repeating an ordinary review remains disallowed.
+    assert {:error, :not_pending} == ReviewQueue.review(dir, reviewed_a, false)
+    # Rechecking now sees the corrected last label.
+    assert {:ok, [revised_a, revised_b]} = ReviewQueue.reviewed(dir)
+    assert revised_a.previous_relevant == false
+    assert revised_b.previous_relevant == true
+
+    feedback =
+      File.read!(Path.join(dir, "feedback.jsonl"))
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    assert Enum.map(feedback, &get_in(&1, ["label", "relevant"])) == [true, true, false]
+    assert Enum.map(feedback, & &1["correction"]) == [false, false, true]
+
+    assert {:ok, dataset} = TrainingBuilder.build(dir, :memory_relevance)
+    assert dataset.metadata.reviewed_examples == 2
+
+    assert {:ok, smoke} = TrainingBuilder.build_smoke(dir, :memory_relevance)
+    assert Nx.to_list(smoke.train.y) == [[0.0], [1.0]]
+  end
+
+
 end
