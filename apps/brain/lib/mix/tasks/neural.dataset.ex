@@ -63,6 +63,12 @@ defmodule Mix.Tasks.Neural.Dataset do
         Mix.shell().info("Target tensor: #{inspect(Nx.shape(train.y))}")
         Mix.shell().info("Evaluation tensor: #{inspect(Nx.shape(evaluation.x))}")
         Mix.shell().info("Split mode: #{Map.get(metadata, :split_mode, :session_holdout)}")
+        if task == :state_transition do
+          Mix.shell().info(
+            "Raw neuromodulator snapshots: #{metadata.complete_modulator_turns}/" <>
+              "#{metadata.input_turns} complete; #{metadata.missing_modulator_turns} missing/incomplete"
+          )
+        end
         Mix.shell().info("No model weights were changed.")
 
       {:error, reason} ->
