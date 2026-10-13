@@ -376,3 +376,59 @@ mix test apps/core/test/core/neural/review_queue_test.exs \
   apps/brain/test/brain/neural/memory_relevance_pilot_test.exs \
   apps/brain/test/brain/neural/training_builder_test.exs
 ```
+
+
+## Correcting existing human relevance labels
+
+Previously the review command hid labeled candidates, even when a person
+mistakenly chose \`y\` for an irrelevant memory. Existing archives do **not**
+need to be deleted or edited by hand. Reopen a specific turn:
+
+\`\`\`sh
+mix neural.review --recheck --turn turn-9f0a80367896c3ca99fd827abcd76558
+\`\`\`
+
+Or review every existing label again:
+
+\`\`\`sh
+mix neural.review --recheck
+\`\`\`
+
+The command displays the previous label for each matching memory. Choosing
+the same decision leaves the archive untouched; choosing the opposite appends
+a **new human feedback event with \`correction: true\`** to
+\`feedback.jsonl\`. The original feedback record is retained as an audit
+trail. \`Brain.Neural.TrainingBuilder\` uses the latest explicitly corrected
+human label for that turn and exact episode fingerprint; unmarked duplicate
+feedback still causes an error.
+
+For the initial pilot, examples should be labeled **relevant only if the
+recalled content would genuinely help answer the original user request**.
+Shared generic words such as "its" or "a" do not imply relevance.
+
+Count labels after corrections:
+
+\`\`\`sh
+jq -r 'select(.label.kind=="memory_relevance") |
+  [.label.relevant,.correction] | @tsv' \
+  tmp/training/feedback.jsonl
+\`\`\`
+
+Because the JSONL is an append-only audit trail, this command counts original
+and corrected events; the trainer uses the **latest effective correction**
+instead. The next \`mix neural.train ... --smoke\` output displays effective
+positive and negative counts.
+
+### Interpreting pilot scores
+
+The trainer now prints the label distribution and a **class-prevalence
+baseline** alongside hippocampal recall-score MSE. If all examples are
+positive, a constant prediction of 1.0 has zero in-sample MSE; an Axon model
+with in-sample MSE 0.23 has not beaten this trivial baseline. With only 13
+reviews, even a holdout split over two sessions is far too small to provide
+robust evidence of generalization.
+
+The warning about initializing Axon with a parameter map was also addressed
+by passing \`Axon.ModelState.empty()\` as the initial model state for the
+experimental memory-relevance trainer. The Hippocampus \`handle_call/3\`
+clauses have been regrouped to silence the separate Elixir compiler warning.
