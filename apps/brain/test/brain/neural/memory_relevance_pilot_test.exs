@@ -46,15 +46,13 @@ defmodule Brain.Neural.MemoryRelevancePilotTest do
 
   test "single-session smoke mode is explicitly not an evaluation" do
     base = dataset()
-    data = %{
-      base |
-      eval: base.train,
-      metadata: %{
-        base.metadata |
-        train_sessions: ["only-session"],
-        eval_sessions: ["only-session"]
-      } |> Map.put(:split_mode, :in_sample_smoke)
-    }
+    metadata =
+      base.metadata
+      |> Map.put(:train_sessions, ["only-session"])
+      |> Map.put(:eval_sessions, ["only-session"])
+      |> Map.put(:split_mode, :in_sample_smoke)
+
+    data = %{base | eval: base.train, metadata: metadata}
 
     assert {:ok, result} = MemoryRelevancePilot.train(data, epochs: 1)
     assert result.evaluated? == false
