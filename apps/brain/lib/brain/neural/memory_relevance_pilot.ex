@@ -34,7 +34,7 @@ defmodule Brain.Neural.MemoryRelevancePilot do
       params =
         model
         |> Axon.Loop.trainer(:mean_squared_error, :sgd, log: 0)
-        |> Axon.Loop.run([{train.x, train.y}], %{}, epochs: epochs)
+        |> Axon.Loop.run([{train.x, train.y}], Axon.ModelState.empty(), epochs: epochs)
 
       {_init, predict} = Axon.build(model)
       train_predictions = predict.(params, train.x) |> Nx.to_list() |> List.flatten()
