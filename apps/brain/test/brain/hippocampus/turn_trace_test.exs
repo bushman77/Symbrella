@@ -68,4 +68,17 @@ defmodule Brain.Hippocampus.TurnTraceTest do
 
     assert TurnTrace.finish() == []
   end
+  test "marks overflow instead of silently treating a partial trace as complete" do
+    TurnTrace.start()
+
+    Enum.each(1..520, fn _ ->
+      assert :ok == TurnTrace.recall(:recall, ["missing"], [limit: 3], [])
+    end)
+
+    events = TurnTrace.finish()
+    assert length(events) == 513
+    assert List.last(events) == %{kind: :trace_truncated, limit: 512}
+  end
+
+
 end
