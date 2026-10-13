@@ -1,93 +1,140 @@
 defmodule Mix.Tasks.Neural.Train do
   @moduledoc """
-  Offline, advisory Axon memory-relevance pilot:
+  Two **separate** experimental, offline Axon learning objectives:
 
-      mix neural.train --task memory_relevance --dir tmp/training
-      mix neural.train --task memory_relevance --epochs 50
+    mix neural.train --task memory_relevance --smoke
+    mix neural.train --task state_transition --smoke
+    mix neural.train --task state_transition
 
-  Requires human-reviewed relevance labels from independent sessions. Never
-  applies model weights to the live Hippocampus or any response component.
+  Memory relevance requires independent human ratings. State transition
+  learns from the next archived cognitive state automatically and needs no
+  human labels. Neither model is installed in the running assistant.
   """
   use Mix.Task
 
   alias Brain.Neural.{TrainingBuilder, MemoryRelevancePilot}
+  alias Brain.Neural.{StateTransitionBuilder, StateTransitionPilot}
 
-  @shortdoc "Train and evaluate experimental reviewed-memory Axon model"
+  @shortdoc "Train isolated Axon pilots on human feedback or observed state transitions"
 
   @impl Mix.Task
   def run(argv) do
     {opts, positional, invalid} =
       OptionParser.parse(argv,
-        strict: [task: :string, dir: :string, epochs: :integer, hidden_units: :integer, smoke: :boolean]
+        strict: [
+          task: :string,
+          dir: :string,
+          epochs: :integer,
+          hidden_units: :integer,
+          smoke: :boolean
+        ]
       )
 
+    task = Keyword.get(opts, :task)
+
     if invalid != [] or positional != [] or
-         Keyword.get(opts, :task) != "memory_relevance" do
+         task not in ["memory_relevance", "state_transition"] do
       Mix.raise(
-        "Usage: mix neural.train --task memory_relevance [--dir DIR] [--epochs N] [--smoke]"
+        "Usage: mix neural.train --task memory_relevance|state_transition [--dir DIR] [--epochs N] [--smoke]"
       )
     end
 
     Mix.Task.run("compile")
     dir = Keyword.get(opts, :dir, "tmp/training")
-
-    options =
-      opts
-      |> Keyword.take([:epochs, :hidden_units])
-
     smoke? = Keyword.get(opts, :smoke, false)
+    settings = Keyword.take(opts, [:epochs, :hidden_units])
 
-    dataset_result =
+    case task do
+      "memory_relevance" -> train_relevance(dir, smoke?, settings)
+      "state_transition" -> train_transition(dir, smoke?, settings)
+    end
+  end
+
+  defp train_relevance(dir, smoke?, settings) do
+    dataset =
       if smoke?,
         do: TrainingBuilder.build_smoke(dir, :memory_relevance),
         else: TrainingBuilder.build(dir, :memory_relevance)
 
-    with {:ok, dataset} <- dataset_result,
-         {:ok, artifact} <- MemoryRelevancePilot.train(dataset, options) do
+    with {:ok, data} <- dataset,
+         {:ok, result} <- MemoryRelevancePilot.train(data, settings) do
       Mix.shell().info("Experimental memory-relevance Axon pilot")
-      Mix.shell().info("Train: #{artifact.train_examples} reviewed candidates")
-      Mix.shell().info("Training sessions: #{length(artifact.train_sessions)}")
-      Mix.shell().info("Training MSE: #{Float.round(artifact.train_mse, 5)}")
-      Mix.shell().info("Training labels: #{artifact.labels.train_positive} relevant / #{artifact.train_examples - artifact.labels.train_positive} irrelevant")
-      Mix.shell().info("Train-label prevalence baseline MSE: #{Float.round(artifact.class_prior_train_mse, 5)}")
+      Mix.shell().info("Train: #{result.train_examples} reviewed candidates")
+      Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
+      Mix.shell().info("Training MSE: #{Float.round(result.train_mse, 5)}")
+      Mix.shell().info("Training labels: #{result.labels.train_positive} relevant / #{result.train_examples - result.labels.train_positive} irrelevant")
+      Mix.shell().info("Train-label prevalence baseline MSE: #{Float.round(result.class_prior_train_mse, 5)}")
 
       if smoke? do
-        Mix.shell().info("SMOKE TEST: training and evaluation use the SAME examples.")
-        Mix.shell().info("In-sample model MSE: #{Float.round(artifact.eval_mse, 5)}")
-        Mix.shell().info("In-sample recall-score baseline MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
-        Mix.shell().info("In-sample class-prior baseline MSE: #{Float.round(artifact.class_prior_eval_mse, 5)}")
-        Mix.shell().info("NO holdout evaluation; the model has NOT demonstrated generalization.")
+        Mix.shell().info("SMOKE TEST: same observations in training and evaluation.")
+        Mix.shell().info("In-sample MSE: #{Float.round(result.eval_mse, 5)}")
+        Mix.shell().info("In-sample recall-score baseline: #{Float.round(result.baseline_eval_mse, 5)}")
+        Mix.shell().info("In-sample class-prior baseline: #{Float.round(result.class_prior_eval_mse, 5)}")
       else
-        Mix.shell().info("Holdout: #{artifact.eval_examples} reviewed candidates")
-        Mix.shell().info("Evaluation sessions: #{length(artifact.eval_sessions)}")
-        Mix.shell().info("Holdout MSE: #{Float.round(artifact.eval_mse, 5)}")
-        Mix.shell().info("Recall-score baseline holdout MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
-        Mix.shell().info("Class-prior baseline holdout MSE: #{Float.round(artifact.class_prior_eval_mse, 5)}")
+        Mix.shell().info("Session-held-out examples: #{result.eval_examples}")
+        Mix.shell().info("Holdout MSE: #{Float.round(result.eval_mse, 5)}")
+        Mix.shell().info("Recall-score baseline holdout MSE: #{Float.round(result.baseline_eval_mse, 5)}")
+        Mix.shell().info("Class-prior baseline holdout MSE: #{Float.round(result.class_prior_eval_mse, 5)}")
       end
 
-      if artifact.train_examples < 20 or artifact.eval_examples < 20 do
-        Mix.shell().info("WARNING: Tiny pilot sample: the metrics are not a reliable quality estimate.")
+      if result.train_examples < 20 or result.eval_examples < 20 do
+        Mix.shell().info("WARNING: insufficient samples for reliable quality estimates.")
       end
 
-      if artifact.labels.train_positive == 0 or
-           artifact.labels.train_positive == artifact.train_examples do
-        Mix.shell().info("WARNING: Training labels have only one class; collect both y and n.")
+      if result.labels.train_positive in [0, result.train_examples] do
+        Mix.shell().info("WARNING: one-class labels; collect relevant and irrelevant examples.")
       end
 
       filename = if smoke?, do: "memory_relevance_smoke.etf", else: "memory_relevance_pilot.etf"
+      save_relevance(result, Path.join(dir, filename))
+    else
+      {:error, reason} -> Mix.raise("Cannot train reviewed memory relevance: #{inspect(reason)}")
+    end
+  end
+
+  defp save_relevance(artifact, path) do
+    case MemoryRelevancePilot.save(artifact, path) do
+      :ok -> complete(path)
+      {:error, reason} -> Mix.raise("Cannot save experimental weights: #{inspect(reason)}")
+    end
+  end
+
+  defp train_transition(dir, smoke?, settings) do
+    with {:ok, data} <- StateTransitionBuilder.build(dir, smoke: smoke?),
+         {:ok, result} <- StateTransitionPilot.train(data, settings) do
+      Mix.shell().info("Experimental self-supervised cognitive-state Axon pilot")
+      Mix.shell().info("Training transitions: #{result.train_examples}")
+      Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
+      Mix.shell().info("Model training MSE: #{Float.round(result.train_mse, 5)}")
+      Mix.shell().info("Persistence baseline training MSE: #{Float.round(result.persistence_train_mse, 5)}")
+
+      if smoke? do
+        Mix.shell().info("SMOKE TEST: NO independent evaluation.")
+        Mix.shell().info("In-sample MSE: #{Float.round(result.eval_mse, 5)}")
+      else
+        Mix.shell().info("Holdout transitions: #{result.eval_examples}")
+        Mix.shell().info("Holdout MSE: #{Float.round(result.eval_mse, 5)}")
+        Mix.shell().info("Holdout persistence baseline MSE: #{Float.round(result.persistence_eval_mse, 5)}")
+      end
+
+      if result.train_examples < 20 or result.eval_examples < 20 do
+        Mix.shell().info("WARNING: tiny transition sample, not evidence of useful learned cognition.")
+      end
+
+      filename = if smoke?, do: "state_transition_smoke.etf", else: "state_transition_pilot.etf"
       path = Path.join(dir, filename)
 
-      case MemoryRelevancePilot.save(artifact, path) do
-        :ok ->
-          Mix.shell().info("Saved experimental checkpoint: #{path}")
-          Mix.shell().info("Live memory ranking and Symbrella responses remain unchanged.")
-
-        {:error, reason} ->
-          Mix.raise("Trained, but could not save experimental checkpoint: #{inspect(reason)}")
+      case StateTransitionPilot.save(result, path) do
+        :ok -> complete(path)
+        {:error, reason} -> Mix.raise("Cannot save experimental weights: #{inspect(reason)}")
       end
     else
-      {:error, reason} ->
-        Mix.raise("Cannot run reviewed Axon pilot: #{inspect(reason)}")
+      {:error, reason} -> Mix.raise("Cannot train state transitions: #{inspect(reason)}")
     end
+  end
+
+  defp complete(path) do
+    Mix.shell().info("Saved offline experiment: #{path}")
+    Mix.shell().info("Live cognitive decisions and hippocampal ranking remain unchanged.")
   end
 end
