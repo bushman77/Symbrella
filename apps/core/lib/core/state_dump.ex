@@ -31,7 +31,7 @@ defmodule Core.StateDump do
         path = config |> Keyword.get(:path, @default_path) |> Path.expand()
         entry = format_entry(stage, term)
 
-        case :global.trans({__MODULE__, path}, fn -> append_private(path, entry) end) do
+        case :global.trans({{__MODULE__, path}, self()}, fn -> append_private(path, entry) end) do
           :ok -> :ok
           {:error, reason} -> Logger.warning("[Core.StateDump] write failed: #{inspect(reason)}")
           {:aborted, reason} -> Logger.warning("[Core.StateDump] lock failed: #{inspect(reason)}")
