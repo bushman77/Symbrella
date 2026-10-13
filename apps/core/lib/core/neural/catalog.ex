@@ -268,9 +268,12 @@ defmodule Core.Neural.Catalog do
 
   defp scalar?(value), do: is_binary(value) or is_boolean(value) or is_number(value)
 
-  defp counts(rows, key) do
+  defp counts(rows, "category"), do: frequency_of(rows, :category)
+  defp counts(rows, "subtype"), do: frequency_of(rows, :subtype)
+
+  defp frequency_of(rows, key) do
     rows
-    |> Enum.frequencies_by(&Map.fetch!(&1, String.to_existing_atom(key)))
+    |> Enum.frequencies_by(&Map.fetch!(&1, key))
     |> Enum.sort_by(&elem(&1, 0))
     |> Map.new()
   end
