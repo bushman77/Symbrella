@@ -54,7 +54,7 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert data.metadata.input_turns == 5
     assert data.metadata.complete_modulator_turns == 5
     assert data.metadata.missing_modulator_turns == 0
-    assert data.metadata.feature_schema_version == 2
+    assert data.metadata.feature_schema_version == 3
     assert length(data.metadata.feature_names) == 24
     assert data.metadata.total_pairs == 3
     assert data.metadata.train_examples == 2
@@ -65,6 +65,9 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     count = length(StateTransitionBuilder.feature_names())
     assert Nx.shape(data.train.x) == {2, count}
     assert Nx.shape(data.train.y) == {2, count}
+    assert Nx.shape(data.train.mask) == {2, count}
+    assert data.metadata.train_valid_cells > 0
+    assert data.metadata.eval_valid_cells > 0
 
     # Target is the ACTUAL next observed confidence, not a made-up "correct" label.
     [x1 | _] = Nx.to_list(data.train.x)
@@ -73,7 +76,9 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert_in_delta hd(y1), 0.4, 0.00001
 
     assert {:ok, model} = StateTransitionPilot.train(data, epochs: 1)
-    assert model.model_version == "state-transition-pilot-v2"
+    assert model.model_version == "state-transition-pilot-v3"
+    assert model.valid_train_cells == data.metadata.train_valid_cells
+    assert model.valid_eval_cells == data.metadata.eval_valid_cells
     assert model.evaluated? == true
     assert model.train_examples == 2
     assert model.eval_examples == 1
@@ -198,6 +203,56 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     # Missing raw levels are not incorrectly inferred from the derived mood.
     assert_in_delta at.(target, :mood_exploration), 0.4, 0.000001
     assert at.(target, :mood_present) == 1.0
+  end
+
+
+  test "missing raw readings never become supervised targets and presence flags are input-only", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4, 0.6]}])
+    path = Path.join(dir, "turns.jsonl")
+    [a, b, c] = path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    # Missing at the middle turn invalidates both pairs' raw modulator targets.
+    b = update_in(b, ["cognition"], &Map.delete(&1, "self_model"))
+    File.write!(path, Enum.map_join([a, b, c], "", &(Jason.encode!(&1) <> "\n")))
+
+    assert {:ok, dataset} = StateTransitionBuilder.build(dir, smoke: true)
+    assert dataset.metadata.missing_modulator_turns == 1
+    assert dataset.metadata.train_examples == 2
+
+    names = StateTransitionBuilder.feature_names()
+    idx = fn name -> Enum.find_index(names, &(&1 == name)) end
+    [first, second] = Nx.to_list(dataset.train.mask)
+
+    for mask <- [first, second] do
+      for name <- [:mood_da, :mood_5ht, :mood_glu, :mood_ne] do
+        assert Enum.at(mask, idx.(name)) == 0.0
+      end
+
+      for name <- [
+        :confidence_present, :mood_da_present, :mood_5ht_present,
+        :mood_glu_present, :mood_ne_present, :mood_present,
+        :self_monitor_present
+      ] do
+        assert Enum.at(mask, idx.(name)) == 0.0
+      end
+
+      # Both ends retain real cognitive observations on the derived mood.
+      assert Enum.at(mask, idx.(:mood_exploration)) == 1.0
+      assert Enum.at(mask, idx.(:confidence)) == 1.0
+    end
+
+    assert dataset.metadata.train_valid_cells < 2 * length(names)
+  end
+
+  test "a gap in recorded events is not automatically an observed zero count", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4]}])
+    assert {:ok, data} = StateTransitionBuilder.build(dir, smoke: true)
+    [mask] = Nx.to_list(data.train.mask)
+    features = StateTransitionBuilder.feature_names()
+    for feature <- [:episodic_encode_count, :episodic_recall_count, :recall_attempt_count, :recall_hit_fraction] do
+      i = Enum.find_index(features, &(&1 == feature))
+      assert Enum.at(mask, i) == 0.0
+    end
   end
 
 
