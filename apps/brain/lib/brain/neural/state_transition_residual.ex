@@ -8,13 +8,13 @@ defmodule Brain.Neural.StateTransitionResidual do
   persistence baseline. A trained model must beat persistence on a held-out
   session before its added complexity can be justified.
 
-  Never loaded into live Symbrella. Inputs are the frozen version-1 16-feature
+  Never loaded into live Symbrella. Inputs use the version-2 24-feature
   projection from StateTransitionBuilder, NOT the raw object archive.
   """
 
   alias Brain.Neural.StateTransitionBuilder
 
-  @model_version "state-transition-residual-v1"
+  @model_version "state-transition-residual-v2"
   @default_epochs 25
   @default_hidden 8
 
