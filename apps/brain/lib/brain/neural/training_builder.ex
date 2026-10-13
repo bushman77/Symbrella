@@ -171,11 +171,20 @@ defmodule Brain.Neural.TrainingBuilder do
       {:error, :no_reviewed_examples}
     else
       episodic_index = index_episodic_events(events)
+      events_by_turn =
+        events
+        |> Enum.filter(fn event ->
+          event["record_type"] == "memory_event" and
+            event["schema_version"] == @schema_version and
+            event["kind"] == "episodic_recall" and
+            valid_key?(record_key(event))
+        end)
+        |> Enum.group_by(&record_key/1)
 
       result =
         Enum.reduce_while(selected, {:ok, [], MapSet.new()}, fn feedback_row,
                                                                 {:ok, acc, seen} ->
-          case example_from_feedback(task, feedback_row, turns, episodic_index, events) do
+          case example_from_feedback(task, feedback_row, turns, episodic_index, events_by_turn) do
             {:ok, example} ->
               if MapSet.member?(seen, example.label_key) do
                 {:halt, {:error, {:duplicate_review, example.label_key}}}
@@ -196,14 +205,14 @@ defmodule Brain.Neural.TrainingBuilder do
     end
   end
 
-  defp example_from_feedback(task, feedback, turns, episodes, all_events) do
+  defp example_from_feedback(task, feedback, turns, episodes, events_by_turn) do
     key = record_key(feedback)
     label = feedback["label"]
 
     with :ok <- validate_feedback(feedback),
          {:ok, turn} <- fetch_turn(turns, key),
          {:ok, event, target, label_key} <- training_target(task, label, key, episodes),
-         {:ok, features} <- extract_features(turn, event, all_events) do
+         {:ok, features} <- extract_features(turn, event, Map.get(events_by_turn, key, [])) do
       {:ok,
        %{
          session_id: elem(key, 0),
@@ -287,16 +296,9 @@ defmodule Brain.Neural.TrainingBuilder do
     end)
   end
 
-  defp extract_features(turn, candidate, all_events) do
+  defp extract_features(turn, candidate, recalled) do
     cognition = turn["cognition"]
     mood = as_map(cognition["mood"])
-    key = record_key(turn)
-
-    recalled =
-      Enum.filter(all_events, fn event ->
-        event["kind"] == "episodic_recall" and record_key(event) == key
-      end)
-
     selected = candidate || top_ranked(recalled)
     confidence = cognition["confidence"]
 
