@@ -98,6 +98,7 @@ defmodule Core.TrainingArchive do
             turn_id: attrs.turn_id,
             reviewed_by: attrs.reviewed_by,
             source: "human_review",
+            correction: Map.get(attrs, :correction) == true,
             label: json_safe(label),
             note: json_safe(Map.get(attrs, :note))
           }
