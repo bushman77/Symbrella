@@ -45,6 +45,9 @@ defmodule Brain.Neural.MemoryRelevancePilot do
 
       train_baseline = recall_scores(train)
       eval_baseline = recall_scores(evaluation)
+      prior = Enum.sum(train_labels) / length(train_labels)
+      train_prior_predictions = List.duplicate(prior, length(train_labels))
+      eval_prior_predictions = List.duplicate(prior, length(eval_labels))
 
       result = %{
         model_version: @model_version,
@@ -64,6 +67,9 @@ defmodule Brain.Neural.MemoryRelevancePilot do
         eval_mse: mse(eval_predictions, eval_labels),
         baseline_train_mse: mse(train_baseline, train_labels),
         baseline_eval_mse: mse(eval_baseline, eval_labels),
+        class_prior: prior,
+        class_prior_train_mse: mse(train_prior_predictions, train_labels),
+        class_prior_eval_mse: mse(eval_prior_predictions, eval_labels),
         labels: %{
           train_positive: Enum.count(train_labels, &(&1 == 1.0)),
           eval_positive: Enum.count(eval_labels, &(&1 == 1.0))
