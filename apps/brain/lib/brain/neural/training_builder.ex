@@ -239,10 +239,25 @@ defmodule Brain.Neural.TrainingBuilder do
           case example_from_feedback(task, feedback_row, turns, episodic_index, events_by_turn) do
             {:ok, example} ->
               if MapSet.member?(seen, example.label_key) do
-                {:halt, {:error, {:duplicate_review, example.label_key}}}
+                if feedback_row["correction"] == true do
+                  # An explicit, verified human correction supersedes the
+                  # earlier label without deleting the historical JSONL row.
+                  updated =
+                    Enum.map(acc, fn stored ->
+                      if stored.label_key == example.label_key, do: example, else: stored
+                    end)
+
+                  {:cont, {:ok, updated, seen}}
+                else
+                  {:halt, {:error, {:duplicate_review, example.label_key}}}
+                end
               else
-                {:cont,
-                 {:ok, [example | acc], MapSet.put(seen, example.label_key)}}
+                if feedback_row["correction"] == true do
+                  {:halt, {:error, {:orphan_review_correction, example.label_key}}}
+                else
+                  {:cont,
+                   {:ok, [example | acc], MapSet.put(seen, example.label_key)}}
+                end
               end
 
             {:error, reason} ->
