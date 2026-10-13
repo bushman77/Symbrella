@@ -18,7 +18,7 @@ defmodule Brain.Neural.StateTransitionMask do
 
     # A completely empty batch must be rejected by the dataset validator.
     # Keep the denominator safe for compilation and for partial mini-batches.
-    Nx.divide(Nx.sum(weighted), Nx.max(Nx.sum(mask), Nx.tensor(1.0)))
+    Nx.divide(Nx.sum(weighted), Nx.add(Nx.sum(mask), 1.0e-8))
   end
 
   @doc "No mutation of the original model inputs or the observed target."
@@ -102,7 +102,7 @@ defmodule Brain.Neural.StateTransitionMask do
       not binary_mask?(batch.mask) ->
         {:error, :invalid_observation_mask}
 
-      Nx.sum(batch.mask) |> Nx.to_number() |> Kernel.==(0) ->
+      Nx.to_number(Nx.sum(batch.mask)) == 0 ->
         {:error, :no_observed_training_targets}
 
       true ->
