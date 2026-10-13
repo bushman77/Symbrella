@@ -226,6 +226,12 @@ defmodule Core.TrainingArchive do
           result: json_safe(fetch(raw, :result))
         })]
 
+      :trace_truncated ->
+        [Map.merge(base, %{
+          kind: "trace_truncated",
+          limit: fetch(raw, :limit)
+        })]
+
       _ ->
         []
     end
