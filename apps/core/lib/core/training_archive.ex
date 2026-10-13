@@ -147,9 +147,20 @@ defmodule Core.TrainingArchive do
       training: %{review_status: "unreviewed", label: nil}
     }
 
-    events =
-      episodic_events(si, session_id, turn_id) ++
-        fact_memory_events(meta, session_id, turn_id)
+    traced = trace_events(attrs, session_id, turn_id)
+    traced_episodes =
+      traced
+      |> Enum.filter(&(&1.kind == "episodic_recall"))
+      |> Enum.map(& &1.episode_fingerprint)
+      |> MapSet.new()
+
+    # The attached-SI projection is a compatibility fallback. If the same
+    # retrieval was already traced at the Hippocampus boundary, do not duplicate it.
+    attached =
+      episodic_events(si, session_id, turn_id)
+      |> Enum.reject(&MapSet.member?(traced_episodes, &1.episode_fingerprint))
+
+    events = traced ++ attached ++ fact_memory_events(meta, session_id, turn_id)
 
     {:ok, turn, events}
   end
@@ -162,6 +173,86 @@ defmodule Core.TrainingArchive do
         value -> Map.put(acc, field, json_safe(value))
       end
     end)
+  end
+
+  # Brain.Hippocampus.TurnTrace supplies events from the chat worker.
+  # Core owns JSONL persistence so the Brain -> Core dependency direction
+  # stays acyclic. Identifiers are joined here, on the completed turn.
+  defp trace_events(attrs, session_id, turn_id) do
+    case fetch(attrs, :hippocampal_events) do
+      events when is_list(events) ->
+        events
+        |> Enum.flat_map(&trace_event(&1, session_id, turn_id))
+
+      _ ->
+        []
+    end
+  end
+
+  defp trace_event(raw, session_id, turn_id) when is_map(raw) do
+    base = %{
+      schema_version: @schema_version,
+      record_type: "memory_event",
+      session_id: session_id,
+      turn_id: turn_id,
+      recorded_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+      review_status: "unreviewed"
+    }
+
+    case fetch(raw, :kind) do
+      :recall_attempt ->
+        [Map.merge(base, %{
+          kind: "recall_attempt",
+          recall_id: fetch(raw, :recall_id),
+          operation: json_safe(fetch(raw, :operation)),
+          source: json_safe(fetch(raw, :source)),
+          cues: json_safe(fetch(raw, :cues)),
+          limit: fetch(raw, :limit),
+          result_count: fetch(raw, :result_count),
+          hit: fetch(raw, :hit?)
+        })]
+
+      :episodic_recall ->
+        trace_episode(base, "episodic_recall", raw)
+
+      :episodic_encode ->
+        trace_episode(base, "episodic_encode", raw)
+
+      :fact_lookup ->
+        [Map.merge(base, %{
+          kind: "fact_lookup",
+          memory_key: json_safe(fetch(raw, :memory_key)),
+          found: fetch(raw, :found?),
+          result: json_safe(fetch(raw, :result))
+        })]
+
+      _ ->
+        []
+    end
+  end
+
+  defp trace_event(_raw, _session_id, _turn_id), do: []
+
+  defp trace_episode(base, kind, raw) do
+    case fetch(raw, :episode) do
+      %{} = episode ->
+        at = fetch(raw, :episode_at_ms)
+
+        [Map.merge(base, %{
+          kind: kind,
+          recall_id: fetch(raw, :recall_id),
+          operation: json_safe(fetch(raw, :operation)),
+          rank: fetch(raw, :rank),
+          score: fetch(raw, :score),
+          episode_at_ms: at,
+          episode_fingerprint: fingerprint({at, episode}),
+          episode: json_safe(episode),
+          used_in_response: fetch(raw, :used_in_response)
+        })]
+
+      _ ->
+        []
+    end
   end
 
   defp episodic_events(si, session_id, turn_id) do
