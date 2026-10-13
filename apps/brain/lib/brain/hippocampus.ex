@@ -296,7 +296,12 @@ defmodule Brain.Hippocampus do
     # For attach we usually want to include head as well unless caller overrides.
     opts = Map.put_new(opts, :ignore_head, false)
 
-    {results, _meas, _meta} = do_recall(si, state, opts)
+    # Core.Recall.Execute supplies normalized lexical cues in opts[:cues].
+    # The full SemanticInput is not a recall slate: Recall.cues_to_set/1
+    # reads :winners, while SemanticInput typically carries :tokens instead.
+    # Using the SI here silently produced an empty cue set and zero matches.
+    cues = Map.get(opts, :cues) || si
+    {results, _meas, _meta} = do_recall(cues, state, opts)
 
     episodes =
       results
