@@ -246,6 +246,20 @@ config :brain, :hippo_db_defaults,
   recall_min_sim: hippo_recall_min_sim,
   recall_half_life_s: hippo_recall_half_life_s
 
+# Opt-in complete raw state snapshots. These may contain private conversation
+# text, memory data, session identifiers and every nested SemanticInput field.
+# SYMBRELLA_STATE_DUMP=final records end-to-end outputs; =all records every stage.
+state_dump_mode =
+  case System.get_env("SYMBRELLA_STATE_DUMP", "off") |> String.downcase() do
+    "all" -> :all
+    "final" -> :final
+    _ -> :off
+  end
+
+config :core, Core.StateDump,
+  mode: state_dump_mode,
+  path: System.get_env("SYMBRELLA_STATE_DUMP_PATH", "tmp/state_dumps/symbrella_raw.log")
+
 config :brain, Brain.SelfCalibration.Logger,
   enabled?: true,
   path: "priv/self_calibration/samples.jsonl"
