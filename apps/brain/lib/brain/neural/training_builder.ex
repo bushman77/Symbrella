@@ -60,12 +60,7 @@ defmodule Brain.Neural.TrainingBuilder do
   def build(dir, task, opts)
       when is_binary(dir) and task in @tasks and is_list(opts) do
     with {:ok, eval_fraction} <- eval_fraction(opts),
-         {:ok, turns} <- read_jsonl(Path.join(dir, "turns.jsonl")),
-         {:ok, events} <- read_jsonl(Path.join(dir, "memory_events.jsonl"), optional: true),
-         :ok <- reject_truncated_trace(events),
-         {:ok, feedback} <- read_jsonl(Path.join(dir, "feedback.jsonl")),
-         {:ok, turn_index} <- index_turns(turns),
-         {:ok, examples} <- reviewed_examples(task, feedback, turn_index, events),
+         {:ok, examples} <- load_reviewed_examples(dir, task),
          {:ok, training, evaluation} <- split(examples, eval_fraction),
          :ok <- prevent_episode_leakage(training, evaluation),
          {:ok, train_batch} <- tensor_batch(training, task),
@@ -91,6 +86,54 @@ defmodule Brain.Neural.TrainingBuilder do
   end
 
   def build(_dir, _task, _opts), do: {:error, :invalid_builder_arguments}
+
+
+  @doc """
+  Explicit single-session pilot only. The same human-reviewed examples are
+  used for training and checking that the Axon pipeline runs. No independent
+  evaluation is performed; its reported loss is NOT a holdout quality metric.
+  This does not relax the normal build/3 leakage safeguards.
+  """
+  @spec build_smoke(Path.t(), task()) :: {:ok, map()} | {:error, term()}
+  def build_smoke(dir, task) when is_binary(dir) and task in @tasks do
+    with {:ok, examples} <- load_reviewed_examples(dir, task),
+         {:ok, batch} <- tensor_batch(examples, task) do
+      sessions = examples |> Enum.map(& &1.session_id) |> Enum.uniq() |> Enum.sort()
+
+      {:ok,
+       %{
+         train: batch,
+         eval: batch,
+         metadata: %{
+           schema_version: @schema_version,
+           feature_schema_version: @feature_schema_version,
+           task: task,
+           feature_names: @feature_names,
+           label_names: label_names(task),
+           reviewed_examples: length(examples),
+           train_examples: length(examples),
+           eval_examples: length(examples),
+           train_sessions: sessions,
+           eval_sessions: sessions,
+           split_mode: :in_sample_smoke
+         }
+       }}
+    end
+  end
+
+  def build_smoke(_dir, _task), do: {:error, :invalid_builder_arguments}
+
+  defp load_reviewed_examples(dir, task) do
+    with {:ok, turns} <- read_jsonl(Path.join(dir, "turns.jsonl")),
+         {:ok, events} <- read_jsonl(Path.join(dir, "memory_events.jsonl"), optional: true),
+         :ok <- reject_truncated_trace(events),
+         {:ok, feedback} <- read_jsonl(Path.join(dir, "feedback.jsonl")),
+         {:ok, turn_index} <- index_turns(turns),
+         {:ok, examples} <- reviewed_examples(task, feedback, turn_index, events) do
+      {:ok, examples}
+    end
+  end
+
 
   defp eval_fraction(opts) do
     value = Keyword.get(opts, :eval_fraction, 0.2)
