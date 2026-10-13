@@ -55,8 +55,13 @@ defmodule Brain.Hippocampus do
 
   @spec encode(map(), map()) :: map()
   def encode(%{} = slate, meta \\ %{}) when is_map(meta) do
-    {:ok, episode, at_ms} = GenServer.call(__MODULE__, {:encode, slate, meta})
-    TurnTrace.encode(episode, at_ms)
+    if TurnTrace.active?() do
+      {:ok, episode, at_ms} = GenServer.call(__MODULE__, {:encode, slate, meta, :trace})
+      TurnTrace.encode(episode, at_ms)
+    else
+      :ok = GenServer.call(__MODULE__, {:encode, slate, meta})
+    end
+
     slate
   end
 
@@ -183,7 +188,14 @@ defmodule Brain.Hippocampus do
   end
 
   @impl true
-  def handle_call({:encode, slate, meta_in}, from, state) do
+  def handle_call({:encode, slate, meta_in}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, false)
+
+  @impl true
+  def handle_call({:encode, slate, meta_in, :trace}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, true)
+
+  defp handle_encode_call(slate, meta_in, from, state, trace?) do
     at = System.system_time(:millisecond)
 
     norms =
@@ -220,7 +232,8 @@ defmodule Brain.Hippocampus do
     Telemetry.emit_write(write_meas, write_meta)
     Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], write_meas, write_meta)
 
-    {:reply, {:ok, ep, at}, state1}
+    reply = if trace?, do: {:ok, ep, at}, else: :ok
+    {:reply, reply, state1}
   end
 
   @impl true
