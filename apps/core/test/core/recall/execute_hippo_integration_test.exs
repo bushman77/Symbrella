@@ -108,7 +108,13 @@ defmodule Core.Recall.ExecuteHippoIntegrationTest do
   test "Core lexical cues produce a direct Hippocampus attach hit without fallback recall" do
     Hippocampus.encode(slate_with(["river"]), %{scope: :conversation})
 
-    si = si_with_tokens(["river"])
+    # Exercise production Core.Token structs, not only plain token maps.
+    si = %SI{
+      sentence: "river",
+      source: :test,
+      tokens: [%Core.Token{phrase: "river", span: {0, 1}, n: 1}]
+    }
+
     plan = plan_min()
 
     Brain.Hippocampus.TurnTrace.start()
