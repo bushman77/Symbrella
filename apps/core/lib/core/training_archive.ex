@@ -207,7 +207,9 @@ defmodule Core.TrainingArchive do
           operation: json_safe(fetch(raw, :operation)),
           source: json_safe(fetch(raw, :source)),
           cues: json_safe(fetch(raw, :cues)),
+          cue_count: fetch(raw, :cue_count),
           limit: fetch(raw, :limit),
+          min_jaccard: fetch(raw, :min_jaccard),
           result_count: fetch(raw, :result_count),
           hit: fetch(raw, :hit?)
         })]
