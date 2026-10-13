@@ -48,17 +48,21 @@ defmodule Mix.Tasks.Neural.Train do
       Mix.shell().info("Train: #{artifact.train_examples} reviewed candidates")
       Mix.shell().info("Training sessions: #{length(artifact.train_sessions)}")
       Mix.shell().info("Training MSE: #{Float.round(artifact.train_mse, 5)}")
+      Mix.shell().info("Training labels: #{artifact.labels.train_positive} relevant / #{artifact.train_examples - artifact.labels.train_positive} irrelevant")
+      Mix.shell().info("Train-label prevalence baseline MSE: #{Float.round(artifact.class_prior_train_mse, 5)}")
 
       if smoke? do
         Mix.shell().info("SMOKE TEST: training and evaluation use the SAME examples.")
         Mix.shell().info("In-sample model MSE: #{Float.round(artifact.eval_mse, 5)}")
-        Mix.shell().info("In-sample baseline MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+        Mix.shell().info("In-sample recall-score baseline MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+        Mix.shell().info("In-sample class-prior baseline MSE: #{Float.round(artifact.class_prior_eval_mse, 5)}")
         Mix.shell().info("NO holdout evaluation; the model has NOT demonstrated generalization.")
       else
         Mix.shell().info("Holdout: #{artifact.eval_examples} reviewed candidates")
         Mix.shell().info("Evaluation sessions: #{length(artifact.eval_sessions)}")
         Mix.shell().info("Holdout MSE: #{Float.round(artifact.eval_mse, 5)}")
         Mix.shell().info("Recall-score baseline holdout MSE: #{Float.round(artifact.baseline_eval_mse, 5)}")
+        Mix.shell().info("Class-prior baseline holdout MSE: #{Float.round(artifact.class_prior_eval_mse, 5)}")
       end
 
       if artifact.train_examples < 20 or artifact.eval_examples < 20 do
