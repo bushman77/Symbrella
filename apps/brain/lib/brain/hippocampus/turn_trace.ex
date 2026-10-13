@@ -23,10 +23,51 @@ defmodule Brain.Hippocampus.TurnTrace do
 
   @doc "Return events in observed order and deactivate this process trace."
   @spec finish() :: [map()]
-  def finish do
+  def finish, do: finish_with_status().events
+
+  @doc """
+  Finish a process-local trace with an explicit distinction between no
+  attempted retrieval, a recorded miss, and a trace never started.
+  The scope is this process only, not every concurrent Brain process.
+  """
+  @spec finish_with_status() :: %{events: [map()], status: map()}
+  def finish_with_status do
     case Process.delete(@key) do
-      {_count, events} -> Enum.reverse(events)
-      _ -> []
+      {_count, raw} ->
+        events = Enum.reverse(raw)
+        truncated? = Enum.any?(events, &(Map.get(&1, :kind) == :trace_truncated))
+        attempts = Enum.filter(events, &(Map.get(&1, :kind) == :recall_attempt))
+        misses = Enum.count(attempts, &(Map.get(&1, :hit?) == false))
+
+        %{
+          events: events,
+          status: %{
+            status: if(truncated?, do: "truncated", else: "complete"),
+            scope: "current_process",
+            event_count: length(events),
+            recall_attempts: length(attempts),
+            recall_misses: misses,
+            recall_status:
+              cond do
+                truncated? -> "unknown_truncated"
+                attempts == [] -> "not_attempted"
+                true -> "attempted"
+              end
+          }
+        }
+
+      _ ->
+        %{
+          events: [],
+          status: %{
+            status: "not_started",
+            scope: "current_process",
+            event_count: 0,
+            recall_attempts: nil,
+            recall_misses: nil,
+            recall_status: "unknown"
+          }
+        }
     end
   end
 
