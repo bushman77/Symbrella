@@ -117,7 +117,12 @@ defmodule SymbrellaWeb.HomeLive do
             planned = build_planned_reply(text, socket.assigns.session_id)
 
             if training_archive_enabled?() do
-              Map.put(planned, :hippocampal_events, Brain.Hippocampus.TurnTrace.finish())
+              trace = Brain.Hippocampus.TurnTrace.finish_with_status()
+
+              planned
+              |> Map.put(:hippocampal_events, trace.events)
+              |> Map.put(:worker_trace_status, trace.status)
+              |> Map.put(:runtime_observation, Core.TrainingArchive.RuntimeObservation.capture())
             else
               planned
             end
@@ -193,16 +198,17 @@ defmodule SymbrellaWeb.HomeLive do
       |> to_bot_reply()
       |> enforce_identity_reply()
 
-    final_memory_events =
+    final_trace =
       if training_archive_enabled?(),
-        do: Brain.Hippocampus.TurnTrace.finish(),
-        else: []
+        do: Brain.Hippocampus.TurnTrace.finish_with_status(),
+        else: %{events: [], status: %{status: "disabled"}}
 
     worker_memory_events = Map.get(reply, :hippocampal_events) || []
 
     reply =
       reply
-      |> Map.put(:hippocampal_events, worker_memory_events ++ final_memory_events)
+      |> Map.put(:hippocampal_events, worker_memory_events ++ final_trace.events)
+      |> Map.put(:final_trace_status, final_trace.status)
       |> Core.StateDump.capture(:chat_reply)
 
     reply_text = reply.text
@@ -277,7 +283,11 @@ defmodule SymbrellaWeb.HomeLive do
       reply_text,
       si,
       meta,
-      Map.get(reply, :hippocampal_events, [])
+      Map.get(reply, :hippocampal_events, []),
+      Map.get(reply, :runtime_observation),
+      Map.get(reply, :pipeline_status),
+      Map.get(reply, :worker_trace_status),
+      Map.get(reply, :final_trace_status)
     )
 
     {:noreply,
@@ -408,7 +418,10 @@ defmodule SymbrellaWeb.HomeLive do
     |> Kernel.==(true)
   end
 
-  defp maybe_archive_completed_turn(assigns, bot_id, reply_text, si, meta, events) do
+  defp maybe_archive_completed_turn(
+         assigns, bot_id, reply_text, si, meta, events,
+         runtime_observation, pipeline_status, worker_trace_status, final_trace_status
+       ) do
     case Map.get(assigns, :pending_user_turn) do
       %{id: turn_id, text: user_text} ->
         case Core.TrainingArchive.record_turn(%{
@@ -419,7 +432,13 @@ defmodule SymbrellaWeb.HomeLive do
                assistant_message_id: bot_id,
                si: si,
                response_meta: meta,
-               hippocampal_events: events
+               hippocampal_events: events,
+               runtime_observation: runtime_observation,
+               pipeline_status: pipeline_status,
+               hippocampal_trace: %{
+                 worker: worker_trace_status,
+                 final: final_trace_status
+               }
              }) do
           {:error, reason} ->
             Logger.warning("[TrainingArchive] could not record turn: #{inspect(reason)}")
@@ -506,13 +525,15 @@ defmodule SymbrellaWeb.HomeLive do
           meta: meta,
           si: memory_si_like,
           senses_selected: [],
-          explain_text: reply_text
+          explain_text: reply_text,
+          pipeline_status: %{route: "memory_fast_path", semantic_pipeline: "bypassed"}
         }
 
       nil ->
         user_text
         |> build_semantic_reply(session_id)
         |> enforce_identity_reply(user_text)
+        |> Map.put(:pipeline_status, %{route: "semantic_pipeline", semantic_pipeline: "completed"})
     end
   end
 
