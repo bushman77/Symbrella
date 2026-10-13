@@ -68,7 +68,8 @@ defmodule Brain.Neural.MemoryRelevancePilot do
           train_positive: Enum.count(train_labels, &(&1 == 1.0)),
           eval_positive: Enum.count(eval_labels, &(&1 == 1.0))
         },
-        evaluated?: true,
+        evaluated?: metadata[:split_mode] != :in_sample_smoke,
+        split_mode: Map.get(metadata, :split_mode, :session_holdout),
         deployment_status: :experimental_not_for_runtime
       }
 
@@ -133,6 +134,9 @@ defmodule Brain.Neural.MemoryRelevancePilot do
       elem(train_shape, 0) != elem(train_y, 0) or
           elem(eval_shape, 0) != elem(eval_y, 0) ->
         {:error, :row_count_mismatch}
+
+      metadata[:split_mode] == :in_sample_smoke ->
+        :ok
 
       not MapSet.disjoint?(MapSet.new(metadata[:train_sessions] || []),
              MapSet.new(metadata[:eval_sessions] || [])) ->
