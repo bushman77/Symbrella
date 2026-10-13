@@ -432,3 +432,90 @@ The warning about initializing Axon with a parameter map was also addressed
 by passing \`Axon.ModelState.empty()\` as the initial model state for the
 experimental memory-relevance trainer. The Hippocampus \`handle_call/3\`
 clauses have been regrouped to silence the separate Elixir compiler warning.
+
+
+## Automatic catalog: the entire recorded cognitive archive
+
+The manual \`memory_relevance\` review pilot is **only one** learning
+objective. Symbrella can categorize much of her already-structured archive
+without additional human prompts:
+
+\`\`\`sh
+mix neural.catalog --dir tmp/training
+\`\`\`
+
+This reads all recorded \`turns.jsonl\`, \`memory_events.jsonl\` and
+\`feedback.jsonl\` (the latter two may be absent), and atomically regenerates
+\`tmp/training/catalog.jsonl\`. The index contains a source-file and line
+pointer, session/turn identity, a deterministic automatic category, available
+cognitive signal groups, a limited set of **observed** metadata values, and
+explicit provenance. It **does not** duplicate raw conversation texts or
+episodes, change any original file, infer relevance labels, or train a model.
+
+Current observed categories include:
+
+- \`cognitive_turn\`: recorded intent, action, confidence and presence of
+  language, syntax, semantics, affect, executive, self-model and trace signals
+- \`memory_encoding\`: observed episodic writes
+- \`memory_retrieval\`: recall attempts, returned episodes and miss events
+- \`fact_memory\`: fact lookup/write/recall
+- \`trace_integrity\`: recording overflow
+- \`human_feedback\`: actual reviewed labels and corrections
+- \`other_memory_event\`: unrecognized event kinds, preserved for future
+  handling instead of silently dropped
+
+**Observed intent is not a true intent label.** A runtime
+\`selected_action\` is not necessarily a correct decision, and a hippocampal
+recall hit is not necessarily relevant. The catalog keeps these distinctions
+explicit using \`label_provenance\`.
+
+## Learn without manually rating each episode: state transition
+
+The first self-supervised objective pairs successive completed turns within a
+session. It predicts the **next actually observed cognitive state** from the
+current state (\`x(t) -> x(t+1)\`), never crossing a session boundary. It uses
+a versioned, 16-feature Nx projection of logged confidence, mood signals,
+language/semantic counts, self-monitoring and hippocampal event statistics:
+
+\`\`\`sh
+mix neural.dataset --task state_transition --smoke
+mix neural.train --task state_transition --smoke
+\`\`\`
+
+The \`--smoke\` mode can run with just one session with two consecutive
+completed turns, using all available state transitions in-sample. It provides
+**no independent evaluation** and is useful for verifying the engineering
+pipeline only.
+
+Once at least two sessions each have consecutive completed turns, omit
+\`--smoke\`:
+
+\`\`\`sh
+mix neural.dataset --task state_transition
+mix neural.train --task state_transition
+\`\`\`
+
+The second, session-held-out split compares the network's next-state
+prediction with a simple **persistence baseline** (predicting the next
+state remains the same as the current one). With a small number of turns,
+neither the result nor a lower MSE establishes meaningful cognitive ability.
+
+The experiment writes a private
+\`tmp/training/state_transition_smoke.etf\` or
+\`tmp/training/state_transition_pilot.etf\` checkpoint. It is
+**never installed into the live response, memory or action pathway**.
+
+**Important scope limitation:** All available JSONL records are cataloged.
+The state-transition learner currently uses **selected numeric features**
+from the cognitive state and memory-event aggregates—not every raw token,
+sense candidate, definition, response text, trace subtree or user statement.
+Encoding those rich variable-length objects requires separate representation
+models and carefully defined objectives. We should develop those incrementally
+instead of pretending the small numeric projection is "the whole brain."
+
+Regression tests:
+
+\`\`\`sh
+mix test apps/core/test/core/neural/catalog_test.exs \
+  apps/brain/test/brain/neural/state_transition_pilot_test.exs
+\`\`\`
