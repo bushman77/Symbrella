@@ -7,6 +7,7 @@ defmodule Core do
   alias Core.LIFG.Attach, as: LifgAttach
   alias Core.Response.Attach, as: ResponseAttach
   alias Core.SemanticInput
+  alias Core.StateDump
   alias Core.TokenFilters
   alias Core.Brain.Introspection, as: BrainIntrospection
   @type opts :: keyword()
@@ -49,8 +50,9 @@ defmodule Core do
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
       |> Map.put_new(:trace, [])
       |> Map.put(:lifg_opts, lifg_opts)
+      |> StateDump.capture(:initial)
 
-    si1 = apply_intent_selection(si0, opts)
+    si1 = apply_intent_selection(si0, opts) |> StateDump.capture(:intent_selected)
 
     out =
       case mode do
@@ -58,7 +60,10 @@ defmodule Core do
         _ -> si1
       end
 
-    coerce_si(out)
+    out
+    |> StateDump.capture(:pipeline_raw)
+    |> coerce_si()
+    |> StateDump.capture(:final)
   end
 
   defp maybe_put_fuzzy(si, nil), do: si
