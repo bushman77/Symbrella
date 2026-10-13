@@ -161,4 +161,133 @@ defmodule Core.TrainingArchiveTest do
                config: config
              )
   end
+  test "joins direct hippocampal trace misses, encodings and retrieved candidates to the turn", %{
+    dir: dir
+  } do
+    episode = %{
+      slate: %{winners: [%{id: "alpha|noun|1", lemma: "alpha"}]},
+      meta: %{source: :chat},
+      norms: MapSet.new(["alpha"])
+    }
+
+    events = [
+      %{kind: :episodic_encode, episode: episode, episode_at_ms: 1000},
+      %{
+        kind: :recall_attempt, recall_id: "query-1", operation: :recall,
+        source: :memory, cues: ["missing"], limit: 3,
+        result_count: 0, hit?: false
+      },
+      %{
+        kind: :recall_attempt, recall_id: "query-2", operation: :attach,
+        source: :memory, cues: ["alpha"], limit: 3,
+        result_count: 1, hit?: true
+      },
+      %{
+        kind: :episodic_recall, recall_id: "query-2",
+        operation: :attach, rank: 1, score: 0.81,
+        episode_at_ms: 1000, episode: episode, used_in_response: nil
+      },
+      %{kind: :fact_lookup, memory_key: :user_name, found?: false, result: nil}
+    ]
+
+    # The final SemanticInput also contains the same attached episode.
+    # It should not cause a second episodic_recall row.
+    si = put_in(turn().si, [:evidence, :episodes],
+      [%{score: 0.81, at: 1000, episode: episode}])
+
+    assert :ok ==
+             TrainingArchive.record_turn(
+               turn(%{si: si, hippocampal_events: events}),
+               config: [enabled?: true, dir: dir]
+             )
+
+    stored = records(Path.join(dir, "memory_events.jsonl"))
+
+    assert Enum.map(stored, & &1["kind"]) == [
+             "episodic_encode",
+             "recall_attempt",
+             "recall_attempt",
+             "episodic_recall",
+             "fact_lookup"
+           ]
+
+    assert Enum.all?(stored, &(&1["session_id"] == "session-test"))
+    assert Enum.all?(stored, &(&1["turn_id"] == "turn-test-1"))
+
+    assert Enum.at(stored, 1)["hit"] == false
+    assert Enum.at(stored, 1)["result_count"] == 0
+    assert Enum.at(stored, 2)["recall_id"] == Enum.at(stored, 3)["recall_id"]
+
+    [write | _] = stored
+    retrieved = Enum.at(stored, 3)
+    assert write["episode_fingerprint"] == retrieved["episode_fingerprint"]
+    assert retrieved["rank"] == 1
+    assert retrieved["score"] == 0.81
+    assert retrieved["used_in_response"] == nil
+    assert List.wrap(retrieved["episode"]["norms"]) == ["alpha"]
+  end
+
+  test "direct trace evidence can supply reviewed memory relevance tensors", %{dir: dir} do
+    config = [enabled?: true, dir: dir]
+
+    Enum.each(1..2, fn n ->
+      word = "memory-#{n}"
+
+      episode = %{
+        slate: %{winners: [%{lemma: word}]},
+        meta: %{source: :test},
+        norms: MapSet.new([word])
+      }
+
+      attrs =
+        turn(%{
+          turn_id: "turn-#{n}",
+          session_id: "session-#{n}",
+          user_text: "Recall #{word}",
+          assistant_text: "Recall completed",
+          hippocampal_events: [
+            %{
+              kind: :episodic_recall,
+              operation: :recall,
+              recall_id: "query-#{n}",
+              rank: 1,
+              score: 0.6,
+              episode_at_ms: 1000 + n,
+              episode: episode,
+              used_in_response: nil
+            }
+          ]
+        })
+
+      assert :ok == TrainingArchive.record_turn(attrs, config: config)
+    end)
+
+    rows = records(Path.join(dir, "memory_events.jsonl"))
+    assert length(rows) == 2
+
+    Enum.each(rows, fn event ->
+      assert :ok ==
+               TrainingArchive.record_feedback(
+                 %{
+                   session_id: event["session_id"],
+                   turn_id: event["turn_id"],
+                   reviewed_by: "developer",
+                   label: %{
+                     kind: "memory_relevance",
+                     episode_fingerprint: event["episode_fingerprint"],
+                     relevant: true
+                   }
+                 },
+                 config: config
+               )
+    end)
+
+    assert {:ok, dataset} = Brain.Neural.TrainingBuilder.build(dir, :memory_relevance)
+    assert dataset.metadata.train_examples == 1
+    assert dataset.metadata.eval_examples == 1
+    assert Nx.shape(dataset.train.x) == {1, 12}
+    assert Nx.shape(dataset.eval.y) == {1, 1}
+  end
+
+
 end
