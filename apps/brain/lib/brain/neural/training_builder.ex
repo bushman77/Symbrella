@@ -62,6 +62,7 @@ defmodule Brain.Neural.TrainingBuilder do
     with {:ok, eval_fraction} <- eval_fraction(opts),
          {:ok, turns} <- read_jsonl(Path.join(dir, "turns.jsonl")),
          {:ok, events} <- read_jsonl(Path.join(dir, "memory_events.jsonl"), optional: true),
+         :ok <- reject_truncated_trace(events),
          {:ok, feedback} <- read_jsonl(Path.join(dir, "feedback.jsonl")),
          {:ok, turn_index} <- index_turns(turns),
          {:ok, examples} <- reviewed_examples(task, feedback, turn_index, events),
@@ -137,6 +138,14 @@ defmodule Brain.Neural.TrainingBuilder do
     end
   rescue
     error in File.Error -> {:error, {:archive_io_error, error.reason}}
+  end
+
+  defp reject_truncated_trace(events) do
+    if Enum.any?(events, &(&1["kind"] == "trace_truncated")) do
+      {:error, :truncated_hippocampal_trace}
+    else
+      :ok
+    end
   end
 
   defp index_turns(turns) do
