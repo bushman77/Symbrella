@@ -68,6 +68,11 @@ defmodule Mix.Tasks.Neural.Dataset do
             "Raw neuromodulator snapshots: #{metadata.complete_modulator_turns}/" <>
               "#{metadata.input_turns} complete; #{metadata.missing_modulator_turns} missing/incomplete"
           )
+          Mix.shell().info(
+            "Observed-only target cells: #{metadata.train_valid_cells}/#{metadata.train_possible_cells} training; " <>
+              "#{metadata.eval_valid_cells}/#{metadata.eval_possible_cells} evaluation"
+          )
+          Mix.shell().info("Presence/availability flags are inputs, not prediction targets.")
         end
         Mix.shell().info("No model weights were changed.")
 
