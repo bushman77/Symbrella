@@ -87,4 +87,39 @@ defmodule Brain.HippocampusRecallTest do
 
     assert_in_delta score, 0.5, 0.0001
   end
+  test "attach_episodes uses caller-provided lexical cues instead of an SI without winners" do
+    Hippocampus.encode(slate_with("river"), %{scope: :conversation})
+
+    # Core.SemanticInput holds its lexical evidence in :tokens, not :winners.
+    # This is the shape Core.Recall.Execute passes for episodic attachment.
+    si = %{sentence: "What happened by the river?", tokens: [%{phrase: "river"}], evidence: %{}}
+
+    # Without normalized cues the legacy slate-only lookup has no winners.
+    assert %{evidence: %{episodes: []}} =
+             Hippocampus.attach_episodes(si, limit: 3, min_jaccard: 0.1)
+
+    # The :cues provided by Core.Recall.Execute must drive retrieval.
+    result =
+      Hippocampus.attach_episodes(si,
+        cues: ["river"],
+        limit: 3,
+        min_jaccard: 0.1
+      )
+
+    assert [%{score: score, episode: %{slate: %{winners: [%{lemma: "river"}]}}}] =
+             result.evidence.episodes
+
+    assert score > 0.0
+    assert result.sentence == si.sentence
+    assert result.tokens == si.tokens
+  end
+
+  test "attach_episodes keeps existing slate winner fallback when no explicit cues are passed" do
+    Hippocampus.encode(slate_with("orchard"), %{})
+
+    si = %{winners: [%{lemma: "orchard"}], evidence: %{}}
+    assert [%{score: score}] = Hippocampus.attach_episodes(si).evidence.episodes
+    assert score > 0.0
+  end
+
 end
