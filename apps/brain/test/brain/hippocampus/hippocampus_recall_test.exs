@@ -94,11 +94,17 @@ defmodule Brain.HippocampusRecallTest do
     # This is the shape Core.Recall.Execute passes for episodic attachment.
     si = %{sentence: "What happened by the river?", tokens: [%{phrase: "river"}], evidence: %{}}
 
-    # Without normalized cues the legacy slate-only lookup has no winners.
-    assert %{evidence: %{episodes: []}} =
-             Hippocampus.attach_episodes(si, limit: 3, min_jaccard: 0.1)
+    # Direct attachment must derive usable terms from :tokens.
+    auto = Hippocampus.attach_episodes(si, limit: 3, min_jaccard: 0.1)
+    assert [%{score: auto_score}] = auto.evidence.episodes
+    assert auto_score > 0.0
 
-    # The :cues provided by Core.Recall.Execute must drive retrieval.
+    # An explicitly empty cue list must also fall back to :tokens.
+    empty_cues = Hippocampus.attach_episodes(si, cues: [], limit: 3)
+    assert [%{score: empty_score}] = empty_cues.evidence.episodes
+    assert empty_score > 0.0
+
+    # Explicit cues from Core.Recall.Execute take precedence over the SI.
     result =
       Hippocampus.attach_episodes(si,
         cues: ["river"],
