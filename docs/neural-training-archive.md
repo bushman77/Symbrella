@@ -106,3 +106,83 @@ mix test
 
 Check that both `turns.jsonl` and `memory_events.jsonl` appear after a
 completed chat turn with episodic evidence, and that records share a turn ID.
+
+
+## Reviewed training-data builder
+
+The read-only builder at `apps/brain/lib/brain/neural/training_builder.ex`
+joins the archive's turn, memory-event and human-review JSONL files.
+Two independent first-generation Nx learning targets are supported:
+
+- `memory_relevance`: whether a specific retrieved hippocampal episode
+  was relevant. Feedback must include the exact episode fingerprint and an
+  explicit `relevant: true` or `false`.
+- `uncertainty`: an explicitly human-reviewed score between 0 and 1.
+
+Other kinds of review, including `word_sense`, are retained but **not**
+treated as labels for these two tasks.
+
+To review a recalled memory from IEx, replace placeholders with actual IDs:
+
+```elixir
+Core.TrainingArchive.record_feedback(%{
+  session_id: "actual-session-id",
+  turn_id: "actual-turn-id",
+  reviewed_by: "developer",
+  label: %{
+    kind: "memory_relevance",
+    episode_fingerprint: "actual-64-character-hex-fingerprint",
+    relevant: true
+  }
+})
+```
+
+For an uncertainty review:
+
+```elixir
+Core.TrainingArchive.record_feedback(%{
+  session_id: "actual-session-id",
+  turn_id: "actual-turn-id",
+  reviewed_by: "developer",
+  label: %{kind: "uncertainty", value: 0.75}
+})
+```
+
+These calls only record reviews; no weights are changed. Once there are
+reviewed examples from at least **two independent sessions**, run:
+
+```sh
+mix neural.dataset --task memory_relevance --dir tmp/training
+mix neural.dataset --task uncertainty --dir tmp/training
+```
+
+The Mix command compiles and builds Nx tensors, but does not start the LLM,
+write training files or change the model. It displays tensor dimensions and
+reviewed-example counts without revealing conversation content.
+
+Programmatic usage (from IEx):
+
+```elixir
+{:ok, dataset} =
+  Brain.Neural.TrainingBuilder.build("tmp/training", :memory_relevance)
+
+# dataset.train.x / dataset.train.y -> Nx f32 tensors
+# dataset.eval.x  / dataset.eval.y  -> held-out Nx f32 tensors
+```
+
+The builder validates reviewed-by/source, joined session and turn IDs,
+memory-episode fingerprints and labels; rejects duplicate review targets and
+malformed JSONL; and uses a deterministic **session-grouped** evaluation split.
+It rejects splits that reuse the same recalled episode fingerprint across
+train and evaluation sets. Each source file is capped at 50,000 lines in this
+initial resource-conscious implementation.
+
+The first feature schema is versioned and has twelve normalized signals:
+confidence (plus an availability flag), mood DA/5HT/Glu/NE, LIFG-choice count,
+input-token count, recall score/rank/count and presence.
+
+The Nx batches **are not directly compatible** with the existing
+`Brain.SelfCalibration.Training` model, which uses different features and
+output targets. The next phase is to define and train an explicit task-matched
+Axon circuit. This builder does not yet retrain, evaluate model predictions,
+checkpoint weights, or instrument *every* hippocampal write and recall attempt.
