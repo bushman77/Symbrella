@@ -1,7 +1,7 @@
 defmodule Brain.Neural.StateTransitionResidualTest do
   use ExUnit.Case, async: true
 
-  alias Brain.Neural.{StateTransitionBuilder, StateTransitionResidual}
+  alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask, StateTransitionResidual}
 
   @width length(Brain.Neural.StateTransitionBuilder.feature_names())
 
@@ -9,6 +9,21 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     %{
       x: Nx.tensor(current, type: :f32),
       y: Nx.tensor(observed, type: :f32),
+      mask:
+        Nx.tensor(
+          Enum.map(current, fn _ ->
+            Enum.map(StateTransitionBuilder.feature_names(), fn name ->
+              if name in [
+                   :confidence_present, :mood_da_present, :mood_5ht_present,
+                   :mood_glu_present, :mood_ne_present, :mood_present,
+                   :self_monitor_present
+                 ],
+                do: 0.0,
+                else: 1.0
+            end)
+          end),
+          type: :f32
+        ),
       feature_names: StateTransitionBuilder.feature_names()
     }
   end
@@ -65,7 +80,9 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     y = Nx.tensor([[0.5, 0.25], [0.5, 0.75]])
     predicted = Nx.tensor([[0.5, 0.25], [0.5, 0.75]])
 
-    report = StateTransitionResidual.metrics(names, predicted, x, y)
+    report = StateTransitionResidual.metrics(
+      names, predicted, x, y, Nx.broadcast(1.0, Nx.shape(x))
+    )
 
     assert_in_delta report.model_mse, 0.0, 1.0e-8
     assert_in_delta report.persistence_mse, 0.03125, 1.0e-8
@@ -80,7 +97,7 @@ defmodule Brain.Neural.StateTransitionResidualTest do
 
   test "trains deltas, reports held-out feature metrics, stays isolated from live runtime" do
     assert {:ok, result} = StateTransitionResidual.train(data(), epochs: 1, hidden_units: 4)
-    assert result.model_version == "state-transition-residual-v2"
+    assert result.model_version == "state-transition-residual-v3"
     assert result.task == :state_transition_residual
     assert result.objective == :observed_next_minus_current
     assert result.zero_initialized_residual? == true
@@ -93,6 +110,8 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     assert result.train_mse >= 0.0
     assert result.eval_mse >= 0.0
     assert result.persistence_eval_mse > 0.0
+    assert result.valid_eval_cells == @width - 7
+    assert result.valid_train_cells == 2 * (@width - 7)
     assert length(result.eval_per_feature) == @width
     assert Enum.map(result.eval_per_feature, & &1.feature) == StateTransitionBuilder.feature_names()
     assert Enum.all?(result.eval_per_feature, fn row ->
@@ -136,11 +155,14 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     File.write!(direct_path, "old-baseline-weights")
     residual_v1_path = Path.join(dir, "state_transition_residual_pilot.etf")
     File.write!(residual_v1_path, "old-residual-weights")
-    residual_path = Path.join(dir, "state_transition_residual_v2_pilot.etf")
+    residual_v2_path = Path.join(dir, "state_transition_residual_v2_pilot.etf")
+    File.write!(residual_v2_path, "old-v2-residual-weights")
+    residual_path = Path.join(dir, "state_transition_residual_v3_pilot.etf")
 
     assert :ok == StateTransitionResidual.save(result, residual_path)
     assert File.read!(direct_path) == "old-baseline-weights"
     assert File.read!(residual_v1_path) == "old-residual-weights"
+    assert File.read!(residual_v2_path) == "old-v2-residual-weights"
     assert Bitwise.band(File.stat!(residual_path).mode, 0o777) == 0o600
 
     loaded = residual_path |> File.read!() |> :erlang.binary_to_term([:safe])
@@ -148,4 +170,32 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     assert loaded.feature_names == StateTransitionBuilder.feature_names()
     assert loaded.params != nil
   end
+  test "missing target values have zero effect on the masked objective or MSE" do
+    predicted = Nx.tensor([[0.25, 0.9], [0.75, 0.2]], type: :f32)
+    truth_a = Nx.tensor([[0.5, 0.1], [0.5, 0.1]], type: :f32)
+    truth_b = Nx.tensor([[0.5, 100.0], [0.5, -100.0]], type: :f32)
+    mask = Nx.tensor([[1.0, 0.0], [1.0, 0.0]], type: :f32)
+
+    loss_a = StateTransitionMask.loss(%{values: truth_a, mask: mask}, predicted) |> Nx.to_number()
+    loss_b = StateTransitionMask.loss(%{values: truth_b, mask: mask}, predicted) |> Nx.to_number()
+    assert_in_delta loss_a, 0.0625, 1.0e-7
+    assert_in_delta loss_a, loss_b, 1.0e-7
+
+    a = StateTransitionMask.metrics([:observed, :missing], predicted, predicted, truth_a, mask)
+    b = StateTransitionMask.metrics([:observed, :missing], predicted, predicted, truth_b, mask)
+    assert a.valid_cells == 2
+    assert_in_delta a.model_mse, b.model_mse, 1.0e-7
+    assert [%{valid_pairs: 2}, %{valid_pairs: 0, model_mse: :not_observed,
+                                  persistence_mse: :not_observed}] = a.per_feature
+  end
+
+  test "trainer refuses to use all-missing targets instead of reporting fake zero error" do
+    dataset = data()
+    blank = Nx.broadcast(0.0, Nx.shape(dataset.train.mask))
+    dataset = put_in(dataset, [:train, :mask], blank)
+    assert {:error, :no_observed_training_targets} =
+             StateTransitionResidual.train(dataset, epochs: 1)
+  end
+
+
 end
