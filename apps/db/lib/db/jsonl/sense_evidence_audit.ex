@@ -141,7 +141,8 @@ defmodule Db.JSONL.SenseEvidenceAudit do
   defp maybe_advance_word(%{current_norm: nil} = state, norm),
     do: %{state | current_norm: norm, word_runs: state.word_runs + 1}
 
-  defp maybe_advance_word(%{current_norm: norm} = state, norm), do: state
+  defp maybe_advance_word(%{current_norm: current} = state, norm) when current == norm,
+    do: state
 
   defp maybe_advance_word(state, norm) do
     state
