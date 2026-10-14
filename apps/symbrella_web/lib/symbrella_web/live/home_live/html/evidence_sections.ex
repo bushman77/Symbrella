@@ -146,14 +146,16 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
     items =
       []
       |> value("intent", field(summary, :intent))
-      |> value("understood", field(summary, :understood))
+      |> value("recognized topics (not verified)", field(summary, :recognized_topics))
+      |> value("selected lexical candidates", field(summary, :selected_lexical_candidates))
+      |> value("verified lexical understanding", field(summary, :understood))
       |> value("uncertain", field(summary, :uncertain))
       |> value("unresolved", field(summary, :unresolved))
       |> value("degraded?", field(summary, :degraded?))
       |> value("reasons", field(summary, :reasons))
 
     append(sections, :comprehension, "Comprehension", nil,
-      "Phrase-level meanings and raw weak-token diagnostics can coexist. Warnings are not suppressed.",
+      "Recognized topics, selected lexical candidates, and verified word meanings are distinct evidence levels. Weak-token warnings are retained.",
       items
     )
   end
