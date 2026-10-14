@@ -117,7 +117,8 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
   defp sentence_competition(_), do: nil
 
   defp comprehension(value) when is_map(value) do
-    pick(value, [:intent, :confidence, :understood, :uncertain, :unresolved,
+    pick(value, [:intent, :confidence, :recognized_topics,
+                 :selected_lexical_candidates, :understood, :uncertain, :unresolved,
                  :degraded?, :reasons, :lexical_meanings])
   end
 
