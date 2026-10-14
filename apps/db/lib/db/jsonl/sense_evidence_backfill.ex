@@ -68,7 +68,7 @@ defmodule Db.JSONL.SenseEvidenceBackfill do
 
   @spec apply(plan(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
   def apply(%{fingerprint: expected, rows: rows, patches: patches,
-              word: word, pos: pos} = plan, approved_fingerprint)
+              word: word, pos: pos}, approved_fingerprint)
       when is_binary(approved_fingerprint) do
     cond do
       approved_fingerprint != expected ->
@@ -81,6 +81,8 @@ defmodule Db.JSONL.SenseEvidenceBackfill do
         {:error, :invalid_plan}
 
       true ->
+        normalized_word = String.downcase(String.trim(word))
+
         Db.transaction(fn ->
           now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
@@ -88,7 +90,7 @@ defmodule Db.JSONL.SenseEvidenceBackfill do
             query =
               from(c in Db.BrainCell,
                 where:
-                  c.id == ^patch.id and c.norm == ^word and c.pos == ^pos and
+                  c.id == ^patch.id and c.norm == ^normalized_word and c.pos == ^pos and
                     c.definition == ^patch.stored_definition and
                     c.semantic_atoms == ^patch.stored_semantic_atoms
               )
