@@ -208,7 +208,8 @@ defmodule Core.Syntax.Signatures do
                 wh: wh.index, auxiliary: aux.index, subject: subject.index,
                 predicate: verb.index, preposition: prep.index
               },
-              %{subject: [:pos_pronoun], predicate: [:pos_verb],
+              %{auxiliary: [:pos_auxiliary, :pos_modal],
+                subject: [:pos_pronoun], predicate: [:pos_verb],
                 preposition: [:pos_preposition]},
               [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
                :explicit_prepositional_topic, :question_punctuation]

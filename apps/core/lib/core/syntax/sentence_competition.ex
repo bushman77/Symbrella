@@ -14,7 +14,7 @@ defmodule Core.Syntax.SentenceCompetition do
   alias Brain.LIFG.ContextFit
   alias Core.Pipeline.Trace
 
-  @max_phrases 32
+  @max_phrases 48
   @max_senses 8
   @composition_threshold 0.80
   @min_discrimination 0.16
@@ -77,11 +77,16 @@ defmodule Core.Syntax.SentenceCompetition do
 
   defp assess(si, %{span: {first, last}} = unit, frames)
        when is_integer(first) and is_integer(last) and first >= 0 and last >= first do
-    case Enum.find(frames, &crosses_clause_roles?(&1, first, last)) do
+    case Enum.find_value(frames, fn frame ->
+           case crossed_roles(frame, first, last) do
+             [] -> nil
+             roles -> {frame, roles}
+           end
+         end) do
       nil ->
         nil
 
-      frame ->
+      {frame, crossed} ->
         senses = unit |> Map.get(:senses, []) |> List.wrap() |> Enum.take(@max_senses)
         phrase = Map.get(unit, :phrase, "")
         sentence = Map.get(si, :sentence, "")
@@ -110,6 +115,8 @@ defmodule Core.Syntax.SentenceCompetition do
           dictionary_sense_ids: Enum.map(senses, &Map.get(&1, :id)),
           frame_id: frame.id,
           frame_span: frame.span,
+          crossed_roles: crossed,
+          role_boundary_conflict?: true,
           lexical_context_fit: fit,
           compositional_compatibility: composition,
           lexical_compatibility: lexical,
@@ -124,17 +131,40 @@ defmodule Core.Syntax.SentenceCompetition do
 
   defp assess(_, _, _), do: nil
 
-  defp crosses_clause_roles?(%{roles: roles}, first, last) when is_map(roles) do
-    wh = Map.get(roles, :wh)
-    subject = Map.get(roles, :subject)
-    predicate = Map.get(roles, :predicate)
+  # Preserve independently evidenced sentence roles, not just the span
+  # containing the original long MWE. A phrase that fuses :auxiliary and
+  # :subject, or :predicate and :preposition, competes against the *same*
+  # sentence-wide reading. A phrase entirely inside the topic remains
+  # eligible (e.g. "turn off" in the question's topic complement).
+  #
+  # Topic words beyond the explicit preposition form one logical scope;
+  # they are not each separate roles. This prevents overblocking ordinary
+  # noun phrases and legitimate MWEs inside the topic.
+  @role_order [:wh, :auxiliary, :subject, :predicate, :preposition]
 
-    is_integer(wh) and is_integer(subject) and is_integer(predicate) and
-      first <= subject and last >= predicate and
-      first >= wh and first < predicate
+  defp crossed_roles(
+         %{span: {frame_start, frame_end}, roles: roles},
+         first,
+         last
+       )
+       when is_map(roles) and is_integer(frame_start) and
+              is_integer(frame_end) and first >= frame_start and
+              last <= frame_end and last > first do
+    labels =
+      first..last
+      |> Enum.map(fn index ->
+        Enum.find(@role_order, &(Map.get(roles, &1) == index)) ||
+          if(index > Map.get(roles, :preposition, frame_end),
+            do: :topic_complement,
+            else: nil)
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    if length(labels) >= 2, do: labels, else: []
   end
 
-  defp crosses_clause_roles?(_, _, _), do: false
+  defp crossed_roles(_, _, _), do: []
 
   defp complete_topic_question?(%{
          id: :wh_aux_topic_question,

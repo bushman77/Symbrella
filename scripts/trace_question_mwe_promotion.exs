@@ -146,6 +146,26 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.inspect(canonical, label: "Final canonical semantic choices",
       limit: :infinity, pretty: true)
 
+    IO.puts("\nSentence-role preservation checks:")
+    for phrase <- ["what do you know", "do you", "know about"] do
+      case Enum.find(list(si, :mwe_lexicon), &(&1.phrase == phrase)) do
+        nil ->
+          IO.puts("NOT APPLICABLE #{phrase} — no dictionary phrase in this run")
+
+        %{span: span} ->
+          rejected? = Core.Syntax.SentenceCompetition.reject_phrase?(si, span)
+
+          selected? =
+            Enum.any?(covers, &(Map.get(&1, :token_span) == span)) or
+              Enum.any?(canonical, fn c ->
+                Map.get(c, :token_span) == span and Map.get(c, :kind) == :mwe
+              end)
+
+          IO.puts("#{if(rejected? and not selected?, do: "PASS", else: "FAIL")} " <>
+                    "#{phrase} at #{inspect(span)} — rejected?=#{rejected?} selected?=#{selected?}")
+      end
+    end
+
     atl =
       si
       |> Map.get(:atl_slate, %{})

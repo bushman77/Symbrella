@@ -18,6 +18,26 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     example: "Well, what do you know?", activation: 0.0
   }
 
+  @do_you %{
+    id: "do you|interjection|1", norm: "do you", pos: "interjection",
+    definition: "Used as an exclamation or expression of disbelief."
+  }
+
+  @know_about %{
+    id: "know about|verb|1", norm: "know about", pos: "verb",
+    definition: "To have information concerning some subject."
+  }
+
+  @about_japan %{
+    id: "about japan's|phrase|1", norm: "about japan's", pos: "phrase",
+    definition: "A fictional name for an unrelated expression."
+  }
+
+  @topic_phrase %{
+    id: "railgun development|noun|1", norm: "railgun development",
+    pos: "noun", definition: "An electromagnetic weapons research programme."
+  }
+
   @lexical_cells [
     %{norm: "what", pos: "pronoun"},
     %{norm: "do", pos: "auxiliary"},
@@ -101,6 +121,92 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     assert out.semantic_choices == word_choices
     assert out.mwe_choices == with_phrase.mwe_choices
     assert out.lifg_choices == word_choices
+  end
+
+  test "all dictionary spans that fuse sentence roles lose, not only the long phrase" do
+    senses =
+      [@sense_one, @sense_two, @do_you, @know_about, @about_japan, @topic_phrase]
+
+    si = input("What do you know about Japan's railgun development?", senses)
+
+    comparisons = si.sentence_competition.comparisons
+    assert Enum.sort(si.sentence_competition.rejected_spans) ==
+             Enum.sort([{0, 3}, {1, 2}, {3, 4}, {4, 5}])
+
+    for {span, roles} <- [
+          {{0, 3}, [:wh, :auxiliary, :subject, :predicate]},
+          {{1, 2}, [:auxiliary, :subject]},
+          {{3, 4}, [:predicate, :preposition]},
+          {{4, 5}, [:preposition, :topic_complement]}
+        ] do
+      assert %{winner: :compositional_clause, crossed_roles: ^roles} =
+               Enum.find(comparisons, &(&1.span == span))
+
+      assert SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    refute SentenceCompetition.reject_phrase?(si, {6, 7})
+
+    # Token resolution must not replace protected roles with virtual MWEs.
+    covered = TokenResolution.resolve(si)
+
+    assert Enum.any?(covered.token_cover, fn item ->
+             item.kind == :phrase and item.token_span == {6, 7}
+           end)
+
+    refute Enum.any?(covered.token_cover, fn item ->
+             item.kind == :phrase and
+               item.token_span in [{0, 3}, {1, 2}, {3, 4}, {4, 5}]
+           end)
+
+    # Even an injected/stale post-LIFG phrase may not bypass the verdict.
+    words =
+      Enum.map(covered.tokens, fn t ->
+        %{token_index: t.index, lemma: t.phrase,
+          id: "word-#{t.index}|noun|1", score: 0.25}
+      end)
+
+    stale =
+      %{covered |
+        lifg_choices: words,
+        mwe_choices: [
+          make_phrase({0, 3}, "what do you know", @sense_two.id),
+          make_phrase({1, 2}, "do you", @do_you.id)
+          |> Map.put(:pos, "interjection"),
+          make_phrase({3, 4}, "know about", @know_about.id)
+          |> Map.put(:pos, "verb"),
+          make_phrase({4, 5}, "about japan's", @about_japan.id)
+        ]
+      }
+
+    out = Decisions.attach(stale)
+    assert out.semantic_choices == words
+    assert out.lifg_choices == words
+    assert out.mwe_choices == stale.mwe_choices
+    assert out.sentence_competition == si.sentence_competition
+  end
+
+  test "ATL rejects an interjection as a grammatical auxiliary" do
+    si = input("What do you know about Japan's railgun development?",
+               [@sense_one, @sense_two, @do_you])
+
+    frame =
+      Enum.find(si.sentence_signatures,
+        &(&1.id == :wh_aux_topic_question))
+
+    assert :pos_auxiliary in frame.required_features.auxiliary
+
+    slate =
+      Brain.ATL.Constituents.attach(
+        %{winners: [
+          %{id: @do_you.id, token_index: 1, norm: "do you"}
+        ]},
+        [frame]
+      )
+
+    assert [%{id: :wh_aux_topic_question, unresolved_roles: unresolved}] =
+             slate.constituents
+    assert :auxiliary in unresolved
   end
 
   test "rhetorical MWE without complete topic frame remains available" do

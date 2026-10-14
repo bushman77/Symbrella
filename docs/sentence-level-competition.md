@@ -12,8 +12,10 @@ dictionary or a new learned model.
 2. Core.Syntax.Signatures recognizes complete WH–auxiliary–subject–verb
    questions with an explicit prepositional topic and noun/pronoun evidence.
    It also retains all existing low-confidence sentence signatures.
-3. Core.Syntax.SentenceCompetition compares each *overlapping* dictionary
-   MWE against that complete sentence frame using bounded compatibility
+3. Core.Syntax.SentenceCompetition compares each dictionary MWE that
+   **crosses two distinct grammatical role scopes** (WH, auxiliary,
+   subject, predicate, preposition, or the topic complement) against the
+   complete sentence frame using bounded compatibility
    scores: 0.90 composition; 0.25 + 0.60 * ContextFit for the lexical
    interpretation. A 0.16 margin and minimum 0.80 composition score are
    required to prefer compositional structure. These are deliberately
@@ -26,13 +28,20 @@ dictionary or a new learned model.
    roles, and Explain displays the actual frame, winner, scores and margin.
 
 **No recursion or arbitrary rerun is performed.** Sentence-level assessment
-is bounded to 8 frames, 32 dictionary phrases and 8 senses per phrase.
+is bounded to 8 frames, 48 dictionary phrases and 8 senses per phrase.
 Question without sufficient grammatical evidence remains ambiguous and
 keeps the previous lexical MWE outcome rather than fabricating confidence.
 
 Example strong frame: 'What do you know about Japan's railgun development?'
 Example without a complete topic frame: 'Well, what do you know?'
 Example other clause: 'What did she say about the experiment?'
+Real follow-up regression: 'do you' cannot fuse auxiliary and subject;
+'know about' cannot fuse predicate and preposition, even after
+'what do you know' has been rejected. 'about Japan's' cannot fuse the
+preposition and topic. 'railgun development' remains a legal compound
+inside the topic because it does not cross role boundaries.
+ATL's WH-question auxiliary role now requires an auxiliary or modal
+sense, not any dictionary phrase beginning at that index.
 Example unrelated MWE: 'turn off' later in the topic is left alone.
 
 ## Test and inspect

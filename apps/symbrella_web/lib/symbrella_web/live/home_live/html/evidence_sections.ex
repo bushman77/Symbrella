@@ -70,6 +70,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
                 |> value("reason", field(comparison, :reason))
                 |> value("span", field(comparison, :span))
                 |> value("frame_id", field(comparison, :frame_id))
+                |> value("crossed_roles", field(comparison, :crossed_roles))
+                |> value("role_boundary_conflict?", field(comparison, :role_boundary_conflict?))
                 |> value("dictionary_sense_ids", field(comparison, :dictionary_sense_ids))
                 |> value("lexical_context_fit", field(comparison, :lexical_context_fit))
                 |> value("compositional_compatibility", field(comparison, :compositional_compatibility))
