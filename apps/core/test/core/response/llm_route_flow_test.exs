@@ -201,7 +201,12 @@ defmodule Core.Response.LlmRouteFlowTest do
   end
 
   test "standalone greeting rejects a robotic service-desk draft from the real LLM route" do
-    si = %{intent: :greet, confidence: 0.8, text: "good afternoon symbrella"}
+    si = %{
+      intent: :greet,
+      confidence: 0.8,
+      text: "good afternoon symbrella",
+      comprehension: %{degraded?: true, uncertain: ["afternoon"]}
+    }
 
     {_tone, text, meta} = Response.plan(si, %{})
 
@@ -220,6 +225,9 @@ defmodule Core.Response.LlmRouteFlowTest do
     assert system =~ "not a request for services"
     assert system =~ "without repeating your name Symbrella"
     assert system =~ "Generate a natural response rather than following a fixed script"
+    assert system =~ "Response profile: social_chat."
+    assert system =~ "reciprocate the greeting naturally"
+    refute system =~ "move=state what is understood"
   end
 
   test "mixed greeting and actual request does not trigger social-greeting repair" do
