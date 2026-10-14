@@ -80,6 +80,11 @@ defmodule Core.Tools.EvidenceResolver do
             # verified facts; do not put them in :support.
             {:halt, {traces, gathered, nil, :headlines_available}}
 
+          %{status: :reference_sources} ->
+            # General reference snippets are evidence candidates, not
+            # claim-specific verification (unlike population/proximity).
+            {:halt, {traces, gathered, nil, :reference_sources}}
+
           _ ->
             {:cont, {traces, gathered, nil, :unverified}}
         end
@@ -165,12 +170,15 @@ defmodule Core.Tools.EvidenceResolver do
           cond do
             is_map(support) -> :source_supported
             sources == [] -> :not_found
+            is_nil(relation) -> :reference_sources
             true -> :retrieved_unsupported
           end
 
+        candidate = if state == :reference_sources, do: %{status: :reference_sources}, else: support
+
         {%{kind: :search, provider: provider, query: query,
            status: state, source_count: length(sources)},
-         sources, support}
+         sources, candidate}
 
       _ ->
         {%{kind: :search, provider: provider, query: query,

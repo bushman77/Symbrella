@@ -89,6 +89,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
     |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
+    |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -118,6 +119,9 @@ defmodule Core.Response.ReflectionLoop do
 
       :news_access_refusal in issues or :news_evidence_not_cited in issues or
           :news_assessment_missing in issues ->
+        {:repair, issues}
+
+      :search_not_answered in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -175,6 +179,9 @@ defmodule Core.Response.ReflectionLoop do
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           news_headline_fallback(context, user_text)
 
+        :search_not_answered in issues ->
+          reference_excerpt_fallback(context)
+
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
@@ -207,6 +214,8 @@ defmodule Core.Response.ReflectionLoop do
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           "Recent headlines require accurate publication dates, outlet attribution, source links and—when requested—a separate qualified assessment. Repair the draft from the retrieved headlines without inventing verified article contents."
+        :search_not_answered in issues ->
+          "Retrieved reference excerpts are already available. Attribute and cite them, rather than promising to search later; do not pretend snippets prove the claims."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -219,6 +228,46 @@ defmodule Core.Response.ReflectionLoop do
   defp apply_decision(:reject, _user_text, _draft_text, _issues, _context) do
     {"I need to stop and ask for a clearer, safer target before answering.",
      "Reject unsafe draft.", 1}
+  end
+
+  # The model must not defer a search that Core already executed this turn.
+  # Restrict to a short, pure search promise with actual retrieved reference
+  # excerpts, never infer support or hallucinate fresh sources.
+  defp unfulfilled_search_promise?(context, draft_text) when is_binary(draft_text) do
+    evidence = Map.get(context, :web_evidence, %{})
+
+    is_map(evidence) and
+      Map.get(evidence, :resolution) == :reference_sources and
+      Map.get(evidence, :status) == :retrieved and
+      is_list(Map.get(evidence, :sources)) and
+      Map.get(evidence, :sources) != [] and
+      String.length(draft_text) <= 260 and
+      Regex.match?(
+        ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me|i\s+can)\s+(?:search|look\s+(?:it|that)\s+up|check\s+(?:that|it)\s+online|find\s+(?:sources|information)|do\s+(?:a\s+)?search)\b/iu,
+        draft_text
+      )
+  end
+
+  defp unfulfilled_search_promise?(_, _), do: false
+
+  defp reference_excerpt_fallback(context) do
+    sources = get_in_map(context, [:web_evidence, :sources]) || []
+
+    excerpts =
+      sources
+      |> Enum.take(2)
+      |> Enum.filter(fn source ->
+        is_map(source) and is_binary(Map.get(source, :url)) and
+          is_binary(Map.get(source, :title)) and is_binary(Map.get(source, :excerpt))
+      end)
+      |> Enum.map_join("\n", fn source ->
+        "- #{String.slice(source.title, 0, 120)}: " <>
+          "#{String.slice(source.excerpt, 0, 320)} " <>
+          "Source: #{String.slice(source.url, 0, 400)}"
+      end)
+
+    "I retrieved these reference excerpts, but they are not independently verified facts:\n" <>
+      excerpts <> "\nThe excerpts alone may not fully answer the question."
   end
 
   # The small model may repeat a stale "I have no live news access" message

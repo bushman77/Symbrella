@@ -61,11 +61,15 @@ defmodule Core.Response.LlmSynthesis do
   defp do_generate(user_text, features, decision, mood, prompt_type) do
     LlmChatHistory.ensure_table!()
 
+    raw_context = prompt_context(user_text, features, decision, mood)
+    session_id = Map.get(raw_context, :session_id, :global)
+
+    # Retrieval follow-ups may resolve "search for it" using a bounded
+    # window of this session's prior USER turns. The history is not copied
+    # into the response context or trusted as external evidence.
     context =
-      user_text
-      |> prompt_context(features, decision, mood)
-      |> WebRetrieval.enrich()
-    session_id = Map.get(context, :session_id, :global)
+      WebRetrieval.enrich(raw_context,
+        history: LlmChatHistory.messages(session_id, 3))
 
     system_prompt = build_prompt(context, prompt_type)
     emit_prompt_event(system_prompt, user_text, context)
