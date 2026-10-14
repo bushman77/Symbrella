@@ -48,7 +48,7 @@ defmodule Brain.LIFG.LexicalAudit do
     pos = Safe.get(candidate, :pos) || pos_from_id(id)
 
     if is_binary(id) and is_binary(pos) and
-         String.split(id, "|") |> length() >= 3 do
+         length(String.split(id, "|")) >= 3 do
       report = ContextFit.explain(sentence, target, candidate)
 
       [%{
