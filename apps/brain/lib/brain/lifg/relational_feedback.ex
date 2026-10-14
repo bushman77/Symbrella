@@ -144,6 +144,13 @@ defmodule Brain.LIFG.RelationalFeedback do
       not complete_distribution?(probs) ->
         Map.merge(base, %{status: :incomplete_probability_distribution})
 
+      not Map.has_key?(probs, chosen) or
+          Map.get(probs, chosen, 0.0) + 1.0e-6 < Enum.max(Map.values(probs)) ->
+        # Core's canonical choice may differ from the Stage1 raw winner after
+        # grammar or MWE compatibility selection. Such a prior cannot be
+        # safely revised without redoing that selection first.
+        Map.merge(base, %{status: :prior_winner_mismatch})
+
       not is_list(bucket) or length(bucket) > @max_candidates ->
         Map.merge(base, %{status: :candidate_bucket_unavailable})
 
@@ -191,7 +198,8 @@ defmodule Brain.LIFG.RelationalFeedback do
           Map.merge(base, %{
             status: if(proposed == chosen, do: :supported_existing_choice,
               else: :revision_proposed),
-            revision?: proposed != chosen and sense_pos(proposed) == selected_pos,
+            revision?: proposed != chosen and sense_pos(proposed) == selected_pos and
+              Enum.any?(report.adjustments, &(&1.id == proposed)),
             proposed_id: proposed,
             adjustments: report.adjustments,
             posterior: posterior,
