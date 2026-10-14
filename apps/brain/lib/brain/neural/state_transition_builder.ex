@@ -97,6 +97,33 @@ defmodule Brain.Neural.StateTransitionBuilder do
 
   def build(_, _), do: {:error, :invalid_arguments}
 
+  @doc """
+  Project ONE already archived completed turn into exactly the same 24
+  numeric features and observation mask as the offline dataset builder.
+
+  Used by the read-only shadow evaluator after a successful archive write.
+  This is not a cognition pipeline and performs no DB/hippocampal calls.
+  """
+  @spec project_observation(map(), [map()]) :: {:ok, map()} | {:error, term()}
+  def project_observation(%{} = turn, events) when is_list(events) do
+    with :ok <- validate_turns([turn]),
+         :ok <- check_traces(events) do
+      stats = memory_stats(events)
+
+      {:ok,
+       %{
+         session_id: turn["session_id"],
+         turn_id: turn["turn_id"],
+         feature_schema_version: @schema_version,
+         feature_names: @feature_names,
+         values: features(turn, stats),
+         observed: observation_mask(turn, stats)
+       }}
+    end
+  end
+
+  def project_observation(_, _), do: {:error, :invalid_observation}
+
   defp read(path, optional \\ false) do
     cond do
       optional and not File.exists?(path) ->
