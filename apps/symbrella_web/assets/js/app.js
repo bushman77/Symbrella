@@ -7,9 +7,11 @@ import topbar from "../vendor/topbar"
 
 // Import ChatInput from dedicated hooks file (Option B)
 import { ChatInput } from "./hooks/chat"
+import { BrainReportCopy } from "./hooks/brain_report_copy"
 
 const Hooks = {}
 Hooks.ChatInput = ChatInput
+Hooks.BrainReportCopy = BrainReportCopy
 
 const setTheme = (theme) => {
   if (theme === "system") {
