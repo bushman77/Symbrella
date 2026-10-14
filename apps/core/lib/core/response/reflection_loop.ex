@@ -92,6 +92,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
     |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
     |> maybe_issue(named_reference_missing?(context), :named_reference_missing)
+    |> maybe_issue(uncited_reference_answer?(context, draft_text), :reference_uncited)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -123,7 +124,8 @@ defmodule Core.Response.ReflectionLoop do
           :news_assessment_missing in issues or :news_lookup_misrepresented in issues ->
         {:repair, issues}
 
-      :search_not_answered in issues or :named_reference_missing in issues ->
+      :search_not_answered in issues or :named_reference_missing in issues or
+          :reference_uncited in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -190,6 +192,9 @@ defmodule Core.Response.ReflectionLoop do
         :named_reference_missing in issues ->
           named_reference_missing_fallback(context)
 
+        :reference_uncited in issues ->
+          reference_excerpt_fallback(context)
+
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
@@ -228,6 +233,8 @@ defmodule Core.Response.ReflectionLoop do
           "A dated-news lookup was attempted but did not yield qualifying headlines. State the search outcome honestly; do not claim Symbrella lacks web-search capabilities or invent reports."
         :named_reference_missing in issues ->
           "No relevant reference excerpts were retained for the named public topic. Do not substitute background information as evidence of the specific programme."
+        :reference_uncited in issues ->
+          "The answer lacks any URL from retrieved reference evidence. Give only attributed excerpts with URLs; do not invent a factual or institutional history."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -304,6 +311,30 @@ defmodule Core.Response.ReflectionLoop do
 
   defp news_access_refusal?(_, _), do: false
 
+  # A public reference answer without any retained source URL is not a
+  # source-grounded response. This does not independently verify the
+  # cited claims, but it prevents unsupported factual narration from being
+  # silently accepted as retrieval-backed.
+  defp uncited_reference_answer?(context, draft_text) when is_binary(draft_text) do
+    case Map.get(context, :web_evidence) do
+      %{resolution: :reference_sources, status: :retrieved,
+        sources: sources, request_type: request_type}
+      when request_type in [
+             :general_search, :historical_reference, :technical_reference,
+             :scientific_research, :fact_check, :comparison, :local_information
+           ] and is_list(sources) and sources != [] ->
+        not Enum.any?(sources, fn source ->
+          url = Map.get(source, :url)
+          is_binary(url) and url != "" and String.contains?(draft_text, url)
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp uncited_reference_answer?(_, _), do: false
+
   # If references were rejected for a qualified named subject, don't
   # substitute generic background material and imply it answers the named
   # programme question. Other query categories remain unchanged.
@@ -339,10 +370,11 @@ defmodule Core.Response.ReflectionLoop do
     case Map.get(context, :web_evidence) do
       %{relation: :current_events, resolution: :exhausted, sources: [],
         attempted_count: attempts} when is_integer(attempts) and attempts > 0 ->
-        Regex.match?(
-          ~r/\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer|unable\s+to)\b.{0,70}\b(?:capability|ability|access|browse|search)\b.{0,70}\b(?:web|internet|online|news|browse|search)|\b(?:no|without)\s+(?:web|internet|live\s+news)\s+access\b/iu,
-          draft_text
-        )
+        generic_refusal?(draft_text) or
+          Regex.match?(
+            ~r/\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer|unable\s+to)\b.{0,70}\b(?:capability|ability|access|browse|search)\b.{0,70}\b(?:web|internet|online|news|browse|search)|\b(?:no|without)\s+(?:web|internet|live\s+news)\s+access\b/iu,
+            draft_text
+          )
 
       _ ->
         false

@@ -116,6 +116,30 @@ railgun source, or guarantee topical citations. Enabling a vetted SearXNG
 endpoint can extend general-reference coverage; RSS is still a bounded
 dated-headline discovery source.
 
+## October 14 follow-up: source-selection and output validation
+
+The follow-up Brain report exposed two failures that were invisible to routing
+tests. The first reference lookup retained an anime/television-season entry
+whose description happened to contain **Japanese** and **railgun**. The named
+programme gate now uses whole words, requires an additional query subject
+term, and rejects entertainment-dominant results when the original question
+does not request entertainment. These are conservative lexical checks, not
+semantic fact verification.
+
+For typed reference responses that have retrieved material, Reflection now
+requires a link to at least one retained source. If the draft gives a factual
+narrative without any of those URLs, the reply is repaired to bounded,
+attributed excerpts rather than silently accepting unsourced assertions.
+Even a URL does *not* prove the model's surrounding claims; deeper
+claim-level validation is still future work.
+
+The news follow-up correctly retained the railgun subject and returned no
+qualifying dated headlines, but Qwen replied "I can't assist with that."
+A generic can't-assist refusal after a documented unsuccessful news lookup
+now triggers the same honest empty-search fallback as a false claim that
+web search capability is absent. The search remains subject-bound and no
+headline is invented.
+
 ## Tests
 
 ```sh

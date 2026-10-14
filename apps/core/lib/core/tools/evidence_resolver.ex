@@ -227,12 +227,10 @@ defmodule Core.Tools.EvidenceResolver do
     end
   end
 
-  # An encyclopedia article about a technology is not automatically an
-  # article about the named programme the user asked about. When a public
-  # general-search subject has a capitalized possessive qualifier (for example
-  # "Japan's railgun development"), require the named focus to occur in the
-  # retrieved title or excerpt. This is a conservative relevance gate, not
-  # an assertion that a matching source independently verifies the claim.
+  # Named-subject searches need both the named entity and actual topic
+  # terms. A partial substring ("Japan" in "Japanese") is not sufficient,
+  # and entertainment results are not evidence for a technical programme.
+  # This is conservative *relevance*, not independent fact verification.
   defp require_named_focus(sources, query, nil, :general_search) do
     case Regex.run(
            ~r/\b([A-Z][\p{L}-]{2,})['’]s\b/u,
@@ -242,12 +240,22 @@ defmodule Core.Tools.EvidenceResolver do
       [name] ->
         focus = String.downcase(name)
 
-        Enum.filter(sources, fn source ->
-          haystack =
-            (Map.get(source, :title, "") <> " " <> Map.get(source, :excerpt, ""))
-            |> String.downcase()
+        terms =
+          query
+          |> String.downcase()
+          |> then(&Regex.scan(~r/[\p{L}\p{N}]+/u, &1))
+          |> List.flatten()
+          |> Enum.reject(&(&1 in [focus, "s", "the", "a", "an", "of", "for", "on", "about"]))
+          |> Enum.filter(&(String.length(&1) >= 4))
+          |> Enum.uniq()
 
-          String.contains?(haystack, focus)
+        Enum.filter(sources, fn source ->
+          text =
+            Map.get(source, :title, "") <> " " <> Map.get(source, :excerpt, "")
+
+          named_word?(text, focus) and
+            (terms == [] or Enum.any?(terms, &whole_word?(text, &1))) and
+            not unrelated_media?(text, query)
         end)
 
       _ ->
@@ -256,6 +264,30 @@ defmodule Core.Tools.EvidenceResolver do
   end
 
   defp require_named_focus(sources, _, _, _), do: sources
+
+  defp named_word?(text, focus) do
+    word_forms =
+      # Adjectival forms such as Japanese/Taiwanese can name a country,
+      # but their mere substring is not sufficient proof of relevance.
+      [focus, focus <> "ese", focus <> "an", focus <> "ian"]
+      |> Enum.uniq()
+
+    Enum.any?(word_forms, &whole_word?(text, &1))
+  end
+
+  defp whole_word?(text, word) do
+    Regex.match?(
+      Regex.compile!("(?<![\\p{L}\\p{N}])" <> Regex.escape(word) <> "(?![\\p{L}\\p{N}])", "iu"),
+      text
+    )
+  end
+
+  defp unrelated_media?(text, query) do
+    media =
+      ~r/\b(?:anime|animated television|television series|tv series|manga|fictional|video game|comic book|television season|season \d+)\b/iu
+
+    Regex.match?(media, text) and not Regex.match?(media, query)
+  end
 
   defp valid_news_source?(%{provider: :news_rss, title: title, url: url,
                                    published_at: stamp, excerpt: excerpt})

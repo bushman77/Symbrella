@@ -43,6 +43,34 @@ defmodule Core.Tools.WebRetrievalTest do
     end
   end
 
+  defmodule UnrelatedAnimePage do
+    def search(_query, _opts) do
+      {:ok,
+       [
+         %{
+           provider: :wikipedia,
+           title: "A Certain Scientific Railgun season 1",
+           url: "https://en.wikipedia.org/wiki/A_Certain_Scientific_Railgun_season_1",
+           excerpt: "2009 Japanese animated television series, based on a manga, featuring a railgun."
+         }
+       ]}
+    end
+  end
+
+  defmodule JapaneseTechnicalReference do
+    def search(_query, _opts) do
+      {:ok,
+       [
+         %{
+           provider: :wikipedia,
+           title: "Japanese railgun research programme",
+           url: "https://en.wikipedia.org/wiki/Japanese_railgun_research_programme",
+           excerpt: "Japanese navy researchers tested a railgun prototype."
+         }
+       ]}
+    end
+  end
+
   defmodule FocusedRailgunPage do
     def search(_query, _opts) do
       {:ok,
@@ -173,6 +201,59 @@ defmodule Core.Tools.WebRetrievalTest do
     assert final =~ "Japan's railgun development"
     assert final =~ "did not establish that subject"
     refute final == draft
+  end
+
+  test "Japanese anime railgun result does not pass the Japan research relevance gate" do
+    query = %{user_text: "What do you know about Japan's railgun development?"}
+
+    result =
+      WebRetrieval.enrich(query,
+        enabled?: true, provider: UnrelatedAnimePage, max_attempts: 1)
+
+    assert result.web_evidence.sources == []
+    assert result.web_evidence.resolution == :exhausted
+    assert result.web_evidence.status == :not_found
+
+    draft =
+      "Japan has developed railguns since the 1960s at several notable institutions."
+
+    {:ok, final, review} = ReflectionLoop.review(query.user_text, draft, result)
+    assert review.status == :repair
+    assert :named_reference_missing in review.issues
+    assert final =~ "did not establish that subject"
+    refute final =~ "since the 1960s"
+  end
+
+  test "Japanese technical source can qualify without exact Japan noun" do
+    query = %{user_text: "What do you know about Japan's railgun development?"}
+
+    result =
+      WebRetrieval.enrich(query,
+        enabled?: true, provider: JapaneseTechnicalReference, max_attempts: 1)
+
+    assert result.web_evidence.status == :retrieved
+    assert result.web_evidence.resolution == :reference_sources
+    assert [%{title: "Japanese railgun research programme"}] =
+             result.web_evidence.sources
+  end
+
+  test "unsupported reference narration is repaired to bounded source excerpts" do
+    query = %{user_text: "What do you know about Japan's railgun development?"}
+
+    result =
+      WebRetrieval.enrich(query,
+        enabled?: true, provider: FocusedRailgunPage, max_attempts: 1)
+
+    draft =
+      "Japan's railguns were developed in the 1960s by fictional institutions. " <>
+        "The research has advanced substantially since then."
+
+    {:ok, final, review} = ReflectionLoop.review(query.user_text, draft, result)
+    assert review.status == :repair
+    assert :reference_uncited in review.issues
+    assert final =~ "https://en.wikipedia.org/wiki/Japan_railgun_programme"
+    refute final =~ "1960s"
+    refute final =~ "fictional institutions"
   end
 
   test "reference results about the named research subject are retained" do

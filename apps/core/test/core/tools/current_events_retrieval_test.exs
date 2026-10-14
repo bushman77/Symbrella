@@ -262,6 +262,25 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     refute final =~ "don't have the capability"
   end
 
+  test "generic can't-assist refusal is repaired after a real, empty news lookup" do
+    user = question("Search the web for the latest developments about Japanese railguns")
+    result = WebRetrieval.enrich(user,
+      enabled?: true, news_provider: EmptyNews, max_attempts: 2)
+
+    {:ok, final, review} =
+      ReflectionLoop.review(
+        user.user_text,
+        "I'm sorry, but I can't assist with that.",
+        result
+      )
+
+    assert review.status == :repair
+    assert :news_lookup_misrepresented in review.issues
+    assert final =~ "I searched for dated news"
+    assert final =~ "no qualifying headlines were returned"
+    refute final =~ "can't assist with that"
+  end
+
   test "provider outage is not described as an empty search or verified news" do
     user = question("Search the web for the latest developments about Japanese railguns")
     result = WebRetrieval.enrich(user,
