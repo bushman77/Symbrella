@@ -63,13 +63,19 @@ defmodule Db.JSONL.SenseEvidenceReconciliationTest do
   end
 
   test "rejects metadata and word/POS mismatches" do
-    assert {:metadata_mismatch, _} =
+    assert {:metadata_mismatch, atom_detail} =
              Reconciliation.classify(source(),
                %{stored() | semantic_atoms: ["pos_raw:unrelated"]})
 
-    assert {:metadata_mismatch, _} =
+    assert atom_detail.stored_noncategory_atoms == ["pos_raw:unrelated"]
+    assert atom_detail.reconstructed_noncategory_atoms == ["pos_raw:name"]
+
+    assert {:metadata_mismatch, example_detail} =
              Reconciliation.classify(source(),
                %{stored() | example: "A changed example."})
+
+    assert example_detail.stored_example == "A changed example."
+    assert example_detail.reconstructed_example == nil
 
     assert {:wrong_word_pos, _} =
              Reconciliation.classify(source(), %{stored() | pos: "noun"})
