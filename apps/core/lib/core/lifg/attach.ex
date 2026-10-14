@@ -173,6 +173,8 @@ defmodule Core.LIFG.Attach do
         )
         |> Core.MWE.Decisions.attach()
         |> maybe_trace_mwe_scores(raw_choices, all_choices, virtual_mwes, lifg_opts)
+        |> maybe_trace_word_scores(raw_choices, all_choices, tokens_for_choices,
+          virtual_mwes, lifg_opts)
 
       _ ->
         si
@@ -180,6 +182,23 @@ defmodule Core.LIFG.Attach do
   end
 
   def run_and_attach(si, _lifg_opts), do: si
+
+  # Diagnostic only. A small winning probability can reflect a large
+  # candidate bucket; do not interpret it as sentence-level confidence.
+  defp maybe_trace_word_scores(si, raw, final, tokens, virtual, opts) do
+    if Keyword.get(opts, :trace_word_scores?, false) == true do
+      scores_mode = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
+      entries = Core.LIFG.ScoreAudit.summarize(raw, final, tokens, virtual, scores_mode)
+
+      Core.Pipeline.Trace.append(si, :lifg_word_score_audit,
+        decision: :observed,
+        reason: :per_token_competitive_probabilities,
+        meta: %{scores_mode: scores_mode, entries: entries}
+      )
+    else
+      si
+    end
+  end
 
   # Opt-in, observation-only trace of the virtual MWE candidates used by
   # LIFG. Unlike the normal compact choices, this records raw scorer IDs,
