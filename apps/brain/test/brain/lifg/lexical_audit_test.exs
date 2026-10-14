@@ -44,7 +44,9 @@ defmodule Brain.LIFG.LexicalAuditTest do
               reason: :insufficient_discriminating_evidence,
               evidence_gap: 0.0}] = report.groups
     assert Enum.all?(report.senses, &(&1.context_fit == 0.0))
-    assert Enum.all?(report.senses, &(Map.values(&1.matches) |> Enum.all?(&(&1 == []))))
+    assert Enum.all?(report.senses, fn row ->
+             Enum.all?(Map.values(row.matches), fn matches -> matches == [] end)
+           end)
   end
 
   test "grammatical class is not misrepresented as word-sense discrimination" do
