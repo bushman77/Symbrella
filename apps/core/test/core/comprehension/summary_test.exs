@@ -81,6 +81,50 @@ defmodule Core.Comprehension.SummaryTest do
     assert summary.stats.unresolved_content == 3
   end
 
+  test "genitive syntax is visible without assigning a dictionary sense to its owner" do
+    si = %{
+      intent: :ask,
+      sentence: "Japan's railgun development?",
+      tokens: [
+        %{index: 0, phrase: "Japan's"},
+        %{index: 1, phrase: "railgun"},
+        %{index: 2, phrase: "development?"}
+      ],
+      semantic_choices: [
+        %{token_index: 1, id: "railgun|noun|1", score: 0.15},
+        %{token_index: 2, id: "development|noun|1", score: 0.8}
+      ],
+      sentence_signatures: [
+        %{
+          id: :possessive_noun_phrase,
+          span: {0, 2},
+          roles: %{possessor: 0, modifier: 1, head: 2},
+          surface_possessor: "Japan",
+          evidence: [:apostrophe_s, :nominal_head_available]
+        }
+      ]
+    }
+
+    summary = Summary.build(si)
+
+    assert summary.syntactic_relations == [
+      %{
+        type: :genitive_nominal_modifier,
+        span: {0, 2},
+        possessor: "Japan",
+        nominal: "railgun development",
+        head: "development",
+        grounding_status: :unverified,
+        source: :sentence_signature
+      }
+    ]
+
+    assert summary.unresolved == ["japan's"]
+    refute "japan's" in summary.understood
+    assert summary.degraded?
+    assert :unresolved_content_tokens in summary.reasons
+  end
+
   test "attach writes summary and trace contract" do
     si =
       Summary.attach(%{
