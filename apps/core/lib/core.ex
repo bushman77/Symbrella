@@ -165,6 +165,9 @@ defmodule Core do
     |> StateDump.capture(:atl)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
     |> StateDump.capture(:atl_pairs)
+    |> Core.LIFG.RelationalFeedback.attach(
+      Keyword.get(opts, :lifg_relational_feedback_opts, []))
+    |> StateDump.capture(:lifg_relational_feedback)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
     |> Core.Semantic.SentenceMeaning.attach()
