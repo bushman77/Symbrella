@@ -61,11 +61,13 @@ defmodule Brain.LIFG.RelationalFeedbackTest do
 
   test "changing the other token's selected sense does not create self-confirmation" do
     si = fixture()
-    modified =
-      put_in(si.atl_slate.constituents,
-        [%{hd(si.atl_slate.constituents) |
-            roles: %{hd(si.atl_slate.constituents).roles |
-              modifier: %{token_index: 0, sense_id: "river|noun|999"}}}])
+    original_constituent = hd(si.atl_slate.constituents)
+    other_sense = %{token_index: 0, sense_id: "river|noun|999"}
+    changed_constituent = %{
+      original_constituent |
+      roles: Map.put(original_constituent.roles, :modifier, other_sense)
+    }
+    modified = put_in(si.atl_slate.constituents, [changed_constituent])
 
     original = RelationalFeedback.evaluate(si)
     changed = RelationalFeedback.evaluate(modified)
