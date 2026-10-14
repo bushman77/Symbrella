@@ -128,6 +128,24 @@ defmodule Brain.LIFG.ContextFitWindowTest do
     assert_in_delta result.score, 0.38, 1.0e-6
   end
 
+  test "custom evidence weights preserve the strongest source of a repeated cue" do
+    candidate = %{
+      definition: "One newly invented item.",
+      example: "A new piece of equipment."
+    }
+
+    report =
+      ContextFit.explain("The new development arrived.", "development", candidate,
+        weights: %{definition: 0.0, example: 1.0, synonyms: 0.0,
+                   semantic_atoms: 0.0, gram_function: 0.0})
+
+    assert report.matches.definition == ["new"]
+    assert report.matches.example == ["new"]
+    assert report.unique_matches.definition == []
+    assert report.unique_matches.example == ["new"]
+    assert_in_delta report.score, 0.5, 1.0e-6
+  end
+
   test "two independent technical clues retain railgun lexical evidence" do
     electromagnetic = %{
       definition: "An electromagnetic gun that uses current to propel a projectile.",
