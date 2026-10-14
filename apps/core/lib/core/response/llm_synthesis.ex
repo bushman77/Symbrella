@@ -19,6 +19,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
+  alias Core.Response.EvidenceRevision
   alias Core.Response.ReflectionLoop
   alias Core.Response.RuntimeContext
   alias Core.Tools.WebRetrieval
@@ -85,7 +86,12 @@ defmodule Core.Response.LlmSynthesis do
           content
           |> sanitize_model_text()
           |> then(&AnswerPolish.polish(user_text, &1, context))
-        {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
+        {:ok, initial_out, initial_reflection} =
+          ReflectionLoop.review(user_text, draft, context)
+
+        {out, reflection} =
+          maybe_revise_evidence(user_text, draft, context, initial_out, initial_reflection)
+
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}
 
@@ -97,6 +103,93 @@ defmodule Core.Response.LlmSynthesis do
         Logger.debug("[LlmSynthesis] LLM error: #{inspect(reason)}")
         {:error, reason}
     end
+  end
+
+  # A failed news draft gets ONE extra model call, only when fresh dated
+  # headlines are available and the failure was news grounding/completeness.
+  # Never retry on unsafe drafts; never let an unvalidated candidate replace
+  # the already-grounded deterministic answer from Reflection.
+  defp maybe_revise_evidence(user_text, draft, context, original_out, first_reflection) do
+    cfg = Application.get_env(:core, :llm_synthesis, [])
+
+    if Keyword.get(cfg, :evidence_revision_enabled?, true) and
+         EvidenceRevision.eligible?(context, first_reflection) do
+      revise_once(user_text, draft, context, original_out, first_reflection)
+    else
+      {original_out, first_reflection}
+    end
+  end
+
+  defp revise_once(user_text, draft, context, original_out, first_reflection) do
+    messages = EvidenceRevision.messages(user_text, context, first_reflection)
+    started_at = System.monotonic_time(:millisecond)
+
+    revision_options =
+      chat_opts()
+      |> Keyword.put(:max_tokens, llm_config(:evidence_revision_max_tokens, 360))
+
+    result =
+      try do
+        llm_client().chat(messages, revision_options)
+      rescue
+        error -> {:error, {:revision_exception, Exception.message(error)}}
+      catch
+        :exit, _ -> {:error, :revision_timeout}
+      end
+
+    {out, reflection, candidate, review, outcome} =
+      case result do
+        {:ok, %{content: content}} when is_binary(content) and content != "" ->
+          candidate =
+            content
+            |> sanitize_model_text()
+            |> then(&AnswerPolish.polish(user_text, &1, context))
+
+          if String.trim(candidate) == "" do
+            {original_out, first_reflection, candidate, nil, :empty}
+          else
+            {:ok, validated, review} = ReflectionLoop.review(user_text, candidate, context)
+
+            # Reflection may have "repaired" the candidate with a deterministic
+            # fallback. That is NOT a successful model revision.
+            if review.status == :accept and validated == candidate do
+              {candidate, review, candidate, review, :accepted}
+            else
+              {original_out, first_reflection, candidate, review, :rejected}
+            end
+          end
+
+        {:error, _reason} ->
+          {original_out, first_reflection, nil, nil, :client_error}
+
+        _ ->
+          {original_out, first_reflection, nil, nil, :invalid_response}
+      end
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    trace =
+      EvidenceRevision.trace(
+        first_reflection, draft, messages, candidate, review, outcome, elapsed_ms
+      )
+
+    emit_revision_event(context, trace)
+
+    {out, Map.put(reflection, :evidence_revision, trace)}
+  end
+
+  defp emit_revision_event(context, trace) do
+    Telemetry.emit(
+      [:core, :response, :evidence_revision],
+      %{elapsed_ms: Map.get(trace, :elapsed_ms, 0), attempts: 1},
+      %{
+        session_id: Map.get(context, :session_id, :global),
+        outcome: Map.get(trace, :outcome),
+        selected_source: Map.get(trace, :selected_source),
+        initial_issues: Map.get(trace, :initial_issues, []),
+        candidate_issues: Map.get(trace, :candidate_issues, [])
+      }
+    )
   end
 
   defp build_prompt(context, prompt_type)

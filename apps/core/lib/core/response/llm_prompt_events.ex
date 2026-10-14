@@ -181,7 +181,8 @@ defmodule Core.Response.LlmPromptEvents do
       :final_sha256,
       :draft_text,
       :final_text,
-      :at_ms
+      :at_ms,
+      :evidence_revision
     ])
   end
 
