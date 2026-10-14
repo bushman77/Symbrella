@@ -85,12 +85,21 @@ defmodule Core.Semantic.Proposition do
       |> Map.get(:tokens, [])
       |> index_tokens()
 
+    # Require a constituent that covers the *whole* nominal complement.
+    # An incidental noun phrase inside a longer topic is not proof of the
+    # meaning of that topic. A surface genitive contributes one prefix token.
+    nominal_start =
+      case Map.get(topic, :possession) do
+        %{token_index: ^first, grounding_status: :unverified} -> first + 1
+        _ -> first
+      end
+
     nominal =
       Enum.find(constituents, fn
         %{id: :noun_phrase, status: :resolved, span: {start, finish},
           roles: %{head: %{token_index: head_idx, sense_id: id}}}
-        when start >= first and finish <= last and
-             is_integer(head_idx) and is_binary(id) -> true
+        when start == nominal_start and finish == last and
+             head_idx == last and is_binary(id) -> true
         _ -> false
       end)
 
