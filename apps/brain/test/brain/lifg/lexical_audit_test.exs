@@ -49,6 +49,33 @@ defmodule Brain.LIFG.LexicalAuditTest do
            end)
   end
 
+  test "repeated new in gloss and example cannot falsely select technical development sense" do
+    senses = [
+      %{id: "development|noun|6", pos: "noun",
+        definition: "The application of new ideas to practical problems.",
+        example: "Our development department produced three new adhesives."},
+      %{id: "development|noun|2", pos: "noun",
+        definition: "The process of producing an organism by adding new cells."},
+      %{id: "development|noun|4", pos: "noun",
+        definition: "A project of residential buildings."}
+    ]
+
+    result =
+      LexicalAudit.analyze(
+        "The city approved a new housing development.",
+        "development",
+        senses
+      )
+
+    assert [%{pos: "noun", eligible_for_control?: false,
+              reason: :insufficient_discriminating_evidence,
+              evidence_gap: 0.0}] = result.groups
+
+    technical = Enum.find(result.senses, &(&1.id == "development|noun|6"))
+    assert technical.matches.example == ["new"]
+    assert technical.unique_matches.example == []
+  end
+
   test "grammatical class is not misrepresented as word-sense discrimination" do
     senses = [
       %{id: "record|noun|1", pos: "noun", definition: "Written information."},
