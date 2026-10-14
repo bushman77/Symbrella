@@ -39,7 +39,7 @@ defmodule Brain.LIFG.ContextFit do
   }
 
   # A repeated cue across definition, example and synonyms is still only one
-  # independent lexical observation. Prefer the highest-reliability source.
+  # independent lexical observation. Prefer the highest-weight source.
   @evidence_priority [:definition, :example, :synonyms, :semantic_atoms, :gram_function]
 
   # Common grammatical/scaffolding words are poor semantic discriminators.
@@ -127,7 +127,7 @@ defmodule Brain.LIFG.ContextFit do
     # Deduplicate matched *context terms*, not dictionary fields. A single
     # token such as "new" appearing in a gloss and an example is not two
     # independent contextual observations. Preserve raw matches for audit.
-    unique_matches = unique_evidence_matches(matches)
+    unique_matches = unique_evidence_matches(matches, weights)
 
     component_scores =
       Map.new(unique_matches, fn {field, terms} ->
@@ -185,9 +185,20 @@ defmodule Brain.LIFG.ContextFit do
 
   # Count each lexical context cue at most once across dictionary fields.
   # No extra linguistic evidence is manufactured by this deduplication.
-  defp unique_evidence_matches(matches) do
+  defp unique_evidence_matches(matches, weights) do
+    # If caller overrides weights, do not discard an example match simply
+    # because the same term appeared in a zero-weight definition field.
+    # Equal-weight fields retain the normal reliability order.
+    priority =
+      @evidence_priority
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {field, position} ->
+        {-Map.get(weights, field, 0.0), position}
+      end)
+      |> Enum.map(&elem(&1, 0))
+
     {_seen, result} =
-      Enum.reduce(@evidence_priority, {MapSet.new(), %{}}, fn field, {seen, acc} ->
+      Enum.reduce(priority, {MapSet.new(), %{}}, fn field, {seen, acc} ->
         novel =
           matches
           |> Map.get(field, [])
