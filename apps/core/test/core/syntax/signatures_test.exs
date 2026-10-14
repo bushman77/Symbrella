@@ -243,6 +243,74 @@ defmodule Core.Syntax.SignaturesTest do
            end)
   end
 
+  test "genitive noun phrase composes the live railgun topic without a Japan's sense" do
+    cells = [
+      %{norm: "about", pos: "preposition"},
+      %{norm: "railgun", pos: "noun"},
+      %{norm: "development", pos: "noun"}
+    ]
+
+    si = input("What do you know about Japan's railgun development?", cells)
+    signatures = Signatures.detect(si)
+
+    assert [%{
+      id: :possessive_noun_phrase,
+      span: {5, 7},
+      surface_possessor: "Japan",
+      roles: %{possessor: 5, modifier: 6, head: 7},
+      evidence: evidence
+    }] = Enum.filter(signatures, &(&1.id == :possessive_noun_phrase))
+
+    assert :apostrophe_s in evidence
+    assert :possessor_not_lexically_verified in evidence
+
+    assert Enum.any?(signatures, fn
+             %{id: :prepositional_phrase, span: {4, 7},
+               roles: %{preposition: 4, possessor: 5, modifier: 6,
+                        head: 7, object: 7}} -> true
+             _ -> false
+           end)
+
+    out = Signatures.attach(si)
+    assert out.active_cells == cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
+  test "a single nominal head and an adjective nominal head support possession" do
+    for {sentence, cells, span, head} <- [
+          {"Mary's car", [%{norm: "car", pos: "noun"}], {0, 1}, 1},
+          {"the company's annual results",
+           [%{norm: "annual", pos: "adjective"}, %{norm: "results", pos: "noun"}],
+           {1, 3}, 3}
+        ] do
+      assert Enum.any?(Signatures.detect(input(sentence, cells)), fn
+               %{id: :possessive_noun_phrase, span: ^span,
+                 roles: %{head: ^head}} -> true
+               _ -> false
+             end)
+    end
+  end
+
+  test "possessive syntax does not treat contractions or punctuation as a genitive" do
+    cells = [
+      %{norm: "time", pos: "noun"},
+      %{norm: "rain", pos: "noun"},
+      %{norm: "home", pos: "noun"},
+      %{norm: "car", pos: "noun"},
+      %{norm: "the", pos: "determiner"}
+    ]
+
+    for sentence <- [
+          "It's time", "There's rain", "He's home",
+          "John's. car", "John's the car"
+        ] do
+      refute :possessive_noun_phrase in ids(sentence, cells)
+    end
+
+    refute :possessive_noun_phrase in ids("Mary's unknown", [])
+  end
+
   test "prepositional phrases compose around noun phrase structure" do
     cells = [
       %{norm: "in", pos: "preposition"},
