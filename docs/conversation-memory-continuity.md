@@ -5,8 +5,9 @@
 1. Assistant identity is configuration-owned, not a user fact. Explicit assistant-name
    questions are resolved deterministically by Core.Response.Memory.
 2. User facts are owned by the user subject, stored as hippocampal fact episodes and
-   retrieved by exact key from Db.Episode.latest_user_fact/1. Neural scores must not
-   replace these authoritative facts.
+   retrieved by exact key from Db.Episode.latest_user_fact/1. A partial PostgreSQL
+   index accelerates this lookup across the full episode table. Neural scores must
+   not replace these authoritative facts.
 3. The LiveView's current conversation identifier is owned by ChatHistory. It is
    stable across LiveView remounts while the application is running. Clearing the
    chat starts a fresh conversation identifier. Bounded LLM prompt history retains
@@ -31,6 +32,10 @@ memory-relevance pilot must remain out of the live response path until an
 independent evaluation justifies a separate rollout.
 
 ## Verification
+
+Apply database migrations before starting the app after pulling:
+
+    mix ecto.migrate
 
 Run the complete suite:
 
