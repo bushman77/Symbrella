@@ -9,6 +9,7 @@ defmodule Core.Response.AnswerAdequacyTest do
   test "identifies a factual information request without treating social greetings as queries" do
     assert AnswerAdequacy.factual_question?(@moon)
     assert AnswerAdequacy.factual_question?("Why does the sky appear blue?")
+    assert AnswerAdequacy.factual_question?("How do you calculate orbital distance?")
     refute AnswerAdequacy.factual_question?("good afternoon symbrella")
     refute AnswerAdequacy.factual_question?("How are you?")
     refute AnswerAdequacy.factual_question?("i do not know you tell me")
