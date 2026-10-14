@@ -836,6 +836,35 @@ override: `SYMBRELLA_NEURAL_SHADOW_CHECKPOINT=/trusted/local/model.etf`.
 Only load model files you created or otherwise trust: Erlang term
 deserialization is not a safe format for arbitrary external files.
 
+### Portable checkpoint encoding and cold BEAM restarts
+
+The original v4 `.etf` writer serialized the entire `Axon.ModelState`
+with Erlang `term_to_binary`. A fresh BEAM can reject such a file when
+`binary_to_term(..., [:safe])` encounters an atom used by a tensor backend
+that has not been loaded in that runtime. Training and saving can succeed
+while shadow startup reports `:unsafe_or_corrupt_checkpoint`.
+
+The replacement writer keeps the **same filename** but saves a versioned,
+portable ETF envelope containing bounded model metadata plus four named
+f32 tensor byte strings and their shapes, **not** Nx or Axon structs. The
+reader safely decodes the envelope, validates tensor shapes and sizes, and
+reconstructs `Axon.ModelState` in the running process. The decoder never
+uses an unsafe fallback. Previously created legacy checkpoints are readable
+only if the existing safe loader can decode them.
+
+To upgrade a checkpoint created by the original writer, retain its backup
+and run `mix neural.train --task state_transition_residual` again with the
+updated code, then restart Phoenix. Validate with:
+
+```sh
+mix test apps/symbrella_web/test/symbrella_web/neural_shadow_test.exs
+```
+
+In the restarted IEx runtime run
+`SymbrellaWeb.NeuralShadow.status()` and check for
+`status: :shadow_only`. Keep the `SYMBRELLA_TRAINING_ARCHIVE=on` and
+`SYMBRELLA_NEURAL_SHADOW=on` flags. The shadow stays read-only.
+
 ### Architecture
 
 1. `Core.TrainingArchive.record_turn/2` persists the original completed

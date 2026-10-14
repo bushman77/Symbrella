@@ -91,6 +91,52 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     assert {:error, :unsafe_or_corrupt_checkpoint} = NeuralShadow.load_checkpoint(path)
   end
 
+  test "portable v4 checkpoint safe-decodes without embedded Nx/Axon structs", %{dir: dir} do
+    checkpoint = valid_checkpoint(dir)
+
+    assert {:ok, bytes} = File.read(checkpoint)
+    assert encoded = :erlang.binary_to_term(bytes, [:safe])
+
+    assert encoded.format == :symbrella_residual_v4_safe_etf
+    assert encoded.feature_schema_version == 4
+    assert encoded.byte_order == System.endianness()
+    refute Map.has_key?(encoded, :params)
+
+    assert %{shape: {24, 4}, binary: kernel} =
+             encoded.weights["dense_0"]["kernel"]
+
+    assert byte_size(kernel) == 24 * 4 * 4
+    assert %{shape: {4, 24}} = encoded.weights["dense_1"]["kernel"]
+
+    assert {:ok, %{artifact: %{params: params}}} = NeuralShadow.load_checkpoint(checkpoint)
+    assert is_struct(params, Axon.ModelState)
+    assert Nx.shape(params.data["dense_0"]["kernel"]) == {24, 4}
+    assert Nx.type(params.data["dense_0"]["kernel"]) == {:f, 32}
+  end
+
+  test "portable checkpoint rejects invalid tensor lengths and shapes", %{dir: dir} do
+    checkpoint = valid_checkpoint(dir)
+    encoded = checkpoint |> File.read!() |> :erlang.binary_to_term([:safe])
+
+    kernel = encoded.weights["dense_0"]["kernel"]
+
+    invalid_bytes =
+      put_in(encoded, [:weights, "dense_0", "kernel", :binary],
+        binary_part(kernel.binary, 0, byte_size(kernel.binary) - 4))
+
+    bad_path = Path.join(dir, "broken_tensor.etf")
+    File.write!(bad_path, :erlang.term_to_binary(invalid_bytes))
+
+    assert {:error, :invalid_portable_weights} = NeuralShadow.load_checkpoint(bad_path)
+
+    invalid_shape =
+      put_in(encoded, [:weights, "dense_0", "kernel", :shape], {4, 24})
+
+    File.write!(bad_path, :erlang.term_to_binary(invalid_shape))
+
+    assert {:error, :invalid_portable_weights} = NeuralShadow.load_checkpoint(bad_path)
+  end
+
   test "supervised mode predicts and scores only consecutive same-session turns", %{dir: dir} do
     checkpoint = valid_checkpoint(dir)
     path = Path.join(dir, "shadow_predictions.jsonl")

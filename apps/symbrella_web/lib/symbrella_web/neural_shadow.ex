@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.NeuralShadow do
   @event [:core, :training_archive, :completed_turn]
   @max_checkpoint_bytes 5_000_000
   @max_sessions 128
+  @portable_format :symbrella_residual_v4_safe_etf
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -283,11 +284,75 @@ defmodule SymbrellaWeb.NeuralShadow do
     end
   end
 
+  # Only known metadata and fixed-size tensor byte strings are decoded.
+  # Unlike the old raw term_to_binary(Axon.ModelState), this portable ETF
+  # contains no Nx structs / arbitrary backend atoms, so :safe works in a
+  # freshly started BEAM without prior model training.
   defp decode_checkpoint(binary) do
-    {:ok, :erlang.binary_to_term(binary, [:safe])}
+    # Load only the known, local schema modules before safe ETF decoding:
+    # feature-name and metadata atoms must already exist in this BEAM.
+    _ = Code.ensure_loaded?(StateTransitionResidual)
+    _ = StateTransitionBuilder.feature_names()
+
+    case :erlang.binary_to_term(binary, [:safe]) do
+      %{format: @portable_format} = encoded ->
+        decode_portable(encoded)
+
+      legacy ->
+        # Retain compatibility with older ETF files *when* the original
+        # safe decoder can read them. No unsafe binary_to_term fallback.
+        {:ok, legacy}
+    end
   rescue
     _ -> {:error, :unsafe_or_corrupt_checkpoint}
   end
+
+  defp decode_portable(%{
+         weights: %{
+           "dense_0" => %{"kernel" => k0, "bias" => b0},
+           "dense_1" => %{"kernel" => k1, "bias" => b1}
+         } = weights,
+         hidden_units: hidden,
+         byte_order: order
+       } = encoded)
+       when is_integer(hidden) and hidden in 1..64 and
+              map_size(weights) == 2 do
+    width = length(StateTransitionBuilder.feature_names())
+
+    if order != System.endianness() do
+      {:error, :unsupported_checkpoint_endianness}
+    else
+      with {:ok, first_kernel} <- unpack_tensor(k0, {width, hidden}),
+           {:ok, first_bias} <- unpack_tensor(b0, {hidden}),
+           {:ok, final_kernel} <- unpack_tensor(k1, {hidden, width}),
+           {:ok, final_bias} <- unpack_tensor(b1, {width}) do
+        data = %{
+          "dense_0" => %{"kernel" => first_kernel, "bias" => first_bias},
+          "dense_1" => %{"kernel" => final_kernel, "bias" => final_bias}
+        }
+
+        {:ok,
+         encoded
+         |> Map.drop([:format, :byte_order, :weights])
+         |> Map.put(:params, Axon.ModelState.new(data))}
+      end
+    end
+  end
+
+  defp decode_portable(_), do: {:error, :invalid_portable_checkpoint}
+
+  defp unpack_tensor(%{shape: shape, binary: bytes}, expected_shape)
+       when is_tuple(shape) and is_binary(bytes) do
+    expected_bytes = 4 * (expected_shape |> Tuple.to_list() |> Enum.product())
+
+    if shape == expected_shape and byte_size(bytes) == expected_bytes do
+      {:ok, bytes |> Nx.from_binary({:f, 32}) |> Nx.reshape(expected_shape)}
+    else
+      {:error, :invalid_portable_weights}
+    end
+  end
+
+  defp unpack_tensor(_, _), do: {:error, :invalid_portable_weights}
 
   defp validate_checkpoint(artifact) when is_map(artifact) do
     names = StateTransitionBuilder.feature_names()

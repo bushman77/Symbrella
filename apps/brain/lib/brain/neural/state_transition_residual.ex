@@ -17,6 +17,7 @@ defmodule Brain.Neural.StateTransitionResidual do
   @model_version "state-transition-residual-v4"
   @default_epochs 25
   @default_hidden 8
+  @portable_format :symbrella_residual_v4_safe_etf
 
   @doc "Residual delta predictor with zero-initialized final layer."
   @spec build_model(keyword()) :: Axon.t()
@@ -105,18 +106,70 @@ defmodule Brain.Neural.StateTransitionResidual do
 
   def train(_, _), do: {:error, :invalid_dataset}
 
-  @doc "Write an isolated, private checkpoint, never replacing the direct pilot."
+  @doc """
+  Save a private, safe-to-decode ETF checkpoint without serializing Nx/Axon
+  structs. Every model parameter is a fixed-shape, raw f32 tensor binary.
+  The loader reconstructs Axon.ModelState.new/1 after validating dimensions.
+  """
   @spec save(map(), Path.t()) :: :ok | {:error, term()}
-  def save(%{model_version: @model_version, params: params} = artifact, path)
-      when not is_nil(params) and is_binary(path) do
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(path, :erlang.term_to_binary(artifact), [:binary]),
+  def save(%{model_version: @model_version, params: params, hidden_units: hidden} = artifact, path)
+      when is_binary(path) and is_integer(hidden) and hidden in 1..64 do
+    with {:ok, weights} <- portable_weights(params, hidden),
+         :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, :erlang.term_to_binary(portable_artifact(artifact, weights)), [:binary]),
          :ok <- File.chmod(path, 0o600) do
       :ok
     end
   end
 
   def save(_, _), do: {:error, :invalid_artifact}
+
+  defp portable_artifact(artifact, weights) do
+    artifact
+    |> Map.take([
+      :model_version, :task, :feature_schema_version, :feature_names,
+      :epochs, :hidden_units, :objective, :reconstruction,
+      :zero_initialized_residual?, :train_examples, :eval_examples,
+      :train_sessions, :eval_sessions, :split_mode, :evaluated?,
+      :train_mse, :eval_mse, :persistence_train_mse,
+      :persistence_eval_mse, :mask_policy, :deployment_status
+    ])
+    |> Map.merge(%{
+      format: @portable_format,
+      byte_order: System.endianness(),
+      weights: weights
+    })
+  end
+
+  defp portable_weights(%Axon.ModelState{data: data}, hidden) when is_map(data) do
+    width = length(StateTransitionBuilder.feature_names())
+
+    with {:ok, first_kernel} <- packed_tensor(data, "dense_0", "kernel", {width, hidden}),
+         {:ok, first_bias} <- packed_tensor(data, "dense_0", "bias", {hidden}),
+         {:ok, final_kernel} <- packed_tensor(data, "dense_1", "kernel", {hidden, width}),
+         {:ok, final_bias} <- packed_tensor(data, "dense_1", "bias", {width}) do
+      {:ok, %{
+        "dense_0" => %{"kernel" => first_kernel, "bias" => first_bias},
+        "dense_1" => %{"kernel" => final_kernel, "bias" => final_bias}
+      }}
+    end
+  end
+
+  defp portable_weights(_, _), do: {:error, :invalid_model_weights}
+
+  defp packed_tensor(data, layer, key, expected_shape) do
+    case get_in(data, [layer, key]) do
+      %Nx.Tensor{} = tensor ->
+        if Nx.shape(tensor) == expected_shape and Nx.type(tensor) == {:f, 32} do
+          {:ok, %{shape: expected_shape, binary: Nx.to_binary(tensor)}}
+        else
+          {:error, :invalid_model_weights}
+        end
+
+      _ ->
+        {:error, :invalid_model_weights}
+    end
+  end
 
   @doc "Per-feature state MSE, excluding any unobserved transition targets."
   def metrics(names, predicted, current, observed, mask) do
