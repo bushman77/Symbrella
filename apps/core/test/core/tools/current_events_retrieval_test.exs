@@ -409,7 +409,7 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     fetch = fn url, opts ->
       assert url == "https://news.google.com/rss/search"
       assert opts[:params][:gl] == "CA"
-      assert opts[:params][:q] =~ "when:1y"
+      assert opts[:params][:q] =~ "when:7d"
       {:ok, %{status: 200, body: xml}}
     end
 
@@ -424,7 +424,7 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     refute String.contains?(source.excerpt, "older")
   end
 
-  test "Google News RSS includes headlines nearly one year old but excludes older items" do
+  test "explicit historical RSS lookback is capped at one year" do
     now = ~U[2026-10-13 17:00:00Z]
 
     xml = """
@@ -452,7 +452,8 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     assert NewsRss.max_age_hours() == 365 * 24
 
     assert {:ok, [%{url: "https://news.google.com/rss/articles/within-year"}]} =
-             NewsRss.search("Japan railgun", fetch: fetch, now: now)
+             NewsRss.search("Japan railgun", fetch: fetch, now: now,
+               max_age_hours: 365 * 24)
 
     # Even an oversized per-call lookback cannot extend past one year.
     assert {:ok, [%{url: "https://news.google.com/rss/articles/within-year"}]} =
@@ -460,17 +461,46 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
                max_age_hours: 2 * 365 * 24)
   end
 
-  test "resolver also retains at most one year of dated headlines" do
+  test "resolver rejects stale headlines even when a custom provider returns them" do
     result =
       WebRetrieval.enrich(
         question("Search the web for the latest developments about Japan's railgun"),
         enabled?: true, news_provider: YearWindowNews, max_attempts: 2
       )
 
-    assert result.web_evidence.resolution == :headlines_available
-    assert result.web_evidence.status == :retrieved
-    assert [%{url: "https://news.google.com/rss/articles/railgun-in-year"}] =
-             result.web_evidence.sources
+    assert result.web_evidence.resolution == :exhausted
+    assert result.web_evidence.status == :not_found
+    assert result.web_evidence.sources == []
+    assert Enum.map(result.web_evidence.attempts, & &1.status) == [:not_found, :not_found]
+  end
+
+  test "current-event RSS discovery excludes March headlines from an October question" do
+    now = ~U[2026-10-14 18:00:00Z]
+    xml = """
+    <rss><channel>
+      <item>
+        <title>Outdated March assessment</title>
+        <link>https://news.google.com/rss/articles/march</link>
+        <pubDate>Thu, 26 Mar 2026 12:00:00 GMT</pubDate>
+        <source>Example Wire</source>
+      </item>
+      <item>
+        <title>Latest October report</title>
+        <link>https://news.google.com/rss/articles/october</link>
+        <pubDate>Wed, 14 Oct 2026 12:00:00 GMT</pubDate>
+        <source>Example Wire</source>
+      </item>
+    </channel></rss>
+    """
+
+    fetch = fn _url, opts ->
+      assert opts[:params][:q] =~ "when:7d"
+      {:ok, %{status: 200, body: xml}}
+    end
+
+    assert NewsRss.default_age_hours() == 7 * 24
+    assert {:ok, [%{title: "Latest October report"}]} =
+             NewsRss.search("Iran war currently happening", fetch: fetch, now: now)
   end
 
   test "RSS network failure remains explicit and safe" do
