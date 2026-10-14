@@ -825,9 +825,11 @@ defmodule Brain.LIFG.Stage1 do
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
 
+        # Keep full softmax precision for downstream probability sums and
+        # decisions. Rounding each candidate to six decimals can make a valid
+        # distribution sum to 0.999999 (or 1.000001) in the trace.
         ranked =
           Enum.zip(ids, probs)
-          |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
           |> Enum.sort_by(fn {_id, p} -> -p end)
 
         {chosen_id, top_p0} =
