@@ -14,6 +14,7 @@
 defmodule Symbrella.TraceQuestionMWEPromotion do
   alias Brain.LIFG.ContextFit
   alias Core.MWE.GrammarPrecedence
+  import Ecto.Query, only: [from: 2]
 
   @question "What do you know about Japan's railgun development?"
   @phrase "what do you know"
@@ -63,6 +64,8 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
       grammar_weight: grammar_weight,
       selected_action: si.selected_action
     }, label: "Question classification")
+
+    print_pos_evidence(si)
 
     covers =
       si
@@ -209,6 +212,101 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
 
     IO.inspect(gate, label: "Final causal checks", pretty: true, limit: :infinity)
   end
+
+
+  # Explain a missing sentence frame with the exact POS evidence seen by the
+  # detector, compared with the POS rows currently stored in the local DB.
+  # Read-only and bounded: one grouped query for the eight base-token norms.
+  defp print_pos_evidence(si) do
+    words =
+      si
+      |> list(:tokens)
+      |> Enum.filter(fn token -> Map.get(token, :n, 1) == 1 end)
+      |> Enum.with_index()
+      |> Enum.map(fn {token, fallback_index} ->
+        surface = Map.get(token, :phrase) || Map.get(token, "phrase") || ""
+        index = Map.get(token, :index) || fallback_index
+        %{index: index, surface: surface, norm: lexical_norm(surface)}
+      end)
+
+    norms = words |> Enum.map(& &1.norm) |> Enum.reject(&(&1 == "")) |> Enum.uniq()
+
+    active_pos =
+      si
+      |> list(:active_cells)
+      |> Enum.reduce(%{}, fn cell, acc ->
+        norm = lexical_norm(Map.get(cell, :norm) || Map.get(cell, :word))
+        pos = Map.get(cell, :pos)
+
+        if norm in norms and not is_nil(pos) do
+          Map.update(acc, norm, MapSet.new([to_string(pos)]),
+            &MapSet.put(&1, to_string(pos)))
+        else
+          acc
+        end
+      end)
+
+    db_pos =
+      try do
+        Db.all(
+          from(c in Db.BrainCell,
+            where: c.norm in ^norms,
+            group_by: [c.norm, c.pos],
+            select: %{norm: c.norm, pos: c.pos}
+          )
+        )
+        |> Enum.reduce(%{}, fn %{norm: norm, pos: pos}, acc ->
+          if not is_nil(pos) do
+            Map.update(acc, norm, MapSet.new([to_string(pos)]),
+              &MapSet.put(&1, to_string(pos)))
+          else
+            acc
+          end
+        end)
+      rescue
+        error ->
+          IO.puts("Dictionary POS diagnostic unavailable: #{Exception.message(error)}")
+          %{}
+      end
+
+    inspected =
+      Enum.map(words, fn word ->
+        Map.merge(word, %{
+          active_pos: sorted_pos(active_pos, word.norm),
+          db_pos: sorted_pos(db_pos, word.norm)
+        })
+      end)
+
+    IO.inspect(inspected, label: "Token POS diagnostic (active cells vs dictionary)",
+      pretty: true, limit: :infinity, width: 120)
+
+    predicate = Enum.find(inspected, &(&1.index == 3))
+    prep = Enum.find(inspected, &(&1.index == 4))
+
+    if predicate && prep do
+      IO.inspect(%{
+        predicate_surface: predicate.surface,
+        active_verb?: "verb" in predicate.active_pos,
+        db_verb?: "verb" in predicate.db_pos,
+        preposition_surface: prep.surface,
+        active_preposition?: "preposition" in prep.active_pos,
+        db_preposition?: "preposition" in prep.db_pos
+      }, label: "WH-topic frame prerequisites")
+    end
+  end
+
+  defp sorted_pos(by_norm, norm) do
+    by_norm |> Map.get(norm, MapSet.new()) |> MapSet.to_list() |> Enum.sort()
+  end
+
+  defp lexical_norm(value) when is_binary(value) do
+    value
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+  end
+
+  defp lexical_norm(_), do: ""
 
   defp maybe_grammar_override(opts, nil), do: opts
 
