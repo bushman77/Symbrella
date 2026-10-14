@@ -57,6 +57,17 @@ defmodule Core.Comprehension.Summary do
     tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
     lexical_meanings = verified_lexical_meanings(si)
     syntactic_relations = syntactic_possessives(si, tokens)
+    sentence_meaning =
+      case Map.get(si, :sentence_meaning) || Map.get(si, "sentence_meaning") do
+        %{} = meaning -> meaning
+        _ -> nil
+      end
+
+    sentence_definition =
+      case sentence_meaning do
+        %{definition: text} when is_binary(text) -> text
+        _ -> nil
+      end
 
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
@@ -94,6 +105,8 @@ defmodule Core.Comprehension.Summary do
       understood: understood,
       lexical_meanings: lexical_meanings,
       syntactic_relations: syntactic_relations,
+      sentence_meaning: sentence_meaning,
+      sentence_definition: sentence_definition,
       uncertain: uncertain,
       unresolved: unresolved,
       degraded?: degraded?,
@@ -441,6 +454,8 @@ defmodule Core.Comprehension.Summary do
       understood: [],
       lexical_meanings: [],
       syntactic_relations: [],
+      sentence_meaning: nil,
+      sentence_definition: nil,
       uncertain: [],
       degraded?: true,
       reasons: [:invalid_input],
