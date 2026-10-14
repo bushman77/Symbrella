@@ -70,6 +70,21 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec align(String.t(), map()) :: String.t()
   def align(draft, context) when is_binary(draft) and is_map(context) do
+    case supported_proximity(context) do
+      %{distance_km: km, subject: subject, target: target, sources: sources}
+      when is_number(km) and is_binary(subject) and is_binary(target) ->
+        citations = Enum.map_join(sources, " and ", &Map.get(&1, :url, ""))
+        "Based on Wikidata coordinates, #{subject} and #{target} are approximately " <>
+          "#{km} km apart in a straight line (not driving distance). Sources: #{citations}"
+
+      _ ->
+        align_population(draft, context)
+    end
+  end
+
+  def align(draft, _), do: draft
+
+  defp align_population(draft, context) do
     case supported_population(context) do
       %{display: display, source_url: source, census_year: year} ->
         frame = geographic_frame(context)
@@ -86,10 +101,28 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     end
   end
 
-  def align(draft, _), do: draft
+  @spec available_support?(map()) :: boolean()
+  def available_support?(context) when is_map(context),
+    do: is_map(supported_population(context)) or is_map(supported_proximity(context))
+
+  def available_support?(_), do: false
 
   @spec supports?(String.t(), map()) :: boolean()
   def supports?(text, context) when is_binary(text) and is_map(context) do
+    case supported_proximity(context) do
+      %{distance_km: km, sources: sources} when is_number(km) and is_list(sources) ->
+        String.contains?(text, "#{km}") and
+          Enum.all?(sources, fn src -> String.contains?(text, Map.get(src, :url, "")) end) and
+          String.contains?(String.downcase(text), "straight line")
+
+      _ ->
+        supports_population?(text, context)
+    end
+  end
+
+  def supports?(_, _), do: false
+
+  defp supports_population?(text, context) do
     case supported_population(context) do
       %{display: display, value: value, source_url: source_url} ->
         (String.contains?(text, display) or String.contains?(text, Integer.to_string(value))) and
@@ -99,7 +132,20 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     end
   end
 
-  def supports?(_, _), do: false
+  defp supported_proximity(context) do
+    frame = geographic_frame(context)
+    evidence = Map.get(context, :web_evidence, %{})
+    support = Map.get(evidence, :support)
+
+    if Map.get(frame, :type) == :location_question and
+         Map.get(frame, :relation) == :proximity and
+         Map.get(evidence, :status) == :retrieved and
+         is_map(support) and Map.get(support, :status) == :source_supported and
+         is_number(Map.get(support, :distance_km)) and
+         is_list(Map.get(support, :sources)) and
+         length(Map.get(support, :sources)) == 2,
+       do: support
+  end
 
   defp supported_population(context) do
     frame = geographic_frame(context)

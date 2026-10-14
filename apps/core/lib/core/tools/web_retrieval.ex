@@ -83,57 +83,21 @@ defmodule Core.Tools.WebRetrieval do
   end
 
   defp fetch_and_attach(context, query, relation, cfg, opts) do
-    provider = Keyword.get(opts, :provider, Keyword.get(cfg, :provider, Core.Tools.WebRetrieval.Wikipedia))
-    timeout = Keyword.get(opts, :timeout_ms, Keyword.get(cfg, :timeout_ms, 3_500))
+    # The resolver owns bounded multi-source lookup and the support decision.
+    # Preserve the existing retrieval event for consumers already using it.
     started = System.monotonic_time(:millisecond)
-
-    result =
-      try do
-        provider.search(query, Keyword.merge([timeout_ms: timeout], Keyword.get(opts, :provider_opts, [])))
-      rescue
-        _ -> {:error, :provider_failure}
-      catch
-        :exit, _ -> {:error, :provider_unavailable}
-      end
-
-    evidence =
-      case result do
-        {:ok, sources} when is_list(sources) ->
-          sources = sources |> Enum.filter(&valid_source?/1) |> Enum.take(3)
-          subject =
-            context
-            |> Map.get(:features, %{})
-            |> Map.get(:symbolic_frame, %{})
-            |> Map.get(:subject)
-
-          support = Core.Tools.WebRetrieval.Grounding.extract_support(sources, relation, subject)
-
-          %{
-            status: if(sources == [], do: :not_found, else: :retrieved),
-            provider: provider,
-            query: query,
-            relation: relation,
-            sources: sources,
-            support: support
-          }
-
-        _ ->
-          %{status: :unavailable, provider: provider, query: query, relation: relation, sources: [], support: nil}
-      end
+    evidence = Core.Tools.EvidenceResolver.resolve(context, query, relation, cfg, opts)
 
     Telemetry.emit(
       @event,
-      %{source_count: length(evidence.sources), elapsed_ms: System.monotonic_time(:millisecond) - started},
-      %{status: evidence.status, provider: provider, relation: relation, session_id: Map.get(context, :session_id)}
+      %{source_count: length(evidence.sources),
+        elapsed_ms: System.monotonic_time(:millisecond) - started},
+      %{status: evidence.status, resolution: evidence.resolution,
+        provider: evidence.provider, relation: relation,
+        attempts: evidence.attempted_count,
+        session_id: Map.get(context, :session_id)}
     )
 
     Map.put(context, :web_evidence, evidence)
   end
-
-  defp valid_source?(%{title: title, url: url, excerpt: excerpt})
-       when is_binary(title) and is_binary(url) and is_binary(excerpt) do
-    String.starts_with?(url, "https://") and String.length(excerpt) > 0
-  end
-
-  defp valid_source?(_), do: false
 end

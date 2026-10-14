@@ -41,7 +41,8 @@ config :core, :llm_synthesis,
 config :core, :web_retrieval,
   enabled?: config_env() != :test,
   provider: Core.Tools.WebRetrieval.Wikipedia,
-  timeout_ms: 3_500
+  timeout_ms: 3_500,
+  max_attempts: 3
 
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,

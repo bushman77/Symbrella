@@ -152,6 +152,9 @@ defmodule Core.Response.LlmPromptEvents do
   defp retrieval_summary(%{} = evidence) do
     %{
       status: Map.get(evidence, :status),
+      resolution: Map.get(evidence, :resolution),
+      attempted_count: Map.get(evidence, :attempted_count),
+      attempts: Map.get(evidence, :attempts, []),
       provider: Map.get(evidence, :provider),
       sources:
         evidence

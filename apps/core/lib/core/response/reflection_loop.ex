@@ -196,7 +196,7 @@ defmodule Core.Response.ReflectionLoop do
         :unsupported_device_refusal in issues ->
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
         :geographic_claim_unverified in issues ->
-          "Use a sourced population figure only when a retrieved excerpt supports it and cite the source; otherwise state that the fact is unverified."
+          "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
           "Repair unsupported self-claims or hidden-control wording before publishing."
       end
@@ -306,10 +306,11 @@ defmodule Core.Response.ReflectionLoop do
     is_map(frame) and map_get(frame, :type) == :location_question and
       map_get(frame, :grounding_status) == :unverified and
       not Grounding.supports?(draft_text, context) and
-      not Regex.match?(
-        ~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu,
-        draft_text
-      )
+      (Grounding.available_support?(context) or
+         not Regex.match?(
+           ~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu,
+           draft_text
+         ))
   end
 
   defp unverified_geographic_reply(context) do
