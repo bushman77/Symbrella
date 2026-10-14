@@ -195,12 +195,20 @@ defmodule Core.LIFG.Attach do
         |> Enum.map(fn {index, cover} ->
           raw = Enum.find(raw_choices, &(Map.get(&1, :token_index) == index)) || %{}
           selected = Enum.find(final_choices, &(Map.get(&1, :token_index) == index)) || %{}
-          candidates = [Map.get(raw, :chosen_id) | List.wrap(Map.get(raw, :alt_ids))]
-          candidate_ids = candidates |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.take(16)
-
+          # :alt_ids lists only retry-eligible alternatives, not all
+          # candidates. Keep the complete bounded score map to reveal
+          # runner-up senses even when :alt_ids is empty.
           scored =
             case Map.get(raw, :scores) do
-              %{} = all -> Map.take(all, candidate_ids)
+              %{} = all ->
+                all
+                |> Enum.filter(fn {id, score} ->
+                  is_binary(id) and is_number(score)
+                end)
+                |> Enum.sort_by(fn {_, score} -> -score end)
+                |> Enum.take(16)
+                |> Map.new()
+
               _ -> %{}
             end
 
@@ -211,6 +219,7 @@ defmodule Core.LIFG.Attach do
             raw_winner: Map.get(raw, :chosen_id),
             final_winner: Map.get(selected, :id),
             raw_candidate_scores: scored,
+            raw_candidate_score_kind: :post_softmax_probability,
             raw_alt_ids: Map.get(raw, :alt_ids, []),
             raw_margin: Map.get(raw, :margin),
             raw_probability_margin: Map.get(raw, :prob_margin),

@@ -56,6 +56,8 @@ defmodule Core.MWE.Decisions do
     |> maybe_trace_promotions(tokens, accepted)
   end
 
+  def attach(other), do: other
+
   # Record the *actual* lexical promotion gate outcomes, with no scoring
   # changes. ATL can subsequently mark a grammatical role unresolved, but
   # that observation cannot retroactively rewrite these already-set winners.
@@ -114,8 +116,6 @@ defmodule Core.MWE.Decisions do
       si
     end
   end
-
-  def attach(other), do: other
 
   defp valid_phrase_choice?(%{
          id: id,
