@@ -71,9 +71,19 @@ defmodule Core.Response.Meta do
   # Only public, bounded review diagnostics enter chat metadata. Do not
   # expose prompt internals or duplicate raw model drafts in HTML/history.
   defp reflection_summary(%{} = reflection) do
-    Map.take(reflection, [:status, :issues, :applied?, :repair_count, :critique,
-                          :draft_sha256, :final_sha256])
+    reflection
+    |> Map.take([:status, :issues, :applied?, :repair_count, :critique,
+                 :draft_sha256, :final_sha256])
+    |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
   end
+
+  # Keep bounded retry outcomes inspectable without exposing prompts or drafts.
+  defp maybe_put_answer_revision(summary, revision) when is_map(revision) do
+    Map.put(summary, :answer_revision,
+      Map.take(revision, [:attempted?, :outcome, :issue]))
+  end
+
+  defp maybe_put_answer_revision(summary, _), do: summary
 
   defp reflection_summary(_), do: nil
 
