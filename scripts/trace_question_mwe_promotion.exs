@@ -22,7 +22,8 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
   def run do
     IO.puts("\n=== LIFG / sentence-signature / MWE promotion proof ===")
     IO.puts("Question: #{inspect(@question)}")
-    IO.puts("No sense selection or grammar rules are changed.\n")
+    IO.puts("Diagnostic only: no runtime rules are modified by this script.")
+    IO.puts("LIFG may adjust sense scores when dictionary context discriminates.\n")
 
     trace_once(:configured, nil)
 
