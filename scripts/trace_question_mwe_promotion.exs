@@ -199,7 +199,7 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.inspect(
       Map.take(Map.get(si, :comprehension) || %{},
         [:understood, :uncertain, :unresolved, :syntactic_relations,
-         :sentence_definition, :degraded?, :reasons]),
+         :sentence_definition, :sentence_proposition, :degraded?, :reasons]),
       label: "Comprehension result", pretty: true
     )
 
