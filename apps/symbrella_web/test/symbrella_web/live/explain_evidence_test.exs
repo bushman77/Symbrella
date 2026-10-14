@@ -106,7 +106,9 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
         intent: :command,
         degraded?: true,
         reasons: [:weak_decision_rate_high],
-        understood: [if(word_order == :power, do: "computer", else: "lights"), phrase],
+        recognized_topics: [if(word_order == :power, do: "computer", else: "lights")],
+        selected_lexical_candidates: [],
+        understood: [phrase],
         uncertain: [], unresolved: [],
         lexical_meanings: [%{id: sense, phrase: phrase, definition: definition}]
       },
@@ -210,7 +212,10 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
       assert body =~ "deactivate an appliance"
 
       assert Enum.any?(section(response, :comprehension).items,
-               &(&1.label == "understood" and &1.body =~ "turn off"))
+               &(&1.label == "verified lexical understanding" and &1.body =~ "turn off"))
+      assert Enum.any?(section(response, :comprehension).items,
+               &(&1.label == "recognized topics (not verified)" and
+                 &1.body =~ "lights"))
     end
 
     assert Enum.any?(section(adj, :semantic_choices).items,
