@@ -21,6 +21,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPromptEvents
   alias Core.Response.EvidenceRevision
   alias Core.Response.ReflectionLoop
+  alias Core.Response.AnswerAdequacy
   alias Core.Response.RuntimeContext
   alias Core.Tools.WebRetrieval
 
@@ -82,9 +83,32 @@ defmodule Core.Response.LlmSynthesis do
 
     LlmChatHistory.record_retrieval(session_id, Map.get(context, :web_evidence))
 
-    system_prompt = build_prompt(context, prompt_type)
-    emit_prompt_event(system_prompt, user_text, context)
     history = LlmChatHistory.messages(session_id, history_turn_pairs())
+    answer_target = AnswerAdequacy.answer_target(user_text, history)
+
+    context =
+      if is_binary(answer_target) do
+        Map.put(context, :answer_target_question, answer_target)
+      else
+        context
+      end
+
+    system_prompt =
+      build_prompt(context, prompt_type)
+      |> then(fn prompt ->
+        if is_binary(answer_target) and
+             AnswerAdequacy.factual_question?(answer_target) and
+             String.trim(answer_target) != String.trim(user_text) do
+          prompt <> "\nThe latest user turn requests an answer to this previous " <>
+            "question from the SAME session: " <> inspect(answer_target) <>
+            ". Answer that question directly; do not repeat it or answer " <>
+            "the follow-up as a standalone statement."
+        else
+          prompt
+        end
+      end)
+
+    emit_prompt_event(system_prompt, user_text, context)
 
     messages =
       [%{"role" => "system", "content" => system_prompt}] ++
@@ -104,8 +128,11 @@ defmodule Core.Response.LlmSynthesis do
         {:ok, initial_out, initial_reflection} =
           ReflectionLoop.review(user_text, draft, context)
 
+        {answer_out, answer_reflection} =
+          maybe_revise_answer(user_text, messages, context, initial_out, initial_reflection)
+
         {out, reflection} =
-          maybe_revise_evidence(user_text, draft, context, initial_out, initial_reflection)
+          maybe_revise_evidence(user_text, draft, context, answer_out, answer_reflection)
 
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}
@@ -117,6 +144,69 @@ defmodule Core.Response.LlmSynthesis do
       {:error, reason} ->
         Logger.debug("[LlmSynthesis] LLM error: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # A question echo or content-free non-answer gets at most one additional
+  # model pass with the actual same-session question restated. If the retry
+  # also fails review, preserve Reflection's transparent failure instead of
+  # publishing another echo or hallucinating a numerical answer.
+  defp maybe_revise_answer(user_text, messages, context, original_out, reflection) do
+    if :answer_not_supplied in Map.get(reflection, :issues, []) and
+         is_binary(Map.get(context, :answer_target_question)) do
+      question = Map.fetch!(context, :answer_target_question)
+
+      revision_messages =
+        case messages do
+          [%{"role" => "system", "content" => system} | rest] ->
+            [%{"role" => "system", "content" => system <>
+              "\n\nAnswer-revision instruction: The factual question is " <>
+              inspect(question) <> ". The last draft did not answer it. " <>
+              "Provide a concise substantive answer if you know it reliably, " <>
+              "clearly identifying approximations. Use existing retrieved " <>
+              "evidence where present. If you cannot answer reliably, explain " <>
+              "the specific limitation. Never echo the question or merely " <>
+              "say 'I don't know'. Do not invent facts."} | rest]
+
+          other ->
+            other
+        end
+
+      result =
+        try do
+          llm_client().chat(revision_messages, initial_chat_opts(context))
+        rescue
+          _ -> {:error, :answer_revision_exception}
+        catch
+          :exit, _ -> {:error, :answer_revision_timeout}
+        end
+
+      {answer, selected_review, outcome} =
+        case result do
+          {:ok, %{content: content}} when is_binary(content) and content != "" ->
+            candidate =
+              content
+              |> sanitize_model_text()
+              |> then(&AnswerPolish.polish(user_text, &1, context))
+
+            {:ok, validated, review} =
+              ReflectionLoop.review(user_text, candidate, context)
+
+            if review.status == :accept and validated == candidate and
+                 not AnswerAdequacy.failed_answer?(question, candidate) do
+              {candidate, review, :accepted}
+            else
+              {original_out, reflection, :rejected}
+            end
+
+          _ ->
+            {original_out, reflection, :unavailable}
+        end
+
+      {answer, Map.put(selected_review, :answer_revision,
+        %{attempted?: true, outcome: outcome, issue: :answer_not_supplied})}
+    else
+      {original_out, reflection}
     end
   end
 
