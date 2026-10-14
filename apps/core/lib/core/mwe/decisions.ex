@@ -51,7 +51,68 @@ defmodule Core.MWE.Decisions do
         {if(is_integer(index), do: index, else: -1), Map.get(choice, :id, "")}
       end)
 
-    Map.put(si, :semantic_choices, semantic_choices)
+    si
+    |> Map.put(:semantic_choices, semantic_choices)
+    |> maybe_trace_promotions(tokens, accepted)
+  end
+
+  # Record the *actual* lexical promotion gate outcomes, with no scoring
+  # changes. ATL can subsequently mark a grammatical role unresolved, but
+  # that observation cannot retroactively rewrite these already-set winners.
+  defp maybe_trace_promotions(si, tokens, accepted) do
+    opts = Map.get(si, :lifg_opts) || []
+
+    if is_list(opts) and Keyword.get(opts, :trace_mwe_promotion?, false) == true do
+      candidates =
+        si
+        |> Map.get(:mwe_choices, [])
+        |> List.wrap()
+        |> Enum.take(12)
+        |> Enum.map(fn choice ->
+          span = Map.get(choice, :token_span)
+          phrase = Map.get(choice, :phrase)
+          pos = Map.get(choice, :pos)
+          {verb_conflict?, question_conflict?} =
+            if is_tuple(span) and tuple_size(span) == 2 do
+              {
+                GrammarPrecedence.incompatible_verb_mwe?(si, span, pos),
+                GrammarPrecedence.incompatible_question_mwe?(si, phrase || "", pos)
+              }
+            else
+              {false, false}
+            end
+
+          %{
+            id: Map.get(choice, :id),
+            phrase: phrase,
+            span: span,
+            score: Map.get(choice, :score),
+            source: Map.get(choice, :source),
+            lexical_gate_passed?: valid_phrase_choice?(choice, tokens, si),
+            verb_frame_conflict?: verb_conflict?,
+            question_conflict?: question_conflict?,
+            promoted?: Enum.any?(accepted, &(&1.id == Map.get(choice, :id) and
+                                              &1.token_span == span))
+          }
+        end)
+
+      prior_count =
+        si
+        |> Map.get(:trace, [])
+        |> List.wrap()
+        |> Enum.count(fn
+          %{stage: :mwe_promotion_audit} -> true
+          _ -> false
+        end)
+
+      Core.Pipeline.Trace.append(si, :mwe_promotion_audit,
+        decision: :observed,
+        reason: :lexical_gate_and_nonoverlapping_selection,
+        meta: %{pass: prior_count + 1, candidates: candidates}
+      )
+    else
+      si
+    end
   end
 
   def attach(other), do: other

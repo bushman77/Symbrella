@@ -172,6 +172,7 @@ defmodule Core.LIFG.Attach do
           meta: %{choice_count: length(raw_choices), flips: flips}
         )
         |> Core.MWE.Decisions.attach()
+        |> maybe_trace_mwe_scores(raw_choices, all_choices, virtual_mwes, lifg_opts)
 
       _ ->
         si
@@ -179,6 +180,57 @@ defmodule Core.LIFG.Attach do
   end
 
   def run_and_attach(si, _lifg_opts), do: si
+
+  # Opt-in, observation-only trace of the virtual MWE candidates used by
+  # LIFG. Unlike the normal compact choices, this records raw scorer IDs,
+  # candidate scores, and the result of Core's post-LIFG tie-break.
+  # Does not change any lexical or semantic winner.
+  defp maybe_trace_mwe_scores(si, raw_choices, final_choices, virtual_mwes, opts) do
+    if Keyword.get(opts, :trace_mwe_promotion?, false) == true and
+         map_size(virtual_mwes) > 0 do
+      entries =
+        virtual_mwes
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.take(12)
+        |> Enum.map(fn {index, cover} ->
+          raw = Enum.find(raw_choices, &(Map.get(&1, :token_index) == index)) || %{}
+          selected = Enum.find(final_choices, &(Map.get(&1, :token_index) == index)) || %{}
+          candidates = [Map.get(raw, :chosen_id) | List.wrap(Map.get(raw, :alt_ids))]
+          candidate_ids = candidates |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.take(16)
+
+          scored =
+            case Map.get(raw, :scores) do
+              %{} = all -> Map.take(all, candidate_ids)
+              _ -> %{}
+            end
+
+          %{
+            phrase: Map.get(cover, :phrase),
+            span: Map.get(cover, :token_span),
+            virtual_index: index,
+            raw_winner: Map.get(raw, :chosen_id),
+            final_winner: Map.get(selected, :id),
+            raw_candidate_scores: scored,
+            raw_alt_ids: Map.get(raw, :alt_ids, []),
+            raw_margin: Map.get(raw, :margin),
+            raw_probability_margin: Map.get(raw, :prob_margin),
+            final_score: Map.get(selected, :score)
+          }
+        end)
+
+      Core.Pipeline.Trace.append(si, :mwe_lifg_score_audit,
+        decision: :observed,
+        reason: :virtual_phrase_candidate_scores,
+        meta: %{
+          grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          scores_mode: Application.get_env(:brain, :lifg_stage1_scores_mode, :all),
+          entries: entries
+        }
+      )
+    else
+      si
+    end
+  end
 
   # ───────────────────────── Brain call (safe) ─────────────────────────
 
