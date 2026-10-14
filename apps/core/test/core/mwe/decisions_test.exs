@@ -61,7 +61,10 @@ defmodule Core.MWE.DecisionsTest do
     refute Enum.any?(result.semantic_choices, &(&1.id == "off|noun|0"))
 
     summary = Summary.build(result)
-    assert "turn off" in summary.understood
+    # MWE promotion is a lexical selection, not independent verification
+    # of the phrase's exact meaning.
+    assert "turn off" in summary.selected_lexical_candidates
+    refute "turn off" in summary.understood
     assert summary.unresolved == []
 
     with_atl = Core.Brain.ATL.ingest(result, [])
