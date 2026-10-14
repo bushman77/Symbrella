@@ -65,9 +65,14 @@ defmodule Symbrella.AuditLexicalDiscrimination do
         end)
 
         rows =
-          if all?, do: report.senses,
-            else: report.senses |> Enum.group_by(& &1.pos) |>
-                Enum.flat_map(fn {_pos, grouped} -> Enum.take(grouped, 4) end)
+          if all? do
+            report.senses
+          else
+            report.senses
+            |> Enum.group_by(& &1.pos)
+            |> Enum.sort_by(fn {pos, _} -> pos end)
+            |> Enum.flat_map(fn {_pos, grouped} -> Enum.take(grouped, 4) end)
+          end
 
         Enum.each(rows, fn row ->
           matched =
