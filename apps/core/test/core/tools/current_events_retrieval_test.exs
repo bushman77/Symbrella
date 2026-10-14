@@ -36,6 +36,26 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     def search(_query, _opts), do: {:error, :connection_failed}
   end
 
+  defmodule YearWindowNews do
+    def search(_query, _opts) do
+      now = DateTime.utc_now()
+      in_range = DateTime.add(now, -364 * 24 * 3_600, :second) |> DateTime.to_iso8601()
+      too_old = DateTime.add(now, -366 * 24 * 3_600, :second) |> DateTime.to_iso8601()
+
+      {:ok,
+       [
+         %{provider: :news_rss, title: "Japan conducts railgun trial",
+           publisher: "Example Wire", published_at: in_range,
+           url: "https://news.google.com/rss/articles/railgun-in-year",
+           excerpt: "Dated headline about a Japanese railgun trial"},
+         %{provider: :news_rss, title: "Historic Japanese railgun trial",
+           publisher: "Example Wire", published_at: too_old,
+           url: "https://news.google.com/rss/articles/railgun-too-old",
+           excerpt: "Headline older than a year"}
+       ]}
+    end
+  end
+
   defmodule EmptyNews do
     def search(_query, _opts), do: {:ok, []}
   end
@@ -369,7 +389,7 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
       <item>
         <title>A much older story</title>
         <link>https://news.google.com/rss/articles/older</link>
-        <pubDate>Wed, 01 Apr 2026 12:00:00 GMT</pubDate>
+        <pubDate>Wed, 01 Apr 2020 12:00:00 GMT</pubDate>
         <source>Old Source</source>
       </item>
       <item>
@@ -389,7 +409,7 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     fetch = fn url, opts ->
       assert url == "https://news.google.com/rss/search"
       assert opts[:params][:gl] == "CA"
-      assert opts[:params][:q] =~ "when:3d"
+      assert opts[:params][:q] =~ "when:1y"
       {:ok, %{status: 200, body: xml}}
     end
 
@@ -402,6 +422,55 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     assert source.published_at == "2026-10-13T15:30:00Z"
     assert source.url == "https://news.google.com/rss/articles/abc123"
     refute String.contains?(source.excerpt, "older")
+  end
+
+  test "Google News RSS includes headlines nearly one year old but excludes older items" do
+    now = ~U[2026-10-13 17:00:00Z]
+
+    xml = """
+    <rss><channel>
+      <item>
+        <title>Japan railgun sea trials within one year</title>
+        <link>https://news.google.com/rss/articles/within-year</link>
+        <pubDate>14 Oct 2025 17:00:00 GMT</pubDate>
+        <source>Example Science Wire</source>
+      </item>
+      <item>
+        <title>Railgun event older than one year</title>
+        <link>https://news.google.com/rss/articles/beyond-year</link>
+        <pubDate>12 Oct 2025 17:00:00 GMT</pubDate>
+        <source>Old Science Wire</source>
+      </item>
+    </channel></rss>
+    """
+
+    fetch = fn _url, opts ->
+      assert opts[:params][:q] =~ "when:1y"
+      {:ok, %{status: 200, body: xml}}
+    end
+
+    assert NewsRss.max_age_hours() == 365 * 24
+
+    assert {:ok, [%{url: "https://news.google.com/rss/articles/within-year"}]} =
+             NewsRss.search("Japan railgun", fetch: fetch, now: now)
+
+    # Even an oversized per-call lookback cannot extend past one year.
+    assert {:ok, [%{url: "https://news.google.com/rss/articles/within-year"}]} =
+             NewsRss.search("Japan railgun", fetch: fetch, now: now,
+               max_age_hours: 2 * 365 * 24)
+  end
+
+  test "resolver also retains at most one year of dated headlines" do
+    result =
+      WebRetrieval.enrich(
+        question("Search the web for the latest developments about Japan's railgun"),
+        enabled?: true, news_provider: YearWindowNews, max_attempts: 2
+      )
+
+    assert result.web_evidence.resolution == :headlines_available
+    assert result.web_evidence.status == :retrieved
+    assert [%{url: "https://news.google.com/rss/articles/railgun-in-year"}] =
+             result.web_evidence.sources
   end
 
   test "RSS network failure remains explicit and safe" do

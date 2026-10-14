@@ -163,6 +163,18 @@ Regression coverage includes the complete search-then-"Well did you?"
 exchange with a fake LLM and fake empty news provider, plus false-positive
 tests for statements of retrieval success with zero returned sources.
 
+## One-year dated-news lookback
+
+Google News RSS discovery uses a rolling `when:1y` query rather than
+`when:3d`. The RSS adapter and the evidence resolver now both accept
+well-dated headlines no older than `365 * 24` hours. Older, undated,
+non-HTTPS or unattributed headlines remain disallowed. A custom
+`max_age_hours` option may narrow this window but cannot widen it
+past one year. This gives specialized topics a chance to recover the
+latest *documented* milestone even when nothing was published in
+the last few days. Headline age and source attribution must remain
+visible; older headlines do not imply new events occurred today.
+
 ## Tests
 
 ```sh

@@ -12,6 +12,12 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
   @user_agent "Symbrella/0.1 (https://github.com/bushman77/Symbrella)"
   @max_results 3
   @max_feed_bytes 500_000
+  @max_age_hours 365 * 24
+  @lookback_filter "when:1y"
+
+  @doc "Maximum age of an accepted news headline: a rolling 365-day window."
+  @spec max_age_hours() :: pos_integer()
+  def max_age_hours, do: @max_age_hours
 
   @spec search(String.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
   def search(query, opts \\ [])
@@ -19,10 +25,11 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
     timeout = Keyword.get(opts, :timeout_ms, 3_500)
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     now = Keyword.get(opts, :now, DateTime.utc_now())
-    max_age = Keyword.get(opts, :max_age_hours, 72)
+    max_age = Keyword.get(opts, :max_age_hours, @max_age_hours)
+    max_age = if is_integer(max_age), do: min(max_age, @max_age_hours), else: max_age
 
     args = [
-      params: [q: String.slice(query, 0, 160) <> " when:3d",
+      params: [q: String.slice(query, 0, 160) <> " " <> @lookback_filter,
                hl: "en-CA", gl: "CA", ceid: "CA:en"],
       headers: [{"user-agent", @user_agent},
                 {"accept", "application/rss+xml, application/xml"}],

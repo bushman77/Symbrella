@@ -297,7 +297,7 @@ defmodule Core.Tools.EvidenceResolver do
       case DateTime.from_iso8601(stamp) do
         {:ok, published, _offset} ->
           age_seconds = DateTime.diff(DateTime.utc_now(), published, :second)
-          age_seconds >= -3_600 and age_seconds <= 72 * 3_600
+          age_seconds >= -3_600 and age_seconds <= NewsRss.max_age_hours() * 3_600
 
         _ ->
           false
