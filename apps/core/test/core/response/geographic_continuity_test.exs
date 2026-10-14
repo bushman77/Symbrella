@@ -5,6 +5,7 @@ defmodule Core.Response.GeographicContinuityTest do
   alias Core.MWE.Decisions
   alias Core.Response.ActionAlignment
   alias Core.Response.AnswerPolish
+  alias Core.Response.Context
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.ReflectionLoop
@@ -168,6 +169,52 @@ defmodule Core.Response.GeographicContinuityTest do
     assert final =~ "Maple Ridge, BC"
     assert final =~ "Vancouver"
     assert final =~ "don't have verified distance information"
+  end
+
+  test "real response context preserves the geographic frame for reflection", %{
+    session_id: session_id
+  } do
+    LlmChatHistory.record_turn(session_id, "Where is Maple Ridge, BC?", "British Columbia")
+
+    si =
+      %{session_id: session_id, sentence: "Is it close to Vancouver?", intent: :ask}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    compact = Context.from_si(si)
+
+    assert compact.symbolic_frame.event.type == :location_question
+    assert compact.symbolic_frame.event.subject == "Maple Ridge, BC"
+    assert compact.symbolic_frame.event.target == "Vancouver"
+    assert compact.symbolic_frame.event.grounding_status == :unverified
+
+    context =
+      Context.from_response_parts(
+        si.sentence,
+        %{
+          session_id: session_id,
+          intent: :ask,
+          conf: 0.9,
+          comprehension: %{degraded?: true},
+          symbolic_frame: si.symbolic_frame,
+          turn_context: compact
+        },
+        %{action: :answer},
+        %{},
+        %{}
+      )
+
+    {:ok, final, review} =
+      ReflectionLoop.review(
+        si.sentence,
+        "Maple Ridge is not close to Vancouver.",
+        context
+      )
+
+    assert review.status == :repair
+    assert :geographic_claim_unverified in review.issues
+    assert final =~ "Maple Ridge, BC"
+    assert final =~ "verified distance information"
   end
 
   test "review leaves unrelated, non-geographic facts alone" do

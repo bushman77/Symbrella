@@ -71,7 +71,7 @@ defmodule Core.Discourse.References do
   defp extract_location(text) do
     capture =
       Regex.run(
-        ~r/^\s*(?:where\s+is|tell\s+me\s+about|what\s+is\s+the\s+population\s+of)\s+(\p{Lu}[\p{L}\p{M}\s,'.-]{1,78})\s*\??\s*$/u,
+        ~r/^\s*(?:where\s+is|tell\s+me\s+about|what\s+is\s+the\s+population\s+of)\s+(\p{Lu}[\p{L}\p{M}\s,'.-]{1,78})\s*\??\s*$/iu,
         text
       )
 

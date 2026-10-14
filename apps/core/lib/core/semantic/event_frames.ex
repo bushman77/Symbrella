@@ -43,7 +43,7 @@ defmodule Core.Semantic.EventFrames do
     cond do
       match =
           Regex.run(
-            ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/u,
+            ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/iu,
             sentence
           ) ->
         [_, target] = match

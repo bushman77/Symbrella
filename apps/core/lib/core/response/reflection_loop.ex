@@ -279,10 +279,22 @@ defmodule Core.Response.ReflectionLoop do
 
   defp subject_reversal?(_, _), do: false
 
+  defp geographic_frame(context) do
+    candidates = [
+      get_in_map(context, [:features, :symbolic_frame]),
+      get_in_map(context, [:symbolic_frame, :event]),
+      get_in_map(context, [:symbolic_frame])
+    ]
+
+    Enum.find(candidates, fn candidate ->
+      is_map(candidate) and map_get(candidate, :type) == :location_question
+    end) || %{}
+  end
+
   # A semantic frame can identify what a question asks without verifying a
   # number or spatial relationship. Do not treat fluent LLM prose as evidence.
   defp unverified_geographic_claim?(context, draft_text) do
-    frame = get_in_map(context, [:symbolic_frame])
+    frame = geographic_frame(context)
     comprehension = get_in_map(context, [:comprehension]) ||
       get_in_map(context, [:features, :comprehension])
 
@@ -293,7 +305,7 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp unverified_geographic_reply(context) do
-    frame = get_in_map(context, [:symbolic_frame]) || %{}
+    frame = geographic_frame(context) || %{}
     subject = map_get(frame, :subject)
     target = map_get(frame, :target)
 

@@ -224,7 +224,7 @@ defmodule Core.Response.Context do
 
   defp semantic_event_summary(%{} = event) do
     event
-    |> Map.take([:type, :subject, :modality, :action, :confidence, :uncertain_roles])
+    |> Map.take([:type, :subject, :target, :relation, :grounding_status, :antecedent_source, :unresolved_roles, :modality, :action, :confidence, :uncertain_roles])
     |> drop_empty()
   end
 
