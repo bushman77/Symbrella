@@ -184,10 +184,16 @@ defmodule Brain.LIFG.RelationalFeedback do
           )
 
         if report.applied? do
+          adjustments =
+            Enum.map(report.adjustments, fn adjustment ->
+              Map.put(adjustment, :source,
+                :atl_structural_relation_dictionary_context)
+            end)
+
           # SemanticControl supplies bounded logit deltas; do not treat the
           # resulting probability-domain score map as a posterior distribution.
           # Instead add deltas to log(prior) and renormalize exactly once.
-          adjustments_by_id = Map.new(report.adjustments, &{&1.id, &1.delta})
+          adjustments_by_id = Map.new(adjustments, &{&1.id, &1.delta})
           logits = Map.new(probs, fn {id, probability} ->
             {id, :math.log(probability) + Map.get(adjustments_by_id, id, 0.0)}
           end)
@@ -199,9 +205,9 @@ defmodule Brain.LIFG.RelationalFeedback do
             status: if(proposed == chosen, do: :supported_existing_choice,
               else: :revision_proposed),
             revision?: proposed != chosen and sense_pos(proposed) == selected_pos and
-              Enum.any?(report.adjustments, &(&1.id == proposed)),
+              Enum.any?(adjustments, &(&1.id == proposed)),
             proposed_id: proposed,
-            adjustments: report.adjustments,
+            adjustments: adjustments,
             posterior: posterior,
             original_prob: Map.get(probs, chosen),
             proposed_prob: Map.get(posterior, proposed)
