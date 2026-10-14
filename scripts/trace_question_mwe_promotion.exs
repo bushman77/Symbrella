@@ -34,6 +34,8 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.puts("* final_winner = Core.LIFG.Attach's post-score compatibility choice.")
     IO.puts("* lexical_gate_passed? = exact dictionary/span/source checks passed.")
     IO.puts("* promoted? = phrase actually entered canonical semantic_choices.")
+    IO.puts("* A complete sentence frame can reject a lexical phrase before LIFG.")
+    IO.puts("* If rejected, no virtual MWE score entry is expected for that phrase.")
     IO.puts("* ATL unresolved does NOT by itself revoke a promoted MWE.")
     IO.puts("* This trace describes the decisions; it does not validate their meaning.")
   end
@@ -71,6 +73,10 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
 
     IO.inspect(covers, label: "Token-cover phrase candidates", limit: :infinity,
       pretty: true, width: 110)
+
+    IO.inspect(Map.get(si, :sentence_competition),
+      label: "Sentence-level competing interpretations",
+      limit: :infinity, pretty: true, width: 110)
 
     sense_units =
       si

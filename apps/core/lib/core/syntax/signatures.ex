@@ -54,8 +54,8 @@ defmodule Core.Syntax.Signatures do
 
     noun_phrases = noun_phrase_constructions(nodes)
 
-    (finite_past(nodes) ++ perfect_predicates(nodes) ++ have_verb_infinitives(nodes) ++
-       verb_particle_constructions(nodes) ++ noun_phrases ++
+    (wh_aux_questions(si, nodes) ++ finite_past(nodes) ++ perfect_predicates(nodes) ++
+       have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        prepositional_phrase_constructions(nodes, noun_phrases))
     |> Enum.uniq_by(fn sig -> {sig.id, sig.span, sig.roles} end)
   end
@@ -161,6 +161,67 @@ defmodule Core.Syntax.Signatures do
   end
 
   defp base_nodes(_, _), do: []
+
+  # A strong *compositional* clause hypothesis, based on the complete
+  # sentence rather than an isolated word. Requires WH fronting, auxiliary
+  # inversion, an existing lexical verb POS, and an explicit prepositional
+  # topic complement. This does NOT select a dictionary sense.
+  #
+  # "What do you know about Japan's railgun development?" -> candidate.
+  # "Well, what do you know?" -> no complete topic-complement frame.
+  @wh_words MapSet.new(~w(what who whom where when why how which))
+  @question_auxiliaries MapSet.new(~w(do does did can could will would should may might))
+  @question_subjects MapSet.new(~w(i you he she it we they))
+  @topic_prepositions MapSet.new(~w(about of for on in at from with to))
+  
+  defp wh_aux_questions(si, nodes) do
+    sentence = Map.get(si, :sentence) || ""
+
+    if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") do
+      nodes
+      |> Enum.chunk_every(5, 1, :discard)
+      |> Enum.flat_map(fn [wh, aux, subject, verb, prep] = segment ->
+        after_prep = Enum.filter(nodes, &(&1.index > prep.index))
+        topic_evidence? =
+          after_prep != [] and
+            Enum.any?(Enum.take(after_prep, 7), fn node ->
+              pos?(node, "noun") or pos?(node, "proper_noun") or
+                pos?(node, "pronoun")
+            end)
+
+        if wh.index == 0 and
+             MapSet.member?(@wh_words, wh.word) and
+             MapSet.member?(@question_auxiliaries, aux.word) and
+             (pos?(subject, "pronoun") or MapSet.member?(@question_subjects, subject.word)) and
+             pos?(verb, "verb") and
+             MapSet.member?(@topic_prepositions, prep.word) and
+             topic_evidence? and
+             valid_surface?(segment) and
+             valid_surface?([prep, hd(after_prep)]) do
+          last = List.last(nodes)
+
+          [
+            signature(
+              :wh_aux_topic_question,
+              {wh.index, last.index},
+              %{
+                wh: wh.index, auxiliary: aux.index, subject: subject.index,
+                predicate: verb.index, preposition: prep.index
+              },
+              %{subject: [:pos_pronoun], predicate: [:pos_verb],
+                preposition: [:pos_preposition]},
+              [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+               :explicit_prepositional_topic, :question_punctuation]
+            )
+          ]
+        else
+          []
+        end
+      end)
+    else
+      []
+    end
+  end
 
   # Deliberately weak evidence: a simple-past form is *available* here.
   # Without a finite-clause parser, this is not a confirmed past predicate.

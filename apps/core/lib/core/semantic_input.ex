@@ -65,6 +65,7 @@ defmodule Core.SemanticInput do
   @map_fields MapSet.new([
                 :intent_bias,
                 :sense_candidates,
+                :sentence_competition,
                 :perception,
                 :atl_slate,
                 :comprehension,
@@ -188,6 +189,7 @@ defmodule Core.SemanticInput do
 
           # Grammatical evidence and sense candidates
           sentence_signatures: [sentence_signature()] | nil,
+          sentence_competition: map() | nil,
           sense_candidates: %{
             optional(non_neg_integer()) => [sense_candidate()]
           },
@@ -267,6 +269,7 @@ defmodule Core.SemanticInput do
             token_cover: nil,
             resolved_tokens: [],
             sentence_signatures: [],
+            sentence_competition: nil,
             sense_candidates: %{},
             lifg_opts: nil,
             lifg_choices: nil,

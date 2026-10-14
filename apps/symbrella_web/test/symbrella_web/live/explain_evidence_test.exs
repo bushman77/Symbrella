@@ -257,6 +257,56 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert List.last(section(result, :semantic_choices).items).label == "sample|noun|36"
   end
 
+  test "Explain preserves the sentence-level comparison, evidence and actual winner" do
+    input = si(:contiguous)
+
+    competition = %{
+      version: 1,
+      competing_frames: 1,
+      rejected_spans: [{0, 3}],
+      comparisons: [
+        %{
+          span: {0, 3},
+          phrase: "what do you know",
+          dictionary_sense_ids: ["what do you know|phrase|2"],
+          frame_id: :wh_aux_topic_question,
+          lexical_context_fit: 0.29,
+          compositional_compatibility: 0.90,
+          lexical_compatibility: 0.424,
+          discrimination_margin: 0.476,
+          winner: :compositional_clause,
+          reason: :complete_question_structure_outweighs_lexical_fit
+        }
+      ]
+    }
+
+    input =
+      input
+      |> Map.put(:sentence_competition, competition)
+      |> Map.update!(:sentence_signatures, fn signatures ->
+        signatures ++ [
+          %{id: :wh_aux_topic_question, span: {0, 7},
+            roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3,
+                     preposition: 4},
+            evidence: [:wh_fronted, :auxiliary_inversion, :question_punctuation]}
+        ]
+      end)
+
+    evidence = ExplainEvidence.from_si(input)
+    assert evidence.sentence_competition == competition
+    assert [%{id: :wh_aux_topic_question}] = evidence.question_signatures
+
+    result = payload(input)
+    section = section(result, :sentence_competition)
+    assert section.title == "Sentence-level competition"
+    assert section.hint =~ "not probabilities"
+    assert Enum.any?(section.items, fn x ->
+             x.label == "what do you know" and
+               x.body =~ "winner: :compositional_clause" and
+               x.body =~ "lexical_context_fit: 0.29"
+           end)
+  end
+
   test "old cached Explain payloads are upgraded from saved Core state without duplication" do
     original = %{
       title: "Explain",

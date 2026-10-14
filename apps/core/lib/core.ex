@@ -131,6 +131,8 @@ defmodule Core do
     |> StateDump.capture(:mwe_lexicon)
     |> Core.Syntax.Signatures.attach()
     |> StateDump.capture(:sentence_signatures)
+    |> Core.Syntax.SentenceCompetition.attach()
+    |> StateDump.capture(:sentence_competition)
     |> Selection.refine_from_syntax()
     |> StateDump.capture(:syntax_intent)
     |> Core.MWE.Discovery.run(opts)

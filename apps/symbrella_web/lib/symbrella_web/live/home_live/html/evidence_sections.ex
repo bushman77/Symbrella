@@ -9,6 +9,10 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   def build(evidence) when is_map(evidence) do
     []
     |> runtime_section(field(evidence, :runtime))
+    |> sentence_competition_section(
+      field(evidence, :sentence_competition),
+      field(evidence, :question_signatures)
+    )
     |> verified_section(field(evidence, :verified_phrasal_meanings))
     |> semantic_section(field(evidence, :semantic_winners))
     |> comprehension_section(field(evidence, :comprehension))
@@ -37,6 +41,50 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp runtime_section(sections, _), do: sections
+
+  defp sentence_competition_section(sections, assessment, signatures) do
+    signatures = list(signatures)
+    comparisons = if(is_map(assessment), do: list(field(assessment, :comparisons)), else: [])
+
+    if comparisons == [] and signatures == [] do
+      sections
+    else
+      items =
+        Enum.map(signatures, fn frame ->
+          %{
+            label: "Sentence frame #{show(field(frame, :span))}",
+            body:
+              []
+              |> value("id", field(frame, :id))
+              |> value("roles", field(frame, :roles))
+              |> value("evidence", field(frame, :evidence))
+              |> body()
+          }
+        end) ++
+          Enum.map(comparisons, fn comparison ->
+            %{
+              label: field(comparison, :phrase) || "Lexical vs compositional reading",
+              body:
+                []
+                |> value("winner", field(comparison, :winner))
+                |> value("reason", field(comparison, :reason))
+                |> value("span", field(comparison, :span))
+                |> value("frame_id", field(comparison, :frame_id))
+                |> value("dictionary_sense_ids", field(comparison, :dictionary_sense_ids))
+                |> value("lexical_context_fit", field(comparison, :lexical_context_fit))
+                |> value("compositional_compatibility", field(comparison, :compositional_compatibility))
+                |> value("lexical_compatibility", field(comparison, :lexical_compatibility))
+                |> value("discrimination_margin", field(comparison, :discrimination_margin))
+                |> body()
+            }
+          end)
+
+      append(sections, :sentence_competition, "Sentence-level competition",
+        Integer.to_string(length(comparisons)),
+        "Compositional grammar competes with dictionary MWEs before LIFG. Compatibility scores are bounded heuristics, not probabilities or LIFG scores.",
+        items)
+    end
+  end
 
   defp verified_section(sections, meanings) when is_list(meanings) and meanings != [] do
     items =

@@ -13,7 +13,8 @@ defmodule Brain.ATL.Constituents do
   """
 
   @max_constituents 48
-  @ids [:noun_phrase, :prepositional_phrase, :verb_particle_construction]
+  @ids [:noun_phrase, :prepositional_phrase, :verb_particle_construction,
+        :wh_aux_topic_question]
 
   @spec attach(map(), list()) :: map()
   def attach(%{winners: winners} = slate, signatures)
@@ -130,6 +131,7 @@ defmodule Brain.ATL.Constituents do
 
   defp matches_pos?(:pos_noun, pos), do: pos in ["noun", "proper_noun"]
   defp matches_pos?(:pos_verb, "verb"), do: true
+  defp matches_pos?(:pos_pronoun, "pronoun"), do: true
   defp matches_pos?(:pos_particle, "particle"), do: true
   defp matches_pos?(:pos_adverb, "adverb"), do: true
   defp matches_pos?(:pos_preposition, "preposition"), do: true

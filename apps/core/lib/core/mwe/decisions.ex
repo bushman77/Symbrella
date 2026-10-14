@@ -9,6 +9,7 @@ defmodule Core.MWE.Decisions do
   """
 
   alias Core.MWE.GrammarPrecedence
+  alias Core.Syntax.SentenceCompetition
 
   @spec attach(map()) :: map()
   def attach(%{lifg_choices: words, tokens: tokens} = si)
@@ -93,6 +94,7 @@ defmodule Core.MWE.Decisions do
             lexical_gate_passed?: valid_phrase_choice?(choice, tokens, si),
             verb_frame_conflict?: verb_conflict?,
             question_conflict?: question_conflict?,
+            sentence_competition_rejected?: SentenceCompetition.reject_phrase?(si, span),
             promoted?: Enum.any?(accepted, &(&1.id == Map.get(choice, :id) and
                                               &1.token_span == span))
           }
@@ -136,6 +138,7 @@ defmodule Core.MWE.Decisions do
       not String.ends_with?(id, "|fallback") and
       normalize(surface) == normalize(phrase) and
       id_lemma_matches?(id, phrase) and
+      not SentenceCompetition.reject_phrase?(si, {first, last}) and
       not GrammarPrecedence.incompatible_verb_mwe?(
         si, {first, last}, Map.get(choice, :pos)
       ) and
