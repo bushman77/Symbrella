@@ -15,6 +15,7 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
   @spec proximity(String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def proximity(subject, target, opts \\ [])
+  def proximity(subject, target, opts)
       when is_binary(subject) and is_binary(target) do
     # "Vancouver" in "Maple Ridge, BC" normally refers to Vancouver, BC.
     # Do not apply this hint to an explicitly qualified target.
@@ -49,7 +50,8 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
 
   @spec place(String.t(), String.t() | nil, keyword()) ::
           {:ok, map()} | {:error, term()}
-  def place(name, hint \\ nil, opts \\ []) when is_binary(name) do
+  def place(name, hint \\ nil, opts \\ [])
+  def place(name, hint, opts) when is_binary(name) do
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     timeout = Keyword.get(opts, :timeout_ms, 3_500)
 

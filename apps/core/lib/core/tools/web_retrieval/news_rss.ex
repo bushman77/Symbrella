@@ -14,7 +14,8 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
   @max_feed_bytes 500_000
 
   @spec search(String.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
-  def search(query, opts \\ []) when is_binary(query) do
+  def search(query, opts \\ [])
+  def search(query, opts) when is_binary(query) do
     timeout = Keyword.get(opts, :timeout_ms, 3_500)
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     now = Keyword.get(opts, :now, DateTime.utc_now())
