@@ -18,7 +18,6 @@ defmodule SymbrellaWeb.NeuralShadow do
   alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask, StateTransitionResidual}
 
   @event [:core, :training_archive, :completed_turn]
-  @handler_id "symbrella-neural-shadow-archive"
   @max_checkpoint_bytes 5_000_000
   @max_sessions 128
 
@@ -95,16 +94,25 @@ defmodule SymbrellaWeb.NeuralShadow do
       evaluations: 0,
       skipped: 0,
       pending: %{},
-      last_evaluation: nil
+      last_evaluation: nil,
+      handler_id: nil
     }
 
     case load_checkpoint(checkpoint) do
       {:ok, model} ->
-        case :telemetry.attach(@handler_id, @event, &__MODULE__.handle_archive_event/4, self()) do
+        # Handler IDs belong to the current shadow process, not a globally
+        # reused constant. In tests/restarts a previous instance may be
+        # terminated without its terminate/2 callback, leaving its handler
+        # installed. Reusing the same static ID silently disabled the next
+        # shadow instance with :already_exists.
+        handler_id = {__MODULE__, self()}
+
+        case :telemetry.attach(handler_id, @event, &__MODULE__.handle_archive_event/4, self()) do
           :ok ->
-            {:ok, %{base | status: :shadow_only, model: model}}
+            {:ok, %{base | status: :shadow_only, model: model, handler_id: handler_id}}
 
           {:error, reason} ->
+            Logger.warning("[NeuralShadow] unable to subscribe to archive events: #{inspect(reason)}")
             {:ok, %{base | reason: {:telemetry_attach_failed, reason}}}
         end
 
@@ -115,8 +123,8 @@ defmodule SymbrellaWeb.NeuralShadow do
   end
 
   @impl true
-  def terminate(_reason, _state) do
-    :telemetry.detach(@handler_id)
+  def terminate(_reason, %{handler_id: handler_id}) do
+    if handler_id, do: :telemetry.detach(handler_id)
     :ok
   end
 
