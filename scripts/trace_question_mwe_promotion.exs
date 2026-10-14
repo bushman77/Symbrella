@@ -152,6 +152,10 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.inspect(controls, label: "LIFG semantic-control decisions",
       limit: :infinity, pretty: true, width: 110)
 
+    IO.inspect(Map.get(si, :lifg_feedback),
+      label: "Post-ATL LIFG relational feedback",
+      limit: :infinity, pretty: true, width: 110)
+
     chosen =
       si
       |> list(:mwe_choices)
