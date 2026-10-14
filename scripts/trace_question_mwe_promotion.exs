@@ -132,9 +132,7 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     word_audits =
       si
       |> list(:trace)
-      |> Enum.filter(&(Map.get(&1, :stage) == :lifg_word_score_audit))
-      |> Enum.map(&Map.get(&1, :meta))
-      |> Enum.take(1)
+      |> Core.LIFG.ScoreAudit.trace_reports()
 
     IO.inspect(word_audits, label: "LIFG per-token probability audit",
       limit: :infinity, pretty: true, width: 110)
