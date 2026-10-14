@@ -41,6 +41,7 @@ Or focused tests:
     mix test apps/core/test/core/response/identity_continuity_test.exs
     mix test apps/core/test/core/response/memory_recall_telemetry_test.exs
     mix test apps/db/test/db/episode_exact_fact_test.exs
+    mix test apps/core/test/core/response/durable_fact_acknowledgement_test.exs
     mix test apps/symbrella_web/test/symbrella_web/chat_session_continuity_test.exs
 
 Then manually verify after a restart:
@@ -57,7 +58,8 @@ ChatHistory is deliberately in-memory: it does not write a full chat transcript
 to disk. A process/application restart discards the conversational buffer, but
 durable fact episodes remain available through the database.
 
-Hippocampal episode writes are currently best-effort. A future strict durable
-write acknowledgement is required before guaranteeing that any *new* fact was
-saved to PostgreSQL during an outage. Do not confuse in-memory recognition
-with verified durable persistence.
+Ordinary hippocampal episodes still use best-effort persistence. Explicit
+user-name and user-fact claims instead use Brain.Hippocampus.encode_verified_fact/2:
+the PostgreSQL insert must succeed before the memory window is updated and
+before a durable acknowledgement is emitted. If persistence fails, the reply
+states the limitation rather than claiming permanent recall.

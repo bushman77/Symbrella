@@ -92,10 +92,11 @@ defmodule Core.Response.Memory do
 
       remember_fact ->
         {key, label, value} = remember_fact
-        text = remember_fact_response(key, label, value, text_in, true)
+        {text, persistence_status} = remember_fact_response(key, label, value, text_in, true)
 
         meta = %{
           action: :remember_fact,
+          persistence_status: persistence_status,
           intent_inferred: :memory_write,
           response_source: :memory,
           memory_key: key,
@@ -112,10 +113,11 @@ defmodule Core.Response.Memory do
 
       direct_fact ->
         {key, label, value} = direct_fact
-        text = remember_fact_response(key, label, value, text_in, false)
+        {text, persistence_status} = remember_fact_response(key, label, value, text_in, false)
 
         meta = %{
           action: :remember_fact,
+          persistence_status: persistence_status,
           intent_inferred: :memory_write,
           response_source: :memory,
           memory_key: key,
@@ -363,12 +365,15 @@ defmodule Core.Response.Memory do
 
   defp remember_fact_response(key, label, value, raw_text, explicit?)
        when is_binary(key) and is_binary(label) and is_binary(value) do
-    SideEffects.persist_user_fact(key, label, value, raw_text)
+    case SideEffects.persist_user_fact(key, label, value, raw_text) do
+      :ok when explicit? ->
+        {"I’ll remember that your #{label} is #{value}.", :persisted}
 
-    if explicit? do
-      "I’ll remember that your #{label} is #{value}."
-    else
-      "I’ve noted that your #{label} is #{value}."
+      :ok ->
+        {"I’ve noted that your #{label} is #{value}.", :persisted}
+
+      {:error, _reason} ->
+        {"I understood that your #{label} is #{value}, but I couldn't save it permanently.", :failed}
     end
   end
 

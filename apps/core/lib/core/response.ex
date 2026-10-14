@@ -140,9 +140,15 @@ defmodule Core.Response do
           |> Map.put(:action_meta, Map.get(si, :action_meta))
 
         name_claim? = name_claim?(extracted_name, text_in)
-        maybe_persist_user_name(name_claim?, extracted_name, text_in)
+        name_persistence = maybe_persist_user_name(name_claim?, extracted_name, text_in)
 
-        forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
+        forced_identity =
+          if name_claim? and match?({:error, _}, name_persistence) and
+               is_binary(user_name_candidate(extracted_name)) do
+            "I heard your name as #{extracted_name}, but I couldn't save it permanently."
+          else
+            forced_identity_text(text_in, extracted_name, name_claim?)
+          end
 
         inline_text = OverrideSkills.deterministic_inline_text(skill)
         llm_prompt_type = OverrideSkills.llm_prompt_override(skill)

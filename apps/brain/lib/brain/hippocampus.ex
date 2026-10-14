@@ -66,6 +66,24 @@ defmodule Brain.Hippocampus do
   end
 
   @doc """
+  Write an explicit fact only if PostgreSQL confirms the insert. The ordinary
+  encode/2 path remains best-effort for non-critical episodic observations.
+  """
+  @spec encode_verified_fact(map(), map()) :: :ok | {:error, atom()}
+  def encode_verified_fact(%{} = slate, %{kind: :fact} = meta) do
+    case GenServer.call(__MODULE__, {:encode_verified_fact, slate, meta}) do
+      {:ok, episode, at_ms} ->
+        if TurnTrace.active?(), do: TurnTrace.encode(episode, at_ms)
+        :ok
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def encode_verified_fact(_, _), do: {:error, :invalid_fact}
+
+  @doc """
   Write an explicitly self-tagged autobiographical episode.
 
   This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
@@ -239,6 +257,53 @@ defmodule Brain.Hippocampus do
   @impl true
   def handle_call({:encode, slate, meta_in, :trace}, from, state),
     do: handle_encode_call(slate, meta_in, from, state, true)
+
+  @impl true
+  def handle_call({:encode_verified_fact, slate, meta_in}, from, state) do
+    at = System.system_time(:millisecond)
+
+    norms =
+      slate
+      |> Normalize.extract_norms_from_any()
+      |> Enum.reject(&Normalize.empty?/1)
+      |> MapSet.new()
+
+    meta = enrich_meta_with_emotion(meta_in)
+    episode = %{slate: slate, meta: meta, norms: norms}
+
+    result =
+      try do
+        :ok = Writer.insert_row!(episode)
+        :ok
+      rescue
+        error ->
+          Logger.warning("[Hippocampus] verified fact write failed: #{Exception.message(error)}")
+          {:error, :not_persisted}
+      catch
+        :exit, _reason -> {:error, :not_persisted}
+        _, _reason -> {:error, :not_persisted}
+      end
+
+    case result do
+      :ok ->
+        window = Window.append_or_refresh_head(state.window, episode, state.window_keep)
+
+        next =
+          state
+          |> Map.put(:window, window)
+          |> Map.put(:last, episode)
+          |> Map.put(:last_at, at)
+
+        measurements = %{count: 1, window_size: length(window), norms_count: MapSet.size(norms)}
+        metadata = %{at: at, window_keep: state.window_keep, meta: meta}
+        Telemetry.emit_write(measurements, metadata)
+        Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], measurements, metadata)
+        {:reply, {:ok, episode, at}, next}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
+  end
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
