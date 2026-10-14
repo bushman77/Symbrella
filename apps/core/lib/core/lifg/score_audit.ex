@@ -50,6 +50,18 @@ defmodule Core.LIFG.ScoreAudit do
             _ -> {nil, nil}
           end
 
+        pos_mass =
+          Enum.reduce(scores, %{}, fn {id, probability}, acc ->
+            pos = sense_pos(id)
+            Map.update(acc, pos, probability, &(&1 + probability))
+          end)
+
+        n = length(scores)
+        uniform_baseline = if n > 0, do: 1.0 / n, else: nil
+
+        unit_score_softmax_ceiling =
+          if n > 0, do: :math.exp(1.0) / (:math.exp(1.0) + n - 1), else: nil
+
         selected = Map.get(final_by_index, index, %{})
         token = Enum.find(tokens, &(is_map(&1) and Map.get(&1, :index) == index))
 
@@ -67,6 +79,12 @@ defmodule Core.LIFG.ScoreAudit do
               do: max(top_p - runner_up_p, 0.0), else: nil),
           reported_candidate_count: length(scores),
           candidate_count_complete?: scores_mode == :all,
+          uniform_baseline: uniform_baseline,
+          unit_interval_logit_ceiling: unit_score_softmax_ceiling,
+          pos_probability_mass: pos_mass,
+          pos_candidate_counts:
+            Enum.frequencies_by(scores, fn {id, _} -> sense_pos(id) end),
+          normalized_entropy: entropy(scores, scores_mode),
           score_kind: :per_token_post_softmax_probability
         } ]
       else
@@ -76,6 +94,38 @@ defmodule Core.LIFG.ScoreAudit do
   end
 
   def summarize(_, _, _, _, _), do: []
+
+  # This ceiling assumes final logits are in [0, 1] and temperature is
+  # one. Cerebellum/grammar may change that range; it is a comparison only.
+  defp sense_pos(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [_, pos, _] -> pos
+      _ -> "unknown"
+    end
+  end
+
+  defp sense_pos(_), do: "unknown"
+
+  defp entropy(scores, :all) when length(scores) > 1 do
+    total = Enum.reduce(scores, 0.0, fn {_id, p}, acc -> acc + p end)
+
+    if total > 0.0 do
+      h =
+        scores
+        |> Enum.map(fn {_id, p} -> p / total end)
+        |> Enum.reduce(0.0, fn p, sum ->
+          if p > 0.0, do: sum - p * :math.log(p), else: sum
+        end)
+
+      h / :math.log(length(scores))
+    else
+      nil
+    end
+  end
+
+  defp entropy(_, _), do: nil
+
+
 
   @doc "Read word-score audit metadata from a mixed pipeline trace."
   @spec trace_reports(term()) :: [map()]
