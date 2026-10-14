@@ -3,6 +3,8 @@ defmodule Core.Response.SelfStateFeatures do
   Pure feature shaping for self-state inputs used by response policy.
   """
 
+  alias Core.Response.AnswerAdequacy
+
   @spec self_state(map() | nil, map() | nil, map() | nil, map() | nil) :: map()
   def self_state(self_model, self_monitor, self_memory_recall, agency_memory) do
     self_model
@@ -22,7 +24,7 @@ defmodule Core.Response.SelfStateFeatures do
       String.contains?(text, "?") ->
         {text, nil}
 
-      answered_factual_question?(features) ->
+      factual_request?(features) ->
         {text, nil}
 
       curiosity_probe?(features, decision) ->
@@ -150,15 +152,11 @@ defmodule Core.Response.SelfStateFeatures do
 
   defp apply_agency_memory(self_state, _agency_memory), do: self_state
 
-  defp answered_factual_question?(features) do
-    selected_action = Map.get(features, :selected_action)
-    question = Map.get(features, :text, "")
-
-    selected_action == :answer_user and is_binary(question) and
-      Regex.match?(
-        ~r/^\s*(?:what|where|when|who|which|how many|how much|is|are|was|were|does|do|did)\b/iu,
-        question
-      )
+  # The policy action can be :ask_first or :offer_options even when the model
+  # has already answered a factual request. Such turns should not receive a
+  # generic, uninvited "what detail next?" curiosity prompt.
+  defp factual_request?(features) do
+    AnswerAdequacy.factual_question?(map_get(features, :text))
   end
 
   defp curiosity_probe?(features, decision) do
