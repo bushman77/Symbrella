@@ -120,7 +120,9 @@ defmodule Brain.LIFG.GrammarEvidence do
          id,
          _cell
        )
-       when predicate == index and is_binary(id) and is_list(evidence) do
+       when predicate == index and is_binary(id) and is_list(evidence) and
+              is_integer(wh) and is_integer(aux) and is_integer(subject) and
+              is_integer(predicate) and is_integer(prep) do
     complete? =
       wh < aux and aux < subject and subject < predicate and
         predicate < prep and
