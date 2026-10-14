@@ -27,6 +27,20 @@ defmodule Core.Syntax.SignaturesTest do
     }
   ]
 
+  @question_cells [
+    %{norm: "what", pos: "pronoun"},
+    %{norm: "do", pos: "auxiliary"},
+    %{norm: "don't", pos: "auxiliary"},
+    %{norm: "you", pos: "pronoun"},
+    %{norm: "know", pos: "verb"},
+    %{norm: "about", pos: "preposition"},
+    %{norm: "japan", pos: "proper_noun"},
+    %{norm: "exactly", pos: "adverb"},
+    %{norm: "actually", pos: "adverb"},
+    %{norm: "really", pos: "adverb"},
+    %{norm: "not", pos: "adverb"}
+  ]
+
   defp input(sentence, cells \\ @cells) do
     %SemanticInput{sentence: sentence, active_cells: cells}
     |> TokenFilters.rebuild_word_ngrams(3)
@@ -323,5 +337,57 @@ defmodule Core.Syntax.SignaturesTest do
     assert [%{stage: :sentence_signatures, decision: :observed, meta: meta} | _] = out.trace
     assert meta.count >= 1
     assert :ok = SemanticInput.validate_contract(out)
+  end
+
+  test "WH-topic signature retains token roles around adverbs and negation" do
+    examples = [
+      {"What exactly do you actually know about Japan?",
+       %{wh: 0, wh_modifier: 1, auxiliary: 2, subject: 3,
+         predicate_modifier: 4, predicate: 5, preposition: 6}},
+      {"What do you actually know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
+         predicate: 4, preposition: 5}},
+      {"What do you not actually know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, negation: 3,
+         predicate_modifier: 4, predicate: 5, preposition: 6}},
+      {"What do you really not know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
+         negation: 4, predicate: 5, preposition: 6}}
+    ]
+
+    for {sentence, expected_roles} <- examples do
+      si = input(sentence, @question_cells)
+      assert [%{roles: ^expected_roles} = frame] =
+               Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+      assert frame.span == {0, length(si.tokens) - 1}
+      assert frame.required_features.predicate == [:pos_verb]
+      assert :explicit_prepositional_topic in frame.evidence
+      assert si.active_cells == @question_cells
+    end
+  end
+
+  test "negative auxiliary contractions stay one base-token role" do
+    si = input("What don't you know about Japan?", @question_cells)
+
+    assert [%{roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3,
+                       preposition: 4} = roles, evidence: evidence}] =
+             Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+    refute Map.has_key?(roles, :negation)
+    assert :negative_auxiliary_contraction in evidence
+  end
+
+  test "WH question does not leap over unknown words or punctuation" do
+    without_adverb = Enum.reject(@question_cells, &(&1.norm == "exactly"))
+
+    for {sentence, cells} <- [
+          {"What exactly do you know about Japan?", without_adverb},
+          {"What mystery do you know about Japan?", @question_cells},
+          {"What exactly, do you know about Japan?", @question_cells},
+          {"What do you actually know?", @question_cells},
+          {"What do you actually know about quickly?", @question_cells}
+        ] do
+      refute Enum.any?(Signatures.detect(input(sentence, cells)),
+               &(&1.id == :wh_aux_topic_question))
+    end
   end
 end
