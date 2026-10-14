@@ -6,6 +6,19 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
   alias SymbrellaWeb.BrainHTML
   alias SymbrellaWeb.Components.Brain.Panels
 
+  defmodule TestRuntime do
+    def blackboard_history(100), do: [%{kind: :telemetry, evidence: "FULL_UNFILTERED_PAYLOAD"}]
+    def cycle_snapshot, do: %{seq: 12}
+    def mood_snapshot, do: %{exploration: 0.6}
+    def brain_snapshot, do: {:ok, %{active: true}}
+    def self_model_snapshot, do: %{uncertainty: 0.2}
+    def self_portrait_snapshot, do: %{source: :test}
+    def wm_snapshot, do: {:ok, %{wm: ["active memory"]}}
+    def region_snapshot(_), do: %{lifg: :active}
+    def region_status(_), do: %{status: :up}
+    def all_region_status, do: %{lifg: %{status: :up}}
+  end
+
   test "brain dashboard offers one complete clipboard export with every diagnostic section" do
     html =
       render_component(&Panels.brain/1,
@@ -24,7 +37,10 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     refute html =~ ~s(phx-hook="BrainReportCopy")
     assert html =~ ~s(id="brain-report-view-btn")
     assert html =~ "Copy Full Brain Report"
-    assert html =~ "View / Save Report"
+    assert html =~ "Open Report Text"
+    assert html =~ "Download .txt"
+    assert html =~ ~s(id="brain-report-download-btn")
+    assert html =~ "/brain/report.txt?region=lifg"
     assert html =~ ~s(data-brain-report-section="HUD, Clock, Intent, Mood and Self-Model")
     assert html =~ ~s(data-brain-report-section="Selected Region Summary and Snapshot")
     assert html =~ ~s(data-brain-report-section="Complete Blackboard Feed")
@@ -71,6 +87,38 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert source =~ "brain-report-view-btn"
     assert source =~ "Complete Brain"
     assert source =~ "downloadReport"
+  end
+
+  test "native plain-text Brain report route is usable without JavaScript", %{conn: conn} do
+    conn = get(conn, "/brain/report.txt?region=lifg")
+
+    assert response(conn, 200) =~ "Symbrella - Complete Brain Diagnostics"
+    assert response(conn, 200) =~ "Selected region: lifg"
+    assert response(conn, 200) =~ "Blackboard history"
+    assert get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]
+    assert get_resp_header(conn, "content-disposition") == ["inline"]
+  end
+
+  test "native Brain report downloads a text attachment", %{conn: conn} do
+    conn = get(conn, "/brain/report.txt?region=lifg&download=1")
+
+    assert response(conn, 200) =~ "Complete Brain Diagnostics"
+    assert [disposition] = get_resp_header(conn, "content-disposition")
+    assert disposition =~ "attachment;"
+    assert disposition =~ "symbrella-brain-lifg-"
+    assert disposition =~ ".txt"
+  end
+
+  test "native exporter reads the source blackboard data, not the visible HTML filter" do
+    text = SymbrellaWeb.BrainReport.generate(:lifg,
+      runtime: TestRuntime,
+      captured_at: ~U[2026-10-13 12:00:00Z]
+    )
+
+    assert text =~ "Captured UTC: 2026-10-13T12:00:00Z"
+    assert text =~ "FULL_UNFILTERED_PAYLOAD"
+    assert text =~ "active memory"
+    assert text =~ "===== All region process statuses ====="
   end
 
 end

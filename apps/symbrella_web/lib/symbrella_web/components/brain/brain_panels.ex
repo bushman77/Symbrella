@@ -147,6 +147,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     assigns =
       assigns
       |> Map.put(:selected, selected)
+      |> Map.put(:selected_param, Atom.to_string(selected))
       |> Map.put(:options, opts)
 
     ~H"""
@@ -157,26 +158,37 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       </div>
 
       <div class="flex flex-wrap items-center justify-end gap-2">
-        <button
+        <!-- Copy uses JS when available; otherwise opens the native text view. -->
+        <a
           id="brain-report-copy-btn"
-          type="button"
-          aria-label="Copy complete Brain diagnostics report to clipboard"
-          title="Copy all Brain dashboard diagnostics, including unfiltered blackboard events"
-          class="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-100"
+          href={~p"/brain/report.txt?region=#{@selected_param}"}
+          aria-label="Copy full Brain report; opens plain text if browser copying is unavailable"
+          title="Copy diagnostics, or open plain text without JavaScript"
+          class="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-100"
         >
           <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
           <span data-brain-copy-label>Copy Full Brain Report</span>
-        </button>
-        <button
+        </a>
+        <a
           id="brain-report-view-btn"
-          type="button"
-          aria-label="View, select, or download complete Brain diagnostics"
-          title="View, select, or download the complete report even if clipboard access is blocked"
+          href={~p"/brain/report.txt?region=#{@selected_param}"}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open complete Brain diagnostic report as plain text"
           class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           <.icon name="hero-document-text" class="h-4 w-4" />
-          <span>View / Save Report</span>
-        </button>
+          <span>Open Report Text</span>
+        </a>
+        <a
+          id="brain-report-download-btn"
+          href={~p"/brain/report.txt?region=#{@selected_param}&download=1"}
+          aria-label="Download complete Brain diagnostic report as a text file"
+          class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+          <span>Download .txt</span>
+        </a>
         <span class="text-sm text-zinc-500">Region:</span>
         <select
           class="border rounded px-2 py-1 text-sm"

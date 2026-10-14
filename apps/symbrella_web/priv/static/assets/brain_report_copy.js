@@ -213,7 +213,9 @@
   }
 
   document.addEventListener("click", async function (event) {
-    const button = event.target.closest("#" + COPY_ID + ", #" + VIEW_ID);
+    // Native Open Report Text / Download .txt anchors must always work,
+    // regardless of whether JavaScript is healthy.
+    const button = event.target.closest("#" + COPY_ID);
     if (!button) return;
 
     event.preventDefault();
@@ -223,11 +225,6 @@
       if (!report) {
         markButton(button, "Report unavailable");
         alert("Brain report is unavailable. Refresh the page and try again.");
-        return;
-      }
-
-      if (button.id === VIEW_ID) {
-        showReport(report, false);
         return;
       }
 
