@@ -7,6 +7,7 @@ defmodule Core.Response.Memory do
   """
 
   alias Core.Response.SideEffects
+  alias Core.Response.LlmChatHistory
 
   @spec reply(map()) :: {atom(), String.t(), map()} | nil
   def reply(si) when is_map(si) do
@@ -38,6 +39,25 @@ defmodule Core.Response.Memory do
         fact_query_key: fact_query_key
       }) do
     cond do
+      asking_for_assistant_name?(text_in, session_id) ->
+        name = SideEffects.assistant_name()
+        text = "My name is #{name}."
+
+        meta = %{
+          action: :identity,
+          identity_subject: :assistant,
+          intent_inferred: :name_query,
+          response_source: :identity,
+          memory_key: :assistant_name,
+          memory_source: :configuration,
+          session_id: session_id,
+          source: :assistant_config,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_reply(session_id, text_in, text, meta)
+
       asking_for_user_name?(text_in) ->
         name = SideEffects.recalled_user_name(extracted_name)
 
@@ -50,6 +70,7 @@ defmodule Core.Response.Memory do
 
         meta = %{
           action: :identity,
+          identity_subject: :user,
           intent_inferred: :name_query,
           response_source: :memory,
           memory_key: :user_name,
@@ -247,6 +268,45 @@ defmodule Core.Response.Memory do
   end
 
   def extract_fact_query_key(_), do: nil
+
+  @doc "Resolve explicit assistant-name questions and grounded ellipsis after a name exchange."
+  @spec asking_for_assistant_name?(String.t(), term()) :: boolean()
+  def asking_for_assistant_name?(text, session_id \\ nil)
+
+  def asking_for_assistant_name?(text, session_id) when is_binary(text) do
+    normalized =
+      text
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{N}'\s?]/u, "")
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
+
+    explicit? =
+      Regex.match?(
+        ~r/^(?:what(?:'s| is) your name|what do (?:you|u) go by|what should i call you|tell me your name|do you have a name)\??$/u,
+        normalized
+      )
+
+    elliptical? =
+      Regex.match?(~r/^(?:and )?(?:what(?:'s| is) )?yours\??$/u, normalized) and
+        recent_name_exchange?(session_id)
+
+    explicit? or elliptical?
+  end
+
+  def asking_for_assistant_name?(_, _), do: false
+
+  defp recent_name_exchange?(session_id) do
+    session_id
+    |> LlmChatHistory.messages(2)
+    |> Enum.any?(fn message ->
+      content = Map.get(message, "content", "") |> to_string()
+
+      asking_for_user_name?(content) or
+        Regex.match?(~r/^my name is\s+/iu, content) or
+        Regex.match?(~r/^(your name is|nice to meet you,)\s*/iu, content)
+    end)
+  end
 
   @spec asking_for_user_name?(String.t()) :: boolean()
   def asking_for_user_name?(text) when is_binary(text) do

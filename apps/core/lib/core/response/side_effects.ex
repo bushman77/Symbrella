@@ -135,6 +135,13 @@ defmodule Core.Response.SideEffects do
 
   def persist_user_fact(_key, _label, _value, _raw_text), do: :ok
 
+  @spec assistant_name() :: String.t()
+  def assistant_name do
+    assistant = Application.get_env(:symbrella, :assistant, [])
+    name = config_get(assistant, :name, "Symbrella")
+    if is_binary(name) and String.trim(name) != "", do: String.trim(name), else: "Symbrella"
+  end
+
   @spec recalled_user_name(String.t() | nil) :: String.t() | nil
   def recalled_user_name(extracted_name) do
     cond do
