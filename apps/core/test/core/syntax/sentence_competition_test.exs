@@ -51,6 +51,11 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     %{norm: "railgun", pos: "noun"},
     %{norm: "development", pos: "noun"},
     %{norm: "experiment", pos: "noun"},
+    %{norm: "exactly", pos: "adverb"},
+    %{norm: "actually", pos: "adverb"},
+    %{norm: "really", pos: "adverb"},
+    %{norm: "not", pos: "adverb"},
+    %{norm: "don't", pos: "auxiliary"},
     %{norm: "the", pos: "determiner"}
   ]
 
@@ -286,5 +291,92 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     assert again.active_cells == prior_cells
     assert again.sentence_competition == si.sentence_competition
     assert :ok = SemanticInput.validate_contract(again)
+  end
+
+  test "modifier phrases remain eligible while MWEs crossing protected roles lose" do
+    senses = [
+      %{id: "what exactly|phrase|1", norm: "what exactly", pos: "phrase",
+        definition: "An expression asking for precision."},
+      %{id: "exactly do|phrase|1", norm: "exactly do", pos: "phrase",
+        definition: "An unrelated idiomatic expression."},
+      @do_you,
+      %{id: "actually know|verb|1", norm: "actually know", pos: "verb",
+        definition: "Possess direct knowledge."},
+      @know_about,
+      @topic_phrase
+    ]
+
+    si = input("What exactly do you actually know about Japan's railgun development?", senses)
+    assert [%{roles: %{wh_modifier: 1, auxiliary: 2, subject: 3,
+                       predicate_modifier: 4, predicate: 5, preposition: 6}}] =
+             Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    for span <- [{1, 2}, {2, 3}, {5, 6}] do
+      assert SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    for span <- [{0, 1}, {4, 5}, {8, 9}] do
+      refute SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    covered = TokenResolution.resolve(si)
+
+    refute Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span in [{1, 2}, {2, 3}, {5, 6}]
+           end)
+
+    assert Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span == {8, 9}
+           end)
+  end
+
+  test "negation and contracted auxiliary both preserve core sentence boundaries" do
+    contraction = %{
+      id: "don't you|interjection|1", norm: "don't you",
+      pos: "interjection", definition: "An unrelated exclamation."
+    }
+
+    contracted =
+      input("What don't you know about Japan's railgun development?",
+        [contraction, @know_about])
+
+    assert SentenceCompetition.reject_phrase?(contracted, {1, 2})
+    assert SentenceCompetition.reject_phrase?(contracted, {3, 4})
+
+    not_know = %{
+      id: "not actually|adverb|1", norm: "not actually",
+      pos: "adverb", definition: "Emphatic negation."
+    }
+
+    you_not = %{
+      id: "you not|phrase|1", norm: "you not",
+      pos: "phrase", definition: "An unrelated idiom."
+    }
+
+    explicit =
+      input("What do you not actually know about Japan's railgun development?",
+        [not_know, you_not, @know_about])
+
+    assert [%{roles: %{negation: 3, predicate_modifier: 4,
+                       predicate: 5, preposition: 6}}] =
+             Enum.filter(explicit.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    assert SentenceCompetition.reject_phrase?(explicit, {2, 3})
+    assert SentenceCompetition.reject_phrase?(explicit, {5, 6})
+    refute SentenceCompetition.reject_phrase?(explicit, {3, 4})
+  end
+
+  test "an adverb does not justify sentence-level competition without a complete frame" do
+    sense = %{id: "what exactly|phrase|1", norm: "what exactly",
+              pos: "phrase", definition: "Ask for clarification."}
+
+    for sentence <- [
+          "What exactly do you know?",
+          "What exactly do you know about?",
+          "What exactly, do you know about Japan?"
+        ] do
+      si = input(sentence, [sense])
+      assert si.sentence_competition.rejected_spans == []
+    end
   end
 end
