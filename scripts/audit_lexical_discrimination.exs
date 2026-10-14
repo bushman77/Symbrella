@@ -75,18 +75,15 @@ defmodule Symbrella.AuditLexicalDiscrimination do
           end
 
         Enum.each(rows, fn row ->
-          matched =
-            row.matches
-            |> Enum.flat_map(fn {field, terms} ->
-              if terms == [], do: [], else: [{field, terms}]
-            end)
-            |> Enum.sort()
+          matched = compact_matches(row.matches)
+          unique = compact_matches(row.unique_matches)
 
           IO.inspect(%{
             id: row.id,
             status: row.status,
             context_fit: row.context_fit,
             matches: matched,
+            unique_matches: unique,
             definition: compact(row.definition, 180),
             example: compact(row.example, 120)
           }, label: "Sense evidence", pretty: true, width: 110, limit: :infinity)
@@ -98,6 +95,16 @@ defmodule Symbrella.AuditLexicalDiscrimination do
     IO.puts("original-sentence dictionary evidence, NOT that all senses are equivalent.")
     IO.puts("This script does not modify active choices, database senses, or rules.")
   end
+
+  defp compact_matches(matches) when is_map(matches) do
+    matches
+    |> Enum.flat_map(fn {field, terms} ->
+      if terms == [], do: [], else: [{field, terms}]
+    end)
+    |> Enum.sort()
+  end
+
+  defp compact_matches(_), do: []
 
   defp compact(value, limit) when is_binary(value) do
     value |> String.trim() |> String.slice(0, limit)
