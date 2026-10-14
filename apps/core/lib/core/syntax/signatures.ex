@@ -185,7 +185,7 @@ defmodule Core.Syntax.Signatures do
          length(nodes) <= @max_question_tokens do
       with [wh | after_wh] <- nodes,
            true <- wh.index == 0 and MapSet.member?(@wh_words, wh.word),
-           {wh_modifier, [aux | after_aux]} <- take_optional_adverb(after_wh),
+           {wh_modifier, [aux | after_aux]} <- take_wh_modifier(after_wh),
            true <- question_auxiliary?(aux),
            [subject | after_subject] <- after_aux,
            true <- (pos?(subject, "pronoun") or
@@ -209,7 +209,7 @@ defmodule Core.Syntax.Signatures do
           |> maybe_question_role(:negation, negation)
 
         required =
-          %{auxiliary: [:pos_auxiliary, :pos_modal],
+          %{auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
             subject: [:pos_pronoun], predicate: [:pos_verb],
             preposition: [:pos_preposition]}
           |> maybe_question_features(:wh_modifier, wh_modifier, [:pos_adverb])
@@ -235,6 +235,17 @@ defmodule Core.Syntax.Signatures do
     end
   end
 
+  # "do" can be both adverb and verb in the production lexicon. Claim
+  # the explicit question auxiliary before considering an optional WH adverb:
+  # otherwise "What do you know ..." incorrectly consumes "do".
+  defp take_wh_modifier([first | _] = nodes) do
+    if question_auxiliary?(first),
+      do: {nil, nodes},
+      else: take_optional_adverb(nodes)
+  end
+
+  defp take_wh_modifier(nodes), do: {nil, nodes}
+
   # One lexical adverb per optional slot. We do not skip arbitrary tokens:
   # an unattested filler must not manufacture a strong sentence frame.
   defp take_optional_adverb([node | rest] = nodes) do
@@ -253,7 +264,20 @@ defmodule Core.Syntax.Signatures do
 
   defp take_optional_negation(nodes), do: {nil, nodes}
 
-  defp take_predicate_prefix(nodes) do
+  # A lexical verb can also carry an adverb alternative. Prefer the
+  # complete verb + topic-preposition structure before consuming it as an
+  # optional modifier. Do not mutate the original POS candidates.
+  defp take_predicate_prefix([verb, prep | _] = nodes) do
+    if pos?(verb, "verb") and MapSet.member?(@topic_prepositions, prep.word) do
+      {nil, nil, nodes}
+    else
+      take_predicate_prefix_with_modifiers(nodes)
+    end
+  end
+
+  defp take_predicate_prefix(nodes), do: take_predicate_prefix_with_modifiers(nodes)
+
+  defp take_predicate_prefix_with_modifiers(nodes) do
     {leading_adverb, after_adverb} = take_optional_adverb(nodes)
     {negation, after_negation} = take_optional_negation(after_adverb)
 
