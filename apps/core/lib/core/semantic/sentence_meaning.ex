@@ -53,9 +53,15 @@ defmodule Core.Semantic.SentenceMeaning do
     # Preserve exactly what the user wrote; token reconstruction is only a
     # fallback for maps that lack a sentence field.
     question =
-      if is_map(question) and is_binary(sentence),
-        do: Map.put(question, :sentence, sentence),
-        else: question
+      if is_map(question) do
+        question
+        |> Map.put(:proposition, Core.Semantic.Proposition.build(si, question))
+        |> then(fn meaning ->
+          if is_binary(sentence), do: Map.put(meaning, :sentence, sentence), else: meaning
+        end)
+      else
+        question
+      end
 
     question || %{
       version: 1,
