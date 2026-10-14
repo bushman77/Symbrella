@@ -224,7 +224,12 @@ defmodule Core.Semantic.SentenceMeaning do
 
   defp surface_at(indexed, index) do
     case Map.get(indexed, index) do
-      s when is_binary(s) and s != "" -> {:ok, clean_word(s)}
+      s when is_binary(s) ->
+        case clean_word(s) do
+          "" -> :error
+          cleaned -> {:ok, cleaned}
+        end
+
       _ -> :error
     end
   end
