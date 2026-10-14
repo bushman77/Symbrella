@@ -128,6 +128,61 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     assert out.lifg_choices == word_choices
   end
 
+  test "production POS alternatives preserve the complete WH frame and block the idiom" do
+    # These POS combinations reproduce the real database trace, including
+    # "do" as an adverb/verb but NOT as a dedicated auxiliary, and "know"
+    # as a noun/particle/verb. No dictionary entry exists for "japan's".
+    observed_pos = %{
+      "what" => ~w(determiner particle pronoun),
+      "do" => ~w(adverb noun numeral verb),
+      "you" => ~w(determiner noun pronoun proper_noun verb),
+      "know" => ~w(noun particle verb),
+      "about" => ~w(adjective adverb preposition verb),
+      "railgun" => ~w(noun),
+      "development" => ~w(noun)
+    }
+
+    observed_cells =
+      for {norm, options} <- observed_pos,
+          pos <- options,
+          do: %{norm: norm, pos: pos}
+
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one, @sense_two], observed_cells)
+
+    assert [%{roles: %{wh: 0, auxiliary: 1, subject: 2,
+                       predicate: 3, preposition: 4},
+               required_features: %{auxiliary: aux_features}}] =
+             Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    assert :pos_verb in aux_features
+    assert si.sentence_competition.rejected_spans == [{0, 3}]
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+
+    covered = TokenResolution.resolve(si)
+
+    refute Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span == {0, 3}
+           end)
+
+    assert si.active_cells == observed_cells
+    assert Enum.any?(si.mwe_lexicon, &(&1.phrase == "what do you know"))
+  end
+
+  test "an ambiguous predicate adverb still yields a WH frame when verb + topic is complete" do
+    cells = [%{norm: "know", pos: "adverb"}, %{norm: "do", pos: "adverb"} | @lexical_cells]
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one, @sense_two], cells)
+
+    assert Enum.any?(si.sentence_signatures, fn
+             %{id: :wh_aux_topic_question,
+               roles: %{auxiliary: 1, predicate: 3, preposition: 4}} -> true
+             _ -> false
+           end)
+
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+  end
+
   test "all dictionary spans that fuse sentence roles lose, not only the long phrase" do
     senses =
       [@sense_one, @sense_two, @do_you, @know_about, @about_japan, @topic_phrase]
