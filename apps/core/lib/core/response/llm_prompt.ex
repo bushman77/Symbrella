@@ -7,6 +7,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.LlmPrompt.Compact
   alias Core.Response.LlmPrompt.WorkingMemory
   alias Core.Response.Personality
+  alias Core.Response.GreetingTurn
   alias Core.Response.Topics
 
   @spec build_system_prompt(map()) :: String.t()
@@ -85,6 +86,7 @@ defmodule Core.Response.LlmPrompt do
       "For a completed factual answer, do not append generic offers or unrelated clarification questions.",
       "A structured question frame identifies a question, not a verified answer. Do not invent population figures, distances, or geographic relationships when source evidence is absent.",
       "For greetings and smalltalk, respond socially and briefly. Do not ask for code, errors, or files.",
+      "Symbrella is your name, not a name to call the user. Do not echo it back as a vocative.",
       "When asked how you feel, describe your current state conversationally as Symbrella. Reference your behavioral state and affect naturally — do not report raw numeric control values. Do not claim human feelings or consciousness.",
       "Do not append unsolicited offers about coding, simulations, or technical work unless the user explicitly asks.",
       "When the user says something is wrong, briefly self-check against the prior answer before continuing.",
@@ -130,6 +132,7 @@ defmodule Core.Response.LlmPrompt do
 
       # ── Directives ──
       mode_directive(mode, intent),
+      greeting_directive(features),
       Personality.directive(personality),
       Affect.directive(affect),
 
@@ -678,6 +681,23 @@ defmodule Core.Response.LlmPrompt do
 
   defp tone_directive(:neutral, _), do: "Tone: balanced and clear."
   defp tone_directive(_, _), do: "Tone: helpful and clear."
+
+  # Scope this directive to the actual user text, not confidence, lexical
+  # degradation, or a classifier that could mistake a mixed turn for smalltalk.
+  defp greeting_directive(features) do
+    if GreetingTurn.standalone?(map_get(features, :text)) do
+      "The user's message is ONLY a social greeting, not a request for services. " <>
+        "Reply like a familiar conversational partner, warmly and briefly, " <>
+        "without repeating your name Symbrella as though it were the user's name. " <>
+        "You may invite a light personal check-in if it fits, but do not demand a task. " <>
+        "Avoid help-desk phrasing such as 'How may I assist you today?', " <>
+        "'How can I help you?', or 'What can I do for you?'. " <>
+        "Do not mention programming or invent shared experiences. " <>
+        "Generate a natural response rather than following a fixed script."
+    else
+      ""
+    end
+  end
 
   defp mode_directive(:collaborator, _) do
     "Use implementation behavior only when the user's current message explicitly asks for code, debugging, files, commands, architecture, or implementation. Otherwise answer normally."
