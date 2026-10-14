@@ -11,7 +11,7 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
 
   @spec classify(Db.BrainCell.t(), map() | nil) :: {verdict(), map()}
   def classify(source, nil) do
-    {:absent_id, details(source, nil, nil, [])}
+    {:absent_id, details(source, nil, [])}
   end
 
   def classify(source, stored) when is_map(stored) do
@@ -24,7 +24,7 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
     missing_categories = expected_categories -- existing_categories
 
     detail =
-      details(source, previous_definition, expected_definition, missing_categories)
+      details(source, stored, missing_categories)
 
     cond do
       source.norm != stored.norm or source.pos != stored.pos ->
@@ -69,14 +69,35 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
     |> Enum.sort()
   end
 
-  defp details(source, previous, expected, missing_categories) do
+  defp details(source, nil, missing_categories) do
+    %{
+      id: source.id,
+      original_definition: nil,
+      reconstructed_definition: source.definition,
+      added_categories: missing_categories,
+      has_multiple_glosses?: false
+    }
+  end
+
+  defp details(source, stored, missing_categories) do
+    previous = stored.definition
+    expected = source.definition
+
     %{
       id: source.id,
       original_definition: previous,
       reconstructed_definition: expected,
       added_categories: missing_categories,
       has_multiple_glosses?: is_binary(previous) and is_binary(expected) and
-        previous != expected
+        previous != expected,
+      # Explain the six observed metadata mismatches without discarding the
+      # source sense or weakening the conservative reconciliation gate.
+      stored_example: stored.example,
+      reconstructed_example: source.example,
+      stored_gram_function: stored.gram_function,
+      reconstructed_gram_function: source.gram_function,
+      stored_noncategory_atoms: noncategory_atoms(stored.semantic_atoms),
+      reconstructed_noncategory_atoms: noncategory_atoms(source.semantic_atoms)
     }
   end
 end
