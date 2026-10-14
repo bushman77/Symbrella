@@ -178,6 +178,55 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     refute query =~ "typo"
   end
 
+  test "standalone typo corrections and acknowledgements are never chosen as topics" do
+    original = "What is happening with the Japanese railgun news currently?"
+
+    for correction <- [
+          "It is not a typo",
+          "It's not a typo.",
+          "That is not a mistake.",
+          "No, that isn't an error!",
+          "You misunderstood me.",
+          "That is not what I meant."
+        ] do
+      history = [
+        %{"role" => "user", "content" => original},
+        %{"role" => "assistant", "content" => "Did you mean a different topic?"},
+        %{"role" => "user", "content" => correction}
+      ]
+
+      assert %{relation: :current_events, query: query} =
+               route("No, search for it", %{retrieval_history: history}),
+             "Failed to skip correction: #{correction}"
+
+      assert query =~ "Japanese railgun"
+      refute query =~ "typo"
+      refute query =~ "mistake"
+    end
+  end
+
+  test "a correction containing an actual replacement topic is kept" do
+    history = [
+      %{"role" => "user", "content" => "Can you research the history of cannons?"},
+      %{"role" => "assistant", "content" => "Here are some historical notes."},
+      %{"role" => "user", "content" => "No, I meant the Japanese railgun programme in Japan."}
+    ]
+
+    assert %{relation: nil, request_type: :general_search,
+             trigger: :explicit_search, query: "the Japanese railgun programme in Japan"} =
+             route("Search for it", %{retrieval_history: history})
+  end
+
+  test "only conversational corrections do not create a searchable topic" do
+    history = [
+      %{"role" => "assistant", "content" => "What did you mean?"},
+      %{"role" => "user", "content" => "It is not a typo"},
+      %{"role" => "user", "content" => "That is not what I meant."}
+    ]
+
+    assert route("Search for it", %{retrieval_history: history}) == nil
+  end
+
   test "a follow-up asking for newer developments uses the dated news backend" do
     history = [
       %{"role" => "user", "content" => "Tell me about the Russian invasion of Ukraine"},

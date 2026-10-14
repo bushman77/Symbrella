@@ -236,17 +236,34 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
 
   defp substantive_topic?(text) do
     words = Regex.scan(~r/[\p{L}\p{N}]+/u, text)
+
     length(words) >= 4 and
       String.length(text) <= 500 and
+      not conversational_correction?(text) and
       not Regex.match?(
-        ~r/^\s*(?:hello|hi|yes|no|okay|ok|thanks|thank you|it'?s\s+not\s+a\s+typo|you\s+are\s+wrong|try\s+again|search\s+(?:for\s+)?(?:it|that|this))\b/iu,
+        ~r/^\s*(?:hello|hi|yes|no|okay|ok|thanks|thank\s+you|you\s+are\s+wrong|try\s+again|search\s+(?:for\s+)?(?:it|that|this))\s*[.!?]*$/iu,
         text
       ) and
       not unresolved_reference?(text)
   end
 
+  # A correction is conversational feedback, not a search subject.
+  # Match the complete utterance so "It's not a typo: Japanese railgun ..."
+  # can still supply an actual referent rather than being discarded.
+  defp conversational_correction?(text) do
+    Regex.match?(
+      ~r/^\s*(?:(?:no|actually)[,!]?\s+)?(?:it|that|this)(?:(?:'s|\s+is)\s+not|\s+isn't)\s+(?:a\s+)?(?:typo|mistake|error)\s*[.!?]*$/iu,
+      text
+    ) or
+      Regex.match?(
+        ~r/^\s*(?:(?:no|actually)[,!]?\s+)?(?:you\s+(?:misunderstood|misheard|misread)\s+(?:me|it|that)|that(?:'s|\s+is)\s+not\s+what\s+i\s+meant|i\s+(?:already\s+)?said\s+that)\s*[.!?]*$/iu,
+        text
+      )
+  end
+
   defp clean_prior(text) do
     text
+    |> String.replace(~r/^\s*(?:(?:no|actually)[,!]\s*)?i\s+(?:mean|meant)\s+/iu, "")
     |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about))\s+/iu, "")
     |> String.replace(~r/[?!.]+$/u, "")
     |> nonempty()
