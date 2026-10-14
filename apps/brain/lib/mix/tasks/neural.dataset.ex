@@ -69,6 +69,14 @@ defmodule Mix.Tasks.Neural.Dataset do
               "#{metadata.input_turns} complete; #{metadata.missing_modulator_turns} missing/incomplete"
           )
           Mix.shell().info(
+            "Complete process-local Hippocampus traces: #{metadata.complete_process_traces}/" <>
+              "#{metadata.input_turns}"
+          )
+          Mix.shell().info(
+            "Explicit memory fast-path turns: #{metadata.memory_fast_path_turns}/" <>
+              "#{metadata.input_turns}"
+          )
+          Mix.shell().info(
             "Observed-only target cells: #{metadata.train_valid_cells}/#{metadata.train_possible_cells} training; " <>
               "#{metadata.eval_valid_cells}/#{metadata.eval_possible_cells} evaluation"
           )
