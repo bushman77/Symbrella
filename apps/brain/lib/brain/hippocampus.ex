@@ -20,7 +20,7 @@ defmodule Brain.Hippocampus do
   use GenServer
   require Logger
 
-  alias Brain.Hippocampus.{Window, Recall, Normalize, Evidence, Config, Telemetry, DB, Writer}
+  alias Brain.Hippocampus.{Window, Recall, Normalize, Evidence, Config, Telemetry, DB, Writer, TurnTrace}
 
   @type slate :: map()
   @type meta :: map()
@@ -55,7 +55,13 @@ defmodule Brain.Hippocampus do
 
   @spec encode(map(), map()) :: map()
   def encode(%{} = slate, meta \\ %{}) when is_map(meta) do
-    :ok = GenServer.call(__MODULE__, {:encode, slate, meta})
+    if TurnTrace.active?() do
+      {:ok, episode, at_ms} = GenServer.call(__MODULE__, {:encode, slate, meta, :trace})
+      TurnTrace.encode(episode, at_ms)
+    else
+      :ok = GenServer.call(__MODULE__, {:encode, slate, meta})
+    end
+
     slate
   end
 
@@ -94,8 +100,11 @@ defmodule Brain.Hippocampus do
   end
 
   @spec fact(atom() | String.t()) :: term() | nil
-  def fact(key) when is_atom(key) or is_binary(key),
-    do: GenServer.call(__MODULE__, {:fact, key})
+  def fact(key) when is_atom(key) or is_binary(key) do
+    value = GenServer.call(__MODULE__, {:fact, key})
+    TurnTrace.fact(key, value)
+    value
+  end
 
   @doc """
   Recall ranked episodes for cues from the configured source.
@@ -109,8 +118,12 @@ defmodule Brain.Hippocampus do
   Returns a list of `%{score, at, episode}` maps.
   """
   @spec recall(list() | map(), keyword()) :: [recall_result()]
-  def recall(cues, opts \\ []) when is_list(cues) or is_map(cues),
-    do: GenServer.call(__MODULE__, {:recall, cues, normalize_opts(opts)})
+  def recall(cues, opts \\ []) when is_list(cues) or is_map(cues) do
+    options = normalize_opts(opts)
+    results = GenServer.call(__MODULE__, {:recall, cues, options})
+    TurnTrace.recall(:recall, cues, options, results)
+    results
+  end
 
   @doc """
   Recall only explicitly self-tagged autobiographical episodes.
@@ -120,8 +133,12 @@ defmodule Brain.Hippocampus do
   self/autobiographical tags.
   """
   @spec recall_self_memories(list() | map(), keyword()) :: [recall_result()]
-  def recall_self_memories(cues, opts \\ []) when is_list(cues) or is_map(cues),
-    do: GenServer.call(__MODULE__, {:recall_self, cues, normalize_opts(opts)})
+  def recall_self_memories(cues, opts \\ []) when is_list(cues) or is_map(cues) do
+    options = normalize_opts(opts)
+    results = GenServer.call(__MODULE__, {:recall_self, cues, options})
+    TurnTrace.recall(:recall_self, cues, options, results)
+    results
+  end
 
   @doc """
   Recall episodes and attach them under `si.evidence[:episodes]`.
@@ -131,7 +148,17 @@ defmodule Brain.Hippocampus do
   """
   @spec attach_episodes(map(), keyword()) :: map()
   def attach_episodes(si, opts \\ []) when is_map(si) or is_struct(si) do
-    GenServer.call(__MODULE__, {:attach, si, normalize_opts(opts)})
+    options = normalize_opts(opts)
+    cues = attachment_cues(si, options)
+    options = Map.put(options, :cues, cues)
+
+    attached = GenServer.call(__MODULE__, {:attach, si, options})
+    evidence = Map.get(attached, :evidence) || %{}
+    results = Map.get(evidence, :episodes) || []
+
+    # Trace the exact cues used for retrieval, not the whole SemanticInput.
+    TurnTrace.recall(:attach, cues, options, results)
+    attached
   end
 
   @spec configure(keyword()) :: :ok
@@ -164,8 +191,7 @@ defmodule Brain.Hippocampus do
     {:ok, state}
   end
 
-  @impl true
-  def handle_call({:encode, slate, meta_in}, from, state) do
+  defp handle_encode_call(slate, meta_in, from, state, trace?) do
     at = System.system_time(:millisecond)
 
     norms =
@@ -202,8 +228,17 @@ defmodule Brain.Hippocampus do
     Telemetry.emit_write(write_meas, write_meta)
     Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], write_meas, write_meta)
 
-    {:reply, :ok, state1}
+    reply = if trace?, do: {:ok, ep, at}, else: :ok
+    {:reply, reply, state1}
   end
+
+  @impl true
+  def handle_call({:encode, slate, meta_in}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, false)
+
+  @impl true
+  def handle_call({:encode, slate, meta_in, :trace}, from, state),
+    do: handle_encode_call(slate, meta_in, from, state, true)
 
   @impl true
   def handle_call({:recall, cues, opts}, from, state) do
@@ -265,7 +300,12 @@ defmodule Brain.Hippocampus do
     # For attach we usually want to include head as well unless caller overrides.
     opts = Map.put_new(opts, :ignore_head, false)
 
-    {results, _meas, _meta} = do_recall(si, state, opts)
+    # Core.Recall.Execute supplies normalized lexical cues in opts[:cues].
+    # The full SemanticInput is not a recall slate: Recall.cues_to_set/1
+    # reads :winners, while SemanticInput typically carries :tokens instead.
+    # Using the SI here silently produced an empty cue set and zero matches.
+    cues = Map.get(opts, :cues) || si
+    {results, _meas, _meta} = do_recall(cues, state, opts)
 
     episodes =
       results
@@ -702,6 +742,36 @@ defmodule Brain.Hippocampus do
           )
 
         {results, meas, Map.merge(base_meta, dbg_meta)}
+    end
+  end
+
+  # Explicit nonempty cues always take precedence. A token-bearing
+  # SemanticInput isn't a %{winners: ...} recall slate, so derive normalized
+  # lexical cues when callers provide an empty list (or no :cues option).
+  # Preserve older map-shaped winner slates unchanged.
+  defp attachment_cues(si, opts) do
+    case Map.get(opts, :cues) do
+      cues when is_list(cues) and cues != [] ->
+        cues
+
+      %{} = cues when map_size(cues) > 0 ->
+        cues
+
+      _ ->
+        if has_winners?(si) do
+          si
+        else
+          tokens = Map.get(si, :tokens) || Map.get(si, "tokens") || []
+          extracted = Normalize.extract_norms_from_any(%{tokens: tokens})
+          if extracted == [], do: si, else: extracted
+        end
+    end
+  end
+
+  defp has_winners?(si) do
+    case Map.get(si, :winners) || Map.get(si, "winners") do
+      [_ | _] -> true
+      _ -> false
     end
   end
 

@@ -105,4 +105,37 @@ defmodule Core.Recall.ExecuteHippoIntegrationTest do
 
     assert episodes_of(si2) == []
   end
+  test "Core lexical cues produce a direct Hippocampus attach hit without fallback recall" do
+    Hippocampus.encode(slate_with(["river"]), %{scope: :conversation})
+
+    # Exercise production Core.Token structs, not only plain token maps.
+    si = %SI{
+      sentence: "river",
+      source: :test,
+      tokens: [%Core.Token{phrase: "river", span: {0, 1}, n: 1}]
+    }
+
+    plan = plan_min()
+
+    Brain.Hippocampus.TurnTrace.start()
+
+    si2 = Execute.execute(si, plan, hippo: true, hippo_write: false)
+    observations = Brain.Hippocampus.TurnTrace.finish()
+
+    assert [%{score: score, episode: %{slate: %{winners: [%{lemma: "river"}]}}}] =
+             episodes_of(si2)
+
+    assert score > 0.0
+
+    assert Enum.any?(observations, fn event ->
+             event.kind == :recall_attempt and event.operation == :attach and
+               event.hit? == true and event.result_count == 1
+           end)
+
+    refute Enum.any?(observations, fn event ->
+             event.kind == :recall_attempt and event.operation == :recall
+           end)
+  end
+
+
 end
