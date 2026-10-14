@@ -210,9 +210,10 @@ defmodule Core.Comprehension.Summary do
       fallback? = fallback_choice?(choice)
       # A near-tie reselected by ATL feedback remains lexically uncertain.
       # Do not turn a 0.50-ish posterior into a strong meaning claim.
-      weak? =
-        score < @weak_score or fallback? or
-          Map.get(choice, :relational_feedback_uncertain?, false) == true
+      relational_weak? =
+        is_map(choice) and Map.get(choice, :relational_feedback_uncertain?, false) == true
+
+      weak? = score < @weak_score or fallback? or relational_weak?
 
       stats =
         stats
