@@ -28,37 +28,62 @@ defmodule Core.LIFG.RelationalFeedback do
         []
       end
 
-    out =
+    {out, applied} =
       if revisions == [] do
-        si
+        {si, []}
       else
-        si
-        |> Map.update!(:lifg_choices, &revise_choices(&1, revisions, si))
-        |> Map.update!(:semantic_choices, &revise_choices(&1, revisions, si))
-        |> Core.Brain.ATL.ingest([])
-        |> Core.Brain.ATL.attach_lifg_pairs([])
+        rebuilt =
+          si
+          |> Map.update!(:lifg_choices, &revise_choices(&1, revisions, si))
+          |> Map.update!(:semantic_choices, &revise_choices(&1, revisions, si))
+          |> Core.Brain.ATL.ingest([])
+          |> Core.Brain.ATL.attach_lifg_pairs([])
+
+        # Never publish a revised sense with a stale or missing ATL slate.
+        if atl_consistent?(rebuilt, revisions) do
+          {rebuilt, revisions}
+        else
+          {si, []}
+        end
       end
 
     result =
       report
-      |> Map.put(:applied_revisions, Enum.map(revisions, fn change ->
+      |> Map.put(:revisions_rejected, length(revisions) - length(applied))
+      |> Map.put(:applied_revisions, Enum.map(applied, fn change ->
         %{token_index: change.token_index,
           from: change.selected_id,
           to: change.proposed_id,
           reason: :atl_relation_dictionary_context}
       end))
-      |> Map.put(:applied?, revisions != [])
+      |> Map.put(:applied?, applied != [])
       |> Map.put(:mode, if(apply?, do: :bounded_reanalysis, else: :observe_only))
 
     out
     |> Map.put(:lifg_feedback, result)
     |> Trace.append(:lifg_relational_feedback,
-      decision: if(revisions == [], do: :preserved, else: :revised),
+      decision: if(applied == [], do: :preserved, else: :revised),
       reason: :atl_structural_context_for_lifg,
       meta: result)
   end
 
   def attach(si, _), do: si
+
+  defp atl_consistent?(si, revisions) do
+    winners =
+      si
+      |> Map.get(:atl_slate, %{})
+      |> case do
+        %{winners: list} when is_list(list) -> list
+        _ -> []
+      end
+
+    Enum.all?(revisions, fn %{token_index: index, proposed_id: id} ->
+      Enum.any?(winners, fn winner ->
+        Map.get(winner, :token_index) == index and Map.get(winner, :id) == id
+      end)
+    end)
+  end
 
   defp can_revise?(si, decision) do
     index = decision.token_index
@@ -87,11 +112,18 @@ defmodule Core.LIFG.RelationalFeedback do
           candidate = candidate_for(si, decision.token_index, decision.proposed_id)
           choice
           |> Map.put(:id, decision.proposed_id)
+          |> then(fn revised ->
+            if Map.has_key?(revised, :chosen_id) do
+              Map.put(revised, :chosen_id, decision.proposed_id)
+            else
+              revised
+            end
+          end)
           |> Map.put(:score, Map.get(decision.posterior, decision.proposed_id))
           |> Map.put(:candidate_probs, decision.posterior)
           |> Map.put(:definition, get(candidate, :definition))
           |> Map.put(:example, get(candidate, :example))
-          |> Map.put(:source, get(candidate, :source))
+          |> Map.put(:source, get(candidate, :source) || Map.get(choice, :source))
           |> Map.put(:relational_revision_from, decision.selected_id)
       end
     end)
