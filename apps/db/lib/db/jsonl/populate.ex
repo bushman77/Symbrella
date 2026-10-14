@@ -166,29 +166,17 @@ defmodule Db.JSONL.Populate do
   end
 
   defp pick_definition(sense) do
-    gloss =
-      sense
-      |> Map.get("glosses")
-      |> List.wrap()
-      |> Enum.find_value(fn
-        g when is_binary(g) ->
-          g2 = String.trim(g)
-          if g2 == "", do: nil, else: g2
+    # Wiktextract supplies hierarchical gloss paths for an exact sense.
+    # The first gloss can be a shared heading, not the discriminating
+    # definition (Cash place names are a concrete example). Keep the full
+    # ordered path in the existing definition column without changing IDs.
+    glosses =
+      case nonempty_glosses(Map.get(sense, "glosses")) do
+        [] -> nonempty_glosses(Map.get(sense, "raw_glosses"))
+        values -> values
+      end
 
-        _ ->
-          nil
-      end) ||
-        sense
-        |> Map.get("raw_glosses")
-        |> List.wrap()
-        |> Enum.find_value(fn
-          g when is_binary(g) ->
-            g2 = String.trim(g)
-            if g2 == "", do: nil, else: g2
-
-          _ ->
-            nil
-        end)
+    gloss = if glosses == [], do: nil, else: Enum.join(glosses, " — ")
 
     if is_nil(gloss) do
       nil
@@ -228,6 +216,15 @@ defmodule Db.JSONL.Populate do
         "(" <> Enum.join(labels, ", ") <> ") " <> gloss
       end
     end
+  end
+
+  defp nonempty_glosses(values) do
+    values
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
   end
 
   defp pick_example(sense) do
@@ -331,12 +328,26 @@ defmodule Db.JSONL.Populate do
   defp gf_canonicalize(other), do: other
 
   defp semantic_atoms_from_sense(sense, raw_pos) do
+    # Modern Wiktextract categories are maps, e.g. %{name: "Places in
+    # Arkansas, USA", kind: "place", source: "w"}. The prior string-only
+    # parser discarded all of them. Only use categories sourced from the
+    # lexical page itself; skip w+disamb maintenance/category artifacts.
     cats =
       sense
       |> Map.get("categories")
       |> List.wrap()
-      |> Enum.filter(&is_binary/1)
-      |> Enum.map(&("cat:" <> Util.normalize_atom(&1)))
+      |> Enum.flat_map(fn
+        %{"name" => name, "source" => "w"} when is_binary(name) ->
+          normalized = Util.normalize_atom(name)
+          if normalized == "", do: [], else: ["cat:en:" <> normalized]
+
+        category when is_binary(category) ->
+          normalized = Util.normalize_atom(category)
+          if normalized == "", do: [], else: ["cat:" <> normalized]
+
+        _ ->
+          []
+      end)
 
     tags =
       sense
