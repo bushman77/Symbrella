@@ -167,6 +167,8 @@ defmodule Core do
     |> StateDump.capture(:atl_pairs)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
+    |> Core.Semantic.SentenceMeaning.attach()
+    |> StateDump.capture(:sentence_meaning)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
