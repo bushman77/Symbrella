@@ -76,4 +76,18 @@ defmodule Core.LIFG.ScoreAudit do
   end
 
   def summarize(_, _, _, _, _), do: []
+
+  @doc "Read word-score audit metadata from a mixed pipeline trace."
+  @spec trace_reports(term()) :: [map()]
+  def trace_reports(trace) when is_list(trace) do
+    trace
+    |> Enum.flat_map(fn
+      %{stage: :lifg_word_score_audit, meta: %{} = report} -> [report]
+      _ -> []
+    end)
+    |> Enum.take(1)
+  end
+
+  def trace_reports(_), do: []
+
 end
