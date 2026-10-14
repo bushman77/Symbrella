@@ -284,4 +284,67 @@ defmodule Brain.Neural.StateTransitionPilotTest do
   end
 
 
+  test "fast-path completion snapshot supplies real neuromodulator measurements without self-model", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4, 0.6]}])
+    path = Path.join(dir, "turns.jsonl")
+    [a, b, c] =
+      path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    b =
+      b
+      |> update_in(["cognition"], fn cognition ->
+        cognition |> Map.delete("self_model") |> Map.delete("mood")
+      end)
+      |> Map.put("pipeline_status", %{
+        "route" => "memory_fast_path", "semantic_pipeline" => "bypassed"
+      })
+      |> Map.put("runtime_observation", %{
+        "status" => "captured",
+        "levels" => %{"da" => 0.81, "5ht" => 0.52, "glu" => 0.67, "ne" => 0.73},
+        "mood" => %{
+          "exploration" => 0.83, "inhibition" => 0.55,
+          "vigilance" => 0.75, "plasticity" => 0.64
+        }
+      })
+
+    trace = %{
+      "status" => "complete", "recall_status" => "not_attempted",
+      "recall_attempts" => 0, "recall_misses" => 0
+    }
+
+    b = Map.put(b, "hippocampal_trace", trace)
+    a = Map.put(a, "hippocampal_trace", trace)
+    c = Map.put(c, "hippocampal_trace", trace)
+
+    File.write!(path, Enum.map_join([a, b, c], "", &(Jason.encode!(&1) <> "\n")))
+
+    assert {:ok, data} = StateTransitionBuilder.build(dir, smoke: true)
+    assert data.metadata.input_turns == 3
+    assert data.metadata.complete_modulator_turns == 3
+    assert data.metadata.missing_modulator_turns == 0
+    assert data.metadata.memory_fast_path_turns == 1
+    assert data.metadata.complete_process_traces == 3
+    assert data.metadata.feature_schema_version == 4
+
+    names = StateTransitionBuilder.feature_names()
+    index = fn name -> Enum.find_index(names, &(&1 == name)) end
+    [first_x, second_x] = Nx.to_list(data.train.x)
+    [first_mask, second_mask] = Nx.to_list(data.train.mask)
+
+    assert_in_delta Enum.at(first_x, index.(:mood_da)), 0.2, 0.00001
+    assert_in_delta Enum.at(second_x, index.(:mood_da)), 0.81, 0.00001
+    assert Enum.at(first_mask, index.(:mood_da)) == 1.0
+    assert Enum.at(second_mask, index.(:mood_da)) == 1.0
+
+    assert_in_delta Enum.at(second_x, index.(:mood_exploration)), 0.83, 0.00001
+    assert Enum.at(second_mask, index.(:mood_exploration)) == 1.0
+
+    # A complete trace with no attempted memory operation measures zero count,
+    # but an absent trace remains unknown in legacy archives.
+    assert Enum.at(first_mask, index.(:recall_attempt_count)) == 1.0
+    assert Enum.at(second_mask, index.(:recall_attempt_count)) == 1.0
+    assert Enum.at(second_mask, index.(:recall_hit_fraction)) == 0.0
+  end
+
+
 end
