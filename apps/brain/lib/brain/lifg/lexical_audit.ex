@@ -57,6 +57,7 @@ defmodule Brain.LIFG.LexicalAudit do
         status: Safe.get(candidate, :status),
         context_fit: report.score,
         matches: report.matches,
+        unique_matches: report.unique_matches,
         context_terms: report.context_terms,
         definition: Safe.get(candidate, :definition),
         example: Safe.get(candidate, :example),
