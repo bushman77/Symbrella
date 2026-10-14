@@ -13,8 +13,8 @@ defmodule Brain.ATL.Constituents do
   """
 
   @max_constituents 48
-  @ids [:noun_phrase, :prepositional_phrase, :verb_particle_construction,
-        :wh_aux_topic_question]
+  @ids [:noun_phrase, :possessive_noun_phrase, :prepositional_phrase,
+        :verb_particle_construction, :wh_aux_topic_question]
 
   @spec attach(map(), list()) :: map()
   def attach(%{winners: winners} = slate, signatures)
