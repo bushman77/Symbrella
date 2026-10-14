@@ -37,8 +37,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 3 adds the composed sentence-meaning evidence contract.
-  @contract_v 3
+  # Version 4 adds independently audited post-ATL LIFG feedback.
+  @contract_v 4
 
   @list_fields MapSet.new([
                  :tokens,
@@ -67,6 +67,7 @@ defmodule Core.SemanticInput do
                 :sense_candidates,
                 :sentence_competition,
                 :sentence_meaning,
+                :lifg_feedback,
                 :perception,
                 :atl_slate,
                 :comprehension,
@@ -192,6 +193,7 @@ defmodule Core.SemanticInput do
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
           sentence_meaning: map() | nil,
+          lifg_feedback: map() | nil,
           sense_candidates: %{
             optional(non_neg_integer()) => [sense_candidate()]
           },
@@ -273,6 +275,7 @@ defmodule Core.SemanticInput do
             sentence_signatures: [],
             sentence_competition: nil,
             sentence_meaning: nil,
+            lifg_feedback: nil,
             sense_candidates: %{},
             lifg_opts: nil,
             lifg_choices: nil,
