@@ -55,6 +55,7 @@ defmodule Core.TrainingArchive do
       with :ok <- validate(attrs),
            {:ok, turn, memory_events} <- build_records(attrs),
            :ok <- persist(config, turn, memory_events) do
+        maybe_notify_observers(config, turn, memory_events)
         :ok
       end
     else
@@ -65,6 +66,26 @@ defmodule Core.TrainingArchive do
   end
 
   def record_turn(_, _), do: {:error, :invalid_turn}
+
+  # Observation publication is strictly best-effort, after persistence, and
+  # never changes the archive's return status or the live response pathway.
+  # The subscriber receives the EXACT JSON-safe turn and memory events that
+  # the offline trainer reads; no competing cognitive reconstruction occurs.
+  defp maybe_notify_observers(config, turn, memory_events) do
+    if Keyword.get(config, :enabled?, false) == true do
+      :telemetry.execute(
+        [:core, :training_archive, :completed_turn],
+        %{count: 1},
+        %{turn: json_safe(turn), events: json_safe(memory_events)}
+      )
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
 
   @doc """
   Append an explicitly human-reviewed correction linked to an archived turn.
