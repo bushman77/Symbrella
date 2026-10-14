@@ -11,6 +11,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Telemetry
   alias Core.Response.Topics
   alias Core.Response.GreetingTurn
+  alias Core.Response.AnswerAdequacy
   alias Core.Tools.WebRetrieval.Grounding
 
   @event [:core, :response, :reflection]
@@ -107,6 +108,12 @@ defmodule Core.Response.ReflectionLoop do
       :robotic_self_state
     )
     |> maybe_issue(overclaims_self_awareness?(draft_text), :overclaimed_self_awareness)
+    |> maybe_issue(
+      AnswerAdequacy.failed_answer?(
+        Map.get(context, :answer_target_question, user_text), draft_text
+      ),
+      :answer_not_supplied
+    )
     |> maybe_issue(GreetingTurn.robotic_draft?(user_text, draft_text), :robotic_greeting)
     |> maybe_issue(
       generic_draft?(draft_text) and
@@ -148,7 +155,8 @@ defmodule Core.Response.ReflectionLoop do
       :topic_dead_end in issues ->
         {:repair, issues}
 
-      :robotic_self_state in issues or :robotic_greeting in issues ->
+      :robotic_self_state in issues or :robotic_greeting in issues or
+          :answer_not_supplied in issues ->
         {:repair, issues}
 
       :low_confidence in issues and (:unknown_intent in issues or :too_generic in issues) ->
@@ -222,6 +230,9 @@ defmodule Core.Response.ReflectionLoop do
         :robotic_greeting in issues ->
           GreetingTurn.repair(user_text, final_text)
 
+        :answer_not_supplied in issues ->
+          "I couldn't establish a reliable answer to that question from the available information."
+
         :leaked_hidden_context in issues and (final_text == "" or final_text == draft_text) ->
           hidden_context_fallback(user_text)
 
@@ -237,6 +248,8 @@ defmodule Core.Response.ReflectionLoop do
 
     instruction =
       cond do
+        :answer_not_supplied in issues ->
+          "The draft only echoed the factual question or gave an empty non-answer. Retry from the actual question and its existing evidence; never invent a numeric result."
         :robotic_greeting in issues ->
           "A standalone greeting is not a customer-service request. Remove stock assistance offers and do not address the user as Symbrella."
         :unsupported_device_refusal in issues ->
