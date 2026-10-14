@@ -97,7 +97,7 @@ defmodule Brain.Neural.StateTransitionResidualTest do
 
   test "trains deltas, reports held-out feature metrics, stays isolated from live runtime" do
     assert {:ok, result} = StateTransitionResidual.train(data(), epochs: 1, hidden_units: 4)
-    assert result.model_version == "state-transition-residual-v3"
+    assert result.model_version == "state-transition-residual-v4"
     assert result.task == :state_transition_residual
     assert result.objective == :observed_next_minus_current
     assert result.zero_initialized_residual? == true
@@ -157,12 +157,15 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     File.write!(residual_v1_path, "old-residual-weights")
     residual_v2_path = Path.join(dir, "state_transition_residual_v2_pilot.etf")
     File.write!(residual_v2_path, "old-v2-residual-weights")
-    residual_path = Path.join(dir, "state_transition_residual_v3_pilot.etf")
+    residual_v3_path = Path.join(dir, "state_transition_residual_v3_pilot.etf")
+    File.write!(residual_v3_path, "old-v3-residual-weights")
+    residual_path = Path.join(dir, "state_transition_residual_v4_pilot.etf")
 
     assert :ok == StateTransitionResidual.save(result, residual_path)
     assert File.read!(direct_path) == "old-baseline-weights"
     assert File.read!(residual_v1_path) == "old-residual-weights"
     assert File.read!(residual_v2_path) == "old-v2-residual-weights"
+    assert File.read!(residual_v3_path) == "old-v3-residual-weights"
     assert Bitwise.band(File.stat!(residual_path).mode, 0o777) == 0o600
 
     loaded = residual_path |> File.read!() |> :erlang.binary_to_term([:safe])
