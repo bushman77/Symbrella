@@ -25,6 +25,11 @@ defmodule Brain.LIFG.SemanticControl do
     max_delta = bounded(opts, :max_delta, @default_max_delta)
     min_fit = bounded(opts, :min_fit, @default_min_fit)
     min_gap = bounded(opts, :min_gap, @default_min_gap)
+    focus_pos =
+      case Keyword.get(opts, :focus_pos) do
+        value when is_binary(value) -> value
+        _ -> nil
+      end
 
     if not enabled? or max_delta == 0.0 do
       {scores, %{applied?: false, reason: :disabled, adjustments: []}}
@@ -34,7 +39,8 @@ defmodule Brain.LIFG.SemanticControl do
           %{id: id, context_evidence: fit}
           when is_binary(id) and is_number(fit) ->
             Map.has_key?(scores, id) and fit >= 0.0 and fit <= 1.0 and
-              not String.ends_with?(id, "|fallback") and valid_sense_id?(id)
+              not String.ends_with?(id, "|fallback") and valid_sense_id?(id) and
+              (is_nil(focus_pos) or sense_pos(id) == focus_pos)
           _ -> false
         end)
 
@@ -101,6 +107,13 @@ defmodule Brain.LIFG.SemanticControl do
   end
 
   defp discriminating_adjustment(_, _, _, _), do: []
+
+  defp sense_pos(id) do
+    case String.split(id, "|", parts: 3) do
+      [_word, pos, _sense] -> pos
+      _ -> nil
+    end
+  end
 
   defp valid_sense_id?(id) do
     case String.split(id, "|", parts: 3) do
