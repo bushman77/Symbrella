@@ -69,6 +69,23 @@ defmodule Brain.LIFG.ContextFitWindowTest do
              ).matches.definition
   end
 
+  test "possessives retain their base noun in contextual evidence" do
+    # The previous plural-s rule turned Japan's into the invalid "japan'".
+    for possessive <- ["Japan's", "Japan’s"] do
+      sentence = "What do you know about #{possessive} railgun development?"
+
+      report =
+        ContextFit.explain(sentence, "what do you know", %{
+          definition: "A question concerning Japan."
+        })
+
+      assert "japan" in report.context_terms
+      refute "japan'" in report.context_terms
+      assert "japan" in report.matches.definition
+      assert report.score > 0.0
+    end
+  end
+
   test "nearby semantic evidence is preserved" do
     sentence = "I sat on the bank beside the river."
 
