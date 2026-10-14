@@ -149,6 +149,18 @@ defmodule Core.Syntax.SignaturesTest do
     assert si.active_cells == cells
   end
 
+  test "an unrelated lexical particle POS does not invent a phrasal verb" do
+    cells = [
+      %{norm: "you", pos: "verb"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "know", pos: "particle"},
+      %{norm: "know", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("you know", cells)
+    refute :verb_particle_construction in ids("do you know", cells)
+  end
+
   test "a general manner adverb never becomes a verb particle" do
     cells = [
       %{norm: "walk", pos: "verb"},
