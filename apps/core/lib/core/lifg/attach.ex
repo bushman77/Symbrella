@@ -138,6 +138,7 @@ defmodule Core.LIFG.Attach do
                 candidate_field(chosen_candidate, [:definition, :def, :gloss, :meaning]),
               example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
+              semantic_control: Map.get(ch, :semantic_control),
               score: score2
             }
           end)
