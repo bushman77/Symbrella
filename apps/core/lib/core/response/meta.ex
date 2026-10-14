@@ -77,6 +77,8 @@ defmodule Core.Response.Meta do
     |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
   end
 
+  defp reflection_summary(_), do: nil
+
   # Keep bounded retry outcomes inspectable without exposing prompts or drafts.
   defp maybe_put_answer_revision(summary, revision) when is_map(revision) do
     Map.put(summary, :answer_revision,
@@ -84,8 +86,6 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_answer_revision(summary, _), do: summary
-
-  defp reflection_summary(_), do: nil
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do
