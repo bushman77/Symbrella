@@ -34,7 +34,7 @@ defmodule Brain.LIFG.LexicalBridges do
       |> Enum.filter(&valid_sense?/1)
       |> Enum.take(@max_target_senses)
 
-    {edges, inventories} =
+    {inventory_entries, bridge_edges} =
       Enum.map_reduce(context_terms, [], fn context_word, all_edges ->
         source =
           source_rows
@@ -73,7 +73,7 @@ defmodule Brain.LIFG.LexicalBridges do
       end)
 
     sorted =
-      inventories
+      bridge_edges
       |> Enum.uniq_by(&{&1.context_word, &1.context_sense_id, &1.synonym, &1.target_sense_id})
       |> Enum.sort_by(&{&1.target_sense_id, &1.context_word, &1.synonym, &1.context_sense_id})
       |> Enum.take(@max_edges)
@@ -82,7 +82,7 @@ defmodule Brain.LIFG.LexicalBridges do
       target: target,
       context_terms: context_terms,
       target_sense_count: length(senses),
-      context_inventory: Enum.sort_by(edges, & &1.word),
+      context_inventory: Enum.sort_by(inventory_entries, & &1.word),
       bridge_count: length(sorted),
       bridges: sorted,
       verified?: false
