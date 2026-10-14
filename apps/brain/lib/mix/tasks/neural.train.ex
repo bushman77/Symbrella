@@ -105,7 +105,7 @@ defmodule Mix.Tasks.Neural.Train do
     with {:ok, data} <- StateTransitionBuilder.build(dir, smoke: smoke?),
          {:ok, result} <- StateTransitionPilot.train(data, settings) do
       print_modulator_coverage(data)
-      Mix.shell().info("Experimental self-supervised cognitive-state Axon pilot (schema v3; observed-only targets)")
+      Mix.shell().info("Experimental self-supervised cognitive-state Axon pilot (schema v4; complete runtime snapshots and observed-only targets)")
       Mix.shell().info("Training transitions: #{result.train_examples}")
       Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
       Mix.shell().info("Valid observed feature pairs: #{result.valid_train_cells} training / #{result.valid_eval_cells} holdout")
@@ -125,7 +125,7 @@ defmodule Mix.Tasks.Neural.Train do
         Mix.shell().info("WARNING: tiny transition sample, not evidence of useful learned cognition.")
       end
 
-      filename = if smoke?, do: "state_transition_v3_smoke.etf", else: "state_transition_v3_pilot.etf"
+      filename = if smoke?, do: "state_transition_v4_smoke.etf", else: "state_transition_v4_pilot.etf"
       path = Path.join(dir, filename)
 
       case StateTransitionPilot.save(result, path) do
@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Neural.Train do
     with {:ok, data} <- StateTransitionBuilder.build(dir, smoke: smoke?),
          {:ok, result} <- StateTransitionResidual.train(data, settings) do
       print_modulator_coverage(data)
-      Mix.shell().info("Experimental residual cognitive-state Axon pilot (schema v3; observed-only targets)")
+      Mix.shell().info("Experimental residual cognitive-state Axon pilot (schema v4; complete runtime snapshots and observed-only targets)")
       Mix.shell().info("Train transitions: #{result.train_examples}")
       Mix.shell().info("Training sessions: #{length(result.train_sessions)}")
       Mix.shell().info("Valid observed feature pairs: #{result.valid_train_cells} training / #{result.valid_eval_cells} holdout")
@@ -184,8 +184,8 @@ defmodule Mix.Tasks.Neural.Train do
 
       filename =
         if smoke?,
-          do: "state_transition_residual_v3_smoke.etf",
-          else: "state_transition_residual_v3_pilot.etf"
+          do: "state_transition_residual_v4_smoke.etf",
+          else: "state_transition_residual_v4_pilot.etf"
 
       path = Path.join(dir, filename)
 
@@ -207,6 +207,8 @@ defmodule Mix.Tasks.Neural.Train do
       "Raw neuromodulator coverage: #{complete}/#{total} archived turns complete; " <>
         "#{missing} incomplete/missing (per-level presence flags retained)."
     )
+    Mix.shell().info("Complete process traces: #{metadata.complete_process_traces}/#{total}")
+    Mix.shell().info("Memory fast-path turns: #{metadata.memory_fast_path_turns}/#{total}")
   end
 
   defp format_metric(:not_observed), do: "n/a"
