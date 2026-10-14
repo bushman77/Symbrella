@@ -105,6 +105,45 @@ defmodule Core.Response.OverrideSkillsTest do
     refute text =~ "Can you please clarify"
   end
 
+  test "enabled news retrieval bypasses the historical US-Iran inline reply" do
+    features = %{
+      intent: :ask,
+      text: "What are your thoughts on the US Iran war currently happening?",
+      web_retrieval_enabled?: true
+    }
+
+    assert {@decision, nil} =
+             OverrideSkills.apply(features, @decision, %{guardrail?: false})
+  end
+
+  test "enabled news retrieval bypasses the generic no-live-news inline reply" do
+    features = %{
+      intent: :ask,
+      text: "what current events are happening today?",
+      web_retrieval_enabled?: true
+    }
+
+    assert {@decision, nil} =
+             OverrideSkills.apply(features, @decision, %{guardrail?: false})
+  end
+
+  test "disabling retrieval preserves the original offline capability response" do
+    {decision, skill} =
+      OverrideSkills.apply(
+        %{
+          intent: :ask,
+          text: "What are your thoughts on the US Iran war currently happening?",
+          web_retrieval_enabled?: false
+        },
+        @decision,
+        %{guardrail?: false}
+      )
+
+    assert decision.action == :offer_likely_interpretation
+    assert skill.id == :recognizable_topic_fallback
+    assert OverrideSkills.deterministic_inline_text(skill) =~ "don't have live news access"
+  end
+
   test "alarm capability remains a deterministic inline skill" do
     {decision, skill} =
       OverrideSkills.apply(

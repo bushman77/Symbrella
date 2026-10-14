@@ -76,6 +76,12 @@ defmodule Core.Response.OverrideSkills.Utility do
     text = Map.get(features, :text, "")
 
     cond do
+      news_retrieval_routable?(text, features) ->
+        # EvidenceResolver is invoked by LlmSynthesis, not here. An inline
+        # capability override bypasses it entirely, so let the response
+        # planner continue when the news pipeline is configured.
+        :pass
+
       current_events_query?(text) ->
         decision =
           decision
@@ -109,6 +115,20 @@ defmodule Core.Response.OverrideSkills.Utility do
       true ->
         :pass
     end
+  end
+
+  defp news_retrieval_routable?(text, features) do
+    cfg = Application.get_env(:core, :web_retrieval, [])
+    enabled? =
+      Map.get(
+        features,
+        :web_retrieval_enabled?,
+        Keyword.get(cfg, :enabled?, false)
+      )
+
+    enabled? == true and
+      is_binary(text) and
+      not is_nil(Core.Tools.WebRetrieval.current_events_query(text))
   end
 
   defp time_query?(text) when is_binary(text) do
