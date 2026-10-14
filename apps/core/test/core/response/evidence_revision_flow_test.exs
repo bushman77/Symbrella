@@ -166,7 +166,7 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
     assert_receive {:evidence_complete, [:core, :response, :complete], metadata}
     assert metadata.reflection.evidence_revision.outcome == :accepted
     assert metadata.reflection.evidence_revision.selected_source == :model_revision
-    assert metadata.reflection.evidence_revision.initial_draft =~ "no live news access"
+    assert metadata.reflection.evidence_revision.initial_draft =~ "don't have live news access"
     assert metadata.reflection.evidence_revision.candidate =~ "Example Wire"
     assert is_binary(metadata.reflection.evidence_revision.revision_prompt_sha256)
 
