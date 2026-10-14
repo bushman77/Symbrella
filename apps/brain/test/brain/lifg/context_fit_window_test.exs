@@ -130,7 +130,7 @@ defmodule Brain.LIFG.ContextFitWindowTest do
 
   test "custom evidence weights preserve the strongest source of a repeated cue" do
     candidate = %{
-      definition: "One newly invented item.",
+      definition: "One new invention.",
       example: "A new piece of equipment."
     }
 
