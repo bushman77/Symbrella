@@ -34,6 +34,8 @@ defmodule Core.Response.Personality do
           reasons: [atom()]
         }
 
+  alias Core.Response.GreetingTurn
+
   @helpful_intents ~w(
     instruction help command refactor review plan diagram bug optimize benchmark
   )a
@@ -109,6 +111,11 @@ defmodule Core.Response.Personality do
     cond do
       guardrail? or risk_bucket == :high or intent == :illicit_request or action == :safe_redirect ->
         :safety_redirect
+
+      # An ordinary greeting does not require successful word-sense grounding.
+      # Keep a benign social opening out of the uncertainty-repair profile.
+      GreetingTurn.standalone?(map_get(features, :text)) ->
+        :social_chat
 
       tone_hint == :deescalate or tone == :deescalate or high_vigilance?(runtime_state) ->
         :self_check
