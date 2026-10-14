@@ -77,6 +77,32 @@ defmodule Core.Response.SelfStateFeaturesTest do
            }
   end
 
+  test "answered factual requests do not get unrelated curiosity prompts regardless of planner action" do
+    for question <- [
+          "how far is the moon",
+          "how far is it from maple ridge bc",
+          "what is the capital of China?",
+          "how many planets orbit the Sun?"
+        ],
+        action <- [:offer_options, :ask_first, :answer_user] do
+      features = %{
+        text: question,
+        selected_action: action,
+        self_state: %{
+          uncertainty: 0.94,
+          focus: :clarify,
+          effects: [:ask_clarifying_question]
+        }
+      }
+
+      answer = "The requested factual information is approximately known."
+      assert {^answer, nil} =
+               SelfStateFeatures.append_curiosity_probe(
+                 answer, features, %{action: action}, %{guardrail?: false}, nil
+               )
+    end
+  end
+
   test "append_curiosity_probe/5 does not append for guardrails, skills, or existing questions" do
     features = %{
       self_state: %{uncertainty: 0.9, focus: :clarify, effects: [:ask_clarifying_question]}
