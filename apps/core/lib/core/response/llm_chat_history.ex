@@ -9,7 +9,7 @@ defmodule Core.Response.LlmChatHistory do
   alias Core.Response.LlmChatHistoryOwner
 
   @table :core_llm_chat_history
-  @default_turn_pairs 3
+  @default_turn_pairs 6
   @default_max_item_chars 900
 
   @compile {:no_warn_undefined, Llm}

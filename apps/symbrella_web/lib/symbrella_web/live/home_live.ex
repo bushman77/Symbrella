@@ -55,7 +55,7 @@ defmodule SymbrellaWeb.HomeLive do
        pending_task: nil,
        pending_user_turn: nil,
        cancelled_ref: nil,
-       session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
+       session_id: ChatHistory.session_id(),
        explain_open?: false,
        explain_payload: %{},
        curiosity_idle_ref: nil,

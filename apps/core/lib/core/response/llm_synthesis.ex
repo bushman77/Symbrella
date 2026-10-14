@@ -257,7 +257,7 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp history_turn_pairs do
-    llm_config(:history_turn_pairs, 3)
+    llm_config(:history_turn_pairs, 6)
   end
 
   defp llm_config(key, default) do
