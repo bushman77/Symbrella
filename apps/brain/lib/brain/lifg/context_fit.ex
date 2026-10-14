@@ -401,6 +401,12 @@ defmodule Brain.LIFG.ContextFit do
     # lexical *comparison* only: dictionary IDs and original token surfaces
     # are never rewritten. "lights" must match "light" in a sense gloss.
     cond do
+      # Genitives such as Japan's are not plurals. For contextual lexical
+      # comparison only, recover the base word; leave token surfaces,
+      # sentence possession roles, and dictionary sense IDs unchanged.
+      String.length(normalized) > 2 and String.ends_with?(normalized, "'s") ->
+        String.replace_suffix(normalized, "'s", "")
+
       String.length(normalized) > 5 and String.ends_with?(normalized, "ies") ->
         String.replace_suffix(normalized, "ies", "y")
 
