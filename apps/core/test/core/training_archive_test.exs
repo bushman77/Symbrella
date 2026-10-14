@@ -290,4 +290,57 @@ defmodule Core.TrainingArchiveTest do
   end
 
 
+  test "archives a memory fast-path with independent runtime snapshot and no recall attempted", %{dir: dir} do
+    attrs =
+      turn(%{
+        si: %{intent: :unknown, confidence: 1.0},
+        pipeline_status: %{route: "memory_fast_path", semantic_pipeline: "bypassed"},
+        runtime_observation: %{
+          source: "Brain.MoodCore.snapshot",
+          captured_at: "2026-10-13T12:00:00Z",
+          status: "captured",
+          levels: %{da: 0.66, "5ht": 0.52, glu: 0.7, ne: 0.6},
+          mood: %{exploration: 0.7, inhibition: 0.55, vigilance: 0.6, plasticity: 0.45}
+        },
+        hippocampal_events: [],
+        hippocampal_trace: %{
+          worker: %{status: "complete", recall_attempts: 0, recall_misses: 0},
+          final: %{status: "complete", recall_attempts: 0, recall_misses: 0}
+        }
+      })
+
+    assert :ok == TrainingArchive.record_turn(attrs, config: [enabled?: true, dir: dir])
+    [saved] = records(Path.join(dir, "turns.jsonl"))
+    assert saved["pipeline_status"] == %{
+             "route" => "memory_fast_path", "semantic_pipeline" => "bypassed"
+           }
+
+    assert saved["runtime_observation"]["levels"]["da"] == 0.66
+    assert saved["runtime_observation"]["levels"]["glu"] == 0.7
+    assert saved["hippocampal_trace"]["status"] == "complete"
+    assert saved["hippocampal_trace"]["recall_status"] == "not_attempted"
+    assert saved["hippocampal_trace"]["recall_attempts"] == 0
+    assert saved["hippocampal_trace"]["scope"] == "worker_and_final_liveview_process"
+
+    # Recording the measurement does not pretend the semantic pipeline ran.
+    refute Map.has_key?(saved["cognition"], "self_model")
+    refute File.exists?(Path.join(dir, "memory_events.jsonl"))
+  end
+
+  test "unavailable worker trace never becomes a negative retrieval label", %{dir: dir} do
+    attrs = turn(%{
+      hippocampal_trace: %{
+        worker: %{status: "not_started"},
+        final: %{status: "complete", recall_attempts: 0}
+      }
+    })
+
+    assert :ok == TrainingArchive.record_turn(attrs, config: [enabled?: true, dir: dir])
+    [saved] = records(Path.join(dir, "turns.jsonl"))
+    assert saved["hippocampal_trace"]["status"] == "incomplete"
+    assert saved["hippocampal_trace"]["recall_status"] == "unknown"
+    assert saved["hippocampal_trace"]["recall_attempts"] == nil
+  end
+
+
 end
