@@ -166,11 +166,9 @@ defmodule Brain.LIFG.RelationalFeedback do
             _ -> []
           end)
 
-        {logit_adjustments, report} =
+        {_ignored_scored_map, report} =
           SemanticControl.apply(
-            Map.new(probs, fn {id, p} ->
-              {id, :math.log(max(p, 1.0e-12))}
-            end),
+            probs,
             rows,
             max_delta: Keyword.get(opts, :max_delta, 0.10),
             min_fit: Keyword.get(opts, :min_fit, 0.18),
@@ -179,7 +177,14 @@ defmodule Brain.LIFG.RelationalFeedback do
           )
 
         if report.applied? do
-          posterior = normalize_logits(logit_adjustments)
+          # SemanticControl supplies bounded logit deltas; do not treat the
+          # resulting probability-domain score map as a posterior distribution.
+          # Instead add deltas to log(prior) and renormalize exactly once.
+          adjustments_by_id = Map.new(report.adjustments, &{&1.id, &1.delta})
+          logits = Map.new(probs, fn {id, probability} ->
+            {id, :math.log(probability) + Map.get(adjustments_by_id, id, 0.0)}
+          end)
+          posterior = normalize_logits(logits)
           {proposed, _} =
             Enum.max_by(posterior, fn {id, value} -> {value, id} end)
 
@@ -204,8 +209,8 @@ defmodule Brain.LIFG.RelationalFeedback do
       %{id: ^id, span: ^span, roles: expected} ->
         Enum.all?(names, fn role ->
           case {Map.get(expected, role), Map.get(actual, role)} do
-            {idx, %{token_index: ^idx, sense_id: sense}}
-            when is_integer(idx) and is_binary(sense) -> true
+            {idx, %{token_index: role_index, sense_id: sense}}
+            when is_integer(idx) and role_index == idx and is_binary(sense) -> true
             _ -> false
           end
         end)
