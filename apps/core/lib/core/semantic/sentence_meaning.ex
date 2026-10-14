@@ -143,6 +143,20 @@ defmodule Core.Semantic.SentenceMeaning do
           wh_modifier: wh_modifier
         })
 
+      negative_auxiliary? = negative_auxiliary?(aux_text)
+      polarity = if(is_binary(negation) or negative_auxiliary?,
+        do: :negative, else: :positive)
+
+      operators = %{
+        polarity: %{value: polarity, scope: :predicate,
+          source: :sentence_signature_and_atl},
+        auxiliary_negation?: negative_auxiliary?,
+        negation: optional_role(roles, atl.roles, indexed, :negation),
+        question_modifier: optional_role(roles, atl.roles, indexed, :wh_modifier),
+        predicate_modifier:
+          optional_role(roles, atl.roles, indexed, :predicate_modifier)
+      }
+
       %{
         version: 1,
         sentence: original_sentence(indexed, start, last),
@@ -150,6 +164,8 @@ defmodule Core.Semantic.SentenceMeaning do
         kind: :wh_topic_question,
         status: :structurally_interpreted,
         speech_act: :request_information,
+        polarity: polarity,
+        operators: operators,
         roles: %{
           question_word: %{surface: wh_text, token_index: wh,
             sense_id: wh_id},
@@ -180,6 +196,34 @@ defmodule Core.Semantic.SentenceMeaning do
   end
 
   defp compose_question(_, _, _, _), do: nil
+
+  # Only expose optional modifiers when ATL resolved the same token index
+  # and provided an actual sense ID. The surface is not a verified sense gloss.
+  defp optional_role(roles, resolved, tokens, kind) do
+    case {Map.get(roles, kind), Map.get(resolved, kind)} do
+      {index, %{token_index: index, sense_id: id}}
+      when is_integer(index) and is_binary(id) ->
+        case surface_at(tokens, index) do
+          {:ok, surface} -> %{
+            surface: surface, token_index: index, sense_id: id,
+            grounding_status: :selected_not_contextually_verified
+          }
+          _ -> nil
+        end
+
+      _ -> nil
+    end
+  end
+
+  defp negative_auxiliary?(surface) when is_binary(surface) do
+    word = String.downcase(surface)
+    String.contains?(word, "n't") or String.contains?(word, "n’t") or
+      word == "cannot"
+  end
+
+  defp negative_auxiliary?(_), do: false
+
+
 
   defp definition(%{question: question, auxiliary: aux, subject: subject,
                      predicate: predicate, preposition: prep, topic: topic} = parts) do
