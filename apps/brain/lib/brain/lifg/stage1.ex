@@ -43,6 +43,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Stage1.PosBias
   alias Brain.LIFG.Stage1.Boundary
   alias Brain.LIFG.GrammarEvidence
+  alias Brain.LIFG.SemanticControl
 
   @default_weights %{
     lex_fit: 0.40,
@@ -233,6 +234,13 @@ defmodule Brain.LIFG.Stage1 do
           sent: sent,
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          semantic_control_opts: [
+            enabled?: Keyword.get(opts, :semantic_control?,
+              Application.get_env(:brain, :lifg_semantic_control?, true)),
+            max_delta: Keyword.get(opts, :semantic_control_max_delta, 0.10),
+            min_fit: Keyword.get(opts, :semantic_control_min_fit, 0.18),
+            min_gap: Keyword.get(opts, :semantic_control_min_gap, 0.15)
+          ],
           weights: weights,
           scores_mode: scores_mode,
           margin_thr: margin_thr,
@@ -763,6 +771,9 @@ defmodule Brain.LIFG.Stage1 do
               id: id,
               token: tok,
               features: feat,
+              # Raw ContextFit is computed from sentence plus dictionary
+              # metadata, not a candidate-supplied feature override.
+              context_evidence: context0,
               perception_delta: perception_delta,
               hom_bump: hom_bump,
               pos_bias: pos_bias
@@ -821,6 +832,15 @@ defmodule Brain.LIFG.Stage1 do
             tok_index,
             Map.get(ctx, :grammar_weight, 0.0)
           )
+
+        {cal_scores, semantic_control} =
+          if closed_class_slate? do
+            {cal_scores, %{
+              applied?: false, reason: :closed_class_slate, adjustments: []
+            }}
+          else
+            SemanticControl.apply(cal_scores, scored_rows, ctx.semantic_control_opts)
+          end
 
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
@@ -928,6 +948,7 @@ defmodule Brain.LIFG.Stage1 do
           margin: margin,
           prob_margin: margin,
           weak?: margin_weak? or low_confidence?,
+          semantic_control: semantic_control,
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
           reliability:
