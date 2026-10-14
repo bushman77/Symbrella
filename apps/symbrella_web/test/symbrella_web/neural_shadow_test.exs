@@ -13,7 +13,7 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     %{dir: dir}
   end
 
-  defp turn(session, n, confidence \\ 0.5) do
+  defp turn(session, n, confidence) do
     %{
       "record_type" => "completed_turn",
       "schema_version" => 1,
@@ -153,6 +153,7 @@ defmodule SymbrellaWeb.NeuralShadowTest do
   test "archive integration publishes persisted turns to shadow, not raw text to its audit", %{dir: dir} do
     checkpoint = valid_checkpoint(dir)
     pid = start_supervised!({NeuralShadow, checkpoint: checkpoint, dir: dir})
+    assert %{status: :shadow_only, reason: nil} = GenServer.call(pid, :status)
 
     attrs = fn n, conf ->
       %{
