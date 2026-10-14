@@ -70,6 +70,65 @@ defmodule Brain.LIFG.SemanticControlTest do
              SemanticControl.apply(scores, rows, enabled?: false)
   end
 
+  test "Stage1 does not mistake a mixed particle/verb slate for a closed-class winner" do
+    si = %{
+      sentence: "What do you know about the river?",
+      tokens: [
+        %{index: 0, phrase: "know", n: 1, mw: false, span: {12, 16}}
+      ],
+      sense_candidates: %{
+        0 => [
+          %{id: "know|verb|11", lemma: "know", pos: "verb",
+            definition: "To have information about a river.",
+            activation: 0.5,
+            features: %{lex_fit: 0.8, rel_prior: 0.5, activation: 0.5}},
+          %{id: "know|verb|22", lemma: "know", pos: "verb",
+            definition: "To recognize someone by sight.",
+            activation: 0.5,
+            features: %{lex_fit: 0.8, rel_prior: 0.5, activation: 0.5}},
+          %{id: "know|particle|1", lemma: "know", pos: "particle",
+            definition: "A discourse particle.",
+            activation: 0.0,
+            features: %{lex_fit: 0.0, rel_prior: 0.0, activation: 0.0}}
+        ]
+      }
+    }
+
+    assert {:ok, %{choices: [choice]}} =
+             Stage1.run(si, scores: :all, preserve_sense_candidates: true,
+               semantic_control?: true)
+
+    assert choice.chosen_id == "know|verb|11"
+    assert choice.semantic_control.applied?
+    assert choice.semantic_control.reason == :contextual_sense_discrimination
+    assert [%{id: "know|verb|11"}] = choice.semantic_control.adjustments
+    assert choice.scores["know|verb|11"] > choice.scores["know|verb|22"]
+    assert choice.low_confidence?
+
+    assert {:ok, %{choices: [baseline]}} =
+             Stage1.run(si, scores: :all, preserve_sense_candidates: true,
+               semantic_control?: false)
+
+    assert baseline.semantic_control.reason == :disabled
+    assert baseline.semantic_control.adjustments == []
+  end
+
+  test "focus POS never boosts a competing grammatical class" do
+    scores = %{
+      "do|verb|1" => 0.4, "do|verb|2" => 0.4,
+      "do|auxiliary|1" => 0.6
+    }
+
+    rows = [
+      %{id: "do|verb|1", context_evidence: 0.8},
+      %{id: "do|verb|2", context_evidence: 0.0},
+      %{id: "do|auxiliary|1", context_evidence: 0.0}
+    ]
+
+    assert {^scores, %{applied?: false}} =
+             SemanticControl.apply(scores, rows, focus_pos: "auxiliary")
+  end
+
   test "Stage1 uses actual sentence dictionary evidence while retaining weak confidence" do
     si = %{
       sentence: "I stood on the bank beside the river.",
