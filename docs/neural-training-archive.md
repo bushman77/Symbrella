@@ -799,3 +799,101 @@ missing old snapshot remains unknown. Future conversation turns will use
 the new instrumentation. More independent sessions and a substantially
 larger archive are still needed before Axon model performance can be
 judged reliably.
+
+
+## Opt-in neural shadow inference: actual trained v4 Axon weights in runtime
+
+The residual Axon checkpoint is now loadable in a **supervised, read-only**
+`SymbrellaWeb.NeuralShadow` GenServer. This is the first step beyond
+offline training: *the existing trained weights can perform real predictions
+while Symbrella is chatting.* It is NOT active cognition or online training.
+
+**Both** flags must be on:
+
+```sh
+cd ~/Symbrella
+# First train the v4 residual model (checkpoint must be independent-session evaluated).
+mix neural.train --task state_transition_residual
+
+SYMBRELLA_TRAINING_ARCHIVE=on SYMBRELLA_NEURAL_SHADOW=on \
+  iex -S mix phx.server
+```
+
+In the running IEx session (not in an unrelated `mix` process):
+
+```elixir
+SymbrellaWeb.NeuralShadow.status()
+```
+
+The status map includes checkpoint, loading status, model version,
+prediction count, evaluated-transition count, and last masked MSE.
+If the file is missing/incompatible/smoke-only, status is
+`:unavailable`, and predictions are disabled. The chat keeps working.
+
+The checkpoint defaults to
+`tmp/training/state_transition_residual_v4_pilot.etf`. Advanced local
+override: `SYMBRELLA_NEURAL_SHADOW_CHECKPOINT=/trusted/local/model.etf`.
+Only load model files you created or otherwise trust: Erlang term
+deserialization is not a safe format for arbitrary external files.
+
+### Architecture
+
+1. `Core.TrainingArchive.record_turn/2` persists the original completed
+   turn and its hippocampal events. On **successful persistence only**, it
+   dispatches a best-effort read-only telemetry event. Archive failures
+   never trigger neural inference.
+2. The supervised shadow GenServer subscribes, asynchronously receives the
+   **same JSON-safe archive records**, and calls
+   `Brain.Neural.StateTransitionBuilder.project_observation/2` for the
+   exact **schema v4 input and observed-feature mask** already used in training.
+3. Loaded v4 residual network predicts next state
+   `clip(x + Axon_delta(x), 0, 1)` without writing to MoodCore,
+   SemanticInput, hippocampal ranking, or the response planner.
+4. When the **next completed turn of the same session** arrives, score
+   the previous prediction against observed data with the v3/v4
+   **both-endpoints-observed** mask, using the same valid feature cells
+   for Axon and persistence. Do not cross sessions or fabricate labels.
+   The first turn of a session only establishes a prediction.
+5. Append predictions and evaluations to a private (mode `0600`) JSONL log:
+   `tmp/training/shadow_predictions.jsonl`. Contains only schema/model
+   identifiers, opaque session/turn IDs, numerical feature predictions,
+   observed availability and masked error diagnostics. **No user text,
+   assistant text, or recalled episode content** is written there.
+   The original opted-in `turns.jsonl` archive remains the primary
+   private raw data store.
+
+Check its output without reading private conversation text:
+
+```sh
+tail -n 8 tmp/training/shadow_predictions.jsonl | jq '{
+  type: .record_type,
+  model: .model_version,
+  session: .session_id,
+  valid_pairs: .valid_feature_pairs,
+  model_mse: .residual_mse,
+  baseline_mse: .persistence_mse,
+  verdict: .verdict
+}'
+```
+
+For true evaluation, send at least **two completed chat messages in the
+same session**. A new browser session does not score an older session's
+pending prediction. Stopping the server discards pending in-memory
+predictions; no attempt is made to backfill or score trained historical
+examples. New observations are scored online but **never used to update
+weights**.
+
+### Tests
+
+```sh
+mix test \
+  apps/symbrella_web/test/symbrella_web/neural_shadow_test.exs \
+  apps/brain/test/brain/neural/state_transition_pilot_test.exs \
+  apps/brain/test/brain/neural/state_transition_residual_test.exs \
+  apps/core/test/core/training_archive_test.exs
+```
+
+Shadow mode is strictly observational. Its predictions must outperform
+persistence on a much larger set of previously unseen sessions and show
+stable behavior before any **separate, reviewed** proposal to use them
+for self-monitoring or cognitive control.
