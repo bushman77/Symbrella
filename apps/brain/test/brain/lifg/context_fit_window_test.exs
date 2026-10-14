@@ -86,6 +86,66 @@ defmodule Brain.LIFG.ContextFitWindowTest do
     end
   end
 
+  test "one generic cue repeated in a definition and example counts only once" do
+    sentence = "The city approved a new housing development."
+
+    applied_ideas = %{
+      definition: "The application of new ideas to practical problems.",
+      example: "Our department has produced three new adhesives."
+    }
+
+    biological = %{
+      definition: "The production of an organism by adding new cells.",
+      example: "The organism reached a crucial stage."
+    }
+
+    ideas = ContextFit.explain(sentence, "development", applied_ideas)
+    biology = ContextFit.explain(sentence, "development", biological)
+
+    # Keep source provenance visible, but don't turn repetition of "new"
+    # into twice the contextual evidence for an unrelated technical sense.
+    assert ideas.matches.definition == ["new"]
+    assert ideas.matches.example == ["new"]
+    assert ideas.unique_matches.definition == ["new"]
+    assert ideas.unique_matches.example == []
+    assert_in_delta ideas.score, 0.29, 1.0e-6
+    assert_in_delta biology.score, 0.29, 1.0e-6
+    assert ideas.score == biology.score
+  end
+
+  test "independent cues in different dictionary fields still add evidence" do
+    candidate = %{
+      definition: "A financial institution dealing in money.",
+      example: "A place to keep money and cash."
+    }
+
+    result = ContextFit.explain("The money bank accepted cash.", "bank", candidate)
+
+    assert result.matches.definition == ["money"]
+    assert result.matches.example == ["cash", "money"]
+    assert result.unique_matches.definition == ["money"]
+    assert result.unique_matches.example == ["cash"]
+    assert_in_delta result.score, 0.38, 1.0e-6
+  end
+
+  test "two independent technical clues retain railgun lexical evidence" do
+    electromagnetic = %{
+      definition: "An electromagnetic gun that uses current to propel a projectile.",
+      example: nil
+    }
+
+    railway = %{definition: "A railway gun."}
+    sentence = "Japan is developing an electromagnetic railgun to launch projectiles."
+
+    strong = ContextFit.explain(sentence, "railgun", electromagnetic)
+    weak = ContextFit.explain(sentence, "railgun", railway)
+
+    assert strong.matches.definition == ["electromagnetic", "projectile"]
+    assert strong.unique_matches.definition == strong.matches.definition
+    assert_in_delta strong.score, 0.435, 1.0e-6
+    assert weak.score == 0.0
+  end
+
   test "nearby semantic evidence is preserved" do
     sentence = "I sat on the bank beside the river."
 
