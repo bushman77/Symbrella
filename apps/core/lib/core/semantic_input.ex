@@ -37,8 +37,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 2 adds the sentence-signature evidence contract.
-  @contract_v 2
+  # Version 3 adds the composed sentence-meaning evidence contract.
+  @contract_v 3
 
   @list_fields MapSet.new([
                  :tokens,
