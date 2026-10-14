@@ -8,11 +8,11 @@ defmodule Core.Response.GreetingTurn do
   This is response-style evidence, never a substitute for LIFG/ATL parsing.
   """
 
-  @standalone ~r/\A\s*(?:hi+|he+y+|hiya|hello|yo|good\s+(?:morning|afternoon|evening))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
+  @standalone ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|evening))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
 
   @service_desk ~r/\b(?:how\s+(?:may|can)\s+i\s+(?:assist|help)\s+you(?:\s+(?:today|with\b[^.!?]*))?|what\s+can\s+i\s+(?:do|help\s+you\s+with)\s+for\s+you|is\s+there\s+anything\s+(?:else\s+)?i\s+can\s+(?:help|assist)\s+(?:you\s+)?with|let\s+me\s+know\s+(?:how|if)\s+i\s+can\s+help)\b[^.!?]*[.!?]*/iu
 
-  @echoed_name ~r/\A\s*(?:hi+|he+y+|hiya|hello|yo|good\s+(?:morning|afternoon|evening))\s*,?\s*symbrella\b/iu
+  @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|evening))\s*,?\s*symbrella\b/iu
 
   @doc "True only for an isolated social greeting, optionally addressing Symbrella."
   @spec standalone?(term()) :: boolean()
