@@ -20,7 +20,7 @@ defmodule Brain.LIFG.SemanticControlTest do
     assert report.reason == :contextual_sense_discrimination
     assert [%{id: @river, source: :original_sentence_dictionary_context}] =
              report.adjustments
-    assert Map.keys(scores) |> Enum.sort() == Map.keys(original) |> Enum.sort()
+    assert Enum.sort(Map.keys(scores)) == Enum.sort(Map.keys(original))
     assert scores[@river] > original[@river]
     assert scores[@river] <= original[@river] + 0.1
     assert scores[@finance] == original[@finance]
@@ -96,6 +96,6 @@ defmodule Brain.LIFG.SemanticControlTest do
     assert gap >= 0.15
     assert choice.scores[@river] > choice.scores[@finance]
     assert choice.low_confidence?
-    assert Map.keys(choice.scores) |> Enum.sort() == [@finance, @river] |> Enum.sort()
+    assert Enum.sort(Map.keys(choice.scores)) == Enum.sort([@finance, @river])
   end
 end
