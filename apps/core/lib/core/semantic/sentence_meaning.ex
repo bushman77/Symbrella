@@ -3,9 +3,10 @@ defmodule Core.Semantic.SentenceMeaning do
   A conservative, sentence-level interpretation assembled from independently
   observed grammatical roles and ATL lexical winners.
 
-  This is *not* a dictionary entry for a whole sentence. It records what the
-  sentence asks or asserts, where its components came from, and what remains
-  ungrounded. No BrainCell IDs, external facts, or sense confidences are invented.
+  This is *not* a dictionary entry for a whole sentence. For recognized
+  question frames, it records a compositional reading with its evidence.
+  Unrecognized sentences retain an explicitly absent definition. No BrainCell
+  IDs, external facts, or sense confidences are invented.
   """
 
   alias Core.Pipeline.Trace
@@ -48,6 +49,13 @@ defmodule Core.Semantic.SentenceMeaning do
 
         _ -> nil
       end)
+
+    # Preserve exactly what the user wrote; token reconstruction is only a
+    # fallback for maps that lack a sentence field.
+    question =
+      if is_map(question) and is_binary(sentence),
+        do: Map.put(question, :sentence, sentence),
+        else: question
 
     question || %{
       version: 1,
