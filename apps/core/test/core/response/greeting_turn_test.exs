@@ -12,7 +12,9 @@ defmodule Core.Response.GreetingTurnTest do
       "Hello there",
       "hey symbrella",
       "hi",
-      "hiya!"
+      "hiya!",
+      "heya!",
+      "sup"
     ] do
       assert GreetingTurn.standalone?(text), inspect(text)
     end
