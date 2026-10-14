@@ -398,6 +398,8 @@ defmodule Core.Response.LlmPrompt do
 
   defp comprehension_shaping(summary) when is_map(summary) do
     understood = summary |> map_get(:understood, []) |> List.wrap() |> Enum.take(2)
+    recognized_topics = summary |> map_get(:recognized_topics, []) |> List.wrap() |> Enum.take(2)
+    selected = summary |> map_get(:selected_lexical_candidates, []) |> List.wrap() |> Enum.take(2)
     uncertain = summary |> map_get(:uncertain, []) |> List.wrap() |> Enum.take(2)
     lexical_meanings = summary |> map_get(:lexical_meanings, []) |> List.wrap() |> Enum.take(2)
     degraded? = map_get(summary, :degraded?) == true
@@ -405,7 +407,12 @@ defmodule Core.Response.LlmPrompt do
     notes =
       []
       |> maybe_add(degraded?, "comprehension is degraded")
-      |> maybe_add(understood != [], "you understood: #{Compact.values(understood)}")
+      |> maybe_add(recognized_topics != [],
+        "you recognized topics (not verified meanings): #{Compact.values(recognized_topics)}")
+      |> maybe_add(selected != [],
+        "you selected lexical candidates (not verified meanings): #{Compact.values(selected)}")
+      |> maybe_add(understood != [],
+        "verified lexical understanding: #{Compact.values(understood)}")
       |> maybe_add(uncertain != [], "you are uncertain about: #{Compact.values(uncertain)}")
       |> maybe_add(
         lexical_meanings != [],
