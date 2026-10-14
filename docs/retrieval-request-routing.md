@@ -48,6 +48,34 @@ Without a substantive antecedent, ambiguous pronouns do **not** generate
 searches. History is used only transiently for routing, and does not become
 a trusted retrieval source.
 
+## Multi-turn topical continuity
+
+An explicit "Search the web for the latest developments" contains a
+retrieval **operation and recency preference**, not a subject. The router
+now resolves it against a substantive same-session user question, such as
+"What do you know about Japan's railgun development?". If there is no
+antecedent, it produces no route rather than querying a generic news feed.
+
+The follow-up "What do you think about those developments?" also resolves
+to the same user-established subject and obtains dated headlines, allowing
+Reflection to enforce source attribution and a qualified assessment.
+Intermediate "search for the latest developments" requests, conversational
+corrections, and social acknowledgements are not substituted as topics.
+
+Narrow public-knowledge prompts ("What do you know about [public subject]?",
+"Tell me about [public subject]?") can request reference excerpts, while
+private memory questions ("Tell me about my sister") remain local.
+
+News answers now require the actual retrieved headline text in addition to
+the matching outlet, date and URL: listing only an outlet and link does not
+demonstrate that the requested topic was addressed. A brief generic "I need
+more information" deferral despite available reference excerpts is repaired
+with cautious, attributed excerpts, not invented facts.
+
+The routing policy deliberately cannot create evidence: if Wikipedia
+or the configured SearXNG endpoint has no relevant sources, the assistant
+must acknowledge that limitation rather than fabricate research results.
+
 ## Evidence strictness
 
 - Dated RSS headlines have `resolution: :headlines_available` and **no**

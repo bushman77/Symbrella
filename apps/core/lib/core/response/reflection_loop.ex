@@ -241,11 +241,15 @@ defmodule Core.Response.ReflectionLoop do
       Map.get(evidence, :status) == :retrieved and
       is_list(Map.get(evidence, :sources)) and
       Map.get(evidence, :sources) != [] and
-      String.length(draft_text) <= 260 and
-      Regex.match?(
-        ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me|i\s+can)\s+(?:search|look\s+(?:it|that)\s+up|check\s+(?:that|it)\s+online|find\s+(?:sources|information)|do\s+(?:a\s+)?search)\b/iu,
-        draft_text
-      )
+      String.length(draft_text) <= 400 and
+      (Regex.match?(
+         ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me|i\s+can)\s+(?:search|look\s+(?:it|that)\s+up|check\s+(?:that|it)\s+online|find\s+(?:sources|information)|do\s+(?:a\s+)?search)\b/iu,
+         draft_text
+       ) or
+         Regex.match?(
+           ~r/\b(?:don't\s+have\s+enough\s+(?:context|information)|do\s+not\s+have\s+enough\s+(?:context|information)|not\s+enough\s+(?:context|information)|need\s+more\s+(?:context|details)|could\s+you\s+(?:please\s+)?(?:provide\s+more\s+(?:details|context)|clarify)|can't\s+provide\s+(?:a\s+)?complete\s+answer)\b/iu,
+           draft_text
+         ))
   end
 
   defp unfulfilled_search_promise?(_, _), do: false
@@ -307,9 +311,14 @@ defmodule Core.Response.ReflectionLoop do
           is_binary(url) and url != "" and
             is_binary(publisher) and publisher != "" and
             byte_size(date) == 10 and
+            is_binary(Map.get(source, :title)) and
             String.contains?(draft_text, url) and
             String.contains?(String.downcase(draft_text), String.downcase(publisher)) and
-            String.contains?(draft_text, date)
+            String.contains?(draft_text, date) and
+            String.contains?(
+              String.downcase(draft_text),
+              String.downcase(Map.get(source, :title))
+            )
         end)
     end
   end

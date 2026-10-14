@@ -20,6 +20,27 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     def search(_, _), do: {:ok, []}
   end
 
+  defmodule RailgunHeadlines do
+    def search(query, _opts) do
+      if String.contains?(String.downcase(query), "railgun") and
+           String.contains?(String.downcase(query), "japan") do
+        {:ok,
+         [
+           %{
+             provider: :news_rss,
+             title: "Japan reports another electromagnetic railgun test",
+             publisher: "Example Science Wire",
+             published_at: DateTime.to_iso8601(DateTime.utc_now()),
+             url: "https://news.google.com/rss/articles/japan-railgun-test",
+             excerpt: "Dated headline only: a railgun test was reported."
+           }
+         ]}
+      else
+        {:ok, []}
+      end
+    end
+  end
+
   defp route(message, context \\ %{}) do
     WebRetrieval.route_for(Map.put(context, :user_text, message))
   end
@@ -265,6 +286,130 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     assert result.web_evidence.status == :retrieved
     assert result.web_evidence.query =~ "Japanese railgun"
     refute Map.has_key?(result, :retrieval_history)
+  end
+
+  test "live three-turn railgun exchange keeps the subject through search and opinion" do
+    opening = "What do you know about Japan's railgun development?"
+    lookup = "Search the web for the latest developments."
+    opinion = "What do you think about those developments?"
+
+    # Turn one: a public technical subject is grounded by reference search.
+    assert %{query: "Japan's railgun development", relation: nil,
+             request_type: :general_search} = route(opening)
+
+    reference = WebRetrieval.enrich(
+      %{user_text: opening, features: %{intent: :ask, confidence: 0.9}},
+      enabled?: true, provider: ReferenceProvider
+    )
+
+    assert reference.web_evidence.resolution == :reference_sources
+    {:ok, initial_reply, first_review} =
+      ReflectionLoop.review(
+        opening,
+        "I'm sorry, but I don't have enough context or information. " <>
+          "Could you please clarify your question?",
+        reference
+      )
+
+    assert first_review.status == :repair
+    assert :search_not_answered in first_review.issues
+    assert initial_reply =~ "I retrieved these reference excerpts"
+
+    # Turn two: "latest developments" has no subject of its own. Recover
+    # only a prior USER topic and search for dated headlines about that.
+    history1 = [
+      %{"role" => "user", "content" => opening},
+      %{"role" => "assistant", "content" => initial_reply}
+    ]
+
+    assert %{query: "Japan's railgun development", relation: :current_events,
+             request_type: :current_events, trigger: :explicit_search} =
+             route(lookup, %{retrieval_history: history1})
+
+    second = WebRetrieval.enrich(
+      %{user_text: lookup, session_id: "railgun-conversation"},
+      enabled?: true, history: history1, news_provider: RailgunHeadlines
+    )
+
+    assert second.web_evidence.query == "Japan's railgun development"
+    assert second.web_evidence.resolution == :headlines_available
+
+    source = hd(second.web_evidence.sources)
+    date = String.slice(source.published_at, 0, 10)
+
+    # A bare link/outlet/date is not a meaningful citation of a headline.
+    bare_link = "#{source.publisher}, #{date}, #{source.url}"
+    {:ok, second_reply, second_review} =
+      ReflectionLoop.review(lookup, bare_link, second)
+
+    assert second_review.status == :repair
+    assert :news_evidence_not_cited in second_review.issues
+    assert second_reply =~ source.title
+    assert second_reply =~ source.url
+
+    # Turn three: skip the generic search request in history, use the
+    # original railgun subject again, and supply a dated news context.
+    history2 = history1 ++ [
+      %{"role" => "user", "content" => lookup},
+      %{"role" => "assistant", "content" => second_reply}
+    ]
+
+    assert %{query: "Japan's railgun development",
+             relation: :current_events, trigger: :followup} =
+             route(opinion, %{retrieval_history: history2})
+
+    third = WebRetrieval.enrich(
+      %{user_text: opinion, session_id: "railgun-conversation"},
+      enabled?: true, history: history2, news_provider: RailgunHeadlines
+    )
+
+    assert third.web_evidence.resolution == :headlines_available
+    assert third.web_evidence.query == "Japan's railgun development"
+
+    {:ok, answer, review} =
+      ReflectionLoop.review(
+        opinion,
+        "I'm sorry, but I don't have the ability to browse the web or provide opinions.",
+        third
+      )
+
+    assert review.status == :repair
+    assert :news_evidence_not_cited in review.issues
+    assert :news_assessment_missing in review.issues
+    assert answer =~ "Japan reports another electromagnetic railgun test"
+    assert answer =~ "https://news.google.com/rss/articles/japan-railgun-test"
+    assert answer =~ "My assessment:"
+    refute answer =~ "don't have the ability"
+  end
+
+  test "topicless searches without an antecedent do not fetch unrelated headlines" do
+    for text <- [
+          "Search the web for latest developments",
+          "Search the web for the latest developments.",
+          "Search the web for current news",
+          "Look up recent updates"
+        ] do
+      assert route(text) == nil
+    end
+
+    assert route("What do you think about those developments?") == nil
+  end
+
+  test "prior searches and short conversational comments cannot displace a real topic" do
+    topic = "Tell me about the Japanese railgun development project."
+    history = [
+      %{"role" => "user", "content" => topic},
+      %{"role" => "assistant", "content" => "I have a short answer."},
+      %{"role" => "user", "content" => "Search the web for latest developments."},
+      %{"role" => "assistant", "content" => "Here are the results."},
+      %{"role" => "user", "content" => "Thanks, good to know."},
+      %{"role" => "assistant", "content" => "You're welcome."}
+    ]
+
+    assert %{query: "the Japanese railgun development project",
+             relation: :current_events} =
+             route("What do you think about those developments?",
+               %{retrieval_history: history})
   end
 
   test "unsupported location and sensitive conversational references are not routed" do

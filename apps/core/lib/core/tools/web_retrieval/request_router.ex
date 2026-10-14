@@ -48,11 +48,13 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
         {query, category} = research
         build(query, nil, category, :structured_question)
 
-      current = current_events_query(text) ->
-        build(current, :current_events, :current_events, :temporal_question)
-
+      # Resolve deictic references BEFORE the generic current-events test.
+      # "those developments" is not itself a legitimate news subject.
       anaphora?(text) ->
         previous_route(context, text)
+
+      current = current_events_query(text) ->
+        build(current, :current_events, :current_events, :temporal_question)
 
       true ->
         nil
@@ -120,27 +122,49 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   end
 
   defp explicit_route({:explicit, query, original}, context) do
-    query =
-      if unresolved_reference?(query),
-        do: prior_topic(context),
-        else: nonempty(query)
+    # A direction such as "search for the latest developments" describes a
+    # retrieval *operation*, not the topic. Reuse an earlier user subject or
+    # decline routing; never send a subject-free generic RSS request.
+    contextual? = unresolved_reference?(query) or topicless_news?(query)
 
-    if query do
+    resolved =
+      if contextual?, do: prior_topic(context), else: nonempty(query)
+
+    if resolved do
       cond do
-        current_events_query(query) ->
-          build(current_events_query(query), :current_events,
+        contextual? and news_intent?(original) ->
+          build(resolved, :current_events, :current_events, :explicit_search)
+
+        current_events_query(resolved) ->
+          build(current_events_query(resolved), :current_events,
             :current_events, :explicit_search)
 
-        # Explicit "find latest news" can be news even if topic words follow.
-        Regex.match?(~r/\b(?:news|headlines|breaking|updates?|recent developments)\b/iu, original) and
-            Regex.match?(~r/\b(?:latest|recent|current|today|now|new)\b/iu, original) ->
-          build(query, :current_events, :current_events, :explicit_search)
+        news_intent?(original) ->
+          build(resolved, :current_events, :current_events, :explicit_search)
 
         true ->
-          build(query, nil, explicit_type(original, query), :explicit_search)
+          build(resolved, nil, explicit_type(original, resolved), :explicit_search)
       end
     end
   end
+
+  defp news_intent?(text) do
+    Regex.match?(
+      ~r/\b(?:latest|breaking|recent|current|today|new)\b/iu, text
+    ) and
+      Regex.match?(
+        ~r/\b(?:news|headlines|updates?|developments?|reports?)\b/iu, text
+      )
+  end
+
+  defp topicless_news?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/^\s*(?:(?:the|any|some)\s+)?(?:(?:latest|recent|new|current|breaking|today'?s?)\s+)*(?:news|headlines|updates?|developments?|reports?)(?:\s+(?:about|on|regarding)\s+(?:it|this|that|those|them))?\s*[.!?]*$/iu,
+      text
+    )
+  end
+
+  defp topicless_news?(_), do: false
 
   defp explicit_type(original, query) do
     cond do
@@ -175,6 +199,34 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
         {text, :technical_reference}
 
       true ->
+        public_topic_question(text)
+    end
+  end
+
+  # Named public subjects often deserve reference lookup even when not
+  # phrased as explicit web searches. Personal memory questions stay local.
+  defp public_topic_question(text) do
+    case Regex.run(
+           ~r/^\s*(?:what\s+do\s+you\s+know\s+about|tell\s+me\s+about)\s+(.+?)\s*[?!.]*$/iu,
+           text,
+           capture: :all_but_first
+         ) do
+      [topic] ->
+        topic = clean_query(topic)
+
+        if Regex.match?(
+             ~r/^(?:my|our|your|me|us|you|yourself|symbrella|this|that|it|these|those)\b/iu,
+             topic
+           ) or unresolved_reference?(topic) or topicless_news?(topic) do
+          nil
+        else
+          case nonempty(topic) do
+            nil -> nil
+            value -> {value, :general_search}
+          end
+        end
+
+      _ ->
         nil
     end
   end
@@ -191,7 +243,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
 
   defp anaphora?(text) do
     Regex.match?(
-      ~r/^\s*(?:any\s+(?:new\s+)?updates?\s+(?:on|about)\s+(?:it|that|this)|what(?:'s|\s+is)\s+(?:the\s+)?latest\s+(?:on|about)\s+(?:it|that|this)|can\s+you\s+(?:check|search|look\s+up)\s+(?:it|that|this)(?:\s+online)?)\s*[.!?]*$/iu,
+      ~r/^\s*(?:any\s+(?:new\s+)?updates?\s+(?:on|about)\s+(?:it|that|this)|what(?:'s|\s+is)\s+(?:the\s+)?latest\s+(?:on|about)\s+(?:it|that|this)|can\s+you\s+(?:check|search|look\s+up)\s+(?:it|that|this)(?:\s+online)?|what\s+do\s+you\s+think\s+about\s+(?:those|these|the)\s+(?:developments|updates|reports)|what\s+are\s+your\s+thoughts\s+(?:on|about)\s+(?:those|these|the)\s+(?:developments|updates|reports)|what\s+do\s+you\s+make\s+of\s+(?:those|these|the)\s+(?:developments|updates|reports)|how\s+do\s+you\s+view\s+(?:those|these|the)\s+(?:developments|updates|reports))\s*[.!?]*$/iu,
       text
     )
   end
@@ -200,7 +252,10 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     case prior_topic(context) do
       nil -> nil
       prior ->
-        if Regex.match?(~r/\b(?:updates?|latest|new)\b/iu, text) do
+        if Regex.match?(
+             ~r/\b(?:updates?|latest|new|developments|reports)\b/iu,
+             text
+           ) do
           build(prior, :current_events, :current_events, :followup)
         else
           build(prior, nil, :general_search, :followup)
@@ -220,10 +275,12 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     |> Enum.take(@max_prior_turns)
     |> Enum.map(fn message -> Map.get(message, "content") || Map.get(message, :content) end)
     |> Enum.find_value(fn prior ->
-      if is_binary(prior) and substantive_topic?(prior) do
+      if is_binary(prior) and substantive_topic?(prior) and
+           not anaphora?(prior) do
         case explicit_request(prior) do
           {:explicit, query, _} when is_binary(query) and byte_size(query) >= 4 ->
-            if unresolved_reference?(query), do: nil, else: nonempty(query)
+            if unresolved_reference?(query) or topicless_news?(query),
+              do: nil, else: nonempty(query)
           _ ->
             case current_events_query(prior) do
               nil -> clean_prior(prior)
@@ -240,6 +297,8 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     length(words) >= 4 and
       String.length(text) <= 500 and
       not conversational_correction?(text) and
+      not acknowledgement?(text) and
+      not topicless_news?(text) and
       not Regex.match?(
         ~r/^\s*(?:hello|hi|yes|no|okay|ok|thanks|thank\s+you|you\s+are\s+wrong|try\s+again|search\s+(?:for\s+)?(?:it|that|this))\s*[.!?]*$/iu,
         text
@@ -261,10 +320,18 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       )
   end
 
+  # Short social acknowledgements must not displace a substantive topic.
+  defp acknowledgement?(text) do
+    Regex.match?(
+      ~r/^\s*(?:thanks(?:[,!]\s*)?(?:good\s+to\s+know|for\s+(?:that|the\s+info))?|thank\s+you(?:[,!]\s*)?(?:good\s+to\s+know)?|(?:ok|okay)[,!]?\s+(?:thanks|got\s+it)|good\s+to\s+know)\s*[.!?]*$/iu,
+      text
+    )
+  end
+
   defp clean_prior(text) do
     text
     |> String.replace(~r/^\s*(?:(?:no|actually)[,!]\s*)?i\s+(?:mean|meant)\s+/iu, "")
-    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about))\s+/iu, "")
+    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
     |> String.replace(~r/[?!.]+$/u, "")
     |> nonempty()
   end
