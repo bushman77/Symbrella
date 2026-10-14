@@ -139,6 +139,11 @@ defmodule Core.LIFG.Attach do
               example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
               semantic_control: Map.get(ch, :semantic_control),
+              # Full Stage1 post-softmax distribution. A second-pass LIFG
+              # update requires this exact prior, not the winning score alone.
+              candidate_probs:
+                if(is_map(scores) and map_size(scores) <= 64,
+                  do: scores, else: nil),
               score: score2
             }
           end)
