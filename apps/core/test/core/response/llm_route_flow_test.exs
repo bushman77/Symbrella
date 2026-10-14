@@ -22,9 +22,23 @@ defmodule Core.Response.LlmRouteFlowTest do
       send(test_pid, {:llm_chat, messages, opts})
 
       user_text = messages |> List.last() |> Map.get("content", "")
+      system_text = messages |> hd() |> Map.get("content", "")
 
       text =
         cond do
+          String.downcase(user_text) == "how far away is the moon?" ->
+            if String.contains?(system_text, "Answer-revision instruction") do
+              "The Moon is roughly 384,400 km from Earth on average, varying along its orbit."
+            else
+              "How far away is the moon?"
+            end
+
+          String.downcase(user_text) == "i do not know you tell me" ->
+            if String.contains?(system_text, "Answer-revision instruction") do
+              "The Moon is roughly 384,400 km from Earth on average, varying along its orbit."
+            else
+              "I don't know!"
+            end
           String.downcase(user_text) == "good afternoon symbrella" ->
             "good afternoon symbrella. How may I assist you today?"
 
@@ -249,6 +263,54 @@ defmodule Core.Response.LlmRouteFlowTest do
       |> Enum.find(&(&1["role"] == "system"))
       |> Map.fetch!("content")
     refute system =~ "ONLY a social greeting"
+  end
+
+  test "a factual question echo gets a single bounded LLM retry rather than being published" do
+    session_id = "moon-answer-#{System.unique_integer([:positive])}"
+    si = %{intent: :ask, confidence: 0.9, session_id: session_id,
+           text: "how far away is the moon?"}
+
+    {_tone, answer, meta} = Response.plan(si, %{})
+
+    assert answer =~ "384,400 km"
+    assert meta.response_source == :llm
+    assert %{attempted?: true, outcome: :accepted} =
+             meta.response_reflection.answer_revision
+
+    assert_receive {:llm_chat, first_messages, _opts}
+    refute hd(first_messages)["content"] =~ "Answer-revision instruction"
+
+    assert_receive {:llm_chat, second_messages, _opts}
+    assert hd(second_messages)["content"] =~ "Answer-revision instruction"
+    assert hd(second_messages)["content"] =~ "how far away is the moon?"
+    refute_received {:llm_chat, _messages, _opts}
+  end
+
+  test "you tell me resolves the previous user's question in the same session" do
+    session_id = "moon-followup-#{System.unique_integer([:positive])}"
+
+    Core.Response.LlmChatHistory.record_turn(
+      session_id, "how far away is the moon?", "how far away is the moon?"
+    )
+
+    si = %{intent: :unknown, confidence: 0.9, session_id: session_id,
+           text: "i do not know you tell me"}
+
+    {_tone, answer, meta} = Response.plan(si, %{})
+
+    assert answer =~ "384,400 km"
+    assert meta.response_source == :llm
+    assert %{attempted?: true, outcome: :accepted} =
+             meta.response_reflection.answer_revision
+
+    assert_receive {:llm_chat, initial_messages, _opts}
+    assert hd(initial_messages)["content"] =~
+             "latest user turn requests an answer to this previous"
+
+    history = Enum.filter(initial_messages, &(&1["role"] in ["user", "assistant"]))
+    assert Enum.any?(history, &(&1["content"] == "how far away is the moon?"))
+    assert_receive {:llm_chat, retry_messages, _opts}
+    assert hd(retry_messages)["content"] =~ "Answer-revision instruction"
   end
 
   test "casual self-state check-ins use the anti-label self-state prompt" do
