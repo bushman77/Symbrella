@@ -39,6 +39,13 @@ defmodule Core.Syntax.Signatures do
     "preposition" => :pos_preposition
   }
 
+  # Do not mistake contracted pronouns/auxiliaries for possessive owners.
+  # Other apostrophe-s tokens remain hypotheses until a nominal head follows.
+  @contraction_bases MapSet.new(~w(
+    he she it that there who what where when why how here let
+  ))
+  @max_possessive_tokens 4
+
   @have_words ~w(have has had)
   @have_contract ~r/^(?:i|you|we|they)'ve$/u
   @have_or_be_contract ~r/^(?:he|she|it|that|there|who)'s$/u
@@ -53,10 +60,12 @@ defmodule Core.Syntax.Signatures do
     nodes = base_nodes(Map.get(si, :tokens, []), lexicon)
 
     noun_phrases = noun_phrase_constructions(nodes)
+    possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
     (wh_aux_questions(si, nodes) ++ finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
-       prepositional_phrase_constructions(nodes, noun_phrases))
+       possessive_phrases ++
+       prepositional_phrase_constructions(nodes, noun_phrases ++ possessive_phrases))
     |> Enum.uniq_by(fn sig -> {sig.id, sig.span, sig.roles} end)
   end
 
@@ -417,6 +426,75 @@ defmodule Core.Syntax.Signatures do
       end)
     end)
   end
+
+  # A genitive suffix is morphological evidence, not a new dictionary sense.
+  # "Japan's railgun development" can therefore keep the existing noun
+  # constituent and an ungrounded possessor role without inventing "Japan's"
+  # as a BrainCell. Do not confuse "it's" or "he's" with possession.
+  defp possessive_noun_phrase_constructions(nodes, noun_phrases) do
+    nodes
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn [owner, following] ->
+      with base when is_binary(base) <- possessive_base(owner.surface),
+           true <- following.index == owner.index + 1,
+           true <- pos?(following, "noun") or pos?(following, "adjective"),
+           matching <-
+             Enum.filter(noun_phrases, fn phrase ->
+               {first, last} = phrase.span
+               first == following.index and
+                 last <= owner.index + @max_possessive_tokens - 1
+             end),
+           noun_phrase <- Enum.max_by(matching, fn sig ->
+             elem(sig.span, 1)
+           end, fn -> nil end),
+           {roles, required, last} <-
+             possessive_roles(following, noun_phrase),
+           segment <- Enum.filter(nodes, &(&1.index >= owner.index and &1.index <= last)),
+           true <- length(segment) == last - owner.index + 1 and valid_surface?(segment) do
+        [
+          signature(
+            :possessive_noun_phrase,
+            {owner.index, last},
+            Map.put(roles, :possessor, owner.index),
+            Map.put(required, :possessor, [:pos_noun_or_pronoun]),
+            [:apostrophe_s, :nominal_head_available, :surface_possessive,
+             :possessor_not_lexically_verified]
+          )
+          |> Map.put(:surface_possessor, base)
+        ]
+      else
+        _ -> []
+      end
+    end)
+  end
+
+  # Prefer the longest locally supported nominal constituent. A single noun
+  # head is enough when no multi-token NP exists ("Mary's car").
+  defp possessive_roles(following, nil) do
+    if pos?(following, "noun") do
+      {%{head: following.index}, %{head: [:pos_noun]}, following.index}
+    else
+      { %{}, %{}, -1 }
+    end
+  end
+
+  defp possessive_roles(_following, noun_phrase) do
+    {noun_phrase.roles, noun_phrase.required_features, elem(noun_phrase.span, 1)}
+  end
+
+  defp possessive_base(surface) when is_binary(surface) do
+    case Regex.run(~r/\A([\p{L}][\p{L}\p{M}-]*)['’]s\z/u, String.trim(surface)) do
+      [_, base] ->
+        if MapSet.member?(@contraction_bases, String.downcase(base)),
+          do: nil,
+          else: base
+
+      _ ->
+        nil
+    end
+  end
+
+  defp possessive_base(_), do: nil
 
   # PP constituents are assembled from a preposition and a following NP.
   # A bare noun or pronoun may also serve as the object of a preposition.
