@@ -15,6 +15,7 @@ defmodule Core.Tools.EvidenceResolver do
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.Wikidata
   alias Core.Tools.WebRetrieval.Searxng
+  alias Core.Tools.WebRetrieval.NewsRss
   alias Core.Telemetry
 
   @max_attempts 3
@@ -33,17 +34,27 @@ defmodule Core.Tools.EvidenceResolver do
     provider_opts = Keyword.get(opts, :provider_opts, [])
     coords_provider = Keyword.get(opts, :coordinate_provider, Wikidata)
     coords_opts = Keyword.get(opts, :coordinate_opts, [])
+    news_provider = Keyword.get(opts, :news_provider, Keyword.get(cfg, :news_provider, NewsRss))
+    news_opts = Keyword.get(opts, :news_opts, [])
     start = System.monotonic_time(:millisecond)
 
     plans =
-      [{:search, provider, query, provider_opts}] ++
-        (if relation == :proximity and is_binary(subject) and is_binary(target),
-           do: [{:coordinates, coords_provider, nil, coords_opts}],
-           else: []) ++
-        (if relation == :population and is_binary(subject),
-           do: [{:search, provider, "#{subject} 2021 census population", provider_opts}],
-           else: []) ++
-        optional_search(cfg, provider, query, opts)
+      if relation == :current_events do
+        # Fresh, dated news headlines are discovery evidence, never verified
+        # article text. News searches do not route through Wikipedia.
+        [{:news, news_provider, query, news_opts},
+         {:news, news_provider, "#{query} latest", news_opts}] ++
+          optional_search(cfg, news_provider, query, opts)
+      else
+        [{:search, provider, query, provider_opts}] ++
+          (if relation == :proximity and is_binary(subject) and is_binary(target),
+             do: [{:coordinates, coords_provider, nil, coords_opts}],
+             else: []) ++
+          (if relation == :population and is_binary(subject),
+             do: [{:search, provider, "#{subject} 2021 census population", provider_opts}],
+             else: []) ++
+          optional_search(cfg, provider, query, opts)
+      end
 
     {attempts, sources, support, resolution} =
       plans
@@ -60,10 +71,17 @@ defmodule Core.Tools.EvidenceResolver do
         gathered = ordered |> Enum.uniq_by(&Map.get(&1, :url)) |> Enum.take(@max_sources)
         traces = traces ++ [trace]
 
-        if is_map(candidate) and Map.get(candidate, :status) == :source_supported do
-          {:halt, {traces, gathered, candidate, :source_supported}}
-        else
-          {:cont, {traces, gathered, nil, :unverified}}
+        case candidate do
+          %{status: :source_supported} ->
+            {:halt, {traces, gathered, candidate, :source_supported}}
+
+          %{status: :headlines_available} ->
+            # Headlines have dates and provenance, but are not independently
+            # verified facts; do not put them in :support.
+            {:halt, {traces, gathered, nil, :headlines_available}}
+
+          _ ->
+            {:cont, {traces, gathered, nil, :unverified}}
         end
       end)
 
@@ -79,7 +97,7 @@ defmodule Core.Tools.EvidenceResolver do
     result = %{
       status: status,
       resolution: resolution,
-      provider: provider,
+      provider: if(relation == :current_events, do: news_provider, else: provider),
       query: query,
       relation: relation,
       support: support,
@@ -111,6 +129,27 @@ defmodule Core.Tools.EvidenceResolver do
     if is_atom(configured) and configured != provider and not is_nil(configured),
       do: [{:search, configured, query, Keyword.get(opts, :fallback_opts, [])}],
       else: []
+  end
+
+  defp attempt({:news, provider, query, provider_opts}, _subject, _target, _relation, timeout) do
+    reply = safe_call(fn ->
+      provider.search(query, Keyword.merge([timeout_ms: timeout], provider_opts))
+    end)
+
+    case reply do
+      {:ok, found} when is_list(found) ->
+        items = found |> Enum.filter(&valid_news_source?/1) |> Enum.take(@max_sources)
+        status = if items == [], do: :not_found, else: :headlines_available
+        candidate = if items == [], do: nil, else: %{status: :headlines_available}
+
+        {%{kind: :news, provider: provider, query: query,
+           status: status, source_count: length(items)},
+         items, candidate}
+
+      _ ->
+        {%{kind: :news, provider: provider, query: query,
+           status: :unavailable, source_count: 0}, [], nil}
+    end
   end
 
   defp attempt({:search, provider, query, provider_opts}, subject, _target, relation, timeout) do
@@ -173,6 +212,23 @@ defmodule Core.Tools.EvidenceResolver do
       :throw, _ -> {:error, :provider_failure}
     end
   end
+
+  defp valid_news_source?(%{provider: :news_rss, title: title, url: url,
+                                   published_at: stamp, excerpt: excerpt})
+       when is_binary(title) and is_binary(url) and is_binary(stamp) and
+              is_binary(excerpt) do
+    valid_source?(%{title: title, url: url, excerpt: excerpt}) and
+      case DateTime.from_iso8601(stamp) do
+        {:ok, published, _offset} ->
+          age_seconds = DateTime.diff(DateTime.utc_now(), published, :second)
+          age_seconds >= -3_600 and age_seconds <= 72 * 3_600
+
+        _ ->
+          false
+      end
+  end
+
+  defp valid_news_source?(_), do: false
 
   defp valid_source?(%{title: title, url: url, excerpt: excerpt})
        when is_binary(title) and is_binary(url) and is_binary(excerpt) do

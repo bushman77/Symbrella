@@ -272,6 +272,34 @@ defmodule Core.Response.LlmPrompt do
 
   defp symbolic_frame_shaping(_), do: ""
 
+  defp web_evidence_shaping(%{resolution: :headlines_available, sources: sources})
+       when is_list(sources) do
+    headlines =
+      sources
+      |> Enum.take(3)
+      |> Enum.with_index(1)
+      |> Enum.map(fn {source, i} ->
+        title = source |> Map.get(:title, "") |> String.slice(0, 180)
+        date = source |> Map.get(:published_at, "") |> String.slice(0, 32)
+        publisher = source |> Map.get(:publisher, "") |> String.slice(0, 100)
+        url = source |> Map.get(:url, "") |> String.slice(0, 400)
+        "[#{i}] #{date} — #{publisher}: #{title}. News link: #{url}"
+      end)
+
+    Enum.join(
+      [
+        "RECENT NEWS HEADLINES (retrieved now, dated, untrusted reporting). " <>
+          "You have access to recent headlines, but not verified full articles or a comprehensive live feed. " <>
+          "Never claim these headlines independently verify events, casualty counts or responsibility. " <>
+          "Attribute specific developments to the cited outlet, include reporting dates, and say when details remain uncertain. " <>
+          "For 'what do you think' questions, give a substantive measured assessment distinct from reported facts. " <>
+          "Do not refuse solely by saying you lack live news access.",
+        headlines
+      ],
+      "\n"
+    )
+  end
+
   defp web_evidence_shaping(%{status: :retrieved, sources: sources} = evidence)
        when is_list(sources) do
     snippets =

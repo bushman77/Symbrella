@@ -1,7 +1,8 @@
 defmodule Core.Tools.WebRetrieval do
   @moduledoc """
-  Opt-in, bounded retrieval for explicit web requests and unverified geographic
-  frames. Neither prompts nor arbitrary URLs are sent automatically.
+  Opt-in, bounded retrieval for explicit web requests, unverified geographic
+  frames, and questions explicitly about recent/current events.
+  Arbitrary URLs are never fetched automatically.
 
   The configured provider supplies source excerpts. The search result is
   untrusted evidence, never an instruction or an automatically verified fact.
@@ -40,11 +41,18 @@ defmodule Core.Tools.WebRetrieval do
 
     cond do
       explicit = explicit_web_query(user_text) ->
-        {explicit, nil}
+        case current_events_query(explicit) do
+          nil -> {explicit, nil}
+          query -> {query, :current_events}
+        end
 
       is_map(frame) and Map.get(frame, :type) == :location_question and
-          Map.get(frame, :grounding_status) == :unverified ->
+          Map.get(frame, :grounding_status) == :unverified and
+          Map.get(frame, :relation) in [:population, :proximity] ->
         location_query(frame)
+
+      current = current_events_query(user_text) ->
+        {current, :current_events}
 
       true ->
         nil
@@ -64,6 +72,43 @@ defmodule Core.Tools.WebRetrieval do
   end
 
   defp explicit_web_query(_), do: nil
+
+  # General current-events routing, not a hardcoded geopolitical keyword.
+  # Require a temporal/news cue plus a question or an events-domain cue, so
+  # ordinary statements like "I currently live in Vancouver" stay local.
+  @spec current_events_query(String.t()) :: String.t() | nil
+  def current_events_query(text) when is_binary(text) do
+    temporal? = Regex.match?(
+      ~r/\b(?:latest|breaking|today|right now|currently|recent(?:ly)?|ongoing|this week|happening now|current news|new developments|live updates)\b/iu,
+      text
+    )
+
+    events? = Regex.match?(
+      ~r/\b(?:war|conflict|ceasefire|attack|fighting|election|protest|crisis|news|headlines|developments?|situation|markets?|economy|outbreak|disaster|happening|updates?)\b/iu,
+      text
+    )
+
+    question? = Regex.match?(
+      ~r/^\s*(?:what|who|why|how|when|where|is|are|has|have|can|tell me|give me|summari[sz]e|explain)\b/iu,
+      text
+    )
+
+    if temporal? and (events? or question?) do
+      query =
+        text
+        |> String.replace(
+          ~r/^\s*(?:what\s+(?:are\s+your\s+thoughts|do\s+you\s+think)\s+(?:on|about)|tell\s+me\s+about|what(?:'s|\s+is)\s+(?:the\s+)?latest\s+(?:on|about|with)|give\s+me\s+(?:the\s+)?(?:latest\s+)?(?:news|updates)\s+(?:on|about))\s*/iu,
+          ""
+        )
+        |> String.replace(~r/\b(?:currently\s+happening|happening\s+now|right\s+now)\b/iu, "")
+        |> String.replace(~r/[?!.]+$/u, "")
+        |> safe_query()
+
+      if String.length(query) >= 4, do: query
+    end
+  end
+
+  def current_events_query(_), do: nil
 
   defp location_query(%{subject: subject, relation: :population})
        when is_binary(subject), do: {safe_query("#{subject} population census"), :population}

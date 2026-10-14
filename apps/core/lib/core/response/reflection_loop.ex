@@ -86,6 +86,7 @@ defmodule Core.Response.ReflectionLoop do
     []
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
+    |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -111,6 +112,9 @@ defmodule Core.Response.ReflectionLoop do
         {:reject, issues}
 
       :unsupported_device_refusal in issues ->
+        {:repair, issues}
+
+      :news_access_refusal in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -165,6 +169,9 @@ defmodule Core.Response.ReflectionLoop do
         :unsupported_device_refusal in issues ->
           acknowledge_device_command(context)
 
+        :news_access_refusal in issues ->
+          news_headline_fallback(context)
+
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
@@ -195,6 +202,8 @@ defmodule Core.Response.ReflectionLoop do
       cond do
         :unsupported_device_refusal in issues ->
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
+        :news_access_refusal in issues ->
+          "Recent dated headlines were retrieved. Replace the false blanket news-access refusal with a cautious, sourced headline summary; distinguish headlines from independently verified facts."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -207,6 +216,45 @@ defmodule Core.Response.ReflectionLoop do
   defp apply_decision(:reject, _user_text, _draft_text, _issues, _context) do
     {"I need to stop and ask for a clearer, safer target before answering.",
      "Reject unsafe draft.", 1}
+  end
+
+  # The small model may repeat a stale "I have no live news access" message
+  # even after Core supplied dated headlines. Repair only when the current
+  # turn actually has fresh, sourced news evidence.
+  defp news_access_refusal?(context, draft_text) when is_binary(draft_text) do
+    evidence = Map.get(context, :web_evidence, %{})
+
+    Map.get(evidence, :resolution) == :headlines_available and
+      Map.get(evidence, :status) == :retrieved and
+      is_list(Map.get(evidence, :sources)) and
+      Map.get(evidence, :sources) != [] and
+      Regex.match?(
+        ~r/\b(?:don't|do not|can't|cannot|lack|without|no)\s+(?:have\s+)?(?:live|real[- ]time|current|up[- ]to[- ]date)\s+(?:news|updates|headlines|news access)\b/iu,
+        draft_text
+      )
+  end
+
+  defp news_access_refusal?(_, _), do: false
+
+  defp news_headline_fallback(context) do
+    reports =
+      context
+      |> Map.get(:web_evidence, %{})
+      |> Map.get(:sources, [])
+      |> Enum.take(2)
+      |> Enum.map_join("\n", fn source ->
+        title = Map.get(source, :title, "")
+        publisher = Map.get(source, :publisher, "Source")
+        stamp = Map.get(source, :published_at, "")
+        url = Map.get(source, :url, "")
+        "- #{publisher} (#{stamp}): #{title}. #{url}"
+      end)
+
+    "I found recent dated news headlines, although I haven't independently verified " <>
+      "the underlying articles:\n#{reports}\n" <>
+      "My assessment: this conflict has serious risks of regional escalation, " <>
+      "civilian harm and economic disruption. The situation warrants caution and " <>
+      "a distinction between reported developments and independently established facts."
   end
 
   # A generic "can't assist" is not itself evidence of a safety issue.

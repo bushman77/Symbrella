@@ -160,7 +160,7 @@ defmodule Core.Response.LlmPromptEvents do
         evidence
         |> Map.get(:sources, [])
         |> Enum.take(3)
-        |> Enum.map(&Map.take(&1, [:title, :url])),
+        |> Enum.map(&Map.take(&1, [:title, :url, :publisher, :published_at])),
       support: Map.get(evidence, :support)
     }
   end
