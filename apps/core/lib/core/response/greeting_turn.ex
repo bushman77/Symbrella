@@ -40,7 +40,7 @@ defmodule Core.Response.GreetingTurn do
       cleaned =
         draft
         |> String.replace(@service_desk, "")
-        |> String.replace(@echoed_name, fn greeting ->
+        |> Regex.replace(@echoed_name, fn greeting ->
           greeting
           |> String.replace(~r/\s*,?\s*symbrella\b/iu, "")
         end)
