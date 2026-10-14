@@ -42,7 +42,12 @@ defmodule Core.Response.LlmPrompt.Compact do
     parts =
       []
       |> maybe_add_present("intent", map_get(summary, :intent))
-      |> maybe_add_present("understood", values(List.wrap(map_get(summary, :understood, []))))
+      |> maybe_add_present("recognized_topics",
+        values(List.wrap(map_get(summary, :recognized_topics, []))))
+      |> maybe_add_present("selected_lexical_candidates",
+        values(List.wrap(map_get(summary, :selected_lexical_candidates, []))))
+      |> maybe_add_present("verified_understood",
+        values(List.wrap(map_get(summary, :understood, []))))
       |> maybe_add_present("uncertain", values(List.wrap(map_get(summary, :uncertain, []))))
       |> maybe_add_present("degraded", map_get(summary, :degraded?))
 
