@@ -12,12 +12,27 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
   @user_agent "Symbrella/0.1 (https://github.com/bushman77/Symbrella)"
   @max_results 3
   @max_feed_bytes 500_000
+  # Real-time questions should not default to a one-year-old headline.
+  # Historical research can explicitly request a larger bounded window.
   @max_age_hours 365 * 24
-  @lookback_filter "when:1y"
+  @default_age_hours 7 * 24
 
-  @doc "Maximum age of an accepted news headline: a rolling 365-day window."
+  @doc "Hard cap for explicitly requested news lookback windows."
   @spec max_age_hours() :: pos_integer()
   def max_age_hours, do: @max_age_hours
+
+  @doc "Default freshness requirement for present-day news discovery."
+  @spec default_age_hours() :: pos_integer()
+  def default_age_hours, do: @default_age_hours
+
+  @doc "Verify timestamp freshness at retrieval and evidence acceptance boundaries."
+  @spec recent_source?(map(), DateTime.t(), pos_integer()) :: boolean()
+  def recent_source?(%{published_at: stamp}, %DateTime{} = now, hours)
+      when is_binary(stamp) and is_integer(hours) and hours > 0 do
+    recent?(stamp, now, min(hours, @max_age_hours))
+  end
+
+  def recent_source?(_, _, _), do: false
 
   @spec search(String.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
   def search(query, opts \\ [])
@@ -25,11 +40,14 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
     timeout = Keyword.get(opts, :timeout_ms, 3_500)
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     now = Keyword.get(opts, :now, DateTime.utc_now())
-    max_age = Keyword.get(opts, :max_age_hours, @max_age_hours)
-    max_age = if is_integer(max_age), do: min(max_age, @max_age_hours), else: max_age
+    max_age =
+      case Keyword.get(opts, :max_age_hours, @default_age_hours) do
+        hours when is_integer(hours) and hours > 0 -> min(hours, @max_age_hours)
+        _ -> @default_age_hours
+      end
 
     args = [
-      params: [q: String.slice(query, 0, 160) <> " " <> @lookback_filter,
+      params: [q: String.slice(query, 0, 160) <> " " <> lookback_filter(max_age),
                hl: "en-CA", gl: "CA", ceid: "CA:en"],
       headers: [{"user-agent", @user_agent},
                 {"accept", "application/rss+xml, application/xml"}],
@@ -55,6 +73,11 @@ defmodule Core.Tools.WebRetrieval.NewsRss do
   end
 
   def search(_, _), do: {:error, :invalid_query}
+
+  defp lookback_filter(hours) when hours <= 24, do: "when:1d"
+  defp lookback_filter(hours) when hours <= 72, do: "when:3d"
+  defp lookback_filter(hours) when hours <= 168, do: "when:7d"
+  defp lookback_filter(_), do: "when:1y"
 
   defp source(xml, now, max_age) do
     title = field(xml, "title")
