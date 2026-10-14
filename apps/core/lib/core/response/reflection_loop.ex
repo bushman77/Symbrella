@@ -88,6 +88,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
+    |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
     |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
     |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
     |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
@@ -121,7 +122,8 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :news_access_refusal in issues or :news_evidence_not_cited in issues or
-          :news_assessment_missing in issues or :news_lookup_misrepresented in issues ->
+          :news_assessment_missing in issues or :news_lookup_misrepresented in issues or
+          :prior_lookup_followup in issues ->
         {:repair, issues}
 
       :search_not_answered in issues or :named_reference_missing in issues or
@@ -183,6 +185,9 @@ defmodule Core.Response.ReflectionLoop do
         :news_lookup_misrepresented in issues ->
           empty_news_lookup_fallback(context)
 
+        :prior_lookup_followup in issues ->
+          prior_lookup_fallback(context)
+
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           news_headline_fallback(context, user_text)
 
@@ -231,6 +236,8 @@ defmodule Core.Response.ReflectionLoop do
           "Retrieved reference excerpts are already available. Attribute and cite them, rather than promising to search later; do not pretend snippets prove the claims."
         :news_lookup_misrepresented in issues ->
           "A dated-news lookup was attempted but did not yield qualifying headlines. State the search outcome honestly; do not claim Symbrella lacks web-search capabilities or invent reports."
+        :prior_lookup_followup in issues ->
+          "The user is checking whether a prior same-session search actually completed. Answer from the recorded lookup status, not the model's conversational guess."
         :named_reference_missing in issues ->
           "No relevant reference excerpts were retained for the named public topic. Do not substitute background information as evidence of the specific programme."
         :reference_uncited in issues ->
@@ -374,7 +381,8 @@ defmodule Core.Response.ReflectionLoop do
           Regex.match?(
             ~r/\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer|unable\s+to)\b.{0,70}\b(?:capability|ability|access|browse|search)\b.{0,70}\b(?:web|internet|online|news|browse|search)|\b(?:no|without)\s+(?:web|internet|live\s+news)\s+access\b/iu,
             draft_text
-          )
+          ) or
+          unfulfilled_news_result?(draft_text)
 
       _ ->
         false
@@ -382,6 +390,56 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp news_lookup_misrepresented?(_, _), do: false
+
+  # Provider attempts happened before Qwen was called. With zero qualifying
+  # headlines, the model must neither promise a *future* search nor claim
+  # to have found reports or new developments. Audit only the attempt
+  # results in the current context; do not infer that nothing happened.
+  defp unfulfilled_news_result?(draft_text) do
+    Regex.match?(
+      ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me)\s+(?:search|look\s+up|check|browse|research)\b/iu,
+      draft_text
+    ) or
+      Regex.match?(
+        ~r/\b(?:i\s+(?:found|retrieved|located)\s+(?:some\s+)?(?:information|reports?|articles?|sources?|results?)|based\s+on\s+(?:the\s+)?information\s+i\s+found|(?:there\s+(?:have|has)\s+been|it\s+seems\s+(?:that\s+)?there\s+(?:have|has)\s+been)\s+(?:some\s+)?(?:recent|new|latest)\s+developments?)\b/iu,
+        draft_text
+      )
+  end
+
+  # "Well did you?" has no fresh search instruction, so answer it from
+  # bounded same-session lookup provenance, never from guessed success.
+  defp prior_lookup_followup?(context, user_text) when is_binary(user_text) do
+    evidence = Map.get(context, :prior_retrieval)
+
+    is_map(evidence) and
+      Map.get(context, :web_evidence) == nil and
+      Map.get(evidence, :relation) == :current_events and
+      Map.get(evidence, :resolution) == :exhausted and
+      Map.get(evidence, :source_count) == 0 and
+      is_integer(Map.get(evidence, :attempted_count)) and
+      Map.get(evidence, :attempted_count) > 0 and
+      Regex.match?(
+        ~r/^\s*(?:well[,! ]*|so[,! ]*)?(?:(?:did|have)\s+you(?:\s+actually)?(?:\s+(?:search|look|check|find|do\s+it|do\s+so))?|what\s+did\s+(?:you|the\s+search)\s+find)\s*[?!.]*$/iu,
+        user_text
+      )
+  end
+
+  defp prior_lookup_followup?(_, _), do: false
+
+  defp prior_lookup_fallback(context) do
+    evidence = Map.get(context, :prior_retrieval, %{})
+    query = evidence |> Map.get(:query, "the previous topic") |> to_string() |> String.slice(0, 160)
+
+    case Map.get(evidence, :status) do
+      :unavailable ->
+        "Yes, I attempted a dated-news lookup for #{query}, but the provider failed. " <>
+          "I did not obtain any verified recent reports."
+
+      _ ->
+        "Yes, I searched for dated news about #{query}, but the lookup returned no qualifying headlines. " <>
+          "My earlier reply should have stated that result instead of promising to search."
+    end
+  end
 
   defp empty_news_lookup_fallback(context) do
     evidence = Map.get(context, :web_evidence, %{})

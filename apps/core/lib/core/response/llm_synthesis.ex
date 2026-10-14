@@ -66,10 +66,21 @@ defmodule Core.Response.LlmSynthesis do
 
     # Retrieval follow-ups may resolve "search for it" using a bounded
     # window of this session's prior USER turns. The history is not copied
-    # into the response context or trusted as external evidence.
-    context =
+    # into the response context or trusted as external evidence. A separate
+    # short-lived, same-session receipt supports audit follow-ups such as
+    # "well did you?" even when no new retrieval is requested.
+    previous_retrieval = LlmChatHistory.recent_retrieval(session_id)
+
+    enriched =
       WebRetrieval.enrich(raw_context,
         history: LlmChatHistory.messages(session_id, 3))
+
+    context =
+      if is_nil(Map.get(enriched, :web_evidence)) and is_map(previous_retrieval),
+        do: Map.put(enriched, :prior_retrieval, previous_retrieval),
+        else: enriched
+
+    LlmChatHistory.record_retrieval(session_id, Map.get(context, :web_evidence))
 
     system_prompt = build_prompt(context, prompt_type)
     emit_prompt_event(system_prompt, user_text, context)

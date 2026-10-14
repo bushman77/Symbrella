@@ -281,6 +281,52 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     refute final =~ "can't assist with that"
   end
 
+  test "a search promise after completed empty retrieval is corrected" do
+    user = question("Search the web for the latest developments about Japanese railguns")
+
+    result =
+      WebRetrieval.enrich(user,
+        enabled?: true, news_provider: EmptyNews, max_attempts: 2)
+
+    draft = "I'll search the web for the latest developments in Japan's railgun technology."
+    {:ok, final, review} = ReflectionLoop.review(user.user_text, draft, result)
+
+    assert review.status == :repair
+    assert :news_lookup_misrepresented in review.issues
+    assert final =~ "no qualifying headlines were returned"
+    refute final =~ "I'll search"
+  end
+
+  test "no retrieved results cannot become a claim that new reports were found" do
+    user = question("What do you think about those developments?")
+
+    result =
+      WebRetrieval.enrich(user,
+        enabled?: true, news_provider: EmptyNews,
+        history: [
+          %{"role" => "user", "content" => "What do you know about Japan's railgun development?"},
+          %{"role" => "assistant", "content" => "I could not verify that programme."}
+        ],
+        max_attempts: 2)
+
+    assert result.web_evidence.query == "Japan's railgun development"
+    assert result.web_evidence.sources == []
+
+    drafts = [
+      "I found some information about the latest developments in Japan's railgun technology.",
+      "Based on the information I found, it seems that there have been some recent developments in Japan's railgun technology."
+    ]
+
+    for draft <- drafts do
+      {:ok, final, review} = ReflectionLoop.review(user.user_text, draft, result)
+
+      assert review.status == :repair
+      assert :news_lookup_misrepresented in review.issues
+      assert final =~ "no qualifying headlines were returned"
+      refute final =~ "I found some information"
+    end
+  end
+
   test "provider outage is not described as an empty search or verified news" do
     user = question("Search the web for the latest developments about Japanese railguns")
     result = WebRetrieval.enrich(user,

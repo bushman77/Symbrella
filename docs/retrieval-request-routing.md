@@ -140,6 +140,29 @@ now triggers the same honest empty-search fallback as a false claim that
 web search capability is absent. The search remains subject-bound and no
 headline is invented.
 
+## Recorded search outcomes for conversational accountability
+
+A routing decision alone does not establish that the requested sources were
+found. Every dated-news lookup produces an authoritative status, query,
+attempt count, resolution and qualifying-source count. An empty lookup
+must not be described as "I found information", "there were recent
+developments", or "I'll search" *after* Core has already searched.
+Reflection replaces these unsupported claims with the actual outcome.
+
+For immediate follow-up checks such as "Well did you?", the session's last
+dated-news receipt is retained in an ETS table owned by
+`LlmChatHistoryOwner`. The receipt contains only bounded provenance fields:
+`query`, `relation`, `status`, `resolution`, `attempted_count`,
+and `source_count`. It expires after five minutes, stays isolated by
+the chat's session key, and does not store untrusted article text.
+Reflection uses it to answer directly without inventing search success.
+This receipt is not a durable memory and is not evidence of any factual
+claim inside retrieved documents.
+
+Regression coverage includes the complete search-then-"Well did you?"
+exchange with a fake LLM and fake empty news provider, plus false-positive
+tests for statements of retrieval success with zero returned sources.
+
 ## Tests
 
 ```sh
