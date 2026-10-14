@@ -7,7 +7,10 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   measurements by looking for loosely matching numerals.
   """
 
-  @population ~r/\bpopulation\s+(?:of|was|is)\s+(\d{1,3}(?:,\d{3})+|\d{3,8})\b/iu
+  # Wikipedia's article lead commonly says "population in 2021 was 90,990".
+  # Capture the year and the number together so a census year from unrelated
+  # preceding text cannot accidentally be attributed to the population.
+  @population ~r/\bpopulation\s+(?:in\s+(?<year>(?:19|20)\d{2})\s+)?(?:of|was|is)\s+(?<display>\d{1,3}(?:,\d{3})+|\d{3,8})\b/iu
 
   @spec extract_support(list(), atom() | nil, String.t() | nil) :: map() | nil
   def extract_support(sources, :population, subject) when is_list(sources) and is_binary(subject) do
@@ -15,17 +18,24 @@ defmodule Core.Tools.WebRetrieval.Grounding do
       %{provider: :wikipedia, title: title, url: url, excerpt: excerpt}
       when is_binary(title) and is_binary(url) and is_binary(excerpt) ->
         if matching_place?(title, subject) do
-          case Regex.run(@population, excerpt) do
-            [matched, display] ->
+          case Regex.named_captures(@population, excerpt) do
+            %{"display" => display} = captures ->
               with {value, ""} <- Integer.parse(String.replace(display, ",", "")),
                    true <- value > 0 do
+                [matched | _] = Regex.run(@population, excerpt)
                 before = excerpt |> String.split(matched, parts: 2) |> hd()
                 preamble = String.slice(before, max(0, String.length(before) - 180), 180)
 
                 year =
-                  case Regex.run(~r/\b((?:19|20)\d{2})\s+[Cc]ensus\b/u, preamble) do
-                    [_, parsed] -> String.to_integer(parsed)
-                    _ -> nil
+                  case Map.get(captures, "year") do
+                    year when is_binary(year) and byte_size(year) == 4 ->
+                      String.to_integer(year)
+
+                    _ ->
+                      case Regex.run(~r/\b((?:19|20)\d{2})\s+[Cc]ensus\b/u, preamble) do
+                        [_, parsed] -> String.to_integer(parsed)
+                        _ -> nil
+                      end
                   end
 
                 %{
