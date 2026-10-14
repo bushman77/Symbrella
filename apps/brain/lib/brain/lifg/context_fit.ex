@@ -38,6 +38,10 @@ defmodule Brain.LIFG.ContextFit do
     gram_function: 0.04
   }
 
+  # A repeated cue across definition, example and synonyms is still only one
+  # independent lexical observation. Prefer the highest-reliability source.
+  @evidence_priority [:definition, :example, :synonyms, :semantic_atoms, :gram_function]
+
   # Common grammatical/scaffolding words are poor semantic discriminators.
   #
   # Stage1 already has separate machinery for POS/function-word behavior,
@@ -61,6 +65,7 @@ defmodule Brain.LIFG.ContextFit do
           score: float(),
           context_terms: [String.t()],
           matches: map(),
+          unique_matches: map(),
           component_scores: map(),
           contributions: map(),
           weights: map(),
@@ -119,11 +124,20 @@ defmodule Brain.LIFG.ContextFit do
       gram_function: overlap(context, evidence.gram_function, related_morphology?)
     }
 
+    # Deduplicate matched *context terms*, not dictionary fields. A single
+    # token such as "new" appearing in a gloss and an example is not two
+    # independent contextual observations. Preserve raw matches for audit.
+    unique_matches = unique_evidence_matches(matches)
+
     component_scores =
-      Map.new(matches, fn {field, terms} ->
+      Map.new(unique_matches, fn {field, terms} ->
         # Related word-family matches contribute half the incremental evidence
         # of an exact token match, rather than masquerading as exact identity.
-        exact_terms = overlap(context, Map.fetch!(evidence, field))
+        exact_terms =
+          context
+          |> overlap(Map.fetch!(evidence, field))
+          |> Enum.filter(&(&1 in terms))
+
         exact_strength = overlap_strength(exact_terms)
         total_strength = overlap_strength(terms)
 
@@ -148,6 +162,7 @@ defmodule Brain.LIFG.ContextFit do
       score: round_score(score),
       context_terms: context |> MapSet.to_list() |> Enum.sort(),
       matches: matches,
+      unique_matches: unique_matches,
       component_scores: round_map(component_scores),
       contributions: round_map(contributions),
       weights: weights,
@@ -160,11 +175,28 @@ defmodule Brain.LIFG.ContextFit do
       score: 0.0,
       context_terms: [],
       matches: empty_match_map(),
+      unique_matches: empty_match_map(),
       component_scores: empty_score_map(),
       contributions: empty_score_map(),
       weights: @default_weights,
       antonym_matches: []
     }
+  end
+
+  # Count each lexical context cue at most once across dictionary fields.
+  # No extra linguistic evidence is manufactured by this deduplication.
+  defp unique_evidence_matches(matches) do
+    {_seen, result} =
+      Enum.reduce(@evidence_priority, {MapSet.new(), %{}}, fn field, {seen, acc} ->
+        novel =
+          matches
+          |> Map.get(field, [])
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {Enum.reduce(novel, seen, &MapSet.put(&2, &1)), Map.put(acc, field, novel)}
+      end)
+
+    result
   end
 
   # ---------------------------------------------------------------------------
