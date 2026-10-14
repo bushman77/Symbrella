@@ -32,16 +32,21 @@ defmodule Core.LIFG.RelationalFeedback do
       if revisions == [] do
         {si, []}
       else
-        rebuilt =
+        proposed =
           si
           |> Map.update!(:lifg_choices, &revise_choices(&1, revisions, si))
           |> Map.update!(:semantic_choices, &revise_choices(&1, revisions, si))
-          |> Core.Brain.ATL.ingest([])
-          |> Core.Brain.ATL.attach_lifg_pairs([])
 
-        # Never publish a revised sense with a stale or missing ATL slate.
-        if atl_consistent?(rebuilt, revisions) do
-          {rebuilt, revisions}
+        # Validate the pure ATL projection *before* mutating the live region.
+        if preflight_consistent?(proposed, revisions) do
+          rebuilt =
+            proposed
+            |> Core.Brain.ATL.ingest([])
+            |> Core.Brain.ATL.attach_lifg_pairs([])
+
+          if atl_consistent?(rebuilt, revisions),
+            do: {rebuilt, revisions},
+            else: {si, []}
         else
           {si, []}
         end
@@ -68,6 +73,22 @@ defmodule Core.LIFG.RelationalFeedback do
   end
 
   def attach(si, _), do: si
+
+  defp preflight_consistent?(si, revisions) do
+    if Code.ensure_loaded?(Brain.ATL) and
+         function_exported?(Brain.ATL, :reduce, 3) do
+      slate =
+        Brain.ATL.reduce(
+          Map.get(si, :semantic_choices) || [],
+          Map.get(si, :tokens) || [],
+          Map.get(si, :sentence_signatures) || []
+        )
+
+      atl_consistent?(Map.put(si, :atl_slate, slate), revisions)
+    else
+      false
+    end
+  end
 
   defp atl_consistent?(si, revisions) do
     winners =
