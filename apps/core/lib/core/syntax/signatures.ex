@@ -444,9 +444,10 @@ defmodule Core.Syntax.Signatures do
                first == following.index and
                  last <= owner.index + @max_possessive_tokens - 1
              end),
-           noun_phrase <- Enum.max_by(matching, fn sig ->
-             elem(sig.span, 1)
-           end, fn -> nil end),
+           noun_phrase <-
+             matching
+             |> Enum.sort_by(fn sig -> elem(sig.span, 1) end)
+             |> List.last(),
            {roles, required, last} <-
              possessive_roles(following, noun_phrase),
            segment <- Enum.filter(nodes, &(&1.index >= owner.index and &1.index <= last)),
@@ -474,7 +475,7 @@ defmodule Core.Syntax.Signatures do
     if pos?(following, "noun") do
       {%{head: following.index}, %{head: [:pos_noun]}, following.index}
     else
-      { %{}, %{}, -1 }
+      {%{}, %{}, -1}
     end
   end
 
