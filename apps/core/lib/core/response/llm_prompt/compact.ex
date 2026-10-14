@@ -8,6 +8,7 @@ defmodule Core.Response.LlmPrompt.Compact do
   """
 
   alias Core.Response.Topics
+  alias Core.Response.GreetingTurn
 
   @spec runtime_state(term()) :: String.t()
   def runtime_state(nil), do: ""
@@ -185,6 +186,9 @@ defmodule Core.Response.LlmPrompt.Compact do
     cond do
       guardrail? ->
         "brief safe redirect"
+
+      GreetingTurn.standalone?(map_get(features, :text)) ->
+        "reciprocate the greeting naturally; do not ask for a task"
 
       skill_moves_to?(features, :personal_life_update) ->
         "acknowledge the personal milestone warmly"
