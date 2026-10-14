@@ -246,6 +246,39 @@ defmodule Core.Syntax.SentenceCompetitionTest do
     assert out.sentence_competition == si.sentence_competition
   end
 
+  test "ATL can resolve do as an auxiliary using its existing verb sense" do
+    cells = [
+      %{norm: "what", pos: "pronoun"},
+      %{norm: "do", pos: "verb"},
+      %{norm: "do", pos: "adverb"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "know", pos: "verb"},
+      %{norm: "about", pos: "preposition"},
+      %{norm: "railgun", pos: "noun"},
+      %{norm: "development", pos: "noun"}
+    ]
+
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one], cells)
+
+    [frame] = Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    slate = Brain.ATL.Constituents.attach(
+      %{winners: [
+        %{id: "what|pronoun|1", token_index: 0, norm: "what"},
+        %{id: "do|verb|1", token_index: 1, norm: "do"},
+        %{id: "you|pronoun|1", token_index: 2, norm: "you"},
+        %{id: "know|verb|1", token_index: 3, norm: "know"},
+        %{id: "about|preposition|1", token_index: 4, norm: "about"}
+      ]},
+      [frame]
+    )
+
+    assert [%{status: :resolved, roles: %{auxiliary: auxiliary}}] = slate.constituents
+    assert auxiliary.sense_id == "do|verb|1"
+    assert auxiliary.token_index == 1
+  end
+
   test "ATL rejects an interjection as a grammatical auxiliary" do
     si = input("What do you know about Japan's railgun development?",
                [@sense_one, @sense_two, @do_you])
