@@ -56,6 +56,7 @@ defmodule Core.Comprehension.Summary do
     choices = resolved_choices(si)
     tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
     lexical_meanings = verified_lexical_meanings(si)
+    syntactic_relations = syntactic_possessives(si, tokens)
 
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
@@ -92,6 +93,7 @@ defmodule Core.Comprehension.Summary do
       keyword: blank_to_nil(keyword),
       understood: understood,
       lexical_meanings: lexical_meanings,
+      syntactic_relations: syntactic_relations,
       uncertain: uncertain,
       unresolved: unresolved,
       degraded?: degraded?,
@@ -101,6 +103,56 @@ defmodule Core.Comprehension.Summary do
   end
 
   def build(_si, _opts), do: empty_summary()
+
+  # Preserve a purely grammatical genitive relationship separately from
+  # grounded lexical meaning. The surface owner may have NO dictionary sense,
+  # as with "Japan's"; do not assign it an ID, include it in understood, or
+  # override degradation just because syntax found an apostrophe-s.
+  defp syntactic_possessives(si, tokens) do
+    indexed =
+      tokens
+      |> Enum.with_index()
+      |> Map.new(fn {token, fallback} -> {token_index(token, fallback), token_term(token)} end)
+
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{id: :possessive_noun_phrase,
+        span: {first, last},
+        roles: %{possessor: possessor, head: head},
+        surface_possessor: owner}
+      when is_integer(first) and is_integer(last) and
+           is_integer(possessor) and is_integer(head) and
+           is_binary(owner) and last >= first and
+           last - first <= 3 ->
+        head_surface = Map.get(indexed, head, "")
+
+        nominal_surface =
+          (possessor + 1)..last
+          |> Enum.map(&Map.get(indexed, &1, ""))
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.join(" ")
+
+        if head_surface != "" and nominal_surface != "" do
+          [%{
+            type: :genitive_nominal_modifier,
+            span: {first, last},
+            possessor: owner,
+            nominal: nominal_surface,
+            head: head_surface,
+            grounding_status: :unverified,
+            source: :sentence_signature
+          }]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.take(4)
+  end
 
   # A phrase is an understood *lexical meaning* only when a real dictionary
   # sense has been verified and there was discriminating contextual evidence.
