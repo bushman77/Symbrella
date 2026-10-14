@@ -833,13 +833,32 @@ defmodule Brain.LIFG.Stage1 do
             Map.get(ctx, :grammar_weight, 0.0)
           )
 
+        # A mixed-POS slate is not automatically a closed-class *winner*.
+        # "know" has particle and verb candidates: the particle must not
+        # suppress contextual discrimination between the verb senses.
+        # Preserve the older closed_class_slate? calibration/learning policy.
+        provisional_id =
+          Enum.max_by(ids, &Map.get(cal_scores, &1, 0.0), fn -> nil end)
+
+        provisional_candidate =
+          Enum.find(cand_list, fn c ->
+            sense_id_for(c, token_phrase) == provisional_id
+          end)
+
+        provisional_closed_class? =
+          not is_nil(provisional_candidate) and
+            ClosedClass.closed_class_candidate?(provisional_candidate)
+
         {cal_scores, semantic_control} =
-          if closed_class_slate? do
+          if provisional_closed_class? do
             {cal_scores, %{
-              applied?: false, reason: :closed_class_slate, adjustments: []
+              applied?: false, reason: :closed_class_winner, adjustments: []
             }}
           else
-            SemanticControl.apply(cal_scores, scored_rows, ctx.semantic_control_opts)
+            semantic_opts =
+              Keyword.put(ctx.semantic_control_opts, :focus_pos, pos_of(provisional_candidate))
+
+            SemanticControl.apply(cal_scores, scored_rows, semantic_opts)
           end
 
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
