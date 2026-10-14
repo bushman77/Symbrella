@@ -162,67 +162,121 @@ defmodule Core.Syntax.Signatures do
 
   defp base_nodes(_, _), do: []
 
-  # A strong *compositional* clause hypothesis, based on the complete
-  # sentence rather than an isolated word. Requires WH fronting, auxiliary
-  # inversion, an existing lexical verb POS, and an explicit prepositional
-  # topic complement. This does NOT select a dictionary sense.
+  # A bounded, compositional WH + auxiliary question frame. Adjunct adverbs
+  # may appear after WH or around an optional negation before the predicate.
+  # A negative contracted auxiliary is one base token, not two invented tokens.
   #
-  # "What do you know about Japan's railgun development?" -> candidate.
-  # "Well, what do you know?" -> no complete topic-complement frame.
+  # Roles retain the original base-token indices. This is evidence of a
+  # complete clause, NEVER a choice of dictionary sense or an MWE deletion.
   @wh_words MapSet.new(~w(what who whom where when why how which))
   @question_auxiliaries MapSet.new(~w(do does did can could will would should may might))
+  @negative_question_auxiliaries MapSet.new(~w(
+    don't doesn't didn't can't couldn't won't wouldn't shouldn't mightn't
+  ))
   @question_subjects MapSet.new(~w(i you he she it we they))
   @topic_prepositions MapSet.new(~w(about of for on in at from with to))
-  
+  @negation_words MapSet.new(~w(not never))
+  @max_question_tokens 64
+
   defp wh_aux_questions(si, nodes) do
     sentence = Map.get(si, :sentence) || ""
 
-    if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") do
-      nodes
-      |> Enum.chunk_every(5, 1, :discard)
-      |> Enum.flat_map(fn [wh, aux, subject, verb, prep] = segment ->
-        after_prep = Enum.filter(nodes, &(&1.index > prep.index))
-        topic_evidence? =
-          after_prep != [] and
-            Enum.any?(Enum.take(after_prep, 7), fn node ->
-              pos?(node, "noun") or pos?(node, "proper_noun") or
-                pos?(node, "pronoun")
-            end)
+    if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") and
+         length(nodes) <= @max_question_tokens do
+      with [wh | after_wh] <- nodes,
+           true <- wh.index == 0 and MapSet.member?(@wh_words, wh.word),
+           {wh_modifier, [aux | after_aux]} <- take_optional_adverb(after_wh),
+           true <- question_auxiliary?(aux),
+           [subject | after_subject] <- after_aux,
+           true <- pos?(subject, "pronoun") or
+                     MapSet.member?(@question_subjects, subject.word),
+           {predicate_modifier, negation, [verb, prep | topic]} <-
+             take_predicate_prefix(after_subject),
+           true <- pos?(verb, "verb"),
+           true <- MapSet.member?(@topic_prepositions, prep.word),
+           true <- topic != [] and
+                     Enum.any?(Enum.take(topic, 7), fn node ->
+                       pos?(node, "noun") or pos?(node, "proper_noun") or
+                         pos?(node, "pronoun")
+                     end),
+           true <- valid_surface?(Enum.take(nodes, length(nodes) - length(topic))),
+           true <- valid_surface?([prep, hd(topic)]) do
+        roles =
+          %{wh: wh.index, auxiliary: aux.index, subject: subject.index,
+            predicate: verb.index, preposition: prep.index}
+          |> maybe_question_role(:wh_modifier, wh_modifier)
+          |> maybe_question_role(:predicate_modifier, predicate_modifier)
+          |> maybe_question_role(:negation, negation)
 
-        if wh.index == 0 and
-             MapSet.member?(@wh_words, wh.word) and
-             MapSet.member?(@question_auxiliaries, aux.word) and
-             (pos?(subject, "pronoun") or MapSet.member?(@question_subjects, subject.word)) and
-             pos?(verb, "verb") and
-             MapSet.member?(@topic_prepositions, prep.word) and
-             topic_evidence? and
-             valid_surface?(segment) and
-             valid_surface?([prep, hd(after_prep)]) do
-          last = List.last(nodes)
+        required =
+          %{auxiliary: [:pos_auxiliary, :pos_modal],
+            subject: [:pos_pronoun], predicate: [:pos_verb],
+            preposition: [:pos_preposition]}
+          |> maybe_question_features(:wh_modifier, wh_modifier, [:pos_adverb])
+          |> maybe_question_features(:predicate_modifier, predicate_modifier, [:pos_adverb])
+          |> maybe_question_features(:negation, negation, [:pos_adverb, :pos_particle])
 
-          [
-            signature(
-              :wh_aux_topic_question,
-              {wh.index, last.index},
-              %{
-                wh: wh.index, auxiliary: aux.index, subject: subject.index,
-                predicate: verb.index, preposition: prep.index
-              },
-              %{auxiliary: [:pos_auxiliary, :pos_modal],
-                subject: [:pos_pronoun], predicate: [:pos_verb],
-                preposition: [:pos_preposition]},
-              [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
-               :explicit_prepositional_topic, :question_punctuation]
-            )
-          ]
-        else
-          []
-        end
-      end)
+        evidence =
+          [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+           :explicit_prepositional_topic, :question_punctuation] ++
+            if(wh_modifier, do: [:wh_adverb_modifier], else: []) ++
+            if(predicate_modifier, do: [:predicate_adverb_modifier], else: []) ++
+            if(negation, do: [:explicit_negation], else: []) ++
+            if(MapSet.member?(@negative_question_auxiliaries, aux.word),
+              do: [:negative_auxiliary_contraction], else: [])
+
+        [signature(:wh_aux_topic_question,
+          {wh.index, List.last(nodes).index}, roles, required, evidence)]
+      else
+        _ -> []
+      end
     else
       []
     end
   end
+
+  # One lexical adverb per optional slot. We do not skip arbitrary tokens:
+  # an unattested filler must not manufacture a strong sentence frame.
+  defp take_optional_adverb([node | rest] = nodes) do
+    if pos?(node, "adverb") and not MapSet.member?(@negation_words, node.word),
+      do: {node, rest},
+      else: {nil, nodes}
+  end
+
+  defp take_optional_adverb(nodes), do: {nil, nodes}
+
+  defp take_optional_negation([node | rest] = nodes) do
+    if MapSet.member?(@negation_words, node.word),
+      do: {node, rest},
+      else: {nil, nodes}
+  end
+
+  defp take_optional_negation(nodes), do: {nil, nodes}
+
+  defp take_predicate_prefix(nodes) do
+    {leading_adverb, after_adverb} = take_optional_adverb(nodes)
+    {negation, after_negation} = take_optional_negation(after_adverb)
+
+    {trailing_adverb, remaining} =
+      if leading_adverb == nil,
+        do: take_optional_adverb(after_negation),
+        else: {nil, after_negation}
+
+    {leading_adverb || trailing_adverb, negation, remaining}
+  end
+
+  defp question_auxiliary?(%{word: word}) do
+    MapSet.member?(@question_auxiliaries, word) or
+      MapSet.member?(@negative_question_auxiliaries, word)
+  end
+
+  defp maybe_question_role(roles, _key, nil), do: roles
+  defp maybe_question_role(roles, key, node), do: Map.put(roles, key, node.index)
+
+  defp maybe_question_features(features, _key, nil, _required), do: features
+
+  defp maybe_question_features(features, key, _node, required),
+    do: Map.put(features, key, required)
 
   # Deliberately weak evidence: a simple-past form is *available* here.
   # Without a finite-clause parser, this is not a confirmed past predicate.
