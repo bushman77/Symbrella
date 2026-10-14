@@ -92,6 +92,44 @@ defmodule Brain.LIFG.RelationalFeedbackTest do
     end
   end
 
+  test "question topic guides predicate without generic predicate feeding back into noun" do
+    words = ["What", "do", "you", "know", "about", "railgun", "development?"]
+    si = %{
+      tokens: words |> Enum.with_index()
+        |> Enum.map(fn {phrase, index} -> %{index: index, phrase: phrase, n: 1} end),
+      sentence_signatures: [
+        %{id: :wh_aux_topic_question, span: {0, 6},
+          roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4}},
+        %{id: :noun_phrase, span: {5, 6},
+          roles: %{modifier: 5, head: 6}}
+      ],
+      atl_slate: %{
+        constituents: [
+          %{id: :wh_aux_topic_question, span: {0, 6}, status: :resolved,
+            roles: %{
+              predicate: %{token_index: 3, sense_id: "know|verb|13"},
+              preposition: %{token_index: 4, sense_id: "about|preposition|1"}
+            }},
+          %{id: :noun_phrase, span: {5, 6}, status: :resolved,
+            roles: %{
+              modifier: %{token_index: 5, sense_id: "railgun|noun|1"},
+              head: %{token_index: 6, sense_id: "development|noun|1"}
+            }}
+        ]
+      }
+    }
+
+    edges = RelationalFeedback.structural_edges(si)
+    assert Enum.any?(edges, fn edge ->
+      edge.target_index == 3 and edge.partner_index == 6 and
+        edge.relation == :predicate_topic and edge.partner_surface == "development"
+    end)
+
+    refute Enum.any?(edges, fn edge ->
+      edge.target_index == 6 and edge.partner_index == 3
+    end)
+  end
+
   test "no complete original LIFG posterior means no winner revision" do
     si = fixture()
 
