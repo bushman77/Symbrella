@@ -205,7 +205,9 @@ defmodule Core.Response.LlmPromptTest do
   test "verified command with weak isolated token scores gets grounded control limits, not generic refusal" do
     verified = %{
       degraded?: true,
-      understood: ["computer", "power down"],
+      recognized_topics: ["computer"],
+      selected_lexical_candidates: [],
+      understood: ["power down"],
       uncertain: [],
       unresolved: [],
       lexical_meanings: [
