@@ -1,13 +1,13 @@
 defmodule Core.Comprehension.Summary do
   @moduledoc """
-  Builds a compact, prompt-facing summary of what the pipeline understood.
+  Builds a compact, prompt-facing summary with separate evidence levels.
 
-  The summary is deliberately coarser than LIFG choices. It gives downstream
-  response planning a stable contract:
-
-  * `:understood` for high-confidence or explicit semantic anchors.
-  * `:uncertain` for weak/fallback concepts.
-  * `:degraded?` and `:reasons` when the evidence quality is poor.
+  * `:recognized_topics` — intent/keyword/topic-syntax anchors, not word senses.
+  * `:selected_lexical_candidates` — high-scoring LIFG lexical selections;
+    those scores alone do not verify a meaning.
+  * `:understood` — only independently dictionary-verified lexical constructions.
+  * `:uncertain` — weak/fallback decisions and unresolved content.
+  * `:degraded?` and `:reasons` retain the existing evidence-quality warnings.
   """
 
   @summary_limit 6
@@ -72,13 +72,27 @@ defmodule Core.Comprehension.Summary do
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
 
-    understood =
+    recognized_topics =
       []
       |> maybe_add_keyword(keyword, intent)
       |> Kernel.++(intent_anchors(intent, sentence))
-      |> Kernel.++(Enum.map(lexical_meanings, & &1.phrase))
-      |> Kernel.++(strong)
+      |> Kernel.++(sentence_topic_anchors(sentence_meaning))
       |> clean_terms()
+      |> Enum.take(@summary_limit)
+
+    # A selected sense and an observed topic are not proof of lexical
+    # understanding. Only the independently verified lexical constructions
+    # contribute to the :understood field.
+    understood =
+      lexical_meanings
+      |> Enum.map(& &1.phrase)
+      |> clean_terms()
+      |> Enum.take(@summary_limit)
+
+    selected_lexical_candidates =
+      strong
+      |> clean_terms()
+      |> Enum.reject(&(&1 in understood))
       |> Enum.take(@summary_limit)
 
     lexical_parts =
@@ -98,10 +112,12 @@ defmodule Core.Comprehension.Summary do
     degraded? = reasons != []
 
     %{
-      version: 1,
+      version: 2,
       intent: intent,
       confidence: confidence,
       keyword: blank_to_nil(keyword),
+      recognized_topics: recognized_topics,
+      selected_lexical_candidates: selected_lexical_candidates,
       understood: understood,
       lexical_meanings: lexical_meanings,
       syntactic_relations: syntactic_relations,
@@ -249,6 +265,15 @@ defmodule Core.Comprehension.Summary do
     |> maybe_reason(stats.weak_rate >= @weak_rate_threshold, :weak_decision_rate_high)
     |> maybe_reason(Map.get(stats, :unresolved_content, 0) > 0, :unresolved_content_tokens)
   end
+
+  # The topic phrase comes from a resolved grammatical sentence frame. Its
+  # surface can be recognized without making its dictionary sense verified.
+  defp sentence_topic_anchors(%{
+         status: :structurally_interpreted,
+         roles: %{topic: %{surface: topic}}
+       }) when is_binary(topic), do: [topic]
+
+  defp sentence_topic_anchors(_), do: []
 
   defp maybe_add_keyword(acc, "", _intent), do: acc
   defp maybe_add_keyword(acc, _keyword, :unknown), do: acc
@@ -455,10 +480,12 @@ defmodule Core.Comprehension.Summary do
 
   defp empty_summary do
     %{
-      version: 1,
+      version: 2,
       intent: :unknown,
       confidence: 0.0,
       keyword: nil,
+      recognized_topics: [],
+      selected_lexical_candidates: [],
       understood: [],
       lexical_meanings: [],
       syntactic_relations: [],
