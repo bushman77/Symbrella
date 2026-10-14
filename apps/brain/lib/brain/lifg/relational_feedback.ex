@@ -97,7 +97,10 @@ defmodule Brain.LIFG.RelationalFeedback do
 
               case closest do
                 %{roles: %{head: head}, span: span} ->
-                  edge_pair(tokens, %{token_index: predicate}, head,
+                  # The topic informs predicate disambiguation. The generic
+                  # predicate (e.g. "know") must not become lexical evidence
+                  # for the nominal topic in the reverse direction.
+                  directed_edge(tokens, %{token_index: predicate}, head,
                     :predicate_topic, span)
                 _ -> []
               end
@@ -247,6 +250,18 @@ defmodule Brain.LIFG.RelationalFeedback do
   end
 
   defp edge_pair(_, _, _, _, _), do: []
+
+  defp directed_edge(tokens, %{token_index: a}, %{token_index: b}, relation, span)
+       when is_integer(a) and is_integer(b) and a != b do
+    case {Map.get(tokens, a), Map.get(tokens, b)} do
+      {aa, bb} when is_binary(aa) and is_binary(bb) and aa != "" and bb != "" ->
+        [%{target_index: a, partner_index: b, partner_surface: bb,
+          relation: relation, span: span}]
+      _ -> []
+    end
+  end
+
+  defp directed_edge(_, _, _, _, _), do: []
 
   defp indexed_tokens(tokens) when is_list(tokens) do
     tokens
