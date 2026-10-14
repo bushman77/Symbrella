@@ -103,6 +103,41 @@ defmodule Brain.LIFG.GrammarEvidence do
     if id_pos(id) == "particle", do: 0.65, else: 0.0
   end
 
+  # A complete WH + auxiliary + subject + predicate + topic-preposition
+  # question is stronger syntactic evidence than an overlapping two-token
+  # noun-phrase hypothesis. In "what do you know about ...", a noun reading
+  # for "know" may otherwise win because a local "you know" noun phrase
+  # receives grammatical support while the complete question receives none.
+  # Reward *existing* verb candidates only; this never chooses a dictionary
+  # sense or invents a candidate.
+  defp support_for(
+         %{id: :wh_aux_topic_question,
+           roles: %{wh: wh, auxiliary: aux, subject: subject,
+                    predicate: predicate, preposition: prep},
+           required_features: %{predicate: required},
+           evidence: evidence},
+         index,
+         id,
+         _cell
+       )
+       when predicate == index and is_binary(id) and is_list(evidence) do
+    complete? =
+      wh < aux and aux < subject and subject < predicate and
+        predicate < prep and
+        Enum.all?(
+          [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+           :explicit_prepositional_topic, :question_punctuation],
+          &(&1 in evidence)
+        )
+
+    if complete? and not String.ends_with?(id, "|fallback") and
+         Enum.any?(List.wrap(required), &matches_pos?(&1, id_pos(id))) do
+      0.38
+    else
+      0.0
+    end
+  end
+
   # Structural compatibility is a small *positive* signal for existing
   # lexical candidates. POS features come from Core.Syntax.Signatures; this
   # pass never manufactures IDs, removes alternatives, or replaces Stage1's
