@@ -193,10 +193,13 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.inspect(list(si, :lexical_constructions),
       label: "Post-ATL verified lexical constructions", limit: :infinity)
 
+    IO.inspect(Map.get(si, :sentence_meaning),
+      label: "Composed sentence definition and meaning", pretty: true, limit: :infinity)
+
     IO.inspect(
       Map.take(Map.get(si, :comprehension) || %{},
         [:understood, :uncertain, :unresolved, :syntactic_relations,
-         :degraded?, :reasons]),
+         :sentence_definition, :degraded?, :reasons]),
       label: "Comprehension result", pretty: true
     )
 
