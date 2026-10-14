@@ -252,7 +252,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   # can still supply an actual referent rather than being discarded.
   defp conversational_correction?(text) do
     Regex.match?(
-      ~r/^\s*(?:(?:no|actually)[,!]?\s+)?(?:it|that|this)(?:(?:'s|\s+is)\s+not|\s+isn't)\s+(?:a\s+)?(?:typo|mistake|error)\s*[.!?]*$/iu,
+      ~r/^\s*(?:(?:no|actually)[,!]?\s+)?(?:it|that|this)(?:(?:'s|\s+is)\s+not|\s+isn't)\s+(?:(?:a|an)\s+)?(?:typo|mistake|error)\s*[.!?]*$/iu,
       text
     ) or
       Regex.match?(

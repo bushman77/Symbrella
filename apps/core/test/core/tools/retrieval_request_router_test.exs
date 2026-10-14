@@ -186,6 +186,10 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
           "It's not a typo.",
           "That is not a mistake.",
           "No, that isn't an error!",
+          "Actually, that is not an error.",
+          "This isn't an error.",
+          "It's not an error.",
+          "No, that is not a mistake.",
           "You misunderstood me.",
           "That is not what I meant."
         ] do
