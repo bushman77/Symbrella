@@ -21,7 +21,7 @@ defmodule Core.Semantic.Proposition do
           preposition: preposition,
           topic: topic
         }
-      }) do
+      } = meaning) do
     with true <- verified_word?(question),
          true <- verified_word?(subject),
          true <- verified_word?(predicate),
@@ -52,6 +52,8 @@ defmodule Core.Semantic.Proposition do
           }
         },
         epistemic_status: :question_not_assertion,
+        polarity: Map.get(meaning, :polarity, :unspecified),
+        operators: Map.get(meaning, :operators, %{}),
         grounding: %{
           grammatical_frame: :atl_resolved,
           predicate_sense: :selected_not_contextually_verified,
