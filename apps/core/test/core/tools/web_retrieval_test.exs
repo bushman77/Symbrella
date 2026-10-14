@@ -20,6 +20,42 @@ defmodule Core.Tools.WebRetrievalTest do
     end
   end
 
+  defmodule IrrelevantRailgunPages do
+    def search(_query, _opts) do
+      {:ok,
+       [
+         %{
+           provider: :wikipedia, title: "Railgun",
+           url: "https://en.wikipedia.org/wiki/Railgun",
+           excerpt: "A railgun is an electromagnetic projectile launcher."
+         },
+         %{
+           provider: :wikipedia, title: "Plasma railgun",
+           url: "https://en.wikipedia.org/wiki/Plasma_railgun",
+           excerpt: "Plasma railguns use electrical acceleration."
+         },
+         %{
+           provider: :wikipedia, title: "A Certain Scientific Railgun",
+           url: "https://en.wikipedia.org/wiki/A_Certain_Scientific_Railgun",
+           excerpt: "A fictional television series about superpowers."
+         }
+       ]}
+    end
+  end
+
+  defmodule FocusedRailgunPage do
+    def search(_query, _opts) do
+      {:ok,
+       [
+         %{
+           provider: :wikipedia, title: "Japan railgun programme",
+           url: "https://en.wikipedia.org/wiki/Japan_railgun_programme",
+           excerpt: "A reference excerpt about Japan's electromagnetic railgun research."
+         }
+       ]}
+    end
+  end
+
   defp context do
     %{
       session_id: "test-session",
@@ -113,6 +149,52 @@ defmodule Core.Tools.WebRetrievalTest do
 
     assert review.status == :repair
     refute final =~ "13,000"
+  end
+
+  test "a named research subject rejects generic references without the named focus" do
+    query = %{user_text: "What do you know about Japan's railgun development?"}
+
+    result =
+      WebRetrieval.enrich(query,
+        enabled?: true, provider: IrrelevantRailgunPages, max_attempts: 1)
+
+    assert result.web_evidence.query == "Japan's railgun development"
+    assert result.web_evidence.request_type == :general_search
+    assert result.web_evidence.sources == []
+    assert result.web_evidence.resolution == :exhausted
+    assert result.web_evidence.status == :not_found
+
+    draft = "A railgun uses electromagnetic force to accelerate a projectile."
+    {:ok, final, reflection} =
+      ReflectionLoop.review(query.user_text, draft, result)
+
+    assert reflection.status == :repair
+    assert :named_reference_missing in reflection.issues
+    assert final =~ "Japan's railgun development"
+    assert final =~ "did not establish that subject"
+    refute final == draft
+  end
+
+  test "reference results about the named research subject are retained" do
+    query = %{user_text: "What do you know about Japan's railgun development?"}
+
+    result =
+      WebRetrieval.enrich(query,
+        enabled?: true, provider: FocusedRailgunPage, max_attempts: 1)
+
+    assert result.web_evidence.resolution == :reference_sources
+    assert result.web_evidence.status == :retrieved
+    assert [%{title: "Japan railgun programme"}] = result.web_evidence.sources
+    assert result.web_evidence.support == nil
+  end
+
+  test "non-possessive general searches still return bounded reference excerpts" do
+    result =
+      WebRetrieval.enrich(%{user_text: "Search for railgun technology"},
+        enabled?: true, provider: IrrelevantRailgunPages, max_attempts: 1)
+
+    assert result.web_evidence.resolution == :reference_sources
+    assert length(result.web_evidence.sources) == 3
   end
 
   test "Wikimedia adapter searches and fetches article via fixed hosts without network" do

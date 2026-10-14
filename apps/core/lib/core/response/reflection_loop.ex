@@ -87,9 +87,11 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
+    |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
     |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
     |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
     |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
+    |> maybe_issue(named_reference_missing?(context), :named_reference_missing)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -118,10 +120,10 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :news_access_refusal in issues or :news_evidence_not_cited in issues or
-          :news_assessment_missing in issues ->
+          :news_assessment_missing in issues or :news_lookup_misrepresented in issues ->
         {:repair, issues}
 
-      :search_not_answered in issues ->
+      :search_not_answered in issues or :named_reference_missing in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -176,11 +178,17 @@ defmodule Core.Response.ReflectionLoop do
         :unsupported_device_refusal in issues ->
           acknowledge_device_command(context)
 
+        :news_lookup_misrepresented in issues ->
+          empty_news_lookup_fallback(context)
+
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           news_headline_fallback(context, user_text)
 
         :search_not_answered in issues ->
           reference_excerpt_fallback(context)
+
+        :named_reference_missing in issues ->
+          named_reference_missing_fallback(context)
 
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
@@ -216,6 +224,10 @@ defmodule Core.Response.ReflectionLoop do
           "Recent headlines require accurate publication dates, outlet attribution, source links and—when requested—a separate qualified assessment. Repair the draft from the retrieved headlines without inventing verified article contents."
         :search_not_answered in issues ->
           "Retrieved reference excerpts are already available. Attribute and cite them, rather than promising to search later; do not pretend snippets prove the claims."
+        :news_lookup_misrepresented in issues ->
+          "A dated-news lookup was attempted but did not yield qualifying headlines. State the search outcome honestly; do not claim Symbrella lacks web-search capabilities or invent reports."
+        :named_reference_missing in issues ->
+          "No relevant reference excerpts were retained for the named public topic. Do not substitute background information as evidence of the specific programme."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -291,6 +303,68 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp news_access_refusal?(_, _), do: false
+
+  # If references were rejected for a qualified named subject, don't
+  # substitute generic background material and imply it answers the named
+  # programme question. Other query categories remain unchanged.
+  defp named_reference_missing?(context) do
+    case Map.get(context, :web_evidence) do
+      %{request_type: :general_search, relation: nil,
+        resolution: :exhausted, sources: [], query: query,
+        attempted_count: attempts}
+      when is_binary(query) and is_integer(attempts) and attempts > 0 ->
+        Regex.match?(~r/\b[A-Z][\p{L}-]{2,}['’]s\b/u, query)
+
+      _ ->
+        false
+    end
+  end
+
+  defp named_reference_missing_fallback(context) do
+    query =
+      context
+      |> get_in_map([:web_evidence, :query])
+      |> to_string()
+      |> String.slice(0, 160)
+
+    "I looked for reference material specifically about #{query}, but the available results " <>
+      "did not establish that subject. I can discuss the underlying technology, " <>
+      "but I can't substantiate the named programme from those results."
+  end
+
+  # An empty search is not the same thing as no search capability. Only
+  # correct demonstrably false capability claims when an actual dated-news
+  # search has been attempted; never claim that unavailable sources were read.
+  defp news_lookup_misrepresented?(context, draft_text) when is_binary(draft_text) do
+    case Map.get(context, :web_evidence) do
+      %{relation: :current_events, resolution: :exhausted, sources: [],
+        attempted_count: attempts} when is_integer(attempts) and attempts > 0 ->
+        Regex.match?(
+          ~r/\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer|unable\s+to)\b.{0,70}\b(?:capability|ability|access|browse|search)\b.{0,70}\b(?:web|internet|online|news|browse|search)|\b(?:no|without)\s+(?:web|internet|live\s+news)\s+access\b/iu,
+          draft_text
+        )
+
+      _ ->
+        false
+    end
+  end
+
+  defp news_lookup_misrepresented?(_, _), do: false
+
+  defp empty_news_lookup_fallback(context) do
+    evidence = Map.get(context, :web_evidence, %{})
+    query = evidence |> Map.get(:query, "the requested subject") |> to_string() |> String.slice(0, 160)
+
+    case Map.get(evidence, :status) do
+      :unavailable ->
+        "I tried to retrieve dated news about #{query}, but the news provider was unavailable or failed. " <>
+          "I can't verify recent developments from that attempt."
+
+      _ ->
+        "I searched for dated news about #{query}, but no qualifying headlines were returned. " <>
+          "That doesn't establish that nothing has happened; I can't verify recent developments from this search."
+    end
+  end
 
   # A headline is evidence of what an outlet reported, not proof that the
   # underlying event has been independently confirmed. For news answers we

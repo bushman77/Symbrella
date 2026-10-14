@@ -92,6 +92,30 @@ must acknowledge that limitation rather than fabricate research results.
 - The number of attempts, sources, and query length remain bounded by the
   evidence resolver; no arbitrary user URL is fetched by this feature.
 
+## Handling misleading search outcomes
+
+Live report from October 14 identified two independent gaps after the
+topic-continuity fix:
+
+- A reference query for **Japan's railgun development** produced only
+  generic "Railgun", "Plasma railgun" and fiction articles. For `general_search`
+  requests with a capitalized possessive named focus (`Japan's` etc.),
+  the resolver now retains only sources whose title or excerpt mentions
+  that named focus. An empty result is **not** counted as a source-supported
+  answer; Reflection gives a scoped, honest no-evidence response.
+- The dated Google News RSS provider made two correctly scoped attempts
+  with no qualifying results; Qwen nevertheless said that Symbrella lacked
+  web-search capability and Reflection accepted it. Reflection now
+  distinguishes `:not_found` (search succeeded but found no qualifying
+  headlines) from `:unavailable` (provider could not be queried).
+  It repairs only false capability claims when actual search attempts are
+  present. No articles or citations are fabricated.
+
+This does **not** increase the Google News window, add a specialised Japan
+railgun source, or guarantee topical citations. Enabling a vetted SearXNG
+endpoint can extend general-reference coverage; RSS is still a bounded
+dated-headline discovery source.
+
 ## Tests
 
 ```sh

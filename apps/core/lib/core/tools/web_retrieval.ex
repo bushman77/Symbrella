@@ -68,7 +68,10 @@ defmodule Core.Tools.WebRetrieval do
     started = System.monotonic_time(:millisecond)
     %{query: query, relation: relation, request_type: type, trigger: trigger} = route
 
-    resolver_opts = provider_options(route, opts)
+    resolver_opts =
+      route
+      |> provider_options(opts)
+      |> Keyword.put(:request_type, type)
 
     evidence =
       context

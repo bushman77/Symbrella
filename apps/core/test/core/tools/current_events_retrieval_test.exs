@@ -36,6 +36,10 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     def search(_query, _opts), do: {:error, :connection_failed}
   end
 
+  defmodule EmptyNews do
+    def search(_query, _opts), do: {:ok, []}
+  end
+
   defmodule NewsOnRetry do
     def search(query, _opts) do
       if String.contains?(query, "latest") do
@@ -235,6 +239,54 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     draft = "I don't have live news access in this runtime, so I can't give current updates."
     {:ok, _text, review} = ReflectionLoop.review(question().user_text, draft, result)
     refute :news_access_refusal in review.issues
+  end
+
+  test "an empty dated-news search repairs a false claim of no web capability" do
+    user = question("Search the web for the latest developments about Japanese railguns")
+    result = WebRetrieval.enrich(user,
+      enabled?: true, news_provider: EmptyNews, max_attempts: 2)
+
+    assert result.web_evidence.relation == :current_events
+    assert result.web_evidence.status == :not_found
+    assert result.web_evidence.resolution == :exhausted
+    assert result.web_evidence.attempted_count == 2
+
+    draft = "I'm sorry, but I currently don't have the capability to search the web for the latest developments."
+    {:ok, final, review} = ReflectionLoop.review(user.user_text, draft, result)
+
+    assert review.status == :repair
+    assert :news_lookup_misrepresented in review.issues
+    assert final =~ "I searched for dated news"
+    assert final =~ "Japanese railguns"
+    assert final =~ "no qualifying headlines were returned"
+    refute final =~ "don't have the capability"
+  end
+
+  test "provider outage is not described as an empty search or verified news" do
+    user = question("Search the web for the latest developments about Japanese railguns")
+    result = WebRetrieval.enrich(user,
+      enabled?: true, news_provider: MissingNews, max_attempts: 2)
+
+    assert result.web_evidence.status == :unavailable
+
+    draft = "I cannot browse the web to answer that."
+    {:ok, final, review} = ReflectionLoop.review(user.user_text, draft, result)
+
+    assert review.status == :repair
+    assert :news_lookup_misrepresented in review.issues
+    assert final =~ "news provider was unavailable or failed"
+    refute final =~ "no qualifying headlines"
+  end
+
+  test "a genuine no-headline response is accepted and does not invent sources" do
+    user = question("Search the web for the latest developments about Japanese railguns")
+    result = WebRetrieval.enrich(user,
+      enabled?: true, news_provider: EmptyNews, max_attempts: 2)
+
+    response = "I searched for dated news but found no qualifying headlines for this topic."
+    {:ok, ^response, review} = ReflectionLoop.review(user.user_text, response, result)
+    refute :news_lookup_misrepresented in review.issues
+    refute :news_evidence_not_cited in review.issues
   end
 
   test "Google News RSS requires dated attributable HTTPS headlines" do

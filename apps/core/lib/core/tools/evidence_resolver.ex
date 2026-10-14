@@ -36,6 +36,7 @@ defmodule Core.Tools.EvidenceResolver do
     coords_opts = Keyword.get(opts, :coordinate_opts, [])
     news_provider = Keyword.get(opts, :news_provider, Keyword.get(cfg, :news_provider, NewsRss))
     news_opts = Keyword.get(opts, :news_opts, [])
+    request_type = Keyword.get(opts, :request_type)
     start = System.monotonic_time(:millisecond)
 
     plans =
@@ -60,7 +61,7 @@ defmodule Core.Tools.EvidenceResolver do
       plans
       |> Enum.take(max_attempts)
       |> Enum.reduce_while({[], [], nil, :unverified}, fn plan, {traces, gathered, _, _} ->
-        {trace, found, candidate} = attempt(plan, subject, target, relation, timeout)
+        {trace, found, candidate} = attempt(plan, subject, target, relation, timeout, request_type)
         # When a fallback finally supports the claim, put its cited sources
         # first instead of losing them behind three irrelevant search hits.
         ordered =
@@ -136,7 +137,7 @@ defmodule Core.Tools.EvidenceResolver do
       else: []
   end
 
-  defp attempt({:news, provider, query, provider_opts}, _subject, _target, _relation, timeout) do
+  defp attempt({:news, provider, query, provider_opts}, _subject, _target, _relation, timeout, _request_type) do
     reply = safe_call(fn ->
       provider.search(query, Keyword.merge([timeout_ms: timeout], provider_opts))
     end)
@@ -157,14 +158,19 @@ defmodule Core.Tools.EvidenceResolver do
     end
   end
 
-  defp attempt({:search, provider, query, provider_opts}, subject, _target, relation, timeout) do
+  defp attempt({:search, provider, query, provider_opts}, subject, _target, relation, timeout, request_type) do
     reply = safe_call(fn ->
       provider.search(query, Keyword.merge([timeout_ms: timeout], provider_opts))
     end)
 
     case reply do
       {:ok, found} when is_list(found) ->
-        sources = found |> Enum.filter(&valid_source?/1) |> Enum.take(@max_sources)
+        sources =
+          found
+          |> Enum.filter(&valid_source?/1)
+          |> require_named_focus(query, relation, request_type)
+          |> Enum.take(@max_sources)
+
         support = Grounding.extract_support(sources, relation, subject)
         state =
           cond do
@@ -186,7 +192,7 @@ defmodule Core.Tools.EvidenceResolver do
     end
   end
 
-  defp attempt({:coordinates, provider, _query, provider_opts}, subject, target, _relation, timeout) do
+  defp attempt({:coordinates, provider, _query, provider_opts}, subject, target, _relation, timeout, _request_type) do
     reply = safe_call(fn ->
       provider.proximity(subject, target,
         Keyword.merge([timeout_ms: timeout], provider_opts))
@@ -220,6 +226,36 @@ defmodule Core.Tools.EvidenceResolver do
       :throw, _ -> {:error, :provider_failure}
     end
   end
+
+  # An encyclopedia article about a technology is not automatically an
+  # article about the named programme the user asked about. When a public
+  # general-search subject has a capitalized possessive qualifier (for example
+  # "Japan's railgun development"), require the named focus to occur in the
+  # retrieved title or excerpt. This is a conservative relevance gate, not
+  # an assertion that a matching source independently verifies the claim.
+  defp require_named_focus(sources, query, nil, :general_search) do
+    case Regex.run(
+           ~r/\b([A-Z][\p{L}-]{2,})['’]s\b/u,
+           query,
+           capture: :all_but_first
+         ) do
+      [name] ->
+        focus = String.downcase(name)
+
+        Enum.filter(sources, fn source ->
+          haystack =
+            (Map.get(source, :title, "") <> " " <> Map.get(source, :excerpt, ""))
+            |> String.downcase()
+
+          String.contains?(haystack, focus)
+        end)
+
+      _ ->
+        sources
+    end
+  end
+
+  defp require_named_focus(sources, _, _, _), do: sources
 
   defp valid_news_source?(%{provider: :news_rss, title: title, url: url,
                                    published_at: stamp, excerpt: excerpt})
