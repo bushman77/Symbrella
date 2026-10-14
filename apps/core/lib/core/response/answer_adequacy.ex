@@ -12,7 +12,7 @@ defmodule Core.Response.AnswerAdequacy do
   """
 
   @question_start ~r/\A(?:what|where|when|who|whom|whose|which|why|how|is|are|was|were|do|does|did|can|could|should|would|will|has|have|had)\b/iu
-  @social_question ~r/\A(?:how\s+(?:are|do)\s+you(?:\s+feel)?|what'?s\s+up|what\s+are\s+you\s+doing)\b/iu
+  @social_question ~r/\A(?:how\s+are\s+you(?:\s+(?:doing|feeling|today))?|how\s+do\s+you\s+feel|what'?s\s+up|what\s+are\s+you\s+doing)\s*[?!.]*\z/iu
   @followup ~r/\A(?:(?:(?:i\s+)?(?:do\s+not|don't)\s+know)[,!.]?\s*)?(?:you\s+tell\s+me|tell\s+me(?:\s+the\s+answer)?|answer\s+(?:it|the\s+question)|just\s+answer(?:\s+it)?|so\s+what'?s\s+the\s+answer)\s*[.!?]*\z/iu
   @empty_reply ~r/\A(?:i\s+(?:do\s+not|don't)\s+know|not\s+sure|i'?m\s+not\s+sure|i\s+have\s+no\s+idea)[.!?]*\z/iu
 
