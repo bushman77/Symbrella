@@ -60,10 +60,17 @@ defmodule Core.LIFG.RelationalFeedbackTest do
     assert [%{token_index: 1, from: "bank|noun|finance",
               to: "bank|noun|river"}] = out.lifg_feedback.applied_revisions
 
-    assert Enum.find(out.lifg_choices, &(&1.token_index == 1)).id ==
-             "bank|noun|river"
+    revised_word = Enum.find(out.lifg_choices, &(&1.token_index == 1))
+    assert revised_word.id == "bank|noun|river"
+    assert revised_word.relational_feedback_uncertain?
+    assert revised_word.margin < 0.15
     assert Enum.find(out.semantic_choices, &(&1.token_index == 1)).id ==
              "bank|noun|river"
+
+    summary = Core.Comprehension.Summary.build(out)
+    assert "bank" in summary.uncertain
+    refute "bank" in summary.understood
+    assert summary.degraded?
 
     assert Enum.any?(out.atl_slate.constituents, fn
       %{id: :noun_phrase, status: :resolved,
