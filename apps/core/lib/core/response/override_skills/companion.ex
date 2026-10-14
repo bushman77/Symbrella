@@ -167,7 +167,8 @@ defmodule Core.Response.OverrideSkills.Companion do
     intent = Map.get(features, :intent)
 
     (short_greeting_turn?(text) and not substantive_question_text?(text)) or
-      (intent == :smalltalk and not substantive_question_text?(text)) or
+      (intent == :smalltalk and not substantive_question_text?(text) and
+         not personal_life_update_text?(text)) or
       Regex.match?(
         ~r/^\s*(huh+\??|no+|c+mon.*up|wh+a+t'?s*\s*u+p+\??|wha+t+s+\s*u+p+\??)\s*$/iu,
         text
