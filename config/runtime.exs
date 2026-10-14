@@ -271,6 +271,26 @@ config :core, Core.TrainingArchive,
   enabled?: training_archive_enabled?,
   dir: System.get_env("SYMBRELLA_TRAINING_DIR", "tmp/training")
 
+# Experimental read-only inference from an existing residual Axon checkpoint.
+# OFF by default, requires the training archive, never changes cognition.
+neural_shadow_enabled? =
+  case System.get_env("SYMBRELLA_NEURAL_SHADOW", "off") |> String.downcase() do
+    value when value in ["1", "true", "yes", "on"] -> true
+    _ -> false
+  end
+
+neural_shadow_dir = System.get_env("SYMBRELLA_TRAINING_DIR", "tmp/training")
+
+config :symbrella_web, SymbrellaWeb.NeuralShadow,
+  enabled?: training_archive_enabled? and neural_shadow_enabled?,
+  dir: neural_shadow_dir,
+  checkpoint:
+    System.get_env(
+      "SYMBRELLA_NEURAL_SHADOW_CHECKPOINT",
+      Path.join(neural_shadow_dir, "state_transition_residual_v4_pilot.etf")
+    )
+
+
 config :brain, Brain.SelfCalibration.Logger,
   enabled?: true,
   path: "priv/self_calibration/samples.jsonl"
