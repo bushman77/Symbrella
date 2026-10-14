@@ -188,8 +188,8 @@ defmodule Core.Syntax.Signatures do
            {wh_modifier, [aux | after_aux]} <- take_optional_adverb(after_wh),
            true <- question_auxiliary?(aux),
            [subject | after_subject] <- after_aux,
-           true <- pos?(subject, "pronoun") or
-                     MapSet.member?(@question_subjects, subject.word),
+           true <- (pos?(subject, "pronoun") or
+                      MapSet.member?(@question_subjects, subject.word)),
            {predicate_modifier, negation, [verb, prep | topic]} <-
              take_predicate_prefix(after_subject),
            true <- pos?(verb, "verb"),
