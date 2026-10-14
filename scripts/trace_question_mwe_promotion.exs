@@ -47,7 +47,7 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
        enrich_lexicon?: true,
        lexicon_stage?: true,
        session_id: "mwe-promotion-proof-#{label}",
-       lifg_opts: [trace_mwe_promotion?: true]]
+       lifg_opts: [trace_mwe_promotion?: true, trace_word_scores?: true]]
       |> maybe_grammar_override(grammar_override)
 
     IO.puts("\n--- Run #{label} ---")
@@ -127,6 +127,16 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
       |> Enum.map(&Map.take(&1, [:stage, :reason, :meta]))
 
     IO.inspect(audits, label: "Actual scoring and promotion trace",
+      limit: :infinity, pretty: true, width: 110)
+
+    word_audits =
+      si
+      |> list(:trace)
+      |> Enum.filter(&(Map.get(&1, :stage) == :lifg_word_score_audit))
+      |> Enum.map(&Map.get(&1, :meta))
+      |> Enum.take(1)
+
+    IO.inspect(word_audits, label: "LIFG per-token probability audit",
       limit: :infinity, pretty: true, width: 110)
 
     chosen =
