@@ -42,8 +42,10 @@ defmodule Brain.LIFG.ContextFit do
   #
   # Stage1 already has separate machinery for POS/function-word behavior,
   # so ContextFit should concentrate on semantic content.
+  # "about" is a relation marker in topic questions, not discriminating
+  # evidence that a particular dictionary sense of "know" is correct.
   @stopwords MapSet.new(~w(
-    a an and are as at be been being but by
+    a about an and are as at be been being but by
     can could did do does for from had has have
     he her hers him his how i if in into is it its
     may me might mine must my nor not of on or our ours
