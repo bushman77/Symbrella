@@ -87,6 +87,8 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
+    |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
+    |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -114,7 +116,8 @@ defmodule Core.Response.ReflectionLoop do
       :unsupported_device_refusal in issues ->
         {:repair, issues}
 
-      :news_access_refusal in issues ->
+      :news_access_refusal in issues or :news_evidence_not_cited in issues or
+          :news_assessment_missing in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -169,8 +172,8 @@ defmodule Core.Response.ReflectionLoop do
         :unsupported_device_refusal in issues ->
           acknowledge_device_command(context)
 
-        :news_access_refusal in issues ->
-          news_headline_fallback(context)
+        Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
+          news_headline_fallback(context, user_text)
 
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
@@ -202,8 +205,8 @@ defmodule Core.Response.ReflectionLoop do
       cond do
         :unsupported_device_refusal in issues ->
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
-        :news_access_refusal in issues ->
-          "Recent dated headlines were retrieved. Replace the false blanket news-access refusal with a cautious, sourced headline summary; distinguish headlines from independently verified facts."
+        Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
+          "Recent headlines require accurate publication dates, outlet attribution, source links and—when requested—a separate qualified assessment. Repair the draft from the retrieved headlines without inventing verified article contents."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -236,25 +239,96 @@ defmodule Core.Response.ReflectionLoop do
 
   defp news_access_refusal?(_, _), do: false
 
-  defp news_headline_fallback(context) do
+  # A headline is evidence of what an outlet reported, not proof that the
+  # underlying event has been independently confirmed. For news answers we
+  # require at least one matched triple: publisher, publication day and URL
+  # all attached to the SAME retained source. Arbitrary citations do not pass.
+  defp news_evidence_not_cited?(context, draft_text) do
+    case news_sources(context) do
+      [] ->
+        false
+
+      sources ->
+        not Enum.any?(sources, fn source ->
+          url = Map.get(source, :url, "")
+          publisher = Map.get(source, :publisher, "")
+          published = Map.get(source, :published_at, "")
+          date = if is_binary(published), do: String.slice(published, 0, 10), else: ""
+
+          is_binary(url) and url != "" and
+            is_binary(publisher) and publisher != "" and
+            byte_size(date) == 10 and
+            String.contains?(draft_text, url) and
+            String.contains?(String.downcase(draft_text), String.downcase(publisher)) and
+            String.contains?(draft_text, date)
+        end)
+    end
+  end
+
+  defp news_assessment_missing?(context, user_text, draft_text) do
+    news_sources(context) != [] and
+      Regex.match?(
+        ~r/\b(?:your thoughts|what do you think|your take|your opinion|how do you view|what's your view)\b/iu,
+        user_text
+      ) and
+      not Regex.match?(
+        ~r/\b(?:my assessment|my view|i think|in my view|my concern|a key concern|key risks?|major risks?|the implications|this raises|i would focus|the central issue)\b/iu,
+        draft_text
+      )
+  end
+
+  defp news_sources(context) do
+    case Map.get(context, :web_evidence, %{}) do
+      %{relation: :current_events, status: :retrieved,
+        resolution: :headlines_available, sources: sources}
+      when is_list(sources) ->
+        Enum.filter(sources, fn source ->
+          is_map(source) and
+            is_binary(Map.get(source, :url)) and
+            is_binary(Map.get(source, :published_at)) and
+            is_binary(Map.get(source, :publisher))
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp news_headline_fallback(context, user_text) do
     reports =
       context
-      |> Map.get(:web_evidence, %{})
-      |> Map.get(:sources, [])
+      |> news_sources()
       |> Enum.take(2)
       |> Enum.map_join("\n", fn source ->
         title = Map.get(source, :title, "")
         publisher = Map.get(source, :publisher, "Source")
-        stamp = Map.get(source, :published_at, "")
+        date = source |> Map.get(:published_at, "") |> String.slice(0, 10)
         url = Map.get(source, :url, "")
-        "- #{publisher} (#{stamp}): #{title}. #{url}"
+
+        "- #{publisher} (#{date}) reported: #{title}. Source: #{url}"
       end)
 
-    "I found recent dated news headlines, although I haven't independently verified " <>
-      "the underlying articles:\n#{reports}\n" <>
-      "My assessment: this conflict has serious risks of regional escalation, " <>
-      "civilian harm and economic disruption. The situation warrants caution and " <>
-      "a distinction between reported developments and independently established facts."
+    "Recent dated headlines from news outlets (not independently verified full articles):\n" <>
+      reports <> "\n" <> news_assessment(user_text)
+  end
+
+  defp news_assessment(user_text) do
+    cond do
+      Regex.match?(~r/\b(?:war|conflict|fighting|military|strikes?|hostilities)\b/iu, user_text) ->
+        "My assessment: the important issues are civilian protection, the potential " <>
+          "for escalation, diplomatic options and economic disruption. The headlines " <>
+          "alone cannot establish all developments or how the conflict will evolve."
+
+      Regex.match?(~r/\b(?:election|vote|polls?|campaign)\b/iu, user_text) ->
+        "My assessment: distinguish reported campaign developments from verified " <>
+          "results, official statements and measurable policy effects. Headlines " <>
+          "alone do not establish the final outcome."
+
+      true ->
+        "My assessment: these dated reports are a useful starting point, but " <>
+          "the underlying facts and implications need checking against primary " <>
+          "evidence before reaching firmer conclusions."
+    end
   end
 
   # A generic "can't assist" is not itself evidence of a safety issue.

@@ -293,8 +293,8 @@ defmodule Core.Response.LlmPrompt do
           "Never claim these headlines independently verify events, casualty counts or responsibility. " <>
           "Attribute specific developments to the cited outlet, include reporting dates, and say when details remain uncertain. " <>
           "For 'what do you think' questions, give a substantive measured assessment distinct from reported facts. " <>
-          "Do not refuse solely by saying you lack live news access.",
-        headlines
+          "Do not refuse solely by saying you lack live news access."
+        | headlines
       ],
       "\n"
     )

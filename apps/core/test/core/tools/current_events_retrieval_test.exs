@@ -101,6 +101,9 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
 
     prompt = LlmPrompt.build_system_prompt(result)
     assert prompt =~ "RECENT NEWS HEADLINES"
+    assert prompt =~ "\n[1] "
+    assert prompt =~ "\n[2] "
+    refute prompt =~ "example-wire-1[2]"
     assert prompt =~ Date.to_iso8601(Date.utc_today())
     assert prompt =~ "Example Wire"
     assert prompt =~ "independently"
@@ -141,6 +144,88 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     assert text =~ "https://news.google.com/rss/articles/example-wire-1"
     assert text =~ "My assessment:"
     refute text =~ "I don't have live news access"
+  end
+
+  test "uncited single-headline answer from the live Iran report is repaired" do
+    result = WebRetrieval.enrich(question(),
+      enabled?: true, news_provider: DatedNews, max_attempts: 2)
+
+    draft =
+      "I'm observing the current situation with the US Iran war. " <>
+        "It's reported that nuclear sites are being fortified for possible strikes."
+
+    {:ok, final, review} =
+      ReflectionLoop.review(question().user_text, draft, result)
+
+    assert review.status == :repair
+    assert :news_evidence_not_cited in review.issues
+    assert :news_assessment_missing in review.issues
+    assert review.applied?
+    assert final =~ "Example Wire"
+    assert final =~ "Second Wire"
+    assert final =~ "https://news.google.com/rss/articles/example-wire-1"
+    assert final =~ Date.to_iso8601(Date.utc_today())
+    assert final =~ "My assessment:"
+    assert final =~ "not independently verified"
+    refute final =~ "nuclear sites"
+  end
+
+  test "complete outlet, date, matching link and assessment can pass" do
+    result = WebRetrieval.enrich(question(),
+      enabled?: true, news_provider: DatedNews)
+
+    source = hd(result.web_evidence.sources)
+    date = String.slice(source.published_at, 0, 10)
+
+    draft =
+      "#{source.publisher} reported on #{date}: #{source.title}. " <>
+        "Source: #{source.url}\n" <>
+        "My assessment: the evidence remains limited to headlines."
+
+    {:ok, final, review} =
+      ReflectionLoop.review(question().user_text, draft, result)
+
+    assert review.status == :accept
+    refute :news_evidence_not_cited in review.issues
+    refute :news_assessment_missing in review.issues
+    assert final == draft
+  end
+
+  test "an unrelated citation cannot satisfy news provenance checks" do
+    result = WebRetrieval.enrich(question(),
+      enabled?: true, news_provider: DatedNews)
+
+    source = hd(result.web_evidence.sources)
+    date = String.slice(source.published_at, 0, 10)
+
+    draft =
+      "#{source.publisher} reported on #{date}: #{source.title}. " <>
+        "Source: https://news.google.com/rss/articles/UNRELATED\n" <>
+        "My assessment: details need verification."
+
+    {:ok, final, review} =
+      ReflectionLoop.review(question().user_text, draft, result)
+
+    assert review.status == :repair
+    assert :news_evidence_not_cited in review.issues
+    assert final =~ "https://news.google.com/rss/articles/example-wire-1"
+    refute final =~ "UNRELATED"
+  end
+
+  test "requests for headlines need citations but not a personal assessment" do
+    user = question("What is the latest news happening today?")
+    result = WebRetrieval.enrich(user, enabled?: true, news_provider: DatedNews)
+    source = hd(result.web_evidence.sources)
+
+    draft =
+      "#{source.publisher} (#{String.slice(source.published_at, 0, 10)}): " <>
+        "#{source.title}. Source: #{source.url}"
+
+    {:ok, final, review} =
+      ReflectionLoop.review(user.user_text, draft, result)
+
+    assert review.status == :accept
+    assert final == draft
   end
 
   test "no headline data means reflection does not falsely claim news access" do
