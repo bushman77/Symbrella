@@ -50,7 +50,7 @@ defmodule SymbrellaWeb.NeuralShadow do
        %{
          artifact: artifact,
          predict: predict,
-         sha256: binary |> :crypto.hash(:sha256) |> Base.encode16(case: :lower)
+         sha256: :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
        }}
     else
       {:error, reason} -> {:error, reason}
