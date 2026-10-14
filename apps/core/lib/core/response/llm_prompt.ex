@@ -582,6 +582,9 @@ defmodule Core.Response.LlmPrompt do
         guardrail? ->
           "brief safe redirect"
 
+        GreetingTurn.standalone?(map_get(features, :text)) ->
+          "reciprocate this social greeting; avoid help-desk language and forced tasks"
+
         skill_moves_to?(features, :personal_life_update) ->
           "acknowledge the personal milestone warmly; do not turn it into a task; ask one natural follow-up"
 
