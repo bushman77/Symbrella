@@ -53,6 +53,18 @@ defmodule Core.Semantic.SentenceMeaningTest do
             unresolved_roles: []
           },
           %{
+            id: :noun_phrase,
+            span: {6, 7},
+            status: :resolved,
+            roles: %{
+              modifier: %{norm: "railgun", token_index: 6,
+                sense_id: "railgun|noun|1"},
+              head: %{norm: "development", token_index: 7,
+                sense_id: "development|noun|1"}
+            },
+            unresolved_roles: []
+          },
+          %{
             id: :possessive_noun_phrase,
             span: {5, 7},
             status: :partially_resolved,
@@ -85,6 +97,91 @@ defmodule Core.Semantic.SentenceMeaningTest do
     assert meaning.grounding.topic_facts == :not_checked
   end
 
+  test "composes a query proposition rather than claiming a fact" do
+    si = input()
+    meaning = SentenceMeaning.build(si)
+
+    assert %{
+      type: :information_request,
+      queried: %{type: :wh_open, surface: "What"},
+      epistemic_status: :question_not_assertion,
+      content: %{
+        predicate: %{surface: "know", sense_id: "know|verb|13"},
+        subject: %{reference: :addressee, surface: "you"},
+        complement: %{
+          kind: :prepositional_topic,
+          relation: %{surface: "about", sense_id: "about|preposition|1"},
+          argument: %{
+            head: %{surface: "development", sense_id: "development|noun|1"},
+            modifiers: [%{surface: "railgun", sense_id: "railgun|noun|1"}],
+            genitive: %{
+              semantic_relation: :unspecified,
+              status: :syntactically_observed,
+              possessor: %{
+                surface: "Japan", sense_id: nil,
+                grounding_status: :unverified
+              }
+            },
+            source: :atl_resolved_noun_phrase
+          }
+        }
+      },
+      grounding: %{external_facts: :not_checked,
+        predicate_sense: :selected_not_contextually_verified}
+    } = meaning.proposition
+
+    assert meaning.proposition.provenance.topic_span == {5, 7}
+    assert meaning.proposition.provenance.frame == :wh_aux_topic_question
+  end
+
+  test "keeps topic surface without inventing noun senses when ATL lacks a noun frame" do
+    si = input()
+
+    si =
+      update_in(si.atl_slate.constituents, fn constituents ->
+        Enum.reject(constituents, &(&1.id == :noun_phrase))
+      end)
+
+    argument =
+      si
+      |> SentenceMeaning.build()
+      |> get_in([:proposition, :content, :complement, :argument])
+
+    assert argument.surface == "Japan's railgun development"
+    assert argument.head == nil
+    assert argument.modifiers == []
+    assert argument.source == :surface_only
+    assert argument.grounding_status == :unverified
+    assert argument.genitive.semantic_relation == :unspecified
+  end
+
+  test "generic predicate roles preserve vocabulary rather than hardcoding knowledge_about" do
+    si = input()
+
+    tokens =
+      Enum.map(si.tokens, fn
+        %{index: 3} = word -> %{word | phrase: "learn"}
+        %{index: 4} = word -> %{word | phrase: "about"}
+        word -> word
+      end)
+
+    constituents =
+      Enum.map(si.atl_slate.constituents, fn
+        %{id: :wh_aux_topic_question, roles: roles} = question ->
+          %{question | roles: %{roles |
+            predicate: %{sense_id: "learn|verb|1"}}}
+        other -> other
+      end)
+
+    si = %{si | tokens: tokens, atl_slate: %{constituents: constituents}}
+    proposition = SentenceMeaning.build(si).proposition
+
+    assert proposition.content.predicate.surface == "learn"
+    assert proposition.content.predicate.sense_id == "learn|verb|1"
+    assert proposition.content.complement.relation.surface == "about"
+    assert proposition.type == :information_request
+  end
+
   test "attaches sentence definition without changing lexical winners or claiming grounding" do
     si = input()
     out = SentenceMeaning.attach(si)
@@ -96,6 +193,7 @@ defmodule Core.Semantic.SentenceMeaningTest do
     assert out.atl_slate == si.atl_slate
     assert summary.sentence_definition == out.sentence_meaning.definition
     assert summary.sentence_meaning == out.sentence_meaning
+    assert summary.sentence_proposition == out.sentence_meaning.proposition
     assert summary.sentence_meaning.grounding.topic_facts == :not_checked
     assert [%{stage: :sentence_meaning, decision: :structurally_interpreted} | _] = out.trace
   end
