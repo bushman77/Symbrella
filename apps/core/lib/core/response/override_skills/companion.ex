@@ -4,6 +4,7 @@ defmodule Core.Response.OverrideSkills.Companion do
   """
 
   alias Core.Response.OverrideSkills.Decision
+  alias Core.Response.GreetingTurn
 
   @spec apply(map(), map()) :: {:ok, {map(), map()}} | :pass
   def apply(features, decision) do
@@ -192,22 +193,9 @@ defmodule Core.Response.OverrideSkills.Companion do
 
   defp personal_life_update_text?(_), do: false
 
-  defp casual_greeting?(text) when is_binary(text) do
-    Regex.match?(~r/\b(he+y+|hi+|hello|yo+|sup)\b/iu, text) and
-      not Regex.match?(~r/\bgood\s+(morning|afternoon|evening)\b/iu, text)
-  end
-
-  defp casual_greeting?(_), do: false
-
-  defp short_greeting_turn?(text) when is_binary(text) do
-    trimmed = String.trim(text)
-
-    String.length(trimmed) <= 48 and
-      (casual_greeting?(trimmed) or
-         Regex.match?(~r/\bgood\s+(morning|afternoon|evening)\b/iu, trimmed))
-  end
-
-  defp short_greeting_turn?(_), do: false
+  # Never absorb a personal update or substantive request into a greeting
+  # override merely because the sentence starts with "good afternoon".
+  defp short_greeting_turn?(text), do: GreetingTurn.standalone?(text)
 
   defp idle_curiosity_casual_turn?(features) when is_map(features) do
     text = Map.get(features, :text, "")
