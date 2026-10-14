@@ -715,3 +715,87 @@ This fix addresses training/evaluation masking, **not** the underlying
 fast-path instrumentation gap; investigating when the upstream cognitive
 snapshot is skipped remains a separate task. The sample is still too small
 for meaningful conclusions about learned neural cognition.
+
+
+## Complete-turn runtime instrumentation (feature schema v4)
+
+The first 13 archived completed turns contained one missing raw MoodCore snapshot.
+Investigation found a real source of incomplete rows: \`HomeLive\` can answer a
+message through \`Response.memory_reply/1\` without calling
+\`Core.resolve_input/2\`. Such fast-path turns legitimately lack a full
+\`Core.SemanticInput\` and \`self_model\`. The old training archive implicitly
+treated the missing semantic snapshot as missing cognitive state.
+
+The **recording boundary is now instrumented**, only when
+\`SYMBRELLA_TRAINING_ARCHIVE=on\`. For each successfully completed ordinary
+user/assistant chat turn:
+
+- The chat worker captures one **fresh, read-only** \`Brain.MoodCore.snapshot/0\`
+  at the end of the reply. The separate \`runtime_observation\` object records
+  source, ISO timestamp, capture status (\`captured\`, \`partial\`, or
+  \`unavailable\`), measured DA/5HT/Glu/NE levels and the four derived
+  mood indices. Missing values remain \`null\`, not fabricated zero.
+- \`pipeline_status\` records whether the response took the
+  \`memory_fast_path\` (semantic pipeline explicitly bypassed) or the
+  \`semantic_pipeline\` (the resolver returned). No synthetic self-model,
+  LIFG choices or derived semantic decision is inserted for fast paths.
+- The worker and LiveView's final identity-correction process each report
+  a **process-local** Hippocampus trace summary. The consolidated
+  \`hippocampal_trace\` explicitly distinguishes \`not_attempted\` from
+  \`attempted\`, \`incomplete\`, and \`unknown\`. Zero-result
+  retrievals were already recorded by the Hippocampus boundary; these
+  now have explicit trace-completeness context.
+- Missing trace records in **older archives** remain unknown. A complete
+  trace with zero recorded attempts means no traced API call was made in
+  those two processes; it does not rule out work delegated to other processes.
+
+These optional fields are added to \`tmp/training/turns.jsonl\`, without
+changing old JSONL lines. They do not modify responses, memory choices,
+MoodCore state, or hippocampal ranking. Cancelled/crashed workers are still
+not silently turned into completed training conversations; that is a
+separate future crash-diagnostic stream.
+
+**The v4 training feature projection** retains 24 input values and the
+v3 observed-only masks, but uses the new measured
+\`runtime_observation.levels\` and \`runtime_observation.mood\` as the
+fallback when no semantic self-model is available. Real semantic pipeline
+observations remain preferred. A fully observed process-local no-recall
+trace can contribute a measured zero to event-count features. An unknown
+or missing trace cannot.
+
+Validate locally:
+
+\`\`\`sh
+mix test apps/core/test/core/training_archive/runtime_observation_test.exs \
+  apps/core/test/core/training_archive_test.exs \
+  apps/brain/test/brain/hippocampus/turn_trace_status_test.exs \
+  apps/brain/test/brain/neural/state_transition_pilot_test.exs \
+  apps/brain/test/brain/neural/state_transition_residual_test.exs
+
+mix neural.dataset --task state_transition
+\`\`\`
+
+New model checkpoint names preserve all v1/v2/v3 experiments:
+
+- \`state_transition_v4_pilot.etf\` and \`state_transition_v4_smoke.etf\`
+- \`state_transition_residual_v4_pilot.etf\` and
+  \`state_transition_residual_v4_smoke.etf\`
+
+After interacting with the newly launched archive-enabled chat, inspect
+only capture metadata (not the conversation content):
+
+\`\`\`sh
+jq -r '
+  [.pipeline_status.route,
+   .runtime_observation.status,
+   .runtime_observation.levels.da,
+   .hippocampal_trace.status,
+   .hippocampal_trace.recall_status] | @tsv
+' tmp/training/turns.jsonl
+\`\`\`
+
+The **13 historical turns are not retroactively repaired**: the single
+missing old snapshot remains unknown. Future conversation turns will use
+the new instrumentation. More independent sessions and a substantially
+larger archive are still needed before Axon model performance can be
+judged reliably.
