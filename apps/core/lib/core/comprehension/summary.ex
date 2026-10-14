@@ -440,6 +440,7 @@ defmodule Core.Comprehension.Summary do
       keyword: nil,
       understood: [],
       lexical_meanings: [],
+      syntactic_relations: [],
       uncertain: [],
       degraded?: true,
       reasons: [:invalid_input],
