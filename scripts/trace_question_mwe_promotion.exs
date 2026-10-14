@@ -137,6 +137,20 @@ defmodule Symbrella.TraceQuestionMWEPromotion do
     IO.inspect(word_audits, label: "LIFG per-token probability audit",
       limit: :infinity, pretty: true, width: 110)
 
+    controls =
+      si
+      |> list(:lifg_choices)
+      |> Enum.flat_map(fn choice ->
+        case Map.get(choice, :semantic_control) do
+          %{} = evidence ->
+            [Map.put(evidence, :token_index, Map.get(choice, :token_index))]
+          _ -> []
+        end
+      end)
+
+    IO.inspect(controls, label: "LIFG semantic-control decisions",
+      limit: :infinity, pretty: true, width: 110)
+
     chosen =
       si
       |> list(:mwe_choices)
