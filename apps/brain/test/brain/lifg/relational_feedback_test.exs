@@ -51,7 +51,7 @@ defmodule Brain.LIFG.RelationalFeedbackTest do
              proposed_id: "bank|noun|river", revision?: true,
              status: :revision_proposed, context_cues: ["river"],
              adjustments: [%{id: "bank|noun|river",
-                             source: :original_sentence_dictionary_context}]} =
+                             source: :atl_structural_relation_dictionary_context}]} =
              Enum.find(result.decisions, &(&1.token_index == 1))
 
     new_probs = Enum.find(result.decisions, &(&1.token_index == 1)).posterior
