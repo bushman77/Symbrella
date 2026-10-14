@@ -645,7 +645,11 @@ defmodule Brain.LIFG do
           :source,
           :stage1_local_mwe_fallback,
           :stage1_stop_event,
-          :grammar_weight
+          :grammar_weight,
+          :semantic_control?,
+          :semantic_control_max_delta,
+          :semantic_control_min_fit,
+          :semantic_control_min_gap
         ])
       )
 
