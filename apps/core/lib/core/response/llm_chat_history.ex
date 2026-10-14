@@ -9,6 +9,8 @@ defmodule Core.Response.LlmChatHistory do
   alias Core.Response.LlmChatHistoryOwner
 
   @table :core_llm_chat_history
+  @recall_table :core_conversation_recall
+  @recall_turn_pairs 100
   @default_turn_pairs 6
   @default_max_item_chars 900
 
@@ -30,6 +32,19 @@ defmodule Core.Response.LlmChatHistory do
       )
 
     :ets.insert(@table, {session_id, next})
+
+    # Preserve more conversational evidence than we can afford to send to the
+    # LLM as prompt context. Both stores are bounded and process-local.
+    recall =
+      LlmHistory.append_turn(
+        lookup_messages(@recall_table, session_id),
+        user_text,
+        assistant_text,
+        @recall_turn_pairs,
+        configured_max_item_chars()
+      )
+
+    :ets.insert(@recall_table, {session_id, recall})
     :ok
   rescue
     e ->
@@ -50,6 +65,22 @@ defmodule Core.Response.LlmChatHistory do
     |> LlmHistory.recent(turn_pairs)
   end
 
+  @doc """
+  Return conversation evidence for verified past-turn recall.
+
+  This is deliberately separate from the short LLM prompt window, and is
+  retained in memory only. It is not a durable chat transcript.
+  """
+  @spec recall_messages(term(), pos_integer()) :: list()
+  def recall_messages(session_id, turn_pairs \\ @recall_turn_pairs)
+      when is_integer(turn_pairs) and turn_pairs > 0 do
+    ensure_table!()
+
+    session_id
+    |> then(&lookup_messages(@recall_table, &1))
+    |> LlmHistory.recent(min(turn_pairs, @recall_turn_pairs))
+  end
+
   @spec status(term()) :: map()
   def status(session_id) do
     case :ets.whereis(@table) do
@@ -65,13 +96,15 @@ defmodule Core.Response.LlmChatHistory do
     LlmChatHistoryOwner.ensure_table!()
   end
 
-  defp lookup_messages(session_id) do
-    case :ets.whereis(@table) do
+  defp lookup_messages(session_id), do: lookup_messages(@table, session_id)
+
+  defp lookup_messages(table, session_id) do
+    case :ets.whereis(table) do
       :undefined ->
         []
 
       _tid ->
-        case :ets.lookup(@table, session_id) do
+        case :ets.lookup(table, session_id) do
           [{^session_id, list}] when is_list(list) -> list
           _ -> []
         end

@@ -8,6 +8,7 @@ defmodule Core.Response.Memory do
 
   alias Core.Response.SideEffects
   alias Core.Response.LlmChatHistory
+  alias Core.Response.ConversationRecall
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -40,6 +41,8 @@ defmodule Core.Response.Memory do
         direct_fact: direct_fact,
         fact_query_key: fact_query_key
       }) do
+    conversation_recall = ConversationRecall.reply(text_in, session_id)
+
     cond do
       asking_for_assistant_name?(text_in, session_id) ->
         name = SideEffects.assistant_name()
@@ -158,6 +161,17 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         }
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, conversation_recall) ->
+        {text, recall_meta} = conversation_recall
+
+        meta =
+          recall_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, text, meta)
 
@@ -345,7 +359,7 @@ defmodule Core.Response.Memory do
 
     # Only the outcome and provenance cross the telemetry boundary. Never
     # emit the conversation text or fact values as recall metadata.
-    if Map.get(meta, :action) in [:identity, :recall_fact] do
+    if Map.get(meta, :action) in [:identity, :recall_fact, :conversation_recall] do
       :telemetry.execute(
         @memory_recall_event,
         %{count: 1, hit: if(Map.get(meta, :retrieval_found?, false), do: 1, else: 0)},

@@ -11,7 +11,11 @@
 3. The LiveView's current conversation identifier is owned by ChatHistory. It is
    stable across LiveView remounts while the application is running. Clearing the
    chat starts a fresh conversation identifier. Bounded LLM prompt history retains
-   six turn pairs by default.
+   six turn pairs by default. A separate ETS buffer retains up to 100 completed
+   exchanges for evidence-based past-turn recall, never sent wholesale to the LLM.
+   Explicit questions such as "Have I asked you what 1 plus 1 is?" check the
+   recorded user turns before the semantic/LLM pipeline, returning a grounded
+   answer or a limited-history miss.
 4. Brain.Neural.MemoryRelevancePilot remains an offline, human-feedback-only
    experiment. Production factual recall does not invoke neural ranking.
 
@@ -44,6 +48,7 @@ Run the complete suite:
 Or focused tests:
 
     mix test apps/core/test/core/response/identity_continuity_test.exs
+    mix test apps/core/test/core/response/conversation_recall_test.exs
     mix test apps/core/test/core/response/memory_recall_telemetry_test.exs
     mix test apps/db/test/db/episode_exact_fact_test.exs
     mix test apps/core/test/core/response/durable_fact_acknowledgement_test.exs
@@ -68,3 +73,11 @@ user-name and user-fact claims instead use Brain.Hippocampus.encode_verified_fac
 the PostgreSQL insert must succeed before the memory window is updated and
 before a durable acknowledgement is emitted. If persistence fails, the reply
 states the limitation rather than claiming permanent recall.
+
+## Current limits of conversational continuity
+
+Explicit past-turn recall is evidence-based, but open-ended pronoun resolution,
+topic transitions, and questions about facts not explicitly stored as user facts
+still depend on the model and the semantic pipeline. The 100-turn buffer is
+in-process and is lost on application restart. A verified name/fact survives
+restart through PostgreSQL, but a full transcript does not.

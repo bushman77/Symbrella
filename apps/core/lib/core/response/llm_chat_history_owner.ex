@@ -5,6 +5,7 @@ defmodule Core.Response.LlmChatHistoryOwner do
   require Logger
 
   @table :core_llm_chat_history
+  @recall_table :core_conversation_recall
 
   @spec ensure_table!() :: :ok
   def ensure_table! do
@@ -21,26 +22,23 @@ defmodule Core.Response.LlmChatHistoryOwner do
 
   @impl true
   def handle_call(:ensure_table, _from, state) do
-    case :ets.whereis(@table) do
-      :undefined ->
-        _tid =
-          :ets.new(@table, [
-            :named_table,
-            :public,
-            :set,
-            {:read_concurrency, true},
-            {:write_concurrency, true}
-          ])
+    Enum.each([@table, @recall_table], fn table ->
+      if :ets.whereis(table) == :undefined do
+        :ets.new(table, [
+          :named_table,
+          :public,
+          :set,
+          {:read_concurrency, true},
+          {:write_concurrency, true}
+        ])
 
         Logger.debug(
-          "[LlmChatHistory] ETS created table=#{inspect(@table)} owner=#{inspect(self())}"
+          "[LlmChatHistory] ETS created table=#{inspect(table)} owner=#{inspect(self())}"
         )
+      end
+    end)
 
-        {:reply, :ok, state}
-
-      _tid ->
-        {:reply, :ok, state}
-    end
+    {:reply, :ok, state}
   end
 
   defp ensure_started do
