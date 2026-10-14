@@ -57,6 +57,22 @@ defmodule Core.LIFG.ScoreAuditTest do
     assert entry.reported_candidate_count == 2
   end
 
+  test "extracts word-score metadata from heterogeneous pipeline trace entries" do
+    report = %{scores_mode: :all, entries: [%{token_index: 0}]}
+
+    trace = [
+      {:activated, %{rows: 137, lifg_choices: 7, shape: :activate_cells}},
+      %{stage: :lifg_run, reason: :stage1_choices_available},
+      :legacy_trace_event,
+      %{stage: :lifg_word_score_audit, meta: report},
+      %{stage: :lifg_word_score_audit, meta: %{entries: []}}
+    ]
+
+    assert ScoreAudit.trace_reports(trace) == [report]
+    assert ScoreAudit.trace_reports([{:activated, %{rows: 1}}]) == []
+    assert ScoreAudit.trace_reports(nil) == []
+  end
+
   test "empty score maps remain unknown rather than implying confidence" do
     [entry] =
       ScoreAudit.summarize(
