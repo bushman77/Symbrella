@@ -3,6 +3,10 @@
 #   mix run scripts/backfill_cash_sense_evidence.exs
 #
 # Explicitly approved update, only AFTER reviewing the full plan:
+#   mix run scripts/backfill_cash_sense_evidence.exs \
+#     --apply --fingerprint <sha256-from-the-dry-run>
+#
+# The optional Mix separator form is also accepted:
 #   mix run scripts/backfill_cash_sense_evidence.exs -- \
 #     --apply --fingerprint <sha256-from-the-dry-run>
 #
@@ -13,14 +17,22 @@
 
 alias Db.JSONL.SenseEvidenceBackfill
 
+# With a script filename, Mix can pass a literal leading "--" through
+# System.argv/0. Remove only this separator; never discard unknown options.
+argv =
+  case System.argv() do
+    ["--" | args] -> args
+    args -> args
+  end
+
 {opts, rest, invalid} =
-  OptionParser.parse(System.argv(),
+  OptionParser.parse(argv,
     strict: [apply: :boolean, fingerprint: :string]
   )
 
 if invalid != [] or rest != [] do
   raise ArgumentError,
-    "Usage: mix run scripts/backfill_cash_sense_evidence.exs [-- --apply --fingerprint SHA256]"
+    "Usage: mix run scripts/backfill_cash_sense_evidence.exs [--apply --fingerprint SHA256]"
 end
 
 apply? = Keyword.get(opts, :apply, false)
