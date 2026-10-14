@@ -57,6 +57,56 @@ defmodule Core.LIFG.ScoreAuditTest do
     assert entry.reported_candidate_count == 2
   end
 
+  test "POS mass and entropy expose distinct from merely numerous senses" do
+    raw = [
+      %{
+        token_index: 0,
+        chosen_id: "railgun|noun|1",
+        scores: %{
+          "railgun|noun|1" => 1.0 / 3,
+          "railgun|noun|2" => 1.0 / 3,
+          "railgun|noun|3" => 1.0 / 3
+        }
+      },
+      %{
+        token_index: 1,
+        chosen_id: "do|auxiliary|0",
+        scores: %{
+          "do|auxiliary|0" => 0.60,
+          "do|verb|1" => 0.20,
+          "do|verb|2" => 0.20
+        }
+      }
+    ]
+
+    final = [
+      %{token_index: 0, id: "railgun|noun|1"},
+      %{token_index: 1, id: "do|auxiliary|0"}
+    ]
+    tokens = [%{index: 0, phrase: "railgun"}, %{index: 1, phrase: "do"}]
+
+    [railgun, do_token] = ScoreAudit.summarize(raw, final, tokens, %{}, :all)
+
+    assert railgun.pos_candidate_counts == %{"noun" => 3}
+    assert_in_delta railgun.pos_probability_mass["noun"], 1.0, 1.0e-9
+    assert_in_delta railgun.normalized_entropy, 1.0, 1.0e-9
+    assert_in_delta railgun.uniform_baseline, 1.0 / 3, 1.0e-9
+    assert_in_delta railgun.unit_interval_logit_ceiling,
+      :math.exp(1.0) / (:math.exp(1.0) + 2), 1.0e-9
+
+    assert do_token.pos_candidate_counts == %{"auxiliary" => 1, "verb" => 2}
+    assert_in_delta do_token.pos_probability_mass["auxiliary"], 0.60, 1.0e-9
+    assert_in_delta do_token.pos_probability_mass["verb"], 0.40, 1.0e-9
+    assert do_token.normalized_entropy < 1.0
+
+    [partial] =
+      ScoreAudit.summarize(
+        [hd(raw)], [hd(final)], [hd(tokens)], %{}, :top2
+      )
+
+    assert partial.normalized_entropy == nil
+  end
+
   test "extracts word-score metadata from heterogeneous pipeline trace entries" do
     report = %{scores_mode: :all, entries: [%{token_index: 0}]}
 
