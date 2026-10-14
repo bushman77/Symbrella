@@ -54,7 +54,7 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert data.metadata.input_turns == 5
     assert data.metadata.complete_modulator_turns == 5
     assert data.metadata.missing_modulator_turns == 0
-    assert data.metadata.feature_schema_version == 3
+    assert data.metadata.feature_schema_version == 4
     assert length(data.metadata.feature_names) == 24
     assert data.metadata.total_pairs == 3
     assert data.metadata.train_examples == 2
@@ -76,7 +76,7 @@ defmodule Brain.Neural.StateTransitionPilotTest do
     assert_in_delta hd(y1), 0.4, 0.00001
 
     assert {:ok, model} = StateTransitionPilot.train(data, epochs: 1)
-    assert model.model_version == "state-transition-pilot-v3"
+    assert model.model_version == "state-transition-pilot-v4"
     assert model.valid_train_cells == data.metadata.train_valid_cells
     assert model.valid_eval_cells == data.metadata.eval_valid_cells
     assert model.evaluated? == true
