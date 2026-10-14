@@ -25,6 +25,9 @@ defmodule Core.Response.LlmRouteFlowTest do
 
       text =
         cond do
+          String.downcase(user_text) == "good afternoon symbrella" ->
+            "good afternoon symbrella. How may I assist you today?"
+
           String.contains?(user_text, "power the computer down") ->
             "I'm sorry, but I can't assist with that."
 
@@ -195,6 +198,49 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute text =~ "Quick picks"
     refute text =~ "Full file"
     assert_receive {:llm_chat, _messages, _opts}
+  end
+
+  test "standalone greeting rejects a robotic service-desk draft from the real LLM route" do
+    si = %{intent: :greet, confidence: 0.8, text: "good afternoon symbrella"}
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text == "good afternoon."
+    assert meta.response_source == :llm
+    assert %{status: :repair, applied?: true, issues: issues} = meta.response_reflection
+    assert :robotic_greeting in issues
+
+    assert_receive {:llm_chat, messages, _opts}
+    system =
+      messages
+      |> Enum.find(&(&1["role"] == "system"))
+      |> Map.fetch!("content")
+
+    assert system =~ "ONLY a social greeting"
+    assert system =~ "not a request for services"
+    assert system =~ "without repeating your name Symbrella"
+    assert system =~ "Generate a natural response rather than following a fixed script"
+  end
+
+  test "mixed greeting and actual request does not trigger social-greeting repair" do
+    si = %{
+      intent: :command,
+      confidence: 0.8,
+      text: "good afternoon symbrella, can you debug this module?"
+    }
+
+    {_tone, text, meta} = Response.plan(si, %{})
+
+    assert text == "LLM verbalized the symbolic posture."
+    assert meta.response_source == :llm
+    refute :robotic_greeting in meta.response_reflection.issues
+
+    assert_receive {:llm_chat, messages, _opts}
+    system =
+      messages
+      |> Enum.find(&(&1["role"] == "system"))
+      |> Map.fetch!("content")
+    refute system =~ "ONLY a social greeting"
   end
 
   test "casual self-state check-ins use the anti-label self-state prompt" do
