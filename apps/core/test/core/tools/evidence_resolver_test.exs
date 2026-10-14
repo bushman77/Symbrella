@@ -75,6 +75,7 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert Enum.map(evidence.attempts, & &1.status) ==
       [:retrieved_unsupported, :source_supported]
     assert evidence.support.kind == :proximity
+    assert Enum.take(evidence.sources, 2) |> Enum.map(& &1.provider) == [:wikidata, :wikidata]
 
     {:ok, final, review} =
       ReflectionLoop.review("Is it close to Vancouver?",

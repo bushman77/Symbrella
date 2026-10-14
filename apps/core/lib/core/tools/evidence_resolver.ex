@@ -50,7 +50,14 @@ defmodule Core.Tools.EvidenceResolver do
       |> Enum.take(max_attempts)
       |> Enum.reduce_while({[], [], nil, :unverified}, fn plan, {traces, gathered, _, _} ->
         {trace, found, candidate} = attempt(plan, subject, target, relation, timeout)
-        gathered = (gathered ++ found) |> Enum.uniq_by(&Map.get(&1, :url)) |> Enum.take(@max_sources)
+        # When a fallback finally supports the claim, put its cited sources
+        # first instead of losing them behind three irrelevant search hits.
+        ordered =
+          if is_map(candidate) and Map.get(candidate, :status) == :source_supported,
+            do: found ++ gathered,
+            else: gathered ++ found
+
+        gathered = ordered |> Enum.uniq_by(&Map.get(&1, :url)) |> Enum.take(@max_sources)
         traces = traces ++ [trace]
 
         if is_map(candidate) and Map.get(candidate, :status) == :source_supported do
