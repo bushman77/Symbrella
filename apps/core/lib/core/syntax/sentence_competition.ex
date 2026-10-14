@@ -140,7 +140,11 @@ defmodule Core.Syntax.SentenceCompetition do
   # Topic words beyond the explicit preposition form one logical scope;
   # they are not each separate roles. This prevents overblocking ordinary
   # noun phrases and legitimate MWEs inside the topic.
-  @role_order [:wh, :auxiliary, :subject, :predicate, :preposition]
+  # Optional adjuncts belong to their host grammatical role for competition.
+  # "what exactly" and "really know" are allowed lexical spans; "exactly do"
+  # and "know about" cross independently evidenced clause-role boundaries.
+  @role_order [:wh, :wh_modifier, :auxiliary, :subject, :negation,
+               :predicate_modifier, :predicate, :preposition]
 
   defp crossed_roles(
          %{span: {frame_start, frame_end}, roles: roles},
@@ -153,10 +157,16 @@ defmodule Core.Syntax.SentenceCompetition do
     labels =
       first..last
       |> Enum.map(fn index ->
-        Enum.find(@role_order, &(Map.get(roles, &1) == index)) ||
-          if(index > Map.get(roles, :preposition, frame_end),
-            do: :topic_complement,
-            else: nil)
+        case Enum.find(@role_order, &(Map.get(roles, &1) == index)) do
+          :wh_modifier -> :wh
+          :predicate_modifier -> :predicate
+          :negation -> :predicate
+          nil ->
+            if index > Map.get(roles, :preposition, frame_end),
+              do: :topic_complement,
+              else: nil
+          role -> role
+        end
       end)
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
@@ -169,16 +179,36 @@ defmodule Core.Syntax.SentenceCompetition do
   defp complete_topic_question?(%{
          id: :wh_aux_topic_question,
          roles: %{wh: wh, auxiliary: aux, subject: subject,
-                  predicate: predicate, preposition: prep},
+                  predicate: predicate, preposition: prep} = roles,
          evidence: evidence
        })
        when is_integer(wh) and is_integer(aux) and is_integer(subject) and
               is_integer(predicate) and is_integer(prep) and is_list(evidence) do
-    aux == wh + 1 and subject == aux + 1 and
-      predicate == subject + 1 and prep == predicate + 1 and
+    wh == 0 and
+      filled_gap?(roles, wh, aux, [:wh_modifier]) and
+      subject == aux + 1 and
+      filled_gap?(roles, subject, predicate, [:negation, :predicate_modifier]) and
+      prep == predicate + 1 and
       Enum.all?([:lexical_verb_available, :explicit_prepositional_topic,
                   :question_punctuation], &(&1 in evidence))
   end
 
   defp complete_topic_question?(_), do: false
+
+  # Every intervening position must be accounted for by an observed optional
+  # role. No arbitrary skips, duplicate indices, or reordered core positions.
+  defp filled_gap?(roles, first, last, optional_roles)
+       when is_integer(first) and is_integer(last) and last > first do
+    intervening = if last == first + 1, do: [], else: Enum.to_list((first + 1)..(last - 1))
+
+    observed =
+      optional_roles
+      |> Enum.map(&Map.get(roles, &1))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort()
+
+    observed == intervening
+  end
+
+  defp filled_gap?(_, _, _, _), do: false
 end
