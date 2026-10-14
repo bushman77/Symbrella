@@ -21,8 +21,10 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
       )
 
     assert html =~ ~s(id="brain-report-copy-btn")
-    assert html =~ ~s(phx-hook="BrainReportCopy")
+    refute html =~ ~s(phx-hook="BrainReportCopy")
+    assert html =~ ~s(id="brain-report-view-btn")
     assert html =~ "Copy Full Brain Report"
+    assert html =~ "View / Save Report"
     assert html =~ ~s(data-brain-report-section="HUD, Clock, Intent, Mood and Self-Model")
     assert html =~ ~s(data-brain-report-section="Selected Region Summary and Snapshot")
     assert html =~ ~s(data-brain-report-section="Complete Blackboard Feed")
@@ -58,4 +60,17 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert html =~ ~s(id="blackboard-copy-target")
     refute html =~ ~s(id="blackboard-full-copy-target")
   end
+
+  test "standalone Brain report handler is served without an asset compilation" do
+    priv_dir = :symbrella_web |> :code.priv_dir() |> to_string()
+    script = Path.join(priv_dir, "static/assets/brain_report_copy.js")
+
+    assert File.exists?(script)
+    source = File.read!(script)
+    assert source =~ "brain-report-copy-btn"
+    assert source =~ "brain-report-view-btn"
+    assert source =~ "Complete Brain"
+    assert source =~ "downloadReport"
+  end
+
 end

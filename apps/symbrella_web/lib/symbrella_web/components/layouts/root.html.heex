@@ -10,6 +10,8 @@
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
+    <!-- Independent of esbuild: keeps Brain report export available in Termux. -->
+    <script defer type="text/javascript" src={~p"/assets/brain_report_copy.js"}></script>
   </head>
   <body>
     {@inner_content}

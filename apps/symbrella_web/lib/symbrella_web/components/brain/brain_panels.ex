@@ -160,14 +160,22 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         <button
           id="brain-report-copy-btn"
           type="button"
-          phx-update="ignore"
-          phx-hook="BrainReportCopy"
           aria-label="Copy complete Brain diagnostics report to clipboard"
           title="Copy all Brain dashboard diagnostics, including unfiltered blackboard events"
           class="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-100"
         >
           <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
           <span data-brain-copy-label>Copy Full Brain Report</span>
+        </button>
+        <button
+          id="brain-report-view-btn"
+          type="button"
+          aria-label="View, select, or download complete Brain diagnostics"
+          title="View, select, or download the complete report even if clipboard access is blocked"
+          class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <.icon name="hero-document-text" class="h-4 w-4" />
+          <span>View / Save Report</span>
         </button>
         <span class="text-sm text-zinc-500">Region:</span>
         <select
