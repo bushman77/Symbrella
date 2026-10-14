@@ -9,6 +9,8 @@ defmodule Core.Response.Memory do
   alias Core.Response.SideEffects
   alias Core.Response.LlmChatHistory
 
+  @memory_recall_event [:core, :response, :memory_recall]
+
   @spec reply(map()) :: {atom(), String.t(), map()} | nil
   def reply(si) when is_map(si) do
     text_in = si_text(si)
@@ -46,6 +48,8 @@ defmodule Core.Response.Memory do
         meta = %{
           action: :identity,
           identity_subject: :assistant,
+          retrieval_found?: true,
+          neural_ranker_used?: false,
           intent_inferred: :name_query,
           response_source: :identity,
           memory_key: :assistant_name,
@@ -71,6 +75,8 @@ defmodule Core.Response.Memory do
         meta = %{
           action: :identity,
           identity_subject: :user,
+          retrieval_found?: is_binary(name) and name != "",
+          neural_ranker_used?: false,
           intent_inferred: :name_query,
           response_source: :memory,
           memory_key: :user_name,
@@ -137,6 +143,8 @@ defmodule Core.Response.Memory do
 
         meta = %{
           action: :recall_fact,
+          retrieval_found?: is_binary(value) and value != "",
+          neural_ranker_used?: false,
           intent_inferred: :fact_query,
           response_source: :memory,
           memory_key: key,
@@ -332,6 +340,21 @@ defmodule Core.Response.Memory do
       meta
       |> Map.put_new(:response_source, :memory)
       |> Map.put_new(:intent_inferred, Map.get(meta, :action))
+
+    # Only the outcome and provenance cross the telemetry boundary. Never
+    # emit the conversation text or fact values as recall metadata.
+    if Map.get(meta, :action) in [:identity, :recall_fact] do
+      :telemetry.execute(
+        @memory_recall_event,
+        %{count: 1, hit: if(Map.get(meta, :retrieval_found?, false), do: 1, else: 0)},
+        %{
+          action: Map.get(meta, :action),
+          identity_subject: Map.get(meta, :identity_subject),
+          memory_source: Map.get(meta, :memory_source),
+          neural_ranker_used?: false
+        }
+      )
+    end
 
     SideEffects.record_turn(session_id, text_in, text)
     SideEffects.emit_plan(meta)
