@@ -360,13 +360,21 @@ defmodule Brain.Hippocampus do
   defp find_fact_in_window(_window, _key), do: nil
 
   defp find_fact_in_db(key) when is_atom(key) or is_binary(key) do
-    if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :recent, 1) do
-      Db.Episode.recent(@boot_warm_limit)
-      |> Enum.find_value(fn row ->
-        row
-        |> db_row_to_episode()
-        |> fact_from_episode(key)
-      end)
+    cond do
+      Code.ensure_loaded?(Db.Episode) and
+          function_exported?(Db.Episode, :latest_user_fact, 1) ->
+        Db.Episode.latest_user_fact(key)
+
+      Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :recent, 1) ->
+        Db.Episode.recent(@boot_warm_limit)
+        |> Enum.find_value(fn row ->
+          row
+          |> db_row_to_episode()
+          |> fact_from_episode(key)
+        end)
+
+      true ->
+        nil
     end
   end
 
