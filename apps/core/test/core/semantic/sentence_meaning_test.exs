@@ -182,6 +182,80 @@ defmodule Core.Semantic.SentenceMeaningTest do
     assert proposition.type == :information_request
   end
 
+  test "keeps negative information requests distinct from positive ones" do
+    si = input()
+
+    tokens =
+      Enum.map(si.tokens, fn
+        %{index: 1} = word -> %{word | phrase: "don't"}
+        word -> word
+      end)
+
+    constituents =
+      Enum.map(si.atl_slate.constituents, fn
+        %{id: :wh_aux_topic_question, roles: roles} = question ->
+          %{question | roles: %{roles |
+            auxiliary: %{sense_id: "don't|auxiliary|0"}}}
+        other -> other
+      end)
+
+    negative =
+      %{si |
+        sentence: "What don't you know about Japan's railgun development?",
+        tokens: tokens,
+        atl_slate: %{constituents: constituents}}
+      |> SentenceMeaning.build()
+
+    positive = SentenceMeaning.build(si)
+
+    assert positive.polarity == :positive
+    assert positive.proposition.polarity == :positive
+    assert negative.polarity == :negative
+    assert negative.proposition.polarity == :negative
+    assert negative.proposition.operators.polarity.scope == :predicate
+    assert negative.proposition.operators.auxiliary_negation?
+    assert negative.proposition.epistemic_status == :question_not_assertion
+    assert negative.definition =~ "you don't know about"
+    refute positive.proposition.polarity == negative.proposition.polarity
+  end
+
+  test "does not elevate a nested noun phrase to a full topic reading" do
+    si = input()
+    tail = %{index: 8, phrase: "systems?", n: 1, mw: false}
+
+    signatures =
+      Enum.map(si.sentence_signatures, fn
+        %{id: :wh_aux_topic_question} = signature ->
+          %{signature | span: {0, 8}}
+        other -> other
+      end)
+
+    constituents =
+      Enum.map(si.atl_slate.constituents, fn
+        %{id: :wh_aux_topic_question} = constituent ->
+          %{constituent | span: {0, 8}}
+        other -> other
+      end)
+
+    si =
+      %{si |
+        sentence: "What do you know about Japan's railgun development systems?",
+        tokens: si.tokens ++ [tail],
+        sentence_signatures: signatures,
+        atl_slate: %{constituents: constituents}}
+
+    argument =
+      si
+      |> SentenceMeaning.build()
+      |> get_in([:proposition, :content, :complement, :argument])
+
+    assert argument.surface == "Japan's railgun development systems"
+    assert argument.head == nil
+    assert argument.modifiers == []
+    assert argument.source == :surface_only
+    assert argument.grounding_status == :unverified
+  end
+
   test "attaches sentence definition without changing lexical winners or claiming grounding" do
     si = input()
     out = SentenceMeaning.attach(si)
