@@ -154,7 +154,9 @@ defmodule Core.Response.LlmPromptTest do
           intent: :illicit_request,
           comprehension: %{
             intent: :illicit_request,
-            understood: ["buy drugs"],
+            recognized_topics: ["buy drugs"],
+            selected_lexical_candidates: [],
+            understood: [],
             uncertain: ["get wasted"],
             degraded?: true,
             reasons: [:fallback_rate_high]
@@ -167,9 +169,37 @@ defmodule Core.Response.LlmPromptTest do
 
     assert prompt =~ "Comprehension:"
     assert prompt =~ "intent=illicit_request"
-    assert prompt =~ "understood=buy drugs"
+    assert prompt =~ "recognized_topics=buy drugs"
+    refute prompt =~ "verified_understood=buy drugs"
     assert prompt =~ "uncertain=get wasted"
     assert prompt =~ "degraded=true"
+  end
+
+  test "response prompt distinguishes recognized topics, selected lexical candidates, and verified meanings" do
+    prompt =
+      LlmPrompt.build_system_prompt(%{
+        features: %{
+          intent: :ask,
+          comprehension: %{
+            recognized_topics: ["japan's railgun development"],
+            selected_lexical_candidates: ["knowledge"],
+            understood: ["turn off"],
+            uncertain: ["development"],
+            degraded?: true
+          }
+        },
+        decision: %{tone: :neutral, mode: :explainer},
+        mood: %{},
+        wm_items: []
+      })
+
+    assert prompt =~ "recognized_topics=japan's railgun development"
+    assert prompt =~ "selected_lexical_candidates=knowledge"
+    assert prompt =~ "verified_understood=turn off"
+    assert prompt =~ "you recognized topics (not verified meanings)"
+    assert prompt =~ "you selected lexical candidates (not verified meanings)"
+    assert prompt =~ "verified lexical understanding: turn off"
+    refute prompt =~ "you understood: japan's railgun development"
   end
 
   test "verified command with weak isolated token scores gets grounded control limits, not generic refusal" do
