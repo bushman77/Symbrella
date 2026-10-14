@@ -548,15 +548,16 @@ defmodule Core.Syntax.Signatures do
     pos?(verb, "verb") and particle_features(particle) != []
   end
 
+  # Dictionary POS alternatives can mark otherwise ordinary words as
+  # "particle". The lexical tag is evidence, but not proof of a verb particle:
+  # require a plausible particle surface even for direct particle POS rows.
   defp particle_features(particle) do
-    direct = if pos?(particle, "particle"), do: [:pos_particle], else: []
-
     if MapSet.member?(@particle_surfaces, particle.word) do
-      direct ++
+      (if pos?(particle, "particle"), do: [:pos_particle], else: []) ++
         (if pos?(particle, "adverb"), do: [:pos_adverb], else: []) ++
         (if pos?(particle, "preposition"), do: [:pos_preposition], else: [])
     else
-      direct
+      []
     end
   end
 
