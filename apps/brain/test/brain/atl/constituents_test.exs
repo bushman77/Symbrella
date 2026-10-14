@@ -147,6 +147,42 @@ defmodule Brain.ATL.ConstituentsTest do
     assert Map.has_key?(slate.by_id, "record|verb|1")
   end
 
+  test "possessive phrase keeps an ungrounded owner while resolving the noun head" do
+    choices = [
+      winner("railgun", "noun", 1),
+      winner("development", "noun", 2)
+    ]
+
+    signature = %{
+      id: :possessive_noun_phrase,
+      span: {0, 2},
+      roles: %{possessor: 0, modifier: 1, head: 2},
+      required_features: %{
+        possessor: [:pos_noun_or_pronoun],
+        modifier: [:pos_noun],
+        head: [:pos_noun]
+      },
+      evidence: [:apostrophe_s, :nominal_head_available],
+      surface_possessor: "Japan"
+    }
+
+    slate = ATL.reduce(choices, tokens(["Japan's", "railgun", "development"]), [signature])
+
+    assert [%{
+      id: :possessive_noun_phrase,
+      status: :partially_resolved,
+      unresolved_roles: [:possessor],
+      roles: %{
+        modifier: %{sense_id: "railgun|noun|1"},
+        head: %{sense_id: "development|noun|1"}
+      }
+    }] = slate.constituents
+
+    assert slate.winners == ATL.reduce(choices, tokens(["Japan's", "railgun", "development"])).winners
+    refute Map.has_key?(slate.by_norm, "japan's")
+    refute Map.has_key?(slate.by_id, "japan's|proper_noun|1")
+  end
+
   test "canonical lexical MWE leaves shadowed particle unresolved" do
     choices = [
       %{
