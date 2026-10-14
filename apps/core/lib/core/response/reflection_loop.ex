@@ -10,6 +10,7 @@ defmodule Core.Response.ReflectionLoop do
 
   alias Core.Telemetry
   alias Core.Response.Topics
+  alias Core.Response.GreetingTurn
   alias Core.Tools.WebRetrieval.Grounding
 
   @event [:core, :response, :reflection]
@@ -106,7 +107,12 @@ defmodule Core.Response.ReflectionLoop do
       :robotic_self_state
     )
     |> maybe_issue(overclaims_self_awareness?(draft_text), :overclaimed_self_awareness)
-    |> maybe_issue(generic_draft?(draft_text), :too_generic)
+    |> maybe_issue(GreetingTurn.robotic_draft?(user_text, draft_text), :robotic_greeting)
+    |> maybe_issue(
+      generic_draft?(draft_text) and
+        (not GreetingTurn.standalone?(user_text) or String.trim(draft_text) == ""),
+      :too_generic
+    )
     |> maybe_issue(topic_dead_end?(context, user_text, draft_text), :topic_dead_end)
     |> maybe_issue(hidden_context_leak?(draft_text), :leaked_hidden_context)
     |> Enum.reverse()
@@ -142,7 +148,7 @@ defmodule Core.Response.ReflectionLoop do
       :topic_dead_end in issues ->
         {:repair, issues}
 
-      :robotic_self_state in issues ->
+      :robotic_self_state in issues or :robotic_greeting in issues ->
         {:repair, issues}
 
       :low_confidence in issues and (:unknown_intent in issues or :too_generic in issues) ->
@@ -213,6 +219,9 @@ defmodule Core.Response.ReflectionLoop do
         :robotic_self_state in issues ->
           self_state_checkin_fallback(user_text)
 
+        :robotic_greeting in issues ->
+          GreetingTurn.repair(user_text, final_text)
+
         :leaked_hidden_context in issues and (final_text == "" or final_text == draft_text) ->
           hidden_context_fallback(user_text)
 
@@ -228,6 +237,8 @@ defmodule Core.Response.ReflectionLoop do
 
     instruction =
       cond do
+        :robotic_greeting in issues ->
+          "A standalone greeting is not a customer-service request. Remove stock assistance offers and do not address the user as Symbrella."
         :unsupported_device_refusal in issues ->
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
