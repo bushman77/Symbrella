@@ -201,8 +201,8 @@ defmodule Core.Semantic.SentenceMeaning do
   # and provided an actual sense ID. The surface is not a verified sense gloss.
   defp optional_role(roles, resolved, tokens, kind) do
     case {Map.get(roles, kind), Map.get(resolved, kind)} do
-      {index, %{token_index: index, sense_id: id}}
-      when is_integer(index) and is_binary(id) ->
+      {index, %{token_index: resolved_index, sense_id: id}}
+      when is_integer(index) and index == resolved_index and is_binary(id) ->
         case surface_at(tokens, index) do
           {:ok, surface} -> %{
             surface: surface, token_index: index, sense_id: id,
