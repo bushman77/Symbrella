@@ -52,7 +52,11 @@ defmodule Core do
       |> Map.put(:lifg_opts, lifg_opts)
       |> StateDump.capture(:initial)
 
-    si1 = apply_intent_selection(si0, opts) |> StateDump.capture(:intent_selected)
+    si1 =
+      si0
+      |> apply_intent_selection(opts)
+      |> Core.Discourse.References.attach()
+      |> StateDump.capture(:intent_selected)
 
     out =
       case mode do

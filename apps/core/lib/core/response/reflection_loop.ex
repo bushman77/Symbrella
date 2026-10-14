@@ -86,6 +86,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
+    |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
@@ -112,6 +113,9 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :subject_reversal in issues ->
+        {:repair, issues}
+
+      :geographic_claim_unverified in issues ->
         {:repair, issues}
 
       :leaked_hidden_context in issues or :overclaimed_self_awareness in issues ->
@@ -163,6 +167,9 @@ defmodule Core.Response.ReflectionLoop do
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
+
+        :geographic_claim_unverified in issues ->
+          unverified_geographic_reply(context)
 
         :robotic_self_state in issues ->
           self_state_checkin_fallback(user_text)
@@ -271,6 +278,39 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp subject_reversal?(_, _), do: false
+
+  # A semantic frame can identify what a question asks without verifying a
+  # number or spatial relationship. Do not treat fluent LLM prose as evidence.
+  defp unverified_geographic_claim?(context, draft_text) do
+    frame = get_in_map(context, [:symbolic_frame])
+    comprehension = get_in_map(context, [:comprehension]) ||
+      get_in_map(context, [:features, :comprehension])
+
+    is_map(frame) and map_get(frame, :type) == :location_question and
+      map_get(frame, :grounding_status) == :unverified and
+      is_map(comprehension) and map_get(comprehension, :degraded?) == true and
+      not Regex.match?(~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu, draft_text)
+  end
+
+  defp unverified_geographic_reply(context) do
+    frame = get_in_map(context, [:symbolic_frame]) || %{}
+    subject = map_get(frame, :subject)
+    target = map_get(frame, :target)
+
+    cond do
+      not is_binary(subject) ->
+        "Which place are you referring to?"
+
+      map_get(frame, :relation) == :population ->
+        "You're asking about #{subject}'s population, but I don't have a verified population figure available here."
+
+      map_get(frame, :relation) == :proximity and is_binary(target) ->
+        "You're asking whether #{subject} is close to #{target}, but I don't have verified distance information to confirm that."
+
+      true ->
+        "I understand the location question, but I can't verify that geographic claim."
+    end
+  end
 
   defp low_confidence?(context) do
     confidence =

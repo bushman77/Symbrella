@@ -22,6 +22,9 @@ defmodule Core.Response.SelfStateFeatures do
       String.contains?(text, "?") ->
         {text, nil}
 
+      answered_factual_question?(features) ->
+        {text, nil}
+
       curiosity_probe?(features, decision) ->
         probe = curiosity_probe_text(features)
         {text <> " " <> probe, %{text: probe, reason: :uncertainty_reduction}}
@@ -146,6 +149,17 @@ defmodule Core.Response.SelfStateFeatures do
   end
 
   defp apply_agency_memory(self_state, _agency_memory), do: self_state
+
+  defp answered_factual_question?(features) do
+    selected_action = Map.get(features, :selected_action)
+    question = Map.get(features, :text, "")
+
+    selected_action == :answer_user and is_binary(question) and
+      Regex.match?(
+        ~r/^\s*(?:what|where|when|who|which|how many|how much|is|are|was|were|does|do|did)\b/iu,
+        question
+      )
+  end
 
   defp curiosity_probe?(features, decision) do
     self_state = Map.get(features, :self_state, %{})

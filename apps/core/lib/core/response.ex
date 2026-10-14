@@ -35,6 +35,7 @@ defmodule Core.Response do
   alias Core.Response.Policy
   alias Core.Response.Guardrails
   alias Core.Response.Skills
+  alias Core.Response.ActionAlignment
   alias Core.Response.AffectPolicy
   alias Core.Response.LlmSynthesis
   alias Core.Response.Memory
@@ -123,6 +124,7 @@ defmodule Core.Response do
             response_policy: Map.get(mood, :response_policy),
             turn_context: Map.get(si, :turn_context),
             symbolic_frame: Map.get(si, :symbolic_frame),
+            discourse_reference: Map.get(si, :discourse_reference),
             self_model: Map.get(si, :self_model),
             self_monitor: Map.get(si, :self_monitor),
             self_memory_recall: Map.get(si, :self_memory_recall),
@@ -132,7 +134,9 @@ defmodule Core.Response do
             agency_memory: agency_memory
           })
 
-        {decision, skill} = decide_and_pick_skill(features, guard, text_in)
+        {decision0, skill} = decide_and_pick_skill(features, guard, text_in)
+        decision =
+          ActionAlignment.align(decision0, Map.get(si, :selected_action), text_in, guard.guardrail?)
         features =
           features
           |> put_chosen_skill(skill)
@@ -299,6 +303,7 @@ defmodule Core.Response do
          response_policy: response_policy,
          turn_context: turn_context,
          symbolic_frame: symbolic_frame,
+         discourse_reference: discourse_reference,
          self_model: self_model,
          self_monitor: self_monitor,
          self_memory_recall: self_memory_recall,
@@ -337,6 +342,7 @@ defmodule Core.Response do
       response_policy: response_policy,
       turn_context: turn_context,
       symbolic_frame: symbolic_frame,
+      discourse_reference: discourse_reference,
       self_model: self_model,
       self_monitor: self_monitor,
       self_memory_recall: self_memory_recall,

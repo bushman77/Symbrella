@@ -79,6 +79,8 @@ defmodule Core.Response.LlmPrompt do
 
       # ── Behavioral rules ──
       "Answer ordinary questions as ordinary conversation.",
+      "For a completed factual answer, do not append generic offers or unrelated clarification questions.",
+      "A structured question frame identifies a question, not a verified answer. Do not invent population figures, distances, or geographic relationships when source evidence is absent.",
       "For greetings and smalltalk, respond socially and briefly. Do not ask for code, errors, or files.",
       "When asked how you feel, describe your current state conversationally as Symbrella. Reference your behavioral state and affect naturally — do not report raw numeric control values. Do not claim human feelings or consciousness.",
       "Do not append unsolicited offers about coding, simulations, or technical work unless the user explicitly asks.",
@@ -95,6 +97,7 @@ defmodule Core.Response.LlmPrompt do
       runtime_state_shaping(runtime_state),
       Compact.comprehension(comprehension),
       comprehension_shaping(comprehension),
+      discourse_reference_shaping(features),
       verified_device_command_shaping(features, comprehension, guardrail?),
       Compact.symbolic_frame(symbolic_frame),
       symbolic_frame_shaping(symbolic_frame),
@@ -266,6 +269,17 @@ defmodule Core.Response.LlmPrompt do
   end
 
   defp symbolic_frame_shaping(_), do: ""
+
+  defp discourse_reference_shaping(features) do
+    case map_get(features, :discourse_reference) do
+      %{antecedent: antecedent, pronoun: pronoun, source: :recent_user_turn}
+      when is_binary(antecedent) and is_binary(pronoun) ->
+        "Conversation binding: #{pronoun} refers to #{String.slice(antecedent, 0, 80)} from an earlier explicit user location question. This resolves a referent, not the requested geographic fact."
+
+      _ ->
+        ""
+    end
+  end
 
   defp comprehension_shaping(nil), do: ""
   defp comprehension_shaping(summary) when summary == %{}, do: ""

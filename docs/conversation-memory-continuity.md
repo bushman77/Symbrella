@@ -81,3 +81,16 @@ topic transitions, and questions about facts not explicitly stored as user facts
 still depend on the model and the semantic pipeline. The 100-turn buffer is
 in-process and is lost on application restart. A verified name/fact survives
 restart through PostgreSQL, but a full transcript does not.
+
+
+## Geographic follow-up continuity (development)
+
+The new session-scoped discourse binding links it/its to an explicitly named location in a recent user question, without treating a pronoun dictionary gloss as a verified antecedent. Grammatical MWE precedence suppresses incompatible is-it/interjection and close-to/adverb lexical promotions in the tested interrogative construction, retaining raw selections for diagnostics.
+
+Core.Semantic.EventFrames now distinguishes population and proximity question roles and records grounding_status as unverified. Core.Response.ReflectionLoop can repair unsupported geographic assertions when the corresponding frame is present and comprehension is degraded. This does not add a geographic data source or fact verification. Response policy also suppresses generic closing probes on completed factual answers.
+
+Regression command:
+
+    mix test apps/core/test/core/response/geographic_continuity_test.exs
+
+Live check: Where is Maple Ridge, BC?; What is its population?; Is it close to Vancouver? Inspect the symbolic frame, comprehension diagnostics, and reflection alongside the reply. Coverage is limited to these clear syntactic forms, six recent turns, and the current process.

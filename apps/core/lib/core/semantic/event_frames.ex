@@ -14,7 +14,7 @@ defmodule Core.Semantic.EventFrames do
   def attach(si, _opts \\ [])
 
   def attach(%{} = si, _opts) do
-    case health_support_frame(si) || obligation_frame(si) do
+    case health_support_frame(si) || location_question_frame(si) || obligation_frame(si) do
       nil ->
         si
 
@@ -31,6 +31,58 @@ defmodule Core.Semantic.EventFrames do
   end
 
   def attach(other, _opts), do: other
+
+  # A syntactically clear location question is not a verified geographic fact.
+  # Keep the predicate and antecedent explicit, without claiming an external
+  # population or distance measurement exists.
+  defp location_question_frame(si) do
+    sentence = Map.get(si, :sentence) || ""
+    reference = Map.get(si, :discourse_reference) || %{}
+    subject = Map.get(reference, :antecedent)
+
+    cond do
+      match =
+          Regex.run(
+            ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/u,
+            sentence
+          ) ->
+        [_, target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: subject,
+          target: clean_entity(target),
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      Regex.match?(~r/^\s*what\s+is\s+its\s+population\s*\?\s*$/iu, sentence) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: subject,
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  defp clean_entity(text) do
+    text
+    |> String.trim()
+    |> String.trim_trailing(".")
+    |> String.replace(~r/\s+/u, " ")
+  end
 
   # Recover a bounded agent/action proposition for recognized obligation.
   # Reject implicit subject attribution: only explicit "I've" is supported.

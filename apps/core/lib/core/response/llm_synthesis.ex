@@ -15,6 +15,7 @@ defmodule Core.Response.LlmSynthesis do
 
   alias Core.Telemetry
   alias Core.Response.Context
+  alias Core.Response.AnswerPolish
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
@@ -76,7 +77,10 @@ defmodule Core.Response.LlmSynthesis do
 
     case llm_client().chat(messages, chat_opts()) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
-        draft = sanitize_model_text(content)
+        draft =
+          content
+          |> sanitize_model_text()
+          |> then(&AnswerPolish.polish(user_text, &1, context))
         {:ok, out, reflection} = ReflectionLoop.review(user_text, draft, context)
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}

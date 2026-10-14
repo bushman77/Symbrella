@@ -77,6 +77,9 @@ defmodule Core.MWE.Decisions do
       id_lemma_matches?(id, phrase) and
       not GrammarPrecedence.incompatible_verb_mwe?(
         si, {first, last}, Map.get(choice, :pos)
+      ) and
+      not GrammarPrecedence.incompatible_question_mwe?(
+        si, phrase, Map.get(choice, :pos)
       )
   end
 
