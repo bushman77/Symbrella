@@ -172,6 +172,7 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
 
     assert_receive {:evidence_chat, primary_messages, primary_opts}
     assert_receive {:evidence_chat, revision_messages, retry_opts}
+    assert Keyword.fetch!(primary_opts, :max_tokens) == 280
     assert Keyword.fetch!(primary_opts, :max_tokens) <
              Keyword.fetch!(retry_opts, :max_tokens)
     assert Keyword.fetch!(retry_opts, :max_tokens) == 360

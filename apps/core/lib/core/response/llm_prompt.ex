@@ -68,6 +68,7 @@ defmodule Core.Response.LlmPrompt do
     [
       # ── Identity ──
       "You are Symbrella.",
+      news_priority_shaping(map_get(features, :web_evidence)),
       "You are Symbrella, a brain-inspired, stateful assistant running locally on the user's machine.",
       "Symbrella is your assistant identity, never the user's name. If the user asks for their name, use explicit user-name memory only; if none is visible, say you do not know yet.",
       "Grounded definition: Symbrella is this local Phoenix umbrella app and brain-inspired neuro-symbolic runtime, with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis.",
@@ -271,6 +272,17 @@ defmodule Core.Response.LlmPrompt do
   end
 
   defp symbolic_frame_shaping(_), do: ""
+
+  # Put the availability signal near the top of the first-pass prompt,
+  # before general personality and state instructions compete for attention.
+  # Dated source details remain in the normal evidence block below.
+  defp news_priority_shaping(%{status: :retrieved, resolution: :headlines_available}) do
+    "CURRENT-EVENT PRIORITY: recent dated headlines have ALREADY been retrieved. " <>
+      "Use and cite the evidence below; do not claim you have no news access. " <>
+      "Attribute reports to outlets with dates. Answer the user's actual question."
+  end
+
+  defp news_priority_shaping(_), do: ""
 
   defp web_evidence_shaping(%{resolution: :headlines_available, sources: sources})
        when is_list(sources) do

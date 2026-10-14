@@ -80,7 +80,7 @@ defmodule Core.Response.LlmSynthesis do
       log_prompt_bundle(messages, context)
     end
 
-    case llm_client().chat(messages, chat_opts()) do
+    case llm_client().chat(messages, initial_chat_opts(context)) do
       {:ok, %{content: content}} when is_binary(content) and content != "" ->
         draft =
           content
@@ -344,6 +344,13 @@ defmodule Core.Response.LlmSynthesis do
   defp llm_client do
     Application.get_env(:core, :llm_client, Llm)
   end
+
+  defp initial_chat_opts(%{web_evidence: %{resolution: :headlines_available}}) do
+    chat_opts()
+    |> Keyword.put(:max_tokens, llm_config(:news_first_max_tokens, 280))
+  end
+
+  defp initial_chat_opts(_), do: chat_opts()
 
   defp chat_opts do
     timeout_ms = llm_config(:timeout_ms, 10_000)
