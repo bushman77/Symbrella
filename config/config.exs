@@ -38,6 +38,11 @@ config :core, :llm_synthesis,
   max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5
 
+config :core, :web_retrieval,
+  enabled?: config_env() != :test,
+  provider: Core.Tools.WebRetrieval.Wikipedia,
+  timeout_ms: 3_500
+
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000

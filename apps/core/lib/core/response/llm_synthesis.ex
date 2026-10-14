@@ -21,6 +21,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPromptEvents
   alias Core.Response.ReflectionLoop
   alias Core.Response.RuntimeContext
+  alias Core.Tools.WebRetrieval
 
   # Suppress compile-time warnings if optional apps/modules are not built/loaded yet.
   @compile {:no_warn_undefined, Llm}
@@ -59,7 +60,10 @@ defmodule Core.Response.LlmSynthesis do
   defp do_generate(user_text, features, decision, mood, prompt_type) do
     LlmChatHistory.ensure_table!()
 
-    context = prompt_context(user_text, features, decision, mood)
+    context =
+      user_text
+      |> prompt_context(features, decision, mood)
+      |> WebRetrieval.enrich()
     session_id = Map.get(context, :session_id, :global)
 
     system_prompt = build_prompt(context, prompt_type)

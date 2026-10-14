@@ -10,6 +10,7 @@ defmodule Core.Response.ReflectionLoop do
 
   alias Core.Telemetry
   alias Core.Response.Topics
+  alias Core.Tools.WebRetrieval.Grounding
 
   @event [:core, :response, :reflection]
   @v 1
@@ -169,7 +170,10 @@ defmodule Core.Response.ReflectionLoop do
           "Understood, you need to #{action}."
 
         :geographic_claim_unverified in issues ->
-          unverified_geographic_reply(context)
+          case Grounding.align(draft_text, context) do
+            ^draft_text -> unverified_geographic_reply(context)
+            sourced -> sourced
+          end
 
         :robotic_self_state in issues ->
           self_state_checkin_fallback(user_text)
@@ -188,10 +192,13 @@ defmodule Core.Response.ReflectionLoop do
       end
 
     instruction =
-      if :unsupported_device_refusal in issues do
-        "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
-      else
-        "Repair unsupported self-claims or hidden-control wording before publishing."
+      cond do
+        :unsupported_device_refusal in issues ->
+          "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
+        :geographic_claim_unverified in issues ->
+          "Use a sourced population figure only when a retrieved excerpt supports it and cite the source; otherwise state that the fact is unverified."
+        true ->
+          "Repair unsupported self-claims or hidden-control wording before publishing."
       end
 
     {final_text, instruction, 1}
@@ -295,13 +302,14 @@ defmodule Core.Response.ReflectionLoop do
   # number or spatial relationship. Do not treat fluent LLM prose as evidence.
   defp unverified_geographic_claim?(context, draft_text) do
     frame = geographic_frame(context)
-    comprehension = get_in_map(context, [:comprehension]) ||
-      get_in_map(context, [:features, :comprehension])
 
     is_map(frame) and map_get(frame, :type) == :location_question and
       map_get(frame, :grounding_status) == :unverified and
-      is_map(comprehension) and map_get(comprehension, :degraded?) == true and
-      not Regex.match?(~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu, draft_text)
+      not Grounding.supports?(draft_text, context) and
+      not Regex.match?(
+        ~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu,
+        draft_text
+      )
   end
 
   defp unverified_geographic_reply(context) do

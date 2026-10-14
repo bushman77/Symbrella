@@ -1,6 +1,26 @@
 # config/runtime.exs
 import Config
 
+# Small-model web retrieval: keyless Wikimedia by default, optional SearXNG.
+# Environment toggles never require changing code.
+web_cfg = Application.get_env(:core, :web_retrieval, [])
+web_enabled =
+  case System.get_env("SYMBRELLA_WEB_RETRIEVAL") do
+    nil -> Keyword.get(web_cfg, :enabled?, false)
+    value -> String.downcase(value) in ["1", "true", "yes", "on"]
+  end
+
+web_provider =
+  case System.get_env("SYMBRELLA_WEB_PROVIDER", "wikipedia") |> String.downcase() do
+    "searxng" -> Core.Tools.WebRetrieval.Searxng
+    _ -> Core.Tools.WebRetrieval.Wikipedia
+  end
+
+config :core, :web_retrieval,
+  Keyword.merge(web_cfg, enabled?: web_enabled, provider: web_provider)
+
+config :core, :searxng_url, System.get_env("SYMBRELLA_SEARXNG_URL")
+
 # ───────── Brain env overrides (apply in all envs) ─────────
 
 pmtg_mode =

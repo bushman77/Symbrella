@@ -28,7 +28,8 @@ defmodule Core.MixProject do
       {:brain, in_umbrella: true},
       {:db, in_umbrella: true},
       {:lexicon, in_umbrella: true},
-      {:llm, in_umbrella: true}
+      {:llm, in_umbrella: true},
+      {:req, "~> 0.7"}
     ]
   end
 end
