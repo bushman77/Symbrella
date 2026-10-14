@@ -208,7 +208,11 @@ defmodule Core.Comprehension.Summary do
       term = choice_term(choice)
       score = choice_score(choice)
       fallback? = fallback_choice?(choice)
-      weak? = score < @weak_score or fallback?
+      # A near-tie reselected by ATL feedback remains lexically uncertain.
+      # Do not turn a 0.50-ish posterior into a strong meaning claim.
+      weak? =
+        score < @weak_score or fallback? or
+          Map.get(choice, :relational_feedback_uncertain?, false) == true
 
       stats =
         stats
