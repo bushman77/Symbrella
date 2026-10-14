@@ -131,6 +131,13 @@ defmodule Core.LIFG.RelationalFeedback do
         nil -> choice
         decision ->
           candidate = candidate_for(si, decision.token_index, decision.proposed_id)
+          [first, second | _] =
+            decision.posterior
+            |> Map.values()
+            |> Enum.sort(:desc)
+
+          margin = max(first - second, 0.0)
+
           choice
           |> Map.put(:id, decision.proposed_id)
           |> then(fn revised ->
@@ -142,6 +149,8 @@ defmodule Core.LIFG.RelationalFeedback do
           end)
           |> Map.put(:score, Map.get(decision.posterior, decision.proposed_id))
           |> Map.put(:candidate_probs, decision.posterior)
+          |> Map.put(:margin, margin)
+          |> Map.put(:relational_feedback_uncertain?, margin < 0.15)
           |> Map.put(:definition, get(candidate, :definition))
           |> Map.put(:example, get(candidate, :example))
           |> Map.put(:source, get(candidate, :source) || Map.get(choice, :source))
