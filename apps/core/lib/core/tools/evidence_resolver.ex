@@ -144,7 +144,16 @@ defmodule Core.Tools.EvidenceResolver do
 
     case reply do
       {:ok, found} when is_list(found) ->
-        items = found |> Enum.filter(&valid_news_source?/1) |> Enum.take(@max_sources)
+        # Recheck timestamps even if a custom provider returned the items.
+        # A provider returning stale data must not imply current evidence.
+        max_age_hours = Keyword.get(provider_opts, :max_age_hours, NewsRss.default_age_hours())
+        now = Keyword.get(provider_opts, :now, DateTime.utc_now())
+
+        items =
+          found
+          |> Enum.filter(&valid_news_source?/1)
+          |> Enum.filter(&NewsRss.recent_source?(&1, now, max_age_hours))
+          |> Enum.take(@max_sources)
         status = if items == [], do: :not_found, else: :headlines_available
         candidate = if items == [], do: nil, else: %{status: :headlines_available}
 
