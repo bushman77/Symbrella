@@ -25,12 +25,14 @@ cases = [
   {"They draw a picture.", 1, "draw|verb|129", "draw|verb|138"},
   {"They draw water with a well.", 1, "draw|verb|81", "draw|verb|17"},
   {"They draw water. From a well.", 1, "draw|verb|81", "draw|verb|17"},
+  {"They draw water (from a well).", 1, "draw|verb|81", "draw|verb|17"},
+  {"They draw water — from a well.", 1, "draw|verb|81", "draw|verb|17"},
   {"They draw water from a mysteryword.", 1, "draw|verb|81", "draw|verb|17"}
 ]
 
 # PRESERVE punctuation and token indices: no fabricated clause adjacency.
 tokenize = fn sentence ->
-  Regex.scan(~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[.!?;,:]/u, sentence)
+  Regex.scan(~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u, sentence)
   |> Enum.map(&hd/1)
   |> Enum.with_index()
   |> Enum.map(fn {phrase, index} -> %{phrase: phrase, index: index, n: 1} end)
