@@ -833,6 +833,16 @@ defmodule Brain.LIFG.Stage1 do
             Map.get(ctx, :grammar_weight, 0.0)
           )
 
+        # Only the full, attested finite-present clause hypothesis is active
+        # independently of the general opt-in grammar weight. No new senses
+        # or POS candidates are created.
+        cal_scores =
+          GrammarEvidence.apply_finite_present(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
         # A mixed-POS slate is not automatically a closed-class *winner*.
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.

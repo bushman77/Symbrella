@@ -470,4 +470,44 @@ defmodule Core.Syntax.SignaturesTest do
                &(&1.id == :wh_aux_topic_question))
     end
   end
+  test "finite present subject–verb–object clause uses exact verb morphology" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "artist", pos: "noun"},
+      %{norm: "draws", pos: "noun", semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{norm: "draws", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
+                         "tag:singular", "tag:third-person"]},
+      %{norm: "a", pos: "determiner"},
+      %{norm: "picture", pos: "noun"}
+    ]
+
+    clauses = Signatures.detect(input("The artist draws a picture.", cells))
+    assert [%{id: :finite_present_svo_candidate,
+              span: {0, 4},
+              roles: %{subject_head: 1, predicate: 2, object_head: 4}}] =
+             Enum.filter(clauses, &(&1.id == :finite_present_svo_candidate))
+
+    refute :finite_present_svo_candidate in ids("The artist draws. a picture.", cells)
+
+    nouns_only = Enum.reject(cells, &(&1.norm == "draws" and &1.pos == "verb"))
+    refute :finite_present_svo_candidate in ids("The artist draws a picture.", nouns_only)
+  end
+
+  test "finite-present construction generalizes but does not promote first-person agreement" do
+    cells = [
+      %{norm: "the", pos: "determiner"}, %{norm: "painter", pos: "noun"},
+      %{norm: "paints", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
+                         "tag:singular", "tag:third-person"]},
+      %{norm: "a", pos: "determiner"}, %{norm: "wall", pos: "noun"},
+      %{norm: "she", pos: "pronoun"}, %{norm: "i", pos: "pronoun"}
+    ]
+
+    assert :finite_present_svo_candidate in ids("The painter paints a wall.", cells)
+    assert :finite_present_svo_candidate in ids("She paints a wall.", cells)
+    refute :finite_present_svo_candidate in ids("I paints a wall.", cells)
+    refute :finite_present_svo_candidate in ids("She paints. a wall.", cells)
+  end
+
 end

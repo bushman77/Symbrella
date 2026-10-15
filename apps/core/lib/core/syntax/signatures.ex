@@ -46,6 +46,21 @@ defmodule Core.Syntax.Signatures do
   ))
   @max_possessive_tokens 4
 
+  # A finite present predicate requires attested verb morphology and a
+  # contiguous subject–verb–object construction. These patterns describe
+  # structural hypotheses, not approved word meanings.
+  @finite_present_patterns [
+    {["determiner", "noun", "verb", "determiner", "noun"],
+     [:subject_determiner, :subject_head, :predicate, :object_determiner, :object_head]},
+    {["determiner", "noun", "verb", "noun"],
+     [:subject_determiner, :subject_head, :predicate, :object_head]},
+    {["pronoun", "verb", "determiner", "noun"],
+     [:subject_head, :predicate, :object_determiner, :object_head]},
+    {["pronoun", "verb", "noun"],
+     [:subject_head, :predicate, :object_head]}
+  ]
+  @third_person_singular_pronouns MapSet.new(~w(he she it))
+
   @have_words ~w(have has had)
   @have_contract ~r/^(?:i|you|we|they)'ve$/u
   @have_or_be_contract ~r/^(?:he|she|it|that|there|who)'s$/u
@@ -62,7 +77,8 @@ defmodule Core.Syntax.Signatures do
     noun_phrases = noun_phrase_constructions(nodes)
     possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
-    (wh_aux_questions(si, nodes) ++ finite_past(nodes) ++ perfect_predicates(nodes) ++
+    (wh_aux_questions(si, nodes) ++ finite_present_svo(nodes) ++
+       finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
        prepositional_phrase_constructions(nodes, noun_phrases ++ possessive_phrases))
@@ -106,13 +122,15 @@ defmodule Core.Syntax.Signatures do
       else
         candidate = %{
           pos: MapSet.new([pos]),
-          morphology: morphology(get(cell, :semantic_atoms))
+          morphology: morphology(get(cell, :semantic_atoms)),
+          finite_present_verb?: pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms))
         }
 
         Map.update(acc, word, candidate, fn existing ->
           %{
             pos: MapSet.union(existing.pos, candidate.pos),
-            morphology: MapSet.union(existing.morphology, candidate.morphology)
+            morphology: MapSet.union(existing.morphology, candidate.morphology),
+            finite_present_verb?: existing.finite_present_verb? or candidate.finite_present_verb?
           }
         end)
       end
@@ -136,6 +154,17 @@ defmodule Core.Syntax.Signatures do
 
   defp morphology(_), do: MapSet.new()
 
+  defp finite_present_verb?(atoms) when is_list(atoms) do
+    tags = MapSet.new(atoms)
+
+    Enum.all?(
+      ["tag:form-of", "tag:indicative", "tag:present", "tag:singular", "tag:third-person"],
+      &MapSet.member?(tags, &1)
+    )
+  end
+
+  defp finite_present_verb?(_), do: false
+
   # Base tokens only; never treat MWE phrase windows as individual words.
   # Keep each original token index even when filtering punctuation.
   defp base_nodes(tokens, lexicon) when is_list(tokens) do
@@ -155,14 +184,20 @@ defmodule Core.Syntax.Signatures do
             _ -> position
           end
 
-        entry = Map.get(lexicon, word, %{pos: MapSet.new(), morphology: MapSet.new()})
+        entry =
+          Map.get(lexicon, word, %{
+            pos: MapSet.new(),
+            morphology: MapSet.new(),
+            finite_present_verb?: false
+          })
         [
           %{
             index: index,
             word: word,
             surface: get(token, :phrase),
             pos: entry.pos,
-            morphology: entry.morphology
+            morphology: entry.morphology,
+            finite_present_verb?: entry.finite_present_verb?
           }
         ]
       end
@@ -388,6 +423,48 @@ defmodule Core.Syntax.Signatures do
       else
         []
       end
+    end)
+  end
+
+  # Attested third-person finite verb + bounded nominal subject/object.
+  # Every term must be contiguous in the original sentence, with lexical POS
+  # alternatives for each role. A noun plural tagged form-of cannot impersonate
+  # the separately attested finite verb form.
+  defp finite_present_svo(nodes) do
+    Enum.flat_map(@finite_present_patterns, fn {pattern, role_names} ->
+      nodes
+      |> Enum.chunk_every(length(pattern), 1, :discard)
+      |> Enum.flat_map(fn segment ->
+        roles = Enum.zip(role_names, segment) |> Map.new(fn {role, node} -> {role, node.index} end)
+        predicate = Enum.find(segment, &(&1.index == roles.predicate))
+        subject = Enum.find(segment, &(&1.index == roles.subject_head))
+
+        compatible? =
+          Enum.zip(segment, pattern)
+          |> Enum.all?(fn {node, pos} -> pos?(node, pos) end)
+
+        third_person_subject? =
+          if MapSet.member?(subject.pos, "pronoun"),
+            do: MapSet.member?(@third_person_singular_pronouns, subject.word),
+            else: true
+
+        if compatible? and third_person_subject? and predicate.finite_present_verb? and
+             valid_surface?(segment) do
+          [
+            signature(
+              :finite_present_svo_candidate,
+              {hd(segment).index, List.last(segment).index},
+              roles,
+              %{subject_head: [:pos_noun_or_pronoun], predicate: [:pos_verb],
+                object_head: [:pos_noun]},
+              [:contiguous_surface, :attested_nominal_subject, :attested_nominal_object,
+               :attested_finite_present_verb]
+            )
+          ]
+        else
+          []
+        end
+      end)
     end)
   end
 

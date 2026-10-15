@@ -263,4 +263,39 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     })
     assert GE.apply(%{"tried|verb|1" => 0.5}, ctx, 1, 1.0) == %{"tried|verb|1" => 0.5}
   end
+  test "verified finite-present clause prefers the attested verb, not a plural noun" do
+    evidence = ["tag:form-of", "tag:indicative", "tag:present",
+                "tag:singular", "tag:third-person"]
+    cells = [
+      %{id: "draws|noun|1", semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{id: "draws|noun|2", semantic_atoms: ["tag:plural", "tag:plural-only"]},
+      %{id: "draws|verb|1", semantic_atoms: evidence}
+    ]
+
+    signature = %{
+      id: :finite_present_svo_candidate,
+      roles: %{subject_head: 1, predicate: 2, object_head: 4},
+      evidence: [:contiguous_surface, :attested_nominal_subject,
+                 :attested_nominal_object, :attested_finite_present_verb]
+    }
+
+    scores = %{"draws|noun|1" => 0.57, "draws|noun|2" => 0.56,
+               "draws|verb|1" => 0.40}
+    context = GE.prepare(%{active_cells: cells, sentence_signatures: [signature]})
+    updated = GE.apply_finite_present(scores, context, 2)
+    assert updated["draws|verb|1"] > updated["draws|noun|1"]
+    assert updated["draws|noun|1"] == scores["draws|noun|1"]
+    assert updated["draws|noun|2"] == scores["draws|noun|2"]
+    assert GE.apply_finite_present(scores, context, 1) == scores
+    assert GE.apply_finite_present(scores, GE.prepare(%{active_cells: cells}), 2) == scores
+
+    no_attested_verb = GE.prepare(%{active_cells: Enum.drop(cells, -1),
+                                   sentence_signatures: [signature]})
+    assert GE.apply_finite_present(scores, no_attested_verb, 2) == scores
+
+    incomplete = put_in(signature, [:evidence], [:attested_finite_present_verb])
+    assert GE.apply_finite_present(scores,
+             GE.prepare(%{active_cells: cells, sentence_signatures: [incomplete]}), 2) == scores
+  end
+
 end

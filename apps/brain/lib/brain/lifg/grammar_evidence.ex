@@ -64,6 +64,54 @@ defmodule Brain.LIFG.GrammarEvidence do
 
   def apply(scores, _context, _index, _weight), do: scores
 
+  @doc """
+  Narrow, on-by-default support for an attested finite-present SVO hypothesis.
+  Unlike the general opt-in grammar weights, this can only boost an existing
+  exact verb sense carrying the full morphological witness. All other
+  candidates and sentences retain their original scores.
+  """
+  @spec apply_finite_present(map(), context(), non_neg_integer()) :: map()
+  def apply_finite_present(scores, %{signatures: signatures, cells_by_id: cells}, index)
+      when is_map(scores) and is_list(signatures) and is_map(cells) and
+             is_integer(index) and index >= 0 do
+    observed? =
+      Enum.any?(signatures, fn
+        %{id: :finite_present_svo_candidate,
+          roles: %{subject_head: subject, predicate: ^index, object_head: object},
+          evidence: evidence}
+        when is_integer(subject) and is_integer(object) and is_list(evidence) ->
+          subject < index and index < object and
+            Enum.all?(
+              [:contiguous_surface, :attested_nominal_subject,
+               :attested_nominal_object, :attested_finite_present_verb],
+              &(&1 in evidence)
+            )
+
+        _ ->
+          false
+      end)
+
+    if observed? do
+      Map.new(scores, fn {id, score} ->
+        cell = Map.get(cells, id)
+        updated =
+          if is_binary(id) and not String.ends_with?(id, "|fallback") and
+               id_pos(id) == "verb" and finite_present_sense?(cell) and
+               is_number(score) do
+            min(1.0, max(0.0, score * 1.0 + 0.32))
+          else
+            score
+          end
+
+        {id, updated}
+      end)
+    else
+      scores
+    end
+  end
+
+  def apply_finite_present(scores, _context, _index), do: scores
+
   # A weak construction hypothesis becomes useful only when an exact
   # sense supplies the matching morphological feature.
   defp support_for(%{id: :finite_past_candidate, roles: %{verb: role_index}}, index, _id, cell)
@@ -202,6 +250,15 @@ defmodule Brain.LIFG.GrammarEvidence do
   defp matches_pos?(:pos_preposition, "preposition"), do: true
   defp matches_pos?(:pos_adjective, "adjective"), do: true
   defp matches_pos?(_, _), do: false
+
+  defp finite_present_sense?(cell) do
+    evidence = tags(cell)
+
+    Enum.all?(
+      ["tag:form-of", "tag:indicative", "tag:present", "tag:singular", "tag:third-person"],
+      &MapSet.member?(evidence, &1)
+    )
+  end
 
   defp simple_past?(cell) do
     tags = tags(cell)
