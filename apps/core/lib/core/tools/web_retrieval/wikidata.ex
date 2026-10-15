@@ -48,6 +48,98 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
 
   def proximity(_, _, _), do: {:error, :invalid_places}
 
+  @doc """
+  Latest dated Wikidata P1082 population statement for a verified city.
+
+  The year is the statement's point-in-time qualifier, not a claim that this
+  is a current-year census or the newest published government estimate.
+  Refuse population values without a dated qualifier.
+  """
+  @spec population(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def population(name, opts \\ []) when is_binary(name) do
+    with {:ok, place} <- place(name, nil, opts),
+         statement when is_map(statement) <-
+           latest_dated_population(Map.get(place, :population_claims, [])) do
+      {:ok,
+       %{
+         kind: :population,
+         status: :source_supported,
+         method: :wikidata_dated_statement,
+         subject: name,
+         value: statement.value,
+         display: Integer.to_string(statement.value) |> format_population(),
+         census_year: statement.year,
+         year: statement.year,
+         source_title: place.title,
+         source_url: place.url,
+         source_type: :wikidata,
+         sources: [Map.take(place, [:title, :url, :provider])]
+       }}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :dated_population_unavailable}
+    end
+  end
+
+  def population(_, _), do: {:error, :invalid_place}
+
+  defp format_population(digits) do
+    digits
+    |> String.reverse()
+    |> String.graphemes()
+    |> Enum.chunk_every(3)
+    |> Enum.map(&Enum.join/1)
+    |> Enum.join(",")
+    |> String.reverse()
+  end
+
+  defp latest_dated_population(claims) when is_list(claims) do
+    claims
+    |> Enum.map(&dated_population/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(fn entry -> {entry.year, entry.preferred?} end, :desc)
+    |> List.first()
+  end
+
+  defp latest_dated_population(_), do: nil
+
+  defp dated_population(%{
+         "mainsnak" => %{"datavalue" => %{"value" => %{"amount" => amount}}},
+         "qualifiers" => %{"P585" => dates}
+       } = claim)
+       when is_binary(amount) and is_list(dates) do
+    year =
+      Enum.find_value(dates, fn
+        %{"datavalue" => %{"value" => %{"time" => time}}}
+        when is_binary(time) ->
+          case Regex.run(~r/^[+]?((?:18|19|20)\d{2})-\d{2}-\d{2}T/u, time) do
+            [_, raw] ->
+              value = String.to_integer(raw)
+              if value <= Date.utc_today().year, do: value
+
+            _ ->
+              nil
+          end
+
+        _ ->
+          nil
+      end)
+
+    case Integer.parse(amount) do
+      {value, ""} when is_integer(year) and value > 0 and value <= 100_000_000 ->
+        if Map.get(claim, "rank") == "deprecated" do
+          nil
+        else
+          %{year: year, value: value, preferred?: Map.get(claim, "rank") == "preferred"}
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp dated_population(_), do: nil
+
   @spec place(String.t(), String.t() | nil, keyword()) ::
           {:ok, map()} | {:error, term()}
   def place(name, hint \\ nil, opts \\ [])
@@ -161,7 +253,8 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
            url: "https://www.wikidata.org/wiki/" <> id,
            provider: :wikidata,
            latitude: lat,
-           longitude: lon
+           longitude: lon,
+           population_claims: get_in(entity, ["claims", "P1082"]) || []
          }}
       else
         _ -> {:error, :coordinates_unavailable}
