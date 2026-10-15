@@ -39,7 +39,10 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
       |> Enum.with_index()
       |> Enum.find_value(:no_match, fn {word, index} ->
         if word == obj do
-          find_relation(tokens, index, src, marker)
+          # Both markers express the same bounded SOURCE relation.
+          # The gloss may say "water out of a well" even if the sentence
+          # says "water from a well" (and vice versa).
+          find_relation(tokens, index, src)
         else
           false
         end
@@ -51,15 +54,15 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
 
   def match(_, _), do: :no_match
 
-  defp find_relation(tokens, object_index, source, marker) do
+  defp find_relation(tokens, object_index, source) do
     suffix = Enum.drop(tokens, object_index + 1)
 
-    case {marker, suffix} do
-      {"from", ["from" | remaining]} ->
-        source_match(remaining, source, marker, object_index, object_index + 2)
+    case suffix do
+      ["from" | remaining] ->
+        source_match(remaining, source, "from", object_index, object_index + 2)
 
-      {"out of", ["out", "of" | remaining]} ->
-        source_match(remaining, source, marker, object_index, object_index + 3)
+      ["out", "of" | remaining] ->
+        source_match(remaining, source, "out of", object_index, object_index + 3)
 
       _ ->
         false
