@@ -95,7 +95,9 @@ defmodule Brain.LIFG.VerbRoleShadowFitTest do
       "They draw water. From a well.",
       "They draw water; from a well.",
       "They draw water, from a well.",
-      "They draw water from a, well."
+      "They draw water from a, well.",
+      "They draw water (from a well).",
+      "They draw water — from a well."
     ] do
       report = result(sentence)
       refute report.role_observation_accepted?, sentence
