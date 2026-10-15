@@ -832,7 +832,11 @@ defmodule Brain.PMTG do
 
     with true <- is_integer(idx),
          tokens when is_list(tokens) <- Map.get(si, :tokens),
-         %{} = tok <- Enum.at(tokens, idx),
+         %{} = tok <-
+           Enum.find(tokens, fn
+             %{} = token -> token_index_of(token) == idx
+             _ -> false
+           end),
          phrase when is_binary(phrase) <- Map.get(tok, :phrase) || Map.get(tok, "phrase") do
       phrase
     else
