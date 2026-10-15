@@ -54,7 +54,7 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
   end
 
   test "rejects credentials and disallowed schemes; escapes all other markup" do
-    unsafe = ~s(<img src=x onerror="alert(1)"> Source: javascript:alert(1))
+    unsafe = ~S|<img src=x onerror="alert(1)"> Source: javascript:alert(1)|
     assert [%{kind: :text, text: ^unsafe}] = SourceLinks.parts(unsafe)
 
     credentials = "Source: https://someone:secret@example.com/private"
@@ -62,11 +62,11 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
 
     html = render_component(&HTML.assistant_text/1, message: %{text: unsafe})
     assert html =~ "&lt;img"
-    refute html =~ ~s(<img src=x onerror=)
-    refute html =~ ~s(href="javascript:)
+    refute html =~ "<img src=x onerror="
+    refute html =~ "href=\"javascript:"
 
     html = render_component(&HTML.assistant_text/1, message: %{text: credentials})
-    refute html =~ ~s(href="https://someone:secret@example.com)
+    refute html =~ "href=\"https://someone:secret@example.com"
   end
 
   test "assistant bubble hides lexical tail without mutating the original text" do
