@@ -17,7 +17,7 @@ defmodule Core.Syntax.VerbRoleShadowTest do
   # Unlike a plain word-only scanner, this keeps punctuation as tokens so
   # sentence boundaries cannot silently collapse during shadow observation.
   defp tokenize(sentence) do
-    Regex.scan(~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[.!?;,:]/u, sentence)
+    Regex.scan(~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u, sentence)
     |> Enum.map(&hd/1)
     |> Enum.with_index()
     |> Enum.map(fn {phrase, index} -> %{phrase: phrase, index: index, n: 1} end)
@@ -75,7 +75,10 @@ defmodule Core.Syntax.VerbRoleShadowTest do
           {"They draw water, from a well.", 1},
           {"They draw a. Picture from a well.", 1},
           {"They draw a picture. From a well.", 1},
-          {"They draw a picture; from a well.", 1}
+          {"They draw a picture; from a well.", 1},
+          {"They draw water (from a well).", 1},
+          {"They draw water — from a well.", 1},
+          {"They draw a (picture from a well).", 1}
         ] do
       assert observe(sentence, index).status == :abstain, sentence
     end
