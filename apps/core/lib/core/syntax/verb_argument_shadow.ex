@@ -221,7 +221,8 @@ defmodule Core.Syntax.VerbArgumentShadow do
   defp boundary?(word) do
     MapSet.member?(@prepositions, word) or
       MapSet.member?(@clause_boundaries, word) or
-      MapSet.member?(@punctuation_boundaries, word)
+      MapSet.member?(@punctuation_boundaries, word) or
+      Regex.match?(~r/^[\p{P}\p{S}]$/u, word)
   end
 
   defp index_tokens(tokens) do
