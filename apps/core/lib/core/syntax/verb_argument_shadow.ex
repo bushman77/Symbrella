@@ -24,6 +24,7 @@ defmodule Core.Syntax.VerbArgumentShadow do
   @auxiliaries MapSet.new(~w(will would can could should may might do does did))
   @prepositions MapSet.new(~w(from with of at on in into through by over under to for))
   @clause_boundaries MapSet.new(~w(and but because if while when although))
+  @punctuation_boundaries MapSet.new([".", "!", "?", ";", ":", ","])
   @max_nominal_words 3
 
   @spec observe([map()], non_neg_integer(), [map()]) :: map()
@@ -219,7 +220,8 @@ defmodule Core.Syntax.VerbArgumentShadow do
 
   defp boundary?(word) do
     MapSet.member?(@prepositions, word) or
-      MapSet.member?(@clause_boundaries, word)
+      MapSet.member?(@clause_boundaries, word) or
+      MapSet.member?(@punctuation_boundaries, word)
   end
 
   defp index_tokens(tokens) do
