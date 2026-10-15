@@ -94,6 +94,15 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
       case {qualifiers, hint} do
         {[plain], region} when is_binary(region) and region != "" ->
           ["#{plain}, #{region}", plain]
+
+        # A jurisdiction in the user's question is a constraint on the
+        # ENTITY, not necessarily part of its English Wikipedia page title.
+        # E.g. "Kamloops, BC" is enwiki "Kamloops". Validate the original
+        # requested jurisdiction against the candidate's Wikidata description
+        # even when the bare title is used.
+        {[plain, _region], _} ->
+          [expanded, String.trim(plain)]
+
         _ ->
           [expanded]
       end

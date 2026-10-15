@@ -216,7 +216,10 @@ defmodule Core.Tools.EvidenceResolverTest do
           wikidata_reply("Maple Ridge, British Columbia")
 
         "Kamloops, British Columbia" ->
-          entity("Q2138", "Kamloops", "city in British Columbia, Canada",
+          {:ok, %{status: 200, body: %{"entities" => %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+
+        "Kamloops" ->
+          entity("Q473209", "Kamloops", "city in British Columbia, Canada",
             50.6745, -120.3273)
 
         other ->
@@ -249,7 +252,10 @@ defmodule Core.Tools.EvidenceResolverTest do
             49.2167, -122.6)
 
         "Kamloops, British Columbia" ->
-          entity("Q2138", "Kamloops", "city in British Columbia, Canada",
+          {:ok, %{status: 200, body: %{"entities" => %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+
+        "Kamloops" ->
+          entity("Q473209", "Kamloops", "city in British Columbia, Canada",
             50.6745, -120.3273)
 
         other ->
@@ -277,7 +283,7 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert_in_delta support.distance_km, 229.6, 0.2
     assert Enum.map(support.sources, & &1.url) == [
       "https://www.wikidata.org/wiki/Q16740",
-      "https://www.wikidata.org/wiki/Q2138"
+      "https://www.wikidata.org/wiki/Q473209"
     ]
 
     {:ok, final, review} =
@@ -289,8 +295,30 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert :geographic_claim_unverified in review.issues
     assert final =~ "229.6 km"
     assert final =~ "straight line"
-    assert final =~ "https://www.wikidata.org/wiki/Q2138"
+    assert final =~ "https://www.wikidata.org/wiki/Q473209"
     refute final =~ "120 miles"
+  end
+
+  test "qualified fallback never accepts a same-name city in a different jurisdiction" do
+    fake_get = fn _url, opts ->
+      case opts[:params][:titles] do
+        "Maple Ridge, British Columbia" ->
+          wikidata_reply("Maple Ridge, British Columbia")
+
+        "Kamloops, British Columbia" ->
+          {:ok, %{status: 200, body: %{"entities" => %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+
+        "Kamloops" ->
+          entity("Q999999", "Kamloops", "city in another province, Canada",
+            50.6745, -120.3273)
+
+        other ->
+          flunk("Unexpected Wikidata title: #{other}")
+      end
+    end
+
+    assert {:error, :place_not_verified} =
+             Wikidata.proximity("Maple Ridge, BC", "Kamloops, BC", fetch: fake_get)
   end
 
   test "Wikidata provider validates two city entities and computes straight-line distance" do
