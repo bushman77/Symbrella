@@ -14,6 +14,7 @@ defmodule Core.Syntax.VerbRoleShadow do
   alias Core.Syntax.VerbArgumentShadow
 
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
+  @punctuation MapSet.new([".", "!", "?", ";", ":", ","])
 
   @doc """
   Observe a local V + object + "from" + nominal-source construction.
@@ -67,7 +68,7 @@ defmodule Core.Syntax.VerbRoleShadow do
       end
 
     cond do
-      is_nil(head) ->
+      is_nil(head) or MapSet.member?(@punctuation, head.word) ->
         abstain(:source_head_missing, argument)
 
       not noun_attested?(head.word, cells) ->
