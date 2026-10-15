@@ -1,6 +1,6 @@
 defmodule Core.Syntax.VerbRoleShadow do
   @moduledoc """
-  Read-only structural observation of an object plus a local "from" source.
+  Read-only structural observation of an object plus a local "from"/"out of" source.
 
   This is deliberately stricter than a sentence-wide keyword match:
   the prepositional phrase must BEGIN immediately after the attested direct
@@ -17,7 +17,7 @@ defmodule Core.Syntax.VerbRoleShadow do
   @punctuation MapSet.new([".", "!", "?", ";", ":", ","])
 
   @doc """
-  Observe a local V + object + "from" + nominal-source construction.
+  Observe a local V + object + ("from" or "out of") + nominal-source construction.
 
   Tokens MUST preserve punctuation as indexed tokens, not silently remove
   punctuation and join two sentences. The caller supplies lexical POS senses
@@ -33,17 +33,25 @@ defmodule Core.Syntax.VerbRoleShadow do
     if argument.status == :candidate do
       object_index = argument.roles.object_head
       object = Map.get(by_index, object_index)
-      from = Map.get(by_index, object_index + 1)
+      marker = Map.get(by_index, object_index + 1)
 
       cond do
-        is_nil(object) or is_nil(from) ->
+        is_nil(object) or is_nil(marker) ->
           abstain(:no_adjacent_source_phrase, argument)
 
-        from.word != "from" ->
-          abstain(:no_adjacent_from_preposition, argument)
+        marker.word == "from" ->
+          source_candidate(by_index, object, marker, marker, "from",
+            verb_index, cells, argument)
+
+        marker.word == "out" and
+            match?(%{word: "of"}, Map.get(by_index, marker.index + 1)) ->
+          marker_end = Map.fetch!(by_index, marker.index + 1)
+
+          source_candidate(by_index, object, marker, marker_end, "out of",
+            verb_index, cells, argument)
 
         true ->
-          source_candidate(by_index, object, from, verb_index, cells, argument)
+          abstain(:no_adjacent_from_preposition, argument)
       end
     else
       abstain(:direct_object_unresolved, argument)
@@ -52,8 +60,9 @@ defmodule Core.Syntax.VerbRoleShadow do
 
   def observe(_, _, _), do: abstain(:invalid_input, nil)
 
-  defp source_candidate(by_index, object, from, verb_index, cells, argument) do
-    first = Map.get(by_index, from.index + 1)
+  defp source_candidate(by_index, object, marker, marker_end, marker_text,
+         verb_index, cells, argument) do
+    first = Map.get(by_index, marker_end.index + 1)
 
     {head, determiner_index} =
       cond do
@@ -80,18 +89,21 @@ defmodule Core.Syntax.VerbRoleShadow do
           status: :candidate,
           frame_id: :verb_object_source_hypothesis,
           construction: :verb_object_from_nominal_source,
-          roles: %{
-            verb: verb_index,
-            object_head: object.index,
-            source_preposition: from.index,
-            source_head: head.index,
-            source_determiner: determiner_index
-          },
-          words: %{object: object.word, preposition: "from", source: head.word},
+          roles:
+            %{
+              verb: verb_index,
+              object_head: object.index,
+              source_preposition: marker.index,
+              source_head: head.index,
+              source_determiner: determiner_index
+            }
+            |> maybe_marker_end(marker.index, marker_end.index),
+          words: %{object: object.word, preposition: marker_text, source: head.word},
           evidence: [
             :attested_direct_object,
             :source_phrase_adjacent_to_object,
-            :explicit_from_preposition,
+            if(marker_text == "from", do: :explicit_from_preposition,
+              else: :explicit_out_of_source_marker),
             :attested_nominal_source
           ],
           source_relation_verified?: false,
@@ -100,6 +112,11 @@ defmodule Core.Syntax.VerbRoleShadow do
         }
     end
   end
+
+  # Keep the original shape unchanged for "from" (existing audit contracts).
+  defp maybe_marker_end(roles, start_index, start_index), do: roles
+  defp maybe_marker_end(roles, _start_index, end_index),
+    do: Map.put(roles, :source_marker_end, end_index)
 
   defp noun_attested?(word, cells) do
     Enum.any?(cells, fn
