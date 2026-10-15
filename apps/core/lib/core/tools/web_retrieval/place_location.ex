@@ -90,7 +90,7 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
 
     if first != "" and String.length(first) <= 240 and
          sentence_starts_with_place? and
-         Regex.match?(~r/\b(?:in|within|near)\b/iu, first) and
+         geographic_relation?(first) and
          not Regex.match?(~r/\b(?:not|never|formerly|fictional|alleged)\b/iu, first) and
          not Regex.match?(~r/\d/u, first) and region_matches? and
          String.ends_with?(first, ".") do
@@ -98,6 +98,13 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
     else
       :no_support
     end
+  end
+
+  # "Capital city of [region]" states a jurisdiction. A bare "of" does not:
+  # "a city of dreams" or "the centre of tourism" are not location evidence.
+  defp geographic_relation?(sentence) do
+    Regex.match?(~r/\b(?:in|within|near)\b/iu, sentence) or
+      Regex.match?(~r/\bis\s+the\s+capital(?:\s+city)?\s+of\b/iu, sentence)
   end
 
   defp expand_region(place) do

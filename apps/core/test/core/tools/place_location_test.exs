@@ -101,14 +101,40 @@ defmodule Core.Tools.PlaceLocationTest do
     refute final =~ "Maple Ridge is a city"
   end
 
-  test "ordinary unqualified city questions work with exact article titles" do
-    page = %{provider: :wikipedia, title: "Victoria",
-      url: "https://en.wikipedia.org/wiki/Victoria",
-      excerpt: "Victoria is the capital city of British Columbia, Canada. Later material."}
-    ctx = context("Where is Victoria?", "Victoria", [page])
+  test "unqualified public-city titles accept a capital-of location assertion" do
+    page = %{provider: :wikipedia, title: "Ottawa",
+      url: "https://en.wikipedia.org/wiki/Ottawa",
+      excerpt: "Ottawa is the capital city of Canada. Later material."}
+    ctx = context("Where is Ottawa?", "Ottawa", [page])
 
     assert {:ok, answer} = PlaceLocation.answer(ctx)
+    assert answer =~ "Ottawa is the capital city of Canada."
+    assert answer =~ page.url
+  end
+
+  test "province-qualified capitals are grounded without guessing from an ambiguous title" do
+    page = %{provider: :wikipedia, title: "Victoria, British Columbia",
+      url: "https://en.wikipedia.org/wiki/Victoria%2C_British_Columbia",
+      excerpt: "Victoria is the capital city of British Columbia, Canada. More text."}
+
+    assert {:ok, answer} =
+      PlaceLocation.answer(context("Where is Victoria, BC?", "Victoria, BC", [page]))
+
     assert answer =~ "Victoria is the capital city of British Columbia, Canada."
     assert answer =~ page.url
+
+    # The unqualified /wiki/Victoria page is a disambiguation page in reality.
+    # A specifically named article must not silently answer an ambiguous query.
+    assert :no_support ==
+      PlaceLocation.answer(context("Where is Victoria?", "Victoria", [page]))
+  end
+
+  test "a generic 'of' phrase is not location evidence" do
+    page = %{provider: :wikipedia, title: "Ottawa",
+      url: "https://en.wikipedia.org/wiki/Ottawa",
+      excerpt: "Ottawa is a city of wonders. More text."}
+
+    assert :no_support ==
+      PlaceLocation.answer(context("Where is Ottawa?", "Ottawa", [page]))
   end
 end
