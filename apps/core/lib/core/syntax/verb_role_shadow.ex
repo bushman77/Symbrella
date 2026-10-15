@@ -68,7 +68,8 @@ defmodule Core.Syntax.VerbRoleShadow do
       end
 
     cond do
-      is_nil(head) or MapSet.member?(@punctuation, head.word) ->
+      is_nil(head) or MapSet.member?(@punctuation, head.word) or
+          (not is_nil(head) and Regex.match?(~r/^[\p{P}\p{S}]$/u, head.word)) ->
         abstain(:source_head_missing, argument)
 
       not noun_attested?(head.word, cells) ->
