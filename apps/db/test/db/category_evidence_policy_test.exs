@@ -55,6 +55,9 @@ defmodule Db.JSONL.CategoryEvidencePolicyTest do
     assert {:skip, :unreviewed_other} =
              CategoryEvidencePolicy.decide(category("An unreviewed topic"))
 
+    assert {:skip, :unreviewed_topic} =
+             CategoryEvidencePolicy.decide(category("An unreviewed specialty", "topic"))
+
     assert {:skip, :unknown_kind} =
              CategoryEvidencePolicy.decide(category("Lifeforms", "lifeform"))
 
