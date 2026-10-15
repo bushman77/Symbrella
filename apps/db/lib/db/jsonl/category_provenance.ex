@@ -53,7 +53,14 @@ defmodule Db.JSONL.CategoryProvenance do
       &String.starts_with?(low, &1)
     ) or String.contains?(low, "translation boxes") or
       String.contains?(low, "incorrect language header") or
-      Regex.match?(~r/^terms with .+ translations$/, low)
+      Regex.match?(~r/^terms with .+ translations$/, low) or
+      # Wiktionary prefixes many maintenance labels with a language name,
+      # e.g. "Mandarin terms with redundant transliterations". The old
+      # "terms with redundant ..." prefix only matched unprefixed labels.
+      Regex.match?(
+        ~r/(?:^| )terms with (?:non-)?redundant (?:manual )?(?:transliterations|script codes)$/,
+        low
+      )
   end
 
   def likely_maintenance?(_), do: false
