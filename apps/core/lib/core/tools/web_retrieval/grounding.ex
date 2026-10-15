@@ -102,8 +102,15 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         subject = Map.get(frame, :subject)
 
         if is_binary(subject) do
-          date_note = if is_integer(year), do: " (#{year} census)", else: ""
-          "According to Wikipedia, #{subject} had a population of #{display}#{date_note}. Source: #{source}"
+          case Map.get(supported_population(context), :source_type) do
+            :wikidata ->
+              "Wikidata lists a dated population statement for #{subject} of #{display} " <>
+                "(#{year}). This is not necessarily the current population estimate. Source: #{source}"
+
+            _ ->
+              date_note = if is_integer(year), do: " (#{year} census)", else: ""
+              "According to Wikipedia, #{subject} had a population of #{display}#{date_note}. Source: #{source}"
+          end
         else
           draft
         end
@@ -146,9 +153,10 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   defp supports_population?(text, context) do
     case supported_population(context) do
-      %{display: display, value: value, source_url: source_url} ->
-        (String.contains?(text, display) or String.contains?(text, Integer.to_string(value))) and
-          String.contains?(text, source_url)
+      %{display: display, source_url: source_url} when is_binary(source_url) ->
+        # Numeric and source-URL matches alone can carry a wrong city or year.
+        # Accept only the deterministic claim-specific, provenance-qualified reply.
+        text == align(text, context) and is_binary(display)
 
       _ -> false
     end
@@ -193,7 +201,10 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     if Map.get(frame, :type) == :location_question and
          Map.get(frame, :relation) == :population and
          Map.get(evidence, :status) == :retrieved and
-         is_map(support) and Map.get(support, :status) == :source_supported,
+         is_map(support) and Map.get(support, :kind) == :population and
+         Map.get(support, :status) == :source_supported and
+         is_binary(Map.get(support, :source_url)) and
+         is_integer(Map.get(support, :census_year)),
        do: support
   end
 

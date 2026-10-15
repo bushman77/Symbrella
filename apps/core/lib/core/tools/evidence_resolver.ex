@@ -47,14 +47,21 @@ defmodule Core.Tools.EvidenceResolver do
          {:news, news_provider, "#{query} latest", news_opts}] ++
           optional_search(cfg, news_provider, query, opts)
       else
-        (if relation == :identity and is_binary(subject),
-           do: [{:identity, coords_provider, nil, coords_opts}],
-           else: [{:search, provider, query, provider_opts}]) ++
+        (cond do
+           relation == :identity and is_binary(subject) ->
+             [{:identity, coords_provider, nil, coords_opts}]
+
+           relation == :population and is_binary(subject) ->
+             # Dated entity statements outrank arbitrary numbers in search
+             # excerpts; every claim must have a date and exact identity.
+             [{:population, coords_provider, nil, coords_opts},
+              {:search, provider, "#{subject} 2021 census population", provider_opts}]
+
+           true ->
+             [{:search, provider, query, provider_opts}]
+         end) ++
           (if relation == :proximity and is_binary(subject) and is_binary(target),
              do: [{:coordinates, coords_provider, nil, coords_opts}],
-             else: []) ++
-          (if relation == :population and is_binary(subject),
-             do: [{:search, provider, "#{subject} 2021 census population", provider_opts}],
              else: []) ++
           optional_search(cfg, provider, query, opts)
       end
@@ -199,6 +206,30 @@ defmodule Core.Tools.EvidenceResolver do
 
       _ ->
         {%{kind: :search, provider: provider, query: query,
+           status: :unavailable, source_count: 0}, [], nil}
+    end
+  end
+
+  defp attempt({:population, provider, _query, provider_opts}, subject, _target, _relation, timeout, _request_type) do
+    reply = safe_call(fn ->
+      provider.population(subject, Keyword.merge([timeout_ms: timeout], provider_opts))
+    end)
+
+    case reply do
+      {:ok, %{kind: :population, status: :source_supported,
+              value: value, census_year: year, source_url: url,
+              sources: sources} = support}
+      when is_integer(value) and value > 0 and is_integer(year) and
+           is_binary(url) and is_list(sources) and length(sources) == 1 ->
+        found = Enum.map(sources, fn source ->
+          Map.put(source, :excerpt, "Dated population statement (#{year}): #{value}")
+        end)
+        {%{kind: :population, provider: provider, query: subject,
+           status: :source_supported, source_count: length(found)},
+         found, support}
+
+      _ ->
+        {%{kind: :population, provider: provider, query: subject,
            status: :unavailable, source_count: 0}, [], nil}
     end
   end

@@ -342,8 +342,10 @@ defmodule Core.Response.LlmPrompt do
 
     support =
       case Map.get(evidence, :support) do
-        %{kind: :population, display: number, source_url: url} ->
-          "Source-extracted population figure: #{number}; source URL: #{url}."
+        %{kind: :population, display: number, census_year: year,
+          source_url: url} ->
+          "Dated population evidence: #{number} (#{year}); source URL: #{url}. " <>
+            "Never present this as a current-year estimate unless the source explicitly says so."
 
         %{kind: :proximity, distance_km: km, sources: coords_sources} ->
           urls = Enum.map_join(coords_sources, " and ", &Map.get(&1, :url, ""))
