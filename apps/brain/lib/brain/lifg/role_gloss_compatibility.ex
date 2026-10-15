@@ -22,7 +22,7 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
   @boundaries MapSet.new(~w(and but because while if although whereas))
   @max_modifiers 2
   @word_or_punctuation ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
-  @enumerated_clause ~r/\(([^()]{1,100})\)\s+(from|out\s+of)\s+([^.;:!?—\n]{1,100})/u
+  @enumerated_clause ~r/\(([^()]{1,100})\)[ \t]+(from|out[ \t]+of)[ \t]+([^.;:!?—\n]{1,100})/u
   @max_alternative_words 4
   @max_alternatives 6
 
