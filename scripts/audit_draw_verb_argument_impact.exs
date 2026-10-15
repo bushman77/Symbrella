@@ -88,8 +88,7 @@ case DefinitionWordReview.collect(File.stream!(path, [], :line), "draw") do
         blank = %{status: :abstain, reason: :syntax_not_used}
 
         rank = fn result, id ->
-          Enum.find_index(result.candidates, &(&1.id == id))
-          |> case do
+          case Enum.find_index(result.candidates, &(&1.id == id)) do
             nil -> nil
             zero_based -> zero_based + 1
           end
