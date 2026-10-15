@@ -48,11 +48,12 @@ defmodule Db.JSONL.CategoryProvenance do
       [
         "pages with ", "entries with ", "english entries with ",
         "english links with ", "terms with redundant ",
-        "english terms with redundant "
+        "english terms with redundant ", "english terms with collocations"
       ],
       &String.starts_with?(low, &1)
     ) or String.contains?(low, "translation boxes") or
-      String.contains?(low, "incorrect language header")
+      String.contains?(low, "incorrect language header") or
+      Regex.match?(~r/^terms with .+ translations$/, low)
   end
 
   def likely_maintenance?(_), do: false
