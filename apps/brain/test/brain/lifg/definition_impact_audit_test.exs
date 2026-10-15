@@ -45,11 +45,11 @@ defmodule Brain.LIFG.DefinitionImpactAuditTest do
              )
 
     assert result.before.expected_fit == 0.0
-    assert result.after.expected_fit > 0.0
+    assert result.projected.expected_fit > 0.0
     assert result.expected_fit_delta > 0.0
-    assert result.after.top_id == "draw|verb|129"
-    assert result.after.hypothesized_id_rank == 1
-    assert result.after.expected_definition_matches == ["picture"]
+    assert result.projected.top_id == "draw|verb|129"
+    assert result.projected.hypothesized_id_rank == 1
+    assert result.projected.expected_definition_matches == ["picture"]
 
     assert Enum.all?(old, fn row ->
       row.definition == "Senses relating to depicting or representing." and
