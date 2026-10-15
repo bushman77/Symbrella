@@ -13,6 +13,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
   """
 
   alias Brain.LIFG.VerbArgumentShadowScoring, as: Baseline
+  alias Brain.LIFG.RoleGlossCompatibility
 
   @role_bonus 0.10
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
@@ -31,18 +32,24 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
       Enum.map(baseline.candidates, fn row ->
         cell = Map.fetch!(by_id, row.id)
 
-        hits? =
-          not is_nil(source) and
-            is_list(Map.get(cell, :gram_function)) and
-            "transitive" in cell.gram_function and
-            exact_role_relation?(Map.get(cell, :definition), source.object, source.source)
+        gloss_match =
+          if not is_nil(source) and
+               is_list(Map.get(cell, :gram_function)) and
+               "transitive" in cell.gram_function do
+            RoleGlossCompatibility.match(Map.get(cell, :definition), source)
+          else
+            :no_match
+          end
 
-        role_bonus = if hits?, do: @role_bonus, else: 0.0
+        role_bonus = if match?({:ok, _}, gloss_match), do: @role_bonus, else: 0.0
 
         row
         |> Map.put(:role_bonus, role_bonus)
-        |> Map.put(:role_evidence,
-          if(hits?, do: %{object: source.object, preposition: "from", source: source.source}, else: nil))
+        |> Map.put(:role_evidence, if(role_bonus > 0.0, do: source, else: nil))
+        |> Map.put(:role_match, case gloss_match do
+          {:ok, trace} -> trace
+          :no_match -> nil
+        end)
         |> Map.put(:combined, Float.round(min(1.0, row.combined + role_bonus), 6))
       end)
       |> Enum.sort_by(&{-&1.combined, &1.id})
@@ -70,8 +77,8 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
     production_winners_changed?: false
   }
 
-  # Keep every constraint, including token indices, surface words and
-  # independent object evidence, before allowing any candidate score change.
+  # Verify structure against the ORIGINAL sentence with all punctuation.
+  # Index labels and words supplied by another component are not trusted alone.
   defp validated_source(
          sentence,
          verb_index,
@@ -80,73 +87,77 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
            frame_id: :verb_object_source_hypothesis,
            roles: %{verb: verb_index, object_head: object_index,
                     source_preposition: prep_index, source_head: source_index,
-                    source_determiner: determiner_index},
-           words: %{object: object, preposition: "from", source: source},
+                    source_determiner: determiner_index} = roles,
+           words: %{object: object, preposition: marker, source: source},
            evidence: evidence},
          %{observation_strength: strength}
        )
        when strength in [:weak, :strong] and is_list(evidence) and
               is_integer(object_index) and is_integer(prep_index) and
-              is_integer(source_index) and is_binary(object) and is_binary(source) do
+              is_integer(source_index) and is_binary(object) and
+              is_binary(source) and marker in ["from", "out of"] do
     tokens = Regex.scan(@token_re, String.downcase(sentence)) |> Enum.map(&hd/1)
+    marker_end = Map.get(roles, :source_marker_end, prep_index)
 
     required? =
       Enum.all?(
         [:attested_direct_object, :source_phrase_adjacent_to_object,
-         :explicit_from_preposition, :attested_nominal_source],
+         :attested_nominal_source],
         &(&1 in evidence)
       )
+
+    marker_ok? =
+      case marker do
+        "from" ->
+          marker_end == prep_index and
+            Enum.at(tokens, prep_index) == "from" and
+            :explicit_from_preposition in evidence
+
+        "out of" ->
+          marker_end == prep_index + 1 and
+            Enum.at(tokens, prep_index) == "out" and
+            Enum.at(tokens, marker_end) == "of" and
+            :explicit_out_of_source_marker in evidence
+      end
 
     determiner_ok? =
       case determiner_index do
         nil ->
-          source_index == prep_index + 1
+          source_index == marker_end + 1
 
         index when is_integer(index) ->
-          index == prep_index + 1 and source_index == index + 1 and
+          index == marker_end + 1 and source_index == index + 1 and
             MapSet.member?(@determiners, Enum.at(tokens, index))
 
         _ ->
           false
       end
 
-    # Object and source are tied to exact token positions; never cross a
-    # punctuation mark or a new clause by deleting non-lexical input tokens.
     sequence? =
-      prep_index == object_index + 1 and
-        Enum.at(tokens, verb_index) != nil and
+      object_index > verb_index and
+        prep_index == object_index + 1 and
+        Enum.at(tokens, verb_index) == String.downcase(target_for_verb(sentence, verb_index)) and
         Enum.at(tokens, object_index) == object and
-        Enum.at(tokens, prep_index) == "from" and
         Enum.at(tokens, source_index) == source and
         String.length(object) >= 3 and String.length(source) >= 3 and
-        determiner_ok?
+        marker_ok? and determiner_ok?
 
-    if required? and sequence?, do: %{object: object, source: source}, else: nil
+    if required? and sequence? do
+      %{object: object, source: source, preposition: marker}
+    else
+      nil
+    end
   end
 
   defp validated_source(_, _, _, _, _), do: nil
 
-  # Exact ordered relation, optionally with a single determiner, within the
-  # SAME gloss. "A well contains water" is not "water from a well".
-  defp exact_role_relation?(definition, object, source)
-       when is_binary(definition) and is_binary(object) and is_binary(source) do
-    terms =
-      Regex.scan(~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/u, String.downcase(definition))
-      |> Enum.map(&hd/1)
-
-    terms
-    |> Enum.chunk_every(4, 1, :discard)
-    |> Enum.any?(fn
-      [^object, "from", determiner, ^source] -> MapSet.member?(@determiners, determiner)
-      _ -> false
-    end) or
-      (terms
-       |> Enum.chunk_every(3, 1, :discard)
-       |> Enum.any?(fn
-         [^object, "from", ^source] -> true
-         _ -> false
-       end))
+  # Do not infer the lemma here. The reported verb is tied to a real sentence
+  # token; its lexical sense set was already filtered by the caller's target.
+  defp target_for_verb(sentence, index) do
+    sentence
+    |> String.downcase()
+    |> then(&Regex.scan(@token_re, &1))
+    |> Enum.map(&hd/1)
+    |> Enum.at(index, "")
   end
-
-  defp exact_role_relation?(_, _, _), do: false
 end
