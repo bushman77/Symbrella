@@ -61,8 +61,7 @@ defmodule Core.Syntax.VerbRoleShadowGeneralizationTest do
           {"They pull a sword out of mysteryword.", :source_head_not_lexically_attested},
           {"They pull from its sheath.", :direct_object_unresolved},
           {"They pull a sword — out of its sheath.", :no_adjacent_from_preposition},
-          {"They pull a sword from. Its sheath.", :source_head_missing},
-          {"Pull a sword out of its sheath.", :direct_object_unresolved}
+          {"They pull a sword from. Its sheath.", :source_head_missing}
         ] do
       report = observe(sentence, 1)
       assert report.status == :abstain, inspect({sentence, report})
@@ -71,6 +70,8 @@ defmodule Core.Syntax.VerbRoleShadowGeneralizationTest do
   end
 
   test "no direct-object inference from an unrelated preceding noun" do
+    assert observe("Pull a sword out of its sheath.", 0).reason == :direct_object_unresolved
+
     result = observe("They pull with a sword out of its sheath.", 1)
     assert result.status == :abstain
     assert result.reason == :direct_object_unresolved
