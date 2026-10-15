@@ -66,6 +66,7 @@ defmodule Symbrella.SourceRowReconciliation do
       verdict_counts: %{},
       missing_extended_definitions: 0,
       missing_categories: 0,
+      missing_usage: 0,
       missing_both: 0,
       examples: %{},
       sample_limit: sample_limit
@@ -104,8 +105,11 @@ defmodule Symbrella.SourceRowReconciliation do
         |> Enum.filter(fn {cell, sense} ->
           # This is the SOURCE eligibility test, not proof of a stale DB row.
           multiple_glosses?(sense) or
-            Enum.any?(cell.semantic_atoms,
-              &(is_binary(&1) and String.starts_with?(&1, "cat:")))
+            Enum.any?(cell.semantic_atoms, fn atom ->
+              is_binary(atom) and
+                (String.starts_with?(atom, "cat:") or
+                 String.starts_with?(atom, "usage:"))
+            end)
         end)
         |> Enum.map(&elem(&1, 0))
 
@@ -174,6 +178,8 @@ defmodule Symbrella.SourceRowReconciliation do
 
       category_gap? =
         verdict == :missing_source_evidence and detail.added_categories != []
+      usage_gap? =
+        verdict == :missing_source_evidence and detail.added_usage_atoms != []
 
       existing_examples = Map.get(acc.examples, verdict, [])
       examples =
@@ -192,6 +198,8 @@ defmodule Symbrella.SourceRowReconciliation do
           acc.missing_extended_definitions + if(gloss_gap?, do: 1, else: 0),
         missing_categories:
           acc.missing_categories + if(category_gap?, do: 1, else: 0),
+        missing_usage:
+          acc.missing_usage + if(usage_gap?, do: 1, else: 0),
         missing_both:
           acc.missing_both + if(gloss_gap? and category_gap?, do: 1, else: 0),
         examples: examples
@@ -252,6 +260,7 @@ IO.inspect(%{
     Map.get(state.verdict_counts, :missing_source_evidence, 0),
   among_matched_missing_extended_definitions: state.missing_extended_definitions,
   among_matched_missing_categories: state.missing_categories,
+  among_matched_missing_usage_atoms: state.missing_usage,
   among_matched_missing_both: state.missing_both,
   different_stored_definition: Map.get(state.verdict_counts, :different_definition, 0),
   missing_definition_on_both_sides: Map.get(state.verdict_counts, :no_gloss, 0),
