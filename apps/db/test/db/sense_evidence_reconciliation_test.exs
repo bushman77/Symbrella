@@ -81,6 +81,33 @@ defmodule Db.JSONL.SenseEvidenceReconciliationTest do
              Reconciliation.classify(source(), %{stored() | pos: "noun"})
   end
 
+  test "labels an added usually-plural derivation without treating it as a safe backfill" do
+    derived_source = %{source() | gram_function: ["countable", "usually plural"]}
+    original = %{stored() | gram_function: ["countable"]}
+
+    assert {:grammar_derivation_drift, detail} =
+             Reconciliation.classify(derived_source, original)
+
+    assert detail.stored_gram_function == ["countable"]
+    assert detail.reconstructed_gram_function == ["countable", "usually plural"]
+
+    unrelated = %{derived_source | gram_function: ["countable", "plural-only"]}
+
+    assert {:metadata_mismatch, _} =
+             Reconciliation.classify(unrelated, original)
+  end
+
+  test "distinguishes glossary-free translation hubs from true ID conflicts" do
+    source_without_gloss = %{source() | definition: nil}
+    stored_without_gloss = %{stored() | definition: nil}
+
+    assert {:no_gloss, _} =
+             Reconciliation.classify(source_without_gloss, stored_without_gloss)
+
+    assert {:different_definition, _} =
+             Reconciliation.classify(source(), stored_without_gloss)
+  end
+
   test "preserves a source category when it is already stored" do
     existing = %{stored() | semantic_atoms: source().semantic_atoms}
     assert {:missing_source_evidence, detail} = Reconciliation.classify(source(), existing)
