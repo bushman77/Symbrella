@@ -18,6 +18,7 @@ alias Core.Syntax.VerbRoleShadow
 
 cases = [
   {"They draw water from a well.", 1, "draw|verb|81", "draw|verb|17"},
+  {"They draw water out of a well.", 1, "draw|verb|81", "draw|verb|17"},
   {"They draw a sword from its sheath.", 1, "draw|verb|79", "draw|verb|112"},
   {"They draw a playing card.", 1, "draw|verb|95", "draw|verb|120"},
   {"They draw the curtains closed.", 1, "draw|verb|5", "draw|verb|36"},
@@ -161,7 +162,7 @@ case DefinitionWordReview.collect(File.stream!(path, [], :line), "draw") do
           expected_rank_improvements_over_grammar_only:
             Enum.count(output, fn row -> row.role_aware_rank < row.projected_rank end),
           false_source_bonus_on_negative_controls?:
-            Enum.any?(Enum.drop(output, 6), &(&1.role_adjusted_senses > 0)),
+            Enum.any?(Enum.drop(output, 7), &(&1.role_adjusted_senses > 0)),
           production_stage1_called?: false,
           brain_cell_lifecycle_updated?: false,
           db_writes?: false
