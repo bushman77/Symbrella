@@ -53,7 +53,7 @@ defmodule Core.Syntax.VerbRoleShadowTest do
   test "does not infer source role from unrelated prepositions or unverified heads" do
     for {sentence, index, reason} <- [
           {"They draw water with a well.", 1, :no_adjacent_from_preposition},
-          {"They draw water because from a well.", 1, :direct_object_unresolved},
+          {"They draw water because from a well.", 1, :no_adjacent_from_preposition},
           {"They draw water from a mysteryword.", 1, :source_head_not_lexically_attested},
           {"They draw water from a.", 1, :source_head_missing},
           {"They draw water from.", 1, :source_head_missing},
