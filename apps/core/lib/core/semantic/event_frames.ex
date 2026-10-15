@@ -32,11 +32,29 @@ defmodule Core.Semantic.EventFrames do
 
   def attach(other, _opts), do: other
 
+  @doc """
+  Classify only the geographical relation requested by the user's question.
+  This does not establish or verify any real-world geographic claim. The pure
+  helper is also used by response review if a runtime context loses its frame.
+  """
+  @spec location_question(String.t()) :: map() | nil
+  def location_question(sentence) when is_binary(sentence),
+    do: location_question_frame(%{sentence: sentence})
+
+  def location_question(_), do: nil
+
   # A syntactically clear location question is not a verified geographic fact.
   # Keep the predicate and antecedent explicit, without claiming an external
   # population or distance measurement exists.
   defp location_question_frame(si) do
-    sentence = Map.get(si, :sentence) || ""
+    sentence =
+      si
+      |> Map.get(:sentence, "")
+      |> String.trim()
+      |> String.replace(~r/\A[“"]+\s*/u, "")
+      |> String.replace(~r/\s*[”"]+\z/u, "")
+      |> String.trim()
+
     reference = Map.get(si, :discourse_reference) || %{}
     subject = Map.get(reference, :antecedent)
 

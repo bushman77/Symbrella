@@ -86,6 +86,55 @@ defmodule Core.Response.GeographicContinuityTest do
     refute answer =~ "10 miles"
   end
 
+  test "quoted direct-distance questions retain both named roles and route coordinates" do
+    for question <- [
+          "How far is Maple Ridge, BC from Kamloops, BC?",
+          "How far is Maple Ridge, BC from Kamloops, BC?”",
+          "“How far is Maple Ridge, BC from Kamloops, BC?”"
+        ] do
+      assert %{type: :location_question, relation: :proximity,
+               subject: "Maple Ridge, BC", target: "Kamloops, BC",
+               grounding_status: :unverified} =
+               EventFrames.location_question(question)
+
+      si = EventFrames.attach(%{sentence: question})
+
+      assert si.symbolic_frame.subject == "Maple Ridge, BC"
+      assert si.symbolic_frame.target == "Kamloops, BC"
+
+      assert %{relation: :proximity, request_type: :geographic_proximity,
+               trigger: :symbolic_frame} =
+               Core.Tools.WebRetrieval.route_for(%{
+                 user_text: question,
+                 features: %{symbolic_frame: si.symbolic_frame}
+               })
+    end
+  end
+
+  test "response review independently rejects hallucinated mileage if frame is lost" do
+    question = "How far is Maple Ridge, BC from Kamloops, BC?”"
+    guessed = "Maple Ridge, BC is approximately 120 miles away from Kamloops, BC."
+
+    # Deliberately omit the geographic frame: this was the live failure mode.
+    context = %{features: %{intent: :ask, conf: 0.9}}
+
+    {:ok, response, reflection} = ReflectionLoop.review(question, guessed, context)
+
+    assert reflection.status == :repair
+    assert :geographic_claim_unverified in reflection.issues
+    assert response =~ "Maple Ridge, BC"
+    assert response =~ "Kamloops, BC"
+    assert response =~ "don't have verified distance information"
+    refute response =~ "120 miles"
+
+    assert {:ok, ^guessed, %{status: :accept}} =
+             ReflectionLoop.review(
+               "Please repeat the following quotation",
+               guessed,
+               context
+             )
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do

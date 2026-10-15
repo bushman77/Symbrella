@@ -14,6 +14,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Response.AnswerAdequacy
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.PlaceLocation
+  alias Core.Semantic.EventFrames
 
   @event [:core, :response, :reflection]
   @v 1
@@ -99,7 +100,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(uncited_reference_answer?(context, draft_text), :reference_uncited)
     |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
-    |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
+    |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
@@ -228,7 +229,7 @@ defmodule Core.Response.ReflectionLoop do
 
         :geographic_claim_unverified in issues ->
           case Grounding.align(draft_text, context) do
-            ^draft_text -> unverified_geographic_reply(context)
+            ^draft_text -> unverified_geographic_reply(context, user_text)
             sourced -> sourced
           end
 
@@ -680,7 +681,7 @@ defmodule Core.Response.ReflectionLoop do
 
   defp subject_reversal?(_, _), do: false
 
-  defp geographic_frame(context) do
+  defp geographic_frame(context, user_text) do
     candidates = [
       get_in_map(context, [:features, :symbolic_frame]),
       get_in_map(context, [:symbolic_frame, :event]),
@@ -689,13 +690,16 @@ defmodule Core.Response.ReflectionLoop do
 
     Enum.find(candidates, fn candidate ->
       is_map(candidate) and map_get(candidate, :type) == :location_question
-    end) || %{}
+    end) ||
+      # A lost upstream frame must not allow the model to invent distances.
+      # Parse the original user question, never a candidate model answer.
+      EventFrames.location_question(user_text) || %{}
   end
 
   # A semantic frame can identify what a question asks without verifying a
   # number or spatial relationship. Do not treat fluent LLM prose as evidence.
-  defp unverified_geographic_claim?(context, draft_text) do
-    frame = geographic_frame(context)
+  defp unverified_geographic_claim?(context, user_text, draft_text) do
+    frame = geographic_frame(context, user_text)
 
     is_map(frame) and map_get(frame, :type) == :location_question and
       map_get(frame, :grounding_status) == :unverified and
@@ -707,8 +711,8 @@ defmodule Core.Response.ReflectionLoop do
          ))
   end
 
-  defp unverified_geographic_reply(context) do
-    frame = geographic_frame(context) || %{}
+  defp unverified_geographic_reply(context, user_text) do
+    frame = geographic_frame(context, user_text)
     subject = map_get(frame, :subject)
     target = map_get(frame, :target)
 
