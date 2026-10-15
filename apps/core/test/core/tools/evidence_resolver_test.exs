@@ -321,6 +321,112 @@ defmodule Core.Tools.EvidenceResolverTest do
              Wikidata.proximity("Maple Ridge, BC", "Kamloops, BC", fetch: fake_get)
   end
 
+  test "a recently named city's identity is sourced and unsupported geographic prose is replaced" do
+    alias Core.Semantic.EventFrames
+
+    question = "what is kamloops?"
+    frame = %{
+      type: :location_question,
+      relation: :identity,
+      subject: "Kamloops, BC",
+      grounding_status: :unverified
+    }
+
+    fake_get = fn _url, opts ->
+      case opts[:params][:titles] do
+        "Kamloops, British Columbia" ->
+          {:ok, %{status: 200, body: %{"entities" =>
+            %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+
+        "Kamloops" ->
+          entity("Q473209", "Kamloops", "city in British Columbia, Canada",
+            50.6761, -120.341)
+
+        other ->
+          flunk("Unexpected city page: #{other}")
+      end
+    end
+
+    context = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: frame}
+    }
+
+    enriched = WebRetrieval.enrich(context,
+      enabled?: true,
+      coordinate_opts: [fetch: fake_get]
+    )
+
+    evidence = enriched.web_evidence
+    assert evidence.relation == :identity
+    assert evidence.request_type == :geographic_identity
+    assert evidence.resolution == :source_supported
+    assert evidence.support.kind == :identity
+    assert evidence.support.title == "Kamloops"
+    assert evidence.support.description == "city in British Columbia, Canada"
+
+    {:ok, corrected, review} =
+      ReflectionLoop.review(question,
+        "Kamloops is in the Okanagan Valley, about 120 km from Kamloops.",
+        enriched)
+
+    assert review.status == :repair
+    assert corrected ==
+      "According to Wikidata, Kamloops is described as city in British Columbia, Canada. " <>
+        "Source: https://www.wikidata.org/wiki/Q473209"
+    refute corrected =~ "Okanagan Valley"
+    refute corrected =~ "120 km"
+
+    {:ok, ^corrected, accepted} = ReflectionLoop.review(question, corrected, enriched)
+    assert accepted.status == :accept
+  end
+
+  test "identity lookup rejects wrong province and cannot validate invented locations" do
+    question = "what is maple ridge?"
+    frame = %{
+      type: :location_question, relation: :identity,
+      subject: "Maple Ridge, BC", grounding_status: :unverified
+    }
+
+    fake_get = fn _url, opts ->
+      case opts[:params][:titles] do
+        "Maple Ridge, British Columbia" ->
+          entity("Q999999", "Maple Ridge", "city in another province, Canada",
+            49.2, -122.6)
+
+        "Maple Ridge" ->
+          entity("Q999999", "Maple Ridge", "city in another province, Canada",
+            49.2, -122.6)
+
+        other ->
+          flunk("Unexpected page: #{other}")
+      end
+    end
+
+    context = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: frame}
+    }
+
+    enriched = WebRetrieval.enrich(context,
+      enabled?: true,
+      coordinate_opts: [fetch: fake_get],
+      max_attempts: 1
+    )
+
+    assert enriched.web_evidence.support == nil
+
+    {:ok, response, review} =
+      ReflectionLoop.review(question,
+        "Maple Ridge is in the Okanagan Valley, 120 km north of Kamloops.",
+        enriched)
+
+    assert review.status == :repair
+    assert :geographic_claim_unverified in review.issues
+    assert response =~ "couldn't verify its geographic identity"
+    refute response =~ "Okanagan Valley"
+  end
+
   test "Wikidata provider validates two city entities and computes straight-line distance" do
     fake_get = fn url, opts ->
       assert url == "https://www.wikidata.org/w/api.php"

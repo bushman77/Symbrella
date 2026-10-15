@@ -214,6 +214,90 @@ defmodule Core.Response.GeographicContinuityTest do
     assert References.resolve("What is Symbrella?", session_id) == nil
   end
 
+  test "named cities from prior distance turn remain distinct through correction and pronoun", %{
+    session_id: session_id
+  } do
+    previous = "How far is Maple Ridge, BC from Kamloops, BC?"
+    LlmChatHistory.record_turn(session_id, previous,
+      "Based on Wikidata coordinates, the cities are 229.0 km apart.")
+
+    kamloops = "what is kamloops?"
+    kamloops_si =
+      %{sentence: kamloops, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert kamloops_si.discourse_reference.antecedent == "Kamloops, BC"
+    assert kamloops_si.symbolic_frame.relation == :identity
+    assert kamloops_si.symbolic_frame.subject == "Kamloops, BC"
+    assert %{relation: :identity, request_type: :geographic_identity,
+             query: "Kamloops, BC"} =
+             Core.Tools.WebRetrieval.route_for(%{
+               user_text: kamloops,
+               features: %{symbolic_frame: kamloops_si.symbolic_frame}
+             })
+
+    LlmChatHistory.record_turn(session_id, kamloops, "Kamloops is in the Okanagan Valley.")
+
+    maple = "what is maple ridge?"
+    maple_si =
+      %{sentence: maple, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert maple_si.symbolic_frame.relation == :identity
+    assert maple_si.symbolic_frame.subject == "Maple Ridge, BC"
+    LlmChatHistory.record_turn(session_id, maple, "Maple Ridge is in the Okanagan Valley.")
+
+    correction = "that is not where maple ridge is"
+    correction_si =
+      %{sentence: correction, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert correction_si.symbolic_frame.relation == :identity
+    assert correction_si.symbolic_frame.subject == "Maple Ridge, BC"
+    LlmChatHistory.record_turn(session_id, correction, "Maple Ridge is in the Okanagan Valley.")
+
+    followup = "no it is not.  how far is it from Vancouver, BC"
+    followup_si =
+      %{sentence: followup, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert followup_si.discourse_reference.antecedent == "Maple Ridge, BC"
+    assert followup_si.symbolic_frame.relation == :proximity
+    assert followup_si.symbolic_frame.subject == "Maple Ridge, BC"
+    assert followup_si.symbolic_frame.target == "Vancouver, BC"
+
+    assert %{relation: :proximity, request_type: :geographic_proximity} =
+             Core.Tools.WebRetrieval.route_for(%{
+               user_text: followup,
+               features: %{symbolic_frame: followup_si.symbolic_frame}
+             })
+
+    ctx = %{features: %{intent: :ask, conf: 0.9, symbolic_frame: followup_si.symbolic_frame}}
+    {:ok, answer, review} = ReflectionLoop.review(
+      followup,
+      "Kamloops is approximately 120 km northwest of Vancouver, BC.",
+      ctx
+    )
+    assert review.status == :repair
+    assert answer =~ "Maple Ridge, BC"
+    refute answer =~ "120 km"
+  end
+
+  test "non-geographic definitions are not taken as cities from old context", %{
+    session_id: session_id
+  } do
+    LlmChatHistory.record_turn(session_id,
+      "How far is Maple Ridge, BC from Kamloops, BC?", "229 km")
+
+    assert References.resolve("what is Elixir?", session_id) == nil
+    assert References.resolve("what is my sister?", session_id) == nil
+    assert References.resolve("what is kamloops?", session_id <> "-other") == nil
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do

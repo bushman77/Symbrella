@@ -387,6 +387,9 @@ defmodule Core.Response.LlmPrompt do
 
   defp discourse_reference_shaping(features) do
     case map_get(features, :discourse_reference) do
+      %{antecedent: place, source: :recent_geographic_entity} when is_binary(place) ->
+        "Conversation binding: the user is asking about #{String.slice(place, 0, 80)} from an earlier explicit geographic question. Verify that city's identity from Wikidata; do not repeat geographic assertions that the user has corrected."
+
       %{subject: subject, target: target, pronoun: "it", source: :recent_distance_turn}
       when is_binary(subject) and is_binary(target) ->
         "Conversation binding: The user's short follow-up 'what is it?' refers to the immediately preceding question about distance between #{String.slice(subject, 0, 80)} and #{String.slice(target, 0, 80)}. They may mean the straight-line distance or the Wikidata-coordinate method. Explain it from prior conversation if clear, or ask which part they mean. Do not introduce yourself or define Symbrella."

@@ -80,6 +80,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     end
   end
 
+  def align(draft, _), do: draft
+
   defp align_distance_or_population(draft, context) do
     case supported_proximity(context) do
       %{distance_km: km, subject: subject, target: target, sources: sources}
@@ -92,8 +94,6 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         align_population(draft, context)
     end
   end
-
-  def align(draft, _), do: draft
 
   defp align_population(draft, context) do
     case supported_population(context) do
