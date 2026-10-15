@@ -191,7 +191,7 @@ defmodule Core.Tools.EvidenceResolverTest do
     end
 
     assert {:ok, proof} =
-      Wikidata.proximity("Maple Ridge, BC", "Kamloops BC", fetch: fake_get)
+      Wikidata.proximity("maple ridge bc", "kamloops bc", fetch: fake_get)
 
     assert proof.kind == :proximity
     assert proof.distance_km > 0

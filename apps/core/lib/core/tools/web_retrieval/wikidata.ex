@@ -98,7 +98,17 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
           [expanded]
       end
 
-    Enum.uniq(title)
+    # Try conventional casing for lowercase city names while still
+    # requiring exact entity-label and jurisdiction validation.
+    title
+    |> Enum.flat_map(fn candidate ->
+      canonical = candidate
+        |> String.split(" ")
+        |> Enum.map(&String.capitalize/1)
+        |> Enum.join(" ")
+      [canonical, candidate]
+    end)
+    |> Enum.uniq()
   end
 
   defp read_place({:ok, %{status: 200, body: %{"entities" => entities}}}, name, hint)

@@ -72,7 +72,7 @@ defmodule Core.Discourse.References do
   defp extract_location(text) do
     capture =
       Regex.run(
-        ~r/^\s*(?:where\s+is|tell\s+me\s+about|what\s+is\s+the\s+population\s+of)\s+(\p{Lu}[\p{L}\p{M}\s,'.-]{1,78})\s*\??\s*$/iu,
+        ~r/^\s*(?:where\s+is|tell\s+me\s+about|what\s+is\s+the\s+population\s+of)\s+(\p{L}[\p{L}\p{M}\s,'.-]{1,78})\s*\??\s*$/iu,
         text
       )
 
@@ -87,7 +87,7 @@ defmodule Core.Discourse.References do
           |> String.replace(~r/\s+/u, " ")
 
         if String.length(entity) > 1 and
-             not Regex.match?(~r/^(?:It|That|This|There)\b/u, entity) do
+             not Regex.match?(~r/^(?:it|that|this|there|my|your|our|their)\b/iu, entity) do
           entity
         end
 
