@@ -50,6 +50,17 @@ defmodule Db.JSONL.CategoryProvenanceTest do
       "kind" => "other", "source" => "w"
     }) == :likely_maintenance
 
+    for name <- [
+      "Mandarin terms with redundant transliterations",
+      "Japanese terms with redundant script codes",
+      "Arabic terms with non-redundant manual transliterations",
+      "Khmer terms with redundant script codes"
+    ] do
+      assert CategoryProvenance.classify(%{
+        "name" => name, "kind" => "other", "source" => "w"
+      }) == :likely_maintenance
+    end
+
     assert CategoryProvenance.classify(%{
       "name" => "Other source label", "kind" => "other", "source" => "w+other"
     }) == :non_w_source
