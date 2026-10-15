@@ -48,8 +48,7 @@ defmodule Core.Semantic.EventFrames do
   # population or distance measurement exists.
   defp location_question_frame(si) do
     sentence =
-      si
-      |> Map.get(:sentence, "")
+      (Map.get(si, :sentence) || "")
       |> String.trim()
       |> String.replace(~r/\A[“"]+\s*/u, "")
       |> String.replace(~r/\s*[”"]+\z/u, "")
