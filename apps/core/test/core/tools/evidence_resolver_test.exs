@@ -232,6 +232,67 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert proof.method == :haversine
   end
 
+  test "quoted live distance question uses coordinate evidence instead of model's mileage guess" do
+    alias Core.Semantic.EventFrames
+
+    question = "How far is Maple Ridge, BC from Kamloops, BC?”"
+    frame = EventFrames.location_question(question)
+    assert frame.subject == "Maple Ridge, BC"
+    assert frame.target == "Kamloops, BC"
+
+    fake_get = fn url, opts ->
+      assert url == "https://www.wikidata.org/w/api.php"
+
+      case opts[:params][:titles] do
+        "Maple Ridge, British Columbia" ->
+          entity("Q16740", "Maple Ridge", "city in British Columbia, Canada",
+            49.2167, -122.6)
+
+        "Kamloops, British Columbia" ->
+          entity("Q2138", "Kamloops", "city in British Columbia, Canada",
+            50.6745, -120.3273)
+
+        other ->
+          flunk("Unexpected Wikidata coordinate title: #{other}")
+      end
+    end
+
+    context = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: frame}
+    }
+
+    enriched =
+      WebRetrieval.enrich(context,
+        enabled?: true,
+        provider: OffTopicWikipedia,
+        coordinate_provider: Wikidata,
+        coordinate_opts: [fetch: fake_get]
+      )
+
+    support = enriched.web_evidence.support
+    assert enriched.web_evidence.resolution == :source_supported
+    assert support.status == :source_supported
+    assert support.method == :haversine
+    assert_in_delta support.distance_km, 229.6, 0.2
+    assert Enum.map(support.sources, & &1.url) == [
+      "https://www.wikidata.org/wiki/Q16740",
+      "https://www.wikidata.org/wiki/Q2138"
+    ]
+
+    {:ok, final, review} =
+      ReflectionLoop.review(question,
+        "Maple Ridge, BC is approximately 120 miles away from Kamloops, BC.",
+        enriched)
+
+    assert review.status == :repair
+    assert :geographic_claim_unverified in review.issues
+    assert final =~ "229.6 km"
+    assert final =~ "straight line"
+    assert final =~ "https://www.wikidata.org/wiki/Q2138"
+    refute final =~ "120 miles"
+  end
+
   test "Wikidata provider validates two city entities and computes straight-line distance" do
     fake_get = fn url, opts ->
       assert url == "https://www.wikidata.org/w/api.php"
