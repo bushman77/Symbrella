@@ -58,7 +58,7 @@ defmodule Db.JSONL.DefinitionShortlistReview do
                     end
 
                   {:cont,
-                   {Map.update!(entries, norm, &[entry | &1]), index,
+                   {Map.update!(entries, norm, fn existing -> [entry | existing] end), index,
                     matched + 1, senses + count}}
                 else
                   {:cont, {entries, index, matched, senses}}
