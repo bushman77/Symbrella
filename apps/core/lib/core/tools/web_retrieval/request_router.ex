@@ -44,6 +44,9 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
           Map.get(frame, :relation) in [:population, :proximity] ->
         location_route(frame)
 
+      place = public_place_location_query(text) ->
+        build(place, nil, :general_search, :structured_question)
+
       research = research_query(text) ->
         {query, category} = research
         build(query, nil, category, :structured_question)
@@ -183,6 +186,50 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       true -> :general_search
     end
   end
+
+  # A static "where is [public place]?" request calls for reference evidence,
+  # not a real-time positions service. Keep the recognition deliberately narrow:
+  # private whereabouts, deictic pronouns, live/nearby requests and generic
+  # facilities are not treated as encyclopedic place names. This route makes
+  # no claim about a place's actual location.
+  defp public_place_location_query(text) when is_binary(text) do
+    case Regex.run(~r/^\s*where\s+is\s+(.+?)\s*[?.!]*\s*$/iu, text,
+           capture: :all_but_first) do
+      [raw] ->
+        place = String.trim(raw)
+        tokens = String.split(place, ~r/\s+/u, trim: true)
+
+        blocked_start? =
+          Regex.match?(
+            ~r/^(?:my|our|your|his|her|their|its|me|you|us|them|it|this|that|these|those|a|an|the|someone|somebody|everyone|anyone)\b/iu,
+            place
+          )
+
+        temporal_or_private? =
+          Regex.match?(
+            ~r/\b(?:right now|currently|today|tonight|at the moment|near me|nearby|my location|their location|nearest|closest|person|friend|sister|brother|child|wife|husband)\b/iu,
+            place
+          )
+
+        # Require at least two non-generic name parts (e.g. "maple ridge bc")
+        # or an explicitly capitalized single-word location ("Vancouver").
+        plausible_name? =
+          length(tokens) in 2..8 or
+            (length(tokens) == 1 and Regex.match?(~r/^\p{Lu}[\p{L}'’-]+$/u, place))
+
+        if plausible_name? and not blocked_start? and not temporal_or_private? and
+             String.length(place) <= @max_query do
+          place
+        else
+          nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp public_place_location_query(_), do: nil
 
   defp research_query(text) do
     cond do

@@ -25,6 +25,35 @@ defmodule Core.Response.AnswerAdequacyTest do
       "I can't verify the exact distance in real time, but the average changes through its orbit.")
   end
 
+  test "lengthy real-time-access deflection is a failed answer to a static place question" do
+    question = "where is maple ridge bc"
+    draft =
+      "I'm sorry, but I don't have direct access to real-time information about " <>
+        "where Maple Ridge is located in BC. I can only provide general information " <>
+        "based on my current knowledge. If you have any specific questions, I can help."
+
+    assert AnswerAdequacy.failed_answer?(question, draft)
+
+    {:ok, final, review} =
+      ReflectionLoop.review(question, draft,
+        %{features: %{intent: :ask, conf: 0.8125},
+          answer_target_question: question})
+
+    assert review.status == :repair
+    assert :answer_not_supplied in review.issues
+    assert final =~ "couldn't establish a reliable answer"
+
+    refute AnswerAdequacy.failed_answer?(
+      question,
+      "I don't have direct access to real-time information, but Maple Ridge is in British Columbia."
+    )
+
+    refute AnswerAdequacy.failed_answer?(
+      "Where is the flight right now?",
+      "I don't have direct access to real-time information about the flight."
+    )
+  end
+
   test "a followup can name only the immediately preceding same-session user question" do
     history = [
       %{"role" => "user", "content" => @moon},

@@ -16,6 +16,10 @@ defmodule Core.Response.AnswerAdequacy do
   @followup ~r/\A(?:(?:(?:i\s+)?(?:do\s+not|don't)\s+know)[,!.]?\s*)?(?:you\s+tell\s+me|tell\s+me(?:\s+the\s+answer)?|answer\s+(?:it|the\s+question)|just\s+answer(?:\s+it)?|so\s+what'?s\s+the\s+answer)\s*[.!?]*\z/iu
   @empty_reply ~r/\A(?:i\s+(?:do\s+not|don't)\s+know|not\s+sure|i'?m\s+not\s+sure|i\s+have\s+no\s+idea)[.!?]*\z/iu
 
+  @plain_location_question ~r/^\s*where\s+is\s+[^?!.]+[?!.]*\s*$/iu
+  @realtime_access_disclaimer ~r/\b(?:i\s+)?(?:do\s+not|don't|cannot|can't)\s+have\s+(?:direct\s+)?access\s+to\s+(?:real[- ]time|live|current)\s+(?:information|data|updates)\b/iu
+  @specific_location_after_qualification ~r/\b(?:but|however|nevertheless)[^.!?]{0,180}\b(?:is|lies|located|situated)\s+(?:in|near|within|north|south|east|west)\b/iu
+
   @spec factual_question?(term()) :: boolean()
   def factual_question?(text) when is_binary(text) do
     text = String.trim(text)
@@ -42,10 +46,26 @@ defmodule Core.Response.AnswerAdequacy do
   def failed_answer?(target, draft) when is_binary(target) and is_binary(draft) do
     factual_question?(target) and
       (normalize(target) == normalize(draft) or
-         Regex.match?(@empty_reply, String.trim(draft)))
+         Regex.match?(@empty_reply, String.trim(draft)) or
+         unsupported_realtime_location_refusal?(target, draft))
   end
 
   def failed_answer?(_, _), do: false
+
+  # Real-time map/data access is not required merely to identify a public
+  # place. Reject a blanket access disclaimer only if it supplies no
+  # affirmative location after the qualification. This leaves properly
+  # qualified answers and genuinely current/geographically precise requests
+  # to the normal grounding rules.
+  defp unsupported_realtime_location_refusal?(target, draft) do
+    Regex.match?(@plain_location_question, target) and
+      not Regex.match?(
+        ~r/\b(?:now|today|currently|tonight|right now|nearest|closest|live)\b/iu,
+        target
+      ) and
+      Regex.match?(@realtime_access_disclaimer, draft) and
+      not Regex.match?(@specific_location_after_qualification, draft)
+  end
 
   defp recent_user_question(history) do
     # Only the immediately preceding conversational turn may supply the

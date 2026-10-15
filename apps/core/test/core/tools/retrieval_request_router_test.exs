@@ -45,6 +45,35 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     WebRetrieval.route_for(Map.put(context, :user_text, message))
   end
 
+  test "static named public places route to bounded reference lookup" do
+    for question <- [
+          "where is maple ridge bc",
+          "Where is Maple Ridge, BC?",
+          "Where is Kyoto Japan?",
+          "Where is Vancouver?"
+        ] do
+      assert %{relation: nil, request_type: :general_search,
+               trigger: :structured_question, query: place} = route(question)
+      refute String.starts_with?(place, "where is")
+    end
+
+    assert %{query: "maple ridge bc"} = route("where is maple ridge bc")
+  end
+
+  test "private whereabouts and current positions do not trigger place reference lookup" do
+    for question <- [
+          "Where is my sister right now?",
+          "Where is my phone?",
+          "Where is it?",
+          "Where is the nearest hospital?",
+          "Where is a bathroom?",
+          "Where is my friend?",
+          "Where is Maple Ridge currently?"
+        ] do
+      assert route(question) == nil, question
+    end
+  end
+
   test "current-events requests cover both currently and as-of-current phrasing" do
     for query <- [
           "What are your thoughts on the US Iran war currently happening?",
