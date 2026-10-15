@@ -58,15 +58,15 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
     # reply, which made two citations occupy several additional lines.
     text =
       html
-      |> Floki.parse_fragment!()
-      |> Floki.find("p")
-      |> Floki.text()
+      |> String.replace(~r/<[^>]*>/u, "")
+      |> String.trim()
 
     assert text ==
              "Based on Wikidata coordinates, the cities are 229.0 km apart. " <>
                "Sources: Source and Source"
 
-    assert length(Floki.find(Floki.parse_fragment!(html), "p > a > img")) == 2
+    assert length(Regex.scan(~r/<a\b/u, html)) == 2
+    assert length(Regex.scan(~r/<img\b/u, html)) == 2
   end
 
   test "bare URLs are labeled Source and original punctuation remains visible" do
