@@ -23,9 +23,10 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
     expected_categories = categories(expected_atoms)
     existing_categories = categories(stored_atoms)
     missing_categories = expected_categories -- existing_categories
+    missing_usage = usage_atoms(expected_atoms) -- usage_atoms(stored_atoms)
 
     detail =
-      details(source, stored, missing_categories)
+      details(source, stored, missing_categories, missing_usage)
 
     cond do
       source.norm != stored.norm or source.pos != stored.pos ->
@@ -53,7 +54,8 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
           not String.starts_with?(expected_definition, previous_definition <> " — ") ->
         {:different_definition, detail}
 
-      previous_definition == expected_definition and missing_categories == [] ->
+      previous_definition == expected_definition and
+          missing_categories == [] and missing_usage == [] ->
         {:matched_current, detail}
 
       true ->
@@ -70,7 +72,7 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
   end
 
   defp non_grammar_metadata_matches?(source, stored) do
-    noncategory_atoms(source.semantic_atoms) == noncategory_atoms(stored.semantic_atoms) and
+    structural_atoms(source.semantic_atoms) == structural_atoms(stored.semantic_atoms) and
       source.example == stored.example
   end
 
@@ -85,24 +87,35 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
 
   defp grammar_derivation_drift?(_, _), do: false
 
-  defp noncategory_atoms(atoms) do
+  defp usage_atoms(atoms) do
     atoms
     |> List.wrap()
-    |> Enum.reject(&(is_binary(&1) and String.starts_with?(&1, "cat:")))
+    |> Enum.filter(&(is_binary(&1) and String.starts_with?(&1, "usage:")))
+    |> Enum.uniq()
     |> Enum.sort()
   end
 
-  defp details(source, nil, missing_categories) do
+  defp structural_atoms(atoms) do
+    atoms
+    |> List.wrap()
+    |> Enum.reject(&(is_binary(&1) and
+                      (String.starts_with?(&1, "cat:") or
+                       String.starts_with?(&1, "usage:"))))
+    |> Enum.sort()
+  end
+
+  defp details(source, nil, missing_categories, missing_usage) do
     %{
       id: source.id,
       original_definition: nil,
       reconstructed_definition: source.definition,
       added_categories: missing_categories,
+      added_usage_atoms: missing_usage,
       has_multiple_glosses?: false
     }
   end
 
-  defp details(source, stored, missing_categories) do
+  defp details(source, stored, missing_categories, missing_usage) do
     previous = stored.definition
     expected = source.definition
 
@@ -111,6 +124,7 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
       original_definition: previous,
       reconstructed_definition: expected,
       added_categories: missing_categories,
+      added_usage_atoms: missing_usage,
       has_multiple_glosses?: is_binary(previous) and is_binary(expected) and
         previous != expected,
       # Explain the six observed metadata mismatches without discarding the
@@ -119,8 +133,8 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
       reconstructed_example: source.example,
       stored_gram_function: stored.gram_function,
       reconstructed_gram_function: source.gram_function,
-      stored_noncategory_atoms: noncategory_atoms(stored.semantic_atoms),
-      reconstructed_noncategory_atoms: noncategory_atoms(source.semantic_atoms)
+      stored_noncategory_atoms: structural_atoms(stored.semantic_atoms),
+      reconstructed_noncategory_atoms: structural_atoms(source.semantic_atoms)
     }
   end
 end
