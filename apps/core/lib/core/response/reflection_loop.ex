@@ -13,6 +13,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Response.GreetingTurn
   alias Core.Response.AnswerAdequacy
   alias Core.Tools.WebRetrieval.Grounding
+  alias Core.Tools.WebRetrieval.PlaceLocation
 
   @event [:core, :response, :reflection]
   @v 1
@@ -96,6 +97,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
     |> maybe_issue(named_reference_missing?(context), :named_reference_missing)
     |> maybe_issue(uncited_reference_answer?(context, draft_text), :reference_uncited)
+    |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, draft_text), :geographic_claim_unverified)
     |> maybe_issue(low_confidence?(context), :low_confidence)
@@ -140,7 +142,7 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :search_not_answered in issues or :named_reference_missing in issues or
-          :reference_uncited in issues ->
+          :reference_uncited in issues or :location_reference_unaligned in issues ->
         {:repair, issues}
 
       :subject_reversal in issues ->
@@ -205,6 +207,12 @@ defmodule Core.Response.ReflectionLoop do
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           news_headline_fallback(context, user_text)
 
+        :location_reference_unaligned in issues ->
+          case PlaceLocation.answer(context) do
+            {:ok, answer} -> answer
+            :no_support -> reference_excerpt_fallback(context)
+          end
+
         :search_not_answered in issues ->
           reference_excerpt_fallback(context)
 
@@ -256,6 +264,8 @@ defmodule Core.Response.ReflectionLoop do
           "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           "Recent headlines require accurate publication dates, outlet attribution, source links and—when requested—a separate qualified assessment. Repair the draft from the retrieved headlines without inventing verified article contents."
+        :location_reference_unaligned in issues ->
+          "A matching Wikipedia article makes one bounded geographic assertion in its lead. Attribute and cite only that assertion, not unsupported details."
         :search_not_answered in issues ->
           "Retrieved reference excerpts are already available. Attribute and cite them, rather than promising to search later; do not pretend snippets prove the claims."
         :news_lookup_misrepresented in issues ->
@@ -305,6 +315,13 @@ defmodule Core.Response.ReflectionLoop do
   defp unfulfilled_search_promise?(_, _), do: false
 
   defp reference_excerpt_fallback(context) do
+    case PlaceLocation.answer(context) do
+      {:ok, answer} -> answer
+      :no_support -> reference_link_fallback(context)
+    end
+  end
+
+  defp reference_link_fallback(context) do
     sources = get_in_map(context, [:web_evidence, :sources]) || []
 
     excerpts =
@@ -340,6 +357,16 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp news_access_refusal?(_, _), do: false
+
+  # A source-matched static place question must be answered from the
+  # article's specific location statement. A citation alone must not
+  # legitimize an LLM draft that contains unsupported geographic claims.
+  defp location_reference_unaligned?(context, draft_text) do
+    case PlaceLocation.answer(context) do
+      {:ok, answer} -> draft_text != answer
+      :no_support -> false
+    end
+  end
 
   # A public reference answer without any retained source URL is not a
   # source-grounded response. This does not independently verify the
