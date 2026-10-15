@@ -10,6 +10,11 @@ defmodule Core.Syntax.VerbArgumentShadow do
   syntactic proof or authorization to overwrite a Stage1 decision. This
   module is intentionally not wired into Core.Syntax.Signatures or Stage1.
 
+  Db.BrainCell.status is a LIFECYCLE field, not a dictionary-sense validity
+  bit. This observer intentionally never filters on "active"/"inactive" or
+  changes a cell's status, activation, or persistence. Corpus-level lexical
+  POS availability and per-turn cognitive activation are separate concerns.
+
   Only affirmative transitive observations are emitted. Failure to observe
   an object does NOT establish an intransitive construction.
   """
