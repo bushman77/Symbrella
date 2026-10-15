@@ -32,17 +32,24 @@ defmodule Core.Discourse.References do
       # immediately preceding distance exchange, not a distant older topic.
       recent_distance_reference(session_id)
     else
-      with pronoun when is_binary(pronoun) <- followup_pronoun(sentence),
-           antecedent when is_binary(antecedent) <- previous_explicit_location(session_id) do
-        %{
-          pronoun: pronoun,
-          antecedent: antecedent,
-          source: :recent_user_turn,
-          evidence: :explicit_location_question,
-          confidence: 0.9
-        }
-      else
-        _ -> nil
+      case named_geographic_reference(sentence, session_id) do
+        %{source: :recent_geographic_entity} = named ->
+          named
+
+        _ ->
+          with pronoun when is_binary(pronoun) <- followup_pronoun(sentence),
+               antecedent when is_binary(antecedent) <-
+                 geographic_pronoun_antecedent(sentence, session_id) do
+            %{
+              pronoun: pronoun,
+              antecedent: antecedent,
+              source: :recent_user_turn,
+              evidence: :explicit_location_question,
+              confidence: 0.9
+            }
+          else
+            _ -> nil
+          end
       end
     end
   end
@@ -78,13 +85,99 @@ defmodule Core.Discourse.References do
     end
   end
 
+  # Match a place named in this turn only against explicit entities from a
+  # recent distance question. Do not infer that arbitrary "what is X?" names
+  # are geographic just because they resemble proper nouns.
+  defp named_geographic_reference(sentence, session_id) do
+    named =
+      case Regex.run(~r/^\s*what\s+is\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/iu, sentence) do
+        [_, place] -> place
+        _ ->
+          case Regex.run(
+                 ~r/^\s*(?:that|this)\s+is\s+not\s+where\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78}?)\s+is\s*[.!?]*\s*$/iu,
+                 sentence
+               ) do
+            [_, place] -> place
+            _ -> nil
+          end
+      end
+
+    case match_known_geographic_entity(session_id, named) do
+      nil -> nil
+      place ->
+        %{pronoun: nil, antecedent: place, source: :recent_geographic_entity,
+          evidence: :previous_explicit_distance_question, confidence: 0.9}
+    end
+  end
+
+  defp geographic_pronoun_antecedent(sentence, session_id) do
+    if Regex.match?(~r/\bhow\s+far\s+is\s+it\s+from\b/iu, sentence) do
+      recent_geographic_focus(session_id) || previous_explicit_location(session_id)
+    else
+      previous_explicit_location(session_id)
+    end
+  end
+
+  defp recent_geographic_focus(session_id) do
+    previous =
+      session_id
+      |> LlmChatHistory.messages(@lookback_turns)
+      |> Enum.reverse()
+      |> Enum.find_value(fn
+        %{"role" => "user", "content" => text} when is_binary(text) -> text
+        _ -> nil
+      end)
+
+    if is_binary(previous) and
+         (Regex.match?(~r/^\s*what\s+is\b/iu, previous) or
+            Regex.match?(~r/^\s*(?:that|this)\s+is\s+not\s+where\b/iu, previous)) do
+      case named_geographic_reference(previous, session_id) do
+        %{antecedent: place} -> place
+        _ -> nil
+      end
+    end
+  end
+
+  defp match_known_geographic_entity(_session_id, nil), do: nil
+
+  defp match_known_geographic_entity(session_id, candidate) when is_binary(candidate) do
+    wanted = normalize_place(candidate)
+
+    session_id
+    |> LlmChatHistory.messages(@lookback_turns)
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{"role" => "user", "content" => text} when is_binary(text) ->
+        case EventFrames.location_question(text) do
+          %{relation: :proximity, antecedent_source: :explicit_user_question,
+            subject: subject, target: target} ->
+            Enum.find([subject, target], fn place ->
+              normalize_place(place) == wanted or
+                normalize_place(place |> String.split(",", parts: 2) |> hd()) == wanted
+            end)
+
+          _ -> nil
+        end
+
+      _ -> nil
+    end)
+  end
+
+  defp normalize_place(text) do
+    text
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/[^\p{L}\p{N}]+/u, " ")
+    |> String.trim()
+  end
+
   defp followup_pronoun(sentence) do
     cond do
-      Regex.match?(~r/^\s*(?:what|how)\s+(?:is|was)\s+its?\b/iu, sentence) ->
+      Regex.match?(~r/^\s*(?:what|how)\s+(?:is|was)\s+its\b/iu, sentence) ->
         "its"
 
       Regex.match?(~r/^\s*(?:is|was|does|did|can|could|will|would)\s+it\b/iu, sentence) or
-          Regex.match?(~r/^\s*how\s+far\s+is\s+it\s+from\b/iu, sentence) ->
+          Regex.match?(~r/^\s*(?:no[,]?\s+it\s+is\s+not[.!]?\s+)?how\s+far\s+is\s+it\s+from\b/iu, sentence) ->
         "it"
 
       true ->

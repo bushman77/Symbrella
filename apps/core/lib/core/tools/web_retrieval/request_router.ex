@@ -41,7 +41,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
 
       is_map(frame) and Map.get(frame, :type) == :location_question and
           Map.get(frame, :grounding_status) == :unverified and
-          Map.get(frame, :relation) in [:population, :proximity] ->
+          Map.get(frame, :relation) in [:population, :proximity, :identity] ->
         location_route(frame)
 
       place = public_place_location_query(text) ->
@@ -277,6 +277,9 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
         nil
     end
   end
+
+  defp location_route(%{subject: subject, relation: :identity}) when is_binary(subject),
+    do: build(subject, :identity, :geographic_identity, :symbolic_frame)
 
   defp location_route(%{subject: subject, relation: :population}) when is_binary(subject),
     do: build("#{subject} population census", :population, :geographic_population, :symbolic_frame)

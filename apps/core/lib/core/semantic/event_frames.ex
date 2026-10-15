@@ -53,6 +53,7 @@ defmodule Core.Semantic.EventFrames do
       |> String.replace(~r/\A[“"]+\s*/u, "")
       |> String.replace(~r/\s*[”"]+\z/u, "")
       |> String.trim()
+      |> String.replace(~r/^\s*no[,]?\s+it\s+is\s+not[.!]?\s+(?=how\s+far\s+is\s+it\s+from\b)/iu, "")
 
     reference = Map.get(si, :discourse_reference) || %{}
     subject = Map.get(reference, :antecedent)
@@ -116,6 +117,20 @@ defmodule Core.Semantic.EventFrames do
           unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
           grounding_status: :unverified,
           confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      Map.get(reference, :source) == :recent_geographic_entity and
+          (Regex.match?(~r/^\s*what\s+is\s+[\p{L}][\p{L}\p{M}\s,.'-]{1,78}\s*\?\s*$/iu, sentence) or
+             Regex.match?(~r/^\s*(?:that|this)\s+is\s+not\s+where\b/iu, sentence)) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :identity,
+          subject: subject,
+          antecedent_source: :recent_geographic_entity,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
         }
 
       Regex.match?(~r/^\s*what\s+is\s+its\s+population\s*\?\s*$/iu, sentence) ->
