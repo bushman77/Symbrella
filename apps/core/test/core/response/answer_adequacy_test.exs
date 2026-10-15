@@ -48,6 +48,17 @@ defmodule Core.Response.AnswerAdequacyTest do
       "I don't have direct access to real-time information, but Maple Ridge is in British Columbia."
     )
 
+    assert AnswerAdequacy.failed_answer?(
+      question,
+      "I don't have access to real-time information, but I don't know where " <>
+        "Maple Ridge is located in British Columbia."
+    )
+
+    refute AnswerAdequacy.failed_answer?(
+      question,
+      "I don't have access to real-time information, but the city is located east of Vancouver."
+    )
+
     refute AnswerAdequacy.failed_answer?(
       "Where is the flight right now?",
       "I don't have direct access to real-time information about the flight."

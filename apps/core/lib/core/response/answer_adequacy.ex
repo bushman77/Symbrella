@@ -18,7 +18,10 @@ defmodule Core.Response.AnswerAdequacy do
 
   @plain_location_question ~r/^\s*where\s+is\s+[^?!.]+[?!.]*\s*$/iu
   @realtime_access_disclaimer ~r/\b(?:i\s+)?(?:do\s+not|don't|cannot|can't)\s+have\s+(?:direct\s+)?access\s+to\s+(?:real[- ]time|live|current)\s+(?:information|data|updates)\b/iu
-  @specific_location_after_qualification ~r/\b(?:but|however|nevertheless)[^.!?]{0,180}\b(?:is|lies|located|situated)\s+(?:in|near|within|north|south|east|west)\b/iu
+  # The qualification must be followed by an affirmative location clause,
+  # not a repeated question such as "but I don't know where X is located in Y".
+  # Exclude denial/uncertainty verbs inside the short subject phrase.
+  @specific_location_after_qualification ~r/\b(?:but|however|nevertheless)\s+(?:(?!(?:where|don't|cannot|can't|not|access|have|know)\b)[\p{L}\p{M}'’-]+\s+){1,10}(?:is|lies|located|situated)\s+(?:in|near|within|north|south|east|west)\b/iu
 
   @spec factual_question?(term()) :: boolean()
   def factual_question?(text) when is_binary(text) do

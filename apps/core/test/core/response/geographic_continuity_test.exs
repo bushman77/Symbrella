@@ -284,7 +284,7 @@ defmodule Core.Response.GeographicContinuityTest do
 
     assert prompt =~ "it refers to Maple Ridge, BC"
     assert prompt =~ "not the requested geographic fact"
-    assert prompt =~ "Do not invent population figures"
+    assert prompt =~ "disclose uncertainty instead of inventing numerical figures or geographical facts"
   end
 
   test "selected answer action overrides optional planner offers, not guardrails" do
