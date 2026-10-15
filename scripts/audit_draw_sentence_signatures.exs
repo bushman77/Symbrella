@@ -4,8 +4,9 @@
 #
 # Deliberately constructs *minimal synthetic SI tokens* for a small set of
 # example sentences and gets POS alternatives from existing DB BrainCells.
-# Two lexicon views are shown: active-only, and all stored senses as an
-# upper-bound parser capability check. Neither is a production pipeline trace.
+# Uses ALL stored dictionary senses as an upper-bound parser capability
+# check. The stored status flag is lifecycle, not a lexical eligibility gate.
+# This is not a production pipeline trace.
 # No changes to Core signatures, LIFG, DB, or learned state.
 
 alias Core.Syntax.Signatures
@@ -42,6 +43,7 @@ IO.puts("\n=== draw sentence-signature coverage audit ===")
 IO.puts("READ ONLY. No DB writes or production Stage1 calls.")
 IO.puts("Constructed tokens and raw DB lexicon are a structural probe,")
 IO.puts("NOT a trace of the actual Core.resolve_input pipeline.")
+IO.puts("BrainCell.status is a lifecycle field; it is NOT used to filter lexical POS evidence.")
 
 Enum.each(scenarios, fn {sentence, ids} ->
   tokens = tokenize.(sentence)
@@ -53,9 +55,8 @@ Enum.each(scenarios, fn {sentence, ids} ->
     end)
     |> Enum.uniq_by(& &1.id)
 
-  active_cells =
-    Enum.filter(all_cells, &(Map.get(&1, :status) in ["active", :active]))
-
+  # Source lexical POS alternatives regardless of their lifecycle status.
+  # The :active_cells key is a Core API field name, not a status filter.
   IO.puts("\n--- #{inspect(sentence)} ---")
   IO.inspect(Enum.map(tokens, &{&1.index, &1.phrase}), label: "Original token indices")
 
@@ -67,7 +68,7 @@ Enum.each(scenarios, fn {sentence, ids} ->
     label: "Competing stored senses"
   )
 
-  Enum.each([{:active_only, active_cells}, {:all_stored_upper_bound, all_cells}], fn {view, cells} ->
+  Enum.each([{:all_stored_pos_evidence, all_cells}], fn {view, cells} ->
     observed = Signatures.detect(%{
       sentence: sentence,
       tokens: tokens,
