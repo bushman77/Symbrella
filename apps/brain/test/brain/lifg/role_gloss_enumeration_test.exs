@@ -90,6 +90,8 @@ defmodule Brain.LIFG.RoleGlossEnumerationTest do
           "To pull out (a firearm, sword, or other weapon) from a holster; a sheath may be used.",
           "To pull out (a firearm, sword, or other weapon) from a holster. A sheath is used.",
           "To pull out (a firearm, sword, or other weapon) from a holster — a sheath is supplied.",
+          "To pull out (a firearm, sword, or other weapon) from a holster - sheath.",
+          "To pull out (a firearm, sword, or other weapon) from a holster\nfrom a sheath.",
           "To pull out (a firearm, sword, or other weapon) into a holster, sheath.",
           "To pull out (a firearm, sword, or other weapon). From a sheath.",
           "To pull out (a firearm, sword, or other weapon) from a holster, and then to secure a sheath."
