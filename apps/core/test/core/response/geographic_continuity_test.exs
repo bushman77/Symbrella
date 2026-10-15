@@ -298,6 +298,75 @@ defmodule Core.Response.GeographicContinuityTest do
     assert References.resolve("what is kamloops?", session_id <> "-other") == nil
   end
 
+  test "explicit Kamloops population question has a typed frame and trusted recheck", %{
+    session_id: session_id
+  } do
+    question = "what is the population of Kamloops,  BC"
+
+    assert %{relation: :population,
+             subject: "Kamloops, BC",
+             antecedent_source: :explicit_user_question,
+             grounding_status: :unverified} =
+             EventFrames.location_question(question)
+
+    original_si =
+      %{sentence: question, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert original_si.symbolic_frame.subject == "Kamloops, BC"
+    assert %{relation: :population, request_type: :geographic_population} =
+             Core.Tools.WebRetrieval.route_for(%{
+               user_text: question,
+               features: %{symbolic_frame: original_si.symbolic_frame}
+             })
+
+    LlmChatHistory.record_turn(session_id, question,
+      "The population is 17,800. Sources: made up.")
+
+    correction = "no its not take a more recent look at kamloops, bc"
+
+    recheck =
+      %{sentence: correction, session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert recheck.discourse_reference.source == :recent_population_recheck
+    assert recheck.discourse_reference.antecedent == "Kamloops, BC"
+    assert recheck.symbolic_frame.type == :location_question
+    assert recheck.symbolic_frame.relation == :population
+    assert recheck.symbolic_frame.subject == "Kamloops, BC"
+    assert recheck.symbolic_frame.freshness == :latest_available
+    assert recheck.symbolic_frame.grounding_status == :unverified
+
+    assert %{relation: :population, request_type: :geographic_population,
+             trigger: :symbolic_frame} =
+             Core.Tools.WebRetrieval.route_for(%{
+               user_text: correction,
+               features: %{symbolic_frame: recheck.symbolic_frame}
+             })
+
+    context = %{
+      features: %{intent: :ask, conf: 0.9,
+        symbolic_frame: recheck.symbolic_frame}
+    }
+
+    {:ok, safe, reflection} = ReflectionLoop.review(correction,
+      "Based on the information provided, Kamloops is approximately 17,800 people.",
+      context)
+
+    assert reflection.status == :repair
+    assert :geographic_claim_unverified in reflection.issues
+    assert safe =~ "don't have a verified population figure"
+    refute safe =~ "17,800"
+
+    # An unrelated or different-city correction cannot steal this antecedent.
+    assert References.resolve(
+      "no its not take a more recent look at Maple Ridge, BC", session_id
+    ) == nil
+    assert References.resolve(correction, session_id <> "-different") == nil
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do
