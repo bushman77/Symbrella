@@ -32,7 +32,10 @@ defmodule Core.Discourse.References do
       # immediately preceding distance exchange, not a distant older topic.
       recent_distance_reference(session_id)
     else
-      case named_geographic_reference(sentence, session_id) do
+      case population_recheck_reference(sentence, session_id) ||
+             named_geographic_reference(sentence, session_id) do
+        %{source: :recent_population_recheck} = recheck ->
+          recheck
         %{source: :recent_geographic_entity} = named ->
           named
 
@@ -55,6 +58,39 @@ defmodule Core.Discourse.References do
   end
 
   def resolve(_, _), do: nil
+
+  # A correction needs a new source lookup. Resolve its named city only
+  # against the immediately preceding explicit population question, never
+  # against the assistant's possibly false population answer.
+  defp population_recheck_reference(sentence, session_id) do
+    case Regex.run(
+           ~r/^\s*(?:no[,]?\s*)?(?:it'?s\s+not|that'?s\s+(?:not\s+right|wrong)|incorrect)[.!]?\s*(?:please\s+)?(?:take\s+a\s+more\s+recent\s+look\s+at|check\s+(?:again|the\s+(?:latest|newest)\s+(?:population|figure)\s+for)|look\s+up\s+the\s+(?:latest|newest)\s+population\s+of)\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]*\s*$/iu,
+           sentence
+         ) do
+      [_, candidate] ->
+        case LlmChatHistory.messages(session_id, 1) do
+          [%{"role" => "user", "content" => question}, %{"role" => "assistant"}] ->
+            case EventFrames.location_question(question) do
+              %{relation: :population, subject: subject} when is_binary(subject) ->
+                if normalize_place(subject) == normalize_place(candidate) do
+                  %{antecedent: subject, pronoun: nil,
+                    source: :recent_population_recheck,
+                    evidence: :previous_explicit_population_question,
+                    confidence: 0.9}
+                end
+
+              _ ->
+                nil
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   defp recent_distance_reference(session_id) do
     case LlmChatHistory.messages(session_id, 1) do

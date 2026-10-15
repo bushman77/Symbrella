@@ -133,6 +133,37 @@ defmodule Core.Semantic.EventFrames do
           confidence: 0.9
         }
 
+      match =
+          Regex.run(
+            ~r/^\s*(?:what(?:'s|\s+is)\s+the\s+population\s+of|how\s+many\s+people\s+live\s+in)\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        [_, named_subject] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: clean_entity(named_subject),
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
+      Map.get(reference, :source) == :recent_population_recheck ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: subject,
+          antecedent_source: :recent_population_recheck,
+          freshness: :latest_available,
+          unresolved_roles: if(is_binary(subject), do: [], else: [:subject]),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
       Regex.match?(~r/^\s*what\s+is\s+its\s+population\s*\?\s*$/iu, sentence) ->
         %{
           type: :location_question,
