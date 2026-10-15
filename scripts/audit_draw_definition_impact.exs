@@ -82,16 +82,16 @@ case DefinitionWordReview.collect(File.stream!(path, [], :line), "draw") do
                 IO.inspect(%{
                   hypothesized_id: expected_id,
                   before_rank: comparison.before.hypothesized_id_rank,
-                  after_rank: comparison.after.hypothesized_id_rank,
+                  after_rank: comparison.projected.hypothesized_id_rank,
                   before_fit: comparison.before.expected_fit,
-                  after_fit: comparison.after.expected_fit,
+                  after_fit: comparison.projected.expected_fit,
                   fit_delta: comparison.expected_fit_delta,
                   before_top: comparison.before.top_id,
-                  after_top: comparison.after.top_id,
+                  after_top: comparison.projected.top_id,
                   before_control_eligible?: comparison.before.semantic_control_eligible?,
-                  after_control_eligible?: comparison.after.semantic_control_eligible?,
+                  after_control_eligible?: comparison.projected.semantic_control_eligible?,
                   after_unique_definition_cues:
-                    comparison.after.expected_definition_matches
+                    comparison.projected.expected_definition_matches
                 }, label: "ContextFit shadow comparison", pretty: true, width: 120)
                 comparison
 
@@ -112,12 +112,12 @@ case DefinitionWordReview.collect(File.stream!(path, [], :line), "draw") do
             Enum.count(reports, &(&1.expected_fit_delta < 0.0)),
           expected_sense_rank_improved:
             Enum.count(reports, fn r ->
-              r.after.hypothesized_id_rank < r.before.hypothesized_id_rank
+              r.projected.hypothesized_id_rank < r.before.hypothesized_id_rank
             end),
           original_context_gate_eligible:
             Enum.count(reports, & &1.before.semantic_control_eligible?),
           projected_context_gate_eligible:
-            Enum.count(reports, & &1.after.semantic_control_eligible?),
+            Enum.count(reports, & &1.projected.semantic_control_eligible?),
           production_stage1_accuracy_measured?: false
         }, pretty: true, width: 120)
 
