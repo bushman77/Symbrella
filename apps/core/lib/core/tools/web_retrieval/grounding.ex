@@ -73,7 +73,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     case supported_identity(context) do
       %{title: title, description: description, sources: [%{url: url}]}
       when is_binary(title) and is_binary(description) and is_binary(url) ->
-        "According to Wikidata, #{title} is described as #{description}. Source: #{url}"
+        "Wikidata describes #{title} as “#{description}”. Source: #{url}"
 
       _ ->
         align_distance_or_population(draft, context)

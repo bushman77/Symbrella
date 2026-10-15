@@ -372,7 +372,7 @@ defmodule Core.Tools.EvidenceResolverTest do
 
     assert review.status == :repair
     assert corrected ==
-      "According to Wikidata, Kamloops is described as city in British Columbia, Canada. " <>
+      "Wikidata describes Kamloops as “city in British Columbia, Canada”. " <>
         "Source: https://www.wikidata.org/wiki/Q473209"
     refute corrected =~ "Okanagan Valley"
     refute corrected =~ "120 km"
