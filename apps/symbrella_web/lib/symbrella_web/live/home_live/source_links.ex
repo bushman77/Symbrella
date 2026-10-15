@@ -39,6 +39,14 @@ defmodule SymbrellaWeb.ChatLive.SourceLinks do
     [%{kind: :text, text: final_text} | reversed]
     |> Enum.reverse()
     |> Enum.reject(&(&1.kind == :text and &1.text == ""))
+    |> Enum.reduce([], fn
+      %{kind: :text, text: text}, [%{kind: :text, text: previous} | rest] ->
+        [%{kind: :text, text: previous <> text} | rest]
+
+      part, acc ->
+        [part | acc]
+    end)
+    |> Enum.reverse()
   end
 
   def parts(_), do: []

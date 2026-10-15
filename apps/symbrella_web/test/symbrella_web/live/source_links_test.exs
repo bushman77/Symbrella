@@ -53,6 +53,14 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
     ] = SourceLinks.parts("See #{@wikipedia}, and then continue.")
   end
 
+  test "adjacent punctuation and trailing prose remain one text segment" do
+    assert [
+      %{kind: :text, text: "See "},
+      %{kind: :source, url: @wikipedia},
+      %{kind: :text, text: ", and then continue!"}
+    ] = SourceLinks.parts("See #{@wikipedia}, and then continue!")
+  end
+
   test "rejects credentials and disallowed schemes; escapes all other markup" do
     unsafe = ~S|<img src=x onerror="alert(1)"> Source: javascript:alert(1)|
     assert [%{kind: :text, text: ^unsafe}] = SourceLinks.parts(unsafe)
