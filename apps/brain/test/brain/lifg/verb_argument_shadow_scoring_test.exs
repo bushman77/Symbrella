@@ -42,12 +42,13 @@ defmodule Brain.LIFG.VerbArgumentShadowScoringTest do
   end
 
   test "weak direct-object evidence is bounded below the strong bonus" do
-    weak = %{
-      @strong |
-      strength: :weak,
-      evidence: [:attested_verb_pos, :bounded_subject_frame,
-                 :attested_nominal_head, :bare_nominal_immediately_following_verb]
-    }
+    weak =
+      @strong
+      |> Map.put(:strength, :weak)
+      |> Map.put(:evidence, [
+        :attested_verb_pos, :bounded_subject_frame,
+        :attested_nominal_head, :bare_nominal_immediately_following_verb
+      ])
     report = Shadow.score("They draw water.", "draw", 1, [@transitive, @intransitive], weak)
     row = Enum.find(report.candidates, &(&1.id == "draw|verb|129"))
 
@@ -68,7 +69,7 @@ defmodule Brain.LIFG.VerbArgumentShadowScoringTest do
   end
 
   test "incomplete or untrusted observations cannot inject a bonus" do
-    incomplete = %{ @strong | evidence: [:attested_verb_pos] }
+    incomplete = Map.put(@strong, :evidence, [:attested_verb_pos])
     report = Shadow.score("They draw a picture.", "draw", 1,
       [@transitive, @intransitive], incomplete)
     assert report.adjusted_senses == 0
