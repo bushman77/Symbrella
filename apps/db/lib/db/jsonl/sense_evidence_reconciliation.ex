@@ -12,7 +12,7 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
 
   @spec classify(Db.BrainCell.t(), map() | nil) :: {verdict(), map()}
   def classify(source, nil) do
-    {:absent_id, details(source, nil, [])}
+    {:absent_id, details(source, nil, [], [])}
   end
 
   def classify(source, stored) when is_map(stored) do
