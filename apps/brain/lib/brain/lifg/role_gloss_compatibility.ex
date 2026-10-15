@@ -58,6 +58,14 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
     suffix = Enum.drop(tokens, object_index + 1)
 
     case suffix do
+      # Wiktextract often sets the object in parentheses: "(water) from a well".
+      # Permit exactly one closing parenthesis, NOT arbitrary punctuation.
+      [")", "from" | remaining] ->
+        source_match(remaining, source, "from", object_index, object_index + 3)
+
+      [")", "out", "of" | remaining] ->
+        source_match(remaining, source, "out of", object_index, object_index + 4)
+
       ["from" | remaining] ->
         source_match(remaining, source, "from", object_index, object_index + 2)
 
