@@ -19,9 +19,10 @@ defmodule Db.JSONL.DefinitionReviewGateTest do
       }
     ]
 
+    first = hd(source)
+
     stored = [
-      %Db.BrainCell{
-        hd(source) |
+      %{first |
         definition: "A small mark.",
         semantic_atoms: ["pos_raw:noun"],
         status: "active",
