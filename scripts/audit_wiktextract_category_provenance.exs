@@ -116,7 +116,6 @@ result =
         _ ->
           %{acc | parse_errors: acc.parse_errors + 1}
       end
-    end
 
     if progress > 0 and rem(i, progress) == 0 do
       IO.puts(:stderr, "Scanned #{i} lines; inspected #{acc.categories} category values")
