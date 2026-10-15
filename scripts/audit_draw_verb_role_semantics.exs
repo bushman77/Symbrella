@@ -143,6 +143,7 @@ case DefinitionWordReview.collect(File.stream!(path, [], :line), "draw") do
               projected_target_score: gloss_expected.combined,
               role_target_score: enriched_expected.combined,
               role_target_bonus: enriched_expected.role_bonus,
+              role_gloss_match: Map.get(enriched_expected, :role_match),
               rival_role_bonus: enriched_rival.role_bonus,
               role_adjusted_senses: enriched.role_adjusted_senses
             }
