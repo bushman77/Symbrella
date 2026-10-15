@@ -109,7 +109,7 @@ defmodule Brain.LIFG.LexicalBridges do
     |> List.wrap()
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.downcase(String.trim(&1)))
-    |> Enum.filter(&Regex.match?(~r/^[\\p{L}\\p{N}]+$/u, &1))
+    |> Enum.filter(&Regex.match?(~r/^[\p{L}\p{N}]+$/u, &1))
     |> Enum.uniq()
     |> Enum.take(@max_synonyms_per_sense)
   end
@@ -119,7 +119,7 @@ defmodule Brain.LIFG.LexicalBridges do
       value when is_binary(value) ->
         value
         |> String.downcase()
-        |> then(&Regex.scan(~r/[\\p{L}\\p{N}]+/u, &1))
+        |> then(&Regex.scan(~r/[\p{L}\p{N}]+/u, &1))
         |> List.flatten()
         |> MapSet.new()
 

@@ -79,6 +79,31 @@ defmodule Brain.LIFG.LexicalBridgesTest do
     assert report.verified? == false
   end
 
+
+  test "unicode whole-word synonym bridge stays hypothetical; partial matches do not bridge" do
+    targets = [
+      %{id: "cafe|noun|coffee", definition: "A café serving hot drinks."}
+    ]
+
+    context = %{
+      "coffee" => [
+        %{id: "coffee|noun|1", norm: "coffee", pos: "noun",
+          status: "inactive", synonyms: ["CAFÉ", "caf", "coffee shop"]}
+      ]
+    }
+
+    report = LexicalBridges.analyze(
+      "We drank coffee at the cafe.", "cafe", targets, context
+    )
+
+    assert report.bridge_count == 1
+    assert [%{context_word: "coffee",
+              synonym: "café",
+              target_sense_id: "cafe|noun|coffee",
+              verified?: false}] = report.bridges
+    assert report.verified? == false
+  end
+
   test "an empty dictionary produces no invented synonym evidence" do
     report = LexicalBridges.analyze(
       "What do you know about Japan's railgun development?",
