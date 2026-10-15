@@ -1,7 +1,7 @@
 defmodule Db.JSONL.Populate do
   @moduledoc false
 
-  alias Db.JSONL.{Fetch, Util}
+  alias Db.JSONL.{CategoryEvidencePolicy, Fetch, Util}
 
   @spec populate_structs(String.t(), keyword()) ::
           {:ok, list(Db.BrainCell.t())} | {:error, any()}
@@ -328,26 +328,10 @@ defmodule Db.JSONL.Populate do
   defp gf_canonicalize(other), do: other
 
   defp semantic_atoms_from_sense(sense, raw_pos) do
-    # Modern Wiktextract categories are maps, e.g. %{name: "Places in
-    # Arkansas, USA", kind: "place", source: "w"}. The prior string-only
-    # parser discarded all of them. Only use categories sourced from the
-    # lexical page itself; skip w+disamb maintenance/category artifacts.
-    cats =
-      sense
-      |> Map.get("categories")
-      |> List.wrap()
-      |> Enum.flat_map(fn
-        %{"name" => name, "source" => "w"} when is_binary(name) ->
-          normalized = Util.normalize_atom(name)
-          if normalized == "", do: [], else: ["cat:en:" <> normalized]
-
-        category when is_binary(category) ->
-          normalized = Util.normalize_atom(category)
-          if normalized == "", do: [], else: ["cat:" <> normalized]
-
-        _ ->
-          []
-      end)
+    # Wiktextract's category source="w" is not a semantic guarantee:
+    # filter raw maps through the conservative evidence/usage policy.
+    # Raw categories remain available in the source JSONL for future review.
+    cats = CategoryEvidencePolicy.atoms(Map.get(sense, "categories"))
 
     tags =
       sense
