@@ -830,12 +830,12 @@ defmodule SymbrellaBootstrapEnglish do
         on_db_error:
           parse_db_err(
             opts[:on_db_error] ||
-              "count"
+              "raise"
           ),
         on_decode_error:
           parse_decode_err(
             opts[:on_decode_error] ||
-              "count"
+              "raise"
           )
       ]
       |> Enum.reject(fn {_k, v} ->
@@ -844,6 +844,12 @@ defmodule SymbrellaBootstrapEnglish do
 
     case Db.JSONL.import_all(import_opts) do
       {:ok, summary} ->
+        if summary.bad_json != 0 or summary.invalid_skipped != 0 or
+             summary.db_errors != 0 do
+          raise "Dictionary import incomplete: bad_json=#{summary.bad_json}, " <>
+                  "invalid_skipped=#{summary.invalid_skipped}, db_errors=#{summary.db_errors}"
+        end
+
         IO.puts(
           :stderr,
           "\nImport complete:"
