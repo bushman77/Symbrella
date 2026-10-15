@@ -71,10 +71,8 @@ defmodule Brain.LIFG.VerbRoleShadowFitTest do
   end
 
   test "separate gloss word overlap does not imply a source relation" do
-    decoy = %{
-      Enum.at(@cells, 0) |
-      definition: "A well contains water and attracts visitors from a town."
-    }
+    decoy = Map.put(Enum.at(@cells, 0), :definition,
+      "A well contains water and attracts visitors from a town.")
     cells = [decoy | tl(@cells)]
     report = result("They draw water from a well.", @argument, @source, cells)
     assert report.role_adjusted_senses == 0
