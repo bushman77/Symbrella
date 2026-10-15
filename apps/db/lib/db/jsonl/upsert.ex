@@ -103,7 +103,7 @@ defmodule Db.JSONL.Upsert do
       :norm,
       :pos,
       :type,
-      :status,
+      # Existing BrainCell status is lifecycle state, never reset on reimport.
       :gram_function,
       :definition,
       :example,

@@ -1,6 +1,6 @@
 #!/usr/bin/env elixir
 
-# Symbrella English dictionary bootstrap.
+# Canonical Symbrella dictionary import command (called by mix db.dictionary).
 #
 # Canonical local corpus files:
 #
@@ -20,7 +20,7 @@
 #
 # Run from the umbrella root:
 #
-#   mix run apps/db/priv/scripts/bootstrap_english_jsonl.exs --
+#   mix db.dictionary --
 #
 # Useful modes:
 #
@@ -47,7 +47,7 @@
 # - Candidate English lines are JSON-decoded and checked at the TOP LEVEL.
 # - Downloads use a .part file so an incomplete download is never mistaken
 #   for a valid corpus.
-# - Import remains the responsibility of Db.JSONL.
+# - Import remains the responsibility of Db.JSONL; no application server is started.
 
 defmodule SymbrellaBootstrapEnglish do
   @default_url "https://kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz"
@@ -55,11 +55,11 @@ defmodule SymbrellaBootstrapEnglish do
 
   # This file:
   #
-  #   apps/db/priv/scripts/bootstrap_english_jsonl.exs
+  #   scripts/dictionary_import.exs
   #
-  # Therefore ".." is the canonical DB priv directory.
+  # Resolve DB priv relative to the umbrella root, not this script's parent.
   @script_dir __DIR__
-  @db_priv_dir Path.expand("..", @script_dir)
+  @db_priv_dir Path.expand("../apps/db/priv", @script_dir)
 
   @default_big Path.join(
                  @db_priv_dir,
@@ -80,6 +80,11 @@ defmodule SymbrellaBootstrapEnglish do
   def main(argv) do
     ensure_mix!()
     ensure_jason!()
+
+    argv = case argv do
+      ["--" | rest] -> rest
+      rest -> rest
+    end
 
     config = parse_args(argv)
 
@@ -120,7 +125,7 @@ defmodule SymbrellaBootstrapEnglish do
   # ===========================================================================
 
   defp parse_args(argv) do
-    {opts, _rest, invalid} =
+    {opts, rest, invalid} =
       OptionParser.parse(
         argv,
         strict: [
@@ -160,7 +165,7 @@ defmodule SymbrellaBootstrapEnglish do
         ]
       )
 
-    if invalid != [] do
+    if invalid != [] or rest != [] do
       IO.puts(
         :stderr,
         "Unknown args: #{inspect(invalid)}"
@@ -766,7 +771,17 @@ defmodule SymbrellaBootstrapEnglish do
       "Starting Symbrella application…"
     )
 
-    Mix.Task.run("app.start")
+    # `mix run --no-start` must not start Phoenix, the Brain, or Core.
+    # Only the database's Ecto and PostgreSQL infrastructure is required.
+    Mix.Task.run("app.config")
+    {:ok, _} = Application.ensure_all_started(:ecto_sql)
+    {:ok, _} = Application.ensure_all_started(:postgrex)
+
+    case Db.start_link() do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> raise "Could not start Db repository: #{inspect(reason)}"
+    end
 
     if migrate? do
       IO.puts(
@@ -885,7 +900,7 @@ defmodule SymbrellaBootstrapEnglish do
 
       IO.puts(
         :stderr,
-        "  mix run apps/db/priv/scripts/bootstrap_english_jsonl.exs -- [opts]"
+        "  mix db.dictionary -- [opts]"
       )
 
       System.halt(2)

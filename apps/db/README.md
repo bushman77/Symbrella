@@ -55,8 +55,26 @@ These schemas are the persistent backing for Brain and Core:
   - Used for continuity and later inspection of the system's self-state over
     time.
 
-- JSONL and import helpers (`Db.JSONL.*`, `Db.Import`) support loading local
-  lexical/brain-cell data.
+- The canonical dictionary workflow is `scripts/dictionary_import.exs` via
+  `mix db.dictionary`; `Db.JSONL.*` implements decoding, projection, and upsert.
+  The deprecated `Db.Import` importer is removed.
+
+### Dictionary bootstrap (before starting the web server)
+
+Run from the umbrella root. This starts only Ecto/PostgreSQL, not Phoenix:
+
+```bash
+mix db.dictionary --extract-only     # download/extract the English corpus if needed
+mix db.dictionary --import-only      # import the existing English JSONL
+mix db.dictionary                    # ensure corpus exists, migrate and import
+```
+
+All three modes use the single script in `scripts/`. The raw Wiktextract
+file is kept by default. The importer can update lexical fields of matching
+sense IDs; review source identity and back up the DB before rerunning it over
+an established dictionary. It does not intentionally change an existing
+BrainCell's lifecycle status or activation state. `mix db.rebuild` is a
+**destructive** operation: it drops and recreates the database before import.
 
 - Other helper modules (e.g. `Db.PostgrexTypes`) live here as well.
   They are considered **infrastructure**, not business logic.
