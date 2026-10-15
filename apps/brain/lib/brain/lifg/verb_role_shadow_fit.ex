@@ -16,7 +16,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
 
   @role_bonus 0.10
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
-  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[.!?;,]/u
+  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[.!?;,:]/u
 
   @spec score(String.t(), String.t(), non_neg_integer(), [map()], map(), map()) :: map()
   def score(sentence, target, verb_index, cells, argument, role)
@@ -97,6 +97,19 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
         &(&1 in evidence)
       )
 
+    determiner_ok? =
+      case determiner_index do
+        nil ->
+          source_index == prep_index + 1
+
+        index when is_integer(index) ->
+          index == prep_index + 1 and source_index == index + 1 and
+            MapSet.member?(@determiners, Enum.at(tokens, index))
+
+        _ ->
+          false
+      end
+
     # Object and source are tied to exact token positions; never cross a
     # punctuation mark or a new clause by deleting non-lexical input tokens.
     sequence? =
@@ -106,17 +119,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
         Enum.at(tokens, prep_index) == "from" and
         Enum.at(tokens, source_index) == source and
         String.length(object) >= 3 and String.length(source) >= 3 and
-        case determiner_index do
-          nil ->
-            source_index == prep_index + 1
-
-          index when is_integer(index) ->
-            index == prep_index + 1 and source_index == index + 1 and
-              MapSet.member?(@determiners, Enum.at(tokens, index))
-
-          _ ->
-            false
-        end
+        determiner_ok?
 
     if required? and sequence?, do: %{object: object, source: source}, else: nil
   end
