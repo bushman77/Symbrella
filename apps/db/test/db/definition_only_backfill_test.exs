@@ -53,7 +53,7 @@ defmodule Db.JSONL.DefinitionOnlyBackfillTest do
 
     assert plan.row_count == 3
     assert plan.patch_count == 2
-    assert length(plan.fingerprint) == 64
+    assert String.length(plan.fingerprint) == 64
     assert Enum.map(plan.patches, & &1.id) ==
              ["free|adjective|1", "free|adjective|2"]
 
