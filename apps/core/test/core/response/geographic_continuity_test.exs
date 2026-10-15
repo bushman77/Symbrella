@@ -43,6 +43,49 @@ defmodule Core.Response.GeographicContinuityTest do
     refute Map.has_key?(si.symbolic_frame, :distance_km)
   end
 
+  test "directly named place distance questions always demand coordinate grounding" do
+    for sentence <- [
+          "how far is maple ridge from kamloops",
+          "How far is Maple Ridge, BC from Kamloops?",
+          "How far is Prince George from Victoria?"
+        ] do
+      si =
+        %{sentence: sentence}
+        |> References.attach()
+        |> EventFrames.attach()
+
+      assert %{type: :location_question, relation: :proximity,
+               grounding_status: :unverified, unresolved_roles: []} =
+               si.symbolic_frame
+
+      assert is_binary(si.symbolic_frame.subject)
+      assert is_binary(si.symbolic_frame.target)
+      assert si.symbolic_frame.antecedent_source == :explicit_user_question
+
+      assert %{relation: :proximity, request_type: :geographic_proximity} =
+               Core.Tools.WebRetrieval.route_for(%{
+                 user_text: sentence,
+                 features: %{symbolic_frame: si.symbolic_frame}
+               })
+    end
+
+    si = EventFrames.attach(%{sentence: "how far is maple ridge from kamloops"})
+    assert si.symbolic_frame.subject == "maple ridge"
+    assert si.symbolic_frame.target == "kamloops"
+
+    context = %{
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: si.symbolic_frame}
+    }
+
+    {:ok, answer, reflection} =
+      ReflectionLoop.review(si.sentence, "Maple Ridge is 10 miles from Kamloops.", context)
+
+    assert reflection.status == :repair
+    assert :geographic_claim_unverified in reflection.issues
+    assert answer =~ "don't have verified distance information"
+    refute answer =~ "10 miles"
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do

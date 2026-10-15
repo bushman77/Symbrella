@@ -90,6 +90,40 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert Grounding.supports?(final, result)
   end
 
+  test "direct distance question routes to coordinate support and overrides a guessed number" do
+    alias Core.Semantic.EventFrames
+
+    question = "how far is Maple Ridge, BC from Kamloops?"
+    frame = EventFrames.attach(%{sentence: question}).symbolic_frame
+
+    assert frame.subject == "Maple Ridge, BC"
+    assert frame.target == "Kamloops"
+
+    ctx = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: frame},
+      symbolic_frame: %{event: frame}
+    }
+
+    with_evidence =
+      WebRetrieval.enrich(ctx,
+        enabled?: true,
+        provider: OffTopicWikipedia,
+        coordinate_provider: SuccessfulCoords
+      )
+
+    assert with_evidence.web_evidence.resolution == :source_supported
+    assert with_evidence.web_evidence.support.method == :haversine
+
+    {:ok, answer, review} =
+      ReflectionLoop.review(question, "Maple Ridge is 10 miles from Kamloops.", with_evidence)
+
+    assert review.status == :repair
+    assert answer =~ "38.5 km"
+    assert answer =~ "straight line"
+    refute answer =~ "10 miles"
+  end
+
   test "an unverified refusal is upgraded when evidence is source-supported" do
     context = WebRetrieval.enrich(context(:proximity),
       enabled?: true, provider: OffTopicWikipedia,

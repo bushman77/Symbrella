@@ -60,6 +60,28 @@ defmodule Core.Semantic.EventFrames do
           confidence: if(is_binary(subject), do: 0.9, else: 0.6)
         }
 
+      # Directly named places do not require discourse antecedent recovery.
+      # This creates only a question frame; coordinates must still be sourced
+      # and matched to both entities before any numeric claim may be returned.
+      match =
+          Regex.run(
+            ~r/^\s*how\s+far\s+is\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78}?)\s+from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]?\s*$/iu,
+            sentence
+          ) ->
+        [_, named_subject, named_target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: clean_entity(named_subject),
+          target: clean_entity(named_target),
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
       match =
           Regex.run(
             ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/iu,
