@@ -8,7 +8,10 @@
 # was line-limited, since it might be incomplete. Full scan tracks positional
 # counters for every word/POS (may consume substantial RAM on mobile).
 #
-# NO writes. This audit is discovery, NOT approval for any bulk repair.
+# NO writes. Results are PROVISIONAL because a normalized word can occur
+# in multiple noncontiguous source runs (cat|noun is a real example).
+# Run scripts/review_definition_word.exs or the full-source shortlist
+# checker to verify ALL occurrences before treating an ID mismatch as real.
 # For a chosen word/POS use the human-reviewed DefinitionOnlyBackfill.plan/4
 # workflow, back up records and approve its individual fingerprint.
 
@@ -59,6 +62,8 @@ defmodule Symbrella.DefinitionBatchCandidateScript do
     IO.puts("Lines: #{if(limit == 0, do: "entire file", else: "first #{limit}")}")
     IO.puts("Source ordering follows Db.JSONL.Import positional sense counters.")
     IO.puts("A matching positional ID never independently proves sense identity.")
+    IO.puts("WARNING: contiguous word RUNS are not necessarily complete words.")
+    IO.puts("Any ID mismatch may reflect later source entries; rerun full-source review.")
 
     stream = File.stream!(path, [], :line)
     stream = if limit == 0, do: stream, else: Stream.take(stream, limit)
@@ -116,7 +121,7 @@ defmodule Symbrella.DefinitionBatchCandidateScript do
 
     state = flush_pending(state)
 
-    IO.puts("\n=== Verified definition-only candidate census ===")
+    IO.puts("\n=== PROVISIONAL word-run definition candidate census ===")
 
     IO.inspect(%{
       source_lines_read: state.lines,
@@ -139,13 +144,14 @@ defmodule Symbrella.DefinitionBatchCandidateScript do
       IO.inspect(sample, pretty: true, width: 120, limit: :infinity)
     end)
 
-    IO.puts("\n=== Blocked examples (not eligible) ===")
+    IO.puts("\n=== Provisional conflicts (full-source review required) ===")
     state.audit.conflict_examples
     |> Enum.reverse()
     |> Enum.each(&IO.inspect(&1, pretty: true))
 
     IO.puts("\nNO DATABASE ROWS CHANGED.")
     IO.puts("This audit deliberately has no --apply option.")
+    IO.puts("All eligible/blocked counts are provisional until full-source word checks.")
   end
 
   defp consume(state, entry, word_batch) do
