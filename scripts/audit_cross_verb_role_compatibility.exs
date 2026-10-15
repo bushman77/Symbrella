@@ -78,6 +78,7 @@ results =
     target = Enum.find(semantic.candidates, &(&1.id == "#{verb}|verb|1"))
     bonus = target.role_bonus
     observed? = bonus > 0.0
+    expected_count = if expect_role_bonus?, do: 1, else: 0
 
     report = %{
       sentence: sentence,
@@ -91,7 +92,7 @@ results =
       total_role_adjusted_senses: semantic.role_adjusted_senses,
       no_lifecycle_changes?: Enum.all?(cells, &(&1.status == "inactive")),
       agreed?: observed? == expect_role_bonus? and
-        semantic.role_adjusted_senses == if(expect_role_bonus?, do: 1, else: 0)
+        semantic.role_adjusted_senses == expected_count
     }
     IO.puts("\n--- #{inspect(sentence)} ---")
     IO.inspect(report, pretty: true, width: 120)
