@@ -41,6 +41,16 @@ defmodule Db.JSONL.CategoryProvenanceTest do
     }) == :likely_maintenance
 
     assert CategoryProvenance.classify(%{
+      "name" => "English terms with collocations",
+      "kind" => "other", "source" => "w"
+    }) == :likely_maintenance
+
+    assert CategoryProvenance.classify(%{
+      "name" => "Terms with Arabic translations",
+      "kind" => "other", "source" => "w"
+    }) == :likely_maintenance
+
+    assert CategoryProvenance.classify(%{
       "name" => "Other source label", "kind" => "other", "source" => "w+other"
     }) == :non_w_source
   end
