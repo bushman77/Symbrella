@@ -49,6 +49,10 @@ defmodule Core.Tools.EvidenceResolverTest do
     def proximity(_, _, _), do: {:error, :entity_mismatch}
   end
 
+  defmodule FailedPopulation do
+    def population(_, _), do: {:error, :dated_population_unavailable}
+  end
+
   defp context(relation) do
     frame = %{
       type: :location_question, subject: "Maple Ridge, BC",
@@ -137,14 +141,120 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert final =~ "38.5 km"
   end
 
-  test "population lookup retries a tighter source query" do
+  test "population lookup falls back to a dated census excerpt when Wikidata is unavailable" do
     result = WebRetrieval.enrich(context(:population),
-      enabled?: true, provider: PopulationOnRetry)
+      enabled?: true, provider: PopulationOnRetry, coordinate_provider: FailedPopulation)
 
     assert result.web_evidence.resolution == :source_supported
     assert result.web_evidence.attempted_count == 2
     assert result.web_evidence.support.value == 90_990
     assert result.web_evidence.support.census_year == 2021
+  end
+
+  test "Kamloops population uses latest dated Wikidata statement, not an invented 17,800" do
+    alias Core.Semantic.EventFrames
+
+    question = "what is the population of Kamloops, BC"
+    frame = EventFrames.location_question(question)
+    assert frame.relation == :population
+    assert frame.subject == "Kamloops, BC"
+
+    statement = fn amount, year ->
+      %{
+        "mainsnak" => %{"datavalue" => %{"value" => %{"amount" => amount}}},
+        "qualifiers" => %{"P585" => [
+          %{"datavalue" => %{"value" =>
+            %{"time" => "+#{year}-01-01T00:00:00Z"}}}
+        ]},
+        "rank" => "normal"
+      }
+    end
+
+    fake_get = fn _url, opts ->
+      case opts[:params][:titles] do
+        "Kamloops" ->
+          {:ok, response} = entity(
+            "Q473209", "Kamloops", "city in British Columbia, Canada",
+            50.6761, -120.341
+          )
+
+          with_claims =
+            put_in(response,
+              [:body, "entities", "Q473209", "claims", "P1082"],
+              [
+                %{"mainsnak" => %{"datavalue" => %{"value" =>
+                  %{"amount" => "+17800"}}}},
+                statement.("+90280", "2016"),
+                statement.("+97902", "2021")
+              ])
+
+          {:ok, with_claims}
+
+        _ ->
+          {:ok, %{status: 200, body: %{"entities" =>
+            %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+      end
+    end
+
+    assert {:ok, statement_result} =
+             Wikidata.population("Kamloops, BC", fetch: fake_get)
+
+    assert statement_result.value == 97_902
+    assert statement_result.display == "97,902"
+    assert statement_result.census_year == 2021
+    assert statement_result.source_url == "https://www.wikidata.org/wiki/Q473209"
+
+    context = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.9, symbolic_frame: frame}
+    }
+
+    enriched = WebRetrieval.enrich(context,
+      enabled?: true, provider: OffTopicWikipedia,
+      coordinate_provider: Wikidata,
+      coordinate_opts: [fetch: fake_get]
+    )
+
+    assert enriched.web_evidence.resolution == :source_supported
+    assert enriched.web_evidence.attempted_count == 1
+    assert enriched.web_evidence.support.value == 97_902
+
+    {:ok, final, review} = ReflectionLoop.review(question,
+      "The population of Kamloops, BC is approximately 17,800. Sources: " <>
+        "https://www.wikidata.org/wiki/Q473209", enriched)
+
+    assert review.status == :repair
+    assert final =~ "97,902"
+    assert final =~ "2021"
+    assert final =~ "https://www.wikidata.org/wiki/Q473209"
+    refute final =~ "17,800"
+    refute final =~ "2026 census"
+
+    assert Grounding.supports?(final, enriched)
+  end
+
+  test "undated Wikidata population values never become verified counts" do
+    fake_get = fn _url, opts ->
+      case opts[:params][:titles] do
+        "Kamloops" ->
+          {:ok, response} = entity(
+            "Q473209", "Kamloops", "city in British Columbia, Canada",
+            50.6761, -120.341
+          )
+
+          {:ok, put_in(response, [:body, "entities", "Q473209", "claims", "P1082"], [
+            %{"mainsnak" => %{"datavalue" => %{"value" =>
+              %{"amount" => "+17800"}}}}
+          ])}
+
+        _ ->
+          {:ok, %{status: 200, body: %{"entities" =>
+            %{"-1" => %{"id" => "-1", "missing" => ""}}}}}
+      end
+    end
+
+    assert {:error, :dated_population_unavailable} =
+             Wikidata.population("Kamloops, BC", fetch: fake_get)
   end
 
   test "failed alternatives exhaust the budget; no unsupported claim is promoted" do
