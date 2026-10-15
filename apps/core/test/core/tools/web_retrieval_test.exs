@@ -278,6 +278,37 @@ defmodule Core.Tools.WebRetrievalTest do
     assert length(result.web_evidence.sources) == 3
   end
 
+  test "Wikipedia retains the article lead for ordinary location questions" do
+    intro = "Maple Ridge is a city in British Columbia, Canada. It lies east of Vancouver."
+    details = "Other text about the city. " <> String.duplicate("History. ", 30) <>
+      "Its population in 2021 was 90,990."
+
+    fake_get = fn url, _opts ->
+      case url do
+        "https://en.wikipedia.org/w/rest.php/v1/search/page" ->
+          {:ok, %{status: 200, body: %{"pages" => [
+            %{"title" => "Maple Ridge, British Columbia", "description" => "City in Canada",
+              "excerpt" => "City east of Vancouver"}
+          ]}}}
+
+        "https://en.wikipedia.org/w/api.php" ->
+          {:ok, %{status: 200, body: %{"query" => %{"pages" => %{
+            "42" => %{"extract" => intro <> " " <> details}
+          }}}}}
+
+        other -> flunk("Unexpected URL: #{other}")
+      end
+    end
+
+    assert {:ok, [ordinary]} = Wikipedia.search("maple ridge bc", fetch: fake_get)
+    assert String.starts_with?(ordinary.excerpt, intro)
+
+    assert {:ok, [population]} = Wikipedia.search("Maple Ridge 2021 population",
+      fetch: fake_get)
+    assert population.excerpt =~ "population in 2021 was 90,990"
+    refute String.starts_with?(population.excerpt, intro)
+  end
+
   test "Wikimedia adapter searches and fetches article via fixed hosts without network" do
     fake_get = fn url, _opts ->
       case url do

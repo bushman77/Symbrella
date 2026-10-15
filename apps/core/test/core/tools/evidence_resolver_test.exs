@@ -173,6 +173,31 @@ defmodule Core.Tools.EvidenceResolverTest do
     }}}
   end
 
+  test "Wikidata resolves unpunctuated BC qualifiers without weakening entity validation" do
+    fake_get = fn url, opts ->
+      assert url == "https://www.wikidata.org/w/api.php"
+
+      case opts[:params][:titles] do
+        "Maple Ridge, British Columbia" ->
+          wikidata_reply("Maple Ridge, British Columbia")
+
+        "Kamloops, British Columbia" ->
+          entity("Q2138", "Kamloops", "city in British Columbia, Canada",
+            50.6745, -120.3273)
+
+        other ->
+          flunk("Unexpected Wikidata entity query: #{other}")
+      end
+    end
+
+    assert {:ok, proof} =
+      Wikidata.proximity("Maple Ridge, BC", "Kamloops BC", fetch: fake_get)
+
+    assert proof.kind == :proximity
+    assert proof.distance_km > 0
+    assert proof.method == :haversine
+  end
+
   test "Wikidata provider validates two city entities and computes straight-line distance" do
     fake_get = fn url, opts ->
       assert url == "https://www.wikidata.org/w/api.php"

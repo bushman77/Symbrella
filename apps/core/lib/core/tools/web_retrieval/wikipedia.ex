@@ -30,9 +30,17 @@ defmodule Core.Tools.WebRetrieval.Wikipedia do
         |> Enum.take(@max_results)
         |> Enum.flat_map(&to_source/1)
 
+      # General reference requests need an article lead, not a sentence cut
+      # from the middle of its population section. Population requests retain
+      # the focused census snippet used by the numeric grounding validator.
+      excerpt_focus =
+        if Regex.match?(~r/\b(?:population|census|inhabitants)\b/iu, query),
+          do: :population,
+          else: :lead
+
       sources =
         case sources do
-          [first | rest] -> [supplement(first, fetch, timeout) | rest]
+          [first | rest] -> [supplement(first, fetch, timeout, excerpt_focus) | rest]
           [] -> []
         end
 
@@ -44,7 +52,7 @@ defmodule Core.Tools.WebRetrieval.Wikipedia do
     end
   end
 
-  defp supplement(source, fetch, timeout) do
+  defp supplement(source, fetch, timeout, excerpt_focus) do
     args = [
       params: [
         action: "query", prop: "extracts", format: "json",
@@ -64,7 +72,7 @@ defmodule Core.Tools.WebRetrieval.Wikipedia do
           |> to_string()
           |> String.slice(0, 100_000)
 
-        selected = relevant_excerpt(text, source.excerpt)
+        selected = relevant_excerpt(text, source.excerpt, excerpt_focus)
         %{source | excerpt: selected}
 
       _ ->
@@ -89,11 +97,15 @@ defmodule Core.Tools.WebRetrieval.Wikipedia do
 
   defp to_source(_), do: []
 
-  defp relevant_excerpt(text, existing) when is_binary(text) do
+  defp relevant_excerpt(text, existing, focus) when is_binary(text) do
     start =
-      case Regex.run(~r/\bpopulation\b/iu, text, return: :index) do
-        [{pos, _} | _] -> max(0, pos - 160)
-        _ -> 0
+      if focus == :population do
+        case Regex.run(~r/\bpopulation\b/iu, text, return: :index) do
+          [{pos, _} | _] -> max(0, pos - 160)
+          _ -> 0
+        end
+      else
+        0
       end
 
     tail =

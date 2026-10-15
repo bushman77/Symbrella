@@ -43,6 +43,25 @@ defmodule Core.Semantic.EventFrames do
     cond do
       match =
           Regex.run(
+            ~r/^\s*how\s+far\s+is\s+it\s+from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]?\s*$/iu,
+            sentence
+          ) ->
+        [_, target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: subject,
+          target: clean_entity(target),
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      match =
+          Regex.run(
             ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/iu,
             sentence
           ) ->
@@ -81,6 +100,7 @@ defmodule Core.Semantic.EventFrames do
     text
     |> String.trim()
     |> String.trim_trailing(".")
+    |> String.trim_trailing("?")
     |> String.replace(~r/\s+/u, " ")
   end
 

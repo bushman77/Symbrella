@@ -87,9 +87,7 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
 
   defp place_titles(name, hint) do
     trimmed = String.trim(name)
-    expanded =
-      trimmed
-      |> String.replace(~r/,\s*BC\s*$/iu, ", British Columbia")
+    expanded = expand_bc_suffix(trimmed)
 
     qualifiers = String.split(expanded, ",", parts: 2)
     title =
@@ -155,8 +153,14 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
 
   defp validated_entity(_, _, _), do: {:error, :entity_mismatch}
 
+  # Users write both "Kamloops BC" and "Kamloops, BC". They must resolve
+  # to the same explicit province-qualified entity, never to a fuzzy match.
+  defp expand_bc_suffix(name) do
+    String.replace(name, ~r/(?:,\s*|\s+)BC\s*$/iu, ", British Columbia")
+  end
+
   defp split_name(name) do
-    case String.split(name, ",", parts: 2) do
+    case name |> expand_bc_suffix() |> String.split(",", parts: 2) do
       [plain, region] ->
         region =
           region |> String.trim() |> String.replace(~r/^BC$/iu, "British Columbia")

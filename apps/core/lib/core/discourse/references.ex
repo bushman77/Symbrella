@@ -47,7 +47,8 @@ defmodule Core.Discourse.References do
       Regex.match?(~r/^\s*(?:what|how)\s+(?:is|was)\s+its?\b/iu, sentence) ->
         "its"
 
-      Regex.match?(~r/^\s*(?:is|was|does|did|can|could|will|would)\s+it\b/iu, sentence) ->
+      Regex.match?(~r/^\s*(?:is|was|does|did|can|could|will|would)\s+it\b/iu, sentence) or
+          Regex.match?(~r/^\s*how\s+far\s+is\s+it\s+from\b/iu, sentence) ->
         "it"
 
       true ->

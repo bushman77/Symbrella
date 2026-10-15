@@ -16,6 +16,33 @@ defmodule Core.Response.GeographicContinuityTest do
     {:ok, session_id: "geo-#{System.unique_integer([:positive])}"}
   end
 
+  test "distance follow-up preserves the place referent and requests coordinates", %{
+    session_id: session_id
+  } do
+    LlmChatHistory.record_turn(session_id, "where is maple ridge bc", "Maple Ridge is in BC.")
+
+    si =
+      %{sentence: "how far is it from kamloops bc", session_id: session_id}
+      |> References.attach()
+      |> EventFrames.attach()
+
+    assert si.discourse_reference.antecedent == "maple ridge bc"
+    assert si.symbolic_frame.type == :location_question
+    assert si.symbolic_frame.relation == :proximity
+    assert si.symbolic_frame.subject == "maple ridge bc"
+    assert si.symbolic_frame.target == "kamloops bc"
+    assert si.symbolic_frame.grounding_status == :unverified
+
+    assert {query, :proximity} =
+      Core.Tools.WebRetrieval.query_for(%{
+        user_text: si.sentence,
+        features: %{symbolic_frame: si.symbolic_frame}
+      })
+
+    assert query =~ "kamloops bc"
+    refute Map.has_key?(si.symbolic_frame, :distance_km)
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do

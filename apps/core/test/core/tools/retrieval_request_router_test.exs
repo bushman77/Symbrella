@@ -181,7 +181,7 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
 
     assert reflection.status == :repair
     assert :search_not_answered in reflection.issues
-    assert final =~ "I retrieved these reference excerpts"
+    assert final =~ "I found reference sources"
     assert final =~ "https://en.wikipedia.org/wiki/Reference"
     assert final =~ "not independently verified"
     refute final =~ "I'll look that up"
@@ -342,7 +342,7 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
 
     assert first_review.status == :repair
     assert :search_not_answered in first_review.issues
-    assert initial_reply =~ "I retrieved these reference excerpts"
+    assert initial_reply =~ "I found reference sources"
 
     # Turn two: "latest developments" has no subject of its own. Recover
     # only a prior USER topic and search for dated headlines about that.

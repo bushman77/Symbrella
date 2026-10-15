@@ -316,12 +316,11 @@ defmodule Core.Response.ReflectionLoop do
       end)
       |> Enum.map_join("\n", fn source ->
         "- #{String.slice(source.title, 0, 120)}: " <>
-          "#{String.slice(source.excerpt, 0, 320)} " <>
           "Source: #{String.slice(source.url, 0, 400)}"
       end)
 
-    "I retrieved these reference excerpts, but they are not independently verified facts:\n" <>
-      excerpts <> "\nThe excerpts alone may not fully answer the question."
+    "I found reference sources, but couldn't establish a complete answer from them:\n" <>
+      excerpts <> "\nThese links are references, not independently verified conclusions."
   end
 
   # The small model may repeat a stale "I have no live news access" message
