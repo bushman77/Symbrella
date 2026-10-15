@@ -22,34 +22,25 @@ defmodule SymbrellaWeb.ChatLive.HTML do
     <% {main, _extra} = split_lexical_tail(text) %>
     <% parts = SourceLinks.parts(main) %>
 
-    <p class="whitespace-pre-wrap break-words">
-      <%= for part <- parts do %>
-        <%= if part.kind == :source do %>
-          <span class="inline-flex items-center gap-1 whitespace-nowrap align-baseline">
-            <img
-              src={part.favicon}
-              alt=""
-              aria-hidden="true"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              width="16"
-              height="16"
-              class="inline-block size-4 shrink-0"
-            />
-            <a
-              href={part.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="font-medium text-sky-400 underline underline-offset-2 hover:text-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
-              title={part.url}
-            >Source</a>
-          </span>
-        <% else %>
-          {part.text}
-        <% end %>
-      <% end %>
-    </p>
+    <%!-- Keep dynamic parts adjacent: whitespace inside the template would be
+          preserved by whitespace-pre-wrap and create big gaps/new lines. --%>
+    <p class="whitespace-pre-wrap break-words"><%= for part <- parts do %><%= if part.kind == :source do %><a
+      href={part.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="inline-flex items-center gap-0.5 whitespace-nowrap align-baseline text-sm font-medium text-sky-400 underline underline-offset-2 hover:text-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+      title={part.url}
+    ><img
+      src={part.favicon}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      decoding="async"
+      referrerpolicy="no-referrer"
+      width="14"
+      height="14"
+      class="inline-block size-3.5 shrink-0"
+    />Source</a><% else %>{part.text}<% end %><% end %></p>
     """
   end
 

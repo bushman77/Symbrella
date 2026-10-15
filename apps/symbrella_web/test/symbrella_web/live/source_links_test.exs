@@ -45,6 +45,30 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
     assert html =~ "Wikidata:"
   end
 
+  test "distance answer renders tightly spaced inline citation links" do
+    reply = "Based on Wikidata coordinates, the cities are 229.0 km apart. " <>
+              "Sources: #{@wikipedia} and #{@wikidata}"
+    html = render_component(&HTML.assistant_text/1, message: %{text: reply})
+
+    assert html =~ ~s(href="#{@wikipedia}")
+    assert html =~ ~s(href="#{@wikidata}")
+    assert length(String.split(html, ">Source</a>")) == 3
+
+    # Prevent accidental line breaks/indentation within a whitespace-pre-wrap
+    # reply, which made two citations occupy several additional lines.
+    text =
+      html
+      |> Floki.parse_fragment!()
+      |> Floki.find("p")
+      |> Floki.text()
+
+    assert text ==
+             "Based on Wikidata coordinates, the cities are 229.0 km apart. " <>
+               "Sources: Source and Source"
+
+    assert length(Floki.find(Floki.parse_fragment!(html), "p > a > img")) == 2
+  end
+
   test "bare URLs are labeled Source and original punctuation remains visible" do
     assert [
       %{kind: :text, text: "See "},
