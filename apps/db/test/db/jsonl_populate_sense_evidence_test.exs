@@ -93,7 +93,7 @@ defmodule Db.JSONL.PopulateSenseEvidenceTest do
         "glosses" => ["The first sense"],
         "synonyms" => [%{"word" => "specific"}],
         "categories" => [
-          %{"source" => "w", "name" => "Testing", "kind" => "other"}
+          %{"source" => "w", "name" => "Computing", "kind" => "other"}
         ]},
       %{"_meta" => %{"word" => "test", "pos" => "noun",
                      "entry_synonyms" => ["shared"]},
@@ -104,7 +104,7 @@ defmodule Db.JSONL.PopulateSenseEvidenceTest do
 
     assert first.synonyms == ["specific"]
     assert second.synonyms == []
-    assert "cat:en:testing" in first.semantic_atoms
-    refute "cat:en:testing" in second.semantic_atoms
+    assert "cat:en:computing" in first.semantic_atoms
+    refute "cat:en:computing" in second.semantic_atoms
   end
 end
