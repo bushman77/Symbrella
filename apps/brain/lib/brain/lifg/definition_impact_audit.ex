@@ -47,16 +47,16 @@ defmodule Brain.LIFG.DefinitionImpactAudit do
         shadow = LexicalAudit.analyze(sentence, target, proposed)
 
         case {summarize(baseline, expected_id), summarize(shadow, expected_id)} do
-          {{:ok, before}, {:ok, after}} ->
+          {{:ok, before}, {:ok, projected}} ->
             {:ok, %{
               sentence: sentence,
               target: target,
               hypothesized_id: expected_id,
               before: before,
-              after: after,
+              projected: projected,
               expected_fit_delta:
-                Float.round(after.expected_fit - before.expected_fit, 6),
-              same_top_id?: before.top_id == after.top_id,
+                Float.round(projected.expected_fit - before.expected_fit, 6),
+              same_top_id?: before.top_id == projected.top_id,
               note: :dictionary_only_shadow_no_winner_changes
             }}
 
