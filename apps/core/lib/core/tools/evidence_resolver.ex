@@ -47,7 +47,9 @@ defmodule Core.Tools.EvidenceResolver do
          {:news, news_provider, "#{query} latest", news_opts}] ++
           optional_search(cfg, news_provider, query, opts)
       else
-        [{:search, provider, query, provider_opts}] ++
+        (if relation == :identity and is_binary(subject),
+           do: [{:identity, coords_provider, nil, coords_opts}],
+           else: [{:search, provider, query, provider_opts}]) ++
           (if relation == :proximity and is_binary(subject) and is_binary(target),
              do: [{:coordinates, coords_provider, nil, coords_opts}],
              else: []) ++
@@ -197,6 +199,34 @@ defmodule Core.Tools.EvidenceResolver do
 
       _ ->
         {%{kind: :search, provider: provider, query: query,
+           status: :unavailable, source_count: 0}, [], nil}
+    end
+  end
+
+  defp attempt({:identity, provider, _query, provider_opts}, subject, _target, _relation, timeout, _request_type) do
+    reply = safe_call(fn ->
+      provider.place(subject, nil, Keyword.merge([timeout_ms: timeout], provider_opts))
+    end)
+
+    case reply do
+      {:ok, %{title: title, url: url, provider: :wikidata, description: description}}
+      when is_binary(title) and is_binary(url) and is_binary(description) and
+           byte_size(description) > 5 ->
+        citation = %{title: title, provider: :wikidata, url: url}
+        support = %{
+          kind: :identity,
+          status: :source_supported,
+          subject: subject,
+          title: title,
+          description: description,
+          sources: [citation]
+        }
+        {%{kind: :identity, provider: provider, query: subject,
+           status: :source_supported, source_count: 1},
+         [Map.put(citation, :excerpt, description)], support}
+
+      _ ->
+        {%{kind: :identity, provider: provider, query: subject,
            status: :unavailable, source_count: 0}, [], nil}
     end
   end

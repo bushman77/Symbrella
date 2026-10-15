@@ -756,6 +756,9 @@ defmodule Core.Response.ReflectionLoop do
       not is_binary(subject) ->
         "Which place are you referring to?"
 
+      map_get(frame, :relation) == :identity ->
+        "I can identify #{subject} from the conversation, but I couldn't verify its geographic identity from Wikidata."
+
       map_get(frame, :relation) == :population ->
         "You're asking about #{subject}'s population, but I don't have a verified population figure available here."
 

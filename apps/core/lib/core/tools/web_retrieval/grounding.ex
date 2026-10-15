@@ -70,6 +70,17 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec align(String.t(), map()) :: String.t()
   def align(draft, context) when is_binary(draft) and is_map(context) do
+    case supported_identity(context) do
+      %{title: title, description: description, sources: [%{url: url}]}
+      when is_binary(title) and is_binary(description) and is_binary(url) ->
+        "According to Wikidata, #{title} is described as #{description}. Source: #{url}"
+
+      _ ->
+        align_distance_or_population(draft, context)
+    end
+  end
+
+  defp align_distance_or_population(draft, context) do
     case supported_proximity(context) do
       %{distance_km: km, subject: subject, target: target, sources: sources}
       when is_number(km) and is_binary(subject) and is_binary(target) ->
@@ -103,12 +114,23 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec available_support?(map()) :: boolean()
   def available_support?(context) when is_map(context),
-    do: is_map(supported_population(context)) or is_map(supported_proximity(context))
+    do: is_map(supported_population(context)) or is_map(supported_proximity(context)) or
+      is_map(supported_identity(context))
 
   def available_support?(_), do: false
 
   @spec supports?(String.t(), map()) :: boolean()
   def supports?(text, context) when is_binary(text) and is_map(context) do
+    case supported_identity(context) do
+      %{status: :source_supported} ->
+        text == align(text, context)
+
+      _ ->
+        supports_distance_or_population?(text, context)
+    end
+  end
+
+  defp supports_distance_or_population?(text, context) do
     case supported_proximity(context) do
       %{distance_km: km, sources: sources} when is_number(km) and is_list(sources) ->
         String.contains?(text, "#{km}") and
@@ -130,6 +152,22 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
       _ -> false
     end
+  end
+
+  defp supported_identity(context) do
+    frame = geographic_frame(context)
+    evidence = Map.get(context, :web_evidence, %{})
+    support = Map.get(evidence, :support)
+
+    if Map.get(frame, :type) == :location_question and
+         Map.get(frame, :relation) == :identity and
+         Map.get(evidence, :status) == :retrieved and
+         is_map(support) and Map.get(support, :kind) == :identity and
+         Map.get(support, :status) == :source_supported and
+         is_binary(Map.get(support, :description)) and
+         is_list(Map.get(support, :sources)) and
+         length(Map.get(support, :sources)) == 1,
+      do: support
   end
 
   defp supported_proximity(context) do

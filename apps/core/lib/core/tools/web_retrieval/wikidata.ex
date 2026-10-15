@@ -157,6 +157,7 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
         {:ok,
          %{
            title: label,
+           description: desc,
            url: "https://www.wikidata.org/wiki/" <> id,
            provider: :wikidata,
            latitude: lat,
