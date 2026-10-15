@@ -7,7 +7,8 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
   """
 
   @type verdict :: :absent_id | :matched_current | :missing_source_evidence |
-                     :different_definition | :metadata_mismatch | :wrong_word_pos
+                     :different_definition | :no_gloss | :grammar_derivation_drift |
+                     :metadata_mismatch | :wrong_word_pos
 
   @spec classify(Db.BrainCell.t(), map() | nil) :: {verdict(), map()}
   def classify(source, nil) do
@@ -30,11 +31,23 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
       source.norm != stored.norm or source.pos != stored.pos ->
         {:wrong_word_pos, detail}
 
-      not metadata_matches?(source, stored) ->
+      not non_grammar_metadata_matches?(source, stored) ->
         {:metadata_mismatch, detail}
+
+      is_nil(previous_definition) and is_nil(expected_definition) ->
+        {:no_gloss, detail}
 
       is_nil(previous_definition) or is_nil(expected_definition) ->
         {:different_definition, detail}
+
+      grammar_derivation_drift?(source.gram_function, stored.gram_function) ->
+        # The current grammar canonicalizer adds "usually plural" to these
+        # cases. Keep them out of automated repair until their provenance is
+        # reviewed, even when gloss and category evidence could be restored.
+        {:grammar_derivation_drift, detail}
+
+      source.gram_function != stored.gram_function ->
+        {:metadata_mismatch, detail}
 
       previous_definition != expected_definition and
           not String.starts_with?(expected_definition, previous_definition <> " — ") ->
@@ -56,11 +69,21 @@ defmodule Db.JSONL.SenseEvidenceReconciliation do
     |> Enum.sort()
   end
 
-  defp metadata_matches?(source, stored) do
+  defp non_grammar_metadata_matches?(source, stored) do
     noncategory_atoms(source.semantic_atoms) == noncategory_atoms(stored.semantic_atoms) and
-      source.gram_function == stored.gram_function and
       source.example == stored.example
   end
+
+  defp grammar_derivation_drift?(source, stored)
+       when is_list(source) and is_list(stored) do
+    source_set = MapSet.new(source)
+    stored_set = MapSet.new(stored)
+
+    MapSet.difference(source_set, stored_set) == MapSet.new(["usually plural"]) and
+      MapSet.subset?(stored_set, source_set)
+  end
+
+  defp grammar_derivation_drift?(_, _), do: false
 
   defp noncategory_atoms(atoms) do
     atoms
