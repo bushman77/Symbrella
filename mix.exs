@@ -56,6 +56,11 @@ defmodule Symbrella.Umbrella.MixProject do
     Mix.Task.run("run", ["--no-start", "scripts/dictionary_import.exs", "--" | args])
   end
 
+  # Read-only corpus audit; --no-start avoids the Phoenix/LLM boot sequence.
+  def dictionary_audit(args) do
+    Mix.Task.run("run", ["--no-start", "scripts/audit_dictionary_fidelity.exs", "--" | args])
+  end
+
   # ---------- Umbrella-wide tasks ----------
   defp aliases do
     [
@@ -79,6 +84,7 @@ defmodule Symbrella.Umbrella.MixProject do
 
       # Non-destructive entrypoint: download/extract/import with DB-only startup.
       {:"db.dictionary", [&__MODULE__.dictionary_import/1]},
+      {:"db.dictionary.audit", [&__MODULE__.dictionary_audit/1]},
 
       # DESTRUCTIVE: drops and recreates the entire database first.
       # Only use this when a full reset is explicitly intended.

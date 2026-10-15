@@ -69,7 +69,18 @@ mix db.dictionary --import-only      # import the existing English JSONL
 mix db.dictionary                    # ensure corpus exists, migrate and import
 ```
 
-All three modes use the single script in `scripts/`. The raw Wiktextract
+A read-only, full-source integrity audit is also available:
+
+```bash
+env -u DATABASE_URL PGDATABASE=brain_dictionary_test mix db.dictionary.audit --limit-lines 10000
+env -u DATABASE_URL PGDATABASE=brain_dictionary_test mix db.dictionary.audit
+```
+
+The audit checks every projected lexical field, missing sense IDs, database
+row totals and unsupported source evidence. It writes a JSON report in
+`tmp/` and does not change records. It is not the importer.
+
+All three import modes use the single script in `scripts/`. The raw Wiktextract
 file is kept by default. The importer can update lexical fields of matching
 sense IDs; review source identity and back up the DB before rerunning it over
 an established dictionary. It does not intentionally change an existing
