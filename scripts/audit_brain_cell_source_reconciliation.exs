@@ -254,6 +254,9 @@ IO.inspect(%{
   among_matched_missing_categories: state.missing_categories,
   among_matched_missing_both: state.missing_both,
   different_stored_definition: Map.get(state.verdict_counts, :different_definition, 0),
+  missing_definition_on_both_sides: Map.get(state.verdict_counts, :no_gloss, 0),
+  usually_plural_grammar_derivation_drift:
+    Map.get(state.verdict_counts, :grammar_derivation_drift, 0),
   metadata_mismatch: Map.get(state.verdict_counts, :metadata_mismatch, 0),
   wrong_word_or_pos: Map.get(state.verdict_counts, :wrong_word_pos, 0)
 }, pretty: true, width: 120)
