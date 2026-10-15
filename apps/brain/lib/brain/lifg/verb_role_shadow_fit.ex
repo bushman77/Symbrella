@@ -25,7 +25,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
              is_integer(verb_index) and verb_index >= 0 and
              is_list(cells) and is_map(argument) and is_map(role) do
     baseline = Baseline.score(sentence, target, verb_index, cells, argument)
-    source = validated_source(sentence, verb_index, argument, role, baseline)
+    source = validated_source(sentence, target, verb_index, argument, role, baseline)
     by_id = Map.new(cells, &{Map.get(&1, :id), &1})
 
     candidates =
@@ -81,6 +81,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
   # Index labels and words supplied by another component are not trusted alone.
   defp validated_source(
          sentence,
+         target,
          verb_index,
          %{status: :candidate, roles: %{verb: verb_index, object_head: object_index}},
          %{status: :candidate,
@@ -136,7 +137,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
     sequence? =
       object_index > verb_index and
         prep_index == object_index + 1 and
-        Enum.at(tokens, verb_index) == String.downcase(target_for_verb(sentence, verb_index)) and
+        Enum.at(tokens, verb_index) == String.downcase(target) and
         Enum.at(tokens, object_index) == object and
         Enum.at(tokens, source_index) == source and
         String.length(object) >= 3 and String.length(source) >= 3 and
@@ -149,15 +150,5 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
     end
   end
 
-  defp validated_source(_, _, _, _, _), do: nil
-
-  # Do not infer the lemma here. The reported verb is tied to a real sentence
-  # token; its lexical sense set was already filtered by the caller's target.
-  defp target_for_verb(sentence, index) do
-    sentence
-    |> String.downcase()
-    |> then(&Regex.scan(@token_re, &1))
-    |> Enum.map(&hd/1)
-    |> Enum.at(index, "")
-  end
+  defp validated_source(_, _, _, _, _, _), do: nil
 end
