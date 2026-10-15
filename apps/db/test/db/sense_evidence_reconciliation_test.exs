@@ -49,6 +49,31 @@ defmodule Db.JSONL.SenseEvidenceReconciliationTest do
     refute detail.has_multiple_glosses?
   end
 
+  test "tracks vetted regional usage separately from semantic categories" do
+    updated_source = %{
+      source() |
+      semantic_atoms: source().semantic_atoms ++ ["usage:region:british english"]
+    }
+
+    assert {:missing_source_evidence, detail} =
+             Reconciliation.classify(updated_source, stored())
+
+    assert detail.added_categories == ["cat:en:places in arkansas, usa"]
+    assert detail.added_usage_atoms == ["usage:region:british english"]
+
+    already_restored = %{
+      stored() |
+      definition: updated_source.definition,
+      semantic_atoms: updated_source.semantic_atoms
+    }
+
+    assert {:matched_current, matched} =
+             Reconciliation.classify(updated_source, already_restored)
+
+    assert matched.added_categories == []
+    assert matched.added_usage_atoms == []
+  end
+
   test "counts missing categories when full gloss is already present" do
     current = %{stored() | definition: source().definition}
     assert {:missing_source_evidence, detail} = Reconciliation.classify(source(), current)
