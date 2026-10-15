@@ -22,7 +22,7 @@ defmodule Core.Syntax.VerbArgumentShadow do
   @subject_pronouns MapSet.new(~w(i you he she it we they))
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @auxiliaries MapSet.new(~w(will would can could should may might do does did))
-  @prepositions MapSet.new(~w(from with of at on in into through by over under to for))
+  @prepositions MapSet.new(~w(from out with of at on in into through by over under to for))
   @clause_boundaries MapSet.new(~w(and but because if while when although))
   @punctuation_boundaries MapSet.new([".", "!", "?", ";", ":", ","])
   @max_nominal_words 3
