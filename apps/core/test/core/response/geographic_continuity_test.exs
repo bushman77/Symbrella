@@ -135,6 +135,85 @@ defmodule Core.Response.GeographicContinuityTest do
              )
   end
 
+  test "short it followup binds to immediately preceding distance question", %{
+    session_id: session_id
+  } do
+    question = "How far is Maple Ridge, BC from Kamloops, BC?"
+    grounded =
+      "Based on Wikidata coordinates, Maple Ridge, BC and Kamloops, BC " <>
+        "are approximately 229.0 km apart in a straight line (not driving distance). " <>
+        "Sources: https://www.wikidata.org/wiki/Q16740 and " <>
+        "https://www.wikidata.org/wiki/Q473209"
+
+    LlmChatHistory.record_turn(session_id, question, grounded)
+    binding = References.resolve("what is it", session_id)
+
+    assert %{pronoun: "it", source: :recent_distance_turn,
+             evidence: :explicit_distance_question, confidence: 0.75,
+             subject: "Maple Ridge, BC", target: "Kamloops, BC"} = binding
+
+    si = References.attach(%{session_id: session_id, sentence: "what is it"})
+    assert si.discourse_reference == binding
+    assert binding.antecedent == "the distance between Maple Ridge, BC and Kamloops, BC"
+
+    # This reference gives the topic, not another coordinate claim.
+    refute Map.has_key?(binding, :distance_km)
+
+    prompt = LlmPrompt.build_system_prompt(
+      %{intent: :ask, discourse_reference: binding},
+      %{mode: :collaborator, action: :answer},
+      %{},
+      []
+    )
+
+    assert prompt =~ "immediately preceding question about distance"
+    assert prompt =~ "Maple Ridge, BC"
+    assert prompt =~ "Kamloops, BC"
+    assert prompt =~ "Do not introduce yourself"
+
+    context = %{features: %{intent: :ask, conf: 0.9, discourse_reference: binding}}
+    draft =
+      "It's a question and answer system. I'm here to provide information " <>
+        "and answer your questions. How can I assist you today?"
+
+    {:ok, corrected, reflection} =
+      ReflectionLoop.review("what is it", draft, context)
+
+    assert reflection.status == :repair
+    assert :distance_followup_subject_loss in reflection.issues
+    assert corrected =~ "straight-line distance between Maple Ridge, BC and Kamloops, BC"
+    assert corrected =~ "Wikidata coordinates"
+    refute corrected =~ "question and answer system"
+
+    {:ok, correct_reply, accepted} = ReflectionLoop.review(
+      "what is it",
+      "It's the straight-line distance between Maple Ridge and Kamloops, not a driving distance.",
+      context
+    )
+
+    assert accepted.status == :accept
+    assert correct_reply =~ "straight-line distance"
+  end
+
+  test "what is it does not borrow a distant topic or invent an assistant identity", %{
+    session_id: session_id
+  } do
+    assert References.resolve("what is it", session_id) == nil
+    assert References.resolve("what is it", session_id <> "-other") == nil
+
+    LlmChatHistory.record_turn(session_id,
+      "How far is Maple Ridge, BC from Kamloops, BC?",
+      "229 km straight line."
+    )
+    LlmChatHistory.record_turn(session_id, "Good morning", "Good morning!")
+
+    assert References.resolve("what is it", session_id) == nil
+    assert References.resolve("What is its population?", session_id) == nil
+
+    # An explicit assistant-identity question must not be overwritten.
+    assert References.resolve("What is Symbrella?", session_id) == nil
+  end
+
   test "binds its and it to the explicitly named place in earlier user turns", %{
     session_id: session_id
   } do

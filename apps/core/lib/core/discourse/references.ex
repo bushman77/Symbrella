@@ -7,6 +7,7 @@ defmodule Core.Discourse.References do
   """
 
   alias Core.Response.LlmChatHistory
+  alias Core.Semantic.EventFrames
 
   @lookback_turns 6
 
@@ -26,21 +27,56 @@ defmodule Core.Discourse.References do
   @spec resolve(String.t() | nil, term()) :: map() | nil
   def resolve(sentence, session_id)
       when is_binary(sentence) and not is_nil(session_id) do
-    with pronoun when is_binary(pronoun) <- followup_pronoun(sentence),
-         antecedent when is_binary(antecedent) <- previous_explicit_location(session_id) do
-      %{
-        pronoun: pronoun,
-        antecedent: antecedent,
-        source: :recent_user_turn,
-        evidence: :explicit_location_question,
-        confidence: 0.9
-      }
+    if Regex.match?(~r/^\s*what\s+is\s+it\s*[?!.]*\s*$/iu, sentence) do
+      # "What is it?" has no safe literal antecedent. Only bind a bounded,
+      # immediately preceding distance exchange, not a distant older topic.
+      recent_distance_reference(session_id)
     else
-      _ -> nil
+      with pronoun when is_binary(pronoun) <- followup_pronoun(sentence),
+           antecedent when is_binary(antecedent) <- previous_explicit_location(session_id) do
+        %{
+          pronoun: pronoun,
+          antecedent: antecedent,
+          source: :recent_user_turn,
+          evidence: :explicit_location_question,
+          confidence: 0.9
+        }
+      else
+        _ -> nil
+      end
     end
   end
 
   def resolve(_, _), do: nil
+
+  defp recent_distance_reference(session_id) do
+    case LlmChatHistory.messages(session_id, 1) do
+      [
+        %{"role" => "user", "content" => previous_question},
+        %{"role" => "assistant", "content" => previous_reply}
+      ] when is_binary(previous_question) and is_binary(previous_reply) ->
+        case EventFrames.location_question(previous_question) do
+          %{relation: :proximity, subject: subject, target: target}
+          when is_binary(subject) and is_binary(target) and
+               byte_size(subject) > 1 and byte_size(target) > 1 ->
+            %{
+              pronoun: "it",
+              antecedent: "the distance between #{subject} and #{target}",
+              subject: subject,
+              target: target,
+              source: :recent_distance_turn,
+              evidence: :explicit_distance_question,
+              confidence: 0.75
+            }
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   defp followup_pronoun(sentence) do
     cond do

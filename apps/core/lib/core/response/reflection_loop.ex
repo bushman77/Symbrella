@@ -101,6 +101,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
+    |> maybe_issue(distance_followup_self_intro?(context, user_text, draft_text), :distance_followup_subject_loss)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
@@ -149,7 +150,7 @@ defmodule Core.Response.ReflectionLoop do
       :subject_reversal in issues ->
         {:repair, issues}
 
-      :geographic_claim_unverified in issues ->
+      :geographic_claim_unverified in issues or :distance_followup_subject_loss in issues ->
         {:repair, issues}
 
       :leaked_hidden_context in issues or :overclaimed_self_awareness in issues ->
@@ -227,6 +228,9 @@ defmodule Core.Response.ReflectionLoop do
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
 
+        :distance_followup_subject_loss in issues ->
+          distance_followup_clarification(context)
+
         :geographic_claim_unverified in issues ->
           case Grounding.align(draft_text, context) do
             ^draft_text -> unverified_geographic_reply(context, user_text)
@@ -277,6 +281,8 @@ defmodule Core.Response.ReflectionLoop do
           "No relevant reference excerpts were retained for the named public topic. Do not substitute background information as evidence of the specific programme."
         :reference_uncited in issues ->
           "The answer lacks any URL from retrieved reference evidence. Give only attributed excerpts with URLs; do not invent a factual or institutional history."
+        :distance_followup_subject_loss in issues ->
+          "The user's 'it' refers to the immediately preceding distance exchange. Do not replace the subject with Symbrella's identity; clarify whether they mean the distance or the coordinate method."
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -680,6 +686,36 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp subject_reversal?(_, _), do: false
+
+  # A valid local discourse binding is necessary: the same draft may be a
+  # reasonable self-description if the user actually asked about Symbrella.
+  defp distance_followup_self_intro?(context, user_text, draft_text) do
+    binding =
+      get_in_map(context, [:features, :discourse_reference]) ||
+        get_in_map(context, [:discourse_reference])
+
+    match?(%{source: :recent_distance_turn, pronoun: "it"}, binding) and
+      Regex.match?(~r/^\s*what\s+is\s+it\s*[?!.]*\s*$/iu, user_text) and
+      Regex.match?(
+        ~r/\b(?:question\s+(?:and|&)\s+answer\s+system|i(?:'m| am)\s+here\s+to\s+(?:provide|help|answer)|(?:how|what)\s+can\s+i\s+(?:assist|help)\s+you)\b/iu,
+        draft_text
+      )
+  end
+
+  defp distance_followup_clarification(context) do
+    binding =
+      get_in_map(context, [:features, :discourse_reference]) ||
+        get_in_map(context, [:discourse_reference]) || %{}
+
+    subject = Map.get(binding, :subject)
+    target = Map.get(binding, :target)
+
+    if is_binary(subject) and is_binary(target) do
+      "Do you mean the straight-line distance between #{subject} and #{target}, or how the Wikidata coordinates were used to calculate it?"
+    else
+      "Are you asking about the distance from the previous answer or how it was calculated?"
+    end
+  end
 
   defp geographic_frame(context, user_text) do
     candidates = [
