@@ -55,7 +55,8 @@ defmodule Db.JSONL.CategoryEvidencePolicy do
           {:emit, :semantic_domain | :place | :topic |
                   :name_class | :regional_usage | :grammatical_usage, String.t()} |
           {:skip, :disambiguation_source | :maintenance | :unreviewed_other |
-                   :unknown_kind | :wrong_source | :legacy_string | :missing_name}
+                   :unreviewed_topic | :unknown_kind | :wrong_source |
+                   :legacy_string | :missing_name}
 
   @spec version() :: pos_integer()
   def version, do: @version
@@ -82,8 +83,11 @@ defmodule Db.JSONL.CategoryEvidencePolicy do
       kind == "place" ->
         {:emit, :place, "cat:en:" <> normalized}
 
-      kind == "topic" ->
+      kind == "topic" and MapSet.member?(@domains, normalized) ->
         {:emit, :topic, "cat:en:" <> normalized}
+
+      kind == "topic" ->
+        {:skip, :unreviewed_topic}
 
       kind == "other" and MapSet.member?(@domains, normalized) ->
         {:emit, :semantic_domain, "cat:en:" <> normalized}
