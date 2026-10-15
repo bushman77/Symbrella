@@ -1,10 +1,12 @@
 defmodule Brain.LIFG.VerbRoleShadowFit do
   @moduledoc """
   Pure shadow-only, candidate-specific lexical compatibility for an explicitly
-  observed "verb OBJECT from SOURCE" construction.
+  observed "verb OBJECT (from/out of) SOURCE" construction.
 
-  A role match requires the exact ordered object -> from -> source pattern
+  A role match requires a bounded, ordered object -> source relation
   inside ONE dictionary sense definition, not a sentence-wide keyword bag.
+  Equivalent "from" / "out of" markers may differ between the sentence
+  and gloss, but the actual object and source heads must match exactly.
   The preposition and object must also be structurally attested at their
   original sentence positions. Only explicit transitive senses are eligible.
 
