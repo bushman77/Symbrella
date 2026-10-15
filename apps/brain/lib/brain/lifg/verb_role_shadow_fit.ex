@@ -16,7 +16,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
 
   @role_bonus 0.10
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
-  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[.!?;,:]/u
+  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
 
   @spec score(String.t(), String.t(), non_neg_integer(), [map()], map(), map()) :: map()
   def score(sentence, target, verb_index, cells, argument, role)
