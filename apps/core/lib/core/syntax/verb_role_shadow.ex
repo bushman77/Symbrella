@@ -85,19 +85,21 @@ defmodule Core.Syntax.VerbRoleShadow do
         abstain(:source_head_not_lexically_attested, argument)
 
       true ->
+        roles =
+          %{
+            verb: verb_index,
+            object_head: object.index,
+            source_preposition: marker.index,
+            source_head: head.index,
+            source_determiner: determiner_index
+          }
+          |> maybe_marker_end(marker.index, marker_end.index)
+
         %{
           status: :candidate,
           frame_id: :verb_object_source_hypothesis,
           construction: :verb_object_from_nominal_source,
-          roles:
-            %{
-              verb: verb_index,
-              object_head: object.index,
-              source_preposition: marker.index,
-              source_head: head.index,
-              source_determiner: determiner_index
-            }
-            |> maybe_marker_end(marker.index, marker_end.index),
+          roles: roles,
           words: %{object: object.word, preposition: marker_text, source: head.word},
           evidence: [
             :attested_direct_object,
@@ -114,7 +116,8 @@ defmodule Core.Syntax.VerbRoleShadow do
   end
 
   # Keep the original shape unchanged for "from" (existing audit contracts).
-  defp maybe_marker_end(roles, start_index, start_index), do: roles
+  defp maybe_marker_end(roles, start_index, end_index)
+       when start_index == end_index, do: roles
   defp maybe_marker_end(roles, _start_index, end_index),
     do: Map.put(roles, :source_marker_end, end_index)
 
