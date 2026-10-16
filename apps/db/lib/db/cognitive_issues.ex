@@ -48,6 +48,17 @@ defmodule Db.CognitiveIssues do
   """
   @spec resolve_missing_year(Db.ConsolidatedConclusion.t()) :: :ok
   def resolve_missing_year(%Db.ConsolidatedConclusion{} = proof) do
+    persisted = Db.get_by(Db.ConsolidatedConclusion,
+      id: proof.id, fingerprint: proof.fingerprint)
+
+    if persisted != nil and persisted.provenance == "source_supported_symbolic_derivation" do
+      close_missing_year_issues(persisted)
+    end
+
+    :ok
+  end
+
+  defp close_missing_year_issues(proof) do
     issues =
       Db.all(
         from(i in CognitiveIssue,
