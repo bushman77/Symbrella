@@ -55,7 +55,8 @@ defmodule Core.Response.PopulationComparison do
               outcome: outcome,
               subjects: names,
               claims: Enum.map(results, &Map.take(&1,
-                [:subject, :value, :census_year, :source_url, :source_type])),
+                [:subject, :value, :census_year, :source_url, :source_type,
+                 :measurement_type, :reference_year, :source_table])),
               year: first.census_year,
               winner: winner,
               loser: loser,
@@ -114,7 +115,24 @@ defmodule Core.Response.PopulationComparison do
 
   defp valid_claim?(_), do: false
 
-  defp same_year?([a, b]), do: a.census_year == b.census_year
+  defp same_year?([a, b]) do
+    a.census_year == b.census_year and
+      Map.get(a, :measurement_type) == Map.get(b, :measurement_type) and
+      compatible_sources?(a, b)
+  end
+
+  # A census-year Wikidata claim and a same-year official population estimate
+  # are not interchangeable observations. A mixture is not comparable by
+  # default, even if its numerical reference years happen to match.
+  defp compatible_sources?(a, b) do
+    case {Map.get(a, :measurement_type), Map.get(b, :measurement_type)} do
+      {:official_estimate, :official_estimate} ->
+        Map.get(a, :source_type) == Map.get(b, :source_type) and
+          Map.get(a, :source_table) == Map.get(b, :source_table)
+
+      _ -> true
+    end
+  end
 
   defp frame(context) do
     case get_in(context, [:features, :symbolic_frame]) do
