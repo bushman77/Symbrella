@@ -13,7 +13,6 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
   import Ecto.Query, only: [from: 2]
 
   alias Brain.Hippocampus
-  alias Core.Brain.Episodes
   alias Core.Response.{Context, LlmChatHistory, LlmPrompt, ResponseFrame}
 
   setup do
