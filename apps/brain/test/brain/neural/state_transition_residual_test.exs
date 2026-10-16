@@ -118,6 +118,9 @@ defmodule Brain.Neural.StateTransitionResidualTest do
              row.model_mse >= 0.0 and row.persistence_mse >= 0.0
            end)
     assert result.deployment_status == :experimental_not_for_runtime
+    assert result.assessment.status == :not_ready
+    assert :too_few_evaluation_transitions in result.assessment.reasons
+    assert result.assessment.deployment_authorized? == false
   end
 
   test "rejects schema and session leakage, except deliberately marked smoke runs" do
@@ -174,6 +177,8 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     assert loaded.format == :symbrella_residual_v4_safe_etf
     assert loaded.byte_order == System.endianness()
     assert loaded.hidden_units == result.hidden_units
+    assert loaded.assessment == result.assessment
+    assert loaded.assessment.deployment_authorized? == false
 
     # The portable checkpoint intentionally stores raw f32 tensors, not
     # Nx/Axon structs. Verify all four parameters round-trip losslessly.
