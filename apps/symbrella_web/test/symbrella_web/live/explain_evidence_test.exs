@@ -389,6 +389,7 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     no_retry_items = Map.new(no_retry.items, &{&1.label, &1.body})
     assert no_retry_items["initial model draft"] == initial
     assert no_retry_items["grounded revision outcome"] == ":not_attempted"
+    assert no_retry_items["final answer origin"] == ":core_fallback"
     refute Map.has_key?(no_retry_items, "revision candidate")
   end
 

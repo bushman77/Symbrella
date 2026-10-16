@@ -875,7 +875,16 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
           pget(grounded || %{}, :first_draft) || pget(reflection, :draft_text))
         |> maybe_kv("grounded revision outcome", revision_outcome)
         |> maybe_kv("final answer origin",
-          if(is_map(grounded), do: format_frame_value(pget(grounded, :source)), else: nil))
+          cond do
+            is_map(grounded) ->
+              format_frame_value(pget(grounded, :source))
+
+            geographic_issue? ->
+              ":core_fallback"
+
+            true ->
+              nil
+          end)
         |> maybe_kv("revision candidate", pget(grounded || %{}, :candidate))
         |> maybe_kv("revision candidate issues",
           if(is_map(grounded) and pget(grounded, :candidate_issues) != nil,
