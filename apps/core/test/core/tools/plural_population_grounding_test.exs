@@ -29,7 +29,7 @@ defmodule Core.Tools.PluralPopulationGroundingTest do
 
   defmodule DifferentlyDatedPopulation do
     def population("Kamloops BC", opts),
-      do: DatedPopulation.population("Kamloops BC", opts)
+      do: Core.Tools.PluralPopulationGroundingTest.DatedPopulation.population("Kamloops BC", opts)
 
     def population("Maple Ridge BC", _opts),
       do: {:ok, %{
@@ -58,7 +58,7 @@ defmodule Core.Tools.PluralPopulationGroundingTest do
 
   defmodule PartialPopulation do
     def population("Kamloops BC", opts),
-      do: DatedPopulation.population("Kamloops BC", opts)
+      do: Core.Tools.PluralPopulationGroundingTest.DatedPopulation.population("Kamloops BC", opts)
     def population("Maple Ridge BC", _opts), do: {:error, :no_dated_statement}
   end
 
