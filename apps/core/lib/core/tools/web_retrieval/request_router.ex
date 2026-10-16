@@ -281,6 +281,20 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   defp location_route(%{subject: subject, relation: :identity}) when is_binary(subject),
     do: build(subject, :identity, :geographic_identity, :symbolic_frame)
 
+  defp location_route(%{subjects: subjects, relation: :population})
+       when is_list(subjects) do
+    named =
+      subjects
+      |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+      |> Enum.uniq()
+      |> Enum.take(4)
+
+    if length(named) >= 2 do
+      build("#{Enum.join(named, " and ")} population census", :population,
+        :geographic_population, :symbolic_frame)
+    end
+  end
+
   defp location_route(%{subject: subject, relation: :population}) when is_binary(subject),
     do: build("#{subject} population census", :population, :geographic_population, :symbolic_frame)
 
