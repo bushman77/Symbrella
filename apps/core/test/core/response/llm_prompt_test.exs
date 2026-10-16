@@ -3,6 +3,31 @@ defmodule Core.Response.LlmPromptTest do
 
   alias Core.Response.LlmPrompt
 
+  test "verified population facts outrank weak lexical interpretation in final prompt priority" do
+    frame = %{
+      version: 1,
+      move: :answer_grounded_question,
+      evidence: %{
+        kind: :population, subject: "Kamloops, BC",
+        value: 97_902, year: 2021,
+        source_urls: ["https://www.wikidata.org/wiki/Q473209"]
+      }
+    }
+
+    prompt =
+      LlmPrompt.build_system_prompt(
+        %{intent: :ask, response_frame: frame},
+        %{tone: :neutral, mode: :scribe, action: :answer},
+        %{},
+        []
+      )
+
+    assert prompt =~ "TURN PRIORITY: The population question's city"
+    assert prompt =~ "Weak single-token word senses are NOT uncertainty"
+    assert prompt =~ "Give the complete dated count and citation"
+    assert prompt =~ "Respond to the user's actual request"
+  end
+
   test "summarize_wm/1 prefers payload lemma, then item lemma, and keeps first five unique non-empty concepts" do
     wm = [
       %{id: "tell|verb|0", payload: %{lemma: "tell"}},

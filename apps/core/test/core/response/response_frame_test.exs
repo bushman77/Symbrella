@@ -65,6 +65,7 @@ defmodule Core.Response.ResponseFrameTest do
     prompt = ResponseFrame.prompt(frame)
     assert prompt =~ "CURRENT CONVERSATIONAL FRAME"
     assert prompt =~ "count=97902"
+    assert prompt =~ "display_count=97,902"
     assert prompt =~ "year=2021"
     assert prompt =~ @url
     assert prompt =~ "Express Symbrella's response in your own natural words"

@@ -135,6 +135,9 @@ defmodule Core.Response.GroundedRevisionFlowTest do
     assert initial_system =~ "CURRENT CONVERSATIONAL FRAME"
     assert revision_system =~ "Your earlier draft did not pass factual review"
     assert revision_system =~ "count=97902"
+    assert revision_system =~ "display_count=97,902"
+    assert revision_system =~ "count=97,902 people"
+    assert revision_system =~ "Write the exact count 97,902"
     assert revision_system =~ "year=2021"
     assert revision_system =~ @url
     refute revision_system =~ "17,800"
