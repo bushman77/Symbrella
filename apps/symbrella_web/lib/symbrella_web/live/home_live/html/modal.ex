@@ -28,20 +28,17 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
     <div
       :if={@open?}
-      class="fixed z-[9999] bg-white overflow-x-hidden"
-      style={
-        "top: var(--hdr,56px); bottom: var(--ftr,72px);" <>
-          "left: 50%; width: 100vw; margin-left: -50vw;"
-      }
+      class="fixed inset-x-0 z-[9999] w-full max-w-[100vw] min-w-0 overflow-hidden bg-white"
+      style="top: var(--hdr,56px); bottom: var(--ftr,72px);"
       role="dialog"
       aria-modal="true"
       aria-label="Explain"
       phx-window-keydown="explain_close"
       phx-key="escape"
     >
-      <div class="h-full w-full bg-white">
-        <div class="h-full w-full max-w-none flex flex-col">
-          <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
+      <div class="h-full w-full min-w-0 max-w-full bg-white">
+        <div class="flex h-full w-full min-w-0 max-w-full flex-col">
+          <div class="sticky top-0 z-10 w-full min-w-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-4">
             <div class="flex items-center justify-end">
               <button
                 type="button"
@@ -54,39 +51,39 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
             </div>
           </div>
 
-          <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 overflow-x-hidden">
-            <div class="grid gap-3 w-full">
+          <div class="min-h-0 min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 sm:px-4">
+            <div class="grid w-full min-w-0 max-w-full grid-cols-1 gap-3">
               <div
                 :for={sec <- sections}
-                class="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                class="w-full min-w-0 max-w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 [overflow-wrap:anywhere]"
               >
-                <div class="flex items-center justify-between gap-3">
-                  <div class="text-sm font-semibold truncate">
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1 text-sm font-semibold break-words [overflow-wrap:anywhere]">
                     {sec[:title] || "Section"}
                   </div>
 
                   <span
                     :if={sec[:tag]}
-                    class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700"
+                    class="max-w-[45%] min-w-0 shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 break-words [overflow-wrap:anywhere]"
                   >
                     {sec[:tag]}
                   </span>
                 </div>
 
-                <div :if={sec[:hint]} class="mt-1 text-xs text-slate-600">
+                <div :if={sec[:hint]} class="mt-1 min-w-0 max-w-full text-xs text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                   {sec[:hint]}
                 </div>
 
-                <div class="mt-2 grid gap-2">
+                <div class="mt-2 grid min-w-0 max-w-full grid-cols-1 gap-2">
                   <div
                     :for={item <- sec[:items] || []}
-                    class="rounded-xl border border-slate-200 bg-white p-3"
+                    class="w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3"
                   >
-                    <div :if={item[:label]} class="text-xs font-semibold text-slate-800">
+                    <div :if={item[:label]} class="min-w-0 max-w-full text-xs font-semibold text-slate-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {item[:label]}
                     </div>
 
-                    <div class="mt-1 text-sm whitespace-pre-wrap break-words text-slate-700">
+                    <div class="mt-1 min-w-0 max-w-full text-sm text-slate-700 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {item[:body] || ""}
                     </div>
                   </div>

@@ -393,6 +393,40 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     refute Map.has_key?(no_retry_items, "revision candidate")
   end
 
+  test "Explain modal uses viewport width and wraps long LIFG labels and values" do
+    long_label =
+      "what → what pos=pronoun src=active_cells score=0.11574459075927734 " <>
+        String.duplicate("verylongunbrokentoken_", 12)
+
+    html =
+      Phoenix.LiveViewTest.render_component(&Modal.explain_modal/1,
+        open?: true,
+        payload: %{
+          sections: [
+            %{
+              key: :individual_word_senses,
+              title: "Individual word senses (LIFG)",
+              tag: ":location_question",
+              hint: String.duplicate("unbroken_hint_", 20),
+              items: [%{label: long_label, body: String.duplicate("long_definition_", 30)}]
+            }
+          ]
+        }
+      )
+
+    assert html =~ ~s(role="dialog")
+    assert html =~ "fixed inset-x-0"
+    assert html =~ "max-w-[100vw]"
+    refute html =~ "margin-left: -50vw"
+    assert html =~ "grid-cols-1"
+    assert html =~ "min-w-0"
+    assert html =~ "[overflow-wrap:anywhere]"
+    assert html =~ "whitespace-pre-wrap"
+    assert html =~ "Individual word senses (LIFG)"
+    assert html =~ "verylongunbrokentoken_"
+    assert html =~ "long_definition_"
+  end
+
   test "memory and ordinary replies do not fabricate runtime semantic sections" do
     assert ExplainEvidence.from_si(nil) == %{}
     assert ExplainEvidence.from_si(%{text: "Your name is... "}) == %{}
