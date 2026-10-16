@@ -328,6 +328,7 @@ defmodule SymbrellaWeb.NeuralShadow do
     # Load only the known, local schema modules before safe ETF decoding:
     # feature-name and metadata atoms must already exist in this BEAM.
     _ = Code.ensure_loaded?(StateTransitionResidual)
+    _ = Code.ensure_loaded?(Brain.Neural.StateTransitionAudit)
     _ = StateTransitionBuilder.feature_names()
 
     case :erlang.binary_to_term(binary, [:safe]) do
