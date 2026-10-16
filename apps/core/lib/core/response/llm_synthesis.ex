@@ -527,7 +527,10 @@ defmodule Core.Response.LlmSynthesis do
         estimated_instruction_tokens: components.instructions,
         estimated_history_tokens: components.history,
         estimated_episodic_tokens: components.episodic_recall,
-        estimated_evidence_tokens: components.verified_evidence,
+        estimated_verified_evidence_tokens: components.verified_evidence,
+        estimated_retrieved_evidence_tokens: components.retrieved_evidence,
+        estimated_evidence_tokens:
+          components.verified_evidence + components.retrieved_evidence,
         estimated_user_tokens: components.current_user,
         estimated_full_tokens: budget.full.total,
         estimated_selective_tokens: budget.selective.total,
