@@ -65,7 +65,7 @@ defmodule Db.ConsolidatedConclusions do
         from(c in ConsolidatedConclusion,
           where: c.kind == "population_comparison" and
             fragment(
-              "EXISTS (SELECT 1 FROM unnest(?) AS p WHERE p->>'subject' = ?)",
+              "EXISTS (SELECT 1 FROM unnest(?) AS p(value) WHERE p.value->>'subject' = ?)",
               c.premises, ^subject
             ),
           order_by: [desc: c.reference_year, desc: c.id],
