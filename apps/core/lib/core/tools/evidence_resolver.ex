@@ -239,11 +239,19 @@ defmodule Core.Tools.EvidenceResolver do
         Enum.map(result.attempts, &Map.put(&1, :subject, entry.subject))
       end)
 
+    verified_providers = verified |> Enum.map(& &1.source_type) |> Enum.uniq()
+
+    source_provider =
+      case verified_providers do
+        [single] -> single
+        [] -> :none
+        _ -> :multiple
+      end
+
     result = %{
       status: if(verified == [], do: :unavailable, else: :retrieved),
       resolution: resolution,
-      provider: Keyword.get(opts, :coordinate_provider,
-        Keyword.get(cfg, :coordinate_provider, Wikidata)),
+      provider: source_provider,
       query: query,
       relation: :population,
       support: %{
