@@ -1,6 +1,8 @@
 defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
   use ExUnit.Case, async: true
 
+  require Phoenix.LiveViewTest
+
   alias SymbrellaWeb.HomeLive.ExplainEvidence
   alias SymbrellaWeb.HomeLive.HTML.Modal
 
