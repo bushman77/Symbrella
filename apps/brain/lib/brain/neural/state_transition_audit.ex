@@ -109,13 +109,8 @@ defmodule Brain.Neural.StateTransitionAudit do
 
   defp counts(mask) do
     mask
+    |> Nx.sum(axes: [0])
     |> Nx.to_list()
-    |> Enum.reduce(nil, fn row, acc ->
-      if is_nil(acc) do
-        Enum.map(row, &round/1)
-      else
-        Enum.zip_with(acc, row, fn count, bit -> count + round(bit) end)
-      end
-    end)
+    |> Enum.map(&round/1)
   end
 end
