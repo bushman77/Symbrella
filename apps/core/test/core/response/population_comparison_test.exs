@@ -292,7 +292,10 @@ defmodule Core.Response.PopulationComparisonTest do
     refute Grounding.supports?("Kamloops is bigger.", bad)
 
     undated = evidence([2021, nil])
-    assert :ok = VerifiedPopulation.record(session(), undated)
+    sid = session()
+    assert :ok = VerifiedPopulation.record(sid, undated)
+    refute VerifiedPopulation.recall(sid, @cities)
+
     undated_context =
       context
       |> Map.put(:web_evidence, undated)
