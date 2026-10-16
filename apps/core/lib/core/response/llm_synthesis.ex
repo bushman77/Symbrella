@@ -20,6 +20,8 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
   alias Core.Response.ResponseFrame
+  alias Core.Response.PopulationComparison
+  alias Core.Response.VerifiedPopulation
   alias Core.Response.EvidenceRevision
   alias Core.Response.GroundedRevision
   alias Core.Response.ReflectionLoop
@@ -74,9 +76,22 @@ defmodule Core.Response.LlmSynthesis do
     # "well did you?" even when no new retrieval is requested.
     previous_retrieval = LlmChatHistory.recent_retrieval(session_id)
 
+    # A comparison may reuse individually sourced, same-session claims.
+    # Otherwise run the usual evidence resolver; unverified history is never
+    # promoted to a population fact.
+    cached_context = PopulationComparison.recall(raw_context)
+
     enriched =
-      WebRetrieval.enrich(raw_context,
-        history: LlmChatHistory.messages(session_id, 3))
+      if is_map(Map.get(cached_context, :web_evidence)) do
+        cached_context
+      else
+        WebRetrieval.enrich(raw_context,
+          history: LlmChatHistory.messages(session_id, 3))
+      end
+
+    # Record only validated provider-side data, before comparative derivation.
+    VerifiedPopulation.record(session_id, Map.get(enriched, :web_evidence))
+    enriched = PopulationComparison.attach(enriched)
 
     context =
       if is_nil(Map.get(enriched, :web_evidence)) and is_map(previous_retrieval),
