@@ -28,6 +28,10 @@ config :core,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
 
+# When enabled, logs aggregate estimated prompt tokens without including messages
+# or recalled content. It can also be toggled from IEx during a running session.
+config :core, :log_prompt_budget?, false
+
 config :core, :llm_synthesis,
   timeout_ms: 120_000,
   ready_timeout_ms: 10_000,
