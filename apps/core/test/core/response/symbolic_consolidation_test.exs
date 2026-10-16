@@ -23,8 +23,11 @@ defmodule Core.Response.SymbolicConsolidationTest do
     old_toggle = Application.get_env(:core, :symbolic_consolidation_enabled?)
     old_client = Application.get_env(:core, :llm_client)
     old_retrieval = Application.get_env(:core, :web_retrieval, [])
+    old_llm_cfg = Application.get_env(:core, :llm_synthesis, [])
 
     Application.put_env(:core, :symbolic_consolidation_enabled?, true)
+    Application.put_env(:core, :llm_synthesis,
+      Keyword.put(old_llm_cfg, :authoritative_style_selection_enabled?, false))
     Application.put_env(:core, :llm_client, OfflineLlm)
     Application.put_env(:core, :web_retrieval,
       Keyword.put(old_retrieval, :enabled?, false))
@@ -42,6 +45,7 @@ defmodule Core.Response.SymbolicConsolidationTest do
         else: Application.put_env(:core, :llm_client, old_client)
 
       Application.put_env(:core, :web_retrieval, old_retrieval)
+      Application.put_env(:core, :llm_synthesis, old_llm_cfg)
     end)
 
     %{names: names, session: "consolidation-#{uid}"}
