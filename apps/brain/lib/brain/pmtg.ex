@@ -790,24 +790,29 @@ defmodule Brain.PMTG do
   end
 
   defp needs_retrieval?(ch, thr, pmin) do
-      m = Map.get(ch, :margin, 1.0) * 1.0
-      alts = Map.get(ch, :alt_ids, [])
-      p1 = p_top1(ch)
+    m = Map.get(ch, :margin, 1.0) * 1.0
+    alts = Map.get(ch, :alt_ids, [])
+    p1 = p_top1(ch)
 
-      low_margin? = m < thr * 1.0
-      low_prob? = p1 < pmin * 1.0
-      has_alts? = is_list(alts) and length(alts) > 0
-      weak? = Map.get(ch, :weak?) == true or Map.get(ch, "weak?") == true
-      fallback? = fallback_choice?(ch)
+    low_margin? = m < thr * 1.0
+    low_prob? = p1 < pmin * 1.0
+    has_alts? = is_list(alts) and length(alts) > 0
+    weak? = Map.get(ch, :weak?) == true or Map.get(ch, "weak?") == true
+    fallback? = fallback_choice?(ch)
 
-      ((low_margin? or low_prob?) and has_alts?) or weak? or fallback?
+    ((low_margin? or low_prob?) and has_alts?) or weak? or fallback?
   end
 
   # Check both the Stage1 grammatical decision and the final winner POS.
   # Merely having a particle in the candidate slate does not exempt a verb
   # (e.g. "know") from retrieval. A veto or fallback is never suppressed.
   defp resolved_closed_class_choice?(ch) when is_map(ch) do
-    control = Map.get(ch, :semantic_control) || Map.get(ch, "semantic_control") || %{}
+    control =
+      case Map.get(ch, :semantic_control) || Map.get(ch, "semantic_control") do
+        %{} = value -> value
+        _ -> %{}
+      end
+
     reason = Map.get(control, :reason) || Map.get(control, "reason")
     chosen_id =
       Map.get(ch, :chosen_id) || Map.get(ch, "chosen_id") ||
