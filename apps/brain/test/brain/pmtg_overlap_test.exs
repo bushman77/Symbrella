@@ -76,7 +76,7 @@ defmodule Brain.PMTG.OverlapTest do
 
     {kept, _} =
       Overlap.prune(
-        List.replace_at(choices, 2, %{Enum.at(choices, 2) | chosen_id: "river bank|phrase|fallback"}),
+        List.replace_at(choices, 2, Map.put(Enum.at(choices, 2), :chosen_id, "river bank|phrase|fallback")),
         words ++ [raw_mwe]
       )
     assert length(kept) == 3
