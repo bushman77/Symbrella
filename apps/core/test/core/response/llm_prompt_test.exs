@@ -28,6 +28,26 @@ defmodule Core.Response.LlmPromptTest do
     assert prompt =~ "Respond to the user's actual request"
   end
 
+  test "same-session WM plural binding is prompt-visible but never presented as verified population" do
+    prompt =
+      LlmPrompt.build_system_prompt(
+        %{
+          intent: :ask,
+          discourse_reference: %{
+            source: :wm_comprehension,
+            pronoun: "each",
+            antecedents: ["Kamloops BC", "Maple Ridge BC"]
+          }
+        },
+        %{tone: :neutral, mode: :scribe, action: :answer},
+        %{},
+        []
+      )
+
+    assert prompt =~ "'each' refers to Kamloops BC and Maple Ridge BC"
+    assert prompt =~ "independently verify any requested population"
+  end
+
   test "summarize_wm/1 prefers payload lemma, then item lemma, and keeps first five unique non-empty concepts" do
     wm = [
       %{id: "tell|verb|0", payload: %{lemma: "tell"}},
