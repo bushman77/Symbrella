@@ -78,6 +78,58 @@ defmodule Core.Tools.StatisticsCanadaPopulationFallbackTest do
     refute_received :unexpected_curl
   end
 
+  test "system unzip recovers valid archive rejected by Erlang ZIP reader" do
+    if System.find_executable("unzip") do
+      zip = zip_data()
+      cache = cache_path()
+
+      fetch = fn url, _args ->
+        if String.contains?(url, "getFullTableDownloadCSV") do
+          {:ok, %{status: 200,
+                  body: %{"status" => "SUCCESS", "object" => @zip_url}}}
+        else
+          {:ok, %{status: 200, body: zip}}
+        end
+      end
+
+      assert {:ok, result} =
+               StatisticsCanadaPopulation.population("Kamloops BC",
+                 fetch: fetch,
+                 zip_extract: fn _binary_archive, _options ->
+                   {:error, :unsupported_zip_reader}
+                 end,
+                 cache_path: cache
+               )
+
+      assert result.value == 108_793
+      assert result.reference_year == 2025
+      assert {:ok, @csv} = File.read(cache)
+    end
+  end
+
+  test "invalid ZIP rejected by both extractors never enters cache" do
+    cache = cache_path()
+    invalid = "PK" <> String.duplicate("x", 128)
+
+    fetch = fn url, _args ->
+      if String.contains?(url, "getFullTableDownloadCSV") do
+        {:ok, %{status: 200,
+                body: %{"status" => "SUCCESS", "object" => @zip_url}}}
+      else
+        {:ok, %{status: 200, body: invalid}}
+      end
+    end
+
+    assert {:error, {:official_download_failed, %{zip: :invalid_zip_archive}}} =
+             StatisticsCanadaPopulation.population("Kamloops BC",
+               fetch: fetch,
+               zip_extract: fn _, _ -> {:error, :invalid_zip} end,
+               cache_path: cache
+             )
+
+    refute File.exists?(cache)
+  end
+
   test "malformed curl ZIP is rejected and never written to cache" do
     fetch = fn _url, _args -> {:error, %Req.TransportError{reason: :timeout}} end
     cache = cache_path()
