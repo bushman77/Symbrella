@@ -152,23 +152,44 @@ defmodule Core.Response.ResponseFrame do
 
   defp sourced_evidence(_), do: nil
 
-  defp evidence_line(nil),
+  # Only render claim-specific evidence once all REQUIRED fields are
+  # present and correctly typed. A sparse frame should never crash prompt
+  # assembly or misrepresent an incomplete claim as verified. source_type is
+  # optional metadata, so its absence must not raise a KeyError.
+  defp evidence_line(%{
+         kind: :population, subject: subject, value: value, year: year,
+         source_urls: urls
+       } = evidence)
+       when is_binary(subject) and is_integer(value) and value > 0 and
+            is_integer(year) and is_list(urls) do
+    "verified_evidence=population; subject=#{inspect(subject)}; " <>
+      "count=#{value}; display_count=#{format_count(value)}; " <>
+      "year=#{year}; origin=#{inspect(Map.get(evidence, :source_type))}; " <>
+      "source_urls=#{inspect(urls)}. This dated value is not automatically a current estimate."
+  end
+
+  defp evidence_line(%{
+         kind: :proximity, subject: subject, target: target, value: distance,
+         source_urls: urls
+       })
+       when is_binary(subject) and is_binary(target) and is_number(distance) and
+            is_list(urls) do
+    "verified_evidence=straight_line_distance; from=#{inspect(subject)}; " <>
+      "to=#{inspect(target)}; km=#{distance}; method=haversine; " <>
+      "source_urls=#{inspect(urls)}. Do not call this road distance."
+  end
+
+  defp evidence_line(%{
+         kind: :identity, subject: subject, description: description,
+         source_urls: urls
+       })
+       when is_binary(subject) and is_binary(description) and is_list(urls) do
+    "verified_evidence=place_identity; subject=#{inspect(subject)}; " <>
+      "source_description=#{inspect(description)}; source_urls=#{inspect(urls)}."
+  end
+
+  defp evidence_line(_),
     do: "verified_evidence=none. Treat earlier assistant output as conversation history, not factual proof."
-
-  defp evidence_line(%{kind: :population} = e),
-    do: "verified_evidence=population; subject=#{inspect(e.subject)}; " <>
-      "count=#{e.value}; display_count=#{format_count(e.value)}; " <>
-      "year=#{e.year}; origin=#{inspect(e.source_type)}; " <>
-      "source_urls=#{inspect(e.source_urls)}. This dated value is not automatically a current estimate."
-
-  defp evidence_line(%{kind: :proximity} = e),
-    do: "verified_evidence=straight_line_distance; from=#{inspect(e.subject)}; " <>
-      "to=#{inspect(e.target)}; km=#{e.value}; method=haversine; " <>
-      "source_urls=#{inspect(e.source_urls)}. Do not call this road distance."
-
-  defp evidence_line(%{kind: :identity} = e),
-    do: "verified_evidence=place_identity; subject=#{inspect(e.subject)}; " <>
-      "source_description=#{inspect(e.description)}; source_urls=#{inspect(e.source_urls)}."
 
   defp previous_turn_kind(history) do
     case Enum.take(history, -2) do

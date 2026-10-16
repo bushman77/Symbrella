@@ -65,6 +65,40 @@ defmodule Core.Response.ResponseFrameTest do
     assert ResponseFrame.prompt(%{version: 1, posture: nil}) =~ "tone=nil"
   end
 
+  test "optional source type is not required for a grounded population prompt" do
+    frame = %{
+      version: 1, move: :answer_grounded_question,
+      evidence: %{
+        kind: :population, subject: "Kamloops, BC",
+        value: 97_902, year: 2021, source_urls: [@url]
+      }
+    }
+
+    prompt = ResponseFrame.prompt(frame)
+    assert prompt =~ "count=97902"
+    assert prompt =~ "display_count=97,902"
+    assert prompt =~ "origin=nil"
+    assert prompt =~ @url
+  end
+
+  test "incomplete or mistyped claim fragments are not promoted to verified evidence" do
+    for evidence <- [
+          %{kind: :population, subject: "Kamloops, BC", value: 97_902},
+          %{kind: :population, subject: "Kamloops, BC", value: "97,902", year: 2021,
+            source_urls: [@url]},
+          %{kind: :proximity, subject: "Maple Ridge, BC", target: "Kamloops, BC"},
+          %{kind: :identity, subject: "Kamloops, BC", source_urls: [@url]}
+        ] do
+      prompt = ResponseFrame.prompt(%{version: 1, move: :answer_grounded_question,
+        evidence: evidence})
+
+      assert prompt =~ "verified_evidence=none"
+      refute prompt =~ "verified_evidence=population;"
+      refute prompt =~ "verified_evidence=straight_line_distance;"
+      refute prompt =~ "verified_evidence=place_identity;"
+    end
+  end
+
   test "converts symbolic and verified data into a prompt frame, not fixed reply text" do
     context = frame_context()
     history = [
