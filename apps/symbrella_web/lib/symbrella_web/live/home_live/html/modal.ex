@@ -846,6 +846,22 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     applied? = pget(reflection, :applied?)
     count = pget(reflection, :repair_count)
     critique = pget(reflection, :critique)
+    grounded = pget(reflection, :grounded_revision)
+
+    # A top-level :repair says only that Core changed the final text. Make
+    # visible whether the grounded second LLM pass was accepted, rejected,
+    # unavailable or never attempted. The primary LLM draft remains useful
+    # even when no second pass ran.
+    geographic_issue? =
+      is_list(issues) and
+        Enum.any?(issues, &(format_frame_value(&1) == ":geographic_claim_unverified"))
+
+    revision_outcome =
+      cond do
+        is_map(grounded) -> format_frame_value(pget(grounded, :outcome, :unknown))
+        geographic_issue? -> ":not_attempted"
+        true -> nil
+      end
 
     if frame_present?(status) do
       items =
@@ -855,6 +871,15 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("applied?", format_frame_value(applied?))
         |> maybe_kv("repair_count", format_frame_value(count))
         |> maybe_kv("review summary", critique)
+        |> maybe_kv("initial model draft",
+          pget(grounded || %{}, :first_draft) || pget(reflection, :draft_text))
+        |> maybe_kv("grounded revision outcome", revision_outcome)
+        |> maybe_kv("final answer origin",
+          if(is_map(grounded), do: format_frame_value(pget(grounded, :source)), else: nil))
+        |> maybe_kv("revision candidate", pget(grounded || %{}, :candidate))
+        |> maybe_kv("revision candidate issues",
+          if(is_map(grounded) and pget(grounded, :candidate_issues) != nil,
+            do: format_frame_value(pget(grounded, :candidate_issues)), else: nil))
         |> maybe_kv("draft SHA-256", pget(reflection, :draft_sha256))
         |> maybe_kv("final SHA-256", pget(reflection, :final_sha256))
 

@@ -342,6 +342,56 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert Modal.enrich_saved_payload(original, %{intent: :unknown}) == original
   end
 
+  test "Explain shows whether grounded population revision ran and which text the LLM wrote" do
+    initial = "Kamloops is around 17,800 people."
+    repaired = "Wikidata lists a dated population statement for Kamloops, BC of 97,902 (2021)."
+
+    payload =
+      Modal.explain_payload_for(%{
+        text: repaired,
+        from: %{
+          response_reflection: %{
+            status: :repair,
+            issues: [:geographic_claim_unverified],
+            applied?: true,
+            repair_count: 1,
+            draft_text: initial,
+            grounded_revision: %{
+              attempted?: true, outcome: :rejected,
+              source: :core_fallback, first_draft: initial,
+              candidate: "Kamloops has 97,902 residents now.",
+              candidate_issues: [:geographic_claim_unverified]
+            }
+          }
+        }
+      })
+
+    result = section(payload, :response_reflection)
+    assert result.title == "LLM response review"
+    items = Map.new(result.items, &{&1.label, &1.body})
+
+    assert items["initial model draft"] == initial
+    assert items["grounded revision outcome"] == ":rejected"
+    assert items["final answer origin"] == ":core_fallback"
+    assert items["revision candidate"] =~ "97,902 residents now"
+    assert items["revision candidate issues"] =~ ":geographic_claim_unverified"
+
+    no_retry =
+      Modal.explain_payload_for(%{
+        text: repaired,
+        from: %{response_reflection: %{
+          status: :repair, issues: [:geographic_claim_unverified],
+          applied?: true, draft_text: initial
+        }}
+      })
+      |> section(:response_reflection)
+
+    no_retry_items = Map.new(no_retry.items, &{&1.label, &1.body})
+    assert no_retry_items["initial model draft"] == initial
+    assert no_retry_items["grounded revision outcome"] == ":not_attempted"
+    refute Map.has_key?(no_retry_items, "revision candidate")
+  end
+
   test "memory and ordinary replies do not fabricate runtime semantic sections" do
     assert ExplainEvidence.from_si(nil) == %{}
     assert ExplainEvidence.from_si(%{text: "Your name is... "}) == %{}
