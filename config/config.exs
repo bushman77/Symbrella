@@ -36,6 +36,10 @@ config :core,
 # authoritative symbolic response is fully verified.
 config :core, :symbolic_consolidation_enabled?, false
 
+# Experimental two-hop composition of already source-backed stored proofs.
+# Kept separate so the existing direct consolidation path stays unchanged.
+config :core, :symbolic_composition_enabled?, false
+
 config :core, :log_prompt_budget?, false
 
 config :core, :llm_synthesis,
