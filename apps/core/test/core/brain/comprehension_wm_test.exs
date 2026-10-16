@@ -47,7 +47,7 @@ defmodule Core.Brain.ComprehensionWMTest do
     on_exit(fn -> Brain.defocus(frame_id(sid)) end)
 
     original_gate = Brain.snapshot_wm().cfg
-    stored = WMComprehension.store(prior_turn(sid))
+    stored = WMComprehension.store(prior_turn(sid), comprehension_wm?: true)
     assert [%{stage: :wm_comprehension, decision: :admitted, meta: meta}] = stored.trace
     assert meta.entity_count == 2
     assert meta.degraded? == true
@@ -64,7 +64,7 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert Brain.snapshot_wm().cfg == original_gate
 
     next = %{session_id: sid, sentence: "What are the populations of each?", trace: []}
-    recalled = WMComprehension.recall(next)
+    recalled = WMComprehension.recall(next, comprehension_wm?: true)
     assert recalled.wm_context.entities == ["Kamloops BC", "Maple Ridge BC"]
     assert recalled.discourse_reference.antecedents == ["Kamloops BC", "Maple Ridge BC"]
     assert recalled.discourse_reference.source == :wm_comprehension
@@ -82,7 +82,7 @@ defmodule Core.Brain.ComprehensionWMTest do
         Map.put(understood.comprehension, :degraded?, true))
 
     assert [%{stage: :wm_comprehension, decision: :admitted} | _] =
-             WMComprehension.store(next_complete).trace
+             WMComprehension.store(next_complete, comprehension_wm?: true).trace
 
     %{wm: newer_wm} = Brain.snapshot_wm()
     assert Enum.count(newer_wm, &(&1.id == frame_id(sid))) == 1
@@ -97,10 +97,10 @@ defmodule Core.Brain.ComprehensionWMTest do
     other = session()
     on_exit(fn -> Brain.defocus(frame_id(sid)) end)
 
-    WMComprehension.store(prior_turn(sid))
+    WMComprehension.store(prior_turn(sid), comprehension_wm?: true)
 
     result = WMComprehension.recall(%{session_id: other,
-      sentence: "What are the populations of each?", trace: []})
+      sentence: "What are the populations of each?", trace: []}, comprehension_wm?: true)
 
     refute Map.has_key?(result, :wm_context)
     refute Map.has_key?(result, :discourse_reference)
@@ -112,12 +112,12 @@ defmodule Core.Brain.ComprehensionWMTest do
     sid = session()
     on_exit(fn -> Brain.defocus(frame_id(sid)) end)
 
-    WMComprehension.store(prior_turn(sid))
+    WMComprehension.store(prior_turn(sid), comprehension_wm?: true)
     known = %{source: :explicit, antecedent: "a specific entity"}
 
     recalled = WMComprehension.recall(%{session_id: sid,
       sentence: "What are the populations of each?",
-      discourse_reference: known, trace: []})
+      discourse_reference: known, trace: []}, comprehension_wm?: true)
 
     assert recalled.discourse_reference == known
   end
