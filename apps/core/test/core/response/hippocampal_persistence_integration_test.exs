@@ -13,7 +13,32 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
   import Ecto.Query, only: [from: 2]
 
   alias Brain.Hippocampus
-  alias Core.Response.{Context, LlmChatHistory, LlmPrompt, ResponseFrame}
+  alias Core.Response.{Context, LlmChatHistory, LlmPrompt, LlmSynthesis, ResponseFrame}
+
+  defmodule MemoryProbeLlm do
+    use GenServer
+
+    def start_link({owner, expected}),
+      do: GenServer.start_link(__MODULE__, {owner, expected}, name: __MODULE__)
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    def chat(messages, _opts), do: GenServer.call(__MODULE__, {:chat, messages})
+
+    @impl true
+    def handle_call({:chat, messages}, _from, {owner, expected} = state) do
+      send(owner, {:persistent_memory_prompt, messages})
+      visible = Enum.map_join(messages, "\n", &Map.get(&1, "content", ""))
+
+      result =
+        if String.contains?(visible, expected),
+          do: "I recall the nickname " <> expected <> ".",
+          else: "I do not have that nickname in context."
+
+      {:reply, {:ok, %{content: result}}, state}
+    end
+  end
 
   setup do
     session_id = "durable-hippo-#{System.unique_integer([:positive])}"
@@ -121,6 +146,36 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
     assert prompt =~ nickname
     assert prompt =~ "recollections, not authoritative evidence"
     assert prompt =~ "verified_evidence=none"
+
+    # The model sees only the generated messages, not the database or the
+    # hippocampal GenServer. This proves a cold-start recall affects an answer.
+    previous_client = Application.get_env(:core, :llm_client)
+    previous_retrieval = Application.get_env(:core, :web_retrieval, [])
+    Application.put_env(:core, :llm_client, MemoryProbeLlm)
+    Application.put_env(:core, :web_retrieval,
+      Keyword.put(previous_retrieval, :enabled?, false))
+
+    on_exit(fn ->
+      if previous_client == nil,
+        do: Application.delete_env(:core, :llm_client),
+        else: Application.put_env(:core, :llm_client, previous_client)
+
+      Application.put_env(:core, :web_retrieval, previous_retrieval)
+    end)
+
+    start_supervised!({MemoryProbeLlm, {self(), nickname}})
+
+    assert {:ok, answer, _reflection} =
+      LlmSynthesis.generate(current.sentence,
+        %{session_id: session_id, intent: :question, turn_context: context},
+        %{tone: :neutral, mode: :collaborator, action: :answer},
+        %{}, nil)
+
+    assert_receive {:persistent_memory_prompt, messages}
+    assert Enum.count(messages, &(&1["role"] == "user")) == 1
+    assert Enum.count(messages, &(&1["role"] == "assistant")) == 0
+    assert hd(messages)["content"] =~ nickname
+    assert answer =~ nickname
 
     :ok = GenServer.stop(reader, :normal)
   end
