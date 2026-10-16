@@ -70,8 +70,15 @@ defmodule Core.Response.PopulationComparison do
               |> Map.put(:comparison_status, :evaluated))
 
           verified? ->
+            reason =
+              if Enum.map(results, & &1.census_year) |> Enum.uniq() |> length() == 1 do
+                :incompatible_measurements
+              else
+                :different_reporting_years
+              end
+
             Map.put(context, :web_evidence,
-              Map.put(evidence, :comparison_status, :different_reporting_years))
+              Map.put(evidence, :comparison_status, reason))
 
           true ->
             Map.put(context, :web_evidence,
