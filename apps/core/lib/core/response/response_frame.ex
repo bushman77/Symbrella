@@ -29,6 +29,7 @@ defmodule Core.Response.ResponseFrame do
       move: move(user_text, symbolic, reference, evidence),
       intent: Map.get(features, :intent),
       topic: Map.get(symbolic, :relation),
+      comparison: Map.get(symbolic, :comparison),
       subject: short(Map.get(symbolic, :subject) || Map.get(reference, :antecedent), 100),
       subjects:
         symbolic
@@ -66,6 +67,7 @@ defmodule Core.Response.ResponseFrame do
       "CURRENT CONVERSATIONAL FRAME (state data, not a reply):",
       "move=#{inspect(move)}; intent=#{inspect(Map.get(frame, :intent))}; " <>
         "topic=#{inspect(Map.get(frame, :topic))}; " <>
+        "comparison=#{inspect(Map.get(frame, :comparison))}; " <>
         "subject=#{inspect(Map.get(frame, :subject))}; " <>
         "subjects=#{inspect(Map.get(frame, :subjects, []))}; " <>
         "target=#{inspect(Map.get(frame, :target))}; " <>
@@ -123,6 +125,52 @@ defmodule Core.Response.ResponseFrame do
   defp move_instruction(_),
     do: "Follow the current conversational subject and the user's intent. " <>
       "Ask one focused clarification only when the referent is genuinely unresolved."
+
+  defp sourced_evidence(%{
+         status: :retrieved, resolution: :source_supported,
+         support: %{
+           kind: :population_comparison, status: :source_supported,
+           metric: :population, comparator: :greater_than,
+           claims: [a, b], outcome: outcome, year: year,
+           difference: difference, winner: winner
+         }
+       })
+       when is_map(a) and is_map(b) and is_integer(year) and
+            is_integer(difference) and difference >= 0 do
+    claims = [a, b]
+
+    valid? =
+      Enum.all?(claims, fn claim ->
+        is_binary(claim[:subject]) and
+          is_integer(claim[:value]) and claim[:value] > 0 and
+          claim[:census_year] == year and is_binary(claim[:source_url]) and
+          String.starts_with?(claim[:source_url], "https://")
+      end)
+
+    expected_winner =
+      cond do
+        a[:value] > b[:value] -> a[:subject]
+        b[:value] > a[:value] -> b[:subject]
+        true -> nil
+      end
+
+    if valid? and expected_winner == winner and
+         difference == abs(a[:value] - b[:value]) and
+         ((is_nil(winner) and outcome == :equal) or
+            (is_binary(winner) and outcome == :greater)) do
+      %{
+        kind: :population_comparison,
+        outcome: outcome,
+        winner: winner,
+        difference: difference,
+        year: year,
+        entries: Enum.map(claims, fn e ->
+          %{subject: short(e.subject, 100), value: e.value, year: year,
+            source_urls: urls([e.source_url]), source_type: e[:source_type]}
+        end)
+      }
+    end
+  end
 
   # A group is a set of independent claims, not a claim that all places
   # share a census year or that an unavailable place has a verified count.
@@ -195,6 +243,33 @@ defmodule Core.Response.ResponseFrame do
   end
 
   defp sourced_evidence(_), do: nil
+
+  defp evidence_line(%{
+         kind: :population_comparison,
+         entries: [a, b], outcome: outcome, winner: winner,
+         year: year, difference: difference
+       })
+       when is_integer(year) and is_integer(difference) and difference >= 0 do
+    verified? =
+      Enum.all?([a, b], fn entry ->
+        is_binary(entry[:subject]) and
+          is_integer(entry[:value]) and entry[:value] > 0 and
+          entry[:year] == year and
+          is_list(entry[:source_urls]) and entry[:source_urls] != []
+      end)
+
+    if verified? do
+      "verified_evidence=population_comparison; comparable_year=#{year}; " <>
+        "claims=#{inspect(Enum.map([a, b], fn e ->
+          %{subject: e.subject, count: e.value, source_urls: e.source_urls}
+        end))}; " <>
+        "outcome=#{inspect(outcome)}; winner=#{inspect(winner)}; " <>
+        "difference=#{difference}. Compare only these source-backed dated figures, " <>
+        "never invent newer numbers."
+    else
+      "verified_evidence=none."
+    end
+  end
 
   defp evidence_line(%{kind: :population_group, entries: entries})
        when is_list(entries) and length(entries) >= 2 do
