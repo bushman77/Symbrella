@@ -30,6 +30,14 @@ defmodule Core.Response.ResponseFrame do
       intent: Map.get(features, :intent),
       topic: Map.get(symbolic, :relation),
       subject: short(Map.get(symbolic, :subject) || Map.get(reference, :antecedent), 100),
+      subjects:
+        symbolic
+        |> Map.get(:subjects, Map.get(reference, :antecedents, []))
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&short(&1, 100))
+        |> Enum.uniq()
+        |> Enum.take(4),
       target: short(Map.get(symbolic, :target), 100),
       reference_source: Map.get(reference, :source),
       preceding_turn: previous_turn_kind(history),
@@ -58,7 +66,9 @@ defmodule Core.Response.ResponseFrame do
       "CURRENT CONVERSATIONAL FRAME (state data, not a reply):",
       "move=#{inspect(move)}; intent=#{inspect(Map.get(frame, :intent))}; " <>
         "topic=#{inspect(Map.get(frame, :topic))}; " <>
-        "subject=#{inspect(Map.get(frame, :subject))}; target=#{inspect(Map.get(frame, :target))}; " <>
+        "subject=#{inspect(Map.get(frame, :subject))}; " <>
+        "subjects=#{inspect(Map.get(frame, :subjects, []))}; " <>
+        "target=#{inspect(Map.get(frame, :target))}; " <>
         "reference_source=#{inspect(Map.get(frame, :reference_source))}; " <>
         "previous_turn=#{inspect(Map.get(frame, :preceding_turn))}",
       "tone=#{inspect(Map.get(posture, :tone))}; interaction_mode=#{inspect(Map.get(posture, :interaction_mode))}; " <>
@@ -114,6 +124,40 @@ defmodule Core.Response.ResponseFrame do
     do: "Follow the current conversational subject and the user's intent. " <>
       "Ask one focused clarification only when the referent is genuinely unresolved."
 
+  # A group is a set of independent claims, not a claim that all places
+  # share a census year or that an unavailable place has a verified count.
+  defp sourced_evidence(%{support: %{kind: :population_group, results: results}})
+       when is_list(results) and length(results) >= 2 do
+    entries =
+      results
+      |> Enum.take(4)
+      |> Enum.filter(&(is_map(&1) and is_binary(Map.get(&1, :subject))))
+      |> Enum.map(fn result ->
+        subject = short(result.subject, 100)
+
+        case result do
+          %{status: :source_supported, value: value, census_year: year,
+            source_url: url}
+          when is_integer(value) and value > 0 and is_integer(year) and
+               is_binary(url) ->
+            if String.starts_with?(url, "https://") do
+              %{
+                subject: subject, status: :source_supported,
+                value: value, year: year, source_type: Map.get(result, :source_type),
+                source_urls: urls([url])
+              }
+            else
+              %{subject: subject, status: :unavailable}
+            end
+
+          _ ->
+            %{subject: subject, status: :unavailable}
+        end
+      end)
+
+    if length(entries) >= 2, do: %{kind: :population_group, entries: entries}
+  end
+
   defp sourced_evidence(%{status: :retrieved, resolution: :source_supported, support: support})
        when is_map(support) do
     case support do
@@ -151,6 +195,39 @@ defmodule Core.Response.ResponseFrame do
   end
 
   defp sourced_evidence(_), do: nil
+
+  defp evidence_line(%{kind: :population_group, entries: entries})
+       when is_list(entries) and length(entries) >= 2 do
+    supported =
+      Enum.filter(entries, fn entry ->
+        entry[:status] == :source_supported and is_binary(entry[:subject]) and
+          is_integer(entry[:value]) and entry[:value] > 0 and
+          is_integer(entry[:year]) and
+          is_list(entry[:source_urls]) and entry[:source_urls] != []
+      end)
+
+    missing =
+      entries
+      |> Enum.reject(&(&1 in supported))
+      |> Enum.map(&Map.get(&1, :subject))
+
+    if supported == [] do
+      "verified_evidence=none; requested_population_subjects=#{inspect(missing)}. " <>
+        "The referents are known but no dated sourced population counts were established. " <>
+        "Do not ask which place the user means."
+    else
+      claims =
+        Enum.map(supported, fn e ->
+          %{subject: e.subject, count: e.value, display_count: format_count(e.value),
+            year: e.year, origin: e[:source_type], source_urls: e.source_urls}
+        end)
+
+      "verified_evidence=population_group; independently_sourced_claims=#{inspect(claims)}; " <>
+        "unavailable_subjects=#{inspect(missing)}. These are dated counts, not " <>
+        "automatically current estimates. Address every requested place; " <>
+        "never invent unavailable values or ask which place is meant."
+    end
+  end
 
   # Only render claim-specific evidence once all REQUIRED fields are
   # present and correctly typed. A sparse frame should never crash prompt
