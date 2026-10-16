@@ -32,7 +32,9 @@ defmodule Db.MixProject do
       {:postgrex, ">= 0.0.0"},
       # keep if you use the :vector column
       {:pgvector, "~> 0.3.0"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      # Db.NativeTrainingBatch constructs Nx tensors directly.
+      {:nx, "~> 0.9"}
     ]
   end
 end
