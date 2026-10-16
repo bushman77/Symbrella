@@ -213,11 +213,24 @@ defmodule Db.NativeTrainingBatch do
         truncated_count: truncated_count,
         truncated_percent: truncated_percent,
         max_token_id_count_seen: max_token_id_count_seen,
-        input_ids: Nx.tensor(input_id_rows, type: {:s, 64}),
-        attention_mask: Nx.tensor(attention_mask_rows, type: {:s, 64})
+        input_ids: to_nx_tensor(input_id_rows),
+        attention_mask: to_nx_tensor(attention_mask_rows)
       }
 
       {:ok, batch}
+    end
+  end
+
+  # Nx is declared directly in apps/db/mix.exs. Resolve this external module
+  # at runtime so umbrella compilation order does not produce misleading
+  # undefined Nx.tensor/2 warnings while compiling the :db sibling.
+  # The tensor type/shape and return contract stay unchanged.
+  defp to_nx_tensor(rows) do
+    if Code.ensure_loaded?(Nx) and function_exported?(Nx, :tensor, 2) do
+      apply(Nx, :tensor, [rows, [type: {:s, 64}]])
+    else
+      raise ArgumentError,
+            "Nx.tensor/2 is unavailable; compile the :nx dependency before building native training batches"
     end
   end
 
