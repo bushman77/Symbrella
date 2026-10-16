@@ -118,7 +118,7 @@ defmodule Core.Brain.WM do
         candidate_count: count,
         lifg_choices_available: lifg_count,
         lifg_winners_submitted?: false,
-        focus_attempted?: decision == :focused,
+        focus_attempted?: count > 0,
         admission_path: :prompt_topics_only,
         wm_size_after: wm_size_after
       }
