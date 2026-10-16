@@ -58,6 +58,8 @@ defmodule Db.CognitiveIssues do
     :ok
   end
 
+  def resolve_missing_year(_), do: :ok
+
   defp close_missing_year_issues(proof) do
     issues =
       Db.all(
@@ -82,5 +84,4 @@ defmodule Db.CognitiveIssues do
     :ok
   end
 
-  def resolve_missing_year(_), do: :ok
 end
