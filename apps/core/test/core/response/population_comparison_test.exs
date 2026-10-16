@@ -186,6 +186,22 @@ defmodule Core.Response.PopulationComparisonTest do
     assert remembered.attempted_count == 0
     assert remembered.evidence_origin == :prior_verified_population
 
+    assert PopulationComparison.recall(
+      Map.put(initial, :user_text, "Which city had more residents in 2021?")
+    ).web_evidence.evidence_origin == :prior_verified_population
+
+    refute Map.has_key?(
+      PopulationComparison.recall(
+        Map.put(initial, :user_text, "Which city had more residents in 2022?")
+      ), :web_evidence
+    )
+
+    refute Map.has_key?(
+      PopulationComparison.recall(
+        Map.put(initial, :user_text, "Which city currently has more residents?")
+      ), :web_evidence
+    )
+
     comparative =
       initial
       |> PopulationComparison.recall()
