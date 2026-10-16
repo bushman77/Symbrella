@@ -39,6 +39,32 @@ defmodule Core.Response.ResponseFrameTest do
     }
   end
 
+  test "prompt accepts partial versioned response frames without optional context keys" do
+    partial = %{
+      version: 1,
+      move: :answer_grounded_question,
+      evidence: %{
+        kind: :population,
+        subject: "Kamloops, BC",
+        value: 97_902,
+        year: 2021,
+        source_urls: [@url]
+      }
+    }
+
+    prompt = ResponseFrame.prompt(partial)
+
+    assert prompt =~ "CURRENT CONVERSATIONAL FRAME"
+    assert prompt =~ "intent=nil"
+    assert prompt =~ "subject=nil"
+    assert prompt =~ "count=97902"
+    assert prompt =~ "display_count=97,902"
+    assert prompt =~ "The evidence fixes the facts, not the exact sentence."
+
+    assert ResponseFrame.prompt(%{version: 1}) =~ "move=nil"
+    assert ResponseFrame.prompt(%{version: 1, posture: nil}) =~ "tone=nil"
+  end
+
   test "converts symbolic and verified data into a prompt frame, not fixed reply text" do
     context = frame_context()
     history = [

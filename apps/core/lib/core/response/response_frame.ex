@@ -51,17 +51,20 @@ defmodule Core.Response.ResponseFrame do
   @spec prompt(t() | term()) :: String.t()
   def prompt(%{version: 1} = frame) do
     evidence = Map.get(frame, :evidence)
-    posture = Map.get(frame, :posture, %{})
+    posture = Map.get(frame, :posture) || %{}
+    move = Map.get(frame, :move)
 
     [
       "CURRENT CONVERSATIONAL FRAME (state data, not a reply):",
-      "move=#{inspect(frame.move)}; intent=#{inspect(frame.intent)}; topic=#{inspect(frame.topic)}; " <>
-        "subject=#{inspect(frame.subject)}; target=#{inspect(frame.target)}; " <>
-        "reference_source=#{inspect(frame.reference_source)}; previous_turn=#{inspect(frame.preceding_turn)}",
+      "move=#{inspect(move)}; intent=#{inspect(Map.get(frame, :intent))}; " <>
+        "topic=#{inspect(Map.get(frame, :topic))}; " <>
+        "subject=#{inspect(Map.get(frame, :subject))}; target=#{inspect(Map.get(frame, :target))}; " <>
+        "reference_source=#{inspect(Map.get(frame, :reference_source))}; " <>
+        "previous_turn=#{inspect(Map.get(frame, :preceding_turn))}",
       "tone=#{inspect(Map.get(posture, :tone))}; interaction_mode=#{inspect(Map.get(posture, :interaction_mode))}; " <>
         "behavior=#{inspect(Map.get(posture, :behavioral_state))}",
       evidence_line(evidence),
-      move_instruction(frame.move),
+      move_instruction(move),
       "Express Symbrella's response in your own natural words. This is a continuing " <>
         "conversation, not a scripted Q&A. Do not repeat internal labels or give a stock " <>
         "assistance offer. Preserve exact source-backed entities, values, years, units " <>
