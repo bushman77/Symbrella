@@ -16,11 +16,11 @@ defmodule Core.Response.AuthoritativeAnswerPlanTest do
     def init(state), do: {:ok, state}
 
     def set_reply(reply), do: GenServer.call(__MODULE__, {:reply, reply})
+    def chat(messages, opts), do: GenServer.call(__MODULE__, {:chat, messages, opts})
 
+    @impl true
     def handle_call({:reply, reply}, _from, {test_pid, _}),
       do: {:reply, :ok, {test_pid, reply}}
-
-    def chat(messages, opts), do: GenServer.call(__MODULE__, {:chat, messages, opts})
 
     def handle_call({:chat, messages, opts}, _from, {test_pid, reply} = state) do
       send(test_pid, {:style_llm_called, messages, opts})
