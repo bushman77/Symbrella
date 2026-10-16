@@ -154,7 +154,8 @@ defmodule Core.Response.ResponseFrame do
 
   defp evidence_line(%{kind: :population} = e),
     do: "verified_evidence=population; subject=#{inspect(e.subject)}; " <>
-      "count=#{e.value}; year=#{e.year}; origin=#{inspect(e.source_type)}; " <>
+      "count=#{e.value}; display_count=#{format_count(e.value)}; " <>
+      "year=#{e.year}; origin=#{inspect(e.source_type)}; " <>
       "source_urls=#{inspect(e.source_urls)}. This dated value is not automatically a current estimate."
 
   defp evidence_line(%{kind: :proximity} = e),
@@ -218,6 +219,16 @@ defmodule Core.Response.ResponseFrame do
       value when is_binary(value) -> value
       _ -> ""
     end
+  end
+
+  defp format_count(value) when is_integer(value) do
+    value
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.graphemes()
+    |> Enum.chunk_every(3)
+    |> Enum.map_join(",", &Enum.join/1)
+    |> String.reverse()
   end
 
   defp short(value, n) when is_binary(value),
