@@ -11,17 +11,37 @@ defmodule Core.Response.PopulationComparison do
   alias Core.Response.VerifiedPopulation
 
   @spec recall(map()) :: map()
+  # Never overwrite a stronger or newer source already attached by another
+  # retrieval channel (including revalidated consolidated symbolic premises).
+  def recall(%{web_evidence: %{}} = context), do: context
+
   def recall(%{} = context) do
     case comparison_subjects(context) do
       [_, _] = names ->
-        case VerifiedPopulation.recall(Map.get(context, :session_id), names) do
-          %{} = evidence -> Map.put(context, :web_evidence, evidence)
-          _ -> context
+        # Cached counts describe a specific historical measurement. A current
+        # or explicit-year query must be resolved against that requested date,
+        # not answered from an unrelated same-session cache entry.
+        if dated_or_freshness_request?(Map.get(context, :user_text, "")) do
+          context
+        else
+          case VerifiedPopulation.recall(Map.get(context, :session_id), names) do
+            %{} = evidence -> Map.put(context, :web_evidence, evidence)
+            _ -> context
+          end
         end
 
       _ -> context
     end
   end
+
+  defp dated_or_freshness_request?(text) when is_binary(text) do
+    Regex.match?(
+      ~r/\b(?:latest|current|currently|today|now|this\s+year|most\s+recent|up\s+to\s+date|as\s+of\s+now|(?:19|20)\d{2})\b/iu,
+      text
+    )
+  end
+
+  defp dated_or_freshness_request?(_), do: false
 
   @spec attach(map()) :: map()
   def attach(%{} = context) do
