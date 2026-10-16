@@ -21,7 +21,7 @@ defmodule Brain.SelfCalibration.TrainingTest do
     assert artifact.meta.batch_size == 1
     assert artifact.meta.hidden_units == 4
     assert artifact.meta.trained? == false
-    assert artifact.params != nil
+    assert %Axon.ModelState{} = artifact.params
     assert inspect(artifact.model) =~ "#Axon<"
   end
 
@@ -42,7 +42,7 @@ defmodule Brain.SelfCalibration.TrainingTest do
     assert artifact.model_version == AxonModel.model_version()
     assert artifact.metrics.epochs == 1
     assert artifact.meta.trained? == true
-    assert artifact.params != nil
+    assert %Axon.ModelState{} = artifact.params
   end
 
   test "trains advisory axon artifact from synthetic bootstrap JSONL fixture" do
@@ -77,7 +77,7 @@ defmodule Brain.SelfCalibration.TrainingTest do
     assert artifact.meta.batch_size == 250
     assert artifact.meta.hidden_units == 8
     assert artifact.meta.trained? == true
-    assert artifact.params != nil
+    assert %Axon.ModelState{} = artifact.params
   end
 
   defp sample_batch do
