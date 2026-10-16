@@ -168,11 +168,25 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     assert next.last_evaluation.valid_feature_pairs > 0
     assert is_number(next.last_evaluation.residual_mse)
     assert is_number(next.last_evaluation.persistence_mse)
+    assert next.observed_pairs == 1
+    assert next.observed_cells == next.last_evaluation.valid_feature_pairs
+    assert_in_delta next.aggregate_residual_mse,
+                    next.last_evaluation.residual_mse, 1.0e-7
+    assert_in_delta next.aggregate_persistence_mse,
+                    next.last_evaluation.persistence_mse, 1.0e-7
 
     duplicate = send_record.(turn("live-a", 2, 0.35))
     assert duplicate.predictions == 3
     assert duplicate.evaluations == 1
     assert duplicate.skipped == 1
+
+    # Replaying a nonadjacent archived ID must not be interpreted as another
+    # transition and cannot change the cumulative error totals.
+    replay = send_record.(turn("live-a", 1, 0.25))
+    assert replay.predictions == 3
+    assert replay.evaluations == 1
+    assert replay.observed_cells == next.observed_cells
+    assert replay.skipped == 2
 
     rows = path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
     assert Enum.count(rows, &(&1["record_type"] == "shadow_prediction")) == 3
