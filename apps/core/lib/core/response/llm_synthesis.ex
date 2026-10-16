@@ -19,6 +19,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
+  alias Core.Response.ResponseFrame
   alias Core.Response.EvidenceRevision
   alias Core.Response.ReflectionLoop
   alias Core.Response.AnswerAdequacy
@@ -92,6 +93,12 @@ defmodule Core.Response.LlmSynthesis do
       else
         context
       end
+
+    # Give the model Symbrella's current cognitive state rather than a
+    # sentence-shaped factual answer. History informs continuity, but never
+    # becomes a source of external factual verification.
+    context =
+      Map.put(context, :response_frame, ResponseFrame.build(context, history))
 
     system_prompt =
       build_prompt(context, prompt_type)

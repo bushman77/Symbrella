@@ -7,6 +7,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.LlmPrompt.Compact
   alias Core.Response.LlmPrompt.WorkingMemory
   alias Core.Response.Personality
+  alias Core.Response.ResponseFrame
   alias Core.Response.GreetingTurn
   alias Core.Response.Topics
 
@@ -26,6 +27,7 @@ defmodule Core.Response.LlmPrompt do
       |> put_if_present(:comprehension, comprehension)
       |> put_if_present(:symbolic_frame, symbolic_frame)
       |> put_if_present(:web_evidence, map_get(context, :web_evidence))
+      |> put_if_present(:response_frame, map_get(context, :response_frame))
 
     build_system_prompt(features, decision, mood, wm_items)
   end
@@ -71,6 +73,7 @@ defmodule Core.Response.LlmPrompt do
       "You are Symbrella.",
       news_priority_shaping(map_get(features, :web_evidence)),
       reference_priority_shaping(map_get(features, :web_evidence)),
+      ResponseFrame.prompt(map_get(features, :response_frame)),
       "You are Symbrella, a brain-inspired, stateful assistant running locally on the user's machine.",
       "Symbrella is your assistant identity, never the user's name. If the user asks for their name, use explicit user-name memory only; if none is visible, say you do not know yet.",
       "Grounded definition: Symbrella is this local Phoenix umbrella app and brain-inspired neuro-symbolic runtime, with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis.",
