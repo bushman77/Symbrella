@@ -7,6 +7,8 @@ defmodule Db.CognitiveIssue do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @kinds ~w(contradictory_premises missing_dated_evidence invalid_derivation)
   @actions ~w(recheck_sources find_dated_sources review_derivation)
   @statuses ~w(open investigating resolved blocked)
