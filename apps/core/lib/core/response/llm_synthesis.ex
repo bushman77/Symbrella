@@ -20,6 +20,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
   alias Core.Response.ResponseFrame
+  alias Core.Response.AuthoritativeAnswerPlan
   alias Core.Response.PopulationComparison
   alias Core.Response.VerifiedPopulation
   alias Core.Response.EvidenceRevision
@@ -116,6 +117,96 @@ defmodule Core.Response.LlmSynthesis do
     context =
       Map.put(context, :response_frame, ResponseFrame.build(context, history))
 
+    case AuthoritativeAnswerPlan.build(context) do
+      %{kind: :verified_population_comparison} = plan ->
+        do_authoritative_generate(user_text, context, plan)
+
+      _ ->
+        do_freeform_generate(user_text, context, history, answer_target, prompt_type)
+    end
+  end
+
+  # For verified symbolic conclusions, Core builds the answer BEFORE the
+  # model sees the turn. Free-form generation is reserved for turns with no
+  # authoritative plan. A model can optionally choose a closed presentation
+  # style, never author the numeric conclusion or citations.
+  defp do_authoritative_generate(user_text, context, plan) do
+    prompt =
+      "AUTHORITATIVE VERIFIED CONCLUSION (Core-owned response plan):\n" <>
+        ResponseFrame.prompt(Map.get(context, :response_frame, %{})) <>
+        "\nPresentation is selected from verified Core renderings, not generated text."
+
+    emit_prompt_event(prompt, user_text, context)
+
+    {style, selection_source} = authoritative_style(context, plan)
+    planned = AuthoritativeAnswerPlan.render(plan, style)
+
+    if AuthoritativeAnswerPlan.authorized?(plan, planned, context) do
+      {:ok, reviewed, first_reflection} =
+        ReflectionLoop.review(user_text, planned, context)
+
+      {out, reflection, forced_fallback?} =
+        if AuthoritativeAnswerPlan.authorized?(plan, reviewed, context) do
+          {reviewed, first_reflection, false}
+        else
+          fallback = AuthoritativeAnswerPlan.render(plan, :detailed)
+          {:ok, _ignored, fallback_review} =
+            ReflectionLoop.review(user_text, fallback, context)
+
+          # No untrusted repair or LLM output may override the plan.
+          {fallback, fallback_review, true}
+        end
+
+      reflection =
+        Map.put(reflection, :authoritative_plan, %{
+          kind: plan.kind,
+          status: :enforced,
+          outcome: plan.outcome,
+          source_count: plan.source_count,
+          selected_style: style,
+          style_source: selection_source,
+          fallback?: forced_fallback?
+        })
+
+      emit_complete_event(user_text, out, context, prompt, reflection)
+      {:ok, out, reflection}
+    else
+      {:error, :invalid_authoritative_plan}
+    end
+  end
+
+  defp authoritative_style(context, plan) do
+    cfg = Application.get_env(:core, :llm_synthesis, [])
+
+    if Keyword.get(cfg, :authoritative_style_selection_enabled?, false) do
+      opts =
+        initial_chat_opts(context)
+        |> Keyword.put(:max_tokens, 8)
+
+      reply =
+        try do
+          llm_client().chat(AuthoritativeAnswerPlan.style_selection_prompt(plan), opts)
+        rescue
+          _ -> {:error, :style_selection_exception}
+        catch
+          :exit, _ -> {:error, :style_selection_timeout}
+        end
+
+      case reply do
+        {:ok, %{content: content}} when is_binary(content) ->
+          style = AuthoritativeAnswerPlan.select_style(content)
+          exact? = String.downcase(String.trim(content)) in ["brief", "detailed"]
+          {style, if(exact?, do: :model_choice, else: :invalid_model_choice)}
+
+        _ ->
+          {:brief, :model_unavailable}
+      end
+    else
+      {:brief, :core_default}
+    end
+  end
+
+  defp do_freeform_generate(user_text, context, history, answer_target, prompt_type) do
     system_prompt =
       build_prompt(context, prompt_type)
       |> then(fn prompt ->
