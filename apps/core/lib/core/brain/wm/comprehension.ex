@@ -23,7 +23,7 @@ defmodule Core.Brain.WM.Comprehension do
   def recall(si, opts \\ [])
 
   def recall(%{} = si, opts) when is_list(opts) do
-    with true <- Keyword.get(opts, :comprehension_wm?, true),
+    with true <- enabled?(opts),
          session when not is_nil(session) <- field(si, :session_id),
          %{} = item <- find_frame(session),
          %{} = context <- field(item, :context) do
@@ -46,7 +46,7 @@ defmodule Core.Brain.WM.Comprehension do
   def store(si, opts \\ [])
 
   def store(%{} = si, opts) when is_list(opts) do
-    with true <- Keyword.get(opts, :comprehension_wm?, true),
+    with true <- enabled?(opts),
          session when not is_nil(session) <- field(si, :session_id),
          %{} = comprehension <- field(si, :comprehension),
          sentence when is_binary(sentence) and byte_size(sentence) > 0 <- field(si, :sentence) do
@@ -220,6 +220,12 @@ defmodule Core.Brain.WM.Comprehension do
     _ -> nil
   catch
     :exit, _ -> nil
+  end
+
+  defp enabled?(opts) do
+    config = Application.get_env(:core, __MODULE__, [])
+    configured? = if is_list(config), do: Keyword.get(config, :enabled?, true), else: true
+    Keyword.get(opts, :comprehension_wm?, configured?) == true
   end
 
   defp terms(value) do
