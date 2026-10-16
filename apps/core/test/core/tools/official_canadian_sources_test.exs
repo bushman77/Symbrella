@@ -32,6 +32,68 @@ defmodule Core.Tools.OfficialCanadianSourcesTest do
       symbolic_frame: %{event: frame}}
   end
 
+  test "direct official ZIP succeeds when WDS discovery is unavailable" do
+    {:ok, {_, zip}} =
+      :zip.create(~c"17100155-eng.zip", [{~c"17100155.csv", @csv}], [:memory])
+
+    cache_path =
+      Path.join(System.tmp_dir!(), "statcan-provider-#{System.unique_integer([:positive])}.csv")
+
+    on_exit(fn -> File.rm(cache_path) end)
+
+    fetch = fn url, _opts ->
+      if String.contains?(url, "/getFullTableDownloadCSV/") do
+        {:error, :metadata_unreachable}
+      else
+        assert url == "https://www150.statcan.gc.ca/n1/tbl/csv/17100155-eng.zip"
+        {:ok, %{status: 200, body: zip}}
+      end
+    end
+
+    assert {:ok, data} =
+      StatisticsCanadaPopulation.population("Kamloops BC",
+        fetch: fetch, cache_path: cache_path)
+
+    assert data.source_type == :statistics_canada
+    assert data.value == 108_793
+    assert {:ok, cached} = File.read(cache_path)
+    assert cached == @csv
+  end
+
+  test "live provider reports which HTTP stage failed instead of losing the cause" do
+    cache_path =
+      Path.join(System.tmp_dir!(), "statcan-failure-#{System.unique_integer([:positive])}.csv")
+
+    fetch = fn _url, _opts -> {:ok, %{status: 403, body: "forbidden"}} end
+
+    assert {:error, {:official_download_failed, errors}} =
+      StatisticsCanadaPopulation.population("Kamloops BC",
+        fetch: fetch, cache_path: cache_path)
+
+    assert errors.metadata == {:metadata_http_status, 403}
+    assert errors.direct_zip == {:zip_http_status, 403}
+  end
+
+  test "non-ZIP HTTP body is identified without promoting it to evidence" do
+    cache_path =
+      Path.join(System.tmp_dir!(), "statcan-badzip-#{System.unique_integer([:positive])}.csv")
+
+    fetch = fn url, _opts ->
+      if String.contains?(url, "/getFullTableDownloadCSV/") do
+        {:ok, %{status: 200, body: %{
+          "status" => "SUCCESS",
+          "object" => "https://www150.statcan.gc.ca/n1/tbl/csv/17100155-eng.zip"
+        }}}
+      else
+        {:ok, %{status: 200, body: "not a zip archive"}}
+      end
+    end
+
+    assert {:error, {:official_download_failed, %{metadata: :ok, zip: :not_a_zip_archive}}} =
+      StatisticsCanadaPopulation.population("Kamloops BC",
+        fetch: fetch, cache_path: cache_path)
+  end
+
   test "official municipal rows select latest year and province, not substring" do
     assert {:ok, result} = StatisticsCanadaPopulation.population("Kamloops BC", csv: @csv)
     assert result.value == 108_793
