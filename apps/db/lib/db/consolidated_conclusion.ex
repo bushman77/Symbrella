@@ -9,6 +9,8 @@ defmodule Db.ConsolidatedConclusion do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "consolidated_conclusions" do
     field :fingerprint, :string
     field :pair_key, :string
