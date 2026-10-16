@@ -55,6 +55,7 @@ defmodule Core do
     si1 =
       si0
       |> apply_intent_selection(opts)
+      |> Core.Brain.WM.Comprehension.recall(opts)
       |> Core.Discourse.References.attach()
       |> StateDump.capture(:intent_selected)
 
@@ -174,6 +175,8 @@ defmodule Core do
     |> StateDump.capture(:sentence_meaning)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
+    |> Core.Brain.WM.Comprehension.store(opts)
+    |> StateDump.capture(:wm_comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
     |> StateDump.capture(:prefrontal)
     |> Core.Brain.ActionSelection.attach(opts)
