@@ -751,8 +751,18 @@ defmodule Core.Response.ReflectionLoop do
     frame = geographic_frame(context, user_text)
     subject = map_get(frame, :subject)
     target = map_get(frame, :target)
+    subjects =
+      frame
+      |> map_get(:subjects, [])
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.take(4)
 
     cond do
+      map_get(frame, :relation) == :population and length(subjects) >= 2 ->
+        "I understand you're asking for the populations of #{Enum.join(subjects, " and ")}, " <>
+          "but I don't have verified dated figures for those places available in this response."
+
       not is_binary(subject) ->
         "Which place are you referring to?"
 
