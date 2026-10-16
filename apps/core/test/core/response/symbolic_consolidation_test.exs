@@ -57,7 +57,7 @@ defmodule Core.Response.SymbolicConsolidationTest do
       subjects: names, grounding_status: :unverified}
   end
 
-  defp claims(names, values \\ [97_902, 90_990], years \\ [2021, 2021]) do
+  defp claims(names, values, years) do
     urls = [
       "https://www.wikidata.org/wiki/Q473209",
       "https://www.wikidata.org/wiki/Q16740"
