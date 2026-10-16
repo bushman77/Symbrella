@@ -115,7 +115,8 @@ defmodule Core.Brain.WM.Comprehension do
     sentence = field(si, :sentence) || ""
 
     explicit_entities =
-      [field(event, :subject), field(event, :target)]
+      ([field(event, :subject), field(event, :target)] ++
+         List.wrap(field(event, :subjects)))
       |> Enum.filter(&is_binary/1)
       |> Enum.map(&clean_entity/1)
       |> Enum.reject(&(&1 == "" or pronoun?(&1)))
@@ -123,7 +124,7 @@ defmodule Core.Brain.WM.Comprehension do
       |> Enum.take(@max_entities)
 
     inherited =
-      if plural_reference?(sentence, reference) and explicit_entities == [] do
+      if contextual_reference?(sentence, reference) and explicit_entities == [] do
         List.wrap(field(prev, :entities))
         |> Enum.filter(&is_binary/1)
         |> Enum.take(@max_entities)
@@ -161,9 +162,18 @@ defmodule Core.Brain.WM.Comprehension do
         si
 
       length(entities) >= 2 and
-          Regex.match?(~r/\b(?:each|both)\b/iu, sentence) ->
+          contextual_plural_cue?(sentence) ->
+        reference_phrase =
+          cond do
+            Regex.match?(~r/\bboth\b/iu, sentence) -> "both"
+            Regex.match?(~r/\beach\b/iu, sentence) -> "each"
+            Regex.match?(~r/\b(?:those|these)\s+(?:cities|places)\b/iu, sentence) ->
+              "those cities"
+            true -> "which one"
+          end
+
         Map.put(si, :discourse_reference, %{
-          pronoun: if(Regex.match?(~r/\bboth\b/iu, sentence), do: "both", else: "each"),
+          pronoun: reference_phrase,
           antecedents: Enum.take(entities, @max_entities),
           source: :wm_comprehension,
           evidence: :prior_same_session_comprehension,
@@ -176,10 +186,23 @@ defmodule Core.Brain.WM.Comprehension do
 
   defp maybe_bind_plural_reference(si, _), do: si
 
-  defp plural_reference?(sentence, reference) do
-    is_binary(sentence) and Regex.match?(~r/\b(?:each|both)\b/iu, sentence) and
+  defp contextual_reference?(sentence, reference) do
+    is_binary(sentence) and contextual_plural_cue?(sentence) and
       field(reference, :source) == :wm_comprehension
   end
+
+  # Only unambiguous references to a previously active group are inherited.
+  # Unrelated turns must not keep the prior topic alive indefinitely.
+  defp contextual_plural_cue?(sentence) when is_binary(sentence) do
+    Regex.match?(~r/\b(?:each|both)\b/iu, sentence) or
+      Regex.match?(~r/\b(?:those|these)\s+(?:cities|places)\b/iu, sentence) or
+      Regex.match?(
+        ~r/^\s*which\s+(?:one|city)\s+has\s+the\s+(?:larger|greater|higher)\s+population\b/iu,
+        sentence
+      )
+  end
+
+  defp contextual_plural_cue?(_), do: false
 
   defp find_frame(session) do
     case safe_brain_call(:snapshot_wm, []) do
