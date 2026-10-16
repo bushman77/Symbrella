@@ -118,7 +118,7 @@ defmodule Brain.LIFGBoundaryGuardTest do
       sentence = "What is the population of Kamloops, BC?"
       tokens = [
         %{phrase: "What", span: {0, 4}},
-        %{phrase: "?", span: {37, 38}},
+        %{phrase: "?", span: {38, 39}},
         %{phrase: ",", span: {34, 35}},
         %{phrase: "BC?", span: {36, 39}}
       ]
