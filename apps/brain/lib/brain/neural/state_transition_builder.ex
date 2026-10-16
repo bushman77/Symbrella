@@ -191,8 +191,8 @@ defmodule Brain.Neural.StateTransitionBuilder do
       records
       |> Enum.chunk_every(2, 1, :discard)
       |> Enum.any?(fn [first, second] ->
-        with {:ok, a, _} <- DateTime.from_iso8601(first["recorded_at"] || ""),
-             {:ok, b, _} <- DateTime.from_iso8601(second["recorded_at"] || "") do
+        with {:ok, a, _} <- parse_timestamp(first["recorded_at"]),
+             {:ok, b, _} <- parse_timestamp(second["recorded_at"]) do
           DateTime.compare(a, b) == :gt
         else
           _ -> false
@@ -200,6 +200,9 @@ defmodule Brain.Neural.StateTransitionBuilder do
       end)
     end)
   end
+
+  defp parse_timestamp(value) when is_binary(value), do: DateTime.from_iso8601(value)
+  defp parse_timestamp(_), do: {:error, :timestamp_unavailable}
 
   defp check_traces(events, turns) do
     truncated_turn? =
