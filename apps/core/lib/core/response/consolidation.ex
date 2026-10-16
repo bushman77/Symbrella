@@ -12,8 +12,6 @@ defmodule Core.Response.Consolidation do
   reference year. No personal memories, LLM-authored facts or generic prose.
   Opt-in using :core, :symbolic_consolidation_enabled? after DB migration.
   """
-  import Bitwise
-
   alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
   alias Db.ConsolidatedConclusions
 
@@ -115,7 +113,8 @@ defmodule Core.Response.Consolidation do
           same_year = Enum.filter(candidates, &(&1.reference_year == first.reference_year))
 
           with true <- unambiguous?(same_year),
-               {:ok, claims} <- rehydrate_claims(first.premises),
+               {:ok, stored_claims} <- rehydrate_claims(first.premises),
+               {:ok, claims} <- reorder_claims(stored_claims, names),
                true <- Enum.map(claims, & &1.subject) == names,
                true <- Enum.all?(claims, &(&1.census_year == first.reference_year)),
                evidence <- evidence_for(names, claims),
@@ -149,10 +148,12 @@ defmodule Core.Response.Consolidation do
   defp unambiguous?(_), do: false
 
   defp claim_values(claims) when is_list(claims) do
-    Enum.map(claims, fn c ->
+    claims
+    |> Enum.map(fn c ->
       {c["subject"], c["value"], c["census_year"],
        c["measurement_type"], c["source_type"], c["source_table"]}
     end)
+    |> Enum.sort()
   end
 
   defp claim_values(_), do: nil
@@ -189,6 +190,18 @@ defmodule Core.Response.Consolidation do
       end),
       attempts: [], attempted_count: 0
     }
+  end
+
+  defp reorder_claims(claims, names) do
+    ordered = Enum.map(names, fn name ->
+      Enum.find(claims, &(&1.subject == name))
+    end)
+
+    if length(ordered) == 2 and Enum.all?(ordered, &is_map/1) do
+      {:ok, ordered}
+    else
+      {:error, :subject_mismatch}
+    end
   end
 
   defp rehydrate_claims([a, b]) do
@@ -298,7 +311,7 @@ defmodule Core.Response.Consolidation do
     canonical = Enum.sort_by(claims, &String.downcase(&1["subject"]))
 
     fingerprint =
-      :crypto.hash(:sha256, :erlang.term_to_binary({names, canonical, derived}))
+      :crypto.hash(:sha256, :erlang.term_to_binary({canonical, canonical_proof(canonical)}))
       |> Base.encode16(case: :lower)
 
     %{
@@ -312,6 +325,8 @@ defmodule Core.Response.Consolidation do
       provenance: "source_supported_symbolic_derivation"
     }
   end
+
+  defp canonical_proof([a, b]), do: derivation([a, b])
 
   defp pair_key(names) do
     names
