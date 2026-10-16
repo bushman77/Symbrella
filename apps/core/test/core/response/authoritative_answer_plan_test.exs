@@ -216,6 +216,29 @@ defmodule Core.Response.AuthoritativeAnswerPlanTest do
       )
   end
 
+  test "public response planner identifies symbolic proof as its answer source" do
+    sid = session_id()
+    assert :ok = VerifiedPopulation.record(sid, source_evidence())
+
+    si = %{
+      session_id: sid,
+      intent: :unknown,
+      confidence: 0.4,
+      text: "Which of those cities has the larger population?",
+      symbolic_frame: event_frame()
+    }
+
+    {_tone, answer, meta} = Core.Response.plan(si, %{})
+
+    assert meta.response_source == :symbolic_verified
+    assert meta.response_reflection.authoritative_plan.status == :enforced
+    assert answer =~ "Kamloops BC"
+    assert answer =~ "6,912"
+    assert Enum.all?(@urls, &String.contains?(answer, &1))
+    assert meta.curiosity_probe == nil
+    refute_receive {:style_llm_called, _, _}, 30
+  end
+
   test "even malicious or incorrect model wording cannot change the verified answer" do
     Application.put_env(:core, :llm_synthesis,
       Application.get_env(:core, :llm_synthesis)
