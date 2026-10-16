@@ -36,7 +36,8 @@ defmodule Core.Response.VerifiedPopulation do
         Enum.map(results, fn entry ->
           if entry.status == :source_supported do
             Map.take(entry, [
-              :subject, :status, :value, :census_year, :source_url, :source_type
+              :subject, :status, :value, :census_year, :source_url, :source_type,
+              :measurement_type, :reference_year, :source_table
             ])
           else
             %{subject: entry.subject, status: :unavailable}
