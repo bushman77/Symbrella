@@ -62,6 +62,7 @@ defmodule Core.Tools.EvidenceResolver do
     population_opts =
       Keyword.get(opts, :statistics_canada_opts,
         Keyword.get(cfg, :statistics_canada_opts, []))
+      |> Keyword.put_new(:timeout_ms, 12_000)
     custom_coordinates? =
       Keyword.has_key?(opts, :coordinate_provider) or
         Keyword.has_key?(cfg, :coordinate_provider)
