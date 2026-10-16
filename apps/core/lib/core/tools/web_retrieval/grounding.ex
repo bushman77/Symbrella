@@ -291,14 +291,23 @@ defmodule Core.Tools.WebRetrieval.Grounding do
          true <- Enum.map([a, b], & &1.subject) == names,
          true <- a.census_year == b.census_year and a.census_year == year,
          true <- difference == abs(a.value - b.value),
-         true <- (if a.value == b.value,
-           do: outcome == :equal and is_nil(winner) and is_nil(loser),
-           else: outcome == :greater and
-             winner == (if a.value > b.value, do: a.subject, else: b.subject) and
-             loser == (if a.value < b.value, do: a.subject, else: b.subject)) do
+         true <- valid_comparison_outcome?(a, b, outcome, winner, loser) do
       support
     else
       _ -> nil
+    end
+  end
+
+  defp valid_comparison_outcome?(a, b, outcome, winner, loser) do
+    cond do
+      a.value == b.value ->
+        outcome == :equal and is_nil(winner) and is_nil(loser)
+
+      a.value > b.value ->
+        outcome == :greater and winner == a.subject and loser == b.subject
+
+      true ->
+        outcome == :greater and winner == b.subject and loser == a.subject
     end
   end
 
