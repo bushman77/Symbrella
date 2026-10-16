@@ -153,6 +153,8 @@ defmodule SymbrellaWeb.NeuralShadowTest do
 
     first = send_record.(turn("live-a", 1, 0.25))
     assert first.status == :shadow_only
+    assert first.checkpoint_assessment.status == :not_ready
+    assert first.checkpoint_assessment.deployment_authorized? == false
     assert first.predictions == 1
     assert first.evaluations == 0
     assert first.pending_sessions == 1
