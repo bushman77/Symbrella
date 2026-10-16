@@ -20,7 +20,9 @@ defmodule Core.Brain.WM.Comprehension do
   @max_terms 6
 
   @spec recall(map(), keyword()) :: map()
-  def recall(%{} = si, opts \\ []) when is_list(opts) do
+  def recall(si, opts \\ [])
+
+  def recall(%{} = si, opts) when is_list(opts) do
     with true <- Keyword.get(opts, :comprehension_wm?, true),
          session when not is_nil(session) <- field(si, :session_id),
          %{} = item <- find_frame(session),
@@ -41,7 +43,9 @@ defmodule Core.Brain.WM.Comprehension do
   def recall(si, _opts), do: si
 
   @spec store(map(), keyword()) :: map()
-  def store(%{} = si, opts \\ []) when is_list(opts) do
+  def store(si, opts \\ [])
+
+  def store(%{} = si, opts) when is_list(opts) do
     with true <- Keyword.get(opts, :comprehension_wm?, true),
          session when not is_nil(session) <- field(si, :session_id),
          %{} = comprehension <- field(si, :comprehension),
