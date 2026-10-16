@@ -171,6 +171,13 @@ defmodule Core.Response.LlmPrompt do
       "has not resolved it."
   end
 
+  defp unresolved_conclusion_shaping(%{kind: :missing_reasoning_link}) do
+    "UNRESOLVED INFERENCE LINK: The stored supported relationships do not " <>
+      "establish the requested two-step conclusion. Do not infer from topic " <>
+      "similarity, inconsistent dates, or an absent intermediate fact. " <>
+      "Request or retrieve the missing premise before drawing a conclusion."
+  end
+
   defp unresolved_conclusion_shaping(%{kind: :invalid_derivation}) do
     "UNRESOLVED INFERENCE: A stored conclusion failed independent " <>
       "re-derivation and must not be treated as established knowledge."
