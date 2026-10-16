@@ -16,6 +16,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
   @table_id "17-10-0155-01"
   @pid "17100155"
   @metadata_url "https://www150.statcan.gc.ca/t1/wds/rest/getFullTableDownloadCSV/17100155/en"
+  @direct_zip_url "https://www150.statcan.gc.ca/n1/tbl/csv/17100155-eng.zip"
   @source_url "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710015501"
   @user_agent "Symbrella/0.1 (https://github.com/bushman77/Symbrella)"
   @cache_days 7
@@ -217,39 +218,168 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     end
   end
 
+  # First use the WDS discovery service, then the independently documented
+  # official direct table URL. Do not collapse errors into a generic message:
+  # Termux needs to distinguish DNS/SSL, HTTP, ZIP and CSV errors.
   defp fetch_latest_csv(opts) do
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     timeout = Keyword.get(opts, :timeout_ms, 10_000)
+
+    case metadata_download_url(fetch, timeout) do
+      {:ok, url} ->
+        case download_table(fetch, url, timeout) do
+          {:ok, _} = success ->
+            success
+
+          {:error, discovered_error} ->
+            if url == @direct_zip_url do
+              {:error, {:official_download_failed, %{metadata: :ok, zip: discovered_error}}}
+            else
+              fallback_table(fetch, timeout, %{metadata: :ok, discovered_zip: discovered_error})
+            end
+        end
+
+      {:error, metadata_error} ->
+        fallback_table(fetch, timeout, %{metadata: metadata_error})
+    end
+  end
+
+  defp fallback_table(fetch, timeout, previous) do
+    case download_table(fetch, @direct_zip_url, timeout) do
+      {:ok, _} = success -> success
+      {:error, reason} ->
+        {:error, {:official_download_failed, Map.put(previous, :direct_zip, reason)}}
+    end
+  end
+
+  defp metadata_download_url(fetch, timeout) do
     args = [
       headers: [{"user-agent", @user_agent}, {"accept", "application/json"}],
       receive_timeout: timeout, retry: false
     ]
 
-    try do
-      with {:ok, %{status: 200, body: %{"status" => "SUCCESS", "object" => url}}} <-
-             fetch.(@metadata_url, args),
-           true <- valid_download_url?(url),
-           {:ok, %{status: 200, body: zip}} <-
-             fetch.(url, Keyword.put(args, :headers, [
-               {"user-agent", @user_agent},
-               {"accept", "application/zip"}
-             ])),
-           true <- is_binary(zip) and byte_size(zip) <= @max_zip_bytes,
-           {:ok, files} <- :zip.extract({:binary, zip}, [:memory]),
-           {_, csv} when is_binary(csv) <- Enum.find(files, fn {name, _} ->
-             Path.basename(to_string(name)) == "#{@pid}.csv"
-           end),
-           true <- byte_size(csv) <= @max_csv_bytes do
-        {:ok, csv}
-      else
-        _ -> {:error, :statistics_canada_download_unavailable}
-      end
-    rescue
-      _ -> {:error, :statistics_canada_download_unavailable}
-    catch
-      :exit, _ -> {:error, :statistics_canada_download_unavailable}
+    case safe_fetch(fetch, @metadata_url, args, :metadata) do
+      {:ok, %{status: 200, body: body}} ->
+        case decode_metadata(body) do
+          %{"status" => "SUCCESS", "object" => url} ->
+            if valid_download_url?(url),
+              do: {:ok, url},
+              else: {:error, :invalid_official_download_url}
+
+          %{"status" => "FAILED"} ->
+            {:error, :metadata_api_rejected}
+
+          _ ->
+            {:error, :unexpected_metadata_response}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, {:metadata_http_status, status}}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :unexpected_metadata_response}
     end
   end
+
+  defp decode_metadata(%{} = body), do: body
+  defp decode_metadata(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{} = decoded} -> decoded
+      _ -> nil
+    end
+  end
+  defp decode_metadata(_), do: nil
+
+  defp download_table(fetch, url, timeout) do
+    args = [
+      headers: [{"user-agent", @user_agent}, {"accept", "application/zip"}],
+      receive_timeout: timeout, retry: false
+    ]
+
+    case safe_fetch(fetch, url, args, :zip) do
+      {:ok, %{status: 200, body: data}} ->
+        extract_table_csv(data)
+
+      {:ok, %{status: status}} ->
+        {:error, {:zip_http_status, status}}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :unexpected_zip_response}
+    end
+  end
+
+  defp extract_table_csv(data) when is_binary(data) do
+    cond do
+      byte_size(data) > @max_zip_bytes ->
+        {:error, {:zip_too_large, byte_size(data)}}
+
+      not String.starts_with?(data, "PK") ->
+        {:error, :not_a_zip_archive}
+
+      true ->
+        case :zip.extract({:binary, data}, [:memory]) do
+          {:ok, files} ->
+            case Enum.find(files, fn {name, _} ->
+                   Path.basename(to_string(name)) == "#{@pid}.csv"
+                 end) do
+              {_name, csv} when is_binary(csv) and byte_size(csv) <= @max_csv_bytes ->
+                if valid_csv_header?(csv),
+                  do: {:ok, csv},
+                  else: {:error, :invalid_csv_header}
+
+              {_name, csv} when is_binary(csv) ->
+                {:error, {:csv_too_large, byte_size(csv)}}
+
+              _ ->
+                {:error, :official_csv_missing_from_archive}
+            end
+
+          {:error, _} ->
+            {:error, :invalid_zip_archive}
+        end
+    end
+  end
+
+  defp extract_table_csv(_), do: {:error, :invalid_zip_body}
+
+  defp valid_csv_header?(csv) when is_binary(csv) do
+    case String.split(csv, "\n", parts: 2) do
+      [header, _] ->
+        fields = csv_fields(String.trim_leading(header, "\uFEFF"))
+        Enum.all?(["REF_DATE", "GEO", "VALUE"], &(&1 in fields))
+
+      _ ->
+        false
+    end
+  end
+
+  defp safe_fetch(fetch, url, args, stage) do
+    try do
+      fetch.(url, args)
+    rescue
+      error ->
+        {:error, {stage, :exception, summarize_reason(error)}}
+    catch
+      :exit, reason ->
+        {:error, {stage, :exit, summarize_reason(reason)}}
+
+      :throw, reason ->
+        {:error, {stage, :throw, summarize_reason(reason)}}
+    end
+    |> case do
+      {:error, reason} -> {:error, {stage, :transport, summarize_reason(reason)}}
+      result -> result
+    end
+  end
+
+  defp summarize_reason(reason),
+    do: reason |> inspect(limit: 8, printable_limit: 180) |> String.slice(0, 260)
 
   defp valid_download_url?(url) when is_binary(url) do
     case URI.parse(url) do
