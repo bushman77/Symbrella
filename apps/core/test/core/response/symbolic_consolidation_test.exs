@@ -190,6 +190,30 @@ defmodule Core.Response.SymbolicConsolidationTest do
     assert id == issue.id
   end
 
+  test "a new year-specific supported proof resolves its outstanding evidence gap", %{
+    names: names
+  } do
+    capture!(sourced_context(names))
+    query = fresh_context(names, "Which place had a larger population in 2022?")
+
+    first = Consolidation.recall(query)
+    issue_id = first.consolidation_issue.id
+    assert Db.get!(CognitiveIssue, issue_id).status == "open"
+
+    newer = capture!(sourced_context(names, [101_000, 95_000], [2022, 2022]))
+    assert newer.reference_year == 2022
+
+    resolved = Db.get!(CognitiveIssue, issue_id)
+    assert resolved.status == "resolved"
+    assert resolved.resolution["proof_fingerprint"] == newer.fingerprint
+    assert resolved.resolved_at != nil
+
+    second = Consolidation.recall(query)
+    assert second.web_evidence.support.year == 2022
+    assert second.web_evidence.support.difference == 6_000
+    refute Map.has_key?(second, :consolidation_issue)
+  end
+
   test "contradictory supported premises remain unresolved instead of selecting latest claim", %{
     names: names
   } do
