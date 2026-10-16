@@ -19,6 +19,8 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
+  alias Core.Response.PromptBudget
+  alias Core.Response.PromptHistoryPolicy
   alias Core.Response.ResponseFrame
   alias Core.Response.AuthoritativeAnswerPlan
   alias Core.Response.PopulationComparison
@@ -227,26 +229,29 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp do_freeform_llm_generate(user_text, context, history, answer_target, prompt_type) do
-    system_prompt =
-      build_prompt(context, prompt_type)
-      |> then(fn prompt ->
-        if is_binary(answer_target) and
-             AnswerAdequacy.factual_question?(answer_target) and
-             String.trim(answer_target) != String.trim(user_text) do
-          prompt <> "\nThe latest user turn requests an answer to this previous " <>
-            "question from the SAME session: " <> inspect(answer_target) <>
-            ". Answer that question directly; do not repeat it or answer " <>
-            "the follow-up as a standalone statement."
-        else
-          prompt
-        end
-      end)
+    cfg = Application.get_env(:core, :llm_synthesis, [])
+    selection =
+      PromptHistoryPolicy.active_history(
+        history, context, user_text, answer_target,
+        mode: Keyword.get(cfg, :history_mode, :full),
+        recent_pairs: Keyword.get(cfg, :selective_recent_pairs, 2)
+      )
 
+    render = fn ctx -> build_prompt_with_target(ctx, prompt_type, user_text, answer_target) end
+    system_prompt = render.(context)
+
+    # Always compare against the SAME prompt and original history. Full history
+    # remains the default. The counterfactual candidate does not call the LLM.
+    budget =
+      PromptBudget.measure(context, render, history, selection.history,
+        selection.actual_history, user_text)
+
+    emit_prompt_budget(budget, context, selection)
     emit_prompt_event(system_prompt, user_text, context)
 
     messages =
       [%{"role" => "system", "content" => system_prompt}] ++
-        history ++
+        selection.actual_history ++
         [%{"role" => "user", "content" => user_text}]
 
     if log_prompts?() do
@@ -492,6 +497,52 @@ defmodule Core.Response.LlmSynthesis do
         selected_source: Map.get(trace, :selected_source),
         initial_issues: Map.get(trace, :initial_issues, []),
         candidate_issues: Map.get(trace, :candidate_issues, [])
+      }
+    )
+  end
+
+  defp build_prompt_with_target(context, prompt_type, user_text, answer_target) do
+    prompt = build_prompt(context, prompt_type)
+
+    if is_binary(answer_target) and
+         AnswerAdequacy.factual_question?(answer_target) and
+         String.trim(answer_target) != String.trim(user_text) do
+      prompt <> "\nThe latest user turn requests an answer to this previous " <>
+        "question from the SAME session: " <> inspect(answer_target) <>
+        ". Answer that question directly; do not repeat it or answer " <>
+        "the follow-up as a standalone statement."
+    else
+      prompt
+    end
+  end
+
+  # Content-free telemetry: never publish the recalled text, raw history,
+  # system prompt, or source excerpts in this budget event.
+  defp emit_prompt_budget(budget, context, selection) do
+    components = budget.actual.components
+    Telemetry.emit(
+      [:core, :response, :prompt_budget],
+      %{
+        estimated_input_tokens: budget.actual.total,
+        estimated_instruction_tokens: components.instructions,
+        estimated_history_tokens: components.history,
+        estimated_episodic_tokens: components.episodic_recall,
+        estimated_evidence_tokens: components.verified_evidence,
+        estimated_user_tokens: components.current_user,
+        estimated_full_tokens: budget.full.total,
+        estimated_selective_tokens: budget.selective.total,
+        estimated_savings_tokens: budget.potential_savings_tokens,
+        estimated_savings_percent: budget.potential_savings_percent
+      },
+      %{
+        session_id: Map.get(context, :session_id, :global),
+        estimator: budget.estimator,
+        history_mode: selection.mode,
+        selection_eligible?: selection.eligible?,
+        selection_applied?: selection.applied?,
+        selection_reason: selection.reason,
+        full_history_messages: budget.full.history_message_count,
+        actual_history_messages: budget.actual.history_message_count
       }
     )
   end
