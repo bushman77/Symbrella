@@ -27,7 +27,7 @@ defmodule Core.Response.PromptBudgetComparisonTest do
 
       answer =
         if String.contains?(text, "copper-fern-orbit"),
-          do: "The nickname was copper-fern-orbit.",
+          do: "I recall the nickname copper-fern-orbit.",
           else: "I cannot recall the nickname."
 
       {:reply, {:ok, %{content: answer}}, owner}
