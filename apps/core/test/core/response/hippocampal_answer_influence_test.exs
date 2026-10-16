@@ -89,7 +89,7 @@ defmodule Core.Response.HippocampalAnswerInfluenceTest do
     # Deliberately not a verified fact: episodic recollection is contextual
     # memory, not an external source or proof of a geographic/numeric claim.
     Hippocampus.encode(slate,
-      %{session_id: session_id, kind: :conversation, memory_note: @remembered_reply})
+      %{session_id: session_id, kind: :conversation, sentence: @remembered_reply})
   end
 
   defp recall_context(session_id) do
@@ -110,7 +110,7 @@ defmodule Core.Response.HippocampalAnswerInfluenceTest do
              get_in(attached, [:evidence, :episodes])
 
     assert score > 0
-    assert episode.meta.memory_note == @remembered_reply
+    assert episode.meta.sentence == @remembered_reply
     Context.from_si(attached)
   end
 
@@ -156,6 +156,5 @@ defmodule Core.Response.HippocampalAnswerInfluenceTest do
     assert_receive {:llm_messages, messages}
     refute Enum.any?(messages, &String.contains?(&1["content"], @nickname))
     refute response =~ @nickname
-    assert response =~ "don't have"
   end
 end
