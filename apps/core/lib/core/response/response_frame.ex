@@ -248,6 +248,8 @@ defmodule Core.Response.ResponseFrame do
     end
   end
 
+  defp sourced_evidence(_), do: nil
+
   # Preserve the historical response-frame shape for providers without
   # explicit measurement metadata. Optional evidence fields must not be
   # inserted as nil: existing consumers compare these maps exactly.
@@ -259,8 +261,6 @@ defmodule Core.Response.ResponseFrame do
       end
     end)
   end
-
-  defp sourced_evidence(_), do: nil
 
   defp evidence_line(%{
          kind: :population_comparison,
