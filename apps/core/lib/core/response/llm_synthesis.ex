@@ -258,18 +258,23 @@ defmodule Core.Response.LlmSynthesis do
             if candidate_review.status == :accept and validated == candidate do
               {candidate, candidate_review,
                %{attempted?: true, outcome: :accepted, source: :model_revision,
-                 prior_issues: first_reflection.issues}}
+                 prior_issues: first_reflection.issues,
+                 first_draft: String.slice(first_reflection.draft_text || "", 0, 500),
+                 candidate: String.slice(candidate, 0, 500)}}
             else
               {original_out, first_reflection,
                %{attempted?: true, outcome: :rejected, source: :core_fallback,
                  prior_issues: first_reflection.issues,
-                 candidate_issues: candidate_review.issues}}
+                 candidate_issues: candidate_review.issues,
+                 first_draft: String.slice(first_reflection.draft_text || "", 0, 500),
+                 candidate: String.slice(candidate, 0, 500)}}
             end
 
           _ ->
             {original_out, first_reflection,
              %{attempted?: true, outcome: :unavailable, source: :core_fallback,
-               prior_issues: first_reflection.issues}}
+               prior_issues: first_reflection.issues,
+               first_draft: String.slice(first_reflection.draft_text || "", 0, 500)}}
         end
 
       {out, Map.put(review, :grounded_revision, trace)}
