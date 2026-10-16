@@ -225,22 +225,93 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     fetch = Keyword.get(opts, :fetch, &Req.get/2)
     timeout = Keyword.get(opts, :timeout_ms, 10_000)
 
-    case metadata_download_url(fetch, timeout) do
-      {:ok, url} ->
-        case download_table(fetch, url, timeout) do
-          {:ok, _} = success ->
-            success
+    result =
+      case metadata_download_url(fetch, timeout) do
+        {:ok, url} ->
+          case download_table(fetch, url, timeout) do
+            {:ok, _} = success ->
+              success
 
-          {:error, discovered_error} ->
-            if url == @direct_zip_url do
-              {:error, {:official_download_failed, %{metadata: :ok, zip: discovered_error}}}
-            else
-              fallback_table(fetch, timeout, %{metadata: :ok, discovered_zip: discovered_error})
-            end
+            {:error, discovered_error} ->
+              if url == @direct_zip_url do
+                {:error, {:official_download_failed, %{metadata: :ok, zip: discovered_error}}}
+              else
+                fallback_table(fetch, timeout, %{metadata: :ok, discovered_zip: discovered_error})
+              end
+          end
+
+        {:error, metadata_error} ->
+          fallback_table(fetch, timeout, %{metadata: metadata_error})
+      end
+
+    maybe_curl_fallback(result, opts, timeout)
+  end
+
+  # Req can time out on some Termux networks even though curl can download
+  # the official archive. Only fall back for an actual ZIP transport failure,
+  # not for an HTTP rejection or malformed upstream content.
+  defp maybe_curl_fallback({:error, {:official_download_failed, reasons}} = failure, opts, timeout) do
+    zip_error = Map.get(reasons, :direct_zip, Map.get(reasons, :zip))
+    injected_fetch? = Keyword.has_key?(opts, :fetch)
+    injected_curl? = Keyword.has_key?(opts, :curl_download)
+
+    if match?({:zip, :transport, _}, zip_error) and
+         (not injected_fetch? or injected_curl?) do
+      curl_download = Keyword.get(opts, :curl_download, &curl_download_zip/2)
+
+      outcome =
+        try do
+          case curl_download.(@direct_zip_url, timeout) do
+            {:ok, zip} -> extract_table_csv(zip)
+            {:error, _} = error -> error
+            _ -> {:error, :unexpected_curl_response}
+          end
+        rescue
+          error -> {:error, {:curl_exception, summarize_reason(error)}}
         end
 
-      {:error, metadata_error} ->
-        fallback_table(fetch, timeout, %{metadata: metadata_error})
+      case outcome do
+        {:ok, _} = success -> success
+        {:error, reason} ->
+          {:error, {:official_download_failed, Map.put(reasons, :curl, reason)}}
+      end
+    else
+      failure
+    end
+  end
+  defp maybe_curl_fallback(result, _opts, _timeout), do: result
+
+  # Download into a uniquely named temporary file instead of capturing a
+  # binary ZIP in stdout. Do not force IPv4: that broke DNS on Termux.
+  defp curl_download_zip(url, timeout) do
+    case System.find_executable("curl") do
+      nil ->
+        {:error, :curl_not_installed}
+
+      executable ->
+        path = Path.join(System.tmp_dir!(),
+          "symbrella-statcan-#{System.unique_integer([:positive, :monotonic])}.zip")
+
+        args = [
+          "--fail", "--location", "--silent", "--show-error",
+          "--proto", "=https", "--proto-redir", "=https",
+          "--connect-timeout", "15",
+          "--max-time", Integer.to_string(max(div(timeout + 999, 1000) * 2, 60)),
+          "--max-filesize", Integer.to_string(@max_zip_bytes),
+          "--output", path, url
+        ]
+
+        try do
+          case System.cmd(executable, args, stderr_to_stdout: true) do
+            {_output, 0} -> File.read(path)
+            {message, status} ->
+              {:error, {:curl_exit_status, status, String.slice(message, 0, 200)}}
+          end
+        rescue
+          error -> {:error, {:curl_exception, summarize_reason(error)}}
+        after
+          File.rm(path)
+        end
     end
   end
 
