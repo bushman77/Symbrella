@@ -183,7 +183,8 @@ defmodule Core.Response.LlmPromptEvents do
       :final_text,
       :at_ms,
       :evidence_revision,
-      :grounded_revision
+      :grounded_revision,
+      :authoritative_plan
     ])
   end
 
