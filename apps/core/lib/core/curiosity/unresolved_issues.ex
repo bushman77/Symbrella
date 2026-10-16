@@ -9,7 +9,9 @@ defmodule Core.Curiosity.UnresolvedIssues do
   alias Db.CognitiveIssues
 
   @spec candidates(pos_integer()) :: [map()]
-  def candidates(limit \\ 5) when is_integer(limit) and limit > 0 do
+  def candidates(limit \\ 5)
+
+  def candidates(limit) when is_integer(limit) and limit > 0 do
     if Application.get_env(:core, :symbolic_consolidation_enabled?, false) do
       CognitiveIssues.pending(min(limit, 20))
       |> Enum.map(fn issue ->
