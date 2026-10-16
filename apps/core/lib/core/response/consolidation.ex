@@ -15,6 +15,7 @@ defmodule Core.Response.Consolidation do
   require Logger
 
   alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
+  alias Core.Reasoning.PopulationChain
   alias Db.{CognitiveIssues, ConsolidatedConclusions}
 
   @source_types [:wikidata, :wikipedia, :statistics_canada]
@@ -122,11 +123,21 @@ defmodule Core.Response.Consolidation do
 
       case candidates do
         [] ->
-          if is_integer(desired_year) and remembered != [] do
-            open_issue(context, names, :missing_dated_evidence, desired_year,
-              %{stored_years: Enum.map(remembered, & &1.reference_year) |> Enum.uniq()})
-          else
-            context
+          # No direct A-vs-C proof: try composing two independently stored
+          # source-backed comparisons A-vs-B and B-vs-C before giving up.
+          composed = PopulationChain.recall(context, names, desired_year)
+
+          cond do
+            is_map(Map.get(composed, :web_evidence)) or
+                is_map(Map.get(composed, :consolidation_issue)) ->
+              composed
+
+            is_integer(desired_year) and remembered != [] ->
+              open_issue(context, names, :missing_dated_evidence, desired_year,
+                %{stored_years: Enum.map(remembered, & &1.reference_year) |> Enum.uniq()})
+
+            true ->
+              context
           end
 
         [first | _] ->
@@ -411,7 +422,10 @@ defmodule Core.Response.Consolidation do
   end
 
   defp consolidated_origin?(context) do
-    get_in(context, [:web_evidence, :evidence_origin]) == :consolidated_symbolic_memory
+    get_in(context, [:web_evidence, :evidence_origin]) in [
+      :consolidated_symbolic_memory,
+      :composed_symbolic_premises
+    ]
   end
 
   defp enabled?, do: Application.get_env(:core, :symbolic_consolidation_enabled?, false) == true
