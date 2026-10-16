@@ -20,6 +20,11 @@ defmodule Core.Tools.WebRetrievalTest do
     end
   end
 
+  # Keep Wikipedia fallback tests independent of the live Wikidata API.
+  defmodule UnavailablePopulation do
+    def population(_subject, _opts), do: {:error, :dated_population_unavailable}
+  end
+
   defmodule IrrelevantRailgunPages do
     def search(_query, _opts) do
       {:ok,
@@ -112,6 +117,14 @@ defmodule Core.Tools.WebRetrievalTest do
     }
   end
 
+  defp wikipedia_population_evidence do
+    WebRetrieval.enrich(context(),
+      enabled?: true,
+      provider: StubProvider,
+      coordinate_provider: UnavailablePopulation
+    )
+  end
+
   test "only explicit or supported geographic questions trigger remote lookup" do
     assert WebRetrieval.query_for(context()) == {"Maple Ridge, BC population census", :population}
 
@@ -127,7 +140,7 @@ defmodule Core.Tools.WebRetrievalTest do
   end
 
   test "bounded retrieval extracts source-backed census fact" do
-    result = WebRetrieval.enrich(context(), enabled?: true, provider: StubProvider)
+    result = wikipedia_population_evidence()
 
     assert result.web_evidence.status == :retrieved
     assert result.web_evidence.query == "Maple Ridge, BC population census"
@@ -135,10 +148,17 @@ defmodule Core.Tools.WebRetrievalTest do
     assert result.web_evidence.support.value == 90_990
     assert result.web_evidence.support.census_year == 2021
     assert result.web_evidence.support.status == :source_supported
+    assert result.web_evidence.attempted_count == 2
+    assert Enum.map(result.web_evidence.attempts, & &1.status) ==
+             [:unavailable, :source_supported]
+    assert String.starts_with?(
+             result.web_evidence.support.source_url,
+             "https://en.wikipedia.org/wiki/"
+           )
   end
 
   test "prompt exposes bounded external evidence as untrusted material" do
-    result = WebRetrieval.enrich(context(), enabled?: true, provider: StubProvider)
+    result = wikipedia_population_evidence()
     prompt = LlmPrompt.build_system_prompt(result)
 
     assert prompt =~ "WEB EVIDENCE"
@@ -148,7 +168,7 @@ defmodule Core.Tools.WebRetrievalTest do
   end
 
   test "reflection replaces an unsupported number with cited retrieved evidence" do
-    result = WebRetrieval.enrich(context(), enabled?: true, provider: StubProvider)
+    result = wikipedia_population_evidence()
 
     {:ok, final, review} =
       ReflectionLoop.review("What is its population?", "Its population is 13,000.", result)
@@ -162,7 +182,7 @@ defmodule Core.Tools.WebRetrievalTest do
   end
 
   test "source-backed exact number with citation is not rejected as unverified" do
-    result = WebRetrieval.enrich(context(), enabled?: true, provider: StubProvider)
+    result = wikipedia_population_evidence()
     sourced = Grounding.align("Anything", result)
     assert Grounding.supports?(sourced, result)
 
