@@ -14,6 +14,7 @@ defmodule Core.Response.PopulationComparison do
   # Never overwrite a stronger or newer source already attached by another
   # retrieval channel (including revalidated consolidated symbolic premises).
   def recall(%{web_evidence: %{}} = context), do: context
+  def recall(%{consolidation_issue: %{}} = context), do: context
 
   def recall(%{} = context) do
     case comparison_subjects(context) do
