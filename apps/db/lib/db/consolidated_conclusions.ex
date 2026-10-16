@@ -43,4 +43,39 @@ defmodule Db.ConsolidatedConclusions do
   end
 
   def recent(_, _), do: []
+
+  @doc """
+  Find source-backed comparison premises mentioning one subject.
+
+  The JSONB array stores compact original claims; querying through
+  `unnest/1` avoids a full table download. Return :too_many_candidates
+  rather than silently ignoring conflicting rows beyond the limit.
+  """
+  @spec for_subject(String.t(), pos_integer()) ::
+          {:ok, [ConsolidatedConclusion.t()]} | {:error, :too_many_candidates}
+  def for_subject(subject, limit \\ 50)
+
+  def for_subject(subject, limit)
+      when is_binary(subject) and byte_size(subject) > 0 and
+             is_integer(limit) and limit > 0 do
+    bounded = min(limit, 100)
+
+    rows =
+      Db.all(
+        from(c in ConsolidatedConclusion,
+          where: c.kind == "population_comparison" and
+            fragment(
+              "EXISTS (SELECT 1 FROM unnest(?) AS p WHERE p->>'subject' = ?)",
+              c.premises, ^subject
+            ),
+          order_by: [desc: c.reference_year, desc: c.id],
+          limit: ^(bounded + 1))
+      )
+
+    if length(rows) > bounded,
+      do: {:error, :too_many_candidates},
+      else: {:ok, rows}
+  end
+
+  def for_subject(_, _), do: {:ok, []}
 end
