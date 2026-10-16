@@ -19,30 +19,47 @@ defmodule Core.Response.PopulationComparison do
   def recall(%{} = context) do
     case comparison_subjects(context) do
       [_, _] = names ->
-        # Cached counts describe a specific historical measurement. A current
-        # or explicit-year query must be resolved against that requested date,
-        # not answered from an unrelated same-session cache entry.
-        if dated_or_freshness_request?(Map.get(context, :user_text, "")) do
-          context
-        else
-          case VerifiedPopulation.recall(Map.get(context, :session_id), names) do
-            %{} = evidence -> Map.put(context, :web_evidence, evidence)
-            _ -> context
-          end
+        case VerifiedPopulation.recall(Map.get(context, :session_id), names) do
+          %{support: %{results: results}} = evidence when is_list(results) ->
+            if compatible_historical_request?(Map.get(context, :user_text, ""), results),
+              do: Map.put(context, :web_evidence, evidence),
+              else: context
+
+          _ -> context
         end
 
       _ -> context
     end
   end
 
-  defp dated_or_freshness_request?(text) when is_binary(text) do
-    Regex.match?(
-      ~r/\b(?:latest|current|currently|today|now|this\s+year|most\s+recent|up\s+to\s+date|as\s+of\s+now|(?:19|20)\d{2})\b/iu,
-      text
-    )
+  # Preserve same-session cache reuse for the SAME recorded year, but do not
+  # silently answer a request for current values or a different year.
+  defp compatible_historical_request?(text, results) when is_binary(text) do
+    fresh? =
+      Regex.match?(
+        ~r/\b(?:latest|current|currently|today|now|this\s+year|most\s+recent|up\s+to\s+date|as\s+of\s+now)\b/iu,
+        text
+      )
+
+    years =
+      Regex.scan(~r/\b(?:19|20)\d{2}\b/u, text)
+      |> List.flatten()
+      |> Enum.uniq()
+
+    cond do
+      fresh? -> false
+      years == [] -> true
+      length(years) != 1 -> false
+      true ->
+        year = years |> hd() |> String.to_integer()
+        Enum.all?(results, fn row ->
+          Map.get(row, :status) == :source_supported and
+            Map.get(row, :census_year) == year
+        end)
+    end
   end
 
-  defp dated_or_freshness_request?(_), do: false
+  defp compatible_historical_request?(_, _), do: false
 
   @spec attach(map()) :: map()
   def attach(%{} = context) do
