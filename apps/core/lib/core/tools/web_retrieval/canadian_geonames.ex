@@ -61,6 +61,8 @@ defmodule Core.Tools.WebRetrieval.CanadianGeoNames do
   @spec proximity(String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def proximity(subject, target, opts \\ [])
+
+  def proximity(subject, target, opts)
       when is_binary(subject) and is_binary(target) and is_list(opts) do
     {_, region} = split_name(subject)
 
