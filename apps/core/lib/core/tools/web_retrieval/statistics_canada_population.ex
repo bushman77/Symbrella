@@ -80,6 +80,8 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
         {name, index}
       end)
 
+      current_year = Date.utc_today().year
+
       records =
         data
         |> Enum.reduce([], fn line, acc ->
@@ -96,7 +98,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
                  status not in ["..", "x", "F"] do
               case {Integer.parse(date), Integer.parse(value)} do
                 {{year, ""}, {count, ""}}
-                when year >= 1900 and year <= 2100 and
+                when year >= 1900 and year <= current_year and
                      count > 0 and count <= 100_000_000 ->
                   [%{year: year, value: count, dguid: dguid,
                      geo: geo} | acc]
