@@ -13,6 +13,7 @@ defmodule Core.Response.AuthoritativeAnswerPlanTest do
     def start_link(test_pid),
       do: GenServer.start_link(__MODULE__, {test_pid, "BRIEF"}, name: __MODULE__)
 
+    @impl true
     def init(state), do: {:ok, state}
 
     def set_reply(reply), do: GenServer.call(__MODULE__, {:reply, reply})
