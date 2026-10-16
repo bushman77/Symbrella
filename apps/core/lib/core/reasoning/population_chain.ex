@@ -67,7 +67,11 @@ defmodule Core.Reasoning.PopulationChain do
           Enum.filter(paths, &(&1.year == year))
 
         :unspecified ->
-          latest = paths |> Enum.map(& &1.year) |> Enum.max(fn -> nil end)
+          latest =
+            case Enum.map(paths, & &1.year) do
+              [] -> nil
+              years -> Enum.max(years)
+            end
           if is_integer(latest), do: Enum.filter(paths, &(&1.year == latest)), else: []
       end
 
