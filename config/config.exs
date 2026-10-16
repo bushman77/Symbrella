@@ -57,6 +57,12 @@ config :core, Core.TrainingArchive,
   enabled?: config_env() == :dev,
   dir: "tmp/training"
 
+# Admit bounded, session-scoped comprehension frames to working memory after
+# semantic interpretation. Disabled in tests unless explicitly opted in;
+# this does not change the evidence gate for LIFG senses or recalled facts.
+config :core, Core.Brain.WM.Comprehension,
+  enabled?: config_env() != :test
+
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
