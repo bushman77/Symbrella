@@ -70,6 +70,10 @@ defmodule Brain.LIFGBoundaryGuardTest do
     end
   end
 
+  def boundary_event(event, measurements, metadata, pid) do
+    send(pid, {:boundary_guard_telemetry, event, measurements, metadata})
+  end
+
   describe "BoundaryGuard.sanitize/2 (raw token list guard)" do
     test "drops tokens that do not start/end on word boundaries" do
       sentence = "hello world"
@@ -103,6 +107,29 @@ defmodule Brain.LIFGBoundaryGuardTest do
       assert Enum.any?(filtered, fn t ->
                t.phrase == "hello world" and (t.mw == true or t.mw == "true")
              end)
+    end
+
+    test "standalone punctuation is ignored without a false boundary error" do
+      handler = "lifg-punctuation-#{System.unique_integer([:positive])}"
+      event = [:brain, :lifg, :stage1, :boundary_drop]
+      :ok = :telemetry.attach(handler, event, &__MODULE__.boundary_event/4, self())
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      sentence = "What is the population of Kamloops, BC?"
+      tokens = [
+        %{phrase: "What", span: {0, 4}},
+        %{phrase: "?", span: {37, 38}},
+        %{phrase: ",", span: {34, 35}},
+        %{phrase: "BC?", span: {36, 39}}
+      ]
+
+      filtered = BoundaryGuard.sanitize(tokens, sentence)
+      assert Enum.map(filtered, & &1.phrase) == ["What", "BC?"]
+      refute_receive {:boundary_guard_telemetry, ^event, _, _}
+
+      # Truly misaligned lexical fragments must still report a boundary drop.
+      assert BoundaryGuard.sanitize([%{phrase: "opula", span: {13, 18}}], sentence) == []
+      assert_receive {:boundary_guard_telemetry, ^event, %{count: 1}, %{token: "opula"}}
     end
 
     test "tokens are sorted by start position after BoundaryGuard.sanitize/2" do
