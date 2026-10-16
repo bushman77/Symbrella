@@ -125,9 +125,20 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
     :ok = GenServer.stop(writer, :normal)
     reader = start_isolated_hippocampus()
 
+    # First prove the new worker loaded our exact PostgreSQL row. This
+    # distinguishes cold-start failures from recall/scoring failures.
+    restored = GenServer.call(reader, :snapshot)
+    assert Enum.any?(restored.window, fn {_at, episode} ->
+      episode.meta.episode_id == row.id
+    end), "The fresh hippocampal worker did not rehydrate the persisted episode"
+
     current = input(session_id, marker)
+
+    # The public attach_episodes/2 API derives lexical cues before calling
+    # GenServer. Since this isolated worker uses a private name, explicitly
+    # pass the same normalized cues to the internal attachment message.
     recalled = GenServer.call(reader, {:attach, current,
-      %{ignore_head: :never, limit: 3, min_jaccard: 0.1}})
+      %{cues: [marker, "handshake"], ignore_head: :never, limit: 3, min_jaccard: 0.1}})
 
     assert [%{episode: recovered, score: score} | _] =
       get_in(recalled, [:evidence, :episodes])
@@ -184,7 +195,7 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
     session_id: session_id, marker: marker
   } do
     remembered = "The private #{marker} handshake is copper-fern-orbit."
-    assert {:ok, %Db.Episode{}} =
+    assert {:ok, %Db.Episode{} = row} =
       Db.Episode.insert(%{
         slate: %{winners: [%{lemma: marker}, %{lemma: "handshake"}]},
         meta: %{session_id: session_id, sentence: remembered, kind: :conversation},
@@ -192,13 +203,17 @@ defmodule Core.Response.HippocampalPersistenceIntegrationTest do
       })
 
     reader = start_isolated_hippocampus()
+    restored = GenServer.call(reader, :snapshot)
+    assert Enum.any?(restored.window, fn {_at, episode} ->
+      episode.meta.episode_id == row.id
+    end), "The fresh hippocampal worker did not rehydrate the persisted episode"
     different_session = session_id <> "-different"
     current = input(different_session, marker)
 
     # Backend retrieval may see a lexical candidate, but presentation must
     # enforce exact session provenance in Context.from_si/1.
     recalled = GenServer.call(reader, {:attach, current,
-      %{ignore_head: :never, limit: 3, min_jaccard: 0.1}})
+      %{cues: [marker, "handshake"], ignore_head: :never, limit: 3, min_jaccard: 0.1}})
 
     assert [%{score: score} | _] = get_in(recalled, [:evidence, :episodes])
     assert score > 0
