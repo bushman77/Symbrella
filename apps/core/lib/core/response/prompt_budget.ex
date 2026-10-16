@@ -7,8 +7,8 @@ defmodule Core.Response.PromptBudget do
   any model-specific chat template are excluded.
 
   Prompt attribution uses counterfactual rendering: rebuild the identical
-  system prompt with recollections removed, then with source-backed evidence
-  removed. This accounts for the real wording and citations injected by
+  system prompt without recollections, then without retrieved source material,
+  and finally without verified response-frame conclusions. This accounts for the real wording and citations injected by
   ResponseFrame and LlmPrompt instead of attributing raw SI map sizes.
   """
 
@@ -21,17 +21,22 @@ defmodule Core.Response.PromptBudget do
              is_list(active_history) and is_binary(user_text) do
     system = build_prompt.(context)
     without_episodes = build_prompt.(strip_episodes(context))
-    without_evidence = build_prompt.(context |> strip_episodes() |> strip_evidence())
+    without_retrieval = build_prompt.(context |> strip_episodes() |> strip_retrieval())
+    without_evidence =
+      build_prompt.(context |> strip_episodes() |> strip_retrieval() |> strip_verified())
 
     system_chars = String.length(system)
     episode_chars = max(system_chars - String.length(without_episodes), 0)
-    evidence_chars = max(String.length(without_episodes) - String.length(without_evidence), 0)
-    instruction_chars = max(system_chars - episode_chars - evidence_chars, 0)
+    retrieval_chars = max(String.length(without_episodes) - String.length(without_retrieval), 0)
+    verified_chars = max(String.length(without_retrieval) - String.length(without_evidence), 0)
+    instruction_chars =
+      max(system_chars - episode_chars - retrieval_chars - verified_chars, 0)
 
     sections = %{
       instructions: estimate_chars(instruction_chars),
       episodic_recall: estimate_chars(episode_chars),
-      verified_evidence: estimate_chars(evidence_chars),
+      retrieved_evidence: estimate_chars(retrieval_chars),
+      verified_evidence: estimate_chars(verified_chars),
       current_user: estimate_chars(String.length(user_text))
     }
 
@@ -78,15 +83,18 @@ defmodule Core.Response.PromptBudget do
     |> update_features(&Map.delete(&1, :episodic_recall))
   end
 
-  defp strip_evidence(context) do
+  defp strip_retrieval(context) do
     context
     |> Map.delete(:web_evidence)
+    |> update_features(&Map.delete(&1, :web_evidence))
+  end
+
+  defp strip_verified(context) do
+    context
     |> Map.update(:response_frame, nil, &remove_frame_evidence/1)
-    |> update_features(fn features ->
-      features
-      |> Map.delete(:web_evidence)
-      |> Map.update(:response_frame, nil, &remove_frame_evidence/1)
-    end)
+    |> update_features(&Map.update(&1, :response_frame, nil, fn frame ->
+      remove_frame_evidence(frame)
+    end))
   end
 
   defp remove_frame_evidence(%{} = frame), do: Map.delete(frame, :evidence)
