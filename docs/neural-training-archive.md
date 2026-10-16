@@ -4,17 +4,28 @@ This is the first **observation and feedback recorder** for Symbrella's
 proposed Nx/Axon nervous-system development. It does **not** train Axon, change
 Hippocampus retrieval, or change how Core chooses responses.
 
-## Enable for a local Termux session
+## Automatic training archive in development
 
-From the umbrella root, after updating the development branch:
+Start Symbrella normally from the umbrella root:
 
 ```sh
-SYMBRELLA_TRAINING_ARCHIVE=on iex -S mix phx.server
+iex -S mix phx.server
 ```
 
-The recorder is **off by default**. Set
-`SYMBRELLA_TRAINING_DIR=/your/private/directory` to move the archive.
-Relative paths are resolved from the application's current working directory.
+Completed LiveView exchanges and their observed Hippocampus events are now
+appended automatically in development. No training archive CLI variable is
+needed. Configuration is in `config/config.exs`:
+
+```elixir
+config :core, Core.TrainingArchive,
+  enabled?: config_env() == :dev,
+  dir: "tmp/training"
+```
+
+To pause capture or change the local directory, edit the configuration and
+restart Phoenix. Automatic capture is disabled by default in test and
+production because archives can contain private conversations and memories.
+Relative paths resolve from the application's current working directory.
 
 ```sh
 tail -f tmp/training/turns.jsonl
@@ -189,7 +200,7 @@ checkpoint weights, or instrument *every* hippocampal write and recall attempt.
 
 ## Hippocampal operation tracing (development milestone 2)
 
-When `SYMBRELLA_TRAINING_ARCHIVE=on` is set, a chat worker activates
+When `Core.TrainingArchive` is enabled (the development default), a chat worker activates
 `Brain.Hippocampus.TurnTrace` while preparing a human-message reply.
 The final LiveView identity-correction path is traced separately and its
 events are combined with the worker's events.
@@ -726,8 +737,8 @@ message through \`Response.memory_reply/1\` without calling
 \`Core.SemanticInput\` and \`self_model\`. The old training archive implicitly
 treated the missing semantic snapshot as missing cognitive state.
 
-The **recording boundary is now instrumented**, only when
-\`SYMBRELLA_TRAINING_ARCHIVE=on\`. For each successfully completed ordinary
+The **recording boundary is now instrumented** whenever
+\`Core.TrainingArchive\` is enabled. For each successfully completed ordinary
 user/assistant chat turn:
 
 - The chat worker captures one **fresh, read-only** \`Brain.MoodCore.snapshot/0\`
@@ -808,15 +819,14 @@ The residual Axon checkpoint is now loadable in a **supervised, read-only**
 offline training: *the existing trained weights can perform real predictions
 while Symbrella is chatting.* It is NOT active cognition or online training.
 
-**Both** flags must be on:
+**The archive must be enabled in `config/config.exs` (development default), with shadow inference opted in separately:**
 
 ```sh
 cd ~/Symbrella
 # First train the v4 residual model (checkpoint must be independent-session evaluated).
 mix neural.train --task state_transition_residual
 
-SYMBRELLA_TRAINING_ARCHIVE=on SYMBRELLA_NEURAL_SHADOW=on \
-  iex -S mix phx.server
+SYMBRELLA_NEURAL_SHADOW=on iex -S mix phx.server
 ```
 
 In the running IEx session (not in an unrelated `mix` process):
@@ -862,8 +872,9 @@ mix test apps/symbrella_web/test/symbrella_web/neural_shadow_test.exs
 
 In the restarted IEx runtime run
 `SymbrellaWeb.NeuralShadow.status()` and check for
-`status: :shadow_only`. Keep the `SYMBRELLA_TRAINING_ARCHIVE=on` and
-`SYMBRELLA_NEURAL_SHADOW=on` flags. The shadow stays read-only.
+`status: :shadow_only`. Keep `Core.TrainingArchive` enabled in
+`config/config.exs` and set `SYMBRELLA_NEURAL_SHADOW=on` for optional shadow
+inference. The shadow stays read-only.
 
 ### Architecture
 
