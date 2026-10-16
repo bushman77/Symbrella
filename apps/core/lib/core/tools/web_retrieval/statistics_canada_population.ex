@@ -274,11 +274,11 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
   defp csv_cells([], cells, field, false),
     do: Enum.reverse([field |> Enum.reverse() |> List.to_string() | cells])
   defp csv_cells([], _, _, true), do: []
-  defp csv_cells([?", ?" | rest], cells, field, true),
-    do: csv_cells(rest, cells, [?" | field], true)
-  defp csv_cells([?" | rest], cells, field, quoted),
+  defp csv_cells([34, 34 | rest], cells, field, true),
+    do: csv_cells(rest, cells, [34 | field], true)
+  defp csv_cells([34 | rest], cells, field, quoted),
     do: csv_cells(rest, cells, field, not quoted)
-  defp csv_cells([?, | rest], cells, field, false),
+  defp csv_cells([44 | rest], cells, field, false),
     do: csv_cells(rest, [field |> Enum.reverse() |> List.to_string() | cells], [], false)
   defp csv_cells([char | rest], cells, field, quoted),
     do: csv_cells(rest, cells, [char | field], quoted)
