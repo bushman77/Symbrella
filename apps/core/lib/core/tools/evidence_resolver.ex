@@ -176,8 +176,9 @@ defmodule Core.Tools.EvidenceResolver do
 
         single_context =
           context
-          |> Map.update(:features, %{symbolic_frame: single_frame}, fn features ->
-            Map.put(features, :symbolic_frame, single_frame)
+          |> Map.update(:features, %{symbolic_frame: single_frame}, fn
+            %{} = features -> Map.put(features, :symbolic_frame, single_frame)
+            _ -> %{symbolic_frame: single_frame}
           end)
           |> Map.put(:symbolic_frame, %{event: single_frame})
 
@@ -190,6 +191,7 @@ defmodule Core.Tools.EvidenceResolver do
           result.resolution == :source_supported and
             is_map(support) and support[:kind] == :population and
             support[:status] == :source_supported and
+            (is_nil(support[:subject]) or support[:subject] == subject) and
             is_integer(support[:value]) and support[:value] > 0 and
             is_integer(support[:census_year]) and
             is_binary(support[:source_url]) and
