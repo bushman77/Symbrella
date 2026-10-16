@@ -283,8 +283,9 @@ defmodule Core.Tools.WebRetrieval.Grounding do
           else
             winner = if a.value > b.value, do: a, else: b
             loser = if a.value > b.value, do: b, else: a
-            "In #{year}, #{winner.subject} recorded #{format_population(winner.value)} " <>
-              "residents versus #{format_population(loser.value)} in #{loser.subject}, " <>
+            "#{winner.subject} had the larger recorded population in #{year}: " <>
+              "#{format_population(winner.value)} versus " <>
+              "#{format_population(loser.value)} in #{loser.subject}, " <>
               "a difference of #{format_population(difference)}."
           end
 
