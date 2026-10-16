@@ -9,8 +9,8 @@ defmodule Db.CognitiveIssue do
 
   @type t :: %__MODULE__{}
 
-  @kinds ~w(contradictory_premises missing_dated_evidence invalid_derivation)
-  @actions ~w(recheck_sources find_dated_sources review_derivation)
+  @kinds ~w(contradictory_premises missing_dated_evidence invalid_derivation missing_reasoning_link)
+  @actions ~w(recheck_sources find_dated_sources review_derivation find_linking_premise)
   @statuses ~w(open investigating resolved blocked)
 
   schema "cognitive_issues" do
