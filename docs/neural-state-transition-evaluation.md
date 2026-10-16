@@ -6,12 +6,16 @@ The original semantic, memory, and action-selection paths stay authoritative.
 
 ## 1. Collect and inspect archived observations
 
-In a local, private development environment, enable recording for conversations
-you are authorized to store:
+In development, completed conversations are appended automatically using
+`config/config.exs` (`Core.TrainingArchive` defaults to `enabled?: true` in
+development). Start Phoenix normally; no recording CLI variable is needed:
 
 ```sh
-SYMBRELLA_TRAINING_ARCHIVE=on iex -S mix phx.server
+iex -S mix phx.server
 ```
+
+Change `enabled?` or `dir` in `config/config.exs` to control local collection.
+Test and production remain disabled by default.
 
 The archive includes chat text and private memory. Do not commit or upload
 `tmp/training/`, `turns.jsonl`, or `memory_events.jsonl`.
@@ -66,7 +70,7 @@ After creating a *non-smoke* residual checkpoint and checking its report, run
 the application with explicit shadow opt-in:
 
 ```sh
-SYMBRELLA_TRAINING_ARCHIVE=on SYMBRELLA_NEURAL_SHADOW=on iex -S mix phx.server
+SYMBRELLA_NEURAL_SHADOW=on iex -S mix phx.server
 ```
 
 Inside IEx:
