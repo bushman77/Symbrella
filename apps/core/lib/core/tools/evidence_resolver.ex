@@ -23,7 +23,29 @@ defmodule Core.Tools.EvidenceResolver do
   @event [:core, :evidence_resolver, :complete]
 
   @spec resolve(map(), String.t(), atom() | nil, keyword(), keyword()) :: map()
-  def resolve(context, query, relation, cfg, opts \\ []) do
+  def resolve(context, query, relation, cfg, opts \\ [])
+
+  def resolve(context, query, :population, cfg, opts) do
+    subjects =
+      context
+      |> frame()
+      |> Map.get(:subjects, [])
+      |> List.wrap()
+      |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+      |> Enum.uniq()
+      |> Enum.take(4)
+
+    if length(subjects) >= 2 do
+      resolve_population_group(context, query, subjects, cfg, opts)
+    else
+      resolve_one(context, query, :population, cfg, opts)
+    end
+  end
+
+  def resolve(context, query, relation, cfg, opts),
+    do: resolve_one(context, query, relation, cfg, opts)
+
+  defp resolve_one(context, query, relation, cfg, opts) do
     frame = frame(context)
     subject = Map.get(frame, :subject)
     target = Map.get(frame, :target)
@@ -131,6 +153,117 @@ defmodule Core.Tools.EvidenceResolver do
       },
       %{
         status: status, resolution: resolution, relation: relation,
+        session_id: Map.get(context, :session_id)
+      }
+    )
+
+    result
+  end
+
+  # Resolve a bounded set of *independently dated* population claims.
+  # No combined count, inferred year, or copied source attribution is allowed.
+  # One failing place never prevents returning the others.
+  defp resolve_population_group(context, query, subjects, cfg, opts) do
+    started = System.monotonic_time(:millisecond)
+
+    results =
+      Enum.map(subjects, fn subject ->
+        single_frame =
+          context
+          |> frame()
+          |> Map.put(:subject, subject)
+          |> Map.delete(:subjects)
+
+        single_context =
+          context
+          |> Map.update(:features, %{symbolic_frame: single_frame}, fn features ->
+            Map.put(features, :symbolic_frame, single_frame)
+          end)
+          |> Map.put(:symbolic_frame, %{event: single_frame})
+
+        result =
+          resolve_one(single_context, "#{subject} population census", :population, cfg, opts)
+
+        support = result.support
+
+        verified? =
+          result.resolution == :source_supported and
+            is_map(support) and support[:kind] == :population and
+            support[:status] == :source_supported and
+            is_integer(support[:value]) and support[:value] > 0 and
+            is_integer(support[:census_year]) and
+            is_binary(support[:source_url]) and
+            String.starts_with?(support[:source_url], "https://")
+
+        entry =
+          if verified? do
+            %{
+              subject: subject,
+              status: :source_supported,
+              value: support.value,
+              census_year: support.census_year,
+              source_url: support.source_url,
+              source_type: Map.get(support, :source_type, :wikipedia)
+            }
+          else
+            %{subject: subject, status: :unavailable}
+          end
+
+        {entry, result}
+      end)
+
+    entries = Enum.map(results, &elem(&1, 0))
+    verified = Enum.filter(entries, &(&1.status == :source_supported))
+
+    resolution =
+      cond do
+        length(verified) == length(entries) -> :source_supported
+        verified != [] -> :partial_support
+        true -> :exhausted
+      end
+
+    sources =
+      Enum.map(verified, fn entry ->
+        %{
+          title: entry.subject,
+          url: entry.source_url,
+          provider: entry.source_type,
+          excerpt: "Dated population statement (#{entry.census_year}): #{entry.value}"
+        }
+      end)
+
+    attempts =
+      Enum.flat_map(results, fn {entry, result} ->
+        Enum.map(result.attempts, &Map.put(&1, :subject, entry.subject))
+      end)
+
+    result = %{
+      status: if(verified == [], do: :unavailable, else: :retrieved),
+      resolution: resolution,
+      provider: Keyword.get(opts, :coordinate_provider,
+        Keyword.get(cfg, :coordinate_provider, Wikidata)),
+      query: query,
+      relation: :population,
+      support: %{
+        kind: :population_group,
+        status: resolution,
+        subjects: subjects,
+        results: entries
+      },
+      sources: sources,
+      attempts: attempts,
+      attempted_count: length(attempts),
+      exhausted?: resolution == :exhausted
+    }
+
+    Telemetry.emit(@event,
+      %{
+        attempts: length(attempts),
+        source_count: length(sources),
+        elapsed_ms: System.monotonic_time(:millisecond) - started
+      },
+      %{
+        status: result.status, resolution: resolution, relation: :population,
         session_id: Map.get(context, :session_id)
       }
     )
