@@ -361,20 +361,15 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
 
   defp safe_fetch(fetch, url, args, stage) do
     try do
-      fetch.(url, args)
+      case fetch.(url, args) do
+        {:error, reason} -> {:error, {stage, :transport, summarize_reason(reason)}}
+        reply -> reply
+      end
     rescue
-      error ->
-        {:error, {stage, :exception, summarize_reason(error)}}
+      error -> {:error, {stage, :exception, summarize_reason(error)}}
     catch
-      :exit, reason ->
-        {:error, {stage, :exit, summarize_reason(reason)}}
-
-      :throw, reason ->
-        {:error, {stage, :throw, summarize_reason(reason)}}
-    end
-    |> case do
-      {:error, reason} -> {:error, {stage, :transport, summarize_reason(reason)}}
-      result -> result
+      :exit, reason -> {:error, {stage, :exit, summarize_reason(reason)}}
+      :throw, reason -> {:error, {stage, :throw, summarize_reason(reason)}}
     end
   end
 
