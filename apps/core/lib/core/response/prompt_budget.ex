@@ -92,9 +92,9 @@ defmodule Core.Response.PromptBudget do
   defp strip_verified(context) do
     context
     |> Map.update(:response_frame, nil, &remove_frame_evidence/1)
-    |> update_features(&Map.update(&1, :response_frame, nil, fn frame ->
-      remove_frame_evidence(frame)
-    end))
+    |> update_features(fn features ->
+      Map.update(features, :response_frame, nil, &remove_frame_evidence/1)
+    end)
   end
 
   defp remove_frame_evidence(%{} = frame), do: Map.delete(frame, :evidence)
