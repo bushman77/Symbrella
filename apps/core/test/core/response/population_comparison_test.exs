@@ -195,6 +195,22 @@ defmodule Core.Response.PopulationComparisonTest do
     assert repaired == answer
   end
 
+  test "equal verified same-year population values produce a tie rather than a false winner" do
+    result =
+      question_context(session(), frame())
+      |> Map.put(:web_evidence, evidence([2021, 2021], [90_990, 90_990]))
+      |> PopulationComparison.attach()
+
+    assert result.web_evidence.support.outcome == :equal
+    assert result.web_evidence.support.winner == nil
+    assert result.web_evidence.support.difference == 0
+
+    answer = Grounding.align("Kamloops is larger.", result)
+    assert answer =~ "Both places have the same recorded population"
+    refute answer =~ "has the larger recorded population by"
+    assert Grounding.supports?(answer, result)
+  end
+
   test "cache isolation, expiry and entity-specific lookups prevent cross-session evidence reuse" do
     sid = session()
     assert :ok = VerifiedPopulation.record(sid, evidence(), now_ms: 100_000)
@@ -251,7 +267,11 @@ defmodule Core.Response.PopulationComparisonTest do
 
     undated = evidence([2021, nil])
     assert :ok = VerifiedPopulation.record(session(), undated)
-    assert PopulationComparison.attach(Map.put(context, :web_evidence, undated))
-           .web_evidence.support.kind == :population_group
+    undated_context =
+      context
+      |> Map.put(:web_evidence, undated)
+      |> PopulationComparison.attach()
+
+    assert undated_context.web_evidence.support.kind == :population_group
   end
 end
