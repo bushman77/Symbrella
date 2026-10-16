@@ -42,6 +42,19 @@ defmodule Brain.PMTG do
 
   # ───────────────────────────── Public API ─────────────────────────────
 
+  @doc """
+  Choices that still warrant lexical/episodic consultation.
+
+  Stage1 can mark a grammatical winner as closed-class while its broad
+  dictionary slate still assigns a low softmax probability. Do not mistake
+  that probability alone for a need to retrieve episodic evidence. Genuine
+  content-word ambiguity and fallback winners remain eligible.
+  """
+  @spec needy_choices([choice()], keyword()) :: [choice()]
+  def needy_choices(choices, opts \\ []) when is_list(choices) and is_list(opts) do
+    needy_from_choices(choices, margin_threshold(opts), p_min(opts))
+  end
+
   @spec consult([choice()], [map()], keyword()) :: :ok
   def consult(list, tokens, opts \\ [])
       when is_list(list) and is_list(tokens) and is_list(opts) do
@@ -696,9 +709,11 @@ defmodule Brain.PMTG do
     pmin = p_min(opts)
 
     need =
-      if Keyword.get(opts, :already_needy, false),
-        do: list,
-        else: needy_from_choices(list, thr, pmin)
+      if Keyword.get(opts, :already_needy, false) do
+        Enum.reject(list, &resolved_closed_class_choice?/1)
+      else
+        needy_choices(list, margin_threshold: thr, p_min: pmin)
+      end
 
     si0 = %{tokens: tokens, trace: []}
     {:ok, %{si: si1, queries: queries}} = resolve(si0, need, limit: Keyword.get(opts, :limit, 5))
@@ -766,6 +781,15 @@ defmodule Brain.PMTG do
 
   defp needy_from_choices(choices, thr, pmin) do
     Enum.filter(choices, fn ch ->
+      if resolved_closed_class_choice?(ch) do
+        false
+      else
+        needs_retrieval?(ch, thr, pmin)
+      end
+    end)
+  end
+
+  defp needs_retrieval?(ch, thr, pmin) do
       m = Map.get(ch, :margin, 1.0) * 1.0
       alts = Map.get(ch, :alt_ids, [])
       p1 = p_top1(ch)
@@ -777,8 +801,40 @@ defmodule Brain.PMTG do
       fallback? = fallback_choice?(ch)
 
       ((low_margin? or low_prob?) and has_alts?) or weak? or fallback?
-    end)
   end
+
+  # Check both the Stage1 grammatical decision and the final winner POS.
+  # Merely having a particle in the candidate slate does not exempt a verb
+  # (e.g. "know") from retrieval. A veto or fallback is never suppressed.
+  defp resolved_closed_class_choice?(ch) when is_map(ch) do
+    control = Map.get(ch, :semantic_control) || Map.get(ch, "semantic_control") || %{}
+    reason = Map.get(control, :reason) || Map.get(control, "reason")
+    chosen_id =
+      Map.get(ch, :chosen_id) || Map.get(ch, "chosen_id") ||
+        Map.get(ch, :id) || Map.get(ch, "id")
+
+    grammatical_pos? =
+      case chosen_id do
+        id when is_binary(id) ->
+          case String.split(id, "|", parts: 3) do
+            [_lemma, pos, _sense] ->
+              pos in ~w(auxiliary determiner article preposition pronoun conjunction particle)
+
+            _ ->
+              false
+          end
+
+        _ ->
+          false
+      end
+
+    reason in [:closed_class_winner, "closed_class_winner"] and grammatical_pos? and
+      Map.get(ch, :veto?, Map.get(ch, "veto?", false)) != true and
+      Map.get(ch, :margin_weak?, Map.get(ch, "margin_weak?", false)) != true and
+      not fallback_choice?(ch)
+  end
+
+  defp resolved_closed_class_choice?(_), do: false
 
   defp fallback_choice?(choice) when is_map(choice) do
     id =
