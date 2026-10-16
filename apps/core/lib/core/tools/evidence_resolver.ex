@@ -103,8 +103,13 @@ defmodule Core.Tools.EvidenceResolver do
            relation == :population and is_binary(subject) ->
              # Dated entity statements outrank arbitrary numbers in search
              # excerpts; every claim must have a date and exact identity.
+             # The structured official provider has first refusal. After
+             # it and the dated Wikidata fallback fail, a narrowly phrased
+             # *dated* census excerpt remains the final supported fallback.
+             # Keep this search text stable for injected/offline providers
+             # that explicitly distinguish census claims from other snippets.
              population_plan ++
-               [{:search, provider, "#{subject} official population estimate", provider_opts}]
+               [{:search, provider, "#{subject} 2021 census population", provider_opts}]
 
            true ->
              [{:search, provider, query, provider_opts}]
