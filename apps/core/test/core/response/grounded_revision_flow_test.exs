@@ -83,6 +83,7 @@ defmodule Core.Response.GroundedRevisionFlowTest do
 
     Application.put_env(:core, :llm_synthesis,
       Keyword.merge(old[:llm_synthesis] || [],
+        max_tokens: 150,
         grounded_revision_enabled?: true, grounded_revision_max_tokens: 220))
 
     on_exit(fn ->
@@ -123,7 +124,9 @@ defmodule Core.Response.GroundedRevisionFlowTest do
 
     assert_receive {:grounded_chat, first_messages, first_opts}
     assert_receive {:grounded_chat, second_messages, second_opts}
-    assert Keyword.fetch!(first_opts, :max_tokens) == 220
+    # The first call uses the regular synthesis budget; the grounded retry
+    # has its own explicit cap. Do not assume they are identical.
+    assert Keyword.fetch!(first_opts, :max_tokens) == 150
     assert Keyword.fetch!(second_opts, :max_tokens) == 220
 
     initial_system = hd(first_messages)["content"]
