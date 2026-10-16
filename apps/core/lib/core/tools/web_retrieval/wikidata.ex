@@ -56,7 +56,9 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
   Refuse population values without a dated qualifier.
   """
   @spec population(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def population(name, opts \\ []) when is_binary(name) do
+  def population(name, opts \\ [])
+
+  def population(name, opts) when is_binary(name) do
     with {:ok, place} <- place(name, nil, opts),
          statement when is_map(statement) <-
            latest_dated_population(Map.get(place, :population_claims, [])) do
