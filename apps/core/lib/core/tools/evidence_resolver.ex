@@ -14,6 +14,8 @@ defmodule Core.Tools.EvidenceResolver do
 
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.Wikidata
+  alias Core.Tools.WebRetrieval.StatisticsCanadaPopulation
+  alias Core.Tools.WebRetrieval.CanadianGeoNames
   alias Core.Tools.WebRetrieval.Searxng
   alias Core.Tools.WebRetrieval.NewsRss
   alias Core.Telemetry
@@ -57,6 +59,29 @@ defmodule Core.Tools.EvidenceResolver do
     coords_provider =
       Keyword.get(opts, :coordinate_provider, Keyword.get(cfg, :coordinate_provider, Wikidata))
     coords_opts = Keyword.get(opts, :coordinate_opts, Keyword.get(cfg, :coordinate_opts, []))
+    population_opts =
+      Keyword.get(opts, :statistics_canada_opts,
+        Keyword.get(cfg, :statistics_canada_opts, []))
+    custom_coordinates? =
+      Keyword.has_key?(opts, :coordinate_provider) or
+        Keyword.has_key?(cfg, :coordinate_provider)
+
+    population_plan =
+      if custom_coordinates? do
+        [{:population, coords_provider, nil, coords_opts}]
+      else
+        [{:population, StatisticsCanadaPopulation, nil, population_opts},
+         {:population, Wikidata, nil, coords_opts}]
+      end
+
+    coordinate_plan =
+      if custom_coordinates? do
+        [{:coordinates, coords_provider, nil, coords_opts}]
+      else
+        [{:coordinates, CanadianGeoNames, nil, coords_opts},
+         {:coordinates, Wikidata, nil, coords_opts}]
+      end
+
     news_provider = Keyword.get(opts, :news_provider, Keyword.get(cfg, :news_provider, NewsRss))
     news_opts = Keyword.get(opts, :news_opts, [])
     request_type = Keyword.get(opts, :request_type)
@@ -77,14 +102,14 @@ defmodule Core.Tools.EvidenceResolver do
            relation == :population and is_binary(subject) ->
              # Dated entity statements outrank arbitrary numbers in search
              # excerpts; every claim must have a date and exact identity.
-             [{:population, coords_provider, nil, coords_opts},
-              {:search, provider, "#{subject} 2021 census population", provider_opts}]
+             population_plan ++
+               [{:search, provider, "#{subject} official population estimate", provider_opts}]
 
            true ->
              [{:search, provider, query, provider_opts}]
          end) ++
           (if relation == :proximity and is_binary(subject) and is_binary(target),
-             do: [{:coordinates, coords_provider, nil, coords_opts}],
+             do: coordinate_plan,
              else: []) ++
           optional_search(cfg, provider, query, opts)
       end
@@ -135,7 +160,15 @@ defmodule Core.Tools.EvidenceResolver do
     result = %{
       status: status,
       resolution: resolution,
-      provider: if(relation == :current_events, do: news_provider, else: provider),
+      provider:
+        cond do
+          relation == :current_events -> news_provider
+          is_map(support) and is_atom(Map.get(support, :source_type)) ->
+            Map.get(support, :source_type)
+          is_map(support) and is_atom(Map.get(support, :coordinate_provider)) ->
+            Map.get(support, :coordinate_provider)
+          true -> provider
+        end,
       query: query,
       relation: relation,
       support: support,
@@ -205,7 +238,10 @@ defmodule Core.Tools.EvidenceResolver do
               value: support.value,
               census_year: support.census_year,
               source_url: support.source_url,
-              source_type: Map.get(support, :source_type, :wikipedia)
+              source_type: Map.get(support, :source_type, :wikipedia),
+              measurement_type: Map.get(support, :measurement_type, :dated_population_statement),
+              reference_year: Map.get(support, :reference_year, support.census_year),
+              source_table: Map.get(support, :source_table)
             }
           else
             %{subject: subject, status: :unavailable}
@@ -421,7 +457,8 @@ defmodule Core.Tools.EvidenceResolver do
            status: :source_supported, source_count: length(sources)},
          Enum.map(sources, fn source ->
            Map.put(source, :excerpt,
-             "Coordinate location (Wikidata P625) for #{Map.get(source, :title)}")
+             "Verified representative place coordinate from #{inspect(Map.get(source, :provider))} " <>
+               "for #{Map.get(source, :title)}")
          end), support}
 
       _ ->
