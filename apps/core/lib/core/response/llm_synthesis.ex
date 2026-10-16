@@ -24,6 +24,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.ResponseFrame
   alias Core.Response.AuthoritativeAnswerPlan
   alias Core.Response.PopulationComparison
+  alias Core.Response.Consolidation
   alias Core.Response.VerifiedPopulation
   alias Core.Response.EvidenceRevision
   alias Core.Response.GroundedRevision
@@ -94,7 +95,10 @@ defmodule Core.Response.LlmSynthesis do
     # A comparison may reuse individually sourced, same-session claims.
     # Otherwise run the usual evidence resolver; unverified history is never
     # promoted to a population fact.
-    cached_context = PopulationComparison.recall(raw_context)
+    cached_context =
+      raw_context
+      |> Consolidation.recall()
+      |> PopulationComparison.recall()
 
     enriched =
       if is_map(Map.get(cached_context, :web_evidence)) do
@@ -181,6 +185,12 @@ defmodule Core.Response.LlmSynthesis do
           style_source: selection_source,
           fallback?: forced_fallback?
         })
+
+      # Consolidation stores ONLY the independently supported symbolic premises
+      # after the published conclusion passes the exact authorization gate.
+      # It never stores the model's words as factual evidence, and neither
+      # replay nor the separate Curiosity process can bypass this gate.
+      _ = Consolidation.capture(context, plan)
 
       emit_complete_event(user_text, out, context, prompt, reflection)
       {:ok, out, reflection}
