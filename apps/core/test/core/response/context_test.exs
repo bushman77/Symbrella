@@ -58,4 +58,60 @@ defmodule Core.Response.ContextTest do
     assert context.runtime_state.source == :brain
     assert [%{id: "loop"}] = context.wm_items
   end
+
+  test "bounded hippocampal episode text survives SI to response context transport" do
+    episode = fn session, sentence, score ->
+      %{score: score, episode: %{meta: %{session_id: session, sentence: sentence},
+                                  slate: %{winners: [%{lemma: "orchard"}]}}}
+    end
+
+    si = %{
+      sentence: "What was the orchard nickname?",
+      session_id: "active-session",
+      evidence: %{
+        episodes: [
+          episode.("active-session", "We called it copper-fern-orbit.", 0.9),
+          episode.("other-session", "Cross-session secret.", 0.85),
+          episode.("active-session", "We called it copper-fern-orbit.", 0.8),
+          episode.("active-session", String.duplicate("a", 300), 0.7),
+          episode.("active-session", "Third eligible episode.", 0.6),
+          episode.("active-session", "Unscored episode.", 0.0)
+        ]
+      }
+    }
+
+    embedded = Context.from_si(si)
+
+    assert Enum.map(embedded.episodic_recall, & &1.text) ==
+             ["We called it copper-fern-orbit.", String.duplicate("a", 220)]
+
+    assert Enum.all?(embedded.episodic_recall,
+             &(&1.source == :hippocampal_episode))
+
+    refute Map.has_key?(embedded, :evidence)
+    refute inspect(embedded) =~ "Cross-session secret"
+    refute inspect(embedded) =~ "Third eligible episode"
+
+    projected =
+      Context.from_response_parts(si.sentence,
+        %{session_id: si.session_id, turn_context: embedded},
+        %{mode: :collaborator}, %{}, %{})
+
+    assert projected.episodic_recall == embedded.episodic_recall
+  end
+
+  test "does not expose hippocampal content without a matching session and positive score" do
+    si = %{
+      sentence: "Do you remember?",
+      session_id: "current",
+      evidence: %{episodes: [
+        %{score: 0.0, episode: %{meta: %{session_id: "current", sentence: "No match"}}},
+        %{score: 0.95, episode: %{meta: %{session_id: "previous", sentence: "Wrong user"}}},
+        %{score: 0.7, episode: %{meta: %{sentence: "Unscoped old episode"}}}
+      ]}
+    }
+
+    refute Map.has_key?(Context.from_si(si), :episodic_recall)
+    refute Map.has_key?(Context.from_si(%{si | session_id: nil}), :episodic_recall)
+  end
 end
