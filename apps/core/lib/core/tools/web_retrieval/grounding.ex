@@ -153,14 +153,65 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   defp supports_population?(text, context) do
     case supported_population(context) do
-      %{display: display, source_url: source_url} when is_binary(source_url) ->
-        # Numeric and source-URL matches alone can carry a wrong city or year.
-        # Accept only the deterministic claim-specific, provenance-qualified reply.
-        text == align(text, context) and is_binary(display)
+      %{value: count, census_year: year, source_url: url}
+      when is_integer(count) and is_integer(year) and is_binary(url) ->
+        subject = Map.get(geographic_frame(context), :subject)
 
-      _ -> false
+        text == align(text, context) or
+          supported_population_paraphrase?(text, subject, count, year, url)
+
+      _ ->
+        false
     end
   end
+
+  # Bounded factual entailment for a SINGLE dated population claim. Do not
+  # compare the whole LLM response to a template: different phrasing is fine
+  # when the exact subject, figure, year and source are preserved. Reject
+  # competing numerals and additional geographic facts this support cannot
+  # validate. This is intentionally conservative, not general NLI.
+  defp supported_population_paraphrase?(text, subject, count, year, url)
+       when is_binary(text) and is_binary(subject) do
+    place = subject |> String.split(",", parts: 2) |> hd() |> String.trim()
+    stripped = String.replace(text, url, "")
+    tokens =
+      Regex.scan(~r/(?<![\p{L}\p{N}])\d[\d,]*(?![\p{L}\p{N}])/u, stripped)
+      |> List.flatten()
+      |> Enum.map(fn token ->
+        token |> String.replace(",", "") |> String.to_integer()
+      end)
+
+    city? =
+      String.length(place) >= 3 and
+        Regex.match?(Regex.compile!("(?<![\\p{L}])" <> Regex.escape(place) <>
+          "(?![\\p{L}])", "iu"), stripped)
+
+    claims_population? =
+      Regex.match?(~r/\b(?:population|residents?|people|inhabitants|census|population\s+figure)\b/iu,
+        stripped)
+
+    exact_figure? = Enum.member?(tokens, count) and Enum.member?(tokens, year)
+    no_other_numbers? = Enum.all?(tokens, &(&1 in [count, year]))
+
+    extraneous_claim? =
+      Regex.match?(
+        ~r/\b(?:valley|located|northwest|northeast|southwest|southeast|distance|km|kilomet(?:e|re)rs?|miles?|founded|area|population\s+growth|grew\s+by|increased\s+by|decreased\s+by)\b/iu,
+        stripped
+      )
+
+    denial? =
+      Regex.match?(~r/\b(?:did\s+not\s+have|does\s+not\s+have|was\s+not|is\s+not)\s+(?:about\s+|approximately\s+)?(?:the\s+)?\d/iu,
+        stripped)
+
+    other_url? = Regex.match?(~r/https?:\/\//iu, stripped)
+
+    city? and claims_population? and String.contains?(text, url) and
+      exact_figure? and no_other_numbers? and
+      not extraneous_claim? and not denial? and not other_url? and
+      String.length(text) <= 450
+  end
+
+  defp supported_population_paraphrase?(_, _, _, _, _), do: false
 
   defp supported_identity(context) do
     frame = geographic_frame(context)
