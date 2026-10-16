@@ -102,8 +102,9 @@ defmodule Core.Response.MetaGroundedRevisionTest do
   end
 
   test "missing revision is not synthesized as a rejected or attempted pass" do
-    summary = metadata(%{status: :repair, issues: [:geographic_claim_unverified]})
-      .response_reflection
+    summary =
+      metadata(%{status: :repair, issues: [:geographic_claim_unverified]})
+      |> Map.fetch!(:response_reflection)
 
     refute Map.has_key?(summary, :grounded_revision)
   end
