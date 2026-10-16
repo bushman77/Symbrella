@@ -111,12 +111,24 @@ defmodule Core.Comprehension.Summary do
     reasons = degradation_reasons(stats, choices)
     degraded? = reasons != []
 
+    # A plural reference is licensed by the immediately preceding same-session
+    # WM comprehension frame. It identifies referents, not verified facts.
+    active_referents =
+      case Map.get(si, :discourse_reference) do
+        %{source: :wm_comprehension, antecedents: entities} when is_list(entities) ->
+          entities |> Enum.filter(&is_binary/1) |> Enum.take(@summary_limit)
+
+        _ ->
+          []
+      end
+
     %{
       version: 2,
       intent: intent,
       confidence: confidence,
       keyword: blank_to_nil(keyword),
       recognized_topics: recognized_topics,
+      active_referents: active_referents,
       selected_lexical_candidates: selected_lexical_candidates,
       understood: understood,
       lexical_meanings: lexical_meanings,
