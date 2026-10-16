@@ -117,6 +117,12 @@ defmodule SymbrellaWeb.NeuralShadow do
             {:ok, %{base | reason: {:telemetry_attach_failed, reason}}}
         end
 
+      {:error, :enoent} ->
+        # A shadow checkpoint is optional until offline training has produced
+        # an evaluated artifact. Its absence should not look like a crash.
+        Logger.info("[NeuralShadow] unavailable: no checkpoint at #{checkpoint}")
+        {:ok, %{base | reason: {:checkpoint_unavailable, :enoent}}}
+
       {:error, reason} ->
         Logger.warning("[NeuralShadow] disabled: checkpoint load failed (#{inspect(reason)})")
         {:ok, %{base | reason: {:checkpoint_unavailable, reason}}}
