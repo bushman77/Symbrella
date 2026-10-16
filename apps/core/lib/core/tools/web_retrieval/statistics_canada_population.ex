@@ -74,7 +74,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     rows = String.split(csv, "\n", trim: true)
 
     with [header | data] <- rows,
-         headings <- csv_fields(header),
+         headings <- csv_fields(String.trim_leading(header, "\uFEFF")),
          true <- Enum.all?(["REF_DATE", "GEO", "VALUE"], &(&1 in headings)) do
       indexes = Enum.into(Enum.with_index(headings), %{}, fn {name, index} ->
         {name, index}
@@ -180,7 +180,8 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
   end
 
   defp default_cache_path do
-    Path.join([System.user_home!(), ".cache", "symbrella", "statistics_canada_#{@pid}.csv"])
+    base = System.get_env("XDG_CACHE_HOME") || Path.join(System.user_home!(), ".cache")
+    Path.join([base, "symbrella", "statistics_canada_#{@pid}.csv"])
   end
 
   defp refresh_cache(path, opts) do
