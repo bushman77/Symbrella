@@ -548,6 +548,20 @@ defmodule Core.Response.LlmSynthesis do
         actual_history_messages: budget.actual.history_message_count
       }
     )
+
+    if Application.get_env(:core, :log_prompt_budget?, false) do
+      Logger.info(
+        "[PromptBudget] policy=#{selection.mode} eligible=#{selection.eligible?} " <>
+          "applied=#{selection.applied?} input_est=#{budget.actual.total} " <>
+          "history_est=#{components.history} instructions_est=#{components.instructions} " <>
+          "episodes_est=#{components.episodic_recall} " <>
+          "verified_est=#{components.verified_evidence} " <>
+          "retrieved_est=#{components.retrieved_evidence} " <>
+          "user_est=#{components.current_user} " <>
+          "potential_savings_est=#{budget.potential_savings_tokens} " <>
+          "potential_savings_pct=#{budget.potential_savings_percent}"
+      )
+    end
   end
 
   defp build_prompt(context, prompt_type)
