@@ -104,7 +104,7 @@ defmodule Core.Response.LlmSynthesis do
       if is_map(Map.get(cached_context, :web_evidence)) do
         cached_context
       else
-        WebRetrieval.enrich(raw_context,
+        WebRetrieval.enrich(cached_context,
           history: LlmChatHistory.messages(session_id, 3))
       end
 
