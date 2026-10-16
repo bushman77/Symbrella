@@ -27,6 +27,35 @@ defmodule Core.Tools.PluralPopulationGroundingTest do
     end
   end
 
+  defmodule DifferentlyDatedPopulation do
+    def population("Kamloops BC", opts),
+      do: DatedPopulation.population("Kamloops BC", opts)
+
+    def population("Maple Ridge BC", _opts),
+      do: {:ok, %{
+        kind: :population, status: :source_supported,
+        subject: "Maple Ridge BC",
+        value: 91_200, census_year: 2022,
+        source_type: :wikidata,
+        source_url: "https://www.wikidata.org/wiki/Q16740",
+        sources: [%{title: "Maple Ridge BC", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q16740"}]
+      }}
+  end
+
+  defmodule MismatchedPopulation do
+    def population(_subject, _opts),
+      do: {:ok, %{
+        kind: :population, status: :source_supported,
+        subject: "Different place",
+        value: 12_345, census_year: 2021,
+        source_type: :wikidata,
+        source_url: "https://www.wikidata.org/wiki/Q1111",
+        sources: [%{title: "Different place", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q1111"}]
+      }}
+  end
+
   defmodule PartialPopulation do
     def population("Kamloops BC", opts),
       do: DatedPopulation.population("Kamloops BC", opts)
@@ -142,6 +171,28 @@ defmodule Core.Tools.PluralPopulationGroundingTest do
 
     refute Grounding.supports?("Kamloops has 17,800 people, Maple Ridge 90,990.", enriched)
     refute Grounding.supports?("Kamloops 97,902 in 2026 and Maple Ridge 90,990.", enriched)
+  end
+
+  test "independent sources retain different dates without deriving a shared census year" do
+    enriched = enrich(DifferentlyDatedPopulation)
+    entries = enriched.web_evidence.support.results
+
+    assert Enum.map(entries, & &1.census_year) == [2021, 2022]
+    answer = Grounding.align("No data", enriched)
+    assert answer =~ "Kamloops BC: 97,902 (2021)"
+    assert answer =~ "Maple Ridge BC: 91,200 (2022)"
+    refute answer =~ "2021 census for both"
+    assert Grounding.supports?(answer, enriched)
+  end
+
+  test "mismatched entity proof is not attributed to a requested city" do
+    enriched = enrich(MismatchedPopulation, max_attempts: 2)
+    assert enriched.web_evidence.resolution == :exhausted
+    assert Enum.all?(enriched.web_evidence.support.results,
+      &(&1.status == :unavailable))
+    answer = Grounding.align("Kamloops has 12,345 residents", enriched)
+    refute answer =~ "12,345"
+    assert answer =~ "no verified dated population"
   end
 
   test "partial lookup reports one verified figure and explicitly marks the other unavailable" do
