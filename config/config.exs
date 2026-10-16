@@ -30,6 +30,12 @@ config :core,
 
 # When enabled, logs aggregate estimated prompt tokens without including messages
 # or recalled content. It can also be toggled from IEx during a running session.
+# Durable symbolic consolidation uses its own proof store, not raw RAG answers.
+# Intentionally disabled until the new migration and regression tests pass.
+# Unlike Curiosity's independent OTP loop, capture only runs after an
+# authoritative symbolic response is fully verified.
+config :core, :symbolic_consolidation_enabled?, false
+
 config :core, :log_prompt_budget?, false
 
 config :core, :llm_synthesis,
