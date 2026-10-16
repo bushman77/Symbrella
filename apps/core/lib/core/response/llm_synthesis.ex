@@ -47,8 +47,15 @@ defmodule Core.Response.LlmSynthesis do
   def generate(user_text, features, decision, mood, prompt_type) do
     # An already-groundable symbolic comparison can be answered even when the
     # LLM process is offline. Other turns retain their original LLM gate.
+    turn_context =
+      if is_map(features), do: Map.get(features, :turn_context, %{}), else: %{}
+
     comparison? =
-      PopulationComparison.comparison_subjects(%{features: features}) != []
+      PopulationComparison.comparison_subjects(%{
+        features: features,
+        symbolic_frame:
+          if(is_map(turn_context), do: Map.get(turn_context, :symbolic_frame), else: nil)
+      }) != []
 
     if llm_available?() or comparison? do
       do_generate(user_text, features, decision, mood, prompt_type)
