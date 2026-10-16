@@ -7,6 +7,7 @@ defmodule Core.Response.LlmChatHistoryOwner do
   @table :core_llm_chat_history
   @recall_table :core_conversation_recall
   @retrieval_table :core_recent_retrieval
+  @verified_population_table :core_verified_population_context
 
   @spec ensure_table!() :: :ok
   def ensure_table! do
@@ -23,7 +24,7 @@ defmodule Core.Response.LlmChatHistoryOwner do
 
   @impl true
   def handle_call(:ensure_table, _from, state) do
-    Enum.each([@table, @recall_table, @retrieval_table], fn table ->
+    Enum.each([@table, @recall_table, @retrieval_table, @verified_population_table], fn table ->
       if :ets.whereis(table) == :undefined do
         :ets.new(table, [
           :named_table,
