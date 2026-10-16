@@ -61,10 +61,7 @@ defmodule Core.Response.Context do
           map_get(embedded, :self_memory_recall),
           map_get(runtime, :self_memory_recall)
         ]),
-      episodic_recall: first_present([
-        map_get(embedded, :episodic_recall),
-        map_get(features, :episodic_recall)
-      ]),
+      episodic_recall: map_get(embedded, :episodic_recall),
       runtime_state: map_get(runtime, :runtime_state),
       comprehension:
         first_present([
