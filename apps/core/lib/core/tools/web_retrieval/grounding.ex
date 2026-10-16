@@ -79,6 +79,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     end
   end
 
+  def align(draft, _), do: draft
+
   defp align_single(draft, context) do
     case supported_identity(context) do
       %{title: title, description: description, sources: [%{url: url}]}
@@ -89,8 +91,6 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         align_distance_or_population(draft, context)
     end
   end
-
-  def align(draft, _), do: draft
 
   defp align_distance_or_population(draft, context) do
     case supported_proximity(context) do
@@ -148,6 +148,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     end
   end
 
+  def supports?(_, _), do: false
+
   defp supports_single?(text, context) do
     case supported_identity(context) do
       %{status: :source_supported} ->
@@ -169,8 +171,6 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         supports_population?(text, context)
     end
   end
-
-  def supports?(_, _), do: false
 
   defp supports_population?(text, context) do
     case supported_population(context) do
