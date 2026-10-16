@@ -41,22 +41,35 @@ defmodule Db.CognitiveIssues do
     )
   end
 
-  @spec resolve(integer(), map()) :: {:ok, CognitiveIssue.t()} | {:error, term()}
-  def resolve(id, %{verified_evidence: %{} = support})
-      when is_integer(id) and id > 0 do
-    case Db.get(CognitiveIssue, id) do
-      %CognitiveIssue{} = issue ->
-        issue
-        |> CognitiveIssue.changeset(%{
-          status: "resolved",
-          resolution: %{verified_evidence: support},
-          resolved_at: DateTime.utc_now()
-        })
-        |> Db.update()
+  @doc """
+  A missing-year gap closes only after a NEW persisted source-supported
+  symbolic conclusion exists for that exact subject pair and reference year.
+  Contradictions are never resolved by selecting one competing proof.
+  """
+  @spec resolve_missing_year(Db.ConsolidatedConclusion.t()) :: :ok
+  def resolve_missing_year(%Db.ConsolidatedConclusion{} = proof) do
+    issues =
+      Db.all(
+        from(i in CognitiveIssue,
+          where: i.subject_key == ^proof.pair_key and
+                 i.reference_year == ^proof.reference_year and
+                 i.kind == "missing_dated_evidence" and
+                 i.status == "open")
+      )
 
-      nil -> {:error, :not_found}
-    end
+    Enum.each(issues, fn issue ->
+      issue
+      |> CognitiveIssue.changeset(%{
+        status: "resolved",
+        resolution: %{proof_fingerprint: proof.fingerprint,
+          provenance: proof.provenance},
+        resolved_at: DateTime.utc_now()
+      })
+      |> Db.update!()
+    end)
+
+    :ok
   end
 
-  def resolve(_, _), do: {:error, :verified_resolution_required}
+  def resolve_missing_year(_), do: :ok
 end
