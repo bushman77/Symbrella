@@ -191,6 +191,31 @@ defmodule Core.Response.AuthoritativeAnswerPlanTest do
     refute_receive {:style_llm_called, _, _}, 30
   end
 
+  test "verified symbolic answer survives a disconnected LLM server" do
+    sid = session_id()
+    assert :ok = VerifiedPopulation.record(sid, source_evidence())
+    Application.put_env(:core, :llm_client, MissingStyleLlm)
+
+    features = %{intent: :unknown, session_id: sid, symbolic_frame: event_frame()}
+
+    assert {:ok, answer, meta} =
+      LlmSynthesis.generate(
+        "Which of those cities has the larger population?",
+        features, %{action: :answer}, %{}, :default
+      )
+
+    assert answer =~ "Kamloops BC"
+    assert answer =~ "6,912"
+    assert meta.authoritative_plan.status == :enforced
+    refute_receive {:style_llm_called, _, _}, 30
+
+    assert {:error, :llm_not_available} =
+      LlmSynthesis.generate(
+        "How can I refactor this code?", %{intent: :ask},
+        %{action: :answer}, %{}, :default
+      )
+  end
+
   test "even malicious or incorrect model wording cannot change the verified answer" do
     Application.put_env(:core, :llm_synthesis,
       Application.get_env(:core, :llm_synthesis)
