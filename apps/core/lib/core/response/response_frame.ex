@@ -166,7 +166,9 @@ defmodule Core.Response.ResponseFrame do
         year: year,
         entries: Enum.map(claims, fn e ->
           %{subject: short(e.subject, 100), value: e.value, year: year,
-            source_urls: urls([e.source_url]), source_type: e[:source_type]}
+            source_urls: urls([e.source_url]), source_type: e[:source_type],
+            measurement_type: e[:measurement_type],
+            source_table: e[:source_table]}
         end)
       }
     end
@@ -191,7 +193,10 @@ defmodule Core.Response.ResponseFrame do
             if String.starts_with?(url, "https://") do
               %{
                 subject: subject, status: :source_supported,
-                value: value, year: year, source_type: Map.get(result, :source_type),
+                value: value, year: year,
+                source_type: Map.get(result, :source_type),
+                measurement_type: Map.get(result, :measurement_type),
+                source_table: Map.get(result, :source_table),
                 source_urls: urls([url])
               }
             else
@@ -217,6 +222,8 @@ defmodule Core.Response.ResponseFrame do
           kind: :population, subject: short(subject, 100),
           value: value, year: year,
           source_type: Map.get(support, :source_type),
+          measurement_type: Map.get(support, :measurement_type),
+          source_table: Map.get(support, :source_table),
           source_urls: urls([url])
         }
 
@@ -261,7 +268,8 @@ defmodule Core.Response.ResponseFrame do
     if verified? do
       "verified_evidence=population_comparison; comparable_year=#{year}; " <>
         "claims=#{inspect(Enum.map([a, b], fn e ->
-          %{subject: e.subject, count: e.value, source_urls: e.source_urls}
+          %{subject: e.subject, count: e.value, source_urls: e.source_urls,
+            measurement_type: e[:measurement_type], source_table: e[:source_table]}
         end))}; " <>
         "outcome=#{inspect(outcome)}; winner=#{inspect(winner)}; " <>
         "difference=#{difference}. Compare only these source-backed dated figures, " <>
@@ -294,7 +302,9 @@ defmodule Core.Response.ResponseFrame do
       claims =
         Enum.map(supported, fn e ->
           %{subject: e.subject, count: e.value, display_count: format_count(e.value),
-            year: e.year, origin: e[:source_type], source_urls: e.source_urls}
+            year: e.year, origin: e[:source_type],
+            measurement_type: e[:measurement_type],
+            source_table: e[:source_table], source_urls: e.source_urls}
         end)
 
       "verified_evidence=population_group; independently_sourced_claims=#{inspect(claims)}; " <>
