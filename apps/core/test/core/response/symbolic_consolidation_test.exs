@@ -257,18 +257,32 @@ defmodule Core.Response.SymbolicConsolidationTest do
     original = sourced_context(names)
     plan = AuthoritativeAnswerPlan.build(original)
 
-    assert :disabled != Consolidation.capture(original, plan)
+    # The original context has valid source support: capturing it here
+    # would legitimately persist a proof and invalidate the empty-store
+    # assertion below. First verify that the opt-out gate causes NO write.
+    Application.put_env(:core, :symbolic_consolidation_enabled?, false)
+    assert :disabled = Consolidation.capture(original, plan)
+    assert ConsolidatedConclusions.recent(first_pair_key(names)) == []
+
+    Application.put_env(:core, :symbolic_consolidation_enabled?, true)
+
+    # Unsupported input cannot inherit the authorization of an earlier plan.
     assert {:error, :not_authorized_for_consolidation} =
       Consolidation.capture(Map.delete(original, :web_evidence), plan)
 
+    # A replayed/consolidated conclusion cannot certify itself as new evidence.
     remembered_origin = put_in(original, [:web_evidence, :evidence_origin],
       :consolidated_symbolic_memory)
 
     assert {:error, :not_authorized_for_consolidation} =
       Consolidation.capture(remembered_origin, plan)
 
-    assert ConsolidatedConclusions.recent(
-      first_pair_key(names)) == []
+    # A valid context cannot authorize a tampered symbolic conclusion.
+    assert {:error, :not_authorized_for_consolidation} =
+      Consolidation.capture(original, Map.put(plan, :winner, List.last(names)))
+
+    # None of these rejected attempts created knowledge.
+    assert ConsolidatedConclusions.recent(first_pair_key(names)) == []
   end
 
   defp first_pair_key(names) do
