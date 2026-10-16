@@ -78,6 +78,27 @@ defmodule Core.Semantic.EventFrames do
           confidence: if(is_binary(subject), do: 0.9, else: 0.6)
         }
 
+      # A comparison is a relation over the previously resolved entities.
+      # The interpretation alone supplies no population values or ranking.
+      Map.get(reference, :source) == :wm_comprehension and
+          is_list(Map.get(reference, :antecedents)) and
+          length(Map.get(reference, :antecedents)) == 2 and
+          Regex.match?(
+            ~r/^\s*which\s+(?:(?:of\s+)?(?:those|these|the)\s+)?(?:cities|places|one)\s+has\s+the\s+(?:larger|greater|higher)\s+population\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          comparison: :greater,
+          subjects: Map.get(reference, :antecedents),
+          antecedent_source: :wm_comprehension,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.85
+        }
+
       # Plural follow-ups can use the preceding same-session comprehension.
       # These are discourse referents, NOT population claims or verified facts.
       Map.get(reference, :source) == :wm_comprehension and
