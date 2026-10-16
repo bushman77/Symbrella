@@ -414,6 +414,17 @@ defmodule Core.Response.LlmPrompt do
 
   defp discourse_reference_shaping(features) do
     case map_get(features, :discourse_reference) do
+      %{antecedents: places, source: :wm_comprehension, pronoun: pronoun}
+      when is_list(places) and length(places) >= 2 and is_binary(pronoun) ->
+        names =
+          places
+          |> Enum.filter(&is_binary/1)
+          |> Enum.take(4)
+          |> Enum.map(&String.slice(&1, 0, 80))
+          |> Enum.join(" and ")
+
+        "Conversation binding: '#{pronoun}' refers to #{names} from the preceding same-session comprehension. This establishes only the referents; independently verify any requested population or other external facts."
+
       %{antecedent: place, source: :recent_geographic_entity} when is_binary(place) ->
         "Conversation binding: the user is asking about #{String.slice(place, 0, 80)} from an earlier explicit geographic question. Verify that city's identity from Wikidata; do not repeat geographic assertions that the user has corrected."
 
