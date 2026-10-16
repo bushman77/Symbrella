@@ -143,11 +143,33 @@ defmodule Core.Response.LlmPrompt do
       wm_context(wm_summary),
 
       # ── Closing ──
+      verified_population_priority(features),
       "Respond to the user's actual request in the most natural useful form."
     ]
     |> Enum.reject(&blank?/1)
     |> Enum.join("\n")
     |> String.trim()
+  end
+
+  # Verified source support outranks low-confidence lexical *word senses*
+  # for this particular factual answer. Keep that distinction near the end
+  # of the prompt, after generic semantic-repair directives.
+  defp verified_population_priority(features) do
+    case map_get(features, :response_frame) do
+      %{version: 1, move: :answer_grounded_question,
+        evidence: %{kind: :population, subject: subject, value: count,
+                    year: year, source_urls: [url | _]}}
+      when is_binary(subject) and is_integer(count) and is_integer(year) and
+           is_binary(url) ->
+        "TURN PRIORITY: The population question's city, numeric count, year and " <>
+          "source are verified. Weak single-token word senses are NOT uncertainty " <>
+          "about the retrieved fact. Give the complete dated count and citation " <>
+          "directly in your own natural wording; no unrelated clarification or " <>
+          "extra figures. Do not copy an earlier unsupported answer."
+
+      _ ->
+        ""
+    end
   end
 
   @spec summarize_wm(list()) :: [String.t()]
