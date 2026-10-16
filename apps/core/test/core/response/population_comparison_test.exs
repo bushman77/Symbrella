@@ -144,6 +144,32 @@ defmodule Core.Response.PopulationComparisonTest do
     assert unrelated.entities == []
   end
 
+  test "comparison survives SemanticInput to bounded response-context transport" do
+    sid = session()
+    si = %{
+      session_id: sid,
+      sentence: "Which of those cities has the larger population?",
+      intent: :unknown,
+      symbolic_frame: frame(),
+      comprehension: %{degraded?: true, uncertain: ["which"]}
+    }
+
+    embedded = Core.Response.Context.from_si(si)
+    assert embedded.symbolic_frame.event.comparison == :greater
+    assert embedded.symbolic_frame.event.subjects == @cities
+
+    context =
+      Core.Response.Context.from_response_parts(
+        si.sentence,
+        %{turn_context: embedded, session_id: sid, intent: :unknown},
+        %{action: :answer},
+        %{},
+        %{wm_items: []}
+      )
+
+    assert PopulationComparison.comparison_subjects(context) == @cities
+  end
+
   test "retrieved claims survive in a separate same-session cache and generate a verified comparison" do
     sid = session()
     initial = question_context(sid, frame())
