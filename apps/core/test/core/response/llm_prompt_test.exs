@@ -69,7 +69,7 @@ defmodule Core.Response.LlmPromptTest do
     prompt = LlmPrompt.build_system_prompt(features, decision, mood, wm)
 
     assert prompt =~ "You are Symbrella."
-    assert prompt =~ "brain-inspired, stateful assistant"
+    assert prompt =~ "brain-inspired conversational companion"
     assert prompt =~ "Symbrella is your assistant identity, never the user's name."
     assert prompt =~ "Grounded definition: Symbrella is this local Phoenix umbrella app"
     assert prompt =~ "local Symbrella umbrella"

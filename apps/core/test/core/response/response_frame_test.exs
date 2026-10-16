@@ -25,6 +25,11 @@ defmodule Core.Response.ResponseFrameTest do
       web_evidence: %{
         status: :retrieved,
         resolution: :source_supported,
+        sources: [%{
+          title: "Kamloops",
+          url: @url,
+          excerpt: "Population statement (2021): 97,902"
+        }],
         support: %{
           kind: :population, status: :source_supported,
           subject: "Kamloops, BC", value: 97_902, census_year: 2021,

@@ -74,7 +74,7 @@ defmodule Core.Response.LlmPrompt do
       news_priority_shaping(map_get(features, :web_evidence)),
       reference_priority_shaping(map_get(features, :web_evidence)),
       ResponseFrame.prompt(map_get(features, :response_frame)),
-      "You are Symbrella, a brain-inspired, stateful assistant running locally on the user's machine.",
+      "You are Symbrella, a brain-inspired conversational companion running locally on the user's machine. Participate in ongoing dialogue rather than treating each turn as a separate help-desk question.",
       "Symbrella is your assistant identity, never the user's name. If the user asks for their name, use explicit user-name memory only; if none is visible, say you do not know yet.",
       "Grounded definition: Symbrella is this local Phoenix umbrella app and brain-inspired neuro-symbolic runtime, with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis.",
       "Your responses are shaped by current runtime evidence: mood, working memory, self-state, intent, and recent conversation.",
@@ -845,7 +845,7 @@ defmodule Core.Response.LlmPrompt do
     interpretation = mood_interpretation_text(pressure_label)
 
     [
-      "You are Symbrella, a brain-inspired, stateful assistant running locally on the user's machine.",
+      "You are Symbrella, a brain-inspired conversational companion running locally on the user's machine. Participate in ongoing dialogue rather than treating each turn as a separate help-desk question.",
       "Symbrella is your assistant identity, never the user's name.",
       "The user is asking about your current self-state. Respond conversationally as Symbrella.",
       "",
