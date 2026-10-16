@@ -228,7 +228,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     result =
       case metadata_download_url(fetch, timeout) do
         {:ok, url} ->
-          case download_table(fetch, url, timeout) do
+          case download_table(fetch, url, timeout, opts) do
             {:ok, _} = success ->
               success
 
@@ -236,12 +236,12 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
               if url == @direct_zip_url do
                 {:error, {:official_download_failed, %{metadata: :ok, zip: discovered_error}}}
               else
-                fallback_table(fetch, timeout, %{metadata: :ok, discovered_zip: discovered_error})
+                fallback_table(fetch, timeout, %{metadata: :ok, discovered_zip: discovered_error}, opts)
               end
           end
 
         {:error, metadata_error} ->
-          fallback_table(fetch, timeout, %{metadata: metadata_error})
+          fallback_table(fetch, timeout, %{metadata: metadata_error}, opts)
       end
 
     maybe_curl_fallback(result, opts, timeout)
@@ -249,7 +249,8 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
 
   # Req can time out on some Termux networks even though curl can download
   # the official archive. Only fall back for an actual ZIP transport failure,
-  # not for an HTTP rejection or malformed upstream content.
+  # not an HTTP rejection. ZIP reader incompatibilities are handled locally
+  # by extract_csv_with_unzip/1 before a second network request.
   defp maybe_curl_fallback({:error, {:official_download_failed, reasons}} = failure, opts, timeout) do
     zip_error = Map.get(reasons, :direct_zip, Map.get(reasons, :zip))
     injected_fetch? = Keyword.has_key?(opts, :fetch)
@@ -262,7 +263,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
       outcome =
         try do
           case curl_download.(@direct_zip_url, timeout) do
-            {:ok, zip} -> extract_table_csv(zip)
+            {:ok, zip} -> extract_table_csv(zip, opts)
             {:error, _} = error -> error
             _ -> {:error, :unexpected_curl_response}
           end
@@ -315,8 +316,8 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     end
   end
 
-  defp fallback_table(fetch, timeout, previous) do
-    case download_table(fetch, @direct_zip_url, timeout) do
+  defp fallback_table(fetch, timeout, previous, opts) do
+    case download_table(fetch, @direct_zip_url, timeout, opts) do
       {:ok, _} = success -> success
       {:error, reason} ->
         {:error, {:official_download_failed, Map.put(previous, :direct_zip, reason)}}
@@ -364,7 +365,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
   end
   defp decode_metadata(_), do: nil
 
-  defp download_table(fetch, url, timeout) do
+  defp download_table(fetch, url, timeout, opts) do
     args = [
       headers: [{"user-agent", @user_agent}, {"accept", "application/zip"}],
       receive_timeout: timeout, retry: false
@@ -372,7 +373,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
 
     case safe_fetch(fetch, url, args, :zip) do
       {:ok, %{status: 200, body: data}} ->
-        extract_table_csv(data)
+        extract_table_csv(data, opts)
 
       {:ok, %{status: status}} ->
         {:error, {:zip_http_status, status}}
@@ -385,7 +386,7 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
     end
   end
 
-  defp extract_table_csv(data) when is_binary(data) do
+  defp extract_table_csv(data, opts) when is_binary(data) do
     cond do
       byte_size(data) > @max_zip_bytes ->
         {:error, {:zip_too_large, byte_size(data)}}
@@ -394,7 +395,9 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
         {:error, :not_a_zip_archive}
 
       true ->
-        case :zip.extract({:binary, data}, [:memory]) do
+        zip_extract = Keyword.get(opts, :zip_extract, &:zip.extract/2)
+
+        case zip_extract.({:binary, data}, [:memory]) do
           {:ok, files} ->
             case Enum.find(files, fn {name, _} ->
                    Path.basename(to_string(name)) == "#{@pid}.csv"
@@ -412,12 +415,67 @@ defmodule Core.Tools.WebRetrieval.StatisticsCanadaPopulation do
             end
 
           {:error, _} ->
-            {:error, :invalid_zip_archive}
+            # OTP's ZIP reader may reject some archives that Info-ZIP can
+            # extract. Use the same trusted downloaded bytes, not another URL.
+            extract_csv_with_unzip(data)
         end
     end
   end
 
-  defp extract_table_csv(_), do: {:error, :invalid_zip_body}
+  defp extract_table_csv(_, _), do: {:error, :invalid_zip_body}
+
+  defp extract_csv_with_unzip(data) do
+    case System.find_executable("unzip") do
+      nil ->
+        {:error, :invalid_zip_archive}
+
+      unzip ->
+        dirname = "symbrella-statcan-zip-" <>
+          Integer.to_string(System.unique_integer([:positive, :monotonic]))
+        dir = Path.join(System.tmp_dir!(), dirname)
+        archive = Path.join(dir, "download.zip")
+        csv_path = Path.join(dir, "#{@pid}.csv")
+
+        try do
+          with :ok <- File.mkdir(dir),
+               :ok <- File.write(archive, data) do
+            # Extract only the exact CSV member, never arbitrary archive paths.
+            case System.cmd(unzip,
+                   ["-j", "-o", archive, "#{@pid}.csv", "-d", dir],
+                   stderr_to_stdout: true) do
+              {_, 0} ->
+                case File.stat(csv_path) do
+                  {:ok, %{size: size}} when size > @max_csv_bytes ->
+                    {:error, {:csv_too_large, size}}
+
+                  {:ok, _} ->
+                    case File.read(csv_path) do
+                      {:ok, csv} ->
+                        if valid_csv_header?(csv),
+                          do: {:ok, csv},
+                          else: {:error, :invalid_csv_header}
+
+                      {:error, reason} ->
+                        {:error, {:unzip_csv_read_failed, reason}}
+                    end
+
+                  _ ->
+                    {:error, :official_csv_missing_from_archive}
+                end
+
+              {_, _} ->
+                {:error, :invalid_zip_archive}
+            end
+          else
+            {:error, reason} -> {:error, {:unzip_temp_file_failed, reason}}
+          end
+        rescue
+          error -> {:error, {:unzip_exception, summarize_reason(error)}}
+        after
+          File.rm_rf(dir)
+        end
+    end
+  end
 
   defp valid_csv_header?(csv) when is_binary(csv) do
     case String.split(csv, "\n", parts: 2) do
