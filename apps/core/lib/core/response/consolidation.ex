@@ -12,6 +12,8 @@ defmodule Core.Response.Consolidation do
   reference year. No personal memories, LLM-authored facts or generic prose.
   Opt-in using :core, :symbolic_consolidation_enabled? after DB migration.
   """
+  require Logger
+
   alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
   alias Db.{CognitiveIssues, ConsolidatedConclusions}
 
@@ -53,9 +55,13 @@ defmodule Core.Response.Consolidation do
       :disabled
     end
   rescue
-    _ -> {:error, :consolidation_store_unavailable}
+    error ->
+      Logger.warning("[Consolidation] capture unavailable: #{Exception.message(error)}")
+      {:error, :consolidation_store_unavailable}
   catch
-    :exit, _ -> {:error, :consolidation_store_unavailable}
+    :exit, reason ->
+      Logger.warning("[Consolidation] capture exit: #{inspect(reason)}")
+      {:error, :consolidation_store_unavailable}
   end
 
   def capture(_, _), do: {:error, :invalid_context}
@@ -85,9 +91,13 @@ defmodule Core.Response.Consolidation do
       context
     end
   rescue
-    _ -> context
+    error ->
+      Logger.warning("[Consolidation] recall unavailable: #{Exception.message(error)}")
+      context
   catch
-    :exit, _ -> context
+    :exit, reason ->
+      Logger.warning("[Consolidation] recall exit: #{inspect(reason)}")
+      context
   end
 
   def recall(other), do: other
