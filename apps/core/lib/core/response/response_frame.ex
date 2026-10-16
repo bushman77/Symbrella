@@ -222,10 +222,9 @@ defmodule Core.Response.ResponseFrame do
           kind: :population, subject: short(subject, 100),
           value: value, year: year,
           source_type: Map.get(support, :source_type),
-          measurement_type: Map.get(support, :measurement_type),
-          source_table: Map.get(support, :source_table),
           source_urls: urls([url])
         }
+        |> maybe_add_source_metadata(support)
 
       %{kind: :proximity, subject: subject, target: target, distance_km: distance,
         sources: sources}
@@ -247,6 +246,18 @@ defmodule Core.Response.ResponseFrame do
       _ ->
         nil
     end
+  end
+
+  # Preserve the historical response-frame shape for providers without
+  # explicit measurement metadata. Optional evidence fields must not be
+  # inserted as nil: existing consumers compare these maps exactly.
+  defp maybe_add_source_metadata(frame, support) do
+    Enum.reduce([:measurement_type, :source_table], frame, fn field, acc ->
+      case Map.get(support, field) do
+        nil -> acc
+        value -> Map.put(acc, field, value)
+      end
+    end)
   end
 
   defp sourced_evidence(_), do: nil
