@@ -182,7 +182,8 @@ defmodule Core.Response.LlmPromptEvents do
       :draft_text,
       :final_text,
       :at_ms,
-      :evidence_revision
+      :evidence_revision,
+      :grounded_revision
     ])
   end
 

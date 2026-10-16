@@ -32,8 +32,9 @@ defmodule Core.Tools.EvidenceResolver do
     configured_budget = Keyword.get(opts, :max_attempts, Keyword.get(cfg, :max_attempts, @max_attempts))
     max_attempts = max(1, min(@max_attempts, configured_budget))
     provider_opts = Keyword.get(opts, :provider_opts, [])
-    coords_provider = Keyword.get(opts, :coordinate_provider, Wikidata)
-    coords_opts = Keyword.get(opts, :coordinate_opts, [])
+    coords_provider =
+      Keyword.get(opts, :coordinate_provider, Keyword.get(cfg, :coordinate_provider, Wikidata))
+    coords_opts = Keyword.get(opts, :coordinate_opts, Keyword.get(cfg, :coordinate_opts, []))
     news_provider = Keyword.get(opts, :news_provider, Keyword.get(cfg, :news_provider, NewsRss))
     news_opts = Keyword.get(opts, :news_opts, [])
     request_type = Keyword.get(opts, :request_type)
