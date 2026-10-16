@@ -10,7 +10,7 @@ defmodule Core.Response.SymbolicConsolidationTest do
 
   alias Core.Curiosity.UnresolvedIssues
   alias Core.Response.{
-    AuthoritativeAnswerPlan, Consolidation, LlmSynthesis,
+    AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
     PopulationComparison, ResponseFrame
   }
   alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
@@ -235,6 +235,13 @@ defmodule Core.Response.SymbolicConsolidationTest do
     assert issue.kind == "contradictory_premises"
     assert issue.priority == 0.9
     assert issue.next_action == "recheck_sources"
+    prompt = LlmPrompt.build_system_prompt(%{
+      features: %{intent: :question, symbolic_frame: frame(names)},
+      consolidation_issue: unresolved.consolidation_issue,
+      decision: %{action: :answer}, mood: %{}
+    })
+    assert prompt =~ "UNRESOLVED EVIDENCE CONFLICT"
+    assert prompt =~ "Do not choose a winner"
     assert Enum.sort(issue.evidence["stored_proof_ids"]) ==
       Enum.sort([first.id, second.id])
 
