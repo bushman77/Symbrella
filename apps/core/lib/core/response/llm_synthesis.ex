@@ -45,7 +45,12 @@ defmodule Core.Response.LlmSynthesis do
   @spec generate(String.t(), map(), map(), map(), atom() | nil) ::
           {:ok, String.t(), map()} | {:error, term()}
   def generate(user_text, features, decision, mood, prompt_type) do
-    if llm_available?() do
+    # An already-groundable symbolic comparison can be answered even when the
+    # LLM process is offline. Other turns retain their original LLM gate.
+    comparison? =
+      PopulationComparison.comparison_subjects(%{features: features}) != []
+
+    if llm_available?() or comparison? do
       do_generate(user_text, features, decision, mood, prompt_type)
     else
       {:error, :llm_not_available}
@@ -207,6 +212,14 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp do_freeform_generate(user_text, context, history, answer_target, prompt_type) do
+    if llm_available?() do
+      do_freeform_llm_generate(user_text, context, history, answer_target, prompt_type)
+    else
+      {:error, :llm_not_available}
+    end
+  end
+
+  defp do_freeform_llm_generate(user_text, context, history, answer_target, prompt_type) do
     system_prompt =
       build_prompt(context, prompt_type)
       |> then(fn prompt ->
