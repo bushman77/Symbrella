@@ -84,7 +84,7 @@ defmodule Core.Semantic.EventFrames do
           is_list(Map.get(reference, :antecedents)) and
           length(Map.get(reference, :antecedents)) == 2 and
           Regex.match?(
-            ~r/^\s*which\s+(?:(?:of\s+)?(?:those|these|the)\s+)?(?:cities|places|one)\s+has\s+the\s+(?:larger|greater|higher)\s+population\s*[?.!]*\s*$/iu,
+            ~r/^\s*which\s+(?:(?:of\s+)?(?:those|these|the)\s+)?(?:cities|city|places|one)\s+has\s+the\s+(?:larger|greater|higher)\s+population\s*[?.!]*\s*$/iu,
             sentence
           ) ->
         %{
