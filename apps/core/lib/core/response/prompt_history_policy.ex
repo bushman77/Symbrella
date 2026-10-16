@@ -24,7 +24,8 @@ defmodule Core.Response.PromptHistoryPolicy do
     {eligible?, reason} =
       cond do
         not usable? -> {false, :no_relevant_episode}
-        is_binary(answer_target) and String.trim(answer_target) != "" ->
+        is_binary(answer_target) and String.trim(answer_target) != "" and
+            String.trim(answer_target) != String.trim(user_text) ->
           {false, :prior_question_dependency}
         ambiguous?(user_text) -> {false, :conversational_dependency}
         length(trimmed) >= length(history) -> {false, :within_recent_window}
