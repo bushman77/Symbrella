@@ -149,6 +149,7 @@ defmodule SymbrellaWeb.NeuralShadow do
       log_path: state.log_path,
       schema: StateTransitionBuilder.feature_schema_version(),
       model_version: if(state.model, do: state.model.artifact.model_version, else: nil),
+      checkpoint_assessment: if(state.model, do: state.model.artifact[:assessment], else: nil),
       predictions: state.predictions,
       evaluations: state.evaluations,
       skipped: state.skipped,
@@ -291,14 +292,16 @@ defmodule SymbrellaWeb.NeuralShadow do
     cells = report.valid_cells
     model_error = if cells > 0, do: report.model_mse * cells, else: 0.0
     baseline_error = if cells > 0, do: report.persistence_mse * cells, else: 0.0
+    observed_increment = if cells > 0, do: 1, else: 0
+    improved_increment = if payload.verdict == "residual_better", do: 1, else: 0
 
     %{state |
       evaluations: state.evaluations + 1,
-      observed_pairs: state.observed_pairs + if(cells > 0, do: 1, else: 0),
+      observed_pairs: state.observed_pairs + observed_increment,
       observed_cells: state.observed_cells + cells,
       residual_squared_error: state.residual_squared_error + model_error,
       persistence_squared_error: state.persistence_squared_error + baseline_error,
-      improved_pairs: state.improved_pairs + if(payload.verdict == "residual_better", do: 1, else: 0),
+      improved_pairs: state.improved_pairs + improved_increment,
       last_evaluation: Map.take(payload, [:valid_feature_pairs, :residual_mse, :persistence_mse, :verdict])
     }
   end
