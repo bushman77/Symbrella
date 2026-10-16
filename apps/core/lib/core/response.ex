@@ -172,8 +172,15 @@ defmodule Core.Response do
               llm_or_model_unavailable(text_in, features, decision, mood, intent)
           end
 
+        # A source-verified symbolic conclusion is already a complete,
+        # authorized answer. Do not append a curiosity question after its
+        # claim/citation lock has passed final review.
         {text, curiosity_probe} =
-          SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
+          if response_source == :symbolic_verified do
+            {text0, nil}
+          else
+            SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
+          end
 
         SideEffects.record_turn(session_id, text_in, text)
 
@@ -393,6 +400,9 @@ defmodule Core.Response do
 
   defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type \\ nil) do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
+      {:ok, verified_text, %{authoritative_plan: %{status: :enforced}} = reflection} ->
+        {verified_text, :symbolic_verified, nil, reflection}
+
       {:ok, llm_text, reflection} ->
         {llm_text, :llm, nil, reflection}
 
