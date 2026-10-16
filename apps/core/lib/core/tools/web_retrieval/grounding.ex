@@ -276,8 +276,14 @@ defmodule Core.Tools.WebRetrieval.Grounding do
             "Both places have the same recorded population for that year."
           else
             winner = if a.value > b.value, do: a.subject, else: b.subject
-            "#{winner} has the larger recorded population by " <>
-              "#{format_population(difference)}."
+            if Map.get(a, :measurement_type) == :official_estimate and
+                 Map.get(b, :measurement_type) == :official_estimate do
+              "#{winner} has the larger estimated population by " <>
+                "#{format_population(difference)} for July 1, #{year}."
+            else
+              "#{winner} has the larger recorded population by " <>
+                "#{format_population(difference)}."
+            end
           end
 
         detailed =
@@ -293,7 +299,12 @@ defmodule Core.Tools.WebRetrieval.Grounding do
           else
             winner = if a.value > b.value, do: a, else: b
             loser = if a.value > b.value, do: b, else: a
-            "#{winner.subject} had the larger recorded population in #{year}: " <>
+            measure =
+              if Map.get(winner, :measurement_type) == :official_estimate,
+                do: "estimated population as of July 1, #{year}",
+                else: "recorded population in #{year}"
+
+            "#{winner.subject} had the larger #{measure}: " <>
               "#{format_population(winner.value)} versus " <>
               "#{format_population(loser.value)} in #{loser.subject}, " <>
               "a difference of #{format_population(difference)}."
@@ -392,6 +403,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
               case get_in(context, [:web_evidence, :comparison_status]) do
                 :different_reporting_years ->
                   " The reporting years differ, so a like-for-like ranking is not established."
+                :incompatible_measurements ->
+                  " The measurement types or source series differ, so a like-for-like ranking is not established."
                 _ ->
                   " The available verified figures do not establish a comparison for every place."
               end
