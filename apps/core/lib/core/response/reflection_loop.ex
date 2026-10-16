@@ -753,7 +753,7 @@ defmodule Core.Response.ReflectionLoop do
     target = map_get(frame, :target)
     subjects =
       frame
-      |> map_get(:subjects, [])
+      |> map_get(:subjects)
       |> List.wrap()
       |> Enum.filter(&is_binary/1)
       |> Enum.take(4)
