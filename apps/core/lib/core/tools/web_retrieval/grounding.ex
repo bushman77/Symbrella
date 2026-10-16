@@ -70,6 +70,16 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec align(String.t(), map()) :: String.t()
   def align(draft, context) when is_binary(draft) and is_map(context) do
+    case population_group_answer(context) do
+      answer when is_binary(answer) ->
+        answer
+
+      _ ->
+        align_single(draft, context)
+    end
+  end
+
+  defp align_single(draft, context) do
     case supported_identity(context) do
       %{title: title, description: description, sources: [%{url: url}]}
       when is_binary(title) and is_binary(description) and is_binary(url) ->
@@ -121,13 +131,24 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec available_support?(map()) :: boolean()
   def available_support?(context) when is_map(context),
-    do: is_map(supported_population(context)) or is_map(supported_proximity(context)) or
+    do: is_map(supported_population_group(context)) or
+      is_map(supported_population(context)) or is_map(supported_proximity(context)) or
       is_map(supported_identity(context))
 
   def available_support?(_), do: false
 
   @spec supports?(String.t(), map()) :: boolean()
   def supports?(text, context) when is_binary(text) and is_map(context) do
+    case population_group_answer(context) do
+      answer when is_binary(answer) ->
+        text == answer
+
+      _ ->
+        supports_single?(text, context)
+    end
+  end
+
+  defp supports_single?(text, context) do
     case supported_identity(context) do
       %{status: :source_supported} ->
         text == align(text, context)
@@ -217,6 +238,74 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   end
 
   defp supported_population_paraphrase?(_, _, _, _, _), do: false
+
+  # Multi-subject population grounding is deliberately claim-by-claim.
+  # If any figure, date or source is malformed, only that city's result is
+  # treated as unavailable. No derived population or shared year is inferred.
+  defp population_group_answer(context) do
+    case supported_population_group(context) do
+      %{results: results} ->
+        lines =
+          Enum.map(results, fn
+            %{subject: subject, status: :source_supported,
+              value: value, census_year: year, source_url: url} ->
+              "#{subject}: #{format_population(value)} (#{year}). Source: #{url}"
+
+            %{subject: subject} ->
+              "#{subject}: no verified dated population figure was available."
+          end)
+
+        "Population figures for the places you asked about:\n" <>
+          Enum.join(lines, "\n") <>
+          "\nThese are dated figures, not necessarily current population estimates."
+
+      _ ->
+        nil
+    end
+  end
+
+  defp format_population(value) when is_integer(value) do
+    value
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.graphemes()
+    |> Enum.chunk_every(3)
+    |> Enum.map_join(",", &Enum.join/1)
+    |> String.reverse()
+  end
+
+  defp supported_population_group(context) do
+    frame = geographic_frame(context)
+    evidence = Map.get(context, :web_evidence) || %{}
+    support = if is_map(evidence), do: Map.get(evidence, :support), else: nil
+    subjects = if is_map(frame), do: Map.get(frame, :subjects), else: nil
+
+    with :population <- Map.get(frame, :relation),
+         :location_question <- Map.get(frame, :type),
+         names when is_list(names) <- subjects,
+         true <- length(names) >= 2 and length(names) <= 4,
+         %{kind: :population_group, subjects: ^names, results: results} <- support,
+         true <- is_list(results) and length(results) == length(names),
+         true <- Enum.map(results, &Map.get(&1, :subject)) == names,
+         true <- Enum.all?(results, &valid_population_group_entry?/1) do
+      support
+    else
+      _ -> nil
+    end
+  end
+
+  defp valid_population_group_entry?(%{subject: subject, status: :unavailable})
+       when is_binary(subject), do: true
+
+  defp valid_population_group_entry?(%{
+         subject: subject, status: :source_supported, value: value,
+         census_year: year, source_url: url
+       })
+       when is_binary(subject) and is_integer(value) and value > 0 and
+              is_integer(year) and is_binary(url),
+       do: String.starts_with?(url, "https://")
+
+  defp valid_population_group_entry?(_), do: false
 
   defp supported_identity(context) do
     frame = geographic_frame(context)
