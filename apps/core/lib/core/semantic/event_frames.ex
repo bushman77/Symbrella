@@ -78,6 +78,26 @@ defmodule Core.Semantic.EventFrames do
           confidence: if(is_binary(subject), do: 0.9, else: 0.6)
         }
 
+      # Plural follow-ups can use the preceding same-session comprehension.
+      # These are discourse referents, NOT population claims or verified facts.
+      Map.get(reference, :source) == :wm_comprehension and
+          is_list(Map.get(reference, :antecedents)) and
+          length(Map.get(reference, :antecedents)) >= 2 and
+          Regex.match?(
+            ~r/^\s*what\s+are\s+(?:the\s+)?populations?\s+of\s+(?:each|both)\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subjects: Enum.take(Map.get(reference, :antecedents), 4),
+          antecedent_source: :wm_comprehension,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.8
+        }
+
       # Directly named places do not require discourse antecedent recovery.
       # This creates only a question frame; coordinates must still be sourced
       # and matched to both entities before any numeric claim may be returned.
