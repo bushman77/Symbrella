@@ -151,7 +151,11 @@ defmodule Core.Response.AuthoritativeAnswerPlanTest do
     unsourced = Map.delete(good, :web_evidence)
     assert AuthoritativeAnswerPlan.build(unsourced) == nil
 
-    irrelevant = %{good | symbolic_frame: %{event: %{type: :smalltalk}}}
+    irrelevant =
+      good
+      |> Map.put(:symbolic_frame, %{event: %{type: :smalltalk}})
+      |> put_in([:features, :symbolic_frame], %{type: :smalltalk})
+
     assert AuthoritativeAnswerPlan.build(irrelevant) == nil
   end
 
