@@ -19,6 +19,7 @@ defmodule Core.Response.Context do
       session_id: map_get(si, :session_id, :global),
       symbolic_frame: symbolic_frame(si),
       comprehension: map_get(si, :comprehension),
+      wm_context: wm_context_summary(map_get(si, :wm_context)),
       self_model: map_get(si, :self_model),
       self_monitor: map_get(si, :self_monitor),
       self_memory_recall: map_get(si, :self_memory_recall)
@@ -222,9 +223,19 @@ defmodule Core.Response.Context do
   defp sense_candidate_count(list) when is_list(list), do: length(list)
   defp sense_candidate_count(_), do: 0
 
+  defp wm_context_summary(%{} = context) do
+    context
+    |> Map.take([:intent, :entities, :relation, :recognized_topics,
+      :degraded?, :verification, :interpretation_status])
+    |> drop_empty()
+  end
+
+  defp wm_context_summary(_), do: nil
+
   defp semantic_event_summary(%{} = event) do
     event
-    |> Map.take([:type, :subject, :target, :relation, :grounding_status, :antecedent_source, :unresolved_roles, :modality, :action, :confidence, :uncertain_roles])
+    |> Map.take([:type, :subject, :subjects, :target, :relation, :grounding_status,
+      :antecedent_source, :unresolved_roles, :modality, :action, :confidence, :uncertain_roles])
     |> drop_empty()
   end
 
