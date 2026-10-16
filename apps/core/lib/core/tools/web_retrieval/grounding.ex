@@ -100,7 +100,12 @@ defmodule Core.Tools.WebRetrieval.Grounding do
       %{distance_km: km, subject: subject, target: target, sources: sources}
       when is_number(km) and is_binary(subject) and is_binary(target) ->
         citations = Enum.map_join(sources, " and ", &Map.get(&1, :url, ""))
-        "Based on Wikidata coordinates, #{subject} and #{target} are approximately " <>
+        origin =
+          if Enum.all?(sources, &(Map.get(&1, :provider) == :natural_resources_canada)),
+            do: "Natural Resources Canada official place-name coordinates",
+            else: "Wikidata coordinates"
+
+        "Based on #{origin}, #{subject} and #{target} are approximately " <>
           "#{km} km apart in a straight line (not driving distance). Sources: #{citations}"
 
       _ ->
@@ -116,6 +121,11 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
         if is_binary(subject) do
           case Map.get(supported_population(context), :source_type) do
+            :statistics_canada ->
+              "Statistics Canada estimates #{subject}'s population at #{display} " <>
+                "as of July 1, #{year}. This is an official annual estimate, " <>
+                "not a census count. Source: #{source}"
+
             :wikidata ->
               "Wikidata lists a dated population statement for #{subject} of #{display} " <>
                 "(#{year}). This is not necessarily the current population estimate. Source: #{source}"
@@ -258,8 +268,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   def authorized_comparison_answers(context) when is_map(context) do
     case supported_population_comparison(context) do
       %{claims: [a, b], year: year, outcome: outcome, difference: difference} ->
-        first = "#{a.subject}: #{format_population(a.value)} (#{year})"
-        second = "#{b.subject}: #{format_population(b.value)} (#{year})"
+        first = "#{a.subject}: #{format_population(a.value)} (#{year_label(year, a)})"
+        second = "#{b.subject}: #{format_population(b.value)} (#{year_label(year, b)})"
 
         conclusion =
           if outcome == :equal do
@@ -274,7 +284,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
           "Comparing sourced population statements:\n" <>
             first <> "\n" <> second <> "\n" <> conclusion <>
             "\nSources: #{a.source_url} and #{b.source_url}. " <>
-            "These dated counts are not necessarily current estimates."
+            provenance_note(a, b)
 
         short_conclusion =
           if outcome == :equal do
@@ -291,7 +301,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
         brief =
           short_conclusion <> " Sources: #{a.source_url} and #{b.source_url}. " <>
-            "These are dated figures, not necessarily current estimates."
+            provenance_note(a, b)
 
         %{detailed: detailed, brief: brief}
 
@@ -321,6 +331,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
          true <- Enum.all?([a, b], &valid_comparison_claim?/1),
          true <- Enum.map([a, b], & &1.subject) == names,
          true <- a.census_year == b.census_year and a.census_year == year,
+         true <- Map.get(a, :measurement_type) == Map.get(b, :measurement_type),
+         true <- compatible_source_claims?(a, b),
          true <- difference == abs(a.value - b.value),
          true <- valid_comparison_outcome?(a, b, outcome, winner, loser) do
       support
@@ -328,6 +340,13 @@ defmodule Core.Tools.WebRetrieval.Grounding do
       _ -> nil
     end
   end
+
+  defp compatible_source_claims?(%{measurement_type: :official_estimate} = a,
+                                         %{measurement_type: :official_estimate} = b) do
+    Map.get(a, :source_type) == Map.get(b, :source_type) and
+      Map.get(a, :source_table) == Map.get(b, :source_table)
+  end
+  defp compatible_source_claims?(_, _), do: true
 
   defp valid_comparison_outcome?(a, b, outcome, winner, loser) do
     cond do
@@ -360,8 +379,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         lines =
           Enum.map(results, fn
             %{subject: subject, status: :source_supported,
-              value: value, census_year: year, source_url: url} ->
-              "#{subject}: #{format_population(value)} (#{year}). Source: #{url}"
+              value: value, census_year: year, source_url: url} = entry ->
+              "#{subject}: #{format_population(value)} (#{year_label(year, entry)}). Source: #{url}"
 
             %{subject: subject} ->
               "#{subject}: no verified dated population figure was available."
@@ -391,6 +410,16 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         nil
     end
   end
+
+  defp year_label(year, %{measurement_type: :official_estimate}),
+    do: "#{year} official estimate"
+  defp year_label(year, _), do: "#{year}"
+
+  defp provenance_note(%{measurement_type: :official_estimate},
+                       %{measurement_type: :official_estimate}),
+    do: "Both figures are official annual population estimates, not census counts."
+  defp provenance_note(_, _),
+    do: "These are dated figures, not necessarily current estimates."
 
   defp format_population(value) when is_integer(value) do
     value
