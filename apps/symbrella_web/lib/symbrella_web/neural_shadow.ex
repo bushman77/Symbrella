@@ -94,6 +94,11 @@ defmodule SymbrellaWeb.NeuralShadow do
       predictions: 0,
       evaluations: 0,
       skipped: 0,
+      observed_pairs: 0,
+      observed_cells: 0,
+      residual_squared_error: 0.0,
+      persistence_squared_error: 0.0,
+      improved_pairs: 0,
       pending: %{},
       last_evaluation: nil,
       handler_id: nil
@@ -147,6 +152,13 @@ defmodule SymbrellaWeb.NeuralShadow do
       predictions: state.predictions,
       evaluations: state.evaluations,
       skipped: state.skipped,
+      observed_pairs: state.observed_pairs,
+      observed_cells: state.observed_cells,
+      improved_pairs: state.improved_pairs,
+      aggregate_residual_mse:
+        if(state.observed_cells > 0, do: state.residual_squared_error / state.observed_cells, else: nil),
+      aggregate_persistence_mse:
+        if(state.observed_cells > 0, do: state.persistence_squared_error / state.observed_cells, else: nil),
       pending_sessions: map_size(state.pending),
       last_evaluation: state.last_evaluation
     }, state}
@@ -175,7 +187,7 @@ defmodule SymbrellaWeb.NeuralShadow do
 
         # Ignore repeated archived turn notifications instead of treating a
         # duplicate as a genuine self-transition.
-        if last && last.turn_id == observation.turn_id do
+        if last && observation.turn_id in Map.get(last, :recent_ids, [last.turn_id]) do
           %{state | skipped: state.skipped + 1}
         else
           state = if last, do: score_previous(state, last, observation), else: state
@@ -208,9 +220,15 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+    prior = Map.get(state.pending, observation.session_id)
+    recent_ids =
+      [observation.turn_id | if(prior, do: Map.get(prior, :recent_ids, [prior.turn_id]), else: [])]
+      |> Enum.take(32)
+
     pending = Map.put(state.pending, observation.session_id, %{
       session_id: observation.session_id,
       turn_id: observation.turn_id,
+      recent_ids: recent_ids,
       features: observation.values,
       observed: observation.observed,
       prediction: predicted
@@ -267,8 +285,20 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+
+    # Aggregate squared errors over the same observed cells. Pairwise winning
+    # counts alone can hide poor performance on larger or harder transitions.
+    cells = report.valid_cells
+    model_error = if cells > 0, do: report.model_mse * cells, else: 0.0
+    baseline_error = if cells > 0, do: report.persistence_mse * cells, else: 0.0
+
     %{state |
       evaluations: state.evaluations + 1,
+      observed_pairs: state.observed_pairs + if(cells > 0, do: 1, else: 0),
+      observed_cells: state.observed_cells + cells,
+      residual_squared_error: state.residual_squared_error + model_error,
+      persistence_squared_error: state.persistence_squared_error + baseline_error,
+      improved_pairs: state.improved_pairs + if(payload.verdict == "residual_better", do: 1, else: 0),
       last_evaluation: Map.take(payload, [:valid_feature_pairs, :residual_mse, :persistence_mse, :verdict])
     }
   end
