@@ -59,6 +59,10 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert item.payload.context.verification == :conversation_context_only
     assert item.payload.context.entities == ["Kamloops BC", "Maple Ridge BC"]
 
+    # Global prompt snapshots must not expose other sessions' context frames.
+    runtime = Core.Response.RuntimeContext.snapshot()
+    refute Enum.any?(runtime.wm_items, &(&1.id == frame_id(sid)))
+
     # No global WM policy was relaxed: only the focus call for the temporary
     # frame receives permissive opts.
     assert Brain.snapshot_wm().cfg == original_gate
