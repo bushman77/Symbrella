@@ -16,6 +16,7 @@ defmodule Brain.PMTG do
   @name __MODULE__
 
   alias Brain.LIFG.Prior
+  alias Brain.PMTG.Overlap
 
   @type si :: map()
   @type choice :: map()
@@ -202,9 +203,10 @@ defmodule Brain.PMTG do
           {:ok, %{si: si(), queries: [query()], audit: map()}}
   def resolve(si, needy, opts \\ []) when is_map(si) and is_list(needy) do
     t0 = System.monotonic_time()
+    {planned, suppressed} = Overlap.prune(needy, Map.get(si, :tokens) || Map.get(si, "tokens") || [])
 
     queries =
-      Enum.map(needy, fn ch ->
+      Enum.map(planned, fn ch ->
         %{
           stage: :pmtg,
           token_index: ch[:token_index],
@@ -219,15 +221,20 @@ defmodule Brain.PMTG do
       stage: :pmtg,
       input_summary: %{token_count: token_count(si)},
       decision: if(queries == [], do: :skip, else: :plan),
-      reason: if(needy == [], do: :no_needy_lifg_choices, else: :weak_or_conflicted_lifg_choices),
-      scores: %{needy_ratio: needy_ratio(si, needy), planned_queries: length(queries)},
-      meta: %{needy_count: length(needy), planned_queries: length(queries)},
+      reason: if(queries == [], do: :no_needy_lifg_choices, else: :weak_or_conflicted_lifg_choices),
+      scores: %{needy_ratio: needy_ratio(si, planned), planned_queries: length(queries)},
+      meta: %{
+        needy_count: length(planned),
+        planned_queries: length(queries),
+        suppressed_overlap_count: length(suppressed),
+        suppressed_token_indices: suppressed
+      },
       ts_ms: System.system_time(:millisecond)
     }
 
     si2 = Map.update(si, :trace, [ev], fn tr -> [ev | tr] end)
 
-    audit = %{stage: :pmtg, needy_count: length(needy)}
+    audit = %{stage: :pmtg, needy_count: length(planned), suppressed_overlap_count: length(suppressed)}
     timing_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
     {:ok, %{si: si2, queries: queries, audit: Map.put(audit, :timing_ms, timing_ms)}}
   end
@@ -717,6 +724,11 @@ defmodule Brain.PMTG do
 
     si0 = %{tokens: tokens, trace: []}
     {:ok, %{si: si1, queries: queries}} = resolve(si0, need, limit: Keyword.get(opts, :limit, 5))
+
+    # Use exactly the queried choices for boosting/reruns, never the
+    # unfiltered set whose constituent words were suppressed.
+    queried_indices = MapSet.new(Enum.map(queries, & &1.token_index))
+    need = Enum.filter(need, &(MapSet.member?(queried_indices, &1[:token_index])))
 
     evidence =
       fetch_evidence(queries, si1.tokens, opts)
