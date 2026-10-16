@@ -105,10 +105,15 @@ defmodule Core.Response.PromptBudgetComparisonTest do
     builder = fn ctx ->
       "Base instructions." <>
         (if Map.has_key?(ctx, :episodic_recall), do: " EPISODE: remembered nickname.", else: "") <>
-        (if Map.has_key?(ctx, :web_evidence), do: " SOURCED: verified count.", else: "")
+        (if Map.has_key?(ctx, :web_evidence), do: " RETRIEVED: source excerpt.", else: "") <>
+        (if get_in(ctx, [:response_frame, :evidence]), do: " VERIFIED: symbolic proof.", else: "")
     end
 
-    context = %{episodic_recall: [episode()], web_evidence: %{status: :retrieved}}
+    context = %{
+      episodic_recall: [episode()],
+      web_evidence: %{status: :retrieved},
+      response_frame: %{evidence: %{kind: :population, value: 100}}
+    }
     history = dialogue(5)
     selective = Enum.take(history, -4)
 
@@ -118,6 +123,7 @@ defmodule Core.Response.PromptBudgetComparisonTest do
     assert b.actual == b.full
     assert b.section_estimated_tokens.episodic_recall > 0
     assert b.section_estimated_tokens.verified_evidence > 0
+    assert b.section_estimated_tokens.retrieved_evidence > 0
     assert b.section_estimated_tokens.instructions > 0
     assert b.full.components.history > b.selective.components.history
     assert b.full.total == Enum.sum(Map.values(b.full.components))
