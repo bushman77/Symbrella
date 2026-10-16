@@ -21,6 +21,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.LlmPromptEvents
   alias Core.Response.ResponseFrame
   alias Core.Response.EvidenceRevision
+  alias Core.Response.GroundedRevision
   alias Core.Response.ReflectionLoop
   alias Core.Response.AnswerAdequacy
   alias Core.Response.RuntimeContext
@@ -138,8 +139,11 @@ defmodule Core.Response.LlmSynthesis do
         {answer_out, answer_reflection} =
           maybe_revise_answer(user_text, messages, context, initial_out, initial_reflection)
 
+        {grounded_out, grounded_reflection} =
+          maybe_revise_grounded(messages, context, answer_out, answer_reflection)
+
         {out, reflection} =
-          maybe_revise_evidence(user_text, draft, context, answer_out, answer_reflection)
+          maybe_revise_evidence(user_text, draft, context, grounded_out, grounded_reflection)
 
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}
@@ -214,6 +218,63 @@ defmodule Core.Response.LlmSynthesis do
         %{attempted?: true, outcome: outcome, issue: :answer_not_supplied})}
     else
       {original_out, reflection}
+    end
+  end
+
+  # When the first draft fails a claim-specific population check, the first
+  # response remains a safe deterministic fallback. Give the model at most one
+  # more attempt to phrase the supported fact conversationally, then validate
+  # the new draft independently. Never publish a rejected revision.
+  defp maybe_revise_grounded(messages, context, original_out, first_reflection) do
+    cfg = Application.get_env(:core, :llm_synthesis, [])
+
+    if Keyword.get(cfg, :grounded_revision_enabled?, true) and
+         GroundedRevision.eligible?(context, first_reflection) do
+      revision_messages = GroundedRevision.messages(messages, context)
+      options =
+        initial_chat_opts(context)
+        |> Keyword.put(:max_tokens, llm_config(:grounded_revision_max_tokens, 220))
+
+      result =
+        try do
+          llm_client().chat(revision_messages, options)
+        rescue
+          _ -> {:error, :grounded_revision_exception}
+        catch
+          :exit, _ -> {:error, :grounded_revision_timeout}
+        end
+
+      {out, review, trace} =
+        case result do
+          {:ok, %{content: content}} when is_binary(content) and content != "" ->
+            candidate =
+              content
+              |> sanitize_model_text()
+              |> then(&AnswerPolish.polish(Map.get(context, :user_text, ""), &1, context))
+
+            {:ok, validated, candidate_review} =
+              ReflectionLoop.review(Map.get(context, :user_text, ""), candidate, context)
+
+            if candidate_review.status == :accept and validated == candidate do
+              {candidate, candidate_review,
+               %{attempted?: true, outcome: :accepted, source: :model_revision,
+                 prior_issues: first_reflection.issues}}
+            else
+              {original_out, first_reflection,
+               %{attempted?: true, outcome: :rejected, source: :core_fallback,
+                 prior_issues: first_reflection.issues,
+                 candidate_issues: candidate_review.issues}}
+            end
+
+          _ ->
+            {original_out, first_reflection,
+             %{attempted?: true, outcome: :unavailable, source: :core_fallback,
+               prior_issues: first_reflection.issues}}
+        end
+
+      {out, Map.put(review, :grounded_revision, trace)}
+    else
+      {original_out, first_reflection}
     end
   end
 
