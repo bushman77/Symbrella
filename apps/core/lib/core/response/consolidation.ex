@@ -13,7 +13,7 @@ defmodule Core.Response.Consolidation do
   Opt-in using :core, :symbolic_consolidation_enabled? after DB migration.
   """
   alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
-  alias Db.ConsolidatedConclusions
+  alias Db.{CognitiveIssues, ConsolidatedConclusions}
 
   @source_types [:wikidata, :wikipedia, :statistics_canada]
   @measurement_types [nil, :official_estimate, :dated_population_statement, :census]
@@ -100,19 +100,37 @@ defmodule Core.Response.Consolidation do
     if desired_year == :ambiguous do
       context
     else
-      candidates = ConsolidatedConclusions.recent(pair_key(names))
+      remembered = ConsolidatedConclusions.recent(pair_key(names))
 
       candidates =
         if is_integer(desired_year),
-          do: Enum.filter(candidates, &(&1.reference_year == desired_year)),
-          else: candidates
+          do: Enum.filter(remembered, &(&1.reference_year == desired_year)),
+          else: remembered
 
       case candidates do
-        [] -> context
+        [] ->
+          if is_integer(desired_year) and remembered != [] do
+            open_issue(context, names, :missing_dated_evidence, desired_year,
+              %{stored_years: Enum.map(remembered, & &1.reference_year) |> Enum.uniq()})
+          else
+            context
+          end
+
         [first | _] ->
           same_year = Enum.filter(candidates, &(&1.reference_year == first.reference_year))
 
-          with true <- unambiguous?(same_year),
+          if unambiguous?(same_year) do
+            recall_unambiguous(context, names, first)
+          else
+            open_issue(context, names, :contradictory_premises, first.reference_year,
+              %{stored_proof_ids: Enum.map(same_year, & &1.id)})
+          end
+      end
+    end
+  end
+
+  defp recall_unambiguous(context, names, first) do
+    with true <- valid_premise_record?(first),
                {:ok, stored_claims} <- rehydrate_claims(first.premises),
                {:ok, claims} <- reorder_claims(stored_claims, names),
                true <- Enum.map(claims, & &1.subject) == names,
@@ -131,9 +149,51 @@ defmodule Core.Response.Consolidation do
               reference_year: first.reference_year
             })
           else
-            _ -> context
-          end
+      _ -> open_issue(context, names, :invalid_derivation, first.reference_year,
+        %{stored_proof_ids: [first.id]})
+    end
+  end
+
+  defp valid_premise_record?(row) do
+    row.provenance == "source_supported_symbolic_derivation" and
+      row.kind == "population_comparison" and row.source_urls ==
+        Enum.map(row.premises, & &1["source_url"])
+  end
+
+  defp open_issue(context, names, kind, reference_year, evidence) do
+    subject_key = pair_key(names)
+    fingerprint =
+      :crypto.hash(:sha256,
+        :erlang.term_to_binary({subject_key, kind, reference_year}))
+      |> Base.encode16(case: :lower)
+
+    next_action =
+      case kind do
+        :contradictory_premises -> "recheck_sources"
+        :missing_dated_evidence -> "find_dated_sources"
+        :invalid_derivation -> "review_derivation"
       end
+
+    attrs = %{
+      fingerprint: fingerprint,
+      kind: Atom.to_string(kind),
+      status: "open",
+      subject_key: subject_key,
+      reference_year: reference_year,
+      priority: if(kind == :contradictory_premises, do: 0.9, else: 0.65),
+      next_action: next_action,
+      evidence: Map.merge(%{subjects: names, relation: "population_comparison"}, evidence)
+    }
+
+    case CognitiveIssues.open(attrs) do
+      {:ok, issue} ->
+        # An unresolved issue is visible to future Curiosity prioritization
+        # but must not be treated as an answer or claim of factual support.
+        Map.put(context, :consolidation_issue, %{
+          id: issue.id, kind: kind, status: :open, next_action: next_action
+        })
+
+      _ -> context
     end
   end
 
@@ -255,8 +315,8 @@ defmodule Core.Response.Consolidation do
       "census_year" => Map.get(c, :census_year),
       "source_url" => Map.get(c, :source_url),
       "source_type" => if(source in @source_types, do: Atom.to_string(source), else: nil),
-      "measurement_type" => if(measure in @measurement_types and is_atom(measure),
-        do: Atom.to_string(measure), else: nil),
+      "measurement_type" => if(is_atom(measure) and not is_nil(measure) and
+        measure in @measurement_types, do: Atom.to_string(measure), else: nil),
       "reference_year" => Map.get(c, :reference_year),
       "source_table" => Map.get(c, :source_table)
     }
