@@ -51,13 +51,13 @@ defmodule Core.Tools.OfficialCanadianSourcesTest do
 
   test "conflicting latest values never become authoritative" do
     duplicate =
-      @csv <> ~s(2025,"Kamloops (CY), British Columbia",2021A00055933042,111111,\n)
+      @csv <> ~s|2025,"Kamloops (CY), British Columbia",2021A00055933042,111111,| <> <<10>>
 
     assert {:error, :ambiguous_measurement} =
       StatisticsCanadaPopulation.population("Kamloops BC", csv: duplicate)
 
     assert {:error, :invalid_table} =
-      StatisticsCanadaPopulation.population("Kamloops BC", csv: "wrong,header\n")
+      StatisticsCanadaPopulation.population("Kamloops BC", csv: "wrong,header")
   end
 
   test "resolver chooses official estimates and propagates measurement type" do
