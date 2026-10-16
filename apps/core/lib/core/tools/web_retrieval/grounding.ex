@@ -70,11 +70,14 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec align(String.t(), map()) :: String.t()
   def align(draft, context) when is_binary(draft) and is_map(context) do
-    case population_group_answer(context) do
-      answer when is_binary(answer) ->
-        answer
+    cond do
+      is_binary(population_comparison_answer(context)) ->
+        population_comparison_answer(context)
 
-      _ ->
+      is_binary(population_group_answer(context)) ->
+        population_group_answer(context)
+
+      true ->
         align_single(draft, context)
     end
   end
@@ -131,7 +134,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec available_support?(map()) :: boolean()
   def available_support?(context) when is_map(context),
-    do: is_map(supported_population_group(context)) or
+    do: is_map(supported_population_comparison(context)) or
+      is_map(supported_population_group(context)) or
       is_map(supported_population(context)) or is_map(supported_proximity(context)) or
       is_map(supported_identity(context))
 
@@ -139,11 +143,14 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   @spec supports?(String.t(), map()) :: boolean()
   def supports?(text, context) when is_binary(text) and is_map(context) do
-    case population_group_answer(context) do
-      answer when is_binary(answer) ->
-        text == answer
+    cond do
+      is_binary(population_comparison_answer(context)) ->
+        text == population_comparison_answer(context)
 
-      _ ->
+      is_binary(population_group_answer(context)) ->
+        text == population_group_answer(context)
+
+      true ->
         supports_single?(text, context)
     end
   end
@@ -239,6 +246,71 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   defp supported_population_paraphrase?(_, _, _, _, _), do: false
 
+  # A comparison is computed, not extracted from the model's prose. Validate
+  # the original two dated claims and recompute the ordering before allowing
+  # the derived relation to appear in the final response.
+  defp population_comparison_answer(context) do
+    case supported_population_comparison(context) do
+      %{claims: [a, b], year: year, outcome: outcome, difference: difference} ->
+        first = "#{a.subject}: #{format_population(a.value)} (#{year})"
+        second = "#{b.subject}: #{format_population(b.value)} (#{year})"
+
+        conclusion =
+          if outcome == :equal do
+            "Both places have the same recorded population for that year."
+          else
+            winner = if a.value > b.value, do: a.subject, else: b.subject
+            "#{winner} has the larger recorded population by " <>
+              "#{format_population(difference)}."
+          end
+
+        "Comparing sourced population statements:\n" <>
+          first <> "\n" <> second <> "\n" <> conclusion <>
+          "\nSources: #{a.source_url} and #{b.source_url}. " <>
+          "These dated counts are not necessarily current estimates."
+
+      _ ->
+        nil
+    end
+  end
+
+  defp supported_population_comparison(context) do
+    frame = geographic_frame(context)
+    evidence = Map.get(context, :web_evidence) || %{}
+    support = if is_map(evidence), do: Map.get(evidence, :support), else: nil
+
+    with %{type: :location_question, relation: :population,
+           comparison: :greater, subjects: names} <- frame,
+         true <- is_list(names) and length(names) == 2,
+         %{kind: :population_comparison, status: :source_supported,
+           metric: :population, comparator: :greater_than,
+           claims: [a, b], year: year, outcome: outcome,
+           difference: difference, winner: winner, loser: loser} <- support,
+         true <- Map.get(evidence, :status) == :retrieved,
+         true <- Enum.map([a, b], & &1.subject) == names,
+         true <- Enum.all?([a, b], &valid_comparison_claim?/1),
+         true <- a.census_year == b.census_year and a.census_year == year,
+         true <- difference == abs(a.value - b.value),
+         true <- (if a.value == b.value,
+           do: outcome == :equal and is_nil(winner) and is_nil(loser),
+           else: outcome == :greater and
+             winner == (if a.value > b.value, do: a.subject, else: b.subject) and
+             loser == (if a.value < b.value, do: a.subject, else: b.subject)) do
+      support
+    else
+      _ -> nil
+    end
+  end
+
+  defp valid_comparison_claim?(%{
+         subject: subject, value: value, census_year: year, source_url: url
+       })
+       when is_binary(subject) and is_integer(value) and value > 0 and
+            is_integer(year) and year >= 1900 and is_binary(url),
+       do: String.starts_with?(url, "https://")
+
+  defp valid_comparison_claim?(_), do: false
+
   # Multi-subject population grounding is deliberately claim-by-claim.
   # If any figure, date or source is malformed, only that city's result is
   # treated as unavailable. No derived population or shared year is inferred.
@@ -255,9 +327,25 @@ defmodule Core.Tools.WebRetrieval.Grounding do
               "#{subject}: no verified dated population figure was available."
           end)
 
+        warning =
+          if Map.get(geographic_frame(context), :comparison) == :greater do
+            reason =
+              case get_in(context, [:web_evidence, :comparison_status]) do
+                :different_reporting_years ->
+                  " The reporting years differ, so a like-for-like ranking is not established."
+                _ ->
+                  " The available verified figures do not establish a comparison for every place."
+              end
+
+            reason
+          else
+            ""
+          end
+
         "Population figures for the places you asked about:\n" <>
           Enum.join(lines, "\n") <>
-          "\nThese are dated figures, not necessarily current population estimates."
+          "\nThese are dated figures, not necessarily current population estimates." <>
+          warning
 
       _ ->
         nil
