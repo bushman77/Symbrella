@@ -689,6 +689,11 @@ defmodule Brain.Hippocampus do
         source: :db,
         episode_id: Map.get(row, :id),
         inserted_at: Map.get(row, :inserted_at),
+        # These fields are persisted as dedicated columns by Db.Episode.
+        # Restore them so Core.Response.Context can enforce session provenance
+        # and expose a bounded recollection after a cold restart.
+        session_id: Map.get(row, :session_id),
+        sentence: Map.get(row, :sentence),
         tags: tags,
         key: meta_key,
         value: meta_value
