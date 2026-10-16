@@ -42,6 +42,9 @@ defmodule Core.Response.Consolidation do
            true <- matches_plan?(proof, plan),
            attrs <- attributes([a1, b1], proof),
            {:ok, row} <- ConsolidatedConclusions.store(attrs) do
+        # A fresh, validated proof can settle a specifically missing-year
+        # issue. Conflicting proofs require a separate adjudication step.
+        :ok = CognitiveIssues.resolve_missing_year(row)
         {:ok, row}
       else
         _ -> {:error, :not_authorized_for_consolidation}
