@@ -12,7 +12,7 @@ defmodule Brain.Neural.StateTransitionResidual do
   projection from StateTransitionBuilder, NOT the raw object archive.
   """
 
-  alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask}
+  alias Brain.Neural.{StateTransitionAudit, StateTransitionBuilder, StateTransitionMask}
 
   @model_version "state-transition-residual-v4"
   @default_epochs 25
@@ -72,8 +72,7 @@ defmodule Brain.Neural.StateTransitionResidual do
       train_metrics = metrics(names, train_next, train.x, train.y, train.mask)
       eval_metrics = metrics(names, eval_next, evaluation.x, evaluation.y, evaluation.mask)
 
-      {:ok,
-       %{
+      result = %{
          model_version: @model_version,
          task: :state_transition_residual,
          feature_schema_version: StateTransitionBuilder.feature_schema_version(),
@@ -100,7 +99,9 @@ defmodule Brain.Neural.StateTransitionResidual do
          valid_eval_cells: eval_metrics.valid_cells,
          mask_policy: :both_endpoints_observed_exclude_presence_indicators,
          deployment_status: :experimental_not_for_runtime
-       }}
+       }
+
+      {:ok, Map.put(result, :assessment, StateTransitionAudit.assess(result))}
     end
   end
 
@@ -129,7 +130,7 @@ defmodule Brain.Neural.StateTransitionResidual do
     |> Map.take([
       :model_version, :task, :feature_schema_version, :feature_names,
       :epochs, :hidden_units, :objective, :reconstruction,
-      :zero_initialized_residual?, :train_examples, :eval_examples,
+      :zero_initialized_residual?, :assessment, :train_examples, :eval_examples,
       :train_sessions, :eval_sessions, :split_mode, :evaluated?,
       :train_mse, :eval_mse, :persistence_train_mse,
       :persistence_eval_mse, :mask_policy, :deployment_status
