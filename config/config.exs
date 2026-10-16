@@ -48,6 +48,15 @@ config :core, :web_retrieval,
   timeout_ms: 3_500,
   max_attempts: 3
 
+# Automatically append completed LiveView conversations and memory evidence
+# to the private local training archive in development. This is data capture,
+# NOT online Axon training. Keep production and tests off by default because
+# the JSONL records may contain private chat text and recalled memories.
+# Change enabled?: false here to pause recording; no CLI env flag is needed.
+config :core, Core.TrainingArchive,
+  enabled?: config_env() == :dev,
+  dir: "tmp/training"
+
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
