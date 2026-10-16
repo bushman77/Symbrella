@@ -231,6 +231,39 @@ defmodule Core.Tools.EvidenceResolverTest do
     refute final =~ "2026 census"
 
     assert Grounding.supports?(final, enriched)
+
+    paraphrase =
+      "Kamloops had 97,902 residents in 2021, according to Wikidata. Source: " <>
+        "https://www.wikidata.org/wiki/Q473209"
+
+    alternative =
+      "The 2021 population of Kamloops, BC was 97,902 people. " <>
+        "Source: https://www.wikidata.org/wiki/Q473209"
+
+    for natural <- [paraphrase, alternative] do
+      assert Grounding.supports?(natural, enriched)
+      {:ok, ^natural, accepted} = ReflectionLoop.review(question, natural, enriched)
+      assert accepted.status == :accept
+      refute accepted.applied?
+    end
+
+    rejected = [
+      "Kamloops had 17,800 residents in 2021. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2026. Source: https://www.wikidata.org/wiki/Q473209",
+      "Maple Ridge had 97,902 residents in 2021. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2021, 120 km from Vancouver. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2021 in the Okanagan Valley. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2021 and 17,800 before. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2021."
+    ]
+
+    for unsafe <- rejected do
+      refute Grounding.supports?(unsafe, enriched), unsafe
+      {:ok, repaired, reflection} = ReflectionLoop.review(question, unsafe, enriched)
+      assert reflection.status == :repair
+      assert :geographic_claim_unverified in reflection.issues
+      assert Grounding.supports?(repaired, enriched)
+    end
   end
 
   test "undated Wikidata population values never become verified counts" do
