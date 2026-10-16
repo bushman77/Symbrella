@@ -204,10 +204,15 @@ defmodule Core.Tools.WebRetrieval.Grounding do
         stripped)
 
     other_url? = Regex.match?(~r/https?:\/\//iu, stripped)
+    # A historical count cannot be silently phrased as today's population.
+    current_claim? =
+      Regex.match?(~r/\b(?:currently|today|right\s+now|at\s+present|this\s+year|nearby|close\s+to|located\s+in)\b/iu,
+        stripped)
 
     city? and claims_population? and String.contains?(text, url) and
       exact_figure? and no_other_numbers? and
       not extraneous_claim? and not denial? and not other_url? and
+      not current_claim? and
       String.length(text) <= 450
   end
 

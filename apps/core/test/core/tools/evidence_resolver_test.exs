@@ -252,6 +252,8 @@ defmodule Core.Tools.EvidenceResolverTest do
       "Kamloops had 97,902 residents in 2026. Source: https://www.wikidata.org/wiki/Q473209",
       "Maple Ridge had 97,902 residents in 2021. Source: https://www.wikidata.org/wiki/Q473209",
       "Kamloops had 97,902 residents in 2021, 120 km from Vancouver. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops has 97,902 residents currently, according to its 2021 count. Source: https://www.wikidata.org/wiki/Q473209",
+      "Kamloops had 97,902 residents in 2021 and is located in the Okanagan Valley. Source: https://www.wikidata.org/wiki/Q473209",
       "Kamloops had 97,902 residents in 2021 in the Okanagan Valley. Source: https://www.wikidata.org/wiki/Q473209",
       "Kamloops had 97,902 residents in 2021 and 17,800 before. Source: https://www.wikidata.org/wiki/Q473209",
       "Kamloops had 97,902 residents in 2021."
