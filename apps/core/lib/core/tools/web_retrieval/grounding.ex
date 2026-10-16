@@ -144,8 +144,8 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   @spec supports?(String.t(), map()) :: boolean()
   def supports?(text, context) when is_binary(text) and is_map(context) do
     cond do
-      is_binary(population_comparison_answer(context)) ->
-        text == population_comparison_answer(context)
+      map_size(authorized_comparison_answers(context)) > 0 ->
+        text in Map.values(authorized_comparison_answers(context))
 
       is_binary(population_group_answer(context)) ->
         text == population_group_answer(context)
@@ -249,7 +249,13 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   # A comparison is computed, not extracted from the model's prose. Validate
   # the original two dated claims and recompute the ordering before allowing
   # the derived relation to appear in the final response.
-  defp population_comparison_answer(context) do
+  @doc """
+  Two Core-authored, independently verified surface forms for a population
+  comparison. Models may select a presentation, never supply the conclusion,
+  quantities, dates, place names, or citations.
+  """
+  @spec authorized_comparison_answers(map()) :: map()
+  def authorized_comparison_answers(context) when is_map(context) do
     case supported_population_comparison(context) do
       %{claims: [a, b], year: year, outcome: outcome, difference: difference} ->
         first = "#{a.subject}: #{format_population(a.value)} (#{year})"
@@ -264,15 +270,39 @@ defmodule Core.Tools.WebRetrieval.Grounding do
               "#{format_population(difference)}."
           end
 
-        "Comparing sourced population statements:\n" <>
-          first <> "\n" <> second <> "\n" <> conclusion <>
-          "\nSources: #{a.source_url} and #{b.source_url}. " <>
-          "These dated counts are not necessarily current estimates."
+        detailed =
+          "Comparing sourced population statements:\n" <>
+            first <> "\n" <> second <> "\n" <> conclusion <>
+            "\nSources: #{a.source_url} and #{b.source_url}. " <>
+            "These dated counts are not necessarily current estimates."
+
+        short_conclusion =
+          if outcome == :equal do
+            "In #{year}, #{a.subject} and #{b.subject} each recorded " <>
+              "#{format_population(a.value)} residents."
+          else
+            winner = if a.value > b.value, do: a, else: b
+            loser = if a.value > b.value, do: b, else: a
+            "In #{year}, #{winner.subject} recorded #{format_population(winner.value)} " <>
+              "residents versus #{format_population(loser.value)} in #{loser.subject}, " <>
+              "a difference of #{format_population(difference)}."
+          end
+
+        brief =
+          short_conclusion <> " Sources: #{a.source_url} and #{b.source_url}. " <>
+            "These are dated figures, not necessarily current estimates."
+
+        %{detailed: detailed, brief: brief}
 
       _ ->
-        nil
+        %{}
     end
   end
+
+  def authorized_comparison_answers(_), do: %{}
+
+  defp population_comparison_answer(context),
+    do: Map.get(authorized_comparison_answers(context), :detailed)
 
   defp supported_population_comparison(context) do
     frame = geographic_frame(context)
