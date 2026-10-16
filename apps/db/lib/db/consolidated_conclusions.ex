@@ -31,6 +31,8 @@ defmodule Db.ConsolidatedConclusions do
 
   @spec recent(String.t(), pos_integer()) :: [ConsolidatedConclusion.t()]
   def recent(pair_key, limit \\ 30)
+
+  def recent(pair_key, limit)
       when is_binary(pair_key) and is_integer(limit) and limit > 0 do
     Db.all(
       from(c in ConsolidatedConclusion,
