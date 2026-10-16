@@ -170,6 +170,8 @@ defmodule Core.Tools.OfficialCanadianSourcesTest do
       |> PopulationComparison.attach()
 
     assert result.web_evidence.support.kind == :population_group
-    assert result.web_evidence.comparison_status == :different_reporting_years
+    assert result.web_evidence.comparison_status == :incompatible_measurements
+    assert Grounding.align("Kamloops is larger.", result) =~
+      "measurement types or source series differ"
   end
 end
