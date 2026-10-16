@@ -42,7 +42,8 @@ defmodule Brain.LIFG.LexicalAuditTest do
 
     assert [%{eligible_for_control?: false,
               reason: :insufficient_discriminating_evidence,
-              evidence_gap: 0.0}] = report.groups
+              evidence_gap: gap}] = report.groups
+    assert gap == 0.0
     assert Enum.all?(report.senses, &(&1.context_fit == 0.0))
     assert Enum.all?(report.senses, fn row ->
              Enum.all?(Map.values(row.matches), fn matches -> matches == [] end)
@@ -69,7 +70,8 @@ defmodule Brain.LIFG.LexicalAuditTest do
 
     assert [%{pos: "noun", eligible_for_control?: false,
               reason: :insufficient_discriminating_evidence,
-              evidence_gap: 0.0}] = result.groups
+              evidence_gap: gap}] = result.groups
+    assert gap == 0.0
 
     technical = Enum.find(result.senses, &(&1.id == "development|noun|6"))
     assert technical.matches.example == ["new"]
