@@ -101,7 +101,16 @@ defmodule Core.Response.RuntimeContext do
       safe_call(
         fn ->
           case Brain.snapshot_wm() do
-            %{wm: wm} when is_list(wm) -> wm
+            %{wm: wm} when is_list(wm) ->
+              # Brain WM is globally hosted. Conversation comprehension frames
+              # belong only in the same-session Core.Brain.WM.Comprehension
+              # recall path, never in an unscoped LLM prompt snapshot.
+              Enum.reject(wm, fn item ->
+                payload = map_get(item, :payload, %{})
+
+                map_get(payload, :kind) == :comprehension_frame and
+                  map_get(item, :source) == :comprehension
+              end)
             _ -> []
           end
         end,
