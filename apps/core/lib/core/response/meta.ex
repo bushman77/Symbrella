@@ -78,6 +78,7 @@ defmodule Core.Response.Meta do
                  :draft_sha256, :final_sha256])
     |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
     |> maybe_put_grounded_revision(Map.get(reflection, :grounded_revision))
+    |> maybe_put_authoritative_plan(Map.get(reflection, :authoritative_plan))
   end
 
   defp reflection_summary(_), do: nil
@@ -119,6 +120,16 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_grounded_revision(summary, _), do: summary
+
+  defp maybe_put_authoritative_plan(summary, %{} = plan) do
+    Map.put(summary, :authoritative_plan,
+      Map.take(plan, [
+        :kind, :status, :outcome, :source_count,
+        :selected_style, :style_source, :fallback?
+      ]))
+  end
+
+  defp maybe_put_authoritative_plan(summary, _), do: summary
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do
