@@ -32,6 +32,8 @@ defmodule Brain.SelfCalibration.Logger do
   def log(_sample, _cfg), do: {:error, :invalid_sample}
 
   # A per-file lock prevents concurrent append and rotation from interleaving.
+  # ResourceId identifies the path; the requester is the calling process.
+  # A shared LockRequesterId would mistakenly allow simultaneous holders.
   # The archived files are ignored by Git, like the active samples.jsonl file.
   defp do_log(%Sample{} = sample, path, cfg) when is_binary(path) do
     max_bytes = positive_limit(Keyword.get(cfg, :max_bytes, 25_000_000), 25_000_000)
@@ -41,7 +43,7 @@ defmodule Brain.SelfCalibration.Logger do
     with {:ok, encoded} <- encode_sample(sample),
          :ok <- check_record_size(encoded, max_record_bytes),
          :ok <-
-           :global.trans({__MODULE__, Path.expand(path)}, fn ->
+           :global.trans({{__MODULE__, Path.expand(path)}, self()}, fn ->
              with :ok <- ensure_parent_dir(path),
                   :ok <- rotate_if_needed(path, byte_size(encoded) + 1, max_bytes, max_files) do
                File.write(path, encoded <> "\n", [:append])
