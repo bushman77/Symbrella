@@ -193,7 +193,11 @@ defmodule Core.LIFG.Attach do
   # candidate bucket; do not interpret it as sentence-level confidence.
   defp maybe_trace_word_scores(si, raw, final, tokens, virtual, opts) do
     if Keyword.get(opts, :trace_word_scores?, false) == true do
-      scores_mode = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
+      # Trace the effective mode for this call: a diagnostic can request
+      # :all even when runtime defaults to :top2 or :none.
+      scores_mode =
+        Keyword.get(opts, :scores,
+          Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
       entries = Core.LIFG.ScoreAudit.summarize(raw, final, tokens, virtual, scores_mode)
 
       Core.Pipeline.Trace.append(si, :lifg_word_score_audit,
