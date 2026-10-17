@@ -46,7 +46,8 @@ config :core, :semantic_associative_recall_enabled?, false
 
 # Supervised but inert unless opted in. Investigates at most one durable
 # missing_reasoning_link per cycle through hippocampal cueing and verified
-# symbolic composition. Never performs web requests or sends chat messages.
+# symbolic composition or source-backed direct proof reconciliation.
+# Never performs web requests or sends chat messages.
 config :core, Core.Curiosity.Investigator,
   enabled?: false,
   interval_ms: 300_000,
