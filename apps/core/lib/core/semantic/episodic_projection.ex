@@ -87,7 +87,12 @@ defmodule Core.Semantic.EpisodicProjection do
   """
   @spec validated_participant(map()) :: map() | nil
   def validated_participant(%{} = si) do
-    case List.wrap(get(si, :episodic_candidates)) do
+    candidates =
+      if get(si, :source) in [:user, :prod, :test],
+        do: List.wrap(get(si, :episodic_candidates)),
+        else: []
+
+    case candidates do
       [candidate] when is_map(candidate) ->
         case validate_candidate(si, candidate) do
           {:ok, %{source_frame: frame, participants: %{"actor" => actor}} = event}
