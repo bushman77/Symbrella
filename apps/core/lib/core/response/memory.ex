@@ -10,6 +10,7 @@ defmodule Core.Response.Memory do
   alias Core.Response.LlmChatHistory
   alias Core.Response.ConversationRecall
   alias Core.Response.SpatialDialogue
+  alias Core.Response.EpisodicMemory
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -44,6 +45,7 @@ defmodule Core.Response.Memory do
       }) do
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
+    episodic_reply = EpisodicMemory.reply(text_in)
 
     cond do
       asking_for_assistant_name?(text_in, session_id) ->
@@ -171,6 +173,17 @@ defmodule Core.Response.Memory do
 
         meta =
           spatial_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, episodic_reply) ->
+        {text, event_meta} = episodic_reply
+
+        meta =
+          event_meta
           |> Map.put(:session_id, session_id)
           |> Map.put(:intent_original, intent0)
           |> Map.put(:confidence, conf)

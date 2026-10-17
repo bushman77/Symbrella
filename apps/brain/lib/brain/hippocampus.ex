@@ -91,7 +91,8 @@ defmodule Brain.Hippocampus do
   by a stable owner key rather than the transient chat session.
   """
   @spec encode_user_observation(map(), map()) :: :ok | {:error, atom()}
-  def encode_user_observation(%{} = slate, %{kind: :user_reported_spatial} = meta) do
+  def encode_user_observation(%{} = slate, %{kind: kind} = meta)
+      when kind in [:user_reported_spatial, :user_reported_event] do
     case GenServer.call(__MODULE__, {:encode_user_observation, slate, meta}) do
       {:ok, episode, at_ms} ->
         if TurnTrace.active?(), do: TurnTrace.encode(episode, at_ms)
@@ -103,6 +104,35 @@ defmodule Brain.Hippocampus do
   end
 
   def encode_user_observation(_, _), do: {:error, :invalid_observation}
+
+  @doc """
+  Generic, typed user-reported event write. The event must already be
+  normalized and attributed by its caller. PostgreSQL confirmation is
+  required before an episode enters the in-memory window.
+  """
+  @spec encode_user_event(map(), map()) :: :ok | {:error, atom()}
+  def encode_user_event(%{} = slate, %{kind: :user_reported_event} = meta),
+    do: encode_user_observation(slate, meta)
+
+  def encode_user_event(_, _), do: {:error, :invalid_event}
+
+  @doc "Find the newest owner-scoped event for an exact entity and relation."
+  @spec user_event(String.t(), String.t(), String.t()) :: map() | nil
+  def user_event(owner, entity_key, relation)
+      when is_binary(owner) and is_binary(entity_key) and is_binary(relation) do
+    GenServer.call(__MODULE__, {:user_event, owner, entity_key, relation})
+  end
+
+  def user_event(_, _, _), do: nil
+
+  @doc "Chronological evidence for one entity, newest first, independently of chat session."
+  @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
+  def user_event_history(owner, entity_key, limit \\ 8)
+      when is_binary(owner) and is_binary(entity_key) and is_integer(limit) and limit > 0 do
+    GenServer.call(__MODULE__, {:user_event_history, owner, entity_key, min(limit, 30)})
+  end
+
+  def user_event_history(_, _, _), do: []
 
   @doc "Retrieve the latest persisted user-reported placement for one owner and object."
   @spec user_observation(String.t(), String.t()) :: map() | nil
@@ -388,6 +418,34 @@ defmodule Brain.Hippocampus do
       end
 
     {:reply, observation, state}
+  end
+
+  @impl true
+  def handle_call({:user_event, owner, entity_key, relation}, _from, state) do
+    result =
+      try do
+        Db.Episode.latest_user_event(owner, entity_key, relation)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:user_event_history, owner, entity_key, limit}, _from, state) do
+    results =
+      try do
+        Db.Episode.user_event_history(owner, entity_key, limit)
+      rescue
+        _ -> []
+      catch
+        :exit, _ -> []
+      end
+
+    {:reply, results, state}
   end
 
   @impl true

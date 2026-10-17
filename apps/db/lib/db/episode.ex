@@ -622,6 +622,16 @@ defmodule Db.Episode do
       # Compact typed observation fields; never include arbitrary chat metadata.
       :owner,
       "owner",
+      :entity,
+      "entity",
+      :entity_key,
+      "entity_key",
+      :relation,
+      "relation",
+      :status,
+      "status",
+      :event_version,
+      "event_version",
       :object_key,
       "object_key",
       :object,
@@ -900,6 +910,62 @@ defmodule Db.Episode do
   end
 
   def latest_user_spatial(_, _), do: nil
+
+  @doc """
+  Exact latest event lookup, scoped by stable owner, entity, and relation.
+  Both assertions and retractions are returned; a retraction must suppress
+  older values. This deliberately cannot treat the stored episode as an
+  independently verified fact.
+  """
+  @spec latest_user_event(String.t(), String.t(), String.t()) :: map() | nil
+  def latest_user_event(owner, entity_key, relation)
+      when is_binary(owner) and is_binary(entity_key) and is_binary(relation) do
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+      where: fragment("? ->> 'relation' = ?", e.meta, ^relation),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: 1,
+      select: %{id: e.id, meta: e.meta, inserted_at: e.inserted_at}
+    )
+    |> Repo.one()
+    |> normalize_user_event()
+  end
+
+  def latest_user_event(_, _, _), do: nil
+
+  @doc "Newest owner-scoped events for one entity, including superseded values."
+  @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
+  def user_event_history(owner, entity_key, limit)
+      when is_binary(owner) and is_binary(entity_key) and is_integer(limit) and limit > 0 do
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: ^min(limit, 30),
+      select: %{id: e.id, meta: e.meta, inserted_at: e.inserted_at}
+    )
+    |> Repo.all()
+    |> Enum.map(&normalize_user_event/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  def user_event_history(_, _, _), do: []
+
+  defp normalize_user_event(%{id: id, meta: %{"entity" => entity, "relation" => relation,
+      "value" => value, "status" => status} = meta, inserted_at: recorded_at})
+      when is_binary(entity) and is_binary(relation) and is_binary(value) and
+             status in ["asserted", "retracted"] do
+    %{id: id, entity: entity, relation: relation, value: value,
+      status: status, recorded_at: recorded_at,
+      provenance: :user_reported, session_id: Map.get(meta, "session_id")}
+  end
+
+  defp normalize_user_event(_), do: nil
 
   @doc """
   Fetch all persisted episodes, newest first.
