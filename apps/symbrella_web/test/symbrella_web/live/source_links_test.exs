@@ -21,7 +21,7 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
 
     assert html =~ ~s(href="#{@wikipedia}")
     assert html =~ ~s(src="https://en.wikipedia.org/favicon.ico")
-    assert html =~ ">Source</a>"
+    assert html =~ ">Wikipedia</a>"
     assert html =~ "Maple Ridge is in British Columbia."
     assert html =~ ~s(rel="noopener noreferrer")
     refute html =~ ">Source: https://"
@@ -41,7 +41,8 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
     html = render_component(&HTML.assistant_text/1, message: %{text: reply})
     assert html =~ ~s(href="#{@wikidata}")
     assert html =~ ~s(href="#{@wikipedia}")
-    assert length(String.split(html, ">Source</a>")) == 3
+    assert html =~ ">Wikipedia</a>"
+    assert html =~ ">Wikidata Q24639</a>"
     assert html =~ "Wikidata:"
   end
 
@@ -52,7 +53,8 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
 
     assert html =~ ~s(href="#{@wikipedia}")
     assert html =~ ~s(href="#{@wikidata}")
-    assert length(String.split(html, ">Source</a>")) == 3
+    assert html =~ ">Wikipedia</a>"
+    assert html =~ ">Wikidata Q24639</a>"
 
     # Prevent accidental line breaks/indentation within a whitespace-pre-wrap
     # reply, which made two citations occupy several additional lines.
@@ -63,13 +65,13 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
 
     assert text ==
              "Based on Wikidata coordinates, the cities are 229.0 km apart. " <>
-               "Sources: Source and Source"
+               "Sources: Wikipedia and Wikidata Q24639"
 
     assert length(Regex.scan(~r/<a\b/u, html)) == 2
     assert length(Regex.scan(~r/<img\b/u, html)) == 2
   end
 
-  test "bare URLs are labeled Source and original punctuation remains visible" do
+  test "bare URLs have readable source labels and retain original punctuation" do
     assert [
       %{kind: :text, text: "See "},
       %{kind: :source, url: @wikipedia},
@@ -104,9 +106,26 @@ defmodule SymbrellaWeb.ChatLive.SourceLinksTest do
   test "assistant bubble hides lexical tail without mutating the original text" do
     original = "Hi. Source: #{@wikipedia}\nBy the way, technical lexical output"
     html = render_component(&HTML.assistant_text/1, message: %{text: original})
-    assert html =~ ">Source</a>"
+    assert html =~ ">Wikipedia</a>"
     refute html =~ "technical lexical output"
     assert original =~ "By the way,"
+  end
+
+  test "recognizable official source labels retain trusted URLs and distinguish Wikidata items" do
+    reply = "Sources: https://www.wikidata.org/wiki/Q16740 and " <>
+              "https://www.wikidata.org/wiki/Q24639. Also see " <>
+              "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710015501."
+
+    links = SourceLinks.parts(reply) |> Enum.filter(&(&1.kind == :source))
+
+    assert Enum.map(links, & &1.label) ==
+      ["Wikidata Q16740", "Wikidata Q24639", "Statistics Canada"]
+
+    html = render_component(&HTML.assistant_text/1, message: %{text: reply})
+    assert html =~ ">Wikidata Q16740</a>"
+    assert html =~ ">Wikidata Q24639</a>"
+    assert html =~ ">Statistics Canada</a>"
+    assert html =~ ~s(href="https://www.wikidata.org/wiki/Q16740")
   end
 
   test "non-URL assistant text is still rendered as escaped plain text" do
