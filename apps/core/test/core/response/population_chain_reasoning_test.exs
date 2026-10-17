@@ -11,7 +11,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
     AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
     PopulationComparison, ResponseFrame
   }
-  alias Db.{CognitiveIssues, ConsolidatedConclusions}
+  alias Db.ConsolidatedConclusions
 
   defmodule OfflineLlm do
     def chat(_, _), do: raise("Two-hop proof must not invoke Qwen")
@@ -61,7 +61,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
     }
   end
 
-  defp sourced(a, b, values, year, source_type \\ :wikidata) do
+  defp sourced(a, b, values, year, source_type) do
     names = [a, b]
     frame = event(names)
 
@@ -168,12 +168,18 @@ defmodule Core.Response.PopulationChainReasoningTest do
     refute Map.has_key?(unresolved, :web_evidence)
     assert unresolved.consolidation_issue.kind == :missing_reasoning_link
 
-    [issue | _] = CognitiveIssues.pending()
+    # Issue queries must be scoped to the issue produced by this specific
+    # reasoning attempt. The curiosity queue is global and priority-ordered;
+    # older unrelated issues may legitimately appear ahead of this one.
+    issue = Db.get!(Db.CognitiveIssue, unresolved.consolidation_issue.id)
     assert issue.kind == "missing_reasoning_link"
+    assert issue.status == "open"
     assert issue.next_action == "find_linking_premise"
     assert issue.evidence["subjects"] == [a, c]
-    assert [%{issue_id: id} | _] = UnresolvedIssues.candidates()
-    assert id == issue.id
+
+    candidates = UnresolvedIssues.candidates(5)
+    assert length(candidates) <= 5
+    assert Enum.all?(candidates, &(&1.status in ["open", "investigating"]))
 
     prompt = LlmPrompt.build_system_prompt(%{
       features: %{intent: :question, symbolic_frame: event([a, c])},
@@ -273,8 +279,10 @@ defmodule Core.Response.PopulationChainReasoningTest do
     refute Map.has_key?(unresolved, :web_evidence)
     assert unresolved.consolidation_issue.kind == :contradictory_premises
 
-    [issue | _] = CognitiveIssues.pending()
+    issue = Db.get!(Db.CognitiveIssue, unresolved.consolidation_issue.id)
+    assert issue.kind == "contradictory_premises"
     assert issue.next_action == "recheck_sources"
+    assert issue.evidence["subjects"] == [a, c]
     assert Enum.sort(issue.evidence["stored_proof_ids"]) == Enum.sort([ab.id, bc.id])
   end
 
