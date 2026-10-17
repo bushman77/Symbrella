@@ -162,6 +162,51 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
   end
 
+  test "supervised cycle selects a durable issue and emits bounded telemetry", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(a, c)
+    capture!(b, c, [100_000, 80_000])
+
+    # Give this issue a unique queue priority so the test is deterministic
+    # even when other sandbox tests have left open issues behind.
+    issue
+    |> CognitiveIssue.changeset(%{priority: 1.0})
+    |> Db.update!()
+
+    worker = Process.whereis(Investigator)
+    assert is_pid(worker)
+    owner = :persistent_term.get({:symbrella, :sandbox_owner})
+    :ok = Ecto.Adapters.SQL.Sandbox.allow(Db, owner, worker)
+
+    handler_id = {__MODULE__, System.unique_integer([:positive])}
+    test_pid = self()
+
+    :ok = :telemetry.attach(
+      handler_id,
+      [:core, :curiosity, :symbolic_investigation],
+      fn _event, measures, metadata, pid ->
+        send(pid, {:investigation_telemetry, measures, metadata})
+      end,
+      test_pid
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert %{status: :resolved, issue_id: id} = Investigator.run_now()
+    assert id == issue.id
+    assert %{status: "resolved"} = Db.get!(CognitiveIssue, id)
+
+    assert_receive {:investigation_telemetry, %{count: 1},
+      %{status: :resolved, issue_id: ^id, parent_proof_ids: [_, _]}}
+
+    status = Investigator.snapshot()
+    assert status.enabled?
+    assert status.last_result.issue_id == id
+    assert status.cycles >= 1
+  end
+
   test "other epistemic issues never enter this narrow autonomous cycle", %{
     a: a, c: c
   } do
