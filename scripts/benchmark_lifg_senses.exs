@@ -289,6 +289,11 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         expected_pos: expected_pos, pos_result: pos_grade,
         expected_id: expected_id, exact_sense_result: grade,
         stage1_winner: raw_id, final_winner: final_id,
+        stage1_winner_definition:
+          compact(Map.get(Map.get(by_id, raw_id, %{}), :definition), 190),
+        grammar_required_pos: required_pos,
+        mwe_covering_target: covering_mwes,
+        mwe_decisions: if(is_nil(final_id), do: mwe_decisions, else: []),
         final_winner_definition:
           compact(Map.get(Map.get(by_id, final_id, %{}), :definition), 240),
         changed_after_stage1?: is_binary(raw_id) and raw_id != final_id,
@@ -298,15 +303,17 @@ defmodule Symbrella.BenchmarkLIFGSenses do
           if(is_map(report), do: report.reported_candidate_count),
         stage1_pos_mass: if(is_map(report), do: report.pos_probability_mass),
         full_score_map?: is_map(probs) and map_size(probs) > 0,
+        top_senses_from: if(is_map(probs) and map_size(probs) > 0,
+          do: :final_full_distribution, else: :bounded_stage1_audit),
         scored_gold_rank:
-          if(valid_gold?,
-            do: rank(ranked, expected_id), else: nil)
+          if(valid_gold?, do: rank(ranked, expected_id), else: nil),
+        gold_rank_limited?: valid_gold? and not (is_map(probs) and map_size(probs) > 0)
       }, label: "Current LIFG decision", pretty: true, width: 115, limit: :infinity)
       IO.inspect(rows, label: "Top scored dictionary senses", pretty: true,
         width: 115, limit: :infinity)
 
       if is_nil(final_id) do
-        IO.puts("No final unigram choice. Investigate MWE covering or missing LIFG candidates; do not score as correct.")
+        IO.puts("No final unigram choice. See MWE coverage/decisions; this case is not a valid POS decision.")
       end
 
       %{grade: grade, pos_grade: pos_grade, note: if(is_nil(report), do: :raw_audit_missing)}
@@ -315,8 +322,9 @@ defmodule Symbrella.BenchmarkLIFGSenses do
 
   defp summarize(results) do
     reviewed = Enum.filter(results, &(&1.grade in [:correct, :incorrect, :no_final_choice]))
-    pos = Enum.filter(results, &(&1.pos_grade in [:correct, :incorrect, :no_final_choice]))
+    pos = Enum.filter(results, &(&1.pos_grade in [:correct, :incorrect]))
     invalid = Enum.count(results, &(&1.grade == :invalid_gold_id))
+    missed = Enum.count(results, &(&1.pos_grade == :no_final_choice))
 
     IO.puts("\n=== Results ===")
     IO.inspect(%{
@@ -326,11 +334,17 @@ defmodule Symbrella.BenchmarkLIFGSenses do
       exact_sense_accuracy:
         if(reviewed == [], do: :not_measured,
           else: Enum.count(reviewed, &(&1.grade == :correct)) / length(reviewed)),
-      pos_cases_labeled: length(pos),
+      pos_selections_scored: length(pos),
       pos_correct: Enum.count(pos, &(&1.pos_grade == :correct)),
-      pos_accuracy:
+      pos_accuracy_among_selected:
         if(pos == [], do: :not_measured,
           else: Enum.count(pos, &(&1.pos_grade == :correct)) / length(pos)),
+      no_final_unigram_choice: missed,
+      all_cases_correct_pos_and_selected:
+        Enum.count(pos, &(&1.pos_grade == :correct)),
+      all_cases_pos_and_selection_rate:
+        if(results == [], do: :not_measured,
+          else: Enum.count(pos, &(&1.pos_grade == :correct)) / length(results)),
       invalid_gold_ids: invalid,
       blocked_cases: Enum.count(results, &(&1.grade == :ungradable))
     }, pretty: true, width: 115)
