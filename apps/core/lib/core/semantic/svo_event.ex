@@ -13,7 +13,7 @@ defmodule Core.Semantic.SVOEvent do
   @spec project(map(), String.t()) :: [map()]
   def project(si, sentence) when is_map(si) and is_binary(sentence) do
     with true <- admissible_text?(sentence),
-         [sig] <- signatures(si),
+         [sig] <- full_clause_signatures(si, sentence),
          %{subject_head: subject, predicate: predicate, object_head: object} = roles <- sig.roles,
          {first, last} <- sig.span,
          true <- is_integer(subject) and is_integer(predicate) and is_integer(object),
@@ -37,6 +37,17 @@ defmodule Core.Semantic.SVOEvent do
   end
 
   def project(_, _), do: []
+
+  # Overlapping lexical POS hypotheses may create partial SVO candidates.
+  # Only full-sentence interpretations compete for episode admission.
+  # Multiple complete analyses remain ambiguous and are rejected.
+  defp full_clause_signatures(si, sentence) do
+    si
+    |> signatures()
+    |> Enum.filter(fn %{span: {first, last}} ->
+      match?({:ok, _}, clause_tokens(si, first, last, sentence))
+    end)
+  end
 
   defp signatures(si) do
     get(si, :sentence_signatures)
