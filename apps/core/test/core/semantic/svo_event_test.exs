@@ -116,6 +116,7 @@ defmodule Core.Semantic.SVOEventTest do
        %{sid: sid, owner: owner} do
     event = %{
       entity: "the artist", relation: "verb_draw", value: "a picture",
+      status: :asserted,
       source_frame: :finite_present_svo,
       participants: %{"actor" => "the artist", "predicate" => "draw",
                       "surface_predicate" => "draws", "patient" => "a picture",
