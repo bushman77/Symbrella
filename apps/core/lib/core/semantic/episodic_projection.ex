@@ -4,9 +4,9 @@ defmodule Core.Semantic.EpisodicProjection do
   generalized Hippocampal event contract.
 
   This does not invent roles, choose dictionary senses or write to storage.
-  At present, only fully resolved, first-person obligation events have an
-  eligible projection. Health frames and unsupported/question interpretations
-  are never admitted here.
+  Supported evidence-gated assertions include obligations, finite-present SVO
+  actions and progressive spatial states. Health frames and unsupported
+  question interpretations are not admitted here.
   """
 
   alias Core.Semantic.EpisodicEvents
