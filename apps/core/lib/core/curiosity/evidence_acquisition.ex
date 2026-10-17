@@ -86,9 +86,24 @@ defmodule Core.Curiosity.EvidenceAcquisition do
   def acquire(%CognitiveIssue{} = issue, opts) when is_list(opts) do
     with {:ok, request} <- plan(issue),
          true <- still_open?(issue.id),
-         context <- context(request.subjects, request.year),
-         retrieved <- retrieve(context, opts),
-         %{resolution: :source_supported} <- Map.get(retrieved, :web_evidence),
+         ctx <- context(request.subjects, request.year),
+         retrieved <- retrieve(ctx, opts) do
+      result = validate_and_capture(issue, request, retrieved)
+
+      Map.put(result, :provider_attempts, provider_attempts(retrieved))
+    else
+      {:error, reason} -> %{status: :unresolved, issue_id: issue.id, reason: reason}
+      _ -> %{status: :unresolved, issue_id: issue.id,
+             reason: :retrieval_or_authorization_failed}
+    end
+  rescue
+    _ -> %{status: :unresolved, issue_id: issue.id, reason: :acquisition_unavailable}
+  catch
+    :exit, _ -> %{status: :unresolved, issue_id: issue.id, reason: :acquisition_unavailable}
+  end
+
+  defp validate_and_capture(issue, request, retrieved) do
+    with %{resolution: :source_supported} <- Map.get(retrieved, :web_evidence),
          derived <- PopulationComparison.attach(retrieved),
          %{kind: :population_comparison, status: :source_supported,
            year: year, subjects: subjects, claims: claims} <-
@@ -101,8 +116,6 @@ defmodule Core.Curiosity.EvidenceAcquisition do
          true <- AuthoritativeAnswerPlan.authorized?(
            answer, AuthoritativeAnswerPlan.render(answer, :brief), framed),
          true <- still_open?(issue.id),
-         # A concurrent capture may have introduced this bridge. Do not
-         # create a second potentially conflicting persisted observation.
          false <- stored_bridge?(request.subjects, request.year),
          {:ok, proof} <- Consolidation.capture(framed, answer) do
       %{status: :captured, issue_id: issue.id, proof_id: proof.id}
@@ -111,11 +124,31 @@ defmodule Core.Curiosity.EvidenceAcquisition do
       _ -> %{status: :unresolved, issue_id: issue.id,
              reason: :retrieval_or_authorization_failed}
     end
-  rescue
-    _ -> %{status: :unresolved, issue_id: issue.id, reason: :acquisition_unavailable}
-  catch
-    :exit, _ -> %{status: :unresolved, issue_id: issue.id, reason: :acquisition_unavailable}
   end
+
+  # Log only a closed vocabulary of provider identifiers and status codes.
+  # Provider excerpts, raw search queries and rejected URLs stay transient.
+  defp provider_attempts(%{web_evidence: %{attempts: attempts}})
+      when is_list(attempts) do
+    attempts
+    |> Enum.take(4)
+    |> Enum.map(fn attempt ->
+      %{provider: provider_name(Map.get(attempt, :provider)),
+        status: provider_status(Map.get(attempt, :status))}
+    end)
+  end
+
+  defp provider_attempts(_), do: []
+
+  defp provider_name(Core.Tools.WebRetrieval.Wikidata), do: "wikidata"
+  defp provider_name(Core.Tools.WebRetrieval.StatisticsCanadaPopulation),
+    do: "statistics_canada"
+  defp provider_name(_), do: "other"
+
+  defp provider_status(status)
+       when status in [:source_supported, :unavailable, :partial_support, :error],
+       do: Atom.to_string(status)
+  defp provider_status(_), do: "unknown"
 
   def acquire(_, _), do: %{status: :unresolved, reason: :invalid_issue}
 
