@@ -58,6 +58,8 @@ defmodule Db.CognitiveIssues do
     :ok
   end
 
+  def resolve_missing_year(_), do: :ok
+
   @doc """
   Mark previously missing two-hop links resolved only after the verified
   composition path has identified TWO distinct persisted parent proofs.
@@ -110,7 +112,6 @@ defmodule Db.CognitiveIssues do
 
   def resolve_reasoning_link(_, _, _), do: :ok
 
-  def resolve_missing_year(_), do: :ok
 
   defp close_missing_year_issues(proof) do
     issues =
