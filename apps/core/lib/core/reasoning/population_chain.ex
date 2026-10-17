@@ -103,8 +103,23 @@ defmodule Core.Reasoning.PopulationChain do
             |> Enum.uniq()
 
           if length(signatures) == 1 do
+            preferred_ids =
+              case Map.get(context, :hippocampal_association) do
+                %{kind: :two_hop_candidate, parent_proof_ids: [a, b]}
+                    when is_integer(a) and is_integer(b) ->
+                  Enum.sort([a, b])
+
+                _ ->
+                  []
+              end
+
+            # The hippocampal association selects which *equivalent* path
+            # Core evaluates first. Conflicts among ALL candidate paths
+            # were checked above; no remembered path can suppress them.
             supported
-            |> Enum.sort_by(&{hd(&1.parent_ids), List.last(&1.parent_ids)})
+            |> Enum.sort_by(fn path ->
+              {if(path.parent_ids == preferred_ids, do: 0, else: 1), path.parent_ids}
+            end)
             |> hd()
             |> attach_proof(context, subjects)
           else
@@ -199,12 +214,16 @@ defmodule Core.Reasoning.PopulationChain do
           parent_proof_ids: path.parent_ids, reference_year: path.year}
       )
 
+      cued? =
+        match?(%{kind: :two_hop_candidate}, Map.get(context, :hippocampal_association)) and
+          get_in(context, [:hippocampal_association, :parent_proof_ids]) == path.parent_ids
+
       Map.put(derived, :composition, %{
         rule: :transitive_population_order,
         intermediate_subject: path.middle["subject"],
         parent_proof_ids: path.parent_ids,
         reference_year: path.year,
-        origin: :stored_independent_proofs
+        origin: if(cued?, do: :hippocampal_two_hop_cue, else: :stored_independent_proofs)
       })
     else
       _ ->
