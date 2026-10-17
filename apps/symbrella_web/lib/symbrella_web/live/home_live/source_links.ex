@@ -70,11 +70,37 @@ defmodule SymbrellaWeb.ChatLive.SourceLinks do
       trailing =
         binary_part(candidate, byte_size(url), byte_size(candidate) - byte_size(url))
 
-      {:ok, %{kind: :source, url: url, favicon: favicon}, trailing}
+      {:ok, %{kind: :source, url: url, favicon: favicon, label: source_label(parsed)}, trailing}
     else
       _ -> :invalid
     end
   rescue
     _ -> :invalid
   end
+
+  # Source URLs are retained in href/title; these short labels make two
+  # different citations distinguishable in the chat transcript and on screen.
+  # All URL-derived text is still escaped by HEEx at rendering.
+  defp source_label(%URI{host: host, path: path}) when is_binary(host) do
+    cond do
+      host in ["www.wikidata.org", "wikidata.org"] ->
+        case Regex.run(~r{/wiki/(Q[0-9]{1,12})\z/u}, path || "") do
+          [_, id] -> "Wikidata #{id}"
+          _ -> "Wikidata"
+        end
+
+      host in ["en.wikipedia.org", "www.wikipedia.org", "wikipedia.org"] ->
+        "Wikipedia"
+
+      host == "statcan.gc.ca" or String.ends_with?(host, ".statcan.gc.ca") ->
+        "Statistics Canada"
+
+      true ->
+        host
+        |> String.trim_leading("www.")
+        |> String.slice(0, 55)
+    end
+  end
+
+  defp source_label(_), do: "Source"
 end
