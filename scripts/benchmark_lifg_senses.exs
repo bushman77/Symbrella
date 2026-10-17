@@ -258,7 +258,43 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         |> List.wrap()
         |> Enum.filter(&is_map/1)
         |> Enum.take(8)
-        |> Enum.map(&Map.take(&1, [:token_index, :id, :lemma, :score]))
+        |> Enum.map(&Map.take(&1,
+          [:token_index, :id, :lemma, :score, :token_span, :span, :source]))
+
+      # The final token list does not necessarily contain Core's virtual MWE
+      # token. Check the actual accepted semantic choices and their original
+      # base-token spans instead of claiming an empty token cover means no MWE.
+      covering_semantic_choices =
+        si
+        |> Map.get(:semantic_choices, [])
+        |> List.wrap()
+        |> Enum.filter(fn
+          %{kind: :mwe, token_span: {first, last}} ->
+            is_integer(first) and is_integer(last) and index >= first and
+              index <= last
+          _ ->
+            false
+        end)
+        |> Enum.take(8)
+        |> Enum.map(&Map.take(&1,
+          [:token_index, :id, :phrase, :token_span, :source, :score]))
+
+      # Observe candidate signatures that *claim* this word as a grammatical
+      # role, including conflicting interpretations. No hypothesis is promoted
+      # by this report or assumed to be correct merely because it exists.
+      impacting_signatures =
+        si
+        |> Map.get(:sentence_signatures, [])
+        |> List.wrap()
+        |> Enum.filter(fn
+          %{roles: roles} when is_map(roles) ->
+            Enum.any?(roles, fn {_name, role_index} -> role_index == index end)
+          _ ->
+            false
+        end)
+        |> Enum.take(16)
+        |> Enum.map(&Map.take(&1,
+          [:id, :span, :roles, :required_features, :evidence, :source]))
 
       required_pos = Core.LIFG.SignatureRoles.required_pos(si, index)
 
@@ -293,7 +329,9 @@ defmodule Symbrella.BenchmarkLIFGSenses do
           compact(Map.get(Map.get(by_id, raw_id, %{}), :definition), 190),
         grammar_required_pos: required_pos,
         mwe_covering_target: covering_mwes,
+        mwe_semantic_choices_covering_target: covering_semantic_choices,
         mwe_decisions: if(is_nil(final_id), do: mwe_decisions, else: []),
+        grammar_signatures_for_target: impacting_signatures,
         final_winner_definition:
           compact(Map.get(Map.get(by_id, final_id, %{}), :definition), 240),
         changed_after_stage1?: is_binary(raw_id) and raw_id != final_id,
