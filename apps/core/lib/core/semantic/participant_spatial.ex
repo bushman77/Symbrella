@@ -32,7 +32,7 @@ defmodule Core.Semantic.ParticipantSpatial do
          true <- [sd, sh, aux, pred, prep, ld, lh] == Enum.to_list(0..6),
          {:ok, tokens} <- tokens(si, sentence),
          {:ok, _} <- selected(si, sd, "determiner"),
-         {:ok, _} <- selected(si, sh, "noun"),
+         {:ok, _} <- selected_common_noun(si, sh, Map.fetch!(tokens, sh)),
          {:ok, _} <- selected(si, aux, "auxiliary"),
          {:ok, _} <- selected_or_attested(si, prep, "preposition", Map.fetch!(tokens, prep)),
          {:ok, _} <- selected(si, ld, "determiner"),
@@ -123,6 +123,34 @@ defmodule Core.Semantic.ParticipantSpatial do
       {:ok, selection}
     else
       _ -> :error
+    end
+  end
+
+  # A lexical proper-noun sense can narrowly win over common noun senses
+  # (e.g. "bird|proper_noun|1" for lowercase "a bird"). A fully attested
+  # determiner + nominal-head construction is independent grammatical evidence
+  # for the common-noun *role*, not a new LIFG sense winner. Admit only when:
+  # - LIFG and ATL agree on the proper-noun alternative;
+  # - the surface is lowercase and unpunctuated;
+  # - an exact common-noun dictionary row exists for that same word.
+  # Other conflicting selections must remain rejected.
+  defp selected_common_noun(si, index, surface) do
+    case selected(si, index, "noun") do
+      {:ok, _} = accepted ->
+        accepted
+
+      :error ->
+        original = String.trim(surface)
+
+        if Regex.match?(~r/\A\p{Ll}[\p{Ll}'-]*\z/u, original) and
+             attested_pos?(si, original, "noun") do
+          case selected(si, index, "proper_noun") do
+            {:ok, _} -> {:ok, :attested_common_noun_role}
+            _ -> :error
+          end
+        else
+          :error
+        end
     end
   end
 
