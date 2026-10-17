@@ -11,6 +11,7 @@ defmodule Core.Response.Memory do
   alias Core.Response.ConversationRecall
   alias Core.Response.SpatialDialogue
   alias Core.Response.EpisodicMemory
+  alias Core.Semantic.EpisodicProjection
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -31,6 +32,45 @@ defmodule Core.Response.Memory do
   end
 
   def reply(_), do: nil
+
+  @doc "Acknowledge only a validated event after Hippocampus confirms persistence."
+  @spec acknowledge_projected(map(), term(), String.t(), atom(), number()) ::
+          {atom(), String.t(), map()} | nil
+  def acknowledge_projected(%{} = si, session_id, text_in, intent0, conf)
+      when is_binary(text_in) do
+    candidates = Map.get(si, :episodic_candidates, [])
+    sentence = Map.get(si, :sentence)
+
+    if Map.get(si, :source) in [:user, :prod, :test] and
+         is_binary(sentence) and String.trim(sentence) == String.trim(text_in) and
+         is_list(candidates) and candidates != [] and
+         Enum.all?(candidates, fn candidate ->
+           match?({:ok, _}, EpisodicProjection.validate_candidate(si, candidate))
+         end) do
+      case EpisodicMemory.remember_projected_events(si, text_in, session_id) do
+        :ok ->
+          response = "I’ve recorded what you told me: " <> String.trim(text_in)
+          finish_reply(session_id, text_in, response, %{
+            action: :remember_event,
+            response_source: :symbolic_conversation,
+            memory_source: :hippocampal_event,
+            provenance: :user_reported,
+            source: :user_reported_event,
+            persistence_status: :persisted,
+            retrieval_found?: false,
+            session_id: session_id,
+            intent_original: intent0,
+            confidence: conf
+          })
+
+        _ -> nil
+      end
+    else
+      nil
+    end
+  end
+
+  def acknowledge_projected(_, _, _, _, _), do: nil
 
   @spec reply_for(map()) :: {atom(), String.t(), map()} | nil
   def reply_for(%{
