@@ -65,6 +65,78 @@ defmodule Core.Curiosity.InvestigationHistory do
   @doc "Bounded recent durable attempts, newest first."
   def recent(limit \\ 20), do: CuriosityInvestigations.recent(limit)
 
+  @doc """
+  Build a read-only audit explanation from persisted issue and proof records.
+  No model inference or source lookup is performed, and an absence of audit
+  rows is reported honestly (history is not reconstructed retroactively).
+  """
+  @spec explain(pos_integer()) :: {:ok, map()} | {:error, :not_found}
+  def explain(issue_id) when is_integer(issue_id) and issue_id > 0 do
+    case Db.get(Db.CognitiveIssue, issue_id) do
+      %Db.CognitiveIssue{} = issue ->
+        events = for_issue(issue_id, 50)
+        ids =
+          events
+          |> Enum.flat_map(fn e -> [e.acquired_proof_id | e.parent_proof_ids] end)
+          |> Kernel.++(resolution_proof_ids(issue.resolution))
+          |> Enum.filter(&(is_integer(&1) and &1 > 0))
+          |> Enum.uniq()
+          |> Enum.take(12)
+
+        proofs =
+          ids
+          |> Enum.flat_map(fn id ->
+            case Db.get(Db.ConsolidatedConclusion, id) do
+              %Db.ConsolidatedConclusion{
+                kind: "population_comparison",
+                provenance: "source_supported_symbolic_derivation"
+              } = proof ->
+                [%{
+                  id: proof.id,
+                  reference_year: proof.reference_year,
+                  provenance: proof.provenance,
+                  source_urls: proof.source_urls
+                }]
+
+              _ -> []
+            end
+          end)
+
+        {:ok, %{
+          issue: %{
+            id: issue.id, kind: issue.kind, status: issue.status,
+            reference_year: issue.reference_year,
+            subjects: Map.get(issue.evidence || %{}, "subjects", []),
+            reason: Map.get(issue.evidence || %{}, "reason"),
+            next_action: issue.next_action
+          },
+          resolution: issue.resolution,
+          resolved_at: issue.resolved_at,
+          attempts: Enum.map(events, fn e ->
+            %{
+              id: e.id, status: e.status, reason: e.reason,
+              worker: e.worker, acquisition: e.acquisition,
+              acquisition_reason: e.acquisition_reason,
+              acquired_proof_id: e.acquired_proof_id,
+              parent_proof_ids: e.parent_proof_ids,
+              origin: e.origin, provider_attempts: e.provider_attempts,
+              started_at: e.inserted_at, completed_at: e.completed_at,
+              duration_ms: e.duration_ms
+            }
+          end),
+          accepted_proofs: proofs
+        }}
+
+      _ -> {:error, :not_found}
+    end
+  end
+
+  def explain(_), do: {:error, :not_found}
+
+  defp resolution_proof_ids(%{"parent_proof_ids" => ids}) when is_list(ids), do: ids
+  defp resolution_proof_ids(%{"proof_id" => id}) when is_integer(id), do: [id]
+  defp resolution_proof_ids(_), do: []
+
   defp allowed_status(status) when status in @allowed_status,
     do: Atom.to_string(status)
   defp allowed_status(_), do: "failed"
