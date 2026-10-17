@@ -52,9 +52,13 @@ defmodule Brain.WorkingMemory do
     * `%{decision: :allow | :boost, ...}` (treated as commit)
     * `%{action: :commit, ...}` (treated as commit)
 
-  Only committed items are admitted.
+  Stage2 commit-style decisions are only *candidate evidence*.
+  The final admission decision always comes from BasalGanglia, even when
+  Stage2 labels an item :allow or :boost.
 
-  Important: Tests expect `source: :lifg` for Stage2-gated entries.
+  This legacy pure-list API delegates to canonical WM admission. New runtime
+  callers should use Brain.focus/2 or Brain.WM.Admission.run/3.
+  The default source remains :lifg for Stage2 candidates.
   """
   @spec ingest_stage2(
           wm :: [wm_item()],
@@ -62,19 +66,24 @@ defmodule Brain.WorkingMemory do
           now_ms :: non_neg_integer(),
           cfg :: cfg()
         ) :: [wm_item()]
-  def ingest_stage2(wm, decisions, now_ms, cfg) when is_list(decisions) do
-    decisions
-    |> Enum.reduce(wm, fn dec, acc ->
-      case normalize_stage2_decision(dec) do
-        {:commit, %{} = choice} ->
-          # Default source must be :lifg for the test expectations.
-          item = normalize(choice, now_ms, source: :lifg)
-          upsert(acc, item, cfg)
+  def ingest_stage2(wm, decisions, now_ms, cfg)
+      when is_list(wm) and is_list(decisions) and is_map(cfg) do
+    candidates =
+      Enum.flat_map(decisions, fn dec ->
+        case normalize_stage2_decision(dec) do
+          {:commit, %{} = choice} -> [{:commit, choice}]
+          _ -> []
+        end
+      end)
 
-        _ ->
-          acc
-      end
-    end)
+    {admitted, _added, _removed} =
+      Brain.WM.Admission.run(
+        %{wm: wm, wm_cfg: cfg, attention: %{}},
+        candidates,
+        %{now_ms: now_ms}
+      )
+
+    admitted
   end
 
   def ingest_stage2(wm, _decisions, _now_ms, _cfg), do: wm
