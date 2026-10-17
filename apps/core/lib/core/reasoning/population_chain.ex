@@ -188,6 +188,10 @@ defmodule Core.Reasoning.PopulationChain do
          frame <- ResponseFrame.build(derived),
          %{kind: :verified_population_comparison} <- AuthoritativeAnswerPlan.build(
            Map.put(derived, :response_frame, frame)) do
+      :ok = CognitiveIssues.resolve_reasoning_link(
+        subject_key(subjects), path.year, path.parent_ids
+      )
+
       Map.put(derived, :composition, %{
         rule: :transitive_population_order,
         intermediate_subject: path.middle["subject"],
@@ -290,15 +294,18 @@ defmodule Core.Reasoning.PopulationChain do
     }
   end
 
+  defp subject_key(subjects) do
+    subjects
+    |> Enum.map(&(String.downcase(String.trim(&1))))
+    |> Enum.sort()
+    |> Enum.join("|")
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
   defp issue(context, subjects, year, kind, proof_ids, details) do
     [a, c] = subjects
-    subject_key =
-      subjects
-      |> Enum.map(&(String.downcase(String.trim(&1))))
-      |> Enum.sort()
-      |> Enum.join("|")
-      |> then(&:crypto.hash(:sha256, &1))
-      |> Base.encode16(case: :lower)
+    subject_key = subject_key(subjects)
 
     fingerprint =
       :crypto.hash(:sha256, :erlang.term_to_binary({
