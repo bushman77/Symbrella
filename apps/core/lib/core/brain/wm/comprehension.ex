@@ -111,7 +111,7 @@ defmodule Core.Brain.WM.Comprehension do
   @spec context_from(map(), map()) :: map()
   def context_from(si, comprehension) when is_map(si) and is_map(comprehension) do
     event = map_or_empty(field(si, :symbolic_frame))
-    projected = validated_participant_event(si)
+    projected = EpisodicProjection.validated_participant(si)
     roles = if is_map(projected), do: field(projected, :participants), else: nil
     event_roles = bounded_roles(roles)
     prev = map_or_empty(field(si, :wm_context))
@@ -175,23 +175,6 @@ defmodule Core.Brain.WM.Comprehension do
       verification: :conversation_context_only,
       updated_at_ms: System.system_time(:millisecond)
     }
-  end
-
-  # The candidate must still be derivable from this exact user-input SI.
-  # Never accept arbitrary :episodic_candidates pasted into a frame; reject
-  # ambiguous multiple projections rather than selecting a convenient one.
-  defp validated_participant_event(si) do
-    case List.wrap(field(si, :episodic_candidates)) do
-      [candidate] when is_map(candidate) ->
-        case EpisodicProjection.validate_candidate(si, candidate) do
-          {:ok, %{participants: %{"actor" => actor}} = validated}
-              when is_binary(actor) -> validated
-
-          _ -> nil
-        end
-
-      _ -> nil
-    end
   end
 
   @event_role_keys ~w(actor predicate surface_predicate patient position location aspect tense)
