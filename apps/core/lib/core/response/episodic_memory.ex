@@ -166,11 +166,10 @@ defmodule Core.Response.EpisodicMemory do
     sentence =
       case relation do
         "has_obligation" -> "You told me you need to #{value}."
+        # The question selected an object role through an exact relation key.
+        # Respond from that persisted slot, not by replaying the source text.
         "verb_" <> _predicate ->
-          case Map.get(event, :sentence) do
-            s when is_binary(s) and s != "" -> "You told me: " <> String.trim(s)
-            _ -> "You told me: #{entity} — #{relation} — #{value}."
-          end
+          role_answer(value)
         "deadline" ->
           subject = if String.starts_with?(String.downcase(entity), "the "), do: entity, else: "the " <> entity
           "According to what you told me, #{subject} deadline is #{value}."
@@ -186,6 +185,11 @@ defmodule Core.Response.EpisodicMemory do
       end
 
     {sentence, metadata(:hippocampal_event, event)}
+  end
+
+  defp role_answer(value) when is_binary(value) do
+    trimmed = value |> String.trim() |> String.trim_trailing(".")
+    String.upcase(String.first(trimmed)) <> String.slice(trimmed, 1, String.length(trimmed)) <> "."
   end
 
   defp respond_history([]), do: nil
