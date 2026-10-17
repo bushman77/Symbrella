@@ -84,7 +84,7 @@ defmodule SymbrellaWeb.ChatLive.SourceLinks do
   defp source_label(%URI{host: host, path: path}) when is_binary(host) do
     cond do
       host in ["www.wikidata.org", "wikidata.org"] ->
-        case Regex.run(~r{/wiki/(Q[0-9]{1,12})\z}u, path || "") do
+        case Regex.run(~r"/wiki/(Q[0-9]{1,12})\z"u, path || "") do
           [_, id] -> "Wikidata #{id}"
           _ -> "Wikidata"
         end
