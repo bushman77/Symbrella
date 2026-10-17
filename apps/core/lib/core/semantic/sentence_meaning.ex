@@ -10,6 +10,7 @@ defmodule Core.Semantic.SentenceMeaning do
   """
 
   alias Core.Pipeline.Trace
+  alias Core.Semantic.EpisodicProjection
 
   @max_topic_tokens 16
 
@@ -63,7 +64,7 @@ defmodule Core.Semantic.SentenceMeaning do
         question
       end
 
-    question || %{
+    question || participant_meaning(si, sentence) || %{
       version: 1,
       sentence: sentence,
       definition: nil,
@@ -77,6 +78,109 @@ defmodule Core.Semantic.SentenceMeaning do
     version: 1, sentence: nil, definition: nil, kind: :unknown,
     status: :not_yet_interpreted, source: :invalid_input
   }
+
+  # A validated participant event provides structural sentence understanding,
+  # not an externally verified fact. Keep this representation separate from
+  # lexical :understood and from any persistence acknowledgement.
+  defp participant_meaning(si, sentence) when is_binary(sentence) do
+    case EpisodicProjection.validated_participant(si) do
+      %{source_frame: :finite_present_svo, relation: relation,
+        value: patient, participants: %{
+          "actor" => actor, "predicate" => lemma,
+          "surface_predicate" => surface, "patient" => stored_patient,
+          "tense" => "present"
+        }} = event ->
+        if relation == "verb_" <> lemma and patient == stored_patient and
+             participant_surface?([actor, lemma, surface, patient]) do
+          roles = %{
+            actor: surface_role(actor),
+            predicate: %{surface: surface, lemma: lemma,
+              grounding_status: :selected_not_contextually_verified},
+            patient: surface_role(patient)
+          }
+
+          participant_frame(sentence, event, :action, roles, %{
+            predicate: %{surface: surface, lemma: lemma},
+            arguments: %{actor: actor, patient: patient},
+            modifiers: %{tense: :present}
+          }, "The speaker reports that #{actor} #{surface} #{patient}.")
+        end
+
+      %{source_frame: :progressive_spatial, relation: "spatial_state",
+        value: location, participants: %{
+          "actor" => actor, "predicate" => predicate, "aspect" => "progressive",
+          "position" => position, "location" => stored_location
+        }} = event ->
+        if location == stored_location and
+             participant_surface?([actor, predicate, position, location]) do
+          roles = %{
+            actor: surface_role(actor),
+            predicate: %{surface: predicate, aspect: :progressive,
+              grounding_status: :attested_form_not_sense_verified},
+            position: surface_role(position),
+            location: surface_role(location)
+          }
+
+          participant_frame(sentence, event, :spatial, roles, %{
+            predicate: %{surface: predicate, aspect: :progressive},
+            arguments: %{actor: actor, location: location},
+            modifiers: %{position: position}
+          }, "The speaker reports that #{actor} is #{predicate} #{position} #{location}.")
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp participant_meaning(_, _), do: nil
+
+  defp participant_frame(sentence, event, kind, roles, content, definition) do
+    # Provenance describes the interpretation path, NOT a persistence claim.
+    provenance = %{
+      source: :user_statement,
+      frame: event.source_frame,
+      evidence: :candidate_revalidated_against_original_input,
+      persistence: :not_claimed
+    }
+
+    grounding = %{
+      grammatical_roles: :revalidated_episodic_projection,
+      exact_lexical_meanings: :not_verified,
+      external_facts: :not_checked
+    }
+
+    %{
+      version: 2,
+      sentence: sentence,
+      kind: :participant_assertion,
+      status: :structurally_interpreted,
+      speech_act: :assertion,
+      definition: definition,
+      roles: roles,
+      polarity: :positive,
+      grounding: grounding,
+      source: :revalidated_episodic_projection,
+      proposition: %{
+        version: 1,
+        type: :participant_assertion,
+        event_type: kind,
+        epistemic_status: :user_reported_unverified,
+        content: content,
+        grounding: grounding,
+        provenance: provenance
+      }
+    }
+  end
+
+  defp surface_role(surface),
+    do: %{surface: surface, grounding_status: :structurally_bound}
+
+  defp participant_surface?(values) do
+    Enum.all?(values, fn value ->
+      is_binary(value) and String.trim(value) != "" and byte_size(value) <= 160
+    end)
+  end
 
   defp compose_question(
          %{span: {start, last}, roles: roles},
