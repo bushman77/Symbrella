@@ -3,6 +3,24 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "generic no-access claims do not replace an evidence-specific population limitation" do
+    question =
+      "Does that mean Vancouver still has the larger population in 2026? What can you actually verify?"
+
+    draft =
+      "I'm sorry, but I don't have access to real-time data or information about the population of Vancouver in 2026. Could you provide me with some more details or a specific date range?"
+
+    context = %{features: %{intent: :ask, conf: 0.9}, web_evidence: %{}}
+    {:ok, answer, reflection} = ReflectionLoop.review(question, draft, context)
+
+    assert :population_access_refusal in reflection.issues
+    assert reflection.status == :repair
+    assert answer =~ "can't verify a 2026 population comparison"
+    assert answer =~ "dated figures"
+    refute answer =~ "don't have access"
+    refute answer =~ "date range"
+  end
+
   test "unsupported future-year population extrapolation yields an epistemically bounded answer" do
     question =
       "Does that mean Vancouver still has the larger population in 2026? What can you actually verify?"

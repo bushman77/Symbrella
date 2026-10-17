@@ -102,6 +102,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
     |> maybe_issue(unsupported_population_year?(context, user_text, draft_text), :unsupported_population_year)
+    |> maybe_issue(population_access_refusal?(context, user_text, draft_text), :population_access_refusal)
     |> maybe_issue(distance_followup_self_intro?(context, user_text, draft_text), :distance_followup_subject_loss)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
@@ -155,6 +156,7 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :geographic_claim_unverified in issues or :unsupported_population_year in issues or
+          :population_access_refusal in issues or
           :distance_followup_subject_loss in issues ->
         {:repair, issues}
 
@@ -236,6 +238,13 @@ defmodule Core.Response.ReflectionLoop do
         :distance_followup_subject_loss in issues ->
           distance_followup_clarification(context)
 
+        :population_access_refusal in issues ->
+          year = requested_population_year(user_text)
+          "I can't verify a #{year} population comparison from the evidence " <>
+            "available in this conversation. Historical population figures " <>
+            "wouldn't establish the #{year} comparison; I would need dated " <>
+            "figures for both places."
+
         :unsupported_population_year in issues ->
           requested_year = requested_population_year(user_text)
 
@@ -296,6 +305,9 @@ defmodule Core.Response.ReflectionLoop do
           "The answer lacks any URL from retrieved reference evidence. Give only attributed excerpts with URLs; do not invent a factual or institutional history."
         :distance_followup_subject_loss in issues ->
           "The user's 'it' refers to the immediately preceding distance exchange. Do not replace the subject with Symbrella's identity; clarify whether they mean the distance or the coordinate method."
+        :population_access_refusal in issues ->
+          "Do not claim there is no data access merely because the current response lacks matching-year evidence. Give the evidence limitation and the specific year."
+
         :unsupported_population_year in issues ->
           "The draft extrapolated a dated population comparison without matching-year verification. Do not convert older census figures into current-year claims."
 
@@ -767,6 +779,18 @@ defmodule Core.Response.ReflectionLoop do
   # This guard is deliberately narrow: it inspects an affirmative draft about
   # the explicit year the user requested, and yields to matching-year sourced
   # evidence. Conversational history alone never authorizes a numeric claim.
+  defp population_access_refusal?(context, user_text, draft_text)
+       when is_binary(user_text) and is_binary(draft_text) do
+    year = requested_population_year(user_text)
+
+    is_integer(year) and
+      Regex.match?(~r/\bpopulation\b/iu, user_text) and
+      Regex.match?(~r/\b(?:do\s+not|don't|cannot|can't)\s+have\s+access\s+to\s+(?:real[- ]time|current|live)\b/iu, draft_text) and
+      not population_evidence_for_year?(context, year)
+  end
+
+  defp population_access_refusal?(_, _, _), do: false
+
   defp unsupported_population_year?(context, user_text, draft_text)
        when is_binary(user_text) and is_binary(draft_text) do
     year = requested_population_year(user_text)
