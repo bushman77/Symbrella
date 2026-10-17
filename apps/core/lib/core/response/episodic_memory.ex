@@ -81,6 +81,7 @@ defmodule Core.Response.EpisodicMemory do
         value: event.value, status: Atom.to_string(event.status),
         source_frame: Map.get(raw_event, :source_frame, :text_adapter),
         frame_confidence: Map.get(raw_event, :frame_confidence),
+        participants: Map.get(raw_event, :participants),
         tags: ["episodic", "user_reported_event"]
       }
 
