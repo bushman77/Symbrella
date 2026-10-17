@@ -12,7 +12,7 @@ defmodule Db.Migrations.CreateCuriosityInvestigations do
       add :acquired_proof_id, :bigint
       add :parent_proof_ids, {:array, :bigint}, null: false, default: []
       add :origin, :string
-      add :provider_attempts, :jsonb, null: false, default: fragment("'[]'::jsonb")
+      add :provider_attempts, {:array, :map}, null: false, default: []
       add :duration_ms, :integer
       add :completed_at, :utc_datetime_usec
 
