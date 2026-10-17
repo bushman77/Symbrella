@@ -117,6 +117,8 @@ defmodule Core.Semantic.Proposition do
     })
   end
 
+  def build(_, _), do: nil
+
   defp participant_proposition(meaning, event_type, content) do
     %{
       version: 1,
@@ -133,8 +135,6 @@ defmodule Core.Semantic.Proposition do
       }
     }
   end
-
-  def build(_, _), do: nil
 
   defp compose_nominal(si, %{surface: surface, span: {first, last}} = topic) do
     constituents =
