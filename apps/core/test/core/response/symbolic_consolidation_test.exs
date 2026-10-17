@@ -240,8 +240,10 @@ defmodule Core.Response.SymbolicConsolidationTest do
       consolidation_issue: unresolved.consolidation_issue,
       decision: %{action: :answer}, mood: %{}
     })
-    assert prompt =~ "UNRESOLVED EVIDENCE CONFLICT"
-    assert prompt =~ "Do not choose a winner"
+    refute prompt =~ "UNRESOLVED EVIDENCE CONFLICT"
+    refute prompt =~ "Do not choose a winner"
+    refute prompt =~ to_string(issue.id)
+    refute prompt =~ "recheck_sources"
     assert Enum.sort(issue.evidence["stored_proof_ids"]) ==
       Enum.sort([first.id, second.id])
 
