@@ -104,7 +104,7 @@ defmodule Core.Curiosity.Investigator do
           end)
           |> case do
             nil -> %{status: :idle}
-            %{issue_id: id} -> investigate_issue(id)
+            %{issue_id: id} -> investigate_issue_with_options(id, state.opts)
           end
       end
 
@@ -135,9 +135,18 @@ defmodule Core.Curiosity.Investigator do
   Useful for testing the DB-backed cognitive boundary independently of timers.
   """
   @spec investigate_issue(integer()) :: map()
-  def investigate_issue(id) when is_integer(id) and id > 0 do
+  def investigate_issue(id) when is_integer(id) and id > 0,
+    do: investigate_issue_with_options(id, [])
+
+  def investigate_issue(_), do: %{status: :skipped, reason: :invalid_issue_id}
+
+  # A scheduled worker must honor its explicit per-process feature gate.
+  # The public direct-call API still uses the global opt-in gate, but a
+  # supervised named trial can remain enabled while the default worker is
+  # disabled. This does not bypass the three independent reasoning gates.
+  defp investigate_issue_with_options(id, opts) do
     cond do
-      not enabled?([]) or not features_enabled?() ->
+      not enabled?(opts) or not features_enabled?() ->
         %{status: :disabled, issue_id: id}
 
       true ->
@@ -151,8 +160,6 @@ defmodule Core.Curiosity.Investigator do
   catch
     :exit, _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
   end
-
-  def investigate_issue(_), do: %{status: :skipped, reason: :invalid_issue_id}
 
   defp investigate(issue) do
     names = Map.get(issue.evidence || %{}, "subjects")
