@@ -95,6 +95,67 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert item2.payload.context.entities == ["Kamloops BC", "Maple Ridge BC"]
   end
 
+  test "Core comprehension uses BG admission without gaining factual authority" do
+    sid = session()
+    id = frame_id(sid)
+    listener = "p9a03-core-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        listener,
+        [:brain, :gate, :decision],
+        fn event, measurements, metadata, pid ->
+          send(pid, {:core_gate, event, measurements, metadata})
+        end,
+        self()
+      )
+
+    on_exit(fn ->
+      :telemetry.detach(listener)
+      Brain.defocus(id)
+    end)
+
+    stored = WMComprehension.store(prior_turn(sid), comprehension_wm?: true)
+    assert [%{stage: :wm_comprehension, decision: :admitted} | _] = stored.trace
+
+    assert_receive {:core_gate, [:brain, :gate, :decision], %{score: score},
+                    %{id: ^id, source: :comprehension, gate: :basal_ganglia,
+                      decision: decision}}
+
+    assert decision in [:allow, :boost]
+    assert score >= 0.0 and score <= 1.0
+
+    assert %{payload: %{context: context}} =
+             Enum.find(Brain.snapshot_wm().wm, &(&1.id == id))
+
+    assert context.verification == :conversation_context_only
+    refute Map.get(context, :factual_authority?, false)
+  end
+
+  test "disabled Core comprehension never submits a WM candidate" do
+    sid = session()
+    id = frame_id(sid)
+    listener = "p9a03-core-disabled-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        listener,
+        [:brain, :gate, :decision],
+        fn _event, _measurements, metadata, pid ->
+          send(pid, {:core_gate_id, metadata.id})
+        end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(listener) end)
+
+    si = prior_turn(sid)
+    assert WMComprehension.store(si, comprehension_wm?: false) == si
+
+    refute_receive {:core_gate_id, ^id}, 75
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+  end
+
   test "never recall a different session's comprehension frame" do
     assert is_pid(Process.whereis(Brain))
     sid = session()
