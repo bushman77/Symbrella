@@ -172,9 +172,9 @@ defmodule Core.Response do
               llm_or_model_unavailable(text_in, features, decision, mood, intent)
           end
 
-        # A source-verified symbolic conclusion is already a complete,
-        # authorized answer. Do not append a curiosity question after its
-        # claim/citation lock has passed final review.
+        # A verified conclusion or a neutral insufficient-evidence answer
+        # is already a complete response. The independent curiosity loop must
+        # never append its investigation prompts to user-facing chat.
         {text, curiosity_probe} =
           if response_source in [:symbolic_verified, :symbolic_unresolved] do
             {text0, nil}
