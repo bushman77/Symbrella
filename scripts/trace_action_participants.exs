@@ -62,7 +62,9 @@ IO.inspect(%{
   lifg_choices: choice_rows,
   atl_winners: winners,
   projected_actions: candidates,
-  validation: revalidated
+  validation: revalidated,
+  working_memory_context:
+    Core.Brain.WM.Comprehension.context_from(si, Map.get(si, :comprehension, %{}))
 }, label: "Read-only action participant diagnostic", pretty: true, limit: :infinity)
 
 if candidates == [] do
