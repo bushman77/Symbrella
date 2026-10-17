@@ -59,6 +59,7 @@ defmodule Core.SemanticInput do
                  :mwe_hypotheses,
                  :mwe_choices,
                  :lexical_constructions,
+                 :episodic_candidates,
                  :sentence_signatures
                ])
 
@@ -195,6 +196,7 @@ defmodule Core.SemanticInput do
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
           sentence_meaning: map() | nil,
+          episodic_candidates: [map()],
           lifg_feedback: map() | nil,
           sense_candidates: %{
             optional(non_neg_integer()) => [sense_candidate()]
@@ -278,6 +280,7 @@ defmodule Core.SemanticInput do
             sentence_signatures: [],
             sentence_competition: nil,
             sentence_meaning: nil,
+            episodic_candidates: [],
             lifg_feedback: nil,
             sense_candidates: %{},
             lifg_opts: nil,

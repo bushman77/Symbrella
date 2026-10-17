@@ -182,7 +182,7 @@ defmodule Core.Response do
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
           end
 
-        SideEffects.record_turn(session_id, text_in, text)
+        SideEffects.record_turn(session_id, text_in, text, si)
 
         profile = Meta.classify_profile(features, decision, guard)
 

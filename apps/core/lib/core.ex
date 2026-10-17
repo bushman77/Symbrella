@@ -173,6 +173,8 @@ defmodule Core do
     |> StateDump.capture(:verified_mwe_senses)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    |> Core.Semantic.EpisodicProjection.attach()
+    |> StateDump.capture(:episodic_projection)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     |> Core.Brain.WM.Comprehension.store(opts)

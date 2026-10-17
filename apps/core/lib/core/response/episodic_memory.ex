@@ -26,10 +26,45 @@ defmodule Core.Response.EpisodicMemory do
 
   def remember_user_turn(_, _), do: :ok
 
+  @doc """
+  Admit conservatively projected events from the SI grammatical/semantic
+  pipeline. Each candidate is checked against its originating frame.
+  """
+  @spec remember_projected_events(map() | nil, String.t(), term()) :: :ok | {:error, atom()}
+  def remember_projected_events(%{} = si, original_text, session_id)
+      when is_binary(original_text) do
+    allowed_source? =
+      Map.get(si, :source, Map.get(si, "source")) in [nil, :user, :prod, :test]
+
+    candidates = Map.get(si, :episodic_candidates, Map.get(si, "episodic_candidates", []))
+    source_sentence = Map.get(si, :sentence, Map.get(si, "sentence", Map.get(si, :text)))
+
+    if allowed_source? and is_binary(source_sentence) and
+         String.trim(source_sentence) == String.trim(original_text) and
+         is_list(candidates) do
+      candidates
+      |> Enum.take(4)
+      |> Enum.reduce(:ok, fn candidate, result ->
+        case Core.Semantic.EpisodicProjection.validate_candidate(si, candidate) do
+          {:ok, event} ->
+            case remember_event(event, session_id, original_text) do
+              :ok -> result
+              error -> error
+            end
+          :error -> result
+        end
+      end)
+    else
+      :ok
+    end
+  end
+
+  def remember_projected_events(_, _, _), do: :ok
+
   @doc "Accept any normalized typed event from a user-grounded symbolic parser."
   @spec remember_event(map(), term(), String.t()) :: :ok | {:error, atom()}
-  def remember_event(event, session_id, sentence \\ "") do
-    with {:ok, event} <- normalize_event(event),
+  def remember_event(raw_event, session_id, sentence \\ "") do
+    with {:ok, event} <- normalize_event(raw_event),
          owner when is_binary(owner) <- memory_owner(),
          true <- hippocampus_available?() do
       slate = %{
@@ -44,6 +79,8 @@ defmodule Core.Response.EpisodicMemory do
         session_id: to_string(session_id), entity: event.entity,
         entity_key: event.entity_key, relation: event.relation,
         value: event.value, status: Atom.to_string(event.status),
+        source_frame: Map.get(raw_event, :source_frame, :text_adapter),
+        frame_confidence: Map.get(raw_event, :frame_confidence),
         tags: ["episodic", "user_reported_event"]
       }
 
@@ -101,6 +138,7 @@ defmodule Core.Response.EpisodicMemory do
   defp respond_event(%{entity: entity, relation: relation, value: value} = event) do
     sentence =
       case relation do
+        "has_obligation" -> "You told me you need to #{value}."
         "deadline" ->
           subject = if String.starts_with?(String.downcase(entity), "the "), do: entity, else: "the " <> entity
           "According to what you told me, #{subject} deadline is #{value}."

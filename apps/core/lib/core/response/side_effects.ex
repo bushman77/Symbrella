@@ -27,13 +27,14 @@ defmodule Core.Response.SideEffects do
 
   def apply_mood_intent(_intent, _confidence, _read_only?), do: :ok
 
-  @spec record_turn(term(), String.t(), String.t()) :: :ok
-  def record_turn(session_id, user_text, assistant_text) do
+  @spec record_turn(term(), String.t(), String.t(), map() | nil) :: :ok
+  def record_turn(session_id, user_text, assistant_text, semantic_input \\ nil) do
     # The user's latest placement is admitted as a typed, attributed
     # hippocampal observation BEFORE the completed turn joins chat history.
     # A failed write never turns it into externally verified knowledge.
     _ = SpatialDialogue.remember_user_turn(user_text, session_id)
     _ = EpisodicMemory.remember_user_turn(user_text, session_id)
+    _ = EpisodicMemory.remember_projected_events(semantic_input, user_text, session_id)
 
     if function_exported?(LlmSynthesis, :record_turn, 3) do
       _ = LlmSynthesis.record_turn(session_id, user_text, assistant_text)

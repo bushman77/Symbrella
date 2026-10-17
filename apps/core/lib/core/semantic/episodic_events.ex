@@ -91,6 +91,9 @@ defmodule Core.Semantic.EpisodicEvents do
       m = Regex.named_captures(~r/^(?:what|when) is (?<entity>.+?) deadline\??$/iu, t) ->
         {:relation, entity_key(m["entity"]), "deadline"}
 
+      Regex.match?(~r/^what do i have to do\??$/iu, t) ->
+        {:relation, "me", "has_obligation"}
+
       m = Regex.named_captures(~r/^what does (?<entity>.+?) like\??$/iu, t) ->
         {:relation, entity_key(m["entity"]), "likes"}
 
