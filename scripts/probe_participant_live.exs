@@ -71,17 +71,26 @@ if persist? do
     IO.inspect(acknowledgement, label: "Validated memory acknowledgement", pretty: true)
     IO.inspect(persisted, label: "Isolated PostgreSQL participant event", pretty: true)
 
-    for question <- [
-          "Where is the bird?",
-          "What is sitting on the fence?",
-          "What is the bird doing?",
-          "What is the bird sitting on?"
-        ] do
-      IO.inspect(Core.Response.EpisodicMemory.reply(question),
-        label: "Independent symbolic recall: #{question}",
-        pretty: true
-      )
-    end
+    answers_pass? =
+      [
+        {"Where is the bird?", "On the fence."},
+        {"What is sitting on the fence?", "A bird."},
+        {"What is the bird doing?", "Sitting."},
+        {"What is the bird sitting on?", "On the fence."}
+      ]
+      |> Enum.map(fn {question, expected} ->
+        recalled = Core.Response.EpisodicMemory.reply(question)
+        IO.inspect(recalled,
+          label: "Independent symbolic recall: #{question}",
+          pretty: true
+        )
+
+        case recalled do
+          {^expected, %{memory_source: :hippocampal_event}} -> true
+          _ -> false
+        end
+      end)
+      |> Enum.all?()
 
     cond do
       not match?({_, _, %{persistence_status: :persisted}}, acknowledgement) ->
@@ -90,8 +99,11 @@ if persist? do
       not match?(%{status: "asserted", value: "the fence"}, persisted) ->
         IO.puts("Persistence check FAILED: PostgreSQL readback missing.")
 
+      not answers_pass? ->
+        IO.puts("Storage confirmed, but one or more participant-role answers FAILED.")
+
       true ->
-        IO.puts("Persistence and readback confirmed under isolated probe owner.")
+        IO.puts("Persistence and all four role answers confirmed under isolated probe owner.")
     end
   after
     try do
