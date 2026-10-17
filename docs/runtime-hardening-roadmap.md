@@ -18,8 +18,7 @@ No change here treats neural-shadow outputs as authoritative symbolic evidence.
 - Retain the existing symbolic-memory trust checks, learning fixtures, tests,
   and no-disk private display-history policy.
 
-**Verification before integration:** run `mix format --check-formatted` and
-`mix test`, specifically the ChatHistory, ChatSessionContinuity, SemanticLive,
+**Verification before integration:** run `mix test`, specifically the ChatHistory, ChatSessionContinuity, SemanticLive,
 HomeLiveHistory, ConversationRecall and LlmChatHistoryOwner tests. Exercise two
 real browsers simultaneously and refresh both. Check that per-browser history
 and verified semantic reports do not bleed across sessions.
@@ -104,17 +103,12 @@ reach the oldest archive position.
 
 ## Phase 4 — CI baseline
 
-GitHub Actions runs `mix format --check-formatted` and `mix test` on pushes and
-pull requests to `development` and `main`, backed by PostgreSQL 16 with
-pgvector. The first CI run may expose format differences introduced by source
-patches; run `mix format` locally and commit formatting before interpreting a
-format failure as a semantic regression.
+GitHub Actions runs `mix test` on pushes and pull requests to
+`development` and `main`, backed by PostgreSQL 16 with pgvector.
+Formatting commands have been deliberately removed from the development
+workflow and verification instructions. Source changes are validated with
+tests and focused reviews without repository-wide automatic rewriting.
 
-Credo, Dialyzer, and Sobelow remain follow-up additions: they require adding
-project dependencies and updating `mix.lock` under a real Elixir toolchain.
-Do not claim these checks are already active.
-
-Formatting is temporarily **advisory** in CI because the initial baseline
-contains hundreds of pre-existing formatting differences. Once formatting is
-normalized in a dedicated, separate commit, remove `continue-on-error` to
-make the formatting check mandatory. ExUnit remains a blocking CI check.
+Credo, Dialyzer, and Sobelow remain possible future additions, but would
+require dependency and lockfile changes under a working Elixir toolchain.
+None are currently active.

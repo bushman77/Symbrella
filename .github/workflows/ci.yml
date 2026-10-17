@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    name: Format and umbrella tests
+    name: Umbrella regression tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -58,10 +58,3 @@ jobs:
       - run: mix deps.compile
       - name: Run umbrella regression suite
         run: mix test
-      # There is a pre-existing unformatted baseline. Keep drift visible,
-      # but do not hide regression test results behind a formatter failure.
-      # Make this blocking after a separate, formatting-only baseline commit.
-      - name: Check formatting (advisory)
-        if: always()
-        continue-on-error: true
-        run: mix format --check-formatted
