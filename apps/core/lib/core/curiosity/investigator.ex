@@ -185,7 +185,11 @@ defmodule Core.Curiosity.Investigator do
            support.year == issue.reference_year and
            support.subjects == names and
            get_in(recalled, [:web_evidence, :evidence_origin]) == :composed_symbolic_premises and
-           match?(%CognitiveIssue{status: "resolved"}, current) do
+           match?(%CognitiveIssue{status: "resolved"}, current) and
+           is_map(current.resolution) and
+           current.resolution["reasoning_rule"] == "transitive_population_order" and
+           current.resolution["reference_year"] == issue.reference_year and
+           current.resolution["parent_proof_ids"] == ids do
         %{status: :resolved, issue_id: issue.id, reference_year: issue.reference_year,
           parent_proof_ids: ids, origin: :hippocampal_two_hop_cue}
       else
