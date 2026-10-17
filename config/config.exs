@@ -44,6 +44,14 @@ config :core, :symbolic_composition_enabled?, false
 # durable proof; Core must revalidate its claims after every associative hit.
 config :core, :semantic_associative_recall_enabled?, false
 
+# Supervised but inert unless opted in. Investigates at most one durable
+# missing_reasoning_link per cycle through hippocampal cueing and verified
+# symbolic composition. Never performs web requests or sends chat messages.
+config :core, Core.Curiosity.Investigator,
+  enabled?: false,
+  interval_ms: 300_000,
+  retry_ms: 3_600_000
+
 config :core, :log_prompt_budget?, false
 
 config :core, :llm_synthesis,
