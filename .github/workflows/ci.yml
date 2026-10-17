@@ -56,7 +56,8 @@ jobs:
       - run: mix local.rebar --force
       - run: mix deps.get
       - run: mix deps.compile
-      - name: Check formatting
-        run: mix format --check-formatted
       - name: Run umbrella regression suite
         run: mix test
+      - name: Check formatting
+        if: always()
+        run: mix format --check-formatted
