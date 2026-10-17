@@ -127,6 +127,7 @@ defmodule Core.Response.Attach do
       keyword: keyword,
       confidence: confidence,
       text: text,
+      sentence: si_get(si, :sentence),
       evidence: si_get(si, :evidence),
       comprehension: si_get(si, :comprehension),
       prefrontal: si_get(si, :prefrontal),
