@@ -6,6 +6,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
   use ExUnit.Case, async: false
 
   alias Core.Curiosity.UnresolvedIssues
+  alias Core.Cognition.MemoryBoundary
   alias Core.Response.{
     AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
     PopulationComparison, ResponseFrame
@@ -182,6 +183,52 @@ defmodule Core.Response.PopulationChainReasoningTest do
     refute prompt =~ "UNRESOLVED INFERENCE LINK"
     refute prompt =~ "find_linking_premise"
     refute prompt =~ to_string(issue.id)
+  end
+
+  test "internal recall is silent and only question-relevant uncertainty reaches the answer", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000])
+
+    question = "Which place has the larger population?"
+    private = MemoryBoundary.recall(fresh([a, c], question))
+    assert private.consolidation_issue.kind == :missing_reasoning_link
+    assert MemoryBoundary.unresolved_answer(private) ==
+      "I don't have sufficient source-supported evidence to make that population comparison reliably."
+
+    public =
+      private
+      |> Map.put(:composition, %{parent_proof_ids: [42, 45]})
+      |> MemoryBoundary.for_expression()
+
+    refute Map.has_key?(public, :composition)
+    refute Map.has_key?(public, :consolidation_issue)
+
+    # Even with Qwen unavailable, Core gives only a neutral answer—not issue
+    # IDs, curiosity actions, a proof trace, or an unsolicited question.
+    features = %{
+      session_id: "silent-recall-#{ctx.sid}", intent: :question,
+      symbolic_frame: event([a, c])
+    }
+
+    assert {:ok, answer, %{status: :insufficient_verified_evidence} = reflection} =
+      LlmSynthesis.generate(question, features, %{action: :answer}, %{}, :default)
+
+    assert answer =~ "sufficient source-supported evidence"
+    refute answer =~ "find_linking_premise"
+    refute answer =~ "missing_reasoning_link"
+    refute answer =~ "parent_proof_ids"
+    refute Map.has_key?(reflection, :symbolic_composition)
+
+    {_tone, planner_answer, meta} =
+      Core.Response.plan(%{
+        session_id: "planner-silent-#{ctx.sid}",
+        sentence: question, text: question, intent: :unknown,
+        symbolic_frame: event([a, c])
+      }, %{})
+
+    assert meta.response_source == :symbolic_unresolved
+    assert meta.curiosity_probe == nil
+    assert planner_answer == answer
   end
 
   test "curiosity issue resolves when the missing verified link is later added", ctx do
