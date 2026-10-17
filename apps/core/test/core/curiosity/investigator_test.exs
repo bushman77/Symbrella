@@ -180,6 +180,54 @@ defmodule Core.Curiosity.InvestigatorTest do
       &(&1.issue_id == issue.id))
   end
 
+  test "durable direct proof resolves a stale issue after hippocampal cue is absent", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(b, c)
+
+    # The direct proof is persisted while hippocampal association indexing
+    # is unavailable. Simulates a missing/evicted cue after warm start.
+    Application.put_env(:core, :semantic_associative_recall_enabled?, false)
+    direct = capture!(b, c, [100_000, 80_000])
+    Application.put_env(:core, :semantic_associative_recall_enabled?, true)
+
+    refute direct.fingerprint in SemanticAssociations.cues([b, c])
+    assert AssociativeReasoning.propose([b, c]) == nil
+
+    assert %{status: :resolved, issue_id: id, reference_year: 2021,
+             proof_id: proof_id, origin: :verified_direct_db_fallback} =
+      Investigator.investigate_issue(issue.id)
+    assert id == issue.id
+    assert proof_id == direct.id
+
+    resolved = Db.get!(CognitiveIssue, issue.id)
+    assert resolved.status == "resolved"
+    assert resolved.resolution["reasoning_rule"] == "direct_population_comparison"
+    assert resolved.resolution["proof_fingerprint"] == direct.fingerprint
+    refute Map.has_key?(resolved.resolution, "parent_proof_ids")
+  end
+
+  test "uncued contradictory direct proofs still fail closed", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(b, c)
+
+    Application.put_env(:core, :semantic_associative_recall_enabled?, false)
+    first = capture!(b, c, [100_000, 80_000])
+    second = capture!(b, c, [105_000, 80_000])
+    Application.put_env(:core, :semantic_associative_recall_enabled?, true)
+
+    refute first.fingerprint in SemanticAssociations.cues([b, c])
+    refute second.fingerprint in SemanticAssociations.cues([b, c])
+    assert AssociativeReasoning.propose([b, c]) == nil
+
+    assert %{status: :unresolved, reason: :direct_proof_not_authorized} =
+      Investigator.investigate_issue(issue.id)
+    assert Db.get!(CognitiveIssue, issue.id).status == "open"
+  end
+
   test "conflicting direct proofs do not resolve a stale missing-link issue", %{
     a: a, b: b, c: c
   } do
