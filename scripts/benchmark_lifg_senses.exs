@@ -56,7 +56,8 @@ defmodule Symbrella.BenchmarkLIFGSenses do
   def run(argv) do
     {opts, rest, errors} =
       OptionParser.parse(argv,
-        strict: [sentence: :string, word: :string, gold: :string, help: :boolean]
+        strict: [sentence: :string, word: :string, gold: :string, help: :boolean,
+                 grammar_weight: :float]
       )
 
     if errors != [] or rest != [] do
@@ -65,15 +66,20 @@ defmodule Symbrella.BenchmarkLIFGSenses do
     end
 
     if opts[:help] do
-      IO.puts("Usage: mix run scripts/benchmark_lifg_senses.exs [--sentence TEXT --word WORD | --gold FILE]")
+      IO.puts("Usage: mix run scripts/benchmark_lifg_senses.exs [--sentence TEXT --word WORD | --gold FILE] [--grammar-weight FLOAT]")
     else
       cases = cases(opts)
       IO.puts("\n=== Current production LIFG word-sense evaluation ===")
       IO.puts("NO episode writes. Stage1 probabilities are per-token competitive scores, not correctness probabilities.")
       IO.puts("Default meaning descriptions are prompts for human inspection, NOT numbered-sense gold labels.")
-      IO.puts("A real exact-sense accuracy figure requires independently reviewed expected_id values.\n")
+      IO.puts("A real exact-sense accuracy figure requires independently reviewed expected_id values.")
+      IO.inspect(%{grammar_weight_override: opts[:grammar_weight],
+                   scores_override: :all,
+                   trace_word_scores?: true},
+        label: "Benchmark lexical options (nil = configured production default)")
+      IO.puts("")
 
-      results = Enum.map(cases, &evaluate/1)
+      results = Enum.map(cases, &evaluate(&1, opts))
       summarize(results)
     end
   end
@@ -120,11 +126,24 @@ defmodule Symbrella.BenchmarkLIFGSenses do
     end
   end
 
-  defp evaluate(item) do
+  defp evaluate(item, opts) do
     sentence = String.trim(item.sentence)
     word = String.downcase(String.trim(item.word))
     cells = Db.brain_cells_for_norm(word) |> List.wrap()
     by_id = cells |> Enum.filter(&is_map/1) |> Map.new(&{Map.get(&1, :id), &1})
+
+    # Keep the actual configured grammar policy by default. The previous
+    # benchmark unconditionally forced grammar_weight: 1.0, which made the
+    # so-called production baseline a special experiment rather than the
+    # normal production lexical path. An explicit flag enables comparison.
+    lifg_opts =
+      [scores: :all, trace_word_scores?: true]
+      |> then(fn base ->
+        case opts[:grammar_weight] do
+          weight when is_number(weight) -> Keyword.put(base, :grammar_weight, weight)
+          _ -> base
+        end
+      end)
 
     si =
       Core.resolve_input(sentence,
@@ -134,7 +153,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         response: :off,
         persist_episodes: false,
         comprehension_wm?: false,
-        lifg_opts: [grammar_weight: 1.0, scores: :all, trace_word_scores?: true]
+        lifg_opts: lifg_opts
       )
 
     target_indices =
