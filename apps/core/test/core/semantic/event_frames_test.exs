@@ -167,6 +167,10 @@ defmodule Core.Semantic.EventFramesTest do
     cases = [
       {"Which had the larger population in 2021, Vancouver or Burnaby?",
        ["Vancouver", "Burnaby"]},
+      {"Which city had the larger population in 2021, Vancouver or Port Moody?",
+       ["Vancouver", "Port Moody"]},
+      {"Which town has the higher population in 2021, Port Moody or Burnaby?",
+       ["Port Moody", "Burnaby"]},
       {"Which had the larger population in 2021, Burnaby or New Westminster?",
        ["Burnaby", "New Westminster"]},
       {"Which had the larger population in 2021, Vancouver or New Westminster?",
@@ -221,6 +225,14 @@ defmodule Core.Semantic.EventFramesTest do
 
     refute EventFrames.location_question(
       "Which had the larger population in 2021, Vancouver or Vancouver?"
+    )
+
+    refute EventFrames.location_question(
+      "Which city had the larger population in 2021, Vancouver?"
+    )
+
+    refute EventFrames.location_question(
+      "Which city had the larger population in 2021, Vancouver or why?"
     )
   end
 
