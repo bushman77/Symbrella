@@ -178,6 +178,7 @@ defmodule Core.LIFG.Attach do
           meta: %{choice_count: length(raw_choices), flips: flips}
         )
         |> Core.MWE.Decisions.attach()
+        |> maybe_trace_word_flow(word_choices, lifg_choices, lifg_opts)
         |> maybe_trace_mwe_scores(raw_choices, all_choices, virtual_mwes, lifg_opts)
         |> maybe_trace_word_scores(raw_choices, all_choices, tokens_for_choices,
           virtual_mwes, lifg_opts)
@@ -188,6 +189,39 @@ defmodule Core.LIFG.Attach do
   end
 
   def run_and_attach(si, _lifg_opts), do: si
+
+  # Compare Brain's unfiltered word decisions, Core's shadowed word
+  # decisions and the actual accepted semantic MWE view. This is read-only:
+  # neither the scorer nor canonical promotion is changed by this audit.
+  defp maybe_trace_word_flow(si, raw_words, shadowed_words, opts) do
+    if Keyword.get(opts, :trace_word_scores?, false) == true do
+      compact = fn choices ->
+        choices
+        |> List.wrap()
+        |> Enum.filter(&is_map/1)
+        |> Enum.take(32)
+        |> Enum.map(&Map.take(&1, [:token_index, :id, :pos, :kind, :token_span]))
+      end
+
+      Core.Pipeline.Trace.append(si, :lifg_word_flow_audit,
+        decision: :observed,
+        reason: :word_selection_before_and_after_mwe_shadow_and_promotion,
+        meta: %{
+          before_shadow: compact.(raw_words),
+          after_shadow: compact.(shadowed_words),
+          after_promotion: compact.(Map.get(si, :semantic_choices, [])),
+          mwe_candidates:
+            Map.get(si, :mwe_choices, [])
+            |> List.wrap()
+            |> Enum.take(12)
+            |> Enum.map(&Map.take(&1,
+              [:token_index, :id, :token_span, :span, :source]))
+        }
+      )
+    else
+      si
+    end
+  end
 
   # Diagnostic only. A small winning probability can reflect a large
   # candidate bucket; do not interpret it as sentence-level confidence.
