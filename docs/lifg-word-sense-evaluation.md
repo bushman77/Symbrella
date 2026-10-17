@@ -8,14 +8,21 @@ and a high Stage1 softmax probability is not a calibrated correctness estimate.
 
     git switch development
     git pull origin development
+    mkdir -p tmp
     mix run scripts/benchmark_lifg_senses.exs \
-      | tee /tmp/symbrella-lifg-sense-baseline.txt
+      | tee tmp/lifg-sense-baseline.txt
 
 The built-in contrast corpus covers **bank**, **bat**, **draw**, and **light**.
 Each pair intentionally uses a different meaning of the same word. The script
 runs `Core.resolve_input/2` in `:prod` mode with the usual lexicon stages
-and `grammar_weight: 1.0`, without response planning, user-episode writes,
-or session-scoped comprehension WM admission.
+and the *configured* production grammar weight by default, without response
+planning, user-episode writes, or session-scoped comprehension WM admission.
+The benchmark sets `scores: :all` for observation only. The original version
+incorrectly forced `grammar_weight: 1.0` without disclosing the difference.
+To run that **separate experiment** for comparison, use:
+
+    mix run scripts/benchmark_lifg_senses.exs --grammar-weight 1.0 \
+      | tee tmp/lifg-sense-grammar1.txt
 
 For one new sentence:
 
@@ -30,8 +37,15 @@ Compare:
 - `stage1_top_probability`, `stage1_margin`, `stage1_pos_mass`: per-token
   competitive scores, **not** probability that the choice is correct
 - `Top scored dictionary senses`: real candidate IDs, definitions and
-  separate deterministic ContextFit values
-- `full_score_map?`: whether the complete per-token score set was available
+  separate deterministic ContextFit values, including large (>64) sense slates
+  using a bounded, original Stage1 audit rather than Core's compact choice
+- `full_score_map?`: whether the full distribution was stored in Core's final
+  choice; **false does not mean candidates were unscored**
+- `grammar_required_pos`: any signature-derived grammatical override;
+  `mwe_covering_target` and `mwe_decisions`: why a unigram final choice may
+  be absent
+- `pos_accuracy_among_selected`: POS precision for actual final unigram
+  choices; `all_cases_pos_and_selection_rate`: overall coverage plus correctness
 
 A missing unigram final choice (e.g. MWE shadowing) is **ungradable** until
 the specific token coverage is explained.
@@ -57,7 +71,7 @@ label. If no unique dictionary sense fits, do not enter an `expected_id`;
 report that example as unresolved rather than forcing a ground-truth label.
 
     mix run scripts/benchmark_lifg_senses.exs --gold tmp/lifg_gold.jsonl \
-      | tee /tmp/symbrella-lifg-reviewed-baseline.txt
+      | tee tmp/lifg-reviewed-baseline.txt
 
 Only records with reviewed, existing IDs contribute to exact-sense accuracy.
 Invalid IDs are explicitly flagged, and cases without gold IDs are **not
