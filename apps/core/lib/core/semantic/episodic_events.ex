@@ -142,7 +142,7 @@ defmodule Core.Semantic.EpisodicEvents do
       {"deadline", ~r/^(?<entity>.+?) deadline is (?<value>.+)$/iu},
       {"lives_in", ~r/^(?<entity>(?:my friend )?[\p{L}\p{N} '-]+?) lives in (?<value>.+)$/iu},
       {"met_at", ~r/^i met (?<entity>.+?) at (?<value>.+)$/iu},
-      {"named", ~r/^(?:we|i) named (?<entity>.+?) (?<value>[\p{L}\p{N} '-]+)$/iu},
+      {"named", ~r/^(?:we|i) named (?<entity>.+?) (?<value>[\p{L}\p{N}-]+)$/iu},
       {"scheduled_for", ~r/^(?<entity>.+?) is scheduled for (?<value>.+)$/iu},
       {"scheduled_for", ~r/^(?<entity>.+?) is on (?<value>(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?: .*)?)$/iu},
       {"likes", ~r/^(?<entity>.+?) likes (?<value>.+)$/iu},

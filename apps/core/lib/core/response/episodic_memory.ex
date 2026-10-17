@@ -101,7 +101,9 @@ defmodule Core.Response.EpisodicMemory do
   defp respond_event(%{entity: entity, relation: relation, value: value} = event) do
     sentence =
       case relation do
-        "deadline" -> "According to what you told me, the #{entity} deadline is #{value}."
+        "deadline" ->
+          subject = if String.starts_with?(String.downcase(entity), "the "), do: entity, else: "the " <> entity
+          "According to what you told me, #{subject} deadline is #{value}."
         "lives_in" -> "You told me #{entity} lives in #{value}."
         "met_at" -> "You told me you met #{entity} at #{value}."
         "named" -> "You told me you named #{entity} #{value}."
