@@ -99,11 +99,8 @@ defmodule Core.Semantic.SentenceMeaning do
             patient: surface_role(patient)
           }
 
-          participant_frame(sentence, event, :action, roles, %{
-            predicate: %{surface: surface, lemma: lemma},
-            arguments: %{actor: actor, patient: patient},
-            modifiers: %{tense: :present}
-          }, "The speaker reports that #{actor} #{surface} #{patient}.")
+          participant_frame(sentence, event, :action, roles,
+            "The speaker reports that #{actor} #{surface} #{patient}.")
         end
 
       %{source_frame: :progressive_spatial, relation: "spatial_state",
@@ -121,11 +118,8 @@ defmodule Core.Semantic.SentenceMeaning do
             location: surface_role(location)
           }
 
-          participant_frame(sentence, event, :spatial, roles, %{
-            predicate: %{surface: predicate, aspect: :progressive},
-            arguments: %{actor: actor, location: location},
-            modifiers: %{position: position}
-          }, "The speaker reports that #{actor} is #{predicate} #{position} #{location}.")
+          participant_frame(sentence, event, :spatial, roles,
+            "The speaker reports that #{actor} is #{predicate} #{position} #{location}.")
         end
 
       _ ->
@@ -135,42 +129,29 @@ defmodule Core.Semantic.SentenceMeaning do
 
   defp participant_meaning(_, _), do: nil
 
-  defp participant_frame(sentence, event, kind, roles, content, definition) do
-    # Provenance describes the interpretation path, NOT a persistence claim.
-    provenance = %{
-      source: :user_statement,
-      frame: event.source_frame,
-      evidence: :candidate_revalidated_against_original_input,
-      persistence: :not_claimed
-    }
-
+  defp participant_frame(sentence, event, kind, roles, definition) do
     grounding = %{
       grammatical_roles: :revalidated_episodic_projection,
       exact_lexical_meanings: :not_verified,
       external_facts: :not_checked
     }
 
-    %{
+    meaning = %{
       version: 2,
       sentence: sentence,
       kind: :participant_assertion,
+      event_type: kind,
+      source_frame: event.source_frame,
       status: :structurally_interpreted,
       speech_act: :assertion,
       definition: definition,
       roles: roles,
       polarity: :positive,
       grounding: grounding,
-      source: :revalidated_episodic_projection,
-      proposition: %{
-        version: 1,
-        type: :participant_assertion,
-        event_type: kind,
-        epistemic_status: :user_reported_unverified,
-        content: content,
-        grounding: grounding,
-        provenance: provenance
-      }
+      source: :revalidated_episodic_projection
     }
+
+    Map.put(meaning, :proposition, Core.Semantic.Proposition.build(%{}, meaning))
   end
 
   defp surface_role(surface),
