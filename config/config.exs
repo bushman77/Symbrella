@@ -102,6 +102,13 @@ config :core, Core.TrainingArchive,
 config :core, Core.Brain.WM.Comprehension,
   enabled?: config_env() != :test
 
+# Feed Core-verified response semantics into Brain WM as bounded session-local
+# proof pointers. Each admission revalidates persisted symbolic evidence;
+# neither WM nor model-generated prose can establish factual authority.
+# Off in tests unless individually opted in; enabled on development startup.
+config :core, Core.Brain.WM.VerifiedSemantics,
+  enabled?: config_env() == :dev
+
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
