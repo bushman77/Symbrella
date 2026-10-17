@@ -15,8 +15,7 @@ si =
   Core.resolve_input(sentence,
     mode: :prod,
     response: :off,
-    persist_episodes: false,
-    fuzzy: false
+    persist_episodes: false
   )
 
 get = fn item, key ->
