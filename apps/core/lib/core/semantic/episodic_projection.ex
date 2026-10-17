@@ -11,6 +11,7 @@ defmodule Core.Semantic.EpisodicProjection do
 
   alias Core.Semantic.EpisodicEvents
   alias Core.Semantic.SVOEvent
+  alias Core.Semantic.ParticipantSpatial
   alias Core.Pipeline.Trace
 
   @confidence_floor 0.8
@@ -52,7 +53,7 @@ defmodule Core.Semantic.EpisodicProjection do
             do: [],
             else: project_frame(frame, sentence)
 
-        obligation ++ SVOEvent.project(si, sentence)
+        obligation ++ SVOEvent.project(si, sentence) ++ ParticipantSpatial.project(si, sentence)
     end
   end
 
@@ -65,7 +66,8 @@ defmodule Core.Semantic.EpisodicProjection do
       case EpisodicEvents.normalize(candidate) do
         {:ok, event} -> {:ok, Map.merge(event, %{
           source_frame: candidate.source_frame,
-          frame_confidence: candidate.frame_confidence
+          frame_confidence: candidate.frame_confidence,
+          participants: Map.get(candidate, :participants)
         })}
         :error -> :error
       end
