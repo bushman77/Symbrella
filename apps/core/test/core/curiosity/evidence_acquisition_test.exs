@@ -86,7 +86,14 @@ defmodule Core.Curiosity.EvidenceAcquisitionTest do
     fn ctx ->
       assert get_in(ctx, [:features, :symbolic_frame, :subjects]) == names
       assert String.contains?(ctx.user_text, "2021")
-      Map.put(ctx, :web_evidence, evidence(names, values))
+      supplied =
+        evidence(names, values)
+        |> Map.put(:attempts, [
+          %{provider: Core.Tools.WebRetrieval.Wikidata, status: :source_supported},
+          %{provider: Core.Tools.WebRetrieval.Wikidata, status: :source_supported}
+        ])
+
+      Map.put(ctx, :web_evidence, supplied)
     end
   end
 
@@ -110,8 +117,13 @@ defmodule Core.Curiosity.EvidenceAcquisitionTest do
     parent = capture!([a, b], [120_000, 100_000])
     issue = issue!(a, c)
 
-    assert %{status: :captured, issue_id: id, proof_id: new_id} =
+    assert %{status: :captured, issue_id: id, proof_id: new_id,
+             provider_attempts: attempts} =
       EvidenceAcquisition.acquire(issue, retriever: retriever([b, c], [100_000, 80_000]))
+    assert attempts == [
+      %{provider: "wikidata", status: "source_supported"},
+      %{provider: "wikidata", status: "source_supported"}
+    ]
     assert id == issue.id
     assert new_id != parent.id
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
@@ -134,8 +146,10 @@ defmodule Core.Curiosity.EvidenceAcquisitionTest do
     capture!([a, b], [120_000, 100_000])
     issue = issue!(a, c)
 
-    assert %{status: :unresolved, reason: :retrieval_or_authorization_failed} =
+    assert %{status: :unresolved, reason: :retrieval_or_authorization_failed,
+             provider_attempts: attempts} =
       EvidenceAcquisition.acquire(issue, retriever: retriever([b, c], [101_000, 80_000]))
+    assert length(attempts) == 2
     assert {:ok, []} = ConsolidatedConclusions.for_subject(c)
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
   end
