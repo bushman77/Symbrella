@@ -182,7 +182,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
     })
     refute prompt =~ "UNRESOLVED INFERENCE LINK"
     refute prompt =~ "find_linking_premise"
-    refute prompt =~ to_string(issue.id)
+    refute prompt =~ "consolidation_issue"
   end
 
   test "internal recall is silent and only question-relevant uncertainty reaches the answer", ctx do
