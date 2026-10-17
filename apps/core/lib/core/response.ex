@@ -176,7 +176,7 @@ defmodule Core.Response do
         # authorized answer. Do not append a curiosity question after its
         # claim/citation lock has passed final review.
         {text, curiosity_probe} =
-          if response_source == :symbolic_verified do
+          if response_source in [:symbolic_verified, :symbolic_unresolved] do
             {text0, nil}
           else
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
@@ -402,6 +402,9 @@ defmodule Core.Response do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
       {:ok, verified_text, %{authoritative_plan: %{status: :enforced}} = reflection} ->
         {verified_text, :symbolic_verified, nil, reflection}
+
+      {:ok, answer, %{status: :insufficient_verified_evidence} = reflection} ->
+        {answer, :symbolic_unresolved, nil, reflection}
 
       {:ok, llm_text, reflection} ->
         {llm_text, :llm, nil, reflection}
