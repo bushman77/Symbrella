@@ -143,8 +143,9 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert answer =~ a
     assert answer =~ "40,000"
     assert reflection.authoritative_plan.status == :enforced
-    assert reflection.symbolic_composition.rule == :transitive_population_order
-    assert reflection.symbolic_composition.parent_proof_ids == Enum.sort([ab.id, bc.id])
+    # Parent proof IDs are inspectable internally but never published in the
+    # user-facing reflection/Explain payload.
+    refute Map.has_key?(reflection, :symbolic_composition)
   end
 
   test "chain works in the other direction by independently rederiving its ordering", ctx do
@@ -178,7 +179,9 @@ defmodule Core.Response.PopulationChainReasoningTest do
       consolidation_issue: unresolved.consolidation_issue,
       decision: %{action: :answer}, mood: %{}
     })
-    assert prompt =~ "UNRESOLVED INFERENCE LINK"
+    refute prompt =~ "UNRESOLVED INFERENCE LINK"
+    refute prompt =~ "find_linking_premise"
+    refute prompt =~ to_string(issue.id)
   end
 
   test "curiosity issue resolves when the missing verified link is later added", ctx do
