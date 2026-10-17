@@ -5,7 +5,8 @@ defmodule Core.Semantic.ParticipantSpatial do
 
   A syntactic candidate is not proof of a verb sense. Require an attested
   present-participle *verb* dictionary cell even when LIFG's selected surface
-  sense is adjectival. Exact LIFG + ATL agreement is required for the subject,
+  sense is adjectival. An attested finite be-verb winner may support the
+  independent auxiliary role. LIFG + ATL agreement is required for the subject,
   preposition and locative noun where present; if PMTG suppresses their
   word-level winners, both slots require exact dictionary POS attestation
   under a complete clause signature. No cells or winners are rewritten.
@@ -33,7 +34,7 @@ defmodule Core.Semantic.ParticipantSpatial do
          {:ok, tokens} <- tokens(si, sentence),
          {:ok, _} <- selected(si, sd, "determiner"),
          {:ok, _} <- selected_common_noun(si, sh, Map.fetch!(tokens, sh)),
-         {:ok, _} <- selected(si, aux, "auxiliary"),
+         {:ok, _} <- selected_copular_auxiliary(si, aux, Map.fetch!(tokens, aux)),
          {:ok, _} <- selected_or_attested(si, prep, "preposition", Map.fetch!(tokens, prep)),
          {:ok, _} <- selected(si, ld, "determiner"),
          {:ok, _} <- selected_or_attested(si, lh, "noun", Map.fetch!(tokens, lh)),
@@ -123,6 +124,35 @@ defmodule Core.Semantic.ParticipantSpatial do
       {:ok, selection}
     else
       _ -> :error
+    end
+  end
+
+  # The grammatical auxiliary position in an independently evidenced
+  # progressive clause can be occupied by a dictionary "is|verb|N" winner.
+  # Stage1 does not always promote the closed-class "is|auxiliary|0" sense.
+  # We recognize the *role* of that attested finite 'be' form without
+  # changing either LIFG's or ATL's selected dictionary sense.
+  #
+  # Exact word + agreed verb winner + dictionary row are all required;
+  # a mismatched lexical winner or missing verb evidence fails closed.
+  defp selected_copular_auxiliary(si, index, surface) do
+    if clean(surface) == "is" do
+      case selected(si, index, "auxiliary") do
+        {:ok, _} = accepted ->
+          accepted
+
+        :error ->
+          if attested_pos?(si, surface, "verb") do
+            case selected(si, index, "verb") do
+              {:ok, _} -> {:ok, :attested_copular_auxiliary_role}
+              _ -> :error
+            end
+          else
+            :error
+          end
+      end
+    else
+      :error
     end
   end
 
