@@ -10,8 +10,8 @@ defmodule Core.Response.PopulationChainReasoningTest do
   alias Core.Cognition.AssociativeReasoning
   alias Brain.Hippocampus.SemanticAssociations
   alias Core.Response.{
-    AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
-    PopulationComparison, ResponseFrame
+    AuthoritativeAnswerPlan, Consolidation, LlmChatHistory, LlmPrompt,
+    LlmSynthesis, PopulationComparison, ResponseFrame, VerifiedAnswerReceipt
   }
   alias Db.ConsolidatedConclusions
 
@@ -181,6 +181,90 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert is_binary(si.response_text)
     assert si.response_text =~ a
     assert si.response_text =~ "40,000"
+  end
+
+  test "how do you know that rechecks the immediately previous symbolic proof chain", ctx do
+    %{a: a, b: b, c: c} = ctx
+    first = capture!(a, b, [120_000, 100_000])
+    second = capture!(b, c, [100_000, 80_000])
+    session = "evidence-followup-#{ctx.sid}"
+    question = "Which city had the larger population in 2021, #{a} or #{c}?"
+
+    features = %{
+      session_id: session, intent: :question,
+      symbolic_frame: event([a, c])
+    }
+
+    assert {:ok, answer, %{authoritative_plan: %{status: :enforced}}} =
+      LlmSynthesis.generate(question, features, %{action: :answer}, %{}, nil)
+
+    # Production does this after the response is finalized. A receipt is
+    # tied to this exact authorized assistant message, not just the session.
+    :ok = LlmChatHistory.record_turn(session, question, answer)
+
+    assert {:ok, explanation, %{status: :verified_evidence_followup}} =
+      LlmSynthesis.generate("how do you know that?",
+        %{session_id: session, intent: :question}, %{action: :answer}, %{}, nil)
+
+    assert explanation =~ "transitive reasoning"
+    assert explanation =~ a
+    assert explanation =~ b
+    assert explanation =~ c
+    assert explanation =~ "120,000"
+    assert explanation =~ "100,000"
+    assert explanation =~ "80,000"
+    assert explanation =~ "40,000"
+    assert explanation =~ hd(first.source_urls)
+    assert explanation =~ List.last(second.source_urls)
+    refute explanation =~ "my training data"
+
+    # Read-only revalidation does not turn a derived A-C result into
+    # another independently sourced conclusion.
+    assert Db.ConsolidatedConclusions.for_subject(a) == {:ok, [first]}
+  end
+
+  test "direct verified comparison can explain its own dated provenance", ctx do
+    %{a: a, b: b} = ctx
+    stored = capture!(a, b, [120_000, 100_000])
+    session = "direct-evidence-#{ctx.sid}"
+    features = %{session_id: session, intent: :question,
+                 symbolic_frame: event([a, b])}
+    question = "Which city had the larger population in 2021, #{a} or #{b}?"
+
+    assert {:ok, answer, %{authoritative_plan: %{status: :enforced}}} =
+      LlmSynthesis.generate(question, features, %{action: :answer}, %{}, nil)
+    :ok = LlmChatHistory.record_turn(session, question, answer)
+
+    assert {:ok, explanation} =
+      VerifiedAnswerReceipt.explain("What are your sources?", session)
+    assert explanation =~ "verified symbolic memory"
+    assert explanation =~ hd(stored.source_urls)
+    assert explanation =~ List.last(stored.source_urls)
+    assert explanation =~ "20,000"
+    refute explanation =~ "transitive reasoning"
+  end
+
+  test "evidence receipt cannot cross sessions or refer to an intervening answer", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000])
+    capture!(b, c, [100_000, 80_000])
+    session = "receipt-stale-#{ctx.sid}"
+    question = "Which city had the larger population in 2021, #{a} or #{c}?"
+    features = %{session_id: session, intent: :question,
+                 symbolic_frame: event([a, c])}
+
+    assert {:ok, answer, _} =
+      LlmSynthesis.generate(question, features, %{action: :answer}, %{}, nil)
+    :ok = LlmChatHistory.record_turn(session, question, answer)
+
+    assert VerifiedAnswerReceipt.explain("how do you know that?",
+      "unrelated-#{ctx.sid}") == :not_applicable
+    assert VerifiedAnswerReceipt.explain("What is your favorite food?", session) ==
+      :not_applicable
+
+    :ok = LlmChatHistory.record_turn(session, "Tell me a story.", "Once upon a time.")
+    assert VerifiedAnswerReceipt.explain("how do you know that?", session) ==
+      :not_applicable
   end
 
   test "hippocampal associations cue a two-hop Core inference and remain private", ctx do
