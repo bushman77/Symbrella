@@ -96,6 +96,7 @@ defmodule Core.Semantic.SVOEventTest do
     for {question, expected} <- [
           {"What does the artist draw?", "A picture."},
           {"What did the artist draw?", "A picture."},
+          {"What does the artist do?", "Draws a picture."},
           {"Who draws a picture?", "The artist."}
         ] do
       assert {:warm, ^expected,
@@ -141,6 +142,18 @@ defmodule Core.Semantic.SVOEventTest do
     assert {"The artist.", _} = EpisodicMemory.reply("Who draws a picture?")
     assert {"The painter.", _} = EpisodicMemory.reply("Who draws a mural?")
 
+    # If the same actor has two different current predicates, an open-ended
+    # "what does X do" question has no unique role assignment.
+    sings = %{
+      entity: "the artist", relation: "verb_sing", value: "a song",
+      source_frame: :finite_present_svo,
+      participants: %{"actor" => "the artist", "predicate" => "sing",
+                      "surface_predicate" => "sings", "patient" => "a song",
+                      "tense" => "present"}
+    }
+    assert :ok = EpisodicMemory.remember_event(sings, sid, "The artist sings a song.")
+    assert EpisodicMemory.reply("What does the artist do?") == nil
+
     retracted = %{event | status: :retracted}
     assert :ok = EpisodicMemory.remember_event(retracted, sid, "I withdraw that assertion.")
     assert EpisodicMemory.reply("Who draws a picture?") == nil
@@ -153,6 +166,8 @@ defmodule Core.Semantic.SVOEventTest do
 
     assert {:forward, "artist", "draw"} =
              ActionQuestions.parse("What does the artist draw?")
+    assert {:activity, "artist"} =
+             ActionQuestions.parse("What does the artist do?")
     assert {:reverse, "draws", "a picture"} =
              ActionQuestions.parse("Who draws a picture?")
 
@@ -170,6 +185,7 @@ defmodule Core.Semantic.SVOEventTest do
     assert ActionQuestions.answer(event, :actor,
              %{surface_predicate: "draws", patient: "a picture"}) == "The artist."
     assert ActionQuestions.answer(event, :patient, %{predicate: "draw"}) == "A picture."
+    assert ActionQuestions.answer(event, :activity, %{}) == "Draws a picture."
     assert ActionQuestions.answer(event, :actor,
              %{surface_predicate: "drew", patient: "a picture"}) == nil
     assert ActionQuestions.answer(%{event | status: "retracted"}, :actor, %{}) == nil
