@@ -218,6 +218,15 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert explanation =~ List.last(second.source_urls)
     refute explanation =~ "my training data"
 
+    # The production Response planner must attribute the answer to Core,
+    # not label it as an LLM-authored explanation.
+    {_tone, planned, meta} = Core.Response.plan(%{
+      session_id: session, text: "how do you know that?",
+      intent: :ask, confidence: 1.0
+    }, %{})
+    assert planned =~ "transitive reasoning"
+    assert meta.response_source == :symbolic_verified_followup
+
     # Read-only revalidation does not turn a derived A-C result into
     # another independently sourced conclusion.
     assert Db.ConsolidatedConclusions.for_subject(a) == {:ok, [first]}
@@ -242,6 +251,30 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert explanation =~ List.last(stored.source_urls)
     assert explanation =~ "20,000"
     refute explanation =~ "transitive reasoning"
+  end
+
+  test "if the proof path is disabled later, evidence explanation fails closed", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000])
+    capture!(b, c, [100_000, 80_000])
+    session = "receipt-recheck-#{ctx.sid}"
+    question = "Which city had the larger population in 2021, #{a} or #{c}?"
+    features = %{session_id: session, intent: :question,
+                 symbolic_frame: event([a, c])}
+
+    assert {:ok, answer, _} =
+      LlmSynthesis.generate(question, features, %{action: :answer}, %{}, nil)
+    :ok = LlmChatHistory.record_turn(session, question, answer)
+
+    Application.put_env(:core, :symbolic_composition_enabled?, false)
+    try do
+      assert {:unavailable, explanation} =
+        VerifiedAnswerReceipt.explain("how do you know that?", session)
+      assert explanation =~ "can't currently revalidate"
+      refute explanation =~ "120,000"
+    after
+      Application.put_env(:core, :symbolic_composition_enabled?, true)
+    end
   end
 
   test "evidence receipt cannot cross sessions or refer to an intervening answer", ctx do
