@@ -16,7 +16,8 @@ defmodule Core.Semantic.ActionQuestions do
 
   @spec parse(String.t()) ::
           {:forward, String.t(), String.t()} |
-          {:reverse, String.t(), String.t()} | nil
+          {:reverse, String.t(), String.t()} |
+          {:activity, String.t()} | nil
   def parse(text) when is_binary(text) do
     t = String.trim(text)
 
@@ -25,6 +26,11 @@ defmodule Core.Semantic.ActionQuestions do
             ~r/^who (?<surface_predicate>[\p{L}]+) (?<patient>(?:the|a|an|my) [\p{L} '-]+)\?$/iu, t
           ) ->
         {:reverse, norm(m["surface_predicate"]), norm(m["patient"])}
+
+      m = Regex.named_captures(
+            ~r/^what does (?<entity>(?:the|a|an|my) [\p{L} '-]+?) do\?$/iu, t
+          ) ->
+        {:activity, EpisodicEvents.entity_key(m["entity"])}
 
       m = Regex.named_captures(
             ~r/^what (?:does|did) (?<entity>(?:the|a|an|my) [\p{L} '-]+?) (?<predicate>[\p{L}]+)\?$/iu, t
@@ -38,7 +44,7 @@ defmodule Core.Semantic.ActionQuestions do
 
   def parse(_), do: nil
 
-  @spec answer(map() | nil, :actor | :patient, map()) :: String.t() | nil
+  @spec answer(map() | nil, :actor | :patient | :activity, map()) :: String.t() | nil
   def answer(
         %{status: "asserted", relation: "verb_" <> predicate,
           value: patient, participants: %{
@@ -65,6 +71,7 @@ defmodule Core.Semantic.ActionQuestions do
       case role do
         :actor -> sentence(actor)
         :patient -> sentence(patient)
+        :activity -> sentence(surface_predicate <> " " <> patient)
         _ -> nil
       end
     end
