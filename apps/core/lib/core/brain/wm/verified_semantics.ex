@@ -154,16 +154,33 @@ defmodule Core.Brain.WM.VerifiedSemantics do
       if admitted?, do: :admitted, else: :rejected
     else
       _ ->
-        emit(:rejected, :proof_revalidation_failed, length(expected_ids))
-        :rejected
+        reject_and_defocus(session, :proof_revalidation_failed, length(expected_ids))
     end
   rescue
     _ ->
-      emit(:rejected, :proof_revalidation_unavailable, length(expected_ids))
+      reject_and_defocus(session, :proof_revalidation_unavailable, length(expected_ids))
+  catch
+    :exit, _ ->
+      reject_and_defocus(session, :proof_revalidation_unavailable, length(expected_ids))
+  end
+
+  defp reject_and_defocus(session, reason, proof_count) do
+    # If an earlier pointer survives but its proofs no longer revalidate,
+    # remove that stale reference from WM rather than retaining a misleading
+    # :source_supported semantic cue.
+    if Runtime.pid_alive?(Brain) do
+      _ = Runtime.apply_if_exported(Brain, :defocus, [frame_id(session)], :unavailable)
+    end
+
+    emit(:rejected, reason, proof_count)
+    :rejected
+  rescue
+    _ ->
+      emit(:rejected, reason, proof_count)
       :rejected
   catch
     :exit, _ ->
-      emit(:rejected, :proof_revalidation_unavailable, length(expected_ids))
+      emit(:rejected, reason, proof_count)
       :rejected
   end
 
