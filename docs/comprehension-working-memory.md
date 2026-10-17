@@ -13,6 +13,25 @@ The temporary frame is NOT a verified fact. It carries at most four explicitly i
 
 This frame has a per-call permissive gate threshold of zero. Other LIFG, episodic and factual candidates retain their evidence gates. No global WM configuration is mutated.
 
+## Validated participant events
+
+The grammatical episodic projector runs before the comprehension summary and
+WM admission. When a user-reported finite-present action or progressive-spatial
+event has one revalidated participant frame, the session-scoped WM context now
+also carries bounded actor, patient/location and predicate roles, the relation,
+and a `:validated_projection` role status. These are derived from the event's
+independent syntactic and lexical evidence; raw candidate injection is checked
+by recomputing the projection. Ambiguous multiple candidates and assistant-
+sourced inputs do not supply these roles.
+
+Example: `The artist draws a picture.` yields active entities
+`["the artist", "a picture"]`, relation `"verb_draw"`, and an
+`event_roles` map containing actor, canonical predicate, verb surface,
+patient, and tense. This is **conversation context**, not a verified external
+fact and not proof that Hippocampus has persisted the event. Lexical
+`understood`, `uncertain`, and `degraded?` remain independent, as does the
+legacy sentence-meaning `interpretation_status`.
+
 ## Session isolation and retention
 
 Only inputs with a non-nil session_id are eligible. Each session has a stable hashed frame ID. A newer turn replaces/refreshes the same session's prior frame rather than admitting every word independently. Recall never falls back to another session's frame. Frames remain eligible for recall for twenty minutes after their most recent update, subject to the existing global WM capacity. This is not a dedicated per-session WM process.
