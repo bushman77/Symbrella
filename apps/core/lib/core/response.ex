@@ -62,16 +62,19 @@ defmodule Core.Response do
     direct_fact = Memory.extract_direct_fact(text_in)
     fact_query_key = Memory.extract_fact_query_key(text_in)
 
-    case Memory.reply_for(%{
-           intent0: intent0,
-           conf: conf,
-           text_in: text_in,
-           session_id: session_id,
-           extracted_name: extracted_name,
-           remember_fact: remember_fact,
-           direct_fact: direct_fact,
-           fact_query_key: fact_query_key
-         }) do
+    memory_reply =
+      Memory.reply_for(%{
+        intent0: intent0,
+        conf: conf,
+        text_in: text_in,
+        session_id: session_id,
+        extracted_name: extracted_name,
+        remember_fact: remember_fact,
+        direct_fact: direct_fact,
+        fact_query_key: fact_query_key
+      }) || Memory.acknowledge_projected(si, session_id, text_in, intent0, conf)
+
+    case memory_reply do
       {_, _, _} = reply ->
         reply
 
