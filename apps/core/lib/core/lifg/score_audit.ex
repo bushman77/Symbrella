@@ -74,6 +74,15 @@ defmodule Core.LIFG.ScoreAudit do
           reported_top_probability: top_p,
           runner_up_id: runner_up_id,
           runner_up_probability: runner_up_p,
+          # Retain bounded actual Stage1 candidates even when Core omits the
+          # full >64-sense probability map from the final choice. Diagnostics
+          # must not confuse that memory optimization with missing evidence.
+          reported_top_candidates:
+            scores
+            |> Enum.take(8)
+            |> Enum.map(fn {id, probability} ->
+              %{id: id, probability: probability}
+            end),
           reported_probability_margin:
             if(is_number(top_p) and is_number(runner_up_p),
               do: max(top_p - runner_up_p, 0.0), else: nil),
