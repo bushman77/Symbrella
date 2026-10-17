@@ -101,3 +101,15 @@ writes. Archives should be backed up externally if their examples matter for
 future neural training; retention is deliberately finite. Do not commit these
 generated records. Rotation does not delete existing large files until they
 reach the oldest archive position.
+
+## Phase 4 — CI baseline
+
+GitHub Actions runs `mix format --check-formatted` and `mix test` on pushes and
+pull requests to `development` and `main`, backed by PostgreSQL 16 with
+pgvector. The first CI run may expose format differences introduced by source
+patches; run `mix format` locally and commit formatting before interpreting a
+format failure as a semantic regression.
+
+Credo, Dialyzer, and Sobelow remain follow-up additions: they require adding
+project dependencies and updating `mix.lock` under a real Elixir toolchain.
+Do not claim these checks are already active.
