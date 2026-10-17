@@ -171,10 +171,13 @@ defmodule Core do
     |> StateDump.capture(:lifg_relational_feedback)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
-    |> Core.Semantic.SentenceMeaning.attach()
-    |> StateDump.capture(:sentence_meaning)
+    # Read-only episodic projection provides independently revalidated
+    # participant roles before SentenceMeaning composes the proposition.
+    # No database write or response is performed by either of these stages.
     |> Core.Semantic.EpisodicProjection.attach()
     |> StateDump.capture(:episodic_projection)
+    |> Core.Semantic.SentenceMeaning.attach()
+    |> StateDump.capture(:sentence_meaning)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     |> Core.Brain.WM.Comprehension.store(opts)
