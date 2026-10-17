@@ -102,6 +102,8 @@ defmodule Core.Curiosity.EvidenceAcquisition do
     :exit, _ -> %{status: :unresolved, issue_id: issue.id, reason: :acquisition_unavailable}
   end
 
+  def acquire(_, _), do: %{status: :unresolved, reason: :invalid_issue}
+
   defp validate_and_capture(issue, request, retrieved) do
     with %{resolution: :source_supported} <- Map.get(retrieved, :web_evidence),
          derived <- PopulationComparison.attach(retrieved),
@@ -149,8 +151,6 @@ defmodule Core.Curiosity.EvidenceAcquisition do
        when status in [:source_supported, :unavailable, :partial_support, :error],
        do: Atom.to_string(status)
   defp provider_status(_), do: "unknown"
-
-  def acquire(_, _), do: %{status: :unresolved, reason: :invalid_issue}
 
   defp retrieve(context, opts) do
     case Keyword.get(opts, :retriever) do
