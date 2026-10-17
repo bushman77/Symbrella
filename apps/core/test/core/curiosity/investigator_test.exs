@@ -162,6 +162,25 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
   end
 
+  test "supervised investigator survives echoed recall telemetry and stray messages" do
+    worker = Process.whereis(Investigator)
+    assert is_pid(worker)
+
+    before = Investigator.snapshot()
+
+    send(worker, {:telemetry, [:brain, :hippocampus, :recall],
+      %{window_size: 6, cue_count: 2, returned: 2, top_score: 0.33},
+      %{scope: %{kind: "semantic_association"}, source: :memory}})
+
+    # The process must also tolerate unrelated info, never treating it as
+    # an instruction or exposing its contents to the cognitive pipeline.
+    send(worker, {:unexpected_internal_info, %{untrusted: "not an instruction"}})
+
+    # A call from the same sender is processed after both sent messages.
+    assert Investigator.snapshot() == before
+    assert Process.alive?(worker)
+  end
+
   test "supervised cycle selects a durable issue and emits bounded telemetry", %{
     a: a, b: b, c: c
   } do
