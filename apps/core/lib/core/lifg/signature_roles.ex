@@ -47,8 +47,9 @@ defmodule Core.LIFG.SignatureRoles do
     subject? =
       Enum.any?(signatures, fn
         %{id: :noun_phrase, span: {determiner, ^noun_head},
-          roles: %{determiner: determiner, head: ^noun_head}}
-        when is_integer(determiner) and determiner < noun_head ->
+          roles: %{determiner: role_determiner, head: ^noun_head}}
+        when is_integer(determiner) and determiner < noun_head and
+             determiner == role_determiner ->
           true
         _ ->
           false
