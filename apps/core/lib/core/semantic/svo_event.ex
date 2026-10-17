@@ -5,7 +5,7 @@ defmodule Core.Semantic.SVOEvent do
 
   This stores the user's attributed assertion; it does not verify truth.
   """
-  alias Core.Semantic.EpisodicEvents
+  alias Core.Semantic.{EpisodicEvents, VerbLemma}
 
   @required [:contiguous_surface, :attested_nominal_subject,
              :attested_nominal_object, :attested_finite_present_verb]
@@ -25,8 +25,7 @@ defmodule Core.Semantic.SVOEvent do
          {:ok, verb_choice} <- single_choice(si, predicate, "verb"),
          {:ok, obj_choice} <- single_choice(si, object, "noun"),
          true <- atl_match?(si, [{subject, sub_choice}, {predicate, verb_choice}, {object, obj_choice}]),
-         lemma when is_binary(lemma) <- lemma(verb_choice),
-         true <- Regex.match?(~r/\A[a-z][a-z0-9_]{0,47}\z/, lemma),
+         {:ok, lemma} <- VerbLemma.canonical(si, verb_choice),
          {:ok, event} <- EpisodicEvents.normalize(%{entity: entity,
            relation: "verb_" <> lemma, value: value}) do
       # Fixed 0.8 denotes an admission grade, not a probability of truth.
@@ -135,15 +134,6 @@ defmodule Core.Semantic.SVOEvent do
           _ -> false
         end
       end)
-  end
-
-  defp lemma(choice) do
-    case get(choice, :lemma) do
-      text when is_binary(text) and text != "" -> String.downcase(text)
-      _ ->
-        (get(choice, :chosen_id) || get(choice, :id) || "")
-        |> String.split("|") |> hd() |> String.downcase()
-    end
   end
 
   defp clean(text), do: text |> String.trim() |> String.trim_trailing(".") |> String.downcase()
