@@ -52,7 +52,9 @@ defmodule Core.Curiosity.Investigator do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply,
-     %{enabled?: enabled?(state.opts), cycles: state.cycles,
+     %{enabled?: enabled?(state.opts),
+       acquisition_enabled?: enabled?(state.opts) and acquire_evidence?(state.opts),
+       cycles: state.cycles,
        last_result: state.last_result, cooldown_count: map_size(state.attempted)},
      state}
   end
