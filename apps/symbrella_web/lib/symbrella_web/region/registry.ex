@@ -253,11 +253,10 @@ defmodule SymbrellaWeb.Region.Registry do
       try do
         String.to_existing_atom(key)
       rescue
-        # bounded by our own keys
-        ArgumentError -> String.to_atom(key)
+        ArgumentError -> nil
       end
 
-    process_for(atom)
+    if atom, do: process_for(atom), else: nil
   end
 
   # ── internal helpers ───────────────────────────────────────────────────────

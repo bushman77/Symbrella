@@ -458,7 +458,12 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
     cond do
       s == "" -> nil
-      Regex.match?(~r/^[a-z_]+$/u, s) -> String.to_atom(s)
+      Regex.match?(~r/^[a-z_]+$/u, s) ->
+        try do
+          String.to_existing_atom(s)
+        rescue
+          ArgumentError -> s
+        end
       true -> s
     end
   end

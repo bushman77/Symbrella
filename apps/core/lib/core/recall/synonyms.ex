@@ -165,7 +165,7 @@ defmodule Core.Recall.Synonyms do
       "verb" -> :verb
       "adj" -> :adj
       "adv" -> :adv
-      other -> String.to_atom(other)
+      _other -> nil
     end
   end
 

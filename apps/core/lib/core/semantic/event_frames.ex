@@ -593,9 +593,14 @@ defmodule Core.Semantic.EventFrames do
   end
 
   defp map_get(map, key, default) when is_map(map) and is_binary(key) do
-    Map.get(map, key, Map.get(map, String.to_atom(key), default))
-  rescue
-    ArgumentError -> Map.get(map, key, default)
+    atom_key =
+      try do
+        String.to_existing_atom(key)
+      rescue
+        ArgumentError -> nil
+      end
+
+    if atom_key, do: Map.get(map, key, Map.get(map, atom_key, default)), else: Map.get(map, key, default)
   end
 
   defp map_get(_map, _key, default), do: default

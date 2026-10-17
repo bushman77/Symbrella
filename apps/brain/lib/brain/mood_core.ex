@@ -624,7 +624,7 @@ defmodule Brain.MoodCore do
         |> String.downcase()
         |> String.replace(~r/\s+/, "_")
         |> String.replace("-", "_")
-        |> String.to_atom()
+        |> existing_tag_atom()
 
       _ ->
         nil
@@ -634,6 +634,14 @@ defmodule Brain.MoodCore do
   end
 
   defp coerce_tags(_), do: MapSet.new()
+
+  defp existing_tag_atom(tag) do
+    try do
+      String.to_existing_atom(tag)
+    rescue
+      ArgumentError -> nil
+    end
+  end
 
   defp to_float_num(v, _default) when is_number(v), do: v * 1.0
 
