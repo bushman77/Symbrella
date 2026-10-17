@@ -68,13 +68,11 @@ defmodule Core.Curiosity.Investigator do
   # Hippocampal recall telemetry may be echoed to the process that initiated
   # the recall. The investigator is a GenServer, so such messages must not
   # terminate its supervision cycle or mutate its investigation state.
-  @impl true
   def handle_info({:telemetry, _event, _measurements, _metadata}, state),
     do: {:noreply, state}
 
   # Ignore unrecognized asynchronous messages safely. Never log arbitrary
   # message payloads: they may include internal cognitive or user data.
-  @impl true
   def handle_info(_message, state), do: {:noreply, state}
 
   defp run_cycle(state) do
