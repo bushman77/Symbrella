@@ -42,6 +42,20 @@ defmodule Core.Response.EpisodicMemoryTest do
     history = Brain.Hippocampus.user_event_history(owner, "project", 5)
     assert Enum.map(history, & &1.value) == ["Monday", "Friday"]
     assert Enum.map(history, & &1.session_id) == [sid <> "-second", sid]
+
+    # The SQL row must retain both source text and speaker attribution.
+    stored =
+      Db.all(from e in Db.Episode,
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        order_by: [asc: e.inserted_at, asc: e.id],
+        select: %{sentence: e.sentence, source: e.source, role: e.role})
+
+    assert stored == [
+      %{sentence: "The project deadline is Friday.", role: "user", source: "user"},
+      %{sentence: "Actually, the project deadline is Monday.", role: "user", source: "user"}
+    ]
+
     :ok = Brain.Hippocampus.reset()
     assert {^answer, _} = EpisodicMemory.reply("What is the project deadline?")
   end

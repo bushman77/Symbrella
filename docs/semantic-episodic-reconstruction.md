@@ -41,3 +41,18 @@ live memory. A separate human-reviewed backfill design is required first.
     mix test apps/core/test/core/semantic/episodic_projection_test.exs
     mix test apps/core/test/core/episodic/reconstruction_test.exs
     mix test
+
+
+## SQL provenance and duplicate reconciliation
+
+Typed user-reported events now retain the original source sentence and are
+stored with role=user, source=user. Historical typed rows with null sentence
+are preserved without mutation. The reconstruction audit matches nearby
+structured events to ordinary cognitive traces only when session, timestamp,
+ID ordering and exact normalized event content agree; newly written typed
+events additionally require identical source sentences.
+
+The audit reports "already_indexed" separately from "candidate_rows". This
+does not rewrite or delete either of the two episode representations.
+`--after-id` pagination can place a pair on opposite sides of the batch
+boundary; review suspicious boundary cases before any future import.

@@ -146,7 +146,30 @@ defmodule Brain.Hippocampus.Writer do
       norms: normalize_norms(norms),
       tags: episode_tags(meta, slate)
     }
+    |> maybe_put_user_event_origin(meta, slate)
     |> maybe_put_embedding(embedding)
+  end
+
+  # User-reported typed events are written synchronously from a user turn,
+  # but their original sentence lives in :slate. Preserve it at the SQL
+  # boundary rather than losing it in the generic compact payload adapter.
+  # Ordinary cognitive episodes are intentionally unaffected.
+  defp maybe_put_user_event_origin(attrs, meta, slate) do
+    kind = Safe.get(meta, :kind) || Safe.get(meta, "kind")
+    subject = Safe.get(meta, :subject) || Safe.get(meta, "subject")
+
+    if kind in [:user_reported_event, :user_reported_spatial,
+                "user_reported_event", "user_reported_spatial"] and
+         subject in [:user, "user"] do
+      attrs = Map.merge(attrs, %{role: "user", source: "user"})
+      case Safe.get(slate, :sentence) || Safe.get(slate, "sentence") do
+        sentence when is_binary(sentence) and byte_size(sentence) > 0 ->
+          Map.put(attrs, :sentence, sentence)
+        _ -> attrs
+      end
+    else
+      attrs
+    end
   end
 
   defp normalize_norms(norms) when is_list(norms) do

@@ -22,6 +22,35 @@ defmodule Core.Episodic.ReconstructionTest do
       write_authorized?: false} = Reconstruction.preview_row(row)
   end
 
+  test "pairs legacy ordinary traces with already-structured events, without automatic promotion" do
+    earlier = ~N[2026-10-17 19:19:56.347625]
+    later = ~N[2026-10-17 19:19:56.367071]
+
+    original = %{id: 891, role: "user", source: "user",
+      sentence: nil, inserted_at: earlier, session_id: "s-a",
+      meta: %{"kind" => "user_reported_event", "subject" => "user",
+        "entity_key" => "project", "relation" => "deadline",
+        "status" => "asserted", "value" => "Friday", "session_id" => "s-a"}}
+    trace = %{id: 892, role: nil, source: nil, inserted_at: later,
+      session_id: "s-a", sentence: "The project deadline is Friday.", meta: %{}}
+
+    assert [_, preview] = Reconstruction.preview_batch([original, trace])
+    assert preview.already_indexed?
+    assert preview.matching_structured_episode_id == 891
+    refute preview.write_authorized?
+
+    # A different statement in the same session is not a duplicate.
+    conflicting = %{trace | sentence: "The project deadline is Tuesday."}
+    assert [_, unrelated] = Reconstruction.preview_batch([original, conflicting])
+    refute unrelated.already_indexed?
+
+    # The textual source check applies once the typed row includes its sentence.
+    typed_new = %{original | sentence: "The project deadline is Friday."}
+    assert [_, wrong_text] =
+      Reconstruction.preview_batch([typed_new, %{trace | sentence: "Actually, the project deadline is Friday."}])
+    refute wrong_text.already_indexed?
+  end
+
   test "assistant, self-facts, questions and empty rows cannot become candidates" do
     for row <- [
       %{id: 3, role: "assistant", sentence: "Rowan lives in Victoria."},

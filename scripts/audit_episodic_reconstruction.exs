@@ -36,17 +36,21 @@ rows =
 
 previews =
   rows
-  |> Enum.map(&Core.Episodic.Reconstruction.preview_row/1)
+  |> Core.Episodic.Reconstruction.preview_batch()
   |> Enum.filter(fn result ->
     result.candidate_count > 0 and
       (include_legacy? or result.attribution == :attributed_user)
   end)
 
+indexed = Enum.count(previews, & &1.already_indexed?)
+remaining = Enum.reject(previews, & &1.already_indexed?)
+
 IO.puts("Read-only reconstruction audit: inspected=#{length(rows)} " <>
-  "candidate_rows=#{length(previews)} include_legacy=#{include_legacy?}")
+  "candidate_rows=#{length(remaining)} already_indexed=#{indexed} " <>
+  "include_legacy=#{include_legacy?}")
 IO.puts("No PostgreSQL rows have been created or modified.")
 
-out = Enum.map_join(previews, "\n", &Jason.encode!/1)
+out = Enum.map_join(remaining, "\n", &Jason.encode!/1)
 if is_binary(opts[:output]) do
   File.mkdir_p!(Path.dirname(opts[:output]))
   File.write!(opts[:output], out <> if(out == "", do: "", else: "\n"))
