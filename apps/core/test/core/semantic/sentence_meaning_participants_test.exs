@@ -138,6 +138,9 @@ defmodule Core.Semantic.SentenceMeaningParticipantsTest do
     assistant = %{action | source: :assistant}
     assert SentenceMeaning.build(assistant).status == :not_yet_interpreted
 
+    unattributed = %{action | source: nil}
+    assert SentenceMeaning.build(unattributed).status == :not_yet_interpreted
+
     altered_role = %{action | atl_slate: %{winners: []}}
     assert SentenceMeaning.build(altered_role).status == :not_yet_interpreted
 
