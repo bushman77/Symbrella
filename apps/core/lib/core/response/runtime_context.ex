@@ -110,7 +110,8 @@ defmodule Core.Response.RuntimeContext do
                 payload = map_get(item, :payload, %{})
                 kind = map_get(payload, :kind)
 
-                kind in [:comprehension_frame, :verified_semantic_frame]
+                kind in [:comprehension_frame, :verified_semantic_frame] or
+                  map_get(item, :source) in [:comprehension, :verified_semantics]
               end)
             _ -> []
           end
