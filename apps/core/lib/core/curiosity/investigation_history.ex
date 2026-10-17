@@ -78,7 +78,7 @@ defmodule Core.Curiosity.InvestigationHistory do
         ids =
           events
           |> Enum.flat_map(fn e -> [e.acquired_proof_id | e.parent_proof_ids] end)
-          |> Kernel.++(resolution_proof_ids(issue.resolution))
+          |> Enum.concat(resolution_proof_ids(issue.resolution))
           |> Enum.filter(&(is_integer(&1) and &1 > 0))
           |> Enum.uniq()
           |> Enum.take(12)
