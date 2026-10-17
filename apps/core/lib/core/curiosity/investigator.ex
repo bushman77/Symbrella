@@ -16,7 +16,8 @@ defmodule Core.Curiosity.Investigator do
 
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
   alias Core.Curiosity.UnresolvedIssues
-  alias Db.CognitiveIssue
+  alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
+  alias Db.{CognitiveIssue, CognitiveIssues}
 
   @default_interval_ms 300_000
   @default_retry_ms 3_600_000
@@ -159,34 +160,56 @@ defmodule Core.Curiosity.Investigator do
                    issue.status in ["open", "investigating"],
          true <- is_integer(issue.reference_year),
          true <- valid_names?(names),
-         true <- issue.subject_key == subject_key(names),
-         %{kind: :two_hop_candidate, parent_proof_ids: ids} <-
-           AssociativeReasoning.propose(names),
-         true <- length(ids) == 2 and Enum.uniq(ids) == ids do
-      frame = %{
-        type: :location_question, domain: :geography,
-        relation: :population, comparison: :greater,
-        subjects: names, grounding_status: :unverified
-      }
+         true <- issue.subject_key == subject_key(names) do
+      # Curiosity supplies only an internal typed question. No LLM, network
+      # retrieval or user-facing messages are involved.
+      context = internal_context(issue.reference_year, names)
 
-      # Synthetic internal request, not a user message. No retrieval or
-      # generation is executed: MemoryBoundary only calls the semantic store.
-      context = %{
-        session_id: "internal-curiosity",
-        user_text: "Which place had the larger population in #{issue.reference_year}?",
-        features: %{intent: :question, symbolic_frame: frame},
-        symbolic_frame: %{event: frame},
-        decision: %{action: :answer}, mood: %{}
-      }
+      case AssociativeReasoning.propose(names) do
+        %{kind: :two_hop_candidate, parent_proof_ids: ids} when is_list(ids) ->
+          reconcile_two_hop(issue, names, context, ids)
 
+        %{kind: :direct_proof_pointer, fingerprint: fingerprint}
+            when is_binary(fingerprint) ->
+          # A directly answered question is not a transitive inference.
+          # This can happen when a source-supported comparison arrives
+          # after a missing-link issue was first opened.
+          reconcile_direct(issue, names, context, fingerprint)
+
+        _ ->
+          %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+      end
+    else
+      _ -> %{status: :skipped, issue_id: issue.id, reason: :invalid_or_stale_issue}
+    end
+  end
+
+  defp internal_context(year, names) do
+    frame = %{
+      type: :location_question, domain: :geography,
+      relation: :population, comparison: :greater,
+      subjects: names, grounding_status: :unverified
+    }
+
+    %{
+      session_id: "internal-curiosity",
+      user_text: "Which place had the larger population in #{year}?",
+      features: %{intent: :question, symbolic_frame: frame},
+      symbolic_frame: %{event: frame},
+      decision: %{action: :answer}, mood: %{}
+    }
+  end
+
+  defp reconcile_two_hop(issue, names, context, ids) do
+    if length(ids) == 2 and Enum.uniq(ids) == ids and
+         Enum.all?(ids, &is_integer/1) do
       recalled = MemoryBoundary.recall(context)
       composition = Map.get(recalled, :composition)
       support = get_in(recalled, [:web_evidence, :support])
       current = Db.get(CognitiveIssue, issue.id)
 
-      # The existing PopulationChain has already revalidated the full graph,
-      # derived and authorized the comparison, and resolved the exact
-      # persisted issue through Db.CognitiveIssues.resolve_reasoning_link/3.
+      # PopulationChain revalidates ALL persisted candidates, then resolves
+      # the exact issue through Db.CognitiveIssues.resolve_reasoning_link/3.
       if match?(%{origin: :hippocampal_two_hop_cue,
                   rule: :transitive_population_order}, composition) and
            composition.parent_proof_ids == ids and
@@ -206,17 +229,50 @@ defmodule Core.Curiosity.Investigator do
         %{status: :unresolved, issue_id: issue.id, reason: :proof_not_authorized}
       end
     else
-      %{kind: :direct_proof_pointer} ->
-        %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+      %{status: :unresolved, issue_id: issue.id, reason: :invalid_two_hop_candidate}
+    end
+  end
 
-      nil ->
-        %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+  defp reconcile_direct(issue, names, context, fingerprint) do
+    # Consolidation.recall independently rehydrates the ORIGINAL two source
+    # claims, checks for competing same-year proofs, re-derives the result
+    # and requires an authoritative population comparison plan.
+    recalled = MemoryBoundary.recall(context)
+    support = get_in(recalled, [:web_evidence, :support])
+    stored = Map.get(recalled, :consolidation)
 
-      false ->
-        %{status: :skipped, issue_id: issue.id, reason: :invalid_or_stale_issue}
-
+    with %{kind: :direct_proof_pointer, fingerprint: ^fingerprint} <-
+           Map.get(recalled, :hippocampal_association),
+         %{kind: :population_comparison, id: proof_id,
+           origin: :stored_symbolic_premises, reference_year: year} <- stored,
+         true <- year == issue.reference_year,
+         %{kind: :population_comparison, status: :source_supported,
+           year: ^year, subjects: ^names} <- support,
+         true <- get_in(recalled, [:web_evidence, :evidence_origin]) ==
+                   :consolidated_symbolic_memory,
+         framed <- Map.put(recalled, :response_frame, ResponseFrame.build(recalled)),
+         %{kind: :verified_population_comparison} = plan <-
+           AuthoritativeAnswerPlan.build(framed),
+         true <- AuthoritativeAnswerPlan.authorized?(
+           plan, AuthoritativeAnswerPlan.render(plan, :brief), framed
+         ),
+         :ok <- CognitiveIssues.resolve_direct_reasoning_link(
+           issue.id, proof_id, fingerprint, year
+         ),
+         %CognitiveIssue{status: "resolved", resolution: resolution} <-
+           Db.get(CognitiveIssue, issue.id),
+         true <- is_map(resolution) and
+                   resolution["reasoning_rule"] == "direct_population_comparison" and
+                   resolution["origin"] == "stored_symbolic_premises" and
+                   resolution["proof_id"] == proof_id and
+                   resolution["proof_fingerprint"] == fingerprint and
+                   resolution["reference_year"] == year do
+      %{status: :resolved, issue_id: issue.id, reference_year: year,
+        proof_id: proof_id, origin: :verified_direct_proof}
+    else
       _ ->
-        %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+        %{status: :unresolved, issue_id: issue.id,
+          reason: :direct_proof_not_authorized}
     end
   end
 
