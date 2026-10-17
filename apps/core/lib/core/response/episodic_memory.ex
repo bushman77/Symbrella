@@ -8,6 +8,7 @@ defmodule Core.Response.EpisodicMemory do
   """
 
   alias Core.Semantic.EpisodicEvents
+  alias Core.Semantic.ParticipantQuestions
 
   @compile {:no_warn_undefined, Brain.Hippocampus}
   @type result :: {String.t(), map()} | nil
@@ -102,7 +103,8 @@ defmodule Core.Response.EpisodicMemory do
   def reply(text) when is_binary(text) do
     with owner when is_binary(owner) <- memory_owner(),
          true <- hippocampus_available?() do
-      case EpisodicEvents.question(text) do
+      participant_reply(owner, text) ||
+        case EpisodicEvents.question(text) do
         {:relation, key, relation} when key != "" ->
           case Brain.Hippocampus.user_event(owner, key, relation) do
             %{status: "asserted"} = event -> respond_event(event)
@@ -121,6 +123,30 @@ defmodule Core.Response.EpisodicMemory do
       end
     else
       _ -> nil
+    end
+  end
+
+  # Current asserted typed events answer by requested participant role.
+  # A failed lookup or ambiguous reverse match falls back without inventing
+  # a relation from chat-history wording.
+  defp participant_reply(owner, text) do
+    case ParticipantQuestions.parse(text) do
+      {:forward, key, role, constraints} when key != "" ->
+        event = Brain.Hippocampus.user_event(owner, key, "spatial_state")
+        case ParticipantQuestions.answer(event, role, constraints) do
+          answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
+          _ -> nil
+        end
+
+      {:reverse, predicate, position, location} ->
+        event = Brain.Hippocampus.spatial_actor(owner, predicate, position, location)
+        case ParticipantQuestions.answer(event, :actor, %{}) do
+          answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 
