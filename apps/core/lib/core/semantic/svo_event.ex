@@ -26,10 +26,25 @@ defmodule Core.Semantic.SVOEvent do
          {:ok, obj_choice} <- single_choice(si, object, "noun"),
          true <- atl_match?(si, [{subject, sub_choice}, {predicate, verb_choice}, {object, obj_choice}]),
          {:ok, lemma} <- VerbLemma.canonical(si, verb_choice),
+         verb_surface when is_binary(verb_surface) <- Map.get(tokens, predicate),
+         verb_surface <- clean(verb_surface),
+         true <- Regex.match?(~r/\A\p{L}+\z/u, verb_surface),
          {:ok, event} <- EpisodicEvents.normalize(%{entity: entity,
            relation: "verb_" <> lemma, value: value}) do
+      # Frame roles are grounded in exact surface tokens, compatible LIFG
+      # selections, and ATL agreement. Preserve the original verb surface
+      # separately from its attested canonical relation for reverse queries.
+      participants = %{
+        "actor" => entity,
+        "predicate" => lemma,
+        "surface_predicate" => verb_surface,
+        "patient" => value,
+        "tense" => "present"
+      }
+
       # Fixed 0.8 denotes an admission grade, not a probability of truth.
-      [Map.merge(event, %{source_frame: :finite_present_svo, frame_confidence: 0.8})]
+      [Map.merge(event, %{source_frame: :finite_present_svo, frame_confidence: 0.8,
+                           participants: participants})]
     else
       _ -> []
     end
