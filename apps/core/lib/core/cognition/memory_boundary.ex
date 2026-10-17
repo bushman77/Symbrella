@@ -14,10 +14,13 @@ defmodule Core.Cognition.MemoryBoundary do
   """
 
   alias Core.Response.{Consolidation, PopulationComparison}
+  alias Brain.Hippocampus.SemanticAssociations
+  alias Db.ConsolidatedConclusion
 
   @private_keys [
     :consolidation_issue,
     :composition,
+    :hippocampal_association,
     :reasoning_trace,
     :hippocampal_replay,
     :curiosity_investigation
@@ -27,12 +30,63 @@ defmodule Core.Cognition.MemoryBoundary do
   @spec recall(map()) :: map()
   def recall(context) when is_map(context) do
     case PopulationComparison.comparison_subjects(context) do
-      [_first, _second] -> Consolidation.recall(context)
+      [first, second] = subjects when is_binary(first) and is_binary(second) ->
+        context
+        |> maybe_associate(subjects)
+        |> Consolidation.recall()
+
       _ -> context
     end
   end
 
   def recall(other), do: other
+
+  # Hippocampus merely proposes an opaque pointer. A matching DB record can
+  # establish a cue association, NOT the truth of the claim. Consolidation
+  # remains responsible for all independent source/proof revalidation.
+  defp maybe_associate(context, subjects) do
+    if Application.get_env(:core, :semantic_associative_recall_enabled?, false) and
+         not is_map(Map.get(context, :web_evidence)) do
+      subject_key = pair_key(subjects)
+
+      pointer =
+        subjects
+        |> SemanticAssociations.cues(8)
+        |> Enum.find(fn fingerprint ->
+          case Db.get_by(ConsolidatedConclusion, fingerprint: fingerprint) do
+            %ConsolidatedConclusion{kind: "population_comparison",
+                                     provenance: "source_supported_symbolic_derivation",
+                                     pair_key: ^subject_key} ->
+              true
+
+            _ -> false
+          end
+        end)
+
+      if is_binary(pointer) do
+        Map.put(context, :hippocampal_association, %{
+          kind: :semantic_proof_pointer, fingerprint: pointer
+        })
+      else
+        context
+      end
+    else
+      context
+    end
+  rescue
+    _ -> context
+  catch
+    :exit, _ -> context
+  end
+
+  defp pair_key(names) do
+    names
+    |> Enum.map(&(String.downcase(String.trim(&1))))
+    |> Enum.sort()
+    |> Enum.join("|")
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
 
   @doc """
   Strip cognitive-workflow records from prompt-facing context. Supported,
