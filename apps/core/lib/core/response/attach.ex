@@ -136,6 +136,8 @@ defmodule Core.Response.Attach do
       active_cells: si_get(si, :active_cells),
       sense_candidates: si_get(si, :sense_candidates),
       lifg_choices: si_get(si, :lifg_choices),
+      # Preserve the original grammatical proof for event revalidation.
+      sentence_signatures: si_get(si, :sentence_signatures),
       acc_conflict: si_get(si, :acc_conflict),
       perception: si_get(si, :perception),
       atl_slate: si_get(si, :atl_slate),
