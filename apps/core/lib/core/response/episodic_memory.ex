@@ -159,6 +159,14 @@ defmodule Core.Response.EpisodicMemory do
   # participant slots if this stricter path returns nil.
   defp action_reply(owner, text) do
     case ActionQuestions.parse(text) do
+      {:activity, key} when key != "" ->
+        event = Brain.Hippocampus.unique_action(owner, key)
+
+        case ActionQuestions.answer(event, :activity, %{}) do
+          answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
+          _ -> nil
+        end
+
       {:forward, key, predicate} when key != "" ->
         event = Brain.Hippocampus.user_event(owner, key, "verb_" <> predicate)
 
