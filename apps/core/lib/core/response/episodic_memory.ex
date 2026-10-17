@@ -8,7 +8,7 @@ defmodule Core.Response.EpisodicMemory do
   """
 
   alias Core.Semantic.EpisodicEvents
-  alias Core.Semantic.ParticipantQuestions
+  alias Core.Semantic.{ActionQuestions, ParticipantQuestions}
 
   @compile {:no_warn_undefined, Brain.Hippocampus}
   @type result :: {String.t(), map()} | nil
@@ -103,7 +103,7 @@ defmodule Core.Response.EpisodicMemory do
   def reply(text) when is_binary(text) do
     with owner when is_binary(owner) <- memory_owner(),
          true <- hippocampus_available?() do
-      participant_reply(owner, text) ||
+      participant_reply(owner, text) || action_reply(owner, text) ||
         case EpisodicEvents.question(text) do
         {:relation, key, relation} when key != "" ->
           case Brain.Hippocampus.user_event(owner, key, relation) do
@@ -143,6 +143,35 @@ defmodule Core.Response.EpisodicMemory do
       {:reverse, predicate, position, location} ->
         event = Brain.Hippocampus.spatial_actor(owner, predicate, position, location)
         case ParticipantQuestions.answer(event, :actor, %{}) do
+          answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  # Finite-present action questions use the same persisted participant slots
+  # as spatial questions. An exact actor + canonical action retrieves the
+  # patient; a surface action + patient retrieves the actor only when unique.
+  # The pre-existing verb_ relation adapter handles historical events without
+  # participant slots if this stricter path returns nil.
+  defp action_reply(owner, text) do
+    case ActionQuestions.parse(text) do
+      {:forward, key, predicate} when key != "" ->
+        event = Brain.Hippocampus.user_event(owner, key, "verb_" <> predicate)
+
+        case ActionQuestions.answer(event, :patient, %{predicate: predicate}) do
+          answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
+          _ -> nil
+        end
+
+      {:reverse, surface_predicate, patient} ->
+        event = Brain.Hippocampus.action_actor(owner, surface_predicate, patient)
+
+        case ActionQuestions.answer(event, :actor,
+               %{surface_predicate: surface_predicate, patient: patient}) do
           answer when is_binary(answer) -> {answer, metadata(:hippocampal_event, event)}
           _ -> nil
         end
