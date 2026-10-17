@@ -89,3 +89,15 @@ trusted network, VPN, or properly configured HTTPS reverse proxy. The developmen
 endpoint still binds to all interfaces. Production fails closed unless web
 credentials, `DATABASE_URL`, `SYMBRELLA_HOST`, and `SECRET_KEY_BASE` exist; enable
 TLS termination at the proxy and forward `X-Forwarded-Proto: https`.
+
+## Phase 3 — Calibration JSONL retention
+
+The logger stays enabled by default in development; production collection is
+disabled unless `SYMBRELLA_CALIBRATION_LOG=true`. Set
+`SYMBRELLA_CALIBRATION_LOG_PATH` to use a private, persistent data directory.
+The active file rotates at 25 MB, retaining three numbered archives
+(`.1` through `.3`), with a 4 MB per-record guard and serialized concurrent
+writes. Archives should be backed up externally if their examples matter for
+future neural training; retention is deliberately finite. Do not commit these
+generated records. Rotation does not delete existing large files until they
+reach the oldest archive position.

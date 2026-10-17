@@ -307,9 +307,16 @@ config :symbrella_web, SymbrellaWeb.NeuralShadow,
     )
 
 
+calibration_log? =
+  config_env() != :prod or
+    System.get_env("SYMBRELLA_CALIBRATION_LOG", "false") in ["1", "true", "yes"]
+
 config :brain, Brain.SelfCalibration.Logger,
-  enabled?: true,
-  path: "priv/self_calibration/samples.jsonl"
+  enabled?: calibration_log?,
+  path: System.get_env("SYMBRELLA_CALIBRATION_LOG_PATH", "priv/self_calibration/samples.jsonl"),
+  max_bytes: 25_000_000,
+  max_files: 3,
+  max_record_bytes: 4_000_000
 
 # ───────── Logger runtime overrides ─────────
 
