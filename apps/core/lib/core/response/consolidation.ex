@@ -16,6 +16,7 @@ defmodule Core.Response.Consolidation do
 
   alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
   alias Core.Reasoning.PopulationChain
+  alias Brain.Hippocampus.SemanticAssociations
   alias Db.{CognitiveIssues, ConsolidatedConclusions}
 
   @source_types [:wikidata, :wikipedia, :statistics_canada]
@@ -48,6 +49,15 @@ defmodule Core.Response.Consolidation do
         # A fresh, validated proof can settle a specifically missing-year
         # issue. Conflicting proofs require a separate adjudication step.
         :ok = CognitiveIssues.resolve_missing_year(row)
+        # Optional hippocampal association indexes the *durable* proof ID,
+        # never a generated answer. Failure to index cannot invalidate the
+        # already committed Core derivation.
+        if Application.get_env(:core, :semantic_associative_recall_enabled?, false) do
+          _ = SemanticAssociations.remember(
+            row.fingerprint, [a1["subject"], b1["subject"]]
+          )
+        end
+
         {:ok, row}
       else
         _ -> {:error, :not_authorized_for_consolidation}
