@@ -27,7 +27,6 @@ defmodule Core.Response.LlmPrompt do
       |> put_if_present(:comprehension, comprehension)
       |> put_if_present(:symbolic_frame, symbolic_frame)
       |> put_if_present(:web_evidence, map_get(context, :web_evidence))
-      |> put_if_present(:consolidation_issue, map_get(context, :consolidation_issue))
       |> put_if_present(:response_frame, map_get(context, :response_frame))
       |> put_if_present(:episodic_recall, map_get(context, :episodic_recall))
 
@@ -146,7 +145,6 @@ defmodule Core.Response.LlmPrompt do
       episodic_recall_shaping(map_get(features, :episodic_recall)),
 
       # ── Closing ──
-      unresolved_conclusion_shaping(map_get(features, :consolidation_issue)),
       verified_population_priority(features),
       "Respond to the user's actual request in the most natural useful form."
     ]
@@ -154,36 +152,6 @@ defmodule Core.Response.LlmPrompt do
     |> Enum.join("\n")
     |> String.trim()
   end
-
-  # An epistemic issue is an active question, never authoritative evidence.
-  # Avoid training the model to silently select a contested stored conclusion.
-  defp unresolved_conclusion_shaping(%{kind: :contradictory_premises}) do
-    "UNRESOLVED EVIDENCE CONFLICT: Stored source-backed premises disagree. " <>
-      "Do not choose a winner using old memory or previous assistant replies. " <>
-      "Reconcile with independently retrieved evidence if possible; otherwise " <>
-      "acknowledge the disagreement and what evidence is missing."
-  end
-
-  defp unresolved_conclusion_shaping(%{kind: :missing_dated_evidence}) do
-    "UNRESOLVED DATED EVIDENCE: The requested year is not supported by the " <>
-      "stored comparison. Do not substitute an older population figure or " <>
-      "invent a new count. Explain the specific evidence gap if retrieval " <>
-      "has not resolved it."
-  end
-
-  defp unresolved_conclusion_shaping(%{kind: :missing_reasoning_link}) do
-    "UNRESOLVED INFERENCE LINK: The stored supported relationships do not " <>
-      "establish the requested two-step conclusion. Do not infer from topic " <>
-      "similarity, inconsistent dates, or an absent intermediate fact. " <>
-      "Request or retrieve the missing premise before drawing a conclusion."
-  end
-
-  defp unresolved_conclusion_shaping(%{kind: :invalid_derivation}) do
-    "UNRESOLVED INFERENCE: A stored conclusion failed independent " <>
-      "re-derivation and must not be treated as established knowledge."
-  end
-
-  defp unresolved_conclusion_shaping(_), do: ""
 
   # Verified source support outranks low-confidence lexical *word senses*
   # for this particular factual answer. Keep that distinction near the end
