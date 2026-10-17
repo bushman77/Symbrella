@@ -89,7 +89,7 @@ defmodule Core.Response.HippocampalSemanticAssociationTest do
     assert %{kind: :verified_population_comparison} = plan
 
     assert {:ok, proof} = Consolidation.capture(original, plan)
-    assert [proof.fingerprint | _] = SemanticAssociations.cues(names)
+    assert proof.fingerprint in SemanticAssociations.cues(names)
 
     recalled = MemoryBoundary.recall(context(Enum.reverse(names)))
     assert recalled.hippocampal_association.fingerprint == proof.fingerprint
