@@ -97,6 +97,31 @@ defmodule Core.Semantic.SVOEventTest do
     assert recall_meta.memory_event_id
   end
 
+  test "partial competing SVO hypotheses do not block a unique full-clause event" do
+    si = input()
+
+    # Production vocabulary can assign a noun alternative to the article "a",
+    # yielding a competing {0, 3} span that does not cover the full sentence.
+    partial = %{
+      id: :finite_present_svo_candidate,
+      source: :core_syntax,
+      span: {0, 3},
+      evidence: @evidence,
+      roles: %{
+        subject_determiner: 0,
+        subject_head: 1,
+        predicate: 2,
+        object_head: 3
+      }
+    }
+
+    si = %{si | sentence_signatures: si.sentence_signatures ++ [partial]}
+
+    assert [%{entity_key: "artist", relation: "verb_draw", value: "a picture",
+              source_frame: :finite_present_svo}] =
+             EpisodicProjection.attach(si).episodic_candidates
+  end
+
   test "rejects mismatched ATL winners or disputed grammatical roles", %{sid: sid, owner: owner} do
     si = input()
     wrong_atl = put_in(si, [:atl_slate, :winners],
