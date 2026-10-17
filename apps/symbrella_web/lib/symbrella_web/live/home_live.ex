@@ -569,6 +569,15 @@ defmodule SymbrellaWeb.HomeLive do
       # retain its typed event frame. Dropping it makes a two-city comparison
       # look like generic chat and prevents its evidence lookup.
       symbolic_frame: Map.get(si, :symbolic_frame),
+      # A fallback planner must receive the same grammatical proof that
+      # Core.Response.Attach uses. Otherwise a valid event is silently
+      # downgraded to LLM prose and the durable memory write is skipped.
+      sentence: Map.get(si, :sentence),
+      sentence_signatures: Map.get(si, :sentence_signatures),
+      episodic_candidates: Map.get(si, :episodic_candidates),
+      lifg_choices: Map.get(si, :lifg_choices),
+      atl_slate: Map.get(si, :atl_slate),
+      active_cells: Map.get(si, :active_cells),
       turn_context: Core.Response.Context.from_si(si)
     }
 
