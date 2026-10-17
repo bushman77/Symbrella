@@ -979,6 +979,48 @@ defmodule Db.Episode do
 
   def spatial_actor(_, _, _, _), do: nil
 
+  @doc """
+  Reverse participant lookup for a finite-present SVO event, matching the
+  stored surface predicate and patient. A newer event for the same actor and
+  canonical verb supersedes its old patient, including a retraction.
+
+  Multiple current actors satisfying the exact query are ambiguous; return
+  nil instead of choosing the most recently inserted speaker. Owner scoped.
+  """
+  @spec action_actor(String.t(), String.t(), String.t()) :: map() | nil
+  def action_actor(owner, surface_predicate, patient)
+      when is_binary(owner) and is_binary(surface_predicate) and is_binary(patient) do
+    events =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("left(? ->> 'relation', 5) = 'verb_'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 100,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(fn row ->
+        {get_in(row, [:meta, "entity_key"]), get_in(row, [:meta, "relation"])}
+      end)
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", value: ^patient,
+          participants: %{"actor" => actor, "patient" => ^patient,
+                          "surface_predicate" => ^surface_predicate,
+                          "tense" => "present"}} when is_binary(actor) -> true
+        _ -> false
+      end)
+
+    case events do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def action_actor(_, _, _), do: nil
+
   @doc "Newest owner-scoped events for one entity, including superseded values."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit)
