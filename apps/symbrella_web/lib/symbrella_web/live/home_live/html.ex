@@ -40,7 +40,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
       width="14"
       height="14"
       class="inline-block size-3.5 shrink-0"
-    />Source</a><% else %>{part.text}<% end %><% end %></p>
+    />{part.label}</a><% else %>{part.text}<% end %><% end %></p>
     """
   end
 
