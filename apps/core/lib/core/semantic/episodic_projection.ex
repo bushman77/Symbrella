@@ -78,6 +78,34 @@ defmodule Core.Semantic.EpisodicProjection do
 
   def validate_candidate(_, _), do: :error
 
+  @doc """
+  Revalidate one unambiguous participant event against this exact SemanticInput.
+
+  This read-only boundary is shared by SentenceMeaning and WM. Do not trust
+  the mere presence of a candidate: an injection, assistant-origin turn, or
+  competing complete interpretation cannot become structural understanding.
+  """
+  @spec validated_participant(map()) :: map() | nil
+  def validated_participant(%{} = si) do
+    case List.wrap(get(si, :episodic_candidates)) do
+      [candidate] when is_map(candidate) ->
+        case validate_candidate(si, candidate) do
+          {:ok, %{source_frame: frame, participants: %{"actor" => actor}} = event}
+              when frame in [:finite_present_svo, :progressive_spatial] and
+                   is_binary(actor) and byte_size(actor) > 0 ->
+            event
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def validated_participant(_), do: nil
+
   defp project_frame(%{type: :obligation_event, subject: :speaker,
       modality: :obligation, action: action, uncertain_roles: [],
       confidence: confidence}, sentence)
