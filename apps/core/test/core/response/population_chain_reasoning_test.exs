@@ -228,6 +228,16 @@ defmodule Core.Response.PopulationChainReasoningTest do
              factual_authority?: false} = VerifiedSemantics.snapshot(session)
     assert parent_ids == Enum.sort([first.id, second.id])
 
+    # The global Brain WM contains a bounded context *pointer*, not a
+    # factual source or a copy of raw user/model text and source URLs.
+    assert %{source: :verified_semantics, payload: %{context: stored_context}} =
+      Enum.find(Brain.snapshot_wm().wm,
+        &(Map.get(&1, :id) == VerifiedSemantics.frame_id(session)))
+    refute Map.has_key?(stored_context, :premises)
+    refute Map.has_key?(stored_context, :values)
+    refute Map.has_key?(stored_context, :source_urls)
+    refute Map.has_key?(stored_context, :user_text)
+
     assert {:ok, explanation, %{status: :verified_evidence_followup}} =
       LlmSynthesis.generate("how do you know that?",
         %{session_id: session, intent: :question}, %{action: :answer}, %{}, nil)
