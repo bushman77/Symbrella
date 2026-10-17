@@ -34,7 +34,7 @@ defmodule Core.LIFG.ScoreAudit do
               |> Enum.filter(fn {id, p} ->
                 is_binary(id) and is_number(p) and p >= 0.0 and p <= 1.0
               end)
-              |> Enum.sort_by(fn {_id, p} -> -p end)
+              |> Enum.sort_by(fn {id, p} -> {-p, id} end)
             _ -> []
           end
 
