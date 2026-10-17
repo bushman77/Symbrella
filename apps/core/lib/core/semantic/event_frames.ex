@@ -57,6 +57,7 @@ defmodule Core.Semantic.EventFrames do
 
     reference = Map.get(si, :discourse_reference) || %{}
     subject = Map.get(reference, :antecedent)
+    named_comparison = named_population_comparison(sentence)
 
     cond do
       match =
@@ -76,6 +77,21 @@ defmodule Core.Semantic.EventFrames do
           unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
           grounding_status: :unverified,
           confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      # Explicitly named comparisons establish the two referents directly.
+      # Parsing a question is not evidence that either population is known.
+      is_list(named_comparison) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          comparison: :greater,
+          subjects: named_comparison,
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
         }
 
       # A comparison is a relation over the previously resolved entities.
@@ -221,6 +237,47 @@ defmodule Core.Semantic.EventFrames do
         nil
     end
   end
+
+  # Recognize only an explicit two-entity comparative construction. The
+  # named operands are syntactic roles, not externally verified places.
+  # Require a single "or" separator and name-like entities to avoid treating
+  # ordinary discussion containing population as a comparison instruction.
+  defp named_population_comparison(sentence) do
+    case Regex.run(
+           ~r/^\s*which\s+(?:had|has)\s+(?:the\s+)?(?:larger|greater|higher)\s+population(?:\s+in\s+(?:19|20)\d{2})?\s*,?\s+(.+?)\s*[?.!]*\s*$/iu,
+           sentence,
+           capture: :all_but_first
+         ) do
+      [candidates] ->
+        case Regex.split(~r/\s+or\s+/iu, candidates, trim: true) do
+          [first, second] ->
+            names =
+              [first, second]
+              |> Enum.map(&clean_entity/1)
+              |> Enum.map(&String.trim(&1, " ,"))
+              |> Enum.map(&String.replace(&1, ~r/\s*,\s*/u, ", "))
+
+            if Enum.all?(names, &valid_named_place?/1) and
+                 length(Enum.uniq_by(names, &String.downcase/1)) == 2 do
+              names
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp valid_named_place?(name) when is_binary(name) do
+    String.length(name) in 3..100 and
+      Regex.match?(~r/^\p{Lu}[\p{L}\p{M}\p{N}\s,.'’-]*$/u, name) and
+      not Regex.match?(~r/\b(?:which|what|who|where|how|why)\b/iu, name)
+  end
+
+  defp valid_named_place?(_), do: false
 
   defp clean_entity(text) do
     text
