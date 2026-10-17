@@ -179,6 +179,27 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert prompt =~ "UNRESOLVED INFERENCE LINK"
   end
 
+  test "curiosity issue resolves when the missing verified link is later added", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000])
+
+    first = Consolidation.recall(fresh([a, c]))
+    issue_id = first.consolidation_issue.id
+    assert Db.get!(Db.CognitiveIssue, issue_id).status == "open"
+
+    capture!(b, c, [100_000, 80_000])
+    second = Consolidation.recall(fresh([a, c]))
+
+    assert second.composition.intermediate_subject == b
+    assert second.web_evidence.support.difference == 40_000
+
+    resolved = Db.get!(Db.CognitiveIssue, issue_id)
+    assert resolved.status == "resolved"
+    assert resolved.resolution["reasoning_rule"] == "transitive_population_order"
+    assert resolved.resolved_at != nil
+    refute Enum.any?(UnresolvedIssues.candidates(), &(&1.issue_id == issue_id))
+  end
+
   test "contradictory intermediate populations cannot produce a transitive answer", ctx do
     %{a: a, b: b, c: c} = ctx
     ab = capture!(a, b, [120_000, 100_000])
@@ -201,6 +222,16 @@ defmodule Core.Response.PopulationChainReasoningTest do
     incompatible_years = Consolidation.recall(fresh([a, c]))
     refute Map.has_key?(incompatible_years, :web_evidence)
     assert incompatible_years.consolidation_issue.kind == :missing_reasoning_link
+  end
+
+  test "different measurement sources never silently merge into a proof", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000], 2021, :wikidata)
+    capture!(b, c, [100_000, 80_000], 2021, :wikipedia)
+
+    incompatible = Consolidation.recall(fresh([a, c]))
+    refute Map.has_key?(incompatible, :web_evidence)
+    assert incompatible.consolidation_issue.kind == :missing_reasoning_link
   end
 
   test "a nonmonotonic pair does not justify transitive ordering", ctx do
