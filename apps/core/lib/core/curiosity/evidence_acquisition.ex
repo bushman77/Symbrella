@@ -76,7 +76,9 @@ defmodule Core.Curiosity.EvidenceAcquisition do
   no override and always uses WebRetrieval with the fixed provider routing.
   """
   @spec acquire(CognitiveIssue.t(), keyword()) :: map()
-  def acquire(%CognitiveIssue{} = issue, opts \\ []) when is_list(opts) do
+  def acquire(issue, opts \\ [])
+
+  def acquire(%CognitiveIssue{} = issue, opts) when is_list(opts) do
     with {:ok, request} <- plan(issue),
          true <- still_open?(issue.id),
          context <- context(request.subjects, request.year),
