@@ -154,6 +154,36 @@ defmodule Core.Response.PopulationChainReasoningTest do
     refute Map.has_key?(reflection, :symbolic_composition)
   end
 
+  test "actual production SI recognizes which-city wording and uses verified two-hop answer", ctx do
+    %{a: a, b: b, c: c} = ctx
+    capture!(a, b, [120_000, 100_000])
+    capture!(b, c, [100_000, 80_000])
+
+    # Run the user's chat-shaped wording through the entire Core pipeline.
+    # The LLM stub raises if invoked; no invented numbers or free-form
+    # response may substitute for the independently revalidated proof.
+    question = "Which city had the larger population in 2021, #{a} or #{c}?"
+
+    si = Core.resolve_input(question,
+      mode: :prod,
+      enrich_lexicon?: true,
+      lexicon_stage?: true,
+      lifg_opts: [grammar_weight: 1.0],
+      session_id: "which-city-#{ctx.sid}"
+    )
+
+    assert %{type: :location_question, domain: :geography,
+             relation: :population, comparison: :greater,
+             subjects: [^a, ^c], grounding_status: :unverified} =
+      si.symbolic_frame
+
+    assert get_in(si.response_meta || %{}, [:response_source]) == :symbolic_verified
+    assert is_binary(si.response_text)
+    assert si.response_text =~ a
+    assert si.response_text =~ "40,000"
+    refute si.response_text =~ "120,000"
+  end
+
   test "hippocampal associations cue a two-hop Core inference and remain private", ctx do
     %{a: a, b: b, c: c} = ctx
     ab = capture!(a, b, [120_000, 100_000])
