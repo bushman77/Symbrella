@@ -127,7 +127,8 @@ defmodule Brain.WM.AdmissionTest do
   end
 
   test "every runtime source class obeys the same hard evidence floor" do
-    cfg = state(%{gate_threshold: 0.0, evidence_floor: 0.8, prefer_sources: []})
+    cfg = state(%{gate_threshold: 0.0, evidence_floor: 0.8,
+                  lifg_min_score: 0.8, prefer_sources: []})
 
     Enum.each([:lifg, :ltm, :curiosity, :intent, :comprehension,
                :verified_semantics], fn source ->
