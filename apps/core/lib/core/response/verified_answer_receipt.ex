@@ -267,7 +267,10 @@ defmodule Core.Response.VerifiedAnswerReceipt do
     v
     |> Integer.to_string()
     |> String.reverse()
-    |> String.replace(~r/.{3}(?=.)/u, "\\0,")
+    |> String.graphemes()
+    |> Enum.chunk_every(3)
+    |> Enum.map(&Enum.join/1)
+    |> Enum.join(",")
     |> String.reverse()
   end
 
