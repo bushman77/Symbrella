@@ -7,6 +7,8 @@ defmodule Core.Response.PopulationChainReasoningTest do
 
   alias Core.Curiosity.UnresolvedIssues
   alias Core.Cognition.MemoryBoundary
+  alias Core.Cognition.AssociativeReasoning
+  alias Brain.Hippocampus.SemanticAssociations
   alias Core.Response.{
     AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
     PopulationComparison, ResponseFrame
@@ -20,12 +22,14 @@ defmodule Core.Response.PopulationChainReasoningTest do
   setup do
     old_compose = Application.get_env(:core, :symbolic_composition_enabled?)
     old_consolidate = Application.get_env(:core, :symbolic_consolidation_enabled?)
+    old_association = Application.get_env(:core, :semantic_associative_recall_enabled?)
     old_client = Application.get_env(:core, :llm_client)
     old_retrieval = Application.get_env(:core, :web_retrieval, [])
     old_llm_cfg = Application.get_env(:core, :llm_synthesis, [])
 
     Application.put_env(:core, :symbolic_composition_enabled?, true)
     Application.put_env(:core, :symbolic_consolidation_enabled?, true)
+    Application.put_env(:core, :semantic_associative_recall_enabled?, true)
     Application.put_env(:core, :llm_client, OfflineLlm)
     Application.put_env(:core, :web_retrieval, Keyword.put(old_retrieval, :enabled?, false))
     Application.put_env(:core, :llm_synthesis,
@@ -34,6 +38,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
     on_exit(fn ->
       restore(:symbolic_composition_enabled?, old_compose)
       restore(:symbolic_consolidation_enabled?, old_consolidate)
+      restore(:semantic_associative_recall_enabled?, old_association)
       restore(:llm_client, old_client)
       Application.put_env(:core, :web_retrieval, old_retrieval)
       Application.put_env(:core, :llm_synthesis, old_llm_cfg)
@@ -147,6 +152,70 @@ defmodule Core.Response.PopulationChainReasoningTest do
     # Parent proof IDs are inspectable internally but never published in the
     # user-facing reflection/Explain payload.
     refute Map.has_key?(reflection, :symbolic_composition)
+  end
+
+  test "hippocampal associations cue a two-hop Core inference and remain private", ctx do
+    %{a: a, b: b, c: c} = ctx
+    ab = capture!(a, b, [120_000, 100_000])
+    bc = capture!(b, c, [100_000, 80_000])
+
+    assert ab.fingerprint in SemanticAssociations.cues([a, c])
+    assert bc.fingerprint in SemanticAssociations.cues([a, c])
+
+    assert %{kind: :two_hop_candidate, parent_proof_ids: ids} =
+      AssociativeReasoning.propose([a, c])
+    assert ids == Enum.sort([ab.id, bc.id])
+
+    recalled = MemoryBoundary.recall(fresh([a, c]))
+    assert recalled.hippocampal_association.kind == :two_hop_candidate
+    assert recalled.composition.origin == :hippocampal_two_hop_cue
+    assert recalled.composition.parent_proof_ids == ids
+    assert recalled.web_evidence.support.winner == a
+    assert recalled.web_evidence.support.difference == 40_000
+
+    expression = MemoryBoundary.for_expression(recalled)
+    refute Map.has_key?(expression, :hippocampal_association)
+    refute Map.has_key?(expression, :composition)
+    assert expression.web_evidence.support.difference == 40_000
+  end
+
+  test "a valid but uncued second premise still works through DB fallback", ctx do
+    %{a: a, b: b, c: c} = ctx
+    ab = capture!(a, b, [120_000, 100_000])
+
+    Application.put_env(:core, :semantic_associative_recall_enabled?, false)
+    bc = capture!(b, c, [100_000, 80_000])
+    Application.put_env(:core, :semantic_associative_recall_enabled?, true)
+
+    assert ab.fingerprint in SemanticAssociations.cues([a, c])
+    refute bc.fingerprint in SemanticAssociations.cues([a, c])
+    assert AssociativeReasoning.propose([a, c]) == nil
+
+    result = MemoryBoundary.recall(fresh([a, c]))
+    assert result.composition.origin == :stored_independent_proofs
+    assert result.web_evidence.support.difference == 40_000
+    refute Map.has_key?(result, :hippocampal_association)
+  end
+
+  test "uncued contradictory evidence vetoes the cued two-hop inference", ctx do
+    %{a: a, b: b, c: c} = ctx
+    ab = capture!(a, b, [120_000, 100_000])
+    bc = capture!(b, c, [100_000, 80_000])
+
+    assert %{kind: :two_hop_candidate} = AssociativeReasoning.propose([a, c])
+
+    Application.put_env(:core, :semantic_associative_recall_enabled?, false)
+    competing = capture!(b, c, [105_000, 80_000])
+    Application.put_env(:core, :semantic_associative_recall_enabled?, true)
+
+    refute competing.fingerprint in SemanticAssociations.cues([a, c])
+    assert ab.fingerprint in SemanticAssociations.cues([a, c])
+    assert bc.fingerprint in SemanticAssociations.cues([a, c])
+
+    result = MemoryBoundary.recall(fresh([a, c]))
+    assert result.hippocampal_association.kind == :two_hop_candidate
+    refute Map.has_key?(result, :web_evidence)
+    assert result.consolidation_issue.kind == :contradictory_premises
   end
 
   test "chain works in the other direction by independently rederiving its ordering", ctx do
