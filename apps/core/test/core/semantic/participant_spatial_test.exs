@@ -158,7 +158,7 @@ defmodule Core.Semantic.ParticipantSpatialTest do
     choices =
       si.lifg_choices
       |> Enum.reject(&(Map.get(&1, :token_index) in [1, 4, 6]))
-      |> Kernel.++([actual_choice])
+      |> Enum.concat([actual_choice])
 
     si = %{si |
       lifg_choices: choices,
