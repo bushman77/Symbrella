@@ -61,6 +61,42 @@ winners =
   |> List.wrap()
   |> Enum.map(&Map.take(&1, [:token_index, :id, :chosen_id, :lemma]))
 
+# Track the dictionary evidence underneath covered (MWE) word positions.
+# Full word-level LIFG winners are not required when complete syntax and exact
+# dictionary POS support the location-role binding.
+locative_role_evidence =
+  for {index, pos} <- [{4, "preposition"}, {6, "noun"}] do
+    surface =
+      base_tokens
+      |> Enum.find(&(Map.get(&1, :index) == index))
+      |> case do
+        %{phrase: phrase} -> phrase |> String.downcase() |> String.trim_trailing(".")
+        _ -> ""
+      end
+
+    dictionary_ids =
+      si
+      |> Map.get(:active_cells, [])
+      |> List.wrap()
+      |> Enum.filter(fn cell ->
+        get.(cell, :norm) == surface and get.(cell, :pos) == pos
+      end)
+      |> Enum.map(&get.(&1, :id))
+      |> Enum.take(6)
+
+    %{index: index, surface: surface, required_pos: pos,
+      dictionary_ids: dictionary_ids,
+      lifg_selected?: Enum.any?(choices, &(Map.get(&1, :token_index) == index)),
+      atl_selected?: Enum.any?(winners, &(Map.get(&1, :token_index) == index))}
+  end
+
+mwe_units =
+  si
+  |> Map.get(:mwe_lexicon, [])
+  |> List.wrap()
+  |> Enum.map(&Map.take(&1, [:span, :phrase, :lexical_pos]))
+  |> Enum.take(12)
+
 proposed = Core.Semantic.ParticipantSpatial.project(si, sentence)
 
 IO.inspect(%{
@@ -73,6 +109,9 @@ IO.inspect(%{
     |> List.wrap()
     |> Enum.filter(&(get.(&1, :id) == :progressive_locative_candidate)),
   participle_dictionary_evidence: participles,
+  locative_role_evidence: locative_role_evidence,
+  mwe_lexical_units: mwe_units,
+  sentence_competition: Map.get(si, :sentence_competition),
   lifg_choices: choices,
   atl_winners: winners,
   proposed_participant_events: proposed,
