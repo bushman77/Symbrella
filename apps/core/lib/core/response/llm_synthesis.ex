@@ -186,6 +186,15 @@ defmodule Core.Response.LlmSynthesis do
           fallback?: forced_fallback?
         })
 
+      reflection =
+        case Map.get(context, :composition) do
+          %{rule: :transitive_population_order} = proof ->
+            Map.put(reflection, :symbolic_composition, proof)
+
+          _ ->
+            reflection
+        end
+
       # Consolidation stores ONLY the independently supported symbolic premises
       # after the published conclusion passes the exact authorization gate.
       # It never stores the model's words as factual evidence, and neither
