@@ -84,6 +84,39 @@ defmodule Core.Semantic.ParticipantSpatialTest do
              ParticipantSpatial.project(si, si.sentence)
   end
 
+  test "MWE-suppressed locative winners admit only dictionary-backed roles" do
+    si = input() |> Signatures.attach()
+
+    # Production omits on/fence while retaining full independent grammar
+    # and exact dictionary rows. No substitute LIFG winners are manufactured.
+    filtered = fn choices ->
+      Enum.reject(choices, &(Map.get(&1, :token_index) in [4, 6]))
+    end
+
+    si = %{si |
+      lifg_choices: filtered.(si.lifg_choices),
+      atl_slate: %{winners: filtered.(si.atl_slate.winners)}
+    }
+
+    assert [%{entity_key: "bird", relation: "spatial_state",
+              participants: %{"position" => "on", "location" => "the fence"}}] =
+             ParticipantSpatial.project(si, si.sentence)
+
+    # A missing row is not evidence. A wrong lexical selection is not
+    # interchangeable with a dictionary candidate for that word.
+    no_prep = %{si | active_cells:
+      Enum.reject(si.active_cells, &(&1.id == "on|preposition|1"))}
+    assert ParticipantSpatial.project(no_prep, si.sentence) == []
+
+    no_noun = %{si | active_cells:
+      Enum.reject(si.active_cells, &(&1.id == "fence|noun|1"))}
+    assert ParticipantSpatial.project(no_noun, si.sentence) == []
+
+    conflict = %{si | lifg_choices:
+      si.lifg_choices ++ [%{id: "on|adverb|1", token_index: 4}]}
+    assert ParticipantSpatial.project(conflict, si.sentence) == []
+  end
+
   test "each question retrieves a different persisted participant role",
        %{sid: sid, owner: owner} do
     si = projected() |> Map.put(:session_id, sid)
