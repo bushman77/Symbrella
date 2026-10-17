@@ -47,6 +47,9 @@ IO.inspect(%{
     |> Enum.filter(&(Map.get(&1, :id) == :progressive_locative_candidate)),
   episodic_candidates: candidates,
   revalidation: proofs,
+  sentence_meaning: Map.get(si, :sentence_meaning),
+  working_memory_context:
+    Core.Brain.WM.Comprehension.context_from(si, Map.get(si, :comprehension) || %{}),
   response_planning_suppressed?: true,
   persistent_write_requested?: persist?
 }, label: "LiveView-equivalent participant projection", pretty: true, limit: :infinity)
