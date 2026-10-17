@@ -145,6 +145,54 @@ defmodule Core.Semantic.ParticipantSpatialTest do
       EpisodicMemory.reply("Where is the bird?")
   end
 
+  test "production proper-noun tie preserves attested common-noun actor",
+       %{sid: sid, owner: owner} do
+    # The real live diagnostics ranked bird|proper_noun|1 a hair above
+    # bird|noun|1 for the lower-case phrase "A bird".
+    # Concurrent PMTG coverage may also suppress the on/fence word winners.
+    si = input() |> Signatures.attach()
+
+    actual_choice =
+      %{id: "bird|proper_noun|1", token_index: 1}
+
+    choices =
+      si.lifg_choices
+      |> Enum.reject(&(Map.get(&1, :token_index) in [1, 4, 6]))
+      |> Kernel.++([actual_choice])
+
+    si = %{si |
+      lifg_choices: choices,
+      atl_slate: %{winners: choices}
+    }
+
+    assert [%{entity_key: "bird", relation: "spatial_state",
+              participants: %{"actor" => "a bird", "location" => "the fence"}}] =
+             ParticipantSpatial.project(si, si.sentence)
+
+    validated =
+      si
+      |> EpisodicProjection.attach()
+      |> Map.put(:session_id, sid)
+      |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
+
+    assert validated.response_meta.response_source == :symbolic_conversation
+    assert validated.response_meta.persistence_status == :persisted
+
+    assert %{status: "asserted", value: "the fence"} =
+             Brain.Hippocampus.user_event(owner, "bird", "spatial_state")
+
+    no_noun_evidence = %{si | active_cells:
+      Enum.reject(si.active_cells, &(&1.id == "bird|noun|1"))}
+    assert ParticipantSpatial.project(no_noun_evidence, si.sentence) == []
+
+    other_pos = %{si | lifg_choices:
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 1} = ch -> %{ch | id: "bird|verb|1"}
+        ch -> ch
+      end)}
+    assert ParticipantSpatial.project(other_pos, si.sentence) == []
+  end
+
   test "each question retrieves a different persisted participant role",
        %{sid: sid, owner: owner} do
     si = projected() |> Map.put(:session_id, sid)
