@@ -138,13 +138,17 @@ defmodule Core.Semantic.ParticipantSpatial do
   defp selected_copular_auxiliary(si, index, surface) do
     if clean(surface) == "is" do
       case selected(si, index, "auxiliary") do
-        {:ok, _} = accepted ->
-          accepted
+        {:ok, choice} = accepted ->
+          if sense_id_prefix?(choice, "is|auxiliary|"), do: accepted, else: :error
 
         :error ->
           if attested_pos?(si, surface, "verb") do
             case selected(si, index, "verb") do
-              {:ok, _} -> {:ok, :attested_copular_auxiliary_role}
+              {:ok, choice} ->
+                if sense_id_prefix?(choice, "is|verb|"),
+                  do: {:ok, :attested_copular_auxiliary_role},
+                  else: :error
+
               _ -> :error
             end
           else
@@ -154,6 +158,11 @@ defmodule Core.Semantic.ParticipantSpatial do
     else
       :error
     end
+  end
+
+  defp sense_id_prefix?(choice, prefix) do
+    id = get(choice, :chosen_id) || get(choice, :id)
+    is_binary(id) and String.starts_with?(id, prefix)
   end
 
   # A lexical proper-noun sense can narrowly win over common noun senses
