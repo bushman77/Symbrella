@@ -203,6 +203,18 @@ defmodule Core.Response.PopulationChainReasoningTest do
     refute Map.has_key?(public, :composition)
     refute Map.has_key?(public, :consolidation_issue)
 
+    nested =
+      MemoryBoundary.for_expression(%{
+        features: %{consolidation_issue: private.consolidation_issue,
+          composition: %{parent_proof_ids: [42]}, intent: :question},
+        consolidation_issue: private.consolidation_issue
+      })
+
+    refute Map.has_key?(nested, :consolidation_issue)
+    refute Map.has_key?(nested.features, :composition)
+    refute Map.has_key?(nested.features, :consolidation_issue)
+    assert nested.features.intent == :question
+
     # Even with Qwen unavailable, Core gives only a neutral answer—not issue
     # IDs, curiosity actions, a proof trace, or an unsolicited question.
     features = %{
