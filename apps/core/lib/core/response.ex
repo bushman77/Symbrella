@@ -35,6 +35,7 @@ defmodule Core.Response do
   alias Core.Response.Policy
   alias Core.Response.Guardrails
   alias Core.Response.Skills
+  alias Core.Response.ActionAlignment
   alias Core.Response.AffectPolicy
   alias Core.Response.LlmSynthesis
   alias Core.Response.Memory
@@ -123,6 +124,7 @@ defmodule Core.Response do
             response_policy: Map.get(mood, :response_policy),
             turn_context: Map.get(si, :turn_context),
             symbolic_frame: Map.get(si, :symbolic_frame),
+            discourse_reference: Map.get(si, :discourse_reference),
             self_model: Map.get(si, :self_model),
             self_monitor: Map.get(si, :self_monitor),
             self_memory_recall: Map.get(si, :self_memory_recall),
@@ -132,7 +134,9 @@ defmodule Core.Response do
             agency_memory: agency_memory
           })
 
-        {decision, skill} = decide_and_pick_skill(features, guard, text_in)
+        {decision0, skill} = decide_and_pick_skill(features, guard, text_in)
+        decision =
+          ActionAlignment.align(decision0, Map.get(si, :selected_action), text_in, guard.guardrail?)
         features =
           features
           |> put_chosen_skill(skill)
@@ -140,9 +144,15 @@ defmodule Core.Response do
           |> Map.put(:action_meta, Map.get(si, :action_meta))
 
         name_claim? = name_claim?(extracted_name, text_in)
-        maybe_persist_user_name(name_claim?, extracted_name, text_in)
+        name_persistence = maybe_persist_user_name(name_claim?, extracted_name, text_in)
 
-        forced_identity = forced_identity_text(text_in, extracted_name, name_claim?)
+        forced_identity =
+          if name_claim? and match?({:error, _}, name_persistence) and
+               is_binary(user_name_candidate(extracted_name)) do
+            "I heard your name as #{extracted_name}, but I couldn't save it permanently."
+          else
+            forced_identity_text(text_in, extracted_name, name_claim?)
+          end
 
         inline_text = OverrideSkills.deterministic_inline_text(skill)
         llm_prompt_type = OverrideSkills.llm_prompt_override(skill)
@@ -162,8 +172,15 @@ defmodule Core.Response do
               llm_or_model_unavailable(text_in, features, decision, mood, intent)
           end
 
+        # A verified conclusion or a neutral insufficient-evidence answer
+        # is already a complete response. The independent curiosity loop must
+        # never append its investigation prompts to user-facing chat.
         {text, curiosity_probe} =
-          SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
+          if response_source in [:symbolic_verified, :symbolic_verified_followup, :symbolic_unresolved] do
+            {text0, nil}
+          else
+            SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
+          end
 
         SideEffects.record_turn(session_id, text_in, text)
 
@@ -293,6 +310,7 @@ defmodule Core.Response do
          response_policy: response_policy,
          turn_context: turn_context,
          symbolic_frame: symbolic_frame,
+         discourse_reference: discourse_reference,
          self_model: self_model,
          self_monitor: self_monitor,
          self_memory_recall: self_memory_recall,
@@ -331,6 +349,7 @@ defmodule Core.Response do
       response_policy: response_policy,
       turn_context: turn_context,
       symbolic_frame: symbolic_frame,
+      discourse_reference: discourse_reference,
       self_model: self_model,
       self_monitor: self_monitor,
       self_memory_recall: self_memory_recall,
@@ -381,6 +400,15 @@ defmodule Core.Response do
 
   defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type \\ nil) do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
+      {:ok, verified_text, %{authoritative_plan: %{status: :enforced}} = reflection} ->
+        {verified_text, :symbolic_verified, nil, reflection}
+
+      {:ok, answer, %{status: :verified_evidence_followup} = reflection} ->
+        {answer, :symbolic_verified_followup, nil, reflection}
+
+      {:ok, answer, %{status: :insufficient_verified_evidence} = reflection} ->
+        {answer, :symbolic_unresolved, nil, reflection}
+
       {:ok, llm_text, reflection} ->
         {llm_text, :llm, nil, reflection}
 

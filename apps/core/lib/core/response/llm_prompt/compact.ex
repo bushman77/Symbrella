@@ -8,6 +8,7 @@ defmodule Core.Response.LlmPrompt.Compact do
   """
 
   alias Core.Response.Topics
+  alias Core.Response.GreetingTurn
 
   @spec runtime_state(term()) :: String.t()
   def runtime_state(nil), do: ""
@@ -42,7 +43,12 @@ defmodule Core.Response.LlmPrompt.Compact do
     parts =
       []
       |> maybe_add_present("intent", map_get(summary, :intent))
-      |> maybe_add_present("understood", values(List.wrap(map_get(summary, :understood, []))))
+      |> maybe_add_present("recognized_topics",
+        values(List.wrap(map_get(summary, :recognized_topics, []))))
+      |> maybe_add_present("selected_lexical_candidates",
+        values(List.wrap(map_get(summary, :selected_lexical_candidates, []))))
+      |> maybe_add_present("verified_understood",
+        values(List.wrap(map_get(summary, :understood, []))))
       |> maybe_add_present("uncertain", values(List.wrap(map_get(summary, :uncertain, []))))
       |> maybe_add_present("degraded", map_get(summary, :degraded?))
 
@@ -68,7 +74,11 @@ defmodule Core.Response.LlmPrompt.Compact do
       |> maybe_add_present("confidence", compact_number(map_get(frame, :confidence)))
       |> maybe_add_present("keyword", map_get(frame, :keyword))
       |> maybe_add_present("event", map_get(frame, :event))
+      |> maybe_add_present("type", map_get(frame, :type))
+      |> maybe_add_present("relation", map_get(frame, :relation))
       |> maybe_add_present("subject", map_get(frame, :subject))
+      |> maybe_add_present("target", map_get(frame, :target))
+      |> maybe_add_present("grounding", map_get(frame, :grounding_status))
       |> maybe_add_present("medication", map_get(frame, :medication))
       |> maybe_add_present("consequence", map_get(frame, :consequence))
       |> maybe_add_present("temporal_context", map_get(frame, :temporal_context))
@@ -176,6 +186,9 @@ defmodule Core.Response.LlmPrompt.Compact do
     cond do
       guardrail? ->
         "brief safe redirect"
+
+      GreetingTurn.standalone?(map_get(features, :text)) ->
+        "reciprocate the greeting naturally; do not ask for a task"
 
       skill_moves_to?(features, :personal_life_update) ->
         "acknowledge the personal milestone warmly"

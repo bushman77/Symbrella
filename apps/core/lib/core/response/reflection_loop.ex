@@ -10,6 +10,11 @@ defmodule Core.Response.ReflectionLoop do
 
   alias Core.Telemetry
   alias Core.Response.Topics
+  alias Core.Response.GreetingTurn
+  alias Core.Response.AnswerAdequacy
+  alias Core.Tools.WebRetrieval.Grounding
+  alias Core.Tools.WebRetrieval.PlaceLocation
+  alias Core.Semantic.EventFrames
 
   @event [:core, :response, :reflection]
   @v 1
@@ -85,7 +90,18 @@ defmodule Core.Response.ReflectionLoop do
     []
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
+    |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
+    |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
+    |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
+    |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
+    |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
+    |> maybe_issue(unfulfilled_search_promise?(context, draft_text), :search_not_answered)
+    |> maybe_issue(named_reference_missing?(context), :named_reference_missing)
+    |> maybe_issue(uncited_reference_answer?(context, draft_text), :reference_uncited)
+    |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
+    |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
+    |> maybe_issue(distance_followup_self_intro?(context, user_text, draft_text), :distance_followup_subject_loss)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
@@ -96,7 +112,18 @@ defmodule Core.Response.ReflectionLoop do
       :robotic_self_state
     )
     |> maybe_issue(overclaims_self_awareness?(draft_text), :overclaimed_self_awareness)
-    |> maybe_issue(generic_draft?(draft_text), :too_generic)
+    |> maybe_issue(
+      AnswerAdequacy.failed_answer?(
+        Map.get(context, :answer_target_question, user_text), draft_text
+      ),
+      :answer_not_supplied
+    )
+    |> maybe_issue(GreetingTurn.robotic_draft?(user_text, draft_text), :robotic_greeting)
+    |> maybe_issue(
+      generic_draft?(draft_text) and
+        (not GreetingTurn.standalone?(user_text) or String.trim(draft_text) == ""),
+      :too_generic
+    )
     |> maybe_issue(topic_dead_end?(context, user_text, draft_text), :topic_dead_end)
     |> maybe_issue(hidden_context_leak?(draft_text), :leaked_hidden_context)
     |> Enum.reverse()
@@ -111,7 +138,19 @@ defmodule Core.Response.ReflectionLoop do
       :unsupported_device_refusal in issues ->
         {:repair, issues}
 
+      :news_access_refusal in issues or :news_evidence_not_cited in issues or
+          :news_assessment_missing in issues or :news_lookup_misrepresented in issues or
+          :prior_lookup_followup in issues ->
+        {:repair, issues}
+
+      :search_not_answered in issues or :named_reference_missing in issues or
+          :reference_uncited in issues or :location_reference_unaligned in issues ->
+        {:repair, issues}
+
       :subject_reversal in issues ->
+        {:repair, issues}
+
+      :geographic_claim_unverified in issues or :distance_followup_subject_loss in issues ->
         {:repair, issues}
 
       :leaked_hidden_context in issues or :overclaimed_self_awareness in issues ->
@@ -120,7 +159,8 @@ defmodule Core.Response.ReflectionLoop do
       :topic_dead_end in issues ->
         {:repair, issues}
 
-      :robotic_self_state in issues ->
+      :robotic_self_state in issues or :robotic_greeting in issues or
+          :answer_not_supplied in issues ->
         {:repair, issues}
 
       :low_confidence in issues and (:unknown_intent in issues or :too_generic in issues) ->
@@ -160,12 +200,51 @@ defmodule Core.Response.ReflectionLoop do
         :unsupported_device_refusal in issues ->
           acknowledge_device_command(context)
 
+        :news_lookup_misrepresented in issues ->
+          empty_news_lookup_fallback(context)
+
+        :prior_lookup_followup in issues ->
+          prior_lookup_fallback(context)
+
+        Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
+          news_headline_fallback(context, user_text)
+
+        :location_reference_unaligned in issues ->
+          case PlaceLocation.answer(context) do
+            {:ok, answer} -> answer
+            :no_support -> reference_excerpt_fallback(context)
+          end
+
+        :search_not_answered in issues ->
+          reference_excerpt_fallback(context)
+
+        :named_reference_missing in issues ->
+          named_reference_missing_fallback(context)
+
+        :reference_uncited in issues ->
+          reference_excerpt_fallback(context)
+
         :subject_reversal in issues ->
           action = get_in_map(context, [:symbolic_frame, :event, :action])
           "Understood, you need to #{action}."
 
+        :distance_followup_subject_loss in issues ->
+          distance_followup_clarification(context)
+
+        :geographic_claim_unverified in issues ->
+          case Grounding.align(draft_text, context) do
+            ^draft_text -> unverified_geographic_reply(context, user_text)
+            sourced -> sourced
+          end
+
         :robotic_self_state in issues ->
           self_state_checkin_fallback(user_text)
+
+        :robotic_greeting in issues ->
+          GreetingTurn.repair(user_text, final_text)
+
+        :answer_not_supplied in issues ->
+          "I couldn't establish a reliable answer to that question from the available information."
 
         :leaked_hidden_context in issues and (final_text == "" or final_text == draft_text) ->
           hidden_context_fallback(user_text)
@@ -181,10 +260,33 @@ defmodule Core.Response.ReflectionLoop do
       end
 
     instruction =
-      if :unsupported_device_refusal in issues do
-        "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
-      else
-        "Repair unsupported self-claims or hidden-control wording before publishing."
+      cond do
+        :answer_not_supplied in issues ->
+          "The draft only echoed the factual question or gave an empty non-answer. Retry from the actual question and its existing evidence; never invent a numeric result."
+        :robotic_greeting in issues ->
+          "A standalone greeting is not a customer-service request. Remove stock assistance offers and do not address the user as Symbrella."
+        :unsupported_device_refusal in issues ->
+          "Replace ungrounded generic refusal with a verified-command acknowledgement; never assert that a device was controlled or its state observed."
+        Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
+          "Recent headlines require accurate publication dates, outlet attribution, source links and—when requested—a separate qualified assessment. Repair the draft from the retrieved headlines without inventing verified article contents."
+        :location_reference_unaligned in issues ->
+          "A matching Wikipedia article makes one bounded geographic assertion in its lead. Attribute and cite only that assertion, not unsupported details."
+        :search_not_answered in issues ->
+          "Retrieved reference excerpts are already available. Attribute and cite them, rather than promising to search later; do not pretend snippets prove the claims."
+        :news_lookup_misrepresented in issues ->
+          "A dated-news lookup was attempted but did not yield qualifying headlines. State the search outcome honestly; do not claim Symbrella lacks web-search capabilities or invent reports."
+        :prior_lookup_followup in issues ->
+          "The user is checking whether a prior same-session search actually completed. Answer from the recorded lookup status, not the model's conversational guess."
+        :named_reference_missing in issues ->
+          "No relevant reference excerpts were retained for the named public topic. Do not substitute background information as evidence of the specific programme."
+        :reference_uncited in issues ->
+          "The answer lacks any URL from retrieved reference evidence. Give only attributed excerpts with URLs; do not invent a factual or institutional history."
+        :distance_followup_subject_loss in issues ->
+          "The user's 'it' refers to the immediately preceding distance exchange. Do not replace the subject with Symbrella's identity; clarify whether they mean the distance or the coordinate method."
+        :geographic_claim_unverified in issues ->
+          "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
+        true ->
+          "Repair unsupported self-claims or hidden-control wording before publishing."
       end
 
     {final_text, instruction, 1}
@@ -193,6 +295,319 @@ defmodule Core.Response.ReflectionLoop do
   defp apply_decision(:reject, _user_text, _draft_text, _issues, _context) do
     {"I need to stop and ask for a clearer, safer target before answering.",
      "Reject unsafe draft.", 1}
+  end
+
+  # The model must not defer a search that Core already executed this turn.
+  # Restrict to a short, pure search promise with actual retrieved reference
+  # excerpts, never infer support or hallucinate fresh sources.
+  defp unfulfilled_search_promise?(context, draft_text) when is_binary(draft_text) do
+    evidence = Map.get(context, :web_evidence, %{})
+
+    is_map(evidence) and
+      Map.get(evidence, :resolution) == :reference_sources and
+      Map.get(evidence, :status) == :retrieved and
+      is_list(Map.get(evidence, :sources)) and
+      Map.get(evidence, :sources) != [] and
+      String.length(draft_text) <= 400 and
+      (Regex.match?(
+         ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me|i\s+can)\s+(?:search|look\s+(?:it|that)\s+up|check\s+(?:that|it)\s+online|find\s+(?:sources|information)|do\s+(?:a\s+)?search)\b/iu,
+         draft_text
+       ) or
+         Regex.match?(
+           ~r/\b(?:don't\s+have\s+enough\s+(?:context|information)|do\s+not\s+have\s+enough\s+(?:context|information)|not\s+enough\s+(?:context|information)|need\s+more\s+(?:context|details)|could\s+you\s+(?:please\s+)?(?:provide\s+more\s+(?:details|context)|clarify)|can't\s+provide\s+(?:a\s+)?complete\s+answer)\b/iu,
+           draft_text
+         ))
+  end
+
+  defp unfulfilled_search_promise?(_, _), do: false
+
+  defp reference_excerpt_fallback(context) do
+    case PlaceLocation.answer(context) do
+      {:ok, answer} -> answer
+      :no_support -> reference_link_fallback(context)
+    end
+  end
+
+  defp reference_link_fallback(context) do
+    sources = get_in_map(context, [:web_evidence, :sources]) || []
+
+    excerpts =
+      sources
+      |> Enum.take(2)
+      |> Enum.filter(fn source ->
+        is_map(source) and is_binary(Map.get(source, :url)) and
+          is_binary(Map.get(source, :title)) and is_binary(Map.get(source, :excerpt))
+      end)
+      |> Enum.map_join("\n", fn source ->
+        "- #{String.slice(source.title, 0, 120)}: " <>
+          "Source: #{String.slice(source.url, 0, 400)}"
+      end)
+
+    "I found reference sources, but couldn't establish a complete answer from them:\n" <>
+      excerpts <> "\nThese links are references, not independently verified conclusions."
+  end
+
+  # The small model may repeat a stale "I have no live news access" message
+  # even after Core supplied dated headlines. Repair only when the current
+  # turn actually has fresh, sourced news evidence.
+  defp news_access_refusal?(context, draft_text) when is_binary(draft_text) do
+    evidence = Map.get(context, :web_evidence, %{})
+
+    Map.get(evidence, :resolution) == :headlines_available and
+      Map.get(evidence, :status) == :retrieved and
+      is_list(Map.get(evidence, :sources)) and
+      Map.get(evidence, :sources) != [] and
+      Regex.match?(
+        ~r/\b(?:don't|do not|can't|cannot|lack|without|no)\s+(?:have\s+)?(?:live|real[- ]time|current|up[- ]to[- ]date)\s+(?:news|updates|headlines|news access)\b/iu,
+        draft_text
+      )
+  end
+
+  defp news_access_refusal?(_, _), do: false
+
+  # A source-matched static place question must be answered from the
+  # article's specific location statement. A citation alone must not
+  # legitimize an LLM draft that contains unsupported geographic claims.
+  defp location_reference_unaligned?(context, draft_text) do
+    case PlaceLocation.answer(context) do
+      {:ok, answer} -> draft_text != answer
+      :no_support -> false
+    end
+  end
+
+  # A public reference answer without any retained source URL is not a
+  # source-grounded response. This does not independently verify the
+  # cited claims, but it prevents unsupported factual narration from being
+  # silently accepted as retrieval-backed.
+  defp uncited_reference_answer?(context, draft_text) when is_binary(draft_text) do
+    case Map.get(context, :web_evidence) do
+      %{resolution: :reference_sources, status: :retrieved,
+        sources: sources, request_type: request_type}
+      when request_type in [
+             :general_search, :historical_reference, :technical_reference,
+             :scientific_research, :fact_check, :comparison, :local_information
+           ] and is_list(sources) and sources != [] ->
+        not Enum.any?(sources, fn source ->
+          url = Map.get(source, :url)
+          is_binary(url) and url != "" and String.contains?(draft_text, url)
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp uncited_reference_answer?(_, _), do: false
+
+  # If references were rejected for a qualified named subject, don't
+  # substitute generic background material and imply it answers the named
+  # programme question. Other query categories remain unchanged.
+  defp named_reference_missing?(context) do
+    case Map.get(context, :web_evidence) do
+      %{request_type: :general_search, relation: nil,
+        resolution: :exhausted, sources: [], query: query,
+        attempted_count: attempts}
+      when is_binary(query) and is_integer(attempts) and attempts > 0 ->
+        Regex.match?(~r/\b[A-Z][\p{L}-]{2,}['’]s\b/u, query)
+
+      _ ->
+        false
+    end
+  end
+
+  defp named_reference_missing_fallback(context) do
+    query =
+      context
+      |> get_in_map([:web_evidence, :query])
+      |> to_string()
+      |> String.slice(0, 160)
+
+    "I looked for reference material specifically about #{query}, but the available results " <>
+      "did not establish that subject. I can discuss the underlying technology, " <>
+      "but I can't substantiate the named programme from those results."
+  end
+
+  # An empty search is not the same thing as no search capability. Only
+  # correct demonstrably false capability claims when an actual dated-news
+  # search has been attempted; never claim that unavailable sources were read.
+  defp news_lookup_misrepresented?(context, draft_text) when is_binary(draft_text) do
+    case Map.get(context, :web_evidence) do
+      %{relation: :current_events, resolution: :exhausted, sources: [],
+        attempted_count: attempts} when is_integer(attempts) and attempts > 0 ->
+        generic_refusal?(draft_text) or
+          Regex.match?(
+            ~r/\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer|unable\s+to)\b.{0,70}\b(?:capability|ability|access|browse|search)\b.{0,70}\b(?:web|internet|online|news|browse|search)|\b(?:no|without)\s+(?:web|internet|live\s+news)\s+access\b/iu,
+            draft_text
+          ) or
+          unfulfilled_news_result?(draft_text)
+
+      _ ->
+        false
+    end
+  end
+
+  defp news_lookup_misrepresented?(_, _), do: false
+
+  # Provider attempts happened before Qwen was called. With zero qualifying
+  # headlines, the model must neither promise a *future* search nor claim
+  # to have found reports or new developments. Audit only the attempt
+  # results in the current context; do not infer that nothing happened.
+  defp unfulfilled_news_result?(draft_text) do
+    Regex.match?(
+      ~r/\b(?:i(?:'ll|\s+will|\s+am\s+going\s+to)|let\s+me)\s+(?:search|look\s+up|check|browse|research)\b/iu,
+      draft_text
+    ) or
+      Regex.match?(
+        ~r/\b(?:i\s+(?:found|retrieved|located)\s+(?:some\s+)?(?:information|reports?|articles?|sources?|results?)|based\s+on\s+(?:the\s+)?information\s+i\s+found|(?:there\s+(?:have|has)\s+been|it\s+seems\s+(?:that\s+)?there\s+(?:have|has)\s+been)\s+(?:some\s+)?(?:recent|new|latest)\s+developments?)\b/iu,
+        draft_text
+      )
+  end
+
+  # "Well did you?" has no fresh search instruction, so answer it from
+  # bounded same-session lookup provenance, never from guessed success.
+  defp prior_lookup_followup?(context, user_text) when is_binary(user_text) do
+    evidence = Map.get(context, :prior_retrieval)
+
+    is_map(evidence) and
+      Map.get(context, :web_evidence) == nil and
+      Map.get(evidence, :relation) == :current_events and
+      Map.get(evidence, :resolution) == :exhausted and
+      Map.get(evidence, :source_count) == 0 and
+      is_integer(Map.get(evidence, :attempted_count)) and
+      Map.get(evidence, :attempted_count) > 0 and
+      Regex.match?(
+        ~r/^\s*(?:well[,! ]*|so[,! ]*)?(?:(?:did|have)\s+you(?:\s+actually)?(?:\s+(?:search|look|check|find|do\s+it|do\s+so))?|what\s+did\s+(?:you|the\s+search)\s+find)\s*[?!.]*$/iu,
+        user_text
+      )
+  end
+
+  defp prior_lookup_followup?(_, _), do: false
+
+  defp prior_lookup_fallback(context) do
+    evidence = Map.get(context, :prior_retrieval, %{})
+    query = evidence |> Map.get(:query, "the previous topic") |> to_string() |> String.slice(0, 160)
+
+    case Map.get(evidence, :status) do
+      :unavailable ->
+        "Yes, I attempted a dated-news lookup for #{query}, but the provider failed. " <>
+          "I did not obtain any verified recent reports."
+
+      _ ->
+        "Yes, I searched for dated news about #{query}, but the lookup returned no qualifying headlines. " <>
+          "My earlier reply should have stated that result instead of promising to search."
+    end
+  end
+
+  defp empty_news_lookup_fallback(context) do
+    evidence = Map.get(context, :web_evidence, %{})
+    query = evidence |> Map.get(:query, "the requested subject") |> to_string() |> String.slice(0, 160)
+
+    case Map.get(evidence, :status) do
+      :unavailable ->
+        "I tried to retrieve dated news about #{query}, but the news provider was unavailable or failed. " <>
+          "I can't verify recent developments from that attempt."
+
+      _ ->
+        "I searched for dated news about #{query}, but no qualifying headlines were returned. " <>
+          "That doesn't establish that nothing has happened; I can't verify recent developments from this search."
+    end
+  end
+
+  # A headline is evidence of what an outlet reported, not proof that the
+  # underlying event has been independently confirmed. For news answers we
+  # require at least one matched triple: publisher, publication day and URL
+  # all attached to the SAME retained source. Arbitrary citations do not pass.
+  defp news_evidence_not_cited?(context, draft_text) do
+    case news_sources(context) do
+      [] ->
+        false
+
+      sources ->
+        not Enum.any?(sources, fn source ->
+          url = Map.get(source, :url, "")
+          publisher = Map.get(source, :publisher, "")
+          published = Map.get(source, :published_at, "")
+          date = if is_binary(published), do: String.slice(published, 0, 10), else: ""
+
+          is_binary(url) and url != "" and
+            is_binary(publisher) and publisher != "" and
+            byte_size(date) == 10 and
+            is_binary(Map.get(source, :title)) and
+            String.contains?(draft_text, url) and
+            String.contains?(String.downcase(draft_text), String.downcase(publisher)) and
+            String.contains?(draft_text, date) and
+            String.contains?(
+              String.downcase(draft_text),
+              String.downcase(Map.get(source, :title))
+            )
+        end)
+    end
+  end
+
+  defp news_assessment_missing?(context, user_text, draft_text) do
+    news_sources(context) != [] and
+      Regex.match?(
+        ~r/\b(?:your thoughts|what do you think|your take|your opinion|how do you view|what's your view)\b/iu,
+        user_text
+      ) and
+      not Regex.match?(
+        ~r/\b(?:my assessment|my view|i think|in my view|my concern|a key concern|key risks?|major risks?|the implications|this raises|i would focus|the central issue)\b/iu,
+        draft_text
+      )
+  end
+
+  defp news_sources(context) do
+    case Map.get(context, :web_evidence, %{}) do
+      %{relation: :current_events, status: :retrieved,
+        resolution: :headlines_available, sources: sources}
+      when is_list(sources) ->
+        Enum.filter(sources, fn source ->
+          is_map(source) and
+            is_binary(Map.get(source, :url)) and
+            is_binary(Map.get(source, :published_at)) and
+            is_binary(Map.get(source, :publisher))
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp news_headline_fallback(context, user_text) do
+    reports =
+      context
+      |> news_sources()
+      |> Enum.take(2)
+      |> Enum.map_join("\n", fn source ->
+        title = Map.get(source, :title, "")
+        publisher = Map.get(source, :publisher, "Source")
+        date = source |> Map.get(:published_at, "") |> String.slice(0, 10)
+        url = Map.get(source, :url, "")
+
+        "- #{publisher} (#{date}) reported: #{title}. Source: #{url}"
+      end)
+
+    "Recent dated headlines from news outlets (not independently verified full articles):\n" <>
+      reports <> "\n" <> news_assessment(user_text)
+  end
+
+  defp news_assessment(user_text) do
+    cond do
+      Regex.match?(~r/\b(?:war|conflict|fighting|military|strikes?|hostilities)\b/iu, user_text) ->
+        "My assessment: the important issues are civilian protection, the potential " <>
+          "for escalation, diplomatic options and economic disruption. The headlines " <>
+          "alone cannot establish all developments or how the conflict will evolve."
+
+      Regex.match?(~r/\b(?:election|vote|polls?|campaign)\b/iu, user_text) ->
+        "My assessment: distinguish reported campaign developments from verified " <>
+          "results, official statements and measurable policy effects. Headlines " <>
+          "alone do not establish the final outcome."
+
+      true ->
+        "My assessment: these dated reports are a useful starting point, but " <>
+          "the underlying facts and implications need checking against primary " <>
+          "evidence before reaching firmer conclusions."
+    end
   end
 
   # A generic "can't assist" is not itself evidence of a safety issue.
@@ -271,6 +686,99 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp subject_reversal?(_, _), do: false
+
+  # A valid local discourse binding is necessary: the same draft may be a
+  # reasonable self-description if the user actually asked about Symbrella.
+  defp distance_followup_self_intro?(context, user_text, draft_text) do
+    binding =
+      get_in_map(context, [:features, :discourse_reference]) ||
+        get_in_map(context, [:discourse_reference])
+
+    match?(%{source: :recent_distance_turn, pronoun: "it"}, binding) and
+      Regex.match?(~r/^\s*what\s+is\s+it\s*[?!.]*\s*$/iu, user_text) and
+      Regex.match?(
+        ~r/\b(?:question\s+(?:and|&)\s+answer\s+system|i(?:'m| am)\s+here\s+to\s+(?:provide|help|answer)|(?:how|what)\s+can\s+i\s+(?:assist|help)\s+you)\b/iu,
+        draft_text
+      )
+  end
+
+  defp distance_followup_clarification(context) do
+    binding =
+      get_in_map(context, [:features, :discourse_reference]) ||
+        get_in_map(context, [:discourse_reference]) || %{}
+
+    subject = Map.get(binding, :subject)
+    target = Map.get(binding, :target)
+
+    if is_binary(subject) and is_binary(target) do
+      "Do you mean the straight-line distance between #{subject} and #{target}, or how the Wikidata coordinates were used to calculate it?"
+    else
+      "Are you asking about the distance from the previous answer or how it was calculated?"
+    end
+  end
+
+  defp geographic_frame(context, user_text) do
+    candidates = [
+      get_in_map(context, [:features, :symbolic_frame]),
+      get_in_map(context, [:symbolic_frame, :event]),
+      get_in_map(context, [:symbolic_frame])
+    ]
+
+    Enum.find(candidates, fn candidate ->
+      is_map(candidate) and map_get(candidate, :type) == :location_question
+    end) ||
+      # A lost upstream frame must not allow the model to invent distances.
+      # Parse the original user question, never a candidate model answer.
+      EventFrames.location_question(user_text) || %{}
+  end
+
+  # A semantic frame can identify what a question asks without verifying a
+  # number or spatial relationship. Do not treat fluent LLM prose as evidence.
+  defp unverified_geographic_claim?(context, user_text, draft_text) do
+    frame = geographic_frame(context, user_text)
+
+    is_map(frame) and map_get(frame, :type) == :location_question and
+      map_get(frame, :grounding_status) == :unverified and
+      not Grounding.supports?(draft_text, context) and
+      (Grounding.available_support?(context) or
+         not Regex.match?(
+           ~r/\b(?:can't|cannot|don't|do not)\s+(?:verify|confirm|reliably say|provide a verified)\b/iu,
+           draft_text
+         ))
+  end
+
+  defp unverified_geographic_reply(context, user_text) do
+    frame = geographic_frame(context, user_text)
+    subject = map_get(frame, :subject)
+    target = map_get(frame, :target)
+    subjects =
+      frame
+      |> map_get(:subjects)
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.take(4)
+
+    cond do
+      map_get(frame, :relation) == :population and length(subjects) >= 2 ->
+        "I understand you're asking for the populations of #{Enum.join(subjects, " and ")}, " <>
+          "but I don't have verified dated figures for those places available in this response."
+
+      not is_binary(subject) ->
+        "Which place are you referring to?"
+
+      map_get(frame, :relation) == :identity ->
+        "I can identify #{subject} from the conversation, but I couldn't verify its geographic identity from Wikidata."
+
+      map_get(frame, :relation) == :population ->
+        "You're asking about #{subject}'s population, but I don't have a verified population figure available here."
+
+      map_get(frame, :relation) == :proximity and is_binary(target) ->
+        "You're asking whether #{subject} is close to #{target}, but I don't have verified distance information to confirm that."
+
+      true ->
+        "I understand the location question, but I can't verify that geographic claim."
+    end
+  end
 
   defp low_confidence?(context) do
     confidence =

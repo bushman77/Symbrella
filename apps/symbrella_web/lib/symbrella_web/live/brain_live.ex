@@ -93,13 +93,20 @@ defmodule SymbrellaWeb.BrainLive do
 
     ~H"""
     <Layouts.app flash={@flash} current_scope={assigns[:current_scope]}>
-      {BrainHTML.brain(assigns)}
-      
-    <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
-      <.mood_hud mood={@mood} />
+      <div id="brain-report-root">
+        {BrainHTML.brain(assigns)}
 
-      <.selected_region_status selected={@selected} status={@region_status} />
-      <.regions_status_grid all_status={@all_status} />
+        <div data-brain-report-section="Selected Region Runtime Configuration">
+          <.selected_region_status selected={@selected} status={@region_status} />
+        </div>
+
+        <div data-brain-report-section="All Regions Live Status">
+          <.regions_status_grid all_status={@all_status} />
+        </div>
+      </div>
+
+      <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
+      <.mood_hud mood={@mood} />
     </Layouts.app>
     """
   end

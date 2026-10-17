@@ -61,7 +61,10 @@ defmodule Core.MWE.DecisionsTest do
     refute Enum.any?(result.semantic_choices, &(&1.id == "off|noun|0"))
 
     summary = Summary.build(result)
-    assert "turn off" in summary.understood
+    # MWE promotion is a lexical selection, not independent verification
+    # of the phrase's exact meaning.
+    assert "turn off" in summary.selected_lexical_candidates
+    refute "turn off" in summary.understood
     assert summary.unresolved == []
 
     with_atl = Core.Brain.ATL.ingest(result, [])
@@ -134,6 +137,97 @@ defmodule Core.MWE.DecisionsTest do
     assert Enum.map(Enum.filter(result.semantic_choices, &(Map.get(&1, :kind) == :mwe)),
              & &1.id) == ["turn off the|verb|1"]
     assert result.lifg_choices == si.lifg_choices
+  end
+
+  test "promotion audit characterizes a phrase winner despite unresolved sentence grammar" do
+    si = input(~w(what do you know about japan's railgun development))
+
+    phrase = %{
+      token_index: 8,
+      token_span: {0, 3},
+      phrase: "what do you know",
+      id: "what do you know|phrase|2",
+      lemma: "what do you know",
+      pos: "phrase",
+      source: :mwe_lexicon,
+      score: 0.529
+    }
+
+    signature = %{
+      id: :verb_particle_construction, span: {1, 3},
+      roles: %{verb: 1, object: 2, particle: 3}
+    }
+
+    si = %{si |
+      sentence_signatures: [signature],
+      mwe_choices: [phrase],
+      lifg_opts: [trace_mwe_promotion?: true]
+    }
+
+    first = Decisions.attach(si)
+
+    assert Enum.any?(first.semantic_choices, fn choice ->
+             choice.id == phrase.id and choice.token_span == {0, 3}
+           end)
+
+    refute Enum.any?(first.semantic_choices, fn choice ->
+             choice.token_index in 0..3 and Map.get(choice, :kind) != :mwe
+           end)
+
+    assert %{
+             stage: :mwe_promotion_audit,
+             meta: %{pass: 1, candidates: [%{
+               id: "what do you know|phrase|2",
+               lexical_gate_passed?: true,
+               question_conflict?: false,
+               verb_frame_conflict?: false,
+               promoted?: true
+             }]}
+           } = hd(first.trace)
+
+    # The existing reranker considers verb senses, not the selected phrase
+    # POS. It does not negate the previously promoted canonical choice.
+    after_rerank = Core.MWE.SenseResolution.rerank_contiguous(first)
+    assert after_rerank.semantic_choices == first.semantic_choices
+
+    # A downstream ATL mismatch is only observational: rerunning the same
+    # canonical promotion gate does not consume or respond to it.
+    after_atl =
+      %{after_rerank | atl_slate: %{
+        constituents: [
+          %{id: :verb_particle_construction, status: :unresolved,
+            span: {1, 3}, unresolved_roles: [:verb, :object, :particle]}
+        ]
+      }}
+      |> Decisions.attach()
+
+    assert after_atl.semantic_choices == first.semantic_choices
+    assert %{
+             stage: :mwe_promotion_audit,
+             meta: %{pass: 3, candidates: [%{promoted?: true}]}
+           } = hd(after_atl.trace)
+  end
+
+  test "diagnostic tracing is disabled unless requested and cannot alter winners" do
+    si = input(~w(what do you know about japan's railgun development))
+
+    phrase = %{
+      token_index: 8, token_span: {0, 3}, phrase: "what do you know",
+      id: "what do you know|phrase|2", lemma: "what do you know",
+      pos: "phrase", source: :mwe_lexicon, score: 0.529
+    }
+
+    without = Decisions.attach(%{si | mwe_choices: [phrase]})
+    with_trace = Decisions.attach(%{si |
+      mwe_choices: [phrase], lifg_opts: [trace_mwe_promotion?: true]
+    })
+
+    assert without.semantic_choices == with_trace.semantic_choices
+    refute Enum.any?(without.trace, fn
+             %{stage: :mwe_promotion_audit} -> true
+             _ -> false
+           end)
+    assert hd(with_trace.trace).stage == :mwe_promotion_audit
   end
 
   test "no lexical phrase means canonical view matches existing word decisions" do

@@ -3,7 +3,7 @@ defmodule Core.Comprehension.SummaryTest do
 
   alias Core.Comprehension.Summary
 
-  test "summarizes confident concepts as understood" do
+  test "recognizes topics and selected senses without claiming verified understanding" do
     si = %{
       intent: :command,
       keyword: "working memory",
@@ -16,8 +16,11 @@ defmodule Core.Comprehension.SummaryTest do
 
     summary = Summary.build(si)
 
+    assert summary.version == 2
     assert summary.intent == :command
-    assert "working memory" in summary.understood
+    assert "working memory" in summary.recognized_topics
+    assert "working memory" in summary.selected_lexical_candidates
+    assert summary.understood == []
     refute "you" in summary.understood
     refute summary.degraded?
   end
@@ -38,9 +41,11 @@ defmodule Core.Comprehension.SummaryTest do
     summary = Summary.build(si)
 
     assert summary.intent == :illicit_request
-    assert "buy drugs" in summary.understood
-    assert "drugs" in summary.understood
-    assert "intoxication" in summary.understood
+    assert "buy drugs" in summary.recognized_topics
+    assert "drugs" in summary.recognized_topics
+    assert "intoxication" in summary.recognized_topics
+    assert summary.understood == []
+    assert "buy drugs" in summary.uncertain
     assert "get wasted" in summary.uncertain
     assert summary.degraded?
     assert :fallback_rate_high in summary.reasons
@@ -79,6 +84,105 @@ defmodule Core.Comprehension.SummaryTest do
     assert summary.degraded?
     assert :unresolved_content_tokens in summary.reasons
     assert summary.stats.unresolved_content == 3
+  end
+
+  test "genitive syntax is visible without assigning a dictionary sense to its owner" do
+    si = %{
+      intent: :ask,
+      sentence: "Japan's railgun development?",
+      tokens: [
+        %{index: 0, phrase: "Japan's"},
+        %{index: 1, phrase: "railgun"},
+        %{index: 2, phrase: "development?"}
+      ],
+      semantic_choices: [
+        %{token_index: 1, id: "railgun|noun|1", score: 0.15},
+        %{token_index: 2, id: "development|noun|1", score: 0.8}
+      ],
+      sentence_signatures: [
+        %{
+          id: :possessive_noun_phrase,
+          span: {0, 2},
+          roles: %{possessor: 0, modifier: 1, head: 2},
+          surface_possessor: "Japan",
+          evidence: [:apostrophe_s, :nominal_head_available]
+        }
+      ]
+    }
+
+    summary = Summary.build(si)
+
+    assert summary.syntactic_relations == [
+      %{
+        type: :genitive_nominal_modifier,
+        span: {0, 2},
+        possessor: "Japan",
+        nominal: "railgun development",
+        head: "development",
+        grounding_status: :unverified,
+        source: :sentence_signature
+      }
+    ]
+
+    assert summary.unresolved == ["japan's"]
+    assert summary.understood == []
+    refute "japan's" in summary.recognized_topics
+    assert summary.degraded?
+    assert :unresolved_content_tokens in summary.reasons
+  end
+
+  test "keeps a verified dictionary meaning distinct from a merely recognized topic" do
+    si = %{
+      intent: :command,
+      keyword: "lights",
+      lexical_constructions: [
+        %{
+          dictionary_verified?: true, id: "turn off|verb|2",
+          phrase: "turn off",
+          definition: "To deactivate an electrical device.",
+          context_score: 0.29, source: :verified_discontinuous_mwe
+        }
+      ],
+      semantic_choices: [
+        %{id: "turn off|verb|2", lemma: "turn off", score: 0.51},
+        %{id: "lights|noun|1", lemma: "lights", score: 0.91}
+      ]
+    }
+
+    summary = Summary.build(si)
+
+    assert summary.recognized_topics == ["lights"]
+    assert summary.understood == ["turn off"]
+    assert summary.selected_lexical_candidates == ["lights"]
+    assert [%{id: "turn off|verb|2"}] = summary.lexical_meanings
+    refute "lights" in summary.understood
+  end
+
+  test "a weak selected topic remains lexically uncertain even if syntactically recognized" do
+    si = %{
+      intent: :ask,
+      keyword: "development",
+      sentence: "What do you know about Japan's railgun development?",
+      semantic_choices: [
+        %{token_index: 6, id: "railgun|noun|1", lemma: "railgun", score: 0.333333},
+        %{token_index: 7, id: "development|noun|1", lemma: "development", score: 0.090909}
+      ],
+      sentence_meaning: %{
+        status: :structurally_interpreted,
+        roles: %{topic: %{surface: "Japan's railgun development",
+                           grounding_status: :not_fully_verified}}
+      }
+    }
+
+    summary = Summary.build(si)
+
+    assert "development" in summary.recognized_topics
+    assert "japan's railgun development" in summary.recognized_topics
+    assert summary.understood == []
+    assert "development" in summary.uncertain
+    assert "railgun" in summary.uncertain
+    assert summary.degraded?
+    assert :weak_decision_rate_high in summary.reasons
   end
 
   test "attach writes summary and trace contract" do

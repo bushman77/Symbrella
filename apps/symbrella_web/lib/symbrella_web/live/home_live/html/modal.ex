@@ -28,20 +28,17 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
 
     <div
       :if={@open?}
-      class="fixed z-[9999] bg-white overflow-x-hidden"
-      style={
-        "top: var(--hdr,56px); bottom: var(--ftr,72px);" <>
-          "left: 50%; width: 100vw; margin-left: -50vw;"
-      }
+      class="fixed inset-x-0 z-[9999] w-full max-w-[100vw] min-w-0 overflow-hidden bg-white"
+      style="top: var(--hdr,56px); bottom: var(--ftr,72px);"
       role="dialog"
       aria-modal="true"
       aria-label="Explain"
       phx-window-keydown="explain_close"
       phx-key="escape"
     >
-      <div class="h-full w-full bg-white">
-        <div class="h-full w-full max-w-none flex flex-col">
-          <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
+      <div class="h-full w-full min-w-0 max-w-full bg-white">
+        <div class="flex h-full w-full min-w-0 max-w-full flex-col">
+          <div class="sticky top-0 z-10 w-full min-w-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-4">
             <div class="flex items-center justify-end">
               <button
                 type="button"
@@ -54,39 +51,39 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
             </div>
           </div>
 
-          <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 overflow-x-hidden">
-            <div class="grid gap-3 w-full">
+          <div class="min-h-0 min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 sm:px-4">
+            <div class="grid w-full min-w-0 max-w-full grid-cols-1 gap-3">
               <div
                 :for={sec <- sections}
-                class="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                class="w-full min-w-0 max-w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 [overflow-wrap:anywhere]"
               >
-                <div class="flex items-center justify-between gap-3">
-                  <div class="text-sm font-semibold truncate">
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1 text-sm font-semibold break-words [overflow-wrap:anywhere]">
                     {sec[:title] || "Section"}
                   </div>
 
                   <span
                     :if={sec[:tag]}
-                    class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700"
+                    class="max-w-[45%] min-w-0 shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 break-words [overflow-wrap:anywhere]"
                   >
                     {sec[:tag]}
                   </span>
                 </div>
 
-                <div :if={sec[:hint]} class="mt-1 text-xs text-slate-600">
+                <div :if={sec[:hint]} class="mt-1 min-w-0 max-w-full text-xs text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                   {sec[:hint]}
                 </div>
 
-                <div class="mt-2 grid gap-2">
+                <div class="mt-2 grid min-w-0 max-w-full grid-cols-1 gap-2">
                   <div
                     :for={item <- sec[:items] || []}
-                    class="rounded-xl border border-slate-200 bg-white p-3"
+                    class="w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3"
                   >
-                    <div :if={item[:label]} class="text-xs font-semibold text-slate-800">
+                    <div :if={item[:label]} class="min-w-0 max-w-full text-xs font-semibold text-slate-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {item[:label]}
                     </div>
 
-                    <div class="mt-1 text-sm whitespace-pre-wrap break-words text-slate-700">
+                    <div class="mt-1 min-w-0 max-w-full text-sm text-slate-700 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {item[:body] || ""}
                     </div>
                   </div>
@@ -846,6 +843,22 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     applied? = pget(reflection, :applied?)
     count = pget(reflection, :repair_count)
     critique = pget(reflection, :critique)
+    grounded = pget(reflection, :grounded_revision)
+
+    # A top-level :repair says only that Core changed the final text. Make
+    # visible whether the grounded second LLM pass was accepted, rejected,
+    # unavailable or never attempted. The primary LLM draft remains useful
+    # even when no second pass ran.
+    geographic_issue? =
+      is_list(issues) and
+        Enum.any?(issues, &(format_frame_value(&1) == ":geographic_claim_unverified"))
+
+    revision_outcome =
+      cond do
+        is_map(grounded) -> format_frame_value(pget(grounded, :outcome, :unknown))
+        geographic_issue? -> ":not_attempted"
+        true -> nil
+      end
 
     if frame_present?(status) do
       items =
@@ -855,6 +868,24 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("applied?", format_frame_value(applied?))
         |> maybe_kv("repair_count", format_frame_value(count))
         |> maybe_kv("review summary", critique)
+        |> maybe_kv("initial model draft",
+          pget(grounded || %{}, :first_draft) || pget(reflection, :draft_text))
+        |> maybe_kv("grounded revision outcome", revision_outcome)
+        |> maybe_kv("final answer origin",
+          cond do
+            is_map(grounded) ->
+              format_frame_value(pget(grounded, :source))
+
+            geographic_issue? ->
+              ":core_fallback"
+
+            true ->
+              nil
+          end)
+        |> maybe_kv("revision candidate", pget(grounded || %{}, :candidate))
+        |> maybe_kv("revision candidate issues",
+          if(is_map(grounded) and pget(grounded, :candidate_issues) != nil,
+            do: format_frame_value(pget(grounded, :candidate_issues)), else: nil))
         |> maybe_kv("draft SHA-256", pget(reflection, :draft_sha256))
         |> maybe_kv("final SHA-256", pget(reflection, :final_sha256))
 

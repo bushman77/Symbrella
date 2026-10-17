@@ -85,7 +85,7 @@ defmodule Db.JSONL.Import do
         st2 =
           st1
           |> flush_group(opts)
-          |> flush_pending(opts)
+          |> flush_pending(opts, true)
 
         took_ms = System.monotonic_time(:millisecond) - start_ms
 
@@ -217,15 +217,17 @@ defmodule Db.JSONL.Import do
     %{st | pending_rows: st.pending_rows ++ rows, pending_count: st.pending_count + length(rows)}
   end
 
-  defp flush_pending(st, opts) do
+  defp flush_pending(st, opts, final? \\ false) do
     batch_size = Keyword.get(opts, :batch_size, st.batch_size)
     returning? = Keyword.get(opts, :returning?, false)
     on_db_error = Keyword.get(opts, :on_db_error, :raise)
 
-    if st.pending_count < batch_size do
+    if st.pending_count == 0 or (not final? and st.pending_count < batch_size) do
       st
     else
-      {to_send, rest} = Enum.split(st.pending_rows, batch_size)
+      # A terminal flush must insert the final partial batch as well.
+      take = min(st.pending_count, batch_size)
+      {to_send, rest} = Enum.split(st.pending_rows, take)
 
       case Upsert.safe_insert_all(st.repo, to_send, returning?, on_db_error) do
         {:ok, {n, _returned}} ->
@@ -234,7 +236,7 @@ defmodule Db.JSONL.Import do
           |> Map.update!(:batches, &(&1 + 1))
           |> Map.put(:pending_rows, rest)
           |> Map.put(:pending_count, length(rest))
-          |> flush_pending(opts)
+          |> flush_pending(opts, final?)
 
         {:error, _e} when on_db_error == :count ->
           st
@@ -242,7 +244,7 @@ defmodule Db.JSONL.Import do
           |> Map.update!(:batches, &(&1 + 1))
           |> Map.put(:pending_rows, rest)
           |> Map.put(:pending_count, length(rest))
-          |> flush_pending(opts)
+          |> flush_pending(opts, final?)
 
         {:error, e} when on_db_error == :halt ->
           throw({:db_error, e, %{upserted_so_far: st.upserted, batches: st.batches}})

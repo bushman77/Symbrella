@@ -26,15 +26,22 @@ defmodule Core.Brain.WM do
   @spec focus_prompt_topics(map(), keyword()) :: map()
   def focus_prompt_topics(%{} = si, opts) when is_list(opts) do
     if Keyword.get(opts, :focus_prompt_topics?, true) == false do
-      si
+      trace_focus(si, 0, :disabled)
     else
       candidates = topic_candidates(si)
 
       if candidates == [] do
+        # Most ordinary questions do not mention one of @brain_topics.
+        # No Brain.focus/2 call occurs, so an empty WM is *not* proof that
+        # BasalGanglia rejected lexical candidates on their scores.
         trace_focus(si, 0, :none)
       else
-        _ = Runtime.apply_if_exported(Brain, :focus, [candidates, []], [])
-        trace_focus(si, length(candidates), :focused)
+        result = Runtime.apply_if_exported(Brain, :focus, [candidates, []], :unavailable)
+
+        case result do
+          wm when is_list(wm) -> trace_focus(si, length(candidates), :focused, length(wm))
+          _ -> trace_focus(si, length(candidates), :unavailable)
+        end
       end
     end
   end
@@ -81,14 +88,40 @@ defmodule Core.Brain.WM do
     |> String.trim()
   end
 
-  defp trace_focus(si, count, decision) do
+  defp trace_focus(si, count, decision, wm_size_after \\ nil) do
+    choices = Map.get(si, :lifg_choices) || Map.get(si, "lifg_choices") || []
+    lifg_count = if is_list(choices), do: length(choices), else: 0
+
+    reason =
+      case decision do
+        :none -> :no_configured_prompt_topic
+        :disabled -> :disabled_by_option
+        :unavailable -> :brain_focus_unavailable
+        :focused -> :prompt_topic_focus
+      end
+
+    # Diagnostics describe *attempts*, not candidate admission outcomes.
+    # LIFG interpretation uses Brain.lifg_run, not this Brain.focus/2 path.
+    :telemetry.execute(
+      [:core, :wm, :focus],
+      %{topic_candidates: count, lifg_choices: lifg_count},
+      %{decision: decision, reason: reason, admission_path: :prompt_topics_only}
+    )
+
     Core.Pipeline.Trace.append(
       si,
       :wm_focus,
       decision: decision,
-      reason: :prompt_topic_focus,
-      scores: %{candidate_count: count},
-      meta: %{candidate_count: count}
+      reason: reason,
+      scores: %{},
+      meta: %{
+        candidate_count: count,
+        lifg_choices_available: lifg_count,
+        lifg_winners_submitted?: false,
+        focus_attempted?: count > 0,
+        admission_path: :prompt_topics_only,
+        wm_size_after: wm_size_after
+      }
     )
   end
 end

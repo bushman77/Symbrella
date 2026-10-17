@@ -66,6 +66,24 @@ defmodule Brain.Hippocampus do
   end
 
   @doc """
+  Write an explicit fact only if PostgreSQL confirms the insert. The ordinary
+  encode/2 path remains best-effort for non-critical episodic observations.
+  """
+  @spec encode_verified_fact(map(), map()) :: :ok | {:error, atom()}
+  def encode_verified_fact(%{} = slate, %{kind: :fact} = meta) do
+    case GenServer.call(__MODULE__, {:encode_verified_fact, slate, meta}) do
+      {:ok, episode, at_ms} ->
+        if TurnTrace.active?(), do: TurnTrace.encode(episode, at_ms)
+        :ok
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def encode_verified_fact(_, _), do: {:error, :invalid_fact}
+
+  @doc """
   Write an explicitly self-tagged autobiographical episode.
 
   This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
@@ -241,6 +259,53 @@ defmodule Brain.Hippocampus do
     do: handle_encode_call(slate, meta_in, from, state, true)
 
   @impl true
+  def handle_call({:encode_verified_fact, slate, meta_in}, from, state) do
+    at = System.system_time(:millisecond)
+
+    norms =
+      slate
+      |> Normalize.extract_norms_from_any()
+      |> Enum.reject(&Normalize.empty?/1)
+      |> MapSet.new()
+
+    meta = enrich_meta_with_emotion(meta_in)
+    episode = %{slate: slate, meta: meta, norms: norms}
+
+    result =
+      try do
+        :ok = Writer.insert_row!(episode)
+        :ok
+      rescue
+        error ->
+          Logger.warning("[Hippocampus] verified fact write failed: #{Exception.message(error)}")
+          {:error, :not_persisted}
+      catch
+        :exit, _reason -> {:error, :not_persisted}
+        _, _reason -> {:error, :not_persisted}
+      end
+
+    case result do
+      :ok ->
+        window = Window.append_or_refresh_head(state.window, episode, state.window_keep)
+
+        next =
+          state
+          |> Map.put(:window, window)
+          |> Map.put(:last, episode)
+          |> Map.put(:last_at, at)
+
+        measurements = %{count: 1, window_size: length(window), norms_count: MapSet.size(norms)}
+        metadata = %{at: at, window_keep: state.window_keep, meta: meta}
+        Telemetry.emit_write(measurements, metadata)
+        Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], measurements, metadata)
+        {:reply, {:ok, episode, at}, next}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  @impl true
   def handle_call({:recall, cues, opts}, from, state) do
     {results, meas, meta} = do_recall(cues, state, opts)
 
@@ -360,13 +425,21 @@ defmodule Brain.Hippocampus do
   defp find_fact_in_window(_window, _key), do: nil
 
   defp find_fact_in_db(key) when is_atom(key) or is_binary(key) do
-    if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :recent, 1) do
-      Db.Episode.recent(@boot_warm_limit)
-      |> Enum.find_value(fn row ->
-        row
-        |> db_row_to_episode()
-        |> fact_from_episode(key)
-      end)
+    cond do
+      Code.ensure_loaded?(Db.Episode) and
+          function_exported?(Db.Episode, :latest_user_fact, 1) ->
+        Db.Episode.latest_user_fact(key)
+
+      Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :recent, 1) ->
+        Db.Episode.recent(@boot_warm_limit)
+        |> Enum.find_value(fn row ->
+          row
+          |> db_row_to_episode()
+          |> fact_from_episode(key)
+        end)
+
+      true ->
+        nil
     end
   end
 
@@ -575,7 +648,10 @@ defmodule Brain.Hippocampus do
     end
   end
 
-  defp db_row_to_episode(row) do
+  # Keep this pure adapter inspectable in tests: row.si is a VIRTUAL field
+  # and is empty after database reads. Durable pointer metadata is in row.meta.
+  @doc false
+  def db_row_to_episode(row) do
     tokens = List.wrap(Map.get(row, :tokens) || [])
 
     norms =
@@ -585,6 +661,11 @@ defmodule Brain.Hippocampus do
 
     si = Map.get(row, :si) || %{}
     tags = Map.get(row, :tags) || []
+    persisted_meta =
+      case Map.get(row, :meta) do
+        %{} = meta -> meta
+        _ -> %{}
+      end
 
     meta_key =
       get_in(si, ["meta", "key"]) ||
@@ -594,7 +675,14 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", "key"]) ||
         get_in(si, [:episode, :meta, :key]) ||
         get_in(si, ["episode", "meta", :key]) ||
-        get_in(si, [:episode, "meta", "key"])
+        get_in(si, [:episode, "meta", "key"]) ||
+        Map.get(persisted_meta, "key") ||
+        Map.get(persisted_meta, :key)
+
+    # Restore compact semantic-association markers from the persisted
+    # episode meta. They are retrieval pointers only, never verified facts.
+    semantic_kind =
+      Map.get(persisted_meta, "kind") || Map.get(persisted_meta, :kind)
 
     meta_value =
       get_in(si, ["meta", "value"]) ||
@@ -604,7 +692,9 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", "value"]) ||
         get_in(si, [:episode, :meta, :value]) ||
         get_in(si, ["episode", "meta", :value]) ||
-        get_in(si, [:episode, "meta", "value"])
+        get_in(si, [:episode, "meta", "value"]) ||
+        Map.get(persisted_meta, "value") ||
+        Map.get(persisted_meta, :value)
 
     %{
       slate: %{
@@ -616,7 +706,13 @@ defmodule Brain.Hippocampus do
         source: :db,
         episode_id: Map.get(row, :id),
         inserted_at: Map.get(row, :inserted_at),
+        # These fields are persisted as dedicated columns by Db.Episode.
+        # Restore them so Core.Response.Context can enforce session provenance
+        # and expose a bounded recollection after a cold restart.
+        session_id: Map.get(row, :session_id),
+        sentence: Map.get(row, :sentence),
         tags: tags,
+        kind: semantic_kind,
         key: meta_key,
         value: meta_value
       },

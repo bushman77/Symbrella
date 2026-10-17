@@ -80,6 +80,12 @@ defmodule Brain.LIFG.BoundaryGuard do
       span = Map.get(tok, :span) || Map.get(tok, "span")
 
       cond do
+        # Standalone punctuation is a legitimate tokenizer byproduct, not a
+        # malformed word boundary. It must not inflate SelfPortrait errors.
+        # Embedded punctuation ("BC?", "Kamloops,") is still processed.
+        punctuation_only?(phrase) ->
+          acc
+
         # cross-word non-mw => char-gram symptom
         not mw? and String.match?(phrase, ~r/\s/u) ->
           emit_chargram_violation(tok, :cross_word)
@@ -100,6 +106,12 @@ defmodule Brain.LIFG.BoundaryGuard do
     |> Enum.reverse()
     |> Enum.sort_by(&span_start/1)
   end
+
+  defp punctuation_only?(phrase) when is_binary(phrase) do
+    String.match?(String.trim(phrase), ~r/^\p{P}+$/u)
+  end
+
+  defp punctuation_only?(_), do: false
 
   # ──────────────────────────────────────────────────────────
   # Token field helpers

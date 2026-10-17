@@ -9,6 +9,7 @@ defmodule SymbrellaWeb.ChatLive.HTML do
   use SymbrellaWeb, :html
 
   alias SymbrellaWeb.HomeLive.HTML.Modal
+  alias SymbrellaWeb.ChatLive.SourceLinks
 
   # ---------- components ----------
 
@@ -19,10 +20,27 @@ defmodule SymbrellaWeb.ChatLive.HTML do
     ~H"""
     <% text = to_string(@message.text || "") %>
     <% {main, _extra} = split_lexical_tail(text) %>
+    <% parts = SourceLinks.parts(main) %>
 
-    <p class="whitespace-pre-wrap">
-      {main}
-    </p>
+    <%!-- Keep dynamic parts adjacent: whitespace inside the template would be
+          preserved by whitespace-pre-wrap and create big gaps/new lines. --%>
+    <p class="whitespace-pre-wrap break-words"><%= for part <- parts do %><%= if part.kind == :source do %><a
+      href={part.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="inline-flex items-center gap-0.5 whitespace-nowrap align-baseline text-sm font-medium text-sky-400 underline underline-offset-2 hover:text-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+      title={part.url}
+    ><img
+      src={part.favicon}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      decoding="async"
+      referrerpolicy="no-referrer"
+      width="14"
+      height="14"
+      class="inline-block size-3.5 shrink-0"
+    />{part.label}</a><% else %>{part.text}<% end %><% end %></p>
     """
   end
 

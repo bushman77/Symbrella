@@ -144,6 +144,7 @@ defmodule Core.Response.Attach do
       self_monitor: si_get(si, :self_monitor),
       self_memory_recall: si_get(si, :self_memory_recall),
       symbolic_frame: si_get(si, :symbolic_frame),
+      discourse_reference: si_get(si, :discourse_reference),
       selected_action: si_get(si, :selected_action),
       action_candidates: si_get(si, :action_candidates),
       action_meta: si_get(si, :action_meta),

@@ -75,39 +75,43 @@ defmodule Core.Response.SideEffects do
 
   def record_agency_response(_user_text, _assistant_text, _features, _meta), do: :ok
 
-  @spec persist_user_name(String.t(), String.t()) :: :ok
+  @spec persist_user_name(String.t(), String.t()) :: :ok | {:error, atom()}
   def persist_user_name(name, raw_text) when is_binary(name) do
-    if not assistant_name?(name) and Code.ensure_loaded?(Brain.Hippocampus) and
-         function_exported?(Brain.Hippocampus, :encode, 2) do
-      slate = %{
-        sentence: raw_text,
-        winners: [%{lemma: name}],
-        tokens: [name],
-        tags: ["fact", "user_name"]
-      }
+    cond do
+      assistant_name?(name) ->
+        {:error, :assistant_identity}
 
-      meta = %{
-        tags: ["fact", "user_name"],
-        scope: :chat,
-        subject: :user,
-        kind: :fact,
-        key: :user_name,
-        value: name
-      }
+      verified_fact_memory_available?() ->
+        slate = %{
+          sentence: raw_text,
+          winners: [%{lemma: name}],
+          tokens: [name],
+          tags: ["fact", "user_name"]
+        }
 
-      _ = Brain.Hippocampus.encode(slate, meta)
+        meta = %{
+          tags: ["fact", "user_name"],
+          scope: :chat,
+          subject: :user,
+          kind: :fact,
+          key: :user_name,
+          value: name
+        }
+
+        Brain.Hippocampus.encode_verified_fact(slate, meta)
+
+      true ->
+        {:error, :memory_unavailable}
     end
-
-    :ok
   end
 
-  def persist_user_name(_name, _raw_text), do: :ok
+  def persist_user_name(_name, _raw_text), do: {:error, :invalid_name}
 
-  @spec persist_user_fact(String.t(), String.t(), String.t(), String.t()) :: :ok
+  @spec persist_user_fact(String.t(), String.t(), String.t(), String.t()) ::
+          :ok | {:error, atom()}
   def persist_user_fact(key, label, value, raw_text)
       when is_binary(key) and is_binary(label) and is_binary(value) do
-    if Code.ensure_loaded?(Brain.Hippocampus) and
-         function_exported?(Brain.Hippocampus, :encode, 2) do
+    if verified_fact_memory_available?() do
       tokens = key |> String.split("_", trim: true) |> Enum.uniq()
 
       slate = %{
@@ -127,13 +131,26 @@ defmodule Core.Response.SideEffects do
         value: value
       }
 
-      _ = Brain.Hippocampus.encode(slate, meta)
+      Brain.Hippocampus.encode_verified_fact(slate, meta)
+    else
+      {:error, :memory_unavailable}
     end
-
-    :ok
   end
 
-  def persist_user_fact(_key, _label, _value, _raw_text), do: :ok
+  def persist_user_fact(_key, _label, _value, _raw_text), do: {:error, :invalid_fact}
+
+  defp verified_fact_memory_available? do
+    Code.ensure_loaded?(Brain.Hippocampus) and
+      function_exported?(Brain.Hippocampus, :encode_verified_fact, 2) and
+      is_pid(Process.whereis(Brain.Hippocampus))
+  end
+
+  @spec assistant_name() :: String.t()
+  def assistant_name do
+    assistant = Application.get_env(:symbrella, :assistant, [])
+    name = config_get(assistant, :name, "Symbrella")
+    if is_binary(name) and String.trim(name) != "", do: String.trim(name), else: "Symbrella"
+  end
 
   @spec recalled_user_name(String.t() | nil) :: String.t() | nil
   def recalled_user_name(extracted_name) do

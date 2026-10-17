@@ -19,6 +19,87 @@ claims of biological equivalence. Symbrella is not a neuron-for-neuron brain
 simulation, not a clinically validated neurological model, and not proof of
 consciousness, sentience, feelings, or subjective experience.
 
+## Quickstart
+
+Run from the umbrella root (`~/Symbrella`):
+
+```bash
+mix deps.get
+mix db.setup
+mix assets.build
+mix phx.server
+```
+
+Open `http://localhost:4000`.
+
+For first-time asset-tool installation:
+
+```bash
+cd apps/symbrella_web
+mix tailwind.install --if-missing
+mix esbuild.install --if-missing
+cd ../..
+```
+
+## Mix Command Reference
+
+The commands below are run from the **umbrella root**. Database and dictionary
+aliases are defined in the root `mix.exs`; use them instead of calling scripts
+directly.
+
+### Everyday development
+
+| Command | Purpose |
+| --- | --- |
+| `mix compile` | Compile the umbrella applications. |
+| `mix test` | Run all tests, prepare the test DB, and clear the negative cache. |
+| `mix test apps/brain/test/brain/curiosity_flow_test.exs` | Run a specific test file. |
+| `mix format` | Format the Elixir code. |
+| `mix assets.build` | Build web assets. |
+| `mix assets.deploy` | Minify/build production-style web assets. |
+| `mix negcache.clean` | Clear the Core negative-cache directories. |
+| `mix cache.nuke` | Alias for `mix negcache.clean`. |
+| `mix phx.server` | Start the Phoenix server. |
+
+### Database and Wiktextract dictionary
+
+| Command | Purpose |
+| --- | --- |
+| `mix db.setup` | Create/migrate the configured DB and clear the negative cache. |
+| `mix db.migrate` | Apply pending database migrations. |
+| `mix db.rollback` | Roll back a database migration. |
+| `mix db.migrations` | Display migration status. |
+| `mix db.dictionary --extract-only` | Prepare `apps/db/priv/english.jsonl` without importing. |
+| `mix db.dictionary --import-only --no-migrate` | Upsert the existing English corpus without re-extracting or migrating. |
+| `mix db.dictionary` | Ensure the corpus exists, run migrations, and import it. |
+| `mix db.dictionary.audit` | **Read-only** full-source fidelity audit; writes a JSON report under `tmp/`. |
+| `mix db.dictionary.audit --limit-lines 10000` | Audit a 10,000-line sample; does not certify the full corpus. |
+| `mix db.reset` / `mix dbreset` | **DESTRUCTIVE:** drop and recreate the configured database. |
+| `mix db.rebuild` / `mix dbrebuild` | **DESTRUCTIVE:** reset the database and reimport the dictionary. |
+
+Select the target database explicitly for dictionary operations. The audit
+defaults to requiring `brain_dictionary_test` and refuses a different database
+unless `--expect-db` is supplied.
+
+```bash
+# Audit the isolated dictionary database without writing to it.
+env -u DATABASE_URL PGDATABASE=brain_dictionary_test \
+  mix db.dictionary.audit --progress 200000
+
+# Example of an existing-database import, ONLY after backup and ID review.
+env -u DATABASE_URL PGDATABASE=brain \
+  mix db.dictionary --import-only --no-migrate
+```
+
+**Import safety:** `mix db.dictionary` performs upserts; an existing BrainCell
+with the same positional `word|pos|index` ID can have its lexical fields
+replaced. The importer preserves existing status, activation, and connectivity
+rather than deliberately resetting cognitive state, but positional IDs are not
+stable semantic identities across source revisions. Back up and review the
+target database before a live reimport. **Never use `mix db.reset` or
+`mix db.rebuild` on the live database unless intentionally discarding its
+state.**
+
 ## Runtime Stack
 
 - **Erlang/OTP:** 28
@@ -304,72 +385,6 @@ work so all WM ingress paths eventually obey the same inspectable cognitive
 gate.
 
 Tests around this loop live under `apps/brain/test/brain`.
-
-## Quickstart
-
-From the umbrella root:
-
-```bash
-mix deps.get
-mix db.setup
-mix assets.build
-mix phx.server
-```
-
-Open:
-
-```text
-http://localhost:4000
-```
-
-If you are setting up asset tool binaries for the first time:
-
-```bash
-cd apps/symbrella_web
-mix tailwind.install --if-missing
-mix esbuild.install --if-missing
-cd ../../
-```
-
-## Common Commands
-
-```bash
-# compile the umbrella
-mix compile
-
-# run all tests; this also prepares the test DB and clears negcache
-mix test
-
-# run a specific test file
-mix test apps/brain/test/brain/curiosity_flow_test.exs
-
-# format code
-mix format
-
-# build assets
-mix assets.build
-
-# production-style asset build
-mix assets.deploy
-
-# reset local DB
-mix db.reset
-```
-
-## Database Notes
-
-The root aliases target the `Db` repo:
-
-```bash
-mix db.setup
-mix db.migrate
-mix db.rollback
-mix db.migrations
-mix db.reset
-```
-
-Episode, self-snapshot, agency-event, brain-cell, and cerebellum-model schemas
-live in `apps/db`. JSONL import helpers live under `apps/db/lib/db/jsonl`.
 
 ## Local LLM Notes
 

@@ -372,17 +372,14 @@ defmodule Brain.LIFG do
               Application.get_env(:brain, :acc_conflict_tau, 0.50)
             )
 
+          # Use the same planner predicate as PMTG itself. In particular,
+          # a Stage1 closed-class winner with a diffuse dictionary slate is
+          # not automatically a candidate for episodic/lexical retrieval.
           needy =
-            Enum.filter(choices, fn ch ->
-              m = (ch[:margin] || 1.0) * 1.0
-              alts? = (ch[:alt_ids] || []) != []
-              p1 = top1_prob(ch)
-              weak? = ch[:weak?] == true or ch["weak?"] == true
-              fallback? = fallback_choice?(ch)
-
-              ((m < cfg.margin_thr or p1 < Application.get_env(:brain, :acc_p_min, 0.65)) and
-                 alts?) or weak? or fallback?
-            end)
+            Brain.PMTG.needy_choices(choices,
+              margin_threshold: cfg.margin_thr,
+              p_min: Application.get_env(:brain, :acc_p_min, 0.65)
+            )
 
           pmtg_mode =
             Keyword.get(eff_opts, :pmtg_mode, Application.get_env(:brain, :pmtg_mode, :boost))
@@ -395,7 +392,7 @@ defmodule Brain.LIFG do
               length(needy) >= Application.get_env(:brain, :pmtg_force_needy_count, 3)
 
           pmtg_apply? =
-            Keyword.get(eff_opts, :pmtg_apply?, true) and
+            Keyword.get(eff_opts, :pmtg_apply?, true) and needy != [] and
               (force_pmtg? or not acc_present? or acc_conflict + acc_epsilon >= acc_conf_tau)
 
           :telemetry.execute(
@@ -645,7 +642,11 @@ defmodule Brain.LIFG do
           :source,
           :stage1_local_mwe_fallback,
           :stage1_stop_event,
-          :grammar_weight
+          :grammar_weight,
+          :semantic_control?,
+          :semantic_control_max_delta,
+          :semantic_control_min_fit,
+          :semantic_control_min_gap
         ])
       )
 

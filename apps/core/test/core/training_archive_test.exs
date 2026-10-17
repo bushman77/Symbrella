@@ -1,5 +1,5 @@
 defmodule Core.TrainingArchiveTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Core.TrainingArchive
 
@@ -41,6 +41,39 @@ defmodule Core.TrainingArchiveTest do
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.map(&Jason.decode!/1)
+  end
+
+  test "config enables automatic appends without passing per-call options", %{dir: dir} do
+    previous = Application.get_env(:core, TrainingArchive, [])
+
+    # The normal application takes these settings from config/config.exs.
+    # Exercise the public default-config path without any launch variables.
+    on_exit(fn -> Application.put_env(:core, TrainingArchive, previous) end)
+
+    Application.put_env(
+      :core,
+      TrainingArchive,
+      Keyword.merge(previous, enabled?: true, dir: dir)
+    )
+
+    assert :ok == TrainingArchive.record_turn(turn())
+    assert :ok ==
+             TrainingArchive.record_turn(
+               turn(%{turn_id: "turn-test-2", user_text: "Hello", assistant_text: "Hi"})
+             )
+
+    assert Enum.map(records(Path.join(dir, "turns.jsonl")), & &1["turn_id"]) ==
+             ["turn-test-1", "turn-test-2"]
+
+    # Disabling via app config takes effect without modifying the recorder.
+    Application.put_env(
+      :core,
+      TrainingArchive,
+      Keyword.merge(previous, enabled?: false, dir: dir)
+    )
+
+    assert :disabled == TrainingArchive.record_turn(turn(%{turn_id: "turn-test-3"}))
+    assert length(records(Path.join(dir, "turns.jsonl"))) == 2
   end
 
   test "disabled by default; does not create a directory", %{dir: dir} do

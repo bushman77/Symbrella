@@ -9,6 +9,8 @@ defmodule Core.Response.Context do
   """
 
   @summary_limit 5
+  @episodic_limit 2
+  @episode_text_limit 220
 
   @type t :: map()
 
@@ -19,9 +21,11 @@ defmodule Core.Response.Context do
       session_id: map_get(si, :session_id, :global),
       symbolic_frame: symbolic_frame(si),
       comprehension: map_get(si, :comprehension),
+      wm_context: wm_context_summary(map_get(si, :wm_context)),
       self_model: map_get(si, :self_model),
       self_monitor: map_get(si, :self_monitor),
-      self_memory_recall: map_get(si, :self_memory_recall)
+      self_memory_recall: map_get(si, :self_memory_recall),
+      episodic_recall: episodic_recall_summary(si)
     }
     |> drop_empty()
   end
@@ -57,6 +61,7 @@ defmodule Core.Response.Context do
           map_get(embedded, :self_memory_recall),
           map_get(runtime, :self_memory_recall)
         ]),
+      episodic_recall: map_get(embedded, :episodic_recall),
       runtime_state: map_get(runtime, :runtime_state),
       comprehension:
         first_present([
@@ -115,6 +120,45 @@ defmodule Core.Response.Context do
     case map_get(features, :turn_context) do
       %{} = context -> context
       _ -> %{}
+    end
+  end
+
+  # Attach only bounded, same-session, positively scored episode text.
+  # This is remembered conversation context, NOT source verification. Keep raw
+  # episode structures, untrusted metadata and cross-session data out of the
+  # response prompt.
+  defp episodic_recall_summary(si) do
+    session_id = map_get(si, :session_id)
+    evidence = map_get(si, :evidence)
+
+    if is_binary(session_id) and session_id != "" and is_map(evidence) do
+      evidence
+      |> map_get(:episodes, [])
+      |> list_or_empty()
+      |> Enum.flat_map(fn hit ->
+        episode = map_get(hit, :episode)
+        meta = map_get(episode, :meta)
+        score = map_get(hit, :score)
+        sentence = map_get(meta, :sentence)
+
+        if is_number(score) and score > 0 and
+             is_map(meta) and map_get(meta, :session_id) == session_id and
+             is_binary(sentence) and String.valid?(sentence) do
+          note =
+            sentence
+            |> String.replace(~r/[[:cntrl:]]/u, " ")
+            |> String.trim()
+            |> clamp(@episode_text_limit)
+
+          if note == "", do: [], else: [%{text: note, source: :hippocampal_episode}]
+        else
+          []
+        end
+      end)
+      |> Enum.uniq_by(& &1.text)
+      |> Enum.take(@episodic_limit)
+    else
+      []
     end
   end
 
@@ -222,9 +266,19 @@ defmodule Core.Response.Context do
   defp sense_candidate_count(list) when is_list(list), do: length(list)
   defp sense_candidate_count(_), do: 0
 
+  defp wm_context_summary(%{} = context) do
+    context
+    |> Map.take([:intent, :entities, :relation, :recognized_topics,
+      :degraded?, :verification, :interpretation_status])
+    |> drop_empty()
+  end
+
+  defp wm_context_summary(_), do: nil
+
   defp semantic_event_summary(%{} = event) do
     event
-    |> Map.take([:type, :subject, :modality, :action, :confidence, :uncertain_roles])
+    |> Map.take([:type, :subject, :subjects, :target, :relation, :comparison, :grounding_status,
+      :antecedent_source, :unresolved_roles, :modality, :action, :confidence, :uncertain_roles])
     |> drop_empty()
   end
 

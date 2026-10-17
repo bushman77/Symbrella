@@ -101,7 +101,18 @@ defmodule Core.Response.RuntimeContext do
       safe_call(
         fn ->
           case Brain.snapshot_wm() do
-            %{wm: wm} when is_list(wm) -> wm
+            %{wm: wm} when is_list(wm) ->
+              # Brain WM is global. Both comprehension and verified semantic
+              # frames are keyed to individual sessions and MUST NOT enter
+              # unrelated session prompts through an unscoped WM snapshot.
+              # In particular, proof pointers do not authorize LLM claims.
+              Enum.reject(wm, fn item ->
+                payload = map_get(item, :payload, %{})
+                kind = map_get(payload, :kind)
+
+                kind in [:comprehension_frame, :verified_semantic_frame] or
+                  map_get(item, :source) in [:comprehension, :verified_semantics]
+              end)
             _ -> []
           end
         end,

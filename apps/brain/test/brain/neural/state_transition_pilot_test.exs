@@ -347,4 +347,50 @@ defmodule Brain.Neural.StateTransitionPilotTest do
   end
 
 
+
+  test "time-reversed archive entries cannot become misleading training transitions", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4, 0.6]}])
+
+    path = Path.join(dir, "turns.jsonl")
+    [first, second, third] =
+      path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    first = Map.put(first, "recorded_at", "2026-10-13T12:01:00Z")
+    second = Map.put(second, "recorded_at", "2026-10-13T11:59:00Z")
+    File.write!(path, Enum.map_join([first, second, third], "", &(Jason.encode!(&1) <> "\n")))
+
+    assert {:error, :out_of_order_session_turns} =
+             StateTransitionBuilder.build(dir, smoke: true)
+  end
+
+  test "a truncated turn trace is rejected even when no event line was written", %{dir: dir} do
+    write_turns(dir, [{"session-a", [0.2, 0.4]}])
+    path = Path.join(dir, "turns.jsonl")
+    [first, second] =
+      path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    first = Map.put(first, "hippocampal_trace", %{
+      "status" => "incomplete",
+      "worker" => %{"status" => "truncated"}
+    })
+    File.write!(path, Enum.map_join([first, second], "", &(Jason.encode!(&1) <> "\n")))
+
+    assert {:error, :truncated_hippocampal_trace} =
+             StateTransitionBuilder.build(dir, smoke: true)
+  end
+
+  test "four independent sessions keep two sessions for holdout", %{dir: dir} do
+    write_turns(dir, [
+      {"session-a", [0.2, 0.4]},
+      {"session-b", [0.3, 0.5]},
+      {"session-c", [0.4, 0.6]},
+      {"session-d", [0.5, 0.7]}
+    ])
+
+    assert {:ok, data} = StateTransitionBuilder.build(dir)
+    assert data.metadata.train_sessions == ["session-a", "session-b"]
+    assert data.metadata.eval_sessions == ["session-c", "session-d"]
+    assert data.metadata.train_examples == 2
+    assert data.metadata.eval_examples == 2
+  end
 end

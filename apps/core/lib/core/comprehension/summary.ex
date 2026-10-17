@@ -1,13 +1,13 @@
 defmodule Core.Comprehension.Summary do
   @moduledoc """
-  Builds a compact, prompt-facing summary of what the pipeline understood.
+  Builds a compact, prompt-facing summary with separate evidence levels.
 
-  The summary is deliberately coarser than LIFG choices. It gives downstream
-  response planning a stable contract:
-
-  * `:understood` for high-confidence or explicit semantic anchors.
-  * `:uncertain` for weak/fallback concepts.
-  * `:degraded?` and `:reasons` when the evidence quality is poor.
+  * `:recognized_topics` — intent/keyword/topic-syntax anchors, not word senses.
+  * `:selected_lexical_candidates` — high-scoring LIFG lexical selections;
+    those scores alone do not verify a meaning.
+  * `:understood` — only independently dictionary-verified lexical constructions.
+  * `:uncertain` — weak/fallback decisions and unresolved content.
+  * `:degraded?` and `:reasons` retain the existing evidence-quality warnings.
   """
 
   @summary_limit 6
@@ -56,17 +56,43 @@ defmodule Core.Comprehension.Summary do
     choices = resolved_choices(si)
     tokens = List.wrap(Map.get(si, :tokens) || Map.get(si, "tokens") || [])
     lexical_meanings = verified_lexical_meanings(si)
+    syntactic_relations = syntactic_possessives(si, tokens)
+    sentence_meaning =
+      case Map.get(si, :sentence_meaning) || Map.get(si, "sentence_meaning") do
+        %{} = meaning -> meaning
+        _ -> nil
+      end
+
+    sentence_definition =
+      case sentence_meaning do
+        %{definition: text} when is_binary(text) -> text
+        _ -> nil
+      end
 
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
 
-    understood =
+    recognized_topics =
       []
       |> maybe_add_keyword(keyword, intent)
       |> Kernel.++(intent_anchors(intent, sentence))
-      |> Kernel.++(Enum.map(lexical_meanings, & &1.phrase))
-      |> Kernel.++(strong)
+      |> Kernel.++(sentence_topic_anchors(sentence_meaning))
       |> clean_terms()
+      |> Enum.take(@summary_limit)
+
+    # A selected sense and an observed topic are not proof of lexical
+    # understanding. Only the independently verified lexical constructions
+    # contribute to the :understood field.
+    understood =
+      lexical_meanings
+      |> Enum.map(& &1.phrase)
+      |> clean_terms()
+      |> Enum.take(@summary_limit)
+
+    selected_lexical_candidates =
+      strong
+      |> clean_terms()
+      |> Enum.reject(&(&1 in understood))
       |> Enum.take(@summary_limit)
 
     lexical_parts =
@@ -85,13 +111,33 @@ defmodule Core.Comprehension.Summary do
     reasons = degradation_reasons(stats, choices)
     degraded? = reasons != []
 
+    # A plural reference is licensed by the immediately preceding same-session
+    # WM comprehension frame. It identifies referents, not verified facts.
+    active_referents =
+      case Map.get(si, :discourse_reference) do
+        %{source: :wm_comprehension, antecedents: entities} when is_list(entities) ->
+          entities |> Enum.filter(&is_binary/1) |> Enum.take(@summary_limit)
+
+        _ ->
+          []
+      end
+
     %{
-      version: 1,
+      version: 2,
       intent: intent,
       confidence: confidence,
       keyword: blank_to_nil(keyword),
+      recognized_topics: recognized_topics,
+      active_referents: active_referents,
+      selected_lexical_candidates: selected_lexical_candidates,
       understood: understood,
       lexical_meanings: lexical_meanings,
+      syntactic_relations: syntactic_relations,
+      sentence_meaning: sentence_meaning,
+      lifg_feedback: Map.get(si, :lifg_feedback),
+      sentence_definition: sentence_definition,
+      sentence_proposition: if(is_map(sentence_meaning),
+        do: Map.get(sentence_meaning, :proposition), else: nil),
       uncertain: uncertain,
       unresolved: unresolved,
       degraded?: degraded?,
@@ -101,6 +147,56 @@ defmodule Core.Comprehension.Summary do
   end
 
   def build(_si, _opts), do: empty_summary()
+
+  # Preserve a purely grammatical genitive relationship separately from
+  # grounded lexical meaning. The surface owner may have NO dictionary sense,
+  # as with "Japan's"; do not assign it an ID, include it in understood, or
+  # override degradation just because syntax found an apostrophe-s.
+  defp syntactic_possessives(si, tokens) do
+    indexed =
+      tokens
+      |> Enum.with_index()
+      |> Map.new(fn {token, fallback} -> {token_index(token, fallback), token_term(token)} end)
+
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{id: :possessive_noun_phrase,
+        span: {first, last},
+        roles: %{possessor: possessor, head: head},
+        surface_possessor: owner}
+      when is_integer(first) and is_integer(last) and
+           is_integer(possessor) and is_integer(head) and
+           is_binary(owner) and last >= first and
+           last - first <= 3 ->
+        head_surface = Map.get(indexed, head, "")
+
+        nominal_surface =
+          (possessor + 1)..last
+          |> Enum.map(&Map.get(indexed, &1, ""))
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.join(" ")
+
+        if head_surface != "" and nominal_surface != "" do
+          [%{
+            type: :genitive_nominal_modifier,
+            span: {first, last},
+            possessor: owner,
+            nominal: nominal_surface,
+            head: head_surface,
+            grounding_status: :unverified,
+            source: :sentence_signature
+          }]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.take(4)
+  end
 
   # A phrase is an understood *lexical meaning* only when a real dictionary
   # sense has been verified and there was discriminating contextual evidence.
@@ -140,7 +236,12 @@ defmodule Core.Comprehension.Summary do
       term = choice_term(choice)
       score = choice_score(choice)
       fallback? = fallback_choice?(choice)
-      weak? = score < @weak_score or fallback?
+      # A near-tie reselected by ATL feedback remains lexically uncertain.
+      # Do not turn a 0.50-ish posterior into a strong meaning claim.
+      relational_weak? =
+        is_map(choice) and Map.get(choice, :relational_feedback_uncertain?, false) == true
+
+      weak? = score < @weak_score or fallback? or relational_weak?
 
       stats =
         stats
@@ -176,6 +277,15 @@ defmodule Core.Comprehension.Summary do
     |> maybe_reason(stats.weak_rate >= @weak_rate_threshold, :weak_decision_rate_high)
     |> maybe_reason(Map.get(stats, :unresolved_content, 0) > 0, :unresolved_content_tokens)
   end
+
+  # The topic phrase comes from a resolved grammatical sentence frame. Its
+  # surface can be recognized without making its dictionary sense verified.
+  defp sentence_topic_anchors(%{
+         status: :structurally_interpreted,
+         roles: %{topic: %{surface: topic}}
+       }) when is_binary(topic), do: [topic]
+
+  defp sentence_topic_anchors(_), do: []
 
   defp maybe_add_keyword(acc, "", _intent), do: acc
   defp maybe_add_keyword(acc, _keyword, :unknown), do: acc
@@ -382,12 +492,19 @@ defmodule Core.Comprehension.Summary do
 
   defp empty_summary do
     %{
-      version: 1,
+      version: 2,
       intent: :unknown,
       confidence: 0.0,
       keyword: nil,
+      recognized_topics: [],
+      selected_lexical_candidates: [],
       understood: [],
       lexical_meanings: [],
+      syntactic_relations: [],
+      sentence_meaning: nil,
+      lifg_feedback: nil,
+      sentence_definition: nil,
+      sentence_proposition: nil,
       uncertain: [],
       degraded?: true,
       reasons: [:invalid_input],

@@ -61,7 +61,9 @@ defmodule Db.BrainCell do
 
   # POS-aware grammar allowlist (matches the DB CHECK)
   @gf_allow %{
-    "noun" => ~w(countable uncountable plural-only usually plural),
+    # The last item is a single compound grammar value (SQL CHECK allowlist).
+    # ~w(...) would split it into "usually" and "plural" and silently lose it.
+    "noun" => ["countable", "uncountable", "plural-only", "usually plural"],
     "verb" =>
       ~w(transitive intransitive ditransitive ambitransitive copular auxiliary modal ergative impersonal),
     "adjective" => ~w(attributive-only predicative-only postpositive comparative-only)

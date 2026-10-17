@@ -1,0 +1,470 @@
+defmodule Core.Syntax.SentenceCompetitionTest do
+  use ExUnit.Case, async: true
+
+  alias Core.{SemanticInput, TokenFilters, TokenResolution}
+  alias Core.MWE.{Decisions, Lexicon}
+  alias Core.Syntax.{SentenceCompetition, Signatures}
+
+  @sense_one %{
+    id: "what do you know|phrase|1",
+    norm: "what do you know", pos: "phrase",
+    definition: "(colloquial, sarcastic) What a surprise; guess what.",
+    example: "Who would have thunk it?", activation: 0.0
+  }
+  @sense_two %{
+    id: "what do you know|phrase|2",
+    norm: "what do you know", pos: "phrase",
+    definition: "Used other than figuratively: see what, do, you, know; synonym of you don't know what you're talking about.",
+    example: "Well, what do you know?", activation: 0.0
+  }
+
+  @do_you %{
+    id: "do you|interjection|1", norm: "do you", pos: "interjection",
+    definition: "Used as an exclamation or expression of disbelief."
+  }
+
+  @know_about %{
+    id: "know about|verb|1", norm: "know about", pos: "verb",
+    definition: "To have information concerning some subject."
+  }
+
+  @about_japan %{
+    id: "about japan's|phrase|1", norm: "about japan's", pos: "phrase",
+    definition: "A fictional name for an unrelated expression."
+  }
+
+  @topic_phrase %{
+    id: "railgun development|noun|1", norm: "railgun development",
+    pos: "noun", definition: "An electromagnetic weapons research programme."
+  }
+
+  @lexical_cells [
+    %{norm: "what", pos: "pronoun"},
+    %{norm: "do", pos: "auxiliary"},
+    %{norm: "did", pos: "auxiliary"},
+    %{norm: "you", pos: "pronoun"},
+    %{norm: "she", pos: "pronoun"},
+    %{norm: "know", pos: "verb"},
+    %{norm: "say", pos: "verb"},
+    %{norm: "about", pos: "preposition"},
+    %{norm: "japan's", pos: "proper_noun"},
+    %{norm: "railgun", pos: "noun"},
+    %{norm: "development", pos: "noun"},
+    %{norm: "experiment", pos: "noun"},
+    %{norm: "exactly", pos: "adverb"},
+    %{norm: "actually", pos: "adverb"},
+    %{norm: "really", pos: "adverb"},
+    %{norm: "not", pos: "adverb"},
+    %{norm: "don't", pos: "auxiliary"},
+    %{norm: "the", pos: "determiner"}
+  ]
+
+  defp input(sentence, senses \\ [@sense_one, @sense_two], cells \\ @lexical_cells) do
+    lookup = fn phrases ->
+      Enum.filter(senses, &(Map.get(&1, :norm) in phrases))
+    end
+
+    %SemanticInput{sentence: sentence, active_cells: cells, intent: :ask,
+                   conversation_act: :question}
+    |> TokenFilters.rebuild_word_ngrams(3)
+    |> Lexicon.attach(mwe_lookup: lookup)
+    |> Signatures.attach()
+    |> SentenceCompetition.attach()
+  end
+
+  defp make_phrase(span, phrase, id) do
+    %{
+      token_index: 12, token_span: span, phrase: phrase, lemma: phrase,
+      id: id, pos: "phrase", source: :mwe_lexicon, score: 0.529
+    }
+  end
+
+  test "complete WH auxiliary clause outranks an overlapping ambiguous dictionary phrase" do
+    si = input("What do you know about Japan's railgun development?")
+
+    assert [%{id: :wh_aux_topic_question, roles: %{
+              wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4
+            }}] = Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    assert %{
+             rejected_spans: [{0, 3}],
+             comparisons: [%{
+               phrase: "what do you know", winner: :compositional_clause,
+               frame_id: :wh_aux_topic_question,
+               discrimination_margin: margin
+             }]
+           } = si.sentence_competition
+    assert margin >= 0.16
+
+    assert :composition_wins == hd(si.trace).decision
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+
+    covered = TokenResolution.resolve(si)
+
+    refute Enum.any?(covered.token_cover, fn item ->
+             item.kind == :phrase and item.token_span == {0, 3}
+           end)
+
+    # A stale/direct virtual MWE choice cannot bypass the sentence verdict
+    # when Core.MWE.Decisions later constructs the canonical semantic view.
+    word_choices =
+      covered.tokens
+      |> Enum.map(fn t ->
+        %{token_index: t.index, lemma: t.phrase,
+          id: "#{t.phrase}|noun|0", score: 0.2}
+      end)
+
+    with_phrase =
+      %{covered |
+        lifg_choices: word_choices,
+        mwe_choices: [make_phrase({0, 3}, "what do you know",
+                                  "what do you know|phrase|2")]
+      }
+
+    out = Decisions.attach(with_phrase)
+
+    assert out.semantic_choices == word_choices
+    assert out.mwe_choices == with_phrase.mwe_choices
+    assert out.lifg_choices == word_choices
+  end
+
+  test "production POS alternatives preserve the complete WH frame and block the idiom" do
+    # These POS combinations reproduce the real database trace, including
+    # "do" as an adverb/verb but NOT as a dedicated auxiliary, and "know"
+    # as a noun/particle/verb. No dictionary entry exists for "japan's".
+    observed_pos = %{
+      "what" => ~w(determiner particle pronoun),
+      "do" => ~w(adverb noun numeral verb),
+      "you" => ~w(determiner noun pronoun proper_noun verb),
+      "know" => ~w(noun particle verb),
+      "about" => ~w(adjective adverb preposition verb),
+      "railgun" => ~w(noun),
+      "development" => ~w(noun)
+    }
+
+    observed_cells =
+      for {norm, options} <- observed_pos,
+          pos <- options,
+          do: %{norm: norm, pos: pos}
+
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one, @sense_two], observed_cells)
+
+    assert [%{roles: %{wh: 0, auxiliary: 1, subject: 2,
+                       predicate: 3, preposition: 4},
+               required_features: %{auxiliary: aux_features}}] =
+             Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    assert :pos_verb in aux_features
+    assert si.sentence_competition.rejected_spans == [{0, 3}]
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+
+    covered = TokenResolution.resolve(si)
+
+    refute Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span == {0, 3}
+           end)
+
+    assert si.active_cells == observed_cells
+    assert Enum.any?(si.mwe_lexicon, &(&1.phrase == "what do you know"))
+  end
+
+  test "an ambiguous predicate adverb still yields a WH frame when verb + topic is complete" do
+    cells = [%{norm: "know", pos: "adverb"}, %{norm: "do", pos: "adverb"} | @lexical_cells]
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one, @sense_two], cells)
+
+    assert Enum.any?(si.sentence_signatures, fn
+             %{id: :wh_aux_topic_question,
+               roles: %{auxiliary: 1, predicate: 3, preposition: 4}} -> true
+             _ -> false
+           end)
+
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+  end
+
+  test "all dictionary spans that fuse sentence roles lose, not only the long phrase" do
+    senses =
+      [@sense_one, @sense_two, @do_you, @know_about, @about_japan, @topic_phrase]
+
+    si = input("What do you know about Japan's railgun development?", senses)
+
+    comparisons = si.sentence_competition.comparisons
+    assert Enum.sort(si.sentence_competition.rejected_spans) ==
+             Enum.sort([{0, 3}, {1, 2}, {3, 4}, {4, 5}])
+
+    for {span, roles} <- [
+          {{0, 3}, [:wh, :auxiliary, :subject, :predicate]},
+          {{1, 2}, [:auxiliary, :subject]},
+          {{3, 4}, [:predicate, :preposition]},
+          {{4, 5}, [:preposition, :topic_complement]}
+        ] do
+      assert %{winner: :compositional_clause, crossed_roles: ^roles} =
+               Enum.find(comparisons, &(&1.span == span))
+
+      assert SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    refute SentenceCompetition.reject_phrase?(si, {6, 7})
+
+    # Token resolution must not replace protected roles with virtual MWEs.
+    covered = TokenResolution.resolve(si)
+
+    assert Enum.any?(covered.token_cover, fn item ->
+             item.kind == :phrase and item.token_span == {6, 7}
+           end)
+
+    refute Enum.any?(covered.token_cover, fn item ->
+             item.kind == :phrase and
+               item.token_span in [{0, 3}, {1, 2}, {3, 4}, {4, 5}]
+           end)
+
+    # Even an injected/stale post-LIFG phrase may not bypass the verdict.
+    words =
+      Enum.map(covered.tokens, fn t ->
+        %{token_index: t.index, lemma: t.phrase,
+          id: "word-#{t.index}|noun|1", score: 0.25}
+      end)
+
+    stale =
+      %{covered |
+        lifg_choices: words,
+        mwe_choices: [
+          make_phrase({0, 3}, "what do you know", @sense_two.id),
+          make_phrase({1, 2}, "do you", @do_you.id)
+          |> Map.put(:pos, "interjection"),
+          make_phrase({3, 4}, "know about", @know_about.id)
+          |> Map.put(:pos, "verb"),
+          make_phrase({4, 5}, "about japan's", @about_japan.id)
+        ]
+      }
+
+    out = Decisions.attach(stale)
+    assert out.semantic_choices == words
+    assert out.lifg_choices == words
+    assert out.mwe_choices == stale.mwe_choices
+    assert out.sentence_competition == si.sentence_competition
+  end
+
+  test "ATL can resolve do as an auxiliary using its existing verb sense" do
+    cells = [
+      %{norm: "what", pos: "pronoun"},
+      %{norm: "do", pos: "verb"},
+      %{norm: "do", pos: "adverb"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "know", pos: "verb"},
+      %{norm: "about", pos: "preposition"},
+      %{norm: "railgun", pos: "noun"},
+      %{norm: "development", pos: "noun"}
+    ]
+
+    si = input("What do you know about Japan's railgun development?",
+      [@sense_one], cells)
+
+    [frame] = Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    slate = Brain.ATL.Constituents.attach(
+      %{winners: [
+        %{id: "what|pronoun|1", token_index: 0, norm: "what"},
+        %{id: "do|verb|1", token_index: 1, norm: "do"},
+        %{id: "you|pronoun|1", token_index: 2, norm: "you"},
+        %{id: "know|verb|1", token_index: 3, norm: "know"},
+        %{id: "about|preposition|1", token_index: 4, norm: "about"}
+      ]},
+      [frame]
+    )
+
+    assert [%{status: :resolved, roles: %{auxiliary: auxiliary}}] = slate.constituents
+    assert auxiliary.sense_id == "do|verb|1"
+    assert auxiliary.token_index == 1
+  end
+
+  test "ATL rejects an interjection as a grammatical auxiliary" do
+    si = input("What do you know about Japan's railgun development?",
+               [@sense_one, @sense_two, @do_you])
+
+    frame =
+      Enum.find(si.sentence_signatures,
+        &(&1.id == :wh_aux_topic_question))
+
+    assert :pos_auxiliary in frame.required_features.auxiliary
+
+    slate =
+      Brain.ATL.Constituents.attach(
+        %{winners: [
+          %{id: @do_you.id, token_index: 1, norm: "do you"}
+        ]},
+        [frame]
+      )
+
+    assert [%{id: :wh_aux_topic_question, unresolved_roles: unresolved}] =
+             slate.constituents
+    assert :auxiliary in unresolved
+  end
+
+  test "rhetorical MWE without complete topic frame remains available" do
+    for sentence <- ["What do you know?", "Well, what do you know?"] do
+      si = input(sentence)
+
+      assert si.sentence_competition.rejected_spans == []
+      refute Enum.any?(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+      covered = TokenResolution.resolve(si)
+
+      assert Enum.any?(covered.token_cover, fn item ->
+               item.kind == :phrase and
+                 String.trim_trailing(String.downcase(item.phrase), "?") == "what do you know"
+             end)
+    end
+  end
+
+  test "same structural decision works for another verb and subject" do
+    sense = %{
+      id: "what did she say|phrase|1", norm: "what did she say", pos: "phrase",
+      definition: "An exclamation of surprise", example: "What did she say?"
+    }
+
+    si = input("What did she say about the experiment?", [sense])
+
+    assert Enum.any?(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+    assert [%{span: {0, 3}, winner: :compositional_clause}] =
+             si.sentence_competition.comparisons
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+  end
+
+  test "structural hypothesis cannot override a dictionary MWE without a lexical verb" do
+    no_verb = Enum.reject(@lexical_cells, &(&1.norm == "know"))
+    si = input("What do you know about Japan's railgun development?",
+               [@sense_one, @sense_two], no_verb)
+
+    refute Enum.any?(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+    assert si.sentence_competition.rejected_spans == []
+    assert Enum.any?(TokenResolution.resolve(si).token_cover,
+             &(&1.kind == :phrase and &1.token_span == {0, 3}))
+  end
+
+  test "unrelated dictionary MWE elsewhere in a question is not suppressed" do
+    other = %{
+      id: "turn off|verb|1", norm: "turn off", pos: "verb",
+      definition: "To deactivate a device", example: "Turn off the device"
+    }
+
+    si =
+      input("What do you know about how to turn off the lights?",
+        [@sense_one, @sense_two, other],
+        @lexical_cells ++ [
+          %{norm: "turn", pos: "verb"},
+          %{norm: "off", pos: "particle"},
+          %{norm: "lights", pos: "noun"}
+        ])
+
+    assert SentenceCompetition.reject_phrase?(si, {0, 3})
+
+    other_span =
+      si.mwe_lexicon
+      |> Enum.find(&(&1.phrase == "turn off"))
+      |> Map.fetch!(:span)
+
+    refute SentenceCompetition.reject_phrase?(si, other_span)
+  end
+
+  test "the competition is bounded and preserves dictionary and candidate objects" do
+    si = input("What do you know about Japan's railgun development?")
+    prior_units = si.mwe_lexicon
+    prior_cells = si.active_cells
+
+    again = SentenceCompetition.attach(si)
+
+    assert again.mwe_lexicon == prior_units
+    assert again.active_cells == prior_cells
+    assert again.sentence_competition == si.sentence_competition
+    assert :ok = SemanticInput.validate_contract(again)
+  end
+
+  test "modifier phrases remain eligible while MWEs crossing protected roles lose" do
+    senses = [
+      %{id: "what exactly|phrase|1", norm: "what exactly", pos: "phrase",
+        definition: "An expression asking for precision."},
+      %{id: "exactly do|phrase|1", norm: "exactly do", pos: "phrase",
+        definition: "An unrelated idiomatic expression."},
+      @do_you,
+      %{id: "actually know|verb|1", norm: "actually know", pos: "verb",
+        definition: "Possess direct knowledge."},
+      @know_about,
+      @topic_phrase
+    ]
+
+    si = input("What exactly do you actually know about Japan's railgun development?", senses)
+    assert [%{roles: %{wh_modifier: 1, auxiliary: 2, subject: 3,
+                       predicate_modifier: 4, predicate: 5, preposition: 6}}] =
+             Enum.filter(si.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    for span <- [{1, 2}, {2, 3}, {5, 6}] do
+      assert SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    for span <- [{0, 1}, {4, 5}, {8, 9}] do
+      refute SentenceCompetition.reject_phrase?(si, span)
+    end
+
+    covered = TokenResolution.resolve(si)
+
+    refute Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span in [{1, 2}, {2, 3}, {5, 6}]
+           end)
+
+    assert Enum.any?(covered.token_cover, fn entry ->
+             entry.kind == :phrase and entry.token_span == {8, 9}
+           end)
+  end
+
+  test "negation and contracted auxiliary both preserve core sentence boundaries" do
+    contraction = %{
+      id: "don't you|interjection|1", norm: "don't you",
+      pos: "interjection", definition: "An unrelated exclamation."
+    }
+
+    contracted =
+      input("What don't you know about Japan's railgun development?",
+        [contraction, @know_about])
+
+    assert SentenceCompetition.reject_phrase?(contracted, {1, 2})
+    assert SentenceCompetition.reject_phrase?(contracted, {3, 4})
+
+    not_know = %{
+      id: "not actually|adverb|1", norm: "not actually",
+      pos: "adverb", definition: "Emphatic negation."
+    }
+
+    you_not = %{
+      id: "you not|phrase|1", norm: "you not",
+      pos: "phrase", definition: "An unrelated idiom."
+    }
+
+    explicit =
+      input("What do you not actually know about Japan's railgun development?",
+        [not_know, you_not, @know_about])
+
+    assert [%{roles: %{negation: 3, predicate_modifier: 4,
+                       predicate: 5, preposition: 6}}] =
+             Enum.filter(explicit.sentence_signatures, &(&1.id == :wh_aux_topic_question))
+
+    assert SentenceCompetition.reject_phrase?(explicit, {2, 3})
+    assert SentenceCompetition.reject_phrase?(explicit, {5, 6})
+    refute SentenceCompetition.reject_phrase?(explicit, {3, 4})
+  end
+
+  test "an adverb does not justify sentence-level competition without a complete frame" do
+    sense = %{id: "what exactly|phrase|1", norm: "what exactly",
+              pos: "phrase", definition: "Ask for clarification."}
+
+    for sentence <- [
+          "What exactly do you know?",
+          "What exactly do you know about?",
+          "What exactly, do you know about Japan?"
+        ] do
+      si = input(sentence, [sense])
+      assert si.sentence_competition.rejected_spans == []
+    end
+  end
+end

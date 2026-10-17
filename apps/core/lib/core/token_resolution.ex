@@ -10,6 +10,7 @@ defmodule Core.TokenResolution do
 
   alias Core.SemanticInput
   alias Core.MWE.{Boundaries, GrammarPrecedence}
+  alias Core.Syntax.SentenceCompetition
 
   @spec resolve(SemanticInput.t() | map(), keyword()) :: SemanticInput.t() | map()
   def resolve(si, opts \\ [])
@@ -135,7 +136,7 @@ defmodule Core.TokenResolution do
 
         if GrammarPrecedence.incompatible_verb_mwe?(
              si, {start_index, end_index}, lexical_pos
-           ) do
+           ) or SentenceCompetition.reject_phrase?(si, {start_index, end_index}) do
           []
         else
           [

@@ -55,7 +55,7 @@ defmodule SymbrellaWeb.HomeLive do
        pending_task: nil,
        pending_user_turn: nil,
        cancelled_ref: nil,
-       session_id: "s-" <> Integer.to_string(System.unique_integer([:positive])),
+       session_id: ChatHistory.session_id(),
        explain_open?: false,
        explain_payload: %{},
        curiosity_idle_ref: nil,
@@ -519,6 +519,11 @@ defmodule SymbrellaWeb.HomeLive do
 
     case memory_reply do
       {tone, reply_text, meta} ->
+        # Memory replies bypass the normal response recorder. Invalidate any
+        # preceding population-proof receipt so "how do you know that?" cannot
+        # accidentally explain an older, no-longer-adjacent assistant reply.
+        :ok = Core.Response.VerifiedAnswerReceipt.clear(session_id)
+
         %{
           text: reply_text,
           tone: tone,
@@ -558,7 +563,12 @@ defmodule SymbrellaWeb.HomeLive do
       keyword: Map.get(si, :keyword, ""),
       text: user_text,
       tokens: Map.get(si, :tokens, []),
-      source: Map.get(si, :source, :user)
+      source: Map.get(si, :source, :user),
+      # If Core's pre-attached reply is missing, the LiveView planner must
+      # retain its typed event frame. Dropping it makes a two-city comparison
+      # look like generic chat and prevents its evidence lookup.
+      symbolic_frame: Map.get(si, :symbolic_frame),
+      turn_context: Core.Response.Context.from_si(si)
     }
 
     # Prefer the response already attached by Core.resolve_input/2; otherwise fall back to planner.

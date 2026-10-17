@@ -68,14 +68,68 @@ defmodule Core.Response.Meta do
     }
   end
 
-  # Only public, bounded review diagnostics enter chat metadata. Do not
-  # expose prompt internals or duplicate raw model drafts in HTML/history.
+  # Only bounded review diagnostics enter chat metadata. The full trace stays
+  # in telemetry; optional model-draft previews are dev-only and never include
+  # system prompts. Otherwise Explain cannot distinguish a skipped revision
+  # from a rejected one, despite telemetry recording the correct outcome.
   defp reflection_summary(%{} = reflection) do
-    Map.take(reflection, [:status, :issues, :applied?, :repair_count, :critique,
-                          :draft_sha256, :final_sha256])
+    reflection
+    |> Map.take([:status, :issues, :applied?, :repair_count, :critique,
+                 :draft_sha256, :final_sha256])
+    |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
+    |> maybe_put_grounded_revision(Map.get(reflection, :grounded_revision))
+    |> maybe_put_authoritative_plan(Map.get(reflection, :authoritative_plan))
   end
 
   defp reflection_summary(_), do: nil
+
+  # Keep bounded retry outcomes inspectable without exposing prompts or drafts.
+  defp maybe_put_answer_revision(summary, revision) when is_map(revision) do
+    Map.put(summary, :answer_revision,
+      Map.take(revision, [:attempted?, :outcome, :issue]))
+  end
+
+  defp maybe_put_answer_revision(summary, _), do: summary
+
+  defp maybe_put_grounded_revision(summary, %{} = revision) do
+    safe_fields =
+      Map.take(revision, [
+        :attempted?, :outcome, :source, :prior_issues, :candidate_issues
+      ])
+
+    safe_fields =
+      if Application.get_env(:core, :expose_llm_drafts_in_explain?, false) do
+        previews =
+          revision
+          |> Map.take([:first_draft, :candidate])
+          |> Enum.flat_map(fn
+            {key, value} when is_binary(value) ->
+              [{key, String.slice(value, 0, 500)}]
+
+            _ ->
+              []
+          end)
+          |> Map.new()
+
+        Map.merge(safe_fields, previews)
+      else
+        safe_fields
+      end
+
+    Map.put(summary, :grounded_revision, safe_fields)
+  end
+
+  defp maybe_put_grounded_revision(summary, _), do: summary
+
+  defp maybe_put_authoritative_plan(summary, %{} = plan) do
+    Map.put(summary, :authoritative_plan,
+      Map.take(plan, [
+        :kind, :status, :outcome, :source_count,
+        :selected_style, :style_source, :fallback?
+      ]))
+  end
+
+  defp maybe_put_authoritative_plan(summary, _), do: summary
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do

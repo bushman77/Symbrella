@@ -64,6 +64,54 @@ defmodule Brain.LIFG.GrammarEvidence do
 
   def apply(scores, _context, _index, _weight), do: scores
 
+  @doc """
+  Narrow, on-by-default support for an attested finite-present SVO hypothesis.
+  Unlike the general opt-in grammar weights, this can only boost an existing
+  exact verb sense carrying the full morphological witness. All other
+  candidates and sentences retain their original scores.
+  """
+  @spec apply_finite_present(map(), context(), non_neg_integer()) :: map()
+  def apply_finite_present(scores, %{signatures: signatures, cells_by_id: cells}, index)
+      when is_map(scores) and is_list(signatures) and is_map(cells) and
+             is_integer(index) and index >= 0 do
+    observed? =
+      Enum.any?(signatures, fn
+        %{id: :finite_present_svo_candidate,
+          roles: %{subject_head: subject, predicate: ^index, object_head: object},
+          evidence: evidence}
+        when is_integer(subject) and is_integer(object) and is_list(evidence) ->
+          subject < index and index < object and
+            Enum.all?(
+              [:contiguous_surface, :attested_nominal_subject,
+               :attested_nominal_object, :attested_finite_present_verb],
+              &(&1 in evidence)
+            )
+
+        _ ->
+          false
+      end)
+
+    if observed? do
+      Map.new(scores, fn {id, score} ->
+        cell = Map.get(cells, id)
+        updated =
+          if is_binary(id) and not String.ends_with?(id, "|fallback") and
+               id_pos(id) == "verb" and finite_present_sense?(cell) and
+               is_number(score) do
+            min(1.0, max(0.0, score * 1.0 + 0.32))
+          else
+            score
+          end
+
+        {id, updated}
+      end)
+    else
+      scores
+    end
+  end
+
+  def apply_finite_present(scores, _context, _index), do: scores
+
   # A weak construction hypothesis becomes useful only when an exact
   # sense supplies the matching morphological feature.
   defp support_for(%{id: :finite_past_candidate, roles: %{verb: role_index}}, index, _id, cell)
@@ -101,6 +149,43 @@ defmodule Brain.LIFG.GrammarEvidence do
        )
        when role_index == index do
     if id_pos(id) == "particle", do: 0.65, else: 0.0
+  end
+
+  # A complete WH + auxiliary + subject + predicate + topic-preposition
+  # question is stronger syntactic evidence than an overlapping two-token
+  # noun-phrase hypothesis. In "what do you know about ...", a noun reading
+  # for "know" may otherwise win because a local "you know" noun phrase
+  # receives grammatical support while the complete question receives none.
+  # Reward *existing* verb candidates only; this never chooses a dictionary
+  # sense or invents a candidate.
+  defp support_for(
+         %{id: :wh_aux_topic_question,
+           roles: %{wh: wh, auxiliary: aux, subject: subject,
+                    predicate: predicate, preposition: prep},
+           required_features: %{predicate: required},
+           evidence: evidence},
+         index,
+         id,
+         _cell
+       )
+       when predicate == index and is_binary(id) and is_list(evidence) and
+              is_integer(wh) and is_integer(aux) and is_integer(subject) and
+              is_integer(predicate) and is_integer(prep) do
+    complete? =
+      wh < aux and aux < subject and subject < predicate and
+        predicate < prep and
+        Enum.all?(
+          [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+           :explicit_prepositional_topic, :question_punctuation],
+          &(&1 in evidence)
+        )
+
+    if complete? and not String.ends_with?(id, "|fallback") and
+         Enum.any?(List.wrap(required), &matches_pos?(&1, id_pos(id))) do
+      0.38
+    else
+      0.0
+    end
   end
 
   # Structural compatibility is a small *positive* signal for existing
@@ -165,6 +250,15 @@ defmodule Brain.LIFG.GrammarEvidence do
   defp matches_pos?(:pos_preposition, "preposition"), do: true
   defp matches_pos?(:pos_adjective, "adjective"), do: true
   defp matches_pos?(_, _), do: false
+
+  defp finite_present_sense?(cell) do
+    evidence = tags(cell)
+
+    Enum.all?(
+      ["tag:form-of", "tag:indicative", "tag:present", "tag:singular", "tag:third-person"],
+      &MapSet.member?(evidence, &1)
+    )
+  end
 
   defp simple_past?(cell) do
     tags = tags(cell)

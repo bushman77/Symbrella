@@ -178,6 +178,11 @@ defmodule Mix.Tasks.Neural.Train do
         Mix.shell().info("Residual model did NOT beat persistence on this #{if(smoke?, do: "in-sample run", else: "held-out sample")}.")
       end
 
+      Mix.shell().info("Evidence assessment: #{result.assessment.status}")
+      Mix.shell().info("Assessment reasons: #{inspect(result.assessment.reasons)}")
+      Mix.shell().info("Relative improvement over persistence: #{inspect(result.assessment.relative_improvement)}")
+      Mix.shell().info("Runtime deployment authorized: false (shadow research only)")
+
       if result.train_examples < 20 or result.eval_examples < 20 do
         Mix.shell().info("WARNING: tiny transition sample; results are not reliable evidence of generalization.")
       end

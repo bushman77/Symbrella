@@ -60,7 +60,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
     with {:ok, turns} <- read(Path.join(dir, "turns.jsonl")),
          {:ok, events} <- read(Path.join(dir, "memory_events.jsonl"), true),
          :ok <- validate_turns(turns),
-         :ok <- check_traces(events),
+         :ok <- check_traces(events, turns),
          {:ok, pairs} <- paired_states(turns, events),
          {:ok, train, evaluation} <- split(pairs, smoke?),
          {:ok, train_batch} <- tensor_batch(train),
@@ -107,7 +107,7 @@ defmodule Brain.Neural.StateTransitionBuilder do
   @spec project_observation(map(), [map()]) :: {:ok, map()} | {:error, term()}
   def project_observation(%{} = turn, events) when is_list(events) do
     with :ok <- validate_turns([turn]),
-         :ok <- check_traces(events) do
+         :ok <- check_traces(events, [turn]) do
       stats = memory_stats(events)
 
       {:ok,
@@ -174,13 +174,48 @@ defmodule Brain.Neural.StateTransitionBuilder do
       Enum.uniq(ids) != ids ->
         {:error, :duplicate_turns}
 
+      out_of_order?(turns) ->
+        {:error, :out_of_order_session_turns}
+
       true ->
         :ok
     end
   end
 
-  defp check_traces(events) do
-    if Enum.any?(events, &(&1["kind"] == "trace_truncated")) do
+  # Archive order defines adjacent turns. Refuse reverse-time pairs but
+  # allow equal timestamps from coarse-grained recorders and old fixtures.
+  defp out_of_order?(turns) do
+    turns
+    |> Enum.group_by(& &1["session_id"])
+    |> Enum.any?(fn {_session, records} ->
+      records
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.any?(fn [first, second] ->
+        with {:ok, a, _} <- parse_timestamp(first["recorded_at"]),
+             {:ok, b, _} <- parse_timestamp(second["recorded_at"]) do
+          DateTime.compare(a, b) == :gt
+        else
+          _ -> false
+        end
+      end)
+    end)
+  end
+
+  defp parse_timestamp(value) when is_binary(value), do: DateTime.from_iso8601(value)
+  defp parse_timestamp(_), do: {:error, :timestamp_unavailable}
+
+  defp check_traces(events, turns) do
+    truncated_turn? =
+      Enum.any?(turns, fn turn ->
+        trace = map(turn["hippocampal_trace"])
+
+        trace["status"] == "truncated" or
+          Enum.any?(["worker", "final"], fn key ->
+            map(trace[key])["status"] == "truncated"
+          end)
+      end)
+
+    if truncated_turn? or Enum.any?(events, &(&1["kind"] == "trace_truncated")) do
       {:error, :truncated_hippocampal_trace}
     else
       :ok
@@ -288,9 +323,11 @@ defmodule Brain.Neural.StateTransitionBuilder do
     if length(groups) < 2 do
       {:error, :insufficient_independent_sessions}
     else
-      evaluation_session = groups |> List.last() |> elem(0)
-      train = Enum.reject(pairs, &(&1.session_id == evaluation_session))
-      evaluation = Enum.filter(pairs, &(&1.session_id == evaluation_session))
+      # Keep two independent held-out sessions when the archive supports it.
+      holdout_count = if length(groups) >= 4, do: 2, else: 1
+      holdout = groups |> Enum.take(-holdout_count) |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      train = Enum.reject(pairs, &MapSet.member?(holdout, &1.session_id))
+      evaluation = Enum.filter(pairs, &MapSet.member?(holdout, &1.session_id))
       {:ok, train, evaluation}
     end
   end

@@ -49,7 +49,7 @@ defmodule Brain.SelfCalibration.Training do
       hidden_units = Keyword.get(opts, :hidden_units, 8)
       model = AxonModel.build(hidden_units: hidden_units)
       {init_fn, _predict_fn} = Axon.build(model)
-      params = init_fn.(Nx.template({batch_size, AxonModel.feature_count()}, :f32), %{})
+      params = init_fn.(Nx.template({batch_size, AxonModel.feature_count()}, :f32), Axon.ModelState.empty())
 
       {:ok,
        %__MODULE__{
@@ -89,7 +89,7 @@ defmodule Brain.SelfCalibration.Training do
       params =
         model
         |> Axon.Loop.trainer(:mean_squared_error, optimizer, log: 0)
-        |> Axon.Loop.run([{x, y}], %{}, epochs: epochs)
+        |> Axon.Loop.run([{x, y}], Axon.ModelState.empty(), epochs: epochs)
 
       {:ok,
        %__MODULE__{

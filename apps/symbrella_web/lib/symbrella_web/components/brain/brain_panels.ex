@@ -41,6 +41,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     <div class="container mx-auto px-4 py-6 space-y-6">
       <.brain_header selected={@selected} regions={@regions} />
 
+      <div data-brain-report-section="HUD, Clock, Intent, Mood and Self-Model">
       <SymbrellaWeb.BrainHTML.hud_row
         clock={@clock}
         intent={@intent}
@@ -51,7 +52,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         self_portrait={assigns[:self_portrait]}
         self_model={assigns[:self_model]}
       />
-      
+      </div>
+
     <!-- Brain map + Region summary -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="border rounded-xl p-4 shadow-sm">
@@ -65,7 +67,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
           />
         </div>
 
-        <div class="relative h-full">
+        <div class="relative h-full" data-brain-report-section="Selected Region Summary and Snapshot">
           <% copy_id = "region-summary-copy-#{@selected}" %>
 
           <%= if @region_state && map_size(@region_state) > 0 do %>
@@ -97,25 +99,35 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       
     <!-- Blackboard + WM -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div data-brain-report-section="Complete Blackboard Feed" data-brain-report-source="#blackboard-full-copy-target, #blackboard-copy-target">
         <SymbrellaWeb.BrainHTML.blackboard_panel
           events={get_in(@region_state, [:workspace]) || []}
           filter={@bb_filter}
           limit={50}
         />
-        <SymbrellaWeb.BrainHTML.wm_panel wm={@wm} />
+        </div>
+        <div data-brain-report-section="Working Memory" data-brain-report-source="#wm-copy-target">
+          <SymbrellaWeb.BrainHTML.wm_panel wm={@wm} />
+        </div>
       </div>
       
     <!-- Live state + Module Status -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div data-brain-report-section="Live Region State">
         <SymbrellaWeb.BrainHTML.live_state_panel
           state={Map.merge(@region_status || %{}, %{state: @snapshot})}
         />
-        <SymbrellaWeb.BrainHTML.module_status_panel status={@region_status} selected={@selected} />
+        </div>
+        <div data-brain-report-section="Module Status">
+          <SymbrellaWeb.BrainHTML.module_status_panel status={@region_status} selected={@selected} />
+        </div>
       </div>
       
     <!-- Mood only -->
       <div class="grid grid-cols-1">
-        <SymbrellaWeb.BrainHTML.mood_panel mood={@mood} />
+        <div data-brain-report-section="Current Mood and Neuromodulators">
+          <SymbrellaWeb.BrainHTML.mood_panel mood={@mood} />
+        </div>
       </div>
     </div>
     """
@@ -135,16 +147,48 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     assigns =
       assigns
       |> Map.put(:selected, selected)
+      |> Map.put(:selected_param, Atom.to_string(selected))
       |> Map.put(:options, opts)
 
     ~H"""
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-2xl font-semibold">Brain Regions ↔ Symbrella Modules</h1>
         <p class="text-sm text-zinc-500">Systems overview and live signals</p>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <!-- Copy uses JS when available; otherwise opens the native text view. -->
+        <a
+          id="brain-report-copy-btn"
+          href={~p"/brain/report.txt?region=#{@selected_param}"}
+          aria-label="Copy full Brain report; opens plain text if browser copying is unavailable"
+          title="Copy diagnostics, or open plain text without JavaScript"
+          class="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-100"
+        >
+          <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
+          <span data-brain-copy-label>Copy Full Brain Report</span>
+        </a>
+        <a
+          id="brain-report-view-btn"
+          href={~p"/brain/report.txt?region=#{@selected_param}"}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open complete Brain diagnostic report as plain text"
+          class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <.icon name="hero-document-text" class="h-4 w-4" />
+          <span>Open Report Text</span>
+        </a>
+        <a
+          id="brain-report-download-btn"
+          href={~p"/brain/report.txt?region=#{@selected_param}&download=1"}
+          aria-label="Download complete Brain diagnostic report as a text file"
+          class="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+          <span>Download .txt</span>
+        </a>
         <span class="text-sm text-zinc-500">Region:</span>
         <select
           class="border rounded px-2 py-1 text-sm"

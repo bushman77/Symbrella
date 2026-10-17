@@ -1,6 +1,8 @@
 defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
   use ExUnit.Case, async: true
 
+  require Phoenix.LiveViewTest
+
   alias SymbrellaWeb.HomeLive.ExplainEvidence
   alias SymbrellaWeb.HomeLive.HTML.Modal
 
@@ -106,7 +108,9 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
         intent: :command,
         degraded?: true,
         reasons: [:weak_decision_rate_high],
-        understood: [if(word_order == :power, do: "computer", else: "lights"), phrase],
+        recognized_topics: [if(word_order == :power, do: "computer", else: "lights")],
+        selected_lexical_candidates: [],
+        understood: [phrase],
         uncertain: [], unresolved: [],
         lexical_meanings: [%{id: sense, phrase: phrase, definition: definition}]
       },
@@ -210,7 +214,10 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
       assert body =~ "deactivate an appliance"
 
       assert Enum.any?(section(response, :comprehension).items,
-               &(&1.label == "understood" and &1.body =~ "turn off"))
+               &(&1.label == "verified lexical understanding" and &1.body =~ "turn off"))
+      assert Enum.any?(section(response, :comprehension).items,
+               &(&1.label == "recognized topics (not verified)" and
+                 &1.body =~ "lights"))
     end
 
     assert Enum.any?(section(adj, :semantic_choices).items,
@@ -257,6 +264,56 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert List.last(section(result, :semantic_choices).items).label == "sample|noun|36"
   end
 
+  test "Explain preserves the sentence-level comparison, evidence and actual winner" do
+    input = si(:contiguous)
+
+    competition = %{
+      version: 1,
+      competing_frames: 1,
+      rejected_spans: [{0, 3}],
+      comparisons: [
+        %{
+          span: {0, 3},
+          phrase: "what do you know",
+          dictionary_sense_ids: ["what do you know|phrase|2"],
+          frame_id: :wh_aux_topic_question,
+          lexical_context_fit: 0.29,
+          compositional_compatibility: 0.90,
+          lexical_compatibility: 0.424,
+          discrimination_margin: 0.476,
+          winner: :compositional_clause,
+          reason: :complete_question_structure_outweighs_lexical_fit
+        }
+      ]
+    }
+
+    input =
+      input
+      |> Map.put(:sentence_competition, competition)
+      |> Map.update!(:sentence_signatures, fn signatures ->
+        signatures ++ [
+          %{id: :wh_aux_topic_question, span: {0, 7},
+            roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3,
+                     preposition: 4},
+            evidence: [:wh_fronted, :auxiliary_inversion, :question_punctuation]}
+        ]
+      end)
+
+    evidence = ExplainEvidence.from_si(input)
+    assert evidence.sentence_competition == competition
+    assert [%{id: :wh_aux_topic_question}] = evidence.question_signatures
+
+    result = payload(input)
+    section = section(result, :sentence_competition)
+    assert section.title == "Sentence-level competition"
+    assert section.hint =~ "not probabilities"
+    assert Enum.any?(section.items, fn x ->
+             x.label == "what do you know" and
+               x.body =~ "winner: :compositional_clause" and
+               x.body =~ "lexical_context_fit: 0.29"
+           end)
+  end
+
   test "old cached Explain payloads are upgraded from saved Core state without duplication" do
     original = %{
       title: "Explain",
@@ -285,6 +342,91 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
            )
 
     assert Modal.enrich_saved_payload(original, %{intent: :unknown}) == original
+  end
+
+  test "Explain shows whether grounded population revision ran and which text the LLM wrote" do
+    initial = "Kamloops is around 17,800 people."
+    repaired = "Wikidata lists a dated population statement for Kamloops, BC of 97,902 (2021)."
+
+    payload =
+      Modal.explain_payload_for(%{
+        text: repaired,
+        from: %{
+          response_reflection: %{
+            status: :repair,
+            issues: [:geographic_claim_unverified],
+            applied?: true,
+            repair_count: 1,
+            draft_text: initial,
+            grounded_revision: %{
+              attempted?: true, outcome: :rejected,
+              source: :core_fallback, first_draft: initial,
+              candidate: "Kamloops has 97,902 residents now.",
+              candidate_issues: [:geographic_claim_unverified]
+            }
+          }
+        }
+      })
+
+    result = section(payload, :response_reflection)
+    assert result.title == "LLM response review"
+    items = Map.new(result.items, &{&1.label, &1.body})
+
+    assert items["initial model draft"] == initial
+    assert items["grounded revision outcome"] == ":rejected"
+    assert items["final answer origin"] == ":core_fallback"
+    assert items["revision candidate"] =~ "97,902 residents now"
+    assert items["revision candidate issues"] =~ ":geographic_claim_unverified"
+
+    no_retry =
+      Modal.explain_payload_for(%{
+        text: repaired,
+        from: %{response_reflection: %{
+          status: :repair, issues: [:geographic_claim_unverified],
+          applied?: true, draft_text: initial
+        }}
+      })
+      |> section(:response_reflection)
+
+    no_retry_items = Map.new(no_retry.items, &{&1.label, &1.body})
+    assert no_retry_items["initial model draft"] == initial
+    assert no_retry_items["grounded revision outcome"] == ":not_attempted"
+    assert no_retry_items["final answer origin"] == ":core_fallback"
+    refute Map.has_key?(no_retry_items, "revision candidate")
+  end
+
+  test "Explain modal uses viewport width and wraps long LIFG labels and values" do
+    long_label =
+      "what → what pos=pronoun src=active_cells score=0.11574459075927734 " <>
+        String.duplicate("verylongunbrokentoken_", 12)
+
+    html =
+      Phoenix.LiveViewTest.render_component(&Modal.explain_modal/1,
+        open?: true,
+        payload: %{
+          sections: [
+            %{
+              key: :individual_word_senses,
+              title: "Individual word senses (LIFG)",
+              tag: ":location_question",
+              hint: String.duplicate("unbroken_hint_", 20),
+              items: [%{label: long_label, body: String.duplicate("long_definition_", 30)}]
+            }
+          ]
+        }
+      )
+
+    assert html =~ ~s(role="dialog")
+    assert html =~ "fixed inset-x-0"
+    assert html =~ "max-w-[100vw]"
+    refute html =~ "margin-left: -50vw"
+    assert html =~ "grid-cols-1"
+    assert html =~ "min-w-0"
+    assert html =~ "[overflow-wrap:anywhere]"
+    assert html =~ "whitespace-pre-wrap"
+    assert html =~ "Individual word senses (LIFG)"
+    assert html =~ "verylongunbrokentoken_"
+    assert html =~ "long_definition_"
   end
 
   test "memory and ordinary replies do not fabricate runtime semantic sections" do

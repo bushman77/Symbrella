@@ -36,6 +36,33 @@ defmodule Core.MWE.GrammarPrecedence do
 
   def incompatible_verb_mwe?(_si, _span, _pos), do: false
 
+  @doc """
+  Do not promote lexical readings that contradict a clear question structure.
+
+  This does not invent new senses: the dictionary entry remains in the raw
+  lexical candidates, while the derived semantic view keeps the constituent
+  words available for compositional interpretation.
+  """
+  @spec incompatible_question_mwe?(map(), String.t(), list() | term()) :: boolean()
+  def incompatible_question_mwe?(si, phrase, pos) when is_map(si) and is_binary(phrase) do
+    sentence = Map.get(si, :sentence) || ""
+    phrase = String.downcase(String.trim(phrase))
+    poses = List.wrap(pos) |> Enum.map(&normalize_pos/1)
+
+    cond do
+      phrase == "is it" and "interjection" in poses ->
+        Regex.match?(~r/^\s*is\s+it\s+.+\?/iu, sentence)
+
+      phrase == "close to" and "adverb" in poses ->
+        Regex.match?(~r/^\s*(?:is|was)\s+it\s+close\s+to\s+.+\?/iu, sentence)
+
+      true ->
+        false
+    end
+  end
+
+  def incompatible_question_mwe?(_, _, _), do: false
+
   defp lexical_verb_only?(poses) do
     case List.wrap(poses) do
       [] -> false

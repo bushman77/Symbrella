@@ -28,15 +28,86 @@ config :core,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
 
+# ──────────────── Autonomous symbolic Curiosity ────────────────
+# The reasoning and evidence-acquisition experiments passed their dedicated
+# regression suite and unattended development trial. Start them automatically
+# in the development environment; keep test and production inert by default.
+# These settings replace the former IEx Application.put_env/3 setup.
+# They are feature gates, not separate processes: Investigator is already
+# supervised by Symbrella.Application, and evidence acquisition runs within
+# its scheduled issue-investigation cycle.
+#
+# Prerequisite: run mix db.migrate before starting Phoenix so the durable
+# curiosity_investigations audit table exists. Neither captured web evidence
+# nor a hippocampal cue alone is authorized knowledge.
+curiosity_enabled? = config_env() == :dev
+
+# Persist independently verified, source-backed population comparisons.
+config :core, :symbolic_consolidation_enabled?, curiosity_enabled?
+
+# Compose two stored population comparisons only after Core revalidates both.
+config :core, :symbolic_composition_enabled?, curiosity_enabled?
+
+# Use Hippocampus only as a proof index; never as a factual authority.
+config :core, :semantic_associative_recall_enabled?, curiosity_enabled?
+
+# One supervised investigator is started by the application on boot.
+# Acquisition is independently gated and uses fixed, bounded public-data
+# providers (no Qwen calls or unsolicited chat). First tick after 60 seconds
+# in development, then at most one eligible issue per minute; an unresolved
+# issue enters a one-hour retry cooldown. Production remains opt-in.
+config :core, Core.Curiosity.Investigator,
+  enabled?: curiosity_enabled?,
+  acquire_evidence?: curiosity_enabled?,
+  interval_ms: if(curiosity_enabled?, do: 60_000, else: 300_000),
+  retry_ms: 3_600_000
+
+config :core, :log_prompt_budget?, false
+
 config :core, :llm_synthesis,
   timeout_ms: 120_000,
   ready_timeout_ms: 10_000,
   max_tokens: 150,
-  history_turn_pairs: 2,
+  news_first_max_tokens: 280,
+  evidence_revision_enabled?: true,
+  evidence_revision_max_tokens: 360,
+  history_turn_pairs: 6,
+  # Full history remains default; opt into :selective_recall only after evaluating metrics.
+  history_mode: :full,
+  selective_recent_pairs: 2,
   max_item_chars: 500,
   max_system_chars: 4_000,
   max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5
+
+config :core, :web_retrieval,
+  enabled?: config_env() != :test,
+  provider: Core.Tools.WebRetrieval.Wikipedia,
+  news_provider: Core.Tools.WebRetrieval.NewsRss,
+  timeout_ms: 3_500,
+  max_attempts: 3
+
+# Automatically append completed LiveView conversations and memory evidence
+# to the private local training archive in development. This is data capture,
+# NOT online Axon training. Keep production and tests off by default because
+# the JSONL records may contain private chat text and recalled memories.
+# Change enabled?: false here to pause recording; no CLI env flag is needed.
+config :core, Core.TrainingArchive,
+  enabled?: config_env() == :dev,
+  dir: "tmp/training"
+
+# Admit bounded, session-scoped comprehension frames to working memory after
+# semantic interpretation. Disabled in tests unless explicitly opted in;
+# this does not change the evidence gate for LIFG senses or recalled facts.
+config :core, Core.Brain.WM.Comprehension,
+  enabled?: config_env() != :test
+
+# Feed Core-verified response semantics into Brain WM as bounded session-local
+# proof pointers. Each admission revalidates persisted symbolic evidence;
+# neither WM nor model-generated prose can establish factual authority.
+# Off in tests unless individually opted in; enabled on development startup.
+config :core, Core.Brain.WM.VerifiedSemantics,
+  enabled?: config_env() == :dev
 
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,

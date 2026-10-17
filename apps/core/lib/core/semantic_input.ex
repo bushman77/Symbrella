@@ -37,8 +37,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 2 adds the sentence-signature evidence contract.
-  @contract_v 2
+  # Version 4 adds independently audited post-ATL LIFG feedback.
+  @contract_v 4
 
   @list_fields MapSet.new([
                  :tokens,
@@ -65,6 +65,9 @@ defmodule Core.SemanticInput do
   @map_fields MapSet.new([
                 :intent_bias,
                 :sense_candidates,
+                :sentence_competition,
+                :sentence_meaning,
+                :lifg_feedback,
                 :perception,
                 :atl_slate,
                 :comprehension,
@@ -76,6 +79,8 @@ defmodule Core.SemanticInput do
                 :response_meta,
                 :symbolic_frame,
                 :context_frame,
+                :discourse_reference,
+                :wm_context,
                 :action_meta,
                 :emotion,
                 :appraisal,
@@ -180,12 +185,17 @@ defmodule Core.SemanticInput do
           conversation_act: atom() | nil,
           topic_domain: atom() | nil,
           context_frame: map() | nil,
+          discourse_reference: map() | nil,
+          wm_context: map() | nil,
           intent_bias: map(),
           token_cover: list() | nil,
           resolved_tokens: list() | nil,
 
           # Grammatical evidence and sense candidates
           sentence_signatures: [sentence_signature()] | nil,
+          sentence_competition: map() | nil,
+          sentence_meaning: map() | nil,
+          lifg_feedback: map() | nil,
           sense_candidates: %{
             optional(non_neg_integer()) => [sense_candidate()]
           },
@@ -260,10 +270,15 @@ defmodule Core.SemanticInput do
             conversation_act: nil,
             topic_domain: nil,
             context_frame: nil,
+            discourse_reference: nil,
+            wm_context: nil,
             intent_bias: %{},
             token_cover: nil,
             resolved_tokens: [],
             sentence_signatures: [],
+            sentence_competition: nil,
+            sentence_meaning: nil,
+            lifg_feedback: nil,
             sense_candidates: %{},
             lifg_opts: nil,
             lifg_choices: nil,

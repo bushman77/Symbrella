@@ -43,6 +43,10 @@ config :core, :tokenizer_defaults,
 
 config :core, :log_llm_prompts?, false
 
+# Local development only: show bounded first/revision LLM drafts in Explain.
+# This stores previews in chat history; production defaults to false.
+config :core, :expose_llm_drafts_in_explain?, true
+
 config :brain, Brain.CycleClock, hz: 20
 
 config :brain, Brain.Camera,

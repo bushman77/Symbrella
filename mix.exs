@@ -50,6 +50,17 @@ defmodule Symbrella.Umbrella.MixProject do
     end
   end
 
+  # Run the canonical dictionary script without starting the application server.
+  # Mix forwards arguments such as --extract-only and --import-only to the script.
+  def dictionary_import(args) do
+    Mix.Task.run("run", ["--no-start", "scripts/dictionary_import.exs", "--" | args])
+  end
+
+  # Read-only corpus audit; --no-start avoids the Phoenix/LLM boot sequence.
+  def dictionary_audit(args) do
+    Mix.Task.run("run", ["--no-start", "scripts/audit_dictionary_fidelity.exs", "--" | args])
+  end
+
   # ---------- Umbrella-wide tasks ----------
   defp aliases do
     [
@@ -71,11 +82,16 @@ defmodule Symbrella.Umbrella.MixProject do
          "negcache.clean"
        ]},
 
-      # Complete DB + BrainCell dictionary rebuild
+      # Non-destructive entrypoint: download/extract/import with DB-only startup.
+      {:"db.dictionary", [&__MODULE__.dictionary_import/1]},
+      {:"db.dictionary.audit", [&__MODULE__.dictionary_audit/1]},
+
+      # DESTRUCTIVE: drops and recreates the entire database first.
+      # Only use this when a full reset is explicitly intended.
       {:"db.rebuild",
        [
          "db.reset",
-         "run --no-start apps/db/priv/scripts/bootstrap_english_jsonl.exs -- --no-migrate"
+         "db.dictionary --no-migrate"
        ]},
       {:"db.migrate", ["ecto.migrate -r Db"]},
       {:"db.rollback", ["ecto.rollback -r Db"]},

@@ -30,6 +30,10 @@ defmodule SymbrellaWeb.ChatHistory do
     GenServer.start_link(__MODULE__, opts, name: @name)
   end
 
+  @doc "Stable conversation identifier shared by LiveView remounts in this runtime."
+  @spec session_id() :: String.t()
+  def session_id, do: GenServer.call(@name, :session_id)
+
   @spec list() :: [message()]
   def list do
     GenServer.call(@name, :list)
@@ -52,16 +56,18 @@ defmodule SymbrellaWeb.ChatHistory do
   @impl true
   def init(opts) do
     limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
-    {:ok, %{limit: limit, messages: []}}
+    {:ok, %{limit: limit, messages: [], session_id: new_session_id()}}
   end
 
   @impl true
+  def handle_call(:session_id, _from, state), do: {:reply, state.session_id, state}
+
   def handle_call(:list, _from, state) do
     {:reply, Enum.reverse(state.messages), state}
   end
 
   def handle_call(:clear, _from, state) do
-    {:reply, :ok, %{state | messages: []}}
+    {:reply, :ok, %{state | messages: [], session_id: new_session_id()}}
   end
 
   @impl true
@@ -118,6 +124,10 @@ defmodule SymbrellaWeb.ChatHistory do
   defp normalize_role("assistant"), do: :assistant
   defp normalize_role("system"), do: :system
   defp normalize_role(_), do: nil
+
+  defp new_session_id do
+    "s-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+  end
 
   defp normalize_limit(limit) when is_integer(limit) and limit > 0, do: limit
   defp normalize_limit(_), do: @default_limit

@@ -27,6 +27,20 @@ defmodule Core.Syntax.SignaturesTest do
     }
   ]
 
+  @question_cells [
+    %{norm: "what", pos: "pronoun"},
+    %{norm: "do", pos: "auxiliary"},
+    %{norm: "don't", pos: "auxiliary"},
+    %{norm: "you", pos: "pronoun"},
+    %{norm: "know", pos: "verb"},
+    %{norm: "about", pos: "preposition"},
+    %{norm: "japan", pos: "proper_noun"},
+    %{norm: "exactly", pos: "adverb"},
+    %{norm: "actually", pos: "adverb"},
+    %{norm: "really", pos: "adverb"},
+    %{norm: "not", pos: "adverb"}
+  ]
+
   defp input(sentence, cells \\ @cells) do
     %SemanticInput{sentence: sentence, active_cells: cells}
     |> TokenFilters.rebuild_word_ngrams(3)
@@ -135,6 +149,18 @@ defmodule Core.Syntax.SignaturesTest do
     assert si.active_cells == cells
   end
 
+  test "an unrelated lexical particle POS does not invent a phrasal verb" do
+    cells = [
+      %{norm: "you", pos: "verb"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "know", pos: "particle"},
+      %{norm: "know", pos: "noun"}
+    ]
+
+    refute :verb_particle_construction in ids("you know", cells)
+    refute :verb_particle_construction in ids("do you know", cells)
+  end
+
   test "a general manner adverb never becomes a verb particle" do
     cells = [
       %{norm: "walk", pos: "verb"},
@@ -215,6 +241,74 @@ defmodule Core.Syntax.SignaturesTest do
              sig.id == :noun_phrase and sig.span == {1, 2} and
                sig.roles == %{modifier: 1, head: 2}
            end)
+  end
+
+  test "genitive noun phrase composes the live railgun topic without a Japan's sense" do
+    cells = [
+      %{norm: "about", pos: "preposition"},
+      %{norm: "railgun", pos: "noun"},
+      %{norm: "development", pos: "noun"}
+    ]
+
+    si = input("What do you know about Japan's railgun development?", cells)
+    signatures = Signatures.detect(si)
+
+    assert [%{
+      id: :possessive_noun_phrase,
+      span: {5, 7},
+      surface_possessor: "Japan",
+      roles: %{possessor: 5, modifier: 6, head: 7},
+      evidence: evidence
+    }] = Enum.filter(signatures, &(&1.id == :possessive_noun_phrase))
+
+    assert :apostrophe_s in evidence
+    assert :possessor_not_lexically_verified in evidence
+
+    assert Enum.any?(signatures, fn
+             %{id: :prepositional_phrase, span: {4, 7},
+               roles: %{preposition: 4, possessor: 5, modifier: 6,
+                        head: 7, object: 7}} -> true
+             _ -> false
+           end)
+
+    out = Signatures.attach(si)
+    assert out.active_cells == cells
+    assert out.sense_candidates == si.sense_candidates
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
+  test "a single nominal head and an adjective nominal head support possession" do
+    for {sentence, cells, span, head} <- [
+          {"Mary's car", [%{norm: "car", pos: "noun"}], {0, 1}, 1},
+          {"the company's annual results",
+           [%{norm: "annual", pos: "adjective"}, %{norm: "results", pos: "noun"}],
+           {1, 3}, 3}
+        ] do
+      assert Enum.any?(Signatures.detect(input(sentence, cells)), fn
+               %{id: :possessive_noun_phrase, span: ^span,
+                 roles: %{head: ^head}} -> true
+               _ -> false
+             end)
+    end
+  end
+
+  test "possessive syntax does not treat contractions or punctuation as a genitive" do
+    cells = [
+      %{norm: "time", pos: "noun"},
+      %{norm: "rain", pos: "noun"},
+      %{norm: "home", pos: "noun"},
+      %{norm: "car", pos: "noun"},
+      %{norm: "the", pos: "determiner"}
+    ]
+
+    for sentence <- [
+          "It's time", "There's rain", "He's home",
+          "John's. car", "John's the car"
+        ] do
+      refute :possessive_noun_phrase in ids(sentence, cells)
+    end
+
+    refute :possessive_noun_phrase in ids("Mary's unknown", [])
   end
 
   test "prepositional phrases compose around noun phrase structure" do
@@ -324,4 +418,96 @@ defmodule Core.Syntax.SignaturesTest do
     assert meta.count >= 1
     assert :ok = SemanticInput.validate_contract(out)
   end
+
+  test "WH-topic signature retains token roles around adverbs and negation" do
+    examples = [
+      {"What exactly do you actually know about Japan?",
+       %{wh: 0, wh_modifier: 1, auxiliary: 2, subject: 3,
+         predicate_modifier: 4, predicate: 5, preposition: 6}},
+      {"What do you actually know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
+         predicate: 4, preposition: 5}},
+      {"What do you not actually know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, negation: 3,
+         predicate_modifier: 4, predicate: 5, preposition: 6}},
+      {"What do you really not know about Japan?",
+       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
+         negation: 4, predicate: 5, preposition: 6}}
+    ]
+
+    for {sentence, expected_roles} <- examples do
+      si = input(sentence, @question_cells)
+      assert [%{roles: ^expected_roles} = frame] =
+               Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+      assert frame.span == {0, length(si.tokens) - 1}
+      assert frame.required_features.predicate == [:pos_verb]
+      assert :explicit_prepositional_topic in frame.evidence
+      assert si.active_cells == @question_cells
+    end
+  end
+
+  test "negative auxiliary contractions stay one base-token role" do
+    si = input("What don't you know about Japan?", @question_cells)
+
+    assert [%{roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3,
+                       preposition: 4} = roles, evidence: evidence}] =
+             Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+    refute Map.has_key?(roles, :negation)
+    assert :negative_auxiliary_contraction in evidence
+  end
+
+  test "WH question does not leap over unknown words or punctuation" do
+    without_adverb = Enum.reject(@question_cells, &(&1.norm == "exactly"))
+
+    for {sentence, cells} <- [
+          {"What exactly do you know about Japan?", without_adverb},
+          {"What mystery do you know about Japan?", @question_cells},
+          {"What exactly, do you know about Japan?", @question_cells},
+          {"What do you actually know?", @question_cells},
+          {"What do you actually know about quickly?", @question_cells}
+        ] do
+      refute Enum.any?(Signatures.detect(input(sentence, cells)),
+               &(&1.id == :wh_aux_topic_question))
+    end
+  end
+  test "finite present subject–verb–object clause uses exact verb morphology" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "artist", pos: "noun"},
+      %{norm: "draws", pos: "noun", semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{norm: "draws", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
+                         "tag:singular", "tag:third-person"]},
+      %{norm: "a", pos: "determiner"},
+      %{norm: "picture", pos: "noun"}
+    ]
+
+    clauses = Signatures.detect(input("The artist draws a picture.", cells))
+    assert [%{id: :finite_present_svo_candidate,
+              span: {0, 4},
+              roles: %{subject_head: 1, predicate: 2, object_head: 4}}] =
+             Enum.filter(clauses, &(&1.id == :finite_present_svo_candidate))
+
+    refute :finite_present_svo_candidate in ids("The artist draws. a picture.", cells)
+
+    nouns_only = Enum.reject(cells, &(&1.norm == "draws" and &1.pos == "verb"))
+    refute :finite_present_svo_candidate in ids("The artist draws a picture.", nouns_only)
+  end
+
+  test "finite-present construction generalizes but does not promote first-person agreement" do
+    cells = [
+      %{norm: "the", pos: "determiner"}, %{norm: "painter", pos: "noun"},
+      %{norm: "paints", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
+                         "tag:singular", "tag:third-person"]},
+      %{norm: "a", pos: "determiner"}, %{norm: "wall", pos: "noun"},
+      %{norm: "she", pos: "pronoun"}, %{norm: "i", pos: "pronoun"}
+    ]
+
+    assert :finite_present_svo_candidate in ids("The painter paints a wall.", cells)
+    assert :finite_present_svo_candidate in ids("She paints a wall.", cells)
+    refute :finite_present_svo_candidate in ids("I paints a wall.", cells)
+    refute :finite_present_svo_candidate in ids("She paints. a wall.", cells)
+  end
+
 end

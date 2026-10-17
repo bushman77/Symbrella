@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.NeuralShadow do
   @event [:core, :training_archive, :completed_turn]
   @max_checkpoint_bytes 5_000_000
   @max_sessions 128
+  @portable_format :symbrella_residual_v4_safe_etf
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -93,6 +94,11 @@ defmodule SymbrellaWeb.NeuralShadow do
       predictions: 0,
       evaluations: 0,
       skipped: 0,
+      observed_pairs: 0,
+      observed_cells: 0,
+      residual_squared_error: 0.0,
+      persistence_squared_error: 0.0,
+      improved_pairs: 0,
       pending: %{},
       last_evaluation: nil,
       handler_id: nil
@@ -116,6 +122,12 @@ defmodule SymbrellaWeb.NeuralShadow do
             {:ok, %{base | reason: {:telemetry_attach_failed, reason}}}
         end
 
+      {:error, :enoent} ->
+        # A shadow checkpoint is optional until offline training has produced
+        # an evaluated artifact. Its absence should not look like a crash.
+        Logger.info("[NeuralShadow] unavailable: no checkpoint at #{checkpoint}")
+        {:ok, %{base | reason: {:checkpoint_unavailable, :enoent}}}
+
       {:error, reason} ->
         Logger.warning("[NeuralShadow] disabled: checkpoint load failed (#{inspect(reason)})")
         {:ok, %{base | reason: {:checkpoint_unavailable, reason}}}
@@ -137,9 +149,17 @@ defmodule SymbrellaWeb.NeuralShadow do
       log_path: state.log_path,
       schema: StateTransitionBuilder.feature_schema_version(),
       model_version: if(state.model, do: state.model.artifact.model_version, else: nil),
+      checkpoint_assessment: if(state.model, do: state.model.artifact[:assessment], else: nil),
       predictions: state.predictions,
       evaluations: state.evaluations,
       skipped: state.skipped,
+      observed_pairs: state.observed_pairs,
+      observed_cells: state.observed_cells,
+      improved_pairs: state.improved_pairs,
+      aggregate_residual_mse:
+        if(state.observed_cells > 0, do: state.residual_squared_error / state.observed_cells, else: nil),
+      aggregate_persistence_mse:
+        if(state.observed_cells > 0, do: state.persistence_squared_error / state.observed_cells, else: nil),
       pending_sessions: map_size(state.pending),
       last_evaluation: state.last_evaluation
     }, state}
@@ -168,7 +188,7 @@ defmodule SymbrellaWeb.NeuralShadow do
 
         # Ignore repeated archived turn notifications instead of treating a
         # duplicate as a genuine self-transition.
-        if last && last.turn_id == observation.turn_id do
+        if last && observation.turn_id in Map.get(last, :recent_ids, [last.turn_id]) do
           %{state | skipped: state.skipped + 1}
         else
           state = if last, do: score_previous(state, last, observation), else: state
@@ -201,9 +221,15 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+    prior = Map.get(state.pending, observation.session_id)
+    recent_ids =
+      [observation.turn_id | if(prior, do: Map.get(prior, :recent_ids, [prior.turn_id]), else: [])]
+      |> Enum.take(32)
+
     pending = Map.put(state.pending, observation.session_id, %{
       session_id: observation.session_id,
       turn_id: observation.turn_id,
+      recent_ids: recent_ids,
       features: observation.values,
       observed: observation.observed,
       prediction: predicted
@@ -260,8 +286,22 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+
+    # Aggregate squared errors over the same observed cells. Pairwise winning
+    # counts alone can hide poor performance on larger or harder transitions.
+    cells = report.valid_cells
+    model_error = if cells > 0, do: report.model_mse * cells, else: 0.0
+    baseline_error = if cells > 0, do: report.persistence_mse * cells, else: 0.0
+    observed_increment = if cells > 0, do: 1, else: 0
+    improved_increment = if payload.verdict == "residual_better", do: 1, else: 0
+
     %{state |
       evaluations: state.evaluations + 1,
+      observed_pairs: state.observed_pairs + observed_increment,
+      observed_cells: state.observed_cells + cells,
+      residual_squared_error: state.residual_squared_error + model_error,
+      persistence_squared_error: state.persistence_squared_error + baseline_error,
+      improved_pairs: state.improved_pairs + improved_increment,
       last_evaluation: Map.take(payload, [:valid_feature_pairs, :residual_mse, :persistence_mse, :verdict])
     }
   end
@@ -283,11 +323,76 @@ defmodule SymbrellaWeb.NeuralShadow do
     end
   end
 
+  # Only known metadata and fixed-size tensor byte strings are decoded.
+  # Unlike the old raw term_to_binary(Axon.ModelState), this portable ETF
+  # contains no Nx structs / arbitrary backend atoms, so :safe works in a
+  # freshly started BEAM without prior model training.
   defp decode_checkpoint(binary) do
-    {:ok, :erlang.binary_to_term(binary, [:safe])}
+    # Load only the known, local schema modules before safe ETF decoding:
+    # feature-name and metadata atoms must already exist in this BEAM.
+    _ = Code.ensure_loaded?(StateTransitionResidual)
+    _ = Code.ensure_loaded?(Brain.Neural.StateTransitionAudit)
+    _ = StateTransitionBuilder.feature_names()
+
+    case :erlang.binary_to_term(binary, [:safe]) do
+      %{format: @portable_format} = encoded ->
+        decode_portable(encoded)
+
+      legacy ->
+        # Retain compatibility with older ETF files *when* the original
+        # safe decoder can read them. No unsafe binary_to_term fallback.
+        {:ok, legacy}
+    end
   rescue
     _ -> {:error, :unsafe_or_corrupt_checkpoint}
   end
+
+  defp decode_portable(%{
+         weights: %{
+           "dense_0" => %{"kernel" => k0, "bias" => b0},
+           "dense_1" => %{"kernel" => k1, "bias" => b1}
+         } = weights,
+         hidden_units: hidden,
+         byte_order: order
+       } = encoded)
+       when is_integer(hidden) and hidden in 1..64 and
+              map_size(weights) == 2 do
+    width = length(StateTransitionBuilder.feature_names())
+
+    if order != System.endianness() do
+      {:error, :unsupported_checkpoint_endianness}
+    else
+      with {:ok, first_kernel} <- unpack_tensor(k0, {width, hidden}),
+           {:ok, first_bias} <- unpack_tensor(b0, {hidden}),
+           {:ok, final_kernel} <- unpack_tensor(k1, {hidden, width}),
+           {:ok, final_bias} <- unpack_tensor(b1, {width}) do
+        data = %{
+          "dense_0" => %{"kernel" => first_kernel, "bias" => first_bias},
+          "dense_1" => %{"kernel" => final_kernel, "bias" => final_bias}
+        }
+
+        {:ok,
+         encoded
+         |> Map.drop([:format, :byte_order, :weights])
+         |> Map.put(:params, Axon.ModelState.new(data))}
+      end
+    end
+  end
+
+  defp decode_portable(_), do: {:error, :invalid_portable_checkpoint}
+
+  defp unpack_tensor(%{shape: shape, binary: bytes}, expected_shape)
+       when is_tuple(shape) and is_binary(bytes) do
+    expected_bytes = 4 * (expected_shape |> Tuple.to_list() |> Enum.product())
+
+    if shape == expected_shape and byte_size(bytes) == expected_bytes do
+      {:ok, bytes |> Nx.from_binary({:f, 32}) |> Nx.reshape(expected_shape)}
+    else
+      {:error, :invalid_portable_weights}
+    end
+  end
+
+  defp unpack_tensor(_, _), do: {:error, :invalid_portable_weights}
 
   defp validate_checkpoint(artifact) when is_map(artifact) do
     names = StateTransitionBuilder.feature_names()

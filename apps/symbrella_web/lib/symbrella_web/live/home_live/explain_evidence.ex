@@ -41,6 +41,13 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
            :selection_scope, :context_score]
         ),
       comprehension: comprehension(comprehension),
+      sentence_competition: sentence_competition(get(si, :sentence_competition)),
+      question_signatures:
+        si
+        |> get(:sentence_signatures, [])
+        |> list()
+        |> Enum.filter(&(get(&1, :id) == :wh_aux_topic_question))
+        |> Enum.map(&pick(&1, [:id, :span, :roles, :evidence])),
       verb_particle_signatures:
         si
         |> get(:sentence_signatures, [])
@@ -103,8 +110,15 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
                            :span, :object_index, :constituent_indices]))
   end
 
+  defp sentence_competition(value) when is_map(value) do
+    pick(value, [:version, :competing_frames, :rejected_spans, :comparisons])
+  end
+
+  defp sentence_competition(_), do: nil
+
   defp comprehension(value) when is_map(value) do
-    pick(value, [:intent, :confidence, :understood, :uncertain, :unresolved,
+    pick(value, [:intent, :confidence, :recognized_topics,
+                 :selected_lexical_candidates, :understood, :uncertain, :unresolved,
                  :degraded?, :reasons, :lexical_meanings])
   end
 
@@ -133,7 +147,8 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
   defp empty?(result) do
     result.runtime == %{} and result.verified_phrasal_meanings == [] and
       result.semantic_winners == [] and result.lexical_winners == [] and
-      result.comprehension == nil and result.verb_particle_signatures == [] and
+      result.comprehension == nil and result.sentence_competition == nil and
+      result.question_signatures == [] and result.verb_particle_signatures == [] and
       result.atl_verb_particles == [] and result.unverified_phrasal_hypotheses == []
   end
 

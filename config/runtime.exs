@@ -1,6 +1,26 @@
 # config/runtime.exs
 import Config
 
+# Small-model web retrieval: keyless Wikimedia by default, optional SearXNG.
+# Environment toggles never require changing code.
+web_cfg = Application.get_env(:core, :web_retrieval, [])
+web_enabled =
+  case System.get_env("SYMBRELLA_WEB_RETRIEVAL") do
+    nil -> Keyword.get(web_cfg, :enabled?, false)
+    value -> String.downcase(value) in ["1", "true", "yes", "on"]
+  end
+
+web_provider =
+  case System.get_env("SYMBRELLA_WEB_PROVIDER", "wikipedia") |> String.downcase() do
+    "searxng" -> Core.Tools.WebRetrieval.Searxng
+    _ -> Core.Tools.WebRetrieval.Wikipedia
+  end
+
+config :core, :web_retrieval,
+  Keyword.merge(web_cfg, enabled?: web_enabled, provider: web_provider)
+
+config :core, :searxng_url, System.get_env("SYMBRELLA_SEARXNG_URL")
+
 # ───────── Brain env overrides (apply in all envs) ─────────
 
 pmtg_mode =
@@ -260,16 +280,12 @@ config :core, Core.StateDump,
   mode: state_dump_mode,
   path: System.get_env("SYMBRELLA_STATE_DUMP_PATH", "tmp/state_dumps/symbrella_raw.log")
 
-# Explicit opt-in. Complete turns and recalled memories can contain private data.
-training_archive_enabled? =
-  case System.get_env("SYMBRELLA_TRAINING_ARCHIVE", "off") |> String.downcase() do
-    value when value in ["1", "true", "yes", "on"] -> true
-    _ -> false
-  end
-
-config :core, Core.TrainingArchive,
-  enabled?: training_archive_enabled?,
-  dir: System.get_env("SYMBRELLA_TRAINING_DIR", "tmp/training")
+# Recording is controlled by config/config.exs; runtime must not override it
+# with a CLI environment toggle. Development chat completions append locally
+# without a special launch command. Production and tests stay disabled.
+training_archive_config = Application.get_env(:core, Core.TrainingArchive, [])
+training_archive_enabled? = Keyword.get(training_archive_config, :enabled?, false) == true
+training_archive_dir = Keyword.get(training_archive_config, :dir, "tmp/training")
 
 # Experimental read-only inference from an existing residual Axon checkpoint.
 # OFF by default, requires the training archive, never changes cognition.
@@ -279,7 +295,7 @@ neural_shadow_enabled? =
     _ -> false
   end
 
-neural_shadow_dir = System.get_env("SYMBRELLA_TRAINING_DIR", "tmp/training")
+neural_shadow_dir = training_archive_dir
 
 config :symbrella_web, SymbrellaWeb.NeuralShadow,
   enabled?: training_archive_enabled? and neural_shadow_enabled?,

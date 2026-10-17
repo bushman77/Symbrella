@@ -138,6 +138,12 @@ defmodule Core.LIFG.Attach do
                 candidate_field(chosen_candidate, [:definition, :def, :gloss, :meaning]),
               example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
+              semantic_control: Map.get(ch, :semantic_control),
+              # Full Stage1 post-softmax distribution. A second-pass LIFG
+              # update requires this exact prior, not the winning score alone.
+              candidate_probs:
+                if(is_map(scores) and map_size(scores) <= 64,
+                  do: scores, else: nil),
               score: score2
             }
           end)
@@ -172,6 +178,9 @@ defmodule Core.LIFG.Attach do
           meta: %{choice_count: length(raw_choices), flips: flips}
         )
         |> Core.MWE.Decisions.attach()
+        |> maybe_trace_mwe_scores(raw_choices, all_choices, virtual_mwes, lifg_opts)
+        |> maybe_trace_word_scores(raw_choices, all_choices, tokens_for_choices,
+          virtual_mwes, lifg_opts)
 
       _ ->
         si
@@ -179,6 +188,83 @@ defmodule Core.LIFG.Attach do
   end
 
   def run_and_attach(si, _lifg_opts), do: si
+
+  # Diagnostic only. A small winning probability can reflect a large
+  # candidate bucket; do not interpret it as sentence-level confidence.
+  defp maybe_trace_word_scores(si, raw, final, tokens, virtual, opts) do
+    if Keyword.get(opts, :trace_word_scores?, false) == true do
+      scores_mode = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
+      entries = Core.LIFG.ScoreAudit.summarize(raw, final, tokens, virtual, scores_mode)
+
+      Core.Pipeline.Trace.append(si, :lifg_word_score_audit,
+        decision: :observed,
+        reason: :per_token_competitive_probabilities,
+        meta: %{scores_mode: scores_mode, entries: entries}
+      )
+    else
+      si
+    end
+  end
+
+  # Opt-in, observation-only trace of the virtual MWE candidates used by
+  # LIFG. Unlike the normal compact choices, this records raw scorer IDs,
+  # candidate scores, and the result of Core's post-LIFG tie-break.
+  # Does not change any lexical or semantic winner.
+  defp maybe_trace_mwe_scores(si, raw_choices, final_choices, virtual_mwes, opts) do
+    if Keyword.get(opts, :trace_mwe_promotion?, false) == true and
+         map_size(virtual_mwes) > 0 do
+      entries =
+        virtual_mwes
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.take(12)
+        |> Enum.map(fn {index, cover} ->
+          raw = Enum.find(raw_choices, &(Map.get(&1, :token_index) == index)) || %{}
+          selected = Enum.find(final_choices, &(Map.get(&1, :token_index) == index)) || %{}
+          # :alt_ids lists only retry-eligible alternatives, not all
+          # candidates. Keep the complete bounded score map to reveal
+          # runner-up senses even when :alt_ids is empty.
+          scored =
+            case Map.get(raw, :scores) do
+              %{} = all ->
+                all
+                |> Enum.filter(fn {id, score} ->
+                  is_binary(id) and is_number(score)
+                end)
+                |> Enum.sort_by(fn {_, score} -> -score end)
+                |> Enum.take(16)
+                |> Map.new()
+
+              _ -> %{}
+            end
+
+          %{
+            phrase: Map.get(cover, :phrase),
+            span: Map.get(cover, :token_span),
+            virtual_index: index,
+            raw_winner: Map.get(raw, :chosen_id),
+            final_winner: Map.get(selected, :id),
+            raw_candidate_scores: scored,
+            raw_candidate_score_kind: :post_softmax_probability,
+            raw_alt_ids: Map.get(raw, :alt_ids, []),
+            raw_margin: Map.get(raw, :margin),
+            raw_probability_margin: Map.get(raw, :prob_margin),
+            final_score: Map.get(selected, :score)
+          }
+        end)
+
+      Core.Pipeline.Trace.append(si, :mwe_lifg_score_audit,
+        decision: :observed,
+        reason: :virtual_phrase_candidate_scores,
+        meta: %{
+          grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          scores_mode: Application.get_env(:brain, :lifg_stage1_scores_mode, :all),
+          entries: entries
+        }
+      )
+    else
+      si
+    end
+  end
 
   # ───────────────────────── Brain call (safe) ─────────────────────────
 

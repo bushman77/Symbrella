@@ -14,7 +14,7 @@ defmodule Core.Semantic.EventFrames do
   def attach(si, _opts \\ [])
 
   def attach(%{} = si, _opts) do
-    case health_support_frame(si) || obligation_frame(si) do
+    case health_support_frame(si) || location_question_frame(si) || obligation_frame(si) do
       nil ->
         si
 
@@ -31,6 +31,261 @@ defmodule Core.Semantic.EventFrames do
   end
 
   def attach(other, _opts), do: other
+
+  @doc """
+  Classify only the geographical relation requested by the user's question.
+  This does not establish or verify any real-world geographic claim. The pure
+  helper is also used by response review if a runtime context loses its frame.
+  """
+  @spec location_question(String.t()) :: map() | nil
+  def location_question(sentence) when is_binary(sentence),
+    do: location_question_frame(%{sentence: sentence})
+
+  def location_question(_), do: nil
+
+  # A syntactically clear location question is not a verified geographic fact.
+  # Keep the predicate and antecedent explicit, without claiming an external
+  # population or distance measurement exists.
+  defp location_question_frame(si) do
+    sentence =
+      (Map.get(si, :sentence) || "")
+      |> String.trim()
+      |> String.replace(~r/\A[“"]+\s*/u, "")
+      |> String.replace(~r/\s*[”"]+\z/u, "")
+      |> String.trim()
+      |> String.replace(~r/^\s*no[,]?\s+it\s+is\s+not[.!]?\s+(?=how\s+far\s+is\s+it\s+from\b)/iu, "")
+
+    reference = Map.get(si, :discourse_reference) || %{}
+    subject = Map.get(reference, :antecedent)
+    named_comparison = named_population_comparison(sentence)
+
+    cond do
+      match =
+          Regex.run(
+            ~r/^\s*how\s+far\s+is\s+it\s+from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]?\s*$/iu,
+            sentence
+          ) ->
+        [_, target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: subject,
+          target: clean_entity(target),
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      # Explicitly named comparisons establish the two referents directly.
+      # Parsing a question is not evidence that either population is known.
+      is_list(named_comparison) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          comparison: :greater,
+          subjects: named_comparison,
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
+      # A comparison is a relation over the previously resolved entities.
+      # The interpretation alone supplies no population values or ranking.
+      Map.get(reference, :source) == :wm_comprehension and
+          is_list(Map.get(reference, :antecedents)) and
+          length(Map.get(reference, :antecedents)) == 2 and
+          Regex.match?(
+            ~r/^\s*which\s+(?:(?:of\s+)?(?:those|these|the)\s+)?(?:cities|city|places|one)\s+has\s+the\s+(?:larger|greater|higher)\s+population\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          comparison: :greater,
+          subjects: Map.get(reference, :antecedents),
+          antecedent_source: :wm_comprehension,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.85
+        }
+
+      # Plural follow-ups can use the preceding same-session comprehension.
+      # These are discourse referents, NOT population claims or verified facts.
+      Map.get(reference, :source) == :wm_comprehension and
+          is_list(Map.get(reference, :antecedents)) and
+          length(Map.get(reference, :antecedents)) >= 2 and
+          Regex.match?(
+            ~r/^\s*what\s+are\s+(?:the\s+)?populations?\s+of\s+(?:each|both)\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subjects: Enum.take(Map.get(reference, :antecedents), 4),
+          antecedent_source: :wm_comprehension,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.8
+        }
+
+      # Directly named places do not require discourse antecedent recovery.
+      # This creates only a question frame; coordinates must still be sourced
+      # and matched to both entities before any numeric claim may be returned.
+      match =
+          Regex.run(
+            ~r/^\s*how\s+far\s+is\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78}?)\s+from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]?\s*$/iu,
+            sentence
+          ) ->
+        [_, named_subject, named_target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: clean_entity(named_subject),
+          target: clean_entity(named_target),
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
+      match =
+          Regex.run(
+            ~r/^\s*is\s+it\s+close\s+to\s+(\p{Lu}[\p{L}\p{M}\s,.'-]{1,78})\s*\?\s*$/iu,
+            sentence
+          ) ->
+        [_, target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: subject,
+          target: clean_entity(target),
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      Map.get(reference, :source) == :recent_geographic_entity and
+          (Regex.match?(~r/^\s*what\s+is\s+[\p{L}][\p{L}\p{M}\s,.'-]{1,78}\s*\?\s*$/iu, sentence) or
+             Regex.match?(~r/^\s*(?:that|this)\s+is\s+not\s+where\b/iu, sentence)) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :identity,
+          subject: subject,
+          antecedent_source: :recent_geographic_entity,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
+      match =
+          Regex.run(
+            ~r/^\s*(?:what(?:'s|\s+is)\s+the\s+population\s+of|how\s+many\s+people\s+live\s+in)\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]*\s*$/iu,
+            sentence
+          ) ->
+        [_, named_subject] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: clean_entity(named_subject),
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
+      Map.get(reference, :source) == :recent_population_recheck ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: subject,
+          antecedent_source: :recent_population_recheck,
+          freshness: :latest_available,
+          unresolved_roles: if(is_binary(subject), do: [], else: [:subject]),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      Regex.match?(~r/^\s*what\s+is\s+its\s+population\s*\?\s*$/iu, sentence) ->
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :population,
+          subject: subject,
+          antecedent_source: Map.get(reference, :source),
+          unresolved_roles: if(is_nil(subject), do: [:subject], else: []),
+          grounding_status: :unverified,
+          confidence: if(is_binary(subject), do: 0.9, else: 0.6)
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  # Recognize only an explicit two-entity comparative construction. The
+  # named operands are syntactic roles, not externally verified places.
+  # Require a single "or" separator and name-like entities to avoid treating
+  # ordinary discussion containing population as a comparison instruction.
+  defp named_population_comparison(sentence) do
+    case Regex.run(
+           ~r/^\s*which\s+(?:(?:city|town|place|municipality)\s+)?(?:had|has)\s+(?:the\s+)?(?:larger|greater|higher)\s+population(?:\s+in\s+(?:19|20)\d{2})?\s*,?\s+(.+?)\s*[?.!]*\s*$/iu,
+           sentence,
+           capture: :all_but_first
+         ) do
+      [candidates] ->
+        case Regex.split(~r/\s+or\s+/iu, candidates, trim: true) do
+          [first, second] ->
+            names =
+              [first, second]
+              |> Enum.map(&clean_entity/1)
+              |> Enum.map(&String.trim(&1, " ,"))
+              |> Enum.map(&String.replace(&1, ~r/\s*,\s*/u, ", "))
+
+            if Enum.all?(names, &valid_named_place?/1) and
+                 length(Enum.uniq_by(names, &String.downcase/1)) == 2 do
+              names
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp valid_named_place?(name) when is_binary(name) do
+    String.length(name) in 3..100 and
+      Regex.match?(~r/^\p{Lu}[\p{L}\p{M}\p{N}\s,.'’-]*$/u, name) and
+      not Regex.match?(~r/\b(?:which|what|who|where|how|why)\b/iu, name)
+  end
+
+  defp valid_named_place?(_), do: false
+
+  defp clean_entity(text) do
+    text
+    |> String.trim()
+    |> String.trim_trailing(".")
+    |> String.trim_trailing("?")
+    |> String.replace(~r/\s+/u, " ")
+  end
 
   # Recover a bounded agent/action proposition for recognized obligation.
   # Reject implicit subject attribution: only explicit "I've" is supported.

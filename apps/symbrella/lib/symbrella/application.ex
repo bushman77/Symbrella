@@ -150,6 +150,10 @@ defmodule Symbrella.Application do
       # Processes curiosity proposals.
       Brain.Curiosity,
 
+      # Bounded silent semantic investigation. Supervised at boot but inert
+      # unless independently enabled; it never sends unsolicited chat.
+      {Core.Curiosity.Investigator, []},
+
       # Observes self-portrait salience.
       Brain.DriveLoop
     ]

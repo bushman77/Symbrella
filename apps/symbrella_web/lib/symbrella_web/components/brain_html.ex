@@ -344,6 +344,9 @@ defmodule SymbrellaWeb.BrainHTML do
     copy_target_id = "blackboard-copy-target"
     copy_button_id = "blackboard-copy-btn"
     copy_dump = blackboard_copy_dump(filtered)
+    # The full Brain report must include every retained event even while the
+    # on-screen feed has an active filter. No second dump when unfiltered.
+    full_copy_dump = if q == "", do: nil, else: blackboard_copy_dump(normalized)
 
     assigns =
       assigns
@@ -356,6 +359,7 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:copy_target_id, copy_target_id)
       |> assign(:copy_button_id, copy_button_id)
       |> assign(:copy_dump, copy_dump)
+      |> assign(:full_copy_dump, full_copy_dump)
 
     ~H"""
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
@@ -401,6 +405,9 @@ defmodule SymbrellaWeb.BrainHTML do
       </div>
 
       <pre id={@copy_target_id} class="sr-only"><%= @copy_dump %></pre>
+      <%= if @full_copy_dump do %>
+        <pre id="blackboard-full-copy-target" class="sr-only"><%= @full_copy_dump %></pre>
+      <% end %>
 
       <div class="mt-3 space-y-2">
         <%= if @view == [] do %>

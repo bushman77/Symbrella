@@ -43,6 +43,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Stage1.PosBias
   alias Brain.LIFG.Stage1.Boundary
   alias Brain.LIFG.GrammarEvidence
+  alias Brain.LIFG.SemanticControl
 
   @default_weights %{
     lex_fit: 0.40,
@@ -233,6 +234,13 @@ defmodule Brain.LIFG.Stage1 do
           sent: sent,
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          semantic_control_opts: [
+            enabled?: Keyword.get(opts, :semantic_control?,
+              Application.get_env(:brain, :lifg_semantic_control?, true)),
+            max_delta: Keyword.get(opts, :semantic_control_max_delta, 0.10),
+            min_fit: Keyword.get(opts, :semantic_control_min_fit, 0.18),
+            min_gap: Keyword.get(opts, :semantic_control_min_gap, 0.15)
+          ],
           weights: weights,
           scores_mode: scores_mode,
           margin_thr: margin_thr,
@@ -763,6 +771,9 @@ defmodule Brain.LIFG.Stage1 do
               id: id,
               token: tok,
               features: feat,
+              # Raw ContextFit is computed from sentence plus dictionary
+              # metadata, not a candidate-supplied feature override.
+              context_evidence: context0,
               perception_delta: perception_delta,
               hom_bump: hom_bump,
               pos_bias: pos_bias
@@ -822,12 +833,52 @@ defmodule Brain.LIFG.Stage1 do
             Map.get(ctx, :grammar_weight, 0.0)
           )
 
+        # Only the full, attested finite-present clause hypothesis is active
+        # independently of the general opt-in grammar weight. No new senses
+        # or POS candidates are created.
+        cal_scores =
+          GrammarEvidence.apply_finite_present(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
+        # A mixed-POS slate is not automatically a closed-class *winner*.
+        # "know" has particle and verb candidates: the particle must not
+        # suppress contextual discrimination between the verb senses.
+        # Preserve the older closed_class_slate? calibration/learning policy.
+        provisional_id =
+          Enum.max_by(ids, &Map.get(cal_scores, &1, 0.0), fn -> nil end)
+
+        provisional_candidate =
+          Enum.find(cand_list, fn c ->
+            sense_id_for(c, token_phrase) == provisional_id
+          end)
+
+        provisional_closed_class? =
+          not is_nil(provisional_candidate) and
+            ClosedClass.closed_class_candidate?(provisional_candidate)
+
+        {cal_scores, semantic_control} =
+          if provisional_closed_class? do
+            {cal_scores, %{
+              applied?: false, reason: :closed_class_winner, adjustments: []
+            }}
+          else
+            semantic_opts =
+              Keyword.put(ctx.semantic_control_opts, :focus_pos, pos_of(provisional_candidate))
+
+            SemanticControl.apply(cal_scores, scored_rows, semantic_opts)
+          end
+
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
 
+        # Keep full softmax precision for downstream probability sums and
+        # decisions. Rounding each candidate to six decimals can make a valid
+        # distribution sum to 0.999999 (or 1.000001) in the trace.
         ranked =
           Enum.zip(ids, probs)
-          |> Enum.map(fn {id, p} -> {id, Float.round(p, 6)} end)
           |> Enum.sort_by(fn {_id, p} -> -p end)
 
         {chosen_id, top_p0} =
@@ -926,6 +977,7 @@ defmodule Brain.LIFG.Stage1 do
           margin: margin,
           prob_margin: margin,
           weak?: margin_weak? or low_confidence?,
+          semantic_control: semantic_control,
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
           reliability:

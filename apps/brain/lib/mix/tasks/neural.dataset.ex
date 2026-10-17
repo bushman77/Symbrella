@@ -80,6 +80,22 @@ defmodule Mix.Tasks.Neural.Dataset do
             "Observed-only target cells: #{metadata.train_valid_cells}/#{metadata.train_possible_cells} training; " <>
               "#{metadata.eval_valid_cells}/#{metadata.eval_possible_cells} evaluation"
           )
+          audit = Brain.Neural.StateTransitionAudit.dataset(%{
+            metadata: metadata, train: train, eval: evaluation
+          })
+
+          Mix.shell().info("Feature coverage (observed train / held-out transition pairs):")
+          Enum.each(audit.feature_coverage, fn row ->
+            Mix.shell().info("  #{row.feature}: #{row.train_pairs} / #{row.eval_pairs}")
+          end)
+
+          if audit.core_features_below_minimum != [] do
+            Mix.shell().info(
+              "WARNING: insufficient held-out coverage for core features: " <>
+                inspect(audit.core_features_below_minimum)
+            )
+          end
+
           Mix.shell().info("Presence/availability flags are inputs, not prediction targets.")
         end
         Mix.shell().info("No model weights were changed.")

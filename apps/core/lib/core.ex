@@ -52,7 +52,12 @@ defmodule Core do
       |> Map.put(:lifg_opts, lifg_opts)
       |> StateDump.capture(:initial)
 
-    si1 = apply_intent_selection(si0, opts) |> StateDump.capture(:intent_selected)
+    si1 =
+      si0
+      |> apply_intent_selection(opts)
+      |> Core.Brain.WM.Comprehension.recall(opts)
+      |> Core.Discourse.References.attach()
+      |> StateDump.capture(:intent_selected)
 
     out =
       case mode do
@@ -127,6 +132,8 @@ defmodule Core do
     |> StateDump.capture(:mwe_lexicon)
     |> Core.Syntax.Signatures.attach()
     |> StateDump.capture(:sentence_signatures)
+    |> Core.Syntax.SentenceCompetition.attach()
+    |> StateDump.capture(:sentence_competition)
     |> Selection.refine_from_syntax()
     |> StateDump.capture(:syntax_intent)
     |> Core.MWE.Discovery.run(opts)
@@ -159,10 +166,17 @@ defmodule Core do
     |> StateDump.capture(:atl)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
     |> StateDump.capture(:atl_pairs)
+    |> Core.LIFG.RelationalFeedback.attach(
+      Keyword.get(opts, :lifg_relational_feedback_opts, []))
+    |> StateDump.capture(:lifg_relational_feedback)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
+    |> Core.Semantic.SentenceMeaning.attach()
+    |> StateDump.capture(:sentence_meaning)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
+    |> Core.Brain.WM.Comprehension.store(opts)
+    |> StateDump.capture(:wm_comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
     |> StateDump.capture(:prefrontal)
     |> Core.Brain.ActionSelection.attach(opts)

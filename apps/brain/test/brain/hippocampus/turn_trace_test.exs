@@ -39,24 +39,30 @@ defmodule Brain.Hippocampus.TurnTraceTest do
   test "observes fact hits and misses, and attached episode candidates" do
     TurnTrace.start()
 
-    assert nil == Hippocampus.fact(:user_name)
+    # reset/0 clears the memory window, not persisted facts. Use a unique key
+    # so existing user_name facts cannot turn this expected miss into a hit.
+    key = "turn_trace_test_#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}"
+
+    assert nil == Hippocampus.fact(key)
 
     Hippocampus.encode(slate("Alex"), %{
       kind: :fact,
-      key: :user_name,
+      key: key,
       value: "Alex",
-      tags: ["fact", "user_name"]
+      tags: ["fact", key]
     })
 
-    assert Hippocampus.fact(:user_name) == "Alex"
+    assert Hippocampus.fact(key) == "Alex"
 
     si = %{winners: [%{lemma: "Alex"}], evidence: %{}}
     attached = Hippocampus.attach_episodes(si, limit: 1, ignore_head: false)
     assert [%{episode: _}] = attached.evidence.episodes
 
     events = TurnTrace.finish()
-    assert Enum.any?(events, &(&1.kind == :fact_lookup and &1.found? == false))
-    assert Enum.any?(events, &(&1.kind == :fact_lookup and &1.found? == true))
+    assert Enum.any?(events, &(&1.kind == :fact_lookup and &1.memory_key == key and
+                                  &1.found? == false))
+    assert Enum.any?(events, &(&1.kind == :fact_lookup and &1.memory_key == key and
+                                  &1.found? == true and &1.result == "Alex"))
     assert Enum.any?(events, &(&1.kind == :recall_attempt and &1.operation == :attach))
     assert Enum.any?(events, &(&1.kind == :episodic_recall and &1.operation == :attach))
   end

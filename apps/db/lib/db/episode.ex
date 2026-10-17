@@ -831,6 +831,30 @@ defmodule Db.Episode do
   end
 
   @doc """
+  Retrieve the newest durable user fact by its exact key without an episode
+  recency cutoff. Self/autobiographical episodes are intentionally excluded.
+  """
+  @spec latest_user_fact(atom() | String.t()) :: term() | nil
+  def latest_user_fact(key) when is_atom(key) or is_binary(key) do
+    normalized_key = key |> to_string() |> String.downcase() |> String.trim()
+
+    from(e in __MODULE__,
+      where: fragment("? ->> 'key' = ?", e.meta, ^normalized_key),
+      where: fragment("? ->> 'kind' = 'fact'", e.meta),
+      where: fragment("coalesce(? ->> 'subject', 'user') = 'user'", e.meta),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: 1,
+      select: e.meta
+    )
+    |> Repo.one()
+    |> case do
+      %{"value" => value} -> value
+      %{value: value} -> value
+      _ -> nil
+    end
+  end
+
+  @doc """
   Fetch all persisted episodes, newest first.
   """
   @spec list_all() :: [t()]

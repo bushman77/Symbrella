@@ -118,6 +118,9 @@ defmodule Brain.Neural.StateTransitionResidualTest do
              row.model_mse >= 0.0 and row.persistence_mse >= 0.0
            end)
     assert result.deployment_status == :experimental_not_for_runtime
+    assert result.assessment.status == :not_ready
+    assert :too_few_evaluation_transitions in result.assessment.reasons
+    assert result.assessment.deployment_authorized? == false
   end
 
   test "rejects schema and session leakage, except deliberately marked smoke runs" do
@@ -171,8 +174,34 @@ defmodule Brain.Neural.StateTransitionResidualTest do
     loaded = residual_path |> File.read!() |> :erlang.binary_to_term([:safe])
     assert loaded.model_version == result.model_version
     assert loaded.feature_names == StateTransitionBuilder.feature_names()
-    assert loaded.params != nil
+    assert loaded.format == :symbrella_residual_v4_safe_etf
+    assert loaded.byte_order == System.endianness()
+    assert loaded.hidden_units == result.hidden_units
+    assert loaded.assessment == result.assessment
+    assert loaded.assessment.deployment_authorized? == false
+
+    # The portable checkpoint intentionally stores raw f32 tensors, not
+    # Nx/Axon structs. Verify all four parameters round-trip losslessly.
+    refute Map.has_key?(loaded, :params)
+    assert %Axon.ModelState{data: original_weights} = result.params
+
+    for {layer, key, shape} <- [
+          {"dense_0", "kernel", {@width, result.hidden_units}},
+          {"dense_0", "bias", {result.hidden_units}},
+          {"dense_1", "kernel", {result.hidden_units, @width}},
+          {"dense_1", "bias", {@width}}
+        ] do
+      assert %{shape: ^shape, binary: bytes} = get_in(loaded, [:weights, layer, key])
+      assert is_binary(bytes)
+      assert byte_size(bytes) == 4 * (shape |> Tuple.to_list() |> Enum.product())
+
+      original = get_in(original_weights, [layer, key])
+      assert Nx.shape(original) == shape
+      assert Nx.type(original) == {:f, 32}
+      assert bytes == Nx.to_binary(original)
+    end
   end
+
   test "missing target values have zero effect on the masked objective or MSE" do
     predicted = Nx.tensor([[0.25, 0.9], [0.75, 0.2]], type: :f32)
     truth_a = Nx.tensor([[0.5, 0.1], [0.5, 0.1]], type: :f32)

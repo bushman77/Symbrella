@@ -60,6 +60,7 @@ defmodule Core.Response.LlmPromptEvents do
       personality_state: Map.get(prompt_fields, :personality_state),
       system_sha256: sha256_hex(system_prompt),
       symbolic_frame: Map.get(context, :symbolic_frame),
+      web_retrieval: retrieval_summary(Map.get(context, :web_evidence)),
       user_text: user_preview,
       user_truncated?: user_truncated?,
       assistant_text: assistant_preview,
@@ -148,6 +149,24 @@ defmodule Core.Response.LlmPromptEvents do
 
   defp existing_atom_value(_), do: nil
 
+  defp retrieval_summary(%{} = evidence) do
+    %{
+      status: Map.get(evidence, :status),
+      resolution: Map.get(evidence, :resolution),
+      attempted_count: Map.get(evidence, :attempted_count),
+      attempts: Map.get(evidence, :attempts, []),
+      provider: Map.get(evidence, :provider),
+      sources:
+        evidence
+        |> Map.get(:sources, [])
+        |> Enum.take(3)
+        |> Enum.map(&Map.take(&1, [:title, :url, :publisher, :published_at])),
+      support: Map.get(evidence, :support)
+    }
+  end
+
+  defp retrieval_summary(_), do: nil
+
   defp reflection_summary(%{} = reflection) do
     Map.take(reflection, [
       :v,
@@ -162,7 +181,10 @@ defmodule Core.Response.LlmPromptEvents do
       :final_sha256,
       :draft_text,
       :final_text,
-      :at_ms
+      :at_ms,
+      :evidence_revision,
+      :grounded_revision,
+      :authoritative_plan
     ])
   end
 

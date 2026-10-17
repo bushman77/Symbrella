@@ -64,6 +64,72 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     assert marker["to|particle|1"] > marker["to|preposition|1"]
   end
 
+  test "complete WH auxiliary question predicate outranks an overlapping noun-phrase hypothesis" do
+    sentence_frame = %{
+      id: :wh_aux_topic_question,
+      span: {0, 7},
+      roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4},
+      required_features: %{predicate: [:pos_verb]},
+      evidence: [
+        :wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+        :explicit_prepositional_topic, :question_punctuation
+      ]
+    }
+
+    # A short "you know" noun phrase is plausible in isolation, but does not
+    # outrank the complete "what do you know about X?" question.
+    overlapping_noun = %{
+      id: :noun_phrase,
+      span: {2, 3},
+      roles: %{modifier: 2, head: 3},
+      required_features: %{modifier: [:pos_noun], head: [:pos_noun]}
+    }
+
+    ctx = context([overlapping_noun, sentence_frame])
+    scores = %{
+      "know|noun|1" => 0.56,
+      "know|verb|1" => 0.48,
+      "know|verb|2" => 0.47
+    }
+
+    assert GE.apply(scores, ctx, 3, 0.0) == scores
+
+    result = GE.apply(scores, ctx, 3, 1.0)
+    assert result["know|verb|1"] > result["know|noun|1"]
+    assert result["know|verb|2"] > result["know|noun|1"]
+    assert Map.keys(result) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
+
+    # The question is only a POS constraint, not evidence that any particular
+    # verb sense is correct. Preserve the relative ordering of verb senses.
+    assert_in_delta result["know|verb|1"] - result["know|verb|2"], 0.01, 1.0e-8
+    assert GE.apply(scores, ctx, 99, 1.0) == scores
+  end
+
+  test "incomplete question frames cannot inflate predicate senses" do
+    noun = %{
+      id: :noun_phrase, span: {2, 3}, roles: %{head: 3},
+      required_features: %{head: [:pos_noun]}
+    }
+
+    incomplete = %{
+      id: :wh_aux_topic_question, span: {0, 7},
+      roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4},
+      required_features: %{predicate: [:pos_verb]},
+      evidence: [:wh_fronted, :lexical_verb_available]
+    }
+
+    scores = %{"know|noun|1" => 0.5, "know|verb|1" => 0.5}
+    output = GE.apply(scores, context([noun, incomplete]), 3, 1.0)
+    assert output["know|noun|1"] > output["know|verb|1"]
+
+    fallback = %{"know|verb|fallback" => 0.5}
+    frame = %{incomplete | evidence: [
+      :wh_fronted, :auxiliary_inversion, :lexical_verb_available,
+      :explicit_prepositional_topic, :question_punctuation
+    ]}
+    assert GE.apply(fallback, context([frame]), 3, 1.0) == fallback
+  end
+
   test "noun phrase roles support compatible existing POS senses without removing alternatives" do
     signature = %{
       id: :noun_phrase,
@@ -197,4 +263,39 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
     })
     assert GE.apply(%{"tried|verb|1" => 0.5}, ctx, 1, 1.0) == %{"tried|verb|1" => 0.5}
   end
+  test "verified finite-present clause prefers the attested verb, not a plural noun" do
+    evidence = ["tag:form-of", "tag:indicative", "tag:present",
+                "tag:singular", "tag:third-person"]
+    cells = [
+      %{id: "draws|noun|1", semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{id: "draws|noun|2", semantic_atoms: ["tag:plural", "tag:plural-only"]},
+      %{id: "draws|verb|1", semantic_atoms: evidence}
+    ]
+
+    signature = %{
+      id: :finite_present_svo_candidate,
+      roles: %{subject_head: 1, predicate: 2, object_head: 4},
+      evidence: [:contiguous_surface, :attested_nominal_subject,
+                 :attested_nominal_object, :attested_finite_present_verb]
+    }
+
+    scores = %{"draws|noun|1" => 0.57, "draws|noun|2" => 0.56,
+               "draws|verb|1" => 0.40}
+    context = GE.prepare(%{active_cells: cells, sentence_signatures: [signature]})
+    updated = GE.apply_finite_present(scores, context, 2)
+    assert updated["draws|verb|1"] > updated["draws|noun|1"]
+    assert updated["draws|noun|1"] == scores["draws|noun|1"]
+    assert updated["draws|noun|2"] == scores["draws|noun|2"]
+    assert GE.apply_finite_present(scores, context, 1) == scores
+    assert GE.apply_finite_present(scores, GE.prepare(%{active_cells: cells}), 2) == scores
+
+    no_attested_verb = GE.prepare(%{active_cells: Enum.drop(cells, -1),
+                                   sentence_signatures: [signature]})
+    assert GE.apply_finite_present(scores, no_attested_verb, 2) == scores
+
+    incomplete = put_in(signature, [:evidence], [:attested_finite_present_verb])
+    assert GE.apply_finite_present(scores,
+             GE.prepare(%{active_cells: cells, sentence_signatures: [incomplete]}), 2) == scores
+  end
+
 end

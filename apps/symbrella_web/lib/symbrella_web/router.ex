@@ -21,6 +21,8 @@ defmodule SymbrellaWeb.Router do
     live "/", HomeLive, :index
     live "/episodes", EpisodesLive
     live "/semantic", SemanticLive
+    # Native text export works even if browser JavaScript or clipboard fails.
+    get "/brain/report.txt", BrainReportController, :show
     live "/brain", BrainLive
     # Optional deep-linking to a specific region (e.g., /brain/lifg)
     live "/brain/:region", BrainLive

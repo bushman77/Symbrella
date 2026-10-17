@@ -23,7 +23,16 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     # Subscribe to blackboard topic for bridged telemetry
     :ok = Bus.subscribe(Blackboard.topic())
 
-    # Attach telemetry listener for gate decisions
+    # Stage2 evidence and the canonical Basal Ganglia admission score are
+    # different quantities. Observe both boundaries independently.
+    :ok =
+      :telemetry.attach(
+        "lifg-stage2-bridge-evidence-test",
+        [:brain, :lifg, :stage2, :evidence],
+        fn event, meas, meta, pid -> send(pid, {:stage2_evidence, event, meas, meta}) end,
+        self()
+      )
+
     :ok =
       :telemetry.attach(
         "lifg-stage2-gate-test",
@@ -33,6 +42,7 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
       )
 
     on_exit(fn ->
+      :telemetry.detach("lifg-stage2-bridge-evidence-test")
       :telemetry.detach("lifg-stage2-gate-test")
     end)
 
@@ -82,16 +92,26 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
         boost_margin: 0.10
       )
 
-    # 1) Gate decision telemetry should fire for the committed item
+    # 1) The Stage2 linguistic evidence satisfies the requested minimum.
+    assert_receive {:stage2_evidence, [:brain, :lifg, :stage2, :evidence],
+                    %{score: evidence_score}, evidence_meta}, 500
+
+    assert is_number(evidence_score) and evidence_score >= 0.60
+    assert evidence_meta.id == "hello there|phrase|fallback"
+    assert evidence_meta.final_admission? == false
+
+    # 2) Canonical admission is independently policy-controlled. A fallback
+    # dictionary ID can be discounted, so its final score need not equal the
+    # raw Stage2 evidence score or exceed the Stage2 admission threshold.
     assert_receive {:gate, [:brain, :gate, :decision], %{score: score}, meta}, 500
-    assert is_number(score) and score >= 0.60
+    assert is_number(score) and score >= 0.0 and score <= 1.0
     assert meta.source == :lifg
     assert meta.decision in [:allow, :boost]
     assert meta.gate == :basal_ganglia
     assert meta.id == "hello there|phrase|fallback"
     assert meta.token_index == 0
 
-    # 2) Blackboard should receive the bridged WM update telemetry (real pipeline signal)
+    # 3) Blackboard should receive the bridged WM update telemetry (real pipeline signal)
     assert_receive {:blackboard,
                     %{
                       kind: :telemetry,
@@ -105,7 +125,7 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     assert meas.added >= 1
     assert meas.size >= 1
 
-    # 3) WM snapshot contains the committed id
+    # 4) WM snapshot contains the committed id
     %{wm: wm} = Brain.snapshot_wm()
     ids = wm |> Enum.map(& &1.id) |> MapSet.new()
     assert "hello there|phrase|fallback" in ids

@@ -3,6 +3,8 @@ defmodule Core.Response.SelfStateFeatures do
   Pure feature shaping for self-state inputs used by response policy.
   """
 
+  alias Core.Response.AnswerAdequacy
+
   @spec self_state(map() | nil, map() | nil, map() | nil, map() | nil) :: map()
   def self_state(self_model, self_monitor, self_memory_recall, agency_memory) do
     self_model
@@ -20,6 +22,9 @@ defmodule Core.Response.SelfStateFeatures do
         {text, nil}
 
       String.contains?(text, "?") ->
+        {text, nil}
+
+      factual_request?(features) ->
         {text, nil}
 
       curiosity_probe?(features, decision) ->
@@ -146,6 +151,13 @@ defmodule Core.Response.SelfStateFeatures do
   end
 
   defp apply_agency_memory(self_state, _agency_memory), do: self_state
+
+  # The policy action can be :ask_first or :offer_options even when the model
+  # has already answered a factual request. Such turns should not receive a
+  # generic, uninvited "what detail next?" curiosity prompt.
+  defp factual_request?(features) do
+    AnswerAdequacy.factual_question?(map_get(features, :text))
+  end
 
   defp curiosity_probe?(features, decision) do
     self_state = Map.get(features, :self_state, %{})

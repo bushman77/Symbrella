@@ -7,6 +7,10 @@ defmodule Core.Response.Memory do
   """
 
   alias Core.Response.SideEffects
+  alias Core.Response.LlmChatHistory
+  alias Core.Response.ConversationRecall
+
+  @memory_recall_event [:core, :response, :memory_recall]
 
   @spec reply(map()) :: {atom(), String.t(), map()} | nil
   def reply(si) when is_map(si) do
@@ -37,7 +41,30 @@ defmodule Core.Response.Memory do
         direct_fact: direct_fact,
         fact_query_key: fact_query_key
       }) do
+    conversation_recall = ConversationRecall.reply(text_in, session_id)
+
     cond do
+      asking_for_assistant_name?(text_in, session_id) ->
+        name = SideEffects.assistant_name()
+        text = "My name is #{name}."
+
+        meta = %{
+          action: :identity,
+          identity_subject: :assistant,
+          retrieval_found?: true,
+          neural_ranker_used?: false,
+          intent_inferred: :name_query,
+          response_source: :identity,
+          memory_key: :assistant_name,
+          memory_source: :configuration,
+          session_id: session_id,
+          source: :assistant_config,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_reply(session_id, text_in, text, meta)
+
       asking_for_user_name?(text_in) ->
         name = SideEffects.recalled_user_name(extracted_name)
 
@@ -50,6 +77,9 @@ defmodule Core.Response.Memory do
 
         meta = %{
           action: :identity,
+          identity_subject: :user,
+          retrieval_found?: is_binary(name) and name != "",
+          neural_ranker_used?: false,
           intent_inferred: :name_query,
           response_source: :memory,
           memory_key: :user_name,
@@ -65,10 +95,11 @@ defmodule Core.Response.Memory do
 
       remember_fact ->
         {key, label, value} = remember_fact
-        text = remember_fact_response(key, label, value, text_in, true)
+        {text, persistence_status} = remember_fact_response(key, label, value, text_in, true)
 
         meta = %{
           action: :remember_fact,
+          persistence_status: persistence_status,
           intent_inferred: :memory_write,
           response_source: :memory,
           memory_key: key,
@@ -85,10 +116,11 @@ defmodule Core.Response.Memory do
 
       direct_fact ->
         {key, label, value} = direct_fact
-        text = remember_fact_response(key, label, value, text_in, false)
+        {text, persistence_status} = remember_fact_response(key, label, value, text_in, false)
 
         meta = %{
           action: :remember_fact,
+          persistence_status: persistence_status,
           intent_inferred: :memory_write,
           response_source: :memory,
           memory_key: key,
@@ -116,6 +148,8 @@ defmodule Core.Response.Memory do
 
         meta = %{
           action: :recall_fact,
+          retrieval_found?: is_binary(value) and value != "",
+          neural_ranker_used?: false,
           intent_inferred: :fact_query,
           response_source: :memory,
           memory_key: key,
@@ -127,6 +161,17 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         }
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, conversation_recall) ->
+        {text, recall_meta} = conversation_recall
+
+        meta =
+          recall_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, text, meta)
 
@@ -248,6 +293,45 @@ defmodule Core.Response.Memory do
 
   def extract_fact_query_key(_), do: nil
 
+  @doc "Resolve explicit assistant-name questions and grounded ellipsis after a name exchange."
+  @spec asking_for_assistant_name?(String.t(), term()) :: boolean()
+  def asking_for_assistant_name?(text, session_id \\ nil)
+
+  def asking_for_assistant_name?(text, session_id) when is_binary(text) do
+    normalized =
+      text
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{N}'\s?]/u, "")
+      |> String.replace(~r/\s+/u, " ")
+      |> String.trim()
+
+    explicit? =
+      Regex.match?(
+        ~r/^(?:what(?:'s| is) your name|what do (?:you|u) go by|what should i call you|tell me your name|do you have a name)\??$/u,
+        normalized
+      )
+
+    elliptical? =
+      Regex.match?(~r/^(?:and )?(?:what(?:'s| is) )?yours\??$/u, normalized) and
+        recent_name_exchange?(session_id)
+
+    explicit? or elliptical?
+  end
+
+  def asking_for_assistant_name?(_, _), do: false
+
+  defp recent_name_exchange?(session_id) do
+    session_id
+    |> LlmChatHistory.messages(2)
+    |> Enum.any?(fn message ->
+      content = Map.get(message, "content", "") |> to_string()
+
+      asking_for_user_name?(content) or
+        Regex.match?(~r/^my name is\s+/iu, content) or
+        Regex.match?(~r/^(your name is|nice to meet you,)\s*/iu, content)
+    end)
+  end
+
   @spec asking_for_user_name?(String.t()) :: boolean()
   def asking_for_user_name?(text) when is_binary(text) do
     fuzzy = Core.Text.Fuzzy.interpret(text)
@@ -273,6 +357,21 @@ defmodule Core.Response.Memory do
       |> Map.put_new(:response_source, :memory)
       |> Map.put_new(:intent_inferred, Map.get(meta, :action))
 
+    # Only the outcome and provenance cross the telemetry boundary. Never
+    # emit the conversation text or fact values as recall metadata.
+    if Map.get(meta, :action) in [:identity, :recall_fact, :conversation_recall] do
+      :telemetry.execute(
+        @memory_recall_event,
+        %{count: 1, hit: if(Map.get(meta, :retrieval_found?, false), do: 1, else: 0)},
+        %{
+          action: Map.get(meta, :action),
+          identity_subject: Map.get(meta, :identity_subject),
+          memory_source: Map.get(meta, :memory_source),
+          neural_ranker_used?: false
+        }
+      )
+    end
+
     SideEffects.record_turn(session_id, text_in, text)
     SideEffects.emit_plan(meta)
     {:warm, text, meta}
@@ -280,12 +379,15 @@ defmodule Core.Response.Memory do
 
   defp remember_fact_response(key, label, value, raw_text, explicit?)
        when is_binary(key) and is_binary(label) and is_binary(value) do
-    SideEffects.persist_user_fact(key, label, value, raw_text)
+    case SideEffects.persist_user_fact(key, label, value, raw_text) do
+      :ok when explicit? ->
+        {"I’ll remember that your #{label} is #{value}.", :persisted}
 
-    if explicit? do
-      "I’ll remember that your #{label} is #{value}."
-    else
-      "I’ve noted that your #{label} is #{value}."
+      :ok ->
+        {"I’ve noted that your #{label} is #{value}.", :persisted}
+
+      {:error, _reason} ->
+        {"I understood that your #{label} is #{value}, but I couldn't save it permanently.", :failed}
     end
   end
 

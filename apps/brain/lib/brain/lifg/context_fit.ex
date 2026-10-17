@@ -38,12 +38,18 @@ defmodule Brain.LIFG.ContextFit do
     gram_function: 0.04
   }
 
+  # A repeated cue across definition, example and synonyms is still only one
+  # independent lexical observation. Prefer the highest-weight source.
+  @evidence_priority [:definition, :example, :synonyms, :semantic_atoms, :gram_function]
+
   # Common grammatical/scaffolding words are poor semantic discriminators.
   #
   # Stage1 already has separate machinery for POS/function-word behavior,
   # so ContextFit should concentrate on semantic content.
+  # "about" is a relation marker in topic questions, not discriminating
+  # evidence that a particular dictionary sense of "know" is correct.
   @stopwords MapSet.new(~w(
-    a an and are as at be been being but by
+    a about an and are as at be been being but by
     can could did do does for from had has have
     he her hers him his how i if in into is it its
     may me might mine must my nor not of on or our ours
@@ -59,6 +65,7 @@ defmodule Brain.LIFG.ContextFit do
           score: float(),
           context_terms: [String.t()],
           matches: map(),
+          unique_matches: map(),
           component_scores: map(),
           contributions: map(),
           weights: map(),
@@ -117,11 +124,20 @@ defmodule Brain.LIFG.ContextFit do
       gram_function: overlap(context, evidence.gram_function, related_morphology?)
     }
 
+    # Deduplicate matched *context terms*, not dictionary fields. A single
+    # token such as "new" appearing in a gloss and an example is not two
+    # independent contextual observations. Preserve raw matches for audit.
+    unique_matches = unique_evidence_matches(matches, weights)
+
     component_scores =
-      Map.new(matches, fn {field, terms} ->
+      Map.new(unique_matches, fn {field, terms} ->
         # Related word-family matches contribute half the incremental evidence
         # of an exact token match, rather than masquerading as exact identity.
-        exact_terms = overlap(context, Map.fetch!(evidence, field))
+        exact_terms =
+          context
+          |> overlap(Map.fetch!(evidence, field))
+          |> Enum.filter(&(&1 in terms))
+
         exact_strength = overlap_strength(exact_terms)
         total_strength = overlap_strength(terms)
 
@@ -146,6 +162,7 @@ defmodule Brain.LIFG.ContextFit do
       score: round_score(score),
       context_terms: context |> MapSet.to_list() |> Enum.sort(),
       matches: matches,
+      unique_matches: unique_matches,
       component_scores: round_map(component_scores),
       contributions: round_map(contributions),
       weights: weights,
@@ -158,11 +175,39 @@ defmodule Brain.LIFG.ContextFit do
       score: 0.0,
       context_terms: [],
       matches: empty_match_map(),
+      unique_matches: empty_match_map(),
       component_scores: empty_score_map(),
       contributions: empty_score_map(),
       weights: @default_weights,
       antonym_matches: []
     }
+  end
+
+  # Count each lexical context cue at most once across dictionary fields.
+  # No extra linguistic evidence is manufactured by this deduplication.
+  defp unique_evidence_matches(matches, weights) do
+    # If caller overrides weights, do not discard an example match simply
+    # because the same term appeared in a zero-weight definition field.
+    # Equal-weight fields retain the normal reliability order.
+    priority =
+      @evidence_priority
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {field, position} ->
+        {-Map.get(weights, field, 0.0), position}
+      end)
+      |> Enum.map(&elem(&1, 0))
+
+    {_seen, result} =
+      Enum.reduce(priority, {MapSet.new(), %{}}, fn field, {seen, acc} ->
+        novel =
+          matches
+          |> Map.get(field, [])
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {Enum.reduce(novel, seen, &MapSet.put(&2, &1)), Map.put(acc, field, novel)}
+      end)
+
+    result
   end
 
   # ---------------------------------------------------------------------------
@@ -399,6 +444,12 @@ defmodule Brain.LIFG.ContextFit do
     # lexical *comparison* only: dictionary IDs and original token surfaces
     # are never rewritten. "lights" must match "light" in a sense gloss.
     cond do
+      # Genitives such as Japan's are not plurals. For contextual lexical
+      # comparison only, recover the base word; leave token surfaces,
+      # sentence possession roles, and dictionary sense IDs unchanged.
+      String.length(normalized) > 2 and String.ends_with?(normalized, "'s") ->
+        String.replace_suffix(normalized, "'s", "")
+
       String.length(normalized) > 5 and String.ends_with?(normalized, "ies") ->
         String.replace_suffix(normalized, "ies", "y")
 
