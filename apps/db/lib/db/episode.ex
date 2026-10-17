@@ -868,6 +868,33 @@ defmodule Db.Episode do
     |> Enum.map(&put_compact_si/1)
   end
 
+  @doc """
+  Return one bounded page of episodes and whether another page exists.
+  Sorting by both timestamp and ID keeps pagination deterministic.
+  """
+  @spec list_page(pos_integer(), pos_integer()) :: {[t()], boolean()}
+  def list_page(page \\ 1, per_page \\ 50)
+
+  def list_page(page, per_page)
+      when is_integer(page) and page > 0 and is_integer(per_page) and per_page > 0 do
+    import Ecto.Query, only: [from: 2]
+
+    limit = min(per_page, 100)
+    offset = (page - 1) * limit
+
+    rows =
+      from(e in __MODULE__,
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: ^(limit + 1),
+        offset: ^offset
+      )
+      |> Db.all()
+
+    {Enum.take(rows, limit) |> Enum.map(&put_compact_si/1), length(rows) > limit}
+  end
+
+  def list_page(_, _), do: list_page(1, 50)
+
   defp put_compact_si(%__MODULE__{} = episode) do
     %{
       episode

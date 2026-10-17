@@ -3,14 +3,18 @@ defmodule SymbrellaWeb.EpisodesLive do
 
   alias SymbrellaWeb.EpisodesData
 
+  @page_size 50
+
   @impl true
   def mount(_params, _session, socket) do
-    episodes = load_episodes()
+    {episodes, has_next?} = load_page(1)
 
     {:ok,
      socket
      |> assign(:page_title, "Episodes")
      |> assign(:episodes_count, length(episodes))
+     |> assign(:page, 1)
+     |> assign(:has_next?, has_next?)
      |> assign(:load_error, nil)
      |> stream(:episodes, episodes)}
   rescue
@@ -19,17 +23,21 @@ defmodule SymbrellaWeb.EpisodesLive do
        socket
        |> assign(:page_title, "Episodes")
        |> assign(:episodes_count, 0)
+       |> assign(:page, 1)
+       |> assign(:has_next?, false)
        |> assign(:load_error, Exception.message(e))
        |> stream(:episodes, [])}
   end
 
   @impl true
   def handle_event("refresh", _params, socket) do
-    episodes = load_episodes()
+    page = socket.assigns.page
+    {episodes, has_next?} = load_page(page)
 
     {:noreply,
      socket
      |> assign(:episodes_count, length(episodes))
+     |> assign(:has_next?, has_next?)
      |> assign(:load_error, nil)
      |> stream(:episodes, episodes, reset: true)}
   rescue
@@ -37,8 +45,32 @@ defmodule SymbrellaWeb.EpisodesLive do
       {:noreply,
        socket
        |> assign(:episodes_count, 0)
+       |> assign(:has_next?, false)
        |> assign(:load_error, Exception.message(e))
        |> stream(:episodes, [], reset: true)}
+  end
+
+  @impl true
+  def handle_event("page", %{"direction" => direction}, socket) when direction in ["prev", "next"] do
+    current = socket.assigns.page
+
+    target =
+      case direction do
+        "prev" -> max(current - 1, 1)
+        "next" -> if socket.assigns.has_next?, do: current + 1, else: current
+      end
+
+    {episodes, has_next?} = load_page(target)
+
+    {:noreply,
+     socket
+     |> assign(:page, target)
+     |> assign(:episodes_count, length(episodes))
+     |> assign(:has_next?, has_next?)
+     |> assign(:load_error, nil)
+     |> stream(:episodes, episodes, reset: true)}
+  rescue
+    e -> {:noreply, assign(socket, :load_error, Exception.message(e))}
   end
 
   @impl true
@@ -63,8 +95,24 @@ defmodule SymbrellaWeb.EpisodesLive do
                 id="episodes-count"
                 class="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300"
               >
-                {@episodes_count} rows
+                Page {@page} · {@episodes_count} rows
               </span>
+              <button
+                id="episodes-prev"
+                type="button"
+                phx-click="page"
+                phx-value-direction="prev"
+                disabled={@page <= 1}
+                class="rounded-md border border-white/10 px-3 py-2 text-sm disabled:opacity-40"
+              >Previous</button>
+              <button
+                id="episodes-next"
+                type="button"
+                phx-click="page"
+                phx-value-direction="next"
+                disabled={!@has_next?}
+                class="rounded-md border border-white/10 px-3 py-2 text-sm disabled:opacity-40"
+              >Next</button>
               <button
                 id="episodes-refresh"
                 type="button"
@@ -164,7 +212,7 @@ defmodule SymbrellaWeb.EpisodesLive do
     """
   end
 
-  defp load_episodes, do: EpisodesData.list_all()
+  defp load_page(page), do: EpisodesData.list_page(page, @page_size)
 
   defp episode_sentence(%{sentence: text}) when is_binary(text) and text != "", do: text
 

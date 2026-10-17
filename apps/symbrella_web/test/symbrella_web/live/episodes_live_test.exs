@@ -22,6 +22,8 @@ defmodule SymbrellaWeb.EpisodesLiveTest do
     assert html =~ "a clock that told stories"
     assert has_element?(view, "#episodes-count")
     assert has_element?(view, "#episodes-refresh")
+    assert has_element?(view, "#episodes-prev[disabled]")
+    assert has_element?(view, "#episodes-next")
     assert has_element?(view, "#episodes-list")
     assert has_element?(view, "#episode-copy-button-#{episode.id}")
     assert has_element?(view, "#episode-copy-#{episode.id}")

@@ -432,8 +432,13 @@ if config_env() != :test do
     auto_start_on_boot?: false
 
   config :llm, Llm.BootGate,
-    # Blocks application startup here; Phoenix starts only after
-    # :symbrella finishes the LLM boot sequence.
+    # Degraded mode does not block the web and symbolic brain while a model loads.
+    # Set SYMBRELLA_LLM_BOOT_STRICT=1 to preserve fail-fast startup.
     enabled?: true,
+    mode:
+      if(System.get_env("SYMBRELLA_LLM_BOOT_STRICT", "false") in ["1", "true", "yes"],
+        do: :strict,
+        else: :degraded
+      ),
     timeout: 600_000
 end
