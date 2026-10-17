@@ -193,6 +193,55 @@ defmodule Core.Semantic.ParticipantSpatialTest do
     assert ParticipantSpatial.project(other_pos, si.sentence) == []
   end
 
+  test "exact live trace: is|verb winner supplies auxiliary role and persists",
+       %{sid: sid, owner: owner} do
+    # In LiveView-equivalent production mode, Stage1 chooses is|verb|1,
+    # not the synthetic is|auxiliary|0 winner used by earlier unit fixtures.
+    # PMTG also leaves on/fence without word-level LIFG and ATL winners.
+    si = input() |> Signatures.attach()
+
+    choices =
+      si.lifg_choices
+      |> Enum.reject(&(Map.get(&1, :token_index) in [2, 4, 6]))
+      |> Enum.concat([%{id: "is|verb|1", token_index: 2}])
+
+    si = %{si | lifg_choices: choices, atl_slate: %{winners: choices}}
+
+    assert [%{entity_key: "bird", relation: "spatial_state",
+              participants: %{"actor" => "a bird", "position" => "on",
+                              "location" => "the fence", "predicate" => "sitting"}}] =
+             ParticipantSpatial.project(si, si.sentence)
+
+    planned =
+      si
+      |> EpisodicProjection.attach()
+      |> Map.put(:session_id, sid)
+      |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
+
+    assert planned.response_meta.response_source == :symbolic_conversation
+    assert planned.response_meta.persistence_status == :persisted
+
+    assert %{status: "asserted", value: "the fence",
+              participants: %{"actor" => "a bird"}} =
+             Brain.Hippocampus.user_event(owner, "bird", "spatial_state")
+
+    assert {"On the fence.", %{memory_source: :hippocampal_event}} =
+             EpisodicMemory.reply("Where is the bird?")
+
+    # A forged auxiliary selection or a missing exact-word verb row cannot
+    # silently pass as grammatical evidence.
+    mismatched = %{si | lifg_choices:
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = ch -> %{ch | id: "is|noun|1"}
+        ch -> ch
+      end)}
+    assert ParticipantSpatial.project(mismatched, si.sentence) == []
+
+    no_verb_cell = %{si | active_cells:
+      Enum.reject(si.active_cells, &(&1.id == "is|verb|1"))}
+    assert ParticipantSpatial.project(no_verb_cell, si.sentence) == []
+  end
+
   test "each question retrieves a different persisted participant role",
        %{sid: sid, owner: owner} do
     si = projected() |> Map.put(:session_id, sid)
