@@ -636,6 +636,8 @@ defmodule Db.Episode do
       "source_frame",
       :frame_confidence,
       "frame_confidence",
+      :participants,
+      "participants",
       :object_key,
       "object_key",
       :object,
@@ -940,6 +942,43 @@ defmodule Db.Episode do
 
   def latest_user_event(_, _, _), do: nil
 
+  @doc """
+  Reverse lookup over *current* owner-scoped spatial events. The newest
+  event per entity wins even if a later report moved or retracted it.
+  Return nil on multiple matching actors instead of guessing.
+  A bounded recent-event window limits broad memory scans.
+  """
+  @spec spatial_actor(String.t(), String.t(), String.t(), String.t()) :: map() | nil
+  def spatial_actor(owner, predicate, position, location)
+      when is_binary(owner) and is_binary(predicate) and
+           is_binary(position) and is_binary(location) do
+    events =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("? ->> 'relation' = 'spatial_state'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 40,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(&get_in(&1, [:meta, "entity_key"]))
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", value: ^location,
+          participants: %{"predicate" => ^predicate, "position" => ^position}} -> true
+        _ -> false
+      end)
+
+    case events do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def spatial_actor(_, _, _, _), do: nil
+
   @doc "Newest owner-scoped events for one entity, including superseded values."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit)
@@ -967,6 +1006,8 @@ defmodule Db.Episode do
     %{id: id, entity: entity, relation: relation, value: value,
       status: status, recorded_at: recorded_at, sentence: sentence,
       source_frame: Map.get(meta, "source_frame"),
+      participants: Map.get(meta, "participants"),
+      entity_key: Map.get(meta, "entity_key"),
       provenance: :user_reported, session_id: Map.get(meta, "session_id")}
   end
 
