@@ -143,6 +143,8 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert answer =~ a
     assert answer =~ "40,000"
     assert reflection.authoritative_plan.status == :enforced
+    assert reflection.symbolic_composition.rule == :transitive_population_order
+    assert reflection.symbolic_composition.parent_proof_ids == Enum.sort([ab.id, bc.id])
   end
 
   test "chain works in the other direction by independently rederiving its ordering", ctx do
