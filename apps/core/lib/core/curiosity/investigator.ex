@@ -19,7 +19,7 @@ defmodule Core.Curiosity.Investigator do
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
   alias Core.Curiosity.UnresolvedIssues
   alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
-  alias Db.{CognitiveIssue, CognitiveIssues}
+  alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion}
 
   @default_interval_ms 300_000
   @default_retry_ms 3_600_000
@@ -179,7 +179,10 @@ defmodule Core.Curiosity.Investigator do
           reconcile_direct(issue, names, context, fingerprint)
 
         _ ->
-          %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+          # Hippocampus is a bounded cue index, not the durable fact store.
+          # A cold-started/evicted association must not permanently prevent
+          # rechecking a direct source-backed proof for an old issue.
+          reconcile_direct(issue, names, context, nil)
       end
     else
       _ -> %{status: :skipped, issue_id: issue.id, reason: :invalid_or_stale_issue}
@@ -235,23 +238,34 @@ defmodule Core.Curiosity.Investigator do
     end
   end
 
-  defp reconcile_direct(issue, names, context, fingerprint) do
-    # Consolidation.recall independently rehydrates the ORIGINAL two source
-    # claims, checks for competing same-year proofs, re-derives the result
-    # and requires an authoritative population comparison plan.
+  defp reconcile_direct(issue, names, context, cued_fingerprint) do
+    # A hippocampal pointer is optional, but never sufficient. Core must
+    # independently rehydrate the persisted claims, check for competing
+    # direct proofs, and authorize the dated comparison.
+    #
+    # When the cue index has forgotten a proof, use the durable DB as the
+    # recovery path. Report the fallback provenance explicitly rather than
+    # claiming hippocampal guidance that did not occur.
     recalled = MemoryBoundary.recall(context)
     support = get_in(recalled, [:web_evidence, :support])
     stored = Map.get(recalled, :consolidation)
 
-    with %{kind: :direct_proof_pointer, fingerprint: ^fingerprint} <-
-           Map.get(recalled, :hippocampal_association),
-         %{kind: :population_comparison, id: proof_id,
+    with %{kind: :population_comparison, id: proof_id,
            origin: :stored_symbolic_premises, reference_year: year} <- stored,
          true <- year == issue.reference_year,
          %{kind: :population_comparison, status: :source_supported,
            year: ^year, subjects: ^names} <- support,
          true <- get_in(recalled, [:web_evidence, :evidence_origin]) ==
                    :consolidated_symbolic_memory,
+         %ConsolidatedConclusion{
+           fingerprint: fingerprint,
+           pair_key: pair_key,
+           reference_year: ^year,
+           kind: "population_comparison",
+           provenance: "source_supported_symbolic_derivation"
+         } <- Db.get(ConsolidatedConclusion, proof_id),
+         true <- pair_key == issue.subject_key,
+         true <- valid_direct_pointer?(cued_fingerprint, fingerprint, recalled),
          framed <- Map.put(recalled, :response_frame, ResponseFrame.build(recalled)),
          %{kind: :verified_population_comparison} = plan <-
            AuthoritativeAnswerPlan.build(framed),
@@ -269,14 +283,28 @@ defmodule Core.Curiosity.Investigator do
                    resolution["proof_id"] == proof_id and
                    resolution["proof_fingerprint"] == fingerprint and
                    resolution["reference_year"] == year do
+      origin =
+        if is_binary(cued_fingerprint),
+          do: :verified_direct_proof,
+          else: :verified_direct_db_fallback
+
       %{status: :resolved, issue_id: issue.id, reference_year: year,
-        proof_id: proof_id, origin: :verified_direct_proof}
+        proof_id: proof_id, origin: origin}
     else
       _ ->
         %{status: :unresolved, issue_id: issue.id,
           reason: :direct_proof_not_authorized}
     end
   end
+
+  defp valid_direct_pointer?(nil, _fingerprint, _recalled), do: true
+
+  defp valid_direct_pointer?(fingerprint, fingerprint, recalled) do
+    match?(%{kind: :direct_proof_pointer, fingerprint: ^fingerprint},
+      Map.get(recalled, :hippocampal_association))
+  end
+
+  defp valid_direct_pointer?(_, _, _), do: false
 
   defp features_enabled? do
     Enum.all?(
