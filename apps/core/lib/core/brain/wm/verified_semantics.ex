@@ -11,7 +11,7 @@ defmodule Core.Brain.WM.VerifiedSemantics do
 
   alias Core.Brain.Runtime
   alias Core.Cognition.MemoryBoundary
-  alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
+  alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
 
   @max_age_ms 20 * 60 * 1_000
   @max_entity_chars 100
