@@ -19,7 +19,7 @@ defmodule Core.Curiosity.Investigator do
   use GenServer
 
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
-  alias Core.Curiosity.{EvidenceAcquisition, UnresolvedIssues}
+  alias Core.Curiosity.{EvidenceAcquisition, InvestigationHistory, UnresolvedIssues}
   alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
   alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
 
@@ -44,7 +44,8 @@ defmodule Core.Curiosity.Investigator do
 
   @impl true
   def init(opts) do
-    state = %{opts: opts, last_result: %{status: :not_run}, attempted: %{}, cycles: 0}
+    state = %{opts: opts, last_result: %{status: :not_run},
+      last_successful_result: nil, attempted: %{}, cycles: 0}
     schedule(interval_ms(opts))
     {:ok, state}
   end
@@ -55,7 +56,9 @@ defmodule Core.Curiosity.Investigator do
      %{enabled?: enabled?(state.opts),
        acquisition_enabled?: enabled?(state.opts) and acquire_evidence?(state.opts),
        cycles: state.cycles,
-       last_result: state.last_result, cooldown_count: map_size(state.attempted)},
+       last_result: state.last_result,
+       last_successful_result: state.last_successful_result,
+       cooldown_count: map_size(state.attempted)},
      state}
   end
 
@@ -131,7 +134,11 @@ defmodule Core.Curiosity.Investigator do
         acquisition: Map.get(result, :acquisition),
         acquisition_reason: Map.get(result, :acquisition_reason)})
 
-    next = %{state | last_result: result, attempted: attempted, cycles: state.cycles + 1}
+    last_successful =
+      if result.status == :resolved, do: result, else: state.last_successful_result
+
+    next = %{state | last_result: result, last_successful_result: last_successful,
+      attempted: attempted, cycles: state.cycles + 1}
     {result, next}
   end
 
@@ -151,20 +158,30 @@ defmodule Core.Curiosity.Investigator do
   # supervised named trial can remain enabled while the default worker is
   # disabled. This does not bypass the three independent reasoning gates.
   defp investigate_issue_with_options(id, opts) do
-    cond do
-      not enabled?(opts) or not features_enabled?() ->
-        %{status: :disabled, issue_id: id}
+    if not enabled?(opts) or not features_enabled?() do
+      %{status: :disabled, issue_id: id}
+    else
+      # Persist a start marker first. A crash leaves an inspectable
+      # incomplete attempt rather than falsely reporting success.
+      audit_id = InvestigationHistory.begin_attempt(id, opts)
+      started = System.monotonic_time(:millisecond)
 
-      true ->
-        case Db.get(CognitiveIssue, id) do
-          %CognitiveIssue{} = issue -> investigate(issue, opts)
-          _ -> %{status: :skipped, issue_id: id, reason: :issue_not_found}
+      result =
+        try do
+          case Db.get(CognitiveIssue, id) do
+            %CognitiveIssue{} = issue -> investigate(issue, opts)
+            _ -> %{status: :skipped, issue_id: id, reason: :issue_not_found}
+          end
+        rescue
+          _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
+        catch
+          :exit, _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
         end
+
+      duration_ms = max(System.monotonic_time(:millisecond) - started, 0)
+      :ok = InvestigationHistory.complete_attempt(audit_id, result, duration_ms)
+      Map.put(result, :history_id, audit_id)
     end
-  rescue
-    _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
-  catch
-    :exit, _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
   end
 
   defp investigate(issue, opts) do
@@ -205,16 +222,23 @@ defmodule Core.Curiosity.Investigator do
       reason: :no_two_hop_cue} = unresolved, opts) do
     if acquire_evidence?(opts) do
       case EvidenceAcquisition.acquire(issue) do
-        %{status: :captured, proof_id: id} ->
+        %{status: :captured, proof_id: id} = acquired ->
           # The capture indexes a source-backed proof, but it cannot declare
           # the old A-C issue resolved. Re-enter the existing reasoning
           # boundary once, without recursive evidence acquisition.
           after_capture = investigate(issue, Keyword.put(opts, :acquire_evidence?, false))
-          Map.merge(after_capture, %{acquisition: :captured, acquired_proof_id: id})
+          Map.merge(after_capture, %{
+            acquisition: :captured,
+            acquired_proof_id: id,
+            provider_attempts: Map.get(acquired, :provider_attempts, [])
+          })
 
-        %{status: :unresolved, reason: reason} ->
-          Map.merge(unresolved, %{acquisition: :not_captured,
-                                 acquisition_reason: reason})
+        %{status: :unresolved, reason: reason} = acquired ->
+          Map.merge(unresolved, %{
+            acquisition: :not_captured,
+            acquisition_reason: reason,
+            provider_attempts: Map.get(acquired, :provider_attempts, [])
+          })
       end
     else
       unresolved
