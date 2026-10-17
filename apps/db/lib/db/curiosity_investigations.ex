@@ -6,7 +6,7 @@ defmodule Db.CuriosityInvestigations do
   import Ecto.Query, only: [from: 2]
   alias Db.CuriosityInvestigation
 
-  @spec begin_attempt(pos_integer(), "default" | "isolated") ::
+  @spec begin_attempt(pos_integer(), String.t()) ::
           {:ok, CuriosityInvestigation.t()} | {:error, term()}
   def begin_attempt(issue_id, worker)
       when is_integer(issue_id) and issue_id > 0 and worker in ["default", "isolated"] do
