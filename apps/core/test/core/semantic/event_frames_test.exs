@@ -94,7 +94,7 @@ defmodule Core.Semantic.EventFramesTest do
 
   defmodule WrongYearPopulation do
     def population(subject, opts) do
-      case DatedPopulation.population(subject, opts) do
+      case Core.Semantic.EventFramesTest.DatedPopulation.population(subject, opts) do
         {:ok, result} ->
           {:ok, %{result | census_year: 2022}}
 
