@@ -2,8 +2,8 @@
 
 ## Scope
 
-`Core.Curiosity.Investigator` is a supervised, **disabled-by-default**
-investigation worker. It revisits durable `Db.CognitiveIssue` entries whose
+`Core.Curiosity.Investigator` is a supervised investigation worker.
+It now auto-enables in development; test and production remain disabled by default. It revisits durable `Db.CognitiveIssue` entries whose
 `kind` is `missing_reasoning_link` and whose `next_action` is
 `find_linking_premise`.
 
@@ -51,7 +51,8 @@ resolution, never as a transitive deduction.
    Retain a bounded runtime snapshot and apply a one-hour retry cooldown
    per unresolved issue.
 
-By default a cycle is attempted at most once every five minutes.
+In development a cycle is attempted every minute; production/test remain
+inert unless explicitly configured, with a five-minute fallback interval.
 Only one issue can be investigated per cycle and at most 32 recent attempt
 timestamps are kept. The worker does not automatically resolve issues
 that need new external evidence.
@@ -100,7 +101,8 @@ To disable autonomous investigation without affecting normal chat:
 Application.put_env(:core, Core.Curiosity.Investigator, enabled?: false)
 ```
 
-The flags reset on restart unless explicitly configured. Never enable
+The current `config/config.exs` sets these flags on development startup.
+IEx overrides are temporary; configured values return after restart. Never enable
 this worker as a way to assert a population result without independent
 source-backed premises.
 
@@ -243,3 +245,46 @@ mix test apps/core/test/core/curiosity/investigation_history_test.exs \
   apps/core/test/core/curiosity/investigator_test.exs \
   apps/core/test/core/response/population_chain_reasoning_test.exs --trace
 ```
+
+
+## V4: automatically enabled in development
+
+`config/config.exs` sets the three symbolic feature gates and the
+`Core.Curiosity.Investigator` switches using `config_env() == :dev`.
+Consequently `iex -S mix phx.server` automatically starts the *existing*
+supervised worker with `enabled?: true` and `acquire_evidence?: true`
+in development. No additional `Supervisor.start_child/2` or
+`Application.put_env/3` commands are necessary.
+
+The development schedule starts its first investigation tick after 60
+seconds, revisits at most one eligible issue each minute, and defers
+retrying an unresolved issue for an hour. Idle cycles do not write durable
+audit rows. The optional acquisition path uses only fixed public-place
+population sources and remains gated by the full symbolic proof checks.
+
+The flags remain **off in test and production** by default. Tests may
+explicitly opt in as before; deployment requires a conscious production
+configuration override. Changing the flags in IEx only affects the current
+BEAM process and can override the configured values until restart.
+
+Before first start with the durable history feature, migrate the existing
+development database:
+
+```bash
+cd ~/Symbrella
+mix db.migrate
+iex -S mix phx.server
+```
+
+Then verify the automatically started default worker from IEx:
+
+```elixir
+Core.Curiosity.Investigator.snapshot()
+Application.get_env(:core, Core.Curiosity.Investigator)
+Core.Curiosity.InvestigationHistory.recent(10)
+```
+
+A successful snapshot contains `enabled?: true` and
+`acquisition_enabled?: true` with `cycles: 0` until the first scheduled
+tick. The earlier standalone trial worker is not automatically started
+and should not be left active alongside the configured default worker.
