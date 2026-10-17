@@ -298,6 +298,10 @@ defmodule Core.Response.PopulationChainReasoningTest do
     :ok = LlmChatHistory.record_turn(session, "Tell me a story.", "Once upon a time.")
     assert VerifiedAnswerReceipt.explain("how do you know that?", session) ==
       :not_applicable
+
+    assert :ok = VerifiedAnswerReceipt.clear(session)
+    assert VerifiedAnswerReceipt.explain("how do you know that?", session) ==
+      :not_applicable
   end
 
   test "hippocampal associations cue a two-hop Core inference and remain private", ctx do
