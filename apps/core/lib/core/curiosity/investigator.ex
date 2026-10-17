@@ -81,7 +81,7 @@ defmodule Core.Curiosity.Investigator do
           %{status: :disabled, reason: :reasoning_feature_disabled}
 
         true ->
-          UnresolvedIssues.candidates(@max_candidates)
+          UnresolvedIssues.reasoning_candidates(@max_candidates)
           |> Enum.find(fn issue ->
             issue.kind == "missing_reasoning_link" and
               issue.next_action == "find_linking_premise" and
