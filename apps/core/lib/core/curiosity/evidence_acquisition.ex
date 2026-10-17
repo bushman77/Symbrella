@@ -54,6 +54,7 @@ defmodule Core.Curiosity.EvidenceAcquisition do
          } = parent <- Db.get(ConsolidatedConclusion, parent_id),
          true <- year == issue.reference_year,
          true <- is_map(a) and is_map(b),
+         true <- parent_fingerprint_valid?(parent),
          [common] <- Enum.filter([a, b], &(&1["subject"] in names)),
          [middle] <- Enum.filter([a, b], &(&1["subject"] not in names)),
          true <- valid_name?(middle["subject"]),
@@ -125,6 +126,31 @@ defmodule Core.Curiosity.EvidenceAcquisition do
               timeout_ms: 3_500)
     end
   end
+
+  # Match the canonical immutable parent fingerprint before treating its
+  # subjects as a reason to query an external source. Consolidation.recall
+  # independently re-derives the stored comparison immediately afterward.
+  defp parent_fingerprint_valid?(%ConsolidatedConclusion{
+         premises: [a, b], pair_key: key, fingerprint: fingerprint,
+         derivation: derivation
+       }) when is_map(a) and is_map(b) do
+    names = [a["subject"], b["subject"]]
+
+    if Enum.all?(names, &is_binary/1) and is_map(derivation) and
+         key == pair_key(names) do
+      canonical = Enum.sort_by([a, b], &String.downcase(&1["subject"]))
+
+      expected =
+        :crypto.hash(:sha256, :erlang.term_to_binary({canonical, derivation}))
+        |> Base.encode16(case: :lower)
+
+      fingerprint == expected
+    else
+      false
+    end
+  end
+
+  defp parent_fingerprint_valid?(_), do: false
 
   defp revalidate_parent(parent, subjects, year) do
     recalled = Consolidation.recall(context(subjects, year))
