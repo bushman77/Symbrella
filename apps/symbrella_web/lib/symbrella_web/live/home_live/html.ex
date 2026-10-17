@@ -22,27 +22,58 @@ defmodule SymbrellaWeb.ChatLive.HTML do
     <% {main, _extra} = split_lexical_tail(text) %>
     <% parts = SourceLinks.parts(main) %>
 
-    <%!-- Keep dynamic parts adjacent: whitespace inside the template would be
-          preserved by whitespace-pre-wrap and create big gaps/new lines. --%>
-    <p class="whitespace-pre-wrap break-words"><%= for part <- parts do %><%= if part.kind == :source do %><a
-      href={part.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      class="inline-flex items-center gap-0.5 whitespace-nowrap align-baseline text-sm font-medium text-sky-400 underline underline-offset-2 hover:text-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
-      title={part.url}
-    ><img
-      src={part.favicon}
-      alt=""
-      aria-hidden="true"
-      loading="lazy"
-      decoding="async"
-      referrerpolicy="no-referrer"
-      width="14"
-      height="14"
-      class="inline-block size-3.5 shrink-0"
-    />{part.label}</a><% else %>{part.text}<% end %><% end %></p>
+    <%!-- Render all parts as one escaped iodata value to preserve precise
+          whitespace within citations and their surrounding prose. --%>
+    <p class="whitespace-pre-wrap break-words">{inline_source_parts(parts)}</p>
     """
   end
+
+  # Build escaped HTML as a single iodata value. HEEx template indentation
+  # otherwise adds whitespace that is visible under whitespace-pre-wrap.
+  # All dynamic text and attributes are escaped before the safe output is joined.
+  defp inline_source_parts(parts) do
+    iodata =
+      Enum.map(parts, fn
+        %{kind: :source} = part ->
+          [
+            "<a",
+            safe_iodata(
+              Phoenix.HTML.attributes_escape(
+                href: part.url,
+                target: "_blank",
+                rel: "noopener noreferrer",
+                class:
+                  "inline-flex items-center gap-0.5 whitespace-nowrap align-baseline text-sm font-medium text-sky-400 underline underline-offset-2 hover:text-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400",
+                title: part.url
+              )
+            ),
+            "><img",
+            safe_iodata(
+              Phoenix.HTML.attributes_escape(
+                src: part.favicon,
+                alt: "",
+                "aria-hidden": "true",
+                loading: "lazy",
+                decoding: "async",
+                referrerpolicy: "no-referrer",
+                width: "14",
+                height: "14",
+                class: "inline-block size-3.5 shrink-0"
+              )
+            ),
+            ">",
+            safe_iodata(Phoenix.HTML.html_escape(part.label)),
+            "</a>"
+          ]
+
+        %{kind: :text, text: text} ->
+          safe_iodata(Phoenix.HTML.html_escape(text))
+      end)
+
+    Phoenix.HTML.raw(iodata)
+  end
+
+  defp safe_iodata({:safe, iodata}), do: iodata
 
   # Explain button (passes id + text as fallback)
   attr :msg_id, :string, required: true
