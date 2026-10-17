@@ -115,3 +115,69 @@ The tests use the existing database sandbox and fabricated example
 subjects/sources to validate **control flow**, not to assert real-world
 population facts. The runtime never treats the tests' synthetic figures
 as evidence.
+
+## V2 opt-in: source-backed missing-bridge acquisition
+
+The new `Core.Curiosity.EvidenceAcquisition` runs only when the supervised
+Investigator is enabled **and** `acquire_evidence?: true` is explicitly
+configured. The reasoning-only default remains network-free. This does not
+grant access to arbitrary web browsing, agent-selected URLs, Qwen, news,
+personal data or unsolicited chat.
+
+For an open A-C missing-link issue, the planner requires exactly one A-B
+stored proof ID from the original issue. It revalidates that source-backed
+parent through `Consolidation.recall/1`, and selects only B-C for the same
+year. Missing, stale, conflicting or ambiguous parent pointers fail closed.
+
+A single scheduled acquisition calls the existing fixed-provider geographic
+population route through `WebRetrieval.enrich/2` for B-C, with two attempts
+per municipality and a 3.5-second request timeout. `PopulationComparison`
+must re-derive a source-supported B-C comparison. The B premise must match
+the A-B parent in subject, value, year, URL, source type, measurement type
+and table. `ResponseFrame`, `AuthoritativeAnswerPlan` and
+`Consolidation.capture/2` apply their existing authorization and immutable
+storage rules; failure does not store a new proof.
+
+Capture alone **never** closes A-C. The Investigator retries only the
+existing hippocampal cue + Core two-hop proof-validation path, once, with
+acquisition disabled for that retry. Only that path can resolve the durable
+issue. Cooldowns, one-issue-per-cycle scheduling and bounded telemetry remain.
+
+### Controlled unattended trial
+
+Leave the normal worker disabled. Start a second named supervised worker:
+
+```elixir
+Application.put_env(:core, Core.Curiosity.Investigator,
+  enabled?: false, acquire_evidence?: false)
+
+trial_name = :curiosity_acquisition_trial
+spec = Supervisor.child_spec(
+  {Core.Curiosity.Investigator,
+   [name: trial_name, enabled?: true, acquire_evidence?: true,
+    interval_ms: 60_000, retry_ms: 3_600_000]},
+  id: trial_name)
+Supervisor.start_child(Symbrella.Supervisor, spec)
+```
+
+The three existing symbolic gates must also be enabled. For an unattended
+test, do not call `run_now/1` or `investigate_issue/1`. After a scheduled
+cycle, inspect `Core.Curiosity.Investigator.snapshot(trial_name)` and the
+durable `Db.CognitiveIssue`. A captured B-C proof is reported separately
+from the final A-C reasoning resolution. To stop the trial:
+
+```elixir
+Supervisor.terminate_child(Symbrella.Supervisor, trial_name)
+Supervisor.delete_child(Symbrella.Supervisor, trial_name)
+```
+
+Offline regression suite:
+
+```bash
+mix test apps/core/test/core/curiosity/evidence_acquisition_test.exs \
+  apps/core/test/core/curiosity/investigator_test.exs \
+  apps/core/test/core/response/population_chain_reasoning_test.exs --trace
+```
+
+Offline fixtures contain synthetic source-backed observations solely to
+exercise authorization. Runtime facts must come from actual providers.
