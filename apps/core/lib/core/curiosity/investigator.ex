@@ -4,8 +4,10 @@ defmodule Core.Curiosity.Investigator do
 
   V1 handles only missing_reasoning_link / find_linking_premise issues.
   One eligible issue is revisited per permitted cycle. Hippocampus proposes
-  opaque parent IDs; Core revalidates all relevant persisted proofs before
-  Db.CognitiveIssues may mark the issue resolved.
+  opaque proof pointers or parent IDs; Core revalidates all relevant persisted
+  proofs before Db.CognitiveIssues may mark the issue resolved. A new direct
+  proof closes a stale missing link as a direct resolution, not as two-hop
+  reasoning.
 
   No Qwen, network, chat/LiveView, PubSub, generated prose, or new fact
   writes are permitted here. An unsuccessful investigation leaves the issue
