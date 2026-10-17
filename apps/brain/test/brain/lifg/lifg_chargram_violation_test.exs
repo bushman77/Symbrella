@@ -2,6 +2,9 @@ defmodule Brain.LIFG.ChargramViolationTest do
   use ExUnit.Case, async: true
   import Support.TelemetryHelpers
 
+  # Isolate concurrent LIFG tests: global telemetry paths are shared by all processes.
+  @event [:test, :lifg, :chargram_violation, :explicit_token_test]
+
   test "drops explicit char-gram tokens and emits telemetry" do
     si = %{
       sentence: "hello there",
@@ -18,9 +21,10 @@ defmodule Brain.LIFG.ChargramViolationTest do
 
     {meas, meta} =
       capture(
-        [:brain, :lifg, :chargram_violation],
+        @event,
         fn ->
-          {:ok, %{choices: choices, audit: audit}} = Brain.LIFG.Stage1.run(si)
+          {:ok, %{choices: choices, audit: audit}} =
+            Brain.LIFG.Stage1.run(si, chargram_event: @event)
           assert length(choices) == 1
           assert audit.kept_tokens == 1
           assert audit.dropped_tokens == 1

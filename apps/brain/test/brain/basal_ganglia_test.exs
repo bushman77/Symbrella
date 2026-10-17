@@ -18,11 +18,15 @@ defmodule Brain.BasalGangliaTest do
     seed = %{id: "candidate|seed|", lemma: "candidate", source: :other, score: 0.9}
     unknown = %{id: "unknown|noun|0", pos: "unk", source: :other, score: 0.9}
 
-    assert {:block, 0.0} =
+    assert {:block, seed_score} =
              BasalGanglia.decide([], seed, %{}, %{allow_seed?: false})
 
-    assert {:block, 0.0} =
+    assert seed_score == 0.0
+
+    assert {:block, unknown_score} =
              BasalGanglia.decide([], unknown, %{}, %{allow_unk?: false})
+
+    assert unknown_score == 0.0
 
     assert {decision_seed, _} =
              BasalGanglia.decide([], seed, %{}, %{allow_seed?: true})
