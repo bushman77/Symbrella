@@ -88,8 +88,11 @@ defmodule Core.Semantic.ParticipantSpatialTest do
        %{sid: sid, owner: owner} do
     si = projected() |> Map.put(:session_id, sid)
 
-    assert {:warm, "I’ve recorded what you told me: A bird is sitting on the fence.",
-            %{persistence_status: :persisted}} = Response.plan(si, %{})
+    planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
+
+    assert planned.response_text ==
+             "I’ve recorded what you told me: A bird is sitting on the fence."
+    assert planned.response_meta.persistence_status == :persisted
 
     assert %{status: "asserted", participants: %{"actor" => "a bird", "predicate" => "sitting",
               "position" => "on", "location" => "the fence"}} =
@@ -111,6 +114,32 @@ defmodule Core.Semantic.ParticipantSpatialTest do
 
     :ok = Brain.Hippocampus.reset()
     assert {"A bird.", _} = EpisodicMemory.reply("What is sitting on the fence?")
+  end
+
+  test "question grammar is role-based and not bird-specific" do
+    alias Core.Semantic.ParticipantQuestions, as: Questions
+
+    assert {:forward, "cat", :location, %{}} =
+             Questions.parse("Where is the cat?")
+
+    assert {:forward, "cat", :predicate, %{}} =
+             Questions.parse("What is the cat doing?")
+
+    assert {:reverse, "resting", "under", "the table"} =
+             Questions.parse("What is resting under the table?")
+
+    assert {:forward, "cat", :location,
+            %{predicate: "resting", position: "under"}} =
+             Questions.parse("What is the cat resting under?")
+
+    event = %{status: "asserted", relation: "spatial_state",
+              participants: %{"actor" => "the cat", "predicate" => "resting",
+                              "position" => "under", "location" => "the table"}}
+
+    assert Questions.answer(event, :actor, %{}) == "The cat."
+    assert Questions.answer(event, :location, %{}) == "Under the table."
+    assert Questions.answer(event, :predicate, %{}) == "Resting."
+    assert Questions.answer(event, :location, %{position: "on"}) == nil
   end
 
   test "superseded spatial state does not produce a stale reverse participant",
