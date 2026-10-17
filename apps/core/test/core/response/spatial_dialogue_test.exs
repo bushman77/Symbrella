@@ -6,12 +6,8 @@ defmodule Core.Response.SpatialDialogueTest do
   alias Core.Response.SpatialDialogue
 
   setup do
-    %{sid: "spatial-dialogue-#{System.unique_integer([:positive])}"}
-  end
-
-  test "spatial events persist through Hippocampus and are recallable in a fresh session", %{sid: sid} do
-    Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
-    owner = "spatial-#{System.unique_integer([:positive])}"
+    sid = "spatial-dialogue-#{System.unique_integer([:positive])}"
+    owner = "spatial-owner-#{System.unique_integer([:positive])}"
     previous_owner = Application.get_env(:symbrella, :memory_owner_id)
     Application.put_env(:symbrella, :memory_owner_id, owner)
 
@@ -23,6 +19,12 @@ defmodule Core.Response.SpatialDialogueTest do
       import Ecto.Query
       Db.delete_all(from(e in Db.Episode, where: fragment("? ->> 'owner' = ?", e.meta, ^owner)))
     end)
+
+    %{sid: sid, owner: owner}
+  end
+
+  test "spatial events persist through Hippocampus and are recallable in a fresh session", %{sid: sid, owner: owner} do
+    Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
 
     Core.Response.SideEffects.record_turn(sid,
       "I have a copper lantern sitting on my desk.", "Okay.")
