@@ -353,6 +353,17 @@ defmodule Core.Response.PopulationChainReasoningTest do
       Enum.sort([ab.id, bc.id])
 
     assert VerifiedSemantics.snapshot("different-#{ctx.sid}") == nil
+
+    # A previously admitted WM pointer must be evicted when the durable
+    # proof chain can no longer be independently revalidated.
+    Application.put_env(:core, :symbolic_composition_enabled?, false)
+    try do
+      assert VerifiedSemantics.admit(session, [a, c], 2021, [ab.id, bc.id],
+        :evidence_followup) == :rejected
+      assert VerifiedSemantics.snapshot(session) == nil
+    after
+      Application.put_env(:core, :symbolic_composition_enabled?, true)
+    end
   end
 
   test "evidence receipt cannot cross sessions or refer to an intervening answer", ctx do
