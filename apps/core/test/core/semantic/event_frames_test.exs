@@ -74,6 +74,95 @@ defmodule Core.Semantic.EventFramesTest do
     assert get_in(context, [:symbolic_frame, :event, :subject]) == :speaker
   end
 
+  # Synthetic offline provider: tests routing and evidence propagation,
+  # not the truth of any actual municipality's population.
+  defmodule DatedPopulation do
+    def population(subject, _opts) when subject in ["Vancouver", "Burnaby"] do
+      count = if subject == "Vancouver", do: 100_000, else: 80_000
+      url = "https://example.invalid/population/#{subject}/2021"
+
+      {:ok, %{
+        kind: :population, status: :source_supported,
+        subject: subject, value: count, census_year: 2021,
+        source_type: :wikidata, source_url: url,
+        sources: [%{title: subject, url: url, provider: :wikidata}]
+      }}
+    end
+
+    def population(_, _), do: {:error, :not_found}
+  end
+
+  defmodule WrongYearPopulation do
+    def population(subject, opts) do
+      case DatedPopulation.population(subject, opts) do
+        {:ok, result} ->
+          {:ok, %{result | census_year: 2022}}
+
+        error -> error
+      end
+    end
+  end
+
+  defmodule NoSources do
+    def search(_, _), do: {:ok, []}
+  end
+
+  defp named_comparison_context(question) do
+    alias Core.Response.Context
+
+    si = EventFrames.attach(%{sentence: question, intent: :ask, trace: []})
+    Context.from_response_parts(
+      question,
+      %{intent: :ask, session_id: "explicit-city-grounding", turn_context: Context.from_si(si)},
+      %{action: :answer}, %{}, %{wm_items: []}
+    )
+  end
+
+  test "real chat-shaped named comparison triggers two-source proof with offline provider" do
+    alias Core.Response.{AuthoritativeAnswerPlan, PopulationComparison, ResponseFrame}
+    alias Core.Tools.WebRetrieval
+
+    question = "Which had the larger population in 2021, Vancouver or Burnaby?"
+    context = named_comparison_context(question)
+
+    enriched = WebRetrieval.enrich(context,
+      enabled?: true,
+      coordinate_provider: DatedPopulation,
+      provider: NoSources
+    )
+
+    assert enriched.web_evidence.resolution == :source_supported
+    assert enriched.web_evidence.support.subjects == ["Vancouver", "Burnaby"]
+    assert Enum.map(enriched.web_evidence.support.results, & &1.census_year) == [2021, 2021]
+
+    verified = PopulationComparison.attach(enriched)
+    assert verified.web_evidence.support.kind == :population_comparison
+    assert verified.web_evidence.support.difference == 20_000
+
+    frame = ResponseFrame.build(verified)
+    assert %{kind: :verified_population_comparison} =
+      AuthoritativeAnswerPlan.build(Map.put(verified, :response_frame, frame))
+  end
+
+  test "explicit 2021 request rejects a provider returning 2022 instead" do
+    alias Core.Response.PopulationComparison
+    alias Core.Tools.WebRetrieval
+
+    context = named_comparison_context(
+      "Which had the larger population in 2021, Vancouver or Burnaby?"
+    )
+
+    result = WebRetrieval.enrich(context,
+      enabled?: true,
+      coordinate_provider: WrongYearPopulation,
+      provider: NoSources
+    )
+
+    assert result.web_evidence.resolution != :source_supported
+    refute Map.has_key?(PopulationComparison.attach(result).web_evidence.support,
+      :winner)
+  end
+
   test "directly named population comparison questions preserve both explicit entities" do
     cases = [
       {"Which had the larger population in 2021, Vancouver or Burnaby?",
