@@ -28,29 +28,38 @@ config :core,
   mwe_greet_phrase_bump: 0.02,
   mwe_general_bump: 0.01
 
-# When enabled, logs aggregate estimated prompt tokens without including messages
-# or recalled content. It can also be toggled from IEx during a running session.
-# Durable symbolic consolidation uses its own proof store, not raw RAG answers.
-# Intentionally disabled until the new migration and regression tests pass.
-# Unlike Curiosity's independent OTP loop, capture only runs after an
-# authoritative symbolic response is fully verified.
-config :core, :symbolic_consolidation_enabled?, false
+# ──────────────── Autonomous symbolic Curiosity ────────────────
+# The reasoning and evidence-acquisition experiments passed their dedicated
+# regression suite and unattended development trial. Start them automatically
+# in the development environment; keep test and production inert by default.
+# These settings replace the former IEx Application.put_env/3 setup.
+# They are feature gates, not separate processes: Investigator is already
+# supervised by Symbrella.Application, and evidence acquisition runs within
+# its scheduled issue-investigation cycle.
+#
+# Prerequisite: run mix db.migrate before starting Phoenix so the durable
+# curiosity_investigations audit table exists. Neither captured web evidence
+# nor a hippocampal cue alone is authorized knowledge.
+curiosity_enabled? = config_env() == :dev
 
-# Experimental two-hop composition of already source-backed stored proofs.
-# Kept separate so the existing direct consolidation path stays unchanged.
-config :core, :symbolic_composition_enabled?, false
+# Persist independently verified, source-backed population comparisons.
+config :core, :symbolic_consolidation_enabled?, curiosity_enabled?
 
-# Experimental semantic cueing through Brain.Hippocampus. Pointers index a
-# durable proof; Core must revalidate its claims after every associative hit.
-config :core, :semantic_associative_recall_enabled?, false
+# Compose two stored population comparisons only after Core revalidates both.
+config :core, :symbolic_composition_enabled?, curiosity_enabled?
 
-# Supervised but inert unless opted in. Investigates at most one durable
-# missing_reasoning_link per cycle through hippocampal cueing and verified
-# symbolic composition or source-backed direct proof reconciliation.
-# Never performs web requests or sends chat messages.
+# Use Hippocampus only as a proof index; never as a factual authority.
+config :core, :semantic_associative_recall_enabled?, curiosity_enabled?
+
+# One supervised investigator is started by the application on boot.
+# Acquisition is independently gated and uses fixed, bounded public-data
+# providers (no Qwen calls or unsolicited chat). First tick after 60 seconds
+# in development, then at most one eligible issue per minute; an unresolved
+# issue enters a one-hour retry cooldown. Production remains opt-in.
 config :core, Core.Curiosity.Investigator,
-  enabled?: false,
-  interval_ms: 300_000,
+  enabled?: curiosity_enabled?,
+  acquire_evidence?: curiosity_enabled?,
+  interval_ms: if(curiosity_enabled?, do: 60_000, else: 300_000),
   retry_ms: 3_600_000
 
 config :core, :log_prompt_budget?, false
