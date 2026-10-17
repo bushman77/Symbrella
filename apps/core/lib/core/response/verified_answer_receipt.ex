@@ -10,6 +10,7 @@ defmodule Core.Response.VerifiedAnswerReceipt do
   and assistant chat transcripts cannot create evidence receipts.
   """
 
+  alias Core.Brain.WM.VerifiedSemantics
   alias Core.Cognition.MemoryBoundary
   alias Core.Response.{AuthoritativeAnswerPlan, LlmChatHistory, PopulationComparison, ResponseFrame}
   alias Core.Response.LlmChatHistoryOwner
@@ -61,6 +62,10 @@ defmodule Core.Response.VerifiedAnswerReceipt do
 
       :ets.insert(@table, {session_id, timestamp, receipt})
       prune(timestamp)
+
+      # The receipt is only a cue; Brain may accept a semantic pointer
+      # after Core independently revalidates the durable proof graph.
+      _ = VerifiedSemantics.admit(session_id, names, year, ids, :verified_answer)
     end
 
     :ok
@@ -97,7 +102,11 @@ defmodule Core.Response.VerifiedAnswerReceipt do
         {:ok, saved} ->
           if most_recent_answer_matches?(session_id, saved.answer_hash) do
             case revalidate(saved, session_id) do
-              {:ok, text} -> {:ok, text}
+              {:ok, text} ->
+                _ = VerifiedSemantics.admit(
+                  session_id, saved.subjects, saved.year,
+                  saved.proof_ids, :evidence_followup)
+                {:ok, text}
               _ ->
                 {:unavailable,
                  "I can't currently revalidate the source-backed evidence for my previous " <>
