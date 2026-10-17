@@ -62,7 +62,7 @@ The server is supervised even when disabled. To request one supervised
 cycle and inspect the compact result:
 
 ```elixir
-Core.Curiosity.UnresolvedIssues.candidates(20)
+Core.Curiosity.UnresolvedIssues.reasoning_candidates(20)
 Core.Curiosity.Investigator.run_now()
 Core.Curiosity.Investigator.snapshot()
 ```
