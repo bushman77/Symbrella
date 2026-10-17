@@ -5,8 +5,8 @@
 In Core's production pipeline:
 
 1. Core.Brain.WM.Comprehension.recall/2 loads the most recent eligible same-session frame after intent selection and before discourse-reference binding.
-2. Core runs STM, LIFG, MWE, ATL, sentence meaning and Core.Comprehension.Summary.attach/2 as before.
-3. Core.Brain.WM.Comprehension.store/2 submits one bounded active-focus frame through Brain.focus/2 -> Brain.WM.Admission -> Brain.BasalGanglia -> Brain.WorkingMemory.
+2. Core runs STM, LIFG, MWE and ATL, then read-only EpisodicProjection before SentenceMeaning. A uniquely revalidated action or spatial event now yields a compositional `:participant_assertion` proposition with `:structurally_interpreted` status. Independent question frames retain their existing interpretation path.
+3. Core.Comprehension.Summary.attach/2 retains that proposition while keeping lexical uncertainty independent. Core.Brain.WM.Comprehension.store/2 submits one bounded active-focus frame through Brain.focus/2 -> Brain.WM.Admission -> Brain.BasalGanglia -> Brain.WorkingMemory.
 4. Prefrontal planning, action selection, legacy topic focusing, response planning, Hippocampus and activation continue normally.
 
 The temporary frame is NOT a verified fact. It carries at most four explicitly identified entity names; up to six recognized topics, lexical constructions and uncertain terms; any interpreted relation; and degraded/interpretation status. Raw sentences, full candidate slates, and model-generated answers are not stored. The fixed candidate score is a temporary focus priority, not a truth probability.
@@ -31,6 +31,36 @@ patient, and tense. This is **conversation context**, not a verified external
 fact and not proof that Hippocampus has persisted the event. Lexical
 `understood`, `uncertain`, and `degraded?` remain independent, as does the
 legacy sentence-meaning `interpretation_status`.
+
+## Unified structural sentence meaning
+
+`Core.Semantic.SentenceMeaning` now consumes exactly one revalidated
+`Core.Semantic.EpisodicProjection` participant event when no resolved WH-topic
+question frame takes precedence. Actions and progressive spatial states use the
+same proposition interface: `type: :participant_assertion`,
+`epistemic_status: :user_reported_unverified`, bounded semantic arguments,
+grammatical modifiers, and the originating `source_frame`.
+
+For the artist example the proposition has `event_type: :action`, canonical
+predicate `draw`, surface predicate `draws`, and actor/patient arguments.
+For the bird example it has `event_type: :spatial`, predicate `sitting`,
+actor/location arguments, progressive aspect and the `on` position.
+
+The representation says *what the user's sentence asserted*. It never says the
+assertion was confirmed true, assigns new dictionary senses, or claims the
+Hippocampus completed a write. `status: :structurally_interpreted` reports
+composition success only. Existing weak LIFG lexical selections can still
+make `comprehension.degraded?` true and leave lexical `understood` empty.
+Stale, forged, ambiguous, or assistant-sourced participant candidates fail
+closed to `:not_yet_interpreted` unless a separate supported frame applies.
+
+Inspect a real production trace with:
+
+    mix run scripts/trace_action_participants.exs
+
+The `sentence_meaning`, `comprehension_status`, and
+`working_memory_context` fields show separate interpretations and certainty
+levels. This diagnostic is read-only.
 
 ## Session isolation and retention
 
