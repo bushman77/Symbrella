@@ -669,6 +669,14 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", :key]) ||
         get_in(si, [:episode, "meta", "key"])
 
+    # Restore compact semantic-association markers from the persisted
+    # episode meta. They are retrieval pointers only, never verified facts.
+    semantic_kind =
+      case Map.get(row, :meta) do
+        %{} = stored -> Map.get(stored, "kind", Map.get(stored, :kind))
+        _ -> nil
+      end
+
     meta_value =
       get_in(si, ["meta", "value"]) ||
         get_in(si, [:meta, :value]) ||
@@ -695,6 +703,7 @@ defmodule Brain.Hippocampus do
         session_id: Map.get(row, :session_id),
         sentence: Map.get(row, :sentence),
         tags: tags,
+        kind: semantic_kind,
         key: meta_key,
         value: meta_value
       },
