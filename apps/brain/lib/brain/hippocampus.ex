@@ -648,7 +648,10 @@ defmodule Brain.Hippocampus do
     end
   end
 
-  defp db_row_to_episode(row) do
+  # Keep this pure adapter inspectable in tests: row.si is a VIRTUAL field
+  # and is empty after database reads. Durable pointer metadata is in row.meta.
+  @doc false
+  def db_row_to_episode(row) do
     tokens = List.wrap(Map.get(row, :tokens) || [])
 
     norms =
@@ -658,6 +661,11 @@ defmodule Brain.Hippocampus do
 
     si = Map.get(row, :si) || %{}
     tags = Map.get(row, :tags) || []
+    persisted_meta =
+      case Map.get(row, :meta) do
+        %{} = meta -> meta
+        _ -> %{}
+      end
 
     meta_key =
       get_in(si, ["meta", "key"]) ||
@@ -667,15 +675,14 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", "key"]) ||
         get_in(si, [:episode, :meta, :key]) ||
         get_in(si, ["episode", "meta", :key]) ||
-        get_in(si, [:episode, "meta", "key"])
+        get_in(si, [:episode, "meta", "key"]) ||
+        Map.get(persisted_meta, "key") ||
+        Map.get(persisted_meta, :key)
 
     # Restore compact semantic-association markers from the persisted
     # episode meta. They are retrieval pointers only, never verified facts.
     semantic_kind =
-      case Map.get(row, :meta) do
-        %{} = stored -> Map.get(stored, "kind", Map.get(stored, :kind))
-        _ -> nil
-      end
+      Map.get(persisted_meta, "kind") || Map.get(persisted_meta, :kind)
 
     meta_value =
       get_in(si, ["meta", "value"]) ||
@@ -685,7 +692,9 @@ defmodule Brain.Hippocampus do
         get_in(si, ["episode", "meta", "value"]) ||
         get_in(si, [:episode, :meta, :value]) ||
         get_in(si, ["episode", "meta", :value]) ||
-        get_in(si, [:episode, "meta", "value"])
+        get_in(si, [:episode, "meta", "value"]) ||
+        Map.get(persisted_meta, "value") ||
+        Map.get(persisted_meta, :value)
 
     %{
       slate: %{
