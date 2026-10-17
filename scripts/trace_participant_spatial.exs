@@ -54,7 +54,10 @@ choices =
 winners =
   si
   |> Map.get(:atl_slate, %{})
-  |> then(&get.(&1, :winners))
+  |> case do
+    %{} = slate -> get.(slate, :winners) || []
+    _ -> []
+  end
   |> List.wrap()
   |> Enum.map(&Map.take(&1, [:token_index, :id, :chosen_id, :lemma]))
 
