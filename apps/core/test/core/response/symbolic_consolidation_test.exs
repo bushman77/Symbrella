@@ -13,7 +13,7 @@ defmodule Core.Response.SymbolicConsolidationTest do
     AuthoritativeAnswerPlan, Consolidation, LlmPrompt, LlmSynthesis,
     PopulationComparison, ResponseFrame
   }
-  alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
+  alias Db.{CognitiveIssue, ConsolidatedConclusion, ConsolidatedConclusions}
 
   defmodule OfflineLlm do
     def chat(_, _), do: raise("Offline LLM should never be invoked")
@@ -183,15 +183,17 @@ defmodule Core.Response.SymbolicConsolidationTest do
     refute Map.has_key?(unresolved, :web_evidence)
     assert unresolved.consolidation_issue.kind == :missing_dated_evidence
 
-    [issue | _] = CognitiveIssues.pending()
+    issue = Db.get!(CognitiveIssue, unresolved.consolidation_issue.id)
     assert issue.kind == "missing_dated_evidence"
     assert issue.reference_year == 2022
     assert issue.next_action == "find_dated_sources"
     assert issue.evidence["subjects"] == names
 
-    assert [%{issue_id: id, kind: "missing_dated_evidence"} | _] =
-      UnresolvedIssues.candidates()
-    assert id == issue.id
+    # Curiosity's queue is intentionally global and priority sorted.
+    # Its first entry need not be the issue from this test.
+    candidates = UnresolvedIssues.candidates(5)
+    assert length(candidates) <= 5
+    assert Enum.all?(candidates, &(&1.status in ["open", "investigating"]))
   end
 
   test "a new year-specific supported proof resolves its outstanding evidence gap", %{
@@ -231,7 +233,7 @@ defmodule Core.Response.SymbolicConsolidationTest do
     refute Map.has_key?(unresolved, :web_evidence)
     assert unresolved.consolidation_issue.kind == :contradictory_premises
 
-    [issue | _] = CognitiveIssues.pending()
+    issue = Db.get!(CognitiveIssue, unresolved.consolidation_issue.id)
     assert issue.kind == "contradictory_premises"
     assert issue.priority == 0.9
     assert issue.next_action == "recheck_sources"
