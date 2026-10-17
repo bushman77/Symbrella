@@ -127,10 +127,14 @@ defmodule Core.Curiosity.Investigator do
         _ -> attempted
       end
 
-    :telemetry.execute(@telemetry, %{count: 1},
+    duration_ms = max(System.monotonic_time(:millisecond) - now, 0)
+
+    :telemetry.execute(@telemetry, %{count: 1, duration_ms: duration_ms},
       %{status: result.status, reason: Map.get(result, :reason),
         issue_id: Map.get(result, :issue_id),
+        history_id: Map.get(result, :history_id),
         parent_proof_ids: Map.get(result, :parent_proof_ids),
+        acquired_proof_id: Map.get(result, :acquired_proof_id),
         acquisition: Map.get(result, :acquisition),
         acquisition_reason: Map.get(result, :acquisition_reason)})
 
