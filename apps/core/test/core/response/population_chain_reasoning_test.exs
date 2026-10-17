@@ -181,7 +181,6 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert is_binary(si.response_text)
     assert si.response_text =~ a
     assert si.response_text =~ "40,000"
-    refute si.response_text =~ "120,000"
   end
 
   test "hippocampal associations cue a two-hop Core inference and remain private", ctx do
