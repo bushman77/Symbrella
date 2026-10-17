@@ -244,7 +244,7 @@ defmodule Core.Semantic.EventFrames do
   # ordinary discussion containing population as a comparison instruction.
   defp named_population_comparison(sentence) do
     case Regex.run(
-           ~r/^\s*which\s+(?:had|has)\s+(?:the\s+)?(?:larger|greater|higher)\s+population(?:\s+in\s+(?:19|20)\d{2})?\s*,?\s+(.+?)\s*[?.!]*\s*$/iu,
+           ~r/^\s*which\s+(?:(?:city|town|place|municipality)\s+)?(?:had|has)\s+(?:the\s+)?(?:larger|greater|higher)\s+population(?:\s+in\s+(?:19|20)\d{2})?\s*,?\s+(.+?)\s*[?.!]*\s*$/iu,
            sentence,
            capture: :all_but_first
          ) do
