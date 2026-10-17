@@ -177,6 +177,24 @@ defmodule Core.Semantic.SVOEventTest do
              SVOEvent.project(%{si | active_cells: [%{cell | id: "other|verb|1"}]}, si.sentence)
   end
 
+  test "response attach preserves SVO proof and persists a live-planned assertion",
+       %{sid: sid, owner: owner} do
+    si =
+      input()
+      |> Map.put(:session_id, sid)
+      |> Map.put(:confidence, 0.4)
+      |> EpisodicProjection.attach()
+
+    planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
+
+    assert planned.response_text == "I’ve recorded what you told me: The artist draws a picture."
+    assert planned.response_meta.response_source == :symbolic_conversation
+    assert planned.response_meta.persistence_status == :persisted
+
+    assert %{value: "a picture", sentence: "The artist draws a picture."} =
+             Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+  end
+
   test "rejects mismatched ATL winners or disputed grammatical roles", %{sid: sid, owner: owner} do
     si = input()
     wrong_atl = put_in(si, [:atl_slate, :winners],
