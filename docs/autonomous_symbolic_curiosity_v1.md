@@ -288,3 +288,48 @@ A successful snapshot contains `enabled?: true` and
 `acquisition_enabled?: true` with `cycles: 0` until the first scheduled
 tick. The earlier standalone trial worker is not automatically started
 and should not be left active alongside the configured default worker.
+
+## V5: evidence-grounded follow-up explanations
+
+A verified population answer now records a **short-lived session-scoped
+receipt** of the answer's identity, claim subjects/year, and persisted
+direct or two-hop proof identifiers. It is a cue, **not new factual
+authority**. The table belongs to the long-lived LlmChatHistoryOwner
+GenServer and is capped at 256 sessions and a 10-minute time-to-live.
+No migrations are required for this addition.
+
+When the next chat turn asks `how do you know that?`, `what evidence
+supports that?`, `what are your sources?`, or `where did you get those
+figures?`, Core first checks that the receipt matches the latest actual
+assistant reply in the **same** session. Core then independently reruns
+`MemoryBoundary.recall/1` on the original typed population question;
+the re-derived claims, year, source URLs and exact persisted parent proof
+IDs must match. Any loss of verification fails closed with an honest
+unavailability statement. Verified follow-up prose comes from Core and
+cannot be rewritten by Qwen.
+
+Direct comparisons cite the exact source URLs recorded in their accepted
+proof. Two-hop comparisons explain each verified parent, the shared
+intermediate population, and why the transitive deduction is justified.
+These proof details are supplied **only** in response to an explicit
+evidence follow-up; unrelated conversations do not receive proof traces.
+A memory-only LiveView reply invalidates any older receipt, preventing
+the follow-up from being misattributed to an earlier population answer.
+
+The receipt is intentionally non-durable: after restarting Phoenix, ask
+the comparison question again to create a new verified receipt. Existing
+durable `consolidated_conclusions` still survive the restart.
+
+### Regression checks
+
+```bash
+cd ~/Symbrella
+mix test apps/core/test/core/response/population_chain_reasoning_test.exs \
+  apps/core/test/core/response/llm_chat_history_owner_test.exs \
+  apps/core/test/core/semantic/event_frames_test.exs --trace
+```
+
+In the UI, ask the original population question, followed immediately
+by `how do you know that?`. Explain metadata should report
+`response_source: :symbolic_verified_followup` for the second answer,
+never `:llm`.
