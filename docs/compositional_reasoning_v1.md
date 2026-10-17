@@ -114,12 +114,27 @@ reasoning trace, or assistant reply. The index is best-effort and deduplicates
 recent entries.
 
 `Core.Cognition.MemoryBoundary.recall/1` optionally asks the hippocampus
-for cue matches. It looks up each pointer in `Db.ConsolidatedConclusion` and
-requires an exact pair-key and supported-provenance match. Even after such
-a match, normal `Consolidation.recall/1` must rederive and authorize the
-stored proof. A fake, stale, or unrelated episode cannot create knowledge.
-If the hippocampus is unavailable, Core's existing semantic retrieval
-continues unchanged.
+for cue matches. `Core.Cognition.AssociativeReasoning.propose/1` resolves
+bounded opaque fingerprints against `Db.ConsolidatedConclusion`: a direct
+A–C candidate or a possible A–B / B–C pair sharing an intermediate entity.
+This **internal** API can later be invoked by a supervised curiosity worker
+without rendering a response or calling Qwen.
+
+`Core.Reasoning.PopulationChain` can prioritize the two-hop path suggested
+by Hippocampus, but **still loads every relevant candidate proof from the DB**
+and re-derives them. A conflicting record that Hippocampus did not retrieve
+must still veto the conclusion. The hippocampal candidate is neither proof nor
+a reason to bypass Core's authoritative gate.
+
+Each successful reasoning path tracks whether its parent pair was cued
+(`:hippocampal_two_hop_cue`) or found by database fallback
+(`:stored_independent_proofs`). That marker and all parent IDs are internal:
+the response expression boundary strips them before conversational output.
+No new derived claim is persisted as an independent first-party source.
+
+A fake, stale, or unrelated episode cannot create knowledge. If the
+hippocampus is unavailable, Core's existing semantic retrieval remains the
+fallback.
 
 The same episodic store supports a bounded warm start (last 200 episodes
 by current configuration). An older pointer can be evicted from the
