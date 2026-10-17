@@ -8,6 +8,26 @@ defmodule Db.EpisodeExactFactTest do
     :ok
   end
 
+  test "owner-scoped spatial observations choose the newest event across sessions" do
+    owner = "owner-#{System.unique_integer([:positive])}"
+
+    for {sid, place} <- [{"first", "a box"}, {"second", "a shelf"}] do
+      assert {:ok, _} = Episode.insert(%{
+        slate: %{tokens: ["lantern"]},
+        meta: %{kind: :user_reported_spatial, subject: :user, owner: owner,
+          session_id: sid, object_key: "lantern", object: "copper lantern",
+          position: "on", location: place},
+        tags: ["user_reported_spatial"]
+      })
+    end
+
+    assert %{location: "a shelf", provenance: :user_reported} =
+             Episode.latest_user_spatial(owner, "lantern")
+    assert Episode.latest_user_spatial(owner <> "-other", "lantern") == nil
+    assert Episode.latest_user_spatial(owner, "book") == nil
+    assert Episode.latest_user_fact("lantern") == nil
+  end
+
   test "latest user fact is selected by exact key rather than recent-episode limit" do
     key = "persistent_name_test_#{System.unique_integer([:positive])}"
 

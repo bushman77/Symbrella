@@ -84,6 +84,36 @@ defmodule Brain.Hippocampus do
   def encode_verified_fact(_, _), do: {:error, :invalid_fact}
 
   @doc """
+  Persist explicitly user-reported spatial observations in Hippocampus.
+
+  These are autobiographical *reports*, not externally verified facts. A
+  successful result means PostgreSQL accepted the episode. Recall is scoped
+  by a stable owner key rather than the transient chat session.
+  """
+  @spec encode_user_observation(map(), map()) :: :ok | {:error, atom()}
+  def encode_user_observation(%{} = slate, %{kind: :user_reported_spatial} = meta) do
+    case GenServer.call(__MODULE__, {:encode_user_observation, slate, meta}) do
+      {:ok, episode, at_ms} ->
+        if TurnTrace.active?(), do: TurnTrace.encode(episode, at_ms)
+        :ok
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def encode_user_observation(_, _), do: {:error, :invalid_observation}
+
+  @doc "Retrieve the latest persisted user-reported placement for one owner and object."
+  @spec user_observation(String.t(), String.t()) :: map() | nil
+  def user_observation(owner, key)
+      when is_binary(owner) and is_binary(key) and byte_size(owner) > 0 and byte_size(key) > 0 do
+    GenServer.call(__MODULE__, {:user_observation, owner, key})
+  end
+
+  def user_observation(_, _), do: nil
+
+  @doc """
   Write an explicitly self-tagged autobiographical episode.
 
   This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
@@ -303,6 +333,61 @@ defmodule Brain.Hippocampus do
       {:error, _} = error ->
         {:reply, error, state}
     end
+  end
+
+  @impl true
+  def handle_call({:encode_user_observation, slate, meta_in}, from, state) do
+    at = System.system_time(:millisecond)
+    norms =
+      slate
+      |> Normalize.extract_norms_from_any()
+      |> Enum.reject(&Normalize.empty?/1)
+      |> MapSet.new()
+
+    meta = enrich_meta_with_emotion(meta_in)
+    episode = %{slate: slate, meta: meta, norms: norms}
+
+    try do
+      :ok = Writer.insert_row!(episode)
+      window = Window.append_or_refresh_head(state.window, episode, state.window_keep)
+
+      next =
+        state
+        |> Map.put(:window, window)
+        |> Map.put(:last, episode)
+        |> Map.put(:last_at, at)
+
+      measurements = %{count: 1, window_size: length(window), norms_count: MapSet.size(norms)}
+      metadata = %{at: at, window_keep: state.window_keep, meta: meta}
+      Telemetry.emit_write(measurements, metadata)
+      Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], measurements, metadata)
+      {:reply, {:ok, episode, at}, next}
+    rescue
+      error ->
+        Logger.warning("[Hippocampus] user observation write failed: #{Exception.message(error)}")
+        {:reply, {:error, :not_persisted}, state}
+    catch
+      :exit, _ -> {:reply, {:error, :not_persisted}, state}
+      _, _ -> {:reply, {:error, :not_persisted}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:user_observation, owner, key}, _from, state) do
+    observation =
+      try do
+        if Code.ensure_loaded?(Db.Episode) and
+             function_exported?(Db.Episode, :latest_user_spatial, 2) do
+          Db.Episode.latest_user_spatial(owner, key)
+        end
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+        _, _ -> nil
+      end
+
+    {:reply, observation, state}
   end
 
   @impl true

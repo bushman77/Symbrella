@@ -9,6 +9,46 @@ defmodule Core.Response.SpatialDialogueTest do
     %{sid: "spatial-dialogue-#{System.unique_integer([:positive])}"}
   end
 
+  test "spatial events persist through Hippocampus and are recallable in a fresh session", %{sid: sid} do
+    Process.whereis(Brain.Hippocampus) || start_supervised!(Brain.Hippocampus)
+    owner = "spatial-#{System.unique_integer([:positive])}"
+    previous_owner = Application.get_env(:symbrella, :memory_owner_id)
+    Application.put_env(:symbrella, :memory_owner_id, owner)
+
+    on_exit(fn ->
+      if is_nil(previous_owner),
+        do: Application.delete_env(:symbrella, :memory_owner_id),
+        else: Application.put_env(:symbrella, :memory_owner_id, previous_owner)
+
+      import Ecto.Query
+      Db.delete_all(from(e in Db.Episode, where: fragment("? ->> 'owner' = ?", e.meta, ^owner)))
+    end)
+
+    Core.Response.SideEffects.record_turn(sid,
+      "I have a copper lantern sitting on my desk.", "Okay.")
+    Core.Response.SideEffects.record_turn(sid,
+      "I moved it into a wooden box.", "Understood.")
+    Core.Response.SideEffects.record_turn(sid,
+      "Actually, I took the lantern out of the box and placed it on a shelf.", "Noted.")
+
+    assert %{location: "a shelf", provenance: :user_reported} =
+             Brain.Hippocampus.user_observation(owner, "lantern")
+
+    assert {"According to what you told me, the lantern is on a shelf.", meta} =
+             SpatialDialogue.reply("Where is the lantern now?", sid <> "-new-session")
+
+    assert meta.memory_source == :hippocampal_user_observation
+
+    # Persistence survives loss of the volatile hippocampal window.
+    :ok = Brain.Hippocampus.reset()
+    assert {"According to what you told me, the lantern is on a shelf.", _} =
+             SpatialDialogue.reply("Where is the lantern now?", sid <> "-after-reset")
+
+    # Owner isolation, not a global scan of everyone else's chat.
+    Application.put_env(:symbrella, :memory_owner_id, owner <> "-other")
+    assert SpatialDialogue.reply("Where is the lantern now?", sid <> "-other-owner") == nil
+  end
+
   test "same-turn correction gives the current object location", %{sid: sid} do
     text =
       "I took the copper lantern out of the wooden box and placed it on a shelf. Where is the lantern now?"

@@ -855,6 +855,38 @@ defmodule Db.Episode do
   end
 
   @doc """
+  Return the latest persisted user-reported spatial episode by stable owner and
+  exact object key. No session filter or warm-window recency cutoff applies.
+  Reports are never returned from the verified user-fact lookup.
+  """
+  @spec latest_user_spatial(String.t(), String.t()) :: map() | nil
+  def latest_user_spatial(owner, key)
+      when is_binary(owner) and is_binary(key) and byte_size(owner) > 0 and byte_size(key) > 0 do
+    normalized = key |> String.downcase() |> String.trim()
+
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_spatial'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'object_key' = ?", e.meta, ^normalized),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: 1,
+      select: e.meta
+    )
+    |> Repo.one()
+    |> case do
+      %{"object" => object, "position" => position, "location" => location} = meta
+      when is_binary(object) and is_binary(position) and is_binary(location) ->
+        %{object: object, position: position, location: location,
+          provenance: :user_reported, session_id: Map.get(meta, "session_id")}
+
+      _ -> nil
+    end
+  end
+
+  def latest_user_spatial(_, _), do: nil
+
+  @doc """
   Fetch all persisted episodes, newest first.
   """
   @spec list_all() :: [t()]

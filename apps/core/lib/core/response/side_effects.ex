@@ -7,6 +7,7 @@ defmodule Core.Response.SideEffects do
   """
 
   alias Core.Response.LlmSynthesis
+  alias Core.Response.SpatialDialogue
 
   @compile {:no_warn_undefined, Brain.Hippocampus}
   @compile {:no_warn_undefined, Brain.MoodCore}
@@ -27,6 +28,11 @@ defmodule Core.Response.SideEffects do
 
   @spec record_turn(term(), String.t(), String.t()) :: :ok
   def record_turn(session_id, user_text, assistant_text) do
+    # The user's latest placement is admitted as a typed, attributed
+    # hippocampal observation BEFORE the completed turn joins chat history.
+    # A failed write never turns it into externally verified knowledge.
+    _ = SpatialDialogue.remember_user_turn(user_text, session_id)
+
     if function_exported?(LlmSynthesis, :record_turn, 3) do
       _ = LlmSynthesis.record_turn(session_id, user_text, assistant_text)
     end
