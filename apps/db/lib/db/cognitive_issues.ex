@@ -58,6 +58,58 @@ defmodule Db.CognitiveIssues do
     :ok
   end
 
+  @doc """
+  Mark previously missing two-hop links resolved only after the verified
+  composition path has identified TWO distinct persisted parent proofs.
+  The logic that validates and composes their contents remains in Core.
+  """
+  @spec resolve_reasoning_link(String.t(), integer(), [integer()]) :: :ok
+  def resolve_reasoning_link(subject_key, year, ids)
+      when is_binary(subject_key) and is_integer(year) and is_list(ids) and
+             length(ids) == 2 do
+    unique_ids = Enum.uniq(ids)
+
+    if length(unique_ids) == 2 do
+      verified_parent_count =
+        Db.aggregate(
+          from(c in Db.ConsolidatedConclusion,
+            where: c.id in ^unique_ids and
+                   c.reference_year == ^year and
+                   c.kind == "population_comparison" and
+                   c.provenance == "source_supported_symbolic_derivation"),
+          :count
+        )
+
+      if verified_parent_count == 2 do
+        issues = Db.all(
+          from(i in CognitiveIssue,
+            where: i.subject_key == ^subject_key and
+                   i.kind == "missing_reasoning_link" and
+                   i.status in ["open", "investigating"] and
+                   (is_nil(i.reference_year) or i.reference_year == ^year))
+        )
+
+        Enum.each(issues, fn issue ->
+          issue
+          |> CognitiveIssue.changeset(%{
+            status: "resolved",
+            resolution: %{
+              reasoning_rule: "transitive_population_order",
+              parent_proof_ids: Enum.sort(unique_ids),
+              reference_year: year
+            },
+            resolved_at: DateTime.utc_now()
+          })
+          |> Db.update!()
+        end)
+      end
+    end
+
+    :ok
+  end
+
+  def resolve_reasoning_link(_, _, _), do: :ok
+
   def resolve_missing_year(_), do: :ok
 
   defp close_missing_year_issues(proof) do
