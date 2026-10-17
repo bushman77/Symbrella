@@ -42,6 +42,26 @@ defmodule Db.CognitiveIssues do
   end
 
   @doc """
+  Narrow queue for internal symbolic investigation. Higher-priority
+  unrelated uncertainties cannot starve missing two-hop links.
+  """
+  @spec pending_reasoning_links(pos_integer()) :: [CognitiveIssue.t()]
+  def pending_reasoning_links(limit \\ 12)
+
+  def pending_reasoning_links(limit) when is_integer(limit) and limit > 0 do
+    Db.all(
+      from(i in CognitiveIssue,
+        where: i.kind == "missing_reasoning_link" and
+               i.next_action == "find_linking_premise" and
+               i.status in ["open", "investigating"],
+        order_by: [desc: i.priority, asc: i.inserted_at, asc: i.id],
+        limit: ^min(limit, 20))
+    )
+  end
+
+  def pending_reasoning_links(_), do: []
+
+  @doc """
   A missing-year gap closes only after a NEW persisted source-supported
   symbolic conclusion exists for that exact subject pair and reference year.
   Contradictions are never resolved by selecting one competing proof.
