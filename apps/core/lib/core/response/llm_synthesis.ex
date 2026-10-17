@@ -295,8 +295,14 @@ defmodule Core.Response.LlmSynthesis do
     end
     system_prompt = render.(context)
 
-    # Always compare against the SAME prompt and original history. Full history
-    # remains the default. The counterfactual candidate does not call the LLM.
+    # Retain a longer conversation in ETS, but only send complete recent
+    # pairs that fit in the local model's conservative input allowance.
+    # This does not change the canonical memory or fact-verification gates.
+    available_chars = prompt_history_budget(system_prompt, user_text)
+    active_history =
+      Core.Response.LlmHistory.within_char_budget(selection.actual_history, available_chars)
+    selection = Map.put(selection, :actual_history, active_history)
+
     budget =
       PromptBudget.measure(context, render, history, selection.history,
         selection.actual_history, user_text)
@@ -792,7 +798,15 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp history_turn_pairs do
-    llm_config(:history_turn_pairs, 6)
+    llm_config(:history_turn_pairs, 32)
+  end
+
+  defp prompt_history_budget(system_prompt, user_text) do
+    # 5200 estimated input tokens leave space in the configured 8192-token
+    # context for generation, role framing, and tokenizer estimation error.
+    max_chars = llm_config(:max_input_estimated_tokens, 5_200) * 4
+    max(max_chars - String.length(system_prompt) -
+      String.length(user_text) - 256, 0)
   end
 
   defp llm_config(key, default) do

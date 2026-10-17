@@ -13,7 +13,7 @@ defmodule Core.Response.LlmChatHistory do
   @retrieval_table :core_recent_retrieval
   @retrieval_ttl_ms 300_000
   @recall_turn_pairs 100
-  @default_turn_pairs 6
+  @default_turn_pairs 32
   @default_max_item_chars 900
 
   @compile {:no_warn_undefined, Llm}

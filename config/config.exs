@@ -67,15 +67,17 @@ config :core, :log_prompt_budget?, false
 config :core, :llm_synthesis,
   timeout_ms: 120_000,
   ready_timeout_ms: 10_000,
-  max_tokens: 150,
+  max_tokens: 240,
   news_first_max_tokens: 280,
   evidence_revision_enabled?: true,
   evidence_revision_max_tokens: 360,
-  history_turn_pairs: 6,
-  # Full history remains default; opt into :selective_recall only after evaluating metrics.
+  # Retain a longer same-session conversation; prompt assembly separately
+  # caps the history to a safe portion of the local model's context.
+  history_turn_pairs: 32,
   history_mode: :full,
   selective_recent_pairs: 2,
-  max_item_chars: 500,
+  max_item_chars: 900,
+  max_input_estimated_tokens: 5_200,
   max_system_chars: 4_000,
   max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5

@@ -2,8 +2,8 @@ defmodule Core.Response.PromptHistoryPolicy do
   @moduledoc """
   Pure, conservative comparison policy for hippocampal prompt compression.
 
-  The normal six-turn LLM history remains untouched unless the caller opts
-  into :selective_recall. Only a relevant same-session episodic projection
+  The bounded same-session LLM history remains untouched unless the caller
+  opts into :selective_recall. Only a relevant same-session episodic projection
   makes a shorter history eligible. Never trim an ambiguous or corrective
   follow-up, or a turn that requires a previous question as its answer target.
   """

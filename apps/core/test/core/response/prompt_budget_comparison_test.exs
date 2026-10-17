@@ -101,6 +101,43 @@ defmodule Core.Response.PromptBudgetComparisonTest do
       @question, nil, mode: :selective_recall).actual_history == candidate.history
   end
 
+  test "a 24-turn conversation remains stored while LLM context is bounded", %{
+    session: sid, old_config: old_config
+  } do
+    Application.put_env(:core, :llm_synthesis,
+      old_config
+      |> Keyword.put(:history_mode, :full)
+      |> Keyword.put(:history_turn_pairs, 32)
+      |> Keyword.put(:max_item_chars, 900)
+      |> Keyword.put(:max_input_estimated_tokens, 3_500))
+
+    for n <- 1..24 do
+      LlmChatHistory.record_turn(sid,
+        "Turn #{n} describes a persistent object with context " <> String.duplicate("c", 200),
+        "Acknowledged turn #{n} with state " <> String.duplicate("s", 160))
+    end
+
+    assert length(LlmChatHistory.messages(sid)) == 48
+
+    features = %{session_id: sid, intent: :question, confidence: 0.92}
+    decision = %{tone: :neutral, mode: :collaborator, action: :answer}
+
+    assert {:ok, _, _} =
+             LlmSynthesis.generate("What did I say most recently?", features, decision, %{}, nil)
+
+    assert_receive {:budget_chat, assembled}
+    assert_receive {:prompt_budget, measure, meta}
+    actual_history = Enum.slice(assembled, 1, length(assembled) - 2)
+
+    assert length(actual_history) > 12
+    assert length(actual_history) < 48
+    assert rem(length(actual_history), 2) == 0
+    assert Enum.at(actual_history, -2)["content"] =~ "Turn 24"
+    assert meta.actual_history_messages == length(actual_history)
+    assert measure.estimated_input_tokens <= 3_500
+    assert length(LlmChatHistory.messages(sid)) == 48
+  end
+
   test "section estimates are additive and distinguish episodic from source evidence" do
     builder = fn ctx ->
       "Base instructions." <>

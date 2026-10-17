@@ -33,6 +33,45 @@ defmodule Core.Response.LlmHistory do
 
   def recent(_messages, _turn_pairs), do: []
 
+  @doc """
+  Keep the newest complete user/assistant pairs within the available prompt
+  characters. An older pair never displaces a more recent correction or
+  referential antecedent. The stored history is not modified.
+  """
+  @spec within_char_budget(list(), non_neg_integer()) :: list()
+  def within_char_budget(messages, max_chars)
+      when is_list(messages) and is_integer(max_chars) and max_chars >= 0 do
+    complete = Enum.take(messages, length(messages) - rem(length(messages), 2))
+
+    complete
+    |> Enum.chunk_every(2)
+    |> Enum.reverse()
+    |> Enum.reduce_while({[], 0}, fn
+      [%{"role" => "user"}, %{"role" => "assistant"}] = pair, {kept, used} ->
+        size = Enum.reduce(pair, 0, fn message, acc ->
+          acc + message_size(message)
+        end)
+
+        if used + size <= max_chars do
+          {:cont, {[pair | kept], used + size}}
+        else
+          {:halt, {kept, used}}
+        end
+
+      _, acc ->
+        {:halt, acc}
+    end)
+    |> elem(0)
+    |> List.flatten()
+  end
+
+  def within_char_budget(_, _), do: []
+
+  defp message_size(%{"content" => text}) when is_binary(text),
+    do: String.length(text) + 24
+
+  defp message_size(_), do: 24
+
   @spec trim(list(), integer()) :: list()
   def trim(messages, turn_pairs) when is_list(messages) and is_integer(turn_pairs) do
     max_messages = max(0, turn_pairs * 2)
