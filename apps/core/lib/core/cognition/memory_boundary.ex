@@ -14,8 +14,7 @@ defmodule Core.Cognition.MemoryBoundary do
   """
 
   alias Core.Response.{Consolidation, PopulationComparison}
-  alias Brain.Hippocampus.SemanticAssociations
-  alias Db.ConsolidatedConclusion
+  alias Core.Cognition.AssociativeReasoning
 
   @private_keys [
     :consolidation_issue,
@@ -41,51 +40,19 @@ defmodule Core.Cognition.MemoryBoundary do
 
   def recall(other), do: other
 
-  # Hippocampus merely proposes an opaque pointer. A matching DB record can
-  # establish a cue association, NOT the truth of the claim. Consolidation
-  # remains responsible for all independent source/proof revalidation.
+  # Hints returned by Hippocampus can refer either to a directly relevant
+  # stored proof or to two parents linked by a shared intermediate subject.
+  # Nothing below declares an answer; Consolidation revalidates the complete
+  # proof graph against all relevant DB records before any result is emitted.
   defp maybe_associate(context, subjects) do
-    if Application.get_env(:core, :semantic_associative_recall_enabled?, false) and
-         not is_map(Map.get(context, :web_evidence)) do
-      subject_key = pair_key(subjects)
-
-      pointer =
-        subjects
-        |> SemanticAssociations.cues(8)
-        |> Enum.find(fn fingerprint ->
-          case Db.get_by(ConsolidatedConclusion, fingerprint: fingerprint) do
-            %ConsolidatedConclusion{kind: "population_comparison",
-                                     provenance: "source_supported_symbolic_derivation",
-                                     pair_key: ^subject_key} ->
-              true
-
-            _ -> false
-          end
-        end)
-
-      if is_binary(pointer) do
-        Map.put(context, :hippocampal_association, %{
-          kind: :semantic_proof_pointer, fingerprint: pointer
-        })
-      else
-        context
-      end
-    else
+    if is_map(Map.get(context, :web_evidence)) do
       context
+    else
+      case AssociativeReasoning.propose(subjects) do
+        %{kind: _} = hint -> Map.put(context, :hippocampal_association, hint)
+        _ -> context
+      end
     end
-  rescue
-    _ -> context
-  catch
-    :exit, _ -> context
-  end
-
-  defp pair_key(names) do
-    names
-    |> Enum.map(&(String.downcase(String.trim(&1))))
-    |> Enum.sort()
-    |> Enum.join("|")
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
   end
 
   @doc """
