@@ -122,6 +122,61 @@ defmodule Core.Semantic.SVOEventTest do
              EpisodicProjection.attach(si).episodic_candidates
   end
 
+  defp inflected_input do
+    si = input()
+
+    choices =
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = choice ->
+          %{choice | id: "draws|verb|1", lemma: "draws"}
+
+        choice ->
+          choice
+      end)
+
+    si
+    |> Map.put(:lifg_choices, choices)
+    |> Map.put(:atl_slate, %{winners: choices})
+    |> Map.put(:active_cells, [
+      %{
+        id: "draws|verb|1",
+        pos: "verb",
+        norm: "draws",
+        definition: "An inflected form of draw.",
+        semantic_atoms: [
+          "tag:form-of", "tag:indicative", "tag:present",
+          "tag:singular", "tag:third-person"
+        ]
+      }
+    ])
+  end
+
+  test "inflected production verb is stored under its attested base verb", %{sid: sid, owner: owner} do
+    si = EpisodicProjection.attach(inflected_input())
+
+    assert [%{entity_key: "artist", relation: "verb_draw", value: "a picture",
+              source_frame: :finite_present_svo}] = si.episodic_candidates
+
+    SideEffects.record_turn(sid, si.sentence, "I understand.", si)
+
+    assert %{value: "a picture", sentence: "The artist draws a picture."} =
+             Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+
+    assert {"You told me: The artist draws a picture.", _meta} =
+             EpisodicMemory.reply("What did the artist draw?")
+  end
+
+  test "does not guess a base form without matching morphology evidence" do
+    si = inflected_input()
+    [cell] = si.active_cells
+
+    assert [%{relation: "verb_draws"}] =
+             SVOEvent.project(%{si | active_cells: [%{cell | semantic_atoms: []}]}, si.sentence)
+
+    assert [%{relation: "verb_draws"}] =
+             SVOEvent.project(%{si | active_cells: [%{cell | id: "other|verb|1"}]}, si.sentence)
+  end
+
   test "rejects mismatched ATL winners or disputed grammatical roles", %{sid: sid, owner: owner} do
     si = input()
     wrong_atl = put_in(si, [:atl_slate, :winners],
