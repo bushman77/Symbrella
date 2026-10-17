@@ -63,6 +63,12 @@ IO.inspect(%{
   atl_winners: winners,
   projected_actions: candidates,
   validation: revalidated,
+  sentence_meaning: Map.get(si, :sentence_meaning),
+  comprehension_status: %{
+    degraded?: get_in(si, [:comprehension, :degraded?]),
+    understood: get_in(si, [:comprehension, :understood]),
+    uncertain: get_in(si, [:comprehension, :uncertain])
+  },
   working_memory_context:
     Core.Brain.WM.Comprehension.context_from(si, Map.get(si, :comprehension, %{}))
 }, label: "Read-only action participant diagnostic", pretty: true, limit: :infinity)
