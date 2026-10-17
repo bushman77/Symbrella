@@ -65,9 +65,9 @@ IO.inspect(%{
   validation: revalidated,
   sentence_meaning: Map.get(si, :sentence_meaning),
   comprehension_status: %{
-    degraded?: get_in(si, [:comprehension, :degraded?]),
-    understood: get_in(si, [:comprehension, :understood]),
-    uncertain: get_in(si, [:comprehension, :uncertain])
+    degraded?: Map.get(Map.get(si, :comprehension) || %{}, :degraded?),
+    understood: Map.get(Map.get(si, :comprehension) || %{}, :understood),
+    uncertain: Map.get(Map.get(si, :comprehension) || %{}, :uncertain)
   },
   working_memory_context:
     Core.Brain.WM.Comprehension.context_from(si, Map.get(si, :comprehension, %{}))
