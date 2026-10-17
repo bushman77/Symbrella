@@ -320,6 +320,57 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert status.cycles >= 1
   end
 
+  test "isolated scheduled worker honors its opt-in while the normal worker remains disabled", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(a, c)
+    capture!(b, c, [100_000, 80_000])
+
+    # Keep selection deterministic without changing unrelated issues.
+    issue
+    |> CognitiveIssue.changeset(%{priority: 1.0})
+    |> Db.update!()
+
+    Application.put_env(:core, Investigator, enabled?: false)
+    assert %{status: :disabled} = Investigator.run_now()
+
+    trial_name = :curiosity_isolated_scheduled_trial_test
+
+    spec =
+      Supervisor.child_spec(
+        {Investigator,
+         [name: trial_name, enabled?: true, interval_ms: 60_000,
+          retry_ms: 60_000]},
+        id: trial_name
+      )
+
+    assert {:ok, worker} = Supervisor.start_child(Symbrella.Supervisor, spec)
+
+    on_exit(fn ->
+      _ = Supervisor.terminate_child(Symbrella.Supervisor, trial_name)
+      _ = Supervisor.delete_child(Symbrella.Supervisor, trial_name)
+    end)
+
+    owner = :persistent_term.get({:symbrella, :sandbox_owner})
+    :ok = Ecto.Adapters.SQL.Sandbox.allow(Db, owner, worker)
+
+    assert %{enabled?: true, cycles: 0} = Investigator.snapshot(trial_name)
+
+    # Exercise the same scheduled handle_info(:tick) path without adding a
+    # minute to ExUnit. No investigate_issue/1 or run_now/1 call is involved.
+    send(worker, :tick)
+    assert %{cycles: 1,
+             last_result: %{status: :resolved, issue_id: issue_id}} =
+      Investigator.snapshot(trial_name)
+    assert issue_id == issue.id
+
+    assert %{status: "resolved", resolution: resolution} =
+      Db.get!(CognitiveIssue, issue.id)
+    assert resolution["reasoning_rule"] == "transitive_population_order"
+    assert %{status: :disabled} = Investigator.run_now()
+  end
+
   test "other epistemic issues never enter this narrow autonomous cycle", %{
     a: a, c: c
   } do
