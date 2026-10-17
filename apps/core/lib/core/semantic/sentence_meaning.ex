@@ -1,12 +1,13 @@
 defmodule Core.Semantic.SentenceMeaning do
   @moduledoc """
   A conservative, sentence-level interpretation assembled from independently
-  observed grammatical roles and ATL lexical winners.
+  observed grammatical roles, ATL lexical winners and independently
+  revalidated event projections.
 
-  This is *not* a dictionary entry for a whole sentence. For recognized
-  question frames, it records a compositional reading with its evidence.
-  Unrecognized sentences retain an explicitly absent definition. No BrainCell
-  IDs, external facts, or sense confidences are invented.
+  This is *not* a dictionary entry for a whole sentence. Recognized question
+  and participant-assertion frames become compositional propositions with
+  explicit epistemic status. Unrecognized sentences retain an absent definition.
+  No BrainCell IDs, external facts, or sense confidences are invented.
   """
 
   alias Core.Pipeline.Trace
