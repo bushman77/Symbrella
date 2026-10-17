@@ -371,6 +371,52 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert %{status: :disabled} = Investigator.run_now()
   end
 
+  test "opted-in scheduled acquisition rejects malformed bridge pointers without fetching", %{
+    a: a, c: c
+  } do
+    capture!(a, "InvestBridge#{System.unique_integer([:positive])}", [120_000, 100_000])
+    issue = missing_issue!(a, c)
+
+    # The durable issue is the only planning authority. An absent stored
+    # parent pointer must not trigger a web lookup or create new facts.
+    issue =
+      issue
+      |> CognitiveIssue.changeset(%{
+        priority: 1.0,
+        evidence: Map.put(issue.evidence, "stored_proof_ids", [])
+      })
+      |> Db.update!()
+
+    Application.put_env(:core, Investigator,
+      enabled?: false, acquire_evidence?: false)
+
+    trial_name = :curiosity_acquisition_reject_test
+    spec =
+      Supervisor.child_spec(
+        {Investigator, [name: trial_name, enabled?: true,
+          acquire_evidence?: true, interval_ms: 60_000]},
+        id: trial_name
+      )
+    assert {:ok, worker} = Supervisor.start_child(Symbrella.Supervisor, spec)
+
+    on_exit(fn ->
+      _ = Supervisor.terminate_child(Symbrella.Supervisor, trial_name)
+      _ = Supervisor.delete_child(Symbrella.Supervisor, trial_name)
+    end)
+
+    owner = :persistent_term.get({:symbrella, :sandbox_owner})
+    :ok = Ecto.Adapters.SQL.Sandbox.allow(Db, owner, worker)
+
+    send(worker, :tick)
+    assert %{cycles: 1,
+      last_result: %{status: :unresolved, issue_id: id,
+        acquisition: :not_captured,
+        acquisition_reason: :no_unique_valid_missing_bridge}} =
+      Investigator.snapshot(trial_name)
+    assert id == issue.id
+    assert Db.get!(CognitiveIssue, issue.id).status == "open"
+  end
+
   test "other epistemic issues never enter this narrow autonomous cycle", %{
     a: a, c: c
   } do
