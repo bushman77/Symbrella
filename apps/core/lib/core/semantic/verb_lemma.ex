@@ -20,9 +20,9 @@ defmodule Core.Semantic.VerbLemma do
     "tag:third-person"
   ]
 
-  @base_pattern ~r/\A[a-z][a-z0-9_]{0,47}\z/
+  defp base_pattern, do: ~r/\A[a-z][a-z0-9_]{0,47}\z/
 
-  @form_of_glosses [
+  defp form_of_glosses, do: [
     ~r/\A(?:\([^)]*\)\s*)?(?:an?\s+)?inflected form of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
     ~r/\A(?:\([^)]*\)\s*)?third-person singular (?:simple )?present (?:indicative )?(?:form )?of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu
   ]
@@ -37,7 +37,7 @@ defmodule Core.Semantic.VerbLemma do
           [surface, "verb", _sense] ->
             surface = String.downcase(surface)
 
-            if Regex.match?(@base_pattern, surface) do
+            if Regex.match?(base_pattern(), surface) do
               {:ok, attested_base(si, value) || surface}
             else
               :error
@@ -83,11 +83,11 @@ defmodule Core.Semantic.VerbLemma do
         |> List.last()
         |> String.trim()
 
-      Enum.find_value(@form_of_glosses, fn regex ->
+      Enum.find_value(form_of_glosses(), fn regex ->
         case Regex.named_captures(regex, gloss) do
           %{"base" => base} ->
             base = String.downcase(base)
-            if Regex.match?(@base_pattern, base), do: base, else: nil
+            if Regex.match?(base_pattern(), base), do: base, else: nil
 
           _ ->
             nil
