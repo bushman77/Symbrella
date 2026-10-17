@@ -144,6 +144,14 @@ defmodule Brain.Hippocampus do
 
   def action_actor(_, _, _), do: nil
 
+  @doc "Return exactly one current action event for an actor; ambiguous actions return nil."
+  @spec unique_action(String.t(), String.t()) :: map() | nil
+  def unique_action(owner, entity_key) when is_binary(owner) and is_binary(entity_key) do
+    GenServer.call(__MODULE__, {:unique_action, owner, entity_key})
+  end
+
+  def unique_action(_, _), do: nil
+
   @doc "Chronological evidence for one entity, newest first, independently of chat session."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit \\ 8)
@@ -474,6 +482,20 @@ defmodule Brain.Hippocampus do
     result =
       try do
         Db.Episode.action_actor(owner, surface_predicate, patient)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:unique_action, owner, entity_key}, _from, state) do
+    result =
+      try do
+        Db.Episode.unique_action(owner, entity_key)
       rescue
         _ -> nil
       catch
