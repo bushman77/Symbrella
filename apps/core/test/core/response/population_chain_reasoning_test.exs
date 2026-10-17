@@ -5,6 +5,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
   """
   use ExUnit.Case, async: false
 
+  alias Core.Brain.WM.VerifiedSemantics
   alias Core.Curiosity.UnresolvedIssues
   alias Core.Cognition.MemoryBoundary
   alias Core.Cognition.AssociativeReasoning
@@ -51,6 +52,19 @@ defmodule Core.Response.PopulationChainReasoningTest do
 
   defp restore(key, nil), do: Application.delete_env(:core, key)
   defp restore(key, value), do: Application.put_env(:core, key, value)
+
+  defp enable_verified_wm(session) do
+    previous = Application.get_env(:core, VerifiedSemantics)
+    Application.put_env(:core, VerifiedSemantics, enabled?: true)
+
+    on_exit(fn ->
+      if is_nil(previous),
+        do: Application.delete_env(:core, VerifiedSemantics),
+        else: Application.put_env(:core, VerifiedSemantics, previous)
+
+      Brain.defocus(VerifiedSemantics.frame_id(session))
+    end)
+  end
 
   defp event(names) do
     %{type: :location_question, domain: :geography,
@@ -188,6 +202,8 @@ defmodule Core.Response.PopulationChainReasoningTest do
     first = capture!(a, b, [120_000, 100_000])
     second = capture!(b, c, [100_000, 80_000])
     session = "evidence-followup-#{ctx.sid}"
+    enable_verified_wm(session)
+    prior_gate = Brain.snapshot_wm().cfg
     question = "Which city had the larger population in 2021, #{a} or #{c}?"
 
     features = %{
@@ -201,6 +217,16 @@ defmodule Core.Response.PopulationChainReasoningTest do
     # Production does this after the response is finalized. A receipt is
     # tied to this exact authorized assistant message, not just the session.
     :ok = LlmChatHistory.record_turn(session, question, answer)
+
+    assert %{kind: :verified_semantic_frame,
+             conversation_act: :verified_answer,
+             parent_proof_ids: parent_ids,
+             entities: [^a, ^b, ^c],
+             reference_year: 2021,
+             reasoning_rule: :transitive_population_order,
+             verification: :source_supported,
+             factual_authority?: false} = VerifiedSemantics.snapshot(session)
+    assert parent_ids == Enum.sort([first.id, second.id])
 
     assert {:ok, explanation, %{status: :verified_evidence_followup}} =
       LlmSynthesis.generate("how do you know that?",
@@ -217,6 +243,17 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert explanation =~ hd(first.source_urls)
     assert explanation =~ List.last(second.source_urls)
     refute explanation =~ "my training data"
+
+    assert %{conversation_act: :evidence_followup,
+             relation: :population_comparison,
+             parent_proof_ids: ^parent_ids,
+             interpretation_status: :verified} = VerifiedSemantics.snapshot(session)
+    assert Brain.snapshot_wm().cfg == prior_gate
+
+    # WM's process is global. The prompt runtime must not leak another
+    # session's verified proof pointers to a free-form LLM.
+    refute Enum.any?(Core.Response.RuntimeContext.snapshot().wm_items,
+      &(Map.get(&1, :id) == VerifiedSemantics.frame_id(session)))
 
     # The production Response planner must attribute the answer to Core,
     # not label it as an LLM-authored explanation.
@@ -236,6 +273,7 @@ defmodule Core.Response.PopulationChainReasoningTest do
     %{a: a, b: b} = ctx
     stored = capture!(a, b, [120_000, 100_000])
     session = "direct-evidence-#{ctx.sid}"
+    enable_verified_wm(session)
     features = %{session_id: session, intent: :question,
                  symbolic_frame: event([a, b])}
     question = "Which city had the larger population in 2021, #{a} or #{b}?"
@@ -251,6 +289,12 @@ defmodule Core.Response.PopulationChainReasoningTest do
     assert explanation =~ List.last(stored.source_urls)
     assert explanation =~ "20,000"
     refute explanation =~ "transitive reasoning"
+    assert %{conversation_act: :evidence_followup,
+             parent_proof_ids: [proof_id],
+             reasoning_rule: :direct_population_comparison,
+             verification: :source_supported} =
+      VerifiedSemantics.snapshot(session)
+    assert proof_id == stored.id
   end
 
   test "if the proof path is disabled later, evidence explanation fails closed", ctx do
@@ -275,6 +319,30 @@ defmodule Core.Response.PopulationChainReasoningTest do
     after
       Application.put_env(:core, :symbolic_composition_enabled?, true)
     end
+  end
+
+  test "unverified or mismatched proof IDs cannot enter verified WM", ctx do
+    %{a: a, b: b, c: c} = ctx
+    ab = capture!(a, b, [120_000, 100_000])
+    bc = capture!(b, c, [100_000, 80_000])
+    session = "wm-rejected-#{ctx.sid}"
+    enable_verified_wm(session)
+
+    assert VerifiedSemantics.admit(session, [a, c], 2021, [ab.id, 123_456_789],
+      :verified_answer) == :rejected
+    assert VerifiedSemantics.snapshot(session) == nil
+
+    assert VerifiedSemantics.admit(session, [a, c], 2022, [ab.id, bc.id],
+      :verified_answer) == :rejected
+    assert VerifiedSemantics.snapshot(session) == nil
+
+    assert VerifiedSemantics.admit(session, [a, c], 2021, [ab.id, bc.id],
+      :verified_answer) == :admitted
+
+    assert VerifiedSemantics.snapshot(session).parent_proof_ids ==
+      Enum.sort([ab.id, bc.id])
+
+    assert VerifiedSemantics.snapshot("different-#{ctx.sid}") == nil
   end
 
   test "evidence receipt cannot cross sessions or refer to an intervening answer", ctx do
