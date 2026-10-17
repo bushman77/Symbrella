@@ -558,7 +558,12 @@ defmodule SymbrellaWeb.HomeLive do
       keyword: Map.get(si, :keyword, ""),
       text: user_text,
       tokens: Map.get(si, :tokens, []),
-      source: Map.get(si, :source, :user)
+      source: Map.get(si, :source, :user),
+      # If Core's pre-attached reply is missing, the LiveView planner must
+      # retain its typed event frame. Dropping it makes a two-city comparison
+      # look like generic chat and prevents its evidence lookup.
+      symbolic_frame: Map.get(si, :symbolic_frame),
+      turn_context: Core.Response.Context.from_si(si)
     }
 
     # Prefer the response already attached by Core.resolve_input/2; otherwise fall back to planner.
