@@ -468,8 +468,8 @@ defmodule Core.Response do
   end
 
   defp si_text(si) when is_map(si) do
-    si
-    |> Map.get(:text, Map.get(si, :keyword, ""))
+    (Map.get(si, :text) || Map.get(si, :sentence) ||
+       Map.get(si, :keyword) || "")
     |> to_string()
   end
 
