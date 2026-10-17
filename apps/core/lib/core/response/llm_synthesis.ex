@@ -27,6 +27,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.Consolidation
   alias Core.Cognition.MemoryBoundary
   alias Core.Response.VerifiedPopulation
+  alias Core.Response.VerifiedAnswerReceipt
   alias Core.Response.EvidenceRevision
   alias Core.Response.GroundedRevision
   alias Core.Response.ReflectionLoop
@@ -49,8 +50,33 @@ defmodule Core.Response.LlmSynthesis do
   @spec generate(String.t(), map(), map(), map(), atom() | nil) ::
           {:ok, String.t(), map()} | {:error, term()}
   def generate(user_text, features, decision, mood, prompt_type) do
-    # An already-groundable symbolic comparison can be answered even when the
-    # LLM process is offline. Other turns retain their original LLM gate.
+    session_id = Map.get(ensure_map(features), :session_id)
+
+    # A question about the immediately previous VERIFIED answer is answered
+    # from freshly revalidated Core proofs, never from LLM self-description.
+    # Keep this check outside the LLM availability gate.
+    case VerifiedAnswerReceipt.explain(user_text, session_id) do
+      {:ok, explanation} ->
+        reflection = %{status: :verified_evidence_followup}
+        emit_complete_event(user_text, explanation,
+          %{session_id: session_id, features: ensure_map(features),
+            decision: ensure_map(decision), mood: ensure_map(mood)}, "", reflection)
+        {:ok, explanation, reflection}
+
+      {:unavailable, explanation} ->
+        reflection = %{status: :insufficient_verified_evidence,
+                       reason: :stale_prior_symbolic_evidence}
+        emit_complete_event(user_text, explanation,
+          %{session_id: session_id, features: ensure_map(features),
+            decision: ensure_map(decision), mood: ensure_map(mood)}, "", reflection)
+        {:ok, explanation, reflection}
+
+      :not_applicable ->
+        generate_normal(user_text, features, decision, mood, prompt_type)
+    end
+  end
+
+  defp generate_normal(user_text, features, decision, mood, prompt_type) do
     turn_context =
       if is_map(features), do: Map.get(features, :turn_context, %{}), else: %{}
 
@@ -203,7 +229,9 @@ defmodule Core.Response.LlmSynthesis do
       # after the published conclusion passes the exact authorization gate.
       # It never stores the model's words as factual evidence, and neither
       # replay nor the separate Curiosity process can bypass this gate.
-      _ = Consolidation.capture(context, plan)
+      capture_result = Consolidation.capture(context, plan)
+      _ = VerifiedAnswerReceipt.record(
+        Map.get(context, :session_id), context, plan, out, capture_result)
 
       emit_complete_event(user_text, out, context, prompt, reflection)
       {:ok, out, reflection}
