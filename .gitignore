@@ -70,3 +70,12 @@ apps/db/priv/kaikki.org-dictionary-English.jsonl
 pgvector/
 .aider*
 output.txt
+# Generated self-calibration records
+/priv/self_calibration/samples.jsonl
+/apps/*/priv/self_calibration/samples.jsonl
+
+# PostgreSQL backup exports
+/apps/db/priv/db/*.sql.gz
+
+# Installed JavaScript dependencies
+/apps/*/node_modules/
