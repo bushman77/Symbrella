@@ -1,11 +1,13 @@
 defmodule Core.Semantic.Proposition do
   @moduledoc """
-  Build a compositional proposition from a verified sentence meaning and ATL
-  constituents. This is a structural interpretation, not a factual assertion
-  or a certification of the selected dictionary senses.
+  Build compositional propositions for resolved WH questions and
+  revalidated action/spatial participant assertions.
 
-  No lexical evidence is synthesized: each sense_id is copied from a verified
-  ATL role, and incomplete noun phrases remain surface-only.
+  This is structural interpretation, not external factual verification or
+  certification of selected dictionary senses. WH role sense IDs are copied
+  only from ATL evidence; participant roles come from event projection whose
+  validity is rechecked by SentenceMeaning. Unsupported phrases remain
+  surface-only rather than acquiring invented dictionary meanings.
   """
 
   @max_modifiers 4
