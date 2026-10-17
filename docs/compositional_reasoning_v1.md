@@ -105,6 +105,56 @@ Test fixtures use invented places and synthetic `example.invalid` URLs:
 they test deduction plumbing, safeguards and the existing authorization
 contract, **not** whether those place facts are true.
 
+## Hippocampal semantic association cues (next experimental slice)
+
+`Brain.Hippocampus.SemanticAssociations` can index a **fingerprint only**
+after Core commits an authorized source-backed conclusion. Its episode holds
+cue tokens and the opaque pointer, not the numeric claim, source text,
+reasoning trace, or assistant reply. The index is best-effort and deduplicates
+recent entries.
+
+`Core.Cognition.MemoryBoundary.recall/1` optionally asks the hippocampus
+for cue matches. It looks up each pointer in `Db.ConsolidatedConclusion` and
+requires an exact pair-key and supported-provenance match. Even after such
+a match, normal `Consolidation.recall/1` must rederive and authorize the
+stored proof. A fake, stale, or unrelated episode cannot create knowledge.
+If the hippocampus is unavailable, Core's existing semantic retrieval
+continues unchanged.
+
+The same episodic store supports a bounded warm start (last 200 episodes
+by current configuration). An older pointer can be evicted from the
+hippocampal window without deleting its semantic proof; Core still has a
+database-backed fallback. This is **question-triggered** associative recall,
+not hippocampus-controlled autonomous replay or background curiosity research.
+
+This extra interface is also off by default:
+
+```elixir
+config :core, :semantic_associative_recall_enabled?, false
+```
+
+New targeted integration test:
+
+```bash
+mix test \
+  apps/core/test/core/response/hippocampal_semantic_association_test.exs \
+  apps/core/test/core/response/population_chain_reasoning_test.exs \
+  apps/core/test/core/response/symbolic_consolidation_test.exs \
+  apps/core/test/core/response/population_comparison_test.exs \
+  --trace
+```
+
+When testing interactively, all three flags must be explicitly enabled:
+
+```elixir
+Application.put_env(:core, :symbolic_consolidation_enabled?, true)
+Application.put_env(:core, :symbolic_composition_enabled?, true)
+Application.put_env(:core, :semantic_associative_recall_enabled?, true)
+```
+
+Only enable these after the new tests pass. No new migration is introduced
+for the association pointers: they use the existing `episodes` table.
+
 ## Next work
 
 - Extend from a bounded two-hop population relation to explicit, typed
