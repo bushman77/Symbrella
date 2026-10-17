@@ -33,6 +33,38 @@ defmodule Core.LIFG.SignatureRolesTest do
     assert SignatureRoles.required_pos(input, 0) == nil
   end
 
+  test "a competing subject NP and attested finite-past verb block a false verb-particle POS requirement" do
+    # A bat flew through the cave. The generic dictionary alternatives
+    # license a speculative "bat flew through" particle hypothesis, but
+    # the independently attested subject and past-tense predicate conflict.
+    subject = %{
+      id: :noun_phrase,
+      span: {0, 1},
+      roles: %{determiner: 0, head: 1}
+    }
+
+    past = %{
+      id: :finite_past_candidate,
+      span: {2, 2},
+      roles: %{verb: 2},
+      evidence: [:simple_past_form_available]
+    }
+
+    input = si([separated(1, 2, 3), subject, past])
+    assert SignatureRoles.required_pos(input, 1) == nil
+
+    # A noun phrase hypothesis alone must not erase the previously
+    # supported genuine separated-verb construction.
+    assert SignatureRoles.required_pos(si([separated(1, 2, 3), subject]), 1) == "verb"
+
+    # A past-tense form on some unrelated token cannot contradict the
+    # specific intervening object/predicate position.
+    unrelated_past = %{past | roles: %{verb: 5}}
+    assert SignatureRoles.required_pos(
+      si([separated(1, 2, 3), subject, unrelated_past]), 1
+    ) == "verb"
+  end
+
   test "adjacent, incomplete and invalid span candidates cannot force verb POS" do
     adjacent = %{
       id: :verb_particle_construction,
