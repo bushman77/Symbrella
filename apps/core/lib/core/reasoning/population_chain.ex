@@ -239,28 +239,32 @@ defmodule Core.Reasoning.PopulationChain do
     case row.premises do
       [a, b] when is_map(a) and is_map(b) ->
         claims = [a, b]
-        canonical = Enum.sort_by(claims, &String.downcase(&1["subject"] || ""))
-        expected = derivation(a, b)
 
-        digest =
-          :crypto.hash(:sha256, :erlang.term_to_binary({
-            canonical, derivation(hd(canonical), List.last(canonical))
-          }))
-          |> Base.encode16(case: :lower)
+        if Enum.all?(claims, &valid_claim?/1) do
+          canonical = Enum.sort_by(claims, &String.downcase(&1["subject"]))
+          expected = derivation(a, b)
 
-        row.kind == "population_comparison" and
-          row.provenance == "source_supported_symbolic_derivation" and
-          Enum.all?(claims, &valid_claim?/1) and
-          a["subject"] != b["subject"] and
-          a["census_year"] == b["census_year"] and
-          a["measurement_type"] == b["measurement_type"] and
-          a["source_type"] == b["source_type"] and
-          (a["measurement_type"] != "official_estimate" or
-             a["source_table"] == b["source_table"]) and
-          row.reference_year == a["census_year"] and
-          row.derivation == expected and
-          row.source_urls == Enum.map(claims, & &1["source_url"]) and
-          row.fingerprint == digest
+          digest =
+            :crypto.hash(:sha256, :erlang.term_to_binary({
+              canonical, derivation(hd(canonical), List.last(canonical))
+            }))
+            |> Base.encode16(case: :lower)
+
+          row.kind == "population_comparison" and
+            row.provenance == "source_supported_symbolic_derivation" and
+            a["subject"] != b["subject"] and
+            a["census_year"] == b["census_year"] and
+            a["measurement_type"] == b["measurement_type"] and
+            a["source_type"] == b["source_type"] and
+            (a["measurement_type"] != "official_estimate" or
+               a["source_table"] == b["source_table"]) and
+            row.reference_year == a["census_year"] and
+            row.derivation == expected and
+            row.source_urls == Enum.map(claims, & &1["source_url"]) and
+            row.fingerprint == digest
+        else
+          false
+        end
 
       _ -> false
     end
