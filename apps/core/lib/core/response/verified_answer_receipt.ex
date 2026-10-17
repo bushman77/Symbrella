@@ -72,6 +72,19 @@ defmodule Core.Response.VerifiedAnswerReceipt do
 
   def record(_, _, _, _, _), do: :ok
 
+  @doc "Invalidate the previous proof cue when another non-symbolic answer is shown."
+  @spec clear(term()) :: :ok
+  def clear(session_id) when is_binary(session_id) and byte_size(session_id) in 1..128 do
+    if :ets.whereis(@table) != :undefined, do: :ets.delete(@table, session_id)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  def clear(_), do: :ok
+
   @doc """
   Return an evidence explanation if (and only if) the latest assistant turn
   matches the authorized receipt. A stale/changed proof fails closed.
