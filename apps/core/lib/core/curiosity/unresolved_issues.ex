@@ -35,4 +35,32 @@ defmodule Core.Curiosity.UnresolvedIssues do
   end
 
   def candidates(_), do: []
+
+  @doc "Prioritize only supported reasoning-link uncertainties for silent investigation."
+  @spec reasoning_candidates(pos_integer()) :: [map()]
+  def reasoning_candidates(limit \\ 12)
+
+  def reasoning_candidates(limit) when is_integer(limit) and limit > 0 do
+    if Application.get_env(:core, :symbolic_consolidation_enabled?, false) do
+      CognitiveIssues.pending_reasoning_links(min(limit, 20))
+      |> Enum.map(fn issue ->
+        %{
+          issue_id: issue.id,
+          kind: issue.kind,
+          status: issue.status,
+          priority: issue.priority,
+          next_action: issue.next_action,
+          reference_year: issue.reference_year
+        }
+      end)
+    else
+      []
+    end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  def reasoning_candidates(_), do: []
 end
