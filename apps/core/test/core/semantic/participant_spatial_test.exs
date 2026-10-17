@@ -240,6 +240,15 @@ defmodule Core.Semantic.ParticipantSpatialTest do
     no_verb_cell = %{si | active_cells:
       Enum.reject(si.active_cells, &(&1.id == "is|verb|1"))}
     assert ParticipantSpatial.project(no_verb_cell, si.sentence) == []
+
+    foreign_verb =
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = ch -> %{ch | id: "was|verb|1"}
+        ch -> ch
+      end)
+    wrong_lexeme = %{si | lifg_choices: foreign_verb,
+                      atl_slate: %{winners: foreign_verb}}
+    assert ParticipantSpatial.project(wrong_lexeme, si.sentence) == []
   end
 
   test "each question retrieves a different persisted participant role",
