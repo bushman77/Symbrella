@@ -150,6 +150,52 @@ defmodule Core.Curiosity.InvestigatorTest do
       Investigator.investigate_issue(issue.id)
   end
 
+  test "a newly verified direct proof resolves a stale missing-link issue without transitive lineage", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(b, c)
+    assert issue.evidence["stored_proof_ids"] != []
+
+    direct = capture!(b, c, [100_000, 80_000])
+    assert %{kind: :direct_proof_pointer, fingerprint: fp} =
+      AssociativeReasoning.propose([b, c])
+    assert fp == direct.fingerprint
+
+    assert %{status: :resolved, issue_id: id, reference_year: 2021,
+             proof_id: proof_id, origin: :verified_direct_proof} =
+      Investigator.investigate_issue(issue.id)
+    assert id == issue.id
+    assert proof_id == direct.id
+
+    resolved = Db.get!(CognitiveIssue, issue.id)
+    assert resolved.status == "resolved"
+    assert resolved.resolution["reasoning_rule"] == "direct_population_comparison"
+    assert resolved.resolution["origin"] == "stored_symbolic_premises"
+    assert resolved.resolution["proof_id"] == direct.id
+    assert resolved.resolution["proof_fingerprint"] == direct.fingerprint
+    refute Map.has_key?(resolved.resolution, "parent_proof_ids")
+    assert resolved.resolved_at != nil
+    refute Enum.any?(Core.Curiosity.UnresolvedIssues.reasoning_candidates(20),
+      &(&1.issue_id == issue.id))
+  end
+
+  test "conflicting direct proofs do not resolve a stale missing-link issue", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(b, c)
+    capture!(b, c, [100_000, 80_000])
+    capture!(b, c, [105_000, 80_000])
+
+    assert %{kind: :direct_proof_pointer} =
+      AssociativeReasoning.propose([b, c])
+
+    assert %{status: :unresolved, reason: :direct_proof_not_authorized} =
+      Investigator.investigate_issue(issue.id)
+    assert %{status: "open", resolution: nil} = Db.get!(CognitiveIssue, issue.id)
+  end
+
   test "conflicting bridge evidence cannot close an issue", %{a: a, b: b, c: c} do
     capture!(a, b, [120_000, 100_000])
     issue = missing_issue!(a, c)
