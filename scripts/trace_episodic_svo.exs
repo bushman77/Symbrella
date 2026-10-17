@@ -55,6 +55,23 @@ base_tokens =
   end)
   |> Enum.map(&Map.take(&1, [:index, :phrase, :n, :kind]))
 
+# Show why the selected finite-present verb did or did not resolve to a
+# canonical dictionary base. This is read-only like the rest of the trace.
+verb_choice =
+  Enum.find(Map.get(si, :lifg_choices, []), fn choice ->
+    id = get.(choice, :chosen_id) || get.(choice, :id)
+    is_binary(id) and String.contains?(id, "|verb|")
+  end)
+
+verb_id = if verb_choice, do: get.(verb_choice, :chosen_id) || get.(verb_choice, :id)
+
+verb_cells =
+  si
+  |> Map.get(:active_cells, [])
+  |> List.wrap()
+  |> Enum.filter(&(get.(&1, :id) == verb_id))
+  |> Enum.map(&Map.take(&1, [:id, :definition, :semantic_atoms]))
+
 IO.inspect(%{
   sentence: sentence,
   intent: Map.get(si, :intent),
@@ -63,6 +80,11 @@ IO.inspect(%{
   base_tokens: base_tokens,
   svo_signatures: signature_count,
   lifg_choices: choices,
+  verb_lemma_evidence: %{
+    selected_id: verb_id,
+    canonical: Core.Semantic.VerbLemma.canonical(si, verb_choice || %{}),
+    dictionary_cells: verb_cells
+  },
   atl_winners: winners,
   proposed_events: Core.Semantic.SVOEvent.project(si, sentence),
   admitted_candidates: Map.get(si, :episodic_candidates)
