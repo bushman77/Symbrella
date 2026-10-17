@@ -1021,6 +1021,43 @@ defmodule Db.Episode do
 
   def action_actor(_, _, _), do: nil
 
+  @doc """
+  Return the only current, validated participant action for one actor, or nil.
+  This is deliberately not a "latest action" guess: simultaneous different
+  current predicates are ambiguous for an open-ended activity question.
+  """
+  @spec unique_action(String.t(), String.t()) :: map() | nil
+  def unique_action(owner, entity_key)
+      when is_binary(owner) and is_binary(entity_key) do
+    current =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+        where: fragment("left(? ->> 'relation', 5) = 'verb_'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 100,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(&get_in(&1, [:meta, "relation"]))
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", relation: "verb_" <> predicate, value: patient,
+          participants: %{"predicate" => predicate, "patient" => patient,
+                          "tense" => "present"}} -> true
+        _ -> false
+      end)
+
+    case current do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def unique_action(_, _), do: nil
+
   @doc "Newest owner-scoped events for one entity, including superseded values."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit)
