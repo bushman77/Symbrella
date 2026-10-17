@@ -35,7 +35,13 @@ defmodule Brain.Hippocampus.SemanticAssociations do
           tags: [@tag]
         }
 
-        _ = Hippocampus.encode(slate, meta)
+        # Repeated chat answers should not flood the episodic window with
+        # the same proof pointer. Cold restarts still recover recent pointers
+        # from the ordinary hippocampal episode store.
+        unless fingerprint in cues(subjects, @max_cues) do
+          _ = Hippocampus.encode(slate, meta)
+        end
+
         :ok
       else
         {:error, :hippocampus_unavailable}
