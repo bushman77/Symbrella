@@ -6,7 +6,9 @@ defmodule Core.Semantic.ParticipantSpatial do
   A syntactic candidate is not proof of a verb sense. Require an attested
   present-participle *verb* dictionary cell even when LIFG's selected surface
   sense is adjectival. Exact LIFG + ATL agreement is required for the subject,
-  preposition and locative noun; no cells or winners are rewritten.
+  preposition and locative noun where present; if PMTG suppresses their
+  word-level winners, both slots require exact dictionary POS attestation
+  under a complete clause signature. No cells or winners are rewritten.
 
   Limited to unhedged singular copular-progressive clauses with a simple
   prepositional location. Idiom-versus-literal meaning is not fully solved.
@@ -32,9 +34,9 @@ defmodule Core.Semantic.ParticipantSpatial do
          {:ok, _} <- selected(si, sd, "determiner"),
          {:ok, _} <- selected(si, sh, "noun"),
          {:ok, _} <- selected(si, aux, "auxiliary"),
-         {:ok, _} <- selected(si, prep, "preposition"),
+         {:ok, _} <- selected_or_attested(si, prep, "preposition", Map.fetch!(tokens, prep)),
          {:ok, _} <- selected(si, ld, "determiner"),
-         {:ok, _} <- selected(si, lh, "noun"),
+         {:ok, _} <- selected_or_attested(si, lh, "noun", Map.fetch!(tokens, lh)),
          true <- attested_participle?(si, Map.fetch!(tokens, pred)),
          "is" <- clean(Map.fetch!(tokens, aux)),
          position when position in @positions <- clean(Map.fetch!(tokens, prep)),
@@ -122,6 +124,57 @@ defmodule Core.Semantic.ParticipantSpatial do
     else
       _ -> :error
     end
+  end
+
+  # PMTG can promote overlapping dictionary MWEs, leaving otherwise
+  # unambiguous clause-role words with *no* LIFG or ATL selection. This is
+  # not permission to invent a selected sense: the complete independent syntax
+  # signature and an actual exact-word dictionary POS row are both required.
+  # Conflicting or one-sided lexical selections still fail closed.
+  # Limit this recovery to the preposition and its nominal head; the
+  # subject/determiners/auxiliary still require LIFG + ATL agreement.
+  defp selected_or_attested(si, index, pos, surface) do
+    choices =
+      si
+      |> get(:lifg_choices)
+      |> List.wrap()
+      |> Enum.filter(&(get(&1, :token_index) == index))
+
+    winners =
+      si
+      |> get(:atl_slate)
+      |> get(:winners)
+      |> List.wrap()
+      |> Enum.filter(&(get(&1, :token_index) == index))
+
+    case {choices, winners} do
+      {[], []} ->
+        if attested_pos?(si, surface, pos),
+          do: {:ok, :attested_grammar_role},
+          else: :error
+
+      {[_], [_]} ->
+        selected(si, index, pos)
+
+      _ ->
+        :error
+    end
+  end
+
+  defp attested_pos?(si, surface, pos) do
+    word = clean(surface)
+
+    si
+    |> get(:active_cells)
+    |> List.wrap()
+    |> Enum.any?(fn cell ->
+      id = get(cell, :id)
+      norm = get(cell, :norm)
+      cell_pos = get(cell, :pos)
+      is_binary(id) and is_binary(norm) and
+        clean(norm) == word and cell_pos == pos and
+        String.starts_with?(id, word <> "|" <> pos <> "|")
+    end)
   end
 
   defp attested_participle?(si, surface) do
