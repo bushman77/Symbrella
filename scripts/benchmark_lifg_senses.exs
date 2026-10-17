@@ -187,9 +187,9 @@ defmodule Symbrella.BenchmarkLIFGSenses do
             probability: Float.round(p * 1.0, 6),
             definition: compact(Map.get(cell, :definition), 190),
             context_fit:
-              if map_size(cell) > 0,
+              if(map_size(cell) > 0,
                 do: Brain.LIFG.ContextFit.score(sentence, word, cell),
-                else: nil
+                else: nil)
           }
         end)
 
