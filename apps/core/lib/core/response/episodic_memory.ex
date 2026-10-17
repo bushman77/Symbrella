@@ -126,6 +126,8 @@ defmodule Core.Response.EpisodicMemory do
     end
   end
 
+  def reply(_), do: nil
+
   # Current asserted typed events answer by requested participant role.
   # A failed lookup or ambiguous reverse match falls back without inventing
   # a relation from chat-history wording.
@@ -149,8 +151,6 @@ defmodule Core.Response.EpisodicMemory do
         nil
     end
   end
-
-  def reply(_), do: nil
 
   @doc "Get the most recent event for an entity/relation, including retractions."
   @spec recall(String.t(), String.t()) :: map() | nil
