@@ -31,6 +31,9 @@ defmodule Db.CuriosityInvestigation do
   @statuses ~w(started resolved unresolved skipped failed disabled)
   @acquisitions ~w(not_attempted captured not_captured)
   @workers ~w(default isolated)
+  @providers ~w(wikidata statistics_canada wikipedia other)
+  @provider_statuses ~w(source_supported unavailable partial_support error unknown)
+  @code_pattern ~r/\A[a-z][a-z0-9_]*\z/
 
   def changeset(event, attrs) do
     event
@@ -47,10 +50,22 @@ defmodule Db.CuriosityInvestigation do
     |> validate_length(:reason, max: 100)
     |> validate_length(:acquisition_reason, max: 100)
     |> validate_length(:origin, max: 100)
+    |> validate_format(:reason, @code_pattern)
+    |> validate_format(:origin, @code_pattern)
+    |> validate_format(:acquisition_reason, @code_pattern)
+    |> validate_change(:provider_attempts, fn :provider_attempts, attempts ->
+      if Enum.all?(attempts, &valid_provider_attempt?/1),
+        do: [], else: [provider_attempts: "must contain only fixed provider/status codes"]
+    end)
     |> validate_number(:acquired_proof_id, greater_than: 0)
     |> validate_number(:duration_ms, greater_than_or_equal_to: 0)
     |> validate_length(:parent_proof_ids, max: 2)
     |> validate_length(:provider_attempts, max: 4)
     |> foreign_key_constraint(:issue_id)
   end
+
+  defp valid_provider_attempt?(%{"provider" => provider, "status" => status} = attempt),
+    do: map_size(attempt) == 2 and provider in @providers and
+      status in @provider_statuses
+  defp valid_provider_attempt?(_), do: false
 end
