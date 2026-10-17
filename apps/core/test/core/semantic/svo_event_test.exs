@@ -73,6 +73,30 @@ defmodule Core.Semantic.SVOEventTest do
       EpisodicMemory.reply("What did the artist draw?")
   end
 
+  test "misclassified declarative still gets stored and is acknowledged", %{sid: sid, owner: owner} do
+    # Input intent is wrong, but a verified SVO clause is not a question.
+    si = EpisodicProjection.attach(%{input() | intent: :question})
+    assert [%{relation: "verb_draw"}] = si.episodic_candidates
+
+    assert {:warm, acknowledgment, meta} = Response.plan(si, %{})
+    assert acknowledgment == "I’ve recorded what you told me: The artist draws a picture."
+    assert meta.response_source == :symbolic_conversation
+    assert meta.persistence_status == :persisted
+
+    assert %{value: "a picture", sentence: "The artist draws a picture."} =
+      Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+
+    assert {:warm, "You told me: The artist draws a picture.", recall_meta} =
+      Response.memory_reply(%{
+        text: "What did the artist draw?", session_id: sid <> "-new",
+        intent: :question, confidence: 0.9
+      })
+
+    assert recall_meta.memory_source == :hippocampal_event
+    assert recall_meta.retrieval_found?
+    assert recall_meta.memory_event_id
+  end
+
   test "rejects mismatched ATL winners or disputed grammatical roles", %{sid: sid, owner: owner} do
     si = input()
     wrong_atl = put_in(si, [:atl_slate, :winners],
