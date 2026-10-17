@@ -40,6 +40,10 @@ config :core, :symbolic_consolidation_enabled?, false
 # Kept separate so the existing direct consolidation path stays unchanged.
 config :core, :symbolic_composition_enabled?, false
 
+# Experimental semantic cueing through Brain.Hippocampus. Pointers index a
+# durable proof; Core must revalidate its claims after every associative hit.
+config :core, :semantic_associative_recall_enabled?, false
+
 config :core, :log_prompt_budget?, false
 
 config :core, :llm_synthesis,
