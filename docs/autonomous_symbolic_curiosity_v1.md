@@ -181,3 +181,65 @@ mix test apps/core/test/core/curiosity/evidence_acquisition_test.exs \
 
 Offline fixtures contain synthetic source-backed observations solely to
 exercise authorization. Runtime facts must come from actual providers.
+
+## V3: durable Curiosity investigation history
+
+Each real issue attempt now creates an operational audit record in
+`curiosity_investigations` **before** reasoning or source acquisition, then
+completes the same row with its result. It is separate from knowledge
+(`consolidated_conclusions`) and epistemic uncertainty (`cognitive_issues`).
+An abrupt process crash can leave `status: "started"` and `completed_at: nil`,
+making an incomplete attempt visible instead of claiming success. Database
+audit unavailability does not grant facts or interrupt Core's reasoning.
+
+The audit stores only issue ID, default/isolated worker class, status and
+reason codes, acquisition outcome, accepted proof ID, two-hop proof IDs,
+reasoning origin, duration and UTC times. Provider attempts are a capped
+list of fixed provider identifiers and status codes. **Raw user messages,
+place names, web excerpts, arbitrary provider URLs and rejected source
+content are never copied into the audit.** Accepted source URLs are
+available in the referenced source-backed proof rows.
+
+Idle and disabled cycles still emit lightweight telemetry but **do not**
+create a durable database row, avoiding an unbounded idle-history flood.
+Telemetry measurements include `count` and `duration_ms`; metadata carries
+issue ID, audit `history_id`, status/reason, acquisition result, and proof IDs.
+The worker snapshot now includes `last_successful_result`, which survives
+later idle ticks in the running process. The PostgreSQL audit survives restart.
+Events from before this migration are **not backfilled or invented**.
+
+### Schema migration
+
+From the umbrella root, migrate the existing database without resetting it:
+
+```bash
+cd ~/Symbrella
+mix db.migrate
+```
+
+`mix test` runs the test database migrations automatically through the
+umbrella test alias. Do not use `db.reset` or `db.rebuild` here.
+
+### Read-only IEx inspection
+
+```elixir
+Core.Curiosity.InvestigationHistory.recent(20)
+Core.Curiosity.InvestigationHistory.for_issue(4, 20)
+Core.Curiosity.InvestigationHistory.explain(4)
+Core.Curiosity.Investigator.snapshot(:curiosity_acquisition_trial)
+```
+
+`explain/1` shows the current issue status and question subjects from
+the **existing issue row**, all recorded attempts, and verified accepted
+source URL provenance drawn only from persisted conclusion rows. Rejected
+provider attempts include only provider names and generic outcome codes.
+If an issue predates this history feature, its attempt list is empty.
+
+### Regression tests
+
+```bash
+mix test apps/core/test/core/curiosity/investigation_history_test.exs \
+  apps/core/test/core/curiosity/evidence_acquisition_test.exs \
+  apps/core/test/core/curiosity/investigator_test.exs \
+  apps/core/test/core/response/population_chain_reasoning_test.exs --trace
+```
