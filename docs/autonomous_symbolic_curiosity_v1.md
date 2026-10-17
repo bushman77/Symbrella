@@ -27,9 +27,11 @@ resolution, never as a transitive deduction.
    `missing_reasoning_link` not recently attempted.
 3. Reload the selected row by ID, verify its status, source action, year,
    two subject names, and canonical pair key.
-4. Require a typed `Brain.Hippocampus.SemanticAssociations` cue:
-   either two independently stored parent proof IDs or a pointer to a
-   newly available *direct* proof. A hint alone is never enough.
+4. Inspect the typed `Brain.Hippocampus.SemanticAssociations` cue:
+   a two-hop candidate with two independently stored parent IDs, or a
+   direct proof pointer. If no cue survives the bounded hippocampal
+   window, check the durable direct-comparison store by canonical pair
+   key instead. Neither cue nor mere database existence is proof.
 5. Call `Core.Cognition.MemoryBoundary.recall/1` with a synthetic,
    **internal-only** typed population-comparison context.
 6. For two-hop cues, `PopulationChain` revalidates every relevant proof
@@ -39,6 +41,7 @@ resolution, never as a transitive deduction.
    authoritative answer plan and uses
    `Db.CognitiveIssues.resolve_direct_reasoning_link/4` to check durable
    fingerprint, pair/year identity, and absence of competing direct proofs.
+   Direct DB fallback must satisfy *the same* proof authorization gates.
 7. Re-read the issue row. Two-hop resolutions retain both parent IDs;
    direct resolutions record one proof ID and fingerprint with
    `reasoning_rule: "direct_population_comparison"`. Otherwise leave
@@ -77,7 +80,9 @@ Core.Curiosity.Investigator.snapshot()
 A successful two-hop investigation reports `%{status: :resolved, issue_id: id,
 parent_proof_ids: [id_a, id_b], origin: :hippocampal_two_hop_cue, ...}`.
 A directly resolved stale issue reports `%{status: :resolved, issue_id: id,
-proof_id: direct_id, origin: :verified_direct_proof, ...}`.
+proof_id: direct_id, origin: :verified_direct_proof, ...}` when hippocampal
+cueing succeeds, or `origin: :verified_direct_db_fallback` when the
+proof is recovered only from durable storage.
 Unresolved issues report `:unresolved`; unsupported issue types are not
 selected. If `run_now/0` returns `:idle`, there are no eligible issues
 outside their cooldown.
