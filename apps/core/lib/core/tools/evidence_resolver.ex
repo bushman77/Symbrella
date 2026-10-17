@@ -67,12 +67,26 @@ defmodule Core.Tools.EvidenceResolver do
       Keyword.has_key?(opts, :coordinate_provider) or
         Keyword.has_key?(cfg, :coordinate_provider)
 
+    requested_year = Keyword.get(opts, :reference_year)
+    wikidata_opts =
+      if is_integer(requested_year),
+        do: Keyword.put(coords_opts, :reference_year, requested_year),
+        else: coords_opts
+
     population_plan =
-      if custom_coordinates? do
-        [{:population, coords_provider, nil, coords_opts}]
-      else
-        [{:population, StatisticsCanadaPopulation, nil, population_opts},
-         {:population, Wikidata, nil, coords_opts}]
+      cond do
+        custom_coordinates? ->
+          [{:population, coords_provider, nil, wikidata_opts}]
+
+        is_integer(requested_year) ->
+          # A question about 2021 cannot be answered with the latest annual
+          # municipal estimate. Query dated Wikidata statements for the
+          # exact requested year, then try a dated census excerpt.
+          [{:population, Wikidata, nil, wikidata_opts}]
+
+        true ->
+          [{:population, StatisticsCanadaPopulation, nil, population_opts},
+           {:population, Wikidata, nil, coords_opts}]
       end
 
     coordinate_plan =
@@ -108,8 +122,9 @@ defmodule Core.Tools.EvidenceResolver do
              # *dated* census excerpt remains the final supported fallback.
              # Keep this search text stable for injected/offline providers
              # that explicitly distinguish census claims from other snippets.
+             year = if(is_integer(requested_year), do: requested_year, else: 2021)
              population_plan ++
-               [{:search, provider, "#{subject} 2021 census population", provider_opts}]
+               [{:search, provider, "#{subject} #{year} census population", provider_opts}]
 
            true ->
              [{:search, provider, query, provider_opts}]
@@ -199,11 +214,27 @@ defmodule Core.Tools.EvidenceResolver do
     result
   end
 
+  # A single explicitly requested year constrains all claims. Ambiguous
+  # year lists do not select a preferred year here; later authorization still
+  # refuses to infer that mismatched measurements are comparable.
+  defp requested_year(text) when is_binary(text) do
+    case Regex.scan(~r/\b(?:19|20)\d{2}\b/u, text) |> List.flatten() |> Enum.uniq() do
+      [year] -> String.to_integer(year)
+      _ -> nil
+    end
+  end
+
+  defp requested_year(_), do: nil
+
   # Resolve a bounded set of *independently dated* population claims.
   # No combined count, inferred year, or copied source attribution is allowed.
   # One failing place never prevents returning the others.
   defp resolve_population_group(context, query, subjects, cfg, opts) do
     started = System.monotonic_time(:millisecond)
+    requested_year = requested_year(Map.get(context, :user_text, ""))
+    opts = if is_integer(requested_year),
+      do: Keyword.put(opts, :reference_year, requested_year),
+      else: opts
 
     results =
       Enum.map(subjects, fn subject ->
@@ -233,6 +264,7 @@ defmodule Core.Tools.EvidenceResolver do
             (is_nil(support[:subject]) or support[:subject] == subject) and
             is_integer(support[:value]) and support[:value] > 0 and
             is_integer(support[:census_year]) and
+            (is_nil(requested_year) or support[:census_year] == requested_year) and
             is_binary(support[:source_url]) and
             String.starts_with?(support[:source_url], "https://")
 
