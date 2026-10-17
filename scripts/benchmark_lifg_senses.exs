@@ -185,20 +185,35 @@ defmodule Symbrella.BenchmarkLIFGSenses do
 
       final_id = if is_map(final), do: Map.get(final, :id), else: nil
       raw_id = if is_map(report), do: Map.get(report, :raw_winner), else: nil
+
+      # Core intentionally omits candidate_probs when the slate exceeds 64
+      # senses. The raw Stage1 audit preserves the actual top eight, so the
+      # benchmark can show evidence even for 156-way "draw" competitions.
       probs = if is_map(final), do: Map.get(final, :candidate_probs), else: nil
 
       ranked =
-        if is_map(probs) do
-          probs
-          |> Enum.filter(fn {id, p} -> is_binary(id) and is_number(p) end)
-          |> Enum.sort_by(fn {id, p} -> {-p, id} end)
-        else
-          []
+        cond do
+          is_map(probs) and map_size(probs) > 0 ->
+            probs
+            |> Enum.filter(fn {id, p} -> is_binary(id) and is_number(p) end)
+            |> Enum.sort_by(fn {id, p} -> {-p, id} end)
+
+          is_map(report) ->
+            report
+            |> Map.get(:reported_top_candidates, [])
+            |> Enum.flat_map(fn
+              %{id: id, probability: p} when is_binary(id) and is_number(p) ->
+                [{id, p}]
+              _ -> []
+            end)
+
+          true ->
+            []
         end
 
       rows =
         ranked
-        |> Enum.take(6)
+        |> Enum.take(8)
         |> Enum.map(fn {id, p} ->
           cell = Map.get(by_id, id, %{})
           %{
@@ -211,6 +226,41 @@ defmodule Symbrella.BenchmarkLIFGSenses do
                 else: nil)
           }
         end)
+
+      target_token =
+        Enum.find(si.tokens || [], fn token ->
+          Map.get(token, :index) == index and Map.get(token, :n, 1) == 1
+        end)
+
+      covering_mwes =
+        case Map.get(target_token || %{}, :span) do
+          {start, len} when is_integer(start) and is_integer(len) ->
+            si.tokens
+            |> List.wrap()
+            |> Enum.filter(fn token ->
+              case Map.get(token, :span) do
+                {mwe_start, mwe_len}
+                    when is_integer(mwe_start) and is_integer(mwe_len) ->
+                  Map.get(token, :n, 1) > 1 and mwe_start <= start and
+                    start + len <= mwe_start + mwe_len
+                _ -> false
+              end
+            end)
+            |> Enum.take(6)
+            |> Enum.map(&Map.take(&1, [:index, :phrase, :span, :n]))
+
+          _ -> []
+        end
+
+      mwe_decisions =
+        si
+        |> Map.get(:mwe_choices, [])
+        |> List.wrap()
+        |> Enum.filter(&is_map/1)
+        |> Enum.take(8)
+        |> Enum.map(&Map.take(&1, [:token_index, :id, :lemma, :score]))
+
+      required_pos = Core.LIFG.SignatureRoles.required_pos(si, index)
 
       expected_id = Map.get(item, :expected_id)
       expected_pos = Map.get(item, :expected_pos)
