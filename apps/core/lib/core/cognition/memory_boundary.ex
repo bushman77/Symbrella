@@ -56,15 +56,13 @@ defmodule Core.Cognition.MemoryBoundary do
   broadcasting curiosity. This is not a generic refusal for unrelated turns.
   """
   @spec unresolved_answer(map()) :: String.t() | nil
-  def unresolved_answer(%{consolidation_issue: %{status: :open}} = context) do
-    case {PopulationComparison.comparison_subjects(context),
-          Map.get(context, :web_evidence)} do
-      {[_first, _second], %{resolution: :source_supported}} ->
-        # If new retrieval supplied supported evidence, let the normal
-        # authoritative gate evaluate it instead of relying on old issues.
-        nil
-
-      {[_first, _second], _} ->
+  def unresolved_answer(%{consolidation_issue: %{status: status}} = context)
+      when status in [:open, :investigating] do
+    # The caller invokes this only AFTER the existing authoritative answer
+    # planner has declined to certify an answer. Even a partial source group
+    # with :source_supported resolution is not proof of comparability.
+    case PopulationComparison.comparison_subjects(context) do
+      [_first, _second] ->
         "I don't have sufficient source-supported evidence to make that " <>
           "population comparison reliably."
 
