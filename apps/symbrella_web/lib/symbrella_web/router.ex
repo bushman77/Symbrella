@@ -5,6 +5,7 @@ defmodule SymbrellaWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug SymbrellaWeb.Plugs.ChatSession
     plug :fetch_live_flash
     plug :put_root_layout, html: {SymbrellaWeb.Layouts, :root}
     plug :protect_from_forgery

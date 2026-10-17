@@ -5,7 +5,7 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
 
   alias SymbrellaWeb.ChatHistory
 
-  setup do
+  setup %{conn: conn} do
     ChatHistory.clear()
 
     if Code.ensure_loaded?(Brain.Hippocampus) do
@@ -13,7 +13,9 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
       Brain.Hippocampus.reset()
     end
 
-    :ok
+    {:ok, conn: Plug.Test.init_test_session(conn, %{
+      "symbrella_chat_session_id" => ChatHistory.session_id()
+    })}
   end
 
   test "renders cached chat history on mount", %{conn: conn} do

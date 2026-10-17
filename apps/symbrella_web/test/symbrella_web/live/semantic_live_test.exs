@@ -5,9 +5,11 @@ defmodule SymbrellaWeb.SemanticLiveTest do
 
   alias SymbrellaWeb.ChatHistory
 
-  setup do
+  setup %{conn: conn} do
     ChatHistory.clear()
-    :ok
+    {:ok, conn: Plug.Test.init_test_session(conn, %{
+      "symbrella_chat_session_id" => ChatHistory.session_id()
+    })}
   end
 
   test "renders every SemanticInput field in a report", %{conn: conn} do
@@ -34,6 +36,23 @@ defmodule SymbrellaWeb.SemanticLiveTest do
     assert has_element?(view, "#semantic-token-0")
     assert has_element?(view, "#semantic-field-sentence")
     assert render(view) =~ "blue quiet lamp"
+  end
+
+  test "latest semantic report cannot read a different browser's chat", %{conn: conn} do
+    other_id = "s-" <> String.duplicate("b", 32)
+
+    ChatHistory.append(other_id, %{
+      id: "private-semantic",
+      role: :assistant,
+      text: "Private response",
+      session_id: other_id,
+      si: %Core.SemanticInput{sentence: "private browser conversation", intent: :ask}
+    })
+
+    {:ok, _view, html} = live(conn, ~p"/semantic")
+
+    refute html =~ "private browser conversation"
+    refute html =~ "private-semantic"
   end
 
   test "loads the latest chat semantic snapshot instead of the sample input", %{conn: conn} do

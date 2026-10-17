@@ -117,6 +117,29 @@ defmodule Core.Response.ConversationRecallTest do
     assert length(LlmChatHistory.messages(session_id, 6)) == 12
   end
 
+  test "concurrent completed turns do not overwrite one another", %{session_id: session_id} do
+    1..20
+    |> Task.async_stream(
+      fn n ->
+        :ok = LlmChatHistory.record_turn(session_id, "parallel question #{n}", "reply #{n}")
+      end,
+      max_concurrency: 10,
+      timeout: 15_000,
+      ordered: false
+    )
+    |> Enum.each(fn result -> assert {:ok, :ok} = result end)
+
+    recall = LlmChatHistory.recall_messages(session_id)
+    assert length(recall) == 40
+
+    contents = recall |> Enum.map(& &1["content"]) |> MapSet.new()
+
+    for n <- 1..20 do
+      assert MapSet.member?(contents, "parallel question #{n}")
+      assert MapSet.member?(contents, "reply #{n}")
+    end
+  end
+
   test "ordinary factual questions still go through the semantic pipeline", %{
     session_id: session_id
   } do
