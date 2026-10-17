@@ -3,7 +3,7 @@ defmodule Core.Curiosity.InvestigatorTest do
 
   alias Brain.Hippocampus.SemanticAssociations
   alias Core.Cognition.AssociativeReasoning
-  alias Core.Curiosity.Investigator
+  alias Core.Curiosity.{InvestigationHistory, Investigator}
   alias Core.Response.{
     AuthoritativeAnswerPlan, Consolidation, PopulationComparison, ResponseFrame
   }
@@ -111,8 +111,12 @@ defmodule Core.Curiosity.InvestigatorTest do
     capture!(a, b, [120_000, 100_000])
     issue = missing_issue!(a, c)
 
-    assert %{status: :unresolved, reason: :no_two_hop_cue} =
+    assert %{status: :unresolved, reason: :no_two_hop_cue,
+             history_id: audit_id} =
       Investigator.investigate_issue(issue.id)
+    assert is_integer(audit_id)
+    assert [%{id: ^audit_id, status: "unresolved", reason: "no_two_hop_cue"}] =
+      InvestigationHistory.for_issue(issue.id)
     assert %{status: "open", resolved_at: nil} = Db.get!(CognitiveIssue, issue.id)
     assert {:ok, [_]} = ConsolidatedConclusions.for_subject(a)
   end
@@ -318,6 +322,13 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert status.enabled?
     assert status.last_result.issue_id == id
     assert status.cycles >= 1
+    assert status.last_successful_result.issue_id == issue.id
+
+    assert [%{status: "resolved", origin: "hippocampal_two_hop_cue",
+              parent_proof_ids: parent_ids, completed_at: completed}] =
+      InvestigationHistory.for_issue(issue.id)
+    assert length(parent_ids) == 2
+    assert completed != nil
   end
 
   test "isolated scheduled worker honors its opt-in while the normal worker remains disabled", %{
@@ -364,6 +375,14 @@ defmodule Core.Curiosity.InvestigatorTest do
              last_result: %{status: :resolved, issue_id: issue_id}} =
       Investigator.snapshot(trial_name)
     assert issue_id == issue.id
+
+    assert [%{status: "resolved", worker: "isolated"}] =
+      InvestigationHistory.for_issue(issue.id)
+
+    # An idle or other subsequent tick must not overwrite the last success.
+    send(worker, :tick)
+    assert %{cycles: 2, last_successful_result: %{status: :resolved,
+             issue_id: ^issue_id}} = Investigator.snapshot(trial_name)
 
     assert %{status: "resolved", resolution: resolution} =
       Db.get!(CognitiveIssue, issue.id)
