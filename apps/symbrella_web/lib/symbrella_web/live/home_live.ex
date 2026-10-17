@@ -519,6 +519,11 @@ defmodule SymbrellaWeb.HomeLive do
 
     case memory_reply do
       {tone, reply_text, meta} ->
+        # Memory replies bypass the normal response recorder. Invalidate any
+        # preceding population-proof receipt so "how do you know that?" cannot
+        # accidentally explain an older, no-longer-adjacent assistant reply.
+        :ok = Core.Response.VerifiedAnswerReceipt.clear(session_id)
+
         %{
           text: reply_text,
           tone: tone,
