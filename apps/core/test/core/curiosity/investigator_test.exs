@@ -415,6 +415,17 @@ defmodule Core.Curiosity.InvestigatorTest do
       Investigator.snapshot(trial_name)
     assert id == issue.id
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
+
+    # The Core test suite reuses a shared database sandbox across cases.
+    # This deliberately malformed priority-1.0 fixture cannot be allowed
+    # to starve subsequent scheduled-worker tests. Mark it *blocked* only
+    # after verifying fail-closed behavior; never pretend it was resolved.
+    issue
+    |> CognitiveIssue.changeset(%{status: "blocked"})
+    |> Db.update!()
+
+    refute Enum.any?(Core.Curiosity.UnresolvedIssues.reasoning_candidates(20),
+      &(&1.issue_id == issue.id))
   end
 
   test "other epistemic issues never enter this narrow autonomous cycle", %{
