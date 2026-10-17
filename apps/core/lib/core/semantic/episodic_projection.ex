@@ -10,6 +10,7 @@ defmodule Core.Semantic.EpisodicProjection do
   """
 
   alias Core.Semantic.EpisodicEvents
+  alias Core.Semantic.SVOEvent
   alias Core.Pipeline.Trace
 
   @confidence_floor 0.8
@@ -27,7 +28,7 @@ defmodule Core.Semantic.EpisodicProjection do
         decision: :candidate,
         reason: :structured_user_reported_event,
         scores: %{confidence: hd(candidates).frame_confidence},
-        meta: %{count: length(candidates), source_frame: :obligation_event}
+        meta: %{count: length(candidates), source_frames: Enum.map(candidates, & &1.source_frame)}
       )
     end
   end
@@ -46,8 +47,9 @@ defmodule Core.Semantic.EpisodicProjection do
       source not in [nil, :user, :prod, :test] -> []
       intent in [:ask, :question, :command] -> []
       not is_binary(sentence) or String.contains?(sentence, "?") -> []
-      not is_map(frame) -> []
-      true -> project_frame(frame, sentence)
+      true ->
+        (if is_map(frame), do: project_frame(frame, sentence), else: []) ++
+          SVOEvent.project(si, sentence)
     end
   end
 
@@ -59,7 +61,7 @@ defmodule Core.Semantic.EpisodicProjection do
     if Enum.member?(project(si), candidate) do
       case EpisodicEvents.normalize(candidate) do
         {:ok, event} -> {:ok, Map.merge(event, %{
-          source_frame: :obligation_event,
+          source_frame: candidate.source_frame,
           frame_confidence: candidate.frame_confidence
         })}
         :error -> :error

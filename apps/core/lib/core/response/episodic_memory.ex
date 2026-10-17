@@ -139,6 +139,11 @@ defmodule Core.Response.EpisodicMemory do
     sentence =
       case relation do
         "has_obligation" -> "You told me you need to #{value}."
+        "verb_" <> _predicate ->
+          case Map.get(event, :sentence) do
+            s when is_binary(s) and s != "" -> "You told me: " <> String.trim(s)
+            _ -> "You told me: #{entity} — #{relation} — #{value}."
+          end
         "deadline" ->
           subject = if String.starts_with?(String.downcase(entity), "the "), do: entity, else: "the " <> entity
           "According to what you told me, #{subject} deadline is #{value}."

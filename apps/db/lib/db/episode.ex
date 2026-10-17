@@ -932,7 +932,7 @@ defmodule Db.Episode do
       where: fragment("? ->> 'relation' = ?", e.meta, ^relation),
       order_by: [desc: e.inserted_at, desc: e.id],
       limit: 1,
-      select: %{id: e.id, meta: e.meta, inserted_at: e.inserted_at}
+      select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
     )
     |> Repo.one()
     |> normalize_user_event()
@@ -951,7 +951,7 @@ defmodule Db.Episode do
       where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
       order_by: [desc: e.inserted_at, desc: e.id],
       limit: ^min(limit, 30),
-      select: %{id: e.id, meta: e.meta, inserted_at: e.inserted_at}
+      select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
     )
     |> Repo.all()
     |> Enum.map(&normalize_user_event/1)
@@ -960,12 +960,13 @@ defmodule Db.Episode do
 
   def user_event_history(_, _, _), do: []
 
-  defp normalize_user_event(%{id: id, meta: %{"entity" => entity, "relation" => relation,
+  defp normalize_user_event(%{id: id, sentence: sentence, meta: %{"entity" => entity, "relation" => relation,
       "value" => value, "status" => status} = meta, inserted_at: recorded_at})
       when is_binary(entity) and is_binary(relation) and is_binary(value) and
              status in ["asserted", "retracted"] do
     %{id: id, entity: entity, relation: relation, value: value,
-      status: status, recorded_at: recorded_at,
+      status: status, recorded_at: recorded_at, sentence: sentence,
+      source_frame: Map.get(meta, "source_frame"),
       provenance: :user_reported, session_id: Map.get(meta, "session_id")}
   end
 

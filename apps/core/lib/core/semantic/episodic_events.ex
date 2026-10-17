@@ -109,6 +109,9 @@ defmodule Core.Semantic.EpisodicEvents do
       m = Regex.named_captures(~r/^who is (?<entity>.+?) to me\??$/iu, t) ->
         {:relation, entity_key(m["entity"]), "relationship"}
 
+      match = Regex.named_captures(~r/^what (?:did|does) (?<entity>.+?) (?<verb>[a-z]+)\??$/iu, t) ->
+        {:relation, entity_key(match["entity"]), "verb_" <> String.downcase(match["verb"])}
+
       true ->
         nil
     end
