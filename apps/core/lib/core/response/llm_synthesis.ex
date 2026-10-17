@@ -25,6 +25,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.AuthoritativeAnswerPlan
   alias Core.Response.PopulationComparison
   alias Core.Response.Consolidation
+  alias Core.Cognition.MemoryBoundary
   alias Core.Response.VerifiedPopulation
   alias Core.Response.EvidenceRevision
   alias Core.Response.GroundedRevision
@@ -97,7 +98,7 @@ defmodule Core.Response.LlmSynthesis do
     # promoted to a population fact.
     cached_context =
       raw_context
-      |> Consolidation.recall()
+      |> MemoryBoundary.recall()
       |> PopulationComparison.recall()
 
     enriched =
@@ -140,7 +141,17 @@ defmodule Core.Response.LlmSynthesis do
         do_authoritative_generate(user_text, context, plan)
 
       _ ->
-        do_freeform_generate(user_text, context, history, answer_target, prompt_type)
+        case MemoryBoundary.unresolved_answer(context) do
+          answer when is_binary(answer) ->
+            # The user asked for an answer; a failed internal investigation
+            # is not an invitation to broadcast curiosity or model the issue.
+            reflection = %{status: :insufficient_verified_evidence}
+            emit_complete_event(user_text, answer, context, "", reflection)
+            {:ok, answer, reflection}
+
+          nil ->
+            do_freeform_generate(user_text, context, history, answer_target, prompt_type)
+        end
     end
   end
 
@@ -186,15 +197,8 @@ defmodule Core.Response.LlmSynthesis do
           fallback?: forced_fallback?
         })
 
-      reflection =
-        case Map.get(context, :composition) do
-          %{rule: :transitive_population_order} = proof ->
-            Map.put(reflection, :symbolic_composition, proof)
-
-          _ ->
-            reflection
-        end
-
+      # Parent proof IDs and intermediate entities stay in the private
+      # cognitive context and telemetry, not the chat/explain reflection.
       # Consolidation stores ONLY the independently supported symbolic premises
       # after the published conclusion passes the exact authorization gate.
       # It never stores the model's words as factual evidence, and neither
@@ -256,7 +260,11 @@ defmodule Core.Response.LlmSynthesis do
         recent_pairs: Keyword.get(cfg, :selective_recent_pairs, 2)
       )
 
-    render = fn ctx -> build_prompt_with_target(ctx, prompt_type, user_text, answer_target) end
+    render = fn ctx ->
+      ctx
+      |> MemoryBoundary.for_expression()
+      |> build_prompt_with_target(prompt_type, user_text, answer_target)
+    end
     system_prompt = render.(context)
 
     # Always compare against the SAME prompt and original history. Full history
