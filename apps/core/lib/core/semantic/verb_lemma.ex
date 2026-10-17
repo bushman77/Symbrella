@@ -3,7 +3,7 @@ defmodule Core.Semantic.VerbLemma do
   Canonicalize a selected finite-present verb only when the exact dictionary
   sense explicitly identifies its base form.
 
-  LIFG's \`:lemma\` currently names the selected surface BrainCell (for
+  LIFG's `:lemma` currently names the selected surface BrainCell (for
   example, "draws"), not necessarily the dictionary base verb ("draw").
   The full-form relation therefore requires both matching Wiktextract
   morphology tags and an explicit form-of statement in that sense's gloss.
