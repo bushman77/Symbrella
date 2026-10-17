@@ -102,14 +102,15 @@ defmodule Core.Response.RuntimeContext do
         fn ->
           case Brain.snapshot_wm() do
             %{wm: wm} when is_list(wm) ->
-              # Brain WM is globally hosted. Conversation comprehension frames
-              # belong only in the same-session Core.Brain.WM.Comprehension
-              # recall path, never in an unscoped LLM prompt snapshot.
+              # Brain WM is global. Both comprehension and verified semantic
+              # frames are keyed to individual sessions and MUST NOT enter
+              # unrelated session prompts through an unscoped WM snapshot.
+              # In particular, proof pointers do not authorize LLM claims.
               Enum.reject(wm, fn item ->
                 payload = map_get(item, :payload, %{})
+                kind = map_get(payload, :kind)
 
-                map_get(payload, :kind) == :comprehension_frame and
-                  map_get(item, :source) == :comprehension
+                kind in [:comprehension_frame, :verified_semantic_frame]
               end)
             _ -> []
           end
