@@ -117,6 +117,34 @@ defmodule Core.Semantic.ParticipantSpatialTest do
     assert ParticipantSpatial.project(conflict, si.sentence) == []
   end
 
+  test "response adapter persists MWE-covered location roles, not only direct projection",
+       %{sid: sid, owner: owner} do
+    si = input() |> Signatures.attach()
+    without_word_winners = fn winners ->
+      Enum.reject(winners, &(Map.get(&1, :token_index) in [4, 6]))
+    end
+    si = %{si |
+      lifg_choices: without_word_winners.(si.lifg_choices),
+      atl_slate: %{winners: without_word_winners.(si.atl_slate.winners)}
+    }
+    si =
+      si
+      |> EpisodicProjection.attach()
+      |> Map.put(:session_id, sid)
+
+    planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
+
+    assert planned.response_meta.response_source == :symbolic_conversation
+    assert planned.response_meta.persistence_status == :persisted
+
+    assert %{value: "the fence", participants: %{"actor" => "a bird",
+              "position" => "on", "location" => "the fence"}} =
+      Brain.Hippocampus.user_event(owner, "bird", "spatial_state")
+
+    assert {"On the fence.", %{memory_source: :hippocampal_event}} =
+      EpisodicMemory.reply("Where is the bird?")
+  end
+
   test "each question retrieves a different persisted participant role",
        %{sid: sid, owner: owner} do
     si = projected() |> Map.put(:session_id, sid)
