@@ -13,7 +13,7 @@ defmodule Core.Response.ReflectionLoopTest do
     context = %{
       features: %{intent: :question, conf: 0.92},
       decision: %{self_state_effects: [:prefer_repair]},
-      web_evidence: nil
+      web_evidence: %{}
     }
 
     {:ok, answer, reflection} = ReflectionLoop.review(question, draft, context)
