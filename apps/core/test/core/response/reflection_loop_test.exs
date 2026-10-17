@@ -3,6 +3,66 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "unsupported future-year population extrapolation yields an epistemically bounded answer" do
+    question =
+      "Does that mean Vancouver still has the larger population in 2026? What can you actually verify?"
+
+    draft =
+      "Yes, based on the population figures I examined, I can confirm that Vancouver had the larger recorded population in 2026. The figures came from government reports."
+
+    context = %{
+      features: %{intent: :question, conf: 0.92},
+      decision: %{self_state_effects: [:prefer_repair]},
+      web_evidence: nil
+    }
+
+    {:ok, answer, reflection} = ReflectionLoop.review(question, draft, context)
+
+    assert reflection.status == :repair
+    assert :unsupported_population_year in reflection.issues
+    refute :self_state_repair in reflection.issues
+    assert answer =~ "don't establish"
+    assert answer =~ "2026"
+    assert answer =~ "can't verify"
+    refute answer =~ "Vancouver had the larger recorded population in 2026"
+    refute answer == "I should slow down and ground this in the available evidence before going further."
+  end
+
+  test "a self-state stabilization signal alone does not erase a factual answer" do
+    context = %{
+      features: %{intent: :question, conf: 0.95},
+      decision: %{self_state_effects: [:prefer_repair]}
+    }
+
+    {:ok, answer, reflection} =
+      ReflectionLoop.review("What is the name of this model?",
+        "The model is named Symbrella.", context)
+
+    assert answer == "The model is named Symbrella."
+    refute :self_state_repair in reflection.issues
+  end
+
+  test "dated population support prevents unwarranted temporal-repair fallback" do
+    question = "Which city had the larger population in 2026?"
+    draft = "Vancouver had the larger recorded population in 2026."
+    context = %{
+      features: %{intent: :question, conf: 0.92},
+      web_evidence: %{
+        resolution: :source_supported,
+        support: %{
+          claims: [
+            %{census_year: 2026},
+            %{census_year: 2026}
+          ]
+        }
+      }
+    }
+
+    {:ok, reply, reflection} = ReflectionLoop.review(question, draft, context)
+    refute :unsupported_population_year in reflection.issues
+    assert reply == draft
+  end
+
   test "repairs an obligation response that reverses the speaker and assistant" do
     context = %{
       features: %{intent: :tell, conf: 0.56},

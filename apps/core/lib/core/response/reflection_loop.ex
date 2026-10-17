@@ -101,11 +101,15 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
+    |> maybe_issue(unsupported_population_year?(context, user_text, draft_text), :unsupported_population_year)
     |> maybe_issue(distance_followup_self_intro?(context, user_text, draft_text), :distance_followup_subject_loss)
     |> maybe_issue(low_confidence?(context), :low_confidence)
     |> maybe_issue(unknown_intent?(context), :unknown_intent)
     |> maybe_issue(high_uncertainty?(context), :high_uncertainty)
-    |> maybe_issue(self_state_repair?(context), :self_state_repair)
+    |> maybe_issue(
+      self_state_repair?(context) and self_state_draft_risk?(draft_text),
+      :self_state_repair
+    )
     |> maybe_issue(self_state_question?(user_text), :self_state_claim_risk)
     |> maybe_issue(
       self_state_question?(user_text) and robotic_self_state_draft?(draft_text),
@@ -150,7 +154,8 @@ defmodule Core.Response.ReflectionLoop do
       :subject_reversal in issues ->
         {:repair, issues}
 
-      :geographic_claim_unverified in issues or :distance_followup_subject_loss in issues ->
+      :geographic_claim_unverified in issues or :unsupported_population_year in issues or
+          :distance_followup_subject_loss in issues ->
         {:repair, issues}
 
       :leaked_hidden_context in issues or :overclaimed_self_awareness in issues ->
@@ -231,6 +236,14 @@ defmodule Core.Response.ReflectionLoop do
         :distance_followup_subject_loss in issues ->
           distance_followup_clarification(context)
 
+        :unsupported_population_year in issues ->
+          requested_year = requested_population_year(user_text)
+
+          "The population figures from an earlier year don't establish the " <>
+            "population comparison in #{requested_year}. I can't verify " <>
+            "the #{requested_year} populations of both places from the evidence " <>
+            "available in this response. I would need dated sources for that year."
+
         :geographic_claim_unverified in issues ->
           case Grounding.align(draft_text, context) do
             ^draft_text -> unverified_geographic_reply(context, user_text)
@@ -283,6 +296,9 @@ defmodule Core.Response.ReflectionLoop do
           "The answer lacks any URL from retrieved reference evidence. Give only attributed excerpts with URLs; do not invent a factual or institutional history."
         :distance_followup_subject_loss in issues ->
           "The user's 'it' refers to the immediately preceding distance exchange. Do not replace the subject with Symbrella's identity; clarify whether they mean the distance or the coordinate method."
+        :unsupported_population_year in issues ->
+          "The draft extrapolated a dated population comparison without matching-year verification. Do not convert older census figures into current-year claims."
+
         :geographic_claim_unverified in issues ->
           "Use the claim-specific sourced evidence (population or coordinate-based straight-line distance), with citations; otherwise state the fact is unverified."
         true ->
@@ -747,6 +763,58 @@ defmodule Core.Response.ReflectionLoop do
          ))
   end
 
+  # A new year's population cannot be verified from earlier dated evidence.
+  # This guard is deliberately narrow: it inspects an affirmative draft about
+  # the explicit year the user requested, and yields to matching-year sourced
+  # evidence. Conversational history alone never authorizes a numeric claim.
+  defp unsupported_population_year?(context, user_text, draft_text)
+       when is_binary(user_text) and is_binary(draft_text) do
+    year = requested_population_year(user_text)
+
+    is_integer(year) and
+      Regex.match?(~r/\bpopulation\b/iu, user_text) and
+      String.contains?(draft_text, Integer.to_string(year)) and
+      Regex.match?(
+        ~r/\b(?:i\s+(?:can\s+)?confirm|i\s+(?:can\s+)?verify|had\s+the\s+larger|has\s+the\s+larger|larger\s+recorded\s+population)\b/iu,
+        draft_text
+      ) and
+      not Regex.match?(
+        ~r/\b(?:cannot|can't|do\s+not|don't|not\s+able\s+to)\s+(?:currently\s+)?(?:confirm|verify)\b/iu,
+        draft_text
+      ) and
+      not population_evidence_for_year?(context, year)
+  end
+
+  defp unsupported_population_year?(_, _, _), do: false
+
+  defp requested_population_year(text) when is_binary(text) do
+    case Regex.run(~r/\b(20\d{2})\b/u, text) do
+      [_, year] -> String.to_integer(year)
+      _ -> nil
+    end
+  end
+
+  defp requested_population_year(_), do: nil
+
+  defp population_evidence_for_year?(context, year) do
+    evidence = map_get(context, :web_evidence)
+    support = map_get(evidence, :support)
+
+    map_get(evidence, :resolution) == :source_supported and
+      (map_get(support, :year) == year or
+         (is_list(map_get(support, :claims)) and
+            length(map_get(support, :claims)) >= 2 and
+            Enum.all?(map_get(support, :claims), fn claim ->
+              map_get(claim, :census_year) == year
+            end)) or
+         (is_list(map_get(support, :results)) and
+            length(map_get(support, :results)) >= 2 and
+            Enum.all?(map_get(support, :results), fn result ->
+              map_get(result, :census_year) == year and
+                map_get(result, :status) == :source_supported
+            end)))
+  end
+
   defp unverified_geographic_reply(context, user_text) do
     frame = geographic_frame(context, user_text)
     subject = map_get(frame, :subject)
@@ -813,6 +881,16 @@ defmodule Core.Response.ReflectionLoop do
     :prefer_repair in effects or :stabilize_before_acting in effects or
       :reduce_scope in effects
   end
+
+  # Self-state affects caution, but must not replace a factual response merely
+  # because cognition requested stabilization. Only repair self/hidden-control
+  # wording if the draft actually contains such a risk.
+  defp self_state_draft_risk?(draft_text) when is_binary(draft_text) do
+    hidden_context_leak?(draft_text) or overclaims_self_awareness?(draft_text) or
+      robotic_self_state_draft?(draft_text)
+  end
+
+  defp self_state_draft_risk?(_), do: false
 
   defp self_state_question?(text) when is_binary(text) do
     t = String.downcase(text)
