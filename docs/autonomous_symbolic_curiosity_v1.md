@@ -68,8 +68,15 @@ Application.put_env(:core, :semantic_associative_recall_enabled?, true)
 Application.put_env(:core, Core.Curiosity.Investigator, enabled?: true)
 ```
 
-The server is supervised even when disabled. To request one supervised
-cycle and inspect the compact result:
+The server is supervised even when disabled. A separately supervised named
+worker can opt in with `enabled?: true` in its **start options** while the
+default worker remains globally disabled. Its scheduled tick and manual
+`run_now/1` both honor that process-local choice; the public
+`investigate_issue/1` still requires the global switch. All three
+symbolic feature flags remain mandatory for every process. This is useful
+for controlled unattended trials without enabling the default worker.
+
+To request one supervised cycle and inspect the compact result:
 
 ```elixir
 Core.Curiosity.UnresolvedIssues.reasoning_candidates(20)
