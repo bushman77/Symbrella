@@ -298,6 +298,49 @@ defmodule Symbrella.BenchmarkLIFGSenses do
 
       required_pos = Core.LIFG.SignatureRoles.required_pos(si, index)
 
+      word_flow =
+        si.trace
+        |> List.wrap()
+        |> Enum.find_value(fn
+          %{stage: :lifg_word_flow_audit, meta: %{} = meta} -> meta
+          _ -> nil
+        end)
+
+      word_flow_for_target =
+        if is_map(word_flow) do
+          for {name, key} <- [
+                {:before_shadow, :before_shadow},
+                {:after_shadow, :after_shadow},
+                {:after_promotion, :after_promotion}
+              ], into: %{} do
+            entries = Map.get(word_flow, key, [])
+            {name, Enum.find(entries, fn e ->
+              Map.get(e, :token_index) == index or
+                (case Map.get(e, :token_span) do
+                   {first, last} when is_integer(first) and is_integer(last) ->
+                     first <= index and index <= last
+                   _ -> false
+                 end)
+            end)}
+          end
+        else
+          %{audit: :not_available}
+        end
+
+      # A candidate can claim an object slot even when the proposed
+      # object is independently attested as a finite verb.
+      following_finite_past =
+        si
+        |> Map.get(:sentence_signatures, [])
+        |> List.wrap()
+        |> Enum.filter(fn
+          %{id: :finite_past_candidate, roles: %{verb: verb}} ->
+            verb == index + 1
+          _ ->
+            false
+        end)
+        |> Enum.map(&Map.take(&1, [:id, :span, :roles, :evidence]))
+
       expected_id = Map.get(item, :expected_id)
       expected_pos = Map.get(item, :expected_pos)
       valid_gold? = is_binary(expected_id) and Map.has_key?(by_id, expected_id)
@@ -332,6 +375,8 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         mwe_semantic_choices_covering_target: covering_semantic_choices,
         mwe_decisions: if(is_nil(final_id), do: mwe_decisions, else: []),
         grammar_signatures_for_target: impacting_signatures,
+        following_finite_past_hypotheses: following_finite_past,
+        word_flow_for_target: word_flow_for_target,
         final_winner_definition:
           compact(Map.get(Map.get(by_id, final_id, %{}), :definition), 240),
         changed_after_stage1?: is_binary(raw_id) and raw_id != final_id,
