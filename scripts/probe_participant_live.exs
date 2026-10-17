@@ -1,11 +1,14 @@
 # Run the same semantic options as the LiveView chat without invoking the LLM.
 # By default this is READ-ONLY. Pass --persist to test the validated
-# Memory.acknowledge_projected -> Hippocampus database handoff explicitly.
+# Memory.acknowledge_projected -> Hippocampus database handoff explicitly,
+# using an isolated temporary owner that is cleaned up after retrieval.
 #
 #   mix run scripts/probe_participant_live.exs
 #   mix run scripts/probe_participant_live.exs --persist
 #
 # This probe does not test the already-running Phoenix worker's code version.
+import Ecto.Query
+
 sentence = "A bird is sitting on the fence."
 persist? = "--persist" in System.argv()
 session_id = "participant-live-probe-#{System.unique_integer([:positive])}"
@@ -48,20 +51,63 @@ IO.inspect(%{
   persistent_write_requested?: persist?
 }, label: "LiveView-equivalent participant projection", pretty: true, limit: :infinity)
 
-owner = Application.get_env(:symbrella, :memory_owner_id, "local-primary")
-
 if persist? do
-  result =
-    Core.Response.Memory.acknowledge_projected(
-      Map.from_struct(si), session_id, sentence, si.intent, si.confidence || 0.0
-    )
+  # Isolate the test from the normal live-chat memory owner. A successful
+  # probe must not make a subsequent chat run appear to have persisted.
+  owner_key = :memory_owner_id
+  original_owner = Application.get_env(:symbrella, owner_key)
+  probe_owner = "participant-probe-#{System.unique_integer([:positive, :monotonic])}"
+  Application.put_env(:symbrella, owner_key, probe_owner)
 
-  IO.inspect(result, label: "Validated memory acknowledgement", pretty: true)
-  IO.inspect(
-    Brain.Hippocampus.user_event(owner, "bird", "spatial_state"),
-    label: "Persisted participant episode",
-    pretty: true
-  )
+  try do
+    acknowledgement =
+      Core.Response.Memory.acknowledge_projected(
+        Map.from_struct(si), session_id, sentence, si.intent, si.confidence || 0.0
+      )
+
+    persisted =
+      Brain.Hippocampus.user_event(probe_owner, "bird", "spatial_state")
+
+    IO.inspect(acknowledgement, label: "Validated memory acknowledgement", pretty: true)
+    IO.inspect(persisted, label: "Isolated PostgreSQL participant event", pretty: true)
+
+    for question <- [
+          "Where is the bird?",
+          "What is sitting on the fence?",
+          "What is the bird doing?",
+          "What is the bird sitting on?"
+        ] do
+      IO.inspect(Core.Response.EpisodicMemory.reply(question),
+        label: "Independent symbolic recall: #{question}",
+        pretty: true
+      )
+    end
+
+    cond do
+      not match?({_, _, %{persistence_status: :persisted}}, acknowledgement) ->
+        IO.puts("Persistence check FAILED: no confirmed memory acknowledgement.")
+
+      not match?(%{status: "asserted", value: "the fence"}, persisted) ->
+        IO.puts("Persistence check FAILED: PostgreSQL readback missing.")
+
+      true ->
+        IO.puts("Persistence and readback confirmed under isolated probe owner.")
+    end
+  after
+    try do
+      {deleted, _} =
+        Db.delete_all(
+          from e in Db.Episode,
+            where: fragment("? ->> 'owner' = ?", e.meta, ^probe_owner)
+        )
+
+      IO.puts("Isolated probe cleanup deleted #{deleted} row(s).")
+    after
+      if is_nil(original_owner),
+        do: Application.delete_env(:symbrella, owner_key),
+        else: Application.put_env(:symbrella, owner_key, original_owner)
+    end
+  end
 else
-  IO.puts("No event was written. Run with --persist to test the database write.")
+  IO.puts("No event was written. Run with --persist for an isolated write/read test.")
 end
