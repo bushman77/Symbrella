@@ -14,6 +14,10 @@ defmodule Core.Curiosity.EvidenceAcquisition do
   alias Core.Tools.WebRetrieval
   alias Db.{CognitiveIssue, ConsolidatedConclusion, ConsolidatedConclusions}
 
+  # Test fixtures may inject a retriever only in the test build. Normal
+  # supervised runtime always uses the real, fixed-route evidence resolver.
+  @allow_test_retriever Code.ensure_loaded?(Mix) and Mix.env() == :test
+
   @max_year 2100
   @allowed_name ~r/\A[\p{L}\p{M}\p{N}\s,'’\-.]+\z/u
 
@@ -116,7 +120,7 @@ defmodule Core.Curiosity.EvidenceAcquisition do
 
   defp retrieve(context, opts) do
     case Keyword.get(opts, :retriever) do
-      fun when is_function(fun, 1) -> fun.(context)
+      fun when is_function(fun, 1) and @allow_test_retriever -> fun.(context)
       _ -> WebRetrieval.enrich(context, enabled?: true, max_attempts: 2,
               timeout_ms: 3_500)
     end
