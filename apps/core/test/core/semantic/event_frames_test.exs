@@ -3,6 +3,19 @@ defmodule Core.Semantic.EventFramesTest do
 
   alias Core.Semantic.EventFrames
 
+  test "lexical parsing of a population question does not grant source authority" do
+    frame =
+      EventFrames.location_question(
+        "Which had the larger population in 2021, Vancouver or Burnaby?"
+      )
+
+    assert %{type: :location_question, domain: :geography,
+             relation: :population, grounding_status: :unverified} = frame
+    refute Map.has_key?(frame, :verified)
+    refute Map.has_key?(frame, :sources)
+    refute Map.has_key?(frame, :source_urls)
+  end
+
   test "attaches forgot-medication frame with sleep inability consequence" do
     si = %{
       sentence: "good morning symbrella, i forgot my quetiapine and now i can not sleep",
