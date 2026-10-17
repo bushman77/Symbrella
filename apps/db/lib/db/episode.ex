@@ -1044,9 +1044,11 @@ defmodule Db.Episode do
       |> Enum.uniq_by(&get_in(&1, [:meta, "relation"]))
       |> Enum.map(&normalize_user_event/1)
       |> Enum.filter(fn
-        %{status: "asserted", relation: "verb_" <> predicate, value: patient,
-          participants: %{"predicate" => predicate, "patient" => patient,
-                          "tense" => "present"}} -> true
+        %{status: "asserted", relation: "verb_" <> lemma, value: patient,
+          participants: %{"predicate" => stored_lemma, "patient" => stored_patient,
+                          "tense" => "present"}} ->
+          lemma == stored_lemma and patient == stored_patient
+
         _ -> false
       end)
 
