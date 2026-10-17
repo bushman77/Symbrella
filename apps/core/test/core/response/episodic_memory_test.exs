@@ -76,17 +76,8 @@ defmodule Core.Response.EpisodicMemoryTest do
   test "generic semantic producer can store new relations and retractions", %{sid: sid} do
     assert :ok = EpisodicMemory.remember_event(
       %{entity: "Aster", relation: "maintainer", value: "Rowan"}, sid)
-    assert {"You told me: Aster — maintainer — Rowan.", _} =
+    assert {"From what you've told me about Aster: maintainer: Rowan.", _} =
              EpisodicMemory.reply("What do you remember about Aster?")
-             |> case do
-               {answer, meta} ->
-                 # History intentionally includes relation details, not a direct
-                 # question parser for every possible relation.
-                 {String.replace(answer,
-                    "From what you've told me about Aster: maintainer: Rowan.",
-                    "You told me: Aster — maintainer — Rowan."), meta}
-               other -> other
-             end
 
     assert :ok = EpisodicMemory.remember_event(
       %{entity: "Aster", relation: "maintainer", value: "(withdrawn)", status: :retracted}, sid)

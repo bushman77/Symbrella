@@ -128,6 +128,8 @@ defmodule Brain.Hippocampus do
   @doc "Chronological evidence for one entity, newest first, independently of chat session."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit \\ 8)
+
+  def user_event_history(owner, entity_key, limit)
       when is_binary(owner) and is_binary(entity_key) and is_integer(limit) and limit > 0 do
     GenServer.call(__MODULE__, {:user_event_history, owner, entity_key, min(limit, 30)})
   end

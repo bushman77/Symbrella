@@ -21,7 +21,12 @@ defmodule Core.Semantic.EpisodicEvents do
   @doc "Normalize structured semantic events from any trusted user-input parser."
   @spec normalize(map()) :: {:ok, event()} | :error
   def normalize(event) when is_map(event) do
-    entity = clean(Map.get(event, :entity) || Map.get(event, "entity"))
+    entity =
+      event
+      |> Map.get(:entity, Map.get(event, "entity"))
+      |> clean()
+      |> String.replace(~r/^my friend\s+/iu, "")
+      |> String.replace(~r/^The\s+/u, "the ")
     relation = clean(Map.get(event, :relation) || Map.get(event, "relation")) |> String.downcase()
     value = clean(Map.get(event, :value) || Map.get(event, "value"))
     status = Map.get(event, :status, Map.get(event, "status", :asserted))

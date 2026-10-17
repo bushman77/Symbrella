@@ -28,7 +28,7 @@ defmodule Core.Response.EpisodicMemory do
 
   @doc "Accept any normalized typed event from a user-grounded symbolic parser."
   @spec remember_event(map(), term(), String.t()) :: :ok | {:error, atom()}
-  def remember_event(event, session_id, sentence \\\\ "") do
+  def remember_event(event, session_id, sentence \\ "") do
     with {:ok, event} <- normalize_event(event),
          owner when is_binary(owner) <- memory_owner(),
          true <- hippocampus_available?() do
