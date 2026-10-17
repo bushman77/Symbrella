@@ -132,6 +132,73 @@ defmodule Db.CognitiveIssues do
 
   def resolve_reasoning_link(_, _, _), do: :ok
 
+  @doc """
+  Close a stale missing_reasoning_link when Core has independently revalidated
+  a *direct* stored population comparison. This is not a two-hop deduction.
+
+  The caller must first pass Consolidation.recall/1 and the authoritative
+  answer planner. This DB boundary additionally checks durable identity,
+  exact pair/year, and the absence of competing direct proofs for that year.
+  An opaque hippocampal fingerprint alone never authorizes closure.
+  """
+  @spec resolve_direct_reasoning_link(integer(), integer(), String.t(), integer()) ::
+          :ok | {:error, :direct_proof_not_unique_or_issue_mismatch}
+  def resolve_direct_reasoning_link(issue_id, proof_id, fingerprint, year)
+      when is_integer(issue_id) and issue_id > 0 and
+             is_integer(proof_id) and proof_id > 0 and
+             is_binary(fingerprint) and byte_size(fingerprint) == 64 and
+             is_integer(year) do
+    issue = Db.get(CognitiveIssue, issue_id)
+
+    if match?(%CognitiveIssue{kind: "missing_reasoning_link",
+                               next_action: "find_linking_premise"}, issue) and
+         issue.status in ["open", "investigating"] and
+         issue.reference_year == year do
+      proof =
+        Db.get_by(Db.ConsolidatedConclusion,
+          id: proof_id,
+          fingerprint: fingerprint,
+          pair_key: issue.subject_key,
+          reference_year: year,
+          kind: "population_comparison",
+          provenance: "source_supported_symbolic_derivation"
+        )
+
+      proof_count =
+        Db.aggregate(
+          from(c in Db.ConsolidatedConclusion,
+            where: c.pair_key == ^issue.subject_key and
+                   c.reference_year == ^year and
+                   c.kind == "population_comparison"),
+          :count
+        )
+
+      if proof != nil and proof_count == 1 do
+        issue
+        |> CognitiveIssue.changeset(%{
+          status: "resolved",
+          resolution: %{
+            reasoning_rule: "direct_population_comparison",
+            origin: "stored_symbolic_premises",
+            proof_id: proof.id,
+            proof_fingerprint: proof.fingerprint,
+            reference_year: year
+          },
+          resolved_at: DateTime.utc_now()
+        })
+        |> Db.update!()
+
+        :ok
+      else
+        {:error, :direct_proof_not_unique_or_issue_mismatch}
+      end
+    else
+      {:error, :direct_proof_not_unique_or_issue_mismatch}
+    end
+  end
+
+  def resolve_direct_reasoning_link(_, _, _, _),
+    do: {:error, :direct_proof_not_unique_or_issue_mismatch}
 
   defp close_missing_year_issues(proof) do
     issues =
