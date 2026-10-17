@@ -113,3 +113,8 @@ format failure as a semantic regression.
 Credo, Dialyzer, and Sobelow remain follow-up additions: they require adding
 project dependencies and updating `mix.lock` under a real Elixir toolchain.
 Do not claim these checks are already active.
+
+Formatting is temporarily **advisory** in CI because the initial baseline
+contains hundreds of pre-existing formatting differences. Once formatting is
+normalized in a dedicated, separate commit, remove `continue-on-error` to
+make the formatting check mandatory. ExUnit remains a blocking CI check.
