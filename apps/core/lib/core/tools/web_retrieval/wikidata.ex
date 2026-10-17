@@ -61,7 +61,10 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
   def population(name, opts) when is_binary(name) do
     with {:ok, place} <- place(name, nil, opts),
          statement when is_map(statement) <-
-           latest_dated_population(Map.get(place, :population_claims, [])) do
+           latest_dated_population(
+             Map.get(place, :population_claims, []),
+             Keyword.get(opts, :reference_year)
+           ) do
       {:ok,
        %{
          kind: :population,
@@ -95,15 +98,18 @@ defmodule Core.Tools.WebRetrieval.Wikidata do
     |> String.reverse()
   end
 
-  defp latest_dated_population(claims) when is_list(claims) do
+  defp latest_dated_population(claims, requested_year) when is_list(claims) do
     claims
     |> Enum.map(&dated_population/1)
     |> Enum.reject(&is_nil/1)
+    |> Enum.filter(fn entry ->
+      not is_integer(requested_year) or entry.year == requested_year
+    end)
     |> Enum.sort_by(fn entry -> {entry.year, entry.preferred?} end, :desc)
     |> List.first()
   end
 
-  defp latest_dated_population(_), do: nil
+  defp latest_dated_population(_, _), do: nil
 
   defp dated_population(%{
          "mainsnak" => %{"datavalue" => %{"value" => %{"amount" => amount}}},
