@@ -9,7 +9,6 @@ defmodule Brain.WM.Admission do
 
   alias Brain.BasalGanglia
   alias Brain.Config, as: BrainConfig
-  alias Brain.WM.Policy, as: WMPolicy
   alias Brain.WorkingMemory
 
   @gate_event [:brain, :gate, :decision]
@@ -53,7 +52,7 @@ defmodule Brain.WM.Admission do
 
   defp admit_candidate(cand, {wm_acc, added, removed}, now, cfg, attn, self_state) do
     {decision, score} = BasalGanglia.decide(wm_acc, cand, attn, cfg)
-    self_state_bias = WMPolicy.self_state_bias(self_state)
+    self_state_bias = BasalGanglia.self_state_bias(self_state)
 
     emit_gate_decision(cand, decision, score, self_state_bias, self_state)
 
