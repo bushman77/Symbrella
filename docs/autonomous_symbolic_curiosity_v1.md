@@ -333,3 +333,79 @@ In the UI, ask the original population question, followed immediately
 by `how do you know that?`. Explain metadata should report
 `response_source: :symbolic_verified_followup` for the second answer,
 never `:llm`.
+
+
+## V6: verified symbolic semantics in Brain working memory
+
+Successful verified population answers and their immediate grounded
+evidence-follow-ups now trigger **independently checked WM admission**.
+\`Core.Brain.WM.VerifiedSemantics.admit/5\` re-runs
+\`Core.Cognition.MemoryBoundary.recall/1\` against the durable
+\`consolidated_conclusions\` records. Admission is refused if the
+reference year, subject names, proof IDs, chain rule, or Core-authored
+authoritative answer does not match the persisted source-backed proofs.
+
+This is **not** a pathway for a conversation, LLM output, or a WM item
+to become a verified fact. It stores only a typed, ephemeral semantic
+*reference* to facts that Core must revalidate on every later use.
+The separately admitted \`:comprehension_frame\` remains an honest report
+of lexical and syntactic certainty; a successful verified response does
+not overwrite its \`degraded?: true\` flag.
+
+The new Brain WM item has:
+- \`source: :verified_semantics\`
+- \`kind: :verified_semantic_frame\`
+- \`context.conversation_act: :verified_answer | :evidence_followup\`
+- \`context.relation: :population_comparison\`
+- \`context.subjects\`, \`entities\` (including the shared intermediary
+  for a two-hop proof), \`reference_year\`
+- \`context.parent_proof_ids\` and \`reasoning_rule\`
+- \`context.verification: :source_supported\`,
+  \`interpretation_status: :verified\`, and
+  **\`factual_authority?: false\`**
+
+No user text, model reply, inferred population counts or source-page
+bodies enter the WM payload. The Brain gate is used exactly as for other
+WM candidates with per-call admission settings; the global LIFG and
+memory thresholds are unchanged. An isolated telemetry event
+\`[:core, :wm, :verified_semantics]\` reports admission or rejection
+without personal text.
+
+The Brain process has a global WM, so \`Core.Response.RuntimeContext\`
+strictly excludes both comprehension and verified-semantic session
+items from the global LLM prompt snapshot. Each item has a hashed
+session ID and an approximately 20-minute expiry for context inspection;
+this is working memory, not long-term factual storage.
+
+The feature starts automatically in development, not in production
+or test. No migration or extra supervisor child is needed. In IEx,
+after asking the population comparison and the evidence follow-up:
+
+\`\`\`elixir
+Application.get_env(:core, Core.Brain.WM.VerifiedSemantics)
+# [enabled?: true]
+
+Core.Brain.WM.VerifiedSemantics.snapshot("THE_CHAT_SESSION_ID")
+# A bounded typed context, never a source of factual authorization.
+
+Brain.snapshot_wm().wm
+|> Enum.filter(&(&1.source == :verified_semantics))
+# Only the new semantic references, one per active session.
+\`\`\`
+
+The actual LiveView session identifier may be obtained from a known
+response trace; do not substitute an unrelated IEx session ID.
+
+Targeted regression:
+
+\`\`\`bash
+mix test apps/core/test/core/response/population_chain_reasoning_test.exs \
+  apps/core/test/core/brain/comprehension_wm_test.exs \
+  apps/core/test/core/semantic/event_frames_test.exs --trace
+\`\`\`
+
+This work intentionally does **not** rewrite LIFG's uncertain sense
+selection. The report's degraded comprehension frame may coexist with
+the independently verified semantic object. Future work can connect
+those references into general multi-turn discourse without promoting
+them into authority.
