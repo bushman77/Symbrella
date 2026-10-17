@@ -360,9 +360,44 @@ if repo_overrides != [] do
   config :db, Db, repo_overrides
 end
 
+# ───────── Web interface access control ─────────
+# Local development stays accessible until credentials are explicitly set.
+# Production always requires an operator-supplied account.
+web_user = System.get_env("SYMBRELLA_WEB_AUTH_USERNAME")
+web_password = System.get_env("SYMBRELLA_WEB_AUTH_PASSWORD")
+
+web_auth =
+  cond do
+    is_binary(web_user) and byte_size(web_user) > 0 and is_binary(web_password) and
+        byte_size(web_password) >= 16 ->
+      [enabled?: true, username: web_user, password: web_password]
+
+    config_env() != :prod and is_nil(web_user) and is_nil(web_password) ->
+      [enabled?: false]
+
+    true ->
+      raise """
+      Symbrella web authentication requires SYMBRELLA_WEB_AUTH_USERNAME and
+      SYMBRELLA_WEB_AUTH_PASSWORD (at least 16 characters). Both must be set.
+      Production may not start without authentication.
+      """
+  end
+
+config :symbrella_web, :web_auth, web_auth
+
 # ───────── Phoenix / prod only ─────────
 
 if config_env() == :prod do
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise "Production requires DATABASE_URL; refusing development DB defaults"
+
+  config :db, Db, url: database_url
+
+  public_host =
+    System.get_env("SYMBRELLA_HOST") ||
+      raise "Production requires SYMBRELLA_HOST"
+
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
       raise """
@@ -373,6 +408,9 @@ if config_env() == :prod do
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   config :symbrella_web, SymbrellaWeb.Endpoint,
+    url: [host: public_host, scheme: "https", port: 443],
+    check_origin: ["https://" <> public_host],
+    force_ssl: [rewrite_on: [:x_forwarded_proto]],
     server: true,
     http: [
       ip: {0, 0, 0, 0, 0, 0, 0, 0},

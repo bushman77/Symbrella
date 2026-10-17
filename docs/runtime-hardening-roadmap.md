@@ -67,3 +67,25 @@ existing web routes remain unauthenticated until Increment 2 is implemented.
   remain global; that is an intentional distinction.
 - Do not rewrite Git history or remove generated local training data as part
   of this runtime-hardening sequence.
+
+## Phase 2 — Web access control
+
+`development` retains anonymous access by default to avoid silently breaking
+existing LAN/Termux use. Before exposing port 4000 outside a trusted network,
+set both variables (use a unique password with at least 16 characters):
+
+```sh
+export SYMBRELLA_WEB_AUTH_USERNAME=symbrella
+read -r -s -p 'Web password: ' SYMBRELLA_WEB_AUTH_PASSWORD; echo
+export SYMBRELLA_WEB_AUTH_PASSWORD
+```
+
+Restart the application after configuring credentials. The browser prompts for
+HTTP Basic credentials and then retains a signed, session-bound proof for
+LiveView reconnects. To change/revoke access, rotate the password and restart.
+
+**Basic authentication must not be used over unencrypted public HTTP.** Use a
+trusted network, VPN, or properly configured HTTPS reverse proxy. The development
+endpoint still binds to all interfaces. Production fails closed unless web
+credentials, `DATABASE_URL`, `SYMBRELLA_HOST`, and `SECRET_KEY_BASE` exist; enable
+TLS termination at the proxy and forward `X-Forwarded-Proto: https`.
