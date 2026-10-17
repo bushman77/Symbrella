@@ -45,11 +45,14 @@ defmodule Core.Semantic.EpisodicProjection do
 
     cond do
       source not in [nil, :user, :prod, :test] -> []
-      intent in [:ask, :question, :command] -> []
       not is_binary(sentence) or String.contains?(sentence, "?") -> []
       true ->
-        (if is_map(frame), do: project_frame(frame, sentence), else: []) ++
-          SVOEvent.project(si, sentence)
+        obligation =
+          if intent in [:ask, :question, :command] or not is_map(frame),
+            do: [],
+            else: project_frame(frame, sentence)
+
+        obligation ++ SVOEvent.project(si, sentence)
     end
   end
 
