@@ -135,6 +135,15 @@ defmodule Brain.Hippocampus do
 
   def spatial_actor(_, _, _, _), do: nil
 
+  @doc "Reverse current-action lookup for exactly one actor matching an attested verb surface and patient."
+  @spec action_actor(String.t(), String.t(), String.t()) :: map() | nil
+  def action_actor(owner, surface_predicate, patient)
+      when is_binary(owner) and is_binary(surface_predicate) and is_binary(patient) do
+    GenServer.call(__MODULE__, {:action_actor, owner, surface_predicate, patient})
+  end
+
+  def action_actor(_, _, _), do: nil
+
   @doc "Chronological evidence for one entity, newest first, independently of chat session."
   @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
   def user_event_history(owner, entity_key, limit \\ 8)
@@ -451,6 +460,20 @@ defmodule Brain.Hippocampus do
     result =
       try do
         Db.Episode.spatial_actor(owner, predicate, position, location)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:action_actor, owner, surface_predicate, patient}, _from, state) do
+    result =
+      try do
+        Db.Episode.action_actor(owner, surface_predicate, patient)
       rescue
         _ -> nil
       catch
