@@ -79,7 +79,7 @@ defmodule Brain.SelfCalibration.Logger do
 
   defp rotate_archives(path, max_files) do
     with :ok <- remove_if_present("#{path}.#{max_files}") do
-      Enum.reduce_while((max_files - 1)..1//-1, :ok, fn index, :ok ->
+      Enum.reduce_while(max_files..1//-1, :ok, fn index, :ok ->
         source = if index == 1, do: path, else: "#{path}.#{index - 1}"
         destination = "#{path}.#{index}"
 
