@@ -36,11 +36,22 @@ If only one side of a chain is present, years/sources differ, or strict
 transitivity is not established, Symbrella records a `missing_reasoning_link`
 issue rather than pretending an inference succeeded.
 
-Each successful proof includes an inspectable `composition` map:
+Each successful proof includes an internal `composition` map:
 `rule`, `intermediate_subject`, `parent_proof_ids`,
-`reference_year`, `origin`. The response reflection mirrors that map in
-`symbolic_composition` and the system emits the event
-`[:core, :reasoning, :composition]` without raw chat content.
+`reference_year`, `origin`. The proof lineage stays inside Core's
+cognitive context; it is NOT included in the user-facing response or
+Explain reflection. The independent event `[:core, :reasoning, :composition]`
+provides controlled instrumentation without raw chat content.
+
+`Core.Cognition.MemoryBoundary.recall/1` is the current question-triggered
+semantic retrieval gateway. `for_expression/1` strips private work items
+before freeform model prompting. An unresolved question produces a neutral,
+Core-authored insufficient-evidence answer rather than revealing issue IDs,
+retry actions or curiosity activity in chat.
+
+This gateway is **ready for future hippocampal cue invocation**, but it is
+not yet a direct callback or autonomous replay from the
+`Brain.Hippocampus` GenServer. Background investigations remain disabled.
 
 ## Curiosity and unresolved issues
 
