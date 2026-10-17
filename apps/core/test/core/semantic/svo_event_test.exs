@@ -63,13 +63,13 @@ defmodule Core.Semantic.SVOEventTest do
              source_frame: "finite_present_svo", provenance: :user_reported} =
              Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
 
-    assert {:warm, "You told me: The artist draws a picture.", meta} =
+    assert {:warm, "A picture.", meta} =
       Response.memory_reply(%{text: "What did the artist draw?",
         session_id: sid <> "-later", intent: :question, confidence: 0.9})
     assert meta.memory_source == :hippocampal_event
 
     :ok = Brain.Hippocampus.reset()
-    assert {"You told me: The artist draws a picture.", _} =
+    assert {"A picture.", _} =
       EpisodicMemory.reply("What did the artist draw?")
   end
 
@@ -86,7 +86,7 @@ defmodule Core.Semantic.SVOEventTest do
     assert %{value: "a picture", sentence: "The artist draws a picture."} =
       Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
 
-    assert {:warm, "You told me: The artist draws a picture.", recall_meta} =
+    assert {:warm, "A picture.", recall_meta} =
       Response.memory_reply(%{
         text: "What did the artist draw?", session_id: sid <> "-new",
         intent: :question, confidence: 0.9
@@ -162,7 +162,7 @@ defmodule Core.Semantic.SVOEventTest do
     assert %{value: "a picture", sentence: "The artist draws a picture."} =
              Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
 
-    assert {"You told me: The artist draws a picture.", _meta} =
+    assert {"A picture.", _meta} =
              EpisodicMemory.reply("What did the artist draw?")
   end
 
