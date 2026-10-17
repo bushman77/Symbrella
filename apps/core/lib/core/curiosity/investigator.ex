@@ -19,7 +19,7 @@ defmodule Core.Curiosity.Investigator do
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
   alias Core.Curiosity.UnresolvedIssues
   alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
-  alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion}
+  alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
 
   @default_interval_ms 300_000
   @default_retry_ms 3_600_000
@@ -182,7 +182,7 @@ defmodule Core.Curiosity.Investigator do
           # Hippocampus is a bounded cue index, not the durable fact store.
           # A cold-started/evicted association must not permanently prevent
           # rechecking a direct source-backed proof for an old issue.
-          reconcile_direct(issue, names, context, nil)
+          reconcile_without_cue(issue, names, context)
       end
     else
       _ -> %{status: :skipped, issue_id: issue.id, reason: :invalid_or_stale_issue}
@@ -235,6 +235,19 @@ defmodule Core.Curiosity.Investigator do
       end
     else
       %{status: :unresolved, issue_id: issue.id, reason: :invalid_two_hop_candidate}
+    end
+  end
+
+  defp reconcile_without_cue(issue, names, context) do
+    # Preserve a meaningful missing-cue diagnostic when there is no direct
+    # stored proof. A durable direct comparison may still be authoritative
+    # even after the hippocampal pointer has aged out of its window.
+    case ConsolidatedConclusions.recent(issue.subject_key) do
+      [] ->
+        %{status: :unresolved, issue_id: issue.id, reason: :no_two_hop_cue}
+
+      _ ->
+        reconcile_direct(issue, names, context, nil)
     end
   end
 
