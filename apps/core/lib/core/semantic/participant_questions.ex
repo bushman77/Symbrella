@@ -71,7 +71,11 @@ defmodule Core.Semantic.ParticipantQuestions do
 
   defp sentence(text) do
     text = String.trim(text)
-    if text == "", do: nil, else: String.capitalize(text) <> "."
+    if text == "" do
+      nil
+    else
+      String.upcase(String.first(text)) <> String.slice(text, 1, String.length(text)) <> "."
+    end
   end
 
   defp norm(text), do: text |> String.downcase() |> String.trim()
