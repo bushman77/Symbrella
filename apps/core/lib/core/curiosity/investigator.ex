@@ -9,15 +9,17 @@ defmodule Core.Curiosity.Investigator do
   proof closes a stale missing link as a direct resolution, not as two-hop
   reasoning.
 
-  No Qwen, network, chat/LiveView, PubSub, generated prose, or new fact
-  writes are permitted here. An unsuccessful investigation leaves the issue
-  open and applies a bounded in-memory retry cooldown.
+  The reasoning-only default does not invoke Qwen, network, chat/LiveView,
+  PubSub, or generated prose. An independently opt-in acquisition mode may
+  retrieve one dated public population comparison via fixed-source providers,
+  then reauthorize and consolidate it before retrying reasoning. Failures
+  leave uncertainty open and apply a bounded in-memory retry cooldown.
   """
 
   use GenServer
 
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
-  alias Core.Curiosity.UnresolvedIssues
+  alias Core.Curiosity.{EvidenceAcquisition, UnresolvedIssues}
   alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
   alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
 
@@ -123,7 +125,9 @@ defmodule Core.Curiosity.Investigator do
     :telemetry.execute(@telemetry, %{count: 1},
       %{status: result.status, reason: Map.get(result, :reason),
         issue_id: Map.get(result, :issue_id),
-        parent_proof_ids: Map.get(result, :parent_proof_ids)})
+        parent_proof_ids: Map.get(result, :parent_proof_ids),
+        acquisition: Map.get(result, :acquisition),
+        acquisition_reason: Map.get(result, :acquisition_reason)})
 
     next = %{state | last_result: result, attempted: attempted, cycles: state.cycles + 1}
     {result, next}
@@ -151,7 +155,7 @@ defmodule Core.Curiosity.Investigator do
 
       true ->
         case Db.get(CognitiveIssue, id) do
-          %CognitiveIssue{} = issue -> investigate(issue)
+          %CognitiveIssue{} = issue -> investigate(issue, opts)
           _ -> %{status: :skipped, issue_id: id, reason: :issue_not_found}
         end
     end
@@ -161,7 +165,7 @@ defmodule Core.Curiosity.Investigator do
     :exit, _ -> %{status: :failed, issue_id: id, reason: :investigation_unavailable}
   end
 
-  defp investigate(issue) do
+  defp investigate(issue, opts) do
     names = Map.get(issue.evidence || %{}, "subjects")
 
     with true <- issue.kind == "missing_reasoning_link" and
@@ -174,26 +178,53 @@ defmodule Core.Curiosity.Investigator do
       # retrieval or user-facing messages are involved.
       context = internal_context(issue.reference_year, names)
 
-      case AssociativeReasoning.propose(names) do
-        %{kind: :two_hop_candidate, parent_proof_ids: ids} when is_list(ids) ->
-          reconcile_two_hop(issue, names, context, ids)
+      result =
+        case AssociativeReasoning.propose(names) do
+          %{kind: :two_hop_candidate, parent_proof_ids: ids} when is_list(ids) ->
+            reconcile_two_hop(issue, names, context, ids)
 
-        %{kind: :direct_proof_pointer, fingerprint: fingerprint}
-            when is_binary(fingerprint) ->
-          # A directly answered question is not a transitive inference.
-          # This can happen when a source-supported comparison arrives
-          # after a missing-link issue was first opened.
-          reconcile_direct(issue, names, context, fingerprint)
+          %{kind: :direct_proof_pointer, fingerprint: fingerprint}
+              when is_binary(fingerprint) ->
+            reconcile_direct(issue, names, context, fingerprint)
 
-        _ ->
-          # Hippocampus is a bounded cue index, not the durable fact store.
-          # A cold-started/evicted association must not permanently prevent
-          # rechecking a direct source-backed proof for an old issue.
-          reconcile_without_cue(issue, names, context)
-      end
+          _ ->
+            reconcile_without_cue(issue, names, context)
+        end
+
+      maybe_acquire_missing_bridge(issue, result, opts)
     else
       _ -> %{status: :skipped, issue_id: issue.id, reason: :invalid_or_stale_issue}
     end
+  end
+
+  # External evidence requires a separate explicit opt-in; it never runs
+  # merely because the reasoning-only investigator has been enabled.
+  defp maybe_acquire_missing_bridge(issue, %{status: :unresolved,
+      reason: :no_two_hop_cue} = unresolved, opts) do
+    if acquire_evidence?(opts) do
+      case EvidenceAcquisition.acquire(issue) do
+        %{status: :captured, proof_id: id} ->
+          # The capture indexes a source-backed proof, but it cannot declare
+          # the old A-C issue resolved. Re-enter the existing reasoning
+          # boundary once, without recursive evidence acquisition.
+          after_capture = investigate(issue, Keyword.put(opts, :acquire_evidence?, false))
+          Map.merge(after_capture, %{acquisition: :captured, acquired_proof_id: id})
+
+        %{status: :unresolved, reason: reason} ->
+          Map.merge(unresolved, %{acquisition: :not_captured,
+                                 acquisition_reason: reason})
+      end
+    else
+      unresolved
+    end
+  end
+
+  defp maybe_acquire_missing_bridge(_issue, result, _opts), do: result
+
+  defp acquire_evidence?(opts) do
+    config = Application.get_env(:core, __MODULE__, [])
+    Keyword.get(opts, :acquire_evidence?,
+      Keyword.get(config, :acquire_evidence?, false)) == true
   end
 
   defp internal_context(year, names) do
