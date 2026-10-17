@@ -192,6 +192,13 @@ defmodule Core.Reasoning.PopulationChain do
         subject_key(subjects), path.year, path.parent_ids
       )
 
+      :telemetry.execute(
+        [:core, :reasoning, :composition],
+        %{count: 1},
+        %{rule: :transitive_population_order, status: :supported,
+          parent_proof_ids: path.parent_ids, reference_year: path.year}
+      )
+
       Map.put(derived, :composition, %{
         rule: :transitive_population_order,
         intermediate_subject: path.middle["subject"],
