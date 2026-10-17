@@ -8,7 +8,9 @@ defmodule Llm.BootGateTest do
   end
 
   test "invalid enabled boot mode fails without starting the model" do
-    assert {:error, {:invalid_llm_boot_mode, :invalid}} =
-             Llm.BootGate.start_link(name: nil, enabled?: true, mode: :invalid)
+    # Test the invalid configuration contract without linking a crashing
+    # GenServer to ExUnit's test process.
+    assert {:stop, {:invalid_llm_boot_mode, :invalid}} =
+             Llm.BootGate.init(enabled?: true, mode: :invalid)
   end
 end

@@ -20,6 +20,9 @@ defmodule SymbrellaWeb.Router do
   scope "/", SymbrellaWeb do
     pipe_through :browser
 
+    # Route literal downloads before the parameterized /brain/:region route.
+    get "/brain/report.txt", BrainReportController, :show
+
     # The HTTP plug protects initial navigation; on_mount independently
     # protects LiveView sessions reconnecting through the socket transport.
     live_session :protected, on_mount: [{SymbrellaWeb.Plugs.WebAuth, :require_authenticated}] do
@@ -30,7 +33,7 @@ defmodule SymbrellaWeb.Router do
       live "/brain/:region", BrainLive
     end
 
-    get "/brain/report.txt", BrainReportController, :show
+
   end
 
   # Other scopes may use custom stacks.
