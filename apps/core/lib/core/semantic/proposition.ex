@@ -71,6 +71,69 @@ defmodule Core.Semantic.Proposition do
     end
   end
 
+  # Validated participant assertions share the same proposition contract as
+  # WH questions. The caller is SentenceMeaning, which has already checked
+  # the candidate against the exact lexical/grammatical input.
+  def build(_, %{
+        kind: :participant_assertion,
+        status: :structurally_interpreted,
+        speech_act: :assertion,
+        event_type: :action,
+        source_frame: :finite_present_svo,
+        roles: %{
+          actor: %{surface: actor},
+          predicate: %{surface: surface, lemma: lemma},
+          patient: %{surface: patient}
+        }
+      } = meaning)
+      when is_binary(actor) and is_binary(surface) and
+           is_binary(lemma) and is_binary(patient) do
+    participant_proposition(meaning, :action, %{
+      predicate: %{surface: surface, lemma: lemma},
+      arguments: %{actor: actor, patient: patient},
+      modifiers: %{tense: :present}
+    })
+  end
+
+  def build(_, %{
+        kind: :participant_assertion,
+        status: :structurally_interpreted,
+        speech_act: :assertion,
+        event_type: :spatial,
+        source_frame: :progressive_spatial,
+        roles: %{
+          actor: %{surface: actor},
+          predicate: %{surface: predicate, aspect: :progressive},
+          position: %{surface: position},
+          location: %{surface: location}
+        }
+      } = meaning)
+      when is_binary(actor) and is_binary(predicate) and
+           is_binary(position) and is_binary(location) do
+    participant_proposition(meaning, :spatial, %{
+      predicate: %{surface: predicate, aspect: :progressive},
+      arguments: %{actor: actor, location: location},
+      modifiers: %{position: position}
+    })
+  end
+
+  defp participant_proposition(meaning, event_type, content) do
+    %{
+      version: 1,
+      type: :participant_assertion,
+      event_type: event_type,
+      epistemic_status: :user_reported_unverified,
+      content: content,
+      grounding: Map.fetch!(meaning, :grounding),
+      provenance: %{
+        source: :user_statement,
+        frame: Map.fetch!(meaning, :source_frame),
+        evidence: :candidate_revalidated_against_original_input,
+        persistence: :not_claimed
+      }
+    }
+  end
+
   def build(_, _), do: nil
 
   defp compose_nominal(si, %{surface: surface, span: {first, last}} = topic) do
