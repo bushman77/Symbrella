@@ -16,7 +16,7 @@ defmodule Core.Curiosity.Investigator do
 
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
   alias Core.Curiosity.UnresolvedIssues
-  alias Db.{CognitiveIssue, CognitiveIssues}
+  alias Db.CognitiveIssue
 
   @default_interval_ms 300_000
   @default_retry_ms 3_600_000
