@@ -73,6 +73,109 @@ defmodule Core.Semantic.SVOEventTest do
       EpisodicMemory.reply("What did the artist draw?")
   end
 
+  test "verified SVO action carries participant roles into PostgreSQL and answers two directions",
+       %{sid: sid, owner: owner} do
+    si = EpisodicProjection.attach(inflected_input())
+
+    assert [%{relation: "verb_draw", value: "a picture",
+              participants: %{
+                "actor" => "the artist",
+                "predicate" => "draw",
+                "surface_predicate" => "draws",
+                "patient" => "a picture",
+                "tense" => "present"
+              }}] = si.episodic_candidates
+
+    assert :ok = EpisodicMemory.remember_projected_events(si, si.sentence, sid)
+
+    assert %{status: "asserted",
+             participants: %{"actor" => "the artist", "patient" => "a picture",
+                             "predicate" => "draw", "surface_predicate" => "draws"}} =
+             Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+
+    for {question, expected} <- [
+          {"What does the artist draw?", "A picture."},
+          {"What did the artist draw?", "A picture."},
+          {"Who draws a picture?", "The artist."}
+        ] do
+      assert {:warm, ^expected,
+              %{response_source: :symbolic_conversation,
+                memory_source: :hippocampal_event, retrieval_found?: true}} =
+        Response.memory_reply(%{text: question, session_id: sid <> "-recall",
+                                intent: :question, confidence: 0.9})
+    end
+
+    # The source event, not the model transcript, remains authoritative
+    # even when the Hippocampus process discards its in-memory window.
+    assert :ok = Brain.Hippocampus.reset()
+    assert {"The artist.", _} = EpisodicMemory.reply("Who draws a picture?")
+  end
+
+  test "action reverse lookup never guesses across multiple actors or stale events",
+       %{sid: sid, owner: owner} do
+    event = %{
+      entity: "the artist", relation: "verb_draw", value: "a picture",
+      source_frame: :finite_present_svo,
+      participants: %{"actor" => "the artist", "predicate" => "draw",
+                      "surface_predicate" => "draws", "patient" => "a picture",
+                      "tense" => "present"}
+    }
+
+    assert :ok = EpisodicMemory.remember_event(event, sid, "The artist draws a picture.")
+    assert {"The artist.", _} = EpisodicMemory.reply("Who draws a picture?")
+
+    # A second actor meeting the same relation cannot be guessed away.
+    other = %{event |
+      entity: "the painter",
+      participants: %{event.participants | "actor" => "the painter"}
+    }
+    assert :ok = EpisodicMemory.remember_event(other, sid, "The painter draws a picture.")
+    assert EpisodicMemory.reply("Who draws a picture?") == nil
+
+    # The latest actor/relation assertion supersedes an older patient value.
+    moved = %{other |
+      value: "a mural",
+      participants: %{other.participants | "patient" => "a mural"}
+    }
+    assert :ok = EpisodicMemory.remember_event(moved, sid, "The painter draws a mural.")
+    assert {"The artist.", _} = EpisodicMemory.reply("Who draws a picture?")
+    assert {"The painter.", _} = EpisodicMemory.reply("Who draws a mural?")
+
+    retracted = %{event | status: :retracted}
+    assert :ok = EpisodicMemory.remember_event(retracted, sid, "I withdraw that assertion.")
+    assert EpisodicMemory.reply("Who draws a picture?") == nil
+    assert %{status: "retracted"} =
+      Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+  end
+
+  test "action question grammar binds requested role, not arbitrary text" do
+    alias Core.Semantic.ActionQuestions
+
+    assert {:forward, "artist", "draw"} =
+             ActionQuestions.parse("What does the artist draw?")
+    assert {:reverse, "draws", "a picture"} =
+             ActionQuestions.parse("Who draws a picture?")
+
+    assert ActionQuestions.parse("Who drew a picture?") ==
+             {:reverse, "drew", "a picture"}
+    assert ActionQuestions.parse("Who might draw a picture?") == nil
+
+    event = %{status: "asserted", relation: "verb_draw", value: "a picture",
+              participants: %{
+                "actor" => "the artist", "predicate" => "draw",
+                "surface_predicate" => "draws", "patient" => "a picture",
+                "tense" => "present"
+              }}
+
+    assert ActionQuestions.answer(event, :actor,
+             %{surface_predicate: "draws", patient: "a picture"}) == "The artist."
+    assert ActionQuestions.answer(event, :patient, %{predicate: "draw"}) == "A picture."
+    assert ActionQuestions.answer(event, :actor,
+             %{surface_predicate: "drew", patient: "a picture"}) == nil
+    assert ActionQuestions.answer(%{event | status: "retracted"}, :actor, %{}) == nil
+    assert ActionQuestions.answer(%{event | relation: "verb_paint"}, :actor, %{}) == nil
+  end
+
   test "misclassified declarative still gets stored and is acknowledged", %{sid: sid, owner: owner} do
     # Input intent is wrong, but a verified SVO clause is not a question.
     si = EpisodicProjection.attach(%{input() | intent: :question})
