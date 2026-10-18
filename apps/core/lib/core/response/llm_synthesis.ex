@@ -17,6 +17,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.Context
   alias Core.Response.AnswerPolish
   alias Core.Response.ProjectedExpression
+  alias Core.Response.SemanticRoleFidelity
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
@@ -374,6 +375,7 @@ defmodule Core.Response.LlmSynthesis do
             :exact_report_echo -> :projected_statement_echo
             :unsupported_temporal_shift -> :projected_tense_aspect_drift
             :unverified_sense_detail -> :unverified_sense_specificity
+            :semantic_role_drift -> :semantic_role_drift
           end
 
         revised =
@@ -400,6 +402,27 @@ defmodule Core.Response.LlmSynthesis do
             promoted_sense?: false,
             stored_memory?: false
           })
+
+        # Audit fields are bounded and role-structural only. The system
+        # never records untrusted generated assertions as verified facts.
+        role_audit =
+          if trigger == :semantic_role_drift,
+            do: SemanticRoleFidelity.audit(user_text, text, frame),
+            else: nil
+
+        revised =
+          if is_map(role_audit),
+            do: Map.put(revised, :semantic_role_fidelity,
+              Map.take(role_audit, [:status, :mismatched_roles, :source,
+                :draft_scope, :event_truth_verified?,
+                :exact_sense_verified?, :modified_cognition?])),
+            else: revised
+
+        if role_audit != nil do
+          Telemetry.emit([:core, :response, :semantic_role_drift],
+            %{count: 1}, %{issue: :semantic_role_drift,
+              mismatched_roles: Map.get(role_audit, :mismatched_roles, [])})
+        end
 
         {reviewed, revised}
 
