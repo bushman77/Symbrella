@@ -115,8 +115,8 @@ defmodule Core.Brain.Activation do
     (selected_plan ++ verified_plan)
     |> Enum.group_by(& &1.id)
     |> Enum.map(fn {_id, contributions} -> Enum.max_by(contributions, & &1.delta) end)
-    |> Enum.sort_by(&{-&1.delta, &1.id})
-    |> Enum.take(Keyword.get(opts, :max_feedback, @max_feedback))
+    |> Enum.sort_by(fn entry -> {-entry.delta, entry.id} end)
+    |> Enum.take(positive_limit(Keyword.get(opts, :max_feedback, @max_feedback)))
   end
 
   def feedback_plan(_, _opts), do: []
@@ -243,4 +243,6 @@ defmodule Core.Brain.Activation do
   defp number(x, _) when is_number(x), do: x * 1.0
   defp number(_, default), do: default
   defp clamp01(x), do: x |> max(0.0) |> min(1.0)
+  defp positive_limit(n) when is_integer(n) and n > 0, do: min(n, @max_feedback)
+  defp positive_limit(_), do: @max_feedback
 end
