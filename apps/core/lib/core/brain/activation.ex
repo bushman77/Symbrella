@@ -39,7 +39,7 @@ defmodule Core.Brain.Activation do
     if Keyword.get(opts, :neuron_activation?, true) == false do
       # Explicit controls (benchmark/tests) must not borrow previous-turn
       # activity or emit new neural stimuli.
-      Map.put(si, :neuron_activation, %{})
+      si |> Map.put(:neuron_activation, %{}) |> Map.put(:semantic_pulses, %{})
     else
       # A diagnostic can supply an isolated prior without mutating Brain's
       # singleton state. Ordinary chat always uses the live STM snapshot.
@@ -49,9 +49,13 @@ defmodule Core.Brain.Activation do
           _ -> map_or_empty(Map.get(si, :neuron_activation))
         end
 
-      si = Map.put(si, :neuron_activation, prior)
+      semantic = case Keyword.fetch(opts, :semantic_probe_snapshot) do
+        {:ok, %{} = snapshot} -> snapshot
+        _ -> map_or_empty(Map.get(si, :semantic_pulses))
+      end
+      si = si |> Map.put(:neuron_activation, prior) |> Map.put(:semantic_pulses, semantic)
       rows = list_or_empty(Map.get(si, :active_cells))
-      updated = Enum.map(rows, &put_runtime_prior(&1, prior))
+      updated = Enum.map(rows, &put_runtime_prior(&1, prior, semantic))
       recruited = initial_ids(updated)
 
       if Keyword.get(opts, :notify_brain?, true) and recruited != [] do
@@ -95,13 +99,14 @@ defmodule Core.Brain.Activation do
   @spec overlay_candidate_slates(map()) :: map()
   def overlay_candidate_slates(%{} = si) do
     prior = map_or_empty(Map.get(si, :neuron_activation))
+    semantic = map_or_empty(Map.get(si, :semantic_pulses))
 
     Enum.reduce([:sense_candidates, :candidates_by_token], si, fn field, acc ->
       case Map.get(acc, field) do
         %{} = slate ->
           modified =
             Map.new(slate, fn {idx, rows} ->
-              candidates = if is_list(rows), do: Enum.map(rows, &put_runtime_prior(&1, prior)), else: rows
+              candidates = if is_list(rows), do: Enum.map(rows, &put_runtime_prior(&1, prior, semantic)), else: rows
               {idx, candidates}
             end)
 
