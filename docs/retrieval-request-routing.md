@@ -298,3 +298,56 @@ offline.** Its results identify whether the remaining blocker is the
 external API, ambiguous entity matching, timeout, or local evidence
 authorization. Do not infer a successful live calculation from a
 synthetic 229.6 km test fixture.
+
+
+### Provenance-bounded jurisdiction hint from same-session user turns
+
+The live diagnostic established two distinct outcomes, using the user's
+actual Termux environment:
+
+- `maple ridge` /`kamloops`: NRCan `:ambiguous_place`,
+  Wikidata `:place_not_verified`, and no supported measurement.
+- `maple ridge bc` / `kamloops bc`: NRCan `:source_supported`,
+  **228.8 km straight-line**; the direct Wikidata provider independently
+  returned **229.0 km** for its representative coordinates. The
+  small difference is consistent with differing source coordinate
+  locations, not a road-route discrepancy.
+
+A pure `Core.Tools.WebRetrieval.PlaceScope` helper now allows the
+*lookup* (not the semantic question or verified memory) to inherit a
+short, exact-name province qualifier from a recent same-session
+USER question such as `where is Kamloops BC`. This supports the
+conversational sequence:
+
+    where is kamloops bc
+    how far from maple ridge is from kamloops
+
+with a qualified geographic lookup, but ONLY if the prior message
+is available in the recent user history. It never treats assistant
+prose as a geographical fact, guesses BC when the chat lacks the
+explicit hint, or uses contradictory hints. Both municipalities
+still must be source-verified by NRCan/Wikidata in the inferred
+jurisdiction. The original user-turn SVO/geographic frame remains
+unaltered and `:grounding_status` remains `:unverified` until
+fresh coordinate retrieval succeeds. The resulting evidence
+includes a bounded `:lookup_scope` audit with
+`:status => :user_qualified_hint` and `:verified? => false`,
+distinct from any source-supported coordinate measurement.
+
+Tests and diagnostic:
+
+    mix test apps/core/test/core/tools/web_retrieval/place_scope_test.exs \
+      apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/semantic/event_frames_test.exs
+
+    mix run scripts/diagnose_live_geographic_distance.exs
+
+The live diagnostic now prints three cases: standalone ambiguous,
+explicitly BC-qualified, and unqualified with a simulated recent
+USER turn naming `Kamloops BC`. The third case performs **real
+provider calls** but uses synthetic **chat history** only to
+exercise retrieval scope. It is not a test of persisted chat
+history or LLM generation. Live Phoenix chat should then be
+tested with the first message and distance follow-up in the
+same session, checking that retrieved source identities and the
+computed measurement match both places.
