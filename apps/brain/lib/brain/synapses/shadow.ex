@@ -336,9 +336,18 @@ defmodule Brain.Synapses.Shadow do
   def handle_call({:preview, ids, noun, relation}, _from, state) do
     candidates =
       Enum.map(ids, fn id ->
-        edge = Map.get(state.edges, {id, noun, relation}, %{weight: 0.0, experiences: 0})
+        edge = Map.get(state.edges, {id, noun, relation}, %{
+          weight: 0.0, experiences: 0,
+          provisional_weight: 0.0, reviewed_weight: 0.0,
+          provisional_experiences: 0, reviewed_experiences: 0
+        })
+
         %{id: id, shadow_support: edge.weight,
-          distinct_report_contexts: edge.experiences}
+          provisional_support: edge.provisional_weight,
+          reviewed_support: edge.reviewed_weight,
+          distinct_report_contexts: edge.experiences,
+          provisional_contexts: edge.provisional_experiences,
+          reviewed_contexts: edge.reviewed_experiences}
       end)
 
     {:reply, %{
@@ -387,7 +396,8 @@ defmodule Brain.Synapses.Shadow do
 
   defp weights(receipts) do
     receipts
-    |> Map.values()
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
     |> Enum.reject(&(&1.verdict == :rejected))
     |> Enum.reduce(%{}, fn %{edges: edges, verdict: verdict}, all ->
       delta = if verdict == :confirmed, do: @reviewed_delta, else: @unreviewed_delta
