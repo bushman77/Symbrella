@@ -249,8 +249,9 @@ defmodule Core.Response.ProjectedExpressionTest do
       assert attached.response_text ==
         "I understand you're describing the gardener planting a tree."
       assert attached.response_meta.response_source == :llm
-      assert attached.response_meta.response_reflection
-        .projected_expression_repair.source == :revalidated_sentence_roles
+      assert get_in(attached,
+        [:response_meta, :response_reflection,
+         :projected_expression_repair, :source]) == :revalidated_sentence_roles
       assert attached.lifg_choices == si.lifg_choices
       assert attached.atl_slate == si.atl_slate
     after
