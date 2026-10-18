@@ -67,6 +67,7 @@ defmodule Core.SemanticInput do
                 :intent_bias,
                 :sense_candidates,
                 :sentence_competition,
+                :role_competition,
                 :sentence_meaning,
                 :lifg_feedback,
                 :perception,
@@ -195,6 +196,7 @@ defmodule Core.SemanticInput do
           # Grammatical evidence and sense candidates
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
+          role_competition: map() | nil,
           sentence_meaning: map() | nil,
           episodic_candidates: [map()],
           lifg_feedback: map() | nil,
@@ -279,6 +281,7 @@ defmodule Core.SemanticInput do
             resolved_tokens: [],
             sentence_signatures: [],
             sentence_competition: nil,
+            role_competition: nil,
             sentence_meaning: nil,
             episodic_candidates: [],
             lifg_feedback: nil,
