@@ -170,8 +170,17 @@ defmodule Core.Brain.SynapticDisambiguationTest do
   test "refuses exact training replay, partial scores and single-sense slates",
        %{server: server} do
     seen = interpreted("artist", "poster")
-    learn(seen, server)
+    observed = learn(seen, server)
 
+    assert %{status: :skipped, reason: :seen_in_training_receipts} =
+             SynapticDisambiguation.evaluate(seen, synapse_shadow_server: server)
+
+    assert {:ok, :rejected} =
+             Shadow.review(%{provenance: :human_review,
+               evidence: observed.evidence, reviewer: "curator",
+               decision: :reject}, server)
+
+    # A rejected receipt must still remain disqualified as a holdout.
     assert %{status: :skipped, reason: :seen_in_training_receipts} =
              SynapticDisambiguation.evaluate(seen, synapse_shadow_server: server)
 
