@@ -151,7 +151,7 @@ defmodule Core.Response.Meta do
   defp maybe_put_semantic_role_fidelity(summary, %{} = audit) do
     Map.put(summary, :semantic_role_fidelity,
       Map.take(audit, [
-        :status, :mismatched_roles, :source, :draft_scope,
+        :status, :reason, :mismatched_roles, :source, :draft_scope,
         :event_truth_verified?, :exact_sense_verified?,
         :modified_cognition?
       ]))
