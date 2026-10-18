@@ -11,6 +11,7 @@ defmodule Core.Response.ProjectedExpression do
   """
 
   alias Core.Brain.SynapticExperience
+  alias Core.Response.SemanticRoleFidelity
   alias Core.Semantic.{EpisodicProjection, SentenceMeaning}
 
   @max_surface 120
@@ -78,6 +79,8 @@ defmodule Core.Response.ProjectedExpression do
     not a request to memorize anything and not a factual question.
     #{cue}
     Respond naturally to the report, in at most two short sentences.
+    The current actor, action, and patient take precedence over earlier
+    conversation topics. Do not substitute previous events for this turn.
     Preserve the source clause's simple-present tense/aspect. Do not
     convert it into present perfect ("has planted"), past ("planted"),
     progressive ("is planting"), or future ("will plant"). Those forms
@@ -115,11 +118,17 @@ defmodule Core.Response.ProjectedExpression do
             {:repaired, :unsupported_temporal_shift, replacement}
 
           :unchanged ->
-            case repair_unverified_detail(user_text, draft, frame) do
-              {:repaired, replacement} ->
-                {:repaired, :unverified_sense_detail, replacement}
+            case SemanticRoleFidelity.audit(user_text, draft, frame) do
+              %{status: :role_substitution_detected} ->
+                {:repaired, :semantic_role_drift, grounded_paraphrase(frame)}
 
-              :unchanged -> :unchanged
+              _ ->
+                case repair_unverified_detail(user_text, draft, frame) do
+                  {:repaired, replacement} ->
+                    {:repaired, :unverified_sense_detail, replacement}
+
+                  :unchanged -> :unchanged
+                end
             end
         end
     end
@@ -280,6 +289,10 @@ defmodule Core.Response.ProjectedExpression do
   end
 
   def repair_unverified_detail(_, _, _), do: :unchanged
+
+  defp grounded_paraphrase(%{
+         actor: actor, patient: patient, predicate_lemma: base
+       }), do: paraphrase(actor, base, patient)
 
   defp contains_word?(text, term) do
     ~r/[\p{L}]+/u
