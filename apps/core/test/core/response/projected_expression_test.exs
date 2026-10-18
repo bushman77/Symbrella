@@ -231,6 +231,11 @@ defmodule Core.Response.ProjectedExpressionTest do
 
       assert answer ==
                "I understand you're describing the gardener planting a tree."
+      assert reflection.status == :repair
+      assert reflection.applied? == true
+      assert :projected_statement_echo in reflection.issues
+      assert reflection.draft_sha256 != reflection.final_sha256
+      assert reflection.final_text == answer
       assert reflection.projected_expression_repair.attempted?
       assert reflection.projected_expression_repair.applied?
       assert reflection.projected_expression_repair.promoted_sense? == false
