@@ -16,6 +16,7 @@ defmodule Core.Response.ProjectedExpression do
   @max_surface 120
   @max_sentence 400
   @max_group_terms 3
+  @max_distinguishing_terms 24
 
   @spec from_si(map()) :: map() | nil
   def from_si(%{intent: :statement,
@@ -90,6 +91,30 @@ defmodule Core.Response.ProjectedExpression do
   def prompt(_), do: ""
 
   @doc """
+  A bounded safety post-pass for generated responses to verified user
+  statement *structure*. It recognizes exact echoes and explicitly
+  ungrounded distinctions copied from still-competing dictionary senses.
+  The latter requires a real source-grounded cohort; it never guesses
+  missing details from the model output.
+  """
+  @spec review_draft(String.t(), String.t(), map() | nil) ::
+    {:repaired, atom(), String.t()} | :unchanged
+  def review_draft(user_text, draft, frame) do
+    case repair_echo(user_text, draft, frame) do
+      {:repaired, replacement} ->
+        {:repaired, :exact_report_echo, replacement}
+
+      :unchanged ->
+        case repair_unverified_detail(user_text, draft, frame) do
+          {:repaired, replacement} ->
+            {:repaired, :unverified_sense_detail, replacement}
+
+          :unchanged -> :unchanged
+        end
+    end
+  end
+
+  @doc """
   Only an exact/repeated sentence echo in a proven statement is repaired.
   This safe fallback refers to the user-described action; it does not
   assert that the event occurred or a dictionary sense was identified.
@@ -102,23 +127,59 @@ defmodule Core.Response.ProjectedExpression do
       }) when is_binary(user_text) and is_binary(draft) do
     if normalized(user_text) == normalized(sentence) and
          same_statement_repeated?(sentence, draft) do
-      gerund = conservative_gerund(base)
-
-      fallback =
-        if is_binary(gerund) do
-          "I understand you're describing #{actor} #{gerund} #{patient}."
-        else
-          "I follow the statement: #{actor} is the actor, " <>
-            "and #{patient} is the object of the action."
-        end
-
-      {:repaired, fallback}
+      {:repaired, paraphrase(actor, base, patient)}
     else
       :unchanged
     end
   end
 
   def repair_echo(_, _, _), do: :unchanged
+
+  @doc """
+  Reject only words copied from a *differentiatING* dictionary sense's
+  gloss when those words were absent from the user's asserted sentence.
+  This detects unsupported specificity, not the broader truth of a claim.
+  """
+  @spec repair_unverified_detail(String.t(), String.t(), map() | nil) ::
+    {:repaired, String.t()} | :unchanged
+  def repair_unverified_detail(user_text, draft, %{
+        kind: :user_reported_action, sentence: sentence,
+        actor: actor, patient: patient, predicate_lemma: base,
+        cohort: %{status: :candidate_cohorts,
+                  distinguishing_terms: details}
+      }) when is_binary(user_text) and is_binary(draft) and is_list(details) do
+    if normalized(sentence) == normalized(user_text) and
+         Enum.any?(details, fn term ->
+           is_binary(term) and term != "" and
+             not contains_word?(sentence, term) and
+             contains_word?(draft, term)
+         end) do
+      {:repaired, paraphrase(actor, base, patient)}
+    else
+      :unchanged
+    end
+  end
+
+  def repair_unverified_detail(_, _, _), do: :unchanged
+
+  defp contains_word?(text, term) do
+    text
+    |> String.downcase()
+    |> Regex.scan(~r/[\p{L}]+/u)
+    |> List.flatten()
+    |> Enum.member?(String.downcase(term))
+  end
+
+  defp paraphrase(actor, base, patient) do
+    case conservative_gerund(base) do
+      gerund when is_binary(gerund) ->
+        "I understand you're describing #{actor} #{gerund} #{patient}."
+
+      _ ->
+        "I follow the statement: #{actor} is the actor, " <>
+          "and #{patient} is the object of the action."
+    end
+  end
 
   defp safe_surface?(text) when is_binary(text) do
     value = String.trim(text)
@@ -156,7 +217,18 @@ defmodule Core.Response.ProjectedExpression do
   defp conservative_gerund(base) when is_binary(base) do
     word = String.downcase(String.trim(base))
 
+    irregular = %{
+      "be" => "being", "run" => "running", "sit" => "sitting",
+      "swim" => "swimming", "get" => "getting",
+      "put" => "putting", "cut" => "cutting",
+      "stop" => "stopping", "plan" => "planning",
+      "begin" => "beginning", "forget" => "forgetting",
+      "panic" => "panicking"
+    }
+
     cond do
+      Map.has_key?(irregular, word) ->
+        Map.fetch!(irregular, word)
       not Regex.match?(~r/^[a-z]{3,28}$/u, word) -> nil
       String.ends_with?(word, "ie") ->
         String.replace_suffix(word, "ie", "ying")
@@ -190,7 +262,24 @@ defmodule Core.Response.ProjectedExpression do
           |> Enum.filter(&(is_binary(&1) and byte_size(&1) <= 32))
           |> Enum.uniq()
 
+        distinguishing_terms =
+          groups
+          |> Enum.take(2)
+          |> Enum.flat_map(fn group ->
+            group
+            |> Map.get(:members, [])
+            |> Enum.take(4)
+            |> Enum.flat_map(&Map.get(&1, :distinguishing_definition_terms, []))
+          end)
+          |> Enum.filter(fn term ->
+            is_binary(term) and
+              Regex.match?(~r/^[a-z]{3,24}$/u, term)
+          end)
+          |> Enum.uniq()
+          |> Enum.take(@max_distinguishing_terms)
+
         %{status: :candidate_cohorts, shared_terms: terms,
+          distinguishing_terms: distinguishing_terms,
           exact_sense_known?: false}
 
       _ -> %{status: :no_verified_cohort, shared_terms: []}
