@@ -136,7 +136,7 @@ defmodule Core.Response.ProjectedExpression do
   def repair_echo(_, _, _), do: :unchanged
 
   @doc """
-  Reject only words copied from a *differentiatING* dictionary sense's
+  Reject only words copied from a *distinguishing* dictionary sense's
   gloss when those words were absent from the user's asserted sentence.
   This detects unsupported specificity, not the broader truth of a claim.
   """
@@ -163,9 +163,8 @@ defmodule Core.Response.ProjectedExpression do
   def repair_unverified_detail(_, _, _), do: :unchanged
 
   defp contains_word?(text, term) do
-    text
-    |> String.downcase()
-    |> Regex.scan(~r/[\p{L}]+/u)
+    ~r/[\p{L}]+/u
+    |> Regex.scan(String.downcase(text))
     |> List.flatten()
     |> Enum.member?(String.downcase(term))
   end
