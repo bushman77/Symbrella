@@ -51,6 +51,6 @@ defmodule Core.Brain.ActivationLifgIntegrationTest do
 
     # A neural prior affecting an LIFG decision is still not an independently
     # verified meaning, so a later comprehension is free to revise it.
-    assert si.comprehension == nil
+    assert Map.get(si, :comprehension) == nil
   end
 end
