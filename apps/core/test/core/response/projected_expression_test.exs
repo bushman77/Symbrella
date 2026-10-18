@@ -40,6 +40,10 @@ defmodule Core.Response.ProjectedExpressionTest do
             predicate: 2, object_determiner: 3, object_head: 4}}
       ],
       active_cells: [
+        %{id: "gardener|noun|1", norm: "gardener", pos: "noun",
+          definition: "Someone who tends a garden."},
+        %{id: "tree|noun|1", norm: "tree", pos: "noun",
+          definition: "A perennial woody plant or shrub."},
         %{id: "plants|verb|1", norm: "plants", pos: "verb",
           semantic_atoms: @morphology,
           definition: "An inflected form of plant."}
@@ -74,6 +78,7 @@ defmodule Core.Response.ProjectedExpressionTest do
 
   test "genuine projected SVO statement becomes a bounded, nonfactual expression frame" do
     si = statement()
+    assert {:ok, _} = Core.Brain.SynapticExperience.extract(si)
     unchanged = si
     frame = ProjectedExpression.from_si(si)
 
@@ -199,10 +204,25 @@ defmodule Core.Response.ProjectedExpressionTest do
   end
 
   defmodule EchoLlm do
-    def chat(messages, _opts) when is_list(messages) do
-      # Return the actual user message twice to reproduce the observed bug.
+    use GenServer
+
+    def start_link(test_pid) do
+      GenServer.start_link(__MODULE__, test_pid, name: __MODULE__)
+    end
+
+    @impl true
+    def init(test_pid), do: {:ok, test_pid}
+
+    def chat(messages, opts) do
+      GenServer.call(__MODULE__, {:chat, messages, opts})
+    end
+
+    @impl true
+    def handle_call({:chat, messages, _opts}, _from, owner) do
+      # Return the original statement twice even with a grounded prompt.
       user = messages |> List.last() |> Map.fetch!("content")
-      {:ok, %{content: user <> "\n\n" <> user}}
+      send(owner, {:projected_echo_llm_prompt, hd(messages)["content"]})
+      {:reply, {:ok, %{content: user <> "\n\n" <> user}}, owner}
     end
   end
 
@@ -212,6 +232,7 @@ defmodule Core.Response.ProjectedExpressionTest do
 
     Application.put_env(:core, :llm_client, EchoLlm)
     Application.put_env(:core, :web_retrieval, enabled?: false)
+    start_supervised!({EchoLlm, self()})
 
     try do
       si = statement()
@@ -236,6 +257,9 @@ defmodule Core.Response.ProjectedExpressionTest do
       assert :projected_statement_echo in reflection.issues
       assert reflection.draft_sha256 != reflection.final_sha256
       assert reflection.final_text == answer
+      assert_receive {:projected_echo_llm_prompt, prompt}
+      assert prompt =~ "USER-REPORTED ACTION"
+      assert prompt =~ ~s(actor="the gardener")
       assert reflection.projected_expression_repair.attempted?
       assert reflection.projected_expression_repair.applied?
       assert reflection.projected_expression_repair.promoted_sense? == false
