@@ -19,6 +19,8 @@ defmodule Brain.Synapses.Shadow do
 
   use GenServer
 
+  alias Brain.Synapses.ReceiptStore
+
   @unreviewed_delta 0.01
   @reviewed_delta 0.03
   @max_weight 0.08
@@ -29,17 +31,24 @@ defmodule Brain.Synapses.Shadow do
   @type edge_key :: {String.t(), String.t(), :actor | :patient}
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    configured = Application.get_env(:brain, __MODULE__, [])
+    opts = Keyword.merge(configured, opts)
+
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc "Record a Core-revalidated, attributed experience with typed edges."
   @spec observe(map()) :: {:ok, :recorded | :duplicate} | {:error, atom()}
-  def observe(%{evidence: evidence, edges: edges, provenance: :user_reported})
+  def observe(observation, server \\ __MODULE__)
+  def observe(%{evidence: evidence, edges: edges, provenance: :user_reported}, server)
       when is_binary(evidence) and is_list(edges) do
-    call({:observe, evidence, edges})
+    call({:observe, evidence, edges}, server)
   end
 
-  def observe(_), do: {:error, :invalid_observation}
+  def observe(_, _), do: {:error, :invalid_observation}
 
   @doc """
   Review an already recorded experience. The caller must be a trusted,
@@ -50,18 +59,19 @@ defmodule Brain.Synapses.Shadow do
   Later authenticated review can reverse either decision.
   """
   @spec review(map()) :: {:ok, :confirmed | :rejected | :unchanged} | {:error, atom()}
+  def review(review, server \\ __MODULE__)
   def review(%{evidence: evidence, provenance: :human_review,
-               reviewer: reviewer, decision: decision})
+               reviewer: reviewer, decision: decision}, server)
       when is_binary(evidence) and is_binary(reviewer) and
            decision in [:confirm, :reject] do
     if byte_size(reviewer) in 1..128 and String.trim(reviewer) != "" do
-      call({:review, evidence, decision})
+      call({:review, evidence, decision, reviewer}, server)
     else
       {:error, :invalid_review}
     end
   end
 
-  def review(_), do: {:error, :invalid_review}
+  def review(_, _), do: {:error, :invalid_review}
 
   @doc """
   Read-only correction proposal across two independently revalidated
@@ -70,25 +80,27 @@ defmodule Brain.Synapses.Shadow do
   must differ. No receipt or weight is ever changed by this call.
   """
   @spec propose_correction(map(), map()) :: map()
+  def propose_correction(old, new, server \\ __MODULE__)
   def propose_correction(
         %{evidence: old_evidence, provenance: :user_reported, edges: old_edges},
-        %{evidence: new_evidence, provenance: :user_reported, edges: new_edges}
+        %{evidence: new_evidence, provenance: :user_reported, edges: new_edges},
+        server
       )
       when is_binary(old_evidence) and is_binary(new_evidence) and
              is_list(old_edges) and is_list(new_edges) do
-    call({:propose_correction, old_evidence, old_edges, new_evidence, new_edges})
+    call({:propose_correction, old_evidence, old_edges, new_evidence, new_edges}, server)
   end
 
-  def propose_correction(_, _), do: %{status: :invalid_evidence}
+  def propose_correction(_, _, _), do: %{status: :invalid_evidence}
 
   @doc "Read-only aggregate counters with no plaintext experiences."
   @spec snapshot() :: map()
-  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
+  def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
 
   @doc "A provisional edge is not evidence that its dictionary sense is right."
   @spec edge(String.t(), String.t(), atom()) :: map() | nil
-  def edge(from_id, to_id, relation) do
-    GenServer.call(__MODULE__, {:edge, {from_id, to_id, relation}})
+  def edge(from_id, to_id, relation, server \\ __MODULE__) do
+    GenServer.call(server, {:edge, {from_id, to_id, relation}})
   end
 
   @doc """
@@ -96,27 +108,48 @@ defmodule Brain.Synapses.Shadow do
   against an independently chosen noun context. Never a lexical decision.
   """
   @spec preview([String.t()], String.t(), :actor | :patient) :: map()
-  def preview(candidates, noun_id, relation)
+  def preview(candidates, noun_id, relation, server \\ __MODULE__)
       when is_list(candidates) and is_binary(noun_id) and
            relation in [:actor, :patient] do
     ids = Enum.uniq(candidates)
 
     if length(ids) in 1..@max_preview and lex_id?(noun_id, "noun") and
          Enum.all?(ids, &lex_id?(&1, "verb")) do
-      GenServer.call(__MODULE__, {:preview, ids, noun_id, relation})
+      GenServer.call(server, {:preview, ids, noun_id, relation})
     else
       %{status: :invalid_candidates, candidates: []}
     end
   end
 
-  def preview(_, _, _), do: %{status: :invalid_candidates, candidates: []}
+  def preview(_, _, _, _), do: %{status: :invalid_candidates, candidates: []}
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
+    durable? = Keyword.get(opts, :durable?, false) == true
+    dir = Keyword.get(opts, :dir, "tmp/synapses")
+
+    loaded =
+      if durable? do
+        case ReceiptStore.open(dir) do
+          {:ok, %{secret: secret, receipts: receipts}} ->
+            {secret, receipts, :ready}
+
+          {:error, _} ->
+            {:crypto.strong_rand_bytes(32), %{}, :unavailable}
+        end
+      else
+        {:crypto.strong_rand_bytes(32), %{}, :disabled}
+      end
+
+    {secret, receipts, storage_status} = loaded
+
     {:ok, %{
-      secret: :crypto.strong_rand_bytes(32),
-      receipts: %{},
-      edges: %{},
+      secret: secret,
+      receipts: receipts,
+      edges: weights(receipts),
+      durable?: durable?,
+      storage_dir: dir,
+      storage_status: storage_status,
       duplicates: 0,
       reviews: 0,
       rejected_reviews: 0
@@ -128,6 +161,9 @@ defmodule Brain.Synapses.Shadow do
     unique_edges = Enum.uniq(edges)
 
     cond do
+      state.storage_status == :unavailable ->
+        {:reply, {:error, :storage_unavailable}, state}
+
       not valid_evidence?(evidence) or
           length(unique_edges) != 2 or
           not Enum.all?(unique_edges, &valid_edge?/1) or
@@ -151,17 +187,23 @@ defmodule Brain.Synapses.Shadow do
             {:reply, {:error, :edge_capacity}, state}
 
           true ->
-            record = %{edges: unique_edges, verdict: :unreviewed}
+            record = %{edges: canonical_edges(unique_edges), verdict: :unreviewed, reviews: []}
             receipts = Map.put(state.receipts, receipt, record)
-            {:reply, {:ok, :recorded},
-             %{state | receipts: receipts, edges: weights(receipts)}}
+
+            case commit_receipts(state, receipts) do
+              {:ok, updated} -> {:reply, {:ok, :recorded}, updated}
+              {:error, reason} -> {:reply, {:error, reason}, state}
+            end
         end
     end
   end
 
   @impl true
-  def handle_call({:review, evidence, decision}, _from, state) do
-    if not valid_evidence?(evidence) do
+  def handle_call({:review, evidence, decision, reviewer}, _from, state) do
+    if state.storage_status == :unavailable do
+      {:reply, {:error, :storage_unavailable}, state}
+    else
+      if not valid_evidence?(evidence) do
       {:reply, {:error, :invalid_review}, state}
     else
       key = receipt(state, evidence)
@@ -173,16 +215,36 @@ defmodule Brain.Synapses.Shadow do
         {:ok, record} ->
           verdict = if decision == :confirm, do: :confirmed, else: :rejected
 
-          if record.verdict == verdict do
-            {:reply, {:ok, :unchanged}, state}
-          else
-            receipts = Map.put(state.receipts, key, %{record | verdict: verdict})
-            {:reply, {:ok, if(decision == :confirm, do: :confirmed, else: :rejected)},
-             %{state | receipts: receipts, edges: weights(receipts),
-               reviews: state.reviews + 1,
-               rejected_reviews: state.rejected_reviews +
-                 if(decision == :reject, do: 1, else: 0)}}
+          cond do
+            record.verdict == verdict ->
+              {:reply, {:ok, :unchanged}, state}
+
+            length(Map.get(record, :reviews, [])) >= 8 ->
+              {:reply, {:error, :review_capacity}, state}
+
+            true ->
+              audit = %{
+                decision: verdict,
+                reviewer: ReceiptStore.reviewer_digest(state.secret, reviewer),
+                at_ms: System.system_time(:millisecond)
+              }
+
+              changed = %{record | verdict: verdict,
+                reviews: Map.get(record, :reviews, []) ++ [audit]}
+              receipts = Map.put(state.receipts, key, changed)
+
+              case commit_receipts(state, receipts) do
+                {:ok, updated} ->
+                  {:reply, {:ok, verdict},
+                   %{updated | reviews: state.reviews + 1,
+                     rejected_reviews: state.rejected_reviews +
+                       if(decision == :reject, do: 1, else: 0)}}
+
+                {:error, reason} ->
+                  {:reply, {:error, reason}, state}
+              end
           end
+      end
       end
     end
   end
@@ -238,6 +300,7 @@ defmodule Brain.Synapses.Shadow do
 
     {:reply, %{
       mode: :shadow_only,
+      persistence_status: state.storage_status,
       experiences: Enum.count(entries, &(&1.verdict != :rejected)),
       rejected_experiences: Enum.count(entries, &(&1.verdict == :rejected)),
       confirmed_experiences: Enum.count(entries, &(&1.verdict == :confirmed)),
@@ -249,7 +312,7 @@ defmodule Brain.Synapses.Shadow do
       max_connections: @max_edges,
       weight_cap: @max_weight,
       live_priming?: false,
-      persisted?: false
+      persisted?: state.storage_status == :ready
     }, state}
   end
 
@@ -276,14 +339,39 @@ defmodule Brain.Synapses.Shadow do
     }, state}
   end
 
-  defp call(message) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, message, 5_000)
-    else
-      {:error, :not_running}
-    end
+  defp call(message, server) do
+    present? =
+      cond do
+        is_pid(server) -> Process.alive?(server)
+        is_atom(server) -> is_pid(Process.whereis(server))
+        true -> false
+      end
+
+    if present?, do: GenServer.call(server, message, 5_000),
+      else: {:error, :not_running}
   catch
     :exit, _ -> {:error, :not_running}
+  end
+
+  defp commit_receipts(state, receipts) do
+    outcome =
+      if state.durable? do
+        ReceiptStore.persist(state.storage_dir, state.secret, receipts)
+      else
+        :ok
+      end
+
+    case outcome do
+      :ok -> {:ok, %{state | receipts: receipts, edges: weights(receipts)}}
+      _ -> {:error, :persistence_failed}
+    end
+  end
+
+  defp canonical_edges(edges) do
+    Enum.sort_by(edges, fn
+      {_, _, :actor} -> 0
+      _ -> 1
+    end)
   end
 
   defp weights(receipts) do
@@ -315,8 +403,10 @@ defmodule Brain.Synapses.Shadow do
     end)
   end
 
-  defp receipt(state, evidence), do:
+  defp receipt(state, evidence) do
     :crypto.mac(:hmac, :sha256, state.secret, evidence)
+    |> Base.encode16(case: :lower)
+  end
 
   defp canonical_correction_edges(edges) when is_list(edges) do
     if length(edges) == 2 do
