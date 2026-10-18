@@ -56,12 +56,13 @@ base_db_lookup = fn base ->
         base_verb_examples: verbs
           |> Enum.take(8)
           |> Enum.map(fn row ->
-            %{id: Map.get(row, :id),
-              definition: Map.get(row, :definition)
-                |> case do
-                  v when is_binary(v) -> String.slice(v, 0, 130)
-                  _ -> nil
-                end}
+            definition =
+              case Map.get(row, :definition) do
+                value when is_binary(value) -> String.slice(value, 0, 130)
+                _ -> nil
+              end
+
+            %{id: Map.get(row, :id), definition: definition}
           end)
       }
     rescue
