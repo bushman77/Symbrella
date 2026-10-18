@@ -17,11 +17,11 @@ defmodule Core.Brain.RoleSemanticContextTest do
     choices = [
       %{token_index: 1, id: actor_id, lemma: actor,
         definition: actor_gloss,
-        candidate_probs: %{actor_id => 0.75}},
+        candidate_probs: %{actor_id => 1.0}},
       %{token_index: 2, id: verb_id, lemma: verb},
       %{token_index: 4, id: patient_id, lemma: patient,
         definition: patient_gloss,
-        candidate_probs: %{patient_id => 0.75}}
+        candidate_probs: %{patient_id => 1.0}}
     ]
 
     %{
