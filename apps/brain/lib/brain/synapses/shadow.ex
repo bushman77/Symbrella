@@ -112,6 +112,8 @@ defmodule Brain.Synapses.Shadow do
   """
   @spec preview([String.t()], String.t(), :actor | :patient, GenServer.server()) :: map()
   def preview(candidates, noun_id, relation, server \\ __MODULE__)
+
+  def preview(candidates, noun_id, relation, server)
       when is_list(candidates) and is_binary(noun_id) and
            relation in [:actor, :patient] do
     ids = Enum.uniq(candidates)
