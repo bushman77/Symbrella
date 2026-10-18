@@ -98,7 +98,9 @@ defmodule Brain.Synapses.Shadow do
 
   @doc "Read-only test of whether an exact evidence report has been recorded (including rejection)."
   @spec recorded?(binary(), GenServer.server()) :: boolean()
-  def recorded?(evidence, server \\ __MODULE__) when is_binary(evidence) do
+  def recorded?(evidence, server \\ __MODULE__)
+
+  def recorded?(evidence, server) when is_binary(evidence) do
     call({:recorded?, evidence}, server)
   end
 
