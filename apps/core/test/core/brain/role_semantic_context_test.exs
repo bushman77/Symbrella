@@ -379,6 +379,22 @@ defmodule Core.Brain.RoleSemanticContextTest do
     assert on.proposed_id == nil
   end
 
+  test "a lower-ranked noun cannot manufacture consensus with a higher noun winner" do
+    input =
+      si("baker", "cooks", "cook", "meal",
+        "A person who bakes bread.", "Food prepared and eaten.")
+      |> tie_patient("meal", 0.3)
+
+    probe = RoleSemanticContext.extract(input,
+      fetch_noun_senses: fn _ ->
+        raise "wrongly queried dictionary before checking selected ID rank"
+      end)
+
+    patient = Enum.find(probe.contexts, &(&1.role == :patient))
+    assert patient.status == :unavailable_or_ambiguous
+    assert patient.reason == :selected_noun_not_highest_scored
+  end
+
   test "unavailable or duplicate tied dictionary IDs fail closed" do
     input =
       si("baker", "cooks", "cook", "meal",
