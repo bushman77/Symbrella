@@ -107,7 +107,8 @@ pairs =
             expanded_proposed: on.proposed_id,
             expansion_status: on.role_expansion_status,
             role_sources: Enum.map(on.role_expansion_sources, fn ctx ->
-              Map.take(ctx, [:role, :status, :noun_sense_id,
+              Map.take(ctx, [:role, :status, :reason, :noun_sense_id,
+                :noun_sense_ids, :competing_sense_count, :source,
                 :selected_probability, :terms])
             end),
             changed_decision?: Map.get(off, :proposed_id) != on.proposed_id,
