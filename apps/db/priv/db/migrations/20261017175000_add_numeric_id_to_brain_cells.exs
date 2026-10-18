@@ -18,7 +18,6 @@ defmodule Db.Migrations.AddNumericIdToBrainCells do
   # the database normally allows only 16 MB of maintenance_work_mem.
   # Scope this increase to the migration transaction; do not change the
   # server-wide setting or leave extra memory allocated for normal queries.
-  @impl true
   def after_begin do
     repo().query!("SET LOCAL maintenance_work_mem = '64MB'")
   end
