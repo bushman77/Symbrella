@@ -78,6 +78,10 @@ defmodule Core.Response.ProjectedExpression do
     not a request to memorize anything and not a factual question.
     #{cue}
     Respond naturally to the report, in at most two short sentences.
+    Preserve the source clause's simple-present tense/aspect. Do not
+    convert it into present perfect ("has planted"), past ("planted"),
+    progressive ("is planting"), or future ("will plant"). Those forms
+    introduce temporal/aspect claims that this utterance does not supply.
     Acknowledge the actor-action-patient relationship without merely
     repeating the user's sentence, without claiming that the event was
     independently witnessed, and without claiming a specific dictionary
@@ -92,8 +96,9 @@ defmodule Core.Response.ProjectedExpression do
 
   @doc """
   A bounded safety post-pass for generated responses to verified user
-  statement *structure*. It recognizes exact echoes and explicitly
-  ungrounded distinctions copied from still-competing dictionary senses.
+  statement *structure*. It recognizes exact echoes, narrow changes
+  to the original finite-present viewpoint, and explicitly ungrounded
+  distinctions copied from still-competing dictionary senses.
   The latter requires a real source-grounded cohort; it never guesses
   missing details from the model output.
   """
@@ -105,11 +110,17 @@ defmodule Core.Response.ProjectedExpression do
         {:repaired, :exact_report_echo, replacement}
 
       :unchanged ->
-        case repair_unverified_detail(user_text, draft, frame) do
+        case repair_temporal_shift(user_text, draft, frame) do
           {:repaired, replacement} ->
-            {:repaired, :unverified_sense_detail, replacement}
+            {:repaired, :unsupported_temporal_shift, replacement}
 
-          :unchanged -> :unchanged
+          :unchanged ->
+            case repair_unverified_detail(user_text, draft, frame) do
+              {:repaired, replacement} ->
+                {:repaired, :unverified_sense_detail, replacement}
+
+              :unchanged -> :unchanged
+            end
         end
     end
   end
@@ -134,6 +145,114 @@ defmodule Core.Response.ProjectedExpression do
   end
 
   def repair_echo(_, _, _), do: :unchanged
+
+  @doc """
+  Reject a *standalone* model restatement that changes a verified finite
+  simple-present SVO report to perfect, past, future, or progressive.
+  A model's tense transformation is not evidence that an event occurred.
+
+  This deliberately uses exact actor/patient bindings and conservative
+  lemma morphology. Substantive explanations and quotations containing
+  additional clauses are left to the normal review, not blanket-rejected.
+  """
+  @spec repair_temporal_shift(String.t(), String.t(), map() | nil) ::
+    {:repaired, String.t()} | :unchanged
+  def repair_temporal_shift(user_text, draft, %{
+        kind: :user_reported_action,
+        evidence_level: :structurally_interpreted_not_verified,
+        sentence: sentence, actor: actor, patient: patient,
+        predicate_lemma: base
+      }) when is_binary(user_text) and is_binary(draft) do
+    if normalized(user_text) == normalized(sentence) and
+         standalone_changed_tense?(draft, actor, base, patient) do
+      {:repaired, paraphrase(actor, base, patient)}
+    else
+      :unchanged
+    end
+  end
+
+  def repair_temporal_shift(_, _, _), do: :unchanged
+
+  # Same independently bound actor and patient, but an unsupported
+  # transformation of the action time/aspect. No best-guess sense search.
+  defp standalone_changed_tense?(draft, actor, base, patient) do
+    subject = normalized(actor)
+    object = normalized(patient)
+
+    case conservative_verb_forms(base) do
+      %{past: past, participle: participle, gerund: gerund, base: lemma} ->
+        templates = [
+          "(?:has|have|had)\\s+" <> Regex.escape(participle),
+          Regex.escape(past),
+          "will\\s+" <> Regex.escape(lemma),
+          "(?:is|are|was|were)\\s+" <> Regex.escape(gerund),
+          "(?:has|have|had)\\s+been\\s+" <> Regex.escape(gerund)
+        ]
+
+        pattern =
+          "\\A" <> Regex.escape(subject) <>
+            "\\s+(?:" <> Enum.join(templates, "|") <> ")\\s+" <>
+            Regex.escape(object) <> "\\z"
+
+        case Regex.compile(pattern, "u") do
+          {:ok, regex} -> Regex.match?(regex, normalized(draft))
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  # Small fail-closed morphology guard. Unknown forms cannot authorize a
+  # temporal-shift repair merely because a sentence contains "has".
+  defp conservative_verb_forms(base) when is_binary(base) do
+    lemma = String.downcase(String.trim(base))
+
+    if Regex.match?(~r/\A[a-z]{3,28}\z/u, lemma) do
+      irregular = %{
+        "throw" => {"threw", "thrown"},
+        "draw" => {"drew", "drawn"},
+        "write" => {"wrote", "written"},
+        "build" => {"built", "built"},
+        "eat" => {"ate", "eaten"},
+        "make" => {"made", "made"},
+        "take" => {"took", "taken"},
+        "grow" => {"grew", "grown"},
+        "run" => {"ran", "run"},
+        "begin" => {"began", "begun"},
+        "sit" => {"sat", "sat"},
+        "put" => {"put", "put"},
+        "get" => {"got", "gotten"},
+        "buy" => {"bought", "bought"},
+        "leave" => {"left", "left"},
+        "sleep" => {"slept", "slept"}
+      }
+
+      {past, participle} =
+        Map.get(irregular, lemma, {regular_past(lemma), regular_past(lemma)})
+
+      case conservative_gerund(lemma) do
+        gerund when is_binary(gerund) ->
+          %{base: lemma, past: past, participle: participle, gerund: gerund}
+        _ ->
+          nil
+      end
+    end
+  end
+
+  defp conservative_verb_forms(_), do: nil
+
+  defp regular_past(lemma) do
+    cond do
+      Regex.match?(~r/[^aeiou]y\z/u, lemma) ->
+        String.replace_suffix(lemma, "y", "ied")
+      String.ends_with?(lemma, "e") ->
+        lemma <> "d"
+      true ->
+        lemma <> "ed"
+    end
+  end
 
   @doc """
   Reject only words copied from a *distinguishing* dictionary sense's
