@@ -492,6 +492,75 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert Modal.enrich_saved_payload(upgraded, with_trace) == upgraded
   end
 
+  test "Explain displays read-only sense cohorts only from genuine shadow trace evidence" do
+    cohort = %{
+      status: :candidate_cohorts, reason: :shared_sentence_conditioned_lexical_evidence,
+      base_lexeme: "plant", eligible_sense_count: 3, cohort_count: 1,
+      participant_surfaces: %{actor: "the gardener", predicate: "plants",
+        patient: "a tree"},
+      semantic_equivalence_verified?: false, chose_exact_sense?: false,
+      modified_lifg?: false, changed_response?: false,
+      cohorts: [
+        %{
+          evidence_origin: :patient_gloss, anchor_term: "plant",
+          member_count: 2, member_ids_truncated?: false,
+          shared_definition_terms: ["plant"], minimum_member_support: 0.1015,
+          shared_meaning_verified?: false,
+          members: [
+            %{id: "plant|verb|1", direct_fit: 0.0,
+              patient_support: 0.1015, actor_support: 0.0,
+              diagnostic_score: 0.1015,
+              distinguishing_definition_terms: ["soil", "grow"]},
+            %{id: "plant|verb|2", direct_fit: 0.0,
+              patient_support: 0.1015, actor_support: 0.0,
+              diagnostic_score: 0.1015,
+              distinguishing_definition_terms: ["area", "vegetation"]}
+          ]
+        }
+      ]
+    }
+
+    source = si(:power)
+    with_trace =
+      Map.put(source, :trace, [%{
+        stage: :semantic_sense_shadow, meta: %{
+          mode: :shadow_only, status: :abstained,
+          semantic_cohort: cohort
+        }
+      }])
+
+    evidence = ExplainEvidence.from_si(with_trace)
+    assert evidence.semantic_cohort == cohort
+    rendered = payload(with_trace)
+    section = section(rendered, :semantic_cohort)
+    assert section.title == "Semantic cohorts (shadow only)"
+    assert section.hint =~ "NOT sense equivalence"
+    assert Enum.any?(section.items, fn item ->
+      item.label == "Cohort audit" and
+        item.body =~ "exact sense selected?: false" and
+        item.body =~ "LIFG modified?: false"
+    end)
+    assert Enum.any?(section.items, fn item ->
+      item.label == "Shared cue: plant (:patient_gloss)" and
+        item.body =~ "plant|verb|1" and
+        item.body =~ "plant|verb|2" and
+        item.body =~ "soil" and
+        item.body =~ "vegetation"
+    end)
+
+    cached = Modal.enrich_saved_payload(%{title: "Explain", sections: []},
+      with_trace)
+    assert section(cached, :semantic_cohort) != nil
+    assert Modal.enrich_saved_payload(cached, with_trace) == cached
+
+    assert section(payload(source), :semantic_cohort) == nil
+    unrelated = Map.put(source, :trace, [%{
+      stage: :unrelated, meta: %{mode: :shadow_only,
+        semantic_cohort: cohort}
+    }])
+    assert section(payload(unrelated), :semantic_cohort) == nil
+  end
+
   test "Explain cannot invent a shadow semantic sense from word winners alone" do
     source = si(:power)
     assert ExplainEvidence.from_si(source).semantic_sense_shadow == nil
