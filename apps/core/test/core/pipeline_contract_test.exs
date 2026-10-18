@@ -97,9 +97,14 @@ defmodule Core.PipelineContractTest do
     assert shadow.meta.applied_to_lifg? == false
     assert shadow.meta.response_changed? == false
 
-    # Core.Pipeline.Trace prepends on append, so the later
-    # comprehension event precedes the earlier shadow event.
-    stages = Enum.map(trace, & &1.stage)
+    # Trace also contains legacy tuple events (such as {:activated, ...}).
+    # Only structured Pipeline.Trace events have a :stage. Newer events
+    # are prepended, so comprehension precedes the earlier shadow event.
+    stages =
+      Enum.flat_map(trace, fn
+        %{stage: stage} when is_atom(stage) -> [stage]
+        _ -> []
+      end)
     meaning_at = Enum.find_index(stages, &(&1 == :sentence_meaning))
     shadow_at = Enum.find_index(stages, &(&1 == :semantic_sense_shadow))
     summary_at = Enum.find_index(stages, &(&1 == :comprehension))
@@ -116,7 +121,7 @@ defmodule Core.PipelineContractTest do
 
     disabled = Core.resolve_input("The artist draws a picture.",
       Keyword.put(opts, :semantic_sense_shadow?, false))
-    refute Enum.any?(disabled.trace, &(&1.stage == :semantic_sense_shadow))
+    refute Enum.any?(disabled.trace, &match?(%{stage: :semantic_sense_shadow}, &1))
   end
 
   defp assert_trace_contract!(%{} = event) do
