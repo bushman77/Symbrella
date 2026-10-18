@@ -849,6 +849,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     count = pget(reflection, :repair_count)
     critique = pget(reflection, :critique)
     grounded = pget(reflection, :grounded_revision)
+    role_fidelity = pget(reflection, :semantic_role_fidelity)
 
     # A top-level :repair says only that Core changed the final text. Make
     # visible whether the grounded second LLM pass was accepted, rejected,
@@ -872,6 +873,12 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("issues", format_frame_value(issues))
         |> maybe_kv("applied?", format_frame_value(applied?))
         |> maybe_kv("repair_count", format_frame_value(count))
+        |> maybe_kv("role fidelity review",
+          if(is_map(role_fidelity),
+            do: format_frame_value(pget(role_fidelity, :status)), else: nil))
+        |> maybe_kv("role differences",
+          if(is_map(role_fidelity),
+            do: format_frame_value(pget(role_fidelity, :mismatched_roles)), else: nil))
         |> maybe_kv("review summary", critique)
         |> maybe_kv("initial model draft",
           pget(grounded || %{}, :first_draft) || pget(reflection, :draft_text))
