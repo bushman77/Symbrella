@@ -17,6 +17,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
     |> semantic_section(field(evidence, :semantic_winners))
     |> comprehension_section(field(evidence, :comprehension))
     |> semantic_sense_shadow_section(field(evidence, :semantic_sense_shadow))
+    |> semantic_cohort_section(field(evidence, :semantic_cohort))
     |> grammar_section(
       field(evidence, :verb_particle_signatures),
       field(evidence, :atl_verb_particles)
@@ -247,6 +248,69 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp semantic_sense_shadow_section(sections, _), do: sections
+
+  defp semantic_cohort_section(sections, cohort) when is_map(cohort) do
+    groups = list(field(cohort, :cohorts))
+
+    overview =
+      []
+      |> value("status", field(cohort, :status))
+      |> value("reason", field(cohort, :reason))
+      |> value("projected SVO participants", field(cohort, :participant_surfaces))
+      |> value("attested predicate base", field(cohort, :base_lexeme))
+      |> value("eligible dictionary senses", field(cohort, :eligible_sense_count))
+      |> value("supported cohorts", field(cohort, :cohort_count))
+      |> value("shared meaning independently verified?",
+        field(cohort, :semantic_equivalence_verified?))
+      |> value("exact sense selected?", field(cohort, :chose_exact_sense?))
+      |> value("LIFG modified?", field(cohort, :modified_lifg?))
+      |> value("response changed?", field(cohort, :changed_response?))
+
+    groups =
+      Enum.map(groups, fn group ->
+        members = list(field(group, :members))
+
+        header =
+          []
+          |> value("support origin", field(group, :evidence_origin))
+          |> value("shared contextual anchor", field(group, :anchor_term))
+          |> value("member senses total", field(group, :member_count))
+          |> value("truncated members?", field(group, :member_ids_truncated?))
+          |> value("shared definition words",
+            field(group, :shared_definition_terms))
+          |> value("lowest member diagnostic support",
+            field(group, :minimum_member_support))
+          |> value("semantic equivalence verified?",
+            field(group, :shared_meaning_verified?))
+
+        member_details =
+          Enum.map(members, fn member ->
+            []
+            |> value("sense", field(member, :id))
+            |> value("direct fit", field(member, :direct_fit))
+            |> value("patient support", field(member, :patient_support))
+            |> value("actor support", field(member, :actor_support))
+            |> value("diagnostic score", field(member, :diagnostic_score))
+            |> value("distinguishing definition words",
+              field(member, :distinguishing_definition_terms))
+            |> body()
+          end)
+          |> Enum.join("\n\n")
+
+        %{
+          label: "Shared cue: " <> show(field(group, :anchor_term)) <>
+            " (" <> show(field(group, :evidence_origin)) <> ")",
+          body: body(header) <> "\n\n" <> member_details
+        }
+      end)
+
+    append(sections, :semantic_cohort, "Semantic cohorts (shadow only)",
+      show(field(cohort, :status)),
+      "Senses share independently observed lexical evidence within the same validated sentence. Cohorts can overlap; resemblance is NOT sense equivalence, a verified concept, or a chosen meaning. Restrictions were checked first.",
+      [%{label: "Cohort audit", body: body(overview)} | groups])
+  end
+
+  defp semantic_cohort_section(sections, _), do: sections
 
   defp grammar_section(sections, signatures, constituents) do
     signatures = list(signatures)
