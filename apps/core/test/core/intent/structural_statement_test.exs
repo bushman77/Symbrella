@@ -97,6 +97,12 @@ defmodule Core.Intent.StructuralStatementTest do
       %{si | experience_origin: :assistant_turn},
       %{si | atl_slate: %{winners: []}},
       %{si | episodic_candidates: []},
+      Map.update!(si, :active_cells, fn cells ->
+        Enum.map(cells, fn
+          %{id: "cooks|verb|1"} = cell -> %{cell | semantic_atoms: []}
+          cell -> cell
+        end)
+      end),
       %{si | sentence: "The baker does not cook a meal."},
       %{si | sentence_meaning: %{kind: :participant_assertion,
         speech_act: :assertion, status: :structurally_interpreted,
