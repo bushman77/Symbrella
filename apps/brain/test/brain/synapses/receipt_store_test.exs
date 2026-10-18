@@ -21,6 +21,7 @@ defmodule Brain.Synapses.ReceiptStoreTest do
   defp observation(patient, evidence) do
     %{
       provenance: :user_reported,
+      session_id: "user-session-A",
       evidence: evidence,
       edges: [
         {"draws|verb|1", "artist|noun|1", :actor},
@@ -53,18 +54,31 @@ defmodule Brain.Synapses.ReceiptStoreTest do
 
     actor = Shadow.edge("draws|verb|1", "artist|noun|1", :actor, a)
     assert_in_delta actor.weight, 0.04, 1.0e-8
+    assert_in_delta actor.provisional_weight, 0.01, 1.0e-8
+    assert_in_delta actor.reviewed_weight, 0.03, 1.0e-8
+    assert actor.provisional_experiences == 1
+    assert actor.reviewed_experiences == 1
     assert actor.experiences == 2
 
     assert {:ok, json} = File.read(Path.join(dir, "receipts.json"))
     refute String.contains?(json, "sentence-one-my-private-text")
     refute String.contains?(json, "reviewer-with-sensitive-name")
+    refute String.contains?(json, "user-session-A")
     assert byte_size(File.read!(Path.join(dir, "secret.key"))) == 32
+    assert {:ok, %{"payload" => payload}} = Jason.decode(json)
+    assert {:ok, %{"receipts" => records}} = Jason.decode(payload)
+    assert length(records) == 2
+    assert Enum.all?(records, fn record ->
+      is_integer(record["first_seen_ms"]) and
+        byte_size(record["first_session_digest"]) == 64 and
+        record["provenance"] == "user_reported_structural"
+    end)
 
     GenServer.stop(a)
     b = start_store(dir)
 
     assert %{experiences: 2, confirmed_experiences: 1, connections: 3,
-             persisted?: true} = Shadow.snapshot(b)
+             durable_review_events: 1, persisted?: true} = Shadow.snapshot(b)
     assert Shadow.edge("draws|verb|1", "artist|noun|1", :actor, b) == actor
     assert {:ok, :duplicate} = Shadow.observe(first, b)
 
