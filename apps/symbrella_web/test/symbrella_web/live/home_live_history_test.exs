@@ -339,7 +339,8 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
         _ -> false
       end)
 
-    assert %{si: si, text: "Your name is Bradley."} = reply
+    assert %{si: si, text: "Your name is Bradley.",
+             meta: %{response_source: :memory, memory_key: :user_name}} = reply
     assert si.sentence == "what is my name?"
     assert si.session_id == ChatHistory.session_id()
     assert si.response_text == nil
