@@ -95,8 +95,8 @@ defmodule Brain.LIFG.SenseFocusTest do
     assert focused_audit.sense_focus.focused_tokens == 1
     assert focused_audit.sense_focus.context_evaluations == 2
     assert focused_audit.sense_focus.context_skipped == 1
-    assert Map.keys(focused.scores) |> Enum.sort() ==
-      Enum.map(candidates(), & &1.id) |> Enum.sort()
+    assert Enum.sort(Map.keys(focused.scores)) ==
+             Enum.sort(Enum.map(candidates(), & &1.id))
     assert_in_delta Enum.sum(Map.values(focused.scores)), 1.0, 1.0e-5
 
     assert {:ok, %{choices: [broad], audit: broad_audit}} =
@@ -108,7 +108,7 @@ defmodule Brain.LIFG.SenseFocusTest do
     assert broad_audit.sense_focus.focused_tokens == 0
     assert broad_audit.sense_focus.context_evaluations == 3
     assert broad_audit.sense_focus.context_skipped == 0
-    assert Map.keys(broad.scores) |> Enum.sort() ==
-      Map.keys(focused.scores) |> Enum.sort()
+    assert Enum.sort(Map.keys(broad.scores)) ==
+             Enum.sort(Map.keys(focused.scores))
   end
 end
