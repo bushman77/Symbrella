@@ -65,6 +65,7 @@ defmodule Core.Brain.SemanticCohortTest do
     %{
       id: id,
       eligible?: true,
+      exclusions: [], missing_restrictions: [],
       grammar: :compatible_direct_object,
       cohort_gloss: gloss,
       combined_diagnostic_score: Keyword.get(opts, :score, 0.1015),
@@ -171,6 +172,18 @@ defmodule Core.Brain.SemanticCohortTest do
 
     assert SemanticCohort.evaluate(si,
       report([row("plant|verb|1", "To place a plant in soil."), excluded])
+      ).status == :skipped
+
+    # Even a malformed "eligible" row carrying a restriction cannot be
+    # passed through by a later accidental caller.
+    disguised =
+      row("plant|verb|99", "To plant a cricket ball.")
+      |> Map.put(:missing_restrictions, [:cricket_bowling])
+      |> Map.put(:exclusions,
+        [{:missing_restriction_witness, :cricket_bowling}])
+
+    assert SemanticCohort.evaluate(si,
+      report([row("plant|verb|1", "To place a plant in soil."), disguised])
       ).status == :skipped
   end
 
