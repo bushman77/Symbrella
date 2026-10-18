@@ -11,8 +11,11 @@ defmodule Core.Syntax.FinitePresentWhRolesTest do
       semantic_atoms: atoms}
   end
 
-  defp tokens(words), do: words |> Enum.with_index()
+  defp tokens(words) do
+    words
+    |> Enum.with_index()
     |> Enum.map(fn {word, i} -> %{index: i, phrase: word, n: 1} end)
+  end
 
   defp artist_cells do
     [
