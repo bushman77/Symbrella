@@ -48,7 +48,21 @@ for {sentence, i} <- Enum.with_index(sentences, 1) do
   frame = ProjectedExpression.from_si(si)
 
   input_echo = sentence <> "\n\n" <> sentence
-  repaired = ProjectedExpression.review_draft(sentence, input_echo, frame)
+  echo_review = ProjectedExpression.review_draft(sentence, input_echo, frame)
+
+  # The real Qwen drafts previously turned these finite-present reports
+  # into present perfect, incorrectly suggesting a completed action.
+  # This diagnostic only previews the response-review decision.
+  completed_action_draft =
+    case i do
+      1 -> "The gardener has planted a tree."
+      2 -> "The baker has cooked a meal."
+      3 -> "The child has thrown a ball."
+      4 -> "The captain has steered a ship."
+    end
+
+  temporal_review =
+    ProjectedExpression.review_draft(sentence, completed_action_draft, frame)
 
   IO.inspect(%{
     case: i,
@@ -57,7 +71,9 @@ for {sentence, i} <- Enum.with_index(sentences, 1) do
     projected_sentence_status:
       Map.get(Map.get(si, :sentence_meaning) || %{}, :status),
     frame: frame,
-    repeated_echo_review: repaired,
+    repeated_echo_review: echo_review,
+    model_completed_action_draft: completed_action_draft,
+    completed_action_review: temporal_review,
     changed_lifg?: false,
     changed_response?: false,
     sense_chosen?: false,
@@ -66,7 +82,8 @@ for {sentence, i} <- Enum.with_index(sentences, 1) do
 end
 
 IO.puts("""
-The preview shows a deterministic *fallback* for a literal model echo.
+The preview shows deterministic fallbacks for an exact model echo
+or a simple-present utterance incorrectly restated as a completed action.
 Normal live chat first asks the configured LLM to respond naturally;
-the fallback is applied only if an actual draft fails narrow checks.
+the fallback applies only if a real draft fails narrow checks.
 """)
