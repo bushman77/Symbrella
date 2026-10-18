@@ -143,6 +143,30 @@ defmodule Core.Brain.ActivationComprehensionTest do
              Activation.feedback_plan(si)
   end
 
+  test "grammar-incompatible lexical winner does not reinforce its neuron" do
+    si = %{
+      active_cells: [%{id: "artist|adjective|1"}, %{id: "artist|noun|1"}],
+      semantic_choices: [
+        %{id: "artist|adjective|1", token_index: 1, candidate_probs: %{}}
+      ],
+      role_competition: %{
+        source: :core_syntax_and_attested_dictionary_pos,
+        roles: %{1 => %{status: :supported, pos: "noun"}}
+      }
+    }
+
+    assert Activation.feedback_plan(si) == []
+
+    # An unresolved but compatible noun sense is still weakly represented,
+    # not promoted into verified comprehension.
+    selected = put_in(si, [:semantic_choices], [
+      %{id: "artist|noun|1", token_index: 1, candidate_probs: %{}}
+    ])
+
+    assert [%{id: "artist|noun|1", evidence: :unresolved_sense_selection}] =
+             Activation.feedback_plan(selected)
+  end
+
   test "a probability gap caused by activation alone cannot reinforce itself" do
     si = %{
       active_cells: [row(@bank), row(@river)],
