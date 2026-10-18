@@ -127,6 +127,14 @@ config :core, Core.Curiosity.EpisodeProbe,
   min_uncertainty: 0.2,
   max_recent: 40
 
+# ────────────── Durable experience-backed synaptic shadow ──────────────
+# Private, local receipts + review decisions survive BEAM restarts in dev.
+# Never feeds LIFG, neuron firing, or authoritative memory; isolated in tests.
+# tmp/ is git-ignored. Back up BOTH receipts.json and secret.key together.
+config :brain, Brain.Synapses.Shadow,
+  durable?: config_env() == :dev,
+  dir: "tmp/synapses"
+
 # ─────────────────────────── Brain ────────────────────────────────
 import_config "brain/brain.exs"
 
