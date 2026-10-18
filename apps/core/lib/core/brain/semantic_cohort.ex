@@ -114,7 +114,11 @@ defmodule Core.Brain.SemanticCohort do
   def evaluate(_, _), do: skipped(:missing_vetted_sentence_evidence)
 
   defp distinct_senses?(rows) do
-    ids = Enum.map(rows, &Map.get(&1, :id))
+    ids = Enum.map(rows, fn
+      %{} = row -> Map.get(row, :id)
+      _ -> nil
+    end)
+
     Enum.all?(ids, &is_binary/1) and
       length(Enum.uniq(ids)) == length(ids)
   end
@@ -159,6 +163,14 @@ defmodule Core.Brain.SemanticCohort do
 
     anchors = (direct ++ roles) |> Enum.uniq() |> Enum.sort()
 
+    provenance =
+      row.one_hop_witnesses
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(&Map.take(&1, [:role, :provenance,
+        :source_noun_sense_id, :source_noun_sense_ids,
+        :selected_noun_probability, :matched]))
+      |> Enum.take(2)
+
     %{
       id: row.id,
       direct: row.lexical_score,
@@ -167,7 +179,8 @@ defmodule Core.Brain.SemanticCohort do
       combined: row.combined_diagnostic_score,
       gloss_tokens: gloss_tokens,
       grammar: row.grammar,
-      anchors: anchors
+      anchors: anchors,
+      source_provenance: provenance
     }
   end
 
@@ -208,6 +221,22 @@ defmodule Core.Brain.SemanticCohort do
       members: Enum.take(unique, @max_members),
       member_ids_truncated?: length(members) > @max_members,
       shared_definition_terms: Enum.take(common, @max_distinctions),
+      role_evidence_provenance:
+        members
+        |> Enum.flat_map(& &1.source_provenance)
+        |> Enum.filter(fn witness ->
+          witness_origin =
+            case Map.get(witness, :role) do
+              :actor -> :actor_gloss
+              :patient -> :patient_gloss
+              _ -> nil
+            end
+
+          witness_origin == origin and
+            term in Map.get(witness, :matched, [])
+        end)
+        |> Enum.uniq()
+        |> Enum.take(4),
       minimum_member_support:
         members |> Enum.map(& &1.combined) |> Enum.min() |> Float.round(6),
       # This is an empirical floor, NOT a probability of group truth.
