@@ -170,6 +170,7 @@ defmodule Core.Brain.RoleSemanticContextTest do
     report = RoleSemanticContext.extract(changed)
     patient = Enum.find(report.contexts, &(&1.role == :patient))
     assert patient.status == :unavailable_or_ambiguous
+    assert patient.reason == :ambiguous_same_surface_noun_senses
 
     senses = [
       sense("cook", 1, "To prepare food for eating."),
@@ -198,6 +199,14 @@ defmodule Core.Brain.RoleSemanticContextTest do
       end)
     end)
 
+    mismatched = RoleSemanticContext.extract(tampered)
+    assert Enum.find(mismatched.contexts, &(&1.role == :patient)).reason ==
+             :missing_or_inconsistent_selected_noun_definition
+
+    no_probabilities = RoleSemanticContext.extract(no_scores)
+    assert Enum.find(no_probabilities.contexts, &(&1.role == :patient)).reason ==
+             :missing_noun_probability_slate
+
     for invalid <- [tampered, no_scores, %{original | source: :assistant},
                     %{original | atl_slate: %{winners: []}}] do
       report = RoleSemanticContext.extract(invalid)
@@ -223,6 +232,7 @@ defmodule Core.Brain.RoleSemanticContextTest do
     result = RoleSemanticContext.extract(invalid)
     patient = Enum.find(result.contexts, &(&1.role == :patient))
     assert patient.status == :unavailable_or_ambiguous
+    assert patient.reason == :incomplete_noun_probability_slate
     assert result.active_count == 1 or result.active_count == 0
   end
 
