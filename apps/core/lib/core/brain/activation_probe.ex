@@ -179,7 +179,8 @@ defmodule Core.Brain.ActivationProbe do
 
     case {event, ActionQuestions.parse(question)} do
       {%{entity_key: actor_key, relation: "verb_" <> predicate} = event,
-       {:forward, actor_key, predicate}} ->
+       {:forward, requested_actor, requested_predicate}}
+      when actor_key == requested_actor and predicate == requested_predicate ->
         event
         |> Map.put(:status, "asserted")
         |> ActionQuestions.answer(:patient, %{predicate: predicate})
