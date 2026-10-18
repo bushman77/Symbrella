@@ -82,6 +82,8 @@ else
       IO.puts("First: #{first}")
       IO.puts("Next:  #{second}")
       IO.puts("Neuron IDs in propagated carryover: #{report.synthetic_prior_count}")
+      IO.inspect(report.first_turn_svo_spans, label: "First-turn competing SVO signature spans")
+      IO.inspect(report.complete_svo_span, label: "Independently admissible complete SVO span")
       IO.inspect(report.semantic_pulse_source, label: "Attested verb-lemma pulse source")
       IO.inspect(report.semantic_lemma_prior, label: "Decayed semantic-lemma prior")
       IO.inspect(report.read_only_event_answer, label: "Read-only validated-event answer")
