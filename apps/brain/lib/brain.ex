@@ -32,6 +32,7 @@ defmodule Brain do
   """
 
   alias Brain.Cell.Runtime, as: CellRT
+  alias Brain.Cell.Activation, as: CellActivation
   alias Brain.WM.Focus, as: WMFocus
   alias Brain.WM.Recall, as: WMRecall
   alias Brain.MoodHooks
@@ -72,6 +73,7 @@ defmodule Brain do
   @type state :: %{
           history: list(),
           active_cells: %{optional(String.t()) => number()},
+          active_cell_times: %{optional(String.t()) => integer()},
           attention: map(),
           wm: [wm_item()],
           wm_cfg: wm_cfg(),
@@ -153,7 +155,13 @@ defmodule Brain do
   @doc false
   @spec report_activation(String.t(), number()) :: :ok
   def report_activation(id, activation) when is_binary(id) and is_number(activation) do
-    gencast(@name, {:activation_report, id, activation})
+    report_activation(id, activation, System.monotonic_time(:millisecond))
+  end
+
+  @spec report_activation(String.t(), number(), integer()) :: :ok
+  def report_activation(id, activation, at_ms)
+      when is_binary(id) and is_number(activation) and is_integer(at_ms) do
+    gencast(@name, {:activation_report, id, activation, at_ms})
   end
 
   @spec cell_status(String.t()) :: {:ok, term()} | {:error, :not_found}
@@ -204,6 +212,7 @@ defmodule Brain do
        assistant: BrainConfig.assistant(),
        history: [],
        active_cells: %{},
+       active_cell_times: %{},
        attention: %{},
        wm: [],
        wm_cfg: BrainConfig.wm(),
@@ -252,7 +261,7 @@ defmodule Brain do
 
   @impl true
   def handle_call({:stm, si}, _from, state) when is_map(si) do
-    state = maybe_orient(state)
+    state = state |> decay_active_cells() |> maybe_orient()
 
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
@@ -267,11 +276,16 @@ defmodule Brain do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state), do: {:reply, state, state}
+  def handle_call(:snapshot, _from, state) do
+    state = decay_active_cells(state)
+    {:reply, state, state}
+  end
 
   @impl true
-  def handle_call(:activation_snapshot, _from, state),
-    do: {:reply, state.active_cells, state}
+  def handle_call(:activation_snapshot, _from, state) do
+    state = decay_active_cells(state)
+    {:reply, state.active_cells, state}
+  end
 
   @impl true
   def handle_call({:cell, id, req}, _from, state) when is_binary(id) do
@@ -318,10 +332,34 @@ defmodule Brain do
   end
 
   @impl true
+  def handle_cast({:activation_report, id, a, at_ms}, state)
+      when is_binary(id) and is_number(a) and is_integer(at_ms) do
+    # Ignore stale late-arriving reports; Brain.Cell uses the same monotonic clock.
+    previous_ms = Map.get(state.active_cell_times, id, at_ms)
+
+    if at_ms < previous_ms do
+      {:noreply, state}
+    else
+      a = CellActivation.decay(max(a, 0.0), at_ms, at_ms)
+
+      if a > 0 do
+        active = Map.put(state.active_cells, id, a)
+        times = Map.put(state.active_cell_times, id, at_ms)
+        _ = safe_mood_register_activation(active)
+        {:noreply, %{state | active_cells: active, active_cell_times: times}}
+      else
+        {:noreply,
+         %{state |
+           active_cells: Map.delete(state.active_cells, id),
+           active_cell_times: Map.delete(state.active_cell_times, id)}}
+      end
+    end
+  end
+
+  # Compatibility with older callers that report without a timestamp.
+  @impl true
   def handle_cast({:activation_report, id, a}, state) when is_binary(id) and is_number(a) do
-    new_active = Map.put(state.active_cells, id, a)
-    _ = safe_mood_register_activation(new_active)
-    {:noreply, %{state | active_cells: new_active}}
+    handle_cast({:activation_report, id, a, System.monotonic_time(:millisecond)}, state)
   end
 
   @impl true
@@ -384,6 +422,16 @@ defmodule Brain do
   def via(id) when is_binary(id), do: CellRT.via(id)
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
+
+  defp decay_active_cells(state) do
+    now = System.monotonic_time(:millisecond)
+
+    {active, times} =
+      CellActivation.decay_reports(state.active_cells, state.active_cell_times, now)
+
+    %{state | active_cells: active, active_cell_times: times}
+  end
+
 
   defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
     meta = if reason, do: %{reason: reason}, else: %{}
