@@ -52,6 +52,32 @@ defmodule Core.Semantic.SVOEvent do
 
   def project(_, _), do: []
 
+  @doc """
+  Return the unique *complete-sentence* finite-present SVO signature.
+
+  This uses the same source, evidence and exact-surface constraints as the
+  projection boundary. Smaller overlapping SVO hypotheses (such as
+  "the artist draws a") must not suppress a validated full clause.
+  A signature alone is not evidence of an event: callers must still revalidate
+  the selected lexical roles and episode independently.
+  """
+  @spec complete_signature(map()) :: map() | nil
+  def complete_signature(%{} = si) do
+    case get(si, :sentence) do
+      sentence when is_binary(sentence) ->
+        if admissible_text?(sentence) do
+          case full_clause_signatures(si, sentence) do
+            [signature] -> signature
+            _ -> nil
+          end
+        end
+
+      _ -> nil
+    end
+  end
+
+  def complete_signature(_), do: nil
+
   # Overlapping lexical POS hypotheses may create partial SVO candidates.
   # Only full-sentence interpretations compete for episode admission.
   # Multiple complete analyses remain ambiguous and are rejected.
