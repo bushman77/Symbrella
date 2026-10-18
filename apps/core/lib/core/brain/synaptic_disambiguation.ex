@@ -248,14 +248,14 @@ defmodule Core.Brain.SynapticDisambiguation do
   defp flip_class(_, _, nil), do: :unlabeled
   defp flip_class(a, a, _gold), do: :unchanged
 
-  defp flip_class(before, after, gold) do
+  defp flip_class(before, projected, gold) do
     cond do
-      before == :abstain and after == gold -> :abstention_to_right
+      before == :abstain and projected == gold -> :abstention_to_right
       before == :abstain -> :abstention_to_wrong
-      before == gold and after == :abstain -> :right_to_abstention
-      after == :abstain -> :wrong_to_abstention
+      before == gold and projected == :abstain -> :right_to_abstention
+      projected == :abstain -> :wrong_to_abstention
       before == gold -> :right_to_wrong
-      after == gold -> :wrong_to_right
+      projected == gold -> :wrong_to_right
       true -> :different_wrong_decision
     end
   end
