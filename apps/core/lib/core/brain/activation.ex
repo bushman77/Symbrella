@@ -240,26 +240,39 @@ defmodule Core.Brain.Activation do
 
   def notify(si, _opts), do: si
 
-  defp put_runtime_prior(%{} = cell, prior) do
+  defp put_runtime_prior(%{} = cell, prior, semantic) do
     id = cell_id(cell)
-    observed = if real_id?(id), do: Map.get(prior, id), else: nil
+    exact = if real_id?(id), do: number(Map.get(prior, id), 0.0), else: 0.0
+    hub = semantic_candidate_pulse(id, semantic)
+    observed = max(exact, hub)
 
-    if is_number(observed) and observed > 0 and not Map.has_key?(cell, :activation) do
-      # Runtime activity is a small PRIOR, never a probability of correctness.
-      # Keep the original LTM score for diagnostics; do not alter dictionary data.
+    if observed > 0 and not Map.has_key?(cell, :activation) do
+      # Existing base-lemma verb candidates all receive the same small hub
+      # feature. No sense ID is created and no individual base sense is verified.
       baseline = number(Map.get(cell, :score), 0.5)
       activation = clamp01(baseline + @runtime_feature_boost * clamp01(observed))
 
       cell
       |> Map.put(:activation, activation)
       |> Map.put(:runtime_primed?, true)
-      |> Map.put(:prior_neuron_activation, observed)
+      |> Map.put(:prior_neuron_activation, exact)
+      |> Map.put(:prior_semantic_activation, hub)
     else
       cell
     end
   end
 
-  defp put_runtime_prior(cell, _prior), do: cell
+  defp put_runtime_prior(cell, _prior, _semantic), do: cell
+
+  defp semantic_candidate_pulse(id, semantic) when is_binary(id) and is_map(semantic) do
+    case String.split(id, "|", parts: 3) do
+      [lemma, "verb", sense] when sense != "" and sense != "fallback" ->
+        semantic |> Map.get(lemma) |> number(0.0) |> max(0.0) |> min(0.03)
+      _ -> 0.0
+    end
+  end
+
+  defp semantic_candidate_pulse(_, _), do: 0.0
 
   defp initial_ids(rows) do
     rows
