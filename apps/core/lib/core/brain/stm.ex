@@ -19,6 +19,8 @@ defmodule Core.Brain.STM do
     end
   end
 
+  def run(si), do: si
+
   @doc """
   Preserve the distinction between lexical candidates (:active_cells list) and
   currently firing neurons (:neuron_activation map). Brain.stm/1 historically
@@ -44,5 +46,4 @@ defmodule Core.Brain.STM do
     end
   end
 
-  def run(si), do: si
 end
