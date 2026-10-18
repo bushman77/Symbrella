@@ -17,7 +17,7 @@ defmodule Core.Brain.SynapticDisambiguation do
   alias Brain.Synapses.Shadow
 
   @min_verb_candidates 2
-  @max_candidates 64
+  @max_candidates 256
   @min_score_sum 0.98
   @max_score_sum 1.02
   @abstain_margin 0.02
