@@ -237,6 +237,22 @@ defmodule Core.Response.ProjectedExpressionTest do
       assert reflection.projected_expression_repair.stored_memory? == false
       refute answer =~ "in soil"
       refute answer =~ "plant|verb|1"
+
+      # Exercise the actual Core.Response.Attach boundary used by
+      # Core.resolve_input/2, not just direct LLM synthesis.
+      attached =
+        si
+        |> Map.put(:session_id,
+          "projected-attach-#{System.unique_integer([:positive])}")
+        |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
+
+      assert attached.response_text ==
+        "I understand you're describing the gardener planting a tree."
+      assert attached.response_meta.response_source == :llm
+      assert attached.response_meta.response_reflection
+        .projected_expression_repair.source == :revalidated_sentence_roles
+      assert attached.lifg_choices == si.lifg_choices
+      assert attached.atl_slate == si.atl_slate
     after
       if old_client == nil,
         do: Application.delete_env(:core, :llm_client),
