@@ -57,7 +57,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
     {opts, rest, errors} =
       OptionParser.parse(argv,
         strict: [sentence: :string, word: :string, gold: :string, help: :boolean,
-                 grammar_weight: :float]
+                 grammar_weight: :float, sense_focus: :boolean]
       )
 
     if errors != [] or rest != [] do
@@ -66,7 +66,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
     end
 
     if opts[:help] do
-      IO.puts("Usage: mix run scripts/benchmark_lifg_senses.exs [--sentence TEXT --word WORD | --gold FILE] [--grammar-weight FLOAT]")
+      IO.puts("Usage: mix run scripts/benchmark_lifg_senses.exs [--sentence TEXT --word WORD | --gold FILE] [--grammar-weight FLOAT] [--no-sense-focus]")
     else
       cases = cases(opts)
       IO.puts("\n=== Current production LIFG word-sense evaluation ===")
@@ -74,6 +74,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
       IO.puts("Default meaning descriptions are prompts for human inspection, NOT numbered-sense gold labels.")
       IO.puts("A real exact-sense accuracy figure requires independently reviewed expected_id values.")
       IO.inspect(%{grammar_weight_override: opts[:grammar_weight],
+                    sense_focus_override: opts[:sense_focus],
                    scores_override: :all,
                    trace_word_scores?: true},
         label: "Benchmark lexical options (nil = configured production default)")
@@ -143,6 +144,11 @@ defmodule Symbrella.BenchmarkLIFGSenses do
           weight when is_number(weight) -> Keyword.put(base, :grammar_weight, weight)
           _ -> base
         end
+      end)
+      |> then(fn base ->
+        if Keyword.has_key?(opts, :sense_focus),
+          do: Keyword.put(base, :sense_focus?, opts[:sense_focus]),
+          else: base
       end)
 
     si =
@@ -380,6 +386,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
           compact(Map.get(Map.get(by_id, raw_id, %{}), :definition), 190),
         grammar_required_pos: required_pos,
         adjudicated_structural_pos: structural_pos,
+        context_focus: if(is_map(final), do: Map.get(final, :sense_focus), else: nil),
         mwe_covering_target: covering_mwes,
         mwe_semantic_choices_covering_target: covering_semantic_choices,
         mwe_decisions: if(is_nil(final_id), do: mwe_decisions, else: []),
@@ -408,7 +415,9 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         IO.puts("No final unigram choice. See MWE coverage/decisions; this case is not a valid POS decision.")
       end
 
-      %{grade: grade, pos_grade: pos_grade, note: if(is_nil(report), do: :raw_audit_missing)}
+      %{grade: grade, pos_grade: pos_grade,
+        context_focus: if(is_map(final), do: Map.get(final, :sense_focus), else: nil),
+        note: if(is_nil(report), do: :raw_audit_missing)}
     end
   end
 
@@ -417,6 +426,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
     pos = Enum.filter(results, &(&1.pos_grade in [:correct, :incorrect]))
     invalid = Enum.count(results, &(&1.grade == :invalid_gold_id))
     missed = Enum.count(results, &(&1.pos_grade == :no_final_choice))
+    focuses = results |> Enum.map(&Map.get(&1, :context_focus)) |> Enum.filter(&is_map/1)
 
     IO.puts("\n=== Results ===")
     IO.inspect(%{
@@ -437,6 +447,9 @@ defmodule Symbrella.BenchmarkLIFGSenses do
       all_cases_pos_and_selection_rate:
         if(results == [], do: :not_measured,
           else: Enum.count(pos, &(&1.pos_grade == :correct)) / length(results)),
+      focused_tokens: Enum.count(focuses, &(&1.mode == :focused)),
+      focused_context_evaluations: Enum.sum(Enum.map(focuses, & &1.context_evaluations)),
+      skipped_context_evaluations: Enum.sum(Enum.map(focuses, & &1.context_skipped)),
       invalid_gold_ids: invalid,
       blocked_cases: Enum.count(results, &(&1.grade == :ungradable))
     }, pretty: true, width: 115)
