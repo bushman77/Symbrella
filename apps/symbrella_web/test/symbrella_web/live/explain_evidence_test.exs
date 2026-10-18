@@ -395,6 +395,39 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     refute Map.has_key?(no_retry_items, "revision candidate")
   end
 
+  test "Explain distinguishes a detected semantic role substitution from lexical uncertainty" do
+    payload =
+      Modal.explain_payload_for(%{
+        text: "I understand you're describing the baker cooking a meal.",
+        from: %{
+          response_reflection: %{
+            status: :repair,
+            issues: [:semantic_role_drift],
+            applied?: true,
+            repair_count: 1,
+            semantic_role_fidelity: %{
+              status: :role_substitution_detected,
+              mismatched_roles: [:predicate, :patient],
+              source: :revalidated_sentence_roles,
+              event_truth_verified?: false,
+              exact_sense_verified?: false,
+              modified_cognition?: false
+            }
+          }
+        }
+      })
+
+    review = section(payload, :response_reflection)
+    assert review.title == "LLM response review"
+
+    values = Map.new(review.items, &{&1.label, &1.body})
+    assert values["status"] == ":repair"
+    assert values["issues"] =~ ":semantic_role_drift"
+    assert values["role fidelity review"] == ":role_substitution_detected"
+    assert values["role differences"] == "[:predicate, :patient]"
+    refute Map.has_key?(values, "initial model draft")
+  end
+
   test "Explain modal uses viewport width and wraps long LIFG labels and values" do
     long_label =
       "what → what pos=pronoun src=active_cells score=0.11574459075927734 " <>
