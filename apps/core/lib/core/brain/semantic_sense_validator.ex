@@ -31,12 +31,12 @@ defmodule Core.Brain.SemanticSenseValidator do
   # their co-occurrence alone cannot establish the specialized sense.
   @restricted_domains [
     {:cricket_bowling, ~w(cricket bowling bowler)},
-    {:electric_execution, ~w(electrocution execution electric chair)},
-    {:jazz_music, ~w(jazz music musician)},
+    {:electric_execution, ["electric chair", "electrocution", "execution"]},
+    {:jazz_music, ["jazz"]},
     {:computing, ~w(computer computing software code programming)},
     {:radar, ~w(radar sonar)},
-    {:grenade, ~w(grenade fuse explosive)},
-    {:graphical_interface, ~w(gui graphical interface)}
+    {:grenade, ["grenade", "fuse"]},
+    {:graphical_interface, ["graphical user interface", "gui"]}
   ]
 
   @spec evaluate(map(), keyword()) :: map()
@@ -297,9 +297,15 @@ defmodule Core.Brain.SemanticSenseValidator do
         end
 
       if (explicit_category? or explicit_gloss?) and
-           not Enum.any?(cues, &MapSet.member?(context, &1)),
+           not Enum.any?(cues, &context_cue?(context, &1)),
         do: [domain], else: []
     end)
+  end
+
+  defp context_cue?(context, cue) do
+    cue
+    |> String.split(" ", trim: true)
+    |> Enum.all?(&MapSet.member?(context, &1))
   end
 
   defp word_in?(text, word) do
