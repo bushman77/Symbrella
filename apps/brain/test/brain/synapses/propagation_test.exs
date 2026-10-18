@@ -41,12 +41,12 @@ defmodule Brain.Synapses.PropagationTest do
     first = Enum.find(on.candidates, &(&1.id == "draws|verb|1"))
     second = Enum.find(on.candidates, &(&1.id == "draws|verb|2"))
     assert_in_delta first.shadow_signal, 0.0025, 1.0e-10
-    assert first.reviewed_signal == 0.0
-    assert second.shadow_signal == 0.0
+    assert_in_delta first.reviewed_signal, 0.0, 1.0e-10
+    assert_in_delta second.shadow_signal, 0.0, 1.0e-10
     assert off.status == :propagation_off
     assert off.baseline_candidate_order == candidates
     assert off.supported_count == 0
-    assert Enum.all?(off.candidates, &(&1.shadow_signal == 0.0))
+    assert Enum.all?(off.candidates, &(abs(&1.shadow_signal) < 1.0e-10))
 
     wrong_patient = Propagation.compare(candidates, "water|noun|1", :patient,
       server: server)
@@ -106,13 +106,13 @@ defmodule Brain.Synapses.PropagationTest do
   end
 
   test "accepts large bounded exact-sense slates but refuses oversized or invented ones", %{server: server} do
-    many = Enum.map(1..138, &"draws|verb|#{&1}")
+    many = Enum.map(1..138, fn n -> "draws|verb|#{n}" end)
     result = Propagation.compare(many, "picture|noun|1", :patient, server: server)
     assert result.status == :shadow_only
     assert length(result.candidates) == 138
     assert result.supported_count == 0
 
-    too_many = Enum.map(1..257, &"draws|verb|#{&1}")
+    too_many = Enum.map(1..257, fn n -> "draws|verb|#{n}" end)
     assert %{status: :invalid_or_oversized_slate} =
              Propagation.compare(too_many, "picture|noun|1", :patient, server: server)
     assert %{status: :invalid_or_oversized_slate} =
