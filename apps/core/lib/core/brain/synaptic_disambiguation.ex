@@ -40,7 +40,7 @@ defmodule Core.Brain.SynapticDisambiguation do
          %{} = scores <- Map.get(choice, :candidate_probs),
          %{candidates: source_candidates, status: :complete} <-
            complete_probabilities(si, index, scores),
-         true <- count_verb_senses(source_candidates) >= @min_verb_candidates,
+         :ok <- require_competition(source_candidates),
          :ok <- valid_gold(opts, source_candidates),
          true <- valid_margin?(Keyword.get(opts, :abstain_margin, @abstain_margin)) do
       supports = Map.new(signal_rows, fn row -> {row.id, row.shadow_signal} end)
@@ -79,7 +79,7 @@ defmodule Core.Brain.SynapticDisambiguation do
       {:error, :seen} -> skipped(:seen_in_training_receipts)
       {:error, :unavailable} -> skipped(:ledger_unavailable)
       %{status: :incomplete} -> skipped(:incomplete_or_invalid_score_slate)
-      %{status: :complete} -> skipped(:single_verb_sense)
+      {:error, :single_verb_sense} -> skipped(:single_verb_sense)
       {:error, :gold} -> skipped(:untrusted_or_out_of_slate_gold)
       _ -> skipped(:ineligible_or_unscored)
     end
@@ -104,13 +104,13 @@ defmodule Core.Brain.SynapticDisambiguation do
       unlabelled: length(eligible) - length(labeled),
       skipped: length(reports) - length(eligible),
       competing_real_slate_examples: Enum.count(eligible, &(&1.verb_sense_count >= 2)),
-      projected_decision_changes: Enum.count(eligible, & &1.changed_decision?),
+      projected_decision_changes: Enum.count(eligible, fn report -> report.changed_decision? end),
       wrong_to_right: Enum.count(labeled, &(&1.flip_class == :wrong_to_right)),
       right_to_wrong: Enum.count(labeled, &(&1.flip_class == :right_to_wrong)),
       abstention_to_right: Enum.count(labeled, &(&1.flip_class == :abstention_to_right)),
       right_to_abstention: Enum.count(labeled, &(&1.flip_class == :right_to_abstention)),
-      baseline_correct: Enum.count(labeled, & &1.baseline.correct?),
-      counterfactual_correct: Enum.count(labeled, & &1.counterfactual.correct?),
+      baseline_correct: Enum.count(labeled, fn report -> report.baseline.correct? end),
+      counterfactual_correct: Enum.count(labeled, fn report -> report.counterfactual.correct? end),
       baseline_abstentions: Enum.count(labeled, &(&1.baseline.decision == :abstain)),
       counterfactual_abstentions: Enum.count(labeled, &(&1.counterfactual.decision == :abstain)),
       measured_accuracy?: labeled != [],
@@ -172,6 +172,12 @@ defmodule Core.Brain.SynapticDisambiguation do
   end
 
   defp get_in_slate(_, _), do: []
+
+  defp require_competition(scores) do
+    if count_verb_senses(scores) >= @min_verb_candidates,
+      do: :ok,
+      else: {:error, :single_verb_sense}
+  end
 
   defp count_verb_senses(scores) do
     Enum.count(scores, fn {id, _} ->
