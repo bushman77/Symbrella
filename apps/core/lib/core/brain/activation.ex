@@ -64,6 +64,34 @@ defmodule Core.Brain.Activation do
 
   def prime(si, _opts), do: si
 
+  @doc """
+  Apply the same exact-ID prior to prebuilt candidate buckets immediately
+  before LIFG. Stage1 gives sense_candidates and candidates_by_token higher
+  precedence than active_cells, so annotating LTM rows alone is insufficient.
+  """
+  @spec overlay_candidate_slates(map()) :: map()
+  def overlay_candidate_slates(%{} = si) do
+    prior = map_or_empty(Map.get(si, :neuron_activation))
+
+    Enum.reduce([:sense_candidates, :candidates_by_token], si, fn field, acc ->
+      case Map.get(acc, field) do
+        %{} = slate ->
+          modified =
+            Map.new(slate, fn {idx, rows} ->
+              candidates = if is_list(rows), do: Enum.map(rows, &put_runtime_prior(&1, prior)), else: rows
+              {idx, candidates}
+            end)
+
+          Map.put(acc, field, modified)
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  def overlay_candidate_slates(si), do: si
+
   @doc "Return a bounded, testable stimulation plan without sending neural signals."
   @spec feedback_plan(map(), keyword()) :: [map()]
   def feedback_plan(si, opts \\ [])
