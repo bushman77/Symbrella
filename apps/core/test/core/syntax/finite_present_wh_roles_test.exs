@@ -44,6 +44,17 @@ defmodule Core.Syntax.FinitePresentWhRolesTest do
              basis: :determined_subject_before_attested_present_predicate} =
              out.roles[1]
 
+    # "the artist draws" separately licenses a weak determiner-adjective-noun
+    # hypothesis because the lexicon also has artist/adjective and draws/noun.
+    # It must not veto the independently witnessed complete SVO clause.
+    assert Enum.any?(out.superseded_proposals, fn candidate ->
+      candidate.token_index == 1 and candidate.pos == "adjective" and
+        candidate.span == {0, 2}
+    end)
+    refute Enum.any?(out.decisions, fn candidate ->
+      candidate.token_index == 1 and candidate.status == :unresolved
+    end)
+
     context =
       si
       |> Map.put(:sentence_signatures, signatures)
@@ -84,6 +95,10 @@ defmodule Core.Syntax.FinitePresentWhRolesTest do
     out = RoleCompetition.resolve(Map.put(si, :sentence_signatures, signatures))
     assert %{pos: "noun", basis: :determined_subject_in_wh_aux_question} = out.roles[3]
     assert %{pos: "verb", basis: :predicate_in_wh_aux_question} = out.roles[4]
+    assert Enum.any?(out.superseded_proposals, fn candidate ->
+      candidate.token_index == 3 and candidate.pos == "adjective" and
+        candidate.span == {2, 4}
+    end)
 
     ctx =
       si
@@ -101,6 +116,23 @@ defmodule Core.Syntax.FinitePresentWhRolesTest do
       [cell("draw", "noun"), cell("draw", "verb")])
 
     assert %{mode: :focused, focus_pos: "verb"} = focus
+  end
+
+  test "ordinary adjective modifier survives without a competing complete clause" do
+    si = %{
+      sentence: "A light suitcase.",
+      tokens: tokens(~w(A light suitcase)),
+      active_cells: [
+        cell("a", "determiner"), cell("light", "adjective"),
+        cell("light", "noun"), cell("suitcase", "noun")
+      ]
+    }
+
+    out = RoleCompetition.resolve(
+      Map.put(si, :sentence_signatures, Signatures.detect(si)))
+
+    assert %{status: :supported, pos: "adjective", role: :modifier} = out.roles[1]
+    assert out.superseded_proposals == []
   end
 
   test "question without an attested lexical verb cannot imply a verb role" do
