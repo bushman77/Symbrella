@@ -58,7 +58,8 @@ defmodule Core.Brain.SemanticSenseShadow do
         |> List.wrap()
         |> Enum.take(2)
         |> Enum.map(&Map.take(&1, [:role, :status, :reason, :noun_sense_id,
-          :selected_probability, :terms])),
+          :noun_sense_ids, :competing_sense_count,
+          :source, :selected_probability, :terms])),
       top_candidates:
         result
         |> Map.get(:eligible_top, [])
@@ -118,7 +119,7 @@ defmodule Core.Brain.SemanticSenseShadow do
     # self-contained, genuine dictionary sense fixture. Live calls use DB.
     evaluator_opts =
       opts
-      |> Keyword.take([:fetch_base_senses])
+      |> Keyword.take([:fetch_base_senses, :fetch_noun_senses])
       |> Keyword.put(:role_context?, true)
 
     SemanticSenseValidator.evaluate(si, evaluator_opts)
