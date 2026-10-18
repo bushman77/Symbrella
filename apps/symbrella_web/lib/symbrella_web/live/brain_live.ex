@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   alias SymbrellaWeb.BrainHTML
   alias SymbrellaWeb.BrainRuntime
+  alias SymbrellaWeb.Components.Brain.ActivationTrend
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.BrainLive.MoodHud
   alias Brain.Bus
@@ -57,6 +58,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
+      |> assign_new(:activation_samples, fn -> [] end)
       |> MoodHud.seed()
       |> assign(:all_status, collect_all_region_status())
       |> maybe_seed_intent_from_brain()
@@ -434,10 +436,29 @@ defmodule SymbrellaWeb.BrainLive do
     |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
     |> assign(:self_model, self_model)
     |> refresh_wm_from_brain()
+    |> sample_neuron_activations()
     |> update(:region_state, fn st ->
       st = st || %{}
       st |> Map.put(:snapshot, snapshot)
     end)
+  end
+
+  # Maintain only one minute of observed Brain.Cell activation history in
+  # this LiveView. Never poll the 1.7M-row lexicon or synthesize decay here.
+  defp sample_neuron_activations(socket) do
+    if connected?(socket) do
+      case BrainRuntime.activation_snapshot() do
+        {:ok, %{} = reports} ->
+          update(socket, :activation_samples, fn prior ->
+            ActivationTrend.capture(prior, reports, System.system_time(:millisecond))
+          end)
+
+        :error ->
+          socket
+      end
+    else
+      socket
+    end
   end
 
   # --- All-regions status grid ----------------------------------------------
