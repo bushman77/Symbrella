@@ -90,6 +90,28 @@ defmodule Core.LIFG.SignatureRolesTest do
     assert SignatureRoles.required_pos(si([]), 0) == nil
   end
 
+  test "independently adjudicated grammatical POS takes precedence over a competing local hypothesis" do
+    si = %{
+      sentence_signatures: [separated(1, 2, 3)],
+      role_competition: %{
+        source: :core_syntax_and_attested_dictionary_pos,
+        roles: %{
+          1 => %{status: :supported, pos: "noun", token_index: 1}
+        }
+      }
+    }
+
+    assert SignatureRoles.required_pos(si, 1) == "noun"
+
+    # A merely proposed or unsupported POS must not override the normal
+    # hard signature policy.
+    unresolved = put_in(si, [:role_competition, :roles, 1, :status], :unresolved)
+    assert SignatureRoles.required_pos(unresolved, 1) == "verb"
+
+    unrelated = put_in(si, [:role_competition, :roles], %{})
+    assert SignatureRoles.required_pos(unrelated, 1) == "verb"
+  end
+
   test "existing have-to-infinitive role behavior is preserved" do
     sig = %{
       id: :have_verb_to_infinitive,
