@@ -207,13 +207,17 @@ defmodule Core.Brain.Activation do
       if Keyword.get(opts, :semantic_propagation?, true) != false,
         do: Core.Brain.SemanticPropagation.lemma_pulse(si), else: nil
 
-    if emitted? do
-      if is_map(pulse) and is_binary(Map.get(si, :session_id)) and
-           is_pid(Process.whereis(Brain)) do
-        _ = Core.Brain.Runtime.apply_if_exported(Brain, :semantic_pulse,
-          [si.session_id, pulse.lemma, pulse.source_id, pulse.delta], :ok)
-      end
+    session_id = Map.get(si, :session_id)
+    pulse_submittable? = emitted? and is_map(pulse) and
+      is_binary(session_id) and byte_size(session_id) > 0 and
+      byte_size(session_id) <= 128 and Core.Brain.Runtime.pid_alive?(Brain) and
+      Code.ensure_loaded?(Brain) and function_exported?(Brain, :semantic_pulse, 4)
 
+    if pulse_submittable? do
+      :ok = Brain.semantic_pulse(session_id, pulse.lemma, pulse.source_id, pulse.delta)
+    end
+
+    if emitted? do
       plan
       |> Enum.group_by(& &1.delta)
       |> Enum.each(fn {delta, entries} ->
@@ -242,8 +246,7 @@ defmodule Core.Brain.Activation do
         # Bounded audit for Explain; does not claim these IDs were verified.
         targets: Enum.take(plan, 8),
         lemma_pulse: pulse,
-        lemma_pulse_emitted?: emitted? and is_map(pulse) and
-          is_binary(Map.get(si, :session_id))
+        lemma_pulse_submitted?: pulse_submittable?
       })
     )
     |> Map.update(:trace, [], fn trace ->
