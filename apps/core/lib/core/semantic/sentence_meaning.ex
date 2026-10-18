@@ -130,8 +130,17 @@ defmodule Core.Semantic.SentenceMeaning do
       _ -> false
     end)
 
-    role_competition = Map.get(si, :role_competition, %{})
-    grammar_roles = Map.get(role_competition, :roles, %{})
+    role_competition =
+      case Map.get(si, :role_competition) do
+        %{} = roles -> roles
+        _ -> %{}
+      end
+
+    grammar_roles =
+      case Map.get(role_competition, :roles) do
+        %{} = roles -> roles
+        _ -> %{}
+      end
 
     with [atl] <- question_constituents,
          true <- Map.get(role_competition, :source) ==
