@@ -121,8 +121,10 @@ defmodule Core.Brain.SemanticPropagation do
 
     roles = Map.get(meaning, :roles, %{})
 
-    if complete? and match?(%{subject: %{head_sense_id: _},
-                             predicate: %{sense_id: _}}, roles) and
+    rebuilt = Core.Semantic.SentenceMeaning.build(si)
+
+    if complete? and rebuilt == meaning and
+         match?(%{subject: %{head_sense_id: _}, predicate: %{sense_id: _}}, roles) and
          Map.get(roles.subject, :head_sense_id) == selected_id(si, 3, "noun") and
          Map.get(roles.predicate, :sense_id) == selected_id(si, 4, "verb") do
       [{3, "noun"}, {4, "verb"}]
