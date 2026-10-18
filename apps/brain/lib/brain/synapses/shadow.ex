@@ -28,7 +28,7 @@ defmodule Brain.Synapses.Shadow do
   @max_weight 0.08
   @max_experiences 512
   @max_edges 1024
-  @max_preview 64
+  @max_preview 256
 
   @type edge_key :: {String.t(), String.t(), :actor | :patient}
 
