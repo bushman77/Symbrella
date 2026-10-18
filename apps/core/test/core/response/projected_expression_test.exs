@@ -62,7 +62,10 @@ defmodule Core.Response.ProjectedExpressionTest do
           chose_exact_sense?: false,
           cohorts: [
             %{anchor_term: "plant", members: [
-              %{id: "plant|verb|1"}, %{id: "plant|verb|2"}]}
+              %{id: "plant|verb|1",
+                distinguishing_definition_terms: ["soil", "seed", "substrate"]},
+              %{id: "plant|verb|2",
+                distinguishing_definition_terms: ["furnish", "supply"]}]}
           ]
         }
       }
@@ -136,6 +139,34 @@ defmodule Core.Response.ProjectedExpressionTest do
       refute paraphrase =~ "soil"
       refute paraphrase =~ "verified"
     end
+  end
+
+  test "model cannot assert an unsupported exact-sense detail from a competing cohort" do
+    si = statement() |> Map.put(:trace, cohort_trace())
+    frame = ProjectedExpression.from_si(si)
+
+    assert "soil" in frame.cohort.distinguishing_terms
+    assert "supply" in frame.cohort.distinguishing_terms
+
+    assert {:repaired, :unverified_sense_detail, paraphrase} =
+      ProjectedExpression.review_draft(
+        "The gardener plants a tree.",
+        "The gardener places a seed in the soil.",
+        frame
+      )
+
+    assert paraphrase ==
+      "I understand you're describing the gardener planting a tree."
+
+    assert {:repaired, :exact_report_echo, ^paraphrase} =
+      ProjectedExpression.review_draft(
+        si.sentence, si.sentence, frame)
+
+    # Source-mentioned details are not treated as an unsupported guess.
+    assert ProjectedExpression.review_draft(
+      "The gardener plants a tree.",
+      "You're describing the gardener working with a tree.",
+      frame) == :unchanged
   end
 
   test "a substantive reply is preserved even if it quotes the original statement" do
