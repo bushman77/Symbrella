@@ -1280,3 +1280,101 @@ correction for four source assertions, without sending LLM requests or
 changing live response text. This is not a full natural-language
 inference or full semantic entailment checker; it targets demonstrable
 unlicensed shifts with explicit evidence gates.
+
+
+## Current-turn response role fidelity — limited, read-only audit
+
+A real brain diagnostic from October 18, 2026 showed the user saying
+`The baker cooks a meal.` and the actual local LLM returning
+`The baker is also planting a tree, which is a tree in a garden.`
+The correct independently revalidated expression frame was present
+in the prompt, yet the existing reviewer marked the hallucinated
+reply `:accept`. The preceding user turn described a *gardener*
+planting a tree. The failure was cross-turn action/patient substitution
+at generation time, not a new verdict from LIFG or semantic cohorts.
+
+`Core.Response.SemanticRoleFidelity.audit/3` now provides a bounded,
+no-side-effects analysis of a completed LLM draft **only** when
+`Core.Response.ProjectedExpression.from_si/1` already revalidated
+a positive finite-present user action with exact ATL/LIFG SVO role
+bindings. The generated answer is untrusted and is NEVER fed back
+through production SVO/LIFG/ATL as evidence.
+
+The first detector is intentionally **not general NLU or semantic
+entailment**. It recognizes a tightly scoped standalone main
+subject-predicate-patient assertion, with a two-word article+noun
+actor/patient surface, either a finite lexical predicate or a
+copula+progressive predicate, and at most an object relative
+`which ...` tail. It abstains on quotations, questions, compound
+clauses, ungrounded sources, and unsupported syntax.
+
+- A changed predicate **and** patient with the source actor still
+  bound is a high-confidence *corrupted continuation* only when the
+  generated sentence explicitly marks the new action as `also`.
+  This catches the actual witnessed response while retaining the
+  grammatical notion of a model asserting an additional event.
+- An exact actor/patient surface reversal is independently
+  detectable, with no forced choice of dictionary verb sense.
+- Other lexical discrepancies (e.g., `cooks a meal` vs.
+  `prepares the dinner`) are reported as
+  `:possible_role_drift` but **not repaired**: lexical variation
+  can be a valid paraphrase and cannot be proved false by string
+  comparison. Other parsable assertions are
+  `:no_high_confidence_role_drift`; the rest are
+  `:not_adjudicated` with a reason.
+
+`ProjectedExpression.review_draft/3` invokes the check **after**
+the preexisting echo and tense/aspect corrections and before its
+unverified-sense detail guard. On an explicitly detected
+`:role_substitution_detected`, the deterministic fallback
+`I understand you're describing the baker cooking a meal.`
+replaces the model's unlicensed report. The usual reflection runs
+again, and a bounded metadata item `:semantic_role_fidelity`
+records the status, source and mismatched roles, without copying
+the model draft. The existing review also contains issue
+`:semantic_role_drift` and trigger `:semantic_role_drift`.
+Even when no correction occurs, inspectable status distinguishes
+`:possible_role_drift` or syntax abstention from verified semantic
+agreement. The user-visible Explain review displays the status and
+mismatched role names when applicable.
+
+A repair emits one telemetry event
+`[:core, :response, :semantic_role_drift]` with bounded tags.
+`Brain.SelfPortrait.Model` now increments
+`:response_semantic_drift` separately from
+`:lifg_pos_anomalies`, to avoid falsely reporting that cortical
+meaning selection failed whenever speech generation failed.
+The check never alters user reports, episodic event storage,
+working memory, dictionary sense selection, synaptic weights or
+generated cognition. The normal preexisting response-history
+policy is unchanged.
+
+### Regression and production probe
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+mix test \
+  apps/core/test/core/response/semantic_role_fidelity_test.exs \
+  apps/core/test/core/response/projected_expression_test.exs \
+  apps/core/test/core/response/llm_route_flow_test.exs \
+  apps/brain/test/brain/self_portrait_model_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs
+
+mix run scripts/probe_semantic_role_fidelity.exs
+```
+
+The probe compares the exact observed wrong baker/tree reply
+to the current validated baker/cook/meal frame **without calling
+the local LLM** or writing memory. A real production re-test should
+confirm `:repair`, `:semantic_role_drift`, two mismatched
+roles `[:predicate, :patient]`, and a source-grounded reply.
+A complex final input like
+`the garder plants the things the baker eventually cooks` is
+outside this v1 positive finite-present SVO contract; it must
+not acquire a fabricated verified frame or forced syntax verdict.
+
+This is a narrow fidelity gate intended for a measurable set of
+high-precision response substitutions. A future fuller solution
+requires independently grounded response parsing and semantic
+compatibility evaluation, with adjudicated paraphrase negatives.
