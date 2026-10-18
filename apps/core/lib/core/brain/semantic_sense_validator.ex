@@ -156,6 +156,9 @@ defmodule Core.Brain.SemanticSenseValidator do
           exclusions: blocks,
           eligible?: blocks == [],
           dictionary_gloss: row.dictionary_definition,
+          cohort_gloss:
+            if(Keyword.get(opts, :cohort_evidence?, false) == true,
+              do: Map.get(evidence, :definition), else: nil),
           sense_verified?: false
         }
       end)
@@ -242,6 +245,11 @@ defmodule Core.Brain.SemanticSenseValidator do
             [:id, :lexical_score, :role_support, :grammar,
               :missing_restrictions, :exclusions])),
         eligible_top: Enum.take(eligible, @max_report),
+        # Complete vetted evidence for the optional read-only cohort stage.
+        # Never becomes a canonical lexical winner or durable memory.
+        cohort_evidence_rows:
+          if(Keyword.get(opts, :cohort_evidence?, false) == true,
+            do: eligible, else: nil),
         label_status: label_status,
         gold_id: if(label_status == :caller_labeled, do: gold, else: nil),
         baseline_correct?: if(label_status == :caller_labeled, do: baseline == gold, else: nil),
