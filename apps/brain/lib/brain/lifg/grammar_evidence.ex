@@ -8,8 +8,11 @@ defmodule Brain.LIFG.GrammarEvidence do
   evidence must also be present on the *specific dictionary sense*.
   """
 
-  @type context :: %{signatures: [map()], cells_by_id: map(),
-                      optional(:resolved_roles) => map()}
+  @type context :: %{
+          required(:signatures) => [map()],
+          required(:cells_by_id) => map(),
+          optional(:resolved_roles) => map()
+        }
 
   @spec prepare(map()) :: context()
   def prepare(%{} = si) do
