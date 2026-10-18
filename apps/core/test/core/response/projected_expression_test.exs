@@ -465,6 +465,82 @@ defmodule Core.Response.ProjectedExpressionTest do
     end
   end
 
+  test "actual LLM correction prevents baker's current action becoming the previous planting event" do
+    old_client = Application.get_env(:core, :llm_client)
+    old_retrieval = Application.get_env(:core, :web_retrieval)
+
+    Application.put_env(:core, :llm_client, EchoLlm)
+    Application.put_env(:core, :web_retrieval, enabled?: false)
+    start_supervised!({EchoLlm, self()})
+
+    try do
+      si = statement("baker", "cooks", "cook", "meal")
+      frame = ProjectedExpression.from_si(si)
+      assert is_map(frame)
+
+      contaminated =
+        "The baker is also planting a tree, which is a tree in a garden."
+
+      assert {:repaired, :semantic_role_drift,
+              "I understand you're describing the baker cooking a meal."} =
+        ProjectedExpression.review_draft(si.sentence, contaminated, frame)
+
+      :ok = EchoLlm.next_draft(contaminated)
+      features = %{
+        intent: :statement, confidence: 0.68,
+        selected_action: :answer_user,
+        session_id: "role-fidelity-#{System.unique_integer([:positive])}",
+        projected_expression: frame
+      }
+      decision = %{tone: :neutral, mode: :scribe, action: :answer}
+      assert {:ok, response, reflection} =
+        LlmSynthesis.generate(si.sentence, features, decision, %{}, nil)
+
+      assert response ==
+        "I understand you're describing the baker cooking a meal."
+      assert reflection.status == :repair
+      assert reflection.applied?
+      assert :semantic_role_drift in reflection.issues
+      assert reflection.projected_expression_repair.trigger ==
+        :semantic_role_drift
+      assert reflection.semantic_role_fidelity.status ==
+        :role_substitution_detected
+      assert reflection.semantic_role_fidelity.mismatched_roles ==
+        [:predicate, :patient]
+      assert reflection.draft_sha256 != reflection.final_sha256
+      assert_receive {:projected_echo_llm_prompt, system_prompt}
+      assert system_prompt =~ "Do not substitute previous events"
+
+      :ok = EchoLlm.next_draft(contaminated)
+      attached =
+        si
+        |> Map.put(:session_id,
+          "role-fidelity-attach-#{System.unique_integer([:positive])}")
+        |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
+
+      assert attached.response_text == response
+      assert attached.response_meta.response_source == :llm
+      assert get_in(attached,
+        [:response_meta, :response_reflection, :semantic_role_fidelity,
+         :mismatched_roles]) == [:predicate, :patient]
+      assert get_in(attached,
+        [:response_meta, :response_reflection, :projected_expression_repair,
+         :trigger]) == :semantic_role_drift
+      assert attached.lifg_choices == si.lifg_choices
+      assert attached.atl_slate == si.atl_slate
+      refute Map.has_key?(attached.response_meta.response_reflection, :draft_text)
+      refute Map.has_key?(attached.response_meta.response_reflection, :final_text)
+    after
+      if old_client == nil,
+        do: Application.delete_env(:core, :llm_client),
+        else: Application.put_env(:core, :llm_client, old_client)
+
+      if old_retrieval == nil,
+        do: Application.delete_env(:core, :web_retrieval),
+        else: Application.put_env(:core, :web_retrieval, old_retrieval)
+    end
+  end
+
   test "without verified statement evidence the echo repair is disabled" do
     assert ProjectedExpression.repair_echo(
       "The gardener plants a tree.",
