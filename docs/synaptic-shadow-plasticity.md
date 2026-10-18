@@ -1084,3 +1084,40 @@ Do not promote this into authoritative comprehension until an
 independently adjudicated holdout set demonstrates improved behavior
 without harmful sense conflation, invalid specialty readings or
 misleading evidence attribution.
+
+
+### Live cohort observation: action selector statement routing
+
+The first live chat with "The gardener plants a tree." confirmed
+`SemanticCohort` formed the group
+`["plant|verb|1", "plant|verb|2"]` using the independently
+grounded tied-tree patient cue `plant`. Its minimum diagnostic support
+was `0.1015`, and individual verb-sense selection correctly
+abstained. This establishes that the live Explain path works, NOT
+that any dictionary sense or cohort has been independently verified.
+
+An adjacent routing issue was exposed: Core's intent was correctly
+`:statement` (0.68), but `Brain.ActionSelector` did not list
+`:statement` among its recognized conversational intents. The
+unknown-intent fallback then offered a clarification action,
+which mood modulation ranked above responding normally. This is
+independent of semantic cohort scoring.
+
+`Brain.ActionSelector.conversational_intent?/1` now explicitly
+accepts `:statement`, routing such utterances to
+`:answer_user` with `:conversation_continuation` reason. Existing
+`:memory_write`, health/safety, explicit question and command
+paths remain higher-priority. The change does NOT generate a
+new semantic meaning or automatically write memories.
+
+```sh
+mix test apps/brain/test/brain/action_selector_test.exs \
+  apps/core/test/core/brain/action_selection_test.exs \
+  apps/core/test/core/brain/semantic_cohort_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+```
+
+The preceding live response echoed the statement verbatim; the
+routing fix is not a guarantee that an LLM will stop parroting.
+That requires a separate prompt/response-quality evaluation.
