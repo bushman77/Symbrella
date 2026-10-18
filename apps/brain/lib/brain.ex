@@ -33,6 +33,7 @@ defmodule Brain do
 
   alias Brain.Cell.Runtime, as: CellRT
   alias Brain.Cell.Activation, as: CellActivation
+  alias Brain.SemanticPulse
   alias Brain.WM.Focus, as: WMFocus
   alias Brain.WM.Recall, as: WMRecall
   alias Brain.MoodHooks
@@ -74,6 +75,7 @@ defmodule Brain do
           history: list(),
           active_cells: %{optional(String.t()) => number()},
           active_cell_times: %{optional(String.t()) => integer()},
+          semantic_pulses: map(),
           attention: map(),
           wm: [wm_item()],
           wm_cfg: wm_cfg(),
@@ -179,6 +181,16 @@ defmodule Brain do
   @spec snapshot() :: state()
   def snapshot, do: gencall(@name, :snapshot)
 
+  @doc "Read bounded per-session lemma priors, separate from BrainCell reports."
+  @spec semantic_snapshot(term()) :: map()
+  def semantic_snapshot(session), do: gencall(@name, {:semantic_snapshot, session})
+
+  @doc "Record an attested verb lemma; never a synthetic neuron ID."
+  @spec semantic_pulse(term(), String.t(), String.t(), number()) :: :ok
+  def semantic_pulse(session, lemma, source_id, delta)
+      when is_binary(lemma) and is_binary(source_id) and is_number(delta),
+    do: gencall(@name, {:semantic_pulse, session, lemma, source_id, delta})
+
   @doc "Current activation reports from live Brain.Cell processes; no database reads or synthetic decay."
   @spec activation_snapshot() :: %{optional(String.t()) => number()}
   def activation_snapshot, do: gencall(@name, :activation_snapshot)
@@ -213,6 +225,7 @@ defmodule Brain do
        history: [],
        active_cells: %{},
        active_cell_times: %{},
+       semantic_pulses: %{},
        attention: %{},
        wm: [],
        wm_cfg: BrainConfig.wm(),
@@ -263,6 +276,9 @@ defmodule Brain do
   def handle_call({:stm, si}, _from, state) when is_map(si) do
     state = maybe_orient(state)
     {active_cells, state} = current_activations(state)
+    {semantic, pulses} = SemanticPulse.snapshot(state.semantic_pulses,
+      Map.get(si, :session_id), System.monotonic_time(:millisecond))
+    state = %{state | semantic_pulses: pulses}
 
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
@@ -271,9 +287,24 @@ defmodule Brain do
     si2 =
       si
       |> Map.put(:active_cells, active_cells)
+      |> Map.put(:semantic_pulses, semantic)
       |> Map.put(:tokens, tokens1)
 
     {:reply, si2, state}
+  end
+
+  @impl true
+  def handle_call({:semantic_snapshot, session}, _from, state) do
+    {values, pulses} = SemanticPulse.snapshot(state.semantic_pulses, session,
+      System.monotonic_time(:millisecond))
+    {:reply, values, %{state | semantic_pulses: pulses}}
+  end
+
+  @impl true
+  def handle_call({:semantic_pulse, session, lemma, source_id, delta}, _from, state) do
+    pulses = SemanticPulse.put(state.semantic_pulses, session, lemma, source_id,
+      delta, System.monotonic_time(:millisecond))
+    {:reply, :ok, %{state | semantic_pulses: pulses}}
   end
 
   @impl true
