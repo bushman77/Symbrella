@@ -281,6 +281,19 @@ defmodule Core.Response.ProjectedExpressionTest do
       assert get_in(attached,
         [:response_meta, :response_reflection,
          :projected_expression_repair, :source]) == :revalidated_sentence_roles
+      assert get_in(attached,
+        [:response_meta, :response_reflection,
+         :projected_expression_repair, :trigger]) == :exact_report_echo
+      assert attached.response_meta.response_reflection.status == :repair
+      assert attached.response_meta.response_reflection.applied?
+      assert Map.keys(
+        attached.response_meta.response_reflection.projected_expression_repair)
+        |> Enum.sort() == Enum.sort([
+          :attempted?, :applied?, :trigger, :source,
+          :original_reflection_status, :promoted_sense?, :stored_memory?
+        ])
+      refute Map.has_key?(attached.response_meta.response_reflection, :draft_text)
+      refute Map.has_key?(attached.response_meta.response_reflection, :final_text)
       assert attached.lifg_choices == si.lifg_choices
       assert attached.atl_slate == si.atl_slate
     after
