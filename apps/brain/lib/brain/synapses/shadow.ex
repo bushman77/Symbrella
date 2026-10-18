@@ -9,7 +9,9 @@ defmodule Brain.Synapses.Shadow do
   corroboration, regardless of session or repetition count.
 
   Retains no utterances, raw event participants, reviewer names or DB writes.
-  Evidence is keyed using an in-process HMAC; all records vanish on restart.
+  In development, an authenticated receipt snapshot and its stable local HMAC
+  secret can survive restarts; test instances remain ephemeral by default.
+  Only validated receipts are loaded, and weights are rebuilt from scratch.
 
   This subsystem never stimulates cells, influences LIFG, trains Axon, or
   asserts that a selected dictionary sense or user claim is objectively true.
@@ -41,7 +43,7 @@ defmodule Brain.Synapses.Shadow do
   end
 
   @doc "Record a Core-revalidated, attributed experience with typed edges."
-  @spec observe(map()) :: {:ok, :recorded | :duplicate} | {:error, atom()}
+  @spec observe(map(), GenServer.server()) :: {:ok, :recorded | :duplicate} | {:error, atom()}
   def observe(observation, server \\ __MODULE__)
   def observe(%{evidence: evidence, edges: edges, provenance: :user_reported}, server)
       when is_binary(evidence) and is_list(edges) do
@@ -58,7 +60,7 @@ defmodule Brain.Synapses.Shadow do
   :reject removes its contribution but retains its receipt for deduplication.
   Later authenticated review can reverse either decision.
   """
-  @spec review(map()) :: {:ok, :confirmed | :rejected | :unchanged} | {:error, atom()}
+  @spec review(map(), GenServer.server()) :: {:ok, :confirmed | :rejected | :unchanged} | {:error, atom()}
   def review(review, server \\ __MODULE__)
   def review(%{evidence: evidence, provenance: :human_review,
                reviewer: reviewer, decision: decision}, server)
@@ -79,7 +81,7 @@ defmodule Brain.Synapses.Shadow do
   active. The subject and predicate cell identities must agree; the patient
   must differ. No receipt or weight is ever changed by this call.
   """
-  @spec propose_correction(map(), map()) :: map()
+  @spec propose_correction(map(), map(), GenServer.server()) :: map()
   def propose_correction(old, new, server \\ __MODULE__)
   def propose_correction(
         %{evidence: old_evidence, provenance: :user_reported, edges: old_edges},
@@ -94,11 +96,11 @@ defmodule Brain.Synapses.Shadow do
   def propose_correction(_, _, _), do: %{status: :invalid_evidence}
 
   @doc "Read-only aggregate counters with no plaintext experiences."
-  @spec snapshot() :: map()
+  @spec snapshot(GenServer.server()) :: map()
   def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
 
   @doc "A provisional edge is not evidence that its dictionary sense is right."
-  @spec edge(String.t(), String.t(), atom()) :: map() | nil
+  @spec edge(String.t(), String.t(), atom(), GenServer.server()) :: map() | nil
   def edge(from_id, to_id, relation, server \\ __MODULE__) do
     GenServer.call(server, {:edge, {from_id, to_id, relation}})
   end
@@ -107,7 +109,7 @@ defmodule Brain.Synapses.Shadow do
   Side-by-side shadow support for a caller-provided, *existing* verb slate
   against an independently chosen noun context. Never a lexical decision.
   """
-  @spec preview([String.t()], String.t(), :actor | :patient) :: map()
+  @spec preview([String.t()], String.t(), :actor | :patient, GenServer.server()) :: map()
   def preview(candidates, noun_id, relation, server \\ __MODULE__)
       when is_list(candidates) and is_binary(noun_id) and
            relation in [:actor, :patient] do
@@ -204,9 +206,9 @@ defmodule Brain.Synapses.Shadow do
       {:reply, {:error, :storage_unavailable}, state}
     else
       if not valid_evidence?(evidence) do
-      {:reply, {:error, :invalid_review}, state}
-    else
-      key = receipt(state, evidence)
+        {:reply, {:error, :invalid_review}, state}
+      else
+        key = receipt(state, evidence)
 
       case Map.fetch(state.receipts, key) do
         :error ->
