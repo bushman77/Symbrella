@@ -369,19 +369,47 @@ defmodule Core.Response.LlmSynthesis do
         {:ok, reviewed, review} =
           ReflectionLoop.review(user_text, replacement, context)
 
-        {reviewed, Map.put(review, :projected_expression_repair, %{
-          attempted?: true,
-          applied?: reviewed != text,
-          trigger: trigger,
-          source: :revalidated_sentence_roles,
-          original_reflection_status: Map.get(reflection, :status),
-          promoted_sense?: false,
-          stored_memory?: false
-        })}
+        issue =
+          if trigger == :exact_report_echo,
+            do: :projected_statement_echo,
+            else: :unverified_sense_specificity
+
+        revised =
+          review
+          |> Map.put(:status, :repair)
+          |> Map.put(:issues,
+            Enum.uniq([issue | Map.get(review, :issues, [])]))
+          |> Map.put(:applied?, reviewed != text)
+          |> Map.put(:repair_count, 1)
+          |> Map.put(:critique,
+            "The model draft did not follow verified structural expression constraints.")
+          |> Map.put(:repair_instruction,
+            "Use only the independently bound actor, predicate and patient.")
+          |> Map.put(:draft_text, String.slice(text, 0, 1200))
+          |> Map.put(:final_text, String.slice(reviewed, 0, 1200))
+          |> Map.put(:draft_sha256, sha256_hex(text))
+          |> Map.put(:final_sha256, sha256_hex(reviewed))
+          |> Map.put(:projected_expression_repair, %{
+            attempted?: true,
+            applied?: reviewed != text,
+            trigger: trigger,
+            source: :revalidated_sentence_roles,
+            original_reflection_status: Map.get(reflection, :status),
+            promoted_sense?: false,
+            stored_memory?: false
+          })
+
+        {reviewed, revised}
 
       :unchanged ->
         {text, reflection}
     end
+  end
+
+  defp sha256_hex(text) when is_binary(text) do
+    text
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   # A question echo or content-free non-answer gets at most one additional
