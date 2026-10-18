@@ -120,7 +120,7 @@ reports =
               end),
             caller_gold_label: result.gold_id,
             sense_verified?: result.sense_meaning_verified?,
-            LIFG_changed?: result.applied_to_lifg?
+            lifg_changed?: result.applied_to_lifg?
           }
 
         _ ->
