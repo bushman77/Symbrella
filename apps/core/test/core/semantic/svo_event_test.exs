@@ -193,15 +193,16 @@ defmodule Core.Semantic.SVOEventTest do
     assert ActionQuestions.answer(%{event | relation: "verb_paint"}, :actor, %{}) == nil
   end
 
-  test "misclassified declarative still gets stored and is acknowledged", %{sid: sid, owner: owner} do
-    # Input intent is wrong, but a verified SVO clause is not a question.
+  test "misclassified declarative can be retained without a fabricated memory acknowledgment", %{sid: sid, owner: owner} do
+    # A validated SVO event may be retained as an attributed user report,
+    # but that does not mean the user asked the assistant to remember it.
     si = EpisodicProjection.attach(%{input() | intent: :question})
     assert [%{relation: "verb_draw"}] = si.episodic_candidates
 
-    assert {:warm, acknowledgment, meta} = Response.plan(si, %{})
-    assert acknowledgment == "I’ve recorded what you told me: The artist draws a picture."
-    assert meta.response_source == :symbolic_conversation
-    assert meta.persistence_status == :persisted
+    assert Core.Response.Memory.acknowledge_projected(
+      si, sid, si.sentence, :question, 0.4) == nil
+
+    assert :ok = SideEffects.record_turn(sid, si.sentence, "I understand.", si)
 
     assert %{value: "a picture", sentence: "The artist draws a picture."} =
       Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
@@ -297,7 +298,7 @@ defmodule Core.Semantic.SVOEventTest do
              SVOEvent.project(%{si | active_cells: [%{cell | id: "other|verb|1"}]}, si.sentence)
   end
 
-  test "response attach preserves SVO proof and persists a live-planned assertion",
+  test "comprehension-only planning preserves the SVO proof without claiming a memory action",
        %{sid: sid, owner: owner} do
     si =
       input()
@@ -305,12 +306,12 @@ defmodule Core.Semantic.SVOEventTest do
       |> Map.put(:confidence, 0.4)
       |> EpisodicProjection.attach()
 
-    planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
+    # Turning off response generation must neither announce persistence
+    # nor erase the proof. Actual event recording is a separate side effect.
+    planned = Core.Response.Attach.maybe_build_response_plan(si, response: :off)
+    assert planned == si
 
-    assert planned.response_text == "I’ve recorded what you told me: The artist draws a picture."
-    assert planned.response_meta.response_source == :symbolic_conversation
-    assert planned.response_meta.persistence_status == :persisted
-
+    assert :ok = SideEffects.record_turn(sid, si.sentence, "I understand.", planned)
     assert %{value: "a picture", sentence: "The artist draws a picture."} =
              Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
   end
