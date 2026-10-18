@@ -185,9 +185,24 @@ defmodule Core.Brain.SynapticExperienceTest do
     assert %{weight: w} = Shadow.edge("draws|verb|1", "plaque|noun|1", :patient)
     assert_in_delta w, 0.01, 1.0e-8
 
+    # The synaptic shadow is shared across these test modules. A separate
+    # engraver experience may already support the :actor edge, so reject
+    # exactly this receipt's contribution rather than requiring a nil edge.
+    actor_before = Shadow.edge("draws|verb|1", "engraver|noun|1", :actor)
+    assert %{experiences: count_before} = actor_before
+
     assert {:ok, :rejected} = SynapticExperience.review(si, :reject, "local-reviewer")
     assert Shadow.edge("draws|verb|1", "plaque|noun|1", :patient) == nil
-    assert Shadow.edge("draws|verb|1", "engraver|noun|1", :actor) == nil
+
+    actor_after = Shadow.edge("draws|verb|1", "engraver|noun|1", :actor)
+
+    if count_before == 1 do
+      assert actor_after == nil
+    else
+      assert %{experiences: count_after, weight: remaining_weight} = actor_after
+      assert count_after == count_before - 1
+      assert remaining_weight <= actor_before.weight
+    end
 
     assert %{decision: :duplicate} =
              hd(SynapticExperience.attach(%{si | session_id: "replay"}).trace)
