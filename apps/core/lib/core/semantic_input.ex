@@ -99,6 +99,7 @@ defmodule Core.SemanticInput do
 
   @atom_fields MapSet.new([
                  :source,
+                 :experience_origin,
                  :intent,
                  :opener_intent,
                  :conversation_act,
@@ -256,6 +257,7 @@ defmodule Core.SemanticInput do
 
           # Execution/frame metadata
           session_id: term() | nil,
+          experience_origin: atom() | nil,
           frame: map() | nil,
           frame_ts_ms: integer() | nil,
           frame_seq: integer() | nil,
@@ -329,6 +331,7 @@ defmodule Core.SemanticInput do
             mwe_choices: [],
             lexical_constructions: [],
             session_id: nil,
+            experience_origin: nil,
             frame: nil,
             frame_ts_ms: nil,
             frame_seq: nil,
