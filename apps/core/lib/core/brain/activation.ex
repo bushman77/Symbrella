@@ -1,13 +1,15 @@
 defmodule Core.Brain.Activation do
   @moduledoc """
   Activation notification stage for `Core.SemanticInput`.
+
+  Neuron decay is owned by Brain.Cell.Activation and its configured half-life,
+  not by a per-message multiplier. The former payload `:decay` was unused.
   """
 
   @spec notify(map(), keyword()) :: map()
   def notify(%{} = si, opts) when is_list(opts) do
     payload = %{
       delta: Keyword.get(opts, :delta, 0.1),
-      decay: Keyword.get(opts, :decay, 0.98),
       via: :core
     }
 
