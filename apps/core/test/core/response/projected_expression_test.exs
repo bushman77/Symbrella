@@ -15,7 +15,7 @@ defmodule Core.Response.ProjectedExpressionTest do
 
   # Structurally faithful fixture for two live utterances; these are
   # synthetic ID/BrainCell attestations, not a dictionary gold label.
-  defp statement(actor, surface_verb, _base, patient) do
+  defp statement(actor, surface_verb, base, patient) do
     actor_id = "#{actor}|noun|1"
     verb_id = "#{surface_verb}|verb|1"
     patient_id = "#{patient}|noun|1"
@@ -54,7 +54,7 @@ defmodule Core.Response.ProjectedExpressionTest do
           definition: "The object of the action."},
         %{id: verb_id, norm: surface_verb, pos: "verb",
           semantic_atoms: @morphology,
-          definition: "Third-person singular simple present inflection."}
+          definition: "An inflected form of #{base}."}
       ],
       lifg_choices: choices,
       semantic_choices: choices,
