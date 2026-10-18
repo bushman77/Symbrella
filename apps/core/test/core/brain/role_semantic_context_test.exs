@@ -205,6 +205,26 @@ defmodule Core.Brain.RoleSemanticContextTest do
     end
   end
 
+  test "incomplete noun score distributions cannot masquerade as confidence" do
+    input = si("baker", "cooks", "cook", "meal",
+      "A maker of bread.", "Food prepared for eating.")
+
+    invalid = Map.update!(input, :lifg_choices, fn choices ->
+      Enum.map(choices, fn
+        %{token_index: 4} = c ->
+          %{c | candidate_probs: %{
+            "meal|noun|1" => 0.6, "meal|noun|2" => 0.2
+          }}
+        c -> c
+      end)
+    end)
+
+    result = RoleSemanticContext.extract(invalid)
+    patient = Enum.find(result.contexts, &(&1.role == :patient))
+    assert patient.status == :unavailable_or_ambiguous
+    assert result.active_count == 1 or result.active_count == 0
+  end
+
   test "only the selected noun sense contributes and extra alternative cells cannot leak" do
     input = si("baker", "cooks", "cook", "meal",
       "A person who bakes bread.", "Food eaten at a sitting.")
