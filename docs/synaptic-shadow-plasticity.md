@@ -111,3 +111,58 @@ Before any durable or live rollout, require authenticated review attribution,
 independent evidence lineage, contradiction adjudication, a schema for
 bounded reversible receipts, and held-out counterfactual improvements
 against an activation-only baseline.
+
+
+## Explicit patient-correction proposals (shadow v3)
+
+The production Core pipeline now also runs
+\`Core.Brain.SynapticCorrection.attach/2\` after ordinary experience admission.
+
+This phase recognizes a **very narrow** correction construction:
+
+\`\`\`text
+Actually, the artist draws a diagram, not a picture.
+\`\`\`
+
+Requirements:
+
+1. The source must be marked as a real human-origin user turn.
+2. The utterance must match an anchored, bounded, five-token positive SVO
+   correction. Questions, quoted material, compound predicates, hypotheses,
+   multiple objects and most natural-language variants are not supported.
+3. Reconstruct the prior and replacement as separate positive clauses and
+   independently comprehend both through real Core with response, persistence,
+   neural recruitment and synaptic writes disabled. This uses the caller's LIFG
+   options but is not a formally pure reconstruction: other transient region
+   state may still be touched.
+4. Each independent interpretation must pass \`SynapticExperience.extract/1\`.
+   Their actor and predicate **sense IDs** must match, their patients differ,
+   and the prior's exact experience receipt must already exist.
+5. The prior must not already be rejected, and the new event must not already
+   have an independently recorded receipt.
+
+On success, \`Brain.Synapses.Shadow.propose_correction/2\` produces a read-only
+\`:review_proposed\` report, attached as a
+\`:synaptic_correction\` trace event. The trace contains bounded sense IDs
+and review status, not original sentence text or evidence binaries.
+
+The proposal **never** rejects the old receipt, registers the new event,
+changes an edge weight, updates LIFG, or alters Hippocampus facts. Two real
+events may have the same actor and predicate but different patients; even an
+explicit "actually" is not enough to prove that an earlier event was false.
+
+The manual \`SynapticExperience.review/3\` remains the only route for modifying
+review verdicts. There is no authenticated end-user approval UI and no
+automatic contradiction adjudication yet. The proposal is ephemeral and will
+not survive a restart, just like the synaptic shadow itself.
+
+\`\`\`sh
+mix test apps/core/test/core/brain/synaptic_correction_test.exs --trace
+mix run scripts/probe_synaptic_contradiction.exs
+\`\`\`
+
+Disable with \`synapse_correction?: false\` or
+\`synapse_shadow?: false\` in a Core call. Before enabling automatic
+corrections or long-lived weights, add attributable event-instance identity,
+verified provenance across sessions, authenticated human approval and
+counterfactual evaluation against unchanged weights.
