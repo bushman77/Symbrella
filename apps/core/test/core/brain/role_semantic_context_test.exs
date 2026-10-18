@@ -205,6 +205,43 @@ defmodule Core.Brain.RoleSemanticContextTest do
     end
   end
 
+  test "only the selected noun sense contributes and extra alternative cells cannot leak" do
+    input = si("baker", "cooks", "cook", "meal",
+      "A person who bakes bread.", "Food eaten at a sitting.")
+
+    with_decoy = Map.update!(input, :active_cells, fn cells ->
+      [%{id: "meal|noun|2", norm: "meal", pos: "noun",
+         definition: "A cricket bowling meal and radar game."} | cells]
+    end)
+
+    proof = RoleSemanticContext.extract(with_decoy)
+    patient = Enum.find(proof.contexts, &(&1.role == :patient))
+    assert patient.status == :grounded_one_hop
+    assert patient.noun_sense_id == "meal|noun|1"
+    assert "food" in patient.terms
+    refute "cricket" in patient.terms
+    refute "radar" in patient.terms
+    refute proof.inferred_noun_meanings_verified?
+  end
+
+  test "role-context scoring stays bounded even when both roles share many terms" do
+    input = si("baker", "cooks", "cook", "meal",
+      "Food heat bake eat bread dishes kitchen preparing.",
+      "Food heat bake eat bread dishes kitchen preparing.")
+    proof = RoleSemanticContext.extract(input)
+    candidate = sense("cook", 1,
+      "To prepare food heat bake eat bread dishes in a kitchen.")
+
+    result = RoleSemanticContext.support(proof, candidate)
+    assert result.patient_signal > 0
+    assert result.actor_signal > 0
+    assert result.patient_signal <= 0.105
+    assert result.actor_signal <= 0.045
+    assert result.signal <= 0.13
+    assert result.one_hop_only?
+    refute result.verified_sense_equivalence?
+  end
+
   test "actor-only expansion cannot license unsupported verb meaning" do
     input = si("baker", "cooks", "cook", "meal",
       "A maker of food by heating.", "A regular occasion in the day.")
