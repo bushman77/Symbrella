@@ -195,9 +195,10 @@ defmodule Core.LIFG.Attach do
 
   def run_and_attach(si, _lifg_opts), do: si
 
-  # Compare Brain's unfiltered word decisions, Core's shadowed word
-  # decisions and the actual accepted semantic MWE view. This is read-only:
-  # neither the scorer nor canonical promotion is changed by this audit.
+  # Compare the complete lexical word choices with the validated semantic
+  # MWE view. Only Core.MWE.Decisions may suppress words from semantic_choices.
+  # The legacy :after_shadow key remains for trace-reader compatibility,
+  # but refers to retained lexical words, not premature shadowing.
   defp maybe_trace_word_flow(si, raw_words, shadowed_words, opts) do
     if Keyword.get(opts, :trace_word_scores?, false) == true do
       compact = fn choices ->
@@ -210,10 +211,11 @@ defmodule Core.LIFG.Attach do
 
       Core.Pipeline.Trace.append(si, :lifg_word_flow_audit,
         decision: :observed,
-        reason: :word_selection_before_and_after_mwe_shadow_and_promotion,
+        reason: :unigrams_retained_until_canonical_mwe_promotion,
         meta: %{
           before_shadow: compact.(raw_words),
           after_shadow: compact.(shadowed_words),
+          retained_words: compact.(shadowed_words),
           after_promotion: compact.(Map.get(si, :semantic_choices, [])),
           mwe_candidates:
             Map.get(si, :mwe_choices, [])
