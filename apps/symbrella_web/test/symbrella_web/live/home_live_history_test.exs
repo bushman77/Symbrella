@@ -329,6 +329,25 @@ defmodule SymbrellaWeb.HomeLiveHistoryTest do
     html = wait_for_reply(view)
     assert html =~ "Your name is Bradley."
     refute html =~ "Your name is Symbrella."
+
+    # A memory-hit answer must remain the displayed reply, but it must no
+    # longer skip the real session-scoped cognitive/neural pipeline.
+    reply =
+      ChatHistory.list(ChatHistory.session_id())
+      |> Enum.find(fn
+        %{role: :assistant, text: "Your name is Bradley."} -> true
+        _ -> false
+      end)
+
+    assert %{si: si, text: "Your name is Bradley."} = reply
+    assert si.sentence == "what is my name?"
+    assert si.session_id == ChatHistory.session_id()
+    assert si.response_text == nil
+    assert si.episode == nil
+    assert Enum.any?(si.trace, fn
+             %{stage: :neuron_feedback} -> true
+             _ -> false
+           end)
   end
 
   test "chat does not accept assistant identity as the user's name", %{conn: conn} do
