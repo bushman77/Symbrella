@@ -565,6 +565,7 @@ defmodule SymbrellaWeb.HomeLive do
     si =
       Core.resolve_input(user_text,
         mode: :prod,
+        experience_origin: :user_turn,
         enrich_lexicon?: true,
         lexicon_stage?: true,
         lifg_opts: [grammar_weight: 1.0],
