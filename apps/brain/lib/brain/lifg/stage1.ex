@@ -302,6 +302,11 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:ignored_mwe_probes, acc.ignored_mwe_probes)
         |> Map.put(:low_confidence_decisions, acc.low_confidence)
         |> Map.put(:pos_anomalies, acc.pos_anomalies)
+        |> Map.put(:sense_focus, %{
+          focused_tokens: acc.focused_tokens,
+          context_evaluations: acc.context_evaluations,
+          context_skipped: acc.context_skipped
+        })
         |> mark_degraded()
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
@@ -1000,6 +1005,7 @@ defmodule Brain.LIFG.Stage1 do
           prob_margin: margin,
           weak?: margin_weak? or low_confidence?,
           semantic_control: semantic_control,
+          sense_focus: focus,
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
           reliability:
@@ -1032,6 +1038,9 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:low_confidence, low_confidence_next)
         |> Map.put(:pos_anomalies, pos_anomaly_next)
         |> Map.put(:fallback_winners, fallback_winners_next)
+        |> Map.update!(:context_evaluations, &(&1 + focus.context_evaluations))
+        |> Map.update!(:context_skipped, &(&1 + focus.context_skipped))
+        |> Map.update!(:focused_tokens, &(&1 + if(focus.mode == :focused, do: 1, else: 0)))
         |> Map.update!(:kept, &(&1 + 1))
     end
   end
