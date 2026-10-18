@@ -1,4 +1,4 @@
-# Compare two-turn comprehension with and without isolated neuron carryover.
+# Compare baseline, exact-ID neuron carryover and bounded semantic propagation.
 #
 # Non-persistent experiment: no user-event writes, no LLM response generation,
 # no neuron stimulation. Existing owner-scoped Hippocampal event memory is
@@ -71,7 +71,7 @@ else
 
   IO.puts("\n=== Neuron carryover vs baseline: read-only comprehension probe ===")
   IO.puts("Gap: #{gap_ms}ms. No LLM call, no durable event write, no BrainCell stimulation.")
-  IO.puts("This is a synthetic prior, not recorded live neuron activation.")
+  IO.puts("These are synthetic neuron and lemma priors, not recorded live activation.")
   IO.puts("The response-path recall reported by live chat is NOT exercised here.\n")
 
   results =
@@ -81,7 +81,9 @@ else
       IO.puts("\n--- #{label} ---")
       IO.puts("First: #{first}")
       IO.puts("Next:  #{second}")
-      IO.puts("Active neurons in synthetic carryover: #{report.synthetic_prior_count}")
+      IO.puts("Neuron IDs in propagated carryover: #{report.synthetic_prior_count}")
+      IO.inspect(report.semantic_pulse_source, label: "Attested verb-lemma pulse source")
+      IO.inspect(report.semantic_lemma_prior, label: "Decayed semantic-lemma prior")
       IO.inspect(report.read_only_event_answer, label: "Read-only validated-event answer")
       IO.inspect(report.first_turn.senses, label: "First-turn LIFG IDs")
       IO.inspect(%{
@@ -93,8 +95,14 @@ else
         current_turn_projected_events: report.first_turn.projected_event_count
       }, label: "First-turn structure vs lexical confidence", pretty: true)
       IO.inspect(report.baseline.senses, label: "Second-turn baseline LIFG IDs")
-      IO.inspect(report.neural.senses, label: "Second-turn neural-prior LIFG IDs")
-      IO.inspect(report.differences, label: "Observed differences", pretty: true)
+      IO.inspect(report.exact_only.senses, label: "Second-turn exact-ID-only LIFG IDs")
+      IO.inspect(report.neural.senses, label: "Second-turn semantic propagation LIFG IDs")
+      IO.inspect(report.exact_only_differences, label: "Exact-ID-only vs baseline", pretty: true)
+      IO.inspect(report.incremental_semantic_differences, label: "Semantic propagation vs exact only", pretty: true)
+      IO.inspect(report.differences, label: "Full propagation vs baseline", pretty: true)
+      IO.inspect(%{exact_only: report.exact_only.semantic_prior_candidates,
+        propagated: report.neural.semantic_prior_candidates},
+        label: "Verb candidate senses receiving shared lemma prior")
       IO.inspect(
         %{
           baseline: %{
@@ -107,6 +115,12 @@ else
             structural_unresolved: report.baseline.structural_unresolved,
             uncertain: report.baseline.uncertain,
             episodic_candidates: report.baseline.projected_event_count
+          },
+          exact_only: %{
+            lexical_degraded?: report.exact_only.comprehension_degraded?,
+            structural_status: report.exact_only.sentence_meaning_status,
+            queried_role: report.exact_only.queried_role,
+            uncertain: report.exact_only.uncertain
           },
           neural: %{
             lexical_degraded?: report.neural.comprehension_degraded?,
