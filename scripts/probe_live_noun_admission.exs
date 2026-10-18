@@ -10,7 +10,10 @@ opts = [
   mode: :prod,
   experience_origin: :user_turn,
   session_id: "noun-admission-read-only",
-  fuzzy: false,
+  # Mirror the HomeLive lexical admission path; disable only responses/writes.
+  fuzzy: true,
+  enrich_lexicon?: true,
+  lexicon_stage?: true,
   response: :off,
   episodes: false,
   persist_episodes: false,
@@ -35,11 +38,19 @@ audit = RoleSemanticContext.extract(si)
 
 IO.puts("\n=== Selected noun-role admission (read only) ===")
 IO.inspect(%{
+  intent: si.intent,
+  speech_act: Map.get(si, :conversation_act),
+  episodic_candidate_count: length(List.wrap(si.episodic_candidates)),
+  finite_present_svo_signatures:
+    si
+    |> Map.get(:sentence_signatures)
+    |> List.wrap()
+    |> Enum.count(&(Map.get(&1, :id) == :finite_present_svo_candidate)),
   sentence_meaning: Map.take(si.sentence_meaning || %{},
     [:kind, :status, :speech_act, :source_frame]),
   admission_status: audit.status,
   roles: audit.contexts
-}, label: "Role gate")
+}, label: "Role gate", pretty: true, limit: :infinity)
 
 case SVOEvent.complete_signature(si) do
   %{roles: %{subject_head: subject_index, object_head: object_index}} ->
