@@ -6,7 +6,8 @@ defmodule Core.LIFG.Attach do
   Responsibilities:
     • Call Brain.LIFG (safely) and attach :lifg_choices / :atl_slate / trace
     • Apply tiny tie-break priors and MWE-friendly bumps
-    • MWE shadowing (suppress overlapping unigrams when an MWE wins)
+    • Retain original unigram choices; Core.MWE.Decisions exclusively owns
+      semantic shadowing after validating lexical phrase promotion
   """
 
   # ── knobs ─────────────────────────────────────────────────────────────
@@ -152,7 +153,10 @@ defmodule Core.LIFG.Attach do
         {word_choices, mwe_choices} =
           Core.MWE.LIFGBridge.split_choices(all_choices, virtual_mwes)
 
-        lifg_choices = mwe_shadow(word_choices, tokens_for_choices)
+        # Never drop lexical unigram choices merely because a virtual MWE
+        # won Stage1. The phrase must pass Core.MWE.Decisions' lexical,
+        # structural and span checks before shadowing in semantic_choices.
+        lifg_choices = word_choices
 
         si_clean =
           if map_size(virtual_mwes) > 0 do
@@ -349,44 +353,6 @@ defmodule Core.LIFG.Attach do
   end
 
   # ───────────────────────── MWE shadowing ─────────────────────────
-
-  defp mwe_shadow(lifg_choices, tokens) when is_list(lifg_choices) and is_list(tokens) do
-    mwe_spans =
-      lifg_choices
-      |> Enum.map(& &1.token_index)
-      |> Enum.map(&Enum.at(tokens, &1, %{}))
-      |> Enum.filter(fn t -> Map.get(t, :n, 1) > 1 end)
-      |> Enum.map(&Map.get(&1, :span))
-
-    if mwe_spans == [] do
-      lifg_choices
-    else
-      Enum.reject(lifg_choices, fn ch ->
-        t = Enum.at(tokens, ch.token_index, %{})
-
-        if Map.get(t, :n, 1) == 1 do
-          covered_by_any_mwe?(Map.get(t, :span), mwe_spans)
-        else
-          false
-        end
-      end)
-    end
-  end
-
-  defp covered_by_any_mwe?({a, l}, spans) when is_integer(a) and is_integer(l) do
-    b = a + l
-
-    Enum.any?(spans, fn
-      {s, sl} when is_integer(s) and is_integer(sl) ->
-        e = s + sl
-        a >= s and b <= e
-
-      _ ->
-        false
-    end)
-  end
-
-  defp covered_by_any_mwe?(_, _), do: false
 
   # ───────────────────────── id helpers ─────────────────────────
 
