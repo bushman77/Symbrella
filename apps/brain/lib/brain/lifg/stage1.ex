@@ -257,6 +257,7 @@ defmodule Brain.LIFG.Stage1 do
           stage1_local_mwe_fallback?: stage1_local_mwe_fallback?,
           stage1_stop_event: stop_event,
           reanalysis?: reanalysis?,
+          cerebellum_learn?: Keyword.get(opts, :cerebellum_learn?, true),
           cerebellum_snapshot_path:
             Keyword.get(
               opts,
@@ -945,7 +946,7 @@ defmodule Brain.LIFG.Stage1 do
         margin = Float.round(max(margin0, 0.0), 6)
 
         _ =
-          unless closed_class_slate? do
+          if not closed_class_slate? and ctx.cerebellum_learn? do
             cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
           end
 
