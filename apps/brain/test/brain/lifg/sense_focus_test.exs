@@ -111,4 +111,21 @@ defmodule Brain.LIFG.SenseFocusTest do
     assert Enum.sort(Map.keys(broad.scores)) ==
              Enum.sort(Map.keys(focused.scores))
   end
+  test "wrapper preserves the focused context option" do
+    si = Map.merge(adjudicated_si(), %{
+      sentence: "light",
+      trace: [],
+      tokens: [%{index: 0, phrase: "light", n: 1, span: {0, 5}}],
+      sense_candidates: %{0 => candidates()},
+      active_cells: candidates()
+    })
+
+    for {flag, mode} <- [{true, :focused}, {false, :broad}] do
+      out = Brain.LIFG.disambiguate_stage1(si, scores: :all,
+        sense_focus?: flag, semantic_control?: false)
+      event = Enum.find(out.trace, &(Map.get(&1, :stage) == :lifg_stage1))
+      assert is_map(event)
+      assert [%{sense_focus: %{mode: ^mode}} | _] = event.choices
+    end
+  end
 end
