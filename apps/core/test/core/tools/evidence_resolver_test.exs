@@ -222,6 +222,52 @@ defmodule Core.Tools.EvidenceResolverTest do
     refute rejected =~ "19 miles"
   end
 
+  test "source-backed proximity admits comma and space qualified Canadian place names" do
+    alias Core.Semantic.EventFrames
+
+    pairs = [
+      {"how far is Maple Ridge, BC from Kamloops, BC",
+       "Maple Ridge, BC", "Kamloops, BC"},
+      {"how far is maple ridge bc from kamloops bc",
+       "maple ridge bc", "kamloops bc"},
+      {"how far is maple ridge from kamloops",
+       "maple ridge", "kamloops"}
+    ]
+
+    for {question, subject, target} <- pairs do
+      frame = EventFrames.location_question(question)
+      assert frame.subject == subject
+      assert frame.target == target
+
+      sources = [
+        %{title: "Maple Ridge", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q16740"},
+        %{title: "Kamloops", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q473209"}
+      ]
+
+      context = %{
+        user_text: question,
+        features: %{symbolic_frame: frame},
+        symbolic_frame: %{event: frame},
+        web_evidence: %{
+          status: :retrieved, resolution: :source_supported,
+          support: %{kind: :proximity, status: :source_supported,
+            method: :haversine, distance_km: 229.6,
+            subject: subject, target: target, sources: sources}
+        }
+      }
+
+      assert Grounding.available_support?(context)
+      answer = Grounding.align("The cities are 30 km apart.", context)
+      assert answer =~ "229.6 km"
+      assert answer =~ "straight line"
+      assert Grounding.supports?(answer, context)
+      refute Grounding.supports?(answer <> " It is 30 km by road.", context)
+      refute Grounding.supports?("30 km straight line " <> answer, context)
+    end
+  end
+
   test "an unverified refusal is upgraded when evidence is source-supported" do
     context = WebRetrieval.enrich(context(:proximity),
       enabled?: true, provider: OffTopicWikipedia,
