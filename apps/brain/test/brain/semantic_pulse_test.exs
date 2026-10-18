@@ -1,5 +1,5 @@
 defmodule Brain.SemanticPulseTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Brain.SemanticPulse
 
@@ -59,6 +59,20 @@ defmodule Brain.SemanticPulseTest do
     {expired, storage} = SemanticPulse.snapshot(refreshed, "a", t + 30_100)
     assert expired == %{}
     assert storage == %{}
+  end
+
+  test "Brain coordinator exposes each session's lemma routing evidence separately" do
+    assert is_pid(Process.whereis(Brain))
+    session = "pulse-test-#{System.unique_integer([:positive])}"
+    another = session <> "-other"
+
+    assert :ok = Brain.semantic_pulse(session, "draw", @id, 0.03)
+    assert %{"draw" => value} = Brain.semantic_snapshot(session)
+    assert value > 0 and value <= 0.03
+    assert Brain.semantic_snapshot(another) == %{}
+
+    # Semantic routing does not create a new BrainCell or forge an exact sense.
+    refute Map.has_key?(Brain.activation_snapshot(), "draw|verb|semantic")
   end
 
   test "memory is bounded globally and by session without new processes" do
