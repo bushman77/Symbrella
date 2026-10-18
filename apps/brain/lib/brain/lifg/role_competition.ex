@@ -30,9 +30,10 @@ defmodule Brain.LIFG.RoleCompetition do
     proposals =
       Enum.flat_map(signatures, fn
         %{id: :noun_phrase, source: :core_syntax, span: {first, last},
-          roles: %{determiner: first, modifier: modifier, head: last},
+          roles: %{determiner: det_role, modifier: modifier, head: head_role},
           evidence: evidence}
         when is_integer(first) and is_integer(last) and is_integer(modifier) and
+             det_role == first and head_role == last and
              modifier == first + 1 and last == first + 2 and is_list(evidence) ->
           if :nominal_constituent in evidence and :pos_pattern in evidence and
                MapSet.member?(@determiners, Map.get(tokens, first)) and
@@ -66,9 +67,10 @@ defmodule Brain.LIFG.RoleCompetition do
       Enum.flat_map(signatures, fn
         %{id: :noun_phrase, source: :core_syntax,
           span: {determiner, head},
-          roles: %{determiner: determiner, head: head},
+          roles: %{determiner: det_role, head: head_role},
           evidence: evidence}
         when is_integer(determiner) and is_integer(head) and
+             det_role == determiner and head_role == head and
              head == determiner + 1 and is_list(evidence) ->
           predicate = head + 1
           attested_predicate? =
