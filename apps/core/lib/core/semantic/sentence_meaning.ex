@@ -220,14 +220,17 @@ defmodule Core.Semantic.SentenceMeaning do
       end
 
     is_list(winners) and is_list(selections) and
-      Enum.all?(roles, fn {_role, %{token_index: index, sense_id: sense_id}} ->
-        Enum.count(winners, fn winner ->
-          Map.get(winner, :token_index) == index and Map.get(winner, :id) == sense_id
-        end) == 1 and
-          Enum.count(selections, fn selected ->
-            Map.get(selected, :token_index) == index and
-              (Map.get(selected, :id) || Map.get(selected, :chosen_id)) == sense_id
-          end) == 1
+      Enum.all?(roles, fn
+        {_role, %{token_index: index, sense_id: sense_id}} ->
+          Enum.count(winners, fn winner ->
+            Map.get(winner, :token_index) == index and Map.get(winner, :id) == sense_id
+          end) == 1 and
+            Enum.count(selections, fn selected ->
+              Map.get(selected, :token_index) == index and
+                (Map.get(selected, :id) || Map.get(selected, :chosen_id)) == sense_id
+            end) == 1
+
+        _ -> false
       end)
   end
 
