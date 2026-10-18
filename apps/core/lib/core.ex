@@ -187,6 +187,10 @@ defmodule Core do
     |> StateDump.capture(:episodic_projection)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    # Intent is about the speaker's act, not a claimed verified verb sense.
+    # Revalidate complete assertions before replacing low-confidence :unknown.
+    |> Core.Intent.StructuralStatement.attach()
+    |> StateDump.capture(:structural_statement)
     # Read-only semantic sense validation for every eligible live chat turn.
     # Reuses exact LIFG/ATL roles and their selected noun glosses; publishes
     # ONLY a bounded Explain trace, never a replacement semantic winner.
