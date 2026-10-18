@@ -304,7 +304,9 @@ defmodule Core.Syntax.Signatures do
             {wh.index, predicate.index},
             %{wh: wh.index, auxiliary: aux.index, subject_determiner: det.index,
               subject_head: subject.index, predicate: predicate.index},
-            %{subject_head: [:pos_noun], predicate: [:pos_verb]},
+            %{wh: [:pos_pronoun], auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
+              subject_determiner: [:pos_determiner],
+              subject_head: [:pos_noun], predicate: [:pos_verb]},
             [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
              :attested_nominal_subject, :lexical_verb_available,
              :question_punctuation, :contiguous_surface]
