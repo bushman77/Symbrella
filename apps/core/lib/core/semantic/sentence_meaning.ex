@@ -115,6 +115,14 @@ defmodule Core.Semantic.SentenceMeaning do
 
   defp object_question(_, _, _, _, _), do: nil
 
+  defp normalize_object_question(sentence) do
+    sentence
+    |> String.trim()
+    |> String.trim_trailing("?")
+    |> String.trim()
+    |> String.downcase()
+  end
+
   defp compose_object_question(si, sentence, _frame, constituents, indexed) do
     question_constituents = Enum.filter(constituents, fn
       %{id: :wh_aux_object_question, span: {0, 4}, status: :resolved,
@@ -148,8 +156,8 @@ defmodule Core.Semantic.SentenceMeaning do
          {:ok, predicate_surface} <- surface_at(indexed, 4),
          true <- String.downcase(wh_surface) in ["what", "who"],
          true <- String.downcase(auxiliary_surface) in ["do", "does", "did"],
-         true <- String.downcase(original_sentence(indexed, 0, 4)) ==
-                   sentence |> String.trim() |> String.trim_trailing("?") |> String.downcase() do
+         {:ok, reconstructed} <- surface_range(indexed, 0, 4),
+         true <- String.downcase(reconstructed) == normalize_object_question(sentence) do
       roles = %{
         question_word: %{surface: wh_surface, token_index: 0, sense_id: wh.sense_id},
         auxiliary: %{surface: auxiliary_surface, token_index: 1,
