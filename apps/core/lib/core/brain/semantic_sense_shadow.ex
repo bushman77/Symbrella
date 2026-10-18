@@ -71,8 +71,14 @@ defmodule Core.Brain.SemanticSenseShadow do
         |> Map.get(:exclusions, [])
         |> List.wrap()
         |> Enum.take(@max_exclusions)
-        |> Enum.map(&Map.take(&1, [:id, :grammar, :lexical_score,
-          :missing_restrictions, :exclusions])),
+        |> Enum.map(fn row ->
+          row
+          |> Map.take([:id, :grammar, :lexical_score,
+            :missing_restrictions, :exclusions])
+          |> Map.update(:exclusions, [], fn values ->
+            Enum.map(List.wrap(values), &normalise_exclusion/1)
+          end)
+        end),
       sense_verified?: false,
       gold_label_provided?: false,
       applied_to_lifg?: false,
@@ -86,7 +92,7 @@ defmodule Core.Brain.SemanticSenseShadow do
     %{
       mode: :shadow_only,
       status: Map.get(result, :status, :skipped),
-      skip_reason: Map.get(result, :reason),
+      skip_reason: inspect(Map.get(result, :reason)),
       role_expansion_enabled?: true,
       sense_verified?: false,
       applied_to_lifg?: false,
@@ -98,6 +104,14 @@ defmodule Core.Brain.SemanticSenseShadow do
 
   def compact(_), do: %{mode: :shadow_only, status: :invalid_result,
     applied_to_lifg?: false, response_changed?: false}
+
+  defp normalise_exclusion({kind, detail})
+       when is_atom(kind) and is_atom(detail) do
+    %{kind: kind, detail: detail}
+  end
+
+  defp normalise_exclusion(value) when is_atom(value), do: %{kind: value}
+  defp normalise_exclusion(value), do: %{kind: :unknown, detail: inspect(value)}
 
   defp safe_evaluate(si, opts) do
     # Internal injection is useful to test the read-only boundary with a
