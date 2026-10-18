@@ -36,6 +36,11 @@ defmodule Core.Brain.Activation do
   def prime(si, opts \\ [])
 
   def prime(%{} = si, opts) when is_list(opts) do
+    if Keyword.get(opts, :neuron_activation?, true) == false do
+      # Explicit controls (benchmark/tests) must not borrow previous-turn
+      # activity or emit new neural stimuli.
+      Map.put(si, :neuron_activation, %{})
+    else
     prior = map_or_empty(Map.get(si, :neuron_activation))
     rows = list_or_empty(Map.get(si, :active_cells))
     updated = Enum.map(rows, &put_runtime_prior(&1, prior))
@@ -60,6 +65,7 @@ defmodule Core.Brain.Activation do
         skipped_ambiguous_slates?: length(recruited) < length(Enum.uniq_by(rows, &cell_id/1))
       }
     )
+    end
   end
 
   def prime(si, _opts), do: si
@@ -159,7 +165,8 @@ defmodule Core.Brain.Activation do
   def notify(%{} = si, opts) when is_list(opts) do
     plan = feedback_plan(si, opts)
 
-    if Keyword.get(opts, :notify_brain?, true) do
+    if Keyword.get(opts, :neuron_activation?, true) != false and
+         Keyword.get(opts, :notify_brain?, true) do
       plan
       |> Enum.group_by(& &1.delta)
       |> Enum.each(fn {delta, entries} ->
