@@ -13,7 +13,6 @@ defmodule Core.Brain.SynapticDisambiguation do
   """
 
   alias Core.Brain.{SynapticExperience, SynapticPropagation}
-  alias Core.Semantic.SVOEvent
   alias Brain.Synapses.Shadow
 
   @min_verb_candidates 2
@@ -63,7 +62,7 @@ defmodule Core.Brain.SynapticDisambiguation do
         probability_kind: :per_token_post_softmax,
         abstain_margin: abstain_margin,
         adjustment_kind: :hypothetical_additive_probability_not_calibrated,
-        candidate_count: length(source_candidates),
+        candidate_count: map_size(source_candidates),
         verb_sense_count: count_verb_senses(source_candidates),
         baseline: decision_report(before, baseline_choice, gold),
         counterfactual: decision_report(after_signal, projected_choice, gold),
