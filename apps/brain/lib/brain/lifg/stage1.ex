@@ -843,6 +843,16 @@ defmodule Brain.LIFG.Stage1 do
             tok_index
           )
 
+        # High-evidence role competition resolves grammatical POS before
+        # semantic sense discrimination. Speculative local signatures alone
+        # never authorize this bounded support.
+        cal_scores =
+          GrammarEvidence.apply_role_competition(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
         # A mixed-POS slate is not automatically a closed-class *winner*.
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.
