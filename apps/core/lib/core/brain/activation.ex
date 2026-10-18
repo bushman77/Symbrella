@@ -41,30 +41,30 @@ defmodule Core.Brain.Activation do
       # activity or emit new neural stimuli.
       Map.put(si, :neuron_activation, %{})
     else
-    prior = map_or_empty(Map.get(si, :neuron_activation))
-    rows = list_or_empty(Map.get(si, :active_cells))
-    updated = Enum.map(rows, &put_runtime_prior(&1, prior))
-    recruited = initial_ids(updated)
+      prior = map_or_empty(Map.get(si, :neuron_activation))
+      rows = list_or_empty(Map.get(si, :active_cells))
+      updated = Enum.map(rows, &put_runtime_prior(&1, prior))
+      recruited = initial_ids(updated)
 
-    if Keyword.get(opts, :notify_brain?, true) and recruited != [] do
-      _ = Core.Brain.activate_cells(recruited, %{delta: @initial_delta, via: :lexical_recruitment})
-    end
+      if Keyword.get(opts, :notify_brain?, true) and recruited != [] do
+        _ = Core.Brain.activate_cells(recruited, %{delta: @initial_delta, via: :lexical_recruitment})
+      end
 
-    si
-    |> Map.put(:active_cells, updated)
-    |> Core.Pipeline.Trace.append(:neuron_priming,
-      decision: :bounded,
-      reason: :lexical_recruitment_and_prior_activation,
-      meta: %{
-        candidates: length(updated),
-        previously_active: Enum.count(updated, fn
-          %{runtime_primed?: true} -> true
-          _ -> false
-        end),
-        recruited: length(recruited),
-        skipped_ambiguous_slates?: length(recruited) < length(Enum.uniq_by(rows, &cell_id/1))
-      }
-    )
+      si
+      |> Map.put(:active_cells, updated)
+      |> Core.Pipeline.Trace.append(:neuron_priming,
+        decision: :bounded,
+        reason: :lexical_recruitment_and_prior_activation,
+        meta: %{
+          candidates: length(updated),
+          previously_active: Enum.count(updated, fn
+            %{runtime_primed?: true} -> true
+            _ -> false
+          end),
+          recruited: length(recruited),
+          skipped_ambiguous_slates?: length(recruited) < length(Enum.uniq_by(rows, &cell_id/1))
+        }
+      )
     end
   end
 
