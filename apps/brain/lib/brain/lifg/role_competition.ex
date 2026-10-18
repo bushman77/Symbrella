@@ -96,8 +96,88 @@ defmodule Brain.LIFG.RoleCompetition do
           []
       end)
 
+    # A complete finite-present SVO signature carries independent morphological
+    # evidence for the predicate. Support only its *existing* nominal subject
+    # alternative, without inferring or verifying any dictionary meaning.
+    present_subject_proposals =
+      Enum.flat_map(signatures, fn
+        %{id: :finite_present_svo_candidate, source: :core_syntax,
+          span: {start, last},
+          roles: %{subject_determiner: det, subject_head: subject,
+                   predicate: predicate, object_head: object}, evidence: evidence}
+        when is_integer(start) and is_integer(last) and is_integer(det) and
+             is_integer(subject) and is_integer(predicate) and is_integer(object) and
+             is_list(evidence) ->
+          required = [:contiguous_surface, :attested_nominal_subject,
+                      :attested_nominal_object, :attested_finite_present_verb]
+
+          if start == det and subject == det + 1 and predicate == subject + 1 and
+               predicate < object and object <= last and
+               Enum.all?(required, &(&1 in evidence)) and
+               MapSet.member?(@determiners, Map.get(tokens, det)) and
+               witnessed?(cells, tokens, det, "determiner") and
+               witnessed?(cells, tokens, subject, "noun") and
+               witnessed?(cells, tokens, predicate, "verb") and
+               witnessed?(cells, tokens, object, "noun") do
+            [%{token_index: subject, pos: "noun", role: :subject_head,
+               frame: :finite_present_svo_candidate, span: {start, last},
+               basis: :determined_subject_before_attested_present_predicate,
+               evidence: [:complete_finite_present_svo, :dictionary_pos_witness,
+                          :attested_finite_present_verb]}]
+          else
+            []
+          end
+
+        _ -> []
+      end)
+
+    # "What did the artist draw?" has a complete auxiliary inversion and
+    # attested noun/verb alternatives. Neither "artist" nor "draw" is hardcoded:
+    # this supports POS only, not a specific word sense or a factual event.
+    question_proposals =
+      Enum.flat_map(signatures, fn
+        %{id: :wh_aux_object_question, source: :core_syntax,
+          span: {first, last},
+          roles: %{wh: wh, auxiliary: aux, subject_determiner: det,
+                   subject_head: subject, predicate: predicate},
+          evidence: evidence}
+        when is_integer(first) and is_integer(last) and is_integer(wh) and
+             is_integer(aux) and is_integer(det) and is_integer(subject) and
+             is_integer(predicate) and is_list(evidence) ->
+          needed = [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+                    :attested_nominal_subject, :lexical_verb_available,
+                    :question_punctuation, :contiguous_surface]
+
+          if first == wh and aux == wh + 1 and det == aux + 1 and
+               subject == det + 1 and predicate == subject + 1 and last == predicate and
+               Map.get(tokens, wh) in ["what", "who"] and
+               Map.get(tokens, aux) in ~w(do does did can could will would should may might) and
+               MapSet.member?(@determiners, Map.get(tokens, det)) and
+               Enum.all?(needed, &(&1 in evidence)) and
+               witnessed?(cells, tokens, det, "determiner") and
+               witnessed?(cells, tokens, subject, "noun") and
+               witnessed?(cells, tokens, predicate, "verb") do
+            basis_evidence = [:wh_fronted, :auxiliary_inversion,
+                              :bounded_determiner_surface, :dictionary_pos_witness,
+                              :question_punctuation]
+
+            [%{token_index: subject, pos: "noun", role: :subject_head,
+               frame: :wh_aux_object_question, span: {first, last},
+               basis: :determined_subject_in_wh_aux_question,
+               evidence: basis_evidence},
+             %{token_index: predicate, pos: "verb", role: :predicate,
+               frame: :wh_aux_object_question, span: {first, last},
+               basis: :predicate_in_wh_aux_question,
+               evidence: basis_evidence ++ [:attested_verb_alternative]}]
+          else
+            []
+          end
+
+        _ -> []
+      end)
+
     decisions =
-      (proposals ++ subject_proposals)
+      (proposals ++ subject_proposals ++ present_subject_proposals ++ question_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
