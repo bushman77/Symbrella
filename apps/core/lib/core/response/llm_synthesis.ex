@@ -370,9 +370,11 @@ defmodule Core.Response.LlmSynthesis do
           ReflectionLoop.review(user_text, replacement, context)
 
         issue =
-          if trigger == :exact_report_echo,
-            do: :projected_statement_echo,
-            else: :unverified_sense_specificity
+          case trigger do
+            :exact_report_echo -> :projected_statement_echo
+            :unsupported_temporal_shift -> :projected_tense_aspect_drift
+            :unverified_sense_detail -> :unverified_sense_specificity
+          end
 
         revised =
           review
