@@ -13,6 +13,16 @@ defmodule Db.Migrations.AddNumericIdToBrainCells do
   database backup; do not run while serving active traffic.
   """
 
+  # Altering this populated table may rebuild its existing pgvector IVFFlat
+  # index. That rebuild needs about 30 MB in the observed environment, while
+  # the database normally allows only 16 MB of maintenance_work_mem.
+  # Scope this increase to the migration transaction; do not change the
+  # server-wide setting or leave extra memory allocated for normal queries.
+  @impl true
+  def after_begin do
+    repo().query!("SET LOCAL maintenance_work_mem = '64MB'")
+  end
+
   def up do
     execute("""
     ALTER TABLE brain_cells
