@@ -712,3 +712,80 @@ confirmation bias if program predictions were already seen.
 
 No learned synaptic edge transfers to a base-verb sense through this
 path, and no previous semantic-restriction behavior is weakened.
+
+
+## Live-chat integration: semantic sense shadow Explain trace (v9)
+
+The earlier inflected-form bridge, evidence-gated sense validator and
+one-hop noun context were *diagnostic-only*. Live production Core now
+evaluates an evidence-gated shadow semantic hypothesis immediately
+**after `Core.Semantic.SentenceMeaning.attach/1`**, after LIFG/ATL
+have resolved selected dictionary candidates, and **before**
+comprehension, response planning, hippocampal capture, and new
+synaptic experience admission.
+
+`Core.Brain.SemanticSenseShadow.attach/2` executes
+`SemanticSenseValidator.evaluate(si, role_context?: true)` by
+default for production pipeline inputs. The underlying validator
+performs its strict human-origin finite-present SVO, original lexical
+choice, morphology and full base-dictionary inventory gates. Other
+turns produce a compact `:skipped` diagnostic, not invented meaning.
+No label or gold ID is presumed. Unexpected diagnostic exceptions
+fail closed to `:diagnostic_unavailable` rather than interrupting chat.
+
+A single, bounded `Core.Pipeline.Trace` entry with stage
+`:semantic_sense_shadow` carries its exact scope:
+
+- source surface sense, attested base lexeme, base sense count
+- earlier lexical baseline vs provisional semantic hypothesis (if any)
+- original and expanded score margins (heuristics, not probabilities)
+- up to two already-selected noun-role gloss witnesses, three ranked
+  candidate summaries, eight exclusions, and the total excluded count
+- flags explicitly saying meaning NOT verified, no gold supplied,
+  LIFG NOT modified, BrainCells NOT stimulated, synapses NOT
+  transferred, and response NOT changed.
+
+Restricted specialist cues (cricket, radar, etc.) STILL use only
+the original user utterance, never the one-hop noun expansion.
+
+`SymbrellaWeb.HomeLive.ExplainEvidence.from_si/1` projects only
+that actual Core trace event; `EvidenceSections.build/1` renders a
+"Semantic sense (shadow only)" section in the normal chat **Explain**
+modal. The section is preserved in newly saved message payloads and
+in the normal saved-payload reconstruction path. Existing history
+without the new trace cannot fabricate a sense result.
+
+**No new cognitive input fields** are added to SemanticInput. The
+complete SemanticInput is unchanged except for one append-only trace
+entry. LIFG choices, ATL winners, comprehension, response text,
+BrainCells, hippocampal records and synaptic weights receive no
+semantic-sense feedback from this stage. It is diagnostic and
+opt-out; set `semantic_sense_shadow?: false` when calling
+`Core.resolve_input/2` to skip the stage altogether. It does NOT
+change `RoleSemanticContext`'s general opt-in default outside
+this explicit live shadow call.
+
+### Validate the live integration
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+
+mix test apps/core/test/core/brain/semantic_sense_shadow_test.exs \
+  apps/core/test/core/brain/role_semantic_context_test.exs \
+  apps/core/test/core/pipeline_contract_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+```
+
+Then start the usual Phoenix chat and submit an independently
+interpretable finite-present SVO such as
+"The painter draws a picture." Open **Explain** for the reply.
+Look for the dedicated shadow section with trace reason, candidate
+evidence, restrictions and explicit no-mutation flags. The live
+production dictionary may produce a conservative abstention when
+selected noun glosses lack sufficient independent evidence.
+
+This wiring is *not* a verified improvement in comprehension or
+answer accuracy. Changing actual sense selection remains dependent
+on independent holdout gold-sense evaluation.
