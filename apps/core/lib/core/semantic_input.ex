@@ -15,6 +15,7 @@ defmodule Core.SemanticInput do
     - phrase_candidates: unconfirmed phrase windows
     - active_cells: lexicon/DB rows attached by downstream stages
     - neuron_activation: separate, live id-to-activation snapshot from STM
+    - semantic_pulses: ephemeral session-scoped verb-lemma signals (not senses)
     - trace: ordered list of stage events
 
   Sentence signatures:
@@ -78,6 +79,7 @@ defmodule Core.SemanticInput do
                 :control_signals,
                 :activation_summary,
                 :neuron_activation,
+                :semantic_pulses,
                 :evidence,
                 :episode,
                 :response_meta,
@@ -173,6 +175,7 @@ defmodule Core.SemanticInput do
           phrase_candidates: [map()],
           active_cells: [cell()],
           neuron_activation: %{optional(String.t()) => number()},
+          semantic_pulses: %{optional(String.t()) => number()},
           trace: list(),
 
           # Fuzzy correction
@@ -265,6 +268,7 @@ defmodule Core.SemanticInput do
             phrase_candidates: [],
             active_cells: [],
             neuron_activation: %{},
+            semantic_pulses: %{},
             trace: [],
             fuzzy_corrections: [],
             fuzzy_aliases: [],
