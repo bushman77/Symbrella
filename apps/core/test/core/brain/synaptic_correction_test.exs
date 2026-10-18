@@ -178,7 +178,8 @@ defmodule Core.Brain.SynapticCorrectionTest do
     }
 
     assert SynapticCorrection.attach(si) == si
-    assert SynapticCorrection.attach(Map.put(si, :experience_origin, :model_output)) == si
+    model_origin = Map.put(si, :experience_origin, :model_output)
+    assert SynapticCorrection.attach(model_origin) == model_origin
     assert SynapticCorrection.attach(
       Map.put(si, :experience_origin, :user_turn), synapse_correction?: false
     ) == Map.put(si, :experience_origin, :user_turn)
