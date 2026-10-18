@@ -41,7 +41,16 @@ defmodule Core.Response.Memory do
     candidates = Map.get(si, :episodic_candidates, [])
     sentence = Map.get(si, :sentence)
 
-    if Map.get(si, :source) in [:user, :prod, :test] and
+    # A parsed declarative event may be retained as attributed experience,
+    # but that alone is NOT a conversational request to remember it.
+    # The ordinary Response.plan path already records validated user events
+    # through SideEffects.record_turn/4 without hijacking the reply.
+    explicit_memory_request? =
+      intent0 == :memory_write and
+        Regex.match?(~r/^\s*remember\b/iu, text_in)
+
+    if explicit_memory_request? and
+         Map.get(si, :source) in [:user, :prod, :test] and
          is_binary(sentence) and String.trim(sentence) == String.trim(text_in) and
          is_list(candidates) and candidates != [] and
          Enum.all?(candidates, fn candidate ->
