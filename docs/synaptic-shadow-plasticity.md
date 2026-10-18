@@ -512,3 +512,101 @@ next milestone is independently reviewing a representative set of base
 sense labels, checking contextual ranking against those labels, and only
 then considering a bounded second-pass sense selection. The live
 synaptic propagation and LIFG scoring remain unchanged.
+
+
+## Evidence-gated semantic sense validation (read-only v7)
+
+The production base-verb sense bridge found eight complete polysemous
+inventories and four cases with lexical support. Importantly, the original
+context matcher proposed `throw|verb|5` for "The child throws a ball"
+because *ball* appears in the specialized cricket-bowling definition.
+This is an **unsupported specialized reading**, not an adequate semantic
+selection. The bridge correctly left its hypotheses unverified.
+
+`Core.Brain.SemanticSenseValidator.evaluate/2` is a read-only second pass.
+It re-runs the existing strict `SynapticExperience.extract` / SVO /
+ATL/LIFG agreement, morphology attestation and complete DB sense inventory
+through `InflectedVerbSenseBridge.project/2` with
+`validation_evidence?: true`. No fabricated base IDs, form-to-sense
+links, training receipts or final LIFG scores are introduced.
+
+For **each existing dictionary candidate**, the validator:
+
+1. Checks overt-object SVO compatibility with explicit `gram_function`
+   and leading dictionary gloss labels. A sense marked *intransitive-only*
+   is excluded from making a positive hypothesis in this finite SVO frame.
+   Missing grammar annotations remain `:unspecified`, not a fabricated
+   endorsement or a rejection. `ambitransitive`, `transitive` and
+   `ditransitive` are compatible with an object.
+2. Examines a deliberately narrow set of *lexically attested specialized
+   requirements*: explicit dictionary domain/topic tags or gloss
+   qualifiers such as **cricket bowling**, electric chair, radar,
+   jazz, grenade, computing and graphical user interface. The famous
+   "straightening the bowling arm" sense requires a context witness
+   such as `cricket`, `bowling` or `bowler`. `ball` **alone** does
+   not satisfy that restricted sense. Absence means
+   `:missing_restriction_witness`, **not** proof the sense is impossible.
+   The list is intentionally high precision, not an exhaustive model
+   of lexical semantics.
+3. Retains the original deterministic `ContextFit` scores for the
+   remaining eligible candidates. A tentative hypothesis requires
+   **nonzero substantive lexical overlap** (`min_context_fit: 0.10`
+   by default) AND a top-versus-next gap of at least `0.10`.
+   Otherwise the validator abstains with an explicit reason.
+   These are heuristic diagnostic thresholds, not calibrated
+   probabilities.
+
+The result carries `baseline_id` (the earlier lexical hypothesis),
+`proposed_id` (if any), excluded dictionary IDs with typed reasons,
+the eligible top entries, and flags explicitly denying sense verification,
+live reranking, synaptic transfer, and BrainCell stimulation.
+
+The regression set covers:
+
+- "The child throws a ball" — the unsupported special cricket
+  interpretation `throw|verb|5` must be withheld; this is an
+  **abstention**, not an automatic selection of `throw|verb|1`.
+- "The artist draws a picture" — an exact dictionary picture gloss
+  may remain a **provisional** hypothesis.
+- "The author writes a letter" — intransitive-only word senses cannot
+  be proposed solely because `author` matches their definitions.
+- Explicit specialist cues, missing morphology proof, forged roles,
+  assistant-origin utterances, incomplete inventories, and no-mutation
+  behavior.
+
+### Run and independently annotate
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+mix test apps/core/test/core/brain/semantic_sense_validator_test.exs \
+  apps/core/test/core/brain/inflected_verb_sense_bridge_test.exs --trace
+mix run scripts/probe_semantic_sense_validator.exs
+```
+
+The probe uses eight real sentences and outputs baseline hypotheses,
+validated hypotheses/abstentions, restricted senses, and the unmodified
+dictionary evidence. It **never** derives the correct sense ID from the
+scorer. To evaluate accuracy, an independent annotator should review
+actual dictionary definitions *before* seeing the program's proposed
+sense IDs, and optionally create:
+
+`tmp/eval/semantic_sense_gold.jsonl` (git-ignored), JSONL records like:
+
+```json
+{"example":1,"gold_id":"REPLACE_WITH_REVIEWED_BASE_VERB_SENSE_ID","source":"human_curated","basis":"Specific dictionary definition independently reviewed"}
+```
+
+This is a **shape example only**, not an adjudicated gold label. The file
+is validated for duplicate IDs and nonempty rationale. A gold ID is
+accepted only if it belongs to the actual base dictionary candidate
+inventory in a `:holdout` evaluation with declared label provenance.
+Caller declarations are **not independently authenticated**; summary
+counts such as `:wrong_to_abstention`, `:right_to_wrong`,
+`:wrong_to_right`, and baseline/validator correct decisions are
+conditional on the supplied labels and do not constitute a validation
+study without external adjudication and a genuinely unseen corpus.
+
+No proposed sense in this module is a verified synonym for a
+`surface|verb|1` form or grounds transferring synaptic weights.
+Live LIFG and the durable synaptic ledger remain unchanged.
