@@ -188,8 +188,10 @@ Private local files in the git-ignored directory:
 - \`receipts.json\`: authenticated, atomically replaced snapshot containing a
   bounded **receipt per distinct user-reported experience**. Each receipt
   contains its HMAC ID, two typed lexicon-cell edges, provenance class,
+  first-observation timestamp, a keyed first-session identifier when available,
   current verdict, and up to eight **review events** with timestamp and
-  pseudonymized reviewer digest. No original utterance, gloss or reviewer name
+  pseudonymized reviewer digest. These provenance fields do not establish
+  independent sources. No original utterance, gloss or reviewer name
   is stored. The directory is permission mode 0700.
 
 **Restore these two files together.** A missing secret with an existing
