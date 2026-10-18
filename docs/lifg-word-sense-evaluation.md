@@ -88,6 +88,49 @@ This only supports two witness patterns initially. Extend by writing a
 contrasting structural counterexample first, not by adding unconditional
 POS biases or treating generic signatures as verified parses.
 
+## Two-tier sense computation (development)
+
+A *supported* `role_competition` result can focus costly exact-sense
+`ContextFit.score/3` evaluation on the corresponding dictionary POS.
+Stage1 still computes basic numeric features, Cerebellum calibration,
+grammar support, and a **single unchanged full-slate softmax** across
+**every** original candidate. No unused candidate is removed, no
+probabilities are renormalized across a smaller selection, and no
+dictionary sense is marked verified merely because its POS matches.
+
+`Brain.LIFG.SenseFocus` is fail-open:
+- Only the previously audited full determiner–adjective–noun and
+  determiner–noun-plus-attested-past-predicate frames can focus a token.
+- Missing or conflicting roles, missing candidate POS, MWE tokens,
+  same-POS-only slates and explicit opt-out run the original broad pass.
+- During a focused pass, `SemanticControl` compares the *supported POS*
+  instead of relying on a provisional top candidate of potentially wrong POS.
+  Weak or tied context-fit signals continue to abstain.
+
+The Stage1 decision and Core choice expose `sense_focus`, including
+`mode`, `reason`, `focus_pos`, `context_evaluations` and
+`context_skipped`. Stage1's audit aggregates `focused_tokens`,
+`context_evaluations` and `context_skipped`. Counts represent context
+function invocations avoided, **not** measured latency, memory savings,
+or accuracy gains.
+
+Evaluate focused selection against broad selection on the same corpus:
+
+    mkdir -p tmp
+    mix test apps/brain/test/brain/lifg/sense_focus_test.exs
+    mix test
+    mix run scripts/benchmark_lifg_senses.exs \
+      | tee tmp/lifg-focused.txt
+    mix run scripts/benchmark_lifg_senses.exs --no-sense-focus \
+      | tee tmp/lifg-broad.txt
+
+Compare the `final_winner`, numbered-sense definitions,
+`adjudicated_structural_pos`, `context_focus`, and evaluation counts.
+The returned probability distribution still covers all original senses.
+An improvement in POS alone does not establish exact-sense accuracy;
+assign independent human-reviewed `expected_id` labels before making
+any such claim.
+
 ## 2. Establish human-reviewed labels before scoring exact-sense accuracy
 
 Get real current sense IDs by reviewing the **full** dictionary inventory
