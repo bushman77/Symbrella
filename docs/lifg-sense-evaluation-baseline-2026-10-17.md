@@ -61,6 +61,40 @@ A correct POS does not imply the expected meaning; e.g. configured-default
 5. `light suitcase` gives no discriminating `ContextFit` for weight;
    POS and lexical-sense certainty should be handled separately.
 
+## Focused reproduction and first gate correction
+
+Additional targeted Termux runs demonstrated:
+
+- **bat** (grammar weight 1.0): a `:verb_particle_construction` with
+  `span: {1, 3}` interpreted `bat` (token 1) as a **verb**,
+  `flew` (token 2) as its **object** and `through` (token 3)
+  as a **particle**. The same source showed a `:noun_phrase` with
+  `span: {0, 1}` for `A bat`. This is genuine incompatible structural
+  evidence, not confirmation of a verb sense. A conservative guard was
+  added to `Core.LIFG.SignatureRoles`: an independently attested
+  `:finite_past_candidate` at the proposed object's index combined with
+  the earlier determiner–noun subject prevents **hard verb POS coercion**
+  from that contradictory separated-particle signature. It does not
+  assert which *noun sense* of bat is correct.
+- **bank**: `at the bank|phrase|1` is a dictionary-backed
+  `mwe_choice` with original token span `{3, 5}`; the focused
+  trace still showed no final `bank` word choice **and no accepted
+  semantic MWE covering the target**. It is not yet established whether
+  disappearance happened during Stage1/Brain normalization, Core's
+  MWE shadow pass, or another boundary. New opt-in
+  `:lifg_word_flow_audit` distinguishes unfiltered, shadowed and
+  semantic selections.
+- **light**: maximal noun-phrase hypothesis `{2, 4}` says
+  `light` is a modifier and `suitcase` the head, but weaker
+  overlapping noun-phrase and prepositional-phrase hypotheses
+  also exist. In the configured run, Core still selected
+  `light|noun|7` (facts/ideas). No automatic sense correction
+  should occur without independently discriminating definition evidence.
+
+These changes are **not yet locally run through Mix**. Avoid interpreting
+the new guard as an exact-sense accuracy improvement before rerunning the
+paired benchmark.
+
 ## Follow-up
 
 - Observation-only benchmark now prints `grammar_signatures_for_target`
