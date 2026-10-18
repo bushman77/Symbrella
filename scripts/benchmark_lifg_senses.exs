@@ -298,6 +298,14 @@ defmodule Symbrella.BenchmarkLIFGSenses do
 
       required_pos = Core.LIFG.SignatureRoles.required_pos(si, index)
 
+      structural_pos =
+        si
+        |> Map.get(:role_competition)
+        |> case do
+          %{roles: roles} when is_map(roles) -> Map.get(roles, index)
+          _ -> nil
+        end
+
       word_flow =
         si.trace
         |> List.wrap()
@@ -371,6 +379,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         stage1_winner_definition:
           compact(Map.get(Map.get(by_id, raw_id, %{}), :definition), 190),
         grammar_required_pos: required_pos,
+        adjudicated_structural_pos: structural_pos,
         mwe_covering_target: covering_mwes,
         mwe_semantic_choices_covering_target: covering_semantic_choices,
         mwe_decisions: if(is_nil(final_id), do: mwe_decisions, else: []),
