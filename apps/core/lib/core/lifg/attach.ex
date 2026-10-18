@@ -144,7 +144,10 @@ defmodule Core.LIFG.Attach do
               # Full Stage1 post-softmax distribution. A second-pass LIFG
               # update requires this exact prior, not the winning score alone.
               candidate_probs:
-                if(is_map(scores) and map_size(scores) <= 64,
+                if(is_map(scores) and
+                    (map_size(scores) <= 64 or
+                       (Keyword.get(lifg_opts, :synapse_eval_full_scores?, false) == true and
+                          map_size(scores) <= 256)),
                   do: scores, else: nil),
               score: score2
             }
