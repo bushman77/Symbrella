@@ -273,6 +273,179 @@ defmodule Core.Brain.RoleSemanticContextTest do
     refute result.verified_sense_equivalence?
   end
 
+  defp tie_patient(input, norm, p \\ 0.5) do
+    Map.update!(input, :lifg_choices, fn choices ->
+      Enum.map(choices, fn
+        %{token_index: 4} = choice ->
+          %{choice | candidate_probs: %{
+            "#{norm}|noun|1" => p,
+            "#{norm}|noun|2" => 1.0 - p
+          }}
+        choice -> choice
+      end)
+    end)
+  end
+
+  test "unanimous gloss term across tied real noun IDs supports a provisional verb sense" do
+    input =
+      si("baker", "cooks", "cook", "meal",
+        "A person who bakes bread.", "Food prepared and eaten at a sitting.")
+      |> tie_patient("meal")
+
+    noun_loader = fn "meal" ->
+      [
+        %{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "Food prepared and eaten at a sitting."},
+        %{id: "meal|noun|2", norm: "meal", pos: "noun",
+          definition: "An occasion for eating food at a particular time."}
+      ]
+    end
+
+    before = input
+    proof = RoleSemanticContext.extract(input, fetch_noun_senses: noun_loader)
+    patient = Enum.find(proof.contexts, &(&1.role == :patient))
+
+    assert patient.status == :grounded_tie_consensus
+    assert patient.noun_sense_id == nil
+    assert patient.noun_sense_ids == ["meal|noun|1", "meal|noun|2"]
+    assert patient.source == :unanimous_tied_dictionary_glosses
+    assert "food" in patient.terms
+    refute patient.noun_sense_independently_verified?
+
+    senses = [
+      sense("cook", 1, "(transitive) To prepare food for eating."),
+      sense("cook", 2, "(transitive) To deceive a person for profit."),
+      sense("cook", 3, "(transitive) To smelt metals in a furnace.")
+    ]
+
+    opts = [fetch_base_senses: fn _ -> senses end,
+      fetch_noun_senses: noun_loader]
+
+    baseline = SemanticSenseValidator.evaluate(input,
+      Keyword.put(opts, :role_context?, false))
+    expanded = SemanticSenseValidator.evaluate(input,
+      Keyword.put(opts, :role_context?, true))
+
+    assert baseline.status == :abstained
+    assert baseline.proposed_id == nil
+    assert expanded.status == :provisional_hypothesis
+    assert expanded.proposed_id == "cook|verb|1"
+    assert expanded.proposed_with_patient_evidence?
+    assert Enum.any?(expanded.eligible_top, fn row ->
+      row.id == "cook|verb|1" and
+        Enum.any?(row.one_hop_witnesses, fn witness ->
+          witness.provenance == :unanimous_tied_dictionary_glosses and
+            witness.source_noun_sense_id == nil and
+            witness.source_noun_sense_ids == ["meal|noun|1", "meal|noun|2"] and
+            "food" in witness.matched
+        end)
+    end)
+    assert input == before
+    refute expanded.sense_meaning_verified?
+    refute expanded.applied_to_lifg?
+    refute expanded.synaptic_weight_transferred?
+  end
+
+  test "disagreeing noun sense glosses abstain instead of selecting first ID" do
+    input =
+      si("baker", "cooks", "cook", "meal",
+        "A person who bakes bread.", "Food prepared and eaten at a sitting.")
+      |> tie_patient("meal")
+
+    noun_loader = fn _ ->
+      [
+        %{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "Food prepared and eaten at a sitting."},
+        %{id: "meal|noun|2", norm: "meal", pos: "noun",
+          definition: "Ground grains used as animal fodder."}
+      ]
+    end
+
+    proof = RoleSemanticContext.extract(input, fetch_noun_senses: noun_loader)
+    patient = Enum.find(proof.contexts, &(&1.role == :patient))
+    assert patient.status == :unavailable_or_ambiguous
+    assert patient.reason == :no_unanimous_noun_gloss_terms
+
+    senses = [
+      sense("cook", 1, "To prepare food for eating."),
+      sense("cook", 2, "To smelt ore."),
+      sense("cook", 3, "To damage equipment.")
+    ]
+    on = SemanticSenseValidator.evaluate(input,
+      role_context?: true,
+      fetch_noun_senses: noun_loader,
+      fetch_base_senses: fn _ -> senses end)
+    assert on.status == :abstained
+    assert on.proposed_id == nil
+  end
+
+  test "unavailable or duplicate tied dictionary IDs fail closed" do
+    input =
+      si("baker", "cooks", "cook", "meal",
+        "A baker of bread.", "Food prepared and eaten.")
+      |> tie_patient("meal")
+
+    for wrong <- [
+      [%{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "Food prepared and eaten."}],
+      [
+        %{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "Food prepared and eaten."},
+        %{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "Food prepared and eaten."}
+      ],
+      [
+        %{id: "meal|noun|1", norm: "meal", pos: "noun",
+          definition: "An invented different gloss."},
+        %{id: "meal|noun|2", norm: "meal", pos: "noun",
+          definition: "Food eaten at lunch."}
+      ]
+    ] do
+      report = RoleSemanticContext.extract(input,
+        fetch_noun_senses: fn _ -> wrong end)
+      patient = Enum.find(report.contexts, &(&1.role == :patient))
+      assert patient.status == :unavailable_or_ambiguous
+      assert patient.reason in [
+        :incomplete_tied_noun_dictionary_evidence,
+        :selected_noun_definition_differs_from_dictionary
+      ]
+    end
+  end
+
+  test "even unanimous cricket noun glosses cannot clear absent utterance restrictions" do
+    input =
+      si("child", "throws", "throw", "ball",
+        "A young person.", "A round ball used in cricket.")
+      |> tie_patient("ball")
+
+    noun_loader = fn _ ->
+      [
+        %{id: "ball|noun|1", norm: "ball", pos: "noun",
+          definition: "A round ball used in cricket."},
+        %{id: "ball|noun|2", norm: "ball", pos: "noun",
+          definition: "A ball used in a game of cricket."}
+      ]
+    end
+
+    senses = [
+      sense("throw", 1, "To hurl an object through the air."),
+      sense("throw", 5,
+        "(transitive) To deliver a ball by straightening the bowling arm."),
+      sense("throw", 6, "To send an error to the computer.")
+    ]
+
+    report = SemanticSenseValidator.evaluate(input,
+      role_context?: true, fetch_noun_senses: noun_loader,
+      fetch_base_senses: fn _ -> senses end)
+
+    assert Enum.any?(report.exclusions, fn excluded ->
+      excluded.id == "throw|verb|5" and
+        {:missing_restriction_witness, :cricket_bowling} in excluded.exclusions
+    end)
+    refute Enum.any?(report.eligible_top, &(&1.id == "throw|verb|5"))
+    refute report.sense_meaning_verified?
+  end
+
   test "actor-only expansion cannot license unsupported verb meaning" do
     input = si("baker", "cooks", "cook", "meal",
       "A maker of food by heating.", "A regular occasion in the day.")
