@@ -305,7 +305,9 @@ defmodule Core.Brain.SemanticSenseValidator do
           :electric_execution -> String.contains?(gloss, "electric chair")
           :jazz_music -> word_in?(labels, "jazz")
           :computing -> word_in?(labels, "computing")
-          :radar -> word_in?(labels, "radar")
+          :radar -> word_in?(labels, "radar") or
+            String.contains?(gloss, "with radar") or
+            String.contains?(gloss, "using radar")
           :grenade -> word_in?(gloss, "grenade")
           :graphical_interface -> String.contains?(gloss, "graphical user interface")
         end
