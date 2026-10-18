@@ -79,6 +79,19 @@ defmodule Core.Brain.ActivationComprehensionTest do
     assert river.activation == 0.8
   end
 
+  test "controlled benchmarks can explicitly disable transient neural carryover" do
+    si = %{
+      active_cells: [row(@bank), row(@river)],
+      neuron_activation: %{@river => 1.0},
+      trace: []
+    }
+
+    out = Activation.prime(si, neuron_activation?: false)
+    assert out.neuron_activation == %{}
+    assert out.active_cells == si.active_cells
+    refute Enum.any?(out.trace, &match?(%{stage: :neuron_priming}, &1))
+  end
+
   test "initial recruitment is bounded and does not choose arbitrary meanings in large slates" do
     large_slate =
       for i <- 1..12 do
