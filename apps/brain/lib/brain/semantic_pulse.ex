@@ -18,7 +18,7 @@ defmodule Brain.SemanticPulse do
   @max_signal 0.03
 
   @type key :: {String.t(), String.t()}
-  @type entries :: %{optional(key()) => %{value: float(), at_ms: integer(), source_id: String.t()}}
+  @type entries :: %{optional(key()) => %{value: float(), at_ms: integer(), born_ms: integer(), source_id: String.t()}}
 
   @spec put(entries(), term(), term(), term(), number(), integer()) :: entries()
   def put(entries, session, lemma, source_id, delta, now_ms)
@@ -37,6 +37,7 @@ defmodule Brain.SemanticPulse do
       updated = Map.put(retained, key, %{
         value: min(before + min(delta * 1.0, @max_signal), @max_signal),
         at_ms: now_ms,
+        born_ms: Map.get(Map.get(retained, key, %{}), :born_ms, now_ms),
         source_id: source_id
       })
 
@@ -76,15 +77,15 @@ defmodule Brain.SemanticPulse do
   @spec prune(entries(), integer()) :: entries()
   def prune(entries, now_ms) when is_map(entries) and is_integer(now_ms) do
     Enum.reduce(entries, %{}, fn
-      {{session, lemma} = key, %{value: value, at_ms: at_ms, source_id: id}}, acc
-      when is_integer(at_ms) and is_number(value) ->
-        age = max(0, now_ms - at_ms)
+      {{session, lemma} = key, %{value: value, at_ms: at_ms, born_ms: born_ms, source_id: id}}, acc
+      when is_integer(at_ms) and is_integer(born_ms) and is_number(value) ->
+        age = max(0, now_ms - born_ms)
         decayed = if age > @max_age_ms, do: 0.0,
           else: Activation.decay(value, at_ms, now_ms)
 
         if valid_session?(session) and valid_lemma?(lemma) and
              attested_verb_id?(id) and decayed > 0 do
-          Map.put(acc, key, %{value: decayed, at_ms: now_ms, source_id: id})
+          Map.put(acc, key, %{value: decayed, at_ms: now_ms, born_ms: born_ms, source_id: id})
         else
           acc
         end
