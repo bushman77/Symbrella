@@ -1220,3 +1220,63 @@ semantic generation, formal entailment checking, a general
 hallucination detector, or independent truth verification.
 More complex syntax and non-SVO utterances intentionally use the
 existing response path until evidence-specific controls are developed.
+
+
+### Live speech-act fidelity: prevent simple present → completed action
+
+The first production chat after the expression module recognized both
+`The gardener plants a tree.` and `The baker cooks a meal.` as
+`:statement`, chose `:answer_user`, and retained correct shadow
+cohorts; however, the LLM changed the utterances into
+`The gardener has planted a tree.` and
+`The baker has cooked a meal.` with a false review
+`:accept`. The present-perfect statements imply a past completed
+action with present relevance, while the user provided only a
+finite simple-present assertion.
+
+This is a **temporal/aspect drift**, not an exact echo or a supported
+choice of verb dictionary sense. `ProjectedExpression.prompt/1`
+now explicitly instructs the generator to preserve source
+simple-present viewpoint. `ProjectedExpression.review_draft/3`
+now checks the output for **strict standalone clause** transformations
+with the identical independently bound actor and patient and
+conservatively recognized participial / past / progressive / future
+morphology. This acts only on eligible, revalidated positive
+simple-present SVO user reports and does not apply to open questions,
+unvalidated projected expressions, long explanations, or quotations.
+Unrecognized inflections fail closed, rather than assuming a shifted
+tense merely because `has` occurs.
+
+When the model drafts one of the disallowed transformations, the
+existing short reported-action fallback is substituted:
+`I understand you're describing the gardener planting a tree.`
+This does not claim an actual planting event or a chosen exact
+dictionary sense. The reflected final output gets status `:repair`,
+issue `:projected_tense_aspect_drift`, and bounded source-only
+`:projected_expression_repair` metadata with trigger
+`:unsupported_temporal_shift`. Existing echo and disputed-sense
+guards remain active. No BrainCell, LIFG, synapse or memory action
+is introduced by the new check.
+
+New real-chat-draft regression scenarios verify both gardener and
+baker examples via direct review and the actual mocked LLM +
+`Core.Response.Attach` pipeline, plus structurally aligned
+child/ball irregular participles and narrow false-positive exclusions.
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+mix test apps/core/test/core/response/projected_expression_test.exs \
+  apps/core/test/core/response/llm_prompt_test.exs \
+  apps/core/test/core/response/llm_route_flow_test.exs \
+  apps/core/test/core/pipeline_contract_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs
+
+mix run scripts/probe_projected_expression.exs
+```
+
+The probe prints both the exact echo fallback and the completed-action
+correction for four source assertions, without sending LLM requests or
+changing live response text. This is not a full natural-language
+inference or full semantic entailment checker; it targets demonstrable
+unlicensed shifts with explicit evidence gates.
