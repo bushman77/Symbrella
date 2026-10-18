@@ -137,6 +137,23 @@ defmodule Core.Brain.SemanticPropagationTest do
     assert Enum.map(primed.active_cells, & &1.id) == Enum.map(si.active_cells, & &1.id)
   end
 
+  test "semantic propagation toggle suppresses priors without suppressing exact IDs" do
+    si = %{
+      active_cells: [
+        %{id: "draw|verb|1", token_index: 0, score: 0.5},
+        %{id: "draw|verb|2", token_index: 0, score: 0.5}
+      ],
+      neuron_activation: %{"draw|verb|1" => 0.5},
+      semantic_pulses: %{"draw" => 0.03},
+      trace: []
+    }
+
+    out = Activation.prime(si, semantic_propagation?: false, notify_brain?: false)
+    assert out.semantic_pulses == %{}
+    assert Enum.at(out.active_cells, 0).prior_neuron_activation == 0.5
+    refute Map.has_key?(Enum.at(out.active_cells, 1), :activation)
+  end
+
   test "experimental disable switch removes the lemma prior without changing lexicon" do
     si = %{active_cells: [%{id: "draw|verb|7", token_index: 0, score: 0.5}],
       semantic_pulses: %{"draw" => 0.03}, neuron_activation: %{}, trace: []}
