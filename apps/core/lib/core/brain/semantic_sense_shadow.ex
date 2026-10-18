@@ -11,7 +11,7 @@ defmodule Core.Brain.SemanticSenseShadow do
   specialist-domain restrictions still require original utterance cues.
   """
 
-  alias Core.Brain.SemanticSenseValidator
+  alias Core.Brain.{SemanticCohort, SemanticSenseValidator}
   alias Core.Pipeline.Trace
 
   @max_exclusions 8
@@ -26,10 +26,19 @@ defmodule Core.Brain.SemanticSenseShadow do
     else
       result = safe_evaluate(si, opts)
 
+      # Reuse the same complete grammar/restriction-gated sense evidence;
+      # no second DB lookup, and no cohort result feeds back into LIFG.
+      cohort =
+        if Keyword.get(opts, :semantic_cohort_shadow?, true) == true,
+          do: safe_cohort(si, result),
+          else: %{status: :disabled, cohorts: [], cohort_count: 0,
+                  chose_exact_sense?: false, modified_lifg?: false,
+                  changed_response?: false}
+
       Trace.append(si, :semantic_sense_shadow,
         decision: decision(result),
         reason: reason(result),
-        meta: compact(result))
+        meta: Map.put(compact(result), :semantic_cohort, cohort))
     end
   end
 
@@ -121,6 +130,8 @@ defmodule Core.Brain.SemanticSenseShadow do
       opts
       |> Keyword.take([:fetch_base_senses, :fetch_noun_senses])
       |> Keyword.put(:role_context?, true)
+      |> Keyword.put(:cohort_evidence?,
+        Keyword.get(opts, :semantic_cohort_shadow?, true) == true)
 
     SemanticSenseValidator.evaluate(si, evaluator_opts)
   rescue
@@ -128,6 +139,18 @@ defmodule Core.Brain.SemanticSenseShadow do
   catch
     :exit, _ -> %{status: :skipped, reason: :diagnostic_unavailable}
     :throw, _ -> %{status: :skipped, reason: :diagnostic_unavailable}
+  end
+
+  defp safe_cohort(si, evaluator_result) do
+    SemanticCohort.evaluate(si, evaluator_result)
+  rescue
+    _ -> %{status: :skipped, reason: :cohort_diagnostic_unavailable,
+           cohorts: [], cohort_count: 0, chose_exact_sense?: false,
+           modified_lifg?: false, changed_response?: false}
+  catch
+    _, _ -> %{status: :skipped, reason: :cohort_diagnostic_unavailable,
+           cohorts: [], cohort_count: 0, chose_exact_sense?: false,
+           modified_lifg?: false, changed_response?: false}
   end
 
   defp decision(%{status: status}) when status in
