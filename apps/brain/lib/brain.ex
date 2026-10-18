@@ -171,6 +171,10 @@ defmodule Brain do
   @spec snapshot() :: state()
   def snapshot, do: gencall(@name, :snapshot)
 
+  @doc "Current activation reports from live Brain.Cell processes; no database reads or synthetic decay."
+  @spec activation_snapshot() :: %{optional(String.t()) => number()}
+  def activation_snapshot, do: gencall(@name, :activation_snapshot)
+
   @spec lifg_stage1(map() | [map()], [number()], keyword()) ::
           {:ok, %{choices: [map()], boosts: list(), inhibitions: list(), audit: map()}}
           | {:error, term()}
@@ -264,6 +268,10 @@ defmodule Brain do
 
   @impl true
   def handle_call(:snapshot, _from, state), do: {:reply, state, state}
+
+  @impl true
+  def handle_call(:activation_snapshot, _from, state),
+    do: {:reply, state.active_cells, state}
 
   @impl true
   def handle_call({:cell, id, req}, _from, state) when is_binary(id) do
