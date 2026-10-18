@@ -41,7 +41,15 @@ defmodule Core.Brain.Activation do
       # activity or emit new neural stimuli.
       Map.put(si, :neuron_activation, %{})
     else
-      prior = map_or_empty(Map.get(si, :neuron_activation))
+      # A diagnostic can supply an isolated prior without mutating Brain's
+      # singleton state. Ordinary chat always uses the live STM snapshot.
+      prior =
+        case Keyword.fetch(opts, :neuron_probe_snapshot) do
+          {:ok, %{} = isolated} -> isolated
+          _ -> map_or_empty(Map.get(si, :neuron_activation))
+        end
+
+      si = Map.put(si, :neuron_activation, prior)
       rows = list_or_empty(Map.get(si, :active_cells))
       updated = Enum.map(rows, &put_runtime_prior(&1, prior))
       recruited = initial_ids(updated)
@@ -69,6 +77,15 @@ defmodule Core.Brain.Activation do
   end
 
   def prime(si, _opts), do: si
+
+  @doc "Return the exact small-slate recruitment IDs used by prime/2, without stimulation."
+  @spec recruitment_ids(map()) :: [String.t()]
+  def recruitment_ids(%{} = si), do: initial_ids(list_or_empty(Map.get(si, :active_cells)))
+  def recruitment_ids(_), do: []
+
+  @doc "The fixed weak recruitment signal, exposed to the read-only A/B probe."
+  @spec recruitment_delta() :: float()
+  def recruitment_delta, do: @initial_delta * 1.0
 
   @doc """
   Apply the same exact-ID prior to prebuilt candidate buckets immediately
