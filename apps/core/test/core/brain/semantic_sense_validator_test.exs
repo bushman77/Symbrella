@@ -157,6 +157,27 @@ defmodule Core.Brain.SemanticSenseValidatorTest do
     refute Enum.any?(report.eligible_top, &(&1.id == "write|verb|1"))
   end
 
+  test "radar detection gloss cannot borrow portrait evidence without radar context" do
+    senses = [
+      sense("paint", 1, "To apply paint to a wall."),
+      sense("paint", 5, "To create a portrait with paints."),
+      sense("paint", 10, "(slang, transitive) To detect something with radar.")
+    ]
+
+    si = statement("paints", "paint", "artist", "portrait")
+    report = SemanticSenseValidator.evaluate(si,
+      fetch_base_senses: fn "paint" -> senses end)
+
+    assert report.status == :provisional_hypothesis
+    assert report.proposed_id == "paint|verb|5"
+    assert Enum.any?(report.exclusions, fn row ->
+      row.id == "paint|verb|10" and
+        {:missing_restriction_witness, :radar} in row.exclusions
+    end)
+    refute report.sense_meaning_verified?
+    refute report.applied_to_lifg?
+  end
+
   test "explicit specialist cue removes the missing-context exclusion but does not verify truth" do
     si = statement("throws", "throw", "bowler", "ball")
     report = SemanticSenseValidator.evaluate(si,
