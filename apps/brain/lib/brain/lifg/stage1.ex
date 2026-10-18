@@ -44,6 +44,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Stage1.Boundary
   alias Brain.LIFG.GrammarEvidence
   alias Brain.LIFG.SemanticControl
+  alias Brain.LIFG.SenseFocus
 
   @default_weights %{
     lex_fit: 0.40,
@@ -234,6 +235,7 @@ defmodule Brain.LIFG.Stage1 do
           sent: sent,
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          sense_focus?: Keyword.get(opts, :sense_focus?, true),
           semantic_control_opts: [
             enabled?: Keyword.get(opts, :semantic_control?,
               Application.get_env(:brain, :lifg_semantic_control?, true)),
@@ -581,7 +583,10 @@ defmodule Brain.LIFG.Stage1 do
       fallback_winners: 0,
       ignored_mwe_probes: 0,
       low_confidence: 0,
-      pos_anomalies: 0
+      pos_anomalies: 0,
+      context_evaluations: 0,
+      context_skipped: 0,
+      focused_tokens: 0
     }
 
     final =
