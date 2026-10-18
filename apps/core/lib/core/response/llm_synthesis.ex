@@ -427,6 +427,21 @@ defmodule Core.Response.LlmSynthesis do
         {reviewed, revised}
 
       :unchanged ->
+        audit = SemanticRoleFidelity.audit(user_text, text, frame)
+
+        # A possible lexical mismatch or unsupported draft grammar is
+        # diagnostic-only: it MUST NOT masquerade as a verified
+        # contradiction or silently rewrite useful language.
+        reflection =
+          if is_map(frame) do
+            Map.put(reflection, :semantic_role_fidelity,
+              Map.take(audit, [:status, :reason, :mismatched_roles,
+                :source, :draft_scope, :event_truth_verified?,
+                :exact_sense_verified?, :modified_cognition?]))
+          else
+            reflection
+          end
+
         {text, reflection}
     end
   end
