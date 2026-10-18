@@ -96,6 +96,10 @@ defmodule Core.PipelineContractTest do
     assert shadow.meta.mode == :shadow_only
     assert shadow.meta.applied_to_lifg? == false
     assert shadow.meta.response_changed? == false
+    assert shadow.meta.semantic_cohort.status in
+      [:candidate_cohorts, :no_supported_cohort, :skipped]
+    assert shadow.meta.semantic_cohort.modified_lifg? == false
+    assert shadow.meta.semantic_cohort.changed_response? == false
 
     # Trace also contains legacy tuple events (such as {:activated, ...}).
     # Only structured Pipeline.Trace events have a :stage. Newer events
