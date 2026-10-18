@@ -358,7 +358,8 @@ synthetic "winner" scores. Only evaluate when:
    scored lexical candidate IDs, with no duplicate IDs. All probabilities
    must be finite, in \`[0,1]\`, and sum approximately to one.
 4. The candidate slate has **at least two distinct real verb sense IDs** and
-   at most 64 total candidates. Stage1 currently omits large \`candidate_probs\`
+   at most 256 total candidates when `synapse_eval_full_scores?: true` is
+   explicitly enabled in LIFG options. Stage1 currently omits large \`candidate_probs\`
    maps; cases with 65+ candidates are marked insufficient rather than
    silently evaluating a top-two subset.
 5. There is an available read-only propagation result for the currently
