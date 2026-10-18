@@ -324,7 +324,7 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         if is_map(word_flow) do
           for {name, key} <- [
                 {:before_shadow, :before_shadow},
-                {:after_shadow, :after_shadow},
+                {:retained_words, :retained_words},
                 {:after_promotion, :after_promotion}
               ], into: %{} do
             entries = Map.get(word_flow, key, [])
