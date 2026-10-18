@@ -73,6 +73,47 @@ defmodule Core.Semantic.Proposition do
     end
   end
 
+  # A WH-object question asks for a participant slot, not a proposition
+  # asserting that the described action occurred. ATL provides the already
+  # selected lexical IDs; the interrogative introduces no invented object.
+  def build(_, %{
+        kind: :wh_object_question,
+        status: :structurally_interpreted,
+        speech_act: :request_information,
+        source_frame: :wh_aux_object_question,
+        roles: %{
+          question_word: %{surface: wh, sense_id: wh_id},
+          auxiliary: %{surface: aux, sense_id: aux_id},
+          subject: %{surface: subject, span: {2, 3},
+            determiner_sense_id: determiner_id, head_sense_id: subject_id},
+          predicate: %{surface: verb, token_index: 4, sense_id: verb_id},
+          object: %{role: :patient, status: :unbound}
+        }
+      } = meaning)
+      when is_binary(wh) and is_binary(wh_id) and is_binary(aux) and
+           is_binary(aux_id) and is_binary(subject) and is_binary(determiner_id) and
+           is_binary(subject_id) and is_binary(verb) and is_binary(verb_id) do
+    %{
+      version: 1,
+      type: :information_request,
+      queried: %{type: :participant_slot, role: :patient, status: :unbound,
+        surface: wh, sense_id: wh_id},
+      content: %{
+        predicate: %{surface: verb, token_index: 4, sense_id: verb_id,
+          grounding_status: :selected_not_contextually_verified},
+        subject: %{surface: subject, span: {2, 3},
+          determiner_sense_id: determiner_id, head_sense_id: subject_id,
+          grounding_status: :structurally_bound_not_lexically_verified},
+        auxiliary: %{surface: aux, token_index: 1, sense_id: aux_id}
+      },
+      epistemic_status: :question_not_assertion,
+      grounding: Map.fetch!(meaning, :grounding),
+      provenance: %{frame: :wh_aux_object_question,
+        evidence: :independent_syntax_and_atl_agreement,
+        persistence: :not_claimed}
+    }
+  end
+
   # Validated participant assertions share the same proposition contract as
   # WH questions. The caller is SentenceMeaning, which has already checked
   # the candidate against the exact lexical/grammatical input.
