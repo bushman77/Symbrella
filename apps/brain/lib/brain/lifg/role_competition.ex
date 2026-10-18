@@ -176,8 +176,26 @@ defmodule Brain.LIFG.RoleCompetition do
         _ -> []
       end)
 
+    # A local determiner + adjective + noun hypothesis can straddle the
+    # *predicate* of a complete, independently witnessed clause. For example:
+    #   The artist draws a picture.
+    #   What did the artist draw?
+    # "artist" has an adjective sense and "draw(s)" has a noun sense, so
+    # "the artist draw(s)" also looks like a short noun phrase in isolation.
+    # Give the complete clause precedence ONLY over that exact overlapping
+    # three-token modifier proposal. Other proposals and contradictions among
+    # complete clauses still compete normally and may remain unresolved.
+    complete_subjects =
+      present_subject_proposals ++
+        Enum.filter(question_proposals, &(&1.role == :subject_head))
+
+    {local_proposals, superseded_proposals} =
+      Enum.split_with(proposals, fn proposal ->
+        not superseded_local_modifier?(proposal, complete_subjects)
+      end)
+
     decisions =
-      (proposals ++ subject_proposals ++ present_subject_proposals ++ question_proposals)
+      (local_proposals ++ subject_proposals ++ present_subject_proposals ++ question_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
@@ -207,11 +225,39 @@ defmodule Brain.LIFG.RoleCompetition do
       version: 1,
       source: :core_syntax_and_attested_dictionary_pos,
       roles: roles,
-      decisions: decisions
+      decisions: decisions,
+      superseded_proposals: superseded_proposals
     }
   end
 
   def resolve(_), do: %{version: 1, source: :invalid_input, roles: %{}, decisions: []}
+
+  # A complete finite-present SVO or WH-object question is stronger evidence
+  # than the overlapping three-token NP *only* when the NP's nominal head is
+  # the independently attested predicate. Do not suppress adjective evidence
+  # for ordinary noun phrases or for a different clause boundary.
+  defp superseded_local_modifier?(
+         %{role: :modifier, pos: "adjective",
+           basis: :complete_determiner_adjective_noun,
+           span: {local_det, local_head}}, complete_subjects
+       ) do
+    Enum.any?(complete_subjects, fn
+      %{role: :subject_head, pos: "noun", token_index: subject,
+        frame: :finite_present_svo_candidate, span: {first, last}} ->
+        local_det == subject - 1 and local_head == subject + 1 and
+          first == local_det and last > local_head
+
+      %{role: :subject_head, pos: "noun", token_index: subject,
+        frame: :wh_aux_object_question, span: {first, last}} ->
+        local_det == subject - 1 and local_head == subject + 1 and
+          first < local_det and last == local_head
+
+      _ ->
+        false
+    end)
+  end
+
+  defp superseded_local_modifier?(_, _), do: false
 
   defp witnessed?(cells, tokens, index, pos) do
     word = Map.get(tokens, index)
