@@ -550,7 +550,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
       |> String.split(",", parts: 2)
       |> hd()
       |> String.downcase()
-      |> String.replace(~r/[^\\p{L}\\p{M}]+/u, " ")
+      |> String.replace(~r/[^\p{L}\p{M}]+/u, " ")
       |> String.trim()
     end
 
