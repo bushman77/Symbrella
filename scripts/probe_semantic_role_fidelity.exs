@@ -38,7 +38,7 @@ cases = [
   {"The baker cooks a meal.",
    "The baker is also planting a tree, which is a tree in a garden."},
   {"The child throws a ball.",
-   "The ball throws a child."},
+   "A ball throws the child."},
   {"The captain steers a ship.",
    "The captain steers a ship."}
 ]
