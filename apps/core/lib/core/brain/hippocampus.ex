@@ -5,6 +5,14 @@ defmodule Core.Brain.Hippocampus do
 
   alias Core.Brain.Runtime
 
+  @doc "Allow isolated diagnostics to skip the normal possibly-persistent encode stage."
+  @spec encode(map(), keyword()) :: map()
+  def encode(si, opts) when is_list(opts) do
+    if Keyword.get(opts, :hippocampus_encode?, true) == false,
+      do: si,
+      else: encode(si)
+  end
+
   @spec encode(map()) :: map()
   def encode(%{atl_slate: slate} = si) when is_map(slate) do
     if Runtime.pid_alive?(Brain.Hippocampus) do
