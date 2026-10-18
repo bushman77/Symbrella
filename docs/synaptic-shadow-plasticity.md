@@ -635,7 +635,9 @@ supply supporting evidence, and each must have all of the following:
 - A finite complete-enough per-token LIFG probability map including
   that noun ID. If multiple same-surface noun senses were scored,
   the selected one must exceed the runner-up by at least `0.08`.
-  Missing score maps and close competitors produce NO expansion.
+  The bounded score distribution must also be finite and sum within
+  0.98–1.02. Missing/incomplete score maps and close competitors produce
+  NO expansion.
 - A nonempty, bounded, single-clause dictionary gloss that yields
   up to 12 useful words after removing grammatical/scaffolding terms
   and the noun/predicate surfaces. No transitive relation is stored.
