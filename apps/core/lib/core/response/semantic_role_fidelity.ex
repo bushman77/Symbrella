@@ -8,10 +8,11 @@ defmodule Core.Response.SemanticRoleFidelity do
 
   A syntactically explicit, standalone generated subject-action-object
   assertion may be compared against the current user report. The
-  conservative check only calls a drift when the model asserts a *new*
-  predicate AND patient for the same actor, or substitutes at least two
-  explicitly bound participants. The detector cannot adjudicate synonyms
-  or complex sentence meaning; all other forms abstain.
+  conservative check calls a high-confidence drift only when the model
+  explicitly presents a *different additional action and patient* as
+  the reply to the current report, or reverses the original actor and
+  patient. Other apparent lexical changes are diagnostic-only; the
+  detector cannot adjudicate synonyms or complex sentence meaning.
 
   No dictionary winner, episodic record, WM entry, or synapse is changed.
   """
@@ -67,7 +68,7 @@ defmodule Core.Response.SemanticRoleFidelity do
       true ->
         case candidate(draft) do
           {:ok, %{actor: observed_actor, predicate: observed_verb,
-                  patient: observed_patient, form: form}} ->
+                  patient: observed_patient, form: form} = parsed} ->
             mismatches =
               []
               |> mismatch(:actor, observed_actor, actor)
@@ -75,20 +76,23 @@ defmodule Core.Response.SemanticRoleFidelity do
               |> mismatch(:patient, observed_patient, patient)
               |> Enum.reverse()
 
-            if role_substitution?(mismatches) do
+            if role_substitution?(mismatches, parsed, actor, patient) do
               %{
                 status: :role_substitution_detected,
                 mismatched_roles: mismatches,
                 source: :revalidated_sentence_roles,
                 draft_scope: :standalone_main_clause,
                 candidate_form: form,
+                explicitly_claims_additional_action?: parsed.continuity_claim?,
                 event_truth_verified?: false,
                 exact_sense_verified?: false,
                 modified_cognition?: false
               }
             else
               %{
-                status: :no_high_confidence_role_drift,
+                status: if(length(mismatches) >= 2,
+                  do: :possible_role_drift,
+                  else: :no_high_confidence_role_drift),
                 mismatched_roles: mismatches,
                 source: :revalidated_sentence_roles,
                 draft_scope: :standalone_main_clause,
@@ -105,23 +109,35 @@ defmodule Core.Response.SemanticRoleFidelity do
 
   def audit(_, _, _), do: no_check(:missing_verified_source_frame)
 
-  # Never automatically rewrite a different actor's otherwise coherent
-  # account, or a semantic paraphrase changing just one lexical role.
-  # At least two independently bound roles must disagree, including a
-  # changed action or a full actor/patient reversal.
-  defp role_substitution?(mismatches) do
-    length(mismatches) >= 2 and
-      (:predicate in mismatches or
-         (:actor in mismatches and :patient in mismatches))
+  # Lexical mismatch is not semantic contradiction: cooking a meal
+  # versus preparing dinner is left unresolved. A confident, automatic
+  # repair requires an explicit "also" continuation replacing the
+  # current predicate and patient for the SAME actor, or an exact role
+  # reversal with the original surface noun phrases.
+  defp role_substitution?(mismatches, parsed, actor, patient) do
+    changed_additional_action? =
+      parsed.continuity_claim? and
+        :actor not in mismatches and
+        :predicate in mismatches and :patient in mismatches
+
+    reversed_roles? =
+      :actor in mismatches and :patient in mismatches and
+        normalized(parsed.actor) == normalized(patient) and
+        normalized(parsed.patient) == normalized(actor)
+
+    changed_additional_action? or reversed_roles?
   end
 
   defp candidate(draft) do
     text = String.trim(draft)
 
     case Regex.named_captures(@progressive_pattern, text) do
-      %{"actor" => actor, "predicate" => predicate, "patient" => patient} ->
-        {:ok, %{actor: actor, predicate: predicate,
-                patient: patient, form: :progressive}}
+      %{"actor" => actor, "predicate" => predicate,
+        "patient" => patient} = captures ->
+        {:ok, %{actor: actor, predicate: predicate, patient: patient,
+                form: :progressive,
+                continuity_claim?:
+                  String.trim(Map.get(captures, "also") || "") != ""}}
 
       _ ->
         case Regex.named_captures(@finite_pattern, text) do
@@ -130,7 +146,8 @@ defmodule Core.Response.SemanticRoleFidelity do
               :error
             else
               {:ok, %{actor: actor, predicate: predicate,
-                      patient: patient, form: :finite}}
+                      patient: patient, form: :finite,
+                      continuity_claim?: false}}
             end
 
           _ -> :error
