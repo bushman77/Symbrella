@@ -56,6 +56,8 @@ defmodule Core.LIFG.SignatureRoles do
     end)
   end
 
+  def required_pos(_, _), do: nil
+
   defp competing_subject_past?(signatures, noun_head, predicate_index) do
     subject? =
       Enum.any?(signatures, fn
@@ -81,5 +83,4 @@ defmodule Core.LIFG.SignatureRoles do
     subject? and past_predicate?
   end
 
-  def required_pos(_, _), do: nil
 end
