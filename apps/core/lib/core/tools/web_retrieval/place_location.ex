@@ -135,7 +135,7 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
   # Trim trailing encyclopedic detail only when the excerpt explicitly
   # states the jurisdiction and country; do not generate new claims.
   defp concise_location_clause(first) do
-    case Regex.run(~r/\\A(.+?\\bCanada)(?:[,;].*)?\\.\\z/iu, first) do
+    case Regex.run(~r/\A(.+?\bCanada)(?:[,;].*)?\.\z/iu, first) do
       [_, clause] -> clause <> "."
       _ -> first
     end
