@@ -57,7 +57,7 @@ defmodule Core.Brain.SemanticSenseShadow do
         |> Map.get(:role_expansion_sources, [])
         |> List.wrap()
         |> Enum.take(2)
-        |> Enum.map(&Map.take(&1, [:role, :status, :noun_sense_id,
+        |> Enum.map(&Map.take(&1, [:role, :status, :reason, :noun_sense_id,
           :selected_probability, :terms])),
       top_candidates:
         result
