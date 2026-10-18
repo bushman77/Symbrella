@@ -695,5 +695,20 @@ who reviewed them. A new proposal, even a linguistically plausible one,
 is not proof of improved comprehension until matched against
 independently verified holdout annotations.
 
+The full unlabeled candidate inventories can also be exported for
+independent human adjudication, WITHOUT predictions, via:
+
+```sh
+mix run scripts/export_semantic_sense_review.exs
+```
+
+This creates `tmp/eval/semantic_sense_review.jsonl` (one sentence per
+JSONL record with its existing dictionary sense IDs, original definitions,
+examples and grammatical tags). The separate
+`tmp/eval/semantic_sense_gold.jsonl` is NEVER written automatically.
+A reviewer should examine the complete inventory independently and
+only then provide a justified gold ID. This reduces but does not erase
+confirmation bias if program predictions were already seen.
+
 No learned synaptic edge transfers to a base-verb sense through this
 path, and no previous semantic-restriction behavior is weakened.
