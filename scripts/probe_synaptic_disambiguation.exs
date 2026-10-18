@@ -47,6 +47,37 @@ pairs = [
   {"The sailor steers a ship.", "The captain steers a ship."}
 ]
 
+# Optional independently human-curated gold labels; never infer them
+# from LIFG winners or shadow output. Create BEFORE inspecting A/B predictions.
+# JSONL rows: {"example":1,"gold_id":"...|verb|...","source":"human_curated",
+#              "basis":"Specific sense meaning independently reviewed"}
+gold_path = "tmp/eval/synaptic_disambiguation_gold.jsonl"
+
+gold =
+  if File.regular?(gold_path) do
+    gold_path
+    |> File.stream!([], :line)
+    |> Enum.with_index(1)
+    |> Enum.reduce(%{}, fn {line, lineno}, acc ->
+      case Jason.decode(String.trim(line)) do
+        {:ok, %{"example" => index, "gold_id" => id,
+                "source" => "human_curated", "basis" => basis}}
+            when is_integer(index) and index in 1..8 and
+                 is_binary(id) and is_binary(basis) and byte_size(basis) >= 8 ->
+          if Map.has_key?(acc, index) do
+            raise "Duplicate gold label for case #{index}"
+          end
+
+          Map.put(acc, index, id)
+
+        _ ->
+          raise "Invalid gold label at #{gold_path}:#{lineno}"
+      end
+    end)
+  else
+    %{}
+  end
+
 {:ok, server} = Shadow.start_link(name: nil, durable?: false)
 
 rows =
@@ -66,8 +97,17 @@ rows =
         _ -> :ineligible
       end
 
-    after_learning = SynapticDisambiguation.evaluate(holdout_si,
-      synapse_shadow_server: server, split: :holdout)
+    eval_opts = [synapse_shadow_server: server, split: :holdout]
+
+    eval_opts =
+      case Map.fetch(gold, index) do
+        {:ok, gold_id} ->
+          Keyword.merge(eval_opts, gold_id: gold_id, label_source: :human_curated)
+        :error ->
+          eval_opts
+      end
+
+    after_learning = SynapticDisambiguation.evaluate(holdout_si, eval_opts)
 
     predicate_choices =
       List.wrap(Map.get(holdout_si, :lifg_choices))
@@ -98,6 +138,8 @@ rows =
       signal: Map.get(after_learning, :total_signal, 0.0),
       baseline_decision: get_in(baseline, [:baseline, :decision]),
       counterfactual_decision: get_in(after_learning, [:counterfactual, :decision]),
+      gold_label_provided?: Map.has_key?(gold, index),
+      gold_label_accepted?: after_learning.status == :labeled_diagnostic,
       report: after_learning
     }
   end)
@@ -132,11 +174,19 @@ if summary.eligible == 0 do
   score-flip claim is justified. Check the real slates / full-score mode.
   """)
 else
-  IO.puts("""
-  PASS: at least one real complete competing sense slate was evaluated
-  counterfactually. This is UNLABELLED; any projected flip is not a proven
-  improvement. Independent human-curated gold labels are still required.
-  """)
+  if summary.labeled == 0 do
+    IO.puts("""
+    PASS: at least one real complete competing sense slate was evaluated
+    counterfactually. Results are UNLABELLED; projected flips do not prove
+    better comprehension. Add independent gold labels for an accuracy audit.
+    """)
+  else
+    IO.puts("""
+    LABELED_DIAGNOSTIC_COMPLETE: Human-curated labels were applied to eligible
+    real dictionary slates. Inspect regressions and abstentions before any
+    consideration of live scoring. Labels are not machine-verified.
+    """)
+  end
 end
 
 GenServer.stop(server)
