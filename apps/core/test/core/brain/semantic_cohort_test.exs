@@ -220,7 +220,9 @@ defmodule Core.Brain.SemanticCohortTest do
       fetch_noun_senses: fn "tree" -> noun_senses end)
 
     assert :atomics.get(fetch_calls, 1) == 1
-    assert [%{stage: :semantic_sense_shadow, meta: meta} | si.trace] = out.trace
+    previous_trace = si.trace
+    assert [%{stage: :semantic_sense_shadow, meta: meta} | ^previous_trace] =
+      out.trace
     assert meta.semantic_cohort.status == :candidate_cohorts
     assert meta.semantic_cohort.cohort_count >= 1
     assert meta.semantic_cohort.changed_response? == false
