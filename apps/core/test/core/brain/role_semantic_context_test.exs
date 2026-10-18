@@ -89,8 +89,9 @@ defmodule Core.Brain.RoleSemanticContextTest do
     assert on.proposed_id == "cook|verb|1"
     assert on.proposed_with_patient_evidence?
     assert on.role_expansion_status == :grounded
-    assert [%{id: "cook|verb|1", lexical_score: 0.0,
+    assert [%{id: "cook|verb|1", lexical_score: direct_score,
       patient_support: patient_support, role_support: combined} | _] = on.eligible_top
+    assert_in_delta direct_score, 0.0, 1.0e-9
     assert patient_support >= 0.08
     assert combined <= 0.13
     assert input == snapshot
