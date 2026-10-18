@@ -525,14 +525,32 @@ defmodule SymbrellaWeb.HomeLive do
         # accidentally explain an older, no-longer-adjacent assistant reply.
         :ok = Core.Response.VerifiedAnswerReceipt.clear(session_id)
 
+        # The memory answer remains authoritative. Nevertheless, run this
+        # user utterance through the non-response comprehension path, so STM,
+        # same-session WM and evidence-gated neuron activity do not stall on
+        # turns satisfied directly by Hippocampus.
+        {si, semantic_status} =
+          if Keyword.get(home_live_config(), :memory_continuity?, true) do
+            case Core.Brain.MemoryFastPathContinuity.run(user_text, session_id) do
+              {:ok, comprehended} ->
+                {comprehended, "comprehension_only"}
+
+              {:error, reason} ->
+                Logger.warning("[MemoryContinuity] skipped: #{inspect(reason)}")
+                {memory_si_like, "failed"}
+            end
+          else
+            {memory_si_like, "disabled"}
+          end
+
         %{
           text: reply_text,
           tone: tone,
           meta: meta,
-          si: memory_si_like,
+          si: si,
           senses_selected: [],
           explain_text: reply_text,
-          pipeline_status: %{route: "memory_fast_path", semantic_pipeline: "bypassed"}
+          pipeline_status: %{route: "memory_fast_path", semantic_pipeline: semantic_status}
         }
 
       nil ->
