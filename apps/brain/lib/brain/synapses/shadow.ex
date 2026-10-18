@@ -63,6 +63,24 @@ defmodule Brain.Synapses.Shadow do
 
   def review(_), do: {:error, :invalid_review}
 
+  @doc """
+  Read-only correction proposal across two independently revalidated
+  observations. A matching previous receipt must already exist and remain
+  active. The subject and predicate cell identities must agree; the patient
+  must differ. No receipt or weight is ever changed by this call.
+  """
+  @spec propose_correction(map(), map()) :: map()
+  def propose_correction(
+        %{evidence: old_evidence, provenance: :user_reported, edges: old_edges},
+        %{evidence: new_evidence, provenance: :user_reported, edges: new_edges}
+      )
+      when is_binary(old_evidence) and is_binary(new_evidence) and
+             is_list(old_edges) and is_list(new_edges) do
+    call({:propose_correction, old_evidence, old_edges, new_evidence, new_edges})
+  end
+
+  def propose_correction(_, _), do: %{status: :invalid_evidence}
+
   @doc "Read-only aggregate counters with no plaintext experiences."
   @spec snapshot() :: map()
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
@@ -170,6 +188,51 @@ defmodule Brain.Synapses.Shadow do
   end
 
   @impl true
+  def handle_call({:propose_correction, prior, old_edges, replacement, new_edges}, _from, state) do
+    old = canonical_correction_edges(old_edges)
+    new = canonical_correction_edges(new_edges)
+
+    result =
+      with true <- valid_evidence?(prior) and valid_evidence?(replacement),
+           true <- prior != replacement,
+           {:ok, {old_actor, old_patient}} <- old,
+           {:ok, {new_actor, new_patient}} <- new,
+           true <- old_actor == new_actor,
+           true <- elem(old_patient, 0) == elem(new_patient, 0),
+           true <- elem(old_patient, 1) != elem(new_patient, 1),
+           {:ok, record} <- Map.fetch(state.receipts, receipt(state, prior)) do
+        cond do
+          MapSet.new(record.edges) != MapSet.new(old_edges) ->
+            %{status: :prior_receipt_mismatch}
+
+          record.verdict == :rejected ->
+            %{status: :prior_already_rejected}
+
+          Map.has_key?(state.receipts, receipt(state, replacement)) ->
+            %{status: :replacement_already_reported}
+
+          true ->
+            %{status: :review_proposed,
+              source: :explicit_not_patient_correction,
+              actor_id: elem(old_actor, 1),
+              predicate_id: elem(old_actor, 0),
+              previous_patient_id: elem(old_patient, 1),
+              proposed_patient_id: elem(new_patient, 1),
+              previous_review: record.verdict,
+              old_patient_support:
+                Map.get(state.edges, old_patient, %{weight: 0.0}).weight,
+              applied?: false, affects_lifg?: false,
+              externally_verified?: false}
+        end
+      else
+        :error -> %{status: :unknown_prior_experience}
+        _ -> %{status: :incompatible_or_ambiguous}
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
   def handle_call(:snapshot, _from, state) do
     entries = Map.values(state.receipts)
 
@@ -254,6 +317,33 @@ defmodule Brain.Synapses.Shadow do
 
   defp receipt(state, evidence), do:
     :crypto.mac(:hmac, :sha256, state.secret, evidence)
+
+  defp canonical_correction_edges(edges) when is_list(edges) do
+    case Enum.sort_by(edges, &inspect/1) do
+      _ when length(edges) != 2 ->
+        :error
+
+      _ ->
+        actor = Enum.find(edges, fn
+          {_, _, :actor} -> true
+          _ -> false
+        end)
+
+        patient = Enum.find(edges, fn
+          {_, _, :patient} -> true
+          _ -> false
+        end)
+
+        if valid_edge?(actor) and valid_edge?(patient) and
+             elem(actor, 0) == elem(patient, 0) and actor != patient do
+          {:ok, {actor, patient}}
+        else
+          :error
+        end
+    end
+  end
+
+  defp canonical_correction_edges(_), do: :error
 
   defp valid_evidence?(value),
     do: is_binary(value) and byte_size(value) in 1..512
