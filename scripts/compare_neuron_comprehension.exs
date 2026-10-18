@@ -84,18 +84,32 @@ else
       IO.puts("Active neurons in synthetic carryover: #{report.synthetic_prior_count}")
       IO.inspect(report.read_only_event_answer, label: "Read-only validated-event answer")
       IO.inspect(report.first_turn.senses, label: "First-turn LIFG IDs")
+      IO.inspect(%{
+        structural_status: report.first_turn.sentence_meaning_status,
+        structural_kind: report.first_turn.structural_kind,
+        lexical_degraded?: report.first_turn.comprehension_degraded?,
+        lexical_reasons: report.first_turn.comprehension_reasons,
+        lexical_stats: report.first_turn.lexical_decision_stats,
+        current_turn_projected_events: report.first_turn.projected_event_count
+      }, label: "First-turn structure vs lexical confidence", pretty: true)
       IO.inspect(report.baseline.senses, label: "Second-turn baseline LIFG IDs")
       IO.inspect(report.neural.senses, label: "Second-turn neural-prior LIFG IDs")
       IO.inspect(report.differences, label: "Observed differences", pretty: true)
       IO.inspect(
         %{
           baseline: %{
-            degraded: report.baseline.comprehension_degraded?,
+            lexical_degraded?: report.baseline.comprehension_degraded?,
+            lexical_reasons: report.baseline.comprehension_reasons,
+            lexical_stats: report.baseline.lexical_decision_stats,
+            structural_status: report.baseline.sentence_meaning_status,
             uncertain: report.baseline.uncertain,
             episodic_candidates: report.baseline.projected_event_count
           },
           neural: %{
-            degraded: report.neural.comprehension_degraded?,
+            lexical_degraded?: report.neural.comprehension_degraded?,
+            lexical_reasons: report.neural.comprehension_reasons,
+            lexical_stats: report.neural.lexical_decision_stats,
+            structural_status: report.neural.sentence_meaning_status,
             uncertain: report.neural.uncertain,
             episodic_candidates: report.neural.projected_event_count
           }
