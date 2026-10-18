@@ -198,7 +198,7 @@ defmodule Core do
     |> StateDump.capture(:working_memory)
     |> maybe_build_response_plan(opts)
     |> StateDump.capture(:response_plan)
-    |> Core.Brain.Hippocampus.encode()
+    |> Core.Brain.Hippocampus.encode(opts)
     |> StateDump.capture(:hippocampus_encode)
     |> Core.Brain.Hippocampus.persist(opts)
     |> StateDump.capture(:hippocampus_persist)
