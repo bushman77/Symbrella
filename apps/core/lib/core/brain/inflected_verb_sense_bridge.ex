@@ -62,6 +62,12 @@ defmodule Core.Brain.InflectedVerbSenseBridge do
             dictionary_definition: short(Map.get(candidate, :definition)),
             dictionary_example: short(Map.get(candidate, :example)),
             grammatical_functions: Map.get(candidate, :gram_function, []),
+            # Full, original dictionary evidence is available only to the
+            # explicit read-only validation path; ordinary projection stays
+            # compact. No inferred or preselected base sense is stored.
+            validation_evidence: if(Keyword.get(opts, :validation_evidence?, false),
+              do: Map.take(candidate, [:definition, :example, :synonyms,
+                :semantic_atoms, :gram_function, :antonyms]), else: nil),
             inventory_entry_retrieved?: true,
             meaning_in_this_sentence_verified?: false,
             synaptic_weight_transferred?: false
@@ -90,6 +96,8 @@ defmodule Core.Brain.InflectedVerbSenseBridge do
              else: nil),
         all_sense_ids: Enum.map(evidence, & &1.id),
         ranked: Enum.take(evidence, @max_reported),
+        validation_rows: if(Keyword.get(opts, :validation_evidence?, false),
+          do: evidence, else: nil),
         complete_inventory_considered?: true,
         surface_to_base_form_attested?: true,
         surface_to_specific_base_sense_verified?: false,
