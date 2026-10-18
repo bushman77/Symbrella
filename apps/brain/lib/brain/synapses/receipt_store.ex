@@ -25,6 +25,8 @@ defmodule Brain.Synapses.ReceiptStore do
   def open(dir) when is_binary(dir) and byte_size(dir) in 1..512 do
     with :ok <- File.mkdir_p(dir),
          :ok <- File.chmod(dir, 0o700),
+         false <- File.exists?(Path.join(dir, "receipts.json")) and
+                  not File.exists?(Path.join(dir, "secret.key")),
          {:ok, key} <- secret(dir),
          {:ok, receipts} <- read_snapshot(dir, key) do
       {:ok, %{secret: key, receipts: receipts, dir: dir}}
