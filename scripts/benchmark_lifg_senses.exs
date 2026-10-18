@@ -159,6 +159,8 @@ defmodule Symbrella.BenchmarkLIFGSenses do
         response: :off,
         persist_episodes: false,
         comprehension_wm?: false,
+        # Isolate lexical comparisons from transient carryover between cases.
+        neuron_activation?: false,
         lifg_opts: lifg_opts
       )
 
