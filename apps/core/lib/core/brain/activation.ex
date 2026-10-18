@@ -164,9 +164,11 @@ defmodule Core.Brain.Activation do
 
   def notify(%{} = si, opts) when is_list(opts) do
     plan = feedback_plan(si, opts)
+    emitted? =
+      Keyword.get(opts, :neuron_activation?, true) != false and
+        Keyword.get(opts, :notify_brain?, true)
 
-    if Keyword.get(opts, :neuron_activation?, true) != false and
-         Keyword.get(opts, :notify_brain?, true) do
+    if emitted? do
       plan
       |> Enum.group_by(& &1.delta)
       |> Enum.each(fn {delta, entries} ->
@@ -178,15 +180,34 @@ defmodule Core.Brain.Activation do
       end)
     end
 
-    Map.update(si, :trace, [], fn trace ->
+    counts = %{
+      verified: Enum.count(plan, &(&1.evidence == :verified_lexical_construction)),
+      differentiated: Enum.count(plan, &(&1.evidence == :ranked_not_verified)),
+      unresolved: Enum.count(plan, &(&1.evidence == :unresolved_sense_selection))
+    }
+
+    si
+    |> Core.Pipeline.Trace.append(:neuron_feedback,
+      decision: if(emitted?, do: :stimulated, else: :suppressed),
+      reason: :post_comprehension_evidence_tiers,
+      meta: Map.merge(counts, %{
+        planned: length(plan),
+        emitted?: emitted?,
+        # Bounded audit for Explain; does not claim these IDs were verified.
+        targets: Enum.take(plan, 8)
+      })
+    )
+    |> Map.update(:trace, [], fn trace ->
       [{:activated,
         %{
-          rows: length(plan),
+          rows: if(emitted?, do: length(plan), else: 0),
+          planned: length(plan),
+          emitted?: emitted?,
           lifg_choices: length(list_or_empty(Map.get(si, :lifg_choices))),
           shape: :selective_comprehension_feedback,
-          verified: Enum.count(plan, &(&1.evidence == :verified_lexical_construction)),
-          differentiated: Enum.count(plan, &(&1.evidence == :ranked_not_verified)),
-          unresolved: Enum.count(plan, &(&1.evidence == :unresolved_sense_selection))
+          verified: counts.verified,
+          differentiated: counts.differentiated,
+          unresolved: counts.unresolved
         }} | trace]
     end)
   end
