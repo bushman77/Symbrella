@@ -75,7 +75,7 @@ defmodule Core.Tools.WebRetrieval.PlaceScope do
         when is_binary(text) -> true
         _ -> false
       end)
-      |> Enum.take(-@max_history_pairs)
+      |> Enum.take(-(@max_history_pairs))
       |> Enum.flat_map(fn %{"content" => text} ->
         case Regex.run(@explicit_place, text) do
           [_, named, region] ->
