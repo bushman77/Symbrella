@@ -121,7 +121,8 @@ defmodule Core.Brain.SemanticSenseValidator do
     # otherwise no extra evidence is supplied.
     role_context =
       if Keyword.get(opts, :role_context?, false) == true,
-        do: RoleSemanticContext.extract(si),
+        do: RoleSemanticContext.extract(si,
+          Keyword.take(opts, [:fetch_noun_senses])),
         else: %{status: :disabled, contexts: [], active_count: 0}
 
     reviews =
