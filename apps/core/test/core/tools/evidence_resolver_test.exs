@@ -33,14 +33,23 @@ defmodule Core.Tools.EvidenceResolverTest do
 
   defmodule SuccessfulCoords do
     def proximity(subject, target, _opts) do
+      # Synthetic coordinates measure a constant (38.5 km) for test
+      # determinism. The two *entity identities* must still match the
+      # exact subject and target independently bound by Core.
+      named_target = target |> String.split(",", parts: 2) |> hd()
+      named_target = String.trim(named_target) |> String.downcase()
+      {target_title, target_url} =
+        if named_target == "kamloops",
+          do: {"Kamloops", "https://www.wikidata.org/wiki/Q473209"},
+          else: {"Vancouver", "https://www.wikidata.org/wiki/Q24639"}
+
       {:ok, %{kind: :proximity, status: :source_supported,
         subject: subject, target: target, method: :haversine,
         distance_km: 38.5,
         sources: [
           %{title: "Maple Ridge", provider: :wikidata,
             url: "https://www.wikidata.org/wiki/Q16740"},
-          %{title: "Vancouver", provider: :wikidata,
-            url: "https://www.wikidata.org/wiki/Q24639"}
+          %{title: target_title, provider: :wikidata, url: target_url}
         ]}}
     end
   end
@@ -169,6 +178,27 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert :geographic_claim_unverified in review.issues
     assert corrected =~ "38.5 km"
     assert corrected =~ "straight line"
+    assert Grounding.supports?(corrected, evidence)
+
+    # Even a successful coordinate-provider status is insufficient when
+    # its second named entity is Vancouver rather than Kamloops.
+    corrupted =
+      update_in(evidence, [:web_evidence, :support, :sources], fn [origin, target] ->
+        [origin, %{target | title: "Vancouver",
+          url: "https://www.wikidata.org/wiki/Q24639"}]
+      end)
+
+    refute Grounding.available_support?(corrupted)
+
+    {:ok, wrong_source_answer, wrong_source_review} =
+      ReflectionLoop.review(question,
+        "Kamloops is approximately 30 kilometers from Maple Ridge.",
+        corrupted)
+
+    assert :geographic_claim_unverified in wrong_source_review.issues
+    assert wrong_source_answer =~ "don't have verified distance"
+    refute wrong_source_answer =~ "30 kilometers"
+
     refute corrected =~ "30 kilometers"
     refute corrected =~ "19 miles"
 
