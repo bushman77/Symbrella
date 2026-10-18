@@ -195,3 +195,67 @@ Core.Tools.WebRetrieval.route_for(%{
 **Do not** confuse successful routing with successful source retrieval or
 a verified answer. Observe the separate status, resolution and provenance
 fields before claiming the user request was answered.
+
+
+## Repeated-"from" intercity distance questions (October 2026)
+
+Production reproduction: after answering `where is kamloops bc`
+from a correctly matched Kamloops Wikipedia lead, Symbrella
+answered `how far from maple ridge is from kamloops` with an
+**unsupported** 30 km (19 miles) estimate falsely attributed to
+Wikipedia. The distance is about 229 km straight-line based on
+Maple Ridge and Kamloops city-centre coordinates; this is NOT a
+driving-route measurement. The failure arose because the first
+turn was a static place-identity question, whereas the noncanonical
+wording on the second turn was not classified as a two-place
+proximity request. Without that frame, numeric geographic
+claims were not subjected to the right source-verification gate.
+
+`Core.Semantic.EventFrames.location_question/1` now recognizes:
+
+    how far from maple ridge is from kamloops
+    How far from Maple Ridge is it from Kamloops, BC?
+
+It produces a `:location_question` /
+`:proximity` frame with two explicitly named, separate subjects,
+`:grounding_status => :unverified`, and no verified distance.
+`Core.Tools.WebRetrieval.RequestRouter` routes that frame to the
+coordinate evidence resolver, which asks the official Canadian
+GeoNames provider and/or Wikidata for the two exact places.
+Only provider-verified place identifiers and coordinates authorize
+a *haversine straight-line* distance. No unverified driving
+distance can be computed from straight-line coordinates.
+
+The response grounding gate now also requires that both source
+titles and support subject/target match the two bound locations
+in the correct order; a source for Maple Ridge and **Vancouver**
+must not authorize a distance query asking about Maple Ridge and
+**Kamloops**, even if the provider reports a successful status.
+A successfully grounded distance has an exact authorized response
+sentence, not merely a valid number and citations embedded
+somewhere in otherwise unconstrained LLM prose.
+
+Without both verified coordinate records, reflection rejects
+the unsupported number and reports missing distance evidence.
+It must NOT publish the 30 km / 19 mile hallucination or imply
+Wikipedia independently verified an intercity driving route.
+
+### Local test and read-only diagnostic
+
+    git pull --ff-only origin development
+
+    mix test apps/core/test/core/semantic/event_frames_test.exs \
+      apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/tools/official_canadian_sources_test.exs \
+      apps/core/test/core/tools/web_retrieval_test.exs
+
+    mix run scripts/probe_distance_question_grounding.exs
+
+The probe uses **synthetic** geographic-support fixtures and performs
+no network calls, model calls, or cognitive writes. Its sample
+229.6 km is a test assertion, not a newly retrieved live
+measurement. Real chat must fetch and revalidate its own sources.
+Test the two live turns consecutively and inspect Explain:
+`:geographic_claim_unverified` signals corrected/withheld
+distance; a supported answer names both places, gives a
+straight-line distance and includes both coordinate citations.
