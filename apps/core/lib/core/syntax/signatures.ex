@@ -77,7 +77,8 @@ defmodule Core.Syntax.Signatures do
     noun_phrases = noun_phrase_constructions(nodes)
     possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
-    (wh_aux_questions(si, nodes) ++ progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
+    (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
+       progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
@@ -220,6 +221,7 @@ defmodule Core.Syntax.Signatures do
     don't doesn't didn't can't couldn't won't wouldn't shouldn't mightn't
   ))
   @question_subjects MapSet.new(~w(i you he she it we they))
+  @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @topic_prepositions MapSet.new(~w(about of for on in at from with to))
   @negation_words MapSet.new(~w(not never))
   @max_question_tokens 64
@@ -278,6 +280,41 @@ defmodule Core.Syntax.Signatures do
       end
     else
       []
+    end
+  end
+
+  # A complete WH object question with a determined nominal subject:
+  # "What did the artist draw?" The interrogative WH asks for the unfilled
+  # object, so this is a grammatical hypothesis, not an event or chosen sense.
+  # Exactly five contiguous base tokens prevent a prefix of a longer clause
+  # from acquiring a stronger structural status than the full utterance.
+  defp wh_aux_object_questions(si, nodes) do
+    sentence = Map.get(si, :sentence) || ""
+
+    case nodes do
+      [wh, aux, det, subject, predicate] = segment ->
+        if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") and
+             wh.index == 0 and wh.word in ~w(what who) and
+             question_auxiliary?(aux) and
+             MapSet.member?(@determiners, det.word) and pos?(det, "determiner") and
+             pos?(subject, "noun") and pos?(predicate, "verb") and
+             valid_surface?(segment) do
+          [signature(
+            :wh_aux_object_question,
+            {wh.index, predicate.index},
+            %{wh: wh.index, auxiliary: aux.index, subject_determiner: det.index,
+              subject_head: subject.index, predicate: predicate.index},
+            %{subject_head: [:pos_noun], predicate: [:pos_verb]},
+            [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+             :attested_nominal_subject, :lexical_verb_available,
+             :question_punctuation, :contiguous_surface]
+          )]
+        else
+          []
+        end
+
+      _ ->
+        []
     end
   end
 
