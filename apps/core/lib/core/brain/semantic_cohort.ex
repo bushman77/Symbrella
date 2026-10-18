@@ -113,7 +113,8 @@ defmodule Core.Brain.SemanticCohort do
          id: id, eligible?: true, grammar: grammar,
          combined_diagnostic_score: combined,
          lexical_score: direct, cohort_gloss: gloss,
-         matching_context: matches, one_hop_witnesses: witnesses
+         matching_context: matches, one_hop_witnesses: witnesses,
+         exclusions: [], missing_restrictions: []
        }) do
     is_binary(id) and is_binary(gloss) and byte_size(gloss) <= 4000 and
       grammar not in [:intransitive_only, :conflicting_grammar] and
@@ -155,6 +156,7 @@ defmodule Core.Brain.SemanticCohort do
       actor: Map.get(row, :actor_support, 0.0),
       combined: row.combined_diagnostic_score,
       gloss_tokens: gloss_tokens,
+      grammar: row.grammar,
       anchors: anchors
     }
   end
@@ -181,6 +183,7 @@ defmodule Core.Brain.SemanticCohort do
           patient_support: member.patient,
           actor_support: member.actor,
           diagnostic_score: member.combined,
+          grammatical_compatibility: member.grammar,
           distinguishing_definition_terms:
             member.gloss_tokens
             |> Enum.reject(&(&1 in common))
