@@ -52,7 +52,10 @@ defmodule Core.Brain.SemanticCohort do
          true <- is_integer(a) and is_integer(v) and is_integer(p),
          true <- Map.get(si, :source) in [:user, :prod, :test],
          true <- Enum.all?(rows, &valid_eligible?/1) do
-      candidates = Enum.map(rows, &candidate/1)
+      candidates =
+      rows
+      |> Enum.filter(&(&1.combined_diagnostic_score >= @min_support))
+      |> Enum.map(&candidate/1)
 
       groups =
         candidates
@@ -210,9 +213,30 @@ defmodule Core.Brain.SemanticCohort do
     |> List.last()
     |> then(&Regex.scan(~r/[\p{L}]{3,26}/u, &1))
     |> List.flatten()
+    |> Enum.map(&normalize_gloss_token/1)
     |> Enum.reject(&MapSet.member?(@noise, &1))
     |> Enum.uniq()
     |> Enum.take(48)
+  end
+
+  # Match ContextFit's ordinary English noun/verb inflection comparison.
+  # This normalizes only diagnostic words, never original dictionary IDs.
+  defp normalize_gloss_token(token) do
+    cond do
+      String.length(token) > 5 and String.ends_with?(token, "ies") ->
+        String.replace_suffix(token, "ies", "y")
+
+      String.length(token) > 5 and
+          Enum.any?(["sses", "ches", "shes", "xes", "zes"],
+            &String.ends_with?(token, &1)) ->
+        String.slice(token, 0, String.length(token) - 2)
+
+      String.length(token) > 4 and String.ends_with?(token, "s") and
+          not String.ends_with?(token, "ss") ->
+        String.slice(token, 0, String.length(token) - 1)
+
+      true -> token
+    end
   end
 
   defp origin_order(:direct_sentence), do: 0
