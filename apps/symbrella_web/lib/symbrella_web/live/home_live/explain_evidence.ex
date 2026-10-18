@@ -42,6 +42,7 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
         ),
       comprehension: comprehension(comprehension),
       semantic_sense_shadow: semantic_sense_shadow(si),
+      semantic_cohort: semantic_cohort(si),
       sentence_competition: sentence_competition(get(si, :sentence_competition)),
       question_signatures:
         si
@@ -132,12 +133,30 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
               :attested_base_lexeme, :sense_count, :excluded_count,
               :baseline_id, :proposed_id, :baseline_gap, :evaluated_gap,
               :role_expansion_enabled?, :role_expansion_status, :role_sources,
-              :top_candidates, :exclusions, :sense_verified?,
+              :top_candidates, :exclusions, :semantic_cohort, :sense_verified?,
               :gold_label_provided?, :applied_to_lifg?,
               :brain_cells_stimulated?, :synaptic_weight_transferred?,
               :response_changed?
             ])
           }
+        end
+
+      _ -> nil
+    end
+  end
+
+  # Cohort evidence comes only from the verified semantic-sense shadow
+  # trace. There is no fallback to word definitions, an LLM reply, or
+  # a guessed sense group. This also supports saved Explain reconstructions.
+  defp semantic_cohort(si) do
+    si
+    |> semantic_sense_shadow()
+    |> case do
+      %{metadata: meta} when is_map(meta) ->
+        case get(meta, :semantic_cohort) do
+          %{status: status} = cohort when is_atom(status) -> cohort
+          %{"status" => _} = cohort -> cohort
+          _ -> nil
         end
 
       _ -> nil
@@ -182,6 +201,7 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
     result.runtime == %{} and result.verified_phrasal_meanings == [] and
       result.semantic_winners == [] and result.lexical_winners == [] and
       result.comprehension == nil and result.semantic_sense_shadow == nil and
+      result.semantic_cohort == nil and
       result.sentence_competition == nil and
       result.question_signatures == [] and result.verb_particle_signatures == [] and
       result.atl_verb_particles == [] and result.unverified_phrasal_hypotheses == []
