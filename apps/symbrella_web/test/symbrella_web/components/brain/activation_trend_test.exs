@@ -24,7 +24,8 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrendTest do
     html = render_component(&ActivationTrend.panel/1, samples: samples)
     assert html =~ "Neuron activation"
     assert html =~ "No neuron activation reports received yet"
-    assert html =~ "individual neuron decay is not yet implemented"
+    assert html =~ "neuron half-life:"
+    assert html =~ "resting threshold:"
   end
 
   test "keeps at most one minute and 120 samples even during frequent refresh" do
