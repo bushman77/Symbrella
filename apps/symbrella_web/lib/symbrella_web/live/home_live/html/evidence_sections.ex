@@ -197,6 +197,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
           body:
             []
             |> value("status", field(ctx, :status))
+            |> value("admission reason", field(ctx, :reason))
             |> value("selected noun sense ID", field(ctx, :noun_sense_id))
             |> value("LIFG selected probability", field(ctx, :selected_probability))
             |> value("one-hop dictionary terms", field(ctx, :terms))
