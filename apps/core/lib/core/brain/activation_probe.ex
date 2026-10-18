@@ -93,6 +93,15 @@ defmodule Core.Brain.ActivationProbe do
       semantic_lemma_prior: lemma_prior,
       semantic_pulse_source: SemanticPropagation.lemma_pulse(first_si),
       synthetic_prior_top: top_prior(prior),
+      first_turn_svo_spans: first_si
+        |> Map.get(:sentence_signatures, [])
+        |> List.wrap()
+        |> Enum.filter(&(is_map(&1) and Map.get(&1, :id) == :finite_present_svo_candidate))
+        |> Enum.map(&Map.get(&1, :span)),
+      complete_svo_span: case Core.Semantic.SVOEvent.complete_signature(first_si) do
+        %{span: span} -> span
+        _ -> nil
+      end,
       first_turn: summarize(first_si),
       read_only_event_answer: event_answer(first_si, second),
       baseline: baseline,
