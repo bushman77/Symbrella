@@ -45,9 +45,10 @@ defmodule Brain.Synapses.Shadow do
   @doc "Record a Core-revalidated, attributed experience with typed edges."
   @spec observe(map(), GenServer.server()) :: {:ok, :recorded | :duplicate} | {:error, atom()}
   def observe(observation, server \\ __MODULE__)
-  def observe(%{evidence: evidence, edges: edges, provenance: :user_reported}, server)
+  def observe(%{evidence: evidence, edges: edges, provenance: :user_reported} = entry, server)
       when is_binary(evidence) and is_list(edges) do
-    call({:observe, evidence, edges}, server)
+    session = Map.get(entry, :session_id)
+    call({:observe, evidence, edges, session}, server)
   end
 
   def observe(_, _), do: {:error, :invalid_observation}
@@ -159,7 +160,7 @@ defmodule Brain.Synapses.Shadow do
   end
 
   @impl true
-  def handle_call({:observe, evidence, edges}, _from, state) do
+  def handle_call({:observe, evidence, edges, session}, _from, state) do
     unique_edges = Enum.uniq(edges)
 
     cond do
@@ -189,7 +190,13 @@ defmodule Brain.Synapses.Shadow do
             {:reply, {:error, :edge_capacity}, state}
 
           true ->
-            record = %{edges: canonical_edges(unique_edges), verdict: :unreviewed, reviews: []}
+            record = %{
+              edges: canonical_edges(unique_edges),
+              verdict: :unreviewed,
+              reviews: [],
+              first_seen_ms: System.system_time(:millisecond),
+              first_session_digest: session_digest(state.secret, session)
+            }
             receipts = Map.put(state.receipts, receipt, record)
 
             case commit_receipts(state, receipts) do
@@ -306,6 +313,8 @@ defmodule Brain.Synapses.Shadow do
       experiences: Enum.count(entries, &(&1.verdict != :rejected)),
       rejected_experiences: Enum.count(entries, &(&1.verdict == :rejected)),
       confirmed_experiences: Enum.count(entries, &(&1.verdict == :confirmed)),
+      durable_review_events: Enum.reduce(entries, 0,
+        fn entry, total -> total + length(Map.get(entry, :reviews, [])) end),
       duplicates: state.duplicates,
       reviews: state.reviews,
       rejected_reviews: state.rejected_reviews,
@@ -415,6 +424,13 @@ defmodule Brain.Synapses.Shadow do
       })}
     end)
   end
+
+  defp session_digest(secret, session)
+       when is_binary(session) and byte_size(session) in 1..128 do
+    ReceiptStore.session_digest(secret, session)
+  end
+
+  defp session_digest(_, _), do: nil
 
   defp receipt(state, evidence) do
     :crypto.mac(:hmac, :sha256, state.secret, evidence)
