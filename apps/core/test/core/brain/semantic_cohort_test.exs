@@ -162,6 +162,43 @@ defmodule Core.Brain.SemanticCohortTest do
     refute Enum.any?(result.cohorts, &(&1.member_count == 3))
   end
 
+  test "cohorts inspect the full eligible sense slate rather than a top-three display" do
+    si = interpreted()
+
+    # The source validator provides all eligible rows to this module.
+    # These 14 weaker entries cannot create shared cohorts.
+    weak =
+      for index <- 1..14 do
+        row("plant|verb|#{index + 20}",
+          "To operate a completely unrelated mechanism.",
+          matched: [], score: 0.0)
+      end
+
+    rows = weak ++ [
+      row("plant|verb|91", "To put a plant in soil."),
+      row("plant|verb|92", "To supply an area with plants.")
+    ]
+    result = SemanticCohort.evaluate(si, report(rows))
+    assert result.eligible_sense_count == 16
+    assert result.cohort_count == 1
+    assert Enum.sort(Enum.map(hd(result.cohorts).members, & &1.id)) ==
+             ["plant|verb|91", "plant|verb|92"]
+  end
+
+  test "independent direct sentence anchors can form a group without noun expansion" do
+    si = interpreted()
+    rows = [
+      row("plant|verb|1", "To put a plant in soil.",
+        literal: ["plant"], matched: [], direct: 0.29, score: 0.29),
+      row("plant|verb|2", "To establish a plant on a property.",
+        literal: ["plant"], matched: [], direct: 0.29, score: 0.29)
+    ]
+
+    result = SemanticCohort.evaluate(si, report(rows))
+    assert [%{evidence_origin: :direct_sentence, anchor_term: "plant"}] =
+      result.cohorts
+  end
+
   test "ineligible specialist sense never enters a cohort even with shared words" do
     si = interpreted()
 
