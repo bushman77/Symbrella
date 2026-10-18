@@ -222,6 +222,7 @@ defmodule Core.Tools.EvidenceResolverTest do
 
     assert refusal_review.status == :repair
     assert :geographic_claim_unverified in refusal_review.issues
+    assert rejected =~ "asking for the distance between"
     assert rejected =~ "don't have verified distance"
     refute rejected =~ "30 kilometers"
     refute rejected =~ "19 miles"
