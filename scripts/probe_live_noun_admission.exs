@@ -83,9 +83,48 @@ case SVOEvent.complete_signature(si) do
         active = Enum.filter(List.wrap(Map.get(si, :active_cells)),
           &(is_map(&1) and Map.get(&1, :id) == id))
 
+        # Show every exact top-scored noun sense, not just the
+        # arbitrary first ID, so an absent consensus is auditable.
+        tied =
+          case scores do
+            %{} = rows ->
+              rows
+              |> Enum.filter(fn {candidate_id, score} ->
+                String.starts_with?(candidate_id, surface <> "|noun|") and
+                  is_number(score) and
+                  is_number(Map.get(rows, id)) and
+                  abs(score - Map.get(rows, id)) <= 1.0e-6
+              end)
+              |> Enum.map(&elem(&1, 0))
+              |> Enum.sort()
+            _ -> []
+          end
+
+        tied_glosses =
+          if length(tied) >= 2 and length(tied) <= 16 do
+            case Db.brain_cells_for_norm(surface) do
+              records when is_list(records) ->
+                records
+                |> Enum.filter(fn record ->
+                  Map.get(record, :id) in tied and
+                    Map.get(record, :pos) == "noun"
+                end)
+                |> Enum.map(fn record ->
+                  %{id: Map.get(record, :id),
+                    definition: Map.get(record, :definition)}
+                end)
+                |> Enum.sort_by(& &1.id)
+              _ -> []
+            end
+          else
+            []
+          end
+
         IO.inspect(%{
           role: role,
           chosen_id: id,
+          exact_tied_ids: tied,
+          tied_dictionary_glosses: tied_glosses,
           selected_probability: if(is_map(scores), do: Map.get(scores, id), else: nil),
           scored_candidates: if(is_map(scores), do: map_size(scores), else: nil),
           probability_sum: if(is_map(scores),
