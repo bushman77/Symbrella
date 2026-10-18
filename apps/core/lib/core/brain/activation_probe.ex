@@ -149,6 +149,9 @@ defmodule Core.Brain.ActivationProbe do
       verified_lexical_meanings: Map.get(comprehension, :lexical_meanings, []),
       uncertain: Map.get(comprehension, :uncertain, []),
       sentence_meaning_status: get(Map.get(si, :sentence_meaning), :status),
+      proposition_type: get(get(Map.get(si, :sentence_meaning), :proposition), :type),
+      queried_role: get(get(get(Map.get(si, :sentence_meaning), :proposition), :queried), :role),
+      structural_unresolved: get(Map.get(si, :sentence_meaning), :unresolved),
       projected_event_count: length(List.wrap(Map.get(si, :episodic_candidates))),
       active_prior_candidates:
         si |> Map.get(:active_cells, []) |> List.wrap()
@@ -183,6 +186,7 @@ defmodule Core.Brain.ActivationProbe do
         Map.get(baseline, :comprehension_degraded?) != Map.get(neural, :comprehension_degraded?),
       structural_status_changed?:
         Map.get(baseline, :sentence_meaning_status) != Map.get(neural, :sentence_meaning_status),
+      queried_role_changed?: Map.get(baseline, :queried_role) != Map.get(neural, :queried_role),
       projected_event_count_delta:
         Map.get(neural, :projected_event_count, 0) - Map.get(baseline, :projected_event_count, 0)
     }
