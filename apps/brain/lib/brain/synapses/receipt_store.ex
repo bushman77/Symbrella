@@ -60,6 +60,10 @@ defmodule Brain.Synapses.ReceiptStore do
   def reviewer_digest(key, reviewer),
     do: sign(key, "reviewer:" <> reviewer)
 
+  @spec session_digest(binary(), String.t()) :: String.t()
+  def session_digest(key, session),
+    do: sign(key, "session:" <> session)
+
   defp secret(dir) do
     path = Path.join(dir, "secret.key")
 
@@ -136,6 +140,8 @@ defmodule Brain.Synapses.ReceiptStore do
           "id" => hash,
           "edges" => Enum.map(record.edges, fn {a, b, rel} -> [a, b, Atom.to_string(rel)] end),
           "provenance" => "user_reported_structural",
+          "first_seen_ms" => Map.get(record, :first_seen_ms),
+          "first_session_digest" => Map.get(record, :first_session_digest),
           "verdict" => Atom.to_string(record.verdict),
           "reviews" => Enum.map(Map.get(record, :reviews, []), fn x ->
             %{"decision" => Atom.to_string(x.decision),
@@ -163,6 +169,8 @@ defmodule Brain.Synapses.ReceiptStore do
 
         val = %{edges: [actor, patient],
                 verdict: String.to_existing_atom(record["verdict"]),
+                first_seen_ms: record["first_seen_ms"],
+                first_session_digest: record["first_session_digest"],
                 reviews: reviews}
 
         {:cont, {:ok, Map.put(acc, record["id"], val)}}
@@ -174,10 +182,14 @@ defmodule Brain.Synapses.ReceiptStore do
 
   defp valid_record?(%{
          "id" => hash, "edges" => edges, "provenance" => "user_reported_structural",
-         "verdict" => verdict, "reviews" => reviews
+         "verdict" => verdict, "reviews" => reviews,
+         "first_seen_ms" => first_seen_ms,
+         "first_session_digest" => session_digest
        })
        when is_binary(hash) and is_list(edges) and is_binary(verdict) and is_list(reviews) do
     is_sha256?(hash) and length(edges) == 2 and
+      is_integer(first_seen_ms) and first_seen_ms > 0 and
+      (is_nil(session_digest) or is_sha256?(session_digest)) and
       valid_edge_list?(edges) and
       verdict in ~w(unreviewed confirmed rejected) and
       length(reviews) <= @max_reviews and
