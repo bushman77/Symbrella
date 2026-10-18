@@ -14,6 +14,7 @@ defmodule Core.SemanticInput do
     - tokens: token list (maps/structs)
     - phrase_candidates: unconfirmed phrase windows
     - active_cells: lexicon/DB rows attached by downstream stages
+    - neuron_activation: separate, live id-to-activation snapshot from STM
     - trace: ordered list of stage events
 
   Sentence signatures:
@@ -76,6 +77,7 @@ defmodule Core.SemanticInput do
                 :prefrontal,
                 :control_signals,
                 :activation_summary,
+                :neuron_activation,
                 :evidence,
                 :episode,
                 :response_meta,
@@ -170,6 +172,7 @@ defmodule Core.SemanticInput do
           tokens: [token()],
           phrase_candidates: [map()],
           active_cells: [cell()],
+          neuron_activation: %{optional(String.t()) => number()},
           trace: list(),
 
           # Fuzzy correction
@@ -261,6 +264,7 @@ defmodule Core.SemanticInput do
             tokens: [],
             phrase_candidates: [],
             active_cells: [],
+            neuron_activation: %{},
             trace: [],
             fuzzy_corrections: [],
             fuzzy_aliases: [],
