@@ -1,9 +1,11 @@
 defmodule Core.Brain.RoleSemanticContext do
   @moduledoc """
   A read-only, one-hop expansion from already-selected SVO actor/patient
-  *noun senses*. The only source is each exact selected noun BrainCell's
-  dictionary gloss, with a matching LIFG choice and nonambiguous noun
-  probability slate. No other noun senses are fetched or inferred.
+  *noun senses*. A uniquely admitted noun uses its exact selected
+  BrainCell gloss. A tied same-surface noun slate may contribute only
+  lexical terms shared by EVERY scored tied noun sense, after verifying
+  all IDs against actual dictionary cells; it does not choose a sense.
+  The optional tie-consensus lookup is read-only and bounded.
 
   The expansion is WEAK contextual evidence. It never proves the selected
   noun sense, a verb sense, a taxonomic edge, or factual truth. It is not
@@ -15,6 +17,8 @@ defmodule Core.Brain.RoleSemanticContext do
   alias Core.Semantic.SVOEvent
 
   @max_terms 12
+  @max_tied_nouns 16
+  @tie_epsilon 1.0e-6
   @max_gloss_bytes 2000
   @noun_margin 0.08
   @patient_weight 0.35
@@ -49,9 +53,15 @@ defmodule Core.Brain.RoleSemanticContext do
           from_selected(si, role, index, opts)
         end)
 
-      active = Enum.filter(contexts, &(&1.status == :grounded_one_hop))
+      active = Enum.filter(contexts, &(&1.status in
+        [:grounded_one_hop, :grounded_tie_consensus]))
       %{
-        status: if(active == [], do: :no_grounded_role_gloss, else: :grounded),
+        status:
+          cond do
+            active == [] -> :no_grounded_role_gloss
+            Enum.any?(active, &(&1.status == :grounded_one_hop)) -> :grounded
+            true -> :tie_consensus_only
+          end,
         contexts: contexts,
         active_count: length(active),
         inferred_noun_meanings_verified?: false,
@@ -77,7 +87,8 @@ defmodule Core.Brain.RoleSemanticContext do
   def support(%{contexts: contexts}, candidate) when is_list(contexts) and is_map(candidate) do
     components =
       contexts
-      |> Enum.filter(&(&1.status == :grounded_one_hop))
+      |> Enum.filter(&(&1.status in
+        [:grounded_one_hop, :grounded_tie_consensus]))
       |> Enum.map(fn ctx ->
         score = ContextFit.explain(nil, nil, candidate,
           extra_context: [Enum.join(ctx.terms, " ")])
@@ -97,11 +108,17 @@ defmodule Core.Brain.RoleSemanticContext do
           if matched == [], do: 0.0,
             else: min(cap, score.score * factor)
 
-        %{role: ctx.role, source_noun_sense_id: ctx.noun_sense_id,
+        %{
+          role: ctx.role,
+          source_noun_sense_id: Map.get(ctx, :noun_sense_id),
+          source_noun_sense_ids: Map.get(ctx, :noun_sense_ids, []),
           selected_noun_probability: ctx.selected_probability,
           context_fit: score.score,
-          matched: matched, contribution: Float.round(contribution, 6),
-          provenance: :exact_selected_noun_definition}
+          matched: matched,
+          contribution: Float.round(contribution, 6),
+          provenance: ctx.source,
+          noun_sense_identity_verified?: false
+        }
       end)
 
     actor = components
@@ -126,7 +143,7 @@ defmodule Core.Brain.RoleSemanticContext do
     actor_signal: 0.0, witnesses: [], one_hop_only?: true,
     verified_sense_equivalence?: false}
 
-  defp from_selected(si, role, index, _opts) do
+  defp from_selected(si, role, index, opts) do
     with [choice] <- Enum.filter(List.wrap(Map.get(si, :lifg_choices)),
            &(is_map(&1) and Map.get(&1, :token_index) == index)),
          %{id: noun_id, definition: definition} <- choice,
@@ -153,6 +170,9 @@ defmodule Core.Brain.RoleSemanticContext do
         noun_sense_independently_verified?: false
       }
     else
+      {:error, :ambiguous_same_surface_noun_senses} ->
+        tied_noun_consensus(si, choice, role, opts)
+
       {:error, reason} ->
         unavailable(role, reason)
 
@@ -160,6 +180,136 @@ defmodule Core.Brain.RoleSemanticContext do
         unavailable(role, :missing_or_inconsistent_selected_noun_definition)
     end
   end
+
+  # Ties are not confidence: no single noun sense is selected. We use
+  # only the intersection of independent real dictionary glosses across
+  # *all* equally top-scored noun senses. A missing row, conflicting
+  # definition or oversized tie fails closed. No one sense is promoted.
+  defp tied_noun_consensus(si, choice, role, opts) do
+    noun_id = Map.get(choice, :id)
+    [norm, "noun", _] = String.split(noun_id, "|", parts: 3)
+    scores = Map.get(choice, :candidate_probs, %{})
+    selected_p = Map.get(scores, noun_id)
+
+    tied =
+      scores
+      |> Enum.filter(fn {id, p} ->
+        case String.split(id, "|", parts: 3) do
+          [^norm, "noun", suffix] when suffix not in ["", "fallback"] ->
+            abs(p - selected_p) <= @tie_epsilon
+          _ -> false
+        end
+      end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    cond do
+      length(tied) < 2 ->
+        unavailable(role, :no_exact_tie_to_consense)
+
+      length(tied) > @max_tied_nouns ->
+        unavailable(role, :too_many_tied_noun_senses)
+
+      noun_id not in tied ->
+        unavailable(role, :selected_noun_not_in_top_tie)
+
+      true ->
+        with {:ok, rows} <- fetch_noun_cells(norm, opts),
+             {:ok, verified} <- exact_tied_cells(rows, tied, norm, noun_id,
+               Map.get(choice, :definition)),
+             term_lists <- Enum.map(verified, fn cell ->
+               gloss_terms(Map.get(cell, :definition), norm, si)
+             end),
+             true <- Enum.all?(term_lists, &(&1 != [])),
+             common <- unanimous_terms(term_lists),
+             true <- common != [] do
+          %{
+            status: :grounded_tie_consensus,
+            role: role,
+            reason: :identical_score_gloss_intersection,
+            noun_sense_id: nil,
+            noun_sense_ids: tied,
+            competing_sense_count: length(tied),
+            selected_probability: selected_p,
+            terms: common,
+            source: :unanimous_tied_dictionary_glosses,
+            noun_sense_independently_verified?: false
+          }
+        else
+          {:error, reason} -> unavailable(role, reason)
+          _ -> unavailable(role, :no_unanimous_noun_gloss_terms)
+        end
+    end
+  end
+
+  defp fetch_noun_cells(norm, opts) do
+    loader = Keyword.get(opts, :fetch_noun_senses, &default_noun_fetch/1)
+
+    if is_function(loader, 1) do
+      try do
+        case loader.(norm) do
+          cells when is_list(cells) and length(cells) <= 256 ->
+            {:ok, cells}
+          _ -> {:error, :noun_dictionary_inventory_unavailable}
+        end
+      rescue
+        _ -> {:error, :noun_dictionary_inventory_unavailable}
+      catch
+        _, _ -> {:error, :noun_dictionary_inventory_unavailable}
+      end
+    else
+      {:error, :noun_dictionary_inventory_unavailable}
+    end
+  end
+
+  defp default_noun_fetch(norm) do
+    if Code.ensure_loaded?(Db) and function_exported?(Db, :brain_cells_for_norm, 1),
+      do: Db.brain_cells_for_norm(norm),
+      else: nil
+  end
+
+  defp exact_tied_cells(rows, ids, norm, selected_id, selected_definition) do
+    noun_rows = Enum.filter(rows, fn row ->
+      is_map(row) and Map.get(row, :pos) == "noun" and
+        Map.get(row, :norm) == norm and Map.get(row, :id) in ids
+    end)
+
+    actual_ids = Enum.map(noun_rows, &Map.get(&1, :id))
+
+    cond do
+      length(noun_rows) != length(ids) or
+        Enum.sort(actual_ids) != ids ->
+        {:error, :incomplete_tied_noun_dictionary_evidence}
+
+      not Enum.all?(noun_rows, fn row ->
+        gloss = Map.get(row, :definition)
+        is_binary(gloss) and gloss != "" and
+          byte_size(gloss) <= @max_gloss_bytes
+      end) ->
+        {:error, :missing_tied_noun_definitions}
+
+      not Enum.any?(noun_rows, fn row ->
+        Map.get(row, :id) == selected_id and
+          Map.get(row, :definition) == selected_definition
+      end) ->
+        {:error, :selected_noun_definition_differs_from_dictionary}
+
+      true ->
+        {:ok, noun_rows}
+    end
+  end
+
+  defp unanimous_terms([first | rest]) do
+    rest
+    |> Enum.reduce(MapSet.new(first), fn terms, acc ->
+      MapSet.intersection(acc, MapSet.new(terms))
+    end)
+    |> MapSet.to_list()
+    |> Enum.sort()
+    |> Enum.take(@max_terms)
+  end
+
+  defp unanimous_terms(_), do: []
 
   defp unavailable(role, reason), do: %{
     status: :unavailable_or_ambiguous,
