@@ -233,7 +233,19 @@ defmodule Core.Brain.Activation do
   defp discriminated?(choice) do
     id = cell_id(choice)
     scores = Map.get(choice, :candidate_probs)
+    control = map_or_empty(Map.get(choice, :semantic_control))
 
+    # A probability gap by itself is not independent evidence: an earlier
+    # activation prior can create such a gap and repeatedly reinforce itself.
+    # Only the context-derived SenseControl adjustment can license this tier.
+    independent_context? =
+      Map.get(control, :applied?) == true and
+        Enum.any?(list_or_empty(Map.get(control, :adjustments)), fn
+          %{id: ^id, source: :original_sentence_dictionary_context} -> true
+          _ -> false
+        end)
+
+    if independent_context? do
     case is_map(scores) && Map.get(scores, id) do
       p when is_number(p) and p > 0 and map_size(scores) > 1 ->
         other =
@@ -246,6 +258,9 @@ defmodule Core.Brain.Activation do
 
       _ ->
         false
+    end
+    else
+      false
     end
   end
 
