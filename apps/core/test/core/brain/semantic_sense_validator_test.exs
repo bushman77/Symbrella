@@ -139,6 +139,24 @@ defmodule Core.Brain.SemanticSenseValidatorTest do
     assert Enum.any?(report.eligible_top, &(&1.id == "write|verb|7"))
   end
 
+  test "contradictory dictionary valency tags fail closed instead of granting compatibility" do
+    conflicting = [
+      sense("write", 1, "(intransitive) To be an author.", ["transitive"]),
+      sense("write", 2, "To write a letter to someone.", ["transitive"]),
+      sense("write", 3, "To record information by typing.", ["transitive"])
+    ]
+
+    si = statement("writes", "write", "author", "letter")
+    report = SemanticSenseValidator.evaluate(si,
+      fetch_base_senses: fn _ -> conflicting end)
+
+    assert report.excluded_count == 1
+    assert Enum.any?(report.exclusions, fn row ->
+      row.id == "write|verb|1" and :conflicting_dictionary_grammar in row.exclusions
+    end)
+    refute Enum.any?(report.eligible_top, &(&1.id == "write|verb|1"))
+  end
+
   test "explicit specialist cue removes the missing-context exclusion but does not verify truth" do
     si = statement("throws", "throw", "bowler", "ball")
     report = SemanticSenseValidator.evaluate(si,
