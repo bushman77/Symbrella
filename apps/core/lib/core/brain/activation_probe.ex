@@ -49,6 +49,10 @@ defmodule Core.Brain.ActivationProbe do
       # Hippocampus.encode persists independently of :persist_episodes.
       episodes: false,
       hippocampus_encode?: false,
+      # Introspection normally persists continuity and can write self-monitor
+      # memory. These diagnostic runs must not change either durable store.
+      persist_self_model: false,
+      write_self_monitor_memory: false,
       comprehension_wm?: false,
       focus_prompt_topics?: false,
       notify_brain?: false
