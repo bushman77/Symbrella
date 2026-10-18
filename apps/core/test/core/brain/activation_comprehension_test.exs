@@ -113,11 +113,30 @@ defmodule Core.Brain.ActivationComprehensionTest do
     si = %{
       active_cells: [row(@bank), row(@river)],
       semantic_choices: [
-        %{id: @river, candidate_probs: %{@bank => 0.4, @river => 0.6}}
+        %{
+          id: @river,
+          candidate_probs: %{@bank => 0.4, @river => 0.6},
+          semantic_control: %{
+            applied?: true,
+            adjustments: [%{id: @river, source: :original_sentence_dictionary_context}]
+          }
+        }
       ]
     }
 
     assert [%{id: @river, delta: 0.05, evidence: :ranked_not_verified}] =
+             Activation.feedback_plan(si)
+  end
+
+  test "a probability gap caused by activation alone cannot reinforce itself" do
+    si = %{
+      active_cells: [row(@bank), row(@river)],
+      semantic_choices: [
+        %{id: @river, candidate_probs: %{@bank => 0.2, @river => 0.8}}
+      ]
+    }
+
+    assert [%{id: @river, delta: 0.015, evidence: :unresolved_sense_selection}] =
              Activation.feedback_plan(si)
   end
 
