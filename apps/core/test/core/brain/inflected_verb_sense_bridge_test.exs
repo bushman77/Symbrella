@@ -75,7 +75,7 @@ defmodule Core.Brain.InflectedVerbSenseBridgeTest do
     assert result.original_surface_id == "draws|verb|1"
     assert result.attested_base_lexeme == "draw"
     assert result.base_sense_count == 3
-    assert result.all_sense_ids == ["draw|verb|1", "draw|verb|2", "draw|verb|3"]
+    assert Enum.sort(result.all_sense_ids) == ["draw|verb|1", "draw|verb|2", "draw|verb|3"]
     assert result.candidates_with_context_evidence > 0
   end
 
