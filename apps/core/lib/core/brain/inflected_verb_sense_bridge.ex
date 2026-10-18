@@ -62,7 +62,7 @@ defmodule Core.Brain.InflectedVerbSenseBridge do
             dictionary_definition: short(Map.get(candidate, :definition)),
             dictionary_example: short(Map.get(candidate, :example)),
             grammatical_functions: Map.get(candidate, :gram_function, []),
-            dictionary_sense_verified?: true,
+            inventory_entry_retrieved?: true,
             meaning_in_this_sentence_verified?: false,
             synaptic_weight_transferred?: false
           }
