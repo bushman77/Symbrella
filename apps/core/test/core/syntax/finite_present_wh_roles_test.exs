@@ -82,8 +82,11 @@ defmodule Core.Syntax.FinitePresentWhRolesTest do
     assert %{pos: "noun", basis: :determined_subject_in_wh_aux_question} = out.roles[3]
     assert %{pos: "verb", basis: :predicate_in_wh_aux_question} = out.roles[4]
 
-    ctx = GrammarEvidence.prepare(%{si |
-      sentence_signatures: signatures, role_competition: out})
+    ctx =
+      si
+      |> Map.put(:sentence_signatures, signatures)
+      |> Map.put(:role_competition, out)
+      |> GrammarEvidence.prepare()
 
     scores = GrammarEvidence.apply_role_competition(
       %{"draw|noun|1" => 0.2, "draw|verb|1" => 0.2}, ctx, 4)
