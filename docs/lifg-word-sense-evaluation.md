@@ -131,6 +131,32 @@ An improvement in POS alone does not establish exact-sense accuracy;
 assign independent human-reviewed `expected_id` labels before making
 any such claim.
 
+## MWE shadow boundary correction
+
+The 2026-10-17 **broad** benchmark (focused computation disabled)
+showed the financial `bank` sense before shadowing but no `bank`
+afterwards, despite no accepted semantic MWE replacing it.
+`Core.LIFG.Attach` had been discarding constituent unigrams when a
+virtual phrase received a Stage1 lexical choice, **before**
+`Core.MWE.Decisions` applied its source, span, grammatical-precedence,
+and sentence-competition acceptance gates.
+
+The LIFG attachment now retains all original `lifg_choices`. Only
+`Core.MWE.Decisions.attach/1` decides which words an **accepted** phrase
+replaces in its derived `semantic_choices` view. Rejected MWEs cannot
+erase the original lexical words merely because they were proposed.
+The diagnostic field `retained_words` makes this visible; legacy
+`after_shadow` trace data is retained only for existing consumers.
+
+Run:
+
+    mix test apps/core/test/core/mwe/decisions_test.exs
+    mix run scripts/benchmark_lifg_senses.exs \
+      --sentence "I deposited cash at the bank." --word bank
+
+The fix preserves grammatical provenance; it **does not itself prove**
+that financial `bank|noun|1` was selected for the right semantic reason.
+
 ## 2. Establish human-reviewed labels before scoring exact-sense accuracy
 
 Get real current sense IDs by reviewing the **full** dictionary inventory
