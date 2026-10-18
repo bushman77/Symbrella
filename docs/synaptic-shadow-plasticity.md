@@ -425,3 +425,42 @@ time-based data splits and sufficient sample size remain future work.
 No production LIFG scores, BrainCells, durable receipts or predictions are
 modified by this evaluation. Do **not** enable live learned priors based only
 on a single positive synthetic fixture or an unlabeled projected flip.
+
+
+## Why the first real-dictionary disambiguation evaluation abstained
+
+The first eight real LIFG held-out examples each had a scored candidate
+map (two to four entries), but only **one surface verb-sense candidate**.
+The score maps were not evidence of competition between multiple verb
+meanings. Training observations were recorded successfully, but **0/8**
+examples met the two-verb-sense evidence gate. This is an evaluation
+coverage finding, not a failed synapse, nor proof that synaptic evidence
+can or cannot improve sense choice.
+
+An inflected surface like `draws|verb|1` is not the same sense namespace
+as the base lexeme `draw|verb|N`. `Core.Semantic.VerbLemma.canonical/2`
+can establish the base *form* `draw` from explicit dictionary morphology
+tags and a matching gloss. That does **not** establish which `draw`
+sense the experience exemplifies. Do not automatically distribute the
+`draws|verb|1` synaptic weight among all the base verb senses.
+
+To inspect the actual gap, run:
+
+```sh
+mix test apps/core/test/core/brain/synaptic_slate_audit_test.exs --trace
+mix run scripts/audit_synaptic_verb_slates.exs
+```
+
+The audit reports original LIFG scores and POS counts, exact surface
+verb competitors, whether the dictionary attests a base form, and
+read-only counts/samples of verb senses for that base lexeme in
+`Db.brain_cells`. A base dictionary lookup failure is labeled
+`:database_unavailable`; missing morphology proof stays
+`:no_proven_base_form`.
+
+**Next gate:** establish independent contextual evidence that maps a
+specific inflected form to a specific base sense, compare full same-POS
+slates without training/test leakage, and collect independently reviewed
+gold-sense labels. Until then, propagation, review, and disambiguation
+remain conservative read-only diagnostics; no learned weight affects
+LIFG or BrainCell activation.
