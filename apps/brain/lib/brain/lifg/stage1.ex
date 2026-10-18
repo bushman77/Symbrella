@@ -676,6 +676,10 @@ defmodule Brain.LIFG.Stage1 do
         {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
         closed_class_slate? = Enum.any?(cand_list, &ClosedClass.closed_class_candidate?/1)
 
+        focus =
+          SenseFocus.plan(ctx.si, tok_index, cand_list,
+            enabled?: ctx.sense_focus?, mwe?: token_mwe?)
+
         scored_rows =
           Enum.map(cand_list, fn c ->
             id = sense_id_for(c, token_phrase)
@@ -692,11 +696,11 @@ defmodule Brain.LIFG.Stage1 do
             lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
             context0 =
-              ContextFit.score(
-                ctx.sent,
-                token_phrase,
-                c
-              )
+              if SenseFocus.evaluate_context?(focus, c) do
+                ContextFit.score(ctx.sent, token_phrase, c)
+              else
+                0.0
+              end
 
             rel0 =
               guess_rel_prior(c, id, token_phrase)
