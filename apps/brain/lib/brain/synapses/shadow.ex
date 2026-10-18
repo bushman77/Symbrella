@@ -111,7 +111,7 @@ defmodule Brain.Synapses.Shadow do
       not valid_evidence?(evidence) or
           length(unique_edges) != 2 or
           not Enum.all?(unique_edges, &valid_edge?/1) or
-          Enum.map(unique_edges, &elem(&1, 2)) |> Enum.sort() != [:actor, :patient] or
+          Enum.sort(Enum.map(unique_edges, &elem(&1, 2))) != [:actor, :patient] or
           length(Enum.uniq(Enum.map(unique_edges, &elem(&1, 0)))) != 1 ->
         {:reply, {:error, :invalid_observation}, state}
 
