@@ -131,14 +131,18 @@ defmodule Core.Response.ProjectedExpression do
 
   defp same_statement_repeated?(sentence, draft) do
     statement = normalized(sentence)
-    answer = normalized(draft)
 
-    # Whole-utterance equality or two/more repeats, not any incidental
-    # mention of a clause inside an otherwise useful response.
-    statement != "" and
-      (answer == statement or
-         (String.starts_with?(answer, statement <> " ") and
-            normalized(String.replace_prefix(answer, statement, "")) == statement))
+    # Split only on complete sentence-ending punctuation. A draft that
+    # repeats the user's assertion one or more times (with newlines
+    # or spaces) is an echo; a useful response containing that sentence
+    # alongside other content is NOT an echo.
+    sentences =
+      draft
+      |> String.split(~r/[.!?]+(?:\s+|$)/u, trim: true)
+      |> Enum.map(&normalized/1)
+
+    statement != "" and sentences != [] and
+      Enum.all?(sentences, &(&1 == statement))
   end
 
   defp normalized(text) do
