@@ -53,3 +53,58 @@ provider supplies context but does not bypass reflection's geographic safeguard.
 
 Restart Phoenix after pulling. Test the Maple Ridge three-turn conversation and
 inspect web_retrieval in core/response/complete blackboard metadata.
+
+
+## Province-qualified public place questions (Oct 2026)
+
+A real live turn, `where is kamloops bc`, had the correct retrieved
+Wikipedia article (`Kamloops`) and an irrelevant article about a school,
+but the response still fell back to a reference-only link list.
+`Core.Tools.WebRetrieval.PlaceLocation` previously required the normalized
+search query (`kamloops bc`) to match the full Wikipedia article title
+(`Kamloops`), which erroneously discarded the relevant city article.
+This was a retrieval identity-admission issue, not a failure to find
+the article, choose `:answer_user`, or choose a semantic cohort.
+
+The location-reference matcher now accepts an unqualified Wikipedia article
+title ONLY when a Canadian province-qualified question precisely names that
+article's base place, the Wikipedia HTTPS article URL matches the title,
+and the opening article sentence explicitly asserts the place lies
+**in** the requested province. A mere mention such as "in Alberta, near
+British Columbia" is NOT an identity witness for BC. Source leads can
+contain bounded parenthetical pronunciations before "is", and trailing
+encyclopedic detail can be shortened to a cited jurisdictional clause
+without introducing new facts.
+
+The normal `ReflectionLoop` check `:location_reference_unaligned`
+uses this newly admitted source and replaces an uncited, unaligned local
+LLM answer with a bounded citation, e.g.:
+
+    According to Wikipedia, Kamloops is a city in south-central
+    British Columbia, Canada. Source: https://en.wikipedia.org/wiki/Kamloops
+
+Other pages, including the Kamloops Indian Residential School,
+unmatched/wrong article URLs, non-Wikipedia domains, unsupported excerpts
+and mismatching provinces remain unverified reference results. This
+does not modify live LIFG noun/abbreviation decisions or claim that
+dictionary selections alone establish an external geographic fact.
+
+Offline validation with deterministic sample provider responses:
+
+    mix test apps/core/test/core/tools/web_retrieval/place_location_test.exs \
+      apps/core/test/core/tools/web_retrieval_test.exs \
+      apps/core/test/core/response/llm_route_flow_test.exs
+
+    mix run scripts/probe_place_location.exs
+
+These checks do not access live Wikipedia. After pulling into the
+Termux runtime, retry `where is kamloops bc` and inspect the
+actual Wikipedia source excerpt plus the final response. If the live
+provider does not supply a title- and province-matched lead, Core must
+still abstain rather than invent location details.
+
+The LIFG selection `bc|noun|1` (birth control) visible in the same
+diagnostic is a separate POS/abbreviation disambiguation issue.
+The citation-bound response fix intentionally does not override
+the lexical selector, conflate lexical guesses with verified facts,
+or silently promote a dictionary sense.
