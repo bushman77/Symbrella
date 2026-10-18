@@ -54,7 +54,8 @@ for {sentence, i} <- Enum.with_index(sentences, 1) do
     case: i,
     input: sentence,
     intended_speech_act: Map.get(si, :intent),
-    projected_sentence_status: get_in(si, [:sentence_meaning, :status]),
+    projected_sentence_status:
+      Map.get(Map.get(si, :sentence_meaning) || %{}, :status),
     frame: frame,
     repeated_echo_review: repaired,
     changed_lifg?: false,
