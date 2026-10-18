@@ -17,6 +17,7 @@ defmodule Core.Brain.SemanticCohort do
   related *uses*, never proof of dictionary sense equivalence.
   """
 
+  alias Core.Brain.SynapticExperience
   alias Core.Semantic.SVOEvent
 
   @max_candidates 256
@@ -47,15 +48,18 @@ defmodule Core.Brain.SemanticCohort do
       when status in [:abstained, :provisional_hypothesis] and
         is_list(rows) and length(rows) <= @max_candidates and
         is_map(actor) and is_map(patient) and is_map(predicate) do
-    with %{roles: %{subject_head: a, object_head: p, predicate: v}} <-
+    with {:ok, _} <- SynapticExperience.extract(si),
+         %{roles: %{subject_head: a, object_head: p, predicate: v}} <-
            SVOEvent.complete_signature(si),
          true <- is_integer(a) and is_integer(v) and is_integer(p),
          true <- Map.get(si, :source) in [:user, :prod, :test],
+         true <- length(rows) >= 2,
+         true <- distinct_senses?(rows),
          true <- Enum.all?(rows, &valid_eligible?/1) do
       candidates =
-      rows
-      |> Enum.filter(&(&1.combined_diagnostic_score >= @min_support))
-      |> Enum.map(&candidate/1)
+        rows
+        |> Enum.filter(&(&1.combined_diagnostic_score >= @min_support))
+        |> Enum.map(&candidate/1)
 
       groups =
         candidates
@@ -108,6 +112,12 @@ defmodule Core.Brain.SemanticCohort do
   end
 
   def evaluate(_, _), do: skipped(:missing_vetted_sentence_evidence)
+
+  defp distinct_senses?(rows) do
+    ids = Enum.map(rows, &Map.get(&1, :id))
+    Enum.all?(ids, &is_binary/1) and
+      length(Enum.uniq(ids)) == length(ids)
+  end
 
   defp valid_eligible?(%{
          id: id, eligible?: true, grammar: grammar,
