@@ -99,12 +99,12 @@ defmodule Core.Brain.NounTieConceptAudit do
       normalized_sum?(probs)
   end
 
+  defp valid_probs?(_), do: false
+
   defp normalized_sum?(probs) do
     total = Enum.reduce(probs, 0.0, fn {_, p}, acc -> acc + p end)
     total >= 0.98 and total <= 1.02
   end
-
-  defp valid_probs?(_), do: false
 
   defp tied_top_ids(probs, norm, selected_id) do
     selected_score = Map.fetch!(probs, selected_id)
