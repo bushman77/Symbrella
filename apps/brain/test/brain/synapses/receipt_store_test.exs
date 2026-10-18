@@ -60,6 +60,14 @@ defmodule Brain.Synapses.ReceiptStoreTest do
     assert actor.reviewed_experiences == 1
     assert actor.experiences == 2
 
+    assert %{status: :shadow_only, affects_lifg?: false,
+             candidates: [
+               %{provisional_support: provisional, reviewed_support: reviewed,
+                 provisional_contexts: 1, reviewed_contexts: 1}
+             ]} = Shadow.preview(["draws|verb|1"], "artist|noun|1", :actor, a)
+    assert_in_delta provisional, 0.01, 1.0e-8
+    assert_in_delta reviewed, 0.03, 1.0e-8
+
     assert {:ok, json} = File.read(Path.join(dir, "receipts.json"))
     refute String.contains?(json, "sentence-one-my-private-text")
     refute String.contains?(json, "reviewer-with-sensitive-name")
@@ -93,6 +101,7 @@ defmodule Brain.Synapses.ReceiptStoreTest do
     GenServer.stop(b)
     c = start_store(dir)
     assert %{experiences: 1, rejected_experiences: 1,
+             durable_review_events: 2,
              persistence_status: :ready} = Shadow.snapshot(c)
     assert {:ok, :duplicate} = Shadow.observe(first, c)
     assert Shadow.edge("draws|verb|1", "picture|noun|1", :patient, c) == nil
