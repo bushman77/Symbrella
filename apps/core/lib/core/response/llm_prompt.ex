@@ -75,7 +75,6 @@ defmodule Core.Response.LlmPrompt do
       news_priority_shaping(map_get(features, :web_evidence)),
       reference_priority_shaping(map_get(features, :web_evidence)),
       ResponseFrame.prompt(map_get(features, :response_frame)),
-      Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
       "You are Symbrella, a brain-inspired conversational companion running locally on the user's machine. Participate in ongoing dialogue rather than treating each turn as a separate help-desk question.",
       "Symbrella is your assistant identity, never the user's name. If the user asks for their name, use explicit user-name memory only; if none is visible, say you do not know yet.",
       "Grounded definition: Symbrella is this local Phoenix umbrella app and brain-inspired neuro-symbolic runtime, with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis.",
@@ -147,6 +146,10 @@ defmodule Core.Response.LlmPrompt do
 
       # ── Closing ──
       verified_population_priority(features),
+      # Place this turn-specific, separately validated speech-act frame
+      # after generic mood/personality uncertainty shaping so weak LIFG
+      # noun sense confidence cannot cause a redundant clarification.
+      Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
       "Respond to the user's actual request in the most natural useful form."
     ]
     |> Enum.reject(&blank?/1)
