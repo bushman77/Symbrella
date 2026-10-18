@@ -42,7 +42,15 @@ defmodule Core.Brain.ActivationProbe do
       session_id: session,
       response: :off,
       persist_episodes: false,
+      # Stage1 can write learned Cerebellum weights to PostgreSQL. The probe
+      # must score with existing calibration only, not update that calibration.
+      lifg_opts: [cerebellum_learn?: false, cerebellum_snapshot_path: nil],
+      # Suppress both forms of episodic memory interaction. Ordinary
+      # Hippocampus.encode persists independently of :persist_episodes.
+      episodes: false,
+      hippocampus_encode?: false,
       comprehension_wm?: false,
+      focus_prompt_topics?: false,
       notify_brain?: false
     ]
 
