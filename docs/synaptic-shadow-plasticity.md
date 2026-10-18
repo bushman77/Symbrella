@@ -1121,3 +1121,102 @@ mix test apps/brain/test/brain/action_selector_test.exs \
 The preceding live response echoed the statement verbatim; the
 routing fix is not a guarantee that an LLM will stop parroting.
 That requires a separate prompt/response-quality evaluation.
+
+
+## Expressing projected comprehension in live responses (v13)
+
+Live chat showed that Symbrella correctly constructed a patient-conditioned
+`plant` cohort while the local model returned the user's entire
+"The gardener plants a tree." sentence verbatim. This is not a
+failure of the grammatical or cohort shadow stages; the response
+generator lacked a source-grounded natural-language expression contract.
+
+`Core.Response.ProjectedExpression.from_si/1` now builds a bounded
+expression frame **only** for fully revalidated user-reported
+positive finite-present SVO assertions whose intent is already
+`:statement`. It independently requires existing
+`SynapticExperience` proof, revalidates `EpisodicProjection`, and
+rebuilds `SentenceMeaning` exactly. It carries the original actor,
+predicate surface, independently attested base verb lemma and
+patient. If an actual semantic shadow cohort exists, only its
+short shared lexical cue(s) and a private bounded set of
+**distinguishing** glossary terms are retained, with explicit
+nonverification flags. No particular dictionary sense or asserted
+external event is promoted.
+
+`Core.Response.Attach.build_response_si_like/1` passes this frame
+to `Core.Response.plan/2`, and `LlmPrompt` places the bounded
+statement guidance after general response-posture/uncertainty
+instructions. The local LLM is instructed to give a natural,
+nonverbatim conversational acknowledgment of the user-described
+action without inventing the occurrence, instrument, purpose,
+location, outcome, or exact sense of the action. A normal bare
+assertion is not a memory request or an obligation to ask another
+question. The frame is never inserted for unvalidated SVO,
+unknown intents, questions, assistant output, or forged ATL roles.
+
+After existing model-generation, source-grounding and reflection
+steps, `LlmSynthesis` invokes the narrow
+`ProjectedExpression.review_draft/3` post-pass. It substitutes a
+deterministic, role-only paraphrase **only** if:
+
+1. The model returned exactly the user sentence (possibly twice
+   with harmless whitespace/punctuation differences); or
+2. A real unresolved semantic cohort supplies a distinction term
+   from an exact competing dictionary gloss, the user did NOT
+   mention that term, but the model's output did. This avoids
+   asserting, for example, that the gardener planted "in soil"
+   when only the patient role/tree had been observed.
+
+The conservative repair uses the attested base-verb morphology
+("plant" → "planting") in a reported-speech construction such as:
+
+    I understand you're describing the gardener planting a tree.
+
+This does not assert the planting happened. Unknown or unsuitable
+inflections fall back to explicit actor/patient wording. The
+replacement passes the existing reflection reviewer again.
+Final response metadata contains a genuine `:repair` state, an
+issue of `:projected_statement_echo` or
+`:unverified_sense_specificity`, original/final text hashes, and
+a bounded `:projected_expression_repair` trace with
+`:promoted_sense?: false` and `:stored_memory?: false`.
+This prevents the Explain review from falsely presenting an
+automatic repair as acceptance of the model's first draft.
+
+The natural-language route never feeds generated text back to
+LIFG/ATL, sense scores, cohort formation, BrainCells, or synaptic
+weights. Normal response persistence via the preexisting
+`SideEffects.record_turn` policy remains separate; this
+expression feature itself performs no cognitive writes.
+
+### Test, probe, and live chat
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+
+mix test apps/core/test/core/response/projected_expression_test.exs \
+  apps/core/test/core/response/llm_prompt_test.exs \
+  apps/core/test/core/response/llm_route_flow_test.exs \
+  apps/core/test/core/brain/semantic_cohort_test.exs \
+  apps/core/test/core/brain/semantic_sense_shadow_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+
+mix run scripts/probe_projected_expression.exs
+```
+
+Then retry *The gardener plants a tree.* in Phoenix chat.
+The sentence should stay `:statement` and the semantic
+cohort remain the same. The LLM can respond freely within the
+grounded constraints; if it echoes verbatim or invents a
+discriminating dictionary detail, the post-pass substitutes
+the conservative reported-action paraphrase.
+
+This is a narrow, auditable first step toward natural language
+generation from projected comprehension. It is NOT full compositional
+semantic generation, formal entailment checking, a general
+hallucination detector, or independent truth verification.
+More complex syntax and non-SVO utterances intentionally use the
+existing response path until evidence-specific controls are developed.
