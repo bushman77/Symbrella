@@ -846,3 +846,36 @@ mix test apps/core/test/core/intent/structural_statement_test.exs \
   apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
   --trace
 ```
+
+
+### Regression correction: environment-dependent SVO admission
+
+The initial two regression modules incorrectly asserted that a
+`Core.resolve_input/2` call with a stripped-down offline lexical
+configuration **must** produce a full episodic assertion. In the
+user's local test run, that setup produced `episodic_candidates: []`.
+As a consequence, 5 of 20 Core tests failed *before* exercising
+either memory acknowledgment or structural-intent reconciliation.
+The earlier role-context, Core pipeline and web Explain tests passed.
+
+Tests now distinguish:
+
+- **Deterministic policy coverage:** explicit full finite-present SVO
+  signatures, actual agreeing LIFG/ATL senses, an attested inflected
+  verb BrainCell and revalidated EpisodicProjection/SentenceMeaning.
+  These exercise the memory acknowledgment gate and the speech-act
+  reconciliation with complete independent provenance.
+- **Production coverage:** the live noun-admission probe now mirrors
+  the HomeLive lexical settings (`fuzzy: true`,
+  `enrich_lexicon?: true`, `lexicon_stage?: true`) while keeping
+  response synthesis, durable event writes and model side effects
+  disabled. It reports available SVO signatures, projected event
+  count, sentence meaning and exact noun probability refusal reasons.
+
+The existing SVO regression tests were updated to verify that
+*attributed* user reports can still be stored and recalled without
+forcing "I've recorded..." as the conversational reply. This is
+different from proving the user intended a memory operation.
+Neither meaning verification nor role-confidence requirements were
+relaxed. Successful offline fixture tests alone cannot guarantee
+that all live messages will have complete dictionary evidence.
