@@ -464,3 +464,51 @@ slates without training/test leakage, and collect independently reviewed
 gold-sense labels. Until then, propagation, review, and disambiguation
 remain conservative read-only diagnostics; no learned weight affects
 LIFG or BrainCell activation.
+
+
+## Evidence-gated surface → base-sense inventory (read-only bridge)
+
+The real-dictionary lexical coverage audit passed its regression tests
+(4/4) and found across eight independent finite-present SVO examples:
+
+- **8/8** complete LIFG score slates, all containing *one* verb sense
+  plus nouns and/or proper nouns, not competing verb meanings.
+- **8/8** dictionary-attested third-person singular inflections leading
+  to a base lexeme with at least two real verb senses.
+- **0/8** verified mappings to a particular base verb sense.
+
+For example, `draws|verb|1` attests the lexeme `draw`, whose database
+contains 138 `draw|verb|N` senses. It does not identify which N.
+
+`Core.Brain.InflectedVerbSenseBridge.project/2` now creates an isolated,
+read-only base **candidate inventory** for a structurally validated
+human-origin positive SVO. It requires `VerbLemma.canonical/2` to
+provide a base DIFFERENT from the inflected surface (using attested tags
+and the exact dictionary form-of gloss); retrieves existing `Db.BrainCell`
+rows with base-matching norm, `pos == "verb"`, nonempty sense gloss and
+a real dictionary ID; bounds the inventory to 256 unique entries; and
+compares every candidate's own definition, examples and lexical evidence
+with the *original sentence* through `Brain.LIFG.ContextFit.explain/4`.
+
+An evidence-supported top candidate and score gap can produce a
+`lexical_hypothesis`; this is deliberately NOT a verified sense mapping,
+not a replacement of LIFG's actual winner, not a scored LIFG slate, and
+not permission to copy `draws|verb|1`'s learned weight to any
+`draw|verb|N`. A zero or tied evidence gap yields no proposal.
+
+The new read-only production probe and the isolated tests:
+
+```sh
+git pull --ff-only origin development
+mix test apps/core/test/core/brain/inflected_verb_sense_bridge_test.exs \
+  apps/core/test/core/brain/synaptic_slate_audit_test.exs --trace
+mix run scripts/probe_inflected_verb_sense_bridge.exs
+```
+
+The probe prints actual base sense IDs, evidence overlaps and top
+dictionary glosses across eight sentences; no independent gold labels
+are inferred. The meaning accuracy question is still open. A responsible
+next milestone is independently reviewing a representative set of base
+sense labels, checking contextual ranking against those labels, and only
+then considering a bounded second-pass sense selection. The live
+synaptic propagation and LIFG scoring remain unchanged.
