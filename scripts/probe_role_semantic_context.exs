@@ -149,7 +149,11 @@ summary = %{
     Map.get(a, :proposed_id) != Map.get(b, :proposed_id)
   end),
   cases_with_grounded_roles: Enum.count(expanded,
+    &(Map.get(&1, :role_expansion_status) in [:grounded, :tie_consensus_only])),
+  cases_with_unique_selected_noun_support: Enum.count(expanded,
     &(Map.get(&1, :role_expansion_status) == :grounded)),
+  cases_with_unanimous_tied_noun_support: Enum.count(expanded,
+    &(Map.get(&1, :role_expansion_status) == :tie_consensus_only)),
   sense_meaning_verified?: false,
   synapses_modified?: false,
   live_lifg_modified?: false
