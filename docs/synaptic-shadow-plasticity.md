@@ -1,7 +1,7 @@
-# Experience-driven synaptic plasticity — shadow v2
+# Experience-driven synaptic plasticity — durable shadow v4
 
 This milestone is **not a live cognitive learning circuit**. It adds reversible
-experience-weighted connections to an ephemeral GenServer, with no database
+experience-weighted connections to a supervised GenServer, with no database
 changes and no effect on LIFG, Axon, activation, response policy or memory facts.
 
 ## Pipeline
@@ -40,10 +40,10 @@ of independent witnesses. We deliberately do not claim that the archive
 establishes source independence or objective event truth.
 
 \`Brain.Synapses.Shadow\` retains a bounded number of keyed receipts, each
-with its own two edges and review verdict. An in-process random HMAC key
-hides the original event string from the ledger. No raw utterance, reviewer
-name or original patient/actor phrase is persisted; lexical sense IDs remain
-in the provisional edge graph.
+with its own two typed edges and a reversible review history. In development,
+a stable private local HMAC key allows receipts to survive BEAM restarts
+without storing raw statements or reviewer names. Source sense IDs and
+the existing provenance classification are retained, but do not verify truth.
 
 ## Manual correction and evidence grades
 
@@ -75,10 +75,10 @@ lower-level read-only probe, **not** proof of improved word-sense accuracy.
 
 ## Limits
 
-- No durable synapses; the GenServer starts empty after each BEAM restart.
+- Development mode restores private receipts across BEAM restarts; tests default to ephemeral. No reviewed weight feeds live cognition.
 - At most 512 experience receipts and 1,024 concurrent edges in memory.
 - No reward model, automatic contradiction understanding, connection decay,
-  consolidation, or learned activation spreading.
+  automatic consolidation into authoritative knowledge, or learned activation spreading.
 - No model-generated content qualifies for a new receipt through chat.
 - Review calls are intentionally manual and programmatic.
 - The graph uses current selected *inflected* surface sense IDs, not a verified
@@ -107,9 +107,8 @@ To opt out of experience recording on a Core call, use
 \`synapse_shadow?: false\`. No existing live cognition uses those weights,
 regardless of this setting.
 
-Before any durable or live rollout, require authenticated review attribution,
-independent evidence lineage, contradiction adjudication, a schema for
-bounded reversible receipts, and held-out counterfactual improvements
+Before any live cognitive rollout, require authenticated review attribution,
+independent evidence lineage, contradiction adjudication and held-out counterfactual improvements
 against an activation-only baseline.
 
 
@@ -153,8 +152,9 @@ explicit "actually" is not enough to prove that an earlier event was false.
 
 The manual \`SynapticExperience.review/3\` remains the only route for modifying
 review verdicts. There is no authenticated end-user approval UI and no
-automatic contradiction adjudication yet. The proposal is ephemeral and will
-not survive a restart, just like the synaptic shadow itself.
+automatic contradiction adjudication yet. The proposal itself is ephemeral:
+durable storage contains only accepted experiences and their review decisions,
+not unapproved correction proposals.
 
 \`\`\`sh
 mix test apps/core/test/core/brain/synaptic_correction_test.exs --trace
@@ -166,3 +166,96 @@ Disable with \`synapse_correction?: false\` or
 corrections or long-lived weights, add attributable event-instance identity,
 verified provenance across sessions, authenticated human approval and
 counterfactual evaluation against unchanged weights.
+
+
+## Durable receipt consolidation (shadow v4)
+
+Development config:
+
+\`\`\`elixir
+config :brain, Brain.Synapses.Shadow,
+  durable?: true,
+  dir: "tmp/synapses"
+\`\`\`
+
+Test mode defaults to \`durable?: false\`. Production is deliberately disabled
+by default until deployment and operational controls are reviewed. This
+feature *persists shadow observations*, not conclusions or model weights.
+
+Private local files in the git-ignored directory:
+
+- \`secret.key\`: stable random 32-byte receipt/snapshot HMAC key, mode 0600.
+- \`receipts.json\`: authenticated, atomically replaced snapshot containing a
+  bounded **receipt per distinct user-reported experience**. Each receipt
+  contains its HMAC ID, two typed lexicon-cell edges, provenance class,
+  current verdict, and up to eight **review events** with timestamp and
+  pseudonymized reviewer digest. No original utterance, gloss or reviewer name
+  is stored. The directory is permission mode 0700.
+
+**Restore these two files together.** A missing secret with an existing
+snapshot, invalid HMAC, malformed receipt, oversized data or unsupported
+version is treated as unavailable. Synaptic mutations then fail closed;
+ordinary chat/lexical comprehension continues, but the shadow cannot
+claim to be learning. Do not delete the secret or silently start afresh.
+
+On startup \`Brain.Synapses.Shadow\` authenticates and structurally validates
+all receipts; it reconstructs **every edge weight** by combining only
+non-rejected receipts. Neither computed weight nor LIFG scoring is read
+from disk. Duplicate receipt HMACs remain stable across BEAM restarts.
+A rejected receipt remains in the ledger, so replay never restores it.
+
+Updates are **write-before-acknowledge**: the complete receipt snapshot is
+written to a private temporary file, synced, and renamed over the original.
+If the write fails, the GenServer keeps its previous in-memory state.
+This provides single-writer, crash-resistant atomic replacement, not a
+guarantee of durability after sudden power loss on every filesystem.
+There is no distributed write lock, remote backup, reviewer authentication,
+or unlimited audit retention. No automatic compaction or truncation of the
+audit trail occurs; after eight review changes on a receipt, further changes
+are rejected with \`:review_capacity\` pending a future migration.
+
+The two evidence classes remain separate:
+
+- Unreviewed reports contribute 0.01 each to
+  \`provisional_weight\` and \`provisional_experiences\`.
+- Human-reviewed confirmations contribute 0.03 each to
+  \`reviewed_weight\` and \`reviewed_experiences\`.
+- Rejected receipts contribute **zero**. The combined \`weight\` is capped at
+  0.08 for observation and read-only preview only.
+
+Neither group certifies a dictionary sense or independent event truth.
+Reviewers are attributed with a stable keyed digest; a caller-supplied
+reviewer string is not identity verification. Only trusted in-process code
+may call the review API.
+
+### Validate persistence on the production dictionary
+
+\`\`\`sh
+cd ~/Symbrella
+git pull --ff-only origin development
+
+mix test apps/brain/test/brain/synapses/receipt_store_test.exs \
+  apps/core/test/core/brain/synaptic_experience_test.exs \
+  apps/core/test/core/brain/synaptic_correction_test.exs --trace
+
+mix run scripts/probe_synaptic_consolidation.exs
+\`\`\`
+
+The standalone probe uses real Core for the SVO experience, then a separate
+private shadow instance to test process restart, reviewed rejection,
+duplicate suppression and reversible confirmation. It never injects new
+weights into the supervised chat shadow. It removes its probe files.
+
+To inspect the **live supervised shadow** after starting Phoenix:
+
+\`\`\`elixir
+Brain.Synapses.Shadow.snapshot()
+\`\`\`
+
+Expected in development: \`persistence_status: :ready\` and
+\`persisted?: true\`. A warning status of \`:unavailable\` means the shadow
+is read-only until local storage is repaired or recovered.
+
+Existing snapshots must never be committed to Git or uploaded with bug
+reports. Keep backups local and secured. Clearing \`tmp/\` will intentionally
+erase this experimental synaptic archive.
