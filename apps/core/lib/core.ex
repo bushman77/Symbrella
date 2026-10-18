@@ -209,6 +209,10 @@ defmodule Core do
     # isolated shadow ledger. No live BrainCell weights or LIFG priors change.
     |> Core.Brain.SynapticExperience.attach(opts)
     |> StateDump.capture(:synaptic_experience)
+    # Explicit patient corrections are *proposals* only. They must not
+    # automatically retract prior receipts or train a new lexical association.
+    |> Core.Brain.SynapticCorrection.attach(opts)
+    |> StateDump.capture(:synaptic_correction)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
