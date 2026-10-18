@@ -100,7 +100,19 @@ defmodule Core.Brain.SynapticCorrection do
   # Nested comprehension is intentionally side-effect-free: no recruitment,
   # stimulation, persistence, self-learning, action, response or shadow write.
   # Only the returned independently revalidated semantic structures are used.
-  defp read_only_comprehension(sentence, _caller_opts) do
+  defp read_only_comprehension(sentence, caller_opts) do
+    # Preserve the caller's lexical ranking configuration so that a
+    # reconstruction cannot silently change the sense-ID interpretation.
+    lifg_opts =
+      case Keyword.get(caller_opts, :lifg_opts, []) do
+        list when is_list(list) ->
+          Keyword.merge(list,
+            cerebellum_learn?: false, cerebellum_snapshot_path: nil)
+
+        _ ->
+          [cerebellum_learn?: false, cerebellum_snapshot_path: nil]
+      end
+
     opts = [
       mode: :prod,
       experience_origin: :user_turn,
@@ -120,7 +132,7 @@ defmodule Core.Brain.SynapticCorrection do
       execute_agency_commands?: false,
       record_agency_commands?: false,
       fuzzy: false,
-      lifg_opts: [cerebellum_learn?: false, cerebellum_snapshot_path: nil]
+      lifg_opts: lifg_opts
     ]
 
     case Core.resolve_input(sentence, opts) do
