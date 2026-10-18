@@ -127,6 +127,55 @@ defmodule Core.Brain.ActivationProbeTest do
     assert summary.projected_event_count == 0
   end
 
+  test "structural event understanding remains distinct from low lexical confidence" do
+    si = %{
+      semantic_choices: [%{token_index: 0, id: "artist|noun|1", score: 0.15}],
+      comprehension: %{
+        degraded?: true,
+        reasons: [:weak_decision_rate_high],
+        stats: %{total: 1, weak: 1, weak_rate: 1.0},
+        lexical_meanings: [],
+        uncertain: ["artist"]
+      },
+      sentence_meaning: %{
+        status: :structurally_interpreted,
+        kind: :participant_assertion
+      },
+      episodic_candidates: [%{source_frame: :finite_present_svo}]
+    }
+
+    summary = Probe.summarize(si)
+    assert summary.structural_interpretation?
+    assert summary.structural_kind == :participant_assertion
+    assert summary.sentence_meaning_status == :structurally_interpreted
+    assert summary.comprehension_degraded?
+    assert summary.lexical_decision_stats.weak == 1
+    assert summary.verified_lexical_meanings == []
+    assert summary.projected_event_count == 1
+  end
+
+  test "A/B comparison reports structural status changes independently" do
+    baseline = %{
+      senses: [%{token_index: 0, id: @bank}],
+      sentence_meaning_status: :not_yet_interpreted,
+      comprehension_degraded?: true,
+      projected_event_count: 0
+    }
+    neural = %{
+      senses: [%{token_index: 0, id: @bank}],
+      sentence_meaning_status: :structurally_interpreted,
+      comprehension_degraded?: true,
+      projected_event_count: 1
+    }
+
+    assert %{
+      changed_sense_selections: [],
+      degraded_changed?: false,
+      structural_status_changed?: true,
+      projected_event_count_delta: 1
+    } = Probe.compare(baseline, neural)
+  end
+
   test "hippocampal diagnostic opt-out never encodes an episode" do
     si = %{atl_slate: %{winners: [%{id: @river}]}, sentence: "bank"}
 
