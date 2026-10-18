@@ -11,15 +11,23 @@ defmodule Core.Response.ProjectedExpressionTest do
   @morphology ["tag:form-of", "tag:indicative",
                "tag:present", "tag:singular", "tag:third-person"]
 
-  defp statement do
+  defp statement, do: statement("gardener", "plants", "plant", "tree")
+
+  # Structurally faithful fixture for two live utterances; these are
+  # synthetic ID/BrainCell attestations, not a dictionary gold label.
+  defp statement(actor, surface_verb, _base, patient) do
+    actor_id = "#{actor}|noun|1"
+    verb_id = "#{surface_verb}|verb|1"
+    patient_id = "#{patient}|noun|1"
+
     choices = [
-      %{token_index: 1, id: "gardener|noun|1", lemma: "gardener"},
-      %{token_index: 2, id: "plants|verb|1", lemma: "plants"},
-      %{token_index: 4, id: "tree|noun|1", lemma: "tree"}
+      %{token_index: 1, id: actor_id, lemma: actor},
+      %{token_index: 2, id: verb_id, lemma: surface_verb},
+      %{token_index: 4, id: patient_id, lemma: patient}
     ]
 
     %{
-      sentence: "The gardener plants a tree.",
+      sentence: "The #{actor} #{surface_verb} a #{patient}.",
       source: :user,
       experience_origin: :user_turn,
       intent: :statement,
@@ -28,10 +36,10 @@ defmodule Core.Response.ProjectedExpressionTest do
       trace: [],
       tokens: [
         %{index: 0, phrase: "The", n: 1},
-        %{index: 1, phrase: "gardener", n: 1},
-        %{index: 2, phrase: "plants", n: 1},
+        %{index: 1, phrase: actor, n: 1},
+        %{index: 2, phrase: surface_verb, n: 1},
         %{index: 3, phrase: "a", n: 1},
-        %{index: 4, phrase: "tree.", n: 1}
+        %{index: 4, phrase: patient <> ".", n: 1}
       ],
       sentence_signatures: [
         %{id: :finite_present_svo_candidate, source: :core_syntax,
@@ -40,13 +48,13 @@ defmodule Core.Response.ProjectedExpressionTest do
             predicate: 2, object_determiner: 3, object_head: 4}}
       ],
       active_cells: [
-        %{id: "gardener|noun|1", norm: "gardener", pos: "noun",
-          definition: "Someone who tends a garden."},
-        %{id: "tree|noun|1", norm: "tree", pos: "noun",
-          definition: "A perennial woody plant or shrub."},
-        %{id: "plants|verb|1", norm: "plants", pos: "verb",
+        %{id: actor_id, norm: actor, pos: "noun",
+          definition: "The subject of the action."},
+        %{id: patient_id, norm: patient, pos: "noun",
+          definition: "The object of the action."},
+        %{id: verb_id, norm: surface_verb, pos: "verb",
           semantic_atoms: @morphology,
-          definition: "An inflected form of plant."}
+          definition: "Third-person singular simple present inflection."}
       ],
       lifg_choices: choices,
       semantic_choices: choices,
@@ -144,6 +152,71 @@ defmodule Core.Response.ProjectedExpressionTest do
       refute paraphrase =~ "soil"
       refute paraphrase =~ "verified"
     end
+  end
+
+  test "live observed present-perfect substitutions are rejected using only source-tense evidence" do
+    cases = [
+      {statement(), "The gardener has planted a tree.",
+        "I understand you're describing the gardener planting a tree."},
+      {statement("baker", "cooks", "cook", "meal"),
+        "The baker has cooked a meal.",
+        "I understand you're describing the baker cooking a meal."},
+      {statement("child", "throws", "throw", "ball"),
+        "The child has thrown a ball.",
+        "I understand you're describing the child throwing a ball."},
+      {statement(), "The gardener planted a tree.",
+        "I understand you're describing the gardener planting a tree."},
+      {statement(), "The gardener will plant a tree.",
+        "I understand you're describing the gardener planting a tree."},
+      {statement(), "The gardener is planting a tree.",
+        "I understand you're describing the gardener planting a tree."}
+    ]
+
+    for {si, changed_tense, expected} <- cases do
+      assert {:ok, _} = Core.Brain.SynapticExperience.extract(si)
+      frame = ProjectedExpression.from_si(si)
+      assert is_map(frame)
+
+      assert {:repaired, :unsupported_temporal_shift, ^expected} =
+        ProjectedExpression.review_draft(si.sentence, changed_tense, frame)
+
+      assert {:repaired, ^expected} =
+        ProjectedExpression.repair_temporal_shift(
+          si.sentence, changed_tense, frame)
+    end
+  end
+
+  test "tense repair is narrow and cannot invent unsupported reinterpretations" do
+    si = statement()
+    frame = ProjectedExpression.from_si(si)
+
+    for draft <- [
+      "You're describing the gardener planting a tree.",
+      "The gardener plants a tree. That describes an action.",
+      "You mentioned a gardener and a tree.",
+      "I wonder whether the gardener has planted a tree.",
+      "The gardener has planted a tree before, but that is another story.",
+      "The gardener is planting a tree in your hypothetical example.",
+      "The gardener has cooked a tree."
+    ] do
+      assert ProjectedExpression.review_draft(
+        si.sentence, draft, frame) == :unchanged
+    end
+
+    assert ProjectedExpression.review_draft(
+      si.sentence, "The gardener has planted a tree.", nil
+    ) == :unchanged
+
+    assert ProjectedExpression.review_draft(
+      si.sentence, "The gardener has planted a tree.",
+      Map.put(frame, :kind, :invalid)
+    ) == :unchanged
+
+    assert ProjectedExpression.review_draft(
+      "Has the gardener planted a tree?",
+      "The gardener has planted a tree.",
+      frame
+    ) == :unchanged
   end
 
   test "model cannot assert an unsupported exact-sense detail from a competing cohort" do
