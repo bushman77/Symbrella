@@ -51,7 +51,7 @@ defmodule Core.Brain.InflectedVerbSenseBridgeTest do
   defp senses do
     [
       %{id: "draw|verb|1", norm: "draw", pos: "verb",
-        definition: "To pull a heavy object along the ground.",
+        definition: "To pull a heavy rope along the ground.",
         gram_function: ["transitive"], synonyms: []},
       %{id: "draw|verb|2", norm: "draw", pos: "verb",
         definition: "To create a picture by tracing lines.",
@@ -99,6 +99,23 @@ defmodule Core.Brain.InflectedVerbSenseBridgeTest do
     refute result.applied_to_lifg?
     refute result.brain_cells_stimulated?
     assert si.lifg_choices == statement().lifg_choices
+  end
+
+  test "different object contexts change the lexical hypothesis without synaptic transfer" do
+    loader = fn _ -> senses() end
+    picture = InflectedVerbSenseBridge.project(statement("picture"),
+      fetch_base_senses: loader)
+    rope = InflectedVerbSenseBridge.project(statement("rope"),
+      fetch_base_senses: loader)
+
+    assert [%{id: "draw|verb|2"} | _] = picture.ranked
+    assert [%{id: "draw|verb|1"} | _] = rope.ranked
+    assert picture.lexical_hypothesis.candidate_id == "draw|verb|2"
+    assert rope.lexical_hypothesis.candidate_id == "draw|verb|1"
+    refute picture.surface_to_specific_base_sense_verified?
+    refute rope.surface_to_specific_base_sense_verified?
+    refute picture.synaptic_weight_transferred?
+    refute rope.synaptic_weight_transferred?
   end
 
   test "missing morphology witness blocks lookup" do
