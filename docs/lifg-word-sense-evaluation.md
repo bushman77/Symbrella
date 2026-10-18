@@ -50,6 +50,44 @@ Compare:
 A missing unigram final choice (e.g. MWE shadowing) is **ungradable** until
 the specific token coverage is explained.
 
+## Structural role competition (development)
+
+`Core.Syntax.RoleCompetition.attach/1` runs immediately after sentence
+signatures and before Stage1. The pure
+`Brain.LIFG.RoleCompetition.resolve/1` adjudicates two carefully bounded
+patterns using *independent* token, morphology, and dictionary POS witnesses:
+
+- A complete determiner–adjective–noun group (`a light suitcase`) supports
+  the **adjective** modifier of the full NP over incompatible overlapping
+  shorter nominal hypotheses.
+- A determiner–noun subject immediately preceding an attested finite-past
+  predicate (`A bat flew`) supports the **noun** subject over a speculative
+  separated verb-particle parse that mistakenly assigns `flew` as its object.
+
+`Brain.LIFG.GrammarEvidence.apply_role_competition/3` adds bounded positive
+support (`0.30` in pre-softmax score units) to existing dictionary candidates
+in that POS only. It does not delete alternatives, invent senses, change
+a dictionary record, or claim an exact lexical meaning is verified.
+When no complete independent structural witness exists, it abstains.
+
+The production benchmark prints `adjudicated_structural_pos`. Compare it
+with `stage1_winner`, `final_winner`, and the actual dictionary definition.
+The latter may remain wrong even after POS improves: e.g., grammar cannot on
+its own distinguish the flying mammal sense of *bat* from its other noun senses,
+or the low-weight sense of *light* from its other adjective senses.
+
+Verify on your local Elixir runtime:
+
+    mix test apps/brain/test/brain/lifg/role_competition_test.exs
+    mix test apps/core/test/core/syntax/role_competition_test.exs
+    mix test
+    mix run scripts/benchmark_lifg_senses.exs \
+      | tee tmp/lifg-sense-role-competition.txt
+
+This only supports two witness patterns initially. Extend by writing a
+contrasting structural counterexample first, not by adding unconditional
+POS biases or treating generic signatures as verified parses.
+
 ## 2. Establish human-reviewed labels before scoring exact-sense accuracy
 
 Get real current sense IDs by reviewing the **full** dictionary inventory
