@@ -259,3 +259,42 @@ Test the two live turns consecutively and inspect Explain:
 `:geographic_claim_unverified` signals corrected/withheld
 distance; a supported answer names both places, gives a
 straight-line distance and includes both coordinate citations.
+
+
+### Live source rejection diagnosis and suffix normalization
+
+A follow-up after the initial repeated-"from" parser fix still returned
+insufficient verified distance evidence for both `maple ridge` ->
+`kamloops` and `maple ridge bc` -> `kamloops bc`.
+
+A definite second-stage failure was in `Grounding.supported_proximity`:
+its source-title check treated `Maple Ridge` and `maple ridge bc`
+as distinct place identities, rejecting some otherwise valid provider
+proofs even after the provider checked the province. It now recognizes
+Canadian province/territory suffixes in comma and whitespace formats
+for **city-name equivalence only**. The provider must still establish
+identity and jurisdiction; this change does not promote a search hit
+or guess coordinates.
+
+The resolver also retains a bounded `:reason` atom when a coordinate
+provider returns `{:error, reason}`, e.g. `:ambiguous_place`,
+`:place_not_verified`, or `:unavailable`. Numeric claims remain
+blocked on errors. The no-support fallback now reflects `how far`
+without changing it into an `is it close` question.
+
+    mix test apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/semantic/event_frames_test.exs \
+      apps/core/test/core/tools/official_canadian_sources_test.exs
+
+    mix run scripts/diagnose_live_geographic_distance.exs
+
+Unlike the synthetic proof script, `diagnose_live_geographic_distance.exs`
+makes real bounded HTTP calls. It prints the current non-secret retrieval
+policy, both question frames, each search/coordinate attempt and failure
+reason, whether a retrieved support object passes the final grounding
+gate, and direct Canadian GeoNames/Wikidata errors for the qualified
+city pair. **This diagnostic is read-only for cognitive state, but NOT
+offline.** Its results identify whether the remaining blocker is the
+external API, ambiguous entity matching, timeout, or local evidence
+authorization. Do not infer a successful live calculation from a
+synthetic 229.6 km test fixture.
