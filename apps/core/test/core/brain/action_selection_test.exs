@@ -79,6 +79,29 @@ defmodule Core.Brain.ActionSelectionTest do
            ] = out.agency_command_results
   end
 
+  test "Core action selection routes recognized SVO statements as conversation" do
+    si = %{
+      sentence: "The gardener plants a tree.",
+      source: :test,
+      tokens: [],
+      trace: [],
+      intent: :statement,
+      confidence: 0.68,
+      conversation_act: :statement,
+      mood: %{vigilance: 0.74, inhibition: 0.53, exploration: 0.54}
+    }
+
+    out = ActionSelection.attach(si, [])
+    assert out.intent == :statement
+    assert out.selected_action == :answer_user
+    assert out.action_meta.selected_candidate.reason == :conversation_continuation
+    assert out.agency_commands == []
+    assert Enum.any?(out.trace, fn
+      %{stage: :action_selection, decision: :answer_user} -> true
+      _ -> false
+    end)
+  end
+
   test "keeps low-confidence smalltalk on the answer path" do
     si = %{
       sentence: "How are you doing on this fine saturday afternoon Symbrella?",
