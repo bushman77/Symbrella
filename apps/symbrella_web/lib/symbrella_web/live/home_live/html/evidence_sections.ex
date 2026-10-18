@@ -278,6 +278,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
           |> value("truncated members?", field(group, :member_ids_truncated?))
           |> value("shared definition words",
             field(group, :shared_definition_terms))
+          |> value("noun role source evidence",
+            field(group, :role_evidence_provenance))
           |> value("lowest member diagnostic support",
             field(group, :minimum_member_support))
           |> value("semantic equivalence verified?",
