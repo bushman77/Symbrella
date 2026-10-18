@@ -202,6 +202,32 @@ defmodule Core.Brain.SynapticDisambiguationTest do
              SynapticDisambiguation.evaluate(single_sense, synapse_shadow_server: server)
   end
 
+  test "opt-in wide score evaluation covers 138 exact candidate IDs, not a truncated top two",
+       %{server: server} do
+    ids = Enum.map(1..138, fn n -> "draws|verb|#{n}" end)
+    probability = 1.0 / length(ids)
+    scores = Map.new(ids, fn id -> {id, probability} end)
+    rows = Enum.map(ids, &%{id: &1, pos: "verb"})
+
+    si = interpreted("painter", "picture")
+    si =
+      si
+      |> Map.put(:sense_candidates, %{2 => rows})
+      |> Map.put(:lifg_choices, Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = ch -> %{ch | candidate_probs: scores}
+        row -> row
+      end))
+
+    result = SynapticDisambiguation.evaluate(si, synapse_shadow_server: server)
+
+    assert result.status == :unlabeled_diagnostic
+    assert result.candidate_count == 138
+    assert result.verb_sense_count == 138
+    assert result.baseline.decision == :abstain
+    assert result.counterfactual.decision == :abstain
+    assert result.applied_to_lifg? == false
+  end
+
   test "rejects guessed gold without explicit holdout provenance", %{server: server} do
     si = interpreted("artist", "banner")
     assert %{status: :skipped, reason: :untrusted_or_out_of_slate_gold} =
