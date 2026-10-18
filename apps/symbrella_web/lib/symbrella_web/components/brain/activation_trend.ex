@@ -4,8 +4,8 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrend do
 
   Keeps only 60 seconds of samples (at most 120) in the connected LiveView.
   These are snapshots of the Brain coordinator's runtime activation map, NOT
-  persisted brain_cells.activation values. Brain.Cell currently does not decay
-  activation, so this component must not invent a falling curve.
+  persisted brain_cells.activation values. The Brain coordinator supplies
+  real time-decayed values; this component only plots those observations.
   """
 
   use SymbrellaWeb, :html
@@ -122,7 +122,9 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrend do
         No neuron activation reports received yet.
       </p>
       <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-        Runtime reports only · starts when this page opens · individual neuron decay is not yet implemented.
+        Runtime only · starts when this page opens · neuron half-life:
+        {Brain.Cell.Activation.half_life_ms() / 1000}s · resting threshold:
+        {Brain.Cell.Activation.rest_threshold()}.
       </p>
     </section>
     """
