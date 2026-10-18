@@ -59,7 +59,8 @@ defmodule Brain.SelfPortrait.Model do
         gate_failures: 0,
         fallback_wins: 0,
         lifg_payload_gaps: 0,
-        lifg_pos_anomalies: 0
+        lifg_pos_anomalies: 0,
+        response_semantic_drift: 0
       },
       sources: %{},
       last_events: [],
@@ -134,6 +135,10 @@ defmodule Brain.SelfPortrait.Model do
 
         event == [:brain, :pmtg, :consult] ->
           Map.update(p0, :pmtg_consults, 1, &(&1 + 1))
+
+        # Response-only mismatches are not attributed to LIFG or ATL.
+        event == [:core, :response, :semantic_role_drift] ->
+          Map.update(p0, :response_semantic_drift, 1, &(&1 + 1))
 
         event == [:brain, :pmtg, :no_mwe_senses] ->
           p0
