@@ -340,3 +340,87 @@ existing verb sense slates, review-grade outcomes, no training/test leakage,
 and comparable baseline LIFG scores. Measure held-out accuracy, abstention,
 contradiction handling and error regressions against disabled propagation.
 Only then consider a bounded opt-in perturbation of candidate scores.
+
+
+## Counterfactual experience-sensitive sense evaluation (shadow v6)
+
+\`Core.Brain.SynapticDisambiguation.evaluate/2\` analyzes a previously
+interpreted human-origin finite SVO without changing it. It uses the **actual**
+\`candidate_probs\` associated with its selected verb's LIFG token, not
+synthetic "winner" scores. Only evaluate when:
+
+1. \`Core.Brain.SynapticExperience.extract/1\` independently revalidates the
+   current utterance, role identities and ATL/LIFG agreement.
+2. The exact experience has **never appeared** in the shadow receipt ledger
+   (including rejected receipts). This is a narrow replay-leakage check;
+   it cannot prove that a semantically equivalent paraphrase was unseen.
+3. \`sense_candidates\` and \`candidate_probs\` contain exactly the same
+   scored lexical candidate IDs, with no duplicate IDs. All probabilities
+   must be finite, in \`[0,1]\`, and sum approximately to one.
+4. The candidate slate has **at least two distinct real verb sense IDs** and
+   at most 64 total candidates. Stage1 currently omits large \`candidate_probs\`
+   maps; cases with 65+ candidates are marked insufficient rather than
+   silently evaluating a top-two subset.
+5. There is an available read-only propagation result for the currently
+   validated patient role. No other lexical role is implicitly inferred.
+
+This comparator carries the complete original Stage1 probability
+distribution through two hypothetical branches: propagation-off uses original
+scores, and propagation-on adds the bounded role signal to the same verb
+sense ID before renormalizing to one. The additive probability-space
+operation is a **hypothesis**, not a calibrated model, LIFG logit, or actual
+LIFG rerun. The report separately retains the **real final LIFG winner**,
+the baseline Stage1 decision, the projected decision, the raw gap and
+abstention flag. Default abstention margin: 0.02 (diagnostic-only, configurable).
+
+A separate \`aggregate/1\` reports total eligible cases, missing labels,
+skips, projected flips, abstention transitions and, only with independently
+supplied labels, right-to-wrong versus wrong-to-right changes.
+
+**No accuracy figure is inferred from Synbrella's own LIFG selection**, from
+the previously learned sense, or from the presence of a positive signal.
+A \`gold_id\` is accepted only when it exists in the current scored dictionary
+slate AND the caller explicitly supplies \`split: :holdout\` and
+\`label_source: :human_curated | :external_gold\`. This is a caller-asserted
+label origin, not machine authentication of the label.
+
+To inspect actual candidates and honestly determine whether a competitive
+evaluation is possible, run:
+
+\`\`\`sh
+cd ~/Symbrella
+git pull --ff-only origin development
+
+mix test apps/brain/test/brain/synapses/propagation_test.exs \
+  apps/core/test/core/brain/synaptic_propagation_test.exs \
+  apps/core/test/core/brain/synaptic_disambiguation_test.exs --trace
+
+mix run scripts/probe_synaptic_disambiguation.exs
+\`\`\`
+
+The real-dictionary probe attempts eight separate **training sentence /
+held-out sentence** pairs in its own isolated shadow store. It records
+eligible training sentences there, **never** the held-out turns. It reports
+actual score-map size, skip reason, comparison status, projected flips and
+full summary. If it finds no complete 2+-verb-sense slate, it prints
+\`INSUFFICIENT_COMPETITIVE_EVIDENCE\` and makes **no positive claim**.
+Its default output is unlabeled. An unlabelled flip is not progress.
+
+For independent manual gold review, BEFORE looking at projected winners,
+optionally create a local, git-ignored JSONL file at
+\`tmp/eval/synaptic_disambiguation_gold.jsonl\`. Example shape
+(**the following ID is a placeholder, not a gold annotation**):
+
+\`\`\`json
+{"example":1,"gold_id":"REPLACE_WITH_ACTUAL_DICTIONARY_VERB_SENSE_ID","source":"human_curated","basis":"Explicit dictionary sense definition checked independently"}
+\`\`\`
+
+The file is strictly validated and errors on malformed/duplicate entries.
+A label is accepted only for a complete competitive slate containing
+that exact sense ID. Human-curated labels are NOT automatically verified;
+reviewed sense definitions, independent adjudicators, truly unseen events,
+time-based data splits and sufficient sample size remain future work.
+
+No production LIFG scores, BrainCells, durable receipts or predictions are
+modified by this evaluation. Do **not** enable live learned priors based only
+on a single positive synthetic fixture or an unlabeled projected flip.
