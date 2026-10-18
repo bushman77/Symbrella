@@ -13,6 +13,8 @@ defmodule Brain.Synapses.Shadow do
 
   This subsystem never stimulates cells, influences LIFG, trains Axon, or
   asserts that a selected dictionary sense or user claim is objectively true.
+  Review calls require a trusted application caller; a reviewer string is
+  attribution, NOT an authentication mechanism. No chat review route exists.
   """
 
   use GenServer
@@ -199,7 +201,7 @@ defmodule Brain.Synapses.Shadow do
       Enum.map(ids, fn id ->
         edge = Map.get(state.edges, {id, noun, relation}, %{weight: 0.0, experiences: 0})
         %{id: id, shadow_support: edge.weight,
-          independent_contexts: edge.experiences}
+          distinct_report_contexts: edge.experiences}
       end)
 
     {:reply, %{
