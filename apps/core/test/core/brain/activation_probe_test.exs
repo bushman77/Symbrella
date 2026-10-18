@@ -127,6 +127,12 @@ defmodule Core.Brain.ActivationProbeTest do
     assert summary.projected_event_count == 0
   end
 
+  test "hippocampal diagnostic opt-out never encodes an episode" do
+    si = %{atl_slate: %{winners: [%{id: @river}]}, sentence: "bank"}
+
+    assert Core.Brain.Hippocampus.encode(si, hippocampus_encode?: false) == si
+  end
+
   test "built-in scenarios include artist and bank-context switch" do
     assert [
       {"artist", "The artist draws a picture.", "what did the artist draw?"},
