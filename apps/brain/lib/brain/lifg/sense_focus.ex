@@ -81,6 +81,31 @@ defmodule Brain.LIFG.SenseFocus do
                :attested_simple_past_predicate], &(&1 in evidence))
   end
 
+  defp supported_role?(%{status: :supported, pos: "noun",
+                          role: :subject_head,
+                          basis: :determined_subject_before_attested_present_predicate,
+                          evidence: evidence}) when is_list(evidence) do
+    Enum.all?([:complete_finite_present_svo, :dictionary_pos_witness,
+               :attested_finite_present_verb], &(&1 in evidence))
+  end
+
+  defp supported_role?(%{status: :supported, pos: "noun",
+                          role: :subject_head,
+                          basis: :determined_subject_in_wh_aux_question,
+                          evidence: evidence}) when is_list(evidence) do
+    Enum.all?([:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation], &(&1 in evidence))
+  end
+
+  defp supported_role?(%{status: :supported, pos: "verb",
+                          role: :predicate,
+                          basis: :predicate_in_wh_aux_question,
+                          evidence: evidence}) when is_list(evidence) do
+    Enum.all?([:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation,
+               :attested_verb_alternative], &(&1 in evidence))
+  end
+
   defp supported_role?(%{status: :supported, pos: "adjective",
                          role: :modifier,
                          basis: :complete_determiner_adjective_noun,
