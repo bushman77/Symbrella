@@ -92,9 +92,12 @@ defmodule Brain.LIFG.GrammarEvidence do
       when is_map(scores) and is_map(roles) and is_integer(index) and index >= 0 do
     case Map.get(roles, index) do
       %{status: :supported, pos: pos, basis: basis, evidence: evidence}
-      when pos in ["noun", "adjective"] and
+      when pos in ["noun", "adjective", "verb"] and
            basis in [:complete_determiner_adjective_noun,
-                     :determined_subject_before_attested_past_predicate] and
+                     :determined_subject_before_attested_past_predicate,
+                     :determined_subject_before_attested_present_predicate,
+                     :determined_subject_in_wh_aux_question,
+                     :predicate_in_wh_aux_question] and
            is_list(evidence) ->
         expected =
           case basis do
@@ -105,6 +108,19 @@ defmodule Brain.LIFG.GrammarEvidence do
             :determined_subject_before_attested_past_predicate ->
               [:bounded_determiner_surface, :dictionary_pos_witness,
                :attested_simple_past_predicate]
+
+            :determined_subject_before_attested_present_predicate ->
+              [:complete_finite_present_svo, :dictionary_pos_witness,
+               :attested_finite_present_verb]
+
+            :determined_subject_in_wh_aux_question ->
+              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation]
+
+            :predicate_in_wh_aux_question ->
+              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation,
+               :attested_verb_alternative]
           end
 
         if Enum.all?(expected, &(&1 in evidence)) do
