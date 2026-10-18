@@ -789,3 +789,60 @@ selected noun glosses lack sufficient independent evidence.
 This wiring is *not* a verified improvement in comprehension or
 answer accuracy. Changing actual sense selection remains dependent
 on independent holdout gold-sense evaluation.
+
+
+## Live-chat observation: plain SVO is not a memory request (v10)
+
+The first live user test said "The baker cooks a meal." The semantic
+shadow correctly appeared in Explain but returned
+`:no_grounded_role_gloss` for actor/patient. Separately,
+`Core.Response.Memory.acknowledge_projected/5` had automatically
+replaced the reply with "I’ve recorded what you told me" merely
+because an ordinary statement produced a valid episodic candidate.
+This incorrectly confounded a stored, attributed observation with
+an explicit request for a memory acknowledgment.
+
+Corrections:
+
+- The response-memory acknowledgment now requires **both** a
+  `:memory_write` intent AND an overt `remember` instruction. A
+  normal SVO declarative is not such an instruction. Existing
+  `SideEffects.record_turn/4` still independently handles qualified
+  user-report experiences during ordinary conversation; the shadow
+  semantic validator still does not affect the response.
+- `Core.Intent.StructuralStatement.attach/1` runs just after
+  `SentenceMeaning.attach/1`. It upgrades **only** `:unknown`
+  to `:statement` when the already-built complete finite-present
+  participant assertion is revalidated by independently rebuilding
+  SentenceMeaning and checking EpisodicProjection. It never invents
+  an exact verb sense, touches LIFG winners, or calls memory writes.
+  Questions, commands, nonuser sources and forged meaning frames
+  cannot use this reconciliation.
+- `RoleSemanticContext` now reports *why* a selected noun was
+  rejected: missing probability slate, incomplete normalization,
+  low same-surface noun-sense margin, missing/mismatched selected
+  BrainCell definition, etc. Admission thresholds remain unchanged.
+  Explain's Semantic sense section prints the typed reason for
+  each noun role rather than a generic ungrounded status.
+
+To inspect the exact production noun score distributions, run:
+
+```sh
+mix run scripts/probe_live_noun_admission.exs
+```
+
+This read-only probe prints the selected actor and patient noun IDs,
+matching active-cell definitions, complete slate sum, same-surface
+noun competitors and typed admission reason. It does not promote
+the noun sense or modify synapses/LIFG.
+
+Regression commands:
+
+```sh
+mix test apps/core/test/core/intent/structural_statement_test.exs \
+  apps/core/test/core/response/projected_memory_reply_policy_test.exs \
+  apps/core/test/core/brain/role_semantic_context_test.exs \
+  apps/core/test/core/pipeline_contract_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+```
