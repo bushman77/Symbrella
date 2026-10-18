@@ -429,6 +429,81 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert html =~ "long_definition_"
   end
 
+  test "Explain renders only genuine live semantic-sense shadow trace and preserves caveats" do
+    event = %{
+      stage: :semantic_sense_shadow,
+      decision: :provisional_hypothesis,
+      reason: :provisional_context_hypothesis,
+      meta: %{
+        mode: :shadow_only, status: :provisional_hypothesis,
+        original_surface_id: "draws|verb|1",
+        attested_base_lexeme: "draw", sense_count: 138,
+        baseline_id: "draw|verb|129", proposed_id: "draw|verb|129",
+        baseline_gap: 0.29, evaluated_gap: 0.29, excluded_count: 40,
+        role_expansion_enabled?: true, role_expansion_status: :grounded,
+        role_sources: [
+          %{role: :patient, status: :grounded_one_hop,
+            noun_sense_id: "picture|noun|1", terms: ["image", "representation"]}
+        ],
+        top_candidates: [
+          %{id: "draw|verb|129", lexical_score: 0.29,
+            patient_support: 0.105, actor_support: 0.0,
+            combined_diagnostic_score: 0.395}
+        ],
+        exclusions: [
+          %{id: "draw|verb|103", exclusions: [
+            %{kind: :missing_restriction_witness, detail: :cricket_bowling}
+          ]}
+        ],
+        sense_verified?: false, applied_to_lifg?: false,
+        response_changed?: false, synaptic_weight_transferred?: false
+      }
+    }
+
+    source = si(:power)
+    with_trace = Map.put(source, :trace, [event])
+    evidence = ExplainEvidence.from_si(with_trace)
+    assert evidence.semantic_sense_shadow.metadata.proposed_id == "draw|verb|129"
+    assert evidence.semantic_sense_shadow.metadata.mode == :shadow_only
+
+    rendered = payload(with_trace)
+    section = section(rendered, :semantic_sense_shadow)
+    assert section.title == "Semantic sense (shadow only)"
+    assert section.hint =~ "NOT verified meanings"
+    assert Enum.any?(section.items, fn item ->
+      item.label == "Read-only assessment" and
+        item.body =~ "shadow semantic hypothesis: draw|verb|129" and
+        item.body =~ "applied to LIFG?: false" and
+        item.body =~ "response changed?: false"
+    end)
+    assert Enum.any?(section.items, fn item ->
+      item.label == "Selected noun role: :patient" and
+        item.body =~ "picture|noun|1"
+    end)
+    assert Enum.any?(section.items, fn item ->
+      item.label == "Excluded draw|verb|103" and
+        item.body =~ "cricket_bowling"
+    end)
+
+    # A cached Explain with its original SI is upgraded without duplication.
+    before = %{title: "Explain", sections: []}
+    upgraded = Modal.enrich_saved_payload(before, with_trace)
+    assert section(upgraded, :semantic_sense_shadow) != nil
+    assert Modal.enrich_saved_payload(upgraded, with_trace) == upgraded
+  end
+
+  test "Explain cannot invent a shadow semantic sense from word winners alone" do
+    source = si(:power)
+    assert ExplainEvidence.from_si(source).semantic_sense_shadow == nil
+    assert section(payload(source), :semantic_sense_shadow) == nil
+
+    forged = Map.put(source, :trace, [%{
+      stage: :unrelated, meta: %{mode: :shadow_only,
+        proposed_id: "fake|verb|999"}
+    }])
+    assert section(payload(forged), :semantic_sense_shadow) == nil
+  end
+
   test "memory and ordinary replies do not fabricate runtime semantic sections" do
     assert ExplainEvidence.from_si(nil) == %{}
     assert ExplainEvidence.from_si(%{text: "Your name is... "}) == %{}
