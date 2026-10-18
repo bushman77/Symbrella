@@ -258,7 +258,7 @@ defmodule Core.Brain.Activation do
 
     # A probability gap by itself is not independent evidence: an earlier
     # activation prior can create such a gap and repeatedly reinforce itself.
-    # Only the context-derived SenseControl adjustment can license this tier.
+    # Only a context-derived SemanticControl adjustment can license this tier.
     independent_context? =
       Map.get(control, :applied?) == true and
         Enum.any?(list_or_empty(Map.get(control, :adjustments)), fn
@@ -267,19 +267,19 @@ defmodule Core.Brain.Activation do
         end)
 
     if independent_context? do
-    case is_map(scores) && Map.get(scores, id) do
-      p when is_number(p) and p > 0 and map_size(scores) > 1 ->
-        other =
-          scores
-          |> Enum.reject(fn {other_id, _} -> other_id == id end)
-          |> Enum.map(fn {_, value} -> if is_number(value), do: value, else: 0.0 end)
-          |> Enum.max(fn -> 0.0 end)
+      case is_map(scores) && Map.get(scores, id) do
+        p when is_number(p) and p > 0 and map_size(scores) > 1 ->
+          other =
+            scores
+            |> Enum.reject(fn {other_id, _} -> other_id == id end)
+            |> Enum.map(fn {_, value} -> if is_number(value), do: value, else: 0.0 end)
+            |> Enum.max(fn -> 0.0 end)
 
-        p - other >= 0.001 and (p - other) / p >= 0.12
+          p - other >= 0.001 and (p - other) / p >= 0.12
 
-      _ ->
-        false
-    end
+        _ ->
+          false
+      end
     else
       false
     end
