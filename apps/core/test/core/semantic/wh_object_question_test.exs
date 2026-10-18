@@ -95,7 +95,7 @@ defmodule Core.Semantic.WhObjectQuestionTest do
   test "stale ATL role IDs cannot override actual lexical winners" do
     si = input()
 
-    slate =
+    altered_si =
       update_in(si.atl_slate.constituents, fn entries ->
         Enum.map(entries, fn
           %{id: :wh_aux_object_question, roles: roles} = question ->
@@ -106,7 +106,7 @@ defmodule Core.Semantic.WhObjectQuestionTest do
         end)
       end)
 
-    assert SentenceMeaning.build(%{si | atl_slate: slate}).status == :not_yet_interpreted
+    assert SentenceMeaning.build(altered_si).status == :not_yet_interpreted
   end
 
   test "missing grammar adjudication cannot manufacture resolved question meaning" do
