@@ -15,6 +15,7 @@ defmodule Core.Brain.MemoryFastPathContinuity do
   def options(session_id) when is_binary(session_id) do
     [
       mode: :prod,
+      experience_origin: :user_turn,
       session_id: session_id,
       response: :off,
       episodes: false,
