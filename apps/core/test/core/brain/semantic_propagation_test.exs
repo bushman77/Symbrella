@@ -66,6 +66,51 @@ defmodule Core.Brain.SemanticPropagationTest do
     assert Activation.feedback_plan(si, semantic_propagation?: false) != plan
   end
 
+  test "overlapping short SVO hypothesis does not block a validated full event" do
+    si = assertion()
+    # The lexicon can see "a" as a noun, yielding a shorter SVO hypothesis
+    # alongside the complete five-token sentence. Only the latter can supply
+    # grammatical role support or an attested lemma pulse.
+    short = %{
+      id: :finite_present_svo_candidate,
+      source: :core_syntax,
+      span: {0, 3},
+      evidence: @svo_evidence,
+      roles: %{subject_determiner: 0, subject_head: 1,
+        predicate: 2, object_head: 3}
+    }
+
+    with_overlap = %{si | sentence_signatures: [short | si.sentence_signatures]}
+
+    assert Core.Semantic.SVOEvent.complete_signature(with_overlap).span == {0, 4}
+    assert SemanticPropagation.lemma_pulse(with_overlap) == %{
+      lemma: "draw",
+      source_id: "draws|verb|1",
+      delta: 0.03,
+      evidence: :attested_inflected_predicate,
+      scope: :verb_lemma_not_sense
+    }
+
+    assert Enum.map(SemanticPropagation.role_plan(with_overlap), & &1.id) ==
+             ["artist|noun|1", "draws|verb|1", "picture|noun|1"]
+    assert Map.get(with_overlap, :comprehension) == nil
+  end
+
+  test "a partial-only SVO hypothesis cannot create a lemma pulse" do
+    si = assertion()
+    short = %{
+      id: :finite_present_svo_candidate, source: :core_syntax,
+      span: {0, 3}, evidence: @svo_evidence,
+      roles: %{subject_determiner: 0, subject_head: 1,
+        predicate: 2, object_head: 3}
+    }
+    partial = %{si | sentence_signatures: [short]}
+
+    assert Core.Semantic.SVOEvent.complete_signature(partial) == nil
+    assert SemanticPropagation.lemma_pulse(partial) == nil
+    assert SemanticPropagation.role_plan(partial) == []
+  end
+
   test "dictionary morphology is required; an unsupported gloss cannot bridge" do
     si = assertion()
     no_tags = %{si | active_cells:
