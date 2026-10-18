@@ -128,6 +128,70 @@ defmodule Core.Tools.EvidenceResolverTest do
     refute answer =~ "10 miles"
   end
 
+  test "actual repeated-from phrasing is routed to coordinates, not an unsourced 30 km assertion" do
+    alias Core.Semantic.EventFrames
+    alias Core.Tools.WebRetrieval.RequestRouter
+
+    question = "how far from maple ridge is from kamloops"
+    frame = EventFrames.location_question(question)
+
+    assert frame.relation == :proximity
+    assert frame.subject == "maple ridge"
+    assert frame.target == "kamloops"
+    assert frame.grounding_status == :unverified
+
+    ctx = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.82, symbolic_frame: frame},
+      symbolic_frame: %{event: frame}
+    }
+
+    assert %{relation: :proximity, request_type: :geographic_proximity} =
+      RequestRouter.route(ctx)
+
+    # The 38.5 km stub is synthetic and intentionally not the true
+    # Maple Ridge/Kamloops distance; this tests proof enforcement only.
+    evidence = WebRetrieval.enrich(ctx,
+      enabled?: true,
+      provider: OffTopicWikipedia,
+      coordinate_provider: SuccessfulCoords
+    )
+    assert evidence.web_evidence.resolution == :source_supported
+    assert evidence.web_evidence.support.subject == "maple ridge"
+    assert evidence.web_evidence.support.target == "kamloops"
+
+    {:ok, corrected, review} =
+      ReflectionLoop.review(question,
+        "According to the information provided, Kamloops is approximately 30 kilometers (19 miles) from Maple Ridge. Wikipedia",
+        evidence)
+
+    assert review.status == :repair
+    assert :geographic_claim_unverified in review.issues
+    assert corrected =~ "38.5 km"
+    assert corrected =~ "straight line"
+    refute corrected =~ "30 kilometers"
+    refute corrected =~ "19 miles"
+
+    no_coords = WebRetrieval.enrich(ctx,
+      enabled?: true,
+      provider: OffTopicWikipedia,
+      coordinate_provider: FailedCoords,
+      max_attempts: 2
+    )
+    assert no_coords.web_evidence.support == nil
+
+    {:ok, rejected, refusal_review} =
+      ReflectionLoop.review(question,
+        "Kamloops is approximately 30 kilometers (19 miles) from Maple Ridge. Wikipedia",
+        no_coords)
+
+    assert refusal_review.status == :repair
+    assert :geographic_claim_unverified in refusal_review.issues
+    assert rejected =~ "don't have verified distance"
+    refute rejected =~ "30 kilometers"
+    refute rejected =~ "19 miles"
+  end
+
   test "an unverified refusal is upgraded when evidence is source-supported" do
     context = WebRetrieval.enrich(context(:proximity),
       enabled?: true, provider: OffTopicWikipedia,
