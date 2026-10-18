@@ -864,6 +864,11 @@ defmodule Core.Response.ReflectionLoop do
       map_get(frame, :relation) == :population ->
         "You're asking about #{subject}'s population, but I don't have a verified population figure available here."
 
+      map_get(frame, :relation) == :proximity and is_binary(target) and
+          Regex.match?(~r/^\s*how\s+far\b/iu, user_text) ->
+        "You're asking for the distance between #{subject} and #{target}, " <>
+          "but I don't have verified distance information for those places."
+
       map_get(frame, :relation) == :proximity and is_binary(target) ->
         "You're asking whether #{subject} is close to #{target}, but I don't have verified distance information to confirm that."
 
