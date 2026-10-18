@@ -16,6 +16,7 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
     |> verified_section(field(evidence, :verified_phrasal_meanings))
     |> semantic_section(field(evidence, :semantic_winners))
     |> comprehension_section(field(evidence, :comprehension))
+    |> semantic_sense_shadow_section(field(evidence, :semantic_sense_shadow))
     |> grammar_section(
       field(evidence, :verb_particle_signatures),
       field(evidence, :atl_verb_particles)
@@ -161,6 +162,87 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp comprehension_section(sections, _), do: sections
+
+  defp semantic_sense_shadow_section(sections, %{metadata: meta} = evidence)
+       when is_map(meta) do
+    status = field(meta, :status)
+    reason = field(evidence, :reason)
+    sources = list(field(meta, :role_sources))
+    ranked = list(field(meta, :top_candidates))
+    exclusions = list(field(meta, :exclusions))
+
+    outcome =
+      []
+      |> value("evaluation status", status)
+      |> value("reason", reason)
+      |> value("original surface sense", field(meta, :original_surface_id))
+      |> value("attested base lexeme", field(meta, :attested_base_lexeme))
+      |> value("dictionary senses considered", field(meta, :sense_count))
+      |> value("baseline lexical hypothesis", field(meta, :baseline_id))
+      |> value("shadow semantic hypothesis", field(meta, :proposed_id))
+      |> value("original lexical margin", field(meta, :baseline_gap))
+      |> value("expanded margin", field(meta, :evaluated_gap))
+      |> value("role expansion enabled?", field(meta, :role_expansion_enabled?))
+      |> value("role expansion status", field(meta, :role_expansion_status))
+      |> value("excluded candidates (total)", field(meta, :excluded_count))
+      |> value("meaning verified?", field(meta, :sense_verified?))
+      |> value("applied to LIFG?", field(meta, :applied_to_lifg?))
+      |> value("response changed?", field(meta, :response_changed?))
+      |> value("synaptic weight transferred?", field(meta, :synaptic_weight_transferred?))
+
+    role_items =
+      Enum.map(sources, fn ctx ->
+        %{
+          label: "Selected noun role: " <> show(field(ctx, :role)),
+          body:
+            []
+            |> value("status", field(ctx, :status))
+            |> value("selected noun sense ID", field(ctx, :noun_sense_id))
+            |> value("LIFG selected probability", field(ctx, :selected_probability))
+            |> value("one-hop dictionary terms", field(ctx, :terms))
+            |> body()
+        }
+      end)
+
+    candidate_items =
+      Enum.map(ranked, fn c ->
+        %{
+          label: "Candidate " <> show(field(c, :id)),
+          body:
+            []
+            |> value("direct lexical fit", field(c, :lexical_score))
+            |> value("patient support", field(c, :patient_support))
+            |> value("actor support", field(c, :actor_support))
+            |> value("combined diagnostic", field(c, :combined_diagnostic_score))
+            |> value("grammar", field(c, :grammar))
+            |> value("one-hop evidence", field(c, :one_hop_witnesses))
+            |> body()
+        }
+      end)
+
+    excluded_items =
+      Enum.map(exclusions, fn c ->
+        %{
+          label: "Excluded " <> show(field(c, :id)),
+          body:
+            []
+            |> value("grammatical gate", field(c, :grammar))
+            |> value("missing restrictions", field(c, :missing_restrictions))
+            |> value("reasons", field(c, :exclusions))
+            |> body()
+        }
+      end)
+
+    items = [%{label: "Read-only assessment", body: body(outcome)}] ++
+      role_items ++ candidate_items ++ excluded_items
+
+    append(sections, :semantic_sense_shadow, "Semantic sense (shadow only)",
+      show(status),
+      "Real post-LIFG/ATL dictionary evidence. These are provisional or abstained hypotheses, NOT verified meanings. No live LIFG selection, synaptic update or response change.",
+      items)
+  end
+
+  defp semantic_sense_shadow_section(sections, _), do: sections
 
   defp grammar_section(sections, signatures, constituents) do
     signatures = list(signatures)
