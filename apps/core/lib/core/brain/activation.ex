@@ -49,10 +49,15 @@ defmodule Core.Brain.Activation do
           _ -> map_or_empty(Map.get(si, :neuron_activation))
         end
 
-      semantic = case Keyword.fetch(opts, :semantic_probe_snapshot) do
-        {:ok, %{} = snapshot} -> snapshot
-        _ -> map_or_empty(Map.get(si, :semantic_pulses))
-      end
+      semantic =
+        if Keyword.get(opts, :semantic_propagation?, true) == false do
+          %{}
+        else
+          case Keyword.fetch(opts, :semantic_probe_snapshot) do
+            {:ok, %{} = snapshot} -> snapshot
+            _ -> map_or_empty(Map.get(si, :semantic_pulses))
+          end
+        end
       si = si |> Map.put(:neuron_activation, prior) |> Map.put(:semantic_pulses, semantic)
       rows = list_or_empty(Map.get(si, :active_cells))
       updated = Enum.map(rows, &put_runtime_prior(&1, prior, semantic))
