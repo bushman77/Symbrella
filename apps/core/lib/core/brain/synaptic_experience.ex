@@ -16,6 +16,7 @@ defmodule Core.Brain.SynapticExperience do
   @spec extract(map()) :: {:ok, map()} | :ineligible
   def extract(%{} = si) do
     with source when source in [:user, :prod] <- Map.get(si, :source),
+         true <- source == :user or Map.get(si, :experience_origin) == :user_turn,
          %{status: :structurally_interpreted, kind: :participant_assertion,
            event_type: :action, source_frame: :finite_present_svo} = meaning <-
            Map.get(si, :sentence_meaning),
