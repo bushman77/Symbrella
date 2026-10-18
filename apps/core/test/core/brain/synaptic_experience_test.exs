@@ -81,6 +81,10 @@ defmodule Core.Brain.SynapticExperienceTest do
              Shadow.edge("draws|verb|1", "picture|noun|1", :patient)
     assert a > 0 and a <= 0.08
     assert count >= 1
+    # Shadow bookkeeping must not mutate the comprehension or lexical slates.
+    assert out.active_cells == si.active_cells
+    assert out.lifg_choices == si.lifg_choices
+    assert out.semantic_choices == si.semantic_choices
   end
 
   test "replay in another session cannot reinforce the same observation" do
@@ -126,6 +130,17 @@ defmodule Core.Brain.SynapticExperienceTest do
     assert SynapticExperience.extract(%{si |
       episodic_candidates: [%{event | value: "a fake value"}]
     }) == :ineligible
+  end
+
+  test "unmarked production calls and assistant-derived input never learn" do
+    si = experience("illustrator", "poster")
+    production = %{si | source: :prod}
+    assert SynapticExperience.extract(production) == :ineligible
+    assert {:ok, _observation} =
+             SynapticExperience.extract(Map.put(production, :experience_origin, :user_turn))
+    assert SynapticExperience.extract(Map.put(production, :experience_origin, :model_output)) ==
+             :ineligible
+    assert SynapticExperience.extract(%{si | source: :assistant}) == :ineligible
   end
 
   test "turning off shadow collection has no synaptic effect" do
