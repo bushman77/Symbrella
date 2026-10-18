@@ -16,7 +16,7 @@ defmodule Core.Brain.ActivationProbe do
   Core.resolve_input runs, so scores are observational, not causal proof.
   """
 
-  alias Core.Brain.Activation
+  alias Core.Brain.{Activation, SemanticPropagation}
   alias Core.Semantic.{ActionQuestions, EpisodicProjection}
 
   @default_gap_ms 1_000
@@ -62,17 +62,26 @@ defmodule Core.Brain.ActivationProbe do
     # priors would also be empty; only its planned activity is carried forward.
     first_si = Core.resolve_input(first, common_opts ++ [neuron_activation?: false])
     prior = carryover(first_si, gap_ms)
+    exact_prior = carryover(first_si, gap_ms, semantic_propagation?: false)
+    lemma_prior = semantic_carryover(first_si, gap_ms)
 
     baseline_si =
       Core.resolve_input(second, common_opts ++ [neuron_activation?: false])
 
+    exact_si =
+      Core.resolve_input(second, common_opts ++ [
+        neuron_activation?: true, neuron_probe_snapshot: exact_prior,
+        semantic_probe_snapshot: %{}, semantic_propagation?: false
+      ])
+
     neural_si =
-      Core.resolve_input(
-        second,
-        common_opts ++ [neuron_activation?: true, neuron_probe_snapshot: prior]
-      )
+      Core.resolve_input(second, common_opts ++ [
+        neuron_activation?: true, neuron_probe_snapshot: prior,
+        semantic_probe_snapshot: lemma_prior
+      ])
 
     baseline = summarize(baseline_si)
+    exact = summarize(exact_si)
     neural = summarize(neural_si)
 
     %{
@@ -81,11 +90,16 @@ defmodule Core.Brain.ActivationProbe do
       second: second,
       gap_ms: gap_ms,
       synthetic_prior_count: map_size(prior),
+      semantic_lemma_prior: lemma_prior,
+      semantic_pulse_source: SemanticPropagation.lemma_pulse(first_si),
       synthetic_prior_top: top_prior(prior),
       first_turn: summarize(first_si),
       read_only_event_answer: event_answer(first_si, second),
       baseline: baseline,
+      exact_only: exact,
       neural: neural,
+      exact_only_differences: compare(baseline, exact),
+      incremental_semantic_differences: compare(exact, neural),
       differences: compare(baseline, neural),
       limits: [
         :planned_carryover_not_live_cell_processes,
@@ -105,7 +119,10 @@ defmodule Core.Brain.ActivationProbe do
   snapshot, and makes no calls that stimulate BrainCells.
   """
   @spec carryover(map(), non_neg_integer()) :: map()
-  def carryover(%{} = first_si, gap_ms) when is_integer(gap_ms) and gap_ms >= 0 do
+  def carryover(first_si, gap_ms, opts \\ [])
+
+  def carryover(%{} = first_si, gap_ms, opts)
+      when is_integer(gap_ms) and gap_ms >= 0 and is_list(opts) do
     recruited =
       first_si
       |> Activation.recruitment_ids()
@@ -115,7 +132,7 @@ defmodule Core.Brain.ActivationProbe do
 
     reports =
       first_si
-      |> Activation.feedback_plan()
+      |> Activation.feedback_plan(opts)
       |> Enum.reduce(recruited, fn %{id: id, delta: delta}, acc ->
         Map.update(acc, id, delta, &(&1 + delta))
       end)
@@ -127,7 +144,20 @@ defmodule Core.Brain.ActivationProbe do
     |> Map.new()
   end
 
-  def carryover(_, _), do: %{}
+  def carryover(_, _, _), do: %{}
+
+  @doc "A synthetic, decayed lemma-level pulse is distinct from a BrainCell ID."
+  @spec semantic_carryover(map(), non_neg_integer()) :: map()
+  def semantic_carryover(si, gap_ms) when is_map(si) and is_integer(gap_ms) and gap_ms >= 0 do
+    case SemanticPropagation.lemma_pulse(si) do
+      %{lemma: lemma, delta: delta} ->
+        value = Brain.Cell.Activation.decay(delta, 0, gap_ms)
+        if value > 0, do: %{lemma => value}, else: %{}
+      _ -> %{}
+    end
+  end
+
+  def semantic_carryover(_, _), do: %{}
 
   @doc "Compact outcome report without interpreting a neural ranking as truth."
   @spec summarize(map()) :: map()
@@ -156,6 +186,11 @@ defmodule Core.Brain.ActivationProbe do
       active_prior_candidates:
         si |> Map.get(:active_cells, []) |> List.wrap()
         |> Enum.count(&(get(&1, :runtime_primed?) == true)),
+      semantic_prior_candidates:
+        si |> Map.get(:active_cells, []) |> List.wrap()
+        |> Enum.count(&(is_number(get(&1, :prior_semantic_activation)) and
+          get(&1, :prior_semantic_activation) > 0)),
+      structural_role_plan: SemanticPropagation.role_plan(si),
       feedback_plan: Activation.feedback_plan(si)
     }
   end
