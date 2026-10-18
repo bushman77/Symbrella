@@ -995,3 +995,92 @@ mix run scripts/probe_role_semantic_context.exs
 The new audit never changes sense scores, episodic assertions,
 hippocampal memories, LIFG/ATL, synapses, or response text. It is
 separate from the existing fail-closed unanimous-gloss validator.
+
+
+## Sentence-conditioned semantic cohorts — shadow-only v1
+
+The first production A/B after unanimous noun-gloss expansion was
+**8/8 evaluated**, **1** case with actual grounded patient-role
+consensus (`tree|noun|1/2` → `plant`), and **zero changes** to
+specific verb-sense hypotheses. Both `plant|verb|1` and
+`plant|verb|2` received the same patient witness and score,
+so exact-sense selection correctly abstained.
+
+`Core.Brain.SemanticCohort.evaluate/2` now groups eligible **base-verb
+dictionary senses** by *shared sentence-conditioned lexical anchors*
+without forcing an exact dictionary sense winner. The evaluator uses
+the full eligible slate from the existing validated projection:
+
+- `SemanticSenseValidator` only exposes full `:cohort_evidence_rows`
+  when explicitly called with `cohort_evidence?: true`. Normal
+  validator clients are unchanged. The rows have already passed the
+  morphology, full-SVO, dictionary inventory, grammatical valency and
+  original-sentence specialist-domain gates.
+- For every eligible sense, its genuine dictionary definition must
+  independently contain the lexical term, and its **own**
+  ContextFit/direct sentence match or **bounded already-admitted
+  actor/patient role witness** must contain the same term.
+- At least two senses sharing the **same evidence origin and term**
+  form a tentative cohort (for instance,
+  `{:patient_gloss, "plant"}`). Multiple cohorts may overlap.
+  **Similarity is NOT transitive:** a group sharing `plant` and a
+  group sharing `soil` are not automatically one larger group.
+- Per group we report the IDs of its member senses, terms all group
+  definitions share, definition terms that distinguish the members,
+  their unchanged direct/actor/patient diagnostic scores and
+  the **minimum** member support. This minimum is an evidence floor,
+  not a sum or calibrated probability. Neither the cohort nor any
+  member is labeled independently correct.
+- If no independently witnessed shared anchor exists, report
+  `:no_supported_cohort`. If the original user SVO and complete
+  trusted eligible dictionary slate are unavailable or malformed,
+  abstain with `:skipped`.
+- Bounded output: maximum 256 eligible dictionary senses, 32 observed
+  anchors considered, 8 cohorts retained, 12 detailed members per
+  cohort. Group labels are descriptive dictionary-token anchors,
+  **not** newly asserted ontology categories.
+
+Live `Core.Brain.SemanticSenseShadow` requests the optional complete
+cohort evidence **during its existing single validator evaluation**,
+then attaches a bounded `:semantic_cohort` subreport to the real
+`:semantic_sense_shadow` Trace event. This avoids a second
+dictionary lookup. `ExplainEvidence` and `EvidenceSections`
+show a separate **Semantic cohorts (shadow only)** section only
+when that actual Trace subreport exists, including saved chat history.
+Unprocessed/older messages cannot acquire made-up cohort results.
+
+Controls: `semantic_sense_shadow?: false` disables the entire
+shadow validator (and cohorts); `semantic_cohort_shadow?: false`
+disables only cohort evaluation and keeps the existing scalar sense
+diagnostic. Both default to enabled for normal eligible live chat.
+A cohort is **never** allowed to update a sense winner, ATL,
+BrainCells, working memory or hippocampal events, synaptic weights,
+the action selector or the assistant's reply. This is still
+*weak lexical evidence* against a structured SVO, not a general
+semantic entailment model or a completed verb argument ontology.
+
+### Test and inspect genuine dictionary examples
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+
+mix test apps/core/test/core/brain/semantic_cohort_test.exs \
+  apps/core/test/core/brain/semantic_sense_validator_test.exs \
+  apps/core/test/core/brain/semantic_sense_shadow_test.exs \
+  apps/core/test/core/pipeline_contract_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+
+mix run scripts/probe_semantic_cohorts.exs
+```
+
+Use live chat "The gardener plants a tree." and inspect **Explain**
+for the existing per-sense abstention (if still ambiguous) followed by
+the new **Semantic cohorts (shadow only)** section. A cohort may show
+shared patient evidence while no individual sense is chosen.
+
+Do not promote this into authoritative comprehension until an
+independently adjudicated holdout set demonstrates improved behavior
+without harmful sense conflation, invalid specialty readings or
+misleading evidence attribution.
