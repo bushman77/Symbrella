@@ -41,12 +41,13 @@ defmodule Core.Brain.SynapticDisambiguation do
          %{candidates: source_candidates, status: :complete} <-
            complete_probabilities(si, index, scores),
          true <- count_verb_senses(source_candidates) >= @min_verb_candidates,
-         :ok <- valid_gold(opts, source_candidates) do
+         :ok <- valid_gold(opts, source_candidates),
+         true <- valid_margin?(Keyword.get(opts, :abstain_margin, @abstain_margin)) do
       supports = Map.new(signal_rows, fn row -> {row.id, row.shadow_signal} end)
       before = ranked(source_candidates, %{})
       after_signal = ranked(source_candidates, supports)
       gold = Keyword.get(opts, :gold_id)
-      abstain_margin = @abstain_margin
+      abstain_margin = Keyword.get(opts, :abstain_margin, @abstain_margin)
 
       baseline_choice = decision(before, abstain_margin)
       projected_choice = decision(after_signal, abstain_margin)
@@ -60,6 +61,7 @@ defmodule Core.Brain.SynapticDisambiguation do
         predicate_index: index,
         selected_lifg_id: Map.get(choice, :id),
         probability_kind: :per_token_post_softmax,
+        abstain_margin: abstain_margin,
         adjustment_kind: :hypothetical_additive_probability_not_calibrated,
         candidate_count: length(source_candidates),
         verb_sense_count: count_verb_senses(source_candidates),
@@ -105,6 +107,8 @@ defmodule Core.Brain.SynapticDisambiguation do
       projected_decision_changes: Enum.count(eligible, & &1.changed_decision?),
       wrong_to_right: Enum.count(labeled, &(&1.flip_class == :wrong_to_right)),
       right_to_wrong: Enum.count(labeled, &(&1.flip_class == :right_to_wrong)),
+      abstention_to_right: Enum.count(labeled, &(&1.flip_class == :abstention_to_right)),
+      right_to_abstention: Enum.count(labeled, &(&1.flip_class == :right_to_abstention)),
       baseline_correct: Enum.count(labeled, & &1.baseline.correct?),
       counterfactual_correct: Enum.count(labeled, & &1.counterfactual.correct?),
       baseline_abstentions: Enum.count(labeled, &(&1.baseline.decision == :abstain)),
@@ -232,14 +236,20 @@ defmodule Core.Brain.SynapticDisambiguation do
     }
   end
 
+  defp valid_margin?(v),
+    do: is_number(v) and v >= 0 and v <= 0.2
+
   defp flip_class(_, _, nil), do: :unlabeled
   defp flip_class(a, a, _gold), do: :unchanged
+
   defp flip_class(before, after, gold) do
     cond do
-      before == gold and after != gold -> :right_to_wrong
-      before != gold and after == gold -> :wrong_to_right
-      before == :abstain and after != :abstain -> :abstention_to_decision
-      before != :abstain and after == :abstain -> :decision_to_abstention
+      before == :abstain and after == gold -> :abstention_to_right
+      before == :abstain -> :abstention_to_wrong
+      before == gold and after == :abstain -> :right_to_abstention
+      after == :abstain -> :wrong_to_abstention
+      before == gold -> :right_to_wrong
+      after == gold -> :wrong_to_right
       true -> :different_wrong_decision
     end
   end
