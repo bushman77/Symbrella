@@ -87,13 +87,19 @@ defmodule Core.Brain.NounTieConceptAudit do
 
   defp valid_probs?(%{} = probs) do
     count = map_size(probs)
-    count > 0 and count <= @max_inventory and
+    valid_values? =
       Enum.all?(probs, fn {id, v} ->
         is_binary(id) and is_number(v) and v == v and
           v >= 0.0 and v <= 1.0
-      end) and
-      (sum = Enum.reduce(probs, 0.0, fn {_, p}, a -> a + p end);
-        sum >= 0.98 and sum <= 1.02)
+      end)
+
+    count > 0 and count <= @max_inventory and valid_values? and
+      normalized_sum?(probs)
+  end
+
+  defp normalized_sum?(probs) do
+    total = Enum.reduce(probs, 0.0, fn {_, p}, acc -> acc + p end)
+    total >= 0.98 and total <= 1.02
   end
 
   defp valid_probs?(_), do: false
