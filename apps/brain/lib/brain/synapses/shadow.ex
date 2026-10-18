@@ -319,27 +319,25 @@ defmodule Brain.Synapses.Shadow do
     :crypto.mac(:hmac, :sha256, state.secret, evidence)
 
   defp canonical_correction_edges(edges) when is_list(edges) do
-    case Enum.sort_by(edges, &inspect/1) do
-      _ when length(edges) != 2 ->
+    if length(edges) == 2 do
+      actor = Enum.find(edges, fn
+        {_, _, :actor} -> true
+        _ -> false
+      end)
+
+      patient = Enum.find(edges, fn
+        {_, _, :patient} -> true
+        _ -> false
+      end)
+
+      if valid_edge?(actor) and valid_edge?(patient) and
+           elem(actor, 0) == elem(patient, 0) do
+        {:ok, {actor, patient}}
+      else
         :error
-
-      _ ->
-        actor = Enum.find(edges, fn
-          {_, _, :actor} -> true
-          _ -> false
-        end)
-
-        patient = Enum.find(edges, fn
-          {_, _, :patient} -> true
-          _ -> false
-        end)
-
-        if valid_edge?(actor) and valid_edge?(patient) and
-             elem(actor, 0) == elem(patient, 0) and actor != patient do
-          {:ok, {actor, patient}}
-        else
-          :error
-        end
+      end
+    else
+      :error
     end
   end
 
