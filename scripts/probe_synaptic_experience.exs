@@ -33,12 +33,10 @@ second = Core.resolve_input(sentence, Keyword.put(opts, :session_id, opts[:sessi
 after_second = Shadow.snapshot()
 
 status = fn si ->
-  si.trace
-  |> Enum.find(fn
-    %{stage: :synaptic_experience} -> true
-    _ -> false
-  end)
-  |> case do
+  case Enum.find(si.trace, fn
+         %{stage: :synaptic_experience} -> true
+         _ -> false
+       end) do
     %{decision: decision} -> decision
     _ -> :missing
   end
