@@ -106,7 +106,9 @@ defmodule Core.Brain.ActivationComprehensionTest do
 
     # No artificial verification event is added by the activation stage.
     out = Activation.notify(Map.put(si, :trace, []), notify_brain?: false)
-    assert [{:activated, %{verified: 0, unresolved: 1}}] = out.trace
+    assert [{:activated, %{verified: 0, unresolved: 1, emitted?: false, planned: 1}},
+            %{stage: :neuron_feedback, decision: :suppressed,
+              meta: %{planned: 1, emitted?: false}}] = out.trace
   end
 
   test "distinguishable but unverified scores remain explicitly unverified" do
