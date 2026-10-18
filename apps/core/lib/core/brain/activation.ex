@@ -175,7 +175,11 @@ defmodule Core.Brain.Activation do
         %{id: id, delta: @verified_delta, evidence: :verified_lexical_construction}
       end)
 
-    (selected_plan ++ verified_plan)
+    role_plan =
+      if Keyword.get(opts, :semantic_propagation?, true) == false,
+        do: [], else: Core.Brain.SemanticPropagation.role_plan(si)
+
+    (selected_plan ++ verified_plan ++ role_plan)
     |> Enum.group_by(& &1.id)
     |> Enum.map(fn {_id, contributions} -> Enum.max_by(contributions, & &1.delta) end)
     |> Enum.sort_by(fn entry -> {-entry.delta, entry.id} end)
@@ -194,7 +198,17 @@ defmodule Core.Brain.Activation do
       Keyword.get(opts, :neuron_activation?, true) != false and
         Keyword.get(opts, :notify_brain?, true)
 
+    pulse =
+      if Keyword.get(opts, :semantic_propagation?, true) != false,
+        do: Core.Brain.SemanticPropagation.lemma_pulse(si), else: nil
+
     if emitted? do
+      if is_map(pulse) and is_binary(Map.get(si, :session_id)) and
+           is_pid(Process.whereis(Brain)) do
+        _ = Core.Brain.Runtime.apply_if_exported(Brain, :semantic_pulse,
+          [si.session_id, pulse.lemma, pulse.source_id, pulse.delta], :ok)
+      end
+
       plan
       |> Enum.group_by(& &1.delta)
       |> Enum.each(fn {delta, entries} ->
@@ -209,7 +223,8 @@ defmodule Core.Brain.Activation do
     counts = %{
       verified: Enum.count(plan, &(&1.evidence == :verified_lexical_construction)),
       differentiated: Enum.count(plan, &(&1.evidence == :ranked_not_verified)),
-      unresolved: Enum.count(plan, &(&1.evidence == :unresolved_sense_selection))
+      unresolved: Enum.count(plan, &(&1.evidence == :unresolved_sense_selection)),
+      structural: Enum.count(plan, &(&1.evidence == :structural_role_not_lexically_verified))
     }
 
     si
@@ -220,7 +235,10 @@ defmodule Core.Brain.Activation do
         planned: length(plan),
         emitted?: emitted?,
         # Bounded audit for Explain; does not claim these IDs were verified.
-        targets: Enum.take(plan, 8)
+        targets: Enum.take(plan, 8),
+        lemma_pulse: pulse,
+        lemma_pulse_emitted?: emitted? and is_map(pulse) and
+          is_binary(Map.get(si, :session_id))
       })
     )
     |> Map.update(:trace, [], fn trace ->
@@ -233,7 +251,8 @@ defmodule Core.Brain.Activation do
           shape: :selective_comprehension_feedback,
           verified: counts.verified,
           differentiated: counts.differentiated,
-          unresolved: counts.unresolved
+          unresolved: counts.unresolved,
+          structural: counts.structural
         }} | trace]
     end)
   end
