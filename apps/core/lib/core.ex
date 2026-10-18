@@ -187,6 +187,11 @@ defmodule Core do
     |> StateDump.capture(:episodic_projection)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    # Read-only semantic sense validation for every eligible live chat turn.
+    # Reuses exact LIFG/ATL roles and their selected noun glosses; publishes
+    # ONLY a bounded Explain trace, never a replacement semantic winner.
+    |> Core.Brain.SemanticSenseShadow.attach(opts)
+    |> StateDump.capture(:semantic_sense_shadow)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     |> Core.Brain.WM.Comprehension.store(opts)
