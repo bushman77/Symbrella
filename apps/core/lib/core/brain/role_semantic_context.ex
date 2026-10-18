@@ -130,6 +130,7 @@ defmodule Core.Brain.RoleSemanticContext do
     with [choice] <- Enum.filter(List.wrap(Map.get(si, :lifg_choices)),
            &(is_map(&1) and Map.get(&1, :token_index) == index)),
          %{id: noun_id, definition: definition} <- choice,
+         true <- is_binary(noun_id) and byte_size(noun_id) <= 128,
          [norm, "noun", suffix] <- String.split(noun_id, "|", parts: 3),
          true <- suffix != "" and suffix != "fallback",
          true <- is_binary(definition) and definition != "" and
@@ -167,6 +168,8 @@ defmodule Core.Brain.RoleSemanticContext do
            is_binary(candidate_id) and is_number(value) and value == value and
              value >= 0.0 and value <= 1.0
          end),
+         total <- Enum.reduce(scores, 0.0, fn {_, p}, acc -> acc + p end),
+         true <- total >= 0.98 and total <= 1.02,
          value when is_number(value) and value > 0.0 <- Map.get(scores, id) do
       competitors =
         scores
