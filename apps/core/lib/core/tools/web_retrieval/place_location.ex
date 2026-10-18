@@ -83,12 +83,31 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
         normalize(requested_title) == normalize(title) and
           normalize(region) in Enum.map(province_names, &normalize/1) and
           case location_lead(%{title: title, excerpt: excerpt}) do
-            {:ok, lead} -> String.contains?(normalize(lead), normalize(region))
+            {:ok, lead} -> asserted_in_region?(lead, region)
             :no_support -> false
           end
 
       _ -> false
     end
+  end
+
+  # A lead can mention several provinces. Require membership in the
+  # province the user asked about, not merely a nearby-province mention.
+  # Constrain optional modifiers to geographic terms so "in Alberta near
+  # British Columbia" cannot pass as a British Columbia location claim.
+  defp asserted_in_region?(lead, region) do
+    modifier =
+      "(?:(?:south-central|north-central|northeastern|northwestern|" <>
+      "southeastern|southwestern|northern|southern|eastern|western|" <>
+      "central|interior)\\s+|the\\s+(?:Canadian\\s+)?province\\s+of\\s+)?"
+
+    pattern =
+      Regex.compile!(
+        "\\b(?:in|within)\\s+" <> modifier <>
+          Regex.escape(region) <> "\\b", "iu"
+      )
+
+    Regex.match?(pattern, lead)
   end
 
   defp location_lead(%{title: title, excerpt: excerpt}) do
