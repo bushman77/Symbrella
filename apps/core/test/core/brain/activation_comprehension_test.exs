@@ -47,6 +47,23 @@ defmodule Core.Brain.ActivationComprehensionTest do
     end)
   end
 
+  test "prebuilt sense slates receive the same exact-ID prior as LTM cells" do
+    si = %{
+      neuron_activation: %{@river => 0.7},
+      sense_candidates: %{0 => [row(@bank), row(@river)]},
+      candidates_by_token: %{0 => [row(@bank), row(@river)]}
+    }
+
+    result = Activation.overlay_candidate_slates(si)
+
+    for key <- [:sense_candidates, :candidates_by_token] do
+      [financial, riverbank] = get_in(result, [key, 0])
+      refute Map.has_key?(financial, :activation)
+      assert_in_delta riverbank.activation, 0.78, 0.0001
+      assert riverbank.prior_neuron_activation == 0.7
+    end
+  end
+
   test "zero activation and candidate-owned activation are not overwritten" do
     cells = [row(@bank), Map.put(row(@river), :activation, 0.8)]
 
