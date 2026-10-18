@@ -382,12 +382,23 @@ defmodule Brain.Synapses.Shadow do
       delta = if verdict == :confirmed, do: @reviewed_delta, else: @unreviewed_delta
 
       Enum.reduce(edges, all, fn key, acc ->
-        prev = Map.get(acc, key, %{weight: 0.0, experiences: 0,
-          reviewed_experiences: 0})
+        prev = Map.get(acc, key, %{
+          provisional_weight: 0.0, reviewed_weight: 0.0,
+          experiences: 0, reviewed_experiences: 0, provisional_experiences: 0
+        })
+
+        provisional = prev.provisional_weight +
+          if(verdict == :unreviewed, do: delta, else: 0.0)
+        reviewed = prev.reviewed_weight +
+          if(verdict == :confirmed, do: delta, else: 0.0)
 
         Map.put(acc, key, %{
-          weight: min(prev.weight + delta, @max_weight),
+          weight: min(provisional + reviewed, @max_weight),
+          provisional_weight: min(provisional, @max_weight),
+          reviewed_weight: min(reviewed, @max_weight),
           experiences: prev.experiences + 1,
+          provisional_experiences: prev.provisional_experiences +
+            if(verdict == :unreviewed, do: 1, else: 0),
           reviewed_experiences: prev.reviewed_experiences +
             if(verdict == :confirmed, do: 1, else: 0)
         })
