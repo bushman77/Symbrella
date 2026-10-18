@@ -121,8 +121,11 @@ defmodule Core.Brain.SemanticSenseValidator do
         restrictions = restriction_gates(evidence, context)
 
         blocks =
-          (if(grammar == :intransitive_only, do: [:intransitive_with_object], else: [])) ++
-            Enum.map(restrictions, &{:missing_restriction_witness, &1})
+          (case grammar do
+            :intransitive_only -> [:intransitive_with_object]
+            :conflicting_grammar -> [:conflicting_dictionary_grammar]
+            _ -> []
+          end) ++ Enum.map(restrictions, &{:missing_restriction_witness, &1})
 
         %{
           id: row.id,
@@ -231,19 +234,30 @@ defmodule Core.Brain.SemanticSenseValidator do
     description = Map.get(evidence, :definition) || ""
     # Distinguish explicit intransitive-only from ambitransitive or
     # a gloss that describes both transitive and intransitive uses.
-    modes =
-      Enum.map(grammar, &String.downcase(to_string(&1))) ++
-        (description
-        |> leading_grammar_labels()
-        |> Enum.map(&String.downcase/1))
+    tags = Enum.map(grammar, &String.downcase(to_string(&1)))
+    labels = leading_grammar_labels(description)
+    supports_object? = fn values ->
+      Enum.any?(values, &(&1 in ["transitive", "ambitransitive", "ditransitive"]))
+    end
 
     cond do
-      Enum.any?(modes, &(&1 in ["transitive", "ambitransitive", "ditransitive"])) ->
-        :compatible_direct_object
-
-      "intransitive" in modes ->
+      "intransitive" in labels and supports_object?.(labels) ->
+        :conflicting_grammar
+      "intransitive" in labels and supports_object?.(tags) ->
+        :conflicting_grammar
+      "intransitive" in labels ->
         :intransitive_only
-
+      supports_object?.(labels) and "intransitive" in tags and
+          not supports_object?.(tags) ->
+        :conflicting_grammar
+      supports_object?.(labels) ->
+        :compatible_direct_object
+      "intransitive" in tags and supports_object?.(tags) ->
+        :conflicting_grammar
+      supports_object?.(tags) ->
+        :compatible_direct_object
+      "intransitive" in tags ->
+        :intransitive_only
       true ->
         :unspecified
     end
