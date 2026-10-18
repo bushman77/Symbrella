@@ -52,7 +52,10 @@ defmodule Core.Brain.Activation do
       reason: :lexical_recruitment_and_prior_activation,
       meta: %{
         candidates: length(updated),
-        previously_active: Enum.count(updated, &Map.get(&1, :runtime_primed?, false)),
+        previously_active: Enum.count(updated, fn
+          %{runtime_primed?: true} -> true
+          _ -> false
+        end),
         recruited: length(recruited),
         skipped_ambiguous_slates?: length(recruited) < length(Enum.uniq_by(rows, &cell_id/1))
       }
