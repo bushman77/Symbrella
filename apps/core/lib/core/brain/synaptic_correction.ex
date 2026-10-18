@@ -52,7 +52,10 @@ defmodule Core.Brain.SynapticCorrection do
   def evaluate(%{} = prior_si, %{} = replacement_si) do
     with {:ok, old_observation} <- SynapticExperience.extract(prior_si),
          {:ok, new_observation} <- SynapticExperience.extract(replacement_si) do
-      Brain.Synapses.Shadow.propose_correction(old_observation, new_observation)
+      case Brain.Synapses.Shadow.propose_correction(old_observation, new_observation) do
+        %{} = result -> result
+        _ -> %{status: :shadow_unavailable}
+      end
     else
       _ -> %{status: :independent_structure_not_established}
     end
