@@ -17,11 +17,12 @@ defmodule Core.Brain.SemanticSenseValidator do
   weight transfer, LIFG/ATL change, BrainCell stimulation or persistence.
   """
 
-  alias Core.Brain.InflectedVerbSenseBridge
+  alias Core.Brain.{InflectedVerbSenseBridge, RoleSemanticContext}
 
   @min_context_fit 0.10
   @min_gap 0.10
   @max_report 12
+  @min_patient_signal 0.08
 
   # Narrow, explicit dictionary-derived restriction cues. These are
   # *requirements for making a positive hypothesis*, not assertions that
@@ -114,11 +115,24 @@ defmodule Core.Brain.SemanticSenseValidator do
 
   defp assess(si, bridge, rows, opts) do
     context = explicit_context(si)
+
+    # Expansion is OPT-IN even in this read-only evaluator.
+    # It requires the already-selected noun sense's exact dictionary gloss;
+    # otherwise no extra evidence is supplied.
+    role_context =
+      if Keyword.get(opts, :role_context?, false) == true,
+        do: RoleSemanticContext.extract(si),
+        else: %{status: :disabled, contexts: [], active_count: 0}
+
     reviews =
       Enum.map(rows, fn row ->
         evidence = row.validation_evidence || %{}
         grammar = grammar_gate(evidence)
+        # Restrictions see ONLY explicit utterance tokens; one-hop noun
+        # definitions are never allowed to satisfy a specialist-domain cue.
         restrictions = restriction_gates(evidence, context)
+        role_support = RoleSemanticContext.support(role_context, evidence)
+        combined = Float.round(min(1.0, row.context_fit + role_support.signal), 6)
 
         blocks =
           (case grammar do
@@ -130,6 +144,11 @@ defmodule Core.Brain.SemanticSenseValidator do
         %{
           id: row.id,
           lexical_score: row.context_fit,
+          role_support: role_support.signal,
+          patient_support: role_support.patient_signal,
+          actor_support: role_support.actor_signal,
+          combined_diagnostic_score: combined,
+          one_hop_witnesses: role_support.witnesses,
           matching_context: row.matched_context_terms,
           grammar: grammar,
           missing_restrictions: restrictions,
@@ -143,26 +162,37 @@ defmodule Core.Brain.SemanticSenseValidator do
     eligible =
       reviews
       |> Enum.filter(& &1.eligible?)
-      |> Enum.sort_by(fn row -> {-row.lexical_score, row.id} end)
+      |> Enum.sort_by(fn row -> {-row.combined_diagnostic_score, row.id} end)
 
     best = List.first(eligible)
     runner = Enum.at(eligible, 1)
-    gap = if(best && runner, do: best.lexical_score - runner.lexical_score, else: 0.0)
+    gap =
+      if(best && runner,
+        do: Float.round(best.combined_diagnostic_score -
+          runner.combined_diagnostic_score, 6),
+        else: 0.0)
 
     min_fit = Keyword.get(opts, :min_context_fit, @min_context_fit)
     min_gap = Keyword.get(opts, :min_gap, @min_gap)
     valid_thresholds? = valid_threshold?(min_fit) and valid_threshold?(min_gap)
 
+    strong_source? =
+      best && (best.lexical_score >= min_fit or
+        (best.patient_support >= @min_patient_signal and
+           best.combined_diagnostic_score >= min_fit))
+
     proposed =
-      if valid_thresholds? && best && runner &&
-           best.lexical_score >= min_fit && gap >= min_gap,
+      if valid_thresholds? && best && runner && strong_source? &&
+           best.combined_diagnostic_score > 0.0 &&
+           best.combined_diagnostic_score >= min_fit && gap >= min_gap,
         do: best.id, else: nil
 
     reason =
       cond do
         not valid_thresholds? -> :invalid_thresholds
         is_nil(best) -> :no_compatible_dictionary_sense
-        best.lexical_score < min_fit -> :insufficient_lexical_evidence
+        best.combined_diagnostic_score < min_fit -> :insufficient_lexical_evidence
+        not strong_source? -> :insufficient_independent_evidence
         is_nil(runner) -> :no_remaining_competition
         gap < min_gap -> :ambiguous_context_evidence
         true -> :provisional_context_hypothesis
@@ -198,12 +228,18 @@ defmodule Core.Brain.SemanticSenseValidator do
         proposed_id: proposed,
         baseline_score_gap: bridge.top_two_gap,
         validator_score_gap: gap,
+        role_expansion_enabled?: Keyword.get(opts, :role_context?, false) == true,
+        role_expansion_status: role_context.status,
+        role_expansion_sources: role_context.contexts,
+        proposed_with_patient_evidence?: is_binary(proposed) and
+          best.patient_support > 0.0,
         excluded_count: Enum.count(reviews, &(not &1.eligible?)),
         exclusions: reviews
           |> Enum.reject(& &1.eligible?)
           |> Enum.take(@max_report)
           |> Enum.map(&Map.take(&1,
-            [:id, :lexical_score, :grammar, :missing_restrictions, :exclusions])),
+            [:id, :lexical_score, :role_support, :grammar,
+              :missing_restrictions, :exclusions])),
         eligible_top: Enum.take(eligible, @max_report),
         label_status: label_status,
         gold_id: if(label_status == :caller_labeled, do: gold, else: nil),
