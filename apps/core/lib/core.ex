@@ -205,8 +205,12 @@ defmodule Core do
     |> StateDump.capture(:hippocampus_persist)
     |> Core.Brain.Activation.notify(opts)
     |> StateDump.capture(:activation)
-    # After post-comprehension feedback, record eligible experiences in an
-    # isolated shadow ledger. No live BrainCell weights or LIFG priors change.
+    # The read-only A/B projection must run BEFORE this turn is recorded,
+    # or the learner could appear to predict an event it just observed.
+    |> Core.Brain.SynapticPropagation.attach(opts)
+    |> StateDump.capture(:synaptic_propagation)
+    # Record only evidence-qualified user experiences in the shadow ledger.
+    # Neither step changes BrainCell weights or LIFG decisions.
     |> Core.Brain.SynapticExperience.attach(opts)
     |> StateDump.capture(:synaptic_experience)
     # Explicit patient corrections are *proposals* only. They must not
