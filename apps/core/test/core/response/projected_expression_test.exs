@@ -284,18 +284,32 @@ defmodule Core.Response.ProjectedExpressionTest do
     end
 
     @impl true
-    def init(test_pid), do: {:ok, test_pid}
+    def init(test_pid), do: {:ok, %{owner: test_pid, draft: :echo}}
 
     def chat(messages, opts) do
       GenServer.call(__MODULE__, {:chat, messages, opts})
     end
 
+    def next_draft(text) when is_binary(text) do
+      GenServer.call(__MODULE__, {:next_draft, text})
+    end
+
     @impl true
-    def handle_call({:chat, messages, _opts}, _from, owner) do
-      # Return the original statement twice even with a grounded prompt.
+    def handle_call({:next_draft, text}, _from, state) do
+      {:reply, :ok, %{state | draft: text}}
+    end
+
+    @impl true
+    def handle_call({:chat, messages, _opts}, _from, state) do
       user = messages |> List.last() |> Map.fetch!("content")
-      send(owner, {:projected_echo_llm_prompt, hd(messages)["content"]})
-      {:reply, {:ok, %{content: user <> "\n\n" <> user}}, owner}
+      send(state.owner, {:projected_echo_llm_prompt, hd(messages)["content"]})
+      draft =
+        case state.draft do
+          :echo -> user <> "\n\n" <> user
+          text when is_binary(text) -> text
+        end
+
+      {:reply, {:ok, %{content: draft}}, state}
     end
   end
 
@@ -369,6 +383,77 @@ defmodule Core.Response.ProjectedExpressionTest do
       refute Map.has_key?(attached.response_meta.response_reflection, :final_text)
       assert attached.lifg_choices == si.lifg_choices
       assert attached.atl_slate == si.atl_slate
+    after
+      if old_client == nil,
+        do: Application.delete_env(:core, :llm_client),
+        else: Application.put_env(:core, :llm_client, old_client)
+
+      if old_retrieval == nil,
+        do: Application.delete_env(:core, :web_retrieval),
+        else: Application.put_env(:core, :web_retrieval, old_retrieval)
+    end
+  end
+
+  test "actual LLM and response attachment repair gardener and baker completed-event paraphrases" do
+    old_client = Application.get_env(:core, :llm_client)
+    old_retrieval = Application.get_env(:core, :web_retrieval)
+
+    Application.put_env(:core, :llm_client, EchoLlm)
+    Application.put_env(:core, :web_retrieval, enabled?: false)
+    start_supervised!({EchoLlm, self()})
+
+    try do
+      for {si, model_draft, expected} <- [
+        {statement(), "The gardener has planted a tree.",
+         "I understand you're describing the gardener planting a tree."},
+        {statement("baker", "cooks", "cook", "meal"),
+         "The baker has cooked a meal.",
+         "I understand you're describing the baker cooking a meal."}
+      ] do
+        :ok = EchoLlm.next_draft(model_draft)
+
+        frame = ProjectedExpression.from_si(si)
+        assert is_map(frame)
+
+        features = %{
+          intent: :statement, confidence: 0.68,
+          selected_action: :answer_user,
+          session_id: "temporal-review-#{System.unique_integer([:positive])}",
+          projected_expression: frame
+        }
+        decision = %{tone: :neutral, mode: :scribe, action: :answer}
+
+        assert {:ok, ^expected, reflection} =
+          LlmSynthesis.generate(si.sentence, features, decision, %{}, nil)
+
+        assert reflection.status == :repair
+        assert reflection.applied? == true
+        assert reflection.projected_expression_repair.trigger ==
+          :unsupported_temporal_shift
+        assert :projected_tense_aspect_drift in reflection.issues
+        assert reflection.draft_sha256 != reflection.final_sha256
+        assert reflection.projected_expression_repair.promoted_sense? == false
+        assert reflection.projected_expression_repair.stored_memory? == false
+
+        assert_receive {:projected_echo_llm_prompt, system_prompt}
+        assert system_prompt =~ "Preserve the source clause's simple-present"
+
+        :ok = EchoLlm.next_draft(model_draft)
+
+        attached =
+          si
+          |> Map.put(:session_id,
+            "temporal-attach-#{System.unique_integer([:positive])}")
+          |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
+
+        assert attached.response_text == expected
+        assert attached.response_meta.response_source == :llm
+        assert attached.response_meta.response_reflection.status == :repair
+        assert get_in(attached, [:response_meta, :response_reflection,
+          :projected_expression_repair, :trigger]) == :unsupported_temporal_shift
+        assert attached.lifg_choices == si.lifg_choices
+        assert attached.atl_slate == si.atl_slate
+      end
     after
       if old_client == nil,
         do: Application.delete_env(:core, :llm_client),
