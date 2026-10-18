@@ -176,7 +176,7 @@ defmodule Core.Brain.SynapticDisambiguationTest do
              SynapticDisambiguation.evaluate(seen, synapse_shadow_server: server)
 
     fresh = interpreted("painter", "poster")
-    with_partial = put_in(fresh.lifg_choices, Enum.map(fresh.lifg_choices, fn
+    with_partial = Map.put(fresh, :lifg_choices, Enum.map(fresh.lifg_choices, fn
       %{token_index: 2} = ch ->
         %{ch | candidate_probs: %{"draws|verb|1" => 1.0}}
       row -> row
@@ -184,7 +184,7 @@ defmodule Core.Brain.SynapticDisambiguationTest do
     assert %{status: :skipped, reason: :incomplete_or_invalid_score_slate} =
              SynapticDisambiguation.evaluate(with_partial, synapse_shadow_server: server)
 
-    with_unscaled = put_in(fresh.lifg_choices, Enum.map(fresh.lifg_choices, fn
+    with_unscaled = Map.put(fresh, :lifg_choices, Enum.map(fresh.lifg_choices, fn
       %{token_index: 2} = ch ->
         %{ch | candidate_probs: %{"draws|verb|1" => 0.7,
                                   "draws|verb|2" => 0.7}}
