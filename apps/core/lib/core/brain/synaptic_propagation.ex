@@ -46,7 +46,6 @@ defmodule Core.Brain.SynapticPropagation do
         patient_id: patient_id,
         predicate_index: predicate_i,
         selected_predicate_id: selected_predicate,
-        before_learning?: true,
         candidates_checked: length(candidates),
         propagation_on: enabled,
         propagation_off: disabled,
@@ -71,7 +70,8 @@ defmodule Core.Brain.SynapticPropagation do
 
   def attach(%{} = si, opts) when is_list(opts) do
     enabled? =
-      Keyword.get(opts, :synapse_shadow?, true) != false and
+      Keyword.get(opts, :synapse_shadow?,
+        Application.get_env(:brain, :synapse_shadow_enabled?, true)) != false and
       Keyword.get(opts, :synapse_propagation?, true) != false
 
     if enabled? do
