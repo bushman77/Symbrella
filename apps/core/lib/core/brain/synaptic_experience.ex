@@ -110,6 +110,58 @@ defmodule Core.Brain.SynapticExperience do
 
   def attach(other, _), do: other
 
+  @doc """
+  Explicit, trusted human review of an *already recorded* experience.
+
+  This is a programmatic reviewer boundary, not an NLP command parser.
+  A chat utterance claiming "actually..." must not directly revoke weights.
+  The same independently revalidated SI is required to locate its receipt.
+  """
+  @spec review(map(), :confirm | :reject, String.t()) ::
+          {:ok, :confirmed | :rejected | :unchanged} | {:error, atom()}
+  def review(%{} = si, decision, reviewer)
+      when decision in [:confirm, :reject] and is_binary(reviewer) do
+    case extract(si) do
+      {:ok, %{evidence: evidence}} ->
+        Brain.Synapses.Shadow.review(%{
+          evidence: evidence,
+          decision: decision,
+          provenance: :human_review,
+          reviewer: reviewer
+        })
+
+      :ineligible ->
+        {:error, :ineligible}
+    end
+  end
+
+  def review(_, _, _), do: {:error, :invalid_review}
+
+  @doc """
+  Read-only context-specific edge support for a handful of *existing*
+  lexical verb candidates. No winner change, LIFG bonus, or verification.
+  """
+  @spec preview(map(), [String.t()]) :: map()
+  def preview(%{} = si, candidate_ids) when is_list(candidate_ids) do
+    with {:ok, %{edges: edges}} <- extract(si),
+         [{_selected, noun_id, :patient}] <-
+           Enum.filter(edges, fn {_, _, role} -> role == :patient end),
+         %{roles: %{predicate: verb_index}} <- SVOEvent.complete_signature(si),
+         true <- is_integer(verb_index),
+         true <- candidate_ids != [] and length(candidate_ids) <= 64,
+         %{} = buckets <- Map.get(si, :sense_candidates),
+         rows when is_list(rows) <-
+           Map.get(buckets, verb_index, Map.get(buckets, to_string(verb_index))),
+         allowed <- MapSet.new(Enum.map(rows, &Map.get(&1, :id))),
+         true <- Enum.all?(candidate_ids, &MapSet.member?(allowed, &1)) do
+      Brain.Synapses.Shadow.preview(candidate_ids, noun_id, :patient)
+    else
+      _ -> %{status: :ineligible_or_incomplete_slate, candidates: []}
+    end
+  end
+
+  def preview(_, _), do: %{status: :invalid_candidates, candidates: []}
+
   defp role_id(si, plan, index, pos) do
     with [%{id: id}] <- Enum.filter(plan, fn
            %{id: id} -> String.split(id, "|", parts: 3) |> Enum.at(1) == pos and
