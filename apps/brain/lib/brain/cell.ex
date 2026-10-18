@@ -20,6 +20,7 @@ defmodule Brain.Cell do
   use GenServer
   require Logger
   alias Db.BrainCell, as: Row
+  alias Brain.Cell.Activation
 
   @allowed_pos ~w(
     noun verb adjective adverb interjection phrase proper_noun pronoun
@@ -53,7 +54,11 @@ defmodule Brain.Cell do
 
     validate_id!(id)
 
-    GenServer.start_link(__MODULE__, %{id: id, data: arg, activation: 0}, name: Brain.via(id))
+    GenServer.start_link(
+      __MODULE__,
+      %{id: id, data: arg, activation: 0.0, last_activation_ms: System.monotonic_time(:millisecond)},
+      name: Brain.via(id)
+    )
   end
 
   @doc "True if an ID is acceptable for a Brain cell under the current policy."
@@ -77,19 +82,25 @@ defmodule Brain.Cell do
 
   @impl true
   def handle_call(:status, _from, %{id: id, activation: a} = st) do
-    {:reply, {:ok, %{id: id, activation: a}}, st}
+    now = System.monotonic_time(:millisecond)
+    current = Activation.decay(a, Map.get(st, :last_activation_ms, now), now)
+    {:reply, {:ok, %{id: id, activation: current}}, st}
   end
 
   @impl true
   def handle_cast({:activate, payload}, %{id: id, activation: a} = st) do
+    now = System.monotonic_time(:millisecond)
     delta =
       payload
       |> Map.get(:delta, 1)
       |> coerce_number(1)
 
-    a2 = a + delta
-    Brain.report_activation(id, a2)
-    {:noreply, %{st | activation: a2}}
+    # Decay before adding new excitation/inhibition. An idle neuron does not
+    # accumulate stale stimulation indefinitely; a second stimulus reactivates it.
+    prior = Activation.decay(a, Map.get(st, :last_activation_ms, now), now)
+    next = Activation.decay(max(prior + delta, 0.0), now, now)
+    Brain.report_activation(id, next, now)
+    {:noreply, %{st | activation: next, last_activation_ms: now}}
   end
 
   # ──────────────────────── Helpers ─────────────────────────
