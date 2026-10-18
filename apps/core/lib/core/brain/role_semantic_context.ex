@@ -153,41 +153,69 @@ defmodule Core.Brain.RoleSemanticContext do
         noun_sense_independently_verified?: false
       }
     else
+      {:error, reason} ->
+        unavailable(role, reason)
+
       _ ->
-        %{status: :unavailable_or_ambiguous, role: role,
-          noun_sense_independently_verified?: false}
+        unavailable(role, :missing_or_inconsistent_selected_noun_definition)
     end
   end
+
+  defp unavailable(role, reason), do: %{
+    status: :unavailable_or_ambiguous,
+    role: role,
+    reason: reason,
+    noun_sense_independently_verified?: false
+  }
 
   defp noun_confidence(choice, norm, id) do
     scores = Map.get(choice, :candidate_probs)
 
-    with %{} = scores <- scores,
-         true <- map_size(scores) > 0 and map_size(scores) <= 256,
-         true <- Enum.all?(scores, fn {candidate_id, value} ->
-           is_binary(candidate_id) and is_number(value) and value == value and
-             value >= 0.0 and value <= 1.0
-         end),
-         total <- Enum.reduce(scores, 0.0, fn {_, p}, acc -> acc + p end),
-         true <- total >= 0.98 and total <= 1.02,
-         value when is_number(value) and value > 0.0 <- Map.get(scores, id) do
-      competitors =
-        scores
-        |> Enum.filter(fn {key, _} ->
-          case String.split(key, "|", parts: 3) do
-            [^norm, "noun", _] -> key != id
-            _ -> false
-          end
-        end)
-        |> Enum.map(&elem(&1, 1))
+    cond do
+      not is_map(scores) ->
+        {:error, :missing_noun_probability_slate}
 
-      if competitors == [] or value - Enum.max(competitors) >= @noun_margin do
-        {:ok, value}
-      else
-        :uncertain_noun_selection
-      end
-    else
-      _ -> :no_scored_noun_selection
+      map_size(scores) == 0 or map_size(scores) > 256 ->
+        {:error, :invalid_noun_probability_slate_size}
+
+      not Enum.all?(scores, fn {candidate_id, value} ->
+        is_binary(candidate_id) and is_number(value) and value == value and
+          value >= 0.0 and value <= 1.0
+      end) ->
+        {:error, :invalid_noun_probability_values}
+
+      true ->
+        noun_confidence_from_scores(scores, norm, id)
+    end
+  end
+
+  defp noun_confidence_from_scores(scores, norm, id) do
+    total = Enum.reduce(scores, 0.0, fn {_, p}, acc -> acc + p end)
+    value = Map.get(scores, id)
+
+    cond do
+      total < 0.98 or total > 1.02 ->
+        {:error, :incomplete_noun_probability_slate}
+
+      not is_number(value) or value <= 0.0 ->
+        {:error, :selected_noun_not_scored}
+
+      true ->
+        competitors =
+          scores
+          |> Enum.filter(fn {key, _} ->
+            case String.split(key, "|", parts: 3) do
+              [^norm, "noun", _] -> key != id
+              _ -> false
+            end
+          end)
+          |> Enum.map(&elem(&1, 1))
+
+        if competitors == [] or value - Enum.max(competitors) >= @noun_margin do
+          {:ok, value}
+        else
+          {:error, :ambiguous_same_surface_noun_senses}
+        end
     end
   end
 
