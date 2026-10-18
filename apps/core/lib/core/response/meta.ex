@@ -79,6 +79,8 @@ defmodule Core.Response.Meta do
     |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
     |> maybe_put_grounded_revision(Map.get(reflection, :grounded_revision))
     |> maybe_put_authoritative_plan(Map.get(reflection, :authoritative_plan))
+    |> maybe_put_projected_expression_repair(
+      Map.get(reflection, :projected_expression_repair))
   end
 
   defp reflection_summary(_), do: nil
@@ -130,6 +132,19 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_authoritative_plan(summary, _), do: summary
+
+  # This response-only review outcome is safe to expose in Explain.
+  # Keep compact structural provenance; never copy model drafts, user
+  # content, system prompts, or the underlying cohort glossary.
+  defp maybe_put_projected_expression_repair(summary, %{} = repair) do
+    Map.put(summary, :projected_expression_repair,
+      Map.take(repair, [
+        :attempted?, :applied?, :trigger, :source,
+        :original_reflection_status, :promoted_sense?, :stored_memory?
+      ]))
+  end
+
+  defp maybe_put_projected_expression_repair(summary, _), do: summary
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do
