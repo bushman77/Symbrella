@@ -212,7 +212,18 @@ defmodule Core.Brain.RoleSemanticContext do
       |> Enum.map(&elem(&1, 0))
       |> Enum.sort()
 
+    stronger_competitor? =
+      Enum.any?(scores, fn {id, p} ->
+        case String.split(id, "|", parts: 3) do
+          [^norm, "noun", _] -> p > selected_p + @tie_epsilon
+          _ -> false
+        end
+      end)
+
     cond do
+      stronger_competitor? ->
+        unavailable(role, :selected_noun_not_highest_scored)
+
       length(tied) < 2 ->
         unavailable(role, :no_exact_tie_to_consense)
 
