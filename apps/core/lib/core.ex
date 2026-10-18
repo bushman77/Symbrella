@@ -47,6 +47,7 @@ defmodule Core do
       |> maybe_put_fuzzy(fuzzy)
       |> TokenFilters.rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put(:experience_origin, Keyword.get(opts, :experience_origin))
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
       |> Map.put_new(:trace, [])
       |> Map.put(:lifg_opts, lifg_opts)
