@@ -204,6 +204,10 @@ defmodule Core do
     |> StateDump.capture(:hippocampus_persist)
     |> Core.Brain.Activation.notify(opts)
     |> StateDump.capture(:activation)
+    # After post-comprehension feedback, record eligible experiences in an
+    # isolated shadow ledger. No live BrainCell weights or LIFG priors change.
+    |> Core.Brain.SynapticExperience.attach(opts)
+    |> StateDump.capture(:synaptic_experience)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
