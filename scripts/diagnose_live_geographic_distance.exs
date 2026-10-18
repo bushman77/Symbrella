@@ -9,9 +9,15 @@ alias Core.Semantic.EventFrames
 alias Core.Tools.WebRetrieval
 alias Core.Tools.WebRetrieval.{Grounding, CanadianGeoNames, Wikidata}
 
-questions = [
-  "how far from maple ridge is from kamloops",
-  "how far is maple ridge bc from kamloops bc"
+cases = [
+  {"Unqualified standalone",
+   "how far from maple ridge is from kamloops", []},
+  {"Explicitly BC-qualified",
+   "how far is maple ridge bc from kamloops bc", []},
+  {"Same-session user-qualified Kamloops",
+   "how far from maple ridge is from kamloops",
+   [%{"role" => "user", "content" => "where is Kamloops BC"},
+    %{"role" => "assistant", "content" => "The city is in British Columbia."}]}
 ]
 
 IO.puts("\n=== Live geographic evidence diagnosis ===")
@@ -23,7 +29,7 @@ IO.inspect(%{
   max_attempts: Keyword.get(config, :max_attempts, 3)
 }, label: "Runtime policy (non-secret)")
 
-for question <- questions do
+for {label, question, history} <- cases do
   frame = EventFrames.location_question(question)
   context = %{
     user_text: question,
@@ -32,7 +38,7 @@ for question <- questions do
   }
 
   route = WebRetrieval.route_for(context)
-  result = WebRetrieval.enrich(context, enabled?: true)
+  result = WebRetrieval.enrich(context, enabled?: true, history: history)
   evidence = Map.get(result, :web_evidence, %{})
 
   attempts =
@@ -52,7 +58,10 @@ for question <- questions do
       else: nil
 
   IO.inspect(%{
+    case: label,
     question: question,
+    prior_user_turns: Enum.count(history, &(&1["role"] == "user")),
+    lookup_scope: Map.get(evidence, :lookup_scope),
     parsed_roles: Map.take(frame || %{}, [
       :relation, :subject, :target, :grounding_status
     ]),
