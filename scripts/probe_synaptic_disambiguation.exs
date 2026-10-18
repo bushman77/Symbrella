@@ -33,6 +33,7 @@ opts = [
   synapse_propagation?: false,
   synapse_correction?: false,
   lifg_opts: [grammar_weight: 1.0, scores: :all,
+              synapse_eval_full_scores?: true,
               cerebellum_learn?: false, cerebellum_snapshot_path: nil]
 ]
 
