@@ -58,7 +58,7 @@ defmodule Core.Response.SemanticRoleFidelityTest do
     source = frame()
 
     for draft <- [
-      "The baker prepares dinner.",
+      "The baker prepares the dinner.",
       "The baker makes a supper."
     ] do
       report = SemanticRoleFidelity.audit(source.sentence, draft, source)
@@ -84,6 +84,7 @@ defmodule Core.Response.SemanticRoleFidelityTest do
     source = frame()
 
     for draft <- [
+      "The baker prepares dinner.",
       "The baker also prepares a meal.",
       "You're describing the baker cooking a meal.",
       "The baker is also planting a tree, but I cannot infer why.",
