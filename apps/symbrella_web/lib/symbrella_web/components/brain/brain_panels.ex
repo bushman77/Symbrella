@@ -16,6 +16,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.Region.BaseArt
   alias SymbrellaWeb.Components.Brain.Regions
+  alias SymbrellaWeb.Components.Brain.ActivationTrend
 
   def brain(assigns) do
     assigns =
@@ -33,6 +34,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:svg_base, nil)
       |> Map.put_new(:bb_filter, "")
       |> Map.put_new(:wm, %{})
+      |> Map.put_new(:activation_samples, [])
       |> assign_viewbox()
       |> Map.put_new(:pan, %{x: 0, y: 0})
       |> Map.put_new(:scale, 1.00)
@@ -53,6 +55,9 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         self_model={assigns[:self_model]}
       />
       </div>
+
+      <!-- Compact live Brain.Cell activity history; no database polling -->
+      <ActivationTrend.panel samples={@activation_samples} />
 
     <!-- Brain map + Region summary -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
