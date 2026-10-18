@@ -610,3 +610,88 @@ study without external adjudication and a genuinely unseen corpus.
 No proposed sense in this module is a verified synonym for a
 `surface|verb|1` form or grounds transferring synaptic weights.
 Live LIFG and the durable synaptic ledger remain unchanged.
+
+
+## Read-only role-conditioned one-hop noun context (v8)
+
+The evidence-gated sense validator passed **9/9** current regression tests
+and the real dictionary audit continued to abstain on seven of eight
+examples. The high-precision specialist exclusions held, but baseline
+dictionary `ContextFit` missed associations such as `meal → food`,
+`tree → plant`, and `ship → vessel`.
+
+`Core.Brain.RoleSemanticContext.extract/2` now offers an explicitly
+bounded **one-hop diagnostic**. It retrieves ZERO additional dictionary
+senses. Only the *current* full-SVO subject and object noun choices can
+supply supporting evidence, and each must have all of the following:
+
+- A revalidated human-origin finite-present SVO with agreeing LIFG,
+  ATL, active BrainCells, and episodic roles, using the existing
+  `SynapticExperience.extract/1` gate.
+- An exact real nonfallback noun-sense ID already selected for the
+  **actor** or **patient** and an active BrainCell with the same ID,
+  norm, POS and the **same literal dictionary definition** as LIFG
+  selected. No alternative noun senses may donate definitions.
+- A finite complete-enough per-token LIFG probability map including
+  that noun ID. If multiple same-surface noun senses were scored,
+  the selected one must exceed the runner-up by at least `0.08`.
+  Missing score maps and close competitors produce NO expansion.
+- A nonempty, bounded, single-clause dictionary gloss that yields
+  up to 12 useful words after removing grammatical/scaffolding terms
+  and the noun/predicate surfaces. No transitive relation is stored.
+
+`RoleSemanticContext.support/2` compares those selected noun-gloss
+terms with each **genuine existing base-verb dictionary sense** using
+`Brain.LIFG.ContextFit.explain/4`. The direct sentence overlap remains
+a separate field: `lexical_score`. One-hop patient evidence is
+multiplied by 0.35 (cap 0.105); actor evidence by 0.15 (cap 0.045).
+Combined role support is capped at `0.13`. The tuple of selected noun
+sense ID, noun selection probability, matched terms and role-specific
+score remains in the diagnostic report. Neither these heuristics nor
+their coefficients are trained or calibrated probabilities.
+
+**Crucial order:** The original specialist restrictions and explicit
+transitivity validation run BEFORE adding role evidence. A noun gloss
+mentioning `cricket` CANNOT supply the missing original-sentence
+`cricket` cue. In a finite-present SVO, actor-only weak support
+cannot license a new sense interpretation: to emit a *provisional*
+hypothesis, the normal direct evidence criterion or separately adequate
+patient support is required, with the existing total evidence and
+runner-up gap thresholds. Near ties and zero-context matches abstain.
+
+The production validator defaults to **role expansion disabled**.
+For this offline read-only diagnostic, callers must explicitly specify
+`role_context?: true`. No automatic change to the production LIFG,
+BrainCells, synapses, or response generation occurs.
+
+### Run the regression and real dictionary A/B
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+mix test apps/core/test/core/brain/role_semantic_context_test.exs \
+  apps/core/test/core/brain/semantic_sense_validator_test.exs \
+  apps/core/test/core/brain/inflected_verb_sense_bridge_test.exs --trace
+
+mix run scripts/probe_role_semantic_context.exs
+```
+
+The A/B probe interprets each sentence **once** and compares unchanged
+baseline (`role_context?: false`) with the same true dictionary
+and bounded one-hop role evidence (`role_context?: true`).
+It reports selected noun sense IDs, rejected/uncertain noun contexts,
+direct versus role scores, new provisional candidates, abstentions,
+candidate exclusions and aggregate changes. It intentionally displays
+warnings rather than claiming accuracy if no grounded noun glossary
+meets the strict admission rules.
+
+Independent gold-sense labels can be supplied in the already documented
+`tmp/eval/semantic_sense_gold.jsonl`, prepared **before viewing**
+system hypotheses and adjudicated against actual dictionary sense IDs.
+The evaluator accepts caller-declared labels, but cannot authenticate
+who reviewed them. A new proposal, even a linguistically plausible one,
+is not proof of improved comprehension until matched against
+independently verified holdout annotations.
+
+No learned synaptic edge transfers to a base-verb sense through this
+path, and no previous semantic-restriction behavior is weakened.
