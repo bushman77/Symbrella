@@ -234,7 +234,13 @@ defmodule Core.Brain.LiveSemanticCarryoverIntegrationTest do
         cell -> cell
       end)
 
-    unsupported = %{first | active_cells: cells}
+    # Rebuild semantic evidence after changing the dictionary witness.
+    # Otherwise a stale projection could be the reason for rejection.
+    unsupported =
+      %{first | active_cells: cells}
+      |> EpisodicProjection.attach()
+      |> SentenceMeaning.attach()
+
     assert SemanticPropagation.lemma_pulse(unsupported) == nil
 
     notified = Activation.notify(unsupported, notify_brain?: true)
