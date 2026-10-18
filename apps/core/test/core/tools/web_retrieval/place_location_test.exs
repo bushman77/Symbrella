@@ -76,6 +76,12 @@ defmodule Core.Tools.WebRetrieval.PlaceLocationTest do
 
     assert :no_support =
       PlaceLocation.answer(context("kamloops bc", [alberta]))
+
+    nearby_province = %{@kamloops_source |
+      excerpt: "Kamloops is a city in Alberta, near British Columbia, Canada."}
+
+    assert :no_support =
+      PlaceLocation.answer(context("kamloops bc", [nearby_province]))
   end
 
   test "an unrelated title, non-Wikipedia host, and unsupported excerpt are rejected" do
