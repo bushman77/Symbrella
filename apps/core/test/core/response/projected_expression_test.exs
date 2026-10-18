@@ -1,7 +1,7 @@
 defmodule Core.Response.ProjectedExpressionTest do
   use ExUnit.Case, async: false
 
-  alias Core.Response.{ProjectedExpression, LlmPrompt}
+  alias Core.Response.{ProjectedExpression, LlmPrompt, LlmSynthesis}
   alias Core.Semantic.{EpisodicProjection, SentenceMeaning}
 
   @svo_evidence [
@@ -164,6 +164,56 @@ defmodule Core.Response.ProjectedExpressionTest do
       %{si | active_cells: []}
     ] do
       assert ProjectedExpression.from_si(changed) == nil
+    end
+  end
+
+  defmodule EchoLlm do
+    def chat(messages, _opts) when is_list(messages) do
+      # Return the actual user message twice to reproduce the observed bug.
+      user = messages |> List.last() |> Map.fetch!("content")
+      {:ok, %{content: user <> "\n\n" <> user}}
+    end
+  end
+
+  test "free-form LLM synthesis passes grounded projection and repairs its real repeated echo" do
+    old_client = Application.get_env(:core, :llm_client)
+    old_retrieval = Application.get_env(:core, :web_retrieval)
+
+    Application.put_env(:core, :llm_client, EchoLlm)
+    Application.put_env(:core, :web_retrieval, enabled?: false)
+
+    try do
+      si = statement()
+      frame = ProjectedExpression.from_si(si)
+      text = si.sentence
+
+      features = %{
+        intent: :statement, confidence: 0.68,
+        selected_action: :answer_user,
+        session_id: "projected-echo-#{System.unique_integer([:positive])}",
+        projected_expression: frame
+      }
+      decision = %{tone: :neutral, mode: :scribe, action: :answer}
+
+      assert {:ok, answer, reflection} =
+        LlmSynthesis.generate(text, features, decision, %{}, nil)
+
+      assert answer ==
+               "I understand you're describing the gardener planting a tree."
+      assert reflection.projected_expression_repair.attempted?
+      assert reflection.projected_expression_repair.applied?
+      assert reflection.projected_expression_repair.promoted_sense? == false
+      assert reflection.projected_expression_repair.stored_memory? == false
+      refute answer =~ "in soil"
+      refute answer =~ "plant|verb|1"
+    after
+      if old_client == nil,
+        do: Application.delete_env(:core, :llm_client),
+        else: Application.put_env(:core, :llm_client, old_client)
+
+      if old_retrieval == nil,
+        do: Application.delete_env(:core, :web_retrieval),
+        else: Application.put_env(:core, :web_retrieval, old_retrieval)
     end
   end
 
