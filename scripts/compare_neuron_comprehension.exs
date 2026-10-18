@@ -59,11 +59,17 @@ else
       name = Keyword.get(options, :scenario, "all")
 
       case name do
-        "all" -> ActivationProbe.scenarios()
-        "artist" -> Enum.filter(ActivationProbe.scenarios(), &(elem(&1, 0) == "artist"))
+        "all" ->
+          ActivationProbe.scenarios()
+
+        "artist" ->
+          Enum.filter(ActivationProbe.scenarios(), &(elem(&1, 0) == "artist"))
+
         "bank_switch" ->
           Enum.filter(ActivationProbe.scenarios(), &(elem(&1, 0) == "bank_switch"))
-        _ -> raise ArgumentError, "Unknown scenario #{inspect(name)}."
+
+        _ ->
+          raise ArgumentError, "Unknown scenario #{inspect(name)}."
       end
     end
 
@@ -88,23 +94,40 @@ else
       IO.inspect(report.semantic_lemma_prior, label: "Decayed semantic-lemma prior")
       IO.inspect(report.read_only_event_answer, label: "Read-only validated-event answer")
       IO.inspect(report.first_turn.senses, label: "First-turn LIFG IDs")
-      IO.inspect(%{
-        structural_status: report.first_turn.sentence_meaning_status,
-        structural_kind: report.first_turn.structural_kind,
-        lexical_degraded?: report.first_turn.comprehension_degraded?,
-        lexical_reasons: report.first_turn.comprehension_reasons,
-        lexical_stats: report.first_turn.lexical_decision_stats,
-        current_turn_projected_events: report.first_turn.projected_event_count
-      }, label: "First-turn structure vs lexical confidence", pretty: true)
+
+      IO.inspect(
+        %{
+          structural_status: report.first_turn.sentence_meaning_status,
+          structural_kind: report.first_turn.structural_kind,
+          lexical_degraded?: report.first_turn.comprehension_degraded?,
+          lexical_reasons: report.first_turn.comprehension_reasons,
+          lexical_stats: report.first_turn.lexical_decision_stats,
+          current_turn_projected_events: report.first_turn.projected_event_count
+        },
+        label: "First-turn structure vs lexical confidence",
+        pretty: true
+      )
+
       IO.inspect(report.baseline.senses, label: "Second-turn baseline LIFG IDs")
       IO.inspect(report.exact_only.senses, label: "Second-turn exact-ID-only LIFG IDs")
       IO.inspect(report.neural.senses, label: "Second-turn semantic propagation LIFG IDs")
       IO.inspect(report.exact_only_differences, label: "Exact-ID-only vs baseline", pretty: true)
-      IO.inspect(report.incremental_semantic_differences, label: "Semantic propagation vs exact only", pretty: true)
+
+      IO.inspect(report.incremental_semantic_differences,
+        label: "Semantic propagation vs exact only",
+        pretty: true
+      )
+
       IO.inspect(report.differences, label: "Full propagation vs baseline", pretty: true)
-      IO.inspect(%{exact_only: report.exact_only.semantic_prior_candidates,
-        propagated: report.neural.semantic_prior_candidates},
-        label: "Verb candidate senses receiving shared lemma prior")
+
+      IO.inspect(
+        %{
+          exact_only: report.exact_only.semantic_prior_candidates,
+          propagated: report.neural.semantic_prior_candidates
+        },
+        label: "Verb candidate senses receiving shared lemma prior"
+      )
+
       IO.inspect(
         %{
           baseline: %{
@@ -140,7 +163,15 @@ else
         pretty: true
       )
 
-      Map.put(report, :scenario, label)
+      report
+      |> Map.put(:scenario, label)
+      |> Map.update!(:first_turn_svo_spans, fn spans ->
+        Enum.map(spans, fn {first, last} -> [first, last] end)
+      end)
+      |> Map.update!(:complete_svo_span, fn
+        {first, last} -> [first, last]
+        nil -> nil
+      end)
     end)
 
   if is_binary(options[:output]) do
