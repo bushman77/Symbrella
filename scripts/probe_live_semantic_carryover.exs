@@ -80,14 +80,14 @@ IO.inspect(%{
     %{span: span} -> span
     _ -> nil
   end,
-  first_structural_status: get_in(first, [:sentence_meaning, :status]),
+  first_structural_status: Map.get(Map.get(first, :sentence_meaning) || %{}, :status),
   first_episode_count: length(List.wrap(first.episodic_candidates)),
   pulse_source: source,
   pulse_submitted?: accepted?,
   brain_stored_pulse: stored,
   second_live_pulse: second.semantic_pulses,
   second_primed_draw_verbs: primed_count.(second),
-  second_structural_status: get_in(second, [:sentence_meaning, :status]),
+  second_structural_status: Map.get(Map.get(second, :sentence_meaning) || %{}, :status),
   propagation_off_pulse: off.semantic_pulses,
   propagation_off_primed_draw_verbs: primed_count.(off),
   other_session_pulse: other
