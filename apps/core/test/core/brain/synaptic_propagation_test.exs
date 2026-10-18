@@ -117,7 +117,7 @@ defmodule Core.Brain.SynapticPropagationTest do
     assert SynapticPropagation.compare(%{si | source: :prod},
       synapse_shadow_server: server).status == :ineligible
 
-    allowed = %{si | source: :prod, experience_origin: :user_turn}
+    allowed = si |> Map.put(:source, :prod) |> Map.put(:experience_origin, :user_turn)
     assert SynapticPropagation.compare(allowed,
       synapse_shadow_server: server).status == :shadow_comparison
     assert SynapticPropagation.attach(si, synapse_shadow?: false) == si
