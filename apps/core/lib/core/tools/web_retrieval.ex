@@ -9,6 +9,7 @@ defmodule Core.Tools.WebRetrieval do
 
   alias Core.Telemetry
   alias Core.Tools.WebRetrieval.RequestRouter
+  alias Core.Tools.WebRetrieval.PlaceScope
 
   @event [:core, :web_retrieval, :complete]
 
@@ -73,11 +74,23 @@ defmodule Core.Tools.WebRetrieval do
       |> provider_options(opts)
       |> Keyword.put(:request_type, type)
 
+    # Reuse explicitly named Canadian province context from recent USER
+    # turns strictly as a coordinate lookup hint. Do not mutate the
+    # original symbolic question frame or promote the hint as evidence.
+    lookup_context =
+      PlaceScope.for_lookup(context, Keyword.get(opts, :history, []))
+
     evidence =
-      context
+      lookup_context
       |> Core.Tools.EvidenceResolver.resolve(query, relation, cfg, resolver_opts)
       |> Map.put(:request_type, type)
       |> Map.put(:routing_trigger, trigger)
+      |> then(fn evidence ->
+        case PlaceScope.scope_summary(lookup_context) do
+          nil -> evidence
+          scope -> Map.put(evidence, :lookup_scope, scope)
+        end
+      end)
 
     Telemetry.emit(
       @event,
