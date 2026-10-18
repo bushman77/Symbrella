@@ -148,6 +148,10 @@ defmodule Core.Brain.Activation do
         cond do
           not real_id?(id) -> []
           not MapSet.member?(eligible, id) and not MapSet.member?(verified, id) -> []
+          # In particular, don't carry a wrong adjective/noun or noun/verb
+          # selection into the next turn when independent grammar contradicts
+          # its POS. This is only a feedback veto; LIFG choices remain visible.
+          grammatically_contradicted?(si, choice, id) -> []
           MapSet.member?(verified, id) ->
             [%{id: id, delta: @verified_delta, evidence: :verified_lexical_construction}]
 
@@ -266,6 +270,20 @@ defmodule Core.Brain.Activation do
     end)
     |> Enum.uniq()
     |> Enum.take(@max_initial_total)
+  end
+
+  defp grammatically_contradicted?(si, choice, id) do
+    index = Map.get(choice, :token_index)
+    competition = map_or_empty(Map.get(si, :role_competition))
+    roles = map_or_empty(Map.get(competition, :roles))
+
+    case {Map.get(competition, :source), Map.get(roles, index), String.split(id, "|", parts: 3)} do
+      {:core_syntax_and_attested_dictionary_pos,
+       %{status: :supported, pos: expected}, [_, selected, _]}
+      when is_binary(expected) -> selected != expected
+
+      _ -> false
+    end
   end
 
   defp discriminated?(choice) do
