@@ -13,7 +13,7 @@ defmodule Core.Brain.SemanticPropagation do
      an arbitrary base-lemma sense.
   """
 
-  alias Core.Semantic.{EpisodicProjection, VerbLemma}
+  alias Core.Semantic.{EpisodicProjection, SVOEvent, VerbLemma}
 
   @role_delta 0.025
   @lemma_delta 0.03
@@ -86,19 +86,11 @@ defmodule Core.Brain.SemanticPropagation do
   def lemma_pulse(_), do: nil
 
   defp participant_signature(si) do
-    si
-    |> Map.get(:sentence_signatures, [])
-    |> List.wrap()
-    |> Enum.filter(fn
-      %{id: :finite_present_svo_candidate, source: :core_syntax,
-        roles: %{subject_head: subject, predicate: verb, object_head: object}}
-      when is_integer(subject) and is_integer(verb) and is_integer(object) -> true
-      _ -> false
-    end)
-    |> case do
-      [one] -> one
-      _ -> nil
-    end
+    # SVOEvent already checks that the signature covers the entire original
+    # utterance and has exactly one interpretation. Searching *all* finite
+    # present hypotheses here can accidentally count partial substrings as
+    # competing complete clauses (e.g. "the artist draws a").
+    SVOEvent.complete_signature(si)
   end
 
   defp participant_roles(si) do
