@@ -157,6 +157,9 @@ defmodule Core.Response.Attach do
       agency_commands: si_get(si, :agency_commands),
       agency_command_results: si_get(si, :agency_command_results),
       turn_context: Context.from_si(si),
+      # Only revalidated user-report SVO structure; cohort words remain
+      # weak lexical hints, never verified dictionary sense IDs.
+      projected_expression: Core.Response.ProjectedExpression.from_si(si),
       session_id: si_get(si, :session_id)
     }
   end
