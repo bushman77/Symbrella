@@ -91,6 +91,44 @@ defmodule Brain.ActionSelectorTest do
     assert result.selected_candidate.reason == :conversation_continuation
   end
 
+  test "a recognized declarative statement continues conversation instead of unknown-intent clarification" do
+    result =
+      ActionSelector.select(%{
+        intent: :statement,
+        confidence: 0.68,
+        text: "The gardener plants a tree.",
+        mood: %{vigilance: 0.74, inhibition: 0.53, exploration: 0.54}
+      })
+
+    assert result.selected == :answer_user
+    assert result.selected_candidate.reason == :conversation_continuation
+    refute Enum.any?(result.candidates, &(&1.action == :ask_clarifying_question))
+    refute Enum.any?(result.candidates, &(&1.action == :store_memory and
+      &1.score >= result.confidence))
+    assert result.safety_gate == :approved
+  end
+
+  test "a statement intent does not override an actual safety disclosure or explicit memory instruction" do
+    safety =
+      ActionSelector.select(%{
+        intent: :statement,
+        confidence: 0.68,
+        text: "I want to hurt myself.",
+        mood: %{vigilance: 0.8}
+      })
+
+    assert safety.selected == :safe_support
+
+    explicit_memory =
+      ActionSelector.select(%{
+        intent: :memory_write,
+        confidence: 0.68,
+        text: "Remember that my preferred editor is Vim."
+      })
+
+    assert explicit_memory.selected == :store_memory
+  end
+
   test "selects refuse_or_redirect for safety-sensitive intents" do
     result =
       ActionSelector.select(%{
