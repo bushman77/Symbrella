@@ -261,3 +261,82 @@ is read-only until local storage is repaired or recovered.
 Existing snapshots must never be committed to Git or uploaded with bug
 reports. Keep backups local and secured. Clearing \`tmp/\` will intentionally
 erase this experimental synaptic archive.
+
+
+## One-hop, role-conditioned synaptic propagation (shadow v5)
+
+After comprehension and neuron feedback, **before** an experience is recorded,
+\`Core.Brain.SynapticPropagation.attach/2\` inspects existing LIFG candidate
+slates and the independently validated SVO patient. The order matters: an
+experience must not provide artificial evidence for *its own* interpretation.
+
+\`Brain.Synapses.Propagation.compare/4\` models a **read-only reverse traversal**
+of an existing typed connection \`{verb_sense_id, noun_sense_id, :patient}\`:
+the currently established noun context supplies small candidate-specific
+support to the exact verb sense ID already present in this turn's lexical
+slate. Actor relationships are supported at the Brain-level comparator too.
+There is no multi-hop spread, inferred noun or verb, or cross-lemma mapping.
+
+The shadow comparison has two branches with the **same** eligible candidate
+set, ordered as supplied by LIFG:
+
+- **Propagation off:** zero projected support for every candidate.
+- **Propagation on:** compute an independently bounded contribution for
+  matching role and *exact ID* only.
+
+The counterfactual signal rule:
+
+\`\`\`text
+shadow_signal = min(
+  0.03,
+  0.25 * provisional_weight + 1.00 * reviewed_weight
+)
+\`\`\`
+
+\`provisional_weight\` and \`reviewed_weight\` already come from separate,
+capped experience receipts and their review histories. A rejected receipt
+contributes zero. Large ambiguous slates up to **256 senses** are supported
+without arbitrarily priming all the senses of a verb.
+
+Importantly, the **signal-only order** is NOT a second LIFG decision; no
+lexical scores are modified, no cell receives stimulation, no new experience
+is stored by the propagation stage, and no claim of improved comprehension
+has been established. All existing dictionary meanings remain unverified
+until their usual evidence gates are independently satisfied.
+
+Supported comparisons require the complete positive SVO sentence, matching
+LIFG and ATL selected role cells, and a real candidate slate including
+the selected predicate sense. Questions with an unbound object, stale
+frames, unsupported language variants and most ordinary conversational
+sentences remain ineligible.
+
+For inspection:
+
+\`\`\`sh
+mix test apps/brain/test/brain/synapses/receipt_store_test.exs \
+  apps/brain/test/brain/synapses/propagation_test.exs \
+  apps/core/test/core/brain/synaptic_propagation_test.exs \
+  apps/core/test/core/brain/synaptic_experience_test.exs \
+  apps/core/test/core/brain/synaptic_correction_test.exs --trace
+
+mix run scripts/probe_synaptic_consolidation.exs
+mix run scripts/probe_synaptic_propagation.exs
+\`\`\`
+
+The propagation probe uses real production-dictionary comprehension for the
+initial observation and held-out next-turn sentences, plus an isolated in-memory
+synaptic store. It compares on versus off against a matching patient and an
+unrelated patient, and checks for zero mutation.
+
+To disable the new comparison on a Core call, specify
+\`synapse_propagation?: false\`. The \`synapse_shadow?: false\` switch disables
+both recording and automatic trace comparison, though the explicit
+\`SynapticPropagation.compare/2\` developer probe remains read-only.
+
+### Required next gate before using live synaptic signals
+
+Establish an evaluation set with independent contexts, true ambiguity in
+existing verb sense slates, review-grade outcomes, no training/test leakage,
+and comparable baseline LIFG scores. Measure held-out accuracy, abstention,
+contradiction handling and error regressions against disabled propagation.
+Only then consider a bounded opt-in perturbation of candidate scores.
