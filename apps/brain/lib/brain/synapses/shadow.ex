@@ -96,6 +96,14 @@ defmodule Brain.Synapses.Shadow do
 
   def propose_correction(_, _, _), do: %{status: :invalid_evidence}
 
+  @doc "Read-only test of whether an exact evidence report has been recorded (including rejection)."
+  @spec recorded?(binary(), GenServer.server()) :: boolean()
+  def recorded?(evidence, server \\ __MODULE__) when is_binary(evidence) do
+    call({:recorded?, evidence}, server)
+  end
+
+  def recorded?(_, _), do: false
+
   @doc "Read-only aggregate counters with no plaintext experiences."
   @spec snapshot(GenServer.server()) :: map()
   def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
@@ -303,6 +311,12 @@ defmodule Brain.Synapses.Shadow do
       end
 
     {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:recorded?, evidence}, _from, state) do
+    {:reply, valid_evidence?(evidence) and
+       Map.has_key?(state.receipts, receipt(state, evidence)), state}
   end
 
   @impl true
