@@ -102,6 +102,9 @@ else
             lexical_reasons: report.baseline.comprehension_reasons,
             lexical_stats: report.baseline.lexical_decision_stats,
             structural_status: report.baseline.sentence_meaning_status,
+            proposition_type: report.baseline.proposition_type,
+            queried_role: report.baseline.queried_role,
+            structural_unresolved: report.baseline.structural_unresolved,
             uncertain: report.baseline.uncertain,
             episodic_candidates: report.baseline.projected_event_count
           },
@@ -110,6 +113,9 @@ else
             lexical_reasons: report.neural.comprehension_reasons,
             lexical_stats: report.neural.lexical_decision_stats,
             structural_status: report.neural.sentence_meaning_status,
+            proposition_type: report.neural.proposition_type,
+            queried_role: report.neural.queried_role,
+            structural_unresolved: report.neural.structural_unresolved,
             uncertain: report.neural.uncertain,
             episodic_candidates: report.neural.projected_event_count
           }
