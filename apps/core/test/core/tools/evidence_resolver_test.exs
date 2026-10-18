@@ -209,6 +209,11 @@ defmodule Core.Tools.EvidenceResolverTest do
       max_attempts: 2
     )
     assert no_coords.web_evidence.support == nil
+    assert Enum.any?(no_coords.web_evidence.attempts, fn attempt ->
+      attempt.kind == :coordinates and
+        attempt.status == :unavailable and
+        attempt.reason == :entity_mismatch
+    end)
 
     {:ok, rejected, refusal_review} =
       ReflectionLoop.review(question,
