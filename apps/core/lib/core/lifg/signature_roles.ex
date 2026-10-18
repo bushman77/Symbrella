@@ -14,7 +14,20 @@ defmodule Core.LIFG.SignatureRoles do
   def required_pos(si, index) when is_map(si) and is_integer(index) and index >= 0 do
     signatures = si |> Map.get(:sentence_signatures, []) |> List.wrap()
 
-    Enum.find_value(signatures, fn
+    adjudicated_pos =
+      case Map.get(si, :role_competition) do
+        %{source: :core_syntax_and_attested_dictionary_pos, roles: roles}
+        when is_map(roles) ->
+          case Map.get(roles, index) do
+            %{status: :supported, pos: pos} when pos in ["noun", "adjective"] -> pos
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    adjudicated_pos || Enum.find_value(signatures, fn
       %{id: :have_verb_to_infinitive, roles: roles} when is_map(roles) ->
         cond do
           Map.get(roles, :complement) == index -> "verb"
