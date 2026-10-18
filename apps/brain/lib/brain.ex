@@ -261,7 +261,8 @@ defmodule Brain do
 
   @impl true
   def handle_call({:stm, si}, _from, state) when is_map(si) do
-    state = state |> decay_active_cells() |> maybe_orient()
+    state = maybe_orient(state)
+    {active_cells, state} = current_activations(state)
 
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
@@ -269,7 +270,7 @@ defmodule Brain do
 
     si2 =
       si
-      |> Map.put(:active_cells, state.active_cells)
+      |> Map.put(:active_cells, active_cells)
       |> Map.put(:tokens, tokens1)
 
     {:reply, si2, state}
@@ -277,14 +278,14 @@ defmodule Brain do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    state = decay_active_cells(state)
-    {:reply, state, state}
+    {active_cells, state} = current_activations(state)
+    {:reply, %{state | active_cells: active_cells}, state}
   end
 
   @impl true
   def handle_call(:activation_snapshot, _from, state) do
-    state = decay_active_cells(state)
-    {:reply, state.active_cells, state}
+    {active_cells, state} = current_activations(state)
+    {:reply, active_cells, state}
   end
 
   @impl true
@@ -423,13 +424,23 @@ defmodule Brain do
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
 
-  defp decay_active_cells(state) do
+  defp current_activations(state) do
     now = System.monotonic_time(:millisecond)
-
-    {active, times} =
+    {current, _sample_times} =
       CellActivation.decay_reports(state.active_cells, state.active_cell_times, now)
 
-    %{state | active_cells: active, active_cell_times: times}
+    # Prune resting neurons, but retain the original reported activation and
+    # stimulus timestamp for live cells. Snapshot reads must not reset their
+    # clock or make a queued stimulus appear older than a chart refresh.
+    ids = Map.keys(current)
+
+    state = %{
+      state
+      | active_cells: Map.take(state.active_cells, ids),
+        active_cell_times: Map.take(state.active_cell_times, ids)
+    }
+
+    {current, state}
   end
 
 
