@@ -159,6 +159,7 @@ defmodule Core do
     |> StateDump.capture(:amygdala)
     |> Core.LIFG.FuzzyEntities.attach(opts)
     |> StateDump.capture(:fuzzy_entities)
+    |> Core.Brain.Activation.overlay_candidate_slates()
     |> LifgAttach.run_and_attach(lifg_opts)
     |> StateDump.capture(:lifg)
     |> Core.MWE.SenseResolution.rerank_contiguous()
