@@ -92,6 +92,23 @@ defmodule Core.Semantic.WhObjectQuestionTest do
     assert SentenceMeaning.build(wrong).status == :not_yet_interpreted
   end
 
+  test "stale ATL role IDs cannot override actual lexical winners" do
+    si = input()
+
+    slate =
+      update_in(si.atl_slate.constituents, fn entries ->
+        Enum.map(entries, fn
+          %{id: :wh_aux_object_question, roles: roles} = question ->
+            altered = put_in(roles, [:predicate, :sense_id], "draw|verb|999")
+            %{question | roles: altered}
+
+          other -> other
+        end)
+      end)
+
+    assert SentenceMeaning.build(%{si | atl_slate: slate}).status == :not_yet_interpreted
+  end
+
   test "missing grammar adjudication cannot manufacture resolved question meaning" do
     si = input()
     missing = %{si | role_competition: %{}}
