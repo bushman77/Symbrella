@@ -48,6 +48,7 @@ defmodule Core.Brain.SynapticExperience do
 
       {:ok, %{
         provenance: :user_reported,
+        session_id: Map.get(si, :session_id),
         evidence: evidence,
         edges: [
           {verb_id, actor_id, :actor},
