@@ -144,9 +144,18 @@ defmodule Core.Brain.RoleSemanticContext do
     verified_sense_equivalence?: false}
 
   defp from_selected(si, role, index, opts) do
-    with [choice] <- Enum.filter(List.wrap(Map.get(si, :lifg_choices)),
-           &(is_map(&1) and Map.get(&1, :token_index) == index)),
-         %{id: noun_id, definition: definition} <- choice,
+    choices =
+      Enum.filter(List.wrap(Map.get(si, :lifg_choices)),
+        &(is_map(&1) and Map.get(&1, :token_index) == index))
+
+    case choices do
+      [choice] -> from_choice(si, choice, role, opts)
+      _ -> unavailable(role, :missing_or_duplicate_noun_choice)
+    end
+  end
+
+  defp from_choice(si, choice, role, opts) do
+    with %{id: noun_id, definition: definition} <- choice,
          true <- is_binary(noun_id) and byte_size(noun_id) <= 128,
          [norm, "noun", suffix] <- String.split(noun_id, "|", parts: 3),
          true <- suffix != "" and suffix != "fallback",
