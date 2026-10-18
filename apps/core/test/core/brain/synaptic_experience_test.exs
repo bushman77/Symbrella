@@ -273,11 +273,12 @@ defmodule Core.Brain.SynapticExperienceTest do
              senses_verified?: false,
              candidates: [
                %{id: "draws|verb|1", shadow_support: support},
-               %{id: "draws|verb|2", shadow_support: 0.0}
+               %{id: "draws|verb|2", shadow_support: other_support}
              ]} =
              SynapticExperience.preview(complete, ["draws|verb|1", "draws|verb|2"])
 
     assert_in_delta support, 0.01, 1.0e-8
+    assert_in_delta other_support, 0.0, 1.0e-8
     assert Shadow.snapshot() == before
 
     assert %{status: :ineligible_or_incomplete_slate} =
