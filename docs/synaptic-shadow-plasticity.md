@@ -879,3 +879,77 @@ different from proving the user intended a memory operation.
 Neither meaning verification nor role-confidence requirements were
 relaxed. Successful offline fixture tests alone cannot guarantee
 that all live messages will have complete dictionary evidence.
+
+
+## Live noun-score tie audit and unanimous-gloss shadow support (v11)
+
+A live Maple Ridge independent SVO probe for
+"The baker cooks a meal." confirmed the structural statement path and
+returned one validated episodic candidate. The noun-role restriction
+rejected BOTH selected noun senses not because dictionary glosses
+were missing, but because **their full LIFG probability slates had
+exact ties within the same noun surface**: four competing
+`baker|noun|N` entries and nine `meal|noun|N` entries had equal
+scores. This is real uncalibrated sense ambiguity, not proof that
+`baker|noun|1` and `meal|noun|1` are the meanings intended.
+
+The role context now has a **second, tightly bounded, read-only
+fallback** specifically for exact ties. The existing unique-noun
+admission, transitivity and specialist restriction gates remain
+unchanged.
+
+- It first checks that the entire LIFG probability map is valid and
+  normalized, the selected noun ID is highest-scored among its
+  same-surface noun alternatives, and at least two IDs are tied
+  within `1.0e-6`. This is NOT a confidence measure.
+- It reads only existing dictionary BrainCells for that noun norm,
+  bounded to 256 retrieved rows and **at most 16 tied noun senses**.
+  Each tied ID must occur *exactly once*, have correct noun POS/norm,
+  a nonempty bounded definition, and the selected ID's definition
+  must agree exactly with its already-active LIFG/BrainCell evidence.
+  Missing, duplicated, stale or inconsistent rows fail closed.
+- It extracts a tiny number of non-scaffolding words from *every*
+  tied sense definition and retains only their **intersection**.
+  The intersection can be used as a weak, provenance-tagged
+  one-hop role signal. **No particular noun sense is picked or
+  verified.** A lack of unanimous words gives
+  `:no_unanimous_noun_gloss_terms` and no expanded score.
+  A near-tie that isn't exact also fails closed.
+- The evidence appears in live Explain with
+  `:grounded_tie_consensus`, original tied noun IDs, glossary terms,
+  and provenance `:unanimous_tied_dictionary_glosses`. Only original
+  utterance words may satisfy specialized domain requirements.
+  No new assertion or persistent event is created by the fallback.
+- The validator can emit a **provisional** verb hypothesis if this
+  unanimity-derived patient evidence meets its **existing**
+  thresholds; otherwise it abstains. No literal dictionary
+  synonymy or human gold answer is inferred. This remains shadow
+  diagnostics; production LIFG, responses, ATL, BrainCells and
+  synapses are untouched.
+
+New regression cases verify a shared `food` gloss across tied
+`meal` senses, conflicting meal definitions causing abstention,
+missing/duplicate noun cells, a nonmaximal nominal winner, and
+`cricket` appearing only in noun glosses NOT overriding the
+explicit cricket-bowling restriction.
+
+Run:
+
+```sh
+cd ~/Symbrella
+git pull --ff-only origin development
+mix test apps/core/test/core/brain/role_semantic_context_test.exs \
+  apps/core/test/core/brain/semantic_sense_validator_test.exs \
+  apps/core/test/core/brain/semantic_sense_shadow_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/explain_evidence_test.exs \
+  --trace
+mix run scripts/probe_live_noun_admission.exs
+mix run scripts/probe_role_semantic_context.exs
+```
+
+The noun-admission probe now prints all exact tied IDs **and their
+original dictionary definitions** to reveal whether the real
+`baker` and `meal` inventories actually share any usable terms.
+Synthetic test glosses establish correctness of the mechanism, not
+real-world coverage: the actual nine `meal` definitions may
+disagree substantially and produce a justified abstention.
