@@ -140,6 +140,12 @@ defmodule Core.Brain.ActivationProbe do
       senses: si |> choices() |> Enum.map(&choice_summary/1),
       comprehension_degraded?: Map.get(comprehension, :degraded?),
       comprehension_reasons: Map.get(comprehension, :reasons, []),
+      lexical_decision_stats: Map.get(comprehension, :stats, %{}),
+      # A fully revalidated participant assertion can be structurally understood
+      # while its individual dictionary senses remain weak. Report both.
+      structural_interpretation?:
+        get(Map.get(si, :sentence_meaning), :status) == :structurally_interpreted,
+      structural_kind: get(Map.get(si, :sentence_meaning), :kind),
       verified_lexical_meanings: Map.get(comprehension, :lexical_meanings, []),
       uncertain: Map.get(comprehension, :uncertain, []),
       sentence_meaning_status: get(Map.get(si, :sentence_meaning), :status),
@@ -175,6 +181,8 @@ defmodule Core.Brain.ActivationProbe do
       changed_sense_selections: changed,
       degraded_changed?:
         Map.get(baseline, :comprehension_degraded?) != Map.get(neural, :comprehension_degraded?),
+      structural_status_changed?:
+        Map.get(baseline, :sentence_meaning_status) != Map.get(neural, :sentence_meaning_status),
       projected_event_count_delta:
         Map.get(neural, :projected_event_count, 0) - Map.get(baseline, :projected_event_count, 0)
     }
