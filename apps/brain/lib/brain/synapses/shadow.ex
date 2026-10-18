@@ -36,6 +36,8 @@ defmodule Brain.Synapses.Shadow do
     else
       {:error, :not_running}
     end
+  catch
+    :exit, _ -> {:error, :not_running}
   end
 
   def observe(_), do: {:error, :invalid_observation}
@@ -85,9 +87,9 @@ defmodule Brain.Synapses.Shadow do
           MapSet.size(state.seen) >= @max_experiences ->
             {:reply, {:error, :experience_capacity}, state}
 
-          Enum.any?(unique_edges, fn key ->
-            not Map.has_key?(state.edges, key) and map_size(state.edges) >= @max_edges
-          end) ->
+          map_size(state.edges) +
+              Enum.count(unique_edges, &(not Map.has_key?(state.edges, &1))) >
+              @max_edges ->
             {:reply, {:error, :edge_capacity}, state}
 
           true ->
