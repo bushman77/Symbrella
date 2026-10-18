@@ -364,15 +364,15 @@ defmodule Core.Response.LlmSynthesis do
       |> Map.get(:features, %{})
       |> Map.get(:projected_expression)
 
-    case ProjectedExpression.repair_echo(user_text, text, frame) do
-      {:repaired, replacement} ->
+    case ProjectedExpression.review_draft(user_text, text, frame) do
+      {:repaired, trigger, replacement} ->
         {:ok, reviewed, review} =
           ReflectionLoop.review(user_text, replacement, context)
 
         {reviewed, Map.put(review, :projected_expression_repair, %{
           attempted?: true,
           applied?: reviewed != text,
-          trigger: :exact_report_echo,
+          trigger: trigger,
           source: :revalidated_sentence_roles,
           original_reflection_status: Map.get(reflection, :status),
           promoted_sense?: false,
