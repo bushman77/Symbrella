@@ -48,7 +48,7 @@ defmodule Core.Response.SemanticRoleFidelityTest do
   test "explicit actor/patient reversal is detected without a new verb sense" do
     source = frame()
     report = SemanticRoleFidelity.audit(source.sentence,
-      "The meal cooks a baker.", source)
+      "A meal cooks the baker.", source)
 
     assert report.status == :role_substitution_detected
     assert report.mismatched_roles == [:actor, :patient]
