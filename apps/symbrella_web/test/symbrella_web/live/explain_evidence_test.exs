@@ -424,7 +424,7 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert values["status"] == ":repair"
     assert values["issues"] =~ ":semantic_role_drift"
     assert values["role fidelity review"] == ":role_substitution_detected"
-    assert values["role differences"] == "[:predicate, :patient]"
+    assert values["role differences"] == ":predicate, :patient"
     refute Map.has_key?(values, "initial model draft")
   end
 
