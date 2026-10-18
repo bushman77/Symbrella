@@ -16,6 +16,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Telemetry
   alias Core.Response.Context
   alias Core.Response.AnswerPolish
+  alias Core.Response.ProjectedExpression
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
@@ -337,6 +338,9 @@ defmodule Core.Response.LlmSynthesis do
         {out, reflection} =
           maybe_revise_evidence(user_text, draft, context, grounded_out, grounded_reflection)
 
+        {out, reflection} =
+          maybe_repair_projected_echo(user_text, out, context, reflection)
+
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}
 
@@ -347,6 +351,36 @@ defmodule Core.Response.LlmSynthesis do
       {:error, reason} ->
         Logger.debug("[LlmSynthesis] LLM error: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # Applies only to structural user-reported statements, after every
+  # ordinary model revision/review step. The fallback restates roles, NOT
+  # a verified event, motive, location, or selected dictionary sense.
+  # Let the normal reflection policy inspect the deterministic paraphrase.
+  defp maybe_repair_projected_echo(user_text, text, context, reflection) do
+    frame =
+      context
+      |> Map.get(:features, %{})
+      |> Map.get(:projected_expression)
+
+    case ProjectedExpression.repair_echo(user_text, text, frame) do
+      {:repaired, replacement} ->
+        {:ok, reviewed, review} =
+          ReflectionLoop.review(user_text, replacement, context)
+
+        {reviewed, Map.put(review, :projected_expression_repair, %{
+          attempted?: true,
+          applied?: reviewed != text,
+          trigger: :exact_report_echo,
+          source: :revalidated_sentence_roles,
+          original_reflection_status: Map.get(reflection, :status),
+          promoted_sense?: false,
+          stored_memory?: false
+        })}
+
+      :unchanged ->
+        {text, reflection}
     end
   end
 
