@@ -159,6 +159,7 @@ defmodule Core.Semantic.SentenceMeaning do
          true <- wh.token_index == 0 and auxiliary.token_index == 1 and
                    determiner.token_index == 2 and subject.token_index == 3 and
                    predicate.token_index == 4,
+         true <- object_roles_agree_with_winners?(si, atl.roles),
          {:ok, wh_surface} <- surface_at(indexed, 0),
          {:ok, auxiliary_surface} <- surface_at(indexed, 1),
          {:ok, subject_surface} <- surface_range(indexed, 2, 3),
@@ -205,6 +206,29 @@ defmodule Core.Semantic.SentenceMeaning do
     else
       _ -> nil
     end
+  end
+
+  # A constituent cannot independently assign BrainCell IDs. Each role
+  # must match both ATL's token-level winner and the final lexical selection.
+  defp object_roles_agree_with_winners?(si, roles) do
+    atl = Map.get(si, :atl_slate) || %{}
+    winners = Map.get(atl, :winners)
+    selections =
+      case Map.get(si, :semantic_choices) do
+        selected when is_list(selected) -> selected
+        _ -> Map.get(si, :lifg_choices)
+      end
+
+    is_list(winners) and is_list(selections) and
+      Enum.all?(roles, fn {_role, %{token_index: index, sense_id: sense_id}} ->
+        Enum.count(winners, fn winner ->
+          Map.get(winner, :token_index) == index and Map.get(winner, :id) == sense_id
+        end) == 1 and
+          Enum.count(selections, fn selected ->
+            Map.get(selected, :token_index) == index and
+              (Map.get(selected, :id) || Map.get(selected, :chosen_id)) == sense_id
+          end) == 1
+      end)
   end
 
   # A validated participant event provides structural sentence understanding,
