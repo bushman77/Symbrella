@@ -178,4 +178,113 @@ defmodule Core.Brain.SynapticExperienceTest do
     assert Shadow.snapshot().live_priming? == false
     assert Shadow.snapshot().persisted? == false
   end
+
+  test "reviewed rejection removes an experience without allowing replay to restore it" do
+    si = experience("engraver", "plaque")
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(si).trace)
+    assert %{weight: w} = Shadow.edge("draws|verb|1", "plaque|noun|1", :patient)
+    assert_in_delta w, 0.01, 1.0e-8
+
+    assert {:ok, :rejected} = SynapticExperience.review(si, :reject, "local-reviewer")
+    assert Shadow.edge("draws|verb|1", "plaque|noun|1", :patient) == nil
+    assert Shadow.edge("draws|verb|1", "engraver|noun|1", :actor) == nil
+
+    assert %{decision: :duplicate} =
+             hd(SynapticExperience.attach(%{si | session_id: "replay"}).trace)
+    assert Shadow.edge("draws|verb|1", "plaque|noun|1", :patient) == nil
+
+    assert {:ok, :unchanged} = SynapticExperience.review(si, :reject, "local-reviewer")
+
+    # A new explicit review may reverse a mistaken rejection; duplicate
+    # statements themselves can never undo the rejection.
+    assert {:ok, :confirmed} =
+             SynapticExperience.review(si, :confirm, "local-reviewer")
+    assert %{weight: confirmed_weight, experiences: 1,
+             reviewed_experiences: 1, lexical_sense_verified?: false} =
+             Shadow.edge("draws|verb|1", "plaque|noun|1", :patient)
+    assert_in_delta confirmed_weight, 0.03, 1.0e-8
+  end
+
+  test "rejecting one experience preserves reinforcement from a different one" do
+    first = experience("illustrator", "banner")
+    second = experience("illustrator", "pamphlet")
+
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(first).trace)
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(second).trace)
+
+    assert %{weight: combined, experiences: 2} =
+             Shadow.edge("draws|verb|1", "illustrator|noun|1", :actor)
+    assert_in_delta combined, 0.02, 1.0e-8
+
+    assert {:ok, :rejected} = SynapticExperience.review(first, :reject, "local-reviewer")
+
+    assert %{weight: remaining, experiences: 1} =
+             Shadow.edge("draws|verb|1", "illustrator|noun|1", :actor)
+    assert_in_delta remaining, 0.01, 1.0e-8
+
+    assert Shadow.edge("draws|verb|1", "banner|noun|1", :patient) == nil
+    assert %{weight: 0.01} =
+             Shadow.edge("draws|verb|1", "pamphlet|noun|1", :patient)
+  end
+
+  test "human confirmation adjusts contribution once, not on repeated reviews" do
+    si = experience("cartographer", "chart")
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(si).trace)
+    assert {:ok, :confirmed} = SynapticExperience.review(si, :confirm, "human-curator")
+    initial = Shadow.edge("draws|verb|1", "chart|noun|1", :patient)
+    assert_in_delta initial.weight, 0.03, 1.0e-8
+    assert {:ok, :unchanged} = SynapticExperience.review(si, :confirm, "human-curator")
+    assert Shadow.edge("draws|verb|1", "chart|noun|1", :patient) == initial
+    assert initial.lexical_sense_verified? == false
+  end
+
+  test "unreviewed, unknown and forged correction requests never change weights" do
+    si = experience("surveyor", "map")
+    assert {:error, :unknown_experience} =
+             SynapticExperience.review(si, :reject, "local-reviewer")
+    assert {:error, :invalid_review} =
+             SynapticExperience.review(si, :reject, "")
+    assert {:error, :invalid_review} =
+             SynapticExperience.review(si, :reject, :not_a_human_identity)
+
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(si).trace)
+    before = Shadow.edge("draws|verb|1", "map|noun|1", :patient)
+    [event] = si.episodic_candidates
+
+    forged = %{si | episodic_candidates: [%{event | value: "different"}]}
+    assert {:error, :ineligible} =
+             SynapticExperience.review(forged, :reject, "local-reviewer")
+    assert Shadow.edge("draws|verb|1", "map|noun|1", :patient) == before
+  end
+
+  test "shadow preview compares only existing lexical candidates and never rewrites LIFG" do
+    si = experience("painter", "fresco")
+    assert %{decision: :recorded} = hd(SynapticExperience.attach(si).trace)
+
+    rows = [
+      %{id: "draws|verb|1", token_index: 2, norm: "draws"},
+      %{id: "draws|verb|2", token_index: 2, norm: "draws"}
+    ]
+
+    complete = Map.put(si, :sense_candidates, %{2 => rows})
+    before = Shadow.snapshot()
+
+    assert %{status: :shadow_only, affects_lifg?: false,
+             senses_verified?: false,
+             candidates: [
+               %{id: "draws|verb|1", shadow_support: support},
+               %{id: "draws|verb|2", shadow_support: 0.0}
+             ]} =
+             SynapticExperience.preview(complete, ["draws|verb|1", "draws|verb|2"])
+
+    assert_in_delta support, 0.01, 1.0e-8
+    assert Shadow.snapshot() == before
+
+    assert %{status: :ineligible_or_incomplete_slate} =
+             SynapticExperience.preview(complete, ["not-in-dictionary|verb|1"])
+    assert %{status: :ineligible_or_incomplete_slate} =
+             SynapticExperience.preview(si, ["draws|verb|1"])
+    assert si.lifg_choices == complete.lifg_choices
+  end
+
 end
