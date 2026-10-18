@@ -13,6 +13,8 @@ defmodule Core.Brain.NounTieConceptAudit do
   currently active BrainCell and LIFG choice.
   """
 
+  import Kernel, except: [inspect: 2]
+
   alias Core.Brain.SynapticExperience
   alias Core.Semantic.SVOEvent
 
