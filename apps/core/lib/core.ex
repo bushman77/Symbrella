@@ -124,6 +124,11 @@ defmodule Core do
     |> StateDump.capture(:mwe_early)
     |> Core.Pipeline.LTM.run(opts)
     |> StateDump.capture(:ltm)
+    # Preserve the STM runtime activity separately from lexical DB candidates.
+    # Feed exact BrainCell IDs into LIFG as bounded prior activation, and only
+    # recruit complete, small candidate slates (large ambiguous sets are skipped).
+    |> Core.Brain.Activation.prime(opts)
+    |> StateDump.capture(:neuron_priming)
     |> TokenFilters.keep_only_word_boundary_tokens()
     |> StateDump.capture(:word_boundaries)
     |> Core.MWE.Stage.run(:late, opts)
