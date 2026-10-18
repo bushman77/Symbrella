@@ -233,10 +233,20 @@ defmodule Core.Brain.SemanticCohortTest do
 
     assert SemanticCohort.evaluate(%{si | source: :assistant}, evidence).status ==
              :skipped
+    assert SemanticCohort.evaluate(%{si | atl_slate: %{winners: []}}, evidence).status ==
+             :skipped
     assert SemanticCohort.evaluate(%{si | sentence_meaning: nil}, evidence).status ==
              :skipped
     assert SemanticCohort.evaluate(%{si | sentence: "Who plants a tree?"}, evidence).status ==
              :skipped
+  end
+
+  test "duplicate dictionary sense rows cannot manufacture shared cohort evidence" do
+    si = interpreted()
+    duplicated = row("plant|verb|1", "To place a plant in soil.")
+
+    report = report([duplicated, duplicated])
+    assert SemanticCohort.evaluate(si, report).status == :skipped
   end
 
   test "live shadow cohorts share one validator call and preserve all prior Core fields" do
