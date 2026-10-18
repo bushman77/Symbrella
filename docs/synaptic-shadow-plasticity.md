@@ -953,3 +953,45 @@ original dictionary definitions** to reveal whether the real
 Synthetic test glosses establish correctness of the mechanism, not
 real-world coverage: the actual nine `meal` definitions may
 disagree substantially and produce a justified abstention.
+
+
+## Score ties vs shared semantic evidence (v12 audit-only)
+
+A subsequent 8-sentence real dictionary A/B run found **1 noun-role
+consensus** (the two tied `tree` senses shared *plant/shrub*), but
+**0 changes in the final verb-sense hypothesis**: both
+`plant|verb|1` and `plant|verb|2` received identical `0.1015`
+patient evidence, so the validator correctly abstained. Other noun
+roles mostly lacked unanimous content terms across their tied senses.
+The A/B summary previously undercounted grounded roles because it
+ignored `:tie_consensus_only`; that counter now recognizes it and
+separately reports unique-sense and tied-consensus evidence.
+
+A tie in LIFG probabilities **does not imply** the competing senses
+have common semantic content. To distinguish these cases, the
+read-only `Core.Brain.NounTieConceptAudit.inspect/2` inspects real
+dictionary definitions for *every* exact top-scored noun in a bounded
+tie (at most 16). It verifies exact dictionary ID membership, selected
+gloss concordance and independent structural SVO proof, then reports:
+
+- **Unanimous gloss tokens** found in all tied definitions
+- **Partial/recurrent tokens** found in at least two but not all
+  definitions, with their supporting dictionary sense IDs
+- An explicit `:ambiguous_with_no_unanimous_terms` when there is
+  disagreement; no single sense is selected
+
+These are transparent token associations, **not** verified concept
+equivalence, entailment, generalization, calibrated likelihoods or
+an authorization to use partial agreement in live LIFG.
+
+```sh
+mix test apps/core/test/core/brain/noun_tie_concept_audit_test.exs \
+  apps/core/test/core/brain/role_semantic_context_test.exs --trace
+
+mix run scripts/audit_noun_tie_concepts.exs
+mix run scripts/probe_role_semantic_context.exs
+```
+
+The new audit never changes sense scores, episodic assertions,
+hippocampal memories, LIFG/ATL, synapses, or response text. It is
+separate from the existing fail-closed unanimous-gloss validator.
