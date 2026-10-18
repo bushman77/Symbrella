@@ -360,7 +360,7 @@ synthetic "winner" scores. Only evaluate when:
 4. The candidate slate has **at least two distinct real verb sense IDs** and
    at most 256 total candidates when `synapse_eval_full_scores?: true` is
    explicitly enabled in LIFG options. Stage1 currently omits large \`candidate_probs\`
-   maps; cases with 65+ candidates are marked insufficient rather than
+   maps; cases with more than 256 candidates are marked insufficient rather than
    silently evaluating a top-two subset.
 5. There is an available read-only propagation result for the currently
    validated patient role. No other lexical role is implicitly inferred.
@@ -378,7 +378,7 @@ A separate \`aggregate/1\` reports total eligible cases, missing labels,
 skips, projected flips, abstention transitions and, only with independently
 supplied labels, right-to-wrong versus wrong-to-right changes.
 
-**No accuracy figure is inferred from Synbrella's own LIFG selection**, from
+**No accuracy figure is inferred from Symbrella's own LIFG selection**, from
 the previously learned sense, or from the presence of a positive signal.
 A \`gold_id\` is accepted only when it exists in the current scored dictionary
 slate AND the caller explicitly supplies \`split: :holdout\` and
