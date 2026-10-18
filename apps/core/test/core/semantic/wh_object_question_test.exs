@@ -2,6 +2,7 @@ defmodule Core.Semantic.WhObjectQuestionTest do
   use ExUnit.Case, async: true
 
   alias Core.Semantic.SentenceMeaning
+  alias Core.Comprehension.Summary
   alias Core.Syntax.Signatures
   alias Brain.LIFG.RoleCompetition
 
@@ -72,6 +73,20 @@ defmodule Core.Semantic.WhObjectQuestionTest do
       provenance: %{frame: :wh_aux_object_question}} = meaning.proposition
 
     refute Map.has_key?(meaning.proposition.content, :patient)
+  end
+
+  test "comprehension reports structural understanding without inflating weak lexical confidence" do
+    si = input() |> SentenceMeaning.attach()
+    summary = Summary.build(si)
+
+    assert summary.sentence_meaning.kind == :wh_object_question
+    assert summary.sentence_meaning.status == :structurally_interpreted
+    assert summary.sentence_proposition.queried.role == :patient
+    assert summary.sentence_proposition.epistemic_status == :question_not_assertion
+    assert summary.degraded?
+    assert summary.understood == []
+    assert summary.lexical_meanings == []
+    assert :weak_decision_rate_high in summary.reasons
   end
 
   test "an ATL noun sense for predicate cannot become a structural question" do
