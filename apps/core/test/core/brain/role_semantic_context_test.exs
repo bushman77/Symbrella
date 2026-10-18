@@ -154,7 +154,7 @@ defmodule Core.Brain.RoleSemanticContextTest do
     refute Enum.any?(on.eligible_top, &(&1.id == "throw|verb|5"))
   end
 
-  test "ambiguous selected noun sense fails closed even with a useful gloss" do
+  test "close but non-exact noun scores abstain without claiming a tie consensus" do
     original = si("baker", "cooks", "cook", "meal",
       "A baker.", "Food prepared and eaten.")
     changed = Map.update!(original, :lifg_choices, fn choices ->
@@ -170,7 +170,19 @@ defmodule Core.Brain.RoleSemanticContextTest do
     report = RoleSemanticContext.extract(changed)
     patient = Enum.find(report.contexts, &(&1.role == :patient))
     assert patient.status == :unavailable_or_ambiguous
-    assert patient.reason == :ambiguous_same_surface_noun_senses
+    assert patient.reason == :no_exact_tie_to_consense
+
+    # 0.51 vs 0.49 is within the confidence-margin gate but is not
+    # an exact equal-score tie, so dictionary consensus must not run.
+    assert %{status: :unavailable_or_ambiguous,
+             reason: :no_exact_tie_to_consense} =
+      changed
+      |> RoleSemanticContext.extract(
+        fetch_noun_senses: fn _ ->
+          raise "non-tie must not fetch noun consensus definitions"
+        end)
+      |> Map.get(:contexts)
+      |> Enum.find(&(&1.role == :patient))
 
     senses = [
       sense("cook", 1, "To prepare food for eating."),
