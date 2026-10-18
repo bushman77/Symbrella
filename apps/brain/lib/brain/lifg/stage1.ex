@@ -879,13 +879,16 @@ defmodule Brain.LIFG.Stage1 do
             ClosedClass.closed_class_candidate?(provisional_candidate)
 
         {cal_scores, semantic_control} =
-          if provisional_closed_class? do
+          if provisional_closed_class? and focus.mode != :focused do
             {cal_scores, %{
               applied?: false, reason: :closed_class_winner, adjustments: []
             }}
           else
+            semantic_pos =
+              if focus.mode == :focused, do: focus.focus_pos, else: pos_of(provisional_candidate)
+
             semantic_opts =
-              Keyword.put(ctx.semantic_control_opts, :focus_pos, pos_of(provisional_candidate))
+              Keyword.put(ctx.semantic_control_opts, :focus_pos, semantic_pos)
 
             SemanticControl.apply(cal_scores, scored_rows, semantic_opts)
           end
