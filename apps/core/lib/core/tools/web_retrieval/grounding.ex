@@ -544,11 +544,18 @@ defmodule Core.Tools.WebRetrieval.Grounding do
 
   defp source_matches_place?(_, _), do: false
 
+  # City names may be expressed with either a comma-qualified region
+  # ("Maple Ridge, BC") or a whitespace suffix ("maple ridge bc").
+  # The coordinate providers are responsible for checking the jurisdiction
+  # against the underlying entity, not the title-only display comparison.
+  # Strip ONLY recognized Canadian province/territory suffixes.
+  @canadian_region_suffix ~r/(?:,\s*|\s+)(?:BC|British\s+Columbia|AB|Alberta|SK|Saskatchewan|MB|Manitoba|ON|Ontario|QC|Quebec|Québec|NB|New\s+Brunswick|NS|Nova\s+Scotia|PE|Prince\s+Edward\s+Island|NL|Newfoundland\s+and\s+Labrador|YT|Yukon|NT|Northwest\s+Territories|NU|Nunavut)\s*\z/iu
+
   defp same_place?(a, b) when is_binary(a) and is_binary(b) do
     city = fn text ->
       text
-      |> String.split(",", parts: 2)
-      |> hd()
+      |> String.trim()
+      |> String.replace(@canadian_region_suffix, "")
       |> String.downcase()
       |> String.replace(~r/[^\p{L}\p{M}]+/u, " ")
       |> String.trim()
