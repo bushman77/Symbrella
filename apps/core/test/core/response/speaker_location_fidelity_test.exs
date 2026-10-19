@@ -82,6 +82,25 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
     end
   end
 
+  test "a denial after an already corrected answer cannot introduce a new self-location" do
+    context = %{
+      review_history: [
+        %{"role" => "user", "content" => "where am i atm"},
+        %{"role" => "assistant", "content" =>
+          "I can't verify your current physical location from the conversation."}
+      ]
+    }
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review("no you are not",
+        "I'm currently located in Kamloops, British Columbia.", context)
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert final =~ "don't have verified evidence"
+    refute final =~ "currently located in Kamloops"
+  end
+
   test "a correct admission of uncertainty is not rewritten" do
     unsure = "I can't determine your current location from this chat."
     {:ok, ^unsure, reflection} = ReflectionLoop.review(@where_am_i, unsure, %{})
@@ -125,8 +144,6 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
       [%{"role" => "assistant", "content" => @incorrect_self_location}],
       [%{"role" => "user", "content" => "where is kamloops bc"},
        %{"role" => "assistant", "content" => @incorrect_self_location}],
-      [%{"role" => "user", "content" => @where_am_i},
-       %{"role" => "assistant", "content" => "I cannot establish that."}],
       [%{"role" => "user", "content" => @where_am_i},
        %{"role" => "assistant", "content" => @incorrect_self_location},
        %{"role" => "user", "content" => "what time is it"},
