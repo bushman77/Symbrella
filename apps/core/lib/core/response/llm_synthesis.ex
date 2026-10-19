@@ -158,11 +158,14 @@ defmodule Core.Response.LlmSynthesis do
         context
       end
 
-    # Give the model Symbrella's current cognitive state rather than a
-    # sentence-shaped factual answer. History informs continuity, but never
-    # becomes a source of external factual verification.
+    # Reflection needs only the immediately preceding same-session pair
+    # to interpret a direct user correction ("no you are not"). A prior
+    # assistant message is a correction TARGET, never geographic evidence.
+    # This bounded history is kept out of the authoritative facts.
     context =
-      Map.put(context, :response_frame, ResponseFrame.build(context, history))
+      context
+      |> Map.put(:review_history, Enum.take(history, -2))
+      |> Map.put(:response_frame, ResponseFrame.build(context, history))
 
     case AuthoritativeAnswerPlan.build(context) do
       %{kind: :verified_population_comparison} = plan ->
