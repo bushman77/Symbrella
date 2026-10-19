@@ -67,6 +67,14 @@ defmodule Core.Semantic.ParticipantSpatialTest do
     |> EpisodicProjection.attach()
   end
 
+  # Ordinary user reports are persisted by SideEffects.record_turn/4 without
+  # becoming an unsolicited memory-write acknowledgement. Tests disable the LLM,
+  # so speech generation fails independently of verified event persistence.
+  defp assert_report_response_without_memory_ack(plan) do
+    assert plan.response_meta.response_source == :model_unavailable
+    refute Map.has_key?(plan.response_meta, :persistence_status)
+  end
+
   test "attested morphology builds a full progressive participant signature" do
     si = input() |> Signatures.attach()
 
@@ -134,8 +142,7 @@ defmodule Core.Semantic.ParticipantSpatialTest do
 
     planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
 
-    assert planned.response_meta.response_source == :symbolic_conversation
-    assert planned.response_meta.persistence_status == :persisted
+    assert_report_response_without_memory_ack(planned)
 
     assert %{value: "the fence", participants: %{"actor" => "a bird",
               "position" => "on", "location" => "the fence"}} =
@@ -175,8 +182,7 @@ defmodule Core.Semantic.ParticipantSpatialTest do
       |> Map.put(:session_id, sid)
       |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
 
-    assert validated.response_meta.response_source == :symbolic_conversation
-    assert validated.response_meta.persistence_status == :persisted
+    assert_report_response_without_memory_ack(validated)
 
     assert %{status: "asserted", value: "the fence"} =
              Brain.Hippocampus.user_event(owner, "bird", "spatial_state")
@@ -218,8 +224,7 @@ defmodule Core.Semantic.ParticipantSpatialTest do
       |> Map.put(:session_id, sid)
       |> Core.Response.Attach.maybe_build_response_plan(response: :auto)
 
-    assert planned.response_meta.response_source == :symbolic_conversation
-    assert planned.response_meta.persistence_status == :persisted
+    assert_report_response_without_memory_ack(planned)
 
     assert %{status: "asserted", value: "the fence",
               participants: %{"actor" => "a bird"}} =
@@ -257,9 +262,7 @@ defmodule Core.Semantic.ParticipantSpatialTest do
 
     planned = Core.Response.Attach.maybe_build_response_plan(si, response: :auto)
 
-    assert planned.response_text ==
-             "I’ve recorded what you told me: A bird is sitting on the fence."
-    assert planned.response_meta.persistence_status == :persisted
+    assert_report_response_without_memory_ack(planned)
 
     assert %{status: "asserted", participants: %{"actor" => "a bird", "predicate" => "sitting",
               "position" => "on", "location" => "the fence"}} =
