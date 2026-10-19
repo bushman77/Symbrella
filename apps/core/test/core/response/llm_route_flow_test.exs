@@ -151,6 +151,55 @@ defmodule Core.Response.LlmRouteFlowTest do
     refute reply =~ "I'm currently located in Kamloops"
   end
 
+  test "full response route stores repaired location and uses it for the next correction" do
+    session_id = "speaker-location-two-turn-#{System.unique_integer([:positive])}"
+
+    {_tone, first, first_meta} =
+      Response.plan(%{
+        intent: :ask, confidence: 0.9, session_id: session_id,
+        text: "where am i atm"
+      }, %{})
+
+    assert first_meta.response_source == :llm
+    assert first_meta.response_reflection.status == :repair
+    assert :speaker_location_fidelity in first_meta.response_reflection.issues
+    assert first =~ "can't verify your current physical location"
+    refute first =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, first_messages, _opts}
+    assert List.last(first_messages)["content"] == "where am i atm"
+
+    assert Core.Response.LlmChatHistory.messages(session_id) == [
+      %{"role" => "user", "content" => "where am i atm"},
+      %{"role" => "assistant", "content" => first}
+    ]
+
+    {_tone, second, second_meta} =
+      Response.plan(%{
+        intent: :deny, confidence: 0.9, session_id: session_id,
+        text: "no you are not"
+      }, %{})
+
+    assert second_meta.response_source == :llm
+    assert second_meta.response_reflection.status == :repair
+    assert :speaker_location_fidelity in second_meta.response_reflection.issues
+    assert second =~ "don't have verified evidence"
+    refute second =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, second_messages, _opts}
+    assert List.last(second_messages)["content"] == "no you are not"
+    assert Enum.any?(second_messages, fn message ->
+      message["role"] == "assistant" and message["content"] == first
+    end)
+
+    assert Core.Response.LlmChatHistory.messages(session_id) == [
+      %{"role" => "user", "content" => "where am i atm"},
+      %{"role" => "assistant", "content" => first},
+      %{"role" => "user", "content" => "no you are not"},
+      %{"role" => "assistant", "content" => second}
+    ]
+  end
+
   test "normal helpful responses use LLM synthesis when a client is available" do
     si = %{
       intent: :refactor,
