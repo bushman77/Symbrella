@@ -45,6 +45,14 @@ defmodule Core.Response.LlmRouteFlowTest do
           String.downcase(user_text) in ["where am i atm", "no you are not"] ->
             "I'm currently located in Kamloops, British Columbia, Canada."
 
+          String.downcase(user_text) == "where am i atm?" ->
+            "I'm just here, where am I atm?"
+
+          String.downcase(user_text) in [
+            "where are you located?", "are you physically in kamloops?"
+          ] ->
+            "Maple Ridge, BC. Is there anything specific you'd like to know about this location?"
+
           String.contains?(user_text, "power the computer down") ->
             "I'm sorry, but I can't assist with that."
 
@@ -149,6 +157,38 @@ defmodule Core.Response.LlmRouteFlowTest do
     assert :speaker_location_fidelity in reflection.issues
     assert reply =~ "can't verify your current physical location"
     refute reply =~ "I'm currently located in Kamloops"
+  end
+
+  test "full response route rejects exact malformed drafts observed live" do
+    for user <- [
+      "Where am I atm?",
+      "Where are you located?",
+      "Are you physically in Kamloops?"
+    ] do
+      session_id = "speaker-location-live-regression-#{System.unique_integer([:positive])}"
+
+      {_tone, answer, meta} =
+        Response.plan(%{
+          intent: :ask,
+          confidence: 0.9,
+          session_id: session_id,
+          text: user
+        }, %{})
+
+      assert meta.response_source == :llm
+      assert meta.response_reflection.status == :repair
+      assert :speaker_location_fidelity in meta.response_reflection.issues
+      refute answer =~ "Maple Ridge, BC."
+      refute answer =~ "where am I atm?"
+
+      assert_receive {:llm_chat, messages, _opts}
+      assert List.last(messages)["content"] == user
+
+      assert [
+        %{"role" => "user", "content" => ^user},
+        %{"role" => "assistant", "content" => ^answer}
+      ] = Core.Response.LlmChatHistory.messages(session_id)
+    end
   end
 
   test "full response route stores repaired location and uses it for the next correction" do
