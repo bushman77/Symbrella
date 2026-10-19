@@ -50,7 +50,9 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
   end
 
   test "Stage2 evidence receives a canonical gate decision and WM update is bridged" do
-    candidate_id = "hello-#{System.unique_integer([:positive])}|phrase|fallback"
+    # A unique, scored non-fallback ID exercises successful canonical admission.
+    # Fallback candidates have a separate, deliberately conservative WM policy.
+    candidate_id = "hello-#{System.unique_integer([:positive])}|interjection|2"
 
     # Stage2 expects a Stage1-ish event in trace with :choices.
     # Provide two choices: one above threshold (commit), one below (ignored).
@@ -103,9 +105,9 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     assert evidence_meta.id == candidate_id
     assert evidence_meta.final_admission? == false
 
-    # 2) Canonical admission is independently policy-controlled. A fallback
-    # dictionary ID can be discounted, so its final score need not equal the
-    # raw Stage2 evidence score or exceed the Stage2 admission threshold.
+    # 2) Canonical admission is independently policy-controlled. This high-
+    # confidence non-fallback candidate should pass without loosening the
+    # production policy that discounts fallback dictionary IDs.
     # Global telemetry can contain another test's gate decision. Match the
     # exact candidate before asserting its canonical outcome.
     assert_receive {:gate, [:brain, :gate, :decision], %{score: score},
