@@ -156,6 +156,13 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
     assert :speaker_location_fidelity in review.issues
     assert final =~ "own physical location"
 
+    {:ok, second_person, second_review} =
+      ReflectionLoop.review("where are you located", "You're in Kamloops.", %{})
+
+    assert :speaker_location_fidelity in second_review.issues
+    assert second_person =~ "own physical location"
+    refute second_person =~ "You're in Kamloops"
+
     correct = "I'm Symbrella, a locally running assistant."
     {:ok, ^correct, review} = ReflectionLoop.review("where are you?", correct, %{})
     refute :speaker_location_fidelity in review.issues
