@@ -36,10 +36,13 @@ read-only review of generated responses.
    place. Symbrella's local runtime identity is not a physical-location
    sensor.
 3. For an immediately adjacent *direct denial* (e.g.
-   `no you are not`), if the prior same-session user question was about
-   current physical location and the prior assistant response asserted
-   its own city, reject any renewed self-location assertion. Previous
-   assistant prose is a **correction target**, never verification.
+   `no you are not`), when the prior same-session user question was
+   about current physical location, reject any new assistant self-location
+   assertion. When the previous assistant already asserted an unsupported
+   city, report that this claim was not verified. The check also blocks
+   a *new* unsupported self-location claim after the first reply was
+   safely repaired. Previous assistant prose is a **correction target**,
+   never verification.
 
 The Core `ReflectionLoop` issues list includes
 `:speaker_location_fidelity` when repair applies; the deterministic
