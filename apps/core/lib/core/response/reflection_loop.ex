@@ -12,6 +12,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Response.Topics
   alias Core.Response.GreetingTurn
   alias Core.Response.AnswerAdequacy
+  alias Core.Response.SpeakerLocationFidelity
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.PlaceLocation
   alias Core.Semantic.EventFrames
@@ -100,6 +101,10 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(uncited_reference_answer?(context, draft_text), :reference_uncited)
     |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
+    |> maybe_issue(
+      SpeakerLocationFidelity.issue(user_text, draft_text, context),
+      :speaker_location_fidelity
+    )
     |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
     |> maybe_issue(unsupported_population_year?(context, user_text, draft_text), :unsupported_population_year)
     |> maybe_issue(population_access_refusal?(context, user_text, draft_text), :population_access_refusal)
@@ -139,6 +144,9 @@ defmodule Core.Response.ReflectionLoop do
     cond do
       :unsafe in issues ->
         {:reject, issues}
+
+      :speaker_location_fidelity in issues ->
+        {:repair, issues}
 
       :unsupported_device_refusal in issues ->
         {:repair, issues}
@@ -204,6 +212,11 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
+        :speaker_location_fidelity in issues ->
+          user_text
+          |> SpeakerLocationFidelity.issue(draft_text, context)
+          |> SpeakerLocationFidelity.repair()
+
         :unsupported_device_refusal in issues ->
           acknowledge_device_command(context)
 
@@ -283,6 +296,8 @@ defmodule Core.Response.ReflectionLoop do
 
     instruction =
       cond do
+        :speaker_location_fidelity in issues ->
+          "The assistant attributed an unverified physical location to a conversation participant, or repeated a recently disputed self-location assertion. Current physical location requires its own verified evidence; public geographic facts and chat claims cannot establish it."
         :answer_not_supplied in issues ->
           "The draft only echoed the factual question or gave an empty non-answer. Retry from the actual question and its existing evidence; never invent a numeric result."
         :robotic_greeting in issues ->
