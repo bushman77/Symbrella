@@ -28,6 +28,7 @@ defmodule Core.Response.SpeakerLocationFidelity do
           :user_current_location_unverified
           | :assistant_current_location_unverified
           | :correction_repeats_self_location
+          | :location_correction_self_claim
 
   @spec issue(String.t(), String.t(), map()) :: issue() | nil
   def issue(user_text, draft, context)
@@ -36,6 +37,10 @@ defmodule Core.Response.SpeakerLocationFidelity do
       correction_to_unsupported_self_location?(user_text, context) and
           affirmative_first_person_location?(draft) ->
         :correction_repeats_self_location
+
+      correction_follows_location_question?(user_text, context) and
+          affirmative_first_person_location?(draft) ->
+        :location_correction_self_claim
 
       Regex.match?(@user_location_question, user_text) and
           affirmative_location?(draft) ->
@@ -69,6 +74,11 @@ defmodule Core.Response.SpeakerLocationFidelity do
       "located in a particular city wasn't verified, and I shouldn't repeat it."
   end
 
+  def repair(:location_correction_self_claim) do
+    "I don't have verified evidence of either of our current physical " <>
+      "locations, and I shouldn't claim to be in a particular city."
+  end
+
   @doc "Inspect only the immediately preceding completed chat pair."
   @spec correction_to_unsupported_self_location?(String.t(), map()) :: boolean()
   def correction_to_unsupported_self_location?(user_text, context)
@@ -93,6 +103,22 @@ defmodule Core.Response.SpeakerLocationFidelity do
   end
 
   def correction_to_unsupported_self_location?(_, _), do: false
+
+  defp correction_follows_location_question?(user_text, context) do
+    if Regex.match?(@direct_correction, user_text) do
+      case context |> Map.get(:review_history, []) |> List.wrap() |> Enum.take(-2) do
+        [%{"role" => "user", "content" => previous_question},
+         %{"role" => "assistant", "content" => _previous_reply}]
+        when is_binary(previous_question) ->
+          Regex.match?(@user_location_question, previous_question) or
+            Regex.match?(@assistant_location_question, previous_question)
+
+        _ -> false
+      end
+    else
+      false
+    end
+  end
 
   defp affirmative_location?(draft) do
     affirmative_first_person_location?(draft) or
