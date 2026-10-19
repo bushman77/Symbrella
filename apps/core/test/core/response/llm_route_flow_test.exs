@@ -42,6 +42,9 @@ defmodule Core.Response.LlmRouteFlowTest do
           String.downcase(user_text) == "good afternoon symbrella" ->
             "good afternoon symbrella. How may I assist you today?"
 
+          String.downcase(user_text) in ["where am i atm", "no you are not"] ->
+            "I'm currently located in Kamloops, British Columbia, Canada."
+
           String.contains?(user_text, "power the computer down") ->
             "I'm sorry, but I can't assist with that."
 
@@ -102,6 +105,50 @@ defmodule Core.Response.LlmRouteFlowTest do
     end)
 
     :ok
+  end
+
+  test "LLM synthesis repairs self-location hallucination using prior session correction target" do
+    alias Core.Response.LlmSynthesis
+
+    session_id = "speaker-location-flow-#{System.unique_integer([:positive])}"
+    wrong = "I'm currently located in Kamloops, British Columbia, Canada."
+
+    # An earlier unguarded assistant turn is a correction TARGET, not
+    # source evidence of the assistant's physical presence.
+    LlmSynthesis.record_turn(session_id, "where am i atm", wrong)
+
+    {:ok, reply, reflection} =
+      LlmSynthesis.generate("no you are not",
+        %{session_id: session_id, intent: :deny, conf: 0.82},
+        %{response_profile: :self_check}, %{}, :runtime_self_check)
+
+    assert :speaker_location_fidelity in reflection.issues
+    assert reflection.status == :repair
+    assert reply =~ "earlier claim"
+    assert reply =~ "wasn't verified"
+    refute reply =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, messages, _opts}
+    assert List.last(messages)["content"] == "no you are not"
+    assert Enum.any?(messages, fn item ->
+      item["role"] == "assistant" and item["content"] == wrong
+    end)
+  end
+
+  test "first user current-location question is reviewed without prior chat history" do
+    alias Core.Response.LlmSynthesis
+
+    session_id = "speaker-location-new-#{System.unique_integer([:positive])}"
+
+    {:ok, reply, reflection} =
+      LlmSynthesis.generate("where am i atm",
+        %{session_id: session_id, intent: :ask, conf: 0.81},
+        %{response_profile: :self_check}, %{}, :runtime_self_check)
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert reply =~ "can't verify your current physical location"
+    refute reply =~ "I'm currently located in Kamloops"
   end
 
   test "normal helpful responses use LLM synthesis when a client is available" do
