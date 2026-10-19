@@ -15,6 +15,14 @@ defmodule Core.Response.SpeakerLocationFidelity do
 
   @user_location_question ~r/^\s*(?:where\s+am\s+i(?:\s+(?:now|right\s+now|currently|atm|at\s+the\s+moment))?|where\s+am\s+i\s+located(?:\s+(?:now|currently|atm))?|what(?:'s|\s+is)\s+my\s+(?:current\s+)?(?:physical\s+)?location|can\s+you\s+tell\s+me\s+where\s+i\s+am)\s*[?.!]*\s*$/iu
   @assistant_location_question ~r/^\s*(?:where\s+are\s+you(?:\s+(?:located|now|right\s+now|currently|atm|at\s+the\s+moment))?|what(?:'s|\s+is)\s+your\s+(?:current\s+)?(?:physical\s+)?location)\s*[?.!]*\s*$/iu
+  @assistant_physical_presence_question ~r/^\s*(?:are\s+you|you're)\s+(?:(?:currently|actually)\s+)?(?:(?:physically|located|based|situated)\s+){1,2}(?:in|at|near)\s+[^?!.]+[?.!]*\s*$/iu
+
+  # Some small-model drafts answer a person's location question with only a
+  # city/province fragment rather than an explicit "I am in ..." claim.
+  # Constrain this to the start of a reply, with an explicit regional marker.
+  # Public place facts remain exempt outside participant-location questions.
+  @bare_place_reply ~r/\A\s*(?:(?:in|at|near)\s+)?[A-Z][\p{L}\p{M}'-]*(?:\s+[A-Z][\p{L}\p{M}'-]*){0,5}\s*,\s*(?:[A-Z]{2,3}|British Columbia|Alberta|Ontario|Quebec|Canada)\s*(?:[.,!?]|\z)/u
+  @echoed_user_location ~r/\bwhere\s+am\s+i(?:\s+(?:now|right\s+now|currently|atm|at\s+the\s+moment))?\s*\?/iu
   @direct_correction ~r/^\s*(?:no[,!]?\s*)?(?:you\s+are\s+not|you're\s+not|you\s+aren't|that's\s+(?:not\s+true|wrong)|that\s+is\s+(?:not\s+true|wrong))\s*[.!]*\s*$/iu
 
   # A positive assertion of physical location. The place phrase begins with
@@ -29,6 +37,7 @@ defmodule Core.Response.SpeakerLocationFidelity do
           | :assistant_current_location_unverified
           | :correction_repeats_self_location
           | :location_correction_self_claim
+          | :user_location_question_echo
 
   @spec issue(String.t(), String.t(), map()) :: issue() | nil
   def issue(user_text, draft, context)
@@ -46,7 +55,12 @@ defmodule Core.Response.SpeakerLocationFidelity do
           affirmative_location?(draft) ->
         :user_current_location_unverified
 
-      Regex.match?(@assistant_location_question, user_text) and
+      Regex.match?(@user_location_question, user_text) and
+          echoed_location_question?(draft) ->
+        :user_location_question_echo
+
+      (Regex.match?(@assistant_location_question, user_text) or
+         Regex.match?(@assistant_physical_presence_question, user_text)) and
           affirmative_location?(draft) ->
         :assistant_current_location_unverified
 
@@ -58,6 +72,8 @@ defmodule Core.Response.SpeakerLocationFidelity do
   def issue(_, _, _), do: nil
 
   @spec repair(issue()) :: String.t()
+  def repair(:user_location_question_echo), do: repair(:user_current_location_unverified)
+
   def repair(:user_current_location_unverified) do
     "I can't verify your current physical location from the information " <>
       "available in this conversation. A city's geographic coordinates " <>
@@ -123,7 +139,13 @@ defmodule Core.Response.SpeakerLocationFidelity do
   defp affirmative_location?(draft) do
     affirmative_first_person_location?(draft) or
       Regex.match?(@second_person_location, draft) or
-      Regex.match?(@location_is, draft)
+      Regex.match?(@location_is, draft) or
+      Regex.match?(@bare_place_reply, draft)
+  end
+
+  defp echoed_location_question?(draft) do
+    Regex.match?(@echoed_user_location, draft) and
+      not Regex.match?(~r/\b(?:can't|cannot|don't|do not|unable|unverified)\b/iu, draft)
   end
 
   defp affirmative_first_person_location?(draft) do
