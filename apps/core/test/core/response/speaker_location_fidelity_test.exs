@@ -82,6 +82,68 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
     end
   end
 
+  test "live regression: echoing where am I is not a valid answer" do
+    user = "Where am I atm?"
+    draft = "I'm just here, where am I atm?"
+    context = %{features: %{intent: :ask, conf: 0.9}}
+
+    assert SpeakerLocationFidelity.issue(user, draft, context) ==
+             :user_location_question_echo
+
+    {:ok, final, reflection} = ReflectionLoop.review(user, draft, context)
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert final =~ "can't verify your current physical location"
+    refute final == draft
+  end
+
+  test "live regression: bare city is not a person's verified location" do
+    draft = "Maple Ridge, BC. Is there anything specific you'd like to know about this location?"
+    context = %{features: %{intent: :ask, conf: 0.9}}
+
+    for user <- [
+      "Where am I atm?",
+      "Where are you located?",
+      "Are you physically in Kamloops?"
+    ] do
+      {:ok, final, reflection} = ReflectionLoop.review(user, draft, context)
+
+      assert reflection.status == :repair
+      assert :speaker_location_fidelity in reflection.issues
+      assert reflection.applied?
+      refute final == draft
+      refute String.starts_with?(final, "Maple Ridge, BC")
+    end
+  end
+
+  test "live regression: explicit assistant physical-presence assertion is reviewed" do
+    user = "Are you physically in Kamloops?"
+    draft = "Yes, I'm currently in Kamloops, BC."
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(user, draft, %{features: %{intent: :ask, conf: 0.9}})
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert final =~ "own physical location"
+    refute final =~ "I'm currently in Kamloops"
+  end
+
+  test "place facts and ordinary qualified answers remain outside location repair" do
+    assert SpeakerLocationFidelity.issue(
+      "Where is Maple Ridge, BC?", "Maple Ridge, BC is in Canada.", %{}
+    ) == nil
+
+    answer = "I can't verify your location, but you previously mentioned Maple Ridge."
+    context = %{features: %{intent: :ask, conf: 0.9}}
+
+    {:ok, ^answer, reflection} =
+      ReflectionLoop.review("Where am I atm?", answer, context)
+
+    refute :speaker_location_fidelity in reflection.issues
+  end
+
   test "a direct denial also rejects second-person location guesses" do
     context = %{review_history: @previous_assistant_claim}
 
