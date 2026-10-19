@@ -139,13 +139,20 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
 
   test "a correct admission of uncertainty is not rewritten" do
     unsure = "I can't determine your current location from this chat."
-    {:ok, ^unsure, reflection} = ReflectionLoop.review(@where_am_i, unsure, %{})
+    # Supply the classifier evidence that normal LlmSynthesis attaches. An
+    # empty context independently triggers ReflectionLoop's clarification policy.
+    {:ok, ^unsure, reflection} =
+      ReflectionLoop.review(@where_am_i, unsure,
+        %{features: %{intent: :ask, conf: 0.9}})
     refute :speaker_location_fidelity in reflection.issues
 
     corrected = "You're right; I shouldn't have claimed a physical location."
     {:ok, ^corrected, reflection} =
       ReflectionLoop.review("no you are not", corrected,
-        %{review_history: @previous_assistant_claim})
+        %{
+          review_history: @previous_assistant_claim,
+          features: %{intent: :deny, conf: 0.9}
+        })
     refute :speaker_location_fidelity in reflection.issues
   end
 
@@ -164,7 +171,9 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
     refute second_person =~ "You're in Kamloops"
 
     correct = "I'm Symbrella, a locally running assistant."
-    {:ok, ^correct, review} = ReflectionLoop.review("where are you?", correct, %{})
+    {:ok, ^correct, review} =
+      ReflectionLoop.review("where are you?", correct,
+        %{features: %{intent: :ask, conf: 0.9}})
     refute :speaker_location_fidelity in review.issues
   end
 
