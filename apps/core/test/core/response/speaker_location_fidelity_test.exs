@@ -82,6 +82,42 @@ defmodule Core.Response.SpeakerLocationFidelityTest do
     end
   end
 
+  test "a direct denial also rejects second-person location guesses" do
+    context = %{review_history: @previous_assistant_claim}
+
+    for draft <- [
+      "You are currently located in Kamloops, British Columbia.",
+      "You're in Maple Ridge, BC.",
+      "Your current location is Kamloops."
+    ] do
+      {:ok, final, reflection} =
+        ReflectionLoop.review("no you are not", draft, context)
+
+      assert reflection.status == :repair
+      assert :speaker_location_fidelity in reflection.issues
+      assert final =~ "wasn't verified"
+      refute final == draft
+    end
+  end
+
+  test "a denial after a safe answer rejects a new second-person location guess" do
+    context = %{
+      review_history: [
+        %{"role" => "user", "content" => "where am i atm"},
+        %{"role" => "assistant", "content" =>
+          "I can't verify your current physical location from the conversation."}
+      ]
+    }
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review("no you are not", "You're in Kamloops, BC.", context)
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert final =~ "don't have verified evidence"
+    refute final =~ "You're in Kamloops"
+  end
+
   test "a denial after an already corrected answer cannot introduce a new self-location" do
     context = %{
       review_history: [
