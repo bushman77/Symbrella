@@ -102,7 +102,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(location_reference_unaligned?(context, draft_text), :location_reference_unaligned)
     |> maybe_issue(subject_reversal?(context, draft_text), :subject_reversal)
     |> maybe_issue(
-      SpeakerLocationFidelity.issue(user_text, draft_text, context),
+      not is_nil(SpeakerLocationFidelity.issue(user_text, draft_text, context)),
       :speaker_location_fidelity
     )
     |> maybe_issue(unverified_geographic_claim?(context, user_text, draft_text), :geographic_claim_unverified)
