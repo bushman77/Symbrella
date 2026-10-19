@@ -354,7 +354,12 @@ defmodule Brain.Amygdala do
     intent =
       case Map.get(stim, :intent) || Map.get(stim, "intent") do
         i when is_atom(i) -> i
-        i when is_binary(i) -> String.to_atom(i)
+        i when is_binary(i) ->
+          try do
+            String.to_existing_atom(i)
+          rescue
+            ArgumentError -> nil
+          end
         _ -> nil
       end
 

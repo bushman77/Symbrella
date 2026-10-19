@@ -14,6 +14,7 @@ defmodule Core.Brain.WM.Comprehension do
 
   alias Core.Brain.Runtime
   alias Core.Pipeline.Trace
+  alias Core.Semantic.EpisodicProjection
 
   @max_age_ms 20 * 60 * 1_000
   @max_entities 4
@@ -110,6 +111,9 @@ defmodule Core.Brain.WM.Comprehension do
   @spec context_from(map(), map()) :: map()
   def context_from(si, comprehension) when is_map(si) and is_map(comprehension) do
     event = map_or_empty(field(si, :symbolic_frame))
+    projected = EpisodicProjection.validated_participant(si)
+    roles = if is_map(projected), do: field(projected, :participants), else: nil
+    event_roles = bounded_roles(roles)
     prev = map_or_empty(field(si, :wm_context))
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
@@ -123,8 +127,24 @@ defmodule Core.Brain.WM.Comprehension do
       |> Enum.uniq()
       |> Enum.take(@max_entities)
 
+    # Grammatical event projection already ran before the comprehension/WM
+    # stages. Preserve its *validated roles* as active conversational context
+    # when the independent symbolic frame has no explicit participants.
+    # This is not a promotion to independently verified factual knowledge.
+    projected_entities =
+      ["actor", "patient", "location"]
+      |> Enum.map(&Map.get(event_roles, &1))
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&clean_entity/1)
+      |> Enum.reject(&(&1 == "" or pronoun?(&1)))
+      |> Enum.uniq()
+      |> Enum.take(@max_entities)
+
+    current_entities =
+      if explicit_entities == [], do: projected_entities, else: explicit_entities
+
     inherited =
-      if contextual_reference?(sentence, reference) and explicit_entities == [] do
+      if contextual_reference?(sentence, reference) and current_entities == [] do
         List.wrap(field(prev, :entities))
         |> Enum.filter(&is_binary/1)
         |> Enum.take(@max_entities)
@@ -132,10 +152,10 @@ defmodule Core.Brain.WM.Comprehension do
         []
       end
 
-    entities = if explicit_entities == [], do: inherited, else: explicit_entities
+    entities = if current_entities == [], do: inherited, else: current_entities
 
     relation =
-      field(event, :relation) ||
+      field(event, :relation) || field(projected, :relation) ||
         if(inherited != [] and Regex.match?(~r/\bpopulations?\b/iu, sentence),
           do: :population, else: nil)
 
@@ -144,6 +164,9 @@ defmodule Core.Brain.WM.Comprehension do
       intent: field(si, :intent),
       entities: entities,
       relation: relation,
+      event_roles: event_roles,
+      event_source_frame: field(projected, :source_frame),
+      event_role_status: if(is_map(projected), do: :validated_projection, else: :none),
       recognized_topics: terms(field(comprehension, :recognized_topics)),
       understood: terms(field(comprehension, :understood)),
       uncertain: terms(field(comprehension, :uncertain)),
@@ -153,6 +176,24 @@ defmodule Core.Brain.WM.Comprehension do
       updated_at_ms: System.system_time(:millisecond)
     }
   end
+
+  @event_role_keys ~w(actor predicate surface_predicate patient position location aspect tense)
+
+  defp bounded_roles(%{} = participants) do
+    participants
+    |> Map.take(@event_role_keys)
+    |> Enum.flat_map(fn {key, value} ->
+      if is_binary(value) and byte_size(value) <= 96 and
+           String.trim(value) != "" do
+        [{key, String.trim(value)}]
+      else
+        []
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp bounded_roles(_), do: %{}
 
   defp maybe_bind_plural_reference(si, %{entities: entities} = _context) when is_list(entities) do
     sentence = field(si, :sentence)

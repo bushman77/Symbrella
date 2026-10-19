@@ -14,6 +14,36 @@ defmodule Brain.BasalGangliaTest do
     }
   end
 
+  test "candidate restrictions are honored by the canonical gate" do
+    seed = %{id: "candidate|seed|", lemma: "candidate", source: :other, score: 0.9}
+    unknown = %{id: "unknown|noun|0", pos: "unk", source: :other, score: 0.9}
+
+    assert {:block, seed_score} =
+             BasalGanglia.decide([], seed, %{}, %{allow_seed?: false})
+
+    assert seed_score == 0.0
+
+    assert {:block, unknown_score} =
+             BasalGanglia.decide([], unknown, %{}, %{allow_unk?: false})
+
+    assert unknown_score == 0.0
+
+    assert {decision_seed, _} =
+             BasalGanglia.decide([], seed, %{}, %{allow_seed?: true})
+
+    assert decision_seed in [:allow, :boost]
+
+    assert {decision_unknown, _} =
+             BasalGanglia.decide([], unknown, %{}, %{allow_unk?: true})
+
+    assert decision_unknown in [:allow, :boost]
+  end
+
+  test "neutral SelfModel produces no bias at the canonical gate" do
+    assert_in_delta BasalGanglia.self_state_bias(%Brain.SelfModel{}), 0.0, 1.0e-12
+    assert BasalGanglia.self_state_bias(nil) == 0.0
+  end
+
   test "preferred sources get :boost when above threshold" do
     wm = []
     cand = %{id: "x|noun|0", lemma: "x", source: :runtime, score: 0.5}

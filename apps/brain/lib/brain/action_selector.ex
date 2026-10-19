@@ -273,6 +273,7 @@ defmodule Brain.ActionSelector do
       :feedback,
       :reflect,
       :discussion,
+      :statement,
       :unknown
     ]
   end

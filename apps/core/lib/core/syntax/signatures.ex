@@ -77,7 +77,8 @@ defmodule Core.Syntax.Signatures do
     noun_phrases = noun_phrase_constructions(nodes)
     possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
-    (wh_aux_questions(si, nodes) ++ finite_present_svo(nodes) ++
+    (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
+       progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
@@ -147,6 +148,8 @@ defmodule Core.Syntax.Signatures do
 
     cond do
       form_of? and past? and participle? -> MapSet.new([:past_participle])
+      form_of? and participle? and MapSet.member?(tags, "tag:present") ->
+        MapSet.new([:present_participle])
       form_of? and past? -> MapSet.new([:simple_past])
       true -> MapSet.new()
     end
@@ -218,6 +221,7 @@ defmodule Core.Syntax.Signatures do
     don't doesn't didn't can't couldn't won't wouldn't shouldn't mightn't
   ))
   @question_subjects MapSet.new(~w(i you he she it we they))
+  @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @topic_prepositions MapSet.new(~w(about of for on in at from with to))
   @negation_words MapSet.new(~w(not never))
   @max_question_tokens 64
@@ -276,6 +280,43 @@ defmodule Core.Syntax.Signatures do
       end
     else
       []
+    end
+  end
+
+  # A complete WH object question with a determined nominal subject:
+  # "What did the artist draw?" The interrogative WH asks for the unfilled
+  # object, so this is a grammatical hypothesis, not an event or chosen sense.
+  # Exactly five contiguous base tokens prevent a prefix of a longer clause
+  # from acquiring a stronger structural status than the full utterance.
+  defp wh_aux_object_questions(si, nodes) do
+    sentence = Map.get(si, :sentence) || ""
+
+    case nodes do
+      [wh, aux, det, subject, predicate] = segment ->
+        if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") and
+             wh.index == 0 and wh.word in ~w(what who) and
+             question_auxiliary?(aux) and
+             MapSet.member?(@determiners, det.word) and pos?(det, "determiner") and
+             pos?(subject, "noun") and pos?(predicate, "verb") and
+             valid_surface?(segment) do
+          [signature(
+            :wh_aux_object_question,
+            {wh.index, predicate.index},
+            %{wh: wh.index, auxiliary: aux.index, subject_determiner: det.index,
+              subject_head: subject.index, predicate: predicate.index},
+            %{wh: [:pos_pronoun], auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
+              subject_determiner: [:pos_determiner],
+              subject_head: [:pos_noun], predicate: [:pos_verb]},
+            [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+             :attested_nominal_subject, :lexical_verb_available,
+             :question_punctuation, :contiguous_surface]
+          )]
+        else
+          []
+        end
+
+      _ ->
+        []
     end
   end
 
@@ -420,6 +461,42 @@ defmodule Core.Syntax.Signatures do
             observations
           )
         ]
+      else
+        []
+      end
+    end)
+  end
+
+  # Observe participants in a complete progressive locative clause:
+  # determiner + noun + be + present-participle + preposition + determiner + noun.
+  # This is a grammatical *candidate*, not a dictionary sense winner. A form-of
+  # present participle must be present in the lexical alternatives; the chosen
+  # sense remains untouched, even when LIFG prefers an adjective reading.
+  # Additional semantic validation is performed by ParticipantSpatial.
+  defp progressive_locatives(nodes) do
+    nodes
+    |> Enum.chunk_every(7, 1, :discard)
+    |> Enum.flat_map(fn [subject_det, subject, aux, predicate, prep, loc_det, location] = segment ->
+      if pos?(subject_det, "determiner") and pos?(subject, "noun") and
+           aux.word == "is" and
+           form?(predicate, :present_participle) and pos?(predicate, "verb") and
+           pos?(prep, "preposition") and
+           prep.word in ~w(on in under beside above below) and
+           pos?(loc_det, "determiner") and pos?(location, "noun") and
+           valid_surface?(segment) do
+        [signature(
+          :progressive_locative_candidate,
+          {subject_det.index, location.index},
+          %{subject_determiner: subject_det.index, subject_head: subject.index,
+            auxiliary: aux.index, predicate: predicate.index,
+            preposition: prep.index, location_determiner: loc_det.index,
+            location_head: location.index},
+          %{subject_head: [:pos_noun], predicate: [:present_participle],
+            preposition: [:pos_preposition], location_head: [:pos_noun]},
+          [:contiguous_surface, :attested_nominal_subject,
+           :attested_present_participle, :attested_preposition,
+           :attested_nominal_location]
+        )]
       else
         []
       end

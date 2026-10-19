@@ -131,6 +131,29 @@ defmodule Brain.SelfPortrait.ModelTest do
     assert p2.patterns.lifg_payload_gaps == 1
   end
 
+  test "counts response semantic substitutions separately from cortical anomalies" do
+    p0 = Model.new()
+
+    event = %{
+      kind: :telemetry,
+      event: [:core, :response, :semantic_role_drift],
+      measurements: %{count: 1},
+      meta: %{issue: :semantic_role_drift,
+              mismatched_roles: [:predicate, :patient]},
+      at_ms: 1
+    }
+
+    p1 = Model.observe(p0, event)
+    assert p1.patterns.response_semantic_drift == 1
+    assert p1.patterns.lifg_pos_anomalies == 0
+    assert p1.patterns.gate_failures == 0
+    assert p1.sources.core == 1
+
+    p2 = Model.observe(p1, %{event | at_ms: 2})
+    assert p2.patterns.response_semantic_drift == 2
+    assert p2.patterns.lifg_pos_anomalies == 0
+  end
+
   test "tracks suspicious LIFG POS choices in greeting context" do
     p0 = Model.new()
 

@@ -62,16 +62,19 @@ defmodule Core.Response do
     direct_fact = Memory.extract_direct_fact(text_in)
     fact_query_key = Memory.extract_fact_query_key(text_in)
 
-    case Memory.reply_for(%{
-           intent0: intent0,
-           conf: conf,
-           text_in: text_in,
-           session_id: session_id,
-           extracted_name: extracted_name,
-           remember_fact: remember_fact,
-           direct_fact: direct_fact,
-           fact_query_key: fact_query_key
-         }) do
+    memory_reply =
+      Memory.reply_for(%{
+        intent0: intent0,
+        conf: conf,
+        text_in: text_in,
+        session_id: session_id,
+        extracted_name: extracted_name,
+        remember_fact: remember_fact,
+        direct_fact: direct_fact,
+        fact_query_key: fact_query_key
+      }) || Memory.acknowledge_projected(si, session_id, text_in, intent0, conf)
+
+    case memory_reply do
       {_, _, _} = reply ->
         reply
 
@@ -123,6 +126,7 @@ defmodule Core.Response do
             control_signals: Map.get(si, :control_signals),
             response_policy: Map.get(mood, :response_policy),
             turn_context: Map.get(si, :turn_context),
+            projected_expression: Map.get(si, :projected_expression),
             symbolic_frame: Map.get(si, :symbolic_frame),
             discourse_reference: Map.get(si, :discourse_reference),
             self_model: Map.get(si, :self_model),
@@ -182,7 +186,7 @@ defmodule Core.Response do
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
           end
 
-        SideEffects.record_turn(session_id, text_in, text)
+        SideEffects.record_turn(session_id, text_in, text, si)
 
         profile = Meta.classify_profile(features, decision, guard)
 
@@ -309,6 +313,7 @@ defmodule Core.Response do
          control_signals: control_signals,
          response_policy: response_policy,
          turn_context: turn_context,
+         projected_expression: projected_expression,
          symbolic_frame: symbolic_frame,
          discourse_reference: discourse_reference,
          self_model: self_model,
@@ -348,6 +353,7 @@ defmodule Core.Response do
       control_signals: control_signals,
       response_policy: response_policy,
       turn_context: turn_context,
+      projected_expression: projected_expression,
       symbolic_frame: symbolic_frame,
       discourse_reference: discourse_reference,
       self_model: self_model,
@@ -465,8 +471,8 @@ defmodule Core.Response do
   end
 
   defp si_text(si) when is_map(si) do
-    si
-    |> Map.get(:text, Map.get(si, :keyword, ""))
+    (Map.get(si, :text) || Map.get(si, :sentence) ||
+       Map.get(si, :keyword) || "")
     |> to_string()
   end
 

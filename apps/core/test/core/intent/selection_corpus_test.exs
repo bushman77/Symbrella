@@ -40,6 +40,18 @@ defmodule Core.Intent.SelectionCorpusTest do
     end
   end
 
+  test "actually as a question adverb does not mark a conversation correction" do
+    question =
+      "Does that mean Vancouver still has the larger population in 2026? What can you actually verify?"
+
+    si = Selection.select(%{sentence: question, tokens: [], trace: []})
+
+    refute si.intent == :correction
+    assert si.conversation_act == :question
+    refute si.topic_domain == :conversation_repair
+    assert si.context_frame.state != :needs_repair
+  end
+
   test "unknown stays low confidence instead of pretending to understand" do
     si = Selection.select(%{sentence: "blorf nindle zup", tokens: [], trace: []})
 

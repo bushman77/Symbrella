@@ -1,15 +1,17 @@
 defmodule Core.Semantic.SentenceMeaning do
   @moduledoc """
   A conservative, sentence-level interpretation assembled from independently
-  observed grammatical roles and ATL lexical winners.
+  observed grammatical roles, ATL lexical winners and independently
+  revalidated event projections.
 
-  This is *not* a dictionary entry for a whole sentence. For recognized
-  question frames, it records a compositional reading with its evidence.
-  Unrecognized sentences retain an explicitly absent definition. No BrainCell
-  IDs, external facts, or sense confidences are invented.
+  This is *not* a dictionary entry for a whole sentence. Recognized question
+  and participant-assertion frames become compositional propositions with
+  explicit epistemic status. Unrecognized sentences retain an absent definition.
+  No BrainCell IDs, external facts, or sense confidences are invented.
   """
 
   alias Core.Pipeline.Trace
+  alias Core.Semantic.EpisodicProjection
 
   @max_topic_tokens 16
 
@@ -63,7 +65,8 @@ defmodule Core.Semantic.SentenceMeaning do
         question
       end
 
-    question || %{
+    question || object_question(si, sentence, frames, constituents, tokens) ||
+      participant_meaning(si, sentence) || %{
       version: 1,
       sentence: sentence,
       definition: nil,
@@ -77,6 +80,243 @@ defmodule Core.Semantic.SentenceMeaning do
     version: 1, sentence: nil, definition: nil, kind: :unknown,
     status: :not_yet_interpreted, source: :invalid_input
   }
+
+  # WH + auxiliary + determined subject + verb asks for the unbound object.
+  # This is a question about a relation, NOT evidence that the action occurred.
+  # The complete Core syntax signature, resolved ATL roles and independent POS
+  # adjudication must agree before we issue a structural interpretation.
+  @object_question_evidence [:wh_fronted, :auxiliary_inversion,
+    :bounded_determiner_surface, :attested_nominal_subject,
+    :lexical_verb_available, :question_punctuation, :contiguous_surface]
+
+  defp object_question(si, sentence, frames, constituents, indexed)
+       when is_binary(sentence) and is_list(frames) and is_list(constituents) and
+              is_map(indexed) do
+    if String.ends_with?(String.trim(sentence), "?") and
+         Enum.sort(Map.keys(indexed)) == Enum.to_list(0..4) do
+      questions =
+        Enum.filter(frames, fn
+          %{id: :wh_aux_object_question, source: :core_syntax,
+            span: {0, 4}, roles: %{
+              wh: 0, auxiliary: 1, subject_determiner: 2,
+              subject_head: 3, predicate: 4}, evidence: evidence}
+          when is_list(evidence) ->
+            Enum.all?(@object_question_evidence, &(&1 in evidence))
+
+          _ -> false
+        end)
+
+      case questions do
+        [frame] -> compose_object_question(si, sentence, frame, constituents, indexed)
+        _ -> nil
+      end
+    end
+  end
+
+  defp object_question(_, _, _, _, _), do: nil
+
+  defp normalize_object_question(sentence) do
+    sentence
+    |> String.trim()
+    |> String.trim_trailing("?")
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp compose_object_question(si, sentence, _frame, constituents, indexed) do
+    question_constituents = Enum.filter(constituents, fn
+      %{id: :wh_aux_object_question, span: {0, 4}, status: :resolved,
+        unresolved_roles: []} -> true
+      _ -> false
+    end)
+
+    role_competition =
+      case Map.get(si, :role_competition) do
+        %{} = roles -> roles
+        _ -> %{}
+      end
+
+    grammar_roles =
+      case Map.get(role_competition, :roles) do
+        %{} = roles -> roles
+        _ -> %{}
+      end
+
+    with [atl] <- question_constituents,
+         true <- Map.get(role_competition, :source) ==
+                   :core_syntax_and_attested_dictionary_pos,
+         %{status: :supported, pos: "noun", role: :subject_head,
+           basis: :determined_subject_in_wh_aux_question} <- Map.get(grammar_roles, 3),
+         %{status: :supported, pos: "verb", role: :predicate,
+           basis: :predicate_in_wh_aux_question} <- Map.get(grammar_roles, 4),
+         %{wh: wh, auxiliary: auxiliary, subject_determiner: determiner,
+           subject_head: subject, predicate: predicate} <- atl.roles,
+         true <- Enum.all?([wh, auxiliary, determiner, subject, predicate], fn
+           %{token_index: index, sense_id: id} when is_integer(index) and
+             is_binary(id) -> not String.ends_with?(id, "|fallback")
+           _ -> false
+         end),
+         true <- wh.token_index == 0 and auxiliary.token_index == 1 and
+                   determiner.token_index == 2 and subject.token_index == 3 and
+                   predicate.token_index == 4,
+         true <- object_roles_agree_with_winners?(si, atl.roles),
+         {:ok, wh_surface} <- surface_at(indexed, 0),
+         {:ok, auxiliary_surface} <- surface_at(indexed, 1),
+         {:ok, subject_surface} <- surface_range(indexed, 2, 3),
+         {:ok, predicate_surface} <- surface_at(indexed, 4),
+         true <- String.downcase(wh_surface) in ["what", "who"],
+         true <- String.downcase(auxiliary_surface) in ["do", "does", "did"],
+         {:ok, reconstructed} <- surface_range(indexed, 0, 4),
+         true <- String.downcase(reconstructed) == normalize_object_question(sentence) do
+      roles = %{
+        question_word: %{surface: wh_surface, token_index: 0, sense_id: wh.sense_id},
+        auxiliary: %{surface: auxiliary_surface, token_index: 1,
+          sense_id: auxiliary.sense_id},
+        subject: %{surface: subject_surface, span: {2, 3},
+          determiner_sense_id: determiner.sense_id,
+          head_sense_id: subject.sense_id,
+          grounding_status: :structurally_bound_not_lexically_verified},
+        predicate: %{surface: predicate_surface, token_index: 4,
+          sense_id: predicate.sense_id,
+          grounding_status: :selected_not_contextually_verified},
+        object: %{role: :patient, status: :unbound}
+      }
+
+      meaning = %{
+        version: 1,
+        sentence: sentence,
+        definition: "The speaker asks for the object of predicate '#{predicate_surface}' " <>
+          "with subject '#{subject_surface}'.",
+        kind: :wh_object_question,
+        status: :structurally_interpreted,
+        speech_act: :request_information,
+        source_frame: :wh_aux_object_question,
+        roles: roles,
+        unresolved: [:patient],
+        grounding: %{
+          grammatical_roles: :independent_syntax_and_atl_agreement,
+          exact_lexical_meanings: :not_verified,
+          event_occurrence: :not_asserted,
+          external_facts: :not_checked
+        },
+        source: :sentence_signature_and_atl
+      }
+
+      Map.put(meaning, :proposition, Core.Semantic.Proposition.build(si, meaning))
+    else
+      _ -> nil
+    end
+  end
+
+  # A constituent cannot independently assign BrainCell IDs. Each role
+  # must match both ATL's token-level winner and the final lexical selection.
+  defp object_roles_agree_with_winners?(si, roles) do
+    atl = Map.get(si, :atl_slate) || %{}
+    winners = Map.get(atl, :winners)
+    selections =
+      case Map.get(si, :semantic_choices) do
+        selected when is_list(selected) -> selected
+        _ -> Map.get(si, :lifg_choices)
+      end
+
+    is_list(winners) and is_list(selections) and
+      Enum.all?(roles, fn
+        {_role, %{token_index: index, sense_id: sense_id}} ->
+          Enum.count(winners, fn winner ->
+            Map.get(winner, :token_index) == index and Map.get(winner, :id) == sense_id
+          end) == 1 and
+            Enum.count(selections, fn selected ->
+              Map.get(selected, :token_index) == index and
+                (Map.get(selected, :id) || Map.get(selected, :chosen_id)) == sense_id
+            end) == 1
+
+        _ -> false
+      end)
+  end
+
+  # A validated participant event provides structural sentence understanding,
+  # not an externally verified fact. Keep this representation separate from
+  # lexical :understood and from any persistence acknowledgement.
+  defp participant_meaning(si, sentence) when is_binary(sentence) do
+    case EpisodicProjection.validated_participant(si) do
+      %{source_frame: :finite_present_svo, relation: relation,
+        value: patient, participants: %{
+          "actor" => actor, "predicate" => lemma,
+          "surface_predicate" => surface, "patient" => stored_patient,
+          "tense" => "present"
+        }} = event ->
+        if relation == "verb_" <> lemma and patient == stored_patient and
+             participant_surface?([actor, lemma, surface, patient]) do
+          roles = %{
+            actor: surface_role(actor),
+            predicate: %{surface: surface, lemma: lemma,
+              grounding_status: :selected_not_contextually_verified},
+            patient: surface_role(patient)
+          }
+
+          participant_frame(sentence, event, :action, roles,
+            "The speaker reports that #{actor} #{surface} #{patient}.")
+        end
+
+      %{source_frame: :progressive_spatial, relation: "spatial_state",
+        value: location, participants: %{
+          "actor" => actor, "predicate" => predicate, "aspect" => "progressive",
+          "position" => position, "location" => stored_location
+        }} = event ->
+        if location == stored_location and
+             participant_surface?([actor, predicate, position, location]) do
+          roles = %{
+            actor: surface_role(actor),
+            predicate: %{surface: predicate, aspect: :progressive,
+              grounding_status: :attested_form_not_sense_verified},
+            position: surface_role(position),
+            location: surface_role(location)
+          }
+
+          participant_frame(sentence, event, :spatial, roles,
+            "The speaker reports that #{actor} is #{predicate} #{position} #{location}.")
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp participant_meaning(_, _), do: nil
+
+  defp participant_frame(sentence, event, kind, roles, definition) do
+    grounding = %{
+      grammatical_roles: :revalidated_episodic_projection,
+      exact_lexical_meanings: :not_verified,
+      external_facts: :not_checked
+    }
+
+    meaning = %{
+      version: 2,
+      sentence: sentence,
+      kind: :participant_assertion,
+      event_type: kind,
+      source_frame: event.source_frame,
+      status: :structurally_interpreted,
+      speech_act: :assertion,
+      definition: definition,
+      roles: roles,
+      polarity: :positive,
+      grounding: grounding,
+      source: :revalidated_episodic_projection
+    }
+
+    Map.put(meaning, :proposition, Core.Semantic.Proposition.build(%{}, meaning))
+  end
+
+  defp surface_role(surface),
+    do: %{surface: surface, grounding_status: :structurally_bound}
+
+  defp participant_surface?(values) do
+    Enum.all?(values, fn value ->
+      is_binary(value) and String.trim(value) != "" and byte_size(value) <= 160
+    end)
+  end
 
   defp compose_question(
          %{span: {start, last}, roles: roles},

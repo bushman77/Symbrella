@@ -9,7 +9,11 @@ config :symbrella_web, SymbrellaWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   check_origin: false,
-  secret_key_base: "0123456789012345678901234567890123456789012345678901234567890123",
+  # Development cookies must not be forgeable with a secret committed to Git.
+  # A fresh key is created each startup unless explicitly configured.
+  secret_key_base:
+    System.get_env("SYMBRELLA_DEV_SECRET_KEY_BASE") ||
+      Base.encode64(:crypto.strong_rand_bytes(64)),
   live_reload: [
     patterns: [
       ~r"priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$",

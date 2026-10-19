@@ -4,6 +4,8 @@ defmodule Brain.LIFG.BoundaryGuardInvariantTest do
 
   alias Brain.LIFG.Stage1
 
+  @event [:test, :lifg, :boundary_drop, :invariant_test]
+
   test "drops non word-boundary substrings and emits boundary_drop" do
     si = %{
       sentence: "what im",
@@ -20,9 +22,10 @@ defmodule Brain.LIFG.BoundaryGuardInvariantTest do
 
     {meas, meta} =
       capture(
-        [:brain, :lifg, :boundary_drop],
+        @event,
         fn ->
-          assert {:ok, %{choices: choices, audit: audit}} = Stage1.run(si)
+          assert {:ok, %{choices: choices, audit: audit}} =
+                   Stage1.run(si, boundary_event: @event)
           assert length(choices) == 1
           assert audit.kept_tokens == 1
           assert audit.dropped_tokens == 1
@@ -34,7 +37,7 @@ defmodule Brain.LIFG.BoundaryGuardInvariantTest do
     assert meas == %{}
     assert meta[:token_index] == 0
     assert meta[:mw] == false
-    # (no longer assert meta[:phrase] == "hat")
+    assert meta[:phrase] == "hat"
   end
 
   # second test ("MWEs bypass boundary guard") can stay as-is

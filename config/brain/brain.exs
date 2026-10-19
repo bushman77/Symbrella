@@ -48,6 +48,13 @@ config :brain,
   thalamus_mood_cap: 0.30,
   capacity: 12
 
+# Individual lexical neuron excitation. Time-based, independent of how often
+# the Brain page refreshes or how frequently the cycle clock ticks.
+# After roughly 33 seconds without a new stimulus, a 0.1 activation reaches
+# the 0.001 resting threshold and drops out of the active snapshot.
+config :brain, :cell_activation_half_life_ms, 5_000
+config :brain, :cell_activation_rest_threshold, 0.001
+
 config :brain, :blackboard_window_size, 100
 config :brain, :log_cognition_pipeline?, false
 config :brain, :log_lifg_stage1?, false

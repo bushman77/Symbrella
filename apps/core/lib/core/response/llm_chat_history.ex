@@ -13,7 +13,7 @@ defmodule Core.Response.LlmChatHistory do
   @retrieval_table :core_recent_retrieval
   @retrieval_ttl_ms 300_000
   @recall_turn_pairs 100
-  @default_turn_pairs 6
+  @default_turn_pairs 32
   @default_max_item_chars 900
 
   @compile {:no_warn_undefined, Llm}
@@ -22,32 +22,14 @@ defmodule Core.Response.LlmChatHistory do
   def record_turn(session_id, user_text, assistant_text) do
     ensure_table!()
 
-    previous = lookup_messages(session_id)
-
-    next =
-      LlmHistory.append_turn(
-        previous,
-        user_text,
-        assistant_text,
-        configured_turn_pairs(),
-        configured_max_item_chars()
-      )
-
-    :ets.insert(@table, {session_id, next})
-
-    # Preserve more conversational evidence than we can afford to send to the
-    # LLM as prompt context. Both stores are bounded and process-local.
-    recall =
-      LlmHistory.append_turn(
-        lookup_messages(@recall_table, session_id),
-        user_text,
-        assistant_text,
-        @recall_turn_pairs,
-        configured_max_item_chars()
-      )
-
-    :ets.insert(@recall_table, {session_id, recall})
-    :ok
+    # A single owner serializes each session's read/append/write transaction.
+    # Independent :ets.lookup + :ets.insert calls can otherwise lose turns
+    # when two request processes complete simultaneously.
+    GenServer.call(
+      LlmChatHistoryOwner,
+      {:record_turn, session_id, user_text, assistant_text, configured_turn_pairs(),
+       configured_max_item_chars()}
+    )
   rescue
     e ->
       Logger.warning("[LlmChatHistory] record_turn failed: #{Exception.message(e)}")

@@ -14,6 +14,8 @@ defmodule Core.SemanticInput do
     - tokens: token list (maps/structs)
     - phrase_candidates: unconfirmed phrase windows
     - active_cells: lexicon/DB rows attached by downstream stages
+    - neuron_activation: separate, live id-to-activation snapshot from STM
+    - semantic_pulses: ephemeral session-scoped verb-lemma signals (not senses)
     - trace: ordered list of stage events
 
   Sentence signatures:
@@ -59,6 +61,7 @@ defmodule Core.SemanticInput do
                  :mwe_hypotheses,
                  :mwe_choices,
                  :lexical_constructions,
+                 :episodic_candidates,
                  :sentence_signatures
                ])
 
@@ -66,6 +69,7 @@ defmodule Core.SemanticInput do
                 :intent_bias,
                 :sense_candidates,
                 :sentence_competition,
+                :role_competition,
                 :sentence_meaning,
                 :lifg_feedback,
                 :perception,
@@ -74,6 +78,8 @@ defmodule Core.SemanticInput do
                 :prefrontal,
                 :control_signals,
                 :activation_summary,
+                :neuron_activation,
+                :semantic_pulses,
                 :evidence,
                 :episode,
                 :response_meta,
@@ -93,6 +99,7 @@ defmodule Core.SemanticInput do
 
   @atom_fields MapSet.new([
                  :source,
+                 :experience_origin,
                  :intent,
                  :opener_intent,
                  :conversation_act,
@@ -168,6 +175,8 @@ defmodule Core.SemanticInput do
           tokens: [token()],
           phrase_candidates: [map()],
           active_cells: [cell()],
+          neuron_activation: %{optional(String.t()) => number()},
+          semantic_pulses: %{optional(String.t()) => number()},
           trace: list(),
 
           # Fuzzy correction
@@ -194,7 +203,9 @@ defmodule Core.SemanticInput do
           # Grammatical evidence and sense candidates
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
+          role_competition: map() | nil,
           sentence_meaning: map() | nil,
+          episodic_candidates: [map()],
           lifg_feedback: map() | nil,
           sense_candidates: %{
             optional(non_neg_integer()) => [sense_candidate()]
@@ -246,6 +257,7 @@ defmodule Core.SemanticInput do
 
           # Execution/frame metadata
           session_id: term() | nil,
+          experience_origin: atom() | nil,
           frame: map() | nil,
           frame_ts_ms: integer() | nil,
           frame_seq: integer() | nil,
@@ -257,6 +269,8 @@ defmodule Core.SemanticInput do
             tokens: [],
             phrase_candidates: [],
             active_cells: [],
+            neuron_activation: %{},
+            semantic_pulses: %{},
             trace: [],
             fuzzy_corrections: [],
             fuzzy_aliases: [],
@@ -277,7 +291,9 @@ defmodule Core.SemanticInput do
             resolved_tokens: [],
             sentence_signatures: [],
             sentence_competition: nil,
+            role_competition: nil,
             sentence_meaning: nil,
+            episodic_candidates: [],
             lifg_feedback: nil,
             sense_candidates: %{},
             lifg_opts: nil,
@@ -315,6 +331,7 @@ defmodule Core.SemanticInput do
             mwe_choices: [],
             lexical_constructions: [],
             session_id: nil,
+            experience_origin: nil,
             frame: nil,
             frame_ts_ms: nil,
             frame_seq: nil,

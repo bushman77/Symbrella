@@ -146,6 +146,10 @@ defmodule Core.Response.LlmPrompt do
 
       # ── Closing ──
       verified_population_priority(features),
+      # Place this turn-specific, separately validated speech-act frame
+      # after generic mood/personality uncertainty shaping so weak LIFG
+      # noun sense confidence cannot cause a redundant clarification.
+      Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
       "Respond to the user's actual request in the most natural useful form."
     ]
     |> Enum.reject(&blank?/1)

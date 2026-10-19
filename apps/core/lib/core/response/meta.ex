@@ -79,6 +79,10 @@ defmodule Core.Response.Meta do
     |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
     |> maybe_put_grounded_revision(Map.get(reflection, :grounded_revision))
     |> maybe_put_authoritative_plan(Map.get(reflection, :authoritative_plan))
+    |> maybe_put_projected_expression_repair(
+      Map.get(reflection, :projected_expression_repair))
+    |> maybe_put_semantic_role_fidelity(
+      Map.get(reflection, :semantic_role_fidelity))
   end
 
   defp reflection_summary(_), do: nil
@@ -130,6 +134,30 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_authoritative_plan(summary, _), do: summary
+
+  # This response-only review outcome is safe to expose in Explain.
+  # Keep compact structural provenance; never copy model drafts, user
+  # content, system prompts, or the underlying cohort glossary.
+  defp maybe_put_projected_expression_repair(summary, %{} = repair) do
+    Map.put(summary, :projected_expression_repair,
+      Map.take(repair, [
+        :attempted?, :applied?, :trigger, :source,
+        :original_reflection_status, :promoted_sense?, :stored_memory?
+      ]))
+  end
+
+  defp maybe_put_projected_expression_repair(summary, _), do: summary
+
+  defp maybe_put_semantic_role_fidelity(summary, %{} = audit) do
+    Map.put(summary, :semantic_role_fidelity,
+      Map.take(audit, [
+        :status, :reason, :mismatched_roles, :source, :draft_scope,
+        :event_truth_verified?, :exact_sense_verified?,
+        :modified_cognition?
+      ]))
+  end
+
+  defp maybe_put_semantic_role_fidelity(summary, _), do: summary
 
   @spec classify_profile(map(), map(), map()) :: atom()
   def classify_profile(features, decision, guard) do

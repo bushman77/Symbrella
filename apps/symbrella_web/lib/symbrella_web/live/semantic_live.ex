@@ -9,12 +9,14 @@ defmodule SymbrellaWeb.SemanticLive do
   @si_fields %SemanticInput{} |> Map.from_struct() |> Map.keys() |> MapSet.new()
 
   @impl true
-  def mount(_params, _session, socket) do
-    {si, params, report_source} = latest_chat_report()
+  def mount(_params, session, socket) do
+    session_id = Map.fetch!(session, "symbrella_chat_session_id")
+    {si, params, report_source} = latest_chat_report(session_id)
 
     {:ok,
      socket
      |> assign(:page_title, "Semantic Report")
+     |> assign(:chat_session_id, session_id)
       |> assign(:form, to_form(params, as: :semantic))
      |> assign(:report_source, report_source)
      |> assign_report(si, params)}
@@ -22,7 +24,7 @@ defmodule SymbrellaWeb.SemanticLive do
 
   @impl true
   def handle_event("analyze", %{"semantic" => params}, socket) do
-    normalized = normalize_params(params)
+    normalized = normalize_params(params) |> Map.put("session_id", socket.assigns.chat_session_id)
     si = resolve(normalized)
 
     {:noreply,
@@ -34,7 +36,7 @@ defmodule SymbrellaWeb.SemanticLive do
 
   @impl true
   def handle_event("load_latest_chat", _params, socket) do
-    {si, params, report_source} = latest_chat_report()
+    {si, params, report_source} = latest_chat_report(socket.assigns.chat_session_id)
 
     {:noreply,
      socket
@@ -254,8 +256,8 @@ defmodule SymbrellaWeb.SemanticLive do
   defp maybe_put_session_id(%SemanticInput{} = si, nil), do: si
   defp maybe_put_session_id(%SemanticInput{} = si, session_id), do: %{si | session_id: session_id}
 
-  defp latest_chat_report do
-    messages = ChatHistory.list()
+  defp latest_chat_report(session_id) do
+    messages = ChatHistory.list(session_id)
 
     case latest_semantic_snapshot(messages) do
       {%SemanticInput{} = si, message} ->

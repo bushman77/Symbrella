@@ -135,6 +135,29 @@ defmodule Core.Semantic.EventFrames do
           confidence: 0.8
         }
 
+      # Users may say "how far from Maple Ridge is from Kamloops".
+      # The repeated "from" is conversational syntax, not evidence that
+      # the two named locations are the same place. Recover both explicit
+      # entities without relying on the previous-turn geography.
+      match =
+          Regex.run(
+            ~r/^\s*how\s+far\s+from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78}?)\s+is\s+(?:it\s+)?from\s+([\p{L}][\p{L}\p{M}\s,.'-]{1,78})\s*[?.!]?\s*$/iu,
+            sentence
+          ) ->
+        [_, named_subject, named_target] = match
+
+        %{
+          type: :location_question,
+          domain: :geography,
+          relation: :proximity,
+          subject: clean_entity(named_subject),
+          target: clean_entity(named_target),
+          antecedent_source: :explicit_user_question,
+          unresolved_roles: [],
+          grounding_status: :unverified,
+          confidence: 0.9
+        }
+
       # Directly named places do not require discourse antecedent recovery.
       # This creates only a question frame; coordinates must still be sourced
       # and matched to both entities before any numeric claim may be returned.
@@ -593,9 +616,14 @@ defmodule Core.Semantic.EventFrames do
   end
 
   defp map_get(map, key, default) when is_map(map) and is_binary(key) do
-    Map.get(map, key, Map.get(map, String.to_atom(key), default))
-  rescue
-    ArgumentError -> Map.get(map, key, default)
+    atom_key =
+      try do
+        String.to_existing_atom(key)
+      rescue
+        ArgumentError -> nil
+      end
+
+    if atom_key, do: Map.get(map, key, Map.get(map, atom_key, default)), else: Map.get(map, key, default)
   end
 
   defp map_get(_map, _key, default), do: default

@@ -33,14 +33,23 @@ defmodule Core.Tools.EvidenceResolverTest do
 
   defmodule SuccessfulCoords do
     def proximity(subject, target, _opts) do
+      # Synthetic coordinates measure a constant (38.5 km) for test
+      # determinism. The two *entity identities* must still match the
+      # exact subject and target independently bound by Core.
+      named_target = target |> String.split(",", parts: 2) |> hd()
+      named_target = String.trim(named_target) |> String.downcase()
+      {target_title, target_url} =
+        if named_target == "kamloops",
+          do: {"Kamloops", "https://www.wikidata.org/wiki/Q473209"},
+          else: {"Vancouver", "https://www.wikidata.org/wiki/Q24639"}
+
       {:ok, %{kind: :proximity, status: :source_supported,
         subject: subject, target: target, method: :haversine,
         distance_km: 38.5,
         sources: [
           %{title: "Maple Ridge", provider: :wikidata,
             url: "https://www.wikidata.org/wiki/Q16740"},
-          %{title: "Vancouver", provider: :wikidata,
-            url: "https://www.wikidata.org/wiki/Q24639"}
+          %{title: target_title, provider: :wikidata, url: target_url}
         ]}}
     end
   end
@@ -126,6 +135,143 @@ defmodule Core.Tools.EvidenceResolverTest do
     assert answer =~ "38.5 km"
     assert answer =~ "straight line"
     refute answer =~ "10 miles"
+  end
+
+  test "actual repeated-from phrasing is routed to coordinates, not an unsourced 30 km assertion" do
+    alias Core.Semantic.EventFrames
+    alias Core.Tools.WebRetrieval.RequestRouter
+
+    question = "how far from maple ridge is from kamloops"
+    frame = EventFrames.location_question(question)
+
+    assert frame.relation == :proximity
+    assert frame.subject == "maple ridge"
+    assert frame.target == "kamloops"
+    assert frame.grounding_status == :unverified
+
+    ctx = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.82, symbolic_frame: frame},
+      symbolic_frame: %{event: frame}
+    }
+
+    assert %{relation: :proximity, request_type: :geographic_proximity} =
+      RequestRouter.route(ctx)
+
+    # The 38.5 km stub is synthetic and intentionally not the true
+    # Maple Ridge/Kamloops distance; this tests proof enforcement only.
+    evidence = WebRetrieval.enrich(ctx,
+      enabled?: true,
+      provider: OffTopicWikipedia,
+      coordinate_provider: SuccessfulCoords
+    )
+    assert evidence.web_evidence.resolution == :source_supported
+    assert evidence.web_evidence.support.subject == "maple ridge"
+    assert evidence.web_evidence.support.target == "kamloops"
+
+    {:ok, corrected, review} =
+      ReflectionLoop.review(question,
+        "According to the information provided, Kamloops is approximately 30 kilometers (19 miles) from Maple Ridge. Wikipedia",
+        evidence)
+
+    assert review.status == :repair
+    assert :geographic_claim_unverified in review.issues
+    assert corrected =~ "38.5 km"
+    assert corrected =~ "straight line"
+    assert Grounding.supports?(corrected, evidence)
+
+    # Even a successful coordinate-provider status is insufficient when
+    # its second named entity is Vancouver rather than Kamloops.
+    corrupted =
+      update_in(evidence, [:web_evidence, :support, :sources], fn [origin, target] ->
+        [origin, %{target | title: "Vancouver",
+          url: "https://www.wikidata.org/wiki/Q24639"}]
+      end)
+
+    refute Grounding.available_support?(corrupted)
+
+    {:ok, wrong_source_answer, wrong_source_review} =
+      ReflectionLoop.review(question,
+        "Kamloops is approximately 30 kilometers from Maple Ridge.",
+        corrupted)
+
+    assert :geographic_claim_unverified in wrong_source_review.issues
+    assert wrong_source_answer =~ "don't have verified distance"
+    refute wrong_source_answer =~ "30 kilometers"
+
+    refute corrected =~ "30 kilometers"
+    refute corrected =~ "19 miles"
+
+    no_coords = WebRetrieval.enrich(ctx,
+      enabled?: true,
+      provider: OffTopicWikipedia,
+      coordinate_provider: FailedCoords,
+      max_attempts: 2
+    )
+    assert no_coords.web_evidence.support == nil
+    assert Enum.any?(no_coords.web_evidence.attempts, fn attempt ->
+      attempt.kind == :coordinates and
+        attempt.status == :unavailable and
+        attempt.reason == :entity_mismatch
+    end)
+
+    {:ok, rejected, refusal_review} =
+      ReflectionLoop.review(question,
+        "Kamloops is approximately 30 kilometers (19 miles) from Maple Ridge. Wikipedia",
+        no_coords)
+
+    assert refusal_review.status == :repair
+    assert :geographic_claim_unverified in refusal_review.issues
+    assert rejected =~ "asking for the distance between"
+    assert rejected =~ "don't have verified distance"
+    refute rejected =~ "30 kilometers"
+    refute rejected =~ "19 miles"
+  end
+
+  test "source-backed proximity admits comma and space qualified Canadian place names" do
+    alias Core.Semantic.EventFrames
+
+    pairs = [
+      {"how far is Maple Ridge, BC from Kamloops, BC",
+       "Maple Ridge, BC", "Kamloops, BC"},
+      {"how far is maple ridge bc from kamloops bc",
+       "maple ridge bc", "kamloops bc"},
+      {"how far is maple ridge from kamloops",
+       "maple ridge", "kamloops"}
+    ]
+
+    for {question, subject, target} <- pairs do
+      frame = EventFrames.location_question(question)
+      assert frame.subject == subject
+      assert frame.target == target
+
+      sources = [
+        %{title: "Maple Ridge", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q16740"},
+        %{title: "Kamloops", provider: :wikidata,
+          url: "https://www.wikidata.org/wiki/Q473209"}
+      ]
+
+      context = %{
+        user_text: question,
+        features: %{symbolic_frame: frame},
+        symbolic_frame: %{event: frame},
+        web_evidence: %{
+          status: :retrieved, resolution: :source_supported,
+          support: %{kind: :proximity, status: :source_supported,
+            method: :haversine, distance_km: 229.6,
+            subject: subject, target: target, sources: sources}
+        }
+      }
+
+      assert Grounding.available_support?(context)
+      answer = Grounding.align("The cities are 30 km apart.", context)
+      assert answer =~ "229.6 km"
+      assert answer =~ "straight line"
+      assert Grounding.supports?(answer, context)
+      refute Grounding.supports?(answer <> " It is 30 km by road.", context)
+      refute Grounding.supports?("30 km straight line " <> answer, context)
+    end
   end
 
   test "an unverified refusal is upgraded when evidence is source-supported" do

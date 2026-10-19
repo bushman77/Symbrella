@@ -18,6 +18,7 @@ defmodule Brain.WorkingMemoryStage2IngestTest do
     capacity: 7,
     decay_ms: 30_000,
     gate_threshold: 0.4,
+    fullness_penalty_mult: 0.0,
     merge_duplicates?: true
   }
 
@@ -56,6 +57,19 @@ defmodule Brain.WorkingMemoryStage2IngestTest do
              is_number(it.score) and it.score >= 0.0 and it.score <= 1.0 and
                is_integer(it.inserted_at) and is_integer(it.last_bump)
            end)
+  end
+
+  test "Stage2 commit/allow labels and unscored evidence cannot bypass the BG gate" do
+    cfg = Map.merge(@cfg, %{gate_threshold: 0.6, lifg_min_score: 0.6})
+
+    decisions = [
+      {:commit, %{id: "weak-commit|noun|0", score: 0.1}},
+      {:allow, %{id: "weak-allow|noun|0", score: 0.1}},
+      %{decision: :boost, id: "weak-map|noun|0", score: 0.1},
+      {:commit, %{id: "unscored|noun|0", margin: 1.0}}
+    ]
+
+    assert WorkingMemory.ingest_stage2([], decisions, 1_000, cfg) == []
   end
 
   test "ingest_stage2 merges duplicates when merge_duplicates? is true" do

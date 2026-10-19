@@ -42,6 +42,17 @@ defmodule Core.Response.LlmRouteFlowTest do
           String.downcase(user_text) == "good afternoon symbrella" ->
             "good afternoon symbrella. How may I assist you today?"
 
+          String.downcase(user_text) in ["where am i atm", "no you are not"] ->
+            "I'm currently located in Kamloops, British Columbia, Canada."
+
+          String.downcase(user_text) == "where am i atm?" ->
+            "I'm just here, where am I atm?"
+
+          String.downcase(user_text) in [
+            "where are you located?", "are you physically in kamloops?"
+          ] ->
+            "Maple Ridge, BC. Is there anything specific you'd like to know about this location?"
+
           String.contains?(user_text, "power the computer down") ->
             "I'm sorry, but I can't assist with that."
 
@@ -102,6 +113,131 @@ defmodule Core.Response.LlmRouteFlowTest do
     end)
 
     :ok
+  end
+
+  test "LLM synthesis repairs self-location hallucination using prior session correction target" do
+    alias Core.Response.LlmSynthesis
+
+    session_id = "speaker-location-flow-#{System.unique_integer([:positive])}"
+    wrong = "I'm currently located in Kamloops, British Columbia, Canada."
+
+    # An earlier unguarded assistant turn is a correction TARGET, not
+    # source evidence of the assistant's physical presence.
+    LlmSynthesis.record_turn(session_id, "where am i atm", wrong)
+
+    {:ok, reply, reflection} =
+      LlmSynthesis.generate("no you are not",
+        %{session_id: session_id, intent: :deny, conf: 0.82},
+        %{response_profile: :self_check}, %{}, :runtime_self_check)
+
+    assert :speaker_location_fidelity in reflection.issues
+    assert reflection.status == :repair
+    assert reply =~ "earlier claim"
+    assert reply =~ "wasn't verified"
+    refute reply =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, messages, _opts}
+    assert List.last(messages)["content"] == "no you are not"
+    assert Enum.any?(messages, fn item ->
+      item["role"] == "assistant" and item["content"] == wrong
+    end)
+  end
+
+  test "first user current-location question is reviewed without prior chat history" do
+    alias Core.Response.LlmSynthesis
+
+    session_id = "speaker-location-new-#{System.unique_integer([:positive])}"
+
+    {:ok, reply, reflection} =
+      LlmSynthesis.generate("where am i atm",
+        %{session_id: session_id, intent: :ask, conf: 0.81},
+        %{response_profile: :self_check}, %{}, :runtime_self_check)
+
+    assert reflection.status == :repair
+    assert :speaker_location_fidelity in reflection.issues
+    assert reply =~ "can't verify your current physical location"
+    refute reply =~ "I'm currently located in Kamloops"
+  end
+
+  test "full response route rejects exact malformed drafts observed live" do
+    for user <- [
+      "Where am I atm?",
+      "Where are you located?",
+      "Are you physically in Kamloops?"
+    ] do
+      session_id = "speaker-location-live-regression-#{System.unique_integer([:positive])}"
+
+      {_tone, answer, meta} =
+        Response.plan(%{
+          intent: :ask,
+          confidence: 0.9,
+          session_id: session_id,
+          text: user
+        }, %{})
+
+      assert meta.response_source == :llm
+      assert meta.response_reflection.status == :repair
+      assert :speaker_location_fidelity in meta.response_reflection.issues
+      refute answer =~ "Maple Ridge, BC."
+      refute answer =~ "where am I atm?"
+
+      assert_receive {:llm_chat, messages, _opts}
+      assert List.last(messages)["content"] == user
+
+      assert [
+        %{"role" => "user", "content" => ^user},
+        %{"role" => "assistant", "content" => ^answer}
+      ] = Core.Response.LlmChatHistory.messages(session_id)
+    end
+  end
+
+  test "full response route stores repaired location and uses it for the next correction" do
+    session_id = "speaker-location-two-turn-#{System.unique_integer([:positive])}"
+
+    {_tone, first, first_meta} =
+      Response.plan(%{
+        intent: :ask, confidence: 0.9, session_id: session_id,
+        text: "where am i atm"
+      }, %{})
+
+    assert first_meta.response_source == :llm
+    assert first_meta.response_reflection.status == :repair
+    assert :speaker_location_fidelity in first_meta.response_reflection.issues
+    assert first =~ "can't verify your current physical location"
+    refute first =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, first_messages, _opts}
+    assert List.last(first_messages)["content"] == "where am i atm"
+
+    assert Core.Response.LlmChatHistory.messages(session_id) == [
+      %{"role" => "user", "content" => "where am i atm"},
+      %{"role" => "assistant", "content" => first}
+    ]
+
+    {_tone, second, second_meta} =
+      Response.plan(%{
+        intent: :deny, confidence: 0.9, session_id: session_id,
+        text: "no you are not"
+      }, %{})
+
+    assert second_meta.response_source == :llm
+    assert second_meta.response_reflection.status == :repair
+    assert :speaker_location_fidelity in second_meta.response_reflection.issues
+    assert second =~ "don't have verified evidence"
+    refute second =~ "I'm currently located in Kamloops"
+
+    assert_receive {:llm_chat, second_messages, _opts}
+    assert List.last(second_messages)["content"] == "no you are not"
+    assert Enum.any?(second_messages, fn message ->
+      message["role"] == "assistant" and message["content"] == first
+    end)
+
+    assert Core.Response.LlmChatHistory.messages(session_id) == [
+      %{"role" => "user", "content" => "where am i atm"},
+      %{"role" => "assistant", "content" => first},
+      %{"role" => "user", "content" => "no you are not"},
+      %{"role" => "assistant", "content" => second}
+    ]
   end
 
   test "normal helpful responses use LLM synthesis when a client is available" do

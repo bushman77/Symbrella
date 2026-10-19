@@ -214,6 +214,7 @@ defmodule Brain.LIFG.FallbackRerun do
           weights: weights_for_stage1,
           scores: scores_mode,
           margin_threshold: margin_thr,
+          sense_focus?: Keyword.get(opts, :sense_focus?, true),
           chargram_event:
             Keyword.get(opts, :chargram_event, [:brain, :lifg, :chargram_violation]),
           boundary_event: Keyword.get(opts, :boundary_event, [:brain, :lifg, :boundary_drop]),

@@ -9,6 +9,9 @@ defmodule Core.Response.Memory do
   alias Core.Response.SideEffects
   alias Core.Response.LlmChatHistory
   alias Core.Response.ConversationRecall
+  alias Core.Response.SpatialDialogue
+  alias Core.Response.EpisodicMemory
+  alias Core.Semantic.EpisodicProjection
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -30,6 +33,54 @@ defmodule Core.Response.Memory do
 
   def reply(_), do: nil
 
+  @doc "Acknowledge only a validated event after Hippocampus confirms persistence."
+  @spec acknowledge_projected(map(), term(), String.t(), atom(), number()) ::
+          {atom(), String.t(), map()} | nil
+  def acknowledge_projected(%{} = si, session_id, text_in, intent0, conf)
+      when is_binary(text_in) do
+    candidates = Map.get(si, :episodic_candidates, [])
+    sentence = Map.get(si, :sentence)
+
+    # A parsed declarative event may be retained as attributed experience,
+    # but that alone is NOT a conversational request to remember it.
+    # The ordinary Response.plan path already records validated user events
+    # through SideEffects.record_turn/4 without hijacking the reply.
+    explicit_memory_request? =
+      intent0 == :memory_write and
+        Regex.match?(~r/^\s*remember\b/iu, text_in)
+
+    if explicit_memory_request? and
+         Map.get(si, :source) in [:user, :prod, :test] and
+         is_binary(sentence) and String.trim(sentence) == String.trim(text_in) and
+         is_list(candidates) and candidates != [] and
+         Enum.all?(candidates, fn candidate ->
+           match?({:ok, _}, EpisodicProjection.validate_candidate(si, candidate))
+         end) do
+      case EpisodicMemory.remember_projected_events(si, text_in, session_id) do
+        :ok ->
+          response = "I’ve recorded what you told me: " <> String.trim(text_in)
+          finish_reply(session_id, text_in, response, %{
+            action: :remember_event,
+            response_source: :symbolic_conversation,
+            memory_source: :hippocampal_event,
+            provenance: :user_reported,
+            source: :user_reported_event,
+            persistence_status: :persisted,
+            retrieval_found?: false,
+            session_id: session_id,
+            intent_original: intent0,
+            confidence: conf
+          })
+
+        _ -> nil
+      end
+    else
+      nil
+    end
+  end
+
+  def acknowledge_projected(_, _, _, _, _), do: nil
+
   @spec reply_for(map()) :: {atom(), String.t(), map()} | nil
   def reply_for(%{
         intent0: intent0,
@@ -42,6 +93,8 @@ defmodule Core.Response.Memory do
         fact_query_key: fact_query_key
       }) do
     conversation_recall = ConversationRecall.reply(text_in, session_id)
+    spatial_reply = SpatialDialogue.reply(text_in, session_id)
+    episodic_reply = EpisodicMemory.reply(text_in)
 
     cond do
       asking_for_assistant_name?(text_in, session_id) ->
@@ -161,6 +214,28 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         }
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, spatial_reply) ->
+        {text, spatial_meta} = spatial_reply
+
+        meta =
+          spatial_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, episodic_reply) ->
+        {text, event_meta} = episodic_reply
+
+        meta =
+          event_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, text, meta)
 

@@ -379,10 +379,27 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert [%{status: "resolved", worker: "isolated"}] =
       InvestigationHistory.for_issue(issue.id)
 
-    # An idle or other subsequent tick must not overwrite the last success.
+    # Another tick may select another eligible issue left in the shared
+    # test sandbox. If it succeeds, the worker must remember that newer
+    # success; otherwise the first success must remain recorded.
+    first_success = Investigator.snapshot(trial_name).last_successful_result
     send(worker, :tick)
-    assert %{cycles: 2, last_successful_result: %{status: :resolved,
-             issue_id: ^issue_id}} = Investigator.snapshot(trial_name)
+
+    assert %{cycles: 2, last_result: second_result,
+             last_successful_result: last_success} =
+      Investigator.snapshot(trial_name)
+
+    if second_result.status == :resolved do
+      assert last_success.issue_id == second_result.issue_id
+      assert last_success.status == :resolved
+      refute second_result.issue_id == issue_id
+    else
+      assert last_success == first_success
+    end
+
+    # The original issue stays resolved and is not investigated twice.
+    assert [%{status: "resolved", worker: "isolated"}] =
+      InvestigationHistory.for_issue(issue.id)
 
     assert %{status: "resolved", resolution: resolution} =
       Db.get!(CognitiveIssue, issue.id)

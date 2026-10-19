@@ -28,6 +28,9 @@ defmodule Core.LIFG.ScoreAuditTest do
     assert entry.candidate_count_complete?
     assert entry.reported_top_probability == 0.12
     assert entry.runner_up_id == "know|noun|1"
+    assert Enum.map(entry.reported_top_candidates, & &1.id) == [
+      "know|verb|1", "know|noun|1", "know|verb|2", "know|verb|3"
+    ]
     assert_in_delta entry.reported_probability_margin, 0.01, 1.0e-10
     assert entry.score_kind == :per_token_post_softmax_probability
 
@@ -121,6 +124,23 @@ defmodule Core.LIFG.ScoreAuditTest do
     assert ScoreAudit.trace_reports(trace) == [report]
     assert ScoreAudit.trace_reports([{:activated, %{rows: 1}}]) == []
     assert ScoreAudit.trace_reports(nil) == []
+  end
+
+  test "bounded Stage1 top sense audit survives a >64-sense slate" do
+    scores =
+      1..100
+      |> Map.new(fn i -> {"draw|verb|#{i}", 1.0 / 100} end)
+
+    [row] =
+      ScoreAudit.summarize(
+        [%{token_index: 1, chosen_id: "draw|verb|1", scores: scores}],
+        [%{token_index: 1, id: "draw|verb|1", candidate_probs: nil}],
+        [%{index: 1, phrase: "draw"}], %{}, :all
+      )
+
+    assert row.reported_candidate_count == 100
+    assert length(row.reported_top_candidates) == 8
+    assert Enum.all?(row.reported_top_candidates, &is_number(&1.probability))
   end
 
   test "empty score maps remain unknown rather than implying confidence" do

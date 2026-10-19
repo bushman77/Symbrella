@@ -8,6 +8,15 @@ defmodule SymbrellaWeb.EpisodesData do
 
   @compile {:no_warn_undefined, Db.Episode}
 
+  @spec list_page(pos_integer(), pos_integer()) :: {list(), boolean()}
+  def list_page(page, per_page) do
+    if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :list_page, 2) do
+      Db.Episode.list_page(page, per_page)
+    else
+      {[], false}
+    end
+  end
+
   @spec list_all() :: list()
   def list_all do
     if Code.ensure_loaded?(Db.Episode) and function_exported?(Db.Episode, :list_all, 0) do

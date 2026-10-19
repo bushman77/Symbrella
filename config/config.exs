@@ -67,15 +67,17 @@ config :core, :log_prompt_budget?, false
 config :core, :llm_synthesis,
   timeout_ms: 120_000,
   ready_timeout_ms: 10_000,
-  max_tokens: 150,
+  max_tokens: 240,
   news_first_max_tokens: 280,
   evidence_revision_enabled?: true,
   evidence_revision_max_tokens: 360,
-  history_turn_pairs: 6,
-  # Full history remains default; opt into :selective_recall only after evaluating metrics.
+  # Retain a longer same-session conversation; prompt assembly separately
+  # caps the history to a safe portion of the local model's context.
+  history_turn_pairs: 32,
   history_mode: :full,
   selective_recent_pairs: 2,
-  max_item_chars: 500,
+  max_item_chars: 900,
+  max_input_estimated_tokens: 5_200,
   max_system_chars: 4_000,
   max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5
@@ -124,6 +126,14 @@ config :core, Core.Curiosity.EpisodeProbe,
   max_vigilance: 0.75,
   min_uncertainty: 0.2,
   max_recent: 40
+
+# ────────────── Durable experience-backed synaptic shadow ──────────────
+# Private, local receipts + review decisions survive BEAM restarts in dev.
+# Never feeds LIFG, neuron firing, or authoritative memory; isolated in tests.
+# tmp/ is git-ignored. Back up BOTH receipts.json and secret.key together.
+config :brain, Brain.Synapses.Shadow,
+  durable?: config_env() == :dev,
+  dir: "tmp/synapses"
 
 # ─────────────────────────── Brain ────────────────────────────────
 import_config "brain/brain.exs"

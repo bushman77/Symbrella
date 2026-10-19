@@ -73,6 +73,16 @@ defmodule SymbrellaWeb.BrainRuntime do
     end
   end
 
+  @doc "Read only the Brain coordinator's in-memory BrainCell activations."
+  @spec activation_snapshot() :: {:ok, map()} | :error
+  def activation_snapshot do
+    if Code.ensure_loaded?(Brain) and function_exported?(Brain, :activation_snapshot, 0) do
+      safe_map_call(fn -> Brain.activation_snapshot() end)
+    else
+      :error
+    end
+  end
+
   @spec brain_snapshot() :: {:ok, map()} | :error
   def brain_snapshot do
     if Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot, 0) do

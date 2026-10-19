@@ -3,6 +3,7 @@ defmodule Core.Response.LlmChatHistoryOwner do
 
   use GenServer
   require Logger
+  alias Core.Response.LlmHistory
 
   @table :core_llm_chat_history
   @recall_table :core_conversation_recall
@@ -45,6 +46,50 @@ defmodule Core.Response.LlmChatHistoryOwner do
     end)
 
     {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call(
+        {:record_turn, session_id, user_text, assistant_text, turn_pairs, max_item_chars},
+        _from,
+        state
+      ) do
+    history =
+      LlmHistory.append_turn(
+        lookup_messages(@table, session_id),
+        user_text,
+        assistant_text,
+        turn_pairs,
+        max_item_chars
+      )
+
+    recall =
+      LlmHistory.append_turn(
+        lookup_messages(@recall_table, session_id),
+        user_text,
+        assistant_text,
+        100,
+        max_item_chars
+      )
+
+    :ets.insert(@table, {session_id, history})
+    :ets.insert(@recall_table, {session_id, recall})
+    {:reply, :ok, state}
+  rescue
+    error ->
+      Logger.warning("[LlmChatHistory] atomic append failed: #{Exception.message(error)}")
+      {:reply, :ok, state}
+  catch
+    kind, reason ->
+      Logger.warning("[LlmChatHistory] atomic append #{kind}: #{inspect(reason)}")
+      {:reply, :ok, state}
+  end
+
+  defp lookup_messages(table, session_id) do
+    case :ets.lookup(table, session_id) do
+      [{^session_id, messages}] when is_list(messages) -> messages
+      _ -> []
+    end
   end
 
   defp ensure_started do

@@ -889,7 +889,10 @@ defmodule Core.Intent.Selection do
   defp score_correction(s) do
     cond do
       Regex.match?(
-        ~r/\b(?:actually|i\s+mean|i\s+meant|what\s+i\s+meant|to\s+be\s+clear|let\s+me\s+rephrase)\b/i,
+        # "actually" is a correction only as a discourse opener. In
+        # "What can you actually verify?" it modifies a question, not a
+        # previous conversational claim.
+        ~r/^\s*(?:actually\b|to\s+be\s+clear\b|let\s+me\s+rephrase\b)|\b(?:i\s+mean|i\s+meant|what\s+i\s+meant)\b/i,
         s
       ) ->
         0.88

@@ -499,9 +499,17 @@ defmodule Core.Tools.EvidenceResolver do
                "for #{Map.get(source, :title)}")
          end), support}
 
+      {:error, reason} when is_atom(reason) ->
+        # Preserve a bounded, provider-origin reason such as
+        # :place_not_verified or :ambiguous_place. This is diagnostic,
+        # never permission to fabricate source evidence.
+        {%{kind: :coordinates, provider: provider, query: "#{subject} / #{target}",
+           status: :unavailable, reason: reason, source_count: 0}, [], nil}
+
       _ ->
         {%{kind: :coordinates, provider: provider, query: "#{subject} / #{target}",
-           status: :unavailable, source_count: 0}, [], nil}
+           status: :unavailable, reason: :unrecognized_provider_response,
+           source_count: 0}, [], nil}
     end
   end
 

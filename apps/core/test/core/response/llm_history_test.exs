@@ -18,6 +18,22 @@ defmodule Core.Response.LlmHistoryTest do
            ] = messages
   end
 
+  test "budget preserves recent complete pairs and drops older pairs first" do
+    pairs = [
+      %{"role" => "user", "content" => "the lantern is in the box"},
+      %{"role" => "assistant", "content" => "understood"},
+      %{"role" => "user", "content" => "actually put the lantern on the shelf"},
+      %{"role" => "assistant", "content" => "now on the shelf"}
+    ]
+
+    assert LlmHistory.within_char_budget(pairs, 250) == pairs
+    assert LlmHistory.within_char_budget(pairs, 115) == Enum.take(pairs, -2)
+    assert LlmHistory.within_char_budget(pairs, 20) == []
+    assert LlmHistory.within_char_budget([], 250) == []
+    assert LlmHistory.within_char_budget(
+             pairs ++ [%{"role" => "user", "content" => "incomplete"}], 250) == pairs
+  end
+
   test "status summarizes messages without touching ETS" do
     messages = [
       %{"role" => "user", "content" => "hello"},

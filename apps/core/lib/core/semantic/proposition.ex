@@ -1,11 +1,13 @@
 defmodule Core.Semantic.Proposition do
   @moduledoc """
-  Build a compositional proposition from a verified sentence meaning and ATL
-  constituents. This is a structural interpretation, not a factual assertion
-  or a certification of the selected dictionary senses.
+  Build compositional propositions for resolved WH questions and
+  revalidated action/spatial participant assertions.
 
-  No lexical evidence is synthesized: each sense_id is copied from a verified
-  ATL role, and incomplete noun phrases remain surface-only.
+  This is structural interpretation, not external factual verification or
+  certification of selected dictionary senses. WH role sense IDs are copied
+  only from ATL evidence; participant roles come from event projection whose
+  validity is rechecked by SentenceMeaning. Unsupported phrases remain
+  surface-only rather than acquiring invented dictionary meanings.
   """
 
   @max_modifiers 4
@@ -71,7 +73,111 @@ defmodule Core.Semantic.Proposition do
     end
   end
 
+  # A WH-object question asks for a participant slot, not a proposition
+  # asserting that the described action occurred. ATL provides the already
+  # selected lexical IDs; the interrogative introduces no invented object.
+  def build(_, %{
+        kind: :wh_object_question,
+        status: :structurally_interpreted,
+        speech_act: :request_information,
+        source_frame: :wh_aux_object_question,
+        roles: %{
+          question_word: %{surface: wh, sense_id: wh_id},
+          auxiliary: %{surface: aux, sense_id: aux_id},
+          subject: %{surface: subject, span: {2, 3},
+            determiner_sense_id: determiner_id, head_sense_id: subject_id},
+          predicate: %{surface: verb, token_index: 4, sense_id: verb_id},
+          object: %{role: :patient, status: :unbound}
+        }
+      } = meaning)
+      when is_binary(wh) and is_binary(wh_id) and is_binary(aux) and
+           is_binary(aux_id) and is_binary(subject) and is_binary(determiner_id) and
+           is_binary(subject_id) and is_binary(verb) and is_binary(verb_id) do
+    %{
+      version: 1,
+      type: :information_request,
+      queried: %{type: :participant_slot, role: :patient, status: :unbound,
+        surface: wh, sense_id: wh_id},
+      content: %{
+        predicate: %{surface: verb, token_index: 4, sense_id: verb_id,
+          grounding_status: :selected_not_contextually_verified},
+        subject: %{surface: subject, span: {2, 3},
+          determiner_sense_id: determiner_id, head_sense_id: subject_id,
+          grounding_status: :structurally_bound_not_lexically_verified},
+        auxiliary: %{surface: aux, token_index: 1, sense_id: aux_id}
+      },
+      epistemic_status: :question_not_assertion,
+      grounding: Map.fetch!(meaning, :grounding),
+      provenance: %{frame: :wh_aux_object_question,
+        evidence: :independent_syntax_and_atl_agreement,
+        persistence: :not_claimed}
+    }
+  end
+
+  # Validated participant assertions share the same proposition contract as
+  # WH questions. The caller is SentenceMeaning, which has already checked
+  # the candidate against the exact lexical/grammatical input.
+  def build(_, %{
+        kind: :participant_assertion,
+        status: :structurally_interpreted,
+        speech_act: :assertion,
+        event_type: :action,
+        source_frame: :finite_present_svo,
+        roles: %{
+          actor: %{surface: actor},
+          predicate: %{surface: surface, lemma: lemma},
+          patient: %{surface: patient}
+        }
+      } = meaning)
+      when is_binary(actor) and is_binary(surface) and
+           is_binary(lemma) and is_binary(patient) do
+    participant_proposition(meaning, :action, %{
+      predicate: %{surface: surface, lemma: lemma},
+      arguments: %{actor: actor, patient: patient},
+      modifiers: %{tense: :present}
+    })
+  end
+
+  def build(_, %{
+        kind: :participant_assertion,
+        status: :structurally_interpreted,
+        speech_act: :assertion,
+        event_type: :spatial,
+        source_frame: :progressive_spatial,
+        roles: %{
+          actor: %{surface: actor},
+          predicate: %{surface: predicate, aspect: :progressive},
+          position: %{surface: position},
+          location: %{surface: location}
+        }
+      } = meaning)
+      when is_binary(actor) and is_binary(predicate) and
+           is_binary(position) and is_binary(location) do
+    participant_proposition(meaning, :spatial, %{
+      predicate: %{surface: predicate, aspect: :progressive},
+      arguments: %{actor: actor, location: location},
+      modifiers: %{position: position}
+    })
+  end
+
   def build(_, _), do: nil
+
+  defp participant_proposition(meaning, event_type, content) do
+    %{
+      version: 1,
+      type: :participant_assertion,
+      event_type: event_type,
+      epistemic_status: :user_reported_unverified,
+      content: content,
+      grounding: Map.fetch!(meaning, :grounding),
+      provenance: %{
+        source: :user_statement,
+        frame: Map.fetch!(meaning, :source_frame),
+        evidence: :candidate_revalidated_against_original_input,
+        persistence: :not_claimed
+      }
+    }
+  end
 
   defp compose_nominal(si, %{surface: surface, span: {first, last}} = topic) do
     constituents =

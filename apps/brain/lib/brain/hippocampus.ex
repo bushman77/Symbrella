@@ -84,6 +84,95 @@ defmodule Brain.Hippocampus do
   def encode_verified_fact(_, _), do: {:error, :invalid_fact}
 
   @doc """
+  Persist explicitly user-reported spatial observations in Hippocampus.
+
+  These are autobiographical *reports*, not externally verified facts. A
+  successful result means PostgreSQL accepted the episode. Recall is scoped
+  by a stable owner key rather than the transient chat session.
+  """
+  @spec encode_user_observation(map(), map()) :: :ok | {:error, atom()}
+  def encode_user_observation(%{} = slate, %{kind: kind} = meta)
+      when kind in [:user_reported_spatial, :user_reported_event] do
+    case GenServer.call(__MODULE__, {:encode_user_observation, slate, meta}) do
+      {:ok, episode, at_ms} ->
+        if TurnTrace.active?(), do: TurnTrace.encode(episode, at_ms)
+        :ok
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def encode_user_observation(_, _), do: {:error, :invalid_observation}
+
+  @doc """
+  Generic, typed user-reported event write. The event must already be
+  normalized and attributed by its caller. PostgreSQL confirmation is
+  required before an episode enters the in-memory window.
+  """
+  @spec encode_user_event(map(), map()) :: :ok | {:error, atom()}
+  def encode_user_event(%{} = slate, %{kind: :user_reported_event} = meta),
+    do: encode_user_observation(slate, meta)
+
+  def encode_user_event(_, _), do: {:error, :invalid_event}
+
+  @doc "Find the newest owner-scoped event for an exact entity and relation."
+  @spec user_event(String.t(), String.t(), String.t()) :: map() | nil
+  def user_event(owner, entity_key, relation)
+      when is_binary(owner) and is_binary(entity_key) and is_binary(relation) do
+    GenServer.call(__MODULE__, {:user_event, owner, entity_key, relation})
+  end
+
+  def user_event(_, _, _), do: nil
+
+  @doc "Reverse role lookup for one exact spatial predicate and location."
+  @spec spatial_actor(String.t(), String.t(), String.t(), String.t()) :: map() | nil
+  def spatial_actor(owner, predicate, position, location)
+      when is_binary(owner) and is_binary(predicate) and
+           is_binary(position) and is_binary(location) do
+    GenServer.call(__MODULE__, {:spatial_actor, owner, predicate, position, location})
+  end
+
+  def spatial_actor(_, _, _, _), do: nil
+
+  @doc "Reverse current-action lookup for exactly one actor matching an attested verb surface and patient."
+  @spec action_actor(String.t(), String.t(), String.t()) :: map() | nil
+  def action_actor(owner, surface_predicate, patient)
+      when is_binary(owner) and is_binary(surface_predicate) and is_binary(patient) do
+    GenServer.call(__MODULE__, {:action_actor, owner, surface_predicate, patient})
+  end
+
+  def action_actor(_, _, _), do: nil
+
+  @doc "Return exactly one current action event for an actor; ambiguous actions return nil."
+  @spec unique_action(String.t(), String.t()) :: map() | nil
+  def unique_action(owner, entity_key) when is_binary(owner) and is_binary(entity_key) do
+    GenServer.call(__MODULE__, {:unique_action, owner, entity_key})
+  end
+
+  def unique_action(_, _), do: nil
+
+  @doc "Chronological evidence for one entity, newest first, independently of chat session."
+  @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
+  def user_event_history(owner, entity_key, limit \\ 8)
+
+  def user_event_history(owner, entity_key, limit)
+      when is_binary(owner) and is_binary(entity_key) and is_integer(limit) and limit > 0 do
+    GenServer.call(__MODULE__, {:user_event_history, owner, entity_key, min(limit, 30)})
+  end
+
+  def user_event_history(_, _, _), do: []
+
+  @doc "Retrieve the latest persisted user-reported placement for one owner and object."
+  @spec user_observation(String.t(), String.t()) :: map() | nil
+  def user_observation(owner, key)
+      when is_binary(owner) and is_binary(key) and byte_size(owner) > 0 and byte_size(key) > 0 do
+    GenServer.call(__MODULE__, {:user_observation, owner, key})
+  end
+
+  def user_observation(_, _), do: nil
+
+  @doc """
   Write an explicitly self-tagged autobiographical episode.
 
   This is the Hippocampus-facing boundary for Brain-owned self memory. Callers
@@ -303,6 +392,131 @@ defmodule Brain.Hippocampus do
       {:error, _} = error ->
         {:reply, error, state}
     end
+  end
+
+  @impl true
+  def handle_call({:encode_user_observation, slate, meta_in}, from, state) do
+    at = System.system_time(:millisecond)
+    norms =
+      slate
+      |> Normalize.extract_norms_from_any()
+      |> Enum.reject(&Normalize.empty?/1)
+      |> MapSet.new()
+
+    meta = enrich_meta_with_emotion(meta_in)
+    episode = %{slate: slate, meta: meta, norms: norms}
+
+    try do
+      :ok = Writer.insert_row!(episode)
+      window = Window.append_or_refresh_head(state.window, episode, state.window_keep)
+
+      next =
+        state
+        |> Map.put(:window, window)
+        |> Map.put(:last, episode)
+        |> Map.put(:last_at, at)
+
+      measurements = %{count: 1, window_size: length(window), norms_count: MapSet.size(norms)}
+      metadata = %{at: at, window_keep: state.window_keep, meta: meta}
+      Telemetry.emit_write(measurements, metadata)
+      Telemetry.maybe_echo_to_caller(from, [:brain, :hippocampus, :write], measurements, metadata)
+      {:reply, {:ok, episode, at}, next}
+    rescue
+      error ->
+        Logger.warning("[Hippocampus] user observation write failed: #{Exception.message(error)}")
+        {:reply, {:error, :not_persisted}, state}
+    catch
+      :exit, _ -> {:reply, {:error, :not_persisted}, state}
+      _, _ -> {:reply, {:error, :not_persisted}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:user_observation, owner, key}, _from, state) do
+    observation =
+      try do
+        if Code.ensure_loaded?(Db.Episode) and
+             function_exported?(Db.Episode, :latest_user_spatial, 2) do
+          Db.Episode.latest_user_spatial(owner, key)
+        end
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+        _, _ -> nil
+      end
+
+    {:reply, observation, state}
+  end
+
+  @impl true
+  def handle_call({:user_event, owner, entity_key, relation}, _from, state) do
+    result =
+      try do
+        Db.Episode.latest_user_event(owner, entity_key, relation)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:spatial_actor, owner, predicate, position, location}, _from, state) do
+    result =
+      try do
+        Db.Episode.spatial_actor(owner, predicate, position, location)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:action_actor, owner, surface_predicate, patient}, _from, state) do
+    result =
+      try do
+        Db.Episode.action_actor(owner, surface_predicate, patient)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:unique_action, owner, entity_key}, _from, state) do
+    result =
+      try do
+        Db.Episode.unique_action(owner, entity_key)
+      rescue
+        _ -> nil
+      catch
+        :exit, _ -> nil
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:user_event_history, owner, entity_key, limit}, _from, state) do
+    results =
+      try do
+        Db.Episode.user_event_history(owner, entity_key, limit)
+      rescue
+        _ -> []
+      catch
+        :exit, _ -> []
+      end
+
+    {:reply, results, state}
   end
 
   @impl true

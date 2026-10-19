@@ -8,7 +8,11 @@ defmodule Brain.LIFG.GrammarEvidence do
   evidence must also be present on the *specific dictionary sense*.
   """
 
-  @type context :: %{signatures: [map()], cells_by_id: map()}
+  @type context :: %{
+          required(:signatures) => [map()],
+          required(:cells_by_id) => map(),
+          optional(:resolved_roles) => map()
+        }
 
   @spec prepare(map()) :: context()
   def prepare(%{} = si) do
@@ -23,13 +27,24 @@ defmodule Brain.LIFG.GrammarEvidence do
         end
       end)
 
+    role_competition = get(si, :role_competition, %{})
+
+    roles =
+      if is_map(role_competition) and
+           get(role_competition, :source, nil) == :core_syntax_and_attested_dictionary_pos do
+        get(role_competition, :roles, %{})
+      else
+        %{}
+      end
+
     %{
       signatures: si |> get(:sentence_signatures, []) |> as_list(),
-      cells_by_id: cells
+      cells_by_id: cells,
+      resolved_roles: if(is_map(roles), do: roles, else: %{})
     }
   end
 
-  def prepare(_), do: %{signatures: [], cells_by_id: %{}}
+  def prepare(_), do: %{signatures: [], cells_by_id: %{}, resolved_roles: %{}}
 
   @doc """
   Apply bounded grammatical support to an existing candidate score map.
@@ -63,6 +78,70 @@ defmodule Brain.LIFG.GrammarEvidence do
   end
 
   def apply(scores, _context, _index, _weight), do: scores
+
+  @doc """
+  Add bounded POS support only where independent grammatical evidence has
+  adjudicated conflicting candidate parses. No candidate is removed, no sense
+  gets lexical/semantic verification, and the original Stage1 alternatives
+  remain available for auditing. This applies even at grammar_weight: 0,
+  because it is stronger evidence than the general speculative signature
+  support governed by that knob.
+  """
+  @spec apply_role_competition(map(), context(), non_neg_integer()) :: map()
+  def apply_role_competition(scores, %{resolved_roles: roles}, index)
+      when is_map(scores) and is_map(roles) and is_integer(index) and index >= 0 do
+    case Map.get(roles, index) do
+      %{status: :supported, pos: pos, basis: basis, evidence: evidence}
+      when pos in ["noun", "adjective", "verb"] and
+           basis in [:complete_determiner_adjective_noun,
+                     :determined_subject_before_attested_past_predicate,
+                     :determined_subject_before_attested_present_predicate,
+                     :determined_subject_in_wh_aux_question,
+                     :predicate_in_wh_aux_question] and
+           is_list(evidence) ->
+        expected =
+          case basis do
+            :complete_determiner_adjective_noun ->
+              [:bounded_determiner_surface, :dictionary_pos_witness,
+               :complete_nominal_constituent]
+
+            :determined_subject_before_attested_past_predicate ->
+              [:bounded_determiner_surface, :dictionary_pos_witness,
+               :attested_simple_past_predicate]
+
+            :determined_subject_before_attested_present_predicate ->
+              [:complete_finite_present_svo, :dictionary_pos_witness,
+               :attested_finite_present_verb]
+
+            :determined_subject_in_wh_aux_question ->
+              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation]
+
+            :predicate_in_wh_aux_question ->
+              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
+               :dictionary_pos_witness, :question_punctuation,
+               :attested_verb_alternative]
+          end
+
+        if Enum.all?(expected, &(&1 in evidence)) do
+          Map.new(scores, fn
+            {id, score} when is_binary(id) and is_number(score) ->
+              boosted? = id_pos(id) == pos and not String.ends_with?(id, "|fallback")
+              {id, if(boosted?, do: min(1.0, max(0.0, score + 0.30)), else: score)}
+
+            entry ->
+              entry
+          end)
+        else
+          scores
+        end
+
+      _ ->
+        scores
+    end
+  end
+
+  def apply_role_competition(scores, _, _), do: scores
 
   @doc """
   Narrow, on-by-default support for an attested finite-present SVO hypothesis.

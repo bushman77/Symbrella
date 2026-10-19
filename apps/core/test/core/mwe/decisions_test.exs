@@ -73,6 +73,41 @@ defmodule Core.MWE.DecisionsTest do
     refute Map.has_key?(with_atl.atl_slate.by_norm, "off")
   end
 
+  test "an unaccepted bank MWE cannot suppress its constituent lexical choice" do
+    si = input(~w(i deposited cash at the bank))
+
+    phrase = %{
+      token_index: 6,
+      token_span: {3, 5},
+      phrase: "at the bank",
+      id: "at the bank|phrase|1",
+      lemma: "at the bank",
+      pos: "phrase",
+      source: :mwe_lexicon,
+      score: 0.5
+    }
+
+    # The phrase can win the lexical competition without winning the
+    # sentence-level promotion. A rejected lexical phrase must never
+    # remove the financial-bank unigram from semantic or LIFG views.
+    rejected = %{si |
+      mwe_choices: [phrase],
+      sentence_competition: %{rejected_spans: [{3, 5}]}
+    }
+
+    out = Decisions.attach(rejected)
+    assert Enum.any?(out.lifg_choices, &(&1.token_index == 5))
+    assert Enum.any?(out.semantic_choices, &(&1.token_index == 5))
+    refute Enum.any?(out.semantic_choices, &(&1.id == phrase.id))
+
+    # When promotion really is valid, shadow only the derived semantic
+    # view; preserve raw word decisions for provenance/recovery.
+    accepted = Decisions.attach(%{si | mwe_choices: [phrase]})
+    assert accepted.lifg_choices == si.lifg_choices
+    assert Enum.any?(accepted.semantic_choices, &(&1.id == phrase.id))
+    refute Enum.any?(accepted.semantic_choices, &(&1.token_index == 5))
+  end
+
   test "a fallback, incorrect lemma, stale span or wrong source cannot shadow words" do
     si = input()
     real = phrase_choice(3, 4)

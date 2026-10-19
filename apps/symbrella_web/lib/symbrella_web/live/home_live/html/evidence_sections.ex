@@ -16,6 +16,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
     |> verified_section(field(evidence, :verified_phrasal_meanings))
     |> semantic_section(field(evidence, :semantic_winners))
     |> comprehension_section(field(evidence, :comprehension))
+    |> semantic_sense_shadow_section(field(evidence, :semantic_sense_shadow))
+    |> semantic_cohort_section(field(evidence, :semantic_cohort))
     |> grammar_section(
       field(evidence, :verb_particle_signatures),
       field(evidence, :atl_verb_particles)
@@ -161,6 +163,156 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp comprehension_section(sections, _), do: sections
+
+  defp semantic_sense_shadow_section(sections, %{metadata: meta} = evidence)
+       when is_map(meta) do
+    status = field(meta, :status)
+    reason = field(evidence, :reason)
+    sources = list(field(meta, :role_sources))
+    ranked = list(field(meta, :top_candidates))
+    exclusions = list(field(meta, :exclusions))
+
+    outcome =
+      []
+      |> value("evaluation status", status)
+      |> value("reason", reason)
+      |> value("original surface sense", field(meta, :original_surface_id))
+      |> value("attested base lexeme", field(meta, :attested_base_lexeme))
+      |> value("dictionary senses considered", field(meta, :sense_count))
+      |> value("baseline lexical hypothesis", field(meta, :baseline_id))
+      |> value("shadow semantic hypothesis", field(meta, :proposed_id))
+      |> value("original lexical margin", field(meta, :baseline_gap))
+      |> value("expanded margin", field(meta, :evaluated_gap))
+      |> value("role expansion enabled?", field(meta, :role_expansion_enabled?))
+      |> value("role expansion status", field(meta, :role_expansion_status))
+      |> value("excluded candidates (total)", field(meta, :excluded_count))
+      |> value("meaning verified?", field(meta, :sense_verified?))
+      |> value("applied to LIFG?", field(meta, :applied_to_lifg?))
+      |> value("response changed?", field(meta, :response_changed?))
+      |> value("synaptic weight transferred?", field(meta, :synaptic_weight_transferred?))
+
+    role_items =
+      Enum.map(sources, fn ctx ->
+        %{
+          label: "Selected noun role: " <> show(field(ctx, :role)),
+          body:
+            []
+            |> value("status", field(ctx, :status))
+            |> value("admission reason", field(ctx, :reason))
+            |> value("selected noun sense ID", field(ctx, :noun_sense_id))
+            |> value("tied dictionary sense IDs", field(ctx, :noun_sense_ids))
+            |> value("tied senses considered", field(ctx, :competing_sense_count))
+            |> value("gloss evidence provenance", field(ctx, :source))
+            |> value("LIFG selected probability", field(ctx, :selected_probability))
+            |> value("one-hop dictionary terms", field(ctx, :terms))
+            |> body()
+        }
+      end)
+
+    candidate_items =
+      Enum.map(ranked, fn c ->
+        %{
+          label: "Candidate " <> show(field(c, :id)),
+          body:
+            []
+            |> value("direct lexical fit", field(c, :lexical_score))
+            |> value("patient support", field(c, :patient_support))
+            |> value("actor support", field(c, :actor_support))
+            |> value("combined diagnostic", field(c, :combined_diagnostic_score))
+            |> value("grammar", field(c, :grammar))
+            |> value("one-hop evidence", field(c, :one_hop_witnesses))
+            |> body()
+        }
+      end)
+
+    excluded_items =
+      Enum.map(exclusions, fn c ->
+        %{
+          label: "Excluded " <> show(field(c, :id)),
+          body:
+            []
+            |> value("grammatical gate", field(c, :grammar))
+            |> value("missing restrictions", field(c, :missing_restrictions))
+            |> value("reasons", field(c, :exclusions))
+            |> body()
+        }
+      end)
+
+    items = [%{label: "Read-only assessment", body: body(outcome)}] ++
+      role_items ++ candidate_items ++ excluded_items
+
+    append(sections, :semantic_sense_shadow, "Semantic sense (shadow only)",
+      show(status),
+      "Real post-LIFG/ATL dictionary evidence. These are provisional or abstained hypotheses, NOT verified meanings. No live LIFG selection, synaptic update or response change.",
+      items)
+  end
+
+  defp semantic_sense_shadow_section(sections, _), do: sections
+
+  defp semantic_cohort_section(sections, cohort) when is_map(cohort) do
+    groups = list(field(cohort, :cohorts))
+
+    overview =
+      []
+      |> value("status", field(cohort, :status))
+      |> value("reason", field(cohort, :reason))
+      |> value("projected SVO participants", field(cohort, :participant_surfaces))
+      |> value("attested predicate base", field(cohort, :base_lexeme))
+      |> value("eligible dictionary senses", field(cohort, :eligible_sense_count))
+      |> value("supported cohorts", field(cohort, :cohort_count))
+      |> value("shared meaning independently verified?",
+        field(cohort, :semantic_equivalence_verified?))
+      |> value("exact sense selected?", field(cohort, :chose_exact_sense?))
+      |> value("LIFG modified?", field(cohort, :modified_lifg?))
+      |> value("response changed?", field(cohort, :changed_response?))
+
+    groups =
+      Enum.map(groups, fn group ->
+        members = list(field(group, :members))
+
+        header =
+          []
+          |> value("support origin", field(group, :evidence_origin))
+          |> value("shared contextual anchor", field(group, :anchor_term))
+          |> value("member senses total", field(group, :member_count))
+          |> value("truncated members?", field(group, :member_ids_truncated?))
+          |> value("shared definition words",
+            field(group, :shared_definition_terms))
+          |> value("noun role source evidence",
+            field(group, :role_evidence_provenance))
+          |> value("lowest member diagnostic support",
+            field(group, :minimum_member_support))
+          |> value("semantic equivalence verified?",
+            field(group, :shared_meaning_verified?))
+
+        member_details =
+          Enum.map(members, fn member ->
+            []
+            |> value("sense", field(member, :id))
+            |> value("direct fit", field(member, :direct_fit))
+            |> value("patient support", field(member, :patient_support))
+            |> value("actor support", field(member, :actor_support))
+            |> value("diagnostic score", field(member, :diagnostic_score))
+            |> value("distinguishing definition words",
+              field(member, :distinguishing_definition_terms))
+            |> body()
+          end)
+          |> Enum.join("\n\n")
+
+        %{
+          label: "Shared cue: " <> show(field(group, :anchor_term)) <>
+            " (" <> show(field(group, :evidence_origin)) <> ")",
+          body: body(header) <> "\n\n" <> member_details
+        }
+      end)
+
+    append(sections, :semantic_cohort, "Semantic cohorts (shadow only)",
+      show(field(cohort, :status)),
+      "Senses share independently observed lexical evidence within the same validated sentence. Cohorts can overlap; resemblance is NOT sense equivalence, a verified concept, or a chosen meaning. Restrictions were checked first.",
+      [%{label: "Cohort audit", body: body(overview)} | groups])
+  end
+
+  defp semantic_cohort_section(sections, _), do: sections
 
   defp grammar_section(sections, signatures, constituents) do
     signatures = list(signatures)

@@ -32,6 +32,8 @@ defmodule Brain do
   """
 
   alias Brain.Cell.Runtime, as: CellRT
+  alias Brain.Cell.Activation, as: CellActivation
+  alias Brain.SemanticPulse
   alias Brain.WM.Focus, as: WMFocus
   alias Brain.WM.Recall, as: WMRecall
   alias Brain.MoodHooks
@@ -72,6 +74,8 @@ defmodule Brain do
   @type state :: %{
           history: list(),
           active_cells: %{optional(String.t()) => number()},
+          active_cell_times: %{optional(String.t()) => integer()},
+          semantic_pulses: map(),
           attention: map(),
           wm: [wm_item()],
           wm_cfg: wm_cfg(),
@@ -153,7 +157,13 @@ defmodule Brain do
   @doc false
   @spec report_activation(String.t(), number()) :: :ok
   def report_activation(id, activation) when is_binary(id) and is_number(activation) do
-    gencast(@name, {:activation_report, id, activation})
+    report_activation(id, activation, System.monotonic_time(:millisecond))
+  end
+
+  @spec report_activation(String.t(), number(), integer()) :: :ok
+  def report_activation(id, activation, at_ms)
+      when is_binary(id) and is_number(activation) and is_integer(at_ms) do
+    gencast(@name, {:activation_report, id, activation, at_ms})
   end
 
   @spec cell_status(String.t()) :: {:ok, term()} | {:error, :not_found}
@@ -170,6 +180,20 @@ defmodule Brain do
 
   @spec snapshot() :: state()
   def snapshot, do: gencall(@name, :snapshot)
+
+  @doc "Read bounded per-session lemma priors, separate from BrainCell reports."
+  @spec semantic_snapshot(term()) :: map()
+  def semantic_snapshot(session), do: gencall(@name, {:semantic_snapshot, session})
+
+  @doc "Record an attested verb lemma; never a synthetic neuron ID."
+  @spec semantic_pulse(term(), String.t(), String.t(), number()) :: :ok
+  def semantic_pulse(session, lemma, source_id, delta)
+      when is_binary(lemma) and is_binary(source_id) and is_number(delta),
+    do: gencall(@name, {:semantic_pulse, session, lemma, source_id, delta})
+
+  @doc "Current activation reports from live Brain.Cell processes; no database reads or synthetic decay."
+  @spec activation_snapshot() :: %{optional(String.t()) => number()}
+  def activation_snapshot, do: gencall(@name, :activation_snapshot)
 
   @spec lifg_stage1(map() | [map()], [number()], keyword()) ::
           {:ok, %{choices: [map()], boosts: list(), inhibitions: list(), audit: map()}}
@@ -200,6 +224,8 @@ defmodule Brain do
        assistant: BrainConfig.assistant(),
        history: [],
        active_cells: %{},
+       active_cell_times: %{},
+       semantic_pulses: %{},
        attention: %{},
        wm: [],
        wm_cfg: BrainConfig.wm(),
@@ -249,6 +275,10 @@ defmodule Brain do
   @impl true
   def handle_call({:stm, si}, _from, state) when is_map(si) do
     state = maybe_orient(state)
+    {active_cells, state} = current_activations(state)
+    {semantic, pulses} = SemanticPulse.snapshot(state.semantic_pulses,
+      Map.get(si, :session_id), System.monotonic_time(:millisecond))
+    state = %{state | semantic_pulses: pulses}
 
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
@@ -256,14 +286,38 @@ defmodule Brain do
 
     si2 =
       si
-      |> Map.put(:active_cells, state.active_cells)
+      |> Map.put(:active_cells, active_cells)
+      |> Map.put(:semantic_pulses, semantic)
       |> Map.put(:tokens, tokens1)
 
     {:reply, si2, state}
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state), do: {:reply, state, state}
+  def handle_call({:semantic_snapshot, session}, _from, state) do
+    {values, pulses} = SemanticPulse.snapshot(state.semantic_pulses, session,
+      System.monotonic_time(:millisecond))
+    {:reply, values, %{state | semantic_pulses: pulses}}
+  end
+
+  @impl true
+  def handle_call({:semantic_pulse, session, lemma, source_id, delta}, _from, state) do
+    pulses = SemanticPulse.put(state.semantic_pulses, session, lemma, source_id,
+      delta, System.monotonic_time(:millisecond))
+    {:reply, :ok, %{state | semantic_pulses: pulses}}
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    {active_cells, state} = current_activations(state)
+    {:reply, %{state | active_cells: active_cells}, state}
+  end
+
+  @impl true
+  def handle_call(:activation_snapshot, _from, state) do
+    {active_cells, state} = current_activations(state)
+    {:reply, active_cells, state}
+  end
 
   @impl true
   def handle_call({:cell, id, req}, _from, state) when is_binary(id) do
@@ -310,10 +364,34 @@ defmodule Brain do
   end
 
   @impl true
+  def handle_cast({:activation_report, id, a, at_ms}, state)
+      when is_binary(id) and is_number(a) and is_integer(at_ms) do
+    # Ignore stale late-arriving reports; Brain.Cell uses the same monotonic clock.
+    previous_ms = Map.get(state.active_cell_times, id, at_ms)
+
+    if at_ms < previous_ms do
+      {:noreply, state}
+    else
+      a = CellActivation.decay(max(a, 0.0), at_ms, at_ms)
+
+      if a > 0 do
+        active = Map.put(state.active_cells, id, a)
+        times = Map.put(state.active_cell_times, id, at_ms)
+        _ = safe_mood_register_activation(active)
+        {:noreply, %{state | active_cells: active, active_cell_times: times}}
+      else
+        {:noreply,
+         %{state |
+           active_cells: Map.delete(state.active_cells, id),
+           active_cell_times: Map.delete(state.active_cell_times, id)}}
+      end
+    end
+  end
+
+  # Compatibility with older callers that report without a timestamp.
+  @impl true
   def handle_cast({:activation_report, id, a}, state) when is_binary(id) and is_number(a) do
-    new_active = Map.put(state.active_cells, id, a)
-    _ = safe_mood_register_activation(new_active)
-    {:noreply, %{state | active_cells: new_active}}
+    handle_cast({:activation_report, id, a, System.monotonic_time(:millisecond)}, state)
   end
 
   @impl true
@@ -376,6 +454,26 @@ defmodule Brain do
   def via(id) when is_binary(id), do: CellRT.via(id)
 
   # ───────────────────────── Internal helpers ─────────────────────────────────
+
+  defp current_activations(state) do
+    now = System.monotonic_time(:millisecond)
+    {current, _sample_times} =
+      CellActivation.decay_reports(state.active_cells, state.active_cell_times, now)
+
+    # Prune resting neurons, but retain the original reported activation and
+    # stimulus timestamp for live cells. Snapshot reads must not reset their
+    # clock or make a queued stimulus appear older than a chart refresh.
+    ids = Map.keys(current)
+
+    state = %{
+      state
+      | active_cells: Map.take(state.active_cells, ids),
+        active_cell_times: Map.take(state.active_cell_times, ids)
+    }
+
+    {current, state}
+  end
+
 
   defp emit_wm_update(capacity, size, added, removed, reason \\ nil) do
     meta = if reason, do: %{reason: reason}, else: %{}

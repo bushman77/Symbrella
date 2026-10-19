@@ -3,6 +3,52 @@ defmodule Core.Semantic.EventFramesTest do
 
   alias Core.Semantic.EventFrames
 
+  test "lexical parsing of a population question does not grant source authority" do
+    frame =
+      EventFrames.location_question(
+        "Which had the larger population in 2021, Vancouver or Burnaby?"
+      )
+
+    assert %{type: :location_question, domain: :geography,
+             relation: :population, grounding_status: :unverified} = frame
+    refute Map.has_key?(frame, :verified)
+    refute Map.has_key?(frame, :sources)
+    refute Map.has_key?(frame, :source_urls)
+  end
+
+  test "repeated-from distance wording binds two named places without borrowing recent location" do
+    question = "how far from maple ridge is from kamloops"
+    frame = EventFrames.location_question(question)
+
+    assert %{
+      type: :location_question,
+      domain: :geography,
+      relation: :proximity,
+      subject: "maple ridge",
+      target: "kamloops",
+      antecedent_source: :explicit_user_question,
+      unresolved_roles: [],
+      grounding_status: :unverified
+    } = frame
+
+    assert %{symbolic_frame: ^frame} =
+      EventFrames.attach(%{sentence: question, intent: :ask, trace: []})
+
+    for alternate <- [
+      "How far from Maple Ridge is from Kamloops?",
+      "How far from Maple Ridge is it from Kamloops, BC?"
+    ] do
+      result = EventFrames.location_question(alternate)
+      assert result.relation == :proximity
+      assert result.subject == "Maple Ridge"
+      assert result.target in ["Kamloops", "Kamloops, BC"]
+      assert result.grounding_status == :unverified
+    end
+
+    assert EventFrames.location_question(
+      "How far from Maple Ridge is from?") == nil
+  end
+
   test "attaches forgot-medication frame with sleep inability consequence" do
     si = %{
       sentence: "good morning symbrella, i forgot my quetiapine and now i can not sleep",

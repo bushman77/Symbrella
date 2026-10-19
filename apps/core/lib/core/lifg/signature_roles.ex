@@ -12,10 +12,22 @@ defmodule Core.LIFG.SignatureRoles do
 
   @spec required_pos(map(), non_neg_integer()) :: String.t() | nil
   def required_pos(si, index) when is_map(si) and is_integer(index) and index >= 0 do
-    si
-    |> Map.get(:sentence_signatures, [])
-    |> List.wrap()
-    |> Enum.find_value(fn
+    signatures = si |> Map.get(:sentence_signatures, []) |> List.wrap()
+
+    adjudicated_pos =
+      case Map.get(si, :role_competition) do
+        %{source: :core_syntax_and_attested_dictionary_pos, roles: roles}
+        when is_map(roles) ->
+          case Map.get(roles, index) do
+            %{status: :supported, pos: pos} when pos in ["noun", "adjective"] -> pos
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    adjudicated_pos || Enum.find_value(signatures, fn
       %{id: :have_verb_to_infinitive, roles: roles} when is_map(roles) ->
         cond do
           Map.get(roles, :complement) == index -> "verb"
@@ -31,7 +43,13 @@ defmodule Core.LIFG.SignatureRoles do
       when index_role == index and first == index and last == particle and
              is_integer(object) and is_integer(particle) and
              object > index and object < particle ->
-        "verb"
+        # A dictionary-POS-based verb-particle hypothesis is not a resolved
+        # parse. If the same surface is an attested subject noun phrase
+        # followed by an independently attested finite-past predicate,
+        # the supposed "object" is that predicate, not evidence strong
+        # enough to *force* this earlier noun into verb POS.
+        if competing_subject_past?(signatures, index, object),
+          do: nil, else: "verb"
 
       _ ->
         nil
@@ -39,4 +57,30 @@ defmodule Core.LIFG.SignatureRoles do
   end
 
   def required_pos(_, _), do: nil
+
+  defp competing_subject_past?(signatures, noun_head, predicate_index) do
+    subject? =
+      Enum.any?(signatures, fn
+        %{id: :noun_phrase, span: {determiner, ^noun_head},
+          roles: %{determiner: role_determiner, head: ^noun_head}}
+        when is_integer(determiner) and determiner < noun_head and
+             determiner == role_determiner ->
+          true
+        _ ->
+          false
+      end)
+
+    past_predicate? =
+      Enum.any?(signatures, fn
+        %{id: :finite_past_candidate,
+          roles: %{verb: ^predicate_index}, evidence: evidence}
+        when is_list(evidence) ->
+          :simple_past_form_available in evidence
+        _ ->
+          false
+      end)
+
+    subject? and past_predicate?
+  end
+
 end

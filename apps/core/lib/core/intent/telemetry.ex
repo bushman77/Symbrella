@@ -18,7 +18,7 @@ defmodule Core.Intent.Telemetry do
           try do
             String.to_existing_atom(label)
           rescue
-            _ -> String.to_atom(label)
+            ArgumentError -> label
           end
 
         true ->

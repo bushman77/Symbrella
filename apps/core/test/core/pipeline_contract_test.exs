@@ -73,6 +73,61 @@ defmodule Core.PipelineContractTest do
     assert_trace_contract!(event)
   end
 
+  test "live production pipeline emits semantic-sense shadow after meaning and before comprehension" do
+    opts = [
+      mode: :prod,
+      experience_origin: :user_turn,
+      fuzzy: false,
+      response: :off,
+      episodes: false,
+      persist_episodes: false,
+      hippocampus_encode?: false,
+      self_model: :off,
+      comprehension_wm?: false,
+      notify_brain?: false,
+      synapse_shadow?: false
+    ]
+
+    si = Core.resolve_input("The artist draws a picture.", opts)
+    trace = si.trace
+
+    shadow = Enum.find(trace, &match?(%{stage: :semantic_sense_shadow}, &1))
+    assert_trace_contract!(shadow)
+    assert shadow.meta.mode == :shadow_only
+    assert shadow.meta.applied_to_lifg? == false
+    assert shadow.meta.response_changed? == false
+    assert shadow.meta.semantic_cohort.status in
+      [:candidate_cohorts, :no_supported_cohort, :skipped]
+    assert shadow.meta.semantic_cohort.modified_lifg? == false
+    assert shadow.meta.semantic_cohort.changed_response? == false
+
+    # Trace also contains legacy tuple events (such as {:activated, ...}).
+    # Only structured Pipeline.Trace events have a :stage. Newer events
+    # are prepended, so comprehension precedes the earlier shadow event.
+    stages =
+      Enum.flat_map(trace, fn
+        %{stage: stage} when is_atom(stage) -> [stage]
+        _ -> []
+      end)
+    meaning_at = Enum.find_index(stages, &(&1 == :sentence_meaning))
+    shadow_at = Enum.find_index(stages, &(&1 == :semantic_sense_shadow))
+    summary_at = Enum.find_index(stages, &(&1 == :comprehension))
+
+    # SentenceMeaning is a state-dump stage, not necessarily a Trace event:
+    # if it emits no separate event we still verify the subsequent summary.
+    assert is_integer(shadow_at)
+    assert is_integer(summary_at)
+    assert summary_at < shadow_at
+    assert is_nil(meaning_at) or shadow_at < meaning_at
+
+    assert is_list(si.lifg_choices)
+    assert is_map(si.atl_slate) or is_nil(si.atl_slate)
+
+    disabled = Core.resolve_input("The artist draws a picture.",
+      Keyword.put(opts, :semantic_sense_shadow?, false))
+    refute Enum.any?(disabled.trace, &match?(%{stage: :semantic_sense_shadow}, &1))
+  end
+
   defp assert_trace_contract!(%{} = event) do
     for key <- [:stage, :input_summary, :decision, :reason, :scores, :meta, :ts_ms] do
       assert Map.has_key?(event, key), "missing trace key #{inspect(key)} in #{inspect(event)}"

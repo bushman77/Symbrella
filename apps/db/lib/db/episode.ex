@@ -619,6 +619,37 @@ defmodule Db.Episode do
       "value",
       :subject,
       "subject",
+      # Compact typed observation fields; never include arbitrary chat metadata.
+      :owner,
+      "owner",
+      :entity,
+      "entity",
+      :entity_key,
+      "entity_key",
+      :relation,
+      "relation",
+      :status,
+      "status",
+      :event_version,
+      "event_version",
+      :source_frame,
+      "source_frame",
+      :frame_confidence,
+      "frame_confidence",
+      :participants,
+      "participants",
+      :object_key,
+      "object_key",
+      :object,
+      "object",
+      :position,
+      "position",
+      :location,
+      "location",
+      :session_id,
+      "session_id",
+      :provenance,
+      "provenance",
       :self?,
       "self?",
       :autobiographical?,
@@ -855,6 +886,215 @@ defmodule Db.Episode do
   end
 
   @doc """
+  Return the latest persisted user-reported spatial episode by stable owner and
+  exact object key. No session filter or warm-window recency cutoff applies.
+  Reports are never returned from the verified user-fact lookup.
+  """
+  @spec latest_user_spatial(String.t(), String.t()) :: map() | nil
+  def latest_user_spatial(owner, key)
+      when is_binary(owner) and is_binary(key) and byte_size(owner) > 0 and byte_size(key) > 0 do
+    normalized = key |> String.downcase() |> String.trim()
+
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_spatial'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'object_key' = ?", e.meta, ^normalized),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: 1,
+      select: e.meta
+    )
+    |> Repo.one()
+    |> case do
+      %{"object" => object, "position" => position, "location" => location} = meta
+      when is_binary(object) and is_binary(position) and is_binary(location) ->
+        %{object: object, position: position, location: location,
+          provenance: :user_reported, session_id: Map.get(meta, "session_id")}
+
+      _ -> nil
+    end
+  end
+
+  def latest_user_spatial(_, _), do: nil
+
+  @doc """
+  Exact latest event lookup, scoped by stable owner, entity, and relation.
+  Both assertions and retractions are returned; a retraction must suppress
+  older values. This deliberately cannot treat the stored episode as an
+  independently verified fact.
+  """
+  @spec latest_user_event(String.t(), String.t(), String.t()) :: map() | nil
+  def latest_user_event(owner, entity_key, relation)
+      when is_binary(owner) and is_binary(entity_key) and is_binary(relation) do
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+      where: fragment("? ->> 'relation' = ?", e.meta, ^relation),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: 1,
+      select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+    )
+    |> Repo.one()
+    |> normalize_user_event()
+  end
+
+  def latest_user_event(_, _, _), do: nil
+
+  @doc """
+  Reverse lookup over *current* owner-scoped spatial events. The newest
+  event per entity wins even if a later report moved or retracted it.
+  Return nil on multiple matching actors instead of guessing.
+  A bounded recent-event window limits broad memory scans.
+  """
+  @spec spatial_actor(String.t(), String.t(), String.t(), String.t()) :: map() | nil
+  def spatial_actor(owner, predicate, position, location)
+      when is_binary(owner) and is_binary(predicate) and
+           is_binary(position) and is_binary(location) do
+    events =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("? ->> 'relation' = 'spatial_state'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 40,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(&get_in(&1, [:meta, "entity_key"]))
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", value: ^location,
+          participants: %{"predicate" => ^predicate, "position" => ^position}} -> true
+        _ -> false
+      end)
+
+    case events do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def spatial_actor(_, _, _, _), do: nil
+
+  @doc """
+  Reverse participant lookup for a finite-present SVO event, matching the
+  stored surface predicate and patient. A newer event for the same actor and
+  canonical verb supersedes its old patient, including a retraction.
+
+  Multiple current actors satisfying the exact query are ambiguous; return
+  nil instead of choosing the most recently inserted speaker. Owner scoped.
+  """
+  @spec action_actor(String.t(), String.t(), String.t()) :: map() | nil
+  def action_actor(owner, surface_predicate, patient)
+      when is_binary(owner) and is_binary(surface_predicate) and is_binary(patient) do
+    events =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("left(? ->> 'relation', 5) = 'verb_'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 100,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(fn row ->
+        {get_in(row, [:meta, "entity_key"]), get_in(row, [:meta, "relation"])}
+      end)
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", value: ^patient,
+          participants: %{"actor" => actor, "patient" => ^patient,
+                          "surface_predicate" => ^surface_predicate,
+                          "tense" => "present"}} when is_binary(actor) -> true
+        _ -> false
+      end)
+
+    case events do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def action_actor(_, _, _), do: nil
+
+  @doc """
+  Return the only current, validated participant action for one actor, or nil.
+  This is deliberately not a "latest action" guess: simultaneous different
+  current predicates are ambiguous for an open-ended activity question.
+  """
+  @spec unique_action(String.t(), String.t()) :: map() | nil
+  def unique_action(owner, entity_key)
+      when is_binary(owner) and is_binary(entity_key) do
+    current =
+      from(e in __MODULE__,
+        where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+        where: fragment("? ->> 'subject' = 'user'", e.meta),
+        where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+        where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+        where: fragment("left(? ->> 'relation', 5) = 'verb_'", e.meta),
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: 100,
+        select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+      )
+      |> Repo.all()
+      |> Enum.uniq_by(&get_in(&1, [:meta, "relation"]))
+      |> Enum.map(&normalize_user_event/1)
+      |> Enum.filter(fn
+        %{status: "asserted", relation: "verb_" <> lemma, value: patient,
+          participants: %{"predicate" => stored_lemma, "patient" => stored_patient,
+                          "tense" => "present"}} ->
+          lemma == stored_lemma and patient == stored_patient
+
+        _ -> false
+      end)
+
+    case current do
+      [one] -> one
+      _ -> nil
+    end
+  end
+
+  def unique_action(_, _), do: nil
+
+  @doc "Newest owner-scoped events for one entity, including superseded values."
+  @spec user_event_history(String.t(), String.t(), pos_integer()) :: [map()]
+  def user_event_history(owner, entity_key, limit)
+      when is_binary(owner) and is_binary(entity_key) and is_integer(limit) and limit > 0 do
+    from(e in __MODULE__,
+      where: fragment("? ->> 'kind' = 'user_reported_event'", e.meta),
+      where: fragment("? ->> 'subject' = 'user'", e.meta),
+      where: fragment("? ->> 'owner' = ?", e.meta, ^owner),
+      where: fragment("? ->> 'entity_key' = ?", e.meta, ^entity_key),
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: ^min(limit, 30),
+      select: %{id: e.id, sentence: e.sentence, meta: e.meta, inserted_at: e.inserted_at}
+    )
+    |> Repo.all()
+    |> Enum.map(&normalize_user_event/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  def user_event_history(_, _, _), do: []
+
+  defp normalize_user_event(%{id: id, sentence: sentence, meta: %{"entity" => entity, "relation" => relation,
+      "value" => value, "status" => status} = meta, inserted_at: recorded_at})
+      when is_binary(entity) and is_binary(relation) and is_binary(value) and
+             status in ["asserted", "retracted"] do
+    %{id: id, entity: entity, relation: relation, value: value,
+      status: status, recorded_at: recorded_at, sentence: sentence,
+      source_frame: Map.get(meta, "source_frame"),
+      participants: Map.get(meta, "participants"),
+      entity_key: Map.get(meta, "entity_key"),
+      provenance: :user_reported, session_id: Map.get(meta, "session_id")}
+  end
+
+  defp normalize_user_event(_), do: nil
+
+  @doc """
   Fetch all persisted episodes, newest first.
   """
   @spec list_all() :: [t()]
@@ -867,6 +1107,33 @@ defmodule Db.Episode do
     |> Db.all()
     |> Enum.map(&put_compact_si/1)
   end
+
+  @doc """
+  Return one bounded page of episodes and whether another page exists.
+  Sorting by both timestamp and ID keeps pagination deterministic.
+  """
+  @spec list_page(pos_integer(), pos_integer()) :: {[t()], boolean()}
+  def list_page(page \\ 1, per_page \\ 50)
+
+  def list_page(page, per_page)
+      when is_integer(page) and page > 0 and is_integer(per_page) and per_page > 0 do
+    import Ecto.Query, only: [from: 2]
+
+    limit = min(per_page, 100)
+    offset = (page - 1) * limit
+
+    rows =
+      from(e in __MODULE__,
+        order_by: [desc: e.inserted_at, desc: e.id],
+        limit: ^(limit + 1),
+        offset: ^offset
+      )
+      |> Db.all()
+
+    {Enum.take(rows, limit) |> Enum.map(&put_compact_si/1), length(rows) > limit}
+  end
+
+  def list_page(_, _), do: list_page(1, 50)
 
   defp put_compact_si(%__MODULE__{} = episode) do
     %{

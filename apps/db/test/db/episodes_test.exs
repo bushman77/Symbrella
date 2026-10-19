@@ -74,6 +74,28 @@ defmodule Db.EpisodesTest do
     assert ep.tokens == ["run around"]
   end
 
+  test "Episode.list_page/2 bounds results and reports whether another page exists" do
+    for idx <- 1..3 do
+      {:ok, _} =
+        Episode.insert(%{
+          si: %{"sentence" => "pagination entry #{idx}", "intent" => "note"},
+          tokens: ["pagination"],
+          tags: ["test"]
+        })
+    end
+
+    {first, more?} = Episode.list_page(1, 2)
+    assert length(first) == 2
+    assert more?
+    {second, more?} = Episode.list_page(2, 2)
+    assert length(second) == 1
+    refute more?
+    assert Enum.empty?(MapSet.intersection(
+      MapSet.new(Enum.map(first, & &1.id)),
+      MapSet.new(Enum.map(second, & &1.id))
+    ))
+  end
+
   test "Episode.list_all/0 returns persisted episodes newest first" do
     assert {:ok, old} =
              Episode.insert(%{

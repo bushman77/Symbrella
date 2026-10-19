@@ -195,3 +195,159 @@ Core.Tools.WebRetrieval.route_for(%{
 **Do not** confuse successful routing with successful source retrieval or
 a verified answer. Observe the separate status, resolution and provenance
 fields before claiming the user request was answered.
+
+
+## Repeated-"from" intercity distance questions (October 2026)
+
+Production reproduction: after answering `where is kamloops bc`
+from a correctly matched Kamloops Wikipedia lead, Symbrella
+answered `how far from maple ridge is from kamloops` with an
+**unsupported** 30 km (19 miles) estimate falsely attributed to
+Wikipedia. The distance is about 229 km straight-line based on
+Maple Ridge and Kamloops city-centre coordinates; this is NOT a
+driving-route measurement. The failure arose because the first
+turn was a static place-identity question, whereas the noncanonical
+wording on the second turn was not classified as a two-place
+proximity request. Without that frame, numeric geographic
+claims were not subjected to the right source-verification gate.
+
+`Core.Semantic.EventFrames.location_question/1` now recognizes:
+
+    how far from maple ridge is from kamloops
+    How far from Maple Ridge is it from Kamloops, BC?
+
+It produces a `:location_question` /
+`:proximity` frame with two explicitly named, separate subjects,
+`:grounding_status => :unverified`, and no verified distance.
+`Core.Tools.WebRetrieval.RequestRouter` routes that frame to the
+coordinate evidence resolver, which asks the official Canadian
+GeoNames provider and/or Wikidata for the two exact places.
+Only provider-verified place identifiers and coordinates authorize
+a *haversine straight-line* distance. No unverified driving
+distance can be computed from straight-line coordinates.
+
+The response grounding gate now also requires that both source
+titles and support subject/target match the two bound locations
+in the correct order; a source for Maple Ridge and **Vancouver**
+must not authorize a distance query asking about Maple Ridge and
+**Kamloops**, even if the provider reports a successful status.
+A successfully grounded distance has an exact authorized response
+sentence, not merely a valid number and citations embedded
+somewhere in otherwise unconstrained LLM prose.
+
+Without both verified coordinate records, reflection rejects
+the unsupported number and reports missing distance evidence.
+It must NOT publish the 30 km / 19 mile hallucination or imply
+Wikipedia independently verified an intercity driving route.
+
+### Local test and read-only diagnostic
+
+    git pull --ff-only origin development
+
+    mix test apps/core/test/core/semantic/event_frames_test.exs \
+      apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/tools/official_canadian_sources_test.exs \
+      apps/core/test/core/tools/web_retrieval_test.exs
+
+    mix run scripts/probe_distance_question_grounding.exs
+
+The probe uses **synthetic** geographic-support fixtures and performs
+no network calls, model calls, or cognitive writes. Its sample
+229.6 km is a test assertion, not a newly retrieved live
+measurement. Real chat must fetch and revalidate its own sources.
+Test the two live turns consecutively and inspect Explain:
+`:geographic_claim_unverified` signals corrected/withheld
+distance; a supported answer names both places, gives a
+straight-line distance and includes both coordinate citations.
+
+
+### Live source rejection diagnosis and suffix normalization
+
+A follow-up after the initial repeated-"from" parser fix still returned
+insufficient verified distance evidence for both `maple ridge` ->
+`kamloops` and `maple ridge bc` -> `kamloops bc`.
+
+A definite second-stage failure was in `Grounding.supported_proximity`:
+its source-title check treated `Maple Ridge` and `maple ridge bc`
+as distinct place identities, rejecting some otherwise valid provider
+proofs even after the provider checked the province. It now recognizes
+Canadian province/territory suffixes in comma and whitespace formats
+for **city-name equivalence only**. The provider must still establish
+identity and jurisdiction; this change does not promote a search hit
+or guess coordinates.
+
+The resolver also retains a bounded `:reason` atom when a coordinate
+provider returns `{:error, reason}`, e.g. `:ambiguous_place`,
+`:place_not_verified`, or `:unavailable`. Numeric claims remain
+blocked on errors. The no-support fallback now reflects `how far`
+without changing it into an `is it close` question.
+
+    mix test apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/semantic/event_frames_test.exs \
+      apps/core/test/core/tools/official_canadian_sources_test.exs
+
+    mix run scripts/diagnose_live_geographic_distance.exs
+
+Unlike the synthetic proof script, `diagnose_live_geographic_distance.exs`
+makes real bounded HTTP calls. It prints the current non-secret retrieval
+policy, both question frames, each search/coordinate attempt and failure
+reason, whether a retrieved support object passes the final grounding
+gate, and direct Canadian GeoNames/Wikidata errors for the qualified
+city pair. **This diagnostic is read-only for cognitive state, but NOT
+offline.** Its results identify whether the remaining blocker is the
+external API, ambiguous entity matching, timeout, or local evidence
+authorization. Do not infer a successful live calculation from a
+synthetic 229.6 km test fixture.
+
+
+### Provenance-bounded jurisdiction hint from same-session user turns
+
+The live diagnostic established two distinct outcomes, using the user's
+actual Termux environment:
+
+- `maple ridge` /`kamloops`: NRCan `:ambiguous_place`,
+  Wikidata `:place_not_verified`, and no supported measurement.
+- `maple ridge bc` / `kamloops bc`: NRCan `:source_supported`,
+  **228.8 km straight-line**; the direct Wikidata provider independently
+  returned **229.0 km** for its representative coordinates. The
+  small difference is consistent with differing source coordinate
+  locations, not a road-route discrepancy.
+
+A pure `Core.Tools.WebRetrieval.PlaceScope` helper now allows the
+*lookup* (not the semantic question or verified memory) to inherit a
+short, exact-name province qualifier from a recent same-session
+USER question such as `where is Kamloops BC`. This supports the
+conversational sequence:
+
+    where is kamloops bc
+    how far from maple ridge is from kamloops
+
+with a qualified geographic lookup, but ONLY if the prior message
+is available in the recent user history. It never treats assistant
+prose as a geographical fact, guesses BC when the chat lacks the
+explicit hint, or uses contradictory hints. Both municipalities
+still must be source-verified by NRCan/Wikidata in the inferred
+jurisdiction. The original user-turn SVO/geographic frame remains
+unaltered and `:grounding_status` remains `:unverified` until
+fresh coordinate retrieval succeeds. The resulting evidence
+includes a bounded `:lookup_scope` audit with
+`:status => :user_qualified_hint` and `:verified? => false`,
+distinct from any source-supported coordinate measurement.
+
+Tests and diagnostic:
+
+    mix test apps/core/test/core/tools/web_retrieval/place_scope_test.exs \
+      apps/core/test/core/tools/evidence_resolver_test.exs \
+      apps/core/test/core/semantic/event_frames_test.exs
+
+    mix run scripts/diagnose_live_geographic_distance.exs
+
+The live diagnostic now prints three cases: standalone ambiguous,
+explicitly BC-qualified, and unqualified with a simulated recent
+USER turn naming `Kamloops BC`. The third case performs **real
+provider calls** but uses synthetic **chat history** only to
+exercise retrieval scope. It is not a test of persisted chat
+history or LLM generation. Live Phoenix chat should then be
+tested with the first message and distance follow-up in the
+same session, checking that retrieved source identities and the
+computed measurement match both places.

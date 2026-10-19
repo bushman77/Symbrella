@@ -109,6 +109,9 @@ defmodule Symbrella.Application do
       # Working memory and brain coordination.
       Brain,
 
+      # Ephemeral, experience-driven synaptic weights in shadow mode only.
+      Brain.Synapses.Shadow,
+
       # Cognitive state and learning support.
       Brain.Amygdala,
       Brain.Cerebellum.Store,

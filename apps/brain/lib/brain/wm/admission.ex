@@ -9,7 +9,6 @@ defmodule Brain.WM.Admission do
 
   alias Brain.BasalGanglia
   alias Brain.Config, as: BrainConfig
-  alias Brain.WM.Policy, as: WMPolicy
   alias Brain.WorkingMemory
 
   @gate_event [:brain, :gate, :decision]
@@ -19,8 +18,8 @@ defmodule Brain.WM.Admission do
   @spec run(map(), list() | map(), map() | keyword()) ::
           {[wm_item()], non_neg_integer(), non_neg_integer()}
   def run(state, cands_or_si, opts) when is_map(state) do
-    now = System.system_time(:millisecond)
     opts_map = opts_map(opts)
+    now = now_ms_from(opts_map)
     self_state = self_state_from(state, opts_map)
     cfg = wm_cfg_from(state, opts_map)
     attn = attention_from(state, cfg, self_state, opts_map)
@@ -53,7 +52,7 @@ defmodule Brain.WM.Admission do
 
   defp admit_candidate(cand, {wm_acc, added, removed}, now, cfg, attn, self_state) do
     {decision, score} = BasalGanglia.decide(wm_acc, cand, attn, cfg)
-    self_state_bias = WMPolicy.self_state_bias(self_state)
+    self_state_bias = BasalGanglia.self_state_bias(self_state)
 
     emit_gate_decision(cand, decision, score, self_state_bias, self_state)
 
@@ -199,56 +198,32 @@ defmodule Brain.WM.Admission do
         get(candidate, :score),
         get(candidate, :prob),
         get(candidate, :p_top1),
-        get(candidate, :activation_snapshot),
-        get(candidate, :margin)
+        get(candidate, :activation_snapshot)
       ]
-      |> first_number(1.0)
+      |> first_number(nil)
 
-    candidate
-    |> Map.put(:token_index, nonneg_int(get(candidate, :token_index) || get(candidate, :index)))
-    |> Map.put(:id, id)
-    |> Map.put(:lemma, lemma)
-    |> Map.put(:score, score)
-    |> Map.put(:source, source)
-  end
-
-  defp normalize_candidate(word, opts) when is_binary(word) do
-    source = Map.get(opts, :source, :runtime)
-
-    if String.contains?(word, "|") do
-      %{
-        token_index: 0,
-        id: word,
-        lemma: guess_lemma_from_id(word) || "",
-        score: 1.0,
-        source: source
-      }
+    # Never promote absent or merely relative evidence (such as :margin)
+    # into a maximum-confidence WM candidate.
+    if is_nil(score) do
+      nil
     else
-      lemma =
-        word
-        |> String.downcase()
-        |> String.replace(~r/\s+/u, " ")
-        |> String.trim()
-
-      %{
-        token_index: 0,
-        id: "#{lemma}|phrase|fallback",
-        lemma: lemma,
-        score: 1.0,
-        source: source
-      }
+      candidate
+      |> Map.put(:token_index, nonneg_int(get(candidate, :token_index) || get(candidate, :index)))
+      |> Map.put(:id, id)
+      |> Map.put(:lemma, lemma)
+      |> Map.put(:score, score)
+      |> Map.put(:source, source)
     end
   end
 
-  defp normalize_candidate(_other, opts) do
-    %{
-      token_index: 0,
-      id: "unk|phrase|fallback",
-      lemma: "",
-      score: 0.0,
-      source: Map.get(opts, :source, :runtime)
-    }
-  end
+  # Bare strings and unknown terms do not carry scored cognitive evidence.
+  # LIFG and recall callers must provide explicitly scored candidate maps.
+  defp normalize_candidate(_unscored, _opts), do: nil
+
+  # Deterministic timestamps are needed only by the legacy pure-list adapter.
+  # Production calls without :now_ms retain the system timestamp.
+  defp now_ms_from(%{now_ms: ms}) when is_integer(ms) and ms >= 0, do: ms
+  defp now_ms_from(_opts), do: System.system_time(:millisecond)
 
   defp opts_map(opts) when is_map(opts), do: opts
 
@@ -266,23 +241,25 @@ defmodule Brain.WM.Admission do
   end
 
   defp first_number(values, default) do
-    Enum.find_value(values, default, fn
-      value when is_integer(value) ->
-        value * 1.0
+    found =
+      Enum.find_value(values, fn
+        value when is_integer(value) ->
+          value * 1.0
 
-      value when is_float(value) ->
-        value
+        value when is_float(value) ->
+          value
 
-      value when is_binary(value) ->
-        case Float.parse(String.trim(value)) do
-          {parsed, ""} -> parsed
-          _ -> nil
-        end
+        value when is_binary(value) ->
+          case Float.parse(String.trim(value)) do
+            {parsed, ""} -> parsed
+            _ -> nil
+          end
 
-      _ ->
-        nil
-    end)
-    |> clamp01()
+        _ ->
+          nil
+      end)
+
+    if is_nil(found), do: default, else: clamp01(found)
   end
 
   defp nonneg_int(nil), do: 0

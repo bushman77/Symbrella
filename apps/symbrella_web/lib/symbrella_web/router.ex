@@ -5,6 +5,8 @@ defmodule SymbrellaWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug SymbrellaWeb.Plugs.WebAuth
+    plug SymbrellaWeb.Plugs.ChatSession
     plug :fetch_live_flash
     plug :put_root_layout, html: {SymbrellaWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -18,14 +20,20 @@ defmodule SymbrellaWeb.Router do
   scope "/", SymbrellaWeb do
     pipe_through :browser
 
-    live "/", HomeLive, :index
-    live "/episodes", EpisodesLive
-    live "/semantic", SemanticLive
-    # Native text export works even if browser JavaScript or clipboard fails.
+    # Route literal downloads before the parameterized /brain/:region route.
     get "/brain/report.txt", BrainReportController, :show
-    live "/brain", BrainLive
-    # Optional deep-linking to a specific region (e.g., /brain/lifg)
-    live "/brain/:region", BrainLive
+
+    # The HTTP plug protects initial navigation; on_mount independently
+    # protects LiveView sessions reconnecting through the socket transport.
+    live_session :protected, on_mount: [{SymbrellaWeb.Plugs.WebAuth, :require_authenticated}] do
+      live "/", HomeLive, :index
+      live "/episodes", EpisodesLive
+      live "/semantic", SemanticLive
+      live "/brain", BrainLive
+      live "/brain/:region", BrainLive
+    end
+
+
   end
 
   # Other scopes may use custom stacks.

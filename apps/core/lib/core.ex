@@ -47,6 +47,7 @@ defmodule Core do
       |> maybe_put_fuzzy(fuzzy)
       |> TokenFilters.rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+      |> Map.put(:experience_origin, Keyword.get(opts, :experience_origin))
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
       |> Map.put_new(:trace, [])
       |> Map.put(:lifg_opts, lifg_opts)
@@ -124,6 +125,11 @@ defmodule Core do
     |> StateDump.capture(:mwe_early)
     |> Core.Pipeline.LTM.run(opts)
     |> StateDump.capture(:ltm)
+    # Preserve the STM runtime activity separately from lexical DB candidates.
+    # Feed exact BrainCell IDs into LIFG as bounded prior activation, and only
+    # recruit complete, small candidate slates (large ambiguous sets are skipped).
+    |> Core.Brain.Activation.prime(opts)
+    |> StateDump.capture(:neuron_priming)
     |> TokenFilters.keep_only_word_boundary_tokens()
     |> StateDump.capture(:word_boundaries)
     |> Core.MWE.Stage.run(:late, opts)
@@ -132,6 +138,8 @@ defmodule Core do
     |> StateDump.capture(:mwe_lexicon)
     |> Core.Syntax.Signatures.attach()
     |> StateDump.capture(:sentence_signatures)
+    |> Core.Syntax.RoleCompetition.attach()
+    |> StateDump.capture(:role_competition)
     |> Core.Syntax.SentenceCompetition.attach()
     |> StateDump.capture(:sentence_competition)
     |> Selection.refine_from_syntax()
@@ -152,6 +160,7 @@ defmodule Core do
     |> StateDump.capture(:amygdala)
     |> Core.LIFG.FuzzyEntities.attach(opts)
     |> StateDump.capture(:fuzzy_entities)
+    |> Core.Brain.Activation.overlay_candidate_slates()
     |> LifgAttach.run_and_attach(lifg_opts)
     |> StateDump.capture(:lifg)
     |> Core.MWE.SenseResolution.rerank_contiguous()
@@ -171,8 +180,22 @@ defmodule Core do
     |> StateDump.capture(:lifg_relational_feedback)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
+    # Read-only episodic projection provides independently revalidated
+    # participant roles before SentenceMeaning composes the proposition.
+    # No database write or response is performed by either of these stages.
+    |> Core.Semantic.EpisodicProjection.attach()
+    |> StateDump.capture(:episodic_projection)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    # Intent is about the speaker's act, not a claimed verified verb sense.
+    # Revalidate complete assertions before replacing low-confidence :unknown.
+    |> Core.Intent.StructuralStatement.attach()
+    |> StateDump.capture(:structural_statement)
+    # Read-only semantic sense validation for every eligible live chat turn.
+    # Reuses exact LIFG/ATL roles and their selected noun glosses; publishes
+    # ONLY a bounded Explain trace, never a replacement semantic winner.
+    |> Core.Brain.SemanticSenseShadow.attach(opts)
+    |> StateDump.capture(:semantic_sense_shadow)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     |> Core.Brain.WM.Comprehension.store(opts)
@@ -185,12 +208,24 @@ defmodule Core do
     |> StateDump.capture(:working_memory)
     |> maybe_build_response_plan(opts)
     |> StateDump.capture(:response_plan)
-    |> Core.Brain.Hippocampus.encode()
+    |> Core.Brain.Hippocampus.encode(opts)
     |> StateDump.capture(:hippocampus_encode)
     |> Core.Brain.Hippocampus.persist(opts)
     |> StateDump.capture(:hippocampus_persist)
     |> Core.Brain.Activation.notify(opts)
     |> StateDump.capture(:activation)
+    # The read-only A/B projection must run BEFORE this turn is recorded,
+    # or the learner could appear to predict an event it just observed.
+    |> Core.Brain.SynapticPropagation.attach(opts)
+    |> StateDump.capture(:synaptic_propagation)
+    # Record only evidence-qualified user experiences in the shadow ledger.
+    # Neither step changes BrainCell weights or LIFG decisions.
+    |> Core.Brain.SynapticExperience.attach(opts)
+    |> StateDump.capture(:synaptic_experience)
+    # Explicit patient corrections are *proposals* only. They must not
+    # automatically retract prior receipts or train a new lexical association.
+    |> Core.Brain.SynapticCorrection.attach(opts)
+    |> StateDump.capture(:synaptic_correction)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other

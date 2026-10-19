@@ -95,6 +95,175 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert item2.payload.context.entities == ["Kamloops BC", "Maple Ridge BC"]
   end
 
+  test "Core comprehension uses BG admission without gaining factual authority" do
+    sid = session()
+    id = frame_id(sid)
+    listener = "p9a03-core-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        listener,
+        [:brain, :gate, :decision],
+        fn event, measurements, metadata, pid ->
+          send(pid, {:core_gate, event, measurements, metadata})
+        end,
+        self()
+      )
+
+    on_exit(fn ->
+      :telemetry.detach(listener)
+      Brain.defocus(id)
+    end)
+
+    stored = WMComprehension.store(prior_turn(sid), comprehension_wm?: true)
+    assert [%{stage: :wm_comprehension, decision: :admitted} | _] = stored.trace
+
+    assert_receive {:core_gate, [:brain, :gate, :decision], %{score: score},
+                    %{id: ^id, source: :comprehension, gate: :basal_ganglia,
+                      decision: decision}}
+
+    assert decision in [:allow, :boost]
+    assert score >= 0.0 and score <= 1.0
+
+    assert %{payload: %{context: context}} =
+             Enum.find(Brain.snapshot_wm().wm, &(&1.id == id))
+
+    assert context.verification == :conversation_context_only
+    refute Map.get(context, :factual_authority?, false)
+  end
+
+  defp projected_action_si(sid) do
+    choices = [
+      %{token_index: 1, id: "artist|noun|1"},
+      %{token_index: 2, id: "draws|verb|1"},
+      %{token_index: 4, id: "picture|noun|1"}
+    ]
+
+    si = %{
+      session_id: sid,
+      source: :user,
+      sentence: "The artist draws a picture.",
+      intent: :unknown,
+      confidence: 0.4,
+      trace: [],
+      tokens: [
+        %{index: 0, phrase: "The", n: 1},
+        %{index: 1, phrase: "artist", n: 1},
+        %{index: 2, phrase: "draws", n: 1},
+        %{index: 3, phrase: "a", n: 1},
+        %{index: 4, phrase: "picture.", n: 1}
+      ],
+      sentence_signatures: [
+        %{
+          id: :finite_present_svo_candidate,
+          source: :core_syntax,
+          span: {0, 4},
+          evidence: [:contiguous_surface, :attested_nominal_subject,
+                     :attested_nominal_object, :attested_finite_present_verb],
+          roles: %{subject_determiner: 0, subject_head: 1, predicate: 2,
+                   object_determiner: 3, object_head: 4}
+        }
+      ],
+      lifg_choices: choices,
+      atl_slate: %{winners: choices},
+      active_cells: [
+        %{id: "draws|verb|1", norm: "draws", pos: "verb",
+          definition: "An inflected form of draw.",
+          semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
+                           "tag:singular", "tag:third-person"]}
+      ],
+      sentence_meaning: %{status: :not_yet_interpreted},
+      comprehension: %{
+        understood: [],
+        uncertain: ["artist", "draws", "picture"],
+        recognized_topics: [],
+        degraded?: true
+      }
+    }
+
+    Core.Semantic.EpisodicProjection.attach(si)
+  end
+
+  test "validated action participants become WM context without falsely upgrading lexical comprehension" do
+    sid = session()
+    id = frame_id(sid)
+    on_exit(fn -> Brain.defocus(id) end)
+
+    si = projected_action_si(sid)
+    assert [%{relation: "verb_draw", participants: %{"actor" => "the artist",
+              "patient" => "a picture"}}] = si.episodic_candidates
+
+    context = WMComprehension.context_from(si, si.comprehension)
+    assert context.entities == ["the artist", "a picture"]
+    assert context.relation == "verb_draw"
+    assert context.event_roles == %{
+      "actor" => "the artist",
+      "predicate" => "draw",
+      "surface_predicate" => "draws",
+      "patient" => "a picture",
+      "tense" => "present"
+    }
+    assert context.event_source_frame == :finite_present_svo
+    assert context.event_role_status == :validated_projection
+    assert context.interpretation_status == :not_yet_interpreted
+    assert context.degraded?
+    assert context.understood == []
+    assert context.verification == :conversation_context_only
+
+    stored = WMComprehension.store(si, comprehension_wm?: true)
+    assert Enum.any?(stored.trace, &(&1.stage == :wm_comprehension and &1.decision == :admitted))
+
+    assert %{payload: %{context: wm_context}} =
+             Enum.find(Brain.snapshot_wm().wm, &(&1.id == id))
+    assert wm_context.event_roles == context.event_roles
+    assert wm_context.entities == ["the artist", "a picture"]
+    refute Map.get(wm_context, :factual_authority?, false)
+  end
+
+  test "WM does not admit forged or non-user participant roles as context" do
+    si = projected_action_si(session())
+    [candidate] = si.episodic_candidates
+
+    poisoned = %{si | episodic_candidates:
+      [%{candidate | participants: %{"actor" => "the painter"}}]}
+    rejected = WMComprehension.context_from(poisoned, poisoned.comprehension)
+    assert rejected.entities == []
+    assert rejected.relation == nil
+    assert rejected.event_roles == %{}
+    assert rejected.event_role_status == :none
+
+    assistant = %{si | source: :assistant}
+    rejected_assistant = WMComprehension.context_from(assistant, assistant.comprehension)
+    assert rejected_assistant.entities == []
+    assert rejected_assistant.relation == nil
+    assert rejected_assistant.event_roles == %{}
+    assert rejected_assistant.event_role_status == :none
+  end
+
+  test "disabled Core comprehension never submits a WM candidate" do
+    sid = session()
+    id = frame_id(sid)
+    listener = "p9a03-core-disabled-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        listener,
+        [:brain, :gate, :decision],
+        fn _event, _measurements, metadata, pid ->
+          send(pid, {:core_gate_id, metadata.id})
+        end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(listener) end)
+
+    si = prior_turn(sid)
+    assert WMComprehension.store(si, comprehension_wm?: false) == si
+
+    refute_receive {:core_gate_id, ^id}, 75
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+  end
+
   test "never recall a different session's comprehension frame" do
     assert is_pid(Process.whereis(Brain))
     sid = session()

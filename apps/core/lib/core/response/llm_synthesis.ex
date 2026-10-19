@@ -16,6 +16,8 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Telemetry
   alias Core.Response.Context
   alias Core.Response.AnswerPolish
+  alias Core.Response.ProjectedExpression
+  alias Core.Response.SemanticRoleFidelity
   alias Core.Response.LlmChatHistory
   alias Core.Response.LlmPrompt
   alias Core.Response.LlmPromptEvents
@@ -156,11 +158,14 @@ defmodule Core.Response.LlmSynthesis do
         context
       end
 
-    # Give the model Symbrella's current cognitive state rather than a
-    # sentence-shaped factual answer. History informs continuity, but never
-    # becomes a source of external factual verification.
+    # Reflection needs only the immediately preceding same-session pair
+    # to interpret a direct user correction ("no you are not"). A prior
+    # assistant message is a correction TARGET, never geographic evidence.
+    # This bounded history is kept out of the authoritative facts.
     context =
-      Map.put(context, :response_frame, ResponseFrame.build(context, history))
+      context
+      |> Map.put(:review_history, Enum.take(history, -2))
+      |> Map.put(:response_frame, ResponseFrame.build(context, history))
 
     case AuthoritativeAnswerPlan.build(context) do
       %{kind: :verified_population_comparison} = plan ->
@@ -295,8 +300,14 @@ defmodule Core.Response.LlmSynthesis do
     end
     system_prompt = render.(context)
 
-    # Always compare against the SAME prompt and original history. Full history
-    # remains the default. The counterfactual candidate does not call the LLM.
+    # Retain a longer conversation in ETS, but only send complete recent
+    # pairs that fit in the local model's conservative input allowance.
+    # This does not change the canonical memory or fact-verification gates.
+    available_chars = prompt_history_budget(system_prompt, user_text)
+    active_history =
+      Core.Response.LlmHistory.within_char_budget(selection.actual_history, available_chars)
+    selection = Map.put(selection, :actual_history, active_history)
+
     budget =
       PromptBudget.measure(context, render, history, selection.history,
         selection.actual_history, user_text)
@@ -331,6 +342,9 @@ defmodule Core.Response.LlmSynthesis do
         {out, reflection} =
           maybe_revise_evidence(user_text, draft, context, grounded_out, grounded_reflection)
 
+        {out, reflection} =
+          maybe_repair_projected_echo(user_text, out, context, reflection)
+
         emit_complete_event(user_text, out, context, system_prompt, reflection)
         {:ok, out, reflection}
 
@@ -342,6 +356,103 @@ defmodule Core.Response.LlmSynthesis do
         Logger.debug("[LlmSynthesis] LLM error: #{inspect(reason)}")
         {:error, reason}
     end
+  end
+
+  # Applies only to structural user-reported statements, after every
+  # ordinary model revision/review step. The fallback restates roles, NOT
+  # a verified event, motive, location, or selected dictionary sense.
+  # Let the normal reflection policy inspect the deterministic paraphrase.
+  defp maybe_repair_projected_echo(user_text, text, context, reflection) do
+    frame =
+      context
+      |> Map.get(:features, %{})
+      |> Map.get(:projected_expression)
+
+    case ProjectedExpression.review_draft(user_text, text, frame) do
+      {:repaired, trigger, replacement} ->
+        {:ok, reviewed, review} =
+          ReflectionLoop.review(user_text, replacement, context)
+
+        issue =
+          case trigger do
+            :exact_report_echo -> :projected_statement_echo
+            :unsupported_temporal_shift -> :projected_tense_aspect_drift
+            :unverified_sense_detail -> :unverified_sense_specificity
+            :semantic_role_drift -> :semantic_role_drift
+          end
+
+        revised =
+          review
+          |> Map.put(:status, :repair)
+          |> Map.put(:issues,
+            Enum.uniq([issue | Map.get(review, :issues, [])]))
+          |> Map.put(:applied?, reviewed != text)
+          |> Map.put(:repair_count, 1)
+          |> Map.put(:critique,
+            "The model draft did not follow verified structural expression constraints.")
+          |> Map.put(:repair_instruction,
+            "Use only the independently bound actor, predicate and patient.")
+          |> Map.put(:draft_text, String.slice(text, 0, 1200))
+          |> Map.put(:final_text, String.slice(reviewed, 0, 1200))
+          |> Map.put(:draft_sha256, sha256_hex(text))
+          |> Map.put(:final_sha256, sha256_hex(reviewed))
+          |> Map.put(:projected_expression_repair, %{
+            attempted?: true,
+            applied?: reviewed != text,
+            trigger: trigger,
+            source: :revalidated_sentence_roles,
+            original_reflection_status: Map.get(reflection, :status),
+            promoted_sense?: false,
+            stored_memory?: false
+          })
+
+        # Audit fields are bounded and role-structural only. The system
+        # never records untrusted generated assertions as verified facts.
+        role_audit =
+          if trigger == :semantic_role_drift,
+            do: SemanticRoleFidelity.audit(user_text, text, frame),
+            else: nil
+
+        revised =
+          if is_map(role_audit),
+            do: Map.put(revised, :semantic_role_fidelity,
+              Map.take(role_audit, [:status, :mismatched_roles, :source,
+                :draft_scope, :event_truth_verified?,
+                :exact_sense_verified?, :modified_cognition?])),
+            else: revised
+
+        if role_audit != nil do
+          Telemetry.emit([:core, :response, :semantic_role_drift],
+            %{count: 1}, %{issue: :semantic_role_drift,
+              mismatched_roles: Map.get(role_audit, :mismatched_roles, [])})
+        end
+
+        {reviewed, revised}
+
+      :unchanged ->
+        audit = SemanticRoleFidelity.audit(user_text, text, frame)
+
+        # A possible lexical mismatch or unsupported draft grammar is
+        # diagnostic-only: it MUST NOT masquerade as a verified
+        # contradiction or silently rewrite useful language.
+        reflection =
+          if is_map(frame) do
+            Map.put(reflection, :semantic_role_fidelity,
+              Map.take(audit, [:status, :reason, :mismatched_roles,
+                :source, :draft_scope, :event_truth_verified?,
+                :exact_sense_verified?, :modified_cognition?]))
+          else
+            reflection
+          end
+
+        {text, reflection}
+    end
+  end
+
+  defp sha256_hex(text) when is_binary(text) do
+    text
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   # A question echo or content-free non-answer gets at most one additional
@@ -792,7 +903,15 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp history_turn_pairs do
-    llm_config(:history_turn_pairs, 6)
+    llm_config(:history_turn_pairs, 32)
+  end
+
+  defp prompt_history_budget(system_prompt, user_text) do
+    # 5200 estimated input tokens leave space in the configured 8192-token
+    # context for generation, role framing, and tokenizer estimation error.
+    max_chars = llm_config(:max_input_estimated_tokens, 5_200) * 4
+    max(max_chars - String.length(system_prompt) -
+      String.length(user_text) - 256, 0)
   end
 
   defp llm_config(key, default) do

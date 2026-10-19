@@ -7,6 +7,7 @@ defmodule Db.BrainCell do
 
   ## Invariants
   - `id` shape: `"text|pos"` or `"text|pos|suffix"`; no trailing pipe.
+  - `numeric_id` is a database-assigned unique signed 32-bit address, not the primary key.
   - `pos` ∈ allowed POS; never `"unk"`.
   - `id`'s POS segment must equal `pos` column.
   - `id` must not contain `|unk|` or `|seed|`.
@@ -78,6 +79,9 @@ defmodule Db.BrainCell do
   }
 
   schema "brain_cells" do
+    # PostgreSQL GENERATED ALWAYS AS IDENTITY; keep the string :id as PK.
+    # A 4-byte integer can be passed to Nx as {:s, 32} when needed.
+    field(:numeric_id, :integer, read_after_writes: true)
     field(:word, :string)
     field(:norm, :string)
     field(:pos, :string)
@@ -121,7 +125,8 @@ defmodule Db.BrainCell do
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(cell, attrs) do
     cell
-    |> cast(attrs, __schema__(:fields))
+    # Never accept caller-supplied numeric addresses: the DB identity owns them.
+    |> cast(attrs, __schema__(:fields) -- [:numeric_id])
     |> validate_required([:id, :word, :pos])
     |> normalize_text_fields()
     |> ensure_norm_matches_word()

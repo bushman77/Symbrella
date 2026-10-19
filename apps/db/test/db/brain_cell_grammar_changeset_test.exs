@@ -15,6 +15,20 @@ defmodule Db.BrainCellGrammarChangesetTest do
     }
   end
 
+  test "numeric_id is a database-owned integer while the lexical ID remains primary" do
+    assert BrainCell.__schema__(:primary_key) == [:id]
+    assert BrainCell.__schema__(:type, :numeric_id) == :integer
+
+    cs =
+      attrs(["countable"])
+      |> Map.put(:numeric_id, 42)
+      |> then(&BrainCell.changeset(%BrainCell{}, &1))
+
+    assert cs.valid?
+    assert Ecto.Changeset.get_field(cs, :id) == "money|noun|1"
+    assert Ecto.Changeset.get_field(cs, :numeric_id) == nil
+  end
+
   test "preserves compound noun grammar usually plural" do
     cs = BrainCell.changeset(%BrainCell{}, attrs(["uncountable", "usually plural"]))
     assert cs.valid?

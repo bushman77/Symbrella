@@ -127,6 +127,7 @@ defmodule Core.Response.Attach do
       keyword: keyword,
       confidence: confidence,
       text: text,
+      sentence: si_get(si, :sentence),
       evidence: si_get(si, :evidence),
       comprehension: si_get(si, :comprehension),
       prefrontal: si_get(si, :prefrontal),
@@ -135,6 +136,8 @@ defmodule Core.Response.Attach do
       active_cells: si_get(si, :active_cells),
       sense_candidates: si_get(si, :sense_candidates),
       lifg_choices: si_get(si, :lifg_choices),
+      # Preserve the original grammatical proof for event revalidation.
+      sentence_signatures: si_get(si, :sentence_signatures),
       acc_conflict: si_get(si, :acc_conflict),
       perception: si_get(si, :perception),
       atl_slate: si_get(si, :atl_slate),
@@ -144,6 +147,8 @@ defmodule Core.Response.Attach do
       self_monitor: si_get(si, :self_monitor),
       self_memory_recall: si_get(si, :self_memory_recall),
       symbolic_frame: si_get(si, :symbolic_frame),
+      episodic_candidates: si_get(si, :episodic_candidates),
+      source: si_get(si, :source),
       discourse_reference: si_get(si, :discourse_reference),
       selected_action: si_get(si, :selected_action),
       action_candidates: si_get(si, :action_candidates),
@@ -152,6 +157,9 @@ defmodule Core.Response.Attach do
       agency_commands: si_get(si, :agency_commands),
       agency_command_results: si_get(si, :agency_command_results),
       turn_context: Context.from_si(si),
+      # Only revalidated user-report SVO structure; cohort words remain
+      # weak lexical hints, never verified dictionary sense IDs.
+      projected_expression: Core.Response.ProjectedExpression.from_si(si),
       session_id: si_get(si, :session_id)
     }
   end

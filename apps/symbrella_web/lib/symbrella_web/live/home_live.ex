@@ -21,8 +21,9 @@ defmodule SymbrellaWeb.HomeLive do
   # ─────────────────────────────────────────────────────────────────────────────
 
   @impl true
-  def mount(_params, _session, socket) do
-    initial = initial_messages()
+  def mount(_params, session, socket) do
+    session_id = Map.fetch!(session, "symbrella_chat_session_id")
+    initial = initial_messages(session_id)
 
     initial_text_by_id =
       Map.new(initial, fn msg ->
@@ -55,7 +56,7 @@ defmodule SymbrellaWeb.HomeLive do
        pending_task: nil,
        pending_user_turn: nil,
        cancelled_ref: nil,
-       session_id: ChatHistory.session_id(),
+       session_id: session_id,
        explain_open?: false,
        explain_payload: %{},
        curiosity_idle_ref: nil,
@@ -109,7 +110,7 @@ defmodule SymbrellaWeb.HomeLive do
           |> push_event("chat:clear-input", %{})
           |> push_event("chat:scroll", %{to: "composer"})
 
-        ChatHistory.append(msg)
+        ChatHistory.append(socket.assigns.session_id, msg)
 
         task =
           Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
@@ -165,7 +166,7 @@ defmodule SymbrellaWeb.HomeLive do
         payload = ChatHTML.explain_payload_for(%{id: bot_id, text: bot_text})
         stopped = %{id: bot_id, role: :assistant, text: bot_text, mods: MoodBadge.build(%{})}
 
-        ChatHistory.append(stopped)
+        ChatHistory.append(socket.assigns.session_id, stopped)
 
         {:noreply,
          socket
@@ -275,7 +276,7 @@ defmodule SymbrellaWeb.HomeLive do
       explain_payload: explain_payload
     }
 
-    ChatHistory.append(bot)
+    ChatHistory.append(socket.assigns.session_id, bot)
 
     maybe_archive_completed_turn(
       socket.assigns,
@@ -332,7 +333,7 @@ defmodule SymbrellaWeb.HomeLive do
           text: bot_text
         }
 
-        ChatHistory.append(msg)
+        ChatHistory.append(socket.assigns.session_id, msg)
 
         {:noreply,
          socket
@@ -389,7 +390,7 @@ defmodule SymbrellaWeb.HomeLive do
               explain_payload: explain_payload
             }
 
-            ChatHistory.append(bot)
+            ChatHistory.append(socket.assigns.session_id, bot)
 
             {:noreply,
              socket
@@ -452,8 +453,8 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  defp initial_messages do
-    case ChatHistory.list() |> sanitize_cached_messages() do
+  defp initial_messages(session_id) do
+    case ChatHistory.list(session_id) |> sanitize_cached_messages() do
       [] -> [%{id: "m1", role: :assistant, text: "Welcome to Symbrella chat  👋"}]
       messages -> messages
     end
@@ -524,14 +525,32 @@ defmodule SymbrellaWeb.HomeLive do
         # accidentally explain an older, no-longer-adjacent assistant reply.
         :ok = Core.Response.VerifiedAnswerReceipt.clear(session_id)
 
+        # The memory answer remains authoritative. Nevertheless, run this
+        # user utterance through the non-response comprehension path, so STM,
+        # same-session WM and evidence-gated neuron activity do not stall on
+        # turns satisfied directly by Hippocampus.
+        {si, semantic_status} =
+          if Keyword.get(home_live_config(), :memory_continuity?, true) do
+            case Core.Brain.MemoryFastPathContinuity.run(user_text, session_id) do
+              {:ok, comprehended} ->
+                {comprehended, "comprehension_only"}
+
+              {:error, reason} ->
+                Logger.warning("[MemoryContinuity] skipped: #{inspect(reason)}")
+                {memory_si_like, "failed"}
+            end
+          else
+            {memory_si_like, "disabled"}
+          end
+
         %{
           text: reply_text,
           tone: tone,
           meta: meta,
-          si: memory_si_like,
+          si: si,
           senses_selected: [],
           explain_text: reply_text,
-          pipeline_status: %{route: "memory_fast_path", semantic_pipeline: "bypassed"}
+          pipeline_status: %{route: "memory_fast_path", semantic_pipeline: semantic_status}
         }
 
       nil ->
@@ -546,6 +565,7 @@ defmodule SymbrellaWeb.HomeLive do
     si =
       Core.resolve_input(user_text,
         mode: :prod,
+        experience_origin: :user_turn,
         enrich_lexicon?: true,
         lexicon_stage?: true,
         lifg_opts: [grammar_weight: 1.0],
@@ -568,6 +588,15 @@ defmodule SymbrellaWeb.HomeLive do
       # retain its typed event frame. Dropping it makes a two-city comparison
       # look like generic chat and prevents its evidence lookup.
       symbolic_frame: Map.get(si, :symbolic_frame),
+      # A fallback planner must receive the same grammatical proof that
+      # Core.Response.Attach uses. Otherwise a valid event is silently
+      # downgraded to LLM prose and the durable memory write is skipped.
+      sentence: Map.get(si, :sentence),
+      sentence_signatures: Map.get(si, :sentence_signatures),
+      episodic_candidates: Map.get(si, :episodic_candidates),
+      lifg_choices: Map.get(si, :lifg_choices),
+      atl_slate: Map.get(si, :atl_slate),
+      active_cells: Map.get(si, :active_cells),
       turn_context: Core.Response.Context.from_si(si)
     }
 

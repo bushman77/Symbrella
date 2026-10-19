@@ -6,7 +6,8 @@ defmodule Core.LIFG.Attach do
   Responsibilities:
     • Call Brain.LIFG (safely) and attach :lifg_choices / :atl_slate / trace
     • Apply tiny tie-break priors and MWE-friendly bumps
-    • MWE shadowing (suppress overlapping unigrams when an MWE wins)
+    • Retain original unigram choices; Core.MWE.Decisions exclusively owns
+      semantic shadowing after validating lexical phrase promotion
   """
 
   # ── knobs ─────────────────────────────────────────────────────────────
@@ -139,10 +140,14 @@ defmodule Core.LIFG.Attach do
               example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
               semantic_control: Map.get(ch, :semantic_control),
+              sense_focus: Map.get(ch, :sense_focus),
               # Full Stage1 post-softmax distribution. A second-pass LIFG
               # update requires this exact prior, not the winning score alone.
               candidate_probs:
-                if(is_map(scores) and map_size(scores) <= 64,
+                if(is_map(scores) and
+                    (map_size(scores) <= 64 or
+                       (Keyword.get(lifg_opts, :synapse_eval_full_scores?, false) == true and
+                          map_size(scores) <= 256)),
                   do: scores, else: nil),
               score: score2
             }
@@ -151,7 +156,10 @@ defmodule Core.LIFG.Attach do
         {word_choices, mwe_choices} =
           Core.MWE.LIFGBridge.split_choices(all_choices, virtual_mwes)
 
-        lifg_choices = mwe_shadow(word_choices, tokens_for_choices)
+        # Never drop lexical unigram choices merely because a virtual MWE
+        # won Stage1. The phrase must pass Core.MWE.Decisions' lexical,
+        # structural and span checks before shadowing in semantic_choices.
+        lifg_choices = word_choices
 
         si_clean =
           if map_size(virtual_mwes) > 0 do
@@ -178,6 +186,7 @@ defmodule Core.LIFG.Attach do
           meta: %{choice_count: length(raw_choices), flips: flips}
         )
         |> Core.MWE.Decisions.attach()
+        |> maybe_trace_word_flow(word_choices, lifg_choices, lifg_opts)
         |> maybe_trace_mwe_scores(raw_choices, all_choices, virtual_mwes, lifg_opts)
         |> maybe_trace_word_scores(raw_choices, all_choices, tokens_for_choices,
           virtual_mwes, lifg_opts)
@@ -189,11 +198,50 @@ defmodule Core.LIFG.Attach do
 
   def run_and_attach(si, _lifg_opts), do: si
 
+  # Compare the complete lexical word choices with the validated semantic
+  # MWE view. Only Core.MWE.Decisions may suppress words from semantic_choices.
+  # The legacy :after_shadow key remains for trace-reader compatibility,
+  # but refers to retained lexical words, not premature shadowing.
+  defp maybe_trace_word_flow(si, raw_words, shadowed_words, opts) do
+    if Keyword.get(opts, :trace_word_scores?, false) == true do
+      compact = fn choices ->
+        choices
+        |> List.wrap()
+        |> Enum.filter(&is_map/1)
+        |> Enum.take(32)
+        |> Enum.map(&Map.take(&1, [:token_index, :id, :pos, :kind, :token_span]))
+      end
+
+      Core.Pipeline.Trace.append(si, :lifg_word_flow_audit,
+        decision: :observed,
+        reason: :unigrams_retained_until_canonical_mwe_promotion,
+        meta: %{
+          before_shadow: compact.(raw_words),
+          after_shadow: compact.(shadowed_words),
+          retained_words: compact.(shadowed_words),
+          after_promotion: compact.(Map.get(si, :semantic_choices, [])),
+          mwe_candidates:
+            Map.get(si, :mwe_choices, [])
+            |> List.wrap()
+            |> Enum.take(12)
+            |> Enum.map(&Map.take(&1,
+              [:token_index, :id, :token_span, :span, :source]))
+        }
+      )
+    else
+      si
+    end
+  end
+
   # Diagnostic only. A small winning probability can reflect a large
   # candidate bucket; do not interpret it as sentence-level confidence.
   defp maybe_trace_word_scores(si, raw, final, tokens, virtual, opts) do
     if Keyword.get(opts, :trace_word_scores?, false) == true do
-      scores_mode = Application.get_env(:brain, :lifg_stage1_scores_mode, :all)
+      # Trace the effective mode for this call: a diagnostic can request
+      # :all even when runtime defaults to :top2 or :none.
+      scores_mode =
+        Keyword.get(opts, :scores,
+          Application.get_env(:brain, :lifg_stage1_scores_mode, :all))
       entries = Core.LIFG.ScoreAudit.summarize(raw, final, tokens, virtual, scores_mode)
 
       Core.Pipeline.Trace.append(si, :lifg_word_score_audit,
@@ -310,44 +358,6 @@ defmodule Core.LIFG.Attach do
   end
 
   # ───────────────────────── MWE shadowing ─────────────────────────
-
-  defp mwe_shadow(lifg_choices, tokens) when is_list(lifg_choices) and is_list(tokens) do
-    mwe_spans =
-      lifg_choices
-      |> Enum.map(& &1.token_index)
-      |> Enum.map(&Enum.at(tokens, &1, %{}))
-      |> Enum.filter(fn t -> Map.get(t, :n, 1) > 1 end)
-      |> Enum.map(&Map.get(&1, :span))
-
-    if mwe_spans == [] do
-      lifg_choices
-    else
-      Enum.reject(lifg_choices, fn ch ->
-        t = Enum.at(tokens, ch.token_index, %{})
-
-        if Map.get(t, :n, 1) == 1 do
-          covered_by_any_mwe?(Map.get(t, :span), mwe_spans)
-        else
-          false
-        end
-      end)
-    end
-  end
-
-  defp covered_by_any_mwe?({a, l}, spans) when is_integer(a) and is_integer(l) do
-    b = a + l
-
-    Enum.any?(spans, fn
-      {s, sl} when is_integer(s) and is_integer(sl) ->
-        e = s + sl
-        a >= s and b <= e
-
-      _ ->
-        false
-    end)
-  end
-
-  defp covered_by_any_mwe?(_, _), do: false
 
   # ───────────────────────── id helpers ─────────────────────────
 

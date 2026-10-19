@@ -44,6 +44,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Stage1.Boundary
   alias Brain.LIFG.GrammarEvidence
   alias Brain.LIFG.SemanticControl
+  alias Brain.LIFG.SenseFocus
 
   @default_weights %{
     lex_fit: 0.40,
@@ -234,6 +235,7 @@ defmodule Brain.LIFG.Stage1 do
           sent: sent,
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
+          sense_focus?: Keyword.get(opts, :sense_focus?, true),
           semantic_control_opts: [
             enabled?: Keyword.get(opts, :semantic_control?,
               Application.get_env(:brain, :lifg_semantic_control?, true)),
@@ -255,6 +257,7 @@ defmodule Brain.LIFG.Stage1 do
           stage1_local_mwe_fallback?: stage1_local_mwe_fallback?,
           stage1_stop_event: stop_event,
           reanalysis?: reanalysis?,
+          cerebellum_learn?: Keyword.get(opts, :cerebellum_learn?, true),
           cerebellum_snapshot_path:
             Keyword.get(
               opts,
@@ -300,6 +303,11 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:ignored_mwe_probes, acc.ignored_mwe_probes)
         |> Map.put(:low_confidence_decisions, acc.low_confidence)
         |> Map.put(:pos_anomalies, acc.pos_anomalies)
+        |> Map.put(:sense_focus, %{
+          focused_tokens: acc.focused_tokens,
+          context_evaluations: acc.context_evaluations,
+          context_skipped: acc.context_skipped
+        })
         |> mark_degraded()
 
       out = %{si: si1, choices: Enum.reverse(choices), audit: audit}
@@ -581,7 +589,10 @@ defmodule Brain.LIFG.Stage1 do
       fallback_winners: 0,
       ignored_mwe_probes: 0,
       low_confidence: 0,
-      pos_anomalies: 0
+      pos_anomalies: 0,
+      context_evaluations: 0,
+      context_skipped: 0,
+      focused_tokens: 0
     }
 
     final =
@@ -671,6 +682,10 @@ defmodule Brain.LIFG.Stage1 do
         {syn_hits, ant_hits} = relations_count_overlaps(ctx.si)
         closed_class_slate? = Enum.any?(cand_list, &ClosedClass.closed_class_candidate?/1)
 
+        focus =
+          SenseFocus.plan(ctx.si, tok_index, cand_list,
+            enabled?: ctx.sense_focus?, mwe?: token_mwe?)
+
         scored_rows =
           Enum.map(cand_list, fn c ->
             id = sense_id_for(c, token_phrase)
@@ -687,11 +702,11 @@ defmodule Brain.LIFG.Stage1 do
             lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
             context0 =
-              ContextFit.score(
-                ctx.sent,
-                token_phrase,
-                c
-              )
+              if SenseFocus.evaluate_context?(focus, c) do
+                ContextFit.score(ctx.sent, token_phrase, c)
+              else
+                0.0
+              end
 
             rel0 =
               guess_rel_prior(c, id, token_phrase)
@@ -843,6 +858,16 @@ defmodule Brain.LIFG.Stage1 do
             tok_index
           )
 
+        # High-evidence role competition resolves grammatical POS before
+        # semantic sense discrimination. Speculative local signatures alone
+        # never authorize this bounded support.
+        cal_scores =
+          GrammarEvidence.apply_role_competition(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
         # A mixed-POS slate is not automatically a closed-class *winner*.
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.
@@ -860,13 +885,16 @@ defmodule Brain.LIFG.Stage1 do
             ClosedClass.closed_class_candidate?(provisional_candidate)
 
         {cal_scores, semantic_control} =
-          if provisional_closed_class? do
+          if provisional_closed_class? and focus.mode != :focused do
             {cal_scores, %{
               applied?: false, reason: :closed_class_winner, adjustments: []
             }}
           else
+            semantic_pos =
+              if focus.mode == :focused, do: focus.focus_pos, else: pos_of(provisional_candidate)
+
             semantic_opts =
-              Keyword.put(ctx.semantic_control_opts, :focus_pos, pos_of(provisional_candidate))
+              Keyword.put(ctx.semantic_control_opts, :focus_pos, semantic_pos)
 
             SemanticControl.apply(cal_scores, scored_rows, semantic_opts)
           end
@@ -918,7 +946,7 @@ defmodule Brain.LIFG.Stage1 do
         margin = Float.round(max(margin0, 0.0), 6)
 
         _ =
-          unless closed_class_slate? do
+          if not closed_class_slate? and ctx.cerebellum_learn? do
             cereb_learn(ctx.si, chosen_id, feats, base_scores, cereb_opts)
           end
 
@@ -978,6 +1006,7 @@ defmodule Brain.LIFG.Stage1 do
           prob_margin: margin,
           weak?: margin_weak? or low_confidence?,
           semantic_control: semantic_control,
+          sense_focus: focus,
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
           reliability:
@@ -1010,6 +1039,9 @@ defmodule Brain.LIFG.Stage1 do
         |> Map.put(:low_confidence, low_confidence_next)
         |> Map.put(:pos_anomalies, pos_anomaly_next)
         |> Map.put(:fallback_winners, fallback_winners_next)
+        |> Map.update!(:context_evaluations, &(&1 + focus.context_evaluations))
+        |> Map.update!(:context_skipped, &(&1 + focus.context_skipped))
+        |> Map.update!(:focused_tokens, &(&1 + if(focus.mode == :focused, do: 1, else: 0)))
         |> Map.update!(:kept, &(&1 + 1))
     end
   end

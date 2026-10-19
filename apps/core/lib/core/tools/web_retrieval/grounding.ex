@@ -180,9 +180,10 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   defp supports_distance_or_population?(text, context) do
     case supported_proximity(context) do
       %{distance_km: km, sources: sources} when is_number(km) and is_list(sources) ->
-        String.contains?(text, "#{km}") and
-          Enum.all?(sources, fn src -> String.contains?(text, Map.get(src, :url, "")) end) and
-          String.contains?(String.downcase(text), "straight line")
+        # Numbers and citations appearing *somewhere* in a draft do not
+        # authorize different endpoints, units, or additional distance
+        # claims. Core owns the single validated distance sentence.
+        text == align(text, context)
 
       _ ->
         supports_population?(text, context)
@@ -501,12 +502,69 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     if Map.get(frame, :type) == :location_question and
          Map.get(frame, :relation) == :proximity and
          Map.get(evidence, :status) == :retrieved and
-         is_map(support) and Map.get(support, :status) == :source_supported and
+         is_map(support) and Map.get(support, :kind) == :proximity and
+         Map.get(support, :status) == :source_supported and
+         Map.get(support, :method) == :haversine and
          is_number(Map.get(support, :distance_km)) and
+         Map.get(support, :distance_km) >= 0 and
          is_list(Map.get(support, :sources)) and
-         length(Map.get(support, :sources)) == 2,
+         matched_distance_entities?(frame, support),
        do: support
   end
+
+  # A two-source list does not by itself say which places were measured.
+  # Compare the bound frame and the coordinate provider's two endpoint
+  # identities, in order. Province validation stays the provider's job.
+  defp matched_distance_entities?(frame, support) do
+    case {Map.get(support, :sources), Map.get(frame, :subject),
+          Map.get(frame, :target)} do
+      {[origin, destination], subject, target}
+      when is_binary(subject) and is_binary(target) ->
+        same_place?(Map.get(support, :subject), subject) and
+          same_place?(Map.get(support, :target), target) and
+          source_matches_place?(origin, subject) and
+          source_matches_place?(destination, target)
+
+      _ -> false
+    end
+  end
+
+  defp source_matches_place?(%{title: title, url: url, provider: provider}, place)
+       when is_binary(title) and is_binary(url) and is_binary(place) do
+    parsed = URI.parse(url)
+
+    trusted_source? =
+      parsed.scheme == "https" and
+        ((provider == :wikidata and parsed.host == "www.wikidata.org") or
+          (provider == :natural_resources_canada and
+             parsed.host == "geogratis.gc.ca"))
+
+    trusted_source? and same_place?(title, place)
+  end
+
+  defp source_matches_place?(_, _), do: false
+
+  # City names may be expressed with either a comma-qualified region
+  # ("Maple Ridge, BC") or a whitespace suffix ("maple ridge bc").
+  # The coordinate providers are responsible for checking the jurisdiction
+  # against the underlying entity, not the title-only display comparison.
+  # Strip ONLY recognized Canadian province/territory suffixes.
+  @canadian_region_suffix ~r/(?:,\s*|\s+)(?:BC|British\s+Columbia|AB|Alberta|SK|Saskatchewan|MB|Manitoba|ON|Ontario|QC|Quebec|Québec|NB|New\s+Brunswick|NS|Nova\s+Scotia|PE|Prince\s+Edward\s+Island|NL|Newfoundland\s+and\s+Labrador|YT|Yukon|NT|Northwest\s+Territories|NU|Nunavut)\s*\z/iu
+
+  defp same_place?(a, b) when is_binary(a) and is_binary(b) do
+    city = fn text ->
+      text
+      |> String.trim()
+      |> String.replace(@canadian_region_suffix, "")
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{M}]+/u, " ")
+      |> String.trim()
+    end
+
+    city.(a) != "" and city.(a) == city.(b)
+  end
+
+  defp same_place?(_, _), do: false
 
   defp supported_population(context) do
     frame = geographic_frame(context)

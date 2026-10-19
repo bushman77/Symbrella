@@ -2,15 +2,19 @@ defmodule SymbrellaWeb.ChatHistory do
   @moduledoc """
   In-memory bounded chat history for the LiveView chat window.
 
-  This keeps the last 100 displayed messages across LiveView remounts while the
-  Phoenix application is running. It intentionally does not persist private chat
-  text to disk.
+  Keeps up to 100 displayed messages per browser conversation across LiveView
+  remounts while Phoenix runs, with a global cap on remembered browsers. The session key is supplied by the signed
+  browser cookie. This deliberately does not persist private chat text to disk.
+
+  Legacy zero/one-argument APIs remain for internal callers and older tests;
+  browser-facing callers must pass an explicit session identifier.
   """
 
   use GenServer
 
   @name __MODULE__
   @default_limit 100
+  @default_max_sessions 128
 
   @type message :: %{
           required(:id) => String.t(),
@@ -30,59 +34,96 @@ defmodule SymbrellaWeb.ChatHistory do
     GenServer.start_link(__MODULE__, opts, name: @name)
   end
 
-  @doc "Stable conversation identifier shared by LiveView remounts in this runtime."
+  @doc "Legacy in-process session key. Browser callers must use their cookie key."
   @spec session_id() :: String.t()
   def session_id, do: GenServer.call(@name, :session_id)
 
-  @spec list() :: [message()]
-  def list do
-    GenServer.call(@name, :list)
+  @spec list(String.t() | nil) :: [message()]
+  def list(session_id \\ nil) do
+    GenServer.call(@name, {:list, session_id})
   end
 
   @spec append(message() | [message()]) :: :ok
-  def append(messages) when is_list(messages) do
-    GenServer.cast(@name, {:append, messages})
+  def append(messages), do: append(nil, messages)
+
+  @spec append(String.t() | nil, message() | [message()]) :: :ok
+  def append(session_id, messages) when is_list(messages) do
+    GenServer.cast(@name, {:append, session_id, messages})
   end
 
-  def append(%{} = message) do
-    append([message])
-  end
+  def append(session_id, %{} = message), do: append(session_id, [message])
 
   @spec clear() :: :ok
-  def clear do
-    GenServer.call(@name, :clear)
+  def clear, do: GenServer.call(@name, :clear)
+
+  @spec clear(String.t()) :: :ok
+  def clear(session_id) when is_binary(session_id) do
+    GenServer.call(@name, {:clear, session_id})
   end
 
   @impl true
   def init(opts) do
     limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
-    {:ok, %{limit: limit, messages: [], session_id: new_session_id()}}
+    max_sessions = opts |> Keyword.get(:max_sessions, @default_max_sessions) |> normalize_limit()
+    {:ok,
+     %{
+       limit: limit,
+       max_sessions: max_sessions,
+       histories: %{},
+       order: [],
+       session_id: new_session_id()
+     }}
   end
 
   @impl true
   def handle_call(:session_id, _from, state), do: {:reply, state.session_id, state}
 
-  def handle_call(:list, _from, state) do
-    {:reply, Enum.reverse(state.messages), state}
+  def handle_call({:list, session_id}, _from, state) do
+    id = session_id || state.session_id
+    {:reply, state.histories |> Map.get(id, []) |> Enum.reverse(), state}
   end
 
   def handle_call(:clear, _from, state) do
-    {:reply, :ok, %{state | messages: [], session_id: new_session_id()}}
+    {:reply, :ok, %{state | histories: %{}, order: [], session_id: new_session_id()}}
+  end
+
+  def handle_call({:clear, session_id}, _from, state) do
+    {:reply, :ok,
+     %{
+       state
+       | histories: Map.delete(state.histories, session_id),
+         order: List.delete(state.order, session_id)
+     }}
   end
 
   @impl true
-  def handle_cast({:append, messages}, state) when is_list(messages) do
+  def handle_cast({:append, session_id, messages}, state) when is_list(messages) do
+    id = session_id || state.session_id
+
     normalized =
       messages
       |> Enum.map(&normalize_message/1)
       |> Enum.reject(&is_nil/1)
 
-    messages =
+    previous = Map.get(state.histories, id, [])
+
+    updated =
       normalized
-      |> Enum.reduce(state.messages, fn message, acc -> [message | acc] end)
+      |> Enum.reduce(previous, fn message, acc -> [message | acc] end)
       |> Enum.take(state.limit)
 
-    {:noreply, %{state | messages: messages}}
+    order = List.delete(state.order, id) ++ [id]
+    histories = Map.put(state.histories, id, updated)
+
+    {order, histories} =
+      if length(order) > state.max_sessions do
+        [expired | remaining] = order
+        {remaining, Map.delete(histories, expired)}
+      else
+        {order, histories}
+      end
+
+    {:noreply, %{state | histories: histories, order: order}}
   end
 
   defp normalize_message(%{} = message) do

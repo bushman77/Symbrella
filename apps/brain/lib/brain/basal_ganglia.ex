@@ -18,8 +18,6 @@ defmodule Brain.BasalGanglia do
     :block_threshold, :block_threshold_disprefer
   """
 
-  alias Brain.WM.Policy, as: WMPolicy
-
   @type decision :: :allow | :boost | :block
 
   @doc "Return compact dashboard status for the stateless basal ganglia gate."
@@ -39,10 +37,62 @@ defmodule Brain.BasalGanglia do
     now = System.system_time(:millisecond)
     cfg = normalize_cfg(cfg)
 
-    if not WMPolicy.acceptable_candidate?(cand, cfg) do
+    if not acceptable_candidate?(cand, cfg) do
       {:block, 0.0}
     else
       decide_acceptable(now, wm, cand, attn, cfg)
+    end
+  end
+
+  @doc """
+  Bounded advisory contribution of SelfModel to an admission score.
+
+  This affects scoring only. It never overrides hard candidate eligibility
+  or the minimum source-evidence floor in decide/4.
+  """
+  @spec self_state_bias(map() | nil) :: float()
+  def self_state_bias(nil), do: 0.0
+
+  def self_state_bias(self_state) when is_map(self_state) do
+    vigilance = self_signal(self_state, :vigilance, 0.5)
+    uncertainty = self_signal(self_state, :uncertainty, 0.5)
+    inhibition = self_signal(self_state, :inhibition, 0.5)
+    cognitive_load = self_signal(self_state, :cognitive_load, 0.0)
+
+    vigilance_bias = 0.10 * (vigilance - 0.5)
+    uncertainty_bias = 0.08 * (uncertainty - 0.5)
+    inhibition_bias = -0.10 * (inhibition - 0.5)
+
+    overload_bias =
+      if cognitive_load > 0.65 do
+        overload = clamp01((cognitive_load - 0.65) / 0.35)
+        -0.15 * overload
+      else
+        0.0
+      end
+
+    vigilance_bias + uncertainty_bias + inhibition_bias + overload_bias
+  end
+
+  def self_state_bias(_), do: 0.0
+
+  defp self_signal(self_state, key, default) do
+    value = Map.get(self_state, key, Map.get(self_state, to_string(key), default))
+
+    case value do
+      number when is_number(number) -> clamp01(number)
+      _ -> default
+    end
+  end
+
+  defp acceptable_candidate?(cand, cfg) do
+    id = to_string(Map.get(cand, :id) || "")
+    pos = to_string(Map.get(cand, :pos) || get_in(cand, [:features, :pos]) || "")
+
+    cond do
+      not cfg.allow_seed? and String.ends_with?(id, "|seed|") -> false
+      not cfg.allow_unk? and String.contains?(String.downcase(pos), "unk") -> false
+      true -> true
     end
   end
 
@@ -105,7 +155,7 @@ defmodule Brain.BasalGanglia do
       |> clamp01()
 
     self_state = Map.get(attn, :self_state, Map.get(cfg, :self_state))
-    self_state_bias = WMPolicy.self_state_bias(self_state)
+    self_state_bias = self_state_bias(self_state)
     score = clamp01(evidence_score + self_state_bias)
 
     recent? = cooldown_match?(match, now, cooldown)
@@ -160,6 +210,8 @@ defmodule Brain.BasalGanglia do
       # evidence-floor name if this threshold becomes non-linguistic.
       allow_fallback_into_wm?: Map.get(cfg, :allow_fallback_into_wm?, false),
       fallback_scale: clamp01(Map.get(cfg, :fallback_scale, 0.70)),
+      allow_seed?: Map.get(cfg, :allow_seed?, true) == true,
+      allow_unk?: Map.get(cfg, :allow_unk?, true) == true,
       source_boosts: Map.get(cfg, :source_boosts, %{}),
       prefer_sources:
         Map.get(

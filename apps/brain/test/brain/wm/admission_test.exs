@@ -101,6 +101,62 @@ defmodule Brain.WM.AdmissionTest do
     assert_receive {:gate, _meas, %{decision: :boost, gate: :basal_ganglia, id: "boost|noun|0"}}
   end
 
+  test "unscored maps, standalone margins and bare strings cannot enter WM" do
+    opts = [
+      gate_threshold: 0.0,
+      boost_threshold: 0.0,
+      boost_threshold_pref: 0.0,
+      evidence_floor: 0.0
+    ]
+
+    candidates = [
+      %{id: "missing|noun|0", lemma: "missing", source: :lifg},
+      %{id: "margin|noun|0", lemma: "margin", margin: 1.0, source: :lifg},
+      "raw|noun|0",
+      %{id: "fallback|phrase|fallback", source: :runtime},
+      %{id: "explicit|noun|0", source: :runtime, score: 0.8}
+    ]
+
+    assert Enum.map(Admission.normalize_candidates(candidates), & &1.id) ==
+             ["explicit|noun|0"]
+
+    {wm, 1, 0} = Admission.run(state(), candidates, opts)
+    assert Enum.map(wm, & &1.id) == ["explicit|noun|0"]
+    assert_receive {:gate, _meas, %{gate: :basal_ganglia, id: "explicit|noun|0"}}
+    refute_receive {:gate, _meas, _meta}, 50
+  end
+
+  test "every runtime source class obeys the same hard evidence floor" do
+    cfg = state(%{gate_threshold: 0.0, evidence_floor: 0.8,
+                  lifg_min_score: 0.8, prefer_sources: []})
+
+    Enum.each([:lifg, :ltm, :curiosity, :intent, :comprehension,
+               :verified_semantics], fn source ->
+      id = "source-floor-#{source}"
+      {wm, 0, 0} = Admission.run(cfg, [%{id: id, source: source, score: 0.1}], [])
+      assert wm == []
+      assert_receive {:gate, %{score: score},
+                      %{gate: :basal_ganglia, decision: :block, id: ^id,
+                        source: ^source}}
+      assert score >= 0.0 and score <= 1.0
+    end)
+  end
+
+  test "self-state modulation cannot override the hard evidence floor" do
+    cfg = state(%{gate_threshold: 0.0, evidence_floor: 0.6})
+    state = %Brain.SelfModel{vigilance: 1.0, uncertainty: 1.0}
+    candidate = %{id: "weak|noun|0", source: :other, score: 0.05}
+
+    {wm, 0, 0} = Admission.run(cfg, [candidate], self_state: state)
+    assert wm == []
+
+    assert_receive {:gate, %{score: score, self_state_bias: bias},
+                    %{gate: :basal_ganglia, decision: :block, id: "weak|noun|0",
+                      self_state_applied?: true}}
+    assert score >= 0.0 and score <= 1.0
+    assert bias > 0.0
+  end
+
   test "normalization keeps stage2 evidence but final decision comes from BG" do
     decisions = [
       {:commit,

@@ -50,6 +50,10 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
   end
 
   test "Stage2 evidence receives a canonical gate decision and WM update is bridged" do
+    # A unique, scored non-fallback ID exercises successful canonical admission.
+    # Fallback candidates have a separate, deliberately conservative WM policy.
+    candidate_id = "hello-#{System.unique_integer([:positive])}|interjection|2"
+
     # Stage2 expects a Stage1-ish event in trace with :choices.
     # Provide two choices: one above threshold (commit), one below (ignored).
     si = %{
@@ -64,7 +68,7 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
           choices: [
             %{
               token_index: 0,
-              chosen_id: "hello there|phrase|fallback",
+              chosen_id: candidate_id,
               lemma: "hello there",
               score: 0.95,
               margin: 0.20
@@ -94,21 +98,25 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
 
     # 1) The Stage2 linguistic evidence satisfies the requested minimum.
     assert_receive {:stage2_evidence, [:brain, :lifg, :stage2, :evidence],
-                    %{score: evidence_score}, evidence_meta}, 500
+                    %{score: evidence_score},
+                    %{id: ^candidate_id, final_admission?: false} = evidence_meta}, 500
 
     assert is_number(evidence_score) and evidence_score >= 0.60
-    assert evidence_meta.id == "hello there|phrase|fallback"
+    assert evidence_meta.id == candidate_id
     assert evidence_meta.final_admission? == false
 
-    # 2) Canonical admission is independently policy-controlled. A fallback
-    # dictionary ID can be discounted, so its final score need not equal the
-    # raw Stage2 evidence score or exceed the Stage2 admission threshold.
-    assert_receive {:gate, [:brain, :gate, :decision], %{score: score}, meta}, 500
+    # 2) Canonical admission is independently policy-controlled. This high-
+    # confidence non-fallback candidate should pass without loosening the
+    # production policy that discounts fallback dictionary IDs.
+    # Global telemetry can contain another test's gate decision. Match the
+    # exact candidate before asserting its canonical outcome.
+    assert_receive {:gate, [:brain, :gate, :decision], %{score: score},
+                    %{id: ^candidate_id, source: :lifg} = meta}, 500
     assert is_number(score) and score >= 0.0 and score <= 1.0
     assert meta.source == :lifg
     assert meta.decision in [:allow, :boost]
     assert meta.gate == :basal_ganglia
-    assert meta.id == "hello there|phrase|fallback"
+    assert meta.id == candidate_id
     assert meta.token_index == 0
 
     # 3) Blackboard should receive the bridged WM update telemetry (real pipeline signal)
@@ -128,6 +136,6 @@ defmodule Brain.LIFGStage2BlackboardBridgeTest do
     # 4) WM snapshot contains the committed id
     %{wm: wm} = Brain.snapshot_wm()
     ids = wm |> Enum.map(& &1.id) |> MapSet.new()
-    assert "hello there|phrase|fallback" in ids
+    assert candidate_id in ids
   end
 end

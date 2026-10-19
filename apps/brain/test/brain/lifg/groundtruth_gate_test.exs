@@ -5,7 +5,9 @@ defmodule Brain.LIFG.GroundTruthGateTest do
   alias Brain.LIFG.Stage1
 
   test "Stage1 guard chargram tripwire includes count and version metadata" do
-    event = [:brain, :lifg, :chargram_violation]
+    # Dedicated path prevents concurrent telemetry from another Stage1 run
+    # from satisfying this test with the wrong candidate's metadata.
+    event = [:test, :lifg, :chargram_violation, :groundtruth_test]
 
     si = %{
       sentence: "what",
@@ -17,7 +19,7 @@ defmodule Brain.LIFG.GroundTruthGateTest do
 
     {measurements, metadata} =
       capture(event, fn ->
-        assert {:ok, %{audit: audit}} = Stage1.run(si)
+        assert {:ok, %{audit: audit}} = Stage1.run(si, chargram_event: event)
         assert audit.dropped_tokens >= 1
       end)
 
@@ -28,7 +30,7 @@ defmodule Brain.LIFG.GroundTruthGateTest do
   end
 
   test "Stage1 guard boundary drop includes count and version metadata" do
-    event = [:brain, :lifg, :boundary_drop]
+    event = [:test, :lifg, :boundary_drop, :groundtruth_test]
 
     si = %{
       sentence: "what im",
@@ -43,7 +45,7 @@ defmodule Brain.LIFG.GroundTruthGateTest do
 
     {measurements, metadata} =
       capture(event, fn ->
-        assert {:ok, %{choices: choices}} = Stage1.run(si)
+        assert {:ok, %{choices: choices}} = Stage1.run(si, boundary_event: event)
         assert [%{token_index: 1}] = choices
       end)
 
