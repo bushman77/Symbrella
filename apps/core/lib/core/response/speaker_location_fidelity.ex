@@ -35,11 +35,11 @@ defmodule Core.Response.SpeakerLocationFidelity do
       when is_binary(user_text) and is_binary(draft) and is_map(context) do
     cond do
       correction_to_unsupported_self_location?(user_text, context) and
-          affirmative_first_person_location?(draft) ->
+          affirmative_location?(draft) ->
         :correction_repeats_self_location
 
       correction_follows_location_question?(user_text, context) and
-          affirmative_first_person_location?(draft) ->
+          affirmative_location?(draft) ->
         :location_correction_self_claim
 
       Regex.match?(@user_location_question, user_text) and
@@ -47,7 +47,7 @@ defmodule Core.Response.SpeakerLocationFidelity do
         :user_current_location_unverified
 
       Regex.match?(@assistant_location_question, user_text) and
-          affirmative_first_person_location?(draft) ->
+          affirmative_location?(draft) ->
         :assistant_current_location_unverified
 
       true ->
