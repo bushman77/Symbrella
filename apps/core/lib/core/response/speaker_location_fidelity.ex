@@ -20,9 +20,9 @@ defmodule Core.Response.SpeakerLocationFidelity do
   # A positive assertion of physical location. The place phrase begins with
   # a proper-name token, so "I'm in no position to say" is not captured.
   # This intentionally covers straightforward claims, not semantic entailment.
-  @first_person_location ~r/\b(?:i\s+am|i'm)\s+(?:(?:currently|physically|actually|right\s+now)\s+)?(?:(?:located|based|situated)\s+)?(?:in|at|near)\s+(?:the\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/u
-  @second_person_location ~r/\b(?:you\s+are|you're)\s+(?:(?:currently|physically|actually|right\s+now)\s+)?(?:(?:located|based|situated)\s+)?(?:in|at|near)\s+(?:the\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/u
-  @location_is ~r/\b(?:your|my)\s+(?:current\s+)?(?:physical\s+)?location\s+is\s+(?:in\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/u
+  @first_person_location ~r/\b(?:i\s+am|i'm)\s+(?:(?:currently|physically|actually|right\s+now)\s+)?(?:(?:located|based|situated)\s+)?(?:in|at|near)\s+(?:the\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/iu
+  @second_person_location ~r/\b(?:you\s+are|you're)\s+(?:(?:currently|physically|actually|right\s+now)\s+)?(?:(?:located|based|situated)\s+)?(?:in|at|near)\s+(?:the\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/iu
+  @location_is ~r/\b(?:your|my)\s+(?:current\s+)?(?:physical\s+)?location\s+is\s+(?:in\s+)?[A-Z][\p{L}\p{M}'-]*(?:[\s,]+[A-Z][\p{L}\p{M}'-]*){0,5}\b/iu
 
   @type issue ::
           :user_current_location_unverified
