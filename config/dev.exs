@@ -53,10 +53,23 @@ config :core, :expose_llm_drafts_in_explain?, true
 
 config :brain, Brain.CycleClock, hz: 20
 
-# Connect the Galaxy S21/DroidCam over its MJPEG HTTP stream. Opt in by
-# supplying the current phone URL, e.g. SYMBRELLA_CAMERA_URL=http://PHONE_IP:4747/video.
-# Never commit a network-specific address. Without a URL, no camera processes start.
-camera_url = System.get_env("SYMBRELLA_CAMERA_URL", "") |> String.trim()
+# Configure DroidCam using either an environment override or the private,
+# git-ignored umbrella-root priv/droidcam_url file (one URL per file).
+# No address is committed to the repository. The cortex runs without a
+# camera; the camera and bridge start only after a URL is configured.
+local_camera_url_file = Path.expand("../priv/droidcam_url", __DIR__)
+
+camera_url =
+  case System.get_env("SYMBRELLA_CAMERA_URL") do
+    nil ->
+      case File.read(local_camera_url_file) do
+        {:ok, url} -> String.trim(url)
+        {:error, _} -> ""
+      end
+
+    url ->
+      String.trim(url)
+  end
 
 config :brain, Brain.Camera,
   enabled?: camera_url != "",

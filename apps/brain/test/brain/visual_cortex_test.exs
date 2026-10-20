@@ -3,6 +3,11 @@ defmodule Brain.Visual.CortexTest do
 
   alias Brain.Visual.Cortex
 
+  test "missing cortex reports offline rather than raising" do
+    assert Cortex.status(:not_a_running_visual_cortex) == {:error, :not_started}
+    assert Cortex.latest(:not_a_running_visual_cortex) == {:error, :not_started}
+  end
+
   test "extracts real grayscale brightness and pixel change without inventing meanings" do
     telemetry_id = "visual-cortex-features-#{System.unique_integer([:positive])}"
     curiosity_id = "visual-cortex-no-curiosity-#{System.unique_integer([:positive])}"

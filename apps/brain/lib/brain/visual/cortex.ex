@@ -42,11 +42,11 @@ defmodule Brain.Visual.Cortex do
     end
   end
 
-  @doc "Latest real pixel-derived features, or nil before the first capture."
-  def latest(server \\ __MODULE__), do: GenServer.call(server, :latest)
+  @doc "Latest pixel features, or nil before the first capture; never crashes when offline."
+  def latest(server \\ __MODULE__), do: safe_call(server, :latest)
 
-  @doc "Processing counters and most recent feature/error."
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+  @doc "Processing counters or {:error, :not_started} if its supervisor is offline."
+  def status(server \\ __MODULE__), do: safe_call(server, :status)
 
   @doc false
   def handle_observation(_event, measurements, metadata, %{pid: pid}) when is_pid(pid) do
@@ -218,6 +218,25 @@ defmodule Brain.Visual.Cortex do
 
   defp map_get(map, key, default \\ nil) when is_map(map),
     do: Map.get(map, key, Map.get(map, to_string(key), default))
+
+  defp safe_call(server, message) when is_atom(server) do
+    case Process.whereis(server) do
+      nil -> {:error, :not_started}
+      _ -> GenServer.call(server, message)
+    end
+  catch
+    :exit, {:noproc, _} -> {:error, :not_started}
+  end
+
+  defp safe_call(server, message) when is_pid(server) do
+    if Process.alive?(server) do
+      GenServer.call(server, message)
+    else
+      {:error, :not_started}
+    end
+  catch
+    :exit, {:noproc, _} -> {:error, :not_started}
+  end
 
   defp normalize_opts(opts) when is_list(opts), do: opts
   defp normalize_opts(opts) when is_map(opts), do: Map.to_list(opts)

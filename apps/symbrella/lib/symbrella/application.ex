@@ -179,38 +179,24 @@ defmodule Symbrella.Application do
   # --------------------------------------------------
 
   defp maybe_camera_child do
-    opts =
-      Application.get_env(
-        :brain,
-        Brain.Camera,
-        []
-      )
+    camera_opts = Application.get_env(:brain, Brain.Camera, [])
+    cortex_opts = Application.get_env(:brain, Brain.Visual.Cortex, [])
 
-    if camera_enabled?(opts) do
-      bridge_opts =
-        Application.get_env(
-          :brain,
-          Brain.Camera.ObservationBridge,
-          []
-        )
+    # The visual cortex is a permanent cognitive region, not a camera driver.
+    # Keep it supervised and queryable even without any camera configured.
+    cortex = [{Brain.Visual.Cortex, cortex_opts}]
 
-      cortex_opts =
-        Application.get_env(
-          :brain,
-          Brain.Visual.Cortex,
-          []
-        )
+    if camera_enabled?(camera_opts) do
+      bridge_opts = Application.get_env(:brain, Brain.Camera.ObservationBridge, [])
 
-      # Raw frames first enter the observation bridge, then the visual
-      # cortex extracts pixel features. The old DebugDecoder remains
-      # available for explicit tests but must not fabricate live vision.
-      [
-        {Brain.Camera, opts},
-        {Brain.Camera.ObservationBridge, bridge_opts},
-        {Brain.Visual.Cortex, cortex_opts}
-      ]
+      # Attach both telemetry consumers BEFORE starting camera capture.
+      cortex ++
+        [
+          {Brain.Camera.ObservationBridge, bridge_opts},
+          {Brain.Camera, camera_opts}
+        ]
     else
-      []
+      cortex
     end
   end
 

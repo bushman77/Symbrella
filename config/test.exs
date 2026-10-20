@@ -2,6 +2,10 @@
 import Config
 config :brain, :ml_enabled, false
 
+# Keep the permanently supervised visual region inert in the test environment.
+# Individual visual-cortex tests start an isolated enabled process.
+config :brain, Brain.Visual.Cortex, enabled?: false
+
 config :db, Db.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   ownership_timeout: 60_000

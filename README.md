@@ -52,9 +52,20 @@ export SYMBRELLA_CAMERA_URL="http://PHONE_IP:4747/video"
 mix phx.server
 ```
 
-Replace `PHONE_IP` with DroidCam's current camera address. With the variable
-unset, the camera and its observation bridge do not start. Captures go to the
-existing umbrella-root `priv/latest.jpg` (ignored by Git); the sensor produces
+Replace `PHONE_IP` with DroidCam's current camera address. To keep the
+connection across terminal restarts without exporting a variable, write that
+URL once to the existing private umbrella-root directory:
+
+```bash
+echo 'http://PHONE_IP:4747/video' > priv/droidcam_url
+iex -S mix phx.server
+```
+
+An explicitly set `SYMBRELLA_CAMERA_URL` overrides the file. Never commit the
+phone's address; `priv/` is Git-ignored. With neither setting, the camera and
+observation bridge remain off, while `Brain.Visual.Cortex` stays supervised
+and reports no features yet. Captures go to the existing umbrella-root
+`priv/latest.jpg`; the sensor produces
 frame metadata and basic observation events. `Brain.Visual.Cortex` then samples
 an 8×8 grayscale pixel grid from each JPEG using FFmpeg, deriving actual
 brightness, four quadrant brightness values, and frame-to-frame change.
