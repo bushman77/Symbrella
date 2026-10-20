@@ -6,19 +6,23 @@
 erl_crash.dump
 .erlang.cookie
 
-# Dialyzer PLTs (often large, machine-local)
+# Dialyzer PLTs (large, machine-local)
+/priv/plts/
+/apps/*/priv/plts/
 *.plt
 *.plt.hash
-priv/plts/
-apps/*/priv/plts/
 
-# ───────── Logs, coverage, temp ─────────
+# ───────── Logs, coverage, and temporary files ─────────
 /log/
 tmp/
 cover/
 *.coverdata
 
-# ───────── Editor / Tools ─────────
+# Runtime cache (not source)
+/apps/core/priv/negcache/
+*.dets
+
+# ───────── Editors and local tooling ─────────
 .elixir_ls/
 apps/*/.elixir_ls/
 .elixir-tools/
@@ -27,55 +31,60 @@ apps/*/.elixir_ls/
 /.vscode/
 *.swp
 *~
-# Mac / Windows cruft
 .DS_Store
 Thumbs.db
+.aider*
 
-# ───────── Phoenix build outputs ─────────
-# (esbuild/vite emit to priv/static/assets)
-apps/*/priv/static/assets/
-apps/*/priv/static/cache_manifest.json
-
-# ───────── Node (umbrella + per-app) ─────────
+# ───────── Phoenix / frontend build artifacts ─────────
+/apps/*/priv/static/assets/
+/apps/*/priv/static/cache_manifest.json
 /assets/node_modules/
-apps/*/assets/node_modules/
-# If any app uses Vite/other tooling caches:
-apps/*/assets/.vite/
-apps/*/assets/.cache/
-apps/*/assets/dist/
+/apps/*/assets/node_modules/
+/apps/*/node_modules/
+/apps/*/assets/.vite/
+/apps/*/assets/.cache/
+/apps/*/assets/dist/
 
-# ───────── Env / secrets ─────────
+# ───────── Local configuration and secrets ─────────
 .env
 .env.*
 config/*.secret.exs
 config/*_secret.exs
 config/prod.secret.exs
 
-# ───────── Project-specific ─────────
-# NegCache DETS store (runtime cache)
-apps/core/priv/negcache/
-*.dets
+# ───────── Dictionary corpora (downloaded/generated) ─────────
+# Raw Kaikki/Wiktextract dump and partial download.
+/apps/db/priv/raw-wiktextract-data.jsonl.gz
+/apps/db/priv/raw-wiktextract-data.jsonl.gz.part
 
-# ───────── Dictionary bootstrap artifacts ─────────
-# Massive Kaikki/Wiktextract raw dump (~20 GB)
-apps/db/priv/raw-wiktextract-data.jsonl.gz
-apps/db/priv/raw-wiktextract-data.jsonl.gz.part
-# Extracted English corpus (~2.6 GB)
-apps/db/priv/english.jsonl
-apps/db/priv/english.jsonl.tmp
-# Legacy filename from older script versions
-apps/db/priv/kaikki.org-dictionary-English.jsonl
+# Extracted English corpus and incomplete output.
+/apps/db/priv/english.jsonl
+/apps/db/priv/english.jsonl.tmp
 
-# ───────── Misc ─────────
-pgvector/
-.aider*
-output.txt
-# Generated self-calibration records
-/priv/self_calibration/samples.jsonl
-/apps/*/priv/self_calibration/samples.jsonl
+# Legacy corpus name.
+/apps/db/priv/kaikki.org-dictionary-English.jsonl
 
-# PostgreSQL backup exports
+# ───────── Training data and model artifacts ─────────
+# Runtime self-calibration samples, including numbered rotations/backups.
+# Keep deliberately checked-in synthetic fixtures separate.
+/priv/self_calibration/samples.jsonl*
+/apps/*/priv/self_calibration/samples.jsonl*
+
+# Optional external-data directories if created inside this working tree.
+/symbrella-data/
+/training-data/
+
+# Downloaded or generated model weights/checkpoints.
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# ───────── Database exports and local dependencies ─────────
 /apps/db/priv/db/*.sql.gz
+/pgvector/
 
-# Installed JavaScript dependencies
-/apps/*/node_modules/
+# ───────── Miscellaneous generated output ─────────
+output.txt
