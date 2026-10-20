@@ -18,7 +18,7 @@ defmodule Brain.Camera do
     input_format: "yuyv422",
     video_size: "1280x720",
     interval_ms: 1_000,
-    output_path: "/tmp/symbrella_camera/latest.jpg",
+    output_path: "priv/latest.jpg",
     timeout_ms: 8_000,
     loglevel: "warning"
   ]
@@ -29,7 +29,7 @@ defmodule Brain.Camera do
             input_format: "yuyv422",
             video_size: "1280x720",
             interval_ms: 1_000,
-            output_path: "/tmp/symbrella_camera/latest.jpg",
+            output_path: "priv/latest.jpg",
             timeout_ms: 8_000,
             loglevel: "warning",
             latest: nil,
@@ -294,7 +294,7 @@ defmodule Brain.Camera do
       input_format: Keyword.get(config, :input_format, "yuyv422"),
       video_size: Keyword.get(config, :video_size, "1280x720"),
       interval_ms: positive_integer(Keyword.get(config, :interval_ms), 1_000),
-      output_path: Keyword.get(config, :output_path, "/tmp/symbrella_camera/latest.jpg"),
+      output_path: Keyword.get(config, :output_path, "priv/latest.jpg"),
       timeout_ms: positive_integer(Keyword.get(config, :timeout_ms), 8_000),
       loglevel: Keyword.get(config, :loglevel, "warning")
     }

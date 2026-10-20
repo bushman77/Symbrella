@@ -41,6 +41,26 @@ mix esbuild.install --if-missing
 cd ../..
 ```
 
+## DroidCam camera input (development)
+
+Symbrella can capture JPEG frames from a phone running DroidCam's HTTP/MJPEG
+stream without a V4L2 device. Use an address reachable from the laptop; keep
+the phone and laptop on a trusted network.
+
+```bash
+export SYMBRELLA_CAMERA_URL="http://PHONE_IP:4747/video"
+mix phx.server
+```
+
+Replace `PHONE_IP` with DroidCam's current camera address. With the variable
+unset, the camera and its observation bridge do not start. Captures go to the
+existing umbrella-root `priv/latest.jpg` (ignored by Git); the sensor produces
+frame metadata and basic observation events, **not** pixel recognition.
+
+In an IEx-connected runtime, check `Brain.Camera.status()`,
+`Brain.Camera.latest()` and `Brain.Camera.ObservationBridge.latest()`.
+Do not put a phone's private IP in `config/dev.exs`.
+
 ## Mix Command Reference
 
 The commands below are run from the **umbrella root**. Database and dictionary

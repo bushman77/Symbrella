@@ -53,14 +53,19 @@ config :core, :expose_llm_drafts_in_explain?, true
 
 config :brain, Brain.CycleClock, hz: 20
 
+# Connect the Galaxy S21/DroidCam over its MJPEG HTTP stream. Opt in by
+# supplying the current phone URL, e.g. SYMBRELLA_CAMERA_URL=http://PHONE_IP:4747/video.
+# Never commit a network-specific address. Without a URL, no camera processes start.
+camera_url = System.get_env("SYMBRELLA_CAMERA_URL", "") |> String.trim()
+
 config :brain, Brain.Camera,
-  enabled?: true,
+  enabled?: camera_url != "",
   ffmpeg: "ffmpeg",
-  source: {:mjpeg_url, "http://192.168.1.138:4747/video?640x480"},
+  source: {:mjpeg_url, camera_url},
   input_format: "mjpeg",
   video_size: "640x480",
   interval_ms: 10_000,
-  output_path: "/tmp/symbrella_camera/latest.jpg",
+  output_path: "priv/latest.jpg",
   timeout_ms: 11_000,
   loglevel: "warning"
 

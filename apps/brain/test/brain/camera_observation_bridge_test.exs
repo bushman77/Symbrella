@@ -36,11 +36,11 @@ defmodule Brain.Camera.ObservationBridgeTest do
 
     frame = %{
       kind: :camera_frame,
-      path: "/tmp/symbrella_camera/latest.jpg",
+      path: "priv/latest.jpg",
       size_bytes: 42_641,
       captured_at_ms: 1_780_173_422_354,
       duration_ms: 5_014,
-      source: %{type: :mjpeg_url, url: "http://192.168.1.138:4747/video?640x480"}
+      source: %{type: :mjpeg_url, url: "http://127.0.0.1:4747/video"}
     }
 
     :telemetry.execute(
@@ -56,7 +56,7 @@ defmodule Brain.Camera.ObservationBridgeTest do
     assert observation.decoded? == false
     assert observation.description == nil
     assert observation.labels == []
-    assert observation.frame_path == "/tmp/symbrella_camera/latest.jpg"
+    assert observation.frame_path == "priv/latest.jpg"
     assert observation.frame == frame
 
     assert_receive {:curiosity_proposal, %{score: proposal_score, risk: risk}, metadata}, 500
