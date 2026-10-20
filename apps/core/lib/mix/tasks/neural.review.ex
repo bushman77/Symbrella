@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Neural.Review do
   @moduledoc """
   Interactively review *existing* archived hippocampal attachment candidates:
 
-      mix neural.review --dir tmp/training
+      mix neural.review --dir priv
 
   Accept y/n for verified relevance, s to skip, q to quit. Nothing is
   automatically labeled and the conversation text stays on the local terminal.
@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Neural.Review do
     if rest != [] or invalid != [], do: Mix.raise("Usage: mix neural.review [--dir DIR] [--recheck] [--turn TURN_ID]")
 
     Mix.Task.run("compile")
-    dir = Keyword.get(opts, :dir, "tmp/training")
+    dir = Keyword.get(opts, :dir, "priv")
 
     recheck? = Keyword.get(opts, :recheck, false)
     queue = if recheck?, do: ReviewQueue.reviewed(dir), else: ReviewQueue.pending(dir)

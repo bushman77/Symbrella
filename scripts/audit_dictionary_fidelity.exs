@@ -7,8 +7,8 @@
 # Complete scan:
 #   env -u DATABASE_URL PGDATABASE=brain_dictionary_test mix db.dictionary.audit
 #
-# JSON reports default to tmp/dictionary_fidelity_trial.json and
-# tmp/dictionary_fidelity_full.json. There are NO database writes.
+# JSON reports default to priv/dictionary_fidelity_trial.json and
+# priv/dictionary_fidelity_full.json. There are NO database writes.
 #
 # Existing IDs are positional: a changed English JSONL source version can
 # produce false disagreements against a database imported from an older file.
@@ -61,15 +61,15 @@ if database != expected_db do
           "Use PGDATABASE with DATABASE_URL unset, or set --expect-db explicitly."
 end
 
-source = Path.expand(Keyword.get(opts, :source, "apps/db/priv/english.jsonl"))
+source = Path.expand(Keyword.get(opts, :source, "priv/english.jsonl"))
 unless File.regular?(source), do: raise("Missing source JSONL: #{source}")
 
 limit = Keyword.get(opts, :limit_lines, 0)
 report_path =
   Keyword.get(opts, :report,
     if(limit > 0,
-      do: "tmp/dictionary_fidelity_trial.json",
-      else: "tmp/dictionary_fidelity_full.json"
+      do: "priv/dictionary_fidelity_trial.json",
+      else: "priv/dictionary_fidelity_full.json"
     )
   )
 

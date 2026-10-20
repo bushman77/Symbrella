@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Neural.Train do
     end
 
     Mix.Task.run("compile")
-    dir = Keyword.get(opts, :dir, "tmp/training")
+    dir = Keyword.get(opts, :dir, "priv")
     smoke? = Keyword.get(opts, :smoke, false)
     settings = Keyword.take(opts, [:epochs, :hidden_units])
 

@@ -17,7 +17,7 @@ defmodule Core.StateDump do
 
   require Logger
 
-  @default_path "tmp/state_dumps/symbrella_raw.log"
+  @default_path "priv/symbrella_raw.log"
   @final_stages [:pipeline_raw, :final, :chat_reply]
 
   @spec capture(term(), atom(), keyword()) :: term()

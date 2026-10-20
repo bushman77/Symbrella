@@ -6,11 +6,11 @@ defmodule Core.TrainingArchive do
   captures completed chat turns together with hippocampal recall evidence
   and fact-memory operations. It never changes retrieval or response decisions.
 
-  Files are local/private by default and are intentionally stored under tmp/.
+  Files are local/private by default and are stored in umbrella-root priv/.
   The raw Core.StateDump remains a separate diagnostic facility.
   """
 
-  @default_dir "tmp/training"
+  @default_dir "priv"
   @schema_version 1
 
   @cognitive_fields [

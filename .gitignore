@@ -64,16 +64,16 @@ config/prod.secret.exs
 # Legacy corpus name.
 /apps/db/priv/kaikki.org-dictionary-English.jsonl
 
+# ───────── Umbrella-root private runtime data ─────────
+# Corpus files, training data, checkpoints, snapshots, receipts and local
+# evaluation records belong inside the existing umbrella-root priv/.
+# The whole directory is private and must never be committed.
+/priv/
+
 # ───────── Training data and model artifacts ─────────
 # Runtime self-calibration samples, including numbered rotations/backups.
 # Keep deliberately checked-in synthetic fixtures separate.
-/priv/self_calibration/samples.jsonl*
-/apps/*/priv/self_calibration/samples.jsonl*
-
-# Optional external-data directories if created inside this working tree.
-/symbrella-data/
-/training-data/
-
+/apps/*
 # Downloaded or generated model weights/checkpoints.
 *.gguf
 *.safetensors

@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Neural.Dataset do
       end
 
     Mix.Task.run("compile")
-    dir = Keyword.get(opts, :dir, "tmp/training")
+    dir = Keyword.get(opts, :dir, "priv")
     smoke? = Keyword.get(opts, :smoke, false)
 
     result =

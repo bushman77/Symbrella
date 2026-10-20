@@ -96,7 +96,7 @@ config :core, :web_retrieval,
 # Change enabled?: false here to pause recording; no CLI env flag is needed.
 config :core, Core.TrainingArchive,
   enabled?: config_env() == :dev,
-  dir: "tmp/training"
+  dir: "priv"
 
 # Admit bounded, session-scoped comprehension frames to working memory after
 # semantic interpretation. Disabled in tests unless explicitly opted in;
@@ -130,10 +130,10 @@ config :core, Core.Curiosity.EpisodeProbe,
 # ────────────── Durable experience-backed synaptic shadow ──────────────
 # Private, local receipts + review decisions survive BEAM restarts in dev.
 # Never feeds LIFG, neuron firing, or authoritative memory; isolated in tests.
-# tmp/ is git-ignored. Back up BOTH receipts.json and secret.key together.
+# Umbrella-root priv/ is git-ignored. Back up BOTH receipts.json and secret.key together.
 config :brain, Brain.Synapses.Shadow,
   durable?: config_env() == :dev,
-  dir: "tmp/synapses"
+  dir: "priv"
 
 # ─────────────────────────── Brain ────────────────────────────────
 import_config "brain/brain.exs"

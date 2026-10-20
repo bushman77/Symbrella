@@ -77,7 +77,7 @@ defmodule SymbrellaWeb.NeuralShadow do
   @impl true
   def init(opts) do
     conf = Application.get_env(:symbrella_web, __MODULE__, [])
-    dir = Keyword.get(opts, :dir, Keyword.get(conf, :dir, "tmp/training"))
+    dir = Keyword.get(opts, :dir, Keyword.get(conf, :dir, "priv"))
     checkpoint =
       Keyword.get(opts, :checkpoint, Keyword.get(conf, :checkpoint,
         Path.join(dir, "state_transition_residual_v4_pilot.etf")

@@ -4,7 +4,7 @@
 #
 # Labels are never guessed from the dictionary or the validator. Optional
 # independent human-curated gold JSONL must be prepared BEFORE looking at
-# predictions: tmp/eval/semantic_sense_gold.jsonl
+# predictions: priv/semantic_sense_gold.jsonl
 #
 # JSONL record (example shape ONLY; not a real gold answer):
 # {"example":1,"gold_id":"BASE|verb|N","source":"human_curated",
@@ -49,7 +49,7 @@ sentences = [
   "The captain steers a ship."
 ]
 
-gold_path = "tmp/eval/semantic_sense_gold.jsonl"
+gold_path = "priv/semantic_sense_gold.jsonl"
 
 gold =
   if File.regular?(gold_path) do

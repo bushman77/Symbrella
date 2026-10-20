@@ -18,12 +18,12 @@ Change `enabled?` or `dir` in `config/config.exs` to control local collection.
 Test and production remain disabled by default.
 
 The archive includes chat text and private memory. Do not commit or upload
-`tmp/training/`, `turns.jsonl`, or `memory_events.jsonl`.
+`priv/`, `turns.jsonl`, or `memory_events.jsonl`.
 
 From the project root, read an aggregate coverage report:
 
 ```sh
-mix neural.dataset --task state_transition --dir tmp/training
+mix neural.dataset --task state_transition --dir priv
 ```
 
 The command reports observed training/held-out cells per feature, as well as
@@ -39,7 +39,7 @@ Timestamps with insufficient information do not imply temporal certainty.
 ## 2. Train and evaluate only against observed targets
 
 ```sh
-mix neural.train --task state_transition_residual --dir tmp/training
+mix neural.train --task state_transition_residual --dir priv
 ```
 
 Training and held-out evaluation use the same observed-feature mask. The
@@ -83,7 +83,7 @@ The status now includes observed-cell-weighted aggregate residual/persistence
 MSE, evaluated pairs, valid cells, and winning-pair count, in addition to the
 latest evaluation. Replayed recent turn IDs within a session are ignored
 instead of generating spurious transitions. Shadow predictions are appended to
-private `tmp/training/shadow_predictions.jsonl`; raw chat text is not included
+private `priv/shadow_predictions.jsonl`; raw chat text is not included
 in the shadow audit payload.
 
 A checkpoint need not exist just to record observations; shadow mode then

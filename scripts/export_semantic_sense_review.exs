@@ -4,7 +4,7 @@
 #
 # This file contains no projected scores, no predictions and NO gold labels.
 # Reviewers must determine gold from dictionary meanings independently.
-# It writes only tmp/eval/semantic_sense_review.jsonl; never BrainCells,
+# It writes only priv/semantic_sense_review.jsonl; never BrainCells,
 # hippocampal memories, synapses, LIFG choices, or the gold label file.
 
 alias Core.Brain.InflectedVerbSenseBridge
@@ -90,7 +90,7 @@ rows =
     end
   end)
 
-path = "tmp/eval/semantic_sense_review.jsonl"
+path = "priv/semantic_sense_review.jsonl"
 File.mkdir_p!(Path.dirname(path))
 
 body =
@@ -111,7 +111,7 @@ IO.inspect(%{
 }, label: "Unlabeled, reviewer-only dictionary export")
 
 IO.puts("""
-Gold annotations belong in the separate tmp/eval/semantic_sense_gold.jsonl.
+Gold annotations belong in the separate priv/semantic_sense_gold.jsonl.
 Review the complete sense inventory independently before annotating.
 Do not use the model's projected rankings as the annotation answer.
 """)

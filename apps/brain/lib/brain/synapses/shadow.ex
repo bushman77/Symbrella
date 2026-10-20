@@ -141,7 +141,7 @@ defmodule Brain.Synapses.Shadow do
   @impl true
   def init(opts) do
     durable? = Keyword.get(opts, :durable?, false) == true
-    dir = Keyword.get(opts, :dir, "tmp/synapses")
+    dir = Keyword.get(opts, :dir, "priv")
 
     loaded =
       if durable? do

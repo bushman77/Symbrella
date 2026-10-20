@@ -9,7 +9,7 @@ From the umbrella root, restart the runtime with:
 
 Read the log from another Termux shell:
 
-    tail -f tmp/state_dumps/symbrella_raw.log
+    tail -f priv/symbrella_raw.log
 
 ## Modes
 
@@ -30,7 +30,7 @@ These are readable diagnostics, not a lossless binary serialization or labels.
 
 ## Privacy and storage
 
-The log file is under git-ignored tmp/ and gets mode 0600. It can contain
+The log file is under git-ignored priv/ and gets mode 0600. It can contain
 private messages, names, session identifiers, memory and other nested data.
 Do not commit or publicly share it without review.
 

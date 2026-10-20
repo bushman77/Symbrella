@@ -6,7 +6,7 @@
 # All selected noun definitions and their scored slates must be present.
 # Requires independent human gold labels to make ANY accuracy claim.
 #
-# Optional: tmp/eval/semantic_sense_gold.jsonl
+# Optional: priv/semantic_sense_gold.jsonl
 # {"example":1,"gold_id":"BASE|verb|N","source":"human_curated",
 #  "basis":"Adjudicated exact dictionary sense"}
 #
@@ -50,7 +50,7 @@ sentences = [
   "The captain steers a ship."
 ]
 
-gold_path = "tmp/eval/semantic_sense_gold.jsonl"
+gold_path = "priv/semantic_sense_gold.jsonl"
 
 gold =
   if File.regular?(gold_path) do

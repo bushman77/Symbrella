@@ -278,14 +278,14 @@ state_dump_mode =
 
 config :core, Core.StateDump,
   mode: state_dump_mode,
-  path: System.get_env("SYMBRELLA_STATE_DUMP_PATH", "tmp/state_dumps/symbrella_raw.log")
+  path: System.get_env("SYMBRELLA_STATE_DUMP_PATH", "priv/symbrella_raw.log")
 
 # Recording is controlled by config/config.exs; runtime must not override it
 # with a CLI environment toggle. Development chat completions append locally
 # without a special launch command. Production and tests stay disabled.
 training_archive_config = Application.get_env(:core, Core.TrainingArchive, [])
 training_archive_enabled? = Keyword.get(training_archive_config, :enabled?, false) == true
-training_archive_dir = Keyword.get(training_archive_config, :dir, "tmp/training")
+training_archive_dir = Keyword.get(training_archive_config, :dir, "priv")
 
 # Experimental read-only inference from an existing residual Axon checkpoint.
 # OFF by default, requires the training archive, never changes cognition.
@@ -313,7 +313,7 @@ calibration_log? =
 
 config :brain, Brain.SelfCalibration.Logger,
   enabled?: calibration_log?,
-  path: System.get_env("SYMBRELLA_CALIBRATION_LOG_PATH", "priv/self_calibration/samples.jsonl"),
+  path: System.get_env("SYMBRELLA_CALIBRATION_LOG_PATH", "priv/samples.jsonl"),
   max_bytes: 25_000_000,
   max_files: 3,
   max_record_bytes: 4_000_000

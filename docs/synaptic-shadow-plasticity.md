@@ -175,7 +175,7 @@ Development config:
 ```elixir
 config :brain, Brain.Synapses.Shadow,
   durable?: true,
-  dir: "tmp/synapses"
+  dir: "priv"
 ```
 
 Test mode defaults to `durable?: false`. Production is deliberately disabled
@@ -259,7 +259,7 @@ Expected in development: `persistence_status: :ready` and
 is read-only until local storage is repaired or recovered.
 
 Existing snapshots must never be committed to Git or uploaded with bug
-reports. Keep backups local and secured. Clearing `tmp/` will intentionally
+reports. Keep backups local and secured. Deleting `priv/` will intentionally
 erase this experimental synaptic archive.
 
 
@@ -409,7 +409,7 @@ Its default output is unlabeled. An unlabelled flip is not progress.
 
 For independent manual gold review, BEFORE looking at projected winners,
 optionally create a local, git-ignored JSONL file at
-`tmp/eval/synaptic_disambiguation_gold.jsonl`. Example shape
+`priv/synaptic_disambiguation_gold.jsonl`. Example shape
 (**the following ID is a placeholder, not a gold annotation**):
 
 ```json
@@ -591,7 +591,7 @@ scorer. To evaluate accuracy, an independent annotator should review
 actual dictionary definitions *before* seeing the program's proposed
 sense IDs, and optionally create:
 
-`tmp/eval/semantic_sense_gold.jsonl` (git-ignored), JSONL records like:
+`priv/semantic_sense_gold.jsonl` (git-ignored), JSONL records like:
 
 ```json
 {"example":1,"gold_id":"REPLACE_WITH_REVIEWED_BASE_VERB_SENSE_ID","source":"human_curated","basis":"Specific dictionary definition independently reviewed"}
@@ -688,7 +688,7 @@ warnings rather than claiming accuracy if no grounded noun glossary
 meets the strict admission rules.
 
 Independent gold-sense labels can be supplied in the already documented
-`tmp/eval/semantic_sense_gold.jsonl`, prepared **before viewing**
+`priv/semantic_sense_gold.jsonl`, prepared **before viewing**
 system hypotheses and adjudicated against actual dictionary sense IDs.
 The evaluator accepts caller-declared labels, but cannot authenticate
 who reviewed them. A new proposal, even a linguistically plausible one,
@@ -702,10 +702,10 @@ independent human adjudication, WITHOUT predictions, via:
 mix run scripts/export_semantic_sense_review.exs
 ```
 
-This creates `tmp/eval/semantic_sense_review.jsonl` (one sentence per
+This creates `priv/semantic_sense_review.jsonl` (one sentence per
 JSONL record with its existing dictionary sense IDs, original definitions,
 examples and grammatical tags). The separate
-`tmp/eval/semantic_sense_gold.jsonl` is NEVER written automatically.
+`priv/semantic_sense_gold.jsonl` is NEVER written automatically.
 A reviewer should examine the complete inventory independently and
 only then provide a justified gold ID. This reduces but does not erase
 confirmation bias if program predictions were already seen.

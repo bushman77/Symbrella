@@ -21,7 +21,7 @@ defmodule Brain.SelfCalibration.Logger do
   @spec log(Sample.t(), keyword()) :: :ok | {:error, term()}
   def log(%Sample{} = sample, cfg) when is_list(cfg) do
     if Keyword.get(cfg, :enabled?, false) do
-      path = Keyword.get(cfg, :path, "priv/self_calibration/samples.jsonl")
+      path = Keyword.get(cfg, :path, "priv/samples.jsonl")
       do_log(sample, path, cfg)
     else
       :ok

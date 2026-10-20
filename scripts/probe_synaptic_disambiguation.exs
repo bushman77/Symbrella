@@ -52,7 +52,7 @@ pairs = [
 # from LIFG winners or shadow output. Create BEFORE inspecting A/B predictions.
 # JSONL rows: {"example":1,"gold_id":"...|verb|...","source":"human_curated",
 #              "basis":"Specific sense meaning independently reviewed"}
-gold_path = "tmp/eval/synaptic_disambiguation_gold.jsonl"
+gold_path = "priv/synaptic_disambiguation_gold.jsonl"
 
 gold =
   if File.regular?(gold_path) do

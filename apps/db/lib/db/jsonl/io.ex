@@ -3,27 +3,15 @@ defmodule Db.JSONL.IO do
 
   @default_filename "english.jsonl"
 
+  # Commands run from the umbrella root. Never fall back to an app-local
+  # corpus with a different version of the dictionary.
   @spec default_paths() :: [String.t()]
   def default_paths do
-    build_priv =
-      case :code.priv_dir(:db) do
-        dir when is_list(dir) or is_binary(dir) ->
-          dir |> to_string() |> Path.join(@default_filename)
-
-        _ ->
-          nil
-      end
-
-    source_priv = Path.expand("apps/db/priv/#{@default_filename}")
-
-    [build_priv, source_priv]
-    |> Enum.reject(&is_nil/1)
+    [Path.expand(Path.join("priv", @default_filename))]
   end
 
   @spec default_path() :: String.t()
-  def default_path do
-    Enum.find(default_paths(), &File.exists?/1) || List.first(default_paths())
-  end
+  def default_path, do: hd(default_paths())
 
   @spec head(non_neg_integer(), keyword()) :: {:ok, [binary()]} | {:error, any()}
   def head(n \\ 3, opts \\ []) when is_integer(n) and n >= 0 do

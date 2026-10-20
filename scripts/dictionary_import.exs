@@ -4,8 +4,8 @@
 #
 # Canonical local corpus files:
 #
-#   apps/db/priv/raw-wiktextract-data.jsonl.gz
-#   apps/db/priv/english.jsonl
+#   priv/raw-wiktextract-data.jsonl.gz
+#   priv/english.jsonl
 #
 # Normal behaviour:
 #
@@ -57,17 +57,17 @@ defmodule SymbrellaBootstrapEnglish do
   #
   #   scripts/dictionary_import.exs
   #
-  # Resolve DB priv relative to the umbrella root, not this script's parent.
+  # Store data in umbrella-root priv/ rather than an app-local directory.
   @script_dir __DIR__
-  @db_priv_dir Path.expand("../apps/db/priv", @script_dir)
+  @root_priv_dir Path.expand("../priv", @script_dir)
 
   @default_big Path.join(
-                 @db_priv_dir,
+                 @root_priv_dir,
                  "raw-wiktextract-data.jsonl.gz"
                )
 
   @default_out Path.join(
-                 @db_priv_dir,
+                 @root_priv_dir,
                  "english.jsonl"
                )
 

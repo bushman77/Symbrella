@@ -19,7 +19,7 @@ needed. Configuration is in `config/config.exs`:
 ```elixir
 config :core, Core.TrainingArchive,
   enabled?: config_env() == :dev,
-  dir: "tmp/training"
+  dir: "priv"
 ```
 
 To pause capture or change the local directory, edit the configuration and
@@ -28,8 +28,8 @@ production because archives can contain private conversations and memories.
 Relative paths resolve from the application's current working directory.
 
 ```sh
-tail -f tmp/training/turns.jsonl
-tail -f tmp/training/memory_events.jsonl
+tail -f priv/turns.jsonl
+tail -f priv/memory_events.jsonl
 ```
 
 The second file is created only when there is an archived memory event.
@@ -93,7 +93,7 @@ is available in its candidate slate, and train/evaluation groups do not leak.
 
 ## Privacy, durability, and limits
 
-- `tmp/` is git-ignored. Files are chmod `0600` and the training directory
+- `priv/` is git-ignored. Files are chmod `0600` and the training directory
   `0700`. Never push these files to GitHub, or include them in bug reports.
 - Turns can contain private user text, facts, and memories; use intentionally
   authorized conversations and establish retention/deletion practices.
@@ -163,8 +163,8 @@ These calls only record reviews; no weights are changed. Once there are
 reviewed examples from at least **two independent sessions**, run:
 
 ```sh
-mix neural.dataset --task memory_relevance --dir tmp/training
-mix neural.dataset --task uncertainty --dir tmp/training
+mix neural.dataset --task memory_relevance --dir priv
+mix neural.dataset --task uncertainty --dir priv
 ```
 
 The Mix command compiles and builds Nx tensors, but does not start the LLM,
@@ -175,7 +175,7 @@ Programmatic usage (from IEx):
 
 ```elixir
 {:ok, dataset} =
-  Brain.Neural.TrainingBuilder.build("tmp/training", :memory_relevance)
+  Brain.Neural.TrainingBuilder.build("priv", :memory_relevance)
 
 # dataset.train.x / dataset.train.y -> Nx f32 tensors
 # dataset.eval.x  / dataset.eval.y  -> held-out Nx f32 tensors
@@ -231,15 +231,15 @@ All events are joined with the same `session_id` and `turn_id` as
 From another Termux shell:
 
 ```sh
-jq -r '.kind' tmp/training/memory_events.jsonl | sort | uniq -c
+jq -r '.kind' priv/memory_events.jsonl | sort | uniq -c
 
 jq -r 'select(.kind=="recall_attempt") |
   [.turn_id,.operation,.result_count,.hit] | @tsv' \
-  tmp/training/memory_events.jsonl | tail -20
+  priv/memory_events.jsonl | tail -20
 
 jq -r 'select(.kind=="episodic_recall") |
   [.turn_id,.episode_fingerprint,.rank,.score] | @tsv' \
-  tmp/training/memory_events.jsonl | tail -20
+  priv/memory_events.jsonl | tail -20
 ```
 
 Review an actual `episodic_recall` fingerprint from the last command using
@@ -314,7 +314,7 @@ Inspect new attempts after restarting the server:
 ```sh
 jq -r 'select(.kind=="recall_attempt") |
   [.operation, (.cue_count // "unknown"), (.min_jaccard // "default"),
-   .result_count, .hit] | @tsv' tmp/training/memory_events.jsonl | tail -20
+   .result_count, .hit] | @tsv' priv/memory_events.jsonl | tail -20
 ```
 
 Even after this change, a recall with no lexical overlap may be empty.
@@ -332,7 +332,7 @@ LiveView review interface is required.
 
 ```sh
 cd ~/Symbrella
-mix neural.review --dir tmp/training
+mix neural.review --dir priv
 ```
 
 The command pairs each archived ordinary `attach` episode with its original
@@ -346,7 +346,7 @@ user question, shows the recalled content and retrieval score, then asks:
 All actions except `y` and `n` are nonlabeling. The command appends verified
 `memory_relevance` feedback through `Core.TrainingArchive.record_feedback`.
 Already reviewed turn+episode pairs will not be relabeled by the queue. The
-records remain private under `tmp/training/`.
+records remain private under `priv/`.
 
 For a first supervised **pipeline smoke test**, even when all reviewed turns
 share the same session:
@@ -357,7 +357,7 @@ mix neural.train --task memory_relevance --smoke
 
 This mode passes all reviewed examples through the 12-feature builder,
 trains a tiny `12 -> 4 ReLU -> 1 sigmoid` Axon model with MSE loss, and
-saves `tmp/training/memory_relevance_smoke.etf`. It deliberately uses the
+saves `priv/memory_relevance_smoke.etf`. It deliberately uses the
 **same examples** for training and reported in-sample loss: there is no holdout
 test or claim of generalization. A model trained on a handful of episodes is
 not ready to advise retrieval ranking.
@@ -372,7 +372,7 @@ mix neural.train --task memory_relevance
 
 Normal training compares held-out MSE against using the original hippocampal
 retrieval score as a relevance prediction, and writes the experimental
-checkpoint to `tmp/training/memory_relevance_pilot.etf`. Tiny training and
+checkpoint to `priv/memory_relevance_pilot.etf`. Tiny training and
 evaluation splits have noisy estimates; these are research diagnostics.
 
 Both modes are strictly **offline** and **advisory**. Neither checkpoint is
@@ -422,7 +422,7 @@ Count labels after corrections:
 \`\`\`sh
 jq -r 'select(.label.kind=="memory_relevance") |
   [.label.relevant,.correction] | @tsv' \
-  tmp/training/feedback.jsonl
+  priv/feedback.jsonl
 \`\`\`
 
 Because the JSONL is an append-only audit trail, this command counts original
@@ -452,12 +452,12 @@ objective. Symbrella can categorize much of her already-structured archive
 without additional human prompts:
 
 \`\`\`sh
-mix neural.catalog --dir tmp/training
+mix neural.catalog --dir priv
 \`\`\`
 
 This reads all recorded \`turns.jsonl\`, \`memory_events.jsonl\` and
 \`feedback.jsonl\` (the latter two may be absent), and atomically regenerates
-\`tmp/training/catalog.jsonl\`. The index contains a source-file and line
+\`priv/catalog.jsonl\`. The index contains a source-file and line
 pointer, session/turn identity, a deterministic automatic category, available
 cognitive signal groups, a limited set of **observed** metadata values, and
 explicit provenance. It **does not** duplicate raw conversation texts or
@@ -512,8 +512,8 @@ state remains the same as the current one). With a small number of turns,
 neither the result nor a lower MSE establishes meaningful cognitive ability.
 
 The experiment writes a private
-\`tmp/training/state_transition_smoke.etf\` or
-\`tmp/training/state_transition_pilot.etf\` checkpoint. It is
+\`priv/state_transition_smoke.etf\` or
+\`priv/state_transition_pilot.etf\` checkpoint. It is
 **never installed into the live response, memory or action pathway**.
 
 **Important scope limitation:** All available JSONL records are cataloged.
@@ -581,8 +581,8 @@ Held-out output includes:
 
 New private artifacts:
 
-- `tmp/training/state_transition_residual_pilot.etf`
-- `tmp/training/state_transition_residual_smoke.etf`
+- `priv/state_transition_residual_pilot.etf`
+- `priv/state_transition_residual_smoke.etf`
 
 The **original** `state_transition_pilot.etf` and
 `state_transition_smoke.etf` are not overwritten. Like all initial Axon
@@ -633,10 +633,10 @@ mix neural.train --task state_transition_residual
 
 New artifacts are kept separate from the flawed v1 experiments:
 
-- `tmp/training/state_transition_v2_pilot.etf`
-- `tmp/training/state_transition_v2_smoke.etf`
-- `tmp/training/state_transition_residual_v2_pilot.etf`
-- `tmp/training/state_transition_residual_v2_smoke.etf`
+- `priv/state_transition_v2_pilot.etf`
+- `priv/state_transition_v2_smoke.etf`
+- `priv/state_transition_residual_v2_pilot.etf`
+- `priv/state_transition_residual_v2_smoke.etf`
 
 The v1 checkpoint files remain untouched. Because the feature schema and
 number of MSE terms have changed, **do not directly compare v1 MSE to v2
@@ -705,10 +705,10 @@ longer be compared directly with these new masked MSE values.
 
 New separate artifacts:
 
-- `tmp/training/state_transition_v3_pilot.etf`
-- `tmp/training/state_transition_v3_smoke.etf`
-- `tmp/training/state_transition_residual_v3_pilot.etf`
-- `tmp/training/state_transition_residual_v3_smoke.etf`
+- `priv/state_transition_v3_pilot.etf`
+- `priv/state_transition_v3_smoke.etf`
+- `priv/state_transition_residual_v3_pilot.etf`
+- `priv/state_transition_residual_v3_smoke.etf`
 
 Command sequence:
 
@@ -760,7 +760,7 @@ user/assistant chat turn:
   trace with zero recorded attempts means no traced API call was made in
   those two processes; it does not rule out work delegated to other processes.
 
-These optional fields are added to \`tmp/training/turns.jsonl\`, without
+These optional fields are added to \`priv/turns.jsonl\`, without
 changing old JSONL lines. They do not modify responses, memory choices,
 MoodCore state, or hippocampal ranking. Cancelled/crashed workers are still
 not silently turned into completed training conversations; that is a
@@ -802,7 +802,7 @@ jq -r '
    .runtime_observation.levels.da,
    .hippocampal_trace.status,
    .hippocampal_trace.recall_status] | @tsv
-' tmp/training/turns.jsonl
+' priv/turns.jsonl
 \`\`\`
 
 The **13 historical turns are not retroactively repaired**: the single
@@ -841,7 +841,7 @@ If the file is missing/incompatible/smoke-only, status is
 `:unavailable`, and predictions are disabled. The chat keeps working.
 
 The checkpoint defaults to
-`tmp/training/state_transition_residual_v4_pilot.etf`. Advanced local
+`priv/state_transition_residual_v4_pilot.etf`. Advanced local
 override: `SYMBRELLA_NEURAL_SHADOW_CHECKPOINT=/trusted/local/model.etf`.
 Only load model files you created or otherwise trust: Erlang term
 deserialization is not a safe format for arbitrary external files.
@@ -895,7 +895,7 @@ inference. The shadow stays read-only.
    for Axon and persistence. Do not cross sessions or fabricate labels.
    The first turn of a session only establishes a prediction.
 5. Append predictions and evaluations to a private (mode `0600`) JSONL log:
-   `tmp/training/shadow_predictions.jsonl`. Contains only schema/model
+   `priv/shadow_predictions.jsonl`. Contains only schema/model
    identifiers, opaque session/turn IDs, numerical feature predictions,
    observed availability and masked error diagnostics. **No user text,
    assistant text, or recalled episode content** is written there.
@@ -905,7 +905,7 @@ inference. The shadow stays read-only.
 Check its output without reading private conversation text:
 
 ```sh
-tail -n 8 tmp/training/shadow_predictions.jsonl | jq '{
+tail -n 8 priv/shadow_predictions.jsonl | jq '{
   type: .record_type,
   model: .model_version,
   session: .session_id,

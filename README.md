@@ -63,16 +63,23 @@ directly.
 
 ### Database and Wiktextract dictionary
 
+Generated data belongs in the **existing umbrella-root `priv/`**, which is
+ignored by Git. The dictionary uses `priv/english.jsonl` and the raw
+Wiktextract download uses `priv/raw-wiktextract-data.jsonl.gz`.
+Training archives, checkpoints, synaptic receipts, and diagnostic captures
+also use root `priv/` by default. No separate data directory is required.
+Intentional test fixtures under `apps/*/priv/` remain source-controlled.
+
 | Command | Purpose |
 | --- | --- |
 | `mix db.setup` | Create/migrate the configured DB and clear the negative cache. |
 | `mix db.migrate` | Apply pending database migrations. |
 | `mix db.rollback` | Roll back a database migration. |
 | `mix db.migrations` | Display migration status. |
-| `mix db.dictionary --extract-only` | Prepare `apps/db/priv/english.jsonl` without importing. |
+| `mix db.dictionary --extract-only` | Prepare `priv/english.jsonl` without importing. |
 | `mix db.dictionary --import-only --no-migrate` | Upsert the existing English corpus without re-extracting or migrating. |
 | `mix db.dictionary` | Ensure the corpus exists, run migrations, and import it. |
-| `mix db.dictionary.audit` | **Read-only** full-source fidelity audit; writes a JSON report under `tmp/`. |
+| `mix db.dictionary.audit` | **Read-only** full-source fidelity audit; writes a JSON report under `priv/`. |
 | `mix db.dictionary.audit --limit-lines 10000` | Audit a 10,000-line sample; does not certify the full corpus. |
 | `mix db.reset` / `mix dbreset` | **DESTRUCTIVE:** drop and recreate the configured database. |
 | `mix db.rebuild` / `mix dbrebuild` | **DESTRUCTIVE:** reset the database and reimport the dictionary. |

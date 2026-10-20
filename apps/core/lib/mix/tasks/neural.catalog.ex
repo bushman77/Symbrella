@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Neural.Catalog do
   structured metadata. This is NOT supervised ground-truth generation.
 
       mix neural.catalog
-      mix neural.catalog --dir tmp/training
+      mix neural.catalog --dir priv
 
   Produces a private, reproducible catalog.jsonl index with source row
   pointers, observed state categories and provenance, without raw conversations.
@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Neural.Catalog do
     end
 
     Mix.Task.run("compile")
-    dir = Keyword.get(opts, :dir, "tmp/training")
+    dir = Keyword.get(opts, :dir, "priv")
     output = Keyword.get(opts, :output, Path.join(dir, "catalog.jsonl"))
 
     case Catalog.write(dir, output) do
