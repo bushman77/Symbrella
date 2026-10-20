@@ -55,7 +55,16 @@ mix phx.server
 Replace `PHONE_IP` with DroidCam's current camera address. With the variable
 unset, the camera and its observation bridge do not start. Captures go to the
 existing umbrella-root `priv/latest.jpg` (ignored by Git); the sensor produces
-frame metadata and basic observation events, **not** pixel recognition.
+frame metadata and basic observation events. `Brain.Visual.Cortex` then samples
+an 8×8 grayscale pixel grid from each JPEG using FFmpeg, deriving actual
+brightness, four quadrant brightness values, and frame-to-frame change.
+These are **low-level pixel features, not object recognition**. The former
+`Brain.Visual.DebugDecoder` is not started automatically, and raw images do
+not emit curiosity proposals. There are no image-based claims or automatic
+hippocampal memories at this stage.
+
+In IEx, inspect `Brain.Visual.Cortex.status()` and
+`Brain.Visual.Cortex.latest()` to see real pixel measurements.
 
 In an IEx-connected runtime, check `Brain.Camera.status()`,
 `Brain.Camera.latest()` and `Brain.Camera.ObservationBridge.latest()`.

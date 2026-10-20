@@ -4,8 +4,9 @@ defmodule Brain.Camera.ObservationBridge do
 
   This is intentionally not an image decoder and not a brain region. It listens
   for `Brain.Camera` frame telemetry, wraps each frame in a conservative
-  `:visual_observation` payload, publishes it to the Blackboard, and nudges the
-  existing curiosity/OFC/Thalamus path with a low-risk proposal.
+  `:visual_observation` payload, publishes it to the Blackboard, and emits observation telemetry for a
+  dedicated visual cortex. A raw JPEG is not evidence of semantic content
+  and must not by itself trigger a curiosity proposal.
 
   The observation is explicit about its limits: `decoded?: false`,
   `description: nil`, and `labels: []`. A later decoder can enrich the same
@@ -106,7 +107,6 @@ defmodule Brain.Camera.ObservationBridge do
 
     Brain.Blackboard.publish(observation)
     emit_visual_observation(observation, state.count)
-    emit_curiosity_proposal(observation)
 
     {:noreply, state}
   end
@@ -160,29 +160,6 @@ defmodule Brain.Camera.ObservationBridge do
         risk: observation.risk
       },
       observation
-    )
-  end
-
-  defp emit_curiosity_proposal(observation) do
-    probe_id = "camera|visual_observation|#{observation.observed_at_ms}"
-
-    probe = %{
-      id: probe_id,
-      source: :camera,
-      reason: :visual_observation,
-      seed: %{
-        kind: observation.kind,
-        frame_path: observation.frame_path,
-        observed_at_ms: observation.observed_at_ms,
-        decoded?: observation.decoded?
-      },
-      score: observation.score
-    }
-
-    :telemetry.execute(
-      [:curiosity, :proposal],
-      %{score: observation.score, novelty: observation.novelty, risk: observation.risk},
-      %{probe: probe, source: :camera, visual_observation: observation}
     )
   end
 

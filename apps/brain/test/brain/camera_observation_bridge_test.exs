@@ -3,7 +3,7 @@ defmodule Brain.Camera.ObservationBridgeTest do
 
   alias Brain.Camera.ObservationBridge
 
-  test "bridges camera frames into visual observations and curiosity proposals" do
+  test "bridges camera frames into unverified visual observations without curiosity proposals" do
     visual_id = "camera-observation-visual-#{System.unique_integer([:positive])}"
     curiosity_id = "camera-observation-curiosity-#{System.unique_integer([:positive])}"
 
@@ -59,13 +59,7 @@ defmodule Brain.Camera.ObservationBridgeTest do
     assert observation.frame_path == "priv/latest.jpg"
     assert observation.frame == frame
 
-    assert_receive {:curiosity_proposal, %{score: proposal_score, risk: risk}, metadata}, 500
-    assert proposal_score == observation.score
-    assert risk == 0.0
-    assert metadata.source == :camera
-    assert metadata.probe.source == :camera
-    assert metadata.probe.reason == :visual_observation
-    assert metadata.visual_observation == observation
+    refute_receive {:curiosity_proposal, _measurements, %{source: :camera}}, 50
 
     assert ObservationBridge.latest(bridge) == observation
   end

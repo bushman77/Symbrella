@@ -194,17 +194,20 @@ defmodule Symbrella.Application do
           []
         )
 
-      decoder_opts =
+      cortex_opts =
         Application.get_env(
           :brain,
-          Brain.Visual.DebugDecoder,
+          Brain.Visual.Cortex,
           []
         )
 
+      # Raw frames first enter the observation bridge, then the visual
+      # cortex extracts pixel features. The old DebugDecoder remains
+      # available for explicit tests but must not fabricate live vision.
       [
         {Brain.Camera, opts},
         {Brain.Camera.ObservationBridge, bridge_opts},
-        {Brain.Visual.DebugDecoder, decoder_opts}
+        {Brain.Visual.Cortex, cortex_opts}
       ]
     else
       []
