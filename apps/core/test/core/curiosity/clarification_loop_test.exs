@@ -152,6 +152,47 @@ defmodule Core.Curiosity.ClarificationLoopTest do
         "Do you use glimmerflux for cryptographic signatures?", @meta)
   end
 
+  test "generic follow-up variants are replaceable, but concrete questions and real answers survive" do
+    for generic <- [
+      "Congratulations! What have you been learning about in your module?",
+      "That sounds interesting! What are you working on?",
+      "That's great. Can you tell me more about your module?",
+      "Awesome! What does your module do?",
+      "Nice! What have you learned so far?",
+      "That sounds cool! What is your project about?",
+      "What are your goals with it?",
+      "How is your module coming along?"
+    ] do
+      assert ClarificationLoop.replaceable_generic_reply?(generic), generic
+    end
+
+    for substantive <- [
+      "What does glimmerflux mean?",
+      "What Elixir libraries are you using for the module?",
+      "Do you use glimmerflux for cryptographic signatures?",
+      "I found your module documentation useful. What else does it support?",
+      "Congratulations! Your module parses JSON. What does your module do?",
+      "What are you doing? Are you testing it?",
+      "What have you been learning about in your module? What about your project?"
+    ] do
+      refute ClarificationLoop.replaceable_generic_reply?(substantive), substantive
+    end
+  end
+
+  test "smalltalk intent on a real user statement may clarify a generic LLM question" do
+    server = server()
+    session = sid()
+    input = %{si(session) | source: :prod, intent: :smalltalk}
+      |> Map.put(:experience_origin, :user_turn)
+    admit(input)
+
+    question = "That sounds interesting! What are you working on?"
+    assert {:replace_generic, replacement, _meta} =
+      ClarificationLoop.observe(session, input, question, @meta, server)
+    assert replacement =~ "glimmerflux"
+    assert ClarificationLoop.snapshot(session, server).session.pending.term == "glimmerflux"
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)

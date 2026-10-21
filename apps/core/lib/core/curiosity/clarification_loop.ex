@@ -54,14 +54,30 @@ defmodule Core.Curiosity.ClarificationLoop do
       when is_binary(clarification), do: clarification
   def display_text(original, _decision), do: original
 
-  # Only a whole, known generic follow-up is replaceable. Do not rewrite a
-  # substantive answer or a question that is already about a specific topic.
+  # A model may phrase a generic pleasantry in dozens of ways. Match a
+  # small *class* of whole-message open-ended prompts, not one literal
+  # sentence. Do not rewrite a specific question about an actual concept,
+  # an informative answer, or a multi-question reply.
+  @generic_opening ~r/\A(?:(?:congratulations|(?:that'?s|that is|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
+  @generic_followups [
+    ~r/\Awhat (?:have you been (?:learning|working) (?:about|on|in|with)|have you (?:learned|discovered)(?: so far)?|are you (?:working on|building|learning)(?: now)?)(?: (?:about|in|with|on) (?:your|the|this) (?:module|project))?\?\z/iu,
+    ~r/\Awhat (?:does|will|is) (?:your|the|this) (?:module|project) (?:do|about|for)\?\z/iu,
+    ~r/\Awhat(?:'s| is) (?:it|that|your module|your project|the module|the project) (?:about|for)\?\z/iu,
+    ~r/\Awhat (?:kind|type) of (?:module|project) (?:is it|are you building)\?\z/iu,
+    ~r/\A(?:can|could|would) you (?:tell me more|share more|elaborate)(?: about (?:it|that|your module|the module|your project|the project))?\?\z/iu,
+    ~r/\Awhat (?:are you hoping to achieve|do you plan to do|are your plans|are your goals)(?: with (?:it|that|the module|your module|your project))?\?\z/iu,
+    ~r/\Ahow (?:is|are|does) (?:it|that|the module|your module|the project|your project) (?:going|coming along|work|progressing)\?\z/iu,
+    ~r/\Awhat (?:have you been focusing on|part are you working on)(?: in (?:your|the) (?:module|project))?\?\z/iu
+  ]
+
   @spec replaceable_generic_reply?(term()) :: boolean()
   def replaceable_generic_reply?(reply) when is_binary(reply) do
-    Regex.match?(
-      ~r/\A(?:Congratulations[.!]\s*)?What have you been learning about (?:in|with) your module\?\s*\z/iu,
-      String.trim(reply)
-    )
+    trimmed = String.trim(reply)
+    question = trimmed |> String.replace(@generic_opening, "") |> String.trim()
+
+    String.length(trimmed) <= 240 and
+      length(String.split(question, "?", trim: true)) == 1 and
+      Enum.any?(@generic_followups, &Regex.match?(&1, question))
   end
 
   def replaceable_generic_reply?(_), do: false
@@ -129,7 +145,7 @@ defmodule Core.Curiosity.ClarificationLoop do
       not user_originated_turn?(si) ->
         {:skip, :not_user_originated}
 
-      get(si, :intent) not in [:statement, :unknown, :inform, :tell] ->
+      get(si, :intent) not in [:statement, :unknown, :inform, :tell, :smalltalk] ->
         {:skip, :intent_not_statement}
 
       Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) ->
