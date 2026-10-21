@@ -620,10 +620,15 @@ defmodule Core.Response.LlmSynthesis do
             |> sanitize_model_text()
             |> then(&AnswerPolish.polish(user_text, &1, context))
 
-          if String.trim(candidate) == "" do
-            {original_out, first_reflection, candidate, nil, :empty}
-          else
-            {:ok, validated, review} = ReflectionLoop.review(user_text, candidate, context)
+          cond do
+            String.trim(candidate) == "" ->
+              {original_out, first_reflection, candidate, nil, :empty}
+
+            EvidenceRevision.prompt_echo?(candidate, messages) ->
+              {original_out, first_reflection, candidate, nil, :prompt_echo}
+
+            true ->
+              {:ok, validated, review} = ReflectionLoop.review(user_text, candidate, context)
 
             # Reflection may have "repaired" the candidate with a deterministic
             # fallback. That is NOT a successful model revision.
