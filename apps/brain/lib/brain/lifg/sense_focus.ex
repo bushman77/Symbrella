@@ -130,6 +130,15 @@ defmodule Brain.LIFG.SenseFocus do
 
   defp supported_role?(%{status: :supported, pos: "adjective",
                          role: :modifier,
+                         basis: :determined_adjective_before_unresolved_head,
+                         evidence: evidence}) when is_list(evidence) do
+    Enum.all?([:bounded_determiner_surface, :dictionary_pos_witness,
+               :unresolved_code_head, :complete_nominal_surface],
+      &(&1 in evidence))
+  end
+
+  defp supported_role?(%{status: :supported, pos: "adjective",
+                         role: :modifier,
                          basis: :complete_determiner_adjective_noun,
                          evidence: evidence}) when is_list(evidence) do
     Enum.all?([:bounded_determiner_surface, :dictionary_pos_witness,
