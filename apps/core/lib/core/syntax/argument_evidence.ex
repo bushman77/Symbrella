@@ -16,10 +16,13 @@ defmodule Core.Syntax.ArgumentEvidence do
       when is_map(roles) and is_list(unresolved) do
     tokens = List.wrap(Map.get(si, :tokens, []))
     cells = List.wrap(Map.get(si, :active_cells, []))
-    words =
-      tokens
-      |> Enum.filter(&(is_map(&1) and Map.get(&1, :n, 1) == 1))
-      |> Map.new(fn t -> {Map.get(t, :index), normalize(Map.get(t, :phrase))} end)
+    base_tokens = Enum.filter(tokens, &(is_map(&1) and Map.get(&1, :n, 1) == 1))
+    words = Map.new(base_tokens, fn t ->
+      {Map.get(t, :index), normalize(Map.get(t, :phrase))}
+    end)
+    surfaces = Map.new(base_tokens, fn t ->
+      {Map.get(t, :index), original_surface(Map.get(t, :phrase))}
+    end)
     unresolved_indices = MapSet.new(Enum.map(unresolved, & &1.token_index))
 
     if map_size(words) > @max_tokens do
@@ -54,7 +57,9 @@ defmodule Core.Syntax.ArgumentEvidence do
                 recipient: if(recipient?, do: recipient_idx, else: nil),
                 object_determiner: det,
                 object_modifier: if(head == det + 2, do: det + 1, else: nil),
-                object_head: head, object_surface: Map.get(words, head),
+                object_head: head,
+                object_surface: Map.get(surfaces, head),
+                object_norm: Map.get(words, head),
                 object_status: if(known_head?, do: :dictionary_noun_witness,
                   else: :lexically_unresolved_code_head),
                 meaning_verified?: false, event_verified?: false,
@@ -91,8 +96,14 @@ defmodule Core.Syntax.ArgumentEvidence do
 
   defp witnessed?(_, _, _), do: false
 
+  defp original_surface(word) when is_binary(word) do
+    String.replace(word, ~r/[?!.;,]+\z/u, "")
+  end
+
+  defp original_surface(_), do: nil
+
   defp normalize(word) when is_binary(word) do
-    word |> String.downcase() |> String.replace(~r/[?!.;,]+\z/u, "")
+    word |> original_surface() |> String.downcase()
   end
 
   defp normalize(_), do: nil
