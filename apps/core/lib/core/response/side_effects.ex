@@ -9,6 +9,7 @@ defmodule Core.Response.SideEffects do
   alias Core.Response.LlmSynthesis
   alias Core.Response.SpatialDialogue
   alias Core.Response.EpisodicMemory
+  alias Core.Response.UserLexicalMemory
 
   @compile {:no_warn_undefined, Brain.Hippocampus}
   @compile {:no_warn_undefined, Brain.MoodCore}
@@ -35,6 +36,7 @@ defmodule Core.Response.SideEffects do
     _ = SpatialDialogue.remember_user_turn(user_text, session_id)
     _ = EpisodicMemory.remember_user_turn(user_text, session_id)
     _ = EpisodicMemory.remember_projected_events(semantic_input, user_text, session_id)
+    _ = UserLexicalMemory.remember_user_turn(user_text, session_id, semantic_input)
 
     if function_exported?(LlmSynthesis, :record_turn, 3) do
       _ = LlmSynthesis.record_turn(session_id, user_text, assistant_text)

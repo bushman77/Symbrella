@@ -72,7 +72,9 @@ defmodule Core.Response do
         remember_fact: remember_fact,
         direct_fact: direct_fact,
         fact_query_key: fact_query_key
-      }) || Memory.acknowledge_projected(si, session_id, text_in, intent0, conf)
+      }) ||
+        Memory.unresolved_lexical_reply(si, text_in, session_id, intent0, conf) ||
+        Memory.acknowledge_projected(si, session_id, text_in, intent0, conf)
 
     case memory_reply do
       {_, _, _} = reply ->

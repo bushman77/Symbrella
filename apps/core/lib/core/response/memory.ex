@@ -11,6 +11,7 @@ defmodule Core.Response.Memory do
   alias Core.Response.ConversationRecall
   alias Core.Response.SpatialDialogue
   alias Core.Response.EpisodicMemory
+  alias Core.Response.UserLexicalMemory
   alias Core.Semantic.EpisodicProjection
 
   @memory_recall_event [:core, :response, :memory_recall]
@@ -32,6 +33,55 @@ defmodule Core.Response.Memory do
   end
 
   def reply(_), do: nil
+
+  @doc """
+  A lexical query with an *explicitly unresolved* term must not be handed
+  to the model as though a definition had been verified. This path is only
+  used when exact owner-scoped user-definition recall has already missed,
+  and the completed SI itself reports lexical uncertainty. Known terms,
+  unsupported arbitrary name guesses, and questions with no such evidence
+  stay in the ordinary response pipeline.
+  """
+  @spec unresolved_lexical_reply(map(), String.t(), term(), atom(), number()) ::
+          {atom(), String.t(), map()} | nil
+  def unresolved_lexical_reply(%{} = si, text_in, session_id, intent0, conf)
+      when is_binary(text_in) do
+    comprehension = Map.get(si, :comprehension, %{})
+    unresolved =
+      if is_map(comprehension),
+        do: Map.get(comprehension, :unresolved, []),
+        else: []
+
+    term = UserLexicalMemory.query_term(text_in)
+
+    if is_binary(term) and
+         Map.get(si, :sentence) == text_in and
+         (Map.get(si, :source) == :user or
+           (Map.get(si, :source) == :prod and
+              Map.get(si, :experience_origin) == :user_turn)) and
+         is_map(comprehension) and Map.get(comprehension, :degraded?) == true and
+         Enum.any?(List.wrap(unresolved),
+           &(is_binary(&1) and String.downcase(String.trim(&1)) == term)) do
+      answer =
+        "I don't have a verified meaning for \"#{term}\" or a previous " <>
+          "user-provided definition I can retrieve. What do you mean by it?"
+
+      finish_reply(session_id, text_in, answer, %{
+        action: :lexical_uncertainty,
+        response_source: :symbolic_unresolved,
+        memory_source: :unavailable,
+        verification: :unverified,
+        retrieval_found?: false,
+        session_id: session_id,
+        intent_original: intent0,
+        confidence: conf
+      })
+    else
+      nil
+    end
+  end
+
+  def unresolved_lexical_reply(_, _, _, _, _), do: nil
 
   @doc "Acknowledge only a validated event after Hippocampus confirms persistence."
   @spec acknowledge_projected(map(), term(), String.t(), atom(), number()) ::
@@ -95,6 +145,7 @@ defmodule Core.Response.Memory do
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
     episodic_reply = EpisodicMemory.reply(text_in)
+    lexical_reply = UserLexicalMemory.reply(text_in)
 
     cond do
       asking_for_assistant_name?(text_in, session_id) ->
@@ -214,6 +265,17 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         }
+
+        finish_reply(session_id, text_in, text, meta)
+
+      match?({_, _}, lexical_reply) ->
+        {text, lexical_meta} = lexical_reply
+
+        meta =
+          lexical_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, text, meta)
 
