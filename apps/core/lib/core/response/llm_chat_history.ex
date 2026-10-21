@@ -41,6 +41,29 @@ defmodule Core.Response.LlmChatHistory do
   end
 
   @doc """
+  Synchronize a narrowly supervised, already-displayed wording repair to the
+  stored conversation history. Requires the exact newest user and assistant
+  texts to match, updates prompt and recall history together, and never
+  appends another turn or touches other sessions.
+  """
+  @spec replace_last_assistant(term(), String.t(), String.t(), String.t()) ::
+          :ok | :stale
+  def replace_last_assistant(sid, user, original, replacement)
+      when is_binary(sid) and byte_size(sid) > 0 and byte_size(sid) <= 128 and
+           is_binary(user) and is_binary(original) and is_binary(replacement) do
+    ensure_table!()
+    GenServer.call(LlmChatHistoryOwner,
+      {:replace_last_assistant, sid, user, original, replacement,
+       configured_max_item_chars()})
+  rescue
+    _ -> :stale
+  catch
+    :exit, _ -> :stale
+  end
+
+  def replace_last_assistant(_, _, _, _), do: :stale
+
+  @doc """
   Keep a bounded, same-session record of an actual dated-news attempt.
 
   Only the factual outcome is stored; retrieved document content, remote

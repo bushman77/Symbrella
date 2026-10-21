@@ -225,7 +225,18 @@ defmodule SymbrellaWeb.HomeLive do
     reply_text = Core.Curiosity.ClarificationLoop.display_text(original_text, clarification)
     meta =
       if match?({:replace_generic, _, _}, clarification) do
-        Map.put(meta || %{}, :clarification_delivery, :replaced_generic_question)
+        history_status =
+          Core.Response.LlmChatHistory.replace_last_assistant(
+            socket.assigns.session_id,
+            Map.get(si, :sentence, ""),
+            original_text,
+            reply_text
+          )
+
+        meta
+        |> Kernel.||(%{})
+        |> Map.put(:clarification_delivery, :replaced_generic_question)
+        |> Map.put(:clarification_history_sync, history_status)
       else
         meta
       end

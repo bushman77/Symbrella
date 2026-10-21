@@ -85,6 +85,41 @@ defmodule Core.Response.LlmChatHistoryOwner do
       {:reply, :ok, state}
   end
 
+  @impl true
+  def handle_call({:replace_last_assistant, sid, user, before, after_text, max_chars},
+                  _from, state) do
+    current = lookup_messages(@table, sid)
+    recall = lookup_messages(@recall_table, sid)
+
+    with {:ok, new_current} <- replace_last_pair(current, user, before, after_text, max_chars),
+         {:ok, new_recall} <- replace_last_pair(recall, user, before, after_text, max_chars) do
+      :ets.insert(@table, {sid, new_current})
+      :ets.insert(@recall_table, {sid, new_recall})
+      {:reply, :ok, state}
+    else
+      _ -> {:reply, :stale, state}
+    end
+  end
+
+  # CAS-style rewrite: only the exact newest user/assistant pair of THIS
+  # session is eligible. Earlier turns and other sessions are untouched.
+  defp replace_last_pair(messages, user, before, after_text, max_chars) do
+    expected_user = LlmHistory.clamp_text(user, max_chars)
+    expected_before = LlmHistory.clamp_text(before, max_chars)
+
+    case Enum.reverse(messages) do
+      [%{"role" => "assistant", "content" => ^expected_before},
+       %{"role" => "user", "content" => ^expected_user} | earlier] ->
+        new_assistant = %{"role" => "assistant",
+          "content" => LlmHistory.clamp_text(after_text, max_chars)}
+        {:ok, Enum.reverse([new_assistant,
+          %{"role" => "user", "content" => expected_user} | earlier])}
+
+      _ ->
+        :stale
+    end
+  end
+
   defp lookup_messages(table, session_id) do
     case :ets.lookup(table, session_id) do
       [{^session_id, messages}] when is_list(messages) -> messages
