@@ -83,7 +83,10 @@ defmodule Brain.LIFG.Stage1.PosBias do
 
   defp supported_predicate_role?(ctx, tok) do
     idx = token_index(tok, -1)
-    case get_in(ctx, [:si, :role_competition]) do
+    si = Map.get(ctx, :si, %{})
+    roles_result = if is_map(si), do: Map.get(si, :role_competition), else: nil
+
+    case roles_result do
       %{source: :core_syntax_and_attested_dictionary_pos, roles: roles}
       when is_map(roles) ->
         case Map.get(roles, idx) do
