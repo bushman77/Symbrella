@@ -113,7 +113,7 @@ defmodule Core.Curiosity.ClarificationLoop do
   @spec proposal(map(), term(), String.t(), map()) :: {:ok, String.t()} | :none
   def proposal(si, gap, reply, meta) do
     case diagnose(si, gap, reply, meta) do
-      {:eligible, term} -> {:ok, term}
+      {kind, term} when kind in [:eligible, :eligible_existing] -> {:ok, term}
       {:skip, _reason} -> :none
     end
   end
@@ -149,7 +149,7 @@ defmodule Core.Curiosity.ClarificationLoop do
       Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) ->
         {:skip, :safety_sensitive}
 
-      get(action, :risk) != :low or get(action, :selected_action) != :answer_user ->
+      not agency_allows_feedback?(action) ->
         {:skip, :agency_not_approved}
 
       get(meta, :response_source) != :llm ->
@@ -170,6 +170,9 @@ defmodule Core.Curiosity.ClarificationLoop do
           [term | _] ->
             cond do
               already_clarifies?(reply, term) -> {:eligible_existing, String.trim(term)}
+              get(action, :selected_action) == :ask_clarifying_question ->
+                {:skip, :agency_clarification_not_term_linked}
+
               String.contains?(reply, "?") and
                   not replaceable_generic_reply?(reply) ->
                 {:skip, :reply_already_asks_question}
@@ -184,6 +187,18 @@ defmodule Core.Curiosity.ClarificationLoop do
   end
 
   def diagnose(_, _, _, _), do: {:skip, :no_fresh_session_gap}
+
+  defp agency_allows_feedback?(action) do
+    case {get(action, :risk), get(action, :selected_action)} do
+      {:low, :answer_user} -> true
+      {:low, :ask_clarifying_question} ->
+        selector = get(action, :selector, %{})
+        get(selector, :safety_gate) == :approved and
+          get(get(selector, :safety, %{}), :decision) == :approved and
+          get(get(action, :permission, %{}), :status) == :not_required
+      _ -> false
+    end
+  end
 
   # A declarative work report can be misclassified as :code or :ask.
   # Require an explicit first-person past/current engineering-work pattern,

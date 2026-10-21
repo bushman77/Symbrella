@@ -274,6 +274,54 @@ defmodule Core.Curiosity.ClarificationLoopTest do
         gap, "Interesting.", @meta)
   end
 
+  test "approved agency question tracks lexical clarification without duplicating it" do
+    server = server()
+    session = sid()
+    input =
+      %{si(session) | sentence: "I've been working on a glimmerflux module.",
+        source: :prod, intent: :code}
+      |> Map.put(:experience_origin, :user_turn)
+    admit(input)
+
+    reply =
+      "That sounds like an interesting project you're working on! Could you tell me more about what a glimmerflux module is and how it works?"
+
+    agency = %Core.Agency.Decision{
+      intent: :code,
+      selected_action: :ask_clarifying_question,
+      risk: :low,
+      permission: %{required?: false, status: :not_required},
+      expected_outcome: %{kind: :user_clarifies},
+      selector: %{safety_gate: :approved, safety: %{decision: :approved}}
+    }
+    meta = %{@meta | agency_decision: agency}
+
+    assert {:tracked_existing, ^reply, flags} =
+      ClarificationLoop.observe(session, input, reply, meta, server)
+    assert flags.delivery == :tracked_existing
+    assert ClarificationLoop.display_text(reply, {:tracked_existing, reply, flags}) == reply
+
+    snapshot = ClarificationLoop.snapshot(session, server)
+    assert snapshot.session.pending.term == "glimmerflux"
+    assert snapshot.session.last_decision == :existing_clarification_tracked
+    assert snapshot.attempts == 1
+
+    gap = {:ok, %{status: :review_required,
+      next_action: :consider_user_clarification, age_ms: 1}}
+
+    assert {:skip, :agency_clarification_not_term_linked} =
+      ClarificationLoop.diagnose(input, gap, "Could you tell me about your day?", meta)
+
+    denied = %{@meta | agency_decision: %{agency |
+      selector: %{safety_gate: :blocked, safety: %{decision: :approved}}}}
+    assert {:skip, :agency_not_approved} =
+      ClarificationLoop.diagnose(input, gap, reply, denied)
+
+    high_risk = %{@meta | agency_decision: %{agency | risk: :high}}
+    assert {:skip, :agency_not_approved} =
+      ClarificationLoop.diagnose(input, gap, reply, high_risk)
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)
