@@ -60,7 +60,10 @@ defmodule Brain.CuriosityLearningTest do
     result = Learning.project(rows, %{})
     assert result.biases.missing_link == -0.12
     assert result.failure_count == 100
+    assert result.biases.two_hop == -0.12
     assert Learning.project([row(1, %{status: "unresolved", reason: "no_two_hop_cue"})], %{}).biases.missing_link == 0.0
+    assert Learning.project([row(1, %{status: "unresolved",
+      reason: "direct_proof_not_authorized"})], %{}).biases.direct == -0.012
     assert Learning.normalize(%{"v" => 1, "biases" => %{"direct" => 800}}).biases.direct == 0.12
     assert Learning.normalize(%{v: 999, biases: %{direct: 1.0}}) == Learning.neutral()
   end

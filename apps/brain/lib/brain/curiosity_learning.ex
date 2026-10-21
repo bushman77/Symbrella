@@ -14,8 +14,7 @@ defmodule Brain.CuriosityLearning do
   @version 1
   @window 100
   @keys [:missing_link, :direct, :two_hop, :acquisition]
-  @conflict_reasons ["proof_not_authorized", "direct_proof_not_authorized",
-                     "invalid_two_hop_candidate"]
+  @two_hop_conflicts ["proof_not_authorized", "invalid_two_hop_candidate"]
 
   def neutral do
     %{v: @version, biases: Map.new(@keys, &{&1, 0.0}),
@@ -62,8 +61,11 @@ defmodule Brain.CuriosityLearning do
       "resolved" -> classify_resolved(row, issue)
       "failed" -> :failed
       "unresolved" ->
-        if get(row, :reason) in @conflict_reasons,
-          do: :unresolved_conflict, else: :unresolved
+        case get(row, :reason) do
+          "direct_proof_not_authorized" -> :unresolved_direct_conflict
+          reason when reason in @two_hop_conflicts -> :unresolved_two_hop_conflict
+          _ -> :unresolved
+        end
       _ -> :ignored
     end
   end
@@ -110,7 +112,8 @@ defmodule Brain.CuriosityLearning do
         :verified_acquired_direct -> {0.060, [:missing_link, :direct, :acquisition], true, false}
         :verified_two_hop -> {0.040, [:missing_link, :two_hop], true, false}
         :verified_acquired_two_hop -> {0.060, [:missing_link, :two_hop, :acquisition], true, false}
-        :unresolved_conflict -> {-0.012, [:missing_link], false, true}
+        :unresolved_direct_conflict -> {-0.012, [:missing_link, :direct], false, true}
+        :unresolved_two_hop_conflict -> {-0.012, [:missing_link, :two_hop], false, true}
         :failed -> {-0.008, [:missing_link], false, true}
         _ -> {0.0, [], false, false}
       end

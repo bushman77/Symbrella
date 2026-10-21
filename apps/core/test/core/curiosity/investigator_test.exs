@@ -144,6 +144,10 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert stored.resolution["parent_proof_ids"] == ids
     assert stored.resolution["reference_year"] == 2021
     assert stored.resolved_at != nil
+    assert :verified_two_hop ==
+      Brain.CuriosityLearning.classify(
+        hd(InvestigationHistory.for_issue(issue.id)), stored
+      )
 
     # No third source-backed comparison is fabricated by internal reasoning.
     assert {:ok, [^ab]} = ConsolidatedConclusions.for_subject(a)
@@ -180,6 +184,10 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert resolved.resolution["proof_fingerprint"] == direct.fingerprint
     refute Map.has_key?(resolved.resolution, "parent_proof_ids")
     assert resolved.resolved_at != nil
+    assert :verified_existing_direct ==
+      Brain.CuriosityLearning.classify(
+        hd(InvestigationHistory.for_issue(issue.id)), resolved
+      )
     refute Enum.any?(Core.Curiosity.UnresolvedIssues.reasoning_candidates(20),
       &(&1.issue_id == issue.id))
   end
@@ -257,6 +265,43 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert %{kind: :two_hop_candidate} = AssociativeReasoning.propose([a, c])
     assert %{status: :unresolved, reason: :proof_not_authorized} =
       Investigator.investigate_issue(issue.id)
+    assert Db.get!(CognitiveIssue, issue.id).status == "open"
+  end
+
+  test "active SelfModel load gate defers real worker without an audit attempt", %{
+    a: a, b: b, c: c
+  } do
+    capture!(a, b, [120_000, 100_000])
+    issue = missing_issue!(a, c)
+    issue
+    |> CognitiveIssue.changeset(%{priority: 1.0})
+    |> Db.update!()
+
+    name = :curiosity_busy_gate_isolated_test
+    spec =
+      Supervisor.child_spec(
+        {Investigator, [
+          name: name, enabled?: true, self_model_policy?: true,
+          self_state: %{cognitive_load: 0.98, inhibition: 0.5},
+          interval_ms: 60_000
+        ]},
+        id: name
+      )
+
+    assert {:ok, worker} = Supervisor.start_child(Symbrella.Supervisor, spec)
+    on_exit(fn ->
+      _ = Supervisor.terminate_child(Symbrella.Supervisor, name)
+      _ = Supervisor.delete_child(Symbrella.Supervisor, name)
+    end)
+
+    owner = :persistent_term.get({:symbrella, :sandbox_owner})
+    :ok = Ecto.Adapters.SQL.Sandbox.allow(Db, owner, worker)
+
+    assert %{status: :deferred, reason: :self_model_overloaded} =
+      Investigator.run_now(name)
+
+    assert Investigator.snapshot(name).cooldown_count == 0
+    assert InvestigationHistory.for_issue(issue.id) == []
     assert Db.get!(CognitiveIssue, issue.id).status == "open"
   end
 
