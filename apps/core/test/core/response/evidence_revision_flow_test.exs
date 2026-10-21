@@ -78,6 +78,17 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
           mode == :echo_new_revision ->
             {:ok, %{content: List.last(messages)["content"]}}
 
+          mode == :echo_sources_only ->
+            user = List.last(messages)["content"]
+
+            sources =
+              user
+              |> String.split("\n", trim: true)
+              |> Enum.filter(&String.starts_with?(&1, "- "))
+              |> Enum.join("\n")
+
+            {:ok, %{content: sources <> "\nMy assessment: diplomacy deserves a chance."}}
+
           mode == :error_revision ->
             {:error, :upstream_timeout}
 
@@ -255,6 +266,17 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
     assert final =~ "Recent dated headlines"
   end
 
+  test "copying every source line with a superficial assessment cannot pass" do
+    start_supervised!({FakeLlm, {self(), :echo_sources_only}})
+
+    assert {:ok, final, reflection} = run_generation()
+
+    assert reflection.evidence_revision.outcome == :prompt_echo
+    assert reflection.evidence_revision.selected_source == :core_fallback
+    assert final =~ "Recent dated headlines"
+    refute final =~ "My assessment: diplomacy deserves a chance."
+  end
+
   test "retry input has a conversational question and no internal issue identifiers" do
     context = %{
       web_evidence: %{
@@ -281,6 +303,7 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
              messages
            )
     assert EvidenceRevision.prompt_echo?(text, messages)
+    refute EvidenceRevision.prompt_echo?(String.duplicate("Natural response. ", 8), [])
   end
 
   test "model error on retry keeps first safe Core response" do
