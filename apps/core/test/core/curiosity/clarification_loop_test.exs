@@ -227,6 +227,53 @@ defmodule Core.Curiosity.ClarificationLoopTest do
       :clarification_received_unverified
   end
 
+  test "live glimmerflux user report is tracked despite noisy :code intent" do
+    server = server()
+    session = sid()
+    input =
+      %{si(session) | sentence: "I've been working on a glimmerflux module.",
+        source: :prod, intent: :code}
+      |> Map.put(:experience_origin, :user_turn)
+    admit(input)
+
+    reply =
+      "That sounds like an interesting project you're working on! Could you tell me more about what a glimmerflux module is and how it works?"
+
+    assert ClarificationLoop.already_clarifies?(reply, "glimmerflux")
+    assert {:tracked_existing, ^reply, flags} =
+      ClarificationLoop.observe(session, input, reply, @meta, server)
+    assert flags.delivery == :tracked_existing
+    snap = ClarificationLoop.snapshot(session, server)
+    assert snap.attempts == 1
+    assert snap.session.pending.term == "glimmerflux"
+    assert snap.session.last_decision == :existing_clarification_tracked
+  end
+
+  test "declarative override rejects actual requests, commands and safety-sensitive reports" do
+    input =
+      %{si(sid()) | sentence: "I've been working on a glimmerflux module.",
+        source: :prod, intent: :ask}
+      |> Map.put(:experience_origin, :user_turn)
+    gap = {:ok, %{status: :review_required,
+      next_action: :consider_user_clarification, age_ms: 1}}
+
+    assert {:eligible, "glimmerflux"} =
+      ClarificationLoop.diagnose(input, gap, "Interesting.", @meta)
+    assert {:skip, :intent_not_statement} =
+      ClarificationLoop.diagnose(%{input | sentence: "Build a glimmerflux module."},
+        gap, "Interesting.", @meta)
+    assert {:skip, :intent_not_statement} =
+      ClarificationLoop.diagnose(%{input | intent: :command},
+        gap, "Interesting.", @meta)
+    assert {:skip, :factual_or_question_turn} =
+      ClarificationLoop.diagnose(%{input | sentence: "I've been working on what?"},
+        gap, "Interesting.", @meta)
+    assert {:skip, :safety_sensitive} =
+      ClarificationLoop.diagnose(%{input | sentence:
+        "I've been working on a dangerous glimmerflux module."},
+        gap, "Interesting.", @meta)
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)

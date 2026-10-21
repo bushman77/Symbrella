@@ -143,7 +143,7 @@ defmodule Core.Curiosity.ClarificationLoop do
       not user_originated_turn?(si) ->
         {:skip, :not_user_originated}
 
-      get(si, :intent) not in [:statement, :unknown, :inform, :tell, :smalltalk] ->
+      not eligible_statement_intent?(si, sentence) ->
         {:skip, :intent_not_statement}
 
       Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) ->
@@ -185,6 +185,21 @@ defmodule Core.Curiosity.ClarificationLoop do
 
   def diagnose(_, _, _, _), do: {:skip, :no_fresh_session_gap}
 
+  # A declarative work report can be misclassified as :code or :ask.
+  # Require an explicit first-person past/current engineering-work pattern,
+  # not merely the absence of a question mark. Unsafe intents remain excluded.
+  defp eligible_statement_intent?(si, sentence) do
+    intent = get(si, :intent)
+
+    intent in [:statement, :unknown, :inform, :tell, :smalltalk] or
+      (intent in [:ask, :ask_info, :code, :debug, :memory_write] and
+         is_binary(sentence) and
+         Regex.match?(
+           ~r/^\s*(?:(?:i['’]ve|i have|we['’]ve|we have)\s+(?:been\s+)?|(?:i['’]m|i am|we['’]re|we are)\s+(?:currently\s+)?)(?:working|building|developing|designing|creating|testing|writing|making|experimenting)\s+(?:on|with|in|at)\b/iu,
+           sentence
+         ))
+  end
+
   # No second question is necessary when the model explicitly asked about
   # the meaning of the exact unresolved term. Mentioning a term in a
   # technical question ("How does X work?") does not meet this condition.
@@ -192,7 +207,8 @@ defmodule Core.Curiosity.ClarificationLoop do
   def already_clarifies?(reply, term) when is_binary(reply) and is_binary(term) do
     String.contains?(reply, "?") and
       refers_to_term?(reply, term) and
-      Regex.match?(
+      (embedded_module_definition?(reply, term) or
+      (Regex.match?(
         ~r/\b(?:what(?:'s| is| does)|what do you mean by|(?:can|could|would) you (?:explain|define|clarify)|what (?:is the meaning|do you mean))\b/iu,
         reply
       ) and
@@ -205,7 +221,23 @@ defmodule Core.Curiosity.ClarificationLoop do
              "iu"
            ),
            reply
-         ))
+         )))
+  end
+
+  # The actual live model asks "tell me more about what a glimmerflux
+  # module is and how it works?" That is a user-answerable clarification,
+  # not a generic "what are you working on" question.
+  defp embedded_module_definition?(reply, term) do
+    Regex.match?(~r/\b(?:can|could|would) you (?:tell me more about|explain|clarify|describe)\b/iu, reply) and
+      Regex.match?(
+        Regex.compile!(
+          "\\bwhat\\s+(?:(?:a|an|the)\\s+)?[\"']?" <>
+            Regex.escape(term) <>
+            "[\"']?(?:\\s+(?:module|project|component|system|library|thing))?\\s+is\\b",
+          "iu"
+        ),
+        reply
+      )
   end
 
   def already_clarifies?(_, _), do: false
