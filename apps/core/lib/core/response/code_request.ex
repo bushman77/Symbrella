@@ -53,13 +53,10 @@ defmodule Core.Response.CodeRequest do
   def complete?(context, draft) when is_binary(draft) do
     if eligible?(context) do
       name = module_name(Map.get(context, :request_structure))
-      # Require a real source-shaped definition, not a paraphrase or
-      # promise. The model may use 'use GenServer' or '@behaviour GenServer'.
-      module_def = Regex.compile!("\\bdefmodule\\s+" <> Regex.escape(name) <> "\\s+do\\b")
-      Regex.match?(module_def, draft) and
-        Regex.match?(~r/\b(?:use\s+GenServer|@behaviour\s+GenServer)\b/u, draft) and
-        Regex.match?(~r/\bdef\s+(?:init|start_link)\b/u, draft) and
-        Regex.match?(~r/\bend\b/u, draft)
+      # Syntax and a conservative callback/state contract are checked
+      # independently. A token-shaped module definition is not enough:
+      # extra handlers or mismatched state can produce misleading examples.
+      CodeRequestValidation.complete?(name, draft)
     else
       false
     end
@@ -80,8 +77,9 @@ defmodule Core.Response.CodeRequest do
         "instead of fulfilling this explicit, safe code request. " <>
         "Write a minimal working Elixir GenServer source example in " <>
         "defmodule #{name} do ... end, including use GenServer, " <>
-        "start_link/1 and init/1. A basic initial-state server is enough; " <>
-        "don't invent extra application requirements. Supply actual code, " <>
+        "start_link/1 and init/1. Pass the initial state unchanged. " <>
+        "Do not invent extra handlers, arithmetic or message protocols; " <>
+        "a basic initial-state server is enough. Supply actual code, " <>
         "not a promise, menu of options or a clarification question. " <>
         "Do not claim you executed, saved or tested the code."
     else
