@@ -35,6 +35,7 @@ defmodule Brain.Curiosity do
     * :source  — tag for the probe source (default :curiosity)
     * :reason  — reason tag (default :curiosity, used in WM payload)
     * :seed    — optional arbitrary value to stash in the probe (not used yet)
+    * :kind    — bounded proposal kind (:missing_link, :direct, :two_hop, :acquisition)
   """
   @spec nudge(Keyword.t() | map()) :: :ok
   def nudge(opts \\ []) when is_list(opts) or is_map(opts) do
@@ -131,7 +132,7 @@ defmodule Brain.Curiosity do
   @impl GenServer
   def handle_info(:tick, %{} = state) do
     {probe, base_score, self_state} = build_probe(state, %{})
-    policy = Brain.CuriosityPolicy.assess(:missing_link, self_state)
+    policy = Brain.CuriosityPolicy.assess(probe.kind, self_state)
 
     if policy.allowed? do
       :telemetry.execute(
@@ -175,12 +176,18 @@ defmodule Brain.Curiosity do
 
     # Caller-provided numeric scores remain explicit overrides. Automatic
     # probes use the current SelfModel and durable investigation preferences.
+    kind =
+      case get_opt(opts, :kind, :missing_link) do
+        value when value in [:missing_link, :direct, :two_hop, :acquisition] -> value
+        _ -> :missing_link
+      end
+
     base =
       case get_opt(opts, :score, :auto) do
         v when is_number(v) -> clamp01(v)
         _ ->
           {scored, _policy} =
-            Brain.CuriosityPolicy.score(curiosity_score(self_state), :missing_link, self_state)
+            Brain.CuriosityPolicy.score(curiosity_score(self_state), kind, self_state)
 
           scored
       end
@@ -199,6 +206,7 @@ defmodule Brain.Curiosity do
         source: source,
         reason: reason,
         seed: seed,
+        kind: kind,
         score: base
       }
       |> maybe_put_trace_id(trace_id)

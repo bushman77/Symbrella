@@ -34,6 +34,18 @@ defmodule Core.Curiosity.SelectionPolicyTest do
       SelectionPolicy.choose(candidates, load, active?: true)
   end
 
+  test "learned two-hop preference can change priority without granting proof" do
+    candidates = [
+      %{issue_id: 10, priority: 0.58, strategy: :missing_link},
+      %{issue_id: 11, priority: 0.55, strategy: :two_hop}
+    ]
+    state = %{plasticity: 0.8, vigilance: 0.25,
+      investigative_biases: %{v: 1, biases: %{two_hop: 0.12}}}
+    choice = SelectionPolicy.choose(candidates, state, active?: true)
+    assert choice.selected.issue_id == 11
+    assert choice.legacy_selected.issue_id == 10
+  end
+
   test "empty queue cannot be made active by preferences" do
     assert %{status: :idle, selected: nil} =
       SelectionPolicy.choose([], %{uncertainty: 1.0}, active?: true)

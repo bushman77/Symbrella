@@ -50,7 +50,10 @@ defmodule Core.Curiosity.UnresolvedIssues do
           status: issue.status,
           priority: issue.priority,
           next_action: issue.next_action,
-          reference_year: issue.reference_year
+          reference_year: issue.reference_year,
+          # Advisory only: a single original parent suggests missing-bridge
+          # reasoning, but neither the parent nor composition is authorized.
+          strategy: proposed_strategy(issue.evidence)
         }
       end)
     else
@@ -63,4 +66,8 @@ defmodule Core.Curiosity.UnresolvedIssues do
   end
 
   def reasoning_candidates(_), do: []
+
+  defp proposed_strategy(%{"stored_proof_ids" => [id]}) when is_integer(id) and id > 0,
+    do: :two_hop
+  defp proposed_strategy(_), do: :missing_link
 end
