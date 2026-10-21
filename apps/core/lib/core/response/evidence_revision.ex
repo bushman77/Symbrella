@@ -25,7 +25,7 @@ defmodule Core.Response.EvidenceRevision do
     Map.get(reflection, :status) == :repair and
       is_list(issues) and
       Enum.any?(issues, &(&1 in @retry_issues)) and
-      not Enum.any?(issues, &(&1 in [:unsafe, :leaked_hidden_context, :overclaimed_self_awareness])) and
+      not Enum.any?(issues, &(&1 in [:unsafe, :leaked_hidden_context, :revision_prompt_echo, :overclaimed_self_awareness])) and
       match?(%{relation: :current_events, status: :retrieved, resolution: :headlines_available}, evidence) and
       valid_sources(evidence) != []
   end
@@ -77,14 +77,24 @@ defmodule Core.Response.EvidenceRevision do
       |> Map.get("content", "")
 
     Regex.match?(
-      ~r/(?:ORIGINAL QUESTION:|FAILED CHECKS:|DATED NEWS REPORTING\s*\(|Dated headline references\s*\()/iu,
+      ~r/(?:ORIGINAL QUESTION:|FAILED CHECKS:|DATED NEWS REPORTING\s*\(|Dated headline references\s*\(|EVIDENCE-ONLY REVISION)/iu,
       text
     ) or
       (String.length(text) >= 60 and is_binary(user_prompt) and user_prompt != "" and
-         String.contains?(text, user_prompt))
+         (String.contains?(text, user_prompt) or source_block_echo?(text, user_prompt)))
   end
 
   def prompt_echo?(_, _), do: false
+
+  defp source_block_echo?(candidate, user_prompt) do
+    sources =
+      user_prompt
+      |> String.split("\n", trim: true)
+      |> Enum.filter(&String.starts_with?(&1, "- "))
+
+    length(sources) >= 2 and
+      Enum.all?(sources, &String.contains?(candidate, &1))
+  end
 
   @spec trace(map(), String.t(), [map()], String.t() | nil, map() | nil, atom(), non_neg_integer()) :: map()
   def trace(first, first_draft, messages, candidate, reviewed, outcome, elapsed_ms) do
