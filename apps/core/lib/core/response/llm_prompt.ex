@@ -9,6 +9,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.LlmPrompt.WorkingMemory
   alias Core.Response.Personality
   alias Core.Response.ResponseFrame
+  alias Core.Response.RequestStructure
   alias Core.Response.GreetingTurn
   alias Core.Response.Topics
 
@@ -20,6 +21,7 @@ defmodule Core.Response.LlmPrompt do
     wm_items = map_get(context, :wm_items, [])
     comprehension = map_get(context, :comprehension)
     symbolic_frame = map_get(context, :symbolic_frame)
+    request_structure = map_get(context, :request_structure)
 
     features =
       features
@@ -27,6 +29,7 @@ defmodule Core.Response.LlmPrompt do
       |> put_if_present(:runtime_state, map_get(context, :runtime_state))
       |> put_if_present(:comprehension, comprehension)
       |> put_if_present(:symbolic_frame, symbolic_frame)
+      |> put_if_present(:request_structure, request_structure)
       |> put_if_present(:web_evidence, map_get(context, :web_evidence))
       |> put_if_present(:response_frame, map_get(context, :response_frame))
       |> put_if_present(:episodic_recall, map_get(context, :episodic_recall))
@@ -87,6 +90,7 @@ defmodule Core.Response.LlmPrompt do
             comprehension_shaping(comprehension),
             verified_device_command_shaping(features, comprehension, guardrail?),
             Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
+            RequestStructure.prompt(map_get(features, :request_structure)),
             episodic_recall_shaping(map_get(features, :episodic_recall))
           ]
           |> Enum.reject(&blank?/1)
@@ -174,6 +178,7 @@ defmodule Core.Response.LlmPrompt do
       # after generic mood/personality uncertainty shaping so weak LIFG
       # noun sense confidence cannot cause a redundant clarification.
       Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
+      RequestStructure.prompt(map_get(features, :request_structure)),
       "Respond to the user's actual request in the most natural useful form."
     ]
     |> Enum.reject(&blank?/1)
