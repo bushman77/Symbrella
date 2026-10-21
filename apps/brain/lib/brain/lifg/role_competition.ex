@@ -176,6 +176,26 @@ defmodule Brain.LIFG.RoleCompetition do
         _ -> []
       end)
 
+    # Core supplies independently witnessed predicate slots. Brain retains
+    # the existing conflict resolver and never trusts a proposed sense ID.
+    predicate_proposals =
+      si
+      |> Map.get(:predicate_proposals, [])
+      |> List.wrap()
+      |> Enum.filter(fn
+        %{token_index: i, pos: "verb", role: :predicate, basis: basis,
+          evidence: evidence}
+        when is_integer(i) and i >= 0 and is_list(evidence) and
+             basis in [:modal_question_predicate, :modal_declarative_predicate,
+                       :imperative_predicate, :plural_present_predicate,
+                       :finite_present_svo_predicate] ->
+          :bounded_predicate_slot in evidence and
+            :dictionary_pos_witness in evidence and
+            witnessed?(cells, tokens, i, "verb")
+
+        _ -> false
+      end)
+
     # A local determiner + adjective + noun hypothesis can straddle the
     # *predicate* of a complete, independently witnessed clause. For example:
     #   The artist draws a picture.
@@ -195,7 +215,8 @@ defmodule Brain.LIFG.RoleCompetition do
       end)
 
     decisions =
-      (local_proposals ++ subject_proposals ++ present_subject_proposals ++ question_proposals)
+      (local_proposals ++ subject_proposals ++ present_subject_proposals ++
+         question_proposals ++ predicate_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
