@@ -182,14 +182,16 @@ defmodule Brain.Curiosity do
         _ -> :missing_link
       end
 
-    base =
+    {base, policy, scoring_mode} =
       case get_opt(opts, :score, :auto) do
-        v when is_number(v) -> clamp01(v)
+        v when is_number(v) ->
+          {clamp01(v), Brain.CuriosityPolicy.assess(kind, self_state), :explicit}
+
         _ ->
-          {scored, _policy} =
+          {scored, assessment} =
             Brain.CuriosityPolicy.score(curiosity_score(self_state), kind, self_state)
 
-          scored
+          {scored, assessment, :self_model}
       end
 
     raw_id = get_opt(opts, :id, "curiosity|probe|alpha_zero") |> to_string()
@@ -207,7 +209,13 @@ defmodule Brain.Curiosity do
         reason: reason,
         seed: seed,
         kind: kind,
-        score: base
+        score: base,
+        policy: %{
+          mode: scoring_mode,
+          learned_bias: policy.learned_bias,
+          adjustment: policy.adjustment,
+          allowed?: policy.allowed?
+        }
       }
       |> maybe_put_trace_id(trace_id)
 

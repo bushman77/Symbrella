@@ -53,4 +53,18 @@ defmodule Brain.CuriositySelfStateTest do
     assert_receive {:curiosity_proposal, measurements, _metadata}, 500
     assert measurements.score > 0.55
   end
+
+  test "explicit caller score stays exact and records a compact policy reason" do
+    :ok = Brain.Curiosity.nudge(
+      score: 0.44,
+      kind: :two_hop,
+      self_state: %{uncertainty: 0.99, plasticity: 0.99,
+        investigative_biases: %{v: 1, biases: %{two_hop: 0.12}}}
+    )
+
+    assert_receive {:curiosity_proposal, %{score: 0.44}, %{probe: probe}}, 500
+    assert probe.kind == :two_hop
+    assert probe.policy.mode == :explicit
+    assert probe.policy.learned_bias == 0.12
+  end
 end
