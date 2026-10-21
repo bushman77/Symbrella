@@ -5,6 +5,7 @@ defmodule Core.Response.LlmPrompt do
   alias Core.Response.AffectPolicy
   alias Core.Response.BehavioralState
   alias Core.Response.LlmPrompt.Compact
+  alias Core.Response.LlmPrompt.MythoMax
   alias Core.Response.LlmPrompt.WorkingMemory
   alias Core.Response.Personality
   alias Core.Response.ResponseFrame
@@ -69,6 +70,29 @@ defmodule Core.Response.LlmPrompt do
     response_profile = Personality.profile(personality)
     affect = Affect.simulate(personality, runtime_state || %{}, comprehension || %{}, features)
 
+    if Application.get_env(:core, :response_prompt_profile, :default) == :mythomax do
+      MythoMax.build(%{
+        features: features,
+        decision: decision,
+        personality: personality,
+        affect: affect,
+        behavioral_state: behavioral_state,
+        source_material:
+          [
+            news_priority_shaping(map_get(features, :web_evidence)),
+            reference_priority_shaping(map_get(features, :web_evidence)),
+            ResponseFrame.prompt(map_get(features, :response_frame)),
+            web_evidence_shaping(map_get(features, :web_evidence)),
+            verified_population_priority(features),
+            comprehension_shaping(comprehension),
+            verified_device_command_shaping(features, comprehension, guardrail?),
+            Core.Response.ProjectedExpression.prompt(map_get(features, :projected_expression)),
+            episodic_recall_shaping(map_get(features, :episodic_recall))
+          ]
+          |> Enum.reject(&blank?/1)
+          |> Enum.join("\\n")
+      })
+    else
     [
       # ── Identity ──
       "You are Symbrella.",
@@ -155,6 +179,7 @@ defmodule Core.Response.LlmPrompt do
     |> Enum.reject(&blank?/1)
     |> Enum.join("\n")
     |> String.trim()
+    end
   end
 
   # Verified source support outranks low-confidence lexical *word senses*
