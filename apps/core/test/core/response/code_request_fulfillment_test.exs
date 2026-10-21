@@ -169,7 +169,7 @@ defmodule Core.Response.CodeRequestFulfillmentTest do
     assert si.response_text =~ "defmodule MyExample do"
     assert si.response_text =~ "use GenServer"
     assert si.response_text =~ "def init(initial_state)"
-    assert si.response_text =~ ~S(def start_link(initial_state \\ %{}) do)
+    assert si.response_text =~ ~S|def start_link(initial_state \\ %{}) do|
     assert si.response_text =~ "not executed or tested"
     assert si.response_meta.response_reflection.code_request_repair.outcome == :fallback
     assert si.response_meta.response_reflection.code_request_repair.selected_source ==
