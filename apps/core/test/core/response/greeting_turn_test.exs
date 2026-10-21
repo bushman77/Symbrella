@@ -80,6 +80,34 @@ defmodule Core.Response.GreetingTurnTest do
     assert :robotic_greeting in reflection.issues
   end
 
+  test "MythoMax does not address the user as Symbrella in a greeting" do
+    user = "good evening symbrella"
+    draft = "Good evening! How are you feeling tonight, Symbrella?"
+
+    assert GreetingTurn.standalone?(user)
+    assert GreetingTurn.robotic_draft?(user, draft)
+    assert GreetingTurn.repair(user, draft) ==
+             "Good evening! How are you feeling tonight?"
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(user, draft, %{features: %{text: user, intent: :greet, conf: 0.85}})
+
+    assert final == "Good evening! How are you feeling tonight?"
+    assert :robotic_greeting in reflection.issues
+    assert reflection.status == :repair
+  end
+
+  test "trailing name repair does not touch substantive turns or Symbrella self-references" do
+    answer = "Yes, my name is Symbrella."
+    user = "what is your name"
+    refute GreetingTurn.robotic_draft?(user, answer)
+    assert GreetingTurn.repair(user, answer) == answer
+
+    greeting = "Good evening! I'm Symbrella, and I'm glad you dropped by."
+    refute GreetingTurn.robotic_draft?("good evening", greeting)
+    assert GreetingTurn.repair("good evening", greeting) == greeting
+  end
+
   test "MythoMax's natural greeting is not replaced by a scripted answer" do
     user = "good eveing symbrella"
     natural = "Evening! Anything interesting going on?"
