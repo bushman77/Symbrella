@@ -141,8 +141,18 @@ defmodule Core.Response do
           })
 
         {decision0, skill} = decide_and_pick_skill(features, guard, text_in)
+        request_structure =
+          si
+          |> Map.get(:turn_context, %{})
+          |> then(fn context ->
+            if is_map(context), do: Map.get(context, :request_structure), else: nil
+          end)
+
         decision =
-          ActionAlignment.align(decision0, Map.get(si, :selected_action), text_in, guard.guardrail?)
+          ActionAlignment.align(
+            decision0, Map.get(si, :selected_action), text_in,
+            guard.guardrail?, request_structure
+          )
         features =
           features
           |> put_chosen_skill(skill)
