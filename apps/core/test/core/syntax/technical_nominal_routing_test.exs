@@ -103,9 +103,18 @@ defmodule Core.Syntax.TechnicalNominalRoutingTest do
 
     assert [%{status: :candidate, construction: :recipient_object,
               predicate: 2, recipient: 3, object_modifier: 5, object_head: 6,
+              object_surface: "GenServer", object_norm: "genserver",
               object_status: :lexically_unresolved_code_head,
               meaning_verified?: false, event_verified?: false}] =
              report.argument_frames
+
+    assert [%{status: :candidate, frame: :requested_artifact_named_module,
+              requested_object_head: 6, requested_object_surface: "GenServer",
+              container_head: 9, container_surface: "module",
+              container_name_index: 11, container_name_surface: "MyExample",
+              semantic_type_verified?: false, existence_verified?: false,
+              meaning_verified?: false, applied_to_lifg?: false}] =
+             report.identifier_bindings
 
     assert [%{status: :shadow_only, applied_to_lifg?: false,
               winner_changed?: false, semantic_sense_verified?: false,
@@ -132,6 +141,23 @@ defmodule Core.Syntax.TechnicalNominalRoutingTest do
              RoleCompetition.attach(letter).role_competition.argument_frames
 
     assert RoleCompetition.attach(incomplete).role_competition.argument_frames == []
+  end
+
+  test "name attachment refuses missing witnesses, broken sequence and unlinked names" do
+    lexical = cells()
+    valid = ~w(Can you write me a basic GenServer in a module called MyExample?)
+
+    for {words, witnesses} <- [
+      {~w(Can you write me a basic GenServer from a module called MyExample?), lexical},
+      {~w(Can you write me a basic GenServer in a file called MyExample?), lexical},
+      {~w(Can you write me a basic GenServer in a module named MyExample?), lexical},
+      {valid, Enum.reject(lexical, &(&1.norm == "module"))},
+      {valid, Enum.reject(lexical, &(&1.norm == "called"))},
+      {~w(A module called MyExample?), lexical}
+    ] do
+      report = input(words, witnesses) |> RoleCompetition.attach()
+      assert report.role_competition.identifier_bindings == []
+    end
   end
 
   test "no invented code senses, no POS inference from a CamelCase word alone" do
