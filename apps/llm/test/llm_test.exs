@@ -108,6 +108,63 @@ defmodule LlmTest do
     assert body["messages"] == [%{"role" => "user", "content" => "hello"}]
   end
 
+  test "alpaca mode sends a single MythoMax completion prompt" do
+    name = :"llm_alpaca_test_#{System.unique_integer([:positive])}"
+
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "symbrella-alpaca-test-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(tmp_dir)
+    model_path = Path.join(tmp_dir, "model.gguf")
+    server_path = Path.join(tmp_dir, "fake_llama_server.py")
+    File.write!(model_path, "fake model")
+    File.write!(server_path, fake_llama_server_script())
+    File.chmod!(server_path, 0o755)
+
+    {:ok, pid} =
+      Llm.start_link(
+        name: name,
+        auto_start_on_boot?: false,
+        allow_lazy_start?: true,
+        auto_restart_on_crash?: false,
+        heartbeat_ms: 0,
+        model_path: model_path,
+        llama_server: server_path,
+        chat_format: :alpaca,
+        n_gpu_layers: 18,
+        timeout: 5_000,
+        port: 0
+      )
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    messages = [
+      %{"role" => "system", "content" => "You are Symbrella, a conversational companion."},
+      %{"role" => "user", "content" => "take a dump"}
+    ]
+
+    assert {:ok, %{content: "fake alpaca response"}} =
+             Llm.chat(messages,
+               name: name,
+               timeout: 5_000,
+               call_timeout: 6_000,
+               max_tokens: 72
+             )
+
+    assert {:ok, %{chat_format: :alpaca, n_gpu_layers: 18}} = Llm.status(name: name)
+
+    body = model_path <> ".completion_body" |> File.read!() |> Jason.decode!()
+    assert body["n_predict"] == 72
+    assert body["temperature"] == 0.4
+    assert body["prompt"] =~ "### Instruction:"
+    assert body["prompt"] =~ "User: take a dump"
+    assert body["prompt"] =~ "### Response:"
+    refute Map.has_key?(body, "messages")
+  end
+
   defp read_child_pid!(path), do: read_child_pid!(path, 20)
 
   defp read_child_pid!(path, 0) do
@@ -185,7 +242,18 @@ defmodule LlmTest do
                 self.end_headers()
 
         def do_POST(self):
-            if self.path == "/v1/chat/completions":
+            if self.path == "/completion":
+                length = int(self.headers.get("content-length", "0"))
+                request_body = self.rfile.read(length)
+                with open(args.m + ".completion_body", "wb") as file:
+                    file.write(request_body)
+                body = json.dumps({"content": "fake alpaca response"}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/v1/chat/completions":
                 length = int(self.headers.get("content-length", "0"))
                 request_body = self.rfile.read(length)
                 with open(args.m + ".chat_body", "wb") as file:
