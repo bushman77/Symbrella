@@ -80,7 +80,7 @@ defmodule Core.Response.EvidenceRevision do
       ~r/(?:ORIGINAL QUESTION:|FAILED CHECKS:|DATED NEWS REPORTING\s*\(|Dated headline references\s*\()/iu,
       text
     ) or
-      (String.length(text) >= 60 and is_binary(user_prompt) and
+      (String.length(text) >= 60 and is_binary(user_prompt) and user_prompt != "" and
          String.contains?(text, user_prompt))
   end
 
