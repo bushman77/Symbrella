@@ -114,16 +114,28 @@ defmodule Core.Response.RequestStructure do
 
   defp validated_argument(
          %{status: :candidate, source: :original_syntax_and_dictionary_pos,
-           construction: :recipient_object, predicate: pred,
+           construction: construction, predicate: pred,
            predicate_surface: verb, recipient: rec, object_head: obj,
            object_determiner: det, object_modifier: modifier,
            object_surface: object, object_norm: norm,
            object_status: obj_status, evidence: evidence,
            meaning_verified?: false, event_verified?: false},
          roles, unknown, surfaces)
-       when is_integer(pred) and is_integer(rec) and is_integer(det) and
-            is_integer(obj) and is_list(evidence) and is_binary(verb) and
+       when construction in [:recipient_object, :direct_object] and
+            is_integer(pred) and is_integer(det) and is_integer(obj) and
+            is_list(evidence) and is_binary(verb) and
             is_binary(object) and is_binary(norm) do
+    recipient_ok? =
+      case construction do
+        :recipient_object ->
+          is_integer(rec) and rec == pred + 1 and
+            :pronoun_recipient_witness in evidence and
+            is_binary(Map.get(surfaces, rec))
+        :direct_object ->
+          is_nil(rec) and det == pred + 1 and
+            :pronoun_recipient_witness not in evidence
+      end
+
     modifiers_ok? =
       case modifier do
         nil -> obj == det + 1
@@ -144,15 +156,16 @@ defmodule Core.Response.RequestStructure do
       end
 
     required = [:supported_predicate_role, :bounded_argument_order,
-                :pronoun_recipient_witness, :determiner_witness, :nominal_head_surface]
+                :determiner_witness, :nominal_head_surface]
 
     structural? =
-      rec == pred + 1 and det == rec + 1 and modifiers_ok? and
+      recipient_ok? and
+        (construction != :recipient_object or det == rec + 1) and
+        modifiers_ok? and
         Enum.all?(required, &(&1 in evidence)) and
         Map.get(surfaces, pred) == verb and
         Map.get(surfaces, obj) == object and
         String.downcase(object) == norm and
-        is_binary(Map.get(surfaces, rec)) and
         is_binary(Map.get(surfaces, det)) and
         role_supported?(Map.get(roles, pred), pred, :predicate, "verb") and
         (is_nil(modifier) or
