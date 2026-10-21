@@ -90,7 +90,7 @@ defmodule Core.Response.LlmPrompt do
             episodic_recall_shaping(map_get(features, :episodic_recall))
           ]
           |> Enum.reject(&blank?/1)
-          |> Enum.join("\\n")
+          |> Enum.join("\n")
       })
     else
     [
