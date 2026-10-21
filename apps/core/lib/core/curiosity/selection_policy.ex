@@ -27,22 +27,38 @@ defmodule Core.Curiosity.SelectionPolicy do
       |> Enum.sort_by(fn item -> {-item.score, item.index} end)
 
     best = hd(ranked)
-    selected = if active?, do: best.candidate, else: legacy
+    chosen = if active?, do: best, else: Enum.find(ranked, &(&1.index == 0))
+    selected = chosen.candidate
     gate = CuriosityPolicy.assess(:missing_link, state)
+
+    # These fields describe the actual selection, not just the best shadow
+    # candidate. Otherwise telemetry mistakes a hypothetical learned bias for
+    # the bias that actually influenced work.
+    details = %{
+      selected_score: chosen.score,
+      selected_learned_bias: chosen.assessment.learned_bias,
+      selected_strategy: kind(selected),
+      legacy_strategy: kind(legacy),
+      shadow_strategy: kind(best.candidate)
+    }
 
     cond do
       active? and not gate.allowed? ->
-        %{status: :deferred, reason: gate.reason, selected: nil,
+        Map.merge(details, %{
+          status: :deferred, reason: gate.reason, selected: nil,
           shadow_selected: best.candidate, legacy_selected: legacy,
           mode: :active, would_defer?: true,
-          learned_bias: gate.learned_bias, score: best.score}
+          learned_bias: best.assessment.learned_bias, score: best.score
+        })
 
       true ->
-        %{status: :ready, selected: selected,
+        Map.merge(details, %{
+          status: :ready, selected: selected,
           shadow_selected: best.candidate, legacy_selected: legacy,
           mode: if(active?, do: :active, else: :shadow),
           would_defer?: not gate.allowed?,
-          learned_bias: gate.learned_bias, score: best.score}
+          learned_bias: best.assessment.learned_bias, score: best.score
+        })
     end
   end
 

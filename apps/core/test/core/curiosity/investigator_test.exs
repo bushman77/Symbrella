@@ -111,6 +111,10 @@ defmodule Core.Curiosity.InvestigatorTest do
     capture!(a, b, [120_000, 100_000])
     issue = missing_issue!(a, c)
 
+    # The single persisted parent is a two-hop planning hint only.
+    assert Enum.any?(Core.Curiosity.UnresolvedIssues.reasoning_candidates(20,
+      acquire_evidence?: true), &(&1.issue_id == issue.id and &1.strategy == :two_hop))
+
     assert %{status: :unresolved, reason: :no_two_hop_cue,
              history_id: audit_id} =
       Investigator.investigate_issue(issue.id)
@@ -169,6 +173,11 @@ defmodule Core.Curiosity.InvestigatorTest do
     assert %{kind: :direct_proof_pointer, fingerprint: fp} =
       AssociativeReasoning.propose([b, c])
     assert fp == direct.fingerprint
+
+    # A durable direct proof makes this a direct-check planning candidate,
+    # not an inferred two-hop result. The proof gate below is still mandatory.
+    assert Enum.any?(Core.Curiosity.UnresolvedIssues.reasoning_candidates(20),
+      &(&1.issue_id == issue.id and &1.strategy == :direct))
 
     assert %{status: :resolved, issue_id: id, reference_year: 2021,
              proof_id: proof_id, origin: :verified_direct_proof} =

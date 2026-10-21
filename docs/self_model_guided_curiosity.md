@@ -59,13 +59,25 @@ Plasticity adds a small exploratory preference. High cognitive load and
 inhibition lower priority and defer scheduled Brain proposals at 0.90.
 Deferral is not a fact, an issue resolution, or permission to call tools.
 
-The Core investigator reads the bounded durable missing-link queue and
-receives an advisory two_hop strategy tag only when a recorded issue identifies
-exactly one original parent proof. A parent hint is not proof authorization.
+The Core investigator reads the bounded durable missing-link queue.
+It scores four *action hints*, each grounded in its available prerequisites:
+- direct: an already stored, source-supported comparison exists for the exact
+  subject key and reference year (a single bulk query, not an authority check)
+- two_hop: the issue names exactly one positive original parent proof ID
+- acquisition: neither of the above and the independently configured evidence
+  acquisition gate is enabled
+- missing_link: no stronger hint is supported, with acquisition disabled
+
+Hints change **only selection order**. They do not force an investigation
+outcome, guarantee a proof is compatible, or enable a disabled tool. Core
+still validates the same source, contradiction, composition and issue gates.
 Core.Curiosity.SelectionPolicy compares legacy queue selection against the
 SelfModel-aware choice. Only a previously validated eligible issue can be
 selected. In shadow mode the legacy choice is executed and the suggested
-choice is reported separately.
+choice is reported separately. A policy_selection receipt in the live worker
+last_result records the actual selected hint, score, learned bias, legacy
+and hypothetical issue IDs (no subject names or raw evidence). The telemetry
+event now distinguishes real selection from the shadow recommendation.
 
 On development startup the Core self_model_policy? flag is enabled. Test and
 production default to shadow/inert. Change it to false to use shadow mode in

@@ -102,7 +102,8 @@ defmodule Core.Curiosity.Investigator do
 
         true ->
           eligible =
-            UnresolvedIssues.reasoning_candidates(@max_candidates)
+            UnresolvedIssues.reasoning_candidates(@max_candidates,
+              acquire_evidence?: acquire_evidence?(state.opts))
             |> Enum.filter(fn issue ->
               issue.kind == "missing_reasoning_link" and
                 issue.next_action == "find_linking_premise" and
@@ -156,23 +157,37 @@ defmodule Core.Curiosity.Investigator do
     legacy_id = selection.legacy_selected.issue_id
     shadow_id = selection.shadow_selected.issue_id
 
+    policy_selection = %{
+      mode: selection.mode,
+      selected_strategy: selection.selected_strategy,
+      legacy_strategy: selection.legacy_strategy,
+      shadow_strategy: selection.shadow_strategy,
+      selected_score: selection.selected_score,
+      selected_learned_bias: selection.selected_learned_bias,
+      legacy_issue_id: legacy_id,
+      shadow_issue_id: shadow_id,
+      selection_changed?: legacy_id != shadow_id
+    }
+
     :telemetry.execute(
       [:core, :curiosity, :policy_comparison],
-      %{count: 1, score: selection.score, learned_bias: selection.learned_bias},
-      %{mode: selection.mode, would_defer?: selection.would_defer?,
-        legacy_issue_id: legacy_id, shadow_issue_id: shadow_id,
-        selection_changed?: legacy_id != shadow_id}
+      %{count: 1, score: selection.score, learned_bias: selection.learned_bias,
+        selected_score: selection.selected_score,
+        selected_learned_bias: selection.selected_learned_bias},
+      Map.merge(policy_selection, %{would_defer?: selection.would_defer?})
     )
 
     case selection do
       %{status: :deferred, reason: reason} ->
         # A deferral is not an issue attempt; do not write an audit row or
         # consume the issue's one-hour retry budget.
-        %{status: :deferred, reason: reason, policy: :active}
+        %{status: :deferred, reason: reason, policy: :active,
+          policy_selection: policy_selection}
 
       %{status: :ready, selected: %{issue_id: id}, mode: mode} ->
         investigate_issue_with_options(id, opts)
         |> Map.put(:policy, mode)
+        |> Map.put(:policy_selection, policy_selection)
     end
   end
 

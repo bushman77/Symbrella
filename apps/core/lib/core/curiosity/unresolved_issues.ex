@@ -6,7 +6,8 @@ defmodule Core.Curiosity.UnresolvedIssues do
   only bounded public-knowledge uncertainties, allowing the Curiosity loop to
   prioritize an investigation when an explicit, supervised tool boundary exists.
   """
-  alias Db.CognitiveIssues
+  import Ecto.Query, only: [from: 2]
+  alias Db.{CognitiveIssues, ConsolidatedConclusion}
 
   @spec candidates(pos_integer()) :: [map()]
   def candidates(limit \\ 5)
@@ -36,14 +37,27 @@ defmodule Core.Curiosity.UnresolvedIssues do
 
   def candidates(_), do: []
 
-  @doc "Prioritize only supported reasoning-link uncertainties for silent investigation."
-  @spec reasoning_candidates(pos_integer()) :: [map()]
-  def reasoning_candidates(limit \\ 12)
+  @doc """
+  Read-only queue of independently eligible reasoning-link issues.
 
-  def reasoning_candidates(limit) when is_integer(limit) and limit > 0 do
+  Classification is a planning hint, not an authorized proof or a command.
+  A direct hint requires an already stored, source-supported pair/year proof.
+  Acquisition is a hint only when its independently controlled gate is on.
+  """
+  @spec reasoning_candidates(pos_integer(), keyword()) :: [map()]
+  def reasoning_candidates(limit \\ 12, opts \\ [])
+
+  def reasoning_candidates(limit, opts)
+      when is_integer(limit) and limit > 0 and is_list(opts) do
     if Application.get_env(:core, :symbolic_consolidation_enabled?, false) do
-      CognitiveIssues.pending_reasoning_links(min(limit, 20))
-      |> Enum.map(fn issue ->
+      issues = CognitiveIssues.pending_reasoning_links(min(limit, 20))
+      direct_pairs = source_backed_direct_pairs(issues)
+      worker_cfg = Application.get_env(:core, Core.Curiosity.Investigator, [])
+      acquire? =
+        Keyword.get(opts, :acquire_evidence?,
+          Keyword.get(worker_cfg, :acquire_evidence?, false)) == true
+
+      Enum.map(issues, fn issue ->
         %{
           issue_id: issue.id,
           kind: issue.kind,
@@ -51,9 +65,7 @@ defmodule Core.Curiosity.UnresolvedIssues do
           priority: issue.priority,
           next_action: issue.next_action,
           reference_year: issue.reference_year,
-          # Advisory only: a single original parent suggests missing-bridge
-          # reasoning, but neither the parent nor composition is authorized.
-          strategy: proposed_strategy(issue.evidence)
+          strategy: strategy_hint(issue, direct_pairs, acquire?)
         }
       end)
     else
@@ -65,9 +77,41 @@ defmodule Core.Curiosity.UnresolvedIssues do
     :exit, _ -> []
   end
 
-  def reasoning_candidates(_), do: []
+  def reasoning_candidates(_, _), do: []
 
-  defp proposed_strategy(%{"stored_proof_ids" => [id]}) when is_integer(id) and id > 0,
-    do: :two_hop
-  defp proposed_strategy(_), do: :missing_link
+  # A single bounded query avoids one DB roundtrip per candidate and verifies
+  # only the existence of compatible durable premises. The Core investigator
+  # still revalidates conflicts, source fingerprints and derivation rules.
+  defp source_backed_direct_pairs([]), do: MapSet.new()
+
+  defp source_backed_direct_pairs(issues) do
+    keys = issues |> Enum.map(& &1.subject_key) |> Enum.uniq()
+
+    Db.all(
+      from(c in ConsolidatedConclusion,
+        where: c.pair_key in ^keys and
+          c.kind == "population_comparison" and
+          c.provenance == "source_supported_symbolic_derivation",
+        select: {c.pair_key, c.reference_year},
+        distinct: true)
+    )
+    |> MapSet.new()
+  end
+
+  defp strategy_hint(issue, direct_pairs, acquire?) do
+    cond do
+      MapSet.member?(direct_pairs, {issue.subject_key, issue.reference_year}) ->
+        :direct
+
+      match?(%{"stored_proof_ids" => [id]} when is_integer(id) and id > 0,
+        issue.evidence) ->
+        :two_hop
+
+      acquire? ->
+        :acquisition
+
+      true ->
+        :missing_link
+    end
+  end
 end

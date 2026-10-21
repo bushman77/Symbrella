@@ -22,6 +22,11 @@ defmodule Core.Curiosity.SelectionPolicyTest do
 
     active = SelectionPolicy.choose(reversed, model, active?: true)
     assert active.selected.issue_id == 1
+    assert active.selected_strategy == :direct
+    assert active.selected_learned_bias == 0.12
+    assert shadow2.selected_strategy == :two_hop
+    assert shadow2.selected_learned_bias == -0.12
+    assert shadow2.shadow_strategy == :direct
   end
 
   test "hard cognitive gate applies only when active" do
@@ -44,6 +49,26 @@ defmodule Core.Curiosity.SelectionPolicyTest do
     choice = SelectionPolicy.choose(candidates, state, active?: true)
     assert choice.selected.issue_id == 11
     assert choice.legacy_selected.issue_id == 10
+    assert choice.selected_strategy == :two_hop
+    assert choice.selected_learned_bias == 0.12
+  end
+
+  test "acquisition learning changes an eligible action hint, not proof authority" do
+    candidates = [
+      %{issue_id: 1, priority: 0.60, strategy: :missing_link},
+      %{issue_id: 2, priority: 0.55, strategy: :acquisition}
+    ]
+
+    no_learning = SelectionPolicy.choose(candidates, %{}, active?: true)
+    assert no_learning.selected.issue_id == 1
+
+    learned = %{investigative_biases: %{
+      v: 1, biases: %{acquisition: 0.12, missing_link: -0.10}
+    }}
+    choice = SelectionPolicy.choose(candidates, learned, active?: true)
+    assert choice.selected.issue_id == 2
+    assert choice.selected_strategy == :acquisition
+    assert choice.selected_learned_bias == 0.12
   end
 
   test "empty queue cannot be made active by preferences" do
