@@ -1,7 +1,39 @@
 import Config
 
+# Read the model path from the current user's ~/.env without requiring the
+# shell to source it. An exported variable takes precedence over the file.
+# Only LLAMA_MODEL_PATH is read; the rest of ~/.env is left untouched.
+home = System.user_home!()
+home_env_model_path =
+  case File.read(Path.join(home, ".env")) do
+    {:ok, contents} ->
+      contents
+      |> String.split(~r/\r?\n/)
+      |> Enum.reduce(nil, fn line, previous ->
+        case Regex.run(
+               ~r/^\s*(?:export\s+)?LLAMA_MODEL_PATH\s*=\s*(.*?)\s*$/,
+               line,
+               capture: :all_but_first
+             ) do
+          [value] -> value |> String.trim() |> String.trim("\"'")
+          _ -> previous
+        end
+      end)
+
+    {:error, _reason} ->
+      nil
+  end
+
+model_path =
+  [System.get_env("LLAMA_MODEL_PATH"), home_env_model_path]
+  |> Enum.find(&(is_binary(&1) and String.trim(&1) != ""))
+  |> case do
+    nil -> nil
+    path -> Path.expand(path, home)
+  end
+
 config :llm, Llm,
-  model_path: "/home/default/models/mythomax-l2-13b.Q4_K_M.gguf",
+  model_path: model_path,
   chat_format: :alpaca,
   n_gpu_layers: 18,
   temperature: 0.75,
