@@ -48,6 +48,24 @@ defmodule Core.Response.CasualChatFlowTest do
     refute text =~ "quick TODO list"
   end
 
+  test "short harmless bodily command routes as conversation without executing an action" do
+    si = %{intent: :command, confidence: 0.8, text: "take a dump"}
+    {tone, _text, meta} = Response.plan(si, @mood)
+
+    assert tone == :warm
+    assert meta.mode == :chat
+    assert meta.action == :answer
+    assert :playful_companion_answer in meta.overrides
+    refute meta.action == :execute
+  end
+
+  test "technical imperative is not swallowed by companion banter" do
+    si = %{intent: :command, confidence: 0.8, text: "delete the database"}
+    {_tone, _text, meta} = Response.plan(si, @mood)
+
+    refute :playful_companion_answer in meta.overrides
+  end
+
   test "good morning answers as a short social turn" do
     si = %{intent: :unknown, confidence: 0.8, text: "good morning"}
 
