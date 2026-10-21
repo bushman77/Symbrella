@@ -88,7 +88,11 @@ defmodule Core.Curiosity.ComprehensionGapsTest do
     }
     context = Comprehension.context_from(si, si.comprehension)
     now = context.updated_at_ms
-    snap = snapshot(sid, context)
+    %{wm: [item]} = snapshot(sid, context)
+    # The synthetic fixture must use the real frame's clock for both fields.
+    # A hardcoded earlier timestamp makes this live-clock test fail once the
+    # runtime advances beyond the fixture date.
+    snap = %{wm: [%{item | last_bump: now}]}
 
     assert {:ok, %{kind: :comprehension_gap, uncertain_count: 1}} =
       ComprehensionGaps.from_snapshot(snap, sid, now)
