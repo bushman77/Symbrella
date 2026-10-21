@@ -131,16 +131,25 @@ defmodule Brain.Curiosity do
   @impl GenServer
   def handle_info(:tick, %{} = state) do
     {probe, base_score, self_state} = build_probe(state, %{})
+    policy = Brain.CuriosityPolicy.assess(:missing_link, self_state)
 
-    :telemetry.execute(
-      [:curiosity, :proposal],
-      %{
-        score: base_score,
-        uncertainty: Map.get(self_state, :uncertainty, 0.0),
-        novelty: Map.get(self_state, :novelty, 0.0)
-      },
-      %{probe: probe, reason: Map.get(self_state, :reason)}
-    )
+    if policy.allowed? do
+      :telemetry.execute(
+        [:curiosity, :proposal],
+        %{
+          score: base_score,
+          uncertainty: Map.get(self_state, :uncertainty, 0.0),
+          novelty: Map.get(self_state, :novelty, 0.0)
+        },
+        %{probe: probe, reason: Map.get(self_state, :reason)}
+      )
+    else
+      :telemetry.execute(
+        [:curiosity, :deferred],
+        %{count: 1},
+        %{reason: policy.reason, kind: policy.kind}
+      )
+    end
 
     next_timer =
       state
@@ -164,12 +173,16 @@ defmodule Brain.Curiosity do
 
     self_state = curiosity_self_state(opts)
 
-    default_score = if has_opt?(opts, :self_state), do: :auto, else: 0.55
-
+    # Caller-provided numeric scores remain explicit overrides. Automatic
+    # probes use the current SelfModel and durable investigation preferences.
     base =
-      case get_opt(opts, :score, default_score) do
+      case get_opt(opts, :score, :auto) do
         v when is_number(v) -> clamp01(v)
-        _ -> curiosity_score(self_state)
+        _ ->
+          {scored, _policy} =
+            Brain.CuriosityPolicy.score(curiosity_score(self_state), :missing_link, self_state)
+
+          scored
       end
 
     raw_id = get_opt(opts, :id, "curiosity|probe|alpha_zero") |> to_string()
@@ -231,6 +244,11 @@ defmodule Brain.Curiosity do
       novelty: state |> map_get(:novelty, inferred_novelty(state)) |> number_or(0.3) |> clamp01(),
       exploration: mood_map |> map_get(:exploration, 0.4) |> number_or(0.4) |> clamp01(),
       dopamine: levels |> map_get(:da, 0.4) |> number_or(0.4) |> clamp01(),
+      vigilance: state |> map_get(:vigilance, map_get(mood_map, :vigilance, 0.5)) |> number_or(0.5) |> clamp01(),
+      plasticity: state |> map_get(:plasticity, map_get(mood_map, :plasticity, 0.5)) |> number_or(0.5) |> clamp01(),
+      inhibition: state |> map_get(:inhibition, map_get(mood_map, :inhibition, 0.5)) |> number_or(0.5) |> clamp01(),
+      cognitive_load: state |> map_get(:cognitive_load, 0.0) |> number_or(0.0) |> clamp01(),
+      investigative_biases: Brain.CuriosityLearning.normalize(map_get(state, :investigative_biases, nil)),
       reason: map_get(state, :reason, :self_state)
     }
   end

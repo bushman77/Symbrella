@@ -43,4 +43,14 @@ defmodule Brain.CuriositySelfStateTest do
     assert metadata.reason == :self_state
     assert metadata.probe.score == measurements.score
   end
+
+  test "ordinary automatic nudges use learned bias rather than a fixed 0.55 score" do
+    :ok = Brain.Curiosity.nudge(self_state: %{
+      uncertainty: 0.5, novelty: 0.3,
+      investigative_biases: %{v: 1, biases: %{missing_link: 0.12}}
+    })
+
+    assert_receive {:curiosity_proposal, measurements, _metadata}, 500
+    assert measurements.score > 0.55
+  end
 end
