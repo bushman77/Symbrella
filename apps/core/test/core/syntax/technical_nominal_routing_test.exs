@@ -29,7 +29,7 @@ defmodule Core.Syntax.TechnicalNominalRoutingTest do
   defp cells do
     [cell("can", "auxiliary"), cell("you", "pronoun"),
      cell("write", "verb", ["tag:ditransitive"]),
-     %{cell("write", "verb") | id: "write|verb|5"},
+     %{cell("write", "verb", ["tag:ditransitive"]) | id: "write|verb|5"},
      %{cell("write", "verb") | id: "write|verb|2",
        semantic_atoms: ["tag:transitive"]},
      cell("me", "pronoun"), cell("a", "determiner"),
