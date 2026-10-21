@@ -54,6 +54,20 @@ defmodule Core.Response.OverrideSkills.Companion do
             llm_prompt: :companion_repair
           }}}
 
+      harmless_embodied_turn?(features) ->
+        decision =
+          decision
+          |> Decision.put(tone: :warm, mode: :chat, action: :answer)
+          |> Decision.add_override(:playful_companion_answer)
+
+        {:ok,
+         {decision,
+          %{
+            id: :playful_companion,
+            reason: :harmless_bodily_or_playful_request,
+            llm_prompt: :casual_companion
+          }}}
+
       casual_companion_turn?(features) ->
         decision =
           decision
@@ -161,6 +175,23 @@ defmodule Core.Response.OverrideSkills.Companion do
   end
 
   defp companion_boundary_turn?(_), do: false
+
+  # These are social instructions addressed to a conversational AI, not
+  # actionable device commands. Route a semantic class, never canned replies.
+  defp harmless_embodied_turn?(features) when is_map(features) do
+    text = Map.get(features, :text, "")
+    intent = Map.get(features, :intent)
+
+    is_binary(text) and String.length(text) <= 80 and
+      intent in [:command, :unknown, :smalltalk] and
+      not technical_text?(text) and
+      Regex.match?(
+        ~r/^\\s*(?:(?:take|have)\\s+(?:a\\s+)?(?:dump|nap|bath|shower|breather)|(?:go\\s+)?(?:sleep|dance|sing|sneeze)|(?:eat|drink)\\s+[^?!.]{1,35})[.!?]*\\s*$/iu,
+        text
+      )
+  end
+
+  defp harmless_embodied_turn?(_), do: false
 
   defp casual_companion_turn?(features) when is_map(features) do
     text = Map.get(features, :text, "")
