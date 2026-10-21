@@ -205,7 +205,7 @@ defmodule Brain.LIFG.Stage1.PosBias do
   defp noun_witness?(phrases, idx) do
     case Map.get(phrases, idx) do
       word when is_binary(word) and word != "" ->
-        Regex.match?(~r/\\A\\p{L}[\\p{L}'-]*\\z/u, word) and
+        Regex.match?(~r/\A\p{L}[\p{L}'-]*\z/u, word) and
           not MapSet.member?(@predicate_auxiliaries, word) and
           not MapSet.member?(@predicate_modifiers, word)
       _ -> false
