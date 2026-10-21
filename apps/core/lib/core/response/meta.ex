@@ -77,6 +77,7 @@ defmodule Core.Response.Meta do
     |> Map.take([:status, :issues, :applied?, :repair_count, :critique,
                  :draft_sha256, :final_sha256])
     |> maybe_put_answer_revision(Map.get(reflection, :answer_revision))
+    |> maybe_put_code_request_repair(Map.get(reflection, :code_request_repair))
     |> maybe_put_grounded_revision(Map.get(reflection, :grounded_revision))
     |> maybe_put_authoritative_plan(Map.get(reflection, :authoritative_plan))
     |> maybe_put_projected_expression_repair(
@@ -94,6 +95,17 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_answer_revision(summary, _), do: summary
+
+  # Report only the bounded outcome, never generated source or prompts.
+  defp maybe_put_code_request_repair(summary, %{} = repair) do
+    Map.put(summary, :code_request_repair,
+      Map.take(repair, [
+        :attempted?, :outcome, :selected_source, :source_verified?,
+        :executed?, :persisted?
+      ]))
+  end
+
+  defp maybe_put_code_request_repair(summary, _), do: summary
 
   defp maybe_put_grounded_revision(summary, %{} = revision) do
     safe_fields =
