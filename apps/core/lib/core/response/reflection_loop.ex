@@ -13,6 +13,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Response.GreetingTurn
   alias Core.Response.EvidenceRevision
   alias Core.Response.AnswerAdequacy
+  alias Core.Response.CodeRequest
   alias Core.Response.SpeakerLocationFidelity
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.PlaceLocation
@@ -124,6 +125,7 @@ defmodule Core.Response.ReflectionLoop do
       :robotic_self_state
     )
     |> maybe_issue(overclaims_self_awareness?(draft_text), :overclaimed_self_awareness)
+    |> maybe_issue(CodeRequest.missing?(context, draft_text), :requested_code_missing)
     |> maybe_issue(
       AnswerAdequacy.failed_answer?(
         Map.get(context, :answer_target_question, user_text), draft_text
@@ -180,7 +182,7 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :robotic_self_state in issues or :robotic_greeting in issues or
-          :answer_not_supplied in issues ->
+          :answer_not_supplied in issues or :requested_code_missing in issues ->
         {:repair, issues}
 
       :low_confidence in issues and (:unknown_intent in issues or :too_generic in issues) ->
@@ -289,6 +291,11 @@ defmodule Core.Response.ReflectionLoop do
         :answer_not_supplied in issues ->
           "I couldn't establish a reliable answer to that question from the available information."
 
+        :requested_code_missing in issues ->
+          # Model revision/fallback is handled in LlmSynthesis. Keep the
+          # original text as evidence of the failed draft, not proof of success.
+          final_text
+
         :leaked_hidden_context in issues and (final_text == "" or final_text == draft_text) ->
           hidden_context_fallback(user_text)
 
@@ -309,6 +316,9 @@ defmodule Core.Response.ReflectionLoop do
 
         :speaker_location_fidelity in issues ->
           "The assistant attributed an unverified physical location to a conversation participant, or repeated a recently disputed self-location assertion. Current physical location requires its own verified evidence; public geographic facts and chat claims cannot establish it."
+        :requested_code_missing in issues ->
+          "The draft did not supply the requested named code artifact. " <>
+            "Retry with an actual source example; do not invent execution results."
         :answer_not_supplied in issues ->
           "The draft only echoed the factual question or gave an empty non-answer. Retry from the actual question and its existing evidence; never invent a numeric result."
         :robotic_greeting in issues ->
