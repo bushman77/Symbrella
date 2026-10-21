@@ -52,6 +52,7 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert state.session.pending.term == "glimmerflux"
     assert state.learning.bias == 0.0
     assert state.learning.success_count == 0
+    assert state.session.last_decision == :clarification_proposed
     assert state.learning.cooldown_ms == 600_000
     assert ClarificationLoop.snapshot("other-session", server).session.pending == nil
 
@@ -123,6 +124,28 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert result.learning.cooldown_ms == 540_000
     assert ClarificationLoop.cooldown_for(25) == 360_000
     assert result.session.last_outcome == :verified_improvement
+  end
+
+  test "real pipeline user source is :prod with :user_turn provenance" do
+    input = %{si(sid()) | source: :prod}
+    |> Map.put(:experience_origin, :user_turn)
+
+    gap = {:ok, %{status: :review_required,
+      next_action: :consider_user_clarification, age_ms: 10}}
+
+    assert {:eligible, "glimmerflux"} =
+      ClarificationLoop.diagnose(input, gap, "Interesting design.", @meta)
+
+    assert {:ok, "glimmerflux"} =
+      ClarificationLoop.proposal(input, gap, "Interesting design.", @meta)
+
+    assert {:skip, :not_user_originated} =
+      ClarificationLoop.diagnose(%{input | experience_origin: :synthetic},
+        gap, "Interesting design.", @meta)
+
+    assert {:skip, :not_user_originated} =
+      ClarificationLoop.diagnose(%{input | source: :test},
+        gap, "Interesting design.", @meta)
   end
 
   test "real-world factual questions, repaired answers, guardrail cases and unknown unrelated terms never prompt" do

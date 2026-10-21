@@ -76,7 +76,20 @@ defmodule Core.Curiosity.ClarificationLoop do
 
   @doc "Pure, conservative eligibility policy. Never infer facts from a gap."
   @spec proposal(map(), term(), String.t(), map()) :: {:ok, String.t()} | :none
-  def proposal(%{} = si, {:ok, %{status: :review_required,
+  def proposal(si, gap, reply, meta) do
+    case diagnose(si, gap, reply, meta) do
+      {:eligible, term} -> {:ok, term}
+      {:skip, _reason} -> :none
+    end
+  end
+
+  @doc """
+  Read-only diagnostic for why a completed turn can or cannot ask a
+  clarification question. Reasons are bounded atoms, not user text.
+  """
+  @spec diagnose(term(), term(), term(), term()) ::
+          {:eligible, String.t()} | {:skip, atom()}
+  def diagnose(%{} = si, {:ok, %{status: :review_required,
       next_action: :consider_user_clarification, age_ms: age}}, reply, meta)
       when is_integer(age) and age >= 0 and age <= 5 * 60_000 and
            is_binary(reply) and is_map(meta) do
@@ -86,30 +99,57 @@ defmodule Core.Curiosity.ClarificationLoop do
     reviewed = get(meta, :response_reflection, %{})
 
     cond do
-      get(comprehension, :degraded?) != true -> :none
-      not is_binary(sentence) or String.contains?(sentence, "?") -> :none
-      not is_binary(reply) or String.contains?(reply, "?") -> :none
-      get(si, :source, :user) != :user -> :none
-      get(si, :intent) not in [:statement, :unknown, :inform, :tell] -> :none
-      Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) -> :none
-      get(action, :risk) != :low or get(action, :selected_action) != :answer_user -> :none
-      get(meta, :response_source) != :llm -> :none
-      get(reviewed, :status, :accept) in [:reject, :clarify] -> :none
+      get(comprehension, :degraded?) != true ->
+        {:skip, :comprehension_not_degraded}
+
+      not is_binary(sentence) or String.contains?(sentence, "?") ->
+        {:skip, :factual_or_question_turn}
+
+      String.contains?(reply, "?") ->
+        {:skip, :reply_already_asks_question}
+
+      not user_originated_turn?(si) ->
+        {:skip, :not_user_originated}
+
+      get(si, :intent) not in [:statement, :unknown, :inform, :tell] ->
+        {:skip, :intent_not_statement}
+
+      Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) ->
+        {:skip, :safety_sensitive}
+
+      get(action, :risk) != :low or get(action, :selected_action) != :answer_user ->
+        {:skip, :agency_not_approved}
+
+      get(meta, :response_source) != :llm ->
+        {:skip, :not_normal_llm_reply}
+
+      get(reviewed, :status, :accept) in [:reject, :clarify] ->
+        {:skip, :response_not_final}
+
       true ->
-        comprehension
-        |> get(:unresolved, [])
-        |> List.wrap()
-        |> Enum.find_value(fn term ->
-          if eligible_focus?(term), do: {:ok, String.trim(term)}, else: nil
-        end)
-        |> case do
-          nil -> :none
-          value -> value
+        terms =
+          comprehension
+          |> get(:unresolved, [])
+          |> List.wrap()
+          |> Enum.filter(&eligible_focus?/1)
+          |> Enum.sort_by(&String.length/1, :desc)
+
+        case terms do
+          [term | _] -> {:eligible, String.trim(term)}
+          [] -> {:skip, :no_eligible_unresolved_term}
         end
     end
   end
 
-  def proposal(_, _, _, _), do: :none
+  def diagnose(_, _, _, _), do: {:skip, :no_fresh_session_gap}
+
+  # :source is a pipeline execution mode (:prod) in Core.resolve_input.
+  # User provenance is independently marked with :experience_origin.
+  # Never treat internal production events as user speech.
+  defp user_originated_turn?(si) do
+    get(si, :source) == :user or
+      (get(si, :source) == :prod and get(si, :experience_origin) == :user_turn)
+  end
 
   @impl true
   def init(opts) do
@@ -140,6 +180,7 @@ defmodule Core.Curiosity.ClarificationLoop do
         cooldown_ms: cooldown_for(credited)},
       session: %{pending: Map.get(session, :pending),
         last_outcome: Map.get(session, :last_outcome),
+        last_decision: Map.get(session, :last_decision),
         last_asked_ms: Map.get(session, :last_asked_ms)}
     }
     {:reply, summary, state}
@@ -163,7 +204,10 @@ defmodule Core.Curiosity.ClarificationLoop do
 
           receipt = %{outcome: outcome, term: pending.term,
             verified?: outcome == :verified_improvement, at_ms: now}
-          session = session |> Map.put(:pending, nil) |> Map.put(:last_outcome, outcome)
+          session = session
+            |> Map.put(:pending, nil)
+            |> Map.put(:last_outcome, outcome)
+            |> Map.put(:last_decision, :followup_evaluated)
           updated = state
             |> put_session(sid, session)
             |> Map.update!(:receipts, &[receipt | &1] |> Enum.take(@max_receipts))
@@ -174,8 +218,8 @@ defmodule Core.Curiosity.ClarificationLoop do
 
         state.auto_ask? and
             now - Map.get(session, :last_asked_ms, 0) >= cooldown_for(credited) ->
-          case proposal(si, gap, reply, meta) do
-            {:ok, term} ->
+          case diagnose(si, gap, reply, meta) do
+            {:eligible, term} ->
               # A slightly positive verified-feedback history makes proposals
               # more competitive without ever bypassing the hard safety gates.
               score = 0.58 + min(credited * 0.03, 0.12)
@@ -184,7 +228,10 @@ defmodule Core.Curiosity.ClarificationLoop do
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
                   asked_at_ms: now, source: :session_comprehension_gap}
                 state2 = state
-                  |> put_session(sid, Map.merge(session, %{pending: pending, last_asked_ms: now}))
+                  |> put_session(sid, Map.merge(session, %{
+                    pending: pending, last_asked_ms: now,
+                    last_decision: :clarification_proposed
+                  }))
                   |> Map.update!(:attempts, &(&1 + 1))
                 :telemetry.execute([:core, :curiosity, :clarification_prompt],
                   %{proposed: 1, score: score},
@@ -195,11 +242,14 @@ defmodule Core.Curiosity.ClarificationLoop do
                 {:reply, :none, state}
               end
 
-            :none -> {:reply, :none, state}
+            {:skip, reason} ->
+              updated = put_session(state, sid, Map.put(session, :last_decision, reason))
+              {:reply, :none, updated}
           end
 
         true ->
-          {:reply, :none, state}
+          updated = put_session(state, sid, Map.put(session, :last_decision, :cooldown))
+          {:reply, :none, updated}
       end
     else
       {:reply, :none, state}
