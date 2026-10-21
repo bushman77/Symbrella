@@ -21,6 +21,8 @@ defmodule Llm do
   use GenServer
   require Logger
 
+  alias Llm.AlpacaPrompt
+
   @type message :: %{required(:role) => String.t(), required(:content) => String.t()}
 
   @default_host "127.0.0.1"
@@ -129,6 +131,8 @@ defmodule Llm do
       # runner config
       llama_server: llama_server,
       model_path: model_path,
+      chat_format: Keyword.get(boot, :chat_format, :openai),
+      n_gpu_layers: Keyword.get(boot, :n_gpu_layers, 0),
       host: Keyword.get(boot, :host, @default_host),
       port: Keyword.get(boot, :port, 0),
       ctx: Keyword.get(boot, :ctx, @default_ctx),
@@ -216,6 +220,8 @@ defmodule Llm do
         manual_stop?: state.manual_stop?,
         endpoint: state.endpoint,
         model_path: state.model_path,
+        chat_format: state.chat_format,
+        n_gpu_layers: state.n_gpu_layers,
         ctx: state.ctx,
         threads: state.threads,
         reachable?: reachable?,
@@ -286,16 +292,9 @@ defmodule Llm do
 
     with {:ok, st} <- ensure_ready(state, ready_timeout),
          messages <- normalize_messages(prompt),
-         body <- %{
-           "model" => "local",
-           "messages" => messages,
-           "temperature" => temperature,
-           "stream" => false,
-           "stop" => @chat_stop_sequences
-         },
-         body <- maybe_put_positive_integer(body, "max_tokens", Keyword.get(opts, :max_tokens)),
-         {:ok, raw} <- http_post(st, "/v1/chat/completions", body, timeout: timeout),
-         content <- extract_chat_content(raw) do
+         {endpoint, body} <- chat_request(st, messages, temperature, opts),
+         {:ok, raw} <- http_post(st, endpoint, body, timeout: timeout),
+         content <- extract_response_content(raw, st.chat_format) do
       {:reply, {:ok, %{content: content, raw: raw}}, st}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -488,6 +487,39 @@ defmodule Llm do
     end
   end
 
+  defp chat_request(%{chat_format: :alpaca}, messages, temperature, opts) do
+    body = %{
+      "prompt" => AlpacaPrompt.render(messages),
+      "temperature" => temperature,
+      "top_k" => 40,
+      "top_p" => 0.9,
+      "repeat_penalty" => 1.1,
+      "stream" => false,
+      "stop" => ["\\n### Instruction:", "\\n### Response:", "\\nUser:", "\\nSymbrella:"]
+    }
+
+    {"/completion", maybe_put_positive_integer(body, "n_predict", Keyword.get(opts, :max_tokens))}
+  end
+
+  defp chat_request(_state, messages, temperature, opts) do
+    body = %{
+      "model" => "local",
+      "messages" => messages,
+      "temperature" => temperature,
+      "stream" => false,
+      "stop" => @chat_stop_sequences
+    }
+
+    {"/v1/chat/completions",
+     maybe_put_positive_integer(body, "max_tokens", Keyword.get(opts, :max_tokens))}
+  end
+
+  defp extract_response_content(%{"content" => content}, :alpaca) when is_binary(content),
+    do: sanitize_model_text(content)
+
+  defp extract_response_content(_reply, :alpaca), do: ""
+  defp extract_response_content(reply, _), do: extract_chat_content(reply)
+
   defp spawn_llama_server(state, port_int) do
     exe = resolve_executable!(state.llama_server)
 
@@ -504,6 +536,13 @@ defmodule Llm do
         "--port",
         Integer.to_string(port_int)
       ]
+
+    args =
+      if is_integer(state.n_gpu_layers) and state.n_gpu_layers > 0 do
+        args ++ ["--n-gpu-layers", Integer.to_string(state.n_gpu_layers)]
+      else
+        args
+      end
 
     Logger.debug("Llm spawning: #{exe} #{Enum.join(args, " ")}")
 
@@ -879,6 +918,8 @@ defmodule Llm do
   defp apply_overrides(state, opts) do
     state
     |> maybe_put(:model_path, Keyword.get(opts, :model_path))
+    |> maybe_put(:chat_format, Keyword.get(opts, :chat_format))
+    |> maybe_put(:n_gpu_layers, Keyword.get(opts, :n_gpu_layers))
     |> maybe_put(:llama_server, Keyword.get(opts, :llama_server))
     |> maybe_put(:host, Keyword.get(opts, :host))
     |> maybe_put(:port, Keyword.get(opts, :port))
