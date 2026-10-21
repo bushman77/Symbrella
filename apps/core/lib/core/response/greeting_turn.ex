@@ -8,13 +8,18 @@ defmodule Core.Response.GreetingTurn do
   This is response-style evidence, never a substitute for LIFG/ATL parsing.
   """
 
-  @standalone ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|even+i+ng))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
+  @standalone ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
 
   @service_desk ~r/\b(?:how\s+(?:may|can)\s+i\s+(?:assist|help)\s+you(?:\s+(?:today|with\b[^.!?]*))?|what\s+can\s+i\s+(?:do|help\s+you\s+with)\s+for\s+you|is\s+there\s+anything\s+(?:else\s+)?i\s+can\s+(?:help|assist)\s+(?:you\s+)?with|let\s+me\s+know\s+(?:how|if)\s+i\s+can\s+help)\b[^.!?]*[.!?]*/iu
 
   @unnecessary_clarification ~r/\b(?:not\s+(?:entirely\s+)?sure\s+what\s+you\s+mean|could\s+you\s+(?:please\s+)?(?:clarify|rephrase|restate))\b/iu
 
-  @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|even+i+ng))\s*,?\s*symbrella\b/iu
+  # These indicate the model is describing a simple greeting instead of replying.
+  # Only apply them after the incoming turn has been proven to be a standalone greeting.
+  @meta_greeting ~r/\b(?:i\s+(?:understand|see|recognize)\s+(?:that\s+)?you(?:'re| are)\s+(?:saying|greeting)|if\s+you(?:'re| are)\s+just\s+saying\s+(?:hello|hi)|you(?:'re| are)\s+(?:just\s+)?greeting\s+me)\b/iu
+  @interview_prompt ~r/\b(?:is\s+there\s+anything\s+(?:specific|in\s+particular)\s+you(?:'d| would)?\s+like\s+to\s+(?:discuss|ask)|i(?:'m| am)\s+here\s+to\s+(?:assist|help)\s+you)\b/iu
+
+  @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))\s*,?\s*symbrella\b/iu
 
   @doc "True only for an isolated social greeting, optionally addressing Symbrella."
   @spec standalone?(term()) :: boolean()
@@ -27,7 +32,9 @@ defmodule Core.Response.GreetingTurn do
       when is_binary(user_text) and is_binary(draft) do
     standalone?(user_text) and
       (Regex.match?(@service_desk, draft) or Regex.match?(@echoed_name, draft) or
-         Regex.match?(@unnecessary_clarification, draft))
+         Regex.match?(@unnecessary_clarification, draft) or
+         Regex.match?(@meta_greeting, draft) or
+         Regex.match?(@interview_prompt, draft))
   end
 
   def robotic_draft?(_, _), do: false
@@ -43,7 +50,9 @@ defmodule Core.Response.GreetingTurn do
       not standalone?(user_text) ->
         draft
 
-      Regex.match?(@unnecessary_clarification, draft) ->
+      Regex.match?(@unnecessary_clarification, draft) or
+          Regex.match?(@meta_greeting, draft) or
+          Regex.match?(@interview_prompt, draft) ->
         safe_acknowledgement(user_text)
 
       true ->
@@ -66,9 +75,12 @@ defmodule Core.Response.GreetingTurn do
   def repair(_user_text, draft), do: draft
 
   defp safe_acknowledgement(text) do
-    case Regex.run(~r/\bgood\s+(morning|afternoon|even+i+ng)\b/iu, text) do
+    case Regex.run(~r/\bgood\s+(morning|afternoon|eve(?:n+i+|i+)ng)\b/iu, text) do
       [_, time] ->
-        greeting = if Regex.match?(~r/^even+i+ng$/iu, time), do: "evening", else: String.downcase(time)
+        greeting =
+          if Regex.match?(~r/^eve(?:n+i+|i+)ng$/iu, time),
+            do: "evening",
+            else: String.downcase(time)
         "Good #{greeting}."
       _ -> "Hello."
     end
