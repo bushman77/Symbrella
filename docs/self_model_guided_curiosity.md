@@ -50,6 +50,31 @@ An autonomous outcome never directly increments global factual confidence:
 success at one population investigation says nothing about unrelated claims.
 It affects only proposal scoring and prioritization.
 
+## Clarification outcome feedback (first live milestone)
+
+`Core.Curiosity.ClarificationLoop` is a supervised, separately bounded
+GenServer. In development it may append a *separate* clarification prompt to
+a normal LiveView answer, but only for a recent session-local degraded
+comprehension with an explicitly unresolved lexical token in a non-question
+user statement. High-risk actions, repaired/clarify responses, factual/news
+questions and already-questioning replies are excluded. No automatic prompt
+is attached to the US–Iran current-events question.
+
+The next completed user turn settles that pending opportunity. A term-linked
+new `lexical_constructions` entry with independently verified dictionary
+sense, definition and contextual score >= 0.12 is the **only** positive
+`:verified_improvement` signal. A user-supplied explanation without such
+independent evidence is recorded as `:clarification_received_unverified`,
+never a factual claim or training reward. Missing term reference yields
+`:unrelated_followup`. The global clarification bias is capped at +0.12;
+it has no access to `Brain.CuriosityLearning` population-proof biases.
+
+State and bounded receipts are currently BEAM-local and reset on restart.
+Live diagnostics for a known chat session key:
+
+    Core.Curiosity.ClarificationLoop.snapshot(session_id)
+    Core.Curiosity.ComprehensionGaps.for_session(session_id)
+
 ## Separate comprehension uncertainty
 
 A zero-candidate reasoning queue does not mean there are no language

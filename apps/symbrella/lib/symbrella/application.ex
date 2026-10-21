@@ -157,6 +157,10 @@ defmodule Symbrella.Application do
       # unless independently enabled; it never sends unsolicited chat.
       {Core.Curiosity.Investigator, []},
 
+      # Separate session-scoped clarification receipts and verified lexical
+      # feedback. Never rewrites symbolic facts or proof-based Curiosity.
+      {Core.Curiosity.ClarificationLoop, []},
+
       # Observes self-portrait salience.
       Brain.DriveLoop
     ]

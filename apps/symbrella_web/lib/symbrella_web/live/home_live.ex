@@ -278,6 +278,14 @@ defmodule SymbrellaWeb.HomeLive do
 
     ChatHistory.append(socket.assigns.session_id, bot)
 
+    # Only the completed semantic input can open/resolve a supervised
+    # clarification. This cannot change the already-delivered answer, create
+    # verified facts, or affect the independent proof-based investigator.
+    clarification =
+      Core.Curiosity.ClarificationLoop.observe(
+        socket.assigns.session_id, si, reply_text, meta || %{}
+      )
+
     maybe_archive_completed_turn(
       socket.assigns,
       bot_id,
@@ -291,19 +299,42 @@ defmodule SymbrellaWeb.HomeLive do
       Map.get(reply, :final_trace_status)
     )
 
-    {:noreply,
-     socket
-     |> assign(
-       bot_typing: false,
-       pending_task: nil,
-       pending_user_turn: nil,
-       message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, explain_text),
-       explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
-     )
-     |> stream_insert(:messages, bot)
-     |> push_event("chat:scroll", %{to: "composer"})
-     |> schedule_curiosity_idle()}
+    socket =
+      socket
+      |> assign(
+        bot_typing: false,
+        pending_task: nil,
+        pending_user_turn: nil,
+        message_text_by_id: Map.put(socket.assigns.message_text_by_id, bot_id, explain_text),
+        explain_by_id: Map.put(socket.assigns.explain_by_id, bot_id, explain_payload)
+      )
+      |> stream_insert(:messages, bot)
+      |> maybe_display_clarification(clarification)
+      |> push_event("chat:scroll", %{to: "composer"})
+      |> schedule_curiosity_idle()
+
+    {:noreply, socket}
   end
+
+  defp maybe_display_clarification(socket, {:ask, question, diagnostics}) do
+    prompt_id = "clarification-" <> Integer.to_string(System.unique_integer([:positive]))
+    payload = ChatHTML.explain_payload_for(%{
+      id: prompt_id, text: question, tone: :curious,
+      intent: :clarification, from: diagnostics
+    })
+    bot = %{id: prompt_id, role: :assistant, text: question, tone: :curious,
+      meta: diagnostics, session_id: socket.assigns.session_id,
+      explain_text: question, explain_payload: payload}
+    ChatHistory.append(socket.assigns.session_id, bot)
+    socket
+    |> assign(
+      message_text_by_id: Map.put(socket.assigns.message_text_by_id, prompt_id, question),
+      explain_by_id: Map.put(socket.assigns.explain_by_id, prompt_id, payload)
+    )
+    |> stream_insert(:messages, bot)
+  end
+
+  defp maybe_display_clarification(socket, _), do: socket
 
   @impl true
   def handle_info({ref, _payload}, socket) when is_reference(ref) do

@@ -117,6 +117,13 @@ config :core, Core.Brain.WM.Comprehension,
 config :core, Core.Brain.WM.VerifiedSemantics,
   enabled?: config_env() == :dev
 
+# A conservative clarification opportunity after an uncertain user statement.
+# The prompt is separate from the existing answer and never interrupts news
+# or factual questions. Receipts are BEAM-local until durable storage is added.
+config :core, Core.Curiosity.ClarificationLoop,
+  enabled?: config_env() == :dev,
+  auto_ask?: config_env() == :dev
+
 config :core, Core.Curiosity.Bridge,
   threshold: 0.60,
   min_gap_ms: 30_000
