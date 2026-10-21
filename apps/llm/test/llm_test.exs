@@ -132,6 +132,7 @@ defmodule LlmTest do
         llama_server: server_path,
         chat_format: :alpaca,
         n_gpu_layers: 18,
+        temperature: 0.75,
         timeout: 5_000,
         port: 0
       )
@@ -156,9 +157,9 @@ defmodule LlmTest do
 
     assert {:ok, %{chat_format: :alpaca, n_gpu_layers: 18}} = Llm.status(name: name)
 
-    body = model_path <> ".completion_body" |> File.read!() |> Jason.decode!()
+    body = (model_path <> ".completion_body") |> File.read!() |> Jason.decode!()
     assert body["n_predict"] == 72
-    assert body["temperature"] == 0.4
+    assert body["temperature"] == 0.75
     assert body["prompt"] =~ "### Instruction:"
     assert body["prompt"] =~ "User: take a dump"
     assert body["prompt"] =~ "### Response:"
