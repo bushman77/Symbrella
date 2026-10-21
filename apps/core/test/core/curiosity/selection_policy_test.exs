@@ -1,6 +1,7 @@
 defmodule Core.Curiosity.SelectionPolicyTest do
   use ExUnit.Case, async: true
   alias Core.Curiosity.SelectionPolicy
+  alias Brain.CuriosityLearning
 
   test "shadow mode reports but never changes legacy selection" do
     candidates = [
@@ -69,6 +70,44 @@ defmodule Core.Curiosity.SelectionPolicyTest do
     assert choice.selected.issue_id == 2
     assert choice.selected_strategy == :acquisition
     assert choice.selected_learned_bias == 0.12
+  end
+
+  test "a proof-authorized outcome causally changes the next eligible selection" do
+    queue = [
+      %{issue_id: 10, priority: 0.60, strategy: :missing_link},
+      %{issue_id: 11, priority: 0.59, strategy: :direct}
+    ]
+
+    before = SelectionPolicy.choose(queue, %{}, active?: true)
+    assert before.selected.issue_id == 10
+
+    # The completed receipt is corroborated by the persisted issue's proof
+    # lineage. No selection decision is allowed to create either record.
+    projection =
+      CuriosityLearning.project(
+        [%{
+          issue_id: 99, completed_at: :done, status: "resolved",
+          origin: "verified_direct_proof", acquisition: "not_attempted"
+        }],
+        %{99 => %{status: "resolved",
+          resolution: %{"reasoning_rule" => "direct_population_comparison", "proof_id" => 42}}}
+      )
+
+    assert projection.success_count == 1
+    assert projection.biases.direct > projection.biases.missing_link
+
+    after_learning =
+      SelectionPolicy.choose(queue, %{investigative_biases: projection}, active?: true)
+    assert after_learning.selected.issue_id == 11
+    assert after_learning.selected_strategy == :direct
+    assert after_learning.selected_learned_bias == projection.biases.direct
+
+    # Passive replay reports the improved proposal but retains legacy work.
+    shadow = SelectionPolicy.choose(queue, %{investigative_biases: projection})
+    assert shadow.mode == :shadow
+    assert shadow.selected.issue_id == 10
+    assert shadow.shadow_selected.issue_id == 11
+    assert shadow.selected_learned_bias == projection.biases.missing_link
   end
 
   test "empty queue cannot be made active by preferences" do

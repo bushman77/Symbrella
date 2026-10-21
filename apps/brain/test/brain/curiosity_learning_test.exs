@@ -33,6 +33,8 @@ defmodule Brain.CuriosityLearningTest do
     assert projection.biases.direct > 0
     assert projection.biases.two_hop > 0
     assert projection.biases.acquisition > 0
+    assert projection.biases.direct > projection.biases.missing_link
+    assert projection.biases.two_hop > projection.biases.missing_link
   end
 
   test "duplicate audit entries, incomplete attempts, and invented proof identities earn nothing" do

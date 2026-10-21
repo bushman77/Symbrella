@@ -106,20 +106,33 @@ defmodule Brain.CuriosityLearning do
   defp valid_parents?(_, _), do: false
 
   defp accumulate(outcome, state) do
-    {credit, keys, success?, failure?} =
+    # Evidence-backed outcomes reinforce the strategy that actually worked.
+    # Only a smaller part reinforces generic missing-link investigation;
+    # equal credit would cancel the preference when comparing two candidate
+    # strategies. Conflicts likewise penalize the affected strategy more
+    # strongly than unrelated curiosity.
+    {credits, success?, failure?} =
       case outcome do
-        :verified_existing_direct -> {0.025, [:missing_link, :direct], true, false}
-        :verified_acquired_direct -> {0.060, [:missing_link, :direct, :acquisition], true, false}
-        :verified_two_hop -> {0.040, [:missing_link, :two_hop], true, false}
-        :verified_acquired_two_hop -> {0.060, [:missing_link, :two_hop, :acquisition], true, false}
-        :unresolved_direct_conflict -> {-0.012, [:missing_link, :direct], false, true}
-        :unresolved_two_hop_conflict -> {-0.012, [:missing_link, :two_hop], false, true}
-        :failed -> {-0.008, [:missing_link], false, true}
-        _ -> {0.0, [], false, false}
+        :verified_existing_direct ->
+          {[missing_link: 0.008, direct: 0.025], true, false}
+        :verified_acquired_direct ->
+          {[missing_link: 0.012, direct: 0.030, acquisition: 0.060], true, false}
+        :verified_two_hop ->
+          {[missing_link: 0.010, two_hop: 0.040], true, false}
+        :verified_acquired_two_hop ->
+          {[missing_link: 0.012, two_hop: 0.040, acquisition: 0.060], true, false}
+        :unresolved_direct_conflict ->
+          {[missing_link: -0.003, direct: -0.012], false, true}
+        :unresolved_two_hop_conflict ->
+          {[missing_link: -0.003, two_hop: -0.012], false, true}
+        :failed ->
+          {[missing_link: -0.008], false, true}
+        _ ->
+          {[], false, false}
       end
 
     bias =
-      Enum.reduce(keys, state.biases, fn key, acc ->
+      Enum.reduce(credits, state.biases, fn {key, credit}, acc ->
         Map.update!(acc, key, &bound(&1 + credit))
       end)
 

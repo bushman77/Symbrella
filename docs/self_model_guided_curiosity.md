@@ -31,9 +31,13 @@ proof lineage agree with the audit outcome.
 - ignored: incomplete, unsupported, duplicate or uncorroborated success claims
 
 Only the most recent completed attempt per issue is considered, preventing
-repeat rewards. Strategy biases are limited to [-0.12, 0.12] for missing_link,
-direct, two_hop and acquisition. A bounded recent-history window lets older
-influence age out without inventing synthetic events.
+repeat rewards. A verified outcome credits the successful specific strategy
+more than the general missing_link strategy; otherwise identical bias
+increments cancel when ranking different candidates. Protective conflict
+penalties are similarly more specific than broad. Strategy biases are limited
+to [-0.12, 0.12] for missing_link, direct, two_hop and acquisition. A bounded
+recent-history window lets older influence age out without inventing
+synthetic events.
 
 The v1 learning projection is embedded in Brain.SelfModel as the separately
 versioned investigative_biases field, and is included in ordinary model
@@ -78,6 +82,9 @@ choice is reported separately. A policy_selection receipt in the live worker
 last_result records the actual selected hint, score, learned bias, legacy
 and hypothetical issue IDs (no subject names or raw evidence). The telemetry
 event now distinguishes real selection from the shadow recommendation.
+An end-to-end pure regression test projects a corroborated receipt into the
+SelfModel preference, then proves the resulting bias changes the next active
+selection while shadow mode preserves the legacy choice.
 
 On development startup the Core self_model_policy? flag is enabled. Test and
 production default to shadow/inert. Change it to false to use shadow mode in
