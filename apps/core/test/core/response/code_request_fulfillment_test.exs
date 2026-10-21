@@ -266,7 +266,9 @@ defmodule Core.Response.CodeRequestFulfillmentTest do
       %{request_structure: Map.put(ctx.request_structure, :module_name, "MyExample;exit")},
       %{request_structure: Map.put(ctx.request_structure, :requested_object, "Report")},
       %{request_structure: Map.put(ctx.request_structure, :meaning_verified?, true)},
-      %{user_text: "Write a book about Elixir"}
+      %{user_text: "Write a book about Elixir"},
+      %{user_text: @question |> String.trim_trailing("?") <>
+        " that also manages a distributed worker pool?"}
     ] do
       modified = Map.merge(ctx, changes)
       refute CodeRequest.eligible?(modified)
