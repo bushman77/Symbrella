@@ -3,9 +3,10 @@ defmodule Core.Curiosity.ClarificationLoop do
   Supervised, bounded conversation-clarification feedback.
 
   A user-visible question is proposed only for a recent, same-session,
-  explicitly unresolved lexical term in a nonfactual statement. A narrow
-  approved generic clarification can be refined into a lexical question;
-  substantive answers and specific questions remain untouched. On the *next user turn*, a
+  explicitly unresolved lexical term in a nonfactual statement. When agency
+  approves a clarification for a single grounded lexical gap, Core owns the
+  clarification target; LLM wording cannot veto that decision. An existing
+  term-definition question is preserved. On the *next user turn*, a
   clarification is credited only when an independently dictionary-verified
   lexical construction for the same term appears in that turn's Core SI.
   A user explanation alone is NOT a verified dictionary sense or a fact.
@@ -61,27 +62,6 @@ defmodule Core.Curiosity.ClarificationLoop do
   # sentence. Do not rewrite a specific question about an actual concept,
   # an informative answer, or a multi-question reply.
   @generic_opening ~r/\A(?:(?:congratulations|(?:that|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
-  # Agency has already selected and safety-approved a clarification in this
-  # path. A vague question about work "with it" does not request the meaning
-  # of the unknown word; only these whole-message generic work questions may
-  # be refined to the term-linked clarification already warranted by SI.
-  @generic_work_opening ~r/\A(?:(?:oh,\s*)?(?:(?:that|this|it) sounds (?:intriguing|interesting|exciting|great|cool|neat)|(?:that's|that is) (?:interesting|exciting|great|cool|neat))\s*[!.]\s*)?/iu
-  @generic_work_followups [
-    ~r/\Awhat (?:sort|kind|type) of work (?:have you been|are you) doing (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu,
-    ~r/\Awhat (?:have you been|are you) (?:working on|doing) (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu,
-    ~r/\A(?:can|could|would) you tell me (?:more )?about (?:what you(?:'ve| have) been doing|your work) (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu
-  ]
-
-  @spec replaceable_approved_work_question?(term()) :: boolean()
-  def replaceable_approved_work_question?(reply) when is_binary(reply) do
-    trimmed = String.trim(reply)
-    question = trimmed |> String.replace(@generic_work_opening, "") |> String.trim()
-    String.length(trimmed) <= 240 and
-      Enum.any?(@generic_work_followups, &Regex.match?(&1, question))
-  end
-
-  def replaceable_approved_work_question?(_), do: false
-
   @generic_followups [
     ~r/\Awhat (?:have you been (?:learning|working) (?:about|on|in|with)|have you (?:learned|discovered)(?: so far)?|are you (?:working on|building|learning)(?: now)?)(?: (?:about|in|with|on) (?:your|the|this) (?:module|project))?\?\z/iu,
     ~r/\Awhat (?:does|will|is) (?:your|the|this) (?:module|project) (?:do|about|for)\?\z/iu,
@@ -190,13 +170,19 @@ defmodule Core.Curiosity.ClarificationLoop do
           |> Enum.sort_by(&String.length/1, :desc)
 
         case terms do
-          [term | _] ->
+          [term] ->
+            # Agency chose a clarification, the safety selector approved it,
+            # and WM identifies one explicit same-turn lexical gap. The
+            # target comes from comprehension, not from the LLM's phrasing.
+            # Preserve a model-authored definition question when it already
+            # asks for exactly that target; otherwise deliver the deterministic
+            # term question as the single response.
             cond do
-              already_clarifies?(reply, term) -> {:eligible_existing, String.trim(term)}
+              already_clarifies?(reply, term) ->
+                {:eligible_existing, String.trim(term)}
 
               get(action, :selected_action) == :ask_clarifying_question and
-                  length(terms) == 1 and refers_to_term?(sentence, term) and
-                  replaceable_approved_work_question?(reply) ->
+                  refers_to_term?(sentence, term) ->
                 {:eligible_refine, String.trim(term)}
 
               get(action, :selected_action) == :ask_clarifying_question ->
@@ -210,7 +196,26 @@ defmodule Core.Curiosity.ClarificationLoop do
                 {:eligible, String.trim(term)}
             end
 
-          [] -> {:skip, :no_eligible_unresolved_term}
+          [term | _] ->
+            # Only a model-authored, explicit term-definition question can
+            # disambiguate several unresolved candidates. Never choose an
+            # arbitrary longest term for a model-requested clarification.
+            if get(action, :selected_action) == :ask_clarifying_question do
+              case Enum.find(terms, &already_clarifies?(reply, &1)) do
+                nil -> {:skip, :multiple_unresolved_terms}
+                focused -> {:eligible_existing, String.trim(focused)}
+              end
+            else
+              if String.contains?(reply, "?") and
+                   not replaceable_generic_reply?(reply) do
+                {:skip, :reply_already_asks_question}
+              else
+                {:eligible, String.trim(term)}
+              end
+            end
+
+          [] ->
+            {:skip, :no_eligible_unresolved_term}
         end
     end
   end
