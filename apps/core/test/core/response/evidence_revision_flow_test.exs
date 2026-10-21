@@ -72,6 +72,12 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
           mode == :failed_revision ->
             {:ok, %{content: "I'm sorry, but I cannot confirm recent developments."}}
 
+          mode == :echo_old_revision ->
+            {:ok, %{content: old_revision_echo()}}
+
+          mode == :echo_new_revision ->
+            {:ok, %{content: List.last(messages)["content"]}}
+
           mode == :error_revision ->
             {:error, :upstream_timeout}
 
@@ -80,6 +86,17 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
         end
 
       {:reply, reply, state}
+    end
+
+    defp old_revision_echo do
+      day = Date.to_iso8601(Date.utc_today())
+
+      "ORIGINAL QUESTION: What are your thoughts on the US Iran war currently happening? " <>
+        "FAILED CHECKS: news_evidence_not_cited " <>
+        "[1] PUBLISHER: Example Wire; DATE: #{day}; " <>
+        "HEADLINE: Diplomats discuss Strait of Hormuz proposal; " <>
+        "LINK: https://news.google.com/rss/articles/known-report-1 " <>
+        "My assessment: civilian protection and de-escalation matter."
     end
 
     defp valid_answer do
@@ -210,6 +227,60 @@ defmodule Core.Response.EvidenceRevisionFlowTest do
     assert_receive {:evidence_chat, _, _}
     assert_receive {:evidence_chat, _, _}
     refute_receive {:evidence_chat, _, _}, 20
+  end
+
+  test "copied old repair metadata never counts as an accepted cited answer" do
+    start_supervised!({FakeLlm, {self(), :echo_old_revision}})
+
+    assert {:ok, final, reflection} = run_generation()
+
+    assert reflection.evidence_revision.outcome == :prompt_echo
+    assert reflection.evidence_revision.selected_source == :core_fallback
+    assert final =~ "Recent dated headlines"
+    assert final =~ "Example Wire"
+    refute final =~ "ORIGINAL QUESTION:"
+    refute final =~ "FAILED CHECKS:"
+    assert_receive {:evidence_chat, _, _}
+    assert_receive {:evidence_chat, _, _}
+  end
+
+  test "verbatim new retry prompt is rejected without publishing source instructions" do
+    start_supervised!({FakeLlm, {self(), :echo_new_revision}})
+
+    assert {:ok, final, reflection} = run_generation()
+
+    assert reflection.evidence_revision.outcome == :prompt_echo
+    assert reflection.evidence_revision.selected_source == :core_fallback
+    refute final =~ "Dated headline references"
+    assert final =~ "Recent dated headlines"
+  end
+
+  test "retry input has a conversational question and no internal issue identifiers" do
+    context = %{
+      web_evidence: %{
+        sources: [%{
+          provider: :news_rss,
+          publisher: "Example Wire",
+          title: "Diplomats discuss Strait of Hormuz proposal",
+          url: "https://news.google.com/rss/articles/known-report-1",
+          published_at: DateTime.to_iso8601(DateTime.utc_now())
+        }]
+      }
+    }
+
+    messages = EvidenceRevision.messages(@question, context, %{issues: [:news_evidence_not_cited]})
+    text = List.last(messages)["content"]
+
+    assert String.starts_with?(text, @question)
+    assert text =~ "Example Wire"
+    assert text =~ "known-report-1"
+    refute text =~ "FAILED CHECKS:"
+    refute text =~ "ORIGINAL QUESTION:"
+    refute EvidenceRevision.prompt_echo?(
+             "Example Wire reported a diplomatic headline on the stated date.",
+             messages
+           )
+    assert EvidenceRevision.prompt_echo?(text, messages)
   end
 
   test "model error on retry keeps first safe Core response" do
