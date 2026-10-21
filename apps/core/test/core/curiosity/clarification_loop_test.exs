@@ -493,7 +493,7 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     # Different agency speech act: no unconditional post-hoc replacement.
     assert {:skip, :reply_already_asks_question} =
       ClarificationLoop.diagnose(input, gap,
-        "Could you share more about the module?", @meta)
+        "Which Elixir libraries are you using for the module?", @meta)
   end
 
   test "real pipeline user source is :prod with :user_turn provenance" do
