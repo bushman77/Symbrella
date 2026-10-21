@@ -198,7 +198,14 @@ defmodule Core.Curiosity.ClarificationLoop do
       ) and
       (Regex.match?(~r/\b(?:mean|means|meaning|refer(?:ring)? to|define|explain|clarify)\b/iu,
          reply) or
-         Regex.match?(~r/\bwhat(?:'s| is)\b/iu, reply))
+         Regex.match?(
+           Regex.compile!(
+             "\\bwhat(?:'s| is)\\s+[\"']?" <> Regex.escape(term) <>
+               "[\"']?\\s*\\?",
+             "iu"
+           ),
+           reply
+         ))
   end
 
   def already_clarifies?(_, _), do: false

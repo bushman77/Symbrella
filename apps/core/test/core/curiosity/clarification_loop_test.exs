@@ -205,6 +205,8 @@ defmodule Core.Curiosity.ClarificationLoopTest do
       "Could you explain what you mean by glimmerflux?", "glimmerflux")
     refute ClarificationLoop.already_clarifies?(
       "How does glimmerflux work?", "glimmerflux")
+    refute ClarificationLoop.already_clarifies?(
+      "What is the purpose of glimmerflux?", "glimmerflux")
 
     assert {:tracked_existing, ^question, flags} =
       ClarificationLoop.observe(session, input, question, @meta, server)
