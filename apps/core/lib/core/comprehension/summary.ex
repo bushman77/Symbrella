@@ -241,7 +241,10 @@ defmodule Core.Comprehension.Summary do
       relational_weak? =
         is_map(choice) and Map.get(choice, :relational_feedback_uncertain?, false) == true
 
-      weak? = score < @weak_score or fallback? or relational_weak?
+      synaptic_weak? = is_map(choice) and
+      Map.get(choice, :synaptic_feedback_uncertain?, false) == true
+
+    weak? = score < @weak_score or fallback? or relational_weak? or synaptic_weak?
 
       stats =
         stats

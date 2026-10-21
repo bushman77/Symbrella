@@ -148,6 +148,10 @@ config :brain, Brain.Synapses.Shadow,
   durable?: config_env() == :dev,
   dir: "priv"
 
+# Opt-in live synaptic sense feedback. Keep false until independently labeled
+# held-out comparisons show no regressions. Per-turn opt-in is ALSO required.
+config :core, :synaptic_feedback_live_enabled?, false
+
 # ─────────────────────────── Brain ────────────────────────────────
 import_config "brain/brain.exs"
 

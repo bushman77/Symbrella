@@ -75,6 +75,11 @@ defmodule Core.Brain.SynapticExperience do
         not enabled? ->
           :disabled
 
+        # Never let the current turn's model-influenced second-pass selection
+        # teach itself as if it were independent user-provided lexical evidence.
+        feedback_selected?(si) ->
+          :feedback_selected
+
         true ->
           case extract(si) do
             {:ok, observation} ->
@@ -94,6 +99,7 @@ defmodule Core.Brain.SynapticExperience do
         {:ok, :recorded} -> :recorded
         {:ok, :duplicate} -> :duplicate
         :disabled -> :disabled
+        :feedback_selected -> :skipped_feedback_selected
         :ineligible -> :ineligible
         {:error, _} -> :unavailable
       end
@@ -110,6 +116,13 @@ defmodule Core.Brain.SynapticExperience do
   end
 
   def attach(other, _), do: other
+
+  defp feedback_selected?(si) do
+    Enum.any?(List.wrap(Map.get(si, :trace)), fn
+      %{stage: :synaptic_feedback, decision: :applied} -> true
+      _ -> false
+    end)
+  end
 
   @doc """
   Explicit, trusted human review of an *already recorded* experience.

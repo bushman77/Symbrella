@@ -187,6 +187,10 @@ defmodule Core do
     |> StateDump.capture(:episodic_projection)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    # Prior, independently reviewed experience may propose a bounded same-POS
+    # revision. Default is audit-only; live selection requires two explicit gates.
+    |> Core.Brain.SynapticFeedback.attach(opts)
+    |> StateDump.capture(:synaptic_feedback)
     # Intent is about the speaker's act, not a claimed verified verb sense.
     # Revalidate complete assertions before replacing low-confidence :unknown.
     |> Core.Intent.StructuralStatement.attach()
