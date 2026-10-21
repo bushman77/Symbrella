@@ -186,7 +186,7 @@ defmodule Core.Response.OverrideSkills.Companion do
       intent in [:command, :unknown, :smalltalk] and
       not technical_text?(text) and
       Regex.match?(
-        ~r/^\\s*(?:(?:take|have)\\s+(?:a\\s+)?(?:dump|nap|bath|shower|breather)|(?:go\\s+)?(?:sleep|dance|sing|sneeze)|(?:eat|drink)\\s+[^?!.]{1,35})[.!?]*\\s*$/iu,
+        ~r/^\s*(?:(?:take|have)\s+(?:a\s+)?(?:dump|nap|bath|shower|breather)|(?:go\s+)?(?:sleep|dance|sing|sneeze)|(?:eat|drink)\s+[^?!.]{1,35})[.!?]*\s*$/iu,
         text
       )
   end
