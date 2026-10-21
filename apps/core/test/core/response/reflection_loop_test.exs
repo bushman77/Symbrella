@@ -3,6 +3,84 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "rejects a news retry prompt echo even if its source metadata matches" do
+    day = Date.to_iso8601(Date.utc_today())
+    url = "https://news.google.com/rss/articles/known-report-1"
+    headline = "Diplomats discuss Strait of Hormuz proposal"
+
+    context = %{
+      features: %{intent: :ask, conf: 0.9},
+      web_evidence: %{
+        relation: :current_events,
+        status: :retrieved,
+        resolution: :headlines_available,
+        sources: [
+          %{
+            provider: :news_rss,
+            publisher: "Example Wire",
+            title: headline,
+            published_at: DateTime.to_iso8601(DateTime.utc_now()),
+            url: url
+          }
+        ]
+      }
+    }
+
+    question = "What are your thoughts on the US Iran war currently happening?"
+
+    draft =
+      "ORIGINAL QUESTION: #{question} FAILED CHECKS: news_evidence_not_cited " <>
+        "[1] PUBLISHER: Example Wire; DATE: #{day}; HEADLINE: #{headline}; " <>
+        "LINK: #{url} My assessment: de-escalation is important."
+
+    {:ok, answer, reflection} = ReflectionLoop.review(question, draft, context)
+
+    assert reflection.status == :repair
+    assert :revision_prompt_echo in reflection.issues
+    assert answer =~ "Recent dated headlines"
+    assert answer =~ "Example Wire"
+    assert answer =~ url
+    refute answer =~ "ORIGINAL QUESTION:"
+    refute answer =~ "FAILED CHECKS:"
+  end
+
+  test "ordinary attributed news assessment is not misclassified as a retry prompt echo" do
+    day = Date.to_iso8601(Date.utc_today())
+    url = "https://news.google.com/rss/articles/known-report-1"
+    headline = "Diplomats discuss Strait of Hormuz proposal"
+
+    context = %{
+      features: %{intent: :ask, conf: 0.9},
+      web_evidence: %{
+        relation: :current_events,
+        status: :retrieved,
+        resolution: :headlines_available,
+        sources: [
+          %{
+            provider: :news_rss,
+            publisher: "Example Wire",
+            title: headline,
+            published_at: DateTime.to_iso8601(DateTime.utc_now()),
+            url: url
+          }
+        ]
+      }
+    }
+
+    answer =
+      "Example Wire reported on #{day}: #{headline}. Source: #{url} " <>
+        "My assessment: this headline alone cannot establish whether diplomacy will work."
+
+    assert {:ok, ^answer, reflection} =
+             ReflectionLoop.review(
+               "What are your thoughts on the US Iran war currently happening?",
+               answer,
+               context
+             )
+    refute :revision_prompt_echo in reflection.issues
+    assert reflection.status == :accept
+  end
+
   test "generic no-access claims do not replace an evidence-specific population limitation" do
     question =
       "Does that mean Vancouver still has the larger population in 2026? What can you actually verify?"
