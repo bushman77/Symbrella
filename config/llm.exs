@@ -15,7 +15,10 @@ home_env_model_path =
                line,
                capture: :all_but_first
              ) do
-          [value] -> value |> String.trim() |> String.trim("\"'")
+          [value] ->
+            value
+            |> String.trim()
+            |> String.replace(~r/^["']|["']$/, "")
           _ -> previous
         end
       end)
