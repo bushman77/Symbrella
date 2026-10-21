@@ -249,30 +249,66 @@ defmodule Core.Curiosity.ClarificationLoop do
   # technical question ("How does X work?") does not meet this condition.
   @spec already_clarifies?(term(), term()) :: boolean()
   def already_clarifies?(reply, term) when is_binary(reply) and is_binary(term) do
-    String.contains?(reply, "?") and
-      refers_to_term?(reply, term) and
-      (embedded_module_definition?(reply, term) or
-      (Regex.match?(
-        ~r/\b(?:what(?:'s| is| does)|what do you mean by|(?:can|could|would) you (?:explain|define|clarify)|what (?:is the meaning|do you mean))\b/iu,
-        reply
-      ) and
-      (Regex.match?(~r/\b(?:mean|means|meaning|refer(?:ring)? to|define|explain|clarify)\b/iu,
-         reply) or
-         Regex.match?(
-           Regex.compile!(
-             "\\bwhat(?:'s| is)\\s+[\"']?" <> Regex.escape(term) <>
-               "[\"']?\\s*\\?",
-             "iu"
-           ),
-           reply
-         ))))
+    if String.contains?(reply, "?") and refers_to_term?(reply, term) do
+      escaped = Regex.escape(term)
+
+      # Track an existing question only when it requests the *meaning* of
+      # the named lexical item. "Explain how you built glimmerflux" is not a
+      # definition request and must be refined rather than credited.
+      names_meaning =
+        Regex.match?(
+          Regex.compile!(
+            "\\bwhat\\s+(?:does|do)\\s+[\"']?" <> escaped <>
+              "[\"']?\\s+(?:mean|refer\\s+to)\\b",
+            "iu"
+          ),
+          reply
+        ) or
+          Regex.match?(
+            Regex.compile!(
+              "\\bwhat\\s+(?:(?:do\\s+)?you\\s+)?mean\\s+by\\s+[\"']?" <>
+                escaped <> "[\"']?",
+              "iu"
+            ),
+            reply
+          )
+
+      explicitly_defines =
+        Regex.match?(
+          Regex.compile!(
+            "\\b(?:can|could|would)\\s+you\\s+(?:define|explain|clarify)\\s+" <>
+              "(?:(?:the\\s+meaning\\s+of)\\s+)?[\"']?" <> escaped <>
+              "[\"']?\\s*\\?",
+            "iu"
+          ),
+          reply
+        )
+
+      asks_what_it_is =
+        Regex.match?(
+          Regex.compile!(
+            "\\bwhat(?:'s|\\s+is)\\s+(?:(?:a|an|the)\\s+)?[\"']?" <>
+              escaped <>
+              "[\"']?(?:\\s+(?:module|project|component|system|library|thing))?\\s*\\?",
+            "iu"
+          ),
+          reply
+        )
+
+      names_meaning or explicitly_defines or asks_what_it_is or
+        embedded_module_definition?(reply, term)
+    else
+      false
+    end
   end
 
-  # The actual live model asks "tell me more about what a glimmerflux
-  # module is and how it works?" That is a user-answerable clarification,
-  # not a generic "what are you working on" question.
+  # An already-approved question can also request the definition embedded
+  # in a longer utterance ("tell me what a glimmerflux module is...").
   defp embedded_module_definition?(reply, term) do
-    Regex.match?(~r/\b(?:can|could|would) you (?:tell me more about|explain|clarify|describe)\b/iu, reply) and
+    Regex.match?(
+      ~r/\b(?:can|could|would) you (?:tell me(?: more about| about)?|explain|clarify|describe)\b/iu,
+      reply
+    ) and
       Regex.match?(
         Regex.compile!(
           "\\bwhat\\s+(?:(?:a|an|the)\\s+)?[\"']?" <>
