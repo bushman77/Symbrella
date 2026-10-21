@@ -221,7 +221,7 @@ defmodule Core.Curiosity.ClarificationLoop do
              "iu"
            ),
            reply
-         )))
+         ))))
   end
 
   # The actual live model asks "tell me more about what a glimmerflux
