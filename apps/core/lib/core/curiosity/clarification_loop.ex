@@ -32,7 +32,8 @@ defmodule Core.Curiosity.ClarificationLoop do
 
   @doc "Handle a completed real user/assistant turn; never emits chat messages itself."
   @spec observe(term(), map(), String.t(), map(), GenServer.server()) ::
-          {:ask, String.t(), map()} | {:replace_generic, String.t(), map()} | :none
+          {:ask, String.t(), map()} | {:replace_generic, String.t(), map()} |
+          {:tracked_existing, String.t(), map()} | :none
   def observe(session_id, si, reply, meta, server \\ __MODULE__)
 
   def observe(session_id, %{} = si, reply, %{} = meta, server)
@@ -139,9 +140,6 @@ defmodule Core.Curiosity.ClarificationLoop do
       not is_binary(sentence) or String.contains?(sentence, "?") ->
         {:skip, :factual_or_question_turn}
 
-      String.contains?(reply, "?") and not replaceable_generic_reply?(reply) ->
-        {:skip, :reply_already_asks_question}
-
       not user_originated_turn?(si) ->
         {:skip, :not_user_originated}
 
@@ -169,13 +167,41 @@ defmodule Core.Curiosity.ClarificationLoop do
           |> Enum.sort_by(&String.length/1, :desc)
 
         case terms do
-          [term | _] -> {:eligible, String.trim(term)}
+          [term | _] ->
+            cond do
+              already_clarifies?(reply, term) -> {:eligible_existing, String.trim(term)}
+              String.contains?(reply, "?") and
+                  not replaceable_generic_reply?(reply) ->
+                {:skip, :reply_already_asks_question}
+
+              true ->
+                {:eligible, String.trim(term)}
+            end
+
           [] -> {:skip, :no_eligible_unresolved_term}
         end
     end
   end
 
   def diagnose(_, _, _, _), do: {:skip, :no_fresh_session_gap}
+
+  # No second question is necessary when the model explicitly asked about
+  # the meaning of the exact unresolved term. Mentioning a term in a
+  # technical question ("How does X work?") does not meet this condition.
+  @spec already_clarifies?(term(), term()) :: boolean()
+  def already_clarifies?(reply, term) when is_binary(reply) and is_binary(term) do
+    String.contains?(reply, "?") and
+      refers_to_term?(reply, term) and
+      Regex.match?(
+        ~r/\b(?:what(?:'s| is| does)|what do you mean by|(?:can|could|would) you (?:explain|define|clarify)|what (?:is the meaning|do you mean))\b/iu,
+        reply
+      ) and
+      (Regex.match?(~r/\b(?:mean|means|meaning|refer(?:ring)? to|define|explain|clarify)\b/iu,
+         reply) or
+         Regex.match?(~r/\bwhat(?:'s| is)\b/iu, reply))
+  end
+
+  def already_clarifies?(_, _), do: false
 
   # :source is a pipeline execution mode (:prod) in Core.resolve_input.
   # User provenance is independently marked with :experience_origin.
@@ -253,22 +279,35 @@ defmodule Core.Curiosity.ClarificationLoop do
         state.auto_ask? and
             now - Map.get(session, :last_asked_ms, 0) >= cooldown_for(credited) ->
           case diagnose(si, gap, reply, meta) do
-            {:eligible, term} ->
-              # A slightly positive verified-feedback history makes proposals
-              # more competitive without ever bypassing the hard safety gates.
+            {kind, term} when kind in [:eligible, :eligible_existing] ->
               score = 0.58 + min(credited * 0.03, 0.12)
               if score >= 0.56 do
-                question = "I couldn't determine what you meant by \"#{term}\". Could you explain that term?"
+                delivery =
+                  cond do
+                    kind == :eligible_existing -> :tracked_existing
+                    replaceable_generic_reply?(reply) -> :replace_generic
+                    true -> :ask
+                  end
+
+                question =
+                  if delivery == :tracked_existing do
+                    reply
+                  else
+                    "I couldn't determine what you meant by \"#{term}\". Could you explain that term?"
+                  end
+
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
                   asked_at_ms: now, source: :session_comprehension_gap}
+                decision =
+                  if delivery == :tracked_existing,
+                    do: :existing_clarification_tracked,
+                    else: :clarification_proposed
+
                 state2 = state
                   |> put_session(sid, Map.merge(session, %{
-                    pending: pending, last_asked_ms: now,
-                    last_decision: :clarification_proposed
+                    pending: pending, last_asked_ms: now, last_decision: decision
                   }))
                   |> Map.update!(:attempts, &(&1 + 1))
-                replace_generic? = replaceable_generic_reply?(reply)
-                delivery = if replace_generic?, do: :replace_generic, else: :ask
                 :telemetry.execute([:core, :curiosity, :clarification_prompt],
                   %{proposed: 1, score: score},
                   %{reason: :unresolved_lexical_meaning,

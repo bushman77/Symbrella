@@ -193,6 +193,38 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert ClarificationLoop.snapshot(session, server).session.pending.term == "glimmerflux"
   end
 
+  test "specific model question about the unknown term is tracked, not replaced" do
+    server = server()
+    session = sid()
+    input = si(session)
+    admit(input)
+    question = ~s(What does "glimmerflux" mean?)
+
+    assert ClarificationLoop.already_clarifies?(question, "glimmerflux")
+    assert ClarificationLoop.already_clarifies?(
+      "Could you explain what you mean by glimmerflux?", "glimmerflux")
+    refute ClarificationLoop.already_clarifies?(
+      "How does glimmerflux work?", "glimmerflux")
+
+    assert {:tracked_existing, ^question, flags} =
+      ClarificationLoop.observe(session, input, question, @meta, server)
+
+    assert flags.delivery == :tracked_existing
+    assert ClarificationLoop.display_text(question,
+      {:tracked_existing, question, flags}) == question
+
+    state = ClarificationLoop.snapshot(session, server)
+    assert state.session.last_decision == :existing_clarification_tracked
+    assert state.session.pending.term == "glimmerflux"
+    assert state.attempts == 1
+
+    assert :none == ClarificationLoop.observe(session,
+      %{sentence: "By glimmerflux I mean a fictional module",
+        lexical_constructions: []}, "Thanks.", @meta, server)
+    assert ClarificationLoop.snapshot(session, server).session.last_outcome ==
+      :clarification_received_unverified
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)
