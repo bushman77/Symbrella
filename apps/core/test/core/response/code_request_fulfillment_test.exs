@@ -20,6 +20,29 @@ defmodule Core.Response.CodeRequestFulfillmentTest do
   ```
   """
 
+  @live_bad_code """
+  Sure! Here's a minimal working example:
+  ```
+  defmodule MyExample do
+    use GenServer
+
+    def init(state), do: {:ok, state}
+
+    def handle_info({:add, x, y}, state) do
+      new_state = state + x * y
+      {:noreply, new_state}
+    end
+
+    def start_link(args) do
+      GenServer.start_link(__MODULE__, args, name: __MODULE__)
+    end
+  end
+  ```
+
+  Start it with MyExample.start_link([]), then call
+  MyExample.handle_info({:add, 2, 3}, state).
+  """
+
   defmodule FakeLlm do
     use GenServer
 
@@ -175,6 +198,49 @@ defmodule Core.Response.CodeRequestFulfillmentTest do
     assert si.response_meta.response_reflection.code_request_repair.selected_source ==
              :bounded_template
     assert si.response_meta.response_reflection.code_request_repair.executed? == false
+
+    assert_receive {:code_request_llm_chat, _, _}
+    assert_receive {:code_request_llm_chat, _, _}
+    refute_receive {:code_request_llm_chat, _, _}, 30
+  end
+
+  test "observed live model code is rejected despite a defmodule and callbacks" do
+    context = response_context(input())
+
+    assert CodeRequest.missing?(context, @live_bad_code)
+    refute CodeRequest.complete?(context, @live_bad_code)
+
+    {:ok, _, reflection} =
+      ReflectionLoop.review(@question, @live_bad_code, context)
+
+    assert reflection.status == :repair
+    assert :requested_code_missing in reflection.issues
+
+    # A syntax-shaped source containing an extra, unvalidated state-mutating
+    # handler cannot be promoted as a correct basic GenServer skeleton.
+    assert CodeRequest.complete?(context, CodeRequest.fallback(context))
+    refute CodeRequest.complete?(context,
+      String.replace(@example_code, "def init(initial_state), do: {:ok, initial_state}",
+        "def init(initial_state), do: {:ok, []}"))
+    refute CodeRequest.complete?(context,
+      String.replace(@example_code, "GenServer.start_link(__MODULE__, initial_state)",
+        "GenServer.start_link(__MODULE__, [])"))
+  end
+
+  test "retry with observed broken code falls back to minimal valid example" do
+    start_supervised!({FakeLlm, {self(), [@deferral, @live_bad_code]}})
+
+    si = Attach.maybe_build_response_plan(input(), response: :auto)
+
+    assert si.response_text =~ "defmodule MyExample do"
+    assert si.response_text =~ "def init(initial_state)"
+    refute si.response_text =~ "handle_info"
+    refute si.response_text =~ "state + x * y"
+    refute si.response_text =~ "MyExample.handle_info"
+
+    repair = si.response_meta.response_reflection.code_request_repair
+    assert repair.outcome == :fallback
+    assert repair.selected_source == :bounded_template
 
     assert_receive {:code_request_llm_chat, _, _}
     assert_receive {:code_request_llm_chat, _, _}
