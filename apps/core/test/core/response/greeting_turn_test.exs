@@ -9,6 +9,7 @@ defmodule Core.Response.GreetingTurnTest do
       "good afternoon symbrella",
       "Good afternoon, Symbrella!",
       "good morning",
+      "good evenniing symbrella",
       "Hello there",
       "hey symbrella",
       "hi",
@@ -45,6 +46,15 @@ defmodule Core.Response.GreetingTurnTest do
     assert reflection.applied?
     assert :robotic_greeting in reflection.issues
     assert reflection.repair_instruction =~ "standalone greeting"
+  end
+
+  test "typo greeting does not turn into a clarification request" do
+    user = "good evenniing symbrella"
+    draft = "I'm sorry, but I'm not entirely sure what you mean. Could you please clarify?"
+
+    assert GreetingTurn.standalone?(user)
+    assert GreetingTurn.robotic_draft?(user, draft)
+    assert GreetingTurn.repair(user, draft) == "Good evening."
   end
 
   test "preserves genuine social conversation rather than replacing it with canned text" do
