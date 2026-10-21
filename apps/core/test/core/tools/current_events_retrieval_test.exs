@@ -81,6 +81,28 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
       WebRetrieval.query_for(question())
   end
 
+  test "an opinion about the named conflict attempts the news provider without temporal keywords" do
+    user = question("What do you think about the conflict between Iran and the United States?")
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :conflict_opinion} = WebRetrieval.route_for(user)
+
+    result = WebRetrieval.enrich(user,
+      enabled?: true, news_provider: DatedNews, max_attempts: 2)
+
+    assert result.web_evidence.resolution == :headlines_available
+    assert result.web_evidence.routing_trigger == :conflict_opinion
+    assert result.web_evidence.support == nil
+
+    draft = "I don't have live news access in this runtime, so I can't give current updates."
+    assert {:ok, response, %{status: :repair}} =
+      ReflectionLoop.review(user.user_text, draft, result)
+
+    assert response =~ "My assessment:"
+    assert response =~ "Example Wire"
+    refute response =~ "don't have live news access"
+  end
+
   test "explicit requests for latest news use the news provider" do
     assert {"latest news about Iran", :current_events} =
       WebRetrieval.query_for(question("Search the web for latest news about Iran"))

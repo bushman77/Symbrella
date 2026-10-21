@@ -85,6 +85,23 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     end
   end
 
+  test "live conflict opinion without temporal keywords routes to dated news" do
+    query = "What do you think about the conflict between Iran and the United States?"
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :conflict_opinion,
+             query: "the conflict between Iran and the United States"} = route(query)
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :conflict_opinion} =
+      route("What are your thoughts on the war between Russia and Ukraine?")
+
+    assert route("What do you think about the conflict between my sister and me?") == nil
+    assert route("What do you think about the historical war between Britain and France?") == nil
+    assert route("What do you think about the Cold War?") == nil
+    assert route("What do you think about the hypothetical war between Mars and Venus?") == nil
+  end
+
   test "current-event false positives are rejected for personal statements" do
     assert route("I currently live in Maple Ridge.") == nil
     assert route("My sister is here right now.") == nil

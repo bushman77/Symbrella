@@ -128,7 +128,10 @@ defmodule Core.Response.OverrideSkills.Utility do
 
     enabled? == true and
       is_binary(text) and
-      not is_nil(Core.Tools.WebRetrieval.current_events_query(text))
+      match?(
+        %{request_type: :current_events},
+        Core.Tools.WebRetrieval.route_for(%{user_text: text})
+      )
   end
 
   defp time_query?(text) when is_binary(text) do

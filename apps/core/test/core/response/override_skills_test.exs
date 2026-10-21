@@ -116,6 +116,26 @@ defmodule Core.Response.OverrideSkillsTest do
              OverrideSkills.apply(features, @decision, %{guardrail?: false})
   end
 
+  test "exact live Iran conflict question reaches evidence retrieval instead of a canned answer" do
+    features = %{
+      intent: :ask,
+      text: "What do you think about the conflict between Iran and the United States?",
+      web_retrieval_enabled?: true
+    }
+
+    assert {@decision, nil} =
+      OverrideSkills.apply(features, @decision, %{guardrail?: false})
+
+    {_decision, offline_skill} =
+      OverrideSkills.apply(
+        %{features | web_retrieval_enabled?: false},
+        @decision,
+        %{guardrail?: false}
+      )
+
+    assert offline_skill.id == :recognizable_topic_fallback
+  end
+
   test "enabled news retrieval bypasses the generic no-live-news inline reply" do
     features = %{
       intent: :ask,

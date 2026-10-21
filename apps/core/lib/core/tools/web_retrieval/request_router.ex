@@ -59,6 +59,12 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       current = current_events_query(text) ->
         build(current, :current_events, :current_events, :temporal_question)
 
+      # A present-tense request for an assessment of a conflict involving
+      # named parties is a request for informed current context, even without
+      # the literal words "latest", "today", or "ongoing".
+      conflict = conflict_opinion_query(text) ->
+        build(conflict, :current_events, :current_events, :conflict_opinion)
+
       true ->
         nil
     end
@@ -102,6 +108,40 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   end
 
   def current_events_query(_), do: nil
+
+  @doc """
+  Recognize a narrowly scoped opinion request about conflict between named
+  actors without inferring facts about whether fighting is actually ongoing.
+  An opinion request is a news-discovery trigger, not proof that a war exists.
+  Historical, hypothetical and personal disputes remain outside this route.
+  """
+  @spec conflict_opinion_query(String.t()) :: String.t() | nil
+  def conflict_opinion_query(text) when is_binary(text) do
+    question =
+      ~r/^\s*(?:what\s+do\s+you\s+think\s+(?:about|of)|what\s+are\s+your\s+thoughts\s+(?:on|about)|what(?:'s|\s+is)\s+your\s+(?:take|opinion)\s+(?:on|about)|how\s+do\s+you\s+view)\s+(.+?)\s*[?!.]*\s*$/iu
+
+    case Regex.run(question, text, capture: :all_but_first) do
+      [topic] ->
+        topic = String.trim(topic)
+        names = Regex.scan(~r/\b(?:[A-Z][\p{L}]{1,}|[A-Z]{2,})\b/u, topic)
+
+        if Regex.match?(~r/\b(?:conflict|war|hostilities|fighting|ceasefire)\b/iu, topic) and
+             Regex.match?(~r/\b(?:between|with)\b/iu, topic) and
+             length(names) >= 2 and
+             not Regex.match?(
+               ~r/\b(?:my|your|our|me|you|family|friend|sister|brother|neighbour|neighbor|coworker|fictional|hypothetical|imaginary|game|movie|novel|historical)\b/iu,
+               topic
+             ) and
+             not Regex.match?(~r/\b(?:in|during|of)\s+(?:the\s+)?(?:\d{4}|(?:first|second)\s+world\s+war|nineteenth|twentieth)\b/iu, topic) do
+          nonempty(topic)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def conflict_opinion_query(_), do: nil
 
   defp explicit_request(text) do
     # A narrowly bounded directive anywhere in a correction ("No, search for
