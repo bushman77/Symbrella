@@ -44,6 +44,9 @@ config :swoosh, :api_client, false
 # LLM runner (disabled unless a test opts in)
 # -------------------------------
 config :llm, Llm,
+  chat_format: :openai,
+  n_gpu_layers: 0,
+  temperature: 0.4,
   auto_start_on_boot?: false,
   allow_lazy_start?: false,
   auto_restart_on_crash?: false,
