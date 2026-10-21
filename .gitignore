@@ -51,6 +51,8 @@ Thumbs.db
 config/*.secret.exs
 config/*_secret.exs
 config/prod.secret.exs
+# Machine-specific llama.cpp configuration (shared llm.exs stays tracked)
+config/llm.local.exs
 
 # ───────── Dictionary corpora (downloaded/generated) ─────────
 # Raw Kaikki/Wiktextract dump and partial download.

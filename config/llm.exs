@@ -86,3 +86,10 @@ config :llm, :generation,
     seed: 42,
     num_predict: 80
   }
+
+# Optional machine-specific tuning. This file is excluded from Git, so local
+# context size/GPU settings can survive routine pulls of shared configuration.
+# The model itself is selected by LLAMA_MODEL_PATH in ~/.env or the shell.
+if File.regular?(Path.join(__DIR__, "llm.local.exs")) do
+  import_config "llm.local.exs"
+end

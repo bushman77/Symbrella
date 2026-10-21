@@ -48,6 +48,38 @@ defmodule Llm.ModelPathConfigTest do
     assert model_path(home) == "NONE"
   end
 
+  test "optional ignored machine-specific config overrides the shared defaults", %{home: home} do
+    config_dir = Path.join(home, "config")
+    File.mkdir_p!(config_dir)
+    File.cp!(@config_file, Path.join(config_dir, "llm.exs"))
+
+    File.write!(Path.join(config_dir, "llm.local.exs"), """
+    import Config
+    config :llm, Llm, ctx: 8192, n_gpu_layers: 33
+    config :llm, :runner, ctx: 8192
+    """)
+
+    code = """
+    cfg = Config.Reader.read!(#{inspect(Path.join(config_dir, "llm.exs"))})
+    options = cfg |> Keyword.fetch!(:llm) |> Keyword.fetch!(Llm)
+    runner = cfg |> Keyword.fetch!(:llm) |> Keyword.fetch!(:runner)
+    IO.puts(Enum.join([
+      Keyword.fetch!(options, :ctx),
+      Keyword.fetch!(options, :n_gpu_layers),
+      Keyword.fetch!(runner, :ctx)
+    ], ","))
+    """
+
+    {output, status} =
+      System.cmd("elixir", ["-e", code],
+        env: [{"HOME", home}, {"LLAMA_MODEL_PATH", ""}],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert String.trim(output) == "8192,33,8192"
+  end
+
   defp model_path(home, exported \\ "") do
     # Separate process keeps HOME and LLAMA_MODEL_PATH isolated from umbrella
     # application state and from concurrent test cases.

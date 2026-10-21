@@ -56,6 +56,44 @@ Restart `iex -S mix phx.server` after changing the path. If no path is
 configured, Symbrella will report a missing model path rather than silently
 using a developer-specific default.
 
+For per-machine performance tuning (GPU layers, context, thread counts), add
+the optional `config/llm.local.exs` file. The file is **Git-ignored** and is
+imported after the shared config. For example:
+
+```elixir
+import Config
+
+config :llm, Llm,
+  n_gpu_layers: 18,
+  ctx: 4096,
+  threads: 6
+
+config :llm, :runner,
+  ctx: 4096,
+  threads: 6
+```
+
+Keep the model path in `~/.env` and performance overrides in
+`config/llm.local.exs`. Avoid editing tracked `config/llm.exs` for local
+settings; then subsequent `git pull --ff-only origin development` commands
+won't conflict with your machine-specific configuration.
+
+**One-time migration if you already edited the tracked `config/llm.exs`:**
+transfer your settings to the ignored file first, and inspect
+`git status --short`. When you've saved everything you need from that file:
+
+```bash
+cd ~/Symbrella
+cp config/llm.exs "$HOME/llm.exs.pre-env-backup"
+git restore -- config/llm.exs
+git pull --ff-only origin development
+```
+
+The backup preserves your previous settings. Do not run `git restore` on
+other files with uncommitted work. If the file was already committed to a
+local branch, this one-time approach will not resolve diverged history;
+inspect the branch and its commits before integrating it.
+
 For first-time asset-tool installation:
 
 ```bash
