@@ -19,6 +19,10 @@ defmodule Core.Response.GreetingTurn do
   @meta_greeting ~r/\b(?:i\s+(?:understand|see|recognize)\s+(?:that\s+)?you(?:'re| are)\s+(?:saying|greeting)|if\s+you(?:'re| are)\s+just\s+saying\s+(?:hello|hi)|you(?:'re| are)\s+(?:just\s+)?greeting\s+me)\b/iu
   @interview_prompt ~r/\b(?:is\s+there\s+anything\s+(?:specific|in\s+particular)\s+you(?:'d| would)?\s+like\s+to\s+(?:discuss|ask)|i(?:'m| am)\s+here\s+to\s+(?:assist|help)\s+you)\b/iu
 
+  # MythoMax may put the assistant's name in a trailing vocative addressed to
+  # the user. Only trim that vocative on otherwise standalone greeting turns.
+  @misaddressed_user ~r/,\s*symbrella\b(?=\s*[.!?]|\s*$)/iu
+
   @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))\s*,?\s*symbrella\b/iu
 
   @doc "True only for an isolated social greeting, optionally addressing Symbrella."
@@ -34,7 +38,8 @@ defmodule Core.Response.GreetingTurn do
       (Regex.match?(@service_desk, draft) or Regex.match?(@echoed_name, draft) or
          Regex.match?(@unnecessary_clarification, draft) or
          Regex.match?(@meta_greeting, draft) or
-         Regex.match?(@interview_prompt, draft))
+         Regex.match?(@interview_prompt, draft) or
+         Regex.match?(@misaddressed_user, draft))
   end
 
   def robotic_draft?(_, _), do: false
@@ -59,6 +64,7 @@ defmodule Core.Response.GreetingTurn do
         cleaned =
           draft
           |> String.replace(@service_desk, "")
+          |> String.replace(@misaddressed_user, "")
           |> then(fn text ->
             Regex.replace(@echoed_name, text, fn greeting ->
               String.replace(greeting, ~r/\s*,?\s*symbrella\b/iu, "")
