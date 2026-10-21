@@ -34,6 +34,7 @@ defmodule Core.Response.LlmSynthesis do
   alias Core.Response.GroundedRevision
   alias Core.Response.ReflectionLoop
   alias Core.Response.AnswerAdequacy
+  alias Core.Response.CodeRequest
   alias Core.Response.RuntimeContext
   alias Core.Tools.WebRetrieval
 
@@ -336,6 +337,9 @@ defmodule Core.Response.LlmSynthesis do
         {answer_out, answer_reflection} =
           maybe_revise_answer(user_text, messages, context, initial_out, initial_reflection)
 
+        {answer_out, answer_reflection} =
+          maybe_fulfill_code_request(user_text, context, answer_out, answer_reflection)
+
         {grounded_out, grounded_reflection} =
           maybe_revise_grounded(messages, context, answer_out, answer_reflection)
 
@@ -515,6 +519,94 @@ defmodule Core.Response.LlmSynthesis do
         %{attempted?: true, outcome: outcome, issue: :answer_not_supplied})}
     else
       {original_out, reflection}
+    end
+  end
+
+  # The response model can understand the user request structurally but
+  # still emit a non-answer ("could you provide more details?"). Reattempt a
+  # *witnessed*, low-risk GenServer authoring request once, then fall back to
+  # a bounded static starter if the local model cannot produce the artifact.
+  # This affects response expression only, not symbolic truth or persistence.
+  defp maybe_fulfill_code_request(user_text, context, draft, initial_reflection) do
+    issues = Map.get(initial_reflection, :issues, [])
+
+    if CodeRequest.missing?(context, draft) and
+         :requested_code_missing in issues and
+         Map.get(initial_reflection, :status) != :reject and
+         :unsafe not in issues do
+      messages = [
+        %{"role" => "system",
+          "content" => "You are Symbrella. Fulfill the current safe programming " <>
+            "request with actual Elixir source code, not an offer to do it. " <>
+            "Use the user-supplied identifier exactly; no code execution or " <>
+            "file changes are authorized. " <> CodeRequest.revision_instruction(context)},
+        %{"role" => "user", "content" => user_text}
+      ]
+
+      opts =
+        chat_opts()
+        |> Keyword.put(:max_tokens, llm_config(:code_request_revision_max_tokens, 440))
+
+      result =
+        try do
+          llm_client().chat(messages, opts)
+        rescue
+          _ -> {:error, :code_request_revision_exception}
+        catch
+          :exit, _ -> {:error, :code_request_revision_timeout}
+        end
+
+      {text, outcome, source} =
+        case result do
+          {:ok, %{content: content}} when is_binary(content) and content != "" ->
+            candidate =
+              content
+              |> sanitize_model_text()
+              |> then(&AnswerPolish.polish(user_text, &1, context))
+
+            {:ok, checked, review} = ReflectionLoop.review(user_text, candidate, context)
+
+            if CodeRequest.complete?(context, candidate) and
+                 review.status == :accept and checked == candidate do
+              {candidate, :accepted, :model_revision}
+            else
+              {CodeRequest.fallback(context), :fallback, :bounded_template}
+            end
+
+          _ ->
+            {CodeRequest.fallback(context), :fallback, :bounded_template}
+        end
+
+      # The fallback is generated only for the small, independently witnessed
+      # structure and is still subject to the ordinary response review.
+      {:ok, checked, review} = ReflectionLoop.review(user_text, text, context)
+
+      if CodeRequest.complete?(context, checked) and
+           review.status == :accept do
+        final_reflection =
+          review
+          |> Map.put(:status, :repair)
+          |> Map.put(:issues, Enum.uniq([:requested_code_missing | issues]))
+          |> Map.put(:applied?, checked != draft)
+          |> Map.put(:repair_count, 1)
+          |> Map.put(:draft_sha256, sha256_hex(draft))
+          |> Map.put(:draft_text, String.slice(draft, 0, 1200))
+          |> Map.put(:final_sha256, sha256_hex(checked))
+          |> Map.put(:final_text, String.slice(checked, 0, 1200))
+          |> Map.put(:critique, "The original response did not deliver the requested code.")
+          |> Map.put(:repair_instruction, CodeRequest.revision_instruction(context))
+          |> Map.put(:code_request_repair, %{
+            attempted?: true, outcome: outcome, selected_source: source,
+            source_verified?: false, executed?: false, persisted?: false
+          })
+
+        {checked, final_reflection}
+      else
+        {draft, Map.put(initial_reflection, :code_request_repair,
+          %{attempted?: true, outcome: :review_rejected, selected_source: :original_draft})}
+      end
+    else
+      {draft, initial_reflection}
     end
   end
 
