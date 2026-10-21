@@ -78,7 +78,7 @@ defmodule Core.Curiosity.ClarificationLoop do
   @spec proposal(map(), term(), String.t(), map()) :: {:ok, String.t()} | :none
   def proposal(%{} = si, {:ok, %{status: :review_required,
       next_action: :consider_user_clarification, age_ms: age}}, reply, meta)
-      when is_integer(age) and age >= 0 and age <= 30_000 and
+      when is_integer(age) and age >= 0 and age <= 5 * 60_000 and
            is_binary(reply) and is_map(meta) do
     comprehension = get(si, :comprehension, %{})
     sentence = get(si, :sentence, "")
@@ -91,8 +91,9 @@ defmodule Core.Curiosity.ClarificationLoop do
       not is_binary(reply) or String.contains?(reply, "?") -> :none
       get(si, :source, :user) != :user -> :none
       get(si, :intent) not in [:statement, :unknown, :inform, :tell] -> :none
+      Regex.match?(~r/\b(?:hurt myself|suicide|emergency|dangerous|overdose|abuse|violence|dying|kill myself|self-harm)\b/iu, sentence) -> :none
       get(action, :risk) != :low or get(action, :selected_action) != :answer_user -> :none
-      get(meta, :response_source) not in [:llm, :model_unavailable] -> :none
+      get(meta, :response_source) != :llm -> :none
       get(reviewed, :status, :accept) in [:reject, :clarify] -> :none
       true ->
         comprehension
@@ -249,7 +250,8 @@ defmodule Core.Curiosity.ClarificationLoop do
   defp normalized(s) when is_binary(s), do: s |> String.downcase() |> String.trim()
   defp normalized(_), do: ""
 
-  defp get(%{} = map, key, default \\ nil),
+  defp get(map, key, default \\ nil)
+  defp get(%{} = map, key, default),
     do: Map.get(map, key, Map.get(map, Atom.to_string(key), default))
   defp get(_, _, default), do: default
 end
