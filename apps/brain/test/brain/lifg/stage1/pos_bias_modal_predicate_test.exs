@@ -62,7 +62,7 @@ defmodule Brain.LIFG.Stage1.PosBiasModalPredicateTest do
 
   test "no speculative verb boost for non-predicates or missing structure" do
     assert bias(~w(the book cover), 1, "verb") == 0.0
-    assert bias(~w(i went to the bank), 5, "verb") == 0.0
+    assert bias(~w(i went to the bank), 4, "verb") == 0.0
     assert bias(~w(can you a write), 3, "verb") == 0.0
     assert bias(~w(the worker and nurse), 3, "verb") == 0.0
     assert bias(~w(write), 0, "verb") == 0.0
