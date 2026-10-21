@@ -219,7 +219,7 @@ defmodule Brain.LIFG.RoleCompetition do
               %{} = token -> Map.get(token, :phrase, "")
               _ -> ""
             end
-            |> String.replace(~r/[?!.;,]+\\z/u, "")
+            |> String.replace(~r/[?!.;,]+\z/u, "")
 
           Enum.all?(
             [:bounded_determiner_surface, :dictionary_pos_witness,
@@ -229,7 +229,7 @@ defmodule Brain.LIFG.RoleCompetition do
             MapSet.member?(@determiners, Map.get(tokens, det)) and
             witnessed?(cells, tokens, det, "determiner") and
             witnessed?(cells, tokens, i, "adjective") and
-            Regex.match?(~r/\\A[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\\z/, raw_head) and
+            Regex.match?(~r/\A[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\z/, raw_head) and
             not Enum.any?(cells, fn cell ->
               normalize(Map.get(cell, :norm) || Map.get(cell, :word)) ==
                 Map.get(tokens, head)
