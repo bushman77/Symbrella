@@ -94,7 +94,9 @@ defmodule Core.Syntax.PredicateEvidence do
     start = if Map.get(tokens, 0) == "please", do: 1, else: 0
     after_verb = Map.get(tokens, start + 1)
 
-    if start < last and verb?(tokens, cells, start) and
+    if start < last and
+         not MapSet.member?(@modals, Map.get(tokens, start)) and
+         verb?(tokens, cells, start) and
          (MapSet.member?(@determiners, after_verb) or
             after_verb in ~w(me him her us them it)) do
       [proposal(start, :imperative_predicate, {0, last},
