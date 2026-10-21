@@ -56,9 +56,12 @@ config :core, :semantic_associative_recall_enabled?, curiosity_enabled?
 # providers (no Qwen calls or unsolicited chat). First tick after 60 seconds
 # in development, then at most one eligible issue per minute; an unresolved
 # issue enters a one-hour retry cooldown. Production remains opt-in.
+# Keep candidate re-ordering and cognitive deferral observable in shadow mode.
+# The verified Core reasoning path, gates and durable audit remain unchanged.
 config :core, Core.Curiosity.Investigator,
   enabled?: curiosity_enabled?,
   acquire_evidence?: curiosity_enabled?,
+  self_model_policy?: false,
   interval_ms: if(curiosity_enabled?, do: 60_000, else: 300_000),
   retry_ms: 3_600_000
 

@@ -89,6 +89,19 @@ defmodule Core.Curiosity.InvestigationHistoryTest do
     assert explained.resolution == nil
   end
 
+  test "a durable audit attempt does not itself make an accepted learning success", %{issue: issue} do
+    id = InvestigationHistory.begin_attempt(issue.id, [])
+    assert :ok =
+      InvestigationHistory.complete_attempt(
+        id,
+        %{status: :resolved, origin: :verified_direct_proof},
+        10
+      )
+
+    [audit] = InvestigationHistory.for_issue(issue.id, 1)
+    assert :ignored == Brain.CuriosityLearning.classify(audit, Db.get!(Db.CognitiveIssue, issue.id))
+  end
+
   test "history query remains bounded and preserves newest attempts", %{issue: issue} do
     first = InvestigationHistory.begin_attempt(issue.id, [])
     assert :ok = InvestigationHistory.complete_attempt(

@@ -19,7 +19,7 @@ defmodule Core.Curiosity.Investigator do
   use GenServer
 
   alias Core.Cognition.{AssociativeReasoning, MemoryBoundary}
-  alias Core.Curiosity.{EvidenceAcquisition, InvestigationHistory, UnresolvedIssues}
+  alias Core.Curiosity.{EvidenceAcquisition, InvestigationHistory, SelectionPolicy, UnresolvedIssues}
   alias Core.Response.{AuthoritativeAnswerPlan, ResponseFrame}
   alias Db.{CognitiveIssue, CognitiveIssues, ConsolidatedConclusion, ConsolidatedConclusions}
 
@@ -101,17 +101,19 @@ defmodule Core.Curiosity.Investigator do
           %{status: :disabled, reason: :reasoning_feature_disabled}
 
         true ->
-          UnresolvedIssues.reasoning_candidates(@max_candidates)
-          |> Enum.find(fn issue ->
-            issue.kind == "missing_reasoning_link" and
-              issue.next_action == "find_linking_premise" and
-              issue.status in ["open", "investigating"] and
-              is_integer(issue.issue_id) and
-              not Map.has_key?(attempted, issue.issue_id)
-          end)
-          |> case do
-            nil -> %{status: :idle}
-            %{issue_id: id} -> investigate_issue_with_options(id, state.opts)
+          eligible =
+            UnresolvedIssues.reasoning_candidates(@max_candidates)
+            |> Enum.filter(fn issue ->
+              issue.kind == "missing_reasoning_link" and
+                issue.next_action == "find_linking_premise" and
+                issue.status in ["open", "investigating"] and
+                is_integer(issue.issue_id) and
+                not Map.has_key?(attempted, issue.issue_id)
+            end)
+
+          case eligible do
+            [] -> %{status: :idle}
+            _ -> select_and_investigate(eligible, state.opts)
           end
       end
 
@@ -144,6 +146,51 @@ defmodule Core.Curiosity.Investigator do
     next = %{state | last_result: result, last_successful_result: last_successful,
       attempted: attempted, cycles: state.cycles + 1}
     {result, next}
+  end
+
+  defp select_and_investigate(eligible, opts) do
+    active? = self_model_policy_enabled?(opts)
+    model = self_model_for_policy(opts)
+    selection = SelectionPolicy.choose(eligible, model, active?: active?)
+
+    legacy_id = selection.legacy_selected.issue_id
+    shadow_id = selection.shadow_selected.issue_id
+
+    :telemetry.execute(
+      [:core, :curiosity, :policy_comparison],
+      %{count: 1, score: selection.score, learned_bias: selection.learned_bias},
+      %{mode: selection.mode, would_defer?: selection.would_defer?,
+        legacy_issue_id: legacy_id, shadow_issue_id: shadow_id,
+        selection_changed?: legacy_id != shadow_id}
+    )
+
+    case selection do
+      %{status: :deferred, reason: reason} ->
+        # A deferral is not an issue attempt; do not write an audit row or
+        # consume the issue's one-hour retry budget.
+        %{status: :deferred, reason: reason, policy: :active}
+
+      %{status: :ready, selected: %{issue_id: id}, mode: mode} ->
+        investigate_issue_with_options(id, opts)
+        |> Map.put(:policy, mode)
+    end
+  end
+
+  defp self_model_policy_enabled?(opts) do
+    cfg = Application.get_env(:core, __MODULE__, [])
+    Keyword.get(opts, :self_model_policy?,
+      Keyword.get(cfg, :self_model_policy?, false)) == true
+  end
+
+  defp self_model_for_policy(opts) do
+    case Keyword.get(opts, :self_state) do
+      %{} = state -> state
+      _ -> Brain.Introspection.snapshot()
+    end
+  rescue
+    _ -> %Brain.SelfModel{}
+  catch
+    :exit, _ -> %Brain.SelfModel{}
   end
 
   @doc """
@@ -184,9 +231,40 @@ defmodule Core.Curiosity.Investigator do
 
       duration_ms = max(System.monotonic_time(:millisecond) - started, 0)
       :ok = InvestigationHistory.complete_attempt(audit_id, result, duration_ms)
+      emit_learning_receipt(audit_id, id)
       Map.put(result, :history_id, audit_id)
     end
   end
+
+  # A receipt is credited only if the durable audit completion and resolved
+  # CognitiveIssue agree. Publishing this telemetry cannot create a proof.
+  defp emit_learning_receipt(audit_id, issue_id)
+      when is_integer(audit_id) and audit_id > 0 do
+    receipt =
+      Db.CuriosityInvestigations.for_issue(issue_id, 1)
+      |> Enum.find(&(Map.get(&1, :id) == audit_id and not is_nil(&1.completed_at)))
+
+    if receipt do
+      issue = Db.get(CognitiveIssue, issue_id)
+      outcome = Brain.CuriosityLearning.classify(receipt, issue)
+      projection = Brain.CuriosityLearning.snapshot()
+
+      :telemetry.execute(
+        [:core, :curiosity, :learning_outcome],
+        %{count: 1, samples: projection.sample_count},
+        %{history_id: audit_id, issue_id: issue_id, outcome: outcome,
+          learning_version: projection.v}
+      )
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp emit_learning_receipt(_, _), do: :ok
 
   defp investigate(issue, opts) do
     names = Map.get(issue.evidence || %{}, "subjects")
