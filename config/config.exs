@@ -62,6 +62,8 @@ config :core, Core.Curiosity.Investigator,
   interval_ms: if(curiosity_enabled?, do: 60_000, else: 300_000),
   retry_ms: 3_600_000
 
+config :core, :response_prompt_profile, :mythomax
+
 config :core, :log_prompt_budget?, false
 
 config :core, :llm_synthesis,
@@ -77,7 +79,7 @@ config :core, :llm_synthesis,
   history_mode: :full,
   selective_recent_pairs: 2,
   max_item_chars: 900,
-  max_input_estimated_tokens: 5_200,
+  max_input_estimated_tokens: 2_800,
   max_system_chars: 4_000,
   max_user_chars: 1_500,
   degraded_acc_conflict_min: 0.5
