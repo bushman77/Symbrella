@@ -99,7 +99,7 @@ defmodule Core.Response.ResponseFrame do
       Map.get(frame, :relation) in [:population, :identity, :proximity] ->
         :answer_grounded_question
 
-      Regex.match?(~r/^\s*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/iu, text) ->
+      Regex.match?(~r/^\s*(?:hello|hi|hey|good\s+(?:morning|afternoon|even+i+ng))\b/iu, text) ->
         :social_exchange
 
       true ->
