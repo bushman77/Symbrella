@@ -423,8 +423,12 @@ defmodule Core.Curiosity.ClarificationLoop do
                     "I couldn't determine what you meant by \"#{term}\". Could you explain that term?"
                   end
 
+                gap_source = case gap do
+                  {:ok, %{} = projection} -> get(projection, :source, :unknown)
+                  _ -> :unknown
+                end
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
-                  asked_at_ms: now, source: get(gap, :source, :session_working_memory)}
+                  asked_at_ms: now, source: gap_source}
                 decision =
                   if delivery == :tracked_existing,
                     do: :existing_clarification_tracked,
