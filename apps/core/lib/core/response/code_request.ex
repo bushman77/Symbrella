@@ -23,7 +23,7 @@ defmodule Core.Response.CodeRequest do
         version: 1, status: :grammatical_candidate,
         source: :current_turn_original_tokens,
         predicate: "write", requested_object: "GenServer",
-        object_lexically_resolved?: false,
+        object_modifier: "basic", object_lexically_resolved?: false,
         meaning_verified?: false, code_semantics_verified?: false
       },
       structure
@@ -35,7 +35,7 @@ defmodule Core.Response.CodeRequest do
       is_binary(text) and Regex.match?(@request_terms, text) and
       valid_module_name?(module_name(structure)) and
       String.contains?(text, "GenServer") and
-      String.contains?(text, module_name(structure))
+      complete_basic_request?(text, module_name(structure))
   end
 
   def eligible?(_), do: false
@@ -116,6 +116,17 @@ defmodule Core.Response.CodeRequest do
   end
 
   def fallback(_), do: nil
+
+  # A static starter is not a substitute for an implementation with
+  # additional requirements. Restrict this narrow fallback contract to
+  # requests that end with the independently witnessed module name.
+  defp complete_basic_request?(text, name) do
+    Regex.match?(
+      Regex.compile!("\\bmodule\\s+called\\s+" <>
+        Regex.escape(name) <> "\\s*[?.!]*\\z", "u"),
+      text
+    )
+  end
 
   defp module_name(%{module_name: name}) when is_binary(name), do: name
   defp module_name(_), do: nil
