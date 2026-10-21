@@ -60,16 +60,47 @@ defmodule Brain.LIFG.Stage1.PosBias do
     token_phrase = tok |> token_raw_phrase() |> norm()
     family = syntactic_pos_family(pos)
 
+    # Core role adjudication is authoritative for predicate POS support.
+    # Preserve the old local heuristics only for standalone Stage1 calls that
+    # lack such evidence, rather than counting the same pattern twice.
+    predicate_fallback =
+      if supported_predicate_role?(ctx, tok) do
+        0.0
+      else
+        auxiliary_predicate_bias(ctx, tok, family) +
+          imperative_predicate_bias(ctx, tok, family)
+      end
+
     fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
       greeting_chain_pos_bias(ctx, tok, token_phrase, family) +
       infinitive_object_bias(ctx, tok, family) +
-      auxiliary_predicate_bias(ctx, tok, family) +
-      imperative_predicate_bias(ctx, tok, family) +
+      predicate_fallback +
       coordinated_predicate_bias(ctx, tok, token_phrase, family) +
       predicate_adjective_bias(ctx, tok, family)
   end
 
   def window(_ctx, _tok, _pos), do: 0.0
+
+  defp supported_predicate_role?(ctx, tok) do
+    idx = token_index(tok, -1)
+    case get_in(ctx, [:si, :role_competition]) do
+      %{source: :core_syntax_and_attested_dictionary_pos, roles: roles}
+      when is_map(roles) ->
+        case Map.get(roles, idx) do
+          %{role: :predicate, pos: "verb", status: :supported,
+            basis: basis, evidence: evidence}
+          when basis in [:modal_question_predicate, :modal_declarative_predicate,
+                         :imperative_predicate, :plural_present_predicate,
+                         :finite_present_svo_predicate] and is_list(evidence) ->
+            :dictionary_pos_witness in evidence and
+              :bounded_predicate_slot in evidence
+
+          _ -> false
+        end
+
+      _ -> false
+    end
+  end
 
   # Detect high-confidence infinitive constructions:
   # "to get some cash", "to buy a car", etc.
