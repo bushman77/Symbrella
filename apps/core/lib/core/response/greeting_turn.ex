@@ -8,11 +8,13 @@ defmodule Core.Response.GreetingTurn do
   This is response-style evidence, never a substitute for LIFG/ATL parsing.
   """
 
-  @standalone ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|evening))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
+  @standalone ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|even+i+ng))(?:\s+there)?(?:\s*,?\s*symbrella)?\s*[.!?]*\s*\z/iu
 
   @service_desk ~r/\b(?:how\s+(?:may|can)\s+i\s+(?:assist|help)\s+you(?:\s+(?:today|with\b[^.!?]*))?|what\s+can\s+i\s+(?:do|help\s+you\s+with)\s+for\s+you|is\s+there\s+anything\s+(?:else\s+)?i\s+can\s+(?:help|assist)\s+(?:you\s+)?with|let\s+me\s+know\s+(?:how|if)\s+i\s+can\s+help)\b[^.!?]*[.!?]*/iu
 
-  @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|evening))\s*,?\s*symbrella\b/iu
+  @unnecessary_clarification ~r/\b(?:not\s+(?:entirely\s+)?sure\s+what\s+you\s+mean|could\s+you\s+(?:please\s+)?(?:clarify|rephrase|restate))\b/iu
+
+  @echoed_name ~r/\A\s*(?:hi+|he+y+a?|hiya|hello|yo|sup|good\s+(?:morning|afternoon|even+i+ng))\s*,?\s*symbrella\b/iu
 
   @doc "True only for an isolated social greeting, optionally addressing Symbrella."
   @spec standalone?(term()) :: boolean()
@@ -24,7 +26,8 @@ defmodule Core.Response.GreetingTurn do
   def robotic_draft?(user_text, draft)
       when is_binary(user_text) and is_binary(draft) do
     standalone?(user_text) and
-      (Regex.match?(@service_desk, draft) or Regex.match?(@echoed_name, draft))
+      (Regex.match?(@service_desk, draft) or Regex.match?(@echoed_name, draft) or
+         Regex.match?(@unnecessary_clarification, draft))
   end
 
   def robotic_draft?(_, _), do: false
@@ -36,7 +39,10 @@ defmodule Core.Response.GreetingTurn do
   """
   @spec repair(String.t(), String.t()) :: String.t()
   def repair(user_text, draft) when is_binary(user_text) and is_binary(draft) do
-    if standalone?(user_text) do
+    if standalone?(user_text) and Regex.match?(@unnecessary_clarification, draft) do
+      safe_acknowledgement(user_text)
+    else
+      if standalone?(user_text) do
       cleaned =
         draft
         |> String.replace(@service_desk, "")
@@ -50,16 +56,19 @@ defmodule Core.Response.GreetingTurn do
         |> String.trim()
 
       if cleaned == "", do: safe_acknowledgement(user_text), else: cleaned
-    else
-      draft
+      else
+        draft
+      end
     end
   end
 
   def repair(_user_text, draft), do: draft
 
   defp safe_acknowledgement(text) do
-    case Regex.run(~r/\bgood\s+(morning|afternoon|evening)\b/iu, text) do
-      [_, time] -> "Good #{String.downcase(time)}."
+    case Regex.run(~r/\bgood\s+(morning|afternoon|even+i+ng)\b/iu, text) do
+      [_, time] ->
+        greeting = if Regex.match?(~r/^even+i+ng$/iu, time), do: "evening", else: String.downcase(time)
+        "Good #{greeting}."
       _ -> "Hello."
     end
   end
