@@ -10,6 +10,7 @@ defmodule Core.Response.GreetingTurnTest do
       "Good afternoon, Symbrella!",
       "good morning",
       "good evenniing symbrella",
+      "good eveing symbrella",
       "Hello there",
       "hey symbrella",
       "hi",
@@ -55,6 +56,37 @@ defmodule Core.Response.GreetingTurnTest do
     assert GreetingTurn.standalone?(user)
     assert GreetingTurn.robotic_draft?(user, draft)
     assert GreetingTurn.repair(user, draft) == "Good evening."
+  end
+
+  test "the observed MythoMax explanation is repaired for a typo greeting" do
+    user = "good eveing symbrella"
+
+    draft =
+      "Hello! I understand that you're saying \"good evening\" to me. " <>
+        "Is there anything specific you would like to discuss or ask about? " <>
+        "If you're just saying hello, that's fine too. " <>
+        "I'm here to assist you in any way I can."
+
+    assert GreetingTurn.standalone?(user)
+    assert GreetingTurn.robotic_draft?(user, draft)
+    assert GreetingTurn.repair(user, draft) == "Good evening."
+
+    {:ok, final, reflection} =
+      ReflectionLoop.review(user, draft, %{features: %{text: user, intent: :unknown, conf: 0.2}})
+
+    assert final == "Good evening."
+    assert reflection.status == :repair
+    assert reflection.applied?
+    assert :robotic_greeting in reflection.issues
+  end
+
+  test "MythoMax's natural greeting is not replaced by a scripted answer" do
+    user = "good eveing symbrella"
+    natural = "Evening! Anything interesting going on?"
+
+    assert GreetingTurn.standalone?(user)
+    refute GreetingTurn.robotic_draft?(user, natural)
+    assert GreetingTurn.repair(user, natural) == natural
   end
 
   test "preserves genuine social conversation rather than replacing it with canned text" do
