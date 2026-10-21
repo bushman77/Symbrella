@@ -39,26 +39,27 @@ defmodule Core.Response.GreetingTurn do
   """
   @spec repair(String.t(), String.t()) :: String.t()
   def repair(user_text, draft) when is_binary(user_text) and is_binary(draft) do
-    if standalone?(user_text) and Regex.match?(@unnecessary_clarification, draft) do
-      safe_acknowledgement(user_text)
-    else
-      if standalone?(user_text) do
-      cleaned =
+    cond do
+      not standalone?(user_text) ->
         draft
-        |> String.replace(@service_desk, "")
-        |> then(fn text ->
-          Regex.replace(@echoed_name, text, fn greeting ->
-            String.replace(greeting, ~r/\s*,?\s*symbrella\b/iu, "")
-          end)
-        end)
-        |> String.replace(~r/\s+([.!?])/u, "\\1")
-        |> String.replace(~r/[ \t]{2,}/u, " ")
-        |> String.trim()
 
-      if cleaned == "", do: safe_acknowledgement(user_text), else: cleaned
-      else
-        draft
-      end
+      Regex.match?(@unnecessary_clarification, draft) ->
+        safe_acknowledgement(user_text)
+
+      true ->
+        cleaned =
+          draft
+          |> String.replace(@service_desk, "")
+          |> then(fn text ->
+            Regex.replace(@echoed_name, text, fn greeting ->
+              String.replace(greeting, ~r/\s*,?\s*symbrella\b/iu, "")
+            end)
+          end)
+          |> String.replace(~r/\s+([.!?])/u, "\\1")
+          |> String.replace(~r/[ \t]{2,}/u, " ")
+          |> String.trim()
+
+        if cleaned == "", do: safe_acknowledgement(user_text), else: cleaned
     end
   end
 
