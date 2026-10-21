@@ -106,6 +106,28 @@ defmodule Brain.LIFG.SenseFocus do
                :attested_verb_alternative], &(&1 in evidence))
   end
 
+  # Consume the same independently witnessed predicate role as Stage1
+  # scoring. This focuses contextual work but never prunes alternatives or
+  # independently selects a verb meaning.
+  defp supported_role?(%{status: :supported, pos: "verb",
+                          role: :predicate, basis: basis, evidence: evidence})
+       when basis in [:modal_question_predicate, :modal_declarative_predicate,
+                      :imperative_predicate, :plural_present_predicate,
+                      :finite_present_svo_predicate] and is_list(evidence) do
+    required =
+      case basis do
+        :modal_question_predicate -> [:auxiliary_subject_order]
+        :modal_declarative_predicate -> [:subject_auxiliary_order]
+        :imperative_predicate -> [:initial_predicate]
+        :plural_present_predicate ->
+          [:attested_plural_subject, :present_base_verb_witness]
+        :finite_present_svo_predicate -> [:attested_finite_present_verb]
+      end
+
+    Enum.all?(required ++ [:dictionary_pos_witness, :bounded_predicate_slot],
+      &(&1 in evidence))
+  end
+
   defp supported_role?(%{status: :supported, pos: "adjective",
                          role: :modifier,
                          basis: :complete_determiner_adjective_noun,
