@@ -196,6 +196,48 @@ defmodule Brain.LIFG.RoleCompetition do
         _ -> false
       end)
 
+    # A dictionary-witnessed adjective preceding an unresolved CamelCase
+    # head is still an adjective. The head itself is NOT promoted to a noun
+    # sense or BrainCell. Recheck the original surface and dictionary witnesses.
+    nominal_proposals =
+      si
+      |> Map.get(:nominal_proposals, [])
+      |> List.wrap()
+      |> Enum.filter(fn
+        %{token_index: i, role: :modifier, pos: "adjective",
+          span: {det, head},
+          basis: :determined_adjective_before_unresolved_head,
+          evidence: evidence}
+        when is_integer(i) and is_integer(det) and is_integer(head) and
+             i >= 0 and det == i - 1 and head == i + 1 and
+             is_list(evidence) ->
+          raw_head =
+            si
+            |> Map.get(:tokens, [])
+            |> Enum.find(fn t -> is_map(t) and Map.get(t, :index) == head end)
+            |> case do
+              %{} = token -> Map.get(token, :phrase, "")
+              _ -> ""
+            end
+            |> String.replace(~r/[?!.;,]+\\z/u, "")
+
+          Enum.all?(
+            [:bounded_determiner_surface, :dictionary_pos_witness,
+             :unresolved_code_head, :complete_nominal_surface],
+            &(&1 in evidence)
+          ) and
+            MapSet.member?(@determiners, Map.get(tokens, det)) and
+            witnessed?(cells, tokens, det, "determiner") and
+            witnessed?(cells, tokens, i, "adjective") and
+            Regex.match?(~r/\\A[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\\z/, raw_head) and
+            not Enum.any?(cells, fn cell ->
+              normalize(Map.get(cell, :norm) || Map.get(cell, :word)) ==
+                Map.get(tokens, head)
+            end)
+
+        _ -> false
+      end)
+
     # A local determiner + adjective + noun hypothesis can straddle the
     # *predicate* of a complete, independently witnessed clause. For example:
     #   The artist draws a picture.
@@ -216,7 +258,7 @@ defmodule Brain.LIFG.RoleCompetition do
 
     decisions =
       (local_proposals ++ subject_proposals ++ present_subject_proposals ++
-         question_proposals ++ predicate_proposals)
+         question_proposals ++ predicate_proposals ++ nominal_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
