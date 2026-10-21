@@ -907,7 +907,7 @@ defmodule Core.Response.LlmSynthesis do
   end
 
   defp prompt_history_budget(system_prompt, user_text) do
-    # 5200 estimated input tokens leave space in the configured 8192-token
+    # The configured estimated-input budget must leave room in the active model
     # context for generation, role framing, and tokenizer estimation error.
     max_chars = llm_config(:max_input_estimated_tokens, 5_200) * 4
     max(max_chars - String.length(system_prompt) -
