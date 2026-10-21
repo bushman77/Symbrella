@@ -210,12 +210,30 @@ defmodule SymbrellaWeb.HomeLive do
       reply
       |> Map.put(:hippocampal_events, worker_memory_events ++ final_trace.events)
       |> Map.put(:final_trace_status, final_trace.status)
-      |> Core.StateDump.capture(:chat_reply)
 
-    reply_text = reply.text
+    original_text = reply.text
     tone = Map.get(reply, :tone)
     meta = Map.get(reply, :meta)
     si = Map.get(reply, :si, %{})
+
+    # Replace only an explicitly recognized stock module follow-up. Other
+    # replies retain their text, and genuine questions are never duplicated.
+    clarification =
+      Core.Curiosity.ClarificationLoop.observe(
+        socket.assigns.session_id, si, original_text, meta || %{}
+      )
+    reply_text = Core.Curiosity.ClarificationLoop.display_text(original_text, clarification)
+    meta =
+      if match?({:replace_generic, _, _}, clarification) do
+        Map.put(meta || %{}, :clarification_delivery, :replaced_generic_question)
+      else
+        meta
+      end
+    reply =
+      reply
+      |> Map.put(:text, reply_text)
+      |> Map.put(:meta, meta)
+      |> Core.StateDump.capture(:chat_reply)
     symbolic_frame = Map.get(reply, :symbolic_frame) || Map.get(si, :symbolic_frame)
 
     action_meta =
@@ -235,7 +253,16 @@ defmodule SymbrellaWeb.HomeLive do
         map_get(meta, :agent_action_candidates) ||
         map_get(action_meta || %{}, :candidates, [])
 
-    explain_text = Map.get(reply, :explain_text, reply_text)
+    explain_text =
+      case Map.get(reply, :explain_text, reply_text) do
+        original when is_binary(original) ->
+          if String.starts_with?(original, original_text),
+            do: String.replace_prefix(original, original_text, reply_text),
+            else: reply_text
+
+        _ ->
+          reply_text
+      end
     senses_selected = Map.get(reply, :senses_selected, [])
     # This is the same SemanticInput the console/API diagnostics report.
     # Pass a compact read-only projection; never reconstruct meaning from
@@ -277,14 +304,6 @@ defmodule SymbrellaWeb.HomeLive do
     }
 
     ChatHistory.append(socket.assigns.session_id, bot)
-
-    # Only the completed semantic input can open/resolve a supervised
-    # clarification. This cannot change the already-delivered answer, create
-    # verified facts, or affect the independent proof-based investigator.
-    clarification =
-      Core.Curiosity.ClarificationLoop.observe(
-        socket.assigns.session_id, si, reply_text, meta || %{}
-      )
 
     maybe_archive_completed_turn(
       socket.assigns,

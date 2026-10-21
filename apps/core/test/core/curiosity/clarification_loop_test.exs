@@ -126,6 +126,32 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert result.session.last_outcome == :verified_improvement
   end
 
+  test "generic model follow-up becomes a single grounded clarification" do
+    server = server()
+    session = sid()
+    input = si(session)
+    admit(input)
+    generic = "Congratulations! What have you been learning about in your module?"
+
+    assert ClarificationLoop.replaceable_generic_reply?(generic)
+    assert {:replace_generic, question, flags} =
+      ClarificationLoop.observe(session, input, generic, @meta, server)
+    assert question =~ "glimmerflux"
+    assert String.ends_with?(question, "?")
+    assert flags.delivery == :replace_generic
+    assert ClarificationLoop.display_text(generic, {:replace_generic, question, flags}) ==
+             question
+    refute String.contains?(question, "Congratulations")
+    assert ClarificationLoop.snapshot(session, server).session.pending.term == "glimmerflux"
+
+    # A specific question is not a vacuous module follow-up.
+    assert {:skip, :reply_already_asks_question} =
+      ClarificationLoop.diagnose(input,
+        {:ok, %{status: :review_required,
+          next_action: :consider_user_clarification, age_ms: 1}},
+        "Do you use glimmerflux for cryptographic signatures?", @meta)
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)

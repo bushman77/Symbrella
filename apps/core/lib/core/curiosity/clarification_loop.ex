@@ -32,7 +32,7 @@ defmodule Core.Curiosity.ClarificationLoop do
 
   @doc "Handle a completed real user/assistant turn; never emits chat messages itself."
   @spec observe(term(), map(), String.t(), map(), GenServer.server()) ::
-          {:ask, String.t(), map()} | :none
+          {:ask, String.t(), map()} | {:replace_generic, String.t(), map()} | :none
   def observe(session_id, si, reply, meta, server \\ __MODULE__)
 
   def observe(session_id, %{} = si, reply, %{} = meta, server)
@@ -47,6 +47,24 @@ defmodule Core.Curiosity.ClarificationLoop do
   end
 
   def observe(_, _, _, _, _), do: :none
+
+  @doc "Select the final text without ever appending a second question."
+  @spec display_text(String.t(), term()) :: String.t()
+  def display_text(_original, {:replace_generic, clarification, _flags})
+      when is_binary(clarification), do: clarification
+  def display_text(original, _decision), do: original
+
+  # Only a whole, known generic follow-up is replaceable. Do not rewrite a
+  # substantive answer or a question that is already about a specific topic.
+  @spec replaceable_generic_reply?(term()) :: boolean()
+  def replaceable_generic_reply?(reply) when is_binary(reply) do
+    Regex.match?(
+      ~r/\A(?:Congratulations[.!]\s*)?What have you been learning about (?:in|with) your module\?\s*\z/iu,
+      String.trim(reply)
+    )
+  end
+
+  def replaceable_generic_reply?(_), do: false
 
   @doc "Inspect the global learning bias and one session's pending/last receipt."
   @spec snapshot(term(), GenServer.server()) :: map()
@@ -105,7 +123,7 @@ defmodule Core.Curiosity.ClarificationLoop do
       not is_binary(sentence) or String.contains?(sentence, "?") ->
         {:skip, :factual_or_question_turn}
 
-      String.contains?(reply, "?") ->
+      String.contains?(reply, "?") and not replaceable_generic_reply?(reply) ->
         {:skip, :reply_already_asks_question}
 
       not user_originated_turn?(si) ->
@@ -233,11 +251,15 @@ defmodule Core.Curiosity.ClarificationLoop do
                     last_decision: :clarification_proposed
                   }))
                   |> Map.update!(:attempts, &(&1 + 1))
+                replace_generic? = replaceable_generic_reply?(reply)
+                delivery = if replace_generic?, do: :replace_generic, else: :ask
                 :telemetry.execute([:core, :curiosity, :clarification_prompt],
                   %{proposed: 1, score: score},
-                  %{reason: :unresolved_lexical_meaning, factual_authority?: false})
-                {:reply, {:ask, question, %{kind: :clarification_prompt,
-                  factual_authority?: false, learning_credit?: false}}, state2}
+                  %{reason: :unresolved_lexical_meaning,
+                    delivery: delivery, factual_authority?: false})
+                {:reply, {delivery, question, %{kind: :clarification_prompt,
+                  delivery: delivery, factual_authority?: false,
+                  learning_credit?: false}}, state2}
               else
                 {:reply, :none, state}
               end
