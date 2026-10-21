@@ -94,6 +94,7 @@ defmodule Brain.LIFG.GrammarEvidence do
       %{status: :supported, pos: pos, basis: basis, evidence: evidence}
       when pos in ["noun", "adjective", "verb"] and
            basis in [:complete_determiner_adjective_noun,
+                     :determined_adjective_before_unresolved_head,
                      :determined_subject_before_attested_past_predicate,
                      :determined_subject_before_attested_present_predicate,
                      :determined_subject_in_wh_aux_question,
@@ -107,6 +108,10 @@ defmodule Brain.LIFG.GrammarEvidence do
             :complete_determiner_adjective_noun ->
               [:bounded_determiner_surface, :dictionary_pos_witness,
                :complete_nominal_constituent]
+
+            :determined_adjective_before_unresolved_head ->
+              [:bounded_determiner_surface, :dictionary_pos_witness,
+               :unresolved_code_head, :complete_nominal_surface]
 
             :determined_subject_before_attested_past_predicate ->
               [:bounded_determiner_surface, :dictionary_pos_witness,
