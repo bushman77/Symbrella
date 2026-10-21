@@ -3,8 +3,9 @@ defmodule Core.Curiosity.ClarificationLoop do
   Supervised, bounded conversation-clarification feedback.
 
   A user-visible question is proposed only for a recent, same-session,
-  explicitly unresolved lexical term in a nonfactual statement. The current
-  answer is never suppressed or rewritten. On the *next user turn*, a
+  explicitly unresolved lexical term in a nonfactual statement. A narrow
+  approved generic clarification can be refined into a lexical question;
+  substantive answers and specific questions remain untouched. On the *next user turn*, a
   clarification is credited only when an independently dictionary-verified
   lexical construction for the same term appears in that turn's Core SI.
   A user explanation alone is NOT a verified dictionary sense or a fact.
@@ -60,6 +61,27 @@ defmodule Core.Curiosity.ClarificationLoop do
   # sentence. Do not rewrite a specific question about an actual concept,
   # an informative answer, or a multi-question reply.
   @generic_opening ~r/\A(?:(?:congratulations|(?:that|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
+  # Agency has already selected and safety-approved a clarification in this
+  # path. A vague question about work "with it" does not request the meaning
+  # of the unknown word; only these whole-message generic work questions may
+  # be refined to the term-linked clarification already warranted by SI.
+  @generic_work_opening ~r/\A(?:(?:oh,\s*)?(?:(?:that|this|it) sounds (?:intriguing|interesting|exciting|great|cool|neat)|(?:that's|that is) (?:interesting|exciting|great|cool|neat))\s*[!.]\s*)?/iu
+  @generic_work_followups [
+    ~r/\Awhat (?:sort|kind|type) of work (?:have you been|are you) doing (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu,
+    ~r/\Awhat (?:have you been|are you) (?:working on|doing) (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu,
+    ~r/\A(?:can|could|would) you tell me (?:more )?about (?:what you(?:'ve| have) been doing|your work) (?:with|on) (?:it|that|your module|your project|the module|the project)\?\z/iu
+  ]
+
+  @spec replaceable_approved_work_question?(term()) :: boolean()
+  def replaceable_approved_work_question?(reply) when is_binary(reply) do
+    trimmed = String.trim(reply)
+    question = trimmed |> String.replace(@generic_work_opening, "") |> String.trim()
+    String.length(trimmed) <= 240 and
+      Enum.any?(@generic_work_followups, &Regex.match?(&1, question))
+  end
+
+  def replaceable_approved_work_question?(_), do: false
+
   @generic_followups [
     ~r/\Awhat (?:have you been (?:learning|working) (?:about|on|in|with)|have you (?:learned|discovered)(?: so far)?|are you (?:working on|building|learning)(?: now)?)(?: (?:about|in|with|on) (?:your|the|this) (?:module|project))?\?\z/iu,
     ~r/\Awhat (?:does|will|is) (?:your|the|this) (?:module|project) (?:do|about|for)\?\z/iu,
@@ -113,7 +135,7 @@ defmodule Core.Curiosity.ClarificationLoop do
   @spec proposal(map(), term(), String.t(), map()) :: {:ok, String.t()} | :none
   def proposal(si, gap, reply, meta) do
     case diagnose(si, gap, reply, meta) do
-      {kind, term} when kind in [:eligible, :eligible_existing] -> {:ok, term}
+      {kind, term} when kind in [:eligible, :eligible_existing, :eligible_refine] -> {:ok, term}
       {:skip, _reason} -> :none
     end
   end
@@ -123,7 +145,8 @@ defmodule Core.Curiosity.ClarificationLoop do
   clarification question. Reasons are bounded atoms, not user text.
   """
   @spec diagnose(term(), term(), term(), term()) ::
-          {:eligible, String.t()} | {:skip, atom()}
+          {:eligible, String.t()} | {:eligible_existing, String.t()} |
+          {:eligible_refine, String.t()} | {:skip, atom()}
   def diagnose(%{} = si, {:ok, %{status: :review_required,
       next_action: :consider_user_clarification, age_ms: age}}, reply, meta)
       when is_integer(age) and age >= 0 and age <= 5 * 60_000 and
@@ -170,6 +193,12 @@ defmodule Core.Curiosity.ClarificationLoop do
           [term | _] ->
             cond do
               already_clarifies?(reply, term) -> {:eligible_existing, String.trim(term)}
+
+              get(action, :selected_action) == :ask_clarifying_question and
+                  length(terms) == 1 and refers_to_term?(sentence, term) and
+                  replaceable_approved_work_question?(reply) ->
+                {:eligible_refine, String.trim(term)}
+
               get(action, :selected_action) == :ask_clarifying_question ->
                 {:skip, :agency_clarification_not_term_linked}
 
@@ -333,12 +362,13 @@ defmodule Core.Curiosity.ClarificationLoop do
         state.auto_ask? and
             now - Map.get(session, :last_asked_ms, 0) >= cooldown_for(credited) ->
           case diagnose(si, gap, reply, meta) do
-            {kind, term} when kind in [:eligible, :eligible_existing] ->
+            {kind, term} when kind in [:eligible, :eligible_existing, :eligible_refine] ->
               score = 0.58 + min(credited * 0.03, 0.12)
               if score >= 0.56 do
                 delivery =
                   cond do
                     kind == :eligible_existing -> :tracked_existing
+                    kind == :eligible_refine -> :replace_generic
                     replaceable_generic_reply?(reply) -> :replace_generic
                     true -> :ask
                   end

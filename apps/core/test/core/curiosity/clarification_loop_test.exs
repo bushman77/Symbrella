@@ -322,6 +322,119 @@ defmodule Core.Curiosity.ClarificationLoopTest do
       ClarificationLoop.diagnose(input, gap, reply, high_risk)
   end
 
+  test "approved vague work question is refined into a lexical clarification" do
+    server = server()
+    session = sid()
+    input =
+      %{si(session) |
+        sentence: "I've been working on a glimmerflux module.",
+        source: :prod,
+        intent: :code}
+      |> Map.put(:experience_origin, :user_turn)
+    admit(input)
+
+    reply =
+      "Oh, that sounds intriguing! What sort of work have you been doing with it?"
+
+    agency = %Core.Agency.Decision{
+      selected_action: :ask_clarifying_question,
+      intent: :code,
+      risk: :low,
+      permission: %{status: :not_required, required?: false},
+      selector: %{safety_gate: :approved, safety: %{decision: :approved}}
+    }
+    meta = %{@meta | agency_decision: agency}
+
+    assert ClarificationLoop.replaceable_approved_work_question?(reply)
+    assert {:eligible_refine, "glimmerflux"} =
+      ClarificationLoop.diagnose(input,
+        {:ok, %{status: :review_required,
+          next_action: :consider_user_clarification, age_ms: 1}},
+        reply, meta)
+    assert {:replace_generic, question, flags} =
+      ClarificationLoop.observe(session, input, reply, meta, server)
+
+    assert question =~ ~s("glimmerflux")
+    assert question =~ "Could you explain that term?"
+    refute question =~ "sort of work"
+    assert flags.delivery == :replace_generic
+    assert flags.factual_authority? == false
+    assert flags.learning_credit? == false
+    assert ClarificationLoop.display_text(reply,
+      {:replace_generic, question, flags}) == question
+
+    snapshot = ClarificationLoop.snapshot(session, server)
+    assert snapshot.attempts == 1
+    assert snapshot.session.pending.term == "glimmerflux"
+    assert snapshot.session.last_decision == :clarification_proposed
+    assert snapshot.learning.sample_count == 0
+
+    # A user-supplied explanation is not an independently verified sense.
+    followup = %{
+      sentence: "By glimmerflux I mean a fictional Elixir module.",
+      lexical_constructions: []
+    }
+    assert :none == ClarificationLoop.observe(
+      session, followup, "Thanks for explaining.", meta, server)
+    snap = ClarificationLoop.snapshot(session, server)
+    assert snap.session.last_outcome == :clarification_received_unverified
+    assert snap.learning.success_count == 0
+    assert snap.learning.unverified_count == 1
+  end
+
+  test "only one fresh named gap can refine vague agency questions" do
+    session = sid()
+    input = %{si(session) |
+      sentence: "I've been working on a glimmerflux module.",
+      intent: :code, source: :prod}
+      |> Map.put(:experience_origin, :user_turn)
+    agency = %Core.Agency.Decision{
+      selected_action: :ask_clarifying_question, risk: :low,
+      permission: %{status: :not_required, required?: false},
+      selector: %{safety_gate: :approved, safety: %{decision: :approved}}
+    }
+    meta = %{@meta | agency_decision: agency}
+    gap = {:ok, %{status: :review_required,
+      next_action: :consider_user_clarification, age_ms: 1}}
+    vague = "Oh, that sounds intriguing! What sort of work have you been doing with it?"
+
+    assert ClarificationLoop.replaceable_approved_work_question?(
+      "What kind of work are you doing with your module?")
+    assert ClarificationLoop.replaceable_approved_work_question?(
+      "Can you tell me more about what you've been doing with it?")
+
+    for concrete <- [
+      "What sort of work have you done with its SQL parser?",
+      "What Elixir libraries did you use for glimmerflux?",
+      "How does your module process input?",
+      "Could you explain how its caching works?",
+      "The code looks good. What sort of work have you been doing with it?",
+      "What sort of work have you been doing with it? What comes next?"
+    ] do
+      refute ClarificationLoop.replaceable_approved_work_question?(concrete), concrete
+      assert {:skip, :agency_clarification_not_term_linked} =
+        ClarificationLoop.diagnose(input, gap, concrete, meta)
+    end
+
+    assert {:skip, :agency_clarification_not_term_linked} =
+      ClarificationLoop.diagnose(
+        put_in(input, [:comprehension, :unresolved], ["glimmerflux", "zorbify"]),
+        gap, vague, meta)
+
+    assert {:skip, :agency_clarification_not_term_linked} =
+      ClarificationLoop.diagnose(%{input | sentence: "I've been working on a module."},
+        gap, vague, meta)
+
+    assert {:skip, :agency_not_approved} =
+      ClarificationLoop.diagnose(input, gap, vague,
+        %{@meta | agency_decision: %{agency | risk: :high}})
+
+    # The model-selected :answer_user path is not given the agency
+    # clarification-refinement permission.
+    assert {:skip, :reply_already_asks_question} =
+      ClarificationLoop.diagnose(input, gap, vague, @meta)
+  end
+
   test "real pipeline user source is :prod with :user_turn provenance" do
     input = %{si(sid()) | source: :prod}
     |> Map.put(:experience_origin, :user_turn)
