@@ -149,6 +149,34 @@ defmodule Core.Response.RequestStructureFlowTest do
     assert text =~ "do not mistake missing lexicon entries for an invalid request"
   end
 
+  test "ordinary direct-object request also crosses bridge without a recipient" do
+    source = si("Can you write a book?")
+    source =
+      %{source | active_cells: source.active_cells ++ [cell("book", "noun")]}
+      |> RoleCompetition.attach()
+
+    assert %{
+      status: :grammatical_candidate,
+      predicate: "write", recipient: nil, requested_object: "book",
+      object_modifier: nil, object_lexically_resolved?: true,
+      meaning_verified?: false
+    } = RequestStructure.from_si(source)
+
+    prompt =
+      source
+      |> Context.from_si()
+      |> then(fn embedded ->
+        Context.from_response_parts(source.sentence,
+          %{intent: :ask, turn_context: embedded},
+          %{mode: :collaborator, action: :answer_user}, %{}, %{})
+      end)
+      |> LlmPrompt.build_system_prompt()
+
+    assert prompt =~ ~s(requested_object="book")
+    assert prompt =~ ~s(recipient=nil)
+    refute prompt =~ "GenServer"
+  end
+
   test "missing, contradictory, or fabricated evidence cannot be promoted to prompt structure" do
     source = si()
 
