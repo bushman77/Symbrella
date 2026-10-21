@@ -11,6 +11,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Telemetry
   alias Core.Response.Topics
   alias Core.Response.GreetingTurn
+  alias Core.Response.EvidenceRevision
   alias Core.Response.AnswerAdequacy
   alias Core.Response.SpeakerLocationFidelity
   alias Core.Tools.WebRetrieval.Grounding
@@ -90,6 +91,7 @@ defmodule Core.Response.ReflectionLoop do
   defp collect_issues(context, user_text, draft_text) do
     []
     |> maybe_issue(unsafe_draft?(draft_text), :unsafe)
+    |> maybe_issue(news_sources(context) != [] and EvidenceRevision.prompt_echo?(draft_text, []), :revision_prompt_echo)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
@@ -144,6 +146,9 @@ defmodule Core.Response.ReflectionLoop do
     cond do
       :unsafe in issues ->
         {:reject, issues}
+
+      :revision_prompt_echo in issues ->
+        {:repair, issues}
 
       :speaker_location_fidelity in issues ->
         {:repair, issues}
@@ -212,6 +217,9 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
+        :revision_prompt_echo in issues ->
+          news_headline_fallback(context, user_text)
+
         :speaker_location_fidelity in issues ->
           user_text
           |> SpeakerLocationFidelity.issue(draft_text, context)
@@ -296,6 +304,9 @@ defmodule Core.Response.ReflectionLoop do
 
     instruction =
       cond do
+        :revision_prompt_echo in issues ->
+          "Discard echoed news-revision controls and publish the source-grounded fallback instead."
+
         :speaker_location_fidelity in issues ->
           "The assistant attributed an unverified physical location to a conversation participant, or repeated a recently disputed self-location assertion. Current physical location requires its own verified evidence; public geographic facts and chat claims cannot establish it."
         :answer_not_supplied in issues ->
