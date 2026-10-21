@@ -9,6 +9,8 @@ defmodule Core.Response.CodeRequest do
   source writes, BrainCell stimulation, or episodic recording.
   """
 
+  alias Core.Response.CodeRequestValidation
+
   @module_pattern ~r/\A[A-Z][A-Za-z0-9]{0,79}\z/
   @request_terms ~r/\b(?:write|create|build|make|generate|implement|show)\b/iu
 
