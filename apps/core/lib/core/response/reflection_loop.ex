@@ -601,7 +601,7 @@ defmodule Core.Response.ReflectionLoop do
   defp news_assessment_missing?(context, user_text, draft_text) do
     news_sources(context) != [] and
       Regex.match?(
-        ~r/\b(?:your thoughts|what do you think|your take|your opinion|how do you view|what's your view)\b/iu,
+        ~r/\b(?:your thoughts|what do you think|what do you thing|your take|your opinion|how do you view|what's your view)\b/iu,
         user_text
       ) and
       not Regex.match?(
