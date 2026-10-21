@@ -181,8 +181,9 @@ defmodule Core.Curiosity.ClarificationLoop do
                 question = "I couldn't determine what you meant by \"#{term}\". Could you explain that term?"
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
                   asked_at_ms: now, source: :session_comprehension_gap}
-                state2 = state |> put_session(sid, %{session | pending: pending,
-                  last_asked_ms: now}) |> Map.update!(:attempts, &(&1 + 1))
+                state2 = state
+                  |> put_session(sid, Map.merge(session, %{pending: pending, last_asked_ms: now}))
+                  |> Map.update!(:attempts, &(&1 + 1))
                 {:reply, {:ask, question, %{kind: :clarification_prompt,
                   factual_authority?: false, learning_credit?: false}}, state2}
               else
