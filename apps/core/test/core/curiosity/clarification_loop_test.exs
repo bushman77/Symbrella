@@ -34,6 +34,45 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     on_exit(fn -> Brain.defocus(Comprehension.frame_id(si.session_id)) end)
   end
 
+  test "real completed user SI opens a clarification without any WM frame" do
+    server = server()
+    session = sid()
+    input =
+      %{si(session) |
+        sentence: "I've been working on a glimmerflux module.",
+        source: :prod, intent: :code}
+      |> Map.put(:experience_origin, :user_turn)
+
+    assert :none == Core.Curiosity.ComprehensionGaps.for_session(session)
+
+    agency = %Core.Agency.Decision{
+      selected_action: :ask_clarifying_question, risk: :low,
+      permission: %{required?: false, status: :not_required},
+      selector: %{safety_gate: :approved, safety: %{decision: :approved}}
+    }
+    meta = %{@meta | agency_decision: agency}
+
+    assert {:replace_generic, text, flags} = ClarificationLoop.observe(
+      session, input, "Sounds great! What features are you adding?", meta, server)
+    assert text =~ ~s("glimmerflux")
+    assert flags.delivery == :replace_generic
+
+    state = ClarificationLoop.snapshot(session, server)
+    assert state.attempts == 1
+    assert state.session.last_decision == :clarification_proposed
+    assert state.session.pending.term == "glimmerflux"
+    assert state.session.pending.source == :completed_semantic_input
+
+    assert :none == ClarificationLoop.observe(
+      session,
+      %{input | sentence: "By glimmerflux I mean an invented Elixir component."},
+      "Thank you.", meta, server)
+    after_reply = ClarificationLoop.snapshot(session, server)
+    assert after_reply.session.pending == nil
+    assert after_reply.session.last_outcome == :clarification_received_unverified
+    assert after_reply.learning.success_count == 0
+  end
+
   test "a real WM comprehension gap offers a separate, non-authoritative prompt" do
     server = server()
     session = sid()

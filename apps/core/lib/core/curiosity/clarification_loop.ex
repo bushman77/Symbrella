@@ -41,7 +41,9 @@ defmodule Core.Curiosity.ClarificationLoop do
   def observe(session_id, %{} = si, reply, %{} = meta, server)
       when is_binary(session_id) and byte_size(session_id) > 2 and
              byte_size(session_id) <= 128 and is_binary(reply) do
-    gap = ComprehensionGaps.for_session(session_id)
+    gap = ComprehensionGaps.for_observed_turn(
+      session_id, si, ComprehensionGaps.for_session(session_id)
+    )
     GenServer.call(server, {:observe, session_id, si, reply, meta, gap})
   rescue
     _ -> :none
@@ -220,7 +222,7 @@ defmodule Core.Curiosity.ClarificationLoop do
     end
   end
 
-  def diagnose(_, _, _, _), do: {:skip, :no_fresh_session_gap}
+  def diagnose(_, _, _, _), do: {:skip, :no_fresh_current_or_wm_gap}
 
   defp agency_allows_feedback?(action) do
     case {get(action, :risk), get(action, :selected_action)} do
@@ -422,7 +424,7 @@ defmodule Core.Curiosity.ClarificationLoop do
                   end
 
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
-                  asked_at_ms: now, source: :session_comprehension_gap}
+                  asked_at_ms: now, source: get(gap, :source, :session_working_memory)}
                 decision =
                   if delivery == :tracked_existing,
                     do: :existing_clarification_tracked,

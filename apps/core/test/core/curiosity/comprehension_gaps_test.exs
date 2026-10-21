@@ -26,6 +26,66 @@ defmodule Core.Curiosity.ComprehensionGapsTest do
     }]}
   end
 
+  test "the current completed SemanticInput supplies a non-authoritative gap when WM has no frame" do
+    sid = "current-turn-#{System.unique_integer([:positive])}"
+    si = %{
+      session_id: sid,
+      source: :prod,
+      experience_origin: :user_turn,
+      intent: :code,
+      sentence: "I've been working on a glimmerflux module.",
+      sentence_meaning: %{status: :not_yet_interpreted},
+      comprehension: %{
+        degraded?: true,
+        unresolved: ["glimmerflux"],
+        uncertain: ["working", "glimmerflux"],
+        understood: []
+      }
+    }
+
+    assert :none == ComprehensionGaps.for_session(sid)
+    assert {:ok, gap} = ComprehensionGaps.for_observed_turn(sid, si)
+    assert gap.status == :review_required
+    assert gap.source == :completed_semantic_input
+    assert gap.verification == :conversation_context_only
+    assert gap.next_action == :consider_user_clarification
+    assert gap.age_ms == 0
+    assert gap.unresolved_count == 1
+    assert gap.factual_authority? == false
+    refute Map.has_key?(gap, :unresolved)
+    refute Map.has_key?(gap, :sentence)
+
+    assert {:ok, %{next_action: :inspect_comprehension}} =
+      ComprehensionGaps.from_completed_turn(%{si |
+        sentence: "What is glimmerflux?"}, sid)
+  end
+
+  test "completed-turn projection fails closed on other sessions, untrusted origins and missing evidence" do
+    sid = "turn-gate-#{System.unique_integer([:positive])}"
+    si = %{
+      session_id: sid,
+      source: :prod,
+      experience_origin: :user_turn,
+      sentence: "I am working on glimmerflux.",
+      comprehension: %{degraded?: true, uncertain: ["glimmerflux"],
+        unresolved: ["glimmerflux"], understood: []}
+    }
+    assert :none == ComprehensionGaps.for_observed_turn("other-session", si)
+    assert :none == ComprehensionGaps.from_completed_turn(
+      %{si | experience_origin: :synthetic}, sid)
+    assert :none == ComprehensionGaps.from_completed_turn(
+      %{si | source: :test}, sid)
+    assert :none == ComprehensionGaps.from_completed_turn(
+      %{si | comprehension: %{degraded?: false, unresolved: ["glimmerflux"],
+        uncertain: ["glimmerflux"]}}, sid)
+    assert :none == ComprehensionGaps.from_completed_turn(
+      %{si | comprehension: %{degraded?: true, unresolved: [],
+        uncertain: ["glimmerflux"]}}, sid)
+    assert :none == ComprehensionGaps.from_completed_turn(
+      %{si | comprehension: %{degraded?: true, unresolved: ["glimmerflux"],
+        uncertain: []}}, sid)
+  end
+
   test "a degraded, unverified same-session frame produces a typed review, not factual learning" do
     assert {:ok, gap} =
       snapshot(@session)

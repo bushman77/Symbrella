@@ -28,6 +28,83 @@ defmodule Core.Curiosity.ComprehensionGaps do
   def for_session(_), do: :none
 
   @doc """
+  Resolve a clarification candidate from the just-completed, same-session
+  SemanticInput. WM is a transient attention cache, not an authoritative
+  prerequisite for feedback on an actual user turn. No database or outside
+  information is consulted, and no lexical sense is promoted to fact.
+
+  Only explicitly user-originated SI is eligible. A caller-provided WM
+  projection is preserved as diagnostic fallback when no completed-turn
+  candidate exists. A session mismatch always fails closed.
+  """
+  @spec for_observed_turn(term(), map(), term()) :: {:ok, map()} | :none
+  def for_observed_turn(session_id, si, wm_gap \\ :none)
+
+  def for_observed_turn(session_id, %{} = si, wm_gap)
+      when is_binary(session_id) and byte_size(session_id) > 2 do
+    if field(si, :session_id) == session_id do
+      case from_completed_turn(si, session_id) do
+        {:ok, _} = current -> current
+        :none -> if(match?({:ok, %{}}, wm_gap), do: wm_gap, else: :none)
+      end
+    else
+      :none
+    end
+  end
+
+  def for_observed_turn(_, _, _), do: :none
+
+  @doc """
+  A pure, unverified current-turn review projection. The caller must supply
+  the actual completed SemanticInput; this does not recover old chat history.
+  Its source is never labeled as WM or dictionary/source verification.
+  """
+  @spec from_completed_turn(term(), term()) :: {:ok, map()} | :none
+  def from_completed_turn(%{} = si, session_id) when not is_nil(session_id) do
+    summary = field(si, :comprehension)
+    sentence = field(si, :sentence)
+    unresolved = field(summary, :unresolved)
+    uncertain = field(summary, :uncertain)
+    source = field(si, :source)
+    origin = field(si, :experience_origin)
+
+    with true <- field(si, :session_id) == session_id,
+         true <- source == :user or (source == :prod and origin == :user_turn),
+         true <- is_binary(sentence) and byte_size(sentence) > 0,
+         true <- is_map(summary) and field(summary, :degraded?) == true,
+         true <- is_list(unresolved) and
+                   Enum.any?(unresolved, &(is_binary(&1) and String.trim(&1) != "")),
+         true <- is_list(uncertain) and uncertain != [] do
+      interpreted = field(field(si, :sentence_meaning), :status)
+      next_action =
+        if String.contains?(sentence, "?"),
+          do: :inspect_comprehension,
+          else: :consider_user_clarification
+
+      {:ok, %{
+        kind: :comprehension_gap,
+        status: :review_required,
+        source: :completed_semantic_input,
+        verification: :conversation_context_only,
+        reason: if(interpreted == :not_yet_interpreted,
+          do: :uninterpreted_language, else: :unresolved_lexical_meaning),
+        next_action: next_action,
+        uncertain_count: min(length(uncertain), 6),
+        unresolved_count: min(length(unresolved), 6),
+        understood_count: length(List.wrap(field(summary, :understood))),
+        interpretation_status: interpreted,
+        age_ms: 0,
+        factual_authority?: false,
+        investigation_authorized?: false
+      }}
+    else
+      _ -> :none
+    end
+  end
+
+  def from_completed_turn(_, _), do: :none
+
+  @doc """
   Pure snapshot projection for deterministic tests and offline diagnostics.
   No raw sentence, recognized topics, or unresolved terms leave this boundary.
   """
