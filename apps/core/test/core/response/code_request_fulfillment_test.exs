@@ -131,7 +131,8 @@ defmodule Core.Response.CodeRequestFulfillmentTest do
     assert :requested_code_missing in reflection.issues
     refute reflection.applied?
 
-    {:ok, ^@example_code, accepted} =
+    expected_code = @example_code
+    {:ok, ^expected_code, accepted} =
       ReflectionLoop.review(@question, @example_code, context)
     assert accepted.status == :accept
     refute :requested_code_missing in accepted.issues
