@@ -101,7 +101,7 @@ defmodule Core.Response.CodeRequest do
       defmodule #{name} do
         use GenServer
 
-        def start_link(initial_state \\ %{}) do
+        def start_link(initial_state \\\\ %{}) do
           GenServer.start_link(__MODULE__, initial_state, name: __MODULE__)
         end
 
