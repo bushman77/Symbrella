@@ -9,7 +9,15 @@ defmodule Core.Syntax.RoleCompetition do
 
   @spec attach(map()) :: map()
   def attach(%{} = si) do
-    result = Brain.LIFG.RoleCompetition.resolve(si)
+    # The Core-side evidence producer can inspect syntax and dictionary cells
+    # without creating a Brain -> Core application dependency.
+    predicate_proposals = Core.Syntax.PredicateEvidence.detect(si)
+
+    result =
+      si
+      |> Map.put(:predicate_proposals, predicate_proposals)
+      |> Brain.LIFG.RoleCompetition.resolve()
+      |> Map.put(:predicate_proposals, predicate_proposals)
 
     si
     |> Map.put(:role_competition, result)
@@ -18,6 +26,7 @@ defmodule Core.Syntax.RoleCompetition do
       reason: :independent_grammatical_evidence_competition,
       meta: %{
         decisions: result.decisions,
+        predicate_proposals: length(predicate_proposals),
         supported_count: map_size(result.roles)
       })
   end
