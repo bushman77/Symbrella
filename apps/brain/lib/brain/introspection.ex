@@ -12,7 +12,8 @@ defmodule Brain.Introspection do
         meta: Brain.Meta.status(),
         mood: Brain.MoodCore.snapshot(),
         wm: Brain.snapshot_wm(),
-        goals: Brain.GoalStack.active_goals()
+        goals: Brain.GoalStack.active_goals(),
+        investigative_biases: Brain.CuriosityLearning.snapshot()
       )
 
     apply_warm_start(model)

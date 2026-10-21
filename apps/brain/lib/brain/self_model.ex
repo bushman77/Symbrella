@@ -15,6 +15,7 @@ defmodule Brain.SelfModel do
             active_goals: [],
             recent_errors: [],
             recent_actions: [],
+            investigative_biases: Brain.CuriosityLearning.neutral(),
             last_appraisal: nil,
             last_lifg: nil,
             self_other_attribution: %{},
@@ -57,6 +58,7 @@ defmodule Brain.SelfModel do
       active_goals: active_goals(goals),
       recent_errors: recent_errors(patterns),
       recent_actions: Map.get(self_portrait, :last_events, []),
+      investigative_biases: Brain.CuriosityLearning.normalize(Map.get(runtime, :investigative_biases)),
       updated_at_ms: System.system_time(:millisecond)
     }
   end
@@ -76,6 +78,7 @@ defmodule Brain.SelfModel do
       active_goals: List.wrap(model.active_goals),
       recent_errors: List.wrap(model.recent_errors),
       recent_actions: List.wrap(model.recent_actions),
+      investigative_biases: Brain.CuriosityLearning.normalize(model.investigative_biases),
       last_appraisal: model.last_appraisal,
       last_lifg: model.last_lifg,
       self_other_attribution: map_or_empty(model.self_other_attribution),
@@ -101,6 +104,7 @@ defmodule Brain.SelfModel do
          active_goals: List.wrap(get(snapshot, :active_goals, [])),
          recent_errors: List.wrap(get(snapshot, :recent_errors, [])),
          recent_actions: List.wrap(get(snapshot, :recent_actions, [])),
+         investigative_biases: Brain.CuriosityLearning.normalize(get(snapshot, :investigative_biases, nil)),
          last_appraisal: get(snapshot, :last_appraisal, nil),
          last_lifg: get(snapshot, :last_lifg, nil),
          self_other_attribution: map_or_empty(get(snapshot, :self_other_attribution, %{})),
