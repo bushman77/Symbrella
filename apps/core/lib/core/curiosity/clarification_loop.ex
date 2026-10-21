@@ -59,7 +59,7 @@ defmodule Core.Curiosity.ClarificationLoop do
   # small *class* of whole-message open-ended prompts, not one literal
   # sentence. Do not rewrite a specific question about an actual concept,
   # an informative answer, or a multi-question reply.
-  @generic_opening ~r/\A(?:(?:congratulations|(?:that'?s|that is|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
+  @generic_opening ~r/\A(?:(?:congratulations|(?:that|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
   @generic_followups [
     ~r/\Awhat (?:have you been (?:learning|working) (?:about|on|in|with)|have you (?:learned|discovered)(?: so far)?|are you (?:working on|building|learning)(?: now)?)(?: (?:about|in|with|on) (?:your|the|this) (?:module|project))?\?\z/iu,
     ~r/\Awhat (?:does|will|is) (?:your|the|this) (?:module|project) (?:do|about|for)\?\z/iu,
