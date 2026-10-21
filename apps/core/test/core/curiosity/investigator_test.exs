@@ -273,8 +273,10 @@ defmodule Core.Curiosity.InvestigatorTest do
   } do
     capture!(a, b, [120_000, 100_000])
     issue = missing_issue!(a, c)
+    # Do not compete with older regression tests that reserve priority 1.0
+    # to select their own fixtures from a shared sandbox queue.
     issue
-    |> CognitiveIssue.changeset(%{priority: 1.0})
+    |> CognitiveIssue.changeset(%{priority: 0.01})
     |> Db.update!()
 
     name = :curiosity_busy_gate_isolated_test
