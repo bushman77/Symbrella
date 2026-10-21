@@ -21,6 +21,9 @@ defmodule Core.Syntax.RoleCompetition do
       |> Brain.LIFG.RoleCompetition.resolve()
 
     argument_frames = Core.Syntax.ArgumentEvidence.detect(si, adjudicated, nominal)
+    identifier_bindings =
+      Core.Syntax.IdentifierBinding.detect(si, argument_frames, nominal)
+
     argument_compatibility =
       Brain.LIFG.ArgumentCompatibility.compare(
         argument_frames, Map.get(si, :active_cells, [])
@@ -32,6 +35,7 @@ defmodule Core.Syntax.RoleCompetition do
       |> Map.put(:nominal_frames, nominal.frames)
       |> Map.put(:unresolved_tokens, nominal.unresolved_tokens)
       |> Map.put(:argument_frames, argument_frames)
+      |> Map.put(:identifier_bindings, identifier_bindings)
       |> Map.put(:argument_compatibility, argument_compatibility)
 
     si
@@ -45,6 +49,7 @@ defmodule Core.Syntax.RoleCompetition do
         nominal_frames: length(nominal.frames),
         unresolved_code_tokens: length(nominal.unresolved_tokens),
         argument_frames: length(argument_frames),
+        identifier_bindings: length(identifier_bindings),
         supported_count: map_size(result.roles)
       })
   end
