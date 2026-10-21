@@ -1,5 +1,7 @@
 # P-201 — Tokenizer defaults (test): words-only, no char-grams
 import Config
+# Preserve existing model-agnostic prompt contracts in tests.
+config :core, :response_prompt_profile, :default
 config :brain, :ml_enabled, false
 
 # Keep the permanently supervised visual region inert in the test environment.
