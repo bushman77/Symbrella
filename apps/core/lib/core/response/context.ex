@@ -8,6 +8,8 @@ defmodule Core.Response.Context do
   behavior.
   """
 
+  alias Core.Response.RequestStructure
+
   @summary_limit 5
   @episodic_limit 2
   @episode_text_limit 220
@@ -20,6 +22,7 @@ defmodule Core.Response.Context do
       user_text: si_text(si),
       session_id: map_get(si, :session_id, :global),
       symbolic_frame: symbolic_frame(si),
+      request_structure: RequestStructure.from_si(si),
       comprehension: map_get(si, :comprehension),
       wm_context: wm_context_summary(map_get(si, :wm_context)),
       self_model: map_get(si, :self_model),
@@ -75,6 +78,7 @@ defmodule Core.Response.Context do
           map_get(embedded, :symbolic_frame),
           map_get(features, :symbolic_frame)
         ]),
+      request_structure: map_get(embedded, :request_structure),
       session_id:
         first_present([
           map_get(features, :session_id),
