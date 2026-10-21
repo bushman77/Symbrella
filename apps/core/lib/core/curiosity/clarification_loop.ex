@@ -136,7 +136,8 @@ defmodule Core.Curiosity.ClarificationLoop do
       auto_ask?: state.auto_ask?,
       attempts: state.attempts,
       learning: %{v: 1, bias: bias, success_count: credited,
-        unverified_count: unverified, sample_count: length(receipts)},
+        unverified_count: unverified, sample_count: length(receipts),
+        cooldown_ms: cooldown_for(credited)},
       session: %{pending: Map.get(session, :pending),
         last_outcome: Map.get(session, :last_outcome),
         last_asked_ms: Map.get(session, :last_asked_ms)}
@@ -151,6 +152,7 @@ defmodule Core.Curiosity.ClarificationLoop do
     if state.enabled? do
       session = Map.get(state.sessions, sid, %{})
       pending = Map.get(session, :pending)
+      credited = Enum.count(state.receipts, &(&1.outcome == :verified_improvement))
 
       cond do
         is_map(pending) ->
@@ -170,13 +172,13 @@ defmodule Core.Curiosity.ClarificationLoop do
             %{outcome: outcome, factual_authority?: false})
           {:reply, :none, updated}
 
-        state.auto_ask? and now - Map.get(session, :last_asked_ms, 0) >= @cooldown_ms ->
+        state.auto_ask? and
+            now - Map.get(session, :last_asked_ms, 0) >= cooldown_for(credited) ->
           case proposal(si, gap, reply, meta) do
             {:ok, term} ->
               # A slightly positive verified-feedback history makes proposals
               # more competitive without ever bypassing the hard safety gates.
-              verified = Enum.count(state.receipts, &(&1.outcome == :verified_improvement))
-              score = 0.58 + min(verified * 0.03, 0.12)
+              score = 0.58 + min(credited * 0.03, 0.12)
               if score >= 0.56 do
                 question = "I couldn't determine what you meant by \"#{term}\". Could you explain that term?"
                 pending = %{term: term, verified_before: verified_term_ids(si, term),
@@ -184,6 +186,9 @@ defmodule Core.Curiosity.ClarificationLoop do
                 state2 = state
                   |> put_session(sid, Map.merge(session, %{pending: pending, last_asked_ms: now}))
                   |> Map.update!(:attempts, &(&1 + 1))
+                :telemetry.execute([:core, :curiosity, :clarification_prompt],
+                  %{proposed: 1, score: score},
+                  %{reason: :unresolved_lexical_meaning, factual_authority?: false})
                 {:reply, {:ask, question, %{kind: :clarification_prompt,
                   factual_authority?: false, learning_credit?: false}}, state2}
               else
@@ -200,6 +205,12 @@ defmodule Core.Curiosity.ClarificationLoop do
       {:reply, :none, state}
     end
   end
+
+  @doc "Verified outcomes alone shorten the question cooldown, never below six minutes."
+  def cooldown_for(verified_count) when is_integer(verified_count) and verified_count >= 0,
+    do: max(@cooldown_ms - verified_count * 60_000, 6 * 60_000)
+
+  def cooldown_for(_), do: @cooldown_ms
 
   defp put_session(state, sid, session) do
     sessions = Map.put(state.sessions, sid, session)

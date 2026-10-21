@@ -66,8 +66,10 @@ sense, definition and contextual score >= 0.12 is the **only** positive
 `:verified_improvement` signal. A user-supplied explanation without such
 independent evidence is recorded as `:clarification_received_unverified`,
 never a factual claim or training reward. Missing term reference yields
-`:unrelated_followup`. The global clarification bias is capped at +0.12;
-it has no access to `Brain.CuriosityLearning` population-proof biases.
+`:unrelated_followup`. The global clarification bias is capped at +0.12 and positive verified
+outcomes conservatively shorten the prompt cooldown from ten minutes toward
+a six-minute floor, without relaxing any safety or semantic-evidence gate.
+It has no access to `Brain.CuriosityLearning` population-proof biases.
 
 State and bounded receipts are currently BEAM-local and reset on restart.
 Live diagnostics for a known chat session key:

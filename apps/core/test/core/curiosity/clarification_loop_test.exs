@@ -52,6 +52,7 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert state.session.pending.term == "glimmerflux"
     assert state.learning.bias == 0.0
     assert state.learning.success_count == 0
+    assert state.learning.cooldown_ms == 600_000
     assert ClarificationLoop.snapshot("other-session", server).session.pending == nil
 
     # The very next turn is the sole opportunity: no duplicate prompt.
@@ -119,6 +120,8 @@ defmodule Core.Curiosity.ClarificationLoopTest do
     assert result.learning.success_count == 1
     assert result.learning.sample_count == 1
     assert result.learning.bias == 0.03
+    assert result.learning.cooldown_ms == 540_000
+    assert ClarificationLoop.cooldown_for(25) == 360_000
     assert result.session.last_outcome == :verified_improvement
   end
 
