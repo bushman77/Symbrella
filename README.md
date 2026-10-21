@@ -32,6 +32,30 @@ mix phx.server
 
 Open `http://localhost:4000`.
 
+## Local llama.cpp model path (`~/.env`)
+
+The local GGUF model path is **not** committed in `config/llm.exs`.
+Create or edit the current user's `~/.env` file, for example:
+
+```bash
+cat >> "$HOME/.env" <<'EOF'
+LLAMA_MODEL_PATH=~/models/mythomax-l2-13b.Q4_K_M.gguf
+EOF
+chmod 600 "$HOME/.env"
+```
+
+Replace the sample filename with the GGUF actually installed on that
+machine. This file is in the user's home directory, outside the repository,
+and is never committed to Git. `config/llm.exs` reads only the
+`LLAMA_MODEL_PATH` assignment automatically when Mix starts; there is no
+need to `source ~/.env`. The last assignment in the file wins, and an
+explicit exported `LLAMA_MODEL_PATH` takes precedence. Quoted and unquoted
+paths are supported, including `~/models/...`.
+
+Restart `iex -S mix phx.server` after changing the path. If no path is
+configured, Symbrella will report a missing model path rather than silently
+using a developer-specific default.
+
 For first-time asset-tool installation:
 
 ```bash
