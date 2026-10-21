@@ -267,7 +267,8 @@ defmodule Core.Brain.WM.Comprehension do
     end
   end
 
-  defp frame_id(session) do
+  @doc "Deterministic opaque WM identity for one conversation session."
+  def frame_id(session) when not is_nil(session) do
     digest =
       :crypto.hash(:sha256, :erlang.term_to_binary({:symbrella_wm_session, session}))
       |> Base.encode16(case: :lower)

@@ -50,6 +50,26 @@ An autonomous outcome never directly increments global factual confidence:
 success at one population investigation says nothing about unrelated claims.
 It affects only proposal scoring and prioritization.
 
+## Separate comprehension uncertainty
+
+A zero-candidate reasoning queue does not mean there are no language
+understanding gaps. `Core.Curiosity.ComprehensionGaps.for_session(session_id)`
+reads an individual session's recent WM comprehension frame, exposing only a
+bounded `:comprehension_gap` review signal when it is degraded, unverified
+conversation context with unresolved language. Results include a reason,
+counts and a proposed **review** action, never raw chat terms or names.
+It refuses stale, other-session or promoted factual frames.
+
+This deliberately does **not** enqueue a population reasoning issue,
+generate questions in chat, reward a strategy, or authorize new facts.
+Follow-up work will need a supervised dialogue/clarification receipt and
+an independently validated outcome, rather than treating lexical uncertainty
+as proof of an investigation's success.
+
+Example, using the exact live session identifier (not the hashed WM id):
+
+    Core.Curiosity.ComprehensionGaps.for_session(session_id)
+
 ## Advisory scoring and execution boundaries
 
 Brain.Curiosity no longer uses the legacy fixed 0.55 automatic score. It
