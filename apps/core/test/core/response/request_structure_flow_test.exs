@@ -5,6 +5,24 @@ defmodule Core.Response.RequestStructureFlowTest do
   alias Core.Syntax.RoleCompetition
   alias Core.SemanticInput
 
+  defmodule FakeLlm do
+    use GenServer
+
+    def start_link(test_pid),
+      do: GenServer.start_link(__MODULE__, test_pid, name: __MODULE__)
+
+    def chat(messages, _opts), do: GenServer.call(__MODULE__, {:chat, messages})
+
+    @impl true
+    def init(pid), do: {:ok, pid}
+
+    @impl true
+    def handle_call({:chat, messages}, _from, pid) do
+      send(pid, {:observed_generation_messages, messages})
+      {:reply, {:ok, %{content: "defmodule MyExample do\\n  use GenServer\\nend"}}, pid}
+    end
+  end
+
   @question "Can you write me a basic GenServer in a module called MyExample?"
 
   defp cell(word, pos, tags \\ []) do
@@ -96,6 +114,39 @@ defmodule Core.Response.RequestStructureFlowTest do
     assert prompt =~ "CURRENT-TURN REQUEST STRUCTURE"
     assert prompt =~ ~s(requested_object="GenServer")
     assert prompt =~ ~s(module_name="MyExample")
+  end
+
+  test "response attachment hands LIFG request structure to an actual LLM client" do
+    original_client = Application.get_env(:core, :llm_client)
+    original_profile = Application.get_env(:core, :response_prompt_profile)
+
+    on_exit(fn ->
+      if is_nil(original_client), do: Application.delete_env(:core, :llm_client),
+        else: Application.put_env(:core, :llm_client, original_client)
+      if is_nil(original_profile), do: Application.delete_env(:core, :response_prompt_profile),
+        else: Application.put_env(:core, :response_prompt_profile, original_profile)
+    end)
+
+    Application.put_env(:core, :llm_client, FakeLlm)
+    Application.put_env(:core, :response_prompt_profile, :mythomax)
+    start_supervised!({FakeLlm, self()})
+
+    input =
+      si()
+      |> Map.put(:session_id, "lifg-response-" <>
+        Integer.to_string(System.unique_integer([:positive])))
+      |> Map.put(:intent, :ask)
+      |> Map.put(:confidence, 0.8)
+
+    _out = Core.Response.Attach.maybe_build_response_plan(input, response: :auto)
+
+    assert_receive {:observed_generation_messages, [system | _]}, 2_000
+    text = Map.fetch!(system, "content")
+
+    assert text =~ "CURRENT-TURN REQUEST STRUCTURE"
+    assert text =~ ~s(requested_object="GenServer")
+    assert text =~ ~s(module_name="MyExample")
+    assert text =~ "do not mistake missing lexicon entries for an invalid request"
   end
 
   test "missing, contradictory, or fabricated evidence cannot be promoted to prompt structure" do
