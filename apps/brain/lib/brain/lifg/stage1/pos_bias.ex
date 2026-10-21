@@ -25,6 +25,22 @@ defmodule Brain.LIFG.Stage1.PosBias do
     stay stays stayed
   ))
 
+  # Grammatical function words, not domain-specific command vocabulary.
+  # Detect a predicate slot only; individual verb *senses* still compete.
+  @predicate_auxiliaries MapSet.new(~w(
+    can could may might must shall should will would do does did
+  ))
+  @subject_pronouns MapSet.new(~w(i you we they he she it))
+  @subject_determiners MapSet.new(~w(
+    a an the this that these those my your his her its our their
+  ))
+  @predicate_modifiers MapSet.new(~w(please not))
+  @question_prefixes MapSet.new(~w(what when where why how which who))
+  @imperative_followers MapSet.new(~w(
+    a an the some any this that these those my your his her its our their
+    me him her us them it
+  ))
+
   # ===== Public API =====
 
   def local_context(acc, tok, pos) when is_map(acc) and is_map(tok) do
@@ -47,6 +63,8 @@ defmodule Brain.LIFG.Stage1.PosBias do
     fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
       greeting_chain_pos_bias(ctx, tok, token_phrase, family) +
       infinitive_object_bias(ctx, tok, family) +
+      auxiliary_predicate_bias(ctx, tok, family) +
+      imperative_predicate_bias(ctx, tok, family) +
       coordinated_predicate_bias(ctx, tok, token_phrase, family) +
       predicate_adjective_bias(ctx, tok, family)
   end
@@ -81,6 +99,116 @@ defmodule Brain.LIFG.Stage1.PosBias do
       end
     else
       0.0
+    end
+  end
+
+  # An inverted auxiliary + subject requires a lexical predicate even
+  # when the word (e.g. "write", "book", "draw") also has noun senses.
+  # Also cover subject + auxiliary + predicate and polite interruptions.
+  # This is POS evidence only: never assert a particular dictionary sense.
+  defp auxiliary_predicate_bias(ctx, tok, family) do
+    phrases = token_phrases(ctx)
+    idx = token_index(tok, -1)
+    core_idx = skip_predicate_modifiers(phrases, idx)
+    predicate? =
+      inverted_subject?(phrases, core_idx) or
+        inverted_determined_subject?(phrases, core_idx) or
+        declarative_subject?(phrases, core_idx) or
+        declarative_determined_subject?(phrases, core_idx)
+
+    if predicate? do
+      case family do
+        :verb -> 0.34
+        :noun -> -0.14
+        :proper_noun -> -0.14
+        _ -> 0.0
+      end
+    else
+      0.0
+    end
+  end
+
+  # "Write a note." / "Please write me a note." Strong local imperative
+  # context, but no boost for isolated words or "the write ...".
+  defp imperative_predicate_bias(ctx, tok, family) do
+    phrases = token_phrases(ctx)
+    idx = token_index(tok, -1)
+    imperative? =
+      (idx == 0 or (idx == 1 and Map.get(phrases, 0) == "please")) and
+        MapSet.member?(@imperative_followers, Map.get(phrases, idx + 1))
+
+    if imperative? do
+      case family do
+        :verb -> 0.30
+        :noun -> -0.12
+        :proper_noun -> -0.12
+        _ -> 0.0
+      end
+    else
+      0.0
+    end
+  end
+
+  # Only skip up to two immediately preceding "please"/"not" tokens.
+  # A distant modal cannot turn an unrelated later noun into a verb.
+  defp skip_predicate_modifiers(phrases, idx) when is_integer(idx) and idx >= 0 do
+    Enum.reduce(1..2, idx, fn _, current ->
+      if current > 0 and MapSet.member?(@predicate_modifiers, Map.get(phrases, current - 1)),
+        do: current - 1,
+        else: current
+    end)
+  end
+
+  defp skip_predicate_modifiers(_phrases, idx), do: idx
+
+  defp inverted_subject?(phrases, idx) when is_integer(idx) and idx >= 2 do
+    aux_idx = idx - 2
+    question_prefix?(phrases, aux_idx) and
+      MapSet.member?(@predicate_auxiliaries, Map.get(phrases, aux_idx)) and
+      MapSet.member?(@subject_pronouns, Map.get(phrases, idx - 1))
+  end
+
+  defp inverted_subject?(_phrases, _idx), do: false
+
+  defp inverted_determined_subject?(phrases, idx) when is_integer(idx) and idx >= 3 do
+    aux_idx = idx - 3
+    question_prefix?(phrases, aux_idx) and
+      MapSet.member?(@predicate_auxiliaries, Map.get(phrases, aux_idx)) and
+      MapSet.member?(@subject_determiners, Map.get(phrases, idx - 2)) and
+      noun_witness?(phrases, idx - 1)
+  end
+
+  defp inverted_determined_subject?(_phrases, _idx), do: false
+
+  defp declarative_subject?(phrases, idx) when is_integer(idx) and idx >= 2 do
+    MapSet.member?(@subject_pronouns, Map.get(phrases, idx - 2)) and
+      MapSet.member?(@predicate_auxiliaries, Map.get(phrases, idx - 1))
+  end
+
+  defp declarative_subject?(_phrases, _idx), do: false
+
+  defp declarative_determined_subject?(phrases, idx)
+       when is_integer(idx) and idx >= 3 do
+    MapSet.member?(@subject_determiners, Map.get(phrases, idx - 3)) and
+      noun_witness?(phrases, idx - 2) and
+      MapSet.member?(@predicate_auxiliaries, Map.get(phrases, idx - 1))
+  end
+
+  defp declarative_determined_subject?(_phrases, _idx), do: false
+
+  defp question_prefix?(_phrases, 0), do: true
+  defp question_prefix?(phrases, 1),
+    do: MapSet.member?(@question_prefixes, Map.get(phrases, 0))
+  defp question_prefix?(_phrases, _idx), do: false
+
+  # This is only a surface shape check, not a new noun-sense assertion.
+  defp noun_witness?(phrases, idx) do
+    case Map.get(phrases, idx) do
+      word when is_binary(word) and word != "" ->
+        Regex.match?(~r/\\A\\p{L}[\\p{L}'-]*\\z/u, word) and
+          not MapSet.member?(@predicate_auxiliaries, word) and
+          not MapSet.member?(@predicate_modifiers, word)
+      _ -> false
     end
   end
 
