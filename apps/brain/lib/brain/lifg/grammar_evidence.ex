@@ -97,7 +97,10 @@ defmodule Brain.LIFG.GrammarEvidence do
                      :determined_subject_before_attested_past_predicate,
                      :determined_subject_before_attested_present_predicate,
                      :determined_subject_in_wh_aux_question,
-                     :predicate_in_wh_aux_question] and
+                     :predicate_in_wh_aux_question,
+                     :modal_question_predicate, :modal_declarative_predicate,
+                     :imperative_predicate, :plural_present_predicate,
+                     :finite_present_svo_predicate] and
            is_list(evidence) ->
         expected =
           case basis do
@@ -121,6 +124,26 @@ defmodule Brain.LIFG.GrammarEvidence do
               [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
                :dictionary_pos_witness, :question_punctuation,
                :attested_verb_alternative]
+
+            :modal_question_predicate ->
+              [:auxiliary_subject_order, :dictionary_pos_witness,
+               :bounded_predicate_slot]
+
+            :modal_declarative_predicate ->
+              [:subject_auxiliary_order, :dictionary_pos_witness,
+               :bounded_predicate_slot]
+
+            :imperative_predicate ->
+              [:initial_predicate, :dictionary_pos_witness,
+               :bounded_predicate_slot]
+
+            :plural_present_predicate ->
+              [:attested_plural_subject, :present_base_verb_witness,
+               :dictionary_pos_witness, :bounded_predicate_slot]
+
+            :finite_present_svo_predicate ->
+              [:attested_finite_present_verb, :dictionary_pos_witness,
+               :bounded_predicate_slot]
           end
 
         if Enum.all?(expected, &(&1 in evidence)) do
@@ -150,9 +173,15 @@ defmodule Brain.LIFG.GrammarEvidence do
   candidates and sentences retain their original scores.
   """
   @spec apply_finite_present(map(), context(), non_neg_integer()) :: map()
-  def apply_finite_present(scores, %{signatures: signatures, cells_by_id: cells}, index)
+  def apply_finite_present(scores, %{signatures: signatures, cells_by_id: cells} = context, index)
       when is_map(scores) and is_list(signatures) and is_map(cells) and
              is_integer(index) and index >= 0 do
+    # A supported Core predicate role already receives the shared 0.30 POS
+    # adjustment; do not stack the legacy 0.32 on the same evidence.
+    already_supported? =
+      match?(%{status: :supported, basis: :finite_present_svo_predicate},
+        get_in(context, [:resolved_roles, index]))
+
     observed? =
       Enum.any?(signatures, fn
         %{id: :finite_present_svo_candidate,
@@ -170,7 +199,7 @@ defmodule Brain.LIFG.GrammarEvidence do
           false
       end)
 
-    if observed? do
+    if observed? and not already_supported? do
       Map.new(scores, fn {id, score} ->
         cell = Map.get(cells, id)
         updated =
