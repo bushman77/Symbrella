@@ -267,7 +267,8 @@ defmodule Core.Social.ColonyConversation do
              :generic_social_draft,
              :unfocused_social_draft,
              :colony_unverified_report_overclaim,
-             :colony_source_attribution_violation
+             :colony_source_attribution_violation,
+             :colony_internal_jargon
            ] ->
         # Only one additional LOCAL generation is permitted. Send the bounded
         # rejection reason, not the discarded external/model-generated text.
@@ -328,6 +329,14 @@ defmodule Core.Social.ColonyConversation do
       "report. State that the author REPORTED a result; never say the report " <>
       "proves, confirms or verifies the claim. Ask one useful technical question. " <>
       "Write ONLY two short sentences, attributing the result to the author."
+  end
+
+  defp social_repair_instruction(:colony_internal_jargon) do
+    "LANGUAGE REPAIR: The first draft leaked internal brain or proposition " <>
+      "labels. Rewrite as a natural peer-to-peer observation grounded in the " <>
+      "author's reported words. Do not mention the brain, models, evidence " <>
+      "frames, internal statuses, or any software component. Keep factual " <>
+      "attribution explicit and ask one precise question. Output only the comment."
   end
 
   defp social_repair_instruction(:colony_source_attribution_violation) do
