@@ -73,10 +73,20 @@ defmodule Core.Social.SemanticProbe do
 
     {lifg, choices} = score_stage1(si, opts)
 
-    summary =
+    # Pure ATL reducer: never call Brain.ATL.ingest/3 here. That operation
+    # updates its GenServer and is inappropriate for untrusted social text.
+    projection = project_choices(choices)
+    slate = Brain.ATL.reduce(projection, tokens, Map.get(si, :sentence_signatures, []))
+
+    semantic_si =
       si
-      |> Map.put(:lifg_choices, project_choices(choices))
-      |> Core.Comprehension.Summary.build()
+      |> Map.put(:lifg_choices, projection)
+      |> Map.put(:atl_slate, slate)
+
+    # SentenceMeaning's participant gate intentionally refuses this external
+    # source unless independently revalidated. Abstention is a real result.
+    meaning = Core.Semantic.SentenceMeaning.build(semantic_si)
+    summary = Core.Comprehension.Summary.build(semantic_si)
 
     {:ok,
      %{
@@ -85,6 +95,17 @@ defmodule Core.Social.SemanticProbe do
        token_count: length(tokens),
        syntax: %{status: :observed, signatures: signatures},
        lifg: lifg,
+       atl: %{
+         status: :read_only_reduced,
+         winner_count: Map.get(slate, :winner_count, 0),
+         resolved_constituents: slate |> Map.get(:constituents, []) |> List.wrap() |>
+           Enum.count(&(Map.get(&1, :status) == :resolved))
+       },
+       sentence_meaning: %{
+         status: Map.get(meaning, :status, :not_yet_interpreted),
+         kind: Map.get(meaning, :kind, :unknown),
+         provenance: :external_unverified
+       },
        comprehension: %{
          recognized_topics: Enum.take(summary.recognized_topics, 6),
          selected_lexical_candidates: Enum.take(summary.selected_lexical_candidates, 6),
