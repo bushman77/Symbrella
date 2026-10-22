@@ -186,6 +186,40 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.sentence_meaning.status == :not_yet_interpreted
   end
 
+  test "standalone social probe emits read-only blackboard metrics with abstention reason" do
+    id = "standalone-colony-" <> Integer.to_string(System.unique_integer([:positive]))
+    owner = self()
+
+    :ok =
+      :telemetry.attach(
+        id,
+        [:core, :social, :cognitive_shadow],
+        fn _event, counts, meta, pid ->
+          if meta[:probe_mode] == :standalone_read_only do
+            send(pid, {:standalone_cognition, counts, meta})
+          end
+        end,
+        owner
+      )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    {:ok, shadow} =
+      SemanticProbe.run("A correction is not the same as a carried claim.",
+        ltm?: false,
+        scorer: fake_scorer()
+      )
+
+    assert shadow.reported_proposition.reason == :unsupported_surface
+
+    assert_receive {:standalone_cognition,
+                    %{dictionary_rows: 0, disputed_roles: 0},
+                    %{source: :colony_external,
+                      proposition_status: :not_interpreted,
+                      proposition_reason: :unsupported_surface,
+                      provenance: :external_unverified}}
+  end
+
   test "posterior probability and winning margin stay separate in shadow summaries" do
     assert {:ok, high} =
              SemanticProbe.run("The artist draws a picture.",
