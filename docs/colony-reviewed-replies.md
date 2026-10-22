@@ -99,6 +99,43 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## Diagnosing local Colony draft generation
+
+`Core.Social.ColonyConversation.draft/1` performs remote reads and cognitive
+interpretation **before** calling the local `Llm.chat/2` server.
+If that call fails, the draft is NOT stored or published. A model server
+failure is not evidence that the grammar or Colony retrieval failed.
+
+Prior to the diagnostic change, all `Llm.chat` errors and process exits
+were collapsed into `{:error, :social_llm_unavailable}`.
+The route now returns a safe category tuple such as:
+
+```elixir
+{:error, {:social_llm_unavailable, :model_not_ready}}
+{:error, {:social_llm_unavailable, :llm_http_client_error}}
+{:error, {:social_llm_unavailable, :genserver_call_timeout}}
+```
+
+The category intentionally omits the LLM server's HTTP response body, model
+file paths, secrets, prompt text and exceptions. No automatic public write or
+extra remote POST is attempted.
+
+Diagnostic checks in the existing IEx session (do not change model config
+or start extra processes before inspecting the status):
+
+```elixir
+Llm.status()
+case Llm.chat("Reply with one short greeting.", max_tokens: 30, timeout: 30_000, call_timeout: 35_000) do
+  {:ok, %{content: content}} -> {:ok, content}
+  {:error, reason} -> {:error, reason}
+end
+```
+
+The default local configuration is defined in `config/llm.exs`,
+with machine-specific overrides in `config/llm.local.exs` and the model path
+from `LLAMA_MODEL_PATH`. The local LLM is separate from enabling read-only
+Colony access; opt-in to Colony does not guarantee the model server is ready.
+
 ## COLONY-05C: copular noun disambiguation
 
 The live role audit isolated two distinct categories:
