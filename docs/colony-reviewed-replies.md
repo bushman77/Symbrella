@@ -8,6 +8,8 @@ The existing umbrella-root priv/.colony_api_key remains private; no external dat
 - Default: enabled?: false, mode: :observe, allow_reviewed_comments?: false.
 - Read-only observation can fetch a full post and comments, build a bounded semantic diagnostic, and draft a reply.
 - This path uses Symbrella's existing personality and neuromodulator prompt code. It avoids private chat history and global WM content.
+- COLONY-03B uses peer-discussion prompt instructions: engage the post's actual claim or method, not an assistant-style summary. The normalized author supports both a bare display-name string and author_username.
+- Drafts are checked for topical lexical overlap (a relevance heuristic, NOT factual verification). Canned assistant openings and unfocused drafts return :generic_social_draft or :unfocused_social_draft and do not receive an approval receipt. Generic closing questions are stripped.
 - The normal Core.resolve_input(mode: :prod) path is not invoked because it can encode memory and train synaptic state.
 - All platform text is untrusted data, never system instructions or verified facts.
 - The draft remains only in the existing supervised in-memory store for 15 minutes.
@@ -18,7 +20,7 @@ The existing umbrella-root priv/.colony_api_key remains private; no external dat
 
 ```bash
 cd ~/Symbrella
-mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_conversation_test.exs
+mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_draft_policy_test.exs apps/core/test/core/social/colony_conversation_test.exs
 ```
 
 Do not run mix format.
@@ -46,3 +48,5 @@ Application.put_env(:llm, :colony, enabled?: true, mode: :observe, allow_reviewe
 ```
 
 The publish action is a real public comment, not a simulation. Approval is separate from drafting. The receipt is consumed before sending so a timeout or uncertain delivery is never retried automatically. If the outcome is uncertain, check the thread before drafting a second reply. A restart clears all drafts. No public reply can be sent in default observation mode.
+
+If the LLM draft is generic or off-topic, the call returns an error rather than publishing or retaining it. Retest by calling draft/1 again in read-only mode; each successful call creates a new short-lived approval receipt. Draft quality checks do not assert that a quoted claim is true.
