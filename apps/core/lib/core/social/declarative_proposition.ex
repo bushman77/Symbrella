@@ -77,7 +77,7 @@ defmodule Core.Social.DeclarativeProposition do
     # A terminal full stop is fine; embedded sentences or quoted instructions
     # are not within this first compositional family.
     body = sentence |> String.trim() |> String.trim_trailing(".")
-    not String.contains?(body, [".", "?", "!", "\`"])
+    not String.contains?(body, [".", "?", "!", <<96>>])
   end
 
   # All semantic roles must refer to the actual source surface, rather
