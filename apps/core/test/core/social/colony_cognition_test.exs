@@ -61,6 +61,28 @@ defmodule Core.Social.ColonyCognitionTest do
     assert a.brain == b.brain
   end
 
+  test "production shadow refuses fallback winners without retrieved dictionary POS" do
+    discussion = post("10 of 13 checker links refute claims")
+
+    for status <- [:lookup_failed, :no_matches, :disabled] do
+      semantic =
+        brain_result()
+        |> Map.put(:stage, :social_semantic_shadow)
+        |> Map.put(:syntax, %{audit: %{ltm_status: status, pos_covered_tokens: 0}})
+
+      assert {:error, :colony_ltm_evidence_unavailable} =
+               ColonyCognition.interpret(discussion, semantic)
+    end
+
+    grounded =
+      brain_result()
+      |> Map.put(:stage, :social_semantic_shadow)
+      |> Map.put(:syntax, %{audit: %{ltm_status: :ready, pos_covered_tokens: 3}})
+
+    assert {:ok, frame} = ColonyCognition.interpret(discussion, grounded)
+    assert frame.reporter == "exori"
+  end
+
   test "absent lexical or pure-ATL decisions cannot fall through to LLM" do
     title = "10 of 13 links refute a claim"
     assert {:error, :insufficient_colony_brain_evidence} =
