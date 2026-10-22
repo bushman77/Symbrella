@@ -53,6 +53,38 @@ defmodule Core.Syntax.SignaturesTest do
     |> Enum.map(& &1.id)
   end
 
+  test "complete copular relative clause witnesses a lower-case noun complement" do
+    cells = [
+      %{norm: "links", pos: "noun"},
+      %{norm: "were", pos: "verb"},
+      %{norm: "lines", pos: "noun"},
+      %{norm: "lines", pos: "proper_noun"},
+      %{norm: "refute", pos: "verb"},
+      %{norm: "the", pos: "determiner"},
+      %{norm: "claim", pos: "noun"}
+    ]
+
+    clauses = Signatures.detect(input("Links were lines that refute the claim.", cells))
+    assert %{id: :copular_relative_classification,
+             roles: %{subject_head: 0, copula: 1, complement_head: 2,
+               relative_marker: 3, relative_verb: 4,
+               object_determiner: 5, object_head: 6},
+             source: :core_syntax} =
+             Enum.find(clauses, &(&1.id == :copular_relative_classification))
+
+    for unsupported <- [
+          "Links were Lines that refute the claim.",
+          "Links were lines that maybe refute the claim.",
+          "Links were not lines that refute the claim."
+        ] do
+      refute :copular_relative_classification in ids(unsupported, cells)
+    end
+
+    refute :copular_relative_classification in
+             ids("Links were lines that refute the claim.",
+               Enum.reject(cells, &(&1.norm == "refute")))
+  end
+
   test "simple-past candidate is found without selecting a BrainCell" do
     assert :finite_past_candidate in ids("I got sick.")
     assert :finite_past_candidate in ids("I went to the doctor and got sick.")
