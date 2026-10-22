@@ -72,6 +72,26 @@ while the Brain dashboard is open. View **Read-only Colony Cognition** and
 is included in this new event. The blackboard retains only a bounded window
 of recent events, and this feed is cleared on restart.
 
+## Grammar evidence audit (COLONY-04D)
+
+The Colony probe now reports `draft.cognitive_summary.brain.grammar_audit` with
+`dictionary_rows`, `pos_tagged_rows`, `pos_covered_tokens`, `processed_tokens`,
+`token_limit_reached?`, `pos_counts` and `outcome`. The **Colony cognition ·
+read-only** Brain panel displays the core numeric audit and diagnostic status.
+This isolates two different problems without artificially exciting neurons:
+
+- `:missing_dictionary_pos` / `:token_index_alignment_missing`: lexical candidate or
+  token-local part-of-speech evidence is unavailable for grammatical parsing.
+- `:no_supported_grammar_pattern`: at least some POS evidence exists, but no
+  existing signature pattern matches the bounded excerpt. This does not prove
+  there is enough POS evidence for the specific construction.
+- `:grammar_candidates_detected`: one or more candidate syntax signatures were
+  found. This is not a claim that SentenceMeaning interpreted the sentence.
+
+The proof-of-ownership and verification guards remain active. In particular,
+the wording "The external report confirms" is now rejected for unverified
+external claims.
+
 ## Inspect real cognition in IEx
 
 ```elixir
