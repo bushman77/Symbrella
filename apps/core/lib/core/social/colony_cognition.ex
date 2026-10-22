@@ -1,0 +1,133 @@
+defmodule Core.Social.ColonyCognition do
+  @moduledoc """
+  Bounded, read-only source/claim frame for a Colony discussion.
+
+  This is not external truth verification and is not a replacement for the
+  normal live user pipeline. It composes an explicit *reported* relationship
+  with real LIFG and pure ATL observations, then determines whether a safe
+  public draft has enough grounded information to proceed.
+
+  No Memory/WM/Hippocampus writes, no live ATL ingestion, no training.
+  """
+
+  @ratio ~r/\b(?<count>\d{1,3})\s+of\s+(?:my\s+)?(?:[\p{L}'’-]+\s+){0,4}(?<total>\d{1,3})\s+(?:links?|references?|citations?)\b/iu
+  @refutation ~r/\b(?:refut(?:e|es|ed|ing)|contradict(?:s|ed|ing)?|den(?:y|ies|ied|ying))\b/iu
+  @support ~r/\b(?:support(?:s|ed|ing)?|corroborat(?:e|es|ed|ing))\b/iu
+
+  @doc """
+  Convert external observations and *actual* brain shadow results to a
+  provenance-bound claim frame. Unresolved comprehension never becomes fact.
+  """
+  def interpret(%{post_id: id, author: author, title: title} = discussion, semantic)
+      when is_binary(id) and is_binary(author) and is_binary(title) and is_map(semantic) do
+    with :ok <- valid_author(author),
+         :ok <- requires_brain_shadow(semantic),
+         {:ok, claim} <- claim_from_title(title) do
+      frame = %{
+        version: 1,
+        source: :colony_external,
+        trust: :untrusted_external,
+        post_id: id,
+        reporter: author,
+        subject: :external_checker,
+        checker_owner: :not_verified,
+        report_status: :author_claim_not_independently_verified,
+        evidence_relation: claim.relation,
+        reported_link_count: claim.count,
+        reported_total_links: claim.total,
+        # This is the author's reported relation, not Symbrella's conclusion.
+        original_title: String.slice(title, 0, 300),
+        reasoning_goal: :ask_about_support_versus_contradiction,
+        brain: brain_summary(semantic)
+      }
+
+      {:ok, frame}
+    end
+  end
+
+  def interpret(_, _), do: {:error, :invalid_colony_cognitive_input}
+
+  @doc "Compact, inspectable non-secret frame for model expression."
+  def prompt_frame(%{source: :colony_external} = frame) do
+    """
+    COGNITIVE EVIDENCE FRAME (read-only; authoritative as attribution, NOT as truth):
+    External reporting agent: #{frame.reporter}
+    Subject: an external checker's evidence links, not Symbrella's checker.
+    Ownership of the checker: NOT independently verified.
+    Reported relation: #{frame.evidence_relation}.
+    Reported number of matching links: #{inspect(frame.reported_link_count)}
+    Reported total links: #{inspect(frame.reported_total_links)}
+    Epistemic status: #{frame.report_status}.
+    Brain lexical status: #{frame.brain.lifg_status};
+    ATL read-only winners: #{frame.brain.atl_winners};
+    sentence comprehension: #{frame.brain.sentence_status}.
+    Response objective: ask how source evidence is classified as support vs
+    contradiction. Do NOT call it "Symbrella's memory checker" or
+    claim to have evaluated the external system.
+    """
+  end
+
+  defp valid_author(author) do
+    if String.trim(author) == "", do: {:error, :missing_colony_author}, else: :ok
+  end
+
+  defp requires_brain_shadow(semantic) do
+    lifg = Map.get(semantic, :lifg, %{})
+    atl = Map.get(semantic, :atl, %{})
+
+    if Map.get(lifg, :status) == :scored and
+         is_integer(Map.get(lifg, :chosen_count)) and
+         Map.get(lifg, :chosen_count) > 0 and
+         Map.get(atl, :status) == :read_only_reduced and
+         is_integer(Map.get(atl, :winner_count)) and
+         Map.get(atl, :winner_count) > 0 do
+      :ok
+    else
+      {:error, :insufficient_colony_brain_evidence}
+    end
+  end
+
+  defp claim_from_title(title) do
+    refutation? = Regex.match?(@refutation, title)
+    support? = Regex.match?(@support, title)
+
+    relation =
+      case {refutation?, support?} do
+        {true, false} -> :reported_refutation
+        {false, true} -> :reported_support
+        _ -> :undetermined
+      end
+
+    if relation == :undetermined do
+      {:error, :unresolved_colony_evidence_relation}
+    else
+      numbers = Regex.named_captures(@ratio, title) || %{}
+
+      {count, total} =
+        case {Integer.parse(Map.get(numbers, "count", "")),
+              Integer.parse(Map.get(numbers, "total", ""))} do
+          {{n, ""}, {t, ""}} when n >= 0 and n <= t and t <= 999 ->
+            {n, t}
+
+          _ ->
+            {nil, nil}
+        end
+
+      {:ok, %{relation: relation, count: count, total: total}}
+    end
+  end
+
+  defp brain_summary(semantic) do
+    %{
+      lifg_status: get_in(semantic, [:lifg, :status]),
+      lifg_choices: get_in(semantic, [:lifg, :chosen_count]),
+      atl_winners: get_in(semantic, [:atl, :winner_count]),
+      sentence_status: get_in(semantic, [:sentence_meaning, :status]),
+      recognized_topics:
+        semantic
+        |> get_in([:comprehension, :recognized_topics])
+        |> List.wrap()
+        |> Enum.take(4)
+    }
+  end
+end
