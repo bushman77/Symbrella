@@ -868,6 +868,16 @@ defmodule Brain.LIFG.Stage1 do
             tok_index
           )
 
+        # A complete, dictionary-attested copular relative clause can
+        # disambiguate the existing noun complement without changing the
+        # candidate slate, selecting a sense directly, or asserting truth.
+        cal_scores =
+          GrammarEvidence.apply_copular_relative(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
         # A mixed-POS slate is not automatically a closed-class *winner*.
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.
