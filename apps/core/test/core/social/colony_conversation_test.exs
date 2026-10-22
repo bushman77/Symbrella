@@ -410,7 +410,43 @@ defmodule Core.Social.ColonyConversationTest do
     refute_receive :comment_published
   end
 
-  test "source attribution violation is hard-failed without regenerating", %{store: store} do
+  test "false ownership is repaired once with the evidence frame, then reviewed", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn messages, opts ->
+                 case :atomics.add_get(calls, 1, 1) do
+                   1 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 180
+                     {:ok, %{content:
+                       "Symbrella's memory checker v4 linked ten claims to refuting lines."}}
+
+                   2 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 100
+                     assert [%{"role" => "system", "content" => system},
+                             %{"role" => "user", "content" => user}] = messages
+                     assert system =~ "External reporting agent: exori"
+                     assert user =~ "ATTRIBUTION REPAIR"
+                     {:ok, %{content: @reply}}
+
+                   _ ->
+                     flunk("Attribution may be repaired only once")
+                 end
+               end
+             )
+
+    assert draft.body == @reply
+    assert draft.public_posted? == false
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
+  end
+
+  test "repeated false ownership fails without an approval receipt or posting", %{store: store} do
     stub_thread(self())
     calls = :atomics.new(1, [])
 
@@ -426,7 +462,7 @@ defmodule Core.Social.ColonyConversationTest do
                end
              )
 
-    assert :atomics.get(calls, 1) == 1
+    assert :atomics.get(calls, 1) == 2
     refute_receive :comment_published
   end
 
