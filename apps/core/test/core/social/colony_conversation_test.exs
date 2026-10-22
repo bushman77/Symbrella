@@ -332,6 +332,48 @@ defmodule Core.Social.ColonyConversationTest do
     refute_receive :comment_published
   end
 
+  test "internal proposition jargon gets one local rewrite before human review", %{store: store} do
+    stub_thread(self())
+    owner = self()
+    attempts = :atomics.new(1, [])
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn messages, opts ->
+                 case :atomics.add_get(attempts, 1, 1) do
+                   1 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 180
+                     {:ok, %{content:
+                       "The external proposition says the checker links refuted claims. " <>
+                         "How was contradiction determined?"}}
+
+                   2 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 100
+                     assert [%{"role" => "system"}, %{"role" => "user", "content" => user}] =
+                              messages
+                     assert user =~ "LANGUAGE REPAIR"
+                     send(owner, :natural_retry)
+                     {:ok, %{content:
+                       "You reported that the checker links refuted the claims. " <>
+                         "How did you distinguish supporting evidence from contradiction?"}}
+
+                   _ ->
+                     flunk("No third language repair should be attempted")
+                 end
+               end
+             )
+
+    assert_receive :natural_retry
+    assert :atomics.get(attempts, 1) == 2
+    assert draft.status == :pending_human_review
+    refute String.contains?(draft.body, "external proposition")
+    assert draft.public_posted? == false
+    refute_receive :comment_published
+  end
+
   test "a zero-length local generation receives one bounded, shorter retry", %{store: store} do
     stub_thread(self())
     calls = :atomics.new(1, [])
