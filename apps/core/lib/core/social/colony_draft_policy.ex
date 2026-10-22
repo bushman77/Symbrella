@@ -156,6 +156,36 @@ defmodule Core.Social.ColonyDraftPolicy do
   end
 
   defp relation_guard(draft, cognition) do
+    with :ok <- explicit_negation_guard(draft, cognition) do
+      counted_relation_guard(draft, cognition)
+    end
+  end
+
+  # A source-reported failure to verify must never become an affirmative
+  # assertion in the public comment. Match only affirmative predicates
+  # attached to the same named subject; queries about verification are fine.
+  defp explicit_negation_guard(draft, cognition) do
+    case Map.get(cognition, :reported_proposition) do
+      %{construction: :explicit_negated_transitive, polarity: :negative,
+        predicate: "verify", subject: subject} when is_binary(subject) ->
+        pattern =
+          "\\b(?:the|your|their|this)\\s+" <> Regex.escape(subject) <>
+            "\\s+(?:verified|verifies|has\\s+verified|did\\s+verify)\\b"
+
+        case Regex.compile(pattern, "iu") do
+          {:ok, regex} ->
+            if Regex.match?(regex, draft),
+              do: {:error, :colony_negation_violation}, else: :ok
+
+          {:error, _} ->
+            {:error, :colony_evidence_guard_unavailable}
+        end
+
+      _ -> :ok
+    end
+  end
+
+  defp counted_relation_guard(draft, cognition) do
     relation = Map.get(cognition, :evidence_relation)
     count = Map.get(cognition, :reported_link_count)
 
