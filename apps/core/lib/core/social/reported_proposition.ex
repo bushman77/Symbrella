@@ -50,7 +50,10 @@ defmodule Core.Social.ReportedProposition do
         object: :the_claim,
         reported_count: count,
         reported_total: total,
-        possessor: :speaker_reported_not_verified,
+        possessor:
+          if(String.starts_with?(String.downcase(captures["possessive"]), "my "),
+            do: :speaker_reported_not_verified,
+            else: :external_checker_owner_not_verified),
         grammar: [:counted_nominal_subject, :copular_were, :restrictive_relative_clause],
         evidence: [:exact_bounded_surface, :dictionary_pos, :noun_phrase_signatures,
                    :lifg_atl_lexical_agreement],
