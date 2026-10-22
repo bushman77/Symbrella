@@ -60,7 +60,10 @@ defmodule Core.Social.ColonyCognition do
     Epistemic status: #{frame.report_status}.
     Brain lexical status: #{frame.brain.lifg_status};
     ATL read-only winners: #{frame.brain.atl_winners};
-    sentence comprehension: #{frame.brain.sentence_status}.
+    Grammatical candidates: #{inspect(frame.brain.syntax_frames)};
+    Selected higher-confidence lexical candidates (NOT verified meaning):
+    #{inspect(frame.brain.lexical_candidates)};
+    Sentence comprehension: #{frame.brain.sentence_status}.
     Response objective: ask how source evidence is classified as support vs
     contradiction. Do NOT call it "Symbrella's memory checker" or
     claim to have evaluated the external system.
@@ -123,6 +126,23 @@ defmodule Core.Social.ColonyCognition do
       lifg_choices: get_in(semantic, [:lifg, :chosen_count]),
       atl_winners: get_in(semantic, [:atl, :winner_count]),
       sentence_status: get_in(semantic, [:sentence_meaning, :status]),
+      syntax_frames:
+        semantic
+        |> get_in([:syntax, :signatures])
+        |> List.wrap()
+        |> Enum.take(8)
+        |> Enum.map(&Map.get(&1, :id)),
+      lexical_candidates:
+        semantic
+        |> get_in([:lifg, :choices])
+        |> List.wrap()
+        |> Enum.filter(fn ch ->
+          Map.get(ch, :weak?) == false and
+            is_number(Map.get(ch, :score)) and
+            Map.get(ch, :score) >= 0.6
+        end)
+        |> Enum.take(6)
+        |> Enum.map(&Map.get(&1, :chosen_id)),
       recognized_topics:
         semantic
         |> get_in([:comprehension, :recognized_topics])
