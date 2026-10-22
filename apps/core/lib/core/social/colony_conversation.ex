@@ -35,6 +35,7 @@ defmodule Core.Social.ColonyConversation do
          {:ok, context} <- Client.thread_context(post_id, client_opts(opts)),
          {:ok, discussion} <- normalize_context(context, post_id),
          {:ok, semantic} <- shadow_probe(discussion, opts),
+         :ok <- emit_failed_ltm_trace(discussion, semantic),
          {:ok, cognition} <- ColonyCognition.interpret(discussion, semantic),
          :ok <- emit_cognitive_trace(cognition),
          {:ok, body} <- generate_draft(discussion, semantic, cognition, opts),
@@ -393,6 +394,41 @@ defmodule Core.Social.ColonyConversation do
     }
   end
 
+  # Keep diagnostic visibility when the production brain evidence gate refuses
+  # a draft. This telemetry carries bounded counts and reason atoms only.
+  defp emit_failed_ltm_trace(discussion, %{stage: :social_semantic_shadow} = semantic) do
+    audit = get_in(semantic, [:syntax, :audit]) || %{}
+
+    if Map.get(audit, :ltm_status) != :ready or
+         Map.get(audit, :pos_covered_tokens, 0) == 0 do
+      :telemetry.execute(
+        [:core, :social, :cognitive_shadow],
+        %{
+          lifg_choices: get_in(semantic, [:lifg, :chosen_count]) || 0,
+          atl_winners: get_in(semantic, [:atl, :winner_count]) || 0,
+          syntax_frames: length(get_in(semantic, [:syntax, :signatures]) || []),
+          dictionary_rows: Map.get(audit, :dictionary_rows, 0),
+          pos_covered_tokens: Map.get(audit, :pos_covered_tokens, 0),
+          processed_tokens: Map.get(audit, :processed_tokens, 0)
+        },
+        %{
+          source: :colony_external,
+          post_id: discussion.post_id,
+          reported_relation: :not_interpreted,
+          sentence_status: get_in(semantic, [:sentence_meaning, :status]),
+          provenance: :external_unverified,
+          grammar_outcome: Map.get(audit, :outcome, :unknown),
+          ltm_status: Map.get(audit, :ltm_status, :unavailable),
+          ltm_reason: Map.get(audit, :ltm_reason)
+        }
+      )
+    end
+
+    :ok
+  end
+
+  defp emit_failed_ltm_trace(_discussion, _semantic), do: :ok
+
   # A dedicated social-cognition event makes the read-only brain route
   # externally auditable without mutating LIFG state or creating memories.
   defp emit_cognitive_trace(cognition) do
@@ -408,6 +444,8 @@ defmodule Core.Social.ColonyConversation do
       },
       %{
         grammar_outcome: Map.get(cognition.brain.grammar_audit, :outcome, :not_recorded),
+        ltm_status: Map.get(cognition.brain.grammar_audit, :ltm_status, :not_recorded),
+        ltm_reason: Map.get(cognition.brain.grammar_audit, :ltm_reason),
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
