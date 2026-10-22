@@ -132,60 +132,36 @@ defmodule Core.Social.ColonyDraftPolicy do
     count = Map.get(cognition, :reported_link_count)
 
     if is_integer(count) do
-      # Detect only an explicit inversion of the reported NUMBERED relationship,
-      # not benign discussion of alternative hypotheses or negated clauses.
-      surface = "\\b" <> Integer.to_string(count) <>
-        "\\s+(?:of\\s+(?:\\d+\\s+)?(?:\\w+\\s+){0,5})?" <>
-        "(?:links?|citations?|references?)\\s+"
-
-      contradictory =
+      # Match a specific incorrect assertion about the counted links, not
+      # any appearance of "support" elsewhere in a substantive discussion.
+      wrong_predicate =
         case relation do
-          :reported_refutation ->
-            ~r/\b(?:support(?:ed|s)?|corroborat(?:ed|es)?)\b/iu
-
-          :reported_support ->
-            ~r/\b(?:refut(?:ed|es|e)|contradict(?:ed|s)?)\b/iu
-
-          _ ->
-            nil
+          :reported_refutation -> "(?:support(?:ed|s)?|corroborat(?:ed|es)?)"
+          :reported_support -> "(?:refut(?:ed|es|e)|contradict(?:ed|s)?)"
+          _ -> nil
         end
 
-      with {:ok, count_pattern} <- Regex.compile(surface, "iu") do
-        inversion? =
-          Regex.match?(count_pattern, draft) and
-            not is_nil(contradictory) and Regex.match?(contradictory, draft)
+      if is_binary(wrong_predicate) do
+        pattern =
+          "\\b" <> Integer.to_string(count) <>
+            "\\s+(?:of\\s+(?:\\d+\\s+)?(?:[\\p{L}'’-]+\\s+){0,5})?" <>
+            "(?:links?|citations?|references?)\\s+" <>
+            "(?:(?:did|were|have|are|had)\\s+)?" <> wrong_predicate <> "\\b"
 
-        if inversion?, do: {:error, :colony_evidence_relation_violation}, else: :ok
+        case Regex.compile(pattern, "iu") do
+          {:ok, expression} ->
+            if Regex.match?(expression, draft),
+              do: {:error, :colony_evidence_relation_violation},
+              else: :ok
+
+          {:error, _} ->
+            {:error, :colony_evidence_guard_unavailable}
+        end
+      else
+        :ok
       end
     else
       :ok
-    end
-  end
-
-
-
-  @doc "The hard external publication draft limit in Unicode characters."
-  def max_chars, do: @max_chars
-
-  # The local model may exceed a character cap despite max_tokens. Preserve
-  # coherent, *complete* leading sentences and revalidate the result. Never
-  # cut in the middle of a statement, or fabricate one in a fallback.
-  defp fit_complete_sentences(draft) do
-    if String.length(draft) <= @max_chars do
-      draft
-    else
-      draft
-      |> String.split(~r/(?<=[.!?])\s+/u, trim: true)
-      |> Enum.reduce_while("", fn sentence, acc ->
-        candidate = if acc == "", do: sentence, else: acc <> " " <> sentence
-
-        if String.length(candidate) <= @max_chars and
-             Regex.match?(~r/[.!?]\z/u, String.trim(sentence)) do
-          {:cont, candidate}
-        else
-          {:halt, acc}
-        end
-      end)
     end
   end
 
