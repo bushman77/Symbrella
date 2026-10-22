@@ -26,42 +26,42 @@ defmodule Core.Pipeline.LTM do
   """
   @spec enrich(map(), [map()], MapSet.t()) :: map()
   def enrich(%{} = si, rows, %MapSet{} = db_hits) when is_list(rows) do
-        existing =
-          case Map.get(si, :active_cells, []) do
-            cells when is_list(cells) -> cells
-            _ -> []
+    existing =
+      case Map.get(si, :active_cells, []) do
+        cells when is_list(cells) -> cells
+        _ -> []
+      end
+
+    active_cells =
+      (existing ++ rows)
+      |> Enum.flat_map(&sanitize_cell/1)
+      |> Enum.reject(&(cell_id(&1) == nil))
+      |> Enum.uniq_by(&cell_id/1)
+
+    db_hits_ms = db_hits
+
+    activation_summary0 =
+      case Map.get(si, :activation_summary) do
+        %{} = summary -> summary
+        _ -> %{}
+      end
+
+    activation_summary =
+      Map.update(activation_summary0, :db_hits, db_hits_ms, fn acc ->
+        acc_ms =
+          cond do
+            match?(%MapSet{}, acc) -> acc
+            is_list(acc) -> MapSet.new(acc)
+            is_nil(acc) -> MapSet.new()
+            true -> MapSet.new(List.wrap(acc))
           end
 
-        active_cells =
-          (existing ++ rows)
-          |> Enum.flat_map(&sanitize_cell/1)
-          |> Enum.reject(&(cell_id(&1) == nil))
-          |> Enum.uniq_by(&cell_id/1)
+        MapSet.union(acc_ms, db_hits_ms)
+      end)
 
-        db_hits_ms = db_hits
-
-        activation_summary0 =
-          case Map.get(si, :activation_summary) do
-            %{} = summary -> summary
-            _ -> %{}
-          end
-
-        activation_summary =
-          Map.update(activation_summary0, :db_hits, db_hits_ms, fn acc ->
-            acc_ms =
-              cond do
-                match?(%MapSet{}, acc) -> acc
-                is_list(acc) -> MapSet.new(acc)
-                is_nil(acc) -> MapSet.new()
-                true -> MapSet.new(List.wrap(acc))
-              end
-
-            MapSet.union(acc_ms, db_hits_ms)
-          end)
-
-        si
-        |> Map.put(:active_cells, active_cells)
-        |> Map.put(:activation_summary, activation_summary)
+    si
+    |> Map.put(:active_cells, active_cells)
+    |> Map.put(:activation_summary, activation_summary)
   end
 
   defp sanitize_cell(%{id: _} = cell), do: [cell]
