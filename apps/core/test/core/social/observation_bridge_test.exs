@@ -211,6 +211,23 @@ defmodule Core.Social.ObservationBridgeTest do
     assert proposition.predicate == "produced"
     assert proposition.reported_count == 13
     assert proposition.verification == :author_claim_not_independently_verified
+
+    no_morphology_reader = fn si, opts ->
+      {:ok, data} = reader.(si, opts)
+      {:ok, %{data | rows: Enum.map(data.rows, &Map.put(&1, :semantic_atoms, []))}}
+    end
+
+    assert {:ok, without_past_tags} =
+             SemanticProbe.run("The checker produced 13 links.",
+               ltm_reader: no_morphology_reader,
+               scorer: scorer,
+               emit_telemetry?: false)
+
+    refute :finite_past_candidate in
+             Enum.map(without_past_tags.syntax.signatures, & &1.id)
+    assert without_past_tags.reported_proposition.status ==
+             :attributed_structural_interpretation
+    assert without_past_tags.reported_proposition.reported_count == 13
   end
 
   test "real syntax and pure ATL bind an attributed relative-clause proposition" do
