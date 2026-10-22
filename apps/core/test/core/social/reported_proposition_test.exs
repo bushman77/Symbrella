@@ -128,8 +128,15 @@ defmodule Core.Social.ReportedPropositionTest do
           else: winner
       end)
 
-    assert %{status: :not_interpreted, reason: :lifg_atl_role_disagreement} =
-             ReportedProposition.interpret(%{si | atl_slate: %{winners: winners}})
+    result = ReportedProposition.interpret(%{si | atl_slate: %{winners: winners}})
+    assert %{status: :not_interpreted, reason: :lifg_atl_role_disagreement} = result
+    assert length(result.role_audit) == 6
+
+    disputed = Enum.filter(result.role_audit, &(not &1.agreed?))
+    assert [%{role: :relative_verb, token_index: 16,
+              expected_pos: "verb", selected_pos: ["noun"],
+              dictionary_pos_available?: true}] = disputed
+    assert Enum.count(result.role_audit, & &1.agreed?) == 5
   end
 
   test "abstains for unsupported clauses, counterfactuals, and untrusted source" do
