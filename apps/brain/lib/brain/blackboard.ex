@@ -40,6 +40,9 @@ defmodule Brain.Blackboard do
     [:core, :intent, :selected],
     [:core, :response, :prompt],
     [:core, :response, :complete],
+    # Read-only Colony cognitive analysis. Deliberately distinct from neuron
+    # activation / WM events, which this social shadow does not produce.
+    [:core, :social, :cognitive_shadow],
 
     # SelfPortrait-friendly signals (compact, high-signal)
     [:brain, :lifg, :stage1, :winner],
