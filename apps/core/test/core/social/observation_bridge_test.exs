@@ -33,7 +33,7 @@ defmodule Core.Social.ObservationBridgeTest do
       {:ok,
        %{
          choices: [
-           %{token_index: 0, chosen_id: "correction|noun|1", margin: 0.05, prob_margin: 0.04}
+           %{token_index: 0, chosen_id: "correction|noun|1", score: 0.92, prob: 0.92, margin: 0.05, prob_margin: 0.04}
          ],
          audit: %{missing_candidates: 1}
        }}
@@ -52,11 +52,63 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.token_count > 0
     assert semantic.syntax.status == :observed
     assert semantic.lifg.status == :scored
-    assert [%{chosen_id: "correction|noun|1"}] = semantic.lifg.choices
+    assert [%{chosen_id: "correction|noun|1", score: 0.92, margin: 0.05}] = semantic.lifg.choices
+    assert "correction" in semantic.comprehension.selected_lexical_candidates
     assert semantic.acc_shadow.uncertain?
     assert semantic.acc_shadow.low_margin_choices == 1
     assert semantic.comprehension.understood == []
     assert semantic.sentence_meaning.status == :not_verified
+  end
+
+  test "posterior probability and winning margin stay separate in shadow summaries" do
+    assert {:ok, high} =
+             SemanticProbe.run("The artist draws a picture.",
+               ltm?: false,
+               scorer: fn _si, _opts ->
+                 {:ok,
+                  %{
+                    choices: [
+                      %{
+                        token_index: 1,
+                        chosen_id: "artist|noun|1",
+                        score: 0.91,
+                        prob: 0.91,
+                        margin: 0.01,
+                        prob_margin: 0.01
+                      }
+                    ],
+                    audit: %{missing_candidates: 0}
+                  }}
+               end
+             )
+
+    assert [%{score: 0.91, margin: 0.01}] = high.lifg.choices
+    assert "artist" in high.comprehension.selected_lexical_candidates
+    assert high.comprehension.understood == []
+    assert high.acc_shadow.low_margin_choices == 1
+
+    assert {:ok, low} =
+             SemanticProbe.run("The artist draws a picture.",
+               ltm?: false,
+               scorer: fn _si, _opts ->
+                 {:ok,
+                  %{
+                    choices: [
+                      %{
+                        token_index: 1,
+                        chosen_id: "artist|noun|1",
+                        score: 0.34,
+                        margin: 0.15,
+                        prob_margin: 0.15
+                      }
+                    ],
+                    audit: %{missing_candidates: 0}
+                  }}
+               end
+             )
+
+    assert low.comprehension.selected_lexical_candidates == []
+    assert "artist" in low.comprehension.uncertain
   end
 
   test "normalizes a Colony API fixture before review and performs no remote writes" do
