@@ -39,8 +39,7 @@ defmodule Core.Social.ColonyCognition do
         # This is the author's reported relation, not Symbrella's conclusion.
         original_title: String.slice(title, 0, 300),
         reasoning_goal: :ask_about_support_versus_contradiction,
-        reported_proposition:
-          Map.get(semantic, :reported_proposition, %{status: :not_interpreted, reason: :not_available}),
+        reported_proposition: external_proposition(semantic),
         brain: brain_summary(semantic)
       }
 
@@ -76,6 +75,14 @@ defmodule Core.Social.ColonyCognition do
     contradiction. Do NOT call it "Symbrella's memory checker" or
     claim to have evaluated the external system.
     """
+  end
+
+  defp external_proposition(semantic) do
+    case Map.get(semantic, :reported_proposition) do
+      %{} = proposition -> proposition
+      _ -> %{status: :not_interpreted, reason: :not_available,
+             verification: :external_unverified}
+    end
   end
 
   # The regex-extracted reported relation and a fully interpreted proposition
