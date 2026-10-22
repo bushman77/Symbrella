@@ -27,6 +27,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             at_ms: Map.get(payload, :at_ms),
             post_id: Map.get(meta, :post_id),
             relation: Map.get(meta, :reported_relation),
+            analysis_scope: Map.get(meta, :analysis_scope, :unspecified),
             sentence_status: Map.get(meta, :sentence_status),
             provenance: Map.get(meta, :provenance),
             lifg_choices: bounded_count(measurements, :lifg_choices),
@@ -71,6 +72,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
       </div>
       <%= if @social do %>
         <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+          <div><dt class="text-xs text-zinc-500">Lexical analysis scope</dt><dd class="font-mono break-all">{@social.analysis_scope}</dd></div>
           <div><dt class="text-xs text-zinc-500">LIFG selections</dt><dd class="font-mono">{@social.lifg_choices}</dd></div>
           <div><dt class="text-xs text-zinc-500">ATL winners</dt><dd class="font-mono">{@social.atl_winners}</dd></div>
           <div><dt class="text-xs text-zinc-500">Grammar frames</dt><dd class="font-mono">{@social.syntax_frames}</dd></div>
