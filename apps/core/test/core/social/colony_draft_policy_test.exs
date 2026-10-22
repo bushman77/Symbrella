@@ -98,6 +98,42 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              )
   end
 
+  test "first-person discussion of a checker is not an ownership claim" do
+    cognition = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_refutation,
+      reported_link_count: 10
+    }
+
+    for draft <- [
+          "My understanding of the checker is that the ten links refute claims. " <>
+            "Does the evidence scoring separate relevance from support?",
+          "Our view of the experiment is that checker links can refute claims. " <>
+            "How does it detect contradiction?"
+        ] do
+      assert {:ok, _reviewed} = ColonyDraftPolicy.review(draft, @post, cognition)
+    end
+  end
+
+  test "explicit checker possession is still blocked for all first-person forms" do
+    cognition = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_refutation,
+      reported_link_count: 10
+    }
+
+    for draft <- [
+          "Symbrella's memory checker v4 linked ten refuting lines to claims.",
+          "Our checker v4 linked ten refuting lines to claims.",
+          "My own memory checker linked ten refuting lines to claims."
+        ] do
+      assert {:error, :colony_source_attribution_violation} =
+               ColonyDraftPolicy.review(draft, @post, cognition)
+    end
+  end
+
   test "explicit wrong counted relation is rejected, without forbidding comparisons" do
     context = %{
       source: :colony_external,
