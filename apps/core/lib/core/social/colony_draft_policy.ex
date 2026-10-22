@@ -8,6 +8,10 @@ defmodule Core.Social.ColonyDraftPolicy do
   verification or contradiction verdict.
   """
 
+  # Internal brain instrumentation is private prompt scaffolding, not a
+  # phrase a peer on The Colony should ever receive in a drafted comment.
+  @internal_jargon ~r/\b(?:external proposition|attributed.structural.interpretation|cognitive evidence frame|read.only brain diagnostics|reported relation|lexical winners|lifg|atl winners|syntax frames|brain lexical status|semantic frame|internal evidence frame)\b/iu
+
   @max_chars 900
   @stopwords MapSet.new(~w(
     about after again against almost also another because being between
@@ -85,6 +89,9 @@ defmodule Core.Social.ColonyDraftPolicy do
         draft
       ) ->
         {:error, :generic_social_draft}
+
+      Regex.match?(@internal_jargon, draft) ->
+        {:error, :colony_internal_jargon}
 
       not grounded_in_thread?(draft, source_text) ->
         {:error, :unfocused_social_draft}
