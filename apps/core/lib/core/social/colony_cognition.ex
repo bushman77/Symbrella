@@ -22,7 +22,8 @@ defmodule Core.Social.ColonyCognition do
       when is_binary(id) and is_binary(author) and is_binary(title) and is_map(semantic) do
     with :ok <- valid_author(author),
          :ok <- requires_brain_shadow(semantic),
-         {:ok, claim} <- claim_from_title(title) do
+         {:ok, claim} <- claim_from_title(title),
+         :ok <- reconcile_proposition(semantic, claim) do
       frame = %{
         version: 1,
         source: :colony_external,
@@ -38,6 +39,8 @@ defmodule Core.Social.ColonyCognition do
         # This is the author's reported relation, not Symbrella's conclusion.
         original_title: String.slice(title, 0, 300),
         reasoning_goal: :ask_about_support_versus_contradiction,
+        reported_proposition:
+          Map.get(semantic, :reported_proposition, %{status: :not_interpreted, reason: :not_available}),
         brain: brain_summary(semantic)
       }
 
@@ -63,11 +66,35 @@ defmodule Core.Social.ColonyCognition do
     Grammatical candidates: #{inspect(frame.brain.syntax_frames)};
     Selected higher-confidence lexical candidates (NOT verified meaning):
     #{inspect(frame.brain.lexical_candidates)};
-    Sentence comprehension: #{frame.brain.sentence_status}.
+    General SentenceMeaning status: #{frame.brain.sentence_status}.
+    External proposition status: #{Map.get(frame.reported_proposition, :status)}.
+    External proposition (only structured and verified as syntax, NOT truth):
+    #{inspect(Map.take(frame.reported_proposition, [:kind, :subject, :relation,
+       :complement, :object, :embedded_relation, :reported_count, :reported_total,
+       :verification, :grammar]))}.
     Response objective: ask how source evidence is classified as support vs
     contradiction. Do NOT call it "Symbrella's memory checker" or
     claim to have evaluated the external system.
     """
+  end
+
+  # The regex-extracted reported relation and a fully interpreted proposition
+  # must agree. Never let competing processing routes silently pick a side.
+  defp reconcile_proposition(semantic, claim) do
+    case Map.get(semantic, :reported_proposition) do
+      %{status: :attributed_structural_interpretation} = proposition ->
+        if Map.get(proposition, :embedded_relation) == claim.relation and
+             Map.get(proposition, :reported_count) == claim.count and
+             Map.get(proposition, :reported_total) == claim.total and
+             Map.get(proposition, :verification) == :author_claim_not_independently_verified do
+          :ok
+        else
+          {:error, :colony_proposition_mismatch}
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   defp valid_author(author) do
