@@ -99,6 +99,36 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-05B: explain LIFG/ATL lexical disagreement
+
+A real Colony headline can have valid LTM rows and grammatical signatures
+but still abstain at `:lifg_atl_role_disagreement`. This is an intentional
+integrity check, not another DB lookup failure. The previous single reason
+now carries `shadow.reported_proposition.role_audit` with six bounded entries.
+Each entry contains its grammatical role, source token index, expected POS,
+actually selected POS and sense ID, dictionary POS availability, winner count
+and exact sense-ID agreement. None is a verified external fact.
+
+Calling `Core.Social.SemanticProbe.run(title)` directly now emits an
+**observation-only** `[:core, :social, :cognitive_shadow]` telemetry
+event, so the Brain panel can display the shadow on a standalone run.
+This does **not** stimulate the LIFG GenServer, record live neuron
+activity, place material in WM or persist an external assertion.
+`ColonyConversation.draft/1` suppresses that standalone event and emits
+its own source-attributed report so drafts do not double-count analysis.
+
+Check the exact discrepancy (read-only):
+
+```elixir
+{:ok, shadow} = Core.Social.SemanticProbe.run(title)
+IO.inspect(shadow.reported_proposition, label: "ROLE BINDING", pretty: true, limit: :infinity)
+```
+
+If `role_audit` shows an expected noun or verb that LIFG selected with
+another POS, investigate contextual disambiguation or underlying token
+alignment rather than promoting a dictionary alternative over the actual
+ATL winner. External claims stay unverified and public writes remain off.
+
 ## COLONY-05: attributed declarative proposition pilot
 
 `Core.Social.ReportedProposition.interpret/1` composes the exact bounded
