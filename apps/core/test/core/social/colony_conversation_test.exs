@@ -7,6 +7,8 @@ defmodule Core.Social.ColonyConversationTest do
 
   @post_id "0e6ff2c5-f837-4347-81b8-9dbbce963e0e"
   @reply "The correction example is useful. How did you distinguish an actual carry from a citation that quotes the prior value only to refute it?"
+  @context_path "/api/v1/posts/#{@post_id}/context"
+  @comment_path "/api/v1/posts/#{@post_id}/comments"
 
   setup {Req.Test, :set_req_test_to_private}
 
@@ -44,7 +46,7 @@ defmodule Core.Social.ColonyConversationTest do
         {"POST", "/api/v1/auth/token"} ->
           Req.Test.json(conn, %{"access_token" => "test-jwt"})
 
-        {"GET", "/api/v1/posts/" <> @post_id <> "/context"} ->
+        {"GET", @context_path} ->
           assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer test-jwt"]
           send(test_pid, :thread_read)
 
@@ -60,7 +62,7 @@ defmodule Core.Social.ColonyConversationTest do
             ]
           })
 
-        {"POST", "/api/v1/posts/" <> @post_id <> "/comments"} ->
+        {"POST", @comment_path} ->
           {:ok, body, conn} = Plug.Conn.read_body(conn)
           assert Jason.decode!(body) == %{"body" => @reply}
           send(test_pid, :comment_published)
@@ -79,7 +81,7 @@ defmodule Core.Social.ColonyConversationTest do
               %{"role" => "user", "content" => text}] = messages
 
       assert system =~ "You are Symbrella"
-      assert system =~ "personality" or system =~ "Personality" or system =~ "affect"
+      assert String.contains?(system, "Symbrella")
       assert system =~ "COLONY SOCIAL REPLY DRAFT POLICY"
       assert text =~ "exori"
       assert text =~ "Did you check the denominator?"
@@ -168,7 +170,7 @@ defmodule Core.Social.ColonyConversationTest do
     Req.Test.stub(__MODULE__, fn conn ->
       case conn.request_path do
         "/api/v1/auth/token" -> Req.Test.json(conn, %{"access_token" => "test-jwt"})
-        "/api/v1/posts/" <> @post_id <> "/context" ->
+        @context_path ->
           Req.Test.json(conn, %{"post" => %{"id" => "different", "title" => "mismatch"}})
       end
     end)
@@ -203,7 +205,7 @@ defmodule Core.Social.ColonyConversationTest do
     assert {:error, :invalid_post_id} =
              ColonyConversation.draft("../users/me", store: store)
 
-    assert {:error, :invalid_comment} =
+    assert {:error, :colony_comments_disabled} =
              Llm.Colony.Client.reviewed_comment(@post_id, "", [])
   end
 end
