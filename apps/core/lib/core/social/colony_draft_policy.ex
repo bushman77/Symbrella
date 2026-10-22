@@ -96,6 +96,74 @@ defmodule Core.Social.ColonyDraftPolicy do
 
   def review(_, _), do: {:error, :invalid_social_draft}
 
+  @doc """
+  On external posts, source attribution is a structural constraint. The
+  lexical relevance gate alone cannot reject false ownership claims.
+  """
+  def review(generated, source_text, %{source: :colony_external} = cognition) do
+    with {:ok, draft} <- review(generated, source_text),
+         :ok <- attribution_guard(draft, cognition),
+         :ok <- relation_guard(draft, cognition) do
+      {:ok, draft}
+    end
+  end
+
+  def review(_, _, _), do: {:error, :missing_colony_cognitive_frame}
+
+  defp attribution_guard(draft, cognition) do
+    # A quoted agent's checker is not Symbrella's own project.
+    false_owner? =
+      Regex.match?(
+        ~r/\b(?:symbrella['’]s|our|my)\s+(?:(?:[\p{L}0-9_-]+\s+){0,3})(?:checker|v4|benchmark|experiment)\b/iu,
+        draft
+      )
+
+    misattributed_reporter? =
+      Regex.match?(~r/\b(?:symbrella|we)\s+(?:reported|tested|found|measured)\s+(?:10|ten)\s+(?:of|out of)\b/iu, draft) and
+        Map.get(cognition, :reporter) != "symbrella"
+
+    if false_owner? or misattributed_reporter?,
+      do: {:error, :colony_source_attribution_violation},
+      else: :ok
+  end
+
+  defp relation_guard(draft, cognition) do
+    relation = Map.get(cognition, :evidence_relation)
+    count = Map.get(cognition, :reported_link_count)
+
+    if is_integer(count) do
+      # Detect only an explicit inversion of the reported NUMBERED relationship,
+      # not benign discussion of alternative hypotheses or negated clauses.
+      surface = "\\b" <> Integer.to_string(count) <>
+        "\\s+(?:of\\s+(?:\\d+\\s+)?(?:\\w+\\s+){0,5})?" <>
+        "(?:links?|citations?|references?)\\s+"
+
+      contradictory =
+        case relation do
+          :reported_refutation ->
+            ~r/\b(?:support(?:ed|s)?|corroborat(?:ed|es)?)\b/iu
+
+          :reported_support ->
+            ~r/\b(?:refut(?:ed|es|e)|contradict(?:ed|s)?)\b/iu
+
+          _ ->
+            nil
+        end
+
+      with {:ok, count_pattern} <- Regex.compile(surface, "iu") do
+        inversion? =
+          Regex.match?(count_pattern, draft) and
+            not is_nil(contradictory) and Regex.match?(contradictory, draft)
+
+        if inversion?, do: {:error, :colony_evidence_relation_violation}, else: :ok
+      end
+    else
+      :ok
+    end
+  end
+
+
+
   @doc "The hard external publication draft limit in Unicode characters."
   def max_chars, do: @max_chars
 
