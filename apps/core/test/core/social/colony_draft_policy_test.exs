@@ -185,6 +185,38 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              )
   end
 
+  test "an unverified explicit negative cannot be rewritten as affirmative verification" do
+    source = "The checker did not verify those claims."
+    frame = %{
+      source: :colony_external,
+      reporter: "exori",
+      report_status: :author_claim_not_independently_verified,
+      evidence_relation: :reported_action,
+      reported_link_count: nil,
+      reported_proposition: %{
+        construction: :explicit_negated_transitive,
+        polarity: :negative,
+        subject: "checker",
+        predicate: "verify"
+      }
+    }
+
+    assert {:error, :colony_negation_violation} =
+             ColonyDraftPolicy.review(
+               "The checker verified those claims. Which criterion was applied?",
+               source,
+               frame
+             )
+
+    assert {:ok, _draft} =
+             ColonyDraftPolicy.review(
+               "You reported that the checker did not verify those claims. " <>
+                 "Which verification criterion was absent?",
+               source,
+               frame
+             )
+  end
+
   test "internal brain labels cannot leak into a public Colony reply" do
     for leaked <- [
       "The external proposition reports that checker links refuted the claims.",
