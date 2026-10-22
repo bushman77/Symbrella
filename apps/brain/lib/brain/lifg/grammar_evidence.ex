@@ -225,6 +225,77 @@ defmodule Brain.LIFG.GrammarEvidence do
 
   def apply_finite_present(scores, _context, _index), do: scores
 
+  @doc """
+  Give existing dictionary noun candidates bounded support when a complete
+  subject–copula–noun–relative-verb–determined-object construction is
+  independently attested by Core syntax. This is a POS compatibility signal,
+  not a selection of a specific word sense or an asserted proposition.
+
+  In particular, "were lines that refute the claim" can prefer the common
+  noun "lines" over an unrelated proper-name reading, while an isolated
+  "Lines" or an incomplete/negated construction remains unaffected.
+  """
+  @spec apply_copular_relative(map(), context(), non_neg_integer()) :: map()
+  def apply_copular_relative(
+        scores,
+        %{signatures: signatures, cells_by_id: cells},
+        index
+      )
+      when is_map(scores) and is_list(signatures) and is_map(cells) and
+             is_integer(index) and index >= 0 do
+    supported? =
+      Enum.any?(signatures, fn
+        %{
+          id: :copular_relative_classification,
+          source: :core_syntax,
+          span: {first, last},
+          roles: %{
+            subject_head: subject, copula: copula,
+            complement_head: ^index, relative_marker: marker,
+            relative_verb: verb, object_determiner: det, object_head: object
+          },
+          evidence: evidence
+        } when is_list(evidence) ->
+          first == subject and last == object and
+            [copula, index, marker, verb, det, object] ==
+              Enum.to_list((subject + 1)..(subject + 6)) and
+            Enum.all?(
+              [
+                :contiguous_surface, :attested_subject_noun,
+                :attested_copular_be, :attested_complement_noun,
+                :explicit_relative_clause, :attested_relative_verb,
+                :attested_object_noun
+              ],
+              &(&1 in evidence)
+            )
+
+        _ ->
+          false
+      end)
+
+    if supported? do
+      Map.new(scores, fn
+        {id, score} when is_binary(id) and is_number(score) ->
+          cell = Map.get(cells, id)
+
+          if id_pos(id) == "noun" and
+               not String.ends_with?(id, "|fallback") and
+               is_map(cell) and get(cell, :pos, nil) == "noun" do
+            {id, min(1.0, max(0.0, score + 0.36))}
+          else
+            {id, score}
+          end
+
+        entry ->
+          entry
+      end)
+    else
+      scores
+    end
+  end
+
+  def apply_copular_relative(scores, _context, _index), do: scores
+
   # A weak construction hypothesis becomes useful only when an exact
   # sense supplies the matching morphological feature.
   defp support_for(%{id: :finite_past_candidate, roles: %{verb: role_index}}, index, _id, cell)
