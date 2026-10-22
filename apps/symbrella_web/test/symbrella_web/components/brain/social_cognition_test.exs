@@ -7,12 +7,16 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
     kind: :telemetry,
     event: [:core, :social, :cognitive_shadow],
     at_ms: 1_792_693_000_000,
-    measurements: %{lifg_choices: 31, atl_winners: 31, syntax_frames: 0},
+    measurements: %{
+      lifg_choices: 31, atl_winners: 31, syntax_frames: 0,
+      dictionary_rows: 130, pos_covered_tokens: 25, processed_tokens: 32
+    },
     meta: %{
       source: :colony_external,
       post_id: "test-colony-post",
       reported_relation: :reported_refutation,
       sentence_status: :not_yet_interpreted,
+      grammar_outcome: :no_supported_grammar_pattern,
       provenance: :author_claim_not_independently_verified
     }
   }
@@ -22,6 +26,10 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
     assert result.lifg_choices == 31
     assert result.atl_winners == 31
     assert result.syntax_frames == 0
+    assert result.dictionary_rows == 130
+    assert result.pos_covered_tokens == 25
+    assert result.processed_tokens == 32
+    assert result.grammar_outcome == :no_supported_grammar_pattern
     assert result.sentence_status == :not_yet_interpreted
     assert result.relation == :reported_refutation
     assert result.provenance == :author_claim_not_independently_verified
