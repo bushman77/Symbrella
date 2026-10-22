@@ -99,6 +99,38 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-05D: preserve repeated-word grammar evidence and isolate title analysis
+
+A successful standalone `SemanticProbe.run(title)` can differ from a live Colony
+draft if the latter tokenizes `title <> ". " <> body`. The pilot uses a
+32-token budget; appending an unrelated or very long body both truncates
+the post and introduces repeated words at different positions. The
+body remains available **only as untrusted quoted discussion context** to
+the local LLM in this version. In a normal `ColonyConversation.draft/1`,
+the read-only lexical/grammar/proposition pass now targets the complete
+bounded title (or the body only when there is no title). The result's
+`analysis_scope` records which was analyzed and is shown on Brain.
+
+A second independent bug existed in `Core.Pipeline.LTM.enrich/3`:
+`Enum.uniq_by(&cell_id/1)` dropped repeat occurrences of the *same
+sense* at different token indices. For example, the second mention of
+"links" could lose POS evidence even though the LTM DB query returned it.
+Enrichment now deduplicates on `{sense_id, token_index}`. This fixes
+token-index fidelity for both general LTM consumers and read-only Colony,
+while still removing exact duplicate copies at the same position.
+
+The title-only scope does **not** mean the body or replies have been
+semantically interpreted; they are still context for a proposed response,
+not verified facts. This is not yet a multi-sentence parser. A future
+expansion can analyze title and bounded body segments *independently*
+without concatenating their source token positions.
+
+```elixir
+{:ok, draft} = Core.Social.ColonyConversation.draft(post_id)
+IO.inspect(draft.semantic_summary.analysis_scope, label: "ANALYZED SCOPE")
+IO.inspect(draft.cognitive_summary.reported_proposition, label: "ATTRIBUTED PROPOSITION")
+```
+
 ## Diagnosing local Colony draft generation
 
 `Core.Social.ColonyConversation.draft/1` performs remote reads and cognitive
