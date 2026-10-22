@@ -14,6 +14,7 @@ defmodule Llm.Colony.Adapter do
   @defaults [
     enabled?: false,
     mode: :observe,
+    allow_reviewed_comments?: false,
     api_base: @api_base,
     max_posts: 10,
     timeout_ms: 5_000
@@ -30,7 +31,7 @@ defmodule Llm.Colony.Adapter do
             {:ok,
              config
              |> Map.new()
-             |> Map.take([:enabled?, :mode, :api_base, :max_posts, :timeout_ms])}
+             |> Map.take([:enabled?, :mode, :allow_reviewed_comments?, :api_base, :max_posts, :timeout_ms])}
           end
         else
           {:error, {:invalid_colony_config, :settings}}
@@ -53,6 +54,7 @@ defmodule Llm.Colony.Adapter do
        %{
          enabled?: config.enabled?,
          mode: config.mode,
+         allow_reviewed_comments?: config.allow_reviewed_comments?,
          api_base: config.api_base,
          max_posts: config.max_posts,
          credentials_configured?: credentials_configured?,
@@ -66,8 +68,19 @@ defmodule Llm.Colony.Adapter do
     with {:ok, config} <- config() do
       cond do
         not config.enabled? -> {:error, :colony_disabled}
-        config.mode != :observe -> {:error, :unsupported_colony_mode}
+        config.mode not in [:observe, :reviewed_comments] -> {:error, :unsupported_colony_mode}
         true -> {:ok, config}
+      end
+    end
+  end
+
+  @doc "Separately gated, operator-reviewed comments. Never available by default."
+  def require_reviewed_comments do
+    with {:ok, config} <- require_observe() do
+      if config.mode == :reviewed_comments and config.allow_reviewed_comments? do
+        {:ok, config}
+      else
+        {:error, :colony_comments_disabled}
       end
     end
   end
@@ -108,8 +121,11 @@ defmodule Llm.Colony.Adapter do
       Keyword.fetch!(config, :enabled?) not in [true, false] ->
         {:error, {:invalid_colony_config, :enabled?}}
 
-      Keyword.fetch!(config, :mode) != :observe ->
+      Keyword.fetch!(config, :mode) not in [:observe, :reviewed_comments] ->
         {:error, {:invalid_colony_config, :mode}}
+
+      Keyword.fetch!(config, :allow_reviewed_comments?) not in [true, false] ->
+        {:error, {:invalid_colony_config, :allow_reviewed_comments?}}
 
       # Never send a key or JWT to a configurable/untrusted host.
       Keyword.fetch!(config, :api_base) != @api_base ->
