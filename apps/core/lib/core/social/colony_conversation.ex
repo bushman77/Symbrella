@@ -348,9 +348,13 @@ defmodule Core.Social.ColonyConversation do
       %{
         lifg_choices: cognition.brain.lifg_choices,
         atl_winners: cognition.brain.atl_winners,
-        syntax_frames: length(cognition.brain.syntax_frames)
+        syntax_frames: length(cognition.brain.syntax_frames),
+        dictionary_rows: Map.get(cognition.brain.grammar_audit, :dictionary_rows, 0),
+        pos_covered_tokens: Map.get(cognition.brain.grammar_audit, :pos_covered_tokens, 0),
+        processed_tokens: Map.get(cognition.brain.grammar_audit, :processed_tokens, 0)
       },
       %{
+        grammar_outcome: Map.get(cognition.brain.grammar_audit, :outcome, :not_recorded),
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
