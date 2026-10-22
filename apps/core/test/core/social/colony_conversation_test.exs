@@ -148,6 +148,32 @@ defmodule Core.Social.ColonyConversationTest do
     refute_receive :comment_published
   end
 
+  test "draft scopes cognitive tokenization to the complete title, not the appended body", %{store: store} do
+    owner = self()
+    stub_thread(owner)
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn text, opts ->
+                 assert text ==
+                          "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
+                 refute String.contains?(text, "Ten of thirteen linked lines")
+                 assert Keyword.get(opts, :emit_telemetry?) == false
+                 send(owner, :focused_title_probe)
+                 brain_fixture(text, opts)
+               end,
+               llm: fake_llm(owner)
+             )
+
+    assert_receive :focused_title_probe
+    assert draft.semantic_summary.analysis_scope == :post_title
+    assert draft.cognitive_summary.brain.analysis_scope == :post_title
+    assert draft.public_posted? == false
+    refute_receive :comment_published
+  end
+
   test "a supported external proposition reaches a pending draft without publishing", %{store: store} do
     stub_thread(self())
 
