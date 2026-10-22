@@ -39,8 +39,8 @@ defmodule Core.Social.DeclarativeProposition do
       case parse(nodes) do
         {:ok, clause} ->
           with :ok <- attested_roles(si, clause.roles),
-               :ok <- selected_roles(si, clause.roles),
-               :ok <- complete_grammar(si, clause) do
+               :ok <- complete_grammar(si, clause),
+               :ok <- selected_roles(si, clause.roles) do
             %{
               status: :attributed_structural_interpretation,
               kind: :reported_declarative_proposition,
@@ -198,10 +198,15 @@ defmodule Core.Social.DeclarativeProposition do
   defp attested_roles(si, roles) do
     cells = Map.get(si, :active_cells, [])
 
-    if Enum.all?(roles, fn {_role, index, pos} ->
+    if Enum.all?(roles, fn {role, index, pos} ->
          Enum.any?(cells, fn cell ->
+           available_pos = Map.get(cell, :pos)
+           valid_pos? =
+             available_pos == pos or
+               (role == :auxiliary and available_pos in ["verb", "auxiliary"])
+
            is_map(cell) and Map.get(cell, :token_index) == index and
-             Map.get(cell, :pos) == pos and is_binary(Map.get(cell, :id))
+             valid_pos? and is_binary(Map.get(cell, :id))
          end)
        end) do
       :ok
@@ -214,23 +219,57 @@ defmodule Core.Social.DeclarativeProposition do
     winners = get_in(si, [:atl_slate, :winners]) || []
     cells = Map.get(si, :active_cells, [])
 
-    if Enum.all?(roles, fn {_role, index, pos} ->
+    if Enum.all?(roles, fn {role, index, pos} ->
          selected = Enum.filter(winners, &(Map.get(&1, :token_index) == index))
 
          length(selected) == 1 and
-           Enum.any?(cells, fn cell ->
-             winner = hd(selected)
-             id = Map.get(winner, :id)
-             is_binary(id) and Map.get(cell, :id) == id and
-               Map.get(cell, :token_index) == index and
-               Map.get(cell, :pos) == pos
-           end)
+           (Enum.any?(cells, fn cell ->
+              id = Map.get(hd(selected), :id)
+              is_binary(id) and Map.get(cell, :id) == id and
+                Map.get(cell, :token_index) == index and
+                Map.get(cell, :pos) == pos
+            end) or
+              (role == :auxiliary and
+                 did_auxiliary_witness?(si, index, Map.get(hd(selected), :id))))
        end) do
       :ok
     else
       {:error, :lifg_atl_role_disagreement}
     end
   end
+
+  # "did" can be a closed-class auxiliary selected by Stage1, rather than
+  # a literal dictionary verb sense. Accept precisely this grammatical
+  # function with independently attested did/not morphology and a negative
+  # surface; no new BrainCell or certainty about the external claim is made.
+  defp did_auxiliary_witness?(si, index, "did|auxiliary|0") do
+    tokens = Map.get(si, :tokens, [])
+    cells = Map.get(si, :active_cells, [])
+
+    surface? =
+      Enum.any?(tokens, fn token ->
+        Map.get(token, :index) == index and
+          normalize(Map.get(token, :phrase)) == "did"
+      end)
+
+    next_not? =
+      Enum.any?(tokens, fn token ->
+        Map.get(token, :index) == index + 1 and
+          normalize(Map.get(token, :phrase)) == "not"
+      end)
+
+    dictionary? =
+      Enum.any?(cells, fn cell ->
+        Map.get(cell, :token_index) == index and
+          Map.get(cell, :pos) == "verb" and
+          normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == "did" and
+          is_binary(Map.get(cell, :id))
+      end)
+
+    surface? and next_not? and dictionary?
+  end
+
+  defp did_auxiliary_witness?(_, _, _), do: false
 
   defp complete_grammar(si, clause) do
     signatures = Map.get(si, :sentence_signatures, [])
