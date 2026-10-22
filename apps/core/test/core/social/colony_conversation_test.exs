@@ -526,6 +526,60 @@ defmodule Core.Social.ColonyConversationTest do
     refute_receive :comment_published
   end
 
+  test "real shadow with failed dictionary read emits diagnostics and never calls LLM", %{store: store} do
+    stub_thread(self())
+    owner = self()
+
+    :ok =
+      :telemetry.attach(
+        "colony-ltm-failure-" <> Integer.to_string(System.unique_integer([:positive])),
+        [:core, :social, :cognitive_shadow],
+        fn event, counts, meta, pid ->
+          send(pid, {:ltm_shadow_diagnostic, event, counts, meta})
+        end,
+        owner
+      )
+
+    # Observer is owned by this ExUnit process; detach only its own handler
+    # to avoid interfering with global blackboard handlers.
+    attach_ids = :telemetry.list_handlers([:core, :social, :cognitive_shadow])
+    mine = Enum.find(attach_ids, fn entry ->
+      String.starts_with?(to_string(entry.id), "colony-ltm-failure-")
+    end)
+    if mine, do: on_exit(fn -> :telemetry.detach(mine.id) end)
+
+    failed = brain_fixture(nil, [])
+      |> elem(1)
+      |> Map.put(:stage, :social_semantic_shadow)
+      |> Map.put(:syntax, %{audit: %{
+        ltm_status: :lookup_failed,
+        ltm_reason: :ltm_query_failed,
+        dictionary_rows: 0,
+        pos_covered_tokens: 0,
+        processed_tokens: 32,
+        outcome: :missing_dictionary_pos
+      }, signatures: []})
+
+    assert {:error, :colony_ltm_evidence_unavailable} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, failed} end,
+               llm: fn _, _ ->
+                 send(owner, :unexpected_llm)
+                 {:ok, %{content: @reply}}
+               end
+             )
+
+    assert_receive {:ltm_shadow_diagnostic,
+                    [:core, :social, :cognitive_shadow],
+                    %{dictionary_rows: 0, pos_covered_tokens: 0},
+                    %{ltm_status: :lookup_failed, ltm_reason: :ltm_query_failed}}
+
+    refute_receive :unexpected_llm
+    refute_receive :comment_published
+  end
+
   test "no external brain evidence means no model generation or approval", %{store: store} do
     stub_thread(self())
     me = self()
