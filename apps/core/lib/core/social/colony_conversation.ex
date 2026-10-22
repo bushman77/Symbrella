@@ -391,6 +391,7 @@ defmodule Core.Social.ColonyConversation do
       atl_status: get_in(semantic, [:atl, :status]),
       atl_winners: get_in(semantic, [:atl, :winner_count]),
       sentence_status: get_in(semantic, [:sentence_meaning, :status]),
+      reported_proposition_status: get_in(semantic, [:reported_proposition, :status]),
       verification: :external_assertions_not_verified
     }
   end
