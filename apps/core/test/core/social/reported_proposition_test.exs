@@ -67,8 +67,39 @@ defmodule Core.Social.ReportedPropositionTest do
     assert proposition.verification == :author_claim_not_independently_verified
     assert proposition.source == :colony_external
     assert proposition.role_indices == %{
-      checker: 9, links: 12, were: 13, lines: 14, refute: 16, claim: 18
+      checker: 9, links: 12, were: 13, lines: 14, relative_verb: 16, claim: 18
     }
+  end
+
+  test "supports the same syntax with the opposite reported evidence polarity" do
+    si = input()
+    sentence = String.replace(@title, "that refute", "that support")
+
+    updated_cells =
+      Enum.map(si.active_cells, fn cell ->
+        if cell.token_index == 16,
+          do: %{cell | id: "support|verb|1"},
+          else: cell
+      end)
+
+    updated_winners =
+      Enum.map(si.atl_slate.winners, fn winner ->
+        if winner.token_index == 16,
+          do: %{winner | id: "support|verb|1"},
+          else: winner
+      end)
+
+    proposition =
+      ReportedProposition.interpret(%{
+        si | sentence: sentence, active_cells: updated_cells,
+             atl_slate: %{winners: updated_winners},
+             tokens: List.replace_at(si.tokens, 16, %{Enum.at(si.tokens, 16) | phrase: "support"})
+      })
+
+    assert proposition.status == :attributed_structural_interpretation
+    assert proposition.embedded_relation == :reported_support
+    assert proposition.reported_count == 10
+    assert proposition.reported_total == 13
   end
 
   test "can parse the same bounded headline followed by a separate body sentence" do
