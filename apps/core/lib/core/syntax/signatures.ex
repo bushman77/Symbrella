@@ -79,6 +79,7 @@ defmodule Core.Syntax.Signatures do
 
     (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
+       copular_relative_classifications(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
@@ -389,6 +390,78 @@ defmodule Core.Syntax.Signatures do
 
   # Deliberately weak evidence: a simple-past form is *available* here.
   # Without a finite-clause parser, this is not a confirmed past predicate.
+  # A complete, locally attested classification such as
+  # "links were lines that refute the claim" can disambiguate the complement
+  # noun. It does not assert truth, determine the precise noun sense, or treat
+  # a proper name as a common noun. This provides syntactic evidence for
+  # subsequent LIFG scoring; lexical decisions remain LIFG's responsibility.
+  defp copular_relative_classifications(nodes) do
+    nodes
+    |> Enum.chunk_every(7, 1, :discard)
+    |> Enum.flat_map(fn
+      [subject, copula, complement, marker, relverb, det, object] = segment ->
+        ordered? =
+          Enum.map(segment, & &1.index) ==
+            Enum.to_list(subject.index..(subject.index + 6))
+
+        witnessed? =
+          pos?(subject, "noun") and
+            copula.word in ~w(is are was were) and
+            (pos?(copula, "verb") or pos?(copula, "auxiliary")) and
+            pos?(complement, "noun") and
+            marker.word == "that" and
+            pos?(relverb, "verb") and
+            det.word in ~w(the a an) and
+            pos?(det, "determiner") and
+            pos?(object, "noun")
+
+        # Do not apply the lower-case common-noun context to an explicitly
+        # capitalized lexical name, even if another noun reading exists.
+        common_surface? =
+          is_binary(complement.surface) and
+            complement.surface == String.downcase(complement.surface)
+
+        if ordered? and witnessed? and common_surface? and valid_surface?(segment) do
+          [
+            signature(
+              :copular_relative_classification,
+              {subject.index, object.index},
+              %{
+                subject_head: subject.index,
+                copula: copula.index,
+                complement_head: complement.index,
+                relative_marker: marker.index,
+                relative_verb: relverb.index,
+                object_determiner: det.index,
+                object_head: object.index
+              },
+              %{
+                subject_head: [:pos_noun],
+                complement_head: [:pos_noun],
+                relative_verb: [:pos_verb],
+                object_determiner: [:pos_determiner],
+                object_head: [:pos_noun]
+              },
+              [
+                :contiguous_surface,
+                :attested_subject_noun,
+                :attested_copular_be,
+                :attested_complement_noun,
+                :explicit_relative_clause,
+                :attested_relative_verb,
+                :attested_object_noun
+              ]
+            )
+          ]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
   defp finite_past(nodes) do
     nodes
     |> Enum.with_index()
