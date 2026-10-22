@@ -115,9 +115,11 @@ defmodule Core.Social.SemanticProbe do
       |> Map.put(:lifg_choices, projection)
       |> Map.put(:atl_slate, slate)
 
-    # SentenceMeaning's participant gate intentionally refuses this external
-    # source unless independently revalidated. Abstention is a real result.
+    # SentenceMeaning's general participant gate intentionally refuses
+    # untrusted external events. The narrower external proposition interpreter
+    # can still report a structurally supported, *unverified* assertion.
     meaning = Core.Semantic.SentenceMeaning.build(semantic_si)
+    reported_proposition = Core.Social.ReportedProposition.interpret(semantic_si)
     summary = Core.Comprehension.Summary.build(semantic_si)
 
     {:ok,
@@ -140,6 +142,7 @@ defmodule Core.Social.SemanticProbe do
          kind: Map.get(meaning, :kind, :unknown),
          provenance: :external_unverified
        },
+       reported_proposition: reported_proposition,
        comprehension: %{
          recognized_topics: Enum.take(summary.recognized_topics, 6),
          selected_lexical_candidates: Enum.take(summary.selected_lexical_candidates, 6),
