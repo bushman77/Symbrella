@@ -353,15 +353,26 @@ defmodule Db do
         from(b in base_q, select: b)
 
       n when is_integer(n) and n > 0 ->
+        # Ecto does not allow whole schema structs nested inside a subquery
+        # map projection (%{b: b, rn: ...}). Rank scalar IDs instead, then
+        # join back to BrainCell to return complete rows. This preserves
+        # the per-norm cap and the original BrainCell-to-candidate mapping.
         ranked_q =
           from(b in base_q,
-            select: %{b: b, rn: over(row_number(), :norm_part)},
-            windows: [norm_part: [partition_by: b.norm, order_by: [desc: b.updated_at]]]
+            select: %{id: b.id, rn: over(row_number(), :norm_part)},
+            windows: [
+              norm_part: [
+                partition_by: b.norm,
+                order_by: [desc: b.updated_at, asc: b.id]
+              ]
+            ]
           )
 
-        from(s in subquery(ranked_q),
-          where: s.rn <= ^n,
-          select: s.b
+        from(b in base_q,
+          join: ranked in subquery(ranked_q),
+          on: ranked.id == b.id,
+          where: ranked.rn <= ^n,
+          select: b
         )
 
       _invalid ->
