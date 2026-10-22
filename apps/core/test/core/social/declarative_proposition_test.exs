@@ -3,7 +3,7 @@ defmodule Core.Social.DeclarativePropositionTest do
 
   alias Core.Social.DeclarativeProposition
 
-  defp fixture(sentence, opts \\ []) do
+  defp fixture(sentence, opts) do
     words =
       sentence
       |> String.trim_trailing(".")
