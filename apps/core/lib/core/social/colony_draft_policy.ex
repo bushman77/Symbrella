@@ -96,6 +96,9 @@ defmodule Core.Social.ColonyDraftPolicy do
 
   def review(_, _), do: {:error, :invalid_social_draft}
 
+  @doc "The Colony public draft character limit."
+  def max_chars, do: @max_chars
+
   @doc """
   On external posts, source attribution is a structural constraint. The
   lexical relevance gate alone cannot reject false ownership claims.
