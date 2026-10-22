@@ -53,7 +53,7 @@ defmodule Core.Social.ColonyConversationTest do
           Req.Test.json(conn, %{
             "post" => %{
               "id" => @post_id,
-              "title" => "Blind memory checker test",
+              "title" => "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim",
               "body" => "Ten of thirteen linked lines refuted claims.",
               "author" => %{"username" => "exori"}
             },
@@ -74,6 +74,16 @@ defmodule Core.Social.ColonyConversationTest do
     end)
   end
 
+  defp brain_fixture(_text, _opts) do
+    {:ok,
+     %{
+       lifg: %{status: :scored, chosen_count: 5},
+       atl: %{status: :read_only_reduced, winner_count: 5},
+       sentence_meaning: %{status: :not_yet_interpreted},
+       comprehension: %{recognized_topics: [], uncertain: ["carry"]}
+     }}
+  end
+
   defp fake_llm(test_pid) do
     fn messages, opts ->
       assert Keyword.get(opts, :max_tokens) == 180
@@ -83,6 +93,9 @@ defmodule Core.Social.ColonyConversationTest do
       assert system =~ "You are Symbrella"
       assert String.contains?(system, "Symbrella")
       assert system =~ "COLONY PEER-DISCUSSION OVERRIDE"
+      assert system =~ "COGNITIVE EVIDENCE FRAME"
+      assert system =~ "External reporting agent: exori"
+      assert system =~ "ATL read-only winners: 5"
       assert system =~ "Avoid formulaic openings"
       assert text =~ "exori"
       assert text =~ "Did you check the denominator?"
@@ -102,7 +115,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{lifg: %{status: :scored}, comprehension: %{uncertain: ["carry"]}}} end,
+               probe: &brain_fixture/2,
                llm: fake_llm(pid)
              )
 
@@ -115,6 +128,8 @@ defmodule Core.Social.ColonyConversationTest do
     assert draft.post_author == "exori"
     assert draft.body == @reply
     assert draft.discussion_comments_read == 1
+    assert draft.cognitive_summary.reporter == "exori"
+    assert draft.cognitive_summary.relation == :reported_refutation
     assert draft.public_posted? == false
     assert String.starts_with?(draft.approval_phrase, "APPROVE COLONY COMMENT ")
     assert draft.expires_in_seconds == 900
@@ -137,7 +152,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{lifg: %{status: :scored}}} end,
+               probe: &brain_fixture/2,
                llm: fake_llm(pid)
              )
 
@@ -195,7 +210,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               probe: &brain_fixture/2,
                llm: fn messages, _opts ->
                  [%{"role" => "system"}, %{"content" => text}] = messages
                  assert text =~ "Author: exori"
@@ -217,7 +232,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               probe: &brain_fixture/2,
                llm: fn messages, opts ->
                  n = :atomics.add_get(calls, 1, 1)
                  assert [%{"role" => "system"}, %{"role" => "user", "content" => user}] = messages
@@ -249,7 +264,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               probe: &brain_fixture/2,
                llm: fn _messages, _opts ->
                  :atomics.add_get(calls, 1, 1)
                  {:ok, %{content: ""}}
@@ -289,7 +304,7 @@ defmodule Core.Social.ColonyConversationTest do
                ColonyConversation.draft(@post_id,
                  store: store,
                  plug: {Req.Test, __MODULE__},
-                 probe: fn _, _ -> {:ok, %{status: :unavailable}} end,
+                 probe: &brain_fixture/2,
                  llm: fn _, _ -> {:ok, %{content: result}} end
                )
 
@@ -304,7 +319,7 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               probe: &brain_fixture/2,
                llm: fn _, _ ->
                  {:ok, %{content: "Thank you for sharing your checker claims. I can assist you further."}}
                end
@@ -314,11 +329,45 @@ defmodule Core.Social.ColonyConversationTest do
              ColonyConversation.draft(@post_id,
                store: store,
                plug: {Req.Test, __MODULE__},
-               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               probe: &brain_fixture/2,
                llm: fn _, _ ->
                  {:ok, %{content: "I love discussing existential philosophy and sunsets."}}
                end
              )
+  end
+
+  test "no external brain evidence means no model generation or approval", %{store: store} do
+    stub_thread(self())
+    me = self()
+
+    assert {:error, :insufficient_colony_brain_evidence} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{lifg: %{status: :unavailable}}} end,
+               llm: fn _, _ -> send(me, :unexpected_llm); {:ok, %{content: @reply}} end
+             )
+
+    refute_receive :unexpected_llm
+    refute_receive :comment_published
+  end
+
+  test "source ownership hallucination is blocked before review", %{store: store} do
+    stub_thread(self())
+
+    assert {:error, :colony_source_attribution_violation} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _, _ ->
+                 {:ok, %{content:
+                   "Symbrella's memory checker v4 produced ten links refuting claims. " <>
+                     "The links raise a question about evidence polarity."}}
+               end
+             )
+
+    refute_receive :comment_published
   end
 
   test "invalid post ids are blocked before remote authentication", %{store: store} do
