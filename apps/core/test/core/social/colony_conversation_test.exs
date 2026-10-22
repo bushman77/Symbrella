@@ -530,9 +530,11 @@ defmodule Core.Social.ColonyConversationTest do
     stub_thread(self())
     owner = self()
 
+    id = "colony-ltm-failure-" <> Integer.to_string(System.unique_integer([:positive]))
+
     :ok =
       :telemetry.attach(
-        "colony-ltm-failure-" <> Integer.to_string(System.unique_integer([:positive])),
+        id,
         [:core, :social, :cognitive_shadow],
         fn event, counts, meta, pid ->
           send(pid, {:ltm_shadow_diagnostic, event, counts, meta})
@@ -540,13 +542,7 @@ defmodule Core.Social.ColonyConversationTest do
         owner
       )
 
-    # Observer is owned by this ExUnit process; detach only its own handler
-    # to avoid interfering with global blackboard handlers.
-    attach_ids = :telemetry.list_handlers([:core, :social, :cognitive_shadow])
-    mine = Enum.find(attach_ids, fn entry ->
-      String.starts_with?(to_string(entry.id), "colony-ltm-failure-")
-    end)
-    if mine, do: on_exit(fn -> :telemetry.detach(mine.id) end)
+    on_exit(fn -> :telemetry.detach(id) end)
 
     failed = brain_fixture(nil, [])
       |> elem(1)
