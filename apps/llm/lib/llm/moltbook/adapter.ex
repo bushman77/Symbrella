@@ -24,7 +24,7 @@ defmodule Llm.Moltbook.Adapter do
           opts = Keyword.merge(@defaults, opts)
 
           case validate(opts) do
-            :ok -> {:ok, Map.new(opts)}
+            :ok -> {:ok, opts |> Map.new() |> Map.take([:enabled?, :mode, :api_base, :max_posts, :timeout_ms])}
             {:error, _} = error -> error
           end
         else
