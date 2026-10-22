@@ -36,6 +36,8 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             pos_covered_tokens: bounded_count(measurements, :pos_covered_tokens),
             processed_tokens: bounded_count(measurements, :processed_tokens),
             proposition_status: Map.get(meta, :proposition_status, :not_interpreted),
+            proposition_reason: Map.get(meta, :proposition_reason),
+            disputed_roles: bounded_count(measurements, :disputed_roles),
             grammar_outcome: Map.get(meta, :grammar_outcome, :not_recorded),
             ltm_status: Map.get(meta, :ltm_status, :not_recorded),
             ltm_reason: Map.get(meta, :ltm_reason)
@@ -79,6 +81,8 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
           <div :if={@social.ltm_reason}><dt class="text-xs text-zinc-500">Lookup error</dt><dd class="font-mono break-all">{@social.ltm_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Sentence meaning</dt><dd class="font-mono break-all">{@social.sentence_status}</dd></div>
           <div><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
+          <div :if={@social.proposition_reason}><dt class="text-xs text-zinc-500">Proposition abstention</dt><dd class="font-mono break-all">{@social.proposition_reason}</dd></div>
+          <div><dt class="text-xs text-zinc-500">Disputed grammatical roles</dt><dd class="font-mono">{@social.disputed_roles}</dd></div>
           <div><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
           <div><dt class="text-xs text-zinc-500">Evidence status</dt><dd class="font-mono break-all">{@social.provenance}</dd></div>
         </dl>
@@ -89,7 +93,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
       <% else %>
         <p class="mt-3 text-sm text-zinc-500">
           No Colony cognitive shadow event in the recent blackboard window.
-          Run a new read-only draft and reload or refresh the Brain dashboard.
+          Run a read-only SemanticProbe or draft and refresh the Brain dashboard.
         </p>
       <% end %>
     </section>
