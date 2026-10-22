@@ -11,7 +11,9 @@ defmodule Core.Social.SemanticProbe do
 
   @max_input_chars 420
   @max_tokens 32
-  @max_choices 12
+  # Keep the complete bounded 32-token slate for ATL. Truncating to twelve
+  # choices discarded the predicate of longer Colony headlines.
+  @max_choices 32
   @low_margin 0.15
 
   @doc """
@@ -62,6 +64,9 @@ defmodule Core.Social.SemanticProbe do
       |> Core.Syntax.Signatures.attach()
       |> Core.Syntax.RoleCompetition.attach()
       |> Core.Syntax.SentenceCompetition.attach()
+      # Relation-edge lookup reads existing lexical DB rows. No related
+      # BrainCells are activated and no external text is persisted.
+      |> Core.Relations.attach_edges(attach_related_cells?: false)
 
     signatures =
       si
@@ -99,7 +104,9 @@ defmodule Core.Social.SemanticProbe do
          status: :read_only_reduced,
          winner_count: Map.get(slate, :winner_count, 0),
          resolved_constituents: slate |> Map.get(:constituents, []) |> List.wrap() |>
-           Enum.count(&(Map.get(&1, :status) == :resolved))
+           Enum.count(&(Map.get(&1, :status) == :resolved)),
+         semantic_relations: si |> Map.get(:evidence, %{}) |>
+           Map.get(:relations, []) |> List.wrap() |> Enum.take(8) |> length()
        },
        sentence_meaning: %{
          status: Map.get(meaning, :status, :not_yet_interpreted),
