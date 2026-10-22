@@ -143,8 +143,11 @@ defmodule Core.Social.SemanticProbe do
     %{
       token_index: Map.get(choice, :token_index),
       chosen_id: limited_id(Map.get(choice, :chosen_id)),
+      score: probability(Map.get(choice, :score) || Map.get(choice, :prob)),
       margin: bounded_number(Map.get(choice, :margin)),
-      probability_margin: bounded_number(Map.get(choice, :prob_margin))
+      probability_margin: bounded_number(Map.get(choice, :prob_margin)),
+      weak?: Map.get(choice, :weak?) == true,
+      reliability: Map.get(choice, :reliability)
     }
   end
 
@@ -156,7 +159,13 @@ defmodule Core.Social.SemanticProbe do
         id: limited_id(id),
         lemma: lemma(id),
         token_index: Map.get(choice, :token_index),
-        score: bounded_number(Map.get(choice, :prob_margin))
+        # LIFG's selected posterior (p1) is a choice score. The
+        # difference between p1 and the runner-up is a *margin*, not a
+        # substitute for p1. A weak margin can coexist with a large p1.
+        # This does not convert the selected sense into verified meaning.
+        score: probability(Map.get(choice, :score) || Map.get(choice, :prob)),
+        weak?: Map.get(choice, :weak?) == true,
+        reliability: Map.get(choice, :reliability)
       }
     end)
   end
@@ -172,6 +181,9 @@ defmodule Core.Social.SemanticProbe do
 
   defp limited_id(id) when is_binary(id), do: String.slice(id, 0, 128)
   defp limited_id(_), do: nil
+  defp probability(n) when is_number(n), do: n |> max(0.0) |> min(1.0)
+  defp probability(_), do: 0.0
+
   defp bounded_number(n) when is_number(n), do: n * 1.0
   defp bounded_number(_), do: 0.0
 
