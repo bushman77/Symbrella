@@ -186,6 +186,57 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.sentence_meaning.status == :not_yet_interpreted
   end
 
+  test "real Stage1 selects attested noun complement in a complete copular relative clause" do
+    title =
+      "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
+
+    lexical_pos = %{
+      "my" => ["determiner"],
+      "checker" => ["noun"],
+      "links" => ["noun"],
+      "were" => ["verb"],
+      "lines" => ["proper_noun", "noun"],
+      "refute" => ["verb"],
+      "the" => ["determiner"],
+      "claim" => ["noun"]
+    }
+
+    reader = fn si, _opts ->
+      rows =
+        Enum.flat_map(si.tokens, fn token ->
+          word = String.downcase(token.phrase)
+
+          lexical_pos
+          |> Map.get(word, [])
+          |> Enum.map(fn pos ->
+            %{
+              id: "#{word}|#{pos}|1", norm: word, word: word, pos: pos,
+              token_index: token.index, score: 0.5, semantic_atoms: []
+            }
+          end)
+        end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexical_pos)), missing_norms: []}}
+    end
+
+    # Do not inject a mock scorer: this must exercise production Stage1's
+    # independent grammar compatibility support and the pure ATL projection.
+    assert {:ok, shadow} = SemanticProbe.run(title, ltm_reader: reader)
+    assert shadow.syntax.audit.ltm_status == :ready
+    assert shadow.syntax.audit.signature_count > 0
+
+    complement = Enum.find(shadow.lifg.choices, &(&1.token_index == 16))
+    assert complement.chosen_id == "lines|noun|1"
+
+    assert shadow.reported_proposition.status ==
+             :attributed_structural_interpretation
+    assert shadow.reported_proposition.embedded_relation == :reported_refutation
+    assert shadow.reported_proposition.reported_count == 10
+    assert shadow.reported_proposition.reported_total == 13
+    assert shadow.reported_proposition.verification ==
+             :author_claim_not_independently_verified
+  end
+
   test "standalone social probe emits read-only blackboard metrics with abstention reason" do
     id = "standalone-colony-" <> Integer.to_string(System.unique_integer([:positive]))
     owner = self()
