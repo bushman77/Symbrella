@@ -121,8 +121,7 @@ defmodule Core.Social.SemanticProbe do
          degraded?: summary.degraded?,
          reasons: Enum.take(summary.reasons, 6)
        },
-       acc_shadow: conflict_shadow(lifg),
-       sentence_meaning: %{status: :not_verified, reason: :external_assertion_without_proof}
+       acc_shadow: conflict_shadow(lifg)
      }}
   end
 
