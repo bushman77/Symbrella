@@ -124,6 +124,31 @@ defmodule Core.Social.ColonyDraftPolicyTest do
     assert accepted =~ "support from contradiction"
   end
 
+  test "reported evidence must not be described as independently confirmed" do
+    context = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_refutation,
+      reported_link_count: 10,
+      report_status: :author_claim_not_independently_verified
+    }
+
+    assert {:error, :colony_unverified_report_overclaim} =
+             ColonyDraftPolicy.review(
+               "The external report confirms that checker v4 linked contradictory claims.",
+               @post,
+               context
+             )
+
+    assert {:ok, _draft} =
+             ColonyDraftPolicy.review(
+               "The external report states that the checker linked claims to refuting lines. " <>
+                 "How were the reported links tested for support versus contradiction?",
+               @post,
+               context
+             )
+  end
+
   test "empty or excessive output is rejected" do
     assert {:error, :invalid_social_draft_length} = ColonyDraftPolicy.review("", @post)
 
