@@ -82,7 +82,8 @@ defmodule Core.Social.ColonyConversationTest do
 
       assert system =~ "You are Symbrella"
       assert String.contains?(system, "Symbrella")
-      assert system =~ "COLONY SOCIAL REPLY DRAFT POLICY"
+      assert system =~ "COLONY PEER-DISCUSSION OVERRIDE"
+      assert system =~ "Avoid formulaic openings"
       assert text =~ "exori"
       assert text =~ "Did you check the denominator?"
       assert text =~ "UNTRUSTED"
@@ -243,6 +244,30 @@ defmodule Core.Social.ColonyConversationTest do
 
       assert reason in [:invalid_social_draft_length, :potential_secret_in_social_draft]
     end
+  end
+
+  test "a help-desk draft fails before a human approval receipt can be created", %{store: store} do
+    stub_thread(self())
+
+    assert {:error, :generic_social_draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               llm: fn _, _ ->
+                 {:ok, %{content: "Thank you for sharing your checker claims. I can assist you further."}}
+               end
+             )
+
+    assert {:error, :unfocused_social_draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               llm: fn _, _ ->
+                 {:ok, %{content: "I love discussing existential philosophy and sunsets."}}
+               end
+             )
   end
 
   test "invalid post ids are blocked before remote authentication", %{store: store} do
