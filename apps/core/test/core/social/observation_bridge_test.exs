@@ -51,6 +51,9 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.stage == :social_semantic_shadow
     assert semantic.token_count > 0
     assert semantic.syntax.status == :observed
+    assert semantic.syntax.audit.outcome == :missing_dictionary_pos
+    assert semantic.syntax.audit.dictionary_rows == 0
+    assert semantic.syntax.audit.pos_covered_tokens == 0
     assert semantic.lifg.status == :scored
     assert [%{chosen_id: "correction|noun|1", score: 0.92, margin: 0.05}] = semantic.lifg.choices
     assert "correction" in semantic.comprehension.selected_lexical_candidates
@@ -88,6 +91,8 @@ defmodule Core.Social.ObservationBridgeTest do
     assert [%{score: 0.91, margin: 0.01}] = high.lifg.choices
     assert "artist" in high.comprehension.selected_lexical_candidates
     assert high.comprehension.understood == []
+    assert high.syntax.audit.source_tokens >= high.syntax.audit.processed_tokens
+    assert high.syntax.audit.signature_count == length(high.syntax.signatures)
     assert high.acc_shadow.low_margin_choices == 1
 
     assert {:ok, low} =
