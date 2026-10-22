@@ -44,6 +44,7 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert html =~ ~s(data-brain-report-section="HUD, Clock, Intent, Mood and Self-Model")
     assert html =~ ~s(data-brain-report-section="Selected Region Summary and Snapshot")
     assert html =~ ~s(data-brain-report-section="Complete Blackboard Feed")
+    assert html =~ ~s(data-brain-report-section="Read-only Colony Cognition")
     assert html =~ ~s(data-brain-report-section="Working Memory")
     assert html =~ ~s(data-brain-report-section="Live Region State")
     assert html =~ ~s(data-brain-report-section="Module Status")
@@ -119,6 +120,7 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert text =~ "FULL_UNFILTERED_PAYLOAD"
     assert text =~ "active memory"
     assert text =~ "===== All region process statuses ====="
+    assert text =~ "===== Read-only Colony cognition (not neuron activation) ====="
   end
 
 end
