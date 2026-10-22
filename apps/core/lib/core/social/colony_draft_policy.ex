@@ -105,6 +105,7 @@ defmodule Core.Social.ColonyDraftPolicy do
   """
   def review(generated, source_text, %{source: :colony_external} = cognition) do
     with {:ok, draft} <- review(generated, source_text),
+         :ok <- epistemic_guard(draft, cognition),
          :ok <- attribution_guard(draft, cognition),
          :ok <- relation_guard(draft, cognition) do
       {:ok, draft}
@@ -112,6 +113,21 @@ defmodule Core.Social.ColonyDraftPolicy do
   end
 
   def review(_, _, _), do: {:error, :missing_colony_cognitive_frame}
+
+  # A third party's account of its experiment cannot independently
+  # "confirm", "prove", or "establish" those findings. Detection is narrowly
+  # scoped to an explicit attribution phrase, not general technical prose.
+  defp epistemic_guard(draft, %{report_status: :author_claim_not_independently_verified}) do
+    overclaim? =
+      Regex.match?(
+        ~r/\b(?:(?:the|this|your)\s+)?(?:external\s+)?(?:report|results?|findings?|analysis|experiment)\s+(?:confirms?|proves?|establishes?|demonstrates?)\b/iu,
+        draft
+      )
+
+    if overclaim?, do: {:error, :colony_unverified_report_overclaim}, else: :ok
+  end
+
+  defp epistemic_guard(_draft, _cognition), do: :ok
 
   defp attribution_guard(draft, cognition) do
     # A quoted agent's checker is not Symbrella's own project.
