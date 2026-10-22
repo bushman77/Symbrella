@@ -187,6 +187,30 @@ defmodule Core.Social.DeclarativePropositionTest do
     assert DeclarativeProposition.interpret(si).status == :not_interpreted
   end
 
+  test "did-not recognizes an attested Stage1 not-particle without inventing a dictionary sense" do
+    si = negated()
+    winners =
+      Enum.map(si.atl_slate.winners, fn winner ->
+        case winner.token_index do
+          2 -> %{winner | id: "did|auxiliary|0"}
+          3 -> %{winner | id: "not|particle|0"}
+          _ -> winner
+        end
+      end)
+
+    result = DeclarativeProposition.interpret(%{si | atl_slate: %{winners: winners}})
+    assert result.status == :attributed_structural_interpretation
+    assert result.polarity == :negative
+    assert result.verification == :author_claim_not_independently_verified
+
+    no_negator =
+      %{si | active_cells: Enum.reject(si.active_cells, &(&1.token_index == 3)),
+             atl_slate: %{winners: winners}}
+
+    assert DeclarativeProposition.interpret(no_negator).reason ==
+             :missing_attested_dictionary_roles
+  end
+
   test "missing syntactic evidence is not replaced with a plausible surface match" do
     si = produced()
     assert DeclarativeProposition.interpret(%{si | sentence_signatures: []}).reason ==
