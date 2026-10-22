@@ -71,6 +71,52 @@ defmodule Core.Social.ReportedPropositionTest do
     }
   end
 
+  test "an attested copular auxiliary is valid even when its selected ID is closed-class" do
+    si = input()
+
+    signature = %{
+      id: :copular_relative_classification,
+      source: :core_syntax,
+      roles: %{copula: 13, complement_head: 14}
+    }
+
+    winners =
+      Enum.map(si.atl_slate.winners, fn winner ->
+        if winner.token_index == 13,
+          do: %{winner | id: "were|auxiliary|0"},
+          else: winner
+      end)
+
+    cells =
+      Enum.map(si.active_cells, fn cell ->
+        if cell.token_index == 13, do: Map.merge(cell, %{norm: "were", word: "were"}), else: cell
+      end)
+
+    result =
+      ReportedProposition.interpret(%{
+        si | active_cells: cells,
+             sentence_signatures: [signature | si.sentence_signatures],
+             atl_slate: %{winners: winners}
+      })
+
+    assert result.status == :attributed_structural_interpretation
+    assert result.embedded_relation == :reported_refutation
+
+    # Neither the exact token nor the complete Core frame may be fabricated.
+    without_frame =
+      %{si | active_cells: cells, atl_slate: %{winners: winners}}
+    rejected = ReportedProposition.interpret(without_frame)
+    assert rejected.status == :not_interpreted
+    assert rejected.reason == :lifg_atl_role_disagreement
+
+    without_dictionary =
+      %{si | active_cells: Enum.reject(cells, &(&1.token_index == 13)),
+             sentence_signatures: [signature | si.sentence_signatures],
+             atl_slate: %{winners: winners}}
+    assert ReportedProposition.interpret(without_dictionary).reason ==
+             :missing_attested_dictionary_roles
+  end
+
   test "supports the same syntax with the opposite reported evidence polarity" do
     si = input()
     sentence = String.replace(@title, "that refute", "that support")
