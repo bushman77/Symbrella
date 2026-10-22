@@ -66,6 +66,37 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.atl.winner_count == 1
   end
 
+  test "LTM keeps a retrieved sense at each independent token index" do
+    cell = %{
+      id: "links|noun|1",
+      norm: "links",
+      word: "links",
+      pos: "noun",
+      source: :ltm,
+      semantic_atoms: []
+    }
+
+    si = %{active_cells: [%{cell | token_index: 1}]}
+
+    result =
+      Core.Pipeline.LTM.enrich(
+        si,
+        [
+          %{cell | token_index: 1},
+          %{cell | token_index: 9},
+          %{cell | token_index: 9}
+        ],
+        MapSet.new(["links"])
+      )
+
+    assert Enum.map(result.active_cells, & &1.token_index) == [1, 9]
+    assert result.activation_summary.db_hits == MapSet.new(["links"])
+
+    # The old ID-only dedup retained just one occurrence, silently removing
+    # grammar evidence for later mentions of the same noun.
+    assert Enum.count(result.active_cells, &(&1.id == "links|noun|1")) == 2
+  end
+
   test "checked read-only dictionary lookup preserves POS for syntax analysis" do
     lookup = fn si, opts ->
       assert Keyword.fetch!(opts, :limit_per_norm) == 8
