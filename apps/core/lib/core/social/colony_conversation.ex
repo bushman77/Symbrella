@@ -247,18 +247,23 @@ defmodule Core.Social.ColonyConversation do
     ]
 
     case social_completion(llm, messages, discussion, cognition, 180, false) do
-      {:error, :invalid_social_draft_length} ->
-        # One correction, at most. This is local inference only, not a
-        # network comment retry. If it still fails, return the error.
+      {:error, reason}
+      when reason in [
+             :invalid_social_draft_length,
+             :generic_social_draft,
+             :unfocused_social_draft,
+             :colony_unverified_report_overclaim
+           ] ->
+        # Only one additional LOCAL generation is permitted. Send the bounded
+        # rejection reason, not the discarded external/model-generated text.
+        # Both attempts pass the same grounding, provenance and secret gates;
+        # there is no Colony POST or approval receipt unless review succeeds.
         corrected_messages = [
           hd(messages),
           %{
             "role" => "user",
             "content" =>
-              user_prompt <>
-                "\nLENGTH REPAIR: Your last response was empty or exceeded the limit. " <>
-                "Reply in EXACTLY two concise sentences, under 350 characters. " <>
-                "Output only those sentences."
+              user_prompt <> "\n" <> social_repair_instruction(reason)
           }
         ]
 
@@ -271,6 +276,36 @@ defmodule Core.Social.ColonyConversation do
     _ -> {:error, :social_llm_unavailable}
   catch
     :exit, _ -> {:error, :social_llm_unavailable}
+  end
+
+  # Only a reason code, never the failed draft text, enters a repair prompt.
+  # Untrusted third-party content must not be promoted into instructions.
+  defp social_repair_instruction(:invalid_social_draft_length) do
+    "LENGTH REPAIR: The first reply was empty or too long. " <>
+      "Write EXACTLY two short complete sentences, under 350 characters. " <>
+      "Use the cognitive evidence frame and output ONLY the proposed comment."
+  end
+
+  defp social_repair_instruction(:generic_social_draft) do
+    "SOCIAL REPAIR: The first reply sounded like generic assistant/customer " <>
+      "support. Address exori's specific reported result and the difference " <>
+      "between relevant links and links that refute claims. " <>
+      "Ask one precise question about how the checker classified evidence. " <>
+      "Write ONLY two short sentences, no thanks, introductions, or offers to help."
+  end
+
+  defp social_repair_instruction(:unfocused_social_draft) do
+    "GROUNDING REPAIR: The first reply was not sufficiently related to the post. " <>
+      "Use the source-attributed evidence frame; discuss the reported checker " <>
+      "links, evidence support versus refutation, and a concrete question. " <>
+      "Write ONLY two short sentences, without inventing tests or results."
+  end
+
+  defp social_repair_instruction(:colony_unverified_report_overclaim) do
+    "EPISTEMIC REPAIR: The first reply overstated certainty about an external " <>
+      "report. State that the author REPORTED a result; never say the report " <>
+      "proves, confirms or verifies the claim. Ask one useful technical question. " <>
+      "Write ONLY two short sentences, attributing the result to the author."
   end
 
   defp social_completion(llm, messages, discussion, cognition, max_tokens, repair?) do
@@ -287,6 +322,14 @@ defmodule Core.Social.ColonyConversation do
             Logger.warning(
               "[ColonyConversation] empty or overlong local draft " <>
                 "(chars=#{String.length(content)}, maximum=#{ColonyDraftPolicy.max_chars()}, repair=#{repair?})"
+            )
+
+            error
+
+          {:error, reason} = error ->
+            Logger.info(
+              "[ColonyConversation] local draft failed review " <>
+                "(reason=#{reason}, chars=#{String.length(content)}, repair=#{repair?})"
             )
 
             error
