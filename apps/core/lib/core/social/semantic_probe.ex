@@ -122,8 +122,7 @@ defmodule Core.Social.SemanticProbe do
     reported_proposition = Core.Social.ReportedProposition.interpret(semantic_si)
     summary = Core.Comprehension.Summary.build(semantic_si)
 
-    {:ok,
-     %{
+    result = %{
        stage: :social_semantic_shadow,
        input_chars: String.length(excerpt),
        token_count: length(tokens),
@@ -152,7 +151,50 @@ defmodule Core.Social.SemanticProbe do
          reasons: Enum.take(summary.reasons, 6)
        },
        acc_shadow: conflict_shadow(lifg)
-     }}
+     }
+
+    # The standalone read-only probe also deserves visibility in Brain.
+    # Pure lexical analysis is NOT neuron activation, working-memory use,
+    # memory writing, or proof of the external claim.
+    if Keyword.get(opts, :emit_telemetry?, true) do
+      emit_shadow_telemetry(result)
+    end
+
+    {:ok, result}
+  end
+
+  defp emit_shadow_telemetry(result) do
+    audit = result.syntax.audit
+    proposition = result.reported_proposition
+
+    :telemetry.execute(
+      [:core, :social, :cognitive_shadow],
+      %{
+        lifg_choices: result.lifg.chosen_count,
+        atl_winners: result.atl.winner_count,
+        syntax_frames: audit.signature_count,
+        dictionary_rows: audit.dictionary_rows,
+        pos_covered_tokens: audit.pos_covered_tokens,
+        processed_tokens: audit.processed_tokens,
+        disputed_roles:
+          proposition
+          |> Map.get(:role_audit, [])
+          |> Enum.count(&(Map.get(&1, :agreed?) == false))
+      },
+      %{
+        source: :colony_external,
+        probe_mode: :standalone_read_only,
+        post_id: nil,
+        reported_relation: Map.get(proposition, :embedded_relation, :not_interpreted),
+        sentence_status: result.sentence_meaning.status,
+        provenance: :external_unverified,
+        grammar_outcome: audit.outcome,
+        ltm_status: audit.ltm_status,
+        ltm_reason: audit.ltm_reason,
+        proposition_status: proposition.status,
+        proposition_reason: Map.get(proposition, :reason)
+      }
+    )
   end
 
   # This is a loss-of-evidence audit, not a semantic verdict. It helps
