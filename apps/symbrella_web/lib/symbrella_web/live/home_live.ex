@@ -346,26 +346,6 @@ defmodule SymbrellaWeb.HomeLive do
     {:noreply, socket}
   end
 
-  defp maybe_display_clarification(socket, {:ask, question, diagnostics}) do
-    prompt_id = "clarification-" <> Integer.to_string(System.unique_integer([:positive]))
-    payload = ChatHTML.explain_payload_for(%{
-      id: prompt_id, text: question, tone: :curious,
-      intent: :clarification, from: diagnostics
-    })
-    bot = %{id: prompt_id, role: :assistant, text: question, tone: :curious,
-      meta: diagnostics, session_id: socket.assigns.session_id,
-      explain_text: question, explain_payload: payload}
-    ChatHistory.append(socket.assigns.session_id, bot)
-    socket
-    |> assign(
-      message_text_by_id: Map.put(socket.assigns.message_text_by_id, prompt_id, question),
-      explain_by_id: Map.put(socket.assigns.explain_by_id, prompt_id, payload)
-    )
-    |> stream_insert(:messages, bot)
-  end
-
-  defp maybe_display_clarification(socket, _), do: socket
-
   @impl true
   def handle_info({ref, _payload}, socket) when is_reference(ref) do
     {:noreply, socket}
@@ -468,6 +448,26 @@ defmodule SymbrellaWeb.HomeLive do
         end
     end
   end
+
+  defp maybe_display_clarification(socket, {:ask, question, diagnostics}) do
+    prompt_id = "clarification-" <> Integer.to_string(System.unique_integer([:positive]))
+    payload = ChatHTML.explain_payload_for(%{
+      id: prompt_id, text: question, tone: :curious,
+      intent: :clarification, from: diagnostics
+    })
+    bot = %{id: prompt_id, role: :assistant, text: question, tone: :curious,
+      meta: diagnostics, session_id: socket.assigns.session_id,
+      explain_text: question, explain_payload: payload}
+    ChatHistory.append(socket.assigns.session_id, bot)
+    socket
+    |> assign(
+      message_text_by_id: Map.put(socket.assigns.message_text_by_id, prompt_id, question),
+      explain_by_id: Map.put(socket.assigns.explain_by_id, prompt_id, payload)
+    )
+    |> stream_insert(:messages, bot)
+  end
+
+  defp maybe_display_clarification(socket, _), do: socket
 
   @impl true
   def render(assigns), do: ChatHTML.chat(assigns)
@@ -1682,8 +1682,6 @@ defmodule SymbrellaWeb.HomeLive do
     end
   end
 
-  defp enforce_identity_reply(reply), do: reply
-
   defp enforce_identity_reply(%{} = reply, fallback_user_text)
        when is_binary(fallback_user_text) do
     si =
@@ -1801,8 +1799,6 @@ defmodule SymbrellaWeb.HomeLive do
     Regex.match?(~r/^\s*your\s+name\s+is\s+symbrella\.?\s*$/iu, text)
   end
 
-  defp assistant_identity_leak?(_text), do: false
-
   defp assistant_name_question_echo?(text) when is_binary(text) do
     text
     |> String.replace(~r/^\s*(?:symbrella|assistant)\s*:\s*/iu, "")
@@ -1812,8 +1808,6 @@ defmodule SymbrellaWeb.HomeLive do
     |> String.downcase()
     |> Kernel.in(["what is your name", "what is your name?"])
   end
-
-  defp assistant_name_question_echo?(_text), do: false
 
   defp deterministic_identity_reply(user_text, session_id) do
     if Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1) do
