@@ -36,7 +36,10 @@ defmodule Core.Pipeline.LTM do
       (existing ++ rows)
       |> Enum.flat_map(&sanitize_cell/1)
       |> Enum.reject(&(cell_id(&1) == nil))
-      |> Enum.uniq_by(&cell_id/1)
+      # A dictionary sense can occur at several token positions in one
+      # sentence. Deduplicate within one position, not across occurrences:
+      # "the ... the" needs distinct POS evidence for both indices.
+      |> Enum.uniq_by(&candidate_position_key/1)
 
     db_hits_ms = db_hits
 
@@ -68,6 +71,13 @@ defmodule Core.Pipeline.LTM do
   defp sanitize_cell(%{"id" => _} = cell), do: [cell]
   defp sanitize_cell(id) when is_binary(id), do: [%{id: id}]
   defp sanitize_cell(_), do: []
+
+  defp candidate_position_key(cell) when is_map(cell) do
+    index = Map.get(cell, :token_index, Map.get(cell, "token_index"))
+    {cell_id(cell), index}
+  end
+
+  defp candidate_position_key(cell), do: {cell_id(cell), nil}
 
   defp cell_id(%{id: id}), do: id
   defp cell_id(%{"id" => id}), do: id
