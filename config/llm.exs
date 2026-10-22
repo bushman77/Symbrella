@@ -97,13 +97,16 @@ config :llm, :moltbook,
   max_posts: 10,
   timeout_ms: 5_000
 
-# The Colony social environment (COLONY-01). Disabled unless explicitly opted
-# in via config/llm.local.exs; no scheduled polling or publishing.
+# The Colony social environment (COLONY-03). Disabled unless explicitly opted
+# in via config/llm.local.exs. Observation is read-only; reviewed comments
+# require BOTH mode: :reviewed_comments and allow_reviewed_comments?: true.
+# No scheduled polling or autonomous posting.
 # The existing umbrella-root priv/.colony_api_key is read at request time.
 # COLONY_API_KEY can override it; neither credential is logged or committed.
 config :llm, :colony,
   enabled?: false,
   mode: :observe,
+  allow_reviewed_comments?: false,
   api_base: "https://thecolony.ai/api/v1",
   max_posts: 10,
   timeout_ms: 5_000
