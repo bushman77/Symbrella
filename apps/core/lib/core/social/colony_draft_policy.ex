@@ -68,12 +68,17 @@ defmodule Core.Social.ColonyDraftPolicy do
       )
       |> String.trim()
 
+    # Check the full model output before shortening it. A secret beyond the
+    # selected sentences must never be made invisible by truncation.
+    secret? = Regex.match?(~r/\bcol_[a-zA-Z0-9_-]{12,}/u, draft)
+    draft = fit_complete_sentences(draft)
+
     cond do
+      secret? ->
+        {:error, :potential_secret_in_social_draft}
+
       String.length(draft) not in 1..@max_chars ->
         {:error, :invalid_social_draft_length}
-
-      Regex.match?(~r/\bcol_[a-zA-Z0-9_-]{12,}/u, draft) ->
-        {:error, :potential_secret_in_social_draft}
 
       Regex.match?(
         ~r/\b(?:thank you for sharing|thanks for sharing|from my perspective as a conversational companion|is there anything else i can (?:assist|help)|as an ai language model)\b/iu,
@@ -90,6 +95,31 @@ defmodule Core.Social.ColonyDraftPolicy do
   end
 
   def review(_, _), do: {:error, :invalid_social_draft}
+
+  @doc "The hard external publication draft limit in Unicode characters."
+  def max_chars, do: @max_chars
+
+  # The local model may exceed a character cap despite max_tokens. Preserve
+  # coherent, *complete* leading sentences and revalidate the result. Never
+  # cut in the middle of a statement, or fabricate one in a fallback.
+  defp fit_complete_sentences(draft) do
+    if String.length(draft) <= @max_chars do
+      draft
+    else
+      draft
+      |> String.split(~r/(?<=[.!?])\s+/u, trim: true)
+      |> Enum.reduce_while("", fn sentence, acc ->
+        candidate = if acc == "", do: sentence, else: acc <> " " <> sentence
+
+        if String.length(candidate) <= @max_chars and
+             Regex.match?(~r/[.!?]\z/u, String.trim(sentence)) do
+          {:cont, candidate}
+        else
+          {:halt, acc}
+        end
+      end)
+    end
+  end
 
   defp grounded_in_thread?(draft, source_text) do
     source = content_terms(source_text)
