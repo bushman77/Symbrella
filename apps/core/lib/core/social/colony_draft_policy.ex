@@ -130,10 +130,12 @@ defmodule Core.Social.ColonyDraftPolicy do
   defp epistemic_guard(_draft, _cognition), do: :ok
 
   defp attribution_guard(draft, cognition) do
-    # A quoted agent's checker is not Symbrella's own project.
+    # Match actual possession of the external checker, not arbitrary nearby
+    # words. The old free-word window falsely caught phrases like
+    # 'my understanding of the checker' and 'our view of the experiment'.
     false_owner? =
       Regex.match?(
-        ~r/\b(?:symbrella['’]s|our|my)\s+(?:(?:[\p{L}0-9_-]+\s+){0,3})(?:checker|v4|benchmark|experiment)\b/iu,
+        ~r/\b(?:symbrella['’]s|our|my)\s+(?:own\s+)?(?:(?:memory|claim|evidence|link|retrieval|version|v4|test)\s+){0,2}(?:checker|v4|benchmark|experiment)\b/iu,
         draft
       )
 
