@@ -121,7 +121,6 @@ defmodule Core.Social.ColonyCognition do
           {:error, :unresolved_colony_evidence_relation} ->
             {:ok, %{relation: relation, count: count, total: total}}
 
-          error -> error
         end
 
       _ ->
