@@ -135,6 +135,30 @@ defmodule Core.Social.DeclarativePropositionTest do
     assert result.reported_count == nil
   end
 
+  test "did-not accepts exact attested closed-class auxiliary without inventing a dictionary sense" do
+    si = negated()
+
+    winners =
+      Enum.map(si.atl_slate.winners, fn winner ->
+        if winner.token_index == 2,
+          do: %{winner | id: "did|auxiliary|0"},
+          else: winner
+      end)
+
+    interpreted =
+      DeclarativeProposition.interpret(%{si | atl_slate: %{winners: winners}})
+
+    assert interpreted.status == :attributed_structural_interpretation
+    assert interpreted.polarity == :negative
+
+    no_dictionary =
+      %{si | active_cells: Enum.reject(si.active_cells, &(&1.token_index == 2)),
+             atl_slate: %{winners: winners}}
+
+    assert DeclarativeProposition.interpret(no_dictionary).reason ==
+             :missing_attested_dictionary_roles
+  end
+
   test "missing syntactic evidence is not replaced with a plausible surface match" do
     si = produced()
     assert DeclarativeProposition.interpret(%{si | sentence_signatures: []}).reason ==
