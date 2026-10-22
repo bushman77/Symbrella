@@ -186,7 +186,9 @@ defmodule Core.Social.ObservationBridge do
             ignore_head: :never
           )
 
-        {:ok, length(episodes)}
+        # Recheck scope locally as well: the general recall helper tolerates
+        # legacy episodes without metadata, which are not social evidence.
+        {:ok, Enum.count(episodes, &colony_episode?/1)}
       end
     else
       {:error, :hippocampus_unavailable}
@@ -196,6 +198,14 @@ defmodule Core.Social.ObservationBridge do
   catch
     :exit, _ -> {:error, :hippocampus_unavailable}
   end
+
+  defp colony_episode?(%{episode: %{meta: meta}}) when is_map(meta) do
+    source = Map.get(meta, :source) || Map.get(meta, "source")
+    trust = Map.get(meta, :trust) || Map.get(meta, "trust")
+    source == :colony_external and trust == :untrusted_external
+  end
+
+  defp colony_episode?(_), do: false
 
   defp text(value, max) when is_binary(value) do
     value |> String.trim() |> String.slice(0, max)
