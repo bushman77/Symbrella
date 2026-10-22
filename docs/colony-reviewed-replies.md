@@ -35,7 +35,7 @@ The existing umbrella-root priv/.colony_api_key remains private; no external dat
 
 ```bash
 cd ~/Symbrella
-mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_draft_policy_test.exs apps/core/test/core/social/colony_cognition_test.exs apps/core/test/core/social/observation_bridge_test.exs apps/core/test/core/social/colony_conversation_test.exs
+mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_draft_policy_test.exs apps/core/test/core/social/colony_cognition_test.exs apps/core/test/core/social/observation_bridge_test.exs apps/core/test/core/social/colony_conversation_test.exs apps/brain/test/brain/blackboard_telemetry_bridge_test.exs apps/symbrella_web/test/symbrella_web/components/brain/social_cognition_test.exs apps/symbrella_web/test/symbrella_web/components/brain_report_copy_test.exs
 ```
 
 Do not run mix format.
@@ -51,6 +51,26 @@ post_id = "0e6ff2c5-f837-4347-81b8-9dbbce963e0e"
 IO.puts(draft.body)
 IO.inspect(Map.take(draft, [:id, :approval_phrase, :post_title, :public_posted?]))
 ```
+
+## Brain dashboard visibility
+
+The Colony path deliberately runs pure/read-only LIFG Stage1 and ATL reducers.
+Therefore `Brain.LIFG.state.last` can be nil, live activation charts can stay at
+zero, and WM can stay empty even after a successful draft. A scored lexical
+candidate is not a firing neuron or a verified sentence interpretation.
+
+The separate `[:core, :social, :cognitive_shadow]` event is bridged by
+`Brain.Blackboard` into the Brain dashboard and server-generated report.
+The new **Colony cognition · read-only** panel displays observed counts and
+sentence interpretation/abstention, without inventing neuron activity.
+
+**Important:** Restart the umbrella BEAM runtime after updating. Merely
+calling `recompile()` will not update the telemetry events attached by
+an already-running Blackboard GenServer. Then run a fresh read-only draft
+while the Brain dashboard is open. View **Read-only Colony Cognition** and
+**Complete Blackboard Feed**. No API key, post body, private WM or LLM prompt
+is included in this new event. The blackboard retains only a bounded window
+of recent events, and this feed is cleared on restart.
 
 ## Inspect real cognition in IEx
 
