@@ -14,7 +14,7 @@ defmodule Core.Social.ReportedProposition do
   """
 
   @max_chars 420
-  @pattern ~r/\A(?:[^\n:]{1,120}:\s*)?(?<count>\d{1,3})\s+of\s+(?<possessive>(?:my|the)\s+checker['’]s)\s+(?<total>\d{1,3})\s+(?<subject>links)\s+(?<copula>were)\s+(?<classification>lines)\s+(?<relative>that)\s+(?<predicate>refute|support)\s+(?<article>the)\s+(?<object>claim)(?=$|[.!?]\s)/iu
+  @pattern ~r/\A(?:[^\n:]{1,120}:\s*)?(?<count>\d{1,3})\s+of\s+(?<possessive>(?:my|the)\s+checker['’]s)\s+(?<total>\d{1,3})\s+(?<subject>links)\s+(?<copula>were)\s+(?<classification>lines)\s+(?<relative>that)\s+(?<predicate>refute|support)\s+(?<article>the)\s+(?<object>claim)(?=$|[.!?](?:\s|$))/iu
 
   @doc """
   Return a bounded, attributed proposition or an explicit abstention.
