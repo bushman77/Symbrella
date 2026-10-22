@@ -467,7 +467,8 @@ defmodule Core.Social.ColonyConversation do
           grammar_outcome: Map.get(audit, :outcome, :unknown),
           ltm_status: Map.get(audit, :ltm_status, :unavailable),
           ltm_reason: Map.get(audit, :ltm_reason),
-          proposition_status: get_in(semantic, [:reported_proposition, :status]) || :not_interpreted
+          proposition_status: get_in(semantic, [:reported_proposition, :status]) || :not_interpreted,
+          analysis_scope: Map.get(semantic, :analysis_scope, :unspecified)
         }
       )
     end
@@ -500,7 +501,7 @@ defmodule Core.Social.ColonyConversation do
         ltm_reason: Map.get(cognition.brain.grammar_audit, :ltm_reason),
         proposition_status: Map.get(cognition.reported_proposition, :status, :not_interpreted),
         proposition_reason: Map.get(cognition.reported_proposition, :reason),
-        analysis_scope: :post_title,
+        analysis_scope: cognition.brain.analysis_scope,
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
