@@ -31,7 +31,7 @@ defmodule Llm.Colony.Context do
     if is_integer(max_posts) and max_posts in 1..50 do
       posts =
         items
-        |> Enum.filter(&is_map/1)
+        |> Enum.filter(&post_item?/1)
         |> Enum.take(max_posts)
         |> Enum.map(&normalize_item/1)
 
@@ -46,6 +46,12 @@ defmodule Llm.Colony.Context do
       {:error, :invalid_limit}
     end
   end
+
+  defp post_item?(%{"kind" => "comment"}), do: false
+  defp post_item?(%{"kind" => "post", "post" => post}), do: is_map(post)
+  defp post_item?(%{"post" => post}), do: is_map(post)
+  defp post_item?(%{"id" => _id}), do: true
+  defp post_item?(_), do: false
 
   defp normalize_item(item) do
     # For-you feed items may wrap a post; /posts returns posts directly.
