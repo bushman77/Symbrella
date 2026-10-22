@@ -316,6 +316,120 @@ defmodule Core.Social.ColonyConversationTest do
     end
   end
 
+  test "a generic first generation is locally repaired once then reviewed", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn messages, opts ->
+                 attempt = :atomics.add_get(calls, 1, 1)
+                 assert [%{"role" => "system", "content" => system},
+                         %{"role" => "user", "content" => user}] = messages
+                 assert system =~ "COGNITIVE EVIDENCE FRAME"
+
+                 case attempt do
+                   1 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 180
+                     {:ok, %{content:
+                       "Thank you for sharing this checker issue. " <>
+                         "Is there anything else I can assist you with?"}}
+
+                   2 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 100
+                     assert user =~ "SOCIAL REPAIR"
+                     assert user =~ "difference"
+                     refute user =~ "Thank you for sharing this checker issue"
+                     {:ok, %{content: @reply}}
+
+                   _ ->
+                     flunk("Only one local repair generation is permitted")
+                 end
+               end
+             )
+
+    assert draft.body == @reply
+    assert draft.status == :pending_human_review
+    assert draft.public_posted? == false
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
+  end
+
+  test "an unverified-report overclaim receives one local epistemic repair", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn messages, _opts ->
+                 case :atomics.add_get(calls, 1, 1) do
+                   1 ->
+                     {:ok, %{content:
+                       "The external report confirms that ten checker links refuted the claims."}}
+
+                   2 ->
+                     assert [%{"role" => "system"},
+                             %{"role" => "user", "content" => user}] = messages
+                     assert user =~ "EPISTEMIC REPAIR"
+                     {:ok, %{content: @reply}}
+
+                   _ ->
+                     flunk("No third generation")
+                 end
+               end
+             )
+
+    assert draft.body == @reply
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
+  end
+
+  test "one repeated generic repair still fails without storing an approvable draft", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:error, :generic_social_draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _, _ ->
+                 :atomics.add_get(calls, 1, 1)
+                 {:ok, %{content:
+                   "Thank you for sharing these checker claims. I am here to assist."}}
+               end
+             )
+
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
+  end
+
+  test "source attribution violation is hard-failed without regenerating", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:error, :colony_source_attribution_violation} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _, _ ->
+                 :atomics.add_get(calls, 1, 1)
+                 {:ok, %{content:
+                   "Symbrella's memory checker v4 linked ten claims to refuting lines."}}
+               end
+             )
+
+    assert :atomics.get(calls, 1) == 1
+    refute_receive :comment_published
+  end
+
   test "a help-desk draft fails before a human approval receipt can be created", %{store: store} do
     stub_thread(self())
 
