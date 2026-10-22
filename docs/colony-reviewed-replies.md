@@ -99,6 +99,46 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-06B: debugging real dictionary morphology and negation winners
+
+The first live read-only four-sentence probe returned three
+`:insufficient_grammatical_evidence` results and one
+`:lifg_atl_role_disagreement`.
+
+Core's `:finite_past_candidate` signature requires Wiktextract's
+exact `tag:form-of` + `tag:past` morphology atoms; regular past
+surface forms may have a legitimate selected dictionary verb POS
+without those atoms. The bounded composer now permits a separate
+*explicit regular-past surface* witness for its existing verbs
+`produced`, `contradicted`, `refuted`, and `supported`,
+provided exact source surface, dictionary POS and selected ATL sense
+all agree. It **does not insert morphology tags**, create a sentence
+signature, or claim that every English past tense is handled.
+
+The interpreter also supplies `grammar_audit` when noun phrase or
+past support fails: exact determiner/head indices, corresponding
+Core syntax witnesses and whether the bounded verb surface applied.
+
+Stage1's closed class selects `not|particle|0`, while Wiktextract
+often describes "not" as an adverb. The interpreter can now accept
+that exact closed-class particle **only** in the bounded `did not`
+sequence when the source and a dictionary entry for that same word
+and index agree. Other missing lexical selections return a
+`role_audit` containing the required POS, actual selected sense
+ID and independent dictionary availability. Such abstention is a valid
+result—not permission to change LIFG's winner after selection.
+
+For each failed sentence in IEx:
+
+```elixir
+{:ok, shadow} = Core.Social.SemanticProbe.run("The checker did not verify those claims.")
+IO.inspect(shadow.reported_proposition, pretty: true, limit: :infinity)
+```
+
+All routes remain **read-only, externally attributed, unverified**, and
+unpublished. The corrective tests include a full SemanticProbe pass
+with missing morphology tags.
+
 ## COLONY-06: general declarative pilots and natural peer wording
 
 The legacy counted-checker headline still uses `Core.Social.ReportedProposition`
