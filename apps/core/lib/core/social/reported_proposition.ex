@@ -62,6 +62,9 @@ defmodule Core.Social.ReportedProposition do
       }
     else
       nil -> abstain(:unsupported_surface)
+      {:error, :lifg_atl_role_disagreement, role_audit} ->
+        Map.put(abstain(:lifg_atl_role_disagreement), :role_audit, role_audit)
+
       {:error, reason} -> abstain(reason)
       :error -> abstain(:insufficient_role_evidence)
       _ -> abstain(:insufficient_role_evidence)
@@ -176,25 +179,59 @@ defmodule Core.Social.ReportedProposition do
       {:lines, "noun"}, {:relative_verb, "verb"}, {:claim, "noun"}
     ]
 
-    # A selected winner can have a weak confidence margin, but its identity
-    # and POS must agree with one of the attested dictionary roles. No
-    # fallback or mere surface guess is accepted as lexical agreement.
-    if Enum.all?(required, fn {role, pos} ->
-         index = Map.fetch!(indices, role)
+    # Preserve the actual disagreement as bounded, inspectable evidence.
+    # A dictionary POS candidate is not equivalent to a LIFG/ATL selection.
+    audit =
+      Enum.map(required, fn {role, pos} ->
+        index = Map.fetch!(indices, role)
 
-         Enum.count(winners, fn winner ->
-           id = Map.get(winner, :id)
-           Map.get(winner, :token_index) == index and
-             selected_pos(id) == pos and
-             Enum.any?(cells, fn cell ->
-               Map.get(cell, :token_index) == index and Map.get(cell, :id) == id and
-                 Map.get(cell, :pos) == pos
-             end)
-         end) == 1
-       end) do
+        selected =
+          Enum.filter(winners, fn winner ->
+            Map.get(winner, :token_index) == index
+          end)
+
+        attested? = fn id ->
+          Enum.any?(cells, fn cell ->
+            is_map(cell) and Map.get(cell, :token_index) == index and
+              Map.get(cell, :id) == id and Map.get(cell, :pos) == pos
+          end)
+        end
+
+        matched =
+          Enum.filter(selected, fn winner ->
+            id = Map.get(winner, :id)
+            selected_pos(id) == pos and attested?.(id)
+          end)
+
+        %{
+          role: role,
+          token_index: index,
+          expected_pos: pos,
+          selected_pos:
+            selected
+            |> Enum.map(&selected_pos(Map.get(&1, :id)))
+            |> Enum.reject(&is_nil/1)
+            |> Enum.uniq()
+            |> Enum.take(3),
+          selected_senses:
+            selected
+            |> Enum.map(&Map.get(&1, :id))
+            |> Enum.filter(&is_binary/1)
+            |> Enum.map(&String.slice(&1, 0, 96))
+            |> Enum.take(3),
+          dictionary_pos_available?: Enum.any?(cells, fn cell ->
+            is_map(cell) and Map.get(cell, :token_index) == index and
+              Map.get(cell, :pos) == pos
+          end),
+          selected_count: length(selected),
+          agreed?: length(matched) == 1 and length(selected) == 1
+        }
+      end)
+
+    if Enum.all?(audit, & &1.agreed?) do
       :ok
     else
-      {:error, :lifg_atl_role_disagreement}
+      {:error, :lifg_atl_role_disagreement, audit}
     end
   end
 
