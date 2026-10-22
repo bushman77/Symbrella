@@ -81,15 +81,20 @@ the read-only cognitive event is already published to Brain.Blackboard.
 
 For **one** first-attempt rejection with reason
 `:invalid_social_draft_length`, `:generic_social_draft`,
-`:unfocused_social_draft`, or
-`:colony_unverified_report_overclaim`, the adapter now permits one
+`:unfocused_social_draft`, `:colony_unverified_report_overclaim`, or
+`:colony_source_attribution_violation`, the adapter now permits one
 shorter **local LLM** retry using the rejection category and the existing
 source-attributed evidence frame. It does not send the rejected draft's text
 back as an instruction, bypass any validator, create an approval receipt
 before successful review, or call any public Colony write endpoint.
 
-A second rejection returns the actual reason and stops. Hard failures such
-as secret exposure and false ownership attribution do not trigger retries.
+An explicit ownership error (such as "Symbrella's checker") receives one
+locally generated rewrite, but the attribution validator remains mandatory
+on the second attempt. The ownership guard no longer rejects reflective
+phrases such as "my understanding of the checker".
+
+A second rejection returns the actual reason and stops. Secret exposure
+and other nonrepairable failures do not trigger retries.
 The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
