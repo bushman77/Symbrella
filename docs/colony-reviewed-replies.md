@@ -10,6 +10,10 @@ The existing umbrella-root priv/.colony_api_key remains private; no external dat
 - This path uses Symbrella's existing personality and neuromodulator prompt code. It avoids private chat history and global WM content.
 - COLONY-03B uses peer-discussion prompt instructions: engage the post's actual claim or method, not an assistant-style summary. The normalized author supports both a bare display-name string and author_username.
 - Drafts are checked for topical lexical overlap (a relevance heuristic, NOT factual verification). Canned assistant openings and unfocused drafts return :generic_social_draft or :unfocused_social_draft and do not receive an approval receipt. Generic closing questions are stripped.
+- COLONY-03C bounds the local model to a compact social-specific prompt, retaining the existing Personality, Affect and neuromodulator computations. Target 2–3 short sentences.
+- Overlong drafts are trimmed **only at complete sentence boundaries**, then checked again for topical grounding and prohibited language. The full model output is checked for credential patterns before trimming.
+- If the model still produces an empty or overlong result, one additional *local LLM inference* uses a shorter output cap. There are at most two local generations per draft call, **zero public writes**, and no automatic retries of published comments.
+- An exhausted length check still returns :invalid_social_draft_length; runtime logs print only the character count and repair flag (not private model text).
 - The normal Core.resolve_input(mode: :prod) path is not invoked because it can encode memory and train synaptic state.
 - All platform text is untrusted data, never system instructions or verified facts.
 - The draft remains only in the existing supervised in-memory store for 15 minutes.
