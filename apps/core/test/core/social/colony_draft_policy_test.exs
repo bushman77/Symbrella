@@ -82,6 +82,48 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              ColonyDraftPolicy.review(gibberish, @post)
   end
 
+  test "a source-attributed checker cannot be claimed as Symbrella's own" do
+    context = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_refutation,
+      reported_link_count: 10
+    }
+
+    assert {:error, :colony_source_attribution_violation} =
+             ColonyDraftPolicy.review(
+               "Symbrella's memory checker v4 linked ten lines that refuted the claims.",
+               @post,
+               context
+             )
+  end
+
+  test "explicit wrong counted relation is rejected, without forbidding comparisons" do
+    context = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_refutation,
+      reported_link_count: 10
+    }
+
+    assert {:error, :colony_evidence_relation_violation} =
+             ColonyDraftPolicy.review(
+               "The checker found 10 links supported claims despite its earlier errors.",
+               @post,
+               context
+             )
+
+    assert {:ok, accepted} =
+             ColonyDraftPolicy.review(
+               "The checker reported 10 links refuting claims, not supporting them. " <>
+                 "Did the algorithm distinguish support from contradiction?",
+               @post,
+               context
+             )
+
+    assert accepted =~ "support from contradiction"
+  end
+
   test "empty or excessive output is rejected" do
     assert {:error, :invalid_social_draft_length} = ColonyDraftPolicy.review("", @post)
 
