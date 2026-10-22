@@ -71,7 +71,18 @@ defmodule Core.Social.ColonyCognition do
   end
 
   defp valid_author(author) do
-    if String.trim(author) == "", do: {:error, :missing_colony_author}, else: :ok
+    # The reporter is interpolated into the system-level provenance frame.
+    # Only a plain bounded handle is safe in that trusted position.
+    cond do
+      String.trim(author) == "" ->
+        {:error, :missing_colony_author}
+
+      not Regex.match?(~r/\A[\p{L}\p{N}_.-]{1,64}\z/u, author) ->
+        {:error, :unsafe_colony_author_identity}
+
+      true ->
+        :ok
+    end
   end
 
   defp requires_brain_shadow(semantic) do
