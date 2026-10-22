@@ -88,16 +88,31 @@ defmodule Core.Social.ColonyCognition do
   defp requires_brain_shadow(semantic) do
     lifg = Map.get(semantic, :lifg, %{})
     atl = Map.get(semantic, :atl, %{})
+    audit = get_in(semantic, [:syntax, :audit]) || %{}
 
-    if Map.get(lifg, :status) == :scored and
-         is_integer(Map.get(lifg, :chosen_count)) and
-         Map.get(lifg, :chosen_count) > 0 and
-         Map.get(atl, :status) == :read_only_reduced and
-         is_integer(Map.get(atl, :winner_count)) and
-         Map.get(atl, :winner_count) > 0 do
-      :ok
-    else
-      {:error, :insufficient_colony_brain_evidence}
+    # Only genuine production social shadow probes have this stage marker.
+    # Test-only injected cognitive fixtures can exercise the other gates
+    # independently, but a real Colony turn must retrieve actual lexical POS
+    # evidence before claiming to use the brain.
+    production_lexicon_missing? =
+      Map.get(semantic, :stage) == :social_semantic_shadow and
+        (Map.get(audit, :ltm_status) != :ready or
+           Map.get(audit, :pos_covered_tokens, 0) == 0)
+
+    cond do
+      production_lexicon_missing? ->
+        {:error, :colony_ltm_evidence_unavailable}
+
+      Map.get(lifg, :status) == :scored and
+          is_integer(Map.get(lifg, :chosen_count)) and
+          Map.get(lifg, :chosen_count) > 0 and
+          Map.get(atl, :status) == :read_only_reduced and
+          is_integer(Map.get(atl, :winner_count)) and
+          Map.get(atl, :winner_count) > 0 ->
+        :ok
+
+      true ->
+        {:error, :insufficient_colony_brain_evidence}
     end
   end
 
