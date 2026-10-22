@@ -52,12 +52,30 @@ defmodule Core.Social.SemanticProbe do
       trace: []
     }
 
-    # Explicitly bounded *read* of the existing lexicon. No candidate writes.
-    si =
+    # Checked, bounded *read*: a failed DB query must not look like a
+    # legitimate empty lexicon. Never write or activate retrieved BrainCells.
+    {si, ltm_lookup} =
       if Keyword.get(opts, :ltm?, true) do
-        Core.Pipeline.LTM.run(si, limit_per_norm: 8)
+        reader = Keyword.get(opts, :ltm_reader, &Core.Pipeline.LTM.Source.checked_ltm/2)
+
+        case reader.(si, limit_per_norm: 8) do
+          {:ok, %{rows: rows, db_hits: %MapSet{} = db_hits} = data} when is_list(rows) ->
+            enriched = Core.Pipeline.LTM.enrich(si, rows, db_hits)
+            {enriched,
+             %{
+               status: if(rows == [], do: :no_matches, else: :ready),
+               source_rows: length(rows),
+               missing_norms: data |> Map.get(:missing_norms, []) |> List.wrap() |> length()
+             }}
+
+          {:error, reason} when is_atom(reason) ->
+            {si, %{status: :lookup_failed, reason: reason, source_rows: 0}}
+
+          _ ->
+            {si, %{status: :lookup_failed, reason: :invalid_ltm_result, source_rows: 0}}
+        end
       else
-        si
+        {si, %{status: :disabled, source_rows: 0}}
       end
 
     si =
@@ -77,7 +95,13 @@ defmodule Core.Social.SemanticProbe do
         Map.take(sig, [:id, :span, :roles])
       end)
 
-    grammar_audit = grammar_audit(si, all_tokens)
+    grammar_audit =
+      si
+      |> grammar_audit(all_tokens)
+      |> Map.put(:ltm_status, ltm_lookup.status)
+      |> Map.put(:ltm_source_rows, ltm_lookup.source_rows)
+      |> Map.put(:ltm_reason, Map.get(ltm_lookup, :reason))
+      |> Map.put(:missing_norms_count, Map.get(ltm_lookup, :missing_norms, 0))
 
     {lifg, choices} = score_stage1(si, opts)
 
