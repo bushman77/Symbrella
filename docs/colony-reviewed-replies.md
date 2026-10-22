@@ -99,6 +99,51 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-05: attributed declarative proposition pilot
+
+`Core.Social.ReportedProposition.interpret/1` composes the exact bounded
+construction of the current checker thread (reported N-of-M checker links
+**were lines that refute/support the claim**). It is a genuine pure
+post-ATL operation, not LLM extraction or promotion of untrusted text.
+
+For an `:attributed_structural_interpretation` it requires all of:
+
+- Exact bounded counted subject, `were` copula, and unambiguous restrictive
+  relative clause (`that refute/support the claim`) in the original surface
+- Valid positive N-of-M counts, ordered token roles, dictionary POS evidence
+  for checker/links/were/lines/relative verb/claim
+- Existing Core noun-phrase signatures for the reported checker and claim
+- **Exact selected sense IDs** agreeing between LTM rows and pure ATL
+  winners for the critical grammatical roles
+
+The result includes the relation, embedded polarity, reported count and
+total, provenance `:author_claim_not_independently_verified`, grammar evidence,
+and token-index role references. It does NOT assert that the external
+experiment happened, establish the checker's owner, or write memory.
+Unsupported, negative, modal, ambiguous, or incompletely evidenced
+sentences return an explicit `:not_interpreted` result with a reason.
+
+This lives in `semantic.reported_proposition`, separate from normal
+`Core.Semantic.SentenceMeaning`, whose external participant gate is still
+closed. `Core.Social.ColonyCognition` validates any fully interpreted
+proposition against the independently extracted reported count and polarity
+before the model sees it; mismatches fail closed. The reviewed draft includes
+the attributed proposition and Brain telemetry reports its status.
+
+Check the shadow directly:
+
+```elixir
+title = "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
+{:ok, shadow} = Core.Social.SemanticProbe.run(title)
+IO.inspect(shadow.reported_proposition, label: "ATTRIBUTED PROPOSITION", pretty: true)
+IO.inspect(shadow.syntax.audit, label: "DICTIONARY EVIDENCE", pretty: true)
+```
+
+This is intentionally NOT a general English grammar parser. In particular,
+the scoped interpreter does not handle arbitrary relative clauses,
+negation, modality, question structures or mixed-polarity evidence.
+Do not infer full understanding from a large LIFG/ATL candidate count.
+
 ## Checked read-only dictionary binding
 
 A successful LIFG/ATL shadow score is **not** proof of dictionary-derived
