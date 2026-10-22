@@ -171,10 +171,10 @@ defmodule Core.Response.LlmPrompt.Compact do
   @spec value(term()) :: String.t()
   def value(nil), do: ""
   def value(value) when is_binary(value), do: value
+  def value(value) when is_boolean(value), do: to_string(value)
   def value(value) when is_atom(value), do: Atom.to_string(value)
   def value(value) when is_integer(value), do: Integer.to_string(value)
   def value(value) when is_float(value), do: compact_number(value)
-  def value(value) when is_boolean(value), do: to_string(value)
   def value(value), do: inspect(value, limit: 8, printable_limit: 120)
 
   defp compact_move(features, decision, profile, comprehension, frame, guardrail?) do
