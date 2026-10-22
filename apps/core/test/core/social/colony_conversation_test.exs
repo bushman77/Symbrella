@@ -1,5 +1,6 @@
 defmodule Core.Social.ColonyConversationTest do
   use ExUnit.Case, async: false
+  @moduletag :capture_log
 
   alias Core.Social.ColonyConversation
   alias Core.Social.ColonyDraftStore
