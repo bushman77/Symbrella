@@ -61,6 +61,42 @@ defmodule Core.Social.ColonyCognitionTest do
     assert a.brain == b.brain
   end
 
+  test "admitted read-only proposition agrees with title-derived counts and polarity" do
+    title =
+      "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
+
+    proposition = %{
+      status: :attributed_structural_interpretation,
+      kind: :reported_declarative_proposition,
+      relation: :copular_classification,
+      embedded_relation: :reported_refutation,
+      reported_count: 10,
+      reported_total: 13,
+      verification: :author_claim_not_independently_verified
+    }
+
+    semantic = Map.put(brain_result(), :reported_proposition, proposition)
+    assert {:ok, frame} = ColonyCognition.interpret(post(title), semantic)
+    assert frame.reported_proposition == proposition
+    assert ColonyCognition.prompt_frame(frame) =~ "External proposition status: attributed_structural_interpretation"
+
+    mismatched = %{proposition | reported_count: 9}
+
+    assert {:error, :colony_proposition_mismatch} =
+             ColonyCognition.interpret(
+               post(title),
+               Map.put(brain_result(), :reported_proposition, mismatched)
+             )
+
+    inverted = %{proposition | embedded_relation: :reported_support}
+
+    assert {:error, :colony_proposition_mismatch} =
+             ColonyCognition.interpret(
+               post(title),
+               Map.put(brain_result(), :reported_proposition, inverted)
+             )
+  end
+
   test "production shadow refuses fallback winners without retrieved dictionary POS" do
     discussion = post("10 of 13 checker links refute claims")
 
