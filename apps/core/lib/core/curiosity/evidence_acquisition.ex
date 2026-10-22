@@ -152,12 +152,22 @@ defmodule Core.Curiosity.EvidenceAcquisition do
        do: Atom.to_string(status)
   defp provider_status(_), do: "unknown"
 
-  defp retrieve(context, opts) do
-    case Keyword.get(opts, :retriever) do
-      fun when is_function(fun, 1) and @allow_test_retriever -> fun.(context)
-      _ -> WebRetrieval.enrich(context, enabled?: true, max_attempts: 2,
-              timeout_ms: 3_500)
+  # Keep test-only injection out of the production function head entirely;
+  # Mix.env() is a compile-time setting, so a false guard is unreachable.
+  if @allow_test_retriever do
+    defp retrieve(context, opts) do
+      case Keyword.get(opts, :retriever) do
+        fun when is_function(fun, 1) -> fun.(context)
+        _ -> default_retrieve(context)
+      end
     end
+  else
+    defp retrieve(context, _opts), do: default_retrieve(context)
+  end
+
+  defp default_retrieve(context) do
+    WebRetrieval.enrich(context, enabled?: true, max_attempts: 2,
+      timeout_ms: 3_500)
   end
 
   # Match the canonical immutable parent fingerprint before treating its
