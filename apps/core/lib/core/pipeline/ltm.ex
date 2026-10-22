@@ -14,6 +14,18 @@ defmodule Core.Pipeline.LTM do
   def run(%{} = si, opts) when is_list(opts) do
     case Source.ltm(si, opts) do
       {:ok, %{rows: rows, db_hits: db_hits}} ->
+        enrich(si, rows, db_hits)
+    end
+  end
+
+  def run(si, _opts), do: si
+
+  @doc """
+  Merge already retrieved, bounded read-only LTM results into a SemanticInput.
+  Both production run/2 and the checked Colony path use this same mapping.
+  """
+  @spec enrich(map(), [map()], MapSet.t()) :: map()
+  def enrich(%{} = si, rows, %MapSet{} = db_hits) when is_list(rows) do
         existing =
           case Map.get(si, :active_cells, []) do
             cells when is_list(cells) -> cells
@@ -50,10 +62,7 @@ defmodule Core.Pipeline.LTM do
         si
         |> Map.put(:active_cells, active_cells)
         |> Map.put(:activation_summary, activation_summary)
-    end
   end
-
-  def run(si, _opts), do: si
 
   defp sanitize_cell(%{id: _} = cell), do: [cell]
   defp sanitize_cell(%{"id" => _} = cell), do: [cell]
