@@ -268,7 +268,8 @@ defmodule Core.Social.ColonyConversation do
              :unfocused_social_draft,
              :colony_unverified_report_overclaim,
              :colony_source_attribution_violation,
-             :colony_internal_jargon
+             :colony_internal_jargon,
+             :colony_negation_violation
            ] ->
         # Only one additional LOCAL generation is permitted. Send the bounded
         # rejection reason, not the discarded external/model-generated text.
@@ -329,6 +330,13 @@ defmodule Core.Social.ColonyConversation do
       "report. State that the author REPORTED a result; never say the report " <>
       "proves, confirms or verifies the claim. Ask one useful technical question. " <>
       "Write ONLY two short sentences, attributing the result to the author."
+  end
+
+  defp social_repair_instruction(:colony_negation_violation) do
+    "NEGATION REPAIR: The source author reported that verification did NOT " <>
+      "occur. The draft falsely asserted affirmative verification. Retain " <>
+      "the exact reported negative polarity; do not claim that the system " <>
+      "verified anything. Write one concise natural peer comment."
   end
 
   defp social_repair_instruction(:colony_internal_jargon) do
