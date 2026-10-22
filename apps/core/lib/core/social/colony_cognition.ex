@@ -22,7 +22,7 @@ defmodule Core.Social.ColonyCognition do
       when is_binary(id) and is_binary(author) and is_binary(title) and is_map(semantic) do
     with :ok <- valid_author(author),
          :ok <- requires_brain_shadow(semantic),
-         {:ok, claim} <- claim_from_title(title),
+         {:ok, claim} <- claim_for_title(title, semantic),
          :ok <- reconcile_proposition(semantic, claim) do
       frame = %{
         version: 1,
@@ -30,7 +30,7 @@ defmodule Core.Social.ColonyCognition do
         trust: :untrusted_external,
         post_id: id,
         reporter: author,
-        subject: :external_checker,
+        subject: reported_subject(semantic),
         checker_owner: :not_verified,
         report_status: :author_claim_not_independently_verified,
         evidence_relation: claim.relation,
@@ -38,7 +38,7 @@ defmodule Core.Social.ColonyCognition do
         reported_total_links: claim.total,
         # This is the author's reported relation, not Symbrella's conclusion.
         original_title: String.slice(title, 0, 300),
-        reasoning_goal: :ask_about_support_versus_contradiction,
+        reasoning_goal: reasoning_goal(claim.relation),
         reported_proposition: external_proposition(semantic),
         brain: brain_summary(semantic)
       }
@@ -54,11 +54,11 @@ defmodule Core.Social.ColonyCognition do
     """
     COGNITIVE EVIDENCE FRAME (read-only; authoritative as attribution, NOT as truth):
     External reporting agent: #{frame.reporter}
-    Subject: an external checker's evidence links, not Symbrella's checker.
-    Ownership of the checker: NOT independently verified.
+    Subject: #{inspect(frame.subject)} (reported by the author, NOT independently verified).
+    Ownership of external systems: NOT independently verified.
     Reported relation: #{frame.evidence_relation}.
-    Reported number of matching links: #{inspect(frame.reported_link_count)}
-    Reported total links: #{inspect(frame.reported_total_links)}
+    Reported count, when supplied: #{inspect(frame.reported_link_count)}
+    Reported total, when supplied: #{inspect(frame.reported_total_links)}
     Epistemic status: #{frame.report_status}.
     Brain lexical status: #{frame.brain.lifg_status};
     ATL read-only winners: #{frame.brain.atl_winners};
@@ -71,9 +71,15 @@ defmodule Core.Social.ColonyCognition do
     #{inspect(Map.take(frame.reported_proposition, [:kind, :subject, :relation,
        :complement, :object, :embedded_relation, :reported_count, :reported_total,
        :verification, :grammar]))}.
-    Response objective: ask how source evidence is classified as support vs
-    contradiction. Do NOT call it "Symbrella's memory checker" or
-    claim to have evaluated the external system.
+    Conversation objective: #{frame.reasoning_goal}.
+    The frame above is PRIVATE STRUCTURAL GUIDANCE, not public conversation.
+    Speak naturally to the author about their own reported claim. NEVER say
+    "external proposition", "cognitive evidence frame", "LIFG", "ATL",
+    "structural interpretation", "source-attributed proposition", or
+    "reported relation" in a public comment. Do not recite status atoms.
+    Ask a specific method or evidence question when appropriate. Do NOT
+    call the external checker "Symbrella's memory checker" or claim to
+    have evaluated any external system.
     """
   end
 
@@ -85,10 +91,71 @@ defmodule Core.Social.ColonyCognition do
     end
   end
 
+  # Preserve the old title checker guard. Other constructions are admitted
+  # only when the read-only composer has already selected and dictionary-
+  # attested every required role. Never use raw regex alone to admit them.
+  defp claim_for_title(title, semantic) do
+    case Map.get(semantic, :reported_proposition) do
+      %{status: :attributed_structural_interpretation,
+        construction: construction,
+        verification: :author_claim_not_independently_verified,
+        relation: relation, reported_count: count, reported_total: total}
+      when construction in [:counted_object_action, :counted_transitive,
+                            :explicit_negated_transitive] and
+           relation in [:reported_action, :reported_refutation, :reported_support] ->
+        case claim_from_title(title) do
+          {:ok, earlier} ->
+            if earlier.relation == relation and
+                 (is_nil(earlier.count) or earlier.count == count) and
+                 (is_nil(earlier.total) or earlier.total == total) do
+              {:ok, %{relation: relation, count: count, total: total}}
+            else
+              {:error, :colony_proposition_mismatch}
+            end
+
+          {:error, :unresolved_colony_evidence_relation} ->
+            {:ok, %{relation: relation, count: count, total: total}}
+
+          error -> error
+        end
+
+      _ ->
+        claim_from_title(title)
+    end
+  end
+
+  defp reported_subject(semantic) do
+    case Map.get(semantic, :reported_proposition) do
+      %{status: :attributed_structural_interpretation, construction: construction,
+        subject: subject}
+      when construction in [:counted_object_action, :counted_transitive,
+                            :explicit_negated_transitive] and is_binary(subject) ->
+        :externally_reported_actor
+
+      _ -> :external_checker
+    end
+  end
+
+  defp reasoning_goal(:reported_action), do: :ask_about_reported_action_or_verification
+  defp reasoning_goal(_), do: :ask_about_support_versus_contradiction
+
   # The regex-extracted reported relation and a fully interpreted proposition
   # must agree. Never let competing processing routes silently pick a side.
   defp reconcile_proposition(semantic, claim) do
     case Map.get(semantic, :reported_proposition) do
+      %{status: :attributed_structural_interpretation,
+        construction: construction} = proposition
+      when construction in [:counted_object_action, :counted_transitive,
+                            :explicit_negated_transitive] ->
+        if Map.get(proposition, :relation) == claim.relation and
+             Map.get(proposition, :reported_count) == claim.count and
+             Map.get(proposition, :reported_total) == claim.total and
+             Map.get(proposition, :verification) == :author_claim_not_independently_verified do
+          :ok
+        else
+          {:error, :colony_proposition_mismatch}
+        end
+
       %{status: :attributed_structural_interpretation} = proposition ->
         if Map.get(proposition, :embedded_relation) == claim.relation and
              Map.get(proposition, :reported_count) == claim.count and
