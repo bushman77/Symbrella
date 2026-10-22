@@ -97,6 +97,67 @@ defmodule Core.Social.ColonyCognitionTest do
              )
   end
 
+  test "new fully evidenced declarative families pass Colony attribution without a checker ratio" do
+    cases = [
+      {"The checker produced 13 links.", :reported_action, 13, :positive},
+      {"Ten links contradicted the original claims.", :reported_refutation, 10, :positive},
+      {"Three links supported the claims.", :reported_support, 3, :positive},
+      {"The checker did not verify those claims.", :reported_action, nil, :negative}
+    ]
+
+    for {title, relation, count, polarity} <- cases do
+      construction =
+        if polarity == :negative,
+          do: :explicit_negated_transitive,
+          else: if(relation == :reported_action, do: :counted_object_action,
+                    else: :counted_transitive)
+
+      proposition = %{
+        status: :attributed_structural_interpretation,
+        construction: construction,
+        kind: :reported_declarative_proposition,
+        relation: relation, polarity: polarity, reported_count: count,
+        reported_total: nil, subject: "checker",
+        verification: :author_claim_not_independently_verified
+      }
+
+      semantic = Map.put(brain_result(), :reported_proposition, proposition)
+
+      assert {:ok, frame} = ColonyCognition.interpret(post(title), semantic)
+      assert frame.evidence_relation == relation
+      assert frame.reported_link_count == count
+      assert frame.reported_proposition == proposition
+      assert frame.report_status == :author_claim_not_independently_verified
+      assert frame.subject == :externally_reported_actor
+    end
+  end
+
+  test "generic claim with contradictory reported polarity fails closed" do
+    proposition = %{
+      status: :attributed_structural_interpretation,
+      construction: :counted_transitive,
+      relation: :reported_support,
+      reported_count: 10, reported_total: nil,
+      verification: :author_claim_not_independently_verified
+    }
+
+    assert {:error, :colony_proposition_mismatch} =
+             ColonyCognition.interpret(
+               post("Ten links contradicted the claims."),
+               Map.put(brain_result(), :reported_proposition, proposition)
+             )
+
+    # No generic fallback when there is only a regex-observed action but the
+    # grammar/POS/ATL interpreter abstains.
+    assert {:error, :unresolved_colony_evidence_relation} =
+             ColonyCognition.interpret(
+               post("The checker produced 13 links."),
+               Map.put(brain_result(), :reported_proposition, %{
+                 status: :not_interpreted, reason: :missing_attested_dictionary_roles
+               })
+             )
+  end
+
   test "production shadow refuses fallback winners without retrieved dictionary POS" do
     discussion = post("10 of 13 checker links refute claims")
 
