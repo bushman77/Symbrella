@@ -66,6 +66,66 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.atl.winner_count == 1
   end
 
+  test "checked read-only dictionary lookup preserves POS for syntax analysis" do
+    lookup = fn si, opts ->
+      assert Keyword.fetch!(opts, :limit_per_norm) == 8
+      assert is_list(si.tokens)
+
+      {:ok,
+       %{
+         rows: [
+           %{id: "the|determiner|1", norm: "the", word: "the",
+             pos: "determiner", token_index: 0, semantic_atoms: []},
+           %{id: "checker|noun|1", norm: "checker", word: "checker",
+             pos: "noun", token_index: 1, semantic_atoms: []},
+           %{id: "the|determiner|2", norm: "the", word: "the",
+             pos: "determiner", token_index: 3, semantic_atoms: []},
+           %{id: "claim|noun|1", norm: "claim", word: "claim",
+             pos: "noun", token_index: 4, semantic_atoms: []}
+         ],
+         db_hits: MapSet.new(["the", "checker", "claim"]),
+         missing_norms: []
+       }}
+    end
+
+    assert {:ok, semantic} =
+             SemanticProbe.run("The checker refutes the claim.",
+               ltm_reader: lookup, scorer: fake_scorer()
+             )
+
+    audit = semantic.syntax.audit
+    assert audit.ltm_status == :ready
+    assert audit.ltm_source_rows == 4
+    assert audit.pos_covered_tokens >= 3
+    assert audit.dictionary_rows == 4
+    assert audit.outcome == :grammar_candidates_detected
+    assert Enum.any?(semantic.syntax.signatures, &(&1.id == :noun_phrase))
+  end
+
+  test "checked dictionary failures remain visible instead of masquerading as no matches" do
+    assert {:ok, failed} =
+             SemanticProbe.run("The checker refutes the claim.",
+               ltm_reader: fn _si, _opts -> {:error, :ltm_query_failed} end,
+               scorer: fake_scorer()
+             )
+
+    assert failed.syntax.audit.ltm_status == :lookup_failed
+    assert failed.syntax.audit.ltm_reason == :ltm_query_failed
+    assert failed.syntax.audit.dictionary_rows == 0
+    assert failed.syntax.audit.pos_covered_tokens == 0
+
+    assert {:ok, empty} =
+             SemanticProbe.run("The checker refutes the claim.",
+               ltm_reader: fn _si, _opts ->
+                 {:ok, %{rows: [], db_hits: MapSet.new(), missing_norms: ["checker"]}}
+               end,
+               scorer: fake_scorer()
+             )
+
+    assert empty.syntax.audit.ltm_status == :no_matches
+    assert empty.syntax.audit.ltm_reason == nil
+  end
+
   test "posterior probability and winning margin stay separate in shadow summaries" do
     assert {:ok, high} =
              SemanticProbe.run("The artist draws a picture.",
