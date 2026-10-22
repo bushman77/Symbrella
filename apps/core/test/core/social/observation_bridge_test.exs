@@ -157,6 +157,62 @@ defmodule Core.Social.ObservationBridgeTest do
     assert empty.syntax.audit.ltm_reason == nil
   end
 
+  test "new declarative action passes tokenization, LTM, Core syntax, ATL and source attribution" do
+    reader = fn si, _opts ->
+      lexicon = %{
+        "the" => "determiner", "checker" => "noun",
+        "produced" => "verb", "links" => "noun"
+      }
+
+      rows =
+        Enum.flat_map(si.tokens, fn token ->
+          word = String.downcase(token.phrase)
+
+          case Map.get(lexicon, word) do
+            nil -> []
+            pos ->
+              atoms =
+                if word == "produced",
+                  do: ["tag:form-of", "tag:past"],
+                  else: []
+
+              [%{
+                id: "#{word}|#{pos}|1", norm: word, word: word,
+                token_index: token.index, pos: pos,
+                semantic_atoms: atoms, score: 0.5
+              }]
+          end
+        end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexicon)), missing_norms: []}}
+    end
+
+    scorer = fn si, _opts ->
+      choices =
+        Enum.map(si.active_cells, fn cell ->
+          %{token_index: cell.token_index, chosen_id: cell.id,
+            score: 0.9, prob: 0.9, margin: 0.4}
+        end)
+
+      {:ok, %{choices: choices, audit: %{missing_candidates: 0}}}
+    end
+
+    assert {:ok, semantic} =
+             SemanticProbe.run("The checker produced 13 links.",
+               ltm_reader: reader, scorer: scorer, emit_telemetry?: false)
+
+    assert semantic.syntax.audit.ltm_status == :ready
+    assert :finite_past_candidate in Enum.map(semantic.syntax.signatures, & &1.id)
+    assert :noun_phrase in Enum.map(semantic.syntax.signatures, & &1.id)
+
+    proposition = semantic.reported_proposition
+    assert proposition.status == :attributed_structural_interpretation
+    assert proposition.construction == :counted_object_action
+    assert proposition.predicate == "produced"
+    assert proposition.reported_count == 13
+    assert proposition.verification == :author_claim_not_independently_verified
+  end
+
   test "real syntax and pure ATL bind an attributed relative-clause proposition" do
     title =
       "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
