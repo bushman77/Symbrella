@@ -58,6 +58,7 @@ defmodule Core.Social.ColonyConversation do
            reported_link_count: cognition.reported_link_count,
            reported_total_links: cognition.reported_total_links,
            report_status: cognition.report_status,
+           reported_proposition: cognition.reported_proposition,
            brain: cognition.brain
          },
          public_posted?: false
@@ -419,7 +420,8 @@ defmodule Core.Social.ColonyConversation do
           provenance: :external_unverified,
           grammar_outcome: Map.get(audit, :outcome, :unknown),
           ltm_status: Map.get(audit, :ltm_status, :unavailable),
-          ltm_reason: Map.get(audit, :ltm_reason)
+          ltm_reason: Map.get(audit, :ltm_reason),
+          proposition_status: get_in(semantic, [:reported_proposition, :status]) || :not_interpreted
         }
       )
     end
@@ -446,6 +448,7 @@ defmodule Core.Social.ColonyConversation do
         grammar_outcome: Map.get(cognition.brain.grammar_audit, :outcome, :not_recorded),
         ltm_status: Map.get(cognition.brain.grammar_audit, :ltm_status, :not_recorded),
         ltm_reason: Map.get(cognition.brain.grammar_audit, :ltm_reason),
+        proposition_status: Map.get(cognition.reported_proposition, :status, :not_interpreted),
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
