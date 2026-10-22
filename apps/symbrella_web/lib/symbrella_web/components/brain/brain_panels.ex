@@ -17,6 +17,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   alias SymbrellaWeb.Region.BaseArt
   alias SymbrellaWeb.Components.Brain.Regions
   alias SymbrellaWeb.Components.Brain.ActivationTrend
+  alias SymbrellaWeb.Components.Brain.SocialCognition
 
   def brain(assigns) do
     assigns =
@@ -58,6 +59,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
 
       <!-- Compact live Brain.Cell activity history; no database polling -->
       <ActivationTrend.panel samples={@activation_samples} />
+      <!-- Pure social cognition stays separate from the neuron activation chart. -->
+      <SocialCognition.panel events={get_in(@region_state, [:workspace]) || []} />
 
     <!-- Brain map + Region summary -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
