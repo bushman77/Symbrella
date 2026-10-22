@@ -167,6 +167,7 @@ defmodule Core.Social.ReportedProposition do
   defp selected_roles(si, indices) do
     slate = Map.get(si, :atl_slate, %{})
     winners = Map.get(slate, :winners, [])
+    cells = Map.get(si, :active_cells, [])
     required = [
       {:checker, "noun"}, {:links, "noun"}, {:were, "verb"},
       {:lines, "noun"}, {:refute, "verb"}, {:claim, "noun"}
@@ -180,9 +181,12 @@ defmodule Core.Social.ReportedProposition do
 
          Enum.count(winners, fn winner ->
            id = Map.get(winner, :id)
-           Map.get(winner, :token_index) == index and is_binary(id) and
-             String.contains?(id, "|" <> pos <> "|") and
-             not String.ends_with?(id, "|fallback")
+           Map.get(winner, :token_index) == index and
+             selected_pos(id) == pos and
+             Enum.any?(cells, fn cell ->
+               Map.get(cell, :token_index) == index and Map.get(cell, :id) == id and
+                 Map.get(cell, :pos) == pos
+             end)
          end) == 1
        end) do
       :ok
@@ -190,6 +194,15 @@ defmodule Core.Social.ReportedProposition do
       {:error, :lifg_atl_role_disagreement}
     end
   end
+
+  defp selected_pos(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [_lemma, pos, suffix] when suffix != "fallback" -> pos
+      _ -> nil
+    end
+  end
+
+  defp selected_pos(_), do: nil
 
   defp normalize(value) when is_binary(value),
     do: value |> String.trim() |> String.downcase()
