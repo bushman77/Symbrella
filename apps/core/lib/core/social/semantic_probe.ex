@@ -105,8 +105,8 @@ defmodule Core.Social.SemanticProbe do
          winner_count: Map.get(slate, :winner_count, 0),
          resolved_constituents: slate |> Map.get(:constituents, []) |> List.wrap() |>
            Enum.count(&(Map.get(&1, :status) == :resolved)),
-         semantic_relations: si |> Map.get(:evidence, %{}) |>
-           Map.get(:relations, []) |> List.wrap() |> Enum.take(8) |> length()
+         semantic_relations: si |> get_in([:evidence, :relations]) |>
+           List.wrap() |> Enum.take(8) |> length()
        },
        sentence_meaning: %{
          status: Map.get(meaning, :status, :not_yet_interpreted),
