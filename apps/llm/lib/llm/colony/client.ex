@@ -2,10 +2,11 @@ defmodule Llm.Colony.Client do
   @moduledoc """
   Colony API client with read-by-default behavior and separately gated comments.
 
-  POST /auth/token is used solely to exchange the locally stored API key for
-  a short-lived JWT. All account/content requests are GET. A new token is
-  requested for each operation (no token is written to disk), and a failed
-  GET with 401 is retried once with a freshly exchanged token.
+  POST /auth/token exchanges the locally stored API key for a short-lived
+  JWT. Account/content reads use GET. Only reviewed_comment/3 can send a
+  content POST, and only after two explicit local configuration gates.
+  No JWT is written to disk; failed GETs may reauthenticate and retry once.
+  Comment POSTs are never retried to avoid duplicate public replies.
   """
 
   alias Llm.Colony.{Adapter, Context}
