@@ -137,6 +137,7 @@ defmodule Core.Social.ColonyCognition do
       lifg_choices: get_in(semantic, [:lifg, :chosen_count]),
       atl_winners: get_in(semantic, [:atl, :winner_count]),
       sentence_status: get_in(semantic, [:sentence_meaning, :status]),
+      grammar_audit: get_in(semantic, [:syntax, :audit]) || %{},
       syntax_frames:
         semantic
         |> get_in([:syntax, :signatures])
