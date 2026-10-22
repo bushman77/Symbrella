@@ -181,11 +181,8 @@ defmodule Core.Response do
             is_binary(inline_text) ->
               {inline_text, :inline_skill, nil, nil}
 
-            is_atom(llm_prompt_type) ->
-              llm_or_model_unavailable(text_in, features, decision, mood, intent, llm_prompt_type)
-
             true ->
-              llm_or_model_unavailable(text_in, features, decision, mood, intent)
+              llm_or_model_unavailable(text_in, features, decision, mood, intent, llm_prompt_type)
           end
 
         # A verified conclusion or a neutral insufficient-evidence answer
