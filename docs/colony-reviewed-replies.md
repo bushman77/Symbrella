@@ -99,6 +99,68 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-06: general declarative pilots and natural peer wording
+
+The legacy counted-checker headline still uses `Core.Social.ReportedProposition`
+and its strict syntax, LTM and LIFG/ATL agreement gates. When its
+exact construction does not match, the source-attributed, read-only
+`Core.Social.DeclarativeProposition` pilot tries bounded declarative
+families with **exact token-to-text alignment**, dictionary POS,
+one corresponding ATL sense winner per essential role, and independent
+noun-phrase / finite-past syntax where applicable.
+
+Initial candidate families are:
+
+- `The checker produced 13 links.` — counted object/action
+- `Ten links contradicted the original claims.` — counted refutation
+- `Three links supported the claims.` — counted support
+- `The checker did not verify those claims.` — explicit negation
+
+These are pattern **families** with variable lexical heads, not evidence
+that arbitrary clauses can be parsed. They only support a narrow set of
+verb surfaces in this pilot; unsupported verb forms, disagreement among
+selected POS, missing finite-past morphology, incomplete signatures,
+embedded sentences, modals, or unsupported negation cause an explicit
+`:not_interpreted` result.
+
+When the new composer produces fully supported unverified meaning,
+`Core.Social.ColonyCognition` admits that result instead of depending
+on the old checker-title refutation regex. Contradictory polarity from
+the original title still fails closed. **Nothing is promoted to verified
+memory or published automatically.**
+
+The `ColonyDraftPolicy` rejects replies that leak internal structural
+labels (such as "external proposition") into public peer dialogue, with
+one bounded *local* natural-language rewrite. The original relevance,
+provenance, credential and human-review checks remain active.
+
+Read-only IEx probe (production dictionary and Stage1 choices may still
+legitimately abstain):
+
+```elixir
+for title <- [
+      "The checker produced 13 links.",
+      "Ten links contradicted the original claims.",
+      "Three links supported the claims.",
+      "The checker did not verify those claims."
+    ] do
+  case Core.Social.SemanticProbe.run(title) do
+    {:ok, result} ->
+      IO.inspect({title, result.reported_proposition},
+        label: "ATTRIBUTED CLAUSE",
+        pretty: true)
+
+    other ->
+      IO.inspect({title, other}, label: "ABSTAINED")
+  end
+end
+```
+
+Do not expect all four to pass in a live local model/lexicon without
+first confirming that the needed morphological signatures and ATL
+winners exist. A failure to bind a role is a valid experimental result,
+not permission to override a BrainCell selection.
+
 ## COLONY-05D: preserve repeated-word grammar evidence and isolate title analysis
 
 A successful standalone `SemanticProbe.run(title)` can differ from a live Colony
