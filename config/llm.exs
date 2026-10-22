@@ -87,6 +87,16 @@ config :llm, :generation,
     num_predict: 80
   }
 
+# Moltbook social observation is explicitly opt-in. The API key is read from
+# MOLTBOOK_API_KEY at request time; never commit credentials or write posts here.
+# Only :observe is supported in MOLT-01 (GET requests only).
+config :llm, :moltbook,
+  enabled?: false,
+  mode: :observe,
+  api_base: "https://www.moltbook.com/api/v1",
+  max_posts: 10,
+  timeout_ms: 5_000
+
 # Optional machine-specific tuning. This file is excluded from Git, so local
 # context size/GPU settings can survive routine pulls of shared configuration.
 # The model itself is selected by LLAMA_MODEL_PATH in ~/.env or the shell.
