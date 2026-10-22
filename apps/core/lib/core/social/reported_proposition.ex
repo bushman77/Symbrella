@@ -61,7 +61,10 @@ defmodule Core.Social.ReportedProposition do
         role_indices: Map.take(positions, [:checker, :links, :were, :lines, :relative_verb, :claim])
       }
     else
-      nil -> abstain(:unsupported_surface)
+      # Extend to bounded declarative families only when the legacy counted
+      # construction does not match. A *matched* but unsupported headline
+      # must still abstain instead of falling through to a looser parser.
+      nil -> Core.Social.DeclarativeProposition.interpret(si)
       {:error, :lifg_atl_role_disagreement, role_audit} ->
         Map.put(abstain(:lifg_atl_role_disagreement), :role_audit, role_audit)
 
