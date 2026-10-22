@@ -325,13 +325,6 @@ defmodule Brain.Curiosity do
   defp get_opt(%{} = opts, key, default), do: Map.get(opts, key, default)
   defp get_opt(_opts, _key, default), do: default
 
-  defp has_opt?(opts, key) when is_list(opts), do: Keyword.has_key?(opts, key)
-
-  defp has_opt?(%{} = opts, key),
-    do: Map.has_key?(opts, key) or Map.has_key?(opts, to_string(key))
-
-  defp has_opt?(_opts, _key), do: false
-
   defp map_get(%{} = map, key, default) when is_atom(key) do
     Map.get(map, key, Map.get(map, Atom.to_string(key), default))
   end
