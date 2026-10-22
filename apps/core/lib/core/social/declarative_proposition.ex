@@ -61,6 +61,14 @@ defmodule Core.Social.DeclarativeProposition do
               role_indices: Map.new(clause.roles, fn {role, index, _pos} -> {role, index} end)
             }
           else
+            {:error, :insufficient_grammatical_evidence, audit} ->
+              abstain(:insufficient_grammatical_evidence)
+              |> Map.put(:grammar_audit, audit)
+
+            {:error, :lifg_atl_role_disagreement, audit} ->
+              abstain(:lifg_atl_role_disagreement)
+              |> Map.put(:role_audit, audit)
+
             {:error, reason} -> abstain(reason)
           end
 
@@ -223,22 +231,46 @@ defmodule Core.Social.DeclarativeProposition do
     winners = get_in(si, [:atl_slate, :winners]) || []
     cells = Map.get(si, :active_cells, [])
 
-    if Enum.all?(roles, fn {role, index, pos} ->
-         selected = Enum.filter(winners, &(Map.get(&1, :token_index) == index))
+    audit =
+      Enum.map(roles, fn {role, index, pos} ->
+        selected = Enum.filter(winners, &(Map.get(&1, :token_index) == index))
 
-         length(selected) == 1 and
-           (Enum.any?(cells, fn cell ->
-              id = Map.get(hd(selected), :id)
-              is_binary(id) and Map.get(cell, :id) == id and
+        matching =
+          Enum.filter(selected, fn winner ->
+            id = Map.get(winner, :id)
+
+            Enum.any?(cells, fn cell ->
+              is_map(cell) and is_binary(id) and Map.get(cell, :id) == id and
                 Map.get(cell, :token_index) == index and
                 Map.get(cell, :pos) == pos
             end) or
-              (role == :auxiliary and
-                 did_auxiliary_witness?(si, index, Map.get(hd(selected), :id))))
-       end) do
+              (role == :auxiliary and did_auxiliary_witness?(si, index, id))
+          end)
+
+        %{
+          role: role,
+          token_index: index,
+          expected_pos: pos,
+          selected_senses:
+            selected
+            |> Enum.map(&Map.get(&1, :id))
+            |> Enum.filter(&is_binary/1)
+            |> Enum.take(3),
+          selected_count: length(selected),
+          dictionary_pos_available?:
+            Enum.any?(cells, fn cell ->
+              is_map(cell) and Map.get(cell, :token_index) == index and
+                (Map.get(cell, :pos) == pos or
+                   (role == :auxiliary and Map.get(cell, :pos) == "auxiliary"))
+            end),
+          agreed?: length(selected) == 1 and length(matching) == 1
+        }
+      end)
+
+    if Enum.all?(audit, & &1.agreed?) do
       :ok
     else
-      {:error, :lifg_atl_role_disagreement}
+      {:error, :lifg_atl_role_disagreement, audit}
     end
   end
 
@@ -280,35 +312,59 @@ defmodule Core.Social.DeclarativeProposition do
     tokens = Map.get(si, :tokens, [])
     indices = Map.new(clause.roles, fn {role, index, _pos} -> {role, index} end)
 
-    nouns_supported? =
-      Enum.all?(clause.noun_phrases, fn {det_position, head_position} ->
+    noun_audit =
+      Enum.map(clause.noun_phrases, fn {det_position, head_position} ->
         det_index = Enum.at(tokens, det_position) && Map.get(Enum.at(tokens, det_position), :index)
         head_index = Enum.at(tokens, head_position) && Map.get(Enum.at(tokens, head_position), :index)
 
-        Enum.any?(signatures, fn sig ->
-          Map.get(sig, :id) == :noun_phrase and
-            Map.get(sig, :source) == :core_syntax and
-            get_in(sig, [:roles, :determiner]) == det_index and
-            get_in(sig, [:roles, :head]) == head_index
-        end)
+        witnessed? =
+          Enum.any?(signatures, fn sig ->
+            Map.get(sig, :id) == :noun_phrase and
+              Map.get(sig, :source) == :core_syntax and
+              get_in(sig, [:roles, :determiner]) == det_index and
+              get_in(sig, [:roles, :head]) == head_index
+          end)
+
+        %{determiner: det_index, head: head_index, witnessed?: witnessed?}
       end)
 
-    # Only an independently attested simple-past candidate supports the
-    # affirmative constructions. Negation instead requires an exact "did not"
-    # sequence plus selected lexical witnesses for both markers.
-    predicate_supported? =
-      if clause.construction == :explicit_negated_transitive do
-        true
-      else
-        Enum.any?(signatures, fn sig ->
-          Map.get(sig, :id) == :finite_past_candidate and
-            Map.get(sig, :source) == :core_syntax and
-            get_in(sig, [:roles, :verb]) == Map.get(indices, :predicate)
-        end)
-      end
+    past_morphology? =
+      Enum.any?(signatures, fn sig ->
+        Map.get(sig, :id) == :finite_past_candidate and
+          Map.get(sig, :source) == :core_syntax and
+          get_in(sig, [:roles, :verb]) == Map.get(indices, :predicate)
+      end)
 
-    if nouns_supported? and predicate_supported?,
-      do: :ok, else: {:error, :insufficient_grammatical_evidence}
+    # Imported dictionary entries can omit the exact form-of/past tags
+    # required by Core's finite_past_candidate. These four unambiguous
+    # regular-past spellings are already in the bounded construction grammar.
+    # Their textual form is evidence of an observed past-tense surface, NOT
+    # a fabricated Wiktextract morphology tag or a chosen dictionary sense.
+    # The exact LTM-selected verb remains separately mandatory.
+    bounded_past? =
+      clause.construction in [:counted_object_action, :counted_transitive] and
+        clause.predicate in ~w(produced contradicted refuted supported) and
+        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
+            Map.get(cell, :pos) == "verb" and
+            normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
+            is_binary(Map.get(cell, :id))
+        end)
+
+    predicate_supported? =
+      clause.construction == :explicit_negated_transitive or
+        past_morphology? or bounded_past?
+
+    audit = %{
+      noun_phrases: noun_audit,
+      predicate_index: Map.get(indices, :predicate),
+      finite_past_signature?: past_morphology?,
+      bounded_regular_past_surface?: bounded_past?,
+      predicate_supported?: predicate_supported?
+    }
+
+    if Enum.all?(noun_audit, & &1.witnessed?) and predicate_supported?,
+      do: :ok, else: {:error, :insufficient_grammatical_evidence, audit}
   end
 
   defp normalize(value) when is_binary(value),
