@@ -17,6 +17,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
       reported_relation: :reported_refutation,
       sentence_status: :not_yet_interpreted,
       grammar_outcome: :no_supported_grammar_pattern,
+      proposition_status: :attributed_structural_interpretation,
       provenance: :author_claim_not_independently_verified
     }
   }
@@ -30,6 +31,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
     assert result.pos_covered_tokens == 25
     assert result.processed_tokens == 32
     assert result.grammar_outcome == :no_supported_grammar_pattern
+    assert result.proposition_status == :attributed_structural_interpretation
     assert result.sentence_status == :not_yet_interpreted
     assert result.relation == :reported_refutation
     assert result.provenance == :author_claim_not_independently_verified
