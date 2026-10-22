@@ -20,11 +20,22 @@ The existing umbrella-root priv/.colony_api_key remains private; no external dat
 - A single-use approval receipt must be consumed before one non-retried POST.
 - No auto-posting, timers, scheduled reads, votes, following, or DMs.
 
+## COLONY-04: real read-only cognition boundary
+
+- The social `SemanticProbe` calls Core's tokenizer, lexicon, Syntax Signatures, RoleCompetition and SentenceCompetition, zero-write lexical relations, and actual Brain.LIFG.Stage1 scoring.
+- The full bounded token slate is passed through `Brain.ATL.reduce/3` (pure function, not the stateful `Brain.ATL.ingest`). `Core.Semantic.SentenceMeaning.build/1` then makes a conservative compositional interpretation. For external asserted events it normally abstains rather than inventing a verified event.
+- `Core.Social.ColonyCognition.interpret/2` requires successful LIFG and ATL observations plus an explicit source-attributed support/refutation claim. It distinguishes an external reporter, reported relation, and what is NOT verified.
+- The cognition frame, selected high-confidence lexical candidates (not verified meanings), grammatical hypotheses and actual sentence-status are sent to the local expression LLM.
+- Without requisite cognition, missing safe reporter, or an unresolved source relation, drafting fails closed BEFORE the LLM or approval store. Early support is intentionally narrow; other Colony post types are not yet cognitively admitted.
+- `ColonyDraftPolicy.review/3` now prevents the model assigning an external checker or its experiment to Symbrella.
+- `[:core, :social, :cognitive_shadow]` telemetry gives bounded LIFG/ATL counts and status, without touching working memory or changing the live LIFG `state.last`.
+- A scored LIFG token is **not** verified meaning. The original source statement is *reported evidence*, not proof that the author's experiment is correct.
+
 ## Run tests from the existing umbrella root
 
 ```bash
 cd ~/Symbrella
-mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_draft_policy_test.exs apps/core/test/core/social/colony_conversation_test.exs
+mix test apps/llm/test/colony_test.exs apps/core/test/core/social/colony_draft_policy_test.exs apps/core/test/core/social/colony_cognition_test.exs apps/core/test/core/social/observation_bridge_test.exs apps/core/test/core/social/colony_conversation_test.exs
 ```
 
 Do not run mix format.
@@ -40,6 +51,18 @@ post_id = "0e6ff2c5-f837-4347-81b8-9dbbce963e0e"
 IO.puts(draft.body)
 IO.inspect(Map.take(draft, [:id, :approval_phrase, :post_title, :public_posted?]))
 ```
+
+## Inspect real cognition in IEx
+
+```elixir
+Application.put_env(:llm, :colony, enabled?: true, mode: :observe, allow_reviewed_comments?: false)
+{:ok, draft} = Core.Social.ColonyConversation.draft(post_id)
+IO.inspect(draft.cognitive_summary, label: "Cognitive provenance", pretty: true)
+IO.inspect(draft.semantic_summary, label: "Shadow brain stages", pretty: true)
+IO.puts(draft.body)
+```
+
+Interpret `:not_yet_interpreted` literally: the existing sentence-meaning module did not structurally interpret the full external statement. The reported support/refutation frame is a conservative symbolic parser over the attributed post title, not a verified truth or a claim that the entire production brain ran. `state.last` on live `Brain.LIFG` may remain nil because scoring uses the pure shadow entry point.
 
 ## Optional reviewed publication
 
