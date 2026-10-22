@@ -14,6 +14,54 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
   defp context(signatures), do: GE.prepare(%{active_cells: @cells, sentence_signatures: signatures})
   defp sign(id, roles), do: %{id: id, roles: roles}
 
+  test "complete copular relative clause boosts only an attested noun complement" do
+    sig = %{
+      id: :copular_relative_classification,
+      source: :core_syntax,
+      span: {0, 6},
+      roles: %{
+        subject_head: 0, copula: 1, complement_head: 2,
+        relative_marker: 3, relative_verb: 4,
+        object_determiner: 5, object_head: 6
+      },
+      evidence: [
+        :contiguous_surface, :attested_subject_noun,
+        :attested_copular_be, :attested_complement_noun,
+        :explicit_relative_clause, :attested_relative_verb,
+        :attested_object_noun
+      ]
+    }
+
+    ctx =
+      GE.prepare(%{
+        active_cells: [
+          %{id: "lines|noun|1", pos: "noun"},
+          %{id: "lines|proper_noun|1", pos: "proper_noun"}
+        ],
+        sentence_signatures: [sig]
+      })
+
+    scores = %{"lines|noun|1" => 0.20, "lines|proper_noun|1" => 0.35}
+    boosted = GE.apply_copular_relative(scores, ctx, 2)
+
+    assert boosted["lines|noun|1"] > boosted["lines|proper_noun|1"]
+    assert boosted["lines|proper_noun|1"] == 0.35
+    assert Map.keys(boosted) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
+    assert GE.apply_copular_relative(scores, ctx, 0) == scores
+
+    missing_evidence =
+      %{sig | evidence: List.delete(sig.evidence, :attested_relative_verb)}
+    assert GE.apply_copular_relative(scores, GE.prepare(%{
+      active_cells: [%{id: "lines|noun|1", pos: "noun"}],
+      sentence_signatures: [missing_evidence]
+    }), 2) == scores
+
+    assert GE.apply_copular_relative(scores, GE.prepare(%{
+      active_cells: [%{id: "lines|proper_noun|1", pos: "proper_noun"}],
+      sentence_signatures: [sig]
+    }), 2) == scores
+  end
+
   test "weight zero preserves exact scores" do
     ctx = context([sign(:finite_past_candidate, %{verb: 1})])
     assert GE.apply(@scores, ctx, 1, 0.0) == @scores
