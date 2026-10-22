@@ -126,6 +126,66 @@ defmodule Core.Social.ObservationBridgeTest do
     assert empty.syntax.audit.ltm_reason == nil
   end
 
+  test "real syntax and pure ATL bind an attributed relative-clause proposition" do
+    title =
+      "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
+
+    lexical_pos = %{
+      "my" => "determiner",
+      "checker" => "noun",
+      "links" => "noun",
+      "were" => "verb",
+      "lines" => "noun",
+      "refute" => "verb",
+      "the" => "determiner",
+      "claim" => "noun"
+    }
+
+    reader = fn si, _opts ->
+      rows =
+        Enum.flat_map(si.tokens, fn token ->
+          word = String.downcase(token.phrase)
+
+          case Map.get(lexical_pos, word) do
+            nil ->
+              []
+
+            pos ->
+              [%{
+                id: "#{word}|#{pos}|1", token_index: token.index,
+                norm: word, word: word, pos: pos, semantic_atoms: []
+              }]
+          end
+        end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexical_pos)), missing_norms: []}}
+    end
+
+    scorer = fn si, _opts ->
+      choices =
+        Enum.map(si.active_cells, fn cell ->
+          %{token_index: cell.token_index, chosen_id: cell.id,
+            score: 0.91, prob: 0.91, margin: 0.4}
+        end)
+
+      {:ok, %{choices: choices, audit: %{missing_candidates: 0}}}
+    end
+
+    assert {:ok, semantic} =
+             SemanticProbe.run(title, ltm_reader: reader, scorer: scorer)
+
+    assert semantic.syntax.audit.ltm_status == :ready
+    assert semantic.syntax.audit.signature_count > 0
+    assert semantic.reported_proposition.status == :attributed_structural_interpretation
+    assert semantic.reported_proposition.reported_count == 10
+    assert semantic.reported_proposition.reported_total == 13
+    assert semantic.reported_proposition.embedded_relation == :reported_refutation
+    assert semantic.reported_proposition.verification ==
+             :author_claim_not_independently_verified
+    # General SentenceMeaning still requires independent participant evidence.
+    assert semantic.sentence_meaning.status == :not_yet_interpreted
+  end
+
   test "posterior probability and winning margin stay separate in shadow summaries" do
     assert {:ok, high} =
              SemanticProbe.run("The artist draws a picture.",
