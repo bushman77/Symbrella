@@ -35,11 +35,12 @@ defmodule Core.Social.SemanticProbe do
   def run(_, _), do: {:error, :invalid_social_text}
 
   defp analyze(excerpt, opts) do
-    tokens =
+    all_tokens =
       excerpt
       |> Core.LIFG.Input.tokenize(fuzzy: false, max_wordgram_n: 1)
       |> Enum.filter(&is_map/1)
-      |> Enum.take(@max_tokens)
+
+    tokens = Enum.take(all_tokens, @max_tokens)
 
     si = %{
       sentence: excerpt,
@@ -76,6 +77,8 @@ defmodule Core.Social.SemanticProbe do
         Map.take(sig, [:id, :span, :roles])
       end)
 
+    grammar_audit = grammar_audit(si, all_tokens)
+
     {lifg, choices} = score_stage1(si, opts)
 
     # Pure ATL reducer: never call Brain.ATL.ingest/3 here. That operation
@@ -98,7 +101,7 @@ defmodule Core.Social.SemanticProbe do
        stage: :social_semantic_shadow,
        input_chars: String.length(excerpt),
        token_count: length(tokens),
-       syntax: %{status: :observed, signatures: signatures},
+       syntax: %{status: :observed, signatures: signatures, audit: grammar_audit},
        lifg: lifg,
        atl: %{
          status: :read_only_reduced,
@@ -123,6 +126,56 @@ defmodule Core.Social.SemanticProbe do
        },
        acc_shadow: conflict_shadow(lifg)
      }}
+  end
+
+  # This is a loss-of-evidence audit, not a semantic verdict. It helps
+  # distinguish missing dictionary POS from unsupported grammatical patterns
+  # without printing untrusted text or private BrainCell definitions.
+  defp grammar_audit(si, all_tokens) do
+    tokens = Map.get(si, :tokens, [])
+    rows = Map.get(si, :active_cells, [])
+    signatures = Map.get(si, :sentence_signatures, [])
+
+    tagged =
+      Enum.filter(rows, fn row ->
+        is_map(row) and is_binary(Map.get(row, :pos)) and
+          String.trim(Map.get(row, :pos)) != ""
+      end)
+
+    indices =
+      tagged
+      |> Enum.map(&Map.get(&1, :token_index))
+      |> Enum.filter(&is_integer/1)
+      |> MapSet.new()
+
+    categories =
+      tagged
+      |> Enum.map(&Map.get(&1, :pos))
+      |> Enum.frequencies()
+
+    pos_covered =
+      tokens
+      |> Enum.filter(&MapSet.member?(indices, Map.get(&1, :index)))
+      |> length()
+
+    %{
+      source_tokens: length(all_tokens),
+      processed_tokens: length(tokens),
+      token_limit_reached?: length(all_tokens) > length(tokens),
+      dictionary_rows: length(rows),
+      pos_tagged_rows: length(tagged),
+      pos_covered_tokens: pos_covered,
+      pos_counts: Map.take(categories, ~w(noun verb pronoun determiner det adjective adj preposition prep auxiliary aux proper_noun)),
+      signature_count: length(signatures),
+      outcome:
+        cond do
+          tokens == [] -> :no_tokens
+          tagged == [] -> :missing_dictionary_pos
+          pos_covered == 0 -> :token_index_alignment_missing
+          signatures == [] -> :no_supported_grammar_pattern
+          true -> :grammar_candidates_detected
+        end
+    }
   end
 
   defp score_stage1(si, opts) do
