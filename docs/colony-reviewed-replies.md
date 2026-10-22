@@ -99,6 +99,40 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## Checked read-only dictionary binding
+
+A successful LIFG/ATL shadow score is **not** proof of dictionary-derived
+comprehension. LIFG can select built-in closed-class defaults without retrieved
+BrainCells. The previous diagnostic reported 31 winners but 0 POS rows, and
+`Core.Pipeline.LTM.Source.ltm/2` intentionally masks DB lookup exceptions as an
+empty row set for the general production pipeline.
+
+For Colony, `Core.Pipeline.LTM.Source.checked_ltm/2` now performs one
+read-only query, shares the production candidate enrichment, and preserves
+nonsecret status in `cognitive_summary.brain.grammar_audit`:
+
+- `:ready`: the lookup returned rows; still check POS coverage
+- `:no_matches`: query succeeded but found no candidate rows
+- `:lookup_failed`: DB access/query failed; inspect the atom
+  in `:ltm_reason` (`:ltm_query_failed`, `:ltm_query_exited`, etc.)
+- `:disabled`: explicitly opted out in a test-only probe
+
+A genuine Colony shadow with no usable POS is now denied with
+`{:error, :colony_ltm_evidence_unavailable}` **before local LLM
+generation**, even if Stage1 fallback choices exist. The failure still emits
+a bounded read-only event into Brain.Blackboard. This prevents a plausible
+LLM reply from being mislabeled as brain-grounded.
+
+To discriminate a local DB failure from an empty lexicon in IEx (read only):
+
+```elixir
+Db.ltm(%{tokens: [%{phrase: "the", index: 0}]}, limit_per_norm: 8)
+```
+
+A DB exception means connectivity/query/schema diagnosis is required; an
+empty successful lookup means investigate which database is connected and
+whether its `brain_cells` table is populated. Avoid logging credentials.
+
 ## Grammar evidence audit (COLONY-04D)
 
 The Colony probe now reports `draft.cognitive_summary.brain.grammar_audit` with
