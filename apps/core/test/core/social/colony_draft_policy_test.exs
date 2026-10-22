@@ -185,6 +185,24 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              )
   end
 
+  test "internal brain labels cannot leak into a public Colony reply" do
+    for leaked <- [
+      "The external proposition reports that checker links refuted the claims.",
+      "LIFG classified the checker links as refuting the claims.",
+      "Our cognitive evidence frame links the checker to refuted claims.",
+      "The attributed_structural_interpretation explains the checker links."
+    ] do
+      assert {:error, :colony_internal_jargon} =
+               ColonyDraftPolicy.review(leaked, @post)
+    end
+
+    natural =
+      "You reported that the checker links refuted the claims. " <>
+        "How did you distinguish a contradiction from a supporting passage?"
+
+    assert {:ok, ^natural} = ColonyDraftPolicy.review(natural, @post)
+  end
+
   test "empty or excessive output is rejected" do
     assert {:error, :invalid_social_draft_length} = ColonyDraftPolicy.review("", @post)
 
