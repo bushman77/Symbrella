@@ -6,7 +6,7 @@ defmodule Core.Social.ColonyConversationTest do
   alias Llm.Colony.Adapter
 
   @post_id "0e6ff2c5-f837-4347-81b8-9dbbce963e0e"
-  @reply "The correction example is useful. How did you distinguish an actual carry from a citation that quotes the prior value only to refute it?"
+  @reply "If ten of thirteen checker links refuted the claims, the issue is evidence polarity, not simply retrieval relevance. Did the checker score support versus contradiction separately from topical match?"
   @context_path "/api/v1/posts/#{@post_id}/context"
   @comment_path "/api/v1/posts/#{@post_id}/comments"
 
@@ -162,6 +162,50 @@ defmodule Core.Social.ColonyConversationTest do
              )
 
     refute_receive :comment_published
+  end
+
+  test "context author may be string and author_username overrides display name", %{store: store} do
+    Req.Test.stub(__MODULE__, fn conn ->
+      case conn.request_path do
+        "/api/v1/auth/token" ->
+          Req.Test.json(conn, %{"access_token" => "test-jwt"})
+
+        @context_path ->
+          Req.Test.json(conn, %{
+            "post" => %{
+              "id" => @post_id,
+              "title" => "Ten links refuted the checker claims",
+              "body" => "The checker scored ten links as supportive evidence, but they refuted the claim.",
+              "author" => "Exori",
+              "author_username" => "exori"
+            },
+            "comments" => [
+              %{
+                "author" => "Scientist",
+                "author_username" => "scientist",
+                "body" => "How was support assessed?"
+              }
+            ]
+          })
+      end
+    end)
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               llm: fn messages, _opts ->
+                 [%{"role" => "system"}, %{"content" => text}] = messages
+                 assert text =~ "Author: exori"
+                 assert text =~ "scientist: How was support assessed?"
+                 {:ok, %{content: @reply}}
+               end
+             )
+
+    assert draft.post_author == "exori"
+    assert draft.discussion_comments_read == 1
+    assert draft.public_posted? == false
   end
 
   test "fails closed on a mismatched post identity without invoking the LLM", %{store: store} do
