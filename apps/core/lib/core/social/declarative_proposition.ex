@@ -111,7 +111,7 @@ defmodule Core.Social.DeclarativeProposition do
           )
         end
 
-      [number, subject, verb, det, modifier, object] when det in @determiners ->
+      [number, subject, verb, det, _modifier, object] when det in @determiners ->
         with {:ok, count} <- number(number),
              :ok <- supported_verb(verb),
              {:ok, relation} <- evidence_relation(verb) do
@@ -200,13 +200,17 @@ defmodule Core.Social.DeclarativeProposition do
 
     if Enum.all?(roles, fn {role, index, pos} ->
          Enum.any?(cells, fn cell ->
-           available_pos = Map.get(cell, :pos)
-           valid_pos? =
-             available_pos == pos or
-               (role == :auxiliary and available_pos in ["verb", "auxiliary"])
+           if is_map(cell) do
+             available_pos = Map.get(cell, :pos)
+             valid_pos? =
+               available_pos == pos or
+                 (role == :auxiliary and available_pos in ["verb", "auxiliary"])
 
-           is_map(cell) and Map.get(cell, :token_index) == index and
-             valid_pos? and is_binary(Map.get(cell, :id))
+             Map.get(cell, :token_index) == index and
+               valid_pos? and is_binary(Map.get(cell, :id))
+           else
+             false
+           end
          end)
        end) do
       :ok
