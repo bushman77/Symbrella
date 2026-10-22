@@ -9,6 +9,7 @@ defmodule SymbrellaWeb.BrainReport do
   """
 
   alias SymbrellaWeb.BrainRuntime
+  alias SymbrellaWeb.Components.Brain.SocialCognition
   alias SymbrellaWeb.Region.Registry
 
   @max_events 100
@@ -46,6 +47,7 @@ defmodule SymbrellaWeb.BrainReport do
       {"Selected region snapshot", runtime.region_snapshot(region)},
       {"Selected region process status", runtime.region_status(region)},
       {"All region process statuses", runtime.all_region_status()},
+      {"Read-only Colony cognition (not neuron activation)", SocialCognition.latest(blackboard)},
       {"Blackboard history (up to 100 retained events, unfiltered)", blackboard}
     ]
 
