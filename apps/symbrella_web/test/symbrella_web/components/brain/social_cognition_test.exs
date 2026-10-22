@@ -51,8 +51,9 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
   end
 
   test "does not accept a spoofed external source with the same event name" do
-    assert SocialCognition.latest([
-             Map.put(@colony, :meta, Map.put(Map.get(@colony, :meta), :source, :private_chat))
-           ]) == nil
+    %{meta: metadata} = @colony
+    spoofed_event = %{@colony | meta: %{metadata | source: :private_chat} }
+
+    assert SocialCognition.latest([spoofed_event]) == nil
   end
 end
