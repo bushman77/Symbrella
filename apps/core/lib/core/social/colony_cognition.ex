@@ -67,10 +67,15 @@ defmodule Core.Social.ColonyCognition do
     #{inspect(frame.brain.lexical_candidates)};
     General SentenceMeaning status: #{frame.brain.sentence_status}.
     External proposition status: #{Map.get(frame.reported_proposition, :status)}.
-    External proposition (only structured and verified as syntax, NOT truth):
-    #{inspect(Map.take(frame.reported_proposition, [:kind, :subject, :relation,
-       :complement, :object, :embedded_relation, :reported_count, :reported_total,
+    Attributed grammatical proposition (not a verified real-world event):
+    #{inspect(Map.take(frame.reported_proposition, [:kind, :construction, :subject,
+       :predicate, :relation, :polarity, :complement, :object,
+       :embedded_relation, :reported_count, :reported_total,
        :verification, :grammar]))}.
+    If polarity is :negative, preserve that negation. Never rewrite a
+    reported failure to verify into a claim of successful verification.
+    The source supplies the report; these structure labels do not provide
+    independent evidence or factual truth.
     Conversation objective: #{frame.reasoning_goal}.
     The frame above is PRIVATE STRUCTURAL GUIDANCE, not public conversation.
     Speak naturally to the author about their own reported claim. NEVER say
