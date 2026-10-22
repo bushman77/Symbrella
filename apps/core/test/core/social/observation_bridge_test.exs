@@ -76,15 +76,15 @@ defmodule Core.Social.ObservationBridgeTest do
       semantic_atoms: []
     }
 
-    si = %{active_cells: [%{cell | token_index: 1}]}
+    si = %{active_cells: [Map.put(cell, :token_index, 1)]}
 
     result =
       Core.Pipeline.LTM.enrich(
         si,
         [
-          %{cell | token_index: 1},
-          %{cell | token_index: 9},
-          %{cell | token_index: 9}
+          Map.put(cell, :token_index, 1),
+          Map.put(cell, :token_index, 9),
+          Map.put(cell, :token_index, 9)
         ],
         MapSet.new(["links"])
       )
