@@ -148,6 +148,39 @@ defmodule Core.Social.ColonyConversationTest do
     refute_receive :comment_published
   end
 
+  test "a supported external proposition reaches a pending draft without publishing", %{store: store} do
+    stub_thread(self())
+
+    proposition = %{
+      status: :attributed_structural_interpretation,
+      kind: :reported_declarative_proposition,
+      source: :colony_external,
+      embedded_relation: :reported_refutation,
+      relation: :copular_classification,
+      reported_count: 10,
+      reported_total: 13,
+      verification: :author_claim_not_independently_verified
+    }
+
+    probe = fn _, _ ->
+      {:ok, semantic} = brain_fixture(nil, [])
+      {:ok, Map.put(semantic, :reported_proposition, proposition)}
+    end
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: probe,
+               llm: fake_llm(self())
+             )
+
+    assert draft.cognitive_summary.reported_proposition == proposition
+    assert draft.status == :pending_human_review
+    assert draft.public_posted? == false
+    refute_receive :comment_published
+  end
+
   test "separate explicit operator permission, exact approval, and one-shot write", %{store: store} do
     pid = self()
     stub_thread(pid)
