@@ -36,6 +36,7 @@ defmodule Core.Social.ColonyConversation do
          {:ok, discussion} <- normalize_context(context, post_id),
          {:ok, semantic} <- shadow_probe(discussion, opts),
          {:ok, cognition} <- ColonyCognition.interpret(discussion, semantic),
+         :ok <- emit_cognitive_trace(cognition),
          {:ok, body} <- generate_draft(discussion, semantic, cognition, opts),
          {:ok, receipt} <- ColonyDraftStore.put(
            %{post_id: discussion.post_id, body: body}, store(opts)
@@ -332,8 +333,33 @@ defmodule Core.Social.ColonyConversation do
       recognized_topics: Map.get(comprehension, :recognized_topics, []) |> Enum.take(4),
       uncertainty: Map.get(comprehension, :uncertain, []) |> Enum.take(4),
       lifg_status: Map.get(lifg, :status),
+      atl_status: get_in(semantic, [:atl, :status]),
+      atl_winners: get_in(semantic, [:atl, :winner_count]),
+      sentence_status: get_in(semantic, [:sentence_meaning, :status]),
       verification: :external_assertions_not_verified
     }
+  end
+
+  # A dedicated social-cognition event makes the read-only brain route
+  # externally auditable without mutating LIFG state or creating memories.
+  defp emit_cognitive_trace(cognition) do
+    :telemetry.execute(
+      [:core, :social, :cognitive_shadow],
+      %{
+        lifg_choices: cognition.brain.lifg_choices,
+        atl_winners: cognition.brain.atl_winners,
+        syntax_frames: length(cognition.brain.syntax_frames)
+      },
+      %{
+        source: :colony_external,
+        post_id: cognition.post_id,
+        reported_relation: cognition.evidence_relation,
+        sentence_status: cognition.brain.sentence_status,
+        provenance: cognition.report_status
+      }
+    )
+
+    :ok
   end
 
   defp safe_text(value, max) when is_binary(value),
