@@ -38,6 +38,31 @@ defmodule Brain.BlackboardTelemetryBridgeTest do
     assert meta.reason == :test
   end
 
+  test "bridges pure Colony cognition as read-only telemetry without a neuron event" do
+    :telemetry.execute(
+      [:core, :social, :cognitive_shadow],
+      %{lifg_choices: 31, atl_winners: 31, syntax_frames: 2},
+      %{
+        source: :colony_external,
+        post_id: "test-colony-post",
+        reported_relation: :reported_refutation,
+        sentence_status: :not_yet_interpreted,
+        provenance: :author_claim_not_independently_verified
+      }
+    )
+
+    assert_receive {:blackboard,
+                    %{
+                      kind: :telemetry,
+                      event: [:core, :social, :cognitive_shadow],
+                      measurements: %{lifg_choices: 31, atl_winners: 31, syntax_frames: 2},
+                      meta: %{
+                        source: :colony_external,
+                        sentence_status: :not_yet_interpreted
+                      }
+                    }}, 500
+  end
+
   test "bridges [:brain, :pipeline, :lifg_stage1, :stop] telemetry onto brain:blackboard" do
     :telemetry.execute(
       [:brain, :pipeline, :lifg_stage1, :stop],
