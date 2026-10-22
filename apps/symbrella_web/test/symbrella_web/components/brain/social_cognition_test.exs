@@ -37,6 +37,25 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
     assert result.provenance == :author_claim_not_independently_verified
   end
 
+  test "shows lexical role disagreements separately from dictionary and neuron counts" do
+    %{meta: metadata, measurements: counts} = @colony
+
+    event = %{@colony |
+      meta: Map.merge(metadata, %{
+        proposition_status: :not_interpreted,
+        proposition_reason: :lifg_atl_role_disagreement,
+        probe_mode: :standalone_read_only
+      }),
+      measurements: Map.put(counts, :disputed_roles, 2)
+    }
+
+    result = SocialCognition.latest([event])
+    assert result.proposition_status == :not_interpreted
+    assert result.proposition_reason == :lifg_atl_role_disagreement
+    assert result.disputed_roles == 2
+    assert result.dictionary_rows == 130
+  end
+
   test "accepts events as wrapped by the live Brain blackboard" do
     wrapped = [%{env: @colony, tag: "core/social/cognitive_shadow", at_ms: 1}]
     assert SocialCognition.latest(wrapped).post_id == "test-colony-post"
