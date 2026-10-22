@@ -449,7 +449,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
     frame = geographic_frame(context)
     evidence = Map.get(context, :web_evidence) || %{}
     support = if is_map(evidence), do: Map.get(evidence, :support), else: nil
-    subjects = if is_map(frame), do: Map.get(frame, :subjects), else: nil
+    subjects = Map.get(frame, :subjects)
 
     with :population <- Map.get(frame, :relation),
          :location_question <- Map.get(frame, :type),
