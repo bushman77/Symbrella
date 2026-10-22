@@ -261,6 +261,51 @@ defmodule Core.Social.ColonyConversationTest do
     assert draft.public_posted? == false
   end
 
+  test "local LLM failure reports sanitized category, not upstream HTTP body", %{store: store} do
+    stub_thread(self())
+    pid = self()
+
+    assert {:error, {:social_llm_unavailable, :llm_http_client_error}} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _messages, _opts ->
+                 send(pid, :llm_called)
+                 {:error, {:http_status, 400, "private model server diagnostic"}}
+               end
+             )
+
+    assert_receive :llm_called
+    refute_receive :comment_published
+  end
+
+  test "missing model and unavailable local process have distinct safe outcomes", %{store: store} do
+    stub_thread(self())
+
+    assert {:error, {:social_llm_unavailable, :model_not_found}} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _messages, _opts ->
+                 {:error, {:model_not_found, "/private/path/to/model.gguf"}}
+               end
+             )
+
+    assert {:error, {:social_llm_unavailable, :llm_process_not_running}} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fn _messages, _opts ->
+                 exit({:noproc, {GenServer, :call, [:missing_llm]}})
+               end
+             )
+
+    refute_receive :comment_published
+  end
+
   test "a zero-length local generation receives one bounded, shorter retry", %{store: store} do
     stub_thread(self())
     calls = :atomics.new(1, [])
