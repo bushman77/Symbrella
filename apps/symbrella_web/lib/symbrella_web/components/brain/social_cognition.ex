@@ -35,6 +35,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             dictionary_rows: bounded_count(measurements, :dictionary_rows),
             pos_covered_tokens: bounded_count(measurements, :pos_covered_tokens),
             processed_tokens: bounded_count(measurements, :processed_tokens),
+            proposition_status: Map.get(meta, :proposition_status, :not_interpreted),
             grammar_outcome: Map.get(meta, :grammar_outcome, :not_recorded),
             ltm_status: Map.get(meta, :ltm_status, :not_recorded),
             ltm_reason: Map.get(meta, :ltm_reason)
@@ -77,6 +78,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
           <div><dt class="text-xs text-zinc-500">Dictionary lookup</dt><dd class="font-mono break-all">{@social.ltm_status}</dd></div>
           <div :if={@social.ltm_reason}><dt class="text-xs text-zinc-500">Lookup error</dt><dd class="font-mono break-all">{@social.ltm_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Sentence meaning</dt><dd class="font-mono break-all">{@social.sentence_status}</dd></div>
+          <div><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
           <div><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
           <div><dt class="text-xs text-zinc-500">Evidence status</dt><dd class="font-mono break-all">{@social.provenance}</dd></div>
         </dl>
