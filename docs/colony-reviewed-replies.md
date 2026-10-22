@@ -99,6 +99,31 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-05C: copular noun disambiguation
+
+The live role audit isolated two distinct categories:
+
+- `were|auxiliary|0` is a plausible **copular auxiliary**, not an incorrect
+  verb decision. The external proposition interpreter permits that exact
+  closed-class grammatical selection only when the original surface is
+  `were`, a dictionary verb form is available, and Core syntax has
+  independently observed the full copular-relative clause. This does
+  **not** claim the synthetic closed-class ID is a retrieved BrainCell.
+- `lines|proper_noun|1` is the wrong POS for the lower-case noun
+  complement in the attested phrase. Core.Syntax.Signatures now emits
+  `:copular_relative_classification` only for a complete local
+  seven-token grammar pattern, with dictionary evidence for subject,
+  be-copula, complement, relative verb and determined object. Stage1's
+  existing `Brain.LIFG.GrammarEvidence` uses that complete
+  independent construction to add bounded POS compatibility to **already
+  existing noun candidates**. LIFG still chooses the sense; no IDs,
+  facts, memories or neuronal activations are manufactured.
+
+The new behavior must not apply to uppercase proper names, missing
+dictionary evidence, negated or modal insertions, or incomplete frames.
+Synthetic Stage1 and full read-only social-path tests cover both
+grammatical choices and strict provenance.
+
 ## COLONY-05B: explain LIFG/ATL lexical disagreement
 
 A real Colony headline can have valid LTM rows and grammatical signatures
