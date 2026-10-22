@@ -31,7 +31,11 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             provenance: Map.get(meta, :provenance),
             lifg_choices: bounded_count(measurements, :lifg_choices),
             atl_winners: bounded_count(measurements, :atl_winners),
-            syntax_frames: bounded_count(measurements, :syntax_frames)
+            syntax_frames: bounded_count(measurements, :syntax_frames),
+            dictionary_rows: bounded_count(measurements, :dictionary_rows),
+            pos_covered_tokens: bounded_count(measurements, :pos_covered_tokens),
+            processed_tokens: bounded_count(measurements, :processed_tokens),
+            grammar_outcome: Map.get(meta, :grammar_outcome, :not_recorded)
           }
         end
       end
@@ -65,6 +69,9 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
           <div><dt class="text-xs text-zinc-500">LIFG selections</dt><dd class="font-mono">{@social.lifg_choices}</dd></div>
           <div><dt class="text-xs text-zinc-500">ATL winners</dt><dd class="font-mono">{@social.atl_winners}</dd></div>
           <div><dt class="text-xs text-zinc-500">Grammar frames</dt><dd class="font-mono">{@social.syntax_frames}</dd></div>
+          <div><dt class="text-xs text-zinc-500">Dictionary rows</dt><dd class="font-mono">{@social.dictionary_rows}</dd></div>
+          <div><dt class="text-xs text-zinc-500">Tokens with POS</dt><dd class="font-mono">{@social.pos_covered_tokens} / {@social.processed_tokens}</dd></div>
+          <div><dt class="text-xs text-zinc-500">Grammar audit</dt><dd class="font-mono break-all">{@social.grammar_outcome}</dd></div>
           <div><dt class="text-xs text-zinc-500">Sentence meaning</dt><dd class="font-mono break-all">{@social.sentence_status}</dd></div>
           <div><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
           <div><dt class="text-xs text-zinc-500">Evidence status</dt><dd class="font-mono break-all">{@social.provenance}</dd></div>
