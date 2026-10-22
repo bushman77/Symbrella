@@ -29,6 +29,7 @@ defmodule Core.Social.ObservationBridge do
 
   def observe(opts) when is_list(opts) do
     with :ok <- validate_opts(opts),
+         :ok <- validate_limit(Keyword.get(opts, :limit, @max_posts)),
          {:ok, feed} <- Client.observe(opts) do
       review(feed, opts)
     end
@@ -127,6 +128,7 @@ defmodule Core.Social.ObservationBridge do
         {title, ""} -> title
         {title, body} -> title <> ". " <> body
       end
+      |> String.slice(0, 420)
 
     semantic =
       case evaluator.(excerpt, probe_opts) do
