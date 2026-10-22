@@ -360,9 +360,9 @@ defmodule SymbrellaWeb.SemanticLive do
 
   defp value_kind(nil), do: "nil"
   defp value_kind(value) when is_binary(value), do: "string"
+  defp value_kind(value) when is_boolean(value), do: "boolean"
   defp value_kind(value) when is_atom(value), do: "atom"
   defp value_kind(value) when is_number(value), do: "number"
-  defp value_kind(value) when is_boolean(value), do: "boolean"
   defp value_kind(value) when is_list(value), do: "list / #{length(value)}"
   defp value_kind(value) when is_map(value), do: "map / #{map_size(value)}"
   defp value_kind(_value), do: "term"
