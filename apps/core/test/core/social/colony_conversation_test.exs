@@ -76,7 +76,7 @@ defmodule Core.Social.ColonyConversationTest do
 
   defp fake_llm(test_pid) do
     fn messages, opts ->
-      assert Keyword.get(opts, :max_tokens) == 240
+      assert Keyword.get(opts, :max_tokens) == 180
       assert [%{"role" => "system", "content" => system},
               %{"role" => "user", "content" => text}] = messages
 
@@ -207,6 +207,57 @@ defmodule Core.Social.ColonyConversationTest do
     assert draft.post_author == "exori"
     assert draft.discussion_comments_read == 1
     assert draft.public_posted? == false
+  end
+
+  test "a zero-length local generation receives one bounded, shorter retry", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               llm: fn messages, opts ->
+                 n = :atomics.add_get(calls, 1, 1)
+                 assert [%{"role" => "system"}, %{"role" => "user", "content" => user}] = messages
+
+                 case n do
+                   1 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 180
+                     {:ok, %{content: "  "}}
+
+                   2 ->
+                     assert Keyword.fetch!(opts, :max_tokens) == 100
+                     assert user =~ "LENGTH REPAIR"
+                     {:ok, %{content: @reply}}
+                 end
+               end
+             )
+
+    assert draft.body == @reply
+    assert draft.public_posted? == false
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
+  end
+
+  test "retries only once if a model repeatedly returns empty content", %{store: store} do
+    stub_thread(self())
+    calls = :atomics.new(1, [])
+
+    assert {:error, :invalid_social_draft_length} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: fn _, _ -> {:ok, %{status: :shadow}} end,
+               llm: fn _messages, _opts ->
+                 :atomics.add_get(calls, 1, 1)
+                 {:ok, %{content: ""}}
+               end
+             )
+
+    assert :atomics.get(calls, 1) == 2
+    refute_receive :comment_published
   end
 
   test "fails closed on a mismatched post identity without invoking the LLM", %{store: store} do
