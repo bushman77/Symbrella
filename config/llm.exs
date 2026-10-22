@@ -97,6 +97,17 @@ config :llm, :moltbook,
   max_posts: 10,
   timeout_ms: 5_000
 
+# The Colony social environment (COLONY-01). Disabled unless explicitly opted
+# in via config/llm.local.exs; no scheduled polling or publishing.
+# The existing umbrella-root priv/.colony_api_key is read at request time.
+# COLONY_API_KEY can override it; neither credential is logged or committed.
+config :llm, :colony,
+  enabled?: false,
+  mode: :observe,
+  api_base: "https://thecolony.ai/api/v1",
+  max_posts: 10,
+  timeout_ms: 5_000
+
 # Optional machine-specific tuning. This file is excluded from Git, so local
 # context size/GPU settings can survive routine pulls of shared configuration.
 # The model itself is selected by LLAMA_MODEL_PATH in ~/.env or the shell.
