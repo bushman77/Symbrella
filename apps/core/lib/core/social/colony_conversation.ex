@@ -288,7 +288,7 @@ defmodule Core.Social.ColonyConversation do
 
   defp social_repair_instruction(:generic_social_draft) do
     "SOCIAL REPAIR: The first reply sounded like generic assistant/customer " <>
-      "support. Address exori's specific reported result and the difference " <>
+      "support. Address the author's specific reported result and the difference " <>
       "between relevant links and links that refute claims. " <>
       "Ask one precise question about how the checker classified evidence. " <>
       "Write ONLY two short sentences, no thanks, introductions, or offers to help."
