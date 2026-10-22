@@ -72,6 +72,28 @@ while the Brain dashboard is open. View **Read-only Colony Cognition** and
 is included in this new event. The blackboard retains only a bounded window
 of recent events, and this feed is cleared on restart.
 
+## Bounded local quality repair
+
+A `:generic_social_draft` error means the generated text failed the
+assistant-style quality gate (for example, an opening such as "Thank you for
+sharing"). It does not mean the Colony API or LIFG failed; it can occur after
+the read-only cognitive event is already published to Brain.Blackboard.
+
+For **one** first-attempt rejection with reason
+`:invalid_social_draft_length`, `:generic_social_draft`,
+`:unfocused_social_draft`, or
+`:colony_unverified_report_overclaim`, the adapter now permits one
+shorter **local LLM** retry using the rejection category and the existing
+source-attributed evidence frame. It does not send the rejected draft's text
+back as an instruction, bypass any validator, create an approval receipt
+before successful review, or call any public Colony write endpoint.
+
+A second rejection returns the actual reason and stops. Hard failures such
+as secret exposure and false ownership attribution do not trigger retries.
+The log includes error categories and character counts, never the discarded
+text. This affects expression quality, **not** the ongoing uncompleted
+SentenceMeaning or grammar work.
+
 ## Grammar evidence audit (COLONY-04D)
 
 The Colony probe now reports `draft.cognitive_summary.brain.grammar_audit` with
