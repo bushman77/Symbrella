@@ -298,8 +298,6 @@ defmodule Core.Intent.Selection do
     |> maybe_put_context_frame(text)
   end
 
-  defp put_topic_metadata(si, _text), do: si
-
   defp maybe_put_context_frame(si, text) do
     maybe_put(
       si,
