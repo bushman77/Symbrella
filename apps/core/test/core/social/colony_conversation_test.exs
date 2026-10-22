@@ -130,6 +130,10 @@ defmodule Core.Social.ColonyConversationTest do
     assert draft.discussion_comments_read == 1
     assert draft.cognitive_summary.reporter == "exori"
     assert draft.cognitive_summary.relation == :reported_refutation
+    assert draft.cognitive_summary.reported_link_count == 10
+    assert draft.cognitive_summary.reported_total_links == 13
+    assert draft.cognitive_summary.brain.atl_winners == 5
+    assert draft.semantic_summary.atl_status == :read_only_reduced
     assert draft.public_posted? == false
     assert String.starts_with?(draft.approval_phrase, "APPROVE COLONY COMMENT ")
     assert draft.expires_in_seconds == 900
@@ -190,7 +194,7 @@ defmodule Core.Social.ColonyConversationTest do
           Req.Test.json(conn, %{
             "post" => %{
               "id" => @post_id,
-              "title" => "Ten links refuted the checker claims",
+              "title" => "10 of the checker's 13 links refute the claims",
               "body" => "The checker scored ten links as supportive evidence, but they refuted the claim.",
               "author" => "Exori",
               "author_username" => "exori"
