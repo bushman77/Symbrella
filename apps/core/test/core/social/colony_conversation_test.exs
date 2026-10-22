@@ -340,6 +340,42 @@ defmodule Core.Social.ColonyConversationTest do
              )
   end
 
+  test "a successful draft emits measurable cognition but not neuron activation", %{store: store} do
+    stub_thread(self())
+    id = "colony-test-cognition-" <> Integer.to_string(System.unique_integer([:positive]))
+    :ok =
+      :telemetry.attach(
+        id,
+        [:core, :social, :cognitive_shadow],
+        fn event, measurements, meta, recipient ->
+          send(recipient, {:observed_shadow, event, measurements, meta})
+        end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert {:ok, draft} =
+             ColonyConversation.draft(@post_id,
+               store: store,
+               plug: {Req.Test, __MODULE__},
+               probe: &brain_fixture/2,
+               llm: fake_llm(self())
+             )
+
+    assert_receive {:observed_shadow,
+                    [:core, :social, :cognitive_shadow],
+                    %{lifg_choices: 5, atl_winners: 5, syntax_frames: 0},
+                    %{
+                      source: :colony_external,
+                      reported_relation: :reported_refutation,
+                      sentence_status: :not_yet_interpreted
+                    }}
+
+    assert draft.public_posted? == false
+    refute_receive :comment_published
+  end
+
   test "no external brain evidence means no model generation or approval", %{store: store} do
     stub_thread(self())
     me = self()
