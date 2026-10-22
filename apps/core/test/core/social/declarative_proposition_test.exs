@@ -159,6 +159,17 @@ defmodule Core.Social.DeclarativePropositionTest do
              :lifg_atl_role_disagreement
   end
 
+  test "token stream must exactly correspond to the claimed source sentence" do
+    si = produced()
+    altered = Enum.map(si.tokens, fn
+      %{index: 4} = token -> %{token | phrase: "claims"}
+      token -> token
+    end)
+
+    assert DeclarativeProposition.interpret(%{si | tokens: altered}).reason ==
+             :unsupported_surface
+  end
+
   test "unsupported modal, mixed polarity, conjunction, and multiple sentences abstain" do
     for sentence <- [
       "Three links might have supported the claims.",
