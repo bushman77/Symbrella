@@ -15,6 +15,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
       source: :colony_external,
       post_id: "test-colony-post",
       reported_relation: :reported_refutation,
+      analysis_scope: :post_title,
       sentence_status: :not_yet_interpreted,
       grammar_outcome: :no_supported_grammar_pattern,
       proposition_status: :attributed_structural_interpretation,
@@ -33,6 +34,7 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognitionTest do
     assert result.grammar_outcome == :no_supported_grammar_pattern
     assert result.proposition_status == :attributed_structural_interpretation
     assert result.sentence_status == :not_yet_interpreted
+    assert result.analysis_scope == :post_title
     assert result.relation == :reported_refutation
     assert result.provenance == :author_claim_not_independently_verified
   end
