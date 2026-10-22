@@ -309,6 +309,8 @@ defmodule Core.Curiosity.ClarificationLoop do
     end
   end
 
+  def already_clarifies?(_, _), do: false
+
   # An already-approved question can also request the definition embedded
   # in a longer utterance ("tell me what a glimmerflux module is...").
   defp embedded_module_definition?(reply, term) do
@@ -326,8 +328,6 @@ defmodule Core.Curiosity.ClarificationLoop do
         reply
       )
   end
-
-  def already_clarifies?(_, _), do: false
 
   # :source is a pipeline execution mode (:prod) in Core.resolve_input.
   # User provenance is independently marked with :experience_origin.
