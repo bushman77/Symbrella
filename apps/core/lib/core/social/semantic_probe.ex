@@ -124,8 +124,7 @@ defmodule Core.Social.SemanticProbe do
           |> Enum.filter(&is_map/1)
           |> Enum.take(@max_choices)
 
-        {:ok,
-         %{
+        {%{
            status: :scored,
            chosen_count: length(choices),
            missing_candidates: Map.get(audit, :missing_candidates, 0),
@@ -133,13 +132,11 @@ defmodule Core.Social.SemanticProbe do
          }, selected}
 
       {:error, _} ->
-        {:ok, %{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
+        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
 
       _ ->
-        {:ok, %{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
+        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
     end
-    |> elem(1)
-    |> then(fn lifg -> {lifg, Map.get(lifg, :choices, [])} end)
   end
 
   defp compact_choice(choice) do
