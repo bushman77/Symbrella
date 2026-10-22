@@ -57,7 +57,10 @@ defmodule Core.Social.ObservationBridgeTest do
     assert semantic.acc_shadow.uncertain?
     assert semantic.acc_shadow.low_margin_choices == 1
     assert semantic.comprehension.understood == []
-    assert semantic.sentence_meaning.status == :not_verified
+    assert semantic.sentence_meaning.status == :not_yet_interpreted
+    assert semantic.sentence_meaning.provenance == :external_unverified
+    assert semantic.atl.status == :read_only_reduced
+    assert semantic.atl.winner_count == 1
   end
 
   test "posterior probability and winning margin stay separate in shadow summaries" do
@@ -192,7 +195,8 @@ defmodule Core.Social.ObservationBridgeTest do
     [row] = report.evaluations
     assert row.semantic.lifg.status == :unavailable
     assert row.semantic.acc_shadow.status == :unavailable
-    assert row.semantic.sentence_meaning.status == :not_verified
+    assert row.semantic.sentence_meaning.status == :not_yet_interpreted
+    assert row.semantic.atl.status == :read_only_reduced
     assert row.hippocampus.status == :unavailable
   end
 
