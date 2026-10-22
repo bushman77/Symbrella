@@ -55,7 +55,7 @@ defmodule Core.Social.ReportedProposition do
         evidence: [:exact_bounded_surface, :dictionary_pos, :noun_phrase_signatures,
                    :lifg_atl_lexical_agreement],
         # Indices are non-semantic evidence pointers, not raw text or BrainCells.
-        role_indices: Map.take(positions, [:checker, :links, :were, :lines, :refute, :claim])
+        role_indices: Map.take(positions, [:checker, :links, :were, :lines, :relative_verb, :claim])
       }
     else
       nil -> abstain(:unsupported_surface)
@@ -92,7 +92,7 @@ defmodule Core.Social.ReportedProposition do
       {:count, Integer.to_string(count)}, {:of, "of"}, {:determiner, determiner},
       {:checker, "checker"}, {:total, Integer.to_string(total)}, {:links, "links"},
       {:were, "were"}, {:lines, "lines"}, {:that, "that"},
-      {:refute, predicate}, {:the, "the"}, {:claim, "claim"}
+      {:relative_verb, predicate}, {:the, "the"}, {:claim, "claim"}
     ]
 
     tokens =
@@ -129,7 +129,7 @@ defmodule Core.Social.ReportedProposition do
   defp dictionary_roles(si, indices) do
     required = [
       {:checker, "noun"}, {:links, "noun"}, {:were, "verb"},
-      {:lines, "noun"}, {:refute, "verb"}, {:claim, "noun"}
+      {:lines, "noun"}, {:relative_verb, "verb"}, {:claim, "noun"}
     ]
 
     cells = Map.get(si, :active_cells, [])
@@ -170,7 +170,7 @@ defmodule Core.Social.ReportedProposition do
     cells = Map.get(si, :active_cells, [])
     required = [
       {:checker, "noun"}, {:links, "noun"}, {:were, "verb"},
-      {:lines, "noun"}, {:refute, "verb"}, {:claim, "noun"}
+      {:lines, "noun"}, {:relative_verb, "verb"}, {:claim, "noun"}
     ]
 
     # A selected winner can have a weak confidence margin, but its identity
