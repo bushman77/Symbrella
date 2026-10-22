@@ -518,8 +518,6 @@ defmodule Db do
     end)
   end
 
-  defp token_meta_by_idx(_tokens), do: %{}
-
   defp keep_ltm_row_for_token?(%BrainCell{} = row, %{norm: token_norm, surface: surface}) do
     row_pos = normalize_pos(row.pos)
     row_word = normalize_word(row.word)
