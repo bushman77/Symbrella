@@ -159,6 +159,34 @@ defmodule Core.Social.DeclarativePropositionTest do
              :missing_attested_dictionary_roles
   end
 
+  test "a bounded regular-past verb remains grammatical when dictionary omits form-of tags" do
+    for si <- [produced(), contradicted(), supported()] do
+      # Missing finite-past morphology is not missing grammatical evidence
+      # for these explicitly scoped, dictionary-attested regular-past forms.
+      si = %{si | sentence_signatures:
+        Enum.reject(si.sentence_signatures, &(&1.id == :finite_past_candidate))}
+      proposition = DeclarativeProposition.interpret(si)
+
+      assert proposition.status == :attributed_structural_interpretation
+      assert proposition.verification == :author_claim_not_independently_verified
+    end
+  end
+
+  test "an absent noun phrase is reported individually without guessing a parse" do
+    si = contradicted()
+    without_object = %{si | sentence_signatures: []}
+    result = DeclarativeProposition.interpret(without_object)
+
+    assert result.reason == :insufficient_grammatical_evidence
+    assert [%{determiner: 3, head: 5, witnessed?: false}] =
+             result.grammar_audit.noun_phrases
+  end
+
+  test "an unsupported predicate cannot bypass lexical selection via a surface shape" do
+    si = %{produced() | sentence: "The checker appeared 13 links."}
+    assert DeclarativeProposition.interpret(si).status == :not_interpreted
+  end
+
   test "missing syntactic evidence is not replaced with a plausible surface match" do
     si = produced()
     assert DeclarativeProposition.interpret(%{si | sentence_signatures: []}).reason ==
