@@ -35,7 +35,7 @@ defmodule Core.Social.DeclarativeProposition do
     # remains responsible for its own exact title construction.
     if length(nodes) in 4..8 and String.length(sentence) <= 420 and
          not String.contains?(sentence, [":", ";", "\n"]) and
-         simple_sentence?(sentence) do
+         simple_sentence?(sentence) and surface_tokens_agree?(sentence, nodes) do
       case parse(nodes) do
         {:ok, clause} ->
           with :ok <- attested_roles(si, clause.roles),
@@ -78,6 +78,20 @@ defmodule Core.Social.DeclarativeProposition do
     # are not within this first compositional family.
     body = sentence |> String.trim() |> String.trim_trailing(".")
     not String.contains?(body, [".", "?", "!", "\`"])
+  end
+
+  # All semantic roles must refer to the actual source surface, rather
+  # than caller-supplied token identities that happen to pass POS checks.
+  defp surface_tokens_agree?(sentence, nodes) do
+    from_surface =
+      sentence
+      |> then(&Regex.scan(~r/[\p{L}\p{N}]+/u, &1))
+      |> Enum.map(fn [word] -> String.downcase(word) end)
+
+    from_tokens = Enum.map(nodes, & &1.word)
+
+    from_surface == from_tokens and
+      Enum.all?(from_tokens, &Regex.match?(~r/\A[\p{L}\p{N}]+\z/u, &1))
   end
 
   defp parse(nodes) do
