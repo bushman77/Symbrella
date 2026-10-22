@@ -189,10 +189,10 @@ defmodule Core.Social.ObservationBridge do
     else
       {:error, :hippocampus_unavailable}
     end
-  catch
-    :exit, _ -> {:error, :hippocampus_unavailable}
   rescue
     _ -> {:error, :hippocampus_unavailable}
+  catch
+    :exit, _ -> {:error, :hippocampus_unavailable}
   end
 
   defp text(value, max) when is_binary(value) do
