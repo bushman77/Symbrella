@@ -162,8 +162,7 @@ defmodule Core.Social.ColonyConversation do
 
     # Read only live neuromodulator levels. Do NOT incorporate global working
     # memory, private conversation history, or previous personal episodes.
-    runtime = RuntimeContext.snapshot().runtime_state
-    modulators = Map.get(runtime, :neuromodulators, %{})
+    modulators = neuromodulator_levels()
     mood = RuntimeContext.mood_like()
 
     system_prompt =
@@ -233,6 +232,28 @@ defmodule Core.Social.ColonyConversation do
     _ -> {:error, :social_llm_unavailable}
   catch
     :exit, _ -> {:error, :social_llm_unavailable}
+  end
+
+  defp neuromodulator_levels do
+    # Deliberately avoid RuntimeContext.snapshot/0 here: that broader
+    # diagnostic also reads WM and self-state. Public replies need only
+    # bounded live neuromodulator levels, never private memory.
+    case Brain.MoodCore.snapshot() do
+      %{levels: levels} when is_map(levels) ->
+        %{
+          dopamine: Map.get(levels, :da),
+          serotonin: Map.get(levels, :"5ht"),
+          glutamate: Map.get(levels, :glu),
+          norepinephrine: Map.get(levels, :ne)
+        }
+
+      _ ->
+        %{}
+    end
+  rescue
+    _ -> %{}
+  catch
+    :exit, _ -> %{}
   end
 
   defp sanitize_draft(body) do
