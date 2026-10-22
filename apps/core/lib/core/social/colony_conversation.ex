@@ -278,9 +278,16 @@ defmodule Core.Social.ColonyConversation do
         other
     end
   rescue
-    _ -> {:error, :social_llm_unavailable}
+    _ ->
+      # Keep programmer/prompt construction errors distinct from llama-server
+      # transport errors; never serialize sensitive prompts in diagnostics.
+      Logger.warning("[ColonyConversation] generation failed before draft review (category=generation_exception)")
+      {:error, {:social_llm_unavailable, :generation_exception}}
   catch
-    :exit, _ -> {:error, :social_llm_unavailable}
+    :exit, reason ->
+      category = llm_exit_category(reason)
+      Logger.warning("[ColonyConversation] local generation exited (category=#{category})")
+      {:error, {:social_llm_unavailable, category}}
   end
 
   # Only a reason code, never the failed draft text, enters a repair prompt.
@@ -352,13 +359,38 @@ defmodule Core.Social.ColonyConversation do
             result
         end
 
-      {:error, _} ->
-        {:error, :social_llm_unavailable}
+      {:error, reason} ->
+        category = llm_failure_category(reason)
+        Logger.warning(
+          "[ColonyConversation] Llm.chat/2 failed (category=#{category}, repair=#{repair?})"
+        )
+        {:error, {:social_llm_unavailable, category}}
 
       _ ->
         {:error, :invalid_social_llm_response}
     end
   end
+
+  # Return only bounded error categories. In particular, Llm HTTP errors
+  # contain server-provided bodies, and model-not-found errors contain local
+  # filesystem paths. Neither may escape into Colony telemetry or logs.
+  defp llm_failure_category({:model_not_found, _}), do: :model_not_found
+  defp llm_failure_category(:missing_model_path), do: :missing_model_path
+  defp llm_failure_category(:lazy_start_disabled), do: :lazy_start_disabled
+  defp llm_failure_category(:not_ready_timeout), do: :model_not_ready
+  defp llm_failure_category({:http_status, status, _}) when status in 400..499,
+    do: :llm_http_client_error
+  defp llm_failure_category({:http_status, status, _}) when status in 500..599,
+    do: :llm_http_server_error
+  defp llm_failure_category({:http_status, _, _}), do: :llm_http_error
+  defp llm_failure_category(:timeout), do: :request_timeout
+  defp llm_failure_category(:econnrefused), do: :connection_refused
+  defp llm_failure_category(_), do: :llm_request_failed
+
+  defp llm_exit_category({:timeout, _}), do: :genserver_call_timeout
+  defp llm_exit_category({:noproc, _}), do: :llm_process_not_running
+  defp llm_exit_category({:normal, _}), do: :llm_process_exited
+  defp llm_exit_category(_), do: :llm_process_exit
 
   defp neuromodulator_levels do
     # Deliberately avoid RuntimeContext.snapshot/0 here: that broader
