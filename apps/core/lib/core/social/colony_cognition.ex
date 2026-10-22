@@ -182,6 +182,7 @@ defmodule Core.Social.ColonyCognition do
 
   defp brain_summary(semantic) do
     %{
+      analysis_scope: Map.get(semantic, :analysis_scope, :unspecified),
       lifg_status: get_in(semantic, [:lifg, :status]),
       lifg_choices: get_in(semantic, [:lifg, :chosen_count]),
       atl_winners: get_in(semantic, [:atl, :winner_count]),
