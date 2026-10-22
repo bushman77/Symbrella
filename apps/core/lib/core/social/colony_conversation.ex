@@ -177,7 +177,9 @@ defmodule Core.Social.ColonyConversation do
     probe = Keyword.get(opts, :probe, &SemanticProbe.run/2)
     excerpt = (discussion.title <> ". " <> discussion.body) |> String.slice(0, 420)
 
-    case probe.(excerpt, []) do
+    # The draft route emits one attributed event of its own; avoid a second
+    # anonymous standalone-probe event for the same read-only analysis.
+    case probe.(excerpt, emit_telemetry?: false) do
       {:ok, %{} = result} -> {:ok, result}
       {:error, _} -> {:ok, %{stage: :social_semantic_shadow, status: :unavailable}}
       _ -> {:ok, %{stage: :social_semantic_shadow, status: :unavailable}}
@@ -443,13 +445,18 @@ defmodule Core.Social.ColonyConversation do
         syntax_frames: length(cognition.brain.syntax_frames),
         dictionary_rows: Map.get(cognition.brain.grammar_audit, :dictionary_rows, 0),
         pos_covered_tokens: Map.get(cognition.brain.grammar_audit, :pos_covered_tokens, 0),
-        processed_tokens: Map.get(cognition.brain.grammar_audit, :processed_tokens, 0)
+        processed_tokens: Map.get(cognition.brain.grammar_audit, :processed_tokens, 0),
+        disputed_roles:
+          cognition.reported_proposition
+          |> Map.get(:role_audit, [])
+          |> Enum.count(&(Map.get(&1, :agreed?) == false))
       },
       %{
         grammar_outcome: Map.get(cognition.brain.grammar_audit, :outcome, :not_recorded),
         ltm_status: Map.get(cognition.brain.grammar_audit, :ltm_status, :not_recorded),
         ltm_reason: Map.get(cognition.brain.grammar_audit, :ltm_reason),
         proposition_status: Map.get(cognition.reported_proposition, :status, :not_interpreted),
+        proposition_reason: Map.get(cognition.reported_proposition, :reason),
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
