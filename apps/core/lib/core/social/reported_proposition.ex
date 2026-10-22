@@ -175,14 +175,17 @@ defmodule Core.Social.ReportedProposition do
     winners = Map.get(slate, :winners, [])
     cells = Map.get(si, :active_cells, [])
     required = [
-      {:checker, "noun"}, {:links, "noun"}, {:were, "verb"},
+      {:checker, "noun"}, {:links, "noun"}, {:were, "verb_or_auxiliary"},
       {:lines, "noun"}, {:relative_verb, "verb"}, {:claim, "noun"}
     ]
 
-    # Preserve the actual disagreement as bounded, inspectable evidence.
-    # A dictionary POS candidate is not equivalent to a LIFG/ATL selection.
+    # A copular be-form is a grammatical auxiliary even when the dictionary
+    # also has a "verb" entry. The built-in "were|auxiliary|0" sense is not a
+    # retrieved BrainCell; accept it only with *independent* surface, Core
+    # syntax and dictionary verb witnesses. Other roles still require exact
+    # agreement between the selected ID and a retrieved dictionary row.
     audit =
-      Enum.map(required, fn {role, pos} ->
+      Enum.map(required, fn {role, expected} ->
         index = Map.fetch!(indices, role)
 
         selected =
@@ -190,7 +193,11 @@ defmodule Core.Social.ReportedProposition do
             Map.get(winner, :token_index) == index
           end)
 
+        allowed_pos =
+          if expected == "verb_or_auxiliary", do: ["verb", "auxiliary"], else: [expected]
+
         attested? = fn id ->
+          pos = selected_pos(id)
           Enum.any?(cells, fn cell ->
             is_map(cell) and Map.get(cell, :token_index) == index and
               Map.get(cell, :id) == id and Map.get(cell, :pos) == pos
@@ -200,13 +207,16 @@ defmodule Core.Social.ReportedProposition do
         matched =
           Enum.filter(selected, fn winner ->
             id = Map.get(winner, :id)
-            selected_pos(id) == pos and attested?.(id)
+
+            selected_pos(id) in allowed_pos and
+              (attested?.(id) or
+                 (role == :were and copular_auxiliary_witness?(si, indices, id)))
           end)
 
         %{
           role: role,
           token_index: index,
-          expected_pos: pos,
+          expected_pos: expected,
           selected_pos:
             selected
             |> Enum.map(&selected_pos(Map.get(&1, :id)))
@@ -221,7 +231,7 @@ defmodule Core.Social.ReportedProposition do
             |> Enum.take(3),
           dictionary_pos_available?: Enum.any?(cells, fn cell ->
             is_map(cell) and Map.get(cell, :token_index) == index and
-              Map.get(cell, :pos) == pos
+              Map.get(cell, :pos) in allowed_pos
           end),
           selected_count: length(selected),
           agreed?: length(matched) == 1 and length(selected) == 1
@@ -234,6 +244,40 @@ defmodule Core.Social.ReportedProposition do
       {:error, :lifg_atl_role_disagreement, audit}
     end
   end
+
+  # The closed-class candidate is not claimed to be a retrieved dictionary
+  # sense. Its grammatical be-function is supported by a complete Core frame,
+  # the exact token surface, and an independently attested lexical be-form.
+  defp copular_auxiliary_witness?(si, indices, "were|auxiliary|0") do
+    index = Map.fetch!(indices, :were)
+
+    surface? =
+      Enum.any?(Map.get(si, :tokens, []), fn token ->
+        is_map(token) and Map.get(token, :index) == index and
+          normalize(Map.get(token, :phrase)) == "were"
+      end)
+
+    dictionary? =
+      Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+        is_map(cell) and Map.get(cell, :token_index) == index and
+          Map.get(cell, :pos) == "verb" and
+          normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == "were" and
+          is_binary(Map.get(cell, :id))
+      end)
+
+    grammar? =
+      Enum.any?(Map.get(si, :sentence_signatures, []), fn signature ->
+        Map.get(signature, :id) == :copular_relative_classification and
+          Map.get(signature, :source) == :core_syntax and
+          get_in(signature, [:roles, :copula]) == index and
+          get_in(signature, [:roles, :complement_head]) ==
+            Map.fetch!(indices, :lines)
+      end)
+
+    surface? and dictionary? and grammar?
+  end
+
+  defp copular_auxiliary_witness?(_, _, _), do: false
 
   defp selected_pos(id) when is_binary(id) do
     case String.split(id, "|", parts: 3) do
