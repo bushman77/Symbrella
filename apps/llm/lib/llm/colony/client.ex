@@ -1,6 +1,6 @@
 defmodule Llm.Colony.Client do
   @moduledoc """
-  Read-only Colony API client.
+  Colony API client with read-by-default behavior and separately gated comments.
 
   POST /auth/token is used solely to exchange the locally stored API key for
   a short-lived JWT. All account/content requests are GET. A new token is
@@ -60,6 +60,70 @@ defmodule Llm.Colony.Client do
          {:ok, result} <- feed(opts) do
       Context.from_feed(result, max_posts: config.max_posts)
     end
+  end
+
+  @post_id ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
+
+  @doc "Fetch the full discussion context (post plus existing comments)."
+  def thread_context(post_id, opts \\ [])
+
+  def thread_context(post_id, opts) when is_binary(post_id) and is_list(opts) do
+    with {:ok, config} <- Adapter.require_observe(),
+         :ok <- validate_opts(opts),
+         :ok <- valid_post_id(post_id) do
+      authorized_get("/posts/" <> post_id <> "/context", %{}, config, opts)
+    end
+  end
+
+  def thread_context(_, _), do: {:error, :invalid_post_id}
+
+  @doc """
+  Post one comment. This method is unusable in the default :observe mode,
+  and requires the separately opted-in :reviewed_comments permission.
+  Callers are responsible for an independently reviewed draft.
+  """
+  def reviewed_comment(post_id, body, opts \\ [])
+
+  def reviewed_comment(post_id, body, opts)
+      when is_binary(post_id) and is_binary(body) and is_list(opts) do
+    with {:ok, config} <- Adapter.require_reviewed_comments(),
+         :ok <- validate_opts(opts),
+         :ok <- valid_post_id(post_id),
+         :ok <- valid_comment(body) do
+      # Writes are deliberately never retried, including after 401.
+      with {:ok, token} <- exchange_token(config, opts) do
+        request =
+          request_opts("/posts/" <> post_id <> "/comments", config, opts)
+          |> Keyword.put(:auth, {:bearer, token})
+          |> Keyword.put(:json, %{body: String.trim(body)})
+
+        case Req.post(request) do
+          {:ok, %Req.Response{status: status, body: response}}
+          when status in 200..299 and is_map(response) ->
+            {:ok, response}
+
+          {:ok, %Req.Response{status: status}} when status in 200..299 ->
+            {:ok, %{status: :accepted}}
+
+          {:ok, %Req.Response{status: status}} ->
+            response_error(status)
+
+          {:error, _} ->
+            {:error, :transport_error}
+        end
+      end
+    end
+  end
+
+  def reviewed_comment(_, _, _), do: {:error, :invalid_comment}
+
+  defp valid_post_id(value) do
+    if Regex.match?(@post_id, value), do: :ok, else: {:error, :invalid_post_id}
+  end
+
+  defp valid_comment(value) do
+    size = String.length(String.trim(value))
+    if size in 1..1800, do: :ok, else: {:error, :invalid_comment}
   end
 
   defp posts_params(opts, max) do
