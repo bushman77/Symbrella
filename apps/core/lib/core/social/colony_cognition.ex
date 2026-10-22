@@ -18,7 +18,7 @@ defmodule Core.Social.ColonyCognition do
   Convert external observations and *actual* brain shadow results to a
   provenance-bound claim frame. Unresolved comprehension never becomes fact.
   """
-  def interpret(%{post_id: id, author: author, title: title} = discussion, semantic)
+  def interpret(%{post_id: id, author: author, title: title}, semantic)
       when is_binary(id) and is_binary(author) and is_binary(title) and is_map(semantic) do
     with :ok <- valid_author(author),
          :ok <- requires_brain_shadow(semantic),
