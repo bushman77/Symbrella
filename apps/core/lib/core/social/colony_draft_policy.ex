@@ -165,6 +165,28 @@ defmodule Core.Social.ColonyDraftPolicy do
     end
   end
 
+  # The local model can exceed the platform's character limit. Keep only
+  # complete leading sentences. Never silently invent a sentence ending.
+  # The full untruncated output is screened for credential patterns first.
+  defp fit_complete_sentences(draft) do
+    if String.length(draft) <= @max_chars do
+      draft
+    else
+      draft
+      |> String.split(~r/(?<=[.!?])\s+/u, trim: true)
+      |> Enum.reduce_while("", fn sentence, acc ->
+        candidate = if acc == "", do: sentence, else: acc <> " " <> sentence
+
+        if String.length(candidate) <= @max_chars and
+             Regex.match?(~r/[.!?]\z/u, String.trim(sentence)) do
+          {:cont, candidate}
+        else
+          {:halt, acc}
+        end
+      end)
+    end
+  end
+
   defp grounded_in_thread?(draft, source_text) do
     source = content_terms(source_text)
     response = content_terms(draft)
