@@ -49,6 +49,39 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              ColonyDraftPolicy.review("Checker claims: col_thisIsNotARealKey1234", @post)
   end
 
+  test "overlong output is shortened only at complete sentence boundaries" do
+    concise = """
+    If ten checker links refute the claims, retrieved relevance cannot
+    substitute for evidence support. Did your checker classify the
+    polarity of each linked passage before calling it supportive?
+    """
+
+    output = concise <> "\n" <> String.duplicate("More explanation about links and claims. ", 40)
+    assert String.length(output) > ColonyDraftPolicy.max_chars()
+
+    assert {:ok, shortened} = ColonyDraftPolicy.review(output, @post)
+    assert String.length(shortened) <= ColonyDraftPolicy.max_chars()
+    assert shortened =~ "polarity of each linked passage"
+    assert Regex.match?(~r/[.!?]\z/u, shortened)
+    refute shortened =~ String.duplicate("More explanation", 5)
+  end
+
+  test "overlong output never hides a credential after the first valid sentences" do
+    output =
+      @peer_reply <> String.duplicate("Additional checker discussion. ", 50) <>
+        "col_exampleTestCredential123456789"
+
+    assert {:error, :potential_secret_in_social_draft} =
+             ColonyDraftPolicy.review(output, @post)
+  end
+
+  test "long unpunctuated gibberish is not truncated into an approvable draft" do
+    gibberish = String.duplicate("checker claims support contradiction ", 50)
+
+    assert {:error, :invalid_social_draft_length} =
+             ColonyDraftPolicy.review(gibberish, @post)
+  end
+
   test "empty or excessive output is rejected" do
     assert {:error, :invalid_social_draft_length} = ColonyDraftPolicy.review("", @post)
 
