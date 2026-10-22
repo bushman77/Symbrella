@@ -244,7 +244,8 @@ defmodule Core.Social.DeclarativeProposition do
                 Map.get(cell, :token_index) == index and
                 Map.get(cell, :pos) == pos
             end) or
-              (role == :auxiliary and did_auxiliary_witness?(si, index, id))
+              (role == :auxiliary and did_auxiliary_witness?(si, index, id)) or
+              (role == :negator and negation_particle_witness?(si, index, id))
           end)
 
         %{
@@ -306,6 +307,37 @@ defmodule Core.Social.DeclarativeProposition do
   end
 
   defp did_auxiliary_witness?(_, _, _), do: false
+
+  # In Stage1, "not" is a negation *particle*, whereas Wiktextract
+  # commonly lists it as an adverb. The closed-class grammatical winner
+  # is admissible only for the exact did/not surface and an independently
+  # retrieved lexicon entry at the same token index. No sense is fabricated.
+  defp negation_particle_witness?(si, index, "not|particle|0") do
+    tokens = Map.get(si, :tokens, [])
+    cells = Map.get(si, :active_cells, [])
+
+    exact_surface? =
+      Enum.any?(tokens, fn token ->
+        is_map(token) and Map.get(token, :index) == index and
+          normalize(Map.get(token, :phrase)) == "not"
+      end) and
+        Enum.any?(tokens, fn token ->
+          is_map(token) and Map.get(token, :index) == index - 1 and
+            normalize(Map.get(token, :phrase)) == "did"
+        end)
+
+    dictionary? =
+      Enum.any?(cells, fn cell ->
+        is_map(cell) and Map.get(cell, :token_index) == index and
+          Map.get(cell, :pos) in ["adverb", "particle"] and
+          normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == "not" and
+          is_binary(Map.get(cell, :id))
+      end)
+
+    exact_surface? and dictionary?
+  end
+
+  defp negation_particle_witness?(_, _, _), do: false
 
   defp complete_grammar(si, clause) do
     signatures = Map.get(si, :sentence_signatures, [])
