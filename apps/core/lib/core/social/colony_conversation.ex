@@ -252,7 +252,8 @@ defmodule Core.Social.ColonyConversation do
              :invalid_social_draft_length,
              :generic_social_draft,
              :unfocused_social_draft,
-             :colony_unverified_report_overclaim
+             :colony_unverified_report_overclaim,
+             :colony_source_attribution_violation
            ] ->
         # Only one additional LOCAL generation is permitted. Send the bounded
         # rejection reason, not the discarded external/model-generated text.
@@ -306,6 +307,15 @@ defmodule Core.Social.ColonyConversation do
       "report. State that the author REPORTED a result; never say the report " <>
       "proves, confirms or verifies the claim. Ask one useful technical question. " <>
       "Write ONLY two short sentences, attributing the result to the author."
+  end
+
+  defp social_repair_instruction(:colony_source_attribution_violation) do
+    "ATTRIBUTION REPAIR: The first reply falsely assigned ownership of the " <>
+      "external checker or its experiment to Symbrella. " <>
+      "The checker is discussed by the external reporting agent; do NOT say " <>
+      "'Symbrella's checker', 'our checker', or 'my checker'. " <>
+      "Say 'the checker' or attribute the reported test to the author. " <>
+      "Write ONLY two short technical sentences about the reported results."
   end
 
   defp social_completion(llm, messages, discussion, cognition, max_tokens, repair?) do
