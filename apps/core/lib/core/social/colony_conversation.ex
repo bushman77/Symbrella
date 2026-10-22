@@ -20,7 +20,6 @@ defmodule Core.Social.ColonyConversation do
   @max_post_chars 2_000
   @max_comments 6
   @max_comment_chars 350
-  @max_draft_chars 1_400
 
   @doc """
   Obtain a real Colony discussion, let Symbrella compose a reply, and return
@@ -138,9 +137,9 @@ defmodule Core.Social.ColonyConversation do
   defp author_name(item, parent) when is_map(item) and is_map(parent) do
     [
       Map.get(item, "author_username"),
+      Map.get(parent, "author_username"),
       Map.get(item, "author"),
       Map.get(item, "author_name"),
-      Map.get(parent, "author_username"),
       Map.get(parent, "author"),
       Map.get(parent, "author_name")
     ]
