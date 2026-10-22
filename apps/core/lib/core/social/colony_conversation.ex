@@ -175,12 +175,22 @@ defmodule Core.Social.ColonyConversation do
 
   defp shadow_probe(discussion, opts) do
     probe = Keyword.get(opts, :probe, &SemanticProbe.run/2)
-    excerpt = (discussion.title <> ". " <> discussion.body) |> String.slice(0, 420)
+    # This pass checks the post's *reported title proposition*. Combining
+    # title + body consumes the bounded token budget and repeats common
+    # words, obscuring which token carries each attested grammatical role.
+    # The full body and replies remain separate, untrusted LLM discussion
+    # context, not additional evidence for title grammar.
+    {scope, excerpt} =
+      if String.trim(discussion.title) != "" do
+        {:post_title, String.slice(discussion.title, 0, 420)}
+      else
+        {:post_body_fallback, String.slice(discussion.body, 0, 420)}
+      end
 
     # The draft route emits one attributed event of its own; avoid a second
     # anonymous standalone-probe event for the same read-only analysis.
     case probe.(excerpt, emit_telemetry?: false) do
-      {:ok, %{} = result} -> {:ok, result}
+      {:ok, %{} = result} -> {:ok, Map.put(result, :analysis_scope, scope)}
       {:error, _} -> {:ok, %{stage: :social_semantic_shadow, status: :unavailable}}
       _ -> {:ok, %{stage: :social_semantic_shadow, status: :unavailable}}
     end
@@ -426,6 +436,7 @@ defmodule Core.Social.ColonyConversation do
       atl_winners: get_in(semantic, [:atl, :winner_count]),
       sentence_status: get_in(semantic, [:sentence_meaning, :status]),
       reported_proposition_status: get_in(semantic, [:reported_proposition, :status]),
+      analysis_scope: Map.get(semantic, :analysis_scope, :unspecified),
       verification: :external_assertions_not_verified
     }
   end
@@ -489,6 +500,7 @@ defmodule Core.Social.ColonyConversation do
         ltm_reason: Map.get(cognition.brain.grammar_audit, :ltm_reason),
         proposition_status: Map.get(cognition.reported_proposition, :status, :not_interpreted),
         proposition_reason: Map.get(cognition.reported_proposition, :reason),
+        analysis_scope: :post_title,
         source: :colony_external,
         post_id: cognition.post_id,
         reported_relation: cognition.evidence_relation,
