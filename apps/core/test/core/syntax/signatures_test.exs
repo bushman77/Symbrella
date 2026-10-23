@@ -53,6 +53,37 @@ defmodule Core.Syntax.SignaturesTest do
     |> Enum.map(& &1.id)
   end
 
+  test "complete attested regular-past transitive frame distinguishes predicate from noun reading" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "checker", pos: "noun"},
+      %{norm: "verified", pos: "noun"},
+      %{norm: "verified", pos: "verb"},
+      %{norm: "those", pos: "determiner"},
+      %{norm: "claims", pos: "noun"}
+    ]
+
+    complete = Signatures.detect(input("The checker verified those claims.", cells))
+
+    assert %{id: :bounded_regular_past_transitive,
+             roles: %{subject_head: 1, predicate: 2, object_head: 4},
+             source: :core_syntax} =
+             Enum.find(complete, &(&1.id == :bounded_regular_past_transitive))
+
+    for sentence <- [
+          "The checker verified.",
+          "The checker not verified those claims.",
+          "The checker might verify those claims.",
+          "The checker classified those claims."
+        ] do
+      refute :bounded_regular_past_transitive in ids(sentence, cells)
+    end
+
+    refute :bounded_regular_past_transitive in
+             ids("The checker verified those claims.",
+               Enum.reject(cells, &(&1.norm == "verified" and &1.pos == "verb")))
+  end
+
   test "complete copular relative clause witnesses a lower-case noun complement" do
     cells = [
       %{norm: "links", pos: "noun"},
