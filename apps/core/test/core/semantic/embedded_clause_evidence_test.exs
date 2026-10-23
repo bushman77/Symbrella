@@ -99,6 +99,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
       %{nominal | status: :partially_resolved},
       %{nominal | span: {6, 7}},
       put_in(nominal, [:roles, :head, :sense_id], nil),
+      put_in(nominal, [:roles, :head, :sense_id], "group|noun|fallback"),
       put_in(nominal, [:roles, :head, :selection_scope], :lexical_mwe)
     ] do
       input = put_in(base, [:atl_slate, :constituents], [altered])
