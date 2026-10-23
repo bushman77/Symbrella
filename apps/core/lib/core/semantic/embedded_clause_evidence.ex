@@ -42,6 +42,10 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
              a >= first and b <= last and a < b ->
         with {:ok, aux} <- surface_at(surfaces, a),
              {:ok, verb} <- surface_at(surfaces, b) do
+          subject_candidate = adjacent_nominal_candidate(constituents, surfaces, first, a)
+          subject_diagnostic =
+            subject_diagnostic(si, constituents, winners, surfaces, first, a, subject_candidate)
+
           [%{
             construction: :perfect_predicate,
             status: :syntactic_candidate_only,
@@ -53,7 +57,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             grammatical_evidence: signature |> Map.get(:evidence, []) |> List.wrap()
               |> Enum.take(6),
             subject: :unresolved,
-            subject_candidate: adjacent_nominal_candidate(constituents, surfaces, first, a),
+            subject_candidate: subject_candidate,
+            subject_diagnostic: subject_diagnostic,
             subject_binding_status: :unresolved,
             embedded_clause_status: :not_interpreted,
             assertion_status: :not_asserted,
@@ -114,6 +119,92 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       end
     end)
   end
+
+  # Explain abstention from the already observed signatures, ATL reductions,
+  # and selected lexical hypotheses. No new constituent or sense is produced.
+  defp subject_diagnostic(si, constituents, winners, surfaces, topic_start, auxiliary_index, candidate) do
+    preceding = auxiliary_index - 1
+    window_start = max(topic_start, auxiliary_index - 4)
+
+    indices =
+      if preceding >= window_start, do: Enum.to_list(window_start..preceding), else: []
+
+    window =
+      Enum.flat_map(indices, fn index ->
+        case surface_at(surfaces, index) do
+          {:ok, surface} ->
+            id = selected_id(winners, index)
+
+            [%{
+              index: index,
+              surface: surface,
+              selected_sense_id: id,
+              selected_pos: sense_pos(id)
+            }]
+
+          _ ->
+            []
+        end
+      end)
+
+    signatures =
+      si
+      |> Map.get(:sentence_signatures, [])
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        %{id: :noun_phrase, span: {start, ^preceding}}
+        when is_integer(start) and start >= topic_start ->
+          [%{span: {start, preceding}}]
+
+        _ ->
+          []
+      end)
+      |> Enum.take(6)
+
+    atl =
+      constituents
+      |> Enum.flat_map(fn
+        %{id: :noun_phrase, span: {start, ^preceding}} = item
+        when is_integer(start) and start >= topic_start ->
+          [%{
+            span: {start, preceding},
+            status: Map.get(item, :status, :unknown),
+            unresolved_roles: item |> Map.get(:unresolved_roles, []) |> List.wrap()
+              |> Enum.take(6)
+          }]
+
+        _ ->
+          []
+      end)
+      |> Enum.take(6)
+
+    reason =
+      cond do
+        is_map(candidate) -> :adjacent_nominal_candidate_available
+        signatures == [] -> :no_adjacent_noun_phrase_signature
+        atl == [] -> :noun_phrase_not_resolved_by_atl
+        Enum.any?(atl, &(&1.status != :resolved)) -> :atl_nominal_unresolved
+        true -> :resolved_nominal_failed_candidate_checks
+      end
+
+    %{
+      status: reason,
+      token_window: window,
+      adjacent_noun_signatures: signatures,
+      adjacent_atl_noun_phrases: atl,
+      selected_senses_are_hypotheses?: true,
+      subject_binding_status: :unresolved
+    }
+  end
+
+  defp sense_pos(id) when is_binary(id) do
+    case String.split(id, "|", parts: 3) do
+      [_lemma, pos, _sense] -> pos
+      _ -> nil
+    end
+  end
+
+  defp sense_pos(_), do: nil
 
   defp indexed_surfaces(tokens) when is_list(tokens) do
     tokens
