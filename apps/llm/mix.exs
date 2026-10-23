@@ -12,9 +12,11 @@ defmodule Llm.MixProject do
     ]
   end
 
-  # No Application module here — nothing auto-starts.
+  # Supervise temporary Colony access tokens in RAM. No network calls
+  # occur until an explicit API read or separately authorized social write.
   def application do
     [
+      mod: {Llm.Application, []},
       extra_applications: [:logger, :ssl]
     ]
   end
