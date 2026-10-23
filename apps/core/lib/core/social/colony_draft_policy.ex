@@ -198,8 +198,8 @@ defmodule Core.Social.ColonyDraftPolicy do
             else: "(?:" <> Integer.to_string(count) <> "|" <> lexical_count <> ")"
 
         pattern =
-          "\b" <> count_prefix <> "\s+" <> Regex.escape(subject) <>
-            "\s+(?:supported|supports|have\s+supported|did\s+support)\b"
+          "\\b" <> count_prefix <> "\\s+" <> Regex.escape(subject) <>
+            "\\s+(?:supported|supports|have\\s+supported|did\\s+support)\\b"
 
         case Regex.compile(pattern, "iu") do
           {:ok, regex} ->
