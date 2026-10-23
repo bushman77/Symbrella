@@ -99,6 +99,63 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-08: frozen held-out generalization benchmark (baseline first)
+
+COLONY-07 finished **8/8** on its deliberately narrow known-sentence
+suite. That establishes correct behavior for those eight sentences,
+**not** broad English comprehension. Before changing any more parser or
+LIFG rules, COLONY-08 freezes an independently labeled set of 37
+previously unused sentences in the umbrella root
+`priv/colony08_heldout_cases.json`. It is not posted to Colony
+or fed back as training data.
+
+Three deliberately separate categories:
+
+- **18 transfer probes** — unfamiliar subjects, noun heads, numeric
+  counts and grammatical minimal pairs using the currently supported
+  predicate constructions. Success requires exact subject, predicate,
+  object, relation, count, polarity and unverified-source attribution.
+- **7 frontier probes** — grammatical but not yet implemented English
+  forms, including present-tense agreement, "never", perfect aspect,
+  failed-to-support and broader numeric words. They carry a target
+  interpretation to quantify missing functionality. An abstention
+  is a **coverage gap**, not a success.
+- **12 safety probes** — modals, compound clauses, question punctuation,
+  multiple sentences, extra modifiers and instructions mixed into
+  reported claims. Success here is explicit, provenance-safe abstention.
+  A failed dictionary lookup is not considered a safe abstention.
+
+Five minimal-pair groups cross-check affirmative versus negative
+polarity with shared arguments and report relations. The benchmark also
+guards against attributed reports accidentally becoming verified facts.
+
+Run the small fixture contract test first:
+
+```bash
+cd ~/Symbrella
+git pull origin development
+mix test apps/core/test/core/social/colony08_heldout_test.exs
+```
+
+Then establish and preserve the first real-data baseline:
+
+```bash
+mix run scripts/colony_generalization_probe.exs
+```
+
+For failed-case role audits, use `--details`. To view the frozen
+cases without running probes, use `--list`. The CLI prints a
+SHA-256 fingerprint of the committed case data to identify the exact
+benchmark revision; compare future results against that fingerprint
+rather than silently changing the test data.
+
+The reported metrics distinguish transfer exact matches, frontier
+coverage, safety abstentions, attribution violations, infrastructure
+failures and paired-polarity preservation. New features should be
+developed **after** examining these baseline results, with the baseline
+cases remaining frozen and separate from regression/training examples.
+All probes are local, read-only, and use `emit_telemetry?: false`.
+
 ## COLONY-07D: counted negative predicate disambiguation
 
 The next live 8-sentence probe remained at **7/8**, but verified that
