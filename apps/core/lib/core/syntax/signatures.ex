@@ -83,6 +83,7 @@ defmodule Core.Syntax.Signatures do
 
     (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
+       counted_present_svo(nodes) ++
        copular_relative_classifications(nodes) ++
        bounded_past_transitives(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
@@ -130,14 +131,18 @@ defmodule Core.Syntax.Signatures do
         candidate = %{
           pos: MapSet.new([pos]),
           morphology: morphology(get(cell, :semantic_atoms)),
-          finite_present_verb?: pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms))
+          finite_present_verb?: pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms)),
+          plural_noun?: pos == "noun" and plural_noun?(get(cell, :semantic_atoms)),
+          base_present_verb?: pos == "verb" and base_present_verb?(get(cell, :semantic_atoms))
         }
 
         Map.update(acc, word, candidate, fn existing ->
           %{
             pos: MapSet.union(existing.pos, candidate.pos),
             morphology: MapSet.union(existing.morphology, candidate.morphology),
-            finite_present_verb?: existing.finite_present_verb? or candidate.finite_present_verb?
+            finite_present_verb?: existing.finite_present_verb? or candidate.finite_present_verb?,
+            plural_noun?: existing.plural_noun? or candidate.plural_noun?,
+            base_present_verb?: existing.base_present_verb? or candidate.base_present_verb?
           }
         end)
       end
@@ -174,6 +179,17 @@ defmodule Core.Syntax.Signatures do
 
   defp finite_present_verb?(_), do: false
 
+  defp plural_noun?(tags) when is_list(tags),
+    do: "tag:form-of" in tags and "tag:plural" in tags
+  defp plural_noun?(_), do: false
+
+  # An uninflected base-form verb is compatible with a plural-present
+  # subject only when the original dictionary row attests verb POS.
+  # Inflected/past/participle forms cannot be promoted to base verbs.
+  defp base_present_verb?(tags) when is_list(tags),
+    do: not Enum.any?(tags, &(&1 in ["tag:form-of", "tag:past", "tag:participle"]))
+  defp base_present_verb?(_), do: false
+
   # Base tokens only; never treat MWE phrase windows as individual words.
   # Keep each original token index even when filtering punctuation.
   defp base_nodes(tokens, lexicon) when is_list(tokens) do
@@ -197,7 +213,9 @@ defmodule Core.Syntax.Signatures do
           Map.get(lexicon, word, %{
             pos: MapSet.new(),
             morphology: MapSet.new(),
-            finite_present_verb?: false
+            finite_present_verb?: false,
+            plural_noun?: false,
+            base_present_verb?: false
           })
         [
           %{
@@ -206,7 +224,9 @@ defmodule Core.Syntax.Signatures do
             surface: get(token, :phrase),
             pos: entry.pos,
             morphology: entry.morphology,
-            finite_present_verb?: entry.finite_present_verb?
+            finite_present_verb?: entry.finite_present_verb?,
+            plural_noun?: entry.plural_noun?,
+            base_present_verb?: entry.base_present_verb?
           }
         ]
       end
@@ -640,7 +660,7 @@ defmodule Core.Syntax.Signatures do
         third_person_subject? =
           if MapSet.member?(subject.pos, "pronoun"),
             do: MapSet.member?(@third_person_singular_pronouns, subject.word),
-            else: true
+            else: not subject.plural_noun?
 
         if compatible? and third_person_subject? and predicate.finite_present_verb? and
              valid_surface?(segment) do
@@ -659,6 +679,41 @@ defmodule Core.Syntax.Signatures do
           []
         end
       end)
+    end)
+  end
+
+  # Counted plural SVO: "Four reports support the claims".
+  # The number alone is not number agreement. Require original dictionary
+  # morphology for the plural noun AND an attested uninflected verb.
+  defp counted_present_svo(nodes) do
+    nodes
+    |> Enum.chunk_every(5, 1, :discard)
+    |> Enum.flat_map(fn [count, subject, predicate, det, object] = segment ->
+      counted_plural? =
+        case Integer.parse(count.word) do
+          {n, ""} when n in 2..999 -> true
+          _ -> count.word in ~w(two three four five six seven eight nine ten eleven twelve thirteen)
+        end
+
+      if counted_plural? and pos?(subject, "noun") and subject.plural_noun? and
+           pos?(predicate, "verb") and predicate.base_present_verb? and
+           MapSet.member?(@determiners, det.word) and
+           pos?(det, "determiner") and pos?(object, "noun") and
+           valid_surface?(segment) do
+        [signature(
+           :counted_finite_present_svo_candidate,
+           {count.index, object.index},
+           %{count: count.index, subject_head: subject.index,
+             predicate: predicate.index, object_determiner: det.index,
+             object_head: object.index},
+           %{subject_head: [:pos_noun], predicate: [:pos_verb],
+             object_head: [:pos_noun]},
+           [:contiguous_surface, :attested_counted_plural_subject,
+            :attested_base_present_verb, :attested_nominal_object]
+         )]
+      else
+        []
+      end
     end)
   end
 
