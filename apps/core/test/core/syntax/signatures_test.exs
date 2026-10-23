@@ -533,6 +533,46 @@ defmodule Core.Syntax.SignaturesTest do
                &(&1.id == :wh_aux_topic_question))
     end
   end
+  test "counted plural present SVO requires attested plural noun and base verb" do
+    cells = [
+      %{norm: "reports", pos: "noun",
+        semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{norm: "support", pos: "noun", semantic_atoms: []},
+      %{norm: "support", pos: "verb", semantic_atoms: []},
+      %{norm: "the", pos: "determiner", semantic_atoms: []},
+      %{norm: "claims", pos: "noun", semantic_atoms: []}
+    ]
+
+    sentence = "Four reports support the claims."
+    assert [%{id: :counted_finite_present_svo_candidate,
+             span: {0, 4},
+             roles: %{count: 0, subject_head: 1, predicate: 2,
+                      object_determiner: 3, object_head: 4},
+             source: :core_syntax}] =
+             Signatures.detect(input(sentence, cells))
+             |> Enum.filter(&(&1.id == :counted_finite_present_svo_candidate))
+
+    no_plural = Enum.reject(cells, &(&1.norm == "reports"))
+    no_verb = Enum.reject(cells, &(&1.norm == "support" and &1.pos == "verb"))
+    past_form =
+      Enum.map(cells, fn
+        %{norm: "support", pos: "verb"} = cell ->
+          %{cell | semantic_atoms: ["tag:form-of", "tag:past"]}
+        cell -> cell
+      end)
+
+    for bad <- [no_plural, no_verb, past_form] do
+      refute :counted_finite_present_svo_candidate in ids(sentence, bad)
+    end
+
+    refute :counted_finite_present_svo_candidate in
+             ids("One report support the claims.", cells)
+    refute :counted_finite_present_svo_candidate in
+             ids("Four reports might support the claims.", cells)
+    refute :counted_finite_present_svo_candidate in
+             ids("Four reports support. the claims.", cells)
+  end
+
   test "finite present subject–verb–object clause uses exact verb morphology" do
     cells = [
       %{norm: "the", pos: "determiner"},
