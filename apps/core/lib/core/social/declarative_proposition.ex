@@ -126,15 +126,14 @@ defmodule Core.Social.DeclarativeProposition do
 
       [det, subject, verb, object_det, object]
       when det in @determiners and object_det in @determiners ->
-        with :ok <- supported_affirmative_verb(verb),
-             {:ok, relation} <- affirmative_relation(verb) do
+        with {:ok, construction, relation, grammar} <- affirmative_clause(verb) do
           clause(
-            :affirmative_transitive, subject, verb, object,
+            construction, subject, verb, object,
             relation, :positive, nil,
             [noun_role(:subject, nodes, 1), verb_role(nodes, 2),
              noun_role(:object, nodes, 4)],
             [{0, 1}, {3, 4}],
-            [:determined_subject, :attested_past_action, :determined_object]
+            grammar
           )
         end
 
@@ -168,15 +167,14 @@ defmodule Core.Social.DeclarativeProposition do
 
       [number, subject, verb, det, object] when det in @determiners ->
         with {:ok, count} <- number(number),
-             :ok <- supported_verb(verb),
-             {:ok, relation} <- evidence_relation(verb) do
+             {:ok, construction, relation, grammar} <- counted_clause(verb, count) do
           clause(
-            :counted_transitive, subject, verb, object,
+            construction, subject, verb, object,
             relation, :positive, count,
             [noun_role(:subject, nodes, 1), verb_role(nodes, 2),
              noun_role(:object, nodes, 4)],
             [{3, 4}],
-            [:counted_subject, :past_action, :determined_object]
+            grammar
           )
         end
 
@@ -240,6 +238,48 @@ defmodule Core.Social.DeclarativeProposition do
         end
     end
   end
+
+  # Do not equate present with past merely because a lexical surface has
+  # an attested verb POS. Finite-present roles are admitted only later with
+  # independent Core morphology and sentence signatures.
+  defp affirmative_clause(verb) when verb in ~w(verifies supports refutes contradicts) do
+    with {:ok, relation} <- present_relation(verb) do
+      {:ok, :finite_present_transitive, relation,
+       [:determined_subject, :finite_present, :determined_object]}
+    end
+  end
+
+  defp affirmative_clause(verb) do
+    with :ok <- supported_affirmative_verb(verb),
+         {:ok, relation} <- affirmative_relation(verb) do
+      {:ok, :affirmative_transitive, relation,
+       [:determined_subject, :attested_past_action, :determined_object]}
+    end
+  end
+
+  defp counted_clause(verb, count) when verb in ~w(verify support refute contradict) do
+    with true <- count >= 2 or {:error, :unsupported_subject_verb_agreement},
+         {:ok, relation} <- present_relation(verb) do
+      {:ok, :counted_present_transitive, relation,
+       [:counted_plural_subject, :finite_present, :determined_object]}
+    end
+  end
+
+  defp counted_clause(verb, _count) do
+    with :ok <- supported_verb(verb),
+         {:ok, relation} <- evidence_relation(verb) do
+      {:ok, :counted_transitive, relation,
+       [:counted_subject, :past_action, :determined_object]}
+    end
+  end
+
+  defp present_relation(verb) when verb in ~w(support supports),
+    do: {:ok, :reported_support}
+  defp present_relation(verb) when verb in ~w(refute refutes contradict contradicts),
+    do: {:ok, :reported_refutation}
+  defp present_relation(verb) when verb in ~w(verify verifies),
+    do: {:ok, :reported_action}
+  defp present_relation(_), do: {:error, :unsupported_evidence_relation}
 
   # The contrastive pilot keeps a closed set of verb surfaces.
   # These choices describe grammatical claims, never verified events.
@@ -468,16 +508,68 @@ defmodule Core.Social.DeclarativeProposition do
             is_binary(Map.get(cell, :id))
         end)
 
+    finite_present? =
+      clause.construction == :finite_present_transitive and
+        Enum.any?(signatures, fn sig ->
+          Map.get(sig, :id) == :finite_present_svo_candidate and
+            Map.get(sig, :source) == :core_syntax and
+            Map.get(sig, :span) == {0, 4} and
+            get_in(sig, [:roles, :subject_head]) == Map.get(indices, :subject) and
+            get_in(sig, [:roles, :predicate]) == Map.get(indices, :predicate) and
+            get_in(sig, [:roles, :object_head]) == Map.get(indices, :object) and
+            Enum.all?([:contiguous_surface, :attested_nominal_subject,
+                       :attested_nominal_object, :attested_finite_present_verb],
+              &(&1 in Map.get(sig, :evidence, [])))
+        end) and
+        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
+            Map.get(cell, :pos) == "verb" and
+            normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
+            Enum.all?(["tag:form-of", "tag:indicative", "tag:present",
+                       "tag:singular", "tag:third-person"], &(&1 in tags))
+        end)
+
+    counted_present? =
+      clause.construction == :counted_present_transitive and
+        Enum.any?(signatures, fn sig ->
+          Map.get(sig, :id) == :counted_finite_present_svo_candidate and
+            Map.get(sig, :source) == :core_syntax and
+            Map.get(sig, :span) == {0, 4} and
+            get_in(sig, [:roles, :subject_head]) == Map.get(indices, :subject) and
+            get_in(sig, [:roles, :predicate]) == Map.get(indices, :predicate) and
+            get_in(sig, [:roles, :object_head]) == Map.get(indices, :object) and
+            Enum.all?([:contiguous_surface, :attested_counted_plural_subject,
+                       :attested_base_present_verb, :attested_nominal_object],
+              &(&1 in Map.get(sig, :evidence, [])))
+        end) and
+        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :subject) and
+            Map.get(cell, :pos) == "noun" and
+            "tag:form-of" in tags and "tag:plural" in tags
+        end) and
+        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
+            Map.get(cell, :pos) == "verb" and
+            normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
+            not Enum.any?(["tag:form-of", "tag:past", "tag:participle"],
+              &(&1 in tags))
+        end)
+
     predicate_supported? =
       clause.construction in [:explicit_negated_transitive,
                               :counted_negated_transitive] or
-        past_morphology? or bounded_past?
+        past_morphology? or bounded_past? or finite_present? or counted_present?
 
     audit = %{
       noun_phrases: noun_audit,
       predicate_index: Map.get(indices, :predicate),
       finite_past_signature?: past_morphology?,
       bounded_regular_past_surface?: bounded_past?,
+      finite_present_signature?: finite_present?,
+      counted_present_signature?: counted_present?,
       predicate_supported?: predicate_supported?
     }
 
