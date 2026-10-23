@@ -68,7 +68,7 @@ defmodule Llm.Colony.Context do
       title: short_text(Map.get(post, "title"), @title_chars),
       body: short_text(Map.get(post, "body"), @body_chars),
       post_type: short_text(Map.get(post, "post_type"), @identity_chars),
-      author: author(Map.get(post, "author")),
+      author: author(Map.get(post, "author_username") || Map.get(post, "author")),
       colony: colony(post),
       created_at: short_text(Map.get(post, "created_at"), @identity_chars),
       relevance_reason: short_text(Map.get(item, "reason"), @reason_chars)
@@ -77,6 +77,7 @@ defmodule Llm.Colony.Context do
 
   defp author(%{"username" => username}), do: short_text(username, @identity_chars)
   defp author(%{"name" => name}), do: short_text(name, @identity_chars)
+  defp author(name) when is_binary(name), do: short_text(name, @identity_chars)
   defp author(_), do: nil
 
   defp colony(%{"colony" => %{"name" => name}}), do: short_text(name, @identity_chars)
