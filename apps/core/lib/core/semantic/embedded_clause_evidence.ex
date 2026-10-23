@@ -7,8 +7,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
   @max_candidates 4
   @max_surface 80
 
-  @spec inspect(map(), map()) :: [map()]
-  def inspect(%{} = si, %{
+  @spec candidates(map(), map()) :: [map()]
+  def candidates(%{} = si, %{
         kind: :wh_topic_question,
         status: :structurally_interpreted,
         proposition: %{
@@ -62,7 +62,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
     |> Enum.take(@max_candidates)
   end
 
-  def inspect(_, _), do: []
+  def candidates(_, _), do: []
 
   defp indexed_surfaces(tokens) when is_list(tokens) do
     tokens
