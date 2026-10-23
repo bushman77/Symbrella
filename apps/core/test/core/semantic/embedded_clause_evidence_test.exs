@@ -47,6 +47,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert candidate.predicate.candidate_sense_id == "grow|verb|1"
     assert candidate.subject == :unresolved
     assert candidate.subject_candidate == nil
+    assert candidate.relation_candidate == nil
     assert candidate.subject_binding_status == :unresolved
     assert candidate.embedded_clause_status == :not_interpreted
     assert candidate.assertion_status == :not_asserted
@@ -214,6 +215,18 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert result.subject_candidate.attachment_status == :unverified
     assert result.subject_candidate.coreference_status == :unresolved
     assert result.assertion_status == :not_asserted
+    assert result.relation_candidate.type == :embedded_perfect_clause_candidate
+    assert result.relation_candidate.status == :question_scoped_structural_relation_candidate
+    assert result.relation_candidate.surface == "the gathered had grown"
+    assert result.relation_candidate.span == {7, 10}
+    assert result.relation_candidate.subject.identity == :unresolved
+    assert result.relation_candidate.subject.lexical_head_sense_id == "gathered|adjective|1"
+    assert result.relation_candidate.predicate.selected_sense_id == "grow|verb|1"
+    assert result.relation_candidate.scope == :unparsed_information_request_complement
+    assert result.relation_candidate.attachment_status == :unverified
+    assert result.relation_candidate.assertion_status == :not_asserted
+    assert result.relation_candidate.embedded_clause_status == :not_fully_interpreted
+    assert result.relation_candidate.remainder_status == :not_interpreted
 
     for changed <- [
       %{nomination | status: :partially_resolved},
@@ -223,8 +236,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
       %{nomination | span: {6, 7}}
     ] do
       invalid = put_in(candidate_input, [:atl_slate, :constituents], [changed])
-      assert [%{subject_candidate: nil, subject_binding_status: :unresolved,
-        assertion_status: :not_asserted}] =
+      assert [%{subject_candidate: nil, relation_candidate: nil,
+        subject_binding_status: :unresolved, assertion_status: :not_asserted}] =
         EmbeddedClauseEvidence.candidates(invalid, meaning())
     end
 
@@ -296,8 +309,65 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert evidence.subject_candidate.surface == "the gathered"
     assert evidence.subject_candidate.head.selected_pos == :adjective
     assert evidence.subject_candidate.attachment_status == :unverified
+    assert evidence.relation_candidate.surface == "the gathered had grown"
+    assert evidence.relation_candidate.assertion_status == :not_asserted
+    assert evidence.relation_candidate.scope == :unparsed_information_request_complement
     assert evidence.embedded_clause_status == :not_interpreted
     assert evidence.assertion_status == :not_asserted
+  end
+
+  test "embedded relation abstains without aligned selected head or verb sense" do
+    base = input()
+    nomination = %{
+      id: :nominalized_adjective_subject_candidate,
+      status: :resolved, span: {7, 8},
+      roles: %{
+        determiner: %{token_index: 7, sense_id: "the|determiner|1"},
+        adjective: %{token_index: 8, sense_id: "gathered|adjective|1"}
+      }
+    }
+    signature = %{id: :nominalized_adjective_subject_candidate,
+      span: {7, 8}, roles: %{determiner: 7, adjective: 8}}
+
+    complete = %{base |
+      tokens: [%{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "gathered", n: 1} | base.tokens],
+      sentence_signatures: [signature | base.sentence_signatures],
+      atl_slate: base.atl_slate
+        |> Map.put(:constituents, [nomination])
+        |> Map.update!(:winners, fn winners ->
+          [%{token_index: 7, id: "the|determiner|1"},
+            %{token_index: 8, id: "gathered|adjective|1"} | winners]
+        end)
+    }
+
+    for invalid_id <- [nil, "grown|adjective|1", "grown|verb|fallback"] do
+      winners =
+        complete.atl_slate.winners
+        |> Enum.reject(&(&1.token_index == 10))
+        |> then(fn remaining ->
+          if invalid_id, do: [%{token_index: 10, id: invalid_id} | remaining],
+            else: remaining
+        end)
+
+      input = put_in(complete, [:atl_slate, :winners], winners)
+      assert [%{subject_candidate: %{surface: "the gathered"},
+        relation_candidate: nil, assertion_status: :not_asserted,
+        subject_binding_status: :unresolved}] =
+        EmbeddedClauseEvidence.candidates(input, meaning())
+    end
+
+    head_mismatch =
+      update_in(complete.atl_slate.winners, fn winners ->
+        Enum.map(winners, fn
+          %{token_index: 8} = w -> %{w | id: "gathered|verb|1"}
+          w -> w
+        end)
+      end)
+    input = put_in(complete, [:atl_slate, :winners], head_mismatch)
+    assert [%{subject_candidate: nil, relation_candidate: nil,
+      assertion_status: :not_asserted}] =
+      EmbeddedClauseEvidence.candidates(input, meaning())
   end
 
   test "no candidate is inferred outside the attested complement" do
