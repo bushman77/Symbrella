@@ -99,6 +99,49 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+### First live held-out baseline (2026-10-23)
+
+The user's local production data and actual read-only
+`scripts/colony_generalization_probe.exs --details` run yielded:
+
+- Corpus SHA-256:
+  `742cc9fa41cfe6dfb3902374e445b6a84c7e7e0cd5cdf1a29acf245c60bf1284`.
+- Transfer: **18 / 18 exact** for subject, predicate, object, count,
+  relation, polarity and external attribution.
+- Safety: **12 / 12 safe abstentions**. No independently verified
+  external facts were asserted.
+- Frontier: **0 / 7 exact**; all seven were coverage gaps, not
+  false-positive interpretations.
+- Paired polarity: **5 / 5 preserved**.
+- Critical failures: **0**; no measured semantic mismatches,
+  attribution violations, or infrastructure failures.
+
+Frontier abstention reasons as originally recorded:
+
+| ID | Reason | Missing capability |
+| --- | --- | --- |
+| F01 | `:unsupported_predicate` | finite-present plural verb |
+| F02 | `:unsupported_predicate` | finite-present singular verb |
+| F03 | `:unsupported_reported_number` | twenty as a cardinal |
+| F04 | `:unsupported_surface` | never-negation scope |
+| F05 | `:unsupported_surface` | have-perfect aspect |
+| F06 | `:unsupported_surface` | failed-to-support complement |
+| F07 | `:unsupported_surface` | reportedly as an evidential modifier |
+
+The transfer success demonstrates generalization *within the admitted
+verb and clause families*, not open-domain English comprehension.
+The safety cases likewise demonstrate abstention at the sentence level,
+not the capability to interpret those unsupported constructions.
+S04, a modal example, abstained under `:unsupported_reported_number`
+rather than a more specific modal reason; diagnostic taxonomy should be
+improved without changing its safe abstention verdict.
+
+This exact baseline must remain traceable. Develop new grammar rules
+from separate unit/regression examples rather than rewriting frozen
+COLONY-08 targets. When additional capability is added, rerun this
+same corpus as a now-known regression evaluation and use a new untouched
+corpus for an independent generalization estimate.
+
 ## COLONY-08: frozen held-out generalization benchmark (baseline first)
 
 COLONY-07 finished **8/8** on its deliberately narrow known-sentence
