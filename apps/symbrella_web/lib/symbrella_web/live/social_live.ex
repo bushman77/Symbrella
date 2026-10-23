@@ -296,6 +296,11 @@ defmodule SymbrellaWeb.SocialLive do
                         <p :if={get_in(segment.result, [:sentence_meaning, :speech_act])}>
                           Speech act: <strong>{segment.result.sentence_meaning.speech_act}</strong>
                         </p>
+                        <p :if={Map.has_key?(segment.result, :question_composition) and
+                                   segment.result.question_composition.status != :no_question_signature}>
+                          Question composition: <strong>{segment.result.question_composition.status}</strong>
+                          <span class="text-zinc-400">{inspect(Map.drop(segment.result.question_composition, [:status]), limit: 8)}</span>
+                        </p>
                         <p :if={Map.has_key?(segment.result, :question_evidence)}>
                           Question frames: {segment.result.question_evidence.signature_count} · ATL resolved: {segment.result.question_evidence.resolved_constituents}
                         </p>
