@@ -43,6 +43,22 @@ defmodule Llm.Colony.TokenCacheTest do
     assert Agent.get(counter, & &1) == 2
   end
 
+  test "never reuses a JWT already expired at exchange time" do
+    key = unique_key()
+    expired = jwt(System.system_time(:second) - 20)
+    fresh = jwt(System.system_time(:second) + 3_600)
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    exchange = fn ->
+      n = Agent.get_and_update(counter, fn old -> {old, old + 1} end)
+      {:ok, if(n == 0, do: expired, else: fresh)}
+    end
+
+    assert {:ok, ^expired} = TokenCache.get(key, exchange)
+    assert {:ok, ^fresh} = TokenCache.get(key, exchange)
+    assert Agent.get(counter, & &1) == 2
+  end
+
   test "a failed token is invalidated on 401 without evicting newer replacements" do
     key = unique_key()
     first = jwt(System.system_time(:second) + 3_600)
