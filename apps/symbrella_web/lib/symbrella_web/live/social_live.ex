@@ -239,12 +239,13 @@ defmodule SymbrellaWeb.SocialLive do
           <div
             :if={@analysis_open?}
             id="social-cognitive-modal"
-            class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/80 p-2 sm:p-5"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-5"
             role="dialog"
             aria-modal="true"
             aria-label="Colony cognitive analysis"
           >
-            <div class="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full max-w-6xl min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl">
+            <div class="flex w-full max-w-6xl min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl"
+              style="height: calc(100vh - 2rem); height: calc(100dvh - 2rem); max-height: 900px;">
               <header class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
                 <div class="min-w-0">
                   <h2 class="text-lg font-semibold">Cognitive inspection</h2>
@@ -258,7 +259,8 @@ defmodule SymbrellaWeb.SocialLive do
                     class="rounded border border-white/20 px-3 py-2 hover:bg-white/10">Close</button>
                 </div>
               </header>
-              <div id="social-report-content" tabindex="0" class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 pb-8 sm:px-6">
+              <div id="social-report-content" tabindex="0" class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 pb-8 sm:px-6"
+                style="display: block; flex: 1 1 0%; min-height: 0; overflow-y: scroll; overflow-x: hidden; scrollbar-width: auto;">
                 <%= if @cognitive_report do %>
                   <p class="text-sm text-zinc-400">
                     {@cognitive_report.analyzed_segments} sentence samples inspected · {@cognitive_report.omitted_replies} replies omitted · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted.
