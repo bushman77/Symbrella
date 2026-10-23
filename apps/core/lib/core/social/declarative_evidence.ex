@@ -74,6 +74,8 @@ defmodule Core.Social.DeclarativeEvidence do
          true <- Enum.all?([:subject_head, :predicate, :object_head], &Map.has_key?(roles, &1))
            || {:error, :missing_grammatical_roles},
          {:ok, token_map} <- bounded_token_map(si, all_indices),
+         true <- source_surface_witnessed?(si, token_map, all_indices) ||
+           {:error, :local_surface_not_in_original_source},
          {:ok, bound} <- bind_roles(si, roles, token_map),
          true <- complete_local_surface?(token_map, all_indices) || {:error, :incomplete_local_span} do
       subject = Map.fetch!(bound, :subject_head)
@@ -141,6 +143,24 @@ defmodule Core.Social.DeclarativeEvidence do
   defp complete_local_surface?(token_map, indices) do
     Enum.all?(indices, &(is_binary(Map.get(token_map, &1)) and
       Map.get(token_map, &1) != ""))
+  end
+
+  defp source_surface_witnessed?(si, token_map, indices) do
+    case Map.get(si, :sentence) do
+      sentence when is_binary(sentence) and byte_size(sentence) <= 2400 ->
+        words =
+          indices
+          |> Enum.map(&Map.fetch!(token_map, &1))
+          |> Enum.map(&Regex.escape/1)
+
+        expression =
+          "(?<![\\p{L}\\p{N}])" <> Enum.join(words, ~S(\s+)) <>
+            "(?![\\p{L}\\p{N}])"
+
+        Regex.match?(Regex.compile!(expression, "iu"), sentence)
+
+      _ -> false
+    end
   end
 
   defp bind_roles(si, roles, token_map) do
