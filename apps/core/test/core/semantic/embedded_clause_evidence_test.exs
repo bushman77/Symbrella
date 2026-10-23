@@ -340,7 +340,9 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
       %{token_index: 7, id: "the|determiner|1"},
       %{token_index: 8, id: "gathered|adjective|1"},
       %{token_index: 9, id: "had|auxiliary|1"},
-      %{token_index: 10, id: "grow|verb|1"}
+      %{token_index: 10, id: "grow|verb|1"},
+      %{token_index: 15, id: "get|verb|1"},
+      %{token_index: 16, id: "long|adjective|1"}
     ]
 
     slate = ATL.reduce(choices, tokens, signatures)
@@ -359,6 +361,10 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert evidence.relation_candidate.surface == "the gathered had grown"
     assert evidence.relation_candidate.assertion_status == :not_asserted
     assert evidence.relation_candidate.scope == :unparsed_information_request_complement
+    assert evidence.qualification_candidate.surface == "and not only gotten longer"
+    assert evidence.qualification_candidate.focus_scope == :not_only_not_clausal_negation
+    assert evidence.qualification_candidate.assertion_status == :not_asserted
+    assert evidence.qualification_candidate.semantic_comparison_status == :not_interpreted
     assert evidence.embedded_clause_status == :not_interpreted
     assert evidence.assertion_status == :not_asserted
   end
