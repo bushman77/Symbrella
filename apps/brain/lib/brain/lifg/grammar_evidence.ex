@@ -102,6 +102,7 @@ defmodule Brain.LIFG.GrammarEvidence do
                      :modal_question_predicate, :modal_declarative_predicate,
                      :imperative_predicate, :plural_present_predicate,
                      :finite_present_svo_predicate,
+                     :counted_present_transitive_predicate,
                      :counted_negative_transitive_predicate] and
            is_list(evidence) ->
         expected =
@@ -149,6 +150,11 @@ defmodule Brain.LIFG.GrammarEvidence do
 
             :finite_present_svo_predicate ->
               [:attested_finite_present_verb, :dictionary_pos_witness,
+               :bounded_predicate_slot]
+
+            :counted_present_transitive_predicate ->
+              [:attested_counted_plural_subject, :attested_base_present_verb,
+               :attested_nominal_object, :dictionary_pos_witness,
                :bounded_predicate_slot]
 
             :counted_negative_transitive_predicate ->
