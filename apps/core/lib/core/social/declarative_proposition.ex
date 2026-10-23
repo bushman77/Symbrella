@@ -106,6 +106,23 @@ defmodule Core.Social.DeclarativeProposition do
     words = Enum.map(nodes, & &1.word)
 
     case words do
+      # The fifth word here is a nominal object, not a counted object:
+      # "The checker verified those claims." Do not coerce "those" into a
+      # number or silently reuse the counted-object rule.
+      [det, subject, verb, object_det, object]
+      when det in @determiners and object_det in @determiners ->
+        with :ok <- supported_affirmative_verb(verb),
+             {:ok, relation} <- affirmative_relation(verb) do
+          clause(
+            :affirmative_transitive, subject, verb, object,
+            relation, :positive, nil,
+            [noun_role(:subject, nodes, 1), verb_role(nodes, 2),
+             noun_role(:object, nodes, 4)],
+            [{0, 1}, {3, 4}],
+            [:determined_subject, :attested_past_action, :determined_object]
+          )
+        end
+
       [det, subject, verb, number, object] when det in @determiners ->
         with {:ok, count} <- number(number),
              :ok <- supported_verb(verb) do
@@ -150,16 +167,34 @@ defmodule Core.Social.DeclarativeProposition do
 
       [det, subject, "did", "not", verb, object_det, object]
       when det in @determiners and object_det in @determiners ->
-        with :ok <- supported_verb(verb) do
+        with :ok <- supported_negative_verb(verb),
+             {:ok, relation} <- negative_relation(verb) do
           clause(
             :explicit_negated_transitive, subject, verb, object,
-            :reported_action, :negative, nil,
+            relation, :negative, nil,
             [noun_role(:subject, nodes, 1),
              verb_role(nodes, 4), noun_role(:object, nodes, 6),
              {:auxiliary, Enum.at(nodes, 2).index, "verb"},
              {:negator, Enum.at(nodes, 3).index, "adverb"}],
             [{0, 1}, {5, 6}],
             [:determined_subject, :did_not_negation, :base_predicate, :determined_object]
+          )
+        end
+
+      [number, subject, "did", "not", verb, object_det, object]
+      when object_det in @determiners ->
+        with {:ok, count} <- number(number),
+             :ok <- supported_negative_verb(verb),
+             {:ok, relation} <- negative_relation(verb) do
+          clause(
+            :counted_negated_transitive, subject, verb, object,
+            relation, :negative, count,
+            [noun_role(:subject, nodes, 1),
+             verb_role(nodes, 4), noun_role(:object, nodes, 6),
+             {:auxiliary, Enum.at(nodes, 2).index, "verb"},
+             {:negator, Enum.at(nodes, 3).index, "adverb"}],
+            [{5, 6}],
+            [:counted_subject, :did_not_negation, :base_predicate, :determined_object]
           )
         end
 
@@ -190,6 +225,24 @@ defmodule Core.Social.DeclarativeProposition do
         end
     end
   end
+
+  # The contrastive pilot keeps a closed set of verb surfaces.
+  # These choices describe grammatical claims, never verified events.
+  defp supported_affirmative_verb(word) when word in ~w(verified supported refuted contradicted),
+    do: :ok
+  defp supported_affirmative_verb(_), do: {:error, :unsupported_predicate}
+
+  defp affirmative_relation("verified"), do: {:ok, :reported_action}
+  defp affirmative_relation(verb), do: evidence_relation(verb)
+
+  defp supported_negative_verb(word) when word in ~w(verify support refute contradict),
+    do: :ok
+  defp supported_negative_verb(_), do: {:error, :unsupported_predicate}
+
+  defp negative_relation("verify"), do: {:ok, :reported_action}
+  defp negative_relation("support"), do: {:ok, :reported_support}
+  defp negative_relation("refute"), do: {:ok, :reported_refutation}
+  defp negative_relation("contradict"), do: {:ok, :reported_refutation}
 
   defp supported_verb(word) when is_binary(word) do
     # Generic action verbs can be represented by their source surface, but
@@ -374,8 +427,9 @@ defmodule Core.Social.DeclarativeProposition do
     # a fabricated Wiktextract morphology tag or a chosen dictionary sense.
     # The exact LTM-selected verb remains separately mandatory.
     bounded_past? =
-      clause.construction in [:counted_object_action, :counted_transitive] and
-        clause.predicate in ~w(produced contradicted refuted supported) and
+      clause.construction in [:counted_object_action, :counted_transitive,
+                              :affirmative_transitive] and
+        clause.predicate in ~w(produced contradicted refuted supported verified) and
         Enum.any?(Map.get(si, :active_cells, []), fn cell ->
           is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
             Map.get(cell, :pos) == "verb" and
@@ -384,7 +438,8 @@ defmodule Core.Social.DeclarativeProposition do
         end)
 
     predicate_supported? =
-      clause.construction == :explicit_negated_transitive or
+      clause.construction in [:explicit_negated_transitive,
+                              :counted_negated_transitive] or
         past_morphology? or bounded_past?
 
     audit = %{
