@@ -132,6 +132,43 @@ defmodule Core.Social.ColonyCognitionTest do
     end
   end
 
+  test "COLONY-09 present reports retain original source attribution through Colony admission" do
+    cases = [
+      {"The reviewer verifies the report.", :finite_present_transitive,
+       :reported_action, nil},
+      {"Four reports support the claims.", :counted_present_transitive,
+       :reported_support, 4}
+    ]
+
+    for {sentence, construction, relation, count} <- cases do
+      proposition = %{
+        status: :attributed_structural_interpretation,
+        kind: :reported_declarative_proposition,
+        construction: construction,
+        relation: relation,
+        polarity: :positive,
+        reported_count: count,
+        reported_total: nil,
+        subject: if(count, do: "reports", else: "reviewer"),
+        verification: :author_claim_not_independently_verified
+      }
+
+      semantic = Map.put(brain_result(), :reported_proposition, proposition)
+      assert {:ok, frame} = ColonyCognition.interpret(post(sentence), semantic)
+      assert frame.evidence_relation == relation
+      assert frame.reported_polarity == :positive
+      assert frame.reported_link_count == count
+      assert frame.report_status == :author_claim_not_independently_verified
+      assert frame.subject == :externally_reported_actor
+      assert frame.reported_proposition == proposition
+
+      inverted = %{proposition | polarity: :negative}
+      assert {:error, :colony_proposition_mismatch} =
+               ColonyCognition.interpret(post(sentence),
+                 Map.put(brain_result(), :reported_proposition, inverted))
+    end
+  end
+
   test "contrastive Colony admission preserves source reported polarity without inventing contradiction" do
     cases = [
       {"The checker verified those claims.", :affirmative_transitive,
