@@ -148,16 +148,11 @@ defmodule Core.Syntax.SignaturesTest do
     end)
 
     for sentence <- [
-      "The gathered had grown. Another sentence.",
       "The gathered walked.",
       "The gathered had quickly grown.",
       "The gathered had."
     ] do
-      # The first sentence in a longer input remains a possible constituent,
-      # but any other phrase must independently satisfy the local four-token pattern.
-      if sentence != "The gathered had grown. Another sentence." do
-        refute :nominalized_adjective_subject_candidate in ids(sentence, cells)
-      end
+      refute :nominalized_adjective_subject_candidate in ids(sentence, cells)
     end
 
     refute :nominalized_adjective_subject_candidate in
