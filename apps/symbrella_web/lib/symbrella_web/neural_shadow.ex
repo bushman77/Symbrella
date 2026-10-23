@@ -18,6 +18,10 @@ defmodule SymbrellaWeb.NeuralShadow do
   alias Brain.Neural.{StateTransitionBuilder, StateTransitionMask, StateTransitionResidual}
 
   @event [:core, :training_archive, :completed_turn]
+  @neural_prediction_event [:brain, :neural, :state_prediction]
+  @neural_evaluation_event [:brain, :neural, :state_evaluation]
+  @signal_features [:confidence, :mood_da, :mood_5ht, :mood_glu, :mood_ne,
+    :mood_exploration, :mood_inhibition, :mood_vigilance, :mood_plasticity]
   @max_checkpoint_bytes 5_000_000
   @max_sessions 128
   @portable_format :symbrella_residual_v4_safe_etf
@@ -221,6 +225,9 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+    # Hand real Axon forecasts to the structured Brain as an isolated
+    # nerve-like signal. This does NOT drive MoodCore or response selection.
+    emit_neural_prediction(model, observation, predicted)
     prior = Map.get(state.pending, observation.session_id)
     recent_ids =
       [observation.turn_id | if(prior, do: Map.get(prior, :recent_ids, [prior.turn_id]), else: [])]
@@ -286,6 +293,7 @@ defmodule SymbrellaWeb.NeuralShadow do
     }
 
     log_private(state.log_path, payload)
+    emit_neural_evaluation(state.model, payload)
 
     # Aggregate squared errors over the same observed cells. Pairwise winning
     # counts alone can hide poor performance on larger or harder transitions.
@@ -305,6 +313,72 @@ defmodule SymbrellaWeb.NeuralShadow do
       last_evaluation: Map.take(payload, [:valid_feature_pairs, :residual_mse, :persistence_mse, :verdict])
     }
   end
+
+  # Predictions are about the *next* completed turn, not about the current
+  # actual neuromodulator levels. Omit any feature whose current observation
+  # was not available, and never call this a calibrated truth estimate.
+  defp emit_neural_prediction(model, observation, predicted) do
+    rows =
+      [observation.feature_names, observation.values, predicted, observation.observed]
+      |> Enum.zip()
+      |> Enum.flat_map(fn {feature, current, forecast, available} ->
+        if feature in @signal_features and available == 1.0 and
+             unit_number?(current) and unit_number?(forecast) do
+          [{feature, current, forecast}]
+        else
+          []
+        end
+      end)
+
+    if rows != [] do
+      observed = Map.new(rows, fn {name, current, _} -> {name, current} end)
+      forecast = Map.new(rows, fn {name, _, next} -> {name, next} end)
+      delta = Map.new(rows, fn {name, current, next} -> {name, next - current} end)
+
+      :telemetry.execute(
+        @neural_prediction_event,
+        %{count: 1, observed_features: length(rows)},
+        %{
+          source: :axon_residual_v4,
+          mode: :shadow_only,
+          verification: :model_prediction_not_verified,
+          deployment_authorized?: false,
+          model_version: model.artifact.model_version,
+          model_sha256: model.sha256,
+          checkpoint_assessment: get_in(model.artifact, [:assessment, :status]),
+          feature_schema_version: observation.feature_schema_version,
+          horizon: :next_completed_turn_in_same_session,
+          observed: observed,
+          forecast: forecast,
+          predicted_change: delta
+        }
+      )
+    end
+  end
+
+  defp emit_neural_evaluation(model, payload) do
+    :telemetry.execute(
+      @neural_evaluation_event,
+      %{count: 1, valid_feature_pairs: payload.valid_feature_pairs},
+      %{
+        source: :axon_residual_v4,
+        mode: :shadow_only,
+        verification: :model_prediction_not_verified,
+        deployment_authorized?: false,
+        model_version: model.artifact.model_version,
+        model_sha256: model.sha256,
+        checkpoint_assessment: get_in(model.artifact, [:assessment, :status]),
+        verdict: payload.verdict,
+        residual_mse: payload.residual_mse,
+        persistence_mse: payload.persistence_mse
+      }
+    )
+  end
+
+  defp unit_number?(value) when is_number(value),
+    do: value >= 0.0 and value <= 1.0
+
+  defp unit_number?(_), do: false
 
   defp format_features(names, values) do
     Enum.zip(names, values)
