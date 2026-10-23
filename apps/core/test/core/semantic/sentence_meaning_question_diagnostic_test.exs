@@ -57,7 +57,8 @@ defmodule Core.Semantic.SentenceMeaningQuestionDiagnosticTest do
     assert %{status: :punctuation_gap_witnessed, indices: [6]} =
       SentenceMeaning.question_diagnostic(%{si | sentence: "what do you know about growth: and"})
 
-    assert %{status: :missing_token_surfaces, indices: [6]} =
+    assert %{status: :missing_token_surfaces, indices: [6],
+      missing_context: [%{original_between: " "}]} =
       SentenceMeaning.question_diagnostic(%{si | sentence: "what do you know about growth and"})
   end
 end
