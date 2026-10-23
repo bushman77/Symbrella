@@ -44,6 +44,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert candidate.predicate.surface == "grown"
     assert candidate.predicate.candidate_sense_id == "grow|verb|1"
     assert candidate.subject == :unresolved
+    assert candidate.subject_candidate == nil
+    assert candidate.subject_binding_status == :unresolved
     assert candidate.embedded_clause_status == :not_interpreted
     assert candidate.assertion_status == :not_asserted
     assert candidate.verification == :external_unverified
