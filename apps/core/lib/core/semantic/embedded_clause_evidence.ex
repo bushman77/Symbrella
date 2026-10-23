@@ -49,6 +49,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             subject_diagnostic(si, constituents, winners, surfaces, first, a, subject_candidate)
           relation_candidate =
             relation_candidate(subject_candidate, winners, a, b, aux, verb)
+          relation_diagnostic =
+            relation_diagnostic(subject_candidate, relation_candidate, winners, b)
 
           [%{
             construction: :perfect_predicate,
@@ -64,6 +66,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             subject_candidate: subject_candidate,
             subject_diagnostic: subject_diagnostic,
             relation_candidate: relation_candidate,
+            relation_diagnostic: relation_diagnostic,
             subject_binding_status: :unresolved,
             embedded_clause_status: :not_interpreted,
             assertion_status: :not_asserted,
@@ -237,6 +240,32 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
   end
 
   defp relation_candidate(_, _, _, _, _, _), do: nil
+
+  defp relation_diagnostic(subject, relation, winners, predicate_index) do
+    selected_predicate_id = selected_id(winners, predicate_index)
+
+    status =
+      cond do
+        is_map(relation) -> :question_scoped_relation_candidate_available
+        not is_map(subject) -> :no_adjacent_subject_candidate
+        selected_id(winners, elem(subject.span, 1)) !=
+            get_in(subject, [:head, :candidate_sense_id]) ->
+          :subject_head_lexical_selection_mismatch
+        is_nil(selected_predicate_id) -> :predicate_lexical_selection_missing
+        sense_pos(selected_predicate_id) != "verb" ->
+          :predicate_selected_sense_not_verb
+        String.ends_with?(selected_predicate_id, "|fallback") ->
+          :predicate_selected_sense_fallback
+        true -> :relation_candidate_checks_not_satisfied
+      end
+
+    %{
+      status: status,
+      selected_predicate_id: selected_predicate_id,
+      interpretation: :not_fully_interpreted,
+      assertion_status: :not_asserted
+    }
+  end
 
   # Explain abstention from the already observed signatures, ATL reductions,
   # and selected lexical hypotheses. No new constituent or sense is produced.
