@@ -261,6 +261,45 @@ defmodule Core.Semantic.SentenceMeaningTest do
     assert argument.grounding_status == :unverified
   end
 
+  test "complex WH question interprets matrix roles but does not invent an embedded assertion" do
+    sentence = "What would you look at to say the gathered had grown—and not only gotten longer?"
+    words = [
+      {0, "What"}, {1, "would"}, {2, "you"}, {3, "look"}, {4, "at"},
+      {5, "to"}, {6, "say"}, {7, "the"}, {8, "gathered"}, {9, "had"},
+      {10, "grown"}, {12, "and"}, {13, "not"}, {14, "only"},
+      {15, "gotten"}, {16, "longer?"}
+    ]
+    roles = %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4}
+    atl_roles = Map.new(roles, fn {role, _index} ->
+      {role, %{sense_id: "#{role}|test|1"}}
+    end)
+
+    si = %{
+      sentence: sentence,
+      tokens: Enum.map(words, fn {index, surface} ->
+        %{index: index, phrase: surface, n: 1}
+      end),
+      sentence_signatures: [%{
+        id: :wh_aux_topic_question, span: {0, 16}, roles: roles
+      }],
+      atl_slate: %{constituents: [%{
+        id: :wh_aux_topic_question, status: :resolved,
+        span: {0, 16}, roles: atl_roles
+      }]}
+    }
+
+    meaning = SentenceMeaning.build(si)
+    assert meaning.status == :structurally_interpreted
+    assert meaning.speech_act == :request_information
+    assert meaning.roles.subject.surface == "you"
+    assert meaning.roles.predicate.surface == "look"
+    assert meaning.proposition.epistemic_status == :question_not_assertion
+    assert meaning.proposition.content.complement.argument.type == :unparsed_topic
+    assert meaning.proposition.content.complement.argument.source == :surface_only
+    assert :topic_internal_structure in meaning.unresolved
+    refute Map.has_key?(meaning.proposition.content.complement.argument, :asserted_event)
+  end
+
   test "attaches sentence definition without changing lexical winners or claiming grounding" do
     si = input()
     out = SentenceMeaning.attach(si)
