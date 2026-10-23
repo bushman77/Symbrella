@@ -113,8 +113,9 @@ defmodule Core.Social.ColonyCognition do
         verification: :author_claim_not_independently_verified,
         relation: relation, reported_count: count, reported_total: total}
       when construction in [:counted_object_action, :counted_transitive,
-                            :affirmative_transitive, :explicit_negated_transitive,
-                            :counted_negated_transitive] and
+                            :affirmative_transitive, :finite_present_transitive,
+                            :counted_present_transitive,
+                            :explicit_negated_transitive, :counted_negated_transitive] and
            relation in [:reported_action, :reported_refutation, :reported_support] ->
         # The published title is independent source text; don't let an
         # injected or stale cognitive projection invert its did-not polarity.
@@ -162,8 +163,9 @@ defmodule Core.Social.ColonyCognition do
       %{status: :attributed_structural_interpretation, construction: construction,
         subject: subject}
       when construction in [:counted_object_action, :counted_transitive,
-                            :affirmative_transitive, :explicit_negated_transitive,
-                            :counted_negated_transitive] and is_binary(subject) ->
+                            :affirmative_transitive, :finite_present_transitive,
+                            :counted_present_transitive,
+                            :explicit_negated_transitive, :counted_negated_transitive] and is_binary(subject) ->
         :externally_reported_actor
 
       _ -> :external_checker
@@ -182,8 +184,9 @@ defmodule Core.Social.ColonyCognition do
       %{status: :attributed_structural_interpretation,
         construction: construction} = proposition
       when construction in [:counted_object_action, :counted_transitive,
-                            :affirmative_transitive, :explicit_negated_transitive,
-                            :counted_negated_transitive] ->
+                            :affirmative_transitive, :finite_present_transitive,
+                            :counted_present_transitive,
+                            :explicit_negated_transitive, :counted_negated_transitive] ->
         if Map.get(proposition, :relation) == claim.relation and
              Map.get(proposition, :polarity) == Map.get(claim, :polarity) and
              Map.get(proposition, :reported_count) == claim.count and
