@@ -26,6 +26,11 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       |> get_in([:atl_slate, :winners])
       |> List.wrap()
 
+    constituents =
+      si
+      |> get_in([:atl_slate, :constituents])
+      |> List.wrap()
+
     si
     |> Map.get(:sentence_signatures, [])
     |> List.wrap()
@@ -48,6 +53,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             grammatical_evidence: signature |> Map.get(:evidence, []) |> List.wrap()
               |> Enum.take(6),
             subject: :unresolved,
+            subject_candidate: adjacent_nominal_candidate(constituents, surfaces, first, a),
+            subject_binding_status: :unresolved,
             embedded_clause_status: :not_interpreted,
             assertion_status: :not_asserted,
             verification: :external_unverified
@@ -63,6 +70,50 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
   end
 
   def candidates(_, _), do: []
+
+
+  # Local adjacency plus a fully resolved ATL nominal supplies evidence for
+  # a possible subject, not a verified subject-predicate attachment.
+  # Longer NPs take precedence; disconnected, fallback, and lexical-MWE
+  # witnesses never qualify.
+  defp adjacent_nominal_candidate(constituents, surfaces, topic_start, auxiliary_index) do
+    constituents
+    |> Enum.filter(fn
+      %{id: :noun_phrase, status: :resolved, span: {first, last},
+        roles: %{head: %{token_index: head, sense_id: id}}}
+      when is_integer(first) and is_integer(last) and
+           first >= topic_start and last == auxiliary_index - 1 and
+           head == last and is_binary(id) ->
+        String.contains?(id, "|noun|") or String.contains?(id, "|proper_noun|")
+
+      _ -> false
+    end)
+    |> Enum.sort_by(fn %{span: {first, _}} -> first end)
+    |> Enum.find_value(fn %{span: {first, last}, roles: roles} ->
+      head_role = Map.fetch!(roles, :head)
+      if Map.get(head_role, :selection_scope) == :lexical_mwe do
+        nil
+      else
+        case Enum.map(first..last, &surface_at(surfaces, &1)) do
+          words when is_list(words) ->
+            if Enum.all?(words, &match?({:ok, _}, &1)) do
+              %{
+                status: :adjacent_nominal_candidate_only,
+                source: :atl_resolved_noun_phrase,
+                surface: words |> Enum.map(fn {:ok, word} -> word end) |> Enum.join(" "),
+                span: {first, last},
+                head: %{token_index: last,
+                  candidate_sense_id: head_role.sense_id},
+                coreference_status: :unresolved,
+                attachment_status: :unverified
+              }
+            else
+              nil
+            end
+        end
+      end
+    end)
+  end
 
   defp indexed_surfaces(tokens) when is_list(tokens) do
     tokens
