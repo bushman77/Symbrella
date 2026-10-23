@@ -51,6 +51,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             relation_candidate(subject_candidate, winners, a, b, aux, verb)
           relation_diagnostic =
             relation_diagnostic(subject_candidate, relation_candidate, winners, b)
+          {qualification_candidate, qualification_diagnostic} =
+            trailing_qualification(si, surfaces, winners, relation_candidate, b, last)
 
           [%{
             construction: :perfect_predicate,
@@ -67,6 +69,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             subject_diagnostic: subject_diagnostic,
             relation_candidate: relation_candidate,
             relation_diagnostic: relation_diagnostic,
+            qualification_candidate: qualification_candidate,
+            qualification_diagnostic: qualification_diagnostic,
             subject_binding_status: :unresolved,
             embedded_clause_status: :not_interpreted,
             assertion_status: :not_asserted,
@@ -266,6 +270,132 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       assertion_status: :not_asserted
     }
   end
+
+  # A coordination/focus candidate is deliberately weaker than a semantic
+  # contrast. "Not only" does NOT negate the entire following predicate.
+  # Require the original source to witness any skipped punctuation token.
+  # The degree word's comparative meaning remains unresolved.
+  defp trailing_qualification(si, surfaces, winners, relation, predicate_index, topic_end) do
+    if not is_map(relation) do
+      {nil, qualification_diagnostic(:base_relation_missing, nil, nil)}
+    else
+      predicate_surface = relation.predicate.surface
+
+      case qualification_connector(si, surfaces, predicate_index, predicate_surface) do
+        {:ok, connector_index, bridge} ->
+          indexes = Enum.to_list((connector_index + 1)..(connector_index + 4))
+
+          if List.last(indexes) > topic_end do
+            {nil, qualification_diagnostic(:qualification_outside_topic, nil, nil)}
+          else
+            [not_index, only_index, verb_index, degree_index] = indexes
+            not_word = surface_at(surfaces, not_index)
+            only_word = surface_at(surfaces, only_index)
+            qualifier_verb = surface_at(surfaces, verb_index)
+            degree_word = surface_at(surfaces, degree_index)
+            verb_id = selected_id(winners, verb_index)
+            degree_id = selected_id(winners, degree_index)
+
+            cond do
+              not_word != {:ok, "not"} or only_word != {:ok, "only"} ->
+                {nil, qualification_diagnostic(:focus_marker_missing, verb_id, degree_id)}
+
+              not match?({:ok, _}, qualifier_verb) or
+                  not match?({:ok, _}, degree_word) ->
+                {nil, qualification_diagnostic(:qualification_surface_missing, verb_id, degree_id)}
+
+              not is_binary(verb_id) ->
+                {nil, qualification_diagnostic(:qualifier_verb_selection_missing, nil, degree_id)}
+
+              sense_pos(verb_id) != "verb" or String.ends_with?(verb_id, "|fallback") ->
+                {nil, qualification_diagnostic(:qualifier_verb_not_supported, verb_id, degree_id)}
+
+              not is_binary(degree_id) ->
+                {nil, qualification_diagnostic(:degree_selection_missing, verb_id, nil)}
+
+              sense_pos(degree_id) not in ["adjective", "adverb"] or
+                  String.ends_with?(degree_id, "|fallback") ->
+                {nil, qualification_diagnostic(:degree_selection_not_supported, verb_id, degree_id)}
+
+              true ->
+                {:ok, verb_surface} = qualifier_verb
+                {:ok, degree_surface} = degree_word
+
+                candidate = %{
+                  type: :not_only_qualification_candidate,
+                  status: :question_scoped_surface_and_lexical_candidate,
+                  source: :original_tokens_and_selected_senses,
+                  surface: "and not only " <> verb_surface <> " " <> degree_surface,
+                  span: {connector_index, degree_index},
+                  punctuation_bridge: bridge,
+                  focus_marker: :not_only,
+                  focus_scope: :not_only_not_clausal_negation,
+                  auxiliary_reuse: :possible_not_established,
+                  qualifier_predicate: %{surface: verb_surface, token_index: verb_index,
+                    selected_sense_id: verb_id},
+                  degree_term: %{surface: degree_surface, token_index: degree_index,
+                    selected_sense_id: degree_id},
+                  coordination_status: :structural_candidate_only,
+                  semantic_comparison_status: :not_interpreted,
+                  asserted_event?: false,
+                  assertion_status: :not_asserted,
+                  verification: :external_unverified
+                }
+
+                {candidate, qualification_diagnostic(:qualification_candidate_available,
+                  verb_id, degree_id)}
+            end
+          end
+
+        :error ->
+          {nil, qualification_diagnostic(:coordinator_not_witnessed, nil, nil)}
+      end
+    end
+  end
+
+  defp qualification_diagnostic(status, verb_id, degree_id) do
+    %{
+      status: status,
+      selected_qualifier_verb_id: verb_id,
+      selected_degree_id: degree_id,
+      scope: :unparsed_information_request_complement,
+      assertion_status: :not_asserted
+    }
+  end
+
+  defp qualification_connector(si, surfaces, predicate_index, predicate_surface) do
+    adjacent_index = predicate_index + 1
+
+    cond do
+      surface_at(surfaces, adjacent_index) == {:ok, "and"} ->
+        {:ok, adjacent_index, :none}
+
+      surface_at(surfaces, adjacent_index + 1) == {:ok, "and"} and
+          source_punctuation_bridge?(si, predicate_surface) ->
+        {:ok, adjacent_index + 1, :original_punctuation_witnessed}
+
+      true ->
+        :error
+    end
+  end
+
+  defp source_punctuation_bridge?(si, predicate_surface)
+       when is_binary(predicate_surface) do
+    case Map.get(si, :sentence) do
+      source when is_binary(source) ->
+        Regex.match?(
+          Regex.compile!(
+            Regex.escape(predicate_surface) <> "\\s*\\p{P}+\\s*and\\b",
+            "iu"
+          ),
+          source
+        )
+
+      _ -> false
+    end
+  end
+
+  defp source_punctuation_bridge?(_, _), do: false
 
   # Explain abstention from the already observed signatures, ATL reductions,
   # and selected lexical hypotheses. No new constituent or sense is produced.
