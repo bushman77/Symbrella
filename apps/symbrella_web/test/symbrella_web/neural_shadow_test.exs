@@ -150,6 +150,16 @@ defmodule SymbrellaWeb.NeuralShadowTest do
   end
 
   test "supervised mode predicts and scores only consecutive same-session turns", %{dir: dir} do
+    if is_nil(Process.whereis(Brain.Neural.SignalReceptor)) do
+      start_supervised!(Brain.Neural.SignalReceptor)
+    end
+
+    assert eventually(fn ->
+      case Process.whereis(Brain.Blackboard) do
+        nil -> false
+        _ -> Brain.Blackboard.state().telemetry_attached? == true
+      end
+    end)
     :ok = Brain.Bus.subscribe(Brain.Blackboard.topic())
     receptor_before = Brain.Neural.SignalReceptor.status().predictions
     checkpoint = valid_checkpoint(dir)
