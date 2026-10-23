@@ -47,6 +47,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
               adjacent_adjectival_nominal_candidate(si, constituents, winners, surfaces, first, a)
           subject_diagnostic =
             subject_diagnostic(si, constituents, winners, surfaces, first, a, subject_candidate)
+          relation_candidate =
+            relation_candidate(subject_candidate, winners, a, b, aux, verb)
 
           [%{
             construction: :perfect_predicate,
@@ -61,6 +63,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
             subject: :unresolved,
             subject_candidate: subject_candidate,
             subject_diagnostic: subject_diagnostic,
+            relation_candidate: relation_candidate,
             subject_binding_status: :unresolved,
             embedded_clause_status: :not_interpreted,
             assertion_status: :not_asserted,
@@ -184,6 +187,56 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       end)
     end
   end
+
+  # Only the adjacent subject candidate and a separately selected lexical
+  # verb may yield a question-scoped structural relationship. This never
+  # asserts that an event happened or verifies the candidate's referent.
+  # The rest of the information-request complement (including contrasts)
+  # remains unparsed. An unresolved lexical verb means abstention.
+  defp relation_candidate(
+         %{span: {start, finish}, surface: surface,
+           status: status, source: subject_source,
+           head: %{candidate_sense_id: head_id}} = subject,
+         winners, auxiliary_index, predicate_index, auxiliary, verb
+       )
+       when status in [:adjacent_nominal_candidate_only,
+                       :adjectival_nominalization_candidate_only] and
+            is_integer(start) and is_integer(finish) and
+            finish == auxiliary_index - 1 and
+            predicate_index == auxiliary_index + 1 and
+            is_binary(surface) and is_binary(head_id) do
+    verb_id = selected_id(winners, predicate_index)
+
+    if selected_id(winners, finish) == head_id and
+         sense_pos(verb_id) == "verb" and
+         not String.ends_with?(verb_id, "|fallback") and
+         Map.get(subject, :attachment_status) == :unverified and
+         Map.get(subject, :coreference_status) == :unresolved do
+      %{
+        type: :embedded_perfect_clause_candidate,
+        status: :question_scoped_structural_relation_candidate,
+        source: :atl_nominal_and_perfect_predicate_signature,
+        subject_source: subject_source,
+        surface: surface <> " " <> auxiliary <> " " <> verb,
+        span: {start, predicate_index},
+        subject: %{surface: surface, span: {start, finish},
+          lexical_head_sense_id: head_id, identity: :unresolved},
+        predicate: %{surface: verb, token_index: predicate_index,
+          selected_sense_id: verb_id},
+        auxiliary: %{surface: auxiliary, token_index: auxiliary_index},
+        scope: :unparsed_information_request_complement,
+        attachment_status: :unverified,
+        assertion_status: :not_asserted,
+        embedded_clause_status: :not_fully_interpreted,
+        remainder_status: :not_interpreted,
+        verification: :external_unverified
+      }
+    else
+      nil
+    end
+  end
+
+  defp relation_candidate(_, _, _, _, _, _), do: nil
 
   # Explain abstention from the already observed signatures, ATL reductions,
   # and selected lexical hypotheses. No new constituent or sense is produced.
