@@ -15,6 +15,12 @@ defmodule Brain.Neural.SignalReceptor do
   @evaluation [:brain, :neural, :state_evaluation]
   @events [@prediction, @evaluation]
   @keep 32
+  @metadata_fields [
+    :source, :mode, :verification, :deployment_authorized?,
+    :model_version, :model_sha256, :checkpoint_assessment,
+    :feature_schema_version, :horizon, :observed, :forecast,
+    :predicted_change, :verdict, :residual_mse, :persistence_mse
+  ]
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -99,8 +105,8 @@ defmodule Brain.Neural.SignalReceptor do
     if valid_signal?(measurements, meta) do
       item = %{
         event: event,
-        measurements: measurements,
-        meta: meta,
+        measurements: Map.take(measurements, [:count, :observed_features, :valid_feature_pairs]),
+        meta: Map.take(meta, @metadata_fields),
         at_ms: System.system_time(:millisecond)
       }
 
