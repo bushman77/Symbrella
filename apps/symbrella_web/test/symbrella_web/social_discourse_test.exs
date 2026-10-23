@@ -36,6 +36,8 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
           speech_act: :request_information, kind: :wh_topic_question,
           definition: "The speaker asks whether the group grew.",
           role_surfaces: %{subject: "the group", predicate: "grown"},
+          embedded_candidates: [%{construction: :perfect_predicate,
+            status: :syntactic_candidate_only, assertion_status: :not_asserted}],
           topic_structure: %{type: :unparsed_topic, source: :surface_only,
             grounding_status: :unverified, assertion_status: :not_asserted,
             embedded_clause_status: :not_interpreted},
@@ -54,6 +56,10 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
     assert hd(report.interpretations).unresolved_roles == [:topic_internal_structure]
     assert hd(report.interpretations).topic_structure.type == :unparsed_topic
     assert hd(report.interpretations).topic_structure.assertion_status == :not_asserted
+    assert hd(report.interpretations).embedded_candidates == [
+      %{construction: :perfect_predicate, status: :syntactic_candidate_only,
+        assertion_status: :not_asserted}
+    ]
     assert hd(report.interpretations).topic_structure.embedded_clause_status == :not_interpreted
     assert Enum.map(report.lexical_links, & &1.to) == [2]
     assert hd(report.lexical_links).shared_terms == ["group", "grown"]
