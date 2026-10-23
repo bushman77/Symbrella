@@ -63,13 +63,14 @@ defmodule Core.Social.DeclarativeEvidence do
   defp candidate(si, %{id: family, source: :core_syntax,
       span: {first, last}, roles: roles, evidence: evidence})
       when family in @families and is_integer(first) and is_integer(last) and
-        first >= 0 and last >= first and is_map(roles) and is_list(evidence) do
+        first >= 0 and last >= first and last - first <= 7 and
+        is_map(roles) and is_list(evidence) do
     required = Map.fetch!(@evidence, family)
     all_indices = Enum.to_list(first..last)
 
     with true <- Enum.all?(required, &(&1 in evidence)) || {:error, :missing_grammar_evidence},
-         true <- Enum.all?(roles, fn {_role, index} ->
-           is_integer(index) and index >= first and index <= last
+         true <- Enum.all?(roles, fn {role, index} ->
+           is_atom(role) and is_integer(index) and index >= first and index <= last
          end) || {:error, :invalid_grammar_indices},
          true <- Enum.all?([:subject_head, :predicate, :object_head], &Map.has_key?(roles, &1))
            || {:error, :missing_grammatical_roles},
