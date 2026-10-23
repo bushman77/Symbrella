@@ -296,6 +296,14 @@ defmodule SymbrellaWeb.SocialLive do
                       class="space-y-1 rounded border border-white/10 p-3 text-sm">
                       <p class="font-semibold">{item.source_label} · {item.speaker} · {item.speech_act}</p>
                       <p class="whitespace-pre-wrap break-words text-zinc-300">{item.interpretation}</p>
+                      <div :if={map_size(item.roles) > 0} class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-300">
+                        <span :for={{role, surface} <- Enum.sort(item.roles)} class="break-words">
+                          <span class="font-semibold text-cyan-200">{role}:</span> {surface}
+                        </span>
+                      </div>
+                      <p :if={item.unresolved_roles != []} class="text-xs text-amber-200">
+                        Unresolved role grounding: {Enum.join(Enum.map(item.unresolved_roles, &to_string/1), ", ")}
+                      </p>
                       <p class="text-xs text-amber-200">External, unverified · only this sentence is interpreted</p>
                     </div>
                     <p :if={@cognitive_report.discourse.interpretations == []} class="text-sm text-zinc-400">
