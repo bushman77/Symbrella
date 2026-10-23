@@ -38,6 +38,52 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     }
   end
 
+  defp qualification_input do
+    base = input()
+    nominal = %{
+      id: :nominalized_adjective_subject_candidate,
+      span: {7, 8},
+      status: :resolved,
+      roles: %{
+        determiner: %{token_index: 7, sense_id: "the|determiner|1"},
+        adjective: %{token_index: 8, sense_id: "gathered|adjective|1"}
+      }
+    }
+
+    witness = %{
+      id: :nominalized_adjective_subject_candidate,
+      span: {7, 8},
+      roles: %{determiner: 7, adjective: 8}
+    }
+
+    %{
+      base |
+      sentence: "What would you look at to say the gathered had grown—and not only gotten longer?",
+      tokens: [
+        %{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "gathered", n: 1}
+      ] ++ base.tokens ++ [
+        %{index: 12, phrase: "and", n: 1},
+        %{index: 13, phrase: "not", n: 1},
+        %{index: 14, phrase: "only", n: 1},
+        %{index: 15, phrase: "gotten", n: 1},
+        %{index: 16, phrase: "longer?", n: 1}
+      ],
+      sentence_signatures: [witness | base.sentence_signatures],
+      atl_slate: base.atl_slate
+        |> Map.put(:constituents, [nominal])
+        |> Map.update!(:winners, fn winners ->
+          [
+            %{token_index: 7, id: "the|determiner|1"},
+            %{token_index: 8, id: "gathered|adjective|1"},
+            %{token_index: 15, id: "get|verb|1"},
+            %{token_index: 16, id: "long|adjective|1"}
+            | winners
+          ]
+        end)
+    }
+  end
+
   test "a perfect-predicate signature inside unresolved topic stays non-assertive" do
     assert [candidate] = EmbeddedClauseEvidence.candidates(input(), meaning())
     assert candidate.construction == :perfect_predicate
@@ -374,6 +420,102 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert [%{subject_candidate: nil, relation_candidate: nil,
       assertion_status: :not_asserted}] =
       EmbeddedClauseEvidence.candidates(input, meaning())
+  end
+
+  test "not-only qualification is a question-scoped lexical hypothesis, never a denial" do
+    assert [candidate] =
+      EmbeddedClauseEvidence.candidates(qualification_input(), meaning())
+
+    assert candidate.relation_candidate.surface == "the gathered had grown"
+    assert candidate.qualification_diagnostic.status == :qualification_candidate_available
+
+    q = candidate.qualification_candidate
+    assert q.type == :not_only_qualification_candidate
+    assert q.surface == "and not only gotten longer"
+    assert q.span == {12, 16}
+    assert q.punctuation_bridge == :original_punctuation_witnessed
+    assert q.focus_marker == :not_only
+    assert q.focus_scope == :not_only_not_clausal_negation
+    assert q.qualifier_predicate.selected_sense_id == "get|verb|1"
+    assert q.degree_term.selected_sense_id == "long|adjective|1"
+    assert q.auxiliary_reuse == :possible_not_established
+    assert q.coordination_status == :structural_candidate_only
+    assert q.semantic_comparison_status == :not_interpreted
+    assert q.asserted_event? == false
+    assert q.assertion_status == :not_asserted
+    assert q.verification == :external_unverified
+    assert candidate.subject_binding_status == :unresolved
+    assert candidate.embedded_clause_status == :not_interpreted
+  end
+
+  test "qualification abstains if punctuation gap is not witnessed in source" do
+    input = %{qualification_input() |
+      sentence: "What would you look at to say the gathered had grown and not only gotten longer?"}
+
+    assert [%{
+      relation_candidate: %{surface: "the gathered had grown"},
+      qualification_candidate: nil,
+      qualification_diagnostic: %{status: :coordinator_not_witnessed},
+      assertion_status: :not_asserted
+    }] = EmbeddedClauseEvidence.candidates(input, meaning())
+  end
+
+  test "qualification does not silently turn a different focus marker into not-only" do
+    input = qualification_input()
+    altered_tokens = Enum.map(input.tokens, fn
+      %{index: 13} = token -> %{token | phrase: "never"}
+      token -> token
+    end)
+
+    assert [%{
+      qualification_candidate: nil,
+      qualification_diagnostic: %{status: :focus_marker_missing}
+    }] = EmbeddedClauseEvidence.candidates(%{input | tokens: altered_tokens}, meaning())
+  end
+
+  test "qualification withholds evidence without supported verb and degree senses" do
+    base = qualification_input()
+
+    for {index, invalid_id, reason} <- [
+      {15, nil, :qualifier_verb_selection_missing},
+      {15, "get|noun|1", :qualifier_verb_not_supported},
+      {15, "get|verb|fallback", :qualifier_verb_not_supported},
+      {16, nil, :degree_selection_missing},
+      {16, "long|noun|1", :degree_selection_not_supported},
+      {16, "long|adjective|fallback", :degree_selection_not_supported}
+    ] do
+      winners =
+        base.atl_slate.winners
+        |> Enum.reject(&(&1.token_index == index))
+        |> then(fn other ->
+          if invalid_id, do: [%{token_index: index, id: invalid_id} | other],
+            else: other
+        end)
+
+      altered = put_in(base, [:atl_slate, :winners], winners)
+      assert [%{
+        qualification_candidate: nil,
+        qualification_diagnostic: %{status: ^reason},
+        assertion_status: :not_asserted
+      }] = EmbeddedClauseEvidence.candidates(altered, meaning())
+    end
+  end
+
+  test "qualification cannot exist without the established question-scoped base relation" do
+    base = qualification_input()
+    winners =
+      Enum.reject(base.atl_slate.winners, &(&1.token_index == 10))
+    altered = put_in(base, [:atl_slate, :winners], winners)
+
+    assert [%{
+      relation_candidate: nil,
+      qualification_candidate: nil,
+      qualification_diagnostic: %{status: :base_relation_missing},
+      assertion_status: :not_asserted
+    }] = EmbeddedClauseEvidence.candidates(altered, meaning())
+
+    asserted = put_in(meaning(), [:proposition, :epistemic_status], :asserted)
+    assert EmbeddedClauseEvidence.candidates(base, asserted) == []
   end
 
   test "no candidate is inferred outside the attested complement" do
