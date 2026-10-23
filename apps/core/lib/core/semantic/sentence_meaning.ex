@@ -47,7 +47,7 @@ defmodule Core.Semantic.SentenceMeaning do
               _ -> false
             end)
 
-          if atl && is_map(roles), do: compose_question(frame, atl, frames, tokens), else: nil
+          if atl && is_map(roles), do: compose_question(frame, atl, frames, tokens, sentence), else: nil
 
         _ -> nil
       end)
@@ -386,7 +386,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
   defp compose_question(
          %{span: {start, last}, roles: roles},
-         atl, signatures, indexed
+         atl, signatures, indexed, sentence
        )
        when is_integer(start) and is_integer(last) and is_map(roles) and
               is_map(atl) and is_map(indexed) do
@@ -401,7 +401,7 @@ defmodule Core.Semantic.SentenceMeaning do
            preposition: %{sense_id: prep_id}} <- atl.roles,
          true <- Enum.all?([wh_id, aux_id, subject_id, predicate_id, prep_id],
            &is_binary/1),
-         {:ok, topic} <- surface_range(indexed, prep + 1, last),
+         {:ok, topic} <- question_topic_surface(indexed, prep + 1, last, sentence),
          {:ok, wh_text} <- surface_at(indexed, wh),
          {:ok, aux_text} <- surface_at(indexed, auxiliary),
          {:ok, subject_text} <- surface_at(indexed, subject),
@@ -501,7 +501,7 @@ defmodule Core.Semantic.SentenceMeaning do
     end
   end
 
-  defp compose_question(_, _, _, _), do: nil
+  defp compose_question(_, _, _, _, _), do: nil
 
   # Only expose optional modifiers when ATL resolved the same token index
   # and provided an actual sense ID. The surface is not a verified sense gloss.
@@ -595,6 +595,41 @@ defmodule Core.Semantic.SentenceMeaning do
       _ -> :error
     end
   end
+
+  # Canonical token indices can contain a removed punctuation token.
+  # Never skip an unknown word: each single missing position needs an
+  # independently visible comma or semicolon between its two neighbors.
+  defp question_topic_surface(indexed, first, last, sentence)
+       when is_integer(first) and is_integer(last) and last >= first and
+              last - first < @max_topic_tokens and is_binary(sentence) do
+    indices = Enum.to_list(first..last)
+    present = Enum.filter(indices, &Map.has_key?(indexed, &1))
+    gaps = indices -- present
+
+    valid_gaps? =
+      Enum.all?(gaps, fn index ->
+        with {:ok, left} <- surface_at(indexed, index - 1),
+             {:ok, right} <- surface_at(indexed, index + 1) do
+          pattern = Regex.compile!(
+            Regex.escape(left) <> ~S(\s*[,;]\s*) <> Regex.escape(right),
+            "iu"
+          )
+          Regex.match?(pattern, sentence)
+        else
+          _ -> false
+        end
+      end)
+
+    words = Enum.map(present, &surface_at(indexed, &1))
+
+    if valid_gaps? and Enum.all?(words, &match?({:ok, _}, &1)) do
+      {:ok, words |> Enum.map(fn {:ok, word} -> word end) |> Enum.join(" ")}
+    else
+      :error
+    end
+  end
+
+  defp question_topic_surface(_, _, _, _), do: :error
 
   defp surface_range(indexed, first, last)
        when is_integer(first) and is_integer(last) and last >= first and
