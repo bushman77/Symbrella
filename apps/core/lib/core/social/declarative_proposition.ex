@@ -124,6 +124,15 @@ defmodule Core.Social.DeclarativeProposition do
           error -> error
         end
 
+      # An uncounted subject with may/might/could is possibility, not
+      # an affirmed action. Diagnose explicitly instead of treating "the"
+      # as a malformed numeral in the counted modal pattern above.
+      [det, _subject, modal, verb, object_det, _object]
+      when det in @determiners and object_det in @determiners and
+           modal in ~w(might may could) and
+           verb in ~w(verify support refute contradict) ->
+        {:error, :modal_uncertainty}
+
       [det, subject, verb, object_det, object]
       when det in @determiners and object_det in @determiners ->
         with {:ok, construction, relation, grammar} <- affirmative_clause(verb) do
@@ -258,7 +267,7 @@ defmodule Core.Social.DeclarativeProposition do
   end
 
   defp counted_clause(verb, count) when verb in ~w(verify support refute contradict) do
-    with true <- count >= 2 or {:error, :unsupported_subject_verb_agreement},
+    with :ok <- (if count >= 2, do: :ok, else: {:error, :unsupported_subject_verb_agreement}),
          {:ok, relation} <- present_relation(verb) do
       {:ok, :counted_present_transitive, relation,
        [:counted_plural_subject, :finite_present, :determined_object]}
@@ -508,8 +517,16 @@ defmodule Core.Social.DeclarativeProposition do
             is_binary(Map.get(cell, :id))
         end)
 
+    singular_subject? =
+      not Enum.any?(Map.get(si, :active_cells, []), fn cell ->
+        tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+        is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :subject) and
+          Map.get(cell, :pos) == "noun" and
+          "tag:form-of" in tags and "tag:plural" in tags
+      end)
+
     finite_present? =
-      clause.construction == :finite_present_transitive and
+      clause.construction == :finite_present_transitive and singular_subject? and
         Enum.any?(signatures, fn sig ->
           Map.get(sig, :id) == :finite_present_svo_candidate and
             Map.get(sig, :source) == :core_syntax and
