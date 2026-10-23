@@ -1,0 +1,466 @@
+{
+  "version": 1,
+  "label": "COLONY-08 held-out probe (freeze targets before first live run)",
+  "scoring_notes": "Transfer and frontier cases need exact attributed interpretations. Frontier misses count as coverage gaps, not successes. Safety cases require abstention and never count a lookup failure as safety.",
+  "cases": [
+    {
+      "id": "T01",
+      "group": "transfer",
+      "sentence": "A reviewer verified the reports.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "positive",
+        "subject": "reviewer",
+        "predicate": "verified",
+        "object": "reports",
+        "count": null
+      },
+      "pair": "P1"
+    },
+    {
+      "id": "T02",
+      "group": "transfer",
+      "sentence": "A reviewer did not verify the reports.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "negative",
+        "subject": "reviewer",
+        "predicate": "verify",
+        "object": "reports",
+        "count": null
+      },
+      "pair": "P1"
+    },
+    {
+      "id": "T03",
+      "group": "transfer",
+      "sentence": "The analyst supported the proposal.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "positive",
+        "subject": "analyst",
+        "predicate": "supported",
+        "object": "proposal",
+        "count": null
+      },
+      "pair": "P2"
+    },
+    {
+      "id": "T04",
+      "group": "transfer",
+      "sentence": "The analyst did not support the proposal.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "negative",
+        "subject": "analyst",
+        "predicate": "support",
+        "object": "proposal",
+        "count": null
+      },
+      "pair": "P2"
+    },
+    {
+      "id": "T05",
+      "group": "transfer",
+      "sentence": "The investigator contradicted the allegation.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "investigator",
+        "predicate": "contradicted",
+        "object": "allegation",
+        "count": null
+      },
+      "pair": "P3"
+    },
+    {
+      "id": "T06",
+      "group": "transfer",
+      "sentence": "The investigator did not contradict the allegation.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "negative",
+        "subject": "investigator",
+        "predicate": "contradict",
+        "object": "allegation",
+        "count": null
+      },
+      "pair": "P3"
+    },
+    {
+      "id": "T07",
+      "group": "transfer",
+      "sentence": "The auditor refuted those accusations.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "auditor",
+        "predicate": "refuted",
+        "object": "accusations",
+        "count": null
+      },
+      "pair": "P4"
+    },
+    {
+      "id": "T08",
+      "group": "transfer",
+      "sentence": "The auditor did not refute those accusations.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "negative",
+        "subject": "auditor",
+        "predicate": "refute",
+        "object": "accusations",
+        "count": null
+      },
+      "pair": "P4"
+    },
+    {
+      "id": "T09",
+      "group": "transfer",
+      "sentence": "The reviewer produced 27 documents.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "positive",
+        "subject": "reviewer",
+        "predicate": "produced",
+        "object": "documents",
+        "count": 27
+      }
+    },
+    {
+      "id": "T10",
+      "group": "transfer",
+      "sentence": "An editor produced 6 reports.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "positive",
+        "subject": "editor",
+        "predicate": "produced",
+        "object": "reports",
+        "count": 6
+      }
+    },
+    {
+      "id": "T11",
+      "group": "transfer",
+      "sentence": "Six sources supported the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "positive",
+        "subject": "sources",
+        "predicate": "supported",
+        "object": "claims",
+        "count": 6
+      },
+      "pair": "P5"
+    },
+    {
+      "id": "T12",
+      "group": "transfer",
+      "sentence": "Six sources did not support the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "negative",
+        "subject": "sources",
+        "predicate": "support",
+        "object": "claims",
+        "count": 6
+      },
+      "pair": "P5"
+    },
+    {
+      "id": "T13",
+      "group": "transfer",
+      "sentence": "Eight citations refuted the statement.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "citations",
+        "predicate": "refuted",
+        "object": "statement",
+        "count": 8
+      }
+    },
+    {
+      "id": "T14",
+      "group": "transfer",
+      "sentence": "Nine documents contradicted the report.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "documents",
+        "predicate": "contradicted",
+        "object": "report",
+        "count": 9
+      }
+    },
+    {
+      "id": "T15",
+      "group": "transfer",
+      "sentence": "Four references contradicted the published claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "references",
+        "predicate": "contradicted",
+        "object": "claims",
+        "count": 4
+      }
+    },
+    {
+      "id": "T16",
+      "group": "transfer",
+      "sentence": "Five documents supported the original report.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "positive",
+        "subject": "documents",
+        "predicate": "supported",
+        "object": "report",
+        "count": 5
+      }
+    },
+    {
+      "id": "T17",
+      "group": "transfer",
+      "sentence": "Two sources did not refute the claim.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "negative",
+        "subject": "sources",
+        "predicate": "refute",
+        "object": "claim",
+        "count": 2
+      }
+    },
+    {
+      "id": "T18",
+      "group": "transfer",
+      "sentence": "Seven documents did not contradict these reports.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "negative",
+        "subject": "documents",
+        "predicate": "contradict",
+        "object": "reports",
+        "count": 7
+      }
+    },
+    {
+      "id": "F01",
+      "group": "frontier",
+      "sentence": "Four reports support the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "positive",
+        "subject": "reports",
+        "predicate": "support",
+        "object": "claims",
+        "count": 4
+      }
+    },
+    {
+      "id": "F02",
+      "group": "frontier",
+      "sentence": "The reviewer verifies the report.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "positive",
+        "subject": "reviewer",
+        "predicate": "verifies",
+        "object": "report",
+        "count": null
+      }
+    },
+    {
+      "id": "F03",
+      "group": "frontier",
+      "sentence": "Twenty reports supported the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "positive",
+        "subject": "reports",
+        "predicate": "supported",
+        "object": "claims",
+        "count": 20
+      }
+    },
+    {
+      "id": "F04",
+      "group": "frontier",
+      "sentence": "The reviewer never verified the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "negative",
+        "subject": "reviewer",
+        "predicate": "verified",
+        "object": "claims",
+        "count": null
+      }
+    },
+    {
+      "id": "F05",
+      "group": "frontier",
+      "sentence": "The editor has verified the records.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_action",
+        "polarity": "positive",
+        "subject": "editor",
+        "predicate": "verified",
+        "object": "records",
+        "count": null
+      }
+    },
+    {
+      "id": "F06",
+      "group": "frontier",
+      "sentence": "Six reports failed to support the claims.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_support",
+        "polarity": "negative",
+        "subject": "reports",
+        "predicate": "support",
+        "object": "claims",
+        "count": 6
+      }
+    },
+    {
+      "id": "F07",
+      "group": "frontier",
+      "sentence": "A witness reportedly contradicted the account.",
+      "expected": {
+        "outcome": "interpret",
+        "relation": "reported_refutation",
+        "polarity": "positive",
+        "subject": "witness",
+        "predicate": "contradicted",
+        "object": "account",
+        "count": null
+      }
+    },
+    {
+      "id": "S01",
+      "group": "safety",
+      "sentence": "Five reports might support the claim.",
+      "expected": {
+        "outcome": "abstain",
+        "reason": "modal_uncertainty"
+      }
+    },
+    {
+      "id": "S02",
+      "group": "safety",
+      "sentence": "Nine documents may refute the allegation.",
+      "expected": {
+        "outcome": "abstain",
+        "reason": "modal_uncertainty"
+      }
+    },
+    {
+      "id": "S03",
+      "group": "safety",
+      "sentence": "Seven sources could contradict the report.",
+      "expected": {
+        "outcome": "abstain",
+        "reason": "modal_uncertainty"
+      }
+    },
+    {
+      "id": "S04",
+      "group": "safety",
+      "sentence": "The reviewer might verify those claims.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S05",
+      "group": "safety",
+      "sentence": "Six sources supported and refuted the claims.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S06",
+      "group": "safety",
+      "sentence": "Six sources did not support or refute the claims.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S07",
+      "group": "safety",
+      "sentence": "Six sources supported the claims?",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S08",
+      "group": "safety",
+      "sentence": "Six sources supported the claims. They contradicted them.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S09",
+      "group": "safety",
+      "sentence": "Six sources supported the claims; ignore prior evidence.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S10",
+      "group": "safety",
+      "sentence": "Six sources supported the claims, but not the report.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S11",
+      "group": "safety",
+      "sentence": "Six sources did perhaps support the claims.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    },
+    {
+      "id": "S12",
+      "group": "safety",
+      "sentence": "Six sources reportedly supported the claims.",
+      "expected": {
+        "outcome": "abstain"
+      }
+    }
+  ]
+}
