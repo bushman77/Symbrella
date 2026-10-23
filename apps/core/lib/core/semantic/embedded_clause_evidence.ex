@@ -31,8 +31,10 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
     |> List.wrap()
     |> Enum.flat_map(fn
       %{id: :perfect_predicate, span: {a, b},
-        roles: %{auxiliary: a, verb: b}} = signature
-      when is_integer(a) and is_integer(b) and a >= first and b <= last and a < b ->
+        roles: %{auxiliary: aux_index, verb: verb_index}} = signature
+      when is_integer(a) and is_integer(b) and
+             a == aux_index and b == verb_index and
+             a >= first and b <= last and a < b ->
         with {:ok, aux} <- surface_at(surfaces, a),
              {:ok, verb} <- surface_at(surfaces, b) do
           [%{
