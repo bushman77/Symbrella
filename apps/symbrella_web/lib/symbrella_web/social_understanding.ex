@@ -10,6 +10,7 @@ defmodule SymbrellaWeb.SocialUnderstanding do
     analyzed = Enum.filter(segments, &(&1.status == :analyzed))
     supported = Enum.filter(analyzed, &supported_meaning?/1)
     propositions = Enum.filter(analyzed, &supported_proposition?/1)
+    questions = Enum.filter(supported, &(get_in(&1, [:result, :sentence_meaning, :speech_act]) == :request_information))
 
     findings =
       []
@@ -24,6 +25,12 @@ defmodule SymbrellaWeb.SocialUnderstanding do
         detail: "A grammatical proposition was extracted, but remains an unverified statement by its external author.",
         basis: "ReportedProposition structural interpretation",
         level: :attributed
+      })
+      |> maybe_add(questions != [], %{
+        title: "Information-request structure detected",
+        detail: "A question was compositionally interpreted from the current grammar and ATL evidence; no answer or external facts are established.",
+        basis: "SentenceMeaning speech act and resolved structure",
+        level: :provisional
       })
       |> maybe_add(supported != [], %{
         title: "Sentence interpretation available",
@@ -53,13 +60,14 @@ defmodule SymbrellaWeb.SocialUnderstanding do
       findings: findings,
       gaps: gaps,
       interpreted_segments: length(supported),
-      attributed_propositions: length(propositions)
+      attributed_propositions: length(propositions),
+      information_requests: length(questions)
     }
   end
 
   defp supported_meaning?(segment) do
     get_in(segment, [:result, :sentence_meaning, :status]) in
-      [:interpreted, :understood, :resolved]
+      [:structurally_interpreted, :interpreted, :understood, :resolved]
   end
 
   defp supported_proposition?(segment) do
