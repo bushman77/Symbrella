@@ -238,7 +238,7 @@ defmodule Core.Semantic.Proposition do
       end
 
     %{
-      type: :nominal_topic,
+      type: if(source == :surface_only, do: :unparsed_topic, else: :nominal_topic),
       surface: surface,
       span: {first, last},
       head: head,
