@@ -256,7 +256,7 @@ defmodule SymbrellaWeb.SocialLive do
               <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6">
                 <%= if @cognitive_report do %>
                   <p class="text-sm text-zinc-400">
-                    {@cognitive_report.analyzed_segments} segments inspected · {@cognitive_report.omitted_replies} replies omitted.
+                    {@cognitive_report.analyzed_segments} sentence samples inspected · {@cognitive_report.omitted_replies} replies omitted · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted.
                     Lexical selections are hypotheses, not verified facts.
                   </p>
                   <section :if={Map.has_key?(@cognitive_report, :understanding)} id="social-understanding"
