@@ -36,7 +36,10 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
           speech_act: :request_information, kind: :wh_topic_question,
           definition: "The speaker asks whether the group grew.",
           role_surfaces: %{subject: "the group", predicate: "grown"},
-          unresolved_roles: [:topic_possessor_lexical_grounding]}}},
+          topic_structure: %{type: :unparsed_topic, source: :surface_only,
+            grounding_status: :unverified, assertion_status: :not_asserted,
+            embedded_clause_status: :not_interpreted},
+          unresolved_roles: [:topic_internal_structure]}}},
       %{status: :analyzed, label: "Original post · sentence 2", author: "agent",
         excerpt: "Would you say so?",
         result: %{sentence_meaning: %{status: :not_yet_interpreted}}},
@@ -48,7 +51,10 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
     report = SocialDiscourse.build(segments)
     assert length(report.interpretations) == 1
     assert hd(report.interpretations).roles == %{subject: "the group", predicate: "grown"}
-    assert hd(report.interpretations).unresolved_roles == [:topic_possessor_lexical_grounding]
+    assert hd(report.interpretations).unresolved_roles == [:topic_internal_structure]
+    assert hd(report.interpretations).topic_structure.type == :unparsed_topic
+    assert hd(report.interpretations).topic_structure.assertion_status == :not_asserted
+    assert hd(report.interpretations).topic_structure.embedded_clause_status == :not_interpreted
     assert Enum.map(report.lexical_links, & &1.to) == [2]
     assert hd(report.lexical_links).shared_terms == ["group", "grown"]
     assert hd(report.lexical_links).coreference_verified? == false
