@@ -113,7 +113,8 @@ defmodule Brain.LIFG.SenseFocus do
                           role: :predicate, basis: basis, evidence: evidence})
        when basis in [:modal_question_predicate, :modal_declarative_predicate,
                       :imperative_predicate, :plural_present_predicate,
-                      :finite_present_svo_predicate] and is_list(evidence) do
+                      :finite_present_svo_predicate,
+                      :counted_negative_transitive_predicate] and is_list(evidence) do
     required =
       case basis do
         :modal_question_predicate -> [:auxiliary_subject_order]
@@ -122,6 +123,9 @@ defmodule Brain.LIFG.SenseFocus do
         :plural_present_predicate ->
           [:attested_plural_subject, :present_base_verb_witness]
         :finite_present_svo_predicate -> [:attested_finite_present_verb]
+        :counted_negative_transitive_predicate ->
+          [:attested_counted_subject, :explicit_did_not_negation,
+           :attested_nominal_object]
       end
 
     Enum.all?(required ++ [:dictionary_pos_witness, :bounded_predicate_slot],
