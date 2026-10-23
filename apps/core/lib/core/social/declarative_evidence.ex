@@ -67,15 +67,15 @@ defmodule Core.Social.DeclarativeEvidence do
     required = Map.fetch!(@evidence, family)
     all_indices = Enum.to_list(first..last)
 
-    with true <- Enum.all?(required, &(&1 in evidence)) or {:error, :missing_grammar_evidence},
+    with true <- Enum.all?(required, &(&1 in evidence)) || {:error, :missing_grammar_evidence},
          true <- Enum.all?(roles, fn {_role, index} ->
            is_integer(index) and index >= first and index <= last
-         end) or {:error, :invalid_grammar_indices},
+         end) || {:error, :invalid_grammar_indices},
          true <- Enum.all?([:subject_head, :predicate, :object_head], &Map.has_key?(roles, &1))
-           or {:error, :missing_grammatical_roles},
+           || {:error, :missing_grammatical_roles},
          {:ok, token_map} <- bounded_token_map(si, all_indices),
          {:ok, bound} <- bind_roles(si, roles, token_map),
-         true <- complete_local_surface?(token_map, all_indices) or {:error, :incomplete_local_span} do
+         true <- complete_local_surface?(token_map, all_indices) || {:error, :incomplete_local_span} do
       subject = Map.fetch!(bound, :subject_head)
       predicate = Map.fetch!(bound, :predicate)
       object = Map.fetch!(bound, :object_head)
