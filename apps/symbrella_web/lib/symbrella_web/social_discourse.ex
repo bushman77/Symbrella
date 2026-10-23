@@ -15,8 +15,8 @@ defmodule SymbrellaWeb.SocialDiscourse do
       |> Enum.with_index()
       |> Enum.flat_map(fn {segment, index} ->
         meaning = get_in(segment, [:result, :sentence_meaning]) || %{}
-        if segment.status == :analyzed and
-             meaning.status in [:structurally_interpreted, :interpreted, :understood, :resolved] do
+        if Map.get(segment, :status) == :analyzed and
+             Map.get(meaning, :status) in [:structurally_interpreted, :interpreted, :understood, :resolved] do
           [%{
             segment_index: index,
             speaker: segment.author,
@@ -39,7 +39,7 @@ defmodule SymbrellaWeb.SocialDiscourse do
         segments
         |> Enum.with_index()
         |> Enum.filter(fn {other, index} ->
-          index != claim.segment_index and other.status == :analyzed and
+          index != claim.segment_index and Map.get(other, :status) == :analyzed and
             Map.get(other, :author) == claim.speaker
         end)
         |> Enum.flat_map(fn {other, index} ->
