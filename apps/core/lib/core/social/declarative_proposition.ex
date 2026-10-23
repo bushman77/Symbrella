@@ -61,6 +61,10 @@ defmodule Core.Social.DeclarativeProposition do
               role_indices: Map.new(clause.roles, fn {role, index, _pos} -> {role, index} end)
             }
           else
+            {:error, :missing_attested_dictionary_roles, audit} ->
+              abstain(:missing_attested_dictionary_roles)
+              |> Map.put(:role_audit, audit)
+
             {:error, :insufficient_grammatical_evidence, audit} ->
               abstain(:insufficient_grammatical_evidence)
               |> Map.put(:grammar_audit, audit)
@@ -267,28 +271,44 @@ defmodule Core.Social.DeclarativeProposition do
   defp evidence_relation("supported"), do: {:ok, :reported_support}
   defp evidence_relation(_), do: {:error, :unsupported_evidence_relation}
 
+  # Dictionary readiness is not equivalent to POS coverage for *every*
+  # grammatical role. Return index-specific evidence on abstention instead
+  # of blaming LIFG or inventing an unobserved sense.
   defp attested_roles(si, roles) do
     cells = Map.get(si, :active_cells, [])
 
-    if Enum.all?(roles, fn {role, index, pos} ->
-         Enum.any?(cells, fn cell ->
-           if is_map(cell) do
-             available_pos = Map.get(cell, :pos)
-             valid_pos? =
-               available_pos == pos or
-                 (role == :auxiliary and available_pos in ["verb", "auxiliary"])
+    audit =
+      Enum.map(roles, fn {role, index, pos} ->
+        at_position =
+          Enum.filter(cells, fn cell ->
+            is_map(cell) and Map.get(cell, :token_index) == index and
+              is_binary(Map.get(cell, :id))
+          end)
 
-             Map.get(cell, :token_index) == index and
-               valid_pos? and is_binary(Map.get(cell, :id))
-           else
-             false
-           end
-         end)
-       end) do
-      :ok
-    else
-      {:error, :missing_attested_dictionary_roles}
-    end
+        available =
+          at_position
+          |> Enum.map(&Map.get(&1, :pos))
+          |> Enum.filter(&is_binary/1)
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        witnessed? =
+          pos in available or
+            (role == :auxiliary and
+               Enum.any?(available, &(&1 in ["verb", "auxiliary"])))
+
+        %{
+          role: role,
+          token_index: index,
+          expected_pos: pos,
+          available_pos: Enum.take(available, 8),
+          dictionary_pos_available?: witnessed?,
+          agreed?: witnessed?
+        }
+      end)
+
+    if Enum.all?(audit, & &1.agreed?),
+      do: :ok, else: {:error, :missing_attested_dictionary_roles, audit}
   end
 
   defp selected_roles(si, roles) do
