@@ -140,7 +140,12 @@ defmodule Core.Social.ColonyCognition do
         end
 
       _ ->
-        claim_from_title(title)
+        # Preserve the original counted-link reporter only. For every other
+        # surface, regex keyword detection cannot substitute for a full
+        # grammar + dictionary + ATL interpretation (notably modals).
+        if Regex.match?(@ratio, title),
+          do: claim_from_title(title),
+          else: {:error, :unresolved_colony_evidence_relation}
     end
   end
 
