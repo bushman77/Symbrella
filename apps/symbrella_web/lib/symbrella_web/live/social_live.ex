@@ -336,6 +336,12 @@ defmodule SymbrellaWeb.SocialLive do
                             <p>Attachment: {candidate.subject_candidate.attachment_status} ·
                               reference: {candidate.subject_candidate.coreference_status}</p>
                           </div>
+                          <p :if={is_map(Map.get(candidate, :relation_diagnostic))}
+                            class="text-amber-100">
+                            Embedded relation evidence: {candidate.relation_diagnostic.status} ·
+                            selected predicate sense:
+                            {candidate.relation_diagnostic.selected_predicate_id || "none"}
+                          </p>
                           <div :if={is_map(Map.get(candidate, :relation_candidate))}
                             class="space-y-1 rounded border border-cyan-400/20 bg-zinc-950/40 p-2">
                             <p class="font-semibold text-cyan-200">
