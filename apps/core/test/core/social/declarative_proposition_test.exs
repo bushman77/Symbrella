@@ -300,15 +300,24 @@ defmodule Core.Social.DeclarativePropositionTest do
     ).reason == :missing_attested_dictionary_roles
   end
 
-  test "determined modal statements abstain as uncertainty, not invalid number" do
-    modal = fixture("The reviewer might verify those claims.",
-      roles: [{1, "noun"}, {3, "verb"}, {5, "noun"}],
-      noun_phrases: [{0, 1}, {4, 5}])
+  test "determined and counted modal statements abstain as uncertainty, not invalid number" do
+    for modal <- ~w(might may could) do
+      for {sentence, phrases} <- [
+            {"The reviewer #{modal} verify those claims.", [{0, 1}, {4, 5}]},
+            {"Three reports #{modal} support the claims.", [{4, 5}]}
+          ] do
+        si =
+          fixture(sentence,
+            roles: [{1, "noun"}, {3, "verb"}, {5, "noun"}],
+            noun_phrases: phrases)
 
-    result = DeclarativeProposition.interpret(modal)
-    assert result.status == :not_interpreted
-    assert result.reason == :modal_uncertainty
-    assert result.verification == :external_unverified
+        result = DeclarativeProposition.interpret(si)
+        assert result.status == :not_interpreted
+        assert result.reason == :modal_uncertainty
+        assert result.verification == :external_unverified
+        refute Map.has_key?(result, :polarity)
+      end
+    end
   end
 
   test "modal support is explicitly unresolved, not affirmative evidence" do
