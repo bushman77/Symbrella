@@ -107,6 +107,71 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     end
   end
 
+  test "diagnoses missing subject using original token senses and noun phrase evidence" do
+    base = input()
+    assert [%{subject_diagnostic: missing}] =
+      EmbeddedClauseEvidence.candidates(base, meaning())
+
+    assert missing.status == :no_adjacent_noun_phrase_signature
+    assert missing.adjacent_noun_signatures == []
+    assert missing.adjacent_atl_noun_phrases == []
+
+    nominal = %{id: :noun_phrase, span: {7, 8},
+      roles: %{determiner: 7, head: 8}}
+    tokens = [
+      %{index: 7, phrase: "the", n: 1},
+      %{index: 8, phrase: "gathered", n: 1}
+    ] ++ base.tokens
+
+    winners = [
+      %{token_index: 7, id: "the|determiner|1"},
+      %{token_index: 8, id: "gather|verb|2"}
+    ] ++ base.atl_slate.winners
+
+    with_signature = %{base |
+      tokens: tokens,
+      sentence_signatures: [nominal | base.sentence_signatures],
+      atl_slate: %{base.atl_slate | winners: winners}
+    }
+
+    assert [%{subject_candidate: nil, subject_diagnostic: no_atl}] =
+      EmbeddedClauseEvidence.candidates(with_signature, meaning())
+
+    assert no_atl.status == :noun_phrase_not_resolved_by_atl
+    assert no_atl.adjacent_noun_signatures == [%{span: {7, 8}}]
+    assert Enum.find(no_atl.token_window, &(&1.index == 8)).selected_pos == "verb"
+
+    partial = %{id: :noun_phrase, span: {7, 8},
+      status: :partially_resolved, unresolved_roles: [:head], roles: %{}}
+    with_partial = put_in(with_signature, [:atl_slate, :constituents], [partial])
+
+    assert [%{subject_candidate: nil, subject_diagnostic: unresolved}] =
+      EmbeddedClauseEvidence.candidates(with_partial, meaning())
+
+    assert unresolved.status == :atl_nominal_unresolved
+    assert unresolved.adjacent_atl_noun_phrases ==
+      [%{span: {7, 8}, status: :partially_resolved, unresolved_roles: [:head]}]
+    assert unresolved.subject_binding_status == :unresolved
+  end
+
+  test "resolved ATL constituent with non-nominal head sense still abstains" do
+    base = input()
+    nominal = %{id: :noun_phrase, status: :resolved, span: {7, 8},
+      roles: %{head: %{token_index: 8, sense_id: "gather|verb|2"}}}
+    source = %{base |
+      tokens: [%{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "gathered", n: 1}] ++ base.tokens,
+      sentence_signatures: [%{id: :noun_phrase, span: {7, 8},
+        roles: %{determiner: 7, head: 8}} | base.sentence_signatures],
+      atl_slate: Map.put(base.atl_slate, :constituents, [nominal])
+    }
+
+    assert [%{subject_candidate: nil, subject_diagnostic: diagnostic}] =
+      EmbeddedClauseEvidence.candidates(source, meaning())
+
+    assert diagnostic.status == :resolved_nominal_failed_candidate_checks
+  end
+
   test "no candidate is inferred outside the attested complement" do
     other = put_in(meaning(), [:proposition, :content, :complement, :argument, :span],
       {11, 16})
