@@ -49,6 +49,60 @@ defmodule Brain.LIFG.SenseFocusTest do
     assert original == candidates()
   end
 
+  test "counted negative transitive focuses attested verb POS without pruning the noun" do
+    role = %{
+      status: :supported,
+      pos: "verb",
+      role: :predicate,
+      basis: :counted_negative_transitive_predicate,
+      evidence: [
+        :attested_counted_subject,
+        :explicit_did_not_negation,
+        :attested_nominal_object,
+        :dictionary_pos_witness,
+        :bounded_predicate_slot
+      ]
+    }
+
+    candidates = [
+      %{id: "support|noun|1", norm: "support", pos: "noun"},
+      %{id: "support|verb|1", norm: "support", pos: "verb"}
+    ]
+
+    si = %{
+      role_competition: %{
+        source: :core_syntax_and_attested_dictionary_pos,
+        roles: %{4 => role}
+      }
+    }
+
+    plan = SenseFocus.plan(si, 4, candidates)
+    assert plan.mode == :focused
+    assert plan.focus_pos == "verb"
+    assert plan.context_evaluations == 1
+    assert plan.context_skipped == 1
+    assert Enum.map(candidates, &SenseFocus.evaluate_context?(plan, &1)) == [false, true]
+    refute Map.has_key?(plan, :selected_sense_id)
+
+    # A weak/partial role or a missing verb alternative must still do the
+    # normal broad contextual pass and must not invent any sense ID.
+    for evidence_to_remove <- [
+          :attested_counted_subject, :explicit_did_not_negation,
+          :attested_nominal_object, :dictionary_pos_witness,
+          :bounded_predicate_slot
+        ] do
+      damaged = %{role | evidence: List.delete(role.evidence, evidence_to_remove)}
+      assert SenseFocus.plan(
+               put_in(si, [:role_competition, :roles, 4], damaged), 4, candidates
+             ).mode == :broad
+    end
+
+    assert SenseFocus.plan(si, 4, [hd(candidates)]).mode == :broad
+    assert SenseFocus.plan(si, 4, candidates, enabled?: false).mode == :broad
+    assert SenseFocus.plan(si, 4, candidates, mwe?: true).mode == :broad
+    assert si.role_competition.roles[4] == role
+  end
+
   test "ambiguous or untrusted evidence retains full broad scoring" do
     original = candidates()
 
