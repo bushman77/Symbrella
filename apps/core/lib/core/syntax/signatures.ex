@@ -87,6 +87,7 @@ defmodule Core.Syntax.Signatures do
        copular_relative_classifications(nodes) ++
        bounded_past_transitives(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
+       nominalized_adjective_subject_candidates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
        prepositional_phrase_constructions(nodes, noun_phrases ++ possessive_phrases))
@@ -566,6 +567,32 @@ defmodule Core.Syntax.Signatures do
             observations
           )
         ]
+      else
+        []
+      end
+    end)
+  end
+
+  # An adjective following a determiner may function as a nominal group
+  # before a perfect predicate ("the injured have recovered"). This does NOT
+  # assign a noun sense, identify its referent, or bind it as an event subject.
+  # The perfect auxiliary and participle are required grammatical witnesses;
+  # the candidate nominal's span contains only the two original tokens.
+  defp nominalized_adjective_subject_candidates(nodes) do
+    nodes
+    |> Enum.chunk_every(4, 1, :discard)
+    |> Enum.flat_map(fn [det, adjective, aux, verb] = segment ->
+      if pos?(det, "determiner") and pos?(adjective, "adjective") and
+           auxiliary_have?(aux) and form?(verb, :past_participle) and
+           valid_surface?(segment) do
+        [signature(
+          :nominalized_adjective_subject_candidate,
+          {det.index, adjective.index},
+          %{determiner: det.index, adjective: adjective.index},
+          %{determiner: [:pos_determiner], adjective: [:pos_adjective]},
+          [:determiner_adjective_surface, :following_perfect_predicate,
+           :nominalization_only_hypothesized]
+        )]
       else
         []
       end
