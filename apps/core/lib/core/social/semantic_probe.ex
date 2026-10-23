@@ -138,6 +138,16 @@ defmodule Core.Social.SemanticProbe do
          semantic_relations: si |> get_in([:evidence, :relations]) |>
            List.wrap() |> Enum.take(8) |> length()
        },
+       question_evidence: %{
+         signature_count: Enum.count(signatures, &(Map.get(&1, :id) in [:wh_aux_topic_question, :wh_aux_object_question])),
+         resolved_constituents: slate
+           |> Map.get(:constituents, [])
+           |> List.wrap()
+           |> Enum.count(fn constituent ->
+             Map.get(constituent, :id) in [:wh_aux_topic_question, :wh_aux_object_question] and
+               Map.get(constituent, :status) == :resolved
+           end)
+       },
        sentence_meaning: %{
          status: Map.get(meaning, :status, :not_yet_interpreted),
          kind: Map.get(meaning, :kind, :unknown),
