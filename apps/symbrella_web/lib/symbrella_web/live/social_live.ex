@@ -325,9 +325,14 @@ defmodule SymbrellaWeb.SocialLive do
                             {candidate.assertion_status}</p>
                           <div :if={is_map(Map.get(candidate, :subject_candidate))}
                             class="rounded border border-cyan-400/20 p-2">
-                            <p>Adjacent nominal candidate: {candidate.subject_candidate.surface}</p>
+                            <p>Adjacent grammatical subject candidate: {candidate.subject_candidate.surface}</p>
                             <p>{candidate.subject_candidate.source} ·
                               {candidate.subject_candidate.status}</p>
+                            <p :if={Map.get(candidate.subject_candidate, :nominalization_status)}
+                              class="text-amber-200">
+                              Adjectival nominalization: {candidate.subject_candidate.nominalization_status} ·
+                              adjective sense retained, not converted into a noun
+                            </p>
                             <p>Attachment: {candidate.subject_candidate.attachment_status} ·
                               reference: {candidate.subject_candidate.coreference_status}</p>
                           </div>
@@ -351,6 +356,17 @@ defmodule SymbrellaWeb.SocialLive do
                               {length(candidate.subject_diagnostic.adjacent_noun_signatures)} ·
                               ATL noun constituents:
                               {length(candidate.subject_diagnostic.adjacent_atl_noun_phrases)}
+                            </p>
+                            <p class="text-zinc-400">
+                              Adjectival nominalization signatures:
+                              {length(Map.get(candidate.subject_diagnostic, :adjacent_nominalization_signatures, []))} ·
+                              ATL nominalization constituents:
+                              {length(Map.get(candidate.subject_diagnostic, :adjacent_atl_nominalizations, []))}
+                            </p>
+                            <p :for={nominal <- Map.get(candidate.subject_diagnostic, :adjacent_atl_nominalizations, [])}
+                              class="break-words text-zinc-400">
+                              ATL adjectival nominalization {inspect(nominal.span)} · {nominal.status} ·
+                              unresolved roles: {inspect(nominal.unresolved_roles)}
                             </p>
                             <p :for={np <- candidate.subject_diagnostic.adjacent_atl_noun_phrases}
                               class="text-zinc-400">
