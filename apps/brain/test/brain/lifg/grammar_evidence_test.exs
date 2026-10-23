@@ -14,6 +14,44 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
   defp context(signatures), do: GE.prepare(%{active_cells: @cells, sentence_signatures: signatures})
   defp sign(id, roles), do: %{id: id, roles: roles}
 
+  test "complete bounded past transitive boosts only an existing verb candidate" do
+    sig = %{
+      id: :bounded_regular_past_transitive,
+      source: :core_syntax,
+      span: {0, 4},
+      roles: %{
+        subject_determiner: 0, subject_head: 1, predicate: 2,
+        object_determiner: 3, object_head: 4
+      },
+      evidence: [
+        :contiguous_surface, :attested_nominal_subject,
+        :attested_dictionary_verb, :bounded_past_surface,
+        :attested_nominal_object
+      ]
+    }
+
+    cells = [
+      %{id: "verified|noun|1", norm: "verified", pos: "noun"},
+      %{id: "verified|verb|3", norm: "verified", pos: "verb"}
+    ]
+
+    scores = %{"verified|noun|1" => 0.42, "verified|verb|3" => 0.20}
+    ctx = GE.prepare(%{active_cells: cells, sentence_signatures: [sig]})
+    result = GE.apply_bounded_past_transitive(scores, ctx, 2)
+
+    assert result["verified|verb|3"] > result["verified|noun|1"]
+    assert result["verified|noun|1"] == 0.42
+    assert Map.keys(result) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
+    assert GE.apply_bounded_past_transitive(scores, ctx, 3) == scores
+
+    incomplete = %{sig | evidence: List.delete(sig.evidence, :attested_nominal_object)}
+    incomplete_ctx = GE.prepare(%{active_cells: cells, sentence_signatures: [incomplete]})
+    assert GE.apply_bounded_past_transitive(scores, incomplete_ctx, 2) == scores
+
+    missing_verb = GE.prepare(%{active_cells: [hd(cells)], sentence_signatures: [sig]})
+    assert GE.apply_bounded_past_transitive(scores, missing_verb, 2) == scores
+  end
+
   test "complete copular relative clause boosts only an attested noun complement" do
     sig = %{
       id: :copular_relative_classification,
