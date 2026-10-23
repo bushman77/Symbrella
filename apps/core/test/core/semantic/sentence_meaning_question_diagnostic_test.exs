@@ -21,4 +21,37 @@ defmodule Core.Semantic.SentenceMeaningQuestionDiagnosticTest do
         tokens: []
       })
   end
+
+  test "comma between indexed words is not mistaken for missing vocabulary" do
+    roles = %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4}
+    frame = %{id: :wh_aux_topic_question, span: {0, 7}, roles: roles}
+
+    atl_roles =
+      Map.new(roles, fn {role, index} ->
+        {role, %{token_index: index, sense_id: "#{role}|noun|1"}}
+      end)
+
+    tokens = [
+      {0, "what"}, {1, "do"}, {2, "you"}, {3, "know"},
+      {4, "about"}, {5, "growth"}, {7, "and"}
+    ] |> Enum.map(fn {index, word} -> %{index: index, n: 1, phrase: word} end)
+
+    si = %{
+      sentence: "what do you know about growth, and",
+      tokens: tokens,
+      sentence_signatures: [frame],
+      atl_slate: %{constituents: [%{
+        id: :wh_aux_topic_question,
+        span: {0, 7},
+        status: :resolved,
+        roles: atl_roles
+      }]}
+    }
+
+    assert %{status: :punctuation_gap_witnessed, indices: [6]} =
+      SentenceMeaning.question_diagnostic(si)
+
+    assert %{status: :missing_token_surfaces, indices: [6]} =
+      SentenceMeaning.question_diagnostic(%{si | sentence: "what do you know about growth and"})
+  end
 end
