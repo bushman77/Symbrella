@@ -413,7 +413,7 @@ defmodule Core.Response do
 
   defp put_chosen_skill(features, _skill), do: features
 
-  defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type \\ nil) do
+  defp llm_or_model_unavailable(text_in, features, decision, mood, _intent, prompt_type) do
     case LlmSynthesis.generate(text_in, features, decision, mood, prompt_type) do
       {:ok, verified_text, %{authoritative_plan: %{status: :enforced}} = reflection} ->
         {verified_text, :symbolic_verified, nil, reflection}
