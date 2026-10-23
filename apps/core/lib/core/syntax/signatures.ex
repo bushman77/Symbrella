@@ -65,6 +65,10 @@ defmodule Core.Syntax.Signatures do
   @have_contract ~r/^(?:i|you|we|they)'ve$/u
   @have_or_be_contract ~r/^(?:he|she|it|that|there|who)'s$/u
 
+  # These regular-past surfaces have been admitted by the bounded Colony
+  # declarative composer. A source word alone never supplies a POS witness.
+  @bounded_regular_past MapSet.new(~w(verified supported refuted contradicted produced))
+
   @type signature :: Core.SemanticInput.sentence_signature()
 
   @doc "Detect grammatical constructions without modifying the input."
@@ -80,6 +84,7 @@ defmodule Core.Syntax.Signatures do
     (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
        copular_relative_classifications(nodes) ++
+       bounded_past_transitives(nodes) ++
        finite_past(nodes) ++ perfect_predicates(nodes) ++
        have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
        possessive_phrases ++
@@ -459,6 +464,45 @@ defmodule Core.Syntax.Signatures do
 
       _ ->
         []
+    end)
+  end
+
+  # An attested D-N-V-D-N frame is stronger POS context than a local
+  # "verified" noun reading, even when the imported verb sense lacks
+  # Wiktextract's tag:form-of + tag:past. This is syntactic evidence only:
+  # no generated dictionary IDs, meanings, or verified events.
+  defp bounded_past_transitives(nodes) do
+    nodes
+    |> Enum.chunk_every(5, 1, :discard)
+    |> Enum.flat_map(fn [subject_det, subject, predicate, object_det, object] = segment ->
+      contiguous? =
+        Enum.map(segment, & &1.index) ==
+          Enum.to_list(subject_det.index..(subject_det.index + 4))
+
+      attested? =
+        MapSet.member?(@determiners, subject_det.word) and
+          pos?(subject_det, "determiner") and pos?(subject, "noun") and
+          MapSet.member?(@bounded_regular_past, predicate.word) and
+          pos?(predicate, "verb") and
+          MapSet.member?(@determiners, object_det.word) and
+          pos?(object_det, "determiner") and pos?(object, "noun")
+
+      if contiguous? and attested? and valid_surface?(segment) do
+        [signature(
+          :bounded_regular_past_transitive,
+          {subject_det.index, object.index},
+          %{subject_determiner: subject_det.index, subject_head: subject.index,
+            predicate: predicate.index, object_determiner: object_det.index,
+            object_head: object.index},
+          %{subject_head: [:pos_noun], predicate: [:pos_verb],
+            object_head: [:pos_noun]},
+          [:contiguous_surface, :attested_nominal_subject,
+           :attested_dictionary_verb, :bounded_past_surface,
+           :attested_nominal_object]
+        )]
+      else
+        []
+      end
     end)
   end
 
