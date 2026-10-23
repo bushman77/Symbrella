@@ -127,6 +127,9 @@ defmodule Core.Semantic.SentenceMeaning do
           missing_atl != [] -> %{status: :missing_atl_role_senses, roles: missing_atl}
           not (is_integer(prep) and last > prep and topic_span <= @max_topic_tokens) ->
             %{status: :topic_span_out_of_bounds, span_tokens: topic_span}
+          surface_gaps != [] and
+              match?({:ok, _}, question_topic_surface(indexed, prep + 1, last, Map.get(si, :sentence))) ->
+            %{status: :punctuation_gap_witnessed, indices: Enum.take(surface_gaps, 16)}
           surface_gaps != [] ->
             %{status: :missing_token_surfaces,
               indices: Enum.take(surface_gaps, 16),
