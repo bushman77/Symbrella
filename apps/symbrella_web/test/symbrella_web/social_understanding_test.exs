@@ -45,6 +45,29 @@ defmodule SymbrellaWeb.SocialUnderstandingTest do
     assert Enum.any?(report.gaps, &String.contains?(&1, "Sentence-level"))
   end
 
+  test "structurally interpreted question is a provisional information request, not truth" do
+    segments = [%{
+      status: :analyzed,
+      result: %{
+        sentence_meaning: %{
+          status: :structurally_interpreted,
+          speech_act: :request_information,
+          definition: "The speaker asks about an unbound topic."
+        },
+        reported_proposition: %{status: :not_interpreted},
+        acc_shadow: %{uncertain?: false},
+        syntax: %{audit: %{}}
+      }
+    }]
+
+    report = SocialUnderstanding.build(segments)
+    assert report.status == :provisional_interpretation
+    assert report.information_requests == 1
+    assert report.interpreted_segments == 1
+    assert report.attributed_propositions == 0
+    assert Enum.any?(report.findings, &(&1.title == "Information-request structure detected"))
+  end
+
   test "failed probes do not claim understanding" do
     report = SocialUnderstanding.build([%{status: :unavailable, reason: :lookup_failed}])
     assert report.status == :meaning_unresolved
