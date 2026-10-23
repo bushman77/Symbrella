@@ -99,6 +99,51 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-07C: lexical POS coverage under bounded LTM retrieval
+
+The live 8-case benchmark reached 7/8. The remaining failed sentence
+`Three links did not support the claims.` abstained at `support`
+(token 4): the bounded dictionary lookup supplied only a noun sense;
+there was no attested verb POS to use.
+
+This **does not prove** the database contains no verb for `support`.
+Previously the observation route requested the latest eight BrainCells per
+normalized word, ordered by `updated_at`. A high-sense noun can crowd out
+a real, less recently updated verb before syntax and LIFG run.
+
+The new, opt-in `pos_diverse?: true` option for `Db.ltm/2` first
+ranks each actual dictionary POS group independently, then selects
+no more than eight total senses per normalized word, prioritizing the
+first real sense of each existing POS. The default LTM query is
+unchanged for other consumers. `Core.Social.SemanticProbe` alone
+requests this distribution. No BrainCells are fabricated, promoted,
+written, or added to memory.
+
+Run the isolated DB and Core regression tests, then the production
+benchmark from the existing umbrella root:
+
+```bash
+mix test apps/db/test/db/ltm_pos_diversity_test.exs \
+  apps/core/test/core/social/observation_bridge_test.exs \
+  apps/core/test/core/social/declarative_proposition_test.exs
+
+mix run scripts/colony_contrastive_probe.exs
+```
+
+If `support` still has no attested verb role, inspect the actual
+database's **read-only** POS distribution in IEx:
+
+```elixir
+Db.brain_cells_for_norm("support")
+|> Enum.frequencies_by(& &1.pos)
+|> IO.inspect(label: "EXISTING SUPPORT DICTIONARY POS")
+```
+
+An absent verb means the corpus needs a separately justified dictionary
+import/repair, not a hardcoded successful parser verdict. An available
+verb with a continued abstention means inspecting bounded selection or
+LIFG choices. Do not override the evidence gate.
+
 ## COLONY-07: contrastive comprehension generalization
 
 The next benchmark compares both sides of independently reported actions:
