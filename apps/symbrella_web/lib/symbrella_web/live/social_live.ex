@@ -481,6 +481,38 @@ defmodule SymbrellaWeb.SocialLive do
                           {signature_labels(segment.result.syntax.signatures)}
                         </p>
                       </div>
+                      <div :if={is_map(Map.get(segment.result, :declarative_evidence))}
+                        class="space-y-2 rounded border border-white/10 p-3">
+                        <h4 class="text-sm font-semibold">COLONY-13 · Local declarative clause evidence</h4>
+                        <p class="text-xs text-zinc-400">
+                          {segment.result.declarative_evidence.examined_frames} grammar frames examined ·
+                          {length(segment.result.declarative_evidence.candidates)} local candidates ·
+                          not whole-sentence interpretation
+                        </p>
+                        <div :for={clause <- segment.result.declarative_evidence.candidates}
+                          class="space-y-1 rounded border border-cyan-400/20 p-2 text-xs text-zinc-300">
+                          <p class="font-semibold text-cyan-200">
+                            {clause.source_frame} · {clause.status}
+                          </p>
+                          <p class="break-words">{clause.surface}</p>
+                          <p>Subject: {clause.subject.surface} ·
+                            {clause.subject.selected_sense_id}</p>
+                          <p>Predicate: {clause.predicate.surface} ·
+                            {clause.predicate.selected_sense_id}</p>
+                          <p>Object: {clause.object.surface} ·
+                            {clause.object.selected_sense_id}</p>
+                          <p class="text-amber-200">
+                            Clause attachment: {clause.clause_attachment} ·
+                            polarity: {clause.polarity} · {clause.assertion_status} ·
+                            {clause.verification}
+                          </p>
+                        </div>
+                        <p :for={rejection <- segment.result.declarative_evidence.abstentions}
+                          class="break-words text-xs text-zinc-400">
+                          {rejection.frame} {inspect(rejection.span)} withheld:
+                          {rejection.reason}
+                        </p>
+                      </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Recognized topics (unverified)</h4>
                         <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
