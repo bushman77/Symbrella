@@ -11,6 +11,9 @@ defmodule Core.Social.ColonyCognition do
   """
 
   @ratio ~r/\b(?<count>\d{1,3})\s+of\s+(?:my\s+)?(?:[\p{L}'’-]+\s+){0,4}(?<total>\d{1,3})\s+(?:links?|references?|citations?)\b/iu
+  # Legacy direct ordering: "10 of 13 checker links refute claims".
+  # This is a bounded counted-link observation, not a general evidence parser.
+  @direct_checker_ratio ~r/\b(?<count>\d{1,3})\s+of\s+(?<total>\d{1,3})\s+checker\s+links?\b/iu
   @refutation ~r/\b(?:refut(?:e|es|ed|ing)|contradict(?:s|ed|ing)?|den(?:y|ies|ied|ying))\b/iu
   @support ~r/\b(?:support(?:s|ed|ing)?|corroborat(?:e|es|ed|ing))\b/iu
 
@@ -143,7 +146,8 @@ defmodule Core.Social.ColonyCognition do
         # Preserve the original counted-link reporter only. For every other
         # surface, regex keyword detection cannot substitute for a full
         # grammar + dictionary + ATL interpretation (notably modals).
-        legacy_counted? = Regex.match?(@ratio, title)
+        legacy_counted? =
+          Regex.match?(@ratio, title) or Regex.match?(@direct_checker_ratio, title)
         uncertain_or_negated? =
           Regex.match?(~r/\b(?:may|might|could|would|should|not|never)\b/iu, title)
 
@@ -265,7 +269,9 @@ defmodule Core.Social.ColonyCognition do
     if relation == :undetermined do
       {:error, :unresolved_colony_evidence_relation}
     else
-      numbers = Regex.named_captures(@ratio, title) || %{}
+      numbers =
+        Regex.named_captures(@ratio, title) ||
+          Regex.named_captures(@direct_checker_ratio, title) || %{}
 
       {count, total} =
         case {Integer.parse(Map.get(numbers, "count", "")),
