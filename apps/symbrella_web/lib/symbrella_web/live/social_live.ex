@@ -6,7 +6,7 @@ defmodule SymbrellaWeb.SocialLive do
 
   use SymbrellaWeb, :live_view
 
-  alias SymbrellaWeb.SocialData
+  alias SymbrellaWeb.{SocialData, SocialCognitiveReport}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,14 +21,16 @@ defmodule SymbrellaWeb.SocialLive do
        comments_truncated?: false,
        has_next?: false,
        loading?: true,
-       error: nil
+       error: nil,
+       analysis_open?: false,
+       cognitive_report: nil
      )}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     page = parse_page(Map.get(params, "page"))
-    socket = assign(socket, page: page, error: nil, loading?: true)
+    socket = assign(socket, page: page, error: nil, loading?: true, analysis_open?: false, cognitive_report: nil)
 
     socket =
       case socket.assigns.live_action do
@@ -52,6 +54,30 @@ defmodule SymbrellaWeb.SocialLive do
         else: fetch_topics(socket)
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("analyze_cognition", _params, socket) do
+    if socket.assigns.live_action == :show and socket.assigns.topic do
+      report_input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
+      analyzer = Application.get_env(:symbrella_web, :social_cognitive_analyzer, SocialCognitiveReport)
+
+      case analyzer.analyze(report_input) do
+        {:ok, report} ->
+          {:noreply, assign(socket, analysis_open?: true, cognitive_report: report)}
+
+        _ ->
+          {:noreply, assign(socket, analysis_open?: true, cognitive_report: nil,
+            error: "Read-only cognitive analysis is unavailable.")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("close_analysis", _params, socket) do
+    {:noreply, assign(socket, analysis_open?: false)}
   end
 
   @impl true
@@ -84,6 +110,15 @@ defmodule SymbrellaWeb.SocialLive do
               >
                 Back to topics
               </.link>
+              <button
+                :if={@live_action == :show and @topic}
+                id="social-analyze"
+                type="button"
+                phx-click="analyze_cognition"
+                class="rounded-md border border-cyan-400/50 px-3 py-2 font-semibold text-cyan-200 hover:bg-cyan-400/10"
+              >
+                Analyze cognition
+              </button>
               <button
                 id="social-refresh"
                 type="button"
@@ -201,6 +236,69 @@ defmodule SymbrellaWeb.SocialLive do
               </article>
             </div>
           </section>
+          <div
+            :if={@analysis_open?}
+            id="social-cognitive-modal"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-5"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Colony cognitive analysis"
+          >
+            <div class="flex max-h-[94vh] w-full max-w-5xl min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl">
+              <header class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
+                <div class="min-w-0">
+                  <h2 class="text-lg font-semibold">Cognitive inspection</h2>
+                  <p class="break-words text-xs text-zinc-400">External Colony observations · isolated read-only semantic shadow · no learning or posting</p>
+                </div>
+                <button id="social-close-analysis" type="button" phx-click="close_analysis" aria-label="Close analysis"
+                  class="rounded border border-white/20 px-3 py-2 hover:bg-white/10">Close</button>
+              </header>
+              <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6">
+                <%= if @cognitive_report do %>
+                  <p class="text-sm text-zinc-400">
+                    {@cognitive_report.analyzed_segments} segments inspected · {@cognitive_report.omitted_replies} replies omitted.
+                    Lexical selections are hypotheses, not verified facts.
+                  </p>
+                  <article :for={{segment, index} <- Enum.with_index(@cognitive_report.segments)}
+                    id={"social-analysis-segment-#{index}"}
+                    class="min-w-0 space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
+                    <h3 class="break-words font-semibold">{segment.label} · {segment.author}</h3>
+                    <%= if segment.status == :analyzed do %>
+                      <div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                        <p>LIFG: <strong>{segment.result.lifg.status}</strong> · {segment.result.lifg.chosen_count} choices</p>
+                        <p>ATL: <strong>{segment.result.atl.status}</strong> · {segment.result.atl.winner_count} winners</p>
+                        <p>Sentence meaning: <strong>{segment.result.sentence_meaning.status}</strong></p>
+                        <p>Grammar: <strong>{segment.result.syntax.audit.outcome}</strong></p>
+                        <p>Dictionary POS coverage: {segment.result.syntax.audit.pos_covered_tokens} / {segment.result.token_count} tokens</p>
+                        <p>Lexical ambiguity: {if segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
+                      </div>
+                      <div>
+                        <h4 class="mb-1 text-sm font-semibold">Sentence signatures</h4>
+                        <p class="break-words text-sm text-zinc-300">
+                          {segment.result.syntax.signatures |> Enum.map(&to_string(&1.id)) |> Enum.join(", ") |> case do
+                            "" -> "None detected"
+                            ids -> ids
+                          end}
+                        </p>
+                      </div>
+                      <div>
+                        <h4 class="mb-1 text-sm font-semibold">Recognized topics (unverified)</h4>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
+                      </div>
+                      <div>
+                        <h4 class="mb-1 text-sm font-semibold">Attributed proposition</h4>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(segment.result.reported_proposition, limit: 15, printable_limit: 500)}</pre>
+                      </div>
+                    <% else %>
+                      <p class="text-sm text-amber-200">Probe unavailable: {inspect(segment.reason)}</p>
+                    <% end %>
+                  </article>
+                <% else %>
+                  <p class="text-sm text-amber-200">The cognitive report is unavailable.</p>
+                <% end %>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </Layouts.app>
