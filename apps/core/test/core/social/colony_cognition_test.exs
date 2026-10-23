@@ -273,6 +273,17 @@ defmodule Core.Social.ColonyCognitionTest do
 
     assert {:ok, frame} = ColonyCognition.interpret(discussion, grounded)
     assert frame.reporter == "exori"
+    assert frame.evidence_relation == :reported_refutation
+    assert frame.reported_link_count == 10
+    assert frame.reported_total_links == 13
+
+    for unsafe_title <- [
+          "10 of 13 checker links might refute claims",
+          "10 of 13 checker links did not refute claims"
+        ] do
+      assert {:error, :unresolved_colony_evidence_relation} =
+               ColonyCognition.interpret(post(unsafe_title), grounded)
+    end
   end
 
   test "absent lexical or pure-ATL decisions cannot fall through to LLM" do
