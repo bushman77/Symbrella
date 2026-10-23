@@ -128,7 +128,14 @@ defmodule Core.Semantic.SentenceMeaning do
           not (is_integer(prep) and last > prep and topic_span <= @max_topic_tokens) ->
             %{status: :topic_span_out_of_bounds, span_tokens: topic_span}
           surface_gaps != [] ->
-            %{status: :missing_token_surfaces, indices: Enum.take(surface_gaps, 16)}
+            %{status: :missing_token_surfaces,
+              indices: Enum.take(surface_gaps, 16),
+              available_indices: indexed |> Map.keys() |> Enum.sort() |> Enum.take(64),
+              missing_context: Enum.map(Enum.take(surface_gaps, 16), fn index ->
+                %{index: index,
+                  preceding: Map.get(indexed, index - 1),
+                  following: Map.get(indexed, index + 1)}
+              end)}
           true ->
             %{status: :eligible_for_composition, note: :inspect_remaining_guards}
         end
