@@ -49,6 +49,62 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert candidate.verification == :external_unverified
   end
 
+  test "adjacent ATL resolved noun phrase is an unbound subject candidate" do
+    input = input()
+    nominal = %{id: :noun_phrase, status: :resolved, span: {7, 8},
+      roles: %{
+        determiner: %{token_index: 7, sense_id: "the|determiner|1"},
+        head: %{token_index: 8, sense_id: "gathered|noun|1"}
+      }}
+
+    input = %{input |
+      tokens: [
+        %{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "gathered", n: 1}
+      ] ++ input.tokens,
+      atl_slate: Map.put(input.atl_slate, :constituents, [nominal])
+    }
+
+    assert [candidate] = EmbeddedClauseEvidence.candidates(input, meaning())
+    assert candidate.subject == :unresolved
+    assert candidate.subject_binding_status == :unresolved
+    assert candidate.subject_candidate.status == :adjacent_nominal_candidate_only
+    assert candidate.subject_candidate.source == :atl_resolved_noun_phrase
+    assert candidate.subject_candidate.surface == "the gathered"
+    assert candidate.subject_candidate.span == {7, 8}
+    assert candidate.subject_candidate.head.candidate_sense_id == "gathered|noun|1"
+    assert candidate.subject_candidate.attachment_status == :unverified
+    assert candidate.subject_candidate.coreference_status == :unresolved
+    assert candidate.assertion_status == :not_asserted
+  end
+
+  test "rejects missing, detached, unresolved or MWE nominal candidates" do
+    nominal = %{id: :noun_phrase, status: :resolved, span: {7, 8},
+      roles: %{head: %{token_index: 8, sense_id: "group|noun|1"}}}
+    base = input()
+    base = %{base |
+      tokens: [
+        %{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "group", n: 1}
+      ] ++ base.tokens,
+      atl_slate: Map.put(base.atl_slate, :constituents, [nominal])
+    }
+
+    assert [%{subject_candidate: %{surface: "the group"}}] =
+      EmbeddedClauseEvidence.candidates(base, meaning())
+
+    for altered <- [
+      %{nominal | status: :partially_resolved},
+      %{nominal | span: {6, 7}},
+      put_in(nominal, [:roles, :head, :sense_id], nil),
+      put_in(nominal, [:roles, :head, :selection_scope], :lexical_mwe)
+    ] do
+      input = put_in(base, [:atl_slate, :constituents], [altered])
+      assert [%{subject: :unresolved, subject_candidate: nil}] =
+        EmbeddedClauseEvidence.candidates(input, meaning())
+    end
+  end
+
   test "no candidate is inferred outside the attested complement" do
     other = put_in(meaning(), [:proposition, :content, :complement, :argument, :span],
       {11, 16})
