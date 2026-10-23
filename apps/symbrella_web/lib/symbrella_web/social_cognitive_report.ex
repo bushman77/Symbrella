@@ -7,6 +7,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   Each sampled segment receives its own report and retains attribution.
   """
   alias Core.Social.SemanticProbe
+  alias SymbrellaWeb.SocialUnderstanding
 
   @max_replies 3
 
@@ -54,7 +55,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       mode: :read_only_shadow,
       analyzed_segments: length(analyses),
       omitted_replies: max(length(comments) - @max_replies, 0),
-      segments: analyses
+      segments: analyses,
+      understanding: SocialUnderstanding.build(analyses)
     }}
   end
 
