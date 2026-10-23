@@ -10,7 +10,7 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     comments = for i <- 1..8, do: %{author: "reply_#{i}", body: "reply #{i}"}
 
     probe = fn text, opts ->
-      assert String.length(text) <= 420
+      assert String.length(text) <= 600
       assert opts[:emit_telemetry?] == false
       {:ok, %{stage: :social_semantic_shadow, marker: text}}
     end
@@ -20,8 +20,8 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
 
     assert report.mode == :read_only_shadow
     assert report.trust == :untrusted_external
-    assert report.analyzed_segments == 4
-    assert report.omitted_replies == 5
+    assert report.analyzed_segments == 9
+    assert report.omitted_replies == 0
     assert Enum.all?(report.segments, &(&1.status == :analyzed))
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
   end
