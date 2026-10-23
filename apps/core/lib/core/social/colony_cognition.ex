@@ -113,21 +113,30 @@ defmodule Core.Social.ColonyCognition do
                             :affirmative_transitive, :explicit_negated_transitive,
                             :counted_negated_transitive] and
            relation in [:reported_action, :reported_refutation, :reported_support] ->
-        case claim_from_title(title) do
-          {:ok, earlier} ->
-            if earlier.relation == relation and
-                 (is_nil(earlier.count) or earlier.count == count) and
-                 (is_nil(earlier.total) or earlier.total == total) do
+        # The published title is independent source text; don't let an
+        # injected or stale cognitive projection invert its did-not polarity.
+        title_polarity =
+          if Regex.match?(~r/\bdid\s+not\b/iu, title),
+            do: :negative, else: :positive
+
+        if Map.get(semantic.reported_proposition, :polarity) != title_polarity do
+          {:error, :colony_proposition_mismatch}
+        else
+          case claim_from_title(title) do
+            {:ok, earlier} ->
+              if earlier.relation == relation and
+                   (is_nil(earlier.count) or earlier.count == count) and
+                   (is_nil(earlier.total) or earlier.total == total) do
+                {:ok, %{relation: relation, count: count, total: total,
+                        polarity: title_polarity}}
+              else
+                {:error, :colony_proposition_mismatch}
+              end
+
+            {:error, :unresolved_colony_evidence_relation} ->
               {:ok, %{relation: relation, count: count, total: total,
-                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
-            else
-              {:error, :colony_proposition_mismatch}
-            end
-
-          {:error, :unresolved_colony_evidence_relation} ->
-            {:ok, %{relation: relation, count: count, total: total,
-                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
-
+                      polarity: title_polarity}}
+          end
         end
 
       _ ->
