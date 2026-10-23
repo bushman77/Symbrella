@@ -114,9 +114,6 @@ defmodule Colony08Probe do
 
       {:error, reason} ->
         %{"status" => "probe_failed", "reason" => as_string(reason)}
-
-      other ->
-        %{"status" => "probe_failed", "reason" => inspect(other, limit: 3)}
     end
   end
 
