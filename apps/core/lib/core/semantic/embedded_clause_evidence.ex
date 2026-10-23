@@ -42,7 +42,9 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
              a >= first and b <= last and a < b ->
         with {:ok, aux} <- surface_at(surfaces, a),
              {:ok, verb} <- surface_at(surfaces, b) do
-          subject_candidate = adjacent_nominal_candidate(constituents, surfaces, first, a)
+          subject_candidate =
+            adjacent_nominal_candidate(constituents, surfaces, first, a) ||
+              adjacent_adjectival_nominal_candidate(constituents, winners, surfaces, first, a)
           subject_diagnostic =
             subject_diagnostic(si, constituents, winners, surfaces, first, a, subject_candidate)
 
@@ -119,6 +121,58 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
         end
       end
     end)
+  end
+
+  # An ATL-resolved determiner + adjective is only a possible nominalized
+  # subject. Its head retains an adjective sense: do not reclassify as a noun
+  # or assert who/what the phrase denotes. A separately witnessed perfect
+  # predicate and exact adjacency are required by the caller.
+  defp adjacent_adjectival_nominal_candidate(
+         constituents, winners, surfaces, topic_start, auxiliary_index
+       ) do
+    start = auxiliary_index - 2
+    finish = auxiliary_index - 1
+
+    if start < topic_start do
+      nil
+    else
+      Enum.find_value(constituents, fn
+        %{id: :nominalized_adjective_subject_candidate,
+          status: :resolved,
+          span: {^start, ^finish},
+          roles: %{
+            determiner: %{token_index: ^start, sense_id: det_id} = det,
+            adjective: %{token_index: ^finish, sense_id: adjective_id} = adjective
+          }}
+        when is_binary(det_id) and is_binary(adjective_id) ->
+          with true <- sense_pos(det_id) == "determiner",
+               true <- sense_pos(adjective_id) == "adjective",
+               false <- String.ends_with?(det_id, "|fallback"),
+               false <- String.ends_with?(adjective_id, "|fallback"),
+               true <- selected_id(winners, start) == det_id,
+               true <- selected_id(winners, finish) == adjective_id,
+               false <- Map.get(det, :selection_scope) == :lexical_mwe,
+               false <- Map.get(adjective, :selection_scope) == :lexical_mwe,
+               {:ok, det_surface} <- surface_at(surfaces, start),
+               {:ok, adj_surface} <- surface_at(surfaces, finish) do
+            %{
+              status: :adjectival_nominalization_candidate_only,
+              source: :atl_resolved_nominalization_hypothesis,
+              surface: det_surface <> " " <> adj_surface,
+              span: {start, finish},
+              head: %{token_index: finish, candidate_sense_id: adjective_id,
+                selected_pos: :adjective},
+              coreference_status: :unresolved,
+              attachment_status: :unverified,
+              nominalization_status: :hypothesized_not_confirmed
+            }
+          else
+            _ -> nil
+          end
+
+        _ -> nil
+      end)
+    end
   end
 
   # Explain abstention from the already observed signatures, ATL reductions,
