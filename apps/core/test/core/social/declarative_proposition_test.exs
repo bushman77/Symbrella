@@ -135,6 +135,24 @@ defmodule Core.Social.DeclarativePropositionTest do
     end
   end
 
+  test "missing attested negative support predicate reports the exact unresolved role" do
+    si = not_supported()
+    without_predicate = %{
+      si | active_cells: Enum.reject(si.active_cells, &(&1.token_index == 4))
+    }
+
+    result = DeclarativeProposition.interpret(without_predicate)
+
+    assert result.reason == :missing_attested_dictionary_roles
+    assert %{role: :predicate, token_index: 4, expected_pos: "verb",
+             dictionary_pos_available?: false, agreed?: false} =
+             Enum.find(result.role_audit, &(&1.role == :predicate))
+
+    assert Enum.any?(result.role_audit, fn role ->
+      role.role == :negator and role.agreed? == true
+    end)
+  end
+
   test "counted negative support accepts exact did-not lexical witnesses" do
     si = not_supported()
 
