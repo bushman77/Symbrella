@@ -44,6 +44,11 @@ defmodule Brain.Blackboard do
     # activation / WM events, which this social shadow does not produce.
     [:core, :social, :cognitive_shadow],
 
+    # Axon nervous-system readout: actual model forecasts and later masked
+    # accuracy measurements, NEVER mood/WM control or verified evidence.
+    [:brain, :neural, :state_prediction],
+    [:brain, :neural, :state_evaluation],
+
     # SelfPortrait-friendly signals (compact, high-signal)
     [:brain, :lifg, :stage1, :winner],
     [:brain, :lifg, :stage1, :boundary_drop],
