@@ -81,6 +81,65 @@ defmodule Core.Semantic.SentenceMeaning do
     status: :not_yet_interpreted, source: :invalid_input
   }
 
+  @doc """
+  Read-only explanation of why a resolved WH-topic frame may fail composition.
+  This diagnostic never promotes a frame into a sentence meaning.
+  """
+  def question_diagnostic(%{} = si) do
+    frames = List.wrap(Map.get(si, :sentence_signatures))
+    slate = Map.get(si, :atl_slate) || %{}
+    constituents = List.wrap(Map.get(slate, :constituents))
+    indexed = indexed_base_tokens(Map.get(si, :tokens, []))
+
+    case Enum.find(frames, &(Map.get(&1, :id) == :wh_aux_topic_question)) do
+      nil ->
+        %{status: :no_question_signature}
+
+      %{span: {first, last}, roles: roles} when is_map(roles) ->
+        atl = Enum.find(constituents, fn constituent ->
+          Map.get(constituent, :id) == :wh_aux_topic_question and
+            Map.get(constituent, :span) == {first, last} and
+            Map.get(constituent, :status) == :resolved
+        end)
+
+        required = [:wh, :auxiliary, :subject, :predicate, :preposition]
+        missing_frame = Enum.reject(required, &(is_integer(Map.get(roles, &1))))
+        atl_roles = if is_map(atl), do: Map.get(atl, :roles) || %{}, else: %{}
+        missing_atl = Enum.reject(required, fn key ->
+          match?(%{sense_id: id} when is_binary(id), Map.get(atl_roles, key))
+        end)
+        prep = Map.get(roles, :preposition)
+        topic_span =
+          if is_integer(prep), do: last - prep, else: nil
+
+        surface_gaps =
+          if is_map(atl) and missing_frame == [] and missing_atl == [] do
+            indices = Enum.map(required, &Map.fetch!(roles, &1)) ++
+              Enum.to_list((prep + 1)..last)
+            Enum.filter(indices, &(not match?({:ok, _}, surface_at(indexed, &1))))
+          else
+            []
+          end
+
+        cond do
+          is_nil(atl) -> %{status: :atl_constituent_unresolved}
+          missing_frame != [] -> %{status: :missing_grammar_roles, roles: missing_frame}
+          missing_atl != [] -> %{status: :missing_atl_role_senses, roles: missing_atl}
+          not (is_integer(prep) and last > prep and topic_span <= @max_topic_tokens) ->
+            %{status: :topic_span_out_of_bounds, span_tokens: topic_span}
+          surface_gaps != [] ->
+            %{status: :missing_token_surfaces, indices: Enum.take(surface_gaps, 16)}
+          true ->
+            %{status: :eligible_for_composition, note: :inspect_remaining_guards}
+        end
+
+      _ ->
+        %{status: :invalid_question_signature}
+    end
+  end
+
+  def question_diagnostic(_), do: %{status: :invalid_input}
+
   # WH + auxiliary + determined subject + verb asks for the unbound object.
   # This is a question about a relation, NOT evidence that the action occurred.
   # The complete Core syntax signature, resolved ATL roles and independent POS
