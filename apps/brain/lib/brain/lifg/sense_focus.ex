@@ -114,6 +114,7 @@ defmodule Brain.LIFG.SenseFocus do
        when basis in [:modal_question_predicate, :modal_declarative_predicate,
                       :imperative_predicate, :plural_present_predicate,
                       :finite_present_svo_predicate,
+                      :counted_present_transitive_predicate,
                       :counted_negative_transitive_predicate] and is_list(evidence) do
     required =
       case basis do
@@ -123,6 +124,9 @@ defmodule Brain.LIFG.SenseFocus do
         :plural_present_predicate ->
           [:attested_plural_subject, :present_base_verb_witness]
         :finite_present_svo_predicate -> [:attested_finite_present_verb]
+        :counted_present_transitive_predicate ->
+          [:attested_counted_plural_subject, :attested_base_present_verb,
+           :attested_nominal_object]
         :counted_negative_transitive_predicate ->
           [:attested_counted_subject, :explicit_did_not_negation,
            :attested_nominal_object]
