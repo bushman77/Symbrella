@@ -100,6 +100,7 @@ defmodule Core.Social.ObservationBridgeTest do
   test "checked read-only dictionary lookup preserves POS for syntax analysis" do
     lookup = fn si, opts ->
       assert Keyword.fetch!(opts, :limit_per_norm) == 8
+      assert Keyword.fetch!(opts, :pos_diverse?) == true
       assert is_list(si.tokens)
 
       {:ok,
