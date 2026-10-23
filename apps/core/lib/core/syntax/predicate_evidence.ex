@@ -13,6 +13,8 @@ defmodule Core.Syntax.PredicateEvidence do
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @wh MapSet.new(~w(what when where why how which who))
   @modifiers MapSet.new(~w(please not))
+  @count_words MapSet.new(~w(one two three four five six seven eight nine ten
+                              eleven twelve thirteen))
   @required_present [:contiguous_surface, :attested_nominal_subject,
                      :attested_nominal_object, :attested_finite_present_verb]
   @max_tokens 64
@@ -30,6 +32,7 @@ defmodule Core.Syntax.PredicateEvidence do
 
       (modal_questions(tokens, cells, max_idx) ++
          modal_statements(tokens, cells, max_idx) ++
+         counted_negative_transitives(tokens, cells, max_idx) ++
          imperatives(tokens, cells, max_idx) ++
          plural_present(tokens, cells, max_idx) ++
          attested_present(si, tokens, cells, max_idx))
@@ -89,6 +92,40 @@ defmodule Core.Syntax.PredicateEvidence do
       end
     end)
   end
+
+  # "Three links did not support the claims": the counted subject and
+  # explicit did/not auxiliary sequence identify a bounded predicate slot.
+  # Require all seven original words plus independent dictionary witnesses;
+  # the result is POS support, not semantic admission or a selected sense.
+  defp counted_negative_transitives(tokens, cells, 6) do
+    count = Map.get(tokens, 0)
+    count? =
+      MapSet.member?(@count_words, count) or
+        case Integer.parse(count || "") do
+          {n, ""} when n in 1..999 -> true
+          _ -> false
+        end
+
+    if count? and
+         Map.get(tokens, 2) == "did" and
+         Map.get(tokens, 3) == "not" and
+         MapSet.member?(@determiners, Map.get(tokens, 5)) and
+         witnessed?(tokens, cells, 1, "noun") and
+         witnessed?(tokens, cells, 2, "verb") and
+         witnessed?(tokens, cells, 3, "adverb") and
+         witnessed?(tokens, cells, 4, "verb") and
+         witnessed?(tokens, cells, 5, "determiner") and
+         witnessed?(tokens, cells, 6, "noun") do
+      [proposal(4, :counted_negative_transitive_predicate, {0, 6},
+         [:attested_counted_subject, :explicit_did_not_negation,
+          :attested_nominal_object, :dictionary_pos_witness,
+          :bounded_predicate_slot])]
+    else
+      []
+    end
+  end
+
+  defp counted_negative_transitives(_tokens, _cells, _last), do: []
 
   defp imperatives(tokens, cells, last) do
     start = if Map.get(tokens, 0) == "please", do: 1, else: 0
