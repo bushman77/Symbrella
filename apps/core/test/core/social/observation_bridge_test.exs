@@ -289,6 +289,48 @@ defmodule Core.Social.ObservationBridgeTest do
     end
   end
 
+  test "real Stage1 chooses attested support verb in counted did-not clause" do
+    lexicon = %{
+      "links" => ["noun"], "did" => ["verb"], "not" => ["adverb"],
+      "support" => ["noun", "verb"], "the" => ["determiner"],
+      "claims" => ["noun"]
+    }
+
+    reader = fn si, _opts ->
+      rows = Enum.flat_map(si.tokens, fn token ->
+        word = String.downcase(token.phrase)
+
+        lexicon
+        |> Map.get(word, [])
+        |> Enum.map(fn pos ->
+          %{id: "#{word}|#{pos}|1", norm: word, word: word,
+            pos: pos, token_index: token.index, semantic_atoms: [],
+            activation: 0.5}
+        end)
+      end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexicon)), missing_norms: []}}
+    end
+
+    assert {:ok, shadow} =
+             SemanticProbe.run("Three links did not support the claims.",
+               ltm_reader: reader, emit_telemetry?: false)
+
+    assert shadow.syntax.audit.ltm_status == :ready
+
+    selected = Enum.find(shadow.lifg.choices, &(&1.token_index == 4))
+    assert selected
+    assert String.starts_with?(selected.chosen_id, "support|verb|")
+
+    proposition = shadow.reported_proposition
+    assert proposition.status == :attributed_structural_interpretation
+    assert proposition.construction == :counted_negated_transitive
+    assert proposition.relation == :reported_support
+    assert proposition.polarity == :negative
+    assert proposition.reported_count == 3
+    assert proposition.verification == :author_claim_not_independently_verified
+  end
+
   test "real syntax and pure ATL bind an attributed relative-clause proposition" do
     title =
       "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
