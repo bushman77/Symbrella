@@ -35,6 +35,7 @@ defmodule Core.Syntax.PredicateEvidence do
          counted_negative_transitives(tokens, cells, max_idx) ++
          imperatives(tokens, cells, max_idx) ++
          plural_present(tokens, cells, max_idx) ++
+         counted_present(si, tokens, cells, max_idx) ++
          attested_present(si, tokens, cells, max_idx))
       |> Enum.uniq_by(&{&1.token_index, &1.basis, &1.span})
       |> Enum.take(@max_proposals)
@@ -162,6 +163,38 @@ defmodule Core.Syntax.PredicateEvidence do
       _ -> []
     end
   end
+
+  defp counted_present(si, tokens, cells, 4) do
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{id: :counted_finite_present_svo_candidate, source: :core_syntax,
+        span: {0, 4},
+        roles: %{count: 0, subject_head: 1, predicate: 2,
+                 object_determiner: 3, object_head: 4},
+        evidence: evidence} when is_list(evidence) ->
+        needed = [:contiguous_surface, :attested_counted_plural_subject,
+                  :attested_base_present_verb, :attested_nominal_object]
+
+        if Enum.all?(needed, &(&1 in evidence)) and
+             plural_noun?(tokens, cells, 1) and
+             present_base_verb?(tokens, cells, 2) and
+             witnessed?(tokens, cells, 3, "determiner") and
+             witnessed?(tokens, cells, 4, "noun") do
+          [proposal(2, :counted_present_transitive_predicate, {0, 4},
+             [:attested_counted_plural_subject, :attested_base_present_verb,
+              :attested_nominal_object, :dictionary_pos_witness,
+              :bounded_predicate_slot])]
+        else
+          []
+        end
+
+      _ -> []
+    end)
+  end
+
+  defp counted_present(_si, _tokens, _cells, _last), do: []
 
   defp attested_present(si, tokens, cells, last) do
     si
