@@ -139,6 +139,7 @@ defmodule Db do
 
   def ltm(%{tokens: tokens}, opts) when is_list(tokens) do
     limit_per_norm = Keyword.get(opts, :limit_per_norm, :all)
+    pos_diverse? = Keyword.get(opts, :pos_diverse?, false) == true
 
     token_norms =
       tokens
@@ -161,7 +162,7 @@ defmodule Db do
     else
       rows0 =
         uniq_norms
-        |> brain_cells_for_norms_query(limit_per_norm)
+        |> brain_cells_for_norms_query(limit_per_norm, pos_diverse?)
         |> Db.all()
 
       token_meta_by_idx = token_meta_by_idx(tokens)
@@ -342,21 +343,58 @@ defmodule Db do
 
   # -- query helpers ----------------------------------------------------------
 
-  defp brain_cells_for_norms_query(uniq_norms, limit_per_norm) when is_list(uniq_norms) do
+  defp brain_cells_for_norms_query(uniq_norms, limit_per_norm, pos_diverse?)
+       when is_list(uniq_norms) do
     base_q =
       from(b in BrainCell,
         where: b.norm in ^uniq_norms
       )
 
-    case limit_per_norm do
-      :all ->
+    case {limit_per_norm, pos_diverse?} do
+      {:all, _} ->
         from(b in base_q, select: b)
 
-      n when is_integer(n) and n > 0 ->
-        # Ecto does not allow whole schema structs nested inside a subquery
-        # map projection (%{b: b, rn: ...}). Rank scalar IDs instead, then
-        # join back to BrainCell to return complete rows. This preserves
-        # the per-norm cap and the original BrainCell-to-candidate mapping.
+      {n, true} when is_integer(n) and n > 0 ->
+        # First distribute each norm's available senses across the existing
+        # dictionary POS groups. Then keep no more than n TOTAL rows/norm.
+        # Without this the most recently updated noun senses can consume all
+        # eight slots before an attested verb sense is considered.
+        # No candidate is synthesized, and this is explicitly opt-in.
+        pos_ranked =
+          from(b in base_q,
+            select: %{
+              id: b.id,
+              norm: b.norm,
+              pos_rank: over(row_number(), :pos_partition)
+            },
+            windows: [
+              pos_partition: [
+                partition_by: [b.norm, b.pos],
+                order_by: [desc: b.updated_at, asc: b.id]
+              ]
+            ]
+          )
+
+        ranked_q =
+          from(p in subquery(pos_ranked),
+            select: %{id: p.id, rn: over(row_number(), :norm_part)},
+            windows: [
+              norm_part: [
+                partition_by: p.norm,
+                order_by: [asc: p.pos_rank, asc: p.id]
+              ]
+            ]
+          )
+
+        from(b in base_q,
+          join: ranked in subquery(ranked_q),
+          on: ranked.id == b.id,
+          where: ranked.rn <= ^n,
+          select: b
+        )
+
+      {n, _} when is_integer(n) and n > 0 ->
+        # Original default policy unchanged for normal Core callers.
         ranked_q =
           from(b in base_q,
             select: %{id: b.id, rn: over(row_number(), :norm_part)},
