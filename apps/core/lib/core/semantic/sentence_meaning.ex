@@ -59,6 +59,15 @@ defmodule Core.Semantic.SentenceMeaning do
         question
         |> Map.put(:proposition, Core.Semantic.Proposition.build(si, question))
         |> then(fn meaning ->
+          if get_in(meaning, [:proposition, :content, :complement, :argument, :type]) ==
+               :unparsed_topic do
+            Map.update(meaning, :unresolved, [:topic_internal_structure],
+              &Enum.uniq(&1 ++ [:topic_internal_structure]))
+          else
+            meaning
+          end
+        end)
+        |> then(fn meaning ->
           if is_binary(sentence), do: Map.put(meaning, :sentence, sentence), else: meaning
         end)
       else
