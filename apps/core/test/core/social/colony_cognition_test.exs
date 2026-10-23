@@ -132,6 +132,67 @@ defmodule Core.Social.ColonyCognitionTest do
     end
   end
 
+  test "contrastive Colony admission preserves source reported polarity without inventing contradiction" do
+    cases = [
+      {"The checker verified those claims.", :affirmative_transitive,
+       :reported_action, :positive, nil},
+      {"The checker did not verify those claims.", :explicit_negated_transitive,
+       :reported_action, :negative, nil},
+      {"Three links supported the claims.", :counted_transitive,
+       :reported_support, :positive, 3},
+      {"Three links did not support the claims.", :counted_negated_transitive,
+       :reported_support, :negative, 3}
+    ]
+
+    for {title, construction, relation, polarity, count} <- cases do
+      proposition = %{
+        status: :attributed_structural_interpretation,
+        construction: construction,
+        source: :colony_external,
+        kind: :reported_declarative_proposition,
+        subject: if(count, do: "links", else: "checker"),
+        predicate: if(relation == :reported_support,
+          do: if(polarity == :negative, do: "support", else: "supported"),
+          else: if(polarity == :negative, do: "verify", else: "verified")),
+        relation: relation,
+        polarity: polarity, reported_count: count, reported_total: nil,
+        verification: :author_claim_not_independently_verified
+      }
+
+      assert {:ok, frame} =
+               ColonyCognition.interpret(post(title),
+                 Map.put(brain_result(), :reported_proposition, proposition))
+
+      assert frame.evidence_relation == relation
+      assert frame.reported_polarity == polarity
+      assert frame.reported_link_count == count
+      assert frame.reported_proposition.polarity == polarity
+      assert frame.report_status == :author_claim_not_independently_verified
+      assert ColonyCognition.prompt_frame(frame) =~ "Reported polarity: #{polarity}"
+    end
+  end
+
+  test "an inverted semantic polarity is refused despite a matching support keyword" do
+    title = "Three links did not support the claims."
+    proposition = %{
+      status: :attributed_structural_interpretation,
+      construction: :counted_negated_transitive,
+      subject: "links", predicate: "support", relation: :reported_support,
+      reported_count: 3, reported_total: nil, polarity: :positive,
+      verification: :author_claim_not_independently_verified
+    }
+
+    assert {:error, :colony_proposition_mismatch} =
+             ColonyCognition.interpret(post(title),
+               Map.put(brain_result(), :reported_proposition, proposition))
+
+    assert {:error, :colony_proposition_mismatch} =
+             ColonyCognition.interpret(post("Three links supported the claims."),
+               Map.put(brain_result(), :reported_proposition,
+                 %{proposition | construction: :counted_transitive,
+                                  predicate: "supported", polarity: :negative}))
+  end
+
   test "generic claim with contradictory reported polarity fails closed" do
     proposition = %{
       status: :attributed_structural_interpretation,
