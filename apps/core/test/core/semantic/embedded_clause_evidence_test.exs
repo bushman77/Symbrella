@@ -56,8 +56,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
       roles: %{determiner: 7, adjective: 8}
     }
 
-    %{
-      base |
+    Map.merge(base, %{
       sentence: "What would you look at to say the gathered had grown—and not only gotten longer?",
       tokens: [
         %{index: 7, phrase: "the", n: 1},
@@ -81,7 +80,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
             | winners
           ]
         end)
-    }
+    })
   end
 
   test "a perfect-predicate signature inside unresolved topic stays non-assertive" do
