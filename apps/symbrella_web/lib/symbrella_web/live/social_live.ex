@@ -259,6 +259,24 @@ defmodule SymbrellaWeb.SocialLive do
                     {@cognitive_report.analyzed_segments} segments inspected · {@cognitive_report.omitted_replies} replies omitted.
                     Lexical selections are hypotheses, not verified facts.
                   </p>
+                  <section :if={Map.has_key?(@cognitive_report, :understanding)} id="social-understanding"
+                    class="space-y-3 rounded-lg border border-cyan-400/25 bg-cyan-950/10 p-4 sm:p-5">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-cyan-300">Symbrella's understanding · evidence constrained</p>
+                    <h3 class="break-words text-lg font-semibold">{@cognitive_report.understanding.headline}</h3>
+                    <p class="text-sm leading-6 text-zinc-300">{@cognitive_report.understanding.explanation}</p>
+                    <div :for={{finding, i} <- Enum.with_index(@cognitive_report.understanding.findings)}
+                      id={"social-finding-#{i}"}
+                      class="rounded border border-white/10 p-3">
+                      <h4 class="font-medium">{finding.title}</h4>
+                      <p class="mt-1 break-words text-sm text-zinc-300">{finding.detail}</p>
+                      <p class="mt-1 text-xs text-zinc-500">Basis: {finding.basis} · {finding.level}</p>
+                    </div>
+                    <div :if={@cognitive_report.understanding.gaps != []} class="space-y-1">
+                      <h4 class="text-sm font-semibold text-amber-200">Unresolved evidence</h4>
+                      <p :for={gap <- @cognitive_report.understanding.gaps}
+                         class="break-words text-sm text-zinc-300">• {gap}</p>
+                    </div>
+                  </section>
                   <article :for={{segment, index} <- Enum.with_index(@cognitive_report.segments)}
                     id={"social-analysis-segment-#{index}"}
                     class="min-w-0 space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
