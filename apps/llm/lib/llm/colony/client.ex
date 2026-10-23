@@ -5,11 +5,12 @@ defmodule Llm.Colony.Client do
   POST /auth/token exchanges the locally stored API key for a short-lived
   JWT. Account/content reads use GET. Only reviewed_comment/3 can send a
   content POST, and only after two explicit local configuration gates.
-  No JWT is written to disk; failed GETs may reauthenticate and retry once.
+  JWTs are reused from an OTP memory cache until shortly before expiry.
+  Nothing is written to disk. A failed GET may reauthenticate once.
   Comment POSTs are never retried to avoid duplicate public replies.
   """
 
-  alias Llm.Colony.{Adapter, Context}
+  alias Llm.Colony.{Adapter, Context, TokenCache}
 
   @sorts [:newest, :top, :hot, :discussed]
   @colony_pattern ~r/\A[a-zA-Z0-9_-]{1,100}\z/
@@ -92,7 +93,7 @@ defmodule Llm.Colony.Client do
          :ok <- valid_post_id(post_id),
          :ok <- valid_comment(body) do
       # Writes are deliberately never retried, including after 401.
-      with {:ok, token} <- exchange_token(config, opts) do
+      with {:ok, token} <- cached_token(config, opts) do
         request =
           request_opts("/posts/" <> post_id <> "/comments", config, opts)
           |> Keyword.put(:auth, {:bearer, token})
@@ -105,6 +106,12 @@ defmodule Llm.Colony.Client do
 
           {:ok, %Req.Response{status: status}} when status in 200..299 ->
             {:ok, %{status: :accepted}}
+
+          {:ok, %Req.Response{status: 401}} ->
+            # A public comment is NEVER retried; invalidate so the next
+            # independent request starts with a new JWT.
+            invalidate_token(token, opts)
+            {:error, :unauthorized}
 
           {:ok, %Req.Response{status: status}} ->
             response_error(status)
@@ -191,10 +198,14 @@ defmodule Llm.Colony.Client do
   defp valid_limit?(value, max), do: is_integer(value) and value >= 1 and value <= max
 
   defp authorized_get(path, params, config, opts) do
-    with {:ok, token} <- exchange_token(config, opts) do
+    with {:ok, token} <- cached_token(config, opts) do
       case do_get(path, params, token, config, opts) do
         {:error, :unauthorized} ->
-          with {:ok, new_token} <- exchange_token(config, opts) do
+          invalidate_token(token, opts)
+
+          # Retry GET once with a newly exchanged bearer token. POST
+          # operations never use this recovery path.
+          with {:ok, new_token} <- cached_token(config, opts) do
             do_get(path, params, new_token, config, opts)
           end
 
@@ -204,23 +215,43 @@ defmodule Llm.Colony.Client do
     end
   end
 
-  defp exchange_token(config, opts) do
-    with {:ok, key} <- Adapter.api_key() do
-      request_opts =
-        request_opts("/auth/token", config, opts)
-        |> Keyword.put(:json, %{api_key: key})
-
-      case Req.post(request_opts) do
-        {:ok, %Req.Response{status: status, body: %{"access_token" => token}}}
-        when status >= 200 and status < 300 and is_binary(token) and byte_size(token) > 0 ->
-          {:ok, token}
-
-        {:ok, %Req.Response{status: status}} ->
-          response_error(status)
-
-        {:error, _} ->
-          {:error, :transport_error}
+  defp cached_token(config, opts) do
+    with {:ok, api_key} <- Adapter.api_key() do
+      # In-process Req.Test plugs use their own test-process ownership.
+      # Avoid cross-process HTTP from inside TokenCache during unit tests.
+      if Keyword.has_key?(opts, :plug) do
+        exchange_token(config, opts, api_key)
+      else
+        # A rotated key must never use a JWT issued for the old one.
+        key_fingerprint = :crypto.hash(:sha256, api_key) |> Base.encode16(case: :lower)
+        TokenCache.get(key_fingerprint, fn -> exchange_token(config, opts, api_key) end)
       end
+    end
+  end
+
+  defp invalidate_token(token, opts) do
+    if not Keyword.has_key?(opts, :plug) do
+      TokenCache.invalidate(token)
+    end
+
+    :ok
+  end
+
+  defp exchange_token(config, opts, api_key) do
+    request =
+      request_opts("/auth/token", config, opts)
+      |> Keyword.put(:json, %{api_key: api_key})
+
+    case Req.post(request) do
+      {:ok, %Req.Response{status: status, body: %{"access_token" => token}}}
+      when status in 200..299 and is_binary(token) and byte_size(token) > 0 ->
+        {:ok, token}
+
+      {:ok, %Req.Response{status: status}} ->
+        response_error(status)
+
+      {:error, _} ->
+        {:error, :transport_error}
     end
   end
 
