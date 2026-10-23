@@ -69,7 +69,11 @@ defmodule Llm.Colony.TokenCache do
 
   defp deadline(token, now) do
     case jwt_exp(token) do
-      exp when is_integer(exp) and exp > now ->
+      exp when is_integer(exp) and exp <= now ->
+        # Never cache a token whose signed expiry claim is already past.
+        now
+
+      exp when is_integer(exp) ->
         min(exp, now + @maximum_lifetime) - @refresh_margin
 
       _ ->
