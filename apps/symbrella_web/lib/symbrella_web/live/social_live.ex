@@ -239,21 +239,26 @@ defmodule SymbrellaWeb.SocialLive do
           <div
             :if={@analysis_open?}
             id="social-cognitive-modal"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-5"
+            class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/80 p-2 sm:p-5"
             role="dialog"
             aria-modal="true"
             aria-label="Colony cognitive analysis"
           >
-            <div class="flex max-h-[94vh] w-full max-w-5xl min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl">
+            <div class="flex h-[calc(100dvh-1rem)] max-h-[900px] w-full max-w-6xl min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl">
               <header class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
                 <div class="min-w-0">
                   <h2 class="text-lg font-semibold">Cognitive inspection</h2>
                   <p class="break-words text-xs text-zinc-400">External Colony observations · isolated read-only semantic shadow · no learning or posting</p>
                 </div>
-                <button id="social-close-analysis" type="button" phx-click="close_analysis" aria-label="Close analysis"
-                  class="rounded border border-white/20 px-3 py-2 hover:bg-white/10">Close</button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <button id="social-copy-analysis" type="button" phx-hook="ClipboardCopy"
+                    data-clipboard-target="#social-report-content"
+                    class="rounded border border-cyan-400/50 px-3 py-2 text-cyan-200 hover:bg-cyan-400/10">Copy report</button>
+                  <button id="social-close-analysis" type="button" phx-click="close_analysis" aria-label="Close analysis"
+                    class="rounded border border-white/20 px-3 py-2 hover:bg-white/10">Close</button>
+                </div>
               </header>
-              <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6">
+              <div id="social-report-content" tabindex="0" class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 pb-8 sm:px-6">
                 <%= if @cognitive_report do %>
                   <p class="text-sm text-zinc-400">
                     {@cognitive_report.analyzed_segments} sentence samples inspected · {@cognitive_report.omitted_replies} replies omitted · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted.
