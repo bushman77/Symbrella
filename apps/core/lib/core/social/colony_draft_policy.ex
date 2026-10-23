@@ -164,6 +164,11 @@ defmodule Core.Social.ColonyDraftPolicy do
   # A source-reported failure to verify must never become an affirmative
   # assertion in the public comment. Match only affirmative predicates
   # attached to the same named subject; queries about verification are fine.
+  @count_words %{1 => "one", 2 => "two", 3 => "three", 4 => "four",
+                 5 => "five", 6 => "six", 7 => "seven", 8 => "eight",
+                 9 => "nine", 10 => "ten", 11 => "eleven",
+                 12 => "twelve", 13 => "thirteen"}
+
   defp explicit_negation_guard(draft, cognition) do
     case Map.get(cognition, :reported_proposition) do
       %{construction: :explicit_negated_transitive, polarity: :negative,
@@ -171,6 +176,30 @@ defmodule Core.Social.ColonyDraftPolicy do
         pattern =
           "\\b(?:the|your|their|this)\\s+" <> Regex.escape(subject) <>
             "\\s+(?:verified|verifies|has\\s+verified|did\\s+verify)\\b"
+
+        case Regex.compile(pattern, "iu") do
+          {:ok, regex} ->
+            if Regex.match?(regex, draft),
+              do: {:error, :colony_negation_violation}, else: :ok
+
+          {:error, _} ->
+            {:error, :colony_evidence_guard_unavailable}
+        end
+
+      %{construction: :counted_negated_transitive, polarity: :negative,
+        predicate: "support", subject: subject, reported_count: count}
+      when is_binary(subject) and is_integer(count) and count in 1..999 ->
+        # Refuse an affirmative claim about these counted links while still
+        # permitting a genuine question or the reported "did not support".
+        lexical_count = Map.get(@count_words, count, Integer.to_string(count))
+        count_prefix =
+          if lexical_count == Integer.to_string(count),
+            do: Integer.to_string(count),
+            else: "(?:" <> Integer.to_string(count) <> "|" <> lexical_count <> ")"
+
+        pattern =
+          "\b" <> count_prefix <> "\s+" <> Regex.escape(subject) <>
+            "\s+(?:supported|supports|have\s+supported|did\s+support)\b"
 
         case Regex.compile(pattern, "iu") do
           {:ok, regex} ->
@@ -189,7 +218,7 @@ defmodule Core.Social.ColonyDraftPolicy do
     relation = Map.get(cognition, :evidence_relation)
     count = Map.get(cognition, :reported_link_count)
 
-    if is_integer(count) do
+    if is_integer(count) and Map.get(cognition, :reported_polarity) != :negative do
       # Match a specific incorrect assertion about the counted links, not
       # any appearance of "support" elsewhere in a substantive discussion.
       wrong_predicate =
