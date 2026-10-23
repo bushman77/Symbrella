@@ -90,7 +90,58 @@ A checkpoint need not exist just to record observations; shadow mode then
 remains unavailable. No shadow prediction updates MoodCore, Hippocampus,
 LIFG, comprehension, or response decisions.
 
-## 4. Controlled integration is deliberately blocked
+## 4. NEURAL-01: read-only nervous-system signal reception
+
+The learned residual Axon network now emits *actual, masked model forecasts*
+as telemetry after each archived completed turn, rather than leaving every
+forecast only inside the Web shadow process. The permanently supervised
+`Brain.Neural.SignalReceptor` and `Brain.Blackboard` receive two events:
+
+- `[:brain, :neural, :state_prediction]`: available numeric current features,
+  the predicted **next completed turn** values, and their deltas; all are
+  marked `:model_prediction_not_verified`, `:shadow_only`, and
+  `deployment_authorized?: false`.
+- `[:brain, :neural, :state_evaluation]`: observed-cell-weighted retrospective
+  residual/persistence MSE and verdict when the next same-session turn arrives.
+
+Only actually observed feature inputs are transmitted: confidence, the four
+raw neuromodulators and four derived mood dimensions. Missing features are
+excluded, never turned into fictitious predictions. No chat text or recalled
+episode content enters these events. The receptor stores at most 32 events in
+memory; the Blackboard bridges them over the existing PubSub topic.
+
+**To receive live model signals**, the residual checkpoint must already exist
+at `priv/state_transition_residual_v4_pilot.etf`, and the training archive
+must be enabled. Restart Phoenix with explicit shadow opt-in:
+
+```sh
+cd ~/Symbrella
+SYMBRELLA_NEURAL_SHADOW=on iex -S mix phx.server
+```
+
+After one or more completed chat turns, inspect from IEx:
+
+```elixir
+SymbrellaWeb.NeuralShadow.status()
+Brain.Neural.SignalReceptor.status()
+Brain.Neural.SignalReceptor.latest()
+Brain.Neural.SignalReceptor.history(5)
+```
+
+A first prediction requires one completed turn. Accuracy feedback requires a
+*second completed turn in the same session*. If shadow startup reports a
+missing checkpoint, train the offline model using
+`mix neural.train --task state_transition_residual --dir priv` first and
+inspect its assessment; a checkpoint with `:not_ready` still remains
+research-only and may not be promoted to live control.
+
+**No actuation occurs.** A predicted DA increase is not a MoodCore update,
+nor is a predicted confidence level evidence that a statement is correct.
+These are provisional sensory-like inputs to the structured Brain's
+observation channel. Future use for decisions or neuromodulation requires a
+separate validated actuator policy, explicit opt-in, and regression gates.
+
+## 5. Controlled integration is deliberately blocked
 
 Even when `assessment.status == :candidate_for_extended_shadow`, the artifact
 says `deployment_authorized?: false` and retains the
@@ -108,6 +159,7 @@ Run focused tests, then the full umbrella suite:
 mix test apps/brain/test/brain/neural/state_transition_audit_test.exs
 mix test apps/brain/test/brain/neural/state_transition_pilot_test.exs
 mix test apps/brain/test/brain/neural/state_transition_residual_test.exs
+mix test apps/brain/test/brain/neural/signal_receptor_test.exs
 mix test apps/symbrella_web/test/symbrella_web/neural_shadow_test.exs
 mix test
 ```
