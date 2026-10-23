@@ -5,7 +5,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   """
 
   alias Core.Social.SemanticProbe
-  alias SymbrellaWeb.SocialUnderstanding
+  alias SymbrellaWeb.{SocialUnderstanding, SocialDiscourse}
 
   @max_replies 8
   @max_sentences_per_source 12
@@ -64,7 +64,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
               %{status: :unavailable, reason: :invalid_probe_response}
           end
 
-        sample |> Map.delete(:text) |> Map.merge(metadata)
+        sample |> Map.put(:excerpt, String.slice(sample.text, 0, 240)) |> Map.delete(:text) |> Map.merge(metadata)
       end)
 
     {:ok, %{
@@ -76,7 +76,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       omitted_replies: max(length(comments) - @max_replies, 0),
       omitted_sentences: dropped_by_source + length(samples) - length(selected),
       segments: analyses,
-      understanding: SocialUnderstanding.build(analyses)
+      understanding: SocialUnderstanding.build(analyses),
+      discourse: SocialDiscourse.build(analyses)
     }}
   end
 
