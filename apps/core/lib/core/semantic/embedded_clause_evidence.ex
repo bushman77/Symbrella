@@ -44,7 +44,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
              {:ok, verb} <- surface_at(surfaces, b) do
           subject_candidate =
             adjacent_nominal_candidate(constituents, surfaces, first, a) ||
-              adjacent_adjectival_nominal_candidate(constituents, winners, surfaces, first, a)
+              adjacent_adjectival_nominal_candidate(si, constituents, winners, surfaces, first, a)
           subject_diagnostic =
             subject_diagnostic(si, constituents, winners, surfaces, first, a, subject_candidate)
 
@@ -128,12 +128,22 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
   # or assert who/what the phrase denotes. A separately witnessed perfect
   # predicate and exact adjacency are required by the caller.
   defp adjacent_adjectival_nominal_candidate(
-         constituents, winners, surfaces, topic_start, auxiliary_index
+         si, constituents, winners, surfaces, topic_start, auxiliary_index
        ) do
     start = auxiliary_index - 2
     finish = auxiliary_index - 1
 
-    if start < topic_start do
+    signature_witnessed? =
+      si
+      |> Map.get(:sentence_signatures, [])
+      |> List.wrap()
+      |> Enum.any?(fn
+        %{id: :nominalized_adjective_subject_candidate, span: {^start, ^finish},
+          roles: %{determiner: ^start, adjective: ^finish}} -> true
+        _ -> false
+      end)
+
+    if start < topic_start or not signature_witnessed? do
       nil
     else
       Enum.find_value(constituents, fn
