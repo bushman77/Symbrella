@@ -173,6 +173,65 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert diagnostic.status == :resolved_nominal_failed_candidate_checks
   end
 
+  test "ATL-resolved adjectival nominalization is an unbound subject candidate" do
+    base = input()
+    nomination = %{
+      id: :nominalized_adjective_subject_candidate,
+      status: :resolved,
+      span: {7, 8},
+      roles: %{
+        determiner: %{token_index: 7, sense_id: "the|determiner|1"},
+        adjective: %{token_index: 8, sense_id: "gathered|adjective|1"}
+      }
+    }
+    nominal_signature = %{
+      id: :nominalized_adjective_subject_candidate,
+      span: {7, 8},
+      roles: %{determiner: 7, adjective: 8}
+    }
+    candidate_input = %{base |
+      tokens: [%{index: 7, phrase: "the", n: 1},
+        %{index: 8, phrase: "gathered", n: 1}] ++ base.tokens,
+      sentence_signatures: [nominal_signature | base.sentence_signatures],
+      atl_slate: base.atl_slate
+        |> Map.put(:constituents, [nomination])
+        |> Map.update!(:winners, fn winners ->
+          [%{token_index: 7, id: "the|determiner|1"},
+            %{token_index: 8, id: "gathered|adjective|1"} | winners]
+        end)
+    }
+
+    assert [result] = EmbeddedClauseEvidence.candidates(candidate_input, meaning())
+    assert result.subject == :unresolved
+    assert result.subject_binding_status == :unresolved
+    assert result.subject_candidate.status == :adjectival_nominalization_candidate_only
+    assert result.subject_candidate.surface == "the gathered"
+    assert result.subject_candidate.head.selected_pos == :adjective
+    assert result.subject_candidate.head.candidate_sense_id == "gathered|adjective|1"
+    assert result.subject_candidate.nominalization_status == :hypothesized_not_confirmed
+    assert result.subject_candidate.attachment_status == :unverified
+    assert result.subject_candidate.coreference_status == :unresolved
+    assert result.assertion_status == :not_asserted
+
+    for changed <- [
+      %{nomination | status: :partially_resolved},
+      put_in(nomination, [:roles, :adjective, :sense_id], "gathered|verb|1"),
+      put_in(nomination, [:roles, :adjective, :sense_id], "gathered|adjective|fallback"),
+      put_in(nomination, [:roles, :adjective, :selection_scope], :lexical_mwe),
+      %{nomination | span: {6, 7}}
+    ] do
+      invalid = put_in(candidate_input, [:atl_slate, :constituents], [changed])
+      assert [%{subject_candidate: nil, subject_binding_status: :unresolved,
+        assertion_status: :not_asserted}] =
+        EmbeddedClauseEvidence.candidates(invalid, meaning())
+    end
+
+    absent_nominalization =
+      %{candidate_input | atl_slate: Map.delete(candidate_input.atl_slate, :constituents)}
+    assert [%{subject_candidate: nil}] =
+      EmbeddedClauseEvidence.candidates(absent_nominalization, meaning())
+  end
+
   test "no candidate is inferred outside the attested complement" do
     other = put_in(meaning(), [:proposition, :content, :complement, :argument, :span],
       {11, 16})
