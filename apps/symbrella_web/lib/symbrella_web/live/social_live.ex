@@ -293,9 +293,19 @@ defmodule SymbrellaWeb.SocialLive do
                         <p>LIFG: <strong>{segment.result.lifg.status}</strong> · {segment.result.lifg.chosen_count} choices</p>
                         <p>ATL: <strong>{segment.result.atl.status}</strong> · {segment.result.atl.winner_count} winners</p>
                         <p>Sentence meaning: <strong>{segment.result.sentence_meaning.status}</strong></p>
+                        <p :if={get_in(segment.result, [:sentence_meaning, :speech_act])}>
+                          Speech act: <strong>{segment.result.sentence_meaning.speech_act}</strong>
+                        </p>
+                        <p :if={Map.has_key?(segment.result, :question_evidence)}>
+                          Question frames: {segment.result.question_evidence.signature_count} · ATL resolved: {segment.result.question_evidence.resolved_constituents}
+                        </p>
                         <p>Grammar: <strong>{segment.result.syntax.audit.outcome}</strong></p>
                         <p>Dictionary POS coverage: {segment.result.syntax.audit.pos_covered_tokens} / {segment.result.token_count} tokens</p>
                         <p>Lexical ambiguity: {if segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
+                      </div>
+                      <div :if={get_in(segment.result, [:sentence_meaning, :definition])} class="rounded border border-cyan-400/20 p-3">
+                        <h4 class="mb-1 text-sm font-semibold">Structural interpretation (not verified fact)</h4>
+                        <p class="break-words text-sm text-zinc-300">{segment.result.sentence_meaning.definition}</p>
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Sentence signatures</h4>
