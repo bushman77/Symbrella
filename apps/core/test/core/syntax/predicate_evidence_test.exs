@@ -116,6 +116,72 @@ defmodule Core.Syntax.PredicateEvidenceTest do
     end
   end
 
+  test "counted did-not transitive supplies a dictionary-witnessed verb role before LIFG" do
+    words = ~w(Three links did not support the claims)
+
+    cells = [
+      cell("links", "noun"),
+      cell("did", "verb"),
+      cell("not", "adverb"),
+      cell("support", "noun"),
+      cell("support", "verb"),
+      cell("the", "determiner"),
+      cell("claims", "noun")
+    ]
+
+    si = input(words, cells)
+    out = RoleCompetition.attach(si)
+
+    assert [%{token_index: 4, basis: :counted_negative_transitive_predicate,
+              pos: "verb", evidence: evidence}] = out.role_competition.predicate_proposals
+    assert :explicit_did_not_negation in evidence
+
+    assert %{role: :predicate, pos: "verb", status: :supported,
+             basis: :counted_negative_transitive_predicate} =
+             out.role_competition.roles[4]
+
+    scores = %{"support|noun|1" => 0.51, "support|verb|1" => 0.38}
+    updated = GrammarEvidence.apply_role_competition(
+      scores, GrammarEvidence.prepare(out), 4
+    )
+
+    assert updated["support|verb|1"] > updated["support|noun|1"]
+    assert updated["support|noun|1"] == 0.51
+    assert Map.keys(updated) |> Enum.sort() == Map.keys(scores) |> Enum.sort()
+
+    focus = SenseFocus.plan(out, 4, Enum.filter(cells, &(&1.norm == "support")))
+    assert focus.mode == :focused
+    assert focus.focus_pos == "verb"
+
+    assert out.active_cells == si.active_cells
+    assert out.sentence_signatures == si.sentence_signatures
+    assert :ok = SemanticInput.validate_contract(out)
+  end
+
+  test "counted negative predicate abstains on missing verb, missing negator or nonnegative surface" do
+    words = ~w(Three links did not support the claims)
+    witnesses = [
+      cell("links", "noun"), cell("did", "verb"),
+      cell("not", "adverb"), cell("support", "noun"),
+      cell("support", "verb"), cell("the", "determiner"),
+      cell("claims", "noun")
+    ]
+
+    cases = [
+      {words, Enum.reject(witnesses, &(&1.norm == "support" and &1.pos == "verb"))},
+      {words, Enum.reject(witnesses, &(&1.norm == "not"))},
+      {~w(Three links did perhaps support the claims), witnesses},
+      {~w(Three links might not support the claims), witnesses},
+      {~w(Three links did not support claims), witnesses}
+    ]
+
+    for {surface, rows} <- cases do
+      out = input(surface, rows)
+      assert PredicateEvidence.detect(out) == []
+      refute Map.has_key?(RoleCompetition.attach(out).role_competition.roles, 4)
+    end
+  end
+
   test "plural present supplies POS evidence without asserting an event" do
     cells = [
       cell("the", "determiner"),
