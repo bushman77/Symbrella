@@ -1,0 +1,272 @@
+defmodule SymbrellaWeb.SocialLive do
+  @moduledoc """
+  Protected read-only Colony topic browser. Selecting a topic retrieves only
+  its public discussion. No drafting, posting, or cognitive persistence.
+  """
+
+  use SymbrellaWeb, :live_view
+
+  alias SymbrellaWeb.SocialData
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok,
+     assign(socket,
+       page_title: "Social · Colony",
+       page: 1,
+       post_id: nil,
+       topics: [],
+       topic: nil,
+       comments: [],
+       comments_truncated?: false,
+       has_next?: false,
+       loading?: true,
+       error: nil
+     )}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    page = parse_page(Map.get(params, "page"))
+    socket = assign(socket, page: page, error: nil, loading?: true)
+
+    socket =
+      case socket.assigns.live_action do
+        :show ->
+          socket = assign(socket, post_id: Map.get(params, "post_id"), topic: nil, comments: [])
+          if connected?(socket), do: fetch_thread(socket), else: socket
+
+        _ ->
+          socket = assign(socket, post_id: nil, topics: [])
+          if connected?(socket), do: fetch_topics(socket), else: socket
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("refresh", _params, socket) do
+    socket =
+      if socket.assigns.live_action == :show,
+        do: fetch_thread(socket),
+        else: fetch_topics(socket)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} current_scope={assigns[:current_scope]}>
+      <section id="social-page" class="min-h-screen bg-zinc-950 px-4 py-6 text-zinc-100 sm:px-6 lg:px-8">
+        <div class="mx-auto flex max-w-6xl flex-col gap-5">
+          <header class="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-5">
+            <div class="min-w-0">
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">
+                Colony · read only
+              </p>
+              <h1 class="mt-2 text-3xl font-semibold text-white">
+                {if @live_action == :show, do: "Conversation", else: "Social"}
+              </h1>
+              <p class="mt-2 max-w-2xl text-sm text-zinc-400">
+                Browse external discussions without publishing or altering Symbrella's memory.
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <.link navigate={~p"/"} class="rounded-md border border-white/10 px-3 py-2 text-zinc-200 hover:bg-white/10">
+                Chat
+              </.link>
+              <.link
+                :if={@live_action == :show}
+                navigate={~p"/social?page=#{@page}"}
+                id="social-back"
+                class="rounded-md border border-white/10 px-3 py-2 text-zinc-200 hover:bg-white/10"
+              >
+                Back to topics
+              </.link>
+              <button
+                id="social-refresh"
+                type="button"
+                phx-click="refresh"
+                class="rounded-md bg-cyan-400 px-3 py-2 font-semibold text-zinc-950 hover:bg-cyan-300"
+              >
+                Refresh
+              </button>
+            </div>
+          </header>
+
+          <div
+            :if={@error}
+            id="social-error"
+            role="alert"
+            class="rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100"
+          >
+            {@error}
+          </div>
+          <p :if={@loading?} id="social-loading" class="py-8 text-center text-zinc-400">
+            Loading Colony conversations…
+          </p>
+
+          <section :if={@live_action != :show} id="social-index" class="flex flex-col gap-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p id="social-page-count" class="text-sm text-zinc-400">
+                Newest topics · Page {@page} · {length(@topics)} shown · up to {SocialData.page_size()} per page
+              </p>
+              <nav aria-label="Topic pages" class="flex gap-2 text-sm">
+                <.link
+                  :if={@page > 1}
+                  id="social-previous"
+                  patch={~p"/social?page=#{@page - 1}"}
+                  class="rounded-md border border-white/10 px-3 py-2 hover:bg-white/10"
+                >
+                  Previous
+                </.link>
+                <.link
+                  :if={@has_next?}
+                  id="social-next"
+                  patch={~p"/social?page=#{@page + 1}"}
+                  class="rounded-md border border-white/10 px-3 py-2 hover:bg-white/10"
+                >
+                  Next 25
+                </.link>
+              </nav>
+            </div>
+
+            <div id="social-list" class="divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10 bg-zinc-900/70">
+              <p :if={!@loading? and @topics == [] and is_nil(@error)} id="social-empty" class="px-5 py-12 text-center text-zinc-400">
+                No topics were returned for this page.
+              </p>
+              <article :for={topic <- @topics} id={"social-topic-#{topic.id}"} class="min-w-0 transition hover:bg-white/[0.04]">
+                <.link
+                  navigate={~p"/social/#{topic.id}?page=#{@page}"}
+                  class="block min-w-0 px-4 py-4 sm:px-5"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <h2 class="min-w-0 break-words text-base font-semibold leading-6 text-zinc-100">
+                      {topic.title}
+                    </h2>
+                    <span class="shrink-0 text-xs text-zinc-500">{topic.created_at}</span>
+                  </div>
+                  <div class="mt-1 flex flex-wrap gap-3 text-xs text-cyan-200">
+                    <span>By {topic.author}</span>
+                    <span :if={topic.colony not in [nil, ""]}>Colony: {topic.colony}</span>
+                  </div>
+                  <p :if={topic.body not in [nil, ""]} class="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-400">
+                    {preview(topic.body)}
+                  </p>
+                </.link>
+              </article>
+            </div>
+          </section>
+
+          <section :if={@live_action == :show} id="social-thread" class="flex flex-col gap-5">
+            <article :if={@topic} id="social-post" class="min-w-0 rounded-lg border border-white/10 bg-zinc-900/75 p-4 sm:p-6">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-cyan-200">
+                <span>By {@topic.author}</span>
+                <span :if={@topic.colony != ""}>Colony: {@topic.colony}</span>
+                <span class="text-zinc-500">{@topic.created_at}</span>
+              </div>
+              <h2 class="mt-3 break-words text-xl font-semibold text-white">{@topic.title}</h2>
+              <p class="mt-4 whitespace-pre-wrap break-words text-sm leading-7 text-zinc-200">{@topic.body}</p>
+            </article>
+
+            <div :if={@topic} class="flex items-center justify-between gap-2">
+              <h3 class="font-semibold text-zinc-100">Discussion</h3>
+              <span id="social-replies-count" class="text-xs text-zinc-400">
+                {length(@comments)} replies returned
+              </span>
+            </div>
+            <p :if={@topic && @comments == []} class="rounded-lg border border-white/10 p-6 text-center text-sm text-zinc-500">
+              No replies were returned for this topic.
+            </p>
+            <p :if={@comments_truncated?} class="text-sm text-amber-200">
+              Display limited to the first 200 returned replies.
+            </p>
+            <div id="social-comments" class="flex flex-col gap-3">
+              <article
+                :for={{comment, index} <- Enum.with_index(@comments)}
+                id={"social-comment-#{index}"}
+                class="min-w-0 rounded-lg border border-white/10 bg-zinc-900/70 px-4 py-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span class="font-semibold text-cyan-200">{comment.author}</span>
+                  <span class="text-zinc-500">{comment.created_at}</span>
+                </div>
+                <p :if={comment.parent_id != ""} class="mt-1 text-xs text-zinc-500">
+                  Reply to another comment
+                </p>
+                <p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">
+                  {comment.body}
+                </p>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+    </Layouts.app>
+    """
+  end
+
+  defp fetch_topics(socket) do
+    case SocialData.list_page(socket.assigns.page) do
+      {:ok, data} ->
+        assign(socket,
+          topics: data.topics,
+          has_next?: data.has_next?,
+          loading?: false,
+          error: nil
+        )
+
+      {:error, reason} ->
+        assign(socket, topics: [], has_next?: false, loading?: false, error: error_message(reason))
+    end
+  rescue
+    _ -> assign(socket, topics: [], has_next?: false, loading?: false, error: "Unable to load Colony topics.")
+  end
+
+  defp fetch_thread(socket) do
+    case SocialData.thread(socket.assigns.post_id) do
+      {:ok, data} ->
+        assign(socket,
+          topic: data.topic,
+          comments: data.comments,
+          comments_truncated?: data.comments_truncated?,
+          loading?: false,
+          error: nil
+        )
+
+      {:error, reason} ->
+        assign(socket, topic: nil, comments: [], loading?: false, error: error_message(reason))
+    end
+  rescue
+    _ -> assign(socket, topic: nil, comments: [], loading?: false, error: "Unable to load Colony conversation.")
+  end
+
+  defp parse_page(page) when is_binary(page) do
+    case Integer.parse(page) do
+      {value, ""} when value in 1..4_001 -> value
+      _ -> 1
+    end
+  end
+
+  defp parse_page(_), do: 1
+
+  defp preview(text) when is_binary(text), do: String.slice(text, 0, 260)
+  defp preview(_), do: ""
+
+  defp error_message(:colony_disabled), do: "Colony observation is disabled in the local configuration."
+  defp error_message(:missing_colony_api_key), do: "No Colony API key is configured for the local server."
+  defp error_message(:insecure_colony_key_file), do: "The local Colony API key file has unsafe permissions."
+  defp error_message(:invalid_limit), do: "Colony max_posts must allow at least 25 topics per page."
+  defp error_message(:rate_limited), do: "Colony is rate-limiting requests. Try refreshing later."
+  defp error_message(:unauthorized), do: "Colony authentication was rejected."
+  defp error_message(:forbidden), do: "Colony denied access to this conversation."
+  defp error_message(:invalid_post_id), do: "Invalid Colony topic identifier."
+  defp error_message(:colony_thread_identity_mismatch), do: "Colony returned a different topic identifier."
+  defp error_message(:invalid_colony_feed), do: "Colony returned an unrecognized topics response."
+  defp error_message(:invalid_colony_context), do: "Colony returned an unrecognized conversation response."
+  defp error_message(:transport_error), do: "Could not contact Colony."
+  defp error_message({:http_status, 404}), do: "This Colony topic was not found."
+  defp error_message({:http_status, _}), do: "Colony could not complete the request."
+  defp error_message(_), do: "Colony conversations are unavailable right now."
+end
