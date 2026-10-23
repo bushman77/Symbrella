@@ -20,7 +20,7 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
 
     assert report.mode == :read_only_shadow
     assert report.trust == :untrusted_external
-    assert report.analyzed_segments == 9
+    assert report.analyzed_segments == 13
     assert report.omitted_replies == 0
     assert Enum.all?(report.segments, &(&1.status == :analyzed))
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
