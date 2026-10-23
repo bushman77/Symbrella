@@ -86,21 +86,32 @@ Hooks.ScrollOnEvent = {
 // --- add to your Hooks object ---
 Hooks.ClipboardCopy = {
   mounted() {
-    this.targetSelector = this.el.dataset.clipboardTarget
     this.onClick = async () => {
-      const target = document.querySelector(this.targetSelector)
-      const text = target?.textContent || target?.innerText || ""
+      const selector = this.el.dataset.clipboardTarget
+      const target = selector ? document.querySelector(selector) : null
+      const text = target?.innerText?.trim() || target?.textContent?.trim() || ""
       if (!text) return
-      try { await navigator.clipboard.writeText(text) } catch (_) { /* fallback handled elsewhere if you added it */ }
-      // quick visual feedback
-      const orig = this.el.textContent
-      this.el.textContent = "Copied"
+
+      const original = this.el.textContent
+      try {
+        await navigator.clipboard.writeText(text)
+        this.el.textContent = "Copied!"
+      } catch (_) {
+        this.el.textContent = "Copy failed"
+      }
       this.el.disabled = true
-      setTimeout(() => { this.el.textContent = orig; this.el.disabled = false }, 900)
+      clearTimeout(this.feedbackTimer)
+      this.feedbackTimer = setTimeout(() => {
+        this.el.textContent = original
+        this.el.disabled = false
+      }, 1200)
     }
     this.el.addEventListener("click", this.onClick)
   },
-  destroyed() { this.el.removeEventListener("click", this.onClick) }
+  destroyed() {
+    this.el.removeEventListener("click", this.onClick)
+    clearTimeout(this.feedbackTimer)
+  }
 }
 
 
