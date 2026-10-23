@@ -29,6 +29,9 @@ defmodule SymbrellaWeb.Router do
       live "/", HomeLive, :index
       live "/episodes", EpisodesLive
       live "/semantic", SemanticLive
+      # Read-only Colony browser stays behind the existing authenticated session.
+      live "/social", SocialLive, :index
+      live "/social/:post_id", SocialLive, :show
       live "/brain", BrainLive
       live "/brain/:region", BrainLive
     end
