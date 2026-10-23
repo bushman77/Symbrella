@@ -243,9 +243,46 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       end)
       |> Enum.take(6)
 
+    nominalization_signatures =
+      si
+      |> Map.get(:sentence_signatures, [])
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        %{id: :nominalized_adjective_subject_candidate,
+          span: {start, ^preceding}}
+        when is_integer(start) and start >= topic_start ->
+          [%{span: {start, preceding}}]
+
+        _ -> []
+      end)
+      |> Enum.take(6)
+
+    nominalization_atl =
+      constituents
+      |> Enum.flat_map(fn
+        %{id: :nominalized_adjective_subject_candidate,
+          span: {start, ^preceding}} = item
+        when is_integer(start) and start >= topic_start ->
+          [%{
+            span: {start, preceding},
+            status: Map.get(item, :status, :unknown),
+            unresolved_roles: item |> Map.get(:unresolved_roles, [])
+              |> List.wrap() |> Enum.take(6)
+          }]
+
+        _ -> []
+      end)
+      |> Enum.take(6)
+
     reason =
       cond do
         is_map(candidate) -> :adjacent_nominal_candidate_available
+        nominalization_signatures != [] and nominalization_atl == [] ->
+          :adjectival_nominalization_not_resolved_by_atl
+        Enum.any?(nominalization_atl, &(&1.status != :resolved)) ->
+          :atl_adjectival_nominalization_unresolved
+        nominalization_atl != [] ->
+          :adjectival_nominalization_failed_candidate_checks
         signatures == [] -> :no_adjacent_noun_phrase_signature
         atl == [] -> :noun_phrase_not_resolved_by_atl
         Enum.any?(atl, &(&1.status != :resolved)) -> :atl_nominal_unresolved
@@ -257,6 +294,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       token_window: window,
       adjacent_noun_signatures: signatures,
       adjacent_atl_noun_phrases: atl,
+      adjacent_nominalization_signatures: nominalization_signatures,
+      adjacent_atl_nominalizations: nominalization_atl,
       selected_senses_are_hypotheses?: true,
       subject_binding_status: :unresolved
     }
