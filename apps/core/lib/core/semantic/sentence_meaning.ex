@@ -601,7 +601,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
   # Canonical token indices can contain a removed punctuation token.
   # Never skip an unknown word: each single missing position needs an
-  # independently visible comma or semicolon between its two neighbors.
+  # independently visible punctuation between its two neighbors.
   defp question_topic_surface(indexed, first, last, sentence)
        when is_integer(first) and is_integer(last) and last >= first and
               last - first < @max_topic_tokens and is_binary(sentence) do
@@ -614,7 +614,7 @@ defmodule Core.Semantic.SentenceMeaning do
         with {:ok, left} <- surface_at(indexed, index - 1),
              {:ok, right} <- surface_at(indexed, index + 1) do
           pattern = Regex.compile!(
-            Regex.escape(left) <> ~S(\s*[,;]\s*) <> Regex.escape(right),
+            Regex.escape(left) <> ~S(\s*\p{P}+\s*) <> Regex.escape(right),
             "iu"
           )
           Regex.match?(pattern, sentence)
