@@ -109,6 +109,17 @@ defmodule Core.Social.DeclarativeProposition do
       # The fifth word here is a nominal object, not a counted object:
       # "The checker verified those claims." Do not coerce "those" into a
       # number or silently reuse the counted-object rule.
+      # Modal possibility is distinct from established support. Keep the
+      # interpretation explicitly unresolved until independently attested
+      # scope and modality composition exists.
+      [number, _subject, modal, verb, det, _object]
+      when modal in ~w(might may could) and det in @determiners and
+           verb in ~w(support refute contradict verify) ->
+        case number(number) do
+          {:ok, _} -> {:error, :modal_uncertainty}
+          error -> error
+        end
+
       [det, subject, verb, object_det, object]
       when det in @determiners and object_det in @determiners ->
         with :ok <- supported_affirmative_verb(verb),
