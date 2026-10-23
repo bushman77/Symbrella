@@ -243,6 +243,14 @@ defmodule Core.Social.ColonyCognitionTest do
 
     assert frame.report_status == :author_claim_not_independently_verified
     assert frame.evidence_relation == :reported_support
+
+    for unsafe_title <- [
+          "3 of the checker's 13 links might support the claims",
+          "3 of the checker's 13 links did not support the claims"
+        ] do
+      assert {:error, :unresolved_colony_evidence_relation} =
+               ColonyCognition.interpret(post(unsafe_title), brain_result())
+    end
   end
 
   test "production shadow refuses fallback winners without retrieved dictionary POS" do
