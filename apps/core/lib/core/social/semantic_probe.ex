@@ -58,7 +58,9 @@ defmodule Core.Social.SemanticProbe do
       if Keyword.get(opts, :ltm?, true) do
         reader = Keyword.get(opts, :ltm_reader, &Core.Pipeline.LTM.Source.checked_ltm/2)
 
-        case reader.(si, limit_per_norm: 8) do
+        # Retain a bounded spread of attested dictionary POS candidates.
+        # The default LTM ordering is unchanged outside this read-only path.
+        case reader.(si, limit_per_norm: 8, pos_diverse?: true) do
           {:ok, %{rows: rows, db_hits: %MapSet{} = db_hits} = data} when is_list(rows) ->
             enriched = Core.Pipeline.LTM.enrich(si, rows, db_hits)
             {enriched,
