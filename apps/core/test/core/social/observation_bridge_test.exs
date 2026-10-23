@@ -230,6 +230,64 @@ defmodule Core.Social.ObservationBridgeTest do
     assert without_past_tags.reported_proposition.reported_count == 13
   end
 
+  test "contrastive clauses reach attributed cognition through real Core tokens, syntax and ATL" do
+    cases = [
+      {"The checker verified those claims.",
+       :affirmative_transitive, :reported_action, :positive, nil},
+      {"Three links did not support the claims.",
+       :counted_negated_transitive, :reported_support, :negative, 3}
+    ]
+
+    lexicon = %{
+      "the" => "determiner", "those" => "determiner",
+      "checker" => "noun", "links" => "noun",
+      "claims" => "noun", "verified" => "verb",
+      "did" => "verb", "not" => "adverb", "support" => "verb"
+    }
+
+    reader = fn si, _opts ->
+      rows =
+        Enum.flat_map(si.tokens, fn token ->
+          word = String.downcase(token.phrase)
+
+          case Map.get(lexicon, word) do
+            nil -> []
+            pos ->
+              [%{id: "#{word}|#{pos}|1", token_index: token.index,
+                 norm: word, word: word, pos: pos, semantic_atoms: []}]
+          end
+        end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexicon)), missing_norms: []}}
+    end
+
+    scorer = fn si, _opts ->
+      choices = Enum.map(si.active_cells, fn cell ->
+        %{token_index: cell.token_index, chosen_id: cell.id,
+          score: 0.91, prob: 0.91, margin: 0.4}
+      end)
+
+      {:ok, %{choices: choices, audit: %{missing_candidates: 0}}}
+    end
+
+    for {sentence, construction, relation, polarity, count} <- cases do
+      assert {:ok, semantic} =
+               SemanticProbe.run(sentence,
+                 ltm_reader: reader, scorer: scorer, emit_telemetry?: false)
+
+      assert semantic.syntax.audit.ltm_status == :ready
+      assert :noun_phrase in Enum.map(semantic.syntax.signatures, & &1.id)
+
+      proposition = semantic.reported_proposition
+      assert proposition.status == :attributed_structural_interpretation
+      assert proposition.construction == construction
+      assert proposition.relation == relation
+      assert proposition.polarity == polarity
+      assert proposition.reported_count == count
+      assert proposition.verification == :author_claim_not_independently_verified
+    end
+  end
+
   test "real syntax and pure ATL bind an attributed relative-clause proposition" do
     title =
       "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
