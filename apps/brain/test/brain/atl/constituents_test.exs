@@ -56,6 +56,49 @@ defmodule Brain.ATL.ConstituentsTest do
     assert roles.determiner.sense_id == "the|determiner|1"
   end
 
+  test "nominalized adjective candidate keeps adjective sense and never creates noun" do
+    choices = [
+      winner("the", "determiner", 0),
+      winner("gathered", "adjective", 1),
+      winner("had", "auxiliary", 2),
+      winner("grown", "verb", 3)
+    ]
+    signature = %{
+      id: :nominalized_adjective_subject_candidate,
+      span: {0, 1},
+      roles: %{determiner: 0, adjective: 1},
+      required_features: %{
+        determiner: [:pos_determiner], adjective: [:pos_adjective]
+      }
+    }
+
+    slate = ATL.reduce(choices, tokens(~w(the gathered had grown)), [signature])
+    assert [%{
+      id: :nominalized_adjective_subject_candidate,
+      status: :resolved,
+      roles: %{
+        determiner: %{sense_id: "the|determiner|1"},
+        adjective: %{sense_id: "gathered|adjective|1"}
+      }
+    }] = slate.constituents
+    assert slate.winners == ATL.reduce(choices, tokens(~w(the gathered had grown))).winners
+    refute Map.has_key?(slate.by_id, "gathered|noun|1")
+
+    wrong_pos = [
+      winner("the", "determiner", 0),
+      winner("gathered", "verb", 1)
+    ]
+    assert [%{status: :partially_resolved,
+      unresolved_roles: [:adjective]}] =
+      ATL.reduce(wrong_pos, tokens(~w(the gathered)), [signature]).constituents
+
+    fallback = [%{id: "the|determiner|1", token_index: 0},
+      %{id: "gathered|adjective|fallback", token_index: 1}]
+    assert [%{status: :partially_resolved,
+      unresolved_roles: [:adjective]}] =
+      ATL.reduce(fallback, tokens(~w(the gathered)), [signature]).constituents
+  end
+
   test "nested noun and prepositional phrases retain shared head identity" do
     choices = [
       winner("in", "preposition", 0),
