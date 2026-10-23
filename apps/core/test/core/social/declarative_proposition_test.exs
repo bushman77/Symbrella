@@ -91,6 +91,100 @@ defmodule Core.Social.DeclarativePropositionTest do
       noun_phrases: [{0, 1}, {5, 6}])
   end
 
+  defp verified do
+    fixture("The checker verified those claims.",
+      roles: [{1, "noun"}, {2, "verb"}, {4, "noun"}],
+      noun_phrases: [{0, 1}, {3, 4}])
+  end
+
+  defp not_supported do
+    fixture("Three links did not support the claims.",
+      roles: [{1, "noun"}, {2, "verb"}, {3, "adverb"},
+              {4, "verb"}, {6, "noun"}],
+      noun_phrases: [{5, 6}])
+  end
+
+  @contrastive_cases [
+    {"The checker verified those claims.", :affirmative_transitive,
+     :reported_action, :positive, nil},
+    {"The checker did not verify those claims.", :explicit_negated_transitive,
+     :reported_action, :negative, nil},
+    {"Three links supported the claims.", :counted_transitive,
+     :reported_support, :positive, 3},
+    {"Three links did not support the claims.", :counted_negated_transitive,
+     :reported_support, :negative, 3}
+  ]
+
+  test "contrastive benchmark preserves independent predicate and polarity" do
+    si_by_sentence = %{
+      "The checker verified those claims." => verified(),
+      "The checker did not verify those claims." => negated(),
+      "Three links supported the claims." => supported(),
+      "Three links did not support the claims." => not_supported()
+    }
+
+    for {sentence, construction, relation, polarity, count} <- @contrastive_cases do
+      result = DeclarativeProposition.interpret(Map.fetch!(si_by_sentence, sentence))
+      assert result.status == :attributed_structural_interpretation
+      assert result.construction == construction
+      assert result.relation == relation
+      assert result.polarity == polarity
+      assert result.reported_count == count
+      assert result.verification == :author_claim_not_independently_verified
+      assert result.trust == :untrusted_external
+    end
+  end
+
+  test "counted negative support accepts exact did-not lexical witnesses" do
+    si = not_supported()
+
+    winners = Enum.map(si.atl_slate.winners, fn
+      %{token_index: 2} = winner -> %{winner | id: "did|auxiliary|0"}
+      %{token_index: 3} = winner -> %{winner | id: "not|particle|0"}
+      winner -> winner
+    end)
+
+    result = DeclarativeProposition.interpret(%{si | atl_slate: %{winners: winners}})
+    assert result.status == :attributed_structural_interpretation
+    assert result.reported_count == 3
+    assert result.relation == :reported_support
+    assert result.polarity == :negative
+    refute result.relation == :reported_refutation
+
+    assert DeclarativeProposition.interpret(
+      %{si | active_cells: Enum.reject(si.active_cells, &(&1.token_index == 3)),
+             atl_slate: %{winners: winners}}
+    ).reason == :missing_attested_dictionary_roles
+  end
+
+  test "modal support is explicitly unresolved, not affirmative evidence" do
+    modal = fixture("Three links might support the claims.",
+      roles: [{1, "noun"}, {2, "auxiliary"}, {3, "verb"}, {5, "noun"}],
+      noun_phrases: [{4, 5}])
+
+    result = DeclarativeProposition.interpret(modal)
+    assert result.status == :not_interpreted
+    assert result.reason == :modal_uncertainty
+    assert result.verification == :external_unverified
+    refute Map.has_key?(result, :polarity)
+  end
+
+  test "contrastive grammar still rejects missing noun phrases and mismatched ATL verbs" do
+    affirmative = verified()
+    unsupported = %{affirmative | sentence_signatures: []}
+    assert DeclarativeProposition.interpret(unsupported).reason ==
+             :insufficient_grammatical_evidence
+
+    negative = not_supported()
+    winners = Enum.map(negative.atl_slate.winners, fn
+      %{token_index: 4} = winner -> %{winner | id: "support|noun|1"}
+      winner -> winner
+    end)
+    failed = DeclarativeProposition.interpret(%{negative | atl_slate: %{winners: winners}})
+    assert failed.reason == :lifg_atl_role_disagreement
+    assert Enum.any?(failed.role_audit, &(&1.role == :predicate and &1.agreed? == false))
+  end
+
   test "reported action binds an attested counted object, not a verified event" do
     proposition = DeclarativeProposition.interpret(produced())
 
