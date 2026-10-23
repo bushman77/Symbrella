@@ -296,6 +296,59 @@ defmodule Brain.LIFG.GrammarEvidence do
 
   def apply_copular_relative(scores, _context, _index), do: scores
 
+  @doc """
+  Give a dictionary-attested verb POS bounded support in a complete
+  regular-past D-N-V-D-N clause. This is pre-winner grammar evidence, not a
+  selected dictionary sense, morphological tag or verified assertion.
+  """
+  @spec apply_bounded_past_transitive(map(), context(), non_neg_integer()) :: map()
+  def apply_bounded_past_transitive(
+        scores, %{signatures: signatures, cells_by_id: cells}, index
+      )
+      when is_map(scores) and is_list(signatures) and is_map(cells) and
+             is_integer(index) and index >= 0 do
+    witnessed? =
+      Enum.any?(signatures, fn
+        %{id: :bounded_regular_past_transitive, source: :core_syntax,
+          span: {first, last},
+          roles: %{subject_determiner: det, subject_head: subject,
+                   predicate: ^index, object_determiner: object_det,
+                   object_head: object},
+          evidence: evidence} when is_list(evidence) ->
+          first == det and last == object and
+            [subject, index, object_det, object] ==
+              Enum.to_list((det + 1)..(det + 4)) and
+            Enum.all?(
+              [:contiguous_surface, :attested_nominal_subject,
+               :attested_dictionary_verb, :bounded_past_surface,
+               :attested_nominal_object],
+              &(&1 in evidence)
+            )
+
+        _ -> false
+      end)
+
+    if witnessed? do
+      Map.new(scores, fn
+        {id, score} when is_binary(id) and is_number(score) ->
+          cell = Map.get(cells, id)
+
+          if id_pos(id) == "verb" and not String.ends_with?(id, "|fallback") and
+               is_map(cell) and get(cell, :pos, nil) == "verb" do
+            {id, min(1.0, max(0.0, score + 0.40))}
+          else
+            {id, score}
+          end
+
+        entry -> entry
+      end)
+    else
+      scores
+    end
+  end
+
+  def apply_bounded_past_transitive(scores, _context, _index), do: scores
+
   # A weak construction hypothesis becomes useful only when an exact
   # sense supplies the matching morphological feature.
   defp support_for(%{id: :finite_past_candidate, roles: %{verb: role_index}}, index, _id, cell)
