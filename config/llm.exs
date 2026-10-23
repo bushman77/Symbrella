@@ -108,7 +108,7 @@ config :llm, :colony,
   mode: :observe,
   allow_reviewed_comments?: false,
   api_base: "https://thecolony.ai/api/v1",
-  max_posts: 10,
+  max_posts: 25,
   timeout_ms: 5_000
 
 # Optional machine-specific tuning. This file is excluded from Git, so local
