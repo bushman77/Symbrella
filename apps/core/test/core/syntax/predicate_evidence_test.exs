@@ -182,6 +182,46 @@ defmodule Core.Syntax.PredicateEvidenceTest do
     end
   end
 
+  test "COLONY-09 counted plural present feeds one attested POS role into Stage1" do
+    cells = [
+      cell("reports", "noun", ["tag:form-of", "tag:plural"]),
+      cell("support", "noun"), cell("support", "verb"),
+      cell("the", "determiner"), cell("claims", "noun")
+    ]
+
+    initial = input(~w(Four reports support the claims), cells)
+    si = Core.Syntax.Signatures.attach(initial)
+    out = RoleCompetition.attach(si)
+
+    assert [%{token_index: 2, basis: :counted_present_transitive_predicate,
+              role: :predicate, pos: "verb"}] =
+             out.role_competition.predicate_proposals
+    assert %{status: :supported, pos: "verb"} = out.role_competition.roles[2]
+
+    scores = %{"support|noun|1" => 0.46, "support|verb|1" => 0.40}
+    revised = GrammarEvidence.apply_role_competition(
+      scores, GrammarEvidence.prepare(out), 2)
+
+    assert revised["support|verb|1"] > revised["support|noun|1"]
+    assert revised["support|noun|1"] == 0.46
+
+    focus = SenseFocus.plan(out, 2, Enum.filter(cells, &(&1.norm == "support")))
+    assert focus.mode == :focused
+    assert focus.focus_pos == "verb"
+
+    for invalid_cells <- [
+          Enum.reject(cells, &(&1.norm == "reports")),
+          Enum.reject(cells, &(&1.norm == "support" and &1.pos == "verb"))
+        ] do
+      invalid =
+        input(~w(Four reports support the claims), invalid_cells)
+        |> Core.Syntax.Signatures.attach()
+        |> RoleCompetition.attach()
+
+      assert invalid.role_competition.predicate_proposals == []
+    end
+  end
+
   test "plural present supplies POS evidence without asserting an event" do
     cells = [
       cell("the", "determiner"),
