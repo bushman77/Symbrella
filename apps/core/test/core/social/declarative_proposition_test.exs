@@ -135,6 +135,122 @@ defmodule Core.Social.DeclarativePropositionTest do
     end
   end
 
+  defp finite_present_fixture(sentence, mode) do
+    si =
+      fixture(sentence,
+        roles: [{1, "noun"}, {2, "verb"}, {4, "noun"}],
+        noun_phrases:
+          if(mode == :singular, do: [{0, 1}, {3, 4}], else: [{3, 4}])
+      )
+
+    tags = ["tag:form-of", "tag:indicative", "tag:present",
+            "tag:singular", "tag:third-person"]
+
+    cells =
+      Enum.map(si.active_cells, fn cell ->
+        case {mode, cell.token_index} do
+          {:singular, 2} -> Map.put(cell, :semantic_atoms, tags)
+          {:counted, 1} ->
+            Map.put(cell, :semantic_atoms, ["tag:form-of", "tag:plural"])
+          _ -> Map.put(cell, :semantic_atoms, [])
+        end
+      end)
+
+    signature =
+      case mode do
+        :singular ->
+          %{id: :finite_present_svo_candidate, source: :core_syntax,
+            span: {0, 4},
+            roles: %{subject_head: 1, predicate: 2, object_head: 4},
+            evidence: [:contiguous_surface, :attested_nominal_subject,
+                       :attested_nominal_object, :attested_finite_present_verb]}
+
+        :counted ->
+          %{id: :counted_finite_present_svo_candidate, source: :core_syntax,
+            span: {0, 4},
+            roles: %{count: 0, subject_head: 1, predicate: 2,
+                     object_determiner: 3, object_head: 4},
+            evidence: [:contiguous_surface, :attested_counted_plural_subject,
+                       :attested_base_present_verb, :attested_nominal_object]}
+      end
+
+    %{si | active_cells: cells, sentence_signatures: [signature | si.sentence_signatures]}
+  end
+
+  test "COLONY-09 singular finite-present report requires real morphology and agreement" do
+    si = finite_present_fixture("The reviewer verifies the report.", :singular)
+
+    proposition = DeclarativeProposition.interpret(si)
+    assert proposition.status == :attributed_structural_interpretation
+    assert proposition.construction == :finite_present_transitive
+    assert proposition.relation == :reported_action
+    assert proposition.polarity == :positive
+    assert proposition.subject == "reviewer"
+    assert proposition.predicate == "verifies"
+    assert proposition.object == "report"
+    assert proposition.verification == :author_claim_not_independently_verified
+
+    without_signature = %{si | sentence_signatures:
+      Enum.reject(si.sentence_signatures, &(&1.id == :finite_present_svo_candidate))}
+    assert DeclarativeProposition.interpret(without_signature).reason ==
+             :insufficient_grammatical_evidence
+
+    without_tags = %{si | active_cells:
+      Enum.map(si.active_cells, fn cell ->
+        if cell.token_index == 2, do: Map.put(cell, :semantic_atoms, []), else: cell
+      end)}
+    assert DeclarativeProposition.interpret(without_tags).reason ==
+             :insufficient_grammatical_evidence
+
+    wrong_winner = %{si | atl_slate: %{winners:
+      Enum.map(si.atl_slate.winners, fn
+        %{token_index: 2} = winner -> %{winner | id: "verifies|noun|1"}
+        winner -> winner
+      end)}}
+    assert DeclarativeProposition.interpret(wrong_winner).reason ==
+             :lifg_atl_role_disagreement
+  end
+
+  test "COLONY-09 counted plural finite-present supports report only with plural witness" do
+    si = finite_present_fixture("Four reports support the claims.", :counted)
+    proposition = DeclarativeProposition.interpret(si)
+
+    assert proposition.status == :attributed_structural_interpretation
+    assert proposition.construction == :counted_present_transitive
+    assert proposition.relation == :reported_support
+    assert proposition.polarity == :positive
+    assert proposition.subject == "reports"
+    assert proposition.predicate == "support"
+    assert proposition.object == "claims"
+    assert proposition.reported_count == 4
+
+    no_plural = %{si | active_cells:
+      Enum.map(si.active_cells, fn cell ->
+        if cell.token_index == 1, do: Map.put(cell, :semantic_atoms, []), else: cell
+      end)}
+    assert DeclarativeProposition.interpret(no_plural).reason ==
+             :insufficient_grammatical_evidence
+
+    no_signature = %{si | sentence_signatures:
+      Enum.reject(si.sentence_signatures,
+        &(&1.id == :counted_finite_present_svo_candidate))}
+    assert DeclarativeProposition.interpret(no_signature).reason ==
+             :insufficient_grammatical_evidence
+
+    singular_count = finite_present_fixture(
+      "One report support the claims.", :counted)
+    assert DeclarativeProposition.interpret(singular_count).reason ==
+             :unsupported_subject_verb_agreement
+
+    wrong_sense = %{si | atl_slate: %{winners:
+      Enum.map(si.atl_slate.winners, fn
+        %{token_index: 2} = winner -> %{winner | id: "support|noun|1"}
+        winner -> winner
+      end)}}
+    assert DeclarativeProposition.interpret(wrong_sense).reason ==
+             :lifg_atl_role_disagreement
+  end
+
   test "missing attested negative support predicate reports the exact unresolved role" do
     si = not_supported()
     without_predicate = %{
