@@ -113,6 +113,10 @@ defmodule Symbrella.Application do
       # Working memory and brain coordination.
       Brain,
 
+      # Receive learned Axon state predictions as observations only.
+      # The receptor never actuates mood, memory, decisions or neural weights.
+      Brain.Neural.SignalReceptor,
+
       # Ephemeral, experience-driven synaptic weights in shadow mode only.
       Brain.Synapses.Shadow,
 
