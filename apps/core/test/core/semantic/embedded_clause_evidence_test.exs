@@ -48,6 +48,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert candidate.subject == :unresolved
     assert candidate.subject_candidate == nil
     assert candidate.relation_candidate == nil
+    assert candidate.relation_diagnostic.status == :no_adjacent_subject_candidate
     assert candidate.subject_binding_status == :unresolved
     assert candidate.embedded_clause_status == :not_interpreted
     assert candidate.assertion_status == :not_asserted
@@ -217,6 +218,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
     assert result.assertion_status == :not_asserted
     assert result.relation_candidate.type == :embedded_perfect_clause_candidate
     assert result.relation_candidate.status == :question_scoped_structural_relation_candidate
+    assert result.relation_diagnostic.status == :question_scoped_relation_candidate_available
     assert result.relation_candidate.surface == "the gathered had grown"
     assert result.relation_candidate.span == {7, 10}
     assert result.relation_candidate.subject.identity == :unresolved
@@ -352,9 +354,13 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
 
       input = put_in(complete, [:atl_slate, :winners], winners)
       assert [%{subject_candidate: %{surface: "the gathered"},
-        relation_candidate: nil, assertion_status: :not_asserted,
+        relation_candidate: nil, relation_diagnostic: diagnostic,
+        assertion_status: :not_asserted,
         subject_binding_status: :unresolved}] =
         EmbeddedClauseEvidence.candidates(input, meaning())
+      assert diagnostic.assertion_status == :not_asserted
+      assert diagnostic.status in [:predicate_lexical_selection_missing,
+        :predicate_selected_sense_not_verb, :predicate_selected_sense_fallback]
     end
 
     head_mismatch =
