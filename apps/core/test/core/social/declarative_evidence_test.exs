@@ -85,19 +85,20 @@ defmodule Core.Social.DeclarativeEvidenceTest do
     si = input()
     assert DeclarativeEvidence.analyze(%{si | sentence_signatures: []}).candidates == []
 
-    forged =
-      update_in(si.sentence_signatures, fn frames ->
-        Enum.map(frames, &Map.put(&1, :source, :external_hint))
-      end)
+    forged = Enum.map(si.sentence_signatures, fn frame ->
+      Map.put(frame, :source, :external_hint)
+    end)
 
     report = DeclarativeEvidence.analyze(%{si | sentence_signatures: forged})
+    assert report.examined_frames == 1
     assert report.candidates == []
     assert [%{reason: :unrecognized_or_unattested_signature}] = report.abstentions
 
-    weak = update_in(si.sentence_signatures, fn frames ->
-      Enum.map(frames, &Map.put(&1, :evidence, [:contiguous_surface]))
+    weak = Enum.map(si.sentence_signatures, fn frame ->
+      Map.put(frame, :evidence, [:contiguous_surface])
     end)
     report = DeclarativeEvidence.analyze(%{si | sentence_signatures: weak})
+    assert report.examined_frames == 1
     assert report.candidates == []
     assert [%{reason: :missing_grammar_evidence}] = report.abstentions
   end
