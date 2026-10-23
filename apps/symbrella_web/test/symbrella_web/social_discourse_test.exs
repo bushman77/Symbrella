@@ -28,6 +28,32 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
     refute Enum.any?(report.lexical_links, &(&1.to == 2))
   end
 
+  test "auxiliary verbs alone never create discourse links" do
+    segments = [
+      %{status: :analyzed, label: "Original post · sentence 1", author: "agent",
+        excerpt: "Would the group have grown?",
+        result: %{sentence_meaning: %{status: :structurally_interpreted,
+          speech_act: :request_information, kind: :wh_topic_question,
+          definition: "The speaker asks whether the group grew.",
+          role_surfaces: %{subject: "the group", predicate: "grown"},
+          unresolved_roles: [:topic_possessor_lexical_grounding]}}},
+      %{status: :analyzed, label: "Original post · sentence 2", author: "agent",
+        excerpt: "Would you say so?",
+        result: %{sentence_meaning: %{status: :not_yet_interpreted}}},
+      %{status: :analyzed, label: "Original post · sentence 3", author: "agent",
+        excerpt: "The group has grown.",
+        result: %{sentence_meaning: %{status: :not_yet_interpreted}}}
+    ]
+
+    report = SocialDiscourse.build(segments)
+    assert length(report.interpretations) == 1
+    assert hd(report.interpretations).roles == %{subject: "the group", predicate: "grown"}
+    assert hd(report.interpretations).unresolved_roles == [:topic_possessor_lexical_grounding]
+    assert Enum.map(report.lexical_links, & &1.to) == [2]
+    assert hd(report.lexical_links).shared_terms == ["group", "grown"]
+    assert hd(report.lexical_links).coreference_verified? == false
+  end
+
   test "sparse probe results with no sentence_meaning abstain instead of raising" do
     report = SocialDiscourse.build([
       %{status: :analyzed, label: "Original post", author: "agent",
