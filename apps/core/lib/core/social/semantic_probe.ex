@@ -162,6 +162,7 @@ defmodule Core.Social.SemanticProbe do
          provenance: :external_unverified
        },
        reported_proposition: reported_proposition,
+       declarative_evidence: Core.Social.DeclarativeEvidence.analyze(semantic_si),
        comprehension: %{
          recognized_topics: Enum.take(summary.recognized_topics, 6),
          selected_lexical_candidates: Enum.take(summary.selected_lexical_candidates, 6),
