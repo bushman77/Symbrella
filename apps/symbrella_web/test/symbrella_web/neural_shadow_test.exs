@@ -65,6 +65,18 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     checkpoint
   end
 
+  defp eventually(fun, attempts \\ 40)
+  defp eventually(fun, 0), do: fun.()
+
+  defp eventually(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
   test "default runtime remains disabled when no supervised shadow is started" do
     assert %{status: :disabled} = NeuralShadow.status()
   end
@@ -177,7 +189,7 @@ defmodule SymbrellaWeb.NeuralShadowTest do
       }
     }}, 800
     assert observed_count >= 5
-    assert Map.keys(observed) |> Enum.sort() == Map.keys(forecast) |> Enum.sort()
+    assert Enum.sort(Map.keys(observed)) == Enum.sort(Map.keys(forecast))
     assert Map.has_key?(observed, :mood_da)
     assert is_number(deltas.mood_da)
     refute Map.has_key?(forecast, :user_text)
@@ -235,8 +247,10 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     refute File.read!(path) =~ "private input"
     refute File.read!(path) =~ "private answer"
     assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
-    assert Brain.Neural.SignalReceptor.status().predictions >= receptor_before + 3
-    assert Brain.Neural.SignalReceptor.status().evaluations >= 1
+    assert eventually(fn ->
+      status = Brain.Neural.SignalReceptor.status()
+      status.predictions >= receptor_before + 3 and status.evaluations >= 1
+    end)
     assert Brain.Neural.SignalReceptor.status().deployment_authorized? == false
   end
 
