@@ -189,6 +189,7 @@ defmodule Brain.LIFG.RoleCompetition do
              basis in [:modal_question_predicate, :modal_declarative_predicate,
                        :imperative_predicate, :plural_present_predicate,
                        :finite_present_svo_predicate,
+                       :counted_present_transitive_predicate,
                        :counted_negative_transitive_predicate] ->
           :bounded_predicate_slot in evidence and
             :dictionary_pos_witness in evidence and
