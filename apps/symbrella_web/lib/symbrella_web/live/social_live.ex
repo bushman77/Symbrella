@@ -335,6 +335,32 @@ defmodule SymbrellaWeb.SocialLive do
                             class="text-zinc-400">
                             No independently resolved adjacent nominal candidate.
                           </p>
+                          <div :if={is_map(Map.get(candidate, :subject_diagnostic))}
+                            class="space-y-1 rounded border border-white/10 bg-zinc-950/40 p-2">
+                            <p class="font-semibold text-amber-100">
+                              Subject evidence: {candidate.subject_diagnostic.status}
+                            </p>
+                            <p :for={token <- candidate.subject_diagnostic.token_window}
+                              class="break-words text-zinc-400">
+                              Token {token.index}: {token.surface} · selected POS:
+                              {token.selected_pos || "unknown"} · lexical hypothesis:
+                              {token.selected_sense_id || "none"}
+                            </p>
+                            <p class="text-zinc-400">
+                              Adjacent NP grammar signatures:
+                              {length(candidate.subject_diagnostic.adjacent_noun_signatures)} ·
+                              ATL noun constituents:
+                              {length(candidate.subject_diagnostic.adjacent_atl_noun_phrases)}
+                            </p>
+                            <p :for={np <- candidate.subject_diagnostic.adjacent_atl_noun_phrases}
+                              class="text-zinc-400">
+                              ATL NP {inspect(np.span)} · {np.status} ·
+                              unresolved roles: {inspect(np.unresolved_roles)}
+                            </p>
+                            <p class="text-amber-200">
+                              Lexical selections remain hypotheses; no subject binding or factual assertion.
+                            </p>
+                          </div>
                           <p>Evidence: {Enum.join(Enum.map(candidate.grammatical_evidence, &to_string/1), ", ")}</p>
                         </div>
                       </div>
