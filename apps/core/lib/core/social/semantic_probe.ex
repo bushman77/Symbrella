@@ -9,11 +9,11 @@ defmodule Core.Social.SemanticProbe do
   A selected lexical candidate is NOT a verified meaning or a factual claim.
   """
 
-  @max_input_chars 420
-  @max_tokens 32
-  # Keep the complete bounded 32-token slate for ATL. Truncating to twelve
+  @max_input_chars 600
+  @max_tokens 64
+  # Keep the complete bounded 64-token slate for ATL. Truncating to twelve
   # choices discarded the predicate of longer Colony headlines.
-  @max_choices 32
+  @max_choices 64
   @low_margin 0.15
 
   @doc """
