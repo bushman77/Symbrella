@@ -113,7 +113,7 @@ defmodule Core.Semantic.SentenceMeaning do
           if is_integer(prep), do: last - prep, else: nil
 
         surface_gaps =
-          if is_map(atl) and missing_frame == [] and missing_atl == [] do
+          if is_map(atl) and missing_frame == [] and missing_atl == [] and last > prep and topic_span <= @max_topic_tokens do
             indices = Enum.map(required, &Map.fetch!(roles, &1)) ++
               Enum.to_list((prep + 1)..last)
             Enum.filter(indices, &(not match?({:ok, _}, surface_at(indexed, &1))))
