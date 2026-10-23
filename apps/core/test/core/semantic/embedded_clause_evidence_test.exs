@@ -228,6 +228,14 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
         EmbeddedClauseEvidence.candidates(invalid, meaning())
     end
 
+    missing_syntax = %{candidate_input |
+      sentence_signatures: base.sentence_signatures}
+    assert [%{subject_candidate: nil, subject_binding_status: :unresolved}] =
+      EmbeddedClauseEvidence.candidates(missing_syntax, meaning())
+
+    assert [%{subject_diagnostic: %{status: :adjacent_nominal_candidate_available}}] =
+      EmbeddedClauseEvidence.candidates(candidate_input, meaning())
+
     absent_nominalization =
       %{candidate_input | atl_slate: Map.delete(candidate_input.atl_slate, :constituents)}
     assert [%{subject_candidate: nil}] =
