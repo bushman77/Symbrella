@@ -99,6 +99,47 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-07D: counted negative predicate disambiguation
+
+The next live 8-sentence probe remained at **7/8**, but verified that
+the POS-diverse LTM retrieval worked: `support` at token index 4 now
+has an attested verb POS and still loses to `support|noun|1` in LIFG.
+
+Core's pre-LIFG `PredicateEvidence` now recognizes the complete
+counted-subject, `did not`, transitive-object sequence:
+`Three links did not support the claims`.
+
+The additional hypothesis requires seven exact source tokens, a
+supported numeric count, dictionary noun evidence for the subject
+and object, dictionary verb evidence for both `did` and the
+predicate, dictionary adverb evidence for `not`, and a dictionary
+determiner for the object. `RoleCompetition` arbitrates this
+independent POS proposal before Stage1; `GrammarEvidence` gives only
+existing verb senses a bounded compatibility boost. No POS or sense is
+fabricated, and the external claim remains attributed, unverified,
+read-only, and unpublished.
+
+Failure cases must abstain when the predicate has no attested verb
+sense, the negation or nominal object is absent, or the wording is
+modal instead. The unit tests cover these counterexamples, and the
+`ObservationBridge` regression exercises real LIFG and pure ATL
+selection rather than supplying a fake scorer.
+
+Run under the existing umbrella root:
+
+```bash
+mix test \
+  apps/core/test/core/syntax/predicate_evidence_test.exs \
+  apps/core/test/core/social/observation_bridge_test.exs \
+  apps/core/test/core/social/declarative_proposition_test.exs
+
+mix run scripts/colony_contrastive_probe.exs
+```
+
+Do not modify the dictionary or force a lexical winner to reach 8/8.
+If disagreement persists, inspect the actual sense choice and
+`RoleCompetition` evidence before changing any scoring.
+
 ## COLONY-07C: lexical POS coverage under bounded LTM retrieval
 
 The live 8-case benchmark reached 7/8. The remaining failed sentence
