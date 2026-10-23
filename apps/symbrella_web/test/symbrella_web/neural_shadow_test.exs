@@ -138,6 +138,8 @@ defmodule SymbrellaWeb.NeuralShadowTest do
   end
 
   test "supervised mode predicts and scores only consecutive same-session turns", %{dir: dir} do
+    :ok = Brain.Bus.subscribe(Brain.Blackboard.topic())
+    receptor_before = Brain.Neural.SignalReceptor.status().predictions
     checkpoint = valid_checkpoint(dir)
     path = Path.join(dir, "shadow_predictions.jsonl")
     pid = start_supervised!({NeuralShadow, checkpoint: checkpoint, dir: dir, log_path: path})
@@ -159,6 +161,28 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     assert first.evaluations == 0
     assert first.pending_sessions == 1
 
+    assert_receive {:blackboard, %{
+      event: [:brain, :neural, :state_prediction],
+      measurements: %{count: 1, observed_features: observed_count},
+      meta: %{
+        mode: :shadow_only,
+        source: :axon_residual_v4,
+        verification: :model_prediction_not_verified,
+        deployment_authorized?: false,
+        horizon: :next_completed_turn_in_same_session,
+        observed: observed,
+        forecast: forecast,
+        predicted_change: deltas,
+        checkpoint_assessment: :not_ready
+      }
+    }}, 800
+    assert observed_count >= 5
+    assert Map.keys(observed) |> Enum.sort() == Map.keys(forecast) |> Enum.sort()
+    assert Map.has_key?(observed, :mood_da)
+    assert is_number(deltas.mood_da)
+    refute Map.has_key?(forecast, :user_text)
+    refute Map.has_key?(forecast, :assistant_text)
+
     other = send_record.(turn("live-b", 1, 0.4))
     assert other.predictions == 2
     assert other.evaluations == 0
@@ -172,6 +196,18 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     assert is_number(next.last_evaluation.persistence_mse)
     assert next.observed_pairs == 1
     assert next.observed_cells == next.last_evaluation.valid_feature_pairs
+
+    assert_receive {:blackboard, %{
+      event: [:brain, :neural, :state_evaluation],
+      measurements: %{count: 1, valid_feature_pairs: valid_pairs},
+      meta: %{source: :axon_residual_v4, mode: :shadow_only,
+        deployment_authorized?: false, residual_mse: residual,
+        persistence_mse: persistence}
+    }}, 800
+    assert valid_pairs > 0
+    assert is_number(residual)
+    assert is_number(persistence)
+
     assert_in_delta next.aggregate_residual_mse,
                     next.last_evaluation.residual_mse, 1.0e-7
     assert_in_delta next.aggregate_persistence_mse,
@@ -199,6 +235,9 @@ defmodule SymbrellaWeb.NeuralShadowTest do
     refute File.read!(path) =~ "private input"
     refute File.read!(path) =~ "private answer"
     assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+    assert Brain.Neural.SignalReceptor.status().predictions >= receptor_before + 3
+    assert Brain.Neural.SignalReceptor.status().evaluations >= 1
+    assert Brain.Neural.SignalReceptor.status().deployment_authorized? == false
   end
 
   test "checkpoint failure leaves the evaluator unavailable and does not observe", %{dir: dir} do
