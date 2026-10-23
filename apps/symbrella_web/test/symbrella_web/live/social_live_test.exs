@@ -146,6 +146,54 @@ defmodule SymbrellaWeb.SocialLiveTest do
     assert has_element?(view, "#social-refresh")
   end
 
+  defmodule FakeCognitiveAnalyzer do
+    def analyze(%{topic: topic, comments: comments}) do
+      {:ok, %{
+        post_id: topic.id,
+        analyzed_segments: 1,
+        omitted_replies: length(comments),
+        segments: [%{
+          label: "Original post",
+          author: topic.author,
+          status: :analyzed,
+          result: %{
+            lifg: %{status: :scored, chosen_count: 2},
+            atl: %{status: :read_only_reduced, winner_count: 1},
+            sentence_meaning: %{status: :external_unverified},
+            syntax: %{audit: %{outcome: :grammar_candidates_detected, pos_covered_tokens: 2}, signatures: [%{id: :noun_phrase}]},
+            token_count: 3,
+            acc_shadow: %{uncertain?: true},
+            comprehension: %{recognized_topics: ["growth"]},
+            reported_proposition: %{status: :not_interpreted}
+          }
+        }]
+      }}
+    end
+  end
+
+  test "on-demand cognitive modal displays read-only stage results and can close", %{conn: conn} do
+    previous = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
+    Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeCognitiveAnalyzer)
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+      assert has_element?(view, "#social-analyze")
+      refute has_element?(view, "#social-cognitive-modal")
+
+      html = view |> element("#social-analyze") |> render_click()
+      assert html =~ "Cognitive inspection"
+      assert has_element?(view, "#social-analysis-segment-0")
+      assert html =~ "grammar_candidates_detected"
+      assert html =~ "read_only_reduced"
+
+      view |> element("#social-close-analysis") |> render_click()
+      refute has_element?(view, "#social-cognitive-modal")
+    after
+      if is_nil(previous), do: Application.delete_env(:symbrella_web, :social_cognitive_analyzer),
+        else: Application.put_env(:symbrella_web, :social_cognitive_analyzer, previous)
+    end
+  end
+
   test "rejects invalid thread identifier without sending a request", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/social/not-a-valid-id")
     assert has_element?(view, "#social-error")
