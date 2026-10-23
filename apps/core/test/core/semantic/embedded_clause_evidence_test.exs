@@ -37,7 +37,7 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
   end
 
   test "a perfect-predicate signature inside unresolved topic stays non-assertive" do
-    assert [candidate] = EmbeddedClauseEvidence.inspect(input(), meaning())
+    assert [candidate] = EmbeddedClauseEvidence.candidates(input(), meaning())
     assert candidate.construction == :perfect_predicate
     assert candidate.status == :syntactic_candidate_only
     assert candidate.auxiliary.surface == "had"
@@ -52,23 +52,23 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
   test "no candidate is inferred outside the attested complement" do
     other = put_in(meaning(), [:proposition, :content, :complement, :argument, :span],
       {11, 16})
-    assert EmbeddedClauseEvidence.inspect(input(), other) == []
+    assert EmbeddedClauseEvidence.candidates(input(), other) == []
   end
 
   test "signature role mismatch or missing surfaces cannot create a candidate" do
     bad_roles = put_in(input(), [:sentence_signatures, Access.at(0), :roles, :verb], 14)
-    assert EmbeddedClauseEvidence.inspect(bad_roles, meaning()) == []
+    assert EmbeddedClauseEvidence.candidates(bad_roles, meaning()) == []
 
     no_predicate = %{input() | tokens: [%{index: 9, phrase: "had", n: 1}]}
-    assert EmbeddedClauseEvidence.inspect(no_predicate, meaning()) == []
+    assert EmbeddedClauseEvidence.candidates(no_predicate, meaning()) == []
   end
 
   test "no candidate for nominal topics or untrusted assertions" do
     nominal = put_in(meaning(), [:proposition, :content, :complement, :argument, :type],
       :nominal_topic)
-    assert EmbeddedClauseEvidence.inspect(input(), nominal) == []
+    assert EmbeddedClauseEvidence.candidates(input(), nominal) == []
 
     asserted = put_in(meaning(), [:proposition, :epistemic_status], :asserted)
-    assert EmbeddedClauseEvidence.inspect(input(), asserted) == []
+    assert EmbeddedClauseEvidence.candidates(input(), asserted) == []
   end
 end
