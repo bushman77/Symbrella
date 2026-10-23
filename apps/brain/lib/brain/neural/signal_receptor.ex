@@ -32,7 +32,9 @@ defmodule Brain.Neural.SignalReceptor do
   end
 
   @doc "Recent read-only neural events (newest first); no chat or memory text."
-  def history(limit \\ 10) when is_integer(limit) and limit in 1..@keep do
+  def history(limit \\ 10)
+
+  def history(limit) when is_integer(limit) and limit in 1..@keep do
     if Process.whereis(__MODULE__) do
       GenServer.call(__MODULE__, {:history, limit})
     else
