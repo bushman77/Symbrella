@@ -122,7 +122,10 @@ The parse families are intentionally bounded. Dictionary noun and verb
 roles, grammatical noun phrases, original token-to-surface alignment,
 pure ATL role agreement and independently observed auxiliary/negator
 witnesses remain mandatory. The modal example abstains: no unverified
-possibility becomes a declared finding.
+possibility becomes a declared finding. Colony's older keyword-only
+fallback is now confined to counted-link ratio headlines **without**
+modal or negative markers; general unsupported titles cannot bypass
+this decision and become approvable drafts.
 
 Run from the umbrella root, without touching folders outside the repo:
 
