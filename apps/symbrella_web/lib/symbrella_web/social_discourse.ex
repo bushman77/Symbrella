@@ -28,6 +28,7 @@ defmodule SymbrellaWeb.SocialDiscourse do
             interpretation: Map.get(meaning, :definition),
             roles: Map.get(meaning, :role_surfaces, %{}),
             topic_structure: Map.get(meaning, :topic_structure),
+            embedded_candidates: Map.get(meaning, :embedded_candidates, []),
             unresolved_roles: Map.get(meaning, :unresolved_roles, []),
             verification: :external_unverified
           }]
