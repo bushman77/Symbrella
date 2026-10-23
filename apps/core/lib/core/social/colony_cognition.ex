@@ -34,11 +34,12 @@ defmodule Core.Social.ColonyCognition do
         checker_owner: :not_verified,
         report_status: :author_claim_not_independently_verified,
         evidence_relation: claim.relation,
+        reported_polarity: Map.get(claim, :polarity, :unspecified),
         reported_link_count: claim.count,
         reported_total_links: claim.total,
         # This is the author's reported relation, not Symbrella's conclusion.
         original_title: String.slice(title, 0, 300),
-        reasoning_goal: reasoning_goal(claim.relation),
+        reasoning_goal: reasoning_goal(claim.relation, Map.get(claim, :polarity)),
         reported_proposition: external_proposition(semantic),
         brain: brain_summary(semantic)
       }
@@ -57,6 +58,9 @@ defmodule Core.Social.ColonyCognition do
     Subject: #{inspect(frame.subject)} (reported by the author, NOT independently verified).
     Ownership of external systems: NOT independently verified.
     Reported relation: #{frame.evidence_relation}.
+    Reported polarity: #{frame.reported_polarity}.
+    A negative support report is NOT evidence of affirmative support and
+    is NOT necessarily a contradiction. Preserve reported negation.
     Reported count, when supplied: #{inspect(frame.reported_link_count)}
     Reported total, when supplied: #{inspect(frame.reported_total_links)}
     Epistemic status: #{frame.report_status}.
@@ -106,20 +110,23 @@ defmodule Core.Social.ColonyCognition do
         verification: :author_claim_not_independently_verified,
         relation: relation, reported_count: count, reported_total: total}
       when construction in [:counted_object_action, :counted_transitive,
-                            :explicit_negated_transitive] and
+                            :affirmative_transitive, :explicit_negated_transitive,
+                            :counted_negated_transitive] and
            relation in [:reported_action, :reported_refutation, :reported_support] ->
         case claim_from_title(title) do
           {:ok, earlier} ->
             if earlier.relation == relation and
                  (is_nil(earlier.count) or earlier.count == count) and
                  (is_nil(earlier.total) or earlier.total == total) do
-              {:ok, %{relation: relation, count: count, total: total}}
+              {:ok, %{relation: relation, count: count, total: total,
+                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
             else
               {:error, :colony_proposition_mismatch}
             end
 
           {:error, :unresolved_colony_evidence_relation} ->
-            {:ok, %{relation: relation, count: count, total: total}}
+            {:ok, %{relation: relation, count: count, total: total,
+                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
 
         end
 
@@ -133,15 +140,18 @@ defmodule Core.Social.ColonyCognition do
       %{status: :attributed_structural_interpretation, construction: construction,
         subject: subject}
       when construction in [:counted_object_action, :counted_transitive,
-                            :explicit_negated_transitive] and is_binary(subject) ->
+                            :affirmative_transitive, :explicit_negated_transitive,
+                            :counted_negated_transitive] and is_binary(subject) ->
         :externally_reported_actor
 
       _ -> :external_checker
     end
   end
 
-  defp reasoning_goal(:reported_action), do: :ask_about_reported_action_or_verification
-  defp reasoning_goal(_), do: :ask_about_support_versus_contradiction
+  defp reasoning_goal(:reported_action, _), do: :ask_about_reported_action_or_verification
+  defp reasoning_goal(:reported_support, :negative),
+    do: :ask_why_reported_links_did_not_support_claims
+  defp reasoning_goal(_, _), do: :ask_about_support_versus_contradiction
 
   # The regex-extracted reported relation and a fully interpreted proposition
   # must agree. Never let competing processing routes silently pick a side.
@@ -150,8 +160,10 @@ defmodule Core.Social.ColonyCognition do
       %{status: :attributed_structural_interpretation,
         construction: construction} = proposition
       when construction in [:counted_object_action, :counted_transitive,
-                            :explicit_negated_transitive] ->
+                            :affirmative_transitive, :explicit_negated_transitive,
+                            :counted_negated_transitive] ->
         if Map.get(proposition, :relation) == claim.relation and
+             Map.get(proposition, :polarity) == Map.get(claim, :polarity) and
              Map.get(proposition, :reported_count) == claim.count and
              Map.get(proposition, :reported_total) == claim.total and
              Map.get(proposition, :verification) == :author_claim_not_independently_verified do
@@ -247,7 +259,8 @@ defmodule Core.Social.ColonyCognition do
             {nil, nil}
         end
 
-      {:ok, %{relation: relation, count: count, total: total}}
+      {:ok, %{relation: relation, count: count, total: total,
+                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
     end
   end
 
