@@ -12,7 +12,7 @@ defmodule Llm.Colony.Adapter do
   @api_base "https://thecolony.ai/api/v1"
   @key_file Path.expand("../../../../../priv/.colony_api_key", __DIR__)
   @defaults [
-    enabled?: false,
+    enabled?: true,
     mode: :observe,
     allow_reviewed_comments?: false,
     api_base: @api_base,
