@@ -2,6 +2,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
   use ExUnit.Case, async: true
 
   alias Core.Semantic.EmbeddedClauseEvidence
+  alias Core.Syntax.Signatures
+  alias Brain.ATL
 
   defp meaning do
     %{
@@ -230,6 +232,64 @@ defmodule Core.Semantic.EmbeddedClauseEvidenceTest do
       %{candidate_input | atl_slate: Map.delete(candidate_input.atl_slate, :constituents)}
     assert [%{subject_candidate: nil}] =
       EmbeddedClauseEvidence.candidates(absent_nominalization, meaning())
+  end
+
+  test "real syntax-to-ATL path retains adjectival subject candidate without an assertion" do
+    tokens =
+      [
+        {0, "What"}, {1, "would"}, {2, "you"}, {3, "look"},
+        {4, "at"}, {5, "to"}, {6, "say"}, {7, "the"},
+        {8, "gathered"}, {9, "had"}, {10, "grown"},
+        {12, "and"}, {13, "not"}, {14, "only"},
+        {15, "gotten"}, {16, "longer?"}
+      ]
+      |> Enum.map(fn {index, phrase} ->
+        %{index: index, phrase: phrase, n: 1}
+      end)
+
+    si = %{
+      sentence: "What would you look at to say the gathered had grown—and not only gotten longer?",
+      tokens: tokens,
+      active_cells: [
+        %{norm: "the", pos: "determiner"},
+        %{norm: "gathered", pos: "adjective"},
+        %{norm: "had", pos: "auxiliary"},
+        %{norm: "grown", pos: "verb",
+          semantic_atoms: ["tag:form-of", "tag:past", "tag:participle"]}
+      ]
+    }
+
+    signatures = Signatures.detect(si)
+    assert Enum.any?(signatures, fn signature ->
+      signature.id == :nominalized_adjective_subject_candidate and
+        signature.span == {7, 8}
+    end)
+    assert Enum.any?(signatures, fn signature ->
+      signature.id == :perfect_predicate and signature.span == {9, 10}
+    end)
+
+    choices = [
+      %{token_index: 7, id: "the|determiner|1"},
+      %{token_index: 8, id: "gathered|adjective|1"},
+      %{token_index: 9, id: "had|auxiliary|1"},
+      %{token_index: 10, id: "grow|verb|1"}
+    ]
+
+    slate = ATL.reduce(choices, tokens, signatures)
+    assert Enum.any?(slate.constituents, fn c ->
+      c.id == :nominalized_adjective_subject_candidate and
+        c.span == {7, 8} and c.status == :resolved
+    end)
+
+    assert [evidence] = EmbeddedClauseEvidence.candidates(
+      Map.merge(si, %{atl_slate: slate, sentence_signatures: signatures}), meaning()
+    )
+    assert evidence.subject == :unresolved
+    assert evidence.subject_candidate.surface == "the gathered"
+    assert evidence.subject_candidate.head.selected_pos == :adjective
+    assert evidence.subject_candidate.attachment_status == :unverified
+    assert evidence.embedded_clause_status == :not_interpreted
+    assert evidence.assertion_status == :not_asserted
   end
 
   test "no candidate is inferred outside the attested complement" do
