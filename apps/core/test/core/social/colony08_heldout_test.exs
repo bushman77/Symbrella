@@ -2,7 +2,7 @@ defmodule Core.Social.Colony08HeldoutTest do
   use ExUnit.Case, async: true
 
   @path Path.expand("../../../../../priv/colony08_heldout_cases.json", __DIR__)
-  @payload @path |> File.read!() |> Jason.decode!()
+  @payload Jason.decode!(File.read!(@path))
   @cases Map.fetch!(@payload, "cases")
 
   @colony07 [
@@ -66,6 +66,7 @@ defmodule Core.Social.Colony08HeldoutTest do
       |> Enum.group_by(& &1["pair"])
 
     assert map_size(pairs) == 5
+    assert Enum.all?(pairs, fn {_pair, cases} -> length(cases) == 2 end)
 
     for {_pair, [first, second]} <- pairs do
       a = first["expected"]
