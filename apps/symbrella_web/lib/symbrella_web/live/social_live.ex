@@ -336,6 +336,25 @@ defmodule SymbrellaWeb.SocialLive do
                             <p>Attachment: {candidate.subject_candidate.attachment_status} ·
                               reference: {candidate.subject_candidate.coreference_status}</p>
                           </div>
+                          <div :if={is_map(Map.get(candidate, :relation_candidate))}
+                            class="space-y-1 rounded border border-cyan-400/20 bg-zinc-950/40 p-2">
+                            <p class="font-semibold text-cyan-200">
+                              Question-scoped structural relation candidate
+                            </p>
+                            <p class="break-words">
+                              {candidate.relation_candidate.surface}
+                            </p>
+                            <p>Subject: {candidate.relation_candidate.subject.surface} ·
+                              referent: {candidate.relation_candidate.subject.identity}</p>
+                            <p>Predicate: {candidate.relation_candidate.predicate.surface} ·
+                              lexical selection: {candidate.relation_candidate.predicate.selected_sense_id}</p>
+                            <p>Attachment: {candidate.relation_candidate.attachment_status} ·
+                              {candidate.relation_candidate.assertion_status} ·
+                              remaining topic: {candidate.relation_candidate.remainder_status}</p>
+                            <p class="text-amber-200">
+                              This is a grammatical hypothesis inside a question, not an event or verified fact.
+                            </p>
+                          </div>
                           <p :if={is_nil(Map.get(candidate, :subject_candidate))}
                             class="text-zinc-400">
                             No independently resolved adjacent nominal candidate.
