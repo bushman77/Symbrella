@@ -312,6 +312,19 @@ defmodule SymbrellaWeb.SocialLive do
                           and relationships have not been established.
                         </p>
                       </div>
+                      <div :if={Map.get(item, :embedded_candidates, []) != []}
+                        class="space-y-2 rounded border border-white/10 p-3 text-xs">
+                        <p class="font-semibold text-cyan-200">Embedded grammatical evidence (not interpreted)</p>
+                        <div :for={candidate <- item.embedded_candidates}
+                          class="space-y-1 text-zinc-300">
+                          <p>{candidate.construction} · {candidate.status}</p>
+                          <p>Auxiliary: {candidate.auxiliary.surface} ·
+                            predicate: {candidate.predicate.surface}</p>
+                          <p>Subject: unresolved · {candidate.embedded_clause_status} ·
+                            {candidate.assertion_status}</p>
+                          <p>Evidence: {Enum.join(Enum.map(candidate.grammatical_evidence, &to_string/1), ", ")}</p>
+                        </div>
+                      </div>
                       <p :if={item.unresolved_roles != []} class="text-xs text-amber-200">
                         Unresolved role grounding: {Enum.join(Enum.map(item.unresolved_roles, &to_string/1), ", ")}
                       </p>
