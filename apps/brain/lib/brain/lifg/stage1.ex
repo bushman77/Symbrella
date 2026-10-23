@@ -878,6 +878,16 @@ defmodule Brain.LIFG.Stage1 do
             tok_index
           )
 
+        # A bounded, dictionary-attested D-N-V-D-N clause can resolve
+        # competing noun/verb POS for regular past predicates such as
+        # "verified"; this never creates a sense or overrides after selection.
+        cal_scores =
+          GrammarEvidence.apply_bounded_past_transitive(
+            cal_scores,
+            ctx.grammar_context,
+            tok_index
+          )
+
         # A mixed-POS slate is not automatically a closed-class *winner*.
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.
