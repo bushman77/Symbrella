@@ -122,6 +122,53 @@ defmodule Core.Syntax.SignaturesTest do
     assert :finite_past_candidate in ids("They got to the station.")
   end
 
+  test "adjective nominalization before a perfect predicate is observation only" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "gathered", pos: "adjective"},
+      %{norm: "had", pos: "auxiliary"},
+      %{norm: "grown", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:past", "tag:participle"]}
+    ]
+
+    signatures = Signatures.detect(input("The gathered had grown.", cells))
+
+    assert [%{
+      id: :nominalized_adjective_subject_candidate,
+      span: {0, 1},
+      roles: %{determiner: 0, adjective: 1},
+      required_features: %{
+        determiner: [:pos_determiner], adjective: [:pos_adjective]
+      }
+    }] =
+      Enum.filter(signatures, &(&1.id == :nominalized_adjective_subject_candidate))
+
+    refute Enum.any?(signatures, fn sig ->
+      sig.id == :noun_phrase and sig.span == {0, 1}
+    end)
+
+    for sentence <- [
+      "The gathered had grown. Another sentence.",
+      "The gathered walked.",
+      "The gathered had quickly grown.",
+      "The gathered had."
+    ] do
+      # The first sentence in a longer input remains a possible constituent,
+      # but any other phrase must independently satisfy the local four-token pattern.
+      if sentence != "The gathered had grown. Another sentence." do
+        refute :nominalized_adjective_subject_candidate in ids(sentence, cells)
+      end
+    end
+
+    refute :nominalized_adjective_subject_candidate in
+      ids("The gathered had grown.",
+        Enum.reject(cells, &(&1.norm == "gathered" and &1.pos == "adjective")))
+
+    refute :nominalized_adjective_subject_candidate in
+      ids("The gathered had grown.",
+        Enum.reject(cells, &(&1.norm == "grown")))
+  end
+
   test "have plus past participle supports a perfect construction" do
     assert :perfect_predicate in ids("I have got very cold.")
     assert :perfect_predicate in ids("They had got very cold.")
