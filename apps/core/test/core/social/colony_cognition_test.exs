@@ -219,6 +219,32 @@ defmodule Core.Social.ColonyCognitionTest do
              )
   end
 
+  test "unsupported modal support cannot enter Colony through the legacy keyword fallback" do
+    title = "Three links might support the claims."
+
+    semantic =
+      brain_result()
+      |> Map.put(:reported_proposition, %{
+        status: :not_interpreted,
+        reason: :modal_uncertainty,
+        verification: :external_unverified
+      })
+
+    assert {:error, :unresolved_colony_evidence_relation} =
+             ColonyCognition.interpret(post(title), semantic)
+
+    # This legacy ratio form remains an attributed, unverified lexical
+    # observation, never a synthesized grammar conclusion or verified fact.
+    assert {:ok, frame} =
+             ColonyCognition.interpret(
+               post("3 of the checker's 13 links support the claims"),
+               brain_result()
+             )
+
+    assert frame.report_status == :author_claim_not_independently_verified
+    assert frame.evidence_relation == :reported_support
+  end
+
   test "production shadow refuses fallback winners without retrieved dictionary POS" do
     discussion = post("10 of 13 checker links refute claims")
 
