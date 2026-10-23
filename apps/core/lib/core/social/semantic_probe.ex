@@ -141,6 +141,9 @@ defmodule Core.Social.SemanticProbe do
        sentence_meaning: %{
          status: Map.get(meaning, :status, :not_yet_interpreted),
          kind: Map.get(meaning, :kind, :unknown),
+         speech_act: Map.get(meaning, :speech_act),
+         definition: Map.get(meaning, :definition),
+         source_frame: Map.get(meaning, :source_frame),
          provenance: :external_unverified
        },
        reported_proposition: reported_proposition,
