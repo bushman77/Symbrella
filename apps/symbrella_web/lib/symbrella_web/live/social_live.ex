@@ -284,6 +284,31 @@ defmodule SymbrellaWeb.SocialLive do
                          class="break-words text-sm text-zinc-300">• {gap}</p>
                     </div>
                   </section>
+                  <section :if={Map.has_key?(@cognitive_report, :discourse)}
+                    id="social-discourse" class="space-y-3 rounded-lg border border-white/10 bg-zinc-900/60 p-4 sm:p-5">
+                    <h3 class="font-semibold text-cyan-200">COLONY-12 · Discourse evidence</h3>
+                    <p class="text-sm text-zinc-400">
+                      {@cognitive_report.discourse.status} ·
+                      {length(@cognitive_report.discourse.interpretations)} supported sentence interpretations ·
+                      {length(@cognitive_report.discourse.lexical_links)} unverified lexical links
+                    </p>
+                    <div :for={item <- @cognitive_report.discourse.interpretations}
+                      class="space-y-1 rounded border border-white/10 p-3 text-sm">
+                      <p class="font-semibold">{item.source_label} · {item.speaker} · {item.speech_act}</p>
+                      <p class="whitespace-pre-wrap break-words text-zinc-300">{item.interpretation}</p>
+                      <p class="text-xs text-amber-200">External, unverified · only this sentence is interpreted</p>
+                    </div>
+                    <p :if={@cognitive_report.discourse.interpretations == []} class="text-sm text-zinc-400">
+                      No sentence has sufficient compositional evidence yet.
+                    </p>
+                    <div :for={link <- @cognitive_report.discourse.lexical_links}
+                      class="text-sm text-zinc-300">
+                      Sentence {link.from + 1} ↔ {link.to + 1} · shared terms:
+                      {Enum.join(link.shared_terms, ", ")} · lexical overlap only, not verified coreference
+                    </div>
+                    <p :for={gap <- @cognitive_report.discourse.unresolved}
+                      class="text-sm text-zinc-400">{gap}</p>
+                  </section>
                   <article :for={{segment, index} <- Enum.with_index(@cognitive_report.segments)}
                     id={"social-analysis-segment-#{index}"}
                     class="min-w-0 space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
