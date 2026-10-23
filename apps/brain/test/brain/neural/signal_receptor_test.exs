@@ -33,7 +33,8 @@ defmodule Brain.Neural.SignalReceptorTest do
   test "receives real model-format neural telemetry as bounded non-authoritative observations" do
     before_count = SignalReceptor.status().predictions
 
-    :telemetry.execute(@prediction, %{count: 1, observed_features: 2}, meta())
+    :telemetry.execute(@prediction, %{count: 1, observed_features: 2},
+      Map.put(meta(), :assistant_text, "must never retain secret conversation"))
 
     status = SignalReceptor.status()
     assert status.predictions == before_count + 1
@@ -52,6 +53,7 @@ defmodule Brain.Neural.SignalReceptorTest do
     assert received.verification == :model_prediction_not_verified
     refute Map.has_key?(received, :user_text)
     refute Map.has_key?(received, :assistant_text)
+    refute inspect(SignalReceptor.latest()) =~ "must never retain secret conversation"
     assert length(SignalReceptor.history(3)) <= 3
   end
 
