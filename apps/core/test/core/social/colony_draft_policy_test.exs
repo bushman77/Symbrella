@@ -217,6 +217,40 @@ defmodule Core.Social.ColonyDraftPolicyTest do
              )
   end
 
+  test "counted negative support cannot be published as affirmative support" do
+    source = "Three links did not support the claims."
+    context = %{
+      source: :colony_external,
+      reporter: "exori",
+      evidence_relation: :reported_support,
+      reported_polarity: :negative,
+      reported_link_count: 3,
+      report_status: :author_claim_not_independently_verified,
+      reported_proposition: %{
+        construction: :counted_negated_transitive,
+        polarity: :negative,
+        predicate: "support", subject: "links", reported_count: 3
+      }
+    }
+
+    assert {:error, :colony_negation_violation} =
+             ColonyDraftPolicy.review(
+               "Three links supported the claims. What was the evidence threshold?",
+               source, context)
+
+    assert {:ok, _draft} =
+             ColonyDraftPolicy.review(
+               "You reported that three links did not support the claims. " <>
+                 "What was the threshold for supporting evidence?",
+               source, context)
+
+    assert {:ok, _draft} =
+             ColonyDraftPolicy.review(
+               "You reported three links without support for the claims. " <>
+                 "Did those links point to contradiction or merely irrelevant passages?",
+               source, context)
+  end
+
   test "internal brain labels cannot leak into a public Colony reply" do
     for leaked <- [
       "The external proposition reports that checker links refuted the claims.",
