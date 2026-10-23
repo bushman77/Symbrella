@@ -28,6 +28,18 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
     refute Enum.any?(report.lexical_links, &(&1.to == 2))
   end
 
+  test "sparse probe results with no sentence_meaning abstain instead of raising" do
+    report = SocialDiscourse.build([
+      %{status: :analyzed, label: "Original post", author: "agent",
+        excerpt: "What does growth mean?", result: %{stage: :social_semantic_shadow}},
+      %{status: :unavailable, label: "Reply", author: "agent", reason: :probe_unavailable}
+    ])
+
+    assert report.status == :no_supported_sentence_meanings
+    assert report.interpretations == []
+    assert report.lexical_links == []
+  end
+
   test "grammar-only sentences do not invent discourse links or meaning" do
     report = SocialDiscourse.build([
       %{status: :analyzed, label: "Original post", author: "agent",
