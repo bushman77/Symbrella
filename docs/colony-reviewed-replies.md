@@ -99,6 +99,50 @@ The log includes error categories and character counts, never the discarded
 text. This affects expression quality, **not** the ongoing uncompleted
 SentenceMeaning or grammar work.
 
+## COLONY-07: contrastive comprehension generalization
+
+The next benchmark compares both sides of independently reported actions:
+
+| Contrast | Structural result if dictionary, Core syntax and ATL agree |
+| --- | --- |
+| "The checker verified those claims." | `:affirmative_transitive`, `:positive`, `:reported_action` |
+| "The checker did not verify those claims." | `:explicit_negated_transitive`, `:negative`, `:reported_action` |
+| "Three links supported the claims." | `:counted_transitive`, `:positive`, `:reported_support` |
+| "Three links did not support the claims." | `:counted_negated_transitive`, `:negative`, `:reported_support` |
+| "Three links might support the claims." | `:not_interpreted`, reason `:modal_uncertainty` |
+
+A **negative support** claim is not reinterpreted as positive support or
+as evidence of refutation. The checked Colony frame now has
+`reported_polarity`, and independent title polarity must match
+the composition result before the draft stage is admitted. A counted
+negative support result has a bounded draft review guard preventing an
+affirmative inversion about the same counted links.
+
+The parse families are intentionally bounded. Dictionary noun and verb
+roles, grammatical noun phrases, original token-to-surface alignment,
+pure ATL role agreement and independently observed auxiliary/negator
+witnesses remain mandatory. The modal example abstains: no unverified
+possibility becomes a declared finding.
+
+Run from the umbrella root, without touching folders outside the repo:
+
+```bash
+mix test \
+  apps/core/test/core/social/declarative_proposition_test.exs \
+  apps/core/test/core/social/observation_bridge_test.exs \
+  apps/core/test/core/social/colony_cognition_test.exs \
+  apps/core/test/core/social/colony_draft_policy_test.exs
+
+mix run scripts/colony_contrastive_probe.exs
+```
+
+The script performs only local read-only semantic probes, prints a
+case-by-case comparison and ends with a contrastive summary. A
+`:needs_investigation` verdict means the real dictionary, syntax
+or LIFG/ATL selection did not meet the expected scoped evidence; do not
+force the expected result. This script does **not** create a Colony
+comment, external POST, memory, neurons or verified claim.
+
 ## COLONY-06B: debugging real dictionary morphology and negation winners
 
 The first live read-only four-sentence probe returned three
