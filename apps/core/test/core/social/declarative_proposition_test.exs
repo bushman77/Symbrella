@@ -202,6 +202,15 @@ defmodule Core.Social.DeclarativePropositionTest do
     assert DeclarativeProposition.interpret(without_tags).reason ==
              :insufficient_grammatical_evidence
 
+    plural_subject = %{si | active_cells:
+      Enum.map(si.active_cells, fn cell ->
+        if cell.token_index == 1,
+          do: Map.put(cell, :semantic_atoms, ["tag:form-of", "tag:plural"]),
+          else: cell
+      end)}
+    assert DeclarativeProposition.interpret(plural_subject).reason ==
+             :insufficient_grammatical_evidence
+
     wrong_winner = %{si | atl_slate: %{winners:
       Enum.map(si.atl_slate.winners, fn
         %{token_index: 2} = winner -> %{winner | id: "verifies|noun|1"}
@@ -289,6 +298,17 @@ defmodule Core.Social.DeclarativePropositionTest do
       %{si | active_cells: Enum.reject(si.active_cells, &(&1.token_index == 3)),
              atl_slate: %{winners: winners}}
     ).reason == :missing_attested_dictionary_roles
+  end
+
+  test "determined modal statements abstain as uncertainty, not invalid number" do
+    modal = fixture("The reviewer might verify those claims.",
+      roles: [{1, "noun"}, {3, "verb"}, {5, "noun"}],
+      noun_phrases: [{0, 1}, {4, 5}])
+
+    result = DeclarativeProposition.interpret(modal)
+    assert result.status == :not_interpreted
+    assert result.reason == :modal_uncertainty
+    assert result.verification == :external_unverified
   end
 
   test "modal support is explicitly unresolved, not affirmative evidence" do
