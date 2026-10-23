@@ -89,7 +89,8 @@ defmodule Core.Semantic.EmbeddedClauseEvidence do
       when is_integer(first) and is_integer(last) and
            first >= topic_start and last == auxiliary_index - 1 and
            head == last and is_binary(id) ->
-        String.contains?(id, "|noun|") or String.contains?(id, "|proper_noun|")
+        not String.ends_with?(id, "|fallback") and
+          (String.contains?(id, "|noun|") or String.contains?(id, "|proper_noun|"))
 
       _ -> false
     end)
