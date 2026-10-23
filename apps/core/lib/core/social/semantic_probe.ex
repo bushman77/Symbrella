@@ -155,6 +155,8 @@ defmodule Core.Social.SemanticProbe do
          speech_act: Map.get(meaning, :speech_act),
          definition: Map.get(meaning, :definition),
          source_frame: Map.get(meaning, :source_frame),
+         role_surfaces: bounded_role_surfaces(meaning),
+         unresolved_roles: meaning |> Map.get(:unresolved, []) |> List.wrap() |> Enum.take(8),
          provenance: :external_unverified
        },
        reported_proposition: reported_proposition,
@@ -368,4 +370,24 @@ defmodule Core.Social.SemanticProbe do
   defp conflict_shadow(_) do
     %{status: :unavailable, uncertain?: true, note: :lexical_evaluation_missing}
   end
+  # A semantic role is shown only if SentenceMeaning explicitly produced it.
+  # These are attributed grammatical surfaces, not verified entity identities.
+  @bounded_role_keys [:question_word, :subject, :actor, :predicate, :object,
+    :patient, :topic, :preposition, :position, :location]
+
+  defp bounded_role_surfaces(%{status: status, roles: roles})
+       when status in [:structurally_interpreted, :interpreted, :understood, :resolved]
+       and is_map(roles) do
+    Enum.reduce(@bounded_role_keys, %{}, fn key, acc ->
+      case Map.get(roles, key) do
+        %{surface: surface} when is_binary(surface) ->
+          Map.put(acc, key, String.slice(surface, 0, 160))
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp bounded_role_surfaces(_), do: %{}
+
 end
