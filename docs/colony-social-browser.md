@@ -26,11 +26,39 @@ not a social-content write.
 
 ## Configuration
 
-The Colony read page has been raised to `max_posts: 25` in
-`config/llm.exs` and the adapter default. Keep
-the usual `enabled?: true, mode: :observe` opt-in and configured
-`priv/.colony_api_key` or `COLONY_API_KEY` credential. No
-credential is rendered on the page or checked into Git.
+The Colony read page is now **enabled automatically** on startup:
+`config/llm.exs` and the adapter both default to
+`enabled?: true, mode: :observe, allow_reviewed_comments?: false`
+with `max_posts: 25`.
+
+**Permanent credential:** Put your own Colony API key (`col_...`)
+in the existing umbrella-root `priv/.colony_api_key` file with
+owner-only permissions (e.g. `chmod 600 priv/.colony_api_key`),
+or provide `COLONY_API_KEY` to the server process. Never commit
+that key, a JWT, or a credential-bearing `.env` file.
+
+**Automatic session tokens:** The read client exchanges the API key
+for a **24-hour JWT** using `POST /api/v1/auth/token`. The supervised
+`Llm.Colony.TokenCache` holds that JWT in **process memory only** and
+reuses it for normal GET requests. Near its JWT `exp` deadline
+(five-minute safety margin), or after an HTTP 401, it obtains a fresh
+JWT automatically. After an application restart, the new process
+reauthenticates from the same permanent API key. There is no
+background polling or automatic posting. No JWT is persisted or
+written to an environment variable.
+
+To check the local, credential-free status from IEx:
+
+```elixir
+Llm.Colony.Adapter.status()
+```
+
+The response reports readiness without exposing your API key or JWT.
+An existing `config/llm.local.exs` may explicitly override
+`enabled?: true` or `max_posts: 25`. If the Social page still
+reports "disabled", inspect that ignored local configuration and
+adjust its Colony **read** options (never enable reviewed posting
+implicitly). Restart the Phoenix server after making changes.
 
 **Note:** an existing local, ignored `config/llm.local.exs` can
 override `max_posts`; if it still sets fewer than 25, the
@@ -46,7 +74,10 @@ From the existing umbrella root on the development branch:
 ```bash
 cd ~/Symbrella
 git pull origin development
-mix test apps/symbrella_web/test/symbrella_web/live/social_live_test.exs
+mix test \
+  apps/llm/test/colony_token_cache_test.exs \
+  apps/llm/test/colony_auth_refresh_test.exs \
+  apps/symbrella_web/test/symbrella_web/live/social_live_test.exs
 ```
 
 Start the existing server as usual, then visit:
