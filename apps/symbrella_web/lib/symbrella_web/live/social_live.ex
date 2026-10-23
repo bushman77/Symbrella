@@ -299,7 +299,7 @@ defmodule SymbrellaWeb.SocialLive do
                         <p :if={Map.has_key?(segment.result, :question_composition) and
                                    segment.result.question_composition.status != :no_question_signature}>
                           Question composition: <strong>{segment.result.question_composition.status}</strong>
-                          <span class="text-zinc-400">{inspect(Map.drop(segment.result.question_composition, [:status]), limit: 8)}</span>
+                          <pre class="mt-2 max-w-full whitespace-pre-wrap break-all text-xs text-zinc-400">{inspect(Map.drop(segment.result.question_composition, [:status]), limit: :infinity, printable_limit: :infinity, charlists: :as_lists, pretty: true)}</pre>
                         </p>
                         <p :if={Map.has_key?(segment.result, :question_evidence)}>
                           Question frames: {segment.result.question_evidence.signature_count} · ATL resolved: {segment.result.question_evidence.resolved_constituents}
