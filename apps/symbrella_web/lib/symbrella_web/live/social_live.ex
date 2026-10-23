@@ -361,6 +361,32 @@ defmodule SymbrellaWeb.SocialLive do
                               This is a grammatical hypothesis inside a question, not an event or verified fact.
                             </p>
                           </div>
+                          <p :if={is_map(Map.get(candidate, :qualification_diagnostic))}
+                            class="text-amber-100">
+                            Trailing qualification evidence:
+                            {candidate.qualification_diagnostic.status} ·
+                            qualifier verb:
+                            {candidate.qualification_diagnostic.selected_qualifier_verb_id || "none"} ·
+                            degree term:
+                            {candidate.qualification_diagnostic.selected_degree_id || "none"}
+                          </p>
+                          <div :if={is_map(Map.get(candidate, :qualification_candidate))}
+                            class="space-y-1 rounded border border-cyan-400/20 bg-zinc-950/40 p-2">
+                            <p class="font-semibold text-cyan-200">
+                              Question-scoped “not only” qualification candidate
+                            </p>
+                            <p class="break-words">{candidate.qualification_candidate.surface}</p>
+                            <p>Focus marker: {candidate.qualification_candidate.focus_marker} ·
+                              punctuation: {candidate.qualification_candidate.punctuation_bridge}</p>
+                            <p>Qualifier: {candidate.qualification_candidate.qualifier_predicate.selected_sense_id} ·
+                              degree term: {candidate.qualification_candidate.degree_term.selected_sense_id}</p>
+                            <p>Comparison: {candidate.qualification_candidate.semantic_comparison_status} ·
+                              {candidate.qualification_candidate.assertion_status}</p>
+                            <p class="text-amber-200">
+                              “Not only” is not a denial that the qualifier happened.
+                              Coordination, comparison and shared-subject attachment remain unverified.
+                            </p>
+                          </div>
                           <p :if={is_nil(Map.get(candidate, :subject_candidate))}
                             class="text-zinc-400">
                             No independently resolved adjacent nominal candidate.
