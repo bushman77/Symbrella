@@ -275,10 +275,7 @@ defmodule SymbrellaWeb.SocialLive do
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Sentence signatures</h4>
                         <p class="break-words text-sm text-zinc-300">
-                          {segment.result.syntax.signatures |> Enum.map(&to_string(&1.id)) |> Enum.join(", ") |> case do
-                            "" -> "None detected"
-                            ids -> ids
-                          end}
+                          {signature_labels(segment.result.syntax.signatures)}
                         </p>
                       </div>
                       <div>
@@ -338,6 +335,13 @@ defmodule SymbrellaWeb.SocialLive do
     end
   rescue
     _ -> assign(socket, topic: nil, comments: [], loading?: false, error: "Unable to load Colony conversation.")
+  end
+
+  defp signature_labels(signatures) do
+    case signatures |> Enum.map(&to_string(&1.id)) |> Enum.join(", ") do
+      "" -> "None detected"
+      labels -> labels
+    end
   end
 
   defp parse_page(page) when is_binary(page) do
