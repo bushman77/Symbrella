@@ -481,7 +481,8 @@ defmodule SymbrellaWeb.SocialLive do
                           {signature_labels(segment.result.syntax.signatures)}
                         </p>
                       </div>
-                      <div :if={is_map(Map.get(segment.result, :declarative_evidence))}
+                      <div :if={is_map(Map.get(segment.result, :declarative_evidence)) and
+                                  Map.get(segment.result.declarative_evidence, :examined_frames, 0) > 0}
                         class="space-y-2 rounded border border-white/10 p-3">
                         <h4 class="text-sm font-semibold">COLONY-13 · Local declarative clause evidence</h4>
                         <p class="text-xs text-zinc-400">
