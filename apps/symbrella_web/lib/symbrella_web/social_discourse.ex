@@ -5,7 +5,9 @@ defmodule SymbrellaWeb.SocialDiscourse do
   """
   @stopwords ~w(the a an and or of to in on is are was were at for with from by
     it its that this those these i you we they he she my your their had has have
-    do does did not only what how who when where about say look)
+    do does did not only what how who when where about say look
+    would could should might may can cannot will shall must ought
+    been being am us them our ours their theirs yours herself himself themselves)
   @max_links 12
   @max_terms 8
 
@@ -24,6 +26,8 @@ defmodule SymbrellaWeb.SocialDiscourse do
             speech_act: Map.get(meaning, :speech_act),
             kind: Map.get(meaning, :kind),
             interpretation: Map.get(meaning, :definition),
+            roles: Map.get(meaning, :role_surfaces, %{}),
+            unresolved_roles: Map.get(meaning, :unresolved_roles, []),
             verification: :external_unverified
           }]
         else
