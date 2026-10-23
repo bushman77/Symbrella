@@ -142,6 +142,71 @@ COLONY-08 targets. When additional capability is added, rerun this
 same corpus as a now-known regression evaluation and use a new untouched
 corpus for an independent generalization estimate.
 
+## COLONY-09: dictionary-attested finite-present declarative expansion
+
+The confirmed COLONY-08 baseline was **18/18 transfer**, **12/12
+safe abstentions**, **0/7 grammar-frontier coverage**, and **5/5
+polarity pairs**, with corpus fingerprint
+`742cc9fa41cfe6dfb3902374e445b6a84c7e7e0cd5cdf1a29acf245c60bf1284`.
+It remains **frozen**, rather than becoming training or edited ground truth.
+
+COLONY-09 introduces two separate present-tense reported clause families:
+
+- **Singular, third-person present**:
+  `The reviewer verifies the report.` Requires a complete
+  `:finite_present_svo_candidate` signature, independent verb POS with
+  all five attested finite-present morphological tags, no known
+  plural-marked subject, matching noun-phrase witnesses, and exact
+  LIFG-to-ATL lexical role agreement. Accepted result:
+  `:finite_present_transitive`, `:reported_action`, `:positive`.
+- **Counted plural present**:
+  `Four reports support the claims.` Requires a bounded count greater
+  than one, an independently attested plural **noun** (not just a
+  surface ending in `s`), an attested **base-form verb** without
+  `form-of` / past / participle tags, a complete `noun_phrase`
+  object, and a new
+  `:counted_finite_present_svo_candidate` Core signature.
+  The resulting bounded RoleCompetition evidence is shared with
+  Stage1 GrammarEvidence and SenseFocus. Accepted result:
+  `:counted_present_transitive`, `:reported_support`, `:positive`.
+
+Both forms also recognize the existing bounded evidence predicates
+(support, verify, refute, contradict), using their attested third-person
+or base forms. Neither form derives truth from the statement itself,
+invents a dictionary sense, admits unverifiable grammar, bypasses
+ATL lexical agreement, or publishes a Colony comment. ColonyCognition
+only accepts the interpreted, provenance-bound constructions.
+
+The separate regression suite includes missing morphology, wrong
+selected sense, bad number agreement, missing noun-phrase witnesses,
+wrong syntactic surface, and uncertainty markers. The determined
+subject modal diagnostic `The reviewer might verify those claims.`
+now abstains specifically as `:modal_uncertainty` rather than as an
+invalid number.
+
+To verify from the existing umbrella root (never run `mix format`):
+
+```bash
+cd ~/Symbrella
+git pull origin development
+mix test \
+  apps/core/test/core/syntax/signatures_test.exs \
+  apps/core/test/core/syntax/predicate_evidence_test.exs \
+  apps/core/test/core/social/declarative_proposition_test.exs \
+  apps/core/test/core/social/observation_bridge_test.exs \
+  apps/core/test/core/social/colony_cognition_test.exs
+mix run scripts/colony_generalization_probe.exs
+```
+
+The second command compares behavior against the **now-known**
+COLONY-08 corpus. Any improved frontier score is a regression and
+coverage measurement, **not** another independent held-out score.
+If either present-tense case abstains because the real Wiktextract
+dictionary lacks the relevant morphological witness, inspect the
+`grammar_audit` and selected POS; do not synthesize an answer.
+A later unseen COLONY-10 benchmark will be needed to assess wider
+generalization independently.
+
 ## COLONY-08: frozen held-out generalization benchmark (baseline first)
 
 COLONY-07 finished **8/8** on its deliberately narrow known-sentence
