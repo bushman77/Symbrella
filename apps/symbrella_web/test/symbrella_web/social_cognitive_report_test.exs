@@ -22,6 +22,8 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     assert report.trust == :untrusted_external
     assert report.analyzed_segments == 13
     assert report.omitted_replies == 0
+    assert report.discourse.status == :no_supported_sentence_meanings
+    assert report.discourse.interpretations == []
     assert Enum.all?(report.segments, &(&1.status == :analyzed))
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
   end
