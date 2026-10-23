@@ -277,8 +277,9 @@ defmodule Core.Social.ColonyCognition do
             {nil, nil}
         end
 
-      {:ok, %{relation: relation, count: count, total: total,
-                      polarity: Map.get(semantic.reported_proposition, :polarity)}}
+      # This lexical fallback has no SemanticProbe input; preserve only
+      # the bounded counts and relation it extracted from the title.
+      {:ok, %{relation: relation, count: count, total: total}}
     end
   end
 
