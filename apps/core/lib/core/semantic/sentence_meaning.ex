@@ -135,9 +135,25 @@ defmodule Core.Semantic.SentenceMeaning do
               indices: Enum.take(surface_gaps, 16),
               available_indices: indexed |> Map.keys() |> Enum.sort() |> Enum.take(64),
               missing_context: Enum.map(Enum.take(surface_gaps, 16), fn index ->
-                %{index: index,
-                  preceding: Map.get(indexed, index - 1),
-                  following: Map.get(indexed, index + 1)}
+                left = Map.get(indexed, index - 1)
+                right = Map.get(indexed, index + 1)
+
+                between =
+                  if is_binary(left) and is_binary(right) and is_binary(Map.get(si, :sentence)) do
+                    expression = Regex.compile!(
+                      Regex.escape(left) <> "(.{0,80}?)" <> Regex.escape(right), "ius"
+                    )
+
+                    case Regex.run(expression, Map.get(si, :sentence)) do
+                      [_, gap] -> gap
+                      _ -> nil
+                    end
+                  else
+                    nil
+                  end
+
+                %{index: index, preceding: left, following: right,
+                  original_between: between}
               end)}
           true ->
             %{status: :eligible_for_composition, note: :inspect_remaining_guards}
