@@ -301,6 +301,17 @@ defmodule SymbrellaWeb.SocialLive do
                           <span class="font-semibold text-cyan-200">{role}:</span> {surface}
                         </span>
                       </div>
+                      <div :if={is_map(item.topic_structure)}
+                        class="rounded border border-amber-400/20 bg-amber-950/20 p-2 text-xs text-amber-100">
+                        <p>Complement structure: <strong>{item.topic_structure.type}</strong> ·
+                          {item.topic_structure.source}</p>
+                        <p>Embedded clause: {item.topic_structure.embedded_clause_status} ·
+                          {item.topic_structure.assertion_status}</p>
+                        <p :if={item.topic_structure.type == :unparsed_topic}>
+                          The topic is preserved as source wording only; its internal entities
+                          and relationships have not been established.
+                        </p>
+                      </div>
                       <p :if={item.unresolved_roles != []} class="text-xs text-amber-200">
                         Unresolved role grounding: {Enum.join(Enum.map(item.unresolved_roles, &to_string/1), ", ")}
                       </p>
