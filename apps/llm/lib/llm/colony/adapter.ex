@@ -16,7 +16,7 @@ defmodule Llm.Colony.Adapter do
     mode: :observe,
     allow_reviewed_comments?: false,
     api_base: @api_base,
-    max_posts: 10,
+    max_posts: 25,
     timeout_ms: 5_000
   ]
 
