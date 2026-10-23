@@ -92,6 +92,8 @@ defmodule Core.Semantic.SentenceMeaningTest do
     assert meaning.roles.topic.surface == "Japan's railgun development"
     assert meaning.roles.topic.possession.possessor == "Japan"
     assert meaning.roles.topic.possession.grounding_status == :unverified
+    assert meaning.proposition.content.complement.argument.type == :nominal_topic
+    refute :topic_internal_structure in meaning.unresolved
     assert meaning.unresolved == [:topic_possessor_lexical_grounding]
     assert meaning.grounding.exact_lexical_meanings == :not_verified
     assert meaning.grounding.topic_facts == :not_checked
@@ -148,6 +150,9 @@ defmodule Core.Semantic.SentenceMeaningTest do
       |> get_in([:proposition, :content, :complement, :argument])
 
     assert argument.surface == "Japan's railgun development"
+    assert argument.type == :unparsed_topic
+    assert :topic_internal_structure in SentenceMeaning.build(si).unresolved
+    assert SentenceMeaning.build(si).proposition.epistemic_status == :question_not_assertion
     assert argument.head == nil
     assert argument.modifiers == []
     assert argument.source == :surface_only
