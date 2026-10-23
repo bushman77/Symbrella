@@ -331,6 +331,65 @@ defmodule Core.Social.ObservationBridgeTest do
     assert proposition.verification == :author_claim_not_independently_verified
   end
 
+  test "COLONY-09 production Stage1 and ATL compose attested finite-present reports" do
+    lexicon = %{
+      "the" => [{"determiner", []}],
+      "reviewer" => [{"noun", []}],
+      "verifies" => [
+        {"noun", []},
+        {"verb", ["tag:form-of", "tag:indicative", "tag:present",
+                  "tag:singular", "tag:third-person"]}
+      ],
+      "report" => [{"noun", []}],
+      "four" => [{"numeral", []}],
+      "reports" => [{"noun", ["tag:form-of", "tag:plural"]}],
+      "support" => [{"noun", []}, {"verb", []}],
+      "claims" => [{"noun", []}]
+    }
+
+    reader = fn si, _opts ->
+      rows = Enum.flat_map(si.tokens, fn token ->
+        word = String.downcase(token.phrase)
+
+        lexicon
+        |> Map.get(word, [])
+        |> Enum.map(fn {pos, atoms} ->
+          %{id: "#{word}|#{pos}|1", norm: word, word: word, pos: pos,
+            token_index: token.index, semantic_atoms: atoms, activation: 0.5}
+        end)
+      end)
+
+      {:ok, %{rows: rows, db_hits: MapSet.new(Map.keys(lexicon)), missing_norms: []}}
+    end
+
+    cases = [
+      {"The reviewer verifies the report.", :finite_present_transitive,
+       :reported_action, nil, "verifies"},
+      {"Four reports support the claims.", :counted_present_transitive,
+       :reported_support, 4, "support"}
+    ]
+
+    for {sentence, construction, relation, count, verb} <- cases do
+      assert {:ok, semantic} =
+               SemanticProbe.run(sentence,
+                 ltm_reader: reader, emit_telemetry?: false)
+
+      assert semantic.syntax.audit.ltm_status == :ready
+      assert semantic.lifg.status == :scored
+      proposition = semantic.reported_proposition
+      assert proposition.status == :attributed_structural_interpretation
+      assert proposition.construction == construction
+      assert proposition.polarity == :positive
+      assert proposition.relation == relation
+      assert proposition.reported_count == count
+      assert proposition.verification == :author_claim_not_independently_verified
+      assert proposition.trust == :untrusted_external
+      assert Enum.any?(semantic.lifg.choices, fn choice ->
+        String.starts_with?(choice.chosen_id || "", "#{verb}|verb|")
+      end)
+    end
+  end
+
   test "real syntax and pure ATL bind an attributed relative-clause proposition" do
     title =
       "Scored blind against a sealed key: 10 of my checker's 13 links were lines that refute the claim"
