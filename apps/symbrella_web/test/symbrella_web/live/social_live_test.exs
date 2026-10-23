@@ -183,6 +183,10 @@ defmodule SymbrellaWeb.SocialLiveTest do
       html = view |> element("#social-analyze") |> render_click()
       assert html =~ "Cognitive inspection"
       assert has_element?(view, "#social-analysis-segment-0")
+      assert has_element?(view, "#social-copy-analysis[phx-hook='ClipboardCopy']")
+      assert has_element?(view, "#social-report-content.overflow-y-auto")
+      assert has_element?(view, "#social-cognitive-modal[role='dialog']")
+
       assert html =~ "grammar_candidates_detected"
       assert html =~ "read_only_reduced"
 
