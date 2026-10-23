@@ -157,6 +157,7 @@ defmodule Core.Social.SemanticProbe do
          source_frame: Map.get(meaning, :source_frame),
          role_surfaces: bounded_role_surfaces(meaning),
          topic_structure: bounded_topic_structure(meaning),
+         embedded_candidates: Core.Semantic.EmbeddedClauseEvidence.inspect(semantic_si, meaning),
          unresolved_roles: meaning |> Map.get(:unresolved, []) |> List.wrap() |> Enum.take(8),
          provenance: :external_unverified
        },
