@@ -113,25 +113,25 @@ defmodule Core.Social.DeclarativeProposition do
       # The fifth word here is a nominal object, not a counted object:
       # "The checker verified those claims." Do not coerce "those" into a
       # number or silently reuse the counted-object rule.
-      # Modal possibility is distinct from established support. Keep the
-      # interpretation explicitly unresolved until independently attested
-      # scope and modality composition exists.
-      [number, _subject, modal, verb, det, _object]
-      when modal in ~w(might may could) and det in @determiners and
-           verb in ~w(support refute contradict verify) ->
-        case number(number) do
-          {:ok, _} -> {:error, :modal_uncertainty}
-          error -> error
-        end
-
-      # An uncounted subject with may/might/could is possibility, not
-      # an affirmed action. Diagnose explicitly instead of treating "the"
-      # as a malformed numeral in the counted modal pattern above.
+      # A determined subject with a modal is uncertainty. Match this
+      # before the counted modal clause: otherwise "The reviewer might
+      # verify those claims" is incorrectly parsed as a numeral "the".
       [det, _subject, modal, verb, object_det, _object]
       when det in @determiners and object_det in @determiners and
            modal in ~w(might may could) and
            verb in ~w(verify support refute contradict) ->
         {:error, :modal_uncertainty}
+
+      # Modal possibility is distinct from established support. Keep the
+      # interpretation unresolved until scope and modality composition
+      # have independent witnesses. The first word is validated as a count.
+      [count_surface, _subject, modal, verb, det, _object]
+      when modal in ~w(might may could) and det in @determiners and
+           verb in ~w(support refute contradict verify) ->
+        case number(count_surface) do
+          {:ok, _} -> {:error, :modal_uncertainty}
+          error -> error
+        end
 
       [det, subject, verb, object_det, object]
       when det in @determiners and object_det in @determiners ->
