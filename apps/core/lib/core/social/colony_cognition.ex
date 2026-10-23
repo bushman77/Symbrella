@@ -143,7 +143,11 @@ defmodule Core.Social.ColonyCognition do
         # Preserve the original counted-link reporter only. For every other
         # surface, regex keyword detection cannot substitute for a full
         # grammar + dictionary + ATL interpretation (notably modals).
-        if Regex.match?(@ratio, title),
+        legacy_counted? = Regex.match?(@ratio, title)
+        uncertain_or_negated? =
+          Regex.match?(~r/\b(?:may|might|could|would|should|not|never)\b/iu, title)
+
+        if legacy_counted? and not uncertain_or_negated?,
           do: claim_from_title(title),
           else: {:error, :unresolved_colony_evidence_relation}
     end
