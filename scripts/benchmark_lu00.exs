@@ -256,6 +256,9 @@ defmodule Symbrella.LU00Benchmark do
         Map.get(c["expected"], "sense_ambiguous") == true ->
           "ambiguity_requires_review"
 
+        c["category"] == "mwe" ->
+          "not_evaluated_mwe_slate_hidden"
+
         lexical["result"] == "pos_mismatch" ->
           "pos_selection_mismatch"
 
@@ -356,7 +359,7 @@ defmodule Symbrella.LU00Benchmark do
       else
         observed =
           Enum.into(Map.keys(expected), %{}, fn key ->
-            {key, as_text(Map.get(proposition, String.to_existing_atom(key)))}
+            {key, as_text(observed_field(proposition, key))}
           end)
 
         mismatches =
@@ -375,6 +378,15 @@ defmodule Symbrella.LU00Benchmark do
       end
     end
   end
+
+  defp observed_field(proposition, "subject"), do: Map.get(proposition, :subject)
+  defp observed_field(proposition, "predicate"), do: Map.get(proposition, :predicate)
+  defp observed_field(proposition, "object"), do: Map.get(proposition, :object)
+  defp observed_field(proposition, "polarity"), do: Map.get(proposition, :polarity)
+  defp observed_field(proposition, "relation"), do: Map.get(proposition, :relation)
+  defp observed_field(proposition, "count"), do: Map.get(proposition, :reported_count)
+
+  defp normalize(nil), do: ""
 
   defp normalize(value) when is_binary(value) do
     value
