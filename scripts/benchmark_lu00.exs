@@ -253,11 +253,20 @@ defmodule Symbrella.LU00Benchmark do
         dictionary in [:lookup_failed, :disabled] or lifg != :scored ->
           "infrastructure_failure"
 
+        dictionary == :no_matches ->
+          "lexical_inventory_gap"
+
         Map.get(c["expected"], "sense_ambiguous") == true ->
           "ambiguity_requires_review"
 
         c["category"] == "mwe" ->
           "not_evaluated_mwe_slate_hidden"
+
+        lexical["result"] == "target_unresolved" ->
+          "lexical_target_missing"
+
+        lexical["result"] == "no_choice" ->
+          "lexical_no_winner"
 
         lexical["result"] == "pos_mismatch" ->
           "pos_selection_mismatch"
