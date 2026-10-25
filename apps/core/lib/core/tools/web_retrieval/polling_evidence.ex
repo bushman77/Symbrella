@@ -53,22 +53,25 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
     cond do
       sources == [] ->
         "I couldn't find relevant dated polling reporting for that public figure in " <>
-          "this lookup. I can't establish a trend or its causes without sourced, " <>
-          "comparable survey data."
+          "this lookup. Headlines alone cannot establish a comparable trend " <>
+          "or its causes without sourced, comparable survey data."
 
       true ->
         reported_figures =
           observations
-          |> Enum.filter(&(&1.origin == :headline_reported))
-          |> Enum.take(2)
-          |> Enum.map_join("\n", &headline_observation/1)
+          |> Enum.take(3)
+          |> Enum.map_join("\n", fn observation ->
+            case observation.origin do
+              :provider_structured -> structured_observation(observation)
+              _ -> headline_observation(observation)
+            end
+          end)
 
         reports =
           sources
           |> Enum.reject(fn source ->
             Enum.any?(observations, fn observation ->
-              observation.origin == :headline_reported and
-                observation.provenance.url == Map.get(source, :url)
+              observation.provenance.url == Map.get(source, :url)
             end)
           end)
           |> Enum.take(2)
@@ -296,6 +299,21 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
       "reported #{format_pct(x.value_pct)}% #{x.metric} in a headline: " <>
       "#{x.provenance.title}. Source: #{x.provenance.url} " <>
       "(survey population and fieldwork not established here)."
+  end
+
+  defp structured_observation(x) do
+    period =
+      if is_binary(x.fieldwork_start) and is_binary(x.fieldwork_end),
+        do: " (fieldwork #{x.fieldwork_start} to #{x.fieldwork_end})",
+        else: " (fieldwork dates unavailable)"
+
+    population =
+      if is_binary(x.population), do: " among #{x.population}", else: ""
+
+    "- #{x.provenance.publisher} (#{String.slice(x.provenance.published_at, 0, 10)}) " <>
+      "reports #{format_pct(x.value_pct)}% #{x.metric}#{population}#{period}. " <>
+      "Source: #{x.provenance.url}. Other methodological details are " <>
+      "retained only if the provider supplied them."
   end
 
   defp comparison_text(%{earlier: earlier, later: later, delta_percentage_points: delta}) do
