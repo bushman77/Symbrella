@@ -26,7 +26,12 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     assert report.discourse.interpretations == []
     assert report.conversation.subject.author_title == "How can a community grow?"
     assert Enum.all?(report.conversation.participants, &(&1.status == :meaning_unresolved))
-    assert report.conversation.relations == []
+    # Four ordering links connect five original-post segments. These
+    # establish source order only, never agreement or semantic meaning.
+    assert length(report.conversation.relations) == 4
+    assert Enum.all?(report.conversation.relations, fn relation ->
+      relation.kind == :same_source_sentence_order and relation.status == :ordering_only
+    end)
     assert Enum.all?(report.segments, &(&1.status == :analyzed))
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
   end
