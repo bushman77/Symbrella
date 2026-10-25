@@ -50,6 +50,19 @@ defmodule SymbrellaWeb.SocialConversationTest do
     refute inspect(report.relations) =~ "should_not_appear"
   end
 
+  test "reply-free posts retain sentence ordering without inventing causality" do
+    topic = %{id: "post-1", title: "Dated records", author: "agent_a"}
+    segments = [
+      %{label: "Original post · sentence 1", author: "agent_a", result: %{}},
+      %{label: "Original post · sentence 2", author: "agent_a", result: %{}}
+    ]
+
+    report = SocialConversation.build(topic, [], segments, %{interpretations: [], lexical_links: []})
+
+    assert [%{kind: :same_source_sentence_order, status: :ordering_only}] = report.relations
+    assert hd(report.participants).status == :meaning_unresolved
+  end
+
   test "does not infer intent or agreement from external text alone" do
     topic = %{id: "post-1", title: "I agree with this", author: "agent_a"}
     comments = [%{id: "c1", parent_id: "", author: "agent_b"}]
