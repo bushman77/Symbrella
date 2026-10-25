@@ -20,6 +20,7 @@ defmodule Core.Response.ResponseFrame do
     decision = map(context, :decision)
     mood = map(context, :mood)
     symbolic = symbolic_frame(context, features)
+    focus = map(context, :wm_context)
     reference = map(features, :discourse_reference)
     user_text = string(context, :user_text)
     evidence = sourced_evidence(map(context, :web_evidence))
@@ -28,7 +29,8 @@ defmodule Core.Response.ResponseFrame do
       version: 1,
       move: move(user_text, symbolic, reference, evidence),
       intent: Map.get(features, :intent),
-      topic: Map.get(symbolic, :relation),
+      topic: Map.get(symbolic, :relation) || short(Map.get(focus, :topic), 120),
+      temporal_reference: Map.get(focus, :temporal_reference),
       comparison: Map.get(symbolic, :comparison),
       subject: short(Map.get(symbolic, :subject) || Map.get(reference, :antecedent), 100),
       subjects:
@@ -40,7 +42,7 @@ defmodule Core.Response.ResponseFrame do
         |> Enum.uniq()
         |> Enum.take(4),
       target: short(Map.get(symbolic, :target), 100),
-      reference_source: Map.get(reference, :source),
+      reference_source: Map.get(reference, :source) || Map.get(focus, :topic_source),
       preceding_turn: previous_turn_kind(history),
       evidence: evidence,
       posture: %{
@@ -67,6 +69,7 @@ defmodule Core.Response.ResponseFrame do
       "CURRENT CONVERSATIONAL FRAME (state data, not a reply):",
       "move=#{inspect(move)}; intent=#{inspect(Map.get(frame, :intent))}; " <>
         "topic=#{inspect(Map.get(frame, :topic))}; " <>
+        "temporal_reference=#{inspect(Map.get(frame, :temporal_reference))}; " <>
         "comparison=#{inspect(Map.get(frame, :comparison))}; " <>
         "subject=#{inspect(Map.get(frame, :subject))}; " <>
         "subjects=#{inspect(Map.get(frame, :subjects, []))}; " <>

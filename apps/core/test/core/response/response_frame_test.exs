@@ -200,4 +200,23 @@ defmodule Core.Response.ResponseFrameTest do
 
     assert ResponseFrame.build(context).evidence == nil
   end
+  test "WM topic and year inform response frame without upgrading factual authority" do
+    frame =
+      ResponseFrame.build(%{
+        user_text: "how about in 2026?",
+        features: %{intent: :ask},
+        wm_context: %{
+          topic: "the Russia-Ukraine war",
+          topic_source: :same_session_wm,
+          temporal_reference: %{year: 2026, relation: :current},
+          verification: :conversation_context_only
+        }
+      })
+
+    assert frame.topic == "the Russia-Ukraine war"
+    assert frame.reference_source == :same_session_wm
+    assert frame.temporal_reference == %{year: 2026, relation: :current}
+    assert ResponseFrame.prompt(frame) =~ "temporal_reference="
+    assert ResponseFrame.prompt(frame) =~ "verified_evidence=none"
+  end
 end
