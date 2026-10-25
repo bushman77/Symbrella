@@ -103,6 +103,34 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     refute response =~ "don't have live news access"
   end
 
+  test "public popularity trends reach dated retrieval and never become verified poll data" do
+    question =
+      question("can you tell me about Donald Trumps popularity and why it is changing")
+
+    assert %{request_type: :current_events, relation: :current_events,
+             trigger: :public_polling_question} =
+             WebRetrieval.route_for(question)
+
+    result =
+      WebRetrieval.enrich(question, enabled?: true, news_provider: DatedNews)
+
+    assert result.web_evidence.status == :retrieved
+    assert result.web_evidence.routing_trigger == :public_polling_question
+    assert result.web_evidence.relation == :current_events
+    assert result.web_evidence.support == nil
+    assert result.web_evidence.attempted_count == 1
+
+    draft = "His approval is 91% and everybody changed their minds last week."
+
+    {:ok, safe, review} =
+      ReflectionLoop.review(question.user_text, draft, result)
+
+    assert :public_polling_evidence_boundary in review.issues
+    assert review.status == :repair
+    assert safe =~ "Headlines alone cannot establish"
+    refute safe =~ "91%"
+  end
+
   test "explicit requests for latest news use the news provider" do
     assert {"latest news about Iran", :current_events} =
       WebRetrieval.query_for(question("Search the web for latest news about Iran"))
