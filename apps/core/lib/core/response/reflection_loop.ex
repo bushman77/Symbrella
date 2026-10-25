@@ -227,11 +227,11 @@ defmodule Core.Response.ReflectionLoop do
 
     final_text =
       cond do
-        :revision_prompt_echo in issues ->
-          news_headline_fallback(context, user_text)
-
         :wm_news_followup_evidence_boundary in issues ->
           wm_news_followup_fallback(context, user_text)
+
+        :revision_prompt_echo in issues ->
+          news_headline_fallback(context, user_text)
 
         :speaker_location_fidelity in issues ->
           user_text

@@ -359,7 +359,7 @@ defmodule Core.Brain.WM.Comprehension do
   defp attention_terms(context) do
     terms =
       case context.topic do
-        topic when is_binary(topic) and topic != "" -> [topic]
+        topic when is_binary(topic) and topic != "" -> [topic, context.subtopic]
         _ -> context.entities
       end
 

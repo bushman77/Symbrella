@@ -416,6 +416,8 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert negotiate.wm_context.current_events? == true
     assert negotiate.wm_context.focus_transition == :sustain
     assert negotiate.wm_context.attention.salience == 1.0
+    assert negotiate.wm_context.attention.goal_terms ==
+             ["the Ukraine - Russia war", "peace negotiations"]
 
     continued =
       %{session_id: sid, sentence: "Tell me more about those negotiations.", trace: []}
