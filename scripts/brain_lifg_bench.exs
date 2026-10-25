@@ -1,5 +1,5 @@
 # Run with:
-#   MIX_ENV=dev mix run bench/brain_lifg_bench.exs
+#   MIX_ENV=dev mix run scripts/brain_lifg_bench.exs
 #
 # Ensure benchee is added:
 #   {:benchee, "~> 1.3", only: :dev}
