@@ -54,12 +54,33 @@ defmodule Core.Brain.WM.Comprehension do
       context = context_from(si, comprehension)
       id = frame_id(session)
 
+      # The already implemented salience/BasalGanglia path receives a bounded,
+      # same-session attention context for this admission only.
+      goal_terms = attention_terms(context)
+      attention = %{goal_terms: goal_terms}
+      focus_label = List.first(goal_terms) || "current comprehension"
+
+      salience =
+        Brain.Attention.salience(
+          %{id: id, lemma: focus_label, source: :comprehension},
+          attention
+        )
+
+      context =
+        Map.put(context, :attention, %{
+          scope: :session,
+          goal_terms: goal_terms,
+          salience: salience,
+          transition: context.focus_transition,
+          verification: :conversation_context_only
+        })
+
       # :score here is focus priority, NEVER factual confidence. Keep lexical
       # :lifg_min_score and generic evidence floors unchanged. Only this
       # session's temporary comprehension frame gets a permissive gate.
       candidate = %{
         id: id,
-        lemma: if(is_binary(context.topic), do: "conversation: #{context.topic}", else: "current comprehension"),
+        lemma: focus_label,
         source: :comprehension,
         score: 0.6,
         reason: :current_conversation,
@@ -71,6 +92,7 @@ defmodule Core.Brain.WM.Comprehension do
         safe_brain_call(:focus, [
           [candidate],
           [
+            attention: attention,
             gate_threshold: 0.0,
             boost_threshold: 0.0,
             boost_threshold_pref: 0.0,
@@ -82,6 +104,17 @@ defmodule Core.Brain.WM.Comprehension do
       admitted? =
         is_list(result) and
           Enum.any?(result, &(field(&1, :id) == id))
+
+      :telemetry.execute(
+        [:core, :wm, :attention],
+        %{salience: salience, goals: length(goal_terms)},
+        %{
+          scope: :session,
+          transition: context.focus_transition,
+          decision: if(admitted?, do: :admitted, else: :unavailable),
+          factual_authority?: false
+        }
+      )
 
       :telemetry.execute(
         [:core, :wm, :comprehension],
@@ -98,6 +131,8 @@ defmodule Core.Brain.WM.Comprehension do
           candidates: 1,
           admitted: if(admitted?, do: 1, else: 0),
           entity_count: length(context.entities),
+          attention_salience: salience,
+          focus_transition: context.focus_transition,
           degraded?: context.degraded?,
           fact_verified?: false
         }
@@ -120,9 +155,19 @@ defmodule Core.Brain.WM.Comprehension do
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
     year = followup_year(sentence)
-    explicit_topic = public_topic(sentence)
-    inherited_topic = if is_integer(year), do: field(prev, :topic), else: nil
+    continuation? = is_integer(year) or conversational_continuation?(sentence)
+    explicit_topic = if continuation?, do: nil, else: public_topic(sentence)
+    inherited_topic = if continuation?, do: field(prev, :topic), else: nil
     topic = explicit_topic || inherited_topic
+    focus_transition =
+      cond do
+        is_binary(explicit_topic) and is_binary(field(prev, :topic)) and
+            explicit_topic != field(prev, :topic) -> :shift
+        is_binary(explicit_topic) -> :select
+        is_binary(inherited_topic) -> :sustain
+        is_binary(field(prev, :topic)) -> :release
+        true -> :none
+      end
 
     explicit_entities =
       ([field(event, :subject), field(event, :target)] ++
@@ -168,6 +213,7 @@ defmodule Core.Brain.WM.Comprehension do
     %{
       schema: 1,
       topic: topic,
+      focus_transition: focus_transition,
       topic_source:
         cond do
           is_binary(explicit_topic) -> :current_user_request
@@ -208,6 +254,31 @@ defmodule Core.Brain.WM.Comprehension do
   end
 
   defp public_topic(_), do: nil
+
+  # Acknowledgements do not discard the current conversation. A new
+  # substantive request without such a cue is allowed to shift the focus.
+  defp conversational_continuation?(sentence) when is_binary(sentence) do
+    Regex.match?(
+      ~r/^\s*(?:(?:and|so)\s+)?(?:how|what)\s+about\b|^\s*(?:tell me more|go on|continue|why\??|okay|ok|yes|right|i see|interesting)\s*[.!?]*\s*$/iu,
+      sentence
+    )
+  end
+
+  defp conversational_continuation?(_), do: false
+
+  defp attention_terms(context) do
+    terms =
+      case context.topic do
+        topic when is_binary(topic) and topic != "" -> [topic]
+        _ -> context.entities
+      end
+
+    terms
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.take(@max_entities)
+  end
 
   defp followup_year(sentence) when is_binary(sentence) do
     case Regex.run(

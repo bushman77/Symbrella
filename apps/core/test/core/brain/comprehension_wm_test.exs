@@ -334,4 +334,48 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert context.temporal_reference.year == 2026
     assert context.verification == :conversation_context_only
   end
+  test "attention is scoped to the WM admission, scored, and exposed in its context" do
+    assert is_pid(Process.whereis(Brain))
+    sid = session()
+    id = frame_id(sid)
+    on_exit(fn -> Brain.defocus(id) end)
+
+    original_attention = Brain.snapshot_wm().attention
+    initial = %{
+      session_id: sid,
+      sentence: "Tell me about the Pacific Ocean",
+      intent: :ask,
+      comprehension: %{recognized_topics: [], understood: [], uncertain: [], degraded?: false},
+      trace: []
+    }
+
+    stored = WMComprehension.store(initial, comprehension_wm?: true)
+    assert stored.wm_context.focus_transition == :select
+    assert stored.wm_context.attention.scope == :session
+    assert stored.wm_context.attention.salience == 1.0
+    assert stored.wm_context.attention.goal_terms == ["the Pacific Ocean"]
+
+    assert %{payload: %{context: context}} =
+             Enum.find(Brain.snapshot_wm().wm, &(&1.id == id))
+    assert context.topic == "the Pacific Ocean"
+    assert context.attention.salience == 1.0
+    assert Brain.snapshot_wm().attention == original_attention
+
+    recalled = WMComprehension.recall(
+      %{session_id: sid, sentence: "okay", trace: []}, comprehension_wm?: true)
+
+    continued = Map.put(recalled, :comprehension, initial.comprehension)
+    assert WMComprehension.context_from(continued, continued.comprehension).focus_transition ==
+             :sustain
+
+    changed = %{continued | sentence: "Tell me about Elixir"}
+    changed_ctx = WMComprehension.context_from(changed, changed.comprehension)
+    assert changed_ctx.topic == "Elixir"
+    assert changed_ctx.focus_transition == :shift
+
+    unrelated = %{continued | sentence: "Please close the window"}
+    released = WMComprehension.context_from(unrelated, unrelated.comprehension)
+    assert released.topic == nil
+    assert released.focus_transition == :release
+  end
 end
