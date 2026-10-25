@@ -241,11 +241,19 @@ defmodule Core.Brain.WM.Comprehension do
   # Conversational subject only, not independently verified evidence.
   defp public_topic(sentence) when is_binary(sentence) do
     pattern =
-      ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
+      ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me\s+about|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
 
     case Regex.run(pattern, sentence, capture: :all_but_first) do
       [subject] ->
-        subject = subject |> String.trim() |> String.slice(0, 120)
+        subject =
+          subject
+          |> String.trim()
+          |> String.replace(
+            ~r/\s+(?:as\s+of\s+(?:current(?:ly)?|now|today|this\s+(?:week|month|year))|currently|right\s+now)\s*$/iu,
+            ""
+          )
+          |> String.trim()
+          |> String.slice(0, 120)
         if subject == "" or
              Regex.match?(~r/^(?:it|that|this|them|those|my|our|your)\b/iu, subject),
           do: nil, else: subject

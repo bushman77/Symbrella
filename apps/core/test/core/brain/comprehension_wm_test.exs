@@ -334,6 +334,58 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert context.temporal_reference.year == 2026
     assert context.verification == :conversation_context_only
   end
+  test "live current-events wording establishes attention subject and sustains it into 2026" do
+    sid = session()
+    id = frame_id(sid)
+    on_exit(fn -> Brain.defocus(id) end)
+
+    user_text = "what can you tell me about the Ukranian - Russian war as of current"
+    first = %{
+      session_id: sid,
+      sentence: user_text,
+      intent: :ask_info,
+      comprehension: %{recognized_topics: [], understood: [], uncertain: [], degraded?: true},
+      trace: []
+    }
+
+    assert %{topic: "the Ukranian - Russian war",
+             focus_transition: :select,
+             verification: :conversation_context_only} =
+             WMComprehension.context_from(first, first.comprehension)
+
+    saved = WMComprehension.store(first, comprehension_wm?: true)
+    assert saved.wm_context.attention.salience == 1.0
+    assert saved.wm_context.attention.goal_terms == ["the Ukranian - Russian war"]
+    assert saved.wm_context.attention.transition == :select
+
+    followup =
+      WMComprehension.recall(
+        %{session_id: sid, sentence: "how about in 2026?", trace: []},
+        comprehension_wm?: true
+      )
+      |> Map.put(:comprehension, first.comprehension)
+
+    assert followup.wm_context.topic == "the Ukranian - Russian war"
+    continued = WMComprehension.store(followup, comprehension_wm?: true)
+    assert continued.wm_context.topic == "the Ukranian - Russian war"
+    assert continued.wm_context.focus_transition == :sustain
+    assert continued.wm_context.temporal_reference.year == 2026
+    assert continued.wm_context.attention.salience == 1.0
+  end
+
+  test "can you tell me about supports an independent subject" do
+    c = %{recognized_topics: [], understood: [], uncertain: [], degraded?: false}
+
+    for sentence <- [
+          "Can you tell me about Elixir?",
+          "What could you tell me about Elixir?",
+          "Would you please tell me about Elixir?"
+        ] do
+      assert %{topic: "Elixir", focus_transition: :select} =
+               WMComprehension.context_from(%{sentence: sentence}, c)
+    end
+  end
+
   test "attention is scoped to the WM admission, scored, and exposed in its context" do
     assert is_pid(Process.whereis(Brain))
     sid = session()

@@ -474,8 +474,12 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     |> String.replace(
       ~r/^\s*(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)\s+/iu, "")
     |> String.replace(~r/^\s*(?:(?:no|actually)[,!]\s*)?i\s+(?:mean|meant)\s+/iu, "")
-    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
+    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me\s+about|tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
     |> String.replace(~r/[?!.]+$/u, "")
+    |> String.replace(
+      ~r/\s+(?:as\s+of\s+(?:current(?:ly)?|now|today|this\s+(?:week|month|year))|currently|right\s+now)\s*$/iu,
+      ""
+    )
     |> nonempty()
   end
 

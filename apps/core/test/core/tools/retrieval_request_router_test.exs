@@ -85,6 +85,21 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     end
   end
 
+  test "current-year follow-up strips conversational lead-in and time suffix" do
+    year = Date.utc_today().year
+
+    history = [
+      %{"role" => "user",
+        "content" => "what can you tell me about the Ukranian - Russian war as of current"},
+      %{"role" => "assistant", "content" => "Recent news was retrieved."}
+    ]
+
+    assert %{query: query, relation: :current_events, trigger: :followup} =
+             route("how about in #{year}?", %{retrieval_history: history})
+
+    assert query == "the Ukranian - Russian war #{year}"
+  end
+
   test "live conflict opinion without temporal keywords routes to dated news" do
     query = "What do you think about the conflict between Iran and the United States?"
 
