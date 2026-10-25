@@ -518,11 +518,16 @@ defmodule Core.Social.DeclarativeProposition do
         end)
 
     singular_subject? =
-      not Enum.any?(Map.get(si, :active_cells, []), fn cell ->
-        tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
-        is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :subject) and
-          Map.get(cell, :pos) == "noun" and
-          "tag:form-of" in tags and "tag:plural" in tags
+      not Enum.any?(Map.get(si, :active_cells, []), fn
+        %{} = cell ->
+          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+
+          Map.get(cell, :token_index) == Map.get(indices, :subject) and
+            Map.get(cell, :pos) == "noun" and
+            "tag:form-of" in tags and "tag:plural" in tags
+
+        _ ->
+          false
       end)
 
     finite_present? =
@@ -538,13 +543,18 @@ defmodule Core.Social.DeclarativeProposition do
                        :attested_nominal_object, :attested_finite_present_verb],
               &(&1 in Map.get(sig, :evidence, [])))
         end) and
-        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
-          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
-          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
-            Map.get(cell, :pos) == "verb" and
-            normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
-            Enum.all?(["tag:form-of", "tag:indicative", "tag:present",
-                       "tag:singular", "tag:third-person"], &(&1 in tags))
+        Enum.any?(Map.get(si, :active_cells, []), fn
+          %{} = cell ->
+            tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+
+            Map.get(cell, :token_index) == Map.get(indices, :predicate) and
+              Map.get(cell, :pos) == "verb" and
+              normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
+              Enum.all?(["tag:form-of", "tag:indicative", "tag:present",
+                         "tag:singular", "tag:third-person"], &(&1 in tags))
+
+          _ ->
+            false
         end)
 
     counted_present? =

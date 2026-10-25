@@ -62,7 +62,7 @@ defmodule Core.Tools.WebRetrieval.PlaceScopeTest do
       "maple ridge"
     assert get_in(original, [:features, :symbolic_frame, :target]) ==
       "kamloops"
-    assert Map.get(original, :geographic_lookup_scope) == nil
+    refute Map.has_key?(original, :geographic_lookup_scope)
   end
 
   test "retrieval uses prior user jurisdiction hint but final support is provider-verified" do

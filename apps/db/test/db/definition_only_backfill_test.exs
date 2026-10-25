@@ -29,7 +29,7 @@ defmodule Db.JSONL.DefinitionOnlyBackfillTest do
     ]
 
     stored =
-      Enum.map(source, fn cell ->
+      Enum.map(source, fn %Db.BrainCell{} = cell ->
         %Db.BrainCell{
           cell |
           definition: String.split(cell.definition, " — ", parts: 2) |> hd(),

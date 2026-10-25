@@ -19,7 +19,9 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrendTest do
 
   test "does not invent activity when no BrainCell has reported positive activation" do
     samples = ActivationTrend.capture([], %{"a" => 0.0, "b" => :not_a_number}, 1_000)
-    assert [%{count: 0, mean: 0.0, peak: 0.0}] = samples
+    assert [%{count: 0, mean: mean, peak: peak}] = samples
+    assert mean == 0.0
+    assert peak == 0.0
 
     html = render_component(&ActivationTrend.panel/1, samples: samples)
     assert html =~ "Neuron activation"

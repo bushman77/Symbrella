@@ -22,7 +22,9 @@ defmodule Brain.CuriosityPolicyTest do
     {positive, %{learned_bias: 0.12}} = CuriosityPolicy.score(0.65, :missing_link, sample)
     {neutral, _} = CuriosityPolicy.score(0.65, :missing_link, %{})
     assert positive > neutral
-    assert {1.0, _} = CuriosityPolicy.score(8.0, :missing_link, sample)
-    assert {0.0, _} = CuriosityPolicy.score(-8.0, :missing_link, sample)
+    {upper, _} = CuriosityPolicy.score(8.0, :missing_link, sample)
+    {lower, _} = CuriosityPolicy.score(-8.0, :missing_link, sample)
+    assert upper == 1.0
+    assert lower == 0.0
   end
 end

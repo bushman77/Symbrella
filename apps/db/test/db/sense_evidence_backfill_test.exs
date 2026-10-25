@@ -37,7 +37,7 @@ defmodule Db.JSONL.SenseEvidenceBackfillTest do
       ])
 
     stored =
-      Enum.map(source, fn cell ->
+      Enum.map(source, fn %Db.BrainCell{} = cell ->
         first_gloss = String.split(cell.definition, " — ", parts: 2) |> hd()
 
         %Db.BrainCell{
