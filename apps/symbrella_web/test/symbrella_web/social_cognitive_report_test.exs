@@ -24,6 +24,9 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     assert report.omitted_replies == 0
     assert report.discourse.status == :no_supported_sentence_meanings
     assert report.discourse.interpretations == []
+    assert report.conversation.subject.author_title == "How can a community grow?"
+    assert Enum.all?(report.conversation.participants, &(&1.status == :meaning_unresolved))
+    assert report.conversation.relations == []
     assert Enum.all?(report.segments, &(&1.status == :analyzed))
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
   end
