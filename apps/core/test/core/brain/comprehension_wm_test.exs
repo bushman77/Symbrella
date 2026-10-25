@@ -302,5 +302,35 @@ defmodule Core.Brain.ComprehensionWMTest do
 
     no_context = %{session_id: sid, sentence: "What about each?", trace: []}
     assert WMComprehension.recall(no_context, comprehension_wm?: false) == no_context
+  end 
+  test "WM carries an established conversation subject into a year follow-up" do
+    sid = session()
+    id = frame_id(sid)
+    on_exit(fn -> Brain.defocus(id) end)
+
+    initial = %{
+      session_id: sid,
+      sentence: "can you give me te detils of the Ukranian - Russian war?",
+      intent: :ask,
+      comprehension: %{recognized_topics: [], understood: [], uncertain: [], degraded?: true},
+      trace: []
+    }
+    assert %{topic: "the Ukranian - Russian war", verification: :conversation_context_only} =
+             WMComprehension.context_from(initial, initial.comprehension)
+
+    WMComprehension.store(initial, comprehension_wm?: true)
+    recalled = WMComprehension.recall(
+      %{session_id: sid, sentence: "how about in 2026?", trace: []},
+      comprehension_wm?: true
+    )
+
+    assert recalled.wm_context.topic == "the Ukranian - Russian war"
+    following = Map.put(recalled, :comprehension,
+      %{recognized_topics: [], understood: [], uncertain: ["2026"], degraded?: true})
+    context = WMComprehension.context_from(following, following.comprehension)
+    assert context.topic == "the Ukranian - Russian war"
+    assert context.topic_source == :same_session_wm
+    assert context.temporal_reference.year == 2026
+    assert context.verification == :conversation_context_only
   end
 end

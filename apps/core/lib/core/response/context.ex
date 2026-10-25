@@ -71,6 +71,11 @@ defmodule Core.Response.Context do
           map_get(features, :comprehension),
           map_get(embedded, :comprehension)
         ]),
+      wm_context:
+        first_present([
+          map_get(embedded, :wm_context),
+          map_get(features, :wm_context)
+        ]),
       symbolic_frame:
         first_present([
           # The bounded turn-context frame carries structured event roles.
@@ -273,6 +278,7 @@ defmodule Core.Response.Context do
   defp wm_context_summary(%{} = context) do
     context
     |> Map.take([:intent, :entities, :relation, :recognized_topics,
+      :topic, :topic_source, :temporal_reference,
       :degraded?, :verification, :interpretation_status])
     |> drop_empty()
   end

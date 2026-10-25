@@ -59,7 +59,7 @@ defmodule Core.Brain.WM.Comprehension do
       # session's temporary comprehension frame gets a permissive gate.
       candidate = %{
         id: id,
-        lemma: "current comprehension",
+        lemma: if(is_binary(context.topic), do: "conversation: #{context.topic}", else: "current comprehension"),
         source: :comprehension,
         score: 0.6,
         reason: :current_conversation,
@@ -117,6 +117,10 @@ defmodule Core.Brain.WM.Comprehension do
     prev = map_or_empty(field(si, :wm_context))
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
+    year = followup_year(sentence)
+    explicit_topic = public_topic(sentence)
+    inherited_topic = if is_integer(year), do: field(prev, :topic), else: nil
+    topic = explicit_topic || inherited_topic
 
     explicit_entities =
       ([field(event, :subject), field(event, :target)] ++
@@ -161,6 +165,15 @@ defmodule Core.Brain.WM.Comprehension do
 
     %{
       schema: 1,
+      topic: topic,
+      topic_source:
+        cond do
+          is_binary(explicit_topic) -> :current_user_request
+          is_binary(inherited_topic) -> :same_session_wm
+          true -> nil
+        end,
+      temporal_reference:
+        if(is_integer(year), do: %{year: year, relation: year_relation(year)}, else: nil),
       intent: field(si, :intent),
       entities: entities,
       relation: relation,
@@ -175,6 +188,42 @@ defmodule Core.Brain.WM.Comprehension do
       verification: :conversation_context_only,
       updated_at_ms: System.system_time(:millisecond)
     }
+  end
+
+  # Conversational subject only, not independently verified evidence.
+  defp public_topic(sentence) when is_binary(sentence) do
+    pattern =
+      ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
+
+    case Regex.run(pattern, sentence, capture: :all_but_first) do
+      [subject] ->
+        subject = subject |> String.trim() |> String.slice(0, 120)
+        if subject == "" or
+             Regex.match?(~r/^(?:it|that|this|them|those|my|our|your)\b/iu, subject),
+          do: nil, else: subject
+      _ -> nil
+    end
+  end
+
+  defp public_topic(_), do: nil
+
+  defp followup_year(sentence) when is_binary(sentence) do
+    case Regex.run(
+           ~r/^\s*(?:(?:and|so)\s+)?(?:how|what)\s+about\s+(?:in\s+)?((?:19|20)\d{2})\s*[?.!]*\s*$/iu,
+           sentence, capture: :all_but_first) do
+      [year] -> String.to_integer(year)
+      _ -> nil
+    end
+  end
+
+  defp followup_year(_), do: nil
+
+  defp year_relation(year) do
+    cond do
+      year < Date.utc_today().year -> :past
+      year > Date.utc_today().year -> :future
+      true -> :current
+    end
   end
 
   @event_role_keys ~w(actor predicate surface_predicate patient position location aspect tense)
