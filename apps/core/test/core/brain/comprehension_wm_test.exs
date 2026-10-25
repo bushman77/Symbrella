@@ -454,6 +454,41 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert context.focus_transition == :none
   end
 
+  test "user typo tell mee still seeds same-session news focus and grounded follow-up route" do
+    sid = session()
+    on_exit(fn -> Brain.defocus(frame_id(sid)) end)
+    summary = %{recognized_topics: [], understood: [], uncertain: [], degraded?: true}
+
+    initial =
+      %{session_id: sid, sentence:
+        "what can you tell mee about the Ukraine - Russia war as of current",
+        comprehension: summary, trace: []}
+      |> WMComprehension.store(comprehension_wm?: true)
+
+    assert initial.wm_context.topic == "the Ukraine - Russia war"
+    assert initial.wm_context.current_events? == true
+    assert initial.wm_context.focus_transition == :select
+    assert initial.wm_context.attention.goal_terms == ["the Ukraine - Russia war"]
+    assert initial.wm_context.attention.salience == 1.0
+
+    followup =
+      %{session_id: sid, sentence: "What about peace negotiations?", trace: []}
+      |> WMComprehension.recall(comprehension_wm?: true)
+      |> Map.put(:comprehension, summary)
+      |> WMComprehension.store(comprehension_wm?: true)
+
+    assert followup.wm_context.topic == "the Ukraine - Russia war"
+    assert followup.wm_context.subtopic == "peace negotiations"
+    assert followup.wm_context.focus_transition == :sustain
+    assert followup.wm_context.attention.salience == 1.0
+
+    response_context = Core.Response.Context.from_si(followup)
+    assert %{request_type: :current_events, relation: :current_events,
+             trigger: :wm_topic_followup,
+             query: "the Ukraine - Russia war peace negotiations"} =
+             Core.Tools.WebRetrieval.route_for(response_context)
+  end
+
   test "attention is scoped to the WM admission, scored, and exposed in its context" do
     assert is_pid(Process.whereis(Brain))
     sid = session()

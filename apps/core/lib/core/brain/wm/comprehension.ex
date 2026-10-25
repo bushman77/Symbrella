@@ -265,7 +265,7 @@ defmodule Core.Brain.WM.Comprehension do
       ~r/^\s*(?:let(?:'s|\s+us)|can\s+we|we\s+should)\s+(?:talk|speak|chat|discuss)\s+(?:about\s+)?(.+?)\s+(?:instead|now)\s*[?!.]*\s*$/iu
 
     pattern =
-      ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me\s+about|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
+      ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me{1,3}\s+about|tell\s+me{1,3}\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
 
     matched =
       Regex.run(switch, sentence, capture: :all_but_first) ||

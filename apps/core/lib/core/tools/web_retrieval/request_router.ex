@@ -162,7 +162,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     if temporal? and (events? or strong_news_question?) do
       text
       |> String.replace(
-        ~r/^\s*(?:what\s+(?:are\s+your\s+thoughts|do\s+you\s+think)\s+(?:on|about)|what(?:'s|\s+is)\s+your\s+(?:thoughts|take)\s+(?:on|about)|tell\s+me\s+about|what(?:'s|\s+is)\s+(?:the\s+)?latest\s+(?:on|about|with)|give\s+me\s+(?:the\s+)?(?:latest\s+)?(?:news|updates)\s+(?:on|about))\s*/iu,
+        ~r/^\s*(?:what\s+(?:are\s+your\s+thoughts|do\s+you\s+think)\s+(?:on|about)|what(?:'s|\s+is)\s+your\s+(?:thoughts|take)\s+(?:on|about)|tell\s+me{1,3}\s+about|what(?:'s|\s+is)\s+(?:the\s+)?latest\s+(?:on|about|with)|give\s+me\s+(?:the\s+)?(?:latest\s+)?(?:news|updates)\s+(?:on|about))\s*/iu,
         ""
       )
       |> String.replace(~r/\b(?:currently\s+happening|happening\s+now|right\s+now|as\s+of\s+(?:now|today|current(?:ly)?))\b/iu, "")
@@ -519,7 +519,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     |> String.replace(
       ~r/^\s*(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)\s+/iu, "")
     |> String.replace(~r/^\s*(?:(?:no|actually)[,!]\s*)?i\s+(?:mean|meant)\s+/iu, "")
-    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me\s+about|tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
+    |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me{1,3}\s+about|tell\s+me{1,3}\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
     |> String.replace(~r/[?!.]+$/u, "")
     |> String.replace(
       ~r/\s+(?:as\s+of\s+(?:current(?:ly)?|now|today|this\s+(?:week|month|year))|currently|right\s+now)\s*$/iu,

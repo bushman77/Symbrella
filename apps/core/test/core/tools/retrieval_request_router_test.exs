@@ -85,6 +85,14 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     end
   end
 
+  test "a small typo in tell mee does not poison the news query" do
+    text = "what can you tell mee about the Ukraine - Russia war as of current"
+    assert Core.Tools.WebRetrieval.RequestRouter.current_events_query(text) ==
+             "the Ukraine - Russia war"
+    assert %{query: "the Ukraine - Russia war", relation: :current_events,
+             request_type: :current_events} = route(text)
+  end
+
   test "current-events extraction strips conversational lead-in without dropping the subject" do
     query = "what can you tell me about the Ukranian - Russian war as of current"
 
