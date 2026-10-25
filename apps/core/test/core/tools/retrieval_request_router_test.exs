@@ -95,6 +95,37 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
              route(query)
   end
 
+  test "session-scoped negotiation follow-ups route to dated evidence, not generic invention" do
+    parent = "the Ukraine - Russia war"
+    focus = %{
+      topic: parent,
+      subtopic: "peace negotiations",
+      current_events?: true,
+      focus_transition: :sustain,
+      verification: :conversation_context_only
+    }
+
+    for question <- [
+          "What about peace negotiations?",
+          "Tell me more about those negotiations."
+        ] do
+      assert %{query: "the Ukraine - Russia war peace negotiations",
+               relation: :current_events,
+               request_type: :current_events,
+               trigger: :wm_topic_followup} =
+               route(question, %{wm_context: focus})
+    end
+
+    assert route("Tell me more about those negotiations.") == nil
+    assert route("Tell me more about those negotiations.",
+      %{wm_context: %{focus | current_events?: false}}) == nil
+
+    switched = %{focus | topic: "Elixir programming",
+                  subtopic: nil, current_events?: false, focus_transition: :shift}
+    assert route("Let's talk about Elixir programming instead.",
+      %{wm_context: switched}) == nil
+  end
+
   test "current-year follow-up strips conversational lead-in and time suffix" do
     year = Date.utc_today().year
 

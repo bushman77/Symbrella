@@ -95,6 +95,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(news_sources(context) != [] and EvidenceRevision.prompt_echo?(draft_text, []), :revision_prompt_echo)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
+    |> maybe_issue(wm_news_followup?(context), :wm_news_followup_evidence_boundary)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
     |> maybe_issue(stale_calendar_claim?(user_text, draft_text), :stale_calendar_claim)
     |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
@@ -151,6 +152,9 @@ defmodule Core.Response.ReflectionLoop do
         {:reject, issues}
 
       :revision_prompt_echo in issues ->
+        {:repair, issues}
+
+      :wm_news_followup_evidence_boundary in issues ->
         {:repair, issues}
 
       :stale_calendar_claim in issues ->
@@ -225,6 +229,9 @@ defmodule Core.Response.ReflectionLoop do
       cond do
         :revision_prompt_echo in issues ->
           news_headline_fallback(context, user_text)
+
+        :wm_news_followup_evidence_boundary in issues ->
+          wm_news_followup_fallback(context, user_text)
 
         :speaker_location_fidelity in issues ->
           user_text
@@ -324,6 +331,9 @@ defmodule Core.Response.ReflectionLoop do
       cond do
         :revision_prompt_echo in issues ->
           "Discard echoed news-revision controls and publish the source-grounded fallback instead."
+
+        :wm_news_followup_evidence_boundary in issues ->
+          "For same-session ongoing-news follow-ups, publish only the provider's dated and attributed headlines; if none were retrieved, state the verification limit. The model draft is not evidence."
 
         :speaker_location_fidelity in issues ->
           "The assistant attributed an unverified physical location to a conversation participant, or repeated a recently disputed self-location assertion. Current physical location requires its own verified evidence; public geographic facts and chat claims cannot establish it."
@@ -618,6 +628,24 @@ defmodule Core.Response.ReflectionLoop do
       _ ->
         "I searched for dated news about #{query}, but no qualifying headlines were returned. " <>
           "That doesn't establish that nothing has happened; I can't verify recent developments from this search."
+    end
+  end
+
+  defp wm_news_followup?(context) do
+    case Map.get(context, :web_evidence) do
+      %{request_type: :current_events, routing_trigger: :wm_topic_followup} ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp wm_news_followup_fallback(context, user_text) do
+    if news_sources(context) == [] do
+      empty_news_lookup_fallback(context)
+    else
+      news_headline_fallback(context, user_text)
     end
   end
 

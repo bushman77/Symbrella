@@ -3,6 +3,51 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "scoped negotiation news follow-up cannot publish unsupported model claims" do
+    url = "https://news.google.com/rss/articles/bounded-diplomacy-1"
+    current = DateTime.to_iso8601(DateTime.utc_now())
+
+    context = %{
+      wm_context: %{topic: "the Ukraine - Russia war",
+        subtopic: "peace negotiations", current_events?: true},
+      web_evidence: %{
+        relation: :current_events,
+        request_type: :current_events,
+        routing_trigger: :wm_topic_followup,
+        status: :retrieved,
+        resolution: :headlines_available,
+        sources: [%{
+          provider: :news_rss, publisher: "Example Wire",
+          published_at: current,
+          title: "Officials call for further talks", url: url
+        }]
+      }
+    }
+
+    invented = "A 20-year neutrality deal was agreed in Istanbul."
+    {:ok, safe, reflection} =
+      ReflectionLoop.review("Tell me more about those negotiations.", invented, context)
+
+    assert reflection.status == :repair
+    assert :wm_news_followup_evidence_boundary in reflection.issues
+    assert safe =~ "Example Wire"
+    assert safe =~ "Officials call for further talks"
+    assert safe =~ url
+    refute safe =~ "20-year neutrality deal"
+
+    missing = %{context | web_evidence:
+      %{relation: :current_events, request_type: :current_events,
+        routing_trigger: :wm_topic_followup, status: :not_found,
+        resolution: :exhausted, sources: [], query: "Ukraine Russia peace negotiations"}}
+
+    {:ok, limitation, missing_reflection} =
+      ReflectionLoop.review("What about peace negotiations?", invented, missing)
+
+    assert missing_reflection.status == :repair
+    assert limitation =~ "no qualifying headlines"
+    refute limitation =~ "20-year neutrality deal"
+  end
+
   test "rejects a news retry prompt echo even if its source metadata matches" do
     day = Date.to_iso8601(Date.utc_today())
     url = "https://news.google.com/rss/articles/known-report-1"

@@ -50,6 +50,9 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       temporal = temporal_followup_route(text, context) ->
         temporal
 
+      scoped_news = wm_current_events_followup(text, context) ->
+        scoped_news
+
       research = research_query(text) ->
         {query, category} = research
         build(query, nil, category, :structured_question)
@@ -105,6 +108,30 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
             build("#{topic} #{year}", nil, :historical_reference, :followup)
         end
 
+      _ -> nil
+    end
+  end
+
+  # Only the SAME turn's WM frame may authorize a contextual news query.
+  # An older assistant reply or an unrelated chat session is never a source
+  # for this subject. The frame stores provenance and current-events intent,
+  # not externally verified facts.
+  defp wm_current_events_followup(text, context) do
+    focus = Map.get(context, :wm_context, %{})
+
+    with %{} <- focus,
+         true <- Map.get(focus, :current_events?) == true,
+         :sustain <- Map.get(focus, :focus_transition),
+         topic when is_binary(topic) <- Map.get(focus, :topic),
+         subtopic when is_binary(subtopic) <- Map.get(focus, :subtopic),
+         true <- String.trim(topic) != "" and String.trim(subtopic) != "",
+         true <-
+           Regex.match?(
+             ~r/^\s*(?:(?:and|so)\s+)?(?:what|how)\s+about\s+.{3,96}[?!.]*\s*$|^\s*(?:tell\s+me\s+more\s+about|more\s+(?:on|about))\s+(?:those|these|the)\s+[\p{L}\p{N}][\p{L}\p{N}\s-]{2,90}[?!.]*\s*$/iu,
+             text
+           ) do
+      build("#{topic} #{subtopic}", :current_events, :current_events, :wm_topic_followup)
+    else
       _ -> nil
     end
   end
