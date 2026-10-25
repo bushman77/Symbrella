@@ -78,9 +78,12 @@ defmodule SymbrellaWeb.BrainReport do
          end) do
       %{payload: %{context: %{} = context}} ->
         context
-        |> Map.take([:topic, :topic_source, :focus_transition,
-          :temporal_reference, :attention, :verification, :updated_at_ms])
+        |> Map.take([:topic, :subtopic, :topic_source, :focus_transition,
+          :current_events?, :temporal_reference, :attention, :verification, :updated_at_ms])
         |> Map.put(:wm_admission, :admitted)
+        |> Map.put(:attention_goal_state,
+          if(get_in(context, [:attention, :goal_terms]) in [nil, []],
+            do: :none, else: :active))
 
       _ ->
         %{status: :no_conversational_attention}

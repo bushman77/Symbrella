@@ -71,6 +71,43 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     assert html =~ "attention-copy-target"
   end
 
+  test "WM distinguishes a gate-admitted frame with no attention goal" do
+    html =
+      render_component(&BrainHTML.wm_panel/1,
+        wm: %{
+          items: [
+            %{payload: %{kind: :comprehension_frame,
+              context: %{verification: :conversation_context_only,
+                attention: %{scope: :session, transition: :release,
+                  salience: 0.0, goal_terms: []}}}}
+          ]
+        })
+
+    assert html =~ "No attention goal"
+    assert html =~ "context frame only"
+    assert html =~ "Admitted via Basal Ganglia"
+    assert html =~ "0.000"
+  end
+
+  test "WM shows inherited news subtopic as distinct from primary topic" do
+    html =
+      render_component(&BrainHTML.wm_panel/1,
+        wm: %{
+          items: [
+            %{payload: %{kind: :comprehension_frame,
+              context: %{topic: "the Ukraine - Russia war",
+                subtopic: "peace negotiations", current_events?: true,
+                attention: %{scope: :session, transition: :sustain,
+                  salience: 1.0, goal_terms: ["the Ukraine - Russia war"]}}}}
+          ]
+        })
+
+    assert html =~ "peace negotiations"
+    assert html =~ "Established"
+    assert html =~ "Dated news required"
+    assert html =~ "sustain"
+  end
+
   test "hud_row formats integer clock telemetry without crashing" do
     html =
       render_component(&BrainHTML.hud_row/1,

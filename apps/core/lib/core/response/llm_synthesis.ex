@@ -618,6 +618,7 @@ defmodule Core.Response.LlmSynthesis do
     cfg = Application.get_env(:core, :llm_synthesis, [])
 
     if Keyword.get(cfg, :grounded_revision_enabled?, true) and
+         :wm_news_followup_evidence_boundary not in first_reflection.issues and
          GroundedRevision.eligible?(context, first_reflection) do
       revision_messages = GroundedRevision.messages(messages, context)
       options =
@@ -680,6 +681,7 @@ defmodule Core.Response.LlmSynthesis do
     cfg = Application.get_env(:core, :llm_synthesis, [])
 
     if Keyword.get(cfg, :evidence_revision_enabled?, true) and
+         :wm_news_followup_evidence_boundary not in first_reflection.issues and
          EvidenceRevision.eligible?(context, first_reflection) do
       revise_once(user_text, draft, context, original_out, first_reflection)
     else

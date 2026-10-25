@@ -709,6 +709,9 @@ defmodule SymbrellaWeb.BrainHTML do
       |> assign(:items, items)
       |> assign(:empty?, empty?)
       |> assign(:attention_topic, mget(focus_context, :topic))
+      |> assign(:attention_subtopic, mget(focus_context, :subtopic))
+      |> assign(:attention_current_events, mget(focus_context, :current_events?) == true)
+      |> assign(:attention_goal_active, is_list(goals) and goals != [])
       |> assign(:attention_transition, mget(attention, :transition))
       |> assign(:attention_salience, mget(attention, :salience))
       |> assign(:attention_goals, if(is_list(goals), do: goals, else: []))
@@ -764,8 +767,14 @@ defmodule SymbrellaWeb.BrainHTML do
           <dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs text-zinc-700 dark:text-zinc-200">
             <dt class="text-zinc-500 dark:text-zinc-400">Active subject</dt>
             <dd class="min-w-0 break-words">{@attention_topic || if(@attention_goals == [], do: "No active subject", else: "Entity-focused context")}</dd>
+            <dt :if={@attention_subtopic} class="text-zinc-500 dark:text-zinc-400">Subtopic</dt>
+            <dd :if={@attention_subtopic} class="min-w-0 break-words">{@attention_subtopic}</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Focus transition</dt>
             <dd>{@attention_transition || :none}</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Goal state</dt>
+            <dd>{if(@attention_goal_active, do: "Established · attention active", else: "No attention goal · context frame only")}</dd>
+            <dt :if={@attention_current_events} class="text-zinc-500 dark:text-zinc-400">Recency</dt>
+            <dd :if={@attention_current_events}>Dated news required for factual updates</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Salience</dt>
             <dd>{fmt(@attention_salience)}</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Goal terms</dt>
@@ -773,13 +782,14 @@ defmodule SymbrellaWeb.BrainHTML do
             <dt :if={@attention_year} class="text-zinc-500 dark:text-zinc-400">Year</dt>
             <dd :if={@attention_year}>{@attention_year}</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Gate</dt>
-            <dd>Admitted via Basal Ganglia</dd>
+            <dd>Admitted via Basal Ganglia (frame present)</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Evidence</dt>
             <dd>{@attention_verification || :unknown} (not verified facts)</dd>
           </dl>
         <% else %>
           <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            No session-scoped conversational attention in the latest WM snapshot.
+            No session-scoped conversational attention frame in the latest WM snapshot.
+            No WM gate or attention goal is established.
           </p>
         <% end %>
       </div>
