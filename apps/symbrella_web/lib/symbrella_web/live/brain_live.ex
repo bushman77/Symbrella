@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   alias SymbrellaWeb.BrainHTML
   alias SymbrellaWeb.BrainRuntime
+  alias SymbrellaWeb.SocialBrainActivity
   alias SymbrellaWeb.Components.Brain.ActivationTrend
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.BrainLive.MoodHud
@@ -28,6 +29,7 @@ defmodule SymbrellaWeb.BrainLive do
   import SymbrellaWeb.BrainLive.MoodHud, only: [mood_hud: 1]
 
   @blackboard_topic "brain:blackboard"
+  @social_topic "brain:social"
   @hud_topics ~w(brain:clock brain:intent brain:mood brain:lifg brain:wm)
   @refresh_ms 500
 
@@ -59,6 +61,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
       |> assign_new(:activation_samples, fn -> [] end)
+      |> assign_new(:social_activity, fn -> SocialBrainActivity.latest() end)
       |> MoodHud.seed()
       |> assign(:all_status, collect_all_region_status())
       |> maybe_seed_intent_from_brain()
@@ -67,6 +70,7 @@ defmodule SymbrellaWeb.BrainLive do
     socket =
       if connected?(socket) do
         :ok = Bus.subscribe(@blackboard_topic)
+        :ok = Bus.subscribe(@social_topic)
         Enum.each(@hud_topics, &Bus.subscribe/1)
         :timer.send_interval(@refresh_ms, :refresh_selected)
 
@@ -97,6 +101,31 @@ defmodule SymbrellaWeb.BrainLive do
     <Layouts.app flash={@flash} current_scope={assigns[:current_scope]}>
       <div id="brain-report-root">
         {BrainHTML.brain(assigns)}
+
+        <section id="brain-social-activity"
+          data-brain-report-section="Social Cognitive Processing"
+          class="mx-4 my-5 rounded-xl border border-cyan-400/25 bg-zinc-950 p-4 text-zinc-100 sm:mx-6">
+          <h2 class="text-lg font-semibold text-cyan-200">Social cognitive processing</h2>
+          <p class="mt-1 text-sm text-zinc-400">
+            Transient Colony semantic shadow · read-only lexical and sentence analysis.
+            This is not BrainCell firing, working-memory admission, or learning.
+          </p>
+          <%= if @social_activity do %>
+            <div id="brain-social-metrics" class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              <p>Sentences inspected: <strong>{@social_activity.segments}</strong></p>
+              <p>LIFG choices: <strong>{@social_activity.lifg_choices}</strong></p>
+              <p>ATL winners: <strong>{@social_activity.atl_winners}</strong></p>
+              <p>Supported meanings: <strong>{@social_activity.supported_interpretations}</strong></p>
+              <p>Sources sampled: <strong>{@social_activity.participants}</strong></p>
+              <p>Evidence links: <strong>{@social_activity.relations}</strong></p>
+            </div>
+            <p class="mt-2 text-xs text-zinc-500">Memory-only aggregate, retained for up to five minutes.</p>
+          <% else %>
+            <p id="brain-social-idle" class="mt-3 text-sm text-zinc-400">
+              No recent Colony analysis. Open a conversation under /social and select Analyze cognition.
+            </p>
+          <% end %>
+        </section>
 
         <div data-brain-report-section="Selected Region Runtime Configuration">
           <.selected_region_status selected={@selected} status={@region_status} />
@@ -222,6 +251,13 @@ defmodule SymbrellaWeb.BrainLive do
 
   @impl true
   def handle_info({:brain_bus, env}, socket), do: handle_blackboard(env, socket)
+
+  # A live observation of the isolated external semantic pipeline; do not
+  # mutate region snapshots or attribute this to actual neuron activation.
+  @impl true
+  def handle_info({:social_cognition, activity}, socket) do
+    {:noreply, assign(socket, :social_activity, activity)}
+  end
 
   # HUD topics
   @impl true
