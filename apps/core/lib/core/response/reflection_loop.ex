@@ -96,6 +96,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(wm_news_followup?(context, user_text), :wm_news_followup_evidence_boundary)
+    |> maybe_issue(public_polling_question?(context, user_text), :public_polling_evidence_boundary)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
     |> maybe_issue(stale_calendar_claim?(user_text, draft_text), :stale_calendar_claim)
     |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
@@ -155,6 +156,9 @@ defmodule Core.Response.ReflectionLoop do
         {:repair, issues}
 
       :wm_news_followup_evidence_boundary in issues ->
+        {:repair, issues}
+
+      :public_polling_evidence_boundary in issues ->
         {:repair, issues}
 
       :stale_calendar_claim in issues ->
@@ -229,6 +233,9 @@ defmodule Core.Response.ReflectionLoop do
       cond do
         :wm_news_followup_evidence_boundary in issues ->
           wm_news_followup_fallback(context, user_text)
+
+        :public_polling_evidence_boundary in issues ->
+          public_polling_fallback(context, user_text)
 
         :revision_prompt_echo in issues ->
           news_headline_fallback(context, user_text)
@@ -334,6 +341,9 @@ defmodule Core.Response.ReflectionLoop do
 
         :wm_news_followup_evidence_boundary in issues ->
           "For same-session ongoing-news follow-ups, publish only the provider's dated and attributed headlines; if none were retrieved, state the verification limit. The model draft is not evidence."
+
+        :public_polling_evidence_boundary in issues ->
+          "Public approval and popularity trends require comparable dated polls. Attributed headlines may be reported, but cannot establish a numeric trend or the causes of change. Do not invent polling measurements or imply private data access."
 
         :speaker_location_fidelity in issues ->
           "The assistant attributed an unverified physical location to a conversation participant, or repeated a recently disputed self-location assertion. Current physical location requires its own verified evidence; public geographic facts and chat claims cannot establish it."
@@ -628,6 +638,35 @@ defmodule Core.Response.ReflectionLoop do
       _ ->
         "I searched for dated news about #{query}, but no qualifying headlines were returned. " <>
           "That doesn't establish that nothing has happened; I can't verify recent developments from this search."
+    end
+  end
+
+  defp public_polling_question?(context, user_text) do
+    question =
+      if is_binary(user_text) and String.trim(user_text) != "",
+        do: user_text,
+        else: Map.get(context, :user_text, "")
+
+    is_binary(Core.Tools.WebRetrieval.RequestRouter.public_polling_query(question))
+  end
+
+  defp public_polling_fallback(context, user_text) do
+    limits =
+      "Headlines alone cannot establish a comparable approval-rating trend " <>
+        "or which events caused a change. That requires dated polls with " <>
+        "the measured population, fieldwork dates and methodology."
+
+    cond do
+      news_sources(context) != [] ->
+        news_headline_fallback(context, user_text) <> "\n" <> limits
+
+      is_map(Map.get(context, :web_evidence)) ->
+        empty_news_lookup_fallback(context) <> " " <> limits
+
+      true ->
+        "I don't have verified dated polling results for that person in this " <>
+          "turn, so I can't establish whether their popularity has changed " <>
+          "or explain why. " <> limits
     end
   end
 

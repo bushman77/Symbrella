@@ -3,6 +3,65 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "public popularity questions require evidence, not fabricated polls or refusal" do
+    question = "can you tell me about Donald Trumps popularity and why it is changing"
+    context = %{user_text: question, features: %{intent: :ask, conf: 0.95}}
+
+    for draft <- [
+          "His approval rating is 56% today because of the economy.",
+          "I'm sorry, but I don't have access to information on individual politicians' popularity beyond news reports and polls."
+        ] do
+      assert ReflectionLoop.needed?(context, draft)
+      {:ok, safe, review} = ReflectionLoop.review(question, draft, context)
+      assert review.status == :repair
+      assert :public_polling_evidence_boundary in review.issues
+      assert safe =~ "don't have verified dated polling results"
+      refute safe =~ "56%"
+      refute safe =~ "don't have access to information on individual politicians"
+      refute safe =~ "I searched"
+    end
+
+    unrelated = %{context | user_text: "Tell me about Elixir programming"}
+    {:ok, _, control} =
+      ReflectionLoop.review("Tell me about Elixir programming",
+        "Elixir runs on BEAM and supports pattern matching.", unrelated)
+
+    refute :public_polling_evidence_boundary in control.issues
+  end
+
+  test "public poll headlines are attributed but not treated as poll measurements" do
+    question = "Why is Donald Trump's approval rating changing?"
+
+    context = %{
+      user_text: question,
+      features: %{intent: :ask, conf: 0.95},
+      web_evidence: %{
+        relation: :current_events,
+        request_type: :current_events,
+        routing_trigger: :public_polling_question,
+        status: :retrieved,
+        resolution: :headlines_available,
+        sources: [%{
+          publisher: "Example Poll Wire",
+          title: "A new presidential approval survey is released",
+          published_at: "2026-10-23T12:00:00Z",
+          url: "https://news.google.com/rss/articles/approval-poll-example"
+        }]
+      }
+    }
+
+    {:ok, answer, review} =
+      ReflectionLoop.review(question, "His rating rose to 90% this week.", context)
+
+    assert review.status == :repair
+    assert :public_polling_evidence_boundary in review.issues
+    assert answer =~ "Example Poll Wire"
+    assert answer =~ "2026-10-23"
+    assert answer =~ "https://news.google.com/rss/articles/approval-poll-example"
+    assert answer =~ "Headlines alone cannot establish"
+    refute answer =~ "90%"
+  end
+
   test "a same-session news follow-up without retrieval cannot invent negotiations" do
     question = "What about peace negotiations?"
     context = %{
