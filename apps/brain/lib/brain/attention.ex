@@ -9,7 +9,14 @@ defmodule Brain.Attention do
 
   @spec salience(map(), map()) :: float()
   def salience(%{} = cand, %{} = ctx) do
-    words = Map.get(ctx, :goal_terms, []) |> MapSet.new()
+    words =
+      ctx
+      |> Map.get(:goal_terms, [])
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&normalize_term/1)
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
 
     w =
       cond do
@@ -26,9 +33,11 @@ defmodule Brain.Attention do
   defp match_any?(cand, words) do
     [cand[:id], cand[:lemma], cand[:word], cand[:phrase]]
     |> Enum.flat_map(&explode/1)
-    |> Enum.map(&String.downcase/1)
+    |> Enum.map(&normalize_term/1)
     |> Enum.any?(&MapSet.member?(words, &1))
   end
+
+  defp normalize_term(term), do: term |> String.trim() |> String.downcase()
 
   defp explode(nil), do: []
   defp explode(t) when is_tuple(t), do: [inspect(t)]

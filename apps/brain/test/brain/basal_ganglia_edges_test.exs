@@ -40,6 +40,19 @@ defmodule Brain.BasalGangliaEdgesTest do
     assert s >= 0.35
   end
 
+  test "attention normalizes mixed-case multiword goals before WM gate scoring" do
+    candidate = %{lemma: "the Pacific Ocean", source: :comprehension, score: 0.2}
+    attention = %{goal_terms: ["the Pacific Ocean"]}
+
+    assert Brain.Attention.salience(candidate, attention) == 1.0
+    assert Brain.Attention.salience(%{candidate | lemma: "THE PACIFIC OCEAN"}, attention) == 1.0
+    assert Brain.Attention.salience(candidate, %{goal_terms: ["unrelated topic"]}) == 0.0
+
+    {decision, score} = BG.decide([], candidate, attention, %{gate_threshold: 0.4})
+    assert decision in [:allow, :boost]
+    assert score >= 0.4
+  end
+
   test "cooldown disabled: recent dup does NOT force boost" do
     now = System.system_time(:millisecond)
     wm = [wm_item("z|n|0", now - 10)]
