@@ -84,16 +84,27 @@ defmodule Db.EpisodesTest do
         })
     end
 
+    # Paging covers the entire table, including previously persisted rows.
+    # Count them rather than incorrectly assuming this test inserted all rows.
+    total = Db.aggregate(Episode, :count, :id)
+    assert total >= 3
+
     {first, more?} = Episode.list_page(1, 2)
     assert length(first) == 2
-    assert more?
+    assert more? == (total > 2)
+
     {second, more?} = Episode.list_page(2, 2)
-    assert length(second) == 1
-    refute more?
+    assert length(second) == min(2, total - 2)
+    assert more? == (total > 4)
     assert Enum.empty?(MapSet.intersection(
       MapSet.new(Enum.map(first, & &1.id)),
       MapSet.new(Enum.map(second, & &1.id))
     ))
+
+    last_page = div(total + 1, 2)
+    {last, more?} = Episode.list_page(last_page, 2)
+    assert length(last) == (if rem(total, 2) == 0, do: 2, else: 1)
+    refute more?
   end
 
   test "Episode.list_all/0 returns persisted episodes newest first" do
