@@ -110,6 +110,41 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert disposition =~ ".txt"
   end
 
+  defmodule AttentiveRuntime do
+    defdelegate blackboard_history(limit), to: TestRuntime
+    defdelegate cycle_snapshot(), to: TestRuntime
+    defdelegate mood_snapshot(), to: TestRuntime
+    defdelegate brain_snapshot(), to: TestRuntime
+    defdelegate self_model_snapshot(), to: TestRuntime
+    defdelegate self_portrait_snapshot(), to: TestRuntime
+    defdelegate region_snapshot(region), to: TestRuntime
+    defdelegate region_status(region), to: TestRuntime
+    defdelegate all_region_status(), to: TestRuntime
+
+    def wm_snapshot do
+      {:ok, %{wm: [%{
+        payload: %{
+          kind: :comprehension_frame,
+          context: %{
+            topic: "Russia-Ukraine war",
+            focus_transition: :sustain,
+            verification: :conversation_context_only,
+            attention: %{scope: :session, salience: 1.0}
+          }
+        }
+      }]}}
+    end
+  end
+
+  test "server-side Brain report exposes the same attention as the WM panel" do
+    report = SymbrellaWeb.BrainReport.generate(:lifg, runtime: AttentiveRuntime)
+    assert report =~ "===== Conversational attention ====="
+    assert report =~ "Russia-Ukraine war"
+    assert report =~ "salience: 1.0"
+    assert report =~ "wm_admission: :admitted"
+    assert report =~ "conversation_context_only"
+  end
+
   test "native exporter reads the source blackboard data, not the visible HTML filter" do
     text = SymbrellaWeb.BrainReport.generate(:lifg,
       runtime: TestRuntime,
@@ -119,6 +154,7 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert text =~ "Captured UTC: 2026-10-13T12:00:00Z"
     assert text =~ "FULL_UNFILTERED_PAYLOAD"
     assert text =~ "active memory"
+    assert text =~ "===== Conversational attention ====="
     assert text =~ "===== All region process statuses ====="
     assert text =~ "===== Read-only Colony cognition (not neuron activation) ====="
   end

@@ -36,6 +36,8 @@ defmodule SymbrellaWeb.BrainReport do
       runtime.blackboard_history(@max_events)
       |> List.wrap()
 
+    wm_snapshot = runtime.wm_snapshot()
+
     sections = [
       {"Selected region", region},
       {"Cycle clock", runtime.cycle_snapshot()},
@@ -43,7 +45,8 @@ defmodule SymbrellaWeb.BrainReport do
       {"Brain overview", runtime.brain_snapshot()},
       {"Introspection and self-model", runtime.self_model_snapshot()},
       {"Self-portrait", runtime.self_portrait_snapshot()},
-      {"Working memory", runtime.wm_snapshot()},
+      {"Working memory", wm_snapshot},
+      {"Conversational attention", conversational_attention(wm_snapshot)},
       {"Selected region snapshot", runtime.region_snapshot(region)},
       {"Selected region process status", runtime.region_status(region)},
       {"All region process statuses", runtime.all_region_status()},
@@ -66,4 +69,23 @@ defmodule SymbrellaWeb.BrainReport do
     ]
     |> Enum.join("\n")
   end
+  # Same session-bound WM comprehension data used by the live Brain panel.
+  # Not independent proof of an external fact or a global attention setting.
+  defp conversational_attention({:ok, %{wm: items}}) when is_list(items) do
+    case Enum.find(items, fn item ->
+           payload = Map.get(item, :payload, %{})
+           is_map(payload) and Map.get(payload, :kind) == :comprehension_frame
+         end) do
+      %{payload: %{context: %{} = context}} ->
+        context
+        |> Map.take([:topic, :topic_source, :focus_transition,
+          :temporal_reference, :attention, :verification, :updated_at_ms])
+        |> Map.put(:wm_admission, :admitted)
+
+      _ ->
+        %{status: :no_conversational_attention}
+    end
+  end
+
+  defp conversational_attention(_), do: %{status: :unavailable}
 end

@@ -1,5 +1,5 @@
 defmodule Core.Brain.PrefrontalTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Core.Brain.Prefrontal
   alias Core.SemanticInput

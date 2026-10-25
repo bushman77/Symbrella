@@ -763,7 +763,7 @@ defmodule SymbrellaWeb.BrainHTML do
         <%= if @attention_scope == :session do %>
           <dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs text-zinc-700 dark:text-zinc-200">
             <dt class="text-zinc-500 dark:text-zinc-400">Active subject</dt>
-            <dd class="min-w-0 break-words">{@attention_topic || "Entity-focused context"}</dd>
+            <dd class="min-w-0 break-words">{@attention_topic || if(@attention_goals == [], do: "No active subject", else: "Entity-focused context")}</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Focus transition</dt>
             <dd>{@attention_transition || :none}</dd>
             <dt class="text-zinc-500 dark:text-zinc-400">Salience</dt>
