@@ -150,6 +150,24 @@ defmodule Core.Tools.PollingEvidenceTest do
     end)
   end
 
+  test "a percentage change is not mislabeled an approval level" do
+    sources = [
+      source("Trump approval dropped 12% after the announcement", "change"),
+      source("Trump approval fell by 3% to 31% in a poll", "multiple")
+    ]
+
+    data = PollingEvidence.from_sources(sources, subject: @subject)
+    assert data.observations == []
+    assert data.comparisons == []
+  end
+
+  test "news provider failures are not described as unsuccessful searches" do
+    data = PollingEvidence.from_sources([], subject: @subject, lookup_status: :unavailable)
+    answer = PollingEvidence.answer(data)
+    assert answer =~ "news provider was unavailable"
+    refute answer =~ "couldn't find relevant"
+  end
+
   test "no relevant subject or no valid headline percentage yields no fictional result" do
     data = PollingEvidence.from_sources(
       [source("Another leader approval hits 79%", "other")], subject: @subject

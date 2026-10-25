@@ -89,7 +89,8 @@ defmodule Core.Tools.WebRetrieval do
       |> then(fn evidence ->
         if trigger == :public_polling_question do
           Map.put(evidence, :polling,
-            PollingEvidence.from_sources(evidence.sources, subject: query))
+            PollingEvidence.from_sources(evidence.sources,
+              subject: query, lookup_status: evidence.status))
         else
           evidence
         end

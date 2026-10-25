@@ -12,10 +12,11 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
   @max_observations 8
   @max_sources 3
   @metric_regex ~r/\b(approval|disapproval|favo[u]?rability)\b/iu
-  @pct_regex ~r/\b(?:approval|disapproval|favo[u]?rability)\b[^%]{0,85}?\b(\d{1,3}(?:\.\d+)?)\s*%/iu
+  @pct_regex ~r/\b(?:approval|disapproval|favo[u]?rability)\b[^%]{0,85}?\b(?:to|at|of|is|hits?|reaches|stands\s+at)\s+(\d{1,3}(?:\.\d+)?)\s*%/iu
 
   @spec from_sources(list(), keyword()) :: map()
-  def from_sources(sources, opts \\ []) when is_list(sources) do
+  def from_sources(sources, opts \\ [])
+  def from_sources(sources, opts) when is_list(sources) do
     subject = Keyword.get(opts, :subject)
     relevant = sources |> Enum.filter(&relevant?(&1, subject)) |> Enum.take(@max_sources)
 
@@ -28,6 +29,7 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
       version: 1,
       kind: :public_polling,
       subject: subject,
+      lookup_status: Keyword.get(opts, :lookup_status),
       sources: relevant,
       observations: observations,
       comparisons: comparable_changes(observations),
@@ -51,6 +53,12 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
     comparisons = Map.get(evidence, :comparisons, [])
 
     cond do
+      sources == [] and Map.get(evidence, :lookup_status) == :unavailable ->
+        "The news provider was unavailable for this polling lookup. " <>
+          "I can't verify a rating or its causes from that attempt. " <>
+          "Headlines alone cannot establish a comparable trend without " <>
+          "dated, source-attributed surveys."
+
       sources == [] ->
         "I couldn't find relevant dated polling reporting for that public figure in " <>
           "this lookup. Headlines alone cannot establish a comparable trend " <>
@@ -154,7 +162,8 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
   defp parse_source(_, _), do: []
 
   defp headline_measurement(title, provenance, subject) do
-    with [metric_name] <- Regex.run(@metric_regex, title, capture: :all_but_first),
+    with true <- length(Regex.scan(~r/\b\d{1,3}(?:\.\d+)?\s*%/u, title)) == 1,
+         [metric_name] <- Regex.run(@metric_regex, title, capture: :all_but_first),
          [number] <- Regex.run(@pct_regex, title, capture: :all_but_first),
          {value, ""} <- Float.parse(number),
          true <- value >= 0 and value <= 100 do
