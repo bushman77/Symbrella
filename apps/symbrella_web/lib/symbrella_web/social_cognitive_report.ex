@@ -5,7 +5,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   """
 
   alias Core.Social.SemanticProbe
-  alias SymbrellaWeb.{SocialUnderstanding, SocialDiscourse}
+  alias SymbrellaWeb.{SocialUnderstanding, SocialDiscourse, SocialConversation}
 
   @max_replies 8
   @max_sentences_per_source 12
@@ -69,6 +69,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
         sample |> Map.put(:excerpt, String.slice(sample.text, 0, 240)) |> Map.delete(:text) |> Map.merge(metadata)
       end)
 
+    discourse = SocialDiscourse.build(analyses)
+
     {:ok, %{
       post_id: id,
       source: :colony_external,
@@ -79,7 +81,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       omitted_sentences: dropped_by_source + length(samples) - length(selected),
       segments: analyses,
       understanding: SocialUnderstanding.build(analyses),
-      discourse: SocialDiscourse.build(analyses)
+      discourse: discourse,
+      conversation: SocialConversation.build(topic, comments, analyses, discourse)
     }}
   end
 
