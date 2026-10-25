@@ -96,6 +96,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
+    |> maybe_issue(stale_calendar_claim?(user_text, draft_text), :stale_calendar_claim)
     |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
     |> maybe_issue(news_evidence_not_cited?(context, draft_text), :news_evidence_not_cited)
     |> maybe_issue(news_assessment_missing?(context, user_text, draft_text), :news_assessment_missing)
@@ -150,6 +151,9 @@ defmodule Core.Response.ReflectionLoop do
         {:reject, issues}
 
       :revision_prompt_echo in issues ->
+        {:repair, issues}
+
+      :stale_calendar_claim in issues ->
         {:repair, issues}
 
       :speaker_location_fidelity in issues ->
@@ -235,6 +239,13 @@ defmodule Core.Response.ReflectionLoop do
 
         :prior_lookup_followup in issues ->
           prior_lookup_fallback(context)
+
+        :stale_calendar_claim in issues ->
+          if news_sources(context) != [] do
+            news_headline_fallback(context, user_text)
+          else
+            stale_calendar_fallback(context)
+          end
 
         Enum.any?(issues, &(&1 in [:news_access_refusal, :news_evidence_not_cited, :news_assessment_missing])) ->
           news_headline_fallback(context, user_text)
@@ -409,6 +420,39 @@ defmodule Core.Response.ReflectionLoop do
 
     "I found reference sources, but couldn't establish a complete answer from them:\n" <>
       excerpts <> "\nThese links are references, not independently verified conclusions."
+  end
+
+  # Detect a false present-date assertion for a user's explicitly dated
+  # question. A historical mention of 2022 is not a present-date claim.
+  defp stale_calendar_claim?(user_text, draft_text)
+       when is_binary(user_text) and is_binary(draft_text) do
+    requested_year =
+      case Regex.run(~r/\b((?:19|20)\d{2})\b/u, user_text, capture: :all_but_first) do
+        [year] -> String.to_integer(year)
+        _ -> nil
+      end
+
+    model_year =
+      case Regex.run(
+             ~r/\bas\s+of\s+(?:now|today)\s*\(?\s*(?:(?:early|mid|late)\s+)?((?:19|20)\d{2})\b/iu,
+             draft_text, capture: :all_but_first) do
+        [year] -> String.to_integer(year)
+        _ -> nil
+      end
+
+    is_integer(requested_year) and requested_year <= Date.utc_today().year and
+      is_integer(model_year) and model_year != Date.utc_today().year
+  end
+
+  defp stale_calendar_claim?(_, _), do: false
+
+  defp stale_calendar_fallback(context) do
+    focus = Map.get(context, :wm_context, %{})
+    topic = if is_map(focus), do: Map.get(focus, :topic), else: nil
+    subject = if is_binary(topic) and topic != "", do: topic, else: "that subject"
+
+    "The current year is #{Date.utc_today().year}, not the year I claimed. " <>
+      "I can't verify recent developments concerning #{subject} without matching dated sources."
   end
 
   # The small model may repeat a stale "I have no live news access" message

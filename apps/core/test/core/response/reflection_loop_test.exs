@@ -477,4 +477,27 @@ defmodule Core.Response.ReflectionLoopTest do
 
     Core.Telemetry.detach(handler_id)
   end
+  test "repairs false as-of-now year in present-year follow-up" do
+    year = Date.utc_today().year
+    previous_year = year - 4
+    question = "how about in #{year}?"
+    draft = "As of now (early #{previous_year}), I cannot predict #{year}."
+
+    {:ok, repaired, review} =
+      Core.Response.ReflectionLoop.review(question, draft,
+        %{wm_context: %{topic: "the Russia-Ukraine war", verification: :conversation_context_only}})
+
+    assert review.status == :repair
+    assert :stale_calendar_claim in review.issues
+    assert repaired =~ "current year is #{year}"
+    refute repaired =~ "early #{previous_year}"
+  end
+
+  test "historical dates are not mistaken for present-date hallucinations" do
+    year = Date.utc_today().year
+    {:ok, _reply, review} =
+      Core.Response.ReflectionLoop.review("What happened in #{year}?",
+        "The full-scale invasion started in February 2022.", %{})
+    refute :stale_calendar_claim in review.issues
+  end
 end
