@@ -100,12 +100,30 @@ defmodule SymbrellaWeb.Region.Registry do
       telemetry: [[:brain, :acc, :conflict]],
       config_examples: ["config :brain, acc_conflict_tau: 0.50"]
     },
+    salience: %{
+      subtitle: "Conversational Attention and Salience",
+      desc:
+        "Brain.Attention scores scoped goal-term relevance for the Basal Ganglia WM gate. " <>
+          "Brain.Salience combines novelty, conflict and WM load for prefrontal control. " <>
+          "The current user-established subject is retained by Core.Brain.WM.Comprehension, " <>
+          "not promoted to verified fact or stored as a global attention goal.",
+      modules: [Brain.Attention, Brain.Salience, Core.Brain.WM.Comprehension],
+      telemetry: [
+        [:core, :wm, :attention],
+        [:brain, :gate, :decision],
+        [:brain, :salience, :boost]
+      ],
+      config_examples: [
+        "Brain.focus([candidate], attention: %{goal_terms: [topic]})",
+        "Brain.snapshot_wm()"
+      ]
+    },
     thalamus: %{
       subtitle: "Routing & Gating",
       desc:
         "Routes signals between regions and participates in gating policies (attention/WM routing).",
       modules: [Brain.Thalamus],
-      telemetry: [[:brain, :thalamus, :gate]],
+      telemetry: [[:brain, :thalamus, :curiosity, :decision]],
       config_examples: []
     },
     basal_ganglia: %{
@@ -113,7 +131,7 @@ defmodule SymbrellaWeb.Region.Registry do
       desc:
         "Action selection and gating signals (what enters focus/WM; inhibit/permit competing actions).",
       modules: [Brain.BasalGanglia],
-      telemetry: [[:brain, :basal_ganglia, :gate]],
+      telemetry: [[:brain, :gate, :decision]],
       config_examples: []
     },
     bg: %{
@@ -121,7 +139,7 @@ defmodule SymbrellaWeb.Region.Registry do
       desc:
         "Action selection and gating signals (what enters focus/WM; inhibit/permit competing actions).",
       modules: [Brain.BasalGanglia],
-      telemetry: [[:brain, :basal_ganglia, :gate]],
+      telemetry: [[:brain, :gate, :decision]],
       config_examples: []
     }
   }

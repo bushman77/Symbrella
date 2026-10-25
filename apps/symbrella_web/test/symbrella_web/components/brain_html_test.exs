@@ -257,6 +257,21 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     end
   end
 
+  test "attention, WM gate and Thalamus expose their actual diagnostic signals" do
+    salience = SymbrellaWeb.Region.Registry.defn(:salience)
+    assert Brain.Attention in salience.modules
+    assert Brain.Salience in salience.modules
+    assert Core.Brain.WM.Comprehension in salience.modules
+    assert [:core, :wm, :attention] in salience.telemetry
+    assert [:brain, :salience, :boost] in salience.telemetry
+
+    basal_ganglia = SymbrellaWeb.Region.Registry.defn(:basal_ganglia)
+    assert [:brain, :gate, :decision] in basal_ganglia.telemetry
+
+    thalamus = SymbrellaWeb.Region.Registry.defn(:thalamus)
+    assert [:brain, :thalamus, :curiosity, :decision] in thalamus.telemetry
+  end
+
   test "brain map region paths come from the shared SVG mask asset" do
     expected =
       ~w(frontal prefrontal dlpfc vmpfc dmpfc fpc lifg ofc acc thalamus basal_ganglia hippocampus temporal pmtg atl salience cerebellum)a
