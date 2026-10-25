@@ -59,6 +59,37 @@ defmodule Core.Response.ContextTest do
     assert [%{id: "loop"}] = context.wm_items
   end
 
+  test "subtopic, recency and focus transition reach the response retrieval context" do
+    si = %{
+      session_id: "attention-context-1",
+      sentence: "Tell me more about those negotiations.",
+      wm_context: %{
+        topic: "the Ukraine - Russia war",
+        subtopic: "peace negotiations",
+        current_events?: true,
+        focus_transition: :sustain,
+        verification: :conversation_context_only,
+        attention: %{goal_terms: ["the Ukraine - Russia war"]}
+      }
+    }
+
+    embedded = Context.from_si(si)
+    assert embedded.wm_context.topic == "the Ukraine - Russia war"
+    assert embedded.wm_context.subtopic == "peace negotiations"
+    assert embedded.wm_context.current_events? == true
+    assert embedded.wm_context.focus_transition == :sustain
+    refute Map.has_key?(embedded.wm_context, :attention)
+
+    response =
+      Context.from_response_parts(si.sentence,
+        %{turn_context: embedded, session_id: si.session_id},
+        %{}, %{}, %{})
+
+    assert response.wm_context == embedded.wm_context
+    assert %{relation: :current_events, trigger: :wm_topic_followup} =
+             Core.Tools.WebRetrieval.route_for(response)
+  end
+
   test "bounded hippocampal episode text survives SI to response context transport" do
     episode = fn session, sentence, score ->
       %{score: score, episode: %{meta: %{session_id: session, sentence: sentence},
