@@ -47,6 +47,9 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       place = public_place_location_query(text) ->
         build(place, nil, :general_search, :structured_question)
 
+      temporal = temporal_followup_route(text, context) ->
+        temporal
+
       research = research_query(text) ->
         {query, category} = research
         build(query, nil, category, :structured_question)
@@ -71,6 +74,40 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   end
 
   def route(_), do: nil
+
+  # An explicit year-only follow-up gets its subject from same-session WM or
+  # earlier USER turns. The previous assistant response is not evidence.
+  defp temporal_followup_route(text, context) do
+    case Regex.run(
+           ~r/^\s*(?:(?:and|so)\s+)?(?:how|what)\s+about\s+(?:in\s+)?((?:19|20)\d{2})\s*[?.!]*\s*$/iu,
+           text, capture: :all_but_first) do
+      [year_text] ->
+        year = String.to_integer(year_text)
+        focus = Map.get(context, :wm_context, %{})
+        wm_topic = if is_map(focus), do: Map.get(focus, :topic), else: nil
+        topic =
+          if is_binary(wm_topic) and String.trim(wm_topic) != "",
+            do: wm_topic,
+            else: prior_topic(context)
+
+        cond do
+          not is_binary(topic) or String.trim(topic) == "" ->
+            nil
+
+          year > Date.utc_today().year ->
+            nil
+
+          year == Date.utc_today().year and
+              Regex.match?(~r/\b(?:war|conflict|ceasefire|attacks?|fighting|elections?|protests?|crisis|news|developments?)\b/iu, topic) ->
+            build("#{topic} #{year}", :current_events, :current_events, :followup)
+
+          true ->
+            build("#{topic} #{year}", nil, :historical_reference, :followup)
+        end
+
+      _ -> nil
+    end
+  end
 
   @doc "Extract a bounded current-events query without requiring an LLM."
   @spec current_events_query(String.t()) :: String.t() | nil
@@ -434,6 +471,8 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
 
   defp clean_prior(text) do
     text
+    |> String.replace(
+      ~r/^\s*(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)\s+/iu, "")
     |> String.replace(~r/^\s*(?:(?:no|actually)[,!]\s*)?i\s+(?:mean|meant)\s+/iu, "")
     |> String.replace(~r/^\s*(?:(?:can|could|would)\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+you\s+(?:think|know)\s+about|what\s+are\s+your\s+thoughts\s+(?:on|about)|what\s+do\s+you\s+know\s+about)\s+/iu, "")
     |> String.replace(~r/[?!.]+$/u, "")

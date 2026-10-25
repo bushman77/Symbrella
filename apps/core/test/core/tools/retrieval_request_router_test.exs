@@ -463,4 +463,32 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     assert route("What is my private bank balance?") == nil
     assert route("Where can I meet a friend?") == nil
   end
+  test "year-only war follow-up uses prior user topic for current news" do
+    year = Date.utc_today().year
+    history = [
+      %{"role" => "user", "content" => "can you give me te detils of the Ukranian - Russian war?"},
+      %{"role" => "assistant", "content" => "It began in 2014."}
+    ]
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :followup, query: query} =
+               route("how about in #{year}?", %{retrieval_history: history})
+    assert query =~ "Ukranian - Russian war"
+    assert query =~ Integer.to_string(year)
+
+    assert route("how about in #{year}?", %{retrieval_history: []}) == nil
+    assert route("how about in #{year + 1}?", %{retrieval_history: history}) == nil
+  end
+
+  test "WM context supplies the same-session topic when LLM history is empty" do
+    year = Date.utc_today().year
+    context = %{
+      wm_context: %{topic: "Ukraine Russia war", verification: :conversation_context_only},
+      retrieval_history: []
+    }
+
+    assert %{request_type: :current_events, query: query} =
+             route("what about in #{year}?", context)
+    assert query == "Ukraine Russia war #{year}"
+  end
 end

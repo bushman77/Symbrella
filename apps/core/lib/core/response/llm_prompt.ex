@@ -30,6 +30,7 @@ defmodule Core.Response.LlmPrompt do
       |> put_if_present(:comprehension, comprehension)
       |> put_if_present(:symbolic_frame, symbolic_frame)
       |> put_if_present(:request_structure, request_structure)
+      |> put_if_present(:wm_context, map_get(context, :wm_context))
       |> put_if_present(:web_evidence, map_get(context, :web_evidence))
       |> put_if_present(:response_frame, map_get(context, :response_frame))
       |> put_if_present(:episodic_recall, map_get(context, :episodic_recall))
@@ -85,6 +86,8 @@ defmodule Core.Response.LlmPrompt do
             news_priority_shaping(map_get(features, :web_evidence)),
             reference_priority_shaping(map_get(features, :web_evidence)),
             ResponseFrame.prompt(map_get(features, :response_frame)),
+            "Current UTC date: #{Date.utc_today()}. Treat this as the present date.",
+            conversation_focus_shaping(map_get(features, :wm_context)),
             web_evidence_shaping(map_get(features, :web_evidence)),
             verified_population_priority(features),
             comprehension_shaping(comprehension),
@@ -103,6 +106,8 @@ defmodule Core.Response.LlmPrompt do
       news_priority_shaping(map_get(features, :web_evidence)),
       reference_priority_shaping(map_get(features, :web_evidence)),
       ResponseFrame.prompt(map_get(features, :response_frame)),
+      "Current UTC date: #{Date.utc_today()}. Treat this as the present date.",
+      conversation_focus_shaping(map_get(features, :wm_context)),
       "You are Symbrella, a brain-inspired conversational companion running locally on the user's machine. Participate in ongoing dialogue rather than treating each turn as a separate help-desk question.",
       "Symbrella is your assistant identity, never the user's name. If the user asks for their name, use explicit user-name memory only; if none is visible, say you do not know yet.",
       "Grounded definition: Symbrella is this local Phoenix umbrella app and brain-inspired neuro-symbolic runtime, with explicit modules for semantic parsing, working memory, mood/control signals, and local LLM synthesis.",
@@ -186,6 +191,22 @@ defmodule Core.Response.LlmPrompt do
     |> String.trim()
     end
   end
+
+  defp conversation_focus_shaping(%{topic: topic} = focus)
+       when is_binary(topic) and byte_size(topic) > 0 do
+    temporal =
+      case Map.get(focus, :temporal_reference) do
+        %{year: year, relation: relation} when is_integer(year) ->
+          " The current question refers to year #{year} (#{relation} relative to the runtime date)."
+        _ -> ""
+      end
+
+    "Same-session conversational subject (user-provided, not verified fact): " <>
+      topic <> "." <> temporal <>
+      " Retain this subject across short follow-ups; obtain dated evidence for current events."
+  end
+
+  defp conversation_focus_shaping(_), do: ""
 
   # Verified source support outranks low-confidence lexical *word senses*
   # for this particular factual answer. Keep that distinction near the end
