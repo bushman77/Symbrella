@@ -6,7 +6,7 @@ defmodule SymbrellaWeb.SocialLive do
 
   use SymbrellaWeb, :live_view
 
-  alias SymbrellaWeb.{SocialData, SocialCognitiveReport}
+  alias SymbrellaWeb.{SocialData, SocialCognitiveReport, SocialBrainActivity}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -64,6 +64,9 @@ defmodule SymbrellaWeb.SocialLive do
 
       case analyzer.analyze(report_input) do
         {:ok, report} ->
+          # Share only transient aggregate stage activity with /brain, never the
+          # untrusted Colony text or a claim of neural/synaptic activation.
+          _ = SocialBrainActivity.record(report)
           {:noreply, assign(socket, analysis_open?: true, cognitive_report: report)}
 
         _ ->
@@ -252,6 +255,7 @@ defmodule SymbrellaWeb.SocialLive do
                   <p class="break-words text-xs text-zinc-400">External Colony observations · isolated read-only semantic shadow · no learning or posting</p>
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
+                  <.link navigate={~p"/brain"} class="rounded border border-white/20 px-3 py-2 text-cyan-200 hover:bg-white/10">Brain activity</.link>
                   <button id="social-copy-analysis" type="button" phx-hook="ClipboardCopy"
                     data-clipboard-target="#social-report-content"
                     class="rounded border border-cyan-400/50 px-3 py-2 text-cyan-200 hover:bg-cyan-400/10">Copy report</button>
@@ -266,6 +270,67 @@ defmodule SymbrellaWeb.SocialLive do
                     {@cognitive_report.analyzed_segments} sentence samples inspected · {@cognitive_report.omitted_replies} replies omitted · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted.
                     Lexical selections are hypotheses, not verified facts.
                   </p>
+                  <section :if={Map.has_key?(@cognitive_report, :conversation)}
+                    id="social-conversation-evidence"
+                    class="space-y-5 rounded-lg border border-emerald-400/25 bg-emerald-950/10 p-4 sm:p-5">
+                    <h3 class="font-semibold text-emerald-200">Conversation comprehension · evidence ledger</h3>
+                    <p class="text-xs text-zinc-400">
+                      Only supported sentence interpretations are shown as interpretations.
+                      External statements are not verified facts; the brain activity feed
+                      does not stimulate neurons or store memories.
+                    </p>
+                    <div id="social-topic-analysis" class="space-y-2">
+                      <h4 class="font-semibold">1. What is being discussed?</h4>
+                      <p class="text-sm text-zinc-300">
+                        Author's title (unverified): {@cognitive_report.conversation.subject.author_title}
+                      </p>
+                      <p class="text-xs text-zinc-400">
+                        Status: {@cognitive_report.conversation.subject.status}
+                      </p>
+                      <p :if={@cognitive_report.conversation.subject.lexical_topic_candidates != []}
+                        class="break-words text-sm text-zinc-300">
+                        Lexical topic candidates (not established meaning):
+                        {Enum.join(@cognitive_report.conversation.subject.lexical_topic_candidates, ", ")}
+                      </p>
+                    </div>
+                    <div id="social-speaker-analysis" class="space-y-3">
+                      <h4 class="font-semibold">2. What did each participant mean?</h4>
+                      <article :for={participant <- @cognitive_report.conversation.participants}
+                        class="space-y-2 rounded border border-white/10 p-3">
+                        <p class="break-words text-sm font-semibold text-cyan-200">
+                          {participant.source_label} · {participant.speaker}
+                        </p>
+                        <p class="text-xs text-zinc-400">Interpretation: {participant.status}</p>
+                        <p :if={participant.interpretations == []} class="text-sm text-amber-200">
+                          No supported sentence meaning; intent remains unresolved.
+                        </p>
+                        <div :for={meaning <- participant.interpretations}
+                          class="space-y-1 rounded border border-white/10 p-2 text-sm">
+                          <p class="text-xs text-zinc-400">Speech act: {meaning.speech_act || "unresolved"}</p>
+                          <p class="break-words whitespace-pre-wrap text-zinc-200">
+                            {meaning.interpretation || "Structural meaning unavailable."}
+                          </p>
+                        </div>
+                      </article>
+                    </div>
+                    <div id="social-relation-analysis" class="space-y-3">
+                      <h4 class="font-semibold">3. How do statements relate?</h4>
+                      <p :if={@cognitive_report.conversation.relations == []} class="text-sm text-amber-200">
+                        No supported reply-parent or lexical relation was found.
+                      </p>
+                      <div :for={relation <- @cognitive_report.conversation.relations}
+                        class="rounded border border-white/10 p-3 text-sm">
+                        <p class="break-words font-semibold">{relation.from} → {relation.to}</p>
+                        <p class="text-xs text-zinc-400">{relation.kind} · {relation.status}</p>
+                        <p class="break-words text-zinc-300">{relation.detail}</p>
+                      </div>
+                    </div>
+                    <div class="space-y-1">
+                      <p class="text-sm font-semibold text-amber-200">Still unresolved</p>
+                      <p :for={gap <- @cognitive_report.conversation.gaps}
+                        class="break-words text-sm text-zinc-400">• {gap}</p>
+                    </div>
+                  </section>
                   <section :if={Map.has_key?(@cognitive_report, :understanding)} id="social-understanding"
                     class="space-y-3 rounded-lg border border-cyan-400/25 bg-cyan-950/10 p-4 sm:p-5">
                     <p class="text-xs font-semibold uppercase tracking-widest text-cyan-300">Symbrella's understanding · evidence constrained</p>
