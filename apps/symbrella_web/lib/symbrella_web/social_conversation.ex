@@ -86,8 +86,10 @@ defmodule SymbrellaWeb.SocialConversation do
       discourse
       |> Map.get(:lexical_links, [])
       |> Enum.flat_map(fn link ->
-        from = Enum.at(segments, Map.get(link, :from, -1))
-        to = Enum.at(segments, Map.get(link, :to, -1))
+        from_index = Map.get(link, :from)
+        to_index = Map.get(link, :to)
+        from = if is_integer(from_index) and from_index >= 0, do: Enum.at(segments, from_index), else: nil
+        to = if is_integer(to_index) and to_index >= 0, do: Enum.at(segments, to_index), else: nil
 
         if is_map(from) and is_map(to) do
           [%{
