@@ -140,7 +140,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       )
       |> String.replace(~r/\b(?:currently\s+happening|happening\s+now|right\s+now|as\s+of\s+(?:now|today|current(?:ly)?))\b/iu, "")
       |> String.replace(~r/[?!.]+$/u, "")
-      |> nonempty()
+      |> clean_prior()
     end
   end
 
@@ -425,7 +425,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
           _ ->
             case current_events_query(prior) do
               nil -> clean_prior(prior)
-              query -> query
+              query -> clean_prior(query)
             end
         end
       end

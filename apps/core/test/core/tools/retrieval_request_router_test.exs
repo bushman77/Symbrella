@@ -85,6 +85,16 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     end
   end
 
+  test "current-events extraction strips conversational lead-in without dropping the subject" do
+    query = "what can you tell me about the Ukranian - Russian war as of current"
+
+    assert Core.Tools.WebRetrieval.RequestRouter.current_events_query(query) ==
+             "the Ukranian - Russian war"
+
+    assert %{query: "the Ukranian - Russian war", relation: :current_events} =
+             route(query)
+  end
+
   test "current-year follow-up strips conversational lead-in and time suffix" do
     year = Date.utc_today().year
 
