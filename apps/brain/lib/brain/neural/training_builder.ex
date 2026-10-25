@@ -151,7 +151,7 @@ defmodule Brain.Neural.TrainingBuilder do
     else
       if File.exists?(path) do
         path
-        |> File.stream!([], :line)
+        |> File.stream!(:line, [])
         |> Stream.with_index(1)
         |> Enum.reduce_while({:ok, []}, fn {line, number}, {:ok, acc} ->
           cond do

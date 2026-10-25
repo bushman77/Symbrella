@@ -48,7 +48,7 @@ defmodule Db.JSONL.FullFidelityAudit do
     end
 
     state = new(sample_limit)
-    lines = File.stream!(path, [], :line)
+    lines = File.stream!(path, :line, [])
     lines = if limit == 0, do: lines, else: Stream.take(lines, limit)
 
     state =

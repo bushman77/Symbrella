@@ -35,7 +35,7 @@ defmodule Db.JSONL.IO do
   @spec stream_lines(String.t()) :: Enumerable.t()
   def stream_lines(path) do
     path
-    |> File.stream!([], :line)
+    |> File.stream!(:line, [])
     |> Stream.map(&trim_newline/1)
     |> Stream.reject(&(&1 == ""))
   end

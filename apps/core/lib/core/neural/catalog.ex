@@ -112,7 +112,7 @@ defmodule Core.Neural.Catalog do
 
       true ->
         path
-        |> File.stream!([], :line)
+        |> File.stream!(:line, [])
         |> Stream.with_index(1)
         |> Enum.reduce_while({:ok, []}, fn {line, line_no}, {:ok, acc} ->
           cond do

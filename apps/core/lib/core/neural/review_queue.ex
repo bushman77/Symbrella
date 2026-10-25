@@ -136,7 +136,7 @@ defmodule Core.Neural.ReviewQueue do
 
       true ->
         path
-        |> File.stream!([], :line)
+        |> File.stream!(:line, [])
         |> Stream.with_index(1)
         |> Enum.reduce_while({:ok, []}, fn {line, index}, {:ok, acc} ->
           cond do
