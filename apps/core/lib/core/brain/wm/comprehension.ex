@@ -89,7 +89,9 @@ defmodule Core.Brain.WM.Comprehension do
         %{decision: if(admitted?, do: :admitted, else: :unavailable), source: :comprehension}
       )
 
-      Trace.append(si, :wm_comprehension,
+      si
+      |> Map.put(:wm_context, context)
+      |> Trace.append(:wm_comprehension,
         decision: if(admitted?, do: :admitted, else: :unavailable),
         reason: :completed_comprehension_focus,
         meta: %{

@@ -318,7 +318,8 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert %{topic: "the Ukranian - Russian war", verification: :conversation_context_only} =
              WMComprehension.context_from(initial, initial.comprehension)
 
-    WMComprehension.store(initial, comprehension_wm?: true)
+    stored = WMComprehension.store(initial, comprehension_wm?: true)
+    assert stored.wm_context.topic == "the Ukranian - Russian war"
     recalled = WMComprehension.recall(
       %{session_id: sid, sentence: "how about in 2026?", trace: []},
       comprehension_wm?: true
