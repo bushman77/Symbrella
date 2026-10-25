@@ -278,7 +278,7 @@ defmodule Core.Response.Context do
   defp wm_context_summary(%{} = context) do
     context
     |> Map.take([:intent, :entities, :relation, :recognized_topics,
-      :topic, :topic_source, :temporal_reference,
+      :topic, :subtopic, :topic_source, :focus_transition, :current_events?, :temporal_reference,
       :degraded?, :verification, :interpretation_status])
     |> drop_empty()
   end

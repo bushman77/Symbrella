@@ -386,6 +386,72 @@ defmodule Core.Brain.ComprehensionWMTest do
     end
   end
 
+  test "live negotiation follow-ups keep parent focus and explicit Elixir switch clears it" do
+    sid = session()
+    on_exit(fn -> Brain.defocus(frame_id(sid)) end)
+    comprehension = %{
+      recognized_topics: [], understood: [], uncertain: [], degraded?: true
+    }
+
+    initial = %{
+      session_id: sid,
+      sentence: "what can you tell me about the Ukraine - Russia war as of current",
+      comprehension: comprehension,
+      trace: []
+    }
+
+    selected = WMComprehension.store(initial, comprehension_wm?: true)
+    assert selected.wm_context.topic == "the Ukraine - Russia war"
+    assert selected.wm_context.current_events? == true
+    assert selected.wm_context.focus_transition == :select
+
+    negotiate =
+      %{session_id: sid, sentence: "What about peace negotiations?", trace: []}
+      |> WMComprehension.recall(comprehension_wm?: true)
+      |> Map.put(:comprehension, comprehension)
+      |> WMComprehension.store(comprehension_wm?: true)
+
+    assert negotiate.wm_context.topic == "the Ukraine - Russia war"
+    assert negotiate.wm_context.subtopic == "peace negotiations"
+    assert negotiate.wm_context.current_events? == true
+    assert negotiate.wm_context.focus_transition == :sustain
+    assert negotiate.wm_context.attention.salience == 1.0
+
+    continued =
+      %{session_id: sid, sentence: "Tell me more about those negotiations.", trace: []}
+      |> WMComprehension.recall(comprehension_wm?: true)
+      |> Map.put(:comprehension, comprehension)
+      |> WMComprehension.store(comprehension_wm?: true)
+
+    assert continued.wm_context.topic == "the Ukraine - Russia war"
+    assert continued.wm_context.subtopic == "peace negotiations"
+    assert continued.wm_context.focus_transition == :sustain
+    assert continued.wm_context.attention.salience == 1.0
+
+    changed =
+      %{session_id: sid, sentence: "Let's talk about Elixir programming instead.", trace: []}
+      |> WMComprehension.recall(comprehension_wm?: true)
+      |> Map.put(:comprehension, comprehension)
+      |> WMComprehension.store(comprehension_wm?: true)
+
+    assert changed.wm_context.topic == "Elixir programming"
+    assert changed.wm_context.subtopic == nil
+    assert changed.wm_context.focus_transition == :shift
+    assert changed.wm_context.current_events? == false
+    assert changed.wm_context.attention.salience == 1.0
+  end
+
+  test "unestablished subtopic references do not invent a session subject" do
+    comprehension = %{recognized_topics: [], understood: [], uncertain: [], degraded?: true}
+    context = WMComprehension.context_from(
+      %{sentence: "Tell me more about those negotiations."}, comprehension
+    )
+
+    assert context.topic == nil
+    assert context.subtopic == nil
+    assert context.focus_transition == :none
+  end
+
   test "attention is scoped to the WM admission, scored, and exposed in its context" do
     assert is_pid(Process.whereis(Brain))
     sid = session()

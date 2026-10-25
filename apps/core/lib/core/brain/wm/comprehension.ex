@@ -155,10 +155,29 @@ defmodule Core.Brain.WM.Comprehension do
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
     year = followup_year(sentence)
-    continuation? = is_integer(year) or conversational_continuation?(sentence)
+    previous_topic = field(prev, :topic)
+    previous_subtopic = field(prev, :subtopic)
+    continuation? =
+      is_integer(year) or conversational_continuation?(sentence, previous_subtopic)
     explicit_topic = if continuation?, do: nil, else: public_topic(sentence)
-    inherited_topic = if continuation?, do: field(prev, :topic), else: nil
+    inherited_topic = if continuation?, do: previous_topic, else: nil
     topic = explicit_topic || inherited_topic
+
+    # A conversational subtopic refines, but does not replace, the established
+    # same-session subject. Explicit switches clear both inherited focus and
+    # news recency; neither is promoted to factual evidence.
+    subtopic =
+      if is_binary(inherited_topic) do
+        followup_subtopic(sentence) || previous_subtopic
+      end
+
+    current_events? =
+      cond do
+        is_binary(explicit_topic) -> current_event_request?(sentence)
+        is_binary(inherited_topic) -> field(prev, :current_events?) == true
+        true -> false
+      end
+
     focus_transition =
       cond do
         is_binary(explicit_topic) and is_binary(field(prev, :topic)) and
@@ -213,6 +232,8 @@ defmodule Core.Brain.WM.Comprehension do
     %{
       schema: 1,
       topic: topic,
+      subtopic: subtopic,
+      current_events?: current_events?,
       focus_transition: focus_transition,
       topic_source:
         cond do
@@ -240,10 +261,17 @@ defmodule Core.Brain.WM.Comprehension do
 
   # Conversational subject only, not independently verified evidence.
   defp public_topic(sentence) when is_binary(sentence) do
+    switch =
+      ~r/^\s*(?:let(?:'s|\s+us)|can\s+we|we\s+should)\s+(?:talk|speak|chat|discuss)\s+(?:about\s+)?(.+?)\s+(?:instead|now)\s*[?!.]*\s*$/iu
+
     pattern =
       ~r/^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?give\s+me\s+(?:(?:the|te|some)\s+)?(?:details?|detils|information|info)\s+(?:of|on|about)|(?:what\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?tell\s+me\s+about|tell\s+me\s+about|what\s+do\s+you\s+know\s+about|what\s+(?:are|is)\s+your\s+(?:thoughts?|take)\s+(?:on|about))\s+(.+?)\s*[?!.]*$/iu
 
-    case Regex.run(pattern, sentence, capture: :all_but_first) do
+    matched =
+      Regex.run(switch, sentence, capture: :all_but_first) ||
+        Regex.run(pattern, sentence, capture: :all_but_first)
+
+    case matched do
       [subject] ->
         subject =
           subject
@@ -263,16 +291,70 @@ defmodule Core.Brain.WM.Comprehension do
 
   defp public_topic(_), do: nil
 
-  # Acknowledgements do not discard the current conversation. A new
-  # substantive request without such a cue is allowed to shift the focus.
-  defp conversational_continuation?(sentence) when is_binary(sentence) do
+  # Follow-ups are only allowed to retain a subject explicitly stored in
+  # the same session. A definite plural reference additionally requires a
+  # matching, previously introduced subtopic.
+  defp conversational_continuation?(sentence, previous_subtopic)
+       when is_binary(sentence) do
     Regex.match?(
       ~r/^\s*(?:(?:and|so)\s+)?(?:how|what)\s+about\b|^\s*(?:tell me more|go on|continue|why\??|okay|ok|yes|right|i see|interesting)\s*[.!?]*\s*$/iu,
       sentence
-    )
+    ) or referenced_subtopic?(sentence, previous_subtopic)
   end
 
-  defp conversational_continuation?(_), do: false
+  defp conversational_continuation?(_, _), do: false
+
+  defp referenced_subtopic?(sentence, previous_subtopic)
+       when is_binary(sentence) and is_binary(previous_subtopic) do
+    case Regex.run(
+           ~r/^\s*(?:tell\s+me\s+more\s+about|more\s+(?:about|on))\s+(?:those|these|the)\s+([\p{L}\p{N}][\p{L}\p{N}\s-]*?)\s*[?!.]*\s*$/iu,
+           sentence, capture: :all_but_first
+         ) do
+      [referent] ->
+        previous = String.downcase(previous_subtopic)
+        referent = String.downcase(String.trim(referent))
+        referent != "" and
+          Regex.match?(~r/(?:^|\W)#{Regex.escape(referent)}(?:\W|$)/iu, previous)
+
+      _ ->
+        false
+    end
+  end
+
+  defp referenced_subtopic?(_, _), do: false
+
+  defp followup_subtopic(sentence) when is_binary(sentence) do
+    case Regex.run(
+           ~r/^\s*(?:(?:and|so)\s+)?(?:how|what)\s+about\s+(.+?)\s*[?!.]*\s*$/iu,
+           sentence, capture: :all_but_first
+         ) do
+      [subject] ->
+        subject = String.trim(subject)
+
+        if String.length(subject) <= 96 and
+             not Regex.match?(~r/^(?:in\s+)?(?:19|20)\d{2}$|^(?:it|that|this|them|those|my|our|your)\b/iu, subject),
+          do: subject,
+          else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp followup_subtopic(_), do: nil
+
+  defp current_event_request?(sentence) when is_binary(sentence) do
+    Regex.match?(
+      ~r/\b(?:war|conflict|ceasefire|attacks?|fighting|elections?|news|developments?|negotiations?)\b/iu,
+      sentence
+    ) and
+      Regex.match?(
+        ~r/\b(?:current(?:ly)?|latest|recent(?:ly)?|today|tonight|ongoing|now|this\s+week|as\s+of\s+(?:current|now|today))\b/iu,
+        sentence
+      )
+  end
+
+  defp current_event_request?(_), do: false
 
   defp attention_terms(context) do
     terms =

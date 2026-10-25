@@ -201,8 +201,17 @@ defmodule Core.Response.LlmPrompt do
         _ -> ""
       end
 
+    subtopic =
+      case Map.get(focus, :subtopic) do
+        value when is_binary(value) and value != "" ->
+          " Current subtopic: " <> value <> " (referent context, not verified facts)."
+
+        _ ->
+          ""
+      end
+
     "Same-session conversational subject (user-provided, not verified fact): " <>
-      topic <> "." <> temporal <>
+      topic <> "." <> subtopic <> temporal <>
       " Retain this subject across short follow-ups; obtain dated evidence for current events."
   end
 
