@@ -153,6 +153,9 @@ defmodule Core.Response.LlmPromptEvents do
     %{
       status: Map.get(evidence, :status),
       resolution: Map.get(evidence, :resolution),
+      request_type: Map.get(evidence, :request_type),
+      routing_trigger: Map.get(evidence, :routing_trigger),
+      polling: polling_summary(Map.get(evidence, :polling)),
       attempted_count: Map.get(evidence, :attempted_count),
       attempts: Map.get(evidence, :attempts, []),
       provider: Map.get(evidence, :provider),
@@ -166,6 +169,43 @@ defmodule Core.Response.LlmPromptEvents do
   end
 
   defp retrieval_summary(_), do: nil
+
+  defp polling_summary(%{kind: :public_polling} = polling) do
+    %{
+      kind: :public_polling,
+      evidence_level: Map.get(polling, :evidence_level),
+      verified?: Map.get(polling, :verified?),
+      limitations: Map.get(polling, :limitations, []),
+      observations:
+        polling
+        |> Map.get(:observations, [])
+        |> Enum.take(3)
+        |> Enum.map(fn item ->
+          item
+          |> Map.take([
+            :subject, :metric, :value_pct, :origin, :population, :pollster,
+            :fieldwork_start, :fieldwork_end, :sample_size, :question, :methodology
+          ])
+          |> Map.put(:provenance,
+            Map.take(Map.get(item, :provenance, %{}),
+              [:publisher, :published_at, :url]))
+        end),
+      comparisons:
+        polling
+        |> Map.get(:comparisons, [])
+        |> Enum.take(2)
+        |> Enum.map(fn item ->
+          %{
+            delta_percentage_points: Map.get(item, :delta_percentage_points),
+            causal_inference?: Map.get(item, :causal_inference?),
+            earlier_source: get_in(item, [:earlier, :provenance, :url]),
+            later_source: get_in(item, [:later, :provenance, :url])
+          }
+        end)
+    }
+  end
+
+  defp polling_summary(_), do: nil
 
   defp reflection_summary(%{} = reflection) do
     Map.take(reflection, [

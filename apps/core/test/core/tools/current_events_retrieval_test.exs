@@ -32,6 +32,29 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     end
   end
 
+  defmodule PollHeadlines do
+    def search(_query, _opts) do
+      {:ok, [
+        %{
+          provider: :news_rss,
+          title: "Trump's approval falls to a reported low of 31% in an opinion poll",
+          publisher: "Example Poll Wire",
+          published_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+          url: "https://news.google.com/rss/articles/poll-31",
+          excerpt: "Dated poll headline; fieldwork and survey population not given."
+        },
+        %{
+          provider: :news_rss,
+          title: "How popular is Donald Trump?",
+          publisher: "Example Poll Review",
+          published_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+          url: "https://news.google.com/rss/articles/popularity-review",
+          excerpt: "Analysis headline, not a fieldwork result."
+        }
+      ]}
+    end
+  end
+
   defmodule MissingNews do
     def search(_query, _opts), do: {:error, :connection_failed}
   end
@@ -129,6 +152,34 @@ defmodule Core.Tools.CurrentEventsRetrievalTest do
     assert review.status == :repair
     assert safe =~ "Headlines alone cannot establish"
     refute safe =~ "91%"
+  end
+
+  test "live polling receipt extracts a reported level but does not invent a comparable trend" do
+    request = question("can you tell me about Donald Trumps popularity and why it is changing")
+
+    result = WebRetrieval.enrich(request,
+      enabled?: true, news_provider: PollHeadlines)
+
+    assert result.web_evidence.support == nil
+    assert result.web_evidence.routing_trigger == :public_polling_question
+
+    polling = result.web_evidence.polling
+    assert polling.verified? == false
+    assert [%{metric: :approval, value_pct: 31.0,
+              fieldwork_start: nil, population: nil}] = polling.observations
+    assert polling.comparisons == []
+
+    {:ok, answer, reflection} =
+      ReflectionLoop.review(request.user_text,
+        "Approval is 96% because of a recent announcement.", result)
+
+    assert reflection.status == :repair
+    assert :public_polling_evidence_boundary in reflection.issues
+    assert answer =~ "31% approval"
+    assert answer =~ "https://news.google.com/rss/articles/poll-31"
+    assert answer =~ "Headlines alone cannot establish"
+    refute answer =~ "96%"
+    refute answer =~ "because of a recent announcement"
   end
 
   test "explicit requests for latest news use the news provider" do
