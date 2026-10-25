@@ -17,6 +17,7 @@ defmodule Core.Response.ReflectionLoop do
   alias Core.Response.SpeakerLocationFidelity
   alias Core.Tools.WebRetrieval.Grounding
   alias Core.Tools.WebRetrieval.PlaceLocation
+  alias Core.Tools.WebRetrieval.PollingEvidence
   alias Core.Semantic.EventFrames
 
   @event [:core, :response, :reflection]
@@ -656,7 +657,12 @@ defmodule Core.Response.ReflectionLoop do
         "or which events caused a change. That requires dated polls with " <>
         "the measured population, fieldwork dates and methodology."
 
+    polling = get_in(context, [:web_evidence, :polling])
+
     cond do
+      match?(%{kind: :public_polling}, polling) ->
+        PollingEvidence.answer(polling)
+
       news_sources(context) != [] ->
         news_headline_fallback(context, user_text) <> "\n" <> limits
 

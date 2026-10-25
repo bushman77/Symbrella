@@ -78,7 +78,7 @@ defmodule Core.Tools.WebRetrieval.PollingEvidence do
           case comparisons do
             [latest | _] -> comparison_text(latest)
             [] ->
-              "These results do not establish a comparable before-and-after " <>
+              "Headlines alone cannot establish a comparable before-and-after " <>
                 "approval trend: matching fieldwork dates, population, " <>
                 "pollster, question and methodology are not available."
           end

@@ -414,6 +414,17 @@ defmodule Core.Response.LlmPrompt do
 
   defp reference_priority_shaping(_), do: ""
 
+  defp news_priority_shaping(%{
+         status: :retrieved,
+         resolution: :headlines_available,
+         routing_trigger: :public_polling_question
+       }) do
+    "POLLING PRIORITY: Core may have dated headlines that report poll figures, " <>
+      "but these are NOT a verified poll series. Do not infer survey fieldwork, " <>
+      "population, methodology, comparable trend or causes from publication dates " <>
+      "or headline percentages. Reflection will provide the bounded evidence answer."
+  end
+
   defp news_priority_shaping(%{status: :retrieved, resolution: :headlines_available}) do
     "CURRENT-EVENT PRIORITY: recent dated headlines have ALREADY been retrieved. " <>
       "Use and cite the evidence below; do not claim you have no news access. " <>

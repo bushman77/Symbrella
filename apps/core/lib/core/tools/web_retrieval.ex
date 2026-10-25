@@ -9,6 +9,7 @@ defmodule Core.Tools.WebRetrieval do
 
   alias Core.Telemetry
   alias Core.Tools.WebRetrieval.RequestRouter
+  alias Core.Tools.WebRetrieval.PollingEvidence
   alias Core.Tools.WebRetrieval.PlaceScope
 
   @event [:core, :web_retrieval, :complete]
@@ -85,6 +86,14 @@ defmodule Core.Tools.WebRetrieval do
       |> Core.Tools.EvidenceResolver.resolve(query, relation, cfg, resolver_opts)
       |> Map.put(:request_type, type)
       |> Map.put(:routing_trigger, trigger)
+      |> then(fn evidence ->
+        if trigger == :public_polling_question do
+          Map.put(evidence, :polling,
+            PollingEvidence.from_sources(evidence.sources, subject: query))
+        else
+          evidence
+        end
+      end)
       |> then(fn evidence ->
         case PlaceScope.scope_summary(lookup_context) do
           nil -> evidence
