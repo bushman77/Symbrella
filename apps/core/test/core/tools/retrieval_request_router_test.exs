@@ -281,13 +281,13 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
              query: "What is happening with the Japanese railgun news"} =
              route("Search for it", %{retrieval_history: current})
 
-    historical = [
-      %{"role" => "user", "content" => "Tell me about the history of cannons"}
+    general = [
+      %{"role" => "user", "content" => "Tell me about the Pacific Ocean"}
     ]
 
     assert %{relation: nil, request_type: :general_search,
-             trigger: :explicit_search, query: "the history of cannons"} =
-             route("Search for it", %{retrieval_history: historical})
+             trigger: :explicit_search, query: "the Pacific Ocean"} =
+             route("Search for it", %{retrieval_history: general})
   end
 
   test "standalone typo corrections and acknowledgements are never chosen as topics" do
