@@ -95,7 +95,7 @@ defmodule Core.Response.ReflectionLoop do
     |> maybe_issue(news_sources(context) != [] and EvidenceRevision.prompt_echo?(draft_text, []), :revision_prompt_echo)
     |> maybe_issue(unfounded_device_refusal?(context, draft_text), :unsupported_device_refusal)
     |> maybe_issue(news_access_refusal?(context, draft_text), :news_access_refusal)
-    |> maybe_issue(wm_news_followup?(context), :wm_news_followup_evidence_boundary)
+    |> maybe_issue(wm_news_followup?(context, user_text), :wm_news_followup_evidence_boundary)
     |> maybe_issue(news_lookup_misrepresented?(context, draft_text), :news_lookup_misrepresented)
     |> maybe_issue(stale_calendar_claim?(user_text, draft_text), :stale_calendar_claim)
     |> maybe_issue(prior_lookup_followup?(context, user_text), :prior_lookup_followup)
@@ -631,21 +631,54 @@ defmodule Core.Response.ReflectionLoop do
     end
   end
 
-  defp wm_news_followup?(context) do
-    case Map.get(context, :web_evidence) do
-      %{request_type: :current_events, routing_trigger: :wm_topic_followup} ->
-        true
+  defp wm_news_followup?(context, user_text) do
+    routed? =
+      match?(
+        %{request_type: :current_events, routing_trigger: :wm_topic_followup},
+        Map.get(context, :web_evidence)
+      )
 
-      _ ->
-        false
-    end
+    focus = Map.get(context, :wm_context, %{})
+    user_text = if is_binary(user_text) and user_text != "",
+      do: user_text, else: Map.get(context, :user_text, "")
+
+    # A retrieval provider may be disabled or fail before a receipt is
+    # attached. Protect the turn using its explicit same-session WM focus
+    # rather than treating absence of a receipt as permission to invent news.
+    scoped? =
+      is_map(focus) and Map.get(focus, :current_events?) == true and
+        Map.get(focus, :focus_transition) == :sustain and
+        is_binary(Map.get(focus, :topic)) and
+        is_binary(Map.get(focus, :subtopic)) and
+        is_binary(user_text) and
+        Regex.match?(
+          ~r/^\s*(?:(?:and|so)\s+)?(?:what|how)\s+about\s+.+|^\s*(?:tell\s+me\s+more\s+about|more\s+(?:about|on))\s+(?:those|these|the)\s+.+/iu,
+          user_text
+        )
+
+    routed? or scoped?
   end
 
   defp wm_news_followup_fallback(context, user_text) do
-    if news_sources(context) == [] do
-      empty_news_lookup_fallback(context)
-    else
-      news_headline_fallback(context, user_text)
+    cond do
+      news_sources(context) != [] ->
+        news_headline_fallback(context, user_text)
+
+      match?(
+        %{request_type: :current_events, routing_trigger: :wm_topic_followup},
+        Map.get(context, :web_evidence)
+      ) ->
+        empty_news_lookup_fallback(context)
+
+      true ->
+        focus = Map.get(context, :wm_context, %{})
+        topic = Map.get(focus, :topic, "the previous subject")
+        subtopic = Map.get(focus, :subtopic, "the current developments")
+
+        "We are discussing #{subtopic} in the context of #{topic}, but I don't " <>
+          "have verified dated reporting for this turn. I can't confirm whether " <>
+          "negotiations are currently taking place, or describe any agreements " <>
+          "as established facts without sources."
     end
   end
 

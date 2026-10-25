@@ -3,6 +3,44 @@ defmodule Core.Response.ReflectionLoopTest do
 
   alias Core.Response.ReflectionLoop
 
+  test "a same-session news follow-up without retrieval cannot invent negotiations" do
+    question = "What about peace negotiations?"
+    context = %{
+      user_text: question,
+      wm_context: %{
+        topic: "the Ukraine - Russia war",
+        subtopic: "peace negotiations",
+        current_events?: true,
+        focus_transition: :sustain,
+        verification: :conversation_context_only
+      }
+    }
+
+    unsupported =
+      "There are no current negotiations, and Russia has accepted a 20-year settlement."
+
+    assert ReflectionLoop.needed?(context, unsupported)
+
+    {:ok, safe, reflection} = ReflectionLoop.review(question, unsupported, context)
+
+    assert reflection.status == :repair
+    assert :wm_news_followup_evidence_boundary in reflection.issues
+    assert safe =~ "peace negotiations"
+    assert safe =~ "don't have verified dated reporting"
+    refute safe =~ "There are no current negotiations"
+    refute safe =~ "20-year settlement"
+    refute safe =~ "I searched"
+
+    unrelated_context = %{context | wm_context: %{context.wm_context |
+      current_events?: false, focus_transition: :shift}}
+
+    {:ok, same_text, unrelated} =
+      ReflectionLoop.review(question, unsupported, unrelated_context)
+
+    refute :wm_news_followup_evidence_boundary in unrelated.issues
+    assert same_text == unsupported
+  end
+
   test "scoped negotiation news follow-up cannot publish unsupported model claims" do
     url = "https://news.google.com/rss/articles/bounded-diplomacy-1"
     current = DateTime.to_iso8601(DateTime.utc_now())
