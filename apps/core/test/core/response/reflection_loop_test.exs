@@ -7,6 +7,9 @@ defmodule Core.Response.ReflectionLoopTest do
     question = "What about peace negotiations?"
     context = %{
       user_text: question,
+      # Isolate the news-evidence boundary from generic low-confidence /
+      # unknown-intent clarification in the unrelated control case.
+      features: %{intent: :ask, conf: 0.95},
       wm_context: %{
         topic: "the Ukraine - Russia war",
         subtopic: "peace negotiations",
