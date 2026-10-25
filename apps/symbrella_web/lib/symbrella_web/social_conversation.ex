@@ -104,6 +104,27 @@ defmodule SymbrellaWeb.SocialConversation do
         end
       end)
 
+    sentence_order_links =
+      segments
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [earlier, later] ->
+        same_source? =
+          source_label(Map.get(earlier, :label)) == source_label(Map.get(later, :label)) and
+            Map.get(earlier, :author) == Map.get(later, :author)
+
+        if same_source? do
+          [%{
+            from: Map.get(earlier, :label),
+            to: Map.get(later, :label),
+            kind: :same_source_sentence_order,
+            status: :ordering_only,
+            detail: "These sentences appear consecutively in the same author's source; no semantic relation is inferred."
+          }]
+        else
+          []
+        end
+      end)
+
     topics =
       segments
       |> Enum.flat_map(fn segment ->
@@ -124,7 +145,7 @@ defmodule SymbrellaWeb.SocialConversation do
         trust: :external_unverified
       },
       participants: participants,
-      relations: Enum.take(reply_links ++ lexical_links, @max_relations),
+      relations: Enum.take(reply_links ++ lexical_links ++ sentence_order_links, @max_relations),
       gaps: [
         "A title and recognized words do not prove the discussion's intended meaning.",
         "Reply linkage does not establish agreement, disagreement, correction, or causality.",
