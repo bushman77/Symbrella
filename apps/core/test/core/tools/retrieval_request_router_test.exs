@@ -270,6 +270,26 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     refute query =~ "typo"
   end
 
+  test "explicit follow-up keeps original news intent but not the recency suffix" do
+    current = [
+      %{"role" => "user",
+        "content" => "What is happening with the Japanese railgun news currently?"}
+    ]
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :explicit_search,
+             query: "What is happening with the Japanese railgun news"} =
+             route("Search for it", %{retrieval_history: current})
+
+    historical = [
+      %{"role" => "user", "content" => "Tell me about the history of cannons"}
+    ]
+
+    assert %{relation: nil, request_type: :general_search,
+             trigger: :explicit_search, query: "the history of cannons"} =
+             route("Search for it", %{retrieval_history: historical})
+  end
+
   test "standalone typo corrections and acknowledgements are never chosen as topics" do
     original = "What is happening with the Japanese railgun news currently?"
 

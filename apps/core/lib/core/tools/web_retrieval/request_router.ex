@@ -207,12 +207,13 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     # decline routing; never send a subject-free generic RSS request.
     contextual? = unresolved_reference?(query) or topicless_news?(query)
 
-    resolved =
-      if contextual?, do: prior_topic(context), else: nonempty(query)
+    prior = if contextual?, do: prior_topic_resolution(context), else: nil
+    resolved = if contextual?, do: prior && prior.query, else: nonempty(query)
 
     if resolved do
       cond do
-        contextual? and news_intent?(original) ->
+        contextual? and
+            (news_intent?(original) or (is_map(prior) and prior.current_events?)) ->
           build(resolved, :current_events, :current_events, :explicit_search)
 
         current_events_query(resolved) ->
@@ -405,6 +406,16 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   end
 
   defp prior_topic(context) do
+    case prior_topic_resolution(context) do
+      %{query: query} -> query
+      _ -> nil
+    end
+  end
+
+  # Keep the previous user's retrieval intent separate from the cleaned
+  # search subject. Removing "currently" from a query must not silently
+  # demote a subsequent "search for it" from news to general search.
+  defp prior_topic_resolution(context) do
     context
     |> Map.get(:retrieval_history, [])
     |> List.wrap()
@@ -418,16 +429,23 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
     |> Enum.find_value(fn prior ->
       if is_binary(prior) and substantive_topic?(prior) and
            not anaphora?(prior) do
-        case explicit_request(prior) do
-          {:explicit, query, _} when is_binary(query) and byte_size(query) >= 4 ->
-            if unresolved_reference?(query) or topicless_news?(query),
-              do: nil, else: nonempty(query)
-          _ ->
-            case current_events_query(prior) do
-              nil -> clean_prior(prior)
-              query -> clean_prior(query)
-            end
-        end
+        news_query = current_events_query(prior)
+        current_events? = is_binary(news_query) or news_intent?(prior)
+
+        query =
+          case explicit_request(prior) do
+            {:explicit, explicit_query, _}
+            when is_binary(explicit_query) and byte_size(explicit_query) >= 4 ->
+              if unresolved_reference?(explicit_query) or topicless_news?(explicit_query),
+                do: nil, else: nonempty(explicit_query)
+
+            _ ->
+              clean_prior(news_query || prior)
+          end
+
+        if is_binary(query),
+          do: %{query: query, current_events?: current_events?},
+          else: nil
       end
     end)
   end

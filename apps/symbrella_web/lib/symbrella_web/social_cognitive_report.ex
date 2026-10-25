@@ -13,7 +13,9 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   @max_sentence_chars 600
   @max_source_chars 12_000
 
-  def analyze(%{topic: %{id: id} = topic, comments: comments}, opts \\ [])
+  def analyze(input, opts \\ [])
+
+  def analyze(%{topic: %{id: id} = topic, comments: comments}, opts)
       when is_binary(id) and is_list(comments) do
     probe = Keyword.get(opts, :probe, &SemanticProbe.run/2)
 
