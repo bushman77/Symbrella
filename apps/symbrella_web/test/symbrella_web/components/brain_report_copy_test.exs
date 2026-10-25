@@ -111,15 +111,15 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
   end
 
   defmodule AttentiveRuntime do
-    defdelegate blackboard_history(limit), to: TestRuntime
-    defdelegate cycle_snapshot(), to: TestRuntime
-    defdelegate mood_snapshot(), to: TestRuntime
-    defdelegate brain_snapshot(), to: TestRuntime
-    defdelegate self_model_snapshot(), to: TestRuntime
-    defdelegate self_portrait_snapshot(), to: TestRuntime
-    defdelegate region_snapshot(region), to: TestRuntime
-    defdelegate region_status(region), to: TestRuntime
-    defdelegate all_region_status(), to: TestRuntime
+    defdelegate blackboard_history(limit), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate cycle_snapshot(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate mood_snapshot(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate brain_snapshot(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate self_model_snapshot(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate self_portrait_snapshot(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate region_snapshot(region), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate region_status(region), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
+    defdelegate all_region_status(), to: SymbrellaWeb.BrainReportCopyTest.TestRuntime
 
     def wm_snapshot do
       {:ok, %{wm: [%{

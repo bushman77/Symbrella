@@ -73,7 +73,7 @@ defmodule SymbrellaWeb.BrainReport do
   # Not independent proof of an external fact or a global attention setting.
   defp conversational_attention({:ok, %{wm: items}}) when is_list(items) do
     case Enum.find(items, fn item ->
-           payload = Map.get(item, :payload, %{})
+           payload = if is_map(item), do: Map.get(item, :payload, %{}), else: %{}
            is_map(payload) and Map.get(payload, :kind) == :comprehension_frame
          end) do
       %{payload: %{context: %{} = context}} ->
