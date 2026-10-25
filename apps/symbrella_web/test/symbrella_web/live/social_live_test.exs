@@ -152,6 +152,13 @@ defmodule SymbrellaWeb.SocialLiveTest do
         post_id: topic.id,
         analyzed_segments: 1,
         omitted_replies: length(comments),
+        conversation: %{
+          subject: %{author_title: topic.title, status: :author_title_only, lexical_topic_candidates: []},
+          participants: [%{source_label: "Original post", speaker: topic.author,
+            status: :meaning_unresolved, interpretations: []}],
+          relations: [],
+          gaps: ["No supported sentence interpretation."]
+        },
         segments: [%{
           label: "Original post",
           author: topic.author,
@@ -186,6 +193,11 @@ defmodule SymbrellaWeb.SocialLiveTest do
       assert has_element?(view, "#social-copy-analysis[phx-hook='ClipboardCopy']")
       assert has_element?(view, "#social-report-content.overflow-y-auto")
       assert has_element?(view, "#social-cognitive-modal[role='dialog']")
+      assert has_element?(view, "#social-conversation-evidence")
+      assert has_element?(view, "#social-topic-analysis")
+      assert has_element?(view, "#social-speaker-analysis")
+      assert has_element?(view, "#social-relation-analysis")
+      assert %{} = SymbrellaWeb.SocialBrainActivity.latest()
 
       assert html =~ "grammar_candidates_detected"
       assert html =~ "read_only_reduced"
