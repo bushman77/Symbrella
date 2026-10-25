@@ -117,7 +117,9 @@ defmodule Core.Brain.Prefrontal do
 
       Code.ensure_loaded?(Brain) and function_exported?(Brain, :snapshot_wm, 0) ->
         case Brain.snapshot_wm() do
-          %{wm: wm} when is_list(wm) -> length(wm) / 7.0
+          %{wm: wm, cfg: %{capacity: capacity}}
+          when is_list(wm) and is_integer(capacity) and capacity > 0 ->
+            length(wm) / capacity
           _ -> 0.0
         end
 

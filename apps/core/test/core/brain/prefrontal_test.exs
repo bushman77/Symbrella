@@ -33,6 +33,18 @@ defmodule Core.Brain.PrefrontalTest do
     assert [%{stage: :prefrontal_control, decision: :attached} | _] = out.trace
   end
 
+  test "working-memory load uses configured Brain capacity" do
+    case Brain.snapshot_wm() do
+      %{wm: items, cfg: %{capacity: capacity}}
+      when is_list(items) and is_integer(capacity) and capacity > 0 ->
+        ctx = Prefrontal.context_from_si(%{}, [])
+        assert_in_delta ctx.wm_load, min(length(items) / capacity, 1.0), 0.00001
+
+      _ ->
+        flunk("Brain WM must expose its configured capacity")
+    end
+  end
+
   test "can be disabled by option" do
     si = %SemanticInput{sentence: "hello", trace: []}
 

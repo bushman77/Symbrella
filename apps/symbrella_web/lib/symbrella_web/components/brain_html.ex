@@ -692,11 +692,29 @@ defmodule SymbrellaWeb.BrainHTML do
 
     empty? = items == []
 
+    focus_item =
+      Enum.find(items, fn item ->
+        payload = mget(item, :payload)
+        mget(payload, :kind) == :comprehension_frame and
+          is_map(mget(payload, :context))
+      end)
+
+    focus_context = mget(mget(focus_item, :payload), :context) || %{}
+    attention = mget(focus_context, :attention) || %{}
+    goals = mget(attention, :goal_terms) || []
+
     assigns =
       assigns
       |> assign(:wm, wm)
       |> assign(:items, items)
       |> assign(:empty?, empty?)
+      |> assign(:attention_topic, mget(focus_context, :topic))
+      |> assign(:attention_transition, mget(attention, :transition))
+      |> assign(:attention_salience, mget(attention, :salience))
+      |> assign(:attention_goals, if(is_list(goals), do: goals, else: []))
+      |> assign(:attention_scope, mget(attention, :scope))
+      |> assign(:attention_year, mget(mget(focus_context, :temporal_reference), :year))
+      |> assign(:attention_verification, mget(focus_context, :verification))
       |> assign(:copy_target_id, "wm-copy-target")
       |> assign(:copy_button_id, "wm-copy-btn")
 
@@ -733,6 +751,36 @@ defmodule SymbrellaWeb.BrainHTML do
           >
             Copy
           </button>
+        <% end %>
+      </div>
+
+      <div
+        id="attention-copy-target"
+        class="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-800/60"
+        data-attention-scope={@attention_scope || :none}
+      >
+        <div class="font-semibold text-zinc-800 dark:text-zinc-100">Conversational Attention</div>
+        <%= if @attention_scope == :session do %>
+          <dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs text-zinc-700 dark:text-zinc-200">
+            <dt class="text-zinc-500 dark:text-zinc-400">Active subject</dt>
+            <dd class="min-w-0 break-words">{@attention_topic || "Entity-focused context"}</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Focus transition</dt>
+            <dd>{@attention_transition || :none}</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Salience</dt>
+            <dd>{fmt(@attention_salience)}</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Goal terms</dt>
+            <dd class="min-w-0 break-words">{Enum.join(@attention_goals, ", ")}</dd>
+            <dt :if={@attention_year} class="text-zinc-500 dark:text-zinc-400">Year</dt>
+            <dd :if={@attention_year}>{@attention_year}</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Gate</dt>
+            <dd>Admitted via Basal Ganglia</dd>
+            <dt class="text-zinc-500 dark:text-zinc-400">Evidence</dt>
+            <dd>{@attention_verification || :unknown} (not verified facts)</dd>
+          </dl>
+        <% else %>
+          <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            No session-scoped conversational attention in the latest WM snapshot.
+          </p>
         <% end %>
       </div>
 

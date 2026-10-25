@@ -114,7 +114,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
           limit={50}
         />
         </div>
-        <div data-brain-report-section="Working Memory" data-brain-report-source="#wm-copy-target">
+        <div data-brain-report-section="Working Memory and Attention" data-brain-report-source="#attention-copy-target, #wm-copy-target">
           <SymbrellaWeb.BrainHTML.wm_panel wm={@wm} />
         </div>
       </div>

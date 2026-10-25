@@ -32,6 +32,45 @@ defmodule SymbrellaWeb.BrainHTMLTest do
     assert html =~ "70.0%"
   end
 
+  test "WM panel exposes session attention and gate provenance" do
+    html =
+      render_component(&BrainHTML.wm_panel/1,
+        wm: %{
+          source: "brain",
+          size: 1,
+          capacity: 12,
+          items: [
+            %{
+              id: "comprehension:example",
+              source: :comprehension,
+              payload: %{
+                kind: :comprehension_frame,
+                context: %{
+                  topic: "Russia-Ukraine war",
+                  temporal_reference: %{year: 2026, relation: :current},
+                  verification: :conversation_context_only,
+                  attention: %{
+                    scope: :session,
+                    transition: :sustain,
+                    salience: 1.0,
+                    goal_terms: ["Russia-Ukraine war"]
+                  }
+                }
+              }
+            }
+          ]
+        })
+
+    assert html =~ "Conversational Attention"
+    assert html =~ "Russia-Ukraine war"
+    assert html =~ "sustain"
+    assert html =~ "1.000"
+    assert html =~ "Admitted via Basal Ganglia"
+    assert html =~ "2026"
+    assert html =~ "not verified facts"
+    assert html =~ "attention-copy-target"
+  end
+
   test "hud_row formats integer clock telemetry without crashing" do
     html =
       render_component(&BrainHTML.hud_row/1,
