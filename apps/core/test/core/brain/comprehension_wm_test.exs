@@ -341,6 +341,16 @@ defmodule Core.Brain.ComprehensionWMTest do
     on_exit(fn -> Brain.defocus(id) end)
 
     original_attention = Brain.snapshot_wm().attention
+    telemetry_id = "wm-attention-#{System.unique_integer([:positive])}"
+
+    :ok = :telemetry.attach(
+      telemetry_id,
+      [:core, :wm, :attention],
+      fn event, measures, meta, pid -> send(pid, {event, measures, meta}) end,
+      self()
+    )
+    on_exit(fn -> :telemetry.detach(telemetry_id) end)
+
     initial = %{
       session_id: sid,
       sentence: "Tell me about the Pacific Ocean",
@@ -354,6 +364,10 @@ defmodule Core.Brain.ComprehensionWMTest do
     assert stored.wm_context.attention.scope == :session
     assert stored.wm_context.attention.salience == 1.0
     assert stored.wm_context.attention.goal_terms == ["the Pacific Ocean"]
+    assert_receive {[:core, :wm, :attention],
+                    %{salience: 1.0, goals: 1},
+                    %{scope: :session, transition: :select,
+                      decision: :admitted, factual_authority?: false}}
 
     assert %{payload: %{context: context}} =
              Enum.find(Brain.snapshot_wm().wm, &(&1.id == id))

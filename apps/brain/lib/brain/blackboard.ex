@@ -30,6 +30,9 @@ defmodule Brain.Blackboard do
   # Keep this list small + high-signal. Add more as needed.
   @telemetry_events [
     [:brain, :wm, :update],
+    # One compact focus/salience observation per completed comprehension turn.
+    # Metadata deliberately excludes user text and session identifiers.
+    [:core, :wm, :attention],
     [:brain, :pipeline, :lifg_stage1, :stop],
     [:brain, :pfc, :policy],
     [:brain, :pfc, :status],
