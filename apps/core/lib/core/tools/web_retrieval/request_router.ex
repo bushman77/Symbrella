@@ -53,6 +53,9 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       scoped_news = wm_current_events_followup(text, context) ->
         scoped_news
 
+      polling = public_polling_query(text) ->
+        build(polling, :current_events, :current_events, :public_polling_question)
+
       research = research_query(text) ->
         {query, category} = research
         build(query, nil, category, :structured_question)
@@ -135,6 +138,35 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
       _ -> nil
     end
   end
+
+  @doc """
+  Detect a public person's approval or popularity question as a request for
+  dated polling evidence, not private information. RSS headlines are only
+  evidence of reporting, never a verified polling time series.
+  """
+  @spec public_polling_query(String.t()) :: String.t() | nil
+  def public_polling_query(text) when is_binary(text) do
+    pattern =
+      ~r/\b(\p{Lu}[\p{L}'’.-]{1,32}(?:\s+\p{Lu}[\p{L}'’.-]{1,32}){1,3})\s+(?:popularity|approval\s+ratings?|favo[u]?rability|poll(?:ing)?\s+(?:numbers|ratings?))\b/u
+
+    question? =
+      Regex.match?(
+        ~r/^\s*(?:can|could|would|what|why|how|is|are|has|have|tell|explain|describe|give|summari[sz]e)\b/iu,
+        text
+      )
+
+    if question? do
+      case Regex.run(pattern, text, capture: :all_but_first) do
+        [name] ->
+          name = name |> String.replace(~r/['’]s\b/u, "") |> String.trim()
+          nonempty("#{name} approval rating favorability polls trend")
+
+        _ -> nil
+      end
+    end
+  end
+
+  def public_polling_query(_), do: nil
 
   @doc "Extract a bounded current-events query without requiring an LLM."
   @spec current_events_query(String.t()) :: String.t() | nil

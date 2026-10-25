@@ -344,14 +344,15 @@ defmodule Core.Brain.WM.Comprehension do
   defp followup_subtopic(_), do: nil
 
   defp current_event_request?(sentence) when is_binary(sentence) do
-    Regex.match?(
+    is_binary(Core.Tools.WebRetrieval.RequestRouter.public_polling_query(sentence)) or
+      (Regex.match?(
       ~r/\b(?:war|conflict|ceasefire|attacks?|fighting|elections?|news|developments?|negotiations?)\b/iu,
       sentence
     ) and
       Regex.match?(
         ~r/\b(?:current(?:ly)?|latest|recent(?:ly)?|today|tonight|ongoing|now|this\s+week|as\s+of\s+(?:current|now|today))\b/iu,
         sentence
-      )
+      ))
   end
 
   defp current_event_request?(_), do: false

@@ -85,6 +85,27 @@ defmodule Core.Tools.RetrievalRequestRouterTest do
     end
   end
 
+  test "public approval and popularity questions request dated source discovery" do
+    for question <- [
+          "can you tell me about Donald Trumps popularity and why it is changing",
+          "Why is Donald Trump's approval rating changing?",
+          "How has Justin Trudeau's popularity changed?",
+          "What is Kamala Harris's favorability?"
+        ] do
+      assert %{relation: :current_events, request_type: :current_events,
+               trigger: :public_polling_question, query: query} = route(question)
+      assert query =~ "approval rating"
+      assert query =~ "polls trend"
+      refute query =~ "can you tell me"
+    end
+
+    assert %{query: "Donald Trumps approval rating favorability polls trend"} =
+             route("can you tell me about Donald Trumps popularity and why it is changing")
+
+    assert route("Can you tell me why my sister's mood is changing?") == nil
+    assert route("Why is Elixir programming popular?") == nil
+  end
+
   test "a small typo in tell mee does not poison the news query" do
     text = "what can you tell mee about the Ukraine - Russia war as of current"
     assert Core.Tools.WebRetrieval.RequestRouter.current_events_query(text) ==

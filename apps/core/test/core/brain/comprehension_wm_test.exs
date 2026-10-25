@@ -489,6 +489,19 @@ defmodule Core.Brain.ComprehensionWMTest do
              Core.Tools.WebRetrieval.route_for(response_context)
   end
 
+  test "named public popularity trend is an active current-events focus" do
+    summary = %{recognized_topics: [], understood: [], uncertain: [], degraded?: true}
+    context =
+      WMComprehension.context_from(
+        %{sentence: "can you tell me about Donald Trumps popularity and why it is changing"},
+        summary
+      )
+
+    assert context.topic == "Donald Trumps popularity and why it is changing"
+    assert context.current_events? == true
+    assert context.focus_transition == :select
+  end
+
   test "attention is scoped to the WM admission, scored, and exposed in its context" do
     assert is_pid(Process.whereis(Brain))
     sid = session()
