@@ -452,7 +452,23 @@ defmodule Core.Response.Memory do
       Regex.match?(~r/^(?:and )?(?:what(?:'s| is) )?yours\??$/u, normalized) and
         recent_name_exchange?(session_id)
 
-    explicit? or elliptical?
+    # Intent has already captured bounded typo repairs. Apply the same
+    # lexical repair at this *identity retrieval* boundary, but only for an
+    # exact, complete assistant-name question. Never repair open-ended text,
+    # silently change the original turn, or invent LIFG sense evidence.
+    fuzzy = Core.Text.Fuzzy.interpret(text)
+
+    corrected_identity? =
+      case Map.get(fuzzy, :corrections, []) do
+        [%{replacement: "name", confidence: correction_conf}]
+        when is_number(correction_conf) and correction_conf >= 0.85 ->
+          Regex.match?(~r/^what(?:'s| is) your [\\p{L}]+\\??$/u, normalized) and
+            Regex.match?(~r/^what(?:'s| is) your name\\??$/u, fuzzy.text)
+        _ ->
+          false
+      end
+
+    explicit? or elliptical? or corrected_identity?
   end
 
   def asking_for_assistant_name?(_, _), do: false

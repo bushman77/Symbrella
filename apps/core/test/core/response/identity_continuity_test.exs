@@ -18,6 +18,29 @@ defmodule Core.Response.IdentityContinuityTest do
     end
   end
 
+  test "high-confidence typo in assistant-name query uses configured identity" do
+    for input <- ["what is your namme", "what is your namme?"] do
+      assert Core.Response.Memory.asking_for_assistant_name?(input)
+      {_tone, answer, meta} = Response.plan(%{text: input, intent: :ask, confidence: 0.683})
+      assert answer == "My name is Symbrella."
+      assert meta.response_source == :identity
+      assert meta.identity_subject == :assistant
+      assert meta.memory_source == :configuration
+    end
+  end
+
+  test "fuzzy identity retrieval rejects unrelated and compound requests" do
+    for input <- [
+      "what is your game?",
+      "what is your namme and who made you?",
+      "explain what is your namme",
+      "what is your namme about?",
+      "what is your namme or address?"
+    ] do
+      refute Core.Response.Memory.asking_for_assistant_name?(input)
+    end
+  end
+
   test "elliptical question uses an actual name exchange" do
     session_id = "identity-test-#{System.unique_integer([:positive])}"
 
