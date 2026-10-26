@@ -95,7 +95,10 @@ defmodule Core.Response.Meta do
     Map.merge(summary, Map.take(reflection,
       [:speech_act, :temporal_anchor, :addressee, :provenance,
        :lexical_witness, :semantic_verified?, :llm_called?,
-       :interpreted_speech_act, :speaker, :addressee, :vocative]))
+       :interpreted_speech_act, :speaker, :vocative, :event_kind,
+       :source_frame, :evidence_level, :event_occurrence_verified?,
+       :exact_verb_sense_verified?, :response_is_memory_acknowledgment?,
+       :factual_claims?]))
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary

@@ -1,6 +1,6 @@
 defmodule Core.Semantic.SpeechActs do
   @moduledoc """
-  Read-only V1.1 post-LIFG binding of narrow direct greetings.
+  Read-only post-LIFG binding of narrow direct social speech acts.
 
   Canonical :semantic_choices supply provisional lexical selection evidence;
   a separately constrained greeting grammar assigns speech act and vocative
@@ -16,11 +16,11 @@ defmodule Core.Semantic.SpeechActs do
 
   @type frame :: %{
           version: 1,
-          speech_act: :greeting,
+          speech_act: :greeting | :gratitude | :farewell | :wellbeing_query,
           speaker: :user,
           addressee: :self | :unspecified | :other,
           vocative: map() | nil,
-          temporal_anchor: :morning | :afternoon | :evening | :unspecified,
+          temporal_anchor: :morning | :afternoon | :evening | :night | :unspecified,
           lexical_evidence: map(),
           source_text: String.t(),
           sentence_meaning_verified?: false
@@ -38,27 +38,22 @@ defmodule Core.Semantic.SpeechActs do
 
   @spec from_si(map()) :: {:ok, frame()} | :not_applicable
   def from_si(%{} = si) do
-    sentence = Map.get(si, :sentence)
+    case Map.get(si, :sentence) do
+      text when is_binary(text) and byte_size(text) <= 160 ->
+        case Regex.named_captures(greeting_pattern(), text) do
+          %{} = captures ->
+            {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
 
-    with text when is_binary(text) <- sentence,
-         true <- byte_size(text) <= 160,
-         captures when is_map(captures) <- Regex.named_captures(greeting_pattern(), text) do
-      {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
+            {:ok, social_frame(:greeting, text, addressee, vocative,
+              time_of_day(Map.fetch!(captures, "greeting")),
+              lexical_evidence(Map.fetch!(captures, "greeting"), si))}
 
-      {:ok,
-       %{
-         version: 1,
-         speech_act: :greeting,
-         speaker: :user,
-         addressee: addressee,
-         vocative: vocative,
-         temporal_anchor: time_of_day(Map.fetch!(captures, "greeting")),
-         lexical_evidence: lexical_evidence(Map.fetch!(captures, "greeting"), si),
-         source_text: text,
-         sentence_meaning_verified?: false
-       }}
-    else
-      _ -> :not_applicable
+          _ ->
+            other_direct_social_act(text)
+        end
+
+      _ ->
+        :not_applicable
     end
   end
 
@@ -69,6 +64,64 @@ defmodule Core.Semantic.SpeechActs do
   # conjunctions, multi-participant addressees and quoted sentences.
   defp greeting_pattern do
     ~r/\A\s*(?<greeting>hello|hi+|heya?|hiya|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))(?:\s+there)?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!?]*\s*\z/iu
+  end
+
+  # Short whole-utterance grammars. These receive *surface-only* provenance,
+  # not invented LIFG winners. Compound turns and quoted speech abstain.
+  defp other_direct_social_act(text) do
+    matched =
+      [
+        {:gratitude, gratitude_pattern()},
+        {:farewell, farewell_pattern()},
+        {:wellbeing_query, wellbeing_pattern()}
+      ]
+      |> Enum.flat_map(fn {act, pattern} ->
+        case Regex.named_captures(pattern, text) do
+          %{} = captures -> [{act, captures}]
+          _ -> []
+        end
+      end)
+
+    case matched do
+      [{act, captures}] ->
+        {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
+
+        anchor =
+          if act == :farewell and Regex.match?(~r/\A\s*good\s+night\b/iu, text),
+            do: :night, else: :unspecified
+
+        {:ok, social_frame(act, text, addressee, vocative, anchor,
+          %{level: :surface_only, status: :provisional, witness: nil})}
+
+      _ ->
+        :not_applicable
+    end
+  end
+
+  defp social_frame(act, text, addressee, vocative, anchor, lexical) do
+    %{
+      version: 1,
+      speech_act: act,
+      speaker: :user,
+      addressee: addressee,
+      vocative: vocative,
+      temporal_anchor: anchor,
+      lexical_evidence: lexical,
+      source_text: text,
+      sentence_meaning_verified?: false
+    }
+  end
+
+  defp gratitude_pattern do
+    ~r/\A\s*(?:thank\s+you(?:\s+very\s+much)?|thanks(?:\s+a\s+lot)?|much\s+appreciated)(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!]*\s*\z/iu
+  end
+
+  defp farewell_pattern do
+    ~r/\A\s*(?:bye|goodbye|good\s+night|see\s+you\s+(?:later|soon)|take\s+care)(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!]*\s*\z/iu
+  end
+
+  defp wellbeing_pattern do
+    ~r/\A\s*how\s+are\s+you(?:\s+doing)?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\?\s*\z/iu
   end
 
   defp resolve_addressee(nil), do: {:unspecified, nil}
