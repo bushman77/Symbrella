@@ -163,7 +163,7 @@ defmodule Core.Response.LexicalDefinitionTest do
   test "explicit low-risk definition can answer an ask-first decision without relaxing safety" do
     sentence = "define bank"
     turn = si(sentence, [row("bank", "noun", 1, "A financial institution.")])
-    assert {:ok, ~s("bank" (noun): A financial institution.), reflection} =
+    assert {:ok, "\"bank\" (noun): A financial institution.", reflection} =
       LexicalDefinition.generate(sentence,
         %{risk_bucket: :low, intent: :define},
         %{action: :ask_first}, turn)
