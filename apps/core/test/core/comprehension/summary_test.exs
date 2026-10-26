@@ -185,6 +185,24 @@ defmodule Core.Comprehension.SummaryTest do
     assert :weak_decision_rate_high in summary.reasons
   end
 
+  test "partial structures remain distinct from independently verified understanding" do
+    words = ["where", "is", "the", "bird"]
+    si = %{
+      sentence: "Where is the bird?",
+      tokens: Enum.with_index(words, fn phrase, index ->
+        %{index: index, phrase: phrase, n: 1}
+      end),
+      intent: :ask, sentence_meaning: %{status: :not_yet_interpreted},
+      active_cells: [], trace: []
+    } |> Core.Semantic.ProvisionalInterpretation.attach()
+
+    summary = Summary.build(si)
+    assert summary.provisional_topics == ["bird"]
+    assert summary.provisional_interpretation.operation == :locate_entity
+    assert summary.understood == []
+    assert summary.lexical_meanings == []
+  end
+
   test "attach writes summary and trace contract" do
     si =
       Summary.attach(%{
