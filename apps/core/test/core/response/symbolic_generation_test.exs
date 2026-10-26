@@ -348,4 +348,49 @@ defmodule Core.Response.SymbolicGenerationTest do
     assert meta.response_reflection.llm_called? == false
   end
 
+
+  test "live classified feedback and bye intents route through native social realization" do
+    for {input, observed_intent, expected, act} <- [
+      {"Thank you, Symbrella!", :feedback, "You're welcome.", :gratitude},
+      {"see you later!", :bye, "Take care.", :farewell}
+    ] do
+      # Live Core intent selection supplies these labels, not :unknown.
+      assert Core.Response.Policy.normalize_intent(observed_intent, input) == observed_intent
+
+      si =
+        %{
+          sentence: input, text: input, intent: observed_intent, confidence: 0.84,
+          session_id: "live-social-intent-#{System.unique_integer([:positive])}"
+        }
+        |> SpeechActs.attach()
+
+      assert si.speech_act_frame.speech_act == act
+      {_tone, response, meta} = Response.plan(si, %{})
+
+      assert response == expected, input
+      assert meta.response_source == :symbolic_generation
+      assert meta.response_reflection.interpreted_speech_act == act
+      assert meta.response_reflection.llm_called? == false
+
+      attached = Core.Response.Attach.maybe_build_response_plan(si, [])
+      assert attached.response_text == expected
+      assert attached.response_meta.response_source == :symbolic_generation
+    end
+  end
+
+  test "feedback and bye labels alone never license a reply without a real social act" do
+    for {text, intent} <- [
+      {"The reviewer left feedback on the code.", :feedback},
+      {"I need to buy some groceries.", :bye},
+      {"See you later, Bradley.", :bye},
+      {"Thank you Symbrella, but could you debug this?", :feedback}
+    ] do
+      si = %{sentence: text, text: text, intent: intent} |> SpeechActs.attach()
+      assert :not_applicable ==
+               SymbolicGeneration.generate(text,
+                 %{risk_bucket: :low, intent: intent},
+                 %{action: :offer_options}, si)
+    end
+  end
+
 end

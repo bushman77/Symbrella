@@ -9,8 +9,11 @@ defmodule Core.Response.SymbolicGeneration do
 
   alias Core.Semantic.{EpisodicProjection, SentenceMeaning, SpeechActs}
 
+  # Accept the intent labels the live classifier actually emits for
+  # complete social turns. These labels by themselves never authorize output:
+  # social_realization/2 still revalidates the whole-utterance SpeechActs frame.
   @social_intents [
-    :greet, :greeting, :gratitude, :smalltalk, :unknown,
+    :greet, :greeting, :gratitude, :smalltalk, :feedback, :bye, :unknown,
     :tell, :statement, :ask_info, :question
   ]
 
