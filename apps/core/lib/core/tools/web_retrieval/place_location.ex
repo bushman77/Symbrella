@@ -16,7 +16,7 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
     "qc" => "quebec", "sk" => "saskatchewan", "yt" => "yukon"
   }
 
-  @question ~r/^\s*where\s+is\s+(.+?)\s*[?!.]*\s*$/iu
+  defp regex_question, do: ~r/^\s*where\s+is\s+(.+?)\s*[?!.]*\s*$/iu
 
   @spec answer(map()) :: {:ok, String.t()} | :no_support
   def answer(%{
@@ -27,7 +27,7 @@ defmodule Core.Tools.WebRetrieval.PlaceLocation do
         }
       })
       when is_binary(question) and is_binary(query) and is_list(sources) do
-    with [_, raw_place] <- Regex.run(@question, question),
+    with [_, raw_place] <- Regex.run(regex_question(), question),
          place when is_binary(place) <- String.trim(raw_place),
          true <- normalize(expand_region(place)) == normalize(expand_region(query)) do
       Enum.find_value(sources, :no_support, fn source ->

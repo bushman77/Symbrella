@@ -10,7 +10,7 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   # Wikipedia's article lead commonly says "population in 2021 was 90,990".
   # Capture the year and the number together so a census year from unrelated
   # preceding text cannot accidentally be attributed to the population.
-  @population ~r/\bpopulation\s+(?:in\s+(?<year>(?:19|20)\d{2})\s+)?(?:of|was|is)\s+(?<display>\d{1,3}(?:,\d{3})+|\d{3,8})\b/iu
+  defp regex_population, do: ~r/\bpopulation\s+(?:in\s+(?<year>(?:19|20)\d{2})\s+)?(?:of|was|is)\s+(?<display>\d{1,3}(?:,\d{3})+|\d{3,8})\b/iu
 
   @spec extract_support(list(), atom() | nil, String.t() | nil) :: map() | nil
   def extract_support(sources, :population, subject) when is_list(sources) and is_binary(subject) do
@@ -18,11 +18,11 @@ defmodule Core.Tools.WebRetrieval.Grounding do
       %{provider: :wikipedia, title: title, url: url, excerpt: excerpt}
       when is_binary(title) and is_binary(url) and is_binary(excerpt) ->
         if matching_place?(title, subject) do
-          case Regex.named_captures(@population, excerpt) do
+          case Regex.named_captures(regex_population(), excerpt) do
             %{"display" => display} = captures ->
               with {value, ""} <- Integer.parse(String.replace(display, ",", "")),
                    true <- value > 0 do
-                [matched | _] = Regex.run(@population, excerpt)
+                [matched | _] = Regex.run(regex_population(), excerpt)
                 before = excerpt |> String.split(matched, parts: 2) |> hd()
                 preamble = String.slice(before, max(0, String.length(before) - 180), 180)
 
@@ -549,13 +549,13 @@ defmodule Core.Tools.WebRetrieval.Grounding do
   # The coordinate providers are responsible for checking the jurisdiction
   # against the underlying entity, not the title-only display comparison.
   # Strip ONLY recognized Canadian province/territory suffixes.
-  @canadian_region_suffix ~r/(?:,\s*|\s+)(?:BC|British\s+Columbia|AB|Alberta|SK|Saskatchewan|MB|Manitoba|ON|Ontario|QC|Quebec|Québec|NB|New\s+Brunswick|NS|Nova\s+Scotia|PE|Prince\s+Edward\s+Island|NL|Newfoundland\s+and\s+Labrador|YT|Yukon|NT|Northwest\s+Territories|NU|Nunavut)\s*\z/iu
+  defp regex_canadian_region_suffix, do: ~r/(?:,\s*|\s+)(?:BC|British\s+Columbia|AB|Alberta|SK|Saskatchewan|MB|Manitoba|ON|Ontario|QC|Quebec|Québec|NB|New\s+Brunswick|NS|Nova\s+Scotia|PE|Prince\s+Edward\s+Island|NL|Newfoundland\s+and\s+Labrador|YT|Yukon|NT|Northwest\s+Territories|NU|Nunavut)\s*\z/iu
 
   defp same_place?(a, b) when is_binary(a) and is_binary(b) do
     city = fn text ->
       text
       |> String.trim()
-      |> String.replace(@canadian_region_suffix, "")
+      |> String.replace(regex_canadian_region_suffix(), "")
       |> String.downcase()
       |> String.replace(~r/[^\p{L}\p{M}]+/u, " ")
       |> String.trim()

@@ -21,7 +21,7 @@ defmodule Core.Tools.WebRetrieval.PlaceScope do
     "qc" => "QC", "quebec" => "QC"
   }
 
-  @explicit_place ~r/^\s*(?:where\s+is|what\s+is|tell\s+me\s+about)\s+([\p{L}][\p{L}\p{M}' -]{1,80}?)\s*(?:,\s*|\s+)(BC|British\s+Columbia|AB|Alberta|ON|Ontario|QC|Quebec)\s*[?.!]*\s*$/iu
+  defp regex_explicit_place, do: ~r/^\s*(?:where\s+is|what\s+is|tell\s+me\s+about)\s+([\p{L}][\p{L}\p{M}' -]{1,80}?)\s*(?:,\s*|\s+)(BC|British\s+Columbia|AB|Alberta|ON|Ontario|QC|Quebec)\s*[?.!]*\s*$/iu
 
   @spec for_lookup(map(), list()) :: map()
   def for_lookup(%{} = context, history) when is_list(history) do
@@ -77,7 +77,7 @@ defmodule Core.Tools.WebRetrieval.PlaceScope do
       end)
       |> Enum.take(-(@max_history_pairs))
       |> Enum.flat_map(fn %{"content" => text} ->
-        case Regex.run(@explicit_place, text) do
+        case Regex.run(regex_explicit_place(), text) do
           [_, named, region] ->
             if same_name?(named, subject) or same_name?(named, target) do
               case Map.get(@province_codes, normalize(region)) do

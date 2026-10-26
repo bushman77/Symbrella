@@ -15,12 +15,12 @@ defmodule Core.Brain.SynapticCorrection do
   alias Core.Brain.SynapticExperience
   alias Core.Pipeline.Trace
 
-  @correction ~r/\A\s*actually\s*,\s*(?<subject>(?:the|a|an)\s+\p{L}+)\s+(?<verb>\p{L}+)\s+(?<new_det>a|an|the)\s+(?<new_patient>\p{L}+)\s*,\s*not\s+(?<old_det>a|an|the)\s+(?<old_patient>\p{L}+)\.?\s*\z/iu
+  defp regex_correction, do: ~r/\A\s*actually\s*,\s*(?<subject>(?:the|a|an)\s+\p{L}+)\s+(?<verb>\p{L}+)\s+(?<new_det>a|an|the)\s+(?<new_patient>\p{L}+)\s*,\s*not\s+(?<old_det>a|an|the)\s+(?<old_patient>\p{L}+)\.?\s*\z/iu
 
   @doc "Parse an explicit, bounded surface correction without inventing meanings."
   @spec parse(String.t()) :: {:ok, map()} | :not_a_supported_correction
   def parse(text) when is_binary(text) and byte_size(text) <= 256 do
-    case Regex.named_captures(@correction, text) do
+    case Regex.named_captures(regex_correction(), text) do
       %{"subject" => subject, "verb" => verb,
         "new_det" => new_det, "new_patient" => new_patient,
         "old_det" => old_det, "old_patient" => old_patient} ->

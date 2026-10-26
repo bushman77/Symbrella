@@ -19,7 +19,7 @@ defmodule Core.Curiosity.EvidenceAcquisition do
   @allow_test_retriever Code.ensure_loaded?(Mix) and Mix.env() == :test
 
   @max_year 2100
-  @allowed_name ~r/\A[\p{L}\p{M}\p{N}\s,'’\-.]+\z/u
+  defp regex_allowed_name, do: ~r/\A[\p{L}\p{M}\p{N}\s,'’\-.]+\z/u
 
   @type plan :: %{
     issue_id: pos_integer(),
@@ -266,7 +266,7 @@ defmodule Core.Curiosity.EvidenceAcquisition do
   defp valid_names?(_), do: false
 
   defp valid_name?(name) when is_binary(name),
-    do: byte_size(name) in 3..100 and Regex.match?(@allowed_name, name)
+    do: byte_size(name) in 3..100 and Regex.match?(regex_allowed_name(), name)
   defp valid_name?(_), do: false
 
   defp pair_key(subjects) do

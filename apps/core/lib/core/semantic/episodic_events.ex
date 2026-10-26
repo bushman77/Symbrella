@@ -9,7 +9,7 @@ defmodule Core.Semantic.EpisodicEvents do
   """
 
   @max_field 160
-  @relation ~r/\A[a-z][a-z0-9_]{0,63}\z/
+  defp regex_relation, do: ~r/\A[a-z][a-z0-9_]{0,63}\z/
   @type event :: %{
     entity: String.t(),
     entity_key: String.t(),
@@ -34,7 +34,7 @@ defmodule Core.Semantic.EpisodicEvents do
 
     cond do
       entity == "" or value == "" or byte_size(value) > @max_field -> :error
-      byte_size(entity) > @max_field or not Regex.match?(@relation, relation) -> :error
+      byte_size(entity) > @max_field or not Regex.match?(regex_relation(), relation) -> :error
       status not in [:asserted, :retracted] -> :error
       true ->
         {:ok, %{entity: entity, entity_key: entity_key(entity), relation: relation,

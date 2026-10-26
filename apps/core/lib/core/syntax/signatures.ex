@@ -62,8 +62,8 @@ defmodule Core.Syntax.Signatures do
   @third_person_singular_pronouns MapSet.new(~w(he she it))
 
   @have_words ~w(have has had)
-  @have_contract ~r/^(?:i|you|we|they)'ve$/u
-  @have_or_be_contract ~r/^(?:he|she|it|that|there|who)'s$/u
+  defp regex_have_contract, do: ~r/^(?:i|you|we|they)'ve$/u
+  defp regex_have_or_be_contract, do: ~r/^(?:he|she|it|that|there|who)'s$/u
 
   # These regular-past surfaces have been admitted by the bounded Colony
   # declarative composer. A source word alone never supplies a POS witness.
@@ -1040,12 +1040,12 @@ defmodule Core.Syntax.Signatures do
   defp auxiliary_have?(nil), do: false
 
   defp auxiliary_have?(%{word: word}) do
-    word in @have_words or Regex.match?(@have_contract, word) or
-      Regex.match?(@have_or_be_contract, word)
+    word in @have_words or Regex.match?(regex_have_contract(), word) or
+      Regex.match?(regex_have_or_be_contract(), word)
   end
 
   defp ambiguous_contraction?(%{word: word}),
-    do: Regex.match?(@have_or_be_contract, word)
+    do: Regex.match?(regex_have_or_be_contract(), word)
 
   defp get(%{} = map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
   defp get(_, _), do: nil

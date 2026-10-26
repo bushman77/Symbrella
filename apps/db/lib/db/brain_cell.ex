@@ -58,7 +58,7 @@ defmodule Db.BrainCell do
   @embedding_dim Application.compile_env(:db, :brain_cell_embedding_dim, 768)
 
   # Allows third segment to be alnum/underscore (index or tag like "fallback")
-  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/
+  defp regex_id_regex, do: ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle)(\|[A-Za-z0-9_]+)?$/
 
   # POS-aware grammar allowlist (matches the DB CHECK)
   @gf_allow %{
@@ -294,7 +294,7 @@ defmodule Db.BrainCell do
 
   # ——— validate_change callback: (field, value) -> keyword ———
   defp validate_id_shape(:id, id) when is_binary(id) do
-    if Regex.match?(@id_regex, id) do
+    if Regex.match?(regex_id_regex(), id) do
       []
     else
       [id: "has invalid shape; expected text|pos or text|pos|suffix (alnum/_), no trailing pipe"]
