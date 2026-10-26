@@ -440,6 +440,12 @@ defmodule Core.Response do
   defp normalize_generation_reason(%{"reason" => reason}) when is_atom(reason), do: reason
   defp normalize_generation_reason(_), do: :unknown
 
+  # On the symbolic-generation branch, an unsupported turn is a useful
+  # coverage signal, not a reason to silently re-enable model inference.
+  defp model_unavailable_text(:llm_disabled) do
+    "Symbolic response unavailable for this turn (LLM intentionally disabled)."
+  end
+
   defp model_unavailable_text(reason) do
     "Model unavailable (#{reason}). No fallback response was generated."
   end
