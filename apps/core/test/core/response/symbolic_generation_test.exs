@@ -235,7 +235,7 @@ defmodule Core.Response.SymbolicGenerationTest do
     si =
       %{
         sentence: "The artist draws a picture.", text: "The artist draws a picture.",
-        source: :user, intent: :statement, confidence: 0.8, trace: [],
+        source: :user, intent: :tell, confidence: 0.8, trace: [],
         session_id: "native-svo-#{System.unique_integer([:positive])}",
         tokens:
           ["The", "artist", "draws", "a", "picture."]
@@ -276,6 +276,12 @@ defmodule Core.Response.SymbolicGenerationTest do
     attached = Core.Response.Attach.maybe_build_response_plan(si, [])
     assert attached.response_text == reply
     assert attached.response_meta.response_source == :symbolic_generation
+
+    # Core's ordinary helpful :tell path uses :act_first.
+    assert {:ok, "You're saying that the artist draws a picture.", _} =
+             SymbolicGeneration.generate(si.text,
+               %{risk_bucket: :low, intent: :tell},
+               %{action: :act_first}, si)
 
     forged = %{si | source: :assistant}
     assert :not_applicable =

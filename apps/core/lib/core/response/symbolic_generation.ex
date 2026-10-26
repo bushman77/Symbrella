@@ -18,7 +18,7 @@ defmodule Core.Response.SymbolicGeneration do
           {:ok, String.t(), map()} | :not_applicable
   def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
       when is_binary(user_text) and is_map(si) and
-             intent in @social_intents and action in [:answer, :offer_options] do
+             intent in @social_intents and action in [:answer, :offer_options, :act_first] do
     case social_realization(user_text, si) do
       {:ok, _, _} = realized -> realized
       :not_applicable -> maybe_realize_report(user_text, intent, si)
