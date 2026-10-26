@@ -20,6 +20,20 @@ defmodule Core.Brain.WM.Comprehension do
   @max_entities 4
   @max_terms 6
 
+  @doc """
+  Return only the currently admitted, unexpired comprehension context for
+  the given session. This is an attention frame, not factual authority.
+  """
+  @spec admitted_context(term()) :: map() | nil
+  def admitted_context(session) when is_binary(session) and session != "" do
+    case find_frame(session) do
+      %{context: %{} = context} -> context
+      _ -> nil
+    end
+  end
+
+  def admitted_context(_), do: nil
+
   @spec recall(map(), keyword()) :: map()
   def recall(si, opts \\ [])
 
