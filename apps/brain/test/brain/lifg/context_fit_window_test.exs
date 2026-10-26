@@ -176,7 +176,7 @@ defmodule Brain.LIFG.ContextFitWindowTest do
   end
 
   test "full current sentence contributes words outside the former three-word window" do
-    sentence = "The witness carefully described an old river bank."
+    sentence = "The witness described a river running across the whole village near the bank."
     sense = %{definition: "The edge of a river."}
     report = ContextFit.explain(sentence, "bank", sense)
 

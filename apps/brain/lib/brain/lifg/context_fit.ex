@@ -56,6 +56,7 @@ defmodule Brain.LIFG.ContextFit do
     she should so some than that the their theirs them
     then there these they this those to too us was we
     were what when where which who whom whose why will
+    went gone going go
     with would you your yours
   ))
 

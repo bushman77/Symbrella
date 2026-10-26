@@ -156,6 +156,12 @@ defmodule Brain.LIFG.Recorder do
             chosen_id: Safe.get(ch, :chosen_id),
             margin: Safe.get(ch, :margin, 0.0),
             scores: Safe.get(ch, :scores, %{}) || %{},
+            # Current production context/definition evidence that contributed
+            # to Stage1; keep only positive evidence and cap the HUD payload.
+            definition_context_evidence:
+              (Safe.get(ch, :definition_context_evidence, []) || [])
+              |> Enum.filter(fn row -> is_map(row) and Map.get(row, :score, 0.0) > 0.0 end)
+              |> Enum.take(8),
             alt_ids: alt_ids,
             slate_alt_ids: slate_alt_ids
           }

@@ -84,7 +84,7 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
     assert DefinitionRole.evaluate("I visited the bank.", "bank", @finance).bonus == 0.0
     assert DefinitionRole.evaluate("I deposited money on the bank.", "bank", @finance).bonus == 0.0
     assert DefinitionRole.evaluate("I deposited money at the bank.", "bank", %{definition: nil}).bonus == 0.0
-    assert DefinitionRole.evaluate("Two banks at the bank have money.", "bank", @finance).bonus == 0.0
+    assert DefinitionRole.evaluate("The bank at the bank keeps money.", "bank", @finance).bonus == 0.0
     assert DefinitionRole.evaluate("The water flowed at the bank.", "bank", @river).bonus == 0.0
   end
 end
