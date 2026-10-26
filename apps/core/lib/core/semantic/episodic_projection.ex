@@ -96,7 +96,7 @@ defmodule Core.Semantic.EpisodicProjection do
       [candidate] when is_map(candidate) ->
         case validate_candidate(si, candidate) do
           {:ok, %{source_frame: frame, participants: %{"actor" => actor}} = event}
-              when frame in [:finite_present_svo, :progressive_spatial] and
+              when frame in [:finite_present_svo, :finite_past_svo, :progressive_spatial] and
                    is_binary(actor) and byte_size(actor) > 0 ->
             event
 

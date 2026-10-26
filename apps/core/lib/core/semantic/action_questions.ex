@@ -56,12 +56,13 @@ defmodule Core.Semantic.ActionQuestions do
           value: patient, participants: %{
             "actor" => actor, "predicate" => recorded_predicate,
             "surface_predicate" => surface_predicate, "patient" => recorded_patient,
-            "tense" => "present"
+            "tense" => tense
           }},
         role,
         constraints
       )
-      when is_binary(actor) and is_binary(predicate) and is_binary(recorded_predicate) and
+      when tense in ["present", "past"] and
+           is_binary(actor) and is_binary(predicate) and is_binary(recorded_predicate) and
            is_binary(patient) and is_binary(recorded_patient) and
            is_binary(surface_predicate) and is_map(constraints) do
     valid? =

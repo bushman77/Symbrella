@@ -333,13 +333,16 @@ defmodule Core.Semantic.SentenceMeaning do
   # lexical :understood and from any persistence acknowledgement.
   defp participant_meaning(si, sentence) when is_binary(sentence) do
     case EpisodicProjection.validated_participant(si) do
-      %{source_frame: :finite_present_svo, relation: relation,
+      %{source_frame: frame, relation: relation,
         value: patient, participants: %{
           "actor" => actor, "predicate" => lemma,
           "surface_predicate" => surface, "patient" => stored_patient,
-          "tense" => "present"
-        }} = event ->
-        if relation == "verb_" <> lemma and patient == stored_patient and
+          "tense" => tense
+        }} = event
+        when frame in [:finite_present_svo, :finite_past_svo] ->
+        if ((frame == :finite_present_svo and tense == "present") or
+             (frame == :finite_past_svo and tense == "past")) and
+             relation == "verb_" <> lemma and patient == stored_patient and
              participant_surface?([actor, lemma, surface, patient]) do
           roles = %{
             actor: surface_role(actor),

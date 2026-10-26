@@ -83,6 +83,7 @@ defmodule Core.Syntax.Signatures do
 
     (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
+       finite_past_svo(nodes) ++
        counted_present_svo(nodes) ++
        copular_relative_classifications(nodes) ++
        bounded_past_transitives(nodes) ++
@@ -706,6 +707,38 @@ defmodule Core.Syntax.Signatures do
           []
         end
       end)
+    end)
+  end
+
+  # A complete D-N-V-D-N clause is a finite-past hypothesis only with
+  # *attested* simple-past verb morphology. This does not choose a verb
+  # sense, canonicalize its lemma, or authorize episodic persistence.
+  defp finite_past_svo(nodes) do
+    nodes
+    |> Enum.chunk_every(5, 1, :discard)
+    |> Enum.flat_map(fn [sd, subject, predicate, od, object] = segment ->
+      contiguous? = Enum.map(segment, & &1.index) ==
+        Enum.to_list(sd.index..(sd.index + 4))
+
+      if contiguous? and
+           pos?(sd, "determiner") and pos?(subject, "noun") and
+           pos?(predicate, "verb") and form?(predicate, :simple_past) and
+           pos?(od, "determiner") and pos?(object, "noun") and
+           valid_surface?(segment) do
+        [signature(
+          :finite_past_svo_candidate,
+          {sd.index, object.index},
+          %{subject_determiner: sd.index, subject_head: subject.index,
+            predicate: predicate.index, object_determiner: od.index,
+            object_head: object.index},
+          %{subject_head: [:pos_noun], predicate: [:simple_past],
+            object_head: [:pos_noun]},
+          [:contiguous_surface, :attested_nominal_subject,
+           :attested_nominal_object, :attested_simple_past_verb]
+        )]
+      else
+        []
+      end
     end)
   end
 

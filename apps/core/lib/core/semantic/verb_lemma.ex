@@ -54,6 +54,71 @@ defmodule Core.Semantic.VerbLemma do
 
   def canonical(_, _), do: :error
 
+  @doc """
+  Resolve a selected past-tense verb to its attested base. A verb selection
+  and generic past tag alone are insufficient: its exact dictionary cell
+  must also explicitly say "past ... of [base]". Fail closed otherwise.
+  """
+  @spec canonical_past(map(), map()) :: {:ok, String.t()} | :error
+  def canonical_past(si, choice) when is_map(si) and is_map(choice) do
+    case get(choice, :chosen_id) || get(choice, :id) do
+      id when is_binary(id) ->
+        case String.split(id, "|", parts: 3) do
+          [surface, "verb", _] ->
+            if Regex.match?(base_pattern(), surface) do
+              bases =
+                si
+                |> get(:active_cells)
+                |> List.wrap()
+                |> Enum.filter(&(get(&1, :id) == id))
+                |> Enum.map(&past_base_from_cell/1)
+                |> Enum.reject(&is_nil/1)
+                |> Enum.uniq()
+
+              case bases do
+                [base] -> {:ok, base}
+                _ -> :error
+              end
+            else
+              :error
+            end
+
+          _ -> :error
+        end
+
+      _ -> :error
+    end
+  end
+
+  def canonical_past(_, _), do: :error
+
+  defp past_base_from_cell(cell) do
+    tags = get(cell, :semantic_atoms)
+    definition = get(cell, :definition)
+
+    if is_list(tags) and "tag:form-of" in tags and "tag:past" in tags and
+         "tag:participle" not in tags and is_binary(definition) do
+      definition
+      |> String.split(" — ")
+      |> List.last()
+      |> String.trim()
+      |> then(fn gloss ->
+        Regex.named_captures(
+          ~r/\A(?:\([^)]*\)\s*)?(?:the\s+)?(?:simple\s+)?past\s+(?:tense\s+)?(?:indicative\s+)?(?:form\s+)?of\s+(?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
+          gloss
+        )
+      end)
+      |> case do
+        %{"base" => base} ->
+          base = String.downcase(base)
+          if Regex.match?(base_pattern(), base), do: base, else: nil
+
+        _ ->
+          nil
+      end
+    end
+  end
+
   defp attested_base(si, id) do
     bases =
       si

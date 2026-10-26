@@ -7,8 +7,10 @@ defmodule Core.Semantic.SVOEvent do
   """
   alias Core.Semantic.{EpisodicEvents, VerbLemma}
 
-  @required [:contiguous_surface, :attested_nominal_subject,
-             :attested_nominal_object, :attested_finite_present_verb]
+  @required_present [:contiguous_surface, :attested_nominal_subject,
+                      :attested_nominal_object, :attested_finite_present_verb]
+  @required_past [:contiguous_surface, :attested_nominal_subject,
+                   :attested_nominal_object, :attested_simple_past_verb]
 
   @spec project(map(), String.t()) :: [map()]
   def project(si, sentence) when is_map(si) and is_binary(sentence) do
@@ -25,7 +27,7 @@ defmodule Core.Semantic.SVOEvent do
          {:ok, verb_choice} <- single_choice(si, predicate, "verb"),
          {:ok, obj_choice} <- single_choice(si, object, "noun"),
          true <- atl_match?(si, [{subject, sub_choice}, {predicate, verb_choice}, {object, obj_choice}]),
-         {:ok, lemma} <- VerbLemma.canonical(si, verb_choice),
+         {:ok, lemma} <- canonical_verb(si, verb_choice, sig.id),
          verb_surface when is_binary(verb_surface) <- Map.get(tokens, predicate),
          verb_surface <- clean(verb_surface),
          true <- Regex.match?(~r/\A\p{L}+\z/u, verb_surface),
@@ -34,16 +36,19 @@ defmodule Core.Semantic.SVOEvent do
       # Frame roles are grounded in exact surface tokens, compatible LIFG
       # selections, and ATL agreement. Preserve the original verb surface
       # separately from its attested canonical relation for reverse queries.
+      tense = if sig.id == :finite_past_svo_candidate, do: "past", else: "present"
+      source_frame = if tense == "past", do: :finite_past_svo, else: :finite_present_svo
+
       participants = %{
         "actor" => entity,
         "predicate" => lemma,
         "surface_predicate" => verb_surface,
         "patient" => value,
-        "tense" => "present"
+        "tense" => tense
       }
 
       # Fixed 0.8 denotes an admission grade, not a probability of truth.
-      [Map.merge(event, %{source_frame: :finite_present_svo, frame_confidence: 0.8,
+      [Map.merge(event, %{source_frame: source_frame, frame_confidence: 0.8,
                            participants: participants})]
     else
       _ -> []
@@ -89,14 +94,25 @@ defmodule Core.Semantic.SVOEvent do
     end)
   end
 
+  defp canonical_verb(si, choice, :finite_past_svo_candidate),
+    do: VerbLemma.canonical_past(si, choice)
+  defp canonical_verb(si, choice, :finite_present_svo_candidate),
+    do: VerbLemma.canonical(si, choice)
+  defp canonical_verb(_, _, _), do: :error
+
   defp signatures(si) do
     get(si, :sentence_signatures)
     |> List.wrap()
     |> Enum.filter(fn
-      %{id: :finite_present_svo_candidate, source: :core_syntax,
+      %{id: id, source: :core_syntax,
         span: {0, last}, roles: roles, evidence: evidence}
-        when is_integer(last) and is_map(roles) and is_list(evidence) ->
-          Enum.all?(@required, &(&1 in evidence)) and
+        when id in [:finite_present_svo_candidate, :finite_past_svo_candidate] and
+             is_integer(last) and is_map(roles) and is_list(evidence) ->
+          required =
+            if id == :finite_past_svo_candidate, do: @required_past,
+              else: @required_present
+
+          Enum.all?(required, &(&1 in evidence)) and
             not Map.has_key?(roles, :negation)
       _ -> false
     end)

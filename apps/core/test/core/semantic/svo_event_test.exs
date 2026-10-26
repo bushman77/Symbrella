@@ -52,6 +52,64 @@ defmodule Core.Semantic.SVOEventTest do
     }
   end
 
+
+  test "past-tense SVO uses attested morphology, composes native reply and supports recall",
+       %{sid: sid, owner: owner} do
+    si = inflected_input()
+    past = %{
+      si
+      | sentence: "The artist drew a picture.",
+        tokens: Enum.map(si.tokens, fn
+          %{index: 2} = token -> %{token | phrase: "drew"}
+          other -> other
+        end)
+    }
+
+    choices = Enum.map(si.lifg_choices, fn
+      %{token_index: 2} = choice ->
+        %{choice | id: "drew|verb|1", lemma: "drew"}
+      other -> other
+    end)
+
+    past =
+      past
+      |> Map.put(:lifg_choices, choices)
+      |> Map.put(:atl_slate, %{winners: choices})
+      |> Map.put(:active_cells, [
+        %{id: "drew|verb|1", pos: "verb", norm: "drew",
+          definition: "simple past of draw",
+          semantic_atoms: ["tag:form-of", "tag:past"]}
+      ])
+      |> Core.Syntax.Signatures.attach()
+
+    assert Enum.any?(past.sentence_signatures,
+      &(&1.id == :finite_past_svo_candidate))
+    past = past |> EpisodicProjection.attach() |> Core.Semantic.SentenceMeaning.attach()
+    assert [%{relation: "verb_draw", source_frame: :finite_past_svo,
+              participants: %{"tense" => "past", "surface_predicate" => "drew"}}] =
+             past.episodic_candidates
+    assert past.sentence_meaning.source_frame == :finite_past_svo
+
+    {_tone, answer, meta} =
+      Response.plan(Map.merge(past, %{text: past.sentence, confidence: 0.8,
+        session_id: sid}), %{})
+    assert answer == "You're saying that the artist drew a picture."
+    assert meta.response_source == :symbolic_generation
+
+    assert :ok = EpisodicMemory.remember_projected_events(past, past.sentence, sid)
+    assert %{source_frame: "finite_past_svo",
+             participants: %{"surface_predicate" => "drew", "tense" => "past"}} =
+             Brain.Hippocampus.user_event(owner, "artist", "verb_draw")
+    assert {"Drew a picture.", _} =
+             EpisodicMemory.reply("What did the artist do?")
+
+    without_proof = put_in(past.active_cells, [
+      %{id: "drew|verb|1", norm: "drew", pos: "verb",
+        definition: "simple past of draw", semantic_atoms: []}
+    ])
+    assert [] == SVOEvent.project(without_proof, without_proof.sentence)
+  end
+
   test "new predicate projects from syntax, LIFG and ATL and survives across sessions", %{sid: sid, owner: owner} do
     si = EpisodicProjection.attach(input())
 

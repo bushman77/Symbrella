@@ -143,11 +143,11 @@ defmodule Core.Response.SymbolicGeneration do
   defp maybe_realize_report(_text, _intent, _si), do: :not_applicable
 
   defp compose_report(%{
-         event_type: :action, source_frame: :finite_present_svo,
+         event_type: :action, source_frame: frame,
          roles: %{actor: %{surface: actor},
                   predicate: %{surface: verb},
                   patient: %{surface: patient}}
-       }) do
+       }) when frame in [:finite_present_svo, :finite_past_svo] do
     if safe_parts?([actor, verb, patient]),
       do: {:ok, "You're saying that #{actor} #{verb} #{patient}."},
       else: :not_applicable
