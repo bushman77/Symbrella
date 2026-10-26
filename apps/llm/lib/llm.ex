@@ -419,7 +419,18 @@ defmodule Llm do
     ensure_serving(state, timeout_ms, allow_start?: allow_start?)
   end
 
-  defp ensure_serving(state, _timeout_ms, allow_start?: false) do
+  # All runner paths (boot, lazy start, explicit start, chat, embeddings)
+  # converge here. A disabled branch must never spawn or contact a model,
+  # even when a caller explicitly passes auto-start options.
+  defp ensure_serving(state, timeout_ms, opts) do
+    if Application.get_env(:llm, :inference_enabled?, true) == true do
+      do_ensure_serving(state, timeout_ms, opts)
+    else
+      {:error, state, :llm_disabled}
+    end
+  end
+
+  defp do_ensure_serving(state, _timeout_ms, allow_start?: false) do
     cond do
       state.status == :ready and reachable?(state, 1_000) ->
         {:ok, state}
@@ -429,7 +440,7 @@ defmodule Llm do
     end
   end
 
-  defp ensure_serving(state, timeout_ms, allow_start?: true) do
+  defp do_ensure_serving(state, timeout_ms, allow_start?: true) do
     cond do
       state.status == :ready and reachable?(state, 1_000) ->
         {:ok, state}
