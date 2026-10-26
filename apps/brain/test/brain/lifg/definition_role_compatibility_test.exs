@@ -90,6 +90,8 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
 
     river = ContextFit.score("I left money at the river bank.", "bank", @river)
     finance = ContextFit.score("I left money at the river bank.", "bank", @finance)
-    assert river > finance
+    # Both senses have one literal cue; the role gate must not invent
+    # financial superiority from an explicit "river bank" construction.
+    assert river == finance
   end
 end
