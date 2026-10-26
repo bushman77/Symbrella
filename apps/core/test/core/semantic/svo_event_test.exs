@@ -55,6 +55,15 @@ defmodule Core.Semantic.SVOEventTest do
 
   test "past-tense SVO uses attested morphology, composes native reply and supports recall",
        %{sid: sid, owner: owner} do
+    previous_llm = Application.get_env(:core, :llm_inference_enabled?)
+    Application.put_env(:core, :llm_inference_enabled?, false)
+
+    on_exit(fn ->
+      if is_nil(previous_llm),
+        do: Application.delete_env(:core, :llm_inference_enabled?),
+        else: Application.put_env(:core, :llm_inference_enabled?, previous_llm)
+    end)
+
     si = inflected_input()
     past = %{
       si
