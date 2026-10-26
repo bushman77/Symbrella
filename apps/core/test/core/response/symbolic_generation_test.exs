@@ -265,6 +265,12 @@ defmodule Core.Response.SymbolicGenerationTest do
     assert meta.response_reflection.response_is_memory_acknowledgment? == false
     assert meta.response_reflection.llm_called? == false
 
+    # Exercise the real Response.Attach SI projection, not just plan/2:
+    # dropping sentence_meaning at this boundary would disable the generator.
+    attached = Core.Response.Attach.maybe_build_response_plan(si, [])
+    assert attached.response_text == reply
+    assert attached.response_meta.response_source == :symbolic_generation
+
     forged = %{si | source: :assistant}
     assert :not_applicable =
              SymbolicGeneration.generate(forged.text,

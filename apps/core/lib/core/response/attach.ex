@@ -130,6 +130,10 @@ defmodule Core.Response.Attach do
       sentence: si_get(si, :sentence),
       evidence: si_get(si, :evidence),
       comprehension: si_get(si, :comprehension),
+      # Post-LIFG compositional meaning has already been attached in Core.
+      # Keep it through SI -> response planning; symbolic realization
+      # revalidates the representation against the independent input.
+      sentence_meaning: si_get(si, :sentence_meaning),
       prefrontal: si_get(si, :prefrontal),
       control_signals: si_get(si, :control_signals),
       tokens: si_get(si, :tokens),
