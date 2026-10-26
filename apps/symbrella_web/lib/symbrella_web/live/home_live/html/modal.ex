@@ -850,6 +850,8 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
     critique = pget(reflection, :critique)
     grounded = pget(reflection, :grounded_revision)
     role_fidelity = pget(reflection, :semantic_role_fidelity)
+    symbolic? = status in [:symbolic_realized, "symbolic_realized"]
+    lexical_witness = pget(reflection, :lexical_witness)
 
     # A top-level :repair says only that Core changed the final text. Make
     # visible whether the grounded second LLM pass was accepted, rejected,
@@ -870,6 +872,17 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
       items =
         []
         |> maybe_kv("status", format_frame_value(status))
+        |> maybe_kv("speech act",
+          if(symbolic?, do: format_frame_value(pget(reflection, :speech_act)), else: nil))
+        |> maybe_kv("lexical witness",
+          if(symbolic? and is_map(lexical_witness),
+            do: pget(lexical_witness, :id), else: nil))
+        |> maybe_kv("provenance",
+          if(symbolic?, do: format_frame_value(pget(reflection, :provenance)), else: nil))
+        |> maybe_kv("sentence meaning verified?",
+          if(symbolic?, do: format_frame_value(pget(reflection, :semantic_verified?)), else: nil))
+        |> maybe_kv("LLM called?",
+          if(symbolic?, do: format_frame_value(pget(reflection, :llm_called?)), else: nil))
         |> maybe_kv("issues", format_frame_value(issues))
         |> maybe_kv("applied?", format_frame_value(applied?))
         |> maybe_kv("repair_count", format_frame_value(count))
@@ -905,9 +918,12 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         [
           %{
             key: :response_reflection,
-            title: "LLM response review",
+            title: if(symbolic?, do: "Symbolic realization", else: "LLM response review"),
             tag: format_frame_value(status),
-            hint: "Bounded post-generation review. A repair changes the LLM draft; it does not mean Core executed a physical action.",
+            hint:
+              if(symbolic?,
+                do: "Lexical selections are provisional. This speech act does not establish a verified sentence meaning.",
+                else: "Bounded post-generation review. A repair changes the LLM draft; it does not mean Core executed a physical action."),
             items: items
           }
         ]
