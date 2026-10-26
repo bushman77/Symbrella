@@ -43,6 +43,7 @@ defmodule Core.Response do
   alias Core.Response.OverrideSkills
   alias Core.Response.SelfStateFeatures
   alias Core.Response.SideEffects
+  alias Core.Response.SymbolicGeneration
 
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
@@ -173,6 +174,16 @@ defmodule Core.Response do
         inline_text = OverrideSkills.deterministic_inline_text(skill)
         llm_prompt_type = OverrideSkills.llm_prompt_override(skill)
 
+        # In the experimental no-LLM runtime, realize only supported,
+        # independently safe speech acts. Keep unsupported turns visibly
+        # unavailable instead of silently restoring model inference.
+        symbolic_response =
+          if Application.get_env(:core, :llm_inference_enabled?, true) == false do
+            SymbolicGeneration.generate(text_in, features, decision)
+          else
+            :not_applicable
+          end
+
         {text0, response_source, response_fallback_reason, response_reflection} =
           cond do
             is_binary(forced_identity) ->
@@ -180,6 +191,10 @@ defmodule Core.Response do
 
             is_binary(inline_text) ->
               {inline_text, :inline_skill, nil, nil}
+
+            match?({:ok, _, _}, symbolic_response) ->
+              {:ok, reply, realization} = symbolic_response
+              {reply, :symbolic_generation, nil, realization}
 
             true ->
               llm_or_model_unavailable(text_in, features, decision, mood, intent, llm_prompt_type)
@@ -189,7 +204,8 @@ defmodule Core.Response do
         # is already a complete response. The independent curiosity loop must
         # never append its investigation prompts to user-facing chat.
         {text, curiosity_probe} =
-          if response_source in [:symbolic_verified, :symbolic_verified_followup, :symbolic_unresolved] do
+          if response_source in [:symbolic_verified, :symbolic_verified_followup, :symbolic_unresolved,
+                                  :symbolic_generation] do
             {text0, nil}
           else
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
