@@ -18,6 +18,8 @@ defmodule Core.Response.LexicalDefinition do
     ~r/\A\s*(?:please\s+)?define\s+(?:the\s+)?(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu
   ]
 
+  alias Core.Semantic.FrameUnifier
+
   @max_definitions 3
   @max_definition_chars 180
 
@@ -38,7 +40,7 @@ defmodule Core.Response.LexicalDefinition do
   def generate(text, %{risk_bucket: :low}, %{action: action}, si)
       when is_binary(text) and is_map(si) and
            action in [:answer, :offer_options, :act_first, :ask_first] do
-    with term when is_binary(term) <- requested_term(text),
+    with {:ok, term, construction} <- bound_target(si, text),
          ^text <- Map.get(si, :sentence),
          true <- Map.get(si, :source) in [:user, :prod, :test] do
       definitions =
@@ -51,6 +53,7 @@ defmodule Core.Response.LexicalDefinition do
       {:ok, reply, %{
         status: status,
         provenance: :current_turn_ltm_definitions,
+        construction: construction,
         requested_term: term,
         candidate_definitions: length(definitions),
         returned_definitions: min(length(definitions), @max_definitions),
@@ -66,6 +69,25 @@ defmodule Core.Response.LexicalDefinition do
   end
 
   def generate(_, _, _, _), do: :not_applicable
+
+  defp bound_target(si, text) do
+    case FrameUnifier.verified(si, text) do
+      {:ok, %{operation: :define, target: %{lemma: term}, construction: schema}} ->
+        {:ok, term, schema}
+
+      _ ->
+        # Compatibility for pre-construction callers and existing narrowly
+        # validated forms. New paraphrases require the complete unified frame.
+        if is_nil(Map.get(si, :semantic_request_frame)) do
+          case requested_term(text) do
+            term when is_binary(term) -> {:ok, term, :legacy_exact_definition_form}
+            _ -> :not_applicable
+          end
+        else
+          :not_applicable
+        end
+    end
+  end
 
   defp valid_definitions(rows, term) when is_list(rows) do
     rows

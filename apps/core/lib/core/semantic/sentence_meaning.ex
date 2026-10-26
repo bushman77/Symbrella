@@ -74,7 +74,8 @@ defmodule Core.Semantic.SentenceMeaning do
         question
       end
 
-    question || object_question(si, sentence, frames, constituents, tokens) ||
+    definition_request(si) ||
+      question || object_question(si, sentence, frames, constituents, tokens) ||
       participant_meaning(si, sentence) || %{
       version: 1,
       sentence: sentence,
@@ -89,6 +90,31 @@ defmodule Core.Semantic.SentenceMeaning do
     version: 1, sentence: nil, definition: nil, kind: :unknown,
     status: :not_yet_interpreted, source: :invalid_input
   }
+
+  defp definition_request(si) do
+    case Core.Semantic.FrameUnifier.verified(si, Map.get(si, :sentence)) do
+      {:ok, %{operation: :define, target: target} = frame} ->
+        %{
+          version: 1,
+          sentence: frame.original_sentence,
+          definition: "The speaker requests a dictionary meaning for '#{target.lemma}'.",
+          kind: :lexical_definition_request,
+          status: :structurally_interpreted,
+          speech_act: :request_information,
+          source_frame: frame.construction,
+          roles: %{lexical_target: target},
+          unresolved: [:exact_dictionary_sense],
+          grounding: %{
+            grammatical_roles: :construction_and_dictionary_witness,
+            exact_lexical_meanings: :not_verified,
+            external_facts: :not_checked
+          },
+          source: :semantic_frame_unifier
+        }
+
+      _ -> nil
+    end
+  end
 
   @doc """
   Read-only explanation of why a resolved WH-topic frame may fail composition.

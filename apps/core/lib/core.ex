@@ -140,6 +140,8 @@ defmodule Core do
     |> StateDump.capture(:sentence_signatures)
     |> Core.Syntax.RoleCompetition.attach()
     |> StateDump.capture(:role_competition)
+    |> Core.Semantic.ConstructionSchema.attach()
+    |> StateDump.capture(:construction_schema)
     |> Core.Syntax.SentenceCompetition.attach()
     |> StateDump.capture(:sentence_competition)
     |> Selection.refine_from_syntax()
@@ -185,6 +187,8 @@ defmodule Core do
     # No database write or response is performed by either of these stages.
     |> Core.Semantic.EpisodicProjection.attach()
     |> StateDump.capture(:episodic_projection)
+    |> Core.Semantic.FrameUnifier.attach()
+    |> StateDump.capture(:frame_unifier)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
     # Prior, independently reviewed experience may propose a bounded same-POS

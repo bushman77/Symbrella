@@ -134,6 +134,9 @@ defmodule Core.Response.Attach do
       # Keep it through SI -> response planning; symbolic realization
       # revalidates the representation against the independent input.
       sentence_meaning: si_get(si, :sentence_meaning),
+      construction_candidates: si_get(si, :construction_candidates),
+      semantic_request_frame: si_get(si, :semantic_request_frame),
+      role_competition: si_get(si, :role_competition),
       # The current, session-specific attentional frame. This is rechecked
       # against the Brain WM admission record before any native realization.
       wm_context: si_get(si, :wm_context),

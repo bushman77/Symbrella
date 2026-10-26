@@ -110,7 +110,7 @@ defmodule Core.Response.Meta do
        when status in [:lexical_definition, :lexical_definition_ambiguous,
                        :lexical_definition_missing] do
     Map.merge(summary, Map.take(reflection,
-      [:requested_term, :provenance, :candidate_definitions,
+      [:requested_term, :construction, :provenance, :candidate_definitions,
        :returned_definitions, :selected_sense_verified?,
        :lexicon_rows_used?, :semantic_verified?, :factual_claims?,
        :llm_called?]))
