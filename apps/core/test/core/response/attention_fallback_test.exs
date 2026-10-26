@@ -34,6 +34,8 @@ defmodule Core.Response.AttentionFallbackTest do
     on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
     si = focused_si(sid, "Tell me about the Pacific Ocean?")
     assert si.wm_context.topic == "the Pacific Ocean"
+    assert si.wm_context.attention.scope == :session
+    assert si.wm_context.attention.salience == 1.0
 
     assert {:ok, reply, metadata} =
       AttentionFallback.generate(si.sentence,
@@ -50,6 +52,11 @@ defmodule Core.Response.AttentionFallbackTest do
     assert planned == reply
     assert plan_meta.response_source == :wm_attention_fallback
     assert plan_meta.curiosity_probe == nil
+
+    attached = Core.Response.Attach.maybe_build_response_plan(
+      Map.merge(si, %{confidence: 0.7}), [])
+    assert attached.response_text == reply
+    assert attached.response_meta.response_source == :wm_attention_fallback
   end
 
   test "unadmitted, stale, other-session, and safety-blocked focus cannot be voiced" do
