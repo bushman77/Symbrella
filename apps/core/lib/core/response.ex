@@ -179,7 +179,7 @@ defmodule Core.Response do
         # unavailable instead of silently restoring model inference.
         symbolic_response =
           if Application.get_env(:core, :llm_inference_enabled?, true) == false do
-            SymbolicGeneration.generate(text_in, features, decision)
+            SymbolicGeneration.generate(text_in, features, decision, si)
           else
             :not_applicable
           end

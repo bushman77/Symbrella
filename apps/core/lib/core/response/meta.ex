@@ -84,9 +84,20 @@ defmodule Core.Response.Meta do
       Map.get(reflection, :projected_expression_repair))
     |> maybe_put_semantic_role_fidelity(
       Map.get(reflection, :semantic_role_fidelity))
+    |> maybe_put_symbolic_realization(reflection)
   end
 
   defp reflection_summary(_), do: nil
+
+  # This evidence is a selected lexical witness, not a verified dictionary
+  # interpretation. Expose it separately so Explain cannot overstate it.
+  defp maybe_put_symbolic_realization(summary, %{status: :symbolic_realized} = reflection) do
+    Map.merge(summary, Map.take(reflection,
+      [:speech_act, :temporal_anchor, :addressee, :provenance,
+       :lexical_witness, :semantic_verified?, :llm_called?]))
+  end
+
+  defp maybe_put_symbolic_realization(summary, _), do: summary
 
   # Keep bounded retry outcomes inspectable without exposing prompts or drafts.
   defp maybe_put_answer_revision(summary, revision) when is_map(revision) do

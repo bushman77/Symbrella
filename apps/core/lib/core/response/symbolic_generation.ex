@@ -1,11 +1,14 @@
 defmodule Core.Response.SymbolicGeneration do
   @moduledoc """
-  First symbolic speech-realization pilot: a bounded reciprocal greeting.
+  First cognitive-to-language bridge for reciprocal greetings.
 
-  This module does not infer facts, feelings, identities, or conversation
-  history. It receives an already classified safe social turn, constructs a
-  speech-act frame, and realizes only the greeting it can support. Unsupported
-  inputs must return :not_applicable rather than invent a response.
+  Input meaning comes from Core's conversational intent and the canonical
+  LIFG/MWE semantic_choices carried by SemanticInput. Canonical lexical
+  selection is provisional evidence, NOT a verified sentence meaning.
+
+  A bounded standalone-greeting boundary prevents converting mixed requests
+  into a greeting. Other established greetings retain an explicitly labelled
+  surface-only realization until they have their own semantic witness.
   """
 
   alias Core.Response.GreetingTurn
@@ -13,41 +16,81 @@ defmodule Core.Response.SymbolicGeneration do
   @type greeting_frame :: %{
           speech_act: :reciprocate_greeting,
           temporal_anchor: :morning | :afternoon | :evening | :unspecified,
-          addressee: :user
+          addressee: :user,
+          lexical_witness: map() | nil
         }
 
-  @spec generate(String.t(), map(), map()) ::
+  @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
-  def generate(user_text, %{risk_bucket: :low}, decision)
-      when is_binary(user_text) and is_map(decision) do
-    # Exact standalone surface evidence is sufficient even when upstream
-    # intent classification reports :smalltalk or :unknown.
-    if GreetingTurn.standalone?(user_text) do
-      frame = plan(user_text)
-      text = realize(frame)
+  def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
+      when is_binary(user_text) and is_map(si) and
+             intent in [:greet, :greeting] and
+             action in [:answer, :offer_options] do
+    with true <- GreetingTurn.standalone?(user_text),
+         {:ok, witness} <- lexical_evidence(user_text, si) do
+      frame = plan(user_text, witness)
 
-      {:ok, text,
+      {:ok, realize(frame),
        %{
          status: :symbolic_realized,
          speech_act: frame.speech_act,
          temporal_anchor: frame.temporal_anchor,
-         provenance: :surface_greeting,
+         addressee: frame.addressee,
+         provenance: if(witness, do: :canonical_lifg_choice, else: :surface_greeting),
+         lexical_witness: witness,
+         semantic_verified?: false,
          factual_claims?: false,
          llm_called?: false
        }}
     else
-      :not_applicable
+      _ -> :not_applicable
     end
   end
 
-  def generate(_user_text, _features, _decision), do: :not_applicable
+  def generate(_text, _features, _decision, _si), do: :not_applicable
 
-  @spec plan(String.t()) :: greeting_frame()
-  defp plan(user_text) do
+  # "Hello" is our first strict bridge. It cannot be realized from surface
+  # matching alone: the canonical winner must select its interjection sense
+  # at the observed first token. Other existing greetings are explicitly
+  # marked surface-only, pending their own lexical rules.
+  defp lexical_evidence(user_text, si) do
+    if Regex.match?(~r/\A\s*hello\b/iu, user_text) do
+      case Map.get(si, :semantic_choices) do
+        choices when is_list(choices) ->
+          choices
+          |> Enum.find(&hello_winner?/1)
+          |> case do
+            %{} = winner ->
+              {:ok, Map.take(winner, [:id, :token_index, :score, :source])}
+
+            nil ->
+              :missing_lexical_evidence
+          end
+
+        _ ->
+          :missing_lexical_evidence
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp hello_winner?(%{} = choice) do
+    Map.get(choice, :id) == "hello|interjection|1" and
+      Map.get(choice, :token_index) == 0 and
+      Map.get(choice, :pos) in [:interjection, "interjection"] and
+      is_number(Map.get(choice, :score)) and Map.get(choice, :score) > 0
+  end
+
+  defp hello_winner?(_), do: false
+
+  @spec plan(String.t(), map() | nil) :: greeting_frame()
+  defp plan(text, witness) do
     %{
       speech_act: :reciprocate_greeting,
-      temporal_anchor: time_of_day(user_text),
-      addressee: :user
+      temporal_anchor: time_of_day(text),
+      addressee: :user,
+      lexical_witness: witness
     }
   end
 
@@ -67,12 +110,10 @@ defmodule Core.Response.SymbolicGeneration do
   defp time_of_day(text) do
     case Regex.run(~r/\bgood\s+(morning|afternoon|eve(?:n+i+|i+)ng)\b/iu, text) do
       [_, phrase] ->
-        normalized = String.downcase(phrase)
-
-        cond do
-          normalized == "morning" -> :morning
-          normalized == "afternoon" -> :afternoon
-          true -> :evening
+        case String.downcase(phrase) do
+          "morning" -> :morning
+          "afternoon" -> :afternoon
+          _ -> :evening
         end
 
       _ ->
