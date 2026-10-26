@@ -15,6 +15,7 @@ defmodule Core.Brain.WM.Comprehension do
   alias Core.Brain.Runtime
   alias Core.Pipeline.Trace
   alias Core.Semantic.EpisodicProjection
+  alias Core.Semantic.ProvisionalInterpretation
 
   @max_age_ms 20 * 60 * 1_000
   @max_entities 4
@@ -168,6 +169,13 @@ defmodule Core.Brain.WM.Comprehension do
     prev = map_or_empty(field(si, :wm_context))
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
+    provisional =
+      case ProvisionalInterpretation.verified(si) do
+        {:ok, frame} -> frame
+        _ -> nil
+      end
+    provisional_topic = get_in(provisional || %{}, [:target, :lemma])
+    provisional_reference = provisional_context(provisional, prev, field(si, :session_id))
     year = followup_year(sentence)
     previous_topic = field(prev, :topic)
     previous_subtopic = field(prev, :subtopic)
@@ -175,7 +183,7 @@ defmodule Core.Brain.WM.Comprehension do
       is_integer(year) or conversational_continuation?(sentence, previous_subtopic)
     explicit_topic = if continuation?, do: nil, else: public_topic(sentence)
     inherited_topic = if continuation?, do: previous_topic, else: nil
-    topic = explicit_topic || inherited_topic
+    topic = explicit_topic || inherited_topic || provisional_topic
 
     # A conversational subtopic refines, but does not replace, the established
     # same-session subject. Explicit switches clear both inherited focus and
@@ -253,6 +261,7 @@ defmodule Core.Brain.WM.Comprehension do
         cond do
           is_binary(explicit_topic) -> :current_user_request
           is_binary(inherited_topic) -> :same_session_wm
+          is_binary(provisional_topic) -> :provisional_construction
           true -> nil
         end,
       temporal_reference:
@@ -260,6 +269,8 @@ defmodule Core.Brain.WM.Comprehension do
       intent: field(si, :intent),
       entities: entities,
       relation: relation,
+      requested_relation: field(provisional_reference, :requested_relation),
+      provisional_interpretation: provisional_reference,
       event_roles: event_roles,
       event_source_frame: field(projected, :source_frame),
       event_role_status: if(is_map(projected), do: :validated_projection, else: :none),
@@ -267,10 +278,59 @@ defmodule Core.Brain.WM.Comprehension do
       understood: terms(field(comprehension, :understood)),
       uncertain: terms(field(comprehension, :uncertain)),
       degraded?: field(comprehension, :degraded?) == true,
-      interpretation_status: field(map_or_empty(field(si, :sentence_meaning)), :status),
+      interpretation_status:
+        case field(map_or_empty(field(si, :sentence_meaning)), :status) do
+          status when status in [nil, :not_yet_interpreted] and is_map(provisional) ->
+            :provisional
+          status -> status
+        end,
       verification: :conversation_context_only,
       updated_at_ms: System.system_time(:millisecond)
     }
+  end
+
+  # These prior-turn matches remain candidates, not resolved references or facts.
+  # Real pipeline recall is session-keyed before this method runs.
+  defp provisional_context(%{status: :provisional} = frame, prev, session)
+       when is_binary(session) and session != "" do
+    lemma = frame.target.lemma
+    candidates =
+      prev
+      |> field(:entities)
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.filter(&(referent_head(&1) == lemma))
+      |> Enum.uniq()
+      |> Enum.take(@max_entities)
+
+    %{
+      status: :provisional, operation: frame.operation,
+      speech_act: frame.speech_act, target: frame.target,
+      requested_relation: frame.requested_relation,
+      referent_status: if(candidates == [], do: :unresolved, else: :candidate_same_session),
+      antecedent_candidates: candidates, evidence: frame.evidence,
+      missing: frame.missing, factual_authority?: false,
+      verification: :conversation_context_only
+    }
+  end
+
+  defp provisional_context(%{status: :provisional} = frame, _prev, _session) do
+    %{
+      status: :provisional, operation: frame.operation,
+      speech_act: frame.speech_act, target: frame.target,
+      requested_relation: frame.requested_relation,
+      referent_status: :unresolved, antecedent_candidates: [],
+      evidence: frame.evidence, missing: frame.missing,
+      factual_authority?: false, verification: :conversation_context_only
+    }
+  end
+  defp provisional_context(_, _, _), do: nil
+
+  defp referent_head(entity) do
+    entity
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r/\A(?:a|an|the)\s+/u, "")
   end
 
   # Conversational subject only, not independently verified evidence.

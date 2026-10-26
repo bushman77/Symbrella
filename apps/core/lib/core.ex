@@ -191,6 +191,8 @@ defmodule Core do
     |> StateDump.capture(:frame_unifier)
     |> Core.Semantic.SentenceMeaning.attach()
     |> StateDump.capture(:sentence_meaning)
+    |> Core.Semantic.ProvisionalInterpretation.attach()
+    |> StateDump.capture(:provisional_interpretation)
     # Prior, independently reviewed experience may propose a bounded same-POS
     # revision. Default is audit-only; live selection requires two explicit gates.
     |> Core.Brain.SynapticFeedback.attach(opts)

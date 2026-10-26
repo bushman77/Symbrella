@@ -69,6 +69,18 @@ defmodule Core.Comprehension.Summary do
         _ -> nil
       end
 
+    provisional =
+      case Core.Semantic.ProvisionalInterpretation.verified(si) do
+        {:ok, frame} -> frame
+        _ -> nil
+      end
+
+    provisional_topics =
+      case provisional do
+        %{target: %{lemma: lemma}} when is_binary(lemma) -> [lemma]
+        _ -> []
+      end
+
     {strong, weak, stats} = split_choice_terms(choices)
     unresolved = unresolved_content_terms(tokens, choices)
 
@@ -77,6 +89,7 @@ defmodule Core.Comprehension.Summary do
       |> maybe_add_keyword(keyword, intent)
       |> Kernel.++(intent_anchors(intent, sentence))
       |> Kernel.++(sentence_topic_anchors(sentence_meaning))
+      |> Kernel.++(provisional_topics)
       |> clean_terms()
       |> Enum.take(@summary_limit)
 
@@ -128,6 +141,8 @@ defmodule Core.Comprehension.Summary do
       confidence: confidence,
       keyword: blank_to_nil(keyword),
       recognized_topics: recognized_topics,
+      provisional_topics: provisional_topics,
+      provisional_interpretation: provisional,
       active_referents: active_referents,
       selected_lexical_candidates: selected_lexical_candidates,
       understood: understood,
@@ -500,6 +515,8 @@ defmodule Core.Comprehension.Summary do
       confidence: 0.0,
       keyword: nil,
       recognized_topics: [],
+      provisional_topics: [],
+      provisional_interpretation: nil,
       selected_lexical_candidates: [],
       understood: [],
       lexical_meanings: [],

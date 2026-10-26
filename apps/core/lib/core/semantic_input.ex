@@ -73,6 +73,7 @@ defmodule Core.SemanticInput do
                 :role_competition,
                 :semantic_request_frame,
                 :sentence_meaning,
+                :provisional_interpretation,
                 :lifg_feedback,
                 :perception,
                 :atl_slate,
@@ -210,6 +211,7 @@ defmodule Core.SemanticInput do
           construction_candidates: [map()],
           semantic_request_frame: map() | nil,
           sentence_meaning: map() | nil,
+          provisional_interpretation: map() | nil,
           episodic_candidates: [map()],
           lifg_feedback: map() | nil,
           sense_candidates: %{
@@ -301,6 +303,7 @@ defmodule Core.SemanticInput do
             construction_candidates: [],
             semantic_request_frame: nil,
             sentence_meaning: nil,
+            provisional_interpretation: nil,
             episodic_candidates: [],
             lifg_feedback: nil,
             sense_candidates: %{},
