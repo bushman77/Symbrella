@@ -1009,7 +1009,8 @@ defmodule Db.Episode do
         %{status: "asserted", value: ^patient,
           participants: %{"actor" => actor, "patient" => ^patient,
                           "surface_predicate" => ^surface_predicate,
-                          "tense" => "present"}} when is_binary(actor) -> true
+                          "tense" => tense}}
+        when is_binary(actor) and tense in ["present", "past"] -> true
         _ -> false
       end)
 
@@ -1046,7 +1047,8 @@ defmodule Db.Episode do
       |> Enum.filter(fn
         %{status: "asserted", relation: "verb_" <> lemma, value: patient,
           participants: %{"predicate" => stored_lemma, "patient" => stored_patient,
-                          "tense" => "present"}} ->
+                          "tense" => tense}}
+        when tense in ["present", "past"] ->
           lemma == stored_lemma and patient == stored_patient
 
         _ -> false
