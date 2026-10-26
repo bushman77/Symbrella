@@ -102,4 +102,90 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
     # financial superiority from an explicit "river bank" construction.
     assert river == finance
   end
+
+  test "production ignores stale candidate context features and preserves computed definition evidence" do
+    sentence = "I deposited money at the bank."
+    {start, width} = :binary.match(sentence, "bank")
+
+    # All candidates have the same non-context features. The financial sense
+    # is deliberately given a stale zero, while the gambling sense advertises
+    # an unsupported high context feature. Neither may override the live gloss.
+    with_features = fn candidate, context_value ->
+      Map.put(candidate, :features, %{
+        lex_fit: 1.0, rel_prior: 0.5, activation: 0.5,
+        intent_bias: 0.0, context_fit: context_value
+      })
+    end
+
+    si = %{
+      sentence: sentence,
+      tokens: [%{index: 0, phrase: "bank", n: 1, mw: false,
+                 span: {start, start + width}}],
+      sense_candidates: %{
+        0 => [
+          with_features.(@finance, 0.0),
+          with_features.(@gambling, 0.9),
+          with_features.(@money, 0.0),
+          with_features.(@river, 0.0)
+        ]
+      }
+    }
+
+    for semantic_control? <- [true, false] do
+      assert {:ok, %{choices: [choice]}} =
+               Stage1.run(si, scores: :all, preserve_sense_candidates: true,
+                 semantic_control?: semantic_control?, cerebellum_learn?: false)
+
+      assert choice.chosen_id == @finance.id
+      assert choice.scores[@finance.id] > choice.scores[@gambling.id]
+      assert choice.scores[@finance.id] > choice.scores[@money.id]
+
+      evidence = Map.new(choice.definition_context_evidence, &{&1.id, &1})
+      assert_in_delta evidence[@finance.id].score, 0.47, 1.0e-6
+      assert_in_delta evidence[@finance.id].effective_context_fit, 0.47, 1.0e-6
+      assert_in_delta evidence[@finance.id].stale_candidate_context_fit, 0.0, 1.0e-6
+      assert_in_delta evidence[@gambling.id].score, 0.29, 1.0e-6
+      assert_in_delta evidence[@gambling.id].effective_context_fit, 0.29, 1.0e-6
+      assert_in_delta evidence[@gambling.id].stale_candidate_context_fit, 0.9, 1.0e-6
+
+      assert evidence[@finance.id].final_logit > evidence[@gambling.id].final_logit
+      assert evidence[@finance.id].base_logit > evidence[@gambling.id].base_logit
+      assert is_number(evidence[@finance.id].after_cerebellum_logit)
+      assert is_number(evidence[@finance.id].after_grammar_logit)
+
+      if semantic_control? do
+        assert choice.semantic_control.applied?
+      else
+        assert choice.semantic_control.reason == :disabled
+      end
+    end
+  end
+
+  test "familiar river and cloud meanings survive production context handoff" do
+    cands = [
+      @finance,
+      @river,
+      %{id: "bank|noun|15", lemma: "bank", pos: "noun",
+        definition: "A mass of clouds.", activation: 0.5}
+    ]
+    for {sentence, winner} <- [
+      {"I sat beside the river bank.", "bank|noun|10"},
+      {"A thick bank of clouds covered the mountains.", "bank|noun|15"}
+    ] do
+      {start, width} = :binary.match(sentence, "bank")
+      si = %{
+        sentence: sentence,
+        tokens: [%{index: 0, phrase: "bank", n: 1, mw: false,
+                   span: {start, start + width}}],
+        sense_candidates: %{0 => Enum.map(cands, fn c ->
+          Map.put(c, :features, %{context_fit: 0.0})
+        end)}
+      }
+      assert {:ok, %{choices: [choice]}} =
+               Stage1.run(si, scores: :all, preserve_sense_candidates: true,
+                 semantic_control?: true, cerebellum_learn?: false)
+      assert choice.chosen_id == winner
+    end
+  end
+
 end

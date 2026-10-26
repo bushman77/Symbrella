@@ -733,29 +733,15 @@ defmodule Brain.LIFG.Stage1 do
             act = feat_override |> get_num(:activation, act0) |> clamp01()
             intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
-            context_fit =
-              feat_override
-              |> get_num(:context_fit, context0)
-              |> clamp01()
-
-            # TEMPORARY DIAGNOSTIC — remove after investigation.
-            if id == "get|verb|19" do
-              IO.inspect(
-                %{
-                  token_index: tok_index,
-                  sentence: ctx.sent,
-                  candidate_id: id,
-                  calculated_context: context0,
-                  feature_override: feat_override,
-                  final_context: context_fit,
-                  definition: Safe.get(c, :definition),
-                  example: Safe.get(c, :example),
-                  candidate_keys: Map.keys(c)
-                },
-                label: "[STAGE1 CONTEXT DEBUG]",
-                limit: :infinity
-              )
-            end
+            # The live, sentence-grounded dictionary comparison is the
+            # authority for :context_fit. Some upstream candidate feature
+            # maps contain cached/zero context_fit values; allowing them to
+            # override this result silently discards definition evidence.
+            #
+            # SenseFocus-skipped alternatives stay at zero as intended; an
+            # upstream override must not bypass the adjudicated POS budget.
+            candidate_context_override = get_num(feat_override, :context_fit, 0.0)
+            context_fit = clamp01(context0)
 
             pos_bias =
               ClosedClass.closed_class_pos_bias(token_phrase, pos) +
@@ -792,6 +778,7 @@ defmodule Brain.LIFG.Stage1 do
               # metadata, not a candidate-supplied feature override.
               context_evidence: context0,
               context_report: context_report,
+              candidate_context_override: candidate_context_override,
               perception_delta: perception_delta,
               hom_bump: hom_bump,
               pos_bias: pos_bias
@@ -836,7 +823,7 @@ defmodule Brain.LIFG.Stage1 do
         cereb_opts =
           kw_to_map(scope: "lifg_stage1", context_key: ctx_key, margin_tau: ctx.margin_thr)
 
-        cal_scores =
+        cerebellum_scores =
           if closed_class_slate? do
             base_scores
           else
@@ -845,7 +832,7 @@ defmodule Brain.LIFG.Stage1 do
 
         cal_scores =
           GrammarEvidence.apply(
-            cal_scores,
+            cerebellum_scores,
             ctx.grammar_context,
             tok_index,
             Map.get(ctx, :grammar_weight, 0.0)
@@ -895,6 +882,8 @@ defmodule Brain.LIFG.Stage1 do
         # "know" has particle and verb candidates: the particle must not
         # suppress contextual discrimination between the verb senses.
         # Preserve the older closed_class_slate? calibration/learning policy.
+        grammar_scores = cal_scores
+
         provisional_id =
           Enum.max_by(ids, &Map.get(cal_scores, &1, 0.0), fn -> nil end)
 
@@ -1041,6 +1030,12 @@ defmodule Brain.LIFG.Stage1 do
               %{
                 id: row.id,
                 score: row.context_evidence,
+                effective_context_fit: row.features.context_fit,
+                stale_candidate_context_fit: row.candidate_context_override,
+                base_logit: Map.get(base_scores, row.id),
+                after_cerebellum_logit: Map.get(cerebellum_scores, row.id),
+                after_grammar_logit: Map.get(grammar_scores, row.id),
+                final_logit: Map.get(cal_scores, row.id),
                 definition_role: row.context_report.definition_role,
                 matches: row.context_report.unique_matches,
                 contributions: row.context_report.contributions
