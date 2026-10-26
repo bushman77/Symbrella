@@ -192,7 +192,7 @@ defmodule Brain.LIFG.RoleCompetition do
           required = [:complete_imperative_surface, :explicit_definition_command,
                       :attested_verb_alternative, :attested_common_noun_object]
 
-          if Map.get(si, :intent) == :define and last == object and
+          if Map.get(si, :intent) in [:define, :command] and last == object and
                object in [predicate + 1, predicate + 2] and
                predicate in [0, 1] and
                Map.get(tokens, predicate) == "define" and

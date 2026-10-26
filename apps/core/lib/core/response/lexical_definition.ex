@@ -6,13 +6,16 @@ defmodule Core.Response.LexicalDefinition do
   ("meaning", "definition") or a working-memory attention hint.
 
   When LIFG leaves senses tied, present bounded dictionary alternatives rather
-  than treating a stable winner ID as semantic certainty.
+  than treating a stable winner ID as semantic certainty. An explicit,
+  low-risk definition request can also be answered under the policy's
+  conversational :ask_first posture: the complete lexical target is known,
+  so no clarification is necessary. Safety redirects/suppression stay gated.
   """
 
   @patterns [
     ~r/\A\s*what\s+is\s+(?:the\s+)?(?:meaning|definition)\s+of\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu,
     ~r/\A\s*what\s+does\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s+mean\s*[?.!]?\s*\z/iu,
-    ~r/\A\s*define\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu
+    ~r/\A\s*(?:please\s+)?define\s+(?:the\s+)?(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu
   ]
 
   @max_definitions 3
@@ -34,7 +37,7 @@ defmodule Core.Response.LexicalDefinition do
           {:ok, String.t(), map()} | :not_applicable
   def generate(text, %{risk_bucket: :low}, %{action: action}, si)
       when is_binary(text) and is_map(si) and
-           action in [:answer, :offer_options, :act_first] do
+           action in [:answer, :offer_options, :act_first, :ask_first] do
     with term when is_binary(term) <- requested_term(text),
          ^text <- Map.get(si, :sentence),
          true <- Map.get(si, :source) in [:user, :prod, :test] do

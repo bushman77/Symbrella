@@ -247,7 +247,7 @@ defmodule Core.Syntax.Signatures do
   # The noun object is specifically a common noun: "define artist" is about
   # the lexical noun, even if an unrelated proper-noun dictionary row exists.
   defp definition_imperatives(si, nodes) do
-    if get(si, :intent) == :define and length(nodes) in 2..4 do
+    if get(si, :intent) in [:define, :command] and length(nodes) in 2..4 do
       parsed =
         case nodes do
           [predicate, object] ->

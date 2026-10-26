@@ -712,4 +712,25 @@ defmodule Core.Syntax.SignaturesTest do
        |> Map.put(:intent, :define) |> Signatures.detect() |> Enum.map(& &1.id))
   end
 
+
+  test "polite commands classified as :command still supply evidenced definition roles" do
+    cells = [
+      %{id: "define|verb|1", norm: "define", pos: "verb"},
+      %{id: "define|noun|1", norm: "define", pos: "noun"},
+      %{id: "artist|noun|1", norm: "artist", pos: "noun"},
+      %{id: "artist|proper_noun|1", norm: "artist", pos: "proper_noun"}
+    ]
+
+    si = input("please define artist", cells) |> Map.put(:intent, :command)
+    assert [%{roles: %{predicate: 1, object_head: 2},
+              source: :core_syntax}] =
+      Enum.filter(Signatures.detect(si), &(&1.id == :definition_imperative))
+
+    refute :definition_imperative in
+      (input("please define artist now", cells)
+       |> Map.put(:intent, :command)
+       |> Signatures.detect()
+       |> Enum.map(& &1.id))
+  end
+
 end

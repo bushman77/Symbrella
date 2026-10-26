@@ -209,4 +209,37 @@ defmodule Brain.LIFG.RoleCompetitionTest do
       RoleCompetition.resolve(checked).roles[2]
   end
 
+
+  test "polite :command correctly adjudicates both dictionary POS conflicts" do
+    cells = [
+      cell("please", "adverb"),
+      cell("define", "noun"), cell("define", "verb"),
+      cell("artist", "noun"), cell("artist", "proper_noun")
+    ]
+    tokens = token_words(["please", "define", "artist"])
+    signature = %{
+      id: :definition_imperative,
+      source: :core_syntax, span: {0, 2},
+      roles: %{predicate: 1, object_head: 2},
+      evidence: [:complete_imperative_surface, :explicit_definition_command,
+                 :attested_verb_alternative, :attested_common_noun_object]
+    }
+    si = %{
+      intent: :command, sentence: "please define artist",
+      tokens: tokens, active_cells: cells, sentence_signatures: [signature]
+    }
+    resolved = RoleCompetition.resolve(si)
+    assert %{pos: "verb", basis: :definition_imperative_predicate} =
+      resolved.roles[1]
+    assert %{pos: "noun", basis: :definition_imperative_object} =
+      resolved.roles[2]
+
+    scores = %{"artist|proper_noun|1" => 0.34, "artist|noun|1" => 0.23}
+    ranked = GrammarEvidence.apply_role_competition(
+      scores, GrammarEvidence.prepare(Map.put(si, :role_competition, resolved)), 2)
+    assert ranked["artist|noun|1"] > ranked["artist|proper_noun|1"]
+    assert Map.keys(scores) == Map.keys(ranked)
+    assert RoleCompetition.resolve(%{si | intent: :unknown}).roles == %{}
+  end
+
 end

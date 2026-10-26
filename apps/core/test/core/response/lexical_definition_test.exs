@@ -131,4 +131,66 @@ defmodule Core.Response.LexicalDefinitionTest do
       AttentionFallback.generate(sentence,
         %{risk_bucket: :low, intent: :ask_info}, %{action: :answer}, turn)
   end
+
+  test "live imperative variants route directly to dictionary answers with LLM disabled" do
+    for {sentence, intent, target} <- [
+      {"please define artist", :command, "artist"},
+      {"define the artist", :define, "artist"},
+      {"define bank", :define, "bank"}
+    ] do
+      assert LexicalDefinition.requested_term(sentence) == target
+      turn = %{
+        sentence: sentence, text: sentence, source: :prod, intent: intent,
+        confidence: 0.94,
+        session_id: "definition-command-#{System.unique_integer([:positive])}",
+        active_cells: [
+          row(target, "noun", 1, "A dictionary meaning of #{target}."),
+          row(target, "noun", 2, "An alternate meaning of #{target}.")
+        ]
+      }
+      {_tone, answer, meta} = Response.plan(turn, %{})
+      assert answer =~ ~s("#{target}" has multiple recorded meanings:), sentence
+      assert meta.response_source == :symbolic_lexical_definition
+      assert meta.response_reflection.requested_term == target
+      assert meta.response_reflection.llm_called? == false
+
+      attached = Core.Response.Attach.maybe_build_response_plan(turn, [])
+      assert attached.response_text == answer
+      assert attached.response_meta.response_source == :symbolic_lexical_definition
+    end
+  end
+
+  test "explicit low-risk definition can answer an ask-first decision without relaxing safety" do
+    sentence = "define bank"
+    turn = si(sentence, [row("bank", "noun", 1, "A financial institution.")])
+    assert {:ok, ~s("bank" (noun): A financial institution.), reflection} =
+      LexicalDefinition.generate(sentence,
+        %{risk_bucket: :low, intent: :define},
+        %{action: :ask_first}, turn)
+    assert reflection.llm_called? == false
+
+    for action <- [:suppress, :safe_redirect, :surface] do
+      assert :not_applicable ==
+        LexicalDefinition.generate(sentence,
+          %{risk_bucket: :low, intent: :define},
+          %{action: action}, turn)
+    end
+
+    assert :not_applicable ==
+      LexicalDefinition.generate(sentence,
+        %{risk_bucket: :high, intent: :define},
+        %{action: :ask_first}, turn)
+  end
+
+  test "unsupported longer or reversed commands do not masquerade as definitions" do
+    for sentence <- [
+      "define artist now",
+      "artist define",
+      "please define artist now",
+      "define the artist and painter"
+    ] do
+      assert LexicalDefinition.requested_term(sentence) == nil
+    end
+  end
+
 end
