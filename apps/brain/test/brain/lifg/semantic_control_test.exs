@@ -157,4 +157,28 @@ defmodule Brain.LIFG.SemanticControlTest do
     assert choice.low_confidence?
     assert Enum.sort(Map.keys(choice.scores)) == Enum.sort([@finance, @river])
   end
+
+  test "semantic control can distinguish already-saturated grammar logits" do
+    original = %{
+      "bank|noun|1" => 1.0,
+      "bank|noun|5" => 1.0,
+      "bank|noun|6" => 1.0
+    }
+
+    rows = [
+      %{id: "bank|noun|1", context_evidence: 0.47},
+      %{id: "bank|noun|5", context_evidence: 0.29},
+      %{id: "bank|noun|6", context_evidence: 0.29}
+    ]
+
+    {scores, report} = SemanticControl.apply(original, rows, focus_pos: "noun")
+
+    assert report.applied?
+    assert scores["bank|noun|1"] > 1.0
+    assert scores["bank|noun|1"] > scores["bank|noun|5"]
+    assert scores["bank|noun|1"] > scores["bank|noun|6"]
+    assert scores["bank|noun|5"] == original["bank|noun|5"]
+    assert scores["bank|noun|6"] == original["bank|noun|6"]
+  end
+
 end

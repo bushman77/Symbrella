@@ -47,9 +47,10 @@ defmodule Brain.LIFG.GrammarEvidence do
   def prepare(_), do: %{signatures: [], cells_by_id: %{}, resolved_roles: %{}}
 
   @doc """
-  Apply bounded grammatical support to an existing candidate score map.
+  Apply bounded grammatical support to existing candidate *logits*.
   The caller decides the scale: 0.0 disables; 1.0 uses the full deltas.
-  Does not remove or create candidates.
+  Does not remove or create candidates. The bounded additive support is not
+  a probability; it must not clip logits at 1.0 and erase within-POS rankings.
   """
   @spec apply(map(), context(), non_neg_integer(), number()) :: map()
   def apply(scores, _context, _index, weight)
@@ -68,7 +69,7 @@ defmodule Brain.LIFG.GrammarEvidence do
 
       updated =
         if is_number(base) do
-          min(1.0, max(0.0, base * 1.0 + support * weight))
+          max(0.0, base * 1.0 + support * weight)
         else
           base
         end
@@ -167,7 +168,7 @@ defmodule Brain.LIFG.GrammarEvidence do
           Map.new(scores, fn
             {id, score} when is_binary(id) and is_number(score) ->
               boosted? = id_pos(id) == pos and not String.ends_with?(id, "|fallback")
-              {id, if(boosted?, do: min(1.0, max(0.0, score + 0.30)), else: score)}
+              {id, if(boosted?, do: max(0.0, score + 0.30), else: score)}
 
             entry ->
               entry
@@ -223,7 +224,7 @@ defmodule Brain.LIFG.GrammarEvidence do
           if is_binary(id) and not String.ends_with?(id, "|fallback") and
                id_pos(id) == "verb" and finite_present_sense?(cell) and
                is_number(score) do
-            min(1.0, max(0.0, score * 1.0 + 0.32))
+            max(0.0, score * 1.0 + 0.32)
           else
             score
           end
@@ -293,7 +294,7 @@ defmodule Brain.LIFG.GrammarEvidence do
           if id_pos(id) == "noun" and
                not String.ends_with?(id, "|fallback") and
                is_map(cell) and get(cell, :pos, nil) == "noun" do
-            {id, min(1.0, max(0.0, score + 0.36))}
+            {id, max(0.0, score + 0.36)}
           else
             {id, score}
           end
@@ -347,7 +348,7 @@ defmodule Brain.LIFG.GrammarEvidence do
 
           if id_pos(id) == "verb" and not String.ends_with?(id, "|fallback") and
                is_map(cell) and get(cell, :pos, nil) == "verb" do
-            {id, min(1.0, max(0.0, score + 0.40))}
+            {id, max(0.0, score + 0.40)}
           else
             {id, score}
           end

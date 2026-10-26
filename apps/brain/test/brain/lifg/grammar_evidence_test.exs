@@ -384,4 +384,27 @@ defmodule Brain.LIFG.GrammarEvidenceTest do
              GE.prepare(%{active_cells: cells, sentence_signatures: [incomplete]}), 2) == scores
   end
 
+
+  test "POS grammar evidence does not saturate away distinctions between noun senses" do
+    signature = %{
+      id: :noun_phrase,
+      roles: %{head: 2},
+      required_features: %{head: [:pos_noun]}
+    }
+
+    financial = "bank|noun|1"
+    gambling = "bank|noun|5"
+    verb = "bank|verb|1"
+
+    initial = %{financial => 0.933, gambling => 0.861, verb => 0.83}
+    ctx = context([signature])
+    boosted = GE.apply(initial, ctx, 2, 1.0)
+
+    assert boosted[financial] > 1.0
+    assert boosted[gambling] > 1.0
+    assert boosted[financial] > boosted[gambling]
+    assert_in_delta boosted[financial] - boosted[gambling], 0.072, 1.0e-8
+    assert boosted[verb] == initial[verb]
+  end
+
 end

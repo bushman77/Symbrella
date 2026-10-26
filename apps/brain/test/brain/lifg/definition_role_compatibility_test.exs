@@ -188,4 +188,50 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
     end
   end
 
+
+  test "production grammatical POS support preserves stronger definition context through softmax" do
+    sentence = "I deposited money at the bank."
+    {start, length} = :binary.match(sentence, "bank")
+
+    candidates =
+      Enum.map([@finance, @gambling, @money], fn candidate ->
+        Map.put(candidate, :features, %{
+          lex_fit: 1.0, rel_prior: 1.0, activation: 1.0,
+          intent_bias: 1.0, context_fit: 0.0
+        })
+      end)
+
+    # A noun phrase supports all three noun senses equally. It must not
+    # obliterate the stronger financial-definition evidence.
+    si = %{
+      sentence: sentence,
+      tokens: [%{index: 0, phrase: "bank", n: 1, mw: false,
+                 span: {start, start + length}}],
+      active_cells: candidates,
+      sense_candidates: %{0 => candidates},
+      sentence_signatures: [
+        %{id: :noun_phrase, roles: %{head: 0},
+          required_features: %{head: [:pos_noun]}}
+      ]
+    }
+
+    assert {:ok, %{choices: [choice]}} =
+             Stage1.run(si,
+               scores: :all, preserve_sense_candidates: true,
+               grammar_weight: 1.0, semantic_control?: true,
+               cerebellum_learn?: false,
+               weights: [
+                 lex_fit: 0.3, context_fit: 0.3, rel_prior: 0.2,
+                 activation: 0.1, intent_bias: 0.1
+               ])
+
+    evidence = Map.new(choice.definition_context_evidence, &{&1.id, &1})
+    assert choice.chosen_id == @finance.id
+    assert evidence[@finance.id].effective_context_fit > evidence[@gambling.id].effective_context_fit
+    assert evidence[@finance.id].after_grammar_logit > evidence[@gambling.id].after_grammar_logit
+    assert evidence[@finance.id].final_logit > evidence[@gambling.id].final_logit
+    assert choice.scores[@finance.id] > choice.scores[@gambling.id]
+    assert choice.margin > 0.0
+  end
+
 end

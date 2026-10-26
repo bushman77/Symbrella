@@ -9,7 +9,8 @@ defmodule Brain.LIFG.SemanticControl do
 
   It does not inspect downstream ATL/propositions, assert facts, create senses,
   change POS, or recalibrate probabilities. Ambiguity remains ambiguity when
-  context fit is uniform or insufficient.
+  context fit is uniform or insufficient. Scores are pre-softmax logits, not
+  probabilities; a 1.0 cap here would erase discriminating evidence.
   """
 
   @default_max_delta 0.10
@@ -59,7 +60,7 @@ defmodule Brain.LIFG.SemanticControl do
 
       updated =
         Enum.reduce(adjustments, scores, fn %{id: id, delta: delta}, acc ->
-          Map.update!(acc, id, &min(1.0, max(0.0, &1 + delta)))
+          Map.update!(acc, id, &max(0.0, &1 + delta))
         end)
 
       {updated, %{
