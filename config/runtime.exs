@@ -429,23 +429,21 @@ if config_env() == :prod do
   config :swoosh, local: false
 end
 
-# ───────── LLM startup ─────────
-
+# ───────── Symbolic-generation branch: no LLM inference ─────────
+# This branch deliberately develops and measures symbolic responses without
+# llama.cpp generation. Keep the cognitive pipeline and existing verified
+# symbolic response paths enabled. Unit tests retain their isolated mock/fake
+# runner configuration; in dev/prod there is no model startup or fallback.
+# This final runtime policy overrides any machine-local llm.local.exs flags.
 if config_env() != :test do
-  config :llm, Llm,
-    # Synchronous startup is owned by Llm.BootGate below.
-    # Leave Llm's own async handle_continue autostart disabled
-    # to avoid a duplicate boot path.
-    auto_start_on_boot?: false
+  config :core, :llm_inference_enabled?, false
+  config :llm, :inference_enabled?, false
 
-  config :llm, Llm.BootGate,
-    # Degraded mode does not block the web and symbolic brain while a model loads.
-    # Set SYMBRELLA_LLM_BOOT_STRICT=1 to preserve fail-fast startup.
-    enabled?: true,
-    mode:
-      if(System.get_env("SYMBRELLA_LLM_BOOT_STRICT", "false") in ["1", "true", "yes"],
-        do: :strict,
-        else: :degraded
-      ),
-    timeout: 600_000
+  config :llm, Llm,
+    auto_start_on_boot?: false,
+    allow_lazy_start?: false,
+    auto_restart_on_crash?: false,
+    heartbeat_ms: 0
+
+  config :llm, Llm.BootGate, enabled?: false
 end
