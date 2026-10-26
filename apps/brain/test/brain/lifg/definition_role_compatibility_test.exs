@@ -86,5 +86,10 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
     assert DefinitionRole.evaluate("I deposited money at the bank.", "bank", %{definition: nil}).bonus == 0.0
     assert DefinitionRole.evaluate("The bank at the bank keeps money.", "bank", @finance).bonus == 0.0
     assert DefinitionRole.evaluate("The water flowed at the bank.", "bank", @river).bonus == 0.0
+    assert DefinitionRole.evaluate("I left money at the river bank.", "bank", @finance).bonus == 0.0
+
+    river = ContextFit.score("I left money at the river bank.", "bank", @river)
+    finance = ContextFit.score("I left money at the river bank.", "bank", @finance)
+    assert river > finance
   end
 end

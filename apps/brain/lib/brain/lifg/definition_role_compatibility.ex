@@ -14,7 +14,6 @@ defmodule Brain.LIFG.DefinitionRoleCompatibility do
     shop store restaurant school hospital station library warehouse
   ))
   @determiners MapSet.new(~w(a an the this that my your our))
-  @max_modifiers 1
 
   @spec evaluate(String.t() | nil, String.t() | nil, map()) :: map()
   def evaluate(sentence, target, candidate)
@@ -73,17 +72,12 @@ defmodule Brain.LIFG.DefinitionRoleCompatibility do
 
     case indices do
       [index] ->
-        prev =
-          words
-          |> Enum.take(index)
-          |> Enum.take(-(@max_modifiers + 2))
-
-        case Enum.reverse(prev) do
+        # No intervening nominal modifiers yet: "at the river bank" is
+        # compatible with the river-edge sense and must not be mistaken for
+        # an institutional destination merely because "money" occurs nearby.
+        case words |> Enum.take(index) |> Enum.reverse() do
           ["at" | _] -> true
           [determiner, "at" | _] -> MapSet.member?(@determiners, determiner)
-          [modifier, determiner, "at" | _] ->
-            MapSet.member?(@determiners, determiner) and
-              Regex.match?(~r/\A\p{L}+\z/u, modifier)
           _ -> false
         end
 
