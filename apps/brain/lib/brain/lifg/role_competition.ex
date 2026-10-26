@@ -221,6 +221,124 @@ defmodule Brain.LIFG.RoleCompetition do
         _ -> []
       end)
 
+
+    # Evidence for existing lexical-request constructions must be independent
+    # of their eventual canonical semantic frame. Revalidate full token order,
+    # required cues, roles, and exact attested POS alternatives. Never boost
+    # a lexical target to noun/verb merely because it was requested.
+    meaning_proposals =
+      Enum.flat_map(signatures, fn
+        %{id: id, source: :core_syntax,
+          span: {0, last}, roles: sig_roles, evidence: evidence}
+        when id in [:meaning_request_imperative, :meaning_wh_question] and
+             is_integer(last) and is_map(sig_roles) and is_list(evidence) ->
+          required = [:complete_lexical_request, :attested_request_cues,
+                      :attested_target_alternatives, :original_contiguous_surface]
+
+          if Map.get(si, :intent) in [:define, :command, :ask, :ask_info] and
+               Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
+               Enum.all?(required, &(&1 in evidence)) do
+            observed =
+              case {id, Map.get(tokens, 0)} do
+                {:meaning_request_imperative, first} when first in ["tell", "please"] ->
+                  predicate = if first == "please", do: 1, else: 0
+
+                  expected = %{
+                    predicate: predicate, recipient: predicate + 1,
+                    determiner: predicate + 2, nominal_head: predicate + 3,
+                    preposition: predicate + 4, lexical_target: predicate + 5
+                  }
+                  expected =
+                    if predicate == 1, do: Map.put(expected, :politeness, 0),
+                      else: expected
+
+                  if last == predicate + 5 and sig_roles == expected and
+                       Map.get(tokens, predicate) == "tell" and
+                       Map.get(tokens, predicate + 1) == "me" and
+                       Map.get(tokens, predicate + 2) == "the" and
+                       Map.get(tokens, predicate + 3) == "meaning" and
+                       Map.get(tokens, predicate + 4) == "of" and
+                       Enum.all?([
+                         {predicate, "verb"},
+                         {predicate + 1, "pronoun"},
+                         {predicate + 2, "determiner"},
+                         {predicate + 3, "noun"},
+                         {predicate + 4, "preposition"}
+                       ], fn {i, pos} -> witnessed_identity?(cells, tokens, i, pos) end) and
+                       any_dictionary_pos?(cells, tokens, last) do
+                    [{predicate, "verb", :predicate, :meaning_request_predicate},
+                     {predicate + 1, "pronoun", :recipient, :meaning_request_recipient},
+                     {predicate + 2, "determiner", :determiner,
+                       :meaning_request_determiner},
+                     {predicate + 3, "noun", :nominal_head, :meaning_request_nominal_head},
+                     {predicate + 4, "preposition", :preposition,
+                       :meaning_request_preposition}] ++
+                    maybe_polite_proposal(cells, tokens, 0, predicate == 1)
+                  else
+                    []
+                  end
+
+                {:meaning_wh_question, "what"} ->
+                  cond do
+                    last == 3 and sig_roles == %{
+                      wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3
+                    } and Map.get(tokens, 1) == "does" and
+                       Map.get(tokens, 3) == "mean" and
+                       witnessed_identity?(cells, tokens, 3, "verb") and
+                       any_dictionary_pos?(cells, tokens, 2) ->
+                      [{3, "verb", :predicate, :meaning_question_predicate}]
+
+                    last == 5 and sig_roles == %{
+                      wh: 0, auxiliary: 1, determiner: 2,
+                      nominal_head: 3, preposition: 4, lexical_target: 5
+                    } and Map.get(tokens, 1) == "is" and
+                       Map.get(tokens, 2) == "the" and
+                       Map.get(tokens, 3) in ["meaning", "definition"] and
+                       Map.get(tokens, 4) == "of" and
+                       witnessed_identity?(cells, tokens, 2, "determiner") and
+                       witnessed_identity?(cells, tokens, 3, "noun") and
+                       witnessed_identity?(cells, tokens, 4, "preposition") and
+                       any_dictionary_pos?(cells, tokens, 5) ->
+                      [{2, "determiner", :determiner, :meaning_request_determiner},
+                       {3, "noun", :nominal_head, :meaning_request_nominal_head},
+                       {4, "preposition", :preposition, :meaning_request_preposition}]
+
+                    true ->
+                      []
+                  end
+
+                _ -> []
+              end
+
+            Enum.map(observed, fn {index, pos, role, basis} ->
+              %{token_index: index, pos: pos, role: role,
+                frame: id, span: {0, last}, basis: basis,
+                evidence: [:complete_lexical_request, :dictionary_pos_witness,
+                           :bounded_grammatical_role]}
+            end)
+          else
+            []
+          end
+
+        _ -> []
+      end)
+
+    definition_polite =
+      if Enum.any?(definition_proposals, &(&1.role == :predicate)) and
+           Map.get(tokens, 0) == "please" and
+           Map.get(tokens, 1) == "define" do
+        maybe_polite_proposal(cells, tokens, 0, true)
+        |> Enum.map(fn {index, pos, role, basis} ->
+          %{token_index: index, pos: pos, role: role,
+            frame: :definition_imperative,
+            span: {0, map_size(tokens) - 1}, basis: basis,
+            evidence: [:complete_lexical_request, :dictionary_pos_witness,
+                       :bounded_grammatical_role]}
+        end)
+      else
+        []
+      end
+
     # Core supplies independently witnessed predicate slots. Brain retains
     # the existing conflict resolver and never trusts a proposed sense ID.
     predicate_proposals =
@@ -306,6 +424,7 @@ defmodule Brain.LIFG.RoleCompetition do
     decisions =
       (local_proposals ++ subject_proposals ++ present_subject_proposals ++
          question_proposals ++ definition_proposals ++
+         definition_polite ++ meaning_proposals ++
          predicate_proposals ++ nominal_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
@@ -369,6 +488,31 @@ defmodule Brain.LIFG.RoleCompetition do
   end
 
   defp superseded_local_modifier?(_, _), do: false
+
+  defp maybe_polite_proposal(cells, tokens, index, true) do
+    cond do
+      witnessed_identity?(cells, tokens, index, "adverb") ->
+        [{index, "adverb", :politeness, :lexical_request_politeness}]
+
+      witnessed_identity?(cells, tokens, index, "interjection") ->
+        [{index, "interjection", :politeness, :lexical_request_politeness}]
+
+      true ->
+        []
+    end
+  end
+
+  defp maybe_polite_proposal(_, _, _, _), do: []
+
+  defp any_dictionary_pos?(cells, tokens, index) do
+    word = Map.get(tokens, index)
+    is_binary(word) and
+      Enum.any?(cells, fn cell ->
+        pos = normalize(Map.get(cell, :pos))
+        is_binary(pos) and pos != "" and
+          witnessed_identity?(cells, tokens, index, pos)
+      end)
+  end
 
   defp definition_object_shape?(cells, tokens, predicate, object) do
     if object == predicate + 1 do

@@ -82,6 +82,7 @@ defmodule Core.Syntax.Signatures do
     possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
     (definition_imperatives(si, nodes) ++
+       definition_request_structures(si, nodes) ++
        wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
@@ -301,6 +302,83 @@ defmodule Core.Syntax.Signatures do
           end
 
         nil ->
+          []
+      end
+    else
+      []
+    end
+  end
+
+
+  # Grammar for a family of lexical requests. These signatures are produced
+  # before LIFG/ATL or FrameUnifier, from complete original token sequences
+  # and independent dictionary POS alternatives.
+  # No exact dictionary *sense* is inferred by a signature.
+  defp definition_request_structures(si, nodes) do
+    if get(si, :intent) in [:define, :command, :ask, :ask_info] and
+         length(nodes) in 4..7 and valid_surface?(nodes) and
+         Enum.map(nodes, & &1.index) == Enum.to_list(0..(length(nodes) - 1)) do
+      words = Enum.map(nodes, & &1.word)
+      leading = if hd(words) == "please", do: 1, else: 0
+      core = Enum.drop(nodes, leading)
+
+      cond do
+        match?([_, _, _, _, _, _], core) and
+          Enum.take(Enum.map(core, & &1.word), 5) ==
+            ["tell", "me", "the", "meaning", "of"] and
+          pos?(Enum.at(core, 0), "verb") and
+          pos?(Enum.at(core, 1), "pronoun") and
+          pos?(Enum.at(core, 2), "determiner") and
+          pos?(Enum.at(core, 3), "noun") and
+          pos?(Enum.at(core, 4), "preposition") and
+          Enum.at(core, 5).pos != MapSet.new() ->
+          roles = %{
+            predicate: leading, recipient: leading + 1,
+            determiner: leading + 2, nominal_head: leading + 3,
+            preposition: leading + 4, lexical_target: leading + 5
+          }
+          roles = if leading == 1, do: Map.put(roles, :politeness, 0), else: roles
+
+          [signature(
+            :meaning_request_imperative, {0, length(nodes) - 1}, roles,
+            %{predicate: [:pos_verb], recipient: [:pos_pronoun],
+              nominal_head: [:pos_noun], preposition: [:pos_preposition]},
+            [:complete_lexical_request, :attested_request_cues,
+             :attested_target_alternatives, :original_contiguous_surface]
+          )]
+
+        leading == 0 and match?([_, _, _, _], core) and
+          Enum.at(core, 0).word == "what" and
+          Enum.at(core, 1).word == "does" and
+          Enum.at(core, 3).word == "mean" and
+          pos?(Enum.at(core, 3), "verb") and
+          Enum.at(core, 2).pos != MapSet.new() ->
+          [signature(
+            :meaning_wh_question, {0, 3},
+            %{wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3},
+            %{predicate: [:pos_verb]},
+            [:complete_lexical_request, :attested_request_cues,
+             :attested_target_alternatives, :original_contiguous_surface]
+          )]
+
+        leading == 0 and match?([_, _, _, _, _, _], core) and
+          Enum.take(Enum.map(core, & &1.word), 3) == ["what", "is", "the"] and
+          Enum.at(core, 3).word in ["meaning", "definition"] and
+          Enum.at(core, 4).word == "of" and
+          pos?(Enum.at(core, 2), "determiner") and
+          pos?(Enum.at(core, 3), "noun") and
+          pos?(Enum.at(core, 4), "preposition") and
+          Enum.at(core, 5).pos != MapSet.new() ->
+          [signature(
+            :meaning_wh_question, {0, 5},
+            %{wh: 0, auxiliary: 1, determiner: 2,
+              nominal_head: 3, preposition: 4, lexical_target: 5},
+            %{nominal_head: [:pos_noun], preposition: [:pos_preposition]},
+            [:complete_lexical_request, :attested_request_cues,
+             :attested_target_alternatives, :original_contiguous_surface]
+          )]
+
+        true ->
           []
       end
     else

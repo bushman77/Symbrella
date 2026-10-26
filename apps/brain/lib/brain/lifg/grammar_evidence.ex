@@ -93,7 +93,8 @@ defmodule Brain.LIFG.GrammarEvidence do
       when is_map(scores) and is_map(roles) and is_integer(index) and index >= 0 do
     case Map.get(roles, index) do
       %{status: :supported, pos: pos, basis: basis, evidence: evidence}
-      when pos in ["noun", "adjective", "verb"] and
+      when pos in ["noun", "adjective", "verb", "pronoun", "preposition",
+                   "adverb", "interjection", "determiner"] and
            basis in [:complete_determiner_adjective_noun,
                      :determined_adjective_before_unresolved_head,
                      :determined_subject_before_attested_past_predicate,
@@ -102,6 +103,14 @@ defmodule Brain.LIFG.GrammarEvidence do
                      :predicate_in_wh_aux_question,
                      :modal_question_predicate, :modal_declarative_predicate,
                      :imperative_predicate, :definition_imperative_predicate,
+                     :lexical_request_politeness,
+                     :meaning_request_predicate,
+                     :meaning_request_recipient,
+                     :meaning_request_determiner,
+                     :meaning_request_nominal_head,
+                     :meaning_request_preposition,
+                     :meaning_question_predicate,
+
                      :definition_imperative_object, :plural_present_predicate,
                      :finite_present_svo_predicate,
                      :counted_present_transitive_predicate,
@@ -153,6 +162,16 @@ defmodule Brain.LIFG.GrammarEvidence do
             :definition_imperative_object ->
               [:complete_definition_imperative, :dictionary_pos_witness,
                :attested_common_noun_object]
+
+            basis when basis in [:lexical_request_politeness,
+                                 :meaning_request_predicate,
+                                 :meaning_request_recipient,
+                                 :meaning_request_determiner,
+                                 :meaning_request_nominal_head,
+                                 :meaning_request_preposition,
+                                 :meaning_question_predicate] ->
+              [:complete_lexical_request, :dictionary_pos_witness,
+               :bounded_grammatical_role]
 
             :plural_present_predicate ->
               [:attested_plural_subject, :present_base_verb_witness,
