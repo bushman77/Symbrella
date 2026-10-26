@@ -19,7 +19,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
 
   @role_bonus 0.10
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
-  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
+  defp regex_token_re, do: ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
 
   @spec score(String.t(), String.t(), non_neg_integer(), [map()], map(), map()) :: map()
   def score(sentence, target, verb_index, cells, argument, role)
@@ -99,7 +99,7 @@ defmodule Brain.LIFG.VerbRoleShadowFit do
               is_integer(object_index) and is_integer(prep_index) and
               is_integer(source_index) and is_binary(object) and
               is_binary(source) and marker in ["from", "out of"] do
-    tokens = Regex.scan(@token_re, String.downcase(sentence)) |> Enum.map(&hd/1)
+    tokens = Regex.scan(regex_token_re(), String.downcase(sentence)) |> Enum.map(&hd/1)
     marker_end = Map.get(roles, :source_marker_end, prep_index)
 
     required? =

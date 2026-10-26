@@ -21,8 +21,8 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @boundaries MapSet.new(~w(and but because while if although whereas))
   @max_modifiers 2
-  @word_or_punctuation ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
-  @enumerated_clause ~r/\(([^()]{1,100})\)[ \t]+(from|out[ \t]+of)[ \t]+([^.;:!?—–\-\n]{1,100})/u
+  defp regex_word_or_punctuation, do: ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|[\p{P}\p{S}]/u
+  defp regex_enumerated_clause, do: ~r/\(([^()]{1,100})\)[ \t]+(from|out[ \t]+of)[ \t]+([^.;:!?—–\-\n]{1,100})/u
   @max_alternative_words 4
   @max_alternatives 6
 
@@ -123,7 +123,7 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
   # The regular expression cannot cross a clause-ending period, semicolon,
   # colon, exclamation mark, question mark, em dash or newline.
   defp enumerated_relation(definition, object, source) do
-    @enumerated_clause
+    regex_enumerated_clause()
     |> Regex.scan(String.downcase(definition))
     |> Enum.find_value(:no_match, fn [_, object_text, marker, source_text] ->
       object_alternatives = alternatives(object_text)
@@ -178,7 +178,7 @@ defmodule Brain.LIFG.RoleGlossCompatibility do
   defp word?(_), do: false
 
   defp tokenize(text) do
-    Regex.scan(@word_or_punctuation, String.downcase(text))
+    Regex.scan(regex_word_or_punctuation(), String.downcase(text))
     |> Enum.map(&hd/1)
   end
 

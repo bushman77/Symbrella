@@ -6,15 +6,15 @@ defmodule SymbrellaWeb.ChatLive.SourceLinks do
   assistant reply and persisted Explain data are not altered.
   """
 
-  @url_pattern ~r/(?:Source:\s*)?https?:\/\/[^\s<>"']+/iu
-  @trailing_punctuation ~r/[.,;!?]+$/u
-  @host_pattern ~r/\A[a-z0-9.-]+\z/iu
+  defp regex_url_pattern, do: ~r/(?:Source:\s*)?https?:\/\/[^\s<>"']+/iu
+  defp regex_trailing_punctuation, do: ~r/[.,;!?]+$/u
+  defp regex_host_pattern, do: ~r/\A[a-z0-9.-]+\z/iu
   @max_url_bytes 2_048
 
   @spec parts(String.t()) :: [map()]
   def parts(text) when is_binary(text) do
     {reversed, cursor} =
-      @url_pattern
+      regex_url_pattern()
       |> Regex.scan(text, return: :index)
       |> Enum.reduce({[], 0}, fn [{start, length}], {acc, previous} ->
         prefix = binary_part(text, previous, start - previous)
@@ -53,12 +53,12 @@ defmodule SymbrellaWeb.ChatLive.SourceLinks do
 
   defp link_part(token) do
     candidate = Regex.replace(~r/\ASource:\s*/iu, token, "")
-    url = Regex.replace(@trailing_punctuation, candidate, "")
+    url = Regex.replace(regex_trailing_punctuation(), candidate, "")
 
     with true <- byte_size(url) <= @max_url_bytes,
          %URI{scheme: scheme, host: host, userinfo: nil} = parsed <- URI.parse(url),
          true <- scheme in ["https", "http"],
-         true <- is_binary(host) and Regex.match?(@host_pattern, host),
+         true <- is_binary(host) and Regex.match?(regex_host_pattern(), host),
          true <- String.contains?(host, ".") or host == "localhost" do
       favicon =
         parsed

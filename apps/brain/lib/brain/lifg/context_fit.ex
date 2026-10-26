@@ -59,7 +59,7 @@ defmodule Brain.LIFG.ContextFit do
     with would you your yours
   ))
 
-  @token_re ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/u
+  defp regex_token_re, do: ~r/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/u
 
   @type explanation :: %{
           score: float(),
@@ -424,7 +424,7 @@ defmodule Brain.LIFG.ContextFit do
   defp raw_tokens(text) when is_binary(text) do
     text
     |> String.downcase()
-    |> then(&Regex.scan(@token_re, &1))
+    |> then(&Regex.scan(regex_token_re(), &1))
     |> Enum.map(fn
       [token | _] -> normalize_token(token)
       _ -> ""

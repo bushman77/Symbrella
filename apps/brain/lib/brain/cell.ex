@@ -29,12 +29,12 @@ defmodule Brain.Cell do
 
   # Lexicon-shaped IDs:
   #   "<phrase>|<pos>" or "<phrase>|<pos>|<suffix>"
-  @id_regex ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle|assistant)(\|[A-Za-z0-9_]+)?$/u
-  @basic_id_regex ~r/^[^|]+(\|[^|]+){1,2}$/u
+  defp regex_id_regex, do: ~r/^[^|]+?\|(noun|verb|adjective|adverb|interjection|phrase|proper_noun|pronoun|determiner|preposition|conjunction|numeral|particle|assistant)(\|[A-Za-z0-9_]+)?$/u
+  defp regex_basic_id_regex, do: ~r/^[^|]+(\|[^|]+){1,2}$/u
 
   # External IDs (test/dev only):
   #   e.g. "THIS/strong" (no pipes, slash allowed, no whitespace)
-  @external_id_regex ~r/^[A-Za-z0-9._\-\/:]+$/u
+  defp regex_external_id_regex, do: ~r/^[A-Za-z0-9._\-\/:]+$/u
 
   @doc """
   Start a `Brain.Cell`.
@@ -171,11 +171,11 @@ defmodule Brain.Cell do
       return_reject!(id, {:unknown_pos, pos})
     end
 
-    unless Regex.match?(@basic_id_regex, id) do
+    unless Regex.match?(regex_basic_id_regex(), id) do
       return_reject!(id, :basic_regex_mismatch)
     end
 
-    unless Regex.match?(@id_regex, id) do
+    unless Regex.match?(regex_id_regex(), id) do
       return_reject!(id, :regex_mismatch)
     end
 
@@ -204,7 +204,7 @@ defmodule Brain.Cell do
       String.contains?(id, "|") ->
         return_reject!(id, :external_contains_pipe)
 
-      not Regex.match?(@external_id_regex, id) ->
+      not Regex.match?(regex_external_id_regex(), id) ->
         return_reject!(id, :external_regex_mismatch)
 
       true ->

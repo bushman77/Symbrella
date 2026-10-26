@@ -15,7 +15,7 @@ defmodule Brain.Hippocampus.SemanticAssociations do
   @tag "semantic_association"
   @kind "population_comparison"
   @max_cues 12
-  @fingerprint ~r/\A[0-9a-f]{64}\z/
+  defp regex_fingerprint, do: ~r/\A[0-9a-f]{64}\z/
 
   @spec remember(String.t(), [String.t()]) :: :ok | {:error, atom()}
   def remember(fingerprint, [a, b] = subjects)
@@ -109,7 +109,7 @@ defmodule Brain.Hippocampus.SemanticAssociations do
   def extract_fingerprints(_), do: []
 
   defp valid_fingerprint?(value) when is_binary(value),
-    do: Regex.match?(@fingerprint, value)
+    do: Regex.match?(regex_fingerprint(), value)
 
   defp valid_fingerprint?(_), do: false
 
