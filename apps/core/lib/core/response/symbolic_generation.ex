@@ -24,7 +24,7 @@ defmodule Core.Response.SymbolicGeneration do
           {:ok, String.t(), map()} | :not_applicable
   def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
       when is_binary(user_text) and is_map(si) and
-             intent in [:greet, :greeting] and
+             intent in [:greet, :greeting, :smalltalk, :unknown] and
              action in [:answer, :offer_options] do
     with true <- GreetingTurn.standalone?(user_text),
          {:ok, witness} <- lexical_evidence(user_text, si) do
