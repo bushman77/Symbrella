@@ -8,8 +8,10 @@ defmodule Core.Semantic.ActionQuestions do
 
   We deliberately do not guess inflected verb lemmas in question parsing:
   forward questions supply the canonical relation ("draw"), while reverse
-  questions match the attested surface predicate ("draws"). An ambiguous
-  reverse match must fail closed at Hippocampal retrieval.
+  questions match the attested surface predicate ("draws"). The "what did
+  [actor] do?" form requests a recorded activity, not a hypothetical past
+  event or an inferred "do" relation. Ambiguous activity and reverse
+  matches fail closed at Hippocampal retrieval.
   """
 
   alias Core.Semantic.EpisodicEvents
@@ -28,7 +30,7 @@ defmodule Core.Semantic.ActionQuestions do
         {:reverse, norm(m["surface_predicate"]), norm(m["patient"])}
 
       m = Regex.named_captures(
-            ~r/^what does (?<entity>(?:the|a|an|my) [\p{L} '-]+?) do\?$/iu, t
+            ~r/^what (?:does|did) (?<entity>(?:the|a|an|my) [\p{L} '-]+?) do\?$/iu, t
           ) ->
         {:activity, EpisodicEvents.entity_key(m["entity"])}
 

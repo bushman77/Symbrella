@@ -97,6 +97,7 @@ defmodule Core.Semantic.SVOEventTest do
           {"What does the artist draw?", "A picture."},
           {"What did the artist draw?", "A picture."},
           {"What does the artist do?", "Draws a picture."},
+          {"What did the artist do?", "Draws a picture."},
           {"Who draws a picture?", "The artist."}
         ] do
       assert {:warm, ^expected,
@@ -154,6 +155,7 @@ defmodule Core.Semantic.SVOEventTest do
     }
     assert :ok = EpisodicMemory.remember_event(sings, sid, "The artist sings a song.")
     assert EpisodicMemory.reply("What does the artist do?") == nil
+    assert EpisodicMemory.reply("What did the artist do?") == nil
 
     retracted = %{event | status: :retracted}
     assert :ok = EpisodicMemory.remember_event(retracted, sid, "I withdraw that assertion.")
@@ -169,6 +171,13 @@ defmodule Core.Semantic.SVOEventTest do
              ActionQuestions.parse("What does the artist draw?")
     assert {:activity, "artist"} =
              ActionQuestions.parse("What does the artist do?")
+    assert {:activity, "artist"} =
+             ActionQuestions.parse("What did the artist do?")
+    assert {:forward, "artist", "draw"} =
+             ActionQuestions.parse("What did the artist draw?")
+    assert ActionQuestions.parse("What did the artist make?") ==
+             {:forward, "artist", "make"}
+    assert ActionQuestions.parse("What did the artist do without permission?") == nil
     assert {:reverse, "draws", "a picture"} =
              ActionQuestions.parse("Who draws a picture?")
 
