@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 4 adds independently audited post-ATL LIFG feedback.
-  @contract_v 4
+  # Version 5 adds read-only provisional semantic interpretation metadata.
+  @contract_v 5
 
   @list_fields MapSet.new([
                  :tokens,
