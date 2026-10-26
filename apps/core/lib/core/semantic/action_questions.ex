@@ -32,12 +32,16 @@ defmodule Core.Semantic.ActionQuestions do
       m = Regex.named_captures(
             ~r/^what (?:does|did) (?<entity>(?:the|a|an|my) [\p{L} '-]+?) do\?$/iu, t
           ) ->
-        {:activity, EpisodicEvents.entity_key(m["entity"])}
+        if nominal_actor?(m["entity"]),
+          do: {:activity, EpisodicEvents.entity_key(m["entity"])},
+          else: nil
 
       m = Regex.named_captures(
             ~r/^what (?:does|did) (?<entity>(?:the|a|an|my) [\p{L} '-]+?) (?<predicate>[\p{L}]+)\?$/iu, t
           ) ->
-        {:forward, EpisodicEvents.entity_key(m["entity"]), norm(m["predicate"])}
+        if nominal_actor?(m["entity"]),
+          do: {:forward, EpisodicEvents.entity_key(m["entity"]), norm(m["predicate"])},
+          else: nil
 
       true ->
         nil
@@ -89,6 +93,29 @@ defmodule Core.Semantic.ActionQuestions do
     else
       String.upcase(String.first(value)) <>
         String.slice(value, 1, String.length(value)) <> "."
+    end
+  end
+
+  # A bounded noun phrase may contain modifiers and compound nouns, but not
+  # an auxiliary, another determiner, a clause linker, or a prepositional
+  # complement. Otherwise the permissive actor regex can swallow part of the
+  # question predicate (e.g. "the artist do without") and invent a verb slot.
+  # This is a conservative syntax boundary, not an independent POS analysis.
+  @non_nominal_terms ~w(
+    a an the do does did is are was were have has had
+    can could will would shall should may might must
+    without with at by for from in into of on onto over under
+    until after before during while to than because if
+    and or but
+  )
+
+  defp nominal_actor?(entity) when is_binary(entity) do
+    case String.split(norm(entity), " ", trim: true) do
+      [article | words] when article in ~w(the a an my) ->
+        words != [] and Enum.all?(words, &(not (&1 in @non_nominal_terms)))
+
+      _ ->
+        false
     end
   end
 

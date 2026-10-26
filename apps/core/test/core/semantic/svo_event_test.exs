@@ -178,6 +178,13 @@ defmodule Core.Semantic.SVOEventTest do
     assert ActionQuestions.parse("What did the artist make?") ==
              {:forward, "artist", "make"}
     assert ActionQuestions.parse("What did the artist do without permission?") == nil
+    assert ActionQuestions.parse("What did the artist draw without permission?") == nil
+    assert ActionQuestions.parse("What did the artist draw a picture?") == nil
+    assert {:forward, "talented young artist", "draw"} =
+             ActionQuestions.parse("What did the talented young artist draw?")
+    assert {:activity, "school art teacher"} =
+             ActionQuestions.parse("What did the school art teacher do?")
+
     assert {:reverse, "draws", "a picture"} =
              ActionQuestions.parse("Who draws a picture?")
 
