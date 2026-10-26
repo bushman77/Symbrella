@@ -18,10 +18,11 @@ defmodule Core.Response.SymbolicGeneration do
 
   @spec generate(String.t(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
-  def generate(user_text, %{risk_bucket: :low} = features, decision)
+  def generate(user_text, %{risk_bucket: :low}, decision)
       when is_binary(user_text) and is_map(decision) do
-    if GreetingTurn.standalone?(user_text) and
-         Map.get(features, :intent) in [:greeting, :greet] do
+    # Exact standalone surface evidence is sufficient even when upstream
+    # intent classification reports :smalltalk or :unknown.
+    if GreetingTurn.standalone?(user_text) do
       frame = plan(user_text)
       text = realize(frame)
 
