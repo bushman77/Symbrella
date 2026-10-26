@@ -64,4 +64,44 @@ defmodule Core.Response.AttachTest do
     assert si.response_meta.agent_action_meta.selected == :answer_user
     assert %Core.Agency.Decision{selected_action: :answer_user} = si.response_meta.agency_decision
   end
+
+  test "carries the canonical lexical greeting winner from SI into symbolic realization" do
+    previous = Application.get_env(:core, :llm_inference_enabled?, :unset)
+    Application.put_env(:core, :llm_inference_enabled?, false)
+
+    on_exit(fn ->
+      if previous == :unset do
+        Application.delete_env(:core, :llm_inference_enabled?)
+      else
+        Application.put_env(:core, :llm_inference_enabled?, previous)
+      end
+    end)
+
+    winner = %{
+      token_index: 0, id: "hello|interjection|1", lemma: "hello",
+      pos: "interjection", score: 0.16190361976623535,
+      source: :active_cells
+    }
+
+    si =
+      Attach.maybe_build_response_plan(
+        %{
+          sentence: "Hello Symbrella.",
+          intent: :greet,
+          confidence: 0.76,
+          semantic_choices: [winner],
+          lifg_choices: [winner],
+          selected_action: :answer_user,
+          trace: []
+        },
+        response: :auto
+      )
+
+    assert si.response_text == "Hello."
+    assert si.response_meta.response_source == :symbolic_generation
+    assert si.response_meta.response_reflection.lexical_witness.id == winner.id
+    assert si.response_meta.response_reflection.provenance == :canonical_lifg_choice
+    assert si.response_meta.response_reflection.semantic_verified? == false
+  end
+
 end

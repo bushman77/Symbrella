@@ -621,4 +621,31 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     assert section(result, :comprehension) == nil
     assert section(result, :intent_tone) != nil
   end
+
+  test "symbolic Explain identifies the lexical witness without calling it an LLM review" do
+    payload =
+      Modal.explain_payload_for(%{
+        text: "Hello.",
+        from: %{
+          response_reflection: %{
+            status: :symbolic_realized,
+            speech_act: :reciprocate_greeting,
+            provenance: :canonical_lifg_choice,
+            lexical_witness: %{id: "hello|interjection|1", score: 0.16},
+            semantic_verified?: false,
+            llm_called?: false
+          }
+        }
+      })
+
+    section = Enum.find(payload.sections, &(&1.key == :response_reflection))
+    assert section.title == "Symbolic realization"
+    assert section.tag == ":symbolic_realized"
+    fields = Map.new(section.items, &{&1.label, &1.body})
+    assert fields["lexical witness"] == "hello|interjection|1"
+    assert fields["speech act"] == ":reciprocate_greeting"
+    assert fields["sentence meaning verified?"] == "false"
+    assert fields["LLM called?"] == "false"
+  end
+
 end
