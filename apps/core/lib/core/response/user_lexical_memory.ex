@@ -12,10 +12,10 @@ defmodule Core.Response.UserLexicalMemory do
 
   @relation "user_defined_meaning"
   @source_frame "explicit_user_definition"
-  @term ~r/^[\p{L}][\p{L}\p{N}_-]{4,31}$/u
+  defp term_pattern, do: ~r/^[\p{L}][\p{L}\p{N}_-]{4,31}$/u
   @ignored_terms ~w(about after before because could would should which their these those where there someone something myself itself)
-  @definition ~r/^\s*by\s+(?<term>[\p{L}][\p{L}\p{N}_-]{4,31})\s*,?\s+i\s+mean\s+(?<meaning>[^?\r\n]{5,240})\s*$/iu
-  @question [
+  defp definition_pattern, do: ~r/^\s*by\s+(?<term>[\p{L}][\p{L}\p{N}_-]{4,31})\s*,?\s+i\s+mean\s+(?<meaning>[^?\r\n]{5,240})\s*$/iu
+  defp question_patterns, do: [
     ~r/^\s*what\s+(?:is|was)\s+(?<term>[\p{L}][\p{L}\p{N}_-]{4,31})\s*\?\s*$/iu,
     ~r/^\s*what\s+does\s+(?<term>[\p{L}][\p{L}\p{N}_-]{4,31})\s+mean\s*\?\s*$/iu,
     ~r/^\s*do\s+you\s+remember\s+what\s+(?<term>[\p{L}][\p{L}\p{N}_-]{4,31})\s+(?:is|means)\s*\?\s*$/iu,
@@ -24,7 +24,7 @@ defmodule Core.Response.UserLexicalMemory do
 
   @spec definition_from(String.t()) :: {String.t(), String.t()} | nil
   def definition_from(text) when is_binary(text) do
-    with %{"term" => term, "meaning" => meaning} <- Regex.named_captures(@definition, text),
+    with %{"term" => term, "meaning" => meaning} <- Regex.named_captures(definition_pattern(), text),
          true <- valid_term?(term),
          meaning <- meaning |> String.trim() |> String.trim_trailing(".") |> String.trim(),
          true <- byte_size(meaning) in 5..240 do
@@ -38,7 +38,7 @@ defmodule Core.Response.UserLexicalMemory do
 
   @spec query_term(String.t()) :: String.t() | nil
   def query_term(text) when is_binary(text) do
-    Enum.find_value(@question, fn pattern ->
+    Enum.find_value(question_patterns(), fn pattern ->
       case Regex.named_captures(pattern, text) do
         %{"term" => term} ->
           if valid_term?(term), do: String.downcase(term), else: nil
@@ -111,7 +111,7 @@ defmodule Core.Response.UserLexicalMemory do
   end
 
   defp valid_term?(term) when is_binary(term) do
-    Regex.match?(@term, term) and String.downcase(term) not in @ignored_terms
+    Regex.match?(term_pattern(), term) and String.downcase(term) not in @ignored_terms
   end
 
   defp valid_term?(_), do: false
