@@ -63,8 +63,8 @@ defmodule Core.Curiosity.ClarificationLoop do
   # small *class* of whole-message open-ended prompts, not one literal
   # sentence. Do not rewrite a specific question about an actual concept,
   # an informative answer, or a multi-question reply.
-  @generic_opening ~r/\A(?:(?:congratulations|(?:that|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
-  @generic_followups [
+  defp generic_opening, do: ~r/\A(?:(?:congratulations|(?:that|it|this) sounds (?:great|interesting|exciting|cool|neat|amazing)|that'?s (?:great|interesting|exciting|cool|neat|amazing)|great|awesome|nice|interesting|cool|neat|good for you)[!.,]\s*){0,2}/iu
+  defp generic_followups, do: [
     ~r/\Awhat (?:have you been (?:learning|working) (?:about|on|in|with)|have you (?:learned|discovered)(?: so far)?|are you (?:working on|building|learning)(?: now)?)(?: (?:about|in|with|on) (?:your|the|this) (?:module|project))?\?\z/iu,
     ~r/\Awhat (?:does|will|is) (?:your|the|this) (?:module|project) (?:do|about|for)\?\z/iu,
     ~r/\Awhat(?:'s| is) (?:it|that|your module|your project|the module|the project) (?:about|for)\?\z/iu,
@@ -78,11 +78,11 @@ defmodule Core.Curiosity.ClarificationLoop do
   @spec replaceable_generic_reply?(term()) :: boolean()
   def replaceable_generic_reply?(reply) when is_binary(reply) do
     trimmed = String.trim(reply)
-    question = trimmed |> String.replace(@generic_opening, "") |> String.trim()
+    question = trimmed |> String.replace(generic_opening(), "") |> String.trim()
 
     String.length(trimmed) <= 240 and
       length(String.split(question, "?", trim: true)) == 1 and
-      Enum.any?(@generic_followups, &Regex.match?(&1, question))
+      Enum.any?(generic_followups(), &Regex.match?(&1, question))
   end
 
   def replaceable_generic_reply?(_), do: false
