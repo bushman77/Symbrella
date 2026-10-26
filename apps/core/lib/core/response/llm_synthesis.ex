@@ -93,7 +93,7 @@ defmodule Core.Response.LlmSynthesis do
     if llm_available?() or comparison? do
       do_generate(user_text, features, decision, mood, prompt_type)
     else
-      {:error, :llm_not_available}
+      {:error, unavailable_reason()}
     end
   end
 
@@ -281,7 +281,7 @@ defmodule Core.Response.LlmSynthesis do
     if llm_available?() do
       do_freeform_llm_generate(user_text, context, history, answer_target, prompt_type)
     else
-      {:error, :llm_not_available}
+      {:error, unavailable_reason()}
     end
   end
 
@@ -975,9 +975,18 @@ defmodule Core.Response.LlmSynthesis do
   defp llm_available? do
     client = llm_client()
 
-    Code.ensure_loaded?(client) and
+    llm_inference_enabled?() and
+      Code.ensure_loaded?(client) and
       function_exported?(client, :chat, 2) and
       is_pid(Process.whereis(client))
+  end
+
+  defp llm_inference_enabled? do
+    Application.get_env(:core, :llm_inference_enabled?, true) == true
+  end
+
+  defp unavailable_reason do
+    if llm_inference_enabled?(), do: :llm_not_available, else: :llm_disabled
   end
 
   defp llm_client do
