@@ -213,6 +213,12 @@ defmodule Core.Response.SymbolicGenerationTest do
 
     text = "Thanks Symbrella."
     si = SpeechActs.attach(%{sentence: text})
+
+    forged = %{si | sentence: "Thanks for helping with my code."}
+    assert :not_applicable =
+             SymbolicGeneration.generate(text,
+               %{risk_bucket: :low, intent: :gratitude},
+               %{action: :offer_options}, forged)
     assert :not_applicable =
              SymbolicGeneration.generate(text,
                %{risk_bucket: :high, intent: :gratitude},

@@ -7,7 +7,7 @@ defmodule Core.Response.SymbolicGeneration do
   independent revalidation of LIFG/ATL roles; their truth is not asserted.
   """
 
-  alias Core.Semantic.{EpisodicProjection, SentenceMeaning}
+  alias Core.Semantic.{EpisodicProjection, SentenceMeaning, SpeechActs}
 
   @social_intents [
     :greet, :greeting, :gratitude, :smalltalk, :unknown,
@@ -36,9 +36,14 @@ defmodule Core.Response.SymbolicGeneration do
       } = frame
       when act in [:greeting, :gratitude, :farewell, :wellbeing_query] and
              addressee in [:self, :unspecified] and is_map(lexical) ->
-        if supported_lexical_evidence?(act, lexical),
-          do: {:ok, realize(act, anchor), social_provenance(frame)},
-          else: :not_applicable
+        # Check the bound frame against the *current* sentence and current
+        # lexical winners. A stale or forged frame cannot produce a reply.
+        with {:ok, ^frame} <- SpeechActs.from_si(si),
+             true <- supported_lexical_evidence?(act, lexical) do
+          {:ok, realize(act, anchor), social_provenance(frame)}
+        else
+          _ -> :not_applicable
+        end
 
       _ ->
         :not_applicable
