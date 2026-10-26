@@ -85,6 +85,7 @@ defmodule Core.Response.Meta do
     |> maybe_put_semantic_role_fidelity(
       Map.get(reflection, :semantic_role_fidelity))
     |> maybe_put_symbolic_realization(reflection)
+    |> maybe_put_lexical_definition(reflection)
   end
 
   defp reflection_summary(_), do: nil
@@ -102,6 +103,20 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary
+
+  # Only the requested word and bounded lexical counts leave the response
+  # planner, not the raw dictionary slate or untrusted gloss text.
+  defp maybe_put_lexical_definition(summary, %{status: status} = reflection)
+       when status in [:lexical_definition, :lexical_definition_ambiguous,
+                       :lexical_definition_missing] do
+    Map.merge(summary, Map.take(reflection,
+      [:requested_term, :provenance, :candidate_definitions,
+       :returned_definitions, :selected_sense_verified?,
+       :lexicon_rows_used?, :semantic_verified?, :factual_claims?,
+       :llm_called?]))
+  end
+
+  defp maybe_put_lexical_definition(summary, _), do: summary
 
   # Keep bounded retry outcomes inspectable without exposing prompts or drafts.
   defp maybe_put_answer_revision(summary, revision) when is_map(revision) do
