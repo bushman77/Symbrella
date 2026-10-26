@@ -655,4 +655,61 @@ defmodule Core.Syntax.SignaturesTest do
     refute :finite_present_svo_candidate in ids("She paints. a wall.", cells)
   end
 
+
+  test "complete definition imperatives annotate verb and common-noun object roles" do
+    cells = [
+      %{id: "define|verb|1", norm: "define", pos: "verb"},
+      %{id: "define|noun|1", norm: "define", pos: "noun"},
+      %{id: "artist|noun|1", norm: "artist", pos: "noun"},
+      %{id: "artist|proper_noun|1", norm: "artist", pos: "proper_noun"},
+      %{id: "the|determiner|1", norm: "the", pos: "determiner"}
+    ]
+
+    for {sentence, predicate, object} <- [
+      {"Define artist.", 0, 1},
+      {"please define artist", 1, 2},
+      {"Define the artist.", 0, 2},
+      {"Please define the artist.", 1, 3}
+    ] do
+      si = input(sentence, cells) |> Map.put(:intent, :define)
+      signature = Enum.find(Signatures.detect(si), &(&1.id == :definition_imperative))
+
+      assert %{source: :core_syntax, roles: %{predicate: ^predicate,
+                                            object_head: ^object}} = signature
+      assert signature.span == {0, object}
+      assert :attested_common_noun_object in signature.evidence
+      assert :attested_verb_alternative in signature.evidence
+    end
+  end
+
+  test "definition signatures abstain on unsupported forms and absent POS witnesses" do
+    cells = [
+      %{id: "define|verb|1", norm: "define", pos: "verb"},
+      %{id: "artist|noun|1", norm: "artist", pos: "noun"}
+    ]
+
+    for {sentence, intent} <- [
+      {"Define artist now", :define},
+      {"Define artist and painter", :define},
+      {"The define artist", :define},
+      {"Define artist", :unknown},
+      {"Artist define", :define},
+      {"Define artist about painting", :define}
+    ] do
+      si = input(sentence, cells) |> Map.put(:intent, intent)
+      refute Enum.any?(Signatures.detect(si), &(&1.id == :definition_imperative)),
+             sentence
+    end
+
+    noun_only = Enum.reject(cells, &(&1.pos == "verb"))
+    refute :definition_imperative in
+      (input("Define artist", noun_only)
+       |> Map.put(:intent, :define) |> Signatures.detect() |> Enum.map(& &1.id))
+
+    verb_only = Enum.reject(cells, &(&1.pos == "noun"))
+    refute :definition_imperative in
+      (input("Define artist", verb_only)
+       |> Map.put(:intent, :define) |> Signatures.detect() |> Enum.map(& &1.id))
+  end
+
 end

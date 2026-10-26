@@ -176,6 +176,52 @@ defmodule Brain.LIFG.RoleCompetition do
         _ -> []
       end)
 
+
+    # An exact complete definition imperative resolves TWO competing roles:
+    # an existing verb alternative for "define" and an existing common-noun
+    # alternative for its object. Neither a classifier label alone nor a
+    # fabricated signature can create a role. No sense ID is selected here.
+    definition_proposals =
+      Enum.flat_map(signatures, fn
+        %{id: :definition_imperative, source: :core_syntax,
+          span: {0, last},
+          roles: %{predicate: predicate, object_head: object},
+          evidence: evidence}
+        when is_integer(last) and is_integer(predicate) and
+             is_integer(object) and is_list(evidence) ->
+          required = [:complete_imperative_surface, :explicit_definition_command,
+                      :attested_verb_alternative, :attested_common_noun_object]
+
+          if Map.get(si, :intent) == :define and last == object and
+               object in [predicate + 1, predicate + 2] and
+               predicate in [0, 1] and
+               Map.get(tokens, predicate) == "define" and
+               Enum.all?(required, &(&1 in evidence)) and
+               witnessed_identity?(cells, tokens, predicate, "verb") and
+               witnessed_identity?(cells, tokens, object, "noun") and
+               Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
+               (predicate != 1 or Map.get(tokens, 0) == "please") and
+               definition_object_shape?(tokens, predicate, object) do
+            [%
+              {token_index: predicate, pos: "verb", role: :predicate,
+               frame: :definition_imperative, span: {0, last},
+               basis: :definition_imperative_predicate,
+               evidence: [:complete_definition_imperative,
+                          :dictionary_pos_witness, :attested_verb_alternative]},
+             %{
+               token_index: object, pos: "noun", role: :object_head,
+               frame: :definition_imperative, span: {0, last},
+               basis: :definition_imperative_object,
+               evidence: [:complete_definition_imperative,
+                          :dictionary_pos_witness, :attested_common_noun_object]
+             }]
+          else
+            []
+          end
+
+        _ -> []
+      end)
+
     # Core supplies independently witnessed predicate slots. Brain retains
     # the existing conflict resolver and never trusts a proposed sense ID.
     predicate_proposals =
@@ -260,7 +306,8 @@ defmodule Brain.LIFG.RoleCompetition do
 
     decisions =
       (local_proposals ++ subject_proposals ++ present_subject_proposals ++
-         question_proposals ++ predicate_proposals ++ nominal_proposals)
+         question_proposals ++ definition_proposals ++
+         predicate_proposals ++ nominal_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
@@ -323,6 +370,28 @@ defmodule Brain.LIFG.RoleCompetition do
   end
 
   defp superseded_local_modifier?(_, _), do: false
+
+  defp definition_object_shape?(tokens, predicate, object) do
+    if object == predicate + 1 do
+      true
+    else
+      Map.get(tokens, predicate + 1) in ~w(a an the) and
+        Map.get(tokens, object) not in [nil, ""]
+    end
+  end
+
+  defp witnessed_identity?(cells, tokens, index, pos) do
+    word = Map.get(tokens, index)
+    is_binary(word) and
+      Enum.any?(cells, fn cell ->
+        normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == word and
+          normalize(Map.get(cell, :pos)) == pos and
+          case Map.get(cell, :id) do
+            id when is_binary(id) -> String.starts_with?(id, word <> "|" <> pos <> "|")
+            _ -> false
+          end
+      end)
+  end
 
   defp witnessed?(cells, tokens, index, pos) do
     word = Map.get(tokens, index)

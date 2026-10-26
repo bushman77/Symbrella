@@ -81,7 +81,8 @@ defmodule Core.Syntax.Signatures do
     noun_phrases = noun_phrase_constructions(nodes)
     possessive_phrases = possessive_noun_phrase_constructions(nodes, noun_phrases)
 
-    (wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
+    (definition_imperatives(si, nodes) ++
+       wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
        counted_present_svo(nodes) ++
@@ -236,6 +237,71 @@ defmodule Core.Syntax.Signatures do
   end
 
   defp base_nodes(_, _), do: []
+
+
+  # An entire definition command is an imperative, not a noun phrase.
+  # The intent is established before Core syntax runs, but the intent alone
+  # never creates a signature: the *original* word order and exact POS
+  # alternatives must agree. This is grammatical evidence, not an answer.
+  #
+  # The noun object is specifically a common noun: "define artist" is about
+  # the lexical noun, even if an unrelated proper-noun dictionary row exists.
+  defp definition_imperatives(si, nodes) do
+    if get(si, :intent) == :define and length(nodes) in 2..4 do
+      parsed =
+        case nodes do
+          [predicate, object] ->
+            {predicate, nil, object}
+
+          [polite, predicate, object] ->
+            if polite.word == "please", do: {predicate, nil, object}, else: nil
+
+          [predicate, determiner, object] ->
+            if determiner.word in ~w(a an the), do: {predicate, determiner, object},
+              else: nil
+
+          [polite, predicate, determiner, object] ->
+            if polite.word == "please" and determiner.word in ~w(a an the),
+              do: {predicate, determiner, object}, else: nil
+
+          _ ->
+            nil
+        end
+
+      case parsed do
+        {predicate, determiner, object} ->
+          indexes = Enum.map(nodes, & &1.index)
+
+          if predicate.word == "define" and
+               indexes == Enum.to_list(0..(length(nodes) - 1)) and
+               pos?(predicate, "verb") and pos?(object, "noun") and
+               (is_nil(determiner) or pos?(determiner, "determiner")) and
+               valid_surface?(nodes) do
+            roles = %{predicate: predicate.index, object_head: object.index}
+            roles =
+              if determiner,
+                do: Map.put(roles, :object_determiner, determiner.index),
+                else: roles
+
+            [signature(
+              :definition_imperative,
+              {0, object.index},
+              roles,
+              %{predicate: [:pos_verb], object_head: [:pos_noun]},
+              [:complete_imperative_surface, :explicit_definition_command,
+               :attested_verb_alternative, :attested_common_noun_object]
+            )]
+          else
+            []
+          end
+
+        nil ->
+          []
+      end
+    else
+      []
+    end
+  end
 
   # A bounded, compositional WH + auxiliary question frame. Adjunct adverbs
   # may appear after WH or around an optional negation before the predicate.

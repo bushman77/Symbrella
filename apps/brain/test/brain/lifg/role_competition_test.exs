@@ -149,4 +149,49 @@ defmodule Brain.LIFG.RoleCompetitionTest do
     refute Map.has_key?(result, :selected_senses)
     refute Map.has_key?(result, :verified_facts)
   end
+
+  test "full definition command resolves both POS conflicts with exact dictionary IDs" do
+    cells = [
+      cell("define", "noun"), cell("define", "verb"),
+      cell("artist", "noun"), cell("artist", "proper_noun")
+    ]
+
+    signature = %{
+      id: :definition_imperative, source: :core_syntax,
+      span: {0, 1}, roles: %{predicate: 0, object_head: 1},
+      evidence: [:complete_imperative_surface, :explicit_definition_command,
+                 :attested_verb_alternative, :attested_common_noun_object]
+    }
+
+    si = %{
+      intent: :define, sentence: "define artist",
+      tokens: token_words(["define", "artist"]), active_cells: cells,
+      sentence_signatures: [signature]
+    }
+    resolved = RoleCompetition.resolve(si)
+
+    assert %{pos: "verb", basis: :definition_imperative_predicate,
+             status: :supported} = resolved.roles[0]
+    assert %{pos: "noun", basis: :definition_imperative_object,
+             status: :supported} = resolved.roles[1]
+
+    ctx = GrammarEvidence.prepare(Map.put(si, :role_competition, resolved))
+
+    predicate = GrammarEvidence.apply_role_competition(
+      %{"define|noun|1" => 0.40, "define|verb|1" => 0.30}, ctx, 0)
+    assert predicate["define|verb|1"] > predicate["define|noun|1"]
+
+    object = GrammarEvidence.apply_role_competition(
+      %{"artist|noun|1" => 0.30, "artist|proper_noun|1" => 0.32}, ctx, 1)
+    assert object["artist|noun|1"] > object["artist|proper_noun|1"]
+
+    refute Map.has_key?(resolved.roles[0], :sense_id)
+    refute Map.has_key?(resolved.roles[1], :sense_id)
+
+    assert RoleCompetition.resolve(%{si | active_cells:
+      Enum.reject(cells, &(&1.pos == "noun" and &1.norm == "artist"))}).roles == %{}
+    assert RoleCompetition.resolve(%{si | intent: :unknown}).roles == %{}
+    assert RoleCompetition.resolve(%{si | sentence_signatures: []}).roles == %{}
+  end
+
 end

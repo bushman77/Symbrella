@@ -292,4 +292,43 @@ defmodule Core.Syntax.PredicateEvidenceTest do
       assert PredicateEvidence.detect(input(words, cells)) == []
     end
   end
+
+  test "Stage1 production roles repair define verb and artist common noun without choosing senses" do
+    rows = [
+      cell("define", "noun"), cell("define", "verb"),
+      cell("artist", "noun"), cell("artist", "proper_noun"),
+      %{cell("artist", "noun") | id: "artist|noun|2"}
+    ]
+
+    si =
+      input(~w(define artist), rows)
+      |> Map.put(:intent, :define)
+      |> Core.Syntax.Signatures.attach()
+      |> RoleCompetition.attach()
+      |> Map.put(:sense_candidates, %{
+        0 => Enum.filter(rows, &(&1.norm == "define")),
+        1 => Enum.filter(rows, &(&1.norm == "artist"))
+      })
+
+    assert %{pos: "verb", status: :supported} = si.role_competition.roles[0]
+    assert %{pos: "noun", status: :supported} = si.role_competition.roles[1]
+
+    assert {:ok, %{choices: choices}} =
+      Stage1.run(si,
+        scores: :all, preserve_sense_candidates: true,
+        db_backfill?: false, semantic_control?: false,
+        weights: [lex_fit: 0.0, context_fit: 0.0, rel_prior: 0.0,
+                  activation: 1.0, intent_bias: 0.0])
+
+    verb = Enum.find(choices, &(&1.token_index == 0))
+    noun = Enum.find(choices, &(&1.token_index == 1))
+    assert verb.chosen_id == "define|verb|1"
+    assert String.starts_with?(noun.chosen_id, "artist|noun|")
+    assert verb.scores["define|verb|1"] > verb.scores["define|noun|1"]
+    assert noun.scores["artist|noun|1"] > noun.scores["artist|proper_noun|1"]
+    assert noun.scores["artist|noun|1"] == noun.scores["artist|noun|2"]
+    assert Map.keys(noun.scores) |> Enum.sort() ==
+      Enum.sort(["artist|noun|1", "artist|noun|2", "artist|proper_noun|1"])
+  end
+
 end

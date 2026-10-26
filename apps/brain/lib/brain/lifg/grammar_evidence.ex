@@ -101,7 +101,8 @@ defmodule Brain.LIFG.GrammarEvidence do
                      :determined_subject_in_wh_aux_question,
                      :predicate_in_wh_aux_question,
                      :modal_question_predicate, :modal_declarative_predicate,
-                     :imperative_predicate, :plural_present_predicate,
+                     :imperative_predicate, :definition_imperative_predicate,
+                     :definition_imperative_object, :plural_present_predicate,
                      :finite_present_svo_predicate,
                      :counted_present_transitive_predicate,
                      :counted_negative_transitive_predicate] and
@@ -144,6 +145,14 @@ defmodule Brain.LIFG.GrammarEvidence do
             :imperative_predicate ->
               [:initial_predicate, :dictionary_pos_witness,
                :bounded_predicate_slot]
+
+            :definition_imperative_predicate ->
+              [:complete_definition_imperative, :dictionary_pos_witness,
+               :attested_verb_alternative]
+
+            :definition_imperative_object ->
+              [:complete_definition_imperative, :dictionary_pos_witness,
+               :attested_common_noun_object]
 
             :plural_present_predicate ->
               [:attested_plural_subject, :present_base_verb_witness,
