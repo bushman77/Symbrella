@@ -462,8 +462,8 @@ defmodule Core.Response.Memory do
       case Map.get(fuzzy, :corrections, []) do
         [%{replacement: "name", confidence: correction_conf}]
         when is_number(correction_conf) and correction_conf >= 0.85 ->
-          Regex.match?(~r/^what(?:'s| is) your [\\p{L}]+\\??$/u, normalized) and
-            Regex.match?(~r/^what(?:'s| is) your name\\??$/u, fuzzy.text)
+          Regex.match?(~r/^what(?:'s| is) your [\p{L}]+\??$/u, normalized) and
+            Regex.match?(~r/^what(?:'s| is) your name\??$/u, fuzzy.text)
         _ ->
           false
       end
