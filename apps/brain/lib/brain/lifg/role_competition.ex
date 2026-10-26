@@ -201,7 +201,7 @@ defmodule Brain.LIFG.RoleCompetition do
                witnessed_identity?(cells, tokens, object, "noun") and
                Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
                (predicate != 1 or Map.get(tokens, 0) == "please") and
-               definition_object_shape?(tokens, predicate, object) do
+               definition_object_shape?(cells, tokens, predicate, object) do
             [%{token_index: predicate, pos: "verb", role: :predicate,
                frame: :definition_imperative, span: {0, last},
                basis: :definition_imperative_predicate,
@@ -370,11 +370,12 @@ defmodule Brain.LIFG.RoleCompetition do
 
   defp superseded_local_modifier?(_, _), do: false
 
-  defp definition_object_shape?(tokens, predicate, object) do
+  defp definition_object_shape?(cells, tokens, predicate, object) do
     if object == predicate + 1 do
       true
     else
       Map.get(tokens, predicate + 1) in ~w(a an the) and
+        witnessed_identity?(cells, tokens, predicate + 1, "determiner") and
         Map.get(tokens, object) not in [nil, ""]
     end
   end

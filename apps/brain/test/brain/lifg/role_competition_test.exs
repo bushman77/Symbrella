@@ -192,6 +192,21 @@ defmodule Brain.LIFG.RoleCompetitionTest do
       Enum.reject(cells, &(&1.pos == "noun" and &1.norm == "artist"))}).roles == %{}
     assert RoleCompetition.resolve(%{si | intent: :unknown}).roles == %{}
     assert RoleCompetition.resolve(%{si | sentence_signatures: []}).roles == %{}
+
+    # Recheck the determiner witness even for a caller-supplied signature.
+    with_determiner = %{
+      si | tokens: token_words(["define", "the", "artist"]),
+           sentence: "define the artist",
+           sentence_signatures: [%{signature |
+             span: {0, 2},
+             roles: %{predicate: 0, object_determiner: 1, object_head: 2}}]
+    }
+    assert RoleCompetition.resolve(with_determiner).roles == %{}
+
+    checked = %{with_determiner |
+      active_cells: [cell("the", "determiner") | cells]}
+    assert %{pos: "noun", status: :supported} =
+      RoleCompetition.resolve(checked).roles[2]
   end
 
 end
