@@ -44,6 +44,7 @@ defmodule Core.Response do
   alias Core.Response.SelfStateFeatures
   alias Core.Response.SideEffects
   alias Core.Response.SymbolicGeneration
+  alias Core.Response.LexicalDefinition
   alias Core.Response.AttentionFallback
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -185,12 +186,22 @@ defmodule Core.Response do
             :not_applicable
           end
 
-        # Comprehension WM is a session-scoped conversational cue, not an
-        # external fact. It can sustain a grounded continuation only after
-        # ordinary memory and symbolic realization have declined this turn.
-        attention_response =
+        # Explicit lexical questions are answered from this turn's LTM rows.
+        # A definition request must not collapse into a generic WM topic.
+        lexical_response =
           if Application.get_env(:core, :llm_inference_enabled?, true) == false and
                symbolic_response == :not_applicable do
+            LexicalDefinition.generate(text_in, features, decision, si)
+          else
+            :not_applicable
+          end
+
+        # Comprehension WM is a session-scoped conversational cue, not an
+        # external fact. Only use it if both answer-producing paths abstained.
+        attention_response =
+          if Application.get_env(:core, :llm_inference_enabled?, true) == false and
+               symbolic_response == :not_applicable and
+               lexical_response == :not_applicable do
             AttentionFallback.generate(text_in, features, decision, si)
           else
             :not_applicable
@@ -208,6 +219,10 @@ defmodule Core.Response do
               {:ok, reply, realization} = symbolic_response
               {reply, :symbolic_generation, nil, realization}
 
+            match?({:ok, _, _}, lexical_response) ->
+              {:ok, reply, realization} = lexical_response
+              {reply, :symbolic_lexical_definition, nil, realization}
+
             match?({:ok, _, _}, attention_response) ->
               {:ok, reply, realization} = attention_response
               {reply, :wm_attention_fallback, nil, realization}
@@ -221,7 +236,8 @@ defmodule Core.Response do
         # never append its investigation prompts to user-facing chat.
         {text, curiosity_probe} =
           if response_source in [:symbolic_verified, :symbolic_verified_followup, :symbolic_unresolved,
-                                  :symbolic_generation, :wm_attention_fallback] do
+                                  :symbolic_generation, :symbolic_lexical_definition,
+                                  :wm_attention_fallback] do
             {text0, nil}
           else
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)

@@ -9,6 +9,7 @@ defmodule Core.Response.AttentionFallback do
   """
 
   alias Core.Brain.WM.Comprehension, as: WMComprehension
+  alias Core.Response.LexicalDefinition
 
   @max_terms 2
   @question_intents [:ask, :ask_info, :question, :query, :help, :information_request]
@@ -18,7 +19,9 @@ defmodule Core.Response.AttentionFallback do
   def generate(text, %{risk_bucket: :low} = features, %{action: action}, si)
       when is_binary(text) and is_map(si) and
              action in [:answer, :offer_options, :act_first] do
-    with session when is_binary(session) and byte_size(session) in 1..128 <-
+    with nil <- LexicalDefinition.requested_term(text),
+         false <- Map.get(features, :intent) == :define,
+         session when is_binary(session) and byte_size(session) in 1..128 <-
            Map.get(si, :session_id),
          ^text <- Map.get(si, :sentence),
          true <- Map.get(si, :source) in [:user, :prod, :test],
@@ -26,7 +29,10 @@ defmodule Core.Response.AttentionFallback do
          %{} = admitted <- WMComprehension.admitted_context(session),
          true <- context == admitted,
          :conversation_context_only <- Map.get(context, :verification),
-         %{scope: :session} <- Map.get(context, :attention),
+         %{scope: :session, salience: salience, goal_terms: goal_terms} <-
+           Map.get(context, :attention),
+         true <- is_number(salience) and salience > 0.0,
+         true <- is_list(goal_terms) and goal_terms != [],
          true <- Map.get(context, :focus_transition) != :release,
          {:ok, kind, terms} <- focused_terms(context) do
       question? = Map.get(features, :intent) in @question_intents or
