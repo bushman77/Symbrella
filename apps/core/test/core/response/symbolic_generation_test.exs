@@ -295,4 +295,51 @@ defmodule Core.Response.SymbolicGenerationTest do
                %{action: :suppress}, si)
   end
 
+
+  test "native generation composes validated progressive spatial reports" do
+    words = ~w(A bird is sitting on the fence.)
+    ids = [
+      "a|determiner|1", "bird|noun|1", "is|verb|1",
+      "sitting|adjective|1", "on|preposition|1",
+      "the|determiner|1", "fence|noun|1"
+    ]
+    choices = ids |> Enum.with_index() |>
+      Enum.map(fn {id, index} -> %{id: id, token_index: index} end)
+
+    si =
+      %{
+        sentence: "A bird is sitting on the fence.",
+        text: "A bird is sitting on the fence.",
+        source: :user, intent: :tell, trace: [], confidence: 0.75,
+        session_id: "native-spatial-#{System.unique_integer([:positive])}",
+        tokens: words |> Enum.with_index() |>
+          Enum.map(fn {word, index} -> %{index: index, phrase: word, n: 1} end),
+        active_cells: [
+          %{id: "a|determiner|1", norm: "a", pos: "determiner"},
+          %{id: "bird|noun|1", norm: "bird", pos: "noun"},
+          %{id: "is|verb|1", norm: "is", pos: "verb"},
+          %{id: "sitting|adjective|1", norm: "sitting", pos: "adjective"},
+          %{id: "sitting|verb|1", norm: "sitting", pos: "verb",
+            semantic_atoms: ~w(tag:form-of tag:present tag:participle)},
+          %{id: "on|preposition|1", norm: "on", pos: "preposition"},
+          %{id: "the|determiner|1", norm: "the", pos: "determiner"},
+          %{id: "fence|noun|1", norm: "fence", pos: "noun"}
+        ],
+        lifg_choices: choices,
+        atl_slate: %{winners: choices}
+      }
+      |> Core.Syntax.Signatures.attach()
+      |> Core.Semantic.EpisodicProjection.attach()
+      |> Core.Semantic.SentenceMeaning.attach()
+      |> SpeechActs.attach()
+
+    assert si.sentence_meaning.event_type == :spatial
+    {_tone, reply, meta} = Response.plan(si, %{})
+    assert reply == "You're describing a bird as sitting on the fence."
+    assert meta.response_source == :symbolic_generation
+    assert meta.response_reflection.event_kind == :spatial
+    assert meta.response_reflection.event_occurrence_verified? == false
+    assert meta.response_reflection.llm_called? == false
+  end
+
 end
