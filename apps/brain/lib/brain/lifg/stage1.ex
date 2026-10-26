@@ -701,12 +701,14 @@ defmodule Brain.LIFG.Stage1 do
 
             lex0 = lex_fit(cnrm, token_phrase, token_mwe?)
 
-            context0 =
+            context_report =
               if SenseFocus.evaluate_context?(focus, c) do
-                ContextFit.score(ctx.sent, token_phrase, c)
+                ContextFit.explain(ctx.sent, token_phrase, c)
               else
-                0.0
+                nil
               end
+
+            context0 = if is_map(context_report), do: context_report.score, else: 0.0
 
             rel0 =
               guess_rel_prior(c, id, token_phrase)
@@ -789,6 +791,7 @@ defmodule Brain.LIFG.Stage1 do
               # Raw ContextFit is computed from sentence plus dictionary
               # metadata, not a candidate-supplied feature override.
               context_evidence: context0,
+              context_report: context_report,
               perception_delta: perception_delta,
               hom_bump: hom_bump,
               pos_bias: pos_bias
@@ -1027,6 +1030,22 @@ defmodule Brain.LIFG.Stage1 do
           weak?: margin_weak? or low_confidence?,
           semantic_control: semantic_control,
           sense_focus: focus,
+          # Live production breakdown, bounded to strongest context-supported
+          # candidates. This diagnostic does not change the actual score.
+          definition_context_evidence:
+            scored_rows
+            |> Enum.filter(&(is_map(&1.context_report)))
+            |> Enum.sort_by(fn row -> {-row.context_evidence, row.id} end)
+            |> Enum.take(12)
+            |> Enum.map(fn row ->
+              %{
+                id: row.id,
+                score: row.context_evidence,
+                definition_role: row.context_report.definition_role,
+                matches: row.context_report.unique_matches,
+                contributions: row.context_report.contributions
+              }
+            end),
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
           reliability:
@@ -1672,7 +1691,15 @@ defmodule Brain.LIFG.Stage1 do
       lemma: lemma,
       pos: Safe.get(cell, :pos) || Safe.get(cell, "pos") || "other",
       score: Safe.get(cell, :score, cell_score_from_map(cell)),
-      features: features
+      features: features,
+      # Preserve evidence if Stage1 has to build directly from active_cells
+      # rather than the richer MWE/LTM candidate map.
+      definition: Safe.get(cell, :definition),
+      example: Safe.get(cell, :example),
+      synonyms: Safe.get(cell, :synonyms, []),
+      antonyms: Safe.get(cell, :antonyms, []),
+      semantic_atoms: Safe.get(cell, :semantic_atoms, []),
+      gram_function: Safe.get(cell, :gram_function, [])
     }
   end
 

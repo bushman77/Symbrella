@@ -174,4 +174,14 @@ defmodule Brain.LIFG.ContextFitWindowTest do
 
     assert ContextFit.score(sentence, "bank", river_sense) > 0.0
   end
+
+  test "full current sentence contributes words outside the former three-word window" do
+    sentence = "The witness carefully described an old river bank."
+    sense = %{definition: "The edge of a river."}
+    report = ContextFit.explain(sentence, "bank", sense)
+
+    assert "river" in report.matches.definition
+    assert "witness" in report.context_terms
+  end
+
 end

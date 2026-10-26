@@ -519,6 +519,7 @@ defmodule Db do
       synonyms: List.wrap(row.synonyms),
       antonyms: List.wrap(row.antonyms),
       semantic_atoms: List.wrap(row.semantic_atoms),
+      gram_function: List.wrap(row.gram_function),
       score: 0.5,
       source: :ltm
     }

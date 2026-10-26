@@ -152,19 +152,27 @@ defmodule Brain.LIFG.ContextFit do
         {field, weight * component}
       end)
 
+    # Production evidence: only an attested grammatical cue combined with
+    # information in THIS candidate's definition can contribute. Never treat
+    # a shared topic word as a verified semantic relationship.
+    role = Brain.LIFG.DefinitionRoleCompatibility.evaluate(sentence, target, candidate)
+    role_bonus = role.bonus
+
     score =
       contributions
       |> Map.values()
       |> Enum.sum()
+      |> Kernel.+(role_bonus)
       |> clamp01()
 
     %{
       score: round_score(score),
+      definition_role: role,
       context_terms: context |> MapSet.to_list() |> Enum.sort(),
       matches: matches,
       unique_matches: unique_matches,
       component_scores: round_map(component_scores),
-      contributions: round_map(contributions),
+      contributions: Map.put(round_map(contributions), :definition_role, round_score(role_bonus)),
       weights: weights,
       antonym_matches: overlap(context, evidence.antonyms)
     }
@@ -174,10 +182,11 @@ defmodule Brain.LIFG.ContextFit do
     %{
       score: 0.0,
       context_terms: [],
+      definition_role: %{applied?: false, bonus: 0.0, reason: :invalid_input},
       matches: empty_match_map(),
       unique_matches: empty_match_map(),
       component_scores: empty_score_map(),
-      contributions: empty_score_map(),
+      contributions: Map.put(empty_score_map(), :definition_role, 0.0),
       weights: @default_weights,
       antonym_matches: []
     }
@@ -215,36 +224,13 @@ defmodule Brain.LIFG.ContextFit do
   # ---------------------------------------------------------------------------
 
   defp context_terms(sentence, target) do
-    words = raw_tokens(sentence)
-    target_words = raw_tokens(target)
+    # Keep the full current sentence; syntactically relevant evidence may be
+    # more than three words away. DefinitionRoleCompatibility separately
+    # requires a bounded grammatical relation before granting role support.
+    excluded = MapSet.new(raw_tokens(target))
 
-    # Locate the target phrase in the sentence.
-    start =
-      words
-      |> Enum.with_index()
-      |> Enum.find_value(fn {_word, index} ->
-        if target_words != [] and
-             Enum.slice(words, index, length(target_words)) == target_words do
-          index
-        end
-      end)
-
-    # Keep up to three words before and after the target.
-    # Fall back to existing whole-sentence behavior if
-    # the target cannot be located.
-    local_words =
-      if is_integer(start) do
-        left = max(start - 3, 0)
-        right = min(start + length(target_words) + 2, length(words) - 1)
-
-        Enum.slice(words, left, right - left + 1)
-      else
-        words
-      end
-
-    excluded = MapSet.new(target_words)
-
-    local_words
+    sentence
+    |> raw_tokens()
     |> reject_stopwords()
     |> Enum.reject(&MapSet.member?(excluded, &1))
     |> MapSet.new()
