@@ -874,6 +874,13 @@ defmodule SymbrellaWeb.HomeLive.HTML.Modal do
         |> maybe_kv("status", format_frame_value(status))
         |> maybe_kv("speech act",
           if(symbolic?, do: format_frame_value(pget(reflection, :speech_act)), else: nil))
+        |> maybe_kv("input speaker",
+          if(symbolic?, do: format_frame_value(pget(reflection, :speaker)), else: nil))
+        |> maybe_kv("input addressee",
+          if(symbolic?, do: format_frame_value(pget(reflection, :addressee)), else: nil))
+        |> maybe_kv("vocative resolution",
+          if(symbolic? and is_map(pget(reflection, :vocative)),
+            do: format_frame_value(pget(pget(reflection, :vocative), :resolution)), else: nil))
         |> maybe_kv("lexical witness",
           if(symbolic? and is_map(lexical_witness),
             do: pget(lexical_witness, :id), else: nil))

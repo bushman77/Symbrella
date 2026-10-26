@@ -94,7 +94,8 @@ defmodule Core.Response.Meta do
   defp maybe_put_symbolic_realization(summary, %{status: :symbolic_realized} = reflection) do
     Map.merge(summary, Map.take(reflection,
       [:speech_act, :temporal_anchor, :addressee, :provenance,
-       :lexical_witness, :semantic_verified?, :llm_called?]))
+       :lexical_witness, :semantic_verified?, :llm_called?,
+       :interpreted_speech_act, :speaker, :addressee, :vocative]))
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary

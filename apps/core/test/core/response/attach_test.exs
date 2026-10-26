@@ -65,7 +65,8 @@ defmodule Core.Response.AttachTest do
     assert %Core.Agency.Decision{selected_action: :answer_user} = si.response_meta.agency_decision
   end
 
-  test "carries the canonical lexical greeting winner from SI into symbolic realization" do
+
+  test "carries the post-LIFG speech-act frame through response planning" do
     previous = Application.get_env(:core, :llm_inference_enabled?, :unset)
     Application.put_env(:core, :llm_inference_enabled?, false)
 
@@ -84,23 +85,23 @@ defmodule Core.Response.AttachTest do
     }
 
     si =
-      Attach.maybe_build_response_plan(
-        %{
-          sentence: "Hello Symbrella.",
-          intent: :greet,
-          confidence: 0.76,
-          semantic_choices: [winner],
-          lifg_choices: [winner],
-          selected_action: :answer_user,
-          trace: []
-        },
-        response: :auto
-      )
+      %{
+        sentence: "Hello Symbrella.",
+        intent: :greet,
+        confidence: 0.76,
+        semantic_choices: [winner],
+        lifg_choices: [winner],
+        selected_action: :answer_user,
+        trace: []
+      }
+      |> Core.Semantic.SpeechActs.attach()
+      |> then(&Attach.maybe_build_response_plan(&1, response: :auto))
 
     assert si.response_text == "Hello."
     assert si.response_meta.response_source == :symbolic_generation
     assert si.response_meta.response_reflection.lexical_witness.id == winner.id
-    assert si.response_meta.response_reflection.provenance == :canonical_lifg_choice
+    assert si.response_meta.response_reflection.addressee == :self
+    assert si.response_meta.response_reflection.vocative.resolution == :assistant_identity
     assert si.response_meta.response_reflection.semantic_verified? == false
   end
 

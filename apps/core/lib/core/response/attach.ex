@@ -138,6 +138,7 @@ defmodule Core.Response.Attach do
       lifg_choices: si_get(si, :lifg_choices),
       # Canonical post-MWE LIFG lexical winners can directly ground realization.
       semantic_choices: si_get(si, :semantic_choices),
+      speech_act_frame: si_get(si, :speech_act_frame),
       # Preserve the original grammatical proof for event revalidation.
       sentence_signatures: si_get(si, :sentence_signatures),
       acc_conflict: si_get(si, :acc_conflict),

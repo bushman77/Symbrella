@@ -1,24 +1,13 @@
 defmodule Core.Response.SymbolicGeneration do
   @moduledoc """
-  First cognitive-to-language bridge for reciprocal greetings.
+  The V1.1 realization boundary consumes a post-LIFG speech-act frame,
+  never reparses the user's sentence or silently substitutes a greeting.
 
-  Input meaning comes from Core's conversational intent and the canonical
-  LIFG/MWE semantic_choices carried by SemanticInput. Canonical lexical
-  selection is provisional evidence, NOT a verified sentence meaning.
-
-  A bounded standalone-greeting boundary prevents converting mixed requests
-  into a greeting. Other established greetings retain an explicitly labelled
-  surface-only realization until they have their own semantic witness.
+  "Hello" requires a selected, canonical LIFG interjection witness.
+  Other previously supported greetings remain explicitly surface-only.
+  A foreign addressee or unsupported action must not generate a reciprocal
+  greeting addressed to Symbrella.
   """
-
-  alias Core.Response.GreetingTurn
-
-  @type greeting_frame :: %{
-          speech_act: :reciprocate_greeting,
-          temporal_anchor: :morning | :afternoon | :evening | :unspecified,
-          addressee: :user,
-          lexical_witness: map() | nil
-        }
 
   @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
@@ -26,98 +15,66 @@ defmodule Core.Response.SymbolicGeneration do
       when is_binary(user_text) and is_map(si) and
              intent in [:greet, :greeting, :smalltalk, :unknown] and
              action in [:answer, :offer_options] do
-    with true <- GreetingTurn.standalone?(user_text),
-         {:ok, witness} <- lexical_evidence(user_text, si) do
-      frame = plan(user_text, witness)
+    case Map.get(si, :speech_act_frame) do
+      %{
+        version: 1,
+        speech_act: :greeting,
+        speaker: :user,
+        addressee: addressee,
+        temporal_anchor: temporal_anchor,
+        lexical_evidence: lexical,
+        source_text: ^user_text
+      } = frame when addressee in [:self, :unspecified] and is_map(lexical) ->
+        if supported_lexical_evidence?(lexical) do
+          {:ok, realize(temporal_anchor), realization(frame)}
+        else
+          :not_applicable
+        end
 
-      {:ok, realize(frame),
-       %{
-         status: :symbolic_realized,
-         speech_act: frame.speech_act,
-         temporal_anchor: frame.temporal_anchor,
-         addressee: frame.addressee,
-         provenance: if(witness, do: :canonical_lifg_choice, else: :surface_greeting),
-         lexical_witness: witness,
-         semantic_verified?: false,
-         factual_claims?: false,
-         llm_called?: false
-       }}
-    else
-      _ -> :not_applicable
+      _ ->
+        :not_applicable
     end
   end
 
   def generate(_text, _features, _decision, _si), do: :not_applicable
 
-  # "Hello" is our first strict bridge. It cannot be realized from surface
-  # matching alone: the canonical winner must select its interjection sense
-  # at the observed first token. Other existing greetings are explicitly
-  # marked surface-only, pending their own lexical rules.
-  defp lexical_evidence(user_text, si) do
-    if Regex.match?(~r/\A\s*hello\b/iu, user_text) do
-      case Map.get(si, :semantic_choices) do
-        choices when is_list(choices) ->
-          choices
-          |> Enum.find(&hello_winner?/1)
-          |> case do
-            %{} = winner ->
-              {:ok, Map.take(winner, [:id, :token_index, :score, :source])}
+  defp supported_lexical_evidence?(%{level: :surface_only, status: :provisional}),
+    do: true
 
-            nil ->
-              :missing_lexical_evidence
-          end
+  defp supported_lexical_evidence?(%{
+         level: :canonical_lifg_selection,
+         status: :provisional,
+         witness: %{id: "hello|interjection|1", token_index: 0}
+       }),
+       do: true
 
-        _ ->
-          :missing_lexical_evidence
-      end
-    else
-      {:ok, nil}
-    end
-  end
+  defp supported_lexical_evidence?(_), do: false
 
-  defp hello_winner?(%{} = choice) do
-    Map.get(choice, :id) == "hello|interjection|1" and
-      Map.get(choice, :token_index) == 0 and
-      Map.get(choice, :pos) in [:interjection, "interjection"] and
-      is_number(Map.get(choice, :score)) and Map.get(choice, :score) > 0
-  end
+  defp realization(frame) do
+    lexical = frame.lexical_evidence
 
-  defp hello_winner?(_), do: false
-
-  @spec plan(String.t(), map() | nil) :: greeting_frame()
-  defp plan(text, witness) do
     %{
+      status: :symbolic_realized,
       speech_act: :reciprocate_greeting,
-      temporal_anchor: time_of_day(text),
-      addressee: :user,
-      lexical_witness: witness
+      interpreted_speech_act: frame.speech_act,
+      speaker: frame.speaker,
+      addressee: frame.addressee,
+      vocative: frame.vocative,
+      temporal_anchor: frame.temporal_anchor,
+      provenance:
+        if(lexical.level == :canonical_lifg_selection,
+          do: :canonical_lifg_choice,
+          else: :surface_greeting
+        ),
+      lexical_witness: Map.get(lexical, :witness),
+      semantic_verified?: false,
+      factual_claims?: false,
+      llm_called?: false
     }
   end
 
-  @spec realize(greeting_frame()) :: String.t()
-  defp realize(%{speech_act: :reciprocate_greeting, temporal_anchor: time}) do
-    greeting =
-      case time do
-        :morning -> "Good morning"
-        :afternoon -> "Good afternoon"
-        :evening -> "Good evening"
-        :unspecified -> "Hello"
-      end
-
-    greeting <> "."
-  end
-
-  defp time_of_day(text) do
-    case Regex.run(~r/\bgood\s+(morning|afternoon|eve(?:n+i+|i+)ng)\b/iu, text) do
-      [_, phrase] ->
-        case String.downcase(phrase) do
-          "morning" -> :morning
-          "afternoon" -> :afternoon
-          _ -> :evening
-        end
-
-      _ ->
-        :unspecified
-    end
-  end
+  defp realize(:morning), do: "Good morning."
+  defp realize(:afternoon), do: "Good afternoon."
+  defp realize(:evening), do: "Good evening."
+  defp realize(:unspecified), do: "Hello."
 end

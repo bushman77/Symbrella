@@ -202,6 +202,9 @@ defmodule Core do
     |> StateDump.capture(:semantic_sense_shadow)
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
+    # Read-only post-LIFG speech-act and vocative binding. No scoring changes.
+    |> Core.Semantic.SpeechActs.attach()
+    |> StateDump.capture(:speech_act)
     |> Core.Brain.WM.Comprehension.store(opts)
     |> StateDump.capture(:wm_comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
