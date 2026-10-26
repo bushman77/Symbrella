@@ -18,7 +18,7 @@ defmodule Core.Response.Guardrails do
   To keep the pipeline stable, we provide run/enforce/apply as no-op passthroughs.
   """
 
-  @approve ~r/\bapprove:\s*p-\d{3}\b/i
+  defp regex_approve, do: ~r/\bapprove:\s*p-\d{3}\b/i
 
   @spec detect(String.t()) :: %{guardrail?: boolean, approve_token?: boolean, flags: [atom]}
   def detect(text) do
@@ -36,7 +36,7 @@ defmodule Core.Response.Guardrails do
 
     %{
       guardrail?: flags != [],
-      approve_token?: Regex.match?(@approve, t),
+      approve_token?: Regex.match?(regex_approve(), t),
       flags: Enum.uniq(flags)
     }
   end

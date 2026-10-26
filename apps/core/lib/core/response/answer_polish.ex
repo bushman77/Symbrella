@@ -4,7 +4,7 @@ defmodule Core.Response.AnswerPolish do
   answers. Do not strip genuine clarification or conversational questions.
   """
 
-  @generic_closing ~r/\s*(?:Is there anything else (?:you(?:'d| would)? like to know|I can help you with)\?|Would you like to know more\?|What is the most important detail to resolve next\?)\s*$/iu
+  defp regex_generic_closing, do: ~r/\s*(?:Is there anything else (?:you(?:'d| would)? like to know|I can help you with)\?|Would you like to know more\?|What is the most important detail to resolve next\?)\s*$/iu
 
   @spec polish(String.t(), String.t(), map()) :: String.t()
   def polish(user_text, draft, context)
@@ -16,7 +16,7 @@ defmodule Core.Response.AnswerPolish do
 
     if direct_factual_question?(user_text) and selected in [:answer_user, nil] do
       draft
-      |> String.replace(@generic_closing, "")
+      |> String.replace(regex_generic_closing(), "")
       |> String.trim()
     else
       draft

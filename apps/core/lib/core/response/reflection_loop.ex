@@ -23,8 +23,8 @@ defmodule Core.Response.ReflectionLoop do
   @event [:core, :response, :reflection]
   @v 1
   @max_text_chars 1_200
-  @hidden_context_line_regex ~r/^\s*(uncertain|temperament|assertiveness|curiosity|restraint|warmth|self-check|abstraction|depth|reasons|personality state|runtime decision|response policy|response posture|semantic control|affect state)\s*:/iu
-  @hidden_context_token_regex ~r/\b(system prompt|hidden instruction|chain of thought|personality state|runtime decision|response policy|response posture|semantic control|internal state|balanced policy|offer options to clarify your intent|lifg|pmtg|hippocampus|working memory|self-state|temperament|assertiveness|self-check|abstraction|neuromodulators?|da\s+\d|5ht\s+\d|glu\s+\d|ne\s+\d)\b/iu
+  defp regex_hidden_context_line_regex, do: ~r/^\s*(uncertain|temperament|assertiveness|curiosity|restraint|warmth|self-check|abstraction|depth|reasons|personality state|runtime decision|response policy|response posture|semantic control|affect state)\s*:/iu
+  defp regex_hidden_context_token_regex, do: ~r/\b(system prompt|hidden instruction|chain of thought|personality state|runtime decision|response policy|response posture|semantic control|internal state|balanced policy|offer options to clarify your intent|lifg|pmtg|hippocampus|working memory|self-state|temperament|assertiveness|self-check|abstraction|neuromodulators?|da\s+\d|5ht\s+\d|glu\s+\d|ne\s+\d)\b/iu
 
   @type status :: :accept | :repair | :clarify | :reject
 
@@ -1178,8 +1178,8 @@ defmodule Core.Response.ReflectionLoop do
   defp hidden_context_leak?(draft_text) when is_binary(draft_text) do
     t = String.downcase(draft_text)
 
-    Regex.match?(@hidden_context_line_regex, draft_text) or
-      Regex.match?(@hidden_context_token_regex, t)
+    Regex.match?(regex_hidden_context_line_regex(), draft_text) or
+      Regex.match?(regex_hidden_context_token_regex(), t)
   end
 
   defp unsafe_draft?(draft_text) when is_binary(draft_text) do
@@ -1240,7 +1240,7 @@ defmodule Core.Response.ReflectionLoop do
   end
 
   defp hidden_context_line?(line) when is_binary(line) do
-    Regex.match?(@hidden_context_line_regex, line) or
+    Regex.match?(regex_hidden_context_line_regex(), line) or
       Regex.match?(~r/^\s*(da|5ht|glu|ne)\s+\d/iu, line)
   end
 

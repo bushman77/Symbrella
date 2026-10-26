@@ -26,14 +26,14 @@ defmodule Core.Response.SemanticRoleFidelity do
   # surface spans, not a newly validated dictionary sense.
   @noun_phrase "(?:the|a|an)\\s+[\\p{L}][\\p{L}'-]{1,46}"
   @tail "(?:[.!]?|,\\s+which\\b[^.!?]{0,140}[.!]?)"
-  @progressive_pattern Regex.compile!(
+  defp regex_progressive_pattern, do: Regex.compile!(
     "\\A(?<actor>#{@noun_phrase})\\s+" <>
       "(?:is|are)\\s+(?<also>also\\s+)?" <>
       "(?<predicate>[\\p{L}]{3,36}ing)\\s+" <>
       "(?<patient>#{@noun_phrase})(?<tail>#{@tail})\\z",
     "iu"
   )
-  @finite_pattern Regex.compile!(
+  defp regex_finite_pattern, do: Regex.compile!(
     "\\A(?<actor>#{@noun_phrase})\\s+" <>
       "(?<predicate>[\\p{L}]{3,36})\\s+" <>
       "(?<patient>#{@noun_phrase})(?<tail>#{@tail})\\z",
@@ -131,7 +131,7 @@ defmodule Core.Response.SemanticRoleFidelity do
   defp candidate(draft) do
     text = String.trim(draft)
 
-    case Regex.named_captures(@progressive_pattern, text) do
+    case Regex.named_captures(regex_progressive_pattern(), text) do
       %{"actor" => actor, "predicate" => predicate,
         "patient" => patient} = captures ->
         {:ok, %{actor: actor, predicate: predicate, patient: patient,
@@ -140,7 +140,7 @@ defmodule Core.Response.SemanticRoleFidelity do
                   String.trim(Map.get(captures, "also") || "") != ""}}
 
       _ ->
-        case Regex.named_captures(@finite_pattern, text) do
+        case Regex.named_captures(regex_finite_pattern(), text) do
           %{"actor" => actor, "predicate" => predicate, "patient" => patient} ->
             if String.downcase(predicate) in @auxiliaries do
               :error

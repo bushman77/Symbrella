@@ -21,7 +21,7 @@ defmodule Core.Response.Consolidation do
 
   @source_types [:wikidata, :wikipedia, :statistics_canada]
   @measurement_types [nil, :official_estimate, :dated_population_statement, :census]
-  @freshness ~r/\b(?:latest|current|currently|today|now|this\s+year|most\s+recent|up\s+to\s+date|as\s+of\s+now)\b/iu
+  defp regex_freshness, do: ~r/\b(?:latest|current|currently|today|now|this\s+year|most\s+recent|up\s+to\s+date|as\s+of\s+now)\b/iu
 
   @doc """
   Called only AFTER the authoritative symbolic output passes exact
@@ -95,7 +95,7 @@ defmodule Core.Response.Consolidation do
         length(names) != 2 -> context
         is_map(Map.get(context, :web_evidence)) -> context
         not is_binary(user_text) -> context
-        Regex.match?(@freshness, user_text) -> context
+        Regex.match?(regex_freshness(), user_text) -> context
         true -> recall_comparison(context, names, user_text)
       end
     else
