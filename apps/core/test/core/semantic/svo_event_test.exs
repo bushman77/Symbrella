@@ -76,9 +76,13 @@ defmodule Core.Semantic.SVOEventTest do
       |> Map.put(:lifg_choices, choices)
       |> Map.put(:atl_slate, %{winners: choices})
       |> Map.put(:active_cells, [
+        %{id: "the|determiner|1", pos: "determiner", norm: "the"},
+        %{id: "artist|noun|1", pos: "noun", norm: "artist"},
         %{id: "drew|verb|1", pos: "verb", norm: "drew",
           definition: "simple past of draw",
-          semantic_atoms: ["tag:form-of", "tag:past"]}
+          semantic_atoms: ["tag:form-of", "tag:past"]},
+        %{id: "a|determiner|1", pos: "determiner", norm: "a"},
+        %{id: "picture|noun|1", pos: "noun", norm: "picture"}
       ])
       |> Core.Syntax.Signatures.attach()
 

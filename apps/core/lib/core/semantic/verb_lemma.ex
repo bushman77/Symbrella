@@ -98,17 +98,16 @@ defmodule Core.Semantic.VerbLemma do
 
     if is_list(tags) and "tag:form-of" in tags and "tag:past" in tags and
          "tag:participle" not in tags and is_binary(definition) do
-      definition
-      |> String.split(" — ")
-      |> List.last()
-      |> String.trim()
-      |> then(fn gloss ->
-        Regex.named_captures(
-          ~r/\A(?:\([^)]*\)\s*)?(?:the\s+)?(?:simple\s+)?past\s+(?:tense\s+)?(?:indicative\s+)?(?:form\s+)?of\s+(?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
-          gloss
-        )
-      end)
-      |> case do
+      gloss =
+        definition
+        |> String.split(" — ")
+        |> List.last()
+        |> String.trim()
+
+      case Regex.named_captures(
+             ~r/\A(?:\([^)]*\)\s*)?(?:the\s+)?(?:simple\s+)?past\s+(?:tense\s+)?(?:indicative\s+)?(?:form\s+)?of\s+(?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
+             gloss
+           ) do
         %{"base" => base} ->
           base = String.downcase(base)
           if Regex.match?(base_pattern(), base), do: base, else: nil

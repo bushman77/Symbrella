@@ -1,7 +1,8 @@
 defmodule Core.Semantic.SVOEvent do
   @moduledoc """
   Evidence-gated subject-verb-object event projection. Requires the full
-  finite-present clause, exact LIFG role senses, and agreeing ATL winners.
+  finite-present or independently attested finite-past clause, exact LIFG
+  role senses, and agreeing ATL winners.
 
   This stores the user's attributed assertion; it does not verify truth.
   """
@@ -58,7 +59,7 @@ defmodule Core.Semantic.SVOEvent do
   def project(_, _), do: []
 
   @doc """
-  Return the unique *complete-sentence* finite-present SVO signature.
+  Return the unique *complete-sentence* finite SVO signature.
 
   This uses the same source, evidence and exact-surface constraints as the
   projection boundary. Smaller overlapping SVO hypotheses (such as
