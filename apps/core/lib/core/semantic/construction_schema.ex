@@ -206,8 +206,86 @@ defmodule Core.Semantic.ConstructionSchema do
     end)
   end
 
-  defp supported_shape?(_si, schema, _words, _target)
-       when schema in [:meaning_request_imperative, :meaning_wh_question], do: true
+  # The independent Core syntax signature and Brain POS adjudication
+  # must both agree. This is deliberately stricter than recognizing the
+  # literal words of a question, and uses no post-LIFG sense selection.
+  defp supported_shape?(si, schema, words, target)
+       when schema in [:meaning_request_imperative, :meaning_wh_question] do
+    roles = get_in(si, [:role_competition, :roles]) || %{}
+    signatures = List.wrap(Map.get(si, :sentence_signatures))
+
+    expected =
+      case {schema, words} do
+        {:meaning_request_imperative,
+         ["tell", "me", "the", "meaning", "of", _]} ->
+          {%{predicate: 0, recipient: 1, determiner: 2, nominal_head: 3,
+             preposition: 4, lexical_target: 5},
+           [{0, "verb", :predicate}, {1, "pronoun", :recipient},
+            {2, "determiner", :determiner}, {3, "noun", :nominal_head},
+            {4, "preposition", :preposition}]}
+
+        {:meaning_request_imperative,
+         ["please", "tell", "me", "the", "meaning", "of", _]} ->
+          {%{predicate: 1, recipient: 2, determiner: 3, nominal_head: 4,
+             preposition: 5, lexical_target: 6, politeness: 0},
+           [{0, :polite, :politeness}, {1, "verb", :predicate},
+            {2, "pronoun", :recipient}, {3, "determiner", :determiner},
+            {4, "noun", :nominal_head}, {5, "preposition", :preposition}]}
+
+        {:meaning_wh_question, ["what", "does", _, "mean"]} ->
+          {%{wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3},
+           [{3, "verb", :predicate}]}
+
+        {:meaning_wh_question, ["what", "is", "the", "meaning", "of", _]} ->
+          {%{wh: 0, auxiliary: 1, determiner: 2, nominal_head: 3,
+             preposition: 4, lexical_target: 5},
+           [{2, "determiner", :determiner}, {3, "noun", :nominal_head},
+            {4, "preposition", :preposition}]}
+
+        {:meaning_wh_question, ["what", "is", "the", "definition", "of", _]} ->
+          {%{wh: 0, auxiliary: 1, determiner: 2, nominal_head: 3,
+             preposition: 4, lexical_target: 5},
+           [{2, "determiner", :determiner}, {3, "noun", :nominal_head},
+            {4, "preposition", :preposition}]}
+
+        _ ->
+          nil
+      end
+
+    case expected do
+      {required_roles, checks} ->
+        Enum.any?(signatures, fn
+          %{id: ^schema, source: :core_syntax, span: {0, last},
+            roles: ^required_roles, evidence: evidence}
+          when is_integer(last) and is_list(evidence) ->
+            last == length(words) - 1 and
+              Map.get(required_roles, :lexical_target) == target and
+              Enum.all?(
+                [:complete_lexical_request, :attested_request_cues,
+                 :attested_target_alternatives, :original_contiguous_surface],
+                &(&1 in evidence)
+              ) and
+              Enum.all?(checks, fn
+                {index, :polite, :politeness} ->
+                  case Map.get(roles, index) do
+                    %{status: :supported, role: :politeness,
+                      pos: pos, basis: :lexical_request_politeness}
+                    when pos in ["adverb", "interjection"] -> true
+                    _ -> false
+                  end
+
+                {index, pos, role} ->
+                  match?(%{status: :supported, pos: ^pos, role: ^role},
+                    Map.get(roles, index))
+              end)
+
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end
 
   defp supported_shape?(_, _, _, _), do: false
 

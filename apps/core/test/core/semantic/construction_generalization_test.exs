@@ -195,4 +195,81 @@ defmodule Core.Semantic.ConstructionGeneralizationTest do
     assert si.semantic_request_frame.semantic.selected_sense == nil
     assert si.sentence_meaning.grounding.external_facts == :not_checked
   end
+
+  test "meaning requests provide explicit POS roles without deciding dictionary senses" do
+    alias Brain.LIFG.GrammarEvidence
+
+    for {sentence, intent, expected_roles} <- [
+      {"tell me the meaning of artist", :command,
+       [{0, "verb", :predicate}, {1, "pronoun", :recipient},
+        {2, "determiner", :determiner}, {3, "noun", :nominal_head},
+        {4, "preposition", :preposition}]},
+      {"please tell me the meaning of bank", :command,
+       [{0, "adverb", :politeness}, {1, "verb", :predicate},
+        {2, "pronoun", :recipient}, {3, "determiner", :determiner},
+        {4, "noun", :nominal_head}, {5, "preposition", :preposition}]},
+      {"what does artist mean?", :define,
+       [{3, "verb", :predicate}]},
+      {"what is the meaning of artist?", :define,
+       [{2, "determiner", :determiner}, {3, "noun", :nominal_head},
+        {4, "preposition", :preposition}]}
+    ] do
+      out = run(input(sentence, intent))
+      assert out.semantic_request_frame != nil, sentence
+      ctx = GrammarEvidence.prepare(out)
+
+      for {index, pos, role} <- expected_roles do
+        assert %{status: :supported, pos: ^pos, role: ^role} =
+          out.role_competition.roles[index]
+
+        word = Enum.at(tokens(sentence), index).phrase
+        alternate = if pos == "verb", do: "noun", else: "verb"
+        scores = %{"#{word}|#{pos}|1" => 0.20,
+                   "#{word}|#{alternate}|1" => 0.21}
+        boosted = GrammarEvidence.apply_role_competition(scores, ctx, index)
+        assert boosted["#{word}|#{pos}|1"] > boosted["#{word}|#{alternate}|1"]
+      end
+
+      assert out.semantic_request_frame.semantic.selected_sense == nil
+    end
+  end
+
+  test "complete lexical request suppresses only overlapping local adjective-noun hypothesis" do
+    rows = lexicon() ++ [
+      row("meaning", "adjective"), row("of", "noun"), row("artist", "verb")
+    ]
+
+    result = run(input("tell me the meaning of artist", :command, rows))
+    assert %{pos: "noun", status: :supported} = result.role_competition.roles[3]
+    assert %{pos: "preposition", status: :supported} = result.role_competition.roles[4]
+
+    assert Enum.any?(result.role_competition.superseded_proposals, fn proposal ->
+      proposal.basis == :complete_determiner_adjective_noun and
+        proposal.token_index == 3 and proposal.span == {2, 4}
+    end)
+
+    other = run(input("tell me the history of artist", :command, rows))
+    assert other.semantic_request_frame == nil
+    refute Enum.any?(other.role_competition.decisions, fn decision ->
+      decision[:basis] in [:meaning_request_nominal_head, :meaning_request_preposition]
+    end)
+  end
+
+  test "constructed meaning requests require corroborating pre-LIFG role evidence" do
+    si = input("tell me the meaning of artist", :command)
+    no_roles = si |> Signatures.attach() |> ConstructionSchema.attach()
+    assert no_roles.construction_candidates == []
+
+    without_preposition =
+      %{si | active_cells: Enum.reject(si.active_cells,
+        &(&1.norm == "of" and &1.pos == "preposition"))}
+      |> run()
+    assert without_preposition.semantic_request_frame == nil
+    assert without_preposition.construction_candidates == []
+
+    confirmed = run(si)
+    doctored = put_in(confirmed, [:role_competition, :roles, 3, :pos], "adjective")
+    assert FrameUnifier.verified(doctored, si.sentence) == :not_applicable
+  end
+
 end

@@ -414,7 +414,8 @@ defmodule Brain.LIFG.RoleCompetition do
     # complete clauses still compete normally and may remain unresolved.
     complete_subjects =
       present_subject_proposals ++
-        Enum.filter(question_proposals, &(&1.role == :subject_head))
+        Enum.filter(question_proposals, &(&1.role == :subject_head)) ++
+        Enum.filter(meaning_proposals, &(&1.role == :nominal_head))
 
     {local_proposals, superseded_proposals} =
       Enum.split_with(proposals, fn proposal ->
@@ -481,6 +482,16 @@ defmodule Brain.LIFG.RoleCompetition do
         frame: :wh_aux_object_question, span: {first, last}} ->
         local_det == subject - 1 and local_head == subject + 1 and
           first < local_det and last == local_head
+
+      # "the meaning of" has low-frequency alternative readings as
+      # determiner + adjective + noun. A complete lexical-request grammar
+      # establishes meaning as the noun and of as a preposition, but only
+      # within this exact local overlap.
+      %{role: :nominal_head, pos: "noun", token_index: head,
+        frame: frame, span: {first, last}}
+      when frame in [:meaning_request_imperative, :meaning_wh_question] ->
+        local_det == head - 1 and local_head == head + 1 and
+          first <= local_det and last > local_head
 
       _ ->
         false
