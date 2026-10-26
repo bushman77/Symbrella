@@ -107,4 +107,28 @@ defmodule Core.Response.LexicalDefinitionTest do
       AttentionFallback.generate(sentence,
         %{risk_bucket: :low, intent: :define}, %{action: :answer}, turn)
   end
+
+  test "admitted comprehension without attention goals cannot fabricate focus" do
+    alias Core.Brain.WM.Comprehension, as: WMComprehension
+    sid = "zero-salience-definition-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "what is the meaning of poop"
+
+    turn =
+      WMComprehension.store(%{
+        source: :user, session_id: sid, sentence: sentence,
+        intent: :define,
+        comprehension: %{recognized_topics: ["meaning"], understood: [],
+                         uncertain: ["poop"], degraded?: true},
+        trace: []
+      }, comprehension_wm?: true)
+
+    assert turn.wm_context.attention.goal_terms == []
+    assert turn.wm_context.attention.salience == 0.0
+    assert WMComprehension.admitted_context(sid) == turn.wm_context
+
+    assert :not_applicable ==
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :ask_info}, %{action: :answer}, turn)
+  end
 end
