@@ -632,6 +632,9 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
             speech_act: :reciprocate_greeting,
             provenance: :canonical_lifg_choice,
             lexical_witness: %{id: "hello|interjection|1", score: 0.16},
+            speaker: :user,
+            addressee: :self,
+            vocative: %{surface: "Symbrella", resolution: :assistant_identity},
             semantic_verified?: false,
             llm_called?: false
           }
@@ -644,6 +647,9 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidenceTest do
     fields = Map.new(section.items, &{&1.label, &1.body})
     assert fields["lexical witness"] == "hello|interjection|1"
     assert fields["speech act"] == ":reciprocate_greeting"
+    assert fields["input speaker"] == ":user"
+    assert fields["input addressee"] == ":self"
+    assert fields["vocative resolution"] == ":assistant_identity"
     assert fields["sentence meaning verified?"] == "false"
     assert fields["LLM called?"] == "false"
   end

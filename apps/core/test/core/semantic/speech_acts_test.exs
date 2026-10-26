@@ -83,4 +83,22 @@ defmodule Core.Semantic.SpeechActsTest do
              SpeechActs.from_si(%{sentence: "Hello Symbrella.", semantic_choices: []})
     assert insufficient.lexical_evidence.level == :insufficient
   end
+
+  test "bound speech-act survives SemanticInput struct contract without rewriting its cognition" do
+    si = %Core.SemanticInput{
+      sentence: "Hello Symbrella.",
+      source: :test,
+      semantic_choices: [@hello],
+      lifg_choices: [@hello]
+    }
+
+    bound = SpeechActs.attach(si)
+
+    assert %Core.SemanticInput{} = bound
+    assert :ok = Core.SemanticInput.validate_contract(bound)
+    assert bound.speech_act_frame.addressee == :self
+    assert bound.semantic_choices == si.semantic_choices
+    assert bound.lifg_choices == si.lifg_choices
+  end
+
 end
