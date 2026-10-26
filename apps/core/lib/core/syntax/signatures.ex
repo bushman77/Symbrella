@@ -253,12 +253,17 @@ defmodule Core.Syntax.Signatures do
           [predicate, object] ->
             {predicate, nil, object}
 
-          [polite, predicate, object] ->
-            if polite.word == "please", do: {predicate, nil, object}, else: nil
+          [first, second, third] ->
+            cond do
+              first.word == "please" ->
+                {second, nil, third}
 
-          [predicate, determiner, object] ->
-            if determiner.word in ~w(a an the), do: {predicate, determiner, object},
-              else: nil
+              second.word in ~w(a an the) ->
+                {first, second, third}
+
+              true ->
+                nil
+            end
 
           [polite, predicate, determiner, object] ->
             if polite.word == "please" and determiner.word in ~w(a an the),

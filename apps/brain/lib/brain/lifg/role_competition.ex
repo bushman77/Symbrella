@@ -202,8 +202,7 @@ defmodule Brain.LIFG.RoleCompetition do
                Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
                (predicate != 1 or Map.get(tokens, 0) == "please") and
                definition_object_shape?(tokens, predicate, object) do
-            [%
-              {token_index: predicate, pos: "verb", role: :predicate,
+            [%{token_index: predicate, pos: "verb", role: :predicate,
                frame: :definition_imperative, span: {0, last},
                basis: :definition_imperative_predicate,
                evidence: [:complete_definition_imperative,
