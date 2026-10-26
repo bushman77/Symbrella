@@ -176,4 +176,111 @@ defmodule Core.Response.SymbolicGenerationTest do
                "Hello Symbrella.", %{risk_bucket: :low, intent: :greet},
                %{action: :suppress}, si)
   end
+
+  test "native responses cover simple gratitude, farewell and wellbeing turns" do
+    for {input, expected, act} <- [
+      {"Thank you, Symbrella!", "You're welcome.", :gratitude},
+      {"Thanks a lot.", "You're welcome.", :gratitude},
+      {"Good night, Symbrella.", "Good night.", :farewell},
+      {"See you later!", "Take care.", :farewell},
+      {"How are you, Symbrella?", "I'm here and ready to talk.", :wellbeing_query}
+    ] do
+      si =
+        %{sentence: input, text: input, intent: :unknown, confidence: 0.7,
+          session_id: "native-social-#{System.unique_integer([:positive])}"}
+        |> SpeechActs.attach()
+
+      {_tone, reply, meta} = Response.plan(si, %{})
+      assert reply == expected, input
+      assert meta.response_source == :symbolic_generation
+      assert meta.response_reflection.interpreted_speech_act == act
+      assert meta.response_reflection.provenance == :surface_social_act
+      assert meta.response_reflection.semantic_verified? == false
+      assert meta.response_reflection.llm_called? == false
+    end
+  end
+
+  test "foreign addressees and unsafe decisions do not generate native social replies" do
+    for text <- [
+      "Thanks Bradley.", "Good night, Bradley.",
+      "How are you, Bradley?", "Thanks Symbrella, now explain the code."
+    ] do
+      si = SpeechActs.attach(%{sentence: text})
+      assert :not_applicable =
+               SymbolicGeneration.generate(text, %{risk_bucket: :low, intent: :unknown},
+                 %{action: :offer_options}, si)
+    end
+
+    text = "Thanks Symbrella."
+    si = SpeechActs.attach(%{sentence: text})
+    assert :not_applicable =
+             SymbolicGeneration.generate(text,
+               %{risk_bucket: :high, intent: :gratitude},
+               %{action: :offer_options}, si)
+  end
+
+  test "revalidated action receives attributed response without verifying its truth" do
+    choices = [
+      %{token_index: 1, id: "artist|noun|1"},
+      %{token_index: 2, id: "draws|verb|1"},
+      %{token_index: 4, id: "picture|noun|1"}
+    ]
+
+    si =
+      %{
+        sentence: "The artist draws a picture.", text: "The artist draws a picture.",
+        source: :user, intent: :statement, confidence: 0.8, trace: [],
+        session_id: "native-svo-#{System.unique_integer([:positive])}",
+        tokens:
+          ["The", "artist", "draws", "a", "picture."]
+          |> Enum.with_index()
+          |> Enum.map(fn {word, index} -> %{index: index, phrase: word, n: 1} end),
+        active_cells: [
+          %{id: "draws|verb|1", norm: "draws", pos: "verb",
+            definition: "An inflected form of draw.",
+            semantic_atoms: ~w(tag:form-of tag:indicative tag:present tag:singular tag:third-person)}
+        ],
+        sentence_signatures: [
+          %{id: :finite_present_svo_candidate, source: :core_syntax,
+            span: {0, 4},
+            evidence: [:contiguous_surface, :attested_nominal_subject,
+                       :attested_nominal_object, :attested_finite_present_verb],
+            roles: %{subject_determiner: 0, subject_head: 1, predicate: 2,
+                     object_determiner: 3, object_head: 4}}
+        ],
+        lifg_choices: choices,
+        atl_slate: %{winners: choices}
+      }
+      |> Core.Semantic.EpisodicProjection.attach()
+      |> Core.Semantic.SentenceMeaning.attach()
+      |> SpeechActs.attach()
+
+    assert si.sentence_meaning.kind == :participant_assertion
+    {_tone, reply, meta} = Response.plan(si, %{})
+    assert reply == "You're saying that the artist draws a picture."
+    assert meta.response_source == :symbolic_generation
+    assert meta.response_reflection.speech_act == :acknowledge_user_report
+    assert meta.response_reflection.provenance == :revalidated_episodic_projection
+    assert meta.response_reflection.event_occurrence_verified? == false
+    assert meta.response_reflection.response_is_memory_acknowledgment? == false
+    assert meta.response_reflection.llm_called? == false
+
+    forged = %{si | source: :assistant}
+    assert :not_applicable =
+             SymbolicGeneration.generate(forged.text,
+               %{risk_bucket: :low, intent: :statement},
+               %{action: :answer}, forged)
+
+    invented = put_in(si.sentence_meaning.roles.patient.surface, "a castle")
+    assert :not_applicable =
+             SymbolicGeneration.generate(invented.text,
+               %{risk_bucket: :low, intent: :statement},
+               %{action: :answer}, invented)
+
+    assert :not_applicable =
+             SymbolicGeneration.generate(si.text,
+               %{risk_bucket: :low, intent: :statement},
+               %{action: :suppress}, si)
+  end
+
 end

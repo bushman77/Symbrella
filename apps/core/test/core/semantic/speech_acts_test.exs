@@ -101,4 +101,46 @@ defmodule Core.Semantic.SpeechActsTest do
     assert bound.lifg_choices == si.lifg_choices
   end
 
+
+  test "gratitude, farewell and check-in are distinguished without invented lexical senses" do
+    for {text, act, anchor} <- [
+      {"Thanks Symbrella!", :gratitude, :unspecified},
+      {"Thank you very much.", :gratitude, :unspecified},
+      {"Good night, Symbrella.", :farewell, :night},
+      {"See you later!", :farewell, :unspecified},
+      {"How are you, Symbrella?", :wellbeing_query, :unspecified}
+    ] do
+      assert {:ok, frame} = SpeechActs.from_si(%{sentence: text})
+      assert frame.speech_act == act
+      assert frame.temporal_anchor == anchor
+      assert frame.lexical_evidence == %{
+        level: :surface_only, status: :provisional, witness: nil
+      }
+      assert frame.source_text == text
+      refute frame.sentence_meaning_verified?
+    end
+
+    assert {:ok, %{addressee: :self}} =
+             SpeechActs.from_si(%{sentence: "Thanks Symbrella."})
+    assert {:ok, %{addressee: :other}} =
+             SpeechActs.from_si(%{sentence: "Thanks Bradley."})
+  end
+
+  test "compound requests, quoted, reported and non-questions cannot bind social acts" do
+    for sentence <- [
+      "I thanked Symbrella.",
+      "Thanks for helping with my code.",
+      "Thanks Symbrella, now explain the code.",
+      "He said goodbye.",
+      "Good night, Bradley and Symbrella.",
+      "How are you explaining that?",
+      "How are you.",
+      "\"Thanks Symbrella\"",
+      "The words good night are a farewell."
+    ] do
+      assert SpeechActs.from_si(%{sentence: sentence}) == :not_applicable,
+             sentence
+    end
+  end
+
 end
