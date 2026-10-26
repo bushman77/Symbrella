@@ -33,7 +33,7 @@ defmodule Db.CuriosityInvestigation do
   @workers ~w(default isolated)
   @providers ~w(wikidata statistics_canada wikipedia other)
   @provider_statuses ~w(source_supported unavailable partial_support error unknown)
-  @code_pattern ~r/\A[a-z][a-z0-9_]*\z/
+  defp code_pattern, do: ~r/\A[a-z][a-z0-9_]*\z/
 
   def changeset(event, attrs) do
     event
@@ -50,9 +50,9 @@ defmodule Db.CuriosityInvestigation do
     |> validate_length(:reason, max: 100)
     |> validate_length(:acquisition_reason, max: 100)
     |> validate_length(:origin, max: 100)
-    |> validate_format(:reason, @code_pattern)
-    |> validate_format(:origin, @code_pattern)
-    |> validate_format(:acquisition_reason, @code_pattern)
+    |> validate_format(:reason, code_pattern())
+    |> validate_format(:origin, code_pattern())
+    |> validate_format(:acquisition_reason, code_pattern())
     |> validate_change(:provider_attempts, fn :provider_attempts, attempts ->
       if Enum.all?(attempts, &valid_provider_attempt?/1),
         do: [], else: [provider_attempts: "must contain only fixed provider/status codes"]
