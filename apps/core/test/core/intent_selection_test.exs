@@ -165,6 +165,16 @@ defmodule Core.Intent.SelectionTest do
     assert Selection.refine_from_syntax(classified) == classified
   end
 
+  test "polite dictionary imperative is classified as :define rather than generic command" do
+    for sentence <- ["please define artist", "Please define the artist.", "define bank"] do
+      selected = Selection.select(%{sentence: sentence, tokens: [], trace: []})
+      assert selected.intent == :define
+      assert selected.confidence >= 0.6
+    end
+
+    assert intent("please build the project") == :command
+  end
+
   test "command: please build the project" do
     assert intent("please build the project") == :command
     assert conf("please build the project") >= 0.80

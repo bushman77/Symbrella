@@ -1198,7 +1198,7 @@ defmodule Core.Intent.Selection do
 
   defp score_define(s) do
     cond do
-      Regex.match?(~r/^\s*(define|what(?:'s| is) the meaning of|what does .+ mean)\b/i, s) -> 0.94
+      Regex.match?(~r/^\s*(?:(?:please\s+)?define|what(?:'s| is) the meaning of|what does .+ mean)\b/i, s) -> 0.94
       Regex.match?(~r/^\s*what\s+is\s+\w+/i, s) -> 0.62
       true -> 0.0
     end
