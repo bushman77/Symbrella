@@ -46,10 +46,18 @@ defmodule Brain.LIFG.DefinitionRoleCompatibilityTest do
 
   test "production Stage1 and SemanticControl use the stronger definition evidence" do
     sentence = "I deposited money at the bank."
+    {bank_start, bank_length} = :binary.match(sentence, "bank")
+    bank_span = {bank_start, bank_start + bank_length}
+    bank_token = %{index: 0, phrase: "bank", n: 1, mw: false, span: bank_span}
+
+    # Span boundaries are [start, stop) byte offsets. The old hard-coded
+    # {24, 28} accidentally selected " ban", triggering Stage1's guard.
+    assert bank_span == {25, 29}
+    assert :ok = Brain.LIFG.Stage1.Boundary.check(sentence, bank_token, "bank", false)
 
     si = %{
       sentence: sentence,
-      tokens: [%{index: 0, phrase: "bank", n: 1, mw: false, span: {24, 28}}],
+      tokens: [bank_token],
       sense_candidates: %{0 => [@finance, @gambling, @money, @river]}
     }
 
