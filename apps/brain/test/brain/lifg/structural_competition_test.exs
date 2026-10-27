@@ -127,4 +127,78 @@ defmodule Brain.LIFG.StructuralCompetitionTest do
     assert result.preferred == nil
     assert hd(result.candidates).conflicting_roles == 4
   end
+  test "complete two-modifier noun phrase competes without promoting smaller constituents" do
+    words = ~w(small black bird)
+    tokens =
+      words
+      |> Enum.with_index()
+      |> Enum.map(fn {phrase, index} -> %{phrase: phrase, index: index, n: 1} end)
+
+    full = %{
+      id: :noun_phrase, source: :core_syntax, span: {0, 2},
+      roles: %{modifier_1: 0, modifier_2: 1, head: 2},
+      required_features: %{
+        modifier_1: [:pos_adjective],
+        modifier_2: [:pos_adjective],
+        head: [:pos_noun]
+      },
+      evidence: [:nominal_constituent, :pos_pattern]
+    }
+
+    partial = %{
+      id: :noun_phrase, source: :core_syntax, span: {1, 2},
+      roles: %{modifier: 1, head: 2},
+      required_features: %{modifier: [:pos_adjective], head: [:pos_noun]},
+      evidence: [:nominal_constituent, :pos_pattern]
+    }
+
+    choices = [
+      %{token_index: 0, id: "small|adjective|1"},
+      %{token_index: 1, id: "black|adjective|1"},
+      %{token_index: 2, id: "bird|noun|1"}
+    ]
+
+    outcome = StructuralCompetition.resolve(%{
+      tokens: tokens,
+      sentence_signatures: [full, partial],
+      lifg_choices: choices
+    })
+
+    assert outcome.status == :preferred
+    assert outcome.preferred.construction == :noun_phrase
+    assert outcome.preferred.roles == full.roles
+    assert outcome.preferred.matched_roles == 3
+    assert length(outcome.candidates) == 1
+    assert outcome.factual_authority? == false
+
+    embedded = StructuralCompetition.resolve(%{
+      tokens: tokens ++ [%{index: 3, phrase: "flies", n: 1}],
+      sentence_signatures: [full, partial],
+      lifg_choices: choices
+    })
+    assert embedded.status == :no_complete_candidate
+  end
+
+  test "two-modifier nominal without selected lexical roles cannot become preferred" do
+    full = %{
+      id: :noun_phrase, source: :core_syntax, span: {0, 2},
+      roles: %{modifier_1: 0, modifier_2: 1, head: 2},
+      required_features: %{
+        modifier_1: [:pos_adjective],
+        modifier_2: [:pos_adjective],
+        head: [:pos_noun]
+      },
+      evidence: [:nominal_constituent, :pos_pattern]
+    }
+
+    outcome = StructuralCompetition.resolve(%{
+      tokens: ~w(small black bird) |> Enum.with_index() |>
+        Enum.map(fn {phrase, index} -> %{phrase: phrase, index: index, n: 1} end),
+      sentence_signatures: [full],
+      lifg_choices: [%{token_index: 0, id: "small|noun|1"}]
+    })
+    assert outcome.status == :unresolved
+    assert outcome.preferred == nil
+  end
+
 end
