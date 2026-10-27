@@ -2,7 +2,7 @@ defmodule Core.Semantic.CompositionNominalPipelineTest do
   use ExUnit.Case, async: true
 
   alias Core.Semantic.Composition
-  alias Core.Semantic.Composition.{Expression, Proof}
+  alias Core.Semantic.Composition.Proof
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   defp input(words, positions) do
@@ -61,7 +61,7 @@ defmodule Core.Semantic.CompositionNominalPipelineTest do
     assert Proof.verify(proof) == :ok
     assert proof.factual_authority? == false
     assert proof.quantifier_applied? == false
-    assert proof.premises.lexical_witnesses |> Enum.map(& &1.word) ==
+    assert Enum.map(proof.premises.lexical_witnesses, & &1.word) ==
       ~w(small black bird)
 
     assert proof.result ==
