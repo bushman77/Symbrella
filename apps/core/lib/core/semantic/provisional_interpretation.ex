@@ -64,22 +64,18 @@ defmodule Core.Semantic.ProvisionalInterpretation do
   # from a verb-particle construction. The signature supplies grammatical
   # roles; the discourse reference remains a tentative antecedent candidate.
   defp spatial_gap_question(si) do
-    tokens = base_tokens(si)
     signatures = List.wrap(Map.get(si, :sentence_signatures))
     reference = Map.get(si, :discourse_reference)
+    words = surface_words(Map.get(si, :sentence))
 
     Enum.find_value(signatures, fn
       %{id: :verb_particle_construction, source: :core_syntax,
-        roles: %{verb: verb, particle: particle}, evidence: evidence}
-      when is_integer(verb) and is_integer(particle) and is_list(evidence) ->
+        roles: %{verb: 3, particle: 4}, evidence: evidence}
+      when is_list(evidence) ->
         with true <- :adjacent_particle in evidence,
-             true <- verb == 3 and particle == 4,
-             "what" <- token_word(tokens, 0),
-             "is" <- token_word(tokens, 1),
-             "it" <- token_word(tokens, 2),
-             predicate when is_binary(predicate) <- token_word(tokens, verb),
-             position when position in ["on", "in", "under", "beside", "above", "below"] <-
-               token_word(tokens, particle) do
+             ["what", "is", "it", predicate, position] <- words,
+             true <- Regex.match?(@lexeme, predicate),
+             true <- position in ["on", "in", "under", "beside", "above", "below"] do
           antecedent =
             case reference do
               %{source: :recent_user_turn, antecedent: name} when is_binary(name) -> name
@@ -107,26 +103,26 @@ defmodule Core.Semantic.ProvisionalInterpretation do
           _ -> nil
         end
 
-      _ -> nil
+      _ ->
+        nil
     end)
   end
 
-  defp base_tokens(si) do
-    si
-    |> Map.get(:tokens, [])
-    |> List.wrap()
-    |> Enum.filter(fn token ->
-      Map.get(token, :n, 1) == 1 and Map.get(token, :kind) not in [:punct, "punct"]
-    end)
-    |> Enum.sort_by(&Map.get(&1, :index, -1))
+  defp surface_words(sentence) when is_binary(sentence) and byte_size(sentence) <= 180 do
+    words =
+      sentence
+      |> String.trim()
+      |> String.replace(~r/[?!.]+\\z/u, "")
+      |> String.trim()
+      |> String.downcase()
+      |> String.split(~r/\\s+/u, trim: true)
+
+    if length(words) == 5 and Enum.all?(words, &Regex.match?(@lexeme, &1)),
+      do: words,
+      else: []
   end
 
-  defp token_word(tokens, index) do
-    case Enum.find(tokens, &(Map.get(&1, :index) == index)) do
-      %{phrase: phrase} when is_binary(phrase) -> String.downcase(phrase)
-      _ -> nil
-    end
-  end
+  defp surface_words(_), do: []
 
   @spec verified(map()) :: {:ok, map()} | :not_applicable
   def verified(%{} = si) do
