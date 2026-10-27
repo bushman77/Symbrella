@@ -87,6 +87,30 @@ defmodule Brain.LIFG.StructuralCompetition do
 
   defp base_indices(_), do: []
 
+  # Only a complete two-modifier NP may compete as a nominal utterance;
+  # nested and shorter noun phrases remain constituent evidence.
+  defp complete_clause?(
+         %{id: :noun_phrase, source: :core_syntax,
+           span: {0, span_last},
+           roles: %{modifier_1: first, modifier_2: second, head: head} = roles,
+           required_features: required, evidence: evidence}, last
+       )
+       when is_map(required) and is_list(evidence) do
+    determiner = Map.get(roles, :determiner)
+    modifier_start = if(is_nil(determiner), do: 0, else: 1)
+    expected_roles = if(is_nil(determiner), do: 3, else: 4)
+
+    span_last == last and head == last and first == modifier_start and
+      second == first + 1 and head == second + 1 and
+      (is_nil(determiner) or determiner == 0) and
+      map_size(roles) == expected_roles and
+      :nominal_constituent in evidence and :pos_pattern in evidence and
+      Map.get(required, :modifier_1) == [:pos_adjective] and
+      Map.get(required, :modifier_2) == [:pos_adjective] and
+      Map.get(required, :head) == [:pos_noun] and
+      (is_nil(determiner) or Map.get(required, :determiner) == [:pos_determiner])
+  end
+
   defp complete_clause?(
          %{id: id, source: :core_syntax, span: {0, span_last},
            roles: roles, evidence: evidence}, last
