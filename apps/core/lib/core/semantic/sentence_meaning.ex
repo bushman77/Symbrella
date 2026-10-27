@@ -28,6 +28,7 @@ defmodule Core.Semantic.SentenceMeaning do
             span: proof.span,
             resulting_type: proof.result_type,
             proof_steps: length(proof.steps),
+            event_semantics: Map.get(proof, :event_semantics),
             formally_verified?: true,
             factual_authority?: false,
             epistemic_status: proof.epistemic_status
