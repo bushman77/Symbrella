@@ -40,21 +40,13 @@ defmodule Core.Semantic.Composition.Event do
           result_type: {:arrow, :event, :truth}
         }
 
-        if Proof.verify(derivation) == :ok do
-          {:ok, Map.put(derivation, :semantics, %{
-            aspect: :progressive,
-            predicate: action,
-            actor: %{kind: actor_kind, referent: :unresolved},
-            spatial: %{
-              relation: relation,
-              landmark_kind: landmark_kind,
-              reading: if(relation == :into, do: :directional, else: :locative),
-              arrival: :not_established
-            },
-            event_existence: :not_asserted
-          })}
+        # Project the reporting map from the NORMAL FORM, never directly
+        # from the input words. This binds human-readable fields to the AST.
+        with :ok <- Proof.verify(derivation),
+             {:ok, semantics} <- project(result) do
+          {:ok, Map.put(derivation, :semantics, semantics)}
         else
-          :unsupported
+          _ -> :unsupported
         end
       else
         _ -> :unsupported
@@ -65,6 +57,69 @@ defmodule Core.Semantic.Composition.Event do
   end
 
   def compose(_), do: :unsupported
+
+  @doc """
+  Decode only the exact, closed four-constraint normal form of a progressive
+  event. Unknown clauses, extra assertions, and unbound variables fail closed.
+
+  :not_established and :not_asserted denote absent proof premises, NOT
+  claims that arrival or occurrence are factually false.
+  """
+  @spec project(Expression.t()) :: {:ok, map()} | :unsupported
+  def project(
+        {:lambda, event_var, :event,
+         {:and,
+          {:and,
+           {:and,
+            {:event_action, action, {:var, action_event}},
+            {:event_aspect, :progressive, {:var, aspect_event}}},
+           {:event_actor_kind, actor_kind, {:var, actor_event}}},
+          {:event_spatial, relation, landmark_kind, {:var, spatial_event}}}
+      )
+      when is_binary(event_var) and event_var == action_event and
+             event_var == aspect_event and event_var == actor_event and
+             event_var == spatial_event do
+    if action in Map.values(@actions) and actor_kind in Map.values(@actors) and
+         landmark_kind in Map.values(@landmarks) and
+         relation in Map.values(@relations) and licensed?(action, relation) do
+      {:ok,
+       %{
+         aspect: :progressive,
+         predicate: action,
+         actor: %{kind: actor_kind, referent: :unresolved},
+         spatial: %{
+           relation: relation,
+           landmark_kind: landmark_kind,
+           reading: if(relation == :into, do: :directional, else: :locative),
+           arrival: :not_established
+         },
+         event_existence: :not_asserted
+       }}
+    else
+      :unsupported
+    end
+  end
+
+  def project(_), do: :unsupported
+
+  @doc """
+  Verify both the mathematical derivation and the exact reported semantics.
+  Proof.verify/1 intentionally checks ONLY the lambda calculus derivation.
+  """
+  @spec verify(map()) :: :ok | {:error, atom()}
+  def verify(%{event_semantics: semantics} = derivation),
+    do: verify(Map.put(derivation, :semantics, semantics))
+
+  def verify(%{result: result, semantics: semantics} = derivation) do
+    with :ok <- Proof.verify(derivation),
+         {:ok, ^semantics} <- project(result) do
+      :ok
+    else
+      _ -> {:error, :invalid_event_semantics}
+    end
+  end
+
+  def verify(_), do: {:error, :invalid_event_semantics}
 
   defp licensed?(:fly, :into), do: true
   defp licensed?(action, relation) when action in [:sit, :sleep],
