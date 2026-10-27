@@ -160,6 +160,122 @@ defmodule Core.Semantic.CompositionEventTest do
     end)
   end
 
+  defp with_live_conflicts(si) do
+    adjective = %{
+      id: "flying|adjective|1",
+      norm: "flying",
+      pos: "adjective",
+      semantic_atoms: []
+    }
+
+    choices =
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = choice ->
+          %{choice | id: "is|auxiliary|0",
+            scores: %{
+              "is|auxiliary|0" => 0.337,
+              "is|verb|1" => 0.270
+            }}
+
+        %{token_index: 3} = choice ->
+          %{choice | id: "flying|adjective|1",
+            scores: %{
+              "flying|adjective|1" => 0.113,
+              "flying|verb|1" => 0.096
+            }}
+
+        choice ->
+          choice
+      end)
+
+    %{si | active_cells: [adjective | si.active_cells],
+      lifg_choices: choices}
+  end
+
+  test "attested losing verb and auxiliary form a provisional proof without changing winners" do
+    si = with_live_conflicts(input())
+    out = run(si)
+
+    assert out.structural_competition.status == :preferred
+    assert out.compositional_derivation.kind == :progressive_event_property
+    assert :ok = Proof.verify(out.compositional_derivation)
+    assert {:ok, _} = Composition.verified(out)
+
+    witnesses = out.compositional_derivation.premises.lexical_witnesses
+
+    assert Enum.any?(witnesses, fn witness ->
+      witness.role == :predicate and
+        witness.sense_id == "flying|verb|1" and
+        witness.original_lifg_id == "flying|adjective|1" and
+        witness.selection_basis == :construction_alternative
+    end)
+
+    assert Enum.any?(witnesses, fn witness ->
+      witness.role == :auxiliary and
+        witness.sense_id == "is|verb|1" and
+        witness.original_lifg_id == "is|auxiliary|0" and
+        witness.selection_basis == :construction_alternative
+    end)
+
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 3)).id ==
+      "flying|adjective|1"
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 2)).id ==
+      "is|auxiliary|0"
+
+    assert out.compositional_derivation.event_semantics.spatial.arrival ==
+      :not_established
+    assert out.compositional_derivation.factual_authority? == false
+  end
+
+  test "unscored dictionary alternative must not be promoted" do
+    si = with_live_conflicts(input())
+
+    choices = Enum.map(si.lifg_choices, fn
+      %{token_index: 3} = choice ->
+        %{choice | scores: %{"flying|adjective|1" => 0.113}}
+      choice -> choice
+    end)
+
+    out = run(%{si | lifg_choices: choices})
+    assert out.compositional_derivation == nil
+  end
+
+  test "forged scored alternative without matching dictionary sense is rejected" do
+    si = with_live_conflicts(input())
+    rows = Enum.reject(si.active_cells, &(&1.id == "flying|verb|1"))
+
+    # The syntax detector must also abstain when its own morphology witness
+    # disappears: score membership never substitutes for actual dictionary POS.
+    out = run(%{si | active_cells: rows})
+    assert out.compositional_derivation == nil
+  end
+
+  test "invalid participle morphology cannot yield a compositional verb" do
+    si = with_live_conflicts(input())
+    rows =
+      Enum.map(si.active_cells, fn
+        %{id: "flying|verb|1"} = row -> %{row | semantic_atoms: []}
+        row -> row
+      end)
+
+    out = run(%{si | active_cells: rows})
+    assert out.compositional_derivation == nil
+  end
+
+  test "proof is invalidated when a scored alternative changes" do
+    out = input() |> with_live_conflicts() |> run()
+    assert {:ok, _} = Composition.verified(out)
+
+    changed = %{out | lifg_choices:
+      Enum.map(out.lifg_choices, fn
+        %{token_index: 3} = choice ->
+          %{choice | scores: %{"flying|adjective|1" => 0.113}}
+        choice -> choice
+      end)}
+
+    assert Composition.verified(changed) == :not_applicable
+  end
+
   test "unknown directional construction abstains rather than guessing" do
     si = run(input("bird", "flying", "towards", "tree"))
     assert si.compositional_derivation == nil
