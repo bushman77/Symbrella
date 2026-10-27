@@ -15,12 +15,14 @@ defmodule Core.Semantic.Composition.Expression do
   @landmarks MapSet.new([:fence, :tree, :table])
   @spatial_relations MapSet.new([:on, :in, :under, :beside, :above, :below, :into])
 
-  @type semantic_type :: :entity | :event | :truth | {:arrow, semantic_type(), semantic_type()}
+  @type semantic_type :: :entity | :event | :truth | :landmark_kind |
+          {:arrow, semantic_type(), semantic_type()}
   @type t ::
           {:var, String.t()}
           | {:lambda, String.t(), semantic_type(), t()}
           | {:apply, t(), t()}
           | {:predicate, atom(), t()}
+          | {:landmark_kind, atom()}
           | {:and, t(), t()}
           | {:event_action, atom(), t()}
           | {:event_aspect, :progressive, t()}
@@ -115,10 +117,21 @@ defmodule Core.Semantic.Composition.Expression do
     event_predicate_type(MapSet.member?(@event_actors, kind), event, env)
   end
 
+  def type_of({:landmark_kind, kind}, _env) do
+    if MapSet.member?(@landmarks, kind),
+      do: {:ok, :landmark_kind},
+      else: {:error, :unapproved_event_symbol}
+  end
+
   def type_of({:event_spatial, relation, landmark, event}, env) do
+    landmark_valid? =
+      case landmark do
+        kind when is_atom(kind) -> MapSet.member?(@landmarks, kind)
+        term -> type_of(term, env) == {:ok, :landmark_kind}
+      end
+
     event_predicate_type(
-      MapSet.member?(@spatial_relations, relation) and
-        MapSet.member?(@landmarks, landmark),
+      MapSet.member?(@spatial_relations, relation) and landmark_valid?,
       event,
       env
     )
@@ -138,6 +151,7 @@ defmodule Core.Semantic.Composition.Expression do
   def valid_type?(:entity), do: true
   def valid_type?(:event), do: true
   def valid_type?(:truth), do: true
+  def valid_type?(:landmark_kind), do: true
   def valid_type?({:arrow, left, right}), do: valid_type?(left) and valid_type?(right)
   def valid_type?(_), do: false
 end
