@@ -8,7 +8,7 @@ defmodule Core.Semantic.Composition do
   reproducible typed lambda derivations, not verified statements about reality.
   """
   alias Core.Pipeline.Trace
-  alias Core.Semantic.Composition.{Event, Expression, Proof, Reducer}
+  alias Core.Semantic.Composition.{Diagnosis, Event, Expression, Proof, Reducer}
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @max_signatures 64
@@ -17,20 +17,27 @@ defmodule Core.Semantic.Composition do
   @spec attach(map()) :: map()
   def attach(%{} = si) do
     proof = derive(si)
+    blockers = if(is_map(proof), do: [], else: Diagnosis.blocked_roles(si))
+    abstention_reason =
+      if(blockers == [], do: :no_admissible_composition, else: :lexical_role_blocked)
 
     updated =
       si
       |> Map.put(:compositional_derivation, proof)
       |> Trace.append(:semantic_composition,
         decision: if(is_map(proof), do: :derived, else: :abstained),
-        reason: :closed_typed_lambda_composition,
+        reason: if(is_map(proof), do: :closed_typed_lambda_composition, else: abstention_reason),
         meta: if(is_map(proof), do: %{
           construction: proof.construction,
           span: proof.span,
           reduction_steps: length(proof.steps),
           formally_verified?: true,
           factual_authority?: false
-        }, else: %{}))
+        }, else: %{
+          blockers: blockers,
+          blocked_role_count: length(blockers),
+          factual_authority?: false
+        }))
 
     Core.Telemetry.emit(@telemetry_event,
       %{derivations: if(is_map(proof), do: 1, else: 0)},
@@ -39,6 +46,8 @@ defmodule Core.Semantic.Composition do
         construction: if(is_map(proof), do: proof.construction, else: nil),
         reduction_steps: if(is_map(proof), do: length(proof.steps), else: 0),
         formally_verified?: is_map(proof),
+        abstention_reason: if(is_map(proof), do: nil, else: abstention_reason),
+        blockers: blockers,
         factual_authority?: false
       })
 
