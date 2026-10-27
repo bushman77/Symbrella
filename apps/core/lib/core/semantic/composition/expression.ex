@@ -12,14 +12,14 @@ defmodule Core.Semantic.Composition.Expression do
   @predicates MapSet.new([:bird, :cat, :dog, :black, :white, :small])
 
   @type semantic_type :: :entity | :truth | {:arrow, semantic_type(), semantic_type()}
-  @type term ::
+  @type t ::
           {:var, String.t()}
-          | {:lambda, String.t(), semantic_type(), term()}
-          | {:apply, term(), term()}
-          | {:predicate, atom(), term()}
-          | {:and, term(), term()}
+          | {:lambda, String.t(), semantic_type(), t()}
+          | {:apply, t(), t()}
+          | {:predicate, atom(), t()}
+          | {:and, t(), t()}
 
-  @spec noun(String.t()) :: {:ok, term()} | :unsupported
+  @spec noun(String.t()) :: {:ok, t()} | :unsupported
   def noun(word) when is_binary(word) do
     case Map.fetch(@nouns, word) do
       {:ok, symbol} -> {:ok, {:lambda, "n", :entity, {:predicate, symbol, {:var, "n"}}}}
@@ -45,7 +45,7 @@ defmodule Core.Semantic.Composition.Expression do
 
   def adjective(_), do: :unsupported
 
-  @spec type_of(term(), map()) :: {:ok, semantic_type()} | {:error, atom()}
+  @spec type_of(t(), map()) :: {:ok, semantic_type()} | {:error, atom()}
   def type_of(term, environment \\ %{})
 
   def type_of({:var, name}, env) when is_binary(name) and is_map(env) do
