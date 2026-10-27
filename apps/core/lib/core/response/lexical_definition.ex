@@ -12,11 +12,13 @@ defmodule Core.Response.LexicalDefinition do
   so no clarification is necessary. Safety redirects/suppression stay gated.
   """
 
-  @patterns [
-    ~r/\A\s*what\s+is\s+(?:the\s+)?(?:meaning|definition)\s+of\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu,
-    ~r/\A\s*what\s+does\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s+mean\s*[?.!]?\s*\z/iu,
-    ~r/\A\s*(?:please\s+)?define\s+(?:the\s+)?(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu
-  ]
+  defp patterns do
+    [
+      ~r/\A\s*what\s+is\s+(?:the\s+)?(?:meaning|definition)\s+of\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu,
+      ~r/\A\s*what\s+does\s+(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s+mean\s*[?.!]?\s*\z/iu,
+      ~r/\A\s*(?:please\s+)?define\s+(?:the\s+)?(?<term>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.!]?\s*\z/iu
+    ]
+  end
 
   alias Core.Semantic.FrameUnifier
 
@@ -25,7 +27,7 @@ defmodule Core.Response.LexicalDefinition do
 
   @spec requested_term(String.t()) :: String.t() | nil
   def requested_term(text) when is_binary(text) and byte_size(text) <= 260 do
-    Enum.find_value(@patterns, fn pattern ->
+    Enum.find_value(patterns(), fn pattern ->
       case Regex.named_captures(pattern, text) do
         %{"term" => term} -> String.downcase(term)
         _ -> nil
