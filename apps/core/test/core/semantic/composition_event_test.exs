@@ -281,6 +281,54 @@ defmodule Core.Semantic.CompositionEventTest do
       Enum.find(out.trace, &(&1.stage == :semantic_composition))
   end
 
+  test "Core candidate_probs authorizes scored alternatives without Stage1 scores key" do
+    si = with_live_conflicts(input())
+    choices =
+      Enum.map(si.lifg_choices, fn
+        %{token_index: index} = choice when index in [2, 3] ->
+          choice
+          |> Map.put(:candidate_probs, Map.fetch!(choice, :scores))
+          |> Map.delete(:scores)
+        choice -> choice
+      end)
+
+    out = run(%{si | lifg_choices: choices})
+    assert out.structural_competition.status == :preferred
+    assert %{kind: :progressive_event_property} = out.compositional_derivation
+    assert :ok = Proof.verify(out.compositional_derivation)
+    assert {:ok, _} = Composition.verified(out)
+    assert out.compositional_derivation.event_semantics.spatial.arrival ==
+      :not_established
+
+    witnesses = out.compositional_derivation.premises.lexical_witnesses
+    assert Enum.any?(witnesses,
+      &(&1.role == :predicate and &1.selection_basis == :construction_alternative))
+    assert Enum.any?(witnesses,
+      &(&1.role == :auxiliary and &1.selection_basis == :construction_alternative))
+
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 3)).id ==
+      "flying|adjective|1"
+  end
+
+  test "missing Core candidate_probs blocks an unselected lexical alternative" do
+    si = with_live_conflicts(input())
+    choices =
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 3} = choice -> Map.delete(choice, :scores)
+        choice -> choice
+      end)
+
+    out = run(%{si | lifg_choices: choices})
+    assert out.compositional_derivation == nil
+
+    audit = Core.Semantic.Composition.Diagnosis.admission_audit(out)
+    assert Enum.any?(audit, fn entry ->
+      entry.role == :predicate and
+        entry.status == :rejected and
+        entry.reason == :missing_or_invalid_score_evidence
+    end)
+  end
+
   test "unscored dictionary alternative must not be promoted" do
     si = with_live_conflicts(input())
 
