@@ -94,14 +94,15 @@ defmodule Core.Semantic.Composition.RoleWitness do
 
   defp attested?(si, word, id, expected_pos, role) do
     case String.split(id, "|", parts: 3) do
-      [^word, pos, suffix] when pos in expected_pos and suffix != "" ->
-        Enum.any?(List.wrap(Map.get(si, :active_cells)), fn
-          %{} = cell ->
-            Map.get(cell, :id) == id and Map.get(cell, :pos) == pos and
-              normalize(Map.get(cell, :norm)) == word and
-              morphology_compatible?(cell, role, pos)
-          _ -> false
-        end)
+      [^word, pos, suffix] ->
+        suffix != "" and pos in expected_pos and
+          Enum.any?(List.wrap(Map.get(si, :active_cells)), fn
+            %{} = cell ->
+              Map.get(cell, :id) == id and Map.get(cell, :pos) == pos and
+                normalize(Map.get(cell, :norm)) == word and
+                morphology_compatible?(cell, role, pos)
+            _ -> false
+          end)
 
       _ -> false
     end
