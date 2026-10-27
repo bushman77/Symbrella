@@ -75,7 +75,9 @@ defmodule Core.Response do
         extracted_name: extracted_name,
         remember_fact: remember_fact,
         direct_fact: direct_fact,
-        fact_query_key: fact_query_key
+        fact_query_key: fact_query_key,
+        semantic_context: Map.take(si, [:sentence, :tokens, :sentence_signatures,
+          :sentence_meaning, :provisional_interpretation, :discourse_reference])
       }) ||
         Memory.unresolved_lexical_reply(si, text_in, session_id, intent0, conf) ||
         Memory.acknowledge_projected(si, session_id, text_in, intent0, conf)
@@ -349,7 +351,9 @@ defmodule Core.Response do
       extracted_name: extracted_name,
       remember_fact: remember_fact,
       direct_fact: direct_fact,
-      fact_query_key: fact_query_key
+      fact_query_key: fact_query_key,
+      semantic_context: Map.take(si, [:sentence, :tokens, :sentence_signatures,
+        :sentence_meaning, :provisional_interpretation, :discourse_reference])
     })
   end
 
