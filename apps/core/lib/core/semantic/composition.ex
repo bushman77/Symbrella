@@ -1,6 +1,6 @@
 defmodule Core.Semantic.Composition do
   @moduledoc """
-  V1: read-only, evidence-gated adjective + noun property composition.
+  V1 nominal properties and V2 progressive event properties. Read-only.
 
   Runs downstream of StructuralCompetition, but never asserts a referent or
   upgrades a grammatical hypothesis to a fact. Its closed semantic vocabulary
@@ -8,7 +8,7 @@ defmodule Core.Semantic.Composition do
   reproducible typed lambda derivations, not verified statements about reality.
   """
   alias Core.Pipeline.Trace
-  alias Core.Semantic.Composition.{Expression, Proof, Reducer}
+  alias Core.Semantic.Composition.{Event, Expression, Proof, Reducer}
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @max_signatures 64
@@ -23,7 +23,7 @@ defmodule Core.Semantic.Composition do
       |> Map.put(:compositional_derivation, proof)
       |> Trace.append(:semantic_composition,
         decision: if(is_map(proof), do: :derived, else: :abstained),
-        reason: :closed_nominal_lambda_prototype,
+        reason: :closed_typed_lambda_composition,
         meta: if(is_map(proof), do: %{
           construction: proof.construction,
           span: proof.span,
@@ -54,17 +54,18 @@ defmodule Core.Semantic.Composition do
     # Most turns have no supported nominal construction. Avoid another
     # dictionary/signature pass in those cases and bound the prototype.
     with true <- length(signatures) <= @max_signatures,
-         true <- Enum.any?(signatures, &nominal_signature?/1),
+         true <- Enum.any?(signatures, &(nominal_signature?(&1) or event_signature?(&1))),
          true <- structural_scope_valid?(si),
          detected <- Signatures.detect(si),
          true <- Enum.all?(signatures, &(&1 in detected)) do
-      signatures
-      |> Enum.take(@max_signatures)
-      |> Enum.filter(&nominal_signature?/1)
-      |> Enum.sort_by(fn sig ->
-        {elem(sig.span, 1), -(elem(sig.span, 1) - elem(sig.span, 0))}
-      end)
-      |> Enum.find_value(&compose_signature(si, &1))
+      event_derivation(si, signatures) ||
+        (signatures
+         |> Enum.take(@max_signatures)
+         |> Enum.filter(&nominal_signature?/1)
+         |> Enum.sort_by(fn sig ->
+           {elem(sig.span, 1), -(elem(sig.span, 1) - elem(sig.span, 0))}
+         end)
+         |> Enum.find_value(&compose_signature(si, &1)))
     else
       _ -> nil
     end
@@ -85,6 +86,92 @@ defmodule Core.Semantic.Composition do
   end
 
   def verified(_), do: :not_applicable
+
+  defp event_signature?(%{
+         id: id, source: :core_syntax, span: {0, 6},
+         roles: %{subject_determiner: 0, subject_head: 1,
+                  auxiliary: 2, predicate: 3, preposition: 4,
+                  location_determiner: 5, location_head: 6},
+         evidence: evidence
+       }) when id in [:progressive_locative_candidate, :progressive_directional_candidate]
+                 and is_list(evidence) do
+    Enum.all?(
+      [:contiguous_surface, :attested_nominal_subject, :attested_present_participle,
+       :attested_preposition, :attested_nominal_location],
+      &(&1 in evidence)
+    ) and
+      (id != :progressive_directional_candidate or :directional_not_arrival in evidence)
+  end
+
+  defp event_signature?(_), do: false
+
+  defp event_derivation(si, signatures) do
+    case StructuralCompetition.verified(si) do
+      {:ok, %{preferred: preferred}} ->
+        Enum.find_value(signatures, fn sig ->
+          if event_signature?(sig) and preferred.construction == sig.id and
+               preferred.span == sig.span and preferred.roles == sig.roles do
+            compose_event(si, sig)
+          end
+        end)
+
+      :not_applicable ->
+        nil
+    end
+  end
+
+  defp compose_event(si, signature) do
+    r = signature.roles
+
+    with {:ok, _subject_determiner} <- witnessed_role(si, r.subject_determiner, "determiner"),
+         {:ok, actor} <- witnessed_role(si, r.subject_head, "noun"),
+         {:ok, auxiliary} <- witnessed_auxiliary(si, r.auxiliary),
+         true <- auxiliary.word == "is",
+         {:ok, predicate} <- witnessed_role(si, r.predicate, "verb"),
+         {:ok, preposition} <- witnessed_role(si, r.preposition, "preposition"),
+         {:ok, _location_determiner} <- witnessed_role(si, r.location_determiner, "determiner"),
+         {:ok, landmark} <- witnessed_role(si, r.location_head, "noun"),
+         {:ok, event} <- Event.compose(%{
+           predicate: predicate.word,
+           actor: actor.word,
+           preposition: preposition.word,
+           landmark: landmark.word
+         }),
+         true <- (signature.id == :progressive_directional_candidate) ==
+                   (event.semantics.spatial.reading == :directional) do
+      proof = %{
+        version: 2,
+        status: :derived,
+        kind: :progressive_event_property,
+        construction: signature.id,
+        span: signature.span,
+        premises: %{
+          signature: Map.take(signature, [:id, :span, :roles, :required_features, :evidence]),
+          lexical_witnesses: [actor, auxiliary, predicate, preposition, landmark],
+          semantic_vocabulary: :closed_event_v2
+        },
+        initial: event.initial,
+        steps: event.steps,
+        result: event.result,
+        result_type: event.result_type,
+        event_semantics: event.semantics,
+        epistemic_status: :conditional_on_lexical_and_structural_premises,
+        quantifier_applied?: false,
+        factual_authority?: false
+      }
+
+      if Proof.verify(proof) == :ok, do: proof
+    else
+      _ -> nil
+    end
+  end
+
+  defp witnessed_auxiliary(si, index) do
+    case witnessed_role(si, index, "verb") do
+      {:ok, _} = found -> found
+      _ -> witnessed_role(si, index, "auxiliary")
+    end
+  end
 
   defp nominal_signature?(%{
          id: :noun_phrase, source: :core_syntax, span: {first, last},
