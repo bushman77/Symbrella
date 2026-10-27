@@ -34,6 +34,8 @@ defmodule Brain.Blackboard do
     # Metadata deliberately excludes user text and session identifiers.
     [:core, :wm, :attention],
     [:brain, :pipeline, :lifg_stage1, :stop],
+    # Bounded read-only whole-sentence hypothesis adjudication.
+    [:core, :lifg, :structural_competition],
     [:brain, :pfc, :policy],
     [:brain, :pfc, :status],
 
