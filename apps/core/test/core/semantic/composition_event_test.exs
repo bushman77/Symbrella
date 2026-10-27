@@ -196,6 +196,85 @@ defmodule Core.Semantic.CompositionEventTest do
       lifg_choices: choices}
   end
 
+  test "live-style tied prepositions provide POS evidence without inventing a sense" do
+    base = %{input("cat", "sleeping", "under", "table") | intent: :statement}
+
+    noun = %{id: "under|noun|1", norm: "under", pos: "noun", semantic_atoms: []}
+    alternative = %{
+      id: "under|preposition|2", norm: "under",
+      pos: "preposition", semantic_atoms: []
+    }
+
+    probabilities = %{
+      "under|noun|1" => 0.04793,
+      "under|preposition|1" => 0.04754,
+      "under|preposition|2" => 0.04754
+    }
+
+    choices = Enum.map(base.lifg_choices, fn
+      %{token_index: 4} = choice ->
+        choice
+        |> Map.put(:id, noun.id)
+        |> Map.put(:candidate_probs, probabilities)
+
+      choice -> choice
+    end)
+
+    si = %{base |
+      active_cells: [noun, alternative | base.active_cells],
+      lifg_choices: choices
+    }
+
+    out = run(si) |> Core.Semantic.SentenceMeaning.attach()
+
+    assert out.structural_competition.status == :preferred
+    assert {:ok, proof} = Composition.verified(out)
+    assert proof.event_semantics.spatial.relation == :under
+    assert proof.event_semantics.spatial.reading == :locative
+    assert proof.event_semantics.event_existence == :not_asserted
+    assert proof.factual_authority? == false
+    assert :ok = Core.SemanticInput.validate_contract(out)
+
+    preposition = Enum.find(proof.premises.lexical_witnesses,
+      &(&1.role == :preposition))
+    assert preposition.selection_basis == :construction_pos_only
+    assert preposition.sense_id == nil
+    assert preposition.original_lifg_id == noun.id
+    assert preposition.attested_sense_ids ==
+      ["under|preposition|1", "under|preposition|2"]
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 4)).id == noun.id
+
+    assert out.sentence_meaning ==
+      Core.Semantic.SentenceMeaning.build(out)
+    assert %{operation: :explain_reported_event} =
+      Core.Response.SemanticStrategy.select(out)
+    assert {:ok, reply, reflection} =
+      Core.Response.SymbolicGeneration.generate(
+        out.sentence, %{risk_bucket: :low, intent: :statement},
+        %{action: :answer}, out
+      )
+    assert reply =~ "cat sleeping under a table"
+    assert reflection.llm_called? == false
+    assert reflection.event_occurrence_verified? == false
+
+    unscored = %{out | lifg_choices: Enum.map(out.lifg_choices, fn
+      %{token_index: 4} = choice -> Map.delete(choice, :candidate_probs)
+      choice -> choice
+    end)}
+    assert Composition.verified(unscored) == :not_applicable
+
+    unattested = %{out | active_cells: Enum.reject(out.active_cells,
+      &(&1.id in ["under|preposition|1", "under|preposition|2"]))}
+    assert Composition.verified(unattested) == :not_applicable
+
+    changed_score = %{out | lifg_choices: Enum.map(out.lifg_choices, fn
+      %{token_index: 4} = choice ->
+        put_in(choice, [:candidate_probs, "under|preposition|2"], 0.045)
+      choice -> choice
+    end)}
+    assert Composition.verified(changed_score) == :not_applicable
+  end
+
   test "attested losing verb and auxiliary form a provisional proof without changing winners" do
     si = with_live_conflicts(input())
     out = run(si)
