@@ -16,17 +16,19 @@ defmodule Core.Semantic.Composition.Expression do
   @spatial_relations MapSet.new([:on, :in, :under, :beside, :above, :below, :into])
 
   @type semantic_type :: :entity | :event | :truth | :landmark_kind |
-          {:arrow, semantic_type(), semantic_type()}
+          :actor_kind | :action_kind | {:arrow, semantic_type(), semantic_type()}
   @type t ::
           {:var, String.t()}
           | {:lambda, String.t(), semantic_type(), t()}
           | {:apply, t(), t()}
           | {:predicate, atom(), t()}
           | {:landmark_kind, atom()}
+          | {:actor_kind, atom()}
+          | {:action_kind, atom()}
           | {:and, t(), t()}
-          | {:event_action, atom(), t()}
+          | {:event_action, atom() | t(), t()}
           | {:event_aspect, :progressive, t()}
-          | {:event_actor_kind, atom(), t()}
+          | {:event_actor_kind, atom() | t(), t()}
           | {:event_spatial, atom(), atom(), t()}
 
   @spec noun(String.t()) :: {:ok, t()} | :unsupported
@@ -106,15 +108,29 @@ defmodule Core.Semantic.Composition.Expression do
     end
   end
 
+  def type_of({:action_kind, action}, _env) do
+    if MapSet.member?(@event_actions, action),
+      do: {:ok, :action_kind},
+      else: {:error, :unapproved_event_symbol}
+  end
+
+  def type_of({:actor_kind, actor}, _env) do
+    if MapSet.member?(@event_actors, actor),
+      do: {:ok, :actor_kind},
+      else: {:error, :unapproved_event_symbol}
+  end
+
   def type_of({:event_action, action, event}, env) do
-    event_predicate_type(MapSet.member?(@event_actions, action), event, env)
+    event_predicate_type(kind_valid?(action, :action_kind, @event_actions, env),
+      event, env)
   end
 
   def type_of({:event_aspect, :progressive, event}, env),
     do: event_predicate_type(true, event, env)
 
   def type_of({:event_actor_kind, kind, event}, env) do
-    event_predicate_type(MapSet.member?(@event_actors, kind), event, env)
+    event_predicate_type(kind_valid?(kind, :actor_kind, @event_actors, env),
+      event, env)
   end
 
   def type_of({:landmark_kind, kind}, _env) do
@@ -139,6 +155,12 @@ defmodule Core.Semantic.Composition.Expression do
 
   def type_of(_, _), do: {:error, :invalid_expression}
 
+  defp kind_valid?(symbol, _type, allowed, _env) when is_atom(symbol),
+    do: MapSet.member?(allowed, symbol)
+
+  defp kind_valid?(term, type, _allowed, env),
+    do: type_of(term, env) == {:ok, type}
+
   defp event_predicate_type(false, _event, _env), do: {:error, :unapproved_event_symbol}
 
   defp event_predicate_type(true, event, env) do
@@ -152,6 +174,8 @@ defmodule Core.Semantic.Composition.Expression do
   def valid_type?(:event), do: true
   def valid_type?(:truth), do: true
   def valid_type?(:landmark_kind), do: true
+  def valid_type?(:actor_kind), do: true
+  def valid_type?(:action_kind), do: true
   def valid_type?({:arrow, left, right}), do: valid_type?(left) and valid_type?(right)
   def valid_type?(_), do: false
 end
