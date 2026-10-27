@@ -9,6 +9,7 @@ defmodule Core.Response.EpisodicMemory do
 
   alias Core.Semantic.EpisodicEvents
   alias Core.Semantic.{ActionQuestions, ParticipantQuestions}
+  alias Core.Response.LlmChatHistory
 
   @compile {:no_warn_undefined, Brain.Hippocampus}
   @type result :: {String.t(), map()} | nil
@@ -100,10 +101,13 @@ defmodule Core.Response.EpisodicMemory do
   end
 
   @spec reply(String.t()) :: result()
-  def reply(text) when is_binary(text) do
+  def reply(text) when is_binary(text), do: reply(text, nil)
+
+  @spec reply(String.t(), term()) :: result()
+  def reply(text, session_id) when is_binary(text) do
     with owner when is_binary(owner) <- memory_owner(),
          true <- hippocampus_available?() do
-      participant_reply(owner, text) || action_reply(owner, text) ||
+      participant_reply(owner, text, session_id) || action_reply(owner, text) ||
         case EpisodicEvents.question(text) do
         {:relation, key, relation} when key != "" ->
           case Brain.Hippocampus.user_event(owner, key, relation) do
@@ -127,12 +131,17 @@ defmodule Core.Response.EpisodicMemory do
   end
 
   def reply(_), do: nil
+  def reply(_, _), do: nil
 
   # Current asserted typed events answer by requested participant role.
   # A failed lookup or ambiguous reverse match falls back without inventing
   # a relation from chat-history wording.
-  defp participant_reply(owner, text) do
-    case ParticipantQuestions.parse(text) do
+  defp participant_reply(owner, text, session_id) do
+    question =
+      ParticipantQuestions.parse(text) ||
+        pronoun_spatial_question(text, recent_location_entity(session_id))
+
+    case question do
       {:forward, key, role, constraints} when key != "" ->
         event = Brain.Hippocampus.user_event(owner, key, "spatial_state")
         case ParticipantQuestions.answer(event, role, constraints) do
@@ -151,6 +160,44 @@ defmodule Core.Response.EpisodicMemory do
         nil
     end
   end
+
+  # Resolve only an immediately preceding, explicit user location question.
+  # The assistant's answer is never used as evidence for the antecedent.
+  defp recent_location_entity(session_id) when not is_nil(session_id) do
+    case LlmChatHistory.messages(session_id, 1) do
+      [%{"role" => "user", "content" => previous}, %{"role" => "assistant"}]
+      when is_binary(previous) ->
+        case Regex.run(
+               ~r/^\s*where\s+is\s+(?:(?:the|a|an|my)\s+)?([\p{L}]+(?:\s+[\p{L}]+){0,2})\s*\?\s*$/iu,
+               previous
+             ) do
+          [_, entity] ->
+            key = EpisodicEvents.entity_key(entity)
+            if key in ["it", "this", "that", "they", "he", "she"], do: nil, else: key
+
+          _ -> nil
+        end
+
+      _ -> nil
+    end
+  end
+
+  defp recent_location_entity(_), do: nil
+
+  defp pronoun_spatial_question(text, entity) when is_binary(entity) do
+    case Regex.named_captures(
+           ~r/^\s*what\s+is\s+it\s+(?<predicate>[\p{L}]+)\s+(?<position>on|in|under|beside|above|below)\s*\?\s*$/iu,
+           text
+         ) do
+      %{"predicate" => predicate, "position" => position} ->
+        {:forward, EpisodicEvents.entity_key(entity), :location,
+         %{predicate: String.downcase(predicate), position: String.downcase(position)}}
+
+      _ -> nil
+    end
+  end
+
+  defp pronoun_spatial_question(_, _), do: nil
 
   # Finite-present action questions use the same persisted participant slots
   # as spatial questions. An exact actor + canonical action retrieves the
