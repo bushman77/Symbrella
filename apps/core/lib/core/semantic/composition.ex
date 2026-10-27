@@ -78,7 +78,14 @@ defmodule Core.Semantic.Composition do
   def verified(%{} = si) do
     saved = Map.get(si, :compositional_derivation)
 
-    if is_map(saved) and saved == derive(si) and Proof.verify(saved) == :ok do
+    checked? =
+      case saved do
+        %{kind: :progressive_event_property} -> Event.verify(saved) == :ok
+        %{kind: :nominal_property} -> Proof.verify(saved) == :ok
+        _ -> false
+      end
+
+    if checked? and saved == derive(si) do
       {:ok, saved}
     else
       :not_applicable
@@ -160,7 +167,7 @@ defmodule Core.Semantic.Composition do
         factual_authority?: false
       }
 
-      if Proof.verify(proof) == :ok, do: proof
+      if Event.verify(proof) == :ok, do: proof
     else
       _ -> nil
     end
