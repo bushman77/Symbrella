@@ -186,6 +186,9 @@ defmodule Core do
     # This is observational: no lexical winners or memory contents are altered.
     |> Core.Syntax.StructuralCompetition.attach()
     |> StateDump.capture(:structural_competition)
+    # Pure typed semantic composition with replayable non-factual proof records.
+    |> Core.Semantic.Composition.attach()
+    |> StateDump.capture(:semantic_composition)
     # Read-only episodic projection provides independently revalidated
     # participant roles before SentenceMeaning composes the proposition.
     # No database write or response is performed by either of these stages.
