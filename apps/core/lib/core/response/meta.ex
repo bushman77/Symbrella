@@ -99,7 +99,8 @@ defmodule Core.Response.Meta do
        :interpreted_speech_act, :speaker, :vocative, :event_kind,
        :source_frame, :evidence_level, :event_occurrence_verified?,
        :exact_verb_sense_verified?, :response_is_memory_acknowledgment?,
-       :factual_claims?]))
+       :factual_claims?, :compositional_proof_verified?, :construction,
+       :proof_steps, :strategy_operation]))
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary
