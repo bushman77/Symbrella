@@ -88,11 +88,11 @@ defmodule Brain.LIFG.StructuralCompetition do
   defp base_indices(_), do: []
 
   defp complete_clause?(
-         %{id: id, source: :core_syntax, span: {0, last},
+         %{id: id, source: :core_syntax, span: {0, span_last},
            roles: roles, evidence: evidence}, last
        )
        when is_atom(id) and is_map(roles) and is_list(evidence) do
-    not MapSet.member?(@constituent_ids, id) and
+    span_last == last and not MapSet.member?(@constituent_ids, id) and
       evidence != [] and map_size(roles) >= 2 and
       Enum.all?(Map.values(roles), &(is_integer(&1) and &1 >= 0 and &1 <= last)) and
       Enum.any?([:predicate, :verb], &Map.has_key?(roles, &1)) and
