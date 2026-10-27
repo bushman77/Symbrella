@@ -305,6 +305,18 @@ defmodule Core.Semantic.Composition do
     end
   end
 
+  defp compose_signature(si, signature) do
+    %{modifier: modifier, head: head} = signature.roles
+
+    with {:ok, adjective} <- witnessed_role(si, modifier, "adjective"),
+         {:ok, noun} <- witnessed_role(si, head, "noun"),
+         {:ok, derivation} <- Nominal.compose(noun.word, [adjective.word]) do
+      nominal_proof(derivation, signature, [adjective, noun], :adjective_noun)
+    else
+      _ -> nil
+    end
+  end
+
   defp witnessed_nominal_determiner(si, %{roles: roles}) do
     case Map.fetch(roles, :determiner) do
       {:ok, index} -> witnessed_role(si, index, "determiner")
@@ -338,40 +350,6 @@ defmodule Core.Semantic.Composition do
     }
 
     if Proof.verify(proof) == :ok, do: proof, else: nil
-  end
-
-  defp compose_signature(si, signature) do
-    %{modifier: modifier, head: head} = signature.roles
-
-    with {:ok, adjective} <- witnessed_role(si, modifier, "adjective"),
-         {:ok, noun} <- witnessed_role(si, head, "noun"),
-         {:ok, %{initial: initial, result: result, steps: steps,
-                 result_type: {:arrow, :entity, :truth}}} <-
-           Nominal.compose(noun.word, [adjective.word]) do
-      proof = %{
-        version: 1,
-        status: :derived,
-        kind: :nominal_property,
-        construction: :adjective_noun,
-        span: signature.span,
-        premises: %{
-          signature: Map.take(signature, [:id, :span, :roles, :required_features, :evidence]),
-          lexical_witnesses: [adjective, noun],
-          semantic_vocabulary: :closed_nominal_v1
-        },
-        initial: initial,
-        steps: steps,
-        result: result,
-        result_type: {:arrow, :entity, :truth},
-        epistemic_status: :conditional_on_lexical_and_structural_premises,
-        quantifier_applied?: false,
-        factual_authority?: false
-      }
-
-      if Proof.verify(proof) == :ok, do: proof, else: nil
-    else
-      _ -> nil
-    end
   end
 
   defp witnessed_role(si, index, pos) do
