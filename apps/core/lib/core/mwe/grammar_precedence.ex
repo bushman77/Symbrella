@@ -55,13 +55,13 @@ defmodule Core.MWE.GrammarPrecedence do
         # compositional question ("What is it used for?" / "What is it
         # sitting on?"). Promoting the shorter dictionary phrase would
         # swallow the interrogative subject and leave the predicate detached.
-        Regex.match?(~r/^\\s*what\\s+is\\s+it\\s+\\p{L}+(?:\\s|\\?|$)/iu, sentence)
+        Regex.match?(~r/^\s*what\s+is\s+it\s+\p{L}+(?:\s|\?|$)/iu, sentence)
 
       phrase == "is it" and "interjection" in poses ->
-        Regex.match?(~r/^\\s*is\\s+it\\s+.+\\?/iu, sentence)
+        Regex.match?(~r/^\s*is\s+it\s+.+\?/iu, sentence)
 
       phrase == "close to" and "adverb" in poses ->
-        Regex.match?(~r/^\\s*(?:is|was)\\s+it\\s+close\\s+to\\s+.+\\?/iu, sentence)
+        Regex.match?(~r/^\s*(?:is|was)\s+it\s+close\s+to\s+.+\?/iu, sentence)
 
       true ->
         false
