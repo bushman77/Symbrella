@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 6 adds read-only LIFG whole-sentence structural competition.
-  @contract_v 6
+  # Version 7 adds read-only typed compositional derivation evidence.
+  @contract_v 7
 
   @list_fields MapSet.new([
                  :tokens,
@@ -72,6 +72,7 @@ defmodule Core.SemanticInput do
                 :sentence_competition,
                 :role_competition,
                 :structural_competition,
+                :compositional_derivation,
                 :semantic_request_frame,
                 :sentence_meaning,
                 :provisional_interpretation,
@@ -210,6 +211,7 @@ defmodule Core.SemanticInput do
           sentence_competition: map() | nil,
           role_competition: map() | nil,
           structural_competition: map() | nil,
+          compositional_derivation: map() | nil,
           construction_candidates: [map()],
           semantic_request_frame: map() | nil,
           sentence_meaning: map() | nil,
@@ -303,6 +305,7 @@ defmodule Core.SemanticInput do
             sentence_competition: nil,
             role_competition: nil,
             structural_competition: nil,
+            compositional_derivation: nil,
             construction_candidates: [],
             semantic_request_frame: nil,
             sentence_meaning: nil,
