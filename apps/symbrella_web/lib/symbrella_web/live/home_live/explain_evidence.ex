@@ -30,6 +30,8 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
 
     result = %{
       runtime: runtime(si),
+      provisional_interpretation: get(si, :provisional_interpretation),
+      discourse_reference: get(si, :discourse_reference),
       verified_phrasal_meanings: verified_meanings(si),
       semantic_winners:
         rows(si, :semantic_choices,
@@ -199,6 +201,7 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
 
   defp empty?(result) do
     result.runtime == %{} and result.verified_phrasal_meanings == [] and
+      is_nil(result.provisional_interpretation) and is_nil(result.discourse_reference) and
       result.semantic_winners == [] and result.lexical_winners == [] and
       result.comprehension == nil and result.semantic_sense_shadow == nil and
       result.semantic_cohort == nil and
