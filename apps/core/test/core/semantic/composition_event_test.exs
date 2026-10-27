@@ -107,6 +107,59 @@ defmodule Core.Semantic.CompositionEventTest do
                       preposition: "into", landmark: "tree"})
   end
 
+  test "abstention identifies conflicting POS winners without overriding LIFG" do
+    si = input()
+    conflicting =
+      %{si | lifg_choices:
+        Enum.map(si.lifg_choices, fn
+          %{token_index: 3} = choice -> %{choice | id: "flying|adjective|1"}
+          %{token_index: 6} = choice -> %{choice | id: "tree|proper_noun|1"}
+          choice -> choice
+        end)}
+
+    out = run(conflicting)
+
+    assert out.structural_competition.status == :preferred
+    assert out.compositional_derivation == nil
+
+    assert %{reason: :lexical_role_blocked, meta: %{blockers: blockers}} =
+      Enum.find(out.trace, &(&1.stage == :semantic_composition))
+
+    assert Enum.any?(blockers, fn blocker ->
+      blocker.role == :predicate and blocker.token_index == 3 and
+        blocker.selected_pos == "adjective" and blocker.expected_pos == ["verb"] and
+        blocker.reason == :selected_pos_conflict and
+        blocker.compatible_dictionary_pos?
+    end)
+
+    assert Enum.any?(blockers, fn blocker ->
+      blocker.role == :location_head and blocker.token_index == 6 and
+        blocker.selected_pos == "proper_noun" and blocker.expected_pos == ["noun"] and
+        blocker.reason == :selected_pos_conflict and
+        blocker.compatible_dictionary_pos?
+    end)
+
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 3)).id ==
+      "flying|adjective|1"
+    assert Composition.verified(out) == :not_applicable
+  end
+
+  test "abstention distinguishes an unattested selected auxiliary" do
+    si = input()
+    rows = Enum.reject(si.active_cells, &(&1.norm == "is"))
+    out = run(%{si | active_cells: rows})
+
+    assert out.compositional_derivation == nil
+    assert %{meta: %{blockers: blockers}} =
+      Enum.find(out.trace, &(&1.stage == :semantic_composition))
+
+    assert Enum.any?(blockers, fn blocker ->
+      blocker.role == :auxiliary and blocker.token_index == 2 and
+        blocker.reason == :selected_sense_not_attested and
+        not blocker.compatible_dictionary_pos?
+    end)
+  end
+
   test "unknown directional construction abstains rather than guessing" do
     si = run(input("bird", "flying", "towards", "tree"))
     assert si.compositional_derivation == nil
