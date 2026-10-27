@@ -76,7 +76,8 @@ defmodule Core.Semantic.SentenceMeaning do
 
     definition_request(si) ||
       question || object_question(si, sentence, frames, constituents, tokens) ||
-      participant_meaning(si, sentence) || %{
+      participant_meaning(si, sentence) ||
+      provisional_structure(si, sentence) || %{
       version: 1,
       sentence: sentence,
       definition: nil,
@@ -90,6 +91,41 @@ defmodule Core.Semantic.SentenceMeaning do
     version: 1, sentence: nil, definition: nil, kind: :unknown,
     status: :not_yet_interpreted, source: :invalid_input
   }
+
+
+  # A preferred grammatical construction is meaningful *evidence* but not
+  # authorization to assert an event. Keep its roles and alternatives visible
+  # to the semantic layer until independent participants/senses are verified.
+  defp provisional_structure(si, sentence) do
+    case Core.Syntax.StructuralCompetition.verified(si) do
+      {:ok, %{preferred: preferred, candidates: candidates}} ->
+        %{
+          version: 1,
+          sentence: sentence,
+          definition: nil,
+          kind: :structural_hypothesis,
+          status: :provisional,
+          source: :lifg_structural_competition,
+          source_frame: preferred.construction,
+          roles: preferred.roles,
+          alternatives: Enum.map(candidates, fn candidate ->
+            %{construction: candidate.construction,
+              compatibility: candidate.compatibility,
+              conflicting_roles: candidate.conflicting_roles}
+          end),
+          unresolved: [:semantic_role_binding, :event_grounding,
+                       :exact_dictionary_senses],
+          grounding: %{
+            grammatical_roles: :preferred_signature_hypothesis,
+            external_facts: :not_checked,
+            factual_authority?: false
+          }
+        }
+
+      :not_applicable ->
+        nil
+    end
+  end
 
   defp definition_request(si) do
     case Core.Semantic.FrameUnifier.verified(si, Map.get(si, :sentence)) do
