@@ -22,6 +22,35 @@ defmodule Core.Semantic.Composition.Lexical do
   @spatial_modifier_type {:arrow, :landmark_kind,
     {:arrow, @event_property, @event_property}}
 
+  @nominal_property {:arrow, :entity, :truth}
+  @nominal_modifier {:arrow, @nominal_property, @nominal_property}
+
+  @doc "Attested nominal surface mapped to a closed entity property (not a referent)."
+  @spec nominal_property(String.t()) :: {:ok, map()} | :unsupported
+  def nominal_property(surface) when is_binary(surface) do
+    with {:ok, term} <- Expression.noun(surface),
+         {:ok, @nominal_property} <- Expression.type_of(term) do
+      {:ok, %{surface: surface, term: term, type: @nominal_property}}
+    else
+      _ -> :unsupported
+    end
+  end
+
+  def nominal_property(_), do: :unsupported
+
+  @doc "An adjective acts on any compatible nominal property, not a whole phrase."
+  @spec nominal_modifier(String.t()) :: {:ok, map()} | :unsupported
+  def nominal_modifier(surface) when is_binary(surface) do
+    with {:ok, term} <- Expression.adjective(surface),
+         {:ok, @nominal_modifier} <- Expression.type_of(term) do
+      {:ok, %{surface: surface, term: term, type: @nominal_modifier}}
+    else
+      _ -> :unsupported
+    end
+  end
+
+  def nominal_modifier(_), do: :unsupported
+
   @doc "Closed lexical event-action meaning, without asserting an occurrence."
   @spec action(String.t()) :: {:ok, map()} | :unsupported
   def action(surface) when is_binary(surface) do
