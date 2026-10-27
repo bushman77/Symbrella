@@ -795,11 +795,13 @@ defmodule Core.Syntax.Signatures do
            aux.word == "is" and
            form?(predicate, :present_participle) and pos?(predicate, "verb") and
            pos?(prep, "preposition") and
-           prep.word in ~w(on in under beside above below) and
+           prep.word in ~w(on in under beside above below into) and
            pos?(loc_det, "determiner") and pos?(location, "noun") and
            valid_surface?(segment) do
         [signature(
-          :progressive_locative_candidate,
+          if(prep.word == "into",
+            do: :progressive_directional_candidate,
+            else: :progressive_locative_candidate),
           {subject_det.index, location.index},
           %{subject_determiner: subject_det.index, subject_head: subject.index,
             auxiliary: aux.index, predicate: predicate.index,
@@ -809,7 +811,8 @@ defmodule Core.Syntax.Signatures do
             preposition: [:pos_preposition], location_head: [:pos_noun]},
           [:contiguous_surface, :attested_nominal_subject,
            :attested_present_participle, :attested_preposition,
-           :attested_nominal_location]
+           :attested_nominal_location] ++
+            if(prep.word == "into", do: [:directional_not_arrival], else: [])
         )]
       else
         []
