@@ -26,7 +26,8 @@ defmodule Core.Semantic.Composition.Proof do
 
   defp replay(term, []), do: {:ok, term}
 
-  defp replay(term, [%{rule: :beta, before: term, after: next} | rest]) do
+  defp replay(term, [%{rule: :beta, before: recorded, after: next} | rest])
+       when recorded == term do
     case Reducer.step(term) do
       {:ok, ^next} -> replay(next, rest)
       _ -> {:error, :invalid_step}
