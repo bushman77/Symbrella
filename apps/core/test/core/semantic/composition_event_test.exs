@@ -180,6 +180,22 @@ defmodule Core.Semantic.CompositionEventTest do
     assert Composition.verified(injected) == :not_applicable
   end
 
+  test "conflicting summaries cannot override the verified normal form" do
+    assert {:ok, derivation} =
+      Event.compose(%{
+        predicate: "flying", actor: "bird",
+        preposition: "into", landmark: "tree"
+      })
+
+    both = Map.put(derivation, :event_semantics, derivation.semantics)
+    assert :ok = Event.verify(both)
+
+    mismatched =
+      put_in(both, [:event_semantics, :spatial, :arrival], :confirmed)
+
+    assert Event.verify(mismatched) == {:error, :invalid_event_semantics}
+  end
+
   test "normal form with extra unchecked event claims cannot be summarized" do
     assert {:ok, derivation} =
       Event.compose(%{
