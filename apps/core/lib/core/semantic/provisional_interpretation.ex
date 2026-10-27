@@ -112,10 +112,10 @@ defmodule Core.Semantic.ProvisionalInterpretation do
     words =
       sentence
       |> String.trim()
-      |> String.replace(~r/[?!.]+\\z/u, "")
+      |> String.replace(~r/[?!.]+\z/u, "")
       |> String.trim()
       |> String.downcase()
-      |> String.split(~r/\\s+/u, trim: true)
+      |> String.split(~r/\s+/u, trim: true)
 
     if length(words) == 5 and Enum.all?(words, &Regex.match?(@lexeme, &1)),
       do: words,
