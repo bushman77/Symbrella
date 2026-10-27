@@ -46,6 +46,96 @@ defmodule Core.Semantic.Composition.RoleWitness do
 
   def resolve(_, _, _, _), do: :unsupported
 
+  @doc """
+  Read-only audit for current-turn event-role evidence. This does not relax
+  resolve/4 or reveal sentence contents in the Blackboard.
+  """
+  def audit(si, role, index, expected_pos) do
+    case resolve(si, role, index, expected_pos) do
+      {:ok, witness} ->
+        %{role: role, token_index: index, status: :admitted,
+          reason: :witness_verified, selection_basis: witness.selection_basis}
+
+      :unsupported ->
+        audit_rejection(si, role, index, expected_pos)
+    end
+  end
+
+  defp audit_rejection(si, role, index, expected_pos) do
+    choices =
+      si |> Map.get(:lifg_choices, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :token_index) == index))
+    tokens =
+      si |> Map.get(:tokens, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :index) == index and
+        Map.get(&1, :n, 1) == 1))
+
+    detail =
+      with [choice] <- choices,
+           [token] <- tokens,
+           phrase when is_binary(phrase) <- Map.get(token, :phrase),
+           word <- normalize(phrase),
+           scores when is_map(scores) <- Map.get(choice, :scores),
+           true <- map_size(scores) <= @max_scores do
+        matching =
+          Enum.flat_map(scores, fn
+            {id, score} when is_binary(id) and is_number(score) and score >= 0 ->
+              case String.split(id, "|", parts: 3) do
+                [^word, pos, _] ->
+                  if pos in expected_pos, do: [{id, pos, score}], else: []
+                _ -> []
+              end
+            _ -> []
+          end)
+
+        exact = Enum.filter(matching, fn {id, pos, _} ->
+          Enum.any?(List.wrap(Map.get(si, :active_cells)), fn
+            %{} = cell ->
+              Map.get(cell, :id) == id and Map.get(cell, :pos) == pos and
+                normalize(Map.get(cell, :norm)) == word
+            _ -> false
+          end)
+        end)
+
+        qualified = Enum.filter(exact, fn {id, _, _} ->
+          attested?(si, word, id, expected_pos, role)
+        end)
+
+        sorted = qualified |> Enum.map(&elem(&1, 2)) |> Enum.sort(:desc)
+        reason =
+          cond do
+            matching == [] -> :no_scored_role_alternative
+            exact == [] -> :scored_dictionary_witness_missing
+            qualified == [] -> :scored_role_morphology_missing
+            length(sorted) > 1 and hd(sorted) == Enum.at(sorted, 1) ->
+              :tied_attested_alternatives
+            true -> :role_witness_unavailable
+          end
+
+        %{
+          reason: reason,
+          scored_role_candidates: length(matching),
+          exact_dictionary_witnesses: length(exact),
+          morphology_qualified_witnesses: length(qualified),
+          any_dictionary_role_morphology?: Enum.any?(
+            List.wrap(Map.get(si, :active_cells)),
+            fn
+              %{} = cell ->
+                normalize(Map.get(cell, :norm)) == word and
+                  Map.get(cell, :pos) in expected_pos and
+                  morphology_compatible?(cell, role, Map.get(cell, :pos))
+              _ -> false
+            end
+          )
+        }
+      else
+        [] -> %{reason: :missing_role_evidence}
+        _ -> %{reason: :missing_or_invalid_score_evidence}
+      end
+
+    Map.merge(%{role: role, token_index: index, status: :rejected}, detail)
+  end
+
   defp alternative(si, role, index, word, selected_id, expected_pos, choice) do
     scores = Map.get(choice, :scores)
 
