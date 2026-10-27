@@ -24,11 +24,15 @@ defmodule Core.Semantic.ProvisionalInterpretation do
 
   @spec detect(map()) :: map() | nil
   def detect(%{} = si) do
-    if established?(Map.get(si, :sentence_meaning)) do
-      nil
-    else
-      case spatial_gap_question(si) do
-        nil ->
+    # A broader sentence composer may produce a structural reading for a
+    # wh-gap question before we can bind its omitted spatial participant.
+    # Keep the sentence-signature hypothesis available in that case: it is
+    # explicitly provisional and still requires a grounded event lookup.
+    case spatial_gap_question(si) do
+      nil ->
+        if established?(Map.get(si, :sentence_meaning)) do
+          nil
+        else
           case original_words(si) do
             {:ok, ["where", "is", article, noun]}
             when article in ["the", "a", "an"] ->
@@ -48,10 +52,10 @@ defmodule Core.Semantic.ProvisionalInterpretation do
 
             _ -> nil
           end
+        end
 
-        hypothesis ->
-          hypothesis
-      end
+      hypothesis ->
+        hypothesis
     end
   end
   def detect(_), do: nil
