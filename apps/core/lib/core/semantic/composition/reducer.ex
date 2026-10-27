@@ -84,7 +84,30 @@ defmodule Core.Semantic.Composition.Reducer do
     end
   end
 
+  def step({:event_action, action, event}) do
+    step_event(event, &{:event_action, action, &1})
+  end
+
+  def step({:event_aspect, aspect, event}) do
+    step_event(event, &{:event_aspect, aspect, &1})
+  end
+
+  def step({:event_actor_kind, kind, event}) do
+    step_event(event, &{:event_actor_kind, kind, &1})
+  end
+
+  def step({:event_spatial, relation, landmark, event}) do
+    step_event(event, &{:event_spatial, relation, landmark, &1})
+  end
+
   def step(_), do: :normal
+
+  defp step_event(term, rebuild) do
+    case step(term) do
+      {:ok, next} -> {:ok, rebuild.(next)}
+      :normal -> :normal
+    end
+  end
 
   @doc "Capture-avoiding substitution of a free variable."
   def substitute({:var, name}, variable, replacement)
@@ -121,6 +144,22 @@ defmodule Core.Semantic.Composition.Reducer do
     {:predicate, symbol, substitute(argument, variable, replacement)}
   end
 
+  def substitute({:event_action, action, event}, variable, replacement) do
+    {:event_action, action, substitute(event, variable, replacement)}
+  end
+
+  def substitute({:event_aspect, aspect, event}, variable, replacement) do
+    {:event_aspect, aspect, substitute(event, variable, replacement)}
+  end
+
+  def substitute({:event_actor_kind, kind, event}, variable, replacement) do
+    {:event_actor_kind, kind, substitute(event, variable, replacement)}
+  end
+
+  def substitute({:event_spatial, relation, landmark, event}, variable, replacement) do
+    {:event_spatial, relation, landmark, substitute(event, variable, replacement)}
+  end
+
   def substitute(other, _variable, _replacement), do: other
 
   defp free_variables({:var, name}), do: MapSet.new([name])
@@ -135,6 +174,10 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(free_variables(left), free_variables(right))
 
   defp free_variables({:predicate, _, argument}), do: free_variables(argument)
+  defp free_variables({:event_action, _, event}), do: free_variables(event)
+  defp free_variables({:event_aspect, _, event}), do: free_variables(event)
+  defp free_variables({:event_actor_kind, _, event}), do: free_variables(event)
+  defp free_variables({:event_spatial, _, _, event}), do: free_variables(event)
   defp free_variables(_), do: MapSet.new()
 
   defp all_variables({:var, name}), do: MapSet.new([name])
@@ -149,6 +192,10 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(all_variables(left), all_variables(right))
 
   defp all_variables({:predicate, _, argument}), do: all_variables(argument)
+  defp all_variables({:event_action, _, event}), do: all_variables(event)
+  defp all_variables({:event_aspect, _, event}), do: all_variables(event)
+  defp all_variables({:event_actor_kind, _, event}), do: all_variables(event)
+  defp all_variables({:event_spatial, _, _, event}), do: all_variables(event)
   defp all_variables(_), do: MapSet.new()
 
   defp fresh_name(base, forbidden) do
@@ -163,5 +210,9 @@ defmodule Core.Semantic.Composition.Reducer do
   defp size({:apply, left, right}), do: 1 + size(left) + size(right)
   defp size({:and, left, right}), do: 1 + size(left) + size(right)
   defp size({:predicate, _, arg}), do: 1 + size(arg)
+  defp size({:event_action, _, event}), do: 1 + size(event)
+  defp size({:event_aspect, _, event}), do: 1 + size(event)
+  defp size({:event_actor_kind, _, event}), do: 1 + size(event)
+  defp size({:event_spatial, _, _, event}), do: 1 + size(event)
   defp size(_), do: @max_nodes + 1
 end
