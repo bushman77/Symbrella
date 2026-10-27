@@ -90,8 +90,9 @@ defmodule Core.Semantic.Composition.Reducer do
   def substitute({:var, name}, name, replacement), do: replacement
   def substitute({:var, _} = variable, _, _), do: variable
 
-  def substitute({:lambda, name, type, body} = lambda, name, _replacement),
-    do: lambda
+  def substitute({:lambda, binder, _type, _body} = lambda, variable, _replacement)
+      when binder == variable,
+      do: lambda
 
   def substitute({:lambda, name, type, body}, variable, replacement) do
     if MapSet.member?(free_variables(replacement), name) do
