@@ -28,7 +28,9 @@ defmodule Core.Response.Memory do
       extracted_name: extract_user_name(text_in),
       remember_fact: extract_remember_fact(text_in),
       direct_fact: extract_direct_fact(text_in),
-      fact_query_key: extract_fact_query_key(text_in)
+      fact_query_key: extract_fact_query_key(text_in),
+      semantic_context: Map.take(si, [:sentence, :tokens, :sentence_signatures,
+        :sentence_meaning, :provisional_interpretation, :discourse_reference])
     })
   end
 
@@ -140,11 +142,12 @@ defmodule Core.Response.Memory do
         extracted_name: extracted_name,
         remember_fact: remember_fact,
         direct_fact: direct_fact,
-        fact_query_key: fact_query_key
+        fact_query_key: fact_query_key,
+        semantic_context: semantic_context
       }) do
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
-    episodic_reply = EpisodicMemory.reply(text_in, session_id)
+    episodic_reply = EpisodicMemory.reply(text_in, session_id, semantic_context)
     lexical_reply = UserLexicalMemory.reply(text_in)
 
     cond do
