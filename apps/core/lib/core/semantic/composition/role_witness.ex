@@ -172,6 +172,9 @@ defmodule Core.Semantic.Composition.RoleWitness do
             pos: "preposition",
             sense_id: nil,
             attested_sense_ids: Enum.map(candidates, &elem(&1, 0)),
+            # Record all attested scores, not just the maximum. Replay
+            # verification must notice any changed lexical-score premise.
+            attested_candidate_scores: candidates,
             role: role,
             selection_basis: :construction_pos_only,
             original_lifg_id: selected_id,
