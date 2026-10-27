@@ -181,8 +181,11 @@ defmodule Brain.LIFG.StructuralCompetition do
 
     enough_margin? = is_nil(margin) or margin >= @min_margin
 
-    if first.matched_roles > 0 and first.compatibility >= @min_preference and
-         enough_margin? do
+    # Require multiple independent lexical-role confirmations, and avoid
+    # preferring a reading contradicted by more roles than support it.
+    if first.matched_roles >= 2 and
+         first.matched_roles >= first.conflicting_roles and
+         first.compatibility >= @min_preference and enough_margin? do
       {:preferred, first, margin}
     else
       {:unresolved, nil, margin}
