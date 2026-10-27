@@ -60,6 +60,30 @@ defmodule Core.Syntax.StructuralCompetition do
 
   def attach(other), do: other
 
+  @doc """
+  Return only an unchanged, independently revalidated structural outcome.
+  An injected signature, altered LIFG selection or altered result fails closed.
+  """
+  @spec verified(map()) :: {:ok, map()} | :not_applicable
+  def verified(%{} = si) do
+    attached = Map.get(si, :structural_competition)
+    signatures = Map.get(si, :sentence_signatures)
+
+    if is_map(attached) and is_list(signatures) and
+         Enum.all?(signatures, &(&1 in Core.Syntax.Signatures.detect(si))) do
+      expected = Brain.LIFG.StructuralCompetition.resolve(si)
+
+      if attached == expected and expected.status == :preferred and
+           is_map(expected.preferred),
+        do: {:ok, expected},
+        else: :not_applicable
+    else
+      :not_applicable
+    end
+  end
+
+  def verified(_), do: :not_applicable
+
   defp preferred_summary(nil), do: nil
   defp preferred_summary(candidate), do: candidate_summary(candidate)
 
