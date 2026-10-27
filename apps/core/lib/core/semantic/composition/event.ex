@@ -7,15 +7,10 @@ defmodule Core.Semantic.Composition.Event do
   resolved individuals. Direction :into never licenses an arrival predicate.
   """
 
-  alias Core.Semantic.Composition.{Expression, Proof, Reducer}
+  alias Core.Semantic.Composition.{Expression, Lexical, Proof, Reducer}
 
   @actions %{"sitting" => :sit, "sleeping" => :sleep, "flying" => :fly}
   @actors %{"bird" => :bird, "cat" => :cat, "dog" => :dog}
-  @landmarks %{"fence" => :fence, "tree" => :tree, "table" => :table}
-  @relations %{
-    "on" => :on, "in" => :in, "under" => :under, "beside" => :beside,
-    "above" => :above, "below" => :below, "into" => :into
-  }
   @static_relations MapSet.new([:on, :in, :under, :beside, :above, :below])
 
   @spec compose(map()) :: {:ok, map()} | :unsupported
@@ -23,12 +18,15 @@ defmodule Core.Semantic.Composition.Event do
                 landmark: landmark}) do
     with {:ok, action} <- Map.fetch(@actions, predicate),
          {:ok, actor_kind} <- Map.fetch(@actors, actor),
-         {:ok, landmark_kind} <- Map.fetch(@landmarks, landmark),
-         {:ok, relation} <- Map.fetch(@relations, prep),
+         {:ok, %{term: relation_term, symbol: relation}} <-
+           Lexical.spatial_modifier(prep),
+         {:ok, %{term: landmark_term}} <- Lexical.landmark(landmark),
          true <- licensed?(action, relation) do
+      # Compose the spatial phrase incrementally: the preposition is a
+      # function of a landmark before it modifies an event property.
       initial =
         {:apply,
-         spatial_modifier(relation, landmark_kind),
+         {:apply, relation_term, landmark_term},
          {:apply, actor_modifier(actor_kind), progressive_action(action)}}
 
       with {:ok, {:arrow, :event, :truth}} <- Expression.type_of(initial),
@@ -74,14 +72,21 @@ defmodule Core.Semantic.Composition.Event do
             {:event_action, action, {:var, action_event}},
             {:event_aspect, :progressive, {:var, aspect_event}}},
            {:event_actor_kind, actor_kind, {:var, actor_event}}},
-          {:event_spatial, relation, landmark_kind, {:var, spatial_event}}}}
+          {:event_spatial, relation, landmark_term, {:var, spatial_event}}}}
       )
       when is_binary(event_var) and event_var == action_event and
              event_var == aspect_event and event_var == actor_event and
              event_var == spatial_event do
+    landmark_kind =
+      case landmark_term do
+        {:landmark_kind, kind} -> kind
+        kind when is_atom(kind) -> kind
+        _ -> nil
+      end
+
     if action in Map.values(@actions) and actor_kind in Map.values(@actors) and
-         landmark_kind in Map.values(@landmarks) and
-         relation in Map.values(@relations) and licensed?(action, relation) do
+         Lexical.known_landmark?(landmark_kind) and
+         Lexical.known_relation?(relation) and licensed?(action, relation) do
       {:ok,
        %{
          aspect: :progressive,
@@ -154,10 +159,4 @@ defmodule Core.Semantic.Composition.Event do
        {:event_actor_kind, kind, {:var, "e"}}}}}
   end
 
-  defp spatial_modifier(relation, landmark) do
-    {:lambda, "P", {:arrow, :event, :truth},
-     {:lambda, "e", :event,
-      {:and, {:apply, {:var, "P"}, {:var, "e"}},
-       {:event_spatial, relation, landmark, {:var, "e"}}}}}
-  end
 end
