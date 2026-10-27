@@ -12,14 +12,16 @@ defmodule Core.Semantic.Composition do
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @max_signatures 64
+  @telemetry_event [:core, :semantic, :composition]
 
   @spec attach(map()) :: map()
   def attach(%{} = si) do
     proof = derive(si)
 
-    si
-    |> Map.put(:compositional_derivation, proof)
-    |> Trace.append(:semantic_composition,
+    updated =
+      si
+      |> Map.put(:compositional_derivation, proof)
+      |> Trace.append(:semantic_composition,
       decision: if(is_map(proof), do: :derived, else: :abstained),
       reason: :closed_nominal_lambda_prototype,
       meta: if(is_map(proof), do: %{
@@ -29,6 +31,18 @@ defmodule Core.Semantic.Composition do
         formally_verified?: true,
         factual_authority?: false
       }, else: %{})
+
+    Core.Telemetry.emit(@telemetry_event,
+      %{derivations: if(is_map(proof), do: 1, else: 0)},
+      %{
+        status: if(is_map(proof), do: :derived, else: :abstained),
+        construction: if(is_map(proof), do: proof.construction, else: nil),
+        reduction_steps: if(is_map(proof), do: length(proof.steps), else: 0),
+        formally_verified?: is_map(proof),
+        factual_authority?: false
+      })
+
+    updated
   end
 
   def attach(other), do: other
