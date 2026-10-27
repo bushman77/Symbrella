@@ -93,6 +93,25 @@ defmodule Brain.LIFG.StructuralCompetitionTest do
     assert result.candidates == []
   end
 
+  test "one supporting role cannot overrule several contradictory roles" do
+    si = %{
+      tokens: tokens(),
+      sentence_signatures: [progressive()],
+      lifg_choices: [
+        %{token_index: 1, id: "cat|adjective|1"},
+        %{token_index: 3, id: "sleeping|adjective|1"},
+        %{token_index: 4, id: "under|preposition|1"},
+        %{token_index: 6, id: "table|verb|1"}
+      ]
+    }
+
+    result = StructuralCompetition.resolve(si)
+    assert result.status == :unresolved
+    assert result.preferred == nil
+    assert hd(result.candidates).matched_roles == 1
+    assert hd(result.candidates).conflicting_roles == 3
+  end
+
   test "local lexical disagreement without positive evidence abstains" do
     si = %{
       tokens: tokens(),
