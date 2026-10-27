@@ -144,7 +144,7 @@ defmodule Core.Response.Memory do
       }) do
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
-    episodic_reply = EpisodicMemory.reply(text_in)
+    episodic_reply = EpisodicMemory.reply(text_in, session_id)
     lexical_reply = UserLexicalMemory.reply(text_in)
 
     cond do
