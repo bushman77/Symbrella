@@ -29,7 +29,7 @@ defmodule Core.Semantic.Composition.Expression do
 
   def noun(_), do: :unsupported
 
-  @spec adjective(String.t()) :: {:ok, term()} | :unsupported
+  @spec adjective(String.t()) :: {:ok, t()} | :unsupported
   def adjective(word) when is_binary(word) do
     case Map.fetch(@adjectives, word) do
       {:ok, symbol} ->
