@@ -171,18 +171,22 @@ defmodule Core.Semantic.CompositionEventTest do
     choices =
       Enum.map(si.lifg_choices, fn
         %{token_index: 2} = choice ->
-          %{choice | id: "is|auxiliary|0",
+          Map.merge(choice, %{
+            id: "is|auxiliary|0",
             scores: %{
               "is|auxiliary|0" => 0.337,
               "is|verb|1" => 0.270
-            }}
+            }
+          })
 
         %{token_index: 3} = choice ->
-          %{choice | id: "flying|adjective|1",
+          Map.merge(choice, %{
+            id: "flying|adjective|1",
             scores: %{
               "flying|adjective|1" => 0.113,
               "flying|verb|1" => 0.096
-            }}
+            }
+          })
 
         choice ->
           choice
