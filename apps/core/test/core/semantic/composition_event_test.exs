@@ -170,9 +170,10 @@ defmodule Core.Semantic.CompositionEventTest do
     assert Event.verify(forged) == {:error, :invalid_event_semantics}
 
     si = run(input())
-    injected =
-      put_in(si, [:compositional_derivation, :event_semantics, :spatial, :arrival],
-        :confirmed)
+    forged_proof =
+      put_in(si.compositional_derivation,
+        [:event_semantics, :spatial, :arrival], :confirmed)
+    injected = %{si | compositional_derivation: forged_proof}
 
     assert Event.verify(injected.compositional_derivation) ==
       {:error, :invalid_event_semantics}
