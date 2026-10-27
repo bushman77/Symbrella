@@ -12,6 +12,7 @@ defmodule Core.Response.SemanticStrategy do
   """
 
   alias Core.Response.{LexicalDefinition, SymbolicGeneration}
+  alias Core.Semantic.Composition
   alias Core.Semantic.{FrameUnifier, ProvisionalInterpretation, SentenceMeaning, SpeechActs}
 
   @type strategy :: map()
@@ -88,6 +89,19 @@ defmodule Core.Response.SemanticStrategy do
 
     if is_map(attached) and attached == SentenceMeaning.build(si) do
       case attached do
+        %{compositional_evidence: %{kind: :progressive_event_property,
+            formally_verified?: true, factual_authority?: false}} ->
+          case Composition.verified(si) do
+            {:ok, %{kind: :progressive_event_property, factual_authority?: false}} ->
+              plan(:explain_reported_event, :event_description, :eligible,
+                :symbolic_generation, :revalidated_event_composition,
+                %{missing: [:real_world_event_grounding],
+                  factual_authority?: false})
+
+            _ ->
+              nil
+          end
+
         %{kind: :participant_assertion, status: :structurally_interpreted,
           speech_act: :assertion, source: :revalidated_episodic_projection,
           event_type: kind, source_frame: frame}
