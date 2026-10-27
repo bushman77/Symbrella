@@ -74,7 +74,7 @@ defmodule Core.Semantic.Composition.Event do
             {:event_action, action, {:var, action_event}},
             {:event_aspect, :progressive, {:var, aspect_event}}},
            {:event_actor_kind, actor_kind, {:var, actor_event}}},
-          {:event_spatial, relation, landmark_kind, {:var, spatial_event}}}
+          {:event_spatial, relation, landmark_kind, {:var, spatial_event}}}}
       )
       when is_binary(event_var) and event_var == action_event and
              event_var == aspect_event and event_var == actor_event and
