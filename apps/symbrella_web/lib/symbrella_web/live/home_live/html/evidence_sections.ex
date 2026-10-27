@@ -9,6 +9,10 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   def build(evidence) when is_map(evidence) do
     []
     |> runtime_section(field(evidence, :runtime))
+    |> provisional_context_section(
+      field(evidence, :provisional_interpretation),
+      field(evidence, :discourse_reference)
+    )
     |> sentence_competition_section(
       field(evidence, :sentence_competition),
       field(evidence, :question_signatures)
@@ -43,6 +47,32 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp runtime_section(sections, _), do: sections
+
+  defp provisional_context_section(sections, interpretation, reference)
+       when is_map(interpretation) or is_map(reference) do
+    items =
+      []
+      |> value("interpretation status", field(interpretation, :status))
+      |> value("operation", field(interpretation, :operation))
+      |> value("target", field(interpretation, :target))
+      |> value("requested relation", field(interpretation, :requested_relation))
+      |> value("predicate", field(interpretation, :predicate))
+      |> value("position", field(interpretation, :position))
+      |> value("interpretation evidence", field(interpretation, :evidence))
+      |> value("missing evidence", field(interpretation, :missing))
+      |> value("discourse reference", reference)
+
+    append(
+      sections,
+      :provisional_context,
+      "Provisional interpretation and discourse reference",
+      nil,
+      "A provisional sentence-level hypothesis may use a bounded prior user mention as an antecedent candidate. Neither field verifies the event or authorizes a factual claim by itself.",
+      items
+    )
+  end
+
+  defp provisional_context_section(sections, _, _), do: sections
 
   defp sentence_competition_section(sections, assessment, signatures) do
     signatures = list(signatures)
