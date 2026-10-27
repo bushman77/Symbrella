@@ -27,28 +27,102 @@ defmodule Core.Semantic.ProvisionalInterpretation do
     if established?(Map.get(si, :sentence_meaning)) do
       nil
     else
-      case original_words(si) do
-        {:ok, ["where", "is", article, noun]}
-        when article in ["the", "a", "an"] ->
-          make(si, :locate_entity, :question, noun, "#{article} #{noun}",
-            :location, [:wh_location, :copula, :nominal_surface],
-            [:referent_binding, :location])
+      case spatial_gap_question(si) do
+        nil ->
+          case original_words(si) do
+            {:ok, ["where", "is", article, noun]}
+            when article in ["the", "a", "an"] ->
+              make(si, :locate_entity, :question, noun, "#{article} #{noun}",
+                :location, [:wh_location, :copula, :nominal_surface],
+                [:referent_binding, :location])
 
-        {:ok, ["what", "is", article, noun]}
-        when article in ["a", "an"] ->
-          make(si, :define_concept, :question, noun, "#{article} #{noun}",
-            :definition, [:wh_definition, :copula, :indefinite_nominal_surface],
-            [:concept_grounding])
+            {:ok, ["what", "is", article, noun]}
+            when article in ["a", "an"] ->
+              make(si, :define_concept, :question, noun, "#{article} #{noun}",
+                :definition, [:wh_definition, :copula, :indefinite_nominal_surface],
+                [:concept_grounding])
 
-        {:ok, [word]} ->
-          make(si, :ambiguous_topic, :fragment, word, word, nil,
-            [:isolated_lexical_surface], [:speech_act, :requested_information])
+            {:ok, [word]} ->
+              make(si, :ambiguous_topic, :fragment, word, word, nil,
+                [:isolated_lexical_surface], [:speech_act, :requested_information])
 
-        _ -> nil
+            _ -> nil
+          end
+
+        hypothesis ->
+          hypothesis
       end
     end
   end
   def detect(_), do: nil
+
+  # A V1 hypothesis for a WH question whose requested participant is omitted
+  # from a verb-particle construction. The signature supplies grammatical
+  # roles; the discourse reference remains a tentative antecedent candidate.
+  defp spatial_gap_question(si) do
+    tokens = base_tokens(si)
+    signatures = List.wrap(Map.get(si, :sentence_signatures))
+    reference = Map.get(si, :discourse_reference)
+
+    Enum.find_value(signatures, fn
+      %{id: :verb_particle_construction, source: :core_syntax,
+        roles: %{verb: verb, particle: particle}, evidence: evidence}
+      when is_integer(verb) and is_integer(particle) and is_list(evidence) ->
+        with true <- :adjacent_particle in evidence,
+             true <- verb == 3 and particle == 4,
+             "what" <- token_word(tokens, 0),
+             "is" <- token_word(tokens, 1),
+             "it" <- token_word(tokens, 2),
+             predicate when is_binary(predicate) <- token_word(tokens, verb),
+             position when position in ["on", "in", "under", "beside", "above", "below"] <-
+               token_word(tokens, particle) do
+          antecedent =
+            case reference do
+              %{source: :recent_user_turn, antecedent: name} when is_binary(name) -> name
+              _ -> nil
+            end
+
+          %{
+            version: 1,
+            status: :provisional,
+            speech_act: :question,
+            operation: :retrieve_spatial_participant,
+            target: %{lemma: "it", surface: "it",
+              referent_status: if(antecedent, do: :contextual_candidate, else: :unresolved),
+              antecedent: antecedent},
+            requested_relation: :spatial_location,
+            predicate: predicate,
+            position: position,
+            evidence: [:original_surface, :verb_particle_sentence_signature],
+            missing: [:event_grounding] ++ if(antecedent, do: [], else: [:referent_binding]),
+            factual_authority?: false,
+            source: :sentence_signature_v1,
+            original_sentence: Map.get(si, :sentence)
+          }
+        else
+          _ -> nil
+        end
+
+      _ -> nil
+    end)
+  end
+
+  defp base_tokens(si) do
+    si
+    |> Map.get(:tokens, [])
+    |> List.wrap()
+    |> Enum.filter(fn token ->
+      Map.get(token, :n, 1) == 1 and Map.get(token, :kind) not in [:punct, "punct"]
+    end)
+    |> Enum.sort_by(&Map.get(&1, :index, -1))
+  end
+
+  defp token_word(tokens, index) do
+    case Enum.find(tokens, &(Map.get(&1, :index) == index)) do
+      %{phrase: phrase} when is_binary(phrase) -> String.downcase(phrase)
+      _ -> nil
+    end
+  end
 
   @spec verified(map()) :: {:ok, map()} | :not_applicable
   def verified(%{} = si) do
