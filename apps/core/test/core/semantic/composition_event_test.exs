@@ -142,6 +142,57 @@ defmodule Core.Semantic.CompositionEventTest do
     assert Composition.verified(changed) == :not_applicable
   end
 
+  test "the semantic summary is projected from the normal form" do
+    assert {:ok, derivation} =
+      Event.compose(%{
+        predicate: "flying", actor: "bird",
+        preposition: "into", landmark: "tree"
+      })
+
+    semantics = derivation.semantics
+    assert {:ok, ^semantics} = Event.project(derivation.result)
+    assert :ok = Proof.verify(derivation)
+    assert :ok = Event.verify(derivation)
+  end
+
+  test "mathematically valid proof cannot authorize a forged arrival summary" do
+    assert {:ok, derivation} =
+      Event.compose(%{
+        predicate: "flying", actor: "bird",
+        preposition: "into", landmark: "tree"
+      })
+
+    forged = put_in(derivation, [:semantics, :spatial, :arrival], :confirmed)
+
+    # The pure lambda derivation is still valid: only its reported summary
+    # was changed. The event-specific verifier MUST catch that mismatch.
+    assert Proof.verify(forged) == :ok
+    assert Event.verify(forged) == {:error, :invalid_event_semantics}
+
+    si = run(input())
+    injected =
+      put_in(si, [:compositional_derivation, :event_semantics, :spatial, :arrival],
+        :confirmed)
+
+    assert Event.verify(injected.compositional_derivation) ==
+      {:error, :invalid_event_semantics}
+    assert Composition.verified(injected) == :not_applicable
+  end
+
+  test "normal form with extra unchecked event claims cannot be summarized" do
+    assert {:ok, derivation} =
+      Event.compose(%{
+        predicate: "flying", actor: "bird",
+        preposition: "into", landmark: "tree"
+      })
+
+    altered = {:lambda, "e", :event,
+      {:and, elem(derivation.result, 3),
+       {:event_actor_kind, :dog, {:var, "e"}}}}
+
+    assert :unsupported = Event.project(altered)
+  end
+
   test "forged event proof cannot pass replay verification" do
     si = run(input())
     proof = si.compositional_derivation
