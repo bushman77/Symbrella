@@ -83,14 +83,23 @@ defmodule Core.Semantic.Composition do
          true <- structural_scope_valid?(si),
          detected <- Signatures.detect(si),
          true <- Enum.all?(signatures, &(&1 in detected)) do
-      event_derivation(si, signatures) ||
-        (signatures
-         |> Enum.take(@max_signatures)
-         |> Enum.filter(&nominal_signature?/1)
-         |> Enum.sort_by(fn sig ->
-           {elem(sig.span, 1), -(elem(sig.span, 1) - elem(sig.span, 0))}
-         end)
-         |> Enum.find_value(&compose_signature(si, &1)))
+      case Enum.find(signatures, &complete_stacked_nominal?(si, &1)) do
+        nil ->
+          event_derivation(si, signatures) ||
+            (signatures
+             |> Enum.take(@max_signatures)
+             |> Enum.filter(&nominal_signature?/1)
+             |> Enum.sort_by(fn sig ->
+               {elem(sig.span, 1), -(elem(sig.span, 1) - elem(sig.span, 0))}
+             end)
+             |> Enum.find_value(&compose_signature(si, &1)))
+
+        signature ->
+          # A full nominal reading must pass structural preference and all
+          # lexical witnesses. Never fall back to a partial adjective+noun
+          # reading when the complete phrase cannot be admitted.
+          compose_complete_stacked_nominal(si, signature)
+      end
     else
       _ -> nil
     end
@@ -208,6 +217,66 @@ defmodule Core.Semantic.Composition do
 
   defp nominal_signature?(%{
          id: :noun_phrase, source: :core_syntax, span: {first, last},
+         roles: %{modifier_1: first_modifier, modifier_2: second_modifier,
+                  head: head} = roles,
+         required_features: required, evidence: evidence
+       })
+       when is_integer(first) and is_integer(last) and is_integer(first_modifier) and
+            is_integer(second_modifier) and is_integer(head) and
+            is_map(required) and is_list(evidence) do
+    determiner = Map.get(roles, :determiner)
+    expected_start = if(is_nil(determiner), do: first, else: first + 1)
+    role_count = if(is_nil(determiner), do: 3, else: 4)
+
+    first >= 0 and last == head and
+      first_modifier == expected_start and
+      second_modifier == first_modifier + 1 and head == second_modifier + 1 and
+      (is_nil(determiner) or determiner == first) and
+      map_size(roles) == role_count and
+      :nominal_constituent in evidence and :pos_pattern in evidence and
+      Map.get(required, :modifier_1) == [:pos_adjective] and
+      Map.get(required, :modifier_2) == [:pos_adjective] and
+      Map.get(required, :head) == [:pos_noun] and
+      (is_nil(determiner) or Map.get(required, :determiner) == [:pos_determiner])
+  end
+
+  defp complete_stacked_nominal?(
+         si, %{span: {0, last},
+               roles: %{modifier_1: _, modifier_2: _, head: _}} = signature
+       ) do
+    base_indices =
+      si
+      |> Map.get(:tokens, [])
+      |> List.wrap()
+      |> Enum.filter(fn
+        %{index: index, phrase: phrase} = token
+          when is_integer(index) and index >= 0 and is_binary(phrase) ->
+          Map.get(token, :n, 1) == 1 and
+            Map.get(token, :kind) not in [:punct, "punct"]
+        _ -> false
+      end)
+      |> Enum.map(& &1.index)
+      |> Enum.sort()
+
+    nominal_signature?(signature) and base_indices == Enum.to_list(0..last)
+  end
+
+  defp complete_stacked_nominal?(_, _), do: false
+
+  defp compose_complete_stacked_nominal(si, signature) do
+    case StructuralCompetition.verified(si) do
+      {:ok, %{preferred: %{construction: :noun_phrase,
+                           span: span, roles: roles}}}
+          when span == signature.span and roles == signature.roles ->
+        compose_signature(si, signature)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp nominal_signature?(%{
+         id: :noun_phrase, source: :core_syntax, span: {first, last},
          roles: %{modifier: modifier, head: head}, evidence: evidence
        })
        when is_integer(first) and is_integer(last) and is_integer(modifier) and
@@ -217,6 +286,59 @@ defmodule Core.Semantic.Composition do
   end
 
   defp nominal_signature?(_), do: false
+
+  defp compose_signature(
+         si, %{roles: %{modifier_1: first, modifier_2: second, head: head}} = signature
+       ) do
+    with {:ok, first_adjective} <- witnessed_role(si, first, "adjective"),
+         {:ok, second_adjective} <- witnessed_role(si, second, "adjective"),
+         {:ok, noun} <- witnessed_role(si, head, "noun"),
+         {:ok, determiner} <- witnessed_nominal_determiner(si, signature),
+         {:ok, derivation} <-
+           Nominal.compose(noun.word, [first_adjective.word, second_adjective.word]) do
+      witnesses =
+        Enum.reject([determiner, first_adjective, second_adjective, noun], &is_nil/1)
+
+      nominal_proof(derivation, signature, witnesses, :stacked_adjective_noun)
+    else
+      _ -> nil
+    end
+  end
+
+  defp witnessed_nominal_determiner(si, %{roles: roles}) do
+    case Map.fetch(roles, :determiner) do
+      {:ok, index} -> witnessed_role(si, index, "determiner")
+      :error -> {:ok, nil}
+    end
+  end
+
+  defp nominal_proof(
+         %{initial: initial, steps: steps, result: result,
+           result_type: {:arrow, :entity, :truth}} = derivation,
+         signature, witnesses, construction
+       ) do
+    proof = %{
+      version: 1,
+      status: :derived,
+      kind: :nominal_property,
+      construction: construction,
+      span: signature.span,
+      premises: %{
+        signature: Map.take(signature, [:id, :span, :roles, :required_features, :evidence]),
+        lexical_witnesses: witnesses,
+        semantic_vocabulary: :closed_nominal_v1
+      },
+      initial: initial,
+      steps: steps,
+      result: result,
+      result_type: derivation.result_type,
+      epistemic_status: :conditional_on_lexical_and_structural_premises,
+      quantifier_applied?: false,
+      factual_authority?: false
+    }
+
+    if Proof.verify(proof) == :ok, do: proof, else: nil
+  end
 
   defp compose_signature(si, signature) do
     %{modifier: modifier, head: head} = signature.roles
