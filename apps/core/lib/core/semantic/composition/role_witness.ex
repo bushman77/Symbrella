@@ -75,7 +75,7 @@ defmodule Core.Semantic.Composition.RoleWitness do
            [token] <- tokens,
            phrase when is_binary(phrase) <- Map.get(token, :phrase),
            word <- normalize(phrase),
-           scores when is_map(scores) <- Map.get(choice, :scores),
+           scores when is_map(scores) <- choice_scores(choice),
            true <- map_size(scores) <= @max_scores do
         matching =
           Enum.flat_map(scores, fn
@@ -136,8 +136,18 @@ defmodule Core.Semantic.Composition.RoleWitness do
     Map.merge(%{role: role, token_index: index, status: :rejected}, detail)
   end
 
+  # Core.LIFG.Attach exports the bounded post-softmax distribution as
+  # :candidate_probs. Direct Stage-1 / synthetic callers may use :scores.
+  # Only evidence on the current SemanticInput can authorize reconsideration.
+  defp choice_scores(choice) when is_map(choice) do
+    case Map.get(choice, :candidate_probs) do
+      %{} = probabilities -> probabilities
+      _ -> Map.get(choice, :scores)
+    end
+  end
+
   defp alternative(si, role, index, word, selected_id, expected_pos, choice) do
-    scores = Map.get(choice, :scores)
+    scores = choice_scores(choice)
 
     if role in @alternative_roles and is_map(scores) and map_size(scores) <= @max_scores do
       candidates =
