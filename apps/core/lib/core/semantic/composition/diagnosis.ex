@@ -7,6 +7,8 @@ defmodule Core.Semantic.Composition.Diagnosis do
   a derivation. No dictionary definitions or user text enter telemetry.
   """
 
+  alias Core.Semantic.Composition.RoleWitness
+
   @event_constructions [
     :progressive_directional_candidate,
     :progressive_locative_candidate
@@ -21,6 +23,23 @@ defmodule Core.Semantic.Composition.Diagnosis do
     {:location_determiner, ["determiner"]},
     {:location_head, ["noun"]}
   ]
+
+  @doc "The exact V2 witness gate for every preferred event role, in deterministic order."
+  @spec admission_audit(map()) :: [map()]
+  def admission_audit(%{structural_competition:
+        %{status: :preferred, preferred: %{construction: construction, roles: roles}}} = si)
+      when construction in @event_constructions and is_map(roles) do
+    Enum.map(@roles, fn {role, expected_pos} ->
+      case Map.fetch(roles, role) do
+        {:ok, index} when is_integer(index) and index >= 0 ->
+          RoleWitness.audit(si, role, index, expected_pos)
+        _ ->
+          %{role: role, status: :rejected, reason: :missing_role}
+      end
+    end)
+  end
+
+  def admission_audit(_), do: []
 
   @spec blocked_roles(map()) :: [map()]
   def blocked_roles(%{structural_competition:
