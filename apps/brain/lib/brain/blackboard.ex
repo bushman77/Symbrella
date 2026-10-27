@@ -36,6 +36,8 @@ defmodule Brain.Blackboard do
     [:brain, :pipeline, :lifg_stage1, :stop],
     # Bounded read-only whole-sentence hypothesis adjudication.
     [:core, :lifg, :structural_competition],
+    # Typed composition outcome only; full derivation stays in SemanticInput.
+    [:core, :semantic, :composition],
     [:brain, :pfc, :policy],
     [:brain, :pfc, :status],
 
