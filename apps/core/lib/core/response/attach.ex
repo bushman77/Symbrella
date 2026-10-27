@@ -152,6 +152,8 @@ defmodule Core.Response.Attach do
       speech_act_frame: si_get(si, :speech_act_frame),
       # Preserve the original grammatical proof for event revalidation.
       sentence_signatures: si_get(si, :sentence_signatures),
+      structural_competition: si_get(si, :structural_competition),
+      compositional_derivation: si_get(si, :compositional_derivation),
       acc_conflict: si_get(si, :acc_conflict),
       perception: si_get(si, :perception),
       atl_slate: si_get(si, :atl_slate),
