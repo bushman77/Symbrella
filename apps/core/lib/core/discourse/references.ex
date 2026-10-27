@@ -213,6 +213,7 @@ defmodule Core.Discourse.References do
         "its"
 
       Regex.match?(~r/^\s*(?:is|was|does|did|can|could|will|would)\s+it\b/iu, sentence) or
+          Regex.match?(~r/^\s*what\s+is\s+it\b/iu, sentence) or
           Regex.match?(~r/^\s*(?:no[,]?\s+it\s+is\s+not[.!]?\s+)?how\s+far\s+is\s+it\s+from\b/iu, sentence) ->
         "it"
 
