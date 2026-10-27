@@ -654,6 +654,8 @@ defmodule SymbrellaWeb.HomeLive do
       # downgraded to LLM prose and the durable memory write is skipped.
       sentence: Map.get(si, :sentence),
       sentence_signatures: Map.get(si, :sentence_signatures),
+      provisional_interpretation: Map.get(si, :provisional_interpretation),
+      discourse_reference: Map.get(si, :discourse_reference),
       episodic_candidates: Map.get(si, :episodic_candidates),
       lifg_choices: Map.get(si, :lifg_choices),
       atl_slate: Map.get(si, :atl_slate),
