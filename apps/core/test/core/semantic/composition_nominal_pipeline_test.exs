@@ -132,6 +132,18 @@ defmodule Core.Semantic.CompositionNominalPipelineTest do
     assert run(missing_det).compositional_derivation == nil
   end
 
+  test "legacy single adjective noun composition remains available" do
+    out = input(~w(black bird), ~w(adjective noun)) |> run()
+
+    assert out.structural_competition.status == :no_complete_candidate
+    assert {:ok, proof} = Composition.verified(out)
+    assert proof.construction == :adjective_noun
+    assert proof.span == {0, 1}
+    assert proof.result_type == {:arrow, :entity, :truth}
+    assert Proof.verify(proof) == :ok
+    assert proof.factual_authority? == false
+  end
+
   test "stale winners and tampered proofs fail current-turn verification" do
     si = input(~w(small black bird), ~w(adjective adjective noun))
     out = run(si)
