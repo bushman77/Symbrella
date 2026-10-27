@@ -231,6 +231,56 @@ defmodule Core.Semantic.CompositionEventTest do
     assert out.compositional_derivation.factual_authority? == false
   end
 
+  test "admission audit reports all witnessed event roles" do
+    out = input() |> with_live_conflicts() |> run()
+
+    audit = Core.Semantic.Composition.Diagnosis.admission_audit(out)
+    assert length(audit) == 7
+    assert Enum.all?(audit, &(&1.status == :admitted))
+    assert Enum.any?(audit, fn entry ->
+      entry.role == :predicate and
+        entry.selection_basis == :construction_alternative
+    end)
+  end
+
+  test "audit distinguishes aggregate morphology from tagged scored sense" do
+    si = with_live_conflicts(input())
+
+    rows =
+      Enum.map(si.active_cells, fn
+        %{id: "flying|verb|1"} = cell -> %{cell | semantic_atoms: []}
+        cell -> cell
+      end)
+
+    # Another attested verb row makes the word-level syntax legal.
+    # It does NOT authorize a different, untagged scored sense.
+    morphology_row = %{
+      id: "flying|verb|2",
+      norm: "flying",
+      pos: "verb",
+      semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"]
+    }
+
+    out = run(%{si | active_cells: [morphology_row | rows]})
+
+    assert out.structural_competition.status == :preferred
+    assert out.compositional_derivation == nil
+
+    audit = Core.Semantic.Composition.Diagnosis.admission_audit(out)
+    assert Enum.any?(audit, fn entry ->
+      entry.role == :predicate and
+        entry.status == :rejected and
+        entry.reason == :scored_role_morphology_missing and
+        entry.scored_role_candidates == 1 and
+        entry.exact_dictionary_witnesses == 1 and
+        entry.morphology_qualified_witnesses == 0 and
+        entry.any_dictionary_role_morphology?
+    end)
+
+    assert %{meta: %{admission_audit: ^audit}} =
+      Enum.find(out.trace, &(&1.stage == :semantic_composition))
+  end
+
   test "unscored dictionary alternative must not be promoted" do
     si = with_live_conflicts(input())
 
