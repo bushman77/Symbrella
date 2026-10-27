@@ -30,7 +30,7 @@ defmodule Core.Semantic.Composition do
           reduction_steps: length(proof.steps),
           formally_verified?: true,
           factual_authority?: false
-        }, else: %{})
+        }, else: %{}))
 
     Core.Telemetry.emit(@telemetry_event,
       %{derivations: if(is_map(proof), do: 1, else: 0)},
