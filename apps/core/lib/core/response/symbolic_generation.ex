@@ -7,6 +7,7 @@ defmodule Core.Response.SymbolicGeneration do
   independent revalidation of LIFG/ATL roles; their truth is not asserted.
   """
 
+  alias Core.Semantic.Composition
   alias Core.Semantic.{EpisodicProjection, SentenceMeaning, SpeechActs}
 
   # Accept the intent labels the live classifier actually emits for
@@ -24,7 +25,11 @@ defmodule Core.Response.SymbolicGeneration do
              intent in @social_intents and action in [:answer, :offer_options, :act_first] do
     case social_realization(user_text, si) do
       {:ok, _, _} = realized -> realized
-      :not_applicable -> maybe_realize_report(user_text, intent, si)
+      :not_applicable ->
+        case maybe_realize_compositional_event(user_text, intent, si) do
+          {:ok, _, _} = event -> event
+          :not_applicable -> maybe_realize_report(user_text, intent, si)
+        end
     end
   end
 
@@ -103,6 +108,88 @@ defmodule Core.Response.SymbolicGeneration do
   defp realize(:farewell, :night), do: "Good night."
   defp realize(:farewell, _), do: "Take care."
   defp realize(:wellbeing_query, _), do: "I'm here and ready to talk."
+
+  # Render only the current-turn, proof-checked event PROPERTY. All words
+  # below are closed-vocabulary terms; never interpolate untrusted input text
+  # or promote the mathematical proof to a fact about the outside world.
+  @event_actors %{bird: "bird", cat: "cat", dog: "dog"}
+  @event_landmarks %{tree: "tree", table: "table", fence: "fence"}
+  @event_activities %{sit: "sitting", sleep: "sleeping"}
+  @event_static_relations %{
+    on: "on", in: "in", under: "under", beside: "beside",
+    above: "above", below: "below"
+  }
+
+  defp maybe_realize_compositional_event(user_text, intent, si)
+       when intent in [:tell, :statement] do
+    with true <- Map.get(si, :source) in [:user, :prod, :test],
+         true <- Map.get(si, :intent) in [:tell, :statement],
+         ^user_text <- Map.get(si, :sentence),
+         true <- not String.ends_with?(String.trim(user_text), "?"),
+         %{compositional_evidence: evidence} = meaning <-
+           Map.get(si, :sentence_meaning),
+         ^meaning <- SentenceMeaning.build(si),
+         %{kind: :progressive_event_property, formally_verified?: true,
+           factual_authority?: false, event_semantics: reported_semantics} <- evidence,
+         {:ok, %{kind: :progressive_event_property, status: :derived,
+           event_semantics: semantics, quantifier_applied?: false,
+           factual_authority?: false} = proof} <- Composition.verified(si),
+         true <- reported_semantics == semantics,
+         {:ok, reply} <- describe_event(semantics) do
+      {:ok, reply, %{
+        status: :symbolic_realized,
+        speech_act: :acknowledge_user_report,
+        interpreted_speech_act: :assertion,
+        provenance: :revalidated_event_composition,
+        construction: proof.construction,
+        proof_steps: length(proof.steps),
+        compositional_proof_verified?: true,
+        event_occurrence_verified?: false,
+        response_is_memory_acknowledgment?: false,
+        factual_claims?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp maybe_realize_compositional_event(_text, _intent, _si),
+    do: :not_applicable
+
+  defp describe_event(%{
+         aspect: :progressive,
+         predicate: predicate,
+         actor: %{kind: actor_kind, referent: :unresolved},
+         spatial: %{relation: relation, landmark_kind: landmark_kind,
+                    reading: reading, arrival: :not_established},
+         event_existence: :not_asserted
+       }) do
+    with {:ok, actor} <- Map.fetch(@event_actors, actor_kind),
+         {:ok, landmark} <- Map.fetch(@event_landmarks, landmark_kind) do
+      case {predicate, relation, reading} do
+        {:fly, :into, :directional} ->
+          {:ok, "You're describing a #{actor} flying into a #{landmark}. " <>
+            "The direction is expressed, but arrival and actual occurrence aren't established."}
+
+        {activity, spatial_relation, :locative} when activity in [:sit, :sleep] ->
+          with {:ok, word} <- Map.fetch(@event_activities, activity),
+               {:ok, prep} <- Map.fetch(@event_static_relations, spatial_relation) do
+            {:ok, "You're describing a #{actor} #{word} #{prep} a #{landmark}. " <>
+              "That's a spatial description, not independent proof the event occurred."}
+          else
+            _ -> :not_applicable
+          end
+
+        _ ->
+          :not_applicable
+      end
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp describe_event(_), do: :not_applicable
 
   # No generic fallback to parroting text: only one verified participant event
   # may license a compositional response. Exact user report, LIFG/ATL
