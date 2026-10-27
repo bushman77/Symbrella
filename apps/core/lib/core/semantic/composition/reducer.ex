@@ -85,7 +85,10 @@ defmodule Core.Semantic.Composition.Reducer do
   end
 
   def step({:event_action, action, event}) do
-    step_event(event, &{:event_action, action, &1})
+    case step(action) do
+      {:ok, next} -> {:ok, {:event_action, next, event}}
+      :normal -> step_event(event, &{:event_action, action, &1})
+    end
   end
 
   def step({:event_aspect, aspect, event}) do
@@ -93,7 +96,10 @@ defmodule Core.Semantic.Composition.Reducer do
   end
 
   def step({:event_actor_kind, kind, event}) do
-    step_event(event, &{:event_actor_kind, kind, &1})
+    case step(kind) do
+      {:ok, next} -> {:ok, {:event_actor_kind, next, event}}
+      :normal -> step_event(event, &{:event_actor_kind, kind, &1})
+    end
   end
 
   def step({:event_spatial, relation, landmark, event}) do
@@ -150,7 +156,8 @@ defmodule Core.Semantic.Composition.Reducer do
   end
 
   def substitute({:event_action, action, event}, variable, replacement) do
-    {:event_action, action, substitute(event, variable, replacement)}
+    {:event_action, substitute(action, variable, replacement),
+     substitute(event, variable, replacement)}
   end
 
   def substitute({:event_aspect, aspect, event}, variable, replacement) do
@@ -158,7 +165,8 @@ defmodule Core.Semantic.Composition.Reducer do
   end
 
   def substitute({:event_actor_kind, kind, event}, variable, replacement) do
-    {:event_actor_kind, kind, substitute(event, variable, replacement)}
+    {:event_actor_kind, substitute(kind, variable, replacement),
+     substitute(event, variable, replacement)}
   end
 
   def substitute({:event_spatial, relation, landmark, event}, variable, replacement) do
@@ -181,9 +189,11 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(free_variables(left), free_variables(right))
 
   defp free_variables({:predicate, _, argument}), do: free_variables(argument)
-  defp free_variables({:event_action, _, event}), do: free_variables(event)
+  defp free_variables({:event_action, action, event}),
+    do: MapSet.union(free_variables(action), free_variables(event))
   defp free_variables({:event_aspect, _, event}), do: free_variables(event)
-  defp free_variables({:event_actor_kind, _, event}), do: free_variables(event)
+  defp free_variables({:event_actor_kind, kind, event}),
+    do: MapSet.union(free_variables(kind), free_variables(event))
   defp free_variables({:event_spatial, _, landmark, event}),
     do: MapSet.union(free_variables(landmark), free_variables(event))
   defp free_variables(_), do: MapSet.new()
@@ -200,9 +210,11 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(all_variables(left), all_variables(right))
 
   defp all_variables({:predicate, _, argument}), do: all_variables(argument)
-  defp all_variables({:event_action, _, event}), do: all_variables(event)
+  defp all_variables({:event_action, action, event}),
+    do: MapSet.union(all_variables(action), all_variables(event))
   defp all_variables({:event_aspect, _, event}), do: all_variables(event)
-  defp all_variables({:event_actor_kind, _, event}), do: all_variables(event)
+  defp all_variables({:event_actor_kind, kind, event}),
+    do: MapSet.union(all_variables(kind), all_variables(event))
   defp all_variables({:event_spatial, _, landmark, event}),
     do: MapSet.union(all_variables(landmark), all_variables(event))
   defp all_variables(_), do: MapSet.new()
@@ -219,9 +231,13 @@ defmodule Core.Semantic.Composition.Reducer do
   defp size({:apply, left, right}), do: 1 + size(left) + size(right)
   defp size({:and, left, right}), do: 1 + size(left) + size(right)
   defp size({:predicate, _, arg}), do: 1 + size(arg)
-  defp size({:event_action, _, event}), do: 1 + size(event)
+  defp size({:action_kind, _}), do: 1
+  defp size({:event_action, action, event}),
+    do: 1 + (if is_atom(action), do: 0, else: size(action)) + size(event)
   defp size({:event_aspect, _, event}), do: 1 + size(event)
-  defp size({:event_actor_kind, _, event}), do: 1 + size(event)
+  defp size({:actor_kind, _}), do: 1
+  defp size({:event_actor_kind, kind, event}),
+    do: 1 + (if is_atom(kind), do: 0, else: size(kind)) + size(event)
   defp size({:landmark_kind, _}), do: 1
   defp size({:event_spatial, _, landmark, event}),
     do: 1 + (if is_atom(landmark), do: 0, else: size(landmark)) + size(event)
