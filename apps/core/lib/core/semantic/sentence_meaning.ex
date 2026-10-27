@@ -19,24 +19,6 @@ defmodule Core.Semantic.SentenceMeaning do
   def attach(%{} = si) do
     meaning = build(si)
 
-    # Mathematical derivation is conditional evidence, not an event assertion.
-    meaning =
-      case Core.Semantic.Composition.verified(si) do
-        {:ok, proof} ->
-          Map.put(meaning, :compositional_evidence, %{
-            kind: proof.kind,
-            span: proof.span,
-            resulting_type: proof.result_type,
-            proof_steps: length(proof.steps),
-            event_semantics: Map.get(proof, :event_semantics),
-            formally_verified?: true,
-            factual_authority?: false,
-            epistemic_status: proof.epistemic_status
-          })
-
-        :not_applicable -> meaning
-      end
-
     si
     |> Map.put(:sentence_meaning, meaning)
     |> Trace.append(:sentence_meaning,
@@ -92,17 +74,41 @@ defmodule Core.Semantic.SentenceMeaning do
         question
       end
 
-    definition_request(si) ||
-      question || object_question(si, sentence, frames, constituents, tokens) ||
-      participant_meaning(si, sentence) ||
-      provisional_structure(si, sentence) || %{
-      version: 1,
-      sentence: sentence,
-      definition: nil,
-      kind: :unknown,
-      status: :not_yet_interpreted,
-      source: :insufficient_verified_sentence_structure
-    }
+    base =
+      definition_request(si) ||
+        question || object_question(si, sentence, frames, constituents, tokens) ||
+        participant_meaning(si, sentence) ||
+        provisional_structure(si, sentence) || %{
+          version: 1,
+          sentence: sentence,
+          definition: nil,
+          kind: :unknown,
+          status: :not_yet_interpreted,
+          source: :insufficient_verified_sentence_structure
+        }
+
+    attach_compositional_evidence(si, base)
+  end
+
+  # build/1 and attach/1 must agree exactly. Revalidate the current proof
+  # rather than trusting a cached compositional_evidence field on SI.
+  defp attach_compositional_evidence(si, meaning) do
+    case Core.Semantic.Composition.verified(si) do
+      {:ok, proof} ->
+        Map.put(meaning, :compositional_evidence, %{
+          kind: proof.kind,
+          span: proof.span,
+          resulting_type: proof.result_type,
+          proof_steps: length(proof.steps),
+          event_semantics: Map.get(proof, :event_semantics),
+          formally_verified?: true,
+          factual_authority?: false,
+          epistemic_status: proof.epistemic_status
+        })
+
+      :not_applicable ->
+        meaning
+    end
   end
 
   def build(_), do: %{
