@@ -240,6 +240,18 @@ defmodule Core.Semantic.Composition do
       (is_nil(determiner) or Map.get(required, :determiner) == [:pos_determiner])
   end
 
+  defp nominal_signature?(%{
+         id: :noun_phrase, source: :core_syntax, span: {first, last},
+         roles: %{modifier: modifier, head: head}, evidence: evidence
+       })
+       when is_integer(first) and is_integer(last) and is_integer(modifier) and
+              is_integer(head) and is_list(evidence) do
+    first >= 0 and head == last and modifier == head - 1 and
+      :nominal_constituent in evidence and :pos_pattern in evidence
+  end
+
+  defp nominal_signature?(_), do: false
+
   defp complete_stacked_nominal?(
          si, %{span: {0, last},
                roles: %{modifier_1: _, modifier_2: _, head: _}} = signature
@@ -274,18 +286,6 @@ defmodule Core.Semantic.Composition do
         nil
     end
   end
-
-  defp nominal_signature?(%{
-         id: :noun_phrase, source: :core_syntax, span: {first, last},
-         roles: %{modifier: modifier, head: head}, evidence: evidence
-       })
-       when is_integer(first) and is_integer(last) and is_integer(modifier) and
-              is_integer(head) and is_list(evidence) do
-    first >= 0 and head == last and modifier == head - 1 and
-      :nominal_constituent in evidence and :pos_pattern in evidence
-  end
-
-  defp nominal_signature?(_), do: false
 
   defp compose_signature(
          si, %{roles: %{modifier_1: first, modifier_2: second, head: head}} = signature
