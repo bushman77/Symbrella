@@ -44,6 +44,7 @@ defmodule Core.Response do
   alias Core.Response.SelfStateFeatures
   alias Core.Response.SideEffects
   alias Core.Response.SymbolicGeneration
+  alias Core.Response.SemanticStrategy
   alias Core.Response.LexicalDefinition
   alias Core.Response.AttentionFallback
 
@@ -176,11 +177,24 @@ defmodule Core.Response do
         inline_text = OverrideSkills.deterministic_inline_text(skill)
         llm_prompt_type = OverrideSkills.llm_prompt_override(skill)
 
+        # Select the response operation from independently interpreted syntax
+        # and semantic evidence. Plans can remain unresolved; they cannot
+        # authorize content without the existing generator's revalidation.
+        no_llm? = Application.get_env(:core, :llm_inference_enabled?, true) == false
+        strategy_plan = if no_llm?, do: SemanticStrategy.select(si), else: :not_applicable
+
+        strategy_response =
+          if is_map(strategy_plan) do
+            SemanticStrategy.realize(strategy_plan, text_in, features, decision, si)
+          else
+            :not_applicable
+          end
+
         # In the experimental no-LLM runtime, realize only supported,
         # independently safe speech acts. Keep unsupported turns visibly
         # unavailable instead of silently restoring model inference.
         symbolic_response =
-          if Application.get_env(:core, :llm_inference_enabled?, true) == false do
+          if no_llm? and strategy_response == :not_applicable do
             SymbolicGeneration.generate(text_in, features, decision, si)
           else
             :not_applicable
@@ -189,7 +203,7 @@ defmodule Core.Response do
         # Explicit lexical questions are answered from this turn's LTM rows.
         # A definition request must not collapse into a generic WM topic.
         lexical_response =
-          if Application.get_env(:core, :llm_inference_enabled?, true) == false and
+          if no_llm? and strategy_response == :not_applicable and
                symbolic_response == :not_applicable do
             LexicalDefinition.generate(text_in, features, decision, si)
           else
@@ -199,7 +213,7 @@ defmodule Core.Response do
         # Comprehension WM is a session-scoped conversational cue, not an
         # external fact. Only use it if both answer-producing paths abstained.
         attention_response =
-          if Application.get_env(:core, :llm_inference_enabled?, true) == false and
+          if no_llm? and strategy_response == :not_applicable and
                symbolic_response == :not_applicable and
                lexical_response == :not_applicable do
             AttentionFallback.generate(text_in, features, decision, si)
@@ -214,6 +228,10 @@ defmodule Core.Response do
 
             is_binary(inline_text) ->
               {inline_text, :inline_skill, nil, nil}
+
+            match?({:ok, _, _, _}, strategy_response) ->
+              {:ok, reply, source, realization} = strategy_response
+              {reply, source, nil, realization}
 
             match?({:ok, _, _}, symbolic_response) ->
               {:ok, reply, realization} = symbolic_response
@@ -293,6 +311,14 @@ defmodule Core.Response do
             agency_command_results: Map.get(features, :agency_command_results),
             agency_memory: agency_memory
           })
+
+        strategy_metadata =
+          if is_map(strategy_plan) do
+            Map.put(strategy_plan, :outcome,
+              if(match?({:ok, _, _, _}, strategy_response), do: :realized, else: :deferred))
+          end
+
+        meta = Map.put(meta, :semantic_response_strategy, strategy_metadata)
 
         SideEffects.emit_plan(meta)
         SideEffects.emit_mode_selected(meta)
