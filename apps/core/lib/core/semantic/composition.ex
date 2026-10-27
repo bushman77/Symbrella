@@ -18,6 +18,7 @@ defmodule Core.Semantic.Composition do
   def attach(%{} = si) do
     proof = derive(si)
     blockers = if(is_map(proof), do: [], else: Diagnosis.blocked_roles(si))
+    admission_audit = if(is_map(proof), do: [], else: Diagnosis.admission_audit(si))
     abstention_reason =
       if(blockers == [], do: :no_admissible_composition, else: :lexical_role_blocked)
 
@@ -36,6 +37,7 @@ defmodule Core.Semantic.Composition do
           factual_authority?: false
         }, else: %{
           blockers: blockers,
+          admission_audit: admission_audit,
           blocked_role_count: length(blockers),
           factual_authority?: false
         }))
@@ -50,6 +52,7 @@ defmodule Core.Semantic.Composition do
         reconsidered_roles: reconsidered_roles(proof),
         abstention_reason: if(is_map(proof), do: nil, else: abstention_reason),
         blockers: blockers,
+        admission_audit: admission_audit,
         factual_authority?: false
       })
 
