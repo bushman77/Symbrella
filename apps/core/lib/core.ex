@@ -182,6 +182,10 @@ defmodule Core do
     |> StateDump.capture(:lifg_relational_feedback)
     |> Core.MWE.SenseResolution.attach_verified(opts)
     |> StateDump.capture(:verified_mwe_senses)
+    # Rank complete sentence readings from independently verified signatures.
+    # This is observational: no lexical winners or memory contents are altered.
+    |> Core.Syntax.StructuralCompetition.attach()
+    |> StateDump.capture(:structural_competition)
     # Read-only episodic projection provides independently revalidated
     # participant roles before SentenceMeaning composes the proposition.
     # No database write or response is performed by either of these stages.
