@@ -8,7 +8,7 @@ defmodule Core.Semantic.Composition do
   reproducible typed lambda derivations, not verified statements about reality.
   """
   alias Core.Pipeline.Trace
-  alias Core.Semantic.Composition.{Diagnosis, Event, Expression, Proof, Reducer, RoleWitness}
+  alias Core.Semantic.Composition.{Diagnosis, Event, Nominal, Proof, RoleWitness}
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @max_signatures 64
@@ -223,11 +223,9 @@ defmodule Core.Semantic.Composition do
 
     with {:ok, adjective} <- witnessed_role(si, modifier, "adjective"),
          {:ok, noun} <- witnessed_role(si, head, "noun"),
-         {:ok, modifier_term} <- Expression.adjective(adjective.word),
-         {:ok, noun_term} <- Expression.noun(noun.word),
-         initial = {:apply, modifier_term, noun_term},
-         {:ok, {:arrow, :entity, :truth}} <- Expression.type_of(initial),
-         {:ok, result, steps} <- Reducer.reduce(initial) do
+         {:ok, %{initial: initial, result: result, steps: steps,
+                 result_type: {:arrow, :entity, :truth}}} <-
+           Nominal.compose(noun.word, [adjective.word]) do
       proof = %{
         version: 1,
         status: :derived,
