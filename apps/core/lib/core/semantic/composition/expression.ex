@@ -10,7 +10,7 @@ defmodule Core.Semantic.Composition.Expression do
   @nouns %{"bird" => :bird, "cat" => :cat, "dog" => :dog}
   @adjectives %{"black" => :black, "white" => :white, "small" => :small}
   @predicates MapSet.new([:bird, :cat, :dog, :black, :white, :small])
-  @event_actions MapSet.new([:sit, :fly])
+  @event_actions MapSet.new([:sit, :sleep, :fly])
   @event_actors MapSet.new([:bird, :cat, :dog])
   @landmarks MapSet.new([:fence, :tree, :table])
   @spatial_relations MapSet.new([:on, :in, :under, :beside, :above, :below, :into])
