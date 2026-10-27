@@ -15,10 +15,73 @@ defmodule Core.Semantic.Composition.Lexical do
     "above" => :above, "below" => :below, "into" => :into
   }
   @landmarks %{"fence" => :fence, "tree" => :tree, "table" => :table}
+  @actors %{"bird" => :bird, "cat" => :cat, "dog" => :dog}
+  @actions %{"sitting" => :sit, "sleeping" => :sleep, "flying" => :fly}
 
   @event_property {:arrow, :event, :truth}
   @spatial_modifier_type {:arrow, :landmark_kind,
     {:arrow, @event_property, @event_property}}
+
+  @doc "Closed lexical event-action meaning, without asserting an occurrence."
+  @spec action(String.t()) :: {:ok, map()} | :unsupported
+  def action(surface) when is_binary(surface) do
+    case Map.fetch(@actions, surface) do
+      {:ok, symbol} ->
+        term = {:action_kind, symbol}
+        if Expression.type_of(term) == {:ok, :action_kind},
+          do: {:ok, %{surface: surface, symbol: symbol, term: term, type: :action_kind}},
+          else: :unsupported
+      :error -> :unsupported
+    end
+  end
+
+  def action(_), do: :unsupported
+
+  @doc "Closed lexical actor-kind meaning, without identifying an individual."
+  @spec actor(String.t()) :: {:ok, map()} | :unsupported
+  def actor(surface) when is_binary(surface) do
+    case Map.fetch(@actors, surface) do
+      {:ok, symbol} ->
+        term = {:actor_kind, symbol}
+        if Expression.type_of(term) == {:ok, :actor_kind},
+          do: {:ok, %{surface: surface, symbol: symbol, term: term, type: :actor_kind}},
+          else: :unsupported
+      :error -> :unsupported
+    end
+  end
+
+  def actor(_), do: :unsupported
+
+  @doc "Reusable progressive-aspect operator: action-kind -> event -> truth."
+  @spec progressive_event() :: {:ok, map()} | :unsupported
+  def progressive_event do
+    type = {:arrow, :action_kind, @event_property}
+    term =
+      {:lambda, "action", :action_kind,
+       {:lambda, "e", :event,
+        {:and, {:event_action, {:var, "action"}, {:var, "e"}},
+         {:event_aspect, :progressive, {:var, "e"}}}}}
+
+    if Expression.type_of(term) == {:ok, type},
+      do: {:ok, %{term: term, type: type}},
+      else: :unsupported
+  end
+
+  @doc "Reusable actor operator: actor-kind -> event-property -> event-property."
+  @spec actor_modifier() :: {:ok, map()} | :unsupported
+  def actor_modifier do
+    type = {:arrow, :actor_kind, {:arrow, @event_property, @event_property}}
+    term =
+      {:lambda, "actor", :actor_kind,
+       {:lambda, "P", @event_property,
+        {:lambda, "e", :event,
+         {:and, {:apply, {:var, "P"}, {:var, "e"}},
+          {:event_actor_kind, {:var, "actor"}, {:var, "e"}}}}}}
+
+    if Expression.type_of(term) == {:ok, type},
+      do: {:ok, %{term: term, type: type}},
+      else: :unsupported
+  end
 
   @doc """
   A spatial preposition denotes a function of a landmark and an event
@@ -72,6 +135,14 @@ defmodule Core.Semantic.Composition.Lexical do
   end
 
   def landmark(_), do: :unsupported
+
+  @spec known_action?(atom()) :: boolean()
+  def known_action?(symbol) when is_atom(symbol), do: symbol in Map.values(@actions)
+  def known_action?(_), do: false
+
+  @spec known_actor?(atom()) :: boolean()
+  def known_actor?(symbol) when is_atom(symbol), do: symbol in Map.values(@actors)
+  def known_actor?(_), do: false
 
   @spec known_relation?(atom()) :: boolean()
   def known_relation?(relation) when is_atom(relation),
