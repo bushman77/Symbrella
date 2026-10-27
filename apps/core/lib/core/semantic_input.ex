@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 5 adds read-only provisional semantic interpretation metadata.
-  @contract_v 5
+  # Version 6 adds read-only LIFG whole-sentence structural competition.
+  @contract_v 6
 
   @list_fields MapSet.new([
                  :tokens,
@@ -71,6 +71,7 @@ defmodule Core.SemanticInput do
                 :sense_candidates,
                 :sentence_competition,
                 :role_competition,
+                :structural_competition,
                 :semantic_request_frame,
                 :sentence_meaning,
                 :provisional_interpretation,
@@ -208,6 +209,7 @@ defmodule Core.SemanticInput do
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
           role_competition: map() | nil,
+          structural_competition: map() | nil,
           construction_candidates: [map()],
           semantic_request_frame: map() | nil,
           sentence_meaning: map() | nil,
@@ -300,6 +302,7 @@ defmodule Core.SemanticInput do
             sentence_signatures: [],
             sentence_competition: nil,
             role_competition: nil,
+            structural_competition: nil,
             construction_candidates: [],
             semantic_request_frame: nil,
             sentence_meaning: nil,
