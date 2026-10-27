@@ -10,8 +10,8 @@ defmodule Core.Semantic.Composition.Reducer do
   @max_steps 24
   @max_nodes 128
 
-  @spec reduce(Expression.term()) ::
-          {:ok, Expression.term(), [map()]} | {:error, atom()}
+  @spec reduce(Expression.t()) ::
+          {:ok, Expression.t(), [map()]} | {:error, atom()}
   def reduce(expression) do
     with {:ok, type} <- Expression.type_of(expression),
          true <- size(expression) <= @max_nodes do
@@ -43,7 +43,7 @@ defmodule Core.Semantic.Composition.Reducer do
   end
 
   @doc "Perform exactly one leftmost-outermost beta step, or return :normal."
-  @spec step(Expression.term()) :: {:ok, Expression.term()} | :normal
+  @spec step(Expression.t()) :: {:ok, Expression.t()} | :normal
   def step({:apply, {:lambda, name, _type, body}, argument}) do
     {:ok, substitute(body, name, argument)}
   end
