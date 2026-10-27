@@ -91,15 +91,17 @@ defmodule Core.Response.SemanticStrategy do
       case attached do
         %{compositional_evidence: %{kind: :progressive_event_property,
             formally_verified?: true, factual_authority?: false}} ->
-          case Composition.verified(si) do
-            {:ok, %{kind: :progressive_event_property, factual_authority?: false}} ->
-              plan(:explain_reported_event, :event_description, :eligible,
-                :symbolic_generation, :revalidated_event_composition,
-                %{missing: [:real_world_event_grounding],
-                  factual_authority?: false})
+          if Map.get(si, :intent) in [:statement, :tell] do
+            case Composition.verified(si) do
+              {:ok, %{kind: :progressive_event_property, factual_authority?: false}} ->
+                plan(:explain_reported_event, :event_description, :eligible,
+                  :symbolic_generation, :revalidated_event_composition,
+                  %{missing: [:real_world_event_grounding],
+                    factual_authority?: false})
 
-            _ ->
-              nil
+              _ ->
+                nil
+            end
           end
 
         %{kind: :participant_assertion, status: :structurally_interpreted,
