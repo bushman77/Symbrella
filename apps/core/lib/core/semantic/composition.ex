@@ -22,15 +22,15 @@ defmodule Core.Semantic.Composition do
       si
       |> Map.put(:compositional_derivation, proof)
       |> Trace.append(:semantic_composition,
-      decision: if(is_map(proof), do: :derived, else: :abstained),
-      reason: :closed_nominal_lambda_prototype,
-      meta: if(is_map(proof), do: %{
-        construction: proof.construction,
-        span: proof.span,
-        reduction_steps: length(proof.steps),
-        formally_verified?: true,
-        factual_authority?: false
-      }, else: %{})
+        decision: if(is_map(proof), do: :derived, else: :abstained),
+        reason: :closed_nominal_lambda_prototype,
+        meta: if(is_map(proof), do: %{
+          construction: proof.construction,
+          span: proof.span,
+          reduction_steps: length(proof.steps),
+          formally_verified?: true,
+          factual_authority?: false
+        }, else: %{})
 
     Core.Telemetry.emit(@telemetry_event,
       %{derivations: if(is_map(proof), do: 1, else: 0)},
