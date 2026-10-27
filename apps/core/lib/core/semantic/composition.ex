@@ -36,10 +36,14 @@ defmodule Core.Semantic.Composition do
   @spec derive(map()) :: map() | nil
   def derive(%{} = si) do
     signatures = List.wrap(Map.get(si, :sentence_signatures))
-    detected = Signatures.detect(si)
 
-    with true <- Enum.all?(signatures, &(&1 in detected)),
-         true <- structural_scope_valid?(si) do
+    # Most turns have no supported nominal construction. Avoid another
+    # dictionary/signature pass in those cases and bound the prototype.
+    with true <- length(signatures) <= @max_signatures,
+         true <- Enum.any?(signatures, &nominal_signature?/1),
+         true <- structural_scope_valid?(si),
+         detected <- Signatures.detect(si),
+         true <- Enum.all?(signatures, &(&1 in detected)) do
       signatures
       |> Enum.take(@max_signatures)
       |> Enum.filter(&nominal_signature?/1)
@@ -155,10 +159,10 @@ defmodule Core.Semantic.Composition do
       %{status: :preferred} ->
         match?({:ok, _}, StructuralCompetition.verified(si))
 
-      %{status: :no_complete_candidate} ->
-        # The observed nominal phrase is still a partial interpretation, not
-        # a complete sentence. No structural sentence winner is claimed.
-        true
+      %{status: :no_complete_candidate} = recorded ->
+        # A nominal property is a partial reading; confirm that even the
+        # no-clause outcome came from this exact current-turn competition.
+        recorded == Brain.LIFG.StructuralCompetition.resolve(si)
 
       nil ->
         false
