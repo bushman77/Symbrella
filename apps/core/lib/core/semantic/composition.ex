@@ -8,7 +8,7 @@ defmodule Core.Semantic.Composition do
   reproducible typed lambda derivations, not verified statements about reality.
   """
   alias Core.Pipeline.Trace
-  alias Core.Semantic.Composition.{Diagnosis, Event, Expression, Proof, Reducer}
+  alias Core.Semantic.Composition.{Diagnosis, Event, Expression, Proof, Reducer, RoleWitness}
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @max_signatures 64
@@ -32,6 +32,7 @@ defmodule Core.Semantic.Composition do
           span: proof.span,
           reduction_steps: length(proof.steps),
           formally_verified?: true,
+          reconsidered_roles: reconsidered_roles(proof),
           factual_authority?: false
         }, else: %{
           blockers: blockers,
@@ -46,6 +47,7 @@ defmodule Core.Semantic.Composition do
         construction: if(is_map(proof), do: proof.construction, else: nil),
         reduction_steps: if(is_map(proof), do: length(proof.steps), else: 0),
         formally_verified?: is_map(proof),
+        reconsidered_roles: reconsidered_roles(proof),
         abstention_reason: if(is_map(proof), do: nil, else: abstention_reason),
         blockers: blockers,
         factual_authority?: false
@@ -55,6 +57,17 @@ defmodule Core.Semantic.Composition do
   end
 
   def attach(other), do: other
+
+  defp reconsidered_roles(%{premises: %{lexical_witnesses: witnesses}})
+       when is_list(witnesses) do
+    witnesses
+    |> Enum.filter(&(is_map(&1) and Map.get(&1, :selection_basis) ==
+      :construction_alternative))
+    |> Enum.map(&%{role: &1.role, token_index: &1.token_index})
+    |> Enum.take(7)
+  end
+
+  defp reconsidered_roles(_), do: []
 
   @spec derive(map()) :: map() | nil
   def derive(%{} = si) do
@@ -139,14 +152,18 @@ defmodule Core.Semantic.Composition do
   defp compose_event(si, signature) do
     r = signature.roles
 
-    with {:ok, _subject_determiner} <- witnessed_role(si, r.subject_determiner, "determiner"),
-         {:ok, actor} <- witnessed_role(si, r.subject_head, "noun"),
-         {:ok, auxiliary} <- witnessed_auxiliary(si, r.auxiliary),
+    with {:ok, subject_determiner} <-
+           RoleWitness.resolve(si, :subject_determiner, r.subject_determiner, ["determiner"]),
+         {:ok, actor} <- RoleWitness.resolve(si, :subject_head, r.subject_head, ["noun"]),
+         {:ok, auxiliary} <-
+           RoleWitness.resolve(si, :auxiliary, r.auxiliary, ["auxiliary", "verb"]),
          true <- auxiliary.word == "is",
-         {:ok, predicate} <- witnessed_role(si, r.predicate, "verb"),
-         {:ok, preposition} <- witnessed_role(si, r.preposition, "preposition"),
-         {:ok, _location_determiner} <- witnessed_role(si, r.location_determiner, "determiner"),
-         {:ok, landmark} <- witnessed_role(si, r.location_head, "noun"),
+         {:ok, predicate} <- RoleWitness.resolve(si, :predicate, r.predicate, ["verb"]),
+         {:ok, preposition} <-
+           RoleWitness.resolve(si, :preposition, r.preposition, ["preposition"]),
+         {:ok, location_determiner} <-
+           RoleWitness.resolve(si, :location_determiner, r.location_determiner, ["determiner"]),
+         {:ok, landmark} <- RoleWitness.resolve(si, :location_head, r.location_head, ["noun"]),
          {:ok, event} <- Event.compose(%{
            predicate: predicate.word,
            actor: actor.word,
@@ -163,7 +180,11 @@ defmodule Core.Semantic.Composition do
         span: signature.span,
         premises: %{
           signature: Map.take(signature, [:id, :span, :roles, :required_features, :evidence]),
-          lexical_witnesses: [actor, auxiliary, predicate, preposition, landmark],
+          lexical_witnesses: [
+            subject_determiner, actor, auxiliary, predicate, preposition,
+            location_determiner, landmark
+          ],
+          lexical_reconsideration: :construction_scoped_provisional,
           semantic_vocabulary: :closed_event_v2
         },
         initial: event.initial,
@@ -179,13 +200,6 @@ defmodule Core.Semantic.Composition do
       if Event.verify(proof) == :ok, do: proof
     else
       _ -> nil
-    end
-  end
-
-  defp witnessed_auxiliary(si, index) do
-    case witnessed_role(si, index, "verb") do
-      {:ok, _} = found -> found
-      _ -> witnessed_role(si, index, "auxiliary")
     end
   end
 
