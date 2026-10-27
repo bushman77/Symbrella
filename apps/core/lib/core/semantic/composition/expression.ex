@@ -10,14 +10,22 @@ defmodule Core.Semantic.Composition.Expression do
   @nouns %{"bird" => :bird, "cat" => :cat, "dog" => :dog}
   @adjectives %{"black" => :black, "white" => :white, "small" => :small}
   @predicates MapSet.new([:bird, :cat, :dog, :black, :white, :small])
+  @event_actions MapSet.new([:sit, :fly])
+  @event_actors MapSet.new([:bird, :cat, :dog])
+  @landmarks MapSet.new([:fence, :tree, :table])
+  @spatial_relations MapSet.new([:on, :in, :under, :beside, :above, :below, :into])
 
-  @type semantic_type :: :entity | :truth | {:arrow, semantic_type(), semantic_type()}
+  @type semantic_type :: :entity | :event | :truth | {:arrow, semantic_type(), semantic_type()}
   @type t ::
           {:var, String.t()}
           | {:lambda, String.t(), semantic_type(), t()}
           | {:apply, t(), t()}
           | {:predicate, atom(), t()}
           | {:and, t(), t()}
+          | {:event_action, atom(), t()}
+          | {:event_aspect, :progressive, t()}
+          | {:event_actor_kind, atom(), t()}
+          | {:event_spatial, atom(), atom(), t()}
 
   @spec noun(String.t()) :: {:ok, t()} | :unsupported
   def noun(word) when is_binary(word) do
@@ -96,9 +104,39 @@ defmodule Core.Semantic.Composition.Expression do
     end
   end
 
+  def type_of({:event_action, action, event}, env) do
+    event_predicate_type(MapSet.member?(@event_actions, action), event, env)
+  end
+
+  def type_of({:event_aspect, :progressive, event}, env),
+    do: event_predicate_type(true, event, env)
+
+  def type_of({:event_actor_kind, kind, event}, env) do
+    event_predicate_type(MapSet.member?(@event_actors, kind), event, env)
+  end
+
+  def type_of({:event_spatial, relation, landmark, event}, env) do
+    event_predicate_type(
+      MapSet.member?(@spatial_relations, relation) and
+        MapSet.member?(@landmarks, landmark),
+      event,
+      env
+    )
+  end
+
   def type_of(_, _), do: {:error, :invalid_expression}
 
+  defp event_predicate_type(false, _event, _env), do: {:error, :unapproved_event_symbol}
+
+  defp event_predicate_type(true, event, env) do
+    case type_of(event, env) do
+      {:ok, :event} -> {:ok, :truth}
+      _ -> {:error, :event_argument_type}
+    end
+  end
+
   def valid_type?(:entity), do: true
+  def valid_type?(:event), do: true
   def valid_type?(:truth), do: true
   def valid_type?({:arrow, left, right}), do: valid_type?(left) and valid_type?(right)
   def valid_type?(_), do: false
