@@ -10,7 +10,7 @@ defmodule Core.Semantic.Composition.RoleWitness do
   a real-world fact, or permission to assert an event.
   """
 
-  @alternative_roles [:auxiliary, :predicate, :location_head]
+  @alternative_roles [:auxiliary, :predicate, :location_head, :preposition]
   @max_scores 128
 
   @spec resolve(map(), atom(), non_neg_integer(), [String.t()]) ::
@@ -160,13 +160,29 @@ defmodule Core.Semantic.Composition.RoleWitness do
         end)
         |> Enum.sort_by(fn {id, score} -> {-score, id} end)
 
-      # A tied POS candidate does not justify selecting an arbitrary sense.
-      case candidates do
-        [{id, score} | rest] when rest == [] ->
+      # For a prepositional event role, independently scored and attested
+      # candidates establish POS compatibility without deciding which
+      # dictionary sense the speaker intended. Keep every witness bound to
+      # this SI so verification fails closed if score/dictionary data changes.
+      case {role, candidates} do
+        {:preposition, [{_id, score} | _]} ->
+          {:ok, %{
+            token_index: index,
+            word: word,
+            pos: "preposition",
+            sense_id: nil,
+            attested_sense_ids: Enum.map(candidates, &elem(&1, 0)),
+            role: role,
+            selection_basis: :construction_pos_only,
+            original_lifg_id: selected_id,
+            candidate_score: score
+          }}
+
+        {_, [{id, score}]} ->
           {:ok, witness(index, word, id, :construction_alternative,
             selected_id, role, score)}
 
-        [{id, score}, {_other_id, runner_score} | _] when score > runner_score ->
+        {_, [{id, score}, {_other_id, runner_score} | _]} when score > runner_score ->
           {:ok, witness(index, word, id, :construction_alternative,
             selected_id, role, score)}
 
