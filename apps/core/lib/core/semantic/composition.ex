@@ -83,7 +83,18 @@ defmodule Core.Semantic.Composition do
          true <- structural_scope_valid?(si),
          detected <- Signatures.detect(si),
          true <- Enum.all?(signatures, &(&1 in detected)) do
-      case Enum.find(signatures, &complete_stacked_nominal?(si, &1)) do
+      stacked_signatures =
+        Enum.filter(signatures, &stacked_nominal_signature?/1)
+
+      case Enum.find(stacked_signatures, &complete_stacked_nominal?(si, &1)) do
+        nil when stacked_signatures != [] ->
+          # A grammatical two-modifier NP may be embedded in a longer input,
+          # or a required preceding determiner may be unattested. Preserve
+          # independently verified event readings, but never promote that
+          # partial NP (or its shorter adjective+noun constituent) into a
+          # complete interpretation of the turn.
+          event_derivation(si, signatures)
+
         nil ->
           event_derivation(si, signatures) ||
             (signatures
@@ -95,9 +106,8 @@ defmodule Core.Semantic.Composition do
              |> Enum.find_value(&compose_signature(si, &1)))
 
         signature ->
-          # A full nominal reading must pass structural preference and all
-          # lexical witnesses. Never fall back to a partial adjective+noun
-          # reading when the complete phrase cannot be admitted.
+          # A complete nominal reading requires structural preference and all
+          # attested lexical witnesses. No partial-reading fallback.
           compose_complete_stacked_nominal(si, signature)
       end
     else
@@ -251,6 +261,12 @@ defmodule Core.Semantic.Composition do
   end
 
   defp nominal_signature?(_), do: false
+
+  defp stacked_nominal_signature?(%{
+         id: :noun_phrase, roles: %{modifier_1: _, modifier_2: _, head: _}
+       } = signature), do: nominal_signature?(signature)
+
+  defp stacked_nominal_signature?(_), do: false
 
   defp complete_stacked_nominal?(
          si, %{span: {0, last},
