@@ -19,6 +19,23 @@ defmodule Core.Semantic.SentenceMeaning do
   def attach(%{} = si) do
     meaning = build(si)
 
+    # Mathematical derivation is conditional evidence, not an event assertion.
+    meaning =
+      case Core.Semantic.Composition.verified(si) do
+        {:ok, proof} ->
+          Map.put(meaning, :compositional_evidence, %{
+            kind: proof.kind,
+            span: proof.span,
+            resulting_type: proof.result_type,
+            proof_steps: length(proof.steps),
+            formally_verified?: true,
+            factual_authority?: false,
+            epistemic_status: proof.epistemic_status
+          })
+
+        :not_applicable -> meaning
+      end
+
     si
     |> Map.put(:sentence_meaning, meaning)
     |> Trace.append(:sentence_meaning,
