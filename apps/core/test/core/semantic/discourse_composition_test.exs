@@ -74,10 +74,16 @@ defmodule Core.Semantic.DiscourseCompositionTest do
     assert meaning.event_semantics.event_existence == :not_asserted
     assert meaning.compositional_evidence.nominal_property.formally_verified?
     assert meaning.compositional_evidence.event_property.formally_verified?
-    assert meaning.compositional_evidence.typed_cross_turn_join_verified? == false
+    assert meaning.compositional_evidence.typed_cross_turn_join_verified? == true
+    assert meaning.compositional_evidence.typed_cross_turn_join.formally_verified?
+    assert meaning.compositional_evidence.typed_cross_turn_join.type ==
+      {:arrow, :entity, {:arrow, :event, :truth}}
+    assert meaning.compositional_evidence.typed_cross_turn_join.quantifier_applied? == false
+    assert meaning.compositional_evidence.typed_cross_turn_join.referent_identity == :unresolved
     assert meaning.factual_authority? == false
     assert :event_occurrence in meaning.unresolved
     assert :referent_identity in meaning.unresolved
+    refute :typed_cross_turn_join in meaning.unresolved
     assert :ok = Core.SemanticInput.validate_contract(si)
   end
 
