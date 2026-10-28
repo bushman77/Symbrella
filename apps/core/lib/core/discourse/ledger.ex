@@ -22,7 +22,6 @@ defmodule Core.Discourse.Ledger do
   alias Core.Semantic.{Composition, DiscourseComposition}
   alias Core.Pipeline.Trace
 
-  @max_sentence_bytes 2048
   @max_query_bytes 256
   @max_public_candidates 5
 
@@ -228,9 +227,7 @@ defmodule Core.Discourse.Ledger do
     normalized =
       text |> String.downcase() |> String.replace("’", "'")
 
-    modifiers
-    |> length()
-    |> then(&Enum.to_list(0..&1))
+    0..length(modifiers)
     |> Enum.map(fn skipped ->
       phrase = Enum.join(Enum.drop(modifiers, skipped) ++ [head], " ")
       regex = Regex.compile!(
