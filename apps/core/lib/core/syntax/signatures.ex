@@ -84,7 +84,8 @@ defmodule Core.Syntax.Signatures do
     (definition_imperatives(si, nodes) ++
        definition_request_structures(si, nodes) ++
        wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
-       progressive_locatives(nodes) ++ finite_present_svo(nodes) ++
+       progressive_locatives(nodes) ++ anaphoric_progressive_locatives(nodes) ++
+       finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
        counted_present_svo(nodes) ++
        copular_relative_classifications(nodes) ++
@@ -813,6 +814,41 @@ defmodule Core.Syntax.Signatures do
            :attested_present_participle, :attested_preposition,
            :attested_nominal_location] ++
             if(prep.word == "into", do: [:directional_not_arrival], else: [])
+        )]
+      else
+        []
+      end
+    end)
+  end
+
+  # Pronoun + copular progressive + spatial complement is a grammatical
+  # hypothesis. DiscourseComposition separately requires a same-session,
+  # verified nominal antecedent before giving the pronoun a candidate referent.
+  # This signature alone makes NO claim about the speaker's referent or event.
+  defp anaphoric_progressive_locatives(nodes) do
+    nodes
+    |> Enum.chunk_every(6, 1, :discard)
+    |> Enum.flat_map(fn [subject, aux, predicate, prep, loc_det, location] = segment ->
+      if subject.word == "it" and pos?(subject, "pronoun") and
+           aux.word == "is" and
+           (pos?(aux, "verb") or pos?(aux, "auxiliary")) and
+           form?(predicate, :present_participle) and pos?(predicate, "verb") and
+           pos?(prep, "preposition") and
+           prep.word in ~w(on in under beside above below into) and
+           pos?(loc_det, "determiner") and pos?(location, "noun") and
+           valid_surface?(segment) do
+        [signature(
+          :progressive_anaphoric_locative_candidate,
+          {subject.index, location.index},
+          %{subject: subject.index, auxiliary: aux.index,
+            predicate: predicate.index, preposition: prep.index,
+            location_determiner: loc_det.index, location_head: location.index},
+          %{subject: [:pos_pronoun], auxiliary: [:pos_auxiliary],
+            predicate: [:present_participle], preposition: [:pos_preposition],
+            location_determiner: [:pos_determiner], location_head: [:pos_noun]},
+          [:contiguous_surface, :attested_subject_pronoun,
+           :attested_present_participle, :attested_preposition,
+           :attested_nominal_location, :unresolved_anaphoric_subject]
         )]
       else
         []
