@@ -89,6 +89,23 @@ defmodule Core.Response.SemanticStrategy do
 
     if is_map(attached) and attached == SentenceMeaning.build(si) do
       case attached do
+        %{compositional_evidence: %{kind: :nominal_property,
+            formally_verified?: true, factual_authority?: false}} ->
+          if Map.get(si, :intent) in [:unknown, :statement, :tell] and
+               not String.ends_with?(String.trim(Map.get(si, :sentence, "")), "?") do
+            case Composition.verified(si) do
+              {:ok, %{kind: :nominal_property,
+                      construction: :stacked_adjective_noun,
+                      quantifier_applied?: false, factual_authority?: false}} ->
+                plan(:clarify_nominal_description, :nominal_fragment, :eligible,
+                  :symbolic_generation, :revalidated_nominal_composition,
+                  %{missing: [:dialogue_goal], factual_authority?: false})
+
+              _ ->
+                nil
+            end
+          end
+
         %{compositional_evidence: %{kind: :progressive_event_property,
             formally_verified?: true, factual_authority?: false}} ->
           if Map.get(si, :intent) in [:statement, :tell] do
