@@ -13,7 +13,8 @@ defmodule Core.Response.SemanticStrategy do
 
   alias Core.Response.{LexicalDefinition, SymbolicGeneration}
   alias Core.Semantic.Composition
-  alias Core.Semantic.{FrameUnifier, ProvisionalInterpretation, SentenceMeaning, SpeechActs}
+  alias Core.Semantic.{DiscourseComposition, FrameUnifier, ProvisionalInterpretation,
+    SentenceMeaning, SpeechActs}
 
   @type strategy :: map()
 
@@ -89,6 +90,22 @@ defmodule Core.Response.SemanticStrategy do
 
     if is_map(attached) and attached == SentenceMeaning.build(si) do
       case attached do
+        %{kind: :anaphoric_spatial_report, status: :provisional,
+          source: :revalidated_cross_turn_composition, factual_authority?: false} ->
+          if Map.get(si, :intent) in [:unknown, :statement, :tell] do
+            case DiscourseComposition.verified(si) do
+              {:ok, %{kind: :anaphoric_spatial_report,
+                       factual_authority?: false, unresolved: unresolved}}
+                  when is_list(unresolved) ->
+                plan(:clarify_anaphoric_spatial_report, :anaphoric_spatial_report,
+                  :eligible, :symbolic_generation, :revalidated_cross_turn_composition,
+                  %{missing: unresolved, factual_authority?: false})
+
+              _ ->
+                nil
+            end
+          end
+
         %{compositional_evidence: %{kind: :nominal_property,
             formally_verified?: true, factual_authority?: false}} ->
           if Map.get(si, :intent) in [:unknown, :statement, :tell] and
