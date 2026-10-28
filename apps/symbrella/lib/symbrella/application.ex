@@ -86,6 +86,10 @@ defmodule Symbrella.Application do
       # caller and can terminate concurrent history reads.
       Core.Response.LlmChatHistoryOwner,
 
+      # A separate protected semantic timeline, supervised independently of
+      # the LLM prompt-history owner and individual request processes.
+      Core.Discourse.Ledger.Owner,
+
       # Explicit, temporary human approvals for Colony replies. No polling or
       # outbound writes occur from this supervised store.
       Core.Social.ColonyDraftStore,
