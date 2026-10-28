@@ -29,6 +29,7 @@ defmodule Core.Semantic.Composition.Expression do
           | {:event_action, atom() | t(), t()}
           | {:event_aspect, :progressive, t()}
           | {:event_actor_kind, atom() | t(), t()}
+          | {:event_actor_entity, t(), t()}
           | {:event_spatial, atom(), atom(), t()}
 
   @spec noun(String.t()) :: {:ok, t()} | :unsupported
@@ -131,6 +132,17 @@ defmodule Core.Semantic.Composition.Expression do
   def type_of({:event_actor_kind, kind, event}, env) do
     event_predicate_type(kind_valid?(kind, :actor_kind, @event_actors, env),
       event, env)
+  end
+
+  # This proposition relates a possible entity and a possible event; it
+  # does not assert that either exists or resolve a discourse referent.
+  def type_of({:event_actor_entity, entity, event}, env) do
+    with {:ok, :entity} <- type_of(entity, env),
+         {:ok, :event} <- type_of(event, env) do
+      {:ok, :truth}
+    else
+      _ -> {:error, :entity_event_actor_argument_type}
+    end
   end
 
   def type_of({:landmark_kind, kind}, _env) do
