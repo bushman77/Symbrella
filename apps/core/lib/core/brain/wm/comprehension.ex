@@ -240,7 +240,7 @@ defmodule Core.Brain.WM.Comprehension do
       cond do
         explicit_entities != [] -> explicit_entities
         projected_entities != [] -> projected_entities
-        is_map(current_nominal_focus) -> [current_nominal_focus.surface]
+        is_map(nominal_focus) -> [nominal_focus.surface]
         true -> []
       end
 
