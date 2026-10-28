@@ -29,7 +29,9 @@ defmodule Core.Discourse.References do
   # binding. It carries a replay-verified nominal property, not a verified
   # object or physical location. A narrow singular spatial continuation can
   # mention that nominal description as a *candidate* antecedent only.
-  defp nominal_followup_reference(si) do
+  @doc "Recompute a provisional singular referent from a same-session WM focus."
+  @spec nominal_followup_reference(map()) :: map() | nil
+  def nominal_followup_reference(si) when is_map(si) do
     session = Map.get(si, :session_id)
     sentence = Map.get(si, :sentence)
     context = Map.get(si, :wm_context)
