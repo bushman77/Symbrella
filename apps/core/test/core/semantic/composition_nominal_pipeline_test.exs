@@ -117,6 +117,113 @@ defmodule Core.Semantic.CompositionNominalPipelineTest do
       wrong_noun.id
   end
 
+  test "a scored adjective POS alternative licenses a provisional nominal proof" do
+    si = input(~w(The small black bird), ~w(determiner adjective adjective noun))
+    noun_row = %{id: "black|noun|1", norm: "black", pos: "noun", semantic_atoms: []}
+
+    conflicting = %{si |
+      active_cells: [noun_row | si.active_cells],
+      lifg_choices: Enum.map(si.lifg_choices, fn
+        %{token_index: 2} = choice ->
+          choice
+          |> Map.put(:id, noun_row.id)
+          |> Map.put(:candidate_probs, %{
+            "black|noun|1" => 0.058,
+            "black|adjective|1" => 0.054
+          })
+
+        choice ->
+          choice
+      end)
+    }
+
+    out = run(conflicting)
+    assert out.structural_competition.status == :preferred
+    assert out.structural_competition.preferred.conflicting_roles == 1
+    assert {:ok, proof} = Composition.verified(out)
+    assert proof.construction == :stacked_adjective_noun
+    assert proof.span == {0, 3}
+    assert Proof.verify(proof) == :ok
+    assert proof.factual_authority? == false
+    assert proof.quantifier_applied? == false
+
+    adjective = Enum.find(proof.premises.lexical_witnesses,
+      &(Map.get(&1, :role) == :modifier_2))
+
+    assert adjective.word == "black"
+    assert adjective.pos == "adjective"
+    assert adjective.sense_id == nil
+    assert adjective.original_lifg_id == noun_row.id
+    assert adjective.selection_basis == :construction_pos_only
+    assert adjective.attested_sense_ids == ["black|adjective|1"]
+    assert adjective.attested_candidate_scores == [{"black|adjective|1", 0.054}]
+    assert Enum.find(out.lifg_choices, &(&1.token_index == 2)).id == noun_row.id
+
+    unscored = %{out | lifg_choices: Enum.map(out.lifg_choices, fn
+      %{token_index: 2} = choice -> Map.delete(choice, :candidate_probs)
+      choice -> choice
+    end)}
+    assert Composition.verified(unscored) == :not_applicable
+
+    unattested = %{out |
+      active_cells: Enum.reject(out.active_cells, &(&1.id == "black|adjective|1"))
+    }
+    assert Composition.verified(unattested) == :not_applicable
+
+    changed_score = %{out | lifg_choices: Enum.map(out.lifg_choices, fn
+      %{token_index: 2} = choice ->
+        put_in(choice, [:candidate_probs, "black|adjective|1"], 0.052)
+      choice -> choice
+    end)}
+    assert Composition.verified(changed_score) == :not_applicable
+  end
+
+  test "tied attested adjective senses do not turn POS evidence into a fake sense" do
+    si = input(~w(small black bird), ~w(adjective adjective noun))
+    noun_row = %{id: "black|noun|1", norm: "black", pos: "noun", semantic_atoms: []}
+    second_adjective = %{
+      id: "black|adjective|2", norm: "black", pos: "adjective", semantic_atoms: []
+    }
+
+    conflicting = %{si |
+      active_cells: [noun_row, second_adjective | si.active_cells],
+      lifg_choices: Enum.map(si.lifg_choices, fn
+        %{token_index: 1} = choice ->
+          choice
+          |> Map.put(:id, noun_row.id)
+          |> Map.put(:candidate_probs, %{
+            "black|noun|1" => 0.052,
+            "black|adjective|1" => 0.05,
+            "black|adjective|2" => 0.05
+          })
+
+        choice ->
+          choice
+      end)
+    }
+
+    out = run(conflicting)
+    assert {:ok, proof} = Composition.verified(out)
+    adjective = Enum.find(proof.premises.lexical_witnesses,
+      &(Map.get(&1, :role) == :modifier_2))
+    assert adjective.sense_id == nil
+    assert adjective.selection_basis == :construction_pos_only
+    assert adjective.attested_sense_ids ==
+      ["black|adjective|1", "black|adjective|2"]
+    assert adjective.attested_candidate_scores ==
+      [{"black|adjective|1", 0.05}, {"black|adjective|2", 0.05}]
+    assert out.structural_competition.preferred.conflicting_roles == 1
+    assert Proof.verify(proof) == :ok
+    assert proof.factual_authority? == false
+
+    changed_tie = %{out | lifg_choices: Enum.map(out.lifg_choices, fn
+      %{token_index: 1} = choice ->
+        put_in(choice, [:candidate_probs, "black|adjective|2"], 0.049)
+      choice -> choice
+    end)}
+    assert Composition.verified(changed_tie) == :not_applicable
+  end
+
   test "missing independent adjective or determiner evidence cannot yield proof" do
     si = input(~w(The small black bird), ~w(determiner adjective adjective noun))
 
