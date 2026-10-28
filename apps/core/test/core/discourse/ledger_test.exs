@@ -128,6 +128,49 @@ defmodule Core.Discourse.LedgerTest do
       Ledger.resolve(sid, "I meant the small black bird.")
   end
 
+  test "provisional spatial reports become attributed event records, never verified events",
+       %{sid: sid} do
+    first = nominal(sid, ~w(The small black bird))
+    context = Core.Brain.WM.Comprehension.context_from(first, %{
+      recognized_topics: [], understood: [], uncertain: [], degraded?: false
+    })
+
+    words = ~w(It is sitting on the fence)
+    positions = ~w(pronoun verb verb preposition determiner noun)
+    rows = Enum.zip(words, positions) |> Enum.map(fn {word, part} ->
+      norm = String.downcase(word)
+      %{id: "#{norm}|#{part}|1", norm: norm, pos: part,
+        semantic_atoms: if(norm == "sitting",
+          do: ["tag:form-of", "tag:present", "tag:participle"], else: [])}
+    end)
+
+    followup =
+      %Core.SemanticInput{
+        session_id: sid, source: :test, intent: :unknown,
+        sentence: "It is sitting on the fence.",
+        wm_context: context,
+        tokens: words |> Enum.with_index()
+          |> Enum.map(fn {word, idx} -> %{phrase: word, index: idx, n: 1} end),
+        active_cells: rows,
+        lifg_choices: rows |> Enum.with_index()
+          |> Enum.map(fn {row, idx} -> %{id: row.id, token_index: idx} end)
+      }
+      |> References.attach()
+      |> Signatures.attach()
+      |> StructuralCompetition.attach()
+      |> Core.Semantic.SentenceMeaning.attach()
+
+    assert {:ok, _} = Core.Semantic.DiscourseComposition.verified(followup)
+    Ledger.record(first)
+    Ledger.record(followup)
+
+    assert [%{kind: :reported_spatial_description, seq: 2, status: :provisional,
+              antecedent: "small black bird", action: :sit, relation: :on,
+              landmark: :fence, factual_authority?: false,
+              event_occurrence_verified?: false, referent_verified?: false},
+            %{kind: :nominal_description, seq: 1}] = Ledger.entries(sid)
+  end
+
   test "no session crossing or long-distance bare-pronoun revival", %{sid: sid, other: other} do
     Ledger.record(nominal(sid, ~w(The small black bird)))
 
