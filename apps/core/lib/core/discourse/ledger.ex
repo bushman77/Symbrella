@@ -234,7 +234,7 @@ defmodule Core.Discourse.Ledger do
         Regex.escape(phrase) <> "(?=\\z|[^\\p{L}\\p{N}])", "u"
       )
 
-      if Regex.match?(regex, normalized), do: length(phrase), else: 0
+      if Regex.match?(regex, normalized), do: String.length(phrase), else: 0
     end)
     |> Enum.max(fn -> 0 end)
   end
