@@ -227,8 +227,7 @@ defmodule Core.Discourse.Ledger do
     normalized =
       text |> String.downcase() |> String.replace("’", "'")
 
-    0..length(modifiers)
-    |> Enum.map(fn skipped ->
+    Enum.map(0..length(modifiers), fn skipped ->
       phrase = Enum.join(Enum.drop(modifiers, skipped) ++ [head], " ")
       regex = Regex.compile!(
         "(?:\\A|[^\\p{L}\\p{N}])(?:that|this|the)\\s+" <>
