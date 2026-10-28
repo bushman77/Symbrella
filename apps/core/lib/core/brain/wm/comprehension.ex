@@ -342,7 +342,7 @@ defmodule Core.Brain.WM.Comprehension do
   defp witness_at(_, _), do: nil
 
   defp safe_lemma?(word) when is_binary(word) do
-    byte_size(word) <= 40 and Regex.match?(~r/\\A\\p{L}[\\p{L}\\p{M}'-]*\\z/u, word)
+    byte_size(word) <= 40 and Regex.match?(~r/\A\p{L}[\p{L}\p{M}'-]*\z/u, word)
   end
 
   defp safe_lemma?(_), do: false
