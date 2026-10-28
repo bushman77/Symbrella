@@ -8,7 +8,7 @@ defmodule Core.Response.SymbolicGeneration do
   """
 
   alias Core.Semantic.Composition
-  alias Core.Semantic.{EpisodicProjection, SentenceMeaning, SpeechActs}
+  alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning, SpeechActs}
 
   # Accept the intent labels the live classifier actually emits for
   # complete social turns. These labels by themselves never authorize output:
@@ -29,9 +29,13 @@ defmodule Core.Response.SymbolicGeneration do
         case maybe_realize_compositional_nominal(user_text, intent, si) do
           {:ok, _, _} = nominal -> nominal
           :not_applicable ->
-            case maybe_realize_compositional_event(user_text, intent, si) do
-              {:ok, _, _} = event -> event
-              :not_applicable -> maybe_realize_report(user_text, intent, si)
+            case maybe_realize_anaphoric_spatial(user_text, intent, si) do
+              {:ok, _, _} = anaphoric -> anaphoric
+              :not_applicable ->
+                case maybe_realize_compositional_event(user_text, intent, si) do
+                  {:ok, _, _} = event -> event
+                  :not_applicable -> maybe_realize_report(user_text, intent, si)
+                end
             end
         end
     end
@@ -183,6 +187,72 @@ defmodule Core.Response.SymbolicGeneration do
     on: "on", in: "in", under: "under", beside: "beside",
     above: "above", below: "below"
   }
+
+  # A cross-turn link is *provisional*, even though both its nominal
+  # description and event-property proofs were independently verified.
+  # Recompute all role evidence against the same-session WM focus before
+  # referring to the remembered subject in a conversational response.
+  defp maybe_realize_anaphoric_spatial(user_text, intent, si)
+       when intent in [:unknown, :tell, :statement] do
+    with true <- Map.get(si, :source) in [:user, :prod, :test],
+         ^user_text <- Map.get(si, :sentence),
+         %{kind: :anaphoric_spatial_report,
+           status: :provisional, factual_authority?: false} = meaning <-
+             Map.get(si, :sentence_meaning),
+         ^meaning <- SentenceMeaning.build(si),
+         {:ok, ^meaning} <- DiscourseComposition.verified(si),
+         %{antecedent: %{head: head, modifiers: [first, second],
+                          description: description,
+                          referent_status: :candidate_same_session},
+           event_semantics: %{
+             aspect: :progressive,
+             predicate: activity_kind,
+             actor: %{kind: actor_kind, referent: :unresolved},
+             spatial: %{relation: relation, landmark_kind: landmark_kind,
+                        reading: :locative, arrival: :not_established},
+             event_existence: :not_asserted
+           },
+           compositional_evidence: %{
+             nominal_property: %{formally_verified?: true},
+             event_property: %{formally_verified?: true},
+             typed_cross_turn_join_verified?: false,
+             lexical_witnesses: witnesses
+           }} <- meaning,
+         {:ok, actor} <- Map.fetch(@event_actors, actor_kind),
+         ^actor <- head,
+         true <- first in ["small", "black", "white"],
+         true <- second in ["small", "black", "white"],
+         ^description <- Enum.join([first, second, actor], " "),
+         {:ok, activity} <- Map.fetch(@event_activities, activity_kind),
+         {:ok, preposition} <- Map.fetch(@event_static_relations, relation),
+         {:ok, landmark} <- Map.fetch(@event_landmarks, landmark_kind),
+         %{word: determiner_word, pos: "determiner"} <-
+           Enum.find(witnesses, &(Map.get(&1, :role) == :location_determiner)),
+         true <- determiner_word in ["a", "an", "the"] do
+      {:ok,
+       "You're describing the #{description} #{activity} #{preposition} " <>
+         "#{determiner_word} #{landmark}. Is that the #{actor} you mean?",
+       %{
+         status: :symbolic_realized,
+         speech_act: :clarify_anaphoric_reference,
+         interpreted_speech_act: :reported_spatial_description,
+         provenance: :revalidated_cross_turn_composition,
+         construction: :progressive_anaphoric_locative_candidate,
+         nominal_proof_verified?: true,
+         event_proof_verified?: true,
+         typed_cross_turn_join_verified?: false,
+         referent_verified?: false,
+         event_occurrence_verified?: false,
+         exact_dictionary_sense_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp maybe_realize_anaphoric_spatial(_, _, _), do: :not_applicable
 
   defp maybe_realize_compositional_event(user_text, intent, si)
        when intent in [:tell, :statement] do
