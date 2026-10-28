@@ -10,7 +10,7 @@ defmodule Core.Semantic.DiscourseComposition do
   """
 
   alias Core.Discourse.References
-  alias Core.Semantic.Composition.{Event, Nominal, Proof, RoleWitness}
+  alias Core.Semantic.Composition.{EntityEvent, Event, Nominal, Proof, RoleWitness}
   alias Core.Syntax.{Signatures, StructuralCompetition}
 
   @construction :progressive_anaphoric_locative_candidate
@@ -62,7 +62,9 @@ defmodule Core.Semantic.DiscourseComposition do
            predicate: predicate.word, actor: noun,
            preposition: preposition.word, landmark: landmark.word
          }),
-         :ok <- Event.verify(event) do
+         :ok <- Event.verify(event),
+         {:ok, joined} <- EntityEvent.compose(nominal, event),
+         :ok <- EntityEvent.verify(joined, nominal, event) do
       %{
         version: 1,
         kind: :anaphoric_spatial_report,
@@ -86,7 +88,16 @@ defmodule Core.Semantic.DiscourseComposition do
             formally_verified?: true},
           event_property: %{result: event.result, type: event.result_type,
             formally_verified?: true},
-          typed_cross_turn_join_verified?: false,
+          typed_cross_turn_join: %{
+            result: joined.result,
+            type: joined.result_type,
+            proof_steps: length(joined.steps),
+            formally_verified?: true,
+            quantifier_applied?: false,
+            referent_identity: :unresolved,
+            event_existence: :not_asserted
+          },
+          typed_cross_turn_join_verified?: true,
           lexical_witnesses: [subject, auxiliary, predicate, preposition,
             determiner, landmark],
           source_signature: Map.take(signature, [:id, :span, :roles, :evidence])
@@ -97,7 +108,7 @@ defmodule Core.Semantic.DiscourseComposition do
           external_facts: :not_checked
         },
         unresolved: [:referent_identity, :event_occurrence,
-          :exact_dictionary_senses, :typed_cross_turn_join],
+          :exact_dictionary_senses],
         factual_authority?: false
       }
     else
