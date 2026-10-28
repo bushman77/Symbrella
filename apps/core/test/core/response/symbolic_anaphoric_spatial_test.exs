@@ -130,7 +130,15 @@ defmodule Core.Response.SymbolicAnaphoricSpatialTest do
       "Is that the bird you mean?"
     assert projected.response_meta.response_source == :symbolic_generation
     assert projected.response_meta.response_reflection.llm_called? == false
-    assert projected.response_meta.response_reflection.referent_verified? == false
+
+    reflection = projected.response_meta.response_reflection
+    assert reflection.nominal_proof_verified? == true
+    assert reflection.event_proof_verified? == true
+    assert reflection.typed_cross_turn_join_verified? == false
+    assert reflection.referent_verified? == false
+    assert reflection.event_occurrence_verified? == false
+    assert reflection.exact_dictionary_sense_verified? == false
+    assert reflection.factual_claims? == false
     assert projected.response_meta.semantic_response_strategy.operation ==
       :clarify_anaphoric_spatial_report
   end
