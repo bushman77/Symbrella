@@ -119,6 +119,22 @@ defmodule Core.Response.SymbolicAnaphoricSpatialTest do
     assert meta.llm_called? == false
   end
 
+  test "the production response planner preserves the cross-turn proof and speaks natively" do
+    si = bird()
+    projected = Core.Response.Attach.maybe_build_response_plan(si, [])
+
+    assert projected.discourse_reference == si.discourse_reference
+    assert projected.sentence_meaning == si.sentence_meaning
+    assert projected.response_text ==
+      "You're describing the small black bird sitting on the fence. " <>
+      "Is that the bird you mean?"
+    assert projected.response_meta.response_source == :symbolic_generation
+    assert projected.response_meta.response_reflection.llm_called? == false
+    assert projected.response_meta.response_reflection.referent_verified? == false
+    assert projected.response_meta.semantic_response_strategy.operation ==
+      :clarify_anaphoric_spatial_report
+  end
+
   test "response composes nouns, modifiers, actions, and landmarks instead of parroting" do
     si = run(
       ~w(The white small cat),
