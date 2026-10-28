@@ -5,8 +5,9 @@ defmodule Core.Semantic.DiscourseComposition do
   The previous turn supplies a revalidated *nominal description* from
   same-session WM, not a proven real-world referent. The current turn supplies
   independently witnessed grammatical roles and a typed progressive event
-  property. Neither a grammatical preference nor a formal derivation proves
-  that an event actually occurred.
+  property. A beta-replay-verified entity/event relation now joins the two
+  property expressions without binding a real individual or asserting event
+  occurrence. Neither grammar nor this proof verifies events in the world.
   """
 
   alias Core.Discourse.References
