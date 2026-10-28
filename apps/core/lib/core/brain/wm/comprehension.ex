@@ -14,6 +14,7 @@ defmodule Core.Brain.WM.Comprehension do
 
   alias Core.Brain.Runtime
   alias Core.Pipeline.Trace
+  alias Core.Semantic.Composition
   alias Core.Semantic.EpisodicProjection
   alias Core.Semantic.ProvisionalInterpretation
 
@@ -169,6 +170,9 @@ defmodule Core.Brain.WM.Comprehension do
     prev = map_or_empty(field(si, :wm_context))
     reference = map_or_empty(field(si, :discourse_reference))
     sentence = field(si, :sentence) || ""
+    current_nominal_focus = nominal_focus_from(si)
+    nominal_focus = current_nominal_focus ||
+      inherited_nominal_focus(prev, reference, field(si, :session_id))
     provisional =
       case ProvisionalInterpretation.verified(si) do
         {:ok, frame} -> frame
@@ -233,7 +237,12 @@ defmodule Core.Brain.WM.Comprehension do
       |> Enum.take(@max_entities)
 
     current_entities =
-      if explicit_entities == [], do: projected_entities, else: explicit_entities
+      cond do
+        explicit_entities != [] -> explicit_entities
+        projected_entities != [] -> projected_entities
+        is_map(current_nominal_focus) -> [current_nominal_focus.surface]
+        true -> []
+      end
 
     inherited =
       if contextual_reference?(sentence, reference) and current_entities == [] do
@@ -268,6 +277,7 @@ defmodule Core.Brain.WM.Comprehension do
         if(is_integer(year), do: %{year: year, relation: year_relation(year)}, else: nil),
       intent: field(si, :intent),
       entities: entities,
+      nominal_focus: nominal_focus,
       relation: relation,
       requested_relation: field(provisional_reference, :requested_relation),
       provisional_interpretation: provisional_reference,
@@ -288,6 +298,72 @@ defmodule Core.Brain.WM.Comprehension do
       updated_at_ms: System.system_time(:millisecond)
     }
   end
+
+  # Only an independently replayed current-turn nominal proof can introduce
+  # a new discourse referent. Preserve descriptive properties, not a claimed
+  # object identity, existence, location, or exact dictionary word sense.
+  defp nominal_focus_from(si) do
+    session = field(si, :session_id)
+
+    with true <- is_binary(session) and session != "",
+         true <- field(si, :source) in [:user, :prod, :test],
+         {:ok, %{kind: :nominal_property,
+                 construction: :stacked_adjective_noun,
+                 span: {0, _},
+                 quantifier_applied?: false,
+                 factual_authority?: false,
+                 premises: %{signature: %{roles: roles},
+                             lexical_witnesses: witnesses}}} <- Composition.verified(si),
+         %{head: head, modifier_1: first, modifier_2: second} <- roles,
+         %{word: noun, pos: "noun"} <- witness_at(witnesses, head),
+         %{word: adjective_1, pos: "adjective"} <- witness_at(witnesses, first),
+         %{word: adjective_2, pos: "adjective"} <- witness_at(witnesses, second),
+         true <- Enum.all?([noun, adjective_1, adjective_2], &safe_lemma?/1) do
+      %{
+        kind: :nominal_description,
+        status: :provisional,
+        head: noun,
+        modifiers: [adjective_1, adjective_2],
+        surface: Enum.join([adjective_1, adjective_2, noun], " "),
+        source: :revalidated_nominal_composition,
+        scope_id: frame_id(session),
+        verification: :conversation_context_only,
+        factual_authority?: false
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp witness_at(witnesses, index) when is_list(witnesses) and is_integer(index) do
+    Enum.find(witnesses, &(is_map(&1) and Map.get(&1, :token_index) == index))
+  end
+
+  defp witness_at(_, _), do: nil
+
+  defp safe_lemma?(word) when is_binary(word) do
+    byte_size(word) <= 40 and Regex.match?(~r/\\A\\p{L}[\\p{L}\\p{M}'-]*\\z/u, word)
+  end
+
+  defp safe_lemma?(_), do: false
+
+  # A compatible singular follow-up may carry the previous focus onward.
+  # A new unrelated utterance releases it instead of keeping a stale topic.
+  defp inherited_nominal_focus(prev, reference, session)
+       when is_binary(session) and session != "" do
+    previous = field(prev, :nominal_focus)
+
+    if field(reference, :source) == :wm_nominal_focus and
+         field(reference, :referent_status) == :candidate_same_session and
+         is_map(previous) and previous[:scope_id] == frame_id(session) and
+         reference[:antecedent] == previous[:surface] and
+         previous[:verification] == :conversation_context_only and
+         previous[:factual_authority?] == false do
+      previous
+    end
+  end
+
+  defp inherited_nominal_focus(_, _, _), do: nil
 
   # These prior-turn matches remain candidates, not resolved references or facts.
   # Real pipeline recall is session-keyed before this method runs.
