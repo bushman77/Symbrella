@@ -100,7 +100,10 @@ defmodule Core.Response.Meta do
        :source_frame, :evidence_level, :event_occurrence_verified?,
        :exact_verb_sense_verified?, :response_is_memory_acknowledgment?,
        :factual_claims?, :compositional_proof_verified?, :construction,
-       :proof_steps, :strategy_operation]))
+       :proof_steps, :strategy_operation,
+       :nominal_proof_verified?, :event_proof_verified?,
+       :typed_cross_turn_join_verified?, :referent_verified?,
+       :exact_dictionary_sense_verified?]))
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary
