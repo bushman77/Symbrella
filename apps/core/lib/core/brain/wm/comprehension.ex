@@ -172,6 +172,7 @@ defmodule Core.Brain.WM.Comprehension do
     sentence = field(si, :sentence) || ""
     current_nominal_focus = nominal_focus_from(si)
     nominal_focus = current_nominal_focus ||
+      reactivated_nominal_focus(si) ||
       inherited_nominal_focus(prev, reference, field(si, :session_id))
     provisional =
       case ProvisionalInterpretation.verified(si) do
@@ -346,6 +347,43 @@ defmodule Core.Brain.WM.Comprehension do
   end
 
   defp safe_lemma?(_), do: false
+
+  # A uniquely named historical noun phrase can be brought back into active
+  # attention. Recheck the protected ledger against the CURRENT explicit
+  # mention; a forged SI map, an ambiguous match, or a bare pronoun fails.
+  # This reactivates only a description, never independently verified identity.
+  defp reactivated_nominal_focus(si) do
+    session = field(si, :session_id)
+    reference = field(si, :discourse_reference)
+
+    with true <- field(si, :source) in [:user, :prod, :test],
+         true <- is_binary(session) and session != "",
+         %{source: :discourse_ledger,
+           antecedent: surface,
+           antecedent_head: head,
+           antecedent_modifiers: [first, second],
+           antecedent_turn_seq: sequence,
+           referent_status: :candidate_same_session,
+           factual_authority?: false} <- reference,
+         ^reference <- Core.Discourse.Ledger.reference(si),
+         true <- Enum.all?([head, first, second], &safe_lemma?/1),
+         ^surface <- Enum.join([first, second, head], " ") do
+      %{
+        kind: :nominal_description,
+        status: :provisional,
+        head: head,
+        modifiers: [first, second],
+        surface: surface,
+        source: :revalidated_nominal_composition,
+        scope_id: frame_id(session),
+        reintroduced_from_ledger_seq: sequence,
+        verification: :conversation_context_only,
+        factual_authority?: false
+      }
+    else
+      _ -> nil
+    end
+  end
 
   # A compatible singular follow-up may carry the previous focus onward.
   # A new unrelated utterance releases it instead of keeping a stale topic.
