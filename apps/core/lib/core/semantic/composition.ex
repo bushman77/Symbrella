@@ -306,8 +306,10 @@ defmodule Core.Semantic.Composition do
   defp compose_signature(
          si, %{roles: %{modifier_1: first, modifier_2: second, head: head}} = signature
        ) do
-    with {:ok, first_adjective} <- witnessed_role(si, first, "adjective"),
-         {:ok, second_adjective} <- witnessed_role(si, second, "adjective"),
+    with {:ok, first_adjective} <-
+           RoleWitness.resolve(si, :modifier_1, first, ["adjective"]),
+         {:ok, second_adjective} <-
+           RoleWitness.resolve(si, :modifier_2, second, ["adjective"]),
          {:ok, noun} <- witnessed_role(si, head, "noun"),
          {:ok, determiner} <- witnessed_nominal_determiner(si, signature),
          {:ok, derivation} <-
