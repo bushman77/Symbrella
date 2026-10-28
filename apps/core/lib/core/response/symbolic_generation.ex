@@ -215,7 +215,10 @@ defmodule Core.Response.SymbolicGeneration do
            compositional_evidence: %{
              nominal_property: %{formally_verified?: true},
              event_property: %{formally_verified?: true},
-             typed_cross_turn_join_verified?: false,
+             typed_cross_turn_join: %{formally_verified?: true,
+               quantifier_applied?: false, referent_identity: :unresolved,
+               event_existence: :not_asserted},
+             typed_cross_turn_join_verified?: true,
              lexical_witnesses: witnesses
            }} <- meaning,
          {:ok, actor} <- Map.fetch(@event_actors, actor_kind),
@@ -240,7 +243,7 @@ defmodule Core.Response.SymbolicGeneration do
          construction: :progressive_anaphoric_locative_candidate,
          nominal_proof_verified?: true,
          event_proof_verified?: true,
-         typed_cross_turn_join_verified?: false,
+         typed_cross_turn_join_verified?: true,
          referent_verified?: false,
          event_occurrence_verified?: false,
          exact_dictionary_sense_verified?: false,
