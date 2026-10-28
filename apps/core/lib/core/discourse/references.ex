@@ -7,6 +7,7 @@ defmodule Core.Discourse.References do
   """
 
   alias Core.Brain.WM.Comprehension, as: WMComprehension
+  alias Core.Discourse.Ledger
   alias Core.Response.LlmChatHistory
   alias Core.Semantic.EventFrames
 
@@ -17,7 +18,8 @@ defmodule Core.Discourse.References do
     sentence = Map.get(si, :sentence)
     session_id = Map.get(si, :session_id)
 
-    case resolve(sentence, session_id) || nominal_followup_reference(si) do
+    case resolve(sentence, session_id) || nominal_followup_reference(si) ||
+           Ledger.reference(si) do
       nil -> si
       reference -> Map.put(si, :discourse_reference, reference)
     end
