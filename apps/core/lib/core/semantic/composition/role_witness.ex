@@ -1,16 +1,17 @@
 defmodule Core.Semantic.Composition.RoleWitness do
   @moduledoc """
-  Construction-scoped, read-only lexical witnesses for V2 event composition.
+  Construction-scoped, read-only lexical witnesses for typed composition.
 
-  Prefer the exact attested LIFG winner. For bounded event roles only, a
-  conflicting winner may be supplemented by a unique, scored, independently
-  attested POS alternative. Neither the winner nor the original SI is changed.
+  Prefer the exact attested LIFG winner. For bounded event and stacked nominal
+  roles, a conflicting winner can be supported by independently scored and
+  attested POS evidence. Neither the winner nor the original SI is changed.
 
   A POS witness establishes role compatibility, NOT the intended word sense,
   a real-world fact, or permission to assert an event.
   """
 
-  @alternative_roles [:auxiliary, :predicate, :location_head, :preposition]
+  @pos_only_roles [:preposition, :modifier_1, :modifier_2]
+  @alternative_roles [:auxiliary, :predicate, :location_head | @pos_only_roles]
   @max_scores 128
 
   @spec resolve(map(), atom(), non_neg_integer(), [String.t()]) ::
@@ -160,20 +161,19 @@ defmodule Core.Semantic.Composition.RoleWitness do
         end)
         |> Enum.sort_by(fn {id, score} -> {-score, id} end)
 
-      # For a prepositional event role, independently scored and attested
-      # candidates establish POS compatibility without deciding which
-      # dictionary sense the speaker intended. Keep every witness bound to
-      # this SI so verification fails closed if score/dictionary data changes.
+      # Prepositions and two-modifier nominal adjectives use a bounded,
+      # construction-scoped POS witness when the selected sense conflicts.
+      # A scored alternative is independently attested, but does NOT settle
+      # which adjective or preposition dictionary sense was intended.
+      # Bind every attested score to the current SI for replay verification.
       case {role, candidates} do
-        {:preposition, [{_id, score} | _]} ->
+        {pos_role, [{_id, score} | _]} when pos_role in @pos_only_roles ->
           {:ok, %{
             token_index: index,
             word: word,
-            pos: "preposition",
+            pos: if(pos_role == :preposition, do: "preposition", else: "adjective"),
             sense_id: nil,
             attested_sense_ids: Enum.map(candidates, &elem(&1, 0)),
-            # Record all attested scores, not just the maximum. Replay
-            # verification must notice any changed lexical-score premise.
             attested_candidate_scores: candidates,
             role: role,
             selection_basis: :construction_pos_only,
