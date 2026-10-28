@@ -256,9 +256,9 @@ defmodule Core.Discourse.LedgerTest do
   end
 
   test "disabled gate does not mutate ledger or leak a stale retrieval", %{sid: sid} do
-    assert Ledger.record(nominal(sid, ~w(The small black bird)),
+    unchanged = Ledger.record(nominal(sid, ~w(The small black bird)),
       discourse_ledger?: false)
-      |> Map.get(:trace) == []
+    assert unchanged.trace == []
     assert Ledger.entries(sid) == []
 
     Ledger.record(nominal(sid, ~w(The small black bird)))
