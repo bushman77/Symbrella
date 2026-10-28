@@ -75,7 +75,10 @@ Opt out in a probe with `discourse_ledger?: false`. Configure via
 
 ## Safety boundaries
 
-This stage does **not** prove a typed cross-turn lambda join, identify a real
-bird, certify a factual claim, or inspect all prior raw text. Retrieval is
-explicit and conservative: unknown/ambiguous references abstain. It leaves
-existing LIFG winners, dictionary cells, and weights untouched.
+The next compositional stage includes a beta-replay-verified **typed
+entity/event property join** with a relational actor predicate. That proves
+a well-typed conditional relation between possible entities and events, **not**
+the identity of a particular real bird or the occurrence of any event.
+The ledger itself does not establish facts or inspect all prior raw text.
+Retrieval is explicit and conservative: unknown/ambiguous references abstain.
+It leaves existing LIFG winners, dictionary cells, and weights untouched.
