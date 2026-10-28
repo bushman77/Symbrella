@@ -6,6 +6,7 @@ defmodule Core.Discourse.References do
   verification. Ambiguous or absent history produces no binding.
   """
 
+  alias Core.Brain.WM.Comprehension, as: WMComprehension
   alias Core.Response.LlmChatHistory
   alias Core.Semantic.EventFrames
 
@@ -16,13 +17,58 @@ defmodule Core.Discourse.References do
     sentence = Map.get(si, :sentence)
     session_id = Map.get(si, :session_id)
 
-    case resolve(sentence, session_id) do
+    case resolve(sentence, session_id) || nominal_followup_reference(si) do
       nil -> si
       reference -> Map.put(si, :discourse_reference, reference)
     end
   end
 
   def attach(other), do: other
+
+  # The WM frame was recalled strictly within this session, before discourse
+  # binding. It carries a replay-verified nominal property, not a verified
+  # object or physical location. A narrow singular spatial continuation can
+  # mention that nominal description as a *candidate* antecedent only.
+  defp nominal_followup_reference(si) do
+    session = Map.get(si, :session_id)
+    sentence = Map.get(si, :sentence)
+    context = Map.get(si, :wm_context)
+    focus = if is_map(context), do: Map.get(context, :nominal_focus)
+
+    with true <- is_binary(session) and session != "",
+         true <- is_binary(sentence) and byte_size(sentence) <= 160,
+         true <- is_map(context) and context[:schema] == 1 and
+                   context[:verification] == :conversation_context_only,
+         true <- is_map(focus) and focus[:kind] == :nominal_description and
+                   focus[:status] == :provisional and
+                   focus[:scope_id] == WMComprehension.frame_id(session) and
+                   focus[:source] == :revalidated_nominal_composition and
+                   focus[:verification] == :conversation_context_only and
+                   focus[:factual_authority?] == false,
+         head when is_binary(head) <- focus[:head],
+         surface when is_binary(surface) <- focus[:surface],
+         modifiers when is_list(modifiers) and length(modifiers) == 2 <-
+           focus[:modifiers],
+         true <- surface == Enum.join(modifiers ++ [head], " "),
+         true <- Regex.match?(
+           ~r/\A\s*it(?:'s|\s+(?:is|was))\s+[\p{L}][\p{L}\p{M}'-]*\s+(?:on|in|under|near|beside|above|below|at|into)\s+[\p{L}\p{N}][\p{L}\p{M}\p{N}\s'-]{0,90}[.!]?\s*\z/iu,
+           sentence
+         ) do
+      %{
+        pronoun: "it",
+        antecedent: surface,
+        antecedent_head: head,
+        antecedent_modifiers: modifiers,
+        source: :wm_nominal_focus,
+        evidence: :previous_verified_nominal_composition,
+        referent_status: :candidate_same_session,
+        verification: :conversation_context_only,
+        factual_authority?: false
+      }
+    else
+      _ -> nil
+    end
+  end
 
   @spec resolve(String.t() | nil, term()) :: map() | nil
   def resolve(sentence, session_id)
