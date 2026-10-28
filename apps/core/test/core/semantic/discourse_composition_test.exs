@@ -127,6 +127,29 @@ defmodule Core.Semantic.DiscourseCompositionTest do
     assert DiscourseComposition.verified(changed) == :not_applicable
   end
 
+  test "forged typed join evidence cannot pass a revalidated sentence meaning" do
+    si = followup(session())
+    assert {:ok, _} = DiscourseComposition.verified(si)
+
+    counterfeit =
+      update_in(si, [Access.key!(:sentence_meaning),
+        Access.key!(:compositional_evidence),
+        Access.key!(:typed_cross_turn_join)], fn proof ->
+        %{proof | formally_verified?: false}
+      end)
+
+    assert DiscourseComposition.verified(counterfeit) == :not_applicable
+    assert DiscourseComposition.build(counterfeit) == si.sentence_meaning
+
+    changed_link =
+      update_in(si, [Access.key!(:sentence_meaning),
+        Access.key!(:compositional_evidence),
+        Access.key!(:typed_cross_turn_join),
+        Access.key!(:result)], fn _ -> {:var, "forged"} end)
+
+    assert DiscourseComposition.verified(changed_link) == :not_applicable
+  end
+
   test "missing morphology, altered antecedent or absent session must abstain" do
     si = followup(session())
 
