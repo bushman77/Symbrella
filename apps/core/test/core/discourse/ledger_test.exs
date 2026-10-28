@@ -101,6 +101,22 @@ defmodule Core.Discourse.LedgerTest do
     assert si.discourse_reference.antecedent == "small black bird"
     assert si.discourse_reference.antecedent_turn_seq == 1
     assert si.discourse_reference.factual_authority? == false
+
+    # A uniquely explicit old mention re-enters WM; a subsequent pronoun can
+    # use that active focus without rereading every historical sentence.
+    focused = Core.Brain.WM.Comprehension.context_from(si, %{
+      recognized_topics: [], understood: [], uncertain: [], degraded?: false
+    })
+    assert focused.nominal_focus.surface == "small black bird"
+    assert focused.nominal_focus.reintroduced_from_ledger_seq == 1
+
+    continued =
+      %Core.SemanticInput{session_id: sid, source: :test,
+        sentence: "It is sleeping under a tree.", wm_context: focused}
+      |> References.attach()
+
+    assert continued.discourse_reference.source == :wm_nominal_focus
+    assert continued.discourse_reference.antecedent == "small black bird"
     assert :ok = Core.SemanticInput.validate_contract(si)
   end
 
@@ -122,6 +138,8 @@ defmodule Core.Discourse.LedgerTest do
     assert ambiguous.discourse_context.status == :ambiguous
     assert length(ambiguous.discourse_context.candidates) == 2
     assert ambiguous.discourse_reference == nil
+    denied = Core.Brain.WM.Comprehension.context_from(ambiguous, %{})
+    assert denied.nominal_focus == nil
 
     # Full explicit mention disambiguates without guessing which "black bird".
     assert {:ok, %{surface: "small black bird", seq: 1}} =
