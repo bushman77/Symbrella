@@ -99,7 +99,7 @@ defmodule Core.Response.SymbolicAnaphoricSpatialTest do
       plan = SemanticStrategy.select(si)
 
     assert plan.missing == [:referent_identity, :event_occurrence,
-      :exact_dictionary_senses, :typed_cross_turn_join]
+      :exact_dictionary_senses]
 
     assert {:ok, response, :symbolic_generation, meta} =
       SemanticStrategy.realize(plan, si.sentence, @features, @decision, si)
@@ -111,7 +111,7 @@ defmodule Core.Response.SymbolicAnaphoricSpatialTest do
     assert meta.strategy_operation == :clarify_anaphoric_spatial_report
     assert meta.nominal_proof_verified?
     assert meta.event_proof_verified?
-    assert meta.typed_cross_turn_join_verified? == false
+    assert meta.typed_cross_turn_join_verified? == true
     assert meta.referent_verified? == false
     assert meta.event_occurrence_verified? == false
     assert meta.exact_dictionary_sense_verified? == false
@@ -134,7 +134,7 @@ defmodule Core.Response.SymbolicAnaphoricSpatialTest do
     reflection = projected.response_meta.response_reflection
     assert reflection.nominal_proof_verified? == true
     assert reflection.event_proof_verified? == true
-    assert reflection.typed_cross_turn_join_verified? == false
+    assert reflection.typed_cross_turn_join_verified? == true
     assert reflection.referent_verified? == false
     assert reflection.event_occurrence_verified? == false
     assert reflection.exact_dictionary_sense_verified? == false
