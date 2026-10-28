@@ -57,6 +57,7 @@ defmodule Core do
       si0
       |> apply_intent_selection(opts)
       |> Core.Brain.WM.Comprehension.recall(opts)
+      |> Core.Discourse.Ledger.recall(opts)
       |> Core.Discourse.References.attach()
       |> StateDump.capture(:intent_selected)
 
@@ -246,6 +247,10 @@ defmodule Core do
     # automatically retract prior receipts or train a new lexical association.
     |> Core.Brain.SynapticCorrection.attach(opts)
     |> StateDump.capture(:synaptic_correction)
+    # Sequence every eligible turn after semantic/reply processing. Historical
+    # candidates come from proof-revalidated SI, never user or LLM prose.
+    |> Core.Discourse.Ledger.record(opts)
+    |> StateDump.capture(:discourse_ledger)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
