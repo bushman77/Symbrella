@@ -375,3 +375,39 @@ mix test apps/brain/test/brain/atl/unresolved_grammar_test.exs \
   apps/brain/test/brain/lifg/role_competition_test.exs \
   apps/core/test/core/syntax/role_competition_test.exs
 \`\`\`
+
+
+## Surgery 4 — semantic hypothesis from audited syntax, LIFG and ATL gap
+
+\`Core.Semantic.ProvisionalInterpretation.detect/1\` now produces the
+\`:unresolved_progressive_predicate\` frame for a complete, bounded
+progressive-locative statement *only* after replaying:
+
+- the original seven-token clause and its exact surface punctuation;
+- the \`Core.Syntax.Signatures\` gap's SHA-256 source-span fingerprint;
+- the LIFG unresolved-role entry, through \`Brain.ATL.UnresolvedGrammar.attach/2\`;
+- the ATL slate's single unresolved predicate observation, with no
+  genuine dictionary winner in that slot.
+
+The frame describes actor surface, unresolved predicate surface and
+locative phrase; it carries \`:operation: :clarify_unresolved_predicate\`,
+\`:status: :provisional\`, and explicitly unresolved lexical sense,
+referent identity, speaker clarification and event occurrence. It is
+an **observation for future clarification**, not a verified event and
+not a response or memory write. It does not replace established
+sentence meanings or LIFG/ATL winners. A forged frame is rejected
+by \`ProvisionalInterpretation.verified/1\`.
+
+The previous fuzzy clarification pathway remains independent.
+An additional later step would need to bind a speaker-confirmed
+substitution to this original-turn provisional frame *without*
+confusing earlier missing-role recognition with verification.
+
+Run:
+
+\`\`\`bash
+mix test apps/core/test/core/semantic/provisional_interpretation_test.exs \
+  apps/core/test/core/brain/atl_constituents_test.exs \
+  apps/brain/test/brain/atl/unresolved_grammar_test.exs \
+  apps/brain/test/brain/lifg/role_competition_test.exs
+\`\`\`
