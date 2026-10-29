@@ -11,6 +11,7 @@ defmodule Core.Response.AttentionFallback do
   alias Core.Brain.WM.Comprehension, as: WMComprehension
   alias Core.Response.LexicalDefinition
   alias Core.Semantic.TemporalSentence
+  alias Core.Text.Fuzzy
 
   @max_terms 2
   @max_repair_terms 6
@@ -287,6 +288,7 @@ defmodule Core.Response.AttentionFallback do
       target = Enum.find(candidates, &attended?(&1, goal_terms)) || first
       verified = verified_known(si, context, text, target)
       recognized = recognized_known(si, context, text, target)
+      suggestion = Fuzzy.suggest_word(target, text)
       {known_level, known_term} =
         cond do
           is_binary(verified) -> {:dictionary_verified, verified}
@@ -306,9 +308,26 @@ defmodule Core.Response.AttentionFallback do
             "I'm not sure how you're using \"#{target}\" here. Could you clarify what you mean?"
         end
 
+      reply =
+        case suggestion do
+          %{replacement: replacement, status: :hypothesis_only}
+          when is_binary(replacement) ->
+            # The original question already ends in a question mark. A
+            # spelling hypothesis is an additional, explicitly provisional
+            # question, not an automatic replacement or learned definition.
+            String.replace_suffix(reply, "Could you clarify that part?",
+              "Did you mean \"#{replacement}\"?") |>
+              String.replace_suffix("Could you clarify what you mean?",
+                "Did you mean \"#{replacement}\"?")
+
+          _ ->
+            reply
+        end
+
       {:ok, reply, %{
         status: :attention_comprehension_repair,
         provenance: :admitted_same_session_comprehension,
+        fuzzy_suggestion: suggestion,
         recognized_term: known_term,
         recognized_level: known_level,
         unresolved_term: target,
