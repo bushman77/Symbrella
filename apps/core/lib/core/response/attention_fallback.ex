@@ -10,6 +10,7 @@ defmodule Core.Response.AttentionFallback do
 
   alias Core.Brain.WM.Comprehension, as: WMComprehension
   alias Core.Response.LexicalDefinition
+  alias Core.Semantic.TemporalSentence
 
   @max_terms 2
   @max_repair_terms 6
@@ -39,9 +40,9 @@ defmodule Core.Response.AttentionFallback do
          true <- is_number(salience) and salience > 0.0,
          true <- is_list(goal_terms) and goal_terms != [],
          true <- Map.get(context, :focus_transition) != :release do
-      case partial_repair(text, si, context, goal_terms, salience) do
-        {:ok, _, _} = repair ->
-          repair
+      case comprehension_report(text, si, context, goal_terms, salience) do
+        {:ok, _, _} = report ->
+          report
 
         :not_applicable when action in [:answer, :offer_options, :act_first] ->
           case focused_terms(context) do
@@ -75,6 +76,99 @@ defmodule Core.Response.AttentionFallback do
   end
 
   def generate(_, _, _, _), do: :not_applicable
+
+  # Give independently verified *sentence-level* structure priority over
+  # attention and individual lexical confidence. A successful temporal proof
+  # establishes what order the speaker described, not that events occurred.
+  # A generic fallback about a keyword such as "sleeping" would discard this.
+  defp comprehension_report(text, si, context, goal_terms, salience) do
+    case verified_temporal_report(text, si, context, goal_terms, salience) do
+      {:ok, _, _} = report -> report
+      :not_applicable -> partial_repair(text, si, context, goal_terms, salience)
+    end
+  end
+
+  defp verified_temporal_report(text, si, context, goal_terms, salience) do
+    with true <- current_turn?(text, context),
+         {:ok, %{
+           kind: :explicit_temporal_report, status: :provisional,
+           factual_authority?: false, connective: connective,
+           compositional_evidence: %{
+             event_properties_verified?: true,
+             temporal_operator_verified?: true,
+             source_event_semantics: [first, second],
+             factual_authority?: false
+           },
+           temporal_claim: %{
+             speaker_attributed?: true, event_occurrence_verified?: false,
+             external_chronology_verified?: false
+           },
+           unresolved: unresolved
+         }} <- TemporalSentence.verified(si),
+         true <- connective in [:before, :after],
+         true <- is_list(unresolved) and
+                   :exact_dictionary_senses in unresolved and
+                   :event_occurrence in unresolved and
+                   :actual_event_chronology in unresolved,
+         {:ok, first_text} <- event_description(first),
+         {:ok, second_text} <- event_description(second) do
+      order = if connective == :before, do: "before", else: "after"
+
+      reply =
+        "I can interpret the order you described: #{first_text} #{order} " <>
+          "#{second_text}. What I haven't established is the exact " <>
+          "dictionary sense of every word, the identities of the " <>
+          "individual animals, or whether these events actually occurred."
+
+      {:ok, reply, %{
+        status: :attention_comprehension_report,
+        provenance: :revalidated_temporal_clause_composition,
+        known_parts: [:first_event_property, :second_event_property,
+          :reported_temporal_order],
+        unresolved_parts: [:exact_dictionary_senses, :referent_identity,
+          :event_occurrence, :actual_event_chronology],
+        attention_salience: salience,
+        focus_terms: Enum.take(goal_terms, @max_terms),
+        evidence_level: :speaker_attributed_event_properties,
+        semantic_verified?: true,
+        factual_claims?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp event_description(%{
+    aspect: :progressive,
+    predicate: predicate,
+    actor: %{kind: actor, referent: :unresolved},
+    spatial: %{
+      relation: relation, landmark_kind: landmark,
+      reading: :locative, arrival: :not_established
+    },
+    event_existence: :not_asserted
+  }) do
+    with true <- actor in [:bird, :cat, :dog],
+         true <- predicate in [:sit, :sleep],
+         true <- relation in [:on, :in, :under, :beside, :above, :below],
+         true <- landmark in [:fence, :tree, :table] do
+      activity = if predicate == :sit, do: "sitting", else: "sleeping"
+
+      {:ok, "the #{Atom.to_string(actor)} #{activity} " <>
+        "#{Atom.to_string(relation)} the #{Atom.to_string(landmark)}"}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp event_description(_), do: :not_applicable
+
+  defp current_turn?(text, context) do
+    is_binary(text) and
+      Map.get(context, :turn_sha256) ==
+        (:crypto.hash(:sha256, text) |> Base.encode16(case: :lower))
+  end
 
   # Unknowns are selected from the *current turn's* weak/unresolved
   # comprehension, matched against the admitted same-session WM frame. An
