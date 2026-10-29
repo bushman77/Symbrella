@@ -46,6 +46,14 @@ Response gating requires all of these:
 - No known already-interpreted temporal meaning that would make an unknown
   explanation inaccurate.
 
+A weak or uncertain lexical label is not automatically a clarification
+target. If that same term is already part of both the recognized conversational
+topic and a recognized-topic anchor (for example, "ocean" in a request about
+"the Pacific Ocean"), the repair selector excludes it. A *different* unknown
+term in the same question remains eligible. This preserves the legacy
+topic-continuation behavior and prevents spurious "what do you mean by
+ocean?" questions.
+
 Attentional focus prioritizes among the eligible uncertain terms. It never
 proves the term's meaning. The repair reports the specific unresolved surface
 term and records it as `:unresolved_term` in provenance metadata.
