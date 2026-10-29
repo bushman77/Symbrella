@@ -15,7 +15,7 @@ defmodule Core.Response.SymbolicGeneration do
   # social_realization/2 still revalidates the whole-utterance SpeechActs frame.
   @social_intents [
     :greet, :greeting, :gratitude, :smalltalk, :feedback, :bye, :unknown,
-    :tell, :statement, :ask_info, :question
+    :tell, :statement, :ask, :ask_info, :question
   ]
 
   @spec generate(String.t(), map(), map(), map()) ::
@@ -23,10 +23,13 @@ defmodule Core.Response.SymbolicGeneration do
   def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
       when is_binary(user_text) and is_map(si) and
              intent in @social_intents and action in [:answer, :offer_options, :act_first] do
-    case social_realization(user_text, si) do
-      {:ok, _, _} = realized -> realized
+    case maybe_realize_temporal_report_order(user_text, si) do
+      {:ok, _, _} = temporal -> temporal
       :not_applicable ->
-        case maybe_realize_compositional_nominal(user_text, intent, si) do
+        case social_realization(user_text, si) do
+          {:ok, _, _} = realized -> realized
+          :not_applicable ->
+            case maybe_realize_compositional_nominal(user_text, intent, si) do
           {:ok, _, _} = nominal -> nominal
           :not_applicable ->
             case maybe_realize_anaphoric_spatial(user_text, intent, si) do
@@ -37,6 +40,7 @@ defmodule Core.Response.SymbolicGeneration do
                   :not_applicable -> maybe_realize_report(user_text, intent, si)
                 end
             end
+        end
         end
     end
   end
@@ -122,6 +126,76 @@ defmodule Core.Response.SymbolicGeneration do
   # current-turn proof; never parrot arbitrary user input as semantic evidence.
   @nominal_nouns %{bird: "bird", cat: "cat", dog: "dog"}
   @nominal_adjectives %{small: "small", black: "black", white: "white"}
+
+  # Answer only a currently rechecked question about report chronology. The
+  # event sequence records what the speaker described, not the external order
+  # of events, and the noun description remains an unresolved candidate.
+  defp maybe_realize_temporal_report_order(user_text, si) do
+    with ^user_text <- Map.get(si, :sentence),
+         {:ok, %{kind: :reported_event_order_question,
+           temporal_evidence: %{
+             order: :reported_before, antecedent: surface,
+             earlier: earlier, later: later,
+             same_actor_identity: :candidate_only,
+             actual_event_order: :not_established,
+             event_occurrence: :not_established,
+             factual_authority?: false
+           }}} <- Core.Semantic.TemporalEventComposition.verified(si),
+         %{head: noun, modifiers: [first, second]} <- nominal_words(surface),
+         {:ok, noun_word} <- Map.fetch(@nominal_nouns, String.to_existing_atom(noun)),
+         ^noun_word <- noun,
+         true <- first in ["small", "black", "white"] and
+                   second in ["small", "black", "white"],
+         ^surface <- Enum.join([first, second, noun], " "),
+         {:ok, first_event} <- temporal_event_words(earlier),
+         {:ok, last_event} <- temporal_event_words(later) do
+      {activity1, relation1, landmark1} = first_event
+      {activity2, relation2, landmark2} = last_event
+
+      {:ok,
+       "Earlier, you described the #{surface} #{activity1} #{relation1} " <>
+         "the #{landmark1}. Later, you described it #{activity2} " <>
+         "#{relation2} the #{landmark2}. That is the order of your reports, " <>
+         "not verified event chronology.",
+       %{
+         status: :symbolic_realized,
+         speech_act: :answer_earlier_report,
+         interpreted_speech_act: :reported_event_order_question,
+         provenance: :revalidated_discourse_report_order,
+         temporal_report_order_verified?: true,
+         actual_event_order_verified?: false,
+         referent_verified?: false,
+         event_occurrence_verified?: false,
+         exact_dictionary_sense_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp nominal_words(surface) when is_binary(surface) do
+    case String.split(surface, " ", trim: true) do
+      [first, second, head] -> %{head: head, modifiers: [first, second]}
+      _ -> nil
+    end
+  end
+  defp nominal_words(_), do: nil
+
+  defp temporal_event_words(%{
+         action: action, relation: relation, landmark: landmark,
+         event_existence: :not_asserted, factual_authority?: false
+       }) do
+    with {:ok, activity} <- Map.fetch(@event_activities, action),
+         {:ok, preposition} <- Map.fetch(@event_static_relations, relation),
+         {:ok, place} <- Map.fetch(@event_landmarks, landmark) do
+      {:ok, {activity, preposition, place}}
+    else
+      _ -> :not_applicable
+    end
+  end
+  defp temporal_event_words(_), do: :not_applicable
 
   defp maybe_realize_compositional_nominal(user_text, intent, si)
        when intent in [:unknown, :tell, :statement] do
