@@ -86,9 +86,11 @@ defmodule Core.Discourse.Ledger do
       } = pending | _] ->
         now = System.system_time(:millisecond)
         normalized = text |> String.downcase() |> String.trim()
-        expected = String.downcase(proposed)
+        expected = if is_binary(proposed), do: String.downcase(proposed), else: ""
+        # Exact one-word selection is valid only against a pending, actually
+        # issued, same-session clarification; it never learns a dictionary sense.
         explicit_confirmation? =
-          normalized in ["yes", "yes.", "yeah", "yeah.", "yep", "yep.",
+          normalized in [expected, expected <> ".", "yes", "yes.", "yeah", "yeah.", "yep", "yep.",
             "yes #{expected}", "yes #{expected}.",
             "yes, #{expected}", "yes, #{expected}.",
             "yeah #{expected}", "yeah, #{expected}.",
