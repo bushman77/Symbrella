@@ -103,6 +103,55 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
 
         for question <- earlier_forms,
           do: assert_report(session, question, :earlier, previous)
+
+        # The ordinary present form must not fall through to a stale
+        # owner-wide spatial_state once a directional report has followed it.
+        present_paraphrases = [
+          "What is the #{actor} doing?",
+          "What's the #{actor} doing?",
+          "Tell me what the #{actor} is doing now.",
+          "Can you tell me what the #{actor} is doing?",
+          "Where is the #{actor}?",
+          "Where is the #{actor} now?",
+          "Where's the #{actor}?",
+          "Where’s a #{actor} right now?"
+        ]
+
+        for question <- Enum.take(present_paraphrases, 4),
+          do: assert_report(session, question, :latest, latest)
+
+        expected_location =
+          if relation == "into" do
+            "a #{actor} flying into a #{landmark}"
+          else
+            "a #{actor} #{relation} a #{landmark}"
+          end
+
+        for question <- Enum.drop(present_paraphrases, 4) do
+          assert {:ok, response, meta} =
+                   TemporalActivityRecall.reply(session, question),
+                   "unanswered location form: #{inspect(question)}"
+          assert response =~ expected_location
+          assert meta.requested_slot == :location
+          assert meta.requested_temporal_role == :latest
+          assert meta.event_occurrence_verified? == false
+          if relation == "into" do
+            assert response =~ "Arrival and current location are not established."
+            refute response =~ "places a #{actor} in a #{landmark}"
+          end
+        end
+
+        for question <- [
+          "Where was the #{actor}?",
+          "Where was the #{actor} before?",
+          "Where was the #{actor} earlier",
+          "Tell me what the #{actor} was doing previously"
+        ] do
+          assert {:ok, response, meta} = TemporalActivityRecall.reply(session, question)
+          assert response =~ "a #{actor} sitting on a fence"
+          assert meta.requested_temporal_role == :earlier
+          assert meta.requested_slot in [:activity, :location]
+        end
       after
         Ledger.clear(session)
       end
@@ -116,13 +165,12 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     record_proved!(session, "bird", "flying", "into", "tree")
 
     for question <- [
-      "What is the bird doing?",
-      "What's the bird doing?",
       "What was the bird doing now?",
       "What was the bird doing currently?",
       "What is the bird doing earlier?",
       "What did the bird do?",
-      "Where is the bird now?",
+      "Where was the bird now?",
+      "Where is the bird earlier?",
       "What is the fox doing now?",
       "What is the bird eating now?",
       "What is the bird doing next?",
