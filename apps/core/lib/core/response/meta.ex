@@ -103,6 +103,7 @@ defmodule Core.Response.Meta do
        :proof_steps, :strategy_operation,
        :nominal_proof_verified?, :event_proof_verified?,
        :typed_cross_turn_join_verified?, :referent_verified?,
+       :temporal_report_order_verified?, :actual_event_order_verified?,
        :exact_dictionary_sense_verified?]))
   end
 
