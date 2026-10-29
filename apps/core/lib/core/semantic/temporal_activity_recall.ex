@@ -42,6 +42,11 @@ defmodule Core.Semantic.TemporalActivityRecall do
   # Count only evidence-qualified event descriptions, never word mentions.
   @count_described ~r/\A\s*how\s+many\s+times\s+(?:have\s+i\s+described|did\s+i\s+describe)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
   @count_reports ~r/\A\s*how\s+many\s+(?:descriptions|reports)\s+of\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:have\s+i\s+given|did\s+i\s+give)\s*[?.]?\s*\z/iu
+  # Compare the descriptions themselves; a difference in attributed
+  # predicates cannot establish a real behavioral transition or identity.
+  @compare_different ~r/\A\s*did\s+i\s+describe\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing\s+something\s+different\s*[?.]?\s*\z/iu
+  @compare_same ~r/\A\s*was\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing\s+the\s+same\s+thing\s*[?.]?\s*\z/iu
+  @compare_what ~r/\A\s*what\s+changed\s+in\s+my\s+descriptions\s+of\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
@@ -118,6 +123,17 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
       match = Regex.named_captures(@count_reports, text) ->
         parse_actor(match, :count, :count)
+
+      match = Regex.named_captures(@compare_different, text) ->
+        parse_actor(match, :comparison, :compare)
+
+      match = Regex.named_captures(@compare_same, text) ->
+        parse_actor(match, :comparison, :compare)
+
+      match = Regex.named_captures(@compare_what, text) ->
+        parse_actor(match, :comparison, :compare)
+
+
 
 
 
@@ -237,6 +253,11 @@ defmodule Core.Semantic.TemporalActivityRecall do
     do: {:ok, %{seq: nil, actor_kind: actor, report_count: 0}}
   defp select(:count, [latest | _] = qualified, _actor, :count),
     do: {:ok, Map.put(latest, :report_count, length(qualified))}
+
+  defp select(:compare, [latest, earlier], _actor, :comparison),
+    do: {:ok, %{seq: latest.seq, latest_report: latest, earlier_report: earlier}}
+  defp select(:compare, [_latest, _earlier | _], actor, :comparison),
+    do: {:ambiguous, :earlier, actor, :comparison}
 
   defp select(:latest, [latest | _], _actor, _slot), do: {:ok, latest}
   defp select(:earlier, [_latest, previous], _actor, _slot), do: {:ok, previous}
@@ -362,6 +383,20 @@ defmodule Core.Semantic.TemporalActivityRecall do
     noun = if count == 1, do: "description", else: "descriptions"
 
     {:ok, "I have #{count} interpretable #{noun} of a #{Atom.to_string(actor)} in this session. They do not establish event occurrence or that multiple reports describe the same individual."}
+  end
+
+  defp realize(%{earlier_report: old, latest_report: new},
+               :comparison, :compare) do
+    with {:ok, before} <- describe(old),
+         {:ok, after_description} <- describe(new) do
+      relation =
+        if old.action == new.action,
+          do: "The reported activity is the same in both descriptions.",
+          else: "The reported activities differ."
+
+      {:ok, "You first described #{before}, then #{after_description}. " <>
+        relation <> " This does not establish that the same individual changed behavior or that either event occurred."}
+    end
   end
 
   defp realize(_, _, _), do: :not_applicable
