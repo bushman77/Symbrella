@@ -103,8 +103,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
   end
 
   defp normalize_time(nil), do: nil
-  defp normalize_time(time),
-    do: time |> String.downcase() |> String.replace(~r/\s+/u, " ")
+  defp normalize_time(time) when is_binary(time) do
+    case time |> String.trim() |> String.downcase() |> String.replace(~r/\s+/u, " ") do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
 
   defp select(:latest, [latest | _], _actor), do: {:ok, latest}
   defp select(:earlier, [_latest, previous], _actor), do: {:ok, previous}
