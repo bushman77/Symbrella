@@ -290,6 +290,68 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     assert_report(session, "What is it doing?", :latest, "a bird sitting on a fence")
   end
 
+  test "count reports per actor kind without confusing mentions with proven descriptions" do
+    session = "count-actor-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "sitting", "on", "fence")
+    record_proved!(session, "cat", "sleeping", "under", "table")
+    record_proved!(session, "bird", "flying", "into", "tree")
+
+    for question <- [
+      "How many times have I described the bird?",
+      "How many times did I describe the bird?",
+      "How many descriptions of the bird have I given?",
+      "How many reports of the bird did I give?"
+    ] do
+      assert {:ok, answer, meta} = TemporalActivityRecall.reply(session, question)
+      assert answer =~ "2 interpretable descriptions of a bird"
+      assert meta.requested_slot == :count
+      assert meta.requested_temporal_role == :count
+      assert meta.actual_event_chronology_verified? == false
+      assert meta.same_actor_identity_verified? == false
+    end
+
+    assert {:ok, one, _} =
+      TemporalActivityRecall.reply(session, "How many times have I described the cat?")
+    assert one =~ "1 interpretable description of a cat"
+
+    assert {:ok, zero, _} =
+      TemporalActivityRecall.reply(session, "How many times did I describe the dog?")
+    assert zero =~ "0 interpretable descriptions of a dog"
+
+    # Mentions and questions are not verified descriptive reports.
+    {:ok, _} = Owner.append(session, %{
+      kind: :uninterpreted, status: :no_verified_semantics,
+      factual_authority?: false
+    })
+    assert {:ok, same, _} =
+      TemporalActivityRecall.reply(session, "How many reports of the bird did I give?")
+    assert same =~ "2 interpretable descriptions of a bird"
+
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "How many times have I described the fox?")
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "How many birds are in the tree?")
+  end
+
+  test "report count refuses truncated session history" do
+    session = "count-truncated-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "sitting", "on", "fence")
+
+    for _ <- 1..128 do
+      {:ok, _} = Owner.append(session, %{
+        kind: :uninterpreted, status: :no_verified_semantics,
+        factual_authority?: false
+      })
+    end
+
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "How many times have I described the bird?")
+  end
+
   test "mixed actor kinds make it ambiguous instead of choosing latest mention" do
     session = "pronoun-mixed-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
