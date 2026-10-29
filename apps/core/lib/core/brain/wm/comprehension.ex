@@ -567,7 +567,13 @@ defmodule Core.Brain.WM.Comprehension do
         _ ->
           case context.entities do
             entities when is_list(entities) and entities != [] -> entities
-            _ -> List.wrap(context.understood) ++ List.wrap(context.uncertain)
+            _ ->
+              # A definition query's unresolved target is not a conversational
+              # attention goal. Its meaning must come from the exact LTM
+              # lexical lookup, never an uncertain-word focus hint.
+              if context.intent == :define,
+                do: [],
+                else: List.wrap(context.understood) ++ List.wrap(context.uncertain)
           end
       end
 
