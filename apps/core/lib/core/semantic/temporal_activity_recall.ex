@@ -59,6 +59,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
       when is_binary(session) and byte_size(session) in 1..128 and
            is_binary(text) and byte_size(text) <= 160 do
     with {:ok, role, mode, subject, target} <- parse(text),
+         true <- is_pid(Process.whereis(Core.Discourse.Ledger.Owner)),
          reports <- Ledger.entries(session),
          # Counts and ordinal retrieval require a complete retained session,
          # not merely a limited slice of a longer or truncated timeline.
@@ -71,7 +72,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
          {:ok, chosen} <- select(mode, qualified, actor, role),
          true <- target_matches?(chosen, role, target),
          {:ok, wording} <- realize(chosen, role, mode) do
-      {:ok, wording, metadata(mode, chosen.seq, role)}
+      {:ok, wording, metadata(mode, chosen.seq, role) |> enrich_metadata(chosen, role)}
     else
       {:ambiguous, :referent, actors, slot} ->
         labels = Enum.map_join(actors, " or ", &("the " <> Atom.to_string(&1)))
@@ -435,6 +436,14 @@ defmodule Core.Semantic.TemporalActivityRecall do
   end
 
   defp realize(_, _, _), do: :not_applicable
+
+  defp enrich_metadata(meta, %{report_count: 0}, :count),
+    do: Map.put(meta, :retrieval_found?, false)
+
+  defp enrich_metadata(meta, %{earlier_report: %{seq: seq}}, :comparison),
+    do: Map.put(meta, :earlier_report_seq, seq)
+
+  defp enrich_metadata(meta, _, _), do: meta
 
   defp metadata(role, seq, requested_slot) do
     %{
