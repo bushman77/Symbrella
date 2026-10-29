@@ -92,7 +92,10 @@ defmodule Core.Response.AttentionFallback do
          true <- safe_terms_max(uncertain, @max_repair_terms) ==
                    safe_terms_max(Map.get(context, :uncertain), @max_repair_terms),
          [first | rest] <- safe_terms_max(uncertain, @max_repair_terms)
-                           |> Enum.filter(&surface_present?(text, &1)),
+                           |> Enum.filter(fn term ->
+                             surface_present?(text, term) and
+                               not recognized_topic_part?(context, term)
+                           end),
          true <- is_list(goal_terms) do
       candidates = [first | rest]
       target = Enum.find(candidates, &attended?(&1, goal_terms)) || first
@@ -134,6 +137,25 @@ defmodule Core.Response.AttentionFallback do
     else
       _ -> :not_applicable
     end
+  end
+
+  # A lexical weak/uncertain label can describe a word that is already
+  # recognized as part of the *requested topic*. Such a label is not, by
+  # itself, a reason to ask what the topic word means. E.g. a question about
+  # "the Pacific Ocean" must not become "what do you mean by ocean?"
+  #
+  # Both an explicit WM topic and its independently recorded recognized-topic
+  # anchor are required. This must NOT suppress genuinely unrecognized words
+  # elsewhere in the current utterance, or ambiguous non-topic vocabulary.
+  defp recognized_topic_part?(context, term) do
+    topic = Map.get(context, :topic)
+    recognized = Map.get(context, :recognized_topics)
+
+    is_binary(topic) and surface_present?(topic, term) and
+      is_list(recognized) and
+      Enum.any?(recognized, fn anchor ->
+        is_binary(anchor) and surface_present?(anchor, term)
+      end)
   end
 
   defp completed_meaning?(si) do
