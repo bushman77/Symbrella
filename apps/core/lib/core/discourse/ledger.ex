@@ -114,6 +114,55 @@ defmodule Core.Discourse.Ledger do
   def pending_fuzzy_confirmation(_, _), do: :not_applicable
 
   @doc """
+  A recent unresolved progressive clause blocks older activity/location
+  retrieval for that same actor until its missing predicate is clarified.
+  A selected, unanswered fuzzy request is also an unresolved source.
+  This is an uncertainty barrier, not an event or dictionary sense.
+  """
+  @spec pending_unresolved_activity(term(), String.t()) :: {:ok, map()} | :not_applicable
+  def pending_unresolved_activity(session, question) when is_binary(question) do
+    with {:forward, actor, requested_role, _constraints} <-
+           ParticipantQuestions.parse(question),
+         true <- requested_role in [:predicate, :location],
+         [latest | _] <- entries(session),
+         {:ok, subject, original, source_digest} <- unresolved_source(latest),
+         true <- subject == actor and is_binary(original) and
+                   is_binary(source_digest) do
+      {:ok, %{
+        actor: subject, unresolved_predicate: original,
+        source_turn_sha256: source_digest,
+        factual_authority?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  def pending_unresolved_activity(_, _), do: :not_applicable
+
+  defp unresolved_source(%{
+         kind: :fuzzy_clarification_request, status: :provisional,
+         actor: actor, original: original,
+         source_turn_sha256: digest,
+         factual_authority?: false
+       }) when is_binary(actor) and is_binary(original) and
+                 is_binary(digest) and byte_size(digest) == 64,
+       do: {:ok, actor, original, digest}
+
+  defp unresolved_source(%{
+         kind: :unresolved_progressive_predicate,
+         status: :provisional, actor: actor, predicate: predicate,
+         source_turn_sha256: digest,
+         factual_authority?: false
+       }) when is_binary(actor) and is_binary(predicate) and
+                 is_binary(digest) and byte_size(digest) == 64,
+       do: {:ok, actor, predicate, digest}
+
+  defp unresolved_source(_), do: :not_applicable
+
+
+
+  @doc """
   The next same-session question may request an actor's activity or described
   location from one speaker-confirmed, fingerprint-replayed progressive frame.
   The requested role is selected by ParticipantQuestions, not by inspecting
@@ -363,7 +412,11 @@ defmodule Core.Discourse.Ledger do
       _ ->
         case clarified_query_record(si) do
           %{} = record -> record
-          _ -> semantic_record_without_fuzzy(si)
+          _ ->
+            case unresolved_predicate_record(si) do
+              %{} = record -> record
+              _ -> semantic_record_without_fuzzy(si)
+            end
         end
     end
   end
@@ -380,6 +433,46 @@ defmodule Core.Discourse.Ledger do
               :not_applicable -> ordinary_semantic_record(si)
             end
         end
+    end
+  end
+
+  # Preserve the uncertainty as a compact, same-session blocker even if
+  # response planning chose a generic lexical report. Revalidate the source
+  # frame rather than trusting an unattested surface-only dictionary guess.
+  defp unresolved_predicate_record(si) do
+    with {:ok, %{
+           kind: :unresolved_progressive_predicate,
+           status: :provisional,
+           operation: :clarify_unresolved_predicate,
+           original_sentence: sentence,
+           source_span_sha256: span_digest,
+           target: %{lemma: predicate, lexical_evidence: :unresolved},
+           participants: %{actor: %{surface: surface_actor}},
+           speaker_clarification_confirmed?: false,
+           event_occurrence_verified?: false,
+           factual_authority?: false
+         }} <- ProvisionalInterpretation.verified(si),
+         true <- sentence == Map.get(si, :sentence),
+         true <- is_binary(surface_actor) and is_binary(predicate),
+         {:ok, clause} <- fuzzy_surface_clause(sentence, predicate),
+         true <- String.downcase(surface_actor) in [
+           "the " <> clause.actor, "a " <> clause.actor, "an " <> clause.actor
+         ],
+         true <- span_digest == span_digest(clause.tokens) do
+      %{
+        kind: :unresolved_progressive_predicate,
+        status: :provisional,
+        actor: clause.actor,
+        predicate: predicate,
+        source_turn_sha256:
+          (:crypto.hash(:sha256, sentence) |> Base.encode16(case: :lower)),
+        source_span_sha256: span_digest,
+        provenance: :revalidated_unresolved_sentence,
+        verification: :conversation_context_only,
+        factual_authority?: false
+      }
+    else
+      _ -> nil
     end
   end
 
