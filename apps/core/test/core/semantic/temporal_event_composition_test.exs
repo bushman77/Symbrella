@@ -146,6 +146,27 @@ defmodule Core.Semantic.TemporalEventCompositionTest do
     assert meta.llm_called? == false
   end
 
+  test "intervening unrelated turns do not erase report provenance", %{sid: sid} do
+    seed(sid)
+
+    for index <- 1..20 do
+      Ledger.record(%Core.SemanticInput{
+        session_id: sid, source: :test, intent: :unknown,
+        sentence: "Unrelated conversation entry #{index}."
+      })
+    end
+
+    si = question(sid)
+    assert {:ok, %{temporal_evidence: pair}} =
+      TemporalEventComposition.verified(si)
+    assert pair.earlier.seq == 2
+    assert pair.later.seq == 3
+    assert length(Ledger.entries(sid)) == 23
+
+    assert {:ok, _reply, _meta} =
+      SymbolicGeneration.generate(@question, @features, @decision, si)
+  end
+
   test "question tampering, wrong session and unsupported phrasing fail closed",
        %{sid: sid, other: other} do
     seed(sid)
