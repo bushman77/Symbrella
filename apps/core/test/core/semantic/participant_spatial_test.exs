@@ -272,6 +272,9 @@ defmodule Core.Semantic.ParticipantSpatialTest do
       {"Where is the bird?", "On the fence."},
       {"What is sitting on the fence?", "A bird."},
       {"What is the bird doing?", "Sitting."},
+      {"what is the bird doing", "Sitting."},
+      {"What was the bird doing?", "Sitting."},
+      {"what was the bird doing", "Sitting."},
       {"What is the bird sitting on?", "On the fence."}
     ]
 
