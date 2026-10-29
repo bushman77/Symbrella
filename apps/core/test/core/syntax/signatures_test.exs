@@ -53,6 +53,68 @@ defmodule Core.Syntax.SignaturesTest do
     |> Enum.map(& &1.id)
   end
 
+  test "unrecognized progressive slot yields role evidence without inventing a verb sense" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "bird", pos: "noun"},
+      %{norm: "fence", pos: "noun"},
+      %{norm: "is", pos: "verb"},
+      %{norm: "on", pos: "preposition"}
+    ]
+
+    signatures =
+      Signatures.detect(input("The bird is flarping on the fence.", cells))
+
+    assert [%{
+      id: :progressive_lexical_gap_candidate,
+      span: {0, 6},
+      roles: %{subject_head: 1, auxiliary: 2, predicate: 3,
+               preposition: 4, location_head: 6},
+      required_features: %{predicate: [:unresolved_ing_surface]},
+      source: :core_syntax
+    } = gap] =
+      Enum.filter(signatures, &(&1.id == :progressive_lexical_gap_candidate))
+
+    assert :unresolved_progressive_predicate in gap.evidence
+    refute :attested_present_participle in gap.evidence
+
+    # No candidate can manufacture a missing dictionary verb cell.
+    refute :progressive_locative_candidate in Enum.map(signatures, & &1.id)
+
+    for missing <- ["bird", "on", "fence"] do
+      weaker = Enum.reject(cells, &(&1.norm == missing))
+      refute :progressive_lexical_gap_candidate in
+        ids("The bird is flarping on the fence.", weaker)
+    end
+
+    for sentence <- [
+      "The bird is flarping.",
+      "The bird is flarping inside the fence.",
+      "The bird is flarping on fence.",
+      "The bird is dancing on the fence."
+    ] do
+      candidates = ids(sentence, cells)
+      if sentence == "The bird is dancing on the fence." do
+        # Surface-only -ing with no dictionary evidence is provisional even
+        # when the string happens to be a real English word.
+        assert :progressive_lexical_gap_candidate in candidates
+      else
+        refute :progressive_lexical_gap_candidate in candidates
+      end
+    end
+
+    attested = [
+      %{norm: "flapping", pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"]}
+      | cells
+    ]
+
+    refute :progressive_lexical_gap_candidate in
+      ids("The bird is flapping on the fence.", attested)
+    assert :progressive_locative_candidate in
+      ids("The bird is flapping on the fence.", attested)
+  end
+
   test "complete attested regular-past transitive frame distinguishes predicate from noun reading" do
     cells = [
       %{norm: "the", pos: "determiner"},
