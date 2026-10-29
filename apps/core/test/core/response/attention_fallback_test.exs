@@ -601,8 +601,21 @@ defmodule Core.Response.AttentionFallbackTest do
       "Where is the bird?")
     assert :not_applicable ==
       Core.Semantic.ClarifiedEvent.build(sid, "What is the cat doing?")
-    assert :not_applicable ==
+    assert {:ok, "In your description, the bird is on the fence.", location_meta} =
       Core.Semantic.ClarifiedEvent.answer(sid, "Where is the bird?")
+    assert location_meta.requested_role == :location
+    assert location_meta.factual_authority? == false
+
+    assert {:warm, location_reply, location_reply_meta} =
+      Response.memory_reply(%{
+        text: "Where is the bird?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+    assert location_reply == "In your description, the bird is on the fence."
+    assert location_reply_meta.memory_source == :same_session_clarified_event
+    assert location_reply_meta.requested_role == :location
+    assert location_reply_meta.semantic_verified? == false
+    assert location_reply_meta.factual_authority? == false
     assert :not_applicable ==
       Core.Semantic.ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
   end
