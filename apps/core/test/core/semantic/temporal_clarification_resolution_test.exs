@@ -205,4 +205,35 @@ defmodule Core.Semantic.TemporalClarificationResolutionTest do
     assert TemporalClarificationResolution.build(say(sid, "I meant report 1.")) ==
       nil
   end
+
+  test "live cautious policy and feedback intent still realize a verified clarification",
+       %{sid: sid} do
+    seed(sid)
+    request(sid)
+
+    answer = "I meant report 1."
+    si = say(sid, answer)
+    plan = SemanticStrategy.select(si)
+    assert %{operation: :acknowledge_intended_temporal_report,
+             status: :eligible} = plan
+
+    features = %{risk_bucket: :low, intent: :feedback}
+    decision = %{action: :ask_first}
+
+    assert {:ok, reply, :symbolic_generation, meta} =
+      SemanticStrategy.realize(plan, answer, features, decision, si)
+    assert String.starts_with?(reply, "You meant the order described in report 1.")
+    assert meta.llm_called? == false
+    assert meta.factual_claims? == false
+
+    assert SymbolicGeneration.generate(answer,
+      %{risk_bucket: :high, intent: :feedback}, decision, si) == :not_applicable
+    assert SymbolicGeneration.generate(answer, features,
+      %{action: :safe_redirect}, si) == :not_applicable
+
+    # No generic social output is unlocked by a cautious action.
+    assert SymbolicGeneration.generate("Hello.", features, decision,
+      %{sentence: "Hello.", source: :test}) == :not_applicable
+  end
+
 end
