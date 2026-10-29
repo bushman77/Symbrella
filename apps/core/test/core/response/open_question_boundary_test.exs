@@ -58,6 +58,7 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
     for sentence <- [
       "what do you think of the iran - US",
       "what do you think of the iranian american war",
+      "what do you think of the U.S. -Iran war",
       "What do you think about the garden?",
       "What's your take on local housing?",
       "What is your opinion on this proposal?",
@@ -93,7 +94,8 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
     for sentence <- [
       "what is new in the world of you",
       "what do you think of the iran - US",
-      "what do you think of the iranian american war"
+      "what do you think of the iranian american war",
+      "what do you think of the U.S. -Iran war"
     ] do
       {_tone, response, metadata} = Response.plan(si(sentence), %{})
 
@@ -113,6 +115,8 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
       assert metadata.curiosity_probe == nil
       refute response =~ "I can identify"
       refute response =~ "Symbolic response unavailable"
+      refute response =~ "I read that as likely about the US-Iran conflict"
+      refute response =~ "I don't have live news access in this runtime"
     end
   end
 
