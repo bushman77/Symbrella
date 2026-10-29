@@ -59,6 +59,7 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
       "what do you think of the iran - US",
       "what do you think of the iranian american war",
       "what do you think of the U.S. -Iran war",
+      "what do you think if the U.S. iranian war",
       "What do you think about the garden?",
       "What's your take on local housing?",
       "What is your opinion on this proposal?",
@@ -95,7 +96,8 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
       "what is new in the world of you",
       "what do you think of the iran - US",
       "what do you think of the iranian american war",
-      "what do you think of the U.S. -Iran war"
+      "what do you think of the U.S. -Iran war",
+      "what do you think if the U.S. iranian war"
     ] do
       {_tone, response, metadata} = Response.plan(si(sentence), %{})
 
