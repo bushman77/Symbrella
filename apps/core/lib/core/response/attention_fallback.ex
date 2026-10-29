@@ -84,6 +84,8 @@ defmodule Core.Response.AttentionFallback do
     summary = Map.get(si, :comprehension)
 
     with true <- is_map(summary),
+         true <- Map.get(context, :turn_sha256) ==
+                   (:crypto.hash(:sha256, text) |> Base.encode16(case: :lower)),
          true <- Map.get(context, :interpretation_status) not in [:fully_verified],
          true <- not completed_meaning?(si),
          uncertain when is_list(uncertain) <- Map.get(summary, :uncertain),
