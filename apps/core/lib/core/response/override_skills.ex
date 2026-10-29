@@ -35,7 +35,6 @@ defmodule Core.Response.OverrideSkills do
              :symbrella_definition,
              :time,
              :current_events_capability,
-             :recognizable_topic_fallback,
              :alarm_capability
            ] and is_binary(s) and s != "" do
     s
