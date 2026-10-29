@@ -166,4 +166,45 @@ defmodule Core.Text.FuzzyTest do
              %{original: "plaase", replacement: "please", reason: :pgvector_context}
            ] = fuzzy.corrections
   end
+
+  test "suggests a nearby action as a question hypothesis using context, not autocorrection" do
+    sentence = "The bird is flarping on the fence."
+    suggestion =
+      Fuzzy.suggest_word("flarping", sentence,
+        known_word?: fn _ -> false end,
+        candidate_words: ["flapping", "flaring"])
+
+    assert suggestion == %{
+      original: "flarping",
+      replacement: "flapping",
+      edit_distance: 1,
+      confidence: 0.96,
+      source: :context_frame,
+      status: :hypothesis_only
+    }
+
+    assert sentence == "The bird is flarping on the fence."
+  end
+
+  test "does not guess without contextual evidence or for an already-known word" do
+    opts = [known_word?: fn _ -> false end, candidate_words: ["flapping", "flaring"]]
+    assert nil == Fuzzy.suggest_word("flarping", "I like flarping.", opts)
+    assert nil == Fuzzy.suggest_word("flarping", "The cat is flarping.", opts)
+    assert nil == Fuzzy.suggest_word("flarping", "The bird is flarping.", 
+      known_word?: fn _ -> true end, candidate_words: ["flapping"])
+    assert nil == Fuzzy.suggest_word("bird", "The bird is flarping.", opts)
+    assert nil == Fuzzy.suggest_word("flarping", "The bird is flarping and flarping.", opts)
+  end
+
+  test "abstains from ambiguous close candidates even when both have context scores" do
+    suggestion = Fuzzy.suggest_word("flarping", "The bird is flarping.",
+      known_word?: fn _ -> false end,
+      candidate_words: [
+        %{word: "flapping", context_score: 0.8},
+        %{word: "flaring", context_score: 0.9}
+      ])
+
+    assert suggestion == nil
+  end
+
 end
