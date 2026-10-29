@@ -107,7 +107,7 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
     end
   end
 
-  test "no forged SI, high-risk turn, unsupported action or unavailable model may authorize content" do
+  test "forged SI, high-risk turn, unsupported action and disallowed intent abstain" do
     sentence = "What do you think of ocean currents?"
     base = si(sentence)
 
@@ -141,7 +141,7 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
       "What is the bird doing?",
       "What is the meaning of bank?",
       "hello symbrella",
-      "tell me what you think", 
+      "tell me what you think",
       "what do you think of",
       "I think of going home",
       "What do you think of " <> String.duplicate("a", 150),
