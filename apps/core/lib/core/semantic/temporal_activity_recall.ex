@@ -47,6 +47,10 @@ defmodule Core.Semantic.TemporalActivityRecall do
   @compare_different ~r/\A\s*did\s+i\s+describe\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing\s+something\s+different\s*[?.]?\s*\z/iu
   @compare_same ~r/\A\s*was\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing\s+the\s+same\s+thing\s*[?.]?\s*\z/iu
   @compare_what ~r/\A\s*what\s+changed\s+in\s+my\s+descriptions\s+of\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
+  # Latest-report recap uses the same proof-qualified event path; it is not
+  # transcript summarization or general question answering.
+  @recap_question ~r/\A\s*(?:what\s+did\s+i\s+(?:say|describe)\s+about|(?:can\s+you\s+)?remind\s+me\s+what\s+i\s+said\s+about)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
+  @recap_pronoun ~r/\A\s*(?:what\s+did\s+i\s+(?:say|describe)\s+about|(?:can\s+you\s+)?remind\s+me\s+what\s+i\s+said\s+about)\s+it\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
@@ -92,6 +96,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
   defp parse(text) do
     cond do
+      Regex.match?(@recap_pronoun, text) ->
+        {:ok, :recap, :latest, :it, nil}
+
+      match = Regex.named_captures(@recap_question, text) ->
+        parse_actor(match, :recap, :latest)
+
       match = Regex.named_captures(@pronoun_activity, text) ->
         parse_aux(Map.put(match, "actor", "it"), :activity)
 
@@ -343,6 +353,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
   # Answers describe what the speaker said, never that the reported action
   # occurred. In particular, "into" is a direction, not a confirmed location.
+  defp realize(event, :recap, :latest) do
+    with {:ok, description} <- describe(event) do
+      {:ok, "Your latest interpretable description in this session was of #{description}. This does not confirm that the event occurred or that the same individual appears in other reports."}
+    end
+  end
+
   defp realize(event, :activity, :first) do
     with {:ok, description} <- describe(event) do
       {:ok, "Your first interpretable report described #{description}. This is report order, not verified event chronology."}
