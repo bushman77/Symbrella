@@ -82,8 +82,10 @@ defmodule Core.Semantic.TemporalClarificationResolution do
 
   def verified(_), do: :not_applicable
 
-  defp choose(seq, %{seq: seq} = older, _newer), do: older
-  defp choose(seq, _older, %{seq: seq} = newer), do: newer
+  defp choose(seq, %{seq: candidate} = older, _newer)
+       when seq == candidate, do: older
+  defp choose(seq, _older, %{seq: candidate} = newer)
+       when seq == candidate, do: newer
   defp choose(_, _, _), do: nil
 
   defp valid_pending?(%{
