@@ -9,7 +9,7 @@ defmodule Core.Response.SymbolicGeneration do
 
   alias Core.Semantic.Composition
   alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning,
-    SpeechActs, TemporalClaimReconciliation}
+    SpeechActs, TemporalClaimReconciliation, TemporalClarificationResolution}
 
   # Accept the intent labels the live classifier actually emits for
   # complete social turns. These labels by themselves never authorize output:
@@ -204,9 +204,50 @@ defmodule Core.Response.SymbolicGeneration do
   # A clarification needs both speaker claims revalidated from the current
   # same-session ledger. Without a unique pair there is no native answer.
   defp maybe_realize_temporal_first(text, si) do
-    case maybe_realize_temporal_conflict(text, si) do
-      {:ok, _, _} = clarification -> clarification
-      :not_applicable -> maybe_realize_temporal_report_order(text, si)
+    case maybe_realize_temporal_resolution(text, si) do
+      {:ok, _, _} = acknowledgment -> acknowledgment
+      :not_applicable ->
+        case maybe_realize_temporal_conflict(text, si) do
+          {:ok, _, _} = clarification -> clarification
+          :not_applicable -> maybe_realize_temporal_report_order(text, si)
+        end
+    end
+  end
+
+  defp maybe_realize_temporal_resolution(user_text, si) do
+    with ^user_text <- Map.get(si, :sentence),
+         {:ok, %{
+           kind: :temporal_clarification_resolution,
+           operation: :select_intended_report_order,
+           chosen_report_seq: chosen,
+           pending_request_seq: pending,
+           speaker_attributed?: true,
+           contradiction_verified?: false,
+           event_occurrence_verified?: false,
+           actual_event_chronology_verified?: false,
+           factual_authority?: false
+         }} <- TemporalClarificationResolution.verified(si),
+         true <- is_integer(chosen) and chosen > 0,
+         true <- is_integer(pending) and pending > chosen do
+      {:ok,
+       "You meant the order described in report #{chosen}. " <>
+         "That clarifies your intended description, not verified event chronology. " <>
+         "Both original reports remain part of the conversation.",
+       %{
+         status: :symbolic_realized,
+         speech_act: :acknowledge_temporal_clarification,
+         interpreted_speech_act: :temporal_clarification_resolution,
+         provenance: :revalidated_temporal_clarification_answer,
+         chosen_report_seq: chosen,
+         event_identity_verified?: false,
+         event_occurrence_verified?: false,
+         actual_event_order_verified?: false,
+         contradiction_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
     end
   end
 
