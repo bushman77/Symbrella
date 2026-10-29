@@ -134,6 +134,9 @@ defmodule Core.Response.Attach do
       # Keep it through SI -> response planning; symbolic realization
       # revalidates the representation against the independent input.
       sentence_meaning: si_get(si, :sentence_meaning),
+      # The attention-repair path only calls a lexical term "understood"
+      # when this turn includes its dictionary-verified construction witness.
+      lexical_constructions: si_get(si, :lexical_constructions),
       provisional_interpretation: si_get(si, :provisional_interpretation),
       construction_candidates: si_get(si, :construction_candidates),
       semantic_request_frame: si_get(si, :semantic_request_frame),
