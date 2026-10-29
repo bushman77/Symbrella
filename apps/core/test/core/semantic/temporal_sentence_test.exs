@@ -70,6 +70,31 @@ defmodule Core.Semantic.TemporalSentenceTest do
     end
   end
 
+  defp live_tied_after do
+    si = live_style_input(@after_words)
+    extra_rows = [
+      %{id: "after|noun|1", norm: "after", pos: "noun", semantic_atoms: []},
+      %{id: "after|conjunction|2", norm: "after", pos: "conjunction",
+        semantic_atoms: []},
+      %{id: "after|preposition|1", norm: "after", pos: "preposition",
+        semantic_atoms: []}
+    ]
+
+    choices = Enum.map(si.lifg_choices, fn
+      %{token_index: 7} = choice ->
+        %{choice | id: "after|noun|1",
+          candidate_probs: %{
+            "after|conjunction|1" => 0.08,
+            "after|conjunction|2" => 0.08,
+            "after|preposition|1" => 0.08
+          }}
+      choice -> choice
+    end)
+
+    %{si | active_cells: extra_rows ++ si.active_cells,
+      lifg_choices: choices}
+  end
+
   test "live alternatives require current dictionary witnesses" do
     si = live_style_input()
     without_verb = %{si | active_cells:
