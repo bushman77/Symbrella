@@ -229,7 +229,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
 
         names =
           Regex.scan(
-            ~r/\b(?:[A-Z]{2,}|[A-Z][\p{Ll}]{2,}|[\p{Ll}]{4,}ian)\b/u,
+            ~r/\b(?:[A-Z]{2,}|[A-Z][\p{Ll}]{2,}|[\p{Ll}]{3,}(?:ian|can|ese|ish))\b/u,
             initialisms
           )
           |> List.flatten()
