@@ -12,6 +12,7 @@ defmodule Core.Response.AttentionFallback do
   alias Core.Discourse.Ledger
   alias Core.Response.LexicalDefinition
   alias Core.Semantic.TemporalSentence
+  alias Core.Semantic.ProvisionalInterpretation
   alias Core.Text.Fuzzy
 
   @max_terms 2
@@ -129,10 +130,57 @@ defmodule Core.Response.AttentionFallback do
         report
 
       :not_applicable ->
-        case partial_repair(text, si, context, goal_terms, salience) do
+        case provisional_predicate_repair(text, si, context, salience) do
           {:ok, _, _} = repair -> repair
-          :not_applicable -> lexical_gap_report(text, si, context, goal_terms, salience)
+          :not_applicable ->
+            case partial_repair(text, si, context, goal_terms, salience) do
+              {:ok, _, _} = repair -> repair
+              :not_applicable -> lexical_gap_report(text, si, context, goal_terms, salience)
+            end
         end
+    end
+  end
+
+  # The independently revalidated missing-predicate frame is stronger
+  # evidence about *which word needs clarification* than weak LIFG scores
+  # for otherwise familiar subject/landmark nouns. No sense is invented:
+  # the suggested substitution remains only a question to the speaker.
+  defp provisional_predicate_repair(text, si, context, salience) do
+    with true <- current_turn?(text, context),
+         true <- not completed_meaning?(si),
+         {:ok, %{
+           kind: :unresolved_progressive_predicate,
+           status: :provisional,
+           operation: :clarify_unresolved_predicate,
+           target: %{lemma: term, lexical_evidence: :unresolved},
+           speaker_clarification_confirmed?: false,
+           factual_authority?: false
+         }} <- ProvisionalInterpretation.verified(si),
+         true <- is_binary(term) and surface_present?(text, term) do
+      suggestion = Fuzzy.suggest_word(term, text)
+      reply =
+        case suggestion do
+          %{status: :hypothesis_only, replacement: replacement}
+          when is_binary(replacement) ->
+            ~s|I'm not sure how you're using "#{term}" here. Did you mean "#{replacement}"?|
+
+          _ ->
+            ~s|I'm not sure how you're using "#{term}" here. Could you clarify what you mean?|
+        end
+
+      {:ok, reply, %{
+        status: :attention_comprehension_repair,
+        provenance: :revalidated_provisional_predicate_gap,
+        unresolved_term: term,
+        fuzzy_suggestion: suggestion,
+        recognized_level: :grammatical_slot_only,
+        attention_salience: salience,
+        semantic_verified?: false,
+        factual_claims?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
     end
   end
 
