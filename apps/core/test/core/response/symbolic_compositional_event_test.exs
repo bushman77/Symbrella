@@ -164,6 +164,9 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
   end
 
   defp record_proved_report(session, actor, activity, relation, landmark) do
+    if not is_pid(Process.whereis(Core.Discourse.Ledger.Owner)),
+      do: start_supervised!(Core.Discourse.Ledger.Owner)
+
     si =
       input(actor, activity, relation, landmark)
       |> Map.put(:session_id, session)
