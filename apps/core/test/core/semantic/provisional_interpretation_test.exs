@@ -125,7 +125,7 @@ defmodule Core.Semantic.ProvisionalInterpretationTest do
 
     attached = Provisional.attach(si)
     forged = put_in(attached,
-      [:provisional_interpretation, :participants, :predicate, :surface],
+      [Access.key!(:provisional_interpretation), :participants, :predicate, :surface],
       "dancing")
 
     assert Provisional.verified(forged) == :not_applicable
