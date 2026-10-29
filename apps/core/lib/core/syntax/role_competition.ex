@@ -41,7 +41,11 @@ defmodule Core.Syntax.RoleCompetition do
     si
     |> Map.put(:role_competition, result)
     |> Trace.append(:role_competition,
-      decision: if(result.roles == %{}, do: :abstained, else: :supported),
+      decision: cond do
+        map_size(result.roles) > 0 -> :supported
+        map_size(result.unresolved_roles) > 0 -> :unresolved
+        true -> :abstained
+      end,
       reason: :independent_grammatical_evidence_competition,
       meta: %{
         decisions: result.decisions,
@@ -50,7 +54,8 @@ defmodule Core.Syntax.RoleCompetition do
         unresolved_code_tokens: length(nominal.unresolved_tokens),
         argument_frames: length(argument_frames),
         identifier_bindings: length(identifier_bindings),
-        supported_count: map_size(result.roles)
+        supported_count: map_size(result.roles),
+        unresolved_grammar_count: map_size(result.unresolved_roles)
       })
   end
 
