@@ -23,6 +23,9 @@ defmodule Core.Discourse.Ledger do
   alias Core.Semantic.{Composition, DiscourseComposition, TemporalSentence,
     TemporalClaimReconciliation, TemporalClarificationResolution}
   alias Core.Pipeline.Trace
+  alias Core.Text.Fuzzy
+
+  @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
   @max_query_bytes 256
   @max_public_candidates 5
@@ -60,6 +63,51 @@ defmodule Core.Discourse.Ledger do
     if valid_session?(session) and is_pid(Process.whereis(Owner)),
       do: Owner.entries(session), else: []
   end
+
+  @doc """
+  The latest ledger entry must be an actually issued, same-session fuzzy
+  question, and the immediate user response must explicitly confirm its
+  proposed word. This is a discourse preference, NOT a dictionary definition.
+  """
+  @spec pending_fuzzy_confirmation(term(), String.t()) ::
+          {:ok, map()} | :not_applicable
+  def pending_fuzzy_confirmation(session, text) when is_binary(text) do
+    case entries(session) do
+      [%{
+        kind: :fuzzy_clarification_request, status: :provisional,
+        original: original, proposed: proposed,
+        source_turn_sha256: digest, asked_at_ms: asked,
+        verification: :conversation_context_only,
+        factual_authority?: false
+      } = pending | _] ->
+        now = System.system_time(:millisecond)
+        normalized = text |> String.downcase() |> String.trim()
+        expected = String.downcase(proposed)
+        explicit_confirmation? =
+          normalized in ["yes", "yes.", "yeah", "yeah.", "yep", "yep.",
+            "yes #{expected}", "yes #{expected}.",
+            "yes, #{expected}", "yes, #{expected}.",
+            "yeah #{expected}", "yeah, #{expected}.",
+            "yep #{expected}", "yep, #{expected}."]
+
+        if is_binary(original) and is_binary(proposed) and
+             Regex.match?(~r/\A\p{L}{5,24}\z/u, original) and
+             Regex.match?(~r/\A\p{L}{5,24}\z/u, proposed) and
+             is_binary(digest) and byte_size(digest) == 64 and
+             is_integer(asked) and now >= asked and
+             now - asked <= @fuzzy_confirmation_window_ms and
+             explicit_confirmation? do
+          {:ok, pending}
+        else
+          :not_applicable
+        end
+
+      _ ->
+        :not_applicable
+    end
+  end
+
+  def pending_fuzzy_confirmation(_, _), do: :not_applicable
 
   @doc """
   Resolve an explicitly named noun phrase from retained semantic records.
@@ -163,6 +211,13 @@ defmodule Core.Discourse.Ledger do
   end
 
   defp semantic_record(si) do
+    case fuzzy_dialogue_record(si) do
+      %{} = record -> record
+      _ -> semantic_record_without_fuzzy(si)
+    end
+  end
+
+  defp semantic_record_without_fuzzy(si) do
     case TemporalSentence.verified(si) do
       {:ok, meaning} -> temporal_claim_record(meaning)
       :not_applicable ->
@@ -174,6 +229,75 @@ defmodule Core.Discourse.Ledger do
               :not_applicable -> ordinary_semantic_record(si)
             end
         end
+    end
+  end
+
+  # Persist only a question that was actually selected and shown by the
+  # response planner, never an unselected fuzzy suggestion from pre-intent
+  # normalization. The source sentence itself is not copied into the ledger.
+  defp fuzzy_dialogue_record(si) do
+    meta = Map.get(si, :response_meta, %{})
+    reflection = if is_map(meta), do: Map.get(meta, :response_reflection), else: nil
+    response = Map.get(si, :response_text)
+    sentence = Map.get(si, :sentence)
+    comprehension = Map.get(si, :comprehension, %{})
+    unresolved = if is_map(comprehension), do: Map.get(comprehension, :unresolved, []), else: []
+
+    cond do
+      not is_map(meta) or
+          Map.get(meta, :response_source) != :wm_attention_fallback or
+          Map.get(meta, :risk_bucket) != :low ->
+        nil
+
+      not is_binary(sentence) or byte_size(sentence) > 256 or
+          not is_binary(response) ->
+        nil
+
+      match?(%{status: :attention_comprehension_repair}, reflection) ->
+        Enum.find_value(List.wrap(unresolved), fn term ->
+          if is_binary(term) do
+            case Fuzzy.suggest_word(term, sentence) do
+              %{original: original, replacement: proposed, status: :hypothesis_only}
+              when is_binary(original) and is_binary(proposed) ->
+                if String.ends_with?(response, ~s|Did you mean "#{proposed}"?|) do
+                  %{
+                    kind: :fuzzy_clarification_request,
+                    status: :provisional,
+                    original: original,
+                    proposed: proposed,
+                    source_turn_sha256: :crypto.hash(:sha256, sentence)
+                      |> Base.encode16(case: :lower),
+                    asked_at_ms: System.system_time(:millisecond),
+                    provenance: :actual_attention_fuzzy_question,
+                    verification: :conversation_context_only,
+                    factual_authority?: false
+                  }
+                end
+
+              _ -> nil
+            end
+          end
+        end)
+
+      match?(%{status: :fuzzy_clarification_confirmed}, reflection) ->
+        case pending_fuzzy_confirmation(Map.get(si, :session_id), sentence) do
+          {:ok, pending} ->
+            %{
+              kind: :fuzzy_clarification_resolution,
+              status: :speaker_confirmed_hypothesis,
+              original: pending.original,
+              proposed: pending.proposed,
+              request_seq: pending.seq,
+              source_turn_sha256: pending.source_turn_sha256,
+              provenance: :explicit_immediate_user_confirmation,
+              verification: :conversation_context_only,
+              factual_authority?: false
+            }
+
+          _ -> nil
+        end
+
+      true -> nil
     end
   end
 
