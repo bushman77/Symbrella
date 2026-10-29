@@ -15,8 +15,8 @@ defmodule Core.Response.OpenQuestionBoundary do
   # Surface-only request frames. Capture isn't treated as entity resolution:
   # the topic remains an unverified span, never a fact or dictionary sense.
   @opinion ~r/\A\s*(?:what\s+do\s+you\s+think\s+(?:of|about)|what(?:['’]s| is)\s+your\s+(?:take|opinion)\s+on|how\s+do\s+you\s+(?:feel|think)\s+about)\s+(?<topic>.+?)\s*[?.]?\s*\z/iu
-  @current ~r/\A\s*(?:what(?:['’]s| is)\s+(?:new|happening|going\s+on)\s+(?:with|in|about)|what(?:['’s]| is)\s+the\s+latest\s+(?:on|about)|what\s+(?:has\s+been|is)\s+happening\s+(?:with|in))\s+(?<topic>.+?)\s*[?.]?\s*\z/iu
-  @self_update ~r/\A\s*(?:what(?:['’s]| is)\s+new\s+(?:(?:with|about|in\s+the\s+world\s+of)\s+(?:you|yourself|symbrella))|what\s+have\s+you\s+been\s+up\s+to)\s*[?.]?\s*\z/iu
+  @current ~r/\A\s*(?:what(?:['’]s| is)\s+(?:new|happening|going\s+on)\s+(?:with|in|about)|what(?:['’]s| is)\s+the\s+latest\s+(?:on|about)|what\s+(?:has\s+been|is)\s+happening\s+(?:with|in))\s+(?<topic>.+?)\s*[?.]?\s*\z/iu
+  @self_update ~r/\A\s*(?:what(?:['’]s| is)\s+new\s+(?:(?:with|about|in\s+the\s+world\s+of)\s+(?:you|yourself|symbrella))|what\s+have\s+you\s+been\s+up\s+to)\s*[?.]?\s*\z/iu
 
   @spec recognize(String.t()) :: {:ok, map()} | :not_applicable
   def recognize(text) when is_binary(text) and byte_size(text) <= 320 do
