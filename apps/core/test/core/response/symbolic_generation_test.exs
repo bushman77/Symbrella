@@ -200,6 +200,65 @@ defmodule Core.Response.SymbolicGenerationTest do
     end
   end
 
+  test "live smalltalk how-are-you MWE plus uncertain today generates wellbeing response" do
+    for question <- [
+      "how are you today",
+      "How are you today?",
+      "How are you doing today?",
+      "How are you this evening?",
+      "How are you today, Symbrella?"
+    ] do
+      mwe = %{
+        id: "how are you|phrase|1", kind: :mwe, token_index: 0,
+        token_span: {0, 2}, source: :mwe_lexicon, score: 0.5
+      }
+
+      si =
+        %{
+          source: :user, sentence: question, text: question,
+          intent: :smalltalk, confidence: 0.655,
+          session_id: "wellbeing-live-#{System.unique_integer([:positive])}",
+          semantic_choices: [mwe, %{
+            id: "today|noun|1", token_index: 3,
+            source: :active_cells, score: 0.1583
+          }],
+          comprehension: %{
+            intent: :smalltalk, recognized_topics: ["today"],
+            understood: [], uncertain: ["today"], unresolved: [],
+            degraded?: true, reasons: [:weak_decision_rate_high]
+          }
+        }
+        |> SpeechActs.attach()
+
+      assert si.speech_act_frame.speech_act == :wellbeing_query
+      assert si.speech_act_frame.lexical_evidence.level == :surface_only
+
+      {_tone, reply, meta} = Response.plan(si, %{})
+      assert reply == "I'm here and ready to talk.", question
+      assert meta.response_source == :symbolic_generation
+      assert meta.response_reflection.interpreted_speech_act == :wellbeing_query
+      assert meta.response_reflection.llm_called? == false
+      assert meta.response_reflection.factual_claims? == false
+      assert meta.curiosity_probe == nil
+    end
+  end
+
+  test "wellbeing questions to other people never produce Symbrella's check-in" do
+    sentence = "How are you today, Bradley?"
+
+    si =
+      %{source: :user, sentence: sentence, text: sentence,
+        intent: :smalltalk, confidence: 0.7,
+        session_id: "wellbeing-other-#{System.unique_integer([:positive])}"}
+      |> SpeechActs.attach()
+
+    assert si.speech_act_frame.addressee == :other
+    assert :not_applicable =
+      SymbolicGeneration.generate(sentence,
+        %{risk_bucket: :low, intent: :smalltalk},
+        %{action: :answer}, si)
+  end
+
   test "foreign addressees and unsafe decisions do not generate native social replies" do
     for text <- [
       "Thanks Bradley.", "Good night, Bradley.",
