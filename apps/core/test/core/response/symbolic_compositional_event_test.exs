@@ -228,6 +228,37 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
     end
   end
 
+  test "response memory verifies a reported event without asserting occurrence" do
+    session = "report-confirm-live-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "bird", "flying", "into", "tree")
+
+    for {question, expected, found?} <- [
+      {"Did I say the bird was sitting on the fence?",
+       "Yes. You described a bird sitting on a fence", true},
+      {"Did I describe the bird flying into the tree?",
+       "Yes. You described a bird flying into a tree", true},
+      {"Have I mentioned the bird sleeping under the table?",
+       "I can't find a matching interpreted report", false}
+    ] do
+      assert {:warm, answer, meta} =
+        Response.memory_reply(%{
+          text: question, intent: :ask,
+          session_id: session, confidence: 0.9
+        }), question
+
+      assert answer =~ expected, question
+      assert meta.memory_source == :same_session_progressive_report
+      assert meta.requested_slot == :reported_event_confirmation
+      assert meta.retrieval_found? == found?
+      assert meta.event_occurrence_verified? == false
+      assert meta.same_actor_identity_verified? == false
+      assert meta.llm_called? == false
+    end
+  end
+
   test "response memory routing supports pronouns, arrival, comparison, count and first report" do
     session = "natural-followup-routing-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
