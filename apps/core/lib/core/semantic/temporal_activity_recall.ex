@@ -168,8 +168,13 @@ defmodule Core.Semantic.TemporalActivityRecall do
     end
   end
 
-  defp resolve_actor(actor, _reports, _slot) when actor in [:bird, :cat, :dog],
-    do: {:ok, actor}
+  defp resolve_actor(actor, _reports, _slot) when is_atom(actor) do
+    case Lexical.actor(Atom.to_string(actor)) do
+      {:ok, %{symbol: ^actor}} -> {:ok, actor}
+      _ -> :not_applicable
+    end
+  end
+
   defp resolve_actor(_, _, _), do: :not_applicable
 
   defp normalize_time(nil), do: nil
