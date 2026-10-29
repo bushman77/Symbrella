@@ -28,7 +28,7 @@ defmodule Core.Semantic.ParticipantQuestions do
          %{predicate: norm(m["predicate"]), position: norm(m["position"])}}
 
       m = Regex.named_captures(
-            ~r/^what is (?<entity>(?:the|a|an|my) [\p{L} '-]+?) doing\?$/iu, t
+            ~r/^what (?:is|was) (?<entity>(?:the|a|an|my) [\p{L} '-]+?) doing\??$/iu, t
           ) ->
         {:forward, EpisodicEvents.entity_key(m["entity"]), :predicate, %{}}
 
