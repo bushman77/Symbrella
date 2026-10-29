@@ -9,6 +9,8 @@ defmodule Core.Response.OpenQuestionBoundary do
   facts from topic text. Existing evidence-bound routes take precedence.
   """
 
+  alias Core.Tools.WebRetrieval
+
   @question_intents [:ask, :ask_info, :question, :query, :unknown,
                      :information_request, :smalltalk, :brain_introspect]
 
@@ -29,6 +31,17 @@ defmodule Core.Response.OpenQuestionBoundary do
 
       match = Regex.named_captures(@current, text) ->
         topic_request(:current_information_request, match)
+
+      # The retrieval router also recognizes narrowly bounded, named-party
+      # conflict assessments with colloquial "if" in place of "of".
+      # If lookup is disabled, still recognize the request rather than
+      # presenting the name as an unfamiliar dictionary word.
+      match?(
+        %{trigger: :conflict_opinion, request_type: :current_events},
+        WebRetrieval.route_for(%{user_text: text})
+      ) ->
+        %{query: topic} = WebRetrieval.route_for(%{user_text: text})
+        topic_request(:assessment_request, %{"topic" => topic})
 
       true ->
         :not_applicable
