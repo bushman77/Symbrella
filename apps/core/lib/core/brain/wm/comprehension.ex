@@ -69,11 +69,14 @@ defmodule Core.Brain.WM.Comprehension do
          sentence when is_binary(sentence) and byte_size(sentence) > 0 <- field(si, :sentence) do
       # Bind the admitted focus to this exact turn without retaining
       # the raw sentence in working memory.
+      turn_sha256 =
+        :crypto.hash(:sha256, sentence)
+        |> Base.encode16(case: :lower)
+
       context =
-        si
-        |> context_from(comprehension)
-        |> Map.put(:turn_sha256,
-          :crypto.hash(:sha256, sentence) |> Base.encode16(case: :lower))
+        context_from(si, comprehension)
+        |> Map.put(:turn_sha256, turn_sha256)
+
       id = frame_id(session)
 
       # The already implemented salience/BasalGanglia path receives a bounded,
