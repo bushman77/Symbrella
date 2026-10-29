@@ -22,8 +22,8 @@ defmodule Core.Semantic.CompositionTemporalRelationTest do
   defp endpoints(%{result: {:lambda, e1, :event,
        {:lambda, e2, :event,
         {:and, {:and, first_event, second_event},
-         {:event_precedes, {:var, before}, {:var, after}}}}}}) do
-    %{first: e1, second: e2, before: before, after: after,
+         {:event_precedes, {:var, earlier_var}, {:var, later_var}}}}}}) do
+    %{first: e1, second: e2, before: earlier_var, after: later_var,
       first_event: first_event, second_event: second_event}
   end
 
