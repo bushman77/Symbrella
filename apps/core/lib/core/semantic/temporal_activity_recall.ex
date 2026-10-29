@@ -17,23 +17,23 @@ defmodule Core.Semantic.TemporalActivityRecall do
   alias Core.Semantic.Composition.Lexical
 
   # Bounded grammatical paraphrases. These select report roles, not facts.
-  @progressive_question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @progressive_question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   @contracted_question ~r/\A\s*what['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
-  @earlier_do_question ~r/\A\s*what\s+did\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+do\s+(?:earlier|before|previously)\s*[?.]?\s*\z/iu
-  @where_question ~r/\A\s*where\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @earlier_do_question ~r/\A\s*what\s+did\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+do\s+(?<time>earlier|before|previously|first|last)\s*[?.]?\s*\z/iu
+  @where_question ~r/\A\s*where\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   @where_contracted ~r/\A\s*where['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
-  @activity_report_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @activity_report_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   # In embedded questions English normally uses subject-auxiliary order:
   # "Tell me what the bird is doing", not "tell me what is the bird doing".
-  @embedded_activity_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @embedded_activity_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   # Anaphoric "it" is never assigned to an individual from mere recency.
   # It can refer to one unique attested actor KIND in the retained session.
   # Mixed actor kinds require clarification, not a guessed antecedent.
-  @pronoun_activity ~r/\A\s*what\s+(?<aux>is|was)\s+it\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
-  @pronoun_where ~r/\A\s*where\s+(?<aux>is|was)\s+it(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @pronoun_activity ~r/\A\s*what\s+(?<aux>is|was)\s+it\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
+  @pronoun_where ~r/\A\s*where\s+(?<aux>is|was)\s+it(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   @pronoun_contract_activity ~r/\A\s*what['’]s\s+it\s+doing(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
   @pronoun_contract_where ~r/\A\s*where['’]s\s+it(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
-  @pronoun_embedded ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+it\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @pronoun_embedded ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+it\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously|first|last))?\s*[?.]?\s*\z/iu
   # Destination questions distinguish a directional property from
   # verified arrival. A matching reported destination is required.
   @direction_question ~r/\A\s*where\s+is\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+flying\s*[?.]?\s*\z/iu
@@ -151,7 +151,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
         parse_actor(match, :activity, :latest)
 
       match = Regex.named_captures(@earlier_do_question, text) ->
-        parse_actor(match, :activity, :earlier)
+        parse_do_order(match)
 
       match = Regex.named_captures(@where_question, text) ->
         parse_aux(match, :location)
@@ -168,6 +168,8 @@ defmodule Core.Semantic.TemporalActivityRecall do
     time = normalize_time(raw)
 
     case {actor_kind(surface), String.downcase(aux), time} do
+      {{:ok, actor}, "was", "first"} -> {:ok, role, :first, actor, nil}
+      {{:ok, actor}, "was", "last"} -> {:ok, role, :latest, actor, nil}
       {{:ok, actor}, "was", nil} -> {:ok, role, :earlier, actor, nil}
       {{:ok, actor}, "was", earlier} when earlier in ["earlier", "before", "previously"] ->
         {:ok, role, :earlier, actor, nil}
@@ -181,6 +183,21 @@ defmodule Core.Semantic.TemporalActivityRecall do
   defp parse_actor(%{"actor" => surface}, role, mode) do
     case actor_kind(surface) do
       {:ok, actor} -> {:ok, role, mode, actor, nil}
+      _ -> :not_applicable
+    end
+  end
+
+  defp parse_do_order(%{"actor" => subject, "time" => time}) do
+    with {:ok, actor} <- actor_kind(subject) do
+      mode =
+        case String.downcase(time) do
+          "first" -> :first
+          "last" -> :latest
+          _ -> :earlier
+        end
+
+      {:ok, :activity, mode, actor, nil}
+    else
       _ -> :not_applicable
     end
   end
@@ -259,6 +276,8 @@ defmodule Core.Semantic.TemporalActivityRecall do
   defp select(:compare, [_latest, _earlier | _], actor, :comparison),
     do: {:ambiguous, :earlier, actor, :comparison}
 
+  defp select(:first, [_ | _] = qualified, _actor, _slot),
+    do: {:ok, List.last(qualified)}
   defp select(:latest, [latest | _], _actor, _slot), do: {:ok, latest}
   defp select(:earlier, [_latest, previous], _actor, _slot), do: {:ok, previous}
   defp select(:earlier, [_latest, _previous | _], actor, slot),
@@ -323,6 +342,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
   # Answers describe what the speaker said, never that the reported action
   # occurred. In particular, "into" is a direction, not a confirmed location.
+  defp realize(event, :activity, :first) do
+    with {:ok, description} <- describe(event) do
+      {:ok, "Your first interpretable report described #{description}. This is report order, not verified event chronology."}
+    end
+  end
+
   defp realize(event, :activity, :earlier) do
     with {:ok, description} <- describe(event) do
       {:ok, "Earlier, you described #{description}. This is report order, not verified event chronology."}
@@ -342,10 +367,15 @@ defmodule Core.Semantic.TemporalActivityRecall do
       actor = Atom.to_string(event.actor_kind)
 
       message =
-        if mode == :latest do
-          "The latest interpretable description places a #{actor} #{prep} a #{place}. Its actual current location is not verified."
-        else
-          "An earlier description places a #{actor} #{prep} a #{place}. This does not establish actual event chronology."
+        case mode do
+          :latest ->
+            "The latest interpretable description places a #{actor} #{prep} a #{place}. Its actual current location is not verified."
+
+          :first ->
+            "Your first interpretable description places a #{actor} #{prep} a #{place}. This does not establish actual event chronology."
+
+          _ ->
+            "An earlier description places a #{actor} #{prep} a #{place}. This does not establish actual event chronology."
         end
 
       {:ok, message}
@@ -361,7 +391,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
           do: "Arrival and current location are not established.",
           else: "Arrival and historical location are not established."
 
-      label = if mode == :latest, do: "latest interpretable", else: "earlier"
+      label =
+        case mode do
+          :latest -> "latest interpretable"
+          :first -> "first interpretable"
+          _ -> "earlier"
+        end
       {:ok, "The #{label} description has #{description}. " <> qualifier}
     end
   end
