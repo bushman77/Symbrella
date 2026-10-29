@@ -34,6 +34,11 @@ defmodule Core.Semantic.TemporalActivityRecall do
   @pronoun_contract_activity ~r/\A\s*what['’]s\s+it\s+doing(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
   @pronoun_contract_where ~r/\A\s*where['’]s\s+it(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
   @pronoun_embedded ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+it\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  # Destination questions distinguish a directional property from
+  # verified arrival. A matching reported destination is required.
+  @direction_question ~r/\A\s*where\s+is\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+flying\s*[?.]?\s*\z/iu
+  @arrived_did ~r/\A\s*did\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:reach|arrive\s+at)\s+(?:the|a|an)\s+(?<landmark>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
+  @arrived_has ~r/\A\s*has\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:reached|arrived\s+at)\s+(?:the|a|an)\s+(?<landmark>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
@@ -45,7 +50,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
   def reply(session, text)
       when is_binary(session) and byte_size(session) in 1..128 and
            is_binary(text) and byte_size(text) <= 160 do
-    with {:ok, role, mode, subject} <- parse(text),
+    with {:ok, role, mode, subject, target} <- parse(text),
          reports <- Ledger.entries(session),
          # Do not mistake a truncated search window for a complete timeline.
          true <- length(reports) <= @max_records,
@@ -55,6 +60,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
            session, "What is the #{Atom.to_string(actor)} doing?"),
          qualified <- Enum.filter(reports, &qualified?(&1, actor)),
          {:ok, chosen} <- select(mode, qualified, actor, role),
+         true <- target_matches?(chosen, role, target),
          {:ok, wording} <- realize(chosen, role, mode) do
       {:ok, wording, metadata(mode, chosen.seq, role)}
     else
@@ -83,13 +89,25 @@ defmodule Core.Semantic.TemporalActivityRecall do
         parse_aux(Map.put(match, "actor", "it"), :location)
 
       Regex.match?(@pronoun_contract_activity, text) ->
-        {:ok, :activity, :latest, :it}
+        {:ok, :activity, :latest, :it, nil}
 
       Regex.match?(@pronoun_contract_where, text) ->
-        {:ok, :location, :latest, :it}
+        {:ok, :location, :latest, :it, nil}
 
       match = Regex.named_captures(@pronoun_embedded, text) ->
         parse_aux(Map.put(match, "actor", "it"), :activity)
+
+      match = Regex.named_captures(@direction_question, text) ->
+        case actor_kind(match["actor"]) do
+          {:ok, actor} -> {:ok, :direction, :latest, actor, nil}
+          _ -> :not_applicable
+        end
+
+      match = Regex.named_captures(@arrived_did, text) ->
+        parse_arrival(match)
+
+      match = Regex.named_captures(@arrived_has, text) ->
+        parse_arrival(match)
 
 
       match = Regex.named_captures(@progressive_question, text) ->
@@ -122,19 +140,28 @@ defmodule Core.Semantic.TemporalActivityRecall do
     time = normalize_time(raw)
 
     case {actor_kind(surface), String.downcase(aux), time} do
-      {{:ok, actor}, "was", nil} -> {:ok, role, :earlier, actor}
+      {{:ok, actor}, "was", nil} -> {:ok, role, :earlier, actor, nil}
       {{:ok, actor}, "was", earlier} when earlier in ["earlier", "before", "previously"] ->
-        {:ok, role, :earlier, actor}
+        {:ok, role, :earlier, actor, nil}
       {{:ok, actor}, "is", latest}
           when latest in [nil, "now", "right now", "currently", "at the moment"] ->
-        {:ok, role, :latest, actor}
+        {:ok, role, :latest, actor, nil}
       _ -> :not_applicable
     end
   end
 
   defp parse_actor(%{"actor" => surface}, role, mode) do
     case actor_kind(surface) do
-      {:ok, actor} -> {:ok, role, mode, actor}
+      {:ok, actor} -> {:ok, role, mode, actor, nil}
+      _ -> :not_applicable
+    end
+  end
+
+  defp parse_arrival(%{"actor" => subject, "landmark" => place}) do
+    with {:ok, actor} <- actor_kind(subject),
+         {:ok, %{symbol: landmark}} <- Lexical.landmark(String.downcase(place)) do
+      {:ok, :arrival, :latest, actor, landmark}
+    else
       _ -> :not_applicable
     end
   end
@@ -190,6 +217,18 @@ defmodule Core.Semantic.TemporalActivityRecall do
   defp select(:earlier, [_latest, _previous | _], actor, slot),
     do: {:ambiguous, :earlier, actor, slot}
   defp select(_, _, _, _), do: :not_applicable
+
+  defp target_matches?(event, :arrival, target)
+       when is_atom(target) do
+    event.reading == :directional and event.action == :fly and
+      event.relation == :into and event.landmark == target
+  end
+  defp target_matches?(event, :direction, nil) do
+    event.reading == :directional and event.action == :fly and
+      event.relation == :into
+  end
+  defp target_matches?(_event, _role, nil), do: true
+  defp target_matches?(_, _, _), do: false
 
   # The ledger is append-only and server-owned. Still validate the complete
   # compact witness before using it for a temporal answer.
@@ -277,6 +316,18 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
       label = if mode == :latest, do: "latest interpretable", else: "earlier"
       {:ok, "The #{label} description has #{description}. " <> qualifier}
+    end
+  end
+
+  defp realize(%{reading: :directional} = event, :direction, :latest) do
+    with {:ok, description} <- describe(event) do
+      {:ok, "You described #{description}. This expresses direction, not a verified destination or arrival."}
+    end
+  end
+
+  defp realize(%{reading: :directional} = event, :arrival, :latest) do
+    with {:ok, description} <- describe(event) do
+      {:ok, "You described #{description}, but the description does not establish that it arrived."}
     end
   end
 
