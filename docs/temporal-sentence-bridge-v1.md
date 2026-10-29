@@ -7,8 +7,8 @@ verified event properties and a caller-supplied :before or :after atom.
 That was **not evidence that a speaker used the connective**.
 
 Core.Semantic.TemporalSentence now admits a deliberately narrow full
-utterance, checking the actual base-token sequence and the selected LIFG
-dictionary evidence for **every** grammatical role before composing events.
+utterance, checking the actual base-token sequence and LIFG dictionary
+evidence for **every** grammatical role before composing events.
 
 Supported sentence family:
 
@@ -19,8 +19,13 @@ The closed construction accepts two explicitly named actor-kind nouns, two
 progressive predicates, locative relations, the determiner 'the', and an
 explicit temporal conjunction. The parser requires exactly 15 contiguous
 base-token indices and a complete, matching original declarative sentence.
-The words must have independent selected-LIFG POS witnesses and current
-dictionary rows; predicates must carry the expected participle morphology.
+Words must have current dictionary evidence. The auxiliary and present-
+participle roles can use uniquely scored and attested construction alternatives,
+as already supported by RoleWitness. All other roles still require the selected
+LIFG witness, including the temporal connective. Predicates must carry
+the expected participle morphology. The live tokenizer may retain a single
+sentence-final period on the last base token; only that period is stripped
+for exact word comparison, never internal punctuation.
 No external knowledge, invented sense IDs or implicit pronoun resolution is
 used to fill missing roles.
 
