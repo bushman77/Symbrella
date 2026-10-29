@@ -49,6 +49,27 @@ defmodule Core.Semantic.TemporalSentenceTest do
     %{si | tokens: tokens, lifg_choices: choices, source: :prod}
   end
 
+  test "live token punctuation and attested verb alternatives compose both connectives" do
+    for {words, connective, early, late} <- [
+      {@before_words, :before, :sit, :sleep},
+      {@after_words, :after, :sleep, :sit}
+    ] do
+      si = live_style_input(words) |> SentenceMeaning.attach()
+      assert {:ok, meaning} = TemporalSentence.verified(si)
+      assert meaning.kind == :explicit_temporal_report
+      assert meaning.connective == connective
+      assert meaning.temporal_claim.earlier_event_property.predicate == early
+      assert meaning.temporal_claim.later_event_property.predicate == late
+      alternatives =
+        meaning.compositional_evidence.lexical_witnesses
+        |> Enum.filter(&(&1.selection_basis == :construction_alternative))
+        |> Enum.map(& &1.token_index)
+      assert alternatives == [2, 3, 10, 11]
+      assert meaning.factual_authority? == false
+      assert meaning.temporal_claim.event_occurrence_verified? == false
+    end
+  end
+
   test "a witnessed before clause composes a speaker-attributed typed temporal meaning" do
     si = input() |> SentenceMeaning.attach()
 
