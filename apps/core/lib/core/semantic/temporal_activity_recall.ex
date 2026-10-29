@@ -31,7 +31,9 @@ defmodule Core.Semantic.TemporalActivityRecall do
          # The latest unknown activity for this actor blocks stale recall.
          :not_applicable <- Ledger.pending_unresolved_activity(
            session, "What is the #{Atom.to_string(actor)} doing?"),
-         reports <- Ledger.entries(session) |> Enum.take(@max_records),
+         reports <- Ledger.entries(session),
+         # Do not mistake a truncated search window for a complete timeline.
+         true <- length(reports) <= @max_records,
          qualified <- Enum.filter(reports, &qualified?(&1, actor)),
          {:ok, chosen} <- select(mode, qualified, actor),
          {:ok, description} <- describe(chosen) do
