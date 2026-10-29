@@ -243,6 +243,36 @@ defmodule Core.Response.SymbolicGenerationTest do
     end
   end
 
+  test "response attachment carries today's wellbeing frame to the LiveView reply" do
+    sentence = "how are you today"
+    si =
+      %{
+        source: :user, sentence: sentence, text: sentence,
+        intent: :smalltalk, confidence: 0.655,
+        session_id: "wellbeing-response-attach-#{System.unique_integer([:positive])}",
+        semantic_choices: [
+          %{id: "how are you|phrase|1", kind: :mwe, token_index: 0,
+            token_span: {0, 2}, score: 0.5, source: :mwe_lexicon},
+          %{id: "today|noun|1", token_index: 3,
+            score: 0.1583, source: :active_cells}
+        ],
+        comprehension: %{
+          intent: :smalltalk, recognized_topics: ["today"], understood: [],
+          uncertain: ["today"], unresolved: [], degraded?: true,
+          reasons: [:weak_decision_rate_high]
+        }
+      }
+      |> SpeechActs.attach()
+
+    attached = Core.Response.Attach.maybe_build_response_plan(si, [])
+    assert attached.speech_act_frame.temporal_anchor == :today
+    assert attached.response_text == "I'm here and ready to talk."
+    assert attached.response_meta.response_source == :symbolic_generation
+    assert attached.response_meta.response_reflection.interpreted_speech_act ==
+             :wellbeing_query
+    assert attached.response_meta.response_reflection.llm_called? == false
+  end
+
   test "wellbeing questions to other people never produce Symbrella's check-in" do
     sentence = "How are you today, Bradley?"
 
