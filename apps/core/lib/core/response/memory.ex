@@ -145,6 +145,7 @@ defmodule Core.Response.Memory do
         fact_query_key: fact_query_key,
         semantic_context: semantic_context
       }) do
+    fuzzy_activity = Core.Discourse.Ledger.confirmed_fuzzy_activity(session_id, text_in)
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
     episodic_reply = EpisodicMemory.reply(text_in, session_id, semantic_context)
@@ -292,6 +293,31 @@ defmodule Core.Response.Memory do
           |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, text, meta)
+
+      # A speaker-confirmed word correction tied to this exact session and
+      # actor takes precedence over an older, owner-wide activity memory.
+      # Do not promote the correction to an event occurrence or global fact.
+      match?({:ok, %{status: :speaker_confirmed_spelling}}, fuzzy_activity) ->
+        {:ok, activity} = fuzzy_activity
+        response =
+          "In your recent description, you confirmed that \"#{activity.original}\" " <>
+            "meant \"#{activity.proposed}\" for the #{activity.actor}. " <>
+            "That is your intended wording, not a verified event."
+
+        meta = %{
+          action: :conversation_recall,
+          memory_source: :same_session_fuzzy_resolution,
+          response_source: :symbolic_conversation,
+          provenance: :speaker_confirmed_correction,
+          retrieval_found?: true,
+          factual_authority?: false,
+          llm_called?: false,
+          session_id: session_id,
+          intent_original: intent0,
+          confidence: conf
+        }
+
+        finish_reply(session_id, text_in, response, meta)
 
       match?({_, _}, episodic_reply) ->
         {text, event_meta} = episodic_reply
