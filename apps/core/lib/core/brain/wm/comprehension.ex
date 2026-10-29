@@ -546,16 +546,26 @@ defmodule Core.Brain.WM.Comprehension do
   defp current_event_request?(_), do: false
 
   defp attention_terms(context) do
+    # When no conversational topic or independently projected participant is
+    # available, the *current* comprehension can still have admitted lexical
+    # anchors. These are focus goals only, not verification of their meaning.
+    # Without them an unresolved ordinary sentence receives salience 0.0,
+    # preventing the existing WM-based repair path from being considered.
     terms =
       case context.topic do
         topic when is_binary(topic) and topic != "" -> [topic, context.subtopic]
-        _ -> context.entities
+        _ ->
+          case context.entities do
+            entities when is_list(entities) and entities != [] -> entities
+            _ -> List.wrap(context.understood) ++ List.wrap(context.uncertain)
+          end
       end
 
     terms
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
     |> Enum.take(@max_entities)
   end
 
