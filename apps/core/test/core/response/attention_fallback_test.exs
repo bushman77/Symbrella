@@ -487,4 +487,104 @@ defmodule Core.Response.AttentionFallbackTest do
     assert meta.llm_called? == false
   end
 
+
+  test "yes flapping confirms the preceding issued hypothesis, without lexical learning" do
+    alias Core.Discourse.Ledger
+
+    sid = "attention-fuzzy-confirm-#{System.unique_integer([:positive])}"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Ledger.clear(sid)
+    end)
+
+    first = "The bird is flarping on the fence."
+    first_si = repair_si(sid, first, verified?: false,
+      uncertain: ["flarping"])
+
+    {_tone, question, question_meta} =
+      Response.plan(Map.merge(first_si, %{text: first, confidence: 0.7}), %{})
+    assert question ==
+      ~s|I'm not sure how you're using "flarping" here. Did you mean "flapping"?|
+    assert question_meta.response_source == :wm_attention_fallback
+
+    # The actual selected/shown response, not an unselected fuzzy result,
+    # becomes the pending request in the protected same-session ledger.
+    Ledger.record(Map.merge(first_si, %{
+      response_text: question, response_meta: question_meta
+    }), discourse_ledger?: true)
+
+    assert [%{kind: :fuzzy_clarification_request, original: "flarping",
+      proposed: "flapping", factual_authority?: false} | _] =
+        Ledger.entries(sid)
+
+    second = "yes flapping"
+    second_si = repair_si(sid, second, verified?: false,
+      uncertain: ["yes", "flapping"])
+
+    assert {:ok, reply, confirmation} =
+      AttentionFallback.generate(second,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, second_si)
+
+    assert reply ==
+      ~s|I understand your correction: you meant "flapping" when you said "flarping". That resolves the word you clarified, though I haven't independently verified the entire sentence.|
+    assert confirmation.status == :fuzzy_clarification_confirmed
+    assert confirmation.confirmed_term == "flapping"
+    assert confirmation.original_term == "flarping"
+    assert confirmation.dictionary_learned? == false
+    assert confirmation.factual_claims? == false
+    assert confirmation.llm_called? == false
+
+    {_tone, planned, planned_meta} =
+      Response.plan(Map.merge(second_si, %{text: second, confidence: 0.7}), %{})
+    assert planned == reply
+    assert planned_meta.response_source == :wm_attention_fallback
+
+    Ledger.record(Map.merge(second_si, %{
+      response_text: planned, response_meta: planned_meta
+    }), discourse_ledger?: true)
+
+    assert [%{kind: :fuzzy_clarification_resolution, original: "flarping",
+      proposed: "flapping", factual_authority?: false} | _] =
+        Ledger.entries(sid)
+
+    # The resolved request cannot be repeatedly confirmed on a later turn.
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flapping")
+  end
+
+  test "a fuzzy confirmation requires immediate, matched and same-session context" do
+    alias Core.Discourse.Ledger
+
+    sid = "attention-fuzzy-scope-#{System.unique_integer([:positive])}"
+    other = sid <> "-other"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Brain.defocus(WMComprehension.frame_id(other))
+      Ledger.clear(sid)
+      Ledger.clear(other)
+    end)
+
+    first = "The bird is flarping on the fence."
+    si = repair_si(sid, first, verified?: false, uncertain: ["flarping"])
+
+    # No user-facing question was issued, so no pending request is stored.
+    Ledger.record(si, discourse_ledger?: true)
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flapping")
+
+    {_tone, question, meta} =
+      Response.plan(Map.merge(si, %{text: first, confidence: 0.7}), %{})
+    Ledger.record(Map.merge(si, %{
+      response_text: question, response_meta: meta
+    }), discourse_ledger?: true)
+
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(other, "yes flapping")
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "no flapping")
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flaring")
+    assert {:ok, _} = Ledger.pending_fuzzy_confirmation(sid, "yes, flapping.")
+
+    # Any intervening turn, even an uninterpreted one, ends the pending state.
+    intervening = repair_si(sid, "What?", verified?: false, uncertain: [])
+    Ledger.record(intervening, discourse_ledger?: true)
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flapping")
+  end
 end
