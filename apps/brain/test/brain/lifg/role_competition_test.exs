@@ -63,6 +63,9 @@ defmodule Brain.LIFG.RoleCompetitionTest do
   test "LIFG observes an unresolved progressive gap without inventing a candidate or POS boost" do
     signature = %{
       id: :progressive_lexical_gap_candidate,
+      source_span_sha256:
+        (:crypto.hash(:sha256, "the fox is flarping on the fence")
+          |> Base.encode16(case: :lower)),
       source: :core_syntax, span: {0, 6},
       roles: %{
         subject_determiner: 0, subject_head: 1, auxiliary: 2,
@@ -114,7 +117,9 @@ defmodule Brain.LIFG.RoleCompetitionTest do
         Enum.reject(si.active_cells, &(&1.norm == "on"))}},
       {:invented_predicate_cell, %{si | active_cells:
         [cell("flarping", "verb") | si.active_cells]}},
-      {:wrong_surface, %{si | tokens: token_words(~w(The fox is maybe on the fence))}},
+      {:wrong_surface, %{si | tokens: token_words(~w(The fox is dancing on the fence))}},
+      {:wrong_fingerprint, %{si | sentence_signatures:
+        [%{signature | source_span_sha256: String.duplicate("0", 64)}]}},
       {:wrong_signature, %{si | sentence_signatures:
         [%{signature | evidence: [:contiguous_surface]}]}}
     ] do
