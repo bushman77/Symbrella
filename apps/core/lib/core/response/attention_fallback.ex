@@ -83,8 +83,14 @@ defmodule Core.Response.AttentionFallback do
   # A generic fallback about a keyword such as "sleeping" would discard this.
   defp comprehension_report(text, si, context, goal_terms, salience) do
     case verified_temporal_report(text, si, context, goal_terms, salience) do
-      {:ok, _, _} = report -> report
-      :not_applicable -> partial_repair(text, si, context, goal_terms, salience)
+      {:ok, _, _} = report ->
+        report
+
+      :not_applicable ->
+        case partial_repair(text, si, context, goal_terms, salience) do
+          {:ok, _, _} = repair -> repair
+          :not_applicable -> lexical_gap_report(text, si, context, goal_terms, salience)
+        end
     end
   end
 
@@ -170,6 +176,72 @@ defmodule Core.Response.AttentionFallback do
         (:crypto.hash(:sha256, text) |> Base.encode16(case: :lower))
   end
 
+  # Weak LIFG scores are not unknown vocabulary. Without a specific
+  # unresolved token, report *which* surface terms have uncertain senses
+  # rather than asking the speaker to redefine ordinary words. These are
+  # lexical selections/recognized strings, not verified dictionary meanings.
+  defp lexical_gap_report(text, si, context, goal_terms, salience) do
+    summary = Map.get(si, :comprehension)
+
+    with true <- is_map(summary),
+         true <- current_turn?(text, context),
+         true <- not completed_meaning?(si),
+         uncertain when is_list(uncertain) <- Map.get(summary, :uncertain),
+         true <- safe_terms_max(uncertain, @max_repair_terms) ==
+                   safe_terms_max(Map.get(context, :uncertain), @max_repair_terms),
+         true <- safe_terms_max(Map.get(summary, :unresolved), @max_repair_terms) ==
+                   safe_terms_max(Map.get(context, :unresolved), @max_repair_terms),
+         words when is_list(words) <-
+           uncertain
+           |> safe_terms_max(@max_repair_terms)
+           |> Enum.filter(fn term ->
+             surface_present?(text, term) and
+               not recognized_topic_part?(context, term)
+           end)
+           |> Enum.take(3),
+         true <- words != [] do
+      understood =
+        safe_terms_max(Map.get(context, :understood), @max_terms)
+        |> Enum.filter(&surface_present?(text, &1))
+
+      words_text = quoted_terms(words)
+
+      {intro, known_level} =
+        case understood do
+          [] ->
+            {"I can identify the words #{words_text}, but", :surface_terms_only}
+
+          known ->
+            {"I have verified lexical meaning for #{quoted_terms(known)}, but",
+             :dictionary_verified}
+        end
+
+      reply =
+        intro <> " the specific senses of #{words_text} are still " <>
+          "uncertain, and I haven't established the full relationship " <>
+          "you're describing."
+
+      {:ok, reply, %{
+        status: :attention_lexical_gap_report,
+        provenance: :admitted_same_session_comprehension,
+        known_level: known_level,
+        verified_lexical_parts: understood,
+        uncertain_lexical_parts: words,
+        attention_salience: salience,
+        focus_terms: Enum.take(goal_terms, @max_terms),
+        semantic_verified?: false,
+        factual_claims?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp quoted_terms([one]), do: ~s|"#{one}"|
+  defp quoted_terms([a, b]), do: ~s|"#{a}" and "#{b}"|
+  defp quoted_terms([a, b, c]), do: ~s|"#{a}", "#{b}", and "#{c}"|
+
   # Unknowns are selected from the *current turn's* weak/unresolved
   # comprehension, matched against the admitted same-session WM frame. An
   # attention match influences priority, but cannot turn a weak term into a
@@ -178,14 +250,16 @@ defmodule Core.Response.AttentionFallback do
     summary = Map.get(si, :comprehension)
 
     with true <- is_map(summary),
-         true <- Map.get(context, :turn_sha256) ==
-                   (:crypto.hash(:sha256, text) |> Base.encode16(case: :lower)),
+         true <- current_turn?(text, context),
          true <- Map.get(context, :interpretation_status) not in [:fully_verified],
          true <- not completed_meaning?(si),
          uncertain when is_list(uncertain) <- Map.get(summary, :uncertain),
          true <- safe_terms_max(uncertain, @max_repair_terms) ==
                    safe_terms_max(Map.get(context, :uncertain), @max_repair_terms),
-         [first | rest] <- safe_terms_max(uncertain, @max_repair_terms)
+         unresolved when is_list(unresolved) <- Map.get(summary, :unresolved),
+         true <- safe_terms_max(unresolved, @max_repair_terms) ==
+                   safe_terms_max(Map.get(context, :unresolved), @max_repair_terms),
+         [first | rest] <- safe_terms_max(unresolved, @max_repair_terms)
                            |> Enum.filter(fn term ->
                              surface_present?(text, term) and
                                not recognized_topic_part?(context, term)
@@ -194,7 +268,7 @@ defmodule Core.Response.AttentionFallback do
       candidates = [first | rest]
       target = Enum.find(candidates, &attended?(&1, goal_terms)) || first
       verified = verified_known(si, context, text, target)
-      recognized = recognized_known(context, text, target)
+      recognized = recognized_known(si, context, text, target)
       {known_level, known_term} =
         cond do
           is_binary(verified) -> {:dictionary_verified, verified}
@@ -279,7 +353,15 @@ defmodule Core.Response.AttentionFallback do
     end)
   end
 
-  defp recognized_known(context, text, target) do
+  defp recognized_known(si, context, text, target) do
+    # The intent classifier's single keyword is not a recognized semantic
+    # subject. It cannot support even the softer "I'm following" claim.
+    keyword =
+      case Map.get(si, :comprehension) do
+        %{keyword: word} when is_binary(word) -> word
+        _ -> nil
+      end
+
     ([Map.get(context, :topic)] ++
        List.wrap(Map.get(context, :entities)) ++
        List.wrap(Map.get(context, :recognized_topics)))
@@ -287,7 +369,10 @@ defmodule Core.Response.AttentionFallback do
     |> Enum.reject(&is_nil/1)
     |> Enum.find(fn word ->
       String.downcase(word) != String.downcase(target) and
-        surface_present?(text, word)
+        surface_present?(text, word) and
+        (word != keyword or
+          Map.get(context, :topic) == word or
+          word in List.wrap(Map.get(context, :entities)))
     end)
   end
 
