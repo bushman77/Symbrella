@@ -488,6 +488,87 @@ defmodule Core.Response.AttentionFallbackTest do
   end
 
 
+  test "live regression: bare flapping confirms only the immediately issued question" do
+    alias Core.Discourse.Ledger
+
+    sid = "attention-bare-confirm-#{System.unique_integer([:positive])}"
+    other = sid <> "-other"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Brain.defocus(WMComprehension.frame_id(other))
+      Ledger.clear(sid)
+      Ledger.clear(other)
+    end)
+
+    original = "The bird is flarping on the fence."
+    si = repair_si(sid, original, verified?: false,
+      uncertain: ["flarping"])
+
+    # No previously issued clarification: a bare word cannot be confirmed.
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "flapping")
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(other, "flapping")
+
+    {_tone, question, question_meta} =
+      Response.plan(Map.merge(si, %{text: original, confidence: 0.7}), %{})
+    assert question =~ ~s|Did you mean "flapping"?|
+    Ledger.record(Map.merge(si, %{
+      response_text: question, response_meta: question_meta
+    }), discourse_ledger?: true)
+
+    assert {:ok, %{original: "flarping", proposed: "flapping"}} =
+      Ledger.pending_fuzzy_confirmation(sid, "flapping")
+    assert {:ok, _} = Ledger.pending_fuzzy_confirmation(sid, "Flapping.")
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(other, "flapping")
+
+    for unrelated <- [
+      "flapping around", "the bird is flapping",
+      "no flapping", "flarping", "flapping?", "flapping on the fence"
+    ] do
+      assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, unrelated)
+    end
+
+    # Bypass the WM repair handler deliberately: Response.plan itself must
+    # acknowledge the exact one-word correction, not return "unavailable".
+    second = "flapping"
+    bare_si = %{source: :test, session_id: sid, sentence: second,
+                text: second, intent: :statement, confidence: 0.7}
+    {_tone, acknowledged, meta} = Response.plan(bare_si, %{})
+
+    assert acknowledged ==
+      ~s|I understand your correction: you meant "flapping" when you said "flarping". That resolves the word you clarified, though I haven't independently verified the entire sentence.|
+    assert meta.response_source == :wm_attention_fallback
+    assert meta.response_reflection.status == :fuzzy_clarification_confirmed
+    assert meta.response_reflection.confirmed_term == "flapping"
+    assert meta.response_reflection.dictionary_learned? == false
+    assert meta.response_reflection.factual_claims? == false
+    assert meta.factual_authority? == false
+
+    # Recording the actual response produces a linked resolution, not a
+    # new dictionary entry or a real-world event.
+    Ledger.record(%{
+      source: :test, session_id: sid, sentence: second,
+      response_text: acknowledged, response_meta: meta, trace: []
+    }, discourse_ledger?: true)
+
+    assert [%{kind: :fuzzy_clarification_resolution,
+      original: "flarping", proposed: "flapping",
+      factual_authority?: false} | _] = Ledger.entries(sid)
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "flapping")
+
+    assert {:ok, frame} =
+      Core.Semantic.ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert frame.predicate.surface == "flapping"
+    assert frame.predicate.exact_dictionary_sense? == false
+    assert frame.factual_authority? == false
+
+    assert {:warm, "In your description, the bird is flapping.", recall_meta} =
+      Response.memory_reply(%{
+        text: "What is the bird doing?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+    assert recall_meta.semantic_verified? == false
+  end
+
   test "yes flapping confirms the preceding issued hypothesis, without lexical learning" do
     alias Core.Discourse.Ledger
 
