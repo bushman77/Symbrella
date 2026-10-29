@@ -851,7 +851,10 @@ defmodule Core.Syntax.Signatures do
           [:contiguous_surface, :attested_nominal_subject,
            :unresolved_progressive_predicate, :attested_preposition,
            :attested_nominal_location]
-        )]
+        )
+        |> Map.put(:source_span_sha256,
+          :crypto.hash(:sha256, Enum.map_join(segment, " ", & &1.word))
+          |> Base.encode16(case: :lower))]
       else
         []
       end
