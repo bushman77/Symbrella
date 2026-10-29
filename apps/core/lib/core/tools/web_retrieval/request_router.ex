@@ -234,6 +234,8 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
           )
           |> List.flatten()
           |> Enum.map(&String.downcase/1)
+          |> Enum.reject(&(&1 in ["war", "conflict", "hostilities",
+                                 "fighting", "ceasefire", "the", "between"]))
           |> Enum.uniq()
 
         conflict? =
