@@ -72,9 +72,54 @@ defmodule Core.Semantic.ClarifiedEventTest do
     assert meta.semantic_frame == frame
     assert meta.llm_called? == false
 
-    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the bird?")
+    assert {:ok, spatial_frame} = ClarifiedEvent.build(sid, "Where is the bird?")
+    assert spatial_frame.evidence.question_role == :location
+    assert spatial_frame.predicate == frame.predicate
+    assert spatial_frame.spatial == frame.spatial
+    assert spatial_frame.source_turn_sha256 == frame.source_turn_sha256
+    assert {:ok, "In your description, the bird is on the fence.", location_meta} =
+      ClarifiedEvent.answer(sid, "Where is the bird?")
+    assert location_meta.requested_role == :location
+    assert location_meta.factual_authority? == false
+
+    assert {:ok, "In your description, the bird is on the fence.", constrained_meta} =
+      ClarifiedEvent.answer(sid, "What is the bird flapping on?")
+    assert constrained_meta.semantic_frame.evidence.question_role == :location
+
+    assert :not_applicable == ClarifiedEvent.build(sid, "What is the bird dancing on?")
+    assert :not_applicable == ClarifiedEvent.build(sid, "What is the bird flapping under?")
     assert :not_applicable == ClarifiedEvent.build(sid, "What is the cat doing?")
     assert :not_applicable == ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
+    assert :not_applicable == ClarifiedEvent.build(sid <> "-other", "Where is the bird?")
+    assert :not_applicable == Ledger.confirmed_fuzzy_activity(sid, "Where is the bird?")
+  end
+
+  test "question-selected roles reject unrelated actor and preserve immediate-session scope", %{sid: sid} do
+    {request, resolution} = records()
+    record_pair(sid, request, resolution)
+    assert {:ok, %{requested_role: :location}} =
+      Ledger.confirmed_fuzzy_event(sid, "Where is the bird?")
+    assert {:ok, %{requested_role: :predicate}} =
+      Ledger.confirmed_fuzzy_event(sid, "What is the bird doing?")
+    assert {:ok, %{requested_role: :location,
+                   question_constraints: %{predicate: "flapping", position: "on"}}} =
+      Ledger.confirmed_fuzzy_event(sid, "What is the bird flapping on?")
+
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_event(sid, "What is the cat flapping on?")
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_event(sid, "What is the bird flarping on?")
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_event(sid, "Where is the cat?")
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_event(sid <> "-other", "Where is the bird?")
+
+    {:ok, _} = Owner.append(sid, %{kind: :unrelated_turn,
+      factual_authority?: false})
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_event(sid, "Where is the bird?")
+    assert :not_applicable ==
+      ClarifiedEvent.answer(sid, "Where is the bird?")
   end
 
   test "replayed pre-LIFG syntax gap enriches provenance but not factual authority", %{sid: sid} do
