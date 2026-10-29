@@ -41,7 +41,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
             "Earlier, you described #{description}. This is report order, not verified event chronology."
 
           :latest ->
-            "In your latest recorded description, #{description}. This does not verify current activity, arrival, or that it is the same individual."
+            "You most recently described #{description}. This does not verify current activity, arrival, or that it is the same individual."
         end
 
       {:ok, wording, metadata(mode, chosen.seq)}
