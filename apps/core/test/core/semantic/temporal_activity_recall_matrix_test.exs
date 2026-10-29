@@ -69,7 +69,7 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     assert meta.llm_called? == false
   end
 
-  test "all 117 attested event properties retrieve the correct role under twelve question variants" do
+  test "117 attested event properties resolve 24 natural activity and location forms" do
     for actor <- @actors, {verb, relation} <- @valid_activities,
         landmark <- @landmarks do
       session = "matrix-#{actor}-#{verb}-#{relation}-#{landmark}"
