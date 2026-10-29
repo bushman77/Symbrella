@@ -42,14 +42,14 @@ defmodule Core.Semantic.TemporalActivityRecall do
          # Do not mistake a truncated search window for a complete timeline.
          true <- length(reports) <= @max_records,
          qualified <- Enum.filter(reports, &qualified?(&1, actor)),
-         {:ok, chosen} <- select(mode, qualified, actor),
+         {:ok, chosen} <- select(mode, qualified, actor, role),
          {:ok, wording} <- realize(chosen, role, mode) do
       {:ok, wording, metadata(mode, chosen.seq, role)}
     else
-      {:ambiguous, :earlier, actor} ->
+      {:ambiguous, :earlier, actor, requested_slot} ->
         {:ok,
          "You gave several earlier descriptions of a #{Atom.to_string(actor)}. Which earlier description do you mean?",
-         metadata(:ambiguous_earlier, nil, role)}
+         metadata(:ambiguous_earlier, nil, requested_slot)}
 
       _ ->
         :not_applicable
@@ -119,11 +119,11 @@ defmodule Core.Semantic.TemporalActivityRecall do
     end
   end
 
-  defp select(:latest, [latest | _], _actor), do: {:ok, latest}
-  defp select(:earlier, [_latest, previous], _actor), do: {:ok, previous}
-  defp select(:earlier, [_latest, _previous | _], actor),
-    do: {:ambiguous, :earlier, actor}
-  defp select(_, _, _), do: :not_applicable
+  defp select(:latest, [latest | _], _actor, _slot), do: {:ok, latest}
+  defp select(:earlier, [_latest, previous], _actor, _slot), do: {:ok, previous}
+  defp select(:earlier, [_latest, _previous | _], actor, slot),
+    do: {:ambiguous, :earlier, actor, slot}
+  defp select(_, _, _, _), do: :not_applicable
 
   # The ledger is append-only and server-owned. Still validate the complete
   # compact witness before using it for a temporal answer.
