@@ -74,6 +74,7 @@ defmodule Core.Response.AttentionFallbackTest do
           recognized_topics: ["ocean"],
           understood: [],
           uncertain: ["ocean", "flarped"],
+          unresolved: ["flarped"],
           degraded?: true
         },
         trace: []
