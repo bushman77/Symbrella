@@ -8,7 +8,8 @@ defmodule Core.Response.SymbolicGeneration do
   """
 
   alias Core.Semantic.Composition
-  alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning, SpeechActs}
+  alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning,
+    SpeechActs, TemporalClaimReconciliation}
 
   # Accept the intent labels the live classifier actually emits for
   # complete social turns. These labels by themselves never authorize output:
@@ -23,7 +24,7 @@ defmodule Core.Response.SymbolicGeneration do
   def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
       when is_binary(user_text) and is_map(si) and
              intent in @social_intents and action in [:answer, :offer_options, :act_first] do
-    case maybe_realize_temporal_report_order(user_text, si) do
+    case maybe_realize_temporal_first(user_text, si) do
       {:ok, _, _} = temporal ->
         temporal
 
@@ -199,6 +200,79 @@ defmodule Core.Response.SymbolicGeneration do
     on: "on", in: "in", under: "under", beside: "beside",
     above: "above", below: "below"
   }
+
+  # A clarification needs both speaker claims revalidated from the current
+  # same-session ledger. Without a unique pair there is no native answer.
+  defp maybe_realize_temporal_first(text, si) do
+    case maybe_realize_temporal_conflict(text, si) do
+      {:ok, _, _} = clarification -> clarification
+      :not_applicable -> maybe_realize_temporal_report_order(text, si)
+    end
+  end
+
+  defp maybe_realize_temporal_conflict(user_text, si) do
+    with ^user_text <- Map.get(si, :sentence),
+         {:ok, %{kind: :temporal_claim_conflict_question,
+           operation: :clarify_opposing_temporal_reports,
+           conflict_evidence: %{
+             kind: :candidate_temporal_order_conflict,
+             older_report: older, newer_report: newer,
+             report_order: :verified_from_session_sequence,
+             occurrence_identity: :unresolved,
+             event_occurrence: :not_established,
+             actual_event_chronology: :not_established,
+             contradiction_verified?: false,
+             speaker_claims_verified?: true,
+             factual_authority?: false
+           }, factual_authority?: false}} <-
+           TemporalClaimReconciliation.verified(si),
+         %{seq: earlier_seq, earlier: older_first, later: older_last} <- older,
+         %{seq: later_seq, earlier: newer_first, later: newer_last} <- newer,
+         true <- earlier_seq < later_seq,
+         true <- older_first == newer_last and older_last == newer_first,
+         {:ok, phrase1} <- temporal_claim_event_words(older_first),
+         {:ok, phrase2} <- temporal_claim_event_words(older_last),
+         {:ok, phrase3} <- temporal_claim_event_words(newer_first),
+         {:ok, phrase4} <- temporal_claim_event_words(newer_last) do
+      {:ok,
+       "In report #{earlier_seq}, you described #{phrase1} before #{phrase2}. " <>
+         "In report #{later_seq}, you described #{phrase3} before #{phrase4}. " <>
+         "Those are opposing descriptions of the order, but they may refer " <>
+         "to different occurrences. Which order did you intend?",
+       %{
+         status: :symbolic_realized,
+         speech_act: :request_temporal_clarification,
+         interpreted_speech_act: :temporal_claim_conflict_question,
+         provenance: :revalidated_temporal_claim_reconciliation,
+         matching_basis: :equal_closed_event_descriptions,
+         speaker_claims_verified?: true,
+         contradiction_verified?: false,
+         event_occurrence_verified?: false,
+         actual_event_order_verified?: false,
+         referent_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp temporal_claim_event_words(%{
+         actor_kind: actor, action: action,
+         relation: relation, landmark: landmark
+       }) do
+    with {:ok, subject} <- Map.fetch(@event_actors, actor),
+         {:ok, activity} <- Map.fetch(@event_activities, action),
+         {:ok, preposition} <- Map.fetch(@event_static_relations, relation),
+         {:ok, place} <- Map.fetch(@event_landmarks, landmark) do
+      {:ok, "the #{subject} #{activity} #{preposition} the #{place}"}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp temporal_claim_event_words(_), do: :not_applicable
 
   # Answer only a currently rechecked question about report chronology. The
   # event sequence records what the speaker described, not the external order
