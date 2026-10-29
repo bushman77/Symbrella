@@ -3,11 +3,11 @@ defmodule Core.Semantic.TemporalSentenceTest do
 
   alias Core.Semantic.{SentenceMeaning, TemporalSentence}
 
-  @before ~w(The bird is sitting on the fence before the cat is sleeping under the tree)
-  @after ~w(The bird is sitting on the fence after the cat is sleeping under the tree)
+  @before_words ~w(The bird is sitting on the fence before the cat is sleeping under the tree)
+  @after_words ~w(The bird is sitting on the fence after the cat is sleeping under the tree)
   @pos ~w(determiner noun verb verb preposition determiner noun conjunction determiner noun verb verb preposition determiner noun)
 
-  defp input(words \\ @before) do
+  defp input(words \\ @before_words) do
     rows =
       Enum.zip(words, @pos)
       |> Enum.map(fn {word, pos} ->
@@ -60,7 +60,7 @@ defmodule Core.Semantic.TemporalSentenceTest do
   end
 
   test "after reverses claimed temporal direction without swapping the original clauses" do
-    si = input(@after) |> SentenceMeaning.attach()
+    si = input(@after_words) |> SentenceMeaning.attach()
     assert {:ok, meaning} = TemporalSentence.verified(si)
     assert meaning.connective == :after
     assert Enum.map(meaning.compositional_evidence.source_event_semantics,
@@ -129,7 +129,7 @@ defmodule Core.Semantic.TemporalSentenceTest do
       [Access.key!(:sentence_meaning), Access.key!(:connective)], :after)
     assert TemporalSentence.verified(wrong_connective) == :not_applicable
 
-    mutated = %{si | sentence: Enum.join(@after, " ") <> "."}
+    mutated = %{si | sentence: Enum.join(@after_words, " ") <> "."}
     assert TemporalSentence.verified(mutated) == :not_applicable
 
     assert TemporalSentence.build(%{si | source: :tool}) == nil
