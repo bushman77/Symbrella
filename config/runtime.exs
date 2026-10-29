@@ -1,12 +1,14 @@
 # config/runtime.exs
 import Config
 
-# Small-model web retrieval: keyless Wikimedia by default, optional SearXNG.
-# Environment toggles never require changing code.
+# Web retrieval stays enabled for normal Symbrella runtimes even when
+# the language model is disabled. Test runs stay offline unless explicitly
+# configured with a fake provider. An explicit environment override can still
+# disable network access when needed.
 web_cfg = Application.get_env(:core, :web_retrieval, [])
 web_enabled =
   case System.get_env("SYMBRELLA_WEB_RETRIEVAL") do
-    nil -> Keyword.get(web_cfg, :enabled?, false)
+    nil -> config_env() != :test
     value -> String.downcase(value) in ["1", "true", "yes", "on"]
   end
 
