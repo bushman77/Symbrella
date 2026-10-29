@@ -82,7 +82,7 @@ defmodule Core.Semantic.ReportVerification do
            kind: :reported_progressive_event, status: :provisional,
            seq: seq, actor_kind: actor, action: action, relation: relation,
            landmark: landmark, reading: reading,
-           typed_proof_sha256: digest,
+           typed_proof_sha256: stored_digest,
            arrival: :not_established, event_existence: :not_asserted,
            referent_verified?: false, event_occurrence_verified?: false,
            provenance: :revalidated_event_composition,
@@ -90,16 +90,19 @@ defmodule Core.Semantic.ReportVerification do
            factual_authority?: false
          },
          %{
-           aspect: :progressive, predicate: action,
-           actor: %{kind: actor, referent: :unresolved},
-           spatial: %{relation: relation, landmark_kind: landmark,
-                      reading: reading, arrival: :not_established},
+           aspect: :progressive, predicate: required_action,
+           actor: %{kind: required_actor, referent: :unresolved},
+           spatial: %{relation: required_relation, landmark_kind: required_landmark,
+                      reading: required_reading, arrival: :not_established},
            event_existence: :not_asserted
          },
          digest
        ) when is_integer(seq) and seq > 0 and
-              is_binary(digest) and byte_size(digest) == 64,
-       do: true
+              is_binary(digest) and byte_size(digest) == 64 do
+    stored_digest == digest and actor == required_actor and
+      action == required_action and relation == required_relation and
+      landmark == required_landmark and reading == required_reading
+  end
 
   defp matching_report?(_, _, _), do: false
 
