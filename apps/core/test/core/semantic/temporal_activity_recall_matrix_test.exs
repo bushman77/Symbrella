@@ -232,6 +232,64 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     end
   end
 
+  test "direction and arrival questions reflect proof limits, never inferred arrival" do
+    for actor <- @actors, landmark <- @landmarks do
+      session = "arrival-#{actor}-#{landmark}"
+      try do
+        record_proved!(session, actor, "flying", "into", landmark)
+
+        for question <- [
+          "Did the #{actor} reach the #{landmark}?",
+          "Did the #{actor} arrive at the #{landmark}?",
+          "Has the #{actor} reached the #{landmark}?",
+          "Has the #{actor} arrived at the #{landmark}?"
+        ] do
+          assert {:ok, text, meta} = TemporalActivityRecall.reply(session, question)
+          assert text =~ "a #{actor} flying into a #{landmark}"
+          assert text =~ "does not establish that it arrived"
+          assert meta.requested_slot == :arrival
+          assert meta.event_occurrence_verified? == false
+          assert meta.same_actor_identity_verified? == false
+          assert meta.llm_called? == false
+        end
+
+        assert {:ok, text, meta} =
+          TemporalActivityRecall.reply(session, "Where is the #{actor} flying?")
+        assert text =~ "a #{actor} flying into a #{landmark}"
+        assert text =~ "not a verified destination or arrival"
+        assert meta.requested_slot == :direction
+
+        # The target is binding evidence, not something supplied by guessing
+        # from the latest narrative when the query names another landmark.
+        for other <- @landmarks -- [landmark] do
+          assert :not_applicable == TemporalActivityRecall.reply(session,
+            "Did the #{actor} reach the #{other}?")
+        end
+
+        assert :not_applicable == TemporalActivityRecall.reply(session,
+          "Did the #{actor} reach the moon?")
+        assert :not_applicable == TemporalActivityRecall.reply(session,
+          "Has the fox reached the #{landmark}?")
+      after
+        Ledger.clear(session)
+      end
+    end
+  end
+
+  test "arrival and direction questions do not borrow earlier movement after later static report" do
+    session = "arrival-stale-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "flying", "into", "tree")
+    record_proved!(session, "bird", "sitting", "on", "fence")
+
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "Did the bird reach the tree?")
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "Where is the bird flying?")
+    assert_report(session, "What is it doing?", :latest, "a bird sitting on a fence")
+  end
+
   test "mixed actor kinds make it ambiguous instead of choosing latest mention" do
     session = "pronoun-mixed-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
