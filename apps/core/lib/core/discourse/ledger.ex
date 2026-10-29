@@ -3,8 +3,9 @@ defmodule Core.Discourse.Ledger do
   Session-scoped, append-only conversational *semantic evidence* ledger (V1).
 
   Every eligible user turn advances a sequence; independently replayed
-  nominal descriptions and validated provisional spatial reports may attach
-  bounded semantic records. No transcript text, assumed referent identity,
+  nominal descriptions, validated provisional spatial reports, and explicitly
+  witnessed temporal claims may attach bounded semantic records. No transcript
+  text, assumed referent identity,
   verified real-world event, dictionary sense guess, or LLM inference is
   stored as a fact.
 
@@ -19,7 +20,7 @@ defmodule Core.Discourse.Ledger do
   """
   alias Core.Brain.WM.Comprehension, as: WMComprehension
   alias Core.Discourse.Ledger.Owner
-  alias Core.Semantic.{Composition, DiscourseComposition}
+  alias Core.Semantic.{Composition, DiscourseComposition, TemporalSentence}
   alias Core.Pipeline.Trace
 
   @max_query_bytes 256
@@ -161,6 +162,13 @@ defmodule Core.Discourse.Ledger do
   end
 
   defp semantic_record(si) do
+    case TemporalSentence.verified(si) do
+      {:ok, meaning} -> temporal_claim_record(meaning)
+      :not_applicable -> ordinary_semantic_record(si)
+    end
+  end
+
+  defp ordinary_semantic_record(si) do
     core = %{kind: :uninterpreted, status: :no_verified_semantics,
       factual_authority?: false}
 
@@ -207,6 +215,78 @@ defmodule Core.Discourse.Ledger do
 
       _ -> core
     end
+  end
+
+  # A meaning saved on SI is never sufficient by itself: semantic_record/1
+  # requires TemporalSentence.verified/1 to independently rebuild the full
+  # two-clause interpretation and its typed proof from current witnesses.
+  # This record describes the speaker's ordering CLAIM, not ledger turn order.
+  defp temporal_claim_record(%{
+         connective: connective,
+         temporal_claim: %{
+           relation: :before,
+           earlier_event_property: earlier,
+           later_event_property: later,
+           speaker_attributed?: true,
+           external_chronology_verified?: false,
+           event_occurrence_verified?: false,
+           referent_identity_verified?: false
+         },
+         compositional_evidence: %{
+           result: proof,
+           temporal_operator_verified?: true,
+           event_properties_verified?: true,
+           connective_witness_verified?: true
+         },
+         factual_authority?: false
+       }) when connective in [:before, :after] do
+    with {:ok, earlier_descriptor} <- temporal_event_descriptor(earlier),
+         {:ok, later_descriptor} <- temporal_event_descriptor(later) do
+      %{
+        kind: :reported_temporal_relation,
+        status: :provisional,
+        relation: :before,
+        connective: connective,
+        earlier: earlier_descriptor,
+        later: later_descriptor,
+        proof_sha256: proof_hash(proof),
+        source: :revalidated_temporal_clause_composition,
+        provenance: :revalidated_temporal_clause_composition,
+        verification: :conversation_context_only,
+        speaker_attributed?: true,
+        event_occurrence_verified?: false,
+        actual_event_chronology_verified?: false,
+        referent_identity_verified?: false,
+        factual_authority?: false
+      }
+    else
+      _ -> uninterpreted_record()
+    end
+  end
+
+  defp temporal_claim_record(_), do: uninterpreted_record()
+
+  # Store only a small whitelist of the event property, never arbitrary
+  # input text, full lambda AST, unbounded dictionary rows or LIFG scores.
+  defp temporal_event_descriptor(%{
+         aspect: :progressive,
+         predicate: action,
+         actor: %{kind: actor_kind, referent: :unresolved},
+         spatial: %{relation: relation, landmark_kind: landmark},
+         event_existence: :not_asserted
+       })
+       when action in [:sit, :sleep] and actor_kind in [:bird, :cat, :dog] and
+            relation in [:on, :in, :under, :beside, :above, :below] and
+            landmark in [:fence, :tree, :table] do
+    {:ok, %{action: action, actor_kind: actor_kind,
+      relation: relation, landmark: landmark}}
+  end
+
+  defp temporal_event_descriptor(_), do: :unsupported
+
+  defp uninterpreted_record do
+    %{kind: :uninterpreted, status: :no_verified_semantics,
+      factual_authority?: false}
   end
 
   defp verified_nominal(si) do
