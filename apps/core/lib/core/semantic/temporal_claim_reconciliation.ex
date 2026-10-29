@@ -135,6 +135,7 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
          earlier: earlier,
          later: later,
          proof_sha256: proof,
+         source: :revalidated_temporal_clause_composition,
          provenance: :revalidated_temporal_clause_composition,
          verification: :conversation_context_only,
          speaker_attributed?: true,
