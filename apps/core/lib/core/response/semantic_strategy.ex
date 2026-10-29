@@ -15,7 +15,7 @@ defmodule Core.Response.SemanticStrategy do
   alias Core.Semantic.Composition
   alias Core.Semantic.{DiscourseComposition, FrameUnifier, ProvisionalInterpretation,
     SentenceMeaning, SpeechActs, TemporalEventComposition,
-    TemporalClaimReconciliation}
+    TemporalClaimReconciliation, TemporalClarificationResolution}
 
   @type strategy :: map()
 
@@ -91,6 +91,21 @@ defmodule Core.Response.SemanticStrategy do
 
     if is_map(attached) and attached == SentenceMeaning.build(si) do
       case attached do
+        %{kind: :temporal_clarification_resolution, status: :provisional,
+          source: :revalidated_temporal_clarification_answer,
+          factual_authority?: false} ->
+          case TemporalClarificationResolution.verified(si) do
+            {:ok, %{chosen_report_seq: chosen, pending_request_seq: pending}}
+                when is_integer(chosen) and is_integer(pending) ->
+              plan(:acknowledge_intended_temporal_report,
+                :temporal_clarification_resolution,
+                :eligible, :symbolic_generation,
+                :revalidated_temporal_clarification_answer,
+                %{missing: [:event_identity, :event_occurrence,
+                  :actual_event_chronology], factual_authority?: false})
+            _ -> nil
+          end
+
         %{kind: :temporal_claim_conflict_question, status: :provisional,
           source: :revalidated_temporal_claim_reconciliation,
           factual_authority?: false} ->
