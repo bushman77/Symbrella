@@ -30,8 +30,8 @@ defmodule Core.Semantic.Composition.TemporalRelation do
       when connective in @connectives and is_map(first) and is_map(second) do
     with :ok <- Event.verify(first),
          :ok <- Event.verify(second),
-         ^@event_property <- first.result_type,
-         ^@event_property <- second.result_type,
+         true <- first.result_type == @event_property,
+         true <- second.result_type == @event_property,
          %{event_existence: :not_asserted} <- first.semantics,
          %{event_existence: :not_asserted} <- second.semantics,
          initial = {:apply, {:apply, operator(connective), first.result}, second.result},
@@ -94,19 +94,6 @@ defmodule Core.Semantic.Composition.TemporalRelation do
          {:and, {:apply, {:var, "P"}, {:var, "e1"}},
           {:apply, {:var, "Q"}, {:var, "e2"}}},
          ordered}}}}}
-  end
-
-  defp canonical_form?(
-         {:lambda, first, :event,
-          {:lambda, second, :event,
-           {:and, _first_event_property,
-            {:event_precedes, {:var, earlier}, {:var, later}}}}}, connective)
-       when is_binary(first) and is_binary(second) and first != second do
-    case connective do
-      :before -> earlier == first and later == second
-      :after -> earlier == second and later == first
-      _ -> false
-    end
   end
 
   # Event predicates compose into two nested conjunctions, with their
