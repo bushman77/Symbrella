@@ -550,6 +550,70 @@ defmodule Core.Response.AttentionFallbackTest do
 
     # The resolved request cannot be repeatedly confirmed on a later turn.
     assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flapping")
+
+    # The very next activity query should retrieve the speaker's clarification
+    # before the owner-wide Hippocampus can supply an unrelated old action.
+    assert {:ok, %{actor: "bird", original: "flarping", proposed: "flapping",
+      factual_authority?: false}} =
+        Ledger.confirmed_fuzzy_activity(sid, "What is the bird doing?")
+
+    assert {:warm, recalled, recalled_meta} =
+      Response.memory_reply(%{
+        text: "What is the bird doing?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+
+    assert recalled ==
+      ~s|In your recent description, you confirmed that "flarping" meant "flapping" for the bird. That is your intended wording, not a verified event.|
+    assert recalled_meta.memory_source == :same_session_fuzzy_resolution
+    assert recalled_meta.response_source == :symbolic_conversation
+    assert recalled_meta.factual_authority? == false
+
+    refute match?({:ok, _}, Ledger.confirmed_fuzzy_activity(sid <> "-other",
+      "What is the bird doing?"))
+    assert :not_applicable == Ledger.confirmed_fuzzy_activity(sid,
+      "What is the cat doing?")
+    assert :not_applicable == Ledger.confirmed_fuzzy_activity(sid,
+      "Where is the bird?")
+  end
+
+  test "an intervening session turn prevents an old fuzzy correction from overriding activity retrieval" do
+    alias Core.Discourse.Ledger
+
+    sid = "attention-fuzzy-followup-#{System.unique_integer([:positive])}"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Ledger.clear(sid)
+    end)
+
+    original = "The bird is flarping on the fence."
+    si = repair_si(sid, original, verified?: false, uncertain: ["flarping"])
+    {_tone, question, question_meta} =
+      Response.plan(Map.merge(si, %{text: original, confidence: 0.7}), %{})
+
+    Ledger.record(Map.merge(si, %{
+      response_text: question, response_meta: question_meta
+    }), discourse_ledger?: true)
+
+    answer = "yes flapping"
+    answer_si = repair_si(sid, answer, verified?: false,
+      uncertain: ["yes", "flapping"])
+    {_tone, acknowledgment, answer_meta} =
+      Response.plan(Map.merge(answer_si, %{text: answer, confidence: 0.7}), %{})
+
+    Ledger.record(Map.merge(answer_si, %{
+      response_text: acknowledgment, response_meta: answer_meta
+    }), discourse_ledger?: true)
+
+    assert {:ok, %{proposed: "flapping"}} =
+      Ledger.confirmed_fuzzy_activity(sid, "What is the bird doing?")
+
+    intervening = repair_si(sid, "The cat sleeps.", verified?: false,
+      uncertain: [])
+    Ledger.record(intervening, discourse_ledger?: true)
+
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_activity(sid, "What is the bird doing?")
   end
 
   test "a fuzzy confirmation requires immediate, matched and same-session context" do
