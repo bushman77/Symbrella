@@ -3,8 +3,8 @@ defmodule Core.Semantic.TemporalSentence do
   A narrowly witnessed two-clause temporal assertion.
 
   Both clauses must have explicitly named, closed-vocabulary noun subjects.
-  Original contiguous base tokens, selected LIFG/dictionary POS witnesses,
-  present-participle morphology and the exact before/after conjunction are
+  Original contiguous base tokens, exact or independently scored LIFG/dictionary
+  POS witnesses, present-participle morphology and the temporal connective are
   rechecked before applying TemporalRelation.
 
   This is an attribution of the *speaker's claim*, not proof of event
@@ -126,7 +126,15 @@ defmodule Core.Semantic.TemporalSentence do
       end)
       |> Enum.sort_by(& &1.index)
 
-    words = Enum.map(tokens, fn t -> String.downcase(String.trim(t.phrase)) end)
+    # The live tokenizer retains the sentence-final full stop in the final
+    # base token (e.g. "tree."). Strip ONLY that full stop, ONLY at the
+    # canonical final index. No internal punctuation is ever normalized away.
+    words = Enum.map(tokens, fn token ->
+      word = token.phrase |> String.downcase() |> String.trim()
+      if token.index == @surface_length - 1,
+        do: String.replace(word, ~r/\.\z/u, ""),
+        else: word
+    end)
     written =
       sentence
       |> String.downcase()
@@ -144,9 +152,11 @@ defmodule Core.Semantic.TemporalSentence do
     end
   end
 
-  # Every element is checked against the actual chosen sense and dictionary
-  # row; predicate roles additionally require attested participle morphology.
-  # A conjunction is not inferred just from the surface word "before".
+  # Each role is backed by current LIFG and an exact dictionary row. Only
+  # auxiliaries and progressive predicates may use RoleWitness's uniquely
+  # scored, independently attested alternatives. Predicate alternatives must
+  # satisfy the existing participle morphology guard. Other roles require
+  # the selected witness, including the temporal connective.
   defp lexical_witnesses(si) do
     roles = [
       {0, :subject_determiner, ["determiner"]},
@@ -169,6 +179,11 @@ defmodule Core.Semantic.TemporalSentence do
     Enum.reduce_while(roles, {:ok, []}, fn {index, role, pos}, {:ok, acc} ->
       case RoleWitness.resolve(si, role, index, pos) do
         {:ok, %{selection_basis: :selected} = witness} ->
+          {:cont, {:ok, [witness | acc]}}
+        {:ok, %{selection_basis: :construction_alternative,
+                candidate_score: score} = witness}
+            when role in [:auxiliary, :predicate] and
+                 is_number(score) and score >= 0 ->
           {:cont, {:ok, [witness | acc]}}
         _ -> {:halt, :unsupported}
       end
