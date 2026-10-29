@@ -82,12 +82,13 @@ defmodule Core.Semantic.TemporalSentenceTest do
 
     choices = Enum.map(si.lifg_choices, fn
       %{token_index: 7} = choice ->
-        %{choice | id: "after|noun|1",
-          candidate_probs: %{
-            "after|conjunction|1" => 0.08,
-            "after|conjunction|2" => 0.08,
-            "after|preposition|1" => 0.08
-          }}
+        choice
+        |> Map.put(:id, "after|noun|1")
+        |> Map.put(:candidate_probs, %{
+          "after|conjunction|1" => 0.08,
+          "after|conjunction|2" => 0.08,
+          "after|preposition|1" => 0.08
+        })
       choice -> choice
     end)
 
