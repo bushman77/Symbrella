@@ -55,7 +55,7 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
             event_occurrence: :not_established,
             actual_event_chronology: :not_established,
             contradiction_verified?: false,
-            speaker_claims_verified?: true,
+            report_evidence_qualified?: true,
             factual_authority?: false
           }}
 
