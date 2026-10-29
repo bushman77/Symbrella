@@ -600,3 +600,42 @@ mix test apps/core/test/core/response/attention_fallback_test.exs \
   apps/core/test/core/semantic/clarified_event_test.exs \
   apps/core/test/core/response/episodic_memory_test.exs
 \`\`\`
+
+
+## LiveView regression: bare lexical confirmation after an issued question
+
+A live run successfully asked:
+\`The bird is flarping on the fence.\`
+→ \`I'm not sure how you're using "flarping" here. Did you mean "flapping"?\`
+
+The next user message was exactly \`flapping\`, but the old ledger
+confirmation grammar accepted only \`yes\`, \`yes flapping\` and related
+affirmative forms. The symbolic-generation fallback therefore reported
+"Symbolic response unavailable for this turn" rather than accepting
+the speaker's selected word.
+
+\`Ledger.pending_fuzzy_confirmation/2\` now admits the **exact proposed
+single word** (or the same word with one final period), but only as the
+next reply to an actual, same-session, non-expired clarification request.
+The existing yes/yeah/yep variants remain supported. Substrings,
+different words, longer sentences, unanswered/other-session requests
+and intervening turns do not count as a confirmation.
+
+\`Core.Response.Memory.reply_for/1\` handles that precisely bounded
+single-word case *before* the generic symbolic fallback. It returns a
+speaker-attributed clarification acknowledgement with the same
+\`:fuzzy_clarification_confirmed\` reflection shape required by
+\`Ledger.fuzzy_dialogue_record/1\`. The ledger then records the linked
+\`:fuzzy_clarification_resolution\`, enabling the existing semantic
+\`ClarifiedEvent\` follow-up path. No lexical sense or factual event is
+learned; the original sentence is never rewritten.
+
+Focused end-to-end regression runs an issued question, the exact
+\`flapping\` response with no working-memory attention assumption,
+ledger admission, and answer to \`What is the bird doing?\`.
+
+\`\`\`bash
+mix test apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/semantic/provisional_interpretation_test.exs
+\`\`\`
