@@ -101,13 +101,12 @@ defmodule Core.Semantic.TemporalSentence do
   @doc "Reject saved, stale or edited meanings by rebuilding current witnesses."
   @spec verified(map()) :: {:ok, map()} | :not_applicable
   def verified(%{} = si) do
-    saved = Map.get(si, :sentence_meaning)
+    case Map.get(si, :sentence_meaning) do
+      %{kind: :explicit_temporal_report, factual_authority?: false} = saved ->
+        if saved == build(si), do: {:ok, saved}, else: :not_applicable
 
-    if is_map(saved) and saved.kind == :explicit_temporal_report and
-         saved.factual_authority? == false and saved == build(si) do
-      {:ok, saved}
-    else
-      :not_applicable
+      _ ->
+        :not_applicable
     end
   end
 
