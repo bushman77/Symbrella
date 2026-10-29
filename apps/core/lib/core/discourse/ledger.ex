@@ -24,6 +24,7 @@ defmodule Core.Discourse.Ledger do
     TemporalClaimReconciliation, TemporalClarificationResolution}
   alias Core.Pipeline.Trace
   alias Core.Text.Fuzzy
+  alias Core.Syntax.Signatures
 
   @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
@@ -138,6 +139,7 @@ defmodule Core.Discourse.Ledger do
            actor: ^subject, original: ^original, proposed: ^proposed,
            source_turn_sha256: ^digest,
            source_tokens: source_tokens,
+           source_syntax: source_syntax,
            verification: :conversation_context_only,
            factual_authority?: false
          } <- request,
@@ -157,6 +159,8 @@ defmodule Core.Discourse.Ledger do
         position: clause.position,
         source_turn_sha256: digest,
         source_request_seq: request_seq,
+        role_evidence: if(valid_gap_syntax?(source_syntax),
+          do: :attested_core_syntax_gap, else: :surface_clause_only),
         status: :speaker_confirmed_spelling,
         source: :same_session_clarification,
         factual_authority?: false
@@ -328,6 +332,7 @@ defmodule Core.Discourse.Ledger do
                         proposed: proposed,
                         actor: actor,
                         source_tokens: tokens,
+                        source_syntax: observed_gap_syntax(si),
                         source_turn_sha256: :crypto.hash(:sha256, sentence)
                           |> Base.encode16(case: :lower),
                         asked_at_ms: System.system_time(:millisecond),
@@ -367,6 +372,51 @@ defmodule Core.Discourse.Ledger do
       true -> nil
     end
   end
+
+  # An independently observed pre-LIFG lexical gap can enrich the
+  # clarification's role provenance. It never proves the missing word's
+  # dictionary sense or bypasses the source fingerprint replay.
+  defp observed_gap_syntax(si) do
+    expected = %{
+      subject_determiner: 0, subject_head: 1, auxiliary: 2,
+      predicate: 3, preposition: 4, location_determiner: 5,
+      location_head: 6
+    }
+
+    original = List.wrap(Map.get(si, :sentence_signatures))
+    independent = Signatures.detect(si)
+
+    Enum.find_value(original, fn candidate ->
+      if candidate in independent and
+           match?(%{id: :progressive_lexical_gap_candidate,
+                    span: {0, 6}, source: :core_syntax}, candidate) and
+           Map.get(candidate, :roles) == expected and
+           is_list(Map.get(candidate, :evidence)) and
+           :unresolved_progressive_predicate in candidate.evidence do
+        Map.take(candidate, [:id, :span, :roles, :evidence, :source])
+      end
+    end)
+  end
+
+  defp valid_gap_syntax?(%{
+         id: :progressive_lexical_gap_candidate, span: {0, 6},
+         source: :core_syntax,
+         roles: %{
+           subject_determiner: 0, subject_head: 1, auxiliary: 2,
+           predicate: 3, preposition: 4,
+           location_determiner: 5, location_head: 6
+         },
+         evidence: evidence
+       }) when is_list(evidence) do
+    Enum.all?(
+      [:contiguous_surface, :attested_nominal_subject,
+       :unresolved_progressive_predicate, :attested_preposition,
+       :attested_nominal_location],
+      &(&1 in evidence)
+    )
+  end
+
+  defp valid_gap_syntax?(_), do: false
 
   # A source record retains bounded source tokens rather than replacing the
   # utterance. Replay the same strict structural grammar and exact original
