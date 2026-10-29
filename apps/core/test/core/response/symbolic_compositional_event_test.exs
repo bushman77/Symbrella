@@ -283,15 +283,10 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
       |> Map.put(:session_id, session)
       |> run()
 
-    assert :not_applicable ==
-             Composition.verified(put_in(
-               si.compositional_derivation.event_semantics.spatial.arrival,
-               :confirmed
-             ))
-
     tampered =
       put_in(si.compositional_derivation.event_semantics.spatial.arrival,
         :confirmed)
+    assert :not_applicable == Composition.verified(tampered)
     Ledger.record(tampered)
 
     assert [%{kind: :uninterpreted}] = Ledger.entries(session)
