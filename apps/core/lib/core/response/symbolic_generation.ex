@@ -222,7 +222,7 @@ defmodule Core.Response.SymbolicGeneration do
              event_occurrence: :not_established,
              actual_event_chronology: :not_established,
              contradiction_verified?: false,
-             speaker_claims_verified?: true,
+             report_evidence_qualified?: true,
              factual_authority?: false
            }, factual_authority?: false}} <-
            TemporalClaimReconciliation.verified(si),
@@ -245,7 +245,7 @@ defmodule Core.Response.SymbolicGeneration do
          interpreted_speech_act: :temporal_claim_conflict_question,
          provenance: :revalidated_temporal_claim_reconciliation,
          matching_basis: :equal_closed_event_descriptions,
-         speaker_claims_verified?: true,
+         report_evidence_qualified?: true,
          contradiction_verified?: false,
          event_occurrence_verified?: false,
          actual_event_order_verified?: false,
