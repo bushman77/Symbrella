@@ -2,6 +2,7 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
   use ExUnit.Case, async: false
 
   alias Core.Response
+  alias Core.Discourse.Ledger
   alias Core.Response.{SemanticStrategy, SymbolicGeneration}
   alias Core.Semantic.{Composition, SentenceMeaning}
   alias Core.Syntax.{Signatures, StructuralCompetition}
@@ -160,6 +161,145 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
     assert reply =~ "cat sleeping under a table"
     assert reply =~ "not independent proof"
     assert reflection.event_occurrence_verified? == false
+  end
+
+  defp record_proved_report(session, actor, activity, relation, landmark) do
+    si =
+      input(actor, activity, relation, landmark)
+      |> Map.put(:session_id, session)
+      |> run()
+
+    assert {:ok, %{kind: :progressive_event_property,
+                   factual_authority?: false}} = Composition.verified(si)
+    Ledger.record(si)
+    si
+  end
+
+  test "two proved activity reports answer earlier versus latest without asserting identity" do
+    session = "temporal-bird-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "bird", "flying", "into", "tree")
+
+    assert [%{kind: :reported_progressive_event, seq: 2, action: :fly,
+              reading: :directional, arrival: :not_established,
+              event_occurrence_verified?: false, referent_verified?: false,
+              factual_authority?: false},
+            %{kind: :reported_progressive_event, seq: 1, action: :sit,
+              reading: :locative, factual_authority?: false}] =
+             Ledger.entries(session)
+
+    assert {:warm, earlier, earlier_meta} =
+             Response.memory_reply(%{
+               text: "What was the bird doing?",
+               intent: :ask, session_id: session, confidence: 0.9
+             })
+
+    assert earlier ==
+             "Earlier, you described a bird sitting on a fence. This is report order, not verified event chronology."
+    assert earlier_meta.memory_source == :same_session_progressive_report
+    assert earlier_meta.requested_temporal_role == :earlier
+    assert earlier_meta.actual_event_chronology_verified? == false
+    assert earlier_meta.same_actor_identity_verified? == false
+    assert earlier_meta.llm_called? == false
+
+    assert {:warm, latest, latest_meta} =
+             Response.memory_reply(%{
+               text: "What is the bird doing now?",
+               intent: :ask, session_id: session, confidence: 0.9
+             })
+
+    assert latest ==
+             "In your latest recorded description, a bird flying into a tree. This does not verify current activity, arrival, or that it is the same individual."
+    assert latest_meta.requested_temporal_role == :latest
+    assert latest_meta.report_seq == 2
+    assert latest_meta.event_occurrence_verified? == false
+
+    assert {:ok, ^latest, _} =
+             Core.Semantic.TemporalActivityRecall.reply(session,
+               "what is the bird doing now")
+
+    # Ordinary activity questions keep their pre-existing episodic reader.
+    assert :not_applicable ==
+             Core.Semantic.TemporalActivityRecall.reply(session,
+               "What is the bird doing?")
+  end
+
+  test "report timeline is actor-scoped and session-scoped, not global recency" do
+    alias Core.Semantic.TemporalActivityRecall
+    session = "temporal-actors-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "cat", "sleeping", "under", "table")
+    record_proved_report(session, "bird", "flying", "into", "tree")
+
+    assert {:ok, bird, _} =
+             TemporalActivityRecall.reply(session, "What is the bird doing now?")
+    assert bird =~ "a bird flying into a tree"
+    refute bird =~ "cat"
+
+    assert {:ok, cat, _} =
+             TemporalActivityRecall.reply(session, "What is the cat doing now?")
+    assert cat =~ "a cat sleeping under a table"
+
+    assert :not_applicable ==
+             TemporalActivityRecall.reply(session, "What was the cat doing?")
+    assert :not_applicable ==
+             TemporalActivityRecall.reply(session <> "-other", "What is the bird doing now?")
+    assert :not_applicable ==
+             TemporalActivityRecall.reply(session, "What is the dog doing now?")
+    assert :not_applicable ==
+             TemporalActivityRecall.reply(session, "What was the bird doing now?")
+  end
+
+  test "more than one earlier report is ambiguous and never guessed by recency" do
+    alias Core.Semantic.TemporalActivityRecall
+    session = "temporal-ambiguous-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "bird", "sleeping", "under", "tree")
+    record_proved_report(session, "bird", "flying", "into", "tree")
+
+    assert {:ok, question, meta} =
+             TemporalActivityRecall.reply(session, "What was the bird doing?")
+    assert question =~ "several earlier descriptions"
+    assert meta.requested_temporal_role == :ambiguous_earlier
+    assert meta.retrieval_found? == false
+
+    assert {:ok, latest, _} =
+             TemporalActivityRecall.reply(session, "What is the bird doing now?")
+    assert latest =~ "flying into a tree"
+  end
+
+  test "forged or unsupported composition cannot become a temporal report" do
+    alias Core.Semantic.TemporalActivityRecall
+    session = "temporal-forgery-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+    si =
+      input("bird", "flying", "into", "tree")
+      |> Map.put(:session_id, session)
+      |> run()
+
+    assert :not_applicable ==
+             Composition.verified(put_in(
+               si.compositional_derivation.event_semantics.spatial.arrival,
+               :confirmed
+             ))
+
+    tampered =
+      put_in(si.compositional_derivation.event_semantics.spatial.arrival,
+        :confirmed)
+    Ledger.record(tampered)
+
+    assert [%{kind: :uninterpreted}] = Ledger.entries(session)
+    assert :not_applicable ==
+             TemporalActivityRecall.reply(session, "What is the bird doing now?")
+
+    Ledger.record(%{si | source: :assistant})
+    assert length(Ledger.entries(session)) == 1
   end
 
   test "forged, stale, unscored, or question-shaped events never generate" do
