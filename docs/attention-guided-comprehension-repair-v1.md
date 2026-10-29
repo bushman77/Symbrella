@@ -242,3 +242,43 @@ An intervening ledger turn, other actor, or different session prevents this
 narrow recall. It is not a generalized semantic reparse, an assertion about
 real-world bird activity, a database correction, or a permanent definition.
 The existing older owner-wide memory remains unchanged.
+
+
+## Speaker-confirmed event recomposition (focused V1)
+
+The preceding activity-recall implementation correctly retrieved the
+clarification, but returned a *description of the clarification* rather than
+answering the requested role. This revision adds
+\`Core.Semantic.ClarifiedEvent\`:
+
+- The issued clarification's discourse record retains seven bounded source
+  lexemes plus the original utterance's SHA-256 fingerprint. They are
+  source evidence, not a substituted or overwritten sentence.
+- Before use, \`Ledger.confirmed_fuzzy_activity/2\` rebuilds the source
+  progressive clause, checks the stored original hash, and links the
+  adjacent, same-session question and explicit user confirmation.
+- \`ParticipantQuestions.parse/1\` independently selects the actor and
+  requested \`:predicate\` role of the *current* question. It must match the
+  reconstructed source actor.
+- The resulting provisional frame has explicit actor, predicate, aspect,
+  locative relation, and landmark, with a separate
+  \`:speaker_confirmed_substitution\` provenance for the predicate.
+  The exact dictionary sense, external event occurrence and referent identity
+  remain unverified.
+- \`Core.Response.Memory\` uses that frame's predicate role to answer
+  **"In your description, the bird is flapping."** before it considers older
+  owner-wide activity episodes. Older Hippocampal records remain untouched.
+
+This is a bounded source-grammar recomposition, **not** a full new LIFG/ATL
+parse or claim that an actual bird moved. Any unrelated actor, other session,
+unmatched question, source hash mismatch, broken request linkage, or
+intervening turn without that active pair abstains.
+
+Run the focused tests after pulling:
+
+\`\`\`bash
+mix test apps/core/test/core/text/fuzzy_test.exs \
+  apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/response/episodic_memory_test.exs
+\`\`\`
