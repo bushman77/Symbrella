@@ -12,9 +12,10 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
   @actors ~w(bird cat dog)
   @landmarks ~w(fence tree table)
   @stationary_relations ~w(on in under beside above below)
-  @valid_activities (for verb <- ~w(sitting sleeping),
-                         relation <- @stationary_relations,
-                         do: {verb, relation}) ++ [{"flying", "into"}]
+  @valid_activities (
+    for verb <- ~w(sitting sleeping), relation <- @stationary_relations,
+      do: {verb, relation}
+  ) ++ [{"flying", "into"}]
 
   setup do
     if not is_pid(Process.whereis(Owner)), do: start_supervised!(Owner)
