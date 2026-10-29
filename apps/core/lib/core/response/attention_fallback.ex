@@ -9,6 +9,7 @@ defmodule Core.Response.AttentionFallback do
   """
 
   alias Core.Brain.WM.Comprehension, as: WMComprehension
+  alias Core.Discourse.Ledger
   alias Core.Response.LexicalDefinition
   alias Core.Semantic.TemporalSentence
   alias Core.Text.Fuzzy
@@ -41,9 +42,15 @@ defmodule Core.Response.AttentionFallback do
          true <- is_number(salience) and salience > 0.0,
          true <- is_list(goal_terms) and goal_terms != [],
          true <- Map.get(context, :focus_transition) != :release do
-      case comprehension_report(text, si, context, goal_terms, salience) do
-        {:ok, _, _} = report ->
-          report
+      report =
+        case confirm_pending_fuzzy(session, text, context, salience) do
+          {:ok, _, _} = confirmation -> confirmation
+          :not_applicable -> comprehension_report(text, si, context, goal_terms, salience)
+        end
+
+      case report do
+        {:ok, _, _} = result ->
+          result
 
         :not_applicable when action in [:answer, :offer_options, :act_first] ->
           case focused_terms(context) do
@@ -77,6 +84,40 @@ defmodule Core.Response.AttentionFallback do
   end
 
   def generate(_, _, _, _), do: :not_applicable
+
+  # A bare confirmation is meaningful only while the *last* discourse
+  # event in this session is the actually issued fuzzy question. WM admission
+  # and the exact current-turn fingerprint are verified before we get here.
+  # This records the speaker's intended correction, not a dictionary fact.
+  defp confirm_pending_fuzzy(session, text, context, salience) do
+    with true <- current_turn?(text, context),
+         {:ok, %{
+           kind: :fuzzy_clarification_request,
+           original: original, proposed: proposed,
+           seq: request_seq, factual_authority?: false
+         }} <- Ledger.pending_fuzzy_confirmation(session, text) do
+      reply =
+        "I understand your correction: you meant \"#{proposed}\" when you " <>
+          "said \"#{original}\". That resolves the word you clarified, " <>
+          "though I haven't independently verified the entire sentence."
+
+      {:ok, reply, %{
+        status: :fuzzy_clarification_confirmed,
+        provenance: :immediate_same_session_fuzzy_question,
+        source_request_seq: request_seq,
+        original_term: original,
+        confirmed_term: proposed,
+        evidence_level: :speaker_confirmed_spelling,
+        attention_salience: salience,
+        semantic_verified?: false,
+        factual_claims?: false,
+        dictionary_learned?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
 
   # Give independently verified *sentence-level* structure priority over
   # attention and individual lexical confidence. A successful temporal proof
