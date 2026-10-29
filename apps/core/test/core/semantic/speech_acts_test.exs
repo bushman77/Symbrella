@@ -126,6 +126,70 @@ defmodule Core.Semantic.SpeechActsTest do
              SpeechActs.from_si(%{sentence: "Thanks Bradley."})
   end
 
+  test "wellbeing check-ins bind time adjuncts separately from assistant vocatives" do
+    for {sentence, anchor, addressee} <- [
+      {"How are you?", :unspecified, :unspecified},
+      {"how are you", :unspecified, :unspecified},
+      {"how are you today", :today, :unspecified},
+      {"How are you today?", :today, :unspecified},
+      {"How are you doing today?", :today, :unspecified},
+      {"How are you this morning?", :morning, :unspecified},
+      {"How are you this afternoon", :afternoon, :unspecified},
+      {"How are you this evening?", :evening, :unspecified},
+      {"How are you tonight?", :night, :unspecified},
+      {"How are you today, Symbrella?", :today, :self}
+    ] do
+      assert {:ok, frame} = SpeechActs.from_si(%{sentence: sentence}),
+        "not recognized: #{inspect(sentence)}"
+      assert frame.speech_act == :wellbeing_query
+      assert frame.temporal_anchor == anchor
+      assert frame.addressee == addressee
+      assert frame.lexical_evidence.level == :surface_only
+      assert frame.source_text == sentence
+      assert frame.sentence_meaning_verified? == false
+    end
+  end
+
+  test "selected idiomatic how-are-you MWE is preserved while today stays a temporal adjunct" do
+    mwe = %{id: "how are you|phrase|1", kind: :mwe, token_index: 0,
+            token_span: {0, 2}, score: 0.5, source: :mwe_lexicon}
+    today = %{id: "today|noun|1", token_index: 3,
+              score: 0.1583, source: :active_cells}
+
+    si = %{
+      source: :user, sentence: "how are you today", intent: :smalltalk,
+      semantic_choices: [mwe, today],
+      comprehension: %{intent: :smalltalk, degraded?: true,
+                       uncertain: ["today"], unresolved: []}
+    }
+
+    attached = SpeechActs.attach(si)
+    assert attached.speech_act_frame.speech_act == :wellbeing_query
+    assert attached.speech_act_frame.temporal_anchor == :today
+    assert attached.speech_act_frame.addressee == :unspecified
+    assert attached.semantic_choices == [mwe, today]
+    assert attached.comprehension == si.comprehension
+  end
+
+  test "similar-looking semantic questions cannot be swallowed by the check-in grammar" do
+    for sentence <- [
+      "How are you feeling today?",
+      "How are you explaining that?",
+      "How are you today because the weather changed?",
+      "How are you today and what are your thoughts?",
+      "He asked how are you today?",
+      "\"How are you today?\"",
+      "How are you.",
+      "How are you doing today and why?"
+    ] do
+      assert :not_applicable == SpeechActs.from_si(%{sentence: sentence}),
+        "unexpected social act for #{inspect(sentence)}"
+    end
+
+    assert {:ok, %{speech_act: :wellbeing_query, addressee: :other}} =
+      SpeechActs.from_si(%{sentence: "How are you today, Bradley?"})
+  end
+
   test "compound requests, quoted, reported and non-questions cannot bind social acts" do
     for sentence <- [
       "I thanked Symbrella.",
