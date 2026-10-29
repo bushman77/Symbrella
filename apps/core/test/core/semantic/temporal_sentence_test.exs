@@ -63,8 +63,8 @@ defmodule Core.Semantic.TemporalSentenceTest do
     si = input(@after) |> SentenceMeaning.attach()
     assert {:ok, meaning} = TemporalSentence.verified(si)
     assert meaning.connective == :after
-    assert meaning.compositional_evidence.source_event_semantics
-      |> Enum.map(& &1.predicate) == [:sit, :sleep]
+    assert Enum.map(meaning.compositional_evidence.source_event_semantics,
+      & &1.predicate) == [:sit, :sleep]
     assert meaning.temporal_claim.earlier_event_property.predicate == :sleep
     assert meaning.temporal_claim.later_event_property.predicate == :sit
     assert meaning.compositional_evidence.result != nil
