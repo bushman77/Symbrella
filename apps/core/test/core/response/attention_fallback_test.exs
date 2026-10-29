@@ -643,6 +643,102 @@ defmodule Core.Response.AttentionFallbackTest do
       Core.Semantic.ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
   end
 
+  test "live regression: the unresolved predicate outranks weakly recognized actor and landmark" do
+    alias Core.SemanticInput
+    alias Core.TokenFilters
+    alias Core.Syntax.{Signatures, RoleCompetition}
+    alias Core.Semantic.ProvisionalInterpretation
+    alias Core.Discourse.Ledger
+
+    sid = "attention-live-regression-#{System.unique_integer([:positive])}"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Ledger.clear(sid)
+    end)
+
+    sentence = "The bird is flarping on the fence."
+    lexical = %SemanticInput{
+      sentence: sentence,
+      active_cells: [
+        %{id: "the|determiner|1", norm: "the", pos: "determiner"},
+        %{id: "bird|noun|1", norm: "bird", pos: "noun"},
+        %{id: "is|verb|1", norm: "is", pos: "verb"},
+        %{id: "on|preposition|1", norm: "on", pos: "preposition"},
+        %{id: "fence|noun|1", norm: "fence", pos: "noun"}
+      ],
+      lifg_choices: [
+        %{id: "bird|noun|1", token_index: 1, lemma: "bird", score: 0.8},
+        %{id: "on|preposition|1", token_index: 4, lemma: "on", score: 0.8}
+      ]
+    }
+    |> TokenFilters.rebuild_word_ngrams(3)
+    |> Signatures.attach()
+    |> RoleCompetition.attach()
+    |> Core.Brain.ATL.ingest([])
+    |> ProvisionalInterpretation.attach()
+
+    assert {:ok, %{target: %{lemma: "flarping"}}} =
+      ProvisionalInterpretation.verified(lexical)
+
+    # This reproduces the live failure: WM marks only familiar words
+    # "bird" and "fence" as uncertain, so ordinary partial_repair/6
+    # selects the wrong target.
+    wm = repair_si(sid, sentence, verified?: false,
+      uncertain: ["bird", "fence"])
+
+    full = Map.merge(wm, %{
+      tokens: lexical.tokens,
+      active_cells: lexical.active_cells,
+      lifg_choices: lexical.lifg_choices,
+      sentence_signatures: lexical.sentence_signatures,
+      role_competition: lexical.role_competition,
+      atl_slate: lexical.atl_slate,
+      provisional_interpretation: lexical.provisional_interpretation,
+      sentence_meaning: lexical.sentence_meaning
+    })
+
+    assert {:ok, question, info} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :answer}, full)
+
+    assert question ==
+      ~s|I'm not sure how you're using "flarping" here. Did you mean "flapping"?|
+    assert info.status == :attention_comprehension_repair
+    assert info.unresolved_term == "flarping"
+    assert info.provenance == :revalidated_provisional_predicate_gap
+    assert info.semantic_verified? == false
+
+    Ledger.record(Map.merge(full, %{
+      response_text: question,
+      response_meta: %{
+        response_source: :wm_attention_fallback,
+        risk_bucket: :low,
+        response_reflection: info
+      }
+    }), discourse_ledger?: true)
+
+    assert [%{kind: :fuzzy_clarification_request,
+      original: "flarping", proposed: "flapping",
+      factual_authority?: false} | _] = Ledger.entries(sid)
+
+    # A new question before confirming must not reuse an old "sitting" event.
+    assert {:ok, %{unresolved_predicate: "flarping"}} =
+      Ledger.pending_unresolved_activity(sid, "What is the bird doing?")
+    assert :not_applicable ==
+      Ledger.pending_unresolved_activity(sid, "What is the cat doing?")
+
+    assert {:warm, response, meta} =
+      Response.memory_reply(%{
+        text: "What is the bird doing?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+    assert response =~ ~s|"flarping"|
+    refute response =~ "Sitting"
+    assert meta.memory_source == :same_session_unresolved_predicate
+    assert meta.factual_authority? == false
+  end
+
   test "actual response-selected clarification retains independently replayed syntax-gap evidence" do
     alias Core.Discourse.Ledger
     alias Core.SemanticInput
