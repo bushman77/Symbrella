@@ -834,7 +834,7 @@ defmodule Core.Syntax.Signatures do
       if pos?(subject_det, "determiner") and pos?(subject, "noun") and
            aux.word == "is" and
            MapSet.size(predicate.pos) == 0 and
-           Regex.match?(~r/\A\p{L}{5,24}ing\z/u, predicate.word) and
+           Regex.match?(~r/\A\p{L}{2,21}ing\z/u, predicate.word) and
            pos?(prep, "preposition") and
            prep.word in ~w(on in under beside above below) and
            pos?(loc_det, "determiner") and pos?(location, "noun") and
