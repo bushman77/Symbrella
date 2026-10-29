@@ -110,6 +110,55 @@ defmodule Core.Discourse.Ledger do
   def pending_fuzzy_confirmation(_, _), do: :not_applicable
 
   @doc """
+  Answer only the immediately following, exact action question after a
+  speaker-confirmed fuzzy substitution. Unlike owner-wide episode retrieval,
+  this resolves the described actor in one specific session and never
+  claims that the event occurred. Unrelated queries abstain.
+  """
+  @spec confirmed_fuzzy_activity(term(), String.t()) ::
+          {:ok, map()} | :not_applicable
+  def confirmed_fuzzy_activity(session, question) when is_binary(question) do
+    with [_, actor] <-
+           Regex.run(~r/\Awhat is the (\p{L}{2,32}) doing\?\z/iu,
+             String.trim(question)),
+         [resolution, request | _] <- entries(session),
+         %{
+           kind: :fuzzy_clarification_resolution,
+           status: :speaker_confirmed_hypothesis,
+           actor: subject, original: original, proposed: proposed,
+           request_seq: request_seq,
+           source_turn_sha256: digest,
+           verification: :conversation_context_only,
+           factual_authority?: false
+         } <- resolution,
+         %{
+           kind: :fuzzy_clarification_request,
+           status: :provisional,
+           seq: ^request_seq,
+           actor: ^subject, original: ^original, proposed: ^proposed,
+           source_turn_sha256: ^digest,
+           verification: :conversation_context_only,
+           factual_authority?: false
+         } <- request,
+         true <- is_binary(subject) and String.downcase(actor) == subject,
+         true <- is_binary(original) and is_binary(proposed) and
+                   original != proposed do
+      {:ok, %{
+        actor: subject,
+        original: original,
+        proposed: proposed,
+        status: :speaker_confirmed_spelling,
+        source: :same_session_clarification,
+        factual_authority?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  def confirmed_fuzzy_activity(_, _), do: :not_applicable
+
+  @doc """
   Resolve an explicitly named noun phrase from retained semantic records.
   A unique match is a *candidate* only, not verified identity or existence.
   """
@@ -260,18 +309,22 @@ defmodule Core.Discourse.Ledger do
               %{original: original, replacement: proposed, status: :hypothesis_only}
               when is_binary(original) and is_binary(proposed) ->
                 if String.ends_with?(response, ~s|Did you mean "#{proposed}"?|) do
-                  %{
+                  actor = fuzzy_surface_actor(sentence, original)
+                  if is_binary(actor) do
+                    %{
                     kind: :fuzzy_clarification_request,
                     status: :provisional,
                     original: original,
                     proposed: proposed,
+                    actor: actor,
                     source_turn_sha256: :crypto.hash(:sha256, sentence)
                       |> Base.encode16(case: :lower),
                     asked_at_ms: System.system_time(:millisecond),
                     provenance: :actual_attention_fuzzy_question,
                     verification: :conversation_context_only,
                     factual_authority?: false
-                  }
+                    }
+                  end
                 end
 
               _ -> nil
@@ -287,6 +340,7 @@ defmodule Core.Discourse.Ledger do
               status: :speaker_confirmed_hypothesis,
               original: pending.original,
               proposed: pending.proposed,
+              actor: pending.actor,
               request_seq: pending.seq,
               source_turn_sha256: pending.source_turn_sha256,
               provenance: :explicit_immediate_user_confirmation,
@@ -300,6 +354,23 @@ defmodule Core.Discourse.Ledger do
       true -> nil
     end
   end
+
+  # Bounded surface alignment, not a verified semantic event. We can
+  # attribute the actor named by the speaker, but cannot assert a real bird,
+  # an exact verb sense, or movement. Reject free-form or ambiguous grammar.
+  defp fuzzy_surface_actor(sentence, unknown) when is_binary(unknown) do
+    regex =
+      ~r/\A(?:the|a|an) (\p{L}{2,32}) is (\p{L}{5,24}) (?:on|in|under|beside|above|below) (?:the|a|an) \p{L}{2,32}\.\z/iu
+
+    case Regex.run(regex, String.trim(sentence)) do
+      [_, actor, activity] ->
+        if String.downcase(activity) == unknown, do: String.downcase(actor)
+
+      _ -> nil
+    end
+  end
+
+  defp fuzzy_surface_actor(_, _), do: nil
 
   defp ordinary_semantic_record(si) do
     core = %{kind: :uninterpreted, status: :no_verified_semantics,
