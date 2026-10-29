@@ -25,6 +25,7 @@ defmodule Core.Discourse.Ledger do
   alias Core.Pipeline.Trace
   alias Core.Text.Fuzzy
   alias Core.Syntax.Signatures
+  alias Core.Semantic.ProvisionalInterpretation
 
   @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
@@ -146,6 +147,8 @@ defmodule Core.Discourse.Ledger do
          true <- is_binary(original) and is_binary(proposed) and
                    original != proposed,
          {:ok, clause} <- replay_fuzzy_source(source_tokens, original, digest),
+         witness <- verified_source_provisional(request, source_tokens, clause),
+         true <- witness != :invalid_source_evidence,
          true <- clause.actor == subject,
          true <- String.ends_with?(original, "ing") and
                    String.ends_with?(proposed, "ing") do
@@ -158,8 +161,10 @@ defmodule Core.Discourse.Ledger do
         position: clause.position,
         source_turn_sha256: digest,
         source_request_seq: request_seq,
-        role_evidence: if(valid_gap_syntax?(Map.get(request, :source_syntax)),
-          do: :attested_core_syntax_gap, else: :surface_clause_only),
+        role_evidence: if(is_map(witness),
+          do: :validated_original_provisional_frame,
+          else: semantic_role_evidence(request, source_tokens)),
+        source_provisional: witness,
         status: :speaker_confirmed_spelling,
         source: :same_session_clarification,
         factual_authority?: false
@@ -332,6 +337,7 @@ defmodule Core.Discourse.Ledger do
                         actor: actor,
                         source_tokens: tokens,
                         source_syntax: observed_gap_syntax(si),
+                        source_provisional: observed_source_provisional(si, original, tokens),
                         source_turn_sha256: :crypto.hash(:sha256, sentence)
                           |> Base.encode16(case: :lower),
                         asked_at_ms: System.system_time(:millisecond),
@@ -392,30 +398,120 @@ defmodule Core.Discourse.Ledger do
            Map.get(candidate, :roles) == expected and
            is_list(Map.get(candidate, :evidence)) and
            :unresolved_progressive_predicate in candidate.evidence do
-        Map.take(candidate, [:id, :span, :roles, :evidence, :source])
+        Map.take(candidate, [:id, :span, :roles, :evidence, :source,
+          :source_span_sha256])
       end
     end)
   end
 
   defp valid_gap_syntax?(%{
          id: :progressive_lexical_gap_candidate, span: {0, 6},
-         source: :core_syntax,
+         source: :core_syntax, source_span_sha256: source_digest,
          roles: %{
            subject_determiner: 0, subject_head: 1, auxiliary: 2,
            predicate: 3, preposition: 4,
            location_determiner: 5, location_head: 6
          },
          evidence: evidence
-       }) when is_list(evidence) do
+       }, words) when is_list(evidence) and is_list(words) and length(words) == 7 and
+                     is_binary(source_digest) do
     Enum.all?(
       [:contiguous_surface, :attested_nominal_subject,
        :unresolved_progressive_predicate, :attested_preposition,
        :attested_nominal_location],
       &(&1 in evidence)
-    )
+    ) and Enum.all?(words, &is_binary/1) and
+      source_digest == span_digest(words)
   end
 
-  defp valid_gap_syntax?(_), do: false
+  defp valid_gap_syntax?(_, _), do: false
+
+  defp semantic_role_evidence(request, words) do
+    case Map.get(request, :source_provisional) do
+      nil ->
+        if valid_gap_syntax?(Map.get(request, :source_syntax), words),
+          do: :attested_core_syntax_gap, else: :surface_clause_only
+
+      _ ->
+        if valid_gap_syntax?(Map.get(request, :source_syntax), words),
+          do: :validated_original_provisional_frame, else: :invalid_source_evidence
+    end
+  end
+
+  # A nonnil witness must rebind to the *same* source lexemes, source syntax,
+  # actor, predicate and locative roles. A merely plausible replacement is
+  # insufficient, and corrupt evidence never falls back to the surface path.
+  defp verified_source_provisional(request, words, clause) do
+    case Map.get(request, :source_provisional) do
+      %{
+        kind: :unresolved_progressive_predicate,
+        operation: :clarify_unresolved_predicate,
+        source_span_sha256: digest,
+        actor: actor, predicate: predicate,
+        position: position, location: location,
+        factual_authority?: false
+      } = witness ->
+        if is_binary(digest) and digest == span_digest(words) and
+             valid_gap_syntax?(Map.get(request, :source_syntax), words) and
+             actor == clause.actor and
+             predicate == String.downcase(Enum.at(words, 3)) and
+             position == clause.position and location == clause.location and
+             Map.get(witness, :speaker_clarification_confirmed?) == false and
+             Map.get(witness, :event_occurrence_verified?) == false do
+          witness
+        else
+          :invalid_source_evidence
+        end
+
+      nil -> nil
+      _ -> :invalid_source_evidence
+    end
+  end
+
+  defp observed_source_provisional(si, original, words) do
+    case ProvisionalInterpretation.verified(si) do
+      {:ok, %{
+        kind: :unresolved_progressive_predicate,
+        operation: :clarify_unresolved_predicate,
+        source_span_sha256: digest,
+        original_sentence: sentence,
+        target: %{lemma: ^original},
+        participants: %{
+          actor: %{surface: actor},
+          predicate: %{surface: ^original, lexical_sense_verified?: false},
+          location: %{relation: position, surface: location,
+                      event_location_verified?: false}
+        },
+        speaker_clarification_confirmed?: false,
+        event_occurrence_verified?: false,
+        factual_authority?: false
+      }} ->
+        if sentence == Map.get(si, :sentence) and
+             digest == span_digest(words) and
+             valid_gap_syntax?(observed_gap_syntax(si), words) and
+             is_binary(actor) and is_binary(position) and
+             is_binary(location) do
+          %{kind: :unresolved_progressive_predicate,
+            operation: :clarify_unresolved_predicate,
+            source_span_sha256: digest,
+            actor: actor |> String.downcase() |> String.replace(~r/\A(?:a|an|the) /u, ""),
+            predicate: original, position: position,
+            location: location,
+            speaker_clarification_confirmed?: false,
+            event_occurrence_verified?: false,
+            factual_authority?: false}
+        else
+          nil
+        end
+
+      _ -> nil
+    end
+  end
+
+  defp span_digest(words) when is_list(words) do
+    :crypto.hash(:sha256, Enum.map_join(words, " ", &String.downcase/1))
+    |> Base.encode16(case: :lower)
+  end
 
   # A source record retains bounded source tokens rather than replacing the
   # utterance. Replay the same strict structural grammar and exact original
