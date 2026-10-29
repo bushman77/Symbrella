@@ -43,7 +43,7 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
 
       case pairs do
         [pair] ->
-          case Enum.filter(entries, &resolution_for_pair?(&1, pair)) do
+          case Enum.filter(entries, &resolution_for_pair?(&1, pair, entries)) do
             [] -> {:ok, conflict_candidate(pair)}
             [resolution] ->
               {:resolved, %{
@@ -162,7 +162,7 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
          actual_event_chronology_verified?: false,
          referent_identity_verified?: false,
          factual_authority?: false
-       }, %{older: older, newer: newer}) do
+       }, %{older: older, newer: newer}, entries) do
     chosen =
       cond do
         chosen_seq == older.seq -> older
@@ -170,15 +170,34 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
         true -> nil
       end
 
+    pending_matches =
+      Enum.count(entries, fn
+        %{
+          kind: :temporal_clarification_request,
+          status: :provisional,
+          seq: ^request_seq,
+          older_report_seq: ^older_seq,
+          newer_report_seq: ^newer_seq,
+          older_proof_sha256: ^older_sha,
+          newer_proof_sha256: ^newer_sha,
+          provenance: :revalidated_temporal_claim_reconciliation,
+          verification: :conversation_context_only,
+          contradiction_verified?: false,
+          factual_authority?: false
+        } -> true
+        _ -> false
+      end)
+
     is_integer(resolution_seq) and is_integer(request_seq) and
-      newer.seq < request_seq and request_seq < resolution_seq and
+      newer.seq < request_seq and resolution_seq == request_seq + 1 and
       older_seq == older.seq and newer_seq == newer.seq and
       older_sha == older.proof_sha256 and newer_sha == newer.proof_sha256 and
+      pending_matches == 1 and
       is_map(chosen) and
       claim == Map.take(chosen, [:earlier, :later, :connective])
   end
 
-  defp resolution_for_pair?(_, _), do: false
+  defp resolution_for_pair?(_, _, _), do: false
 
   defp reverse_descriptions?(older, newer) do
     older.earlier != older.later and
