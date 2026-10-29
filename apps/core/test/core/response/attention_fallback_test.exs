@@ -90,6 +90,7 @@ defmodule Core.Response.AttentionFallbackTest do
   defp repair_si(session, sentence, opts \\ []) do
     verified? = Keyword.get(opts, :verified?, true)
     recognized? = Keyword.get(opts, :recognized?, false)
+    focus_subject = Keyword.get(opts, :focus_subject, "bird")
     uncertain = Keyword.get(opts, :uncertain, ["flarped", "blorp"])
 
     lexical =
@@ -106,7 +107,7 @@ defmodule Core.Response.AttentionFallbackTest do
       sentence: sentence,
       intent: :statement,
       lexical_constructions: lexical,
-      symbolic_frame: if(recognized?, do: %{subject: "bird"}, else: %{}),
+      symbolic_frame: if(recognized?, do: %{subject: focus_subject}, else: %{}),
       comprehension: %{
         recognized_topics: [],
         understood: if(verified?, do: ["bird"], else: []),
@@ -230,6 +231,28 @@ defmodule Core.Response.AttentionFallbackTest do
       AttentionFallback.generate(sentence,
         %{risk_bucket: :low, intent: :statement},
         %{action: :safe_redirect}, si)
+  end
+
+
+  test "attention selects a later unresolved term over mere lexical list order" do
+    sid = "attention-priority-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The bird flarped beside the blorp."
+    si = repair_si(sid, sentence, recognized?: true, focus_subject: "blorp")
+
+    assert si.wm_context.attention.goal_terms == ["blorp"]
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, si)
+
+    assert String.contains?(reply, "I understand \"bird\"")
+    assert String.contains?(reply, "using \"blorp\"")
+    assert meta.unresolved_term == "blorp"
+    assert meta.attention_selected? == true
+    assert meta.recognized_level == :dictionary_verified
+    assert meta.llm_called? == false
   end
 
 end
