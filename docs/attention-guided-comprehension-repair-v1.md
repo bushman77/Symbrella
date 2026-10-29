@@ -148,3 +148,32 @@ synapses, database rows, or beliefs are modified.
 
 The diagnostics still do not establish that the complete chat response
 will work until a user pulls, compiles, runs tests, and exercises LiveView.
+
+
+## Context-guided fuzzy clarification pilot
+
+The original statement's text and token evidence remain unchanged. Only when
+the same-turn admitted comprehension identifies an actually unresolved word
+does \`Core.Response.AttentionFallback\` ask \`Core.Text.Fuzzy.suggest_word/3\`
+for a non-mutating hypothesis. The spelling matcher uses existing
+Damerau–Levenshtein and DB candidate lookup infrastructure with additional
+guards: a single occurrence of the unresolved word, distance exactly one,
+an attested bounded context frame or strong contextual candidate score, and
+an unambiguous lead over other context-supported candidates. No suggestion
+is treated as an exact lexical sense or a verified event.
+
+The first deliberately narrow frame recognizes **bird is [unknown action]**
+and permits **flarping → flapping** as a question only. This is a curated
+contextual compatibility pilot, *not* generalized ATL semantic inference.
+Context-free or tied candidates abstain, retaining the existing targeted
+clarification. This pilot does not persist definitions, alter the original
+utterance, resolve the meaning of a novel word, or implement a multi-turn
+confirmation/learning loop. Future iterations can replace curated frames
+with explicitly revalidated ATL/lexical and corpus evidence.
+
+To validate on the Elixir runtime:
+
+\`\`\`bash
+mix test apps/core/test/core/text/fuzzy_test.exs \
+  apps/core/test/core/response/attention_fallback_test.exs
+\`\`\`
