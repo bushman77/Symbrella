@@ -326,3 +326,18 @@ mix test apps/core/test/core/syntax/signatures_test.exs \
   apps/core/test/core/semantic/clarified_event_test.exs \
   apps/core/test/core/response/attention_fallback_test.exs
 \`\`\`
+
+## Surgery 2 — LIFG unresolved-role observation
+
+`Brain.LIFG.RoleCompetition.resolve/1` now independently rechecks the pre-LIFG `:progressive_lexical_gap_candidate` before emitting an `:unresolved_roles` map. This requires an ordered seven-token progressive locative clause, dictionary POS witnesses for the surrounding determiners, nouns and preposition, and no attested dictionary POS for the predicate. It remains `status: :unresolved`, with no POS or sense ID.
+
+`role_competition.roles` remains reserved for supported existing dictionary alternatives, and Stage-1 scoring still reads only those supported roles. No score boost, invented sense, ATL constituent, or factual event is produced by this observation. `Core.Syntax.RoleCompetition` reports an `:unresolved` diagnostic with `unresolved_grammar_count` separately from supported count. The next surgery can bridge this into ATL without promoting it to semantic truth.
+
+Focused validation:
+
+```bash
+mix test apps/brain/test/brain/lifg/role_competition_test.exs \
+  apps/core/test/core/syntax/role_competition_test.exs \
+  apps/core/test/core/syntax/signatures_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs
+```
