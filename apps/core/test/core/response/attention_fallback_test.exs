@@ -43,6 +43,8 @@ defmodule Core.Response.AttentionFallbackTest do
 
     assert reply =~ "the Pacific Ocean"
     assert reply =~ "don't have a grounded answer"
+    refute reply =~ "what you mean by \\"ocean\\""
+    assert metadata.status == :attention_continuation
     assert metadata.provenance == :admitted_same_session_comprehension
     assert metadata.factual_claims? == false
     assert metadata.llm_called? == false
@@ -57,6 +59,39 @@ defmodule Core.Response.AttentionFallbackTest do
       Map.merge(si, %{confidence: 0.7}), [])
     assert attached.response_text == reply
     assert attached.response_meta.response_source == :wm_attention_fallback
+  end
+
+
+  test "a different unresolved term still triggers repair within a recognized topic request" do
+    sid = "attention-topic-repair-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+
+    sentence = "Tell me about the Pacific Ocean and flarped?"
+    si =
+      WMComprehension.store(%{
+        source: :user, session_id: sid, sentence: sentence, intent: :ask_info,
+        comprehension: %{
+          recognized_topics: ["ocean"],
+          understood: [],
+          uncertain: ["ocean", "flarped"],
+          degraded?: true
+        },
+        trace: []
+      }, comprehension_wm?: true)
+
+    assert si.wm_context.attention.salience > 0.0
+
+    assert {:ok, reply, metadata} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :ask_info},
+        %{action: :answer}, si)
+
+    assert metadata.status == :attention_comprehension_repair
+    assert metadata.unresolved_term == "flarped"
+    assert String.contains?(reply, "flarped")
+    refute String.contains?(reply, "using \\"ocean\\"")
+    assert metadata.factual_claims? == false
+    assert metadata.llm_called? == false
   end
 
   test "unadmitted, stale, other-session, and safety-blocked focus cannot be voiced" do
