@@ -206,29 +206,50 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
   def current_events_query(_), do: nil
 
   @doc """
-  Recognize a narrowly scoped opinion request about conflict between named
-  actors without inferring facts about whether fighting is actually ongoing.
-  An opinion request is a news-discovery trigger, not proof that a war exists.
-  Historical, hypothetical and personal disputes remain outside this route.
+  Recognize a request for evidence about a public conflict, not a conclusion
+  that any conflict is occurring. Accept a named-party "between/with" frame
+  or a bounded two-party subject such as "the U.S. Iranian war".
+
+  "if" is accepted only with the stronger two-party conflict evidence, as a
+  narrow conversational preposition repair; the original text is unchanged.
+  Personal, fictional, hypothetical and explicitly historical disputes abstain.
   """
   @spec conflict_opinion_query(String.t()) :: String.t() | nil
   def conflict_opinion_query(text) when is_binary(text) do
     question =
-      ~r/^\s*(?:what\s+do\s+you\s+think\s+(?:about|of)|what\s+are\s+your\s+thoughts\s+(?:on|about)|what(?:'s|\s+is)\s+your\s+(?:take|opinion)\s+(?:on|about)|how\s+do\s+you\s+view)\s+(.+?)\s*[?!.]*\s*$/iu
+      ~r/^\s*(?:what\s+do\s+you\s+think\s+(?:about|of|if)|what\s+are\s+your\s+thoughts\s+(?:on|about)|what(?:'s|\s+is)\s+your\s+(?:take|opinion)\s+(?:on|about)|how\s+do\s+you\s+view)\s+(.+?)\s*[?!.]*\s*$/iu
 
     case Regex.run(question, text, capture: :all_but_first) do
-      [topic] ->
-        topic = String.trim(topic)
-        names = Regex.scan(~r/\b(?:[A-Z][\p{L}]{1,}|[A-Z]{2,})\b/u, topic)
+      [raw] ->
+        topic = String.trim(raw)
+        # Orthographic indicators guide retrieval only. They neither
+        # identify real-world participants nor establish event occurrence.
+        initialisms =
+          Regex.replace(~r/\b([A-Z])\.([A-Z])\./u, topic, "\\1\\2")
 
-        if Regex.match?(~r/\b(?:conflict|war|hostilities|fighting|ceasefire)\b/iu, topic) and
-             Regex.match?(~r/\b(?:between|with)\b/iu, topic) and
-             length(names) >= 2 and
-             not Regex.match?(
-               ~r/\b(?:my|your|our|me|you|family|friend|sister|brother|neighbour|neighbor|coworker|fictional|hypothetical|imaginary|game|movie|novel|historical)\b/iu,
-               topic
-             ) and
-             not Regex.match?(~r/\b(?:in|during|of)\s+(?:the\s+)?(?:\d{4}|(?:first|second)\s+world\s+war|nineteenth|twentieth)\b/iu, topic) do
+        names =
+          Regex.scan(
+            ~r/\b(?:[A-Z]{2,}|[A-Z][\p{Ll}]{2,}|[\p{Ll}]{4,}ian)\b/u,
+            initialisms
+          )
+          |> List.flatten()
+          |> Enum.map(&String.downcase/1)
+          |> Enum.uniq()
+
+        conflict? =
+          Regex.match?(~r/\b(?:conflict|war|hostilities|fighting|ceasefire)\b/iu, topic)
+
+        public? =
+          not Regex.match?(
+            ~r/\b(?:my|your|our|me|you|family|friend|sister|brother|neighbour|neighbor|coworker|fictional|hypothetical|imaginary|game|movie|novel|historical)\b/iu,
+            topic
+          ) and
+          not Regex.match?(
+            ~r/\b(?:in|during|of)\s+(?:the\s+)?(?:\d{4}|(?:first|second)\s+world\s+war|nineteenth|twentieth)\b/iu,
+            topic
+          )
+
+        if conflict? and public? and length(names) >= 2 do
           nonempty(topic)
         end
 
