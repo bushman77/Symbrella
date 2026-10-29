@@ -215,3 +215,30 @@ Focused regression command:
 mix test apps/core/test/core/response/attention_fallback_test.exs \
   apps/core/test/core/text/fuzzy_test.exs
 \`\`\`
+
+
+## Same-session fuzzy action recall V1
+
+A confirmed fuzzy substitution is not automatically reflected in the
+owner-wide Hippocampus. The question `What is the bird doing?` previously
+returned `Sitting.` from a separate, older stored `spatial_state` event even
+after the current session had confirmed `flarping → flapping`. That older
+stored event was not evidence for the newly clarified utterance.
+
+The discourse ledger now attaches only a bounded surface actor to an *issued*
+fuzzy question when the original utterance matches a strict progressive,
+locative clause. Confirmation retains that actor without copying or
+silently rewriting the source utterance. For the very next exact
+`What is the <actor> doing?` question, `confirmed_fuzzy_activity/2`
+revalidates the adjacent request/resolution entries, session, actor,
+original, candidate, source-turn digest, and nonfactual provenance.
+
+`Core.Response.Memory` consults that revalidated same-session correction
+before the owner-wide episodic activity lookup, answering in the form
+`In your recent description, you confirmed that "flarping" meant "flapping"
+for the bird. That is your intended wording, not a verified event.`
+
+An intervening ledger turn, other actor, or different session prevents this
+narrow recall. It is not a generalized semantic reparse, an assertion about
+real-world bird activity, a database correction, or a permanent definition.
+The existing older owner-wide memory remains unchanged.
