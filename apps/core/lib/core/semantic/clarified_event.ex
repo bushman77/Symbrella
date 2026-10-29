@@ -20,20 +20,22 @@ defmodule Core.Semantic.ClarifiedEvent do
 
   @spec build(term(), String.t()) :: {:ok, map()} | :not_applicable
   def build(session, text) when is_binary(text) do
-    with {:forward, requested_actor, :predicate, constraints} <-
+    with {:forward, requested_actor, requested_role, constraints} <-
            ParticipantQuestions.parse(text),
-         true <- constraints == %{},
+         true <- requested_role in [:predicate, :location] and is_map(constraints),
          {:ok, %{
            actor: actor, original: original, proposed: proposed,
            aspect: :progressive, position: position, location: location,
            source_turn_sha256: source_digest,
            source_request_seq: request_seq,
            role_evidence: role_evidence,
+           requested_role: ^requested_role,
+           question_constraints: ^constraints,
            source_provisional: original_provisional,
            status: :speaker_confirmed_spelling,
            source: :same_session_clarification,
            factual_authority?: false
-         }} <- Ledger.confirmed_fuzzy_activity(session, text),
+         }} <- Ledger.confirmed_fuzzy_event(session, text),
          true <- requested_actor == actor,
          true <- role_evidence in [
            :validated_original_provisional_frame,
@@ -63,7 +65,7 @@ defmodule Core.Semantic.ClarifiedEvent do
         evidence: %{
           source_clause_replayed?: true,
           speaker_clarification_verified?: true,
-          question_role: :predicate,
+          question_role: requested_role,
           role_binding: role_evidence,
           pre_lifg_gap_observed?: role_evidence in [
             :attested_core_syntax_gap, :validated_original_provisional_frame
@@ -120,30 +122,43 @@ defmodule Core.Semantic.ClarifiedEvent do
   def build(_, _), do: :not_applicable
 
   @doc """
-  Answer only from the recomposed activity slot. The natural response is
-  explicitly attributed to the user's description, not to observed reality.
+  Select the requested role from the recomposed, speaker-attributed frame.
+  Source attribution is kept in the wording; no location or activity is
+  asserted as an independently verified real-world fact.
   """
   @spec answer(term(), String.t()) :: {:ok, String.t(), map()} | :not_applicable
   def answer(session, question) when is_binary(question) do
     case build(session, question) do
-      {:ok, %{
-        kind: :speaker_clarified_progressive_event,
-        actor: %{surface: actor, referent: :unresolved},
-        predicate: %{surface: predicate, exact_dictionary_sense?: false},
-        factual_authority?: false
-      } = frame} ->
-        {:ok, "In your description, the #{actor} is #{predicate}.", %{
-          action: :conversation_recall,
-          memory_source: :same_session_clarified_event,
-          response_source: :symbolic_conversation,
-          provenance: :speaker_clarified_progressive_event,
-          semantic_frame: frame,
-          requested_role: :predicate,
-          retrieval_found?: true,
-          semantic_verified?: false,
-          factual_authority?: false,
-          llm_called?: false
-        }}
+      {:ok, %{kind: :speaker_clarified_progressive_event,
+              actor: %{surface: actor, referent: :unresolved},
+              predicate: %{surface: predicate, exact_dictionary_sense?: false},
+              spatial: %{relation: position, location: location,
+                         event_location_verified?: false},
+              evidence: %{question_role: role},
+              factual_authority?: false} = frame} ->
+        response =
+          case role do
+            :predicate -> "In your description, the #{actor} is #{predicate}."
+            :location -> "In your description, the #{actor} is #{position} #{location}."
+            _ -> nil
+          end
+
+        if is_binary(response) do
+          {:ok, response, %{
+            action: :conversation_recall,
+            memory_source: :same_session_clarified_event,
+            response_source: :symbolic_conversation,
+            provenance: :speaker_clarified_progressive_event,
+            semantic_frame: frame,
+            requested_role: role,
+            retrieval_found?: true,
+            semantic_verified?: false,
+            factual_authority?: false,
+            llm_called?: false
+          }}
+        else
+          :not_applicable
+        end
 
       _ -> :not_applicable
     end
