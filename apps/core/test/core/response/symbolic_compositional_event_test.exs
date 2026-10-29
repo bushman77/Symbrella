@@ -272,7 +272,9 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
       {"Where is it flying?", "direction, not a verified destination", :direction},
       {"How many times have I described the bird?", "2 interpretable descriptions", :count},
       {"Did I describe the bird doing something different?", "reported activities differ", :comparison},
-      {"What did the bird do first?", "bird sitting on a fence", :activity}
+      {"What did the bird do first?", "bird sitting on a fence", :activity},
+      {"What did I say about the bird?", "latest interpretable description", :recap},
+      {"What did I say about it?", "bird flying into a tree", :recap}
     ] do
       assert {:warm, answer, meta} =
         Response.memory_reply(%{
