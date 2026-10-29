@@ -12,13 +12,18 @@ defmodule Core.Response.AttentionFallback do
   alias Core.Response.LexicalDefinition
 
   @max_terms 2
+  @max_repair_terms 6
+  @completed_meanings [
+    :explicit_temporal_report, :temporal_clarification_resolution,
+    :temporal_preference_recall_question, :temporal_claim_conflict_question
+  ]
   @question_intents [:ask, :ask_info, :question, :query, :help, :information_request]
 
   @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
   def generate(text, %{risk_bucket: :low} = features, %{action: action}, si)
-      when is_binary(text) and is_map(si) and
-             action in [:answer, :offer_options, :act_first] do
+      when is_binary(text) and byte_size(text) <= 2048 and is_map(si) and
+             action in [:answer, :offer_options, :act_first, :ask_first] do
     with nil <- LexicalDefinition.requested_term(text),
          false <- Map.get(features, :intent) == :define,
          session when is_binary(session) and byte_size(session) in 1..128 <-
@@ -35,16 +40,85 @@ defmodule Core.Response.AttentionFallback do
          true <- is_list(goal_terms) and goal_terms != [],
          true <- Map.get(context, :focus_transition) != :release,
          {:ok, kind, terms} <- focused_terms(context) do
-      question? = Map.get(features, :intent) in @question_intents or
-        String.ends_with?(String.trim(text), "?")
+      case partial_repair(text, si, context, goal_terms, salience) do
+        {:ok, _, _} = repair ->
+          repair
 
-      reply = realize(kind, terms, question?)
+        :not_applicable when action in [:answer, :offer_options, :act_first] ->
+          question? = Map.get(features, :intent) in @question_intents or
+            String.ends_with?(String.trim(text), "?")
+
+          reply = realize(kind, terms, question?)
+
+          {:ok, reply, %{
+            status: :attention_continuation,
+            provenance: :admitted_same_session_comprehension,
+            focus_kind: kind,
+            focus_terms: terms,
+            evidence_level: :conversation_context_only,
+            semantic_verified?: false,
+            factual_claims?: false,
+            llm_called?: false
+          }}
+
+        :not_applicable ->
+          :not_applicable
+      end
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  def generate(_, _, _, _), do: :not_applicable
+
+  # Unknowns are selected from the *current turn's* weak/unresolved
+  # comprehension, matched against the admitted same-session WM frame. An
+  # attention match influences priority, but cannot turn a weak term into a
+  # verified dictionary sense or an asserted real-world claim.
+  defp partial_repair(text, si, context, goal_terms, salience) do
+    summary = Map.get(si, :comprehension)
+
+    with true <- is_map(summary),
+         true <- Map.get(context, :interpretation_status) not in [:fully_verified],
+         true <- not completed_meaning?(si),
+         uncertain when is_list(uncertain) <- Map.get(summary, :uncertain),
+         true <- safe_terms_max(uncertain, @max_repair_terms) ==
+                   safe_terms_max(Map.get(context, :uncertain), @max_repair_terms),
+         [first | rest] <- safe_terms_max(uncertain, @max_repair_terms)
+                           |> Enum.filter(&surface_present?(text, &1)),
+         true <- is_list(goal_terms) do
+      candidates = [first | rest]
+      target = Enum.find(candidates, &attended?(&1, goal_terms)) || first
+      verified = verified_known(si, context, text, target)
+      recognized = recognized_known(context, text, target)
+      {known_level, known_term} =
+        cond do
+          is_binary(verified) -> {:dictionary_verified, verified}
+          is_binary(recognized) -> {:recognized_focus, recognized}
+          true -> {:none, nil}
+        end
+
+      reply =
+        case {known_level, known_term} do
+          {:dictionary_verified, word} ->
+            "I understand \"#{word}\", but I'm not sure how you're using \"#{target}\" here. Could you clarify that part?"
+
+          {:recognized_focus, word} ->
+            "I'm following \"#{word}\", but I'm not sure how you're using \"#{target}\" here. Could you clarify that part?"
+
+          _ ->
+            "I'm not sure how you're using \"#{target}\" here. Could you clarify what you mean?"
+        end
 
       {:ok, reply, %{
-        status: :attention_continuation,
+        status: :attention_comprehension_repair,
         provenance: :admitted_same_session_comprehension,
-        focus_kind: kind,
-        focus_terms: terms,
+        recognized_term: known_term,
+        recognized_level: known_level,
+        unresolved_term: target,
+        attention_selected?: attended?(target, goal_terms),
+        attention_salience: salience,
+        focus_terms: Enum.take(goal_terms, @max_terms),
         evidence_level: :conversation_context_only,
         semantic_verified?: false,
         factual_claims?: false,
@@ -55,7 +129,70 @@ defmodule Core.Response.AttentionFallback do
     end
   end
 
-  def generate(_, _, _, _), do: :not_applicable
+  defp completed_meaning?(si) do
+    case Map.get(si, :sentence_meaning) do
+      %{kind: kind} when kind in @completed_meanings -> true
+      _ -> false
+    end
+  end
+
+  defp verified_known(si, context, text, target) do
+    understood = safe_terms_max(Map.get(context, :understood), @max_repair_terms)
+
+    si
+    |> Map.get(:lexical_constructions, [])
+    |> List.wrap()
+    |> Enum.find_value(fn
+      %{dictionary_verified?: true, id: id, phrase: phrase,
+        definition: definition, context_score: score}
+      when is_binary(id) and is_binary(phrase) and is_binary(definition) and
+           is_number(score) and score >= 0.12 ->
+        if phrase in understood and phrase != target and
+             safe_term(phrase) == phrase and surface_present?(text, phrase),
+          do: phrase, else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp recognized_known(context, text, target) do
+    [Map.get(context, :topic)] ++
+      List.wrap(Map.get(context, :entities)) ++
+      List.wrap(Map.get(context, :recognized_topics))
+    |> Enum.map(&safe_term/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.find(fn word ->
+      String.downcase(word) != String.downcase(target) and
+        surface_present?(text, word)
+    end)
+  end
+
+  defp attended?(term, goal_terms) do
+    Enum.any?(goal_terms, fn goal ->
+      is_binary(goal) and String.downcase(String.trim(goal)) ==
+        String.downcase(String.trim(term))
+    end)
+  end
+
+  defp surface_present?(text, term)
+       when is_binary(text) and is_binary(term) do
+    Regex.match?(
+      Regex.compile!("(?:\\A|[^\\p{L}\\p{N}])" <>
+        Regex.escape(term) <> "(?:\\z|[^\\p{L}\\p{N}])", "iu"),
+      text
+    )
+  end
+
+  defp safe_terms_max(terms, limit) when is_list(terms) do
+    terms
+    |> Enum.map(&safe_term/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.take(limit)
+  end
+
+  defp safe_terms_max(_, _), do: []
 
   defp focused_terms(context) do
     topic = safe_term(Map.get(context, :topic))
