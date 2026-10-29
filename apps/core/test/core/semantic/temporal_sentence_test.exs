@@ -243,6 +243,21 @@ defmodule Core.Semantic.TemporalSentenceTest do
     assert TemporalSentence.build(%{si | source: :assistant}) == nil
   end
 
+  test "partial, malformed or authority-claiming temporal meanings fail closed" do
+    si = input()
+
+    for meaning <- [
+      %{kind: :explicit_temporal_report},
+      %{kind: :explicit_temporal_report, factual_authority?: false},
+      %{kind: :explicit_temporal_report, factual_authority?: true},
+      %{kind: :unrecognized, factual_authority?: false},
+      %{}
+    ] do
+      assert :not_applicable ==
+        TemporalSentence.verified(%{si | sentence_meaning: meaning})
+    end
+  end
+
   test "stale, edited and unsupported temporal results never verify" do
     si = input() |> SentenceMeaning.attach()
     assert {:ok, _} = TemporalSentence.verified(si)
