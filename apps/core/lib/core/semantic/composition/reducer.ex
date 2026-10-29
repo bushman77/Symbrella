@@ -109,6 +109,17 @@ defmodule Core.Semantic.Composition.Reducer do
     end
   end
 
+  def step({:event_precedes, earlier, later}) do
+    case step(earlier) do
+      {:ok, next} -> {:ok, {:event_precedes, next, later}}
+      :normal ->
+        case step(later) do
+          {:ok, next} -> {:ok, {:event_precedes, earlier, next}}
+          :normal -> :normal
+        end
+    end
+  end
+
   def step({:event_spatial, relation, landmark, event}) do
     # A landmark is now a first-class typed term. Reduce it, if needed,
     # before reducing the event expression in the surrounding predicate.
@@ -181,6 +192,11 @@ defmodule Core.Semantic.Composition.Reducer do
      substitute(event, variable, replacement)}
   end
 
+  def substitute({:event_precedes, earlier, later}, variable, replacement) do
+    {:event_precedes, substitute(earlier, variable, replacement),
+     substitute(later, variable, replacement)}
+  end
+
   def substitute({:event_spatial, relation, landmark, event}, variable, replacement) do
     {:event_spatial, relation,
      substitute(landmark, variable, replacement),
@@ -208,6 +224,8 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(free_variables(kind), free_variables(event))
   defp free_variables({:event_actor_entity, entity, event}),
     do: MapSet.union(free_variables(entity), free_variables(event))
+  defp free_variables({:event_precedes, earlier, later}),
+    do: MapSet.union(free_variables(earlier), free_variables(later))
   defp free_variables({:event_spatial, _, landmark, event}),
     do: MapSet.union(free_variables(landmark), free_variables(event))
   defp free_variables(_), do: MapSet.new()
@@ -231,6 +249,8 @@ defmodule Core.Semantic.Composition.Reducer do
     do: MapSet.union(all_variables(kind), all_variables(event))
   defp all_variables({:event_actor_entity, entity, event}),
     do: MapSet.union(all_variables(entity), all_variables(event))
+  defp all_variables({:event_precedes, earlier, later}),
+    do: MapSet.union(all_variables(earlier), all_variables(later))
   defp all_variables({:event_spatial, _, landmark, event}),
     do: MapSet.union(all_variables(landmark), all_variables(event))
   defp all_variables(_), do: MapSet.new()
@@ -257,6 +277,8 @@ defmodule Core.Semantic.Composition.Reducer do
   defp size({:landmark_kind, _}), do: 1
   defp size({:event_actor_entity, entity, event}),
     do: 1 + size(entity) + size(event)
+  defp size({:event_precedes, earlier, later}),
+    do: 1 + size(earlier) + size(later)
   defp size({:event_spatial, _, landmark, event}),
     do: 1 + (if is_atom(landmark), do: 0, else: size(landmark)) + size(event)
   defp size(_), do: @max_nodes + 1
