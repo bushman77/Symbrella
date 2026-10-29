@@ -132,6 +132,83 @@ defmodule Core.Semantic.ClarifiedEventTest do
       ClarifiedEvent.answer(sid, "What is the fox doing?")
   end
 
+  test "original provisional semantics binds every role before speaker correction", %{sid: sid} do
+    alias Core.SemanticInput
+    alias Core.TokenFilters
+    alias Core.Syntax.Signatures
+
+    sentence = "The bird is flarping on the fence."
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "bird", pos: "noun"},
+      %{norm: "is", pos: "verb"},
+      %{norm: "on", pos: "preposition"},
+      %{norm: "fence", pos: "noun"}
+    ]
+
+    si =
+      %SemanticInput{sentence: sentence, active_cells: cells}
+      |> TokenFilters.rebuild_word_ngrams(3)
+
+    assert [syntax] =
+      Enum.filter(Signatures.detect(si),
+        &(&1.id == :progressive_lexical_gap_candidate))
+
+    witness = %{
+      kind: :unresolved_progressive_predicate,
+      operation: :clarify_unresolved_predicate,
+      source_span_sha256:
+        (:crypto.hash(:sha256, "the bird is flarping on the fence")
+         |> Base.encode16(case: :lower)),
+      actor: "bird", predicate: "flarping",
+      position: "on", location: "the fence",
+      speaker_clarification_confirmed?: false,
+      event_occurrence_verified?: false,
+      factual_authority?: false
+    }
+
+    {request, resolution} = records()
+    request = Map.merge(request, %{
+      source_syntax: syntax, source_provisional: witness
+    })
+    record_pair(sid, request, resolution)
+
+    assert {:ok, frame} = ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert frame.predicate.surface == "flapping"
+    assert frame.original_interpretation.kind == :unresolved_progressive_predicate
+    assert frame.original_interpretation.status == :provisional
+    assert frame.evidence.role_binding == :validated_original_provisional_frame
+    assert frame.evidence.original_semantic_frame_replayed? == true
+    assert frame.evidence.event_occurrence_verified? == false
+    assert frame.factual_authority? == false
+
+    assert {:ok, "In your description, the bird is flapping.", _} =
+      ClarifiedEvent.answer(sid, "What is the bird doing?")
+
+    for corrupted <- [
+      %{witness | actor: "cat"},
+      %{witness | predicate: "dancing"},
+      %{witness | position: "under"},
+      %{witness | location: "the branch"},
+      %{witness | source_span_sha256: String.duplicate("0", 64)},
+      %{witness | event_occurrence_verified?: true}
+    ] do
+      isolated = sid <> "-" <> Integer.to_string(:erlang.phash2(corrupted))
+      record_pair(isolated, %{request | source_provisional: corrupted}, resolution)
+      assert :not_applicable ==
+        Ledger.confirmed_fuzzy_activity(isolated, "What is the bird doing?")
+      assert :not_applicable ==
+        ClarifiedEvent.build(isolated, "What is the bird doing?")
+      Ledger.clear(isolated)
+    end
+
+    Ledger.clear(sid)
+    altered_signature = %{syntax | source_span_sha256: String.duplicate("0", 64)}
+    record_pair(sid, %{request | source_syntax: altered_signature}, resolution)
+    assert :not_applicable ==
+      ClarifiedEvent.build(sid, "What is the bird doing?")
+  end
+
   test "rejects altered source tokens despite matching actor and correction", %{sid: sid} do
     {request, resolution} = records()
     tampered = %{request | source_tokens: ~w(The bird is flarping under the fence)}
