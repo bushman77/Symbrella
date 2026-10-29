@@ -70,6 +70,13 @@ defmodule Core.Semantic.TemporalSentenceTest do
     end
   end
 
+  test "live alternatives require current dictionary witnesses" do
+    si = live_style_input()
+    without_verb = %{si | active_cells:
+      Enum.reject(si.active_cells, &(&1.id == "sitting|verb|1"))}
+    assert TemporalSentence.build(without_verb) == nil
+  end
+
   test "a witnessed before clause composes a speaker-attributed typed temporal meaning" do
     si = input() |> SentenceMeaning.attach()
 
