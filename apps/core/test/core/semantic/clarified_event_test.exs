@@ -185,15 +185,15 @@ defmodule Core.Semantic.ClarifiedEventTest do
     assert {:ok, "In your description, the bird is flapping.", _} =
       ClarifiedEvent.answer(sid, "What is the bird doing?")
 
-    for corrupted <- [
+    for {corrupted, i} <- Enum.with_index([
       %{witness | actor: "cat"},
       %{witness | predicate: "dancing"},
       %{witness | position: "under"},
       %{witness | location: "the branch"},
       %{witness | source_span_sha256: String.duplicate("0", 64)},
       %{witness | event_occurrence_verified?: true}
-    ] do
-      isolated = sid <> "-" <> Integer.to_string(:erlang.phash2(corrupted))
+    ]) do
+      isolated = sid <> "-" <> Integer.to_string(i)
       record_pair(isolated, %{request | source_provisional: corrupted}, resolution)
       assert :not_applicable ==
         Ledger.confirmed_fuzzy_activity(isolated, "What is the bird doing?")
