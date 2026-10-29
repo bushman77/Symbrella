@@ -14,6 +14,7 @@ defmodule Core.Response.Memory do
   alias Core.Response.UserLexicalMemory
   alias Core.Discourse.Ledger
   alias Core.Semantic.EpisodicProjection
+  alias Core.Semantic.TemporalActivityRecall
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -167,6 +168,7 @@ defmodule Core.Response.Memory do
     bare_confirmation = pending_bare_fuzzy_confirmation(session_id, text_in)
     clarified_event = Core.Semantic.ClarifiedEvent.answer(session_id, text_in)
     pending_gap = Ledger.pending_unresolved_activity(session_id, text_in)
+    temporal_activity = TemporalActivityRecall.reply(session_id, text_in)
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
     episodic_reply = EpisodicMemory.reply(text_in, session_id, semantic_context)
@@ -375,6 +377,19 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         })
+
+      # Prefer a revalidated same-session report timeline over stale owner-wide
+      # spatial memory when a question explicitly requests report time.
+      match?({:ok, _, _}, temporal_activity) ->
+        {:ok, response, event_meta} = temporal_activity
+
+        meta =
+          event_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
+
+        finish_reply(session_id, text_in, response, meta)
 
       match?({_, _}, spatial_reply) ->
         {text, spatial_meta} = spatial_reply
