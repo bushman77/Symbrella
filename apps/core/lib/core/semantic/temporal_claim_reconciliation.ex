@@ -24,7 +24,8 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
   Return one *candidate* conflict, or abstain if evidence is absent,
   ambiguous, or the configured scan cannot cover all retained records.
   """
-  @spec detect(term()) :: {:ok, map()} | :not_found | :ambiguous | :window_incomplete
+  @spec detect(term()) ::
+    {:ok, map()} | {:resolved, map()} | :not_found | :ambiguous | :window_incomplete
   def detect(session) when is_binary(session) and byte_size(session) in 1..128 do
     entries = Ledger.entries(session)
 
@@ -42,22 +43,24 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
 
       case pairs do
         [pair] ->
-          {:ok, %{
-            kind: :candidate_temporal_order_conflict,
-            status: :provisional,
-            scope: :same_session,
-            relation: :opposing_speaker_claims,
-            matching_basis: :equal_closed_event_descriptions,
-            older_report: pair.older,
-            newer_report: pair.newer,
-            report_order: :verified_from_session_sequence,
-            occurrence_identity: :unresolved,
-            event_occurrence: :not_established,
-            actual_event_chronology: :not_established,
-            contradiction_verified?: false,
-            report_evidence_qualified?: true,
-            factual_authority?: false
-          }}
+          case Enum.filter(entries, &resolution_for_pair?(&1, pair)) do
+            [] -> {:ok, conflict_candidate(pair)}
+            [resolution] ->
+              {:resolved, %{
+                kind: :speaker_preferred_temporal_report,
+                status: :speaker_preference_recorded,
+                older_report_seq: pair.older.seq,
+                newer_report_seq: pair.newer.seq,
+                chosen_report_seq: resolution.chosen_report_seq,
+                resolution_seq: resolution.seq,
+                event_identity: :unresolved,
+                event_occurrence: :not_established,
+                actual_event_chronology: :not_established,
+                contradiction_verified?: false,
+                factual_authority?: false
+              }}
+            _ -> :ambiguous
+          end
 
         [] -> :not_found
         _ -> :ambiguous
@@ -115,6 +118,67 @@ defmodule Core.Semantic.TemporalClaimReconciliation do
   end
 
   def verified(_), do: :not_applicable
+
+  defp conflict_candidate(pair) do
+    %{
+      kind: :candidate_temporal_order_conflict,
+      status: :provisional,
+      scope: :same_session,
+      relation: :opposing_speaker_claims,
+      matching_basis: :equal_closed_event_descriptions,
+      older_report: pair.older,
+      newer_report: pair.newer,
+      report_order: :verified_from_session_sequence,
+      occurrence_identity: :unresolved,
+      event_occurrence: :not_established,
+      actual_event_chronology: :not_established,
+      contradiction_verified?: false,
+      report_evidence_qualified?: true,
+      factual_authority?: false
+    }
+  end
+
+  # The report-choice is an appended, separately attributed record. A
+  # resolution cannot make the original claims true or give events identities.
+  # A stale resolution for a different pair does not affect this pair.
+  defp resolution_for_pair?(%{
+         kind: :temporal_clarification_resolution,
+         status: :provisional,
+         seq: resolution_seq,
+         pending_request_seq: request_seq,
+         conflict_pair: %{
+           older_report_seq: older_seq,
+           newer_report_seq: newer_seq,
+           older_proof_sha256: older_sha,
+           newer_proof_sha256: newer_sha
+         },
+         chosen_report_seq: chosen_seq,
+         chosen_claim: claim,
+         provenance: :revalidated_temporal_clarification_answer,
+         verification: :conversation_context_only,
+         speaker_attributed?: true,
+         contradiction_verified?: false,
+         event_occurrence_verified?: false,
+         actual_event_chronology_verified?: false,
+         referent_identity_verified?: false,
+         factual_authority?: false
+       }, %{older: older, newer: newer}) do
+    chosen =
+      cond do
+        chosen_seq == older.seq -> older
+        chosen_seq == newer.seq -> newer
+        true -> nil
+      end
+
+    is_integer(resolution_seq) and is_integer(request_seq) and
+      newer.seq < request_seq and request_seq < resolution_seq and
+      older_seq == older.seq and newer_seq == newer.seq and
+      older_sha == older.proof_sha256 and newer_sha == newer.proof_sha256 and
+      is_map(chosen) and
+      claim == Map.take(chosen, [:earlier, :later, :connective])
+  end
+
+  defp resolution_for_pair?(_, _), do: false
 
   defp reverse_descriptions?(older, newer) do
     older.earlier != older.later and
