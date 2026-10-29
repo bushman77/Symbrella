@@ -31,6 +31,7 @@ defmodule Core.Semantic.Composition.Expression do
           | {:event_actor_kind, atom() | t(), t()}
           | {:event_actor_entity, t(), t()}
           | {:event_spatial, atom(), atom(), t()}
+          | {:event_precedes, t(), t()}
 
   @spec noun(String.t()) :: {:ok, t()} | :unsupported
   def noun(word) when is_binary(word) do
@@ -142,6 +143,17 @@ defmodule Core.Semantic.Composition.Expression do
       {:ok, :truth}
     else
       _ -> {:error, :entity_event_actor_argument_type}
+    end
+  end
+
+  # "Precedes" is a relation between possible events. Its type alone
+  # neither proves when events occurred nor licenses existential claims.
+  def type_of({:event_precedes, earlier, later}, env) do
+    with {:ok, :event} <- type_of(earlier, env),
+         {:ok, :event} <- type_of(later, env) do
+      {:ok, :truth}
+    else
+      _ -> {:error, :temporal_event_argument_type}
     end
   end
 
