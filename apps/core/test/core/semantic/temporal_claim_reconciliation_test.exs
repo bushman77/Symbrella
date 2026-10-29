@@ -6,7 +6,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   alias Core.Semantic.{SentenceMeaning, TemporalClaimReconciliation, TemporalSentence}
 
   @before ~w(The bird is sitting on the fence before the cat is sleeping under the tree)
-  @after ~w(The bird is sitting on the fence after the cat is sleeping under the tree)
+  @after_words ~w(The bird is sitting on the fence after the cat is sleeping under the tree)
   @different ~w(The dog is sitting on the fence before the cat is sleeping under the tree)
   @pos ~w(determiner noun verb verb preposition determiner noun conjunction determiner noun verb verb preposition determiner noun)
   @question "Did I describe conflicting temporal orders?"
@@ -59,7 +59,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "two opposing closed descriptions yield one candidate, never an event contradiction",
        %{sid: sid} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
 
     assert {:ok, conflict} = TemporalClaimReconciliation.detect(sid)
     assert conflict.kind == :candidate_temporal_order_conflict
@@ -85,7 +85,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "an explicit question generates a safe native clarification, no LLM",
        %{sid: sid} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
 
     si = ask(sid)
     assert {:ok, meaning} = TemporalClaimReconciliation.verified(si)
@@ -134,7 +134,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "multiple opposing pairs remain ambiguous and cannot generate a clarification",
        %{sid: sid} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
     claim(sid, @before)
 
     assert TemporalClaimReconciliation.detect(sid) == :ambiguous
@@ -151,7 +151,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "an edited question, changed session or changed evidence fails revalidation",
        %{sid: sid, other: other} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
     good = ask(sid)
     assert {:ok, _} = TemporalClaimReconciliation.verified(good)
 
@@ -173,7 +173,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "over-limit retained history refuses a selective unique interpretation",
        %{sid: sid} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
     for index <- 1..127 do
       Ledger.record(%Core.SemanticInput{
         session_id: sid, sentence: "Unrelated entry #{index}.", source: :test
@@ -188,7 +188,7 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
   test "unverified or damaged ledger records are ignored",
        %{sid: sid} do
     claim(sid, @before)
-    claim(sid, @after)
+    claim(sid, @after_words)
     [second | _] = Ledger.entries(sid)
 
     # Even an exact reversed descriptor cannot be accepted merely because
