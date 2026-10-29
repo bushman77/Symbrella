@@ -143,6 +143,28 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
           end
         end
 
+        # Structural comparison: changes are about the descriptions, never
+        # a claim of actual change in one verified real-world individual.
+        for question <- [
+          "Did I describe the #{actor} doing something different?",
+          "Was the #{actor} doing the same thing?",
+          "What changed in my descriptions of the #{actor}?"
+        ] do
+          assert {:ok, comparison, meta} =
+            TemporalActivityRecall.reply(session, question)
+          assert comparison =~ "a #{actor} sitting on a fence"
+          assert comparison =~ latest
+          if verb == "sitting" do
+            assert comparison =~ "activity is the same"
+          else
+            assert comparison =~ "reported activities differ"
+          end
+          assert comparison =~ "does not establish that the same individual changed behavior"
+          assert meta.requested_slot == :comparison
+          assert meta.event_occurrence_verified? == false
+          assert meta.same_actor_identity_verified? == false
+        end
+
         # Anaphora is licensed only when the entire retained event record
         # has one actor KIND, and never claims real-world identity.
         for question <- [
@@ -350,6 +372,32 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
 
     assert :not_applicable ==
       TemporalActivityRecall.reply(session, "How many times have I described the bird?")
+  end
+
+  test "comparison requires two unique qualified reports for the requested actor" do
+    session = "compare-ambiguity-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "sitting", "on", "fence")
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session, "What changed in my descriptions of the bird?")
+
+    record_proved!(session, "bird", "sleeping", "under", "table")
+    assert {:ok, compared, metadata} =
+      TemporalActivityRecall.reply(session, "Did I describe the bird doing something different?")
+    assert compared =~ "reported activities differ"
+    assert metadata.requested_slot == :comparison
+
+    record_proved!(session, "bird", "flying", "into", "tree")
+    assert {:ok, clarification, metadata} =
+      TemporalActivityRecall.reply(session, "Was the bird doing the same thing?")
+    assert clarification =~ "Which earlier description"
+    assert metadata.retrieval_found? == false
+    assert metadata.requested_slot == :comparison
+
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session <> "-other",
+        "Did I describe the bird doing something different?")
   end
 
   test "mixed actor kinds make it ambiguous instead of choosing latest mention" do
