@@ -97,21 +97,6 @@ defmodule Core.Response.OverrideSkills.Utility do
               "I don't have a live news source available in this runtime right now, so I can't truthfully list today's current events. If you give me a region or topic, I can help frame what to look for or summarize background from what I already know."
           }}}
 
-      us_iran_conflict_topic?(text) ->
-        decision =
-          decision
-          |> Decision.put(tone: :neutral, mode: :chat, action: :offer_likely_interpretation)
-          |> Decision.add_override(:recognizable_topic_fallback)
-
-        {:ok,
-         {decision,
-          %{
-            id: :recognizable_topic_fallback,
-            reason: :short_conflict_topic,
-            inline_text:
-              "I read that as likely about the US-Iran conflict or possible war. I don't have live news access in this runtime, so I can't give current updates, but I can help with background, a timeline, key actors, or a search query for fresh headlines."
-          }}}
-
       true ->
         :pass
     end
@@ -163,20 +148,6 @@ defmodule Core.Response.OverrideSkills.Utility do
   end
 
   defp current_events_query?(_), do: false
-
-  defp us_iran_conflict_topic?(text) when is_binary(text) do
-    t =
-      text
-      |> String.downcase()
-      |> String.replace(~r/\bu\s*\.\s*s\s*\.?/u, "us")
-      |> String.replace(~r/[^\p{L}\p{N}\s-]+/u, " ")
-
-    Regex.match?(~r/\b(?:us|u\.?s\.?|united states)\b/u, t) and
-      Regex.match?(~r/\biran(?:ian)?\b/u, t) and
-      Regex.match?(~r/\b(?:war|conflict|strike|attack|tension|crisis)\b/u, t)
-  end
-
-  defp us_iran_conflict_topic?(_), do: false
 
   defp time_inline_text do
     utc = DateTime.utc_now()
