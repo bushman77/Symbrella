@@ -32,6 +32,7 @@ defmodule Core.Discourse.Ledger do
 
   @max_query_bytes 256
   @max_public_candidates 5
+  @max_clarified_followup_questions 3
 
   @doc "Store the current independently interpreted user turn, without altering SI."
   @spec record(map(), keyword()) :: map()
@@ -123,7 +124,8 @@ defmodule Core.Discourse.Ledger do
     with {:forward, actor, requested_role, constraints} <-
            ParticipantQuestions.parse(question),
          true <- requested_role in [:predicate, :location] and is_map(constraints),
-         [resolution, request | _] <- entries(session),
+         {:ok, resolution, request, continuity_questions} <-
+           active_clarified_pair(session, actor),
          %{
            kind: :fuzzy_clarification_resolution,
            status: :speaker_confirmed_hypothesis,
@@ -166,6 +168,7 @@ defmodule Core.Discourse.Ledger do
         position: clause.position,
         requested_role: requested_role,
         question_constraints: constraints,
+        continuity_questions: continuity_questions,
         source_turn_sha256: digest,
         source_request_seq: request_seq,
         role_evidence: if(is_map(witness),
@@ -183,6 +186,52 @@ defmodule Core.Discourse.Ledger do
 
   def confirmed_fuzzy_event(_, _), do: :not_applicable
 
+  # Only previously answered, explicitly matched questions can extend the
+  # pair's lifetime. Any intervening statement, different actor, correction,
+  # malformed marker, or overflow stops the scan; no arbitrary transcript
+  # search and no owner-wide episodic inference.
+  defp active_clarified_pair(session, actor) do
+    records = entries(session)
+
+    {markers, remainder} =
+      Enum.split_while(records, fn
+        %{kind: :clarified_event_query} -> true
+        _ -> false
+      end)
+
+    case remainder do
+      [%{kind: :fuzzy_clarification_resolution} = resolution,
+       %{kind: :fuzzy_clarification_request, seq: request_seq} = request | _] ->
+        valid_markers? =
+          length(markers) <= @max_clarified_followup_questions and
+            is_integer(request_seq) and
+            Enum.all?(markers, fn
+              %{kind: :clarified_event_query, status: :role_projected,
+                actor: ^actor, source_request_seq: ^request_seq,
+                source_turn_sha256: digest,
+                verification: :conversation_context_only,
+                factual_authority?: false}
+              when is_binary(digest) ->
+                digest == Map.get(request, :source_turn_sha256)
+
+              _ -> false
+            end) and
+            Enum.all?(Enum.chunk_every(markers ++ [resolution], 2, 1, :discard),
+              fn
+                [%{seq: newer}, %{seq: older}]
+                when is_integer(newer) and is_integer(older) ->
+                  newer == older + 1
+
+                _ -> false
+              end)
+
+        if valid_markers?, do: {:ok, resolution, request, length(markers)},
+          else: :not_applicable
+
+      _ -> :not_applicable
+    end
+  end
+
   @doc """
   Compatibility entry point for the strictly activity-directed query.
   A location query still abstains here; use confirmed_fuzzy_event/2 for
@@ -192,7 +241,12 @@ defmodule Core.Discourse.Ledger do
   def confirmed_fuzzy_activity(session, question) when is_binary(question) do
     case ParticipantQuestions.parse(question) do
       {:forward, _, :predicate, constraints} when constraints == %{} ->
-        confirmed_fuzzy_event(session, question)
+        case entries(session) do
+          [%{kind: :fuzzy_clarification_resolution} | _] ->
+            confirmed_fuzzy_event(session, question)
+
+          _ -> :not_applicable
+        end
 
       _ -> :not_applicable
     end
@@ -304,7 +358,11 @@ defmodule Core.Discourse.Ledger do
   defp semantic_record(si) do
     case fuzzy_dialogue_record(si) do
       %{} = record -> record
-      _ -> semantic_record_without_fuzzy(si)
+      _ ->
+        case clarified_query_record(si) do
+          %{} = record -> record
+          _ -> semantic_record_without_fuzzy(si)
+        end
     end
   end
 
@@ -320,6 +378,51 @@ defmodule Core.Discourse.Ledger do
               :not_applicable -> ordinary_semantic_record(si)
             end
         end
+    end
+  end
+
+  # A successful question-directed projection creates a compact, factual-
+  # authority-free marker. Only a *shown answer* with exactly matching frame,
+  # role, and source provenance may extend the active clarification pair.
+  # No raw question or answer text is retained.
+  defp clarified_query_record(si) do
+    meta = Map.get(si, :response_meta)
+    session = Map.get(si, :session_id)
+    text = Map.get(si, :sentence)
+
+    with %{
+           memory_source: :same_session_clarified_event,
+           response_source: :symbolic_conversation,
+           semantic_frame: frame,
+           requested_role: role,
+           factual_authority?: false
+         } <- meta,
+         true <- role in [:predicate, :location],
+         true <- is_binary(text) and is_binary(Map.get(si, :response_text)),
+         {:ok, answer, proof_meta} <- Core.Semantic.ClarifiedEvent.answer(session, text),
+         true <- answer == Map.get(si, :response_text),
+         true <- proof_meta.semantic_frame == frame,
+         true <- proof_meta.requested_role == role,
+         %{actor: %{surface: actor},
+           source_request_seq: request_seq,
+           source_turn_sha256: digest,
+           evidence: %{question_role: ^role},
+           factual_authority?: false} <- frame,
+         true <- is_binary(actor) and is_integer(request_seq) and
+                   is_binary(digest) do
+      %{
+        kind: :clarified_event_query,
+        status: :role_projected,
+        actor: actor,
+        requested_role: role,
+        source_request_seq: request_seq,
+        source_turn_sha256: digest,
+        provenance: :revalidated_same_session_role_answer,
+        verification: :conversation_context_only,
+        factual_authority?: false
+      }
+    else
+      _ -> nil
     end
   end
 
