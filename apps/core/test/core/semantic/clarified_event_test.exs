@@ -77,6 +77,61 @@ defmodule Core.Semantic.ClarifiedEventTest do
     assert :not_applicable == ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
   end
 
+  test "replayed pre-LIFG syntax gap enriches provenance but not factual authority", %{sid: sid} do
+    alias Core.SemanticInput
+    alias Core.Syntax.Signatures
+    alias Core.TokenFilters
+
+    sentence = "The fox is flarping on the fence."
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "fox", pos: "noun"},
+      %{norm: "is", pos: "verb"},
+      %{norm: "on", pos: "preposition"},
+      %{norm: "fence", pos: "noun"}
+    ]
+
+    si = %SemanticInput{sentence: sentence, active_cells: cells}
+      |> TokenFilters.rebuild_word_ngrams(3)
+
+    assert [gap] =
+      Enum.filter(Signatures.detect(si),
+        &(&1.id == :progressive_lexical_gap_candidate))
+
+    original = %{
+      kind: :fuzzy_clarification_request, status: :provisional,
+      actor: "fox", original: "flarping", proposed: "flapping",
+      source_tokens: ~w(The fox is flarping on the fence),
+      source_turn_sha256: sha(sentence),
+      source_syntax: gap,
+      verification: :conversation_context_only,
+      factual_authority?: false
+    }
+    resolved = %{
+      kind: :fuzzy_clarification_resolution,
+      status: :speaker_confirmed_hypothesis, actor: "fox",
+      original: "flarping", proposed: "flapping",
+      source_turn_sha256: sha(sentence),
+      verification: :conversation_context_only,
+      factual_authority?: false
+    }
+
+    record_pair(sid, original, resolved)
+    assert {:ok, frame} =
+      ClarifiedEvent.build(sid, "What is the fox doing?")
+
+    assert frame.actor.surface == "fox"
+    assert frame.predicate.surface == "flapping"
+    assert frame.evidence.role_binding == :attested_core_syntax_gap
+    assert frame.evidence.pre_lifg_gap_observed? == true
+    assert frame.evidence.event_occurrence_verified? == false
+    assert frame.predicate.exact_dictionary_sense? == false
+    assert frame.factual_authority? == false
+
+    assert {:ok, "In your description, the fox is flapping.", _} =
+      ClarifiedEvent.answer(sid, "What is the fox doing?")
+  end
+
   test "rejects altered source tokens despite matching actor and correction", %{sid: sid} do
     {request, resolution} = records()
     tampered = %{request | source_tokens: ~w(The bird is flarping under the fence)}
