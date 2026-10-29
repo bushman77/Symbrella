@@ -15,6 +15,7 @@ defmodule Core.Semantic.SentenceMeaning do
   alias Core.Semantic.EpisodicProjection
   alias Core.Semantic.TemporalEventComposition
   alias Core.Semantic.TemporalClaimReconciliation
+  alias Core.Semantic.TemporalClarificationResolution
   alias Core.Semantic.TemporalSentence
 
   @max_topic_tokens 16
@@ -80,6 +81,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
     base =
       definition_request(si) ||
+        TemporalClarificationResolution.build(si) ||
         TemporalClaimReconciliation.question(si) ||
         TemporalEventComposition.question(si) ||
         TemporalSentence.build(si) ||
@@ -101,8 +103,10 @@ defmodule Core.Semantic.SentenceMeaning do
   # A full two-clause temporal interpretation already carries its own
   # independently replayed event/temporal proof and all lexical witnesses.
   # Do not let a partial single-clause compositional candidate overwrite it.
-  defp attach_compositional_evidence(_si, %{kind: :explicit_temporal_report} = meaning),
-    do: meaning
+  defp attach_compositional_evidence(_si, %{kind: kind} = meaning)
+       when kind in [:explicit_temporal_report, :temporal_clarification_resolution,
+                     :temporal_claim_conflict_question],
+       do: meaning
 
   # build/1 and attach/1 must agree exactly. Revalidate the current proof
   # rather than trusting a cached compositional_evidence field on SI.
