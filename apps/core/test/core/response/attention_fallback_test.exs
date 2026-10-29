@@ -607,6 +607,72 @@ defmodule Core.Response.AttentionFallbackTest do
       Core.Semantic.ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
   end
 
+  test "actual response-selected clarification retains independently replayed syntax-gap evidence" do
+    alias Core.Discourse.Ledger
+    alias Core.SemanticInput
+    alias Core.Syntax.Signatures
+    alias Core.TokenFilters
+
+    sid = "attention-gap-witness-#{System.unique_integer([:positive])}"
+    on_exit(fn ->
+      Brain.defocus(WMComprehension.frame_id(sid))
+      Ledger.clear(sid)
+    end)
+
+    sentence = "The bird is flarping on the fence."
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "bird", pos: "noun"},
+      %{norm: "is", pos: "verb"},
+      %{norm: "on", pos: "preposition"},
+      %{norm: "fence", pos: "noun"}
+    ]
+
+    syntactic = %SemanticInput{sentence: sentence, active_cells: cells}
+      |> TokenFilters.rebuild_word_ngrams(3)
+      |> Signatures.attach()
+
+    assert Enum.any?(syntactic.sentence_signatures,
+      &(&1.id == :progressive_lexical_gap_candidate))
+
+    first = repair_si(sid, sentence, verified?: false,
+      uncertain: ["flarping"])
+
+    first = Map.merge(first, %{
+      tokens: syntactic.tokens,
+      active_cells: syntactic.active_cells,
+      sentence_signatures: syntactic.sentence_signatures
+    })
+
+    {_tone, question, question_meta} =
+      Response.plan(Map.merge(first, %{text: sentence, confidence: 0.7}), %{})
+
+    assert question =~ ~s|Did you mean "flapping"?|
+    Ledger.record(Map.merge(first, %{
+      response_text: question, response_meta: question_meta
+    }), discourse_ledger?: true)
+
+    assert [%{kind: :fuzzy_clarification_request,
+      source_syntax: %{id: :progressive_lexical_gap_candidate}} | _] =
+      Ledger.entries(sid)
+
+    second = "yes flapping"
+    second_si = repair_si(sid, second, verified?: false,
+      uncertain: ["yes", "flapping"])
+    {_tone, acknowledged, meta} =
+      Response.plan(Map.merge(second_si, %{text: second, confidence: 0.7}), %{})
+
+    Ledger.record(Map.merge(second_si, %{
+      response_text: acknowledged, response_meta: meta
+    }), discourse_ledger?: true)
+
+    assert {:ok, frame} =
+      Core.Semantic.ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert frame.evidence.role_binding == :attested_core_syntax_gap
+    assert frame.evidence.pre_lifg_gap_observed? == true
+    assert frame.evidence.event_occurrence_verified? == false
+  end
+
   test "an intervening session turn prevents an old fuzzy correction from overriding activity retrieval" do
     alias Core.Discourse.Ledger
 
