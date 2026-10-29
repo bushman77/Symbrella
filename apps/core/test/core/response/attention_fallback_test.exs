@@ -737,6 +737,33 @@ defmodule Core.Response.AttentionFallbackTest do
     refute response =~ "Sitting"
     assert meta.memory_source == :same_session_unresolved_predicate
     assert meta.factual_authority? == false
+
+    # Exact live failure simulation: even if an older build selected the
+    # generic noun-sense report instead, the source's verified gap blocks
+    # a stale owner-wide "Sitting." recall for the next actor question.
+    Ledger.clear(sid)
+    Ledger.record(Map.merge(full, %{
+      response_text: "I can identify \"bird\" and \"fence\" as words in your sentence, but I haven't resolved their exact senses or the full relationship you're describing.",
+      response_meta: %{
+        response_source: :wm_attention_fallback,
+        risk_bucket: :low,
+        response_reflection: %{status: :attention_lexical_gap_report}
+      }
+    }), discourse_ledger?: true)
+
+    assert [%{kind: :unresolved_progressive_predicate,
+      actor: "bird", predicate: "flarping",
+      factual_authority?: false} | _] = Ledger.entries(sid)
+    assert {:ok, %{unresolved_predicate: "flarping"}} =
+      Ledger.pending_unresolved_activity(sid, "What is the bird doing?")
+    assert {:warm, unresolved_reply, unresolved_meta} =
+      Response.memory_reply(%{
+        text: "What is the bird doing?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+    assert unresolved_reply =~ ~s|"flarping"|
+    refute unresolved_reply == "Sitting."
+    assert unresolved_meta.memory_source == :same_session_unresolved_predicate
   end
 
   test "actual response-selected clarification retains independently replayed syntax-gap evidence" do
