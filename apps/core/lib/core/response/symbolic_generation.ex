@@ -9,7 +9,8 @@ defmodule Core.Response.SymbolicGeneration do
 
   alias Core.Semantic.Composition
   alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning,
-    SpeechActs, TemporalClaimReconciliation, TemporalClarificationResolution}
+    SpeechActs, TemporalClaimReconciliation, TemporalClarificationResolution,
+    TemporalMemoryRetrieval}
 
   # Accept the intent labels the live classifier actually emits for
   # complete social turns. These labels by themselves never authorize output:
@@ -204,6 +205,13 @@ defmodule Core.Response.SymbolicGeneration do
   # A clarification needs both speaker claims revalidated from the current
   # same-session ledger. Without a unique pair there is no native answer.
   defp maybe_realize_temporal_first(text, si) do
+    case maybe_realize_temporal_memory_recall(text, si) do
+      {:ok, _, _} = recalled -> recalled
+      :not_applicable -> maybe_realize_temporal_resolution_or_conflict(text, si)
+    end
+  end
+
+  defp maybe_realize_temporal_resolution_or_conflict(text, si) do
     case maybe_realize_temporal_resolution(text, si) do
       {:ok, _, _} = acknowledgment -> acknowledgment
       :not_applicable ->
@@ -291,6 +299,59 @@ defmodule Core.Response.SymbolicGeneration do
          event_occurrence_verified?: false,
          actual_event_order_verified?: false,
          referent_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  # The reader returns the speaker's selected *description*, never proof
+  # of event occurrence. Realization uses only current, verified ledger
+  # evidence and the closed event vocabulary below.
+  defp maybe_realize_temporal_memory_recall(user_text, si) do
+    with ^user_text <- Map.get(si, :sentence),
+         {:ok, %{
+           kind: :temporal_preference_recall_question,
+           operation: :recall_intended_temporal_order,
+           temporal_evidence: %{
+             kind: :recalled_temporal_speaker_preference,
+             status: :revalidated_from_ledger,
+             chosen_report_seq: chosen,
+             resolution_seq: resolution,
+             earlier: earlier,
+             later: later,
+             speaker_attributed?: true,
+             event_identity_verified?: false,
+             event_occurrence_verified?: false,
+             actual_event_chronology_verified?: false,
+             contradiction_verified?: false,
+             factual_authority?: false
+           },
+           factual_authority?: false
+         }} <- TemporalMemoryRetrieval.verified(si),
+         true <- is_integer(chosen) and chosen > 0,
+         true <- is_integer(resolution) and resolution > chosen,
+         true <- earlier != later,
+         {:ok, first} <- temporal_claim_event_words(earlier),
+         {:ok, second} <- temporal_claim_event_words(later) do
+      {:ok,
+       "You clarified that you meant report #{chosen}: #{first} before " <>
+         "#{second}. That is your stated intended order, not verified " <>
+         "event chronology.",
+       %{
+         status: :symbolic_realized,
+         speech_act: :answer_intended_temporal_order,
+         interpreted_speech_act: :temporal_preference_recall_question,
+         provenance: :revalidated_temporal_preference_ledger,
+         chosen_report_seq: chosen,
+         resolution_seq: resolution,
+         speaker_preference_recalled?: true,
+         event_identity_verified?: false,
+         event_occurrence_verified?: false,
+         actual_event_order_verified?: false,
+         contradiction_verified?: false,
          factual_claims?: false,
          llm_called?: false
        }}
