@@ -242,4 +242,29 @@ defmodule Core.Semantic.TemporalMemoryRetrievalTest do
     assert TemporalMemoryRetrieval.recall(sid) == :not_found
     assert TemporalMemoryRetrieval.question(say(sid, @recall_question)) == nil
   end
+
+  test "live cautious policy and non-social intent still realize verified recall",
+       %{sid: sid} do
+    seed(sid)
+
+    si = say(sid, @recall_question)
+    plan = SemanticStrategy.select(si)
+    assert %{operation: :answer_intended_temporal_order,
+             status: :eligible} = plan
+
+    features = %{risk_bucket: :low, intent: :feedback}
+    decision = %{action: :ask_first}
+
+    assert {:ok, reply, :symbolic_generation, meta} =
+      SemanticStrategy.realize(plan, @recall_question, features, decision, si)
+    assert String.contains?(reply, "report 1")
+    assert meta.llm_called? == false
+    assert meta.factual_claims? == false
+
+    assert SymbolicGeneration.generate(@recall_question,
+      %{risk_bucket: :high, intent: :feedback}, decision, si) == :not_applicable
+    assert SymbolicGeneration.generate(@recall_question, features,
+      %{action: :safe_redirect}, si) == :not_applicable
+  end
+
 end
