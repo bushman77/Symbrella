@@ -20,7 +20,7 @@ defmodule Core.Semantic.SpeechActs do
           speaker: :user,
           addressee: :self | :unspecified | :other,
           vocative: map() | nil,
-          temporal_anchor: :morning | :afternoon | :evening | :night | :unspecified,
+          temporal_anchor: :morning | :afternoon | :evening | :night | :today | :unspecified,
           lexical_evidence: map(),
           source_text: String.t(),
           sentence_meaning_verified?: false
@@ -87,8 +87,16 @@ defmodule Core.Semantic.SpeechActs do
         {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
 
         anchor =
-          if act == :farewell and Regex.match?(~r/\A\s*good\s+night\b/iu, text),
-            do: :night, else: :unspecified
+          cond do
+            act == :farewell and Regex.match?(~r/\A\s*good\s+night\b/iu, text) ->
+              :night
+
+            act == :wellbeing_query ->
+              wellbeing_anchor(Map.get(captures, "temporal"))
+
+            true ->
+              :unspecified
+          end
 
         {:ok, social_frame(act, text, addressee, vocative, anchor,
           %{level: :surface_only, status: :provisional, witness: nil})}
@@ -120,8 +128,26 @@ defmodule Core.Semantic.SpeechActs do
     ~r/\A\s*(?:bye|goodbye|good\s+night|see\s+you\s+(?:later|soon)|take\s+care)(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!]*\s*\z/iu
   end
 
+  # "Today" is a temporal adjunct to the idiomatic check-in, not an
+  # addressee or an unresolved predicate. The final question mark is optional
+  # in chat; a period is deliberately not accepted as a question marker.
+  # This remains a closed whole-utterance grammar, not a prefix match.
   defp wellbeing_pattern do
-    ~r/\A\s*how\s+are\s+you(?:\s+doing)?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\?\s*\z/iu
+    ~r/\A\s*how\s+are\s+you(?:\s+doing)?(?:\s+(?<temporal>today|tonight|this\s+(?:morning|afternoon|evening)))?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\??\s*\z/iu
+  end
+
+  defp wellbeing_anchor(nil), do: :unspecified
+  defp wellbeing_anchor(""), do: :unspecified
+
+  defp wellbeing_anchor(temporal) when is_binary(temporal) do
+    case String.downcase(temporal) do
+      "today" -> :today
+      "tonight" -> :night
+      "this morning" -> :morning
+      "this afternoon" -> :afternoon
+      "this evening" -> :evening
+      _ -> :unspecified
+    end
   end
 
   defp resolve_addressee(nil), do: {:unspecified, nil}
