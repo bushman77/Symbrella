@@ -43,7 +43,7 @@ defmodule Core.Response.AttentionFallbackTest do
 
     assert reply =~ "the Pacific Ocean"
     assert reply =~ "don't have a grounded answer"
-    refute reply =~ "what you mean by \\"ocean\\""
+    refute reply =~ ~s|what you mean by "ocean"|
     assert metadata.status == :attention_continuation
     assert metadata.provenance == :admitted_same_session_comprehension
     assert metadata.factual_claims? == false
@@ -89,7 +89,7 @@ defmodule Core.Response.AttentionFallbackTest do
     assert metadata.status == :attention_comprehension_repair
     assert metadata.unresolved_term == "flarped"
     assert String.contains?(reply, "flarped")
-    refute String.contains?(reply, "using \\"ocean\\"")
+    refute String.contains?(reply, ~s|using "ocean"|)
     assert metadata.factual_claims? == false
     assert metadata.llm_called? == false
   end
