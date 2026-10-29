@@ -96,6 +96,12 @@ defmodule Core.Semantic.SentenceMeaning do
     attach_compositional_evidence(si, base)
   end
 
+  # A full two-clause temporal interpretation already carries its own
+  # independently replayed event/temporal proof and all lexical witnesses.
+  # Do not let a partial single-clause compositional candidate overwrite it.
+  defp attach_compositional_evidence(_si, %{kind: :explicit_temporal_report} = meaning),
+    do: meaning
+
   # build/1 and attach/1 must agree exactly. Revalidate the current proof
   # rather than trusting a cached compositional_evidence field on SI.
   defp attach_compositional_evidence(si, meaning) do
