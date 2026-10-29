@@ -182,7 +182,12 @@ defmodule Core.Discourse.Ledger do
         end
 
       {_, {:ok, %{kind: :anaphoric_spatial_report,
-                  factual_authority?: false} = meaning}} ->
+                  factual_authority?: false,
+                  compositional_evidence: %{
+                    typed_cross_turn_join_verified?: true,
+                    typed_cross_turn_join: %{formally_verified?: true,
+                      type: {:arrow, :entity, {:arrow, :event, :truth}},
+                      result: joined}}} = meaning}} ->
         Map.merge(core, %{
           kind: :reported_spatial_description, status: :provisional,
           antecedent: meaning.antecedent.description,
@@ -190,6 +195,10 @@ defmodule Core.Discourse.Ledger do
           action: meaning.event_semantics.predicate,
           relation: meaning.relation,
           landmark: meaning.event_semantics.spatial.landmark_kind,
+          typed_join_verified?: true,
+          typed_join_type: {:arrow, :entity, {:arrow, :event, :truth}},
+          typed_join_proof_sha256: proof_hash(joined),
+          event_existence: :not_asserted,
           provenance: :revalidated_cross_turn_composition,
           verification: :conversation_context_only,
           event_occurrence_verified?: false,
