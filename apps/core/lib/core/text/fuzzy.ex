@@ -228,6 +228,8 @@ defmodule Core.Text.Fuzzy do
   """
   @spec suggest_word(String.t(), String.t(), keyword()) :: map() | nil
   def suggest_word(word, sentence, opts \\ [])
+
+  def suggest_word(word, sentence, opts)
       when is_binary(word) and is_binary(sentence) and is_list(opts) do
     word = word |> String.downcase() |> String.trim()
     surface_words =
