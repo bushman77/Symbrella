@@ -209,9 +209,11 @@ defmodule Core.Discourse.Ledger do
               %{kind: :clarified_event_query, status: :role_projected,
                 actor: ^actor, source_request_seq: ^request_seq,
                 source_turn_sha256: digest,
+                requested_role: role,
+                provenance: :revalidated_same_session_role_answer,
                 verification: :conversation_context_only,
                 factual_authority?: false}
-              when is_binary(digest) ->
+              when is_binary(digest) and role in [:predicate, :location] ->
                 digest == Map.get(request, :source_turn_sha256)
 
               _ -> false
