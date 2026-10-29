@@ -135,6 +135,71 @@ defmodule Core.Response.SymbolicGeneration do
   @nominal_nouns %{bird: "bird", cat: "cat", dog: "dog"}
   @nominal_adjectives %{small: "small", black: "black", white: "white"}
 
+  defp maybe_realize_compositional_nominal(user_text, intent, si)
+       when intent in [:unknown, :tell, :statement] do
+    with true <- Map.get(si, :source) in [:user, :prod, :test],
+         ^user_text <- Map.get(si, :sentence),
+         true <- not String.ends_with?(String.trim(user_text), "?"),
+         %{compositional_evidence: evidence} = meaning <-
+           Map.get(si, :sentence_meaning),
+         ^meaning <- SentenceMeaning.build(si),
+         %{kind: :nominal_property, formally_verified?: true,
+           factual_authority?: false} <- evidence,
+         {:ok, %{kind: :nominal_property,
+           construction: :stacked_adjective_noun,
+           result: result, quantifier_applied?: false,
+           factual_authority?: false} = proof} <- Composition.verified(si),
+         {:ok, description} <- nominal_description(result) do
+      {:ok, "You're describing a #{description}. What would you like to know about it?", %{
+        status: :symbolic_realized,
+        speech_act: :clarify_nominal_fragment,
+        interpreted_speech_act: :nominal_fragment,
+        provenance: :revalidated_nominal_composition,
+        construction: proof.construction,
+        proof_steps: length(proof.steps),
+        compositional_proof_verified?: true,
+        exact_dictionary_sense_verified?: false,
+        referent_verified?: false,
+        factual_claims?: false,
+        llm_called?: false
+      }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp maybe_realize_compositional_nominal(_, _, _), do: :not_applicable
+
+  defp nominal_description(
+         {:lambda, variable, :entity,
+          {:and,
+           {:and, {:predicate, noun, {:var, noun_var}},
+                  {:predicate, inner, {:var, inner_var}}},
+           {:predicate, outer, {:var, outer_var}}}}
+       ) when is_binary(variable) and noun_var == variable and
+              inner_var == variable and outer_var == variable do
+    with {:ok, noun_word} <- Map.fetch(@nominal_nouns, noun),
+         {:ok, inner_word} <- Map.fetch(@nominal_adjectives, inner),
+         {:ok, outer_word} <- Map.fetch(@nominal_adjectives, outer) do
+      {:ok, outer_word <> " " <> inner_word <> " " <> noun_word}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp nominal_description(_), do: :not_applicable
+
+  # Render only the current-turn, proof-checked event PROPERTY. All words
+  # below are closed-vocabulary terms; never interpolate untrusted input text
+  # or promote the mathematical proof to a fact about the outside world.
+  @event_actors %{bird: "bird", cat: "cat", dog: "dog"}
+  @event_landmarks %{tree: "tree", table: "table", fence: "fence"}
+  @event_activities %{sit: "sitting", sleep: "sleeping"}
+  @event_static_relations %{
+    on: "on", in: "in", under: "under", beside: "beside",
+    above: "above", below: "below"
+  }
+
   # Answer only a currently rechecked question about report chronology. The
   # event sequence records what the speaker described, not the external order
   # of events, and the noun description remains an unresolved candidate.
@@ -203,71 +268,6 @@ defmodule Core.Response.SymbolicGeneration do
     end
   end
   defp temporal_event_words(_), do: :not_applicable
-
-  defp maybe_realize_compositional_nominal(user_text, intent, si)
-       when intent in [:unknown, :tell, :statement] do
-    with true <- Map.get(si, :source) in [:user, :prod, :test],
-         ^user_text <- Map.get(si, :sentence),
-         true <- not String.ends_with?(String.trim(user_text), "?"),
-         %{compositional_evidence: evidence} = meaning <-
-           Map.get(si, :sentence_meaning),
-         ^meaning <- SentenceMeaning.build(si),
-         %{kind: :nominal_property, formally_verified?: true,
-           factual_authority?: false} <- evidence,
-         {:ok, %{kind: :nominal_property,
-           construction: :stacked_adjective_noun,
-           result: result, quantifier_applied?: false,
-           factual_authority?: false} = proof} <- Composition.verified(si),
-         {:ok, description} <- nominal_description(result) do
-      {:ok, "You're describing a #{description}. What would you like to know about it?", %{
-        status: :symbolic_realized,
-        speech_act: :clarify_nominal_fragment,
-        interpreted_speech_act: :nominal_fragment,
-        provenance: :revalidated_nominal_composition,
-        construction: proof.construction,
-        proof_steps: length(proof.steps),
-        compositional_proof_verified?: true,
-        exact_dictionary_sense_verified?: false,
-        referent_verified?: false,
-        factual_claims?: false,
-        llm_called?: false
-      }}
-    else
-      _ -> :not_applicable
-    end
-  end
-
-  defp maybe_realize_compositional_nominal(_, _, _), do: :not_applicable
-
-  defp nominal_description(
-         {:lambda, variable, :entity,
-          {:and,
-           {:and, {:predicate, noun, {:var, noun_var}},
-                  {:predicate, inner, {:var, inner_var}}},
-           {:predicate, outer, {:var, outer_var}}}}
-       ) when is_binary(variable) and noun_var == variable and
-              inner_var == variable and outer_var == variable do
-    with {:ok, noun_word} <- Map.fetch(@nominal_nouns, noun),
-         {:ok, inner_word} <- Map.fetch(@nominal_adjectives, inner),
-         {:ok, outer_word} <- Map.fetch(@nominal_adjectives, outer) do
-      {:ok, outer_word <> " " <> inner_word <> " " <> noun_word}
-    else
-      _ -> :not_applicable
-    end
-  end
-
-  defp nominal_description(_), do: :not_applicable
-
-  # Render only the current-turn, proof-checked event PROPERTY. All words
-  # below are closed-vocabulary terms; never interpolate untrusted input text
-  # or promote the mathematical proof to a fact about the outside world.
-  @event_actors %{bird: "bird", cat: "cat", dog: "dog"}
-  @event_landmarks %{tree: "tree", table: "table", fence: "fence"}
-  @event_activities %{sit: "sitting", sleep: "sleeping"}
-  @event_static_relations %{
-    on: "on", in: "in", under: "under", beside: "beside",
-    above: "above", below: "below"
-  }
 
   # A cross-turn link is *provisional*, even though both its nominal
   # description and event-property proofs were independently verified.
