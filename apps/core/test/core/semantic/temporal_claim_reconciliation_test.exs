@@ -131,4 +131,78 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
     assert TemporalClaimReconciliation.detect(other) == :not_found
     assert TemporalClaimReconciliation.question(ask(other)) == nil
   end
+  test "multiple opposing pairs remain ambiguous and cannot generate a clarification",
+       %{sid: sid} do
+    claim(sid, @before)
+    claim(sid, @after)
+    claim(sid, @before)
+
+    assert TemporalClaimReconciliation.detect(sid) == :ambiguous
+    assert TemporalClaimReconciliation.question(ask(sid)) == nil
+    si = ask(sid)
+    assert TemporalClaimReconciliation.verified(si) == :not_applicable
+    assert SemanticStrategy.select(si) != %{
+      version: 1, operation: :clarify_opposing_temporal_reports,
+      status: :eligible
+    }
+    assert SymbolicGeneration.generate(@question, @features, @decision, si) ==
+      :not_applicable
+    assert length(Ledger.entries(sid)) == 3
+  end
+
+  test "an edited question, changed session or changed evidence fails revalidation",
+       %{sid: sid, other: other} do
+    claim(sid, @before)
+    claim(sid, @after)
+    good = ask(sid)
+    assert {:ok, _} = TemporalClaimReconciliation.verified(good)
+
+    assert TemporalClaimReconciliation.verified(%{good | session_id: other}) ==
+      :not_applicable
+    changed = %{good | sentence: "Did something else happen?"}
+    assert TemporalClaimReconciliation.verified(changed) == :not_applicable
+    forged = put_in(good, [Access.key!(:sentence_meaning),
+      Access.key!(:conflict_evidence), Access.key!(:contradiction_verified?)], true)
+    assert TemporalClaimReconciliation.verified(forged) == :not_applicable
+
+    Ledger.clear(sid)
+    assert TemporalClaimReconciliation.verified(good) == :not_applicable
+    assert SemanticStrategy.select(good) == :not_applicable
+    assert SymbolicGeneration.generate(@question, @features, @decision, good) ==
+      :not_applicable
+  end
+
+  test "over-limit retained history refuses a selective unique interpretation",
+       %{sid: sid} do
+    claim(sid, @before)
+    claim(sid, @after)
+    for index <- 1..127 do
+      Ledger.record(%Core.SemanticInput{
+        session_id: sid, sentence: "Unrelated entry #{index}.", source: :test
+      })
+    end
+
+    assert length(Ledger.entries(sid)) == 129
+    assert TemporalClaimReconciliation.detect(sid) == :window_incomplete
+    assert TemporalClaimReconciliation.question(ask(sid)) == nil
+  end
+
+  test "unverified or damaged ledger records are ignored",
+       %{sid: sid} do
+    claim(sid, @before)
+    claim(sid, @after)
+    [second | _] = Ledger.entries(sid)
+
+    # Even an exact reversed descriptor cannot be accepted merely because
+    # it resembles a previously witnessed event property.
+    forged = %{second |
+      proof_sha256: "not-a-proof",
+      factual_authority?: true
+    }
+    assert {:ok, 3} = Core.Discourse.Ledger.Owner.append(sid, forged)
+    assert {:ok, conflict} = TemporalClaimReconciliation.detect(sid)
+    assert conflict.newer_report.seq == 2
+    assert conflict.older_report.seq == 1
+  end
+
 end
