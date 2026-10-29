@@ -28,11 +28,13 @@ defmodule Core.Semantic.ClarifiedEvent do
            aspect: :progressive, position: position, location: location,
            source_turn_sha256: source_digest,
            source_request_seq: request_seq,
+           role_evidence: role_evidence,
            status: :speaker_confirmed_spelling,
            source: :same_session_clarification,
            factual_authority?: false
          }} <- Ledger.confirmed_fuzzy_activity(session, text),
          true <- requested_actor == actor,
+         true <- role_evidence in [:attested_core_syntax_gap, :surface_clause_only],
          true <- is_binary(original) and is_binary(proposed) and
                    original != proposed,
          true <- is_binary(position) and is_binary(location) and
@@ -54,7 +56,8 @@ defmodule Core.Semantic.ClarifiedEvent do
           source_clause_replayed?: true,
           speaker_clarification_verified?: true,
           question_role: :predicate,
-          role_binding: :surface_progressive_clause,
+          role_binding: role_evidence,
+          pre_lifg_gap_observed?: role_evidence == :attested_core_syntax_gap,
           event_occurrence_verified?: false
         },
         factual_authority?: false
