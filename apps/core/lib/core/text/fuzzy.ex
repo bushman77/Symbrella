@@ -259,8 +259,8 @@ defmodule Core.Text.Fuzzy do
           distance = damerau_levenshtein(word, candidate)
           frame? = candidate in preferred
           semantic_score = min(Map.get(spec, :context_score, 0.0), 1.0)
-          confidence = min(0.97, 0.88 + if(frame?, do: 0.08, else: 0.0) +
-            semantic_score * 0.06)
+          frame_boost = if frame?, do: 0.08, else: 0.0
+          confidence = min(0.97, 0.88 + frame_boost + semantic_score * 0.06)
 
           %{
             replacement: candidate,
