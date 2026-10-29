@@ -563,11 +563,35 @@ defmodule Core.Response.AttentionFallbackTest do
         intent: :question, confidence: 0.7
       })
 
-    assert recalled ==
-      ~s|In your recent description, you confirmed that "flarping" meant "flapping" for the bird. That is your intended wording, not a verified event.|
-    assert recalled_meta.memory_source == :same_session_fuzzy_resolution
+    assert recalled == "In your description, the bird is flapping."
+    assert recalled_meta.memory_source == :same_session_clarified_event
     assert recalled_meta.response_source == :symbolic_conversation
+    assert recalled_meta.provenance == :speaker_clarified_progressive_event
+    assert recalled_meta.requested_role == :predicate
+    assert recalled_meta.semantic_verified? == false
     assert recalled_meta.factual_authority? == false
+
+    assert {:ok, frame} =
+      Core.Semantic.ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert frame.kind == :speaker_clarified_progressive_event
+    assert frame.status == :provisional
+    assert frame.actor == %{surface: "bird", referent: :unresolved}
+    assert frame.predicate == %{
+      surface: "flapping",
+      source: :speaker_confirmed_substitution,
+      original_surface: "flarping",
+      exact_dictionary_sense?: false
+    }
+    assert frame.aspect == :progressive
+    assert frame.spatial == %{
+      relation: "on", location: "the fence", event_location_verified?: false
+    }
+    assert frame.evidence.source_clause_replayed? == true
+    assert frame.evidence.speaker_clarification_verified? == true
+    assert frame.evidence.question_role == :predicate
+    assert frame.evidence.event_occurrence_verified? == false
+    assert frame.factual_authority? == false
+    assert recalled_meta.semantic_frame == frame
 
     refute match?({:ok, _}, Ledger.confirmed_fuzzy_activity(sid <> "-other",
       "What is the bird doing?"))
@@ -575,6 +599,12 @@ defmodule Core.Response.AttentionFallbackTest do
       "What is the cat doing?")
     assert :not_applicable == Ledger.confirmed_fuzzy_activity(sid,
       "Where is the bird?")
+    assert :not_applicable ==
+      Core.Semantic.ClarifiedEvent.build(sid, "What is the cat doing?")
+    assert :not_applicable ==
+      Core.Semantic.ClarifiedEvent.answer(sid, "Where is the bird?")
+    assert :not_applicable ==
+      Core.Semantic.ClarifiedEvent.build(sid <> "-other", "What is the bird doing?")
   end
 
   test "an intervening session turn prevents an old fuzzy correction from overriding activity retrieval" do
