@@ -452,16 +452,73 @@ defmodule Brain.LIFG.RoleCompetition do
       |> Enum.filter(&(&1.status == :supported))
       |> Map.new(&{&1.token_index, &1})
 
+    # A syntax candidate may witness an *unresolved grammatical slot*,
+    # independently of any dictionary entry for that word. Preserve it as a
+    # separate hypothesis: never turn the slot into supported POS evidence,
+    # fabricate a BrainCell ID or change Stage-1 candidate scores.
+    unresolved_roles = observe_progressive_gaps(signatures, tokens, cells)
+
     %{
       version: 1,
       source: :core_syntax_and_attested_dictionary_pos,
       roles: roles,
+      unresolved_roles: unresolved_roles,
       decisions: decisions,
       superseded_proposals: superseded_proposals
     }
   end
 
-  def resolve(_), do: %{version: 1, source: :invalid_input, roles: %{}, decisions: []}
+  def resolve(_), do: %{version: 1, source: :invalid_input, roles: %{},
+    unresolved_roles: %{}, decisions: []}
+
+  @gap_roles %{
+    subject_determiner: 0, subject_head: 1, auxiliary: 2,
+    predicate: 3, preposition: 4, location_determiner: 5,
+    location_head: 6
+  }
+  @gap_evidence [
+    :contiguous_surface, :attested_nominal_subject,
+    :unresolved_progressive_predicate, :attested_preposition,
+    :attested_nominal_location
+  ]
+
+  defp observe_progressive_gaps(signatures, tokens, cells) do
+    signatures
+    |> Enum.filter(fn
+      %{id: :progressive_lexical_gap_candidate,
+        source: :core_syntax, span: {0, 6},
+        roles: @gap_roles, evidence: evidence}
+      when is_list(evidence) ->
+        Enum.all?(@gap_evidence, &(&1 in evidence)) and
+          Enum.sort(Map.keys(tokens)) == Enum.to_list(0..6) and
+          Map.get(tokens, 2) == "is" and
+          Map.get(tokens, 4) in ~w(on in under beside above below) and
+          Map.get(tokens, 0) in ~w(a an the) and
+          Map.get(tokens, 5) in ~w(a an the) and
+          Regex.match?(~r/\A\p{L}{2,21}ing\z/u, Map.get(tokens, 3, "")) and
+          witnessed?(cells, tokens, 0, "determiner") and
+          witnessed?(cells, tokens, 1, "noun") and
+          witnessed?(cells, tokens, 4, "preposition") and
+          witnessed?(cells, tokens, 5, "determiner") and
+          witnessed?(cells, tokens, 6, "noun") and
+          not any_dictionary_pos?(cells, tokens, 3)
+
+      _ -> false
+    end)
+    |> Enum.reduce(%{}, fn _signature, acc ->
+      Map.put(acc, 3, %{
+        token_index: 3,
+        role: :predicate,
+        status: :unresolved,
+        frame: :progressive_lexical_gap_candidate,
+        basis: :independently_witnessed_surrounding_roles,
+        evidence: @gap_evidence,
+        lexical_pos_verified?: false,
+        exact_dictionary_sense_verified?: false,
+        factual_authority?: false
+      })
+    end)
+  end
 
   # A complete finite-present SVO or WH-object question is stronger evidence
   # than the overlapping three-token NP *only* when the NP's nominal head is
