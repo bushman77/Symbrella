@@ -610,7 +610,8 @@ defmodule Core.Response.AttentionFallbackTest do
   test "actual response-selected clarification retains independently replayed syntax-gap evidence" do
     alias Core.Discourse.Ledger
     alias Core.SemanticInput
-    alias Core.Syntax.Signatures
+    alias Core.Syntax.{Signatures, RoleCompetition}
+    alias Core.Semantic.ProvisionalInterpretation
     alias Core.TokenFilters
 
     sid = "attention-gap-witness-#{System.unique_integer([:positive])}"
@@ -628,12 +629,23 @@ defmodule Core.Response.AttentionFallbackTest do
       %{norm: "fence", pos: "noun"}
     ]
 
-    syntactic = %SemanticInput{sentence: sentence, active_cells: cells}
+    syntactic = %SemanticInput{
+        sentence: sentence, active_cells: cells,
+        lifg_choices: [
+          %{token_index: 1, id: "bird|noun|1", lemma: "bird", score: 0.8},
+          %{token_index: 4, id: "on|preposition|1", lemma: "on", score: 0.8}
+        ]
+      }
       |> TokenFilters.rebuild_word_ngrams(3)
       |> Signatures.attach()
+      |> RoleCompetition.attach()
+      |> Core.Brain.ATL.ingest([])
+      |> ProvisionalInterpretation.attach()
 
     assert Enum.any?(syntactic.sentence_signatures,
       &(&1.id == :progressive_lexical_gap_candidate))
+    assert {:ok, original_frame} = ProvisionalInterpretation.verified(syntactic)
+    assert original_frame.kind == :unresolved_progressive_predicate
 
     first = repair_si(sid, sentence, verified?: false,
       uncertain: ["flarping"])
@@ -641,7 +653,10 @@ defmodule Core.Response.AttentionFallbackTest do
     first = Map.merge(first, %{
       tokens: syntactic.tokens,
       active_cells: syntactic.active_cells,
-      sentence_signatures: syntactic.sentence_signatures
+      sentence_signatures: syntactic.sentence_signatures,
+      role_competition: syntactic.role_competition,
+      atl_slate: syntactic.atl_slate,
+      provisional_interpretation: syntactic.provisional_interpretation
     })
 
     {_tone, question, question_meta} =
@@ -652,9 +667,16 @@ defmodule Core.Response.AttentionFallbackTest do
       response_text: question, response_meta: question_meta
     }), discourse_ledger?: true)
 
-    assert [%{kind: :fuzzy_clarification_request,
-      source_syntax: %{id: :progressive_lexical_gap_candidate}} | _] =
-      Ledger.entries(sid)
+    assert [%{
+      kind: :fuzzy_clarification_request,
+      source_syntax: %{id: :progressive_lexical_gap_candidate},
+      source_provisional: %{
+        kind: :unresolved_progressive_predicate,
+        actor: "bird", predicate: "flarping",
+        position: "on", location: "the fence",
+        factual_authority?: false
+      }
+    } | _] = Ledger.entries(sid)
 
     second = "yes flapping"
     second_si = repair_si(sid, second, verified?: false,
@@ -668,8 +690,13 @@ defmodule Core.Response.AttentionFallbackTest do
 
     assert {:ok, frame} =
       Core.Semantic.ClarifiedEvent.build(sid, "What is the bird doing?")
-    assert frame.evidence.role_binding == :attested_core_syntax_gap
+    assert frame.evidence.role_binding == :validated_original_provisional_frame
     assert frame.evidence.pre_lifg_gap_observed? == true
+    assert frame.evidence.original_semantic_frame_replayed? == true
+    assert frame.original_interpretation.kind == :unresolved_progressive_predicate
+    assert frame.original_interpretation.status == :provisional
+    assert frame.original_interpretation.factual_authority? == false
+    assert frame.predicate.surface == "flapping"
     assert frame.evidence.event_occurrence_verified? == false
   end
 
