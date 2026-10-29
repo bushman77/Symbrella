@@ -73,6 +73,8 @@ defmodule Core.Response.NewsLookupTest do
     for text <- [
       "what do you think if the U.S.  iranian war",
       "what do you think of the U.S. -Iran war",
+      "what do you think of the U.S. iran war",
+      "what do you think of the us iran war",
       "what do you think of the iranian american war",
       "What do you think about the Russia Ukraine war?"
     ] do
@@ -93,6 +95,19 @@ defmodule Core.Response.NewsLookupTest do
       assert meta.llm_called? == false
       assert_receive {:news_lookup_query, _query}
     end
+  end
+
+  test "the exact lowercase live question is a current-events route" do
+    text = "what do you think of the U.S. iran war"
+
+    assert %{relation: :current_events, request_type: :current_events,
+             trigger: :conflict_opinion} = WebRetrieval.route_for(%{user_text: text})
+
+    assert {:ok, answer, metadata} = news(text)
+    assert answer =~ "Recent headlines:"
+    assert metadata.source_count == 1
+    assert metadata.llm_called? == false
+    assert_receive {:news_lookup_query, _query}
   end
 
   test "the live no-LLM response planner uses fetched news rather than lexical repair" do
