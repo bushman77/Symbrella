@@ -660,6 +660,10 @@ defmodule SymbrellaWeb.HomeLive do
       lifg_choices: Map.get(si, :lifg_choices),
       atl_slate: Map.get(si, :atl_slate),
       active_cells: Map.get(si, :active_cells),
+      comprehension: Map.get(si, :comprehension),
+      wm_context: Map.get(si, :wm_context),
+      lexical_constructions: Map.get(si, :lexical_constructions),
+      sentence_meaning: Map.get(si, :sentence_meaning),
       turn_context: Core.Response.Context.from_si(si)
     }
 
