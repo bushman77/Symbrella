@@ -411,3 +411,53 @@ mix test apps/core/test/core/semantic/provisional_interpretation_test.exs \
   apps/brain/test/brain/atl/unresolved_grammar_test.exs \
   apps/brain/test/brain/lifg/role_competition_test.exs
 \`\`\`
+
+
+## Surgery 5 — source provisional interpretation → confirmed lexical substitution
+
+The actual clarification request can now carry a bounded
+\`source_provisional\` witness. \`Core.Discourse.Ledger\` only builds this
+witness when \`ProvisionalInterpretation.verified/1\` independently
+reconstructs the original missing-predicate frame and its source-span
+SHA-256 digest matches the replayed seven-token clause. It retains only
+the original actor/predicate/locative role surfaces, frame identifier,
+digest, and negative epistemic markers—not a wholesale sentence
+rewrite, fabricated dictionary cell, or factual event.
+
+At follow-up, the existing exact-session, adjacent request/resolution
+sequence and original source-utterance fingerprint are still required.
+A nonnil source witness is replayed against its original source
+tokens and the fingerprinted Core syntax signature. **Every role**
+must agree: actor, missing predicate surface, preposition, location.
+A corrupted witness causes abstention instead of falling back to
+surface-only correction. Records with no original provisional frame
+retain the previous conservative \`:attested_core_syntax_gap\` or
+\`:surface_clause_only\` pathway, so older dialogue does not break.
+
+\`Core.Semantic.ClarifiedEvent.build/2\` now explicitly distinguishes
+\`:validated_original_provisional_frame\` in
+\`frame.evidence.role_binding\`, sets
+\`original_semantic_frame_replayed?: true\` and preserves a compact
+\`original_interpretation\` reference. It still answers the question
+by projecting the speaker-confirmed replacement into the requested
+predicate slot, not by claiming an observed event. In particular,
+\`exact_dictionary_sense?: false\`,
+\`event_occurrence_verified?: false\`, and
+\`factual_authority?: false\` remain unchanged.
+
+The previous focused response and semantic tests now include an
+actual response-selected clarification with a full Core
+syntax→LIFG→ATL→provisional source frame and negative tests for
+mismatched actor, predicate, position, landmark, and source hashes.
+This is intentionally a **bounded same-session semantic repair**;
+generalized grammar repair and long-lived lexical learning remain
+separate milestones.
+
+Focused validation:
+
+\`\`\`bash
+mix test apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/semantic/provisional_interpretation_test.exs \
+  apps/core/test/core/response/episodic_memory_test.exs
+\`\`\`
