@@ -282,3 +282,47 @@ mix test apps/core/test/core/text/fuzzy_test.exs \
   apps/core/test/core/semantic/clarified_event_test.exs \
   apps/core/test/core/response/episodic_memory_test.exs
 \`\`\`
+
+
+## Surgery 1 — independent grammatical-gap observation
+
+\`Core.Syntax.Signatures\` now produces
+\`:progressive_lexical_gap_candidate\` for a seven-slot progressive
+locative clause when the predicate has an \`-ing\` surface form **but no
+dictionary POS row**, and all surrounding noun, determiner, and
+preposition slots have independent POS evidence. This signature is an
+observational pre-LIFG role hypothesis, not an inferred verb sense,
+verified event, or LIFG/ATL winner. With complete participle evidence,
+the existing \`:progressive_locative_candidate\` is retained instead.
+
+When the actual response asks a fuzzy clarification question,
+\`Core.Discourse.Ledger\` attempts to independently replay this
+\`Signatures.detect/1\` witness against the original SemanticInput,
+then retains a bounded \`source_syntax\` witness together with the source
+lexemes and SHA-256 fingerprint. On a subsequent speaker-confirmed
+correction, it revalidates the source clause and carries
+\`role_evidence: :attested_core_syntax_gap\` if the witness is present,
+or \`:surface_clause_only\` for the existing narrow compatibility path.
+
+\`Core.Semantic.ClarifiedEvent\` exposes the distinction as
+\`frame.evidence.role_binding\` and
+\`frame.evidence.pre_lifg_gap_observed?\`. Neither variant changes
+the original utterance, the lexicon, LIFG/ATL choices, or Hippocampal
+event records. Both preserve
+\`frame.evidence.event_occurrence_verified? == false\`.
+
+This does **not yet** generalize fuzzy lexical hypothesis generation:
+the current \`Fuzzy.suggest_word/3\` still requires contextual candidate
+evidence, with a curated pilot frame for the bird example. Nor is the
+new gap signature a completed ATL semantic integration. Later stages
+should wire candidate scoring and semantic competition to these
+explicit evidence records rather than assuming a matching \`-ing\`
+suffix is sufficient.
+
+Focused regression command:
+
+\`\`\`bash
+mix test apps/core/test/core/syntax/signatures_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/response/attention_fallback_test.exs
+\`\`\`
