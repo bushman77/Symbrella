@@ -191,6 +191,8 @@ defmodule Core.Response.AttentionFallback do
                    safe_terms_max(Map.get(context, :uncertain), @max_repair_terms),
          true <- safe_terms_max(Map.get(summary, :unresolved), @max_repair_terms) ==
                    safe_terms_max(Map.get(context, :unresolved), @max_repair_terms),
+         true <- safe_terms_max(Map.get(summary, :understood), @max_repair_terms) ==
+                   safe_terms_max(Map.get(context, :understood), @max_repair_terms),
          words when is_list(words) <-
            uncertain
            |> safe_terms_max(@max_repair_terms)
@@ -200,26 +202,42 @@ defmodule Core.Response.AttentionFallback do
            end)
            |> Enum.take(3),
          true <- words != [] do
+      # Revalidate the exact lexical-construction witness before the
+      # stronger "understand" language. WM's :understood projection alone
+      # is a conversation focus, not an independently verified definition.
       understood =
-        safe_terms_max(Map.get(context, :understood), @max_terms)
-        |> Enum.filter(&surface_present?(text, &1))
+        si
+        |> Map.get(:lexical_constructions, [])
+        |> List.wrap()
+        |> Enum.flat_map(fn
+          %{dictionary_verified?: true, id: id, phrase: phrase,
+            definition: definition, context_score: score}
+          when is_binary(id) and is_binary(phrase) and
+               is_binary(definition) and is_number(score) and score >= 0.12 ->
+            if phrase in List.wrap(Map.get(context, :understood)) and
+                 safe_term(phrase) == phrase and surface_present?(text, phrase),
+              do: [phrase], else: []
+
+          _ ->
+            []
+        end)
+        |> Enum.uniq()
+        |> Enum.take(@max_terms)
 
       words_text = quoted_terms(words)
 
-      {intro, known_level} =
+      {reply, known_level} =
         case understood do
           [] ->
-            {"I can identify the words #{words_text}, but", :surface_terms_only}
+            {"I can identify #{words_text} as words in your sentence, " <>
+               "but I haven't resolved their exact senses or the full " <>
+               "relationship you're describing.", :surface_terms_only}
 
           known ->
-            {"I have verified lexical meaning for #{quoted_terms(known)}, but",
-             :dictionary_verified}
+            {"I understand #{quoted_terms(known)} in this context, but " <>
+               "I haven't resolved the exact senses of #{words_text} " <>
+               "or the full relationship you're describing.", :dictionary_verified}
         end
-
-      reply =
-        intro <> " the specific senses of #{words_text} are still " <>
-          "uncertain, and I haven't established the full relationship " <>
-          "you're describing."
 
       {:ok, reply, %{
         status: :attention_lexical_gap_report,
