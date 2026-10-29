@@ -67,7 +67,13 @@ defmodule Core.Brain.WM.Comprehension do
          session when not is_nil(session) <- field(si, :session_id),
          %{} = comprehension <- field(si, :comprehension),
          sentence when is_binary(sentence) and byte_size(sentence) > 0 <- field(si, :sentence) do
-      context = context_from(si, comprehension)
+      # Bind the admitted focus to this exact turn without retaining
+      # the raw sentence in working memory.
+      context =
+        si
+        |> context_from(comprehension)
+        |> Map.put(:turn_sha256,
+          :crypto.hash(:sha256, sentence) |> Base.encode16(case: :lower))
       id = frame_id(session)
 
       # The already implemented salience/BasalGanglia path receives a bounded,
