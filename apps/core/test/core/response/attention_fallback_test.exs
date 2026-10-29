@@ -463,6 +463,12 @@ defmodule Core.Response.AttentionFallbackTest do
 
     assert si.sentence == sentence
     assert si.wm_context.turn_sha256 != nil
+
+    {_tone, planned, plan_meta} =
+      Response.plan(Map.merge(si, %{text: sentence, confidence: 0.7}), %{})
+    assert planned == reply
+    assert plan_meta.response_source == :wm_attention_fallback
+    assert plan_meta.curiosity_probe == nil
   end
 
   test "non-contextual unknown keeps ordinary targeted clarification" do
