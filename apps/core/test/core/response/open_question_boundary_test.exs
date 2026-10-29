@@ -101,6 +101,15 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
         "unexpected planning route for #{inspect(sentence)}: #{inspect(metadata.response_source)}"
       assert metadata.response_reflection.status == :open_question_evidence_boundary
       assert metadata.response_reflection.llm_called? == false
+      assert metadata.response_reflection.topic_grounded? == false
+      assert metadata.response_reflection.external_facts_verified? == false
+      assert metadata.response_reflection.factual_claims? == false
+      assert metadata.response_reflection.provenance == :current_turn_request_construction
+      assert metadata.response_reflection.requested_operation in [
+        :assistant_update_request, :assessment_request, :current_information_request
+      ]
+      # Explanations expose the operation and missing evidence, not raw topic spans.
+      refute Map.has_key?(metadata.response_reflection, :requested_topic_surface)
       assert metadata.curiosity_probe == nil
       refute response =~ "I can identify"
       refute response =~ "Symbolic response unavailable"
