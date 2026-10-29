@@ -56,8 +56,10 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
   end
 
   defp assert_report(session, question, role, expected) do
-    assert {:ok, response, meta} = TemporalActivityRecall.reply(session, question),
-      "failed form: #{inspect(question)}"
+    result = TemporalActivityRecall.reply(session, question)
+    assert match?({:ok, _, _}, result),
+      "failed form #{inspect(question)} in session #{inspect(session)}: #{inspect(result)}"
+    {:ok, response, meta} = result
     assert String.contains?(response, expected),
       "wrong reported event for #{inspect(question)}: #{inspect(response)}"
     assert meta.requested_temporal_role == role
