@@ -26,6 +26,14 @@ defmodule Core.Semantic.TemporalActivityRecall do
   # In embedded questions English normally uses subject-auxiliary order:
   # "Tell me what the bird is doing", not "tell me what is the bird doing".
   @embedded_activity_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  # Anaphoric "it" is never assigned to an individual from mere recency.
+  # It can refer to one unique attested actor KIND in the retained session.
+  # Mixed actor kinds require clarification, not a guessed antecedent.
+  @pronoun_activity ~r/\A\s*what\s+(?<aux>is|was)\s+it\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @pronoun_where ~r/\A\s*where\s+(?<aux>is|was)\s+it(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @pronoun_contract_activity ~r/\A\s*what['’]s\s+it\s+doing(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
+  @pronoun_contract_where ~r/\A\s*where['’]s\s+it(?:\s+(?:right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
+  @pronoun_embedded ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+it\s+(?<aux>is|was)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
@@ -37,18 +45,23 @@ defmodule Core.Semantic.TemporalActivityRecall do
   def reply(session, text)
       when is_binary(session) and byte_size(session) in 1..128 and
            is_binary(text) and byte_size(text) <= 160 do
-    with {:ok, role, mode, actor} <- parse(text),
-         # The latest unknown activity for this actor blocks stale recall.
-         :not_applicable <- Ledger.pending_unresolved_activity(
-           session, "What is the #{Atom.to_string(actor)} doing?"),
+    with {:ok, role, mode, subject} <- parse(text),
          reports <- Ledger.entries(session),
          # Do not mistake a truncated search window for a complete timeline.
          true <- length(reports) <= @max_records,
+         {:ok, actor} <- resolve_actor(subject, reports, role),
+         # The latest unknown activity for this actor blocks stale recall.
+         :not_applicable <- Ledger.pending_unresolved_activity(
+           session, "What is the #{Atom.to_string(actor)} doing?"),
          qualified <- Enum.filter(reports, &qualified?(&1, actor)),
          {:ok, chosen} <- select(mode, qualified, actor, role),
          {:ok, wording} <- realize(chosen, role, mode) do
       {:ok, wording, metadata(mode, chosen.seq, role)}
     else
+      {:ambiguous, :referent, actors, slot} ->
+        labels = Enum.map_join(actors, " or ", &("the " <> Atom.to_string(&1)))
+        {:ok, "Do you mean #{labels}?", metadata(:ambiguous_referent, nil, slot)}
+
       {:ambiguous, :earlier, actor, requested_slot} ->
         {:ok,
          "You gave several earlier descriptions of a #{Atom.to_string(actor)}. Which earlier description do you mean?",
@@ -63,6 +76,22 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
   defp parse(text) do
     cond do
+      match = Regex.named_captures(@pronoun_activity, text) ->
+        parse_aux(Map.put(match, "actor", "it"), :activity)
+
+      match = Regex.named_captures(@pronoun_where, text) ->
+        parse_aux(Map.put(match, "actor", "it"), :location)
+
+      Regex.match?(@pronoun_contract_activity, text) ->
+        {:ok, :activity, :latest, :it}
+
+      Regex.match?(@pronoun_contract_where, text) ->
+        {:ok, :location, :latest, :it}
+
+      match = Regex.named_captures(@pronoun_embedded, text) ->
+        parse_aux(Map.put(match, "actor", "it"), :activity)
+
+
       match = Regex.named_captures(@progressive_question, text) ->
         parse_aux(match, :activity)
 
@@ -110,12 +139,38 @@ defmodule Core.Semantic.TemporalActivityRecall do
     end
   end
 
+  defp actor_kind("it"), do: {:ok, :it}
+
   defp actor_kind(surface) do
     case Lexical.actor(String.downcase(surface)) do
       {:ok, %{symbol: kind}} when is_atom(kind) -> {:ok, kind}
       _ -> :unsupported
     end
   end
+
+  defp resolve_actor(:it, reports, slot) do
+    actor_kinds =
+      reports
+      |> Enum.flat_map(fn
+        %{actor_kind: kind} = report when is_atom(kind) ->
+          if qualified?(report, kind) and
+               match?({:ok, %{symbol: ^kind}},
+                 Lexical.actor(Atom.to_string(kind))), do: [kind], else: []
+        _ -> []
+      end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    case actor_kinds do
+      [unique] -> {:ok, unique}
+      [] -> :not_applicable
+      kinds -> {:ambiguous, :referent, kinds, slot}
+    end
+  end
+
+  defp resolve_actor(actor, _reports, _slot) when actor in [:bird, :cat, :dog],
+    do: {:ok, actor}
+  defp resolve_actor(_, _, _), do: :not_applicable
 
   defp normalize_time(nil), do: nil
   defp normalize_time(time) when is_binary(time) do
@@ -231,7 +286,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
       requested_temporal_role: role,
       requested_slot: requested_slot,
       report_seq: seq,
-      retrieval_found?: role != :ambiguous_earlier,
+      retrieval_found?: role not in [:ambiguous_earlier, :ambiguous_referent],
       scope: :same_session,
       semantic_verified?: false,
       factual_authority?: false,
