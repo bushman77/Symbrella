@@ -143,24 +143,37 @@ defmodule Core.Discourse.Ledger do
   defp unresolved_source(%{
          kind: :fuzzy_clarification_request, status: :provisional,
          actor: actor, original: original,
-         source_turn_sha256: digest,
+         source_tokens: words, source_turn_sha256: digest,
+         verification: :conversation_context_only,
          factual_authority?: false
        }) when is_binary(actor) and is_binary(original) and
-                 is_binary(digest) and byte_size(digest) == 64,
-       do: {:ok, actor, original, digest}
+                 is_binary(digest) and byte_size(digest) == 64 do
+    case replay_fuzzy_source(words, original, digest) do
+      {:ok, %{actor: ^actor}} -> {:ok, actor, original, digest}
+      _ -> :not_applicable
+    end
+  end
 
   defp unresolved_source(%{
          kind: :unresolved_progressive_predicate,
          status: :provisional, actor: actor, predicate: predicate,
-         source_turn_sha256: digest,
+         source_tokens: words,
+         source_turn_sha256: digest, source_span_sha256: span,
+         verification: :conversation_context_only,
          factual_authority?: false
        }) when is_binary(actor) and is_binary(predicate) and
-                 is_binary(digest) and byte_size(digest) == 64,
-       do: {:ok, actor, predicate, digest}
+                 is_binary(digest) and byte_size(digest) == 64 and
+                 is_binary(span) do
+    case replay_fuzzy_source(words, predicate, digest) do
+      {:ok, %{actor: ^actor}} ->
+        if span == span_digest(words),
+          do: {:ok, actor, predicate, digest}, else: :not_applicable
+
+      _ -> :not_applicable
+    end
+  end
 
   defp unresolved_source(_), do: :not_applicable
-
-
 
   @doc """
   The next same-session question may request an actor's activity or described
@@ -464,6 +477,7 @@ defmodule Core.Discourse.Ledger do
         status: :provisional,
         actor: clause.actor,
         predicate: predicate,
+        source_tokens: clause.tokens,
         source_turn_sha256:
           (:crypto.hash(:sha256, sentence) |> Base.encode16(case: :lower)),
         source_span_sha256: span_digest,
