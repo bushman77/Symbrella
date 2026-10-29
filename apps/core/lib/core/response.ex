@@ -48,6 +48,7 @@ defmodule Core.Response do
   alias Core.Response.LexicalDefinition
   alias Core.Response.AttentionFallback
   alias Core.Response.OpenQuestionBoundary
+  alias Core.Response.NewsLookup
 
   # ────────────────────────────────────────────────────────────────────────────
   # Public API
@@ -213,13 +214,26 @@ defmodule Core.Response do
             :not_applicable
           end
 
+        # Current-events questions first request dated sources through the
+        # existing evidence resolver, even when local LLM inference is off.
+        # Only provider-validated headline discovery may become a response.
+        news_lookup_response =
+          if no_llm? and strategy_response == :not_applicable and
+               symbolic_response == :not_applicable and
+               lexical_response == :not_applicable do
+            NewsLookup.generate(text_in, features, decision, si)
+          else
+            :not_applicable
+          end
+
         # A recognizable open question is not necessarily a lexical
         # misunderstanding. Preserve the request type and evidence deficit
         # without synthesizing current facts or restoring the LLM.
         open_question_response =
           if no_llm? and strategy_response == :not_applicable and
                symbolic_response == :not_applicable and
-               lexical_response == :not_applicable do
+               lexical_response == :not_applicable and
+               news_lookup_response == :not_applicable do
             OpenQuestionBoundary.generate(text_in, features, decision, si)
           else
             :not_applicable
@@ -230,7 +244,8 @@ defmodule Core.Response do
           if no_llm? and strategy_response == :not_applicable and
                symbolic_response == :not_applicable and
                lexical_response == :not_applicable and
-               open_question_response == :not_applicable do
+               open_question_response == :not_applicable and
+               news_lookup_response == :not_applicable do
             AttentionFallback.generate(text_in, features, decision, si)
           else
             :not_applicable
@@ -256,6 +271,10 @@ defmodule Core.Response do
               {:ok, reply, realization} = lexical_response
               {reply, :symbolic_lexical_definition, nil, realization}
 
+            match?({:ok, _, _}, news_lookup_response) ->
+              {:ok, reply, realization} = news_lookup_response
+              {reply, :symbolic_news_discovery, nil, realization}
+
             match?({:ok, _, _}, open_question_response) ->
               {:ok, reply, realization} = open_question_response
               {reply, :symbolic_request_boundary, nil, realization}
@@ -274,7 +293,8 @@ defmodule Core.Response do
         {text, curiosity_probe} =
           if response_source in [:symbolic_verified, :symbolic_verified_followup, :symbolic_unresolved,
                                   :symbolic_generation, :symbolic_lexical_definition,
-                                  :wm_attention_fallback, :symbolic_request_boundary] do
+                                  :wm_attention_fallback, :symbolic_request_boundary,
+                                  :symbolic_news_discovery] do
             {text0, nil}
           else
             SelfStateFeatures.append_curiosity_probe(text0, features, decision, guard, skill)
