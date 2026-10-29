@@ -26,6 +26,7 @@ defmodule Core.Discourse.Ledger do
   alias Core.Text.Fuzzy
   alias Core.Syntax.Signatures
   alias Core.Semantic.ProvisionalInterpretation
+  alias Core.Semantic.ParticipantQuestions
 
   @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
@@ -112,17 +113,16 @@ defmodule Core.Discourse.Ledger do
   def pending_fuzzy_confirmation(_, _), do: :not_applicable
 
   @doc """
-  Answer only the immediately following, exact action question after a
-  speaker-confirmed fuzzy substitution. Unlike owner-wide episode retrieval,
-  this resolves the described actor in one specific session and never
-  claims that the event occurred. Unrelated queries abstain.
+  The next same-session question may request an actor's activity or described
+  location from one speaker-confirmed, fingerprint-replayed progressive frame.
+  The requested role is selected by ParticipantQuestions, not by inspecting
+  the answer's text. No verified event or word meaning is implied.
   """
-  @spec confirmed_fuzzy_activity(term(), String.t()) ::
-          {:ok, map()} | :not_applicable
-  def confirmed_fuzzy_activity(session, question) when is_binary(question) do
-    with [_, actor] <-
-           Regex.run(~r/\Awhat is the (\p{L}{2,32}) doing\?\z/iu,
-             String.trim(question)),
+  @spec confirmed_fuzzy_event(term(), String.t()) :: {:ok, map()} | :not_applicable
+  def confirmed_fuzzy_event(session, question) when is_binary(question) do
+    with {:forward, actor, requested_role, constraints} <-
+           ParticipantQuestions.parse(question),
+         true <- requested_role in [:predicate, :location] and is_map(constraints),
          [resolution, request | _] <- entries(session),
          %{
            kind: :fuzzy_clarification_resolution,
@@ -150,6 +150,11 @@ defmodule Core.Discourse.Ledger do
          witness <- verified_source_provisional(request, source_tokens, clause),
          true <- witness != :invalid_source_evidence,
          true <- clause.actor == subject,
+         true <- Enum.all?(constraints, fn
+           {:predicate, predicate} -> predicate == proposed
+           {:position, position} -> position == clause.position
+           _ -> false
+         end),
          true <- String.ends_with?(original, "ing") and
                    String.ends_with?(proposed, "ing") do
       {:ok, %{
@@ -159,6 +164,8 @@ defmodule Core.Discourse.Ledger do
         aspect: :progressive,
         location: clause.location,
         position: clause.position,
+        requested_role: requested_role,
+        question_constraints: constraints,
         source_turn_sha256: digest,
         source_request_seq: request_seq,
         role_evidence: if(is_map(witness),
@@ -170,6 +177,23 @@ defmodule Core.Discourse.Ledger do
         factual_authority?: false
       }}
     else
+      _ -> :not_applicable
+    end
+  end
+
+  def confirmed_fuzzy_event(_, _), do: :not_applicable
+
+  @doc """
+  Compatibility entry point for the strictly activity-directed query.
+  A location query still abstains here; use confirmed_fuzzy_event/2 for
+  question-selected predicate or location projection.
+  """
+  @spec confirmed_fuzzy_activity(term(), String.t()) :: {:ok, map()} | :not_applicable
+  def confirmed_fuzzy_activity(session, question) when is_binary(question) do
+    case ParticipantQuestions.parse(question) do
+      {:forward, _, :predicate, constraints} when constraints == %{} ->
+        confirmed_fuzzy_event(session, question)
+
       _ -> :not_applicable
     end
   end
