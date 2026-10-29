@@ -593,6 +593,29 @@ defmodule Core.Response.AttentionFallbackTest do
     assert frame.factual_authority? == false
     assert recalled_meta.semantic_frame == frame
 
+    # The actual selected, attributed answer can carry a bounded marker.
+    # A subsequent question then projects a different role from the SAME
+    # validated original clarification rather than an older spatial episode.
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: "What is the bird doing?",
+      response_text: recalled, response_meta: recalled_meta, trace: []
+    }, discourse_ledger?: true)
+
+    assert [%{kind: :clarified_event_query,
+      requested_role: :predicate, factual_authority?: false} | _] =
+      Ledger.entries(sid)
+
+    assert {:warm, second_location, second_meta} =
+      Response.memory_reply(%{
+        text: "Where is the bird?", session_id: sid,
+        intent: :question, confidence: 0.7
+      })
+    assert second_location == "In your description, the bird is on the fence."
+    assert second_meta.requested_role == :location
+    assert second_meta.semantic_frame.continuity_questions == 1
+    assert second_meta.semantic_frame.evidence.bounded_question_continuity? == true
+    assert second_meta.factual_authority? == false
+
     refute match?({:ok, _}, Ledger.confirmed_fuzzy_activity(sid <> "-other",
       "What is the bird doing?"))
     assert :not_applicable == Ledger.confirmed_fuzzy_activity(sid,
