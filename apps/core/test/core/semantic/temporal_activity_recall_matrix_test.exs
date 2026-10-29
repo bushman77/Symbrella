@@ -71,7 +71,7 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     assert meta.llm_called? == false
   end
 
-  test "117 attested event properties resolve 24 natural activity and location forms" do
+  test "117 event properties cover 40 activity, location, pronoun, comparison and ordinal forms" do
     for actor <- @actors, {verb, relation} <- @valid_activities,
         landmark <- @landmarks do
       session = "matrix-#{actor}-#{verb}-#{relation}-#{landmark}"
@@ -359,9 +359,10 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
       TemporalActivityRecall.reply(session, "How many times have I described the cat?")
     assert one =~ "1 interpretable description of a cat"
 
-    assert {:ok, zero, _} =
+    assert {:ok, zero, zero_meta} =
       TemporalActivityRecall.reply(session, "How many times did I describe the dog?")
     assert zero =~ "0 interpretable descriptions of a dog"
+    assert zero_meta.retrieval_found? == false
 
     # Mentions and questions are not verified descriptive reports.
     {:ok, _} = Owner.append(session, %{
@@ -408,6 +409,8 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
       TemporalActivityRecall.reply(session, "Did I describe the bird doing something different?")
     assert compared =~ "reported activities differ"
     assert metadata.requested_slot == :comparison
+    assert metadata.report_seq == 2
+    assert metadata.earlier_report_seq == 1
 
     record_proved!(session, "bird", "flying", "into", "tree")
     assert {:ok, clarification, metadata} =
