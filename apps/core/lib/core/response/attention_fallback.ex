@@ -38,28 +38,33 @@ defmodule Core.Response.AttentionFallback do
            Map.get(context, :attention),
          true <- is_number(salience) and salience > 0.0,
          true <- is_list(goal_terms) and goal_terms != [],
-         true <- Map.get(context, :focus_transition) != :release,
-         {:ok, kind, terms} <- focused_terms(context) do
+         true <- Map.get(context, :focus_transition) != :release do
       case partial_repair(text, si, context, goal_terms, salience) do
         {:ok, _, _} = repair ->
           repair
 
         :not_applicable when action in [:answer, :offer_options, :act_first] ->
-          question? = Map.get(features, :intent) in @question_intents or
-            String.ends_with?(String.trim(text), "?")
+          case focused_terms(context) do
+            {:ok, kind, terms} ->
+              question? = Map.get(features, :intent) in @question_intents or
+                String.ends_with?(String.trim(text), "?")
 
-          reply = realize(kind, terms, question?)
+              reply = realize(kind, terms, question?)
 
-          {:ok, reply, %{
-            status: :attention_continuation,
-            provenance: :admitted_same_session_comprehension,
-            focus_kind: kind,
-            focus_terms: terms,
-            evidence_level: :conversation_context_only,
-            semantic_verified?: false,
-            factual_claims?: false,
-            llm_called?: false
-          }}
+              {:ok, reply, %{
+                status: :attention_continuation,
+                provenance: :admitted_same_session_comprehension,
+                focus_kind: kind,
+                focus_terms: terms,
+                evidence_level: :conversation_context_only,
+                semantic_verified?: false,
+                factual_claims?: false,
+                llm_called?: false
+              }}
+
+            _ ->
+              :not_applicable
+          end
 
         :not_applicable ->
           :not_applicable
