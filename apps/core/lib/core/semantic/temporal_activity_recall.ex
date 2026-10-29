@@ -14,7 +14,10 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
   alias Core.Discourse.Ledger
 
-  @question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>bird|cat|dog)\s+doing(?<now>\s+now)?\s*\??\s*\z/iu
+  # Bounded grammatical paraphrases. These select report roles, not facts.
+  @progressive_question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>bird|cat|dog)\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*\??\s*\z/iu
+  @contracted_question ~r/\A\s*what['’]s\s+(?:the|a|an)\s+(?<actor>bird|cat|dog)\s+doing\s+(?<time>right\s+now|at\s+the\s+moment|now|currently)\s*\??\s*\z/iu
+  @earlier_do_question ~r/\A\s*what\s+did\s+(?:the|a|an)\s+(?<actor>bird|cat|dog)\s+do\s+(?:earlier|before|previously)\s*\??\s*\z/iu
   @actors %{"bird" => :bird, "cat" => :cat, "dog" => :dog}
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
@@ -61,22 +64,36 @@ defmodule Core.Semantic.TemporalActivityRecall do
   def reply(_, _), do: :not_applicable
 
   defp parse(text) do
-    case Regex.named_captures(@question, text) do
-      %{"actor" => surface, "aux" => auxiliary, "now" => now} ->
-        actor = Map.fetch!(@actors, String.downcase(surface))
-        temporal = String.downcase(auxiliary)
-        explicit_now? = String.trim(now || "") != ""
+    cond do
+      match = Regex.named_captures(@progressive_question, text) ->
+        actor = actor_kind(match["actor"])
+        time = normalize_time(match["time"])
 
-        case {temporal, explicit_now?} do
-          {"was", false} -> {:ok, :earlier, actor}
-          {"is", true} -> {:ok, :latest, actor}
+        case {String.downcase(match["aux"]), time} do
+          {"was", nil} -> {:ok, :earlier, actor}
+          {"was", earlier} when earlier in ["earlier", "before", "previously"] ->
+            {:ok, :earlier, actor}
+          {"is", latest} when latest in ["now", "right now", "currently", "at the moment"] ->
+            {:ok, :latest, actor}
           _ -> :not_applicable
         end
 
-      _ ->
+      match = Regex.named_captures(@contracted_question, text) ->
+        {:ok, :latest, actor_kind(match["actor"])}
+
+      match = Regex.named_captures(@earlier_do_question, text) ->
+        {:ok, :earlier, actor_kind(match["actor"])}
+
+      true ->
         :not_applicable
     end
   end
+
+  defp actor_kind(surface), do: Map.fetch!(@actors, String.downcase(surface))
+
+  defp normalize_time(nil), do: nil
+  defp normalize_time(time),
+    do: time |> String.downcase() |> String.replace(~r/\s+/u, " ")
 
   defp select(:latest, [latest | _], _actor), do: {:ok, latest}
   defp select(:earlier, [_latest, previous], _actor), do: {:ok, previous}
