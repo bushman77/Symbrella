@@ -298,4 +298,101 @@ defmodule Core.Response.AttentionFallbackTest do
     assert meta.llm_called? == false
   end
 
+
+  defp temporal_report_si(session) do
+    words = ~w(The bird is sitting on the fence before the cat is sleeping under the tree)
+    pos = ~w(determiner noun verb verb preposition determiner noun conjunction determiner noun verb verb preposition determiner noun)
+
+    cells =
+      Enum.zip(words, pos)
+      |> Enum.map(fn {word, part} ->
+        word = String.downcase(word)
+        %{
+          id: "#{word}|#{part}|1", norm: word, pos: part,
+          semantic_atoms: if(word in ["sitting", "sleeping"],
+            do: ["tag:form-of", "tag:present", "tag:participle"], else: [])
+        }
+      end)
+
+    tokens =
+      words
+      |> Enum.with_index()
+      |> Enum.map(fn {word, i} ->
+        %{index: i, n: 1,
+          phrase: if(i == 14, do: word <> ".", else: word)}
+      end)
+
+    si = %{
+      source: :user,
+      session_id: session,
+      sentence: Enum.join(words, " ") <> ".",
+      intent: :statement,
+      tokens: tokens,
+      active_cells: cells,
+      lifg_choices: cells |> Enum.with_index()
+        |> Enum.map(fn {cell, i} ->
+          %{token_index: i, id: cell.id}
+        end),
+      comprehension: %{
+        recognized_topics: ["sleeping"], understood: [],
+        uncertain: ["bird", "sitting", "before", "cat"],
+        degraded?: true
+      },
+      trace: []
+    }
+
+    si
+    |> Core.Semantic.SentenceMeaning.attach()
+    |> WMComprehension.store(comprehension_wm?: true)
+  end
+
+  test "verified reported order voices concrete known and unresolved parts, not an intent keyword" do
+    sid = "attention-meaning-report-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    si = temporal_report_si(sid)
+    assert {:ok, %{kind: :explicit_temporal_report}} =
+      Core.Semantic.TemporalSentence.verified(si)
+
+    assert si.wm_context.attention.salience > 0.0
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(si.sentence,
+        %{risk_bucket: :low, intent: :statement}, %{action: :answer}, si)
+
+    assert reply ==
+      "I can interpret the order you described: the bird sitting on the fence before the cat sleeping under the tree. What I haven't established is the exact dictionary sense of every word, the identities of the individual animals, or whether these events actually occurred."
+    assert meta.status == :attention_comprehension_report
+    assert meta.provenance == :revalidated_temporal_clause_composition
+    assert meta.known_parts == [:first_event_property, :second_event_property,
+      :reported_temporal_order]
+    assert :exact_dictionary_senses in meta.unresolved_parts
+    assert meta.semantic_verified? == true
+    assert meta.factual_claims? == false
+    assert meta.llm_called? == false
+
+    {_tone, planned, plan_meta} =
+      Response.plan(Map.merge(si, %{text: si.sentence, confidence: 0.7}), %{})
+    assert planned == reply
+    assert plan_meta.response_source == :wm_attention_fallback
+  end
+
+  test "an edited temporal meaning cannot authorize a comprehension report" do
+    sid = "attention-meaning-spoof-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    si = temporal_report_si(sid)
+
+    spoofed = put_in(si, [:sentence_meaning, :connective], :after)
+    assert :not_applicable ==
+      Core.Semantic.TemporalSentence.verified(spoofed)
+
+    assert {:ok, _reply, meta} =
+      AttentionFallback.generate(spoofed.sentence,
+        %{risk_bucket: :low, intent: :statement}, %{action: :answer}, spoofed)
+    refute meta.status == :attention_comprehension_report
+
+    assert :not_applicable ==
+      AttentionFallback.generate(si.sentence,
+        %{risk_bucket: :high, intent: :statement}, %{action: :answer}, si)
+  end
+
 end
