@@ -84,7 +84,8 @@ defmodule Core.Syntax.Signatures do
     (definition_imperatives(si, nodes) ++
        definition_request_structures(si, nodes) ++
        wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
-       progressive_locatives(nodes) ++ anaphoric_progressive_locatives(nodes) ++
+       progressive_locatives(nodes) ++ progressive_lexical_gaps(nodes) ++
+       anaphoric_progressive_locatives(nodes) ++
        finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
        counted_present_svo(nodes) ++
@@ -814,6 +815,42 @@ defmodule Core.Syntax.Signatures do
            :attested_present_participle, :attested_preposition,
            :attested_nominal_location] ++
             if(prep.word == "into", do: [:directional_not_arrival], else: [])
+        )]
+      else
+        []
+      end
+    end)
+  end
+
+  # A missing lexical predicate can occupy a progressive slot even when it
+  # has no dictionary POS/participle row. This is *only* a grammatical gap
+  # hypothesis: it must not become an LIFG winner or an asserted event.
+  # The surrounding determiners, nominal heads and preposition require
+  # independent lexical POS evidence; the predicate has none.
+  defp progressive_lexical_gaps(nodes) do
+    nodes
+    |> Enum.chunk_every(7, 1, :discard)
+    |> Enum.flat_map(fn [subject_det, subject, aux, predicate, prep, loc_det, location] = segment ->
+      if pos?(subject_det, "determiner") and pos?(subject, "noun") and
+           aux.word == "is" and
+           MapSet.size(predicate.pos) == 0 and
+           Regex.match?(~r/\A\p{L}{5,24}ing\z/u, predicate.word) and
+           pos?(prep, "preposition") and
+           prep.word in ~w(on in under beside above below) and
+           pos?(loc_det, "determiner") and pos?(location, "noun") and
+           valid_surface?(segment) do
+        [signature(
+          :progressive_lexical_gap_candidate,
+          {subject_det.index, location.index},
+          %{subject_determiner: subject_det.index, subject_head: subject.index,
+            auxiliary: aux.index, predicate: predicate.index,
+            preposition: prep.index, location_determiner: loc_det.index,
+            location_head: location.index},
+          %{subject_head: [:pos_noun], predicate: [:unresolved_ing_surface],
+            preposition: [:pos_preposition], location_head: [:pos_noun]},
+          [:contiguous_surface, :attested_nominal_subject,
+           :unresolved_progressive_predicate, :attested_preposition,
+           :attested_nominal_location]
         )]
       else
         []
