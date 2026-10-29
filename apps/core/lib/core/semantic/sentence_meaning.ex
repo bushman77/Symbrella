@@ -14,6 +14,7 @@ defmodule Core.Semantic.SentenceMeaning do
   alias Core.Semantic.DiscourseComposition
   alias Core.Semantic.EpisodicProjection
   alias Core.Semantic.TemporalEventComposition
+  alias Core.Semantic.TemporalClaimReconciliation
   alias Core.Semantic.TemporalSentence
 
   @max_topic_tokens 16
@@ -79,6 +80,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
     base =
       definition_request(si) ||
+        TemporalClaimReconciliation.question(si) ||
         TemporalEventComposition.question(si) ||
         TemporalSentence.build(si) ||
         question || object_question(si, sentence, frames, constituents, tokens) ||
