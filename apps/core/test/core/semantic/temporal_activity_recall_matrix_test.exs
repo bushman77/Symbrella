@@ -143,6 +143,34 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
           end
         end
 
+        # Anaphora is licensed only when the entire retained event record
+        # has one actor KIND, and never claims real-world identity.
+        for question <- [
+          "What is it doing now?",
+          "What's it doing?",
+          "What’s it doing currently?",
+          "Can you tell me what it is doing?"
+        ] do
+          assert_report(session, question, :latest, latest)
+        end
+
+        for question <- [
+          "What was it doing?",
+          "Tell me what it was doing before."
+        ] do
+          assert_report(session, question, :earlier, previous)
+        end
+
+        for question <- [
+          "Where is it?",
+          "Where's it now?"
+        ] do
+          assert {:ok, answer, meta} = TemporalActivityRecall.reply(session, question)
+          assert answer =~ expected_location
+          assert meta.requested_slot == :location
+          assert meta.same_actor_identity_verified? == false
+        end
+
         for {question, requested_slot} <- [
           {"Where was the #{actor}?", :location},
           {"Where was the #{actor} before?", :location},
@@ -201,6 +229,48 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
       "Tell me what the bird will be doing now."
     ] do
       assert :not_applicable == TemporalActivityRecall.reply(session, question)
+    end
+  end
+
+  test "mixed actor kinds make it ambiguous instead of choosing latest mention" do
+    session = "pronoun-mixed-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "sitting", "on", "fence")
+    record_proved!(session, "cat", "sleeping", "under", "table")
+    record_proved!(session, "bird", "flying", "into", "tree")
+
+    for question <- [
+      "What is it doing now?",
+      "Where is it?",
+      "What was it doing?"
+    ] do
+      assert {:ok, text, meta} = TemporalActivityRecall.reply(session, question)
+      assert text =~ "Do you mean"
+      assert text =~ "the bird"
+      assert text =~ "the cat"
+      assert meta.requested_temporal_role == :ambiguous_referent
+      assert meta.retrieval_found? == false
+      assert meta.same_actor_identity_verified? == false
+    end
+
+    assert_report(session, "Where is the bird now?", :latest,
+      "a bird flying into a tree")
+    assert :not_applicable ==
+      TemporalActivityRecall.reply(session <> "-other", "What is it doing now?")
+  end
+
+  test "it questions without proven antecedents fail closed" do
+    session = "pronoun-empty-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    for text <- [
+      "What is it doing?",
+      "Where is it now?",
+      "What was it doing?",
+      "Tell me what it was doing before."
+    ] do
+      assert :not_applicable == TemporalActivityRecall.reply(session, text)
     end
   end
 
