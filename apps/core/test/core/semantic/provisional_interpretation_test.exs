@@ -21,6 +21,125 @@ defmodule Core.Semantic.ProvisionalInterpretationTest do
     }
   end
 
+  defp gap_input(sentence \\ "The fox is flarping on the fence.") do
+    alias Core.SemanticInput
+    alias Core.Syntax.{RoleCompetition, Signatures}
+    alias Core.TokenFilters
+
+    cells = [
+      %{id: "the|determiner|1", norm: "the", pos: "determiner"},
+      %{id: "fox|noun|1", norm: "fox", pos: "noun"},
+      %{id: "is|verb|1", norm: "is", pos: "verb"},
+      %{id: "on|preposition|1", norm: "on", pos: "preposition"},
+      %{id: "fence|noun|1", norm: "fence", pos: "noun"}
+    ]
+
+    choices = [
+      %{token_index: 1, id: "fox|noun|1", lemma: "fox", score: 0.8},
+      %{token_index: 4, id: "on|preposition|1", lemma: "on", score: 0.8}
+    ]
+
+    %SemanticInput{
+      sentence: sentence, source: :test,
+      active_cells: cells, lifg_choices: choices,
+      sentence_meaning: %{status: :not_yet_interpreted, kind: :unknown}
+    }
+    |> TokenFilters.rebuild_word_ngrams(3)
+    |> Signatures.attach()
+    |> RoleCompetition.attach()
+    |> Core.Brain.ATL.ingest([])
+  end
+
+  test "semantic provisional frame consumes only revalidated ATL unresolved predicate evidence" do
+    si = gap_input()
+    assert [%{role: :predicate, status: :unresolved}] =
+      si.atl_slate.unresolved_grammar
+
+    observed = Provisional.attach(si)
+    assert {:ok, frame} = Provisional.verified(observed)
+    assert frame.kind == :unresolved_progressive_predicate
+    assert frame.status == :provisional
+    assert frame.operation == :clarify_unresolved_predicate
+    assert frame.speech_act == :statement
+    assert frame.target.lemma == "flarping"
+    assert frame.target.lexical_evidence == :unresolved
+    assert frame.participants.actor.surface == "the fox"
+    assert frame.participants.predicate.surface == "flarping"
+    assert frame.participants.location == %{
+      relation: "on", surface: "the fence",
+      event_location_verified?: false
+    }
+    assert frame.evidence == [
+      :original_surface_fingerprint, :core_syntax_gap,
+      :lifg_unresolved_role, :atl_unresolved_grammar
+    ]
+    assert :speaker_clarification in frame.missing
+    assert :lexical_predicate_sense in frame.missing
+    assert frame.speaker_clarification_confirmed? == false
+    assert frame.event_occurrence_verified? == false
+    assert frame.factual_authority? == false
+
+    assert observed.lifg_choices == si.lifg_choices
+    assert observed.sense_candidates == si.sense_candidates
+    assert observed.atl_slate == si.atl_slate
+    assert observed.sentence_signatures == si.sentence_signatures
+    assert observed.role_competition == si.role_competition
+    assert observed.sentence_meaning == si.sentence_meaning
+
+    summary = Summary.build(observed)
+    assert summary.provisional_interpretation == frame
+    assert summary.understood == []
+  end
+
+  test "stale signatures, stale ATL evidence and mismatched sentences cannot compose" do
+    si = gap_input()
+    observation = hd(si.atl_slate.unresolved_grammar)
+    signature = Enum.find(si.sentence_signatures,
+      &(&1.id == :progressive_lexical_gap_candidate))
+
+    stale = [
+      %{si | atl_slate: %{si.atl_slate | unresolved_grammar: []}},
+      %{si | atl_slate: %{si.atl_slate |
+        unresolved_grammar: [%{observation | token_index: 2}]}},
+      %{si | sentence_signatures:
+        Enum.reject(si.sentence_signatures,
+          &(&1.id == :progressive_lexical_gap_candidate))},
+      %{si | sentence_signatures:
+        Enum.map(si.sentence_signatures, fn
+          %{id: :progressive_lexical_gap_candidate} = sig ->
+            %{sig | source_span_sha256: String.duplicate("0", 64)}
+          other -> other
+        end)},
+      %{si | sentence: "The fox is dancing on the fence."},
+      %{si | sentence: "The fox is flarping on the fence?"},
+      %{si | active_cells: Enum.reject(si.active_cells, &(&1.norm == "fox"))},
+      %{si | atl_slate: Map.put(si.atl_slate, :winners,
+        si.atl_slate.winners ++ [
+          %{token_index: 3, id: "flarping|verb|1", norm: "flarping"}
+        ])}
+    ]
+
+    for altered <- stale do
+      assert Provisional.detect(altered) == nil
+    end
+
+    attached = Provisional.attach(si)
+    forged = put_in(attached,
+      [:provisional_interpretation, :participants, :predicate, :surface],
+      "dancing")
+
+    assert Provisional.verified(forged) == :not_applicable
+    assert Provisional.verified(%{attached | sentence: "The fox is dancing on the fence."}) ==
+      :not_applicable
+    assert signature.source_span_sha256 == attached.provisional_interpretation.source_span_sha256
+  end
+
+  test "existing established sentence meaning takes precedence over predicate-gap hypothesis" do
+    si = gap_input()
+    established = %{status: :structurally_interpreted, kind: :verified_question}
+    assert Provisional.detect(%{si | sentence_meaning: established}) == nil
+  end
+
   test "location question has a target, but no resolved location or referent" do
     si =
       input("Where is the bird?", cells: [
