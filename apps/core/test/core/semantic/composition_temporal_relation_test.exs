@@ -23,7 +23,7 @@ defmodule Core.Semantic.CompositionTemporalRelationTest do
        {:lambda, e2, :event,
         {:and, {:and, first_event, second_event},
          {:event_precedes, {:var, earlier_var}, {:var, later_var}}}}}}) do
-    %{first: e1, second: e2, before: earlier_var, after: later_var,
+    %{first: e1, second: e2, earlier_event: earlier_var, later_event: later_var,
       first_event: first_event, second_event: second_event}
   end
 
@@ -42,8 +42,8 @@ defmodule Core.Semantic.CompositionTemporalRelationTest do
 
     out = endpoints(proof)
     assert out.first != out.second
-    assert out.before == out.first
-    assert out.after == out.second
+    assert out.earlier_event == out.first
+    assert out.later_event == out.second
     assert Expression.type_of(out.first_event, %{out.first => :event}) == {:ok, :truth}
     assert Expression.type_of(out.second_event, %{out.second => :event}) == {:ok, :truth}
 
@@ -64,8 +64,8 @@ defmodule Core.Semantic.CompositionTemporalRelationTest do
     assert :ok = TemporalRelation.verify(proof, :after, first, second)
     out = endpoints(proof)
 
-    assert out.before == out.second
-    assert out.after == out.first
+    assert out.earlier_event == out.second
+    assert out.later_event == out.first
     assert Expression.type_of(out.first_event, %{out.first => :event}) == {:ok, :truth}
     assert Expression.type_of(out.second_event, %{out.second => :event}) == {:ok, :truth}
     assert out.first_event != out.second_event
