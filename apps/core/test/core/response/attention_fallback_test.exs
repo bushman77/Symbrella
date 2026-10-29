@@ -147,6 +147,7 @@ defmodule Core.Response.AttentionFallbackTest do
         recognized_topics: [],
         understood: if(verified?, do: ["bird"], else: []),
         uncertain: uncertain,
+        unresolved: uncertain,
         degraded?: true
       },
       trace: []
@@ -393,6 +394,46 @@ defmodule Core.Response.AttentionFallbackTest do
     assert :not_applicable ==
       AttentionFallback.generate(si.sentence,
         %{risk_bucket: :high, intent: :statement}, %{action: :answer}, si)
+  end
+
+
+  test "weak LIFG senses without truly unknown words are reported, not mistaken for definitions" do
+    sid = "attention-weak-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence =
+      "The bird is sitting on the fence before the cat is sleeping under the tree."
+
+    si =
+      WMComprehension.store(%{
+        source: :user, session_id: sid, sentence: sentence, intent: :statement,
+        comprehension: %{
+          keyword: "sleeping",
+          recognized_topics: ["sleeping"],
+          understood: [],
+          uncertain: ["bird", "sitting", "before", "cat"],
+          unresolved: [],
+          degraded?: true
+        },
+        trace: []
+      }, comprehension_wm?: true)
+
+    assert si.wm_context.attention.goal_terms ==
+      ["bird", "sitting", "before", "cat"]
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :answer}, si)
+
+    assert reply ==
+      ~s|I can identify the words "bird", "sitting", and "before", but the specific senses of "bird", "sitting", and "before" are still uncertain, and I haven't established the full relationship you're describing.|
+    assert meta.status == :attention_lexical_gap_report
+    assert meta.known_level == :surface_terms_only
+    assert meta.uncertain_lexical_parts == ["bird", "sitting", "before"]
+    assert meta.factual_claims? == false
+    assert meta.llm_called? == false
+    refute String.contains?(reply, "what you mean by")
+    refute String.contains?(reply, ~s|"sleeping"|)
   end
 
 end
