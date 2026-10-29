@@ -15,6 +15,7 @@ defmodule Core.Response.Memory do
   alias Core.Discourse.Ledger
   alias Core.Semantic.EpisodicProjection
   alias Core.Semantic.TemporalActivityRecall
+  alias Core.Semantic.ReportVerification
 
   @memory_recall_event [:core, :response, :memory_recall]
 
@@ -169,6 +170,7 @@ defmodule Core.Response.Memory do
     clarified_event = Core.Semantic.ClarifiedEvent.answer(session_id, text_in)
     pending_gap = Ledger.pending_unresolved_activity(session_id, text_in)
     temporal_activity = TemporalActivityRecall.reply(session_id, text_in)
+    report_verification = ReportVerification.reply(session_id, text_in)
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
     episodic_reply = EpisodicMemory.reply(text_in, session_id, semantic_context)
@@ -377,6 +379,19 @@ defmodule Core.Response.Memory do
           intent_original: intent0,
           confidence: conf
         })
+
+      # Confirm only an exact evidence-qualified reported event, never an
+      # actual occurrence. A missing interpretation is not a factual denial.
+      match?({:ok, _, _}, report_verification) ->
+        {:ok, response, evidence_meta} = report_verification
+
+        meta =
+          evidence_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
+
+        finish_reply(session_id, text_in, response, meta)
 
       # Prefer a revalidated same-session report timeline over stale owner-wide
       # spatial memory when a question explicitly requests report time.
