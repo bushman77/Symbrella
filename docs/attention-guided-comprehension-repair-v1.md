@@ -37,7 +37,8 @@ Response gating requires all of these:
   including a cautious `:ask_first` for targeted repair only.
 - Same exact current sentence and allowed user/prod/test source.
 - Identical current-turn SI WM context and independently admitted,
-  non-expired same-session Brain working-memory frame.
+  non-expired same-session Brain working-memory frame, including a SHA-256
+  fingerprint of the exact current utterance (no raw text stored in WM).
 - Positive attentional salience, a nonempty current goal, no released focus.
 - An unresolved term reported by `Core.Comprehension.Summary` and matching
   the admitted WM's `:uncertain` projection. The term must actually appear
