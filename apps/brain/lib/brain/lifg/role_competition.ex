@@ -487,15 +487,17 @@ defmodule Brain.LIFG.RoleCompetition do
     |> Enum.filter(fn
       %{id: :progressive_lexical_gap_candidate,
         source: :core_syntax, span: {0, 6},
-        roles: @gap_roles, evidence: evidence}
-      when is_list(evidence) ->
-        Enum.all?(@gap_evidence, &(&1 in evidence)) and
+        roles: roles, evidence: evidence}
+      when is_map(roles) and is_list(evidence) ->
+        roles == @gap_roles and
+          Enum.all?(@gap_evidence, &(&1 in evidence)) and
           Enum.sort(Map.keys(tokens)) == Enum.to_list(0..6) and
           Map.get(tokens, 2) == "is" and
           Map.get(tokens, 4) in ~w(on in under beside above below) and
           Map.get(tokens, 0) in ~w(a an the) and
           Map.get(tokens, 5) in ~w(a an the) and
-          Regex.match?(~r/\A\p{L}{2,21}ing\z/u, Map.get(tokens, 3, "")) and
+          is_binary(Map.get(tokens, 3)) and
+          Regex.match?(~r/\A\p{L}{2,21}ing\z/u, Map.get(tokens, 3)) and
           witnessed?(cells, tokens, 0, "determiner") and
           witnessed?(cells, tokens, 1, "noun") and
           witnessed?(cells, tokens, 4, "preposition") and
