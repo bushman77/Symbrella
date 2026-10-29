@@ -158,6 +158,41 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     end
   end
 
+  test "embedded activity questions preserve natural subject-auxiliary order" do
+    session = "matrix-embedded-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+
+    record_proved!(session, "bird", "sitting", "on", "fence")
+    record_proved!(session, "bird", "flying", "into", "tree")
+
+    for question <- [
+      "Tell me what the bird is doing now.",
+      "Can you tell me what the bird is doing?",
+      "tell me what a bird is doing",
+      "CAN YOU TELL ME WHAT THE BIRD IS DOING AT THE MOMENT?"
+    ] do
+      assert_report(session, question, :latest, "a bird flying into a tree")
+    end
+
+    for question <- [
+      "Tell me what the bird was doing previously",
+      "Can you tell me what the bird was doing before?",
+      "tell me what a bird was doing",
+      "Tell me what the bird was doing earlier."
+    ] do
+      assert_report(session, question, :earlier, "a bird sitting on a fence")
+    end
+
+    for question <- [
+      "Tell me what the bird was doing now.",
+      "Can you tell me what the bird is doing earlier?",
+      "Tell me what the fox is doing now.",
+      "Tell me what the bird will be doing now."
+    ] do
+      assert :not_applicable == TemporalActivityRecall.reply(session, question)
+    end
+  end
+
   test "temporal parser refuses contradictory modifiers and unsupported requests" do
     session = "matrix-negative-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
