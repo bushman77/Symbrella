@@ -14,7 +14,8 @@ defmodule Core.Response.SemanticStrategy do
   alias Core.Response.{LexicalDefinition, SymbolicGeneration}
   alias Core.Semantic.Composition
   alias Core.Semantic.{DiscourseComposition, FrameUnifier, ProvisionalInterpretation,
-    SentenceMeaning, SpeechActs, TemporalEventComposition}
+    SentenceMeaning, SpeechActs, TemporalEventComposition,
+    TemporalClaimReconciliation}
 
   @type strategy :: map()
 
@@ -90,6 +91,25 @@ defmodule Core.Response.SemanticStrategy do
 
     if is_map(attached) and attached == SentenceMeaning.build(si) do
       case attached do
+        %{kind: :temporal_claim_conflict_question, status: :provisional,
+          source: :revalidated_temporal_claim_reconciliation,
+          factual_authority?: false} ->
+          case TemporalClaimReconciliation.verified(si) do
+            {:ok, %{conflict_evidence: %{
+              kind: :candidate_temporal_order_conflict,
+              contradiction_verified?: false,
+              factual_authority?: false
+            }}} ->
+              plan(:clarify_opposing_temporal_reports,
+                :temporal_claim_reconciliation,
+                :eligible, :symbolic_generation,
+                :revalidated_temporal_claim_reconciliation,
+                %{missing: [:event_identity, :event_occurrence,
+                  :actual_event_chronology], factual_authority?: false})
+
+            _ -> nil
+          end
+
         %{kind: :reported_event_order_question, status: :provisional,
           source: :revalidated_discourse_report_order,
           factual_authority?: false} ->
