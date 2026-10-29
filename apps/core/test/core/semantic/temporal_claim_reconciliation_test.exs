@@ -141,10 +141,8 @@ defmodule Core.Semantic.TemporalClaimReconciliationTest do
     assert TemporalClaimReconciliation.question(ask(sid)) == nil
     si = ask(sid)
     assert TemporalClaimReconciliation.verified(si) == :not_applicable
-    assert SemanticStrategy.select(si) != %{
-      version: 1, operation: :clarify_opposing_temporal_reports,
-      status: :eligible
-    }
+    refute match?(%{operation: :clarify_opposing_temporal_reports,
+      status: :eligible}, SemanticStrategy.select(si))
     assert SymbolicGeneration.generate(@question, @features, @decision, si) ==
       :not_applicable
     assert length(Ledger.entries(sid)) == 3
