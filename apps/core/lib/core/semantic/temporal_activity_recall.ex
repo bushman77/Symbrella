@@ -39,6 +39,9 @@ defmodule Core.Semantic.TemporalActivityRecall do
   @direction_question ~r/\A\s*where\s+is\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+flying\s*[?.]?\s*\z/iu
   @arrived_did ~r/\A\s*did\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:reach|arrive\s+at)\s+(?:the|a|an)\s+(?<landmark>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
   @arrived_has ~r/\A\s*has\s+(?:(?:the|a|an)\s+)?(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:reached|arrived\s+at)\s+(?:the|a|an)\s+(?<landmark>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
+  # Count only evidence-qualified event descriptions, never word mentions.
+  @count_described ~r/\A\s*how\s+many\s+times\s+(?:have\s+i\s+described|did\s+i\s+describe)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[?.]?\s*\z/iu
+  @count_reports ~r/\A\s*how\s+many\s+(?:descriptions|reports)\s+of\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+(?:have\s+i\s+given|did\s+i\s+give)\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
@@ -52,8 +55,9 @@ defmodule Core.Semantic.TemporalActivityRecall do
            is_binary(text) and byte_size(text) <= 160 do
     with {:ok, role, mode, subject, target} <- parse(text),
          reports <- Ledger.entries(session),
-         # Do not mistake a truncated search window for a complete timeline.
-         true <- length(reports) <= @max_records,
+         # Counts and ordinal retrieval require a complete retained session,
+         # not merely a limited slice of a longer or truncated timeline.
+         true <- complete_report_window?(reports),
          {:ok, actor} <- resolve_actor(subject, reports, role),
          # The latest unknown activity for this actor blocks stale recall.
          :not_applicable <- Ledger.pending_unresolved_activity(
@@ -108,6 +112,14 @@ defmodule Core.Semantic.TemporalActivityRecall do
 
       match = Regex.named_captures(@arrived_has, text) ->
         parse_arrival(match)
+
+      match = Regex.named_captures(@count_described, text) ->
+        parse_actor(match, :count, :count)
+
+      match = Regex.named_captures(@count_reports, text) ->
+        parse_actor(match, :count, :count)
+
+
 
 
       match = Regex.named_captures(@progressive_question, text) ->
@@ -211,6 +223,20 @@ defmodule Core.Semantic.TemporalActivityRecall do
       normalized -> normalized
     end
   end
+
+  defp complete_report_window?([]), do: true
+  defp complete_report_window?(reports) when is_list(reports) do
+    length(reports) <= @max_records and
+      case List.last(reports) do
+        %{seq: 1} -> true
+        _ -> false
+      end
+  end
+
+  defp select(:count, [], actor, :count),
+    do: {:ok, %{seq: nil, actor_kind: actor, report_count: 0}}
+  defp select(:count, [latest | _] = qualified, _actor, :count),
+    do: {:ok, Map.put(latest, :report_count, length(qualified))}
 
   defp select(:latest, [latest | _], _actor, _slot), do: {:ok, latest}
   defp select(:earlier, [_latest, previous], _actor, _slot), do: {:ok, previous}
@@ -329,6 +355,13 @@ defmodule Core.Semantic.TemporalActivityRecall do
     with {:ok, description} <- describe(event) do
       {:ok, "You described #{description}, but the description does not establish that it arrived."}
     end
+  end
+
+  defp realize(%{report_count: count, actor_kind: actor}, :count, :count)
+       when is_integer(count) and count >= 0 and is_atom(actor) do
+    noun = if count == 1, do: "description", else: "descriptions"
+
+    {:ok, "I have #{count} interpretable #{noun} of a #{Atom.to_string(actor)} in this session. They do not establish event occurrence or that multiple reports describe the same individual."}
   end
 
   defp realize(_, _, _), do: :not_applicable
