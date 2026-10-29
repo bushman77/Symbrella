@@ -273,10 +273,24 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
              Core.Semantic.TemporalActivityRecall.reply(session,
                "what is the bird doing now")
 
-    # Ordinary activity questions keep their pre-existing episodic reader.
-    assert :not_applicable ==
+    # Ordinary present questions must prefer this actor's newer
+    # proof-qualified report instead of stale owner-wide spatial_state.
+    assert {:ok, unqualified, unqualified_meta} =
              Core.Semantic.TemporalActivityRecall.reply(session,
                "What is the bird doing?")
+    assert unqualified =~ "a bird flying into a tree"
+    assert unqualified_meta.requested_slot == :activity
+
+    assert {:warm, location, location_meta} =
+             Response.memory_reply(%{
+               text: "Where is the bird?", intent: :ask,
+               session_id: session, confidence: 0.9
+             })
+    assert location =~ "a bird flying into a tree"
+    assert location =~ "Arrival and current location are not established."
+    refute location == "On the fence."
+    assert location_meta.requested_slot == :location
+    assert location_meta.same_actor_identity_verified? == false
   end
 
   test "report timeline is actor-scoped and session-scoped, not global recency" do
