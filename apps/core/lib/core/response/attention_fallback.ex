@@ -157,9 +157,9 @@ defmodule Core.Response.AttentionFallback do
   end
 
   defp recognized_known(context, text, target) do
-    [Map.get(context, :topic)] ++
-      List.wrap(Map.get(context, :entities)) ++
-      List.wrap(Map.get(context, :recognized_topics))
+    ([Map.get(context, :topic)] ++
+       List.wrap(Map.get(context, :entities)) ++
+       List.wrap(Map.get(context, :recognized_topics)))
     |> Enum.map(&safe_term/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.find(fn word ->
