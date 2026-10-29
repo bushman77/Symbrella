@@ -104,7 +104,12 @@ defmodule Core.Semantic.TemporalEventComposition do
           &1.status == :provisional and
           &1.surface == target.antecedent and
           &1.head == target.antecedent_head and
-          &1.seq < target.seq and &1.factual_authority? == false))
+          &1.seq < target.seq and
+          &1.provenance == :revalidated_nominal_composition and
+          &1.verification == :conversation_context_only and
+          &1.factual_authority? == false and
+          is_binary(&1.proof_sha256) and
+          byte_size(&1.proof_sha256) == 64))
 
         case {earlier, nominals} do
           {[previous], [nominal]} when nominal.seq < previous.seq ->
@@ -120,7 +125,7 @@ defmodule Core.Semantic.TemporalEventComposition do
               event_occurrence: :not_established,
               actual_event_order: :not_established,
               causal_relation: :not_established,
-              relation_type: @event_type,
+              event_property_type: @event_type,
               scope: :same_session,
               factual_authority?: false
             }}
