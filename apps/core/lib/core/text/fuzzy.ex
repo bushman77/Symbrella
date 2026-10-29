@@ -137,6 +137,15 @@ defmodule Core.Text.Fuzzy do
     %{pattern: ["can", "you", "help", "me", "with", :slot], prefers: []}
   ]
 
+  # Conversational hypotheses only. These frames must NOT feed the
+  # pre-tokenization auto-corrector: an unfamiliar word may be intentional.
+  # The frame supports plausibility, never a claimed lexical sense.
+  @clarification_frames [
+    %{pattern: ["bird", "is", :slot], prefers: ~w(flapping)},
+    %{pattern: ["bird", :slot], prefers: ~w(flapping)},
+    %{pattern: ["wings", "are", :slot], prefers: ~w(flapping)}
+  ]
+
   @identity_query_phrases [
     "what is my name",
     "whats my name",
@@ -206,6 +215,95 @@ defmodule Core.Text.Fuzzy do
       evidence: evidence(corrections, aliases)
     }
   end
+
+  @doc """
+  Suggest a bounded, non-mutating spelling hypothesis for a specific unknown
+  word in the original sentence. A candidate must have edit distance one and
+  independent context evidence (a bounded frame or scored candidate lookup),
+  and must clearly win over any competing candidate. The result is a question
+  candidate only, never a verified word sense or a change to sentence/tokens.
+
+  Returns nil for words that already exist, ambiguous candidates, missing
+  source context or unsupported input. Pure injected callbacks support tests.
+  """
+  @spec suggest_word(String.t(), String.t(), keyword()) :: map() | nil
+  def suggest_word(word, sentence, opts \\ [])
+      when is_binary(word) and is_binary(sentence) and is_list(opts) do
+    word = word |> String.downcase() |> String.trim()
+    surface_words =
+      sentence
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{N}]+/u, " ")
+      |> String.split(" ", trim: true)
+
+    matches =
+      surface_words
+      |> Enum.with_index()
+      |> Enum.filter(fn {token, _index} -> token == word end)
+
+    with true <- Regex.match?(~r/\A\p{L}{5,24}\z/u, word),
+         false <- known_word?(word, opts),
+         [{^word, index}] <- matches do
+      preferred =
+        @clarification_frames
+        |> Enum.filter(&frame_matches?(&1.pattern, surface_words, index))
+        |> Enum.flat_map(& &1.prefers)
+        |> Enum.uniq()
+
+      candidates =
+        preferred
+        |> normalize_candidate_specs()
+        |> merge_candidate_specs(lookup_candidate_specs(word, opts))
+        |> Enum.map(fn spec ->
+          candidate = spec.word
+          distance = damerau_levenshtein(word, candidate)
+          frame? = candidate in preferred
+          semantic_score = min(Map.get(spec, :context_score, 0.0), 1.0)
+          confidence = min(0.97, 0.88 + if(frame?, do: 0.08, else: 0.0) +
+            semantic_score * 0.06)
+
+          %{
+            replacement: candidate,
+            distance: distance,
+            confidence: Float.round(confidence, 4),
+            source: if(frame?, do: :context_frame, else: :contextual_candidate),
+            contextual_evidence?: frame? or semantic_score >= 0.75
+          }
+        end)
+        |> Enum.filter(fn candidate ->
+          replacement = candidate.replacement
+          candidate.contextual_evidence? and
+            candidate.distance == 1 and
+            same_initial?(word, replacement) and
+            Regex.match?(~r/\A\p{L}{5,24}\z/u, replacement)
+        end)
+        |> Enum.sort_by(fn c ->
+          {-c.confidence, c.replacement}
+        end)
+
+      case candidates do
+        [%{confidence: score} = winner | rest] when score >= 0.92 ->
+          second = List.first(rest)
+          if is_nil(second) or score - second.confidence >= 0.05 do
+            %{
+              original: word,
+              replacement: winner.replacement,
+              edit_distance: 1,
+              confidence: score,
+              source: winner.source,
+              status: :hypothesis_only
+            }
+          end
+
+        _ ->
+          nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  def suggest_word(_, _, _), do: nil
 
   @doc """
   Convenience wrapper returning only the corrected cue text.
