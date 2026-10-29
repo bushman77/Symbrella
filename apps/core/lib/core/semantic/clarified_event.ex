@@ -31,6 +31,7 @@ defmodule Core.Semantic.ClarifiedEvent do
            role_evidence: role_evidence,
            requested_role: ^requested_role,
            question_constraints: ^constraints,
+           continuity_questions: continuity_questions,
            source_provisional: original_provisional,
            status: :speaker_confirmed_spelling,
            source: :same_session_clarification,
@@ -62,9 +63,11 @@ defmodule Core.Semantic.ClarifiedEvent do
           original_provisional),
         source_request_seq: request_seq,
         source_turn_sha256: source_digest,
+        continuity_questions: continuity_questions,
         evidence: %{
           source_clause_replayed?: true,
           speaker_clarification_verified?: true,
+          bounded_question_continuity?: continuity_questions > 0,
           question_role: requested_role,
           role_binding: role_evidence,
           pre_lifg_gap_observed?: role_evidence in [
