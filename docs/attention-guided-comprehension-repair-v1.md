@@ -341,3 +341,37 @@ mix test apps/brain/test/brain/lifg/role_competition_test.exs \
   apps/core/test/core/syntax/signatures_test.exs \
   apps/core/test/core/semantic/clarified_event_test.exs
 ```
+
+
+## Surgery 3 — read-only LIFG → ATL unresolved grammatical roles
+
+\`Brain.ATL.UnresolvedGrammar.attach/2\` adds a distinct
+\`:unresolved_grammar\` observation list and
+\`:unresolved_grammar_count\` to the local ATL slate. The observations
+are not constituents, concept counts, dictionary senses, or events.
+They retain \`:status => :unresolved\` and explicit false values for
+lexical POS verification, exact sense, referent identity, event
+occurrence, and factual authority.
+
+The bridge only accepts LIFG's \`:unresolved_roles\` entries that
+match an independently replayed
+\`Brain.LIFG.RoleCompetition.resolve/1\` result. An actual selected
+dictionary sense at that predicate token index suppresses the
+observation, while a nonlexical fallback cannot become a sense.
+The Core ATL adapter attaches observations to its existing
+reduced slate without replacing \`:winners\`, \`:by_id\`, \`:by_norm\`,
+or \`:constituents\`. It adds the observation count to the ATL trace.
+
+This is intentionally not yet ATL event composition or lexical
+interpretation: the semantic hub can inspect the unresolved gap
+while all existing sense-selection and fact-generation boundaries
+remain intact.
+
+Focused regression command:
+
+\`\`\`bash
+mix test apps/brain/test/brain/atl/unresolved_grammar_test.exs \
+  apps/core/test/core/brain/atl_constituents_test.exs \
+  apps/brain/test/brain/lifg/role_competition_test.exs \
+  apps/core/test/core/syntax/role_competition_test.exs
+\`\`\`
