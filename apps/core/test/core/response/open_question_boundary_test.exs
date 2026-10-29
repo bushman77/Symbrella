@@ -6,12 +6,18 @@ defmodule Core.Response.OpenQuestionBoundaryTest do
 
   setup do
     previous = Application.get_env(:core, :llm_inference_enabled?, :unset)
+    previous_web = Application.get_env(:core, :web_retrieval, :unset)
     Application.put_env(:core, :llm_inference_enabled?, false)
+    Application.put_env(:core, :web_retrieval, [enabled?: false])
 
     on_exit(fn ->
       if previous == :unset,
         do: Application.delete_env(:core, :llm_inference_enabled?),
         else: Application.put_env(:core, :llm_inference_enabled?, previous)
+
+      if previous_web == :unset,
+        do: Application.delete_env(:core, :web_retrieval),
+        else: Application.put_env(:core, :web_retrieval, previous_web)
     end)
 
     :ok
