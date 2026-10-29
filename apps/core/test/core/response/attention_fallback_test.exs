@@ -207,6 +207,14 @@ defmodule Core.Response.AttentionFallbackTest do
         %{risk_bucket: :low, intent: :statement},
         %{action: :ask_first}, ungrounded)
 
+    # The same uncertain word in a later utterance cannot borrow the
+    # preceding turn's admitted focus or lexical comprehension.
+    rephrased = %{si | sentence: "The bird flarped again."}
+    assert :not_applicable ==
+      AttentionFallback.generate(rephrased.sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, rephrased)
+
     # A dictionary-verified lexical witness is needed before using
     # the stronger "I understand" wording.
     unverified = Map.put(si, :lexical_constructions, [])
