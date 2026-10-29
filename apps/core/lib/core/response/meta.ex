@@ -86,6 +86,7 @@ defmodule Core.Response.Meta do
       Map.get(reflection, :semantic_role_fidelity))
     |> maybe_put_symbolic_realization(reflection)
     |> maybe_put_lexical_definition(reflection)
+    |> maybe_put_open_question_boundary(reflection)
   end
 
   defp reflection_summary(_), do: nil
@@ -108,6 +109,20 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_symbolic_realization(summary, _), do: summary
+
+  # Open-question diagnostics describe a recognized request, not a
+  # verified opinion or external event. Keep only bounded status fields:
+  # topic text and arbitrary SI/WM material are not copied into Explain.
+  defp maybe_put_open_question_boundary(summary,
+         %{status: :open_question_evidence_boundary} = reflection) do
+    Map.merge(summary, Map.take(reflection, [
+      :requested_operation, :missing_evidence, :provenance,
+      :topic_grounded?, :semantic_verified?, :external_facts_verified?,
+      :factual_claims?, :llm_called?
+    ]))
+  end
+
+  defp maybe_put_open_question_boundary(summary, _), do: summary
 
   # Only the requested word and bounded lexical counts leave the response
   # planner, not the raw dictionary slate or untrusted gloss text.
