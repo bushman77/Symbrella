@@ -461,3 +461,48 @@ mix test apps/core/test/core/response/attention_fallback_test.exs \
   apps/core/test/core/semantic/provisional_interpretation_test.exs \
   apps/core/test/core/response/episodic_memory_test.exs
 \`\`\`
+
+
+## Surgery 6 — question-directed projection from one clarified event
+
+The same immediately confirmed, source-fingerprinted progressive event now
+supports two distinct information requests through
+\`Core.Semantic.ParticipantQuestions.parse/1\`:
+
+- \`What is the bird doing?\` requests the \`:predicate\` slot and yields
+  "In your description, the bird is flapping."
+- \`Where is the bird?\` requests the \`:location\` slot and yields
+  "In your description, the bird is on the fence."
+- \`What is the bird flapping on?\` requests \`:location\` with predicate
+  and preposition constraints; both must match the corrected source frame.
+
+The ledger exposes \`confirmed_fuzzy_event/2\` for those role-directed
+queries and retains \`confirmed_fuzzy_activity/2\` as the narrow
+activity-only compatibility entry point. All existing adjacent
+request/resolution sequencing, original-sentence fingerprint replay,
+speaker-confirmation and same-session gates remain required. Unrelated
+actors, mismatched predicates/prepositions, other sessions, or an
+intervening turn cause abstention.
+
+\`ClarifiedEvent.build/2\` now records the requested role, and
+\`ClarifiedEvent.answer/2\` projects that slot rather than interpreting
+a separate fixed phrase. The response policy prioritizes this
+**immediately confirmed same-session event** over older spatial or
+owner-wide episodic recollections; only if the source event abstains
+does existing spatial/episodic recall proceed. No event is promoted
+to factual truth, no lexical sense is created, and the old source
+utterance is unchanged.
+
+The design is intentionally *single immediate follow-up*: once a new
+user turn is recorded, this particular active clarification pair is
+no longer eligible. Multi-turn semantic frame persistence is a later
+milestone.
+
+Focused validation:
+
+\`\`\`bash
+mix test apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/response/episodic_memory_test.exs \
+  apps/core/test/core/semantic/participant_questions_test.exs
+\`\`\`
