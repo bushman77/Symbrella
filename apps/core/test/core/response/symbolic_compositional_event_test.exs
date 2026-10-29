@@ -228,6 +228,56 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
     end
   end
 
+  test "response memory routing supports pronouns, arrival, comparison, count and first report" do
+    session = "natural-followup-routing-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "bird", "flying", "into", "tree")
+
+    for {question, expected, slot} <- [
+      {"What's it doing?", "bird flying into a tree", :activity},
+      {"Where is it?", "Arrival and current location are not established", :location},
+      {"Did it reach the tree?", "does not establish that it arrived", :arrival},
+      {"Where is it flying?", "direction, not a verified destination", :direction},
+      {"How many times have I described the bird?", "2 interpretable descriptions", :count},
+      {"Did I describe the bird doing something different?", "reported activities differ", :comparison},
+      {"What did the bird do first?", "bird sitting on a fence", :activity}
+    ] do
+      assert {:warm, answer, meta} =
+        Response.memory_reply(%{
+          text: question, intent: :ask, session_id: session, confidence: 0.9
+        }), question
+
+      assert answer =~ expected, question
+      assert meta.requested_slot == slot
+      assert meta.response_source == :symbolic_conversation
+      assert meta.memory_source == :same_session_progressive_report
+      assert meta.llm_called? == false
+      assert meta.event_occurrence_verified? == false
+      assert meta.same_actor_identity_verified? == false
+    end
+  end
+
+  test "response memory asks for an antecedent when it is ambiguous" do
+    session = "ambiguous-it-routing-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+    record_proved_report(session, "bird", "sitting", "on", "fence")
+    record_proved_report(session, "cat", "sleeping", "under", "tree")
+
+    assert {:warm, clarification, meta} =
+      Response.memory_reply(%{
+        text: "Where is it?", intent: :ask, session_id: session,
+        confidence: 0.9
+      })
+
+    assert clarification =~ "Do you mean"
+    assert clarification =~ "the bird"
+    assert clarification =~ "the cat"
+    assert meta.requested_temporal_role == :ambiguous_referent
+    assert meta.retrieval_found? == false
+    assert meta.llm_called? == false
+  end
+
   test "two proved activity reports answer earlier versus latest without asserting identity" do
     session = "temporal-bird-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
