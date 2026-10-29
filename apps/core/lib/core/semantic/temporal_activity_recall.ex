@@ -209,7 +209,8 @@ defmodule Core.Semantic.TemporalActivityRecall do
           do: "Arrival and current location are not established.",
           else: "Arrival and historical location are not established."
 
-      {:ok, "The #{if(mode == :latest, do: "latest interpretable", else: "earlier")} description has #{description}. " <> qualifier}
+      label = if mode == :latest, do: "latest interpretable", else: "earlier"
+      {:ok, "The #{label} description has #{description}. " <> qualifier}
     end
   end
 
