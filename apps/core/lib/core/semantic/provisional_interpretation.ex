@@ -33,7 +33,8 @@ defmodule Core.Semantic.ProvisionalInterpretation do
         if established?(Map.get(si, :sentence_meaning)) do
           nil
         else
-          case original_words(si) do
+          lexical_gap_statement(si) ||
+            case original_words(si) do
             {:ok, ["where", "is", article, noun]}
             when article in ["the", "a", "an"] ->
               make(si, :locate_entity, :question, noun, "#{article} #{noun}",
@@ -59,6 +60,110 @@ defmodule Core.Semantic.ProvisionalInterpretation do
     end
   end
   def detect(_), do: nil
+
+  # Recompose a *missing role*, not a lexical sense or an event. Three
+  # independent layers must agree on the original utterance: a fingerprinted
+  # syntax signature, LIFG unresolved-role competition and ATL's audited
+  # observation. Replaying the ATL admission function also checks that a
+  # genuine lexical winner has not already filled the missing slot.
+  @gap_roles %{
+    subject_determiner: 0, subject_head: 1, auxiliary: 2,
+    predicate: 3, preposition: 4, location_determiner: 5,
+    location_head: 6
+  }
+
+  defp lexical_gap_statement(si) do
+    sentence = Map.get(si, :sentence)
+    slate = Map.get(si, :atl_slate)
+
+    with true <- is_binary(sentence) and byte_size(sentence) <= 180,
+         %{
+           winners: winners,
+           unresolved_grammar: [%{
+             token_index: 3, role: :predicate, status: :unresolved,
+             source: :lifg_role_competition,
+             construction: :progressive_lexical_gap_candidate,
+             lexical_pos_verified?: false,
+             exact_dictionary_sense_verified?: false,
+             event_occurrence_verified?: false, factual_authority?: false
+           } = observation]
+         } <- slate,
+         true <- is_list(winners),
+         %{unresolved_grammar: [^observation]} <-
+           Brain.ATL.UnresolvedGrammar.attach(si, slate),
+         [%{source_span_sha256: digest}] <-
+           Enum.filter(List.wrap(Map.get(si, :sentence_signatures)), fn
+             %{id: :progressive_lexical_gap_candidate, source: :core_syntax,
+               span: {0, 6}, roles: roles} -> roles == @gap_roles
+             _ -> false
+           end),
+         true <- is_binary(digest) and byte_size(digest) == 64,
+         {:ok, [det, actor, "is", predicate, position, loc_det, landmark]} <-
+           full_original_words(si),
+         true <- det in ~w(a an the) and loc_det in ~w(a an the),
+         true <- position in ~w(on in under beside above below),
+         ^digest <-
+           (:crypto.hash(:sha256,
+             Enum.join([det, actor, "is", predicate, position, loc_det, landmark], " "))
+           |> Base.encode16(case: :lower)) do
+      %{
+        version: 1,
+        kind: :unresolved_progressive_predicate,
+        status: :provisional,
+        speech_act: :statement,
+        operation: :clarify_unresolved_predicate,
+        target: %{
+          lemma: predicate, surface: predicate,
+          lexical_evidence: :unresolved,
+          referent_status: :not_applicable
+        },
+        participants: %{
+          actor: %{surface: det <> " " <> actor, referent_status: :unresolved},
+          predicate: %{surface: predicate, grammatical_role: :candidate,
+                       lexical_sense_verified?: false},
+          location: %{relation: position, surface: loc_det <> " " <> landmark,
+                      event_location_verified?: false}
+        },
+        requested_relation: :predicate_meaning,
+        evidence: [:original_surface_fingerprint, :core_syntax_gap,
+                   :lifg_unresolved_role, :atl_unresolved_grammar],
+        missing: [:speaker_clarification, :lexical_predicate_sense,
+                  :referent_binding, :event_occurrence],
+        source_span_sha256: digest,
+        speaker_clarification_confirmed?: false,
+        event_occurrence_verified?: false,
+        factual_authority?: false,
+        source: :revalidated_grammar_gap,
+        original_sentence: sentence
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  # A seven-token exact source alignment is required; n-grams, shadow
+  # tokens, omitted words or a changed surface cannot establish this frame.
+  defp full_original_words(si) do
+    sentence = Map.get(si, :sentence)
+    tokens = Map.get(si, :tokens)
+
+    with true <- is_binary(sentence) and is_list(tokens),
+         word_tokens <-
+           Enum.filter(tokens, fn
+             %{} = t -> Map.get(t, :n, 1) == 1 and
+               Map.get(t, :kind) not in [:punct, "punct"]
+             _ -> false
+           end)
+           |> Enum.sort_by(&Map.get(&1, :index, -1)),
+         true <- Enum.map(word_tokens, &Map.get(&1, :index)) == Enum.to_list(0..6),
+         words <- Enum.map(word_tokens, &normalize(Map.get(&1, :phrase))),
+         true <- Enum.all?(words, &(is_binary(&1) and Regex.match?(@lexeme, &1))),
+         true <- String.downcase(String.trim(sentence)) == Enum.join(words, " ") <> "." do
+      {:ok, words}
+    else
+      _ -> :error
+    end
+  end
 
   # A V1 hypothesis for a WH question whose requested participant is omitted
   # from a verb-particle construction. The signature supplies grammatical
