@@ -297,6 +297,7 @@ defmodule Core.Brain.WM.Comprehension do
       recognized_topics: terms(field(comprehension, :recognized_topics)),
       understood: terms(field(comprehension, :understood)),
       uncertain: terms(field(comprehension, :uncertain)),
+      unresolved: terms(field(comprehension, :unresolved)),
       degraded?: field(comprehension, :degraded?) == true,
       interpretation_status:
         case field(map_or_empty(field(si, :sentence_meaning)), :status) do
